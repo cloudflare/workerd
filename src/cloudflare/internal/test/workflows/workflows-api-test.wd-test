@@ -25,6 +25,10 @@ const unitTests :Workerd.Config = (
         (
           name = "mock",
           service = "workflows-mock"
+        ),
+        (
+          name = "nonTransferable",
+          service = "non-transferable"
         )
         ],
       )
@@ -35,6 +39,14 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "workflows-mock.js")
         ],
+      )
+    ),
+    # External services produce Fetchers but cannot be passed over RPC. The test only serializes
+    # this binding, so it never connects to the inert address below.
+    ( name = "non-transferable",
+      external = (
+        address = "127.0.0.1:1",
+        http = ()
       )
     )
   ]

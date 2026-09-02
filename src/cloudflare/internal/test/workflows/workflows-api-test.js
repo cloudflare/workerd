@@ -128,6 +128,26 @@ export const workflowsApi = {
   },
 };
 
+export const serviceStubCreateParams = {
+  async test(_, env) {
+    const options = {
+      id: 'service-stub-param',
+      params: { service: env.nonTransferable },
+    };
+    const serialized = JSON.stringify(options);
+
+    assert.strictEqual(
+      serialized,
+      '{"id":"service-stub-param","params":{"service":{}}}'
+    );
+    const instance = await env.workflow.create(JSON.parse(serialized));
+    assert.strictEqual(instance.id, options.id);
+
+    const rpcInstance = await env.workflow.create(options);
+    assert.strictEqual(rpcInstance.id, options.id);
+  },
+};
+
 export const restartNoOptions = {
   async test(_, env) {
     const instance = await env.workflow.get('restart-basic');
