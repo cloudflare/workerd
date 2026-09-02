@@ -74,8 +74,7 @@ class R2MultipartUpload: public jsg::Object {
   JSG_RESOURCE_TYPE(R2MultipartUpload, CompatibilityFlags::Reader flags) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(key, getKey);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(uploadId, getUploadId);
-    if (util::Autogate::isEnabled(util::AutogateKey::R2_BINDINGS_JSRPC) &&
-        flags.getR2BindingsJsrpc()) {
+    if (flags.getR2BindingsJsrpc()) {
       JSG_METHOD_NAMED(uploadPart, uploadPartRpc);
       JSG_METHOD_NAMED(abort, abortRpc);
       JSG_METHOD_NAMED(complete, completeRpc);
