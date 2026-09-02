@@ -362,6 +362,8 @@ export const testHttpRequestHostHeader = {
       (res) => {
         strictEqual(res.statusCode, 400);
         strictEqual(res.headers.connection, 'close');
+        deepStrictEqual(res.rawHeaders, ['connection', 'close']);
+        deepStrictEqual(res.headersDistinct.connection, ['close']);
         resolve();
       }
     );
@@ -409,6 +411,97 @@ export const testHttpRequestJoinAuthorizationHeaders = {
         resolve();
       }
     );
+    await promise;
+  },
+};
+
+export const testHttpClientResponseRawHeaders = {
+  async test(_ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    http.get(
+      {
+        hostname: env.SIDECAR_HOSTNAME,
+        port: env.HELLO_WORLD_SERVER_PORT,
+        method: 'POST',
+        headers: [
+          'authorization',
+          '1',
+          'authorization',
+          '2',
+          'cookie',
+          'foo',
+          'cookie',
+          'bar',
+        ],
+        joinDuplicateHeaders: true,
+        path: '/join-duplicate-headers',
+      },
+      (res) => {
+        strictEqual(res.statusCode, 200);
+        strictEqual(res.headers.authorization, '3, 4');
+        strictEqual(res.headers.cookie, 'foo; bar');
+        deepStrictEqual(res.rawHeaders, [
+          'authorization',
+          '3, 4',
+          'connection',
+          'keep-alive',
+          'cookie',
+          'foo; bar',
+          'keep-alive',
+          'timeout=1',
+          'transfer-encoding',
+          'chunked',
+        ]);
+        resolve();
+      }
+    );
+    await promise;
+  },
+};
+
+function getRawHeaderValues(rawHeaders, name) {
+  const values = [];
+  for (let i = 0; i < rawHeaders.length; i += 2) {
+    if (rawHeaders[i] === name) {
+      values.push(rawHeaders[i + 1]);
+    }
+  }
+  return values;
+}
+
+export const testHttpClientResponseSetCookieHeaders = {
+  async test(_ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+
+    // Use Headers so we can avoid differing values due to the http_headers_getsetcookie compat flag
+    const headers = new Headers();
+    headers.append('Set-Cookie', 'a=1');
+    headers.append('Set-Cookie', 'b=2');
+    const expectedSetCookieValues = Array.from(headers)
+      .filter(([name]) => name === 'set-cookie')
+      .map(([, value]) => value);
+
+    http.get(
+      {
+        hostname: env.SIDECAR_HOSTNAME,
+        port: env.HELLO_WORLD_SERVER_PORT,
+        path: '/set-cookie-duplicates',
+      },
+      (res) => {
+        strictEqual(res.statusCode, 200);
+        deepStrictEqual(
+          getRawHeaderValues(res.rawHeaders, 'set-cookie'),
+          expectedSetCookieValues
+        );
+        deepStrictEqual(res.headers['set-cookie'], expectedSetCookieValues);
+        deepStrictEqual(
+          res.headersDistinct['set-cookie'],
+          expectedSetCookieValues
+        );
+        resolve();
+      }
+    );
+
     await promise;
   },
 };
