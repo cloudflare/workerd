@@ -88,7 +88,7 @@ constexpr kj::StringPtr logLevelToString(LogLevel level) {
   }
 }
 
-constexpr kj::StringPtr startTypeToString(IsolateObserver::StartType startType) {
+[[maybe_unused]] constexpr kj::StringPtr startTypeToString(IsolateObserver::StartType startType) {
   switch (startType) {
     case IsolateObserver::StartType::COLD:
       return "cold";

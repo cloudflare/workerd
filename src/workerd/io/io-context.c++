@@ -40,6 +40,191 @@ static void* getThreadId() {
   return threadId.get();
 }
 
+namespace {
+
+class PerfettoSubrequestTrace final {
+ public:
+  enum class Type { HTTP, CONNECT };
+
+  PerfettoSubrequestTrace(
+      Type type, kj::StringPtr operationName, kj::StringPtr method, kj::StringPtr target) {
+    switch (type) {
+      case Type::HTTP:
+        TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "HTTP subrequest",
+            PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this), "operation",
+            operationName.cStr(), "method", method.cStr(), "url", target.cStr());
+        break;
+      case Type::CONNECT:
+        TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "TCP subrequest",
+            PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this), "operation",
+            operationName.cStr(), "host", target.cStr());
+        break;
+    }
+  }
+
+  ~PerfettoSubrequestTrace() noexcept {
+    if (receivingResponseBody) {
+      TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("io"), PERFETTO_TRACK_FROM_POINTER(this));
+    }
+    TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("io"), PERFETTO_TRACK_FROM_POINTER(this),
+        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+  }
+
+  KJ_DISALLOW_COPY_AND_MOVE(PerfettoSubrequestTrace);
+
+  void receiveResponseHeaders(uint statusCode, kj::Maybe<uint64_t> expectedBodySize) {
+    TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("io"), "Receive subrequest headers",
+        PERFETTO_TRACK_FROM_POINTER(this), "status_code", statusCode, "expected_body_size_known",
+        expectedBodySize != kj::none, "expected_body_size", expectedBodySize.orDefault(0));
+  }
+
+  void receiveResponseBody() {
+    if (!receivingResponseBody) {
+      receivingResponseBody = true;
+      TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Receive subrequest body",
+          PERFETTO_TRACK_FROM_POINTER(this));
+    }
+  }
+
+  void acceptWebSocket() {
+    TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("io"), "Accept subrequest WebSocket",
+        PERFETTO_TRACK_FROM_POINTER(this));
+  }
+
+  void failed(const kj::Exception& exception) {
+    TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("io"), "Subrequest failed",
+        PERFETTO_TRACK_FROM_POINTER(this), "error", exception.getDescription().cStr());
+  }
+
+ private:
+  bool receivingResponseBody = false;
+};
+
+class PerfettoSubrequestResponse final: public kj::HttpService::Response {
+ public:
+  PerfettoSubrequestResponse(kj::HttpService::Response& inner, PerfettoSubrequestTrace& trace)
+      : inner(inner),
+        trace(trace) {}
+  KJ_DISALLOW_COPY_AND_MOVE(PerfettoSubrequestResponse);
+
+  kj::Own<kj::AsyncOutputStream> send(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+    trace.receiveResponseHeaders(statusCode, expectedBodySize);
+    trace.receiveResponseBody();
+    return inner.send(statusCode, statusText, headers, expectedBodySize);
+  }
+
+  kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+    trace.acceptWebSocket();
+    return inner.acceptWebSocket(headers);
+  }
+
+ private:
+  kj::HttpService::Response& inner;
+  PerfettoSubrequestTrace& trace;
+};
+
+class PerfettoConnectResponse final: public kj::HttpService::ConnectResponse {
+ public:
+  PerfettoConnectResponse(kj::HttpService::ConnectResponse& inner, PerfettoSubrequestTrace& trace)
+      : inner(inner),
+        trace(trace) {}
+  KJ_DISALLOW_COPY_AND_MOVE(PerfettoConnectResponse);
+
+  void accept(uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
+    trace.receiveResponseHeaders(statusCode, kj::none);
+    inner.accept(statusCode, statusText, headers);
+  }
+
+  kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize) override {
+    trace.receiveResponseHeaders(statusCode, expectedBodySize);
+    trace.receiveResponseBody();
+    return inner.reject(statusCode, statusText, headers, expectedBodySize);
+  }
+
+ private:
+  kj::HttpService::ConnectResponse& inner;
+  PerfettoSubrequestTrace& trace;
+};
+
+class PerfettoSubrequestClient final: public WorkerInterface {
+ public:
+  PerfettoSubrequestClient(kj::Own<WorkerInterface> inner, kj::String operationName)
+      : inner(kj::mv(inner)),
+        operationName(kj::mv(operationName)) {}
+  KJ_DISALLOW_COPY_AND_MOVE(PerfettoSubrequestClient);
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response) override {
+    auto methodName = kj::str(method);
+    PerfettoSubrequestTrace trace(
+        PerfettoSubrequestTrace::Type::HTTP, operationName, methodName, url);
+    PerfettoSubrequestResponse tracedResponse(response, trace);
+    KJ_TRY {
+      co_await inner->request(method, url, headers, requestBody, tracedResponse);
+    }
+    KJ_CATCH(exception) {
+      trace.failed(exception);
+      kj::throwFatalException(kj::mv(exception));
+    }
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    PerfettoSubrequestTrace trace(
+        PerfettoSubrequestTrace::Type::CONNECT, operationName, "CONNECT"_kj, host);
+    PerfettoConnectResponse tracedResponse(response, trace);
+    KJ_TRY {
+      co_await inner->connect(host, headers, connection, tracedResponse, kj::mv(settings));
+    }
+    KJ_CATCH(exception) {
+      trace.failed(exception);
+      kj::throwFatalException(kj::mv(exception));
+    }
+  }
+
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
+    return inner->prewarm(url);
+  }
+
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    return inner->runScheduled(scheduledTime, cron);
+  }
+
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    return inner->runAlarm(scheduledTime, retryCount);
+  }
+
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    return inner->abandonAlarm(scheduledTime);
+  }
+
+  kj::Promise<bool> test() override {
+    return inner->test();
+  }
+
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    return inner->customEvent(kj::mv(event));
+  }
+
+ private:
+  kj::Own<WorkerInterface> inner;
+  kj::String operationName;
+};
+
+}  // namespace
+
 class IoContext::TimeoutManagerImpl final: public TimeoutManager {
  public:
   class TimeoutState;
@@ -1055,6 +1240,16 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     ret = metrics.wrapSubrequestClient(kj::mv(ret), countSubrequest);
     ret = worker->getIsolate().wrapSubrequestClient(
         kj::mv(ret), getHeaderIds().contentEncoding, metrics);
+  }
+
+  if (TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"))) {
+    auto operationName = [&]() -> kj::String {
+      KJ_IF_SOME(name, options.operationName) {
+        return kj::str(name);
+      }
+      return kj::str("subrequest");
+    }();
+    ret = kj::heap<PerfettoSubrequestClient>(kj::mv(ret), kj::mv(operationName));
   }
 
   if (tracing.isObserved()) {
