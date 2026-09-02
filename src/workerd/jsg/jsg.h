@@ -3078,11 +3078,6 @@ class Lock {
     bool previous;
   };
 
-  // Enable the experimental WebAssembly memory.discard proposal on the current context, installing
-  // `WebAssembly.Memory.prototype.discard` and allowing the `memory.discard` opcode. Gated by a
-  // compatibility flag.
-  void installWasmMemoryDiscard();
-
   // Tracks whether JavaScript execution is currently disallowed so that conversions in unwrap()
   // can choose a safe, non-JS-invoking path. Prefer the RAII `DisallowJavaScriptScope` (which
   // also installs V8's hard guard) over calling this directly.
