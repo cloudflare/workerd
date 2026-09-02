@@ -1,6 +1,8 @@
 using Workerd = import "/workerd/workerd.capnp";
+%PYTHON_COMPAT_DATES_IMPORT;
 
 const undefinedHandler :Workerd.Worker = (
+  %COMPAT_DATE,
   modules = [
     (name = "undefined_handler.py", pythonModule = embed "undefined_handler.py")
   ],
@@ -8,6 +10,7 @@ const undefinedHandler :Workerd.Worker = (
 );
 
 const server :Workerd.Worker = (
+  %COMPAT_DATE,
   modules = [
     (name = "server.js", esModule = embed "server.mjs")
   ],

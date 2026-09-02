@@ -1,9 +1,11 @@
 using Workerd = import "/workerd/workerd.capnp";
+%PYTHON_COMPAT_DATES_IMPORT;
 
 const unitTests :Workerd.Config = (
   services = [
     ( name = "main",
       worker = (
+        %COMPAT_DATE,
         modules = [
           (name = "a.py", pythonModule = embed "./a.py"),
           (name = "subdir/__init__.py", pythonModule = embed "./subdir/__init__.py"),

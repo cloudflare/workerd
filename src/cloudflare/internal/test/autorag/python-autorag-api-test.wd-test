@@ -1,9 +1,11 @@
 using Workerd = import "/workerd/workerd.capnp";
+%PYTHON_COMPAT_DATES_IMPORT;
 
 const unitTests :Workerd.Config = (
   services = [
     ( name = "autorag-api-test",
       worker = (
+        %COMPAT_DATE,
         modules = [
           (name = "worker.py", pythonModule = embed "autorag-api-test.py")
         ],
@@ -24,6 +26,7 @@ const unitTests :Workerd.Config = (
     ),
     ( name = "autorag-mock",
       worker = (
+        %COMPAT_DATE,
         compatibilityFlags = ["experimental", "nodejs_compat"],
         modules = [
           (name = "worker", esModule = embed "autorag-mock.js")
