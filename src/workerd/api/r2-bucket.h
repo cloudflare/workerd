@@ -38,6 +38,9 @@ kj::Own<kj::HttpClient> r2GetClient(IoContext& context, uint subrequestChannel, 
 kj::ArrayPtr<kj::StringPtr> fillR2Path(
     kj::StringPtr pathStorage[1], const kj::Maybe<kj::String>& bucket);
 
+kj::Maybe<kj::String> buildSsecKey(
+    kj::Maybe<kj::OneOf<kj::Array<byte>, kj::String>> maybeRawSsecKey);
+
 class R2MultipartUpload;
 
 // A capability to an R2 Bucket.

@@ -159,7 +159,7 @@ struct PreparedR2RpcBody {
 
 // Prepares the transport value and the exact byte length passed alongside it. The length is an
 // internal argument to the gateway's named RPC method, not part of the public R2 API.
-PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue value);
+PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value);
 
 struct R2Result {
   uint httpStatus;

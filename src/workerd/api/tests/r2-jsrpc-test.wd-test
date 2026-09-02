@@ -29,22 +29,6 @@ const unitTests :Workerd.Config = (
                               "r2_binding_jsrpc", "disable_fast_jsg_struct"],
       )
     ),
-    ( name = "r2-jsrpc-legacy-list-test",
-      worker = (
-        modules = [
-          ( name = "worker", esModule = embed "r2-test.js" )
-        ],
-        bindings = [
-          ( name = "BUCKET",
-            r2Bucket = (name = "r2-jsrpc-legacy-list-test", entrypoint = "R2BindingEntrypoint") ),
-          ( name = "R2_TRANSPORT", text = "jsrpc" ),
-          ( name = "R2_LIST_HONOR_INCLUDE", text = "false" ),
-        ],
-        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
-                              "streams_enable_constructors", "r2_binding_jsrpc",
-                              "disable_fast_jsg_struct"],
-      )
-    ),
   ],
   autogates = ["workerd-autogate-r2-bindings-jsrpc"],
 );

@@ -58,7 +58,7 @@ jsg::Promise<jsg::Value> normalizeR2RpcPromise(jsg::Lock& js, jsg::Value rpcProm
   return kj::mv(paf.promise);
 }
 
-PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue value) {
+PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value) {
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(stream, JsReadableStream) {
       auto size = stream.tryGetLength(js, StreamEncoding::IDENTITY);
