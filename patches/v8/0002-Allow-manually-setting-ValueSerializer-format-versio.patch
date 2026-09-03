@@ -7,11 +7,11 @@ Refs: https://bitbucket.cfdata.org/projects/MIRRORS/repos/v8/pull-requests/2/ove
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
-index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347dec6c0c7d 100644
+index 923a13a76f5220cbb106447f84c279b9a1df3079..240fd2da3b1eb2c7858b026525a963402bcb5c62 100644
 --- a/include/v8-value-serializer.h
 +++ b/include/v8-value-serializer.h
-@@ -154,6 +154,11 @@ class V8_EXPORT ValueSerializer {
-   ValueSerializer(Isolate* isolate, Delegate* delegate);
+@@ -166,6 +166,11 @@ class V8_EXPORT ValueSerializer {
+                       SharedImmutableArrayBufferMode::kDisabled);
    ~ValueSerializer();
  
 +  /**
@@ -23,10 +23,10 @@ index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347d
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index cbe74a9614c347753561b45b9c07598b4263bf09..a03b14ae35a30306fcaf0526cd5dd2f34d812c88 100644
+index b2ee99322d96c8e29ee0e49ec53d3779e5f9fde2..669ccb3e90b6aba5ab30f8333b8ff2334e63e330 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3603,6 +3603,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
+@@ -3658,6 +3658,10 @@ ValueSerializer::ValueSerializer(
  
  ValueSerializer::~ValueSerializer() { delete private_; }
  
@@ -38,18 +38,18 @@ index cbe74a9614c347753561b45b9c07598b4263bf09..a03b14ae35a30306fcaf0526cd5dd2f3
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 06d1861adceae7283938849d0ca0ac9413a87119..1063a750c3b3ccb8f10127d77237880a6f8a15cf 100644
+index 1e7ff653c47e2e3a7fd94cae99eb4b99e62e67d3..2efe470d8eac790a4323f31e10c0ffca703c4618 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
-@@ -302,6 +302,7 @@ ValueSerializer::ValueSerializer(Isolate* isolate,
+@@ -313,6 +313,7 @@ ValueSerializer::ValueSerializer(
      : isolate_(isolate),
        delegate_(delegate),
        zone_(isolate->allocator(), ZONE_NAME),
 +      version_(kLatestVersion),
        id_map_(isolate->heap(), ZoneAllocationPolicy(&zone_)),
-       array_buffer_transfer_map_(isolate->heap(),
-                                  ZoneAllocationPolicy(&zone_)) {
-@@ -321,9 +322,17 @@ ValueSerializer::~ValueSerializer() {
+       array_buffer_transfer_map_(isolate->heap(), ZoneAllocationPolicy(&zone_)),
+       share_immutable_array_buffer_(share_immutable_array_buffer) {
+@@ -338,9 +339,17 @@ ValueSerializer::~ValueSerializer() {
    }
  }
  
@@ -68,7 +68,7 @@ index 06d1861adceae7283938849d0ca0ac9413a87119..1063a750c3b3ccb8f10127d77237880a
  }
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
-@@ -1106,10 +1115,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
+@@ -1142,10 +1151,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
    WriteVarint(static_cast<uint8_t>(tag));
    WriteVarint<size_t>(view->byte_offset());
    WriteVarint<size_t>(view->byte_length());
@@ -86,10 +86,10 @@ index 06d1861adceae7283938849d0ca0ac9413a87119..1063a750c3b3ccb8f10127d77237880a
  }
  
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index edde26bf9cc19d7a1a50ec780484cd1871602060..1409bf5d0009f9b663892913ebc1e773921f585b 100644
+index 1c870f97ec02e3ce541b46ad0c0ce0f30bc10bf0..935c2fcd026ff57311e5c8b17a042f1593d648f9 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
-@@ -54,6 +54,11 @@ class ValueSerializer {
+@@ -65,6 +65,11 @@ class ValueSerializer {
    ValueSerializer(const ValueSerializer&) = delete;
    ValueSerializer& operator=(const ValueSerializer&) = delete;
  
@@ -101,7 +101,7 @@ index edde26bf9cc19d7a1a50ec780484cd1871602060..1409bf5d0009f9b663892913ebc1e773
    /*
     * Writes out a header, which includes the format version.
     */
-@@ -182,6 +187,7 @@ class ValueSerializer {
+@@ -198,6 +203,7 @@ class ValueSerializer {
    bool treat_array_buffer_views_as_host_objects_ = false;
    bool out_of_memory_ = false;
    Zone zone_;

@@ -50,6 +50,7 @@ PERFETTO_CONFIG = struct(
         # overridden in Google internal builds.
         base_platform = ["//:perfetto_base_default_platform"],
         zlib = ["@zlib//:zlib"],
+        zstd = ["@zstd//:zstd"],
         re2 = [],
         expat = ["@perfetto_dep_expat//:expat"],
         jsoncpp = ["@perfetto_dep_jsoncpp//:jsoncpp"],
@@ -95,6 +96,7 @@ PERFETTO_CONFIG = struct(
     # initialized with the Perfetto build files (i.e. via perfetto_deps()).
     deps_copts = struct(
         zlib = [],
+        zstd = [],
         jsoncpp = [],
         linenoise = [],
         sqlite = [],

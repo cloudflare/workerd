@@ -3,66 +3,89 @@ From: Mikhail Aizatsky <maizatskyi@cloudflare.com>
 Date: Tue, 16 Jun 2026 22:00:00 +0000
 Subject: Fix ExtendedMap layout on Windows
 
-MSVC's C++ object layout can place derived-class members into base-class
-tail padding. ExtendedMap intentionally leaves kTaggedSize - 1 bytes after
-bit_field_ex_ for subclasses, but Torque expects ExtendedMap itself to be
-rounded up before JSInterceptorMap fields start.
+MSVC places derived-class members into an abstract base class's tail
+padding. Torque instead starts @cppObjectLayoutDefinition subclasses
+at sizeof(ExtendedMap), making its JSInterceptorMap offsets three
+bytes later than C++.
 
-Make the padding explicit in ExtendedMap's Torque and C++ layouts, and let
-JSInterceptorMap start directly with its tagged fields. This keeps the C++
-layout and generated Torque offsets consistent on Windows.
+Move JSInterceptorMap's non-tagged flags byte and remaining padding
+into ExtendedMap. This makes the base occupy one complete tagged slot
+while preserving JSInterceptorMap's object size and raw/tagged-field
+boundary.
 
 diff --git a/src/objects/js-interceptor-map.h b/src/objects/js-interceptor-map.h
-index 546a15e1bc6ba44e528ba66e5a45a0f002a81cce..976b022ad9d3e2e1fcc3bcdc4c6b8bfc47c10d12 100644
+index 1bf77351fa028f6c7b2147827f38590aedfa0e1d..1c25801648f86742beaced5e5864bfcdf8be9c44 100644
 --- a/src/objects/js-interceptor-map.h
 +++ b/src/objects/js-interceptor-map.h
-@@ -31,7 +31,6 @@ V8_OBJECT class JSInterceptorMap : public ExtendedMap {
-   inline void clear_extended_padding();
+@@ -40,8 +40,6 @@ V8_OBJECT class JSInterceptorMap : public ExtendedMap {
+   inline void init_flags_and_clear_extended_padding();
  
   public:
--  uint8_t extended_padding_[kTaggedSize - 1];
+-  uint8_t flags_;
+-  uint8_t extended_padding_[kTaggedSize - 2];
    TaggedMember<InterceptorInfo> named_interceptor_;
    TaggedMember<InterceptorInfo> indexed_interceptor_;
- } V8_OBJECT_END;
+   TaggedMember<Cell> fast_case_validity_cell_;
 diff --git a/src/objects/js-interceptor-map.tq b/src/objects/js-interceptor-map.tq
-index 7a0838bb84d985467fd495e5b5fd10764bf82bf0..25f1d670094ec2f43739c992314fc474ebfd6d3c 100644
+index f351cb0fb0a75ab7639b56d0e4f8c0dc10e935e8..9795025976d26792bcc16c0f7120949c57b7567e 100644
 --- a/src/objects/js-interceptor-map.tq
 +++ b/src/objects/js-interceptor-map.tq
-@@ -8,8 +8,6 @@
+@@ -8,9 +8,6 @@
  @hasSameInstanceTypeAsParent
  @doNotGenerateCast
  extern class JSInterceptorMap extends ExtendedMap {
--  @ifnot(TAGGED_SIZE_8_BYTES) extended_padding[3]: uint8;
--  @if(TAGGED_SIZE_8_BYTES) extended_padding[7]: uint8;
+-  flags: uint8;
+-  @ifnot(TAGGED_SIZE_8_BYTES) extended_padding[2]: uint8;
+-  @if(TAGGED_SIZE_8_BYTES) extended_padding[6]: uint8;
    named_interceptor: InterceptorInfo;
    indexed_interceptor: InterceptorInfo;
- }
+   // This prototype validity cell guards modifications of the interceptor's
 diff --git a/src/objects/map.h b/src/objects/map.h
-index b907c3ddc112618f40480e06b314213587b90e1c..9eb229400c8d29e84e1b599c14ffa6224aaa7b40 100644
+index 95676554a82d096d3e9c3ba2b80de03d281fbe5a..513c9fd31bebb603ed44458d344d00032c641d2e 100644
 --- a/src/objects/map.h
 +++ b/src/objects/map.h
-@@ -1290,7 +1290,8 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
+@@ -1263,7 +1263,7 @@ static_assert(offsetof(Map, instance_type_) ==
+               Internals::kMapInstanceTypeOffset);
+ 
+ // Base class for Maps with extra fields. Subclasses must be defined with
+-// @hasSameInstanceTypeAsParent and define padding fields up to kTaggedSize.
++// @hasSameInstanceTypeAsParent.
+ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
+  public:
+   // Bit positions for |bit_field_ex|.
+@@ -1289,7 +1289,10 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
    static const int kStartOfStrongExtendedFieldsOffset;
  
    std::atomic<uint8_t> bit_field_ex_;
 -  // Leaves kTaggedSize-1 unused bytes, they will be used by subclasses.
-+  // Pads ExtendedMap to kTaggedSize so subclasses start at tagged alignment.
-+  uint8_t extended_padding_[kTaggedSize - 1];
++  // Keep the non-tagged fields in one kTaggedSize slot so subclasses begin at
++  // tagged alignment.
++  uint8_t flags_;
++  uint8_t extended_padding_[kTaggedSize - 2];
  } V8_OBJECT_END;
  
  constexpr int ExtendedMapSizeForKind(ExtendedMapKind kind);
 diff --git a/src/objects/map.tq b/src/objects/map.tq
-index cb85e7788e6a38116fc690341ca51f6288869247..687c95966d88c31b48ff3cb045c452762b2af237 100644
+index cb85e7788e6a38116fc690341ca51f6288869247..fd23b760c2d57bebf16f6abbd71a5ffab2431c89 100644
 --- a/src/objects/map.tq
 +++ b/src/objects/map.tq
-@@ -116,7 +116,9 @@ bitfield struct ExtendedMapBitFields extends uint8 {
+@@ -110,13 +110,17 @@ bitfield struct ExtendedMapBitFields extends uint8 {
+ }
+ 
+ // Base class for Maps with extra fields. Subclasses must be defined with
+-// @hasSameInstanceTypeAsParent and define padding fields up to kTaggedSize.
++// @hasSameInstanceTypeAsParent.
+ @cppObjectLayoutDefinition
+ @hasSameInstanceTypeAsParent
  @doNotGenerateCast
  extern class ExtendedMap extends Map {
    bit_field_ex: ExtendedMapBitFields;
 -  // Leaves kTaggedSize-1 unused bytes, they will be used by subclasses.
-+  // Pads ExtendedMap to kTaggedSize so subclasses start at tagged alignment.
-+  @ifnot(TAGGED_SIZE_8_BYTES) extended_padding[3]: uint8;
-+  @if(TAGGED_SIZE_8_BYTES) extended_padding[7]: uint8;
++  // Keep the non-tagged fields in one kTaggedSize slot so subclasses begin at
++  // tagged alignment.
++  flags: uint8;
++  @ifnot(TAGGED_SIZE_8_BYTES) extended_padding[2]: uint8;
++  @if(TAGGED_SIZE_8_BYTES) extended_padding[6]: uint8;
  }
  
  @export
