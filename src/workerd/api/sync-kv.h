@@ -31,7 +31,25 @@ class SyncKvStorage: public jsg::Object {
 
   jsg::JsValue get(jsg::Lock& js, kj::String key);
 
-  JSG_ITERATOR_TYPE(ListIterator, jsg::JsArray, IoOwn<SqliteKv::ListCursor>, listNext);
+  class ListTrace {
+   public:
+    virtual ~ListTrace() noexcept(false) = default;
+    KJ_DISALLOW_COPY_AND_MOVE(ListTrace);
+
+   protected:
+    ListTrace() = default;
+  };
+
+  struct ListState {
+    ListState(IoOwn<SqliteKv::ListCursor> cursor, kj::Own<ListTrace> trace)
+        : cursor(kj::mv(cursor)),
+          trace(kj::mv(trace)) {}
+
+    IoOwn<SqliteKv::ListCursor> cursor;
+    kj::Own<ListTrace> trace;
+  };
+
+  JSG_ITERATOR_TYPE(ListIterator, jsg::JsArray, ListState, listNext);
 
   jsg::Ref<ListIterator> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
 
@@ -67,7 +85,7 @@ class SyncKvStorage: public jsg::Object {
     return storage->getSqliteKv(js);
   }
 
-  static kj::Maybe<jsg::JsArray> listNext(jsg::Lock& js, IoOwn<SqliteKv::ListCursor>& state);
+  static kj::Maybe<jsg::JsArray> listNext(jsg::Lock& js, ListState& state);
 };
 
 #define EW_SYNC_KV_ISOLATE_TYPES api::SyncKvStorage, api::SyncKvStorage::ListOptions,              \

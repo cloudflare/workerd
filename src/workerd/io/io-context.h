@@ -211,6 +211,11 @@ class IoContext_IncomingRequest final {
   // Tracks the location where delivered() was called for debugging.
   kj::Maybe<kj::SourceLocation> deliveredLocation;
 
+  // Bit set for each limit event emitted to an active Perfetto session. A worker can catch an
+  // operation-limit exception and immediately retry, so each kind is recorded at most once per
+  // incoming event.
+  uint8_t perfettoLimitEvents = 0;
+
   template <typename T>
   kj::Promise<T> maybeAddGcPassForTest(kj::Promise<T> promise);
 
@@ -292,6 +297,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   LimitEnforcer& getLimitEnforcer() {
     return *limitEnforcer;
   }
+
+  enum class OperationLimitType { SUBREQUEST, IN_HOUSE_SUBREQUEST, KV, ANALYTICS_ENGINE };
+
+  // Records limit failures in the workerd.resource Perfetto category. Resource outcomes and
+  // operation types are deduplicated independently for each incoming event.
+  void traceResourceLimitExceeded(EventOutcome outcome, kj::StringPtr source);
+  void traceOperationLimitExceeded(OperationLimitType type);
 
   // Get the current input lock. Throws an exception if no input lock is held (e.g. because this is
   // not an actor request).

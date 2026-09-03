@@ -7,6 +7,7 @@
 #include "actor-state.h"
 
 #include <workerd/io/io-context.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 #if _WIN32
 #define strncasecmp _strnicmp
@@ -15,6 +16,45 @@
 #endif
 
 namespace workerd::api {
+
+namespace {
+
+class PerfettoSqlQuery final {
+ public:
+  explicit PerfettoSqlQuery(size_t bindingCount) {
+    TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Durable Object SQL query",
+        PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this), "bindings",
+        bindingCount);
+  }
+
+  ~PerfettoSqlQuery() noexcept {
+    TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("io"), PERFETTO_TRACK_FROM_POINTER(this),
+        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this), "finalized", finalized, "rows_read", rowsRead,
+        "rows_written", rowsWritten);
+  }
+
+  KJ_DISALLOW_COPY_AND_MOVE(PerfettoSqlQuery);
+
+  void finalize(double rowsRead, double rowsWritten) {
+    finalized = true;
+    this->rowsRead = rowsRead;
+    this->rowsWritten = rowsWritten;
+  }
+
+ private:
+  bool finalized = false;
+  double rowsRead = 0;
+  double rowsWritten = 0;
+};
+
+kj::Own<PerfettoSqlQuery> traceSqlQuery(size_t bindingCount) {
+  if (TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"))) {
+    return kj::heap<PerfettoSqlQuery>(bindingCount);
+  }
+  return {};
+}
+
+}  // namespace
 
 // Maximum total size of all cached statements (measured in size of the SQL code). If cached
 // statements exceed this, we remove the LRU statement(s).
@@ -31,6 +71,7 @@ SqlStorage::~SqlStorage() {}
 
 jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     jsg::Lock& js, jsg::JsString querySql, jsg::Arguments<BindingValue> bindings) {
+  auto perfettoTrace = traceSqlQuery(bindings.size());
   auto& context = IoContext::current();
   TraceContext traceContext = context.makeUserTraceSpan("durable_object_storage_exec"_kjc);
   traceContext.setTag("db.system.name"_kjc, "cloudflare-durable-object-sql"_kjc);
@@ -62,13 +103,22 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
   // In order to get accurate statistics, we have to keep the spans around until the query is
   // actually done, which for read queries that iterate over a cursor won't be until later.
   kj::Maybe<kj::Function<void(Cursor&)>> doneCallback;
+  kj::Maybe<IoOwn<TraceContext>> observedTraceContext;
   if (traceContext.isObserved()) {
-    doneCallback = [traceContext = context.addObject(kj::heap(kj::mv(traceContext)))](
-                       Cursor& cursor) mutable {
+    observedTraceContext = context.addObject(kj::heap(kj::mv(traceContext)));
+  }
+  if (observedTraceContext != kj::none || perfettoTrace.get() != nullptr) {
+    doneCallback = [traceContext = kj::mv(observedTraceContext),
+                       perfettoTrace = kj::mv(perfettoTrace)](Cursor& cursor) mutable {
       int64_t rowsRead = cursor.getRowsRead();
       int64_t rowsWritten = cursor.getRowsWritten();
-      traceContext->setTag("cloudflare.durable_object.response.rows_read"_kjc, rowsRead);
-      traceContext->setTag("cloudflare.durable_object.response.rows_written"_kjc, rowsWritten);
+      KJ_IF_SOME(context, traceContext) {
+        context->setTag("cloudflare.durable_object.response.rows_read"_kjc, rowsRead);
+        context->setTag("cloudflare.durable_object.response.rows_written"_kjc, rowsWritten);
+      }
+      if (perfettoTrace.get() != nullptr) {
+        perfettoTrace->finalize(rowsRead, rowsWritten);
+      }
     };
   }
 
@@ -99,6 +149,8 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
 }
 
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
+  TRACE_EVENT(
+      WORKERD_TRACE_CATEGORY("io"), "Durable Object SQL ingest", "sql_size", querySql.size());
   auto& context = IoContext::current();
   TraceContext traceContext = context.makeUserTraceSpan("durable_object_storage_ingest"_kjc);
   auto result = getDb(js).ingestSql(regulator, querySql);
@@ -124,6 +176,7 @@ jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, jsg::JsString
 }
 
 double SqlStorage::getDatabaseSize(jsg::Lock& js) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("io"), "Get Durable Object SQLite size");
   auto& context = IoContext::current();
   TraceContext traceContext =
       context.makeUserTraceSpan("durable_object_storage_getDatabaseSize"_kjc);

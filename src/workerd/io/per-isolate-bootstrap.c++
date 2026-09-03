@@ -491,14 +491,14 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
   // subsequent script via the context extension object.
   JSG_TRY(js) {
     {
-      TRACE_EVENT("workerd", "PerIsolateBootrap::primordials");
+      TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "PerIsolateBootrap::primordials");
       auto result =
           state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("primordials"_kj));
       state->primordials = result.addRef(js);
     }
 
     {
-      TRACE_EVENT("workerd", "PerIsolateBootstrap::main");
+      TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "PerIsolateBootstrap::main");
       // Run the entry point. This synchronously executes main.js, which may
       // require() other scripts. All execution is synchronous.
       state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("main"_kj));

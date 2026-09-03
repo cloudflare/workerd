@@ -13,6 +13,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/string-buffer.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 #include <kj/vector.h>
 
@@ -73,7 +74,7 @@ kj::Promise<void> pumpTo(
 
     ptr = ptr.first(amount);
     if (!output->tryWriteSync(ptr)) {
-      co_await output->write(ptr);
+      co_await output->writeWithBackpressureTracing(ptr);
       syncBytes = 0;
     }
   }
@@ -416,11 +417,11 @@ class TeeBranch final: public ReadableStreamSource {
     explicit PumpAdapter(kj::Ptr<WritableStreamSink> inner): inner(kj::mv(inner)) {}
 
     kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
-      return inner->write(buffer);
+      return inner->writeWithBackpressureTracing(buffer);
     }
 
     kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-      return inner->write(pieces);
+      return inner->writeWithBackpressureTracing(pieces);
     }
 
     bool tryWriteSync(kj::ArrayPtr<const byte> buffer) override {
@@ -1357,10 +1358,35 @@ jsg::Promise<void> WritableStreamInternalController::write(
 
 void WritableStreamInternalController::adjustWriteBufferSize(jsg::Lock& js, int64_t amount) {
   KJ_DASSERT(amount >= 0 || std::abs(amount) <= currentWriteBufferSize);
-  currentWriteBufferSize += amount;
+  bool wasBackpressured = false;
   KJ_IF_SOME(highWaterMark, maybeHighWaterMark) {
-    int64_t desiredSize = highWaterMark - currentWriteBufferSize;
-    updateBackpressure(js, desiredSize <= 0);
+    wasBackpressured = currentWriteBufferSize >= highWaterMark;
+  }
+  currentWriteBufferSize += amount;
+
+  KJ_IF_SOME(highWaterMark, maybeHighWaterMark) {
+    bool backpressured = currentWriteBufferSize >= highWaterMark;
+    if (TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"))) {
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("io"),
+          perfetto::CounterTrack(
+              "Buffered bytes", perfetto::NamedTrack::FromPointer("Internal WritableStream", this)),
+          currentWriteBufferSize);
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("io"),
+          perfetto::CounterTrack("High water mark",
+              perfetto::NamedTrack::FromPointer("Internal WritableStream", this)),
+          highWaterMark);
+      if (wasBackpressured != backpressured) {
+        TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("io"), "WritableStream backpressure changed",
+            perfetto::NamedTrack::FromPointer("Internal WritableStream", this), "active",
+            backpressured, "buffered", currentWriteBufferSize, "high_water_mark", highWaterMark);
+      }
+    }
+    updateBackpressure(js, backpressured);
+  } else if (TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"))) {
+    TRACE_COUNTER(WORKERD_TRACE_CATEGORY("io"),
+        perfetto::CounterTrack(
+            "Buffered bytes", perfetto::NamedTrack::FromPointer("Internal WritableStream", this)),
+        currentWriteBufferSize);
   }
 }
 
@@ -1383,6 +1409,16 @@ void WritableStreamInternalController::updateBackpressure(jsg::Lock& js, bool ba
 
 void WritableStreamInternalController::setHighWaterMark(uint64_t highWaterMark) {
   maybeHighWaterMark = highWaterMark;
+  if (TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"))) {
+    TRACE_COUNTER(WORKERD_TRACE_CATEGORY("io"),
+        perfetto::CounterTrack(
+            "High water mark", perfetto::NamedTrack::FromPointer("Internal WritableStream", this)),
+        highWaterMark);
+    TRACE_COUNTER(WORKERD_TRACE_CATEGORY("io"),
+        perfetto::CounterTrack(
+            "Buffered bytes", perfetto::NamedTrack::FromPointer("Internal WritableStream", this)),
+        currentWriteBufferSize);
+  }
 }
 
 jsg::Promise<void> WritableStreamInternalController::closeImpl(jsg::Lock& js, bool markAsHandled) {
@@ -2015,8 +2051,8 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
       auto check = makeChecker(*this);
       auto promise = KJ_ASSERT_NONNULL(state.whenActive([&request](IoOwn<Writable>& writable) {
-        return writable->canceler.wrap(
-            writable->sink->write(request.bytes).attach(kj::mv(request.ownBytes)));
+        return writable->canceler.wrap(writable->sink->writeWithBackpressureTracing(request.bytes)
+                                           .attach(kj::mv(request.ownBytes)));
       }));
 
       // TODO(soon): We use awaitIoLegacy() here because if the stream terminates in JavaScript in
@@ -2314,6 +2350,37 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
   KJ_UNREACHABLE;
 }
 
+WritableStreamInternalController::Pipe::Pipe(WritableStreamInternalController& parent,
+    jsg::Ref<ReadableStream> readable,
+    kj::Ptr<ReadableStreamController::PipeController> source,
+    jsg::Promise<void>::Resolver promise,
+    bool preventAbort,
+    bool preventClose,
+    bool preventCancel,
+    kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal)
+    : parent(parent),
+      readable(kj::mv(readable)),
+      source(kj::mv(source)),
+      promise(kj::mv(promise)),
+      maybeSignal(kj::mv(maybeSignal)) {
+  flags.preventAbort = preventAbort;
+  flags.preventClose = preventClose;
+  flags.preventCancel = preventCancel;
+  flags.perfettoTraceStarted = TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"));
+  if (flags.perfettoTraceStarted) {
+    TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Pipe to internal WritableStream",
+        PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this), "prevent_abort",
+        preventAbort, "prevent_close", preventClose, "prevent_cancel", preventCancel);
+  }
+}
+
+WritableStreamInternalController::Pipe::~Pipe() noexcept(false) {
+  if (flags.perfettoTraceStarted) {
+    TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("io"), PERFETTO_TRACK_FROM_POINTER(this),
+        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+  }
+}
+
 bool WritableStreamInternalController::Pipe::State::checkSignal(jsg::Lock& js) {
   // If the weakRef is not alive, we'll return true to indicate aborted.
   bool answer = true;
@@ -2434,7 +2501,8 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::write(
     auto& ioContext = IoContext::current();
     return KJ_ASSERT_NONNULL(parent.state.whenActive([&](IoOwn<Writable>& writable) {
       return ioContext.awaitIo(js,
-          writable->canceler.wrap(writable->sink->write(data).attach(kj::mv(data))),
+          writable->canceler.wrap(
+              writable->sink->writeWithBackpressureTracing(data).attach(kj::mv(data))),
           [](jsg::Lock&) {});
     }));
   };
@@ -2955,11 +3023,22 @@ kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
     kj::Own<WritableStreamSink> sink;
     kj::Own<ReadableStreamSource> source;
     bool done = false;
+    bool perfettoTraceStarted = false;
 
     Holder(kj::Own<WritableStreamSink> sink, kj::Own<ReadableStreamSource> source)
         : sink(kj::mv(sink)),
-          source(kj::mv(source)) {}
+          source(kj::mv(source)) {
+      perfettoTraceStarted = TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"));
+      if (perfettoTraceStarted) {
+        TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Pump internal ReadableStream",
+            PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+      }
+    }
     ~Holder() noexcept(false) {
+      if (perfettoTraceStarted) {
+        TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("io"), PERFETTO_TRACK_FROM_POINTER(this),
+            PERFETTO_TERMINATING_FLOW_FROM_POINTER(this), "completed", done);
+      }
       if (!done) {
         // It appears the pump was canceled. We should make sure this propagates back to the
         // source stream. This is important in particular when we're implementing the response

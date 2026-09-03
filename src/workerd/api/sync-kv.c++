@@ -6,10 +6,39 @@
 
 #include <workerd/io/stored-value.h>
 #include <workerd/util/sqlite-kv.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 namespace workerd::api {
 
+namespace {
+
+class PerfettoSyncKvList final: public SyncKvStorage::ListTrace {
+ public:
+  PerfettoSyncKvList() {
+    TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Durable Object synchronous KV list cursor",
+        PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+  }
+
+  ~PerfettoSyncKvList() noexcept {
+    TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("io"), PERFETTO_TRACK_FROM_POINTER(this),
+        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+  }
+
+  KJ_DISALLOW_COPY_AND_MOVE(PerfettoSyncKvList);
+};
+
+kj::Own<SyncKvStorage::ListTrace> traceSyncKvList() {
+  if (TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"))) {
+    return kj::heap<PerfettoSyncKvList>();
+  }
+  return {};
+}
+
+}  // namespace
+
 jsg::JsValue SyncKvStorage::get(jsg::Lock& js, kj::String key) {
+  TRACE_EVENT(
+      WORKERD_TRACE_CATEGORY("io"), "Durable Object synchronous KV get", "key_size", key.size());
   TraceContext traceContext =
       IoContext::current().makeUserTraceSpan("durable_object_storage_kv_get"_kjc);
 
@@ -73,33 +102,39 @@ jsg::Ref<SyncKvStorage::ListIterator> SyncKvStorage::list(
     };
   });
 
-  auto [start, end, reverse, limit] =
-      KJ_UNWRAP_OR(DurableObjectStorageOperations::compileListOptions(asyncOptions), {
-        // Key range is empty. Return empty map.
-        return js.alloc<SyncKvStorage::ListIterator>(
-            IoContext::current().createObject<SqliteKv::ListCursor>(nullptr));
-      });
+  auto [start, end, reverse,
+      limit] = KJ_UNWRAP_OR(DurableObjectStorageOperations::compileListOptions(asyncOptions), {
+    // Key range is empty. Return empty map.
+    return js.alloc<SyncKvStorage::ListIterator>(ListState(
+        IoContext::current().createObject<SqliteKv::ListCursor>(nullptr), kj::Own<ListTrace>()));
+  });
 
+  auto perfettoTrace = traceSyncKvList();
   auto cursor = sqliteKv.list(start, end, limit, reverse ? SqliteKv::REVERSE : SqliteKv::FORWARD)
                     .attach(kj::mv(start), kj::mv(end));
-
-  return js.alloc<SyncKvStorage::ListIterator>(IoContext::current().addObject(kj::mv(cursor)));
+  return js.alloc<SyncKvStorage::ListIterator>(
+      ListState(IoContext::current().addObject(kj::mv(cursor)), kj::mv(perfettoTrace)));
 }
 
-kj::Maybe<jsg::JsArray> SyncKvStorage::listNext(jsg::Lock& js, IoOwn<SqliteKv::ListCursor>& state) {
-  auto& stateRef = *state;
+kj::Maybe<jsg::JsArray> SyncKvStorage::listNext(jsg::Lock& js, ListState& state) {
+  auto& stateRef = *state.cursor;
   KJ_IF_SOME(pair, stateRef.next()) {
     return js.arr(js.str(pair.key), deserializeV8Value(js, pair.key, pair.value));
-  } else if (stateRef.wasCanceled()) {
-    JSG_FAIL_REQUIRE(Error,
-        "kv.list() iterator was invalidated because a new call to kv.list() was started. Only one "
-        "kv.list() iterator can exist at a time.");
   } else {
-    return kj::none;
+    state.trace = nullptr;
+    if (stateRef.wasCanceled()) {
+      JSG_FAIL_REQUIRE(Error,
+          "kv.list() iterator was invalidated because a new call to kv.list() was started. Only "
+          "one kv.list() iterator can exist at a time.");
+    } else {
+      return kj::none;
+    }
   }
 }
 
 void SyncKvStorage::put(jsg::Lock& js, kj::String key, jsg::JsValue value) {
+  TRACE_EVENT(
+      WORKERD_TRACE_CATEGORY("io"), "Durable Object synchronous KV put", "key_size", key.size());
   TraceContext traceContext =
       IoContext::current().makeUserTraceSpan("durable_object_storage_kv_put"_kjc);
   SqliteKv& sqliteKv = getSqliteKv(js);
@@ -113,6 +148,8 @@ void SyncKvStorage::put(jsg::Lock& js, kj::String key, jsg::JsValue value) {
 }
 
 kj::OneOf<bool, int> SyncKvStorage::delete_(jsg::Lock& js, kj::String key) {
+  TRACE_EVENT(
+      WORKERD_TRACE_CATEGORY("io"), "Durable Object synchronous KV delete", "key_size", key.size());
   auto& ioctx = IoContext::current();
 
   KJ_IF_SOME(handler, KJ_ASSERT_NONNULL(ioctx.getActor()).getStoredExternalHandler()) {

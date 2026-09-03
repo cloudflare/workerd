@@ -11,6 +11,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/state-machine.h>
+#include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/weak-refs.h>
 
 #include <kj/debug.h>
@@ -24,6 +25,31 @@ using ByobController = jsg::Ref<ReadableByteStreamController>;
 namespace {
 struct ValueReadable;
 struct ByteReadable;
+
+class PerfettoStreamPipe final {
+ public:
+  explicit PerfettoStreamPipe(const PipeToOptions& options) {
+    TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Pipe to standard WritableStream",
+        PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this), "prevent_abort",
+        options.preventAbort.orDefault(false), "prevent_close",
+        options.preventClose.orDefault(false), "prevent_cancel",
+        options.preventCancel.orDefault(false), "pipe_through", options.pipeThrough);
+  }
+
+  ~PerfettoStreamPipe() noexcept {
+    TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("io"), PERFETTO_TRACK_FROM_POINTER(this),
+        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+  }
+
+  KJ_DISALLOW_COPY_AND_MOVE(PerfettoStreamPipe);
+};
+
+kj::Own<PerfettoStreamPipe> traceStreamPipe(const PipeToOptions& options) {
+  if (TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"))) {
+    return kj::heap<PerfettoStreamPipe>(options);
+  }
+  return {};
+}
 }  // namespace
 
 // =======================================================================================
@@ -192,6 +218,7 @@ class WritableLockImpl {
     kj::Ptr<ReadableStreamController::PipeController> source;
 
     kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
+    kj::Own<PerfettoStreamPipe> perfettoTrace;
 
     kj::Maybe<jsg::Promise<void>> checkSignal(jsg::Lock& js, Controller& self);
 
@@ -515,12 +542,14 @@ bool WritableLockImpl<Controller>::pipeLock(
     return false;
   }
 
+  auto perfettoTrace = traceStreamPipe(options);
   auto sourceLock = KJ_ASSERT_NONNULL(source->getController().tryPipeLock());
 
   state.template transitionTo<PipeLocked>(PipeLocked{
     .readableStreamRef = kj::mv(source),
     .source = kj::mv(sourceLock),
     .maybeSignal = kj::mv(options.signal),
+    .perfettoTrace = kj::mv(perfettoTrace),
     .flags =
         {
           .preventAbort = options.preventAbort.orDefault(false),
@@ -1705,6 +1734,21 @@ void WritableImpl<Self>::setup(jsg::Lock& js,
   };
 
   flags.backpressure = getDesiredSize() <= 0;
+  if (TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"))) {
+    TRACE_COUNTER(WORKERD_TRACE_CATEGORY("io"),
+        perfetto::CounterTrack(
+            "High water mark", perfetto::NamedTrack::FromPointer("Standard WritableStream", this)),
+        highWaterMark);
+    TRACE_COUNTER(WORKERD_TRACE_CATEGORY("io"),
+        perfetto::CounterTrack(
+            "Queued size", perfetto::NamedTrack::FromPointer("Standard WritableStream", this)),
+        amountBuffered);
+    if (flags.backpressure) {
+      TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("io"), "WritableStream backpressure changed",
+          perfetto::NamedTrack::FromPointer("Standard WritableStream", this), "active", true,
+          "queued_size", amountBuffered, "high_water_mark", highWaterMark);
+    }
+  }
 
   maybeRunAlgorithm(js, startAlgorithm, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
 }
@@ -1726,8 +1770,24 @@ void WritableImpl<Self>::updateBackpressure(jsg::Lock& js) {
   KJ_ASSERT(isWritable());
   KJ_ASSERT(!isCloseQueuedOrInFlight());
   bool bp = getDesiredSize() <= 0;
+  bool backpressureChanged = bp != flags.backpressure;
+  if (TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"))) {
+    TRACE_COUNTER(WORKERD_TRACE_CATEGORY("io"),
+        perfetto::CounterTrack(
+            "Queued size", perfetto::NamedTrack::FromPointer("Standard WritableStream", this)),
+        amountBuffered);
+    TRACE_COUNTER(WORKERD_TRACE_CATEGORY("io"),
+        perfetto::CounterTrack(
+            "High water mark", perfetto::NamedTrack::FromPointer("Standard WritableStream", this)),
+        highWaterMark);
+    if (backpressureChanged) {
+      TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("io"), "WritableStream backpressure changed",
+          perfetto::NamedTrack::FromPointer("Standard WritableStream", this), "active", bp,
+          "queued_size", amountBuffered, "high_water_mark", highWaterMark);
+    }
+  }
 
-  if (bp != flags.backpressure) {
+  if (backpressureChanged) {
     flags.backpressure = bp;
     KJ_IF_SOME(owner, tryGetOwner()) {
       owner.updateBackpressure(js, flags.backpressure);
@@ -3574,7 +3634,7 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
         auto pieces =
             KJ_MAP(chunk, result.chunks) -> kj::ArrayPtr<const kj::byte> { return chunk.asPtr(); };
         if (!sink->tryWriteSync(pieces)) {
-          co_await sink->write(pieces);
+          co_await sink->writeWithBackpressureTracing(pieces);
         }
       }
 

@@ -10,6 +10,7 @@
 #include <workerd/util/duration-exceeded-logger.h>
 #include <workerd/util/exception.h>
 #include <workerd/util/sentry.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 #include <kj/debug.h>
 
@@ -29,6 +30,68 @@ static constexpr size_t MAX_ACTOR_STORAGE_RPC_WORDS = (16u << 20) / sizeof(capnp
 const ActorCache::Hooks ActorCache::Hooks::DEFAULT;
 
 namespace {
+
+class PerfettoStorageOperation final {
+ public:
+  enum class Type { READ, PUT, DELETE, ALARM, TRANSACTION, DELETE_ALL };
+
+  explicit PerfettoStorageOperation(Type type) {
+    switch (type) {
+      case Type::READ:
+        TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Durable Object storage read",
+            PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+        break;
+      case Type::PUT:
+        TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Durable Object storage put",
+            PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+        break;
+      case Type::DELETE:
+        TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Durable Object storage delete",
+            PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+        break;
+      case Type::ALARM:
+        TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Durable Object storage alarm update",
+            PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+        break;
+      case Type::TRANSACTION:
+        TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Durable Object storage transaction",
+            PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+        break;
+      case Type::DELETE_ALL:
+        TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Durable Object storage delete all",
+            PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+        break;
+    }
+  }
+
+  ~PerfettoStorageOperation() noexcept {
+    TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("io"), PERFETTO_TRACK_FROM_POINTER(this),
+        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+  }
+
+  KJ_DISALLOW_COPY_AND_MOVE(PerfettoStorageOperation);
+};
+
+kj::Own<PerfettoStorageOperation> traceStorageOperation(PerfettoStorageOperation::Type type) {
+  if (TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"))) {
+    return kj::heap<PerfettoStorageOperation>(type);
+  }
+  return {};
+}
+
+template <typename T>
+kj::Promise<T> attachStorageTrace(kj::Promise<T> promise, kj::Own<PerfettoStorageOperation> trace) {
+  if (trace.get() != nullptr) {
+    return kj::mv(promise).attach(kj::mv(trace));
+  }
+  return kj::mv(promise);
+}
+
+template <typename Func>
+kj::Promise<void> traceStoragePromise(PerfettoStorageOperation::Type type, Func&& func) {
+  auto trace = traceStorageOperation(type);
+  return attachStorageTrace(func(), kj::mv(trace));
+}
 
 // Utility functions for recording latency metrics via a one-liner in the callers below.
 auto recordStorageRead(ActorCache::Hooks& hooks, const kj::MonotonicClock& clock) {
@@ -1833,14 +1896,19 @@ kj::PromiseForResult<Func, rpc::ActorStorage::Operations::Client> ActorCache::sc
   // This is basically kj::retryOnDisconnect() except that we make the first call synchronously.
   // For our use case, this is safe, and I wanted to make sure reads get sent concurrently with
   // further JavaScript execution if possible.
-  auto promise = kj::evalNow(
-      [&]() mutable { return function(storage).attach(recordStorageRead(hooks, clock)); });
+  auto promise = kj::evalNow([&]() mutable {
+    auto trace = traceStorageOperation(PerfettoStorageOperation::Type::READ);
+    auto request = function(storage).attach(recordStorageRead(hooks, clock));
+    return attachStorageTrace(kj::mv(request), kj::mv(trace));
+  });
   return oomCanceler.wrap(
       promise
           .catch_([this, function = kj::mv(function)](kj::Exception&& e) mutable
               -> kj::PromiseForResult<Func, rpc::ActorStorage::Operations::Client> {
     if (e.getType() == kj::Exception::Type::DISCONNECTED) {
-      return function(storage).attach(recordStorageRead(hooks, clock));
+      auto trace = traceStorageOperation(PerfettoStorageOperation::Type::READ);
+      auto request = function(storage).attach(recordStorageRead(hooks, clock));
+      return attachStorageTrace(kj::mv(request), kj::mv(trace));
     } else {
       return kj::mv(e);
     }
@@ -2577,24 +2645,30 @@ kj::Promise<void> ActorCache::startFlushTransaction() {
     // Oh, nothing to do.
   } else if (typesOfDataToFlush > 1) {
     // We have multiple types of operations, so we have to use a transaction.
-    co_await useTransactionToFlush();
+    co_await traceStoragePromise(
+        PerfettoStorageOperation::Type::TRANSACTION, useTransactionToFlush);
   } else if (maybeAlarmChange.is<DirtyAlarm>()) {
     // We only had an alarm, we can skip the transaction.
-    co_await flushImplAlarmOnly(maybeAlarmChange.get<DirtyAlarm>());
+    co_await traceStoragePromise(PerfettoStorageOperation::Type::ALARM,
+        [&]() { return flushImplAlarmOnly(maybeAlarmChange.get<DirtyAlarm>()); });
   } else if (putFlush.batches.size() == 1) {
     // As an optimization for the common case where there are only puts and they all fit in a
     // single batch, just send a simple put rather than complicating things with a transaction.
-    co_await flushImplUsingSinglePut(kj::mv(putFlush));
+    co_await traceStoragePromise(PerfettoStorageOperation::Type::PUT,
+        [&]() { return flushImplUsingSinglePut(kj::mv(putFlush)); });
   } else if (mutedDeleteFlush.batches.size() == 1) {
     // Same as for puts, but for muted deletes.
-    co_await flushImplUsingSingleMutedDelete(kj::mv(mutedDeleteFlush));
+    co_await traceStoragePromise(PerfettoStorageOperation::Type::DELETE,
+        [&]() { return flushImplUsingSingleMutedDelete(kj::mv(mutedDeleteFlush)); });
   } else if (countedDeleteFlushes.size() == 1 && countedDeleteFlushes[0].batches.size() == 1) {
     // Same as for puts, but for muted deletes.
-    co_await flushImplUsingSingleCountedDelete(kj::mv(countedDeleteFlushes[0]));
+    co_await traceStoragePromise(PerfettoStorageOperation::Type::DELETE,
+        [&]() { return flushImplUsingSingleCountedDelete(kj::mv(countedDeleteFlushes[0])); });
   } else {
     // None of the special cases above triggered. Default to using a transaction in all other cases,
     // such as when there are so many keys to be flushed that they don't fit into a single batch.
-    co_await useTransactionToFlush();
+    co_await traceStoragePromise(
+        PerfettoStorageOperation::Type::TRANSACTION, useTransactionToFlush);
   }
 }
 
@@ -3070,11 +3144,14 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
 
   KJ_ASSERT(requestedDeleteAll != kj::none);
 
-  return storage.deleteAllRequest(capnp::MessageSize{2, 0})
-      .send()
-      .then(
-          [this](capnp::Response<rpc::ActorStorage::Operations::DeleteAllResults> results)
-              -> kj::Promise<void> {
+  auto trace = retryCount == 0 ? traceStorageOperation(PerfettoStorageOperation::Type::DELETE_ALL)
+                               : kj::Own<PerfettoStorageOperation>();
+  auto operation =
+      storage.deleteAllRequest(capnp::MessageSize{2, 0})
+          .send()
+          .then(
+              [this](capnp::Response<rpc::ActorStorage::Operations::DeleteAllResults> results)
+                  -> kj::Promise<void> {
     auto& deleteAllState = KJ_ASSERT_NONNULL(requestedDeleteAll);
     deleteAllState.countFulfiller->fulfill(results.getNumDeleted());
     bool shouldDeleteAlarm = deleteAllState.deleteAlarm;
@@ -3120,7 +3197,7 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
     // to do so. We should fix this.
     return flushImpl();
   },
-          [this, retryCount](kj::Exception&& e) -> kj::Promise<void> {
+              [this, retryCount](kj::Exception&& e) -> kj::Promise<void> {
     static const size_t MAX_RETRIES = 4;
     if (e.getType() == kj::Exception::Type::DISCONNECTED && retryCount < MAX_RETRIES) {
       return flushImplDeleteAll(retryCount + 1);
@@ -3148,6 +3225,7 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
               wdErrId));
     }
   });
+  return attachStorageTrace(kj::mv(operation), kj::mv(trace));
 }
 
 // =======================================================================================

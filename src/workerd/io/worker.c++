@@ -88,6 +88,18 @@ constexpr kj::StringPtr logLevelToString(LogLevel level) {
   }
 }
 
+[[maybe_unused]] constexpr kj::StringPtr startTypeToString(IsolateObserver::StartType startType) {
+  switch (startType) {
+    case IsolateObserver::StartType::COLD:
+      return "cold";
+    case IsolateObserver::StartType::PREWARM:
+      return "prewarm";
+    case IsolateObserver::StartType::PRELOAD:
+      return "preload";
+  }
+  KJ_UNREACHABLE;
+}
+
 void headersToCDP(const kj::HttpHeaders& in, capnp::JsonValue::Builder out) {
   std::map<kj::StringPtr, kj::Vector<kj::StringPtr>> inMap;
   in.forEach([&](kj::StringPtr name, kj::StringPtr value) {
@@ -154,7 +166,7 @@ void maybePerIsolateBootstrap(CompatibilityFlags::Reader& featureFlags,
     v8::Local<v8::Context> context,
     kj::Maybe<ValidationErrorReporter&> errorReporter) {
   if (util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
-    TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
+    TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Worker::perIsolateBootstrap");
     JSG_WITHIN_CONTEXT_SCOPE(
         lock, context, [&](jsg::Lock& js) { runPerIsolateBootstrap(js, featureFlags); });
   } else if (featureFlags.getTypeScriptImplementedStreams()) {
@@ -575,6 +587,10 @@ struct Worker::Isolate::Impl {
   // attempt. This allows watchdogs to see evidence of forward progress in other threads, even if
   // their own thread has blocked waiting for the lock for a long time.
   mutable uint64_t lockSuccessCount = 0;
+
+  // Protected by the isolate lock. Set only when a condemnation event is emitted to an active
+  // Perfetto session, preventing every subsequent lock release from repeating the same signal.
+  mutable bool perfettoCondemnationTraced = false;
 
   // Wrapper around JsgWorkerIsolate::Lock and various RAII objects which help us report metrics,
   // measure instantaneous load, avoid spurious watchdog kills, and defer context destruction.
@@ -1130,6 +1146,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       weakIsolateRef(WeakIsolateRef::wrap(this)),
       traceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()),
       userTraceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()) {
+  TRACE_EVENT(
+      WORKERD_TRACE_CATEGORY("startup"), "Initialize worker isolate", "isolate", this->id.cStr());
   api->setIsolateObserver(*metrics);
   metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
@@ -1396,6 +1414,9 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       impl(kj::heap<Impl>(kj::mv(vfs), kj::mv(maybeNewModuleRegistry))),
       dynamicEnvBuilder(source.dynamicEnvBuilder.map(
           [](const auto& inst) -> kj::Arc<DynamicEnvBuilder> { return inst.addRef(); })) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Compile worker script", "script", this->id.cStr(),
+      "syntax", modular ? "modules" : "service-worker", "start_type",
+      startTypeToString(startType).cStr());
   // The caller must pass a module registry instance if and only if the
   // worker's configuration enables the new module registry: which registry a
   // worker uses is decided by isNewModuleRegistryEnabled() (io/features.h),
@@ -1437,6 +1458,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
 
       v8::Local<v8::Context> context;
       if (modular) {
+        TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Create worker module context");
         // Modules can't be compiled for multiple contexts. We need to create the real context now.
         auto& mContext = impl->moduleContext.emplace(isolate->getApi().newContext(lock,
             {
@@ -1450,6 +1472,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         auto featureFlags = isolate->getApi().getFeatureFlags();
         maybePerIsolateBootstrap(featureFlags, lock, context, errorReporter);
       } else {
+        TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Create worker compiler context");
         // Although we're going to compile a script independent of context, V8 requires that
         // there be an active context, otherwise it will segfault, I guess. So we create a
         // dummy context. (Undocumented, as usual.)
@@ -1515,10 +1538,14 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   }
                 }
 
-                impl->globals =
-                    isolate->getApi().compileServiceWorkerGlobals(lock, script, *isolate);
+                {
+                  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Compile service-worker globals");
+                  impl->globals =
+                      isolate->getApi().compileServiceWorkerGlobals(lock, script, *isolate);
+                }
 
                 {
+                  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Compile service-worker script");
                   // It's unclear to me if CompileUnboundScript() can get trapped in any
                   // infinite loops or excessively-expensive computation requiring a time
                   // limit. We'll go ahead and apply a time limit just to be safe. Don't
@@ -1542,6 +1569,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                 }
 
                 if (!isNewModuleRegistryEnabled(isolate->getApi().getFeatureFlags())) {
+                  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Compile worker modules");
                   kj::Own<void> limitScope;
                   if (modulesSource.isPython) {
                     limitScope =
@@ -1657,7 +1685,15 @@ const Worker::Isolate& Worker::Isolate::from(jsg::Lock& js) {
 
 bool Worker::Isolate::Impl::Lock::checkInWithLimitEnforcer(Worker::Isolate& isolate) {
   shouldReportIsolateMetrics = true;
-  return limitEnforcer.exitJs(*lock);
+  bool condemned = limitEnforcer.exitJs(*lock);
+  if (condemned && !impl.perfettoCondemnationTraced &&
+      TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("resource"))) {
+    impl.perfettoCondemnationTraced = true;
+    TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("resource"), "Isolate condemned",
+        PERFETTO_TRACK_FROM_POINTER(&isolate), "heap_limit_excessively_exceeded",
+        limitEnforcer.hasExcessivelyExceededHeapLimit());
+  }
+  return condemned;
 }
 
 kj::Maybe<kj::Function<void(void)>> Worker::Isolate::getCpuLimitNearlyExceededCallback() const {
@@ -1882,6 +1918,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     : script(kj::mv(scriptParam)),
       metrics(kj::mv(metricsParam)),
       impl(kj::heap<Impl>()) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Instantiate worker", "script", script->id.cStr(),
+      "syntax", script->modular ? "modules" : "service-worker", "start_type",
+      startTypeToString(startType).cStr());
   // Enter/lock isolate.
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     Isolate::Impl::Lock recordedLock(*script->isolate, lockType, stackScope);
@@ -1922,6 +1961,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         jsContext = const_cast<jsg::JsContext<api::ServiceWorkerGlobalScope>*>(&c);
         currentSpan.setTag("module_context"_kjc, true);
       } else {
+        TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Create worker context");
         // Create a new context.
         jsContext = &this->impl->context.emplace(script->isolate->getApi().newContext(lock,
             {
@@ -1991,10 +2031,14 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
             v8::Local<v8::Object> ctxExports = v8::Object::New(lock.v8Isolate);
 
-            compileBindings(lock, script->isolate->getApi(), bindingsScope, ctxExports);
+            {
+              TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Compile worker bindings");
+              compileBindings(lock, script->isolate->getApi(), bindingsScope, ctxExports);
+            }
 
             // Execute script.
             currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);
+            TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "Evaluate worker top level");
 
             // Ensure that our worker top-level bootstrap has a temporary directory
             // storage scope. This is used to store temporary files created within
@@ -2792,11 +2836,15 @@ class AsyncLockHooks final: public AsyncLockQueue<Worker::Isolate>::Hooks {
   explicit AsyncLockHooks(IsolateObserver::LockTiming& lockTiming): lockTiming(lockTiming) {}
 
   void waitingForOtherResource(kj::StringPtr id) override {
+    TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("scheduler"), "Blocked by another isolate lock",
+        "blockingIsolate", id.cStr());
     lockTiming.waitingForOtherIsolate(id);
   }
 
   void reportAsyncInfo(
       uint currentLoad, bool coalesced, uint blockedByOtherResourceCount) override {
+    TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("scheduler"), "Queue isolate lock", "queueDepth",
+        currentLoad, "coalesced", coalesced, "blockingIsolates", blockedByOtherResourceCount);
     lockTiming.reportAsyncInfo(currentLoad, coalesced, blockedByOtherResourceCount);
   }
 
@@ -2827,6 +2875,8 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLock(RequestObserver& r
 
 kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
     kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("scheduler"), "Wait for isolate lock", "isolate",
+      getId().cStr(), "queueDepth", asyncLockQueue.getCurrentLoad());
   // Held on the coroutine frame so it outlives the wait below.
   kj::Maybe<AsyncLockHooks> hooks;
   kj::Maybe<AsyncLockQueue<Isolate>::Hooks&> hooksRef;
@@ -2835,6 +2885,7 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
   }
 
   auto lock = co_await asyncLockQueue.lock(kj::atomicAddRef(*this), hooksRef);
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("scheduler"), "Isolate lock acquired");
   co_return AsyncLock(kj::mv(lock), kj::mv(lockTiming));
 }
 
@@ -3700,15 +3751,33 @@ struct Worker::Actor::Impl {
           metrics(metrics) {}
 
     void inputGateLocked() override {
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack(
+              "Input gate locks", perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          1);
       metrics.inputGateLocked();
     }
     void inputGateReleased() override {
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack(
+              "Input gate locks", perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          0);
       metrics.inputGateReleased();
     }
     void inputGateWaiterAdded() override {
+      ++inputGateWaiters;
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack("Input gate waiters",
+              perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          inputGateWaiters);
       metrics.inputGateWaiterAdded();
     }
     void inputGateWaiterRemoved() override {
+      --inputGateWaiters;
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack("Input gate waiters",
+              perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          inputGateWaiters);
       metrics.inputGateWaiterRemoved();
     }
     // Implements InputGate::Hooks.
@@ -3730,15 +3799,35 @@ struct Worker::Actor::Impl {
     // Implements OutputGate::Hooks.
 
     void outputGateLocked() override {
+      ++outputGateLocks;
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack(
+              "Output gate locks", perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          outputGateLocks);
       metrics.outputGateLocked();
     }
     void outputGateReleased() override {
+      --outputGateLocks;
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack(
+              "Output gate locks", perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          outputGateLocks);
       metrics.outputGateReleased();
     }
     void outputGateWaiterAdded() override {
+      ++outputGateWaiters;
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack("Output gate waiters",
+              perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          outputGateWaiters);
       metrics.outputGateWaiterAdded();
     }
     void outputGateWaiterRemoved() override {
+      --outputGateWaiters;
+      TRACE_COUNTER(WORKERD_TRACE_CATEGORY("scheduler"),
+          perfetto::CounterTrack("Output gate waiters",
+              perfetto::NamedTrack::FromPointer("Durable Object gates", this)),
+          outputGateWaiters);
       metrics.outputGateWaiterRemoved();
     }
 
@@ -3756,6 +3845,10 @@ struct Worker::Actor::Impl {
     kj::Own<Loopback> loopback;  // only for updateAlarmInMemory()
     TimerChannel& timerChannel;  // only for afterLimitTimeout() and updateAlarmInMemory()
     ActorObserver& metrics;
+
+    uint inputGateWaiters = 0;
+    uint outputGateLocks = 0;
+    uint outputGateWaiters = 0;
 
     kj::Maybe<kj::Promise<void>> maybeAlarmPreviewTask;
   };
@@ -3908,6 +4001,9 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Maybe<uint64_t> holderToken)
     : worker(kj::atomicAddRef(worker)),
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("event"), "Initialize Durable Object", "has_class",
+      className != kj::none, "has_transient", hasTransient, "has_container", container != kj::none,
+      "has_hibernation_manager", manager != kj::none);
   impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache), kj::mv(props),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
       hibernationEventType, kj::mv(container), facetManager);
@@ -3961,6 +4057,13 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
 }
 
 kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, ActorClassInfo& info) {
+  TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("event"), "Construct Durable Object",
+      PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+  KJ_DEFER({
+    TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("event"), PERFETTO_TRACK_FROM_POINTER(this),
+        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+  });
+
   InputGate::Lock inputLock = co_await impl->inputGate.wait(context.getCurrentTraceSpan());
 
   try {
@@ -3981,6 +4084,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
     }
 
     co_await context.run([this, &info, containerRunning](Worker::Lock& lock, IoContext& context) {
+      TRACE_EVENT(WORKERD_TRACE_CATEGORY("event"), "Run Durable Object constructor", "has_storage",
+          impl->actorCache != kj::none, "container_running", containerRunning);
       jsg::Lock& js = lock;
 
       kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
@@ -4036,6 +4141,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
 }
 
 Worker::Actor::~Actor() noexcept(false) {
+  TRACE_EVENT_INSTANT(
+      WORKERD_TRACE_CATEGORY("event"), "Destroy Durable Object", PERFETTO_TRACK_FROM_POINTER(this));
   // Note: We do not need an isolate lock to destroy the actor impl. Everything in it is specific
   // to our thread, or is a handle that can be dropped outside of the lock.
 
@@ -4043,6 +4150,8 @@ Worker::Actor::~Actor() noexcept(false) {
 }
 
 void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error) {
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("event"), "Shut down Durable Object",
+      PERFETTO_TRACK_FROM_POINTER(this), "reason_code", reasonCode, "has_error", error != kj::none);
   // We're officially canceling all background work and we're going to destruct the Actor as soon
   // as all IoContexts that reference it go out of scope. We might still log additional
   // periodic messages, and that's good because we might care about that information. That said,
@@ -4069,6 +4178,8 @@ void Worker::Actor::shutdownActorCache(kj::Maybe<const kj::Exception&> error) {
 }
 
 void Worker::Actor::abort(const kj::Exception& error) {
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("event"), "Abort Durable Object",
+      PERFETTO_TRACK_FROM_POINTER(this), "exception_type", static_cast<uint>(error.getType()));
   KJ_IF_SOME(ctx, impl->ioContext) {
     impl->metrics->shutdown(0, ctx->getLimitEnforcer());
     ctx->abort(error.clone());
@@ -4283,6 +4394,9 @@ kj::Maybe<kj::Promise<WorkerInterface::AlarmOutcome>> Worker::Actor::getAlarm(
 
 kj::Promise<WorkerInterface::ScheduleAlarmResult> Worker::Actor::scheduleAlarm(
     kj::Date scheduledTime) {
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("event"), "Schedule Durable Object alarm",
+      PERFETTO_TRACK_FROM_POINTER(this), "scheduled_time_ms",
+      (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
   KJ_IF_SOME(runningAlarm, impl->maybeRunningAlarm) {
     if (runningAlarm.scheduledTime == scheduledTime) {
       // The running alarm has the same time, we can just wait for it.
@@ -4325,6 +4439,8 @@ kj::Promise<WorkerInterface::ScheduleAlarmResult> Worker::Actor::handleAlarm(
   co_await impl->runningAlarmTask;
 
   co_await KJ_ASSERT_NONNULL(impl->ioContext)->atTime(scheduledTime);
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("event"), "Start Durable Object alarm",
+      PERFETTO_TRACK_FROM_POINTER(this));
   // It's time to run! Let's tear apart the scheduled alarm and make a running alarm.
 
   // `maybeScheduledAlarm` should have the same value we emplaced above. If another call to

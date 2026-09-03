@@ -803,7 +803,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
         // TODO(later): In the future, we might want to enable providing a perfetto
         // TraceConfig structure here rather than just the categories.
         .addOptionWithArg({"p", "perfetto-trace"}, CLI_METHOD(enablePerfetto),
-            "<path>=<categories>", "Enable perfetto tracing output to the specified file.")
+            "<path>=<categories>",
+            "Enable perfetto tracing output to the specified file. Include dev.v8.code to record "
+            "V8 JIT code metadata.")
 #endif
         .addOption({'w', "watch"}, CLI_METHOD(watch),
             "Watch configuration files (and server binary) and reload if they change. "
@@ -1098,6 +1100,11 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     auto [name, value] = parseOverride(param);
     perfettoTraceDestination = kj::str(name);
     perfettoTraceCategories = kj::str(value);
+    for (auto category: PerfettoSession::parseCategories(value)) {
+      if (category == "dev.v8.code"_kj) {
+        perfettoV8CodeDataSource = true;
+      }
+    }
   }
 #endif
 
@@ -1425,7 +1432,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             PerfettoSession(dest, kj::mv(perfettoTraceCategories).orDefault(kj::String()));
       }
 #endif
-      TRACE_EVENT("workerd", "serveImpl()");
+      TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "serveImpl()");
       auto config = getConfig();
 
       // Configure structured logging in the process context
@@ -1436,6 +1443,11 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 
       auto platform = jsg::defaultPlatform(0);
       WorkerdPlatform v8Platform(*platform);
+#ifdef WORKERD_USE_PERFETTO
+      if (perfettoV8CodeDataSource) {
+        v8::V8::SetFlagsFromString("--perfetto-code-logger");
+      }
+#endif
       jsg::V8System v8System(v8Platform,
           KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; }, platform.get());
       auto promise = func(v8System, config);
@@ -1587,6 +1599,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 #ifdef WORKERD_USE_PERFETTO
   kj::Maybe<kj::String> perfettoTraceDestination;
   kj::Maybe<kj::String> perfettoTraceCategories;
+  bool perfettoV8CodeDataSource = false;
 #endif
 
   kj::Own<Server> server;

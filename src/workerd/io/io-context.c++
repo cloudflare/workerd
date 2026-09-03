@@ -40,6 +40,273 @@ static void* getThreadId() {
   return threadId.get();
 }
 
+namespace {
+
+constexpr uint8_t CPU_LIMIT_TRACE_BIT = 1u << 0;
+constexpr uint8_t MEMORY_LIMIT_TRACE_BIT = 1u << 1;
+constexpr uint8_t WALL_TIME_LIMIT_TRACE_BIT = 1u << 2;
+constexpr uint8_t SUBREQUEST_LIMIT_TRACE_BIT = 1u << 3;
+constexpr uint8_t IN_HOUSE_SUBREQUEST_LIMIT_TRACE_BIT = 1u << 4;
+constexpr uint8_t KV_LIMIT_TRACE_BIT = 1u << 5;
+constexpr uint8_t ANALYTICS_ENGINE_LIMIT_TRACE_BIT = 1u << 6;
+
+}  // namespace
+
+void IoContext::traceResourceLimitExceeded(EventOutcome outcome, kj::StringPtr source) {
+  if (!TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("resource"))) {
+    return;
+  }
+
+  uint8_t bit;
+  switch (outcome) {
+    case EventOutcome::EXCEEDED_CPU:
+      bit = CPU_LIMIT_TRACE_BIT;
+      break;
+    case EventOutcome::EXCEEDED_MEMORY:
+      bit = MEMORY_LIMIT_TRACE_BIT;
+      break;
+    case EventOutcome::EXCEEDED_WALL_TIME:
+      bit = WALL_TIME_LIMIT_TRACE_BIT;
+      break;
+    default:
+      return;
+  }
+
+  if (!incomingRequests.empty()) {
+    auto& request = getCurrentIncomingRequest();
+    if ((request.perfettoLimitEvents & bit) != 0) {
+      return;
+    }
+    request.perfettoLimitEvents |= bit;
+  }
+
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("resource"), "Resource limit exceeded", "outcome",
+      getEventOutcomeName(outcome).cStr(), "source", source.cStr());
+}
+
+void IoContext::traceOperationLimitExceeded(OperationLimitType type) {
+  if (!TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("resource"))) {
+    return;
+  }
+
+  uint8_t bit;
+  kj::StringPtr operation;
+  switch (type) {
+    case OperationLimitType::SUBREQUEST:
+      bit = SUBREQUEST_LIMIT_TRACE_BIT;
+      operation = "subrequest"_kj;
+      break;
+    case OperationLimitType::IN_HOUSE_SUBREQUEST:
+      bit = IN_HOUSE_SUBREQUEST_LIMIT_TRACE_BIT;
+      operation = "in-house subrequest"_kj;
+      break;
+    case OperationLimitType::KV:
+      bit = KV_LIMIT_TRACE_BIT;
+      operation = "KV"_kj;
+      break;
+    case OperationLimitType::ANALYTICS_ENGINE:
+      bit = ANALYTICS_ENGINE_LIMIT_TRACE_BIT;
+      operation = "Analytics Engine"_kj;
+      break;
+  }
+
+  if (!incomingRequests.empty()) {
+    auto& request = getCurrentIncomingRequest();
+    if ((request.perfettoLimitEvents & bit) != 0) {
+      return;
+    }
+    request.perfettoLimitEvents |= bit;
+  }
+
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("resource"), "Operation limit exceeded", "operation",
+      operation.cStr());
+}
+
+namespace {
+
+class PerfettoSubrequestTrace final {
+ public:
+  enum class Type { HTTP, CONNECT };
+
+  PerfettoSubrequestTrace(
+      Type type, kj::StringPtr operationName, kj::StringPtr method, kj::StringPtr target) {
+    switch (type) {
+      case Type::HTTP:
+        TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "HTTP subrequest",
+            PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this), "operation",
+            operationName.cStr(), "method", method.cStr(), "url", target.cStr());
+        break;
+      case Type::CONNECT:
+        TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "TCP subrequest",
+            PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this), "operation",
+            operationName.cStr(), "host", target.cStr());
+        break;
+    }
+  }
+
+  ~PerfettoSubrequestTrace() noexcept {
+    if (receivingResponseBody) {
+      TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("io"), PERFETTO_TRACK_FROM_POINTER(this));
+    }
+    TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("io"), PERFETTO_TRACK_FROM_POINTER(this),
+        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+  }
+
+  KJ_DISALLOW_COPY_AND_MOVE(PerfettoSubrequestTrace);
+
+  void receiveResponseHeaders(uint statusCode, kj::Maybe<uint64_t> expectedBodySize) {
+    TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("io"), "Receive subrequest headers",
+        PERFETTO_TRACK_FROM_POINTER(this), "status_code", statusCode, "expected_body_size_known",
+        expectedBodySize != kj::none, "expected_body_size", expectedBodySize.orDefault(0));
+  }
+
+  void receiveResponseBody() {
+    if (!receivingResponseBody) {
+      receivingResponseBody = true;
+      TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Receive subrequest body",
+          PERFETTO_TRACK_FROM_POINTER(this));
+    }
+  }
+
+  void acceptWebSocket() {
+    TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("io"), "Accept subrequest WebSocket",
+        PERFETTO_TRACK_FROM_POINTER(this));
+  }
+
+  void failed(const kj::Exception& exception) {
+    TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("io"), "Subrequest failed",
+        PERFETTO_TRACK_FROM_POINTER(this), "error", exception.getDescription().cStr());
+  }
+
+ private:
+  bool receivingResponseBody = false;
+};
+
+class PerfettoSubrequestResponse final: public kj::HttpService::Response {
+ public:
+  PerfettoSubrequestResponse(kj::HttpService::Response& inner, PerfettoSubrequestTrace& trace)
+      : inner(inner),
+        trace(trace) {}
+  KJ_DISALLOW_COPY_AND_MOVE(PerfettoSubrequestResponse);
+
+  kj::Own<kj::AsyncOutputStream> send(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+    trace.receiveResponseHeaders(statusCode, expectedBodySize);
+    trace.receiveResponseBody();
+    return inner.send(statusCode, statusText, headers, expectedBodySize);
+  }
+
+  kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+    trace.acceptWebSocket();
+    return inner.acceptWebSocket(headers);
+  }
+
+ private:
+  kj::HttpService::Response& inner;
+  PerfettoSubrequestTrace& trace;
+};
+
+class PerfettoConnectResponse final: public kj::HttpService::ConnectResponse {
+ public:
+  PerfettoConnectResponse(kj::HttpService::ConnectResponse& inner, PerfettoSubrequestTrace& trace)
+      : inner(inner),
+        trace(trace) {}
+  KJ_DISALLOW_COPY_AND_MOVE(PerfettoConnectResponse);
+
+  void accept(uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
+    trace.receiveResponseHeaders(statusCode, kj::none);
+    inner.accept(statusCode, statusText, headers);
+  }
+
+  kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize) override {
+    trace.receiveResponseHeaders(statusCode, expectedBodySize);
+    trace.receiveResponseBody();
+    return inner.reject(statusCode, statusText, headers, expectedBodySize);
+  }
+
+ private:
+  kj::HttpService::ConnectResponse& inner;
+  PerfettoSubrequestTrace& trace;
+};
+
+class PerfettoSubrequestClient final: public WorkerInterface {
+ public:
+  PerfettoSubrequestClient(kj::Own<WorkerInterface> inner, kj::String operationName)
+      : inner(kj::mv(inner)),
+        operationName(kj::mv(operationName)) {}
+  KJ_DISALLOW_COPY_AND_MOVE(PerfettoSubrequestClient);
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response) override {
+    auto methodName = kj::str(method);
+    PerfettoSubrequestTrace trace(
+        PerfettoSubrequestTrace::Type::HTTP, operationName, methodName, url);
+    PerfettoSubrequestResponse tracedResponse(response, trace);
+    KJ_TRY {
+      co_await inner->request(method, url, headers, requestBody, tracedResponse);
+    }
+    KJ_CATCH(exception) {
+      trace.failed(exception);
+      kj::throwFatalException(kj::mv(exception));
+    }
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    PerfettoSubrequestTrace trace(
+        PerfettoSubrequestTrace::Type::CONNECT, operationName, "CONNECT"_kj, host);
+    PerfettoConnectResponse tracedResponse(response, trace);
+    KJ_TRY {
+      co_await inner->connect(host, headers, connection, tracedResponse, kj::mv(settings));
+    }
+    KJ_CATCH(exception) {
+      trace.failed(exception);
+      kj::throwFatalException(kj::mv(exception));
+    }
+  }
+
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
+    return inner->prewarm(url);
+  }
+
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    return inner->runScheduled(scheduledTime, cron);
+  }
+
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    return inner->runAlarm(scheduledTime, retryCount);
+  }
+
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    return inner->abandonAlarm(scheduledTime);
+  }
+
+  kj::Promise<bool> test() override {
+    return inner->test();
+  }
+
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    return inner->customEvent(kj::mv(event));
+  }
+
+ private:
+  kj::Own<WorkerInterface> inner;
+  kj::String operationName;
+};
+
+}  // namespace
+
 class IoContext::TimeoutManagerImpl final: public TimeoutManager {
  public:
   class TimeoutState;
@@ -567,7 +834,7 @@ namespace {
 #ifdef KJ_DEBUG
 
 void requestGc(const Worker& worker) {
-  TRACE_EVENT("workerd", "Debug: requestGc()");
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("gc"), "Debug: requestGc()");
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     auto& isolate = worker.getIsolate();
     auto lock = isolate.getApi().lock(stackScope);
@@ -577,7 +844,7 @@ void requestGc(const Worker& worker) {
 
 template <typename T>
 kj::Promise<T> addGcPassForTest(IoContext& context, kj::Promise<T> promise) {
-  TRACE_EVENT("workerd", "Debug: addGcPassForTest");
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("gc"), "Debug: addGcPassForTest");
   auto worker = kj::atomicAddRef(context.getWorker());
   if constexpr (kj::isSameType<T, void>()) {
     co_await promise;
@@ -689,6 +956,7 @@ kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finish
   }));
 
   auto result = outcome.then([this](EventOutcome outcome) {
+    context->traceResourceLimitExceeded(outcome, "waitUntil"_kj);
     return WorkerInterface::ScheduledResult{
       .retry = context->shouldRetryScheduled(),
       .outcome = outcome,
@@ -1057,6 +1325,16 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
         kj::mv(ret), getHeaderIds().contentEncoding, metrics);
   }
 
+  if (TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"))) {
+    auto operationName = [&]() -> kj::String {
+      KJ_IF_SOME(name, options.operationName) {
+        return kj::str(name);
+      }
+      return kj::str("subrequest");
+    }();
+    ret = kj::heap<PerfettoSubrequestClient>(kj::mv(ret), kj::mv(operationName));
+  }
+
   if (tracing.isObserved()) {
     auto ioOwnedSpan = addObject(kj::heap(kj::mv(tracing)));
     ret = ret.attach(kj::mv(ioOwnedSpan));
@@ -1077,7 +1355,14 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
 kj::Own<WorkerInterface> IoContext::getSubrequest(
     kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
     SubrequestOptions options) {
-  limitEnforcer->newSubrequest(options.inHouse);
+  KJ_TRY {
+    limitEnforcer->newSubrequest(options.inHouse);
+  }
+  KJ_CATCH(exception) {
+    traceOperationLimitExceeded(
+        options.inHouse ? OperationLimitType::IN_HOUSE_SUBREQUEST : OperationLimitType::SUBREQUEST);
+    kj::throwFatalException(kj::mv(exception), kj::maxValue);
+  }
   return getSubrequestNoChecks(kj::mv(func), kj::mv(options), CountSubrequest::YES);
 }
 
@@ -1181,7 +1466,13 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
   //   as subrequests in metrics and logs (like in-house requests aren't), but historically the
   //   subrequest limit still applied. Since I can't currently think of a use case for more than 50
   //   cache API requests per request, I'm leaving it as-is for now.
-  limitEnforcer->newSubrequest(false);
+  KJ_TRY {
+    limitEnforcer->newSubrequest(false);
+  }
+  KJ_CATCH(exception) {
+    traceOperationLimitExceeded(OperationLimitType::SUBREQUEST);
+    kj::throwFatalException(kj::mv(exception), kj::maxValue);
+  }
   auto ret = getIoChannelFactory().getCache();
 
   // Apply external memory adjustment for Cache API subrequests (same as other subrequests in
@@ -1295,6 +1586,7 @@ void IoContext::taskFailed(kj::Exception&& exception) {
     } else {
       waitUntilStatusValue = RequestObserver::outcomeFromException(exception);
     }
+    traceResourceLimitExceeded(waitUntilStatusValue, "waitUntil"_kj);
   }
 
   // If `taskFailed()` throws the whole event loop blows up... let's be careful not to let that
@@ -1487,6 +1779,9 @@ void IoContext::runImpl(Runnable& runnable,
         limiterScope = nullptr;
 
         // Check if we hit a limit.
+        KJ_IF_SOME(outcome, limitEnforcer->getLimitsExceeded()) {
+          traceResourceLimitExceeded(outcome, "JavaScript"_kj);
+        }
         limitEnforcer->requireLimitsNotExceeded();
 
         // Check if we were aborted. TerminateExecution() may be called after abort() in order

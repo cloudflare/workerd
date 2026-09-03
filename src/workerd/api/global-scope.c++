@@ -274,7 +274,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler,
     kj::Maybe<jsg::Ref<AbortSignal>> abortSignal) {
-  TRACE_EVENT("workerd", "ServiceWorkerGlobalScope::request()");
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("request"), "ServiceWorkerGlobalScope::request()");
   // To construct a ReadableStream object, we're supposed to pass in an Own<AsyncInputStream>, so
   // that it can drop the reference whenever it gets GC'ed. But in this case the stream's lifetime
   // is not under our control -- it's attached to the request. So, we wrap it in a

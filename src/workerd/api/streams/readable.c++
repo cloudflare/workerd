@@ -12,6 +12,7 @@
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 namespace workerd::api {
 
@@ -279,9 +280,19 @@ void ReadableStreamBYOBReader::visitForGc(jsg::GcVisitor& visitor) {
 // ======================================================================================
 // DrainingReader implementation
 
-DrainingReader::DrainingReader(): ioContext(tryGetIoContextId()) {}
+DrainingReader::DrainingReader(): ioContext(tryGetIoContextId()) {
+  perfettoTraceStarted = TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"));
+  if (perfettoTraceStarted) {
+    TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Pump standard ReadableStream",
+        PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+  }
+}
 
 DrainingReader::~DrainingReader() noexcept(false) {
+  if (perfettoTraceStarted) {
+    TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("io"), PERFETTO_TRACK_FROM_POINTER(this),
+        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+  }
   KJ_IF_SOME(stream, state.tryGet<Attached>()) {
     stream->getController().releaseReader(addPtrToThis(), kj::none);
   }

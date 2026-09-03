@@ -364,7 +364,7 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
     config::Worker::Reader conf,
     CompatibilityFlags::Reader featureFlags,
     Worker::ValidationErrorReporter& errorReporter) {
-  TRACE_EVENT("workerd", "WorkerdApi::extractSource()");
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "WorkerdApi::extractSource()");
   switch (conf.which()) {
     case config::Worker::MODULES: {
       auto modules = conf.getModules();
@@ -420,7 +420,7 @@ invalid:
 kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileServiceWorkerGlobals(jsg::Lock& js,
     const Worker::Script::ScriptSource& source,
     const Worker::Isolate& isolate) const {
-  TRACE_EVENT("workerd", "WorkerdApi::compileScriptGlobals()");
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "WorkerdApi::compileScriptGlobals()");
   const jsg::CompilationObserver& observer = *impl->observer;
   return workerd::modules::legacy::compileServiceWorkerGlobals<JsgWorkerdIsolate>(
       js, source, isolate, observer);
@@ -520,7 +520,7 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
     const Worker::Isolate& isolate,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
     SpanParent parentSpan) const {
-  TRACE_EVENT("workerd", "WorkerdApi::compileModules()");
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "WorkerdApi::compileModules()");
   lockParam.withinHandleScope([&] {
     auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
 
@@ -563,7 +563,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     uint32_t ownerId,
     api::MemoryCacheProvider& memoryCacheProvider,
     IsInternalBinding isInternal) {
-  TRACE_EVENT("workerd", "WorkerdApi::createBindingValue()");
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "WorkerdApi::createBindingValue()");
   using Global = WorkerdApi::Global;
   auto context = lock.v8Context();
 
@@ -754,7 +754,7 @@ void WorkerdApi::compileGlobals(jsg::Lock& lockParam,
     kj::ArrayPtr<const Global> globals,
     v8::Local<v8::Object> target,
     uint32_t ownerId) const {
-  TRACE_EVENT("workerd", "WorkerdApi::compileGlobals()");
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("startup"), "WorkerdApi::compileGlobals()");
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
   lockParam.withinHandleScope([&] {
     auto& featureFlags = *impl->features;

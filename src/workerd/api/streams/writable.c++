@@ -289,10 +289,10 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
-    return canceler.wrap(getInner()->write(buffer));
+    return canceler.wrap(getInner()->writeWithBackpressureTracing(buffer));
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-    return canceler.wrap(getInner()->write(pieces));
+    return canceler.wrap(getInner()->writeWithBackpressureTracing(pieces));
   }
 
   // TODO(perf): We can't properly implement tryPumpFrom(), which means that Cap'n Proto will

@@ -239,6 +239,9 @@ wd_cc_library(
         "actor-sqlite.h",
         "actor-storage.h",
     ],
+    implementation_deps = [
+        "//src/workerd/util:perfetto",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":actor-storage_capnp",
@@ -298,6 +301,7 @@ wd_cc_library(
     implementation_deps = [
         ":worker-interface",
         "//src/workerd/util:exception",
+        "//src/workerd/util:perfetto",
     ],
     visibility = ["//visibility:public"],
     deps = [

@@ -1,5 +1,7 @@
 #pragma once
 
+#define WORKERD_TRACE_CATEGORY(name) "workerd,workerd." name
+
 #ifdef WORKERD_USE_PERFETTO
 #include <kj/memory.h>
 #define PERFETTO_ENABLE_LEGACY_TRACE_EVENTS 1
@@ -7,7 +9,22 @@
 // recommended in the full perfetto header (perfetto/tracing.h).
 #include "perfetto/tracing/track_event.h"
 
-PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE(workerd::traces, perfetto::Category("workerd"));
+PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE(workerd::traces,
+    perfetto::Category("workerd"),
+    perfetto::Category("workerd.event"),
+    perfetto::Category("workerd.gc"),
+    perfetto::Category("workerd.io"),
+    perfetto::Category("workerd.request"),
+    perfetto::Category("workerd.resource"),
+    perfetto::Category("workerd.scheduler"),
+    perfetto::Category("workerd.startup"),
+    perfetto::Category::Group(WORKERD_TRACE_CATEGORY("event")),
+    perfetto::Category::Group(WORKERD_TRACE_CATEGORY("gc")),
+    perfetto::Category::Group(WORKERD_TRACE_CATEGORY("io")),
+    perfetto::Category::Group(WORKERD_TRACE_CATEGORY("request")),
+    perfetto::Category::Group(WORKERD_TRACE_CATEGORY("resource")),
+    perfetto::Category::Group(WORKERD_TRACE_CATEGORY("scheduler")),
+    perfetto::Category::Group(WORKERD_TRACE_CATEGORY("startup")));
 
 namespace kj {
 class StringPtr;
