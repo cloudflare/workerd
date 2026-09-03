@@ -72,6 +72,36 @@ void SpanState::setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue) {
   // If value is kj::none the attribute is left unset (undefined on the JS side).
 }
 
+void SpanState::recordException(kj::Maybe<tracing::Exception::Code> code,
+    kj::String name,
+    kj::String message,
+    kj::Maybe<kj::String> stack) {
+  if (!canRecordAttributes()) {
+    return;
+  }
+
+  size_t valueSize = name.size() + message.size();
+  KJ_IF_SOME(c, code) {
+    KJ_SWITCH_ONEOF(c) {
+      KJ_CASE_ONEOF(text, kj::String) {
+        valueSize += text.size();
+      }
+      KJ_CASE_ONEOF(_, double) {
+        valueSize += sizeof(double);
+      }
+    }
+  }
+  KJ_IF_SOME(s, stack) {
+    valueSize += s.size();
+  }
+  bytesUsed += valueSize;
+  if (bytesUsed > MAX_SPAN_BYTES) {
+    recordSpanDataLimitError("exception", name, valueSize);
+    return;
+  }
+  recordExceptionImpl(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+}
+
 class UserSpanState final: public SpanState {
  public:
   UserSpanState(kj::Rc<workerd::SpanObserver> observer, kj::ConstString operationName)
@@ -114,6 +144,13 @@ class UserSpanState final: public SpanState {
     }
   }
 
+  void recordExceptionImpl(kj::Maybe<tracing::Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) override {
+    builder.recordException(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+  }
+
   void recordSpanDataLimitError(
       kj::StringPtr itemKind, kj::StringPtr name, size_t valueSize) override {
     if (!builder.isObserved()) {
@@ -154,6 +191,10 @@ class NoopSpanState final: public SpanState {
   }
 
   void recordAttribute(kj::String, TagValue) override {}
+
+  void recordExceptionImpl(
+      kj::Maybe<tracing::Exception::Code>, kj::String, kj::String, kj::Maybe<kj::String>) override {
+  }
 };
 
 // ======================================================================================
@@ -194,6 +235,59 @@ jsg::Ref<Span> Span::setAttributes(jsg::Lock& js, jsg::Dict<jsg::Optional<TagVal
     setAttribute(js, kj::mv(field.name), kj::mv(field.value));
   }
   return JSG_THIS;
+}
+
+void Span::recordException(
+    jsg::Lock& js, jsg::Value exception, const jsg::TypeHandler<ExceptionData>& exceptionHandler) {
+  if (!getIsTraced()) {
+    return;
+  }
+
+  kj::String name;
+  kj::String message;
+  kj::Maybe<kj::String> stack;
+  kj::Maybe<tracing::Exception::Code> code;
+  auto handle = exception.getHandle(js);
+  if (handle->IsString()) {
+    message = jsg::JsValue(handle).toString(js);
+  } else if (handle->IsObject()) {
+    auto data = KJ_REQUIRE_NONNULL(exceptionHandler.tryUnwrap(js, handle));
+    bool hasRequiredField =
+        data.code != kj::none || data.name != kj::none || data.message != kj::none;
+    if (!hasRequiredField) {
+      return;
+    }
+    KJ_IF_SOME(c, data.code) {
+      KJ_SWITCH_ONEOF(c) {
+        KJ_CASE_ONEOF(s, kj::String) {
+          code = kj::mv(s);
+        }
+        KJ_CASE_ONEOF(n, double) {
+          code = n;
+        }
+      }
+    }
+    KJ_IF_SOME(n, data.name) {
+      name = kj::mv(n);
+    }
+    KJ_IF_SOME(m, data.message) {
+      message = kj::mv(m);
+    }
+    KJ_IF_SOME(s, data.stack) {
+      stack = kj::mv(s);
+    }
+  } else {
+    return;
+  }
+
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
+      s->recordException(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+    }
+    KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
+      s->recordException(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+    }
+  }
 }
 
 void Span::end() {

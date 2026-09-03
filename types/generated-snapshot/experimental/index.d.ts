@@ -4856,6 +4856,28 @@ declare abstract class Span {
   setAttributes(
     attributes: Record<string, boolean | number | string | undefined>,
   ): this;
+  recordException(
+    exception:
+      | string
+      | {
+          code: string | number;
+          name?: string;
+          message?: string;
+          stack?: string;
+        }
+      | {
+          code?: string | number;
+          name: string;
+          message?: string;
+          stack?: string;
+        }
+      | {
+          code?: string | number;
+          name?: string;
+          message: string;
+          stack?: string;
+        },
+  ): void;
   end(): void;
 }
 /**
@@ -17098,6 +17120,7 @@ declare namespace TailStream {
   }
   interface Exception {
     readonly type: "exception";
+    readonly code?: string | number;
     readonly name: string;
     readonly message: string;
     readonly stack?: string;
