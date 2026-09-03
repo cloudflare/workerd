@@ -6,7 +6,58 @@
 
 #include "../util.h"
 
+#include <workerd/util/use-perfetto-categories.h>
+
 namespace workerd::api {
+
+namespace {
+
+class PerfettoStreamWrite final {
+ public:
+  explicit PerfettoStreamWrite(size_t bytes) {
+    TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "WritableStream asynchronous write",
+        PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this), "bytes", bytes);
+  }
+
+  ~PerfettoStreamWrite() noexcept {
+    TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("io"), PERFETTO_TRACK_FROM_POINTER(this),
+        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+  }
+
+  KJ_DISALLOW_COPY_AND_MOVE(PerfettoStreamWrite);
+};
+
+template <typename GetByteCount, typename Func>
+kj::Promise<void> traceStreamWrite(GetByteCount&& getByteCount, Func&& func) {
+  kj::Own<PerfettoStreamWrite> trace;
+  if (TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"))) {
+    trace = kj::heap<PerfettoStreamWrite>(getByteCount());
+  }
+
+  auto promise = func();
+  if (trace.get() != nullptr) {
+    return kj::mv(promise).attach(kj::mv(trace));
+  }
+  return kj::mv(promise);
+}
+
+}  // namespace
+
+kj::Promise<void> WritableStreamSink::writeWithBackpressureTracing(
+    kj::ArrayPtr<const byte> buffer) {
+  return traceStreamWrite([&]() { return buffer.size(); }, [&]() { return write(buffer); });
+}
+
+kj::Promise<void> WritableStreamSink::writeWithBackpressureTracing(
+    kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
+  return traceStreamWrite([&]() {
+    size_t bytes = 0;
+    for (auto piece: pieces) {
+      bytes += piece.size();
+    }
+    return bytes;
+  }, [&]() { return write(pieces); });
+}
 
 WritableStreamController::PendingAbort::PendingAbort(
     jsg::Lock& js, jsg::PromiseResolverPair<void> prp, jsg::JsValue reason, bool reject)
@@ -70,7 +121,7 @@ class MemoryInputStream final: public ReadableStreamSource {
     if (unread.size() > 0) {
       auto data = unread;
       unread = nullptr;
-      co_await output->write(data);
+      co_await output->writeWithBackpressureTracing(data);
     }
     if (end) {
       co_await output->end();

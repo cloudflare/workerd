@@ -268,6 +268,7 @@ class DrainingReader: public ReadableStreamController::Reader {
   kj::Maybe<IoContext::Id> ioContext;
   kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state = Initial();
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
+  bool perfettoTraceStarted = false;
 };
 
 class ReadableStream: public kj::PtrTarget, public jsg::Object {

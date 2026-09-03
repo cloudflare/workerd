@@ -312,7 +312,7 @@ class PrefixedSource final: public ReadableStreamSource {
     // rides the inner proxy task.
     KJ_IF_SOME(prefix, maybePrefix) {
       if (prefix.view != nullptr) {
-        co_await output->write(prefix.view);
+        co_await output->writeWithBackpressureTracing(prefix.view);
       }
       maybePrefix = kj::none;
     }
@@ -391,7 +391,7 @@ kj::Promise<void> queuedWriteStep(
     kj::Ptr<WritableStreamSink> sink, kj::Array<kj::Array<const kj::byte>> pieces, EndStream end) {
   if (pieces.size() > 0) {
     auto ptrs = KJ_MAP(piece, pieces) -> kj::ArrayPtr<const kj::byte> { return piece.asPtr(); };
-    co_await sink->write(ptrs.asPtr());
+    co_await sink->writeWithBackpressureTracing(ptrs.asPtr());
   }
   if (end) {
     co_await sink->end();

@@ -439,6 +439,7 @@ class WritableStreamInternalController: public WritableStreamController {
       uint8_t preventAbort : 1;
       uint8_t preventClose : 1;
       uint8_t preventCancel : 1;
+      uint8_t perfettoTraceStarted : 1;
     };
     Flags flags{};
     kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
@@ -451,18 +452,9 @@ class WritableStreamInternalController: public WritableStreamController {
         bool preventAbort,
         bool preventClose,
         bool preventCancel,
-        kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal)
-        : parent(parent),
-          readable(kj::mv(readable)),
-          source(kj::mv(source)),
-          promise(kj::mv(promise)),
-          maybeSignal(kj::mv(maybeSignal)) {
-      flags.preventAbort = preventAbort;
-      flags.preventClose = preventClose;
-      flags.preventCancel = preventCancel;
-    }
+        kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal);
 
-    ~Pipe() noexcept(false) {}
+    ~Pipe() noexcept(false);
 
     KJ_DISALLOW_COPY_AND_MOVE(Pipe);
 

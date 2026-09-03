@@ -204,13 +204,7 @@ class QueueImpl final {
   // Polls all known consumers to collect their current buffer sizes
   // so that the current queue size can be updated.
   // If we are already closed or errored, set totalQueueSize to zero.
-  void maybeUpdateBackpressure() {
-    totalQueueSize = 0;
-    if (state.isActive()) {
-      allConsumers.forEach(
-          [&](auto& consumer) { totalQueueSize = kj::max(totalQueueSize, consumer.size()); });
-    }
-  }
+  void maybeUpdateBackpressure();
 
   // Forwards the entry to all consumers (except skipConsumer if given).
   // For each consumer, the entry will be used to fulfill any pending consume operations.

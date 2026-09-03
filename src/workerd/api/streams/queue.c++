@@ -6,10 +6,47 @@
 
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 #include <kj/common.h>
 
 namespace workerd::api {
+
+template <typename Self>
+void QueueImpl<Self>::maybeUpdateBackpressure() {
+  totalQueueSize = 0;
+  if (state.isActive()) {
+    allConsumers.forEach(
+        [&](auto& consumer) { totalQueueSize = kj::max(totalQueueSize, consumer.size()); });
+  }
+
+  if (!TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"))) {
+    return;
+  }
+
+  if constexpr (kj::isSameType<Self, ValueQueue>()) {
+    TRACE_COUNTER(WORKERD_TRACE_CATEGORY("io"),
+        perfetto::CounterTrack(
+            "Queued size", perfetto::NamedTrack::FromPointer("Readable value stream", this)),
+        totalQueueSize);
+    TRACE_COUNTER(WORKERD_TRACE_CATEGORY("io"),
+        perfetto::CounterTrack(
+            "High water mark", perfetto::NamedTrack::FromPointer("Readable value stream", this)),
+        highWaterMark);
+  } else {
+    TRACE_COUNTER(WORKERD_TRACE_CATEGORY("io"),
+        perfetto::CounterTrack(
+            "Queued bytes", perfetto::NamedTrack::FromPointer("Readable byte stream", this)),
+        totalQueueSize);
+    TRACE_COUNTER(WORKERD_TRACE_CATEGORY("io"),
+        perfetto::CounterTrack(
+            "High water mark", perfetto::NamedTrack::FromPointer("Readable byte stream", this)),
+        highWaterMark);
+  }
+}
+
+template void QueueImpl<ValueQueue>::maybeUpdateBackpressure();
+template void QueueImpl<ByteQueue>::maybeUpdateBackpressure();
 
 // ======================================================================================
 // ValueQueue

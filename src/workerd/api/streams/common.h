@@ -238,6 +238,11 @@ class WritableStreamSink: public kj::PtrTarget {
   virtual kj::Promise<void> write(
       kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) KJ_WARN_UNUSED_RESULT = 0;
 
+  kj::Promise<void> writeWithBackpressureTracing(
+      kj::ArrayPtr<const byte> buffer) KJ_WARN_UNUSED_RESULT;
+  kj::Promise<void> writeWithBackpressureTracing(
+      kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) KJ_WARN_UNUSED_RESULT;
+
   // Attempt to perform a synchronous write, as an optimization to avoid promise overhead when
   // the sink can accept the bytes immediately. This follows the same contract as
   // kj::AsyncOutputStream::tryWriteSync():
