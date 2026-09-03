@@ -271,6 +271,8 @@ kj::Promise<void> ServiceWorkerGlobalScope::connectUdp(kj::String host,
     kj::Maybe<ExportedHandler&> exportedHandler) {
   ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
       "Connect ingress is not currently supported with Service Workers syntax.");
+  KJ_REQUIRE(FeatureFlags::get(lock).getWorkerdExperimental(),
+      "UDP ingress requires the experimental flag.");
 
   KJ_IF_SOME(handler, eh.connect) {
     // Using a neuterable wrapper to manage lifetime, exactly like connect()'s NeuterableIoStream:

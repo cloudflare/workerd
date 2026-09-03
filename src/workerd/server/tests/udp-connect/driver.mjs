@@ -24,6 +24,7 @@ beforeEach(async () => {
     workerdBinary: env.WORKERD_BINARY,
     workerdConfig: env.WORKERD_CONFIG,
     listenPortNames: ['udp'],
+    extraArgs: ['--experimental'],
   });
   await workerd.start();
   await workerd.getListenPort('udp');
