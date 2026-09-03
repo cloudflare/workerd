@@ -399,6 +399,9 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     workerTracer = t;
   }
 
+  // Claim before delivered() constructs an actor. This introduces no asynchronous boundary, so
+  // capability pipelining remains unchanged.
+  incomingRequest->getMetrics().claimRetryTokenBeforeUserCode();
   incomingRequest->delivered();
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
