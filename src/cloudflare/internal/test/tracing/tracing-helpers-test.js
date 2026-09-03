@@ -42,6 +42,7 @@ export class OverlappingRequestsObject extends DurableObject {
             await this.firstCanResume;
             const span = publicTracing.getActiveSpan();
             assert(span);
+            assert.strictEqual(publicTracing.getInvocationSpan(), span);
             assert.strictEqual(span.isTraced, true);
             span.setAttribute('overlapping.request', 'a');
             this.resolveFirstAttributed();
@@ -54,6 +55,7 @@ export class OverlappingRequestsObject extends DurableObject {
     assert.strictEqual(this.firstIsWaiting, true);
     const span = publicTracing.getActiveSpan();
     assert(span);
+    assert.strictEqual(publicTracing.getInvocationSpan(), span);
     assert.strictEqual(span.isTraced, true);
     span.setAttribute('overlapping.request', 'b');
     this.resumeFirst();

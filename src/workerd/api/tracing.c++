@@ -534,16 +534,17 @@ jsg::Optional<jsg::Ref<user_tracing::Span>> getInvocationSpanFromTag(jsg::Lock& 
     jsg::JsObject tag,
     const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler) {
   constexpr auto CACHE_KEY = "workerd.invocationSpan"_kj;
-  if (tag.hasPrivate(js, CACHE_KEY)) {
-    auto cached = tag.getPrivate(js, CACHE_KEY);
-    KJ_IF_SOME(span, spanHandler.tryUnwrap(js, cached)) {
-      return kj::mv(span);
-    }
-  }
-
   auto& state = jsg::unwrapOpaqueRef<IoOwn<UserTracingInvocationSpanTag>>(js.v8Isolate, tag);
   jsg::Optional<jsg::Ref<user_tracing::Span>> result;
   state->request->runIfAlive([&](IoContext::IncomingRequest& request) {
+    if (tag.hasPrivate(js, CACHE_KEY)) {
+      auto cached = tag.getPrivate(js, CACHE_KEY);
+      KJ_IF_SOME(span, spanHandler.tryUnwrap(js, cached)) {
+        result = kj::mv(span);
+        return;
+      }
+    }
+
     kj::Maybe<kj::Own<BaseTracer::WeakRef>> tracer;
     KJ_IF_SOME(value, request.getWorkerTracer()) {
       tracer = value.getWeakRef();
