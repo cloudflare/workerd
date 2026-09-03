@@ -9,11 +9,13 @@
 namespace workerd {
 
 namespace {
-// Optimization: If the same wait list is waited multiple times in the same thread, we want to
-// share the signal rather than send two cross-thread signals.
-static const kj::EventLoopLocal<CrossThreadWaitList::WaiterMap> threadLocalWaiters;
-
 void END_WAIT_LIST_CANCELER_STACK_START_CANCELEE_STACK() {}
+
+kj::Exception makeNeverFulfilledException() {
+  return kj::getDestructionReason(
+      reinterpret_cast<void*>(&END_WAIT_LIST_CANCELER_STACK_START_CANCELEE_STACK),
+      kj::Exception::Type::FAILED, __FILE__, __LINE__, "wait list was never fulfilled"_kj);
+}
 }  // namespace
 
 CrossThreadWaitList::CrossThreadWaitList(Options options)
@@ -27,26 +29,11 @@ CrossThreadWaitList::Waiter::Waiter(
     const State& state, kj::Own<kj::CrossThreadPromiseFulfiller<void>> fulfillerArg)
     : state(kj::atomicAddRef(state)),
       fulfiller(kj::mv(fulfillerArg)) {
-  auto lock = state.waiters.lockExclusive();
-  if (__atomic_load_n(&state.done, __ATOMIC_ACQUIRE)) {
-    KJ_IF_SOME(e, state.exception) {
-      fulfiller->reject(e.clone());
-    } else {
-      fulfiller->fulfill();
-    }
-  } else {
-    lock->add(*this);
-  }
+  state.list.add(*this);
 }
 CrossThreadWaitList::Waiter::~Waiter() noexcept(false) {
-  if (__atomic_load_n(&unlinked, __ATOMIC_ACQUIRE)) {
-    // No need to take a lock, already unlinked.
-    KJ_ASSERT(!link.isLinked());
-  } else {
-    auto lock = state->waiters.lockExclusive();
-    if (link.isLinked()) {
-      lock->remove(*this);
-    }
+  if (!__atomic_load_n(&unlinked, __ATOMIC_ACQUIRE)) {
+    state->list.remove(*this);
   }
 
   if (state->useThreadLocalOptimization) {
@@ -61,10 +48,24 @@ CrossThreadWaitList::Waiter::~Waiter() noexcept(false) {
   }
 }
 
+void CrossThreadWaitList::Waiter::ready(const Outcome& outcome) noexcept {
+  KJ_IF_SOME(exception, outcome.exception) {
+    fulfiller->reject(exception.clone());
+  } else {
+    fulfiller->fulfill();
+  }
+  __atomic_store_n(&unlinked, true, __ATOMIC_RELEASE);
+}
+
+void CrossThreadWaitList::Waiter::removed() noexcept {
+  fulfiller->reject(makeNeverFulfilledException());
+  __atomic_store_n(&unlinked, true, __ATOMIC_RELEASE);
+}
+
 kj::Promise<void> CrossThreadWaitList::addWaiter() const {
-  if (__atomic_load_n(&state->done, __ATOMIC_ACQUIRE)) {
-    KJ_IF_SOME(e, state->exception) {
-      return e.clone();
+  KJ_IF_SOME(outcome, state->list.isReady()) {
+    KJ_IF_SOME(exception, outcome.exception) {
+      return exception.clone();
     } else {
       return kj::READY_NOW;
     }
@@ -107,17 +108,17 @@ kj::Own<kj::CrossThreadPromiseFulfiller<void>> CrossThreadWaitList::makeSeparate
       state->lostFulfiller();
     }
     void fulfill(kj::_::Void&&) const override {
-      state->fulfill();
+      state->tryFulfill();
     }
     void reject(kj::Exception&& exception) const override {
       state->reject(kj::mv(exception));
     }
     bool isWaiting() const override {
-      // Note that it would be incorrect for isWaiting() to return false when `done` is false
+      // Note that it would be incorrect for isWaiting() to return false when the list is not ready
       // even if the waiter list is empty, because the waiter list could become non-empty later.
       // In theory if we could determine that there will never be a waiter, then isWaiting()
       // could return false.
-      return !__atomic_load_n(&state->done, __ATOMIC_ACQUIRE);
+      return state->list.isReady() == kj::none;
     }
 
    private:
@@ -129,49 +130,17 @@ kj::Own<kj::CrossThreadPromiseFulfiller<void>> CrossThreadWaitList::makeSeparate
   return kj::heap<FulfillerImpl>(kj::atomicAddRef(*state));
 }
 
-void CrossThreadWaitList::State::fulfill() const {
-  if (__atomic_load_n(&done, __ATOMIC_ACQUIRE)) return;
-  auto lock = waiters.lockExclusive();
-  if (done) return;
-  __atomic_store_n(&done, true, __ATOMIC_RELEASE);
-
-  for (auto& waiter: *lock) {
-    lock->remove(waiter);
-    waiter.fulfiller->fulfill();
-    __atomic_store_n(&waiter.unlinked, true, __ATOMIC_RELEASE);
-  }
+bool CrossThreadWaitList::State::tryFulfill() const {
+  return list.tryReady(Outcome{kj::none});
 }
 
 void CrossThreadWaitList::State::reject(kj::Exception&& e) const {
-  if (__atomic_load_n(&done, __ATOMIC_ACQUIRE)) return;
-  auto lock = waiters.lockExclusive();
-  if (done) return;
-  auto& exceptionRef = exception.emplace(kj::mv(e));
-  __atomic_store_n(&done, true, __ATOMIC_RELEASE);
-
-  for (auto& waiter: *lock) {
-    lock->remove(waiter);
-    waiter.fulfiller->reject(exceptionRef.clone());
-    __atomic_store_n(&waiter.unlinked, true, __ATOMIC_RELEASE);
-  }
+  list.tryReady(Outcome{kj::mv(e)});
 }
 
 void CrossThreadWaitList::State::lostFulfiller() const {
-  if (__atomic_load_n(&done, __ATOMIC_ACQUIRE)) return;
-  auto lock = waiters.lockExclusive();
-  if (done) return;
-  auto& exceptionRef = exception.emplace(kj::getDestructionReason(
-      reinterpret_cast<void*>(&END_WAIT_LIST_CANCELER_STACK_START_CANCELEE_STACK),
-      kj::Exception::Type::FAILED, __FILE__, __LINE__, "wait list was never fulfilled"_kj));
-  __atomic_store_n(&done, true, __ATOMIC_RELEASE);
-
-  if (!lock->empty()) {
-    for (auto& waiter: *lock) {
-      lock->remove(waiter);
-      waiter.fulfiller->reject(exceptionRef.clone());
-      __atomic_store_n(&waiter.unlinked, true, __ATOMIC_RELEASE);
-    }
-  }
+  if (list.isReady() != kj::none) return;
+  list.tryReady(Outcome{makeNeverFulfilledException()});
 }
 
 }  // namespace workerd

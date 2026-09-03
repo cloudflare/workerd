@@ -76,6 +76,22 @@ wd_cc_library(
 # why the Windows build is failing, we could simplify things here a bit.
 
 wd_cc_library(
+    name = "sync-wait-list",
+    hdrs = ["sync-wait-list.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+kj_test(
+    src = "sync-wait-list-test.c++",
+    deps = [
+        ":sync-wait-list",
+    ],
+)
+
+wd_cc_library(
     name = "util",
     srcs = [
         "canceler.c++",
@@ -99,6 +115,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":sync-wait-list",
         ":duration-exceeded-logger",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
@@ -380,6 +397,7 @@ exports_files(["autogate.h"])
     for f in [
         "batch-queue-test.c++",
         "wait-list-test.c++",
+        "xthread-wait-list-test.c++",
         "duration-exceeded-logger-test.c++",
     ]
 ]
