@@ -214,6 +214,73 @@ export const globalScopeTransformStream = {
   },
 };
 
+// G13 concurrency: module-scope streams touched by PARALLEL requests.
+// A pool of independent module-scope streams, each drained by its own
+// concurrent request.
+const encPool = new TextEncoder();
+const streamPool = Array.from(
+  { length: 4 },
+  (_, i) =>
+    new ReadableStream({
+      start(c) {
+        c.enqueue(encPool.encode(`pool-${i}`));
+        c.close();
+      },
+    })
+);
+let poolRequestsEntered = 0;
+
+export const concurrentRequestsDrainDistinctStreams = {
+  async test(ctrl, env) {
+    const texts = await Promise.all(
+      streamPool.map(async (_, i) => {
+        const response = await env.self.fetch(`http://test/pool/${i}`);
+        return response.text();
+      })
+    );
+    strictEqual(texts.join(','), 'pool-0,pool-1,pool-2,pool-3');
+  },
+};
+
+// One module-scope stream: request A parks a read and FINISHES;
+// request B then enqueues into it. PARITY across implementations, and
+// the outcome is governed by handle_cross_request_promise_resolution
+// (2024-10-14): without it the parked read OUTLIVES its request and
+// B's enqueue fulfills it with the bytes; with it the cross-request
+// resolution is handled — the stale read stays pending at observation
+// time. (Contrast the fully PARALLEL rendezvous shape, which wedges
+// both requests' response plumbing with an uncatchable async 'Cannot
+// perform I/O on behalf of a different request' and cannot be pinned
+// under the harness's hang detector — the cross-request guard bites
+// only LIVE foreign contexts.)
+const rs11 = new ReadableStream({
+  start(c) {
+    globalThis.controller11 = c;
+  },
+});
+
+export const crossRequestStaleParkedRead = {
+  async test(ctrl, env) {
+    const parked = await env.self
+      .fetch('http://test/11/park')
+      .then((r) => r.text());
+    strictEqual(parked, 'parked');
+    const enqueued = await env.self
+      .fetch('http://test/11/enqueue')
+      .then((r) => r.text());
+    const handled =
+      globalThis.Cloudflare.compatibilityFlags[
+        'handle_cross_request_promise_resolution'
+      ];
+    strictEqual(
+      enqueued,
+      handled
+        ? 'enqueue=ok parked=pending'
+        : 'enqueue=ok parked=value:108,97,116,101'
+    );
+  },
+};
+
 export default {
   async fetch(req) {
     const url = new URL(req.url);
@@ -316,6 +383,51 @@ export default {
       void writer.write(enc.encode('ok'));
       void writer.close();
       return new Response(ts10.readable);
+    }
+
+    if (url.pathname.startsWith('/pool/')) {
+      const i = Number(url.pathname.split('/')[2]);
+      poolRequestsEntered++;
+      // Keep each wait bound to its request's IoContext.
+      for (
+        let attempts = 0;
+        poolRequestsEntered < streamPool.length;
+        attempts++
+      ) {
+        if (attempts === 1000) {
+          throw new Error('Pool request handlers did not overlap');
+        }
+        await scheduler.wait(0);
+      }
+      return new Response(streamPool[i]);
+    }
+
+    // Request A: park a read on the module-scope stream and return
+    // while it is still pending.
+    if (url.pathname === '/11/park') {
+      const reader = rs11.getReader();
+      globalThis.parkedRead11 = reader.read();
+      globalThis.parkedRead11.then(
+        (r) => (globalThis.parkedOutcome11 = `value:${r.value}`),
+        (e) => (globalThis.parkedOutcome11 = `rejected:${e.name}`)
+      );
+      return new Response('parked');
+    }
+    // Request B: enqueue into the stream whose parked read belongs to
+    // the finished request A.
+    if (url.pathname === '/11/enqueue') {
+      const enc = new TextEncoder();
+      let enqueue;
+      try {
+        globalThis.controller11.enqueue(enc.encode('late'));
+        enqueue = 'ok';
+      } catch (e) {
+        enqueue = `threw:${String(e.message).slice(0, 45)}`;
+      }
+      await scheduler.wait(50);
+      return new Response(
+        `enqueue=${enqueue} parked=${globalThis.parkedOutcome11 ?? 'pending'}`
+      );
     }
 
     throw new Error('boom');

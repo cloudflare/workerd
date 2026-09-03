@@ -94,6 +94,7 @@ export {
   fractionalSizeTruncation,
   invalidSizeReturnRejects,
   desiredSizeWhileErroring,
+  writableFloatQueueTotal,
 } from 'backpressure';
 
 export {
@@ -114,3 +115,5 @@ export {
   largeChunkedWrites,
   veryLargeChunkedWrites,
 } from 'data-volumes';
+
+export { structuredCloneWritable } from 'transfer';

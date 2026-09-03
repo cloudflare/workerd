@@ -196,3 +196,5 @@ export {
   writeFromReadContinuation,
   cancelSiblingFromReadContinuation,
 } from 'reentrancy';
+
+export { structuredCloneIdentity } from 'transfer';

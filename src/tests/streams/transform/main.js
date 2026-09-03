@@ -117,3 +117,5 @@ export default {
     });
   },
 };
+
+export { structuredCloneTransform } from 'transfer';
