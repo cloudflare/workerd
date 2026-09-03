@@ -557,6 +557,11 @@ jsg::Ref<user_tracing::Span> Tracing::startSpan(jsg::Lock& js, kj::String operat
 
 jsg::Optional<jsg::Ref<user_tracing::Span>> Tracing::getActiveSpan(
     jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler) {
+  // case: a user has an active span
+  //
+  // tracing.startActiveSpan('operation', async (span) => {
+  //   tracing.getActiveSpan() === span;
+  // });
   KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
     auto key = jsg::IsolateBase::from(js.v8Isolate).getActiveSpanAsyncContextKey();
     KJ_IF_SOME(value, frame.get(*key)) {
@@ -566,10 +571,13 @@ jsg::Optional<jsg::Ref<user_tracing::Span>> Tracing::getActiveSpan(
     }
   }
 
+  // case: outside an invocation
   if (!IoContext::hasCurrent()) {
     return kj::none;
   }
 
+  // case: inside an invocation with no explicit child span set
+  // this is cached so that repeated calls return the same reference
   auto& ioContext = IoContext::current();
   KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
     auto key = ioContext.getCurrentLock().getUserTraceAsyncContextKey();
