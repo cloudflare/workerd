@@ -4877,8 +4877,8 @@ declare abstract class Span {
           code?: string | number;
           name?: string;
           message: string;
-      stack?: string;
-    },
+          stack?: string;
+        },
   ): void;
   setStatus(status: TracingSpanStatus): this;
   end(): void;
@@ -17347,7 +17347,6 @@ declare namespace TailStream {
     readonly outcome: EventOutcome;
     readonly cpuTime: number;
     readonly wallTime: number;
-    readonly status?: SpanStatus;
   }
   type SpanStatusCode = "unset" | "ok" | "error";
   interface SpanStatus {
