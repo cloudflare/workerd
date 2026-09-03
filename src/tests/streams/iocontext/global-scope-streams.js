@@ -228,6 +228,7 @@ const streamPool = Array.from(
       },
     })
 );
+let poolRequestsEntered = 0;
 
 export const concurrentRequestsDrainDistinctStreams = {
   async test(ctrl, env) {
@@ -386,6 +387,18 @@ export default {
 
     if (url.pathname.startsWith('/pool/')) {
       const i = Number(url.pathname.split('/')[2]);
+      poolRequestsEntered++;
+      // Keep each wait bound to its request's IoContext.
+      for (
+        let attempts = 0;
+        poolRequestsEntered < streamPool.length;
+        attempts++
+      ) {
+        if (attempts === 1000) {
+          throw new Error('Pool request handlers did not overlap');
+        }
+        await scheduler.wait(0);
+      }
       return new Response(streamPool[i]);
     }
 
