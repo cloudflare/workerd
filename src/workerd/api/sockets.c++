@@ -405,6 +405,21 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   return result;
 }
 
+jsg::Ref<Socket> setupSocket(jsg::Lock& js,
+    kj::Own<kj::AsyncIoStream> connection,
+    kj::Maybe<kj::String> remoteAddress,
+    kj::Maybe<kj::String> localAddress,
+    jsg::Optional<SocketOptions> options,
+    kj::Own<kj::TlsStarterCallback> tlsStarter,
+    SecureTransportKind secureTransport,
+    kj::Maybe<kj::String> domain,
+    bool isDefaultFetchPort,
+    kj::Maybe<jsg::PromiseResolverPair<SocketInfo>> maybeOpenedPrPair) {
+  return setupSocket(js, kj::mv(connection), kj::mv(remoteAddress), kj::mv(localAddress),
+      kj::mv(options), kj::mv(tlsStarter), secureTransport, SocketProtocol::TCP, kj::mv(domain),
+      isDefaultFetchPort, kj::mv(maybeOpenedPrPair));
+}
+
 jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
     kj::Own<DatagramChannel> channelOwn,
     kj::Maybe<kj::String> remoteAddress,
