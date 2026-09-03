@@ -182,3 +182,16 @@ export const closeWithPendingUnfilledByobRead = {
     await reader.closed;
   },
 };
+
+export const controllerType = {
+  async test() {
+    let c;
+    new ReadableStream({
+      type: 'bytes',
+      start(ctrl) {
+        c = ctrl;
+      },
+    });
+    strictEqual(c instanceof ReadableByteStreamController, true);
+  },
+};

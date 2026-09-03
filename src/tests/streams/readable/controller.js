@@ -179,3 +179,15 @@ export const closeDrainsQueue = {
     strictEqual((await reader.read()).done, true);
   },
 };
+
+export const controllerType = {
+  async test() {
+    let c;
+    new ReadableStream({
+      start(ctrl) {
+        c = ctrl;
+      },
+    });
+    strictEqual(c instanceof ReadableStreamDefaultController, true);
+  },
+};

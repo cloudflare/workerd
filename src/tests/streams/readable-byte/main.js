@@ -51,6 +51,7 @@ export {
   readAfterCloseReturnsEmptyView,
   readDetachesCallerBuffer,
   closeWithPendingUnfilledByobRead,
+  controllerType,
 } from 'controller';
 
 export {

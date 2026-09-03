@@ -52,6 +52,7 @@ export {
   errorIdempotence,
   closeTerminality,
   closeDrainsQueue,
+  controllerType,
 } from 'controller';
 
 export {
