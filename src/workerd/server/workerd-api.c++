@@ -315,7 +315,6 @@ jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(
     .schemaLoader = options.schemaLoader,
     .enableWeakRef = getFeatureFlags().getJsWeakRef(),
     .deferWeakRefDeletion = deferWeakRefDeletion,
-    .installWasmMemoryDiscard = getFeatureFlags().getWasmMemoryDiscard(),
   };
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).newContext<api::ServiceWorkerGlobalScope>(
       kj::mv(opts));

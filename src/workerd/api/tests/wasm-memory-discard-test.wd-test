@@ -1,23 +1,11 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
-  services = [
-    ( name = "wasm-memory-discard-test",
-      worker = (
-        modules = [
-          (name = "worker", esModule = embed "wasm-memory-discard-test.js"),
-          (name = "test.wasm", wasm = embed "wasm-memory-discard.wasm")
-        ],
-        compatibilityFlags = ["nodejs_compat", "experimental", "wasm_memory_discard"],
-      )
+  services = [(
+    name = "wasm-memory-discard-test",
+    worker = (
+      modules = [(name = "worker", esModule = embed "wasm-memory-discard-disabled-test.js")],
+      compatibilityFlags = ["nodejs_compat", "experimental", "wasm_memory_discard"],
     ),
-    ( name = "wasm-memory-discard-disabled-test",
-      worker = (
-        modules = [
-          (name = "worker", esModule = embed "wasm-memory-discard-disabled-test.js")
-        ],
-        compatibilityFlags = ["nodejs_compat"],
-      )
-    ),
-  ],
+  )],
 );

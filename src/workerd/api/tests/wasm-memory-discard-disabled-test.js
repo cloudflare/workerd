@@ -6,7 +6,6 @@ import { strictEqual } from 'node:assert';
 
 export const test = {
   test() {
-    // Without the wasm_memory_discard compat flag the JS API is not installed.
     strictEqual(WebAssembly.Memory.prototype.discard, undefined);
   },
 };

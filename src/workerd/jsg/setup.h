@@ -196,12 +196,6 @@ class IsolateBase {
     return evalAllowed;
   }
 
-  // One-way: once enabled, the feature must remain enabled for the isolate's lifetime since V8
-  // re-queries it at wasm compile time.
-  inline void enableWasmMemoryDiscard(kj::Badge<Lock>) {
-    wasmMemoryDiscardEnabled = true;
-  }
-
   inline void setDisallowJavascriptExecution(kj::Badge<Lock>, bool allow) {
     if (allow) {
       javascriptExecutionDisallowed++;
@@ -442,13 +436,6 @@ class IsolateBase {
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
 
-  // Gates the experimental WebAssembly memory.discard proposal. Read by
-  // `wasmMemoryDiscardEnabledCallback`, which V8 consults both when installing the
-  // JS API (`InstallConditionalFeatures`) and when compiling wasm modules that use the
-  // `memory.discard` opcode. Set once per context based on the compat flag; must remain
-  // true for the isolate's lifetime so later compilations still see the feature.
-  bool wasmMemoryDiscardEnabled = false;
-
   // When > 0, we take the "safe" path in unwrap() to avoid calling Get() which can invoke
   // user-defined getters, triggering the `DisallowJavascriptExecution` scope constructed
   // as part of `Deserializer::readValue`
@@ -616,7 +603,7 @@ class IsolateBase {
   static v8::ModifyCodeGenerationFromStringsResult modifyCodeGenCallback(
       v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike);
   static bool allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source);
-  static bool wasmMemoryDiscardEnabledCallback(v8::Local<v8::Context> context);
+  static bool jspiEnabledCallback(v8::Local<v8::Context> context);
 
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
 
@@ -970,11 +957,6 @@ class Isolate: public IsolateBase {
           static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
       jsg::setAlignedPointerInEmbedderData(
           context.getHandle(v8Isolate), jsg::ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER, wrapper);
-      if (options.installWasmMemoryDiscard) {
-        v8::Local<v8::Context> handle = context.getHandle(v8Isolate);
-        v8::Context::Scope scope(handle);
-        installWasmMemoryDiscard();
-      }
       return context;
     }
 

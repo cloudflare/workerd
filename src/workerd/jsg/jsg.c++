@@ -237,14 +237,6 @@ Lock::AllowEvalScope::~AllowEvalScope() noexcept(false) {
   js.setAllowEval(previous);
 }
 
-void Lock::installWasmMemoryDiscard() {
-  // Mark the feature enabled for the lifetime of the isolate, then install the JS API on the
-  // current context. The flag must stay set: V8 re-checks it via the enabled callback whenever it
-  // compiles a wasm module that uses the `memory.discard` opcode, not just at install time.
-  IsolateBase::from(v8Isolate).enableWasmMemoryDiscard({});
-  v8Isolate->InstallConditionalFeatures(v8Context());
-}
-
 void Lock::setDisallowJavascriptExecution(bool allow) {
   IsolateBase::from(v8Isolate).setDisallowJavascriptExecution({}, allow);
 }
