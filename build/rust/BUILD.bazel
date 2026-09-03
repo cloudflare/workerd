@@ -1,84 +1,50 @@
-load("@rules_rust//rust:toolchain.bzl", "rust_toolchain")
-load("//build/deps:gen/build_deps.bzl", "RUST_NIGHTLY_DATE", "RUST_NIGHTLY_VERSION")
-load(":build_std.bzl", "compiler_runtime_files", "instrumented_rust_std")
+load(":tsan_toolchain.bzl", "tsan_rust_toolchain")
 
 exports_files(["build_std.sh"])
 
-_RUST_TOOLS = "@rust_nightly_linux_x86_64"
-
-_TARGET_TRIPLE = "x86_64-unknown-linux-gnu"
-
-compiler_runtime_files(
-    name = "nightly_rustc_lib",
-    src = _RUST_TOOLS + "//:rustc_lib",
-    sanitizer = "tsan",
-    tags = ["manual"],
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
-)
-
-instrumented_rust_std(
-    name = "tsan_rust_std",
-    rust_src = "@rust_nightly_src",
-    rust_tools = _RUST_TOOLS,
-    sanitizer = "thread",
-    tags = ["manual"],
-    target_compatible_with = ["//build/platforms:sanitizer_thread"],
-    target_triple = _TARGET_TRIPLE,
-    visibility = ["//src/rust/tsan-test:__pkg__"],
-)
-
-rust_toolchain(
-    name = "tsan_toolchain_impl",
-    allocator_library = "@rules_rust//ffi/rs:empty",
-    binary_ext = "",
-    cargo = _RUST_TOOLS + "//:cargo",
-    cargo_clippy = _RUST_TOOLS + "//:cargo_clippy_bin",
-    channel = "nightly",
-    clippy_driver = _RUST_TOOLS + "//:clippy_driver_bin",
-    default_edition = "2024",
+# One TSan toolchain per supported host. `--config=tsan` / `--config=tsan-macos` (.bazelrc) list
+# all of them in --extra_toolchains; toolchain resolution picks the one matching the host.
+# stdlib_linkflags mirror rules_rust's own generated toolchain for each triple.
+tsan_rust_toolchain(
+    name = "tsan_toolchain_linux_x86_64",
+    cpu = "@platforms//cpu:x86_64",
     dylib_ext = ".so",
-    exec_triple = _TARGET_TRIPLE,
-    extra_exec_rustc_flags = [],
     extra_rustc_flags = ["-Ctarget-feature=+sse4.2,+pclmulqdq"],
-    iso_date = RUST_NIGHTLY_DATE,
-    linker = _RUST_TOOLS + "//:rust-lld",
-    linker_type = "direct",
-    llvm_cov = _RUST_TOOLS + "//:llvm_cov_bin",
-    llvm_lib = _RUST_TOOLS + "//:llvm_lib",
-    llvm_profdata = _RUST_TOOLS + "//:llvm_profdata_bin",
-    rust_doc = _RUST_TOOLS + "//:rustdoc",
-    rust_objcopy = _RUST_TOOLS + "//:rust-objcopy",
-    rust_std = ":tsan_rust_std",
-    rustc = _RUST_TOOLS + "//:rustc",
-    rustc_lib = ":nightly_rustc_lib",
-    rustfmt = _RUST_TOOLS + "//:rustfmt_bin",
-    staticlib_ext = ".a",
+    os = "@platforms//os:linux",
+    rust_tools = "@rust_nightly_linux_x86_64",
     stdlib_linkflags = [
         "-ldl",
         "-lpthread",
     ],
-    tags = ["manual"],
-    target_compatible_with = ["//build/platforms:sanitizer_thread"],
-    target_triple = _TARGET_TRIPLE,
-    version = RUST_NIGHTLY_VERSION,
+    target_triple = "x86_64-unknown-linux-gnu",
 )
 
-toolchain(
-    name = "tsan_toolchain",
-    exec_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
+tsan_rust_toolchain(
+    name = "tsan_toolchain_macos_aarch64",
+    cpu = "@platforms//cpu:aarch64",
+    dylib_ext = ".dylib",
+    # rustc passes -nodefaultlibs to the linker driver, and unlike Linux, Darwin's clang then also
+    # omits the sanitizer runtime that -Zexternal-clangrt (.bazelrc) relies on it to provide.
+    # Letting clang add its default libraries restores libclang_rt.tsan_osx_dynamic.dylib (and
+    # its rpath) at every Rust-driven link, so rust_binary/rust_test targets share Clang's
+    # runtime with the C++ they link, exactly as on Linux.
+    extra_rustc_flags = ["-Cdefault-linker-libraries=yes"],
+    os = "@platforms//os:macos",
+    rust_tools = "@rust_nightly_macos_aarch64",
+    stdlib_linkflags = [
+        "-lSystem",
+        "-lresolv",
     ],
+    target_triple = "aarch64-apple-darwin",
+)
+
+# The host's TSan-instrumented standard library, for tests that inspect it (//src/rust/tsan-test).
+alias(
+    name = "tsan_rust_std",
+    actual = select({
+        "@platforms//os:linux": ":tsan_toolchain_linux_x86_64_std",
+        "@platforms//os:macos": ":tsan_toolchain_macos_aarch64_std",
+    }),
     tags = ["manual"],
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-        "//build/platforms:sanitizer_thread",
-    ],
-    target_settings = ["@rules_rust//rust/toolchain/channel:nightly"],
-    toolchain = ":tsan_toolchain_impl",
-    toolchain_type = "@rules_rust//rust:toolchain",
+    visibility = ["//src/rust/tsan-test:__pkg__"],
 )
