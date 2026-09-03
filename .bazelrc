@@ -248,24 +248,38 @@ build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
 build:asan --per_file_copt='external/.*v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
 
 # thread sanitizer (https://github.com/google/sanitizers/wiki/ThreadSanitizerCppManual)
-build:tsan --config=sanitizer-common
-build:tsan --copt="-fsanitize=thread" --linkopt="-fsanitize=thread"
-# A statically-linked unwinder in each shared library cannot propagate exceptions across DSOs.
-build:tsan --linkopt="-l:libunwind.so.8"
-build:tsan --platforms=//build/platforms:sanitizer_thread_platform
-build:tsan --action_env=TSAN_OPTIONS=halt_on_error=true
-build:tsan --test_env=TSAN_OPTIONS=halt_on_error=true
+#
+# Instruments both C++ and Rust (nightly rustc with -Zsanitizer=thread plus a TSan-built standard
+# library, see //build/rust). Supported hosts: Linux x86_64 (`--config=tsan`) and macOS arm64
+# (`--config=tsan-macos`). The two differ only in the Linux-specific unwinder linkopt below --
+# bazelrc has no way to make a single flag OS-conditional, hence the two entry points sharing
+# `tsan-common`.
+build:tsan-common --config=sanitizer-common
+build:tsan-common --copt="-fsanitize=thread" --linkopt="-fsanitize=thread"
+build:tsan-common --platforms=//build/platforms:sanitizer_thread_platform
+build:tsan-common --action_env=TSAN_OPTIONS=halt_on_error=true
+build:tsan-common --test_env=TSAN_OPTIONS=halt_on_error=true
 # Clang-tidy loads this shared object into an unsanitized process, which cannot resolve TSan hooks.
-build:tsan --per_file_copt='tools/clang-tidy@-fno-sanitize=thread'
+build:tsan-common --per_file_copt='tools/clang-tidy@-fno-sanitize=thread'
 # TSan significantly increases test runtime.
-build:tsan --test_timeout=30,150,600,2400
+build:tsan-common --test_timeout=30,150,600,2400
 # Enable V8's TSan-specific generated code and synchronization annotations. V8's Bazel build does
 # not currently derive these defines from the compiler's sanitizer flags.
-build:tsan --copt="-DV8_IS_TSAN"
-build:tsan --per_file_copt='external/.*v8@-DTHREAD_SANITIZER'
-build:tsan --extra_toolchains=//build/rust:tsan_toolchain
-build:tsan --@rules_rust//:extra_rustc_flag=-Zsanitizer=thread
-build:tsan --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
+build:tsan-common --copt="-DV8_IS_TSAN"
+build:tsan-common --per_file_copt='external/.*v8@-DTHREAD_SANITIZER'
+# One toolchain per host; resolution picks the one matching the (host-parented) tsan platform.
+build:tsan-common --extra_toolchains=//build/rust:tsan_toolchain_linux_x86_64,//build/rust:tsan_toolchain_macos_aarch64
+build:tsan-common --@rules_rust//:extra_rustc_flag=-Zsanitizer=thread
+build:tsan-common --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
+
+# Linux x86_64.
+build:tsan --config=tsan-common
+# A statically-linked unwinder in each shared library cannot propagate exceptions across DSOs.
+build:tsan --linkopt="-l:libunwind.so.8"
+
+# macOS arm64. ld64 does not accept the GNU-ld `-l:` syntax and has no equivalent need: libunwind is
+# part of libSystem and shared by every image.
+build:tsan-macos --config=tsan-common
 
 # fuzzilli (https://github.com/googleprojectzero/fuzzilli/)
 build:fuzzilli --config=asan

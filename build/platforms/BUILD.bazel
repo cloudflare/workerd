@@ -18,11 +18,10 @@ platform(
     parents = ["@platforms//host"],
 )
 
+# Like the address platform, inherits the host's cpu/os: the TSan Rust toolchains in //build/rust
+# are defined per host (Linux x86_64, macOS arm64) and selected by toolchain resolution.
 platform(
     name = "sanitizer_thread_platform",
-    constraint_values = [
-        ":sanitizer_thread",
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
+    constraint_values = [":sanitizer_thread"],
+    parents = ["@platforms//host"],
 )

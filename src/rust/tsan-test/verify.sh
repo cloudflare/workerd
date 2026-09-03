@@ -8,8 +8,8 @@ set -euo pipefail
 
 readonly ROOT="${TEST_SRCDIR}/${TEST_WORKSPACE}"
 
-stdlib=$(find "$ROOT/build/rust/tsan_rust_std_build" \
-  -name libstd_std.rlib -print -quit)
+# The instrumented stdlib lives under the host's tsan_<platform>_std_build directory.
+stdlib=$(find "$ROOT/build/rust" -name libstd_std.rlib -print -quit)
 if [[ -z "$stdlib" ]] || ! nm -A "$stdlib" 2>/dev/null | grep '__tsan_func_entry' >/dev/null; then
   echo "Rust standard library does not contain TSan instrumentation" >&2
   exit 1
