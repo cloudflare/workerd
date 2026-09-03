@@ -1212,7 +1212,11 @@ wd_test(
     src = "worker-loader-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-test.js"],
-    tags = ["requires-network"],
+    # Needs to fetch pyodide which is not supported under RBE
+    tags = [
+        "no-remote-exec",
+        "requires-network",
+    ],
 )
 
 wd_test(

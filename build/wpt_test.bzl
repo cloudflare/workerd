@@ -22,7 +22,7 @@ PORT_BINDINGS = [
 ### (Invokes wpt_js_test_gen, wpt_wd_test_gen and wd_test to assemble a complete test suite.)
 ### -----------------------------------------------------------------------------------------
 
-def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, **kwargs):
+def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, tags = [], **kwargs):
     """
     Main entry point.
 
@@ -98,6 +98,8 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         # blobs emitted by the WPT harness and break tools/cross/wpt_logs.py parsing.
         predictable = False,
         data = data,
+        # WPT tests are not supported in RBE so far
+        tags = tags + ["no-remote-exec"],
         **kwargs
     )
 

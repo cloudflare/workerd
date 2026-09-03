@@ -409,7 +409,11 @@ wd_test(
     src = "dns-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["dns-nodejs-test.js"],
-    tags = ["requires-network"],
+    # Requires network access and certificates not available in RBE
+    tags = [
+        "no-remote-exec",
+        "requires-network",
+    ],
 )
 
 js_binary(
