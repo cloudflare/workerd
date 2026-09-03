@@ -41,9 +41,9 @@ R2RpcClient R2RpcClient::fromCallResult(jsg::Lock& js, jsg::Value& rpcPromise) {
   auto object = KJ_ASSERT_NONNULL(value.tryCast<jsg::JsObject>());
   auto promise = KJ_ASSERT_NONNULL(object.tryUnwrapAs<JsRpcPromise>(js));
   kj::Vector<kj::StringPtr> path;
-  auto client = promise->getClientForOneCall(js, path);
+  auto oneCall = promise->getClientForOneCall(js, path);
   KJ_ASSERT(path.empty());
-  return R2RpcClient(kj::mv(client));
+  return R2RpcClient(kj::mv(oneCall.client));
 }
 
 R2RpcClient::Method R2RpcClient::getMethod(jsg::Lock& js, kj::StringPtr methodName) {
