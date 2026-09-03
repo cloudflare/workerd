@@ -203,6 +203,7 @@ class Socket: public jsg::Object {
       case SocketProtocol::UDP:
         return "udp"_kj;
     }
+    KJ_UNREACHABLE;
   }
 
   // Takes ownership of the underlying connection stream, detaching the readable and writable streams.
