@@ -1,0 +1,30 @@
+src/workerd/io/io-context.c++
+  s_8d3ff6b9908116::t_5e3af1518fa39d 320-337,386-389
+src/workerd/io/incoming-request-test.c++
+  s_ab4e43acd62623::t_9984dc1bc86f88 153
+  s_ab4e43acd62623::t_2a789e9e3eb7e7 90-152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3628fe3a2a037337c5cafc24596a26a5fad2378a",
+  "prompts": {},
+  "sessions": {
+    "s_8d3ff6b9908116": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fc63bb043ffeWOJMRbxvOXrGJK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_ab4e43acd62623": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0dd95e56cffeOLXlCNwX9ixaK3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
