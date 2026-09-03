@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  services = [
+    ( name = "globals-iteration-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "globals-iteration-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "enable_weak_ref",
+        ]
+      )
+    ),
+  ],
+);

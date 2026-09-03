@@ -41,3 +41,12 @@ export const writableStreamGc = {
     }
   },
 };
+
+// A bare WritableStream survives a gc() sweep without crashing the GC
+// tracing path (migrated from streams-test.js).
+export const writableStreamGcTraceFinishes = {
+  test() {
+    const _ws = new WritableStream();
+    gc();
+  },
+};

@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+using InspectModules = import "inspect-modules.capnp";
+
+# util.inspect over the C++ streams implementation, which installs a
+# custom inspect exposing lock/state internals. Flags as in the sibling
+# suites; nodejs_compat additionally provides node:util.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-inspect-cpp",
+      worker = (
+        modules = InspectModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          # The identity-stream abort in inspectErroredIdentityStream
+          # reaches the 'errored' state immediately only under the
+          # modern abort semantics.
+          "internal_writable_stream_abort_clears_queue",
+          "writable_stream_spec_compliant_writer",
+          # The composite (identity/FixedLength) inspect lists
+          # readable before writable only when the accessors live on
+          # the prototype.
+          "workers_api_getters_setters_on_prototype",
+        ],
+      )
+    ),
+  ],
+);

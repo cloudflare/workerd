@@ -1,0 +1,21 @@
+using Workerd = import "/workerd/workerd.capnp";
+using R2PatternsModules = import "r2-patterns-modules.capnp";
+
+# R2-SDK-style stream consumption against the C++ implementation. Flags
+# as in the sibling suites (JS stream constructors for the byte-stream
+# sources).
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-r2-patterns-cpp",
+      worker = (
+        modules = R2PatternsModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+        ],
+      )
+    ),
+  ],
+);

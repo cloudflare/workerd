@@ -255,8 +255,11 @@ interface CursorLike {
   queue: { removeCursor(cursor: unknown): void };
 }
 
-const cursorCleanupRegistry = new FinalizationRegistry((cursor: CursorLike) => {
-  cursor.queue.removeCursor(cursor);
+const cursorCleanupRegistry = new FinalizationRegistry((cursorRef: unknown) => {
+  const cursor = WeakRefPrototypeDeref(cursorRef) as CursorLike | undefined;
+  if (cursor !== undefined) {
+    cursor.queue.removeCursor(cursor);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -477,10 +480,10 @@ class StreamQueue<T, V = T> {
   }
 
   // Called by the QueueCursor constructor (cursors self-register). `owner`
-  // is the stream object — held strongly only by the FinalizationRegistry
-  // key and weakly by the cursor. When forking (tee), the new cursor's
-  // constructor receives the source cursor's position AND byteOffset so the
-  // branch resumes exactly where the original left off.
+  // is the stream object — registered as the FinalizationRegistry's weak
+  // target and also held weakly by the cursor. When forking (tee), the new
+  // cursor's constructor receives the source cursor's position AND byteOffset
+  // so the branch resumes exactly where the original left off.
   addCursor(cursor: QueueCursor<T, V>, owner: object): void {
     this.#hadCursors = true;
     this.#allGoneSignaled = false;
@@ -521,7 +524,9 @@ function registerCursorCleanup(owner: object, cursor: object): void {
   FinalizationRegistryPrototypeRegister(
     cursorCleanupRegistry,
     owner,
-    cursor,
+    // Held values are strongly retained, so retain only a weak reference
+    // to the cursor. A live queue keeps its registered cursors alive.
+    new WeakRef(cursor),
     cursor
   );
 }

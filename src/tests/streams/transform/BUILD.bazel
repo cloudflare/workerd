@@ -1,0 +1,41 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The transform streams suite runs the same test modules under two configs:
+# transform-cpp against the C++ implementation, transform-ts against the
+# TypeScript implementation.
+
+transform_suite_srcs = glob(["*.js"]) + ["transform-modules.capnp"]
+
+wd_test(
+    src = "transform-cpp.wd-test",
+    data = transform_suite_srcs,
+)
+
+wd_test(
+    src = "transform-ts.wd-test",
+    args = ["--experimental"],
+    data = transform_suite_srcs,
+)
+
+# The main C++ cell plus the dateless opt-in pedantic_wpt flag; probed to
+# produce no observable deltas on this suite's surface, so the shared
+# modules run unbranched.
+wd_test(
+    src = "transform-cpp-pedantic.wd-test",
+    data = transform_suite_srcs,
+)
+
+# Legacy (pre-flag) regression guard, C++ implementation only. The
+# @all-compat-flags variant is disabled: at the 2999-12-31 date the flags
+# the cell deliberately omits would all turn on.
+wd_test(
+    src = "transform-cpp-legacy.wd-test",
+    data = transform_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
+    src = "transform-cpp-legacy-backpressure.wd-test",
+    data = transform_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)

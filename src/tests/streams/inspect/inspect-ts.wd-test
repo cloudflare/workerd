@@ -1,0 +1,24 @@
+using Workerd = import "/workerd/workerd.capnp";
+using InspectModules = import "inspect-modules.capnp";
+
+# The SAME modules against the TypeScript implementation, which has no
+# custom inspect: every stream renders as a bare "ClassName {}". The
+# shared module pins both sides.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-inspect-ts",
+      worker = (
+        modules = InspectModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

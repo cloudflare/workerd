@@ -1,0 +1,1137 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+// byobRequest.respond()/respondWithNewView() and the BYOB pump:
+// migrated wholesale from streams-respond-test.js (Response-body
+// consumption driving JS byte sources, multi-chunk fills, reentrant
+// respond, cancel races, transform pumps, and UAF regressions).
+
+import { strictEqual, rejects, throws, ok } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
+
+// Test Response body methods with JS-backed BYOB ReadableStream
+export const responseBodyMethodsJsByob = {
+  async test() {
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+
+    {
+      const rs = new ReadableStream({
+        type: 'bytes',
+        autoAllocateChunkSize: 4096,
+        async pull(c) {
+          if (c.byobRequest) {
+            enc.encodeInto('hello', c.byobRequest.view);
+            c.byobRequest.respond(5);
+            c.close();
+          } else {
+            c.enqueue(enc.encode('hello'));
+            c.close();
+          }
+        },
+      });
+
+      const resp = new Response(rs);
+
+      strictEqual(dec.decode(await resp.arrayBuffer()), 'hello');
+    }
+
+    {
+      const rs = new ReadableStream({
+        type: 'bytes',
+        autoAllocateChunkSize: 4096,
+        async pull(c) {
+          if (c.byobRequest) {
+            enc.encodeInto('hello', c.byobRequest.view);
+            c.byobRequest.respond(5);
+            c.close();
+          } else {
+            c.enqueue(enc.encode('hello'));
+            c.close();
+          }
+        },
+      });
+
+      const resp = new Response(rs);
+
+      strictEqual(await resp.text(), 'hello');
+    }
+  },
+};
+
+// Test Request body methods with JS-backed ReadableStream
+export const requestBodyMethodsJsByob = {
+  async test() {
+    const enc = new TextEncoder();
+    const wrapped = new ReadableStream({
+      type: 'bytes',
+      async pull(c) {
+        c.enqueue(enc.encode('hello'));
+        c.close();
+      },
+    });
+
+    const req = new Request('http://example.com', {
+      method: 'POST',
+      body: wrapped,
+    });
+    const text = await req.text();
+
+    strictEqual(text, 'hello');
+  },
+};
+
+// Test basic JS ReadableStream as Response body
+export const jsSource = {
+  async test() {
+    const enc = new TextEncoder();
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode('hello'));
+        c.close();
+      },
+    });
+
+    const response = new Response(rs);
+    strictEqual(await response.text(), 'hello');
+  },
+};
+
+// Test JS ReadableStream with async pull as Response body
+export const jsSourceAsyncPull = {
+  async test() {
+    const enc = new TextEncoder();
+    const chunks = [enc.encode('hello'), enc.encode('there')];
+    const rs = new ReadableStream({
+      async pull(c) {
+        await scheduler.wait(10);
+        if (chunks.length > 0) c.enqueue(chunks.shift());
+        if (chunks.length === 0) c.close();
+      },
+    });
+
+    const response = new Response(rs);
+    strictEqual(await response.text(), 'hellothere');
+  },
+};
+
+// Test BYOB ReadableStream as Response body
+export const jsByteSource = {
+  async test() {
+    const enc = new TextEncoder();
+    const rs = new ReadableStream({
+      type: 'bytes',
+      autoAllocateChunkSize: 4096,
+      pull(c) {
+        const request = c.byobRequest;
+        if (request != null) {
+          enc.encodeInto('hello', request.view);
+          request.respond(5);
+          c.close();
+        } else {
+          // The TypeScript Body pump reads without a BYOB request even
+          // with autoAllocateChunkSize (see bodyPumpByobRequestPresence).
+          c.enqueue(enc.encode('hello'));
+          c.close();
+        }
+      },
+    });
+
+    const response = new Response(rs);
+    strictEqual(await response.text(), 'hello');
+  },
+};
+
+// Test BYOB ReadableStream with multiple chunks
+export const jsByteSourceMultipleChunks = {
+  async test() {
+    const enc = new TextEncoder();
+    const chunks = ['hello', 'there', 'this', 'is', 'a', 'test'];
+
+    const rs = new ReadableStream({
+      type: 'bytes',
+      async pull(c) {
+        await scheduler.wait(10);
+        const request = c.byobRequest;
+        const chunk = chunks.shift();
+        if (request != null) {
+          if (chunk !== undefined) {
+            const { written } = enc.encodeInto(chunk, request.view);
+            request.respond(written);
+          } else {
+            c.close();
+            request.respond(0);
+          }
+        } else if (chunk !== undefined) {
+          c.enqueue(enc.encode(chunk));
+        } else {
+          c.close();
+        }
+      },
+    });
+
+    const response = new Response(rs);
+    strictEqual(await response.text(), 'hellotherethisisatest');
+  },
+};
+
+// Test teed JS ReadableStream as Response body
+export const jsTeeSource = {
+  async test() {
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+    const readable = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode('hello'));
+        c.close();
+      },
+    });
+
+    const [branch1, branch2] = readable.tee();
+    const reader = branch2.getReader();
+
+    // By reading first, we ensure that the branch1 will have queued
+    // read data before the Response is actually transmitted. Both tee
+    // branches should still resolve to the same data.
+
+    const result = await reader.read();
+    strictEqual(dec.decode(result.value), 'hello');
+
+    const response = new Response(branch1);
+    strictEqual(await response.text(), 'hello');
+  },
+};
+
+// Test closed teed BYOB stream
+export const jsTeeClose = {
+  async test() {
+    const rs = new ReadableStream({
+      type: 'bytes',
+      autoAllocateChunkSize: 4096,
+      async pull(c) {
+        if (c.byobRequest) {
+          c.close();
+          c.byobRequest.respond(0);
+        } else {
+          c.close();
+        }
+      },
+    });
+
+    const [branch] = rs.tee();
+    const response = new Response(branch);
+    strictEqual(await response.text(), '');
+  },
+};
+
+// Test large enqueue with synchronous close (default stream)
+export const bigEnqueue = {
+  async test() {
+    const a = 'a'.repeat(4096 * 2);
+    const enc = new TextEncoder();
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode(a));
+        c.close();
+      },
+    });
+
+    const response = new Response(rs);
+    const text = await response.text();
+    strictEqual(text.length, 8192);
+    strictEqual(text, a);
+  },
+};
+
+// Test large enqueue with synchronous close (bytes stream)
+export const bigEnqueueBytes = {
+  async test() {
+    const a = 'a'.repeat(4096 * 2);
+    const enc = new TextEncoder();
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        c.enqueue(enc.encode(a));
+        c.close();
+      },
+    });
+
+    const response = new Response(rs);
+    const text = await response.text();
+    strictEqual(text.length, 8192);
+    strictEqual(text, a);
+  },
+};
+
+// Test large enqueue via IdentityTransformStream (sync close)
+export const bigEnqueueViaIdentityTransform = {
+  async test() {
+    const a = 'a'.repeat(4096 * 2 + 345);
+    const enc = new TextEncoder();
+
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode(a));
+        c.close();
+      },
+    });
+
+    const transform = new IdentityTransformStream();
+    const response = new Response(rs.pipeThrough(transform));
+
+    const text = await response.text();
+    strictEqual(text.length, 8537);
+    strictEqual(text, a);
+  },
+};
+
+// Test large enqueue via IdentityTransformStream (async close)
+export const bigEnqueueViaIdentityTransformAsync = {
+  async test() {
+    const a = 'a'.repeat(4096 * 2 + 345);
+    const enc = new TextEncoder();
+
+    const rs = new ReadableStream({
+      async start(c) {
+        c.enqueue(enc.encode(a));
+        await scheduler.wait(10);
+        c.close();
+      },
+    });
+
+    const transform = new IdentityTransformStream();
+    const response = new Response(rs.pipeThrough(transform));
+
+    const text = await response.text();
+    strictEqual(text.length, 8537);
+    strictEqual(text, a);
+  },
+};
+
+// Test large enqueue via JS TransformStream (sync close)
+export const bigEnqueueViaJsTransform = {
+  async test() {
+    const a = 'a'.repeat(4096 * 2 + 345);
+    const enc = new TextEncoder();
+
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode(a));
+        c.close();
+      },
+    });
+
+    const transform = new TransformStream();
+    const response = new Response(rs.pipeThrough(transform));
+
+    const text = await response.text();
+    strictEqual(text.length, 8537);
+    strictEqual(text, a);
+  },
+};
+
+// Test large enqueue via JS TransformStream (async close)
+export const bigEnqueueViaJsTransformAsync = {
+  async test() {
+    const a = 'a'.repeat(4096 * 2 + 345);
+    const enc = new TextEncoder();
+
+    const rs = new ReadableStream({
+      async start(c) {
+        c.enqueue(enc.encode(a));
+        await scheduler.wait(10);
+        c.close();
+      },
+    });
+
+    const transform = new TransformStream();
+    const response = new Response(rs.pipeThrough(transform));
+
+    const text = await response.text();
+    strictEqual(text.length, 8537);
+    strictEqual(text, a);
+  },
+};
+
+export const bigEnqueueViaJsTransformSplit = {
+  async test() {
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode('a'.repeat(4090)));
+      },
+      pull(c) {
+        c.enqueue(enc.encode('a'.repeat(4096 + 345)));
+        c.close();
+      },
+    });
+
+    const transform = new TransformStream({
+      transform(chunk, controller) {
+        controller.enqueue(enc.encode(dec.decode(chunk).toUpperCase()));
+      },
+    });
+
+    const response = new Response(rs.pipeThrough(transform));
+
+    const text = await response.text();
+    strictEqual(text.length, 4090 + 4096 + 345);
+    strictEqual(text, 'A'.repeat(4090 + 4096 + 345));
+  },
+};
+
+// Test enqueue same chunk multiple times (default stream)
+export const enqueueChunkMultipleTimes = {
+  async test() {
+    const chunk = new TextEncoder().encode('ping!');
+    const rs = new ReadableStream({
+      start(controller) {
+        controller.enqueue(chunk);
+        controller.enqueue(chunk);
+        controller.enqueue(chunk);
+        controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+
+    const response = new Response(rs);
+    strictEqual(await response.text(), 'ping!ping!ping!ping!');
+  },
+};
+
+// Test enqueue same chunk multiple times errors in bytes stream
+export const enqueueChunkMultipleTimesBytes = {
+  async test() {
+    const chunk = new TextEncoder().encode('ping!');
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(controller) {
+        controller.enqueue(chunk);
+        try {
+          controller.enqueue(chunk);
+          throw new Error('this should have failed because chunk is size 0');
+        } catch (err) {
+          // The first enqueue detached the chunk's buffer on both sides;
+          // only the message differs.
+          const expected = usingTsImpl
+            ? 'chunk must have a non-zero byteLength'
+            : 'Cannot enqueue a zero-length ArrayBuffer.';
+          if (err.message !== expected) {
+            throw new Error('Incorrect error: ' + err.message);
+          }
+          controller.close();
+        }
+      },
+    });
+
+    const response = new Response(rs);
+    strictEqual(await response.text(), 'ping!');
+  },
+};
+
+export const bigEnqueueOddSize = {
+  async test() {
+    const a = 'a'.repeat(4096 * 2 + 345);
+    const enc = new TextEncoder();
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode(a));
+        c.close();
+      },
+    });
+
+    const response = new Response(rs);
+    const text = await response.text();
+    strictEqual(text.length, 8537);
+    strictEqual(text, a);
+  },
+};
+
+// In this test, we write data into an IdentityTransformStream
+// We then read from that in a JS ReadableStream
+// We then pipe that through a JS TransformStream
+// We then respond with the TransformStream's readable.
+// We use parallel writes to simulate waitUntil() behavior.
+export const multistepTransform = {
+  async test() {
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+
+    const { readable, writable } = new IdentityTransformStream();
+    const reader = readable.getReader({ mode: 'byob' });
+
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        c.enqueue(enc.encode('bbbb'));
+      },
+      async pull(c) {
+        const buffer = new Uint8Array(4096);
+        const result = await reader.read(buffer);
+        if (result.done) {
+          c.enqueue(enc.encode('bye'));
+          c.close();
+        } else if (c.byobRequest !== null) {
+          const view = c.byobRequest.view;
+          const toCopy = Math.min(result.value.byteLength, view.byteLength);
+          new Uint8Array(view.buffer, view.byteOffset, toCopy).set(
+            result.value.subarray(0, toCopy)
+          );
+          c.byobRequest.respond(toCopy);
+        } else {
+          c.enqueue(result.value);
+        }
+      },
+    });
+
+    const transform = new TransformStream({
+      transform(chunk, controller) {
+        controller.enqueue(enc.encode(dec.decode(chunk).toUpperCase()));
+      },
+    });
+
+    const response = new Response(rs.pipeThrough(transform));
+
+    const writer = writable.getWriter();
+    const writePromise = (async () => {
+      await writer.write(enc.encode('a'.repeat(4090)));
+      await writer.write(enc.encode('a'.repeat(4096)));
+      await writer.write(enc.encode('a'.repeat(345)));
+      await writer.close();
+    })();
+
+    const [text] = await Promise.all([response.text(), writePromise]);
+
+    strictEqual(text.startsWith('BBBB'), true);
+    strictEqual(text.endsWith('BYE'), true);
+    strictEqual(text.length, 4 + 4090 + 4096 + 345 + 3);
+  },
+};
+
+// In this test, we write data into an IdentityTransformStream
+// We then read from that in a JS ReadableStream
+// We then pipe that through a JS TransformStream with preventClose = true
+// When the pipe is done, we write a final chunk to the JS TransformStream
+// We then respond with the TransformStream's readable.
+export const multistepTransformPreventClose = {
+  async test() {
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+
+    const { readable, writable } = new IdentityTransformStream();
+    const reader = readable.getReader({ mode: 'byob' });
+
+    const detachesBuffer =
+      Cloudflare.compatibilityFlags.streams_byob_reader_detaches_buffer;
+
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        c.enqueue(enc.encode('bbbb'));
+      },
+      async pull(c) {
+        if (detachesBuffer) {
+          const buffer = new Uint8Array(4096);
+          const result = await reader.read(buffer);
+          if (result.done) {
+            c.enqueue(enc.encode('bye'));
+            c.close();
+          } else if (c.byobRequest !== null) {
+            const view = c.byobRequest.view;
+            const toCopy = Math.min(result.value.byteLength, view.byteLength);
+            new Uint8Array(view.buffer, view.byteOffset, toCopy).set(
+              result.value.subarray(0, toCopy)
+            );
+            c.byobRequest.respond(toCopy);
+          } else {
+            c.enqueue(result.value);
+          }
+        } else {
+          const result = await reader.read(
+            c.byobRequest !== null ? c.byobRequest.view : new Uint8Array(4096)
+          );
+          if (result.done) {
+            c.enqueue(enc.encode('bye'));
+            c.close();
+          } else if (c.byobRequest !== null) {
+            c.byobRequest.respondWithNewView(result.value);
+          } else {
+            c.enqueue(result.value);
+          }
+        }
+      },
+    });
+
+    const transform = new TransformStream({
+      transform(chunk, controller) {
+        controller.enqueue(enc.encode(dec.decode(chunk).toUpperCase()));
+      },
+    });
+
+    const promise = rs.pipeTo(transform.writable, { preventClose: true });
+
+    const writer = writable.getWriter();
+    const writePromise = (async () => {
+      await writer.write(enc.encode('a'.repeat(4090)));
+      await writer.write(enc.encode('a'.repeat(4096)));
+      await writer.write(enc.encode('a'.repeat(345)));
+      await writer.close();
+    })();
+
+    async function finishChunk() {
+      await promise;
+      const transformWriter = transform.writable.getWriter();
+      await transformWriter.write(enc.encode('all done'));
+      await transformWriter.close();
+    }
+
+    const response = new Response(transform.readable);
+
+    const [text] = await Promise.all([
+      response.text(),
+      writePromise,
+      finishChunk(),
+    ]);
+
+    strictEqual(text.startsWith('BBBB'), true);
+    strictEqual(text.endsWith('ALL DONE'), true);
+    // 4 (BBBB) + 4090 + 4096 + 345 (A's) + 3 (BYE) + 8 (ALL DONE)
+    strictEqual(text.length, 4 + 4090 + 4096 + 345 + 3 + 8);
+  },
+};
+
+export const jsSourceError = {
+  async test() {
+    // The sync start() throw escapes the constructor under TypeScript
+    // (spec) but is captured by C++, erroring the stream (the readable
+    // suite's ledger #6).
+    if (usingTsImpl) {
+      throws(
+        () =>
+          new ReadableStream({
+            start() {
+              throw new Error('boom');
+            },
+          }),
+        {
+          message: 'boom',
+        }
+      );
+    } else {
+      const rs = new ReadableStream({
+        start() {
+          throw new Error('boom');
+        },
+      });
+      const response = new Response(rs);
+      await rejects(response.text(), { name: 'Error', message: 'boom' });
+    }
+  },
+};
+
+export const jsSourceErrorAsync = {
+  async test() {
+    const rs = new ReadableStream({
+      async pull(c) {
+        await scheduler.wait(10);
+        throw new Error('boom');
+      },
+    });
+
+    const response = new Response(rs);
+    await rejects(response.text(), { name: 'Error', message: 'boom' });
+  },
+};
+
+export const jsErroredSourceAsync = {
+  async test() {
+    const rs = new ReadableStream({
+      async start(c) {
+        throw new Error('boom');
+      },
+    });
+
+    const response = new Response(rs);
+    await rejects(response.text(), { name: 'Error', message: 'boom' });
+  },
+};
+
+export const jsErroredSourceAsyncDelayed = {
+  async test() {
+    const rs = new ReadableStream({
+      async start(c) {
+        await scheduler.wait(10);
+        throw new Error('boom');
+      },
+    });
+
+    const response = new Response(rs);
+    await rejects(response.text(), { name: 'Error', message: 'boom' });
+  },
+};
+
+export const jsNotBytesInPull = {
+  async test() {
+    const rs = new ReadableStream({
+      pull(c) {
+        c.enqueue('hello');
+        c.close();
+      },
+    });
+
+    const response = new Response(rs);
+    await rejects(response.text(), TypeError);
+  },
+};
+
+export const jsNotBytesInStart = {
+  async test() {
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue('hello');
+        c.close();
+      },
+    });
+
+    const response = new Response(rs);
+    await rejects(response.text(), TypeError);
+  },
+};
+
+export const jsTeeError = {
+  async test() {
+    const rs = new ReadableStream({
+      pull(c) {
+        throw new Error('boom');
+      },
+    });
+
+    const [branch] = rs.tee();
+    const response = new Response(branch);
+    await rejects(response.text(), { name: 'Error', message: 'boom' });
+  },
+};
+
+export const jsTeeErrorByob = {
+  async test() {
+    const rs = new ReadableStream({
+      type: 'bytes',
+      autoAllocateChunkSize: 4096,
+      async pull() {
+        throw new Error('boom');
+      },
+    });
+
+    const [branch] = rs.tee();
+    const response = new Response(branch);
+    await rejects(response.text(), { name: 'Error', message: 'boom' });
+  },
+};
+
+export const jsSourceTeed = {
+  async test() {
+    const enc = new TextEncoder();
+
+    const readable = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode('hello'));
+      },
+      async pull(c) {
+        c.enqueue(enc.encode('a'.repeat(100)));
+        c.enqueue(enc.encode('b'.repeat(200)));
+        c.enqueue(enc.encode('c'.repeat(300)));
+        c.enqueue(enc.encode('d'.repeat(400)));
+        c.enqueue(enc.encode('e'.repeat(500)));
+        c.enqueue(enc.encode('f'.repeat(600)));
+        c.enqueue(enc.encode('g'.repeat(700)));
+        c.enqueue(enc.encode('h'.repeat(800)));
+        await scheduler.wait(10);
+        c.enqueue(enc.encode('i'.repeat(900)));
+        c.enqueue(enc.encode('j'.repeat(1000)));
+        c.enqueue(enc.encode('k'.repeat(1100)));
+        c.close();
+      },
+    });
+
+    const tee = readable.tee();
+
+    async function consume(branch) {
+      for await (const _chunk of branch) {
+        // intentionally empty
+      }
+    }
+
+    const consumePromise = consume(tee[1]);
+
+    const response = new Response(tee[0]);
+    const text = await response.text();
+
+    await consumePromise;
+
+    strictEqual(text.startsWith('hello'), true);
+    strictEqual(text.endsWith('k'.repeat(1100)), true);
+    strictEqual(
+      text.length,
+      5 + 100 + 200 + 300 + 400 + 500 + 600 + 700 + 800 + 900 + 1000 + 1100
+    );
+  },
+};
+
+export const jsByteSourceLargeData = {
+  async test() {
+    const largeData = 'x'.repeat(100000);
+    const enc = new TextEncoder();
+
+    const sourceReadable = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        c.enqueue(enc.encode(largeData));
+        c.close();
+      },
+    });
+
+    const reader = sourceReadable.getReader({ mode: 'byob' });
+
+    const rs = new ReadableStream({
+      type: 'bytes',
+      autoAllocateChunkSize: 4096,
+      async pull(c) {
+        const request = c.byobRequest;
+        const chunk = await reader.read(
+          request != null ? request.view : new Uint8Array(4096)
+        );
+        if (chunk.done) {
+          c.close();
+        } else if (request != null) {
+          request.respondWithNewView(chunk.value);
+        } else {
+          c.enqueue(chunk.value);
+        }
+      },
+    });
+
+    const response = new Response(rs);
+    const text = await response.text();
+    strictEqual(text.length, 100000);
+    strictEqual(text, largeData);
+  },
+};
+
+export const jsByteSourceLargeDataEnqueue = {
+  async test() {
+    const largeData = 'x'.repeat(100000);
+    const enc = new TextEncoder();
+
+    const sourceReadable = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        c.enqueue(enc.encode(largeData));
+        c.close();
+      },
+    });
+
+    const rs = new ReadableStream({
+      type: 'bytes',
+      async pull(c) {
+        for await (const chunk of sourceReadable) {
+          c.enqueue(chunk);
+        }
+        c.close();
+      },
+    });
+
+    const response = new Response(rs);
+    const text = await response.text();
+    strictEqual(text.length, 100000);
+    strictEqual(text, largeData);
+  },
+};
+
+// DIVERGENCE (why several sources above need dual paths): consuming a
+// byte stream through the Body machinery drives pull() with a FILLED
+// byobRequest under C++ (its pump reads BYOB), but with byobRequest
+// null under TypeScript even when autoAllocateChunkSize is set — the TS
+// pump issues plain default reads (a DIRECT default read on the same
+// stream DOES synthesize the request; see byobRequestOnDefaultRead for
+// the no-autoAllocate case).
+export const bodyPumpByobRequestPresence = {
+  async test() {
+    let seen = 'not-pulled';
+    const rs = new ReadableStream({
+      type: 'bytes',
+      autoAllocateChunkSize: 4096,
+      pull(c) {
+        seen =
+          c.byobRequest === null
+            ? 'null'
+            : `view(${c.byobRequest.view.byteLength})`;
+        c.enqueue(new TextEncoder().encode('x'));
+        c.close();
+      },
+    });
+    strictEqual(await new Response(rs).text(), 'x');
+    strictEqual(seen, usingTsImpl ? 'null' : 'view(4096)');
+  },
+};
+
+// --- Migrated from streams-js-test.js (byte respond family) ---
+
+export const readableStreamByteRespond = {
+  async test() {
+    // Basic respond
+    {
+      const rs = new ReadableStream({
+        type: 'bytes',
+        pull(c) {
+          if (c.byobRequest) {
+            const req = c.byobRequest;
+            req.view[0] = 1;
+            req.view[1] = 2;
+            req.view[2] = 3;
+
+            throws(() => req.respond(10), RangeError);
+            throws(() => req.respond(0), TypeError);
+
+            req.respond(3);
+
+            // This will error the stream but won't be immediately
+            // apparent until the next read operation.
+            req.respond(3);
+          }
+        },
+      });
+
+      const reader = rs.getReader({ mode: 'byob' });
+      const u8 = new Uint8Array(3);
+      const read = reader.read(u8);
+      strictEqual(u8.byteLength, 0);
+
+      const { value } = await read;
+      strictEqual(value.byteLength, 3);
+
+      await rejects(reader.read(new Uint8Array(3)), {
+        message: usingTsImpl
+          ? 'This BYOB request has been invalidated'
+          : 'This ReadableStreamBYOBRequest has been invalidated.',
+      });
+    }
+
+    // Respond with close
+    {
+      const rs = new ReadableStream({
+        type: 'bytes',
+        pull(c) {
+          if (c.byobRequest) {
+            c.close();
+            c.byobRequest.respond(0);
+          }
+        },
+      });
+
+      const reader = rs.getReader({ mode: 'byob' });
+
+      const u8 = new Uint8Array([1, 2, 3]);
+
+      const { done, value } = await reader.read(u8);
+
+      ok(done);
+      ok(value instanceof Uint8Array);
+      strictEqual(value.byteLength, 0);
+      strictEqual(value.buffer.byteLength, 3);
+      const u82 = new Uint8Array(value.buffer, 0, 3);
+      strictEqual(u82[0], 1);
+      strictEqual(u82[1], 2);
+      strictEqual(u82[2], 3);
+    }
+  },
+};
+
+export const readableStreamByteRespondWithNewView = {
+  async test() {
+    // Basic respondWithNewView
+    {
+      const rs = new ReadableStream({
+        type: 'bytes',
+        pull(c) {
+          if (c.byobRequest) {
+            const req = c.byobRequest;
+            const u8 = new Uint8Array(req.view.buffer);
+
+            u8[0] = 1;
+            u8[1] = 2;
+            u8[2] = 3;
+
+            // Can't respond with zero if we're not closed.
+            throws(() => req.respondWithNewView(new Uint8Array(0)), TypeError);
+
+            // Underlying buffer is too big.
+            throws(
+              () => req.respondWithNewView(new Uint8Array(10)),
+              RangeError
+            );
+
+            // Can't respond with a non-detachable ArrayBuffer.
+            throws(
+              () =>
+                req.respondWithNewView(
+                  new Uint8Array(new SharedArrayBuffer(10))
+                ),
+              TypeError
+            );
+
+            // New view has an invalid byte offset.
+            throws(
+              () => req.respondWithNewView(new Uint8Array(req.view.buffer, 1)),
+              RangeError
+            );
+
+            req.respondWithNewView(u8);
+
+            strictEqual(u8.byteLength, 0);
+
+            // This will error the stream but won't be immediately
+            // apparent until the next read operation.
+            req.respond(3);
+          }
+        },
+      });
+
+      const reader = rs.getReader({ mode: 'byob' });
+      const u8 = new Uint8Array(3);
+      const read = reader.read(u8);
+      strictEqual(u8.byteLength, 0);
+
+      const { value } = await read;
+      strictEqual(value.byteLength, 3);
+      strictEqual(value[0], 1);
+      strictEqual(value[1], 2);
+      strictEqual(value[2], 3);
+
+      await rejects(reader.read(new Uint8Array(3)), {
+        message: usingTsImpl
+          ? 'This BYOB request has been invalidated'
+          : 'This ReadableStreamBYOBRequest has been invalidated.',
+      });
+    }
+
+    // RespondWithNewView with close
+    {
+      const rs = new ReadableStream({
+        type: 'bytes',
+        pull(c) {
+          if (c.byobRequest) {
+            c.close();
+            c.byobRequest.respondWithNewView(
+              new Uint8Array(c.byobRequest.view.buffer, 0, 0)
+            );
+          }
+        },
+      });
+
+      const reader = rs.getReader({ mode: 'byob' });
+
+      const { done, value } = await reader.read(new Uint8Array(3));
+
+      ok(done);
+      ok(value instanceof Uint8Array);
+      strictEqual(value.byteLength, 0);
+      strictEqual(value.buffer.byteLength, 3);
+    }
+  },
+};
+
+export const readableStreamByteRespondWithNewViewUsesNewElementSize = {
+  async test() {
+    const rs = new ReadableStream({
+      type: 'bytes',
+      pull(controller) {
+        const request = controller.byobRequest;
+        const replacement = new Uint16Array(
+          request.view.buffer,
+          request.view.byteOffset,
+          3
+        );
+
+        new Uint8Array(
+          replacement.buffer,
+          replacement.byteOffset,
+          replacement.byteLength
+        ).set([1, 2, 3, 4, 5, 6]);
+
+        request.respondWithNewView(replacement);
+        controller.close();
+      },
+    });
+
+    const reader = rs.getReader({ mode: 'byob' });
+    const { value, done } = await reader.read(new Uint32Array(2));
+
+    // DIVERGENCE: C++ adopts the replacement view's element size, so
+    // the read fulfills with all 6 bytes at once; TypeScript keeps the
+    // ORIGINAL read view's element size (Uint32 → 4-byte multiples),
+    // fulfilling with 4 bytes and queuing the remaining 2.
+    ok(!done);
+    strictEqual(value.byteLength, usingTsImpl ? 4 : 6);
+    const bytes = new Uint8Array(
+      value.buffer,
+      value.byteOffset,
+      value.byteLength
+    );
+    for (let i = 0; i < bytes.length; i++) {
+      strictEqual(bytes[i], i + 1);
+    }
+    if (usingTsImpl) {
+      const rest = await reader.read(new Uint8Array(4));
+      strictEqual(rest.done, false);
+      strictEqual(rest.value.byteLength, 2);
+      strictEqual(rest.value[0], 5);
+      strictEqual(rest.value[1], 6);
+    }
+    // Ensure no further bytes remain queued.
+    const end = await reader.read(new Uint8Array(1));
+    ok(end.done);
+  },
+};
+
+export const readableStreamAutoAllocateChunkSize = {
+  async test() {
+    throws(() => {
+      new ReadableStream({
+        type: 'bytes',
+        autoAllocateChunkSize: 0,
+      });
+    }, TypeError);
+
+    throws(() => {
+      new ReadableStream({
+        type: 'bytes',
+        autoAllocateChunkSize: -1,
+      });
+    }, TypeError);
+
+    throws(() => {
+      new ReadableStream({
+        type: 'bytes',
+        autoAllocateChunkSize: 'a',
+      });
+    }, TypeError);
+
+    let pulled = false;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      autoAllocateChunkSize: 10,
+      pull(c) {
+        pulled = true;
+        if (c.byobRequest) {
+          strictEqual(c.byobRequest.view.byteLength, 10);
+          c.byobRequest.respond(10);
+        }
+      },
+    });
+    await rs.getReader().read();
+    ok(pulled);
+  },
+};

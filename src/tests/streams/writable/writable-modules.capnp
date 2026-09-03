@@ -21,4 +21,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "reentrancy", esModule = embed "reentrancy.js"),
   (name = "then-interceptors", esModule = embed "then-interceptors.js"),
   (name = "gc", esModule = embed "gc.js"),
+  (name = "data-volumes", esModule = embed "data-volumes.js"),
 ];
