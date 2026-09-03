@@ -1,0 +1,33 @@
+.bazelrc
+  s_ad98b07a2ebbe9::t_8cbe44f8e8a6dd 251-261,263,265,268-282
+build/deps/rust.MODULE.bazel
+  s_ad98b07a2ebbe9::t_87d36883c5f909 36
+build/platforms/BUILD.bazel
+  s_ad98b07a2ebbe9::t_e608ceea5cc95a 21-22,25-26
+build/rust/BUILD.bazel
+  s_ad98b07a2ebbe9::t_e4072fece6dc81 1,5-10,13-14,19,22-36,38-47,49
+build/rust/build_std.bzl
+  s_ad98b07a2ebbe9::t_49157be68dd3b4 17-19,21,25
+build/rust/build_std.sh
+  s_ad98b07a2ebbe9::t_99a1790c4e2786 26-35,71-77,85-92,107-109
+build/rust/tsan_toolchain.bzl
+  s_ad98b07a2ebbe9::t_051536fba770fd 1-87
+src/rust/tsan-test/verify.sh
+  s_ad98b07a2ebbe9::t_cc34fb0ff6827f 11-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "98f8e6b6deea6795a9e00693b034998858c1c6a8",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
