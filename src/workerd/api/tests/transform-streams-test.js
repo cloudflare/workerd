@@ -12,6 +12,49 @@ async function consume(readable) {
   return data;
 }
 
+function createSavedController(size) {
+  let controller;
+  const stream = new TransformStream(
+    {
+      start(value) {
+        controller = value;
+      },
+    },
+    undefined,
+    { highWaterMark: 1, size }
+  );
+  return {
+    controller,
+    readable: new WeakRef(stream.readable),
+    writable: new WeakRef(stream.writable),
+  };
+}
+
+export const savedControllerRetainsStream = {
+  async test() {
+    let sizeCalls = 0;
+    const { controller, readable, writable } = createSavedController(() => {
+      sizeCalls++;
+      return 1;
+    });
+
+    for (let i = 0; i < 4; i++) {
+      await scheduler.wait(0);
+      gc();
+    }
+
+    const readableStream = readable.deref();
+    ok(readableStream !== undefined);
+    ok(writable.deref() !== undefined);
+    strictEqual(controller.desiredSize, 1);
+    controller.enqueue('chunk');
+    strictEqual(sizeCalls, 1);
+    const result = await readableStream.getReader().read();
+    strictEqual(result.value, 'chunk');
+    strictEqual(result.done, false);
+  },
+};
+
 // Test default identity transform
 export const defaultIdentityTransform = {
   async test() {

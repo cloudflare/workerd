@@ -18,6 +18,7 @@ export {
   argumentConversionOrder,
   readyFulfillTiming,
   nonCallableSizeThrows,
+  globalScopePipe,
 } from 'construction';
 
 export {

@@ -141,3 +141,27 @@ export const nonCallableSizeThrows = {
     }
   },
 };
+
+// A JS-backed WritableStream can be created and consumed at the global scope
+const globalPipe = (async () => {
+  const chunks = [];
+  const rs = new ReadableStream({
+    start(c) {
+      c.enqueue('hello');
+      c.close();
+    },
+  });
+  const ws = new WritableStream({
+    write(c) {
+      chunks.push(c);
+    },
+  });
+  await rs.pipeTo(ws);
+  return chunks.join('');
+})();
+
+export const globalScopePipe = {
+  async test() {
+    strictEqual(await globalPipe, 'hello');
+  },
+};

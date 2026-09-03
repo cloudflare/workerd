@@ -12,16 +12,6 @@
 
 namespace workerd::api {
 
-namespace {
-template <typename T>
-jsg::Function<T> maybeAddFunctor(auto t) {
-  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-    return jsg::Function<T>(ioContext.addFunctor(kj::mv(t)));
-  }
-  return jsg::Function<T>(kj::mv(t));
-}
-}  // namespace
-
 jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
     jsg::Optional<Transformer> maybeTransformer,
     jsg::Optional<StreamQueuingStrategy> maybeWritableStrategy,
@@ -39,8 +29,8 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
     // reads.
     //
     // Persistent references to the TransformStreamDefaultController are held by both
-    // the readable and writable sides. The actual TransformStream object can be dropped
-    // and allowed to be garbage collected.
+    // the readable and writable sides. The controller retains those sides through their
+    // JavaScript wrappers so that V8 can collect the resulting cycle.
 
     auto controller = js.alloc<TransformStreamDefaultController>(js);
     auto transformer = kj::mv(maybeTransformer).orDefault({});
@@ -58,15 +48,12 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
         UnderlyingSource{
           .type = kj::none,
           .autoAllocateChunkSize = kj::none,
-          .start = maybeAddFunctor<UnderlyingSource::StartAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto c) mutable { return controller->getStartPromise(js); })),
-          .pull = maybeAddFunctor<UnderlyingSource::PullAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto c) mutable { return controller->pull(js); })),
-          .cancel = maybeAddFunctor<UnderlyingSource::CancelAlgorithm>( JSG_VISITABLE_LAMBDA(
-              (controller = controller.addRef()), (controller),
-              (jsg::Lock & js, auto reason) mutable { return controller->cancel(js, reason); })),
+          .start = JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+              (jsg::Lock & js, auto c) mutable { return controller->getStartPromise(js); }),
+          .pull = JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+              (jsg::Lock & js, auto c) mutable { return controller->pull(js); }),
+          .cancel = JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+              (jsg::Lock & js, auto reason) mutable { return controller->cancel(js, reason); }),
           .expectedLength = transformer.expectedLength.map(
               [](uint64_t expectedLength) { return expectedLength; }),
         },
@@ -75,26 +62,26 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
     auto writable = WritableStream::constructor(js,
         UnderlyingSink{
           .type = kj::none,
-          .start = maybeAddFunctor<UnderlyingSink::StartAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto c) mutable { return controller->getStartPromise(js); })),
-          .write = maybeAddFunctor<UnderlyingSink::WriteAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto chunk, auto c) mutable {
-                    return controller->write(js, chunk);
-                  })),
-          .abort = maybeAddFunctor<UnderlyingSink::AbortAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto reason) mutable { return controller->abort(js, reason); })),
-          .close = maybeAddFunctor<UnderlyingSink::CloseAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js) mutable { return controller->close(js); })),
+          .start = JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+              (jsg::Lock & js, auto c) mutable { return controller->getStartPromise(js); }),
+          .write = JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+              (jsg::Lock & js, auto chunk, auto c) mutable {
+                return controller->write(js, chunk);
+              }),
+          .abort = JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+              (jsg::Lock & js, auto reason) mutable { return controller->abort(js, reason); }),
+          .close = JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+              (jsg::Lock & js) mutable { return controller->close(js); }),
         },
         kj::mv(maybeWritableStrategy));
 
-    // The controller will store c++ references to both the readable and writable
-    // streams underlying controllers.
-    controller->init(js, readable, writable, kj::mv(transformer));
+    auto& readableHandler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStream>>());
+    auto readableOwner = jsg::JsValue(readableHandler.wrap(js, readable.addRef())).addRef(js);
+    auto& writableHandler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<WritableStream>>());
+    auto writableOwner = jsg::JsValue(writableHandler.wrap(js, writable.addRef())).addRef(js);
+
+    controller->init(
+        js, readable, writable, kj::mv(readableOwner), kj::mv(writableOwner), kj::mv(transformer));
 
     return js.alloc<TransformStream>(kj::mv(readable), kj::mv(writable));
   }
@@ -104,10 +91,12 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
   // but the compatibility flag is not set.
   if (maybeTransformer != kj::none || maybeWritableStrategy != kj::none ||
       maybeReadableStrategy != kj::none) {
-    IoContext::current().logWarningOnce(
-        "To use the new TransformStream() constructor with a "
-        "custom transformer, enable the transformstream_enable_standard_constructor compatibility flag. "
-        "Refer to the docs for more information: https://developers.cloudflare.com/workers/platform/compatibility-dates/#compatibility-flags");
+    KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+      ioContext.logWarningOnce(
+          "To use the new TransformStream() constructor with a "
+          "custom transformer, enable the transformstream_enable_standard_constructor compatibility flag. "
+          "Refer to the docs for more information: https://developers.cloudflare.com/workers/platform/compatibility-dates/#compatibility-flags");
+    }
   }
 
   return IdentityTransformStream::constructor(js);

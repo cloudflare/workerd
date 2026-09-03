@@ -33,6 +33,12 @@ class Generator {
 };
 
 template <typename T>
+class AsyncGenerator {
+ public:
+  void visitForGc(GcVisitor& visitor) {}
+};
+
+template <typename T>
 class Sequence {};
 
 class GcVisitor {
@@ -121,7 +127,14 @@ struct MissedGenerator: public jsg::Object {
   void visitForGc(jsg::GcVisitor& visitor) {}
 };
 
-// Case P9: unvisited jsg::Sequence with a visitable element type.
+// Case P9: unvisited jsg::AsyncGenerator<T> field.
+struct MissedAsyncGenerator: public jsg::Object {
+  jsg::AsyncGenerator<int> gen;
+
+  void visitForGc(jsg::GcVisitor& visitor) {}
+};
+
+// Case P10: unvisited jsg::Sequence with a visitable element type.
 struct MissedSequence: public jsg::Object {
   jsg::Sequence<jsg::Ref<Widget>> seq;
 

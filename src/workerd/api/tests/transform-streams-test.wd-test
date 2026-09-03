@@ -1,6 +1,7 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
   services = [
     ( name = "transform-streams-test",
       worker = (
@@ -11,6 +12,7 @@ const unitTests :Workerd.Config = (
           "nodejs_compat",
           "streams_enable_constructors",
           "transformstream_enable_standard_constructor",
+          "enable_weak_ref",
         ]
       )
     ),

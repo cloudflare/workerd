@@ -43,25 +43,25 @@ class Generator final {
  public:
   template <typename TypeWrapper>
   Generator(Lock& js, JsObject object, TypeWrapper*)
-      : maybeActive(Active(js, object, static_cast<TypeWrapper*>(nullptr))) {}
+      : state(js, object, static_cast<TypeWrapper*>(nullptr)) {}
   Generator(Generator&&) = default;
   Generator& operator=(Generator&&) = default;
   KJ_DISALLOW_COPY(Generator);
 
   // If nothing is returned, the generator is complete.
   kj::Maybe<T> next(Lock& js) {
-    KJ_IF_SOME(active, maybeActive) {
-      KJ_IF_SOME(nextfn, active.maybeNext) {
-        return js.tryCatch([&] {
-          auto result = nextfn(js);
-          if (result.done || result.value == kj::none) {
-            maybeActive = kj::none;
-          }
-          return kj::mv(result.value);
-        }, [&](Value exception) { return throw_(js, kj::mv(exception)); });
+    if (state.isDone()) return kj::none;
+    KJ_IF_SOME(nextfn, state.maybeNext) {
+      JSG_TRY(js) {
+        auto result = nextfn(js);
+        if (result.done) state.setDone();
+        return kj::mv(result.value);
       }
-      maybeActive = kj::none;
+      JSG_CATCH(exception) {
+        return throw_(js, kj::mv(exception));
+      };
     }
+
     return kj::none;
   }
 
@@ -69,24 +69,24 @@ class Generator final {
   // Per GetMethod spec (https://262.ecma-international.org/#sec-getmethod), if the 'return'
   // property exists but is not callable, we throw a TypeError.
   kj::Maybe<T> return_(Lock& js, kj::Maybe<T> maybeValue = kj::none) {
-    KJ_IF_SOME(active, maybeActive) {
-      // Per GetMethod spec: if property exists but is not callable, throw TypeError
-      if (active.returnExistsButNotCallable) {
-        maybeActive = kj::none;
-        JSG_FAIL_REQUIRE(TypeError, "Property 'return' is not a function");
-      }
-
-      KJ_IF_SOME(returnFn, active.maybeReturn) {
-        return js.tryCatch([&] {
-          auto result = returnFn(js, kj::mv(maybeValue));
-          if (result.done || result.value == kj::none) {
-            maybeActive = kj::none;
-          }
-          return kj::mv(result.value);
-        }, [&](Value exception) { return throw_(js, kj::mv(exception)); });
-      }
-      maybeActive = kj::none;
+    if (state.isDone()) return kj::none;
+    // Per GetMethod spec: if property exists but is not callable, throw TypeError
+    if (state.returnExistsButNotCallable) {
+      JSG_FAIL_REQUIRE(TypeError, "Property 'return' is not a function");
     }
+
+    KJ_IF_SOME(returnFn, state.maybeReturn) {
+      JSG_TRY(js) {
+        auto result = returnFn(js, kj::mv(maybeValue));
+        if (result.done) state.setDone();
+        return kj::mv(result.value);
+      }
+      JSG_CATCH(exception) {
+        return throw_(js, kj::mv(exception));
+      };
+    }
+
+    state.setDone();
     return kj::none;
   }
 
@@ -95,25 +95,31 @@ class Generator final {
   // It's also possible (and even likely) that the throw handler
   // will just re-throw the exception.
   kj::Maybe<T> throw_(Lock& js, Value exception) {
-    KJ_IF_SOME(active, maybeActive) {
-      KJ_IF_SOME(throwFn, active.maybeThrow) {
-        return js.tryCatch([&] -> kj::Maybe<T> {
-          auto result = throwFn(js, kj::mv(exception));
-          if (result.done || result.value == kj::none) {
-            maybeActive = kj::none;
-          }
-          return kj::mv(result.value);
-        }, [&](Value exception) -> kj::Maybe<T> {
-          maybeActive = kj::none;
-          js.throwException(kj::mv(exception));
-        });
-      }
+    if (state.isDone()) {
+      js.throwException(kj::mv(exception));
     }
+
+    KJ_IF_SOME(throwFn, state.maybeThrow) {
+      JSG_TRY(js) {
+        auto result = throwFn(js, kj::mv(exception));
+        if (result.done) state.setDone();
+        return kj::mv(result.value);
+      }
+      JSG_CATCH(ex) {
+        exception = kj::mv(ex);
+      };
+    }
+
+    state.setDone();
     js.throwException(kj::mv(exception));
   }
 
+  Generator addRef(Lock& js) {
+    return Generator(js, state);
+  }
+
   void visitForGc(GcVisitor& visitor) {
-    visitForGc(maybeActive);
+    visitor.visit(state);
   }
 
  private:
@@ -122,7 +128,7 @@ class Generator final {
   using ReturnSignature = Function<Next(Optional<T>)>;
   using ThrowSignature = Function<Next(Optional<Value>)>;
 
-  struct Active final {
+  struct State final {
     kj::Maybe<NextSignature> maybeNext;
     kj::Maybe<ReturnSignature> maybeReturn;
     kj::Maybe<ThrowSignature> maybeThrow;
@@ -130,9 +136,10 @@ class Generator final {
     // 'return' property exists but is not callable, we should throw a TypeError.
     // We track this state to defer the error to when return_() is actually called.
     bool returnExistsButNotCallable = false;
+    kj::Rc<bool> done = kj::rc<bool>(false);
 
     template <typename TypeWrapper>
-    Active(Lock& js, JsObject object, TypeWrapper*)
+    State(Lock& js, JsObject object, TypeWrapper*)
         : maybeNext(tryGetGeneratorFunction<NextSignature, TypeWrapper>(js, object, "next"_kj)),
           // maybeReturn is initialized in the constructor body — see below.
           maybeThrow(tryGetGeneratorFunction<ThrowSignature, TypeWrapper>(js, object, "throw"_kj)) {
@@ -156,15 +163,32 @@ class Generator final {
         returnExistsButNotCallable = (maybeReturn == kj::none);
       }
     }
-    Active(Active&&) = default;
-    Active& operator=(Active&&) = default;
-    KJ_DISALLOW_COPY(Active);
+    State(Lock& js, State& other)
+        : maybeNext(other.maybeNext.map([&](NextSignature& fn) mutable { return fn.addRef(js); })),
+          maybeReturn(
+              other.maybeReturn.map([&](ReturnSignature& fn) mutable { return fn.addRef(js); })),
+          maybeThrow(
+              other.maybeThrow.map([&](ThrowSignature& fn) mutable { return fn.addRef(js); })),
+          returnExistsButNotCallable(other.returnExistsButNotCallable),
+          done(other.done.addRef()) {}
+    State(State&&) = default;
+    State& operator=(State&&) = default;
+    KJ_DISALLOW_COPY(State);
+
+    bool isDone() const {
+      return *done;
+    }
+    void setDone() {
+      *done = true;
+    }
 
     void visitForGc(GcVisitor& visitor) {
       visitor.visit(maybeNext, maybeReturn, maybeThrow);
     }
   };
-  kj::Maybe<Active> maybeActive;
+  State state;
+
+  Generator(jsg::Lock& js, State& state): state(js, state) {}
 };
 
 template <typename T>
@@ -173,63 +197,32 @@ class AsyncGenerator final {
  public:
   template <typename TypeWrapper>
   AsyncGenerator(Lock& js, JsObject object, TypeWrapper*)
-      : maybeActive(Active(js, object, static_cast<TypeWrapper*>(nullptr))),
-        maybeSelfRef(kj::rc<workerd::WeakRef<AsyncGenerator>>(kj::Badge<AsyncGenerator>{}, *this)) {
-  }
-  AsyncGenerator(AsyncGenerator&& other) noexcept
-      : maybeActive(kj::mv(other.maybeActive)),
-        maybeSelfRef(kj::rc<workerd::WeakRef<AsyncGenerator>>(kj::Badge<AsyncGenerator>{}, *this)) {
-    // Invalidate the old WeakRef since it's being moved.
-    KJ_IF_SOME(selfRef, other.maybeSelfRef) {
-      selfRef->invalidate();
-    }
-  }
-  AsyncGenerator& operator=(AsyncGenerator&& other) {
-    if (this != &other) {
-      KJ_IF_SOME(selfRef, maybeSelfRef) {
-        selfRef->invalidate();
-      }
-      KJ_IF_SOME(selfRef, other.maybeSelfRef) {
-        selfRef->invalidate();
-      }
-      maybeActive = kj::mv(other.maybeActive);
-      maybeSelfRef = kj::rc<workerd::WeakRef<AsyncGenerator>>(kj::Badge<AsyncGenerator>{}, *this);
-    }
-    return *this;
-  }
+      : state(js, object, static_cast<TypeWrapper*>(nullptr)) {}
+  AsyncGenerator(AsyncGenerator&& other) = default;
   KJ_DISALLOW_COPY(AsyncGenerator);
-  ~AsyncGenerator() noexcept(false) {
-    KJ_IF_SOME(selfRef, maybeSelfRef) {
-      selfRef->invalidate();
-    }
-  }
 
   // If nothing is returned, the generator is complete.
   Promise<kj::Maybe<T>> next(Lock& js) {
-    KJ_IF_SOME(active, maybeActive) {
-      KJ_IF_SOME(next, active.maybeNext) {
-        auto& selfRef = KJ_ASSERT_NONNULL(maybeSelfRef);
-        return js.tryCatch([&] {
-          return next(js).then(js, [ref = selfRef.addRef()](Lock& js, auto result) {
-            if (result.done || result.value == kj::none) {
-              ref->runIfAlive([&](AsyncGenerator& self) { self.maybeActive = kj::none; });
-            }
-            return js.resolvedPromise<kj::Maybe<T>>(kj::mv(result.value));
-          }, [ref = selfRef.addRef()](Lock& js, Value exception) {
-            Promise<kj::Maybe<T>> retPromise = nullptr;
-            if (ref->runIfAlive([&](AsyncGenerator& self) {
-              retPromise = self.throw_(js, kj::mv(exception));
-            })) {
-              return kj::mv(retPromise);
-            }
-            return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
-          });
-        }, [&](Value exception) {
-          maybeActive = kj::none;
-          return throw_(js, kj::mv(exception));
+    if (state->isDone()) {
+      return js.resolvedPromise<kj::Maybe<T>>(kj::none);
+    }
+    KJ_IF_SOME(next, state->maybeNext) {
+      JSG_TRY(js) {
+        return next(js).then(js, [state = state.addWeak()](Lock& js, auto result) mutable {
+          KJ_IF_SOME(s, state.tryGet()) {
+            if (result.done) s.setDone();
+          }
+          return js.resolvedPromise<kj::Maybe<T>>(kj::mv(result.value));
+        }, [state = state.addWeak()](Lock& js, Value exception) mutable {
+          KJ_IF_SOME(s, state.tryGet()) {
+            return s.handleThrow(js, kj::mv(exception), kj::mv(state));
+          }
+          return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
         });
       }
-      maybeActive = kj::none;
+      JSG_CATCH(exception) {
+        return throw_(js, kj::mv(exception));
+      };
     }
 
     return js.resolvedPromise(kj::Maybe<T>(kj::none));
@@ -239,35 +232,36 @@ class AsyncGenerator final {
   // Per GetMethod spec (https://262.ecma-international.org/#sec-getmethod), if the 'return'
   // property exists but is not callable, we throw a TypeError.
   Promise<kj::Maybe<T>> return_(Lock& js, kj::Maybe<T> maybeValue = kj::none) {
-    KJ_IF_SOME(active, maybeActive) {
-      // Per GetMethod spec: if property exists but is not callable, throw TypeError
-      if (active.returnExistsButNotCallable) {
-        maybeActive = kj::none;
-        return js.rejectedPromise<kj::Maybe<T>>(
-            js.typeError("Property 'return' is not a function"_kj));
-      }
+    if (state->isDone()) {
+      return js.resolvedPromise<kj::Maybe<T>>(kj::none);
+    }
 
-      KJ_IF_SOME(return_, active.maybeReturn) {
-        auto& selfRef = KJ_ASSERT_NONNULL(maybeSelfRef);
-        return js.tryCatch([&] {
-          return return_(js, kj::mv(maybeValue))
-              .then(js, [ref = selfRef.addRef()](Lock& js, auto result) {
-            if (result.done || result.value == kj::none) {
-              ref->runIfAlive([&](AsyncGenerator& self) { self.maybeActive = kj::none; });
-            }
-            return js.resolvedPromise(kj::mv(result.value));
-          }, [ref = selfRef.addRef()](Lock& js, Value exception) {
-            // Per spec, rejections from return() should be propagated directly
-            ref->runIfAlive([&](AsyncGenerator& self) { self.maybeActive = kj::none; });
-            return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
-          });
-        }, [&](Value exception) {
-          maybeActive = kj::none;
+    // Per GetMethod spec: if property exists but is not callable, throw TypeError
+    if (state->returnExistsButNotCallable) {
+      return js.rejectedPromise<kj::Maybe<T>>(
+          js.typeError("Property 'return' is not a function"_kj));
+    }
+
+    KJ_IF_SOME(return_, state->maybeReturn) {
+      JSG_TRY(js) {
+        return return_(js, kj::mv(maybeValue))
+            .then(js, [state = state.addWeak()](Lock& js, auto result) mutable {
+          KJ_IF_SOME(s, state.tryGet()) {
+            if (result.done) s.setDone();
+          }
+          return js.resolvedPromise(kj::mv(result.value));
+        }, [](Lock& js, Value exception) mutable {
+          // Per spec, rejections from return() should be propagated directly
           return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
         });
       }
-      maybeActive = kj::none;
+      JSG_CATCH(exception) {
+        state->setDone();
+        return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
+      };
     }
+
+    state->setDone();
     return js.resolvedPromise(kj::Maybe<T>(kj::none));
   }
 
@@ -276,30 +270,18 @@ class AsyncGenerator final {
   // It's also possible (and even likely) that the throw handler
   // will just re-throw the exception.
   Promise<kj::Maybe<T>> throw_(Lock& js, Value exception) {
-    KJ_IF_SOME(active, maybeActive) {
-      KJ_IF_SOME(throw_, active.maybeThrow) {
-        auto& selfRef = KJ_ASSERT_NONNULL(maybeSelfRef);
-        return js.tryCatch([&] {
-          return throw_(js, kj::mv(exception))
-              .then(js, [ref = selfRef.addRef()](Lock& js, auto result) {
-            if (result.done || result.value == kj::none) {
-              ref->runIfAlive([&](AsyncGenerator& self) { self.maybeActive = kj::none; });
-            }
-            // In this case, the exception was handled and we might have a value to return.
-            // The generator might still be active.
-            return js.resolvedPromise(kj::mv(result.value));
-          }, [ref = selfRef.addRef()](Lock& js, Value exception) {
-            ref->runIfAlive([&](AsyncGenerator& self) { self.maybeActive = kj::none; });
-            return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
-          });
-        }, [&](Value exception) {
-          maybeActive = kj::none;
-          return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
-        });
-      }
-      maybeActive = kj::none;
+    if (state->isDone()) {
+      return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
     }
-    return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
+    return state->handleThrow(js, kj::mv(exception), state.addWeak());
+  }
+
+  AsyncGenerator addRef(Lock& js) {
+    return AsyncGenerator(js, state.asPtr());
+  }
+
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(*state);
   }
 
  private:
@@ -308,16 +290,17 @@ class AsyncGenerator final {
   using ReturnSignature = Function<Promise<Next>(Optional<T>)>;
   using ThrowSignature = Function<Promise<Next>(Optional<Value>)>;
 
-  struct Active final {
+  struct State final {
     kj::Maybe<NextSignature> maybeNext;
     kj::Maybe<ReturnSignature> maybeReturn;
     kj::Maybe<ThrowSignature> maybeThrow;
     // Per GetMethod spec, if property exists but is not callable, we should throw TypeError.
     // We track this state to defer the error to when return_() is actually called.
     bool returnExistsButNotCallable = false;
+    kj::Rc<bool> done = kj::rc<bool>(false);
 
     template <typename TypeWrapper>
-    Active(Lock& js, JsObject object, TypeWrapper*)
+    State(Lock& js, JsObject object, TypeWrapper*)
         : maybeNext(tryGetGeneratorFunction<NextSignature, TypeWrapper>(js, object, "next"_kj)),
           // maybeReturn is initialized in the constructor body — see below.
           maybeThrow(tryGetGeneratorFunction<ThrowSignature, TypeWrapper>(js, object, "throw"_kj)) {
@@ -341,16 +324,57 @@ class AsyncGenerator final {
         returnExistsButNotCallable = (maybeReturn == kj::none);
       }
     }
-    Active(Active&&) = default;
-    Active& operator=(Active&&) = default;
-    KJ_DISALLOW_COPY(Active);
+
+    State(Lock& js, kj::Ptr<State> other)
+        : maybeNext(other->maybeNext.map([&](NextSignature& fn) mutable { return fn.addRef(js); })),
+          maybeReturn(
+              other->maybeReturn.map([&](ReturnSignature& fn) mutable { return fn.addRef(js); })),
+          maybeThrow(
+              other->maybeThrow.map([&](ThrowSignature& fn) mutable { return fn.addRef(js); })),
+          returnExistsButNotCallable(other->returnExistsButNotCallable),
+          done(other->done.addRef()) {}
+
+    State(State&&) = default;
+    State& operator=(State&&) = default;
+    KJ_DISALLOW_COPY(State);
+
+    bool isDone() const {
+      return *done;
+    }
+    void setDone() {
+      *done = true;
+    }
 
     void visitForGc(GcVisitor& visitor) {
       visitor.visit(maybeNext, maybeReturn, maybeThrow);
     }
+
+    Promise<kj::Maybe<T>> handleThrow(jsg::Lock& js, Value exception, kj::Weak<State> weakSelf) {
+      KJ_IF_SOME(throw_, maybeThrow) {
+        JSG_TRY(js) {
+          return throw_(js, kj::mv(exception))
+              .then(js, [state = kj::mv(weakSelf)](Lock& js, auto result) mutable {
+            KJ_IF_SOME(s, state.tryGet()) {
+              if (result.done) s.setDone();
+            }
+            // In this case, the exception was handled and we might have a value to return.
+            // The generator might still be active.
+            return js.resolvedPromise(kj::mv(result.value));
+          }, [](Lock& js, Value exception) {
+            return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
+          });
+        }
+        JSG_CATCH(ex) {
+          exception = kj::mv(ex);
+        };
+      }
+      setDone();
+      return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
+    }
   };
-  kj::Maybe<Active> maybeActive;
-  kj::Maybe<kj::Rc<workerd::WeakRef<AsyncGenerator>>> maybeSelfRef;
+  kj::Pin<State> state;
+
+  AsyncGenerator(Lock& js, kj::Ptr<State> other): state(js, other) {}
 };
 
 template <typename T>

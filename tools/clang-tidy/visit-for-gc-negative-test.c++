@@ -38,9 +38,11 @@ class Generator {
   void visitForGc(GcVisitor& visitor) {}
 };
 
-// Mirrors the real jsg::AsyncGenerator: no visitForGc.
 template <typename T>
-class AsyncGenerator {};
+class AsyncGenerator {
+ public:
+  void visitForGc(GcVisitor& visitor) {}
+};
 
 template <typename T>
 class Sequence {};
@@ -145,8 +147,8 @@ struct VisitedResolver: public jsg::Object {
   }
 };
 
-// Case N7: visited Generator; Sequence via visitAll; non-visitable element
-// Sequence and AsyncGenerator held strong.
+// Case N7: visited generators; Sequence via visitAll; non-visitable element
+// Sequence held strong.
 struct GeneratorAndSequence: public jsg::Object {
   jsg::Generator<int> gen;
   jsg::Sequence<int> plainSeq;
@@ -154,7 +156,7 @@ struct GeneratorAndSequence: public jsg::Object {
   jsg::AsyncGenerator<int> asyncGen;
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(gen);
+    visitor.visit(gen, asyncGen);
     visitor.visitAll(refSeq);
   }
 };
