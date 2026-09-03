@@ -38,6 +38,7 @@ const unitTests :Workerd.Config = (
           "workers_api_getters_setters_on_prototype",
           "set_tostring_tag",
           "writable_stream_spec_compliant_writer",
+          "enable_weak_ref",
         ],
       )
     ),

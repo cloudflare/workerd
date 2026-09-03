@@ -28,6 +28,7 @@ const unitTests :Workerd.Config = (
           "set_tostring_tag",
           "writable_stream_spec_compliant_writer",
           "pedantic_wpt",
+          "enable_weak_ref",
         ],
       )
     ),

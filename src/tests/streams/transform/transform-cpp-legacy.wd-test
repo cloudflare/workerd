@@ -15,7 +15,7 @@ const unitTests :Workerd.Config = (
           (name = "main", esModule = embed "legacy-main.js"),
           (name = "legacy-identity-fallback", esModule = embed "legacy-identity-fallback.js"),
         ],
-        compatibilityFlags = ["nodejs_compat"],
+        compatibilityFlags = ["nodejs_compat", "enable_weak_ref"],
       )
     ),
   ],
