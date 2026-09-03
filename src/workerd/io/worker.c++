@@ -3989,6 +3989,9 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Maybe<uint64_t> holderToken)
     : worker(kj::atomicAddRef(worker)),
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("event"), "Initialize Durable Object", "has_class",
+      className != kj::none, "has_transient", hasTransient, "has_container", container != kj::none,
+      "has_hibernation_manager", manager != kj::none);
   impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache), kj::mv(props),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
       hibernationEventType, kj::mv(container), facetManager);
@@ -4042,6 +4045,13 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
 }
 
 kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, ActorClassInfo& info) {
+  TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("event"), "Construct Durable Object",
+      PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+  KJ_DEFER({
+    TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("event"), PERFETTO_TRACK_FROM_POINTER(this),
+        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+  });
+
   InputGate::Lock inputLock = co_await impl->inputGate.wait(context.getCurrentTraceSpan());
 
   try {
@@ -4062,6 +4072,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
     }
 
     co_await context.run([this, &info, containerRunning](Worker::Lock& lock, IoContext& context) {
+      TRACE_EVENT(WORKERD_TRACE_CATEGORY("event"), "Run Durable Object constructor", "has_storage",
+          impl->actorCache != kj::none, "container_running", containerRunning);
       jsg::Lock& js = lock;
 
       kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
@@ -4117,6 +4129,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
 }
 
 Worker::Actor::~Actor() noexcept(false) {
+  TRACE_EVENT_INSTANT(
+      WORKERD_TRACE_CATEGORY("event"), "Destroy Durable Object", PERFETTO_TRACK_FROM_POINTER(this));
   // Note: We do not need an isolate lock to destroy the actor impl. Everything in it is specific
   // to our thread, or is a handle that can be dropped outside of the lock.
 
@@ -4124,6 +4138,8 @@ Worker::Actor::~Actor() noexcept(false) {
 }
 
 void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error) {
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("event"), "Shut down Durable Object",
+      PERFETTO_TRACK_FROM_POINTER(this), "reason_code", reasonCode, "has_error", error != kj::none);
   // We're officially canceling all background work and we're going to destruct the Actor as soon
   // as all IoContexts that reference it go out of scope. We might still log additional
   // periodic messages, and that's good because we might care about that information. That said,
@@ -4150,6 +4166,8 @@ void Worker::Actor::shutdownActorCache(kj::Maybe<const kj::Exception&> error) {
 }
 
 void Worker::Actor::abort(const kj::Exception& error) {
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("event"), "Abort Durable Object",
+      PERFETTO_TRACK_FROM_POINTER(this), "exception_type", static_cast<uint>(error.getType()));
   KJ_IF_SOME(ctx, impl->ioContext) {
     impl->metrics->shutdown(0, ctx->getLimitEnforcer());
     ctx->abort(error.clone());
@@ -4364,6 +4382,9 @@ kj::Maybe<kj::Promise<WorkerInterface::AlarmOutcome>> Worker::Actor::getAlarm(
 
 kj::Promise<WorkerInterface::ScheduleAlarmResult> Worker::Actor::scheduleAlarm(
     kj::Date scheduledTime) {
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("event"), "Schedule Durable Object alarm",
+      PERFETTO_TRACK_FROM_POINTER(this), "scheduled_time_ms",
+      (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
   KJ_IF_SOME(runningAlarm, impl->maybeRunningAlarm) {
     if (runningAlarm.scheduledTime == scheduledTime) {
       // The running alarm has the same time, we can just wait for it.
@@ -4406,6 +4427,8 @@ kj::Promise<WorkerInterface::ScheduleAlarmResult> Worker::Actor::handleAlarm(
   co_await impl->runningAlarmTask;
 
   co_await KJ_ASSERT_NONNULL(impl->ioContext)->atTime(scheduledTime);
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("event"), "Start Durable Object alarm",
+      PERFETTO_TRACK_FROM_POINTER(this));
   // It's time to run! Let's tear apart the scheduled alarm and make a running alarm.
 
   // `maybeScheduledAlarm` should have the same value we emplaced above. If another call to

@@ -8,6 +8,7 @@
 
 #include <workerd/jsg/exception.h>
 #include <workerd/util/sentry.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 #include <kj/exception.h>
 #include <kj/function.h>
@@ -17,6 +18,28 @@
 namespace workerd {
 
 namespace {
+
+class PerfettoSqlitePersistence final {
+ public:
+  PerfettoSqlitePersistence() {
+    TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("io"), "Persist Durable Object SQLite",
+        PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+  }
+
+  ~PerfettoSqlitePersistence() noexcept {
+    TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("io"), PERFETTO_TRACK_FROM_POINTER(this),
+        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+  }
+
+  KJ_DISALLOW_COPY_AND_MOVE(PerfettoSqlitePersistence);
+};
+
+kj::Own<PerfettoSqlitePersistence> traceSqlitePersistence() {
+  if (TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("io"))) {
+    return kj::heap<PerfettoSqlitePersistence>();
+  }
+  return {};
+}
 
 // Returns true if a given (set or unset) alarm will fire earlier than another.
 static bool willFireEarlier(kj::Maybe<kj::Date> alarm1, kj::Maybe<kj::Date> alarm2) {
@@ -87,6 +110,7 @@ ActorSqlite::ImplicitTxn::~ImplicitTxn() noexcept(false) {
 void ActorSqlite::ImplicitTxn::commit() {
   // Ignore redundant commit()s.
   if (!committed) {
+    TRACE_EVENT(WORKERD_TRACE_CATEGORY("io"), "Commit Durable Object SQLite transaction");
     parent.commitTxn.run();
     committed = true;
   }
@@ -212,6 +236,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
 }
 
 void ActorSqlite::ExplicitTxn::commitImpl() {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("io"), "Commit Durable Object SQLite savepoint");
   actorSqlite.requireNotBroken();
   KJ_REQUIRE(!hasChild,
       "critical sections should have prevented committing transaction while "
@@ -500,6 +525,16 @@ ActorSqlite::PrecommitAlarmState ActorSqlite::startPrecommitAlarmScheduling() {
 
 kj::Promise<void> ActorSqlite::commitImpl(
     ActorSqlite::PrecommitAlarmState precommitAlarmState, SpanParent parentSpan) {
+  auto perfettoTrace = traceSqlitePersistence();
+  auto operation = commitImplUntraced(kj::mv(precommitAlarmState), kj::mv(parentSpan));
+  if (perfettoTrace.get() != nullptr) {
+    return kj::mv(operation).attach(kj::mv(perfettoTrace));
+  }
+  return kj::mv(operation);
+}
+
+kj::Promise<void> ActorSqlite::commitImplUntraced(
+    ActorSqlite::PrecommitAlarmState precommitAlarmState, SpanParent parentSpan) {
   auto commitSpan = parentSpan.newChild("actor_sqlite_commit"_kjc);
 
   // We assume that exceptions thrown during commit will propagate to the caller, such that they
@@ -700,6 +735,7 @@ void ActorSqlite::maybeDeleteDeferredAlarm() {
 
 kj::OneOf<kj::Maybe<ActorCacheOps::Value>, kj::Promise<kj::Maybe<ActorCacheOps::Value>>>
 ActorSqlite::get(Key key, ReadOptions options) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("io"), "Durable Object SQLite get", "key_size", key.size());
   requireNotBroken();
 
   kj::Maybe<ActorCacheOps::Value> result;
@@ -709,6 +745,8 @@ ActorSqlite::get(Key key, ReadOptions options) {
 
 kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>> ActorSqlite::get(
     kj::Array<Key> keys, ReadOptions options) {
+  TRACE_EVENT(
+      WORKERD_TRACE_CATEGORY("io"), "Durable Object SQLite get multiple", "keys", keys.size());
   requireNotBroken();
 
   kj::Vector<KeyValuePair> results;
@@ -722,6 +760,7 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 
 kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorSqlite::getAlarm(
     ReadOptions options) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("io"), "Durable Object SQLite get alarm");
   requireNotBroken();
 
   bool transactionAlarmDirty = false;
@@ -741,6 +780,8 @@ kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorSqlite::ge
 
 kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>> ActorSqlite::
     list(Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("io"), "Durable Object SQLite list", "reverse", false,
+      "has_limit", limit != kj::none, "limit", limit.orDefault(0));
   requireNotBroken();
 
   kj::Vector<KeyValuePair> results;
@@ -754,6 +795,8 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 
 kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>> ActorSqlite::
     listReverse(Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("io"), "Durable Object SQLite list", "reverse", true,
+      "has_limit", limit != kj::none, "limit", limit.orDefault(0));
   requireNotBroken();
 
   kj::Vector<KeyValuePair> results;
@@ -767,6 +810,8 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(
     Key key, Value value, WriteOptions options, SpanParent traceSpan) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("io"), "Durable Object SQLite put", "key_size", key.size(),
+      "value_size", value.size());
   requireNotBroken();
   // Capture trace span for the output gate lock hold trace.
   currentCommitSpan = kj::mv(traceSpan);
@@ -776,6 +821,8 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(
     kj::Array<KeyValuePair> pairs, WriteOptions options, SpanParent traceSpan) {
+  TRACE_EVENT(
+      WORKERD_TRACE_CATEGORY("io"), "Durable Object SQLite put multiple", "pairs", pairs.size());
   requireNotBroken();
   // Capture trace span for the output gate lock hold trace.
   currentCommitSpan = kj::mv(traceSpan);
@@ -794,6 +841,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(
 
 kj::OneOf<bool, kj::Promise<bool>> ActorSqlite::delete_(
     Key key, WriteOptions options, SpanParent traceSpan) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("io"), "Durable Object SQLite delete", "key_size", key.size());
   requireNotBroken();
   // Capture trace span for the output gate lock hold trace.
   currentCommitSpan = kj::mv(traceSpan);
@@ -803,6 +851,8 @@ kj::OneOf<bool, kj::Promise<bool>> ActorSqlite::delete_(
 
 kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(
     kj::Array<Key> keys, WriteOptions options, SpanParent traceSpan) {
+  TRACE_EVENT(
+      WORKERD_TRACE_CATEGORY("io"), "Durable Object SQLite delete multiple", "keys", keys.size());
   requireNotBroken();
   // Capture trace span for the output gate lock hold trace.
   currentCommitSpan = kj::mv(traceSpan);
@@ -816,6 +866,8 @@ kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options, SpanParent traceSpan) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("io"), "Durable Object SQLite update alarm", "delete",
+      newAlarmTime == kj::none);
   requireNotBroken();
   // Capture trace span for the output gate lock hold trace.
   currentCommitSpan = kj::mv(traceSpan);
@@ -844,6 +896,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
 
 kj::OneOf<kj::Own<ActorCacheInterface::Transaction>, kj::Promise<void>> ActorSqlite::
     startTransaction() {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("io"), "Durable Object SQLite start transaction");
   requireNotBroken();
 
   KJ_IF_SOME(itxn, currentTxn.tryGet<ImplicitTxn*>()) {
@@ -861,6 +914,7 @@ kj::OneOf<kj::Own<ActorCacheInterface::Transaction>, kj::Promise<void>> ActorSql
 
 ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(
     WriteOptions options, SpanParent traceSpan, DeleteAllOptions deleteAllOptions) {
+  TRACE_EVENT(WORKERD_TRACE_CATEGORY("io"), "Durable Object SQLite delete all");
   requireNotBroken();
   disableAllowUnconfirmed(options, "deleteAll is not supported");
 
