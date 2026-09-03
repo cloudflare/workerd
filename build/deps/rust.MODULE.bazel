@@ -29,7 +29,11 @@ rust.toolchain(
         RUST_NIGHTLY_VERSION,
     ],
 )
-use_repo(rust, "rust_toolchains")
+use_repo(
+    rust,
+    "rust_toolchains",
+    rust_nightly_linux_x86_64 = "rust_linux_x86_64__x86_64-unknown-linux-gnu__nightly_tools",
+)
 
 register_toolchains("@rust_toolchains//:all")
 

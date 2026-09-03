@@ -73,6 +73,11 @@
       "name": "rules_rust",
       "type": "bazel_dep"
     },
+    {
+      "name": "rust_nightly",
+      "type": "rust_nightly",
+      "freeze_version": "2026-07-16"
+    },
     // wasm-tools
     {
       "name": "wasm_tools_linux_x64",

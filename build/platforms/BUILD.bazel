@@ -1,0 +1,28 @@
+package(default_visibility = ["//visibility:public"])
+
+constraint_setting(name = "sanitizer")
+
+constraint_value(
+    name = "sanitizer_address",
+    constraint_setting = ":sanitizer",
+)
+
+constraint_value(
+    name = "sanitizer_thread",
+    constraint_setting = ":sanitizer",
+)
+
+platform(
+    name = "sanitizer_address_platform",
+    constraint_values = [":sanitizer_address"],
+    parents = ["@platforms//host"],
+)
+
+platform(
+    name = "sanitizer_thread_platform",
+    constraint_values = [
+        ":sanitizer_thread",
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+)

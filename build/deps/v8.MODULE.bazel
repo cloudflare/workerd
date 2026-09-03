@@ -63,6 +63,7 @@ PATCHES = [
     "0038-Properly-depend-on-llvm-libc.patch",
     "0039-wasm-memory.discard-prototype-for-the-memory-control.patch",
     "0040-cppgc-Add-two-API-calls-for-testing.patch",
+    "0041-Fix-TSan-build-without-the-V8-sandbox.patch",
 ]
 
 http_archive(

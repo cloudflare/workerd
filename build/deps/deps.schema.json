@@ -235,6 +235,25 @@
             "type": "object",
             "properties": {
               "type": {
+                "const": "rust_nightly"
+              },
+              "name": {
+                "type": "string"
+              },
+              "freeze_version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
                 "const": "bazel_dep"
               },
               "name": {

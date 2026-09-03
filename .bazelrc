@@ -234,15 +234,38 @@ build:sanitizer-common --copt="-Og"
 build:sanitizer-common --copt="-g" --strip=never
 build:sanitizer-common --copt="-fno-optimize-sibling-calls"
 build:sanitizer-common --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-frame-pointer"
+# Rust's sanitizer support requires nightly
+build:sanitizer-common --@rules_rust//rust/toolchain/channel:channel=nightly
 
 # address sanitizer (https://github.com/google/sanitizers/wiki/AddressSanitizer)
 build:asan --config=sanitizer-common
+build:asan --platforms=//build/platforms:sanitizer_address_platform
 build:asan --copt="-fsanitize=address" --linkopt="-fsanitize=address"
 build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
 build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
 build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
 build:asan --per_file_copt='external/.*v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
+
+# thread sanitizer (https://github.com/google/sanitizers/wiki/ThreadSanitizerCppManual)
+build:tsan --config=sanitizer-common
+build:tsan --copt="-fsanitize=thread" --linkopt="-fsanitize=thread"
+# A statically-linked unwinder in each shared library cannot propagate exceptions across DSOs.
+build:tsan --linkopt="-l:libunwind.so.8"
+build:tsan --platforms=//build/platforms:sanitizer_thread_platform
+build:tsan --action_env=TSAN_OPTIONS=halt_on_error=true
+build:tsan --test_env=TSAN_OPTIONS=halt_on_error=true
+# Clang-tidy loads this shared object into an unsanitized process, which cannot resolve TSan hooks.
+build:tsan --per_file_copt='tools/clang-tidy@-fno-sanitize=thread'
+# TSan significantly increases test runtime.
+build:tsan --test_timeout=30,150,600,2400
+# Enable V8's TSan-specific generated code and synchronization annotations. V8's Bazel build does
+# not currently derive these defines from the compiler's sanitizer flags.
+build:tsan --copt="-DV8_IS_TSAN"
+build:tsan --per_file_copt='external/.*v8@-DTHREAD_SANITIZER'
+build:tsan --extra_toolchains=//build/rust:tsan_toolchain
+build:tsan --@rules_rust//:extra_rustc_flag=-Zsanitizer=thread
+build:tsan --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
 
 # fuzzilli (https://github.com/googleprojectzero/fuzzilli/)
 build:fuzzilli --config=asan
