@@ -7868,5 +7868,28 @@ MF-Access-Blob: {"app_aud":"valid-aud","jwt_claims":"not-an-object"}
   }
 }
 
+KJ_TEST("Server: handler validation does not evaluate unrelated getters") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2026-07-30",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `export default {
+          `  fetch() {
+          `    return new Response("ok");
+          `  },
+          `  get unrelated() {
+          `    return NOT_DEFINED_ANYWHERE;
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "ok");
+}
+
 }  // namespace
 }  // namespace workerd::server

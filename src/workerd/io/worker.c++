@@ -2686,24 +2686,36 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
       auto report = [&](kj::Maybe<kj::StringPtr> name, api::ExportedHandler& exported) {
         auto handle = exported.self.getHandle(js);
         if (handle->IsArray()) {
-          // HACK: toDict() will throw a TypeError if given an array, because jsg::DictWrapper is
-          //   designed to treat arrays as not matching when a dict is expected. However,
-          //   StructWrapper has no such restriction, and therefore an exported array will
-          //   successfully produce an ExportedHandler (presumably with no handler functions), and
-          //   hence we will see it here. Rather than try to correct this inconsistency between
-          //   struct and dict handling (which could have unintended consequences), let's just
-          //   work around by ignoring arrays here.
+          // HACK: jsg::DictWrapper is designed to treat arrays as not matching when a dict is
+          //   expected. However, StructWrapper has no such restriction, and therefore an exported
+          //   array will successfully produce an ExportedHandler (presumably with no handler
+          //   functions), and hence we will see it here. Rather than try to correct this
+          //   inconsistency between struct and dict handling (which could have unintended
+          //   consequences), let's just work around by ignoring arrays here -- otherwise we'd
+          //   report the array's indices as if they were handler names.
           errorReporter.addEntrypoint(name, kj::Array<kj::String>());
         } else {
           // Use a HashSet to avoid duplicates when methods exist both as own properties
           // and in the prototype chain
           kj::HashSet<kj::String> methodSet;
 
-          // First, check for own properties (like a plain object literal)
-          auto dict = js.toDict(handle);
-          for (auto& field: dict.fields) {
-            if (!ignoredHandlers.contains(field.name)) {
-              methodSet.upsert(kj::mv(field.name), [&](auto&, auto&&) {});
+          // First, check for own properties (like a plain object literal).
+          //
+          // We deliberately read only the property names here, never their values. Reading
+          // values (as `toDict()` does) invokes application-defined getters, which can throw
+          // arbitrary exceptions and end up reported as an internal error instead of a
+          // user-visible script error. The handler values themselves were already validated
+          // when the export was unwrapped into an ExportedHandler, so we don't need them here.
+          //
+          jsg::JsArray ownProperties =
+              jsg::JsObject(handle).getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
+                  static_cast<jsg::PropertyFilter>(
+                      jsg::PropertyFilter::ONLY_ENUMERABLE | jsg::PropertyFilter::SKIP_SYMBOLS),
+                  jsg::IndexFilter::INCLUDE_INDICES);
+          for (auto i: kj::zeroTo(ownProperties.size())) {
+            auto propName = ownProperties.get(js, i).toString(js);
+            if (!ignoredHandlers.contains(propName)) {
+              methodSet.upsert(kj::mv(propName), [&](auto&, auto&&) {});
             }
           }
 
