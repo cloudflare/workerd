@@ -25,12 +25,28 @@ namespace workerd::api {
 kj::Own<ReadableStreamSource> newSystemStream(kj::Own<kj::AsyncInputStream> inner,
     StreamEncoding encoding,
     IoContext& context = IoContext::current());
+// Chain-taking overload: `encodings` is the stream's content coding chain in the order the
+// codings were applied, and an empty array means identity. StreamEncoding::IDENTITY must never
+// appear in the array -- it is not a transformation, so it has no place in a chain, and a
+// violation trips a KJ_FAIL_ASSERT on the read path. getContentEncoding() maintains this
+// invariant for chains parsed from headers.
+kj::Own<ReadableStreamSource> newSystemStream(kj::Own<kj::AsyncInputStream> inner,
+    kj::Array<StreamEncoding> encodings,
+    IoContext& context = IoContext::current());
 
 // A WritableStreamSink which automatically encodes its underlying stream.
 //
 // NOTE: As with the other overload of newSystemStream(), `inner` must be wholly owned.
 kj::Own<WritableStreamSink> newSystemStream(kj::Own<kj::AsyncOutputStream> inner,
     StreamEncoding encoding,
+    IoContext& context = IoContext::current());
+// Chain-taking overload: `encodings` is the coding chain to apply to written bytes, in applied
+// order, and an empty array means identity. StreamEncoding::IDENTITY must never appear in the
+// array -- it is not a transformation, so it has no place in a chain, and a violation trips a
+// KJ_FAIL_ASSERT on the write path. getContentEncoding() maintains this invariant for chains
+// parsed from headers.
+kj::Own<WritableStreamSink> newSystemStream(kj::Own<kj::AsyncOutputStream> inner,
+    kj::Array<StreamEncoding> encodings,
     IoContext& context = IoContext::current());
 
 struct SystemMultiStream {
@@ -48,9 +64,12 @@ struct ContentEncodingOptions {
   ContentEncodingOptions(CompatibilityFlags::Reader flags);
 };
 
-// Get the Content-Encoding header from an HttpHeaders object as a StreamEncoding enum. Unsupported
-// encodings return IDENTITY.
-StreamEncoding getContentEncoding(IoContext& context,
+// Get the Content-Encoding header from an HttpHeaders object as a chain of StreamEncoding values,
+// listed in the order they were applied. An empty array means identity. The chain currently never
+// holds more than one element: the whole header value is matched against the supported codings,
+// and any other value (including a comma-separated list) yields the empty chain, so the body is
+// passed through unchanged, exactly as before.
+kj::Array<StreamEncoding> getContentEncoding(IoContext& context,
     const kj::HttpHeaders& headers,
     Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,
     ContentEncodingOptions options = {});
