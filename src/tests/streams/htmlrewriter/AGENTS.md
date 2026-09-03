@@ -22,7 +22,7 @@ under the MODERN `fixup-transform-stream-backpressure`.
 | `identityStreamBody` | identity body fed by a concurrent writer |
 | `cancelDoesNotReachSource` | PARITY PIN: cancelling the transformed body does NOT invoke the source's cancel hook (contrast pipeTo); demand simply stops (bounded) |
 | `erroringSourceRejectsConsumption` | source error surfaces from .text() |
-| `largeDocumentThroughHandler` | 8192 elements / ~300 KiB through a counting handler, byte-exact output length |
+| `largeDocumentThroughHandler` | 1024 elements / ~264 KiB through a counting handler, byte-exact output |
 
 The api/tests htmlrewriter-transform-cancel-test.js (cancel-before-read
 ×50 UAF regression) stays where it is, per the security-regression

@@ -8,7 +8,7 @@ interaction only.
 
 ## Infrastructure
 
-Both cells wire `cacheApiOutbound` to a loopback `cache-backend` worker
+All cells wire `cacheApiOutbound` to a loopback `cache-backend` worker
 (cache-backend.js). A cache.put() arrives there as a PUT whose body is
 the SERIALIZED HTTP RESPONSE (status line + headers + CRLFCRLF + body);
 the backend splits at the header boundary, verifies the continuous
@@ -29,6 +29,14 @@ the record back through its MOCK service binding (/last-put).
 | `putErroringBodyRejects` | source error rejects the put |
 | `concurrentClonePuts` | the migrated cache-put-stream-test.js regression: clone + concurrent puts over a live TransformStream body, 1 MiB |
 | `matchBodyIsReadableStream` | a HIT body streams out and drains via a reader |
+
+## Compatibility flags
+
+The main C++ cell pins `streams_enable_constructors` and
+`transformstream_enable_standard_constructor`. `cache-cpp-legacy` runs
+`concurrentClonePuts` with only `nodejs_compat`, retaining coverage of the
+original TransformStream constructor. Its `@all-compat-flags` variant is
+disabled because that variant would enable the standard constructor.
 
 Consumed source (deleted): cache-put-stream-test.js. The backend
 worker takes no compatibilityDate — wd_test injects `--compat-date`,

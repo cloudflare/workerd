@@ -193,11 +193,11 @@ export const erroringSourceRejectsConsumption = {
 };
 
 // A LARGE document (256 KiB of repeated elements) through a counting
-// handler, byte-exact output length.
+// handler, with byte-exact output.
 export const largeDocumentThroughHandler = {
   async test() {
-    const UNIT = '<div class="item">content here</div>';
-    const COUNT = 8192;
+    const UNIT = `<div class="item">${'content here'.repeat(20)}</div>`;
+    const COUNT = 1024;
     let elements = 0;
     let offset = 0;
     const doc = UNIT.repeat(COUNT);
@@ -219,6 +219,6 @@ export const largeDocumentThroughHandler = {
       .transform(new Response(rs))
       .text();
     strictEqual(elements, COUNT);
-    strictEqual(result.length, doc.length);
+    strictEqual(result, doc);
   },
 };

@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# C++-only legacy cell: concurrent clone puts run under the original
+# TransformStream constructor. The BUILD rule disables the
+# @all-compat-flags variant, which would enable the standard constructor.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-cache-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "cache-streams", esModule = embed "cache-streams.js"),
+        ],
+        cacheApiOutbound = "cache-backend",
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+    ( name = "cache-backend",
+      worker = (
+        modules = [
+          (name = "backend", esModule = embed "cache-backend.js"),
+        ],
+      )
+    ),
+  ],
+);
