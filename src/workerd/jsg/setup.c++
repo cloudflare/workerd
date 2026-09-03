@@ -297,15 +297,23 @@ HeapTracer::HeapTracer(v8::Isolate* isolate)
     : isolate(isolate) {
   isolate->AddGCPrologueCallback(
       [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
-    // We can expect that any freelisted shims will be collected during a major GC, because
-    // they are not in use therefore not reachable. We should therefore clear the freelist now,
-    // before the trace starts: once the trace has determined a shim to be unreachable it will
-    // be destroyed, so a shim reused after that point would be left dangling.
-    //
-    // We must clear the freelist in the GC prologue, not the epilogue, because when building in
-    // ASAN mode, V8 will poison the objects' memory, so our attempt to clear the freelist after
-    // the fact will trigger a spurious ASAN failure.
-    static_cast<HeapTracer*>(data)->clearFreelistedShims();
+    auto& self = *static_cast<HeapTracer*>(data);
+    if (type == v8::GCType::kGCTypeMarkSweepCompact) {
+      // We can expect that any freelisted shims will be collected during a major GC, because
+      // they are not in use therefore not reachable. We should therefore clear the freelist
+      // now, before the trace starts.
+      //
+      // Note that we cannot simply depend on the destructor of CppgcShim to remove objects
+      // from the freelist, because destructors do not actually run at trace time. They may be
+      // deferred to run some time after the trace is done. If we accidentally reuse a shim
+      // during that time, we'll have a problem as the shim will still be destroyed as it was
+      // already determined to be unreachable.
+      //
+      // We must clear the freelist in the GC prologue, not the epilogue, because when building
+      // in ASAN mode, V8 will poison the objects' memory, so our attempt to clear the freelist
+      // after the fact will trigger a spurious ASAN failure.
+      self.clearFreelistedShims();
+    }
   }, this, v8::GCType::kGCTypeMarkSweepCompact);
 
   isolate->AddGCEpilogueCallback(
@@ -327,30 +335,7 @@ HeapTracer& HeapTracer::getTracer(v8::Isolate* isolate) {
   return IsolateBase::from(isolate).heapTracer;
 }
 
-void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
-  // V8 calls this to tell us when our wrapper can be dropped. See comment about droppable
-  // references in Wrappable::attachWrapper() for details.
-  v8::HandleScope scope(isolate);
-
-  // V8 can only hand this polymorphic callback an object that is in one of the
-  // sandbox-external tables, so it's genuinely one of our objects. Sandbox-internal corruption
-  // can still substitute another shim, so resolve through the exact wrapper identity check.
-  auto object = handle.As<v8::Object>().Get(isolate);
-  auto& wrappable =
-      *Wrappable::unwrapFromShimInRangeOrAbort(isolate, object, kJsgWrappableTagRange);
-  auto& backReference = KJ_ASSERT_NONNULL(wrappable.wrapper);
-
-  // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
-  // (which is what `detachWrapper()` will do) it is not satisfied, and will come back and try to
-  // visit the reference again, but it will DCHECK-fail on that second attempt because the
-  // reference is in an inconsistent state at that point.
-  backReference.Reset();
-
-  // We don't want to call `detachWrapper()` now because it may create new handles (specifically,
-  // if the wrappable has strong references, which means that its outgoing references need to be
-  // upgraded to strong).
-  detachLater.add(&wrappable);
-}
+// Note: ResetRoot() lives in wrappable.c++, where Wrappable::CppgcShim is a complete type.
 
 bool HeapTracer::TryResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // This method is potentially called on a separate thread. Our ResetRoot() implementation,
