@@ -1657,23 +1657,9 @@ Ref<T> _jsgThis(T* obj) {
 // wrapper is collected), the WeakRef automatically becomes invalid — no manual invalidation
 // is required.
 //
-// The accessors answer two different questions:
-//
-// - tryGet() and operator->() answer "is the C++ object still alive?". They require no
-//   isolate lock, and the result is valid for pure C++/KJ access ONLY. The target may be
-//   *condemned*: its JS wrapper died in a major GC whose deferred cleanup has not yet
-//   destroyed the object, in which case its V8-facing state (the wrapper TracedReference,
-//   V8Ref/JsRef members, promise resolvers) is already zapped. Taking a Ref, calling
-//   getHandle(), dispatching events, or touching any V8 handle through the result can be a
-//   use-after-free.
-//
-// - tryAddRef(js) answers "is the object still usable from JS?". It requires the isolate
-//   lock and returns kj::none for condemned objects (see Wrappable::isCondemned()).
-//   Any JS-facing work through a WeakRef must go through tryAddRef().
-//
 // Use operator->() for convenient single-expression access that asserts liveness:
 //
-//     weakFoo->doPureCppThing();  // throws kj::Exception if dead
+//     weakFoo->doSomething();  // throws kj::Exception if dead
 //
 // Use tryGet() or tryAddRef() when the target might legitimately be dead:
 //
@@ -1734,9 +1720,6 @@ class WeakRef {
 
   // Dereference. Asserts if the target has been destroyed.
   // Safe for single-expression use: weakFoo->doSomething()
-  //
-  // Valid for pure C++/KJ access only — the target may be condemned (see the class comment).
-  // Use tryAddRef() for anything that touches V8 state.
   T* operator->() const KJ_LIFETIMEBOUND {
     auto& i = KJ_ASSERT_NONNULL(impl, "attempt to access destroyed jsg::WeakRef target");
     KJ_ASSERT(i.anchor->isAlive(), "attempt to access invalidated jsg::WeakRef target");
@@ -1758,9 +1741,6 @@ class WeakRef {
   // Use of tryGet is discouraged because it does return a raw reference that can
   // dangle. Use it only for single-expression access, essentially as a non-asserting
   // version of operator->().
-  //
-  // Valid for pure C++/KJ access only — the target may be condemned (see the class comment).
-  // Use tryAddRef() for anything that touches V8 state.
   kj::Maybe<T&> tryGet() const KJ_LIFETIMEBOUND {
     KJ_IF_SOME(i, impl) {
       if (i.anchor->isAlive()) {
@@ -1770,12 +1750,10 @@ class WeakRef {
     return kj::none;
   }
 
-  // Try to promote to a strong Ref<T>. Returns kj::none if the target has been destroyed,
-  // or if the target's V8 wrapper died in a major GC whose deferred cleanup has not yet
-  // released the target (detected via Wrappable::isCondemned();
-  // see the implementation in setup.h). In the latter case the target is condemned and this
-  // WeakRef is permanently invalidated.
-  kj::Maybe<Ref<T>> tryAddRef(Lock&) const;
+  // Try to promote to a strong Ref<T>. Returns kj::none if the target has been destroyed.
+  kj::Maybe<Ref<T>> tryAddRef(Lock&) const {
+    return tryGet().map([](T& t) { return Ref<T>(kj::addRef(t)); });
+  }
 
   // Create another weak ref to the same target.
   WeakRef addRef(jsg::Lock& js) &;
@@ -3119,18 +3097,12 @@ class Lock {
   // implementation in setup.c++. Use responsibly.
   void requestGcForTesting() const;
 
-  // Like requestGcForTesting(), but leaves cppgc's sweep pending rather than running it inside the
-  // collection. On return, wrappers unreachable at the start of the GC have been collected and
-  // their Wrappables condemned (see Wrappable::isCondemned()), but the ~CppgcShim that releases
-  // each Wrappable has not run yet. This is the state a natural major GC leaves behind, and the
-  // only state in which the condemned-wrapper hazard is observable.
-  //
-  // Pair with finishDeferredSweepForTesting() to close the window. Testing only.
-  void requestGcWithDeferredSweepForTesting() const;
-
-  // Completes a sweep left pending by requestGcWithDeferredSweepForTesting(), running the deferred
-  // ~CppgcShim finalizers. Testing only.
-  void finishDeferredSweepForTesting() const;
+  // Like requestGcForTesting(), but requests an unforced collection, configured the way a
+  // spontaneous allocation-triggered one would be. Forced collections always sweep cppgc
+  // atomically; unforced ones use the sweeping type newCppHeap() configured, so this is the only
+  // way a test can observe the finalization timing that production actually gets. Test-only, same
+  // as requestGcForTesting().
+  void requestGcWithDefaultSweepForTesting() const;
 
   // Runs the given function synchronously with a v8::HandleScope on the stack.
   // If the fn returns a v8::Local<T> or v8::MaybeLocal<T> type, then

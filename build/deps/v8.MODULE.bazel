@@ -62,7 +62,7 @@ PATCHES = [
     "0037-Fix-CFunction-MemorySpan-declarations-on-Windows.patch",
     "0038-Properly-depend-on-llvm-libc.patch",
     "0039-wasm-memory.discard-prototype-for-the-memory-control.patch",
-    "0040-cppgc-Add-two-API-calls-for-testing.patch",
+    "0040-cppgc-Sweep-cppgc-eagerly-with-non-incremental-GC.patch",
 ]
 
 http_archive(

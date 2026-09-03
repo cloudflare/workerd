@@ -1,0 +1,122 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Erik Corry <ecorry@cloudflare.com>
+Date: Thu, 3 Sep 2026 14:47:47 +0200
+Subject: [cppgc] Sweep cppgc eagerly with non-incremental GC
+
+When the embedder requests non-incremental GC
+V8 would accidentally still postpone cppgc sweeping
+until the next turns. With this change it respects
+the setting and does cppgc sweeping and calling of
+cppgc finalizers in the atomic GC pause.
+
+Also adds a test API to get a GC that matches
+organic memory-pressure GCs in terms of cppgc
+sweeping. The default GC request API always sweeps
+atomically. With this API an embedder can test
+the type of GCs that can be expected in normal
+running.
+
+diff --git a/include/v8-isolate.h b/include/v8-isolate.h
+index 1df5fa358d5afb1ee9eb0b7ab07ade2efcf5db95..343a3ac2b71206fd404f1be67e51ae0e21605af1 100644
+--- a/include/v8-isolate.h
++++ b/include/v8-isolate.h
+@@ -1374,6 +1374,24 @@ class V8_EXPORT Isolate {
+   void RequestGarbageCollectionForTesting(GarbageCollectionType type,
+                                           StackState stack_state);
+ 
++  /**
++   * Request a full garbage collection that is configured the same way as a
++   * spontaneous, allocation-triggered collection, rather than as a forced one.
++   * It is only valid to call this function if --expose_gc was specified.
++   *
++   * A forced collection always sweeps the C++ heap atomically, overriding
++   * CppHeapCreateParams::sweeping_support. An unforced collection honors it, so
++   * embedders observe the finalization timing they actually get in production:
++   * atomic sweeping finalizes within the pause, while incremental or concurrent
++   * sweeping may leave finalizers pending after this call returns.
++   *
++   * This should only be used for testing purposes and not to enforce a garbage
++   * collection schedule. It has strong negative impact on the garbage
++   * collection performance. Use MemoryPressureNotification() instead to
++   * influence the garbage collection schedule.
++   */
++  void RequestUnforcedGarbageCollectionForTesting(StackState stack_state);
++
+   /**
+    * Set the callback to invoke for logging event.
+    */
+diff --git a/src/api/api.cc b/src/api/api.cc
+index 82e7d0051159d829927223210a672450ac68f59c..977a0c3921b15a5f8702308c3b2a7d94909c6c03 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -10298,6 +10298,29 @@ void Isolate::RequestGarbageCollectionForTesting(GarbageCollectionType type,
+   RequestGarbageCollectionForTesting(type);
+ }
+ 
++void Isolate::RequestUnforcedGarbageCollectionForTesting(
++    StackState stack_state) {
++  Utils::ApiCheck(i::v8_flags.expose_gc,
++                  "v8::Isolate::RequestUnforcedGarbageCollectionForTesting",
++                  "Must use --expose-gc");
++  // The embedder must have entered the isolate (via `Isolate::Scope`) such that
++  // the GC can get the "current" isolate from TLS.
++  DCHECK_EQ(this, Isolate::TryGetCurrent());
++
++  i::Heap* heap = reinterpret_cast<i::Isolate*>(this)->heap();
++  i::EmbedderStackStateScope stack_scope(
++      heap, i::EmbedderStackStateOrigin::kExplicitInvocation, stack_state);
++  // Deliberately no kGCCallbackFlagForced, which is the only difference from
++  // RequestGarbageCollectionForTesting(). GarbageCollectionPrologue() derives
++  // is_current_gc_forced_ from it, CppHeap picks up kForced from there, and
++  // CppHeap::SelectSweepingType() then sweeps atomically no matter what
++  // sweeping_support the embedder configured. Leaving the collection unforced
++  // lets that configuration take effect.
++  heap->PreciseCollectAllGarbage(i::GCFlag::kNoFlags,
++                                 i::GarbageCollectionReason::kTesting,
++                                 kNoGCCallbackFlags);
++}
++
+ Isolate* Isolate::GetCurrent() {
+   i::Isolate* i_isolate = i::Isolate::Current();
+   return reinterpret_cast<Isolate*>(i_isolate);
+diff --git a/src/heap/cppgc-js/cpp-heap.cc b/src/heap/cppgc-js/cpp-heap.cc
+index 6d0a7b913899f0c1063d89eebda8f9cb9e4c43ba..4bd9a5eef49802121bbb40576f5568db38bb247d 100644
+--- a/src/heap/cppgc-js/cpp-heap.cc
++++ b/src/heap/cppgc-js/cpp-heap.cc
+@@ -761,6 +761,19 @@ CppHeap::SweepingType CppHeap::SelectSweepingType() const {
+ }
+ 
+ void CppHeap::UpdateGCCapabilitiesFromFlags() {
++  // Runtime flags may only reduce what the embedder requested via
++  // CppHeapCreateParams; they must never grant more. The std::min calls below
++  // do that directly. The marking else-branch does it by assigning kAtomic,
++  // which is the least capable value. All of this depends on the enumerators
++  // being ordered from least to most capable; reordering them would silently
++  // grant more than was requested.
++  static_assert(MarkingType::kAtomic < MarkingType::kIncremental);
++  static_assert(MarkingType::kIncremental <
++                MarkingType::kIncrementalAndConcurrent);
++  static_assert(SweepingType::kAtomic < SweepingType::kIncremental);
++  static_assert(SweepingType::kIncremental <
++                SweepingType::kIncrementalAndConcurrent);
++
+   CHECK_IMPLIES(v8_flags.cppheap_concurrent_marking,
+                 v8_flags.cppheap_incremental_marking);
+   if (v8_flags.cppheap_concurrent_marking) {
+@@ -773,9 +786,13 @@ void CppHeap::UpdateGCCapabilitiesFromFlags() {
+     marking_support_ = MarkingType::kAtomic;
+   }
+ 
+-  sweeping_support_ = v8_flags.single_threaded_gc
+-                          ? CppHeap::SweepingType::kIncremental
+-                          : CppHeap::SweepingType::kIncrementalAndConcurrent;
++  // Assigning unconditionally here would raise an embedder-requested kAtomic
++  // back up, silently ignoring CppHeapCreateParams::sweeping_support.
++  sweeping_support_ =
++      std::min(sweeping_support_,
++               v8_flags.single_threaded_gc
++                   ? CppHeap::SweepingType::kIncremental
++                   : CppHeap::SweepingType::kIncrementalAndConcurrent);
+ }
+ 
+ void CppHeap::InitializeMarking(
