@@ -42,6 +42,88 @@ static void* getThreadId() {
 
 namespace {
 
+constexpr uint8_t CPU_LIMIT_TRACE_BIT = 1u << 0;
+constexpr uint8_t MEMORY_LIMIT_TRACE_BIT = 1u << 1;
+constexpr uint8_t WALL_TIME_LIMIT_TRACE_BIT = 1u << 2;
+constexpr uint8_t SUBREQUEST_LIMIT_TRACE_BIT = 1u << 3;
+constexpr uint8_t IN_HOUSE_SUBREQUEST_LIMIT_TRACE_BIT = 1u << 4;
+constexpr uint8_t KV_LIMIT_TRACE_BIT = 1u << 5;
+constexpr uint8_t ANALYTICS_ENGINE_LIMIT_TRACE_BIT = 1u << 6;
+
+}  // namespace
+
+void IoContext::traceResourceLimitExceeded(EventOutcome outcome, kj::StringPtr source) {
+  if (!TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("resource"))) {
+    return;
+  }
+
+  uint8_t bit;
+  switch (outcome) {
+    case EventOutcome::EXCEEDED_CPU:
+      bit = CPU_LIMIT_TRACE_BIT;
+      break;
+    case EventOutcome::EXCEEDED_MEMORY:
+      bit = MEMORY_LIMIT_TRACE_BIT;
+      break;
+    case EventOutcome::EXCEEDED_WALL_TIME:
+      bit = WALL_TIME_LIMIT_TRACE_BIT;
+      break;
+    default:
+      return;
+  }
+
+  if (!incomingRequests.empty()) {
+    auto& request = getCurrentIncomingRequest();
+    if ((request.perfettoLimitEvents & bit) != 0) {
+      return;
+    }
+    request.perfettoLimitEvents |= bit;
+  }
+
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("resource"), "Resource limit exceeded", "outcome",
+      getEventOutcomeName(outcome).cStr(), "source", source.cStr());
+}
+
+void IoContext::traceOperationLimitExceeded(OperationLimitType type) {
+  if (!TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("resource"))) {
+    return;
+  }
+
+  uint8_t bit;
+  kj::StringPtr operation;
+  switch (type) {
+    case OperationLimitType::SUBREQUEST:
+      bit = SUBREQUEST_LIMIT_TRACE_BIT;
+      operation = "subrequest"_kj;
+      break;
+    case OperationLimitType::IN_HOUSE_SUBREQUEST:
+      bit = IN_HOUSE_SUBREQUEST_LIMIT_TRACE_BIT;
+      operation = "in-house subrequest"_kj;
+      break;
+    case OperationLimitType::KV:
+      bit = KV_LIMIT_TRACE_BIT;
+      operation = "KV"_kj;
+      break;
+    case OperationLimitType::ANALYTICS_ENGINE:
+      bit = ANALYTICS_ENGINE_LIMIT_TRACE_BIT;
+      operation = "Analytics Engine"_kj;
+      break;
+  }
+
+  if (!incomingRequests.empty()) {
+    auto& request = getCurrentIncomingRequest();
+    if ((request.perfettoLimitEvents & bit) != 0) {
+      return;
+    }
+    request.perfettoLimitEvents |= bit;
+  }
+
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("resource"), "Operation limit exceeded", "operation",
+      operation.cStr());
+}
+
+namespace {
+
 class PerfettoSubrequestTrace final {
  public:
   enum class Type { HTTP, CONNECT };
@@ -874,6 +956,7 @@ kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finish
   }));
 
   auto result = outcome.then([this](EventOutcome outcome) {
+    context->traceResourceLimitExceeded(outcome, "waitUntil"_kj);
     return WorkerInterface::ScheduledResult{
       .retry = context->shouldRetryScheduled(),
       .outcome = outcome,
@@ -1272,7 +1355,14 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
 kj::Own<WorkerInterface> IoContext::getSubrequest(
     kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
     SubrequestOptions options) {
-  limitEnforcer->newSubrequest(options.inHouse);
+  KJ_TRY {
+    limitEnforcer->newSubrequest(options.inHouse);
+  }
+  KJ_CATCH(exception) {
+    traceOperationLimitExceeded(
+        options.inHouse ? OperationLimitType::IN_HOUSE_SUBREQUEST : OperationLimitType::SUBREQUEST);
+    kj::throwFatalException(kj::mv(exception), kj::maxValue);
+  }
   return getSubrequestNoChecks(kj::mv(func), kj::mv(options), CountSubrequest::YES);
 }
 
@@ -1376,7 +1466,13 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
   //   as subrequests in metrics and logs (like in-house requests aren't), but historically the
   //   subrequest limit still applied. Since I can't currently think of a use case for more than 50
   //   cache API requests per request, I'm leaving it as-is for now.
-  limitEnforcer->newSubrequest(false);
+  KJ_TRY {
+    limitEnforcer->newSubrequest(false);
+  }
+  KJ_CATCH(exception) {
+    traceOperationLimitExceeded(OperationLimitType::SUBREQUEST);
+    kj::throwFatalException(kj::mv(exception), kj::maxValue);
+  }
   auto ret = getIoChannelFactory().getCache();
 
   // Apply external memory adjustment for Cache API subrequests (same as other subrequests in
@@ -1490,6 +1586,7 @@ void IoContext::taskFailed(kj::Exception&& exception) {
     } else {
       waitUntilStatusValue = RequestObserver::outcomeFromException(exception);
     }
+    traceResourceLimitExceeded(waitUntilStatusValue, "waitUntil"_kj);
   }
 
   // If `taskFailed()` throws the whole event loop blows up... let's be careful not to let that
@@ -1682,6 +1779,9 @@ void IoContext::runImpl(Runnable& runnable,
         limiterScope = nullptr;
 
         // Check if we hit a limit.
+        KJ_IF_SOME(outcome, limitEnforcer->getLimitsExceeded()) {
+          traceResourceLimitExceeded(outcome, "JavaScript"_kj);
+        }
         limitEnforcer->requireLimitsNotExceeded();
 
         // Check if we were aborted. TerminateExecution() may be called after abort() in order

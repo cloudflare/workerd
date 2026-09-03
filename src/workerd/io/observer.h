@@ -29,6 +29,12 @@ class WorkerInterface;
 class LimitEnforcer;
 class TimerChannel;
 
+// Returns the stable schema name for an EventOutcome without allocating.
+kj::StringPtr getEventOutcomeName(EventOutcome outcome);
+
+// Emits the terminal outcome of a delivered worker event to Perfetto when event tracing is active.
+void traceWorkerEventOutcome(kj::StringPtr eventType, EventOutcome outcome);
+
 class WebSocketObserver: public kj::Refcounted {
  public:
   virtual ~WebSocketObserver() noexcept(false) = default;

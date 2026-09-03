@@ -11,6 +11,7 @@
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/limit-enforcer.h>
+#include <workerd/io/observer.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/http-util.h>
@@ -390,13 +391,44 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
   auto& context = incomingRequest->getContext();
   auto wrappedResponse = kj::heap<ResponseSentTracker>(response, this);
   bool isActor = context.getActor() != kj::none;
+  bool perfettoTraceStarted = TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("request"));
+  kj::Maybe<kj::Own<IoContext::WeakRef>> traceContextWeakRef;
+  if (perfettoTraceStarted || TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("resource"))) {
+    traceContextWeakRef = context.getWeakRef();
+  }
+  EventOutcome traceOutcome KJ_UNUSED = EventOutcome::CANCELED;
+  auto classifyOutcome = [&traceContextWeakRef](const kj::Exception& exception,
+                             RequestObserver::FailureSource source) -> EventOutcome {
+    EventOutcome outcome = RequestObserver::outcomeFromException(exception, source);
+    KJ_IF_SOME(weakRef, traceContextWeakRef) {
+      weakRef->runIfAlive([&outcome](IoContext& context) {
+        KJ_IF_SOME(limitOutcome, context.getLimitEnforcer().getLimitsExceeded()) {
+          outcome = limitOutcome;
+        }
+        context.traceResourceLimitExceeded(outcome, "request"_kj);
+      });
+    }
+    return outcome;
+  };
 
-  TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("request"), "Worker request",
-      PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this), "url", url.cStr(),
-      "actor", isActor);
+  if (perfettoTraceStarted) {
+    TRACE_EVENT_BEGIN(WORKERD_TRACE_CATEGORY("request"), "Worker request",
+        PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this), "url", url.cStr(),
+        "actor", isActor);
+  }
   KJ_DEFER({
-    TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("request"), PERFETTO_TRACK_FROM_POINTER(this),
-        PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
+    if (perfettoTraceStarted) {
+      auto statusCode = wrappedResponse->getHttpResponseStatus();
+      if (statusCode == 0) {
+        TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("request"), PERFETTO_TRACK_FROM_POINTER(this),
+            PERFETTO_TERMINATING_FLOW_FROM_POINTER(this), "outcome",
+            getEventOutcomeName(traceOutcome).cStr());
+      } else {
+        TRACE_EVENT_END(WORKERD_TRACE_CATEGORY("request"), PERFETTO_TRACK_FROM_POINTER(this),
+            PERFETTO_TERMINATING_FLOW_FROM_POINTER(this), "outcome",
+            getEventOutcomeName(traceOutcome).cStr(), "status_code", statusCode);
+      }
+    }
   });
 
   // HACK: Capture workerTracer directly, it's unclear how to acquire the right tracer from context
@@ -504,6 +536,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         }
       }
       KJ_CATCH(exception) {
+        traceOutcome = classifyOutcome(exception, RequestObserver::FailureSource::OTHER);
         TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("request"), "Handler exception",
             PERFETTO_TRACK_FROM_POINTER(this));
         // Log JS exceptions to the JS console, if inspector is attached. This also has the effect
@@ -563,16 +596,21 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         co_await kj::yield();
       }
       KJ_CATCH(e) {
+        traceOutcome = classifyOutcome(e, RequestObserver::FailureSource::DEFERRED_PROXY);
         metricsForProxyTask->reportFailure(e, RequestObserver::FailureSource::DEFERRED_PROXY);
         // See the matching yield in stage 2's catch.
         co_await kj::yield();
         kj::throwFatalException(kj::mv(e));
       }
     }
+    traceOutcome = EventOutcome::OK;
   }
   KJ_CATCH(exception) {
     // ----- Stage 4: Handle whatever exception escaped the stages above. -----
 
+    traceOutcome = classifyOutcome(exception,
+        loggedExceptionEarlier ? RequestObserver::FailureSource::OTHER
+                               : RequestObserver::FailureSource::DEFERRED_PROXY);
     TRACE_EVENT_INSTANT(
         WORKERD_TRACE_CATEGORY("request"), "Request exception", PERFETTO_TRACK_FROM_POINTER(this));
 
@@ -888,7 +926,11 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
       -> kj::Promise<WorkerInterface::ScheduledResult> {
     TRACE_EVENT(
         WORKERD_TRACE_CATEGORY("event"), "WorkerEntrypoint::runScheduled() waitForFinished()");
-    return request->finishScheduled(kj::mv(request));
+    EventOutcome traceOutcome = EventOutcome::CANCELED;
+    KJ_DEFER(traceWorkerEventOutcome("scheduled"_kj, traceOutcome));
+    auto result = co_await request->finishScheduled(kj::mv(request));
+    traceOutcome = result.outcome;
+    co_return result;
   };
 
   return wrapWithCanceler(waitForFinished(kj::mv(incomingRequest)));
@@ -930,12 +972,23 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
   }
 
   incomingRequest->delivered();
+  auto traceContextWeakRef = context.getWeakRef();
+  EventOutcome traceOutcome = EventOutcome::CANCELED;
+  KJ_DEFER({
+    traceContextWeakRef->runIfAlive([&traceOutcome](IoContext& context) {
+      context.traceResourceLimitExceeded(traceOutcome, "alarm"_kj);
+    });
+    traceWorkerEventOutcome("alarm"_kj, traceOutcome);
+  });
 
-  auto scheduleAlarmResult = co_await kj::evalNow([&]() {
-    return actor.scheduleAlarm(scheduledTime);
-  }).catch_([](kj::Exception&& exception) -> kj::Promise<WorkerInterface::ScheduleAlarmResult> {
+  auto scheduleAlarmResult =
+      co_await kj::evalNow([&]() { return actor.scheduleAlarm(scheduledTime); })
+          .catch_(
+              [&traceOutcome](
+                  kj::Exception&& exception) -> kj::Promise<WorkerInterface::ScheduleAlarmResult> {
+    traceOutcome = RequestObserver::outcomeFromException(exception);
     markExceptionAsDelivered(exception);
-    return kj::mv(exception);
+    kj::throwFatalException(kj::mv(exception), kj::maxValue);
   });
   KJ_SWITCH_ONEOF(scheduleAlarmResult) {
     KJ_CASE_ONEOF(af, WorkerInterface::AlarmFulfiller) {
@@ -989,9 +1042,16 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
         // We succeeded, inform any other entrypoints that may be waiting upon us.
         af.fulfill(result.asOutcome());
         cancellationGuard.cancel();
+        traceOutcome = result.outcome;
         co_return kj::mv(result);
       }
       KJ_CATCH(e) {
+        traceOutcome = RequestObserver::outcomeFromException(e);
+        traceContextWeakRef->runIfAlive([&traceOutcome](IoContext& context) {
+          KJ_IF_SOME(limitOutcome, context.getLimitEnforcer().getLimitsExceeded()) {
+            traceOutcome = limitOutcome;
+          }
+        });
         markExceptionAsDelivered(e);
         // We failed, inform any other entrypoints that may be waiting upon us.
         af.reject(e);
@@ -1001,6 +1061,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
     }
     KJ_CASE_ONEOF(outcome, WorkerInterface::AlarmOutcome) {
       // The alarm was cancelled while we were waiting to run, go ahead and return the result.
+      traceOutcome = outcome.outcome;
       co_return AlarmResult{.retry = outcome.retry,
         .retryCountsAgainstLimit = outcome.retryCountsAgainstLimit,
         .outcome = outcome.outcome};
@@ -1069,7 +1130,10 @@ kj::Promise<bool> WorkerEntrypoint::test() {
       [](kj::Own<IoContext::IncomingRequest> request) -> kj::Promise<bool> {
     TRACE_EVENT(WORKERD_TRACE_CATEGORY("event"), "WorkerEntrypoint::test() waitForFinished()");
 
+    EventOutcome traceOutcome = EventOutcome::CANCELED;
+    KJ_DEFER(traceWorkerEventOutcome("test"_kj, traceOutcome));
     auto scheduledResult = co_await request->finishScheduled(kj::mv(request));
+    traceOutcome = scheduledResult.outcome;
 
     // Not adding a return event here – we only provide rudimentary tracing support for test events
     // (enough so that we can get logs/spans from them in wd-tests), so this is not needed in

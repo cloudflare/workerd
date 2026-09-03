@@ -3,6 +3,7 @@
 #include "worker-interface.h"
 
 #include <workerd/util/exception.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 #include <kj/common.h>
 #include <kj/debug.h>
@@ -10,6 +11,49 @@
 #include <kj/mutex.h>
 
 namespace workerd {
+
+kj::StringPtr getEventOutcomeName(EventOutcome outcome) {
+  switch (outcome) {
+    case EventOutcome::UNKNOWN:
+      return "unknown"_kj;
+    case EventOutcome::OK:
+      return "ok"_kj;
+    case EventOutcome::EXCEPTION:
+      return "exception"_kj;
+    case EventOutcome::EXCEEDED_CPU:
+      return "exceededCpu"_kj;
+    case EventOutcome::KILL_SWITCH:
+      return "killSwitch"_kj;
+    case EventOutcome::DAEMON_DOWN:
+      return "daemonDown"_kj;
+    case EventOutcome::SCRIPT_NOT_FOUND:
+      return "scriptNotFound"_kj;
+    case EventOutcome::CANCELED:
+      return "canceled"_kj;
+    case EventOutcome::EXCEEDED_MEMORY:
+      return "exceededMemory"_kj;
+    case EventOutcome::LOAD_SHED:
+      return "loadShed"_kj;
+    case EventOutcome::RESPONSE_STREAM_DISCONNECTED:
+      return "responseStreamDisconnected"_kj;
+    case EventOutcome::INTERNAL_ERROR:
+      return "internalError"_kj;
+    case EventOutcome::EXCEEDED_WALL_TIME:
+      return "exceededWallTime"_kj;
+    case EventOutcome::ABORTED:
+      return "aborted"_kj;
+  }
+  return "unknown"_kj;
+}
+
+void traceWorkerEventOutcome(kj::StringPtr eventType, EventOutcome outcome) {
+  if (!TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("event"))) {
+    return;
+  }
+
+  TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("event"), "Worker event outcome", "event_type",
+      eventType.cStr(), "outcome", getEventOutcomeName(outcome).cStr());
+}
 
 namespace {
 kj::Maybe<kj::Own<FeatureObserver>> featureObserver;

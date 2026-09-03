@@ -588,6 +588,10 @@ struct Worker::Isolate::Impl {
   // their own thread has blocked waiting for the lock for a long time.
   mutable uint64_t lockSuccessCount = 0;
 
+  // Protected by the isolate lock. Set only when a condemnation event is emitted to an active
+  // Perfetto session, preventing every subsequent lock release from repeating the same signal.
+  mutable bool perfettoCondemnationTraced = false;
+
   // Wrapper around JsgWorkerIsolate::Lock and various RAII objects which help us report metrics,
   // measure instantaneous load, avoid spurious watchdog kills, and defer context destruction.
   //
@@ -1681,7 +1685,15 @@ const Worker::Isolate& Worker::Isolate::from(jsg::Lock& js) {
 
 bool Worker::Isolate::Impl::Lock::checkInWithLimitEnforcer(Worker::Isolate& isolate) {
   shouldReportIsolateMetrics = true;
-  return limitEnforcer.exitJs(*lock);
+  bool condemned = limitEnforcer.exitJs(*lock);
+  if (condemned && !impl.perfettoCondemnationTraced &&
+      TRACE_EVENT_CATEGORY_ENABLED(WORKERD_TRACE_CATEGORY("resource"))) {
+    impl.perfettoCondemnationTraced = true;
+    TRACE_EVENT_INSTANT(WORKERD_TRACE_CATEGORY("resource"), "Isolate condemned",
+        PERFETTO_TRACK_FROM_POINTER(&isolate), "heap_limit_excessively_exceeded",
+        limitEnforcer.hasExcessivelyExceededHeapLimit());
+  }
+  return condemned;
 }
 
 kj::Maybe<kj::Function<void(void)>> Worker::Isolate::getCpuLimitNearlyExceededCallback() const {

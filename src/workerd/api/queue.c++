@@ -8,6 +8,7 @@
 
 #include <workerd/api/global-scope.h>
 #include <workerd/io/features.h>
+#include <workerd/io/observer.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
@@ -696,6 +697,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
   // 3. Wait on the necessary portions of the worker's code to complete.
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
+  EventOutcome traceOutcome = EventOutcome::CANCELED;
+  KJ_DEFER(traceWorkerEventOutcome("queue"_kj, traceOutcome));
 
   // This vestigial type used to hold more than just this bool.
   // TODO(cleanup): There's probably a better way to pass this bool through.
@@ -792,10 +795,12 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
       KJ_IF_SOME(status, context.getLimitEnforcer().getLimitsExceeded()) {
         outcome = status;
       }
+      context.traceResourceLimitExceeded(outcome, "queue"_kj);
 
       incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
     }
 
+    traceOutcome = outcome;
     co_return WorkerInterface::CustomEvent::Result{.outcome = outcome};
   } else {
     // The user has not opted in to the new waitUntil behavior, so we need to add the queue()
@@ -805,6 +810,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
     // We reuse the finishScheduled() method for convenience, since queues use the same wall clock
     // timeout as scheduled workers.
     auto scheduledResult = co_await incomingRequest->finishScheduled(kj::mv(incomingRequest));
+    traceOutcome = scheduledResult.outcome;
     co_return WorkerInterface::CustomEvent::Result{
       .outcome = scheduledResult.outcome,
     };

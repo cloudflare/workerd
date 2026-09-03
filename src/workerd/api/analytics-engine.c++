@@ -14,7 +14,13 @@ void AnalyticsEngine::writeDataPoint(
     jsg::Lock& js, jsg::Optional<api::AnalyticsEngine::AnalyticsEngineEvent> event) {
   auto& context = IoContext::current();
 
-  context.getLimitEnforcer().newAnalyticsEngineRequest();
+  KJ_TRY {
+    context.getLimitEnforcer().newAnalyticsEngineRequest();
+  }
+  KJ_CATCH(exception) {
+    context.traceOperationLimitExceeded(IoContext::OperationLimitType::ANALYTICS_ENGINE);
+    kj::throwFatalException(kj::mv(exception), kj::maxValue);
+  }
 
   // Optimization: For non-actors, which never have output locks, avoid the overhead of
   // awaitIo() and such by not going back to the event loop at all.
