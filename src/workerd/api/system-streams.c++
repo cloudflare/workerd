@@ -63,6 +63,8 @@ class EncodedAsyncInputStream final: public ReadableStreamSource {
   kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override;
 
   StreamEncoding getPreferredEncoding() override {
+    // A chain of multiple encodings cannot be expressed as a single preferred encoding, so
+    // advertise IDENTITY in that case; reads always produce fully-decoded bytes anyway.
     return encodings.size() == 1 ? encodings[0] : StreamEncoding::IDENTITY;
   }
 
@@ -72,6 +74,10 @@ class EncodedAsyncInputStream final: public ReadableStreamSource {
   // It is likely an error to call this function without immediately following it with a pumpTo()
   // to a EncodedAsyncOutputStream of that exact encoding.
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding outEncoding) override;
+
+  // Chain-aware variant: the length is known whenever the sink applies exactly this stream's
+  // coding chain, because tryPumpFrom() then passes the bytes through unchanged.
+  kj::Maybe<uint64_t> tryGetLength(kj::ArrayPtr<const StreamEncoding> outEncodings) override;
 
   // Consume this stream and return two streams with the same encoding that read the exact same
   // data.
@@ -142,9 +148,23 @@ kj::Maybe<size_t> EncodedAsyncInputStream::tryReadSync(
 }
 
 kj::Maybe<uint64_t> EncodedAsyncInputStream::tryGetLength(StreamEncoding outEncoding) {
+  // A chain of multiple encodings can never match a single output encoding, so a length is only
+  // known for identity or single-coding streams.
   bool matches = encodings.size() == 0 ? outEncoding == StreamEncoding::IDENTITY
                                        : encodings.size() == 1 && outEncoding == encodings[0];
   if (matches) {
+    return inner->tryGetLength();
+  } else {
+    // We have no idea what the length will be once encoded/decoded.
+    return kj::none;
+  }
+}
+
+kj::Maybe<uint64_t> EncodedAsyncInputStream::tryGetLength(
+    kj::ArrayPtr<const StreamEncoding> outEncodings) {
+  if (encodings.asPtr() == outEncodings) {
+    // The sink applies exactly the chain this stream already carries, so tryPumpFrom() will move
+    // the bytes through without decoding or re-encoding and the inner length is the wire length.
     return inner->tryGetLength();
   } else {
     // We have no idea what the length will be once encoded/decoded.
@@ -178,11 +198,10 @@ void EncodedAsyncInputStream::cancel(kj::Exception reason) {
 
 void EncodedAsyncInputStream::ensureIdentityEncoding() {
   // Decompression gets added to the stream here if needed based on the content encoding chain.
-  // The chain never holds more than one coding yet (getContentEncoding() produces at most one
-  // element), so this reduces to wrapping the inner stream at most once.
-  KJ_ASSERT(encodings.size() <= 1);
-  if (encodings.size() == 1) {
-    StreamEncoding encoding = encodings[0];
+  // Codings are listed in the order they were applied, so the chain is walked backwards: the
+  // last-applied coding is decoded first, directly off the wire.
+  for (size_t i = encodings.size(); i > 0; i--) {
+    StreamEncoding encoding = encodings[i - 1];
     if (encoding == StreamEncoding::GZIP) {
       inner = kj::heap<kj::GzipAsyncInputStream>(*inner).attach(kj::mv(inner));
     } else if (encoding == StreamEncoding::BROTLI) {
@@ -233,12 +252,25 @@ class EncodedAsyncOutputStream final: public WritableStreamSink {
  private:
   void ensureIdentityEncoding();
 
+  // Chain `promise` with end() calls for every compressor layer buried under `inner`, outermost
+  // first, so that each layer's trailer is flushed through the layers beneath it. The caller is
+  // responsible for keeping the layers alive until the returned promise settles.
+  kj::Promise<void> endInnerLayers(kj::Promise<void> promise);
+
   // Unwrap `inner` as a `kj::AsyncOutputStream`.
   kj::AsyncOutputStream& getInner();
   // TODO(cleanup): Obviously this is polymorphism. We should be able to do better.
 
   // A sentinel indicating that the EncodedOutputStream has ended and is no longer usable.
   struct Ended {};
+
+  // Compressor layers sitting between `inner` and the original stream, innermost first. Only
+  // non-empty once a chain of more than one encoding has been applied: `inner` then holds the
+  // outermost compressor, which writes into `innerLayers.back()`, and so on down to
+  // `innerLayers.front()`, which writes into the original stream (attached to it). Declared
+  // before `inner` so that `inner` is destroyed first.
+  kj::Vector<kj::OneOf<kj::Own<kj::GzipAsyncOutputStream>, kj::Own<kj::BrotliAsyncOutputStream>>>
+      innerLayers;
 
   // I use a OneOf here rather than probing with downcasts because end() must be called for
   // correctness rather than for optimization. I "know" this code will never be compiled w/o RTTI,
@@ -381,10 +413,10 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
           }
         }
         KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
-          promise = promise.then([&gz = gz]() { return gz->end(); });
+          promise = endInnerLayers(promise.then([&gz = gz]() { return gz->end(); }));
         }
         KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
-          promise = promise.then([&br = br]() { return br->end(); });
+          promise = endInnerLayers(promise.then([&br = br]() { return br->end(); }));
         }
         KJ_CASE_ONEOF(e, Ended) {}
       }
@@ -399,6 +431,11 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
 }
 
 StreamEncoding EncodedAsyncOutputStream::disownEncodingResponsibility() {
+  if (encodings.size() > 1) {
+    // A chain of multiple encodings cannot be handed to the caller as a single StreamEncoding,
+    // so we keep responsibility for applying it. Identity writes remain correct either way.
+    return StreamEncoding::IDENTITY;
+  }
   StreamEncoding result = encodings.size() == 1 ? encodings[0] : StreamEncoding::IDENTITY;
   encodings = nullptr;
   return result;
@@ -421,10 +458,10 @@ kj::Promise<void> EncodedAsyncOutputStream::end() {
       }
     }
     KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
-      promise = gz->end().attach(kj::mv(gz));
+      promise = endInnerLayers(gz->end()).attach(kj::mv(gz), kj::mv(innerLayers));
     }
     KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
-      promise = br->end().attach(kj::mv(br));
+      promise = endInnerLayers(br->end()).attach(kj::mv(br), kj::mv(innerLayers));
     }
     KJ_CASE_ONEOF(e, Ended) {}
   }
@@ -448,28 +485,77 @@ void EncodedAsyncOutputStream::abort(kj::Exception reason) {
     KJ_CASE_ONEOF(e, Ended) {}
   }
   inner.init<Ended>();
+  // Layers are destroyed back-to-front, i.e. outermost first.
+  innerLayers.clear();
 }
 
 void EncodedAsyncOutputStream::ensureIdentityEncoding() {
   // Compression gets added to the stream here if needed based on the content encoding chain.
-  // The chain never holds more than one coding yet (getContentEncoding() produces at most one
-  // element), so this reduces to wrapping the inner stream at most once.
   KJ_DASSERT(!inner.is<Ended>(), "the EncodedAsyncOutputStream has been ended or aborted");
-  KJ_ASSERT(encodings.size() <= 1);
-  if (encodings.size() == 1) {
-    StreamEncoding encoding = encodings[0];
-    // This is safe because only a kj::AsyncOutputStream can have non-identity encoding.
-    auto& stream = inner.get<kj::Own<kj::AsyncOutputStream>>();
+  if (encodings.size() == 0) {
+    return;
+  }
+
+  // This is safe because only a kj::AsyncOutputStream can have non-identity encoding.
+  auto base = kj::mv(inner.get<kj::Own<kj::AsyncOutputStream>>());
+
+  // Codings are listed in the order they were applied: writes must pass through the compressors
+  // in list order, so the compressor for the last-applied coding is created first, closest to
+  // the wire, and takes ownership of the original stream. Any further layers stack on top of it;
+  // the compressor for the first-listed coding becomes the outermost stream in `inner`. With a
+  // single coding this reduces to wrapping the original stream directly, exactly as before.
+  kj::AsyncOutputStream* target = base.get();
+  for (size_t i = encodings.size(); i > 1; i--) {
+    StreamEncoding encoding = encodings[i - 1];
+    bool innermost = i == encodings.size();
     if (encoding == StreamEncoding::GZIP) {
-      inner = kj::heap<kj::GzipAsyncOutputStream>(*stream).attach(kj::mv(stream));
+      auto layer = innermost ? kj::heap<kj::GzipAsyncOutputStream>(*target).attach(kj::mv(base))
+                             : kj::heap<kj::GzipAsyncOutputStream>(*target);
+      target = layer.get();
+      innerLayers.add(kj::mv(layer));
     } else if (encoding == StreamEncoding::BROTLI) {
-      inner = kj::heap<kj::BrotliAsyncOutputStream>(*stream).attach(kj::mv(stream));
+      auto layer = innermost ? kj::heap<kj::BrotliAsyncOutputStream>(*target).attach(kj::mv(base))
+                             : kj::heap<kj::BrotliAsyncOutputStream>(*target);
+      target = layer.get();
+      innerLayers.add(kj::mv(layer));
     } else {
       // We currently support gzip and brotli as non-identity content encodings.
       KJ_FAIL_ASSERT("unsupported content encoding in chain");
     }
   }
+
+  StreamEncoding outermost = encodings[0];
+  if (outermost == StreamEncoding::GZIP) {
+    if (encodings.size() == 1) {
+      inner = kj::heap<kj::GzipAsyncOutputStream>(*target).attach(kj::mv(base));
+    } else {
+      inner = kj::heap<kj::GzipAsyncOutputStream>(*target);
+    }
+  } else if (outermost == StreamEncoding::BROTLI) {
+    if (encodings.size() == 1) {
+      inner = kj::heap<kj::BrotliAsyncOutputStream>(*target).attach(kj::mv(base));
+    } else {
+      inner = kj::heap<kj::BrotliAsyncOutputStream>(*target);
+    }
+  } else {
+    // We currently support gzip and brotli as non-identity content encodings.
+    KJ_FAIL_ASSERT("unsupported content encoding in chain");
+  }
   encodings = nullptr;
+}
+
+kj::Promise<void> EncodedAsyncOutputStream::endInnerLayers(kj::Promise<void> promise) {
+  for (size_t i = innerLayers.size(); i > 0; i--) {
+    KJ_SWITCH_ONEOF(innerLayers[i - 1]) {
+      KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
+        promise = promise.then([&gz = *gz]() { return gz.end(); });
+      }
+      KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
+        promise = promise.then([&br = *br]() { return br.end(); });
+      }
+    }
+  }
+  return promise;
 }
 
 kj::AsyncOutputStream& EncodedAsyncOutputStream::getInner() {
@@ -519,6 +605,52 @@ SystemMultiStream newSystemMultiStream(kj::Rc<kj::AsyncIoStream> stream, IoConte
 ContentEncodingOptions::ContentEncodingOptions(CompatibilityFlags::Reader flags)
     : brotliEnabled(flags.getBrotliContentEncoding()) {}
 
+namespace {
+
+// Upper bound on the number of codings we are willing to decode from one Content-Encoding
+// header, counted after skipping "identity" tokens and empty list elements (neither names a
+// transformation to undo). Longer lists are passed through unchanged. The value matches
+// undici's maxContentEncodings, though undici counts raw list elements and fails the fetch
+// instead of passing the body through.
+constexpr size_t MAX_CONTENT_ENCODINGS = 5;
+
+// Parse a Content-Encoding header value as the comma-separated list of codings RFC 9110 defines,
+// listed in the order they were applied. Empty list elements are ignored, as RFC 9110 5.6.1.2
+// says recipients should, and "identity" tokens denote no transformation, so neither contributes
+// to the chain. If any coding is unsupported (or the chain is too long), returns the empty chain
+// so the body is passed through unchanged, consistent with the longstanding behavior for a
+// single unsupported value.
+kj::Array<StreamEncoding> parseContentEncodings(
+    kj::StringPtr value, ContentEncodingOptions options) {
+  kj::Vector<StreamEncoding> encodings;
+  for (kj::ArrayPtr<const char> token: value.asArray().split(',')) {
+    // Trim optional whitespace (SP / HTAB) around the coding.
+    while (token.size() > 0 && (token.front() == ' ' || token.front() == '\t')) {
+      token = token.slice(1, token.size());
+    }
+    while (token.size() > 0 && (token.back() == ' ' || token.back() == '\t')) {
+      token = token.first(token.size() - 1);
+    }
+    if (token.size() == 0 || token == "identity"_kj.asArray()) {
+      // No transformation to undo; does not count toward the cap.
+      continue;
+    }
+    if (encodings.size() == MAX_CONTENT_ENCODINGS) {
+      return nullptr;
+    }
+    if (token == "gzip"_kj.asArray()) {
+      encodings.add(StreamEncoding::GZIP);
+    } else if (options.brotliEnabled && token == "br"_kj.asArray()) {
+      encodings.add(StreamEncoding::BROTLI);
+    } else {
+      return nullptr;
+    }
+  }
+  return encodings.releaseAsArray();
+}
+
+}  // namespace
+
 kj::Array<StreamEncoding> getContentEncoding(IoContext& context,
     const kj::HttpHeaders& headers,
     Response::BodyEncoding bodyEncoding,
@@ -527,11 +659,9 @@ kj::Array<StreamEncoding> getContentEncoding(IoContext& context,
     return nullptr;
   }
   KJ_IF_SOME(encodingStr, headers.get(context.getHeaderIds().contentEncoding)) {
-    if (encodingStr == "gzip") {
-      return kj::arr(StreamEncoding::GZIP);
-    } else if (options.brotliEnabled && encodingStr == "br") {
-      return kj::arr(StreamEncoding::BROTLI);
-    }
+    // Note: if chain handling ever needs to sit behind a compatibility flag, this is the seam;
+    // the fallback is matching encodingStr against "gzip"/"br" as a whole.
+    return parseContentEncodings(encodingStr, options);
   }
   return nullptr;
 }

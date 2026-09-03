@@ -720,6 +720,14 @@ wd_test(
 )
 
 wd_test(
+    src = "content-encoding-chain-test.wd-test",
+    data = [
+        "content-encoding-chain-helper.js",
+        "content-encoding-chain-test.js",
+    ],
+)
+
+wd_test(
     src = "streams-consumer-reentry-gc-test.wd-test",
     args = ["--experimental"],
     data = ["streams-consumer-reentry-gc-test.js"],

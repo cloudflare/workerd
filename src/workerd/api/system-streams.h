@@ -65,10 +65,11 @@ struct ContentEncodingOptions {
 };
 
 // Get the Content-Encoding header from an HttpHeaders object as a chain of StreamEncoding values,
-// listed in the order they were applied. An empty array means identity. The chain currently never
-// holds more than one element: the whole header value is matched against the supported codings,
-// and any other value (including a comma-separated list) yields the empty chain, so the body is
-// passed through unchanged, exactly as before.
+// listed in the order they were applied. An empty array means identity. "identity" tokens and
+// empty list elements are skipped rather than added to the chain. If any coding in the list is
+// unsupported, or more than five codings remain after the skips, an empty array is returned and
+// the body is passed through unchanged, matching the longstanding behavior for a single
+// unsupported value.
 kj::Array<StreamEncoding> getContentEncoding(IoContext& context,
     const kj::HttpHeaders& headers,
     Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,

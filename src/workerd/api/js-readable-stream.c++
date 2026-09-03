@@ -840,6 +840,39 @@ kj::Maybe<uint64_t> JsReadableStream::tryGetLength(jsg::Lock& js, StreamEncoding
   return kj::none;
 }
 
+kj::Maybe<uint64_t> JsReadableStream::tryGetLength(
+    jsg::Lock& js, kj::ArrayPtr<const StreamEncoding> encodings) {
+  if (encodings.size() == 0) {
+    return tryGetLength(js, StreamEncoding::IDENTITY);
+  } else if (encodings.size() == 1) {
+    return tryGetLength(js, encodings[0]);
+  }
+  KJ_IF_SOME(i, impl) {
+    KJ_SWITCH_ONEOF(i.stream) {
+      KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+        return stream->tryGetLength(encodings);
+      }
+      KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+        // A chain of more than one coding can only be answered by a native underlying source
+        // (see the single-encoding overload above for why queued streams answer kj::none for
+        // any encoded query).
+        auto handle = obj.getHandle(js);
+        auto sourceValue = webstreams::dispatchCall(js, "getReadableStreamNativeSource", handle);
+        if (sourceValue.isUndefined()) {
+          return kj::none;
+        }
+        auto& handler =
+            KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+        auto source = KJ_REQUIRE_NONNULL(handler.tryUnwrap(js, sourceValue),
+            "getReadableStreamNativeSource did not return a ReadableStreamNativeSource");
+        return source->tryGetLength(encodings);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+  return kj::none;
+}
+
 StreamEncoding JsReadableStream::getPreferredEncoding(jsg::Lock& js) {
   KJ_IF_SOME(i, impl) {
     KJ_SWITCH_ONEOF(i.stream) {
@@ -1659,6 +1692,25 @@ kj::Maybe<uint64_t> ReadableStreamNativeSource::tryGetLength(StreamEncoding enco
   // EOF'd, canceled, or consumed: nothing more will be produced, but distinguishing
   // "closed, hence zero" from "unknown" is the stream layer's business, not the
   // source's; report unknown.
+  return kj::none;
+}
+
+kj::Maybe<uint64_t> ReadableStreamNativeSource::tryGetLength(
+    kj::ArrayPtr<const StreamEncoding> encodings) {
+  if (encodings.size() == 0) {
+    return tryGetLength(StreamEncoding::IDENTITY);
+  } else if (encodings.size() == 1) {
+    return tryGetLength(encodings[0]);
+  }
+  KJ_IF_SOME(active, state) {
+    // Stashed bytes are identity bytes already drawn from the source: once any exist, an
+    // encoded length no longer describes what this source will deliver.
+    if (!stash.empty()) {
+      return kj::none;
+    }
+    return active.source->tryGetLength(encodings);
+  }
+  // EOF'd, canceled, or consumed: report unknown, as in the single-encoding overload.
   return kj::none;
 }
 
