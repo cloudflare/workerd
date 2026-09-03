@@ -1307,6 +1307,16 @@ wd_test(
     data = ["ts-webstreams-test.js"],
 )
 
+wd_test(
+    # Normally a second or two: the test stops as soon as its counter proves it reached the
+    # window. "large" is for the case where that never happens and it runs out its own 30s
+    # budget instead.
+    size = "large",
+    src = "messageport-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["messageport-gc-test.js"],
+)
+
 sh_test(
     name = "abortIsolate",
     size = "medium",

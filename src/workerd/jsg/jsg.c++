@@ -12,6 +12,8 @@
 #include <workerd/jsg/util.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <v8-cppgc.h>
+
 #ifdef V8_ENABLE_SANDBOX
 #include <sys/mman.h>
 #endif
@@ -334,14 +336,27 @@ void Lock::requestGcForTesting() const {
       v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
 }
 
-void Lock::requestGcWithDefaultSweepForTesting() const {
+void Lock::requestGcWithDeferredSweepForTesting() const {
   if (!isPredictableModeForTest()) {
     KJ_LOG(ERROR, "Test GC used while not in a test");
     return;
   }
-  // kNoHeapPointers keeps conservative stack scanning from retaining the very objects a test is
-  // trying to collect.
-  v8Isolate->RequestUnforcedGarbageCollectionForTesting(v8::StackState::kNoHeapPointers);
+  auto* cppHeap = v8Isolate->GetCppHeap();
+  KJ_ASSERT(cppHeap != nullptr);
+
+  // Scoped rather than left on: the override only needs to cover the collection itself, and
+  // leaving it set would silently change the sweeping behaviour of every later GC in the isolate.
+  cppHeap->SetForceIncrementalSweepingForTesting(true);
+  KJ_DEFER(cppHeap->SetForceIncrementalSweepingForTesting(false));
+
+  v8Isolate->RequestGarbageCollectionForTesting(
+      v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
+}
+
+void Lock::finishDeferredSweepForTesting() const {
+  auto* cppHeap = v8Isolate->GetCppHeap();
+  KJ_ASSERT(cppHeap != nullptr);
+  cppHeap->FinishSweepingForTesting();
 }
 
 void Lock::v8Set(v8::Local<v8::Object> obj, kj::StringPtr name, v8::Local<v8::Value> value) {

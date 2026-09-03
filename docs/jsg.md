@@ -2259,7 +2259,7 @@ if (jsg::HeapTracer::isInCppgcDestructor()) {
    - Wrapper is "unmodified"
          |
 6. detachWrapper() runs when the wrapper goes away, from:
-   - ~CppgcShim, in the same GC pause that collected the wrapper
+   - ~CppgcShim, after a major GC collected the wrapper
    - ResetRoot(), when V8 drops an unmodified droppable wrapper
    - clearWrappers(), at isolate shutdown
    It releases the shim's reference to the Wrappable.
@@ -2267,13 +2267,6 @@ if (jsg::HeapTracer::isInCppgcDestructor()) {
 7. If other C++ references remain, the Wrappable lives on and a new
    wrapper is created on the next JS access. Otherwise it is destroyed.
 ```
-
-cppgc sweeps atomically here, which is not its default: the heap is created with
-`sweeping_support = kAtomic` (see `newCppHeap()` in `setup.c++`). A shim found unreachable is
-therefore finalized inside the atomic pause, before JavaScript runs again, rather than by a later
-incremental or concurrent sweep. So there is no window in which the wrapper has been collected but
-the shim still owns the Wrappable, and no code outside the GC can observe a Wrappable whose wrapper
-is already gone.
 
 ### Async Destructor Safety
 

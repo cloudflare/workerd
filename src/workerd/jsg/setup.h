@@ -1139,6 +1139,31 @@ WeakRef<T> WeakRef<T>::addRef(jsg::Lock& js) & {
 }
 
 template <typename T>
+kj::Maybe<Ref<T>> WeakRef<T>::tryAddRef(Lock&) const {
+  KJ_IF_SOME(i, impl) {
+    if (!i.anchor->isAlive()) return kj::none;
+    // A major GC may have collected the target's wrapper while the ~CppgcShim that would
+    // release the target Wrappable (running ~Wrappable(), which invalidates the anchor) is
+    // still deferred, so the anchor keeps reporting isAlive(). Promoting a Ref in that state
+    // would call addStrongRef() on a doomed Wrappable. cppgc tells us directly: it cleared the
+    // Wrappable's weak reference to its shim during the collecting GC's atomic pause.
+    auto& target = static_cast<Wrappable&>(i.target);
+    if (target.isCondemned()) {
+      // The object is condemned: its wrapper died in a completed major GC, which also means
+      // no strong refs exist (they would have rooted the wrapper) and no live wrappable
+      // holds a traced ref to it (that would have marked it) — anything still referencing
+      // it is itself unreachable garbage awaiting the same deferred sweep. Invalidating the
+      // anchor now is therefore permanent-safe, and additionally protects tryGet() and
+      // operator->() callers during the remainder of the window.
+      target.condemn();
+      return kj::none;
+    }
+    return Ref<T>(kj::addRef(i.target));
+  }
+  return kj::none;
+}
+
+template <typename T>
 void WeakRef<T>::destroy() {
   KJ_IF_SOME(i, impl) {
     v8::Isolate* isolate = i.isolateLiveness->tryGetIsolate();

@@ -10,6 +10,7 @@
 
 #include <workerd/jsg/wrappable-tag.h>
 
+#include <cppgc/persistent.h>
 #include <v8-context.h>
 #include <v8-object.h>
 #include <v8-version.h>
@@ -179,6 +180,47 @@ class Wrappable: public kj::Refcounted {
         &WORKERD_WRAPPABLE_TAG;
   }
 
+  // Does a live JS wrapper currently exist for this Wrappable?
+  //
+  // False both before the first attachWrapper() and after detachWrapper(), and also during the
+  // window in which a major GC has collected the wrapper but the deferred ~CppgcShim has not run
+  // yet -- see isCondemned().
+  bool hasWrapper() const {
+    return weakShim.Get() != nullptr;
+  }
+
+  // True when a completed major GC collected this Wrappable's wrapper and cleared `weakShim`,
+  // but the ~CppgcShim that will release this Wrappable has not run yet. The Wrappable is still
+  // alive and its weak-ref anchor still reports alive, yet it is doomed: the shim holds the last
+  // reference to it, and the shim's destructor is only deferred, not cancelled.
+  //
+  // A Wrappable is a member of HeapTracer::wrappers exactly between attachWrapper() and
+  // detachWrapper(), so being linked while having no wrapper isolates precisely the case where
+  // cppgc nulled `weakShim` behind our back. That link test is load-bearing, because a null
+  // `weakShim` has two producers: cppgc on major GC (this case), and detachWrapper() itself --
+  // including the minor-GC path, where V8 drops a droppable wrapper while the Wrappable lives
+  // on.
+  bool isCondemned() const {
+    return link.isLinked() && !hasWrapper();
+  }
+
+  // Invalidate all outstanding jsg::WeakRef<T>s pointing at this Wrappable. Called lazily from
+  // WeakRef::tryAddRef() when a condemned Wrappable is detected; ~Wrappable() performs the same
+  // invalidation for ordinary destruction. Deliberately NOT called from detachWrapper(): that
+  // also runs when V8 drops an unmodified droppable wrapper via ResetRoot() and at isolate
+  // shutdown, while the Wrappable remains alive and usable — a WeakRef tracks Wrappable
+  // lifetime, not wrapper lifetime.
+  void invalidateWeakRefs() {
+    KJ_IF_SOME(a, weakRefAnchor) {
+      a->invalidate();
+    }
+  }
+
+  // Act on a condemned Wrappable (see isCondemned()): invalidate outstanding weak refs and bump
+  // the isolate's condemned counter (see HeapTracer::getCondemnedWrapperCount()). Called from
+  // WeakRef::tryAddRef(), which must refuse to promote such a Wrappable.
+  inline void condemn();
+
   void addStrongRef();
   void removeStrongRef();
   uint getStrongRefcount() const {
@@ -192,9 +234,10 @@ class Wrappable: public kj::Refcounted {
 
   v8::Local<v8::Object> getHandle(v8::Isolate* isolate);
 
-  kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate) {
-    return wrapper.map([&](v8::TracedReference<v8::Object>& ref) { return ref.Get(isolate); });
-  }
+  // This Wrappable's JS wrapper, or null if none currently exists. Reaches the handle through
+  // `weakShim`, so a wrapper the GC has already collected reads as absent rather than as a
+  // zapped handle.
+  kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate);
 
   // Visits a Ref<T> pointing at this Wrappable. `refParent` and `refStrong` are the members of
   // `Ref<T>`, and this method is invoked on the object the ref points at. (This avoids the need
@@ -304,45 +347,68 @@ class Wrappable: public kj::Refcounted {
  private:
   class CppgcShim;
 
-  // If a JS wrapper is currently allocated, this points to the cppgc shim object.
-  kj::Maybe<CppgcShim&> cppgcShim;
+  // The shim owning this Wrappable's wrapper handle, or null when no live wrapper exists.
+  // Downcasts `weakShim`; see its comment for why that is stored as the cppgc base type.
+  kj::Maybe<CppgcShim&> getShim() const;
 
-  // Handle to the JS wrapper object. The wrapper is created lazily when the object is first
-  // exported to JavaScript; until then, the wrapper is empty.
+  // The body of detachWrapper(), taking the shim explicitly. ~CppgcShim must use this: on the
+  // major-GC path cppgc has already cleared `weakShim`, so getShim() would find nothing.
+  kj::Own<Wrappable> detachFromShim(CppgcShim& shim, bool shouldFreelistShim);
+
+  // The cppgc shim owning this Wrappable's JS wrapper, or null when no live wrapper exists.
   //
-  // If the wrapper object is "unmodified" from its original creation state, then V8 may choose to
-  // collect it even when it could still technically be reached via C++ objects. The idea here is
-  // that if the object is returned to JavaScript again later, the wrapper can be reconstructed at
-  // that time. However, if the wrapper is modified by the application (e.g. monkey-patched with
-  // a new property), then collecting and recreating it won't work. The logic to decide if an
-  // object has been "modified" is internal to V8 and baked into its use of EmbedderRootsHandler.
-  kj::Maybe<v8::TracedReference<v8::Object>> wrapper;
+  // The wrapper handle itself lives in the shim, not here. The wrapper is created lazily when the
+  // Wrappable is first exported to JavaScript; until then this is null.
+  //
+  // If the wrapper is "unmodified" from its original creation state, then V8 may choose to
+  // collect it even when the Wrappable could still technically be reached from C++. The idea here
+  // is that if the Wrappable is returned to JavaScript again later, the wrapper can be
+  // reconstructed at that time. However, if the wrapper is modified by the application (e.g.
+  // monkey-patched with a new property), then collecting and recreating it won't work. The logic
+  // to decide if a wrapper has been "modified" is internal to V8 and baked into its use of
+  // EmbedderRootsHandler.
+  //
+  // The reference is weak so that the GC, not us, decides when it goes away. When a major GC
+  // collects the wrapper, cppgc nulls this in MarkerBase::ProcessWeakness() -- during the same
+  // atomic pause that zaps the wrapper's traced node, and long before the deferred ~CppgcShim
+  // runs. Every reader therefore observes "no wrapper" as soon as the GC knows it, instead of
+  // reaching a zapped handle through a bare pointer.
+  //
+  // Declared as the cppgc base type because CppgcShim is defined in wrappable.c++ while
+  // cppgc::WeakPersistent needs a complete type. Only CppgcShim instances are ever stored here;
+  // getShim() does the downcast.
+  cppgc::WeakPersistent<v8::Object::Wrappable> weakShim;
 
-  // Whenever there are non-GC-traced references to the object (i.e. from other C++ objects, i.e.
-  // strongRefcount > 0), and `wrapper` is non-null, then `strongWrapper` contains a copy of
-  // `wrapper`, to force it to stay alive. Otherwise, `strongWrapper` is empty.
+  // Whenever there are non-GC-traced references to this Wrappable (i.e. from other C++ objects,
+  // i.e. strongRefcount > 0) and a wrapper exists, `strongWrapper` contains a copy of the wrapper
+  // handle, to force the wrapper to stay alive. Otherwise, `strongWrapper` is empty.
   v8::Global<v8::Object> strongWrapper;
 
-  // Will be non-null if `wrapper` has ever been non-null.
+  // Will be non-null if a wrapper has ever been attached.
   v8::Isolate* isolate = nullptr;
 
-  // How many strong Ref<T>s point at this object, forcing the wrapper to stay alive even if GC
-  // tracing doesn't find it?
+  // How many strong Ref<T>s point at this Wrappable, forcing its wrapper to stay alive even if
+  // GC tracing doesn't find it?
   //
-  // Whenever the value of the boolean expression (strongRefcount > 0 && wrapper == kj::none)
-  // changes, a GC visitation is needed to update all outgoing refs.
+  // Whenever the value of the boolean expression (strongRefcount > 0 && !hasWrapper()) changes, a
+  // GC visitation is needed to update all outgoing refs. The four places that can change it --
+  // attachWrapper(), detachWrapper(), addStrongRef() and removeStrongRef() -- each run one.
+  //
+  // cppgc clearing `weakShim` behind our back does not count, and needs no visitation: clearing
+  // requires the wrapper to have been collected, which requires `strongWrapper` to be empty (see
+  // the assert in ~CppgcShim), which means strongRefcount is 0 -- so the expression is false both
+  // before and after. In other words, a wrapper can only be condemned while strongRefcount == 0.
   uint strongRefcount = 0;
 
-  // Links this Wrappable into `HeapTracer::wrappers` while a wrapper is attached: added at the end
-  // of attachWrapper(), once the wrapper is fully attached, and removed by detachWrapper(). That
-  // list is what lets isolate shutdown force-detach every remaining wrapper.
+  // While a wrapper is attached, the Wrappable is a member of the list `HeapTracer::wrappers`.
   kj::ListLink<Wrappable> link;
 
-  // Lazy-allocated shared state for jsg::WeakRef<T>. Zero overhead for objects that never
+  // Lazy-allocated shared state for jsg::WeakRef<T>. Zero overhead for Wrappables that never
   // have weak references taken. Created on first call to getOrCreateWeakRefAnchor().
   kj::Maybe<kj::Rc<WeakRefAnchor>> weakRefAnchor;
 
-  // Returns (or creates) the shared WeakRefAnchor for this object. Used by Ref<T>::getWeakRef().
+  // Returns (or creates) the shared WeakRefAnchor for this Wrappable. Used by
+  // Ref<T>::getWeakRef().
   kj::Rc<WeakRefAnchor> getOrCreateWeakRefAnchor() {
     KJ_IF_SOME(a, weakRefAnchor) {
       return a.addRef();
@@ -400,6 +466,24 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   kj::Maybe<Wrappable::CppgcShim&>& freelistHeadFor(v8::CppHeapPointerTag tag);
 
  public:
+  // Number of times WeakRef::tryAddRef() has detected a condemned target in this isolate, i.e.
+  // the number of times the dangling-wrapper hazard has actually been caught rather
+  // than merely guarded against.
+  //
+  // This exists so that the regression test can assert it reached the hazard. The window is
+  // only reachable under a *natural* major GC: a forced GC (v8::Isolate::
+  // RequestGarbageCollectionForTesting, and hence --gc-stress) sweeps atomically, so cppgc
+  // runs ~CppgcShim inside the GC and no deferred window exists to observe. That makes the
+  // test inherently probabilistic, and without this counter a pass would be
+  // indistinguishable from never having exercised the code path at all.
+  //
+  // Not test-only: the increment sits on an already-cold path (a WeakRef promotion that is
+  // about to fail), so it costs nothing in production, and the count is useful for
+  // diagnosing how often this occurs in the wild.
+  uint64_t getCondemnedWrapperCount() const {
+    return condemnedWrapperCount;
+  }
+
   // implements EmbedderRootsHandler -------------------------------------------
   void ResetRoot(const v8::TracedReference<v8::Value>& handle) override;
   bool TryResetRoot(const v8::TracedReference<v8::Value>& handle) override;
@@ -442,8 +526,20 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   // static_assert in TypeWrapper::wrappableTag<T>().
   kj::Maybe<Wrappable::CppgcShim&> freelistedShimsByTag[kMaxWrappableTags] = {};
 
+  // See getCondemnedWrapperCount(). Plain (non-atomic) because it is only ever touched from
+  // Wrappable::condemn(), which runs under the isolate lock.
+  uint64_t condemnedWrapperCount = 0;
+
   friend class Wrappable;
 };
+
+inline void Wrappable::condemn() {
+  // Only reachable from isCondemned() returning true, which implies this Wrappable is still
+  // linked into HeapTracer::wrappers, which implies attachWrapper() set `isolate`.
+  KJ_DASSERT(isolate != nullptr);
+  ++HeapTracer::getTracer(isolate).condemnedWrapperCount;
+  invalidateWeakRefs();
+}
 
 void substituteCppgcShimForTest(
     v8::Isolate* isolate, v8::Local<v8::Object> target, v8::Local<v8::Object> source);
