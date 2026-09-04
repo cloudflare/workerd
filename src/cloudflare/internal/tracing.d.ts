@@ -82,6 +82,10 @@ declare const tracing: {
   // Callers must invoke `span.end()` explicitly.
   startSpan(name: string): Span;
 
+  // Returns the span associated with the current async context. Returns undefined
+  // outside an invocation or when execution is detached into the root async context.
+  getActiveSpan(): Span | undefined;
+
   // The `Span` class is exposed as a nested type so callers can reference the type via
   // `InstanceType<typeof tracing.Span>` (see `tracing-helpers.ts`).
   readonly Span: typeof Span;
