@@ -49,11 +49,6 @@ constexpr uint16_t kFirstResourceTag = kNonResourceWrappableTag + 1;
 // order of ~270 tags today.
 constexpr uint16_t kMaxWrappableTags = 310;
 
-// The full tag range owned by JSG. Only pointers with tags in this range are CppgcShims.
-constexpr v8::CppHeapPointerTagRange kJsgWrappableTagRange(
-    static_cast<v8::CppHeapPointerTag>(kNonResourceWrappableTag),
-    static_cast<v8::CppHeapPointerTag>(kNonResourceWrappableTag + kMaxWrappableTags - 1));
-
 // Index of a tag within the freelist bucket array: tags are dense starting at
 // kFirstObjectWrappableTag (the catch-all), so the offset is a compact array index.
 constexpr uint16_t wrappableTagBucketIndex(uint16_t tag) {

@@ -1,7 +1,6 @@
 load("@aspect_rules_js//npm:defs.bzl", "npm_package")
 load("//:build/js_capnp_library.bzl", "js_capnp_library")
 load("//:build/kj_test.bzl", "kj_test")
-load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
@@ -28,13 +27,6 @@ wd_cc_library(
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",
     ],
-)
-
-wd_cc_benchmark(
-    name = "bench-dispatch",
-    srcs = ["bench-dispatch.c++"],
-    local_defines = ["JSG_IMPLEMENTATION"],
-    deps = [":jsg"],
 )
 
 wd_cc_library(

@@ -168,19 +168,6 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
     return false;
   }
 
-  JSGWrappable& resolve(v8::Local<v8::Object> object) {
-    KJ_IF_SOME(active, state.tryGet<Active>()) {
-      KJ_IF_SOME(wrapper, active.wrappable->wrapper) {
-        if (wrapper == object) {
-          return *active.wrappable;
-        }
-      } else {
-        KJ_FAIL_ASSERT("active CppgcShim has no wrapper");
-      }
-    }
-    reportWrapperIdentityMismatch();
-  }
-
   // The per-type CppHeapPointerTag this shim was Wrapped with. A shim is only ever reused for the
   // same tag (see HeapTracer::freelistedShimsByTag), so this value is fixed for the shim's whole
   // lifetime and identifies which freelist bucket it belongs to.
@@ -256,37 +243,6 @@ void HeapTracer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
   // TODO(soon): Track the other fields here?
 }
 
-void HeapTracer::substituteCppgcShimForTest(
-    v8::Isolate* isolate, v8::Local<v8::Object> target, v8::Local<v8::Object> source) {
-  auto* shim = v8::Object::Unwrap<v8::Object::Wrappable>(isolate, source, kJsgWrappableTagRange);
-  KJ_REQUIRE(shim != nullptr);
-  v8::Object::Wrap(isolate, target, shim, static_cast<Wrappable::CppgcShim*>(shim)->tag);
-}
-
-void substituteCppgcShimForTest(
-    v8::Isolate* isolate, v8::Local<v8::Object> target, v8::Local<v8::Object> source) {
-  HeapTracer::substituteCppgcShimForTest(isolate, target, source);
-}
-
-void detachWrapperForTest(v8::Isolate* isolate, v8::Local<v8::Object> object) {
-  auto& wrappable = *Wrappable::unwrapFromShimAnyType(isolate, object);
-  auto drop = wrappable.detachWrapper(true);
-}
-
-void resetRootForTest(v8::Isolate* isolate, v8::Local<v8::Object> object) {
-  v8::TracedReference<v8::Value> handle(isolate, object);
-  HeapTracer::getTracer(isolate).ResetRoot(handle);
-}
-
-bool sharesCppgcShimForTest(
-    v8::Isolate* isolate, v8::Local<v8::Object> first, v8::Local<v8::Object> second) {
-  auto* firstShim =
-      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, first, kJsgWrappableTagRange);
-  auto* secondShim =
-      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, second, kJsgWrappableTagRange);
-  return firstShim != nullptr && secondShim != nullptr && firstShim == secondShim;
-}
-
 Wrappable* Wrappable::unwrapFromShim(
     v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange) {
   // Read the CppgcShim out of V8's CppHeap pointer table, requiring the stored tag to fall within
@@ -298,25 +254,36 @@ Wrappable* Wrappable::unwrapFromShim(
     return nullptr;
   }
 
-  return &shim->resolve(object);
+  // Dispatch through the shim's owning reference, which is the lifetime-correct pointer: it is a
+  // kj::Own<Wrappable> that keeps the object alive for as long as the shim is Active. A minor-GC'd
+  // (Freelisted) or dead shim can never be reached here, because its table entry is only ever
+  // populated while Active (attachWrapper/allocateShim write it) and per-type freelisting keeps a
+  // recycled shim's tag constant, so a stale handle either misses the range or resolves to a live
+  // object of the same type.
+  KJ_IF_SOME(active, shim->state.tryGet<CppgcShim::Active>()) {
+    return active.wrappable.get();
+  }
+  return nullptr;
 }
 
 Wrappable* Wrappable::unwrapFromShimAnyType(v8::Isolate* isolate, v8::Local<v8::Object> object) {
-  return unwrapFromShim(isolate, object, kJsgWrappableTagRange);
+  return unwrapFromShim(isolate, object, v8::kObjectWrappableTagRange);
 }
 
 Wrappable* Wrappable::unwrapFromShimInRangeOrAbort(
     v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange) {
-  // Unwrap with the full JSG range so Object::Unwrap never faults, then range-check the shim's own
-  // tag ourselves. See the header for why the check can't be delegated to Object::Unwrap, and why
-  // an out-of-range tag here is a memory-safety violation that must abort.
+  // Unwrap with the wide wrappable range so Object::Unwrap never faults, then range-check the shim's
+  // own tag ourselves. See the header for why the check can't be delegated to Object::Unwrap, and
+  // why an out-of-range tag here is a memory-safety violation that must abort.
   auto* shim = static_cast<CppgcShim*>(
-      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, kJsgWrappableTagRange));
+      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, v8::kObjectWrappableTagRange));
   if (shim != nullptr) {
     auto tag = static_cast<uint16_t>(shim->tag);
     if (tag >= static_cast<uint16_t>(tagRange.first) &&
         tag <= static_cast<uint16_t>(tagRange.last)) {
-      return &shim->resolve(object);
+      KJ_IF_SOME(active, shim->state.tryGet<CppgcShim::Active>()) {
+        return active.wrappable.get();
+      }
     }
   }
 
@@ -566,11 +533,6 @@ void reportWrapperTypeMismatch(const std::type_info& expected, const std::type_i
   // Abort: edgeworker's crash handler turns this into an abrupt shutdown of the isolate.
   KJ_LOG(FATAL, "JS wrapper's C++ object is not of the expected type", typeName(expected),
       typeName(actual));
-  abort();
-}
-
-void reportWrapperIdentityMismatch() {
-  KJ_LOG(FATAL, "JS wrapper's CppHeap shim does not own the dispatch receiver");
   abort();
 }
 

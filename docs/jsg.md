@@ -2199,20 +2199,17 @@ connection between a C++ object and its JavaScript "wrapper" object.
 
 #### Internal Fields
 
-JavaScript wrapper objects have one internal marker field:
+JavaScript wrapper objects have two internal fields:
 
 ```cpp
 enum InternalFields : int {
-  WRAPPABLE_TAG_FIELD_INDEX = 0,  // Contains WORKERD_WRAPPABLE_TAG
-  INTERNAL_FIELD_COUNT = 1,
+  WRAPPABLE_TAG_FIELD_INDEX = 0,    // Contains WORKERD_WRAPPABLE_TAG
+  WRAPPED_OBJECT_FIELD_INDEX = 1,   // Pointer back to the Wrappable
+  INTERNAL_FIELD_COUNT = 2,
 };
 ```
 
 Check if an object is a workerd API object: `jsg::Wrappable::isWorkerdApiObject(object)`
-
-The native `Wrappable` is owned by a cppgc shim reached through V8's tagged CppHeap pointer table.
-Unwrapping validates the resource tag range, exact JavaScript wrapper identity, and native RTTI
-before dispatch.
 
 #### Context Embedder Data Slots
 

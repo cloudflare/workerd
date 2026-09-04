@@ -306,7 +306,7 @@ class Wrappable: public kj::Refcounted {
   static Wrappable* unwrapFromShim(
       v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange);
 
-  // Like unwrapFromShim(), but accepts any JSG wrappable tag. For call sites that have already
+  // Like unwrapFromShim(), but accepts any wrappable tag. For call sites that have already
   // established the object's type by another means (a prototype-chain check, or an
   // isWorkerdApiObject() marker check plus a dynamic-type lookup) and only need the pointer.
   // Returns nullptr if the object was never wrapped.
@@ -323,9 +323,9 @@ class Wrappable: public kj::Refcounted {
   // memory-safety violation. We abort so it is surfaced rather than silently ignored; returning a
   // pointer would risk type confusion, and returning "not found" would hide the attack.
   //
-  // The range check is done in C++ (after unwrapping with the full JSG tag range) rather than by
-  // passing `tagRange` to Object::Unwrap, because a checked V8 build turns a narrow-range miss into
-  // its own fatal DCHECK before returning, producing a different crash than the abort here.
+  // The range check is done in C++ (via a wide-range unwrap) rather than by passing `tagRange` to
+  // Object::Unwrap, because a checked V8 build turns a narrow-range miss into its own fatal DCHECK
+  // before returning, producing a different (and less informative) crash than the abort here.
   static Wrappable* unwrapFromShimInRangeOrAbort(
       v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange);
 
@@ -432,8 +432,6 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   void addToFreelist(Wrappable::CppgcShim& shim);
   Wrappable::CppgcShim* allocateShim(Wrappable& wrappable, v8::CppHeapPointerTag tag);
   void clearFreelistedShims();
-  static void substituteCppgcShimForTest(
-      v8::Isolate* isolate, v8::Local<v8::Object> target, v8::Local<v8::Object> source);
 
  private:
   // Returns the head slot of the intrusive freelist for `tag`. The slot has a stable address (it
@@ -559,13 +557,6 @@ inline bool Wrappable::wasTracedInLastGc() const {
       HeapTracer::getTracer(isolate).getCompletedGcEpoch();
 }
 
-void substituteCppgcShimForTest(
-    v8::Isolate* isolate, v8::Local<v8::Object> target, v8::Local<v8::Object> source);
-void detachWrapperForTest(v8::Isolate* isolate, v8::Local<v8::Object> object);
-void resetRootForTest(v8::Isolate* isolate, v8::Local<v8::Object> object);
-bool sharesCppgcShimForTest(
-    v8::Isolate* isolate, v8::Local<v8::Object> first, v8::Local<v8::Object> second);
-
 // Try to use this in any scope where JavaScript wrapped objects are destroyed, to confirm that
 // they don't hold disallowed references to KJ I/O objects. IoOwn's destructor will explicitly
 // create AllowAsyncDestructorsScope to permit holding such objects via IoOwn. This is meant to
@@ -580,7 +571,6 @@ bool sharesCppgcShimForTest(
 // templated, to keep the code that unwrappers inline as small as possible.
 [[noreturn]] void reportWrapperTypeMismatch(
     const std::type_info& expected, const std::type_info& actual);
-[[noreturn]] void reportWrapperIdentityMismatch();
 
 // Cast an `Object` that came from a wrapper to the type the callsite expects,
 // aborting if the object is not of that type.
@@ -614,13 +604,9 @@ T& downcastWrappable(Wrappable& wrappable) {
     // Wrappables that are not `Object`s -- `WrappableFunction` and
     // `OpaqueWrappable` -- inherit `Wrappable` publicly, so they can be cast
     // directly.
-    const auto& actualType = typeid(wrappable);
-    if (&actualType == &typeid(T) || actualType == typeid(T)) {
-      return static_cast<T&>(wrappable);
-    }
     T* result = dynamic_cast<T*>(&wrappable);
     if (result == nullptr) {
-      reportWrapperTypeMismatch(typeid(T), actualType);
+      reportWrapperTypeMismatch(typeid(T), typeid(wrappable));
     }
     return *result;
   }

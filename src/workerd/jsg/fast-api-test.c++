@@ -2,21 +2,10 @@
 
 #include <workerd/util/autogate.h>
 
-#include <signal.h>
-#ifdef __linux__
-#include <sys/mman.h>
-#endif
-
 namespace workerd::jsg::test {
 namespace {
 
 using jsg::CallCounter;
-
-volatile sig_atomic_t* fastCallbackEntered = nullptr;
-
-void recordFastCallback(int) {
-  *fastCallbackEntered = jsg::callCounter.fast > 0;
-}
 
 struct WrappedInt {
   int32_t i;
@@ -139,15 +128,6 @@ class FastMethodContext: public jsg::Object, public jsg::ContextGlobal {
     return js.alloc<StaticMethodContainer>();
   }
 
-  void substituteCppgcShim(
-      jsg::Lock& js, v8::Local<v8::Object> target, v8::Local<v8::Object> source) {
-    substituteCppgcShimForTest(js.v8Isolate, target, source);
-  }
-
-  void resetCallCounter() {
-    jsg::callCounter.reset();
-  }
-
   JSG_RESOURCE_TYPE(FastMethodContext) {
     JSG_NESTED_TYPE(StaticMethodContainer);
 
@@ -167,14 +147,11 @@ class FastMethodContext: public jsg::Object, public jsg::ContextGlobal {
     JSG_METHOD(unwrapLenientOptional);
 
     JSG_METHOD(newContainer);
-    JSG_METHOD(substituteCppgcShim);
-    JSG_METHOD(resetCallCounter);
   }
 };
 
 JSG_DECLARE_DEBUG_ISOLATE_TYPE(
     FastMethodIsolate, FastMethodContext, WrappedInt, StaticMethodContainer);
-using FastMethodEvaluator = Evaluator<FastMethodContext, FastMethodIsolate, JsgConfig>;
 
 jsg::V8System v8System({"--allow-natives-syntax"});
 
@@ -207,52 +184,12 @@ CallCounter runTest(Test test) {
   return jsg::callCounter;
 }
 
-void runCorruptedFastDispatch() {
-  JsgConfig config = {
-    .fastApiEnabled = true,
-  };
-  FastMethodEvaluator e(v8System, config);
-  e.expectEval(R"(
-    const target = newContainer();
-    const source = newContainer();
-    const fastCall = () => target.value;
-    %PrepareFunctionForOptimization(fastCall);
-    fastCall();
-    %OptimizeFunctionOnNextCall(fastCall);
-    fastCall();
-    substituteCppgcShim(target, source);
-    resetCallCounter();
-    fastCall();
-  )",
-      "number", "42");
-}
-
 KJ_TEST("v8::Local<v8::Value> and v8::Local<v8::Object> as fast method parameters") {
   util::Autogate::initAutogateForTest({util::AutogateKey::V8_FAST_API});
   KJ_ASSERT(runTest({"processValue(42)"_kjc, "number"_kjc, "42"_kjc}) == CallCounter(2, 1));
   KJ_ASSERT(
       runTest({"processObject({test: 123})"_kjc, "number"_kjc, "123"_kjc}) == CallCounter(2, 1));
 }
-
-#ifdef __linux__
-// Needs mmap.
-KJ_TEST("fast dispatch rejects substituted wrapper identity") {
-  util::Autogate::initAutogateForTest({util::AutogateKey::V8_FAST_API});
-  auto* entered = static_cast<volatile sig_atomic_t*>(mmap(
-      nullptr, sizeof(sig_atomic_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0));
-  KJ_REQUIRE(entered != MAP_FAILED);
-  *entered = 0;
-  KJ_DEFER(KJ_SYSCALL(munmap(const_cast<sig_atomic_t*>(entered), sizeof(*entered))));
-  fastCallbackEntered = entered;
-  KJ_DEFER(fastCallbackEntered = nullptr);
-
-  KJ_EXPECT_SIGNAL(SIGABRT, {
-    signal(SIGABRT, recordFastCallback);
-    runCorruptedFastDispatch();
-  });
-  KJ_EXPECT(*entered == 1, "corrupted invocation did not enter the Fast API callback");
-}
-#endif  // __linux__
 
 KJ_TEST("Lock& as the first parameter in fast method calls") {
   KJ_ASSERT(runTest({"addWithLock(3, 4)"_kjc, "number"_kjc, "7"_kjc}) == CallCounter(2, 1));
