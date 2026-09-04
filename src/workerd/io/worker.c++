@@ -4535,12 +4535,16 @@ kj::Promise<EventOutcome> Worker::Actor::runOnEvict(api::DurableObjectEvictionRe
   // planned-eviction path. The actor is past the point of running JS, so report the hook as
   // canceled, like any other case where it could not run.
   IoContext& context = KJ_UNWRAP_OR(getIoContext(), {
+    impl->metrics->onEvictFinished(EventOutcome::CANCELED);
     co_return EventOutcome::CANCELED;
   });
 
   // Set up a lightweight IncomingRequest so that the IoContext has a current request while the
   // handler runs (required for timers, subrequests, and metrics attribution). Note that
-  // delivered() also tops up the actor's CPU allowance, like any other event.
+  // delivered() also tops up the actor's CPU allowance, like any other event. Keep a bare
+  // reference to the observer (now owned by the IncomingRequest) so the outcome can be reported
+  // to it below, before the IncomingRequest is destroyed.
+  RequestObserver& observerRef = *observer;
   auto incomingRequest =
       kj::heap<IoContext::IncomingRequest>(kj::addRef(context), kj::mv(ioChannelFactory),
           kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */);
@@ -4583,9 +4587,11 @@ kj::Promise<EventOutcome> Worker::Actor::runOnEvict(api::DurableObjectEvictionRe
   // hook means no more code may run in this actor, and nothing may be left that could try to
   // resume on the IoContext once it has no current request (see
   // abandonTasksForActorShutdown()).
+  observerRef.reportOnEvictOutcome(outcome);
   incomingRequest->abandonTasksForActorShutdown();
   incomingRequest = nullptr;
 
+  impl->metrics->onEvictFinished(outcome);
   co_return outcome;
 }
 
