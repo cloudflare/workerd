@@ -7,6 +7,7 @@ def kj_test(
         deps = [],
         tags = [],
         size = "medium",
+        target_compatible_with = [],
         **kwargs):
     test_name = src.removesuffix(".c++")
     binary_name = test_name + "_binary"
@@ -28,7 +29,7 @@ def kj_test(
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
-        }),
+        }) + target_compatible_with,
         **kwargs
     )
 
@@ -40,6 +41,7 @@ def kj_test(
             "@//build/config:prebuilt_binaries_arm64": "@//:bin.arm64/tmp/workerd/{}/{}.aarch64-linux-gnu".format(pkg, binary_name),
             "//conditions:default": binary_name,
         }),
+        target_compatible_with = target_compatible_with,
     )
 
     sh_test(
@@ -49,6 +51,7 @@ def kj_test(
         data = data + [cross_alias],
         tags = tags,
         size = size,
+        target_compatible_with = target_compatible_with,
     )
 
     sh_test(
@@ -60,4 +63,5 @@ def kj_test(
         # Tag with no-coverage to reduce coverage CI time
         tags = tags + ["no-coverage"],
         size = size,
+        target_compatible_with = target_compatible_with,
     )
