@@ -34,6 +34,7 @@
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uuid.h>
 #include <workerd/util/xthreadnotifier.h>
 
@@ -153,6 +154,7 @@ void maybePerIsolateBootstrap(CompatibilityFlags::Reader& featureFlags,
     v8::Local<v8::Context> context,
     kj::Maybe<ValidationErrorReporter&> errorReporter) {
   if (util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
+    TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
     JSG_WITHIN_CONTEXT_SCOPE(
         lock, context, [&](jsg::Lock& js) { runPerIsolateBootstrap(js, featureFlags); });
   } else if (featureFlags.getTypeScriptImplementedStreams()) {
