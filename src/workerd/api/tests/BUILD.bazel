@@ -363,6 +363,19 @@ wd_test(
 )
 
 wd_test(
+    src = "r2-jsrpc-test.wd-test",
+    args = ["--experimental"],
+    data = ["r2-test.js"],
+)
+
+wd_test(
+    src = "r2-jsrpc-legacy-list-test.wd-test",
+    args = ["--experimental"],
+    data = ["r2-test.js"],
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
     src = "r2-test.wd-test",
     args = ["--experimental"],
     data = [

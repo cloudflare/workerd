@@ -5,6 +5,8 @@
 #include "r2-rpc.h"
 
 #include <workerd/api/r2-api.capnp.h>
+#include <workerd/api/streams/common.h>
+#include <workerd/api/streams/readable.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/util.h>
 #include <workerd/util/http-util.h>
@@ -15,6 +17,92 @@
 #include <kj/compat/http.h>
 
 namespace workerd::api {
+
+namespace {
+
+constexpr size_t R2_RPC_INLINE_BODY_LIMIT = 16u << 20;
+
+JsReadableStream makeR2RpcMemoryStream(
+    jsg::Lock& js, kj::ArrayPtr<const byte> bytes, kj::Maybe<kj::Own<void>> backing = kj::none) {
+  // TODO(EWC): Confirm that internal R2 transport streams should bypass
+  // typescript_implemented_streams until TypeScript-backed streams support JSRPC serialization.
+  auto stream =
+      js.alloc<ReadableStream>(IoContext::current(), newMemorySource(bytes, kj::mv(backing)));
+  return JsReadableStream(kj::mv(stream));
+}
+
+}  // namespace
+
+R2RpcClient::R2RpcClient(rpc::JsRpcTarget::Client client)
+    : client(IoContext::current().addObject(kj::heap(kj::mv(client)))) {}
+
+R2RpcClient R2RpcClient::fromCallResult(jsg::Lock& js, jsg::Value& rpcPromise) {
+  auto value = jsg::JsValue(rpcPromise.getHandle(js));
+  auto object = KJ_ASSERT_NONNULL(value.tryCast<jsg::JsObject>());
+  auto promise = KJ_ASSERT_NONNULL(object.tryUnwrapAs<JsRpcPromise>(js));
+  kj::Vector<kj::StringPtr> path;
+  auto oneCall = promise->getClientForOneCall(js, path);
+  KJ_ASSERT(path.empty());
+  return R2RpcClient(kj::mv(oneCall.client));
+}
+
+R2RpcClient::Method R2RpcClient::getMethod(jsg::Lock& js, kj::StringPtr methodName) {
+  auto stub = js.alloc<JsRpcStub>(IoContext::current().addObject(kj::heap(*client)));
+  auto property = KJ_ASSERT_NONNULL(stub->getRpcMethod(js, kj::str(methodName)));
+  return {.stub = kj::mv(stub), .property = kj::mv(property)};
+}
+
+jsg::Promise<jsg::Value> normalizeR2RpcPromise(jsg::Lock& js, jsg::Value rpcPromise) {
+  auto paf = js.newPromiseAndResolver<jsg::Value>();
+  paf.resolver.resolve(js, kj::mv(rpcPromise));
+  return kj::mv(paf.promise);
+}
+
+PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(stream, JsReadableStream) {
+      auto size = stream.tryGetLength(js, StreamEncoding::IDENTITY);
+      JSG_REQUIRE(size != kj::none, TypeError,
+          "Provided readable stream must have a known length (request/response body or readable "
+          "half of FixedLengthStream)");
+      auto exactSize = KJ_ASSERT_NONNULL(size);
+      JSG_REQUIRE(exactSize <= 9007199254740991ull, RangeError,
+          "Provided readable stream is too large to represent its length exactly");
+      return {.value = kj::mv(stream), .size = static_cast<double>(exactSize)};
+    }
+    KJ_CASE_ONEOF(data, kj::Array<byte>) {
+      auto size = data.size();
+      if (size > R2_RPC_INLINE_BODY_LIMIT) {
+        // Type-wrapper arrays may alias V8 memory, which cannot be pumped without the isolate lock.
+        auto owned = kj::heapArray<byte>(data.asPtr());
+        auto view = owned.asPtr();
+        return {.value = makeR2RpcMemoryStream(js, view, kj::heap(kj::mv(owned))),
+          .size = static_cast<double>(size)};
+      }
+      return {.value = kj::mv(data), .size = static_cast<double>(size)};
+    }
+    KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
+      auto size = text.value.size();
+      if (size > R2_RPC_INLINE_BODY_LIMIT) {
+        auto bytes = text.value.asBytes();
+        return {.value = makeR2RpcMemoryStream(js, bytes, kj::heap(kj::mv(text.value))),
+          .size = static_cast<double>(size)};
+      }
+      return {.value = kj::mv(text.value), .size = static_cast<double>(size)};
+    }
+    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+      auto size = blob->getSize();
+      if (size > R2_RPC_INLINE_BODY_LIMIT) {
+        // Blob bytes are V8-backed, so newMemorySource() must copy them into native memory.
+        return {
+          .value = makeR2RpcMemoryStream(js, blob->getData()), .size = static_cast<double>(size)};
+      }
+      return {.value = kj::mv(blob), .size = static_cast<double>(size)};
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 static kj::Own<R2Error> toError(uint statusCode, kj::StringPtr responseBody) {
   capnp::JsonCodec json;
   json.handleByAnnotation<public_beta::R2ErrorResponse>();

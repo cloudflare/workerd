@@ -7,7 +7,9 @@
 #include "r2-rpc.h"
 
 #include <workerd/api/streams/readable.h>
+#include <workerd/api/worker-rpc.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::api {
 class Headers;
@@ -35,6 +37,9 @@ kj::Own<kj::HttpClient> r2GetClient(IoContext& context, uint subrequestChannel, 
 
 kj::ArrayPtr<kj::StringPtr> fillR2Path(
     kj::StringPtr pathStorage[1], const kj::Maybe<kj::String>& bucket);
+
+kj::Maybe<kj::String> buildSsecKey(
+    kj::Maybe<kj::OneOf<kj::Array<byte>, kj::String>> maybeRawSsecKey);
 
 class R2MultipartUpload;
 
@@ -232,6 +237,48 @@ class R2Bucket: public jsg::Object {
     JSG_STRUCT_TS_OVERRIDE(R2PutOptions);
   };
 
+  struct ConditionalRpc {
+    jsg::Optional<kj::String> etagMatches;
+    jsg::Optional<kj::String> etagDoesNotMatch;
+    jsg::Optional<kj::Date> uploadedBefore;
+    jsg::Optional<kj::Date> uploadedAfter;
+    jsg::Optional<bool> secondsGranularity;
+
+    JSG_STRUCT(etagMatches, etagDoesNotMatch, uploadedBefore, uploadedAfter, secondsGranularity);
+  };
+
+  struct PutOptionsRpc {
+    jsg::Optional<kj::OneOf<ConditionalRpc, jsg::Ref<Headers>>> onlyIf;
+    jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
+    jsg::Optional<jsg::Dict<kj::String>> customMetadata;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> md5;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> sha1;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> sha256;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> sha384;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> sha512;
+    jsg::Optional<kj::String> storageClass;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
+
+    JSG_STRUCT(onlyIf,
+        httpMetadata,
+        customMetadata,
+        md5,
+        sha1,
+        sha256,
+        sha384,
+        sha512,
+        storageClass,
+        ssecKey);
+  };
+
+  struct GetOptionsRpc {
+    jsg::Optional<ConditionalRpc> onlyIf;
+    jsg::Optional<kj::OneOf<Range, kj::String>> range;
+    jsg::Optional<kj::String> ssecKey;
+
+    JSG_STRUCT(onlyIf, range, ssecKey);
+  };
+
   struct MultipartOptions {
     jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
     jsg::Optional<jsg::Dict<kj::String>> customMetadata;
@@ -240,6 +287,84 @@ class R2Bucket: public jsg::Object {
 
     JSG_STRUCT(httpMetadata, customMetadata, storageClass, ssecKey);
     JSG_STRUCT_TS_OVERRIDE(R2MultipartOptions);
+  };
+
+  // Object metadata as it crosses the JSRPC boundary, mirroring the shape the R2
+  // gateway worker returns. Distinct from `HeadResult`, which is a resource type
+  // carrying methods and lazy accessors that RPC cannot serialize; these plain
+  // structs are unwrapped from the RPC result and used to build one.
+  //
+  // Not part of the public API: these are internal to the JSRPC transport and are
+  // never handed to user code, so they carry no TS overrides.
+  struct ChecksumsRpc {
+    jsg::Optional<kj::Array<kj::byte>> md5;
+    jsg::Optional<kj::Array<kj::byte>> sha1;
+    jsg::Optional<kj::Array<kj::byte>> sha256;
+    jsg::Optional<kj::Array<kj::byte>> sha384;
+    jsg::Optional<kj::Array<kj::byte>> sha512;
+
+    JSG_STRUCT(md5, sha1, sha256, sha384, sha512);
+  };
+
+  // Field names match the gateway's R2ObjectRpc, not HeadResult's members: the
+  // key arrives as `key` where HeadResult stores it as `name`.
+  //
+  // `kj::Maybe` rather than `jsg::Optional` throughout, because jsg::Optional
+  // accepts `undefined` but not `null`, and only kj::Maybe tolerates both. The
+  // gateway omits absent fields today, but that is an unenforced cross-repo
+  // invariant and a null would otherwise be a hard unwrap failure.
+  struct HeadResultRpc {
+    kj::String key;
+    kj::String version;
+    double size;
+    kj::String etag;
+    kj::Date uploaded;
+    kj::String storageClass;
+    ChecksumsRpc checksums;
+    kj::Maybe<HttpMetadata> httpMetadata;
+    kj::Maybe<jsg::Dict<kj::String>> customMetadata;
+    kj::Maybe<Range> range;
+    kj::Maybe<kj::String> ssecKeyMd5;
+
+    JSG_STRUCT(key,
+        version,
+        size,
+        etag,
+        uploaded,
+        storageClass,
+        checksums,
+        httpMetadata,
+        customMetadata,
+        range,
+        ssecKeyMd5);
+  };
+
+  struct ListOptionsRpc {
+    jsg::Optional<int> limit;
+    jsg::Optional<kj::String> prefix;
+    jsg::Optional<kj::String> cursor;
+    jsg::Optional<kj::String> delimiter;
+    jsg::Optional<kj::String> startAfter;
+    kj::Array<kj::String> include;
+
+    JSG_STRUCT(limit, prefix, cursor, delimiter, startAfter, include);
+  };
+
+  struct ListResultRpc {
+    kj::Array<HeadResultRpc> objects;
+    bool truncated;
+    kj::Maybe<kj::String> cursor;
+    kj::Maybe<kj::Array<kj::String>> delimitedPrefixes;
+
+    JSG_STRUCT(objects, truncated, cursor, delimitedPrefixes);
+  };
+
+  struct GetResultRpc {
+    kj::String kind;
+    HeadResultRpc object;
+    kj::Maybe<JsReadableStream> body;
+
+    JSG_STRUCT(kind, object, body);
   };
 
   class HeadResult: public jsg::Object {
@@ -490,20 +615,93 @@ class R2Bucket: public jsg::Object {
   jsg::Promise<void> delete_(jsg::Lock& js,
       kj::OneOf<kj::String, kj::Array<kj::String>> keys,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+
+  // JSRPC equivalents of the above, selected by JSG_RESOURCE_TYPE when the r2_binding_jsrpc compatibility flag is
+  // on. It dispatches to the gateway's R2BindingEntrypoint instead of
+  // synthesising an HTTP request, then rebuilds the public result types from the
+  // plain data JSRPC delivers.
+  //
+  // These keep ordinary typed signatures rather than taking a raw
+  // v8::FunctionCallbackInfo the way KvNamespace::deleteBulk does. A raw-args
+  // passthrough cannot work here: it returns the JsRpcPromise directly, so the
+  // caller receives the gateway's plain data and R2Object's methods and sync
+  // accessors are gone. Reconstruction needs the resolved value, which needs a
+  // real promise, which needs a typed return, which needs an injected
+  // TypeHandler -- and TypeHandlers are only injected into typed signatures.
+  jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> headRpc(jsg::Lock& js,
+      kj::String key,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String)>>& headFnHandler,
+      const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadResultRpc>>>& headResultHandler);
+  jsg::Promise<kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>>> getRpc(
+      jsg::Lock& js,
+      kj::String key,
+      jsg::Optional<GetOptions> options,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, jsg::Optional<GetOptionsRpc>)>>&
+          getFnHandler,
+      const jsg::TypeHandler<jsg::Promise<kj::Maybe<GetResultRpc>>>& getResultHandler);
+  jsg::Promise<void> deleteRpc(jsg::Lock& js,
+      kj::OneOf<kj::String, kj::Array<kj::String>> keys,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<
+          jsg::Function<jsg::Value(kj::OneOf<kj::String, kj::Array<kj::String>>)>>& deleteFnHandler,
+      const jsg::TypeHandler<jsg::Promise<void>>& deleteResultHandler);
+  jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> putRpc(jsg::Lock& js,
+      kj::String key,
+      kj::Maybe<R2PutValue> value,
+      jsg::Optional<PutOptions> options,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(
+          kj::String, kj::Maybe<R2PutValueRpc>, jsg::Optional<PutOptionsRpc>, double)>>&
+          putFnHandler,
+      const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadResultRpc>>>& putResultHandler);
+  jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUploadRpc(jsg::Lock& js,
+      kj::String key,
+      jsg::Optional<MultipartOptions> options,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<
+          jsg::Function<jsg::Value(kj::String, jsg::Optional<MultipartOptions>)>>& createFnHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value()>>& getUploadIdFnHandler,
+      const jsg::TypeHandler<jsg::Promise<kj::String>>& uploadIdResultHandler);
+  jsg::Ref<R2MultipartUpload> resumeMultipartUploadRpc(jsg::Lock& js,
+      kj::String key,
+      kj::String uploadId,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, kj::String)>>& resumeFnHandler);
+  jsg::Promise<ListResult> listRpc(jsg::Lock& js,
+      jsg::Optional<ListOptions> options,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Optional<ListOptionsRpc>)>>&
+          listFnHandler,
+      const jsg::TypeHandler<jsg::Promise<ListResultRpc>>& listResultHandler,
+      CompatibilityFlags::Reader flags);
   jsg::Promise<ListResult> list(jsg::Lock& js,
       jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
       CompatibilityFlags::Reader flags);
 
   JSG_RESOURCE_TYPE(R2Bucket, CompatibilityFlags::Reader flags) {
-    JSG_METHOD(head);
-    JSG_METHOD(get);
-    JSG_METHOD(put);
-    JSG_METHOD(createMultipartUpload);
-    JSG_METHOD(resumeMultipartUpload);
-    JSG_METHOD_NAMED(delete, delete_);
-    JSG_METHOD(list);
-
+    // The compatibility flag
+    // restricts the new transport to allowlisted workers, because it is marked $experimental and
+    // EWC decides who may opt in.
+    if (flags.getR2BindingsJsrpc()) {
+      JSG_METHOD_NAMED(head, headRpc);
+      JSG_METHOD_NAMED(get, getRpc);
+      JSG_METHOD_NAMED(delete, deleteRpc);
+      JSG_METHOD_NAMED(put, putRpc);
+      JSG_METHOD_NAMED(createMultipartUpload, createMultipartUploadRpc);
+      JSG_METHOD_NAMED(resumeMultipartUpload, resumeMultipartUploadRpc);
+      JSG_METHOD_NAMED(list, listRpc);
+    } else {
+      JSG_METHOD(head);
+      JSG_METHOD(get);
+      JSG_METHOD_NAMED(delete, delete_);
+      JSG_METHOD(put);
+      JSG_METHOD(createMultipartUpload);
+      JSG_METHOD(resumeMultipartUpload);
+      JSG_METHOD(list);
+    }
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE({
       // The order of these matters, since typescript tries to match function signatures in order
@@ -600,8 +798,23 @@ class R2Bucket: public jsg::Object {
 
   kj::Own<kj::HttpClient> getHttpClient(IoContext& context, TraceContext& traceContext);
 
+  // Look up a method on the gateway's entrypoint over this binding's subrequest
+  // channel.
+  jsg::Ref<JsRpcProperty> getRpcMethod(jsg::Lock& js, kj::StringPtr methodName);
+
   friend class R2MultipartUpload;
 };
+
+// Helper enum to indicate whether returned httpMetadata and customMetadata to be empty or absent.
+// Use EMPTY for `head`, successful `get`, conditional `get`, `put`, and multipart completion. Use ABSENT for list fields that were not requested.
+enum class MissingMetadataPolicy {
+  EMPTY,
+  ABSENT,
+};
+
+jsg::Ref<R2Bucket::HeadResult> headResultFromRpc(jsg::Lock& js,
+    R2Bucket::HeadResultRpc rpc,
+    MissingMetadataPolicy policy = MissingMetadataPolicy::EMPTY);
 
 // Non-generic wrapper avoid moving the parseObjectMetadata implementation into this header file
 // by making use of dynamic dispatch.

@@ -3,9 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
+import { RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
 
 const key = 'basicKey';
 const body = 'content';
+const rpcStreamBody = 'café';
+const rpcInlineBodyLimit = 16 << 20;
+const largeRpcBodySize = rpcInlineBodyLimit + 2;
 const httpMetaObj = {
   contentType: 'text/plain',
   contentLanguage: 'en-US',
@@ -85,6 +89,83 @@ const HeadObject = {
   key,
 };
 
+function buildRpcHead(requestKey, multipartOptions) {
+  const result = {
+    key,
+    version: objResponse.version,
+    size: Number(objResponse.size),
+    etag: objResponse.etag,
+    uploaded: new Date(Number(objResponse.uploaded)),
+    storageClass: multipartOptions?.storageClass ?? objResponse.storageClass,
+    checksums: {},
+    httpMetadata: {},
+    customMetadata: multipartOptions?.customMetadata ?? {},
+  };
+
+  if (multipartOptions?.httpMetadata !== undefined) {
+    result.httpMetadata =
+      multipartOptions.httpMetadata instanceof Headers
+        ? httpMetaObj
+        : multipartOptions.httpMetadata;
+  }
+
+  switch (requestKey) {
+    case 'httpMetadata':
+      result.httpMetadata = httpMetaObj;
+      break;
+    case 'customMetadata':
+      result.customMetadata = customMetadata;
+      break;
+    case 'classInfrequentAccess':
+      result.storageClass = 'InfrequentAccess';
+      break;
+    case 'ssec':
+    case 'ssecMultipart':
+      result.ssecKeyMd5 = keyMd5;
+      break;
+    case 'multipleChecksums':
+      result.checksums = {
+        md5: md5Buffer.buffer,
+        sha1: sha1Buffer.buffer,
+        sha256: sha256Buffer.buffer,
+      };
+      break;
+    case 'ranged':
+      result.range = { offset: 10, length: 20 };
+      break;
+  }
+
+  return result;
+}
+
+async function assertLargeRpcBody(requestKey, value, valueSize) {
+  assert(value instanceof ReadableStream);
+  assert.strictEqual(valueSize, largeRpcBodySize);
+  const uploaded = new Uint8Array(await new Response(value).arrayBuffer());
+  assert.strictEqual(uploaded.byteLength, largeRpcBodySize);
+
+  switch (requestKey) {
+    case 'largeBuffer':
+      assert.strictEqual(uploaded[0], 0x11);
+      assert.strictEqual(uploaded[1], 0x41);
+      assert.strictEqual(uploaded.at(-2), 0x41);
+      assert.strictEqual(uploaded.at(-1), 0x22);
+      break;
+    case 'largeString':
+      assert.strictEqual(uploaded[0], 0xc3);
+      assert.strictEqual(uploaded[1], 0xa9);
+      assert.strictEqual(uploaded.at(-2), 0xc3);
+      assert.strictEqual(uploaded.at(-1), 0xa9);
+      break;
+    case 'largeBlob':
+      assert.strictEqual(uploaded[0], 0x5a);
+      assert.strictEqual(uploaded.at(-1), 0x5a);
+      break;
+    default:
+      assert.fail(`unexpected large RPC body key: ${requestKey}`);
+  }
+}
+
 function buildGetResponse({ head, body, isList } = {}) {
   const encoder = new TextEncoder();
   let meta;
@@ -114,6 +195,7 @@ function buildGetResponse({ head, body, isList } = {}) {
     },
   });
 }
+
 async function compareResponse(res, { head, body } = {}, bytes) {
   // Destructuring syntax looks ugly, but gets around needing to construct HeadResponse objects(somehow?)
   const { ...obj } = await res;
@@ -136,7 +218,7 @@ async function compareResponse(res, { head, body } = {}, bytes) {
   }
 }
 
-export default {
+const testWorker = {
   // Handler for HTTP request binding makes to R2
   async fetch(request, env, ctx) {
     // We only expect PUT/Get
@@ -620,7 +702,10 @@ export default {
       // GetObject(.bytes())
       await compareResponse(env.BUCKET.get(key), { body }, true);
       // HeadObject
-      await compareResponse(env.BUCKET.head(key));
+      const headObject = await env.BUCKET.head(key);
+      await compareResponse(headObject);
+      assert.strictEqual(typeof headObject.writeHttpMetadata, 'function');
+      assert.strictEqual(typeof headObject.checksums.toJSON, 'function');
       // MultipartUploads
       {
         // CreateMultipartUpload
@@ -662,8 +747,11 @@ export default {
       }
       // DeleteObject
       {
-        await env.BUCKET.delete(key);
-        await env.BUCKET.delete([key, 'basicKey2']);
+        assert.strictEqual(await env.BUCKET.delete(key), undefined);
+        assert.strictEqual(
+          await env.BUCKET.delete([key, 'basicKey2']),
+          undefined
+        );
       }
     }
     // Ranged Reads
@@ -704,26 +792,22 @@ export default {
     }
     // Conditionals
     {
-      try {
-        await env.BUCKET.put('throwOnInvalidEtag', body, {
+      await assert.rejects(
+        env.BUCKET.put('throwOnInvalidEtag', body, {
           onlyIf: new Headers({
             'if-match': 'strongEtag',
           }),
-        });
-        throw new Error('This should have thrown');
-      } catch {
-        // intentionally empty
-      }
-      try {
-        await env.BUCKET.put('throwOnInvalidEtag', body, {
+        }),
+        { message: 'Invalid ETag in if-match header' }
+      );
+      await assert.rejects(
+        env.BUCKET.put('throwOnInvalidEtag', body, {
           onlyIf: new Headers({
             'if-none-match': 'strongEtag',
           }),
-        });
-        throw new Error('This should have thrown');
-      } catch {
-        // intentionally empty
-      }
+        }),
+        { message: 'Invalid ETag in if-none-match header' }
+      );
       await env.BUCKET.put('onlyIfStrongEtag', body, {
         onlyIf: {
           etagMatches: 'strongEtag',
@@ -789,9 +873,16 @@ export default {
           });
           list.objects[0] = { ...list.objects[0] };
           list.objects[0].checksums = { ...list.objects[0].checksums };
+          const expected = { ...HeadObject, ...head };
+          if (
+            env.R2_TRANSPORT === 'jsrpc' &&
+            env.R2_LIST_HONOR_INCLUDE === 'true'
+          ) {
+            expected.customMetadata = undefined;
+          }
           assert.deepEqual(list, {
             delimitedPrefixes: [],
-            objects: [{ ...HeadObject, ...head }],
+            objects: [expected],
             truncated: false,
           });
         }
@@ -834,9 +925,16 @@ export default {
           });
           list.objects[0] = { ...list.objects[0] };
           list.objects[0].checksums = { ...list.objects[0].checksums };
+          const expected = { ...HeadObject, ...head };
+          if (
+            env.R2_TRANSPORT === 'jsrpc' &&
+            env.R2_LIST_HONOR_INCLUDE === 'true'
+          ) {
+            expected.httpMetadata = undefined;
+          }
           assert.deepEqual(list, {
             delimitedPrefixes: [],
-            objects: [{ ...HeadObject, ...head }],
+            objects: [expected],
             truncated: false,
           });
         }
@@ -952,7 +1050,731 @@ export default {
 
       // Also test HEAD operation to verify checksum tags
       const headResp = await env.BUCKET.head('multipleChecksums');
-      assert.ok(headResp);
+      assert.deepStrictEqual(new Uint8Array(headResp.checksums.md5), md5Buffer);
+      assert.deepStrictEqual(
+        new Uint8Array(headResp.checksums.sha1),
+        sha1Buffer
+      );
+      assert.deepStrictEqual(
+        new Uint8Array(headResp.checksums.sha256),
+        sha256Buffer
+      );
+      assert.deepStrictEqual(headResp.checksums.toJSON(), {
+        md5: '9a0364b9e99bb480dd25e1f0284c8555',
+        sha1: '2a0364b9e99bb480dd25e1f0284c855511223344',
+        sha256:
+          '3a0364b9e99bb480dd25e1f0284c8555112233445566778899aabbccddeeff00',
+      });
     }
   },
 };
+
+// The production gateway supports HTTP and named RPC on the same entrypoint. Keeping both here is
+// also necessary while operations are migrated incrementally: methods without an RPC implementation
+// continue to use fetch() even when the JSRPC compatibility flag is enabled.
+export class R2BindingEntrypoint extends WorkerEntrypoint {
+  fetch(request) {
+    const encodedRequest = request.headers.get('cf-r2-request');
+    if (
+      encodedRequest !== null &&
+      ['get', 'list'].includes(JSON.parse(encodedRequest).method)
+    ) {
+      throw new Error('get and list must use JSRPC');
+    }
+    return testWorker.fetch(request, this.env, this.ctx);
+  }
+
+  head(requestKey) {
+    if (requestKey === 'missing') {
+      return null;
+    }
+    if (requestKey === 'boom') {
+      throw new Error('head: no such bucket (10006)');
+    }
+
+    const result = buildRpcHead(requestKey);
+    if (requestKey === 'rpc-malformed-size') {
+      result.size = -1;
+    }
+    if (requestKey === 'rpc-malformed-range') {
+      result.range = { offset: -1, length: 1 };
+    }
+    if (requestKey === 'rpc-malformed-date') {
+      result.uploaded = new Date(NaN);
+    }
+    return result;
+  }
+
+  get(requestKey, options) {
+    if (requestKey === 'missing') {
+      return null;
+    }
+    if (requestKey === 'rpc-get-boom') {
+      throw new Error('get: no such bucket (10006)');
+    }
+    if (requestKey === 'rpc-malformed-kind') {
+      return { kind: 'other', object: buildRpcHead(requestKey) };
+    }
+    if (requestKey === 'rpc-malformed-metadata-body') {
+      return {
+        kind: 'metadata',
+        object: buildRpcHead(requestKey),
+        body: new ReadableStream(),
+      };
+    }
+    if (requestKey === 'rpc-malformed-missing-body') {
+      return { kind: 'body', object: buildRpcHead(requestKey) };
+    }
+    if (requestKey === 'rpc-options') {
+      assert.deepStrictEqual(options, {
+        onlyIf: {
+          etagMatches: 'strongEtag',
+          uploadedBefore: new Date(0),
+          secondsGranularity: false,
+        },
+        range: { offset: 1, length: 3 },
+        ssecKey: hexKey,
+      });
+    }
+    if (requestKey === 'rpc-header-options') {
+      assert.deepStrictEqual(options, {
+        onlyIf: {
+          etagMatches: 'strongEtag',
+          uploadedAfter: new Date(0),
+          secondsGranularity: true,
+        },
+        range: 'bytes=1-3',
+      });
+    }
+    if (requestKey === 'rpc-must-not-call') {
+      throw new Error('get RPC method must not be called');
+    }
+
+    const object = buildRpcHead(requestKey);
+    if (requestKey === 'rangeOffLen') {
+      assert.deepStrictEqual(options, { range: { offset: 1, length: 3 } });
+      object.range = { offset: 1, length: 3 };
+    } else if (requestKey === 'rangeSuff') {
+      assert.deepStrictEqual(options, { range: { suffix: 2 } });
+      object.range = { offset: 6, length: 2 };
+    }
+
+    if (requestKey === 'rpc-conditional-metadata') {
+      return { kind: 'metadata', object };
+    }
+
+    const responseBody =
+      requestKey === 'rangeOffLen'
+        ? 'ont'
+        : requestKey === 'rangeSuff'
+          ? 'nt'
+          : requestKey === 'rpc-json'
+            ? JSON.stringify({ ok: true })
+            : body;
+    let sent = false;
+    return {
+      kind: 'body',
+      object,
+      body: new ReadableStream({
+        pull(controller) {
+          assert.strictEqual(sent, false);
+          sent = true;
+          controller.enqueue(new TextEncoder().encode(responseBody));
+          controller.close();
+        },
+      }),
+    };
+  }
+
+  delete(keys) {
+    if (keys === 'boom') {
+      throw new Error('delete: bad keys (10021)');
+    }
+    if (Array.isArray(keys)) {
+      assert.deepEqual(keys, [key, key + '2']);
+    } else {
+      assert.strictEqual(keys, key);
+    }
+  }
+
+  async put(requestKey, value, options, valueSize) {
+    if (requestKey === 'rpc-must-not-call') {
+      throw new Error('put RPC method must not be called');
+    }
+    if (requestKey === 'rpc-null-value') {
+      assert.strictEqual(value, null);
+      assert.strictEqual(valueSize, 0);
+      return buildRpcHead(requestKey);
+    }
+    if (requestKey === 'rpc-conditional-null') {
+      assert.deepStrictEqual(options.onlyIf, {
+        etagMatches: 'strongEtag',
+        secondsGranularity: false,
+      });
+      return null;
+    }
+    if (requestKey === 'rpc-put-options') {
+      assert.deepStrictEqual(options.onlyIf, {
+        etagMatches: 'strongEtag',
+        uploadedBefore: new Date(0),
+        secondsGranularity: false,
+      });
+      assert.deepStrictEqual(options.httpMetadata, httpMetaObj);
+      assert.deepStrictEqual(options.customMetadata, customMetadata);
+      assert.deepStrictEqual(new Uint8Array(options.md5), md5Buffer);
+      assert.strictEqual(options.storageClass, 'InfrequentAccess');
+      assert.strictEqual(options.ssecKey, hexKey);
+    }
+    if (requestKey.startsWith('large')) {
+      await assertLargeRpcBody(requestKey, value, valueSize);
+      return buildRpcHead(requestKey, options);
+    }
+    const uploaded = await new Response(value).text();
+    const expected = requestKey === 'rpcStream' ? rpcStreamBody : body;
+    assert.strictEqual(uploaded, expected);
+    assert.strictEqual(
+      valueSize,
+      new TextEncoder().encode(expected).byteLength
+    );
+    return buildRpcHead(requestKey, options);
+  }
+
+  list(options) {
+    const honorsIncludes = this.env.R2_LIST_HONOR_INCLUDE === 'true';
+    const effectiveIncludes = honorsIncludes
+      ? (options?.include ?? [])
+      : ['httpMetadata', 'customMetadata'];
+
+    if (options?.prefix === 'rpc-boom') {
+      throw new Error('list: no such bucket (10006)');
+    }
+    if (options?.prefix === 'rpc-malformed') {
+      return { objects: [{}], truncated: false };
+    }
+    if (options?.prefix === 'rpc-options') {
+      assert.deepStrictEqual(options, {
+        limit: 2,
+        prefix: 'rpc-options',
+        cursor: 'cursor-in',
+        delimiter: '/',
+        startAfter: 'after',
+        include: effectiveIncludes,
+      });
+      return {
+        objects: [],
+        truncated: true,
+        cursor: 'cursor-out',
+        delimitedPrefixes: ['rpc-options/'],
+      };
+    }
+
+    if (options?.prefix === 'basic') {
+      assert.deepStrictEqual(options, {
+        limit: 1,
+        prefix: 'basic',
+        cursor: 'ai',
+        delimiter: '/',
+        include: effectiveIncludes,
+      });
+      return {
+        objects: [listRpcHead('basic', effectiveIncludes)],
+        truncated: true,
+        cursor: 'ai',
+      };
+    }
+    if (options?.prefix === 'httpMeta') {
+      return {
+        objects: [listRpcHead('httpMetadata', effectiveIncludes)],
+        truncated: false,
+      };
+    }
+    if (options?.prefix === 'customMeta') {
+      return {
+        objects: [listRpcHead('customMetadata', effectiveIncludes)],
+        truncated: false,
+      };
+    }
+    if (options?.prefix === 'rpc-metadata') {
+      return {
+        objects: [listRpcHead('basic', effectiveIncludes)],
+        truncated: false,
+      };
+    }
+
+    if (honorsIncludes) {
+      assert.strictEqual(options, undefined);
+    } else {
+      assert.deepStrictEqual(options, {
+        include: ['httpMetadata', 'customMetadata'],
+      });
+    }
+    return { objects: [], truncated: false };
+  }
+
+  createMultipartUpload(requestKey, options) {
+    if (requestKey === 'rpc-must-not-call') {
+      throw new Error('createMultipartUpload RPC method must not be called');
+    }
+    if (requestKey === 'rpc-create-options') {
+      assert.deepStrictEqual(options.httpMetadata, httpMetaObj);
+      assert.deepStrictEqual(options.customMetadata, customMetadata);
+      assert.strictEqual(options.storageClass, 'InfrequentAccess');
+      assert.strictEqual(options.ssecKey, hexKey);
+    }
+    assert.strictEqual(typeof requestKey, 'string');
+    return new MultipartUploadTarget(requestKey, 'multipartId', options);
+  }
+
+  resumeMultipartUpload(requestKey, uploadId) {
+    assert.strictEqual(typeof requestKey, 'string');
+    assert.strictEqual(typeof uploadId, 'string');
+    return new MultipartUploadTarget(requestKey, uploadId);
+  }
+}
+
+function listRpcHead(requestKey, includes) {
+  const result = buildRpcHead(requestKey);
+  if (!includes.includes('httpMetadata')) {
+    delete result.httpMetadata;
+  }
+  if (!includes.includes('customMetadata')) {
+    delete result.customMetadata;
+  }
+  return result;
+}
+
+class MultipartUploadTarget extends RpcTarget {
+  #key;
+  #uploadId;
+  #options;
+  #aborted = false;
+
+  constructor(requestKey, uploadId, options) {
+    super();
+    this.#key = requestKey;
+    this.#uploadId = uploadId;
+    this.#options = options;
+  }
+
+  getUploadId() {
+    return this.#uploadId;
+  }
+
+  async uploadPart(partNumber, value, options, valueSize) {
+    assert(partNumber >= 1 && partNumber <= 10000);
+    if (this.#key === 'rpc-must-not-call') {
+      throw new Error('uploadPart RPC method must not be called');
+    }
+    if (this.#key === 'largeBuffer') {
+      await assertLargeRpcBody(this.#key, value, valueSize);
+      return { partNumber, etag: 'partEtag' };
+    }
+    const uploaded = await new Response(value).text();
+    const expected =
+      this.#key === 'ssecMultipart'
+        ? 'hey'
+        : this.#key === 'rpcStream'
+          ? rpcStreamBody
+          : body;
+    assert.strictEqual(uploaded, expected);
+    assert.strictEqual(
+      valueSize,
+      new TextEncoder().encode(expected).byteLength
+    );
+    if (this.#key === 'ssecMultipart') {
+      assert.strictEqual(options?.ssecKey, hexKey);
+    }
+    return {
+      partNumber: this.#key === 'rpc-wrong-part-number' ? 9999 : partNumber,
+      etag: this.#uploadId === 'resumedId' ? 'resumedRpcPartEtag' : 'partEtag',
+    };
+  }
+
+  abort() {
+    this.#aborted = true;
+  }
+
+  complete(uploadedParts) {
+    if (this.#uploadId === 'resumedId') {
+      assert.strictEqual(this.#aborted, true);
+    }
+    for (const part of uploadedParts) {
+      assert(part.partNumber >= 1 && part.partNumber <= 10000);
+      assert.strictEqual(typeof part.etag, 'string');
+    }
+    const result = buildRpcHead(this.#key, this.#options);
+    if (this.#uploadId === 'resumedId') {
+      result.version = 'resumedRpcObjectVersion';
+    }
+    return result;
+  }
+}
+
+// These cases cover RPC boundary behavior that the HTTP-oriented fake cannot observe directly.
+// The canonical API suite remains identical for both transport configurations.
+export const jsrpcTransportTests = {
+  async test(ctrl, env, ctx) {
+    if (env.R2_TRANSPORT !== 'jsrpc') {
+      return;
+    }
+
+    assert.strictEqual(await env.BUCKET.head('missing'), null);
+
+    const ranged = await env.BUCKET.head('ranged');
+    assert.deepStrictEqual(ranged.range, { offset: 10, length: 20 });
+
+    await assert.rejects(env.BUCKET.head('boom'), (err) => {
+      assert.strictEqual(err.message, 'head: no such bucket (10006)');
+      assert.strictEqual(err.code, undefined);
+      return true;
+    });
+    await assert.rejects(env.BUCKET.head('rpc-malformed-size'), {
+      message: 'Malformed R2 RPC result: size must be a non-negative integer.',
+    });
+    await assert.rejects(env.BUCKET.head('rpc-malformed-range'), {
+      message:
+        'Malformed R2 RPC result: range offset must be a non-negative integer.',
+    });
+    await assert.rejects(env.BUCKET.head('rpc-malformed-date'), {
+      message: 'The value cannot be converted because it is not a valid Date.',
+    });
+
+    await assert.rejects(env.BUCKET.delete('boom'), {
+      message: 'delete: bad keys (10021)',
+    });
+
+    const coerced = await env.BUCKET.head(12345);
+    assert.strictEqual(coerced.key, key);
+
+    assert.strictEqual(await env.BUCKET.get('missing'), null);
+
+    const conditional = await env.BUCKET.get('rpc-conditional-metadata', {
+      onlyIf: { etagMatches: 'objectEtag' },
+    });
+    assert.strictEqual(conditional.body, undefined);
+    assert.deepStrictEqual(conditional.httpMetadata, {});
+    assert.deepStrictEqual(conditional.customMetadata, {});
+    assert.strictEqual(typeof conditional.writeHttpMetadata, 'function');
+
+    const lazyBody = await env.BUCKET.get('rpc-lazy-body');
+    assert.strictEqual(lazyBody.bodyUsed, false);
+    assert(lazyBody.body instanceof ReadableStream);
+    assert.strictEqual(await lazyBody.text(), body);
+    assert.strictEqual(lazyBody.bodyUsed, true);
+
+    const bytesResult = await env.BUCKET.get('rpc-bytes');
+    assert.deepStrictEqual(
+      await bytesResult.bytes(),
+      new TextEncoder().encode(body)
+    );
+    assert.strictEqual(bytesResult.bodyUsed, true);
+    const bufferResult = await env.BUCKET.get('rpc-array-buffer');
+    assert.deepStrictEqual(
+      new Uint8Array(await bufferResult.arrayBuffer()),
+      new TextEncoder().encode(body)
+    );
+    const jsonResult = await env.BUCKET.get('rpc-json');
+    assert.deepStrictEqual(await jsonResult.json(), { ok: true });
+    const blobResult = await env.BUCKET.get('rpc-blob');
+    assert.strictEqual(await (await blobResult.blob()).text(), body);
+
+    await env.BUCKET.get('rpc-options', {
+      onlyIf: {
+        etagMatches: 'strongEtag',
+        uploadedBefore: new Date(0),
+      },
+      range: { offset: 1, length: 3 },
+      ssecKey: bufferKey,
+    });
+    await env.BUCKET.get('rpc-header-options', {
+      onlyIf: new Headers({
+        'if-match': '"strongEtag"',
+        'if-modified-since': new Date(0).toUTCString(),
+      }),
+      range: new Headers({ range: 'bytes=1-3' }),
+    });
+
+    await assert.rejects(
+      env.BUCKET.get('rpc-must-not-call', { range: { offset: -1 } }),
+      {
+        message:
+          'Invalid range. Starting offset (-1) must be greater than or equal to 0.',
+      }
+    );
+    await assert.rejects(
+      env.BUCKET.get('rpc-must-not-call', { range: { suffix: 1, length: 1 } }),
+      { message: 'Suffix is incompatible with length.' }
+    );
+    await assert.rejects(
+      env.BUCKET.get('rpc-must-not-call', { ssecKey: 'bad' }),
+      { message: 'SSE-C Key must be 32 bytes in length' }
+    );
+    await assert.rejects(
+      env.BUCKET.get('rpc-must-not-call', {
+        onlyIf: { etagMatches: '"quoted"' },
+      }),
+      {
+        message: 'Conditional ETag should not be wrapped in quotes ("quoted").',
+      }
+    );
+
+    await assert.rejects(env.BUCKET.get('rpc-malformed-kind'), {
+      message: 'Malformed R2 get RPC result: unknown result kind other.',
+    });
+    await assert.rejects(env.BUCKET.get('rpc-malformed-metadata-body'), {
+      message: 'Malformed R2 get RPC result: metadata result had a body.',
+    });
+    await assert.rejects(env.BUCKET.get('rpc-malformed-missing-body'), {
+      message: 'Malformed R2 get RPC result: body result did not have a body.',
+    });
+    await assert.rejects(env.BUCKET.get('rpc-get-boom'), {
+      message: 'get: no such bucket (10006)',
+    });
+
+    const emptyList = await env.BUCKET.list();
+    assert.deepStrictEqual(emptyList, {
+      objects: [],
+      truncated: false,
+      delimitedPrefixes: [],
+    });
+
+    const optionList = await env.BUCKET.list({
+      limit: 2,
+      prefix: 'rpc-options',
+      cursor: 'cursor-in',
+      delimiter: '/',
+      startAfter: 'after',
+      include: [],
+    });
+    assert.deepStrictEqual(optionList, {
+      objects: [],
+      truncated: true,
+      cursor: 'cursor-out',
+      delimitedPrefixes: ['rpc-options/'],
+    });
+
+    if (env.R2_LIST_HONOR_INCLUDE === 'true') {
+      for (const include of [
+        [],
+        ['httpMetadata'],
+        ['customMetadata'],
+        ['httpMetadata', 'customMetadata'],
+      ]) {
+        const listed = await env.BUCKET.list({
+          prefix: 'rpc-metadata',
+          include,
+        });
+        const object = listed.objects[0];
+        assert.strictEqual(typeof object.writeHttpMetadata, 'function');
+        assert.strictEqual(typeof object.checksums.toJSON, 'function');
+        assert.strictEqual(
+          object.httpMetadata === undefined,
+          !include.includes('httpMetadata')
+        );
+        assert.strictEqual(
+          object.customMetadata === undefined,
+          !include.includes('customMetadata')
+        );
+        if (include.includes('httpMetadata')) {
+          assert.deepStrictEqual(object.httpMetadata, {});
+        }
+        if (include.includes('customMetadata')) {
+          assert.deepStrictEqual(object.customMetadata, {});
+        }
+      }
+    }
+
+    await assert.rejects(env.BUCKET.list({ prefix: 'rpc-boom' }), {
+      message: 'list: no such bucket (10006)',
+    });
+    await assert.rejects(env.BUCKET.list({ prefix: 'rpc-malformed' }));
+
+    const nullPut = await env.BUCKET.put('rpc-null-value', null);
+    assert.strictEqual(nullPut.key, key);
+    assert.strictEqual(
+      await env.BUCKET.put('rpc-conditional-null', body, {
+        onlyIf: { etagMatches: 'strongEtag' },
+      }),
+      null
+    );
+    await env.BUCKET.put('rpc-put-options', body, {
+      onlyIf: {
+        etagMatches: 'strongEtag',
+        uploadedBefore: new Date(0),
+      },
+      httpMetadata: httpMetaHeaders,
+      customMetadata,
+      md5: md5Buffer,
+      storageClass: 'InfrequentAccess',
+      ssecKey: bufferKey,
+    });
+
+    await assert.rejects(
+      env.BUCKET.put('rpc-must-not-call', body, { md5: new Uint8Array(1) }),
+      { message: 'MD5 is 16 bytes, not 1' }
+    );
+    await assert.rejects(
+      env.BUCKET.put('rpc-must-not-call', body, {
+        md5: 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
+      }),
+      { message: "Provided MD5 wasn't a valid hex string" }
+    );
+    await assert.rejects(
+      env.BUCKET.put('rpc-must-not-call', body, {
+        md5: md5Buffer,
+        sha1: sha1Buffer,
+      }),
+      { message: 'You cannot specify multiple hashing algorithms.' }
+    );
+    await assert.rejects(
+      env.BUCKET.createMultipartUpload('rpc-must-not-call', {
+        ssecKey: 'bad',
+      }),
+      { message: 'SSE-C Key must be 32 bytes in length' }
+    );
+    const invalidPartUpload = env.BUCKET.resumeMultipartUpload(
+      'rpc-must-not-call',
+      'invalidPartUploadId'
+    );
+    await assert.rejects(
+      invalidPartUpload.uploadPart(1, body, { ssecKey: 'bad' }),
+      { message: 'SSE-C Key must be 32 bytes in length' }
+    );
+
+    const createOptionsUpload = await env.BUCKET.createMultipartUpload(
+      'rpc-create-options',
+      {
+        httpMetadata: httpMetaHeaders,
+        customMetadata,
+        storageClass: 'InfrequentAccess',
+        ssecKey: bufferKey,
+      }
+    );
+    assert.strictEqual(createOptionsUpload.uploadId, 'multipartId');
+
+    const encodedStreamBody = new TextEncoder().encode(rpcStreamBody);
+    {
+      const { readable, writable } = new FixedLengthStream(
+        encodedStreamBody.byteLength
+      );
+      const writer = writable.getWriter();
+      const writing = writer
+        .write(encodedStreamBody)
+        .then(() => writer.close());
+      const result = await env.BUCKET.put('rpcStream', readable);
+      await writing;
+      assert.strictEqual(result.size, Number(objResponse.size));
+    }
+
+    let unknownLengthCancelReason;
+    await assert.rejects(
+      env.BUCKET.put(
+        'unknownLengthStream',
+        new ReadableStream({
+          cancel(reason) {
+            unknownLengthCancelReason = reason;
+          },
+        })
+      ),
+      {
+        message:
+          'Provided readable stream must have a known length (request/response body or readable half of FixedLengthStream)',
+      }
+    );
+    assert.strictEqual(
+      unknownLengthCancelReason.message,
+      'Stream cancelled because the associated put operation encountered an error.'
+    );
+
+    const invalidOptionsStream = new FixedLengthStream(1);
+    const invalidOptionsWriter = invalidOptionsStream.writable.getWriter();
+    const invalidOptionsWriting = invalidOptionsWriter.write(
+      new Uint8Array([1])
+    );
+    await assert.rejects(
+      env.BUCKET.put('rpc-must-not-call', invalidOptionsStream.readable, {
+        onlyIf: { etagMatches: '"quoted"' },
+      }),
+      {
+        message: 'Conditional ETag should not be wrapped in quotes ("quoted").',
+      }
+    );
+    await assert.rejects(invalidOptionsWriting, {
+      message:
+        'Stream cancelled because the associated put operation encountered an error.',
+    });
+
+    const largeBufferBacking = new Uint8Array(largeRpcBodySize + 2);
+    largeBufferBacking.fill(0x41);
+    const largeBuffer = largeBufferBacking.subarray(1, -1);
+    largeBuffer[0] = 0x11;
+    largeBuffer[largeBuffer.length - 1] = 0x22;
+    await env.BUCKET.put('largeBuffer', largeBuffer);
+
+    const largeString = 'é'.repeat(largeRpcBodySize / 2);
+    await env.BUCKET.put('largeString', largeString);
+
+    const largeBlobBytes = new Uint8Array(largeRpcBodySize);
+    largeBlobBytes.fill(0x5a);
+    await env.BUCKET.put('largeBlob', new Blob([largeBlobBytes]));
+
+    const resumed = env.BUCKET.resumeMultipartUpload(key, 'resumedId');
+    assert.strictEqual(resumed.key, key);
+    assert.strictEqual(resumed.uploadId, 'resumedId');
+    const resumedPart = await resumed.uploadPart(1, body);
+    assert.deepStrictEqual(resumedPart, {
+      partNumber: 1,
+      etag: 'resumedRpcPartEtag',
+    });
+    await resumed.abort();
+    const resumedObject = await resumed.complete([resumedPart]);
+    assert.strictEqual(resumedObject.key, key);
+    assert.strictEqual(resumedObject.version, 'resumedRpcObjectVersion');
+    assert.strictEqual(resumedObject.etag, objResponse.etag);
+    assert.strictEqual(resumedObject.httpEtag, `"${objResponse.etag}"`);
+    assert.strictEqual(resumedObject.size, Number(objResponse.size));
+    assert(resumedObject.uploaded instanceof Date);
+    assert.strictEqual(resumedObject.storageClass, objResponse.storageClass);
+    const resumedHeaders = new Headers();
+    resumedObject.writeHttpMetadata(resumedHeaders);
+    assert.deepStrictEqual([...resumedHeaders], []);
+    assert.strictEqual(typeof resumedObject.checksums.toJSON, 'function');
+    assert.deepStrictEqual(resumedObject.checksums.toJSON(), {});
+
+    const streamedUpload = env.BUCKET.resumeMultipartUpload(
+      'rpcStream',
+      'streamedId'
+    );
+    const { readable, writable } = new FixedLengthStream(
+      encodedStreamBody.byteLength
+    );
+    const writer = writable.getWriter();
+    const writing = writer.write(encodedStreamBody).then(() => writer.close());
+    const streamedPart = await streamedUpload.uploadPart(2, readable);
+    await writing;
+    assert.deepStrictEqual(streamedPart, {
+      partNumber: 2,
+      etag: 'partEtag',
+    });
+
+    const largeUpload = env.BUCKET.resumeMultipartUpload(
+      'largeBuffer',
+      'largeUploadId'
+    );
+    assert.deepStrictEqual(await largeUpload.uploadPart(1, largeBuffer), {
+      partNumber: 1,
+      etag: 'partEtag',
+    });
+
+    const wrongPartUpload = env.BUCKET.resumeMultipartUpload(
+      'rpc-wrong-part-number',
+      'wrongPartUploadId'
+    );
+    assert.deepStrictEqual(await wrongPartUpload.uploadPart(3, body), {
+      partNumber: 3,
+      etag: 'partEtag',
+    });
+  },
+};
+
+export default testWorker;

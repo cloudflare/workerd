@@ -1,0 +1,32 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the canonical R2 binding suite (r2-test.js) with the JSRPC transport enabled. The named entrypoint also
+# implements fetch because operations which have not yet migrated to JSRPC continue to use HTTP.
+#
+# Reaching the JSRPC method table needs two things to line up:
+#   - the r2_binding_jsrpc compatibility flag, which is $experimental and so also needs
+#     "experimental" in the flag list here
+#   - a binding that targets the named entrypoint the gateway exposes
+#
+# The `entrypoint` below is the point of this file. A bare-string designator would target the
+# default export and would not exercise named-entrypoint dispatch, which is the production shape.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "r2-jsrpc-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "r2-test.js" )
+        ],
+        bindings = [
+          ( name = "BUCKET",
+            r2Bucket = (name = "r2-jsrpc-test", entrypoint = "R2BindingEntrypoint") ),
+          ( name = "R2_TRANSPORT", text = "jsrpc" ),
+          ( name = "R2_LIST_HONOR_INCLUDE", text = "true" ),
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
+                              "streams_enable_constructors", "r2_list_honor_include",
+                              "r2_binding_jsrpc", "disable_fast_jsg_struct"],
+      )
+    ),
+  ],
+);
