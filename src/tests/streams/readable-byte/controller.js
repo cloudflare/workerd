@@ -195,3 +195,83 @@ export const controllerType = {
     strictEqual(c instanceof ReadableByteStreamController, true);
   },
 };
+
+// cancel() while a partially filled pull-into is pending (WPT
+// 'cancel() with partially filled pending pull() request'): the read
+// resolves done with the partial bytes DISCARDED on both sides —
+// DIVERGENCE only in the done shape (C++ an empty view, TypeScript
+// undefined; the done-read family). The cancel hook gets the reason
+// and the cancel fulfills on both.
+export const cancelWithPartiallyFilledPull = {
+  async test() {
+    const events = [];
+    let controller;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        controller = c;
+      },
+      cancel(reason) {
+        events.push(`cancel:${reason}`);
+      },
+    });
+    const reader = rs.getReader({ mode: 'byob' });
+    const readP = reader.read(new Uint16Array(1)); // wants 2 bytes
+    controller.enqueue(new Uint8Array([0x11])); // partial: 1 byte
+    await scheduler.wait(1);
+    const cancelP = reader.cancel('why');
+    const read = await Promise.race([
+      readP.then(
+        (r) =>
+          `read:done=${r.done},len=${r.value ? r.value.byteLength : 'undef'}`,
+        (e) => `read-rejected:${e.name}`
+      ),
+      scheduler.wait(200).then(() => 'read:pending'),
+    ]);
+    const cancel = await Promise.race([
+      cancelP.then(
+        () => 'cancel:fulfilled',
+        (e) => `cancel-rejected:${e.name}`
+      ),
+      scheduler.wait(200).then(() => 'cancel:pending'),
+    ]);
+    strictEqual(
+      read,
+      usingTsImpl ? 'read:done=true,len=undef' : 'read:done=true,len=0'
+    );
+    strictEqual(cancel, 'cancel:fulfilled');
+    strictEqual(events.join(','), 'cancel:why');
+  },
+};
+
+// read(view) then immediate cancel() (WPT 'getReader(), read(view),
+// then cancel()'): DIVERGENCE — C++ pulls proactively on the read, so
+// pull runs BEFORE the cancel hook; TypeScript never pulls (spec: the
+// cancel wins). The read resolves done on both.
+export const readViewThenCancelOrdering = {
+  async test() {
+    const events = [];
+    const rs = new ReadableStream({
+      type: 'bytes',
+      pull() {
+        events.push('pull');
+      },
+      cancel(reason) {
+        events.push(`cancel:${reason}`);
+      },
+    });
+    const reader = rs.getReader({ mode: 'byob' });
+    const readP = reader.read(new Uint8Array(4));
+    const cancelP = reader.cancel('stop');
+    await Promise.all([
+      readP.then((r) => events.push(`read:done=${r.done}`)),
+      cancelP,
+    ]);
+    strictEqual(
+      events.join(','),
+      usingTsImpl
+        ? 'cancel:stop,read:done=true'
+        : 'pull,cancel:stop,read:done=true'
+    );
+  },
+};

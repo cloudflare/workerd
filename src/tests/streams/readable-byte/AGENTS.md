@@ -59,6 +59,31 @@ bridge drives to consume TypeScript streams (conduit basics in the
 identity suite's draining-reader.js). No such global exists under the
 C++ implementation; `draining-reader.js` asserts both sides.
 
+## WPT map: readable-byte-streams/general.any.js expectedFailures
+
+The 34 C++ expectedFailures in that WPT file (see
+src/wpt/streams-test.ts), each mapped to the suite pin that owns the
+divergence root. "Family" means the WPT test fails for the same root a
+named suite test pins directly, differing only in incidental asserts.
+
+| WPT test (abbreviated) | Root | Suite pin |
+| --- | --- | --- |
+| start() throws an exception | ctor captures sync start throws (ledger #4) | `syncStartThrow` |
+| Automatic pull() after start() / after read() / after read(view) | proactive pull (ledger #3) | `pullCountShape` |
+| autoAllocateChunkSize | auto-allocated byobRequest on default reads (ledger #5) | `byobRequestOnDefaultRead` |
+| Respond to pull() by enqueue() asynchronously / multiple pull() by separate enqueue() / read() twice then enqueue() twice / Push source without pull signal / enqueue()+getReader()+read() | pull-count and coalescing family (ledger #3, #17) | `pullCountShape`, `byteDesiredSizeAccounting` |
+| constructor rejects size with type "bytes" | ledger #1 | `sizeStrategyForBytes` |
+| cancel() with partially filled pending pull() | done-shape family + partial discard | `cancelWithPartiallyFilledPull` (direct) |
+| getReader(), read(view), then cancel() | pull runs before cancel under C++ | `readViewThenCancelOrdering` (direct) |
+| enqueue() with Uint16Array then read() / 3 byte + 2-element Uint16Array | mismatched view/enqueue granularity | `readableStreamBytesMismatchedSizes`, `byobUint16Array` |
+| read(view) Uint32Array filled by multiple enqueue() | partial fills across enqueues | `byobUint32Array`, `byobPartialRespondMisalignsFillOffset` |
+| enqueue(), read(view) partially, then read() | remainder to a default read | `partialViewThenDefaultRead` (direct; PARITY) |
+| read(view) Uint16 on close()-d with 1 byte / errored if close()-d before fulfilling read(view) | close-with-partial (ledger #7) | `closeWithPartiallyFilledView` |
+| Throwing in pull ignored if errored / pull throw errors stream | pull-throw shapes | `pullThrowIgnoredIfErrored`, `pullThrowErrorsStream` |
+| enqueue() discards auto-allocated BYOB request | request invalidation | `enqueueDiscardsByobRequest` |
+| releaseLock()+second-reader ×9 (respond / respond(1) Uint16 / respond(3) / respondWithNewView / autoAllocate ×3 / Uint16 respond(1) chains ×2) | the release-relock cluster (ledger #9, #10) | `release-relock.js` (whole module) |
+| Multiple read(view): close() and respond() / big enqueue() / multiple enqueue() | multi-pending-read delivery | `readableStreamMultiplePendingReads` |
+
 ## Compatibility flags
 
 | Flag | Pinned in main cells | Other cells |
@@ -101,3 +126,13 @@ streams-byte-cancel-uaf, streams-byte-handlePush-uaf,
 streams-byob-close-reentry, streams-byob-concurrent-readatleast,
 streams-internal-read-buffer-gc, streams-circ-ref-regression,
 streams-consumer-reentry-gc.
+
+## IDL shape (deliberately not pinned here)
+
+WebIDL function metadata — operation `.length` values (optional
+arguments do not count), and promise-typed attributes/operations
+REJECTING rather than throwing on a broken `this` — is enumerated
+per-implementation by WPT's `idlharness.any.js`: the C++ implementation
+carries the known deviations as expectedFailures in
+`src/wpt/streams-test.ts`; the TypeScript implementation matches spec.
+The suites do not duplicate that enumeration.
