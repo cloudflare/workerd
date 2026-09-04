@@ -13,6 +13,7 @@
 //!   ensure the isolate is alive and the current thread holds the isolate lock
 //! - [`Local<'a, T>`] - Stack-allocated handle to a V8 value, tied to a `HandleScope`
 //! - [`Global<T>`] - Persistent handle that outlives `HandleScope`s
+//! - [`Slot<T>`] - Handle stored as an edge in a traced resource
 //! - [`BackingStore`] - Owned handle to the raw memory backing an `ArrayBuffer`;
 //!   keeps the memory alive independently of any JS handle
 //!
@@ -61,10 +62,11 @@ pub mod ffi {
         ptr: usize,
     }
 
-    #[derive(Debug)]
     struct Global {
         /// Strong `v8::Global<v8::Value>` handle. Always valid when non-zero.
         ptr: usize,
+        /// Keeps the isolate's liveness state available until this handle is destroyed.
+        isolate_liveness: KjArc<IsolateLiveness>,
     }
 
     #[derive(Debug)]
@@ -132,6 +134,7 @@ pub mod ffi {
         include!("workerd/rust/jsg/ffi.h");
 
         type Isolate;
+        type IsolateLiveness;
         type FunctionCallbackInfo;
         type Wrappable;
 
@@ -468,6 +471,12 @@ pub mod ffi {
         pub unsafe fn global_reset(value: Pin<&mut Global>);
         pub unsafe fn global_clone(isolate: *mut Isolate, value: &Global) -> Global;
         pub unsafe fn global_to_local(isolate: *mut Isolate, value: &Global) -> Local;
+        pub unsafe fn traced_reference_to_global(
+            isolate: *mut Isolate,
+            value: &Global,
+            traced: &TracedReference,
+        ) -> Global;
+        pub unsafe fn traced_reference_reset(value: Pin<&mut Global>, traced: &mut TracedReference);
 
         // Wrappable - data access
         pub unsafe fn wrappable_get_trait_object<'a>(
@@ -488,23 +497,18 @@ pub mod ffi {
             ref_strong: *mut bool,
             visitor: *mut GcVisitor,
         );
-        /// Visit a `v8::Global` field during GC tracing, implementing the same
+        /// Visit a `v8::TracedReference` field during GC tracing, implementing the same
         /// strong↔traced dual-mode switching that `jsg::Data` / `jsg::V8Ref<T>`
         /// use in C++.
         ///
-        /// `global` points to the `ptr` field of `ffi::Global` (the strong handle).
-        /// `traced` points to the `traced_ptr` field (the weak traced handle).
+        /// `global` contains the strong handle and its isolate liveness token.
+        /// `traced` is the companion traced handle.
         /// Both are mutated in-place to reflect the new handle state after the visit.
         pub unsafe fn wrappable_visit_global(
             visitor: *mut GcVisitor,
-            global: *mut usize,
+            global: Pin<&mut Global>,
             traced: &mut TracedReference,
         );
-        /// Resets a `v8::TracedReference`, releasing the weak GC handle.
-        /// Must be called when a `Global<T>` is dropped in traced mode to avoid
-        /// leaking a live `v8::TracedReference`.
-        pub unsafe fn traced_reference_reset(traced: &mut TracedReference);
-
         // Unwrappers
         //
         // Shims that can throw (coercion via jsg::check, building rust::String/Vec
@@ -689,6 +693,11 @@ pub mod ffi {
         );
     }
 }
+
+// SAFETY: IsolateLiveness is atomically refcounted and its isolate pointer is atomic.
+unsafe impl Send for ffi::IsolateLiveness {}
+// SAFETY: IsolateLiveness is atomically refcounted and its isolate pointer is atomic.
+unsafe impl Sync for ffi::IsolateLiveness {}
 
 impl std::fmt::Display for ffi::ExceptionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2889,20 +2898,12 @@ impl<'a> Local<'a, Object> {
     }
 }
 
-// Generic Global<T> handle without lifetime
+/// Persistent V8 handle without a HandleScope lifetime.
+///
+/// Dropping a Global outside its isolate lock defers destruction until the next lock. A Global
+/// must not outlive its isolate.
 pub struct Global<T> {
     handle: ffi::Global,
-    /// Weak `v8::TracedReference<v8::Data>` handle used during GC tracing.
-    ///
-    /// Empty (`ptr == 0`) when the strong handle is active; becomes non-empty
-    /// once the parent `Wrappable` is downgraded to traced mode (all strong Rust
-    /// `Rc`s dropped). Reset to empty when strong refs are re-acquired.
-    ///
-    /// `UnsafeCell` is required because `GcVisitor::visit_global` takes `&Global<T>`
-    /// (shared reference) but must mutate this field to install the traced handle.
-    /// This is sound because GC tracing is always single-threaded within a V8
-    /// isolate and `trace` is never re-entrant on the same object.
-    traced: UnsafeCell<ffi::TracedReference>,
     _marker: PhantomData<T>,
 }
 
@@ -2915,7 +2916,6 @@ impl<T> Global<T> {
     pub unsafe fn from_ffi(handle: ffi::Global) -> Self {
         Self {
             handle,
-            traced: UnsafeCell::new(ffi::TracedReference { ptr: 0 }),
             _marker: PhantomData,
         }
     }
@@ -2946,21 +2946,14 @@ impl<T> Global<T> {
         }
     }
 
-    /// Resets this global handle, releasing both the strong and traced V8 handles.
+    /// Resets this global handle.
     ///
     /// # Safety
     /// The caller must ensure the global handle is valid.
     pub unsafe fn reset(&mut self) {
-        // Reset the strong handle.
-        // SAFETY: global handle is valid; Pin is sound because ffi::Global is not moved.
+        // SAFETY: the handle is valid; Pin is sound because ffi::Global is not moved.
         unsafe {
             ffi::global_reset(Pin::new_unchecked(&mut self.handle));
-        }
-        // Reset the TracedReference to avoid leaking a live V8 handle when this
-        // Global is dropped while in traced mode.
-        // SAFETY: traced is valid for the lifetime of self.
-        unsafe {
-            ffi::traced_reference_reset(self.traced.get_mut());
         }
     }
 }
@@ -2970,7 +2963,6 @@ impl<T> From<Local<'_, T>> for Global<T> {
         Self {
             // SAFETY: isolate is valid (guaranteed by Local's invariant); handle is valid.
             handle: unsafe { ffi::local_to_global(local.isolate.as_ffi(), local.into_ffi()) },
-            traced: UnsafeCell::new(ffi::TracedReference { ptr: 0 }),
             _marker: PhantomData,
         }
     }
@@ -3000,7 +2992,6 @@ impl<T> From<ffi::Global> for Global<T> {
     fn from(handle: ffi::Global) -> Self {
         Self {
             handle,
-            traced: UnsafeCell::new(ffi::TracedReference { ptr: 0 }),
             _marker: PhantomData,
         }
     }
@@ -3013,8 +3004,69 @@ impl<T> Drop for Global<T> {
     }
 }
 
-/// `Global<T>` is a strong GC handle — visited via `GcVisitor::visit_global`.
-impl<T> crate::Traced for Global<T> {
+/// A traced edge from a garbage-collected resource to a V8 value.
+///
+/// Backed by V8's `TracedReference<T>`. It cannot be opened directly; use
+/// [`Slot::to_global`] under the isolate lock before accessing it. Once visited by GC,
+/// moving it into another resource or destroying it also requires the isolate lock.
+pub struct Slot<T> {
+    // Both fields are mutated by GcVisitor through a shared reference.
+    global: UnsafeCell<Global<T>>,
+    // V8 retains the address of the traced slot, so keep it stable across Rust moves.
+    traced: Box<UnsafeCell<ffi::TracedReference>>,
+    _not_send_sync: PhantomData<*const ()>,
+}
+
+impl<T> Slot<T> {
+    #[must_use]
+    pub fn new(global: Global<T>) -> Self {
+        Self {
+            global: UnsafeCell::new(global),
+            traced: Box::new(UnsafeCell::new(ffi::TracedReference { ptr: 0 })),
+            _not_send_sync: PhantomData,
+        }
+    }
+
+    #[must_use]
+    pub fn to_global(&self, lock: &mut Lock) -> Global<T> {
+        // SAFETY: the isolate lock prevents GC from mutating the handle.
+        unsafe {
+            ffi::traced_reference_to_global(
+                lock.isolate().as_ffi(),
+                &(*self.global.get()).handle,
+                &*self.traced.get(),
+            )
+            .into()
+        }
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn is_traced(&self, _lock: &mut Lock) -> bool {
+        // SAFETY: the isolate lock prevents GC from mutating the traced slot.
+        unsafe { (*self.traced.get()).ptr != 0 }
+    }
+}
+
+impl<T> Drop for Slot<T> {
+    fn drop(&mut self) {
+        // SAFETY: both fields are exclusively borrowed during drop.
+        unsafe {
+            ffi::traced_reference_reset(
+                Pin::new_unchecked(&mut self.global.get_mut().handle),
+                self.traced.as_mut().get_mut(),
+            );
+        }
+    }
+}
+
+impl<T> From<Global<T>> for Slot<T> {
+    fn from(global: Global<T>) -> Self {
+        Self::new(global)
+    }
+}
+
+impl<T> crate::Traced for Slot<T> {
     fn trace(&self, visitor: &mut GcVisitor) {
         visitor.visit_global(self);
     }
@@ -3030,10 +3082,7 @@ impl<T> Global<T> {
     /// This properly creates a new V8 persistent handle that references the same
     /// JS object. Both the original and clone can be independently dropped.
     ///
-    /// The returned clone always starts in **strong mode** (`traced_ptr = 0`),
-    /// regardless of whether `self` is currently in traced mode. If the clone
-    /// needs to be traced, `GcVisitor::visit_global` will transition it on the
-    /// next GC cycle.
+    /// The returned clone always starts in strong mode.
     #[must_use]
     pub fn clone(&self, lock: &mut Lock) -> Self {
         // SAFETY: isolate is valid and locked (guaranteed by Lock); global handle is valid.
@@ -3377,39 +3426,35 @@ impl GcVisitor {
         }
     }
 
-    /// Visits a `jsg::Rc<R>` field during GC tracing.
+    /// Visits the `jsg::Rc<R>` backing a `jsg::Member<R>` during GC tracing.
     ///
     /// Delegates to the C++ `Wrappable::visitRef()` which handles all the
     /// strong/traced switching logic and transitive tracing.
-    pub fn visit_rc<R: crate::Resource>(&mut self, r: &crate::Rc<R>) {
+    pub(crate) fn visit_rc<R: crate::Resource>(&mut self, r: &crate::Rc<R>) {
         r.visit(self);
     }
 
-    /// Visits a `v8::Global<T>` field during GC tracing.
+    /// Visits a `Slot<T>` field during GC tracing.
     ///
     /// Implements the same strong↔traced dual-mode switching that `jsg::Data`
     /// / `jsg::V8Ref<T>` use in C++. When the parent `Wrappable` has strong
-    /// Rust refs the handle stays strong; once all Rust refs are dropped and
-    /// only the JS wrapper keeps it alive, the handle is downgraded to a
-    /// `v8::TracedReference` that cppgc can follow — allowing GC to detect
-    /// and break reference cycles.
+    /// Rust refs the handle stays strong until its owner participates in wrapper
+    /// tracing. It is then downgraded to a `v8::TracedReference` that cppgc can
+    /// follow, allowing GC to detect and break reference cycles.
     ///
-    /// Accepts `&Global<T>` even though it mutates the `traced` slot inside the
-    /// handle. This is safe because:
+    /// Accepts `&Slot<T>` even though it mutates the traced slot inside
+    /// its global handle. This is safe because:
     /// - GC tracing is always single-threaded within a V8 isolate.
     /// - `trace` is never re-entrant on the same object during a GC cycle.
-    /// - The mutation only touches `traced` (the weak traced handle slot),
-    ///   never `handle` (the strong handle), so the value observed through any
-    ///   other `&Global<T>` reference remains valid.
-    pub fn visit_global<T>(&mut self, global: &Global<T>) {
-        // SAFETY: `global.traced` is an `UnsafeCell`; accessing it via `get()`
-        // is sound under the single-threaded, non-reentrant GC tracing contract
-        // documented on `Global<T>::traced`.
+    /// - Both mutable handle slots are stored in `UnsafeCell`.
+    pub(crate) fn visit_global<T>(&mut self, reference: &Slot<T>) {
+        // SAFETY: both fields are UnsafeCells and GC tracing is single-threaded and non-reentrant.
         unsafe {
+            let global = &mut *reference.global.get();
             ffi::wrappable_visit_global(
                 &raw mut self.handle,
-                (&raw const global.handle.ptr).cast_mut(),
-                &mut *global.traced.get(),
+                Pin::new_unchecked(&mut global.handle),
+                &mut *reference.traced.get(),
             );
         }
     }

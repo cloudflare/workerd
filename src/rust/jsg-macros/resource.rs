@@ -128,7 +128,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 }
 
 /// Scans `impl_block` for `#[jsg_method]`-annotated functions and returns a
-/// `Member::Method` / `Member::StaticMethod` token stream for each.
+/// `ResourceMember::Method` / `ResourceMember::StaticMethod` token stream for each.
 fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
     impl_block
         .items
@@ -157,16 +157,16 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::
                 .any(|arg| matches!(arg, FnArg::Receiver(_)));
 
             Some(if has_self {
-                quote! { jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback_name } }
+                quote! { jsg::ResourceMember::Method { name: #js_name.to_owned(), callback: Self::#callback_name } }
             } else {
-                quote! { jsg::Member::StaticMethod { name: #js_name.to_owned(), callback: Self::#callback_name } }
+                quote! { jsg::ResourceMember::StaticMethod { name: #js_name.to_owned(), callback: Self::#callback_name } }
             })
         })
         .collect()
 }
 
 /// Scans `impl_block` for `#[jsg_static_constant]`-annotated consts and returns
-/// a `Member::StaticConstant` token stream for each.
+/// a `ResourceMember::StaticConstant` token stream for each.
 fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
     impl_block
         .items
@@ -190,7 +190,7 @@ fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<quote::__private
                 .unwrap_or_else(|| rust_name.to_string());
 
             Some(quote! {
-                jsg::Member::StaticConstant {
+                jsg::ResourceMember::StaticConstant {
                     name: #js_name.to_owned(),
                     value: jsg::ConstantValue::from(Self::#rust_name),
                 }
@@ -222,7 +222,7 @@ pub fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
 
         #[automatically_derived]
         impl jsg::Resource for #self_ty {
-            fn members() -> Vec<jsg::Member>
+            fn members() -> Vec<jsg::ResourceMember>
             where
                 Self: Sized,
             {
@@ -365,7 +365,7 @@ fn generate_constructor_registration(
             };
 
             quote! {
-                jsg::Member::Constructor {
+                jsg::ResourceMember::Constructor {
                     callback: {
                         unsafe extern "C" fn #callback_name(
                             info: *mut jsg::v8::ffi::FunctionCallbackInfo,
@@ -395,7 +395,7 @@ fn generate_constructor_registration(
 // Property helpers
 // ---------------------------------------------------------------------------
 
-/// Emits one `Member::Property { .. }` token stream for a single property group,
+/// Emits one `ResourceMember::Property { .. }` token stream for a single property group,
 /// or an `Err` compile-error stream if the group has no getter.
 fn emit_property_group(
     js_name: &str,
@@ -423,7 +423,7 @@ fn emit_property_group(
     };
 
     Ok(quote! {
-        jsg::Member::Property {
+        jsg::ResourceMember::Property {
             name: #js_name.to_owned(),
             kind: #kind_tokens,
             getter_callback: Self::#getter_cb,
@@ -602,7 +602,7 @@ fn scan_property_annotations(
     Ok(groups)
 }
 
-/// Phase 2 (per group): validate constraints and emit one `Member::Property`.
+/// Phase 2 (per group): validate constraints and emit one `ResourceMember::Property`.
 fn validate_and_emit_property(
     js_name: &str,
     kind: PropertyKind,
@@ -657,7 +657,7 @@ fn validate_and_emit_property(
 }
 
 /// Scans an impl block for `#[jsg_property]` and `#[jsg_inspect_property]` annotations
-/// and returns a `Member::Property` token stream for each property group.
+/// and returns a `ResourceMember::Property` token stream for each property group.
 fn collect_property_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
     let groups = match scan_property_annotations(impl_block) {
         Ok(g) => g,

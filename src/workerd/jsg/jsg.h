@@ -941,6 +941,10 @@ class Data {
     return handle == other;
   }
 
+  // Defers destruction of a v8::Global handle to the next time the isolate is locked. Used by
+  // Data::destroy(), WeakV8Ref::destroy(), and the Rust JSG FFI.
+  static void deferGlobalDestruction(v8::Isolate* isolate, v8::Global<v8::Data> handle);
+
  private:
   // Liveness handle for the isolate the handles below are associated with. Null exactly when this
   // Data is empty. Reading the isolate through this (rather than caching a raw v8::Isolate*) lets
@@ -982,10 +986,6 @@ class Data {
   // Implement move constructor when the source of the move has previously been visited for
   // garbage collection.
   void moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTracedRef) noexcept;
-
-  // Defers destruction of a v8::Global handle to the next time the isolate is locked.
-  // Used by Data::destroy() and WeakV8Ref::destroy().
-  static void deferGlobalDestruction(v8::Isolate* isolate, v8::Global<v8::Data> handle);
 
   // Looks up the IsolateLiveness handle for the given isolate. Captured at construction so that
   // destroy() can tell whether the isolate is still alive. Used by Data and WeakV8Ref.
@@ -2222,11 +2222,13 @@ class GcVisitor {
   void visit(Data& data);
 
   /// Visit a raw `v8::Global<Value>` + `v8::TracedReference<Data>` pair,
-  /// implementing the same strong↔traced dual-mode switching as `visit(Data&)`.
+  /// keeping exactly one populated based on whether the parent is rooted or traced.
   ///
-  /// Used by the Rust JSG FFI to support `v8::Global<T>` fields on Rust
+  /// Used by the Rust JSG FFI to support `v8::TracedReference<T>` fields on Rust
   /// resources without a full `jsg::Data` wrapper.
-  void visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Data>& traced);
+  void visit(v8::Global<v8::Value>& strong,
+      v8::TracedReference<v8::Data>& traced,
+      v8::Isolate* handleIsolate);
 
   void visit(kj::Maybe<Data>& maybeData) {
     KJ_IF_SOME(data, maybeData) {

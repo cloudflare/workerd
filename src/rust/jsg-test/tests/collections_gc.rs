@@ -4,8 +4,8 @@
 
 //! GC tracing tests for collection fields in `#[jsg_resource]` structs.
 //!
-//! Verifies that `Vec<jsg::Rc<T>>`, `HashMap<K, jsg::Rc<T>>`, `BTreeMap<K, jsg::Rc<T>>`,
-//! `HashSet<jsg::Rc<T>>`, `BTreeSet<jsg::Rc<T>>`, and their `Cell<…>` variants all
+//! Verifies that `jsg::Member<T>` values in standard collections and their `Cell<…>`
+//! variants all
 //! produce correct GC trace edges so that children are kept alive as long as the parent
 //! is reachable, and collected once the parent is collected.
 //!
@@ -53,14 +53,14 @@ impl Leaf {
 }
 
 // =============================================================================
-// Vec<jsg::Rc<T>>
+// Vec<jsg::Member<T>>
 // =============================================================================
 
 static VEC_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 #[jsg_resource]
 struct VecParent {
-    pub children: Vec<jsg::Rc<Leaf>>,
+    pub children: Vec<jsg::Member<Leaf>>,
 }
 
 impl Drop for VecParent {
@@ -72,9 +72,9 @@ impl Drop for VecParent {
 #[jsg_resource]
 impl VecParent {}
 
-/// `Vec<jsg::Rc<T>>` children are kept alive while parent JS wrapper is reachable.
+/// `Vec<jsg::Member<T>>` children are kept alive while parent JS wrapper is reachable.
 #[test]
-fn vec_rc_children_kept_alive_through_gc() {
+fn vec_member_children_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     VEC_PARENT_DROPS.store(0, Ordering::SeqCst);
 
@@ -85,7 +85,7 @@ fn vec_rc_children_kept_alive_through_gc() {
         let c3 = jsg::Rc::new(Leaf { value: 3 });
 
         let parent = jsg::Rc::new(VecParent {
-            children: vec![c1.clone(), c2.clone(), c3.clone()],
+            children: vec![c1.clone().into(), c2.clone().into(), c3.clone().into()],
         });
         let wrapped = parent.clone().to_js(lock);
         ctx.set_global("parent", wrapped);
@@ -112,9 +112,9 @@ fn vec_rc_children_kept_alive_through_gc() {
     });
 }
 
-/// An empty `Vec<jsg::Rc<T>>` does not crash during GC.
+/// An empty `Vec<jsg::Member<T>>` does not crash during GC.
 #[test]
-fn vec_rc_empty_does_not_crash_during_gc() {
+fn vec_member_empty_does_not_crash_during_gc() {
     VEC_PARENT_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
@@ -137,14 +137,14 @@ fn vec_rc_empty_does_not_crash_during_gc() {
 }
 
 // =============================================================================
-// HashMap<K, jsg::Rc<T>>
+// HashMap<K, jsg::Member<T>>
 // =============================================================================
 
 static HASHMAP_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 #[jsg_resource]
 struct HashMapParent {
-    pub children: HashMap<String, jsg::Rc<Leaf>>,
+    pub children: HashMap<String, jsg::Member<Leaf>>,
 }
 
 impl Drop for HashMapParent {
@@ -156,9 +156,9 @@ impl Drop for HashMapParent {
 #[jsg_resource]
 impl HashMapParent {}
 
-/// `HashMap<K, jsg::Rc<T>>` values are kept alive while parent JS wrapper is reachable.
+/// `HashMap<K, jsg::Member<T>>` values are kept alive while parent JS wrapper is reachable.
 #[test]
-fn hashmap_rc_values_kept_alive_through_gc() {
+fn hashmap_member_values_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     HASHMAP_PARENT_DROPS.store(0, Ordering::SeqCst);
 
@@ -168,8 +168,8 @@ fn hashmap_rc_values_kept_alive_through_gc() {
         let b = jsg::Rc::new(Leaf { value: 20 });
 
         let mut map = HashMap::new();
-        map.insert("a".to_owned(), a.clone());
-        map.insert("b".to_owned(), b.clone());
+        map.insert("a".to_owned(), a.clone().into());
+        map.insert("b".to_owned(), b.clone().into());
 
         let parent = jsg::Rc::new(HashMapParent { children: map });
         let wrapped = parent.clone().to_js(lock);
@@ -193,9 +193,9 @@ fn hashmap_rc_values_kept_alive_through_gc() {
     });
 }
 
-/// An empty `HashMap<K, jsg::Rc<T>>` does not crash during GC.
+/// An empty `HashMap<K, jsg::Member<T>>` does not crash during GC.
 #[test]
-fn hashmap_rc_empty_does_not_crash_during_gc() {
+fn hashmap_member_empty_does_not_crash_during_gc() {
     HASHMAP_PARENT_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
@@ -220,14 +220,14 @@ fn hashmap_rc_empty_does_not_crash_during_gc() {
 }
 
 // =============================================================================
-// BTreeMap<K, jsg::Rc<T>>
+// BTreeMap<K, jsg::Member<T>>
 // =============================================================================
 
 static BTREEMAP_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 #[jsg_resource]
 struct BTreeMapParent {
-    pub children: BTreeMap<String, jsg::Rc<Leaf>>,
+    pub children: BTreeMap<String, jsg::Member<Leaf>>,
 }
 
 impl Drop for BTreeMapParent {
@@ -239,9 +239,9 @@ impl Drop for BTreeMapParent {
 #[jsg_resource]
 impl BTreeMapParent {}
 
-/// `BTreeMap<K, jsg::Rc<T>>` values are kept alive while parent JS wrapper is reachable.
+/// `BTreeMap<K, jsg::Member<T>>` values are kept alive while parent JS wrapper is reachable.
 #[test]
-fn btreemap_rc_values_kept_alive_through_gc() {
+fn btreemap_member_values_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     BTREEMAP_PARENT_DROPS.store(0, Ordering::SeqCst);
 
@@ -251,8 +251,8 @@ fn btreemap_rc_values_kept_alive_through_gc() {
         let y = jsg::Rc::new(Leaf { value: 200 });
 
         let mut map = BTreeMap::new();
-        map.insert("x".to_owned(), x.clone());
-        map.insert("y".to_owned(), y.clone());
+        map.insert("x".to_owned(), x.clone().into());
+        map.insert("y".to_owned(), y.clone().into());
 
         let parent = jsg::Rc::new(BTreeMapParent { children: map });
         let wrapped = parent.clone().to_js(lock);
@@ -276,9 +276,9 @@ fn btreemap_rc_values_kept_alive_through_gc() {
     });
 }
 
-/// An empty `BTreeMap<K, jsg::Rc<T>>` does not crash during GC.
+/// An empty `BTreeMap<K, jsg::Member<T>>` does not crash during GC.
 #[test]
-fn btreemap_rc_empty_does_not_crash_during_gc() {
+fn btreemap_member_empty_does_not_crash_during_gc() {
     BTREEMAP_PARENT_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
@@ -303,15 +303,15 @@ fn btreemap_rc_empty_does_not_crash_during_gc() {
 }
 
 // =============================================================================
-// HashSet<jsg::Rc<T>>
+// HashSet<jsg::Member<T>>
 // =============================================================================
 
 static HASHSET_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
-// jsg::Rc<T> implements Hash + Eq by pointer identity (matching std::rc::Rc).
+// jsg::Member<T> implements Hash + Eq by pointer identity.
 #[jsg_resource]
 struct HashSetParent {
-    pub children: HashSet<jsg::Rc<Leaf>>,
+    pub children: HashSet<jsg::Member<Leaf>>,
 }
 
 impl Drop for HashSetParent {
@@ -323,15 +323,15 @@ impl Drop for HashSetParent {
 #[jsg_resource]
 impl HashSetParent {}
 
-/// `HashSet<jsg::Rc<T>>` elements are kept alive while parent JS wrapper is reachable.
-// jsg::Rc uses pointer-identity Hash+Eq, so interior mutability (Cell fields) doesn't
+/// `HashSet<jsg::Member<T>>` elements are kept alive while parent JS wrapper is reachable.
+// jsg::Member uses pointer-identity Hash+Eq, so interior mutability (Cell fields) doesn't
 // affect correctness. Suppress the mutable_key_type lint that fires on HashSet::new().
 #[expect(
     clippy::mutable_key_type,
-    reason = "jsg::Rc hashes by pointer address, not interior state"
+    reason = "jsg::Member hashes by pointer address, not interior state"
 )]
 #[test]
-fn hashset_rc_elements_kept_alive_through_gc() {
+fn hashset_member_elements_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     HASHSET_PARENT_DROPS.store(0, Ordering::SeqCst);
 
@@ -341,8 +341,8 @@ fn hashset_rc_elements_kept_alive_through_gc() {
         let q = jsg::Rc::new(Leaf { value: 2 });
 
         let mut set = HashSet::new();
-        set.insert(p.clone());
-        set.insert(q.clone());
+        set.insert(p.clone().into());
+        set.insert(q.clone().into());
 
         let parent = jsg::Rc::new(HashSetParent { children: set });
         let wrapped = parent.clone().to_js(lock);
@@ -366,9 +366,9 @@ fn hashset_rc_elements_kept_alive_through_gc() {
     });
 }
 
-/// An empty `HashSet<jsg::Rc<T>>` does not crash during GC.
+/// An empty `HashSet<jsg::Member<T>>` does not crash during GC.
 #[test]
-fn hashset_rc_empty_does_not_crash_during_gc() {
+fn hashset_member_empty_does_not_crash_during_gc() {
     HASHSET_PARENT_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
@@ -393,14 +393,14 @@ fn hashset_rc_empty_does_not_crash_during_gc() {
 }
 
 // =============================================================================
-// BTreeSet<jsg::Rc<T>>
+// BTreeSet<jsg::Member<T>>
 // =============================================================================
 
 static BTREESET_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 #[jsg_resource]
 struct BTreeSetParent {
-    pub children: BTreeSet<jsg::Rc<Leaf>>,
+    pub children: BTreeSet<jsg::Member<Leaf>>,
 }
 
 impl Drop for BTreeSetParent {
@@ -412,14 +412,14 @@ impl Drop for BTreeSetParent {
 #[jsg_resource]
 impl BTreeSetParent {}
 
-/// `BTreeSet<jsg::Rc<T>>` elements are kept alive while parent JS wrapper is reachable.
+/// `BTreeSet<jsg::Member<T>>` elements are kept alive while parent JS wrapper is reachable.
 // Same pointer-identity rationale as the HashSet test above.
 #[expect(
     clippy::mutable_key_type,
-    reason = "jsg::Rc orders by pointer address, not interior state"
+    reason = "jsg::Member orders by pointer address, not interior state"
 )]
 #[test]
-fn btreeset_rc_elements_kept_alive_through_gc() {
+fn btreeset_member_elements_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     BTREESET_PARENT_DROPS.store(0, Ordering::SeqCst);
 
@@ -429,8 +429,8 @@ fn btreeset_rc_elements_kept_alive_through_gc() {
         let s = jsg::Rc::new(Leaf { value: 8 });
 
         let mut set = BTreeSet::new();
-        set.insert(r.clone());
-        set.insert(s.clone());
+        set.insert(r.clone().into());
+        set.insert(s.clone().into());
 
         let parent = jsg::Rc::new(BTreeSetParent { children: set });
         let wrapped = parent.clone().to_js(lock);
@@ -454,9 +454,9 @@ fn btreeset_rc_elements_kept_alive_through_gc() {
     });
 }
 
-/// An empty `BTreeSet<jsg::Rc<T>>` does not crash during GC.
+/// An empty `BTreeSet<jsg::Member<T>>` does not crash during GC.
 #[test]
-fn btreeset_rc_empty_does_not_crash_during_gc() {
+fn btreeset_member_empty_does_not_crash_during_gc() {
     BTREESET_PARENT_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
@@ -481,14 +481,14 @@ fn btreeset_rc_empty_does_not_crash_during_gc() {
 }
 
 // =============================================================================
-// Cell<Vec<jsg::Rc<T>>>
+// Cell<Vec<jsg::Member<T>>>
 // =============================================================================
 
 static CELL_VEC_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 #[jsg_resource]
 struct CellVecParent {
-    pub children: Cell<Vec<jsg::Rc<Leaf>>>,
+    pub children: Cell<Vec<jsg::Member<Leaf>>>,
 }
 
 impl Drop for CellVecParent {
@@ -500,9 +500,9 @@ impl Drop for CellVecParent {
 #[jsg_resource]
 impl CellVecParent {}
 
-/// `Cell<Vec<jsg::Rc<T>>>` children are kept alive while parent JS wrapper is reachable.
+/// `Cell<Vec<jsg::Member<T>>>` children are kept alive while parent JS wrapper is reachable.
 #[test]
-fn cell_vec_rc_children_kept_alive_through_gc() {
+fn cell_vec_member_children_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     CELL_VEC_PARENT_DROPS.store(0, Ordering::SeqCst);
 
@@ -512,7 +512,7 @@ fn cell_vec_rc_children_kept_alive_through_gc() {
         let c2 = jsg::Rc::new(Leaf { value: 22 });
 
         let parent = jsg::Rc::new(CellVecParent {
-            children: Cell::new(vec![c1.clone(), c2.clone()]),
+            children: Cell::new(vec![c1.clone().into(), c2.clone().into()]),
         });
         let wrapped = parent.clone().to_js(lock);
         ctx.set_global("parent", wrapped);
@@ -535,9 +535,9 @@ fn cell_vec_rc_children_kept_alive_through_gc() {
     });
 }
 
-/// An empty `Cell<Vec<jsg::Rc<T>>>` does not crash during GC.
+/// An empty `Cell<Vec<jsg::Member<T>>>` does not crash during GC.
 #[test]
-fn cell_vec_rc_empty_does_not_crash_during_gc() {
+fn cell_vec_member_empty_does_not_crash_during_gc() {
     CELL_VEC_PARENT_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
@@ -562,14 +562,14 @@ fn cell_vec_rc_empty_does_not_crash_during_gc() {
 }
 
 // =============================================================================
-// Cell<HashMap<K, jsg::Rc<T>>>
+// Cell<HashMap<K, jsg::Member<T>>>
 // =============================================================================
 
 static CELL_MAP_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 #[jsg_resource]
 struct CellHashMapParent {
-    pub children: Cell<HashMap<String, jsg::Rc<Leaf>>>,
+    pub children: Cell<HashMap<String, jsg::Member<Leaf>>>,
 }
 
 impl Drop for CellHashMapParent {
@@ -581,9 +581,9 @@ impl Drop for CellHashMapParent {
 #[jsg_resource]
 impl CellHashMapParent {}
 
-/// `Cell<HashMap<K, jsg::Rc<T>>>` values are kept alive while parent JS wrapper is reachable.
+/// `Cell<HashMap<K, jsg::Member<T>>>` values are kept alive while parent JS wrapper is reachable.
 #[test]
-fn cell_hashmap_rc_values_kept_alive_through_gc() {
+fn cell_hashmap_member_values_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     CELL_MAP_PARENT_DROPS.store(0, Ordering::SeqCst);
 
@@ -592,7 +592,7 @@ fn cell_hashmap_rc_values_kept_alive_through_gc() {
         let m = jsg::Rc::new(Leaf { value: 99 });
 
         let mut map = HashMap::new();
-        map.insert("m".to_owned(), m.clone());
+        map.insert("m".to_owned(), m.clone().into());
 
         let parent = jsg::Rc::new(CellHashMapParent {
             children: Cell::new(map),
@@ -618,16 +618,16 @@ fn cell_hashmap_rc_values_kept_alive_through_gc() {
 }
 
 // =============================================================================
-// Mixed field resource — Vec + HashMap + bare Rc all in one struct
+// Mixed field resource — Vec + HashMap + direct Member
 // =============================================================================
 
 static MIXED_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 #[jsg_resource]
 struct MixedParent {
-    pub singles: Vec<jsg::Rc<Leaf>>,
-    pub named: HashMap<String, jsg::Rc<Leaf>>,
-    pub direct: jsg::Rc<Leaf>,
+    pub singles: Vec<jsg::Member<Leaf>>,
+    pub named: HashMap<String, jsg::Member<Leaf>>,
+    pub direct: jsg::Member<Leaf>,
 }
 
 impl Drop for MixedParent {
@@ -639,7 +639,7 @@ impl Drop for MixedParent {
 #[jsg_resource]
 impl MixedParent {}
 
-/// A resource with `Vec`, `HashMap`, and bare `Rc` fields — all children traced.
+/// A resource with `Vec`, `HashMap`, and direct `Member` fields.
 #[test]
 fn mixed_collection_fields_all_traced() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
@@ -652,12 +652,12 @@ fn mixed_collection_fields_all_traced() {
         let direct_child = jsg::Rc::new(Leaf { value: 3 });
 
         let mut named = HashMap::new();
-        named.insert("key".to_owned(), map_child.clone());
+        named.insert("key".to_owned(), map_child.clone().into());
 
         let parent = jsg::Rc::new(MixedParent {
-            singles: vec![vec_child.clone()],
+            singles: vec![vec_child.clone().into()],
             named,
-            direct: direct_child.clone(),
+            direct: direct_child.clone().into(),
         });
         let wrapped = parent.clone().to_js(lock);
         ctx.set_global("parent", wrapped);
@@ -683,13 +683,13 @@ fn mixed_collection_fields_all_traced() {
 }
 
 // =============================================================================
-// Vec<jsg::Rc<T>> — child kept alive by vec even after outer Rust ref is dropped
+// Vec<jsg::Member<T>> — child kept alive after the outer Rust root is dropped
 // =============================================================================
 
 /// Verifies that a child held only by a `Vec` inside a JS-wrapped parent is NOT
 /// collected while the parent is reachable, even after its own Rust `Rc` is gone.
 #[test]
-fn vec_rc_child_kept_alive_by_parent_after_rust_ref_dropped() {
+fn vec_member_child_kept_alive_after_rust_root_dropped() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     VEC_PARENT_DROPS.store(0, Ordering::SeqCst);
 
@@ -698,7 +698,7 @@ fn vec_rc_child_kept_alive_by_parent_after_rust_ref_dropped() {
         let child = jsg::Rc::new(Leaf { value: 42 });
 
         let parent = jsg::Rc::new(VecParent {
-            children: vec![child.clone()],
+            children: vec![child.clone().into()],
         });
 
         // Wrap parent so it gets a JS object.
@@ -726,14 +726,14 @@ fn vec_rc_child_kept_alive_by_parent_after_rust_ref_dropped() {
 }
 
 // =============================================================================
-// HashMap with integer key — u32 key, jsg::Rc<T> value
+// HashMap with integer key — u32 key, jsg::Member<T> value
 // =============================================================================
 
 static INT_KEY_MAP_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 #[jsg_resource]
 struct IntKeyMapParent {
-    pub children: HashMap<u32, jsg::Rc<Leaf>>,
+    pub children: HashMap<u32, jsg::Member<Leaf>>,
 }
 
 impl Drop for IntKeyMapParent {
@@ -745,9 +745,9 @@ impl Drop for IntKeyMapParent {
 #[jsg_resource]
 impl IntKeyMapParent {}
 
-/// `HashMap<u32, jsg::Rc<T>>` — integer key does not affect tracing.
+/// `HashMap<u32, jsg::Member<T>>` — integer key does not affect tracing.
 #[test]
-fn hashmap_integer_key_rc_values_traced() {
+fn hashmap_integer_key_member_values_traced() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     INT_KEY_MAP_PARENT_DROPS.store(0, Ordering::SeqCst);
 
@@ -756,8 +756,8 @@ fn hashmap_integer_key_rc_values_traced() {
         let v = jsg::Rc::new(Leaf { value: 55 });
 
         let mut map = HashMap::new();
-        map.insert(0u32, v.clone());
-        map.insert(1u32, v.clone()); // same child twice
+        map.insert(0u32, v.clone().into());
+        map.insert(1u32, v.clone().into()); // same child twice
 
         let parent = jsg::Rc::new(IntKeyMapParent { children: map });
         let wrapped = parent.clone().to_js(lock);
@@ -794,12 +794,12 @@ static TRACE_DELEGATION_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 /// A plain Rust struct (not a jsg resource) that holds traceable children.
 /// It manually implements `Traced`.
 struct PrivateData {
-    child: jsg::Rc<Leaf>,
+    child: jsg::Member<Leaf>,
 }
 
 impl jsg::Traced for PrivateData {
     fn trace(&self, visitor: &mut jsg::GcVisitor) {
-        visitor.visit_rc(&self.child);
+        jsg::Traced::trace(&self.child, visitor);
     }
 }
 
@@ -832,7 +832,7 @@ fn trace_delegation_child_kept_alive_through_gc() {
 
         let parent = jsg::Rc::new(TraceDelegationParent {
             data: PrivateData {
-                child: child.clone(),
+                child: child.clone().into(),
             },
         });
         let wrapped = parent.clone().to_js(lock);
@@ -866,7 +866,7 @@ static CUSTOM_TRACE_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 /// The user provides their own `Traced` impl with custom logic.
 #[jsg_resource(custom_trace)]
 struct CustomTraceParent {
-    pub child: jsg::Rc<Leaf>,
+    pub child: jsg::Member<Leaf>,
 }
 
 impl Drop for CustomTraceParent {
@@ -878,7 +878,7 @@ impl Drop for CustomTraceParent {
 // User-supplied Traced impl — not generated by the macro because of custom_trace.
 impl jsg::Traced for CustomTraceParent {
     fn trace(&self, visitor: &mut jsg::GcVisitor) {
-        visitor.visit_rc(&self.child);
+        jsg::Traced::trace(&self.child, visitor);
     }
 }
 
@@ -897,7 +897,7 @@ fn custom_trace_child_kept_alive_through_gc() {
         let child = jsg::Rc::new(Leaf { value: 88 });
 
         let parent = jsg::Rc::new(CustomTraceParent {
-            child: child.clone(),
+            child: child.clone().into(),
         });
         let wrapped = parent.clone().to_js(lock);
         ctx.set_global("parent", wrapped);

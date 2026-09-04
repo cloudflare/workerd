@@ -112,7 +112,7 @@ Local local_clone(const Local& value) {
 
 Global local_to_global(Isolate* isolate, Local value) {
   v8::Global<v8::Value> global(isolate, local_from_ffi<v8::Value>(kj::mv(value)));
-  return to_ffi(kj::mv(global));
+  return to_ffi(isolate, kj::mv(global));
 }
 
 Local local_new_number(Isolate* isolate, double value) {
@@ -766,7 +766,7 @@ DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
         [](uint32_t index, v8::Local<v8::Value> element,
             void* userData) -> v8::Array::CallbackResult {
       auto* d = static_cast<Data*>(userData);
-      d->result->push_back(to_ffi(v8::Global<v8::Value>(d->isolate, element)));
+      d->result->push_back(to_ffi(d->isolate, v8::Global<v8::Value>(d->isolate, element)));
       return v8::Array::CallbackResult::kContinue;
     },
         &data);
@@ -817,18 +817,62 @@ DEFINE_TYPED_ARRAY_GET(uint8clamped_array, Uint8ClampedArray, uint8_t)
 
 // Global<T>
 void global_reset(Global& value) {
-  global_as_ref_from_ffi<v8::Value>(value)->Reset();
+  auto* handle = global_as_ref_from_ffi<v8::Value>(value);
+  if (handle->IsEmpty()) return;
+
+  v8::Isolate* isolate = value.isolate_liveness->tryGetIsolate();
+  if (isolate == nullptr) {
+    KJ_LOG(FATAL, "Rust Global outlived its isolate");
+    abort();
+  }
+
+  if (v8::Locker::IsLocked(isolate)) {
+    handle->Reset();
+  } else {
+    auto* dataHandle = global_as_ref_from_ffi<v8::Data>(value);
+    ::workerd::jsg::Data::deferGlobalDestruction(isolate, kj::mv(*dataHandle));
+  }
 }
 
 Global global_clone(Isolate* isolate, const Global& value) {
   auto& original = global_as_ref_from_ffi<v8::Value>(value);
-  return to_ffi(v8::Global<v8::Value>(isolate, original));
+  return to_ffi(value.isolate_liveness.addRef(), v8::Global<v8::Value>(isolate, original));
 }
 
 Local global_to_local(Isolate* isolate, const Global& value) {
   auto& glbl = global_as_ref_from_ffi<v8::Value>(value);
   v8::Local<v8::Value> local = v8::Local<v8::Value>::New(isolate, glbl);
   return to_ffi(kj::mv(local));
+}
+
+Global traced_reference_to_global(
+    Isolate* isolate, const Global& value, const TracedReference& traced) {
+  auto& strong = global_as_ref_from_ffi<v8::Value>(value);
+  if (!strong.IsEmpty()) {
+    return to_ffi(value.isolate_liveness.addRef(), v8::Global<v8::Value>(isolate, strong));
+  }
+
+  auto& tracedHandle = traced_ref_from_ffi(traced);
+  return to_ffi(value.isolate_liveness.addRef(),
+      v8::Global<v8::Value>(isolate, tracedHandle.Get(isolate).As<v8::Value>()));
+}
+
+void traced_reference_reset(Global& value, TracedReference& traced) {
+  if (traced.ptr == 0) return;
+
+  v8::Isolate* isolate = value.isolate_liveness->tryGetIsolate();
+  if (isolate == nullptr) {
+    KJ_LOG(FATAL, "Rust Slot outlived its isolate");
+    abort();
+  }
+  if (!v8::Locker::IsLocked(isolate)) {
+    KJ_LOG(FATAL, "Rust Slot destroyed without the isolate lock");
+    abort();
+  }
+
+  // V8 may already have reclaimed the traced node, so abandon the local slot without Reset().
+  value.ptr = 0;
+  traced.ptr = 0;
 }
 
 // Wrappable - data access
@@ -876,15 +920,16 @@ void wrappable_remove_strong_ref(Wrappable& wrappable, bool is_strong) {
   wrappable.maybeDeferDestruction(is_strong, kj::mv(own), &wrappable);
 }
 
-void wrappable_visit_global(GcVisitor* visitor, uintptr_t* global, TracedReference& traced) {
+void wrappable_visit_global(GcVisitor* visitor, Global& global, TracedReference& traced) {
   auto* gcVisitor = gc_visitor_from_ffi(visitor);
-  auto& strongHandle = *reinterpret_cast<v8::Global<v8::Value>*>(global);
+  auto& strongHandle = *global_as_ref_from_ffi<v8::Value>(global);
   auto& tracedHandle = traced_ref_from_ffi(traced);
-  gcVisitor->visit(strongHandle, tracedHandle);
-}
-
-void traced_reference_reset(TracedReference& traced) {
-  traced_ref_from_ffi(traced).Reset();
+  auto* isolate = global.isolate_liveness->tryGetIsolate();
+  if (isolate == nullptr) {
+    KJ_LOG(FATAL, "Rust Slot outlived its isolate");
+    abort();
+  }
+  gcVisitor->visit(strongHandle, tracedHandle, isolate);
 }
 
 void wrappable_visit_ref(
@@ -1089,7 +1134,7 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
   }
 
   auto result = scope.Escape(constructor);
-  return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, result));
+  return to_ffi(isolate, v8::Global<v8::FunctionTemplate>(isolate, result));
 }
 
 // FunctionTemplate

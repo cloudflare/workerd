@@ -717,9 +717,19 @@ void GcVisitor::visit(Data& value) {
   }
 }
 
-void GcVisitor::visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Data>& traced) {
-  if (strong.IsEmpty()) {
+void GcVisitor::visit(v8::Global<v8::Value>& strong,
+    v8::TracedReference<v8::Data>& traced,
+    v8::Isolate* handleIsolate) {
+  if (strong.IsEmpty() && traced.IsEmpty()) {
     return;
+  }
+
+  v8::Isolate* isolate = parent.isolate;
+  if (isolate == nullptr) {
+    isolate = handleIsolate;
+  } else if (isolate != handleIsolate) {
+    KJ_LOG(FATAL, "Rust Slot moved between isolates");
+    abort();
   }
 
   // Mirror visit(Data&): make handle strength match the parent.
@@ -730,18 +740,22 @@ void GcVisitor::visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Dat
   // from it.  Only when there is no wrapper yet (object not yet exported to JS)
   // does a positive strongRefcount alone justify keeping the handle strong.
   if (parent.strongRefcount > 0 && !parent.hasWrapper()) {
-    // Parent has strong Rust refs and no JS wrapper — keep handle strong,
-    // discard any traced ref.
-    if (!traced.IsEmpty()) {
-      strong.ClearWeak<void>();
+    // Parent has strong Rust refs and no JS wrapper — keep only a strong handle.
+    if (strong.IsEmpty()) {
+      if (!v8::Locker::IsLocked(isolate)) {
+        KJ_LOG(FATAL, "Rust Slot moved to a new owner without the isolate lock");
+        abort();
+      }
+      v8::HandleScope scope(isolate);
+      strong.Reset(isolate, traced.Get(isolate).As<v8::Value>());
       traced.Reset();
     }
   } else {
-    // Parent is only reachable via GC tracing — downgrade to a TracedReference.
+    // Parent participates in GC tracing — keep only a TracedReference.
     if (traced.IsEmpty()) {
-      v8::HandleScope scope(parent.isolate);
-      traced.Reset(parent.isolate, strong.Get(parent.isolate));
-      strong.SetWeak();
+      v8::HandleScope scope(isolate);
+      traced.Reset(isolate, strong.Get(isolate));
+      strong.Reset();
     }
   }
 

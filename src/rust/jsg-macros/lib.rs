@@ -388,7 +388,7 @@ pub fn jsg_constructor(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// `snake_case` -> `camelCase`.
 #[proc_macro_attribute]
 pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Reuse jsg_method callback generation; registration as Member::Property is
+    // Reuse jsg_method callback generation; registration as ResourceMember::Property is
     // handled by #[jsg_resource] on the enclosing impl block.
     jsg_method(TokenStream::new(), item)
 }
@@ -401,7 +401,7 @@ pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Inspect properties are always read-only; setters are rejected at compile time.
 #[proc_macro_attribute]
 pub fn jsg_inspect_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Reuse jsg_method callback generation; registration as Member::Property is
+    // Reuse jsg_method callback generation; registration as ResourceMember::Property is
     // handled by #[jsg_resource] on the enclosing impl block.
     jsg_method(TokenStream::new(), item)
 }

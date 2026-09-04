@@ -7,6 +7,7 @@
 // This header contains template implementations that require complete type definitions.
 // It should be included after workerd/rust/jsg/v8.rs.h which defines the complete types.
 
+#include <workerd/jsg/setup.h>
 #include <workerd/rust/jsg/ffi.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
@@ -52,22 +53,26 @@ inline MaybeLocal maybe_local_to_ffi(v8::MaybeLocal<T> value) {
 
 // Global<T>
 //
-// ffi::Global stores only the strong v8::Global<v8::Value> in `ptr`.
-// The traced v8::TracedReference<v8::Data> slot lives in Global<T>::traced_ptr
-// on the Rust side (as UnsafeCell<usize>), passed by raw pointer to
-// wrappable_visit_global and wrappable_global_reset.
+// ffi::Global stores the strong v8::Global<v8::Value> and its isolate liveness token.
+// The Rust Slot<T> stores the companion v8::TracedReference<v8::Data> slot alongside it.
 static_assert(sizeof(v8::Global<v8::Value>) == sizeof(size_t), "Global must be pointer-sized");
 static_assert(sizeof(v8::TracedReference<v8::Data>) == sizeof(size_t),
     "TracedReference must be pointer-sized");
-static_assert(sizeof(Global) == sizeof(size_t), "ffi::Global must hold exactly one pointer slot");
+static_assert(offsetof(Global, ptr) == 0, "Global handle must be the first field");
 static_assert(alignof(v8::Global<v8::Value>) == alignof(Global), "Alignment should match");
 
 template <typename T>
-inline Global to_ffi(v8::Global<T>&& value) {
+inline Global to_ffi(
+    kj::Arc<const ::workerd::jsg::IsolateLiveness> liveness, v8::Global<T>&& value) {
   size_t strong_slot;
   auto ptr_void = reinterpret_cast<void*>(&strong_slot);
   new (ptr_void) v8::Global<T>(kj::mv(value));
-  return Global{strong_slot};
+  return Global{strong_slot, kj::mv(liveness)};
+}
+
+template <typename T>
+inline Global to_ffi(v8::Isolate* isolate, v8::Global<T>&& value) {
+  return to_ffi(::workerd::jsg::IsolateBase::from(isolate).getIsolateLiveness(), kj::mv(value));
 }
 
 template <typename T>
@@ -96,6 +101,10 @@ static_assert(alignof(v8::TracedReference<v8::Data>) == alignof(TracedReference)
 
 inline v8::TracedReference<v8::Data>& traced_ref_from_ffi(TracedReference& value) {
   return *reinterpret_cast<v8::TracedReference<v8::Data>*>(&value);
+}
+
+inline const v8::TracedReference<v8::Data>& traced_ref_from_ffi(const TracedReference& value) {
+  return *reinterpret_cast<const v8::TracedReference<v8::Data>*>(&value);
 }
 
 // GcVisitor - wraps a pointer to jsg::GcVisitor

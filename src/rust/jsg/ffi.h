@@ -15,9 +15,14 @@
 #include <kj/memory.h>
 #include <kj/refcount.h>
 
+namespace workerd::jsg {
+class IsolateLiveness;
+}
+
 // Forward declarations needed by v8.rs.h
 namespace workerd::rust::jsg {
 using Isolate = v8::Isolate;
+using IsolateLiveness = const ::workerd::jsg::IsolateLiveness;
 using FunctionCallbackInfo = v8::FunctionCallbackInfo<v8::Value>;
 struct ModuleRegistry;
 struct Local;
@@ -85,18 +90,13 @@ void wrappable_remove_strong_ref(Wrappable& wrappable, bool is_strong);
 void wrappable_visit_ref(
     Wrappable& wrappable, uintptr_t* ref_parent, bool* ref_strong, GcVisitor* visitor);
 
-/// Visit a `v8::Global` field during GC tracing, implementing the same
+/// Visit a Rust `Slot` field during GC tracing, implementing the same
 /// strong↔traced dual-mode switching as `jsg::Data` / `jsg::V8Ref<T>`.
 ///
-/// `global` points to the `ptr` field of `ffi::Global` (the strong handle).
-/// `traced` is the `ffi::TracedReference` slot from `Global<T>` on the Rust side.
+/// `global` contains the strong handle and its isolate liveness token.
+/// `traced` is its companion `ffi::TracedReference` slot.
 /// Both are mutated in-place by this function.
-void wrappable_visit_global(GcVisitor* visitor, uintptr_t* global, TracedReference& traced);
-
-/// Resets a `v8::TracedReference`, releasing the weak GC handle.
-/// Must be called when a `Global<T>` is dropped in traced mode to avoid
-/// leaking a live `v8::TracedReference`.
-void traced_reference_reset(TracedReference& traced);
+void wrappable_visit_global(GcVisitor* visitor, Global& global, TracedReference& traced);
 
 // Local<T>
 void local_drop(Local value);
@@ -258,6 +258,10 @@ bool backing_store_is_resizable_by_user_javascript(size_t ptr);
 void global_reset(Global& value);
 Global global_clone(Isolate* isolate, const Global& value);
 Local global_to_local(Isolate* isolate, const Global& value);
+Global traced_reference_to_global(
+    Isolate* isolate, const Global& value, const TracedReference& traced);
+/// Abandons a traced slot before destruction. A non-empty slot requires the isolate lock.
+void traced_reference_reset(Global& value, TracedReference& traced);
 
 // Wrappable - data access
 const TraitObjectPtr& wrappable_get_trait_object(const Wrappable& wrappable);

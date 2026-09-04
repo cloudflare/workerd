@@ -8,8 +8,8 @@
 //! 1. All Rust `Rc` handles are dropped and no JavaScript wrapper exists (immediate cleanup)
 //! 2. All Rust `Rc` handles are dropped and V8 garbage collects the JS wrapper
 //!
-//! Note: Circular references through `Rc<T>` are NOT collected, matching the behavior
-//! of C++ `jsg::Rc<T>` which uses `kj::Own<T>` cross-references.
+//! Note: Circular references through `Member<T>` are NOT collected, matching the behavior
+//! of C++ `jsg::Ref<T>` which uses `kj::Own<T>` cross-references.
 
 use std::cell::Cell;
 use std::sync::atomic::AtomicUsize;
@@ -47,8 +47,8 @@ static PARENT_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 #[jsg_resource]
 struct ParentResource {
-    pub child: jsg::Rc<SimpleResource>,
-    pub optional_child: Option<jsg::Rc<SimpleResource>>,
+    pub child: jsg::Member<SimpleResource>,
+    pub optional_child: Option<jsg::Member<SimpleResource>>,
 }
 
 impl Drop for ParentResource {
@@ -115,7 +115,7 @@ fn supports_gc_via_weak_callback() {
 }
 
 #[test]
-fn resource_with_traced_ref_field() {
+fn resource_with_member_field() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
     PARENT_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
@@ -129,8 +129,8 @@ fn resource_with_traced_ref_field() {
         });
 
         let parent = jsg::Rc::new(ParentResource {
-            child: child.clone(),
-            optional_child: Some(optional_child.clone()),
+            child: child.clone().into(),
+            optional_child: Some(optional_child.clone().into()),
         });
 
         let _wrapped = parent.clone().to_js(lock);
@@ -153,7 +153,7 @@ fn resource_with_traced_ref_field() {
 }
 
 #[test]
-fn child_traced_ref_kept_alive_by_parent() {
+fn child_member_kept_alive_by_parent() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
     PARENT_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
@@ -164,7 +164,7 @@ fn child_traced_ref_kept_alive_by_parent() {
         });
 
         let parent = jsg::Rc::new(ParentResource {
-            child: child.clone(),
+            child: child.clone().into(),
             optional_child: None,
         });
 
@@ -172,7 +172,7 @@ fn child_traced_ref_kept_alive_by_parent() {
         // by not storing it. The wrapper is now only held weakly by cppgc.
         let _ = parent.clone().to_js(lock);
 
-        // Child not collected because parent still holds an `Rc` (which holds a kj::Own)
+        // Child not collected because the parent still holds a Member.
         std::mem::drop(child);
         crate::Harness::request_gc(lock);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
@@ -271,9 +271,9 @@ fn weak_ref_with_wrapped_resource() {
     });
 }
 
-/// Tests parent-child GC with traced refs.
+/// Tests parent-child GC with resource members.
 #[test]
-fn traced_ref_in_gc() {
+fn member_in_gc() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
     PARENT_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
@@ -285,7 +285,7 @@ fn traced_ref_in_gc() {
         let _child_wrapped = child.clone().to_js(lock);
 
         let parent = jsg::Rc::new(ParentResource {
-            child: child.clone(),
+            child: child.clone().into(),
             optional_child: None,
         });
         let _parent_wrapped = parent.clone().to_js(lock);
@@ -729,10 +729,10 @@ fn resource_data_survives_gc_via_js_global() {
 
 /// Tests parent-child relationships where parent is only held by JS.
 ///
-/// When the parent is wrapped and held by a JS global, its `Rc<SimpleResource>` child
+/// When the parent is wrapped and held by a JS global, its `Member<SimpleResource>` child
 /// should be traced during GC and kept alive even without any Rust strong refs.
 #[test]
-fn parent_ref_keeps_child_alive_through_gc() {
+fn parent_member_keeps_child_alive_through_gc() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
     PARENT_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
@@ -742,7 +742,7 @@ fn parent_ref_keeps_child_alive_through_gc() {
             name: "child".to_owned(),
         });
         let parent = jsg::Rc::new(ParentResource {
-            child: child.clone(),
+            child: child.clone().into(),
             optional_child: None,
         });
         let wrapped = parent.clone().to_js(lock);
@@ -752,7 +752,7 @@ fn parent_ref_keeps_child_alive_through_gc() {
         std::mem::drop(child);
         std::mem::drop(parent);
 
-        // GC should NOT collect the parent (held by global) or child (held by parent's Rc)
+        // GC should NOT collect the parent (held by global) or child (held by its Member)
         crate::Harness::request_gc(lock);
         assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
@@ -811,7 +811,7 @@ fn instance_drop_invalidates_all_weak_refs() {
 }
 
 // =============================================================================
-// Nullable<Rc<T>> tracing tests
+// Nullable<Member<T>> tracing tests
 // =============================================================================
 
 /// Counter to track how many `NullableParent` instances have been dropped.
@@ -819,7 +819,7 @@ static NULLABLE_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 #[jsg_resource]
 struct NullableParent {
-    pub child: jsg::Nullable<jsg::Rc<SimpleResource>>,
+    pub child: jsg::Nullable<jsg::Member<SimpleResource>>,
 }
 
 impl Drop for NullableParent {
@@ -831,9 +831,9 @@ impl Drop for NullableParent {
 #[jsg_resource]
 impl NullableParent {}
 
-/// Tests that `Nullable<Rc<T>>` with `Nullable::Some` keeps the child alive through GC tracing.
+/// Tests that `Nullable<Member<T>>` with `Nullable::Some` keeps the child alive through tracing.
 #[test]
-fn nullable_ref_some_keeps_child_alive_through_gc() {
+fn nullable_member_some_keeps_child_alive_through_gc() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
     NULLABLE_PARENT_DROPS.store(0, Ordering::SeqCst);
 
@@ -843,7 +843,7 @@ fn nullable_ref_some_keeps_child_alive_through_gc() {
             name: "nullable_child".to_owned(),
         });
         let parent = jsg::Rc::new(NullableParent {
-            child: jsg::Nullable::Some(child.clone()),
+            child: jsg::Nullable::Some(child.clone().into()),
         });
         let wrapped = parent.clone().to_js(lock);
         ctx.set_global("parent", wrapped);
@@ -868,9 +868,9 @@ fn nullable_ref_some_keeps_child_alive_through_gc() {
     });
 }
 
-/// Tests that `Nullable<Rc<T>>` with `Nullable::Null` doesn't cause issues during GC.
+/// Tests that `Nullable<Member<T>>` with `Nullable::Null` doesn't cause issues during GC.
 #[test]
-fn nullable_ref_null_does_not_crash_during_gc() {
+fn nullable_member_null_does_not_crash_during_gc() {
     NULLABLE_PARENT_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
@@ -896,9 +896,9 @@ fn nullable_ref_null_does_not_crash_during_gc() {
     });
 }
 
-/// Tests that `Nullable<Rc<T>>` with `Nullable::Undefined` doesn't cause issues during GC.
+/// Tests that `Nullable<Member<T>>` with `Nullable::Undefined` doesn't cause issues during GC.
 #[test]
-fn nullable_ref_undefined_does_not_crash_during_gc() {
+fn nullable_member_undefined_does_not_crash_during_gc() {
     NULLABLE_PARENT_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
@@ -959,7 +959,7 @@ impl NativeOwnerResource {
 
 /// Regression test for the `strong` flag bug in `wrappable_remove_strong_ref`.
 ///
-/// When a parent resource (with a JS wrapper) holds a `Rc<Child>`, GC tracing
+/// When a parent resource (with a JS wrapper) holds a `Member<Child>`, GC tracing
 /// transitions the child's ref from strong→weak via `visitRef`, which calls
 /// `removeStrongRef()` once.
 ///
@@ -969,11 +969,11 @@ impl NativeOwnerResource {
 /// time — underflowing the strong refcount.
 ///
 /// This test keeps a direct Rust ref to the child alive so we can observe
-/// the strong refcount after the parent's traced ref is dropped by GC.
+/// the strong refcount after the parent's member is dropped by GC.
 /// With the bug: `strong_refcount()` returns 0 instead of 1.
 #[test]
 #[cfg(debug_assertions)]
-fn traced_ref_drop_respects_strong_flag() {
+fn member_drop_respects_strong_flag() {
     let harness = crate::Harness::new();
     let mut child_holder: Option<jsg::Rc<SimpleResource>> = None;
 
@@ -986,7 +986,7 @@ fn traced_ref_drop_respects_strong_flag() {
         assert_eq!(child.strong_refcount(), 1);
 
         let parent = jsg::Rc::new(ParentResource {
-            child: child.clone(),
+            child: child.clone().into(),
             optional_child: None,
         });
 
@@ -1073,21 +1073,20 @@ fn rc_native_object_dropped_on_minor_gc() {
 }
 
 // =============================================================================
-// Global<Value> back-reference cycle — collected via visit_global tracing
+// Slot<Value> back-reference cycle
 // =============================================================================
 //
-// `jsg::v8::Global<T>` fields on Rust resources participate in GC tracing via
+// `jsg::Slot<T>` fields on Rust resources participate in GC tracing via
 // `GcVisitor::visit_global`, which implements the same strong↔traced dual-mode
 // switching as `jsg::Data` / `jsg::V8Ref<T>` in C++.
 //
-// When the parent Wrappable has strong Rust refs the handle stays strong.
-// Once all Rust refs are dropped and only the JS wrapper keeps it alive,
-// `visit_global` downgrades the handle to a `v8::TracedReference` that cppgc
-// can follow — allowing the GC to detect and collect the cycle.
+// Before the parent has a JS wrapper, its Rust roots keep the handle strong.
+// Once the parent participates in wrapper tracing, the handle becomes a
+// `v8::TracedReference` that cppgc can follow to detect and collect cycles.
 
 static CYCLIC_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
-/// A resource that stores a `Global<Value>` via `Cell` so the back-reference
+/// A resource that stores a `Slot<Value>` via `Cell` so the back-reference
 /// to the resource's own JS wrapper can be installed after wrapping.
 ///
 /// `Cell<Option<…>>` provides interior mutability through `&self`, matching
@@ -1096,7 +1095,7 @@ static CYCLIC_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 struct CyclicResource {
     /// The stored "callback". Uses `Cell` so it can be set after `to_js()`
     /// returns the wrapper `Local`, without requiring `&mut self`.
-    callback: std::cell::Cell<Option<jsg::v8::Global<jsg::v8::Value>>>,
+    callback: std::cell::Cell<Option<jsg::Slot<jsg::v8::Value>>>,
 }
 
 impl Drop for CyclicResource {
@@ -1108,17 +1107,16 @@ impl Drop for CyclicResource {
 #[jsg_resource]
 impl CyclicResource {}
 
-/// Verifies that a `Global<Value>` back-reference cycle is collected by GC.
+/// Verifies that a `Slot<Value>` back-reference cycle is collected by GC.
 ///
 /// The cycle:
-///   CyclicResource.callback (Global<Value>) → JS wrapper
+///   CyclicResource.callback (Slot<Value>) → JS wrapper
 ///   JS wrapper → `CppgcShim` → `Wrappable` → `CyclicResource` (same object)
 ///
-/// `visit_global` downgrades the `Global` to a `v8::TracedReference` once all
-/// strong Rust refs are dropped, making the cycle visible to cppgc so it can
-/// be collected on the next full GC.
+/// Tracing downgrades the edge's `Global` to a `v8::TracedReference`, making the
+/// cycle visible to cppgc so it can be collected on the next full GC.
 #[test]
-fn global_value_back_ref_is_collected_by_gc() {
+fn slot_back_ref_is_collected_by_gc() {
     CYCLIC_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
@@ -1134,27 +1132,129 @@ fn global_value_back_ref_is_collected_by_gc() {
         let wrapper_local = resource.clone().to_js(lock);
         let wrapper_global = wrapper_local.to_global(lock);
 
-        // Install the back-reference: resource now holds a Global pointing
+        // Install the back-reference: resource now holds a traced edge pointing
         // to its own JS wrapper, closing the cycle.
-        resource.callback.set(Some(wrapper_global));
+        resource.callback.set(Some(wrapper_global.into()));
 
-        // Drop the only Rust Rc. The cycle is now closed but the Global
-        // will be downgraded to a TracedReference by visit_global, making
-        // it visible to cppgc.
+        // Drop the only Rust Rc. The remaining cycle is visible to cppgc through
+        // the Slot.
         std::mem::drop(resource);
         assert_eq!(CYCLIC_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
-    // Full GC can now detect and collect the cycle because visit_global
-    // downgrades the Global to a TracedReference during tracing.
+    // Full GC can now detect and collect the traced cycle.
     harness.run_in_context(|lock, _ctx| {
         crate::Harness::request_gc(lock);
         assert_eq!(
             CYCLIC_RESOURCE_DROPS.load(Ordering::SeqCst),
             1,
-            "full GC should collect the cyclic resource via visit_global tracing"
+            "full GC should collect the cyclic resource through its traced edge"
         );
+        Ok(())
+    });
+}
+
+#[test]
+fn global_value_can_be_dropped_without_isolate_lock() {
+    let harness = crate::Harness::new();
+    let mut global = None;
+
+    harness.run_in_context(|lock, _ctx| {
+        global = Some(jsg::v8::Global::from(lock.new_object()));
+        Ok(())
+    });
+
+    std::thread::spawn(move || drop(global)).join().unwrap();
+
+    harness.run_in_context(|_lock, _ctx| Ok(()));
+}
+
+fn make_slot(
+    harness: &crate::Harness,
+) -> (jsg::Slot<jsg::v8::Value>, jsg::v8::Global<jsg::v8::Value>) {
+    let mut slot = None;
+    let mut wrapper_root = None;
+
+    harness.run_in_context(|lock, _ctx| {
+        let resource = jsg::Rc::new(CyclicResource {
+            callback: std::cell::Cell::new(None),
+        });
+        let raw: *const CyclicResource = &*resource;
+
+        let wrapper = resource.clone().to_js(lock);
+        let wrapper_global = wrapper.to_global(lock);
+        wrapper_root = Some(wrapper_global.clone(lock));
+        resource.callback.set(Some(wrapper_global.into()));
+        drop(resource);
+
+        crate::Harness::request_gc(lock);
+
+        // SAFETY: wrapper_root keeps the resource alive across the GC.
+        slot = unsafe { (*raw).callback.take() };
+        assert!(slot.as_ref().unwrap().is_traced(lock));
+        Ok(())
+    });
+
+    (slot.unwrap(), wrapper_root.unwrap())
+}
+
+#[test]
+fn extracted_slot_can_be_rooted_before_use() {
+    let harness = crate::Harness::new();
+    let (slot, wrapper_root) = make_slot(&harness);
+
+    harness.run_in_context(|lock, _ctx| {
+        let global = slot.to_global(lock);
+        drop(wrapper_root);
+        crate::Harness::request_gc(lock);
+        assert!(global.as_local(lock).is_object());
+        Ok(())
+    });
+}
+
+#[test]
+fn moved_slot_can_be_traced_from_new_owner() {
+    CYCLIC_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+    let harness = crate::Harness::new();
+    let (slot, wrapper_root) = make_slot(&harness);
+    let mut owner_root = None;
+
+    harness.run_in_context(|lock, _ctx| {
+        let owner = jsg::Rc::new(CyclicResource {
+            callback: std::cell::Cell::new(Some(slot)),
+        });
+        owner_root = Some(owner.clone().to_js(lock).to_global(lock));
+        drop(owner);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        drop(wrapper_root);
+
+        crate::Harness::request_gc(lock);
+        assert_eq!(CYCLIC_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+
+        drop(owner_root.take());
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(CYCLIC_RESOURCE_DROPS.load(Ordering::SeqCst), 2);
+        Ok(())
+    });
+}
+
+#[test]
+fn stale_slot_can_be_dropped_with_isolate_lock() {
+    let harness = crate::Harness::new();
+    let (slot, wrapper_root) = make_slot(&harness);
+
+    harness.run_in_context(|lock, _ctx| {
+        drop(wrapper_root);
+        crate::Harness::request_gc(lock);
+        drop(slot);
         Ok(())
     });
 }
@@ -1179,10 +1279,10 @@ impl CellChild {}
 
 static CELL_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
-/// Resource with a `Cell<jsg::Rc<T>>` field.
+/// Resource with a `Cell<jsg::Member<T>>` field.
 #[jsg_resource]
 struct CellParent {
-    pub child: Cell<jsg::Rc<CellChild>>,
+    pub child: Cell<jsg::Member<CellChild>>,
 }
 
 impl Drop for CellParent {
@@ -1194,10 +1294,10 @@ impl Drop for CellParent {
 #[jsg_resource]
 impl CellParent {}
 
-/// Resource with a `Cell<Option<jsg::Rc<T>>>` field.
+/// Resource with a `Cell<Option<jsg::Member<T>>>` field.
 #[jsg_resource]
 struct CellOptionParent {
-    pub child: Cell<Option<jsg::Rc<CellChild>>>,
+    pub child: Cell<Option<jsg::Member<CellChild>>>,
 }
 
 impl Drop for CellOptionParent {
@@ -1209,10 +1309,10 @@ impl Drop for CellOptionParent {
 #[jsg_resource]
 impl CellOptionParent {}
 
-/// Resource with a `Cell<jsg::Nullable<jsg::Rc<T>>>` field.
+/// Resource with a `Cell<jsg::Nullable<jsg::Member<T>>>` field.
 #[jsg_resource]
 struct CellNullableParent {
-    pub child: Cell<jsg::Nullable<jsg::Rc<CellChild>>>,
+    pub child: Cell<jsg::Nullable<jsg::Member<CellChild>>>,
 }
 
 impl Drop for CellNullableParent {
@@ -1224,10 +1324,10 @@ impl Drop for CellNullableParent {
 #[jsg_resource]
 impl CellNullableParent {}
 
-/// Resource using the fully-qualified `std::cell::Cell<jsg::Rc<T>>` syntax.
+/// Resource using the fully-qualified `std::cell::Cell<jsg::Member<T>>` syntax.
 #[jsg_resource]
 struct StdCellParent {
-    pub child: std::cell::Cell<jsg::Rc<CellChild>>,
+    pub child: std::cell::Cell<jsg::Member<CellChild>>,
 }
 
 impl Drop for StdCellParent {
@@ -1239,9 +1339,9 @@ impl Drop for StdCellParent {
 #[jsg_resource]
 impl StdCellParent {}
 
-/// `Cell<jsg::Rc<T>>` keeps the child alive through GC.
+/// `Cell<jsg::Member<T>>` keeps the child alive through GC.
 #[test]
-fn cell_ref_keeps_child_alive_through_gc() {
+fn cell_member_keeps_child_alive_through_gc() {
     CELL_CHILD_DROPS.store(0, Ordering::SeqCst);
     CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
 
@@ -1249,7 +1349,7 @@ fn cell_ref_keeps_child_alive_through_gc() {
     harness.run_in_context(|lock, ctx| {
         let child = jsg::Rc::new(CellChild);
         let parent = jsg::Rc::new(CellParent {
-            child: Cell::new(child.clone()),
+            child: Cell::new(child.clone().into()),
         });
         let wrapped = parent.clone().to_js(lock);
         ctx.set_global("parent", wrapped);
@@ -1258,7 +1358,7 @@ fn cell_ref_keeps_child_alive_through_gc() {
         std::mem::drop(child);
         std::mem::drop(parent);
 
-        // Parent is JS-global-held; child is kept alive via Cell<Rc<T>> tracing.
+        // Parent is JS-global-held; child is kept alive via Cell<Member<T>> tracing.
         crate::Harness::request_gc(lock);
         assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 0);
@@ -1273,9 +1373,9 @@ fn cell_ref_keeps_child_alive_through_gc() {
     });
 }
 
-/// `Cell<Option<jsg::Rc<T>>>` with `Some` keeps the child alive through GC.
+/// `Cell<Option<jsg::Member<T>>>` with `Some` keeps the child alive through GC.
 #[test]
-fn cell_option_ref_some_keeps_child_alive_through_gc() {
+fn cell_option_member_keeps_child_alive_through_gc() {
     CELL_CHILD_DROPS.store(0, Ordering::SeqCst);
     CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
 
@@ -1283,7 +1383,7 @@ fn cell_option_ref_some_keeps_child_alive_through_gc() {
     harness.run_in_context(|lock, ctx| {
         let child = jsg::Rc::new(CellChild);
         let parent = jsg::Rc::new(CellOptionParent {
-            child: Cell::new(Some(child.clone())),
+            child: Cell::new(Some(child.clone().into())),
         });
         let wrapped = parent.clone().to_js(lock);
         ctx.set_global("parent", wrapped);
@@ -1305,9 +1405,42 @@ fn cell_option_ref_some_keeps_child_alive_through_gc() {
     });
 }
 
-/// `Cell<Option<jsg::Rc<T>>>` with `None` does not crash during GC.
 #[test]
-fn cell_option_ref_none_does_not_crash_during_gc() {
+fn extracted_member_can_be_rooted_before_use() {
+    CELL_CHILD_DROPS.store(0, Ordering::SeqCst);
+    let harness = crate::Harness::new();
+    let mut rooted = None;
+
+    harness.run_in_context(|lock, ctx| {
+        let child = jsg::Rc::new(CellChild);
+        let parent = jsg::Rc::new(CellOptionParent {
+            child: Cell::new(Some(child.clone().into())),
+        });
+        let raw: *const CellOptionParent = &*parent;
+        let wrapped = parent.clone().to_js(lock);
+        ctx.set_global("parent", wrapped);
+        drop(child);
+        drop(parent);
+        crate::Harness::request_gc(lock);
+
+        // SAFETY: the context global keeps the parent alive.
+        let member = unsafe { (*raw).child.take() }.unwrap();
+        rooted = Some(member.to_rc(lock));
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 0);
+        drop(rooted.take());
+        assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// `Cell<Option<jsg::Member<T>>>` with `None` does not crash during GC.
+#[test]
+fn cell_option_member_none_does_not_crash_during_gc() {
     CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
@@ -1332,9 +1465,9 @@ fn cell_option_ref_none_does_not_crash_during_gc() {
     });
 }
 
-/// `Cell<jsg::Nullable<jsg::Rc<T>>>` with `Nullable::Some` keeps child alive.
+/// `Cell<jsg::Nullable<jsg::Member<T>>>` with `Nullable::Some` keeps child alive.
 #[test]
-fn cell_nullable_ref_some_keeps_child_alive_through_gc() {
+fn cell_nullable_member_some_keeps_child_alive_through_gc() {
     CELL_CHILD_DROPS.store(0, Ordering::SeqCst);
     CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
 
@@ -1342,7 +1475,7 @@ fn cell_nullable_ref_some_keeps_child_alive_through_gc() {
     harness.run_in_context(|lock, ctx| {
         let child = jsg::Rc::new(CellChild);
         let parent = jsg::Rc::new(CellNullableParent {
-            child: Cell::new(jsg::Nullable::Some(child.clone())),
+            child: Cell::new(jsg::Nullable::Some(child.clone().into())),
         });
         let wrapped = parent.clone().to_js(lock);
         ctx.set_global("parent", wrapped);
@@ -1364,9 +1497,9 @@ fn cell_nullable_ref_some_keeps_child_alive_through_gc() {
     });
 }
 
-/// `Cell<jsg::Nullable<jsg::Rc<T>>>` with `Nullable::Null` does not crash during GC.
+/// `Cell<jsg::Nullable<jsg::Member<T>>>` with `Nullable::Null` does not crash during GC.
 #[test]
-fn cell_nullable_ref_null_does_not_crash_during_gc() {
+fn cell_nullable_member_null_does_not_crash_during_gc() {
     CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
@@ -1391,9 +1524,9 @@ fn cell_nullable_ref_null_does_not_crash_during_gc() {
     });
 }
 
-/// `std::cell::Cell<jsg::Rc<T>>` (fully-qualified path) keeps child alive through GC.
+/// `std::cell::Cell<jsg::Member<T>>` (fully-qualified path) keeps child alive through GC.
 #[test]
-fn std_cell_ref_keeps_child_alive_through_gc() {
+fn std_cell_member_keeps_child_alive_through_gc() {
     CELL_CHILD_DROPS.store(0, Ordering::SeqCst);
     CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
 
@@ -1401,7 +1534,7 @@ fn std_cell_ref_keeps_child_alive_through_gc() {
     harness.run_in_context(|lock, ctx| {
         let child = jsg::Rc::new(CellChild);
         let parent = jsg::Rc::new(StdCellParent {
-            child: std::cell::Cell::new(child.clone()),
+            child: std::cell::Cell::new(child.clone().into()),
         });
         let wrapped = parent.clone().to_js(lock);
         ctx.set_global("parent", wrapped);

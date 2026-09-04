@@ -91,9 +91,9 @@ use crate::v8::ToLocalValue;
 /// - **Collections** (`Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
 ///   `BTreeSet<T>`) — iterates elements/values and traces each.
 /// - **`Cell<T>`** — reads through `as_ptr()` (sound under single-threaded GC).
-/// - **`jsg::Rc<T>`** — visits the reference via `GcVisitor::visit_rc`.
+/// - **`jsg::Member<T>`** — visits the reference via `GcVisitor::visit_rc`.
 /// - **`jsg::Weak<T>`** — no-op (weak refs don't keep targets alive).
-/// - **`jsg::v8::Global<T>`** — visits via `GcVisitor::visit_global`.
+/// - **`jsg::Slot<T>`** — visits via `GcVisitor::visit_global`.
 pub trait Traced {
     /// Visit GC-visible references held by this value.
     ///

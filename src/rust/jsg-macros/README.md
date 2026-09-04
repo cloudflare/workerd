@@ -5,12 +5,12 @@ boilerplate when implementing the JSG type system for Rust-backed JavaScript API
 
 ## Crate layout
 
-| File          | Contents                                                                       |
-|---------------|--------------------------------------------------------------------------------|
-| `lib.rs`      | Public macro entry points — thin dispatchers only                              |
-| `resource.rs` | Code generation for `#[jsg_resource]` on structs and impl blocks               |
-| `trace.rs`    | GC trace code generation — field classification and `trace()` body emission    |
-| `utils.rs`    | Shared helpers: `extract_named_fields`, `snake_to_camel`, `is_lock_ref`, etc.  |
+| File          | Contents                                                                      |
+| ------------- | ----------------------------------------------------------------------------- |
+| `lib.rs`      | Public macro entry points — thin dispatchers only                             |
+| `resource.rs` | Code generation for `#[jsg_resource]` on structs and impl blocks              |
+| `trace.rs`    | GC trace code generation — field classification and `trace()` body emission   |
+| `utils.rs`    | Shared helpers: `extract_named_fields`, `snake_to_camel`, `is_lock_ref`, etc. |
 
 ---
 
@@ -82,7 +82,7 @@ Use `#[jsg_resource(name = "JSName")]` to override the JavaScript class name.
 ```rust
 #[jsg_resource]
 pub struct DnsUtil {
-    cache: HashMap<String, jsg::Rc<CacheEntry>>, // traced automatically
+    cache: HashMap<String, jsg::Member<CacheEntry>>, // traced automatically
     name: String,                                // plain data, ignored by tracer
 }
 
@@ -161,7 +161,7 @@ this property. Omitting a setter already makes the property read-only; `readonly
 explicit check.
 
 **Naming** — methods **must** start with `get_` (getter) or `set_` (setter). A method without
-either prefix is a compile error.  The prefix is stripped and the remainder is converted
+either prefix is a compile error. The prefix is stripped and the remainder is converted
 `snake_case` → `camelCase`, so `get_foo_bar` / `set_foo_bar` both map to `"fooBar"`.
 
 **Setter detection** — a method whose Rust name starts with `set_` is registered as the setter.
@@ -214,7 +214,6 @@ impl Counter {
 //     obj.hasOwnProperty("id")                // true
 //     obj.kind                                // TypeError: read-only
 ```
-
 
 ## `#[jsg_inspect_property]`
 
@@ -295,16 +294,17 @@ use no-op `Traced` impls; containers/wrappers recurse to inner values.
 
 ### Supported field shapes
 
-| Field type | Trace behaviour |
-|---|---|
-| `jsg::Rc<T>` | Strong GC edge — `visitor.visit_rc` |
-| `jsg::v8::Global<T>` | Dual strong/traced — `visitor.visit_global` (enables cycle collection) |
-| `jsg::Weak<T>` | **Not traced** — does not keep the target alive |
-| `Option<T>` / `jsg::Nullable<T>` | Delegates to `T` when present |
-| `Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
-| `Cell<T>` / `std::cell::Cell<T>` | Delegates via `as_ptr()` read (safe under single-threaded, non-reentrant GC tracing) |
-| Plain data / primitives / `#[jsg_struct]` types | No-op `Traced` |
-| Any other `T: Traced` | Uses `T`'s implementation |
+| Field type                                                             | Trace behaviour                                                                      |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `jsg::Member<T>`                                                       | Strong resource edge                                                                 |
+| `jsg::Slot<T>`                                                         | Traced V8 edge (enables cycle collection)                                            |
+| `jsg::Rc<T>` / `jsg::v8::Global<T>`                                    | Persistent roots; not traceable fields                                               |
+| `jsg::Weak<T>`                                                         | **Not traced** — does not keep the target alive                                      |
+| `Option<T>` / `jsg::Nullable<T>`                                       | Delegates to `T` when present                                                        |
+| `Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values                                            |
+| `Cell<T>` / `std::cell::Cell<T>`                                       | Delegates via `as_ptr()` read (safe under single-threaded, non-reentrant GC tracing) |
+| Plain data / primitives / `#[jsg_struct]` types                        | No-op `Traced`                                                                       |
+| Any other `T: Traced`                                                  | Uses `T`'s implementation                                                            |
 
 The `Cell<…>` variants are required whenever a traced field needs to be mutated
 after construction, because `Traced::trace` receives `&self`.
@@ -326,8 +326,8 @@ Example:
 
 ```rust
 struct EventHandlers {
-    on_message: Option<jsg::v8::Global<jsg::v8::Value>>,
-    on_error:   Option<jsg::v8::Global<jsg::v8::Value>>,
+    on_message: Option<jsg::Slot<jsg::v8::Value>>,
+    on_error:   Option<jsg::Slot<jsg::v8::Value>>,
 }
 
 impl jsg::Traced for EventHandlers {
@@ -351,14 +351,14 @@ use std::collections::HashMap;
 #[jsg_resource]
 pub struct EventRouter {
     // Strong edges — all children kept alive through GC.
-    handlers: HashMap<String, jsg::Rc<Handler>>,
+    handlers: HashMap<String, jsg::Member<Handler>>,
 
     // Conditionally traced.
-    fallback: Option<jsg::Rc<Handler>>,
+    fallback: Option<jsg::Member<Handler>>,
 
-    // Interior-mutable callback set after construction; dual-mode Global enables
+    // Interior-mutable callback set after construction; Slot enables
     // cycle collection if the callback closes over this resource's own JS wrapper.
-    on_error: Cell<Option<jsg::v8::Global<jsg::v8::Value>>>,
+    on_error: Cell<Option<jsg::Slot<jsg::v8::Value>>>,
 
     // Weak — does not keep target alive.
     parent: jsg::Weak<EventRouter>,
@@ -368,14 +368,16 @@ pub struct EventRouter {
 }
 ```
 
-### `jsg::v8::Global<T>` and cycle collection
+### `jsg::Slot<T>` and cycle collection
 
-`jsg::v8::Global<T>` uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`.
-While the parent resource holds at least one strong Rust `Rc`, the V8 handle stays
-strong. Once all `Rc`s are dropped and only the JS wrapper keeps the resource alive,
-`visit_global` downgrades the handle to a `v8::TracedReference` that cppgc can
-follow — allowing back-reference cycles (e.g. a resource that stores a callback
-which closes over its own JS wrapper) to be detected and collected on the next full GC.
+`jsg::Slot<T>` uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`.
+Before its owner has a JavaScript wrapper, a strong Rust `Rc` keeps the V8 handle
+strong. Once the owner participates in wrapper tracing, the handle is downgraded to
+a `v8::TracedReference` that cppgc can follow. This allows back-reference cycles
+(e.g. a resource that stores a callback which closes over its own JS wrapper) to be
+detected and collected on the next full GC. Once visited, it must be destroyed under
+the isolate lock; moving it into another resource also requires the lock. It cannot be
+sent to another thread.
 
 ### Custom tracing with `custom_trace`
 
@@ -386,14 +388,14 @@ write your own. The macro still generates `jsg::GarbageCollected` (`memory_name`
 ```rust
 #[jsg_resource(custom_trace)]
 pub struct DynamicResource {
-    slots: Vec<Option<jsg::Rc<Handler>>>,
+    slots: Vec<Option<jsg::Member<Handler>>>,
 }
 
 impl jsg::Traced for DynamicResource {
     fn trace(&self, visitor: &mut jsg::GcVisitor) {
         for slot in &self.slots {
             if let Some(ref h) = slot {
-                visitor.visit_rc(h);
+                jsg::Traced::trace(h, visitor);
             }
         }
     }

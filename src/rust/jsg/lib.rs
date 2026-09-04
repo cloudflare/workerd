@@ -16,6 +16,7 @@ mod wrappable;
 
 pub use feature_flags::FeatureFlags;
 pub use nullable::Nullable;
+pub use resource::Member;
 pub use resource::Rc;
 pub use resource::Resource;
 pub use resource::Weak;
@@ -31,6 +32,7 @@ pub use v8::Int8Array;
 pub use v8::Int16Array;
 pub use v8::Int32Array;
 pub use v8::IsolatePtr;
+pub use v8::Slot;
 pub use v8::Uint8Array;
 pub use v8::Uint16Array;
 pub use v8::Uint32Array;
@@ -951,7 +953,7 @@ impl From<u64> for ConstantValue {
     }
 }
 
-/// Where a [`Member::Property`] is attached on the JavaScript object.
+/// Where a [`ResourceMember::Property`] is attached on the JavaScript object.
 ///
 /// This is a re-export of the CXX bridge type in [`v8::ffi`] so that callers
 /// do not need to import `jsg::v8::ffi` directly.  The three variants behave
@@ -963,7 +965,8 @@ impl From<u64> for ConstantValue {
 ///   surfaced by `node:util` `inspect()`.
 pub use crate::v8::ffi::PropertyKind;
 
-pub enum Member {
+#[doc(hidden)]
+pub enum ResourceMember {
     Constructor {
         callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
     },

@@ -16,7 +16,7 @@ use crate::Error;
 use crate::FromJS;
 use crate::GarbageCollected;
 use crate::Lock;
-use crate::Member;
+use crate::ResourceMember;
 use crate::ToJS;
 use crate::Traced;
 use crate::Type;
@@ -307,10 +307,67 @@ impl<R: Resource> Clone for Weak<R> {
     }
 }
 
-/// `Rc<R>` is a strong GC edge — visited via `GcVisitor::visit_rc`.
-impl<R: Resource> Traced for Rc<R> {
+/// A traced pointer from one resource to another.
+///
+/// Like V8 cppgc's `Member<T>`, this type is only valid while reached through
+/// its owner's trace. Convert it to an [`Rc`] under the isolate lock before use.
+pub struct Member<R: Resource> {
+    value: Rc<R>,
+}
+
+impl<R: Resource> Member<R> {
+    #[must_use]
+    pub fn new(value: Rc<R>) -> Self {
+        Self { value }
+    }
+
+    #[must_use]
+    pub fn to_rc(&self, _lock: &mut Lock) -> Rc<R> {
+        self.value.clone()
+    }
+}
+
+impl<R: Resource> From<Rc<R>> for Member<R> {
+    fn from(value: Rc<R>) -> Self {
+        Self::new(value)
+    }
+}
+
+impl<R: Resource> Traced for Member<R> {
     fn trace(&self, visitor: &mut v8::GcVisitor) {
-        visitor.visit_rc(self);
+        visitor.visit_rc(&self.value);
+    }
+}
+
+impl<R: Resource> PartialEq for Member<R> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl<R: Resource> Eq for Member<R> {}
+
+impl<R: Resource> PartialOrd for Member<R> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<R: Resource> Ord for Member<R> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.value.cmp(&other.value)
+    }
+}
+
+impl<R: Resource> std::hash::Hash for Member<R> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.value.hash(state);
+    }
+}
+
+impl<R: Resource> fmt::Debug for Member<R> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Member").field(&self.value).finish()
     }
 }
 
@@ -400,18 +457,18 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
 
     for m in R::members() {
         match m {
-            Member::Constructor { callback } => {
+            ResourceMember::Constructor { callback } => {
                 descriptor.constructor = KjMaybe::Some(v8::ffi::ConstructorDescriptor {
                     callback: callback as usize,
                 });
             }
-            Member::Method { name, callback } => {
+            ResourceMember::Method { name, callback } => {
                 descriptor.methods.push(v8::ffi::MethodDescriptor {
                     name,
                     callback: callback as usize,
                 });
             }
-            Member::Property {
+            ResourceMember::Property {
                 name,
                 kind,
                 getter_callback,
@@ -424,13 +481,13 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
                     setter_callback: setter_callback.map(|f| f as usize).into(),
                 });
             }
-            Member::StaticMethod { name, callback } => {
+            ResourceMember::StaticMethod { name, callback } => {
                 descriptor.static_methods.push(v8::ffi::MethodDescriptor {
                     name,
                     callback: callback as usize,
                 });
             }
-            Member::StaticConstant { name, value } => {
+            ResourceMember::StaticConstant { name, value } => {
                 let ConstantValue::Number(number_value) = value;
                 descriptor
                     .static_constants
@@ -481,7 +538,7 @@ impl Resources {
 /// member declarations, a cleanup function for GC, and access to their V8 wrapper state.
 pub trait Resource: Type + GarbageCollected + Sized + 'static {
     /// Returns the list of methods, properties, and constructors exposed to JavaScript.
-    fn members() -> Vec<Member>
+    fn members() -> Vec<ResourceMember>
     where
         Self: Sized;
 }

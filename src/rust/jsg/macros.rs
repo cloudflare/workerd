@@ -5,7 +5,7 @@
 /// Generates a no-op [`Traced`](crate::Traced) implementation for types with no GC-visible
 /// references.
 ///
-/// Types that contain only plain data (no `jsg::Rc`, `jsg::v8::Global`, etc.) do not
+/// Types that contain only plain data (no `jsg::Member`, `jsg::Slot`, etc.) do not
 /// need to participate in GC tracing. This macro produces an empty `Traced` impl
 /// whose `trace` method is a no-op.
 ///

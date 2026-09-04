@@ -41,8 +41,8 @@ static ENUM_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 enum StreamState {
     Closed,
-    Errored { reason: jsg::Rc<Leaf> },
-    Readable(jsg::Rc<Leaf>),
+    Errored { reason: jsg::Member<Leaf> },
+    Readable(jsg::Member<Leaf>),
 }
 
 impl jsg::Traced for StreamState {
@@ -104,7 +104,7 @@ fn enum_variant_child_kept_alive_through_gc() {
         let child = jsg::Rc::new(Leaf { value: 10 });
 
         let parent = jsg::Rc::new(StreamController {
-            state: StreamState::Readable(child.clone()),
+            state: StreamState::Readable(child.clone().into()),
         });
         let wrapped = parent.clone().to_js(lock);
         ctx.set_global("parent", wrapped);
@@ -137,7 +137,7 @@ fn enum_named_variant_child_kept_alive_through_gc() {
 
         let parent = jsg::Rc::new(StreamController {
             state: StreamState::Errored {
-                reason: child.clone(),
+                reason: child.clone().into(),
             },
         });
         let wrapped = parent.clone().to_js(lock);
