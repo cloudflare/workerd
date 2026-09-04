@@ -21,7 +21,11 @@ Both cells need `experimental` (Socket) and an `internet` network
 service allowing `private`. The suite's `.wd-test` files take no
 `compatibilityDate` (wd_test injects `--compat-date`).
 
-## Coverage (parity — no divergences observed)
+## Coverage
+
+`cancelReadableSettlesSocket` pins one implementation divergence: canceling
+a pending read rejects with a re-created `Error` carrying the cancel reason
+under C++, while TypeScript resolves the read done.
 
 | Test | Shape |
 | --- | --- |
@@ -33,5 +37,5 @@ service allowing `private`. The suite's `.wd-test` files take no
 | `pipeJsSourceToSocketWritable` | JS ReadableStream → socket writable, echo drained concurrently |
 | `pipeSocketThroughJsTransform` | socket → JS TransformStream → JS sink |
 | `pipeSocketToSocket` | greet socket's readable piped into the echo socket's writable |
-| `cancelReadableSettlesSocket` | reader.cancel mid-stream, then socket.close() settles |
+| `cancelReadableSettlesSocket` | reader.cancel settles a pending peer read (C++ rejects; TS resolves done), then socket.close()/closed settle |
 | `largeEchoVolume` | 256 KiB continuous pattern, concurrent producer/consumer, byte-exact |
