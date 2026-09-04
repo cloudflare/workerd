@@ -4,6 +4,7 @@
 
 #include "worker-entrypoint.h"
 
+#include <workerd/jsg/util.h>
 #include <workerd/tests/test-fixture.h>
 
 #include <kj/test.h>
@@ -194,6 +195,74 @@ class RecordingObserver final: public RequestObserver, public WorkerInterface {
  private:
   kj::Maybe<WorkerInterface&> inner;
 };
+
+class PredecessorRejectedObserver final: public RequestObserver {
+ public:
+  void claimRetryTokenBeforeUserCode() override {
+    auto exception = KJ_EXCEPTION(DISCONNECTED, "request rejected before user code");
+    jsg::markActorRequestNotDelivered(exception);
+    exception.setDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+    kj::throwFatalException(kj::mv(exception));
+  }
+};
+
+KJ_TEST("actor fetch preserves a predecessor rejection before user code") {
+  TestFixture fixture(TestFixture::SetupParams{
+    .actorId = Worker::Actor::Id(kj::str("not-delivered-test")),
+    .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
+        []() -> kj::Own<RequestObserver> { return kj::refcounted<PredecessorRejectedObserver>(); }),
+  });
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  kj::NullStream requestBody;
+  TestResponse response;
+
+  auto exception = kj::runCatchingExceptions([&]() {
+    entrypoint->request(kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
+        .wait(fixture.getWaitScope());
+  });
+
+  auto& e = KJ_ASSERT_NONNULL(exception);
+  KJ_EXPECT(e.getType() == kj::Exception::Type::DISCONNECTED, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID) != kj::none, e);
+}
+
+class UnqualifiedNotDeliveredObserver final: public RequestObserver {
+ public:
+  void claimRetryTokenBeforeUserCode() override {
+    auto exception = KJ_EXCEPTION(DISCONNECTED, "request rejected before user code");
+    jsg::markActorRequestNotDelivered(exception);
+    kj::throwFatalException(kj::mv(exception));
+  }
+};
+
+KJ_TEST("actor fetch does not preserve an unqualified not-delivered marker") {
+  TestFixture fixture(TestFixture::SetupParams{
+    .actorId = Worker::Actor::Id(kj::str("not-delivered-test")),
+    .requestObserverFactory =
+        kj::Function<kj::Own<RequestObserver>()>([]() -> kj::Own<RequestObserver> {
+    return kj::refcounted<UnqualifiedNotDeliveredObserver>();
+  }),
+  });
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  kj::NullStream requestBody;
+  TestResponse response;
+
+  auto exception = kj::runCatchingExceptions([&]() {
+    entrypoint->request(kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
+        .wait(fixture.getWaitScope());
+  });
+
+  auto& e = KJ_ASSERT_NONNULL(exception);
+  KJ_EXPECT(e.getType() == kj::Exception::Type::DISCONNECTED, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
+}
 
 KJ_TEST("connect pass-through tags failures after delivery") {
   capnp::MallocMessageBuilder flagsMessage;
