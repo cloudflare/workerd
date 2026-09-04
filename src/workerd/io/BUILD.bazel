@@ -502,6 +502,7 @@ kj_test(
     deps = [
         ":actor",
         ":io-gate",
+        "//src/workerd/util:sentry",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
         "@sqlite3",
