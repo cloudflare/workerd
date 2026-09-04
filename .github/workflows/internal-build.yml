@@ -16,31 +16,37 @@ jobs:
   internal-build:
     runs-on: ubuntu-latest
     steps:
-      # Check if this is a fork and if the author is a Cloudflare org member
+      # Check if this is a fork and if the owner is a Cloudflare org member
       - name: Check fork status and org membership
         if: github.event.pull_request.head.repo.fork
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AUTHOR: ${{ github.event.pull_request.user.login }}
+          FORK_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
         run: |
-          echo "Fork detected. Checking if $AUTHOR is a Cloudflare org member..."
+          echo "Fork detected. Checking if $FORK_OWNER is a Cloudflare org member..."
 
-          if gh api orgs/cloudflare/members/$AUTHOR --silent 2>/dev/null; then
+          if gh api "orgs/cloudflare/members/$FORK_OWNER" --silent 2>/dev/null; then
             echo "✓ Cloudflare org member confirmed"
           else
-            echo "✗ Not a Cloudflare org public member"
+            echo "✗ Fork owner '$FORK_OWNER' is not a public Cloudflare org member."
             echo ""
-            echo "This workflow only runs for forks from Cloudflare organization public members."
-            echo "If you're an external contributor, please ask the auto-assigned reviewers"
-            echo "to run the internal build workflow on your behalf."
+            echo "GitHub's public membership API cannot verify private organization membership."
+            echo "If you are a Cloudflare org member, open the page below, find your account,"
+            echo "change your organization visibility from Private to Public, and re-run this workflow:"
+            echo "https://github.com/orgs/cloudflare/people"
+            echo ""
+            echo "If you are an external contributor, please ask the auto-assigned reviewers for help."
             exit 1
           fi
 
       # Try to checkout the merge commit - will fail if PR isn't mergeable
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: checkout_merge
         continue-on-error: true
         with:
+          # Fork PRs reach this step only after their owner is confirmed to be a
+          # public Cloudflare org member, whose code this workflow trusts.
+          allow-unsafe-pr-checkout: true
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           show-progress: false
 
@@ -60,11 +66,11 @@ jobs:
           CI_CLIENT_ID: ${{ secrets.CI_CF_ACCESS_CLIENT_ID }}
           CI_CLIENT_SECRET: ${{ secrets.CI_CF_ACCESS_CLIENT_SECRET }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          USER_LOGIN: ${{ github.event.pull_request.user.login }}
+          FORK_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
         run: |
           # Format ref based on whether this is a fork
           if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
-            REF="$USER_LOGIN/$HEAD_REF"
+            REF="$FORK_OWNER/$HEAD_REF"
           else
             REF="$HEAD_REF"
           fi
