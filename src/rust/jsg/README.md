@@ -18,7 +18,7 @@ A traced edge from one resource to another. Convert it to an `Rc<R>` with `to_rc
 
 ### `Weak<R>`
 
-Weak reference that doesn't prevent GC collection. Use `upgrade()` to get a `Rc<R>` if the resource is still alive.
+Weak reference that doesn't prevent GC collection. Use `upgrade(lock)` to get a `Rc<R>` if the resource is still alive.
 
 ### `Realm`
 

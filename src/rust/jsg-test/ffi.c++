@@ -150,6 +150,17 @@ void request_gc(Isolate* isolate, GcType gc_type) {
             cppgc::EmbedderStackState::kNoHeapPointers);
       }
       break;
+    case GcType::FullDeferredSweep: {
+      auto& cppHeap = KJ_ASSERT_NONNULL(isolate->GetCppHeap());
+      cppHeap.SetForceIncrementalSweepingForTesting(true);
+      KJ_DEFER(cppHeap.SetForceIncrementalSweepingForTesting(false));
+      isolate->RequestGarbageCollectionForTesting(
+          v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
+      break;
+    }
+    case GcType::FinishDeferredSweep:
+      KJ_ASSERT_NONNULL(isolate->GetCppHeap()).FinishSweepingForTesting();
+      break;
   }
 }
 

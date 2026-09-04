@@ -888,6 +888,10 @@ kj::uint wrappable_strong_refcount(const Wrappable& wrappable) {
   return wrappable.getStrongRefcount();
 }
 
+bool wrappable_is_condemned(const Wrappable& wrappable) {
+  return wrappable.isCondemned();
+}
+
 // Wrappable lifecycle
 kj::Rc<Wrappable> wrappable_new(TraitObjectPtr ptr) {
   auto rc = kj::rc<Wrappable>();

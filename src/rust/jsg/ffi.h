@@ -267,6 +267,9 @@ void traced_reference_reset(Global& value, TracedReference& traced);
 const TraitObjectPtr& wrappable_get_trait_object(const Wrappable& wrappable);
 void wrappable_clear_trait_object(Wrappable& wrappable);
 kj::uint wrappable_strong_refcount(const Wrappable& wrappable);
+// True once a major GC has collected the wrapper but the deferred ~CppgcShim has not yet
+// released this Wrappable. See ::workerd::jsg::Wrappable::isCondemned().
+bool wrappable_is_condemned(const Wrappable& wrappable);
 
 // Wrappers
 Local wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl);

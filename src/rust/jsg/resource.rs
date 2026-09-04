@@ -270,7 +270,11 @@ impl<R: Resource> Weak<R> {
     }
 
     /// Upgrades to a strong `Rc<R>` if the resource is still alive.
-    pub fn upgrade(&self) -> Option<Rc<R>> {
+    ///
+    /// Returns `None` for a condemned resource: one whose wrapper a major GC has already
+    /// collected while the finalizer that drops it is still pending. The lock is what makes
+    /// that check stable, and rooting the wrapper requires it in any case.
+    pub fn upgrade(&self, _lock: &mut Lock) -> Option<Rc<R>> {
         let handle = self.weak.upgrade()?;
         let wrappable_ptr = self.wrappable?;
         // Reconstruct a WrappableRc from the stored wrappable pointer.
@@ -279,6 +283,9 @@ impl<R: Resource> Weak<R> {
         // means the Wrappable must still exist — its destruction via std::rc::Rc::from_raw
         // would have released the Rc and thus the resource).
         let mut wrappable = unsafe { v8::WrappableRc::from_raw_wrappable(wrappable_ptr.as_ptr()) };
+        if wrappable.is_condemned() {
+            return None;
+        }
         wrappable.add_strong_ref();
         Some(Rc {
             handle,

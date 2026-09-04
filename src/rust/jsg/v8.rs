@@ -484,6 +484,7 @@ pub mod ffi {
         ) -> &'a TraitObjectPtr;
         pub unsafe fn wrappable_clear_trait_object(wrappable: Pin<&mut Wrappable>);
         pub unsafe fn wrappable_strong_refcount(wrappable: &Wrappable) -> u32;
+        pub unsafe fn wrappable_is_condemned(wrappable: &Wrappable) -> bool;
 
         // Wrappable lifecycle — KjRc<Wrappable> for reference-counted ownership
         pub unsafe fn wrappable_new(ptr: TraitObjectPtr) -> KjRc<Wrappable>;
@@ -3700,6 +3701,14 @@ impl WrappableRc {
     pub(crate) fn strong_refcount(&self) -> u32 {
         // SAFETY: wrappable pointer is valid (guaranteed by KjRc lifetime).
         unsafe { ffi::wrappable_strong_refcount(&*self.handle.get()) }
+    }
+
+    /// Returns whether a major GC has collected this Wrappable's wrapper while its deferred
+    /// finalizer has not yet run. Such a Wrappable is still allocated but must not be
+    /// re-rooted. Requires the isolate lock.
+    pub(crate) fn is_condemned(&self) -> bool {
+        // SAFETY: wrappable pointer is valid (guaranteed by KjRc lifetime).
+        unsafe { ffi::wrappable_is_condemned(&*self.handle.get()) }
     }
 
     /// Resolves the `Rc::into_raw` pointer stored in the Wrappable as a typed `NonNull<R>`.

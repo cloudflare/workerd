@@ -197,14 +197,14 @@ fn weak_ref_upgrade() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
+    harness.run_in_context(|lock, _ctx| {
         let strong = jsg::Rc::new(SimpleResource {
             name: "test".to_owned(),
         });
         let weak = strong.downgrade();
 
         assert!(weak.is_alive());
-        let upgraded = weak.upgrade();
+        let upgraded = weak.upgrade(lock);
         assert!(upgraded.is_some());
         assert!(weak.is_alive());
 
@@ -215,7 +215,7 @@ fn weak_ref_upgrade() {
         // No wrapper, so resource is destroyed immediately when last strong ref drops
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         assert!(!weak.is_alive());
-        assert!(weak.upgrade().is_none());
+        assert!(weak.upgrade(lock).is_none());
         Ok(())
     });
 }
@@ -257,7 +257,7 @@ fn weak_ref_with_wrapped_resource() {
         let _wrapped = strong.clone().to_js(lock);
         let weak = strong.downgrade();
 
-        assert!(weak.upgrade().is_some());
+        assert!(weak.upgrade(lock).is_some());
         std::mem::drop(strong);
         // CppgcShim keeps it alive even after dropping the strong ref
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
@@ -315,14 +315,14 @@ fn member_in_gc() {
 #[test]
 fn weak_ref_get_returns_resource_data() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
+    harness.run_in_context(|lock, _ctx| {
         let strong = jsg::Rc::new(SimpleResource {
             name: "hello".to_owned(),
         });
         let weak = strong.downgrade();
 
         // get() should return a reference to the resource
-        let resource = weak.upgrade().expect("weak ref should be alive");
+        let resource = weak.upgrade(lock).expect("weak ref should be alive");
         assert_eq!(resource.name, "hello");
         Ok(())
     });
@@ -334,18 +334,18 @@ fn weak_ref_get_returns_none_after_drop() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
+    harness.run_in_context(|lock, _ctx| {
         let strong = jsg::Rc::new(SimpleResource {
             name: "ephemeral".to_owned(),
         });
         let weak = strong.downgrade();
-        assert!(weak.upgrade().is_some());
+        assert!(weak.upgrade(lock).is_some());
 
         std::mem::drop(strong);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
 
         // get() must return None without touching freed memory
-        assert!(weak.upgrade().is_none());
+        assert!(weak.upgrade(lock).is_none());
         Ok(())
     });
 }
@@ -357,12 +357,12 @@ fn weak_ref_get_returns_none_after_drop() {
 #[test]
 fn weak_ref_default_is_dead() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
+    harness.run_in_context(|lock, _ctx| {
         let weak: jsg::Weak<SimpleResource> = jsg::Weak::default();
 
         assert!(!weak.is_alive());
-        assert!(weak.upgrade().is_none());
-        assert!(weak.upgrade().is_none());
+        assert!(weak.upgrade(lock).is_none());
+        assert!(weak.upgrade(lock).is_none());
         Ok(())
     });
 }
@@ -375,7 +375,7 @@ fn weak_ref_clone_shares_alive_marker() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
+    harness.run_in_context(|lock, _ctx| {
         let strong = jsg::Rc::new(SimpleResource {
             name: "shared".to_owned(),
         });
@@ -394,8 +394,8 @@ fn weak_ref_clone_shares_alive_marker() {
         assert!(!weak1.is_alive());
         assert!(!weak2.is_alive());
         assert!(!weak3.is_alive());
-        assert!(weak1.upgrade().is_none());
-        assert!(weak2.upgrade().is_none());
+        assert!(weak1.upgrade(lock).is_none());
+        assert!(weak2.upgrade(lock).is_none());
         Ok(())
     });
 }
@@ -416,7 +416,7 @@ fn weak_ref_upgrade_with_wrapped_resource_prevents_gc() {
 
         // Drop the original strong ref, but upgrade from weak creates a new one
         std::mem::drop(strong);
-        let upgraded = weak.upgrade().expect("should be alive via wrapper");
+        let upgraded = weak.upgrade(lock).expect("should be alive via wrapper");
         assert_eq!(upgraded.name, "persistent");
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
 
@@ -428,6 +428,37 @@ fn weak_ref_upgrade_with_wrapped_resource_prevents_gc() {
     harness.run_in_context(|lock, _ctx| {
         crate::Harness::request_gc(lock);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// A major GC whose cppgc sweep is still pending leaves a wrapped resource condemned: its
+/// wrapper is gone but `~Wrappable` has not run, so the Rust allocation is still alive.
+/// Upgrading in that window must fail rather than resurrect the doomed resource.
+#[test]
+fn weak_ref_upgrade_fails_for_condemned_resource() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    let mut weak = None;
+    harness.run_in_context(|lock, _ctx| {
+        let strong = jsg::Rc::new(SimpleResource {
+            name: "condemned".to_owned(),
+        });
+        let _wrapped = strong.clone().to_js(lock);
+        weak = Some(strong.downgrade());
+        Ok(())
+    });
+    let weak = weak.unwrap();
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc_with_deferred_sweep(lock);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        assert!(weak.upgrade(lock).is_none());
+
+        crate::Harness::finish_deferred_sweep(lock);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        assert!(weak.upgrade(lock).is_none());
         Ok(())
     });
 }
@@ -469,7 +500,7 @@ fn weak_ref_trace_does_not_prevent_gc() {
         let _holder_wrapped = holder.clone().to_js(lock);
 
         // WeakRef should be upgradable while the target is alive
-        assert!(holder.weak.upgrade().is_some());
+        assert!(holder.weak.upgrade(lock).is_some());
 
         // Drop all Rust refs — both are only held by JS wrappers
         std::mem::drop(target);
@@ -776,7 +807,7 @@ fn instance_drop_invalidates_all_weak_refs() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, _ctx| {
+    harness.run_in_context(|lock, _ctx| {
         let original = jsg::Rc::new(SimpleResource {
             name: "shared-target".to_owned(),
         });
@@ -803,9 +834,9 @@ fn instance_drop_invalidates_all_weak_refs() {
         assert!(!weak_from_original.is_alive());
         assert!(!weak_from_clone1.is_alive());
         assert!(!weak_from_clone2.is_alive());
-        assert!(weak_from_original.upgrade().is_none());
-        assert!(weak_from_clone1.upgrade().is_none());
-        assert!(weak_from_clone2.upgrade().is_none());
+        assert!(weak_from_original.upgrade(lock).is_none());
+        assert!(weak_from_clone1.upgrade(lock).is_none());
+        assert!(weak_from_clone2.upgrade(lock).is_none());
         Ok(())
     });
 }

@@ -31,6 +31,11 @@ mod ffi {
         Full = 0,
         /// Minor (scavenge) GC — collects only the young generation.
         Minor = 1,
+        /// Full GC that leaves cppgc's sweep pending, as a natural major GC does. Wrappers are
+        /// collected but their `~CppgcShim` finalizers have not run.
+        FullDeferredSweep = 2,
+        /// Runs the finalizers left pending by `FullDeferredSweep`.
+        FinishDeferredSweep = 3,
     }
 
     unsafe extern "C++" {
@@ -246,6 +251,16 @@ impl Harness {
     pub fn request_minor_gc(lock: &mut jsg::Lock) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Minor) };
+    }
+
+    pub fn request_gc_with_deferred_sweep(lock: &mut jsg::Lock) {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::FullDeferredSweep) };
+    }
+
+    pub fn finish_deferred_sweep(lock: &mut jsg::Lock) {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::FinishDeferredSweep) };
     }
 
     /// Creates a V8 object tagged with the C++ `WORKERD_WRAPPABLE_TAG`.
