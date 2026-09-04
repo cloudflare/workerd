@@ -274,8 +274,6 @@ build:tsan-common --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
 
 # Linux x86_64.
 build:tsan --config=tsan-common
-# A statically-linked unwinder in each shared library cannot propagate exceptions across DSOs.
-build:tsan --linkopt="-l:libunwind.so.8"
 
 # macOS arm64. ld64 does not accept the GNU-ld `-l:` syntax and has no equivalent need: libunwind is
 # part of libSystem and shared by every image.

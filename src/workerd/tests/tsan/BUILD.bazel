@@ -1,0 +1,9 @@
+load("//:build/kj_test.bzl", "kj_test")
+
+kj_test(
+    src = "libcxx-tsan-test.c++",
+    target_compatible_with = select({
+        "//build/platforms:sanitizer_thread": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)

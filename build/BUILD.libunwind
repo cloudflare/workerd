@@ -1,0 +1,27 @@
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "configure_make")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+configure_make(
+    name = "libunwind",
+    configure_options = [
+        "--disable-minidebuginfo",
+        "--disable-static",
+        "--disable-tests",
+        "--enable-shared",
+    ],
+    env = {
+        "CFLAGS": "-Wno-error",
+        "CXXFLAGS": "-Wno-error",
+    },
+    lib_source = ":srcs",
+    out_shared_libs = ["libunwind.so.8"],
+)

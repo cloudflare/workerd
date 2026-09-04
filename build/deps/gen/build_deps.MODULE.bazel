@@ -69,6 +69,9 @@ bazel_dep(name = "platforms", version = "1.1.0")
 # rules_cc
 bazel_dep(name = "rules_cc", version = "0.2.22")
 
+# rules_foreign_cc
+bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
+
 # rules_multirun
 bazel_dep(name = "rules_multirun", version = "0.14.0")
 
@@ -106,6 +109,34 @@ exports_files(["library/Cargo.toml"])
     url = "https://static.rust-lang.org/dist/2026-07-16/rust-src-nightly.tar.xz",
 )
 use_repo(http, "rust_nightly_src")
+
+# tsan_libunwind
+http.archive(
+    name = "tsan_libunwind",
+    build_file = "@workerd//:build/BUILD.libunwind",
+    sha256 = "4a6aec666991fb45d0889c44aede8ad6eb108071c3554fcdff671f9c94794976",
+    strip_prefix = "libunwind-1.6.2",
+    type = "tgz",
+    url = "https://github.com/libunwind/libunwind/releases/download/v1.6.2/libunwind-1.6.2.tar.gz",
+)
+use_repo(http, "tsan_libunwind")
+
+# tsan_llvm_runtimes
+git_repository(
+    name = "tsan_llvm_runtimes",
+    build_file = "@workerd//:build/BUILD.llvm-runtimes",
+    remote = "https://github.com/llvm/llvm-project.git",
+    sparse_checkout_patterns = [
+        "cmake",
+        "libc/hdr",
+        "libc/include",
+        "libc/shared",
+        "libc/src/__support",
+        "libcxx",
+        "runtimes",
+    ],
+    tag = "llvmorg-22.1.8",
+)
 
 # wasm_tools_linux_arm64
 http.archive(

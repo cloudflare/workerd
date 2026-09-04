@@ -1,0 +1,12 @@
+load("//:build/wd_rust_test.bzl", "wd_rust_test")
+
+wd_rust_test(
+    name = "race",
+    srcs = ["race.rs"],
+    edition = "2024",
+    link_deps = ["@@//deps:rust_runtime"],
+    target_compatible_with = select({
+        "//build/platforms:sanitizer_thread": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)

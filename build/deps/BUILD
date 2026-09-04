@@ -45,7 +45,10 @@ cc_library(
         "//conditions:default": [""],
     }),
     visibility = ["//visibility:public"],
-    deps = [":linkopts_common"],
+    deps = [":linkopts_common"] + select({
+        "//build/platforms:sanitizer_thread_linux": ["@tsan_llvm_runtimes//:runtimes"],
+        "//conditions:default": [],
+    }),
 )
 
 # link options to use with tools where we don't want to compromise performance, e.g. workerd. At
@@ -54,5 +57,8 @@ cc_library(
 cc_library(
     name = "linkopts_tool",
     visibility = ["//visibility:public"],
-    deps = [":linkopts_common"],
+    deps = [":linkopts_common"] + select({
+        "//build/platforms:sanitizer_thread_linux": ["@tsan_llvm_runtimes//:runtimes"],
+        "//conditions:default": [],
+    }),
 )
