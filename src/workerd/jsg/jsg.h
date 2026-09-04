@@ -1668,7 +1668,7 @@ Ref<T> _jsgThis(T* obj) {
 //   use-after-free.
 //
 // - tryAddRef(js) answers "is the object still usable from JS?". It requires the isolate
-//   lock and returns kj::none for condemned objects (see Wrappable::isCondemned()).
+//   lock and returns kj::none for condemned objects (see Wrappable::wasTracedInLastGc()).
 //   Any JS-facing work through a WeakRef must go through tryAddRef().
 //
 // Use operator->() for convenient single-expression access that asserts liveness:
@@ -1772,7 +1772,7 @@ class WeakRef {
 
   // Try to promote to a strong Ref<T>. Returns kj::none if the target has been destroyed,
   // or if the target's V8 wrapper died in a major GC whose deferred cleanup has not yet
-  // released the target (detected via Wrappable::isCondemned();
+  // released the target (detected via the GC epoch check in Wrappable::wasTracedInLastGc();
   // see the implementation in setup.h). In the latter case the target is condemned and this
   // WeakRef is permanently invalidated.
   kj::Maybe<Ref<T>> tryAddRef(Lock&) const;
@@ -3115,16 +3115,13 @@ class Lock {
   void requestGcForTesting() const;
 
   // Like requestGcForTesting(), but leaves cppgc's sweep pending rather than running it inside the
-  // collection. On return, wrappers unreachable at the start of the GC have been collected and
-  // their Wrappables condemned (see Wrappable::isCondemned()), but the ~CppgcShim that releases
-  // each Wrappable has not run yet. This is the state a natural major GC leaves behind, and the
-  // only state in which the condemned-wrapper hazard is observable.
+  // collection. This reproduces the delayed finalization performed by a natural major GC.
   //
   // Pair with finishDeferredSweepForTesting() to close the window. Testing only.
   void requestGcWithDeferredSweepForTesting() const;
 
   // Completes a sweep left pending by requestGcWithDeferredSweepForTesting(), running the deferred
-  // ~CppgcShim finalizers. Testing only.
+  // cppgc finalizers. Testing only.
   void finishDeferredSweepForTesting() const;
 
   // Runs the given function synchronously with a v8::HandleScope on the stack.
