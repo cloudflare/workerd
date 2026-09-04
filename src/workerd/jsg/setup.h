@@ -1124,13 +1124,15 @@ template <typename T>
 kj::Maybe<Ref<T>> WeakRef<T>::tryAddRef(Lock&) const {
   KJ_IF_SOME(i, impl) {
     if (!i.anchor->isAlive()) return kj::none;
-    // A major GC may have collected the target's wrapper while the ~CppgcShim that would
-    // release the target Wrappable (running ~Wrappable(), which invalidates the anchor) is
-    // still deferred, so the anchor keeps reporting isAlive(). Promoting a Ref in that state
-    // would call addStrongRef() on a doomed Wrappable. cppgc tells us directly: it cleared the
-    // Wrappable's weak reference to its shim during the collecting GC's atomic pause.
+    // After a major GC, V8's ResetDeadNodes zaps a dead droppable TracedReference without
+    // calling ResetRoot(). The CppgcShim destructor that would release the object (running
+    // ~Wrappable(), which invalidates the anchor) can be deferred past the end of the GC
+    // cycle, so the anchor still reports isAlive() while the TracedReference dangles.
+    // Promoting a Ref in that state would call addStrongRef(), which copies the dangling
+    // reference via TracedReference::Get() — a use-after-free. Detect it instead: a wrapper
+    // that exists but was not traced in the last completed major GC cycle is dead.
     auto& target = static_cast<Wrappable&>(i.target);
-    if (target.isCondemned()) {
+    if (!target.wasTracedInLastGc()) {
       // The object is condemned: its wrapper died in a completed major GC, which also means
       // no strong refs exist (they would have rooted the wrapper) and no live wrappable
       // holds a traced ref to it (that would have marked it) — anything still referencing
