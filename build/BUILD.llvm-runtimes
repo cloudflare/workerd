@@ -1,0 +1,45 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+cmake(
+    name = "libcxx",
+    cache_entries = {
+        "LIBCXX_CXX_ABI": "none",
+        "LIBCXX_ENABLE_ABI_LINKER_SCRIPT": "OFF",
+        "LIBCXX_ENABLE_SHARED": "OFF",
+        "LIBCXX_ENABLE_STATIC": "ON",
+        "LIBCXX_INCLUDE_BENCHMARKS": "OFF",
+        "LIBCXX_INCLUDE_TESTS": "OFF",
+        "LIBCXX_INSTALL_HEADERS": "OFF",
+    },
+    env = {
+        "CFLAGS": "-Wno-error",
+        "CXXFLAGS": "-Wno-error",
+    },
+    lib_source = ":srcs",
+    out_static_libs = ["libc++.a"],
+    targets = [
+        "cxx_experimental",
+        "cxx_static",
+    ],
+    working_directory = "libcxx",
+)
+
+cc_library(
+    name = "runtimes",
+    # A statically-linked unwinder in each shared library cannot propagate exceptions across DSOs.
+    deps = [
+        ":libcxx",
+        "@tsan_libunwind//:libunwind",
+    ],
+)

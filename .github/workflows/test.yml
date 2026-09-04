@@ -93,18 +93,12 @@ jobs:
       suffix: -tsan
       extra_bazel_args: '--config=ci-test --config=ci-linux-tsan'
       build_target: >-
-        //src/rust/tsan-test:tsan-integration-test
-        //src/workerd/util:batch-queue-test@
-        //src/workerd/util:checked-queue-test@
-        //src/workerd/util:ring-buffer-test@
-        //src/workerd/util:strong-bool-test@
+        //src/rust/tsan/...
+        //src/workerd/tests/tsan/...
         //src/workerd/util:wait-list-test@
       test_target: >-
-        //src/rust/tsan-test:tsan-integration-test
-        //src/workerd/util:batch-queue-test@
-        //src/workerd/util:checked-queue-test@
-        //src/workerd/util:ring-buffer-test@
-        //src/workerd/util:strong-bool-test@
+        //src/rust/tsan/...
+        //src/workerd/tests/tsan/...
         //src/workerd/util:wait-list-test@
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}

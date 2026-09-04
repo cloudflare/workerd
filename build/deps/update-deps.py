@@ -449,33 +449,47 @@ def get_release_asset(repo, release):
 def gen_git_clone(repo):
     url = repo["url"]
 
-    # We used to clone the repository here to get a shallow_since timestamp, but based
-    # on # https://github.com/bazelbuild/bazel/issues/12857 it is unclear if this is
-    # actually helpful.
-    ls_remote = subprocess.run(
-        ["git", "ls-remote", url, repo["branch"]], capture_output=True, text=True
-    )
-    ls_remote.check_returncode()
-    commit = ls_remote.stdout.strip().split()[0]
+    if repo.get("use_bazel_dep") and "sparse_checkout_patterns" in repo:
+        raise UnsupportedException(
+            "sparse_checkout_patterns is not supported with use_bazel_dep"
+        )
 
-    if "freeze_commit" in repo:
-        freeze_commit = repo["freeze_commit"]
-        if freeze_commit != commit:
-            print(
-                "frozen, update available ",
-                repo["freeze_commit"][:7],
-                " -> ",
-                commit[:7],
-                end="",
-            )
-            commit = freeze_commit
-        else:
-            print(commit[:7], end="")
+    if "tag" in repo:
+        print(repo["tag"], end="")
+        attrs = dict(
+            remote=url,
+            tag=repo["tag"],
+        )
+    else:
+        # We used to clone the repository here to get a shallow_since timestamp, but based
+        # on https://github.com/bazelbuild/bazel/issues/12857 it is unclear if this is
+        # actually helpful.
+        ls_remote = subprocess.run(
+            ["git", "ls-remote", url, repo["branch"]], capture_output=True, text=True
+        )
+        ls_remote.check_returncode()
+        commit = ls_remote.stdout.strip().split()[0]
 
-    attrs = dict(
-        remote=url,
-        commit=commit,
-    )
+        if "freeze_commit" in repo:
+            freeze_commit = repo["freeze_commit"]
+            if freeze_commit != commit:
+                print(
+                    "frozen, update available ",
+                    repo["freeze_commit"][:7],
+                    " -> ",
+                    commit[:7],
+                    end="",
+                )
+                commit = freeze_commit
+            else:
+                print(commit[:7], end="")
+
+        attrs = dict(
+            remote=url,
+            commit=commit,
+        )
+    if "sparse_checkout_patterns" in repo:
+        attrs["sparse_checkout_patterns"] = repo["sparse_checkout_patterns"]
 
     if repo.get("use_bazel_dep"):
         return format_bazel_dep_with_override(

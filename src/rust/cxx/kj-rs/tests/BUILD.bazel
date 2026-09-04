@@ -49,6 +49,7 @@ rust_unpretty(
 rust_test(
     name = "rust_tests",
     crate = "tests",
+    env = {"RUST_TEST_THREADS": "1"},
     experimental_use_cc_common_link = 1,
     malloc = "//src/workerd/server:malloc",
     target_compatible_with = select({

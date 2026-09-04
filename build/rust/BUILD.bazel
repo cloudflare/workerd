@@ -37,14 +37,3 @@ tsan_rust_toolchain(
     ],
     target_triple = "aarch64-apple-darwin",
 )
-
-# The host's TSan-instrumented standard library, for tests that inspect it (//src/rust/tsan-test).
-alias(
-    name = "tsan_rust_std",
-    actual = select({
-        "@platforms//os:linux": ":tsan_toolchain_linux_x86_64_std",
-        "@platforms//os:macos": ":tsan_toolchain_macos_aarch64_std",
-    }),
-    tags = ["manual"],
-    visibility = ["//src/rust/tsan-test:__pkg__"],
-)

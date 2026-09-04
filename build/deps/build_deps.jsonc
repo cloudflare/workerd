@@ -74,6 +74,10 @@
       "type": "bazel_dep"
     },
     {
+      "name": "rules_foreign_cc",
+      "type": "bazel_dep"
+    },
+    {
       "name": "rust_nightly",
       "type": "rust_nightly",
       "freeze_version": "2026-07-16"
@@ -159,6 +163,33 @@
       "file_regex": "llvm-.*-linux-amd64-clang-tidy-dev\\.tar\\.xz$",
       "build_file": "@workerd//tools/clang-tidy:BUILD.headers",
       "freeze_version": "clang-tidy-22.1.5"
+    },
+    {
+      "name": "tsan_libunwind",
+      "type": "github_release",
+      "owner": "libunwind",
+      "repo": "libunwind",
+      "file_regex": "^libunwind-1\\.6\\.2\\.tar\\.gz$",
+      "build_file": "@workerd//:build/BUILD.libunwind",
+      "freeze_version": "v1.6.2",
+      "freeze_sha256": "4a6aec666991fb45d0889c44aede8ad6eb108071c3554fcdff671f9c94794976",
+      "strip_prefix": "libunwind-1.6.2"
+    },
+    {
+      "name": "tsan_llvm_runtimes",
+      "type": "git_clone",
+      "url": "https://github.com/llvm/llvm-project.git",
+      "tag": "llvmorg-22.1.8",
+      "build_file": "@workerd//:build/BUILD.llvm-runtimes",
+      "sparse_checkout_patterns": [
+        "cmake",
+        "libc/hdr",
+        "libc/include",
+        "libc/shared",
+        "libc/src/__support",
+        "libcxx",
+        "runtimes"
+      ]
     }
   ]
 }

@@ -161,6 +161,9 @@
               "branch": {
                 "type": "string"
               },
+              "tag": {
+                "type": "string"
+              },
               "build_file": {
                 "type": "string"
               },
@@ -195,6 +198,12 @@
                 }
               },
               "patch_cmds_win": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sparse_checkout_patterns": {
                 "type": "array",
                 "items": {
                   "type": "string"

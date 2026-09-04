@@ -12,6 +12,14 @@ constraint_value(
     constraint_setting = ":sanitizer",
 )
 
+config_setting(
+    name = "sanitizer_thread_linux",
+    constraint_values = [
+        ":sanitizer_thread",
+        "@platforms//os:linux",
+    ],
+)
+
 platform(
     name = "sanitizer_address_platform",
     constraint_values = [":sanitizer_address"],
