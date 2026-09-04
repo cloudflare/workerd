@@ -9,6 +9,7 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/autogate.h>
 
 #include <kj/async.h>
 #include <kj/test.h>
@@ -87,11 +88,11 @@ KJ_TEST("trace onset synchronizes an idle actor's clock before reading it") {
   fixture.drainAndDestroy(kj::mv(request));
 }
 
-KJ_TEST(
-    "request owning the final IoContext reference cancels tasks before it stops being current") {
+KJ_TEST("final context task cleanup follows the JSRPC tracing gate") {
   TestFixture fixture;
   auto request = fixture.newIncomingRequest();
   auto& context = request->getContext();
+  auto gateEnabled = util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING);
 
   bool taskWasCanceledWhileRequestWasCurrent = false;
   context.addTask(kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
@@ -100,11 +101,13 @@ KJ_TEST(
 
   fixture.drainAndDestroy(kj::mv(request));
 
-  KJ_EXPECT(taskWasCanceledWhileRequestWasCurrent);
+  KJ_EXPECT(taskWasCanceledWhileRequestWasCurrent == gateEnabled);
 }
 
 KJ_TEST(
     "request owning the final IoContext reference cancels reentry before it stops being current") {
+  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) return;
+
   TestFixture fixture;
   auto request = fixture.newIncomingRequest();
   auto& context = request->getContext();
@@ -131,6 +134,8 @@ KJ_TEST(
 }
 
 KJ_TEST("request owning the final IoContext reference preserves its abort reason") {
+  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) return;
+
   TestFixture fixture;
   auto request = fixture.newIncomingRequest();
   auto& context = request->getContext();
@@ -152,6 +157,8 @@ KJ_TEST("request owning the final IoContext reference preserves its abort reason
 }
 
 KJ_TEST("final request cancels wait-until tasks before it stops being current") {
+  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) return;
+
   TestFixture fixture;
   auto request = fixture.newIncomingRequest();
   auto& context = request->getContext();
@@ -168,6 +175,8 @@ KJ_TEST("final request cancels wait-until tasks before it stops being current") 
 }
 
 KJ_TEST("final request completes cleanup after cancellation throws") {
+  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) return;
+
   class ThrowOnDestruction: private kj::UnwindDetector {
    public:
     ~ThrowOnDestruction() noexcept(false) {
