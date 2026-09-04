@@ -4,6 +4,9 @@ on:
   issues:
     types: [opened, labeled, transferred]
 
+# The project mutation uses secrets.DEVPROD_PAT, not GITHUB_TOKEN.
+permissions: {}
+
 jobs:
   add-to-project:
     name: Add issue to GH project
