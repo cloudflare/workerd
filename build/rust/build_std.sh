@@ -23,11 +23,16 @@ if [[ $# -lt 9 ]]; then
   exit 2
 fi
 
-rust_root=$(realpath "$1")
-rust_library=$(realpath "$2")
-target_dir=$(realpath -m "$3")
-output_dir=$(realpath -m "$4")
-work=$(realpath -m "$5")
+# Portable across GNU and BSD userlands (macOS ships bash 3.2 and lacks GNU realpath -m):
+# existing directories resolve via pwd -P, not-yet-existing outputs via their (existing) parent.
+abs_dir() { (cd "$1" && pwd -P); }
+abs_path() { printf '%s/%s\n' "$(abs_dir "$(dirname "$1")")" "$(basename "$1")"; }
+
+rust_root=$(abs_dir "$1")
+rust_library=$(abs_dir "$2")
+target_dir=$(abs_path "$3")
+output_dir=$(abs_path "$4")
+work=$(abs_path "$5")
 target_triple=$6
 sanitizer=$7
 shift 7
@@ -63,6 +68,13 @@ EOF
 export PATH="$rust_root/bin:$PATH"
 export RUSTC="$rust_root/bin/rustc"
 export CARGO_HOME="$work/cargo-home"
+# Cargo also reads config.toml from every ancestor of the working directory, and Bazel's
+# sandbox lives under the developer's home (~/Library/Caches/bazel on macOS, ~/.cache/bazel on
+# Linux), so a developer's ~/.cargo/config.toml leaks into this action. Explicitly unset the
+# settings that would redirect the compiler (an empty wrapper disables it); RUSTFLAGS and the
+# linker are pinned below via the target-specific env var, which outranks config files.
+export RUSTC_WRAPPER=
+export RUSTC_WORKSPACE_WRAPPER=
 export CARGO_NET_OFFLINE=true
 export CARGO_TARGET_DIR="$target_dir"
 # Cargo has no public override for rust-src's location. This test-only hook is
@@ -70,12 +82,14 @@ export CARGO_TARGET_DIR="$target_dir"
 export __CARGO_TESTS_ONLY_SRC_ROOT="$rust_library"
 
 # Cargo applies target-specific flags to the generated package and every
-# build-std dependency. The temporary test binary may use Rust's sanitizer
-# runtime; Bazel-built targets use -Zexternal-clangrt to share Clang's runtime
-# with C++ at their final link.
-env_name="CARGO_TARGET_${target_triple^^}_RUSTFLAGS"
-env_name=${env_name//-/_}
-export "$env_name=-Zsanitizer=$sanitizer -Zexternal-clangrt -Clinker=clang -Clink-arg=-fsanitize=$sanitizer"
+# build-std dependency. The temporary test binary links Rust's own sanitizer
+# runtime: rustc passes -nodefaultlibs to clang, and on macOS that suppresses
+# clang's automatic sanitizer-runtime linking, so -Zexternal-clangrt would leave
+# the binary's __tsan_* references unresolved. That flag only affects linking,
+# never the rlibs we keep, so it is applied to Bazel-built targets from .bazelrc
+# instead, where they share Clang's runtime with C++ at their final link.
+env_name="CARGO_TARGET_$(printf '%s' "$target_triple" | tr '[:lower:]-' '[:upper:]_')_RUSTFLAGS"
+export "$env_name=-Zsanitizer=$sanitizer -Clinker=clang -Clink-arg=-fsanitize=$sanitizer"
 
 "$rust_root/bin/cargo" test \
   --manifest-path "$work/Cargo.toml" \
@@ -90,7 +104,9 @@ copy_unique_rlib() {
   local crate=$1
   local destination=$2
   local sources=()
-  mapfile -t sources < <(find "$deps" -maxdepth 1 -name "lib$crate-*.rlib" -print)
+  while IFS= read -r source; do
+    sources+=("$source")
+  done < <(find "$deps" -maxdepth 1 -name "lib$crate-*.rlib" -print)
   if [[ ${#sources[@]} -ne 1 ]]; then
     echo "Cargo produced ${#sources[@]} rlibs for $crate; expected exactly one" >&2
     printf '  %s\n' "${sources[@]}" >&2

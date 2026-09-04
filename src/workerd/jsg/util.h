@@ -97,12 +97,19 @@ constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_DETAIL_ID = 0xe80272921
 // Detail type for JavaScript exception metadata (error type and stack trace)
 constexpr kj::Exception::DetailTypeId JS_EXCEPTION_METADATA_DETAIL_ID = 0xa9ae63464030fcefull;
 
-// Set on a DISCONNECTED actor-call failure that is known to have occurred BEFORE the call reached
-// the actor (i.e. user code definitely never ran). Such failures are safe to retry as a fresh
-// attempt. Set by edgeworker's pre-delivery routing/getActor failure paths; read by the caller-side
-// actor-call classifier. The payload is a zero-length array (marker only).
+// Set on a DISCONNECTED actor-call failure for an attempt that definitely did not enter user code.
+// Such failures are safe to retry; the caller decides whether to reuse the logical call's token
+// based on earlier attempts. Set by edgeworker's pre-delivery routing and getActor failure paths,
+// and by sandbox-side rejections before user code; read by the caller-side actor-call classifier.
+// The payload is a zero-length array (marker only).
 constexpr kj::Exception::DetailTypeId REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID =
     0x1a07d0b6559baea6ull;
+
+inline void markActorRequestNotDelivered(kj::Exception& exception) {
+  if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
+    exception.setDetail(REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  }
+}
 
 // Set on a failure that is known to have occurred AFTER the call reached the actor (user code may
 // have run). Must not be retried as a delivery failure. Set at the receiving entrypoint's actor
@@ -111,9 +118,13 @@ constexpr kj::Exception::DetailTypeId REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID =
 constexpr kj::Exception::DetailTypeId REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID = 0x7f6e0bece261e8eeull;
 
 // Set when an actor invocation is rejected before user code because its retry token could not be
-// claimed. This distinguishes a claim rejection from other delivery failures so a caller can avoid
-// retrying it. The payload is a zero-length array (marker only).
+// claimed. This distinguishes a terminal claim rejection from other delivery failures. The payload
+// is a zero-length array (marker only).
 constexpr kj::Exception::DetailTypeId ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID = 0x6fb3a97323600af2ull;
+
+// Set when a draining predecessor rejects an actor invocation before user code. The caller can
+// retry the request against the replacement actor. The payload is a zero-length array (marker only).
+constexpr kj::Exception::DetailTypeId ACTOR_PREDECESSOR_REJECTED_DETAIL_ID = 0xaef1c0c972f21fe7ull;
 
 // Detail type for Durable Object metadata on exceptions propagated out of actor execution.
 constexpr kj::Exception::DetailTypeId DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_ID =

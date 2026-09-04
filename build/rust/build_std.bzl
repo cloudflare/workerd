@@ -14,13 +14,15 @@ load("@rules_rust//rust:toolchain.bzl", "rust_stdlib_filegroup")
 
 # rustc_lib contains host compiler libraries plus prebuilt target metadata. A
 # replacement toolchain must discard that metadata while retaining the runtime
-# archive needed when rustc links sanitizer-instrumented execution tools.
+# library needed when rustc links sanitizer-instrumented execution tools. The
+# runtime is a static archive on Linux (librustc-nightly_rt.tsan.a) and a dylib
+# on macOS (librustc-nightly_rt.tsan.dylib), so match on the stem only.
 def _compiler_runtime_files_impl(ctx):
-    sanitizer_runtime = "_rt.{}.a".format(ctx.attr.sanitizer)
+    sanitizer_runtime = "_rt.{}.".format(ctx.attr.sanitizer)
     return [DefaultInfo(files = depset([
         file
         for file in ctx.files.src
-        if "/lib/rustlib/" not in file.path or file.basename.endswith(sanitizer_runtime)
+        if "/lib/rustlib/" not in file.path or sanitizer_runtime in file.basename
     ]))]
 
 compiler_runtime_files = rule(

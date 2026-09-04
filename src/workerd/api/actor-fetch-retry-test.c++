@@ -109,6 +109,7 @@ enum class ReplayFailure {
   NOT_DELIVERED,
   DELIVERED,
   CLAIM_REJECTED,
+  PREDECESSOR_REJECTED,
   SLOW_RESPONSE,
   RETRY_DELAY_EXCEEDS_BUDGET,
 };
@@ -228,15 +229,19 @@ class ReplayFetchTarget final: public WorkerInterface {
         auto exception = failure == ReplayFailure::CLAIM_REJECTED
             ? KJ_EXCEPTION(FAILED, "actor retry claim rejected")
             : KJ_EXCEPTION(DISCONNECTED, "actor fetch disconnected");
-        if (failure == ReplayFailure::NOT_DELIVERED) {
-          exception.setDetail(
-              jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+        if (failure == ReplayFailure::NOT_DELIVERED ||
+            failure == ReplayFailure::PREDECESSOR_REJECTED) {
+          jsg::markActorRequestNotDelivered(exception);
         } else if (failure == ReplayFailure::DELIVERED) {
           exception.setDetail(
               jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
-        } else if (failure == ReplayFailure::CLAIM_REJECTED) {
+        }
+        if (failure == ReplayFailure::CLAIM_REJECTED) {
           exception.setDetail(
               jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+        } else if (failure == ReplayFailure::PREDECESSOR_REJECTED) {
+          exception.setDetail(
+              jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
         }
         kj::throwRecoverableException(kj::mv(exception));
       }
@@ -586,6 +591,25 @@ KJ_TEST("actor fetch updates retry metadata and rewinds the body") {
   for (auto& body: state.requestBodies) {
     KJ_EXPECT(body == "request body"_kj.asBytes());
   }
+}
+
+KJ_TEST("actor fetch retries a predecessor rejection as a fresh attempt") {
+  ReplayState state{.failures = kj::arr(ReplayFailure::PREDECESSOR_REJECTED)};
+  KJ_EXPECT(runActorFetch(state, ActorRetryGateEnabled::YES, "request body"_kj,
+                ActorFetchKind::HTTP) == kj::none);
+
+  KJ_EXPECT(state.requestCount == 2);
+  KJ_EXPECT(state.retryCount == 1);
+  KJ_ASSERT(state.metadata.size() == 2);
+  KJ_EXPECT(state.metadata[0].nonce != state.metadata[1].nonce);
+  KJ_EXPECT(state.metadata[0].isRetry == IsActorRetry::NO);
+  KJ_EXPECT(state.metadata[1].isRetry == IsActorRetry::NO);
+  KJ_ASSERT(state.countSubrequests.size() == 2);
+  KJ_EXPECT(state.countSubrequests[0] == CountSubrequest::YES);
+  KJ_EXPECT(state.countSubrequests[1] == CountSubrequest::NO);
+  KJ_ASSERT(state.requestBodies.size() == 2);
+  KJ_EXPECT(state.requestBodies[0] == "request body"_kj.asBytes());
+  KJ_EXPECT(state.requestBodies[1] == "request body"_kj.asBytes());
 }
 
 KJ_TEST("actor fetch does not retry when the enforce gate is disabled") {
