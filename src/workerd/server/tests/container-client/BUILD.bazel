@@ -1,3 +1,5 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
@@ -8,5 +10,32 @@ wd_test(
     tags = [
         "requires-container-engine",
         "requires-network",  # Accesses unix://var/run/docker.sock
+    ],
+)
+
+js_binary(
+    name = "websocket-close-propagation-client",
+    entry_point = "websocket-close-propagation-client.js",
+)
+
+sh_test(
+    name = "websocket-close-propagation-test",
+    size = "enormous",
+    srcs = ["websocket-close-propagation-test.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd_cross)",
+        "$(location :websocket-close-propagation-client)",
+        "$(location websocket-close-propagation.capnp.in)",
+        "$(location websocket-close-propagation-worker.js)",
+    ],
+    data = [
+        "websocket-close-propagation.capnp.in",
+        "websocket-close-propagation-worker.js",
+        ":websocket-close-propagation-client",
+        "//src/workerd/server:workerd_cross",
+    ],
+    tags = [
+        "requires-container-engine",
+        "requires-network",
     ],
 )

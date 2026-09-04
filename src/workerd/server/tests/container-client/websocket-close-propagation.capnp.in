@@ -1,0 +1,36 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+    (name = "internet", network = (allow = ["private"])),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
+  ],
+
+  sockets = [
+    ( name = "http",
+      address = "127.0.0.1:__PORT__",
+      http = (),
+      service = "main"
+    ),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "websocket-close-propagation-worker.js"),
+  ],
+  compatibilityDate = "2026-02-03",
+  compatibilityFlags = ["nodejs_compat", "experimental"],
+  containerEngine = (localDocker = (socketPath = "unix:/var/run/docker.sock")),
+  durableObjectNamespaces = [
+    ( className = "ContainerProxy",
+      uniqueKey = "container-client-ws-close-propagation",
+      container = (imageName = "cloudflare/workerd/container-client-test")
+    ),
+  ],
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+  bindings = [
+    (name = "MY_CONTAINER", durableObjectNamespace = "ContainerProxy"),
+  ],
+);
