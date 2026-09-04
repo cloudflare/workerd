@@ -48,6 +48,7 @@ class DurableObjectState;
 class DurableObjectStorage;
 class ServiceWorkerGlobalScope;
 struct ExportedHandler;
+enum class DurableObjectEvictionReason : uint8_t;
 struct CryptoAlgorithm;
 struct QueueExportedHandler;
 class WebSocket;
@@ -60,6 +61,7 @@ KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
 }  // namespace pyodide
 }  // namespace api
 
+class BaseTracer;
 class IsolateLimitEnforcer;
 enum class UncaughtExceptionSource;
 class VirtualFileSystem;
@@ -636,6 +638,9 @@ class Worker::Api {
 
   virtual NamedExport unwrapExport(jsg::Lock& lock, v8::Local<v8::Value> exportVal) const = 0;
 
+  virtual void captureOnEvictHandler(
+      jsg::Lock& lock, api::ExportedHandler& handler) const = 0;
+
   // Get the constructors for classes from which entrypoint classes may inherit.
   //
   // This can be used to check which class a particular entrypoint inherits from, by following
@@ -877,6 +882,20 @@ class Worker::Actor final: public kj::Refcounted {
     virtual kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) = 0;
 
     virtual kj::Own<Loopback> addRef() = 0;
+
+    // Runs `actor`'s onEvict lifecycle hook by supplying the embedder's request
+    // infrastructure (IoChannelFactory, RequestObserver, tracer) to
+    // Worker::Actor::runOnEvict(). This lives on the loopback because, like hibernatable
+    // WebSocket events, the hook must be deliverable when no inbound request exists. `actor` is
+    // passed explicitly because the loopback can outlive the Worker::Actor.
+    //
+    // Returns kj::none if the actor has no applicable handler or if this embedder does not
+    // deliver the hook through the loopback (workerd's local server triggers it through its own
+    // service objects instead; see Server::ActorClass::runOnEvict()).
+    virtual kj::Maybe<kj::Promise<EventOutcome>> runOnEvict(
+        Worker::Actor& actor, api::DurableObjectEvictionReason reason) {
+      return kj::none;
+    }
   };
 
   // The HibernationManager class manages HibernatableWebSockets created by an actor.
@@ -1104,6 +1123,31 @@ class Worker::Actor final: public kj::Refcounted {
 
   // A reference that goes invalid when this actor is destroyed.
   kj::Own<WeakRef> getWeakRef();
+
+  // Runs the actor's onEvict lifecycle handler, if any, and then waits for any storage
+  // writes the handler issued to be durably flushed. Intended to be invoked from planned,
+  // storage-healthy shutdown paths, *before* calling shutdown(). Today only idle eviction does
+  // so; further planned reasons (e.g. code-update resets) are expected to be added.
+  //
+  // Callers must check hasOnEvictHandler() first and skip the call (synchronously, without
+  // suspending) when it returns false, so that shutdown paths of actors without the hook keep
+  // exactly their prior timing. (Even a ready promise costs event-loop turns to await.)
+  //
+  // This deliberately does not call addRef(): taking a normal strong reference would create a
+  // RequestTracker::ActiveRequest, and the resulting active() callback would cancel the very
+  // shutdown that triggered the hook. Instead the hook runs on a lightweight IncomingRequest
+  // constructed from the caller-provided pieces, which is destroyed (without the normal drain
+  // path) before the promise resolves.
+  //
+  // The returned promise never rejects; failures are reported through the outcome (and logged).
+  kj::Promise<EventOutcome> runOnEvict(api::DurableObjectEvictionReason reason,
+      kj::Rc<IoChannelFactory> ioChannelFactory,
+      kj::Own<RequestObserver> observer,
+      kj::Maybe<kj::Own<BaseTracer>> workerTracer);
+
+  // Whether the actor currently has an onEvict lifecycle handler for runOnEvict() to run. May
+  // only be called when the actor is quiescent, since it reads state that running requests mutate.
+  bool hasOnEvictHandler();
 
  private:
   kj::Promise<WorkerInterface::ScheduleAlarmResult> handleAlarm(kj::Date scheduledTime);

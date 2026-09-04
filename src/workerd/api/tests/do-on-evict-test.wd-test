@@ -1,0 +1,45 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "TEST_TMPDIR", disk = (writable = true) ),
+    ( name = "do-on-evict-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "do-on-evict-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "unsafe_module",
+          "enable_ctx_exports",
+        ],
+        durableObjectNamespaces = [
+          (className = "HookObject", uniqueKey = "hook"),
+          (className = "AsyncHookObject", uniqueKey = "async-hook"),
+          (className = "ThrowingHookObject", uniqueKey = "throwing-hook"),
+          (className = "NoHookObject", uniqueKey = "no-hook"),
+          (className = "RacingHookObject", uniqueKey = "racing-hook"),
+          (className = "AlarmHookObject", uniqueKey = "alarm-hook"),
+          (className = "AbortingHookObject", uniqueKey = "aborting-hook"),
+          (className = "LeftoverWorkObject", uniqueKey = "leftover-work"),
+          (className = "FacetHookRoot", uniqueKey = "facet-hook-root"),
+          (className = "SymbolHookObject", uniqueKey = "symbol-hook"),
+        ],
+        durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+        bindings = [
+          (name = "HOOK", durableObjectNamespace = "HookObject"),
+          (name = "ASYNC_HOOK", durableObjectNamespace = "AsyncHookObject"),
+          (name = "THROWING_HOOK", durableObjectNamespace = "ThrowingHookObject"),
+          (name = "NO_HOOK", durableObjectNamespace = "NoHookObject"),
+          (name = "RACING_HOOK", durableObjectNamespace = "RacingHookObject"),
+          (name = "ALARM_HOOK", durableObjectNamespace = "AlarmHookObject"),
+          (name = "ABORTING_HOOK", durableObjectNamespace = "AbortingHookObject"),
+          (name = "LEFTOVER_WORK", durableObjectNamespace = "LeftoverWorkObject"),
+          (name = "FACET_HOOK_ROOT", durableObjectNamespace = "FacetHookRoot"),
+          (name = "SYMBOL_HOOK", durableObjectNamespace = "SymbolHookObject"),
+        ],
+      )
+    ),
+  ],
+);

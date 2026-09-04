@@ -123,6 +123,51 @@ KJ_TEST("IoContext::IncomingRequest::drain() releases a superseded (non-front) r
   fixture.drainAndDestroy(kj::mv(second));
 }
 
+// abandonTasksForActorShutdown() is what the onEvict hook uses instead of drain(): it
+// must cancel leftover I/O while the request is still installed, so nothing resumes on an
+// IoContext with no current request (that path Sentry-reports via taskFailed). The end of the
+// hook means no more code may run in the actor, so this includes work belonging to other,
+// still-live IncomingRequests (an embedder may deliver the hook to an actor that is still
+// serving requests): those requests must not be allowed to finish.
+KJ_TEST("abandonTasksForActorShutdown() cancels leftover work of all requests") {
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("abandon-test"))});
+
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  bool lastRequestWaitUntilCanceled = false;
+  context->addWaitUntil(kj::Promise<void>(kj::NEVER_DONE)
+          .attach(kj::defer(
+              [&lastRequestWaitUntilCanceled]() { lastRequestWaitUntilCanceled = true; })));
+  bool lastRequestTaskCanceled = false;
+  context->addTask(kj::Promise<void>(kj::NEVER_DONE)
+          .attach(kj::defer([&lastRequestTaskCanceled]() { lastRequestTaskCanceled = true; })));
+
+  request->abandonTasksForActorShutdown();
+  request = nullptr;
+  KJ_EXPECT(lastRequestWaitUntilCanceled, "sole request's leftover waitUntil must be canceled");
+  KJ_EXPECT(lastRequestTaskCanceled, "sole request's leftover task must be canceled");
+
+  auto first = fixture.newIncomingRequest(*context);
+  auto second = fixture.newIncomingRequest(*context);
+
+  bool racingWaitUntilCanceled = false;
+  context->addWaitUntil(kj::Promise<void>(kj::NEVER_DONE)
+          .attach(kj::defer([&racingWaitUntilCanceled]() { racingWaitUntilCanceled = true; })));
+  bool racingTaskCanceled = false;
+  context->addTask(kj::Promise<void>(kj::NEVER_DONE)
+          .attach(kj::defer([&racingTaskCanceled]() { racingTaskCanceled = true; })));
+
+  first->abandonTasksForActorShutdown();
+  first = nullptr;
+  KJ_EXPECT(racingWaitUntilCanceled,
+      "leftover waitUntil must be canceled even while another IncomingRequest is live");
+  KJ_EXPECT(racingTaskCanceled,
+      "leftover task must be canceled even while another IncomingRequest is live");
+
+  fixture.drainAndDestroy(kj::mv(second));
+}
+
 KJ_TEST("ambient IoContext is hidden while another V8 isolate is entered") {
   auto io = kj::setupAsyncIo();
   TestFixture outer({.waitScope = io.waitScope, .useRealTimers = false});

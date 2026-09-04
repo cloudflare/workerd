@@ -11,6 +11,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/analytics-engine.capnp.h>
+#include <workerd/api/global-scope.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/worker-rpc.h>
@@ -324,6 +325,14 @@ class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
   virtual kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) = 0;
 
+  // Runs the actor's onEvict lifecycle hook (if any) followed by a storage flush wait; see
+  // Worker::Actor::runOnEvict(). Called from planned eviction paths before shutting the actor
+  // down; returns kj::none synchronously when the actor has no applicable handler, so that such
+  // paths don't suspend at all. Note that `actor` is a bare reference, not a strong reference:
+  // taking a strong reference would create an ActiveRequest that cancels the pending shutdown.
+  virtual kj::Maybe<kj::Promise<EventOutcome>> runOnEvict(
+      Worker::Actor& actor, api::DurableObjectEvictionReason reason) = 0;
+
   virtual kj::Own<ActorClass> forProps(Frankenvalue props, Persistent persistent) {
     KJ_FAIL_REQUIRE("can't override props for this actor class");
   }
@@ -597,28 +606,42 @@ class Server::ActorNamespace final {
 
     // Get the actor, starting it if it's not already running.
     kj::Promise<kj::Own<Worker::Actor>> getActor() {
-      requireNotBroken();
+      for (;;) {
+        requireNotBroken();
 
-      if (actor == kj::none) {
-        KJ_IF_SOME(promise, classAndId.tryGet<kj::ForkedPromise<void>>()) {
-          co_await promise;
-          requireNotBroken();
+        // If a graceful teardown is running, wait for it to settle rather than touching the
+        // actor: taking a strong reference to a doomed actor mid-teardown (in particular while
+        // its onEvict hook runs) would either revive it or cancel the teardown under it.
+        // If the teardown evicts the actor, we start a fresh one below, so the request is
+        // served by the doomed actor's successor, matching production semantics. (If it backs
+        // off instead, e.g. because the actor still had strong references, the actor is simply
+        // still running and we use it as usual.)
+        KJ_IF_SOME(gate, teardownGate) {
+          co_await gate.addBranch();
+          continue;
         }
 
-        auto& [actorClass, id] = KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>());
-
-        KJ_IF_SOME(promise, actorClass->whenReady()) {
-          co_await promise;
-          requireNotBroken();
-        }
-
-        // A concurrent request could have started the actor, so check again.
         if (actor == kj::none) {
+          KJ_IF_SOME(promise, classAndId.tryGet<kj::ForkedPromise<void>>()) {
+            co_await promise;
+            // Re-check everything: a teardown could have started while we waited.
+            continue;
+          }
+
+          auto& [actorClass, id] = KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>());
+
+          KJ_IF_SOME(promise, actorClass->whenReady()) {
+            co_await promise;
+            // Re-check everything, including whether a concurrent request already started the
+            // actor while we waited.
+            continue;
+          }
+
           start(actorClass, id);
         }
-      }
 
-      co_return KJ_ASSERT_NONNULL(actor)->addRef();
+        co_return KJ_ASSERT_NONNULL(actor)->addRef();
+      }
     }
 
     // Callers should `attach` a self-ref to this promise as it can outlive `ActorContainer`
@@ -835,6 +858,28 @@ class Server::ActorNamespace final {
     kj::Timer& timer;
     kj::TimePoint lastAccess;
     kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager;
+
+    // Non-none while a graceful teardown (handleShutdown() or tryEvict()) is running, resolving
+    // when that teardown attempt settles (whether or not it evicted the actor). Serves two
+    // purposes:
+    //
+    // - Mutual exclusion between teardown attempts: since the onEvict hook makes these
+    //   paths suspend mid-teardown, concurrent attempts are possible (e.g.
+    //   evictAllDurableObjects() reaches the same namespace once per channel bound to it, and
+    //   the inactivity timer can fire while a test eviction runs). A second attempt must not
+    //   tear the actor down while the first attempt's hook is still running against it.
+    //
+    // - Committing the teardown: getActor() waits on this before touching the actor, so a
+    //   request that arrives mid-teardown doesn't revive the doomed actor (or cancel the
+    //   teardown via active()); it waits for the teardown to settle and is then served by a
+    //   fresh instance, matching production semantics.
+    //
+    // The corresponding fulfiller lives in the teardown coroutine's frame, whose KJ_DEFER
+    // fulfills it and clears this member (including on cancellation). Declared before the
+    // teardown tasks below so that the KJ_DEFER runs while this member is still alive, even
+    // when the tasks are destroyed by ~ActorContainer.
+    kj::Maybe<kj::ForkedPromise<void>> teardownGate;
+
     kj::Maybe<kj::Promise<void>> shutdownTask;
     kj::Maybe<kj::Promise<void>> onBrokenTask;
     kj::Maybe<kj::Exception> brokenReason;
@@ -1038,9 +1083,27 @@ class Server::ActorNamespace final {
       // JS WebSockets.
       // TODO(someday): We could make this timeout configurable to make testing less burdensome.
       co_await timer.afterDelay(10 * kj::SECONDS);
-      // Cancel the onBroken promise, since we're about to destroy the actor anyways and don't
-      // want to trigger it.
-      onBrokenTask = kj::none;
+
+      // A test-only eviction (tryEvict()) may already be tearing the actor down. It normally
+      // finishes the job (and cancels this task), but it can also back off, or be canceled by
+      // its caller mid-teardown -- and an idle actor gets no new active()/inactive() transition
+      // to re-arm this task. So rather than abandoning the inactivity path, wait for the other
+      // teardown to settle, then re-check whose job the teardown is.
+      while (teardownGate != kj::none) {
+        co_await KJ_ASSERT_NONNULL(teardownGate).addBranch();
+      }
+      if (actor == kj::none) {
+        // The other teardown finished the job.
+        co_return;
+      }
+
+      auto gate = kj::newPromiseAndFulfiller<void>();
+      teardownGate = gate.promise.fork();
+      KJ_DEFER({
+        teardownGate = kj::none;
+        gate.fulfiller->fulfill();
+      });
+
       KJ_IF_SOME(a, actor) {
         if (a->isShared()) {
           // Our ActiveRequest refcounting has broken somewhere. This is likely because we're
@@ -1055,21 +1118,51 @@ class Server::ActorNamespace final {
 
           co_return;
         }
+
+        // Run the actor's onEvict lifecycle hook, if the class defines one. This runs before
+        // hibernateWebSockets() so that a final ws.send() from
+        // the handler still works, and it waits for the handler's storage writes to flush before
+        // we proceed with teardown. Only the root actor gets the hook, matching production:
+        // per-facet ordering and timeout semantics haven't been designed yet.
+        if (parent == kj::none) {
+          KJ_IF_SOME(resolved, classAndId.tryGet<ClassAndId>()) {
+            KJ_IF_SOME(promise,
+                resolved.actorClass->runOnEvict(*a, api::DurableObjectEvictionReason::INACTIVE)) {
+              co_await promise;
+
+              // The hook may have broken its own actor (e.g. via ctx.abort()), in which case
+              // the still-armed monitorOnBroken may already have torn it down and cleared the
+              // `actor` slot (if this container is pinned, e.g. by a concurrently retrying test
+              // eviction, monitorOnBroken hollows the container without cancelling us). If it
+              // hasn't run yet, we proceed and tear the broken actor down ourselves below,
+              // which is equivalent. Nothing else can have touched the slot: while
+              // teardownGate is set, requests wait in getActor() instead of reviving the actor.
+              if (actor == kj::none) {
+                co_return;
+              }
+            }
+          }
+        }
+
+        // We are now committed to destroying the actor: cancel the onBroken task so the
+        // deliberate shutdown below doesn't trigger the brokenness path. From here on nothing
+        // can clear the `actor` slot or the hibernation manager under us (monitorOnBroken is
+        // disarmed, requests are gated on teardownGate, and a container abort() would cancel
+        // this whole task), so `a` and `m` remain valid across the lock await below.
+        onBrokenTask = kj::none;
+
         KJ_IF_SOME(m, manager) {
           auto& worker = a->getWorker();
           auto workerStrongRef = kj::atomicAddRef(worker);
-          // Take an async lock, we can't use `takeAsyncLock(RequestObserver&)` since we don't
+          // Take an async lock; we can't use `takeAsyncLock(RequestObserver&)` since we don't
           // have an `IncomingRequest` at this point.
-          //
-          // Note that we do not have a race here because this is part of the `shutdownTask`
-          // promise. If a new request comes in while we're waiting to get the lock then we will
-          // cancel this promise.
           Worker::AsyncLock asyncLock = co_await worker.takeAsyncLockWithoutRequest(nullptr);
           workerStrongRef->runInLockScope(
               asyncLock, [&](Worker::Lock& lock) { m->hibernateWebSockets(lock); });
         }
         a->shutdown(0, KJ_EXCEPTION(DISCONNECTED, "broken.dropped; Actor freed due to inactivity"));
       }
+
       // Destroy the last strong Worker::Actor reference.
       actor = kj::none;
 
@@ -1084,59 +1177,86 @@ class Server::ActorNamespace final {
     // webSocketMode, hibernatable WebSockets are either hibernated first or closed. `reason` is
     // recorded as the actor's disconnect reason.
     //
-    // Returns false without evicting if the actor has acquired strong references by the time we
-    // hold the isolate lock (i.e. a new request raced in). Unlike the inactivity-timer path
-    // (handleShutdown), which is cancelled by active() when a request arrives, the test-only evict
-    // path is not cancellable, so it relies on this re-check to avoid tearing down a live actor.
-    // For the same reason, we only cancel onBrokenTask once we're committed to the shutdown --
-    // otherwise an early `false` return would leave the actor running with no broken-detection.
+    // Returns false without evicting if the actor still has strong references (e.g. a
+    // just-completed request is still winding down) or if another teardown attempt is already
+    // running; the caller's retry loop re-checks. Once past those checks the eviction is
+    // committed: teardownGate makes racing requests wait in getActor() until the teardown
+    // settles rather than reviving the doomed actor.
     kj::Promise<bool> tryEvict(
         kj::StringPtr reason, IoChannelFactory::EvictWebSocketMode webSocketMode) {
+      if (teardownGate != kj::none) {
+        // Another teardown attempt is already running its course, possibly suspended in the
+        // onEvict hook. Tearing the actor down out from under it would leave that hook
+        // running against a destroyed actor, so just report "not evicted yet"; the caller's
+        // retry loop re-checks once the other attempt finishes.
+        co_return false;
+      }
+      auto gate = kj::newPromiseAndFulfiller<void>();
+      teardownGate = gate.promise.fork();
+      KJ_DEFER({
+        teardownGate = kj::none;
+        gate.fulfiller->fulfill();
+      });
+
       KJ_IF_SOME(a, actor) {
         if (a->isShared()) {
           co_return false;
         }
 
-        if (manager != kj::none &&
-            webSocketMode == IoChannelFactory::EvictWebSocketMode::HIBERNATE) {
+        // Run the actor's onEvict lifecycle hook, mirroring the inactivity-timer path
+        // (handleShutdown), including its root-only restriction. This must happen before we
+        // take the async lock below, since the hook acquires its own lock internally.
+        if (parent == kj::none) {
+          KJ_IF_SOME(resolved, classAndId.tryGet<ClassAndId>()) {
+            KJ_IF_SOME(promise,
+                resolved.actorClass->runOnEvict(*a, api::DurableObjectEvictionReason::INACTIVE)) {
+              co_await promise;
+
+              // The hook may have broken its own actor (e.g. via ctx.abort()), in which case
+              // the still-armed monitorOnBroken may already have torn it down and cleared the
+              // `actor` slot, hollowing this container (it can't erase it while our caller
+              // pins it). A hard abort() of this container (e.g. its parent facet was deleted)
+              // clears the slot too, without cancelling this coroutine. Nothing else can have
+              // touched the slot: while teardownGate is set, requests wait in getActor()
+              // instead of reviving the actor.
+              if (actor == kj::none) {
+                co_return false;
+              }
+            }
+          }
+        }
+
+        // We are now committed to destroying the actor: cancel the onBroken task so the
+        // deliberate shutdown below doesn't trigger the brokenness path.
+        onBrokenTask = kj::none;
+
+        if (webSocketMode == IoChannelFactory::EvictWebSocketMode::HIBERNATE &&
+            manager != kj::none) {
           auto& worker = a->getWorker();
           auto workerStrongRef = kj::atomicAddRef(worker);
-          // Take an async lock, we can't use `takeAsyncLock(RequestObserver&)` since we don't
+          // Take an async lock; we can't use `takeAsyncLock(RequestObserver&)` since we don't
           // have an `IncomingRequest` at this point.
           auto asyncLock = co_await worker.takeAsyncLockWithoutRequest(nullptr);
 
-          // Re-check the actor slot now that we've awaited the lock. `a` is the actor we observed
-          // before suspending, but while we waited another path may have replaced it, or a new
-          // request may have grabbed a strong reference.
-          KJ_IF_SOME(current, actor) {
-            if (&*current != &*a) {
-              co_return false;
-            }
-            if (current->isShared()) {
-              co_return false;
-            }
-
-            KJ_IF_SOME(m, manager) {
-              workerStrongRef->runInLockScope(
-                  asyncLock, [&](Worker::Lock& lock) { m->hibernateWebSockets(lock); });
-            }
-
-            // Note: wrap `reason` in kj::str() so KJ_EXCEPTION doesn't prefix the description with
-            // "reason = " (it only omits the label for string literals and kj::str(...) args).
-            current->shutdown(0, KJ_EXCEPTION(DISCONNECTED, kj::str(reason)));
-          } else {
-            co_return true;
+          // Unlike the inactivity-timer path (handleShutdown), which a container abort()
+          // cancels outright (it is the shutdownTask), this coroutine survives an abort(), and
+          // an abort while we waited for the lock destroys the actor and the hibernation
+          // manager. Re-check before touching them; a non-empty slot means neither was
+          // touched, since everything else that could is excluded (monitorOnBroken is
+          // disarmed and requests are gated on teardownGate).
+          if (actor == kj::none) {
+            co_return false;
           }
-        } else {
-          // Note: wrap `reason` in kj::str() so KJ_EXCEPTION doesn't prefix the description with
-          // "reason = " (it only omits the label for string literals and kj::str(...) args).
-          a->shutdown(0, KJ_EXCEPTION(DISCONNECTED, kj::str(reason)));
+          KJ_IF_SOME(m, manager) {
+            workerStrongRef->runInLockScope(
+                asyncLock, [&](Worker::Lock& lock) { m->hibernateWebSockets(lock); });
+          }
         }
-      }
 
-      // Cancel the onBroken promise, since we're committed to destroying the actor and don't want
-      // to trigger it.
-      onBrokenTask = kj::none;
+        // Note: wrap `reason` in kj::str() so KJ_EXCEPTION doesn't prefix the description with
+        // "reason = " (it only omits the label for string literals and kj::str(...) args).
+        a->shutdown(0, KJ_EXCEPTION(DISCONNECTED, kj::str(reason)));
+      }
 
       // Destroy the last strong Worker::Actor reference.
       actor = kj::none;
@@ -2031,6 +2151,12 @@ class Server::InvalidConfigActorClass final: public ActorClass {
   kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) override {
     // Can't get here because creating the actor would have required calling the other method.
+    KJ_UNREACHABLE;
+  }
+
+  kj::Maybe<kj::Promise<EventOutcome>> runOnEvict(
+      Worker::Actor& actor, api::DurableObjectEvictionReason reason) override {
+    // Can't get here because creating the actor would have required calling newActor().
     KJ_UNREACHABLE;
   }
 };
@@ -3959,6 +4085,23 @@ class Server::WorkerService final: public Service,
         kj::mv(accessInfo), kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub);
   }
 
+  // Runs `actor`'s onEvict lifecycle hook, providing the pieces of request infrastructure
+  // the hook's event needs (this service is the IoChannelFactory, so the handler can make
+  // subrequests). Returns kj::none synchronously when the actor has no applicable handler, so
+  // that such actors' shutdown paths don't suspend at all. See Worker::Actor::runOnEvict().
+  kj::Maybe<kj::Promise<EventOutcome>> runActorOnEvict(
+      Worker::Actor& actor, api::DurableObjectEvictionReason reason) {
+    if (!actor.hasOnEvictHandler()) {
+      return kj::none;
+    }
+
+    // TODO(someday): Wire up tail workers (like createEntrypoint() does) so handler exceptions
+    //   reach tail workers in local dev. For now they are still reported to the inspector.
+    kj::Own<RequestObserver> observer =
+        kj::refcounted<RequestObserverWithTracer>(kj::none, waitUntilTasks);
+    return actor.runOnEvict(reason, addRefToThis(), kj::mv(observer), kj::none);
+  }
+
  private:
   class EntrypointService;
 
@@ -4148,6 +4291,11 @@ class Server::WorkerService final: public Service,
       // The `props` parameter is empty here because props are not passed per-request, they are
       // passed at Actor construction time.
       return service->startRequest(kj::mv(metadata), className, {}, kj::mv(actor));
+    }
+
+    kj::Maybe<kj::Promise<EventOutcome>> runOnEvict(
+        Worker::Actor& actor, api::DurableObjectEvictionReason reason) override {
+      return service->runActorOnEvict(actor, reason);
     }
 
     kj::Own<ActorClass> forProps(Frankenvalue props, Persistent persistent) override {
@@ -5495,6 +5643,11 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet:
       kj::Own<WorkerInterface> startRequest(
           IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) override {
         return getInner().startRequest(kj::mv(metadata), kj::mv(actor));
+      }
+
+      kj::Maybe<kj::Promise<EventOutcome>> runOnEvict(
+          Worker::Actor& actor, api::DurableObjectEvictionReason reason) override {
+        return getInner().runOnEvict(actor, reason);
       }
 
      private:

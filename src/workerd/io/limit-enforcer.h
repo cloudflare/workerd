@@ -174,6 +174,20 @@ class LimitEnforcer {
   // Like limitDrain() and limitScheduled() but applies a time limit to alarm event processing.
   virtual kj::Duration getAlarmLimit() = 0;
 
+  // Wall-clock time budget for a Durable Object's onEvict lifecycle handler. Unlike the
+  // other limits, this has a default implementation so that embedders which don't need a
+  // configurable value get the standard budget.
+  //
+  // This budget is not preemptive: it is enforced by a timer promise, which only fires when the
+  // isolate yields to the event loop. It bounds handlers that await too long, not handlers that
+  // spin the CPU; those are bounded by the embedder's CPU enforcement (which aborts the
+  // IoContext), like any other event. Embedders without CPU enforcement (e.g. workerd's local
+  // server) can hang on a CPU-bound handler here, just as they can on any other CPU-bound
+  // handler.
+  virtual kj::Duration getOnEvictLimit() {
+    return 10 * kj::SECONDS;
+  }
+
   // Gets a byte size limit to apply to operations that will buffer a possibly large amount of
   // data in C++ memory, such as reading an entire HTTP response into an `ArrayBuffer`.
   virtual size_t getBufferingLimit() = 0;

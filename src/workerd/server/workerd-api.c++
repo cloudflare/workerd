@@ -328,6 +328,18 @@ NamedExport WorkerdApi::unwrapExport(jsg::Lock& lock, v8::Local<v8::Value> expor
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).unwrap<NamedExport>(
       lock.v8Context(), exportVal);
 }
+void WorkerdApi::captureOnEvictHandler(
+    jsg::Lock& lock, api::ExportedHandler& handler) const {
+  auto& typedLock = kj::downcast<JsgWorkerdIsolate::Lock>(lock);
+  auto self = jsg::JsObject(handler.self.getHandle(lock));
+  auto value = self.get(lock, lock.symbolInternal("cloudflare:workers:onEvict"));
+  handler.onEvict = typedLock.unwrap<
+      jsg::LenientOptional<jsg::Function<api::ExportedHandler::OnEvictHandler>>>(
+      lock.v8Context(), value);
+  KJ_IF_SOME(onEvict, handler.onEvict) {
+    onEvict.setReceiver(handler.self.asValue(lock));
+  }
+}
 EntrypointClasses WorkerdApi::getEntrypointClasses(jsg::Lock& lock) const {
   auto& typedLock = kj::downcast<JsgWorkerdIsolate::Lock>(lock);
 

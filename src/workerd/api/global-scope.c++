@@ -195,6 +195,7 @@ ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
     .webSocketClose{mapAddRef(js, webSocketClose)},
     .webSocketError{mapAddRef(js, webSocketError)},
     .self{js.v8Isolate, self.getHandle(js.v8Isolate)},
+    .onEvict{mapAddRef(js, onEvict)},
     .env{env.addRef(js)},
     .ctx{getCtx()},
     .missingSuperclass = missingSuperclass,
@@ -796,6 +797,66 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
     }
   }
   KJ_UNREACHABLE;
+}
+
+kj::Promise<EventOutcome> ServiceWorkerGlobalScope::runOnEvict(DurableObjectEvictionReason reason,
+    kj::Duration timeout,
+    Worker::Lock& lock,
+    kj::Maybe<ExportedHandler&> exportedHandler) {
+  auto& context = IoContext::current();
+
+  auto& handler = KJ_UNWRAP_OR(exportedHandler, return EventOutcome::CANCELED);
+  auto& onEvict = KJ_UNWRAP_OR(handler.onEvict, return EventOutcome::CANCELED);
+
+  return context
+      .run([&onEvict, reason, timeout](
+               Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<EventOutcome> {
+    // The hook deliberately runs with no per-request AsyncLocalStorage context: per-request ALS
+    // values (e.g. application tracing) do not survive into the hook.
+    jsg::AsyncContextFrame::Scope asyncScope(lock, kj::none);
+    jsg::Lock& js = lock;
+
+    auto timeoutPromise =
+        context.afterLimitTimeout(timeout).then([]() -> kj::Promise<EventOutcome> {
+      // Unlike the alarm timeout, we do NOT abort the IoContext: teardown is already committed
+      // and proceeding, and the caller still drains storage writes the handler managed to issue.
+      // We just stop waiting for the handler. The abandoned handler continuation may keep
+      // running until that final storage drain completes, after which all of its pending
+      // background work is canceled (see abandonTasksForActorShutdown()); our awaitJs reaction
+      // remains attached to the handler's promise throughout, so a late rejection doesn't
+      // become unhandled-rejection noise.
+      //
+      // Like any timer, this timeout only fires once the isolate yields to the event loop, so it
+      // bounds handlers that await too long, not handlers that spin the CPU; the latter are
+      // bounded by the embedder's CPU enforcement (see LimitEnforcer::getOnEvictLimit()).
+      // We also don't take the isolate lock to emit a user-visible warning, since a CPU-bound
+      // handler would then delay teardown past the budget.
+      LOG_NOSENTRY(WARNING, "onEvict handler exceeded its allowed execution time");
+      return EventOutcome::EXCEEDED_WALL_TIME;
+    });
+
+    return onEvict(lock, js.alloc<DurableObjectEvictionInfo>(reason))
+        .then([]() -> kj::Promise<EventOutcome> {
+      return EventOutcome::OK;
+    }).exclusiveJoin(kj::mv(timeoutPromise));
+  }).catch_([&context](kj::Exception&& e) -> EventOutcome {
+    if (jsg::isTunneledException(e.getDescription()) ||
+        e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none) {
+      // The handler threw or rejected (or otherwise failed with an error attributable to the
+      // user, e.g. the handler hard-aborted its own actor). Per the contract this is benign:
+      // log to the *user's* observability (like other handler errors -- not our Sentry) and
+      // proceed with teardown. The shutdown keeps its original classification (e.g.
+      // broken.dropped), not an error-class reset.
+      context.logUncaughtExceptionAsync(UncaughtExceptionSource::ON_EVICT_HANDLER, kj::mv(e));
+      return EventOutcome::EXCEPTION;
+    }
+    // An internal failure interrupted the handler, e.g. the IoContext was aborted mid-hook by
+    // a brokenness path racing with this shutdown. That is not the handler's exception, so
+    // don't report it into the user's observability as one; classify it like the
+    // couldn't-run-at-all case (see Worker::Actor::runOnEvict()).
+    LOG_NOSENTRY(WARNING, "onEvict handler was interrupted by a non-user error", e);
+    return EventOutcome::CANCELED;
+  });
 }
 
 jsg::Promise<void> ServiceWorkerGlobalScope::test(

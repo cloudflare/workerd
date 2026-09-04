@@ -55,6 +55,7 @@ class WorkerdApi final: public Worker::Api {
   jsg::Dict<NamedExport> unwrapExports(
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const override;
   NamedExport unwrapExport(jsg::Lock& lock, v8::Local<v8::Value> exportVal) const override;
+  void captureOnEvictHandler(jsg::Lock& lock, api::ExportedHandler& handler) const override;
   EntrypointClasses getEntrypointClasses(jsg::Lock& lock) const override;
   const jsg::TypeHandler<ErrorInterface>& getErrorInterfaceTypeHandler(
       jsg::Lock& lock) const override;

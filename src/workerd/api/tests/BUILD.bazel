@@ -611,6 +611,12 @@ wd_test(
 )
 
 wd_test(
+    src = "do-on-evict-test.wd-test",
+    args = ["--experimental"],
+    data = ["do-on-evict-test.js"],
+)
+
+wd_test(
     src = "js-rpc-flag.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-flag.js"],

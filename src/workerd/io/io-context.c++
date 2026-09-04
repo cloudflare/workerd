@@ -367,6 +367,32 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   context->incomingRequests.remove(*this);
 }
 
+void IoContext::IncomingRequest::abandonTasksForActorShutdown() {
+  // Cancel all pending background work: the end of the teardown-sequence event means no more
+  // code may run in this actor, period. That includes work belonging to other, still-live
+  // IncomingRequests (an embedder may deliver the event to an actor that is still serving
+  // requests): those requests must not be allowed to finish, and the imminent teardown will
+  // reject them. Canceling here rather than leaving it to the teardown also closes the window
+  // between this event completing and the embedder's shutdown call, during which a stray timer
+  // or I/O completion could otherwise still resume JS.
+  //
+  // This must run while this request is still installed: canceled work may have spans attached
+  // that access the current request's timer (the destructor's aborted-context cleanup above
+  // runs before removal from `incomingRequests` for the same reason). It also ensures these
+  // sets are empty by the time this request is destroyed and the IoContext is potentially left
+  // with no current request at all -- a task resuming in that state would fail on
+  // getCurrentIncomingRequest() before ever reaching JS, noisily for awaitIo continuations
+  // (via taskFailed()).
+  //
+  // It is safe to cancel from here for the same reason it is safe in the destructor: the
+  // caller (Worker::Actor::runOnEvict()) is not itself a task in any of these sets, so
+  // this is not a self-cancellation.
+  context->timeoutManager->cancelAll();
+  context->tasks.clear();
+  context->waitUntilTasks.clear();
+  waitedForWaitUntil = true;
+}
+
 InputGate::Lock IoContext::getInputLock() {
   return KJ_ASSERT_NONNULL(currentInputLock, "no input lock available in this context")
       .addRef(getCurrentTraceSpan());

@@ -2626,7 +2626,6 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
     ignoredHandlers.insert("alarm"_kj);
     ignoredHandlers.insert("unhandledrejection"_kj);
     ignoredHandlers.insert("rejectionhandled"_kj);
-
     // Helper function to collect methods from a prototype chain
     auto collectMethodsFromPrototypeChain = [&](jsg::JsValue startProto,
                                                 kj::HashSet<kj::String>& seenNames) {
@@ -4019,6 +4018,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       handler.ctx = kj::none;
       handler.missingSuperclass = info.missingSuperclass;
 
+      worker->getIsolate().getApi().captureOnEvictHandler(js, handler);
+
       context.setEntrypointHandler(js, jsg::JsObject(handler.self.getHandle(js)));
 
       impl->classInstance = kj::mv(handler);
@@ -4498,6 +4499,94 @@ kj::Own<Worker::Actor> Worker::Actor::addRef() {
   } else {
     return kj::addRef(*this);
   }
+}
+
+bool Worker::Actor::hasOnEvictHandler() {
+  // These checks read plain C++ state without the isolate lock, which is safe because callers
+  // only use this on shutdown paths, where the actor is quiescent, so nothing is concurrently
+  // mutating `classInstance`.
+  KJ_IF_SOME(handler, impl->classInstance.tryGet<api::ExportedHandler>()) {
+    return handler.onEvict != kj::none;
+  }
+  // The class instance was never constructed (or this isn't a class-based actor, or the
+  // constructor threw). There is no handler to run, and we must not construct the instance
+  // just to tear it down.
+  return false;
+}
+
+kj::Promise<EventOutcome> Worker::Actor::runOnEvict(api::DurableObjectEvictionReason reason,
+    kj::Rc<IoChannelFactory> ioChannelFactory,
+    kj::Own<RequestObserver> observer,
+    kj::Maybe<kj::Own<BaseTracer>> workerTracer) {
+  // Pin the actor for the duration of this coroutine: a hard abort (e.g.
+  // abortAllDurableObjects(), ctx.abort(), or a brokenness path) can drop the embedder's owning
+  // reference while we are suspended, and this coroutine must not run against a destroyed
+  // actor. This is deliberately a plain kj::addRef() rather than Actor::addRef(): the latter
+  // creates a RequestTracker::ActiveRequest, whose active() callback would cancel the very
+  // shutdown that triggered this hook. Note that an abort still cuts the hook short (the
+  // IoContext rejects, yielding outcome CANCELED); the pin only guarantees that doing so is
+  // memory-safe.
+  auto self = kj::addRef(*this);
+
+  // hasOnEvictHandler() returning true implies the class instance was constructed, which
+  // implies an IoContext was created. If the IoContext is gone anyway, then the actor was
+  // already hard-shut-down before we were invoked -- shutdown() destroys the IoContext once the
+  // last IncomingRequest is gone -- e.g. an abort or brokenness path raced with the embedder's
+  // planned-eviction path. The actor is past the point of running JS, so report the hook as
+  // canceled, like any other case where it could not run.
+  IoContext& context = KJ_UNWRAP_OR(getIoContext(), {
+    co_return EventOutcome::CANCELED;
+  });
+
+  // Set up a lightweight IncomingRequest so that the IoContext has a current request while the
+  // handler runs (required for timers, subrequests, and metrics attribution). Note that
+  // delivered() also tops up the actor's CPU allowance, like any other event.
+  auto incomingRequest =
+      kj::heap<IoContext::IncomingRequest>(kj::addRef(context), kj::mv(ioChannelFactory),
+          kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */);
+  incomingRequest->delivered();
+
+  EventOutcome outcome;
+  KJ_TRY {
+    outcome = co_await context.run(
+        [reason](Worker::Lock& lock, IoContext& context) -> kj::Promise<EventOutcome> {
+      auto timeout = context.getLimitEnforcer().getOnEvictLimit();
+      auto handler = KJ_ASSERT_NONNULL(context.getActor()).getHandler();
+      return lock.getGlobalScope().runOnEvict(reason, timeout, lock, handler);
+    });
+  } KJ_CATCH(exception) {
+    // We couldn't run the handler at all, e.g. the IoContext was aborted concurrently (say, by
+    // resource-limit condemnation racing with the shutdown path). Teardown proceeds; the hook is
+    // best-effort.
+    LOG_NOSENTRY(WARNING, "failed to deliver onEvict to actor", exception);
+    outcome = EventOutcome::CANCELED;
+  }
+
+  // Regardless of the handler's outcome (including timeout), drain any storage writes it managed
+  // to issue: they must be durably flushed before the caller tears the actor down and a successor
+  // can be created. This wait is already bounded by the storage-hang timeout, which breaks the
+  // output gate; a broken gate rejects this promise, in which case teardown just proceeds.
+  KJ_IF_SOME(persistent, getPersistent()) {
+    KJ_IF_SOME(flush, persistent.onNoPendingFlush(SpanParent(nullptr))) {
+      KJ_TRY {
+        co_await flush;
+      } KJ_CATCH(_) {}
+    }
+  }
+
+  // The hook's event is complete. We must not use the normal drain path: for actors, drain()
+  // waits on onShutdown(), which only fires once our caller proceeds with the shutdown after this
+  // method returns -- and the resulting background task would keep the IncomingRequest alive past
+  // the actor's destruction, leaving IoContext::actor dangling in the IncomingRequest destructor.
+  // Instead, destroy the IncomingRequest synchronously, now, while the actor is still alive. All
+  // pending background work (timers, tasks, waitUntil tasks) is canceled first: the end of the
+  // hook means no more code may run in this actor, and nothing may be left that could try to
+  // resume on the IoContext once it has no current request (see
+  // abandonTasksForActorShutdown()).
+  incomingRequest->abandonTasksForActorShutdown();
+  incomingRequest = nullptr;
+
+  co_return outcome;
 }
 
 // =======================================================================================
