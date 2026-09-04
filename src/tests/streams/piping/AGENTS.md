@@ -28,6 +28,7 @@ a deliberate defect pin, not a hole).
 | 8 | dest controller error()s while the pipe waits on a read | HALF-PROPAGATES: cancels the source with the error but FULFILLS the pipe promise | rejects the pipe and cancels the source with the error (spec) | `destControllerErrorsMidPipe` |
 | 9 | FixedLengthStream length violations via pipe | overflow: pipe NEVER SETTLES (bounded); underflow: never settles | overflow: rejects RangeError; underflow: never settles (parity of nonconformance) | `fixedLengthStreamPipeOverflow`/`Underflow` |
 | 10 | already-closed source → already-closed dest | rejects TypeError (spec; the WPT multiple-propagation seed) | FULFILLS as a trivially complete pipe | `closedSourceToClosedDest` |
+| 11 | SharedArrayBuffer-backed views into CompressionStream | copies the shared bytes; round-trips | write path REJECTS TypeError 'The provided value is not of type (ArrayBuffer or ArrayBufferView)' — while its identity stream ACCEPTS the same views | `sabViewThroughCompressionRoundTrip` |
 
 Parity worth noting (probed, pinned): the whole error-propagation-
 forward core matrix (starts-errored rejection/hook IDENTITY on both
@@ -70,12 +71,14 @@ the source FIRST, then releasing the write (`pipeStopsPullingWhenDestStalls`).
 | `close-propagation.js` | the WPT-disabled backward territory, bounded: external close/abort on piped dest, write-throw backward propagation (ledger #7), idle dest-controller error (ledger #8) |
 | `flow-control.js` | backpressure chain (migrated from streams-backpressure-test.js), stalled-dest read-ahead bound |
 | `interop.js` | cancel propagation ×2 (migrated from api/streams/streams-test.js), FixedLengthStream (ledger #9), pre-settled pairings (ledger #10) |
+| `special-buffers.js` | SharedArrayBuffer-backed and resizable-buffer views through native and JS pipe endpoints (migrated from pipe-write-special-buffer-test.js, strengthened to content checks; ledger #11); the JS path delivers the very view uncopied, resizable buffers stay resizable |
 | `legacy-pipes.js` | the unflagged cell (flags table) |
 | `data-volumes.js` | end-to-end pipe volumes: 1 MiB pipeTo JS→JS, 8 MiB pipeThrough chain, 1 MiB JS→identity with body readback, 1 MiB identity→JS with a concurrent writer — all byte-exact |
 
-Consumed sources (deleted or shrunk): pipe-streams-test.js (deleted),
+Consumed sources (deleted or shrunk): pipe-streams-test.js and
+pipe-write-special-buffer-test.js (deleted),
 streams-error-edge-cases-test.js (−2), streams-backpressure-test.js
 (−1), api/streams/streams-test.js (−2; partiallyReadStream and inspect
 remain). The security regression files remain authoritative and
 separate: identity-transform-stream-uaf, pipe-source-error-uaf,
-pipe-write-special-buffer (SharedArrayBuffer/resizable shapes).
+identity-transform-stream-uaf and pipe-source-error-uaf.
