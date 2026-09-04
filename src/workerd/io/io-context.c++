@@ -1229,6 +1229,7 @@ constexpr auto USER_TRACING_INVOCATION_TAG = "workerd.userTracingInvocation"_kj;
 
 jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
     Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride) {
+  auto& ioContext = IoContext::current();
   jsg::Lock& js = lock;
   kj::Maybe<jsg::JsObject> invocationTag;
   if (userSpanOverride != kj::none) {
@@ -1260,7 +1261,7 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
 
   auto asyncContext = kj::heap<UserTraceAsyncContext>(
       kj::mv(userSpan), kj::mv(tracer), kj::mv(invocationSpanContext));
-  auto ioOwnAsyncContext = IoContext::current().addObject(kj::mv(asyncContext));
+  auto ioOwnAsyncContext = ioContext.addObject(kj::mv(asyncContext));
   auto contextHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnAsyncContext));
 
   if (invocationTag == kj::none) {
