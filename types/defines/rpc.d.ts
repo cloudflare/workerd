@@ -36,6 +36,7 @@ declare namespace Rpc {
   //   cloneable composite types. This allows types defined with the "interface" keyword to pass the
   //   serializable check as well. Otherwise, only types defined with the "type" keyword would pass.
   type Serializable<T> =
+    | (unknown extends T ? unknown : never)
     // Structured cloneables
     | BaseType
     // Structured cloneable composites
