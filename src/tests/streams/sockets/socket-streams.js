@@ -6,9 +6,13 @@
 // stream pair — internal streams whose consumption shapes this suite
 // pins under both implementations. The sidecar provides a pure echo
 // server (half-close aware) and a greet-then-end server.
+//
+// Canceling a pending read diverges: C++ rejects with a re-created Error
+// carrying the cancel reason, while TypeScript resolves the read done.
 
 import { connect } from 'cloudflare:sockets';
-import { strictEqual, ok, deepStrictEqual } from 'node:assert';
+import { strictEqual, ok, rejects, deepStrictEqual } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -210,16 +214,24 @@ export const pipeSocketToSocket = {
   },
 };
 
-// Cancelling the socket readable: the socket's closed promise still
-// settles and the writable is unusable afterwards.
+// Cancel a pending socket read while the peer remains open, then close
+// the socket and observe its public closed promise.
 export const cancelReadableSettlesSocket = {
   async test(ctrl, env) {
-    const socket = connect(greetAddress(env));
+    const socket = connect(echoAddress(env));
+    await socket.opened;
     const reader = socket.readable.getReader();
-    await reader.read(); // take the greeting (or its first fragment)
+    const pendingRead = reader.read();
     await reader.cancel('done');
+    if (usingTsImpl) {
+      const { value, done } = await pendingRead;
+      strictEqual(done, true);
+      strictEqual(value, undefined);
+    } else {
+      await rejects(pendingRead, { name: 'Error', message: 'done' });
+    }
     await socket.close();
-    ok(true);
+    await socket.closed;
   },
 };
 
