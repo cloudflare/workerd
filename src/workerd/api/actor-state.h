@@ -592,6 +592,7 @@ class DurableObjectState: public jsg::Object {
       kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
       kj::Maybe<rpc::Container::Client> container,
       bool containerRunning,
+      jsg::Dict<kj::String> containerImages,
       kj::Maybe<Worker::Actor::FacetManager&> facetManager,
       kj::Maybe<ActorVersion> version = kj::none);
 

@@ -3983,6 +3983,7 @@ interface ExecProcess {
 }
 interface Container {
   get running(): boolean;
+  get images(): Record<string, string>;
   start(options?: ContainerStartupOptions): void;
   monitor(): Promise<void>;
   destroy(error?: any): Promise<void>;

@@ -1149,6 +1149,7 @@ DurableObjectState::DurableObjectState(jsg::Lock& js,
     kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
     kj::Maybe<rpc::Container::Client> container,
     bool containerRunning,
+    jsg::Dict<kj::String> containerImages,
     kj::Maybe<Worker::Actor::FacetManager&> facetManager,
     kj::Maybe<ActorVersion> version)
     : id(kj::mv(actorId)),
@@ -1156,7 +1157,7 @@ DurableObjectState::DurableObjectState(jsg::Lock& js,
       props(js, props),
       storage(kj::mv(storage)),
       container(container.map([&](rpc::Container::Client& cap) {
-        return js.alloc<Container>(kj::mv(cap), containerRunning);
+        return js.alloc<Container>(kj::mv(cap), containerRunning, kj::mv(containerImages));
       })),
       facetManager(facetManager.map(
           [](Worker::Actor::FacetManager& ref) { return IoContext::current().addObject(ref); })),

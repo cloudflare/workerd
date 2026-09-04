@@ -318,6 +318,7 @@ class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
       kj::Own<Worker::Actor::Loopback> loopback,
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
       kj::Maybe<rpc::Container::Client> container,
+      jsg::Dict<kj::String> containerImages,
       kj::Maybe<Worker::Actor::FacetManager&> facetManager) = 0;
 
   // Start a request on the actor. (The actor must have been created using newActor().)
@@ -1320,9 +1321,16 @@ class Server::ActorNamespace final {
       auto loopback = kj::refcounted<Loopback>(*this);
 
       kj::Maybe<rpc::Container::Client> container = kj::none;
+      jsg::Dict<kj::String> containerImages;
       KJ_IF_SOME(config, containerOptions) {
         KJ_ASSERT(config.hasImageName(), "Image name is required");
         auto imageName = config.getImageName();
+        containerImages.fields = KJ_MAP(image, config.getImages()) {
+          return jsg::Dict<kj::String>::Field{
+            .name = kj::str(image.getName()),
+            .value = kj::str(image.getImage()),
+          };
+        };
         auto privilegeConfig = config.getPrivileges();
         auto capabilities =
             kj::heapArrayBuilder<kj::String>(privilegeConfig.getCapabilities().size());
@@ -1363,9 +1371,9 @@ class Server::ActorNamespace final {
             kj::mv(privileges));
       }
 
-      auto actor =
-          actorClass->newActor(getTracker(), Worker::Actor::cloneId(id), kj::mv(makeActorCache),
-              kj::mv(makeStorage), kj::mv(loopback), tryGetManagerRef(), kj::mv(container), *this);
+      auto actor = actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
+          kj::mv(makeActorCache), kj::mv(makeStorage), kj::mv(loopback), tryGetManagerRef(),
+          kj::mv(container), kj::mv(containerImages), *this);
       onBrokenTask = monitorOnBroken(*actor);
       this->actor = kj::mv(actor);
     }
@@ -2023,6 +2031,7 @@ class Server::InvalidConfigActorClass final: public ActorClass {
       kj::Own<Worker::Actor::Loopback> loopback,
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
       kj::Maybe<rpc::Container::Client> container,
+      jsg::Dict<kj::String> containerImages,
       kj::Maybe<Worker::Actor::FacetManager&> facetManager) override {
     JSG_FAIL_REQUIRE(
         Error, "Cannot instantiate Durable Object class because its config is invalid.");
@@ -4123,6 +4132,7 @@ class Server::WorkerService final: public Service,
         kj::Own<Worker::Actor::Loopback> loopback,
         kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
         kj::Maybe<rpc::Container::Client> container,
+        jsg::Dict<kj::String> containerImages,
         kj::Maybe<Worker::Actor::FacetManager&> facetManager) override {
       TimerChannel& timerChannel = *service;
 
@@ -4140,7 +4150,7 @@ class Server::WorkerService final: public Service,
       return kj::refcounted<Worker::Actor>(*service->worker, tracker, kj::mv(actorId), true,
           kj::mv(makeActorCache), className, kj::mv(props), kj::mv(makeStorage), kj::mv(loopback),
           timerChannel, kj::refcounted<ActorObserver>(), kj::mv(manager), hibernationEventTypeId,
-          kj::mv(container), facetManager);
+          kj::mv(container), kj::mv(containerImages), facetManager);
     }
 
     kj::Own<WorkerInterface> startRequest(
@@ -5486,10 +5496,11 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet:
           kj::Own<Worker::Actor::Loopback> loopback,
           kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
           kj::Maybe<rpc::Container::Client> container,
+          jsg::Dict<kj::String> containerImages,
           kj::Maybe<Worker::Actor::FacetManager&> facetManager) override {
         return getInner().newActor(tracker, kj::mv(actorId), kj::mv(makeActorCache),
             kj::mv(makeStorage), kj::mv(loopback), kj::mv(manager), kj::mv(container),
-            facetManager);
+            kj::mv(containerImages), facetManager);
       }
 
       kj::Own<WorkerInterface> startRequest(
