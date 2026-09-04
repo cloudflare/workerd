@@ -805,6 +805,8 @@ class R2Bucket: public jsg::Object {
   friend class R2MultipartUpload;
 };
 
+// Helper enum to indicate whether returned httpMetadata and customMetadata to be empty or absent.
+// Use EMPTY for `head`, successful `get`, conditional `get`, `put`, and multipart completion. Use ABSENT for list fields that were not requested.
 enum class MissingMetadataPolicy {
   EMPTY,
   ABSENT,
