@@ -306,8 +306,13 @@ fn extract_constructor_params(
             let unwrap = quote! {
                 let #var = match <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#js_index)) {
                     Ok(v) => v,
-                    Err(e) => {
-                        lock.throw_exception(&e);
+                    Err(err) => {
+                        let err = if err.name == jsg::ExceptionType::TypeMismatchError {
+                            jsg::Error::new_type_error(err.message)
+                        } else {
+                            err
+                        };
+                        lock.throw_exception(&err);
                         return;
                     }
                 };

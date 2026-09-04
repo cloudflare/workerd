@@ -128,7 +128,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             fn from_js(lock: &mut jsg::Lock, value: jsg::v8::Local<jsg::v8::Value>) -> Result<Self::ResultType, jsg::Error> {
                 if !value.is_object() {
-                    return Err(jsg::Error::new_type_error(
+                    return Err(jsg::Error::new_type_mismatch_error(
                         format!("Expected object but got {}", value.type_of())
                     ));
                 }
@@ -206,6 +206,11 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 let #arg = match <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#js_index)) {
                     Ok(v) => v,
                     Err(err) => {
+                        let err = if err.name == jsg::ExceptionType::TypeMismatchError {
+                            jsg::Error::new_type_error(err.message)
+                        } else {
+                            err
+                        };
                         lock.throw_exception(&err);
                         return;
                     }
@@ -482,7 +487,7 @@ pub fn jsg_oneof(_attr: TokenStream, item: TokenStream) -> TokenStream {
             expected.join(", "),
             value.type_of()
         );
-        Err(jsg::Error::new_type_error(msg))
+        Err(jsg::Error::new_type_mismatch_error(msg))
     };
 
     quote! {

@@ -707,3 +707,37 @@ fn constructor_with_lock_parameter() {
         Ok(())
     });
 }
+
+// =============================================================================
+// Constructor type-mismatch tests
+// =============================================================================
+
+#[jsg_resource]
+struct Wrapper {
+    inner: jsg::Rc<Greeting>,
+}
+
+#[jsg_resource]
+impl Wrapper {
+    #[jsg_constructor]
+    fn constructor(inner: jsg::Rc<Greeting>) -> Self {
+        Self { inner }
+    }
+}
+
+/// `#[jsg_constructor]` with a wrong-typed resource argument throws `TypeError` (not a plain `Error`).
+#[test]
+fn constructor_with_wrong_resource_type_throws_type_error() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let wrapper_ctor = jsg::resource::function_template_of::<Wrapper>(lock);
+        ctx.set_global("Wrapper", wrapper_ctor.into());
+
+        let err = ctx
+            .eval::<jsg::Rc<Wrapper>>(lock, "new Wrapper(42)")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert_eq!(err.name, jsg::ExceptionType::TypeError);
+        Ok(())
+    });
+}
