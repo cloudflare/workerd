@@ -12,6 +12,7 @@
 #include <workerd/api/actor-state.h>
 #include <workerd/api/analytics-engine.capnp.h>
 #include <workerd/api/pyodide/pyodide.h>
+#include <workerd/api/sockets.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/access-info.h>
@@ -37,6 +38,7 @@
 #include <workerd/util/exception.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/ring-buffer.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/strings.h>
 #include <workerd/util/use-perfetto-categories.h>
@@ -6706,6 +6708,201 @@ kj::Promise<void> Server::listenTcp(
 }
 
 // =======================================================================================
+// UdpListener
+
+class Server::UdpListener final: public kj::Refcounted {
+ public:
+  UdpListener(Server& owner,
+      kj::Own<kj::DatagramPort> port,
+      kj::Own<Service> service,
+      kj::StringPtr addrStr,
+      kj::Duration idleTimeout,
+      size_t maxPendingBytes)
+      : owner(owner),
+        port(kj::mv(port)),
+        service(kj::mv(service)),
+        addrStr(addrStr),
+        idleTimeout(idleTimeout),
+        maxPendingBytes(maxPendingBytes) {}
+
+  kj::Promise<void> run() {
+    TRACE_EVENT("workerd", "UdpListener::run");
+    // Datagrams larger than this are truncated by the kernel with no way to recover the tail --
+    // matching setupDatagramSocket()'s read-side buffer, and comfortably above the largest UDP
+    // payload a peer could ever send (65507 bytes plus headers).
+    static constexpr size_t MAX_DATAGRAM_SIZE = 65535;
+
+    auto receiver =
+        port->makeReceiver(kj::DatagramReceiver::Capacity{.content = MAX_DATAGRAM_SIZE});
+    for (;;) {
+      co_await receiver->receive();
+      TRACE_EVENT("workerd", "UdpListener handle datagram");
+
+      auto content = receiver->getContent();
+      auto key = receiver->getSource().toString();
+
+      Flow* flow;
+      KJ_IF_SOME(existing, flows.find(key)) {
+        flow = existing;
+      } else {
+        auto newFlow = kj::heap<Flow>(
+            *this, kj::str(key), receiver->getSource().clone(), idleTimeout, maxPendingBytes);
+        flow = newFlow.get();
+        flows.insert(kj::str(key), flow);
+        dispatch(kj::mv(newFlow));
+      }
+      flow->deliver(kj::heapArray<kj::byte>(content.value));
+    }
+  }
+
+ private:
+  // A single logical UDP flow (all datagrams to/from one peer address, until idle). Implements
+  // DatagramChannel so it can be handed to a UdpConnectCustomEvent directly: receive() drains
+  // `pending`, blocking on `waitingReceiver` if empty; send() writes back to the peer via the
+  // listener's shared DatagramPort.
+  //
+  // Ownership: the dispatch task owns Flow (see dispatch()), same as TcpListener::run() owning
+  // per-connection state. `flows` below is a non-owning lookup pointer for routing datagrams.
+  class Flow final: public workerd::DatagramChannel {
+   public:
+    Flow(UdpListener& listener,
+        kj::String key,
+        kj::Own<kj::NetworkAddress> peerAddr,
+        kj::Duration idleTimeout,
+        size_t maxPendingBytes)
+        : listener(kj::addRef(listener)),
+          key(kj::mv(key)),
+          peerAddr(kj::mv(peerAddr)),
+          port(listener.port.addRef()),
+          idleTimeout(idleTimeout),
+          maxPendingBytes(maxPendingBytes) {
+      resetIdleTimer();
+    }
+
+    ~Flow() noexcept(false) {
+      // Stop routing further datagrams here if the dispatch task is ending before an idle timeout
+      // removed us already (e.g. the connect() handler returned without reading until EOF).
+      listener->flows.erase(key);
+    }
+
+    // Called by UdpListener::run() when a new datagram arrives for this flow. The listener keeps
+    // draining the kernel socket regardless of whether this flow's queue has room, so one slow
+    // flow does not block delivery to other peers sharing the same socket.
+    // Once `maxPendingBytes` worth of datagrams are queued, further arrivals for this flow are
+    // dropped rather than buffered.
+    void deliver(kj::Array<kj::byte> datagram) {
+      if (ended) return;
+      resetIdleTimer();
+      KJ_IF_SOME(fulfiller, waitingReceiver) {
+        fulfiller->fulfill(kj::mv(datagram));
+        waitingReceiver = kj::none;
+        return;
+      }
+      if (pendingBytes + datagram.size() > maxPendingBytes) {
+        return;
+      }
+      pendingBytes += datagram.size();
+      pending.push_back(kj::mv(datagram));
+    }
+
+    kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receive() override {
+      if (!pending.empty()) {
+        auto result = kj::mv(pending.front());
+        pending.pop_front();
+        pendingBytes -= result.size();
+        return kj::Maybe<kj::Array<kj::byte>>(kj::mv(result));
+      }
+      if (ended) {
+        return kj::Maybe<kj::Array<kj::byte>>(kj::none);
+      }
+      KJ_REQUIRE(
+          waitingReceiver == kj::none, "DatagramChannel::receive() already has a pending call");
+      auto paf = kj::newPromiseAndFulfiller<kj::Maybe<kj::Array<kj::byte>>>();
+      waitingReceiver = kj::mv(paf.fulfiller);
+      return kj::mv(paf.promise);
+    }
+
+    kj::Promise<void> send(kj::ArrayPtr<const kj::byte> datagram) override {
+      co_await port->send(datagram, *peerAddr);
+    }
+
+   private:
+    kj::Own<UdpListener> listener;
+    kj::String key;
+    kj::Own<kj::NetworkAddress> peerAddr;
+    kj::Rc<kj::DatagramPort> port;
+    kj::Duration idleTimeout;
+    size_t maxPendingBytes;
+
+    workerd::RingBuffer<kj::Array<kj::byte>> pending;
+    size_t pendingBytes = 0;
+    kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Maybe<kj::Array<kj::byte>>>>> waitingReceiver;
+    bool ended = false;
+    kj::Promise<void> idleTask = kj::READY_NOW;
+
+    void resetIdleTimer() {
+      // Dropping the old task (by overwriting idleTask) cancels its pending afterDelay(), so only
+      // the most recent datagram's timer can ever fire. eagerlyEvaluate() is required: a bare
+      // kj::Promise sitting in a member variable is never polled by the event loop unless
+      // something is actively waiting on it (a coroutine co_await, a TaskSet, or eager
+      // evaluation) -- without it this timer would simply never fire.
+      idleTask = listener->owner.timer.afterDelay(idleTimeout).then([this]() {
+        onIdleTimeout();
+      }).eagerlyEvaluate(nullptr);
+    }
+
+    void onIdleTimeout() {
+      ended = true;
+      KJ_IF_SOME(fulfiller, waitingReceiver) {
+        fulfiller->fulfill(kj::Maybe<kj::Array<kj::byte>>(kj::none));
+        waitingReceiver = kj::none;
+      }
+      // Stop routing further datagrams here; the Flow object itself isn't destroyed by this
+      // (it's owned by its dispatch task, not by `flows`), just no longer reachable for future
+      // deliver() calls. It's destroyed once that task's promise chain -- the connect() handler,
+      // plus connectUdp()'s own neutering -- completes.
+      listener->flows.erase(key);
+    }
+  };
+
+  Server& owner;
+  kj::Rc<kj::DatagramPort> port;
+  kj::Own<Service> service;
+  kj::StringPtr addrStr;
+  kj::Duration idleTimeout;
+  size_t maxPendingBytes;
+
+  // Flows keyed by the peer's address (as text): a non-owning lookup table used only to route a
+  // later datagram from the same peer to the Flow already dispatched for it. See Flow's class
+  // comment for the actual ownership model.
+  kj::HashMap<kj::String, Flow*> flows;
+
+  void dispatch(kj::Own<Flow> flow) {
+    IoChannelFactory::SubrequestMetadata metadata;
+    auto worker = service->startRequest(kj::mv(metadata));
+    auto event = kj::heap<api::UdpConnectCustomEvent>(kj::str(addrStr), *flow);
+    owner.tasks.add(worker->customEvent(kj::mv(event))
+                        .ignoreResult()
+                        .attach(kj::mv(worker), kj::mv(flow))
+                        .catch_([](kj::Exception&& e) {
+      if (e.getType() != kj::Exception::Type::DISCONNECTED) {
+        KJ_LOG(ERROR, "UDP connect() handler threw", e);
+      }
+    }));
+  }
+};
+
+kj::Promise<void> Server::listenUdp(kj::Own<kj::DatagramPort> port,
+    kj::Own<Service> service,
+    kj::StringPtr addrStr,
+    kj::Duration idleTimeout,
+    size_t maxPendingBytes) {
+  auto obj = kj::refcounted<UdpListener>(
+      *this, kj::mv(port), kj::mv(service), addrStr, idleTimeout, maxPendingBytes);
+  co_return co_await obj->run();
+}
+
+// =======================================================================================
 // Debug port for exposing all services via RPC
 
 class Server::WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
@@ -7121,6 +7318,12 @@ kj::Maybe<Server::SocketTypeConfig> Server::parseSocketType(
       }
       return kj::mv(result);
     }
+    case config::Socket::UDP: {
+      // listenOnSockets() handles UDP sockets in its own branch, before parseSocketType() is
+      // called, since UDP binds a DatagramPort rather than listening for connections. This case
+      // should be unreachable.
+      KJ_UNREACHABLE;
+    }
   }
   reportConfigError(kj::str("Encountered unknown socket type in \"", name,
       "\". Was the config compiled with a newer version of the schema?"));
@@ -7159,6 +7362,44 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       reportConfigError(kj::str("Socket \"", name,
           "\" has no address in the config, so must be specified on the "
           "command line with `--socket-addr`."));
+      continue;
+    }
+
+    if (sock.which() == config::Socket::UDP) {
+      // UDP doesn't fit the ConnectionReceiver-based listen()/accept() model the HTTP/TCP path
+      // below is built around: it binds a DatagramPort instead, so it's handled as an entirely
+      // separate branch.
+      if (listenerOverride != kj::none) {
+        reportConfigError(kj::str("Socket \"", name,
+            "\" is a UDP socket; --socket-fd overrides (which pass a listening "
+            "connection-oriented socket) are not supported for it."));
+        continue;
+      }
+
+      auto idleTimeout = sock.getUdp().getIdleTimeoutMs() * kj::MILLISECONDS;
+      size_t maxPendingBytes = sock.getUdp().getMaxPendingBytes();
+      auto addrPromise = network.parseAddress(addrStr, 0);
+
+      auto handle = kj::coCapture(
+          [this, service = kj::mv(service), name = kj::mv(name), addrStr = kj::mv(addrStr),
+              idleTimeout, maxPendingBytes](
+              kj::Promise<kj::Own<kj::NetworkAddress>> addrPromise) mutable -> kj::Promise<void> {
+        TRACE_EVENT("workerd", "setup listenUdp");
+        auto addr = co_await addrPromise;
+        auto port = addr->bindDatagramPort();
+        KJ_IF_SOME(stream, controlOverride) {
+          auto message = kj::str(
+              "{\"event\":\"listen\",\"socket\":\"", name, "\",\"port\":", port->getPort(), "}\n");
+          try {
+            stream->write(message.asBytes());
+          } catch (kj::Exception& e) {
+            KJ_LOG(ERROR, e);
+          }
+        }
+
+        co_await listenUdp(kj::mv(port), kj::mv(service), addrStr, idleTimeout, maxPendingBytes);
+      });
+      tasks.add(handle(kj::mv(addrPromise)).exclusiveJoin(forkedDrainWhen.addBranch()));
       continue;
     }
 

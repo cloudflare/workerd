@@ -7,6 +7,7 @@
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/api/streams/common.h>
+#include <workerd/api/streams/standard.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/url.h>
 #include <workerd/io/features.h>
@@ -627,6 +628,60 @@ JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::
   sourceObj.set(js, "cancel"_kj, jsg::JsValue(cancel));
   // Demand-driven pulls only, per the spec's ReadableStreamFromIterable (and the legacy
   // arm's StreamQueuingStrategy{.highWaterMark = 0}).
+  auto strategyObj = js.obj();
+  strategyObj.set(js, "highWaterMark"_kj, jsg::JsValue(js.num(0)));
+
+  auto constructor = webstreams::getCppExport(js, "ReadableStream");
+  return JsReadableStream(js,
+      constructor.newInstance(js, jsg::JsValue(sourceObj), jsg::JsValue(strategyObj)).addRef(js));
+}
+
+JsReadableStream JsReadableStream::fromPull(
+    jsg::Lock& js, kj::Function<jsg::Promise<kj::Maybe<jsg::Value>>(jsg::Lock&)> pull) {
+  if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+    UnderlyingSource underlyingSource;
+    underlyingSource.pull = [pull = kj::mv(pull)](jsg::Lock& js,
+                                UnderlyingSource::Controller c) mutable -> jsg::Promise<void> {
+      auto defaultController =
+          KJ_ASSERT_NONNULL(c.tryGet<jsg::Ref<ReadableStreamDefaultController>>()).addRef();
+      return pull(js).then(js,
+          [defaultController = kj::mv(defaultController)](
+              jsg::Lock& js, kj::Maybe<jsg::Value> value) mutable {
+        KJ_IF_SOME(v, value) {
+          defaultController->enqueue(js, jsg::JsValue(v.getHandle(js)));
+        } else {
+          defaultController->close(js);
+        }
+      });
+    };
+    return JsReadableStream(ReadableStream::constructor(
+        js, kj::mv(underlyingSource), StreamQueuingStrategy{.highWaterMark = 0}));
+  }
+
+  // TypeScript arm: same idea as from()'s TypeScript arm, but driving `pull` directly rather
+  // than an async generator's next().
+  auto tsPull = js.wrapPromiseReturningFunction(js.v8Context(),
+      [pull = kj::mv(pull)](
+          jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
+    auto controller =
+        jsg::JsRef(js, KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>()));
+    return pull(js).then(js,
+        [controller = kj::mv(controller)](
+            jsg::Lock& js, kj::Maybe<jsg::Value> value) mutable -> jsg::Promise<jsg::Value> {
+      KJ_IF_SOME(v, value) {
+        webstreams::dispatchCall(js, "readableControllerEnqueue",
+            jsg::JsValue(controller.getHandle(js)), jsg::JsValue(v.getHandle(js)));
+      } else {
+        webstreams::dispatchCall(
+            js, "readableControllerClose", jsg::JsValue(controller.getHandle(js)));
+      }
+      return js.resolvedPromise(js.v8Ref<v8::Value>(js.v8Undefined()));
+    });
+  });
+
+  auto sourceObj = js.obj();
+  sourceObj.set(js, "pull"_kj, jsg::JsValue(tsPull));
+  // Demand-driven pulls only, matching from()'s TypeScript arm.
   auto strategyObj = js.obj();
   strategyObj.set(js, "highWaterMark"_kj, jsg::JsValue(js.num(0)));
 

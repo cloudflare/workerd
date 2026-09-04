@@ -147,6 +147,26 @@ struct Socket {
       tlsOptions @6 :TlsOptions;
     }
 
+    udp :group {
+      # Listen for UDP datagrams. Bindings to this service will only support the `connect()`
+      # method, same as `tcp`; `fetch()` will throw an exception. Unlike `tcp`, the delivered
+      # Socket's `readable`/`writable` are value-mode: each chunk read or written is exactly one
+      # datagram (see Socket.protocol).
+      #
+      # Datagrams from a given peer address/port are grouped into one flow, dispatched to one
+      # `connect()` call, until no datagram has been seen from that peer for `idleTimeoutMs`.
+
+      idleTimeoutMs @7 :UInt32 = 30000;
+
+      # Bound, in bytes, on datagrams queued for one flow waiting to be consumed by
+      # `DatagramChannel::receive()`. The listener keeps
+      # draining the kernel socket regardless of whether this flow's queue has room, so one slow
+      # flow does not block delivery to other peers sharing the same socket.
+      # Once `maxPendingBytes` worth of datagrams are queued, further arrivals for this flow are
+      # dropped rather than buffered.
+      maxPendingBytes @8 :UInt32 = 262144;
+    }
+
     # TODO(someday): TCP proxy, SMTP, Cap'n Proto, ...
   }
 
