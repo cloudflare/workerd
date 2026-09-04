@@ -308,17 +308,9 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
       throwDataCloneErrorForObject(js, object);
     }
 
-    // The InternalFieldCount + isWorkerdApiObject() checks above established that this is one of
-    // our wrapped objects; the serializer is then selected by the object's dynamic type, so we
-    // only need the pointer here.
-    Wrappable* wrappable = Wrappable::unwrapFromShimAnyType(js.v8Isolate, object);
-    if (wrappable == nullptr) {
-      // The object carries our marker (isWorkerdApiObject() passed) yet its CppHeap handle resolves
-      // to no live wrappable. That is an in-sandbox corruption signal.
-      KJ_LOG(
-          FATAL, "wrapper type mismatch: marked object's CppHeap handle resolves to no wrappable");
-      abort();
-    }
+    Wrappable* wrappable = reinterpret_cast<Wrappable*>(
+        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+            static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
 
     // Only subclasses of `Object` register serializers, so anything else is not serializable.
     Object* obj = wrappable->jsgTryGetObject();
