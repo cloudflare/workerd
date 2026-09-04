@@ -63,17 +63,6 @@ http.file(
 )
 use_repo(http, "clang_tidy_linux_arm64")
 
-# libunwind
-http.archive(
-    name = "libunwind",
-    build_file = "@workerd//:build/BUILD.libunwind",
-    sha256 = "be30d910e67f58d82e753231f1357f326a1a088acf126b21ff77e60aab19b90b",
-    strip_prefix = "libunwind-1.8.3",
-    type = "tgz",
-    url = "https://github.com/libunwind/libunwind/releases/download/v1.8.3/libunwind-1.8.3.tar.gz",
-)
-use_repo(http, "libunwind")
-
 # llvm_runtimes
 git_repository(
     name = "llvm_runtimes",
@@ -87,6 +76,8 @@ git_repository(
         "libc/shared",
         "libc/src/__support",
         "libcxx",
+        "libcxxabi",
+        "libunwind",
         "runtimes",
     ],
 )

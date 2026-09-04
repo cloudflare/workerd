@@ -74,6 +74,7 @@ build:ci-linux-asan --config=asan --copt="-g0" --strip=always
 build:ci-linux-arm-asan --config=ci-linux-asan
 
 build:ci-linux-tsan --config=ci-linux-common --config=ci-limit-storage --config=tsan
+test:ci-linux-tsan --test_summary=detailed
 
 # Build container tests on Linux CI
 build:ci-linux --build_tag_filters=-off-by-default

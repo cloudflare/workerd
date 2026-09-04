@@ -19,7 +19,10 @@ def kj_test(
             "@capnp-cpp//src/kj:kj-test",
             "//build/deps:linkopts_default",
         ] + deps,
+        # libc++abi is static under TSan, so all code that participates in exception unwinding must
+        # be linked into the same image.
         linkstatic = select({
+            "//build/platforms:sanitizer_thread_linux": 1,
             "@platforms//os:linux": 0,
             "//conditions:default": 1,
         }),
