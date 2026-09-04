@@ -421,6 +421,13 @@ kj_test(
 )
 
 kj_test(
+    src = "sentry-test.c++",
+    deps = [
+        ":sentry",
+    ],
+)
+
+kj_test(
     size = "large",
     src = "sqlite-test.c++",
     deps = [
