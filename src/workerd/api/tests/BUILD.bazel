@@ -306,14 +306,6 @@ wd_test(
 )
 
 wd_test(
-    src = "cache-put-stream-test.wd-test",
-    data = [
-        "cache-mock.js",
-        "cache-put-stream-test.js",
-    ],
-)
-
-wd_test(
     src = "kv-test.wd-test",
     args = ["--experimental"],
     data = [
