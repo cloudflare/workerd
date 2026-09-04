@@ -1425,6 +1425,9 @@ class Server::ActorNamespace final {
 
   kj::Own<ContainerClient> getContainerClient(
       kj::StringPtr containerId, kj::StringPtr imageName, ContainerPrivileges privileges) {
+    KJ_REQUIRE(!containerShutdownStarted,
+        "cannot acquire a container client after graceful shutdown has begun");
+
     KJ_IF_SOME(existingClient, containerClients.find(containerId)) {
       return existingClient->addRef();
     }
@@ -1454,15 +1457,13 @@ class Server::ActorNamespace final {
       capturedGeneration = ++existing.generation;
     });
 
-    // Cleanup callback: invoked from the ContainerClient destructor with the joined
-    // with a cleanup promise
+    // Cleanup callback: invoked when ContainerClient shutdown begins with a cleanup promise.
     kj::Function<void(kj::Promise<void>)> cleanupCallback =
         [this, containerId = kj::str(containerId), capturedGeneration](
             kj::Promise<void> cleanupPromise) mutable {
       KJ_IF_SOME(state, containerCleanupState.find(containerId)) {
         if (state.generation != capturedGeneration) {
-          // A newer ContainerClient has replaced us already with another destructor.
-          // drop the promise.
+          // A newer ContainerClient has already taken ownership of cleanup for this ID.
           return;
         }
 
@@ -1496,6 +1497,33 @@ class Server::ActorNamespace final {
       actor.value->abort(reason);
     }
     actors.clear();
+  }
+
+  void beginContainerCleanup() {
+    bool hasContainer = false;
+    KJ_IF_SOME(durable, config.tryGet<Durable>()) {
+      hasContainer = durable.containerOptions != kj::none;
+    }
+    if (!hasContainer || containerShutdownStarted) return;
+
+    containerShutdownStarted = true;
+    abortAll(KJ_EXCEPTION(DISCONNECTED, "Server shutting down."));
+
+    auto clients = kj::heapArrayBuilder<ContainerClient*>(containerClients.size());
+    for (auto& entry: containerClients) {
+      clients.add(entry.value);
+    }
+    for (auto* client: clients.finish()) {
+      client->shutdown();
+    }
+  }
+
+  kj::Promise<void> waitForContainerCleanup() {
+    auto cleanups = kj::heapArrayBuilder<kj::Promise<void>>(containerCleanupState.size());
+    for (auto& entry: containerCleanupState) {
+      cleanups.add(entry.value.promise.addBranch());
+    }
+    return kj::joinPromises(cleanups.finish());
   }
 
   // Test-only: gracefully evict every currently-running actor in this namespace. Depending on
@@ -1578,6 +1606,7 @@ class Server::ActorNamespace final {
   // The map holds raw pointers (not ownership) - ContainerClients are owned by actors and timers.
   // When the last reference is dropped, the destructor removes the entry from this map.
   kj::HashMap<kj::String, ContainerClient*> containerClients;
+  bool containerShutdownStarted = false;
 
   // If the actor is broken, we remove it from the map. However, if it's just evicted due to
   // inactivity, we keep the ActorContainer in the map but drop the Own<Worker::Actor>. When a new
@@ -3654,6 +3683,12 @@ class Server::WorkerService final: public Service,
 
   kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>>& getActorNamespaces() {
     return actorNamespaces;
+  }
+
+  void beginContainerCleanup() {
+    for (auto& [className, ns]: actorNamespaces) {
+      ns->beginContainerCleanup();
+    }
   }
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
@@ -6896,7 +6931,22 @@ kj::Promise<void> Server::run(
   // services take longer to get ready.
   auto ownHeaderTable = headerTableBuilder.build();
 
-  co_return co_await listenPromise.exclusiveJoin(kj::mv(fatalPromise));
+  co_await listenPromise.exclusiveJoin(kj::mv(fatalPromise));
+
+  // All incoming requests have drained. Stop container-enabled actors so they cannot race their
+  // terminal Docker cleanup, then wait while their namespaces and Docker I/O remain available.
+  for (auto& service: services) {
+    KJ_IF_SOME(worker, kj::tryDowncast<WorkerService>(*service.value)) {
+      worker.beginContainerCleanup();
+    }
+  }
+  for (auto& service: services) {
+    KJ_IF_SOME(worker, kj::tryDowncast<WorkerService>(*service.value)) {
+      for (auto& [className, ns]: worker.getActorNamespaces()) {
+        co_await ns->waitForContainerCleanup();
+      }
+    }
+  }
 }
 
 // Configure and start the inspector socket, returning the port the socket started on.

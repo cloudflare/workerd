@@ -96,6 +96,10 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   ~ContainerClient() noexcept(false);
 
+  // Starts best-effort Docker cleanup before this client is destroyed. This is used during
+  // graceful server shutdown, when cleanup can still use the server's network resources.
+  void shutdown();
+
   // Implement rpc::Container::Server interface
   kj::Promise<void> status(StatusContext context) override;
   kj::Promise<void> start(StartContext context) override;
@@ -231,10 +235,11 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> destroySidecarContainer();
   kj::Promise<void> monitorSidecarContainer();
 
-  // Cleanup callback invoked from the destructor. Receives the joined cleanup promise so
+  // Cleanup callback invoked when shutdown begins. Receives the cleanup promise so
   // ActorNamespace can wrap it with the canceler, store it for the next ContainerClient
   // to await, and add a branch to waitUntilTasks to keep the cleanup tasks alive.
   kj::Function<void(kj::Promise<void>)> cleanupCallback;
+  bool shutdownStarted = false;
 
   // For redeeming channel tokens received via setEgressHttp / setEgressHttps.
   ChannelTokenHandler& channelTokenHandler;
