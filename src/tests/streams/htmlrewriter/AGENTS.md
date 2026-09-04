@@ -28,12 +28,19 @@ under the MODERN `fixup-transform-stream-backpressure`.
 
 After the next source chunk wakes a canceled rewriter pump, C++ makes one
 additional pull while TypeScript makes two; these counts are pinned by
-`cancelReachesSourceAfterNextChunk`. The TypeScript pump also reports
-`Error: done early` once outside the worker's event realm; C++ does not.
+`cancelReachesSourceAfterNextChunk`.
+
+## Known bugs
+
+With TypeScript streams, canceling the transformed body reports the handled
+`Error: done early` through `logUncaughtException` (tail traces / inspector),
+although it is not delivered to `unhandledrejection` listeners. C++ does not
+report it. This is tracked in [#7239](https://github.com/cloudflare/workerd/issues/7239).
 
 An erroring source is rewrapped by both implementations. Even though the
-`.text()` rejection is handled, C++ also logs the source error twice while
-TypeScript logs it once.
+`.text()` rejection is handled, the source error is reported as uncaught twice
+with C++ streams and once with TypeScript streams. This is tracked in
+[#7240](https://github.com/cloudflare/workerd/issues/7240).
 
 The api/tests htmlrewriter-transform-cancel-test.js (cancel-before-read
 ×50 UAF regression) stays where it is, per the security-regression

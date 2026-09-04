@@ -142,8 +142,10 @@ export const identityStreamBody = {
 
 // Cancelling the transformed body reaches the source lazily: another
 // source chunk must wake the parked pump before it forwards the reason.
-// The TypeScript implementation then pulls once more than C++; its internal
-// pump also reports one unhandled rejection outside the worker's event realm.
+// The TypeScript implementation then pulls once more than C++.
+// TODO(https://github.com/cloudflare/workerd/issues/7239): Stop the TS pump
+// from reporting the handled cancellation through logUncaughtException (tail
+// traces / inspector), even though no unhandledrejection event is delivered.
 export const cancelReachesSourceAfterNextChunk = {
   async test() {
     let cancelReason = 'not-called';
@@ -159,6 +161,7 @@ export const cancelReachesSourceAfterNextChunk = {
       },
       pull() {
         pulls++;
+        // The pump parks after its start-drain, post-read, and post-enqueue pulls.
         if (pulls === 3) resolvePumpParked();
       },
       cancel(reason) {
