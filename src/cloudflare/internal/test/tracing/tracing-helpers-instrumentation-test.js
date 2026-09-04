@@ -129,6 +129,10 @@ export const validateSpans = {
       rootAttributes.find(({ name }) => name === 'test'),
       { name: 'test', value: 'getActiveSpanInvocation' }
     );
+    assert.deepStrictEqual(
+      rootAttributes.find(({ name }) => name === 'user.id'),
+      { name: 'user.id', value: 'user-123' }
+    );
 
     for (const requestName of ['a', 'b']) {
       const request = invocations.find(

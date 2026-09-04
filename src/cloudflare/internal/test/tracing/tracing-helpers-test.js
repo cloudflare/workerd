@@ -7,9 +7,14 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { DurableObject, tracing as publicTracing } from 'cloudflare:workers';
 
 assert.strictEqual(publicTracing.getActiveSpan(), undefined);
-const getActiveSpanOutsideInvocationContext = AsyncLocalStorage.bind(() =>
-  publicTracing.getActiveSpan()
-);
+assert.strictEqual(publicTracing.getInvocationSpan(), undefined);
+const getSpansOutsideInvocationContext = AsyncLocalStorage.bind(() => ({
+  active: [publicTracing.getActiveSpan(), publicTracing.getActiveSpan()],
+  invocation: [
+    publicTracing.getInvocationSpan(),
+    publicTracing.getInvocationSpan(),
+  ],
+}));
 
 // Overlapping Durable Object requests share an IoContext, but each async continuation must retain
 // its originating request's tracing state. This verifies that request A resuming while request B is
@@ -37,6 +42,7 @@ export class OverlappingRequestsObject extends DurableObject {
             await this.firstCanResume;
             const span = publicTracing.getActiveSpan();
             assert(span);
+            assert.strictEqual(publicTracing.getInvocationSpan(), span);
             assert.strictEqual(span.isTraced, true);
             span.setAttribute('overlapping.request', 'a');
             this.resolveFirstAttributed();
@@ -49,6 +55,7 @@ export class OverlappingRequestsObject extends DurableObject {
     assert.strictEqual(this.firstIsWaiting, true);
     const span = publicTracing.getActiveSpan();
     assert(span);
+    assert.strictEqual(publicTracing.getInvocationSpan(), span);
     assert.strictEqual(span.isTraced, true);
     span.setAttribute('overlapping.request', 'b');
     this.resumeFirst();
@@ -319,14 +326,19 @@ export const publicImportStartSpan = {
   },
 };
 
-export const getActiveSpan = {
+export const activeAndInvocationSpans = {
   async test(ctrl, env, ctx) {
     const invocationSpan = publicTracing.getActiveSpan();
     assert.ok(invocationSpan);
     // All the ways to get the active span should return the same reference
     assert.strictEqual(publicTracing.getActiveSpan(), invocationSpan);
     assert.strictEqual(ctx.tracing.getActiveSpan(), invocationSpan);
-    assert.strictEqual(getActiveSpanOutsideInvocationContext(), undefined);
+    assert.strictEqual(publicTracing.getInvocationSpan(), invocationSpan);
+    assert.strictEqual(ctx.tracing.getInvocationSpan(), invocationSpan);
+    const detachedSpans = getSpansOutsideInvocationContext();
+    assert.deepStrictEqual(detachedSpans.active, [undefined, undefined]);
+    assert.strictEqual(detachedSpans.invocation[0], invocationSpan);
+    assert.strictEqual(detachedSpans.invocation[1], invocationSpan);
     assert.strictEqual(invocationSpan.isTraced, true);
     // This is ignored since we control the lifecycle
     invocationSpan.end();
@@ -335,8 +347,11 @@ export const getActiveSpan = {
 
     await ctx.tracing.startActiveSpan('get-active-span-op', async (span) => {
       assert.strictEqual(publicTracing.getActiveSpan(), span);
+      assert.strictEqual(publicTracing.getInvocationSpan(), invocationSpan);
       await Promise.resolve();
       assert.strictEqual(publicTracing.getActiveSpan(), span);
+      assert.strictEqual(publicTracing.getInvocationSpan(), invocationSpan);
+      publicTracing.getInvocationSpan().setAttribute('user.id', 'user-123');
       span.setAttribute('test', 'getActiveSpan');
       span.end();
     });

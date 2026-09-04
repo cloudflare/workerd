@@ -4858,6 +4858,7 @@ export interface Tracing {
   ): T;
   startSpan(name: string): Span;
   getActiveSpan(): Span | undefined;
+  getInvocationSpan(): Span | undefined;
   Span: typeof Span;
 }
 export declare abstract class Span {
