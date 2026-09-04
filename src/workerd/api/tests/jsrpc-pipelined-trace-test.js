@@ -22,6 +22,11 @@ class Counter extends RpcTarget {
     this.#value += amount;
     return this.#value;
   }
+
+  incrementDuplicate(amount) {
+    this.#value += amount;
+    return this.#value;
+  }
 }
 
 export class CounterService extends WorkerEntrypoint {
@@ -34,13 +39,17 @@ export class CounterService extends WorkerEntrypoint {
 
 export default {
   async test(controller, env, ctx) {
-    // Opens the session.
-    const counter = await env.CounterService.getCounter();
-
-    // Reuses the session opened above, so this is delivered to the same callee invocation.
-    const result = await counter.increment(5);
-    if (result !== 5) {
-      throw new Error(`Expected 5, got ${result}`);
+    // Pipeline increment before resolving the stub returned by getCounter.
+    // Then duplicate the resolved stub to verify it retains the same ancestry.
+    const counterPromise = env.CounterService.getCounter();
+    const incrementPromise = counterPromise.increment(5);
+    const counter = await counterPromise;
+    const result = await incrementPromise;
+    const duplicateResult = await counter.dup().incrementDuplicate(2);
+    if (result !== 5 || duplicateResult !== 7) {
+      throw new Error(
+        `Expected results 5 and 7, got ${result} and ${duplicateResult}`
+      );
     }
   },
 };

@@ -82,11 +82,29 @@ function findInvocations() {
   }
   if (!caller || !callee) return { caller: null, callee: null };
 
-  // Expect both dispatches on the callee and both client-side calls on the caller.
-  if (spansNamed(callee, 'jsRpcCall').length < 2)
+  // Wait for the exact method set and callee links, since attributes can follow spanOpen.
+  // This prevents span counts from making partially attributed data look complete.
+  const expectedMethods = new Set([
+    'getCounter',
+    'increment',
+    'incrementDuplicate',
+  ]);
+  const callerCalls = spansNamed(caller, 'jsRpcCall');
+  const calleeCalls = spansNamed(callee, 'jsRpcCall');
+  const hasExpectedMethods = (calls) => {
+    const methods = new Set(calls.map((span) => span.attrs['jsrpc.method']));
+    return (
+      calls.length === expectedMethods.size &&
+      methods.size === expectedMethods.size &&
+      [...expectedMethods].every((method) => methods.has(method))
+    );
+  };
+  if (!hasExpectedMethods(callerCalls) || !hasExpectedMethods(calleeCalls)) {
     return { caller: null, callee: null };
-  if (spansNamed(caller, 'jsRpcCall').length < 2)
+  }
+  if (!calleeCalls.every((span) => span.attrs['jsrpc.caller_span_id'])) {
     return { caller: null, callee: null };
+  }
   return { caller, callee };
 }
 
@@ -121,16 +139,29 @@ export const test = {
     );
     const sessionSpanId = sessionSpans[0].spanId;
 
-    // Sanity check that the caller nests its own calls as expected: the increment call was made on
-    // a stub returned by getCounter, so it nests under getCounter's span.
+    // The pipelined call and duplicate-stub call both use ancestry from getCounter.
+    // The callee onset is likewise parented to the call that opened the session.
     const callerGetCounter = callerCalls.find(
       (s) => s.attrs['jsrpc.method'] === 'getCounter'
     );
     assert.ok(callerGetCounter, "Missing caller's getCounter jsRpcCall span");
+    const callerIncrement = callerCallsByMethod.get('increment');
+    const callerIncrementDuplicate =
+      callerCallsByMethod.get('incrementDuplicate');
     assert.strictEqual(
       callerGetCounter.parentId,
       sessionSpanId,
       "The caller's first call should nest under the jsRpcSession span"
+    );
+    assert.strictEqual(
+      callerIncrement.parentId,
+      callerGetCounter.spanId,
+      'The pipelined increment call should nest under getCounter'
+    );
+    assert.strictEqual(
+      callerIncrementDuplicate.parentId,
+      callerGetCounter.spanId,
+      'The duplicate-stub call should nest under getCounter'
     );
     assert.strictEqual(
       callee.onset.parentId,
@@ -172,8 +203,8 @@ export const test = {
       );
     }
 
-    // The two dispatches must link to *different* caller calls, proving the link tracks the
-    // individual call rather than something session-wide.
+    // All three dispatches must link to different caller calls, proving per-call attribution.
+    // This includes the pipelined call and the call made through dup().
     const distinctLinks = new Set(
       calleeCalls.map((s) => s.attrs['jsrpc.caller_span_id'])
     );
