@@ -1510,6 +1510,7 @@ class ErrorInjectableFile final: public kj::File, public kj::AtomicRefcounted {
 // kj::Directory that serves ErrorInjectableFiles to SQLite.
 class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRefcounted {
  public:
+  kj::Maybe<kj::Exception> error;
   kj::Maybe<kj::Own<ErrorInjectableFile>> dbFile;
   kj::Maybe<kj::Own<ErrorInjectableFile>> walFile;
   kj::Maybe<kj::Own<ErrorInjectableFile>> journalFile;
@@ -1538,6 +1539,9 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
   // implements kj::Directory
 
   kj::Maybe<kj::Own<const kj::ReadableFile>> tryOpenFile(kj::PathPtr path) const override {
+    KJ_IF_SOME(e, error) {
+      kj::throwFatalException(e.clone());
+    }
     return getSlot(path).map([](kj::Own<ErrorInjectableFile>& file) { return file->clone(); });
   }
 
@@ -1636,6 +1640,17 @@ KJ_TEST("SQLite open errors are tagged for DO Sentry") {
   expectDoSentryDisposition(exception);
 }
 
+KJ_TEST("SQLite open preserves directory VFS exceptions") {
+  auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
+  dir->error = KJ_EXCEPTION(FAILED, "test-directory-vfs-error");
+  SqliteDatabase::Vfs vfs(*dir);
+  auto exception = KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { SqliteDatabase(vfs, kj::Path({"db"}), kj::none); }));
+  KJ_EXPECT(exception.getDescription() == "test-directory-vfs-error", exception);
+  auto disposition = KJ_ASSERT_NONNULL(exception.getDetail(SENTRY_TAG_DETAIL_ID));
+  KJ_EXPECT(disposition.asChars() == "SENTRY_DO"_kj, exception);
+}
+
 KJ_TEST("SQLite memory metering enforces SQLITE_NOMEM when limit is exceeded") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
@@ -1703,7 +1718,9 @@ KJ_TEST("I/O exceptions pass through SQLite") {
   )"));
 
   // Now arrange for an error on write().
-  KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "test-vfs-error");
+  auto vfsError = KJ_EXCEPTION(FAILED, "test-vfs-error");
+  vfsError.setDetail(SENTRY_TAG_DETAIL_ID, kj::heapArray("NOSENTRY"_kj.asBytes()));
+  KJ_ASSERT_NONNULL(dir->dbFile)->error = kj::mv(vfsError);
 
   // It should pass through.
   auto exception = KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
@@ -1712,7 +1729,8 @@ KJ_TEST("I/O exceptions pass through SQLite") {
   )"));
   }));
   KJ_EXPECT(exception.getDescription() == "test-vfs-error", exception);
-  expectDoSentryDisposition(exception);
+  auto disposition = KJ_ASSERT_NONNULL(exception.getDetail(SENTRY_TAG_DETAIL_ID));
+  KJ_EXPECT(disposition.asChars() == "NOSENTRY"_kj, exception);
 }
 
 void testCriticalError(const char* expectedErrorMessage,
