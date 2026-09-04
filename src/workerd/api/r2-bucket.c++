@@ -317,6 +317,7 @@ void initOnlyIf(TraceContext& traceContext, jsg::Lock& js, Builder& builder, Opt
   }
 }
 
+// Validates and performs string conversion on the SSE-C key.
 kj::Maybe<kj::String> buildSsecKey(
     kj::Maybe<kj::OneOf<kj::Array<byte>, kj::String>> maybeRawSsecKey) {
   KJ_IF_SOME(rawSsecKey, maybeRawSsecKey) {
@@ -349,6 +350,14 @@ static R2Bucket::HttpMetadata normalizeHttpMetadata(
   KJ_UNREACHABLE;
 }
 
+/*****************************
+ *
+ * Helper functions to set various tags on traceContext.
+ * - addHttpMetadataRequestSpanTags
+ * - addR2ResponseSpanTags
+ * - addHeadResultSpanTags
+ *
+ ******************************/
 static void addHttpMetadataRequestSpanTags(
     TraceContext& traceContext, const R2Bucket::HttpMetadata& metadata) {
   KJ_IF_SOME(value, metadata.contentType) {
@@ -547,6 +556,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
   });
 }
 
+// Retrieves the RPC method with name methodName.
 jsg::Ref<JsRpcProperty> R2Bucket::getRpcMethod(jsg::Lock& js, kj::StringPtr methodName) {
   auto fetcher = [&]() -> jsg::Ref<Fetcher> {
     KJ_SWITCH_ONEOF(clientChannel) {
@@ -569,6 +579,7 @@ jsg::Ref<JsRpcProperty> R2Bucket::getRpcMethod(jsg::Lock& js, kj::StringPtr meth
   return KJ_ASSERT_NONNULL(fetcher->getRpcMethodInternal(js, kj::str(methodName)));
 }
 
+// Validates HeadResult shape from JSRPC call.
 jsg::Ref<R2Bucket::HeadResult> headResultFromRpc(
     jsg::Lock& js, R2Bucket::HeadResultRpc rpc, MissingMetadataPolicy policy) {
   JSG_REQUIRE(std::isfinite(rpc.size) && rpc.size >= 0 && isWholeNumber(rpc.size), Error,

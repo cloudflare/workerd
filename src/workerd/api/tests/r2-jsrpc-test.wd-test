@@ -29,5 +29,4 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
-  autogates = ["workerd-autogate-r2-bindings-jsrpc"],
 );
