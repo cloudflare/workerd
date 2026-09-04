@@ -1272,8 +1272,8 @@ jsg::Ref<StorageManager> Navigator::getStorage(jsg::Lock& js) {
 bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body) {
   KJ_IF_SOME(context, IoContext::tryCurrent()) {
     auto v8Context = js.v8Context();
-    auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
-        js.v8Isolate, v8Context, v8Context->Global(), jsg::kNonResourceWrappableTagRange);
+    auto& global =
+        jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(v8Context, v8Context->Global());
     auto promise = global.fetch(js, kj::mv(url),
         Request::InitializerDict{
           .method = kj::str("POST"),

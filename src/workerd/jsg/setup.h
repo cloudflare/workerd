@@ -875,7 +875,7 @@ class Isolate: public IsolateBase {
         }
 
         auto de = alloc<DOMException>(kj::mv(message), kj::mv(name));
-        de.attachWrapper(v8Isolate, obj, TypeWrapper::template wrappableTag<DOMException>());
+        de.attachWrapper(v8Isolate, obj);
 
         return kj::mv(de);
       });
@@ -1025,23 +1025,22 @@ class Isolate: public IsolateBase {
 
     virtual kj::Maybe<Object&> getInstance(
         v8::Local<v8::Object> obj, const std::type_info& type) override {
-      auto info = jsgIsolate.getWrapperByContext(*this)->getDynamicTypeInfo(v8Isolate, type);
-      auto instance = v8::Local<v8::Object>(obj)->FindInstanceInPrototypeChain(info.tmpl);
+      auto instance = v8::Local<v8::Object>(obj)->FindInstanceInPrototypeChain(
+          jsgIsolate.getWrapperByContext(*this)->getDynamicTypeInfo(v8Isolate, type).tmpl);
       if (instance.IsEmpty()) {
         return kj::none;
       } else {
-        // Tag-check the wrapper against the requested type's range. The prototype-chain check above
-        // already accepts exactly the genuine wrappers of `type` (or a subclass), whose tags all lie
-        // in the range, so a tag outside it means a wrapper whose CppHeap handle was redirected while
-        // its prototype chain was left intact -- an in-sandbox memory-safety violation, which aborts.
-        Wrappable* wrappable =
-            Wrappable::unwrapFromShimInRangeOrAbort(v8Isolate, instance, info.tagRange);
-        // Even after checking the tags we use the vtable check to confirm the type
-        // matches our expectations. This should never fail unless we have an attacker
-        // that has somehow got around the tag check.
-        Object* object = wrappable->jsgTryGetObject();
+        // Finding `type`'s template in the prototype chain says nothing about
+        // what the internal field points at (sandbox corruption defense in
+        // depth), so this establishes only that the pointer is *some*
+        // `Wrappable`. The caller, which knows the type statically, is
+        // responsible for the rest -- see JsObject::tryUnwrapAs().
+        auto& wrappable = *reinterpret_cast<Wrappable*>(
+            instance->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+                static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
+        Object* object = wrappable.jsgTryGetObject();
         if (object == nullptr) {
-          reportWrapperTypeMismatch(type, typeid(*wrappable));
+          reportWrapperTypeMismatch(type, typeid(wrappable));
         }
         return *object;
       }

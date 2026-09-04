@@ -59,7 +59,7 @@ namespace workerd::jsg {
 
 #define JSG_RESOURCE_TYPE(Type, ...)                                                               \
   static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = ::workerd::jsg::JsgKind::RESOURCE; \
-  using jsgSuper = typename Type::jsgThis;                                                         \
+  using jsgSuper = jsgThis;                                                                        \
   using jsgThis = Type;                                                                            \
   inline kj::StringPtr jsgGetMemoryName() const override {                                         \
     return #Type##_kjc;                                                                            \
@@ -1574,12 +1574,8 @@ class Ref {
   //
   // It is an error to attach a wrapper when another wrapper is already attached. Hence,
   // typically this should only be called on a newly-allocated object.
-  // `tag` is the per-type CppHeapPointerTag for T, computed by the caller via
-  // TypeWrapper::wrappableTag<T>() (the caller has the TypeWrapper and thus the full type list
-  // needed to number T; Ref<T> does not).
-  void attachWrapper(
-      v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTag tag) {
-    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>(), tag);
+  void attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object) {
+    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>());
   }
 
   // Obtain a weak reference to the referenced object. The weak reference does not keep the
