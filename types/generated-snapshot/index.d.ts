@@ -15403,6 +15403,11 @@ interface RateLimit {
    */
   limit(options: RateLimitOptions): Promise<RateLimitOutcome>;
 }
+/** Information about why a Durable Object is being evicted. */
+interface DurableObjectEvictionInfo {
+  /** The eviction reason. Additional reasons may be added in the future. */
+  readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
+}
 // Namespace for RPC utility types. Unfortunately, we can't use a `module` here as these types need
 // to referenced by `Fetcher`. This is included in the "importable" version of the types which
 // strips all `module` blocks.
@@ -15619,6 +15624,7 @@ declare namespace Cloudflare {
   };
 }
 declare namespace CloudflareWorkersModule {
+  export const onEvict: unique symbol;
   export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
   export const RpcStub: {
     new <T extends Rpc.Stubable>(value: T): Rpc.Stub<T>;
@@ -15658,6 +15664,12 @@ declare namespace CloudflareWorkersModule {
     alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
     connect?(socket: Socket): void | Promise<void>;
+    /**
+     * Best-effort lifecycle hook invoked before planned, storage-healthy evictions. Currently
+     * invoked on idle eviction only, and only for root objects (not facets). `info.reason` is an
+     * open set so that further eviction reasons can be delivered later.
+     */
+    [onEvict]?(info: DurableObjectEvictionInfo): void | Promise<void>;
     webSocketMessage?(
       ws: WebSocket,
       message: string | ArrayBuffer,

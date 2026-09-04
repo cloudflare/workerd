@@ -106,6 +106,8 @@ class DurableObject final: public Fetcher {
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
 
+    // The JSG_TS_OVERRIDE renames this resource type to DurableObjectStub, and makes DurableObject
+    // the interface implemented by users' Durable Object classes.
     JSG_TS_DEFINE(interface DurableObject {
       fetch(request: Request): Response | Promise<Response>;
       connect?(socket: Socket): void | Promise<void>;
@@ -122,8 +124,6 @@ class DurableObject final: public Fetcher {
           readonly name?: string;
         }
     );
-    // Rename this resource type to DurableObjectStub, and make DurableObject
-    // the interface implemented by users' Durable Object classes.
   }
 
   // Even though it ought to be inherited, we have to declare this explicitly or the serialization

@@ -5,6 +5,7 @@
 import {
   cache,
   DurableObject,
+  onEvict,
   RpcStub,
   RpcTarget,
   WorkerEntrypoint,
@@ -390,6 +391,28 @@ class TestAlarmObject extends DurableObject {
   }
 }
 
+class TestOnEvictObject extends DurableObject {
+  async [onEvict](info: DurableObjectEvictionInfo) {
+    // The reason type is open: the list of reasons may grow over time, so handlers must accept
+    // reason strings they don't recognize...
+    const _reason: string = info.reason;
+    // ...while the known literals stay assignable (and autocomplete in editors).
+    const _known: DurableObjectEvictionInfo['reason'] = 'inactive';
+  }
+
+  async runOnEvict(): Promise<void> {
+    return await this[onEvict]({ reason: 'inactive' });
+  }
+
+  async preShutdown(): Promise<string> {
+    return 'ordinary RPC method';
+  }
+
+  async onEvict(): Promise<string> {
+    return 'ordinary RPC method';
+  }
+}
+
 class TestNaughtyEntrypoint extends WorkerEntrypoint {
   // Check incorrectly typed methods
   // @ts-expect-error
@@ -417,6 +440,8 @@ class TestNaughtyObject extends DurableObject {
   // @ts-expect-error
   async alarm(_x: boolean) {}
   // @ts-expect-error
+  async [onEvict](_x: boolean) {}
+  // @ts-expect-error
   webSocketMessage(_x: boolean) {}
   // @ts-expect-error
   async webSocketClose(_x: boolean) {}
@@ -435,6 +460,7 @@ interface Env {
   REGULAR_OBJECT: DurableObjectNamespace;
   RPC_OBJECT: DurableObjectNamespace<TestObject>;
   ALARM_OBJECT: DurableObjectNamespace<TestAlarmObject>;
+  ON_EVICT_OBJECT: DurableObjectNamespace<TestOnEvictObject>;
   NAUGHTY_OBJECT: DurableObjectNamespace<TestNaughtyObject>;
   // @ts-expect-error `BoringClass` isn't an RPC capable type
   __INVALID_OBJECT_1: DurableObjectNamespace<BoringClass>;
@@ -494,6 +520,15 @@ export default <ExportedHandler<Env>>{
       expectTypeOf(stub.connect).toEqualTypeOf<
         (address: SocketAddress | string, options?: SocketOptions) => Socket
       >();
+    }
+
+    // Check symbol lifecycle hooks are not callable over RPC, while string names remain callable.
+    {
+      const stub = env.ON_EVICT_OBJECT.get(env.ON_EVICT_OBJECT.newUniqueId());
+      // @ts-expect-error symbols cannot be called over RPC
+      stub[onEvict];
+      expectTypeOf(stub.preShutdown).toEqualTypeOf<() => Promise<string>>();
+      expectTypeOf(stub.onEvict).toEqualTypeOf<() => Promise<string>>();
     }
 
     // Check cannot access `env` and `ctx` over RPC

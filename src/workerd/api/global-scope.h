@@ -487,6 +487,53 @@ class AlarmInvocationInfo: public jsg::Object {
   uint32_t retryCount = 0;
 };
 
+// Why a Durable Object is being evicted, as reported to its onEvict lifecycle handler.
+// This list may grow over time; handlers must tolerate reason strings they don't recognize.
+//
+// This is a namespace-scope enum (with a fixed underlying type) so that headers which cannot
+// include this one, like worker.h, can forward-declare it.
+enum class DurableObjectEvictionReason : uint8_t {
+  // The object is being evicted because it has been idle for too long.
+  INACTIVE,
+  // The object is being reset because its code was updated.
+  CODE_UPDATED,
+  // The object is being shut down for a reason outside the user's control, e.g. a runtime
+  // restart or machine maintenance.
+  SYSTEM,
+};
+
+// DurableObjectEvictionInfo is passed to a Durable Object's onEvict lifecycle handler.
+class DurableObjectEvictionInfo final: public jsg::Object {
+ public:
+  DurableObjectEvictionInfo(DurableObjectEvictionReason reason): reason(reason) {}
+
+  kj::StringPtr getReason() {
+    switch (reason) {
+      case DurableObjectEvictionReason::INACTIVE:
+        return "inactive"_kj;
+      case DurableObjectEvictionReason::CODE_UPDATED:
+        return "codeUpdated"_kj;
+      case DurableObjectEvictionReason::SYSTEM:
+        return "system"_kj;
+    }
+    KJ_UNREACHABLE;
+  }
+
+  JSG_RESOURCE_TYPE(DurableObjectEvictionInfo) {
+    JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
+
+    // The `(string & {})` arm keeps the type open: the reason list may grow over time, and
+    // handlers must tolerate reason strings they don't recognize. The known literals are still
+    // listed so editors can autocomplete them.
+    JSG_TS_OVERRIDE({
+      readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
+    });
+  }
+
+ private:
+  DurableObjectEvictionReason reason;
+};
+
 // Type signature for handlers exported from the root module.
 //
 // We define each handler method as a LenientOptional rather than as a plain Optional in order to
@@ -521,6 +568,7 @@ struct ExportedHandler {
   // Alarms are only exported on DOs, which receive env bindings from the constructor
   jsg::LenientOptional<jsg::Function<AlarmHandler>> alarm;
 
+  using OnEvictHandler = kj::Promise<void>(jsg::Ref<DurableObjectEvictionInfo> info);
   using TestHandler = jsg::Promise<void>(jsg::Ref<TestController> controller,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
@@ -539,6 +587,11 @@ struct ExportedHandler {
 
   // Self-ref potentially allows extracting other custom handlers from the object.
   jsg::SelfRef self;
+
+  // Captured from Durable Object instances after construction. This is not part of JSG_STRUCT
+  // because the handler is keyed by an internal symbol rather than a string. It must follow all
+  // JSG_STRUCT fields because JSG initializes those fields positionally.
+  jsg::LenientOptional<jsg::Function<OnEvictHandler>> onEvict;
 
   JSG_STRUCT(fetch,
       connect,
@@ -713,6 +766,17 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   kj::Promise<WorkerInterface::AlarmResult> runAlarm(kj::Date scheduledTime,
       kj::Duration timeout,
       uint32_t retryCount,
+      Worker::Lock& lock,
+      kj::Maybe<ExportedHandler&> exportedHandler);
+
+  // Runs a Durable Object's onEvict lifecycle handler (called from C++, not JS; the usual
+  // entry point is Worker::Actor::runOnEvict()). Awaits the handler's returned promise, racing
+  // it against `timeout`. On timeout the IoContext is NOT aborted (unlike the alarm timeout): the
+  // runtime stops waiting, but JS the handler already started (and storage writes it already
+  // issued) may still complete until teardown. Handler exceptions are logged to the user's
+  // observability and reported in the outcome; this method never throws due to handler failure.
+  kj::Promise<EventOutcome> runOnEvict(DurableObjectEvictionReason reason,
+      kj::Duration timeout,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
@@ -1199,7 +1263,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
       api::ExecutionContext, api::ExportedHandler,                                                 \
       api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
-      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
-      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessContext
+      api::AlarmInvocationInfo, api::DurableObjectEvictionInfo, api::Immediate, api::Cloudflare,  \
+      api::CachePurgeError, api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext,      \
+      api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

@@ -19,6 +19,7 @@ export const ServiceStub = entrypoints.ServiceStub;
 export const WorkflowEntrypoint = entrypoints.WorkflowEntrypoint;
 
 export const restore = entrypoints.restore;
+export const onEvict = entrypoints.onEvict;
 
 export function withEnv(newEnv: unknown, fn: () => unknown): unknown {
   return innerEnv.withEnv(newEnv, fn);

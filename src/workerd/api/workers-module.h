@@ -91,6 +91,7 @@ class EntrypointsModule: public jsg::Object {
   void abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> reason);
 
   jsg::JsSymbol getRestoreSymbol(jsg::Lock& js);
+  jsg::JsSymbol getOnEvictSymbol(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(EntrypointsModule, CompatibilityFlags::Reader flags) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
@@ -105,6 +106,7 @@ class EntrypointsModule: public jsg::Object {
     JSG_METHOD(waitUntil);
     JSG_METHOD(getCtxCache);
     JSG_LAZY_INSTANCE_PROPERTY(restore, getRestoreSymbol);
+    JSG_LAZY_INSTANCE_PROPERTY(onEvict, getOnEvictSymbol);
     JSG_METHOD(abortIsolate);
   }
 };

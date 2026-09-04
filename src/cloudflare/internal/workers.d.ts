@@ -65,3 +65,4 @@ export function getCtxCache(): CacheContext | undefined;
 export function abortIsolate(reason?: string): never;
 
 export const restore: symbol;
+export const onEvict: unique symbol;

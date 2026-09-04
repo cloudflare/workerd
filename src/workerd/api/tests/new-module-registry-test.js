@@ -27,6 +27,7 @@ strictEqual(typeof workers.RpcTarget, 'function');
 strictEqual(typeof workers.ServiceStub, 'function');
 strictEqual(typeof workers.WorkerEntrypoint, 'function');
 strictEqual(typeof workers.WorkflowEntrypoint, 'function');
+strictEqual(typeof workers.onEvict, 'symbol');
 strictEqual(typeof workers.waitUntil, 'function');
 strictEqual(typeof workers.withEnv, 'function');
 strictEqual(typeof workers.env, 'object');
