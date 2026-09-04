@@ -659,6 +659,45 @@ KJ_TEST("Container::start monitors a container that exits immediately") {
   });
 }
 
+KJ_TEST("Container::images returns configured images without exposing mutable state") {
+  auto fixture = makeFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto images = kj::heapArrayBuilder<jsg::Dict<kj::String>::Field>(2);
+    images.add(jsg::Dict<kj::String>::Field{
+      .name = kj::str("api"),
+      .value = kj::str("registry.example.com/api@sha256:111"),
+    });
+    images.add(jsg::Dict<kj::String>::Field{
+      .name = kj::str("worker"),
+      .value = kj::str("registry.example.com/worker@sha256:222"),
+    });
+
+    auto container =
+        env.js.alloc<Container>(rpc::Container::Client(kj::heap<RestartContainerServer>()), false,
+            jsg::Dict<kj::String>{.fields = images.finish()});
+
+    auto first = container->getImages();
+    KJ_EXPECT(first.fields.size() == 2);
+    KJ_EXPECT(first.fields[0].name == "api");
+    KJ_EXPECT(first.fields[0].value == "registry.example.com/api@sha256:111");
+    KJ_EXPECT(first.fields[1].name == "worker");
+    KJ_EXPECT(first.fields[1].value == "registry.example.com/worker@sha256:222");
+
+    first.fields[0].value = kj::str("changed");
+    auto second = container->getImages();
+    KJ_EXPECT(second.fields[0].value == "registry.example.com/api@sha256:111");
+  });
+}
+
+KJ_TEST("Container::images is empty when no images are configured") {
+  auto fixture = makeFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto container =
+        env.js.alloc<Container>(rpc::Container::Client(kj::heap<RestartContainerServer>()), false);
+    KJ_EXPECT(container->getImages().fields.size() == 0);
+  });
+}
+
 KJ_TEST("Container::destroy updates running before restart and clears the old reason") {
   auto fixture = makeFixture();
   fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {

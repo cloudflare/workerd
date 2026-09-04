@@ -21,6 +21,10 @@ export const validateSpans = {
     // Get all spans and prepare for validation
     const allSpans = collector.spans.values();
     const spansByTest = groupSpansBy(allSpans, 'test');
+    const invocations = [...collector.invocations.values()];
+    const rootAttributes = invocations.flatMap(
+      (invocation) => invocation.attributes
+    );
 
     // Core tests that validate withSpan produces a correctly-closed span of the given name.
     const testValidations = [
@@ -44,6 +48,7 @@ export const validateSpans = {
         test: 'publicImportStartSpan',
         expectedSpan: 'public-start-span-op',
       },
+      { test: 'getActiveSpan', expectedSpan: 'get-active-span-op' },
       { test: 'ctxTracing', expectedSpan: 'ctx-tracing-op' },
       {
         test: 'detachedSpanEndsAfterStreamDrain',
@@ -118,6 +123,30 @@ export const validateSpans = {
       assert(span, 'startActiveSpanSyncThrow: span present');
       assert.strictEqual(span['after.throw'], true);
       assert(span.closed, 'Manual throw span should be explicitly closed');
+    }
+
+    assert.deepStrictEqual(
+      rootAttributes.find(({ name }) => name === 'test'),
+      { name: 'test', value: 'getActiveSpanInvocation' }
+    );
+
+    for (const requestName of ['a', 'b']) {
+      const request = invocations.find(
+        (invocation) =>
+          invocation.onset.executionModel === 'durableObject' &&
+          invocation.onset.entrypoint === 'OverlappingRequestsObject' &&
+          new URL(invocation.onset.info.url).pathname === `/${requestName}`
+      );
+      assert(
+        request,
+        `Missing tail trace for overlapping request ${requestName}`
+      );
+      assert.deepStrictEqual(
+        request.attributeEvents
+          .filter(({ name }) => name === 'overlapping.request')
+          .map(({ spanId, value }) => ({ spanId, value })),
+        [{ spanId: request.rootSpanId, value: requestName }]
+      );
     }
 
     // setAttributes should record each supported value and ignore undefined values.

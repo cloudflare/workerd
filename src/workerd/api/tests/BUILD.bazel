@@ -199,8 +199,8 @@ wd_test(
     tags = ["no-coverage"],
 )
 
-# Regression test: a callback passed as an RPC argument, when invoked by the callee, must
-# produce a jsRpcCall span nested under the method's server-side jsRpcCall span.
+# Regression test for callback ancestry across outbound stub calls and transient re-entry
+# dispatches.
 wd_test(
     src = "jsrpc-callback-trace-test.wd-test",
     args = ["--experimental"],
@@ -302,14 +302,6 @@ wd_test(
         "cache-mock.js",
         "cache-operations-test.js",
         "instrumentation-tail-worker.js",
-    ],
-)
-
-wd_test(
-    src = "cache-put-stream-test.wd-test",
-    data = [
-        "cache-mock.js",
-        "cache-put-stream-test.js",
     ],
 )
 

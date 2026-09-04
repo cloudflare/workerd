@@ -57,6 +57,40 @@ WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
 
 class IoContext;
 
+// Request-specific user-tracing state captured in an AsyncContextFrame. Durable Object requests
+// share an IoContext and may overlap, so ambient IoContext state can refer to a newer request when
+// an older continuation resumes. Keeping the span, tracer, and invocation context together ensures
+// tracing events remain attributed to the request that created the async context.
+class UserTraceAsyncContext final {
+ public:
+  UserTraceAsyncContext(SpanParent span,
+      kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer,
+      kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext)
+      : span(kj::mv(span)),
+        tracer(kj::mv(tracer)),
+        invocationSpanContext(kj::mv(invocationSpanContext)) {}
+
+  SpanParent getSpan() {
+    return span.addRef();
+  }
+
+  kj::Maybe<workerd::WeakRef<BaseTracer>&> getTracer() {
+    KJ_IF_SOME(value, tracer) {
+      return *value;
+    }
+    return kj::none;
+  }
+
+  kj::Maybe<tracing::InvocationSpanContext&> getInvocationSpanContext() {
+    return invocationSpanContext;
+  }
+
+ private:
+  SpanParent span;
+  kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
+  kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
+};
+
 // Represents one incoming request being handled by a IoContext. In non-actor scenarios,
 // there is only ever one IncomingRequest per IoContext, but with actors there could be many.
 //
@@ -1069,10 +1103,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Returns an object that ensures an async JS operation started in the current scope captures
   // the given user trace span, or the current incoming request's root user trace span if none is
-  // given. Storing the span in the AsyncContextFrame (which on actors outlives individual
-  // requests via the IoContext's delete queue) is safe because user-tracing SpanSubmitter
-  // implementations hold only a BaseTracer::WeakRef - stale references cannot extend tracer
-  // lifetime.
+  // given. The originating tracer and invocation context are captured with the span so that an
+  // actor continuation cannot pick up tracing state from a newer overlapping request. Storing this
+  // data in the AsyncContextFrame (which on actors outlives individual requests via the IoContext's
+  // delete queue) is safe because the tracer reference is weak.
   jsg::AsyncContextFrame::StorageScope makeUserAsyncTraceScope(
       Worker::Lock& lock, kj::Maybe<SpanParent> userSpan = kj::none) KJ_WARN_UNUSED_RESULT;
 

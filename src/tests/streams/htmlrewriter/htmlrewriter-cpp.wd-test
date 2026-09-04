@@ -1,0 +1,24 @@
+using Workerd = import "/workerd/workerd.capnp";
+using HtmlrewriterModules = import "htmlrewriter-modules.capnp";
+
+# HTMLRewriter × streams against the C++ implementation. Runs under the
+# MODERN transform backpressure (fixup-transform-stream-backpressure),
+# unlike the api/tests htmlrewriter files, which pin the pre-fixup
+# behavior via original-transform-stream-backpressure.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-htmlrewriter-cpp",
+      worker = (
+        modules = HtmlrewriterModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "fixup-transform-stream-backpressure",
+          "html_rewriter_treats_esi_include_as_void_tag",
+        ],
+      )
+    ),
+  ],
+);

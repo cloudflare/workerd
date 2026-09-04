@@ -34,6 +34,7 @@
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uuid.h>
 #include <workerd/util/xthreadnotifier.h>
 
@@ -153,6 +154,7 @@ void maybePerIsolateBootstrap(CompatibilityFlags::Reader& featureFlags,
     v8::Local<v8::Context> context,
     kj::Maybe<ValidationErrorReporter&> errorReporter) {
   if (util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
+    TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
     JSG_WITHIN_CONTEXT_SCOPE(
         lock, context, [&](jsg::Lock& js) { runPerIsolateBootstrap(js, featureFlags); });
   } else if (featureFlags.getTypeScriptImplementedStreams()) {
@@ -3682,6 +3684,7 @@ struct Worker::Actor::Impl {
   kj::Maybe<jsg::JsRef<jsg::JsObject>> ctxObject;
 
   kj::Maybe<rpc::Container::Client> container;
+  jsg::Dict<kj::String> containerImages;
   kj::Maybe<FacetManager&> facetManager;
   kj::Maybe<ActorVersion> version;
 
@@ -3855,6 +3858,7 @@ struct Worker::Actor::Impl {
       kj::Maybe<kj::Own<HibernationManager>> manager,
       kj::Maybe<uint16_t>& hibernationEventType,
       kj::Maybe<rpc::Container::Client> container,
+      jsg::Dict<kj::String> containerImages,
       kj::Maybe<FacetManager&> facetManager,
       kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
       : actorId(kj::mv(actorId)),
@@ -3863,6 +3867,7 @@ struct Worker::Actor::Impl {
         metrics(kj::mv(metricsParam)),
         transient(hasTransient),
         container(kj::mv(container)),
+        containerImages(kj::mv(containerImages)),
         facetManager(facetManager),
         hooks(loopback->addRef(), timerChannel, *metrics),
         inputGate(hooks),
@@ -3913,6 +3918,7 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Maybe<kj::Own<HibernationManager>> manager,
     kj::Maybe<uint16_t> hibernationEventType,
     kj::Maybe<rpc::Container::Client> container,
+    jsg::Dict<kj::String> containerImages,
     kj::Maybe<FacetManager&> facetManager,
     kj::Maybe<ActorVersion> version,
     kj::Maybe<uint64_t> holderToken)
@@ -3920,7 +3926,7 @@ Worker::Actor::Actor(const Worker& worker,
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
   impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache), kj::mv(props),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
-      hibernationEventType, kj::mv(container), facetManager);
+      hibernationEventType, kj::mv(container), kj::mv(containerImages), facetManager);
   impl->version = kj::mv(version);
   impl->holderToken = holderToken;
 
@@ -3998,10 +4004,21 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
         storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
       }
 
+      auto containerImages = jsg::Dict<kj::String>{
+        .fields =
+            KJ_MAP(field, impl->containerImages.fields) {
+        return jsg::Dict<kj::String>::Field{
+          .name = kj::str(field.name),
+          .value = kj::str(field.value),
+        };
+      },
+      };
+
       auto ctx = js.alloc<api::DurableObjectState>(js, cloneId(),
           jsg::JsValue(KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).getHandle(js)),
           impl->props.toJs(js), kj::mv(storage), kj::mv(impl->container), containerRunning,
-          impl->facetManager, impl->version.map([](ActorVersion& v) { return v.clone(); }));
+          kj::mv(containerImages), impl->facetManager,
+          impl->version.map([](ActorVersion& v) { return v.clone(); }));
 
       auto handler =
           info.cls(lock, ctx.addRef(), KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
