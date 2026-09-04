@@ -18,9 +18,10 @@ wd_test(
     data = cache_suite_srcs,
 )
 
-# Retains the clone-put regression under the legacy TransformStream
-# constructor. The all-compat-flags variant would enable the standard
-# constructor and duplicate the main C++ cell.
+# Retains the clone-put regression under the original TransformStream alias.
+# The all-compat-flags variant would enable streams_enable_constructors,
+# allowing the modern path selected by transformstream_enable_standard_constructor
+# and duplicating the main C++ cell.
 wd_test(
     src = "cache-cpp-legacy.wd-test",
     data = cache_suite_srcs,

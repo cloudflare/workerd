@@ -1,8 +1,9 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 # C++-only legacy cell: concurrent clone puts run under the original
-# TransformStream constructor. The BUILD rule disables the
-# @all-compat-flags variant, which would enable the standard constructor.
+# TransformStream alias. The BUILD rule disables the @all-compat-flags
+# variant because it would enable streams_enable_constructors, allowing the
+# modern path selected by transformstream_enable_standard_constructor.
 
 const unitTests :Workerd.Config = (
   services = [

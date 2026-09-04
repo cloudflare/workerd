@@ -162,7 +162,7 @@ export const putErroringBodyRejects = {
     });
     await rejects(
       caches.default.put('https://example.com/erroring', new Response(rs)),
-      (e) => e === boom || e.name === 'Error'
+      (e) => e !== boom && e.name === 'Error' && e.message === 'boom'
     );
   },
 };

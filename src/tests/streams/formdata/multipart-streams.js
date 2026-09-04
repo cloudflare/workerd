@@ -183,10 +183,7 @@ export const erroringBodyRejectsFormData = {
         'content-type': `multipart/form-data; boundary=${BOUNDARY}`,
       },
     });
-    await rejects(
-      request.formData(),
-      (e) => e === boom || /boom/.test(e.message)
-    );
+    await rejects(request.formData(), (e) => e === boom);
   },
 };
 

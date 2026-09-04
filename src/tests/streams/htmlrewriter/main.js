@@ -12,7 +12,7 @@ export {
   rewrittenBodyIsReadableStream,
   contentFromReadableStream,
   identityStreamBody,
-  cancelDoesNotReachSource,
+  cancelReachesSourceAfterNextChunk,
   erroringSourceRejectsConsumption,
   largeDocumentThroughHandler,
 } from 'rewrite-streams';

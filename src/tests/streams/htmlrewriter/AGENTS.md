@@ -11,7 +11,7 @@ Unlike the api/tests rewriter files (which pin the pre-fixup behavior
 via `original-transform-stream-backpressure`), the cpp cell here runs
 under the MODERN `fixup-transform-stream-backpressure`.
 
-## Coverage (parity — no divergences observed)
+## Coverage
 
 | Test | Shape |
 | --- | --- |
@@ -20,9 +20,20 @@ under the MODERN `fixup-transform-stream-backpressure`.
 | `rewrittenBodyIsReadableStream` | output body drained incrementally via a reader |
 | `contentFromReadableStream` | element.replace(ReadableStream) — streamed replacement content |
 | `identityStreamBody` | identity body fed by a concurrent writer |
-| `cancelDoesNotReachSource` | PARITY PIN: cancelling the transformed body does NOT invoke the source's cancel hook (contrast pipeTo); demand simply stops (bounded) |
+| `cancelReachesSourceAfterNextChunk` | cancel remains pending at the source until another chunk wakes the pump, then reaches the source |
 | `erroringSourceRejectsConsumption` | source error surfaces from .text() |
 | `largeDocumentThroughHandler` | 1024 elements / ~264 KiB through a counting handler, byte-exact output |
+
+## Divergences
+
+After the next source chunk wakes a canceled rewriter pump, C++ makes one
+additional pull while TypeScript makes two; these counts are pinned by
+`cancelReachesSourceAfterNextChunk`. The TypeScript pump also reports
+`Error: done early` once outside the worker's event realm; C++ does not.
+
+An erroring source is rewrapped by both implementations. Even though the
+`.text()` rejection is handled, C++ also logs the source error twice while
+TypeScript logs it once.
 
 The api/tests htmlrewriter-transform-cancel-test.js (cancel-before-read
 ×50 UAF regression) stays where it is, per the security-regression

@@ -9,6 +9,7 @@
 // replacement extension) reads that stream through the same machinery.
 
 import { strictEqual, ok, rejects } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 const enc = new TextEncoder();
 
@@ -139,36 +140,46 @@ export const identityStreamBody = {
   },
 };
 
-// Cancelling the transformed body mid-stream: PARITY — the cancel does
-// NOT propagate to the source stream's cancel hook (contrast pipeTo,
-// which delivers the reason). The rewriter simply stops pulling; the
-// source is left readable and un-canceled (bounded observation).
-export const cancelDoesNotReachSource = {
+// Cancelling the transformed body reaches the source lazily: another
+// source chunk must wake the parked pump before it forwards the reason.
+// The TypeScript implementation then pulls once more than C++; its internal
+// pump also reports one unhandled rejection outside the worker's event realm.
+export const cancelReachesSourceAfterNextChunk = {
   async test() {
     let cancelReason = 'not-called';
     let pulls = 0;
     let controller;
+    const { promise: pumpParked, resolve: resolvePumpParked } =
+      Promise.withResolvers();
+    const { promise: canceled, resolve: resolveCanceled } =
+      Promise.withResolvers();
     const rs = new ReadableStream({
       start(c) {
         controller = c;
       },
       pull() {
         pulls++;
+        if (pulls === 3) resolvePumpParked();
       },
       cancel(reason) {
         cancelReason = String(reason);
+        resolveCanceled();
       },
     });
     const transformed = new HTMLRewriter().transform(new Response(rs));
     const reader = transformed.body.getReader();
     controller.enqueue(enc.encode('<p>first</p>'));
     await reader.read();
+    await pumpParked;
     await reader.cancel('done early');
-    await scheduler.wait(100);
     strictEqual(cancelReason, 'not-called');
     const pullsAtCancel = pulls;
-    await scheduler.wait(50);
-    strictEqual(pulls, pullsAtCancel); // no further demand either
+
+    controller.enqueue(enc.encode('<p>second</p>'));
+    await canceled;
+
+    strictEqual(cancelReason, 'Error: done early');
+    strictEqual(pulls, pullsAtCancel + (usingTsImpl ? 2 : 1));
   },
 };
 
@@ -187,7 +198,7 @@ export const erroringSourceRejectsConsumption = {
     });
     await rejects(
       new HTMLRewriter().transform(new Response(rs)).text(),
-      (e) => e === boom || /boom/.test(e.message)
+      (e) => e !== boom && e.name === 'Error' && e.message === 'boom'
     );
   },
 };

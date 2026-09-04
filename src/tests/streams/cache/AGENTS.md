@@ -35,9 +35,10 @@ the record back through its MOCK service binding (/last-put).
 The main C++ cell pins `streams_enable_constructors` and
 `transformstream_enable_standard_constructor`. `cache-cpp-legacy` runs
 `concurrentClonePuts` with only `nodejs_compat`, retaining coverage of the
-original TransformStream constructor. Its `@all-compat-flags` variant is
-disabled because that variant would enable the standard constructor.
+original TransformStream alias. Its `@all-compat-flags` variant is disabled
+because that variant would enable `streams_enable_constructors`, allowing the
+modern path selected by `transformstream_enable_standard_constructor` and
+duplicating the main C++ cell.
 
-Consumed source (deleted): cache-put-stream-test.js. The backend
-worker takes no compatibilityDate — wd_test injects `--compat-date`,
-and a worker-level date conflicts with it.
+The backend worker takes no compatibilityDate — wd_test injects
+`--compat-date`, and a worker-level date conflicts with it.
