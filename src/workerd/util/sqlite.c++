@@ -190,14 +190,14 @@ kj::String dbErrorMessage(int errorCode, sqlite3* db) {
 // exceptions through SQLite.
 static thread_local kj::Maybe<kj::Exception>* vfsErrorListener = nullptr;
 
-void tagDoSentry(kj::Exception& e) {
+void tagSentry(kj::Exception& e, kj::StringPtr tag) {
   if (e.getDetail(SENTRY_TAG_DETAIL_ID) == kj::none) {
-    e.setDetail(SENTRY_TAG_DETAIL_ID, kj::heapArray("SENTRY_DO"_kj.asBytes()));
+    e.setDetail(SENTRY_TAG_DETAIL_ID, kj::heapArray(tag.asBytes()));
   }
 }
 
-[[noreturn]] void throwDoSentryException(kj::Exception&& e) {
-  tagDoSentry(e);
+[[noreturn]] void throwSentryException(kj::Exception&& e, kj::StringPtr tag) {
+  tagSentry(e, tag);
   kj::throwFatalException(kj::mv(e));
 }
 
@@ -209,7 +209,7 @@ void tagDoSentry(kj::Exception& e) {
 // only the frames between the throw and the catch. We actually want to retain the full trace
 // through SQLite.
 void reportVfsErrorCaught(kj::Exception&& e) {
-  tagDoSentry(e);
+  tagSentry(e, "SENTRY_DO"_kj);
   if (vfsErrorListener != nullptr) {
     // Only capture the first error; assume subsequent errors are side effects.
     if (*vfsErrorListener == kj::none) {
@@ -259,11 +259,15 @@ class SqliteCallScope {
 // the return value of sqlite3_errmsg() or a string literal containing a similarly
 // application-approriate error message. A reference called `regulator` must be in-scope.
 // sqliteErrorCode is a kj::Maybe<int> and represents the error code from sqlite.
-#define SQLITE_REQUIRE(condition, sqliteErrorCode, errorMessage, ...)                              \
+#define SQLITE_REQUIRE_WITH_TAG(condition, sqliteErrorCode, sentryTag, errorMessage, ...)          \
   if (!(condition)) {                                                                              \
     regulator->onError(sqliteErrorCode, errorMessage);                                             \
-    KJ_FAIL_REQUIRE("SENTRY_DO SQLite failed", errorMessage, ##__VA_ARGS__);                       \
+    throwSentryException(                                                                          \
+        KJ_EXCEPTION(FAILED, "SQLite failed", errorMessage, ##__VA_ARGS__), sentryTag);            \
   }
+
+#define SQLITE_REQUIRE(condition, sqliteErrorCode, errorMessage, ...)                              \
+  SQLITE_REQUIRE_WITH_TAG(condition, sqliteErrorCode, "SENTRY_DO"_kj, errorMessage, ##__VA_ARGS__)
 
 // Make a SQLite call and check the returned error code. Use this version when the call is not
 // associated with an open DB connection.
@@ -271,8 +275,10 @@ class SqliteCallScope {
   do {                                                                                             \
     int _ec = code;                                                                                \
     if (_ec != SQLITE_OK) {                                                                        \
-      throwDoSentryException(KJ_EXCEPTION(                                                         \
-          FAILED, kj::str(sqlite3_errstr(_ec), ": ", namedErrorCode(_ec)), ##__VA_ARGS__));        \
+      throwSentryException(                                                                        \
+          KJ_EXCEPTION(                                                                            \
+              FAILED, kj::str(sqlite3_errstr(_ec), ": ", namedErrorCode(_ec)), ##__VA_ARGS__),     \
+          "SENTRY_DO"_kj);                                                                         \
     }                                                                                              \
   } while (false)
 
@@ -299,8 +305,8 @@ class SqliteCallScope {
     KJ_ASSERT(error != SQLITE_MISUSE, "SQLite misused: " code, ##__VA_ARGS__);                     \
     handleCriticalError(error, dbErrorMessage(error, db), sqliteCallScope.getException());         \
     if (error == SQLITE_IOERR) sqliteCallScope.rethrowVfsError();                                  \
-    SQLITE_REQUIRE(error != SQLITE_BUSY, error, kj::str("NOSENTRY ", dbErrorMessage(error, db)),   \
-        ##__VA_ARGS__);                                                                            \
+    SQLITE_REQUIRE_WITH_TAG(                                                                       \
+        error != SQLITE_BUSY, error, "NOSENTRY"_kj, dbErrorMessage(error, db), ##__VA_ARGS__);     \
     SQLITE_REQUIRE(error == SQLITE_OK, error, dbErrorMessage(error, db), ##__VA_ARGS__);           \
   } while (false);
 

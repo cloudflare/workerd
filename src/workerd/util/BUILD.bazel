@@ -431,6 +431,7 @@ kj_test(
     size = "large",
     src = "sqlite-test.c++",
     deps = [
+        ":sentry",
         ":sqlite",
         "//src/workerd/io:io-gate",
         "@sqlite3",
