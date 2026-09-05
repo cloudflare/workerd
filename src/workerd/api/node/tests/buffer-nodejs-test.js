@@ -6262,3 +6262,50 @@ export const invalidThisTests = {
     ok(new bufferModule.Blob([]));
   },
 };
+
+// Ref: https://github.com/cloudflare/workerd/issues/6875
+// The encoding-specific write methods must default an omitted `length` to the
+// bytes remaining after `offset` (this.length - offset), not the full buffer
+// size. Before the fix, any two-argument call with a non-zero offset threw
+// ERR_OUT_OF_RANGE, which broke callers like protobufjs.
+export const writeMethodsDefaultLength = {
+  test() {
+    // A representative valid input per encoding, all decoding to bytes that fit
+    // in the 5 bytes remaining after offset 5 in a 10-byte buffer.
+    const inputs = {
+      asciiWrite: 'hi',
+      base64Write: 'aGk=', // -> "hi"
+      base64urlWrite: 'aGk', // -> "hi"
+      hexWrite: '4869', // -> "Hi"
+      latin1Write: 'hi',
+      ucs2Write: 'h', // 2 bytes per char
+      utf8Write: 'hi',
+    };
+
+    for (const [method, input] of Object.entries(inputs)) {
+      // Omitting `length` with a non-zero offset must not throw, and must not
+      // write past the space remaining after `offset`.
+      const buf = Buffer.alloc(10);
+      const written = buf[method](input, 5);
+      ok(
+        written > 0,
+        `${method}: expected a non-zero byte count, got ${written}`
+      );
+      ok(
+        written <= buf.length - 5,
+        `${method}: wrote ${written} bytes, past the remaining space`
+      );
+    }
+
+    // Spot-check the actual bytes for utf8Write: "hi" at offset 5.
+    const buf = Buffer.alloc(10);
+    strictEqual(buf.utf8Write('hi', 5), 2);
+    strictEqual(buf[5], 0x68); // 'h'
+    strictEqual(buf[6], 0x69); // 'i'
+
+    // Offset defaults to 0 and length still defaults to the whole buffer.
+    const buf2 = Buffer.alloc(4);
+    strictEqual(buf2.utf8Write('abcd'), 4);
+    strictEqual(buf2.toString(), 'abcd');
+  },
+};
