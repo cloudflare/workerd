@@ -13,24 +13,54 @@ mod test_own;
 mod test_refcount;
 
 use kj_rs::KjOwn;
+use test_futures::clear_stashed_wakers_on_background_thread;
+use test_futures::drop_stashed_future;
+use test_futures::get_side_effect_counter;
+use test_futures::join_wake_storm;
+use test_futures::new_await_fulfillable_promise_future_void;
+use test_futures::new_await_pending_promise_future_void;
+use test_futures::new_clone_storm_future_void;
+use test_futures::new_cloned_kj_waker_context_future_void;
+use test_futures::new_cross_thread_wake_future_void;
 use test_futures::new_drop_cancellable_promise_without_polling;
 use test_futures::new_error_handling_future_void_infallible;
 use test_futures::new_errored_future_void;
 use test_futures::new_future_awaiting_cancellable_promise;
+use test_futures::new_generic_then_optimized_drops_clone_future_void;
 use test_futures::new_kj_errored_future_void;
 use test_futures::new_layered_ready_future_void;
+use test_futures::new_multi_round_cross_thread_wake_future_void;
 use test_futures::new_naive_select_future_void;
+use test_futures::new_optimized_then_generic_future_void;
+use test_futures::new_panic_on_drop_future_void;
+use test_futures::new_panicking_after_await_future_void;
+use test_futures::new_panicking_future_void;
+use test_futures::new_panicking_infallible_future_void;
 use test_futures::new_pending_future_void;
+use test_futures::new_ping_pong_future_void;
 use test_futures::new_promise_i32_awaiting_future_void;
 use test_futures::new_ready_future_i32;
 use test_futures::new_ready_future_void;
 use test_futures::new_select_with_cancellation;
+use test_futures::new_shared_stash_waker_future_void;
+use test_futures::new_side_effect_future_void;
+use test_futures::new_stash_then_ready_future_void;
+use test_futures::new_stash_wakers_future_void;
+use test_futures::new_sync_wake_storm_future_void;
 use test_futures::new_threaded_delay_future_void;
 use test_futures::new_two_step_cancellable_future;
+use test_futures::new_wake_storm_future_void;
+use test_futures::new_waker_reuse_and_replace_future_void;
 use test_futures::new_waking_future_void;
 use test_futures::new_wrapped_waker_future_void;
 use test_futures::poll_and_stash_promise_future;
+use test_futures::reset_ping_pong;
+use test_futures::reset_side_effect_counter;
+use test_futures::start_wake_storm;
 use test_futures::unstash_and_await_promise_future;
+use test_futures::wake_delayed_future;
+use test_futures::wake_shared_stashed_waker;
+use test_futures::wake_stashed_waker_from_background_thread;
 use test_maybe::take_maybe_own;
 use test_maybe::take_maybe_own_ret;
 use test_maybe::take_maybe_ref;
@@ -260,12 +290,74 @@ pub mod ffi {
         async fn new_ready_future_shared_type() -> Shared;
         async fn new_waking_future_void(cloning_action: CloningAction, waking_action: WakingAction);
         async fn new_threaded_delay_future_void();
+        // Woken from a spawned foreign thread (no KJ event loop): exercises the cross-thread
+        // `Waker` contract end to end.
+        async fn new_cross_thread_wake_future_void();
+        // Foreign-thread wakes across multiple polls: exercises the cross-thread fulfiller's
+        // per-poll renewal.
+        async fn new_multi_round_cross_thread_wake_future_void();
+        // Takes the waker stashed by `new_threaded_delay_future_void` and wakes it from a joined
+        // foreign thread — used both while the future is alive and after it has been destroyed
+        // (the neutralized cross-thread late wake).
+        fn wake_stashed_waker_from_background_thread();
+        // Wakes the waker stashed by `new_threaded_delay_future_void`'s future, on the loop thread,
+        // to drive an asynchronous same-thread wake after poll() has returned.
+        fn wake_delayed_future();
+
+        // Multithreaded stress helpers (TSAN targets; see test_futures.rs for the full story).
+        //
+        // Concurrent foreign-thread wake storm against a live, re-polling future.
+        async fn new_wake_storm_future_void(threads: u32, wakes_per_thread: u32);
+        // Concurrent clone/drop refcount churn from foreign threads.
+        async fn new_clone_storm_future_void(threads: u32, clones_per_thread: u32);
+        // Stash waker clones globally and stay Pending forever; the driver storms and cancels.
+        async fn new_stash_wakers_future_void(clones: u32);
+        // Spawn threads waking every stashed waker in a loop; runs concurrently with the driver.
+        fn start_wake_storm(threads: u32, iterations: u32);
+        // Join the storm threads.
+        fn join_wake_storm();
+        // Drop the stashed clones on a joined foreign thread (after the future's death).
+        fn clear_stashed_wakers_on_background_thread();
+        // Shared-slot waker stash + wake-from-anywhere: another loop's thread, or after loop death.
+        async fn new_shared_stash_waker_future_void();
+        fn wake_shared_stashed_waker();
+
+        // Coverage-gap helpers (see test_futures.rs).
+        //
+        // N same-thread wake_by_ref() calls inside one poll (armDepthFirst idempotence).
+        async fn new_sync_wake_storm_future_void(wakes: u32);
+        // Stashes a waker then completes immediately: waking it later hits isDone()'s early return.
+        async fn new_stash_then_ready_future_void();
+        // Parked on a never-resolving KJ promise, for kj::Promise::trace() through the bridge.
+        async fn new_await_pending_promise_future_void() -> Result<()>;
+        /// Awaits the fulfillable promise (`new_fulfillable_promise_void`); re-polled when the
+        /// C++ side calls `fulfill_stored_promise()`.
+        async fn new_await_fulfillable_promise_future_void() -> Result<()>;
+        // RustPromiseAwaiter path transitions: optimized -> generic (fire wakes the stored custom
+        // waker) and generic -> optimized (the stored clone is dropped).
+        async fn new_optimized_then_generic_future_void();
+        async fn new_generic_then_optimized_drops_clone_future_void() -> Result<()>;
+        // Generic path storing a clone of a KJ cell waker (a Context built from a cloned waker).
+        async fn new_cloned_kj_waker_context_future_void();
+        // Two loops on two threads waking each other for N rounds.
+        fn reset_ping_pong();
+        async fn new_ping_pong_future_void(side: u32, rounds: u32);
+
         async fn new_layered_ready_future_void() -> Result<()>;
 
         async fn new_naive_select_future_void() -> Result<()>;
         async fn new_wrapped_waker_future_void() -> Result<()>;
 
         async fn new_errored_future_void() -> Result<()>;
+
+        // Unwind protection (kj-rs/future.rs): panics escaping a bridged future's poll()
+        // must become rejected promises (kj::Exception), not process aborts.
+        async fn new_panicking_future_void() -> Result<()>;
+        /// Never ready; its `Drop` panics. Dropping the promise must abort (death test), never
+        /// unwind into C++.
+        async fn new_panic_on_drop_future_void();
+        async fn new_panicking_infallible_future_void();
+        async fn new_panicking_after_await_future_void() -> Result<()>;
 
         async fn new_kj_errored_future_void() -> Result<()>;
 
@@ -275,7 +367,17 @@ pub mod ffi {
         async fn new_ready_future_i32(value: i32) -> Result<i32>;
         async fn new_pass_through_feature_shared() -> Shared;
 
-        async unsafe fn work_before_poll<'a>(target: &'a mut u64) -> Result<()>;
+        // Eager-by-default test helpers. The bridge's conversion polls the future
+        // synchronously to its first suspension at promise creation. The cold-promise
+        // (`RustFuture::lazily()`) counterparts bypass the bridge: they hand C++ the raw
+        // `RustFuture` through plain `extern "C"` helpers (see `test_futures.rs`).
+        #[expect(clippy::allow_attributes)] // Only called from C++ tests; #[expect(dead_code)] fails in builds where the lint does not fire
+        #[allow(dead_code)]
+        fn reset_side_effect_counter();
+        #[expect(clippy::allow_attributes)] // Only called from C++ tests; #[expect(dead_code)] fails in builds where the lint does not fire
+        #[allow(dead_code)]
+        fn get_side_effect_counter() -> u64;
+        async fn new_side_effect_future_void();
 
         // Cancellation test helpers.
         async fn new_future_awaiting_cancellable_promise() -> Result<()>;
@@ -286,6 +388,13 @@ pub mod ffi {
         // NaughtyFuture test helpers.
         async fn poll_and_stash_promise_future() -> Result<()>;
         async fn unstash_and_await_promise_future() -> Result<()>;
+        // Drop the stashed future without awaiting it — called after the event loop is
+        // destroyed, exercising the teardown-tolerant drop path.
+        fn drop_stashed_future();
+
+        // Stored-Waker semantics: exact will_wake / replace / drop behavior of the generic
+        // (non-KJ-waker) poll path, asserted via Arc strong counts.
+        async fn new_waker_reuse_and_replace_future_void() -> Result<()>;
     }
 
     // these are used to check compilation only
@@ -313,6 +422,20 @@ async fn pass_struct_with_maybe(_x: ffi::StructWithMaybe) -> Result<()> {
 unsafe impl Send for ffi::OpaqueAtomicRefcountedClass {}
 // Safety: the test type follows the thread-safety contract of its C++ implementation.
 unsafe impl Sync for ffi::OpaqueAtomicRefcountedClass {}
+
+// Compile-time thread-safety contracts (kj-rs/own.rs, kj-rs/refcount.rs):
+//
+// KjOwn is never Send/Sync: its type-erased kj disposer (kj::Rc, arena, ...) may not be
+// thread-safe, regardless of T.
+static_assertions::assert_not_impl_any!(KjOwn<u64>: Send, Sync);
+static_assertions::assert_not_impl_any!(KjOwn<ffi::OpaqueCxxClass>: Send, Sync);
+// KjArc matches std::sync::Arc: Send/Sync require T: Send + Sync...
+static_assertions::assert_impl_all!(kj_rs::KjArc<ffi::OpaqueAtomicRefcountedClass>: Send, Sync);
+// ...so a Send + !Sync payload (Cell) must make KjArc neither Send nor Sync (clones would
+// otherwise hand concurrent &T to multiple threads).
+static_assertions::assert_not_impl_any!(kj_rs::KjArc<std::cell::Cell<u64>>: Send, Sync);
+// KjRc (non-atomic refcount) must never be Send or Sync.
+static_assertions::assert_not_impl_any!(kj_rs::KjRc<ffi::OpaqueRefcountedClass>: Send, Sync);
 
 pub fn modify_own_return(mut own: KjOwn<ffi::OpaqueCxxClass>) -> KjOwn<ffi::OpaqueCxxClass> {
     own.pin_mut().set_data(72);
@@ -355,6 +478,33 @@ fn work_before_poll(target: &mut u64) -> impl Future<Output = Result<()>> {
     async move {
         unimplemented!("not expected to be polled");
     }
+}
+
+/// Hands C++ the raw, not-yet-converted future from [`work_before_poll`].
+///
+/// The returned future must never be polled (its body panics), so it cannot go through a
+/// bridged `async fn` shim: those always apply `RustFuture`'s eager-by-default
+/// `kj::Promise` conversion, which polls at creation. The C++ test converts it with
+/// `RustFuture::lazily()` instead (see `awaitables-cc-test.c++`).
+///
+/// # Safety
+///
+/// `target` must be a valid, exclusive `u64` pointer that outlives the future; `out` must
+/// point to uninitialized storage for one `::kj_rs::repr::RustFuture` (future.h), which the
+/// caller takes ownership of.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kj_rs_demo_work_before_poll<'a>(
+    target: &'a mut u64,
+    out: *mut kj_rs::repr::RustFuture<'a, ()>,
+) {
+    let fut = kj_rs::repr::future(Box::pin(kj_rs::map_err(
+        work_before_poll(target),
+        file!(),
+        line!(),
+    )));
+    // SAFETY: `out` points to uninitialized storage for one RustFuture, per this fn's
+    // `# Safety` contract.
+    unsafe { out.write(fut) };
 }
 
 #[cfg(test)]

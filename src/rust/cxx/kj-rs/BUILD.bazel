@@ -11,7 +11,10 @@ wd_cc_library(
         "@platforms//os:windows": True,
         "//conditions:default": False,
     }),
-    visibility = ["//src/rust/cxx/tests:__pkg__"],
+    visibility = [
+        "//src/rust/cxx/kj-rs-tokio:__pkg__",
+        "//src/rust/cxx/tests:__pkg__",
+    ],
     deps = [
         ":bridge",
     ],
@@ -51,13 +54,17 @@ rust_test(
 
 rust_cxx_bridge(
     name = "bridge",
-    src = "lib.rs",
+    src = "ffi.rs",
     hdrs = glob(["*.h"]),
     include_prefix = "kj-rs",
     visibility = ["//src/rust/cxx/tests:__pkg__"],
     deps = [
         "//src/rust/cxx:core",
         "@capnp-cpp//src/kj:kj",
-        "@capnp-cpp//src/kj:kj-async",
+        # kj-rs is the base cxx<->rust Promise/Future bridge: it uses only the abstract async
+        # core (kj::Promise / kj::EventLoop via async.h), no kj OS I/O. Depending on
+        # :kj-async-core (not the :kj-async umbrella) keeps the whole kj-rs stack -- and thus
+        # kj-rs-io / kj-rs-tokio built on it -- off the concrete kj OS event loop (:kj-async-os).
+        "@capnp-cpp//src/kj:kj-async-core",
     ],
 )

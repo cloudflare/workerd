@@ -1,150 +1,159 @@
 #include "waker.h"
 
-#include <kj/debug.h>
+#include "awaiter.h"
 
 namespace kj_rs {
 
 // =======================================================================================
-// ArcWakerPromiseNode
+// CrossThreadWakeSink
 
-ArcWakerPromiseNode::ArcWakerPromiseNode(kj::Promise<void> promise)
-    : node(PromiseNode::from(kj::mv(promise))) {
-  node->setSelfPointer(&node);
-}
+// The per-loop owner of a sink: created by kj::EventLoopLocal on first use, destroyed with the
+// loop. The drain coroutine it starts arms a fresh fulfiller, sleeps until a foreign thread
+// fulfills it, replays the queued wakes from the owning thread, and repeats.
+//
+// The drain runs as a detached ("daemon") task of the loop rather than as a member here, for
+// teardown order: ~EventLoop destroys its daemons FIRST, then disconnects its Executor -- which
+// logs an error for any cross-thread fulfiller reply still queued -- and only then destroys its
+// EventLoopLocals (this Holder). Cancelling the drain with the daemons destroys the promise side
+// of the armed fulfiller in time, so a wake that arrived just before the loop died is dequeued
+// quietly instead of being reported as an undrained reply.
+struct CrossThreadWakeSink::Holder {
+  kj::Arc<CrossThreadWakeSink> sink = kj::arc<CrossThreadWakeSink>();
 
-void ArcWakerPromiseNode::destroy() noexcept {
-  auto drop = kj::mv(owner);
-}
+  Holder() {
+    sink->ensureDrain();
+  }
 
-void ArcWakerPromiseNode::onReady(kj::_::Event* event) noexcept {
-  node->onReady(event);
-}
+  // Runs during ~EventLoop, after the drain daemon is gone: later enqueues drop their cells.
+  ~Holder() noexcept(false) {
+    sink->close();
+  }
+};
 
-void ArcWakerPromiseNode::get(kj::_::ExceptionOrValue& output) noexcept {
-  node->get(output);
-  KJ_IF_SOME(exception, kj::runCatchingExceptions([this]() { node = nullptr; })) {
-    output.addException(kj::mv(exception));
+kj::Promise<void> CrossThreadWakeSink::drainLoop(kj::Arc<CrossThreadWakeSink> sink) {
+  // Co-owns the sink so the frame never outlives what it reads. The frame's destruction --
+  // cancellation by ~EventLoop or by cancelAllDetached() -- is what marks the drain stopped, so
+  // ensureDrain() can restart it; a bare `drainRunning = false` at the end would miss both.
+  KJ_DEFER(sink->drainRunning.store(false, std::memory_order_relaxed));
+  for (;;) {
+    auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
+    sink->arm(kj::mv(paf.fulfiller));
+    co_await paf.promise;
+    for (auto& cell: sink->takePending()) {
+      // Same-thread now: arms the event, or no-op if the event was destroyed meanwhile.
+      cell->wakeByRef();
+    }
   }
 }
 
-void ArcWakerPromiseNode::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) {
-  // TODO(someday): Is it possible to get the address of the Rust code which cloned our Waker?
+void CrossThreadWakeSink::ensureDrain() const {
+  if (drainRunning.load(std::memory_order_relaxed)) return;
+  drainRunning.store(true, std::memory_order_relaxed);
+  drainLoop(kj::Arc<CrossThreadWakeSink>(const_cast<CrossThreadWakeSink&>(*this).addRefToThis()))
+      .detach([](kj::Exception&& exception) {
+    // Only kj::newPromiseAndCrossThreadFulfiller() can throw here, and only if the loop has no
+    // executor left; nothing to recover, but never silently. (The frame's KJ_DEFER has already
+    // marked the drain stopped, so a later ensureDrain() retries.)
+    KJ_LOG(ERROR, "kj-rs cross-thread wake drain stopped", exception);
+  });
+}
 
-  if (node.get() != nullptr) {
-    node->tracePromise(builder, stopAtNextEvent);
+kj::Arc<CrossThreadWakeSink> CrossThreadWakeSink::forCurrentLoop() {
+  // One sink per event loop, created on first use and destroyed with the loop. (A function-local
+  // static so it can name the private Holder; EventLoopLocal only requires static storage.)
+  static const kj::EventLoopLocal<Holder> loopSink;
+  auto& sink = loopSink->sink;
+  sink->ensureDrain();
+  return sink.addRef();
+}
+
+void CrossThreadWakeSink::enqueue(kj::Arc<FutureWakerCell> cell) const {
+  auto lock = state.lockExclusive();
+  if (lock->closed) return;  // loop gone: drop the reference, nothing to wake
+  lock->pending.add(kj::mv(cell));
+  KJ_IF_SOME(fulfiller, lock->fulfiller) {
+    // First wake since the drain armed: fire it (and consume it; the drain installs the next).
+    // fulfill() is thread-safe and fine to call under our lock: the fulfiller never calls back.
+    fulfiller->fulfill();
+    lock->fulfiller = kj::none;
   }
+}
+
+void CrossThreadWakeSink::arm(
+    kj::Own<const kj::CrossThreadPromiseFulfiller<void>> fulfiller) const {
+  auto lock = state.lockExclusive();
+  if (!lock->pending.empty()) {
+    // Wakes arrived between the last drain and this arm: fire immediately.
+    fulfiller->fulfill();
+    return;
+  }
+  lock->fulfiller = kj::mv(fulfiller);
+}
+
+kj::Vector<kj::Arc<FutureWakerCell>> CrossThreadWakeSink::takePending() const {
+  auto lock = state.lockExclusive();
+  auto result = kj::mv(lock->pending);
+  lock->pending = kj::Vector<kj::Arc<FutureWakerCell>>();
+  return result;
+}
+
+void CrossThreadWakeSink::close() const {
+  auto lock = state.lockExclusive();
+  lock->closed = true;
+  // Queued cells that never got replayed: their events are dying with this loop anyway.
+  lock->pending = kj::Vector<kj::Arc<FutureWakerCell>>();
 }
 
 // =======================================================================================
-// ArcWaker
+// FutureWakerCell
 
-PromiseArcWakerPair ArcWaker::create(const kj::Executor& executor) {
-  // TODO(perf): newPromiseAndCrossThreadFulfiller() makes two heap allocations, but it is probably
-  //   optimizable to one.
-  // TODO(perf): This heap allocation could also probably be collapsed into the fulfiller's.
-  auto waker =
-      kj::arc<ArcWaker>(kj::Badge<ArcWaker>(), executor.newPromiseAndCrossThreadFulfiller<void>());
-  auto promise = const_cast<ArcWaker*>(waker.get())->getPromise();
-  return {
-    .promise = kj::mv(promise),
-    .waker = kj::mv(waker),
-  };
-}
-
-kj::Promise<void> ArcWaker::getPromise() {
-  KJ_REQUIRE(node.owner == nullptr);
-  node.owner = addRefToThis();
-  return kj::_::PromiseNode::to<kj::Promise<void>>(OwnPromiseNode(&node));
-}
-
-ArcWaker::ArcWaker(kj::Badge<ArcWaker>, kj::PromiseCrossThreadFulfillerPair<void> paf)
-    : node(kj::mv(paf.promise)),
-      fulfiller(kj::mv(paf.fulfiller)) {}
-
-const KjWaker* ArcWaker::clone() const {
-  return addRefToThis().disown();
-}
-void ArcWaker::wake() const {
-  wake_by_ref();
-  drop();
-}
-void ArcWaker::wake_by_ref() const {
-  fulfiller->fulfill();
-}
-void ArcWaker::drop() const {
-  auto drop = kj::Arc<const ArcWaker>::reown(this);
+// Defined here rather than inline in waker.h because arming the event requires FuturePollEvent to
+// be a complete type, which it only is once awaiter.h is included.
+void FutureWakerCell::wakeByRef() const {
+  if (executor->isCurrent()) {
+    // Owning thread: arm the event directly. `event` is only touched on this thread. (An event
+    // port that drives other work inside its own wait() -- kj-rs-tokio -- learns of the arm
+    // through EventLoop::setRunnable(true); nothing here needs to know about it.)
+    KJ_IF_SOME(e, event) {
+      e.armDepthFirst();
+    }
+  } else if (alive.load(std::memory_order_acquire)) {
+    // Foreign thread (possibly one with no KJ event loop): hand ourselves to the owning loop's
+    // sink, whose drain replays this wake on the owning thread. A closed sink (loop gone) drops
+    // the reference; repeated wakes before the drain runs coalesce.
+    sink->enqueue(addRef());
+  }
+  // else: our event is already gone (neutralized); nothing to wake, so do not bother the loop.
 }
 
 // =======================================================================================
-// LazyArcWaker
+// PollWaker
 
-const KjWaker* LazyArcWaker::clone() const {
-  // Rust code wants to suspend and wait for something. We'll start handing out ArcWakers if we
-  // haven't already been woken synchronously.
-
-  if (wakeCount.load(std::memory_order_relaxed) > 0) {
-    // We were already woken synchronously, so there's no point handing out more wakers for the
-    // current call to `Future::poll()`. We can hand out a noop waker by returning nullptr.
-    return nullptr;
-  }
-
-  auto lock = cloned.lockExclusive();
-
-  if (*lock == kj::none) {
-    // We haven't been cloned before, so make a new ArcWaker.
-    *lock = ArcWaker::create(executor);
-  }
-
-  return KJ_ASSERT_NONNULL(*lock).waker->clone();
+PollWaker::PollWaker(FuturePollEvent& futurePollEvent): cell(futurePollEvent.cloneWakerCell()) {
+  // Every poll starts on the owning thread: the cheapest reliable place to make sure the loop's
+  // cross-thread drain is (still) running -- see CrossThreadWakeSink::ensureDrain().
+  cell->ensureCrossThreadDrain();
 }
 
-void LazyArcWaker::wake() const {
-  // LazyArcWakers are only exposed to Rust by const borrow, meaning Rust can never arrange to call
-  // `wake()`, which drops `self`, on this object.
-  KJ_UNIMPLEMENTED("Rust user code should never have possess a consumable "
-                   "reference to LazyArcWaker");
+PollWaker::~PollWaker() noexcept(false) {}
+
+void PollWaker::wakeByRef() const {
+  // Delegate to the cell, which handles both threads: on the owning thread this is a synchronous
+  // same-turn wake (armDepthFirst() is idempotent and safe from within the event's own fire(),
+  // so it works whether we were reached from onReady() or fire(), and causes an immediate
+  // re-poll); from a foreign thread it goes through the cross-thread fulfiller — `&Waker` is
+  // Sync, so even this borrowed waker may legally be woken from another thread during the poll.
+  cell->wakeByRef();
 }
 
-void LazyArcWaker::wake_by_ref() const {
-  // Woken synchronously during a call to `future.poll(awaitWaker)`.
-  wakeCount.fetch_add(1, std::memory_order_relaxed);
+kj::Arc<FutureWakerCell> PollWaker::cloneCell() const {
+  // Rust wants a waker it can retain and wake later: hand out a strong reference to the event's
+  // FutureWakerCell. Atomic refcount, safe from any thread.
+  return cell->addRef();
 }
 
-void LazyArcWaker::drop() const {
-  ++dropCount;
-}
-
-kj::Maybe<kj::Promise<void>> LazyArcWaker::reset() {
-  // This function is only called after `future.poll(awaitWaker)` has returned, meaning Rust has
-  // dropped its reference. Thus, we don't need to worry about thread-safety here, and can call
-  // `cloned.getWithoutLock()`, for example.
-
-  KJ_ASSERT(dropCount == 1);
-  KJ_DEFER(dropCount = 0);
-  KJ_DEFER(wakeCount.store(0, std::memory_order_relaxed));
-
-  // Reset the ArcWaker on our way out. Since we only return the ArcWaker's promise to our caller,
-  // we ensure that Rust owns the only remaining ArcWaker clones, if any.
-  //
-  // TODO(perf): If ArcWakers were resettable, we could instead return the ArcWaker for our caller
-  //   to cache for later use.
-  KJ_DEFER(cloned.getWithoutLock() = kj::none);
-
-  if (wakeCount.load(std::memory_order_relaxed) > 0) {
-    // The future returned Pending, but synchronously called `wake_by_ref()` on the LazyArcWaker,
-    // indicating it wants to immediately be polled again. We should arm our event right now,
-    // which will call `await_ready()` again on the event loop.
-    return kj::Promise<void>(kj::READY_NOW);
-  } else KJ_IF_SOME(arcWakerPair, cloned.getWithoutLock()) {
-    // The future returned Pending and cloned an ArcWaker to notify us later. We'll arrange for
-    // the ArcWaker's promise to arm our event once it's fulfilled.
-    return kj::mv(arcWakerPair.promise);
-  } else {
-    // The future returned Pending, did not call `wake_by_ref()` on the LazyArcWaker, and did not
-    // clone an ArcWaker. Rust is either awaiting a KJ promise, or the Rust equivalent of
-    // kj::NEVER_DONE.
-    return kj::none;
-  }
+kj::Maybe<FuturePollEvent&> PollWaker::tryGetFuturePollEvent() const {
+  return cell->tryGetFuturePollEvent();
 }
 
 }  // namespace kj_rs

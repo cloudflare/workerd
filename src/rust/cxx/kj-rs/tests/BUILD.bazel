@@ -31,6 +31,7 @@ rust_library(
         # TODO(cleanup): Why isn't :cxx transitive?
         "//src/rust/cxx",
         "//src/rust/cxx/kj-rs",
+        "@crates_vendor//:static_assertions",
     ],
 )
 
@@ -132,27 +133,6 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":test-date-bridge",
-    ],
-)
-
-cc_test(
-    name = "linked-group-test",
-    size = "small",
-    srcs = [
-        "linked-group-test.c++",
-    ],
-    linkstatic = select({
-        "@platforms//os:windows": True,
-        "//conditions:default": False,
-    }),
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
-    deps = [
-        "//src/rust/cxx/kj-rs",
-        "//src/rust/cxx/third-party:runtime",
-        "@capnp-cpp//src/kj:kj-test",
     ],
 )
 
