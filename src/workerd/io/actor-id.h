@@ -23,6 +23,8 @@ enum class ActorRoutingMode {
   PRIMARY_ONLY
 };
 
+constexpr size_t kMaxActorCohortLength = 10;
+
 // Version information for an actor. Used to specify cohort.
 struct ActorVersion {
   kj::Maybe<kj::String> cohort;
