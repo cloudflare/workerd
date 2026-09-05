@@ -71,6 +71,8 @@ namespace workerd {
 
 namespace {
 
+enum class ConsoleMethodKind { STANDARD, TRACE };
+
 constexpr kj::StringPtr logLevelToString(LogLevel level) {
   switch (level) {
     case LogLevel::DEBUG_:
@@ -403,6 +405,13 @@ void reportStartupError(kj::StringPtr id,
 #undef LOG_AND_SET_PERM_EXCEPTION
   }
 }
+
+void handleLogImpl(jsg::Lock& js,
+    const Worker::LoggingOptions& loggingOptions,
+    LogLevel level,
+    const v8::Global<v8::Function>& original,
+    const v8::FunctionCallbackInfo<v8::Value>& info,
+    ConsoleMethodKind methodKind);
 
 uint64_t getCurrentThreadId() {
 #if __linux__
@@ -1788,24 +1797,29 @@ void Worker::setupContext(
   auto consoleStr = jsg::v8StrIntern(lock.v8Isolate, "console");
   auto console = jsg::check(global->Get(context, consoleStr)).As<v8::Object>();
 
-  auto setHandler = [&](const char* method, LogLevel level) {
+  auto setHandler = [&](const char* method, LogLevel level, ConsoleMethodKind methodKind) {
     auto methodStr = jsg::v8StrIntern(lock.v8Isolate, method);
     v8::Global<v8::Function> original(
         lock.v8Isolate, jsg::check(console->Get(context, methodStr)).As<v8::Function>());
 
     auto f = lock.wrapSimpleFunction(context,
-        [loggingOptions, level, original = kj::mv(original)](
+        [loggingOptions, level, methodKind, original = kj::mv(original)](
             jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      handleLog(js, loggingOptions, level, original, info);
+      if (methodKind == ConsoleMethodKind::TRACE) {
+        handleLogImpl(js, loggingOptions, level, original, info, ConsoleMethodKind::TRACE);
+      } else {
+        handleLog(js, loggingOptions, level, original, info);
+      }
     });
     jsg::check(console->Set(context, methodStr, f));
   };
 
-  setHandler("debug", LogLevel::DEBUG_);
-  setHandler("error", LogLevel::ERROR);
-  setHandler("info", LogLevel::INFO);
-  setHandler("log", LogLevel::LOG);
-  setHandler("warn", LogLevel::WARN);
+  setHandler("debug", LogLevel::DEBUG_, ConsoleMethodKind::STANDARD);
+  setHandler("error", LogLevel::ERROR, ConsoleMethodKind::STANDARD);
+  setHandler("info", LogLevel::INFO, ConsoleMethodKind::STANDARD);
+  setHandler("log", LogLevel::LOG, ConsoleMethodKind::STANDARD);
+  setHandler("trace", LogLevel::LOG, ConsoleMethodKind::TRACE);
+  setHandler("warn", LogLevel::WARN, ConsoleMethodKind::STANDARD);
 }
 
 void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context> context) {
@@ -2171,20 +2185,58 @@ void Worker::processEntrypointClass(jsg::Lock& js,
   });
 }
 
-void Worker::handleLog(jsg::Lock& js,
-    const LoggingOptions& loggingOptions,
+namespace {
+
+kj::String getConsoleTrace(jsg::Lock& js) {
+  static constexpr auto addLineCol = [](kj::StringTree str, int line, int col) {
+    if (line != v8::Message::kNoLineNumberInfo) {
+      str = kj::strTree(kj::mv(str), ":", line);
+      if (col != v8::Message::kNoColumnInfo) {
+        str = kj::strTree(kj::mv(str), ":", col);
+      }
+    }
+    return str;
+  };
+
+  auto trace = v8::StackTrace::CurrentStackTrace(js.v8Isolate, 10);
+  kj::Vector<kj::String> lines(trace->GetFrameCount());
+  for (auto i: kj::zeroTo(trace->GetFrameCount())) {
+    auto frame = trace->GetFrame(js.v8Isolate, i);
+    auto scriptName = frame->GetScriptName();
+    auto location = scriptName.IsEmpty() || scriptName->Length() == 0
+        ? kj::strTree("  at worker.js")
+        : kj::strTree("  at ", scriptName);
+    location = addLineCol(kj::mv(location), frame->GetLineNumber(), frame->GetColumn());
+
+    auto functionName = frame->GetFunctionName();
+    if (!functionName.IsEmpty() && functionName->Length() != 0) {
+      location = kj::strTree(kj::mv(location), " in ", functionName);
+    }
+    lines.add(location.flatten());
+  }
+  return kj::str("\n", kj::delimited(lines, "\n"_kj));
+}
+
+void handleLogImpl(jsg::Lock& js,
+    const Worker::LoggingOptions& loggingOptions,
     LogLevel level,
     const v8::Global<v8::Function>& original,
-    const v8::FunctionCallbackInfo<v8::Value>& info) {
+    const v8::FunctionCallbackInfo<v8::Value>& info,
+    ConsoleMethodKind methodKind) {
   // Call original V8 implementation so messages sent to connected inspector if any
   auto context = js.v8Context();
-  int length = info.Length();
+  int originalLength = info.Length();
   // to pass additional arguments from this function to js' `formatLog` we add arguments to the end
   // of the arguments vector, then in formatLog we `pop` these from the vector.
   // 3 is just the number of args we currently pass.
-  v8::LocalVector<v8::Value> args(js.v8Isolate, length + 3);
-  for (auto i: kj::zeroTo(length)) args[i] = info[i];
-  jsg::check(original.Get(js.v8Isolate)->Call(context, info.This(), length, args.data()));
+  v8::LocalVector<v8::Value> args(js.v8Isolate, originalLength + 3);
+  for (auto i: kj::zeroTo(originalLength)) args[i] = info[i];
+  jsg::check(original.Get(js.v8Isolate)->Call(context, info.This(), originalLength, args.data()));
+
+  kj::String traceStack;
+  if (methodKind == ConsoleMethodKind::TRACE) {
+    traceStack = getConsoleTrace(js);
+  }
 
   // The TryCatch is initialized here to catch cases where the v8 isolate's execution is
   // terminating, usually as a result of an infinite loop. We need to perform the initialization
@@ -2192,9 +2244,27 @@ void Worker::handleLog(jsg::Lock& js,
   v8::TryCatch tryCatch(js.v8Isolate);
 
   auto message = [&]() {
-    int length = info.Length();
+    int length = methodKind == ConsoleMethodKind::TRACE && originalLength == 0 ? 1 : originalLength;
     kj::Vector<kj::String> stringified(length);
     for (auto i: kj::zeroTo(length)) {
+      if (methodKind == ConsoleMethodKind::TRACE && i == 0) {
+        if (!tryCatch.CanContinue()) {
+          stringified.add(kj::str("{}"));
+          break;
+        }
+        js.withinHandleScope([&] {
+          if (kj::runCatchingExceptions([&]() {
+            auto first = originalLength == 0
+                ? kj::str("Trace", traceStack)
+                : kj::str("Trace: ", js.toString(jsg::check(info[0]->ToString(js.v8Context()))),
+                      traceStack);
+            stringified.add(js.serializeJson(js.str(first)));
+          }) != kj::none) {
+            stringified.add(kj::str("{}"));
+          }
+        });
+        continue;
+      }
       auto arg = info[i];
       // serializeJson and v8::Value::ToString can throw JS exceptions
       // (e.g. for recursive objects) so we eat them here, to ensure logging and non-logging code
@@ -2279,7 +2349,7 @@ void Worker::handleLog(jsg::Lock& js,
             ioContext.getWorker().getIsolate().getApi().getErrorInterfaceTypeHandler(js);
         kj::Array<kj::Maybe<tracing::ErrorInfo>> slots;
         bool anyError = false;
-        for (auto i: kj::zeroTo(length)) {
+        for (auto i: kj::zeroTo(originalLength)) {
           if (!tryCatch.CanContinue()) break;
           auto arg = info[i];
           if (!arg->IsNativeError()) continue;
@@ -2306,7 +2376,7 @@ void Worker::handleLog(jsg::Lock& js,
 
           KJ_IF_SOME(e, extracted) {
             if (!anyError) {
-              slots = kj::heapArray<kj::Maybe<tracing::ErrorInfo>>(length);
+              slots = kj::heapArray<kj::Maybe<tracing::ErrorInfo>>(originalLength);
               anyError = true;
             }
             slots[i] = kj::mv(e);
@@ -2354,14 +2424,39 @@ void Worker::handleLog(jsg::Lock& js,
     auto formatLog = formatLogVal.As<v8::Function>();
 
     auto levelStr = logLevelToString(level);
-    args[length] = js.boolean(colors);
-    args[length + 1] = js.boolean(loggingOptions.structuredLogging.toBool());
-    args[length + 2] = js.strIntern(levelStr);
-    auto formatted = js.toString(
-        jsg::check(formatLog->Call(context, js.v8Undefined(), length + 3, args.data())));
+    auto formatMessage = [&](v8::LocalVector<v8::Value>& formatArgs, int length,
+                             StructuredLogging structuredLogging) {
+      formatArgs[length] = js.boolean(colors);
+      formatArgs[length + 1] = js.boolean(structuredLogging.toBool());
+      formatArgs[length + 2] = js.strIntern(levelStr);
+      return js.toString(
+          jsg::check(formatLog->Call(context, js.v8Undefined(), length + 3, formatArgs.data())));
+    };
+
+    auto formatted = [&]() {
+      if (methodKind == ConsoleMethodKind::TRACE) {
+        auto rawMessage = formatMessage(args, originalLength, StructuredLogging::NO);
+        auto traceMessage = originalLength == 0 ? kj::str("Trace", traceStack)
+                                                : kj::str("Trace: ", rawMessage, traceStack);
+        v8::LocalVector<v8::Value> traceArgs(js.v8Isolate, 4);
+        traceArgs[0] = js.str(traceMessage);
+        return formatMessage(traceArgs, 1, loggingOptions.structuredLogging);
+      }
+      return formatMessage(args, originalLength, loggingOptions.structuredLogging);
+    }();
     fprintf(fd, "%s\n", formatted.cStr());
     fflush(fd);
   }
+}
+
+}  // namespace
+
+void Worker::handleLog(jsg::Lock& js,
+    const LoggingOptions& loggingOptions,
+    LogLevel level,
+    const v8::Global<v8::Function>& original,
+    const v8::FunctionCallbackInfo<v8::Value>& info) {
+  handleLogImpl(js, loggingOptions, level, original, info, ConsoleMethodKind::STANDARD);
 }
 
 Worker::Lock::TakeSynchronously::TakeSynchronously(kj::Maybe<RequestObserver&> requestParam) {

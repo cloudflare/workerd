@@ -3807,10 +3807,17 @@ KJ_TEST("Server: tail workers") {
           modules = [
             ( name = "main.js",
               esModule =
+                `function traceFromHelper() {
+                `  console.trace("trace message");
+                `}
                 `export default {
                 `  async fetch(req, env, ctx) {
                 `    console.log("foo", "bar");
                 `    console.log("baz");
+                `    traceFromHelper();
+                `    console.trace();
+                `    console.trace(new Error("trace error"));
+                `    console.trace("context", new TypeError("trace context"));
                 `    return new Response("OK");
                 `  }
                 `}
@@ -3827,9 +3834,36 @@ KJ_TEST("Server: tail workers") {
               esModule =
                 `export default {
                 `  async tail(req, env, ctx) {
+                `    const logs = req[0].logs;
+                `    const trace = logs[2];
+                `    const noArgs = logs[3];
+                `    const error = logs[4];
+                `    const context = logs[5];
+                `    const firstFrame = trace?.message[0]?.split("\n")[1];
                 `    await fetch("http://tail", {
                 `      method: "POST",
-                `      body: JSON.stringify(req[0].logs.map(log => log.message))
+                `      body: JSON.stringify({
+                `        messages: logs.slice(0, 2).map(log => log.message),
+                `        length: logs.length,
+                `        level: trace?.level,
+                `        trace: trace?.message.length === 1 &&
+                `          trace.message[0].startsWith("Trace: trace message\n"),
+                `        stack: firstFrame?.includes("main.js:") &&
+                `          firstFrame.includes("in traceFromHelper"),
+                `        noArgs: noArgs?.message.length === 1 &&
+                `          noArgs.message[0].startsWith("Trace\n  at "),
+                `        noErrorInfo: trace?.errorInfo === undefined && noArgs?.errorInfo === undefined,
+                `        error: error?.message.length === 1 &&
+                `          error.message[0].startsWith("Trace: Error: trace error\n") &&
+                `          error.errorInfo?.length === 1 && error.errorInfo[0]?.name === "Error" &&
+                `          error.errorInfo[0].message === "trace error",
+                `        context: context?.message.length === 2 &&
+                `          context.message[0].startsWith("Trace: context\n") &&
+                `          context.message[1] === "TypeError: trace context" &&
+                `          context.errorInfo?.length === 2 && context.errorInfo[0] === null &&
+                `          context.errorInfo[1]?.name === "TypeError" &&
+                `          context.errorInfo[1].message === "trace context"
+                `      })
                 `    });
                 `  }
                 `}
@@ -3869,15 +3903,15 @@ KJ_TEST("Server: tail workers") {
   auto subreq = test.receiveInternetSubrequest("tail");
   subreq.recv(R"(
     POST / HTTP/1.1
-    Content-Length: 23
+    Content-Length: 148
     Host: tail
     Content-Type: text/plain;charset=UTF-8
 
-    [["foo","bar"],["baz"]])"_blockquote);
+    {"messages":[["foo","bar"],["baz"]],"length":6,"level":"log","trace":true,"stack":true,"noArgs":true,"noErrorInfo":true,"error":true,"context":true})"_blockquote);
 
   auto subreq2 = test.receiveInternetSubrequest("tail2");
   subreq2.recv(R"(
-    GET /2 HTTP/1.1
+    GET /6 HTTP/1.1
     Host: tail2
 
     )"_blockquote);
@@ -6594,6 +6628,7 @@ KJ_TEST("Server: structured logging with console methods") {
                 `    console.error("This is an error message");
                 `    console.debug("This is a debug message");
                 `    console.debug({a: 1});
+                `    console.trace("This is a %s", "trace message");
                 `
                 `    process.stdout.write("stdout");
                 `    process.stdout.write("stdout with\nmultiple\nnewlines\nlog");
@@ -6678,6 +6713,13 @@ KJ_TEST("Server: structured logging with console methods") {
     KJ_ASSERT(logline.contains(R"("message":"{ a: 1 }")"), logline);
   });
 
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"Trace: This is a trace message\n  at )"), logline);
+    KJ_ASSERT(logline.contains("main.js:"_kj), logline);
+    KJ_ASSERT(logline.contains("in fetch"_kj), logline);
+  });
+
   // process.stdout should be logs split by newline
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
     KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
@@ -6715,7 +6757,7 @@ KJ_TEST("Server: structured logging with console methods") {
         logline.contains(
             R"_("message":"Error: Test exception for structured logging\n    at Object.fetch ()_"),
         logline);
-    KJ_ASSERT(logline.contains(R"_(main.js:18:13)")_"), logline);
+    KJ_ASSERT(logline.contains(R"_(main.js:19:13)")_"), logline);
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
