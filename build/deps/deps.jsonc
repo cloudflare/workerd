@@ -31,12 +31,17 @@
       "name": "tcmalloc",
       "type": "bazel_dep"
     },
+    // Frozen at the head of capnproto/capnproto#2814 (kj/async: lock-free Executor::isCurrent();
+    // setRunnable(false) before EventPort::wait()), which kj-rs / kj-rs-tokio rely on. Unfreeze
+    // once it has merged into v2.
     {
       "name": "capnp-cpp",
       "type": "github_tarball",
       "owner": "capnproto",
       "repo": "capnproto",
       "branch": "v2",
+      "freeze_commit": "49cbe3daf42d97166315acdddd9666763a1a3da3",
+      "freeze_sha256": "6b6a9a13a47a14142caef9c07c74bd41f9c90d30e81c79c34772675219afbb9f",
       "extra_strip_prefix": "/c++"
     },
     // We want to avoid version skew with v8, so we use identical versions. Keep this
