@@ -11,7 +11,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-26.04
     name: build Python runtime
     steps:
       - uses: actions/checkout@v6

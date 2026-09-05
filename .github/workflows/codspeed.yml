@@ -26,7 +26,7 @@ jobs:
     # Temporarily disabled until benchmark quality and accuracy can be improved.
     if: false
     name: Run benchmarks
-    runs-on: ubuntu-22.04-16core
+    runs-on: ubuntu-26.04
     env:
       BAZEL_ARGS: --config=benchmark --@google_benchmark//:codspeed_mode=simulation --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev
     steps:

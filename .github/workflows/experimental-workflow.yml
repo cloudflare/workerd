@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   experiment:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Hello World
         shell: bash

@@ -27,7 +27,7 @@ jobs:
       types_version: ${{ steps.echo.outputs.types_version }}
     # version job uses ubuntu 24.04, this way we don't have to install the updated clang while
     # the build job uses 22.04 for libc compatibility.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
       - id: echo
@@ -77,12 +77,12 @@ jobs:
         include:
           - title: linux
             os-name: Linux
-            image: ubuntu-22.04-16core
+            image: ubuntu-26.04
             bazel-config: release_linux
             target-arch: X64
           - title: linux-arm64
             os-name: Linux
-            image: ubuntu-22.04-arm-16core
+            image: ubuntu-26.04-arm
             bazel-config: release_linux
             target-arch: ARM64
           # Based on runner availability, we build both Apple Silicon and (cross-compiled) x86
@@ -236,7 +236,7 @@ jobs:
   publish-wrapper:
     name: Publish `workerd` to NPM
     needs: [version, upload-artifacts]
-    runs-on: ubuntu-22.04-16core
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v6
@@ -295,7 +295,7 @@ jobs:
       - run: cd npm/workerd && npm publish --access public --tag ${{ startsWith(needs.version.outputs.version, '0') && 'beta' || 'latest'}}
 
   build-and-publish-types:
-    runs-on: ubuntu-22.04-16core
+    runs-on: ubuntu-26.04
     needs: [version, upload-artifacts]
     steps:
       - uses: actions/checkout@v6

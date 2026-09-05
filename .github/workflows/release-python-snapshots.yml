@@ -13,7 +13,7 @@ jobs:
   build-linux:
     uses: ./.github/workflows/_bazel.yml
     with:
-      image: ubuntu-22.04
+      image: ubuntu-26.04
       os_name: linux
       arch_name: 'X64'
       suffix: ''
@@ -27,7 +27,7 @@ jobs:
 
   build:
     needs: [build-linux]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-26.04
     name: Build and upload Python memory snapshots
     steps:
       - uses: actions/checkout@v6
