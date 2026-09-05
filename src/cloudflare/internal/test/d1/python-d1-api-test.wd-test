@@ -1,10 +1,12 @@
 using Workerd = import "/workerd/workerd.capnp";
+%PYTHON_COMPAT_DATES_IMPORT;
 
 const unitTests :Workerd.Config = (
   services = [
     ( name = "TEST_TMPDIR", disk = (writable = true) ),
     ( name = "d1-api-test",
       worker = (
+        %COMPAT_DATE,
         modules = [
           (name = "worker.py", pythonModule = embed "d1-api-test.py")
         ],
@@ -25,6 +27,7 @@ const unitTests :Workerd.Config = (
     ),
     ( name = "d1-mock",
       worker = (
+        %COMPAT_DATE,
         compatibilityFlags = ["experimental", "nodejs_compat"],
         modules = [
           (name = "worker", esModule = embed "d1-mock.js")

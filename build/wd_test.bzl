@@ -13,6 +13,7 @@ def wd_test(
         generate_gc_stress_variant = True,
         predictable = True,
         compat_date = "",
+        no_default_compat_date = False,
         **kwargs):
     """Rule to define tests that run `workerd test` with a particular config.
 
@@ -30,6 +31,8 @@ def wd_test(
      predictable: If True (default), pass `--predictable` to workerd.
      compat_date: If specified, use this compat date for the default variant instead of 2000-01-01.
         Does not affect the @all-compat-flags variant which always uses 2999-12-31.
+     no_default_compat_date: If True, do not override compatibility dates in the default,
+        @all-autogates, or compat-date-sensitive @gc-stress variants.
 
     The following test variants are generated based on the flags:
      - name@ (if generate_default_variant): oldest compat date (2000-01-01)
@@ -75,11 +78,16 @@ def wd_test(
 
     # Define the compat-date args for each variant
     # Note: dates must be in range [2000-01-01, 2999-12-31] due to parsing constraints
-    default_compat_args = ["--compat-date=2000-01-01"]
     newest_compat_args = ["--compat-date=2999-12-31"]
 
+    if compat_date and no_default_compat_date:
+        fail("compat_date and no_default_compat_date cannot both be set")
     if compat_date:
         default_compat_args = ["--compat-date={}".format(compat_date)]
+    elif no_default_compat_date:
+        default_compat_args = []
+    else:
+        default_compat_args = ["--compat-date=2000-01-01"]
 
     # Generate variants based on the flags
     # Default variant: oldest compat date

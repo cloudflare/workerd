@@ -1,4 +1,5 @@
 using Workerd = import "/workerd/workerd.capnp";
+%PYTHON_COMPAT_DATES_IMPORT;
 
 const config :Workerd.Config = (
   services = [
@@ -9,6 +10,7 @@ const config :Workerd.Config = (
 );
 
 const pyWorker :Workerd.Worker = (
+  %COMPAT_DATE,
   compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows", "python_workflows_implicit_dependencies"],
 
   modules = [
@@ -21,6 +23,7 @@ const pyWorker :Workerd.Worker = (
 );
 
 const pyWorkerOld :Workerd.Worker = (
+  %COMPAT_DATE,
   compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows", "no_python_workflows_implicit_dependencies"],
 
   modules = [
@@ -33,6 +36,7 @@ const pyWorkerOld :Workerd.Worker = (
 );
 
 const jsWorker :Workerd.Worker = (
+  %COMPAT_DATE,
   compatibilityFlags = ["nodejs_compat", "rpc"],
 
   modules = [

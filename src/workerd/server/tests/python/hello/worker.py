@@ -10,14 +10,21 @@ else:
     # js should be patched at top level in order to allow snapshotting.
     assert js != globalThis
 
-# Calling fetch at top level should give a good error message despite patching.
+
+# Calling fetch at top level should give a good error message despite patching. Depending on the
+# compatibility date, fetch either throws synchronously or returns a rejected promise.
+def check_fetch_error(error):
+    print(error)
+    assert "Disallowed operation called within global scope" in str(error)
+
+
 try:
-    js.fetch("example.com")
+    fetch_result = js.fetch("example.com")
 except JsException as e:
-    print(e)
-    assert "Disallowed operation called within global scope" in str(e)
+    check_fetch_error(e)
 else:
-    assert False  # noqa: B011
+    fetch_result.catch(check_fetch_error)
+    del fetch_result
 
 
 def test():
