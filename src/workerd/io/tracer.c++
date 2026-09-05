@@ -670,6 +670,10 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
   }
 }
 
+void WorkerTracer::markUnused() {
+  markedUnused = true;
+}
+
 kj::Rc<SpanObserver> UserSpanObserver::newChild() {
   return kj::rc<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags);
 }
