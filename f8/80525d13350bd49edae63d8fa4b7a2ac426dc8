@@ -1,0 +1,130 @@
+src/rust/cxx/kj-rs-io/tests/serve-test.c++
+  s_ad98b07a2ebbe9::t_85e3418642788e 1-5,7-17,18-23,24-150,251-367
+  s_2427bf394889ab::t_5b568fdbbae2e5 6,151-250
+src/rust/cxx/kj-rs-io/error.rs
+  s_ad98b07a2ebbe9::t_6aa2184d20ef53 1-130,138,156,167,177,182,195,206,215,219,225,242-243
+  s_ad98b07a2ebbe9::t_5b4f71b23a3bc7 131-137,139-155,157-166,168-176,178-181,183-194,196-205,207-214,216-218,220-224,226-241
+src/rust/cxx/kj-rs-io/BUILD.bazel
+  s_ad98b07a2ebbe9::t_e74edd456a7e2b 1-80
+src/rust/cxx/kj-rs-io/stream.rs
+  s_ad98b07a2ebbe9::t_78054f9d17847f 1-10,12-78,87-244,287-366,370,372-498,506-844
+  s_2427bf394889ab::t_e7d802594c1e72 11,79-86,245-286,367-369,371,499-505
+src/rust/cxx/kj-rs-io/file-watcher.c++
+  s_ad98b07a2ebbe9::t_8ac4cd4e354354 1-221
+src/rust/cxx/kj-rs-io/tests/http-test.c++
+  s_ad98b07a2ebbe9::t_09b6f645f96ca5 1-147
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_ad98b07a2ebbe9::t_88a8001aec6c14 1-36,37-41,47-513,514,520-531
+  s_2427bf394889ab::t_4dbf33905d233e 42-46,515-519
+src/rust/cxx/kj-rs-io/readiness.rs
+  s_ad98b07a2ebbe9::t_ca0834204a2e1b 1-94
+src/rust/cxx/kj-rs-io/runtime.rs
+  s_ad98b07a2ebbe9::t_fe6d173d441846 1-50,67-68
+  s_ad98b07a2ebbe9::t_9c77fdf9c214fb 51-66
+src/rust/cxx/kj-rs-io/net.rs
+  s_ad98b07a2ebbe9::t_3ea0b3f4599215 1-359,362-371,378-789
+  s_2427bf394889ab::t_064d13dc93d629 360-361,372-377
+src/rust/cxx/kj-rs-io/signal.rs
+  s_ad98b07a2ebbe9::t_bef72c28553dd8 1-94
+src/rust/cxx/kj-rs-io/async-io.h
+  s_ad98b07a2ebbe9::t_77bfb6d173a414 1-40,43-231,235,240,242-243,245-246,249-252,254-256,257,262-263,265-266,268-293
+  s_2427bf394889ab::t_9ed0a8cbba4172 41-42,232-234,236-239,241,244,247-248,253,258-261,264,267
+deps/rust/Cargo.toml
+  s_ad98b07a2ebbe9::t_fc960a22fa96dd 57,59
+src/rust/cxx/kj-rs-io/tests/async-io-test.c++
+  s_ad98b07a2ebbe9::t_7f6596ab23cfbf 1-4,6-38,40-53,54-131,136-982,1075-1076
+  s_2427bf394889ab::t_fd4de3c21ef1be 5,39,132-135,983-1074
+src/rust/cxx/kj-rs-io/unwrap.h
+  s_ad98b07a2ebbe9::t_0f94cbc6bac385 1-39,57-95
+  s_2427bf394889ab::t_d04f30260f21d3 40-56
+src/rust/cxx/kj-rs-io/tests/capnp-rpc-test.c++
+  s_ad98b07a2ebbe9::t_fc11866b2eb198 1-79
+src/rust/cxx/kj-rs-io/serve.rs
+  s_ad98b07a2ebbe9::t_954177eda01596 1-459
+src/rust/cxx/kj-rs-io/tests/lib.rs
+  s_ad98b07a2ebbe9::t_be5c6141f4b963 1-11,13-57,63-97
+  s_2427bf394889ab::t_ecef787faa10ad 12,58-62
+src/rust/cxx/kj-rs-io/peer-filter.c++
+  s_ad98b07a2ebbe9::t_e58adf6f9202a0 1-203
+deps/rust/Cargo.lock
+  s_ad98b07a2ebbe9::t_e5602005ec7725 473,542-551,1569-1578,2071,2075,2077,2081-2091
+src/rust/cxx/AGENTS.md
+  s_ad98b07a2ebbe9::t_711064f6314e78 39-42
+src/rust/cxx/kj-rs-io/file-watcher.h
+  s_ad98b07a2ebbe9::t_0702ee116c5b46 1-54
+src/rust/cxx/kj-rs-io/tests/serve_helpers.rs
+  s_ad98b07a2ebbe9::t_9a09438b27b8db 1-35,51-69,84-185
+  s_2427bf394889ab::t_2d071e9ef938e0 36-50,70-83
+src/rust/cxx/kj-rs-io/tests/test_helpers.rs
+  s_ad98b07a2ebbe9::t_e89e89323a1f06 1-71
+src/rust/cxx/kj-rs-io/lib.rs
+  s_ad98b07a2ebbe9::t_78221cce0d1f0c 1-25,31-110
+  s_2427bf394889ab::t_6450a547247a5d 26-30
+src/rust/cxx/kj-rs-io/tests/file-watcher-test.c++
+  s_ad98b07a2ebbe9::t_4aad52e3d1996c 1-185,216-350
+  s_2427bf394889ab::t_00cfd15894f766 186-215
+src/rust/cxx/kj-rs-io/peer-filter.h
+  s_ad98b07a2ebbe9::t_ae2d00332b04f2 1-55
+src/rust/cxx/kj-rs-io/tests/BUILD.bazel
+  s_ad98b07a2ebbe9::t_ed9ccf7e43e3b6 1-38,43-103,108-163
+  s_2427bf394889ab::t_85340b534f1be2 39-42,104-107
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_ad98b07a2ebbe9::t_0391b3aa44b4e9 1-35,39-78,80-114,123-300,311-469,473-478,486-499,527-900,903-932,937-940,978-984,1018
+  s_2427bf394889ab::t_aace04c8555354 36-38,79,115-122,301-310,470-472,479-485,500-526,901-902,933-936,941-977,985-1017
+src/rust/cxx/kj-rs-io/tests/peer-filter-test.c++
+  s_ad98b07a2ebbe9::t_9a408579d67dab 1-193
+src/rust/cxx/kj-rs/waker.c++
+  s_2427bf394889ab::t_0946e53e6ca8f5 14-16
+src/rust/cxx/kj-rs/waker.h
+  s_2427bf394889ab::t_cb69b103f11643 4,58-63,65-66
+src/rust/cxx/kj-rs/waker.rs
+  s_2427bf394889ab::t_e6437d72728540 103-111,119-123,131,137,139-141
+build/deps/deps.jsonc
+  s_2427bf394889ab::t_dd568121fdeb82 34-36,43-44
+build/deps/gen/deps.MODULE.bazel
+  s_2427bf394889ab::t_a048a31b1a800f 30-31,33
+src/rust/cxx/kj-rs-tokio/ffi.rs
+  s_2427bf394889ab::t_3a5e0879cc37db 3-7,25,32-33,36-37,51-55
+src/rust/cxx/kj-rs-tokio/lib.rs
+  s_2427bf394889ab::t_a0a2c0696e22bb 8-10,15-17
+src/rust/cxx/kj-rs-tokio/port.rs
+  s_2427bf394889ab::t_2ea69d0a6d3796 40,69-76,96-97,105-109,144-148,175,190-194,228-230,240,249,277-281,310-311,324,326,343-346,511-513,515
+src/rust/cxx/kj-rs-tokio/tests/lib.rs
+  s_2427bf394889ab::t_0def42a18b445f 19-20,75-87,103-105
+src/rust/cxx/kj-rs-tokio/tests/test-helpers.h
+  s_2427bf394889ab::t_ab20c19bda4520 22-26
+src/rust/cxx/kj-rs-tokio/tests/test_helpers.rs
+  s_2427bf394889ab::t_7e1bcbd3adc9ea 197-215
+src/rust/cxx/kj-rs-tokio/tests/tokio-event-port-test.c++
+  s_2427bf394889ab::t_385111a0d99bea 15,162-163,165-168,176,191,194,204-222,349,367-370,436-443,458-595,628-629
+src/rust/cxx/kj-rs-tokio/tokio-event-port.c++
+  s_2427bf394889ab::t_3c3146f8c889de 8-9,25-26,30-34,41-64,69-77,85-86,103-104,106,112-113
+src/rust/cxx/kj-rs-tokio/tokio-event-port.h
+  s_2427bf394889ab::t_5d8de3354eb487 11-26,30,34-40,48-49,52-53,55-57,68,71,74-76,82-85,101-102,106-114,116-118,121-126,128-131,135-136,138-141,143,149-150,161-163
+src/rust/cxx/kj-rs-io/tests/io-test-helpers.h
+  s_2427bf394889ab::t_d11a6eaade9b75 1-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f880525d13350bd49edae63d8fa4b7a2ac426dc8",
+  "prompts": {},
+  "sessions": {
+    "s_2427bf394889ab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28753db2-9693-4557-828c-5c58d097f066",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
