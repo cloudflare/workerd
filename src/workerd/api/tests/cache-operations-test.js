@@ -304,3 +304,28 @@ export const conditionalRequestOperations = {
     _matchResult = await cache.match(matchRequest2);
   },
 };
+export const queryMethodSupport = {
+  async test(ctrl, env, ctx) {
+    const cache = caches.default;
+    const url = "http://example.com/query-test";
+
+    const req = new Request(url, {
+      method: "QUERY",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ filter: "automated-test" })
+    });
+
+    const res = new Response("Cached Query Data", {
+      headers: { "Cache-Control": "max-age=3600" }
+    });
+
+    //  Execute the Cache API operations
+    await cache.put(req, res.clone());
+    await cache.match(req);
+    await cache.delete(req);
+
+    return true;
+  }
+};
