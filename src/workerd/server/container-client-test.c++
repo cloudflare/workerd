@@ -13,7 +13,12 @@
 
 #include "container-client.h"
 
+#include "channel-token.h"
+
+#include <capnp/compat/byte-stream.h>
+#include <kj/async-io.h>
 #include <kj/test.h>
+#include <kj/timer.h>
 
 namespace workerd::server {
 namespace {
@@ -301,6 +306,137 @@ KJ_TEST("ContainerCreateRequest omits empty container privileges") {
   KJ_EXPECT(decodedHostConfig.getCapAdd().size() == 0);
   KJ_EXPECT(decodedHostConfig.getDevices().size() == 0);
   KJ_EXPECT(decodedHostConfig.getSecurityOpt().size() == 0);
+}
+
+// ======================================================================================
+// DockerPort::connect() use-after-free regression test.
+//
+// DockerPort dereferences its ContainerClient (network, byteStreamFactory) AFTER several co_await
+// points in connect(). If it holds only a bare `ContainerClient&`, then the safety of those derefs
+// depends entirely on nothing dropping the last ContainerClient reference while a connect() is
+// suspended. Nothing in the type system enforces that coupling. The sibling DockerProcessHandle
+// avoids the hazard by holding `containerClient.addRef()`; DockerPort should do the same.
+//
+// This test drives connect() to a suspension point (parseAddress), drops the only strong reference
+// to the ContainerClient, then resumes connect(). With a bare reference this reads freed memory and
+// AddressSanitizer aborts; with the addRef fix DockerPort keeps the ContainerClient alive and the
+// test passes.
+
+// A NetworkAddress whose connect() hands back a pre-supplied stream (the proxy connection).
+class MockAddress final: public kj::NetworkAddress {
+ public:
+  explicit MockAddress(kj::Own<kj::AsyncIoStream> streamParam): stream(kj::mv(streamParam)) {}
+  kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
+    return kj::mv(KJ_ASSERT_NONNULL(stream));
+  }
+  kj::Own<kj::ConnectionReceiver> listen() override {
+    KJ_UNIMPLEMENTED("listen");
+  }
+  kj::Own<kj::NetworkAddress> clone() override {
+    KJ_UNIMPLEMENTED("clone");
+  }
+  kj::String toString() override {
+    return kj::str("mock");
+  }
+
+ private:
+  kj::Maybe<kj::Own<kj::AsyncIoStream>> stream;
+};
+
+// A Network whose parseAddress() suspends (returns a fulfiller-controlled promise) so the test can
+// free the ContainerClient while connect() is parked at its first co_await.
+class SuspendNetwork final: public kj::Network {
+ public:
+  kj::Promise<kj::Own<kj::NetworkAddress>> parseAddress(kj::StringPtr addr, uint = 0) override {
+    // Only the connect() path parses the 127.0.0.1 ingress-proxy address. The ctor's stale-snapshot
+    // check and ~ContainerClient's docker-socket cleanup also call parseAddress; leave those pending
+    // so they don't disturb the connect() suspension the test is controlling.
+    if (addr.contains("127.0.0.1"_kjc)) {
+      auto paf = kj::newPromiseAndFulfiller<kj::Own<kj::NetworkAddress>>();
+      fulfiller = kj::mv(paf.fulfiller);
+      return kj::mv(paf.promise);
+    }
+    return kj::NEVER_DONE;
+  }
+  kj::Own<kj::NetworkAddress> getSockaddr(const void*, uint) override {
+    KJ_UNIMPLEMENTED("getSockaddr");
+  }
+  kj::Own<kj::Network> restrictPeers(
+      kj::ArrayPtr<const kj::StringPtr>, kj::ArrayPtr<const kj::StringPtr>) override {
+    KJ_UNIMPLEMENTED("restrictPeers");
+  }
+
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Own<kj::NetworkAddress>>>> fulfiller;
+};
+
+class MockResolver final: public ChannelTokenHandler::Resolver {
+ public:
+  kj::Own<IoChannelFactory::SubrequestChannel> resolveEntrypoint(
+      kj::StringPtr, kj::Maybe<kj::StringPtr>, Frankenvalue, Persistent) override {
+    KJ_UNIMPLEMENTED("resolveEntrypoint");
+  }
+  kj::Own<IoChannelFactory::ActorClassChannel> resolveActorClass(
+      kj::StringPtr, kj::Maybe<kj::StringPtr>, Frankenvalue, Persistent) override {
+    KJ_UNIMPLEMENTED("resolveActorClass");
+  }
+  kj::Own<IoChannelFactory::ActorChannel> resolveActor(
+      kj::StringPtr, kj::ArrayPtr<const byte>, kj::Maybe<kj::StringPtr>, Persistent) override {
+    KJ_UNIMPLEMENTED("resolveActor");
+  }
+};
+
+struct NullErrorHandler final: public kj::TaskSet::ErrorHandler {
+  void taskFailed(kj::Exception&&) override {}
+};
+
+KJ_TEST("DockerPort connect() use-after-free on ContainerClient freed mid-call") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  capnp::ByteStreamFactory byteStreamFactory;
+  kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+  SuspendNetwork network;
+  NullErrorHandler errorHandler;
+  kj::TaskSet waitUntilTasks(errorHandler);
+  MockResolver resolver;
+  ChannelTokenHandler channelTokenHandler(resolver);
+
+  auto container = kj::refcounted<ContainerClient>(byteStreamFactory, timer, network,
+      kj::str("docker"), kj::str("test-container"), kj::str("test-image"), kj::str("interceptor"),
+      waitUntilTasks, kj::Promise<void>(kj::READY_NOW), [](kj::Promise<void>) {}, channelTokenHandler,
+      ContainerPrivileges{});
+  container->setSidecarIngressHostPortForTest(8080);
+
+  // Wrap the ContainerClient as a capnp Container capability. This Own is the only strong reference.
+  rpc::Container::Client containerCap = kj::mv(container);
+
+  // getTcpPort -> Port capability (resolves immediately; mutationQueue is READY_NOW).
+  auto getPortReq = containerCap.getTcpPortRequest();
+  getPortReq.setPort(1234);
+  auto port = getPortReq.send().getPort();
+
+  // Start connect(). It runs to `co_await network.parseAddress(...)` and suspends there.
+  auto connectReq = port.connectRequest();
+  auto connectPromise = connectReq.send();
+
+  // Drive the loop until connect() has suspended at parseAddress.
+  KJ_ASSERT(!connectPromise.poll(ws));
+  KJ_ASSERT(network.fulfiller != kj::none, "connect() did not reach parseAddress");
+
+  // Drop the only external strong ref to ContainerClient. Without the addRef fix, DockerPort holds a
+  // bare reference, so nothing keeps ContainerClient alive across the suspended connect().
+  { auto drop = kj::mv(containerCap); }
+
+  // Resume connect(): supply a mock proxy connection, then a "200" so the HTTP CONNECT status
+  // resolves and connect() proceeds to the containerClient.byteStreamFactory deref -- against freed
+  // memory if the bare-reference bug is present.
+  auto httpPipe = kj::newTwoWayPipe();
+  auto serverEnd = kj::mv(httpPipe.ends[1]);
+  auto respTask = serverEnd->write("HTTP/1.1 200 OK\r\n\r\n"_kjb).eagerlyEvaluate(nullptr);
+  KJ_ASSERT_NONNULL(network.fulfiller)->fulfill(kj::heap<MockAddress>(kj::mv(httpPipe.ends[0])));
+
+  // With the bug present, ASAN aborts here when connect() dereferences the freed ContainerClient.
+  connectPromise.wait(ws);
 }
 
 }  // namespace

@@ -1093,18 +1093,18 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server,
                                          private kj::TaskSet::ErrorHandler {
  public:
   DockerPort(ContainerClient& containerClient, kj::String containerHost, uint16_t containerPort)
-      : containerClient(containerClient),
+      : containerClient(containerClient.addRef()),
         containerHost(kj::mv(containerHost)),
         containerPort(containerPort),
         pumpTasks(*this) {}
 
   kj::Promise<void> connect(ConnectContext context) override {
-    auto mappedPort = JSG_REQUIRE_NONNULL(containerClient.sidecarIngressHostPort, Error,
+    auto mappedPort = JSG_REQUIRE_NONNULL(containerClient->sidecarIngressHostPort, Error,
         "connect(): Container ingress proxy is not running.");
 
     auto dstAddr = kj::str(containerHost, ":", containerPort);
 
-    auto address = co_await containerClient.network.parseAddress(kj::str("127.0.0.1:", mappedPort));
+    auto address = co_await containerClient->network.parseAddress(kj::str("127.0.0.1:", mappedPort));
 
     kj::HttpHeaderTable::Builder headerTableBuilder;
     auto xDstAddrHeader = headerTableBuilder.add("X-Dst-Addr");
@@ -1138,9 +1138,9 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server,
     auto upPipe = kj::newOneWayPipe();
     auto upEnd = kj::mv(upPipe.in);
     auto results = context.getResults();
-    results.setUp(containerClient.byteStreamFactory.kjToCapnp(kj::mv(upPipe.out)));
+    results.setUp(containerClient->byteStreamFactory.kjToCapnp(kj::mv(upPipe.out)));
     auto downEnd =
-        containerClient.byteStreamFactory.capnpToKjExplicitEnd(context.getParams().getDown());
+        containerClient->byteStreamFactory.capnpToKjExplicitEnd(context.getParams().getDown());
 
     auto& connectionRef = *connection;
     auto& downEndRef = *downEnd;
@@ -1157,8 +1157,13 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server,
   }
 
  private:
-  // ContainerClient is owned by the Worker::Actor and keeps it alive.
-  ContainerClient& containerClient;
+  // Hold a strong ref to ContainerClient. connect() dereferences containerClient (network,
+  // byteStreamFactory) after co_await points, so it must keep ContainerClient alive across those
+  // suspensions itself rather than relying on an external owner. A bare reference here is safe only
+  // as long as every path that drops the last ContainerClient ref also cancels any in-flight
+  // connect() first; that coupling is unenforced by the type system. Mirrors DockerProcessHandle,
+  // which addRef()s for the same reason.
+  kj::Own<ContainerClient> containerClient;
   kj::String containerHost;
   uint16_t containerPort;
   kj::TaskSet pumpTasks;
