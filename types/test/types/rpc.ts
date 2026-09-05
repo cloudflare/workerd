@@ -1318,9 +1318,39 @@ expectTypeOf(withoutSchedule.schedule).toEqualTypeOf<
   WorkflowCronSchedule | undefined
 >();
 
-declare const workflow: Workflow;
+declare const workflow: Workflow<WorkflowPayload>;
 declare const workflowInstance: WorkflowInstance;
 expectTypeOf(workflowInstance.delete()).toEqualTypeOf<Promise<void>>();
+expectTypeOf(
+  workflow.createBatch({
+    count: 2,
+    params: {foo: 'bar'},
+    retention: {successRetention: '1 day'},
+    locationHint: 'weur',
+  })
+).toEqualTypeOf<Promise<WorkflowBatchCreateResult>>();
+expectTypeOf(
+  workflow.createBatch({instances: [{id: 'one', params: {foo: 'bar'}}]})
+).toEqualTypeOf<Promise<WorkflowBatchCreateResult>>();
+expectTypeOf(
+  workflow.createBatch([{id: 'one', params: {foo: 'bar'}}])
+).toEqualTypeOf<Promise<WorkflowInstance[]>>();
+expectTypeOf<WorkflowBatchCreateResult['created'][number]>().toEqualTypeOf<
+  WorkflowInstance
+>();
+expectTypeOf<WorkflowBatchCreateResult['errors'][number]>().toEqualTypeOf<{
+  index: number;
+  id?: string;
+  code: number;
+  message: string;
+}>();
+
+// @ts-expect-error count and instances are mutually exclusive
+workflow.createBatch({count: 1, instances: []});
+
+// @ts-expect-error batch params must match the Workflow generic
+workflow.createBatch({count: 1, params: {foo: 1}});
+
 expectTypeOf(workflow.deleteBatch(['one', 'two'])).toEqualTypeOf<
   Promise<WorkflowBatchDeleteResult>
 >();
