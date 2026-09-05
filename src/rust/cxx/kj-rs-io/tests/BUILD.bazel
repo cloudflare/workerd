@@ -1,0 +1,169 @@
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("@rules_rust//rust:defs.bzl", "rust_library")
+load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
+
+rust_library(
+    name = "tests",
+    srcs = glob(["*.rs"]),
+    edition = "2024",
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":bridge",
+        "//src/rust/cxx",
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/kj-rs-io",
+        "//src/rust/cxx/kj-rs-tokio",
+        "@crates_vendor//:bytes",
+        "@crates_vendor//:tokio",
+    ],
+)
+
+rust_cxx_bridge(
+    name = "bridge",
+    src = "lib.rs",
+    include_prefix = "kj-rs-io-test",
+    deps = [
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/kj-rs-io:bridge",
+    ],
+)
+
+cc_test(
+    name = "async-io-test",
+    # medium: several tests do real socket I/O plus timer-bounded waits (backpressure, signals,
+    # DNS), which can exceed small's 60 s budget under load / sanitizers.
+    size = "medium",
+    srcs = [
+        "async-io-test.c++",
+        "io-test-helpers.h",
+    ],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":bridge",
+        ":tests",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)
+
+cc_test(
+    name = "file-watcher-test",
+    # medium: real I/O plus timer-bounded waits; small's 3 s budget is exceeded under parallel
+    # build load even though the suite runs in ~2 s alone.
+    size = "medium",
+    srcs = ["file-watcher-test.c++"],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":tests",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)
+
+cc_test(
+    name = "http-test",
+    # medium: real I/O plus timer-bounded waits; small's 3 s budget is exceeded under parallel
+    # build load even though the suite runs in ~2 s alone.
+    size = "medium",
+    srcs = ["http-test.c++"],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":tests",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+cc_test(
+    name = "serve-test",
+    size = "small",
+    srcs = [
+        "io-test-helpers.h",
+        "serve-test.c++",
+    ],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":bridge",
+        ":tests",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)
+
+cc_test(
+    name = "peer-filter-test",
+    size = "small",
+    srcs = ["peer-filter-test.c++"],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)
+
+cc_test(
+    name = "capnp-rpc-test",
+    # medium: real I/O plus timer-bounded waits; small's 3 s budget is exceeded under parallel
+    # build load even though the suite runs in ~2 s alone.
+    size = "medium",
+    srcs = ["capnp-rpc-test.c++"],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":tests",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)
