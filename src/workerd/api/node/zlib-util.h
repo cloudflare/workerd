@@ -333,7 +333,8 @@ class ZlibUtil final: public jsg::Object {
         jsg::JsArrayBufferView params,
         jsg::JsArrayBufferView writeResult,
         jsg::Function<void()> writeCallback,
-        jsg::Optional<uint64_t> pledgedSrcSize);
+        jsg::Optional<uint64_t> pledgedSrcSize,
+        jsg::Optional<kj::Array<kj::byte>> dictionary);
 
     void params() {
       // Currently a no-op, and not accessed from JS land.

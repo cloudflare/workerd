@@ -446,3 +446,225 @@ export const zstdStreamLargeDecompressTest = {
     );
   },
 };
+
+// The dictionary tests below share this pair. `input` repeats phrases that appear in
+// `dictionary`, so a dictionary-aware encoder can reference them instead of emitting them,
+// which is what makes the size assertions meaningful.
+const DICTIONARY = Buffer.from(
+  'Lorem ipsum dolor sit amet, consectetur adipiscing elit. ' +
+    'Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. ' +
+    'Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.'
+);
+
+const DICT_INPUT =
+  'Lorem ipsum dolor sit amet, consectetur adipiscing elit. ' +
+  'Lorem ipsum dolor sit amet, consectetur adipiscing elit. ' +
+  'Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. ' +
+  'Duis aute irure dolor in reprehenderit in voluptate velit esse cillum.';
+
+// A dictionary must shrink the output and must round-trip.
+export const zstdDictionarySyncTest = {
+  test() {
+    const input = Buffer.from(DICT_INPUT);
+    const plain = zlib.zstdCompressSync(input);
+    const withDict = zlib.zstdCompressSync(input, { dictionary: DICTIONARY });
+
+    assert(
+      withDict.length < plain.length,
+      `Dictionary should shrink the output, got ${withDict.length} with and ` +
+        `${plain.length} without`
+    );
+
+    const decompressed = zlib.zstdDecompressSync(withDict, {
+      dictionary: DICTIONARY,
+    });
+    assert.strictEqual(
+      decompressed.toString(),
+      input.toString(),
+      'Dictionary round-trip should match'
+    );
+  },
+};
+
+// Compressing a buffer against itself is the sharpest form of the size check: every byte of
+// the input is already in the dictionary, so the frame collapses to a few bytes. This is the
+// feature-detect that a caller has to resort to when the option is silently dropped.
+export const zstdDictionaryCollapseTest = {
+  test() {
+    const input = Buffer.from(
+      'the quick brown fox jumps over the lazy dog '.repeat(200)
+    );
+    const params = { [zlib.constants.ZSTD_c_compressionLevel]: 19 };
+
+    const none = zlib.zstdCompressSync(input, { params });
+    const good = zlib.zstdCompressSync(input, { dictionary: input, params });
+
+    assert(
+      good.length < none.length / 2,
+      `Self-dictionary should collapse the frame, got ${good.length} against ${none.length}`
+    );
+
+    // Parameters are applied after the dictionary is loaded, so this also proves the
+    // compression level still reaches the encoder.
+    const level1 = zlib.zstdCompressSync(input, {
+      dictionary: input,
+      params: { [zlib.constants.ZSTD_c_compressionLevel]: 1 },
+    });
+    assert.strictEqual(
+      zlib.zstdDecompressSync(good, { dictionary: input }).toString(),
+      input.toString(),
+      'Self-dictionary round-trip should match'
+    );
+    assert.strictEqual(
+      zlib.zstdDecompressSync(level1, { dictionary: input }).toString(),
+      input.toString(),
+      'Self-dictionary round-trip at level 1 should match'
+    );
+  },
+};
+
+// Buffer, TypedArray, DataView and ArrayBuffer all name the same bytes and must behave
+// identically. Mirrors Node's test/parallel/test-zlib-zstd-dictionary.js.
+export const zstdDictionaryTypesTest = {
+  test() {
+    const input = Buffer.from(DICT_INPUT);
+    const baseline = zlib.zstdCompressSync(input, {
+      dictionary: DICTIONARY,
+    }).length;
+
+    const arrayBuffer = DICTIONARY.buffer.slice(
+      DICTIONARY.byteOffset,
+      DICTIONARY.byteOffset + DICTIONARY.byteLength
+    );
+    const uint8 = new Uint8Array(arrayBuffer);
+    const dataView = new DataView(arrayBuffer);
+
+    for (const dictionary of [arrayBuffer, uint8, dataView]) {
+      const compressed = zlib.zstdCompressSync(input, { dictionary });
+      assert.strictEqual(
+        compressed.length,
+        baseline,
+        'Every dictionary representation should compress identically'
+      );
+      assert.strictEqual(
+        zlib.zstdDecompressSync(compressed, { dictionary }).toString(),
+        input.toString(),
+        'Every dictionary representation should decompress identically'
+      );
+    }
+  },
+};
+
+// Node ignores a dictionary that is neither an ArrayBufferView nor an ArrayBuffer rather
+// than throwing, on both the fast path and the stream path.
+export const zstdDictionaryIgnoredTypeTest = {
+  test() {
+    const input = Buffer.from(DICT_INPUT);
+    const plain = zlib.zstdCompressSync(input).length;
+
+    assert.strictEqual(
+      zlib.zstdCompressSync(input, { dictionary: 'not a buffer' }).length,
+      plain,
+      'A non-buffer dictionary should be ignored'
+    );
+    assert.strictEqual(
+      zlib.zstdCompressSync(input, { dictionary: 'not a buffer', info: true })
+        .buffer.length,
+      plain,
+      'A non-buffer dictionary should be ignored on the stream path too'
+    );
+  },
+};
+
+// A frame written with a dictionary cannot be read without it. The checksum is enabled so
+// that the mismatch is always detected rather than left to chance.
+export const zstdDictionaryMismatchTest = {
+  test() {
+    const input = Buffer.from(DICT_INPUT);
+    const other = Buffer.from('completely unrelated filler bytes '.repeat(20));
+    const compressed = zlib.zstdCompressSync(input, {
+      dictionary: DICTIONARY,
+      params: { [zlib.constants.ZSTD_c_checksumFlag]: 1 },
+    });
+
+    assert.throws(
+      () => zlib.zstdDecompressSync(compressed),
+      (err) => err instanceof Error,
+      'Decompressing without the dictionary should fail'
+    );
+    assert.throws(
+      () => zlib.zstdDecompressSync(compressed, { dictionary: other }),
+      (err) => err instanceof Error,
+      'Decompressing with the wrong dictionary should fail'
+    );
+  },
+};
+
+// The async convenience functions take the same option.
+export const zstdDictionaryAsyncTest = {
+  async test() {
+    const input = Buffer.from(DICT_INPUT);
+
+    const compressed = await new Promise((resolve, reject) => {
+      zlib.zstdCompress(input, { dictionary: DICTIONARY }, (err, res) => {
+        if (err) reject(err);
+        else resolve(res);
+      });
+    });
+
+    assert(
+      compressed.length < zlib.zstdCompressSync(input).length,
+      'Async compression should honour the dictionary'
+    );
+
+    const decompressed = await new Promise((resolve, reject) => {
+      zlib.zstdDecompress(
+        compressed,
+        { dictionary: DICTIONARY },
+        (err, res) => {
+          if (err) reject(err);
+          else resolve(res);
+        }
+      );
+    });
+
+    assert.strictEqual(
+      decompressed.toString(),
+      input.toString(),
+      'Async dictionary round-trip should match'
+    );
+  },
+};
+
+// And so do the streams, where the dictionary reaches the context through initialize().
+export const zstdDictionaryStreamTest = {
+  async test() {
+    const input = Buffer.from(DICT_INPUT);
+
+    const compress = zlib.createZstdCompress({ dictionary: DICTIONARY });
+    compress.end(input);
+    const compressedChunks = [];
+    for await (const chunk of compress) {
+      compressedChunks.push(chunk);
+    }
+    const compressed = Buffer.concat(compressedChunks);
+
+    assert(
+      compressed.length < zlib.zstdCompressSync(input).length,
+      'Stream compression should honour the dictionary'
+    );
+
+    const decompress = zlib.createZstdDecompress({ dictionary: DICTIONARY });
+    decompress.end(compressed);
+    const decompressedChunks = [];
+    for await (const chunk of decompress) {
+      decompressedChunks.push(chunk);
+    }
+
+    assert.strictEqual(
+      Buffer.concat(decompressedChunks).toString(),
+      input.toString(),
+      'Stream dictionary round-trip should match'
+    );
+  },
+};
