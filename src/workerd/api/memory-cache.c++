@@ -175,7 +175,7 @@ void SharedMemoryCache::putWhileLocked(ThreadUnsafeData& data,
     }
     updatedEntry.liveliness = data.stepLiveliness();
     updatedEntry.value = kj::mv(value);
-    updatedEntry.expiration = expiration;
+    updatedEntry.expiration = kj::mv(expiration);
     data.cache.insert(kj::mv(updatedEntry));
     data.totalValueSize += valueSize;
   } else {
