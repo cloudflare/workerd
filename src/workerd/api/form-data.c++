@@ -24,6 +24,33 @@
 namespace workerd::api {
 
 namespace {
+void addToSerializedSize(size_t& total, size_t amount) {
+  static constexpr size_t kMaxSize = kj::maxValue;
+  JSG_REQUIRE(amount <= kMaxSize - total, RangeError, "FormData is too large to serialize.");
+  total += amount;
+}
+
+size_t getEscapedSize(kj::StringPtr value) {
+  JSG_REQUIRE(!value.endsWith("\\"), TypeError, "Name or filename can't end with backslash");
+
+  size_t result = 0;
+  for (char c: value) {
+    switch (c) {
+      case '\"':
+      case '\n':
+        addToSerializedSize(result, 3);
+        break;
+      case '\\':
+        addToSerializedSize(result, 2);
+        break;
+      default:
+        addToSerializedSize(result, 1);
+        break;
+    }
+  }
+  return result;
+}
+
 // Like split() in kj/compat/url.c++, but splits at a substring rather than a character.
 kj::ArrayPtr<const char> splitAtSubString(kj::ArrayPtr<const char>& text, kj::StringPtr subString) {
   // TODO(perf): Use a Boyer-Moore search?
@@ -314,9 +341,39 @@ kj::Array<kj::byte> FormData::serialize(kj::ArrayPtr<const char> boundary) {
   JSG_REQUIRE(boundary.size() > 0 && boundary.size() <= 70, TypeError,
       "Length of multipart/form-data boundary string must be in the range [1, 70].");
 
-  // TODO(perf): We should be able to trivially calculate the length of the serialized form data
-  //   beforehand. I tried, but apparently my math REALLY sucks and I hate memory overruns, so ...
-  auto builder = kj::Vector<char>{};
+  size_t serializedSize = 0;
+  for (auto& kv: data) {
+    addToSerializedSize(serializedSize, "--"_kj.size());
+    addToSerializedSize(serializedSize, boundary.size());
+    addToSerializedSize(serializedSize, "\r\n"_kj.size());
+    addToSerializedSize(serializedSize, "Content-Disposition: form-data; name=\""_kj.size());
+    addToSerializedSize(serializedSize, getEscapedSize(kv.name));
+    KJ_SWITCH_ONEOF(kv.value) {
+      KJ_CASE_ONEOF(text, kj::String) {
+        addToSerializedSize(serializedSize, "\"\r\n\r\n"_kj.size());
+        addToSerializedSize(serializedSize, text.size());
+      }
+      KJ_CASE_ONEOF(file, jsg::Ref<File>) {
+        addToSerializedSize(serializedSize, "\"; filename=\""_kj.size());
+        addToSerializedSize(serializedSize, getEscapedSize(file->getName()));
+        addToSerializedSize(serializedSize, "\"\r\nContent-Type: "_kj.size());
+        auto type = file->getType();
+        if (type == nullptr) {
+          addToSerializedSize(serializedSize, MimeType::OCTET_STREAM.toString().size());
+        } else {
+          addToSerializedSize(serializedSize, type.size());
+        }
+        addToSerializedSize(serializedSize, "\r\n\r\n"_kj.size());
+        addToSerializedSize(serializedSize, file->getData().size());
+      }
+    }
+    addToSerializedSize(serializedSize, "\r\n"_kj.size());
+  }
+  addToSerializedSize(serializedSize, "--"_kj.size());
+  addToSerializedSize(serializedSize, boundary.size());
+  addToSerializedSize(serializedSize, "--"_kj.size());
+
+  kj::Vector<char> builder(serializedSize);
 
   for (auto& kv: data) {
     builder.addAll("--"_kj);
@@ -349,6 +406,7 @@ kj::Array<kj::byte> FormData::serialize(kj::ArrayPtr<const char> boundary) {
   builder.addAll(boundary);
   builder.addAll("--"_kj);
 
+  KJ_ASSERT(builder.size() == serializedSize);
   return builder.releaseAsArray().releaseAsBytes();
 }
 
