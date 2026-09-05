@@ -8,6 +8,7 @@ mod coercion_safety;
 mod collections_gc;
 mod eval;
 mod function;
+mod function_resource;
 mod gc;
 mod jsg_oneof;
 mod jsg_struct;

@@ -181,6 +181,7 @@ Local local_symbol_new_with_description(Isolate* isolate, Local description);
 MaybeLocal local_symbol_description(Isolate* isolate, const Local& value);
 
 // Local<Function>
+// Fallible: tunnels any JS exception thrown by the callee.
 Local local_function_call(
     Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args);
 

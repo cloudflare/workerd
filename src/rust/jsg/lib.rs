@@ -7,6 +7,7 @@ use std::num::ParseIntError;
 use std::ops::Deref;
 
 pub mod feature_flags;
+pub mod function;
 pub mod macros;
 pub mod modules;
 pub mod nullable;
@@ -15,6 +16,8 @@ pub mod v8;
 mod wrappable;
 
 pub use feature_flags::FeatureFlags;
+pub use function::Function;
+pub use function::FunctionArgs;
 pub use nullable::Nullable;
 pub use resource::Rc;
 pub use resource::Resource;
@@ -101,6 +104,14 @@ pub struct Error {
     /// `impl_error_constructors!` macro) always set this to `false`; only
     /// `from_kj_description()` sets it to `true`.
     is_internal: bool,
+    /// If `true`, this error represents isolate termination surfaced across the
+    /// FFI (the C++ shims' `TERMINATED_DESCRIPTION` tunnel, see
+    /// `src/rust/jsg/ffi.c++`), not a catchable JS exception.
+    /// `Lock::throw_exception()` re-raises it by re-arming
+    /// `terminate_execution()` instead of scheduling a JS throw. Only
+    /// `from_kj_description()` sets it; guest JS cannot forge it because user
+    /// exceptions tunnel under the `jsg.` prefix, not `jsg-internal.`.
+    is_termination: bool,
 }
 
 impl std::fmt::Display for Error {
@@ -120,6 +131,7 @@ macro_rules! impl_error_constructors {
                         name: ExceptionType::$variant,
                         message: message.into(),
                         is_internal: false,
+                        is_termination: false,
                     }
                 }
             )*
@@ -170,6 +182,7 @@ impl FromJS for Error {
                 name: name.map_or(ExceptionType::Error, |n| ExceptionType::from(n.as_str())),
                 message,
                 is_internal: false,
+                is_termination: false,
             })
         } else {
             Err(Self::new_type_error("Unknown error"))
@@ -183,6 +196,7 @@ impl Error {
             name: ExceptionType::from(name),
             message: message.to_owned(),
             is_internal: false,
+            is_termination: false,
         }
     }
 
@@ -199,6 +213,7 @@ impl Error {
             name,
             message: message.into(),
             is_internal: false,
+            is_termination: false,
         }
     }
 
@@ -322,6 +337,17 @@ impl Error {
             None => (msg.strip_prefix("jsg-internal.")?, true),
         };
 
+        // Isolate termination tunneled by the FFI shims (TERMINATED_DESCRIPTION in
+        // ffi.c++). Only recognized under the unforgeable `jsg-internal.` prefix.
+        if is_internal && let Some(message) = body.strip_prefix("Terminated: ") {
+            return Some(Self {
+                name: ExceptionType::Error,
+                message: message.to_owned(),
+                is_internal: true,
+                is_termination: true,
+            });
+        }
+
         if let Some(rest) = body.strip_prefix("DOMException(")
             && let Some((name, message)) = rest.split_once("): ")
         {
@@ -329,6 +355,7 @@ impl Error {
                 name: ExceptionType::from(name),
                 message: message.to_owned(),
                 is_internal,
+                is_termination: false,
             });
         }
 
@@ -337,7 +364,19 @@ impl Error {
             name: ExceptionType::from(ty),
             message: message.to_owned(),
             is_internal,
+            is_termination: false,
         })
+    }
+
+    /// Returns `true` if this error represents isolate termination rather than a
+    /// catchable JS exception.
+    ///
+    /// Callers looping over JS callbacks should treat this as a signal to stop
+    /// immediately: the termination flag is pending on the isolate, so further JS
+    /// entry only fails again. Throwing the error via `Lock::throw_exception()`
+    /// re-arms termination rather than scheduling a JS throw.
+    pub fn is_termination(&self) -> bool {
+        self.is_termination
     }
 
     /// Like `new_type_error()`, but marks the resulting `Error` `is_internal`, so
@@ -351,6 +390,7 @@ impl Error {
             name: ExceptionType::TypeError,
             message: message.into(),
             is_internal: true,
+            is_termination: false,
         }
     }
 }
@@ -369,6 +409,23 @@ mod tunneled_error_tests {
         assert_eq!(err.name, ExceptionType::TypeError);
         assert_eq!(err.message, "boom");
         assert!(!err.is_internal, "jsg. errors must not be redacted");
+    }
+
+    #[test]
+    fn termination_tunnel() {
+        let err = from_description("jsg-internal.Terminated: JavaScript execution terminated");
+        assert!(err.is_termination());
+        assert!(err.is_internal);
+        assert_eq!(err.message, "JavaScript execution terminated");
+    }
+
+    #[test]
+    fn termination_not_forgeable_from_guest_prefix() {
+        // A user error named "Terminated" tunnels under `jsg.`, which must not
+        // be treated as termination.
+        let err = from_description("jsg.Terminated: fake");
+        assert!(!err.is_termination());
+        assert!(!err.is_internal);
     }
 
     #[test]
@@ -848,10 +905,20 @@ impl Lock {
 
     /// Throws an error as a V8 exception.
     ///
+    /// If `err.is_termination` is set, no JS exception is scheduled; termination
+    /// is re-armed instead so V8 unwinds all JS frames (a termination "throw"
+    /// must never be catchable by guest JS).
+    ///
     /// If `err.is_internal` is set, the message is redacted (via
     /// `throw_internal_error()`) rather than thrown verbatim, matching how
     /// C++ `decodeTunneledException()` handles `isInternal` KJ exceptions.
     pub fn throw_exception(&mut self, err: &Error) {
+        if err.is_termination {
+            // Idempotent if termination is already pending; covers the edge case
+            // where V8 cleared the flag after unwinding all JS frames.
+            self.terminate_execution();
+            return;
+        }
         if err.is_internal {
             self.throw_internal_error(&err.message);
             return;

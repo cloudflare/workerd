@@ -207,3 +207,22 @@ fn type_of_returns_correct_js_types() {
         Ok(())
     });
 }
+
+#[jsg_struct]
+struct HandlerOptions {
+    pub handler: jsg::Function<(), jsg::Number>,
+}
+
+/// A `jsg::Function` field converts through `#[jsg_struct]` and remains
+/// callable from the unwrapped struct.
+#[test]
+fn struct_with_function_field() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let value = ctx.eval_raw("({handler: () => 7})").unwrap();
+        let options = <HandlerOptions as jsg::FromJS>::from_js(lock, value)?;
+        let result = options.handler.call(lock, ())?;
+        assert!((result.value() - 7.0).abs() < f64::EPSILON);
+        Ok(())
+    });
+}

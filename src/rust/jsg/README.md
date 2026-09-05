@@ -143,6 +143,24 @@ impl EventEmitter {
 
 Without tracing, storing a `Global` back to the resource's own wrapper creates an unbreakable reference cycle that leaks until the worker is torn down. With `visit_global` tracing (generated automatically by `#[jsg_resource]`), the cycle is collected by the next full GC after all strong Rust `Rc`s are dropped.
 
+### `Function<Args, R>`
+
+A persistent, GC-traced handle to a JavaScript function with a typed Rust call signature — the counterpart of unwrapping a C++ `jsg::Function<Ret(Args...)>`. `Args` is a tuple of `ToJS` argument types; `R` is the `FromJS` return type (`()` discards the result). It is `FromJS`/`ToJS`/`Traced`, so it can be taken directly as a `#[jsg_method]` parameter and stored in a resource field:
+
+```rust
+#[jsg_method]
+fn on_event(&self, callback: jsg::Function<(String,), ()>) {
+    self.callback.set(Some(callback));
+}
+
+// later, under a lock:
+if let Some(cb) = self.callback.take() {
+    cb.call(lock, ("ready".to_owned(),))?;
+}
+```
+
+A JS exception thrown by the callee is returned as a `jsg::Error` preserving the JS error type and message. Isolate termination during the call is returned as a `jsg::Error` with `is_termination()` set; stop calling into JS when you see it — throwing it via `Lock::throw_exception()` re-arms termination rather than scheduling a catchable JS exception. Use `call_with_receiver` to pass an explicit `this`.
+
 ## Union Types
 
 To accept JavaScript values that can be one of several types, define an enum with `#[jsg_oneof]`:

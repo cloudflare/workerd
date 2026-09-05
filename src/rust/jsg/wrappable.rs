@@ -282,6 +282,16 @@ pub trait FromJS: Sized {
 // Primitive type implementations
 // =============================================================================
 
+/// `()` accepts any JS value and discards it — the return type for callbacks
+/// whose result is ignored, mirroring C++ `jsg::Function<void(...)>`.
+impl FromJS for () {
+    type ResultType = Self;
+
+    fn from_js(_lock: &mut Lock, _value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        Ok(())
+    }
+}
+
 // Boolean implementation for JavaScript booleans.
 impl Type for bool {
     fn class_name() -> &'static str {

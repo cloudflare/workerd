@@ -361,12 +361,14 @@ pub mod ffi {
         pub unsafe fn local_symbol_description(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
         // Local<Function>
+        // Fallible: tunnels any JS exception thrown by the callee (including
+        // exceptions from user code invoked transitively). See "Unwrappers" below.
         pub unsafe fn local_function_call(
             isolate: *mut Isolate,
             function: &Local,
             recv: &Local,
             args: &[Local],
-        ) -> Local;
+        ) -> Result<Local>;
 
         // Local<Object>
         pub unsafe fn local_object_set_property(
@@ -1459,6 +1461,9 @@ impl Local<'_, Function> {
     /// `args` is a slice of `Local<Value>` — use [`ToJS::to_js`] to convert Rust
     /// values, or `.into()` for other `Local<T>` handles.
     ///
+    /// If the callee throws, the exception is returned as an [`Error`] preserving
+    /// the JS error type and message.
+    ///
     /// # Example
     ///
     /// ```ignore
@@ -1489,7 +1494,7 @@ impl Local<'_, Function> {
                     &self.handle,
                     recv.as_ffi(),
                     &ffi_args,
-                ),
+                )?,
             )
         };
         R::from_js(lock, result)
@@ -2903,7 +2908,10 @@ pub struct Global<T> {
     /// This is sound because GC tracing is always single-threaded within a V8
     /// isolate and `trace` is never re-entrant on the same object.
     traced: UnsafeCell<ffi::TracedReference>,
-    _marker: PhantomData<T>,
+    /// `*mut ()` makes `Global` `!Send + !Sync`: the handle is bound to its
+    /// isolate's thread, and even `Drop` mutates V8 state (`global_reset`), so
+    /// moving one across threads would corrupt the V8 heap.
+    _marker: PhantomData<(T, *mut ())>,
 }
 
 // Common implementations for all Global<T>

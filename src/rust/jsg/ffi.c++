@@ -77,6 +77,48 @@ static v8::Local<v8::String> makeInternedStr(v8::Isolate* isolate, const Name& n
       v8::String::NewFromUtf8(isolate, name.data(), v8::NewStringType::kInternalized, name.size()));
 }
 
+// Description prefix for isolate termination surfaced across the FFI. Rust's
+// `jsg::Error::from_kj_description` recognizes it and marks the error as
+// termination, which `Lock::throw_exception` re-raises by re-arming
+// TerminateExecution() instead of scheduling a JS throw. The `jsg-internal.`
+// tunneling namespace makes it unforgeable from guest JS: user exceptions
+// tunnel with the plain `jsg.` prefix.
+static constexpr kj::StringPtr TERMINATED_DESCRIPTION =
+    "jsg-internal.Terminated: JavaScript execution terminated"_kj;
+
+// Runs `fn` (returning a v8::MaybeLocal<T>) and, on failure, converts the pending
+// JS exception into a `jsg.<Type>:`-prefixed kj::Exception and throws it, so
+// workerd-cxx's Result::run catches it in C++ and hands Rust a catchable error
+// instead of aborting.
+//
+// Isolate termination (which jsg::Lock::tryCatch re-throws as JsExceptionThrown,
+// expecting C++ callers to keep unwinding) cannot unwind across the nounwind FFI
+// frame either, so it is converted to a TERMINATED_DESCRIPTION kj::Exception.
+// The termination flag remains pending on the isolate regardless, so even a Rust
+// caller that swallows the error cannot resume JS execution.
+template <typename T, typename Func>
+static v8::Local<T> checkTunneled(v8::Isolate* isolate, Func&& fn) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  try {
+    JSG_TRY(js) {
+      return ::workerd::jsg::check(fn());
+    }
+    JSG_CATCH(error) {
+      kj::throwFatalException(
+          ::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
+    };
+  } catch (::workerd::jsg::JsExceptionThrown&) {
+    // Lock::tryCatch also re-throws JsExceptionThrown when no exception was
+    // actually scheduled (e.g. V8 already cleared the termination flag after
+    // unwinding all JS frames); it conflates that case with termination, and so
+    // do we.
+    // Constructed directly (not via KJ_EXCEPTION) so the description is exactly
+    // TERMINATED_DESCRIPTION, which Rust matches on.
+    kj::throwFatalException(kj::Exception(
+        kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::str(TERMINATED_DESCRIPTION)));
+  }
+}
+
 // Wrappable implementation - calls into Rust via CXX bridge
 Wrappable::~Wrappable() {
   wrappable_invoke_drop(*this);
@@ -409,6 +451,8 @@ MaybeLocal local_symbol_description(Isolate* isolate, const Local& value) {
 }
 
 // Local<Function>
+
+// Fallible: tunnels any JS exception thrown by the callee (see checkTunneled).
 Local local_function_call(
     Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args) {
   auto context = isolate->GetCurrentContext();
@@ -420,7 +464,8 @@ Local local_function_call(
     v8Args[i] = local_as_ref_from_ffi<v8::Value>(args[i]);
   }
 
-  return to_ffi(::workerd::jsg::check(fn->Call(context, receiver, v8Args.size(), v8Args.data())));
+  return to_ffi(checkTunneled<v8::Value>(
+      isolate, [&] { return fn->Call(context, receiver, v8Args.size(), v8Args.data()); }));
 }
 
 // Local<Object>
@@ -646,22 +691,6 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 
 // Unwrappers
 
-// Runs `fn` (returning a v8::MaybeLocal<T>) and, on failure, converts the pending
-// JS exception into a `jsg.<Type>:`-prefixed kj::Exception and throws it, so
-// workerd-cxx's Result::run catches it in C++ and hands Rust a catchable error
-// instead of aborting. Termination exceptions are re-thrown unchanged. The
-// TryCatch and termination handling are delegated to jsg::Lock::tryCatch.
-template <typename T, typename Func>
-static v8::Local<T> unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
-  auto& js = ::workerd::jsg::Lock::from(isolate);
-  JSG_TRY(js) {
-    return ::workerd::jsg::check(fn());
-  }
-  JSG_CATCH(error) {
-    kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
-  };
-}
-
 ::rust::String unwrap_string(Isolate* isolate, Local value) {
   auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
   // Fast path: a string primitive needs no coercion and can't throw, so skip
@@ -671,7 +700,7 @@ static v8::Local<T> unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
     v8Str = v8Value.As<v8::String>();
   } else {
     auto context = isolate->GetCurrentContext();
-    v8Str = unwrapCoerce<v8::String>(isolate, [&] { return v8Value->ToString(context); });
+    v8Str = checkTunneled<v8::String>(isolate, [&] { return v8Value->ToString(context); });
   }
   v8::String::ValueView view(isolate, v8Str);
   if (!view.is_one_byte()) {
@@ -693,7 +722,7 @@ double unwrap_number(Isolate* isolate, Local value) {
   }
   auto context = isolate->GetCurrentContext();
   v8::Local<v8::Number> number =
-      unwrapCoerce<v8::Number>(isolate, [&] { return v8Value->ToNumber(context); });
+      checkTunneled<v8::Number>(isolate, [&] { return v8Value->ToNumber(context); });
   return number->Value();
 }
 
@@ -736,7 +765,7 @@ DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
 //
 // Iterate() can fail with a *pending* V8 exception rather than a KJ one -- e.g. a
 // throwing Proxy trap or getter on one of the array's elements. That must be tunneled
-// through the same `jsg.<Type>:`-prefixed kj::Exception mechanism as `unwrapCoerce`
+// through the same `jsg.<Type>:`-prefixed kj::Exception mechanism as `checkTunneled`
 // uses (see above), rather than discarded in favor of a generic KJ_REQUIRE failure,
 // or the real error is lost and the pending exception is left dangling on the isolate.
 ::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value) {

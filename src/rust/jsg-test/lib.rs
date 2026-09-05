@@ -57,6 +57,7 @@ mod ffi {
         /// current HandleScope.
         #[expect(clippy::allow_attributes)] // Only used in tests, but #[expect(dead_code)] fails during test builds
         #[allow(dead_code)]
+        pub unsafe fn cancel_termination(isolate: *mut Isolate);
         pub unsafe fn request_gc(isolate: *mut Isolate, gc_type: GcType);
 
         /// Creates a V8 object with the C++ `WORKERD_WRAPPABLE_TAG` in its internal fields.
@@ -236,6 +237,15 @@ impl Harness {
             self.0
                 .run_in_context(&raw mut callback as usize, trampoline::<F>);
         }
+    }
+
+    /// Cancels a pending `terminate_execution()` so the harness can keep using
+    /// the isolate after a test deliberately terminates it. Debug V8 DCHECKs
+    /// (`!isolate_->has_exception()`) on API entry if the termination exception
+    /// is still scheduled when the test returns control to the harness.
+    pub fn cancel_termination(lock: &mut jsg::Lock) {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::cancel_termination(lock.isolate().as_ffi()) };
     }
 
     pub fn request_gc(lock: &mut jsg::Lock) {

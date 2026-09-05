@@ -130,6 +130,10 @@ void TestHarness::run_in_context(
   });
 }
 
+void cancel_termination(Isolate* isolate) {
+  isolate->CancelTerminateExecution();
+}
+
 void request_gc(Isolate* isolate, GcType gc_type) {
   switch (gc_type) {
     case GcType::Full:
