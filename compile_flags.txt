@@ -21,7 +21,10 @@
 -isystembazel-bin/external/+http+capnp-cpp/src/capnp/compat/_virtual_includes/http-over-capnp
 -isystembazel-bin/external/+http+capnp-cpp/src/capnp/compat/_virtual_includes/json
 -isystembazel-bin/external/+http+capnp-cpp/src/kj/_virtual_includes/kj
--isystembazel-bin/external/+http+capnp-cpp/src/kj/_virtual_includes/kj-async
+-isystembazel-bin/external/+http+capnp-cpp/src/kj/_virtual_includes/kj-async-core
+-isystembazel-bin/external/+http+capnp-cpp/src/kj/_virtual_includes/kj-async-io
+-isystembazel-bin/external/+http+capnp-cpp/src/kj/_virtual_includes/kj-async-os-hdrs
+-isystembazel-bin/external/+http+capnp-cpp/src/kj/_virtual_includes/kj-test
 -isystembazel-bin/external/+http+capnp-cpp/src/kj/compat/_virtual_includes/kj-brotli
 -isystembazel-bin/external/+http+capnp-cpp/src/kj/compat/_virtual_includes/kj-gzip
 -isystembazel-bin/external/+http+capnp-cpp/src/kj/compat/_virtual_includes/kj-http
