@@ -254,6 +254,8 @@ class AesGcmKey final: public AesKeyBase {
     // a stream cipher in that it does not add padding and can process partial blocks, meaning that
     // we know the exact ciphertext size in advance.
     auto tagByteSize = tagLength / 8;
+    JSG_REQUIRE(isOpenSslInputSizeValid(plainText.size(), tagByteSize), DOMOperationError,
+        "Data is too large.");
     auto cipherText = jsg::JsArrayBuffer::create(js, plainText.size() + tagByteSize);
 
     // Perform the actual encryption.
@@ -324,6 +326,8 @@ class AesGcmKey final: public AesKeyBase {
     auto actualCipherText = cipherText.first(cipherText.size() - tagLength / 8);
     auto tagText = cipherText.slice(actualCipherText.size(), cipherText.size());
 
+    JSG_REQUIRE(
+        isOpenSslInputSizeValid(actualCipherText.size()), DOMOperationError, "Data is too large.");
     auto plainText = jsg::JsArrayBuffer::create(js, actualCipherText.size());
 
     // Perform the actual decryption.
@@ -378,6 +382,8 @@ class AesCbcKey final: public AesKeyBase {
 
     auto blockSize = EVP_CIPHER_CTX_block_size(cipherCtx.get());
     size_t paddingSize = blockSize - (plainText.size() % blockSize);
+    JSG_REQUIRE(isOpenSslInputSizeValid(plainText.size(), paddingSize), DOMOperationError,
+        "Data is too large.");
     auto cipherText = jsg::JsArrayBuffer::create(js, plainText.size() + paddingSize);
 
     // Perform the actual encryption.
@@ -420,6 +426,9 @@ class AesCbcKey final: public AesKeyBase {
 
     int plainSize = 0;
     auto blockSize = EVP_CIPHER_CTX_block_size(cipherCtx.get());
+    auto maxFinalBlockSize = blockSize > 1 ? static_cast<size_t>(blockSize) : 0;
+    JSG_REQUIRE(isOpenSslInputSizeValid(cipherText.size(), maxFinalBlockSize), DOMOperationError,
+        "Data is too large.");
 
     KJ_STACK_ARRAY(
         kj::byte, plainText, cipherText.size() + ((blockSize > 1) ? blockSize : 0), 1024, 4096);

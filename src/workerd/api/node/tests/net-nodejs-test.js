@@ -574,6 +574,22 @@ export const testNetConnectOptionsInvalid = {
         });
       }
     );
+
+    const err = {
+      code: 'ERR_INVALID_ARG_VALUE',
+      name: 'TypeError',
+    };
+
+    throws(() => net.connect({ host: 'localhost\u0000', port: 8080 }), err);
+    throws(
+      () => net.createConnection({ host: 'localhost\u0000', port: 8080 }),
+      err
+    );
+
+    for (const host of [null, '', undefined, 0, false]) {
+      const socket = net.connect({ host, port: 8080 });
+      socket.destroy();
+    }
   },
 };
 
