@@ -93,6 +93,7 @@ cc_library(
     local_defines = ["ZLIB_IMPLEMENTATION"] + select({
         "@platforms//cpu:x86_64": ["ADLER32_SIMD_SSSE3"],
         "@platforms//cpu:aarch64": ["ADLER32_SIMD_NEON"],
+        "//conditions:default": [],
     }) + select({
         ":x86_linux": ["X86_NOT_WINDOWS"],
         ":x86_macos": ["X86_NOT_WINDOWS"],
@@ -150,6 +151,7 @@ cc_library(
         "@platforms//cpu:aarch64": [
             "INFLATE_CHUNK_SIMD_NEON",
         ],
+        "//conditions:default": [],
     }),
     deps = [":zlib_common_headers"],
 )
@@ -186,6 +188,7 @@ cc_library(
     local_defines = ["ZLIB_IMPLEMENTATION"] + select({
         "@platforms//cpu:x86_64": ["DEFLATE_SLIDE_HASH_SSE2"],
         "@platforms//cpu:aarch64": ["DEFLATE_SLIDE_HASH_NEON"],
+        "//conditions:default": [],
     }),
     deps = [":zlib_common_headers"],
 )
@@ -249,6 +252,7 @@ cc_library(
             "DEFLATE_SLIDE_HASH_NEON",
             "DEFLATE_CHUNK_WRITE_64LE",
         ],
+        "//conditions:default": [],
     }) + select({
         ":x86_linux": ["X86_NOT_WINDOWS"],
         ":x86_macos": ["X86_NOT_WINDOWS"],
@@ -266,6 +270,7 @@ cc_library(
     ] + select({
         "@platforms//cpu:x86_64": [":zlib_crc32_simd"],
         "@platforms//cpu:aarch64": [":zlib_arm_crc32"],
+        "//conditions:default": [],
     }),
 )
 
