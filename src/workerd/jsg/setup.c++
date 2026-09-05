@@ -790,6 +790,11 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
   state.sp = reinterpret_cast<void*>(mcontext.sp);
   state.fp = reinterpret_cast<void*>(mcontext.regs[29]);
   state.lr = reinterpret_cast<void*>(mcontext.regs[30]);
+#elif defined(__linux__) && defined(__riscv)
+  state.pc = reinterpret_cast<void*>(mcontext.__gregs[REG_PC]);
+  state.sp = reinterpret_cast<void*>(mcontext.__gregs[REG_SP]);
+  state.fp = reinterpret_cast<void*>(mcontext.__gregs[REG_S0]);
+  state.lr = reinterpret_cast<void*>(mcontext.__gregs[REG_RA]);
 #else
 #error "Please add architecture support. See FillRegisterState() in v8/src/libsampler/sampler.cc"
 #endif
