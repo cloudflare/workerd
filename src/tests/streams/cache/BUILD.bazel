@@ -1,0 +1,29 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The cache streams suite runs the same test modules under two configs:
+# cache-cpp against the C++ implementation, cache-ts against the
+# TypeScript implementation. Both wire a loopback cache backend that
+# records puts for integrity verification.
+
+cache_suite_srcs = glob(["*.js"]) + ["cache-modules.capnp"]
+
+wd_test(
+    src = "cache-cpp.wd-test",
+    data = cache_suite_srcs,
+)
+
+wd_test(
+    src = "cache-ts.wd-test",
+    args = ["--experimental"],
+    data = cache_suite_srcs,
+)
+
+# Retains the clone-put regression under the original TransformStream alias.
+# The all-compat-flags variant would enable streams_enable_constructors,
+# allowing the modern path selected by transformstream_enable_standard_constructor
+# and duplicating the main C++ cell.
+wd_test(
+    src = "cache-cpp-legacy.wd-test",
+    data = cache_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)

@@ -2199,20 +2199,17 @@ connection between a C++ object and its JavaScript "wrapper" object.
 
 #### Internal Fields
 
-JavaScript wrapper objects have one internal marker field:
+JavaScript wrapper objects have two internal fields:
 
 ```cpp
 enum InternalFields : int {
-  WRAPPABLE_TAG_FIELD_INDEX = 0,  // Contains WORKERD_WRAPPABLE_TAG
-  INTERNAL_FIELD_COUNT = 1,
+  WRAPPABLE_TAG_FIELD_INDEX = 0,    // Contains WORKERD_WRAPPABLE_TAG
+  WRAPPED_OBJECT_FIELD_INDEX = 1,   // Pointer back to the Wrappable
+  INTERNAL_FIELD_COUNT = 2,
 };
 ```
 
 Check if an object is a workerd API object: `jsg::Wrappable::isWorkerdApiObject(object)`
-
-The native `Wrappable` is owned by a cppgc shim reached through V8's tagged CppHeap pointer table.
-Unwrapping validates the resource tag range, exact JavaScript wrapper identity, and native RTTI
-before dispatch.
 
 #### Context Embedder Data Slots
 
@@ -2241,31 +2238,25 @@ if (jsg::HeapTracer::isInCppgcDestructor()) {
 ### Wrapper Lifecycle
 
 ```
-1. Wrappable created (no JS wrapper yet)
+1. C++ object created (no JS wrapper yet)
          |
-2. Wrappable passed to JavaScript
+2. Object passed to JavaScript
          |
-3. attachWrapper() attaches the JS wrapper, allocating a cppgc shim
-   (or reusing one from the freelist)
+3. attachWrapper() creates JS wrapper
          |
-4. wrapper -> shim -> Wrappable:
-   - the wrapper keeps the shim alive, via V8's CppHeap pointer table
-   - the shim holds a strong kj::Own<Wrappable>
-   - so the Wrappable cannot be destroyed while a wrapper exists
+4. JS wrapper and C++ object linked
          |
-5. GC may collect the wrapper if:
+5. GC may collect wrapper if:
    - No JS references exist
-   - No strong Ref<T>s exist (one would root the wrapper)
+   - No strong Ref<T>s exist
    - Wrapper is "unmodified"
          |
-6. detachWrapper() runs when the wrapper goes away, from:
-   - ~CppgcShim, after a major GC collected the wrapper
-   - ResetRoot(), when V8 drops an unmodified droppable wrapper
-   - clearWrappers(), at isolate shutdown
-   It releases the shim's reference to the Wrappable.
+6. If wrapper collected but C++ object still alive:
+   - New wrapper created on next JS access
          |
-7. If other C++ references remain, the Wrappable lives on and a new
-   wrapper is created on the next JS access. Otherwise it is destroyed.
+7. When C++ object destroyed:
+   - detachWrapper() called
+   - JS wrapper becomes empty shell
 ```
 
 ### Async Destructor Safety

@@ -298,8 +298,9 @@ void ExecProcess::resize(jsg::Lock& js, int cols, int rows) {
 // =======================================================================================
 // Basic lifecycle methods
 
-Container::Container(rpc::Container::Client rpcClient, bool running)
-    : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))) {
+Container::Container(rpc::Container::Client rpcClient, bool running, jsg::Dict<kj::String> images)
+    : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
+      images(kj::mv(images)) {
   if (running) startMonitor();
 }
 
@@ -320,6 +321,18 @@ bool Container::getRunning() {
     return monitor->running;
   }
   return false;
+}
+
+jsg::Dict<kj::String> Container::getImages() const {
+  return jsg::Dict<kj::String>{
+    .fields =
+        KJ_MAP(field, images.fields) {
+    return jsg::Dict<kj::String>::Field{
+      .name = kj::str(field.name),
+      .value = kj::str(field.value),
+    };
+  },
+  };
 }
 
 bool Container::isCurrentMonitor(uint64_t generation) {

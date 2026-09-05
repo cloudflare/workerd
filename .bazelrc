@@ -87,6 +87,13 @@ build:macos --per_file_copt=v8/src/heap/heap.cc@-O3
 # causing compile errors. Undefine DEBUG to match Linux behavior.
 build:macos --copt=-UDEBUG
 
+# Keep workerd and V8's Perfetto build configurations in sync.
+build:perfetto --//src/workerd/util:use_perfetto=True
+build:perfetto --@v8//:v8_use_perfetto=True
+build:no-perfetto --//src/workerd/util:use_perfetto=False
+build:no-perfetto --@v8//:v8_use_perfetto=False
+build:unix --config=perfetto
+
 # Increasing the optimization level of V8 significantly speeds up tests using V8 a lot, especially
 # python tests. This is useful for both CI and local development and enabled by default, but still
 # kept in a separate configuration to make it easy to disable.

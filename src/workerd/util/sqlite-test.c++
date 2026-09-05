@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "sentry.h"
 #include "sqlite.h"
 
 #include <fcntl.h>
@@ -1613,6 +1614,21 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
   }
 };
 
+void expectDoSentryDisposition(const kj::Exception& exception) {
+  auto disposition = KJ_ASSERT_NONNULL(exception.getDetail(SENTRY_TAG_DETAIL_ID));
+  KJ_EXPECT(disposition.asChars() == "SENTRY_DO"_kj, exception);
+}
+
+KJ_TEST("SQLite open errors are tagged for DO Sentry") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  auto exception = KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { SqliteDatabase(vfs, kj::Path({"missing"}), kj::none); }));
+  KJ_EXPECT(exception.getDescription().contains("unable to open database file: SQLITE_CANTOPEN"),
+      exception);
+  expectDoSentryDisposition(exception);
+}
+
 KJ_TEST("SQLite memory metering enforces SQLITE_NOMEM when limit is exceeded") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
@@ -1683,10 +1699,13 @@ KJ_TEST("I/O exceptions pass through SQLite") {
   KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "test-vfs-error");
 
   // It should pass through.
-  KJ_EXPECT_THROW_MESSAGE(
-      "test-vfs-error", db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str(R"(
+  auto exception = KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
+    db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str(R"(
     INSERT INTO things(value) VALUES (456);
-  )")));
+  )"));
+  }));
+  KJ_EXPECT(exception.getDescription() == "test-vfs-error", exception);
+  expectDoSentryDisposition(exception);
 }
 
 void testCriticalError(const char* expectedErrorMessage,

@@ -51,10 +51,7 @@ edition = "2024"
 debug = true
 EOF
 
-cat > "$work/src/lib.rs" <<'EOF'
-#[test]
-fn build_std() {}
-EOF
+touch "$work/src/lib.rs"
 
 # rust-src includes the exact third-party sources selected by the standard
 # library's lockfile. Offline mode keeps this action hermetic.
@@ -82,18 +79,12 @@ export CARGO_TARGET_DIR="$target_dir"
 export __CARGO_TESTS_ONLY_SRC_ROOT="$rust_library"
 
 # Cargo applies target-specific flags to the generated package and every
-# build-std dependency. The temporary test binary links Rust's own sanitizer
-# runtime: rustc passes -nodefaultlibs to clang, and on macOS that suppresses
-# clang's automatic sanitizer-runtime linking, so -Zexternal-clangrt would leave
-# the binary's __tsan_* references unresolved. That flag only affects linking,
-# never the rlibs we keep, so it is applied to Bazel-built targets from .bazelrc
-# instead, where they share Clang's runtime with C++ at their final link.
+# build-std dependency.
 env_name="CARGO_TARGET_$(printf '%s' "$target_triple" | tr '[:lower:]-' '[:upper:]_')_RUSTFLAGS"
-export "$env_name=-Zsanitizer=$sanitizer -Clinker=clang -Clink-arg=-fsanitize=$sanitizer"
+export "$env_name=-Zsanitizer=$sanitizer"
 
-"$rust_root/bin/cargo" test \
+"$rust_root/bin/cargo" build \
   --manifest-path "$work/Cargo.toml" \
-  --no-run \
   --release \
   --target "$target_triple" \
   -Zbuild-std=std,panic_unwind,test \

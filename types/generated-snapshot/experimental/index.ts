@@ -4079,6 +4079,7 @@ export interface ExecProcess {
 }
 export interface Container {
   get running(): boolean;
+  get images(): Record<string, string>;
   start(options?: ContainerStartupOptions): void;
   monitor(): Promise<void>;
   destroy(error?: any): Promise<void>;
@@ -4857,6 +4858,7 @@ export interface Tracing {
     ...args: A
   ): T;
   startSpan(name: string): Span;
+  getActiveSpan(): Span | undefined;
   Span: typeof Span;
 }
 export declare abstract class Span {

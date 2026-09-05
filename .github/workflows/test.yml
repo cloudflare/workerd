@@ -82,6 +82,35 @@ jobs:
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
       GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
 
+  # Start TSan coverage with a small set of targets that do not depend on V8. More targets can be
+  # added as sanitizer compatibility is verified.
+  test-tsan:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ubuntu-22.04-16core
+      os_name: linux
+      arch_name: 'X64'
+      suffix: -tsan
+      extra_bazel_args: '--config=ci-test --config=ci-linux-tsan'
+      build_target: >-
+        //src/rust/tsan-test:tsan-integration-test
+        //src/workerd/util:batch-queue-test@
+        //src/workerd/util:checked-queue-test@
+        //src/workerd/util:ring-buffer-test@
+        //src/workerd/util:strong-bool-test@
+        //src/workerd/util:wait-list-test@
+      test_target: >-
+        //src/rust/tsan-test:tsan-integration-test
+        //src/workerd/util:batch-queue-test@
+        //src/workerd/util:checked-queue-test@
+        //src/workerd/util:ring-buffer-test@
+        //src/workerd/util:strong-bool-test@
+        //src/workerd/util:wait-list-test@
+    secrets:
+      BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
+      WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+      GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
+
   # Handled separately from `test` to speed up execution of workers-sdk-test which depends on it.
   test-linux:
     uses: ./.github/workflows/_bazel.yml
