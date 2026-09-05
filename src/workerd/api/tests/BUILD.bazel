@@ -186,6 +186,15 @@ wd_test(
     ],
 )
 
+wd_test(
+    src = "rpc-stub-gc-warning-inspector-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "rpc-stub-gc-warning-inspector-test.js",
+        "rpc-stub-gc-warning-inspector-trigger.js",
+    ],
+)
+
 # Test to validate timing semantics for JSRPC streaming responses.
 # This test verifies that Return events occur when the handler returns,
 # NOT when the stream is fully consumed.

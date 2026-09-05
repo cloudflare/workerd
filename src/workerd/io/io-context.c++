@@ -420,12 +420,14 @@ bool IoContext::hasWarningHandler() {
       ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO);
 }
 
-void IoContext::logWarning(kj::StringPtr description) {
-  KJ_REQUIRE_NONNULL(currentLock).logWarning(description);
+void IoContext::logWarning(
+    kj::StringPtr description, CaptureInspectorStackTrace captureStackTrace) {
+  KJ_REQUIRE_NONNULL(currentLock).logWarning(description, captureStackTrace);
 }
 
-void IoContext::logWarningOnce(kj::StringPtr description) {
-  KJ_REQUIRE_NONNULL(currentLock).logWarningOnce(description);
+void IoContext::logWarningOnce(
+    kj::StringPtr description, CaptureInspectorStackTrace captureStackTrace) {
+  KJ_REQUIRE_NONNULL(currentLock).logWarningOnce(description, captureStackTrace);
 }
 
 void IoContext::logErrorOnce(kj::StringPtr description) {

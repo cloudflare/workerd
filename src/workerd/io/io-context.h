@@ -391,11 +391,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Log a warning. Emits to the Chrome DevTools inspector (if connected), stderr, and to the
   // streaming tail worker tracer (if active).
-  void logWarning(kj::StringPtr description);
+  void logWarning(kj::StringPtr description,
+      CaptureInspectorStackTrace captureStackTrace = CaptureInspectorStackTrace::YES);
 
   // Log a warning, deduplicating so that each unique message is only logged once for the lifetime
   // of an isolate. Emits to the same destinations as logWarning().
-  void logWarningOnce(kj::StringPtr description);
+  void logWarningOnce(kj::StringPtr description,
+      CaptureInspectorStackTrace captureStackTrace = CaptureInspectorStackTrace::YES);
 
   // Log an internal error message. Deduplicates log messages such that a single unique message will
   // only be logged once for the lifetime of an isolate.
