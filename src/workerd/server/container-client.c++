@@ -1064,27 +1064,35 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
 }
 
 ContainerClient::~ContainerClient() noexcept(false) {
+  shutdown();
+}
+
+void ContainerClient::shutdown() {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+
   stopEgressListener();
 
-  // Best-effort cleanup for both containers.
-  auto sidecarCleanup =
-      removeContainer(network, kj::str(dockerPath), kj::str(sidecarContainerName), false)
-          .catch_([](kj::Exception&&) {});
-
-  // Also try to delete any cloned snapshot volumes.
+  // Remove the application before deleting its cloned volumes and network-namespace sidecar.
+  // Waiting for each removal ensures shutdown does not report completion while Docker is still
+  // tearing down the sidecar.
   auto volumes = snapshotClones.releaseAsArray();
-  auto mainCleanup = removeContainer(network, kj::str(dockerPath), kj::str(containerName))
-                         .catch_([](kj::Exception&&) {})
-                         .then([&network = network, dockerPath = kj::str(dockerPath),
-                                   volumes = kj::mv(volumes)]() mutable {
+  auto cleanup = removeContainer(network, kj::str(dockerPath), kj::str(containerName))
+                     .catch_([](kj::Exception&&) {})
+                     .then([&network = network, dockerPath = kj::str(dockerPath),
+                               volumes = kj::mv(volumes)]() mutable {
     return deleteVolumes(network, kj::mv(dockerPath), kj::mv(volumes));
+  })
+                     .catch_([](kj::Exception&&) {})
+                     .then([&network = network, dockerPath = kj::str(dockerPath),
+                               sidecarContainerName = kj::str(sidecarContainerName)]() mutable {
+    return removeContainer(network, kj::mv(dockerPath), kj::mv(sidecarContainerName));
   }).catch_([](kj::Exception&&) {});
 
-  // Pass the joined cleanup promise to the callback. The callback wraps it with the
-  // canceler (so a future client creation can cancel it), stores it so the next
-  // ContainerClient can await it, and adds a branch to waitUntilTasks to keep the
-  // underlying I/O alive.
-  cleanupCallback(kj::joinPromises(kj::arr(kj::mv(sidecarCleanup), kj::mv(mainCleanup))));
+  // Pass the cleanup promise to the callback. The callback wraps it with the canceler (so a
+  // future client creation can cancel it), stores it so the next ContainerClient can await it,
+  // and adds a branch to waitUntilTasks to keep the underlying I/O alive.
+  cleanupCallback(kj::mv(cleanup));
 }
 
 // Docker-specific Port implementation that implements rpc::Container::Port::Server
