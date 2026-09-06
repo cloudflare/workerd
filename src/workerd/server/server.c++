@@ -6608,9 +6608,12 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
     }
 
     kj::Own<WorkerInterface> getWorker() {
-      // For non-HTTP events (RPC, traces, etc.), create WorkerInterface with
-      // empty metadata since there's no HTTP request to extract cf from.
-      return getService()->startRequest({});
+      // For non-HTTP events (RPC, traces, etc.), there's no HTTP request to extract cf from, so
+      // cfBlobJson is left unset. fromPersistentStub must still be propagated so that the target
+      // re-verifies allow_irrevocable_stub_storage.
+      IoChannelFactory::SubrequestMetadata metadata;
+      metadata.fromPersistentStub = fromPersistentStub;
+      return getService()->startRequest(kj::mv(metadata));
     }
 
     [[noreturn]] void throwUnsupported() {

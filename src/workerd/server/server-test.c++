@@ -7132,6 +7132,55 @@ KJ_TEST("Server: debug port RPC calls") {
     auto jsonResult = deserializeV8ToJson(resultData);
     KJ_EXPECT(jsonResult == "8", jsonResult, "Expected result to be 8");
   }
+
+  // Test 7: `startEvent(fromPersistentStub = true)` is propagated to the target for non-HTTP
+  // events. `rpc-service` lacks `allow_irrevocable_stub_storage`, so the target must reject the
+  // event; this is the only observable that proves the flag reached WorkerEntrypoint::construct().
+  {
+    auto startSession = [&](bool fromPersistentStub) {
+      auto bootstrap =
+          getBootstrap("rpc-service", kj::none, [](auto& props) { props.setEmptyObject(); });
+      auto eventReq = bootstrap.startEventRequest();
+      eventReq.setFromPersistentStub(fromPersistentStub);
+      auto dispatcher = eventReq.send().wait(test.ws).getDispatcher();
+      return dispatcher.jsRpcSessionRequest().send();
+    };
+
+    auto callAdd = [&](rpc::JsRpcTarget::Client rpcTarget) {
+      auto v8SerializedArgs = serializeJsArguments({[](jsg::Lock& js) {
+        return jsg::JsValue(js.num(2));
+      }, [](jsg::Lock& js) { return jsg::JsValue(js.num(3)); }});
+      auto callReq = rpcTarget.callRequest();
+      callReq.setMethodName("add");
+      callReq.initOperation().initCallWithArgs().setV8Serialized(v8SerializedArgs);
+      return callReq.send();
+    };
+
+    // Control: without the flag, the session works.
+    {
+      auto sessionPromise = startSession(false);
+      auto callResp = callAdd(sessionPromise.getTopLevel()).wait(test.ws);
+      KJ_EXPECT(deserializeV8ToJson(callResp.getResult().getV8Serialized()) == "5");
+    }
+
+    // With the flag, the target rejects the RPC session.
+    {
+      auto sessionPromise = startSession(true);
+      KJ_EXPECT_THROW_MESSAGE("no longer has the allow_irrevocable_stub_storage",
+          callAdd(sessionPromise.getTopLevel()).wait(test.ws));
+    }
+
+    // Control: the HTTP path rejects it too.
+    {
+      auto bootstrap =
+          getBootstrap("rpc-service", kj::none, [](auto& props) { props.setEmptyObject(); });
+      auto eventReq = bootstrap.startEventRequest();
+      eventReq.setFromPersistentStub(true);
+      auto dispatcher = eventReq.send().wait(test.ws).getDispatcher();
+      KJ_EXPECT_THROW_MESSAGE("no longer has the allow_irrevocable_stub_storage",
+          makeHttpRequestFromDispatcher(kj::mv(dispatcher), "/"));
+    }
+  }
 }
 
 KJ_TEST("Server: workerdDebugPort binding current process test") {
