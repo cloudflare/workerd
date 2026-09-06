@@ -391,8 +391,6 @@ class Server::ActorNamespace final {
         waitUntilTasks(waitUntilTasks),
         selfTokensArePersistent(selfTokensArePersistent) {}
 
-  class ClusterActorChannel;
-
   void link(kj::Maybe<const kj::Directory&> serviceActorStorage,
       kj::Maybe<ClusterRegistry&> clusterRegistry,
       kj::Maybe<capnp::RpcSystem<cluster::VatId>&> clusterRpc) {
@@ -481,40 +479,10 @@ class Server::ActorNamespace final {
       }
     }
 
-    KJ_IF_SOME(ld, lockManager) {
-      auto key = actorKey(id);
-
-      // First check if the container exists locally.
-      KJ_IF_SOME(container, actors.find(key)) {
-        return kj::refcounted<ActorChannelImpl>(container->addRef(), persistent);
-      }
-
-      auto promise = ld.acquireOrRoute(key);
-      return newPromisedChannel<IoChannelFactory::ActorChannel>(
-          promise.then([this, id = kj::mv(id), key = kj::mv(key), persistent](
-                           kj::OneOf<ClusterLockManager::OwnedLock, rpc::WorkerdDebugPort::Client>
-                               lockOrClient) mutable -> kj::Own<IoChannelFactory::ActorChannel> {
-        KJ_SWITCH_ONEOF(lockOrClient) {
-          KJ_CASE_ONEOF(ownership, ClusterLockManager::OwnedLock) {
-            return kj::refcounted<ActorChannelImpl>(
-                createActorContainer(kj::mv(key), kj::mv(id), kj::mv(ownership)), persistent);
-          }
-          KJ_CASE_ONEOF(debugPort, rpc::WorkerdDebugPort::Client) {
-            auto req = debugPort.getActorRequest(capnp::MessageSize{32, 0});
-            req.setService(serviceName);
-            req.setEntrypoint(className);
-            req.setActorId(key);
-            KJ_IF_SOME(i, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
-              KJ_IF_SOME(name, i->getName()) {
-                req.setActorName(name);
-              }
-            }
-            return kj::refcounted<RpcActorChannel>(
-                *this, kj::mv(id), persistent, req.send().getActor());
-          }
-        }
-        KJ_UNREACHABLE;
-      }));
+    if (lockManager != kj::none) {
+      // Cluster mode: resolution of the owning node is deferred until the channel is first used,
+      // so that merely obtaining a stub never takes cluster locks or wakes actors.
+      return kj::refcounted<ClusterActorChannel>(*this, kj::mv(id), persistent);
     } else {
       return kj::refcounted<ActorChannelImpl>(getActorContainer(kj::mv(id)), persistent);
     }
@@ -1502,7 +1470,10 @@ class Server::ActorNamespace final {
     })->addRef();
   }
 
-  // Create an ActorContainer in cluster mode.
+  // Create an ActorContainer in cluster mode. Must be called in the same synchronous continuation
+  // that received `ownership` from ClusterLockManager::acquireOrRoute(): the lock file naming this
+  // node while `actors` has no entry for the key would make requests for the actor loop through
+  // self-bootstrap until the entry appears.
   kj::Own<ActorContainer> createActorContainer(
       kj::String key, Worker::Actor::Id id, ClusterLockManager::OwnedLock ownership) {
     KJ_ASSERT(actors.find(key) == kj::none);
@@ -1511,6 +1482,29 @@ class Server::ActorNamespace final {
         ActorContainer::ClassAndId(kj::addRef(*actorClass), kj::mv(id)), timer, kj::mv(ownership));
     actors.insert(container->getKey(), container->addRef());
     return container;
+  }
+
+  // Which node currently owns the actor with the given key: a container on this node (created
+  // here if we just claimed the lock), or the owning node's debug port. Not cached; callers cache
+  // what they derive from it. Every cluster-routed channel type resolves through this method so
+  // that the lock protocol lives in exactly one place. `key` and `id` must remain valid until the
+  // returned promise settles. Cluster mode only.
+  using Node = kj::OneOf<kj::Own<ActorContainer>, rpc::WorkerdDebugPort::Client>;
+  kj::Promise<Node> resolveNode(kj::StringPtr key, Worker::Actor::Id& id) {
+    KJ_IF_SOME(container, actors.find(key)) {
+      co_return container->addRef();
+    }
+
+    auto lockOrClient = co_await KJ_ASSERT_NONNULL(lockManager).acquireOrRoute(key);
+    KJ_SWITCH_ONEOF(lockOrClient) {
+      KJ_CASE_ONEOF(ownership, ClusterLockManager::OwnedLock) {
+        co_return createActorContainer(kj::str(key), Worker::Actor::cloneId(id), kj::mv(ownership));
+      }
+      KJ_CASE_ONEOF(debugPort, rpc::WorkerdDebugPort::Client) {
+        co_return kj::mv(debugPort);
+      }
+    }
+    KJ_UNREACHABLE;
   }
 
   // Encode a channel token pointing at the given actor in this namespace. The caller is
@@ -1894,37 +1888,51 @@ class Server::ActorNamespace final {
     }
   };
 
-  // ActorChannel implementation wrapping a `WorkerdBootstrap` RPC stub pointing at an actor
-  // owned by another workerd instance in the cluster.
-  class RpcActorChannel final: public IoChannelFactory::ActorChannel {
+  // Channel to an actor in this namespace in cluster mode. Resolution of which node owns the actor
+  // is deferred until first use, so that obtaining or deserializing a stub does not take cluster
+  // locks or wake remote actors.
+  class ClusterActorChannel final: public IoChannelFactory::ActorChannel {
    public:
-    RpcActorChannel(ActorNamespace& ns,
-        Worker::Actor::Id id,
-        Persistent persistent,
-        rpc::WorkerdBootstrap::Client client)
+    ClusterActorChannel(ActorNamespace& ns, Worker::Actor::Id id, Persistent persistent)
         : ns(ns),
           id(kj::mv(id)),
-          persistent(persistent),
-          client(kj::mv(client)) {}
+          key(ns.actorKey(this->id)),
+          persistent(persistent) {}
+    ~ClusterActorChannel() noexcept(false) {
+      KJ_IF_SOME(t, target) {
+        KJ_IF_SOME(container, t.tryGet<kj::Own<ActorContainer>>()) {
+          container->updateAccessTime();
+        }
+      }
+    }
 
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-      capnp::MessageSize sizeHint{4, 0};
-      KJ_IF_SOME(cf, metadata.cfBlobJson) {
-        sizeHint.wordCount += cf.size() / sizeof(capnp::word) + 1;
+      // If this channel was reconstructed from a persistent (stored) stub, signal the target so it
+      // can re-verify that it still allows persistent stubs.
+      metadata.fromPersistentStub = metadata.fromPersistentStub || persistent;
+      return newPromisedWorkerInterface(startRequestImpl(kj::addRef(*this), kj::mv(metadata)));
+    }
+
+    kj::Promise<void> evictForTest(IoChannelFactory::EvictWebSocketMode webSocketMode) override {
+      KJ_IF_SOME(t, target) {
+        KJ_SWITCH_ONEOF(t) {
+          KJ_CASE_ONEOF(container, kj::Own<ActorContainer>) {
+            return container->evictForTest(webSocketMode).attach(kj::addRef(*this));
+          }
+          KJ_CASE_ONEOF(_, rpc::WorkerdBootstrap::Client) {
+            JSG_FAIL_REQUIRE(Error,
+                "Cannot evict Durable Object: it is owned by another workerd instance in the "
+                "cluster.");
+          }
+        }
       }
 
-      // The remote instance reconstructs SubrequestMetadata from these params.
-      auto req = client.startEventRequest(sizeHint);
-      KJ_IF_SOME(cf, metadata.cfBlobJson) {
-        req.setCfBlobJson(cf);
+      // Not resolved yet. If the actor is running on this node, evict it without pinning it to
+      // this channel.
+      KJ_IF_SOME(container, ns.actors.find(key)) {
+        return container->evictForTest(webSocketMode).attach(container->addRef());
       }
-      req.setFromPersistentStub(bool(metadata.fromPersistentStub || persistent));
-
-      auto dispatcher = req.sendForPipeline().getDispatcher();
-      // NOTE: We don't support restore() over cluster RPC so we can use
-      // getUnsupportedFrankenvalueHandler() here for now.
-      return kj::heap<RpcWorkerInterface>(ns.httpOverCapnpFactory, ns.byteStreamFactory,
-          getUnsupportedFrankenvalueHandler(), kj::mv(dispatcher));
+      JSG_FAIL_REQUIRE(Error, "Cannot evict Durable Object: it is not currently running.");
     }
 
     void requireAllowsTransfer() override {
@@ -1940,8 +1948,87 @@ class Server::ActorNamespace final {
    private:
     ActorNamespace& ns;
     Worker::Actor::Id id;
+    kj::String key;
     Persistent persistent;
-    rpc::WorkerdBootstrap::Client client;
+
+    // Where requests on this channel go, resolved on first startRequest() and retained for the
+    // life of the channel. Local: the container, pinned exactly as ActorChannelImpl pins it (and
+    // therefore the ownership lock). Remote: a WorkerdBootstrap for this actor on the owning node.
+    // Retaining the target gives remote stubs the same failure semantics as local ones: a local
+    // channel keeps throwing `brokenReason` once its container breaks; a retained bootstrap
+    // likewise keeps failing once the far end breaks, rather than silently reaching a freshly
+    // re-instantiated actor on the next call.
+    using Target = kj::OneOf<kj::Own<ActorContainer>, rpc::WorkerdBootstrap::Client>;
+    kj::Maybe<Target> target;
+
+    // Set once the first resolution starts. Its branches are only ever held by coroutines that
+    // also hold a reference to this channel, so the underlying resolution never outlives `this`.
+    kj::Maybe<kj::ForkedPromise<void>> resolving;
+
+    // Resolves `target`, caching the result. Safe to call concurrently; all callers share one
+    // ns.resolveNode() attempt. A failed resolution is retained too, so every later request on the
+    // channel fails with the same exception.
+    kj::Promise<void> resolveTarget() {
+      if (target != kj::none) return kj::READY_NOW;
+      KJ_IF_SOME(r, resolving) return r.addBranch();
+      return resolving.emplace(resolveTargetImpl().fork()).addBranch();
+    }
+
+    kj::Promise<void> resolveTargetImpl() {
+      auto node = co_await ns.resolveNode(key, id);
+      KJ_SWITCH_ONEOF(node) {
+        KJ_CASE_ONEOF(container, kj::Own<ActorContainer>) {
+          target = kj::mv(container);
+        }
+        KJ_CASE_ONEOF(debugPort, rpc::WorkerdDebugPort::Client) {
+          // Convert the owner's debug port into a bootstrap for this actor. Nothing else on this
+          // channel needs the debug port, so only the (pipelined) bootstrap is retained: if
+          // getActor() fails, the bootstrap is broken and every later startEvent() fails with
+          // that exception.
+          auto req = debugPort.getActorRequest(capnp::MessageSize{32, 0});
+          req.setService(ns.serviceName);
+          req.setEntrypoint(ns.className);
+          req.setActorId(key);
+          KJ_IF_SOME(i, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
+            KJ_IF_SOME(name, i->getName()) {
+              req.setActorName(name);
+            }
+          }
+          target = req.send().getActor();
+        }
+      }
+    }
+
+    static kj::Promise<kj::Own<WorkerInterface>> startRequestImpl(
+        kj::Own<ClusterActorChannel> self, IoChannelFactory::SubrequestMetadata metadata) {
+      co_await self->resolveTarget();
+
+      KJ_SWITCH_ONEOF(KJ_ASSERT_NONNULL(self->target)) {
+        KJ_CASE_ONEOF(container, kj::Own<ActorContainer>) {
+          co_return co_await container->startRequest(kj::mv(metadata));
+        }
+        KJ_CASE_ONEOF(bootstrap, rpc::WorkerdBootstrap::Client) {
+          capnp::MessageSize sizeHint{4, 0};
+          KJ_IF_SOME(cf, metadata.cfBlobJson) {
+            sizeHint.wordCount += cf.size() / sizeof(capnp::word) + 1;
+          }
+
+          // The remote instance reconstructs SubrequestMetadata from these params.
+          auto req = bootstrap.startEventRequest(sizeHint);
+          KJ_IF_SOME(cf, metadata.cfBlobJson) {
+            req.setCfBlobJson(cf);
+          }
+          req.setFromPersistentStub(metadata.fromPersistentStub.toBool());
+
+          auto dispatcher = req.sendForPipeline().getDispatcher();
+          // NOTE: We don't support restore() over cluster RPC so we can use
+          // getUnsupportedFrankenvalueHandler() here for now.
+          co_return kj::heap<RpcWorkerInterface>(self->ns.httpOverCapnpFactory,
+              self->ns.byteStreamFactory, getUnsupportedFrankenvalueHandler(), kj::mv(dispatcher));
+        }
+      }
+      KJ_UNREACHABLE;
+    }
   };
 };
 

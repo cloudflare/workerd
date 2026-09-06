@@ -11,6 +11,7 @@
 //   3. Takeover after a node is killed.
 //   4. Alarms are rejected with a clear error in cluster mode.
 //   5. No `metadata.sqlite` is ever created (no AlarmScheduler in cluster mode).
+//   6. Storing/loading a DO stub without calling it takes no ownership lock.
 //
 // Two variants are run: the unix-socket cluster network mode (default) and a
 // localhost CIDR (`127.0.0.0/8`) IP-socket mode that exercises the registry
@@ -18,7 +19,7 @@
 // by the WD_TEST_CONFIG environment variable supplied by the BUILD target.
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { env } from 'node:process';
@@ -461,5 +462,62 @@ test('cluster: registry directory is populated for each running instance', async
         `registry entry name should be 64-char hex, got: ${name}`
       );
     }
+  });
+});
+
+async function exists(path) {
+  try {
+    await stat(path);
+    return true;
+  } catch (err) {
+    if (err.code === 'ENOENT') return false;
+    throw err;
+  }
+}
+
+test('cluster: storing and loading a stub does not take the ownership lock', async () => {
+  await withCluster(2, async ({ nodes, sharedPath }) => {
+    const nsDir = join(sharedPath, 'counter-test-namespace');
+    const locksDir = join(nsDir, 'locks');
+
+    // DO "holder" (on whichever node claims it) stores a stub to DO "lazy" and
+    // reads it back. Serializing and deserializing the stub must not claim
+    // "lazy": no lock file, and no storage for it.
+    const stored = await fetchJson(
+      nodes[1].httpPort,
+      '/store-stub?name=holder&target=lazy'
+    );
+    assert.strictEqual(stored.status, 200, JSON.stringify(stored.body));
+    assert.strictEqual(stored.body.hasStub, true);
+    const holderId = stored.body.id;
+    const targetId = stored.body.targetId;
+    assert.notStrictEqual(holderId, targetId);
+    assert(
+      await exists(join(locksDir, holderId)),
+      `the holder DO itself must be locked`
+    );
+    const lockFile = join(locksDir, targetId);
+    assert(
+      !(await exists(lockFile)),
+      `storing/loading a stub must not create the lock file ${lockFile}`
+    );
+    const nsEntries = await readdir(nsDir);
+    assert(
+      !nsEntries.some((name) => name.startsWith(targetId)),
+      `storing/loading a stub must not create actor storage; found: ${nsEntries.join(', ')}`
+    );
+
+    // Calling the loaded stub claims ownership and creates the lock file.
+    const called = await fetchJson(
+      nodes[1].httpPort,
+      '/call-stored-stub?name=holder'
+    );
+    assert.strictEqual(called.status, 200, JSON.stringify(called.body));
+    assert.strictEqual(called.body.target.id, targetId);
+    assert.strictEqual(called.body.target.count, 0);
+    assert(
+      await exists(lockFile),
+      `calling the stub must create the lock file ${lockFile}`
+    );
   });
 });

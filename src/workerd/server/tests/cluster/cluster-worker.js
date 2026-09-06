@@ -13,6 +13,12 @@
 //   /identity        Returns information identifying this instance (NODE_ID env)
 //                    along with the DO id, so the test can verify which instance
 //                    served the request.
+//   /store-stub      Stores a stub to the DO named by the `target` query param in
+//                    this DO's storage, then reads it back without calling it.
+//                    Returns the target's id.
+//   /call-stored-stub
+//                    Loads the stub stored by /store-stub and calls /get on it.
+//                    Returns the target's response.
 
 export default {
   async fetch(request, env) {
@@ -27,8 +33,8 @@ export default {
     const id = env.COUNTER.idFromName(name);
     const stub = env.COUNTER.get(id);
 
-    // Forward to the DO with the same pathname.
-    const forwardUrl = new URL(url.pathname, 'http://do/');
+    // Forward to the DO with the same path and query.
+    const forwardUrl = new URL(url.pathname + url.search, 'http://do/');
     return await stub.fetch(forwardUrl.toString(), {
       method: request.method,
       headers: request.headers,
@@ -73,6 +79,28 @@ export class Counter {
       }
     } else if (url.pathname === '/identity') {
       return Response.json({ nodeId, id: idHex });
+    } else if (url.pathname === '/store-stub') {
+      // Only stubs from the ctx.exports self-binding are storable.
+      const target = url.searchParams.get('target');
+      const ns = this.state.exports.Counter;
+      const targetId = ns.idFromName(target);
+      await this.state.storage.put('stub', ns.get(targetId));
+      // Read it back so that the stub is also deserialized, but do not call it.
+      const stub = await this.state.storage.get('stub');
+      return Response.json({
+        nodeId,
+        id: idHex,
+        targetId: targetId.toString(),
+        hasStub: typeof stub?.fetch === 'function',
+      });
+    } else if (url.pathname === '/call-stored-stub') {
+      const stub = await this.state.storage.get('stub');
+      const response = await stub.fetch('http://do/get');
+      return Response.json({
+        nodeId,
+        id: idHex,
+        target: await response.json(),
+      });
     }
 
     return new Response('Not found', { status: 404 });
