@@ -88,6 +88,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   void blockTransaction(kj::Promise<void> promise) override;
 
   kj::Maybe<SqliteDatabase&> getSqliteDatabase() override {
+    requireNotBroken();
     return *db;
   }
 

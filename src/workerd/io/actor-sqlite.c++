@@ -997,6 +997,17 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
     // We've already experienced a terminal exception either from shutdown or OOM, there should
     // already be a flush scheduled that will break the output gate.
   }
+
+  // Sever the sqlite connection, so that the underlying database file is fully and synchcronously
+  // closed. Callers of shutdown() rely on this. Do it even if `broken` was already set because not
+  // all paths that set `broken` call `close()`. Note `close()` is idempotent.
+  //
+  // TODO(cleanup): Maybe the entire `broken` mechanism should be pushed down into SqliteDatabase?
+  //   Currently `ActorSqlite` carefully checks `broken` in every path that touches the database,
+  //   but `SqliteDatabase` itself checks if it is closed on every path. We could change `close()`
+  //   to something like `abort(reason)` and then rely on that instead of having `broken` in
+  //   `ActorSqlite`. Needs careful investigation of all code paths, though.
+  db->close();
 }
 
 kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSqlite::

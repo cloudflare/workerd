@@ -520,15 +520,15 @@ class Server::ActorNamespace final {
         kj::OneOf<ClassAndId, kj::Promise<ClassAndId>> classAndIdParam,
         kj::Timer& timer,
         kj::Maybe<ClusterLockManager::OwnedLock> ownershipLock = kj::none)
-        : key(kj::mv(key)),
+        : ownershipLock(kj::mv(ownershipLock)),
+          key(kj::mv(key)),
           tracker(kj::refcounted<RequestTracker>(*this)),
           ns(ns),
           root(parent.map([](ActorContainer& p) -> ActorContainer& { return p.root; })
                    .orDefault(*this)),
           parent(parent),
           timer(timer),
-          lastAccess(timer.now()),
-          ownershipLock(kj::mv(ownershipLock)) {
+          lastAccess(timer.now()) {
       KJ_SWITCH_ONEOF(classAndIdParam) {
         KJ_CASE_ONEOF(value, ClassAndId) {
           // `classAndId` is immediately available.
@@ -706,7 +706,9 @@ class Server::ActorNamespace final {
     // removed from any maps that would cause it to receive further traffic, since any further
     // requests will be expected to fail. abort() does NOT attempt to remove the ActorContainer
     // from the parent facet map since at most call sites it makes more sense to handle this
-    // directly.
+    // directly. Callers that remove the container from `ns.actors` must do so in the same
+    // synchronous continuation as this call: abort() releases the ownership lock (see
+    // `ownershipLock`).
     void abort(kj::Maybe<const kj::Exception&> reason) {
       if (brokenReason != kj::none) return;
 
@@ -730,6 +732,12 @@ class Server::ActorNamespace final {
       actor = kj::none;
       containerClient = kj::none;
 
+      // The actor (and every facet) shut down above, which closed their databases, so nothing on
+      // this node holds a handle into the actor's storage anymore. Drop ours and let another node
+      // (or a fresh container on this one) claim the actor.
+      facetTreeIndex = kj::none;
+      ownershipLock = kj::none;
+
       KJ_IF_SOME(r, reason) {
         brokenReason = r.clone();
       } else {
@@ -738,13 +746,15 @@ class Server::ActorNamespace final {
     }
 
     // Resets the actor's SQLite database while the connection is still open,
-    // avoiding file-locking issues on Windows.
+    // avoiding file-locking issues on Windows. Storage that is already broken is skipped.
     void resetStorage() {
       KJ_IF_SOME(a, actor) {
         KJ_IF_SOME(cache, a->getPersistent()) {
-          KJ_IF_SOME(db, cache.getSqliteDatabase()) {
-            kj::runCatchingExceptions([&]() { db.reset(); });
-          }
+          kj::runCatchingExceptions([&]() {
+            KJ_IF_SOME(db, cache.getSqliteDatabase()) {
+              db.reset();
+            }
+          });
         }
       }
     }
@@ -860,6 +870,21 @@ class Server::ActorNamespace final {
     }
 
    private:
+    // In cluster mode, the root container's claim on the actor. Declared first so that on plain
+    // destruction it is released only after everything below it -- the Worker::Actor, facets,
+    // hibernation manager, and facet tree index -- has been torn down.
+    //
+    // Invariant: the lock file names this node if and only if this container is in `ns.actors`.
+    // A request for an actor whose lock file names this node but which has no map entry loops
+    // through self-bootstrap (see ActorNamespace::resolveNode()), so the lock is released at the
+    // moment the container leaves the map (abort(), monitorOnBroken()), not when the last
+    // reference to the container is dropped. Releasing it there is only safe because
+    // ActorSqlite::shutdown() closes the database: by the time either path hollows the container,
+    // every SQLite handle under the actor and its facets is already closed, so no handle into the
+    // actor's storage outlives the claim even if an in-flight request still holds the
+    // Worker::Actor.
+    kj::Maybe<ClusterLockManager::OwnedLock> ownershipLock;
+
     // The actor is constructed after the ActorContainer so it starts off empty.
     kj::Maybe<kj::Own<Worker::Actor>> actor;
 
@@ -875,7 +900,6 @@ class Server::ActorNamespace final {
     kj::Maybe<kj::Promise<void>> onBrokenTask;
     kj::Maybe<kj::Exception> brokenReason;
     kj::Vector<kj::Own<kj::PromiseFulfiller<void>>> inactiveFulfillers;
-    kj::Maybe<ClusterLockManager::OwnedLock> ownershipLock;  // in cluster mode
 
     // Reference to the ContainerClient (if container is enabled for this actor)
     kj::Maybe<kj::Own<ContainerClient>> containerClient;
@@ -1058,6 +1082,13 @@ class Server::ActorNamespace final {
       auto actorToDrop = kj::mv(this->actor);
       tracker->shutdown();
       auto managerToDrop = kj::mv(manager);
+
+      // onBroken fired only after IoContext::abort() shut down the actor cache, and the facets
+      // were aborted above, so every database under this actor is closed. Release the claim now,
+      // in the same synchronous continuation as the erase() below (see `ownershipLock`). Any stub
+      // still pinning this container after the erase keeps only a hollow shell.
+      facetTreeIndex = kj::none;
+      ownershipLock = kj::none;
 
       // Note that we remove the entire ActorContainer from the map -- this drops the
       // HibernationManager so any connected hibernatable websockets will be disconnected.
@@ -1473,9 +1504,13 @@ class Server::ActorNamespace final {
   // Create an ActorContainer in cluster mode. Must be called in the same synchronous continuation
   // that received `ownership` from ClusterLockManager::acquireOrRoute(): the lock file naming this
   // node while `actors` has no entry for the key would make requests for the actor loop through
-  // self-bootstrap until the entry appears.
+  // self-bootstrap until the entry appears (see resolveNode()).
   kj::Own<ActorContainer> createActorContainer(
       kj::String key, Worker::Actor::Id id, ClusterLockManager::OwnedLock ownership) {
+    // Invariant: the lock file names this node iff a container holding the OwnedLock is in
+    // `actors`. We hold the lock and are about to insert; nothing else may already be mapped.
+    // The other direction is upheld by ActorContainer::abort() and monitorOnBroken(), which
+    // release the lock as the container leaves the map.
     KJ_ASSERT(actors.find(key) == kj::none);
 
     auto container = kj::refcounted<ActorContainer>(kj::str(key), *this, kj::none,
@@ -1491,6 +1526,10 @@ class Server::ActorNamespace final {
   // returned promise settles. Cluster mode only.
   using Node = kj::OneOf<kj::Own<ActorContainer>, rpc::WorkerdDebugPort::Client>;
   kj::Promise<Node> resolveNode(kj::StringPtr key, Worker::Actor::Id& id) {
+    // Local-first. This lookup is what terminates the routing loop: when the lock file names this
+    // node, acquireOrRoute() returns our own debug port with no backoff, and the resulting
+    // getActor() lands right back here. That is only correct because "lock file names this node"
+    // implies "container is in `actors`" -- see ActorContainer::ownershipLock.
     KJ_IF_SOME(container, actors.find(key)) {
       co_return container->addRef();
     }

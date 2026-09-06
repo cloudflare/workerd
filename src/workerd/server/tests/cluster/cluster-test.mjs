@@ -12,6 +12,8 @@
 //   4. Alarms are rejected with a clear error in cluster mode.
 //   5. No `metadata.sqlite` is ever created (no AlarmScheduler in cluster mode).
 //   6. Storing/loading a DO stub without calling it takes no ownership lock.
+//   7. A broken DO releases its ownership lock even while stubs still pin it,
+//      so it can be re-instantiated (on any node) instead of hanging requests.
 //
 // Two variants are run: the unix-socket cluster network mode (default) and a
 // localhost CIDR (`127.0.0.0/8`) IP-socket mode that exercises the registry
@@ -19,7 +21,7 @@
 // by the WD_TEST_CONFIG environment variable supplied by the BUILD target.
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { env } from 'node:process';
@@ -174,9 +176,26 @@ class ClusterNode {
   }
 }
 
-async function fetchJson(port, path, init) {
+// Fetches `path` from the given node and parses the JSON response. When
+// `timeoutMs` is given, a request that does not complete in time fails with a
+// clear error instead of hanging the test (used where a bug would manifest as
+// a request that never completes).
+async function fetchJson(port, path, { timeoutMs } = {}) {
   const url = `http://127.0.0.1:${port}${path}`;
-  const res = await fetch(url, init);
+  let res;
+  try {
+    res = await fetch(url, {
+      signal:
+        timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    if (err.name === 'TimeoutError') {
+      throw new Error(
+        `request to ${url} did not complete within ${timeoutMs}ms`
+      );
+    }
+    throw err;
+  }
   const text = await res.text();
   let body;
   try {
@@ -189,11 +208,32 @@ async function fetchJson(port, path, init) {
   return { status: res.status, body };
 }
 
+// Returns the hex-encoded public key of the node that currently owns the lock
+// file at `path` (the node's registry entry name), or null if the file is
+// absent or empty.
+async function readLockOwner(path) {
+  let content;
+  try {
+    content = await readFile(path);
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  }
+  return content.length === 0 ? null : content.toString('hex');
+}
+
+// Starts `numNodes` workerd instances sharing one directory and runs `fn` with:
+//   nodes      the ClusterNode instances, in start order
+//   sharedPath the shared directory
+//   nodeKeys   Map from nodeId to the node's registry key (64-char hex), which
+//              is also what ownership lock files contain
 async function withCluster(numNodes, fn) {
   // Each test run gets its own shared directory, so the registry/lock-file
   // state doesn't leak between tests.
   const sharedPath = await mkdtemp(join(tmpdir(), 'workerd-cluster-'));
+  const registryDir = join(sharedPath, 'workerd-registry');
   const nodes = [];
+  const nodeKeys = new Map();
   try {
     for (let i = 0; i < numNodes; i++) {
       const node = new ClusterNode({
@@ -204,8 +244,32 @@ async function withCluster(numNodes, fn) {
       });
       await node.start();
       nodes.push(node);
+
+      // Each node writes its registry entry before it reports its listening
+      // socket, but allow a small grace period for filesystem visibility. Since
+      // nodes start one at a time, the entry that is new is this node's.
+      const known = new Set(nodeKeys.values());
+      const deadline = Date.now() + 5000;
+      let fresh = [];
+      while (Date.now() < deadline) {
+        let entries = [];
+        try {
+          entries = await readdir(registryDir);
+        } catch (_) {
+          // Not created yet.
+        }
+        fresh = entries.filter((name) => !known.has(name));
+        if (fresh.length > 0) break;
+        await sleep(50);
+      }
+      assert.strictEqual(
+        fresh.length,
+        1,
+        `expected exactly one new registry entry after starting ${node.nodeId}, got: [${fresh.join(', ')}]`
+      );
+      nodeKeys.set(node.nodeId, fresh[0]);
     }
-    await fn({ nodes, sharedPath });
+    await fn({ nodes, sharedPath, nodeKeys });
   } finally {
     // Stop all nodes (ignore errors -- some may already be stopped by the
     // test itself).
@@ -519,5 +583,139 @@ test('cluster: storing and loading a stub does not take the ownership lock', asy
       await exists(lockFile),
       `calling the stub must create the lock file ${lockFile}`
     );
+  });
+});
+
+// Requests that would hang forever if a broken actor kept its ownership lock
+// are bounded by this timeout so the failure is a clear error.
+const HANG_TIMEOUT_MS = 5000;
+
+function lockFilePath(sharedPath, id) {
+  return join(sharedPath, 'counter-test-namespace', 'locks', id);
+}
+
+test('cluster: a broken DO pinned by a stub does not keep its ownership lock', async () => {
+  await withCluster(2, async ({ nodes, sharedPath, nodeKeys }) => {
+    // Node 0 claims "pinned". DO "holder", served by node 1, then obtains a
+    // stub to it, uses it, and keeps it for as long as "holder" lives. Through
+    // node 0's bootstrap for that stub, node 0's container for "pinned" stays
+    // referenced for the rest of the test.
+    const first = await fetchJson(nodes[0].httpPort, '/increment?name=pinned');
+    assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+    assert.strictEqual(first.body.count, 1);
+    const owner = first.body.nodeId;
+    const lockFile = lockFilePath(sharedPath, first.body.id);
+    assert.strictEqual(await readLockOwner(lockFile), nodeKeys.get(owner));
+
+    const held = await fetchJson(
+      nodes[1].httpPort,
+      '/hold-stub?name=holder&target=pinned'
+    );
+    assert.strictEqual(held.status, 200, JSON.stringify(held.body));
+    assert.strictEqual(held.body.target.nodeId, owner);
+
+    // Break the DO. Its container leaves the owner's map but lives on, pinned
+    // by the parked stub.
+    const broken = await fetchJson(nodes[1].httpPort, '/break?name=pinned');
+    assert.strictEqual(broken.status, 500, JSON.stringify(broken.body));
+
+    // The lock must have been released along with the map entry. Otherwise a
+    // request from the non-owner routes to the owner, which finds no container
+    // and routes to itself, forever.
+    const other = nodes.find((n) => n.nodeId !== owner);
+    const after = await fetchJson(other.httpPort, '/increment?name=pinned', {
+      timeoutMs: HANG_TIMEOUT_MS,
+    });
+    assert.strictEqual(after.status, 200, JSON.stringify(after.body));
+    assert.strictEqual(after.body.count, 2, 'state must survive the break');
+    assert.strictEqual(
+      await readLockOwner(lockFile),
+      nodeKeys.get(after.body.nodeId),
+      'the lock file must name the node that re-instantiated the DO'
+    );
+  });
+});
+
+test('cluster: a DO whose constructor fails releases its ownership lock', async () => {
+  await withCluster(2, async ({ nodes, sharedPath, nodeKeys }) => {
+    const first = await fetchJson(nodes[0].httpPort, '/increment?name=ctor');
+    assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+    const lockFile = lockFilePath(sharedPath, first.body.id);
+
+    // Arm the one-shot constructor failure and abort the running instance so
+    // the next request has to construct a new one.
+    const armed = await fetchJson(
+      nodes[1].httpPort,
+      '/arm-constructor-failure?name=ctor'
+    );
+    assert.strictEqual(armed.status, 500, JSON.stringify(armed.body));
+
+    // Re-instantiate through a stub kept by DO "holder". The constructor
+    // throws, which breaks the new instance; the kept stub pins its hollowed
+    // container on whichever node claimed the DO.
+    const held = await fetchJson(
+      nodes[1].httpPort,
+      '/hold-stub?name=holder&target=ctor',
+      { timeoutMs: HANG_TIMEOUT_MS }
+    );
+    assert.strictEqual(held.status, 500, JSON.stringify(held.body));
+    assert.match(held.body.error, /constructor failed on purpose/);
+
+    // A fresh request from the other node must not hang. The failed constructor
+    // committed the cleared flag before throwing, so this instantiation
+    // succeeds and sees the earlier increment.
+    const after = await fetchJson(nodes[0].httpPort, '/increment?name=ctor', {
+      timeoutMs: HANG_TIMEOUT_MS,
+    });
+    assert.strictEqual(after.status, 200, JSON.stringify(after.body));
+    assert.strictEqual(after.body.count, 2);
+    assert.strictEqual(
+      await readLockOwner(lockFile),
+      nodeKeys.get(after.body.nodeId),
+      'the lock file must name the node that re-instantiated the DO'
+    );
+  });
+});
+
+test('cluster: aborting a DO with a request in flight lets it be re-instantiated immediately', async () => {
+  await withCluster(2, async ({ nodes, sharedPath, nodeKeys }) => {
+    const first = await fetchJson(
+      nodes[0].httpPort,
+      '/increment?name=inflight'
+    );
+    assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+    const owner = first.body.nodeId;
+    const lockFile = lockFilePath(sharedPath, first.body.id);
+
+    // Start a request the DO holds open, give it time to reach the DO, then
+    // abort the DO underneath it. The in-flight request keeps a reference to
+    // the old Worker::Actor until it unwinds, but the storage must be closed
+    // and the lock released as soon as the actor breaks, not when that
+    // reference goes away.
+    const holding = fetchJson(nodes[0].httpPort, '/hold?name=inflight', {
+      timeoutMs: HANG_TIMEOUT_MS,
+    });
+    await sleep(250);
+    const broken = await fetchJson(nodes[0].httpPort, '/break?name=inflight');
+    assert.strictEqual(broken.status, 500, JSON.stringify(broken.body));
+
+    const other = nodes.find((n) => n.nodeId !== owner);
+    const after = await fetchJson(other.httpPort, '/increment?name=inflight', {
+      timeoutMs: HANG_TIMEOUT_MS,
+    });
+    assert.strictEqual(after.status, 200, JSON.stringify(after.body));
+    assert.strictEqual(
+      after.body.count,
+      2,
+      'the new instance must see the state committed before the abort'
+    );
+    assert.strictEqual(
+      await readLockOwner(lockFile),
+      nodeKeys.get(after.body.nodeId),
+      'the lock file must name the node that re-instantiated the DO'
+    );
+
+    const held = await holding;
+    assert.strictEqual(held.status, 500, JSON.stringify(held.body));
   });
 });

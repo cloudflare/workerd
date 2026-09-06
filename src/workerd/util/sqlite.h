@@ -289,7 +289,23 @@ class SqliteDatabase {
   // may throw if they depend on tables that haven't been recreated yet).
   void reset();
 
-  // Objects that need to be notified when reset() is called may inherit `ResetListener`.
+  // Closes the underlying SQLite connection without reopening it. Every subsequent attempt to
+  // use the database, including through existing Statements and Queries, throws. Any open
+  // transaction is rolled back (never committed). Idempotent.
+  //
+  // This exists so that an actor's storage can be severed at the moment the actor is shut down,
+  // even if references to the SqliteDatabase live on: closing the last connection checkpoints and
+  // deletes the WAL and releases any file locks, which the next opener of the same file needs.
+  //
+  // This is declared noexcept because it is expected to be used in shutdown paths which are not
+  // prepared to catch further errors and strongly depend on the database actually becoming closed
+  // (so that they can safely release file locks). If close() is unable to complete (e.g. because
+  // a sqlite statement is currently being executed) then we have no choice but to abort the
+  // process.
+  void close() noexcept;
+
+  // Objects that need to be notified when reset() or close() is called may inherit
+  // `ResetListener`.
   class ResetListener {
    public:
     ResetListener(SqliteDatabase& db): db(db) {
@@ -303,8 +319,8 @@ class SqliteDatabase {
       db.resetListeners.add(*this);
     }
 
-    // When the database's `reset()` method is called, all listeners' `beforeSqliteReset()` will be
-    // called before actually resetting the database.
+    // When the database's `reset()` or `close()` method is called, all listeners'
+    // `beforeSqliteReset()` will be called before actually closing the connection.
     virtual void beforeSqliteReset() = 0;
 
    protected:  // so that subclasses don't have to store their own copy of the `db` reference
@@ -366,8 +382,11 @@ class SqliteDatabase {
 
   kj::Maybe<const ActorAccountLimits&> actorAccountLimits;
 
-  // This pointer can be left null if a call to reset() failed to re-open the database.
+  // Null after a call to reset() failed to re-open the database, or after close().
   kj::Maybe<sqlite3&> maybeDb;
+
+  // Set by close(). Distinguishes the closed state from a failed reset() in error messages.
+  bool closed = false;
 
   // Set while a query is compiling.
   kj::Maybe<StaticRegulator> currentRegulator;
