@@ -131,6 +131,7 @@ jobs:
   lint:
     uses: ./.github/workflows/_bazel.yml
     with:
+      image: ubuntu-24.04
       extra_bazel_args: '--config=lint --config=ci-test --config=ci-linux-common'
       run_tests: false
       parse_headers: true

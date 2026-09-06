@@ -60,7 +60,10 @@ Checks: >
   readability-enum-initial-value,
   readability-redundant-*,
   -readability-redundant-inline-specifier,
+  -readability-redundant-lambda-parameter-list,
+  -readability-redundant-nested-if,
   -readability-redundant-parentheses,
+  -readability-redundant-qualified-alias,
   -readability-redundant-smartptr-get,
   readability-reference-to-constructed-temporary,
   readability-static-accessed-through-instance,
@@ -82,6 +85,7 @@ Checks: >
 # modernize-use-override
 # modernize-use-ranges
 # readability-avoid-return-with-void-value
+# readability-redundant-qualified-alias
 # modernize-avoid-variadic-functions
 # readability-convert-member-functions-to-static
 # readability-redundant-smartptr-get
