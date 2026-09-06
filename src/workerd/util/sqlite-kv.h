@@ -222,7 +222,7 @@ class SqliteKv: private SqliteDatabase::ResetListener {
   // with `allowUnconfirmed = true` since the paired KV write decides confirmation semantics.
   void clearExternalsIfPresent(KeyPtr key);
 
-  void beforeSqliteReset() override;
+  void beforeSqliteClose(SqliteDatabase::CloseReason reason) override;
 
   // Helper function that rolls back a multi-put statement and swallows any exceptions that may
   // occur during the rollback.

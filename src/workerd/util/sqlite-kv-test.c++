@@ -338,5 +338,25 @@ KJ_TEST("SQLite-KV multi-put with allowUnconfirmed") {
   KJ_EXPECT(called);
 }
 
+KJ_TEST("SQLite-KV reads throw after close()") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteKv kv(db);
+
+  kv.put("foo", "abc"_kj.asBytes());
+  kv.putExternals("foo", kj::arr(kj::heapArray("tok"_kj.asBytes())));
+
+  db.close();
+
+  // Unlike reset(), close() must not make the data appear deleted: the file still has it.
+  KJ_EXPECT_THROW_MESSAGE("database has been closed",
+      kv.get("foo", [](kj::ArrayPtr<const byte>) { KJ_FAIL_EXPECT("should not be called"); }));
+  KJ_EXPECT_THROW_MESSAGE(
+      "database has been closed", kv.list(nullptr, kj::none, kj::none, SqliteKv::FORWARD)->next());
+  KJ_EXPECT_THROW_MESSAGE("database has been closed", kv.getExternals("foo"));
+  KJ_EXPECT_THROW_MESSAGE("database has been closed", kv.put("bar", "def"_kj.asBytes()));
+}
+
 }  // namespace
 }  // namespace workerd

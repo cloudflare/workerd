@@ -304,6 +304,14 @@ class SqliteDatabase {
   // process.
   void close() noexcept;
 
+  // Why a connection is being closed. Passed to `ResetListener::beforeSqliteClose()`.
+  enum class CloseReason {
+    // reset(): the database file is deleted and a fresh connection opened.
+    RESET,
+    // close(): the connection is gone for good.
+    CLOSE,
+  };
+
   // Objects that need to be notified when reset() or close() is called may inherit
   // `ResetListener`.
   class ResetListener {
@@ -320,8 +328,15 @@ class SqliteDatabase {
     }
 
     // When the database's `reset()` or `close()` method is called, all listeners'
-    // `beforeSqliteReset()` will be called before actually closing the connection.
-    virtual void beforeSqliteReset() = 0;
+    // `beforeSqliteClose()` will be called before actually closing the connection. Any prepared
+    // statements must be finalized here so that `sqlite3_close()` can succeed.
+    //
+    // The `reason` matters for listeners that cache facts about the database's contents: after
+    // RESET the database is empty and will be reopened, so such caches must be cleared; after
+    // CLOSE nothing may read the database again, so such caches should be left alone so that
+    // attempted reads reach the closed connection and throw rather than reporting an empty
+    // database.
+    virtual void beforeSqliteClose(CloseReason reason) = 0;
 
    protected:  // so that subclasses don't have to store their own copy of the `db` reference
     SqliteDatabase& db;
@@ -355,6 +370,11 @@ class SqliteDatabase {
   // When a rollback occurs, callbacks are invoked in the reverse of the order in which they were
   // registered. The database content is rolled back first, before invoking any callbacks.
   // Callbacks may read from the database, but must not write to it.
+  //
+  // NOTE: close() technically rolls back all outstanding transactions, but does NOT call rollback
+  //   callbacks. Instead, callers who need to handle the close() case should register a
+  //   ResetListener. In practices, in-memory caches are generally moot after close() since the
+  //   actor has shut down anyway.
   void onRollback(kj::Function<void()> callback) {
     if (inTransaction || !savepoints.empty()) {
       rollbackCallbacks.add(kj::mv(callback));
@@ -550,7 +570,7 @@ class SqliteDatabase::Statement final: private ResetListener {
         regulator(regulator),
         stmt(kj::mv(sqlCode)) {}
 
-  void beforeSqliteReset() override;
+  void beforeSqliteClose(CloseReason reason) override;
 
   // Get the underlying StatementAndEffect, which the caller will then execute. If `prelude` is
   // non-empty, prepareForExecution() actually executes the prelude.
@@ -812,7 +832,7 @@ class SqliteDatabase::Query final: private ResetListener {
     return getStatementAndEffect().statement;
   }
 
-  void beforeSqliteReset() override;
+  void beforeSqliteClose(CloseReason reason) override;
 
   void nextRow(bool first);
 };

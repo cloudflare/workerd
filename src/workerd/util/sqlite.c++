@@ -1029,7 +1029,7 @@ void SqliteDatabase::reset() {
 
   KJ_IF_SOME(db, maybeDb) {
     for (auto& listener: resetListeners) {
-      listener.beforeSqliteReset();
+      listener.beforeSqliteClose(CloseReason::RESET);
     }
 
     auto err = sqlite3_close(&db);
@@ -1064,7 +1064,7 @@ void SqliteDatabase::close() noexcept {
 
   KJ_IF_SOME(db, maybeDb) {
     for (auto& listener: resetListeners) {
-      listener.beforeSqliteReset();
+      listener.beforeSqliteClose(CloseReason::CLOSE);
     }
 
     // Every prepared statement was finalized by the listener walk above, so SQLITE_BUSY here
@@ -1533,10 +1533,22 @@ SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::prepareForExecuti
   return KJ_ASSERT_NONNULL(stmt.tryGet<StatementAndEffect>());
 }
 
-void SqliteDatabase::Statement::beforeSqliteReset() {
+void SqliteDatabase::Statement::beforeSqliteClose(CloseReason reason) {
+  // Regardless of `reason`, the prepared statement must be finalized (by destroying the
+  // StatementAndEffect) so that the connection can be closed.
   KJ_IF_SOME(prepared, stmt.tryGet<StatementAndEffect>()) {
-    // Pull the original SQL code out of the statement and store it.
-    stmt = kj::str(sqlite3_sql(prepared.statement));
+    switch (reason) {
+      case CloseReason::RESET:
+        // Keep the SQL text so that the statement can be reprepared against the new database.
+        stmt = kj::str(sqlite3_sql(prepared.statement));
+        break;
+      case CloseReason::CLOSE:
+        // The statement can never be reprepared, so don't bother copying the SQL. An empty string
+        // (no allocation) suffices: prepareForExecution() will attempt to prepare it and fail
+        // with "database has been closed" before ever looking at the text.
+        stmt = kj::String();
+        break;
+    }
   }
 }
 
@@ -1847,10 +1859,10 @@ SqliteDatabase::StatementAndEffect& SqliteDatabase::Query::getStatementAndEffect
   });
 }
 
-void SqliteDatabase::Query::beforeSqliteReset() {
+void SqliteDatabase::Query::beforeSqliteClose(CloseReason reason) {
   // Note that if we don't own the statement, then `maybeStatement` is probably already dangling
   // here. Luckily, we don't need to reset it or anything because the statement will be destroyed
-  // by Statement::beforeSqliteReset().
+  // by Statement::beforeSqliteClose().
   maybeStatement = kj::none;
   ownStatement = {};
 }

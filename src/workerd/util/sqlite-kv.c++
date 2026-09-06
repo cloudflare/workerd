@@ -258,10 +258,16 @@ void SqliteKv::putExternals(kj::StringPtr key, kj::Array<kj::Array<byte>> tokens
   }
 }
 
-void SqliteKv::beforeSqliteReset() {
-  // We'll need to recreate the tables on the next operation.
-  tableCreated = false;
-  externalsTableCreated = false;
+void SqliteKv::beforeSqliteClose(SqliteDatabase::CloseReason reason) {
+  if (reason == SqliteDatabase::CloseReason::RESET) {
+    // The tables are deleted along with the database and will need to be recreated on the next
+    // operation.
+    tableCreated = false;
+    externalsTableCreated = false;
+  }
+  // On close(), leave the flags alone: the tables still exist in the file. Clearing them would
+  // make get()/list()/getExternals() report an empty database without consulting the (closed)
+  // connection; with the flags intact those reads go through a Statement and throw instead.
 }
 
 void SqliteKv::rollbackMultiPut(Initialized& stmts, WriteOptions options) {
