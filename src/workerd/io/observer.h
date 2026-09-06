@@ -30,15 +30,14 @@ enum class ActorRetryCallType : uint8_t {
   FETCH,
   JSRPC,
   OTHER,
-  COUNT,
 };
 
 enum class ActorRetryOutcome : uint8_t {
   RECOVERED,
   RETRIES_EXHAUSTED,
   UNABLE_TO_RETRY,
+  CLAIM_REJECTED,
   OTHER,
-  COUNT,
 };
 
 class WorkerInterface;
@@ -162,8 +161,11 @@ class RequestObserver: public kj::Refcounted {
   // Records an additional outgoing actor call started by a runtime retry loop.
   virtual void recordActorRetry(ActorRetryCallType callType) {}
 
-  // Records the terminal outcome of an outgoing actor call after a retry-relevant failure.
-  virtual void recordActorRetryOutcome(ActorRetryCallType callType, ActorRetryOutcome outcome) {}
+  // Records the terminal outcome and added latency of an outgoing actor retry loop that started at
+  // least one retry attempt.
+  virtual void recordActorRetryOutcome(ActorRetryCallType callType,
+      ActorRetryOutcome outcome,
+      kj::Duration retryAddedLatency) {}
 
   // Fired immediately before an actor fetch dispatches into user code, so an observer can claim the
   // request's retry-token nonce against the actor's claim store. No-op in the base observer;
