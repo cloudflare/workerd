@@ -445,6 +445,9 @@ kj::Promise<void> ActorSqlite::requestScheduledAlarm(
 }
 
 void ActorSqlite::scheduleLaterAlarm(kj::Maybe<kj::Date> newAlarmTime, SpanParent parentSpan) {
+  // A queued update may resume after shutdown, when another instance owns the actor.
+  if (broken != kj::none) return;
+
   if (alarmLaterIsInFlight) {
     // There's already a move-later request in-flight. Just store the desired time; the in-flight
     // request's completion handler will pick it up and start a new request. This overwrites any
@@ -524,7 +527,7 @@ kj::Promise<void> ActorSqlite::commitImpl(
     }
     commitSpan.setTag("merged_with_pending_commit"_kjc, true);
     co_await pending.addBranch();
-    if (debugAlarmSync) {
+    if (debugAlarmSync && broken == kj::none) {
       auto alarmAfterMerge = metadata.getAlarm();
       KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: Commit merge resumed", logDate(alarmBeforeMerge),
           logDate(alarmAfterMerge), alarmVersion);
@@ -548,6 +551,11 @@ kj::Promise<void> ActorSqlite::commitImpl(
     auto alarmSpan = commitSpan.newChild("actor_sqlite_alarm_sync"_kjc);
     haveAlarmForDebug = true;
     co_await p;
+
+    // We may have become broken (e.g. shutdown() closed the database) while suspended. Once
+    // broken, we no longer own the database, and there could be another instance of this actor
+    // running elsewhere, therefore we should not continue with alarm updates.
+    requireNotBroken();
   }
 
   // While the local db state requires an earlier alarm than is known might be scheduled, issue an
@@ -577,6 +585,7 @@ kj::Promise<void> ActorSqlite::commitImpl(
     // future turn of the event loop. That means we're going to suspend, even if the promise is
     // ready, which means we'd take a performance hit.
     co_await requestScheduledAlarm(metadata.getAlarm(), kj::READY_NOW);
+    requireNotBroken();  // See above.
     syncIterations++;
   }
   if (debugAlarmSync && syncIterations > 0) {
@@ -614,6 +623,13 @@ kj::Promise<void> ActorSqlite::commitImpl(
 
   // Notify any merged commitImpl() requests that the db persistence completed.
   fulfiller->fulfill();
+
+  // The commit itself is complete. If we became broken while it was in flight, skip the optional
+  // post-commit alarm sync rather than throwing: the merged waiters' writes did persist, and the
+  // alarm will self-correct when it fires (see armAlarmHandler()).
+  if (broken != kj::none) {
+    co_return;
+  }
 
   if (debugAlarmSync) {
     KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: Version check", alarmVersionBeforeAsync, alarmVersion,
@@ -988,6 +1004,12 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
     // `maybeTerminalException` has a value. Any in-flight flushes will continue to run in the
     // background. Remember that these in-flight flushes may or may not be awaited by the worker,
     // but they still hold the output lock as long as `allowUnconfirmed` wasn't used.
+    //
+    // TODO(cleanup): Instead of letting in-flight commits continue and having every resume point
+    //   in commitImpl() re-check `broken`, consider cancelling them here outright. (Use a
+    //   kj::Canceler for this to make sure all forks are canceled.) This changes the policy
+    //   above (in-flight flushes no longer complete), which embedders with a real commitCallback
+    //   (SRS / internal codebase) may care about -- need to study consequences there.
     broken.emplace(kj::mv(exception));
 
     // We explicitly do not schedule a flush to break the output gate. This means that if a request

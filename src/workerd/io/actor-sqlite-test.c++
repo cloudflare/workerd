@@ -2683,6 +2683,36 @@ KJ_TEST("shutdown() closes the database when storage is already broken") {
   expectDatabaseClosed(test);
 }
 
+KJ_TEST("shutdown() during in-flight commit does not unschedule the persisted alarm") {
+  ActorSqliteTest test({.monitorOutputGate = false});
+
+  // Persist an alarm at 2ms, so that the next write moves the alarm earlier and thus starts a
+  // precommit scheduling request that the commit must wait on.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Move the alarm earlier. The local transaction commits, then commitImpl() suspends waiting for
+  // the scheduler to confirm the 1ms request.
+  test.setAlarm(oneMs);
+  auto scheduleFulfiller = kj::mv(test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]);
+
+  // Shut down (and thereby close the database) while that commit is parked.
+  test.actor.shutdown(kj::none);
+
+  // Resume the commit. It must not consult the closed database's alarm state and must not issue
+  // any further scheduler requests. In particular it must not issue `scheduleRun(none)`, which
+  // would cancel the alarm that the database still persists.
+  scheduleFulfiller->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_EXPECT_THROW_MESSAGE(ActorCache::SHUTDOWN_ERROR_MESSAGE, test.gate.onBroken().wait(test.ws));
+
+  // The database still holds the 1ms alarm for the next instance to pick up.
+  SqliteDatabase fresh(test.vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
+  KJ_EXPECT(fresh.run("SELECT value FROM _cf_METADATA WHERE key = 1").getInt64(0) ==
+      (oneMs - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+}
+
 KJ_TEST("allowUnconfirmed put in explicit transaction does not block output gate") {
   ActorSqliteTest test;
 
