@@ -879,15 +879,20 @@ class Server::ActorNamespace final {
     // destruction it is released only after everything below it -- the Worker::Actor, facets,
     // hibernation manager, and facet tree index -- has been torn down.
     //
-    // Invariant: the lock file names this node if and only if this container is in `ns.actors`.
-    // A request for an actor whose lock file names this node but which has no map entry loops
-    // through self-bootstrap (see ActorNamespace::resolveNode()), so the lock is released at the
-    // moment the container leaves the map (abort(), monitorOnBroken()), not when the last
-    // reference to the container is dropped. Releasing it there is only safe because
-    // ActorSqlite::shutdown() closes the database: by the time either path hollows the container,
-    // every SQLite handle under the actor and its facets is already closed, so no handle into the
-    // actor's storage outlives the claim even if an in-flight request still holds the
-    // Worker::Actor.
+    // Invariant: an OwnedLock for the actor is alive on this node if and only if its container is
+    // in `ns.actors`. ClusterLockManager::acquireOrRoute() routes to this node whenever the lock
+    // file names it and the OFD lock is held, so an OwnedLock with no map entry would make every
+    // request for the actor loop through self-bootstrap (see ActorNamespace::resolveNode()). The
+    // lock is therefore released at the moment the container leaves the map (abort(),
+    // monitorOnBroken()), not when the last reference to the container is dropped. Releasing it
+    // there is only safe because ActorSqlite::shutdown() closes the database: by the time either
+    // path hollows the container, every SQLite handle under the actor and its facets is already
+    // closed, so no handle into the actor's storage outlives the claim even if an in-flight
+    // request still holds the Worker::Actor.
+    //
+    // The lock file's contents alone carry no such guarantee: a failed claim or release can leave
+    // this node's key behind with no OwnedLock held. acquireOrRoute() detects that (the OFD lock
+    // is free) and reclaims, so it needs no handling here.
     kj::Maybe<ClusterLockManager::OwnedLock> ownershipLock;
 
     // The actor is constructed after the ActorContainer so it starts off empty.
@@ -1507,15 +1512,15 @@ class Server::ActorNamespace final {
   }
 
   // Create an ActorContainer in cluster mode. Must be called in the same synchronous continuation
-  // that received `ownership` from ClusterLockManager::acquireOrRoute(): the lock file naming this
-  // node while `actors` has no entry for the key would make requests for the actor loop through
-  // self-bootstrap until the entry appears (see resolveNode()).
+  // that received `ownership` from ClusterLockManager::acquireOrRoute(): an OwnedLock alive on
+  // this node while `actors` has no entry for the key would make requests for the actor loop
+  // through self-bootstrap until the entry appears (see resolveNode()).
   kj::Own<ActorContainer> createActorContainer(
       kj::String key, Worker::Actor::Id id, ClusterLockManager::OwnedLock ownership) {
-    // Invariant: the lock file names this node iff a container holding the OwnedLock is in
-    // `actors`. We hold the lock and are about to insert; nothing else may already be mapped.
-    // The other direction is upheld by ActorContainer::abort() and monitorOnBroken(), which
-    // release the lock as the container leaves the map.
+    // Invariant: an OwnedLock is alive on this node iff a container holding it is in `actors`. We
+    // hold the lock and are about to insert; nothing else may already be mapped. The other
+    // direction is upheld by ActorContainer::abort() and monitorOnBroken(), which release the
+    // lock as the container leaves the map.
     KJ_ASSERT(actors.find(key) == kj::none);
 
     auto container = kj::refcounted<ActorContainer>(kj::str(key), *this, kj::none,
@@ -1531,11 +1536,11 @@ class Server::ActorNamespace final {
   // the returned promise settles. Cluster mode only.
   using Node = kj::OneOf<kj::Own<ActorContainer>, rpc::WorkerdClusterPort::Client>;
   kj::Promise<Node> resolveNode(kj::StringPtr key, const Worker::Actor::Id& id) {
-    // Local-first. This lookup is what terminates the routing loop: when the lock file names this
-    // node, acquireOrRoute() returns our own cluster port with no backoff, and the resulting
-    // getChannelFromToken() decodes the token into a channel that lands right back here. That is
-    // only correct because "lock file names this node" implies "container is in `actors`" -- see
-    // ActorContainer::ownershipLock.
+    // Local-first. This lookup is what terminates the routing loop: when an OwnedLock on this
+    // node holds the actor, acquireOrRoute() returns our own cluster port with no backoff, and the
+    // resulting getChannelFromToken() decodes the token into a channel that lands right back here.
+    // That is only correct because "OwnedLock alive on this node" implies "container is in
+    // `actors`" -- see ActorContainer::ownershipLock.
     KJ_IF_SOME(container, actors.find(key)) {
       co_return container->addRef();
     }

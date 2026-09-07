@@ -22,9 +22,13 @@ namespace workerd {
 //
 // The ownership protocol:
 //   1. Open/create the lock file.
-//   2. Read it. If non-empty and CRC32 valid, parse the owner key.
-//      - If !registry.isPeerDead(ownerKey): route via clusterRpc.bootstrap(vatIdFor(ownerKey)).
-//      - If registry.isPeerDead(ownerKey): fall through to the claim path.
+//   2. Read it. If it holds a full key, that's the owner.
+//      - If it's another node and !registry.isPeerDead(ownerKey): route via
+//        clusterRpc.bootstrap(vatIdFor(ownerKey)).
+//      - If it's another node and registry.isPeerDead(ownerKey): fall through to the claim path.
+//      - If it's this node: the file alone is not authoritative (a failed claim or release can
+//        leave our key behind). Fall through to the claim path; if tryLock() is refused, an
+//        OwnedLock on this node holds the actor and we route to ourselves.
 //   3. Claim path: tryLock(EXCLUSIVE). If granted, ftruncate, write our key, fsync,
 //      return OwnedLock. If refused, retry with backoff.
 class ClusterLockManager {
@@ -34,9 +38,9 @@ class ClusterLockManager {
       capnp::RpcSystem<cluster::VatId>& clusterRpc,
       kj::Timer& timer);
 
-  // RAII ownership handle. Holding this object means this node owns the DO.
-  // Destruction truncates the lock file and releases the exclusive OFD lock,
-  // making the DO available for other nodes to claim.
+  // RAII ownership handle. Holding this object means this node owns the DO: it holds the
+  // exclusive OFD lock on the lock file. Destruction truncates the lock file (best-effort) and
+  // releases the OFD lock, making the DO available for other nodes to claim.
   class OwnedLock {
    public:
     ~OwnedLock() noexcept(false);

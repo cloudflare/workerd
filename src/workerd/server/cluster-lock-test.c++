@@ -200,6 +200,34 @@ KJ_TEST("ClusterLockManager: OwnedLock destructor truncates and releases") {
   KJ_ASSERT(result2.is<ClusterLockManager::OwnedLock>());
 }
 
+KJ_TEST("ClusterLockManager: stale file naming self with no lock held -> reclaims") {
+  auto io = kj::setupAsyncIo();
+  TempDir tmpDir;
+
+  ClusterRegistry reg(
+      tmpDir.registry(), "unix"_kj, io.provider->getNetwork(), io.provider->getTimer());
+
+  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubClusterPort>()));
+
+  ClusterLockManager lockManager(tmpDir.locks(), reg, rpc, io.provider->getTimer());
+
+  // Simulate a claim or release that published our key but failed before clearing it: the file
+  // names this node, but no OwnedLock (and hence no OFD lock) exists. Routing to ourselves here
+  // would loop forever; we must reclaim instead.
+  tmpDir.writeLockFile("a6", kj::arrayPtr(reg.getPublicKey().bytes, 32));
+
+  auto result = lockManager.acquireOrRoute("a6").wait(io.waitScope);
+  KJ_ASSERT(result.is<ClusterLockManager::OwnedLock>());
+
+  auto content = tmpDir.readLockFile("a6");
+  KJ_ASSERT(content.size() == 32);
+  KJ_EXPECT(memcmp(content.begin(), reg.getPublicKey().bytes, 32) == 0);
+
+  // With the OwnedLock now held, a further lookup routes to ourselves rather than reclaiming.
+  auto routeResult = lockManager.acquireOrRoute("a6").wait(io.waitScope);
+  KJ_ASSERT(routeResult.is<rpc::WorkerdClusterPort::Client>());
+}
+
 KJ_TEST("ClusterLockManager: owned by live peer -> returns bootstrap client") {
   auto io = kj::setupAsyncIo();
   TempDir tmpDir;
@@ -267,11 +295,12 @@ KJ_TEST("ClusterLockManager: writer alive -> retries until writer releases") {
   io.provider->getTimer().afterDelay(50 * kj::MILLISECONDS).wait(io.waitScope);
   KJ_EXPECT(!completed, "acquireOrRoute should still be waiting for the external lock");
 
-  // Now the "external writer" writes its key (our own, for simplicity) and releases the lock.
-  // acquireOrRoute, on its next iteration, should see the valid key, recognize the owner as us,
-  // and return a bootstrap client.
+  // Now the "external writer" finishes publishing its key (our own, for simplicity) while still
+  // holding the lock, as a real owner does. acquireOrRoute, on its next iteration, should see the
+  // key, find the OFD lock held, and return a bootstrap client routing to the owner. (Releasing
+  // the lock instead would leave a self-naming file with no holder, which acquireOrRoute reclaims;
+  // see the "stale file naming self" test.)
   externalFile->write(0, kj::arrayPtr(reg.getPublicKey().bytes, 32));
-  { auto _ = kj::mv(externalLock); }
 
   auto result = trackedPromise.wait(io.waitScope);
   KJ_EXPECT(completed);

@@ -65,7 +65,9 @@ ClusterLockManager::OwnedLock::~OwnedLock() noexcept(false) {
     // Truncate the file back to zero so the next claimant sees an empty file. We then drop the
     // OFD lock (via OfdLock's destructor) which makes the file available for other nodes to claim.
     //
-    // Best-effort: don't throw from the destructor.
+    // Best-effort: don't throw from the destructor. If this fails, the file keeps naming this node
+    // with no lock held. That's benign: the next acquireOrRoute() on this node sees its own key,
+    // takes the OFD lock, and reclaims (remote nodes route here, so they land on that path too).
     KJ_TRY {
       file->truncate(0);
     }
@@ -120,11 +122,17 @@ ClusterLockManager::acquireOrRoute(kj::StringPtr actorId) {
     X25519PublicKey ownerKey;
     auto n = file->read(0, ownerKey.bytes);
 
+    const auto& myKey = registry.getPublicKey();
+    bool namesSelf = n == sizeof(ownerKey.bytes) && ownerKey == myKey;
+
     if (n == sizeof(ownerKey.bytes)) {
-      if (!registry.isPeerDead(ownerKey)) {
+      if (namesSelf) {
+        // The file names this node. That is authoritative only if an OwnedLock on this node still
+        // holds the OFD lock; otherwise a claim or release failed partway and left our key behind.
+        // Routing to ourselves in the latter case would loop forever (resolveNode() finds no
+        // container and lands back here), so the OFD lock decides: fall through to tryLock().
+      } else if (!registry.isPeerDead(ownerKey)) {
         // Trust the lock file. Build a VatId and ask the RpcSystem to bootstrap.
-        // The owner might be us — clusterRpc.bootstrap() returns the local bootstrap directly
-        // without going through ClusterRegistry::connect() in that case.
         //
         // If the owner is actually unreachable, the bootstrap call will fail later. Internally,
         // ClusterRegistry::ConnectionImpl::unregister() runs the dead-peer cleanup probe;
@@ -135,7 +143,7 @@ ClusterLockManager::acquireOrRoute(kj::StringPtr actorId) {
         co_return clusterRpc.bootstrap(holder.getReader()).castAs<rpc::WorkerdClusterPort>();
       }
 
-      // Owner is confirmed dead. Fall through to the claim path.
+      // else: owner is confirmed dead. Fall through to the claim path.
     }
     // else: n == 0 (empty file) or n is some unexpected partial size. In either case, the claim
     //       path is the right next step: if a live writer is currently producing the file, they
@@ -145,14 +153,23 @@ ClusterLockManager::acquireOrRoute(kj::StringPtr actorId) {
     // Claim path. Try to acquire an exclusive OFD lock.
     int fd = KJ_REQUIRE_NONNULL(file->getFd(), "lock directory must be disk-backed");
     KJ_IF_SOME(lock, OfdLock::tryLock(fd, OfdLock::EXCLUSIVE)) {
-      // We got the exclusive lock. Clear any stale content and write our identity.
-      file->truncate(0);
+      // We got the exclusive lock. Clear any stale content and write our identity. Construct the
+      // OwnedLock first so that if any of these operations throws, unwinding runs ~OwnedLock,
+      // which clears the file (best-effort) before the OFD lock is dropped.
+      OwnedLock owned(kj::mv(file), kj::mv(lock));
+      owned.file->truncate(0);
+      owned.file->write(0, myKey.bytes);
+      owned.file->sync();
 
-      const auto& myKey = registry.getPublicKey();
-      file->write(0, myKey.bytes);
-      file->sync();
+      co_return kj::mv(owned);
+    }
 
-      co_return OwnedLock(kj::mv(file), kj::mv(lock));
+    if (namesSelf) {
+      // The file names this node and an OwnedLock on this node holds the OFD lock, so the actor's
+      // container exists here (see ActorContainer::ownershipLock). Route to ourselves; the
+      // RpcSystem returns the local bootstrap directly.
+      VatIdHolder holder(ownerKey);
+      co_return clusterRpc.bootstrap(holder.getReader()).castAs<rpc::WorkerdClusterPort>();
     }
 
     // tryLock failed — someone else owns it (or is racing us to claim it). Retry.
