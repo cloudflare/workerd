@@ -39,14 +39,23 @@ jobs:
             exit 1
           fi
 
+      - name: Checkout trusted workflow tooling
+        uses: actions/checkout@v7
+        with:
+          path: trusted
+          persist-credentials: false
+          show-progress: false
+
       # Try to checkout the merge commit - will fail if PR isn't mergeable
       - uses: actions/checkout@v7
         id: checkout_merge
         continue-on-error: true
         with:
           # Fork PRs reach this step only after their owner is confirmed to be a
-          # public Cloudflare org member, whose code this workflow trusts.
+          # public Cloudflare org member. Workflow tooling runs from the trusted checkout.
           allow-unsafe-pr-checkout: true
+          path: pull-request
+          persist-credentials: false
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           show-progress: false
 
@@ -57,10 +66,8 @@ jobs:
           echo "The pull request is not mergeable. Please rebase and resolve any conflicts."
           exit 1
 
-      - name: Get merge commit SHA
-        id: get_sha
-        run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
       - name: Run internal build
+        working-directory: trusted
         env:
           CI_URL: ${{ secrets.CI_URL }}
           CI_CLIENT_ID: ${{ secrets.CI_CF_ACCESS_CLIENT_ID }}
@@ -77,7 +84,7 @@ jobs:
 
           python3 -u ./tools/cross/internal_build.py \
             ${{github.event.pull_request.number}} \
-            ${{steps.get_sha.outputs.sha}} \
+            ${{steps.checkout_merge.outputs.commit}} \
             ${{github.event.pull_request.head.sha}} \
             ${{github.run_attempt}} \
             "$REF" \
