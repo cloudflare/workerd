@@ -485,38 +485,43 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   readable.setPendingClosure(js);
 
   // Wait until the socket connects (successfully or otherwise)
-  // Note: `self` (jsg::Ref) is captured in each continuation to prevent GC from collecting
-  // this object while the promise chain is pending. Without it, the bare `this` pointer dangles.
+  // Keep the socket alive while a close continuation is reachable. Trace the captures so
+  // that unreachable promise cycles can be collected.
   return openedPromiseCopy.whenResolved(js)
       .then(js,
-          [self = JSG_THIS](jsg::Lock& js) mutable {
-    if (!self->writable.isClosedOrClosing(js)) {
-      return self->writable.forceFlush(js);
-    } else {
-      return js.resolvedPromise();
-    }
-  })
+          JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self),
+              (jsg::Lock & js) mutable {
+                if (!self->writable.isClosedOrClosing(js)) {
+                return self->writable.forceFlush(js);
+                } else {
+                return js.resolvedPromise();
+                }
+              }))
       .then(js,
-          [self = JSG_THIS](jsg::Lock& js) mutable {
-    // Forcibly abort the readable/writable streams.
-    auto cancelPromise = self->readable.forceCancel(js, kj::none);
-    auto abortPromise = self->writable.forceAbort(js, kj::none);
+          JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self),
+              (jsg::Lock & js) mutable {
+                // Forcibly abort the readable/writable streams.
+                auto cancelPromise = self->readable.forceCancel(js, kj::none);
+                auto abortPromise = self->writable.forceAbort(js, kj::none);
 
-    // The below is effectively `Promise.all(cancelPromise, abortPromise)`
-    return cancelPromise.then(js, [abortPromise = kj::mv(abortPromise)](jsg::Lock& js) mutable {
-      return kj::mv(abortPromise);
-    });
-  })
-      .then(js, [self = JSG_THIS](jsg::Lock& js) mutable {
-    // Destroy the connection stream to close the connection.
-    { auto _ = kj::mv(self->connectionData); }
-    self->connectionData = kj::none;
+                // The below is effectively `Promise.all(cancelPromise, abortPromise)`
+                return cancelPromise.then(js,
+                    JSG_VISITABLE_LAMBDA((abortPromise = kj::mv(abortPromise)), (abortPromise),
+                        (jsg::Lock & js) mutable { return kj::mv(abortPromise); }));
+              }))
+      .then(js,
+          JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self),
+              (jsg::Lock & js) mutable {
+                // Destroy the connection stream to close the connection.
+                { auto _ = kj::mv(self->connectionData); }
+                self->connectionData = kj::none;
 
-    self->resolveFulfiller(js, kj::none);
-    return js.resolvedPromise();
-  }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value err) mutable {
-    self->errorHandler(js, kj::mv(err));
-  });
+                self->resolveFulfiller(js, kj::none);
+                return js.resolvedPromise();
+              }))
+      .catch_(js,
+          JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self),
+              (jsg::Lock & js, jsg::Value err) mutable { self->errorHandler(js, kj::mv(err)); }));
 }
 
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
