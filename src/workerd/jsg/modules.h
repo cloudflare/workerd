@@ -376,12 +376,6 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     }
   }
 
-  template <typename Func>
-  void addBuiltinBundleFiltered(Bundle::Reader bundle, Func filter) {
-    addBuiltinBundleFiltered(
-        bundle, kj::mv(filter), [&](Module::Reader module) { addBuiltinModule(module); });
-  }
-
   template <typename Filter, typename AddModule>
   void addBuiltinBundleFiltered(Bundle::Reader bundle, Filter filter, AddModule addModule) {
     for (auto module: bundle.getModules()) {
