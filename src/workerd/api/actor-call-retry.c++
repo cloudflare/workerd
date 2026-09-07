@@ -16,13 +16,15 @@ ActorCallRetryState::ActorCallRetryState(
     : timer(timer),
       observer(kj::addRef(observer)),
       config(config) {
-  retriesEnabled = config.observationEnabled.toBool() && config.enforcementEnabled.toBool();
-  if (config.payloadReplayable.toBool()) {
+  auto payloadReplayable = config.payloadReplayable.toBool();
+  retriesEnabled =
+      payloadReplayable && config.observationEnabled.toBool() && config.enforcementEnabled.toBool();
+  if (payloadReplayable) {
     metadata = generateActorRetryRequestMetadata(
         kj::systemCoarseCalendarClock().now(), config.enforcementEnabled);
-    if (retriesEnabled) {
-      deadline = timer.nowForLimitTimeout() + RETRY_BUDGET;
-    }
+  }
+  if (retriesEnabled) {
+    deadline = timer.nowForLimitTimeout() + RETRY_BUDGET;
   }
 }
 
@@ -49,23 +51,18 @@ kj::OneOf<ActorCallRetryState::Attempt, kj::Exception> ActorCallRetryState::star
 
 kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::handleAttemptFailure(
     kj::Exception exception) {
-  if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-    startRetryLatencyTimer();
-  }
+  maybeStartRetryLatencyTimer(exception);
   KJ_IF_SOME(claimRejection, handleClaimRejection(exception)) {
     return kj::mv(claimRejection);
   }
 
-  auto decision = checkCanRetry(kj::mv(exception));
-  KJ_SWITCH_ONEOF(decision) {
-    KJ_CASE_ONEOF(plan, RetryPlan) {
-      return prepareRetry(kj::mv(plan));
-    }
-    KJ_CASE_ONEOF(finalFailure, kj::Exception) {
-      return kj::mv(finalFailure);
-    }
+  return checkCanRetry(kj::mv(exception));
+}
+
+void ActorCallRetryState::maybeStartRetryLatencyTimer(const kj::Exception& exception) {
+  if (exception.getType() == kj::Exception::Type::DISCONNECTED && retryStartTime == kj::none) {
+    retryStartTime = kj::systemPreciseMonotonicClock().now();
   }
-  KJ_UNREACHABLE;
 }
 
 kj::Maybe<kj::Exception> ActorCallRetryState::handleClaimRejection(const kj::Exception& exception) {
@@ -74,24 +71,17 @@ kj::Maybe<kj::Exception> ActorCallRetryState::handleClaimRejection(const kj::Exc
   }
 
   recordOutcome(ActorRetryOutcome::CLAIM_REJECTED);
-  return KJ_ASSERT_NONNULL(originalDisconnect).clone();
+  return KJ_ASSERT_NONNULL(
+      originalDisconnect, "actor retry claim rejected before a retry was attempted")
+      .clone();
 }
 
-kj::OneOf<ActorCallRetryState::RetryPlan, kj::Exception> ActorCallRetryState::checkCanRetry(
-    kj::Exception exception) {
+kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::checkCanRetry(kj::Exception exception) {
   if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
     recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY);
     return kj::mv(exception);
   }
   if (exception.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none) {
-    recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY);
-    return kj::mv(exception);
-  }
-  if (!config.payloadReplayable.toBool()) {
-    recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY);
-    return kj::mv(exception);
-  }
-  if (!retriesEnabled) {
     recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY);
     return kj::mv(exception);
   }
@@ -109,14 +99,10 @@ kj::OneOf<ActorCallRetryState::RetryPlan, kj::Exception> ActorCallRetryState::ch
     }
     return kj::mv(exception);
   }
-  return RetryPlan{kj::mv(exception), delay};
-}
-
-kj::Duration ActorCallRetryState::prepareRetry(RetryPlan plan) {
   if (attemptCount == 1) {
-    originalDisconnect = plan.failure.clone();
+    originalDisconnect = exception.clone();
   }
-  if (plan.failure.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none) {
+  if (exception.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none) {
     KJ_ASSERT_NONNULL(metadata).isRetry = IsActorRetry::YES;
   } else if (KJ_ASSERT_NONNULL(metadata).isRetry == IsActorRetry::NO) {
     metadata = generateActorRetryRequestMetadata(
@@ -124,7 +110,7 @@ kj::Duration ActorCallRetryState::prepareRetry(RetryPlan plan) {
   }
 
   ++attemptCount;
-  return plan.delay;
+  return delay;
 }
 
 void ActorCallRetryState::recordRecovered() {
@@ -146,12 +132,6 @@ kj::Duration ActorCallRetryState::retryDelay() {
   auto maximum = INITIAL_BACKOFF * (1u << (attemptCount - 1));
   std::uniform_int_distribution<uint64_t> distribution(0, maximum / kj::NANOSECONDS);
   return distribution(generator) * kj::NANOSECONDS;
-}
-
-void ActorCallRetryState::startRetryLatencyTimer() {
-  if (retryStartTime == kj::none) {
-    retryStartTime = kj::systemPreciseMonotonicClock().now();
-  }
 }
 
 void ActorCallRetryState::recordOutcome(ActorRetryOutcome outcome) {

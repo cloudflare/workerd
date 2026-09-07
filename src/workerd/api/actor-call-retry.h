@@ -64,24 +64,21 @@ class ActorCallRetryState final: public kj::Refcounted {
   kj::OneOf<Attempt, kj::Exception> startAttempt();
   kj::OneOf<kj::Duration, kj::Exception> handleAttemptFailure(kj::Exception exception);
 
+  bool isRetryEnabled() const {
+    return retriesEnabled;
+  }
+  void maybeStartRetryLatencyTimer(const kj::Exception& exception);
   void recordRecovered();
   void recordCanceled();
 
  private:
-  struct RetryPlan {
-    kj::Exception failure;
-    kj::Duration delay;
-  };
-
   static constexpr uint MAX_ATTEMPTS = 5;
   static constexpr auto RETRY_BUDGET = 10 * kj::SECONDS;
   static constexpr auto INITIAL_BACKOFF = 50 * kj::MILLISECONDS;
 
   kj::Maybe<kj::Exception> handleClaimRejection(const kj::Exception& exception);
-  kj::OneOf<RetryPlan, kj::Exception> checkCanRetry(kj::Exception exception);
-  kj::Duration prepareRetry(RetryPlan plan);
+  kj::OneOf<kj::Duration, kj::Exception> checkCanRetry(kj::Exception exception);
   kj::Duration retryDelay();
-  void startRetryLatencyTimer();
   void recordOutcome(ActorRetryOutcome outcome);
 
   TimerChannel& timer;

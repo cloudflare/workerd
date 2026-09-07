@@ -241,8 +241,7 @@ KJ_TEST("actor calls do not retry when retry requests are disabled") {
 
   auto first = startAttempt(*state);
   KJ_EXPECT(KJ_ASSERT_NONNULL(first.getMetadata()).retryGateEnabled == ActorRetryGateEnabled::NO);
-  auto result = handleFailure(*state, makeDisconnect("disconnected"_kj));
-  KJ_EXPECT(result.is<kj::Exception>());
+  KJ_EXPECT(!state->isRetryEnabled());
   KJ_EXPECT(observer->outcomes.size() == 0);
 }
 

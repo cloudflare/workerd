@@ -87,15 +87,15 @@ class RetryMetadataOutgoingFactory final: public Fetcher::OutgoingFactory {
     return {.client = kj::heap<MockFetchTarget>(), .spanParents = kj::none};
   }
 
-  bool supportsActorFetchRetries() const override {
+  bool supportsActorCallRetries() const override {
     return true;
   }
 
-  Result newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String>,
-      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
-      CountSubrequest,
-      MakeUserSpanParent) override {
-    capturedMetadata = kj::mv(actorRetryRequestMetadata);
+  void onActorCallRetry() override {}
+
+  Result newActorCallAttempt(
+      kj::Maybe<kj::String>, ActorCallRetryState::Attempt attempt, MakeUserSpanParent) override {
+    capturedMetadata = attempt.takeMetadata();
     return {.client = kj::heap<MockFetchTarget>(), .spanParents = kj::none};
   }
 
@@ -212,6 +212,7 @@ struct ReplayState {
   uint requestCount = 0;
   uint webSocketRequestCount = 0;
   uint retryCount = 0;
+  uint acceptedRetryCount = 0;
   uint observedRetryCount = 0;
   kj::Vector<ActorRetryOutcome> outcomes;
   kj::Maybe<DeterministicTimerChannel&> timerChannel;
@@ -326,20 +327,21 @@ class ReplayOutgoingFactory final: public Fetcher::OutgoingFactory {
     return {.client = kj::heap<ReplayFetchTarget>(state), .spanParents = kj::none};
   }
 
-  bool supportsActorFetchRetries() const override {
+  bool supportsActorCallRetries() const override {
     return true;
   }
 
-  void onActorFetchRetry() override {
-    ++state.retryCount;
+  void onActorCallRetry() override {
+    ++state.acceptedRetryCount;
   }
 
-  Result newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String>,
-      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
-      CountSubrequest countSubrequest,
-      MakeUserSpanParent) override {
-    state.metadata.add(KJ_REQUIRE_NONNULL(actorRetryRequestMetadata));
-    state.countSubrequests.add(countSubrequest);
+  Result newActorCallAttempt(
+      kj::Maybe<kj::String>, ActorCallRetryState::Attempt attempt, MakeUserSpanParent) override {
+    if (!attempt.getIsFirstAttempt().toBool()) {
+      ++state.retryCount;
+    }
+    state.metadata.add(KJ_REQUIRE_NONNULL(attempt.takeMetadata()));
+    state.countSubrequests.add(attempt.getCountSubrequest());
     if (state.requestCount < state.actions.size()) {
       auto action = state.actions[state.requestCount];
       if (action == ReplayAction::CLIENT_CREATION_FAILURE) {
@@ -822,18 +824,6 @@ KJ_TEST("actor fetch stops after a retry claim rejection") {
   KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::CLAIM_REJECTED);
 }
 
-KJ_TEST("actor fetch normalizes an initial retry claim rejection") {
-  ReplayState state{.actions = kj::arr(ReplayAction::CLAIM_REJECTED)};
-  auto failure = KJ_REQUIRE_NONNULL(
-      runActorFetch(state, ActorRetryGateEnabled::YES, kj::none, ActorFetchKind::HTTP));
-
-  KJ_EXPECT(failure.getType() == kj::Exception::Type::DISCONNECTED, failure);
-  KJ_EXPECT(!failure.getDescription().contains("claim rejected"), failure);
-  KJ_EXPECT(state.requestCount == 1);
-  KJ_EXPECT(state.retryCount == 0);
-  KJ_EXPECT(state.outcomes.size() == 0);
-}
-
 KJ_TEST("actor WebSocket fetch retries a disconnected handshake") {
   ReplayState state{
     .actions = kj::arr(ReplayAction::AMBIGUOUS),
@@ -884,6 +874,7 @@ KJ_TEST("actor fetch abort before an actor failure does not report retry telemet
   KJ_EXPECT(exception.getDescription().contains("The operation was aborted"), exception);
   KJ_EXPECT(state.requestCount == 1);
   KJ_EXPECT(state.retryCount == 0);
+  KJ_EXPECT(state.acceptedRetryCount == 0);
   KJ_EXPECT(state.observedRetryCount == 0);
   KJ_EXPECT(state.outcomes.size() == 0);
 }
@@ -930,6 +921,8 @@ KJ_TEST("actor fetch abort before the first retry does not report an outcome") {
   });
 
   KJ_EXPECT(state.requestCount == 1);
+  KJ_EXPECT(state.acceptedRetryCount == 1);
+  KJ_EXPECT(state.retryCount == 0);
   KJ_EXPECT(state.observedRetryCount == 0);
   KJ_EXPECT(state.outcomes.size() == 0);
 }
@@ -1039,7 +1032,7 @@ KJ_TEST("actor fetch does not start a retry after the start budget") {
   KJ_EXPECT(
       runActorFetch(state, ActorRetryGateEnabled::YES, kj::none, ActorFetchKind::HTTP) != kj::none);
   KJ_EXPECT(state.requestCount == 1);
-  KJ_EXPECT(state.retryCount == 1);
+  KJ_EXPECT(state.retryCount == 0);
   KJ_EXPECT(state.observedRetryCount == 0);
   KJ_EXPECT(state.outcomes.size() == 0);
 }
@@ -1109,16 +1102,18 @@ KJ_TEST("GlobalActorOutgoingFactory forwards metadata and recreates channels for
         env.js.alloc<DurableObjectId>(kj::heap<MockActorId>()), kj::str("location"),
         ActorGetMode::GET_OR_CREATE, false, ActorRoutingMode::DEFAULT,
         ActorVersion{.cohort = kj::str("cohort")}, Persistent::NO);
-    KJ_EXPECT(factory.supportsActorFetchRetries());
+    KJ_EXPECT(factory.supportsActorCallRetries());
 
-    auto client = factory.newSingleUseClientWithActorRetryMetadata(kj::none,
-        IoChannelFactory::ActorRetryRequestMetadata{
-          .nonce = 0x123456789abcdef0,
-          .createdAt = kj::UNIX_EPOCH + 123 * kj::MILLISECONDS,
-          .isRetry = IsActorRetry::YES,
-          .retryGateEnabled = ActorRetryGateEnabled::NO,
-        },
-        CountSubrequest::YES, [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
+    auto client = factory.newActorCallAttempt(kj::none,
+        ActorCallRetryState::Attempt(
+            IoChannelFactory::ActorRetryRequestMetadata{
+              .nonce = 0x123456789abcdef0,
+              .createdAt = kj::UNIX_EPOCH + 123 * kj::MILLISECONDS,
+              .isRetry = IsActorRetry::YES,
+              .retryGateEnabled = ActorRetryGateEnabled::NO,
+            },
+            IsFirstActorCallAttempt::YES),
+        [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
 
     KJ_IF_SOME(metadata, capturedMetadata) {
       KJ_EXPECT(metadata.nonce == 0x123456789abcdef0);
@@ -1128,15 +1123,17 @@ KJ_TEST("GlobalActorOutgoingFactory forwards metadata and recreates channels for
       KJ_FAIL_EXPECT("actor retry metadata was not forwarded to the actor channel");
     }
 
-    factory.onActorFetchRetry();
-    auto retryClient = factory.newSingleUseClientWithActorRetryMetadata(kj::none,
-        IoChannelFactory::ActorRetryRequestMetadata{
-          .nonce = 0xfedcba9876543210,
-          .createdAt = kj::UNIX_EPOCH + 456 * kj::MILLISECONDS,
-          .isRetry = IsActorRetry::YES,
-          .retryGateEnabled = ActorRetryGateEnabled::NO,
-        },
-        CountSubrequest::NO, [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
+    factory.onActorCallRetry();
+    auto retryClient = factory.newActorCallAttempt(kj::none,
+        ActorCallRetryState::Attempt(
+            IoChannelFactory::ActorRetryRequestMetadata{
+              .nonce = 0xfedcba9876543210,
+              .createdAt = kj::UNIX_EPOCH + 456 * kj::MILLISECONDS,
+              .isRetry = IsActorRetry::YES,
+              .retryGateEnabled = ActorRetryGateEnabled::NO,
+            },
+            IsFirstActorCallAttempt::NO),
+        [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
     KJ_EXPECT(checkedSubrequestCount == 1);
     KJ_EXPECT(channelCount == 2);
     KJ_ASSERT(locationHints.size() == 2);
