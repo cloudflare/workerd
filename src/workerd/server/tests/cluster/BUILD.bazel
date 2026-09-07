@@ -2,7 +2,7 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
 
 js_test(
     name = "cluster-test-unix",
-    size = "medium",
+    size = "large",
     data = [
         ":cluster-test.wd-test",
         ":cluster-worker.js",
