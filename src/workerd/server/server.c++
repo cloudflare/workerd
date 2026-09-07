@@ -6737,7 +6737,7 @@ class Server::UdpListener final: public kj::Refcounted {
     ~Flow() noexcept(false) {
       // Stop routing further datagrams here if the dispatch task is ending before an idle timeout
       // removed us already (e.g. the connect() handler returned without reading until EOF).
-      listener->flows.erase(key);
+      unregister();
     }
 
     // Called by UdpListener::run() when a new datagram arrives for this flow. The listener keeps
@@ -6816,7 +6816,15 @@ class Server::UdpListener final: public kj::Refcounted {
       // (it's owned by its dispatch task, not by `flows`), just no longer reachable for future
       // deliver() calls. It's destroyed once that task's promise chain -- the connect() handler,
       // plus connectUdp()'s own neutering -- completes.
-      listener->flows.erase(key);
+      unregister();
+    }
+
+    void unregister() {
+      KJ_IF_SOME(current, listener->flows.find(key)) {
+        if (current == this) {
+          listener->flows.erase(key);
+        }
+      }
     }
   };
 
