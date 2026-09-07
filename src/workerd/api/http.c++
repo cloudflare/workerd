@@ -1499,6 +1499,10 @@ class ActorRetryMetrics final: public kj::Refcounted {
     observer->recordActorRetry(ActorRetryCallType::FETCH);
   }
 
+  void recordCanceled() {
+    recordOutcome(ActorRetryOutcome::CANCELED);
+  }
+
   void recordOutcome(ActorRetryOutcome outcome) {
     if (recordedOutcome) return;
     recordedOutcome = true;
@@ -1542,6 +1546,9 @@ class ActorFetchRetryState {
     return metrics.addRef();
   }
   void recordRecovered();
+  void recordCanceled() {
+    metrics->recordCanceled();
+  }
 
  private:
   static constexpr uint MAX_ATTEMPTS = 5;
@@ -1629,7 +1636,7 @@ kj::OneOf<kj::Duration, kj::Exception> ActorFetchRetryState::prepareRetry(
 
   if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
     if (originalDisconnect != kj::none) {
-      metrics->recordOutcome(ActorRetryOutcome::OTHER);
+      metrics->recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY);
     }
     return kj::mv(exception);
   }
@@ -1675,6 +1682,7 @@ kj::Promise<ActorFetchAttemptResult<T>> captureActorFetchAttempt(jsg::Lock& js,
     kj::Maybe<jsg::Ref<AbortSignal>>& signal,
     kj::Promise<T> promise,
     kj::Rc<ActorRetryMetrics> metrics) {
+  auto cancellationMetrics = metrics.addRef();
   auto result = kj::mv(promise)
       .then([](T&& result) -> ActorFetchAttemptResult<T> { return kj::mv(result); })
       .catch_([metrics = kj::mv(metrics)](
@@ -1682,7 +1690,12 @@ kj::Promise<ActorFetchAttemptResult<T>> captureActorFetchAttempt(jsg::Lock& js,
     metrics->observeAttemptFailure(exception);
     return ActorFetchFailure{kj::mv(exception)};
   });
-  return AbortSignal::maybeCancelWrap(js, signal, kj::mv(result));
+  return AbortSignal::maybeCancelWrap(js, signal, kj::mv(result))
+      .catch_([metrics = kj::mv(cancellationMetrics)](
+                  kj::Exception&& exception) mutable -> kj::Promise<ActorFetchAttemptResult<T>> {
+    metrics->recordCanceled();
+    return kj::mv(exception);
+  });
 }
 
 jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
@@ -1775,9 +1788,10 @@ jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList,
-  ActorFetchRetryState state,
-  kj::Exception exception) {
+    ActorFetchRetryState state,
+    kj::Exception exception) {
   KJ_IF_SOME(reason, getAbortReason(js, *jsRequest)) {
+    state.recordCanceled();
     return js.rejectedPromise<jsg::Ref<Response>>(kj::mv(reason));
   }
   auto delayOrException = state.prepareRetry(kj::mv(exception));
@@ -1790,7 +1804,12 @@ jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
   fetcher->onActorFetchRetry();
 
   auto signal = jsRequest->getSignal();
-  auto delayPromise = AbortSignal::maybeCancelWrap(js, signal, ioContext.afterLimitTimeout(delay));
+  auto delayPromise = AbortSignal::maybeCancelWrap(js, signal, ioContext.afterLimitTimeout(delay))
+                          .catch_([metrics = state.addMetricsRef()](
+                                      kj::Exception&& exception) mutable -> kj::Promise<void> {
+    metrics->recordCanceled();
+    return kj::mv(exception);
+  });
   return ioContext.awaitIo(js, kj::mv(delayPromise),
       [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
           retryState = kj::Maybe(kj::mv(state))](jsg::Lock& js) mutable {
@@ -1825,6 +1844,9 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
 
   auto signal = jsRequest->getSignal();
   KJ_IF_SOME(reason, getAbortReason(js, *jsRequest)) {
+    KJ_IF_SOME(state, retryState) {
+      state.recordCanceled();
+    }
     return js.rejectedPromise<jsg::Ref<Response>>(kj::mv(reason));
   }
   KJ_IF_SOME(state, retryState) {
