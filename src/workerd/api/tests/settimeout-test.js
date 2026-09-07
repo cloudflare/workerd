@@ -9,10 +9,11 @@ import timers from 'node:timers/promises';
 // builds add additional overhead.
 const JITTER = 10;
 
-// A zero (or omitted, or negative) delay setTimeout() called outside of a request -- e.g. here,
-// at top-level module scope -- doesn't throw and is scheduled as a microtask instead. By the
-// time any request is handled, top-level evaluation (and any microtasks it queued) has already
-// run to completion, so `globalScopeTimeoutRan` below is observable from a test handler.
+// A setTimeout() with a delay of exactly zero (or omitted, which defaults to zero) called
+// outside of a request -- e.g. here, at top-level module scope -- doesn't throw and is
+// scheduled as a microtask instead. By the time any request is handled, top-level evaluation
+// (and any microtasks it queued) has already run to completion, so `globalScopeTimeoutRan`
+// below is observable from a test handler.
 // Ref: https://github.com/cloudflare/workerd/issues/389
 let globalScopeTimeoutRan = false;
 const globalScopeTimeoutId = setTimeout(() => {
@@ -30,9 +31,11 @@ const canceledGlobalScopeTimeoutId = setTimeout(() => {
 }, 0);
 clearTimeout(canceledGlobalScopeTimeoutId);
 
-// A positive delay still can't be honored outside of a request -- there's no per-request timer
-// queue to schedule it against -- so it continues to throw exactly as before.
+// Any delay other than exactly zero -- positive or negative -- still can't be honored outside
+// of a request -- there's no per-request timer queue to schedule it against -- so it continues
+// to throw exactly as before.
 throws(() => setTimeout(() => {}, 10), /Disallowed operation/);
+throws(() => setTimeout(() => {}, -1), /Disallowed operation/);
 
 // setInterval() is intentionally not given the same treatment: a recurring task with no request
 // to attach it to could run forever, so it always throws at global scope regardless of delay.

@@ -1068,7 +1068,7 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeoutInternal(
   return timeoutId.toNumber();
 }
 
-bool ServiceWorkerGlobalScope::cancelPendingGlobalScopeTimeout(TimeoutId::NumberType id) {
+bool ServiceWorkerGlobalScope::removePendingGlobalScopeTimeout(TimeoutId::NumberType id) {
   for (auto i: kj::indices(pendingGlobalScopeTimeouts)) {
     if (pendingGlobalScopeTimeouts[i] == id) {
       // Order doesn't matter for this set, so swap-and-pop is fine.
@@ -1093,20 +1093,29 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeout(jsg::Lock& js,
 
   double delay = msDelay.orDefault(0);
 
-  if (!IoContext::hasCurrent() && delay <= 0) {
+  if (!IoContext::hasCurrent() && delay == 0) {
     // There is no per-request timer queue to schedule against outside of a request (e.g.
-    // during top-level module evaluation). A zero (or negative, or omitted) delay is
-    // nonetheless a common cross-platform idiom for "run this soon, but not synchronously" --
-    // see https://github.com/cloudflare/workerd/issues/389. Since the distinction between a
-    // task and a microtask isn't observable in this scenario, honor it via queueMicrotask()
-    // instead of throwing. A positive delay still falls through to IoContext::current() below,
-    // which throws the usual "Disallowed operation" error, since we have no timer mechanism
-    // available outside of a request.
+    // during top-level module evaluation). A delay of exactly zero (including an omitted
+    // delay, which defaults to zero) is nonetheless a common cross-platform idiom for "run
+    // this soon, but not synchronously" -- see
+    // https://github.com/cloudflare/workerd/issues/389. Since the distinction between a task
+    // and a microtask isn't observable in this scenario, honor it via queueMicrotask() instead
+    // of throwing. Any other delay -- including a negative one -- still falls through to
+    // IoContext::current() below, which throws the usual "Disallowed operation" error, since we
+    // have no timer mechanism available outside of a request.
+    //
+    // Note that error reporting and ordering necessarily differ slightly from the in-request
+    // case: an exception thrown by `fn` is reported the way queueMicrotask() reports one (a
+    // global 'error' event, then console logging), rather than through the request's uncaught
+    // exception machinery, since no request exists yet to attach that to; and this and other
+    // microtasks queued during startup interleave directly with each other rather than going
+    // through the per-request timer queue.
     auto id = timeoutIdGenerator.getNext().toNumber();
     pendingGlobalScopeTimeouts.add(id);
-    queueMicrotask(js, [this, id, fn = kj::mv(fn)](jsg::Lock& js) mutable {
-      // May have already been canceled via clearTimeout().
-      if (cancelPendingGlobalScopeTimeout(id)) {
+    queueMicrotask(js, [self = JSG_THIS, id, fn = kj::mv(fn)](jsg::Lock& js) mutable {
+      // Only run `fn` if this timeout is still pending, i.e. clearTimeout() hasn't already
+      // removed it.
+      if (self->removePendingGlobalScopeTimeout(id)) {
         fn(js);
       }
     });
@@ -1123,7 +1132,9 @@ void ServiceWorkerGlobalScope::clearTimeout(jsg::Lock& js, kj::Maybe<jsg::JsNumb
     // Browsers does not throw an error when "unsafe" integers are passed to the clearTimeout method.
     // Let's make sure we ignore those values, just like browsers and other runtimes.
     KJ_IF_SOME(id, rawId.toSafeInteger(js)) {
-      if (cancelPendingGlobalScopeTimeout(id)) {
+      if (removePendingGlobalScopeTimeout(id)) {
+        // It was a pending global-scope timeout (see setTimeout()); removing it from the
+        // pending set is enough to cancel it.
         return;
       }
       IoContext::current().clearTimeoutImpl(TimeoutId::fromNumber(id));
