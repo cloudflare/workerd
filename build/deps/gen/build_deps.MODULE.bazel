@@ -20,7 +20,7 @@ bazel_dep(name = "aspect_rules_js", version = "3.4.1")
 bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
 
 # bazel_lib
-bazel_dep(name = "bazel_lib", version = "3.7.1")
+bazel_dep(name = "bazel_lib", version = "3.7.2")
 
 # bazel_skylib
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
@@ -79,7 +79,7 @@ bazel_dep(name = "rules_nodejs", version = "6.7.5")
 bazel_dep(name = "rules_oci", version = "2.3.0")
 
 # rules_python
-bazel_dep(name = "rules_python", version = "2.3.2")
+bazel_dep(name = "rules_python", version = "2.3.3")
 
 # rules_rust
 bazel_dep(name = "rules_rust", version = "0.74.0")
