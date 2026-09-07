@@ -6716,7 +6716,7 @@ class Server::UdpListener final: public kj::Refcounted {
   // `pending`, blocking on `waitingReceiver` if empty; send() writes back to the peer via the
   // listener's shared DatagramPort.
   //
-  // Ownership: the dispatch task owns Flow (see dispatch()), same as TcpListener::run() owning
+  // Ownership: the dispatch task owns Flow (see dispatch()), same as TcpListener::run() tasks owning
   // per-connection state. `flows` below is a non-owning lookup pointer for routing datagrams.
   class Flow final: public workerd::DatagramChannel {
    public:
