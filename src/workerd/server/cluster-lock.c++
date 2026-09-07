@@ -87,7 +87,7 @@ ClusterLockManager::ClusterLockManager(kj::Own<const kj::Directory> dir,
       clusterRpc(clusterRpc),
       timer(timer) {}
 
-kj::Promise<kj::OneOf<ClusterLockManager::OwnedLock, rpc::WorkerdDebugPort::Client>>
+kj::Promise<kj::OneOf<ClusterLockManager::OwnedLock, rpc::WorkerdClusterPort::Client>>
 ClusterLockManager::acquireOrRoute(kj::StringPtr actorId) {
   // Validate that the actor ID is a hex string. This is the only form of actor ID we expect on
   // this path (durable actors named by a 64-char hex SHA-256 hash, or by `idFromName` which also
@@ -132,7 +132,7 @@ ClusterLockManager::acquireOrRoute(kj::StringPtr actorId) {
         // acquireOrRoute() will then see isPeerDead(ownerKey) return true and fall through to
         // the claim path.
         VatIdHolder holder(ownerKey);
-        co_return clusterRpc.bootstrap(holder.getReader()).castAs<rpc::WorkerdDebugPort>();
+        co_return clusterRpc.bootstrap(holder.getReader()).castAs<rpc::WorkerdClusterPort>();
       }
 
       // Owner is confirmed dead. Fall through to the claim path.

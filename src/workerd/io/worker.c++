@@ -4166,7 +4166,7 @@ bool Worker::Actor::idsEqual(const Id& a, const Id& b) {
   KJ_UNREACHABLE;
 }
 
-Worker::Actor::Id Worker::Actor::cloneId(Worker::Actor::Id& id) {
+Worker::Actor::Id Worker::Actor::cloneId(const Worker::Actor::Id& id) {
   KJ_SWITCH_ONEOF(id) {
     KJ_CASE_ONEOF(coloLocalId, kj::String) {
       return kj::str(coloLocalId);

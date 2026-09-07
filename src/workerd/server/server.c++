@@ -13,6 +13,7 @@
 #include <workerd/api/actor-state.h>
 #include <workerd/api/analytics-engine.capnp.h>
 #include <workerd/api/pyodide/pyodide.h>
+#include <workerd/api/restore.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/access-info.h>
@@ -363,8 +364,6 @@ class Server::ActorNamespace final {
   friend class Server;
 
   ActorNamespace(kj::Own<ActorClass> actorClass,
-      kj::StringPtr serviceName,
-      kj::StringPtr className,
       const ActorConfig& config,
       const kj::Clock& clock,
       kj::Timer& timer,
@@ -377,8 +376,6 @@ class Server::ActorNamespace final {
       kj::TaskSet& waitUntilTasks,
       Persistent selfTokensArePersistent)
       : actorClass(kj::mv(actorClass)),
-        serviceName(serviceName),
-        className(className),
         config(config),
         clock(clock),
         timer(timer),
@@ -1471,7 +1468,7 @@ class Server::ActorNamespace final {
     }
   };
 
-  kj::String actorKey(Worker::Actor::Id& id) {
+  kj::String actorKey(const Worker::Actor::Id& id) {
     KJ_SWITCH_ONEOF(id) {
       KJ_CASE_ONEOF(obj, kj::Own<ActorIdFactory::ActorId>) {
         KJ_REQUIRE(config.is<Durable>());
@@ -1520,16 +1517,17 @@ class Server::ActorNamespace final {
   }
 
   // Which node currently owns the actor with the given key: a container on this node (created
-  // here if we just claimed the lock), or the owning node's debug port. Not cached; callers cache
-  // what they derive from it. Every cluster-routed channel type resolves through this method so
-  // that the lock protocol lives in exactly one place. `key` and `id` must remain valid until the
-  // returned promise settles. Cluster mode only.
-  using Node = kj::OneOf<kj::Own<ActorContainer>, rpc::WorkerdDebugPort::Client>;
-  kj::Promise<Node> resolveNode(kj::StringPtr key, Worker::Actor::Id& id) {
+  // here if we just claimed the lock), or the owning node's cluster port. Not cached; callers
+  // cache what they derive from it. Every cluster-routed channel type resolves through this method
+  // so that the lock protocol lives in exactly one place. `key` and `id` must remain valid until
+  // the returned promise settles. Cluster mode only.
+  using Node = kj::OneOf<kj::Own<ActorContainer>, rpc::WorkerdClusterPort::Client>;
+  kj::Promise<Node> resolveNode(kj::StringPtr key, const Worker::Actor::Id& id) {
     // Local-first. This lookup is what terminates the routing loop: when the lock file names this
-    // node, acquireOrRoute() returns our own debug port with no backoff, and the resulting
-    // getActor() lands right back here. That is only correct because "lock file names this node"
-    // implies "container is in `actors`" -- see ActorContainer::ownershipLock.
+    // node, acquireOrRoute() returns our own cluster port with no backoff, and the resulting
+    // getChannelFromToken() decodes the token into a channel that lands right back here. That is
+    // only correct because "lock file names this node" implies "container is in `actors`" -- see
+    // ActorContainer::ownershipLock.
     KJ_IF_SOME(container, actors.find(key)) {
       co_return container->addRef();
     }
@@ -1539,8 +1537,8 @@ class Server::ActorNamespace final {
       KJ_CASE_ONEOF(ownership, ClusterLockManager::OwnedLock) {
         co_return createActorContainer(kj::str(key), Worker::Actor::cloneId(id), kj::mv(ownership));
       }
-      KJ_CASE_ONEOF(debugPort, rpc::WorkerdDebugPort::Client) {
-        co_return kj::mv(debugPort);
+      KJ_CASE_ONEOF(clusterPort, rpc::WorkerdClusterPort::Client) {
+        co_return kj::mv(clusterPort);
       }
     }
     KJ_UNREACHABLE;
@@ -1671,8 +1669,6 @@ class Server::ActorNamespace final {
 
  private:
   kj::Own<ActorClass> actorClass;
-  kj::StringPtr serviceName;
-  kj::StringPtr className;
   const ActorConfig& config;
   const kj::Clock& clock;
 
@@ -1927,17 +1923,22 @@ class Server::ActorNamespace final {
     }
   };
 
-  // Channel to an actor in this namespace in cluster mode. Resolution of which node owns the actor
-  // is deferred until first use, so that obtaining or deserializing a stub does not take cluster
-  // locks or wake remote actors.
-  class ClusterActorChannel final: public IoChannelFactory::ActorChannel {
+  // Base class for SubrequestChannels in cluster mode whose requests are routed to whichever node
+  // currently owns some root actor in this namespace: plain actor stubs (ClusterActorChannel) and
+  // restored stubs whose vendor chain bottoms out at such an actor
+  // (ClusterRestoredSubrequestChannel). Resolution of the owning node is deferred until first use,
+  // so that obtaining or deserializing a stub does not take cluster locks or wake remote actors.
+  //
+  // Server::wrapRestoredChannel() recognizes a cluster-routed vendor by this type and copies the
+  // root actor's identity out of it so that the wrapper can resolve that node for itself. No
+  // resolution state is shared between channels; each caches its own `target`.
+  class ClusterRoutedChannel: public IoChannelFactory::SubrequestChannel {
    public:
-    ClusterActorChannel(ActorNamespace& ns, Worker::Actor::Id id, Persistent persistent)
+    ClusterRoutedChannel(ActorNamespace& ns, Worker::Actor::Id id)
         : ns(ns),
           id(kj::mv(id)),
-          key(ns.actorKey(this->id)),
-          persistent(persistent) {}
-    ~ClusterActorChannel() noexcept(false) {
+          key(ns.actorKey(this->id)) {}
+    ~ClusterRoutedChannel() noexcept(false) {
       KJ_IF_SOME(t, target) {
         KJ_IF_SOME(container, t.tryGet<kj::Own<ActorContainer>>()) {
           container->updateAccessTime();
@@ -1945,11 +1946,132 @@ class Server::ActorNamespace final {
       }
     }
 
+    ActorNamespace& getRootNamespace() {
+      return ns;
+    }
+    const Worker::Actor::Id& getRootId() {
+      return id;
+    }
+
+    kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+      return newPromisedWorkerInterface(startRequestImpl(kj::addRef(*this), kj::mv(metadata)));
+    }
+
+   protected:
+    ActorNamespace& ns;
+    Worker::Actor::Id id;
+    kj::String key;  // actorKey(id), computed once
+
+    // Where requests on this channel go, resolved on first startRequest() and retained for the
+    // life of the channel. Local: the container, pinned exactly as ActorChannelImpl pins it (and
+    // therefore the ownership lock). Remote: a WorkerdBootstrap for this channel's target on the
+    // owning node, obtained by sending the channel's own token to that node's
+    // WorkerdClusterPort.getChannelFromToken(). Retaining the target gives remote stubs the same
+    // failure semantics as local ones: a local channel keeps throwing `brokenReason` once its
+    // container breaks; a retained bootstrap likewise keeps failing once the far end breaks, rather
+    // than silently reaching a freshly re-instantiated actor on the next call.
+    using Target = kj::OneOf<kj::Own<ActorContainer>, rpc::WorkerdBootstrap::Client>;
+    kj::Maybe<Target> target;
+
+    // Resolves `target`, caching the result. Safe to call concurrently; all callers share one
+    // ns.resolveNode() attempt. A failed resolution is retained too, so every later request on the
+    // channel fails with the same exception.
+    kj::Promise<void> resolveTarget() {
+      if (target != kj::none) return kj::READY_NOW;
+      KJ_IF_SOME(r, resolving) return r.addBranch();
+      return resolving.emplace(resolveTargetImpl().fork()).addBranch();
+    }
+
+    // Start a request when `target` resolved to a container on this node.
+    virtual kj::Promise<kj::Own<WorkerInterface>> startLocalRequest(
+        ActorContainer& container, IoChannelFactory::SubrequestMetadata metadata) = 0;
+
+   private:
+    // Set once the first resolution starts. Its branches are only ever held by coroutines that
+    // also hold a reference to this channel, so the underlying resolution never outlives `this`.
+    kj::Maybe<kj::ForkedPromise<void>> resolving;
+
+    static rpc::WorkerdBootstrap::Client bootstrapFromToken(
+        rpc::WorkerdClusterPort::Client& clusterPort, kj::ArrayPtr<const byte> token) {
+      auto req = clusterPort.getChannelFromTokenRequest(
+          capnp::MessageSize{token.size() / sizeof(capnp::word) + 4, 0});
+      req.setToken(token);
+      return req.send().getBootstrap();
+    }
+
+    kj::Promise<void> resolveTargetImpl() {
+      auto node = co_await ns.resolveNode(key, id);
+      KJ_SWITCH_ONEOF(node) {
+        KJ_CASE_ONEOF(container, kj::Own<ActorContainer>) {
+          target = kj::mv(container);
+        }
+        KJ_CASE_ONEOF(clusterPort, rpc::WorkerdClusterPort::Client) {
+          // Convert the owner's cluster port into a bootstrap for this channel's target by sending
+          // it our own token. Nothing else on this channel needs the cluster port, so only the
+          // (pipelined) bootstrap is retained: if getChannelFromToken() fails, the bootstrap is
+          // broken and every later startEvent() fails with that exception. A restored token may
+          // be asynchronous (when its restoreArg holds channels with asynchronous tokens); a
+          // promise capability covers that case with the same semantics.
+          KJ_SWITCH_ONEOF(getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::RPC)) {
+            KJ_CASE_ONEOF(token, kj::Array<byte>) {
+              target = bootstrapFromToken(clusterPort, token);
+            }
+            KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+              target = rpc::WorkerdBootstrap::Client(
+                  promise.then([clusterPort = kj::mv(clusterPort)](kj::Array<byte> token) mutable {
+                return bootstrapFromToken(clusterPort, token);
+              }));
+            }
+          }
+        }
+      }
+    }
+
+    static kj::Promise<kj::Own<WorkerInterface>> startRequestImpl(
+        kj::Own<ClusterRoutedChannel> self, IoChannelFactory::SubrequestMetadata metadata) {
+      co_await self->resolveTarget();
+
+      KJ_SWITCH_ONEOF(KJ_ASSERT_NONNULL(self->target)) {
+        KJ_CASE_ONEOF(container, kj::Own<ActorContainer>) {
+          co_return co_await self->startLocalRequest(*container, kj::mv(metadata));
+        }
+        KJ_CASE_ONEOF(bootstrap, rpc::WorkerdBootstrap::Client) {
+          capnp::MessageSize sizeHint{4, 0};
+          KJ_IF_SOME(cf, metadata.cfBlobJson) {
+            sizeHint.wordCount += cf.size() / sizeof(capnp::word) + 1;
+          }
+
+          // The remote instance reconstructs SubrequestMetadata from these params.
+          auto req = bootstrap.startEventRequest(sizeHint);
+          KJ_IF_SOME(cf, metadata.cfBlobJson) {
+            req.setCfBlobJson(cf);
+          }
+          req.setFromPersistentStub(metadata.fromPersistentStub.toBool());
+
+          auto dispatcher = req.sendForPipeline().getDispatcher();
+          // Restore events never cross the cluster -- restored stubs are forwarded as whole
+          // tokens instead (see ClusterRestoredSubrequestChannel) -- so no FrankenvalueHandler is
+          // needed to marshal restore params here.
+          co_return kj::heap<RpcWorkerInterface>(self->ns.httpOverCapnpFactory,
+              self->ns.byteStreamFactory, getUnsupportedFrankenvalueHandler(), kj::mv(dispatcher));
+        }
+      }
+      KJ_UNREACHABLE;
+    }
+  };
+
+  // Channel to a root actor in this namespace in cluster mode.
+  class ClusterActorChannel final: public ClusterRoutedChannel {
+   public:
+    ClusterActorChannel(ActorNamespace& ns, Worker::Actor::Id id, Persistent persistent)
+        : ClusterRoutedChannel(ns, kj::mv(id)),
+          persistent(persistent) {}
+
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
       // If this channel was reconstructed from a persistent (stored) stub, signal the target so it
       // can re-verify that it still allows persistent stubs.
       metadata.fromPersistentStub = metadata.fromPersistentStub || persistent;
-      return newPromisedWorkerInterface(startRequestImpl(kj::addRef(*this), kj::mv(metadata)));
+      return ClusterRoutedChannel::startRequest(kj::mv(metadata));
     }
 
     kj::Promise<void> evictForTest(IoChannelFactory::EvictWebSocketMode webSocketMode) override {
@@ -1985,85 +2107,111 @@ class Server::ActorNamespace final {
     }
 
    private:
+    Persistent persistent;
+
+    kj::Promise<kj::Own<WorkerInterface>> startLocalRequest(
+        ActorContainer& container, IoChannelFactory::SubrequestMetadata metadata) override {
+      return container.startRequest(kj::mv(metadata)).attach(container.addRef());
+    }
+  };
+
+  // Wrapper around a decoded `restored` SubrequestChannel whose vendor chain bottoms out at a
+  // cluster-routed actor. Rather than replaying `[restore]()` hop-by-hop across the network (which
+  // could not carry `restoredSelfTokenFactory`, so a remotely-restored facet could not itself call
+  // `ctx.restore()`), the whole token is either run locally (this node owns the root actor) or
+  // shipped to the owning node, which decodes it and runs the entire restore chain in-process.
+  //
+  // The wrapped `local` tree already knows how to re-encode itself for the wire, including
+  // converting STORAGE-usage tokens to RPC-usage at every nesting level. For a multiply-nested
+  // token each level is wrapped; only the outermost wrapper is ever exercised on the remote path,
+  // and on the local path each level's resolution finds the container the outer one created or
+  // found (see ActorNamespace::resolveNode()).
+  class ClusterRestoredSubrequestChannel final: public ClusterRoutedChannel {
+   public:
+    ClusterRestoredSubrequestChannel(
+        ClusterRoutedChannel& vendor, kj::Own<IoChannelFactory::SubrequestChannel> local)
+        : ClusterRoutedChannel(
+              vendor.getRootNamespace(), Worker::Actor::cloneId(vendor.getRootId())),
+          local(kj::mv(local)) {}
+
+    kj::Promise<void> evictForTest(IoChannelFactory::EvictWebSocketMode webSocketMode) override {
+      return local->evictForTest(webSocketMode);
+    }
+
+    void requireAllowsTransfer() override {
+      local->requireAllowsTransfer();
+    }
+
+    kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+        IoChannelFactory::ChannelTokenUsage usage) override {
+      return local->getTokenMaybeSync(usage);
+    }
+
+   private:
+    kj::Own<IoChannelFactory::SubrequestChannel> local;
+
+    kj::Promise<kj::Own<WorkerInterface>> startLocalRequest(
+        ActorContainer& container, IoChannelFactory::SubrequestMetadata metadata) override {
+      // `local` caches its restored channel across requests, as it does outside cluster mode. The
+      // root ClusterActorChannel inside it resolves to the container we just found or created.
+      return local->startRequest(kj::mv(metadata));
+    }
+  };
+
+  // RpcChannel counterpart of ClusterRestoredSubrequestChannel. `restore()` is a fresh-session
+  // operation by contract, so nothing is retained across calls here: each call resolves the owning
+  // node anew and either restores locally or opens a session on the owner via
+  // WorkerdClusterPort.getRpcTargetFromToken().
+  class ClusterRestoredRpcChannel final: public IoChannelFactory::RpcChannel {
+   public:
+    ClusterRestoredRpcChannel(
+        ClusterRoutedChannel& vendor, kj::Own<IoChannelFactory::RpcChannel> local)
+        : ns(vendor.getRootNamespace()),
+          id(Worker::Actor::cloneId(vendor.getRootId())),
+          key(ns.actorKey(id)),
+          local(kj::mv(local)) {}
+
+    Session restore() override {
+      auto split = restoreImpl(kj::addRef(*this)).split();
+      return {
+        .cap = kj::mv(kj::get<0>(split)),
+        .task = kj::mv(kj::get<1>(split)),
+      };
+    }
+
+    void requireAllowsTransfer() override {
+      local->requireAllowsTransfer();
+    }
+
+    kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+        IoChannelFactory::ChannelTokenUsage usage) override {
+      return local->getTokenMaybeSync(usage);
+    }
+
+   private:
     ActorNamespace& ns;
     Worker::Actor::Id id;
     kj::String key;
-    Persistent persistent;
+    kj::Own<IoChannelFactory::RpcChannel> local;
 
-    // Where requests on this channel go, resolved on first startRequest() and retained for the
-    // life of the channel. Local: the container, pinned exactly as ActorChannelImpl pins it (and
-    // therefore the ownership lock). Remote: a WorkerdBootstrap for this actor on the owning node.
-    // Retaining the target gives remote stubs the same failure semantics as local ones: a local
-    // channel keeps throwing `brokenReason` once its container breaks; a retained bootstrap
-    // likewise keeps failing once the far end breaks, rather than silently reaching a freshly
-    // re-instantiated actor on the next call.
-    using Target = kj::OneOf<kj::Own<ActorContainer>, rpc::WorkerdBootstrap::Client>;
-    kj::Maybe<Target> target;
-
-    // Set once the first resolution starts. Its branches are only ever held by coroutines that
-    // also hold a reference to this channel, so the underlying resolution never outlives `this`.
-    kj::Maybe<kj::ForkedPromise<void>> resolving;
-
-    // Resolves `target`, caching the result. Safe to call concurrently; all callers share one
-    // ns.resolveNode() attempt. A failed resolution is retained too, so every later request on the
-    // channel fails with the same exception.
-    kj::Promise<void> resolveTarget() {
-      if (target != kj::none) return kj::READY_NOW;
-      KJ_IF_SOME(r, resolving) return r.addBranch();
-      return resolving.emplace(resolveTargetImpl().fork()).addBranch();
-    }
-
-    kj::Promise<void> resolveTargetImpl() {
-      auto node = co_await ns.resolveNode(key, id);
+    static kj::Promise<kj::Tuple<rpc::JsRpcTarget::Client, kj::Promise<void>>> restoreImpl(
+        kj::Own<ClusterRestoredRpcChannel> self) {
+      auto node = co_await self->ns.resolveNode(self->key, self->id);
       KJ_SWITCH_ONEOF(node) {
         KJ_CASE_ONEOF(container, kj::Own<ActorContainer>) {
-          target = kj::mv(container);
+          // The root ClusterActorChannel inside `local` resolves to the container we just found or
+          // created and pins it for the session.
+          auto session = self->local->restore();
+          co_return kj::tuple(kj::mv(session.cap), session.task.attach(kj::mv(self)));
         }
-        KJ_CASE_ONEOF(debugPort, rpc::WorkerdDebugPort::Client) {
-          // Convert the owner's debug port into a bootstrap for this actor. Nothing else on this
-          // channel needs the debug port, so only the (pipelined) bootstrap is retained: if
-          // getActor() fails, the bootstrap is broken and every later startEvent() fails with
-          // that exception.
-          auto req = debugPort.getActorRequest(capnp::MessageSize{32, 0});
-          req.setService(ns.serviceName);
-          req.setEntrypoint(ns.className);
-          req.setActorId(key);
-          KJ_IF_SOME(i, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
-            KJ_IF_SOME(name, i->getName()) {
-              req.setActorName(name);
-            }
-          }
-          target = req.send().getActor();
-        }
-      }
-    }
-
-    static kj::Promise<kj::Own<WorkerInterface>> startRequestImpl(
-        kj::Own<ClusterActorChannel> self, IoChannelFactory::SubrequestMetadata metadata) {
-      co_await self->resolveTarget();
-
-      KJ_SWITCH_ONEOF(KJ_ASSERT_NONNULL(self->target)) {
-        KJ_CASE_ONEOF(container, kj::Own<ActorContainer>) {
-          co_return co_await container->startRequest(kj::mv(metadata));
-        }
-        KJ_CASE_ONEOF(bootstrap, rpc::WorkerdBootstrap::Client) {
-          capnp::MessageSize sizeHint{4, 0};
-          KJ_IF_SOME(cf, metadata.cfBlobJson) {
-            sizeHint.wordCount += cf.size() / sizeof(capnp::word) + 1;
-          }
-
-          // The remote instance reconstructs SubrequestMetadata from these params.
-          auto req = bootstrap.startEventRequest(sizeHint);
-          KJ_IF_SOME(cf, metadata.cfBlobJson) {
-            req.setCfBlobJson(cf);
-          }
-          req.setFromPersistentStub(metadata.fromPersistentStub.toBool());
-
-          auto dispatcher = req.sendForPipeline().getDispatcher();
-          // NOTE: We don't support restore() over cluster RPC so we can use
-          // getUnsupportedFrankenvalueHandler() here for now.
-          co_return kj::heap<RpcWorkerInterface>(self->ns.httpOverCapnpFactory,
-              self->ns.byteStreamFactory, getUnsupportedFrankenvalueHandler(), kj::mv(dispatcher));
+        KJ_CASE_ONEOF(clusterPort, rpc::WorkerdClusterPort::Client) {
+          auto token = co_await self->local->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
+          auto req = clusterPort.getRpcTargetFromTokenRequest(
+              capnp::MessageSize{token.size() / sizeof(capnp::word) + 4, 0});
+          req.setToken(token);
+          auto sent = req.send();
+          auto session = api::wrapRemoteRpcSession(sent.getTarget(), sent.getSession());
+          co_return kj::tuple(kj::mv(session.cap), session.task.attach(kj::mv(self)));
         }
       }
       KJ_UNREACHABLE;
@@ -3807,12 +3955,11 @@ class Server::WorkerService final: public Service,
       }
 
       auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, Frankenvalue());
-      auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass),
-          // Dynamic workers can't have actor namespaces, so `serviceName` must be available here.
-          KJ_ASSERT_NONNULL(serviceName), entry.key, entry.value, kj::systemPreciseCalendarClock(),
-          threadContext.getUnsafeTimer(), threadContext.getByteStreamFactory(),
-          threadContext.getHttpOverCapnpFactory(), channelTokenHandler, network, dockerPath,
-          containerEgressInterceptorImage, waitUntilTasks, selfTokensArePersistent());
+      auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
+          kj::systemPreciseCalendarClock(), threadContext.getUnsafeTimer(),
+          threadContext.getByteStreamFactory(), threadContext.getHttpOverCapnpFactory(),
+          channelTokenHandler, network, dockerPath, containerEgressInterceptorImage, waitUntilTasks,
+          selfTokensArePersistent());
       KJ_IF_SOME(d, entry.value.tryGet<Durable>()) {
         actorNamespacesByUniqueKey.insert(d.uniqueKey, ns.get());
       }
@@ -6624,6 +6771,28 @@ kj::Own<IoChannelFactory::ActorChannel> Server::resolveActor(kj::StringPtr names
   return ns.getActorChannel(kj::mv(idObj), persistent);
 }
 
+kj::Own<IoChannelFactory::TokenizableChannel> Server::wrapRestoredChannel(ChannelToken::Type type,
+    IoChannelFactory::SubrequestChannel& vendor,
+    kj::Own<IoChannelFactory::TokenizableChannel> local) {
+  KJ_IF_SOME(routed, kj::tryDowncast<ActorNamespace::ClusterRoutedChannel>(vendor)) {
+    switch (type) {
+      case ChannelToken::Type::SUBREQUEST:
+        return kj::refcounted<ActorNamespace::ClusterRestoredSubrequestChannel>(
+            routed, kj::mv(local).downcast<IoChannelFactory::SubrequestChannel>());
+      case ChannelToken::Type::RPC:
+        return kj::refcounted<ActorNamespace::ClusterRestoredRpcChannel>(
+            routed, kj::mv(local).downcast<IoChannelFactory::RpcChannel>());
+      case ChannelToken::Type::ACTOR_CLASS:
+        KJ_UNREACHABLE;  // decodeChannelTokenImpl() already rejected this
+    }
+    KJ_UNREACHABLE;
+  }
+
+  // The vendor is a static service, or we are not in cluster mode (resolveActor() then returns a
+  // plain ActorChannelImpl). Nothing to route.
+  return kj::mv(local);
+}
+
 // =======================================================================================
 
 class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
@@ -7142,6 +7311,48 @@ class Server::WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
 };
 
+// Bootstrap served to cluster peers. Every method takes a channel token, so this grants nothing
+// beyond what the caller's tokens already do; see WorkerdClusterPort in worker-interface.capnp.
+class Server::WorkerdClusterPortImpl final: public rpc::WorkerdClusterPort::Server {
+ public:
+  WorkerdClusterPortImpl(
+      workerd::server::Server& srv, capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+      : srv(srv),
+        httpOverCapnpFactory(httpOverCapnpFactory) {}
+
+  kj::Promise<void> getChannelFromToken(GetChannelFromTokenContext context) override {
+    // Decoding on this node yields the same lazy channel tree the sender has. If we own the root
+    // actor, its ClusterActorChannel resolves locally and any restore chain runs in-process with
+    // correct self-tokens; if we have just lost ownership, it re-claims or forwards to the new
+    // owner. Either way this is bounded by the invariant described at ActorContainer::ownershipLock.
+    auto channel = KJ_ASSERT_NONNULL(srv.channelTokenHandler)
+                       .decodeSubrequestChannelToken(IoChannelFactory::ChannelTokenUsage::RPC,
+                           context.getParams().getToken());
+    context.initResults(capnp::MessageSize{4, 1})
+        .setBootstrap(kj::heap<WorkerdBootstrapImpl>(kj::mv(channel), httpOverCapnpFactory));
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> getRpcTargetFromToken(GetRpcTargetFromTokenContext context) override {
+    auto channel = KJ_ASSERT_NONNULL(srv.channelTokenHandler)
+                       .decodeRpcChannelToken(IoChannelFactory::ChannelTokenUsage::RPC,
+                           context.getParams().getToken());
+    auto session = channel->restore();
+
+    auto results = context.getResults(capnp::MessageSize{4, 2});
+    results.setTarget(kj::mv(session.cap));
+    // The returned session capability keeps the session alive; dropping it cancels the task. Same
+    // shape as RestoreRpcStubCustomEvent::receiveRpc().
+    results.setSession(session.task.then(
+        [channel = kj::mv(channel)]() { return rpc::JsRpcSession::Client(nullptr); }));
+    return kj::READY_NOW;
+  }
+
+ private:
+  workerd::server::Server& srv;
+  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+};
+
 class Server::DebugPortListener {
  public:
   DebugPortListener(Server& owner, kj::Own<kj::ConnectionReceiver> listener)
@@ -7151,15 +7362,6 @@ class Server::DebugPortListener {
   kj::Promise<void> run() {
     capnp::TwoPartyServer server(owner.makeWorkerdDebugPortClient());
     co_return co_await server.listen(*listener);
-  }
-
-  // Expose WorkerdDebugPortImpl for use by the cluster RPC system.
-  //
-  // TODO(cleanup): Maybe move WorkerDebugPortImpl up into Server. However, note the clustering
-  //   code might also shift to a different interface.
-  static rpc::WorkerdDebugPort::Client makeBootstrap(
-      Server& owner, capnp::HttpOverCapnpFactory& httpOverCapnpFactory) {
-    return kj::heap<WorkerdDebugPortImpl>(owner, httpOverCapnpFactory);
   }
 
  private:
@@ -7480,8 +7682,9 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
             kj::heap<ClusterRegistry>(kj::mv(registryDir), cluster.getNetwork(), network, timer);
         tasks.add(registry->runMaintenance().exclusiveJoin(forkedDrainWhen.addBranch()));
         auto& reg = *clusterRegistry.emplace(kj::mv(registry));
-        clusterRpc.emplace(capnp::makeRpcServer(
-            reg, DebugPortListener::makeBootstrap(*this, globalContext->httpOverCapnpFactory)));
+        clusterRpc.emplace(capnp::makeRpcServer(reg,
+            rpc::WorkerdClusterPort::Client(
+                kj::heap<WorkerdClusterPortImpl>(*this, globalContext->httpOverCapnpFactory))));
 
         // TODO(clustering): We really shouldn't start accepting connections until the server
         //   is totally up, but the RPC system actually starts accepting immediately on

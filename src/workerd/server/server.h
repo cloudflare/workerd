@@ -295,6 +295,9 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::ArrayPtr<const byte> id,
       kj::Maybe<kj::StringPtr> name,
       Persistent persistent) override;
+  kj::Own<IoChannelFactory::TokenizableChannel> wrapRestoredChannel(ChannelToken::Type type,
+      IoChannelFactory::SubrequestChannel& vendor,
+      kj::Own<IoChannelFactory::TokenizableChannel> local) override;
 
   kj::Array<byte> encodeChannelToken(IoChannelFactory::ChannelTokenUsage usage,
       kj::StringPtr serviceName,
@@ -331,6 +334,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   class TcpListener;
   class DebugPortListener;
   class WorkerdDebugPortImpl;
+  class WorkerdClusterPortImpl;
 
   struct ErrorReporter;
   struct ConfigErrorReporter;

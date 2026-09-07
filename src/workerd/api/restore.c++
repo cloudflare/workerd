@@ -495,46 +495,78 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::run
   }
 }
 
+namespace {
+
+kj::Promise<void> remoteRpcSessionTask(rpc::JsRpcSession::Client session,
+    kj::Promise<void> allStubsDropped,
+    kj::Own<kj::PromiseFulfiller<void>> revoker) {
+  // Revoke all stubs in the session as soon as this task completes or is canceled. Normally the
+  // server side doesn't end the session while any stubs still exist, so this only makes a
+  // difference when some sort of error occurred. The stubs are probably already broken in that
+  // case, but revoking them ensures the underlying transport isn't held open waiting for the JS
+  // garbage collector to actually collect the JsRpcStub objects.
+  KJ_DEFER({
+    if (revoker->isWaiting()) {
+      revoker->reject(KJ_EXCEPTION(DISCONNECTED, "JS-RPC session canceled"));
+    }
+  });
+
+  try {
+    // Wait for `session` to resolve to a null capability, which the server does once the session
+    // is over. (If the server is using the "old approach" of not returning a `session` at all, the
+    // return itself represents the end of the session and `session` resolves to null just the
+    // same.)
+    co_await session.whenResolved().exclusiveJoin(kj::mv(allStubsDropped));
+  } catch (...) {
+    auto e = kj::getCaughtExceptionAsKj();
+    if (revoker->isWaiting()) {
+      revoker->reject(e.clone());
+    }
+    kj::throwFatalException(kj::mv(e));
+  }
+}
+
+}  // namespace
+
+IoChannelFactory::RpcChannel::Session wrapRemoteRpcSession(
+    rpc::JsRpcTarget::Client cap, rpc::JsRpcSession::Client session) {
+  auto revokePaf = kj::newPromiseAndFulfiller<void>();
+  cap = capnp::membrane(kj::mv(cap), kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise)));
+
+  // When no more stubs exist in the session, proactively end it. This matters in particular when
+  // the client drops the stub without making any calls at all, e.g. because serializing the
+  // arguments failed: `cap` may be a pipelined capability on a call that has not returned yet, in
+  // which case simply dropping it is not detected by the server.
+  auto completionPaf = kj::newPromiseAndFulfiller<void>();
+  cap = capnp::membrane(
+      kj::mv(cap), kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
+
+  return {
+    .cap = kj::mv(cap),
+    .task = remoteRpcSessionTask(
+        kj::mv(session), kj::mv(completionPaf.promise), kj::mv(revokePaf.fulfiller)),
+  };
+}
+
 kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     FrankenvalueHandler& frankenvalueHandler,
     rpc::EventDispatcher::Client dispatcher) {
-  // This contains a lot of similar code to JsRpcSessionCustomEvent::sendRpc() for setting
-  // up membranes, handling the returned JsRpcSession, etc.
-
-  auto revokePaf = kj::newPromiseAndFulfiller<void>();
-  KJ_DEFER({
-    if (revokePaf.fulfiller->isWaiting()) {
-      revokePaf.fulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "JS-RPC-restore session canceled"));
-    }
-  });
-
   auto req = dispatcher.restoreRpcStubRequest();
   frankenvalueHandler.toCapnp(restoreParams, req.initParams());
   auto sent = req.send();
 
-  rpc::JsRpcTarget::Client cap = sent.getTarget();
+  auto session = wrapRemoteRpcSession(sent.getTarget(), sent.getSession());
 
-  cap = capnp::membrane(kj::mv(cap), kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise)));
-
-  auto completionPaf = kj::newPromiseAndFulfiller<void>();
-  cap = capnp::membrane(
-      kj::mv(cap), kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
-
-  capFulfiller->fulfill(kj::mv(cap));
-
-  auto session = sent.getSession();
+  // `session.task` already propagates any errors from the call, so the call promise itself can be
+  // dropped. (It would NOT work to use `req.sendForPipeline()` above, since pipelined capabilities
+  // cannot resolve until the call returns, but `sendForPipeline()` explicitly inhibits the return
+  // message.)
   { auto drop = kj::mv(sent); }
-  try {
-    co_await session.whenResolved().exclusiveJoin(kj::mv(completionPaf.promise));
-  } catch (...) {
-    auto e = kj::getCaughtExceptionAsKj();
-    if (revokePaf.fulfiller->isWaiting()) {
-      revokePaf.fulfiller->reject(e.clone());
-    }
-    kj::throwFatalException(kj::mv(e));
-  }
+
+  capFulfiller->fulfill(kj::mv(session.cap));
+  co_await session.task;
 
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
 }

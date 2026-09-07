@@ -994,18 +994,6 @@ interface WorkerdDebugPort {
   # purposes.
   #
   # This interface is subject to change. It is intended for use by miniflare.
-  #
-  # This is also the same interface that workerd exports on its cluster port, which other workerd
-  # instances in the same cluster may connect to. See ClusterConfig in workerd.capnp for how to
-  # configure clustering. The cluster port is only intended to be used by other instances in the
-  # cluster, and does not implement a regular two-party RPC protocol. `ClusterRegistry` implements
-  # the `VatNetwork` intended to be used for this. Nobody else should try to connect to it.
-  #
-  # TODO(clustering): Once channel tokens have been extended to support actors, consider changing
-  #   the cluster interface with one that takes a channel token. This seems a bit cleaner and safer
-  #   than letting the client specify props and such directly.
-  # TODO(clustering): Automatically use encryption on non-localhost networks. We have an X25519
-  #   keypair for each node, no need for certs!
 
   getEntrypoint @0 (service :Text, entrypoint :Text, props :Frankenvalue)
               -> (entrypoint :WorkerdBootstrap);
@@ -1017,4 +1005,30 @@ interface WorkerdDebugPort {
   # The actorId should be a hex string for Durable Objects or a plain string for ephemeral actors.
   # `actorName` may optionally be specified for Durable Objects, if `actorId` is derived from the
   # name.
+}
+
+interface WorkerdClusterPort {
+  # Bootstrap interface that workerd exports on its cluster port, which other workerd instances in
+  # the same cluster connect to in order to reach Durable Objects owned by this instance. See
+  # ClusterConfig in workerd.capnp for how to configure clustering. The cluster port does not
+  # implement a regular two-party RPC protocol; `ClusterRegistry` implements the `VatNetwork` used
+  # for it. Nobody else should try to connect to it.
+  #
+  # Every method takes a channel token authenticated with the cluster key, so a peer that does not
+  # hold the key can do nothing with this interface, and a peer that does gains no authority beyond
+  # what its tokens already grant. (Contrast WorkerdDebugPort, which lets the client name arbitrary
+  # services, props, and actors.)
+  #
+  # TODO(clustering): Automatically use encryption on non-localhost networks. We have an X25519
+  #   keypair for each node, no need for certs!
+
+  getChannelFromToken @0 (token :Data) -> (bootstrap :WorkerdBootstrap);
+  # Resolve a `subrequest`-type channel token (in RPC-usage encoding) on this node and return a
+  # bootstrap for it. Used to route requests -- including restored stubs whose `[restore]()` chain
+  # must run on the node that owns the root actor -- to the node that owns the target.
+
+  getRpcTargetFromToken @1 (token :Data) -> (target :JsRpcTarget, session :JsRpcSession);
+  # Like getChannelFromToken(), but for `rpc`-type tokens. Opens a fresh JS RPC session to the
+  # restored RpcTarget. `session` has the same semantics as the field of the same name in
+  # `EventDispatcher.restoreRpcStub()`.
 }

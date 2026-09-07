@@ -500,8 +500,10 @@ class ChannelTokenHandler::RestoredSubrequestChannel final
 class ChannelTokenHandler::RestoredRpcChannel final: public IoChannelFactory::RpcChannel {
  public:
   // Constructor for the "fresh" path: created by `ctx.restore()`. The vendor is the current
-  // entrypoint's `ServerSelfTokenFactory`, used only to construct the token. `restore()` is never
-  // called in this case, because the freshly-created stub is paired with a live capability.
+  // entrypoint's `ServerSelfTokenFactory`, used to construct the token. The freshly-created stub
+  // is paired with a live capability, so `restore()` is only reached if the stub is passed
+  // somewhere that keeps the channel but not the capability (`ctx.props`, a dynamic worker's
+  // `env`) and then used.
   RestoredRpcChannel(ChannelTokenHandler& handler,
       kj::Own<ServerSelfTokenFactory> vendor,
       Frankenvalue restoreArg,
@@ -526,7 +528,38 @@ class ChannelTokenHandler::RestoredRpcChannel final: public IoChannelFactory::Rp
     // Unlike RestoredSubrequestChannel, we expect the caller of restore() already caches the
     // resulting stub, rather than calling again for every request. So, we don't need to cache
     // our result.
-    return restoreWith(getVendorChannel());
+    KJ_SWITCH_ONEOF(vendor) {
+      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::SubrequestChannel>) {
+        return restoreWith(kj::addRef(*channel));
+      }
+      KJ_CASE_ONEOF(_, kj::Own<ServerSelfTokenFactory>) {
+        // Decode our own token rather than just the vendor's, so that the result is exactly what
+        // the stub would have been had it arrived as a token -- in particular, so that
+        // `Resolver::wrapRestoredChannel()` gets to route the whole token to whichever node owns
+        // the vendor, rather than us trying to replay `[restore]()` over a remote vendor channel.
+        auto& handlerRef = handler;
+        kj::Own<IoChannelFactory::RpcChannel> decoded;
+        KJ_SWITCH_ONEOF(getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::RPC)) {
+          KJ_CASE_ONEOF(token, kj::Array<byte>) {
+            decoded =
+                handlerRef.decodeRpcChannelToken(IoChannelFactory::ChannelTokenUsage::RPC, token);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+            decoded = newPromisedChannel<IoChannelFactory::RpcChannel>(
+                promise.then([&handlerRef](kj::Array<byte> token) {
+              return handlerRef.decodeRpcChannelToken(
+                  IoChannelFactory::ChannelTokenUsage::RPC, token);
+            }));
+          }
+        }
+        // The decoded channel's session task does not keep the channel itself alive; callers of
+        // restore() only keep *us* alive.
+        auto session = decoded->restore();
+        session.task = session.task.attach(kj::mv(decoded));
+        return session;
+      }
+    }
+    KJ_UNREACHABLE;
   }
 
   void requireAllowsTransfer() override {}
@@ -551,34 +584,6 @@ class ChannelTokenHandler::RestoredRpcChannel final: public IoChannelFactory::Rp
   kj::OneOf<kj::Own<ServerSelfTokenFactory>, kj::Own<IoChannelFactory::SubrequestChannel>> vendor;
   Frankenvalue restoreArg;
   Persistent persistent;
-
-  // Obtain a callable channel to the vendor, i.e. the entrypoint whose `[restore]()` method must
-  // be invoked to (re)create the live RPC target.
-  kj::Own<IoChannelFactory::SubrequestChannel> getVendorChannel() {
-    KJ_SWITCH_ONEOF(vendor) {
-      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::SubrequestChannel>) {
-        return kj::addRef(*channel);
-      }
-      KJ_CASE_ONEOF(factory, kj::Own<ServerSelfTokenFactory>) {
-        KJ_SWITCH_ONEOF(factory->getSelfToken(IoChannelFactory::ChannelTokenUsage::RPC)) {
-          KJ_CASE_ONEOF(token, kj::Array<byte>) {
-            return handler.decodeSubrequestChannelToken(
-                IoChannelFactory::ChannelTokenUsage::RPC, token);
-          }
-          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-            auto& handlerRef = handler;
-            return newPromisedChannel<IoChannelFactory::SubrequestChannel>(
-                promise.then([&handlerRef](kj::Array<byte> token) {
-              return handlerRef.decodeSubrequestChannelToken(
-                  IoChannelFactory::ChannelTokenUsage::RPC, token);
-            }));
-          }
-        }
-        KJ_UNREACHABLE;
-      }
-    }
-    KJ_UNREACHABLE;
-  }
 
   Session restoreWith(kj::Own<IoChannelFactory::SubrequestChannel> vendorChannel) {
     // Just like RestoredSubrequestChannel::ensureRestored(), we must verify that the worker on
@@ -754,16 +759,24 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
       auto vendor = decodeSubrequestChannelToken(usage, restored.getVendor());
       auto restoreArg = decodeFrankenvalue(usage, restored.getRestoreArg());
 
+      // The restored channel takes ownership of `vendor`, so this reference stays valid for the
+      // `wrapRestoredChannel()` call below.
+      auto& vendorRef = *vendor;
+      kj::Own<IoChannelFactory::TokenizableChannel> local;
       switch (type) {
         case ChannelToken::Type::SUBREQUEST:
-          return kj::refcounted<RestoredSubrequestChannel>(
+          local = kj::refcounted<RestoredSubrequestChannel>(
               *this, kj::mv(vendor), kj::mv(restoreArg), persistent);
+          break;
         case ChannelToken::Type::ACTOR_CLASS:
           KJ_FAIL_REQUIRE("actor class channel tokens cannot have a restore chain");
         case ChannelToken::Type::RPC:
-          return kj::refcounted<RestoredRpcChannel>(
+          local = kj::refcounted<RestoredRpcChannel>(
               *this, kj::mv(vendor), kj::mv(restoreArg), persistent);
+          break;
       }
+
+      return resolver.wrapRestoredChannel(type, vendorRef, kj::mv(local));
     }
   }
 

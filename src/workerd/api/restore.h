@@ -55,6 +55,17 @@ jsg::Promise<jsg::Value> restoreCurrentEntrypoint(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
     const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler);
 
+// Wraps the `target` and `session` capabilities returned by an RPC that opened a JS RPC session on
+// a remote worker (`EventDispatcher.restoreRpcStub()`, `WorkerdDebugPort.getRpcTargetFromToken()`)
+// into an `RpcChannel::Session`. The returned `cap` is membraned so that dropping every stub
+// derived from it ends the session promptly, without waiting for the server to notice, and so that
+// completing or cancelling the returned `task` revokes any stubs still outstanding, so they cannot
+// hold the underlying transport open. `task` completes when `session` resolves (to null, i.e. the
+// server ended the session) or all local stubs are dropped, whichever comes first, and fails if the
+// session fails.
+IoChannelFactory::RpcChannel::Session wrapRemoteRpcSession(
+    rpc::JsRpcTarget::Client target, rpc::JsRpcSession::Client session);
+
 // Custom event that calls the `[restore]()` method of the entrypoint and expects that the result
 // is a `Fetcher`. (When the result is expected to be an RpcStub instead, we use
 // `RestoreRpcStubCustomEvent`.)

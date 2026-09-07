@@ -68,9 +68,9 @@ class TempDir {
   kj::Own<const kj::Directory> locksDir;
 };
 
-// Stub WorkerdDebugPort server used as a per-node bootstrap. We don't actually invoke methods on
+// Stub WorkerdClusterPort server used as a per-node bootstrap. We don't actually invoke methods on
 // it from these tests; we just need a capability to hand to RpcSystem.
-class StubDebugPort final: public rpc::WorkerdDebugPort::Server {};
+class StubClusterPort final: public rpc::WorkerdClusterPort::Server {};
 
 KJ_TEST("ClusterLockManager: unowned (empty file) -> acquire succeeds") {
   auto io = kj::setupAsyncIo();
@@ -79,7 +79,7 @@ KJ_TEST("ClusterLockManager: unowned (empty file) -> acquire succeeds") {
   ClusterRegistry reg(
       tmpDir.registry(), "unix"_kj, io.provider->getNetwork(), io.provider->getTimer());
 
-  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubDebugPort>()));
+  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubClusterPort>()));
 
   ClusterLockManager lockManager(tmpDir.locks(), reg, rpc, io.provider->getTimer());
 
@@ -99,7 +99,7 @@ KJ_TEST("ClusterLockManager: owned by self -> returns self-bootstrap, no wire tr
   ClusterRegistry reg(
       tmpDir.registry(), "unix"_kj, io.provider->getNetwork(), io.provider->getTimer());
 
-  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubDebugPort>()));
+  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubClusterPort>()));
 
   ClusterLockManager lockManager(tmpDir.locks(), reg, rpc, io.provider->getTimer());
 
@@ -111,7 +111,7 @@ KJ_TEST("ClusterLockManager: owned by self -> returns self-bootstrap, no wire tr
   // path). With the OwnedLock still held, the lock file is non-empty and our key is the owner.
   // acquireOrRoute should return a bootstrap client (routing to ourselves).
   auto routeResult = lockManager.acquireOrRoute("a2").wait(io.waitScope);
-  KJ_ASSERT(routeResult.is<rpc::WorkerdDebugPort::Client>());
+  KJ_ASSERT(routeResult.is<rpc::WorkerdClusterPort::Client>());
 }
 
 KJ_TEST("ClusterLockManager: stale owner (peer dead) -> claim path runs") {
@@ -121,7 +121,7 @@ KJ_TEST("ClusterLockManager: stale owner (peer dead) -> claim path runs") {
   ClusterRegistry reg(
       tmpDir.registry(), "unix"_kj, io.provider->getNetwork(), io.provider->getTimer());
 
-  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubDebugPort>()));
+  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubClusterPort>()));
 
   // Manually create a lock file naming a non-existent peer as owner. Since `deadKey`'s registry
   // file doesn't exist in tmpDir, isPeerDead(deadKey) returns true and the claim path should run.
@@ -152,7 +152,7 @@ KJ_TEST("ClusterLockManager: wrong-sized stale content + writer dead -> claim im
   ClusterRegistry reg(
       tmpDir.registry(), "unix"_kj, io.provider->getNetwork(), io.provider->getTimer());
 
-  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubDebugPort>()));
+  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubClusterPort>()));
 
   // Write a lock file of unexpected size (e.g. a crashed writer left a half-written file).
   // Nobody holds the lock, so the claim path should succeed.
@@ -178,7 +178,7 @@ KJ_TEST("ClusterLockManager: OwnedLock destructor truncates and releases") {
   ClusterRegistry reg(
       tmpDir.registry(), "unix"_kj, io.provider->getNetwork(), io.provider->getTimer());
 
-  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubDebugPort>()));
+  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubClusterPort>()));
 
   ClusterLockManager lockManager(tmpDir.locks(), reg, rpc, io.provider->getTimer());
 
@@ -211,7 +211,7 @@ KJ_TEST("ClusterLockManager: owned by live peer -> returns bootstrap client") {
   ClusterRegistry reg2(
       tmpDir.registry(), "unix"_kj, io.provider->getNetwork(), io.provider->getTimer());
 
-  auto rpc1 = capnp::makeRpcServer(reg1, capnp::Capability::Client(kj::heap<StubDebugPort>()));
+  auto rpc1 = capnp::makeRpcServer(reg1, capnp::Capability::Client(kj::heap<StubClusterPort>()));
 
   // reg1 owns a ClusterLockManager; we'll set up a lock file naming reg2 as the owner.
   // reg2 is alive (its registry file exists in tmpDir), so isPeerDead(reg2) returns false,
@@ -225,7 +225,7 @@ KJ_TEST("ClusterLockManager: owned by live peer -> returns bootstrap client") {
   ClusterLockManager lockManager(tmpDir.locks(), reg1, rpc1, io.provider->getTimer());
 
   auto result = lockManager.acquireOrRoute("a7").wait(io.waitScope);
-  KJ_ASSERT(result.is<rpc::WorkerdDebugPort::Client>());
+  KJ_ASSERT(result.is<rpc::WorkerdClusterPort::Client>());
 
   // The lock file should NOT have been modified (we did not claim).
   auto content = tmpDir.readLockFile("a7");
@@ -240,7 +240,7 @@ KJ_TEST("ClusterLockManager: writer alive -> retries until writer releases") {
   ClusterRegistry reg(
       tmpDir.registry(), "unix"_kj, io.provider->getNetwork(), io.provider->getTimer());
 
-  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubDebugPort>()));
+  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubClusterPort>()));
 
   // Open the lock file from outside the ClusterLockManager and take an exclusive lock. This
   // simulates a writer that holds the lock but hasn't yet flushed its key. The file is left
@@ -258,7 +258,7 @@ KJ_TEST("ClusterLockManager: writer alive -> retries until writer releases") {
 
   bool completed = false;
   auto trackedPromise = promise.then(
-      [&](kj::OneOf<ClusterLockManager::OwnedLock, rpc::WorkerdDebugPort::Client>&& r) {
+      [&](kj::OneOf<ClusterLockManager::OwnedLock, rpc::WorkerdClusterPort::Client>&& r) {
     completed = true;
     return kj::mv(r);
   });
@@ -275,7 +275,7 @@ KJ_TEST("ClusterLockManager: writer alive -> retries until writer releases") {
 
   auto result = trackedPromise.wait(io.waitScope);
   KJ_EXPECT(completed);
-  KJ_ASSERT(result.is<rpc::WorkerdDebugPort::Client>());
+  KJ_ASSERT(result.is<rpc::WorkerdClusterPort::Client>());
 }
 
 KJ_TEST("ClusterLockManager: concurrent acquisitions, exactly one wins") {
@@ -285,13 +285,13 @@ KJ_TEST("ClusterLockManager: concurrent acquisitions, exactly one wins") {
   ClusterRegistry reg(
       tmpDir.registry(), "unix"_kj, io.provider->getNetwork(), io.provider->getTimer());
 
-  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubDebugPort>()));
+  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<StubClusterPort>()));
 
   ClusterLockManager lockManager(tmpDir.locks(), reg, rpc, io.provider->getTimer());
 
   // Launch several concurrent calls.
   constexpr uint N = 5;
-  kj::Vector<kj::Promise<kj::OneOf<ClusterLockManager::OwnedLock, rpc::WorkerdDebugPort::Client>>>
+  kj::Vector<kj::Promise<kj::OneOf<ClusterLockManager::OwnedLock, rpc::WorkerdClusterPort::Client>>>
       promises;
   for (uint i = 0; i < N; ++i) {
     promises.add(lockManager.acquireOrRoute("a9"));

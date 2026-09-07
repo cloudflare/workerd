@@ -14,6 +14,13 @@
 //   6. Storing/loading a DO stub without calling it takes no ownership lock.
 //   7. A broken DO releases its ownership lock even while stubs still pin it,
 //      so it can be re-instantiated (on any node) instead of hanging requests.
+//   8. Persistent stubs to restored targets (facets, RpcTargets, and chains of
+//      them) rooted at a DO on one node can be stored and redeemed from a DO on
+//      another node; the restore chain runs on the root DO's owner. This holds
+//      whether the stub arrives as a token or was minted in-process and passed
+//      through props.
+//   9. A stub that has resolved to a remote DO keeps failing once that DO
+//      breaks, while a fresh stub reaches the re-instantiated DO.
 //
 // Two variants are run: the unix-socket cluster network mode (default) and a
 // localhost CIDR (`127.0.0.0/8`) IP-socket mode that exercises the registry
@@ -717,5 +724,213 @@ test('cluster: aborting a DO with a request in flight lets it be re-instantiated
 
     const held = await holding;
     assert.strictEqual(held.status, 500, JSON.stringify(held.body));
+  });
+});
+
+// Sets up the cross-node persistent-stub scenario shared by the tests below:
+// DO "root" is claimed by node 0, then DO "holder", served through node 1 (and
+// therefore claimed by node 1), asks "root" to vend a persistent stub of the
+// given kind and stores it. `liveRestores` is how many times vending itself is
+// expected to run root's [restore](). Returns the two DOs' node IDs and root's
+// id.
+async function vendAcrossNodes(nodes, kind, liveRestores = 1) {
+  const first = await fetchJson(nodes[0].httpPort, '/increment?name=root');
+  assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+  const rootOwner = first.body.nodeId;
+
+  const vended = await fetchJson(
+    nodes[1].httpPort,
+    `/vend-stub?name=holder&kind=${kind}&target=root`,
+    { timeoutMs: HANG_TIMEOUT_MS }
+  );
+  assert.strictEqual(vended.status, 200, JSON.stringify(vended.body));
+  assert.strictEqual(vended.body.hasStub, true);
+  const holderOwner = vended.body.nodeId;
+  assert.notStrictEqual(
+    holderOwner,
+    rootOwner,
+    'the test requires root and holder to live on different nodes'
+  );
+
+  // Vending ran [restore]() live. Storing and loading the stub must not have
+  // replayed it.
+  const state = await fetchJson(nodes[1].httpPort, '/get?name=root');
+  assert.strictEqual(state.status, 200, JSON.stringify(state.body));
+  assert.strictEqual(state.body.restores, liveRestores);
+
+  return { rootOwner, holderOwner, rootId: first.body.id };
+}
+
+test('cluster: a restored facet stub is redeemed on the root DO owner', async () => {
+  await withCluster(2, async ({ nodes, sharedPath, nodeKeys }) => {
+    const { rootOwner, rootId } = await vendAcrossNodes(nodes, 'facet');
+
+    // Redeeming from holder (node 1) forwards the whole token to root's owner,
+    // which replays [restore]() and runs the facet there.
+    const used = await fetchJson(
+      nodes[1].httpPort,
+      '/use-stub?name=holder&kind=facet',
+      { timeoutMs: HANG_TIMEOUT_MS }
+    );
+    assert.strictEqual(used.status, 200, JSON.stringify(used.body));
+    assert.strictEqual(used.body.result.count, 1);
+    assert.strictEqual(used.body.result.nodeId, rootOwner);
+    let state = await fetchJson(nodes[1].httpPort, '/get?name=root');
+    assert.strictEqual(state.body.restores, 2);
+
+    // Break root so the next redemption has to re-instantiate it (on whichever
+    // node claims it) and replay [restore]() from scratch. The facet's storage
+    // lives under root's, so its count carries over.
+    const broken = await fetchJson(nodes[1].httpPort, '/break?name=root');
+    assert.strictEqual(broken.status, 500, JSON.stringify(broken.body));
+
+    const again = await fetchJson(
+      nodes[1].httpPort,
+      '/use-stub?name=holder&kind=facet',
+      { timeoutMs: HANG_TIMEOUT_MS }
+    );
+    assert.strictEqual(again.status, 200, JSON.stringify(again.body));
+    assert.strictEqual(again.body.result.count, 2);
+    assert.strictEqual(
+      await readLockOwner(lockFilePath(sharedPath, rootId)),
+      nodeKeys.get(again.body.result.nodeId),
+      'the facet must run on the node that now owns root'
+    );
+    state = await fetchJson(nodes[1].httpPort, '/get?name=root');
+    assert.strictEqual(state.body.restores, 3);
+  });
+});
+
+test('cluster: a restored RpcTarget stub is redeemed on the root DO owner', async () => {
+  await withCluster(2, async ({ nodes }) => {
+    const { rootOwner } = await vendAcrossNodes(nodes, 'rpc');
+
+    // The RpcTarget mutates root's own storage, so it must run in root's
+    // context on root's owner.
+    const used = await fetchJson(
+      nodes[1].httpPort,
+      '/use-stub?name=holder&kind=rpc&amount=10',
+      { timeoutMs: HANG_TIMEOUT_MS }
+    );
+    assert.strictEqual(used.status, 200, JSON.stringify(used.body));
+    assert.deepStrictEqual(used.body.result, { count: 11, nodeId: rootOwner });
+
+    const state = await fetchJson(nodes[0].httpPort, '/get?name=root');
+    assert.strictEqual(state.body.count, 11);
+    assert.strictEqual(state.body.restores, 2);
+  });
+});
+
+test('cluster: a two-level restore chain is redeemed on the root DO owner', async () => {
+  await withCluster(2, async ({ nodes }) => {
+    // root -> facet -> sub-facet. The facet's own [restore]() must run with a
+    // working ctx.restore(), which only holds when the entire chain is replayed
+    // in-process on root's owner. Vending runs root's [restore]() twice: once
+    // live for the facet stub, and once more when holder calls vendSub() on
+    // that stub, since a stub received over RPC is replayed on first use.
+    const { rootOwner } = await vendAcrossNodes(nodes, 'chained', 2);
+
+    const used = await fetchJson(
+      nodes[1].httpPort,
+      '/use-stub?name=holder&kind=chained',
+      { timeoutMs: HANG_TIMEOUT_MS }
+    );
+    assert.strictEqual(used.status, 200, JSON.stringify(used.body));
+    assert.strictEqual(used.body.result.count, 1);
+    assert.strictEqual(used.body.result.nodeId, rootOwner);
+
+    const state = await fetchJson(nodes[0].httpPort, '/get?name=root');
+    assert.strictEqual(state.body.restores, 3);
+  });
+});
+
+test('cluster: a stub resolved to a remote DO keeps failing after that DO breaks', async () => {
+  await withCluster(2, async ({ nodes }) => {
+    const first = await fetchJson(nodes[0].httpPort, '/increment?name=sticky');
+    assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+    const owner = first.body.nodeId;
+
+    // DO "holder" on node 1 obtains a stub to "sticky", uses it once (resolving
+    // it to node 0's instance), and keeps it.
+    const held = await fetchJson(
+      nodes[1].httpPort,
+      '/hold-stub?name=holder&target=sticky'
+    );
+    assert.strictEqual(held.status, 200, JSON.stringify(held.body));
+    assert.strictEqual(held.body.target.nodeId, owner);
+    assert.notStrictEqual(held.body.nodeId, owner);
+
+    const broken = await fetchJson(nodes[1].httpPort, '/break?name=sticky');
+    assert.strictEqual(broken.status, 500, JSON.stringify(broken.body));
+
+    // The held stub points at the broken instance and must keep failing, even
+    // after a fresh stub has re-instantiated the DO.
+    const heldAfter = await fetchJson(
+      nodes[1].httpPort,
+      '/call-held-stub?name=holder&target=sticky',
+      { timeoutMs: HANG_TIMEOUT_MS }
+    );
+    assert.strictEqual(heldAfter.status, 500, JSON.stringify(heldAfter.body));
+    assert.match(heldAfter.body.error, /broken on purpose/);
+
+    const fresh = await fetchJson(nodes[1].httpPort, '/increment?name=sticky', {
+      timeoutMs: HANG_TIMEOUT_MS,
+    });
+    assert.strictEqual(fresh.status, 200, JSON.stringify(fresh.body));
+    assert.strictEqual(fresh.body.count, 2);
+
+    const heldAgain = await fetchJson(
+      nodes[1].httpPort,
+      '/call-held-stub?name=holder&target=sticky',
+      { timeoutMs: HANG_TIMEOUT_MS }
+    );
+    assert.strictEqual(heldAgain.status, 500, JSON.stringify(heldAgain.body));
+    assert.match(heldAgain.body.error, /broken on purpose/);
+  });
+});
+
+test('cluster: a freshly minted RpcTarget stub passed via props follows its DO to a new owner', async () => {
+  await withCluster(2, async ({ nodes }) => {
+    const first = await fetchJson(nodes[0].httpPort, '/increment?name=root');
+    assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+    const originalOwner = first.body.nodeId;
+
+    // Root mints an RpcTarget stub and hands it to a Consumer entrypoint on the
+    // same node via props. The Consumer holds the stub's channel only -- the
+    // very channel object ctx.restore() created, not a decoded token -- and
+    // waits for the go signal before using it.
+    const vended = await fetchJson(
+      nodes[0].httpPort,
+      '/vend-to-consumer?name=root'
+    );
+    assert.strictEqual(vended.status, 200, JSON.stringify(vended.body));
+
+    // Move root to the other node: break it, then re-instantiate it from there.
+    const broken = await fetchJson(nodes[1].httpPort, '/break?name=root');
+    assert.strictEqual(broken.status, 500, JSON.stringify(broken.body));
+    const moved = await fetchJson(nodes[1].httpPort, '/increment?name=root', {
+      timeoutMs: HANG_TIMEOUT_MS,
+    });
+    assert.strictEqual(moved.status, 200, JSON.stringify(moved.body));
+    assert.strictEqual(moved.body.count, 2);
+    assert.notStrictEqual(moved.body.nodeId, originalOwner);
+
+    // Now let the Consumer use its stub. The restore must be forwarded to the
+    // new owner as a whole token, not replayed over a remote vendor channel.
+    const go = await fetchJson(nodes[0].httpPort, '/set-go?name=sink');
+    assert.strictEqual(go.status, 200, JSON.stringify(go.body));
+
+    const deadline = Date.now() + HANG_TIMEOUT_MS;
+    let recorded;
+    while (recorded === undefined) {
+      assert(Date.now() < deadline, 'Consumer never recorded a result');
+      await sleep(50);
+      const sink = await fetchJson(nodes[0].httpPort, '/get?name=sink');
+      recorded = sink.body.recorded;
+    }
+    assert.deepStrictEqual(recorded, { count: 3, nodeId: moved.body.nodeId });
+
+    const state = await fetchJson(nodes[1].httpPort, '/get?name=root');
+    assert.strictEqual(state.body.restores, 2);
   });
 });

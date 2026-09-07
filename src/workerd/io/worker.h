@@ -1022,7 +1022,7 @@ class Worker::Actor final: public kj::Refcounted {
 
   const Id& getId();
   Id cloneId();
-  static Id cloneId(Id& id);
+  static Id cloneId(const Id& id);
   kj::Maybe<jsg::JsRef<jsg::JsValue>> getTransient(Worker::Lock& lock);
   kj::Maybe<ActorCacheInterface&> getPersistent();
   kj::Own<Loopback> getLoopback();

@@ -60,11 +60,11 @@ class ClusterLockManager {
   //
   // Returns:
   //   OwnedLock — this node has newly acquired ownership (caller should start the DO).
-  //   rpc::WorkerdDebugPort::Client — the DO has an existing owner. The caller calls
-  //       getActor() on this to reach the actor. The owner might be this node, in which case
-  //       the RpcSystem returns the local self-bootstrap directly (no wire traffic). The
-  //       caller does not need to distinguish local vs remote.
-  kj::Promise<kj::OneOf<OwnedLock, rpc::WorkerdDebugPort::Client>> acquireOrRoute(
+  //   rpc::WorkerdClusterPort::Client — the DO has an existing owner. The caller sends the
+  //       actor's channel token to this to reach the actor. The owner might be this node, in
+  //       which case the RpcSystem returns the local self-bootstrap directly (no wire traffic).
+  //       The caller does not need to distinguish local vs remote.
+  kj::Promise<kj::OneOf<OwnedLock, rpc::WorkerdClusterPort::Client>> acquireOrRoute(
       kj::StringPtr actorId);
 
  private:
