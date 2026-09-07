@@ -142,14 +142,10 @@ class RequestObserver: public kj::Refcounted {
   // Wrap an HttpClient to observe its request and response activity. `countSubrequest` controls
   // whether its usage contributes to the request's logical subrequest count.
   virtual kj::Own<WorkerInterface> wrapSubrequestClient(
-      kj::Own<WorkerInterface> client, CountSubrequest countSubrequest) {
-    return kj::mv(client);
-  }
+      kj::Own<WorkerInterface> client, CountSubrequest countSubrequest);
 
   // Wrap an HttpClient so that its usage is counted in the request's actor subrequest count.
-  virtual kj::Own<WorkerInterface> wrapActorSubrequestClient(kj::Own<WorkerInterface> client) {
-    return kj::mv(client);
-  }
+  virtual kj::Own<WorkerInterface> wrapActorSubrequestClient(kj::Own<WorkerInterface> client);
 
   // Record whether the next outgoing subrequest's request body can be rewound (e.g. a buffered or
   // null fetch body). Consumed when the subrequest client for that call is constructed. The

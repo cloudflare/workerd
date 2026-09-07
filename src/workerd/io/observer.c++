@@ -11,6 +11,16 @@
 
 namespace workerd {
 
+kj::Own<WorkerInterface> RequestObserver::wrapSubrequestClient(
+    kj::Own<WorkerInterface> client, CountSubrequest) {
+  return kj::mv(client);
+}
+
+kj::Own<WorkerInterface> RequestObserver::wrapActorSubrequestClient(
+    kj::Own<WorkerInterface> client) {
+  return kj::mv(client);
+}
+
 namespace {
 kj::Maybe<kj::Own<FeatureObserver>> featureObserver;
 

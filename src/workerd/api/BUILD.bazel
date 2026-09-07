@@ -9,6 +9,7 @@ filegroup(
     # Only add files here when needed: Where possible, new src/header files should be defined in
     # their own targets, modularizing bazel targets makes incremental rebuilds faster.
     srcs = [
+        "actor-call-retry.c++",
         "actor.c++",
         "actor-state.c++",
         "basics.c++",
@@ -63,6 +64,7 @@ filegroup(
 filegroup(
     name = "hdrs",
     srcs = [
+        "actor-call-retry.h",
         "actor.h",
         "actor-state.h",
         "basics.h",
@@ -792,6 +794,13 @@ kj_test(
 kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "actor-call-retry-test.c++",
+    deps = [
+        "//src/workerd/io",
+    ],
 )
 
 kj_test(
