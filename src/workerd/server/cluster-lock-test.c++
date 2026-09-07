@@ -96,8 +96,7 @@ KJ_TEST("ClusterLockManager: unowned (empty file) -> acquire succeeds") {
 
   // The lock file should now contain our key.
   auto content = tmpDir.readLockFile(testId("a1"));
-  KJ_ASSERT(content.size() == 32);
-  KJ_EXPECT(memcmp(content.begin(), reg.getPublicKey().bytes, 32) == 0);
+  KJ_EXPECT(content == reg.getPublicKey().bytes.asPtr());
 }
 
 KJ_TEST("ClusterLockManager: owned by self -> returns self-bootstrap, no wire traffic") {
@@ -134,9 +133,9 @@ KJ_TEST("ClusterLockManager: stale owner (peer dead) -> claim path runs") {
   // Manually create a lock file naming a non-existent peer as owner. Since `deadKey`'s registry
   // file doesn't exist in tmpDir, isPeerDead(deadKey) returns true and the claim path should run.
   X25519PublicKey deadKey;
-  memset(deadKey.bytes, 0xAB, sizeof(deadKey.bytes));
+  deadKey.bytes.fill(0xAB);
 
-  tmpDir.writeLockFile(testId("a3"), kj::arrayPtr(deadKey.bytes, 32));
+  tmpDir.writeLockFile(testId("a3"), deadKey.bytes);
 
   // Confirm isPeerDead returns true for the dead key.
   KJ_EXPECT(reg.isPeerDead(deadKey));
@@ -149,8 +148,7 @@ KJ_TEST("ClusterLockManager: stale owner (peer dead) -> claim path runs") {
 
   // The lock file should now contain *our* key.
   auto content = tmpDir.readLockFile(testId("a3"));
-  KJ_ASSERT(content.size() == 32);
-  KJ_EXPECT(memcmp(content.begin(), reg.getPublicKey().bytes, 32) == 0);
+  KJ_EXPECT(content == reg.getPublicKey().bytes.asPtr());
 }
 
 KJ_TEST("ClusterLockManager: wrong-sized stale content + writer dead -> claim immediately") {
@@ -175,8 +173,7 @@ KJ_TEST("ClusterLockManager: wrong-sized stale content + writer dead -> claim im
 
   // The lock file should now contain our key.
   auto content = tmpDir.readLockFile(testId("a4"));
-  KJ_ASSERT(content.size() == 32);
-  KJ_EXPECT(memcmp(content.begin(), reg.getPublicKey().bytes, 32) == 0);
+  KJ_EXPECT(content == reg.getPublicKey().bytes.asPtr());
 }
 
 KJ_TEST("ClusterLockManager: OwnedLock destructor truncates and releases") {
@@ -222,14 +219,13 @@ KJ_TEST("ClusterLockManager: stale file naming self with no lock held -> reclaim
   // Simulate a claim or release that published our key but failed before clearing it: the file
   // names this node, but no OwnedLock (and hence no OFD lock) exists. Routing to ourselves here
   // would loop forever; we must reclaim instead.
-  tmpDir.writeLockFile(testId("a6"), kj::arrayPtr(reg.getPublicKey().bytes, 32));
+  tmpDir.writeLockFile(testId("a6"), reg.getPublicKey().bytes);
 
   auto result = lockManager.acquireOrRoute(testId("a6")).wait(io.waitScope);
   KJ_ASSERT(result.is<ClusterLockManager::OwnedLock>());
 
   auto content = tmpDir.readLockFile(testId("a6"));
-  KJ_ASSERT(content.size() == 32);
-  KJ_EXPECT(memcmp(content.begin(), reg.getPublicKey().bytes, 32) == 0);
+  KJ_EXPECT(content == reg.getPublicKey().bytes.asPtr());
 
   // With the OwnedLock now held, a further lookup routes to ourselves rather than reclaiming.
   auto routeResult = lockManager.acquireOrRoute(testId("a6")).wait(io.waitScope);
@@ -254,7 +250,7 @@ KJ_TEST("ClusterLockManager: owned by live peer -> returns bootstrap client") {
   // and acquireOrRoute should return a bootstrap client without falling through to claim.
   //
   // Note: actor IDs aren't hex of 64 chars, so they won't collide with registry filenames.
-  tmpDir.writeLockFile(testId("a7"), kj::arrayPtr(reg2.getPublicKey().bytes, 32));
+  tmpDir.writeLockFile(testId("a7"), reg2.getPublicKey().bytes);
 
   KJ_EXPECT(!reg1.isPeerDead(reg2.getPublicKey()));
 
@@ -265,8 +261,7 @@ KJ_TEST("ClusterLockManager: owned by live peer -> returns bootstrap client") {
 
   // The lock file should NOT have been modified (we did not claim).
   auto content = tmpDir.readLockFile(testId("a7"));
-  KJ_ASSERT(content.size() == 32);
-  KJ_EXPECT(memcmp(content.begin(), reg2.getPublicKey().bytes, 32) == 0);
+  KJ_EXPECT(content == reg2.getPublicKey().bytes.asPtr());
 }
 
 KJ_TEST("ClusterLockManager: writer alive -> retries until writer releases") {
@@ -308,7 +303,7 @@ KJ_TEST("ClusterLockManager: writer alive -> retries until writer releases") {
   // key, find the OFD lock held, and return a bootstrap client routing to the owner. (Releasing
   // the lock instead would leave a self-naming file with no holder, which acquireOrRoute reclaims;
   // see the "stale file naming self" test.)
-  externalFile->write(0, kj::arrayPtr(reg.getPublicKey().bytes, 32));
+  externalFile->write(0, reg.getPublicKey().bytes);
 
   auto result = trackedPromise.wait(io.waitScope);
   KJ_EXPECT(completed);

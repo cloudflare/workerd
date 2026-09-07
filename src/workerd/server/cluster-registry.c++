@@ -41,7 +41,7 @@ constexpr kj::Duration PEER_LIVENESS_CACHE_TTL = 15 * kj::SECONDS;
 // X25519PublicKey
 
 kj::String X25519PublicKey::toHex() const {
-  return kj::encodeHex(kj::arrayPtr(bytes, sizeof(bytes)));
+  return kj::encodeHex(bytes);
 }
 
 X25519PublicKey X25519PublicKey::fromHex(kj::StringPtr hex) {
@@ -50,7 +50,7 @@ X25519PublicKey X25519PublicKey::fromHex(kj::StringPtr hex) {
   KJ_REQUIRE(!decoded.hadErrors, "invalid hex in X25519 public key");
   KJ_ASSERT(decoded.size() == 32);
   X25519PublicKey result;
-  memcpy(result.bytes, decoded.begin(), 32);
+  result.bytes.asPtr().copyFrom(decoded);
   return result;
 }
 
@@ -164,7 +164,7 @@ class ClusterRegistry::ConnectionImpl final: public ClusterVatNetworkBase::Conne
       return p.getRoot<cluster::VatId>().asReader();
     } else {
       auto builder = peerVatId.emplace(peerVatIdScratch).getRoot<cluster::VatId>();
-      builder.setPublicKey(kj::arrayPtr(pk.bytes, sizeof(pk.bytes)));
+      builder.setPublicKey(pk.bytes.asPtr());
       return builder.asReader();
     }
   }
@@ -453,7 +453,7 @@ ClusterRegistry::ClusterRegistry(kj::Own<const kj::Directory> registryDirParam,
       idleTimeout(idleTimeout),
       connectTimeout(connectTimeout) {
   // Generate X25519 keypair.
-  X25519_keypair(publicKey.bytes, privateKey);
+  X25519_keypair(publicKey.bytes.begin(), privateKey.begin());
   publicKeyHex = publicKey.toHex();
 
   if (networkConfig == "unix") {
@@ -577,7 +577,7 @@ void ClusterRegistry::scanDirectory() {
     if (decoded.hadErrors || decoded.size() != 32) continue;
 
     X25519PublicKey key;
-    memcpy(key.bytes, decoded.begin(), 32);
+    key.bytes.asPtr().copyFrom(decoded);
 
     peers.findOrCreate(key, [&]() -> decltype(peers)::Entry { return {.key = key}; });
   }
@@ -710,7 +710,7 @@ kj::Maybe<kj::Own<ClusterVatNetworkBase::Connection>> ClusterRegistry::connect(
   KJ_REQUIRE(keyData.size() == 32, "invalid VatId: publicKey must be 32 bytes");
 
   X25519PublicKey peerKey;
-  memcpy(peerKey.bytes, keyData.begin(), 32);
+  peerKey.bytes.asPtr().copyFrom(keyData);
 
   // Self-connect returns kj::none per VatNetwork contract.
   if (peerKey == publicKey) {

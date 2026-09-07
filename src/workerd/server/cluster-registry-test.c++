@@ -120,7 +120,7 @@ class BlackholeNetwork final: public kj::Network {
 
 KJ_TEST("X25519PublicKey: hex roundtrip") {
   X25519PublicKey key;
-  memset(key.bytes, 0xAB, sizeof(key.bytes));
+  key.bytes.fill(0xAB);
   auto hex = key.toHex();
   KJ_EXPECT(hex.size() == 64);
   auto decoded = X25519PublicKey::fromHex(hex);
@@ -129,8 +129,8 @@ KJ_TEST("X25519PublicKey: hex roundtrip") {
 
 KJ_TEST("X25519PublicKey: equality") {
   X25519PublicKey a, b;
-  memset(a.bytes, 1, sizeof(a.bytes));
-  memset(b.bytes, 1, sizeof(b.bytes));
+  a.bytes.fill(1);
+  b.bytes.fill(1);
   KJ_EXPECT(a == b);
 
   b.bytes[0] = 2;
@@ -154,7 +154,7 @@ KJ_TEST("ClusterRegistry: self-connect returns none") {
 
   capnp::MallocMessageBuilder msg;
   auto vatId = msg.initRoot<cluster::VatId>();
-  vatId.setPublicKey(kj::arrayPtr(reg.getPublicKey().bytes, 32));
+  vatId.setPublicKey(reg.getPublicKey().bytes.asPtr());
 
   KJ_EXPECT(reg.connect(vatId.asReader()) == kj::none);
 }
@@ -172,7 +172,7 @@ KJ_TEST("ClusterRegistry: self-bootstrap returns local capability") {
 
   capnp::MallocMessageBuilder msg;
   auto vatId = msg.initRoot<cluster::VatId>();
-  vatId.setPublicKey(kj::arrayPtr(reg.getPublicKey().bytes, 32));
+  vatId.setPublicKey(reg.getPublicKey().bytes.asPtr());
 
   auto client = rpc.bootstrap(vatId);
   makeCall(client, io.waitScope);
@@ -212,7 +212,7 @@ KJ_TEST("ClusterRegistry: isPeerDead caches dead peers permanently") {
   ClusterRegistry reg(tmpDir.get(), "unix"_kj, io.provider->getNetwork(), io.provider->getTimer());
 
   X25519PublicKey peerKey;
-  memset(peerKey.bytes, 0xCA, sizeof(peerKey.bytes));
+  peerKey.bytes.fill(0xCA);
   auto peerPath = kj::Path({peerKey.toHex()});
 
   KJ_EXPECT(reg.isPeerDead(peerKey));
@@ -245,7 +245,7 @@ KJ_TEST("ClusterRegistry: end-to-end RPC between two registries") {
   {
     capnp::MallocMessageBuilder msg;
     auto vatId = msg.initRoot<cluster::VatId>();
-    vatId.setPublicKey(kj::arrayPtr(reg2.getPublicKey().bytes, 32));
+    vatId.setPublicKey(reg2.getPublicKey().bytes.asPtr());
 
     auto client = rpc1.bootstrap(vatId);
     makeCall(client, io.waitScope);
@@ -256,7 +256,7 @@ KJ_TEST("ClusterRegistry: end-to-end RPC between two registries") {
   {
     capnp::MallocMessageBuilder msg;
     auto vatId = msg.initRoot<cluster::VatId>();
-    vatId.setPublicKey(kj::arrayPtr(reg1.getPublicKey().bytes, 32));
+    vatId.setPublicKey(reg1.getPublicKey().bytes.asPtr());
 
     auto client = rpc2.bootstrap(vatId);
     makeCall(client, io.waitScope);
@@ -287,7 +287,7 @@ KJ_TEST("ClusterRegistry: end-to-end RPC with binary IP registry entries") {
 
   capnp::MallocMessageBuilder msg;
   auto vatId = msg.initRoot<cluster::VatId>();
-  vatId.setPublicKey(kj::arrayPtr(reg2.getPublicKey().bytes, 32));
+  vatId.setPublicKey(reg2.getPublicKey().bytes.asPtr());
 
   auto client = rpc1.bootstrap(vatId);
   makeCall(client, io.waitScope);
@@ -316,7 +316,7 @@ KJ_TEST("ClusterRegistry: idle timeout closes connections") {
 
   capnp::MallocMessageBuilder msg;
   auto vatId = msg.initRoot<cluster::VatId>();
-  vatId.setPublicKey(kj::arrayPtr(reg2.getPublicKey().bytes, 32));
+  vatId.setPublicKey(reg2.getPublicKey().bytes.asPtr());
 
   {
     auto client = rpc1.bootstrap(vatId);
@@ -348,7 +348,7 @@ KJ_TEST("ClusterRegistry: hung connect is torn down and dead peer cleaned up wit
   // Forge a registry entry for a peer that is gone: a valid address (copied from our own entry),
   // not locked by anyone, and old enough to be past the new-entry grace period.
   X25519PublicKey peerKey;
-  memset(peerKey.bytes, 0xBE, sizeof(peerKey.bytes));
+  peerKey.bytes.fill(0xBE);
   auto peerPath = kj::Path({peerKey.toHex()});
   {
     auto dir = tmpDir.get();
@@ -364,7 +364,7 @@ KJ_TEST("ClusterRegistry: hung connect is torn down and dead peer cleaned up wit
 
   capnp::MallocMessageBuilder msg;
   auto vatId = msg.initRoot<cluster::VatId>();
-  vatId.setPublicKey(kj::arrayPtr(peerKey.bytes, 32));
+  vatId.setPublicKey(peerKey.bytes.asPtr());
 
   auto& timer = io.provider->getTimer();
   auto start = timer.now();

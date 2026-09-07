@@ -23,7 +23,7 @@ class VatIdHolder {
  public:
   explicit VatIdHolder(const X25519PublicKey& key): msg(scratch) {
     auto vatId = msg.initRoot<cluster::VatId>();
-    vatId.setPublicKey(kj::ArrayPtr<const byte>(key.bytes));
+    vatId.setPublicKey(key.bytes.asPtr());
   }
 
   cluster::VatId::Reader getReader() {

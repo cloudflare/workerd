@@ -25,16 +25,16 @@ using kj::byte;
 using kj::uint;
 
 struct X25519PublicKey {
-  kj::byte bytes[32];
+  kj::FixedArray<kj::byte, 32> bytes;
 
   kj::String toHex() const;
   static X25519PublicKey fromHex(kj::StringPtr hex);
 
   bool operator==(const X25519PublicKey& other) const {
-    return kj::arrayPtr(bytes) == kj::arrayPtr(other.bytes);
+    return bytes.asPtr() == other.bytes.asPtr();
   }
   kj::uint hashCode() const {
-    return kj::hashCode(kj::ArrayPtr<const byte>(bytes));
+    return kj::hashCode(bytes.asPtr());
   }
 };
 
@@ -134,7 +134,7 @@ class ClusterRegistry final: public ClusterVatNetworkBase {
   kj::Duration connectTimeout;
 
   // Identity
-  kj::byte privateKey[32];
+  kj::FixedArray<kj::byte, 32> privateKey;
   X25519PublicKey publicKey;
   kj::String publicKeyHex;
 
