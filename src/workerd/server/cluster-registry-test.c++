@@ -7,6 +7,7 @@
 #include <stdlib.h>
 
 #if !_WIN32
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -68,6 +69,54 @@ void makeCall(capnp::Capability::Client& client, kj::WaitScope& ws) {
       0, 0, capnp::MessageSize{4, 0}, capnp::Capability::Client::CallHints());
   req.send().wait(ws);
 }
+
+// A kj::Network wrapper whose outbound connects never complete, simulating a peer address that
+// blackholes our SYNs. Listening is delegated unchanged.
+class BlackholeNetwork final: public kj::Network {
+ public:
+  BlackholeNetwork(kj::Network& inner): inner(inner) {}
+
+  kj::Promise<kj::Own<kj::NetworkAddress>> parseAddress(
+      kj::StringPtr addr, uint portHint) override {
+    return inner.parseAddress(addr, portHint)
+        .then([](kj::Own<kj::NetworkAddress> a) -> kj::Own<kj::NetworkAddress> {
+      return kj::heap<Address>(kj::mv(a));
+    });
+  }
+
+  kj::Own<kj::NetworkAddress> getSockaddr(const void* sockaddr, uint len) override {
+    return kj::heap<Address>(inner.getSockaddr(sockaddr, len));
+  }
+
+  kj::Own<kj::Network> restrictPeers(
+      kj::ArrayPtr<const kj::StringPtr> allow, kj::ArrayPtr<const kj::StringPtr> deny) override {
+    KJ_UNIMPLEMENTED("not needed in test");
+  }
+
+ private:
+  class Address final: public kj::NetworkAddress {
+   public:
+    Address(kj::Own<kj::NetworkAddress> inner): inner(kj::mv(inner)) {}
+
+    kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
+      return kj::NEVER_DONE;
+    }
+    kj::Own<kj::ConnectionReceiver> listen() override {
+      return inner->listen();
+    }
+    kj::Own<kj::NetworkAddress> clone() override {
+      return kj::heap<Address>(inner->clone());
+    }
+    kj::String toString() override {
+      return inner->toString();
+    }
+
+   private:
+    kj::Own<kj::NetworkAddress> inner;
+  };
+
+  kj::Network& inner;
+};
 
 KJ_TEST("X25519PublicKey: hex roundtrip") {
   X25519PublicKey key;
@@ -283,6 +332,54 @@ KJ_TEST("ClusterRegistry: idle timeout closes connections") {
   auto client2 = rpc1.bootstrap(vatId);
   makeCall(client2, io.waitScope);
   KJ_EXPECT(server2Ref.callCount == 2);
+}
+
+KJ_TEST("ClusterRegistry: hung connect is torn down and dead peer cleaned up within timeout") {
+  auto io = kj::setupAsyncIo();
+  TempDir tmpDir;
+
+  auto connectTimeout = 100 * kj::MILLISECONDS;
+  BlackholeNetwork network(io.provider->getNetwork());
+
+  ClusterRegistry reg(tmpDir.get(), "127.0.0.0/8"_kj, network, io.provider->getTimer(),
+      60 * kj::SECONDS, connectTimeout);
+  auto maint = reg.runMaintenance();
+
+  // Forge a registry entry for a peer that is gone: a valid address (copied from our own entry),
+  // not locked by anyone, and old enough to be past the new-entry grace period.
+  X25519PublicKey peerKey;
+  memset(peerKey.bytes, 0xBE, sizeof(peerKey.bytes));
+  auto peerPath = kj::Path({peerKey.toHex()});
+  {
+    auto dir = tmpDir.get();
+    auto ownEntry = dir->openFile(kj::Path({reg.getPublicKey().toHex()}))->readAllBytes();
+    auto peerFile = dir->openFile(peerPath, kj::WriteMode::CREATE);
+    peerFile->writeAll(ownEntry);
+    timespec old[2] = {{.tv_sec = 1, .tv_nsec = 0}, {.tv_sec = 1, .tv_nsec = 0}};
+    KJ_SYSCALL(futimens(KJ_ASSERT_NONNULL(peerFile->getFd()), old));
+  }
+
+  auto rpc = capnp::makeRpcServer(reg, capnp::Capability::Client(kj::heap<CallCountServer>()));
+  auto run = rpc.run();
+
+  capnp::MallocMessageBuilder msg;
+  auto vatId = msg.initRoot<cluster::VatId>();
+  vatId.setPublicKey(kj::arrayPtr(peerKey.bytes, 32));
+
+  auto& timer = io.provider->getTimer();
+  auto start = timer.now();
+  {
+    auto client = rpc.bootstrap(vatId);
+    KJ_EXPECT_THROW_MESSAGE("timed out", makeCall(client, io.waitScope));
+  }
+
+  // Give the RPC system a chance to finish dropping the connection.
+  timer.afterDelay(connectTimeout).wait(io.waitScope);
+  KJ_EXPECT(timer.now() - start < 10 * connectTimeout);
+
+  // The dead-peer probe must have run: the unlocked, stale entry is removed and the peer is dead.
+  KJ_EXPECT(!tmpDir.get()->exists(peerPath));
+  KJ_EXPECT(reg.isPeerDead(peerKey));
 }
 
 KJ_TEST("ClusterRegistry: verifyNfsLease() succeeds when lock is held") {

@@ -750,6 +750,11 @@ kj::Maybe<kj::Own<ClusterVatNetworkBase::Connection>> ClusterRegistry::connect(
   }
 
   auto connectPromise = networkAddress->connect();
+  if (nfsMode()) {
+    // Enforce timeout when connecting over the network. (When not in nfsMode(), we're connecting
+    // to a local unix socket, in which case no timeout is needed.)
+    connectPromise = timer.timeoutAfter(connectTimeout, kj::mv(connectPromise));
+  }
 
   kj::Maybe<kj::Own<bool>> wasRefused;
   if (!nfsMode()) {
