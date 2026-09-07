@@ -435,6 +435,43 @@ test('cluster: killing the owner allows another node to take over', async () => 
   });
 });
 
+test('cluster: draining node still routes in-flight requests to a remote owner', async () => {
+  await withCluster(2, async ({ nodes }) => {
+    // Prime the DO so that exactly one node owns it.
+    const initial = await fetchJson(nodes[0].httpPort, '/increment?name=drain');
+    assert.strictEqual(initial.status, 200);
+    assert.strictEqual(initial.body.count, 1);
+    const owner = nodes.find((n) => n.nodeId === initial.body.nodeId);
+    const nonOwner = nodes.find((n) => n.nodeId !== initial.body.nodeId);
+    assert(owner !== undefined && nonOwner !== undefined);
+
+    // Put a request in flight on the non-owner whose stateless handler waits
+    // before calling the DO, then SIGTERM the non-owner while it is waiting.
+    // Draining lets in-flight requests finish, so this request must still be
+    // able to route to the owner over cluster RPC after draining began.
+    const requestPromise = fetchJson(
+      nonOwner.httpPort,
+      '/increment?name=drain&delay=1000',
+      { timeoutMs: 10_000 }
+    );
+    await sleep(250);
+    const exitPromise = nonOwner.stop({ signal: 'SIGTERM', timeoutMs: 10_000 });
+
+    const response = await requestPromise;
+    assert.strictEqual(
+      response.status,
+      200,
+      `in-flight request on draining node failed: ${JSON.stringify(response.body)}`
+    );
+    assert.strictEqual(response.body.nodeId, owner.nodeId);
+    assert.strictEqual(response.body.count, 2);
+
+    // The draining node must have exited cleanly once the request finished.
+    const exit = await exitPromise;
+    assert.deepStrictEqual(exit, { code: 0, signal: null });
+  });
+});
+
 test('cluster: alarms are rejected with a clear error', async () => {
   await withCluster(1, async ({ nodes, sharedPath }) => {
     // Fire the request. In cluster mode `setAlarm()` does not throw

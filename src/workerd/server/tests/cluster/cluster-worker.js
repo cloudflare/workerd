@@ -64,6 +64,11 @@
 //                    then calls the stub and records the result in "sink".
 //   /set-go          Sets this DO's `go` flag (read by Consumer via /get).
 //   /record?value=V  Stores V (JSON) as this DO's `recorded` value.
+//
+// The top-level fetch() additionally honors a `delay` query parameter (ms): it
+// waits that long *before* calling the DO. This lets a test put a request in
+// flight on a node and SIGTERM that node while the request has not yet routed
+// to the DO's owner.
 
 import {
   DurableObject,
@@ -84,6 +89,11 @@ export default {
     // Synthesize a stub URL for the DO.
     const id = env.COUNTER.idFromName(name);
     const stub = env.COUNTER.get(id);
+
+    const delay = url.searchParams.get('delay');
+    if (delay !== null) {
+      await scheduler.wait(Number(delay));
+    }
 
     // Forward to the DO with the same path and query.
     const forwardUrl = new URL(url.pathname + url.search, 'http://do/');
