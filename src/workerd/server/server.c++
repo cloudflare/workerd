@@ -7411,19 +7411,28 @@ kj::Promise<void> Server::handleDrain(kj::Promise<void> drainWhen) {
     tasks.add(httpServer.httpServer.drain());
   }
 
-  // Note that `clusterRpc` is intentionally NOT torn down here. Its accept loop is a task joined
-  // with `forkedDrainWhen` (see startServices()), so no new cluster connections are accepted once
-  // draining begins. But the RpcSystem itself must stay alive: every ClusterLockManager holds a
-  // reference to it, and in-flight HTTP requests -- which are permitted to run to completion --
-  // may still call a remotely owned actor, which routes through clusterRpc.bootstrap(). Dynamic
-  // workers linked during the drain window likewise need it (see the link callback's
-  // KJ_ASSERT_NONNULL(this->clusterRpc)). The RpcSystem is destroyed in ~Server(), after all
-  // requests have finished and before services are unlinked.
-  //
-  // TODO(clustering): This is a harsh ending for actors on this machine. We should really evict
-  //   each one at a time that is convenient, and wait some time for RPC requests to drain.
-  //   Three-party handoff would help with straggler requests that we forward to the new owner.
-  abortAllActors(kj::none);
+  KJ_IF_SOME(registry, clusterRegistry) {
+    // When draining begins, we stop accepting cluster RPC connections (`clusterRpc`'s accept
+    // loop is joined with `forkedDrainWhen` -- see `startServices()`). As such, as soon as we
+    // start draining, all actors hosted here become unreachable from the rest of the cluster. We
+    // MUST, therefore, abort them, and refuse to claim any more: an in-flight local request that
+    // reaches an unowned actor during the drain would otherwise make this node its owner (see
+    // ClusterLockManager::acquireOrRoute()).
+    //
+    // TODO(clustering): This is a harsh ending for actors on this machine. We should really evict
+    //   each one at a time that is convenient, and wait some time for RPC requests to drain.
+    //   As of this writing, though, we don't really have any machinery for determining what time
+    //   is "convenient" nor for doing any sort of clean hand-off between instances of an actor.
+    //   The Cloudflare production behavior is widely considered not great: draining instances lose
+    //   access to storage but are allowed to finish in-flight requests. The DO team has plans to
+    //   replace this behavior with something better in the not-so-distant future (maybe), so for
+    //   now we don't try to recreate it here -- we just hard-abort actors when drain starts. Note
+    //   that it is important that we abort at drain start rather than continue accepting cluster
+    //   connections until fully drained since we want actor locks to be released cleanly; a stale
+    //   lock takes more effort to clean up.
+    registry->startDraining();
+    abortAllActors(kj::none);
+  }
 }
 
 kj::Promise<void> Server::run(

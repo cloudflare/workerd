@@ -80,6 +80,18 @@ class ClusterRegistry final: public ClusterVatNetworkBase {
   // Pick a random peer's key from the cached peer list, biased away from recent failures.
   kj::Maybe<X25519PublicKey> pickRandomPeer();
 
+  // Marks this node as leaving the cluster. Once the server begins draining, its cluster listener
+  // stops accepting connections, so an actor claimed here would be unreachable from every other
+  // node until this process exits. ClusterLockManager::acquireOrRoute() consults isDraining() and
+  // refuses to claim unowned actors; routing to an existing owner is unaffected, since outbound
+  // connections keep working for in-flight requests.
+  void startDraining() {
+    draining = true;
+  }
+  bool isDraining() {
+    return draining;
+  }
+
   // Returns true if this registry uses IP sockets (not unix sockets) and is therefore in
   // "NFS mode" where it tries to be NFS-friendly.
   bool nfsMode() {
@@ -91,6 +103,8 @@ class ClusterRegistry final: public ClusterVatNetworkBase {
   kj::Promise<kj::Own<Connection>> accept() override;
 
  private:
+  bool draining = false;
+
 #if __linux__
   class ConnectionImpl;
 

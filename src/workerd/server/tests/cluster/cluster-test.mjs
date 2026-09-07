@@ -472,6 +472,50 @@ test('cluster: draining node still routes in-flight requests to a remote owner',
   });
 });
 
+test('cluster: draining node refuses to claim an unowned DO', async () => {
+  await withCluster(2, async ({ nodes, sharedPath, nodeKeys }) => {
+    // Put a request in flight on node 0 for a DO that nobody owns yet, then
+    // SIGTERM node 0 while its stateless handler is still waiting. By the time
+    // the handler calls the DO, node 0 is draining: its cluster listener no
+    // longer accepts connections, so claiming the DO there would leave it
+    // unreachable from the rest of the cluster until node 0 exits. The claim
+    // must be refused instead.
+    const requestPromise = fetchJson(
+      nodes[0].httpPort,
+      '/increment?name=lame-duck&delay=1000',
+      { timeoutMs: 10_000 }
+    );
+    await sleep(250);
+    const exitPromise = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 10_000 });
+
+    const response = await requestPromise;
+    assert.strictEqual(
+      response.status,
+      500,
+      `draining node must not claim the DO: ${JSON.stringify(response.body)}`
+    );
+    // The refusal is a DISCONNECTED exception, which JS sees as a generic
+    // connection-loss error.
+    assert.match(response.body.error, /Network connection lost/);
+
+    const exit = await exitPromise;
+    assert.deepStrictEqual(exit, { code: 0, signal: null });
+
+    // The DO was never instantiated anywhere: the survivor claims it fresh.
+    const survivor = await fetchJson(
+      nodes[1].httpPort,
+      '/increment?name=lame-duck'
+    );
+    assert.strictEqual(survivor.status, 200, JSON.stringify(survivor.body));
+    assert.strictEqual(survivor.body.count, 1);
+    assert.strictEqual(survivor.body.nodeId, nodes[1].nodeId);
+    assert.strictEqual(
+      await readLockOwner(lockFilePath(sharedPath, survivor.body.id)),
+      nodeKeys.get(nodes[1].nodeId)
+    );
+  });
+});
+
 test('cluster: alarms are rejected with a clear error', async () => {
   await withCluster(1, async ({ nodes, sharedPath }) => {
     // Fire the request. In cluster mode `setAlarm()` does not throw

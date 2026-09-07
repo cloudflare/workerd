@@ -157,6 +157,18 @@ ClusterLockManager::acquireOrRoute(kj::StringPtr actorId) {
       // OwnedLock first so that if any of these operations throws, unwinding runs ~OwnedLock,
       // which clears the file (best-effort) before the OFD lock is dropped.
       OwnedLock owned(kj::mv(file), kj::mv(lock));
+
+      // Holding the lock proves the actor is unowned (a file naming this node was stale). A
+      // draining node must not become its owner: its cluster listener no longer accepts
+      // connections, so no other node could reach the actor until this process exits. The check
+      // comes after tryLock() because the lock is what distinguishes "unowned" from "owned here",
+      // and the latter must still route to ourselves below. Unwinding runs ~OwnedLock, which
+      // leaves the file empty and unlocked for a live node to claim.
+      if (registry.isDraining()) {
+        kj::throwFatalException(
+            KJ_EXCEPTION(DISCONNECTED, "cannot claim Durable Object: this node is shutting down"));
+      }
+
       owned.file->truncate(0);
       owned.file->write(0, myKey.bytes);
       owned.file->sync();
