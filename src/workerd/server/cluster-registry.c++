@@ -149,9 +149,9 @@ class ClusterRegistry::ConnectionImpl final: public ClusterVatNetworkBase::Conne
   }
 
   cluster::VatId::Reader getPeerVatId() override {
-    // We can safely expected the RPC system won't call this method until there is actually some
+    // We can safely expect the RPC system won't call this method until there is actually some
     // activity on the stream that causes it to be needed. If this is an inbound stream, there
-    // is necessary no activity until we receive some messages, and we must have received the
+    // is necessarily no activity until we receive some messages, and we must have received the
     // peer key before that.
     //
     // This is convenient because otherwise we'd have to figure out what to do with this call

@@ -72,6 +72,14 @@ class TempDir {
 // it from these tests; we just need a capability to hand to RpcSystem.
 class StubClusterPort final: public rpc::WorkerdClusterPort::Server {};
 
+// Make a valid actor ID (64 digits) given some shorter base.
+kj::StringPtr testId(kj::StringPtr base) {
+  static kj::HashMap<kj::StringPtr, kj::String> cache;
+  return cache.findOrCreate(base, [&]() -> decltype(cache)::Entry {
+    return {base, kj::str(base, kj::repeat('0', 64 - base.size()))};
+  });
+}
+
 KJ_TEST("ClusterLockManager: unowned (empty file) -> acquire succeeds") {
   auto io = kj::setupAsyncIo();
   TempDir tmpDir;
@@ -83,11 +91,11 @@ KJ_TEST("ClusterLockManager: unowned (empty file) -> acquire succeeds") {
 
   ClusterLockManager lockManager(tmpDir.locks(), reg, rpc, io.provider->getTimer());
 
-  auto result = lockManager.acquireOrRoute("a1").wait(io.waitScope);
+  auto result = lockManager.acquireOrRoute(testId("a1")).wait(io.waitScope);
   KJ_ASSERT(result.is<ClusterLockManager::OwnedLock>());
 
   // The lock file should now contain our key.
-  auto content = tmpDir.readLockFile("a1");
+  auto content = tmpDir.readLockFile(testId("a1"));
   KJ_ASSERT(content.size() == 32);
   KJ_EXPECT(memcmp(content.begin(), reg.getPublicKey().bytes, 32) == 0);
 }
@@ -104,13 +112,13 @@ KJ_TEST("ClusterLockManager: owned by self -> returns self-bootstrap, no wire tr
   ClusterLockManager lockManager(tmpDir.locks(), reg, rpc, io.provider->getTimer());
 
   // First acquire to populate the lock file with our own key.
-  auto ownedResult = lockManager.acquireOrRoute("a2").wait(io.waitScope);
+  auto ownedResult = lockManager.acquireOrRoute(testId("a2")).wait(io.waitScope);
   KJ_ASSERT(ownedResult.is<ClusterLockManager::OwnedLock>());
 
   // Now simulate someone else also calling acquireOrRoute on the same actor (i.e. a forwarding
   // path). With the OwnedLock still held, the lock file is non-empty and our key is the owner.
   // acquireOrRoute should return a bootstrap client (routing to ourselves).
-  auto routeResult = lockManager.acquireOrRoute("a2").wait(io.waitScope);
+  auto routeResult = lockManager.acquireOrRoute(testId("a2")).wait(io.waitScope);
   KJ_ASSERT(routeResult.is<rpc::WorkerdClusterPort::Client>());
 }
 
@@ -128,7 +136,7 @@ KJ_TEST("ClusterLockManager: stale owner (peer dead) -> claim path runs") {
   X25519PublicKey deadKey;
   memset(deadKey.bytes, 0xAB, sizeof(deadKey.bytes));
 
-  tmpDir.writeLockFile("a3", kj::arrayPtr(deadKey.bytes, 32));
+  tmpDir.writeLockFile(testId("a3"), kj::arrayPtr(deadKey.bytes, 32));
 
   // Confirm isPeerDead returns true for the dead key.
   KJ_EXPECT(reg.isPeerDead(deadKey));
@@ -136,11 +144,11 @@ KJ_TEST("ClusterLockManager: stale owner (peer dead) -> claim path runs") {
   ClusterLockManager lockManager(tmpDir.locks(), reg, rpc, io.provider->getTimer());
 
   // acquireOrRoute should run the claim path and succeed.
-  auto result = lockManager.acquireOrRoute("a3").wait(io.waitScope);
+  auto result = lockManager.acquireOrRoute(testId("a3")).wait(io.waitScope);
   KJ_ASSERT(result.is<ClusterLockManager::OwnedLock>());
 
   // The lock file should now contain *our* key.
-  auto content = tmpDir.readLockFile("a3");
+  auto content = tmpDir.readLockFile(testId("a3"));
   KJ_ASSERT(content.size() == 32);
   KJ_EXPECT(memcmp(content.begin(), reg.getPublicKey().bytes, 32) == 0);
 }
@@ -158,15 +166,15 @@ KJ_TEST("ClusterLockManager: wrong-sized stale content + writer dead -> claim im
   // Nobody holds the lock, so the claim path should succeed.
   kj::byte garbage[10];
   memset(garbage, 0xFF, sizeof(garbage));
-  tmpDir.writeLockFile("a4", kj::arrayPtr(garbage, sizeof(garbage)));
+  tmpDir.writeLockFile(testId("a4"), kj::arrayPtr(garbage, sizeof(garbage)));
 
   ClusterLockManager lockManager(tmpDir.locks(), reg, rpc, io.provider->getTimer());
 
-  auto result = lockManager.acquireOrRoute("a4").wait(io.waitScope);
+  auto result = lockManager.acquireOrRoute(testId("a4")).wait(io.waitScope);
   KJ_ASSERT(result.is<ClusterLockManager::OwnedLock>());
 
   // The lock file should now contain our key.
-  auto content = tmpDir.readLockFile("a4");
+  auto content = tmpDir.readLockFile(testId("a4"));
   KJ_ASSERT(content.size() == 32);
   KJ_EXPECT(memcmp(content.begin(), reg.getPublicKey().bytes, 32) == 0);
 }
@@ -183,20 +191,20 @@ KJ_TEST("ClusterLockManager: OwnedLock destructor truncates and releases") {
   ClusterLockManager lockManager(tmpDir.locks(), reg, rpc, io.provider->getTimer());
 
   {
-    auto result = lockManager.acquireOrRoute("a5").wait(io.waitScope);
+    auto result = lockManager.acquireOrRoute(testId("a5")).wait(io.waitScope);
     KJ_ASSERT(result.is<ClusterLockManager::OwnedLock>());
     // Lock file should have our key.
-    auto content = tmpDir.readLockFile("a5");
+    auto content = tmpDir.readLockFile(testId("a5"));
     KJ_ASSERT(content.size() == 32);
   }
 
   // After OwnedLock destructor, the file should be truncated to 0 bytes (and the OFD lock
   // released).
-  auto content = tmpDir.readLockFile("a5");
+  auto content = tmpDir.readLockFile(testId("a5"));
   KJ_EXPECT(content.size() == 0);
 
   // A second acquire should now succeed via the claim path.
-  auto result2 = lockManager.acquireOrRoute("a5").wait(io.waitScope);
+  auto result2 = lockManager.acquireOrRoute(testId("a5")).wait(io.waitScope);
   KJ_ASSERT(result2.is<ClusterLockManager::OwnedLock>());
 }
 
@@ -214,17 +222,17 @@ KJ_TEST("ClusterLockManager: stale file naming self with no lock held -> reclaim
   // Simulate a claim or release that published our key but failed before clearing it: the file
   // names this node, but no OwnedLock (and hence no OFD lock) exists. Routing to ourselves here
   // would loop forever; we must reclaim instead.
-  tmpDir.writeLockFile("a6", kj::arrayPtr(reg.getPublicKey().bytes, 32));
+  tmpDir.writeLockFile(testId("a6"), kj::arrayPtr(reg.getPublicKey().bytes, 32));
 
-  auto result = lockManager.acquireOrRoute("a6").wait(io.waitScope);
+  auto result = lockManager.acquireOrRoute(testId("a6")).wait(io.waitScope);
   KJ_ASSERT(result.is<ClusterLockManager::OwnedLock>());
 
-  auto content = tmpDir.readLockFile("a6");
+  auto content = tmpDir.readLockFile(testId("a6"));
   KJ_ASSERT(content.size() == 32);
   KJ_EXPECT(memcmp(content.begin(), reg.getPublicKey().bytes, 32) == 0);
 
   // With the OwnedLock now held, a further lookup routes to ourselves rather than reclaiming.
-  auto routeResult = lockManager.acquireOrRoute("a6").wait(io.waitScope);
+  auto routeResult = lockManager.acquireOrRoute(testId("a6")).wait(io.waitScope);
   KJ_ASSERT(routeResult.is<rpc::WorkerdClusterPort::Client>());
 }
 
@@ -246,17 +254,17 @@ KJ_TEST("ClusterLockManager: owned by live peer -> returns bootstrap client") {
   // and acquireOrRoute should return a bootstrap client without falling through to claim.
   //
   // Note: actor IDs aren't hex of 64 chars, so they won't collide with registry filenames.
-  tmpDir.writeLockFile("a7", kj::arrayPtr(reg2.getPublicKey().bytes, 32));
+  tmpDir.writeLockFile(testId("a7"), kj::arrayPtr(reg2.getPublicKey().bytes, 32));
 
   KJ_EXPECT(!reg1.isPeerDead(reg2.getPublicKey()));
 
   ClusterLockManager lockManager(tmpDir.locks(), reg1, rpc1, io.provider->getTimer());
 
-  auto result = lockManager.acquireOrRoute("a7").wait(io.waitScope);
+  auto result = lockManager.acquireOrRoute(testId("a7")).wait(io.waitScope);
   KJ_ASSERT(result.is<rpc::WorkerdClusterPort::Client>());
 
   // The lock file should NOT have been modified (we did not claim).
-  auto content = tmpDir.readLockFile("a7");
+  auto content = tmpDir.readLockFile(testId("a7"));
   KJ_ASSERT(content.size() == 32);
   KJ_EXPECT(memcmp(content.begin(), reg2.getPublicKey().bytes, 32) == 0);
 }
@@ -273,8 +281,8 @@ KJ_TEST("ClusterLockManager: writer alive -> retries until writer releases") {
   // Open the lock file from outside the ClusterLockManager and take an exclusive lock. This
   // simulates a writer that holds the lock but hasn't yet flushed its key. The file is left
   // empty (matching the freshly-truncated state during the writer's claim path).
-  auto externalFile =
-      tmpDir.locks()->openFile(kj::Path({"a8"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  auto externalFile = tmpDir.locks()->openFile(
+      kj::Path({testId("a8")}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
   int externalFd = KJ_REQUIRE_NONNULL(externalFile->getFd());
 
   auto externalLock = KJ_ASSERT_NONNULL(OfdLock::tryLock(externalFd, OfdLock::EXCLUSIVE));
@@ -282,7 +290,7 @@ KJ_TEST("ClusterLockManager: writer alive -> retries until writer releases") {
   ClusterLockManager lockManager(tmpDir.locks(), reg, rpc, io.provider->getTimer());
 
   // acquireOrRoute should see an empty file, attempt to lock, fail, then retry with backoff.
-  auto promise = lockManager.acquireOrRoute("a8");
+  auto promise = lockManager.acquireOrRoute(testId("a8"));
 
   bool completed = false;
   auto trackedPromise = promise.then(
@@ -323,7 +331,7 @@ KJ_TEST("ClusterLockManager: concurrent acquisitions, exactly one wins") {
   kj::Vector<kj::Promise<kj::OneOf<ClusterLockManager::OwnedLock, rpc::WorkerdClusterPort::Client>>>
       promises;
   for (uint i = 0; i < N; ++i) {
-    promises.add(lockManager.acquireOrRoute("a9"));
+    promises.add(lockManager.acquireOrRoute(testId("a9")));
   }
 
   auto results = kj::joinPromises(promises.releaseAsArray()).wait(io.waitScope);

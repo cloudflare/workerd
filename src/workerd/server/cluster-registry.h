@@ -31,7 +31,7 @@ struct X25519PublicKey {
   static X25519PublicKey fromHex(kj::StringPtr hex);
 
   bool operator==(const X25519PublicKey& other) const {
-    return memcmp(bytes, other.bytes, sizeof(bytes)) == 0;
+    return kj::arrayPtr(bytes) == kj::arrayPtr(other.bytes);
   }
   kj::uint hashCode() const {
     return kj::hashCode(kj::ArrayPtr<const byte>(bytes));

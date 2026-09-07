@@ -18,9 +18,6 @@ namespace {
 // protocol is truncate(0) → write(full key) → sync, so a reader interleaving sees either size
 // 0 (treat as unowned, run claim path) or the full key.
 
-constexpr kj::Duration INITIAL_BACKOFF = 10 * kj::MILLISECONDS;
-constexpr kj::Duration MAX_BACKOFF = 1 * kj::SECONDS;
-
 // Build a `cluster::VatId` Reader for a given public key, backed by an internal `MessageBuilder`.
 class VatIdHolder {
  public:
@@ -38,6 +35,9 @@ class VatIdHolder {
   capnp::MallocMessageBuilder msg;
 };
 
+constexpr kj::Duration INITIAL_BACKOFF = 10 * kj::MILLISECONDS;
+constexpr kj::Duration MAX_BACKOFF = 1 * kj::SECONDS;
+
 // Compute the next backoff delay with ±25% jitter. `attempt` starts at 0.
 kj::Duration computeBackoff(uint attempt) {
   // Exponential: 10ms, 20ms, 40ms, ..., capped at 1s.
@@ -51,7 +51,8 @@ kj::Duration computeBackoff(uint attempt) {
   auto nanos =
       (kj::systemPreciseMonotonicClock().now() - kj::origin<kj::TimePoint>()) / kj::NANOSECONDS;
   uint32_t r = kj::hashCode(nanos);
-  double jitter = 0.75 + (r / static_cast<double>(0xFFFFFFFFu)) * 0.5;
+  constexpr decltype(r) MAX_R = kj::maxValue;
+  double jitter = 0.75 + (r / static_cast<double>(MAX_R)) * 0.5;
   return base * static_cast<int64_t>(jitter * 1000) / 1000;
 }
 
@@ -92,13 +93,13 @@ ClusterLockManager::ClusterLockManager(kj::Own<const kj::Directory> dir,
 kj::Promise<kj::OneOf<ClusterLockManager::OwnedLock, rpc::WorkerdClusterPort::Client>>
 ClusterLockManager::acquireOrRoute(kj::StringPtr actorId) {
   // Validate that the actor ID is a hex string. This is the only form of actor ID we expect on
-  // this path (durable actors named by a 64-char hex SHA-256 hash, or by `idFromName` which also
+  // this path (Durable Objects named by a 64-char hex SHA-256 hash, or by `idFromName` which also
   // produces hex). Enforcing hex incidentally guarantees the ID is safe to use as a filename.
+  KJ_REQUIRE(actorId.size() == 64, "invalid actor ID", actorId);
   for (char c: actorId) {
     KJ_REQUIRE((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'),
-        "actor ID is not a hex string", actorId);
+        "invalid actor ID", actorId);
   }
-  KJ_REQUIRE(actorId.size() > 0, "actor ID is empty");
 
   kj::Path path({actorId});
 

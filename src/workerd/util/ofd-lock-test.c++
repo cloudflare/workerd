@@ -69,7 +69,7 @@ KJ_TEST("shared locks do not conflict with each other") {
   // Both shared locks held simultaneously — no conflict.
 }
 
-KJ_TEST("exclusive lock blocks while shared lock is held") {
+KJ_TEST("exclusive lock fails while shared lock is held") {
   auto fd1 = openTempFile();
 
   auto procPath = kj::str("/proc/self/fd/", fd1.get());
@@ -125,8 +125,8 @@ KJ_TEST("move constructor releases on destruction of target") {
   KJ_SYSCALL(rawFd2 = open(procPath.cStr(), O_RDWR));
   auto fd2 = kj::OwnFd(rawFd2);
 
+  auto lock1 = KJ_ASSERT_NONNULL(OfdLock::tryLock(fd1, OfdLock::EXCLUSIVE));
   {
-    auto lock1 = KJ_ASSERT_NONNULL(OfdLock::tryLock(fd1, OfdLock::EXCLUSIVE));
     auto lock2 = kj::mv(lock1);
     // lock2 goes out of scope, releasing the lock.
   }

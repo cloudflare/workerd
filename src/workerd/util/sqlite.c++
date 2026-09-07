@@ -2426,7 +2426,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
           KJ_IF_SOME(afterOpen, self.options.afterOpen) {
             afterOpen();
           } else {
-            // sqelch spurious "dangling else" warning from clang
+            // squelch spurious "dangling else" warning from clang
           }
           kj::Maybe<kj::Own<Lock>> lock;
           if (flags & SQLITE_OPEN_MAIN_DB) {
@@ -2446,7 +2446,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
             KJ_IF_SOME(afterOpen, self.options.afterOpen) {
               afterOpen();
             } else {
-              // sqelch spurious "dangling else" warning from clang
+              // squelch spurious "dangling else" warning from clang
             }
           } else {
             kj::WriteMode mode;
@@ -2466,7 +2466,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
             KJ_IF_SOME(afterOpen, self.options.afterOpen) {
               afterOpen();
             } else {
-              // sqelch spurious "dangling else" warning from clang
+              // squelch spurious "dangling else" warning from clang
             }
             if (flags & SQLITE_OPEN_MAIN_DB) {
               lock = self.lockManager.lock(path, *kjFile);
