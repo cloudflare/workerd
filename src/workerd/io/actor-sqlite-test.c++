@@ -2624,7 +2624,7 @@ void expectDatabaseClosed(ActorSqliteTest& test) {
   fresh.run("COMMIT");
 }
 
-KJ_TEST("shutdown() closes the database") {
+KJ_TEST("shutdown() leaves the connection open; the owner closes it afterwards") {
   ActorSqliteTest test({.monitorOutputGate = false});
 
   test.put("committed", "yes");
@@ -2635,21 +2635,27 @@ KJ_TEST("shutdown() closes the database") {
 
   test.actor.shutdown(kj::none);
 
+  // Storage is broken, but shutdown() must not close the connection itself: embedders may call it
+  // from inside a SQLite callback, where closing is unsafe. The owner closes it later.
   KJ_EXPECT_THROW_MESSAGE(ActorCache::SHUTDOWN_ERROR_MESSAGE, test.actor.getSqliteDatabase());
-  expectDatabaseClosed(test);
+  test.db.run("SELECT 1");
 
   // The scheduled commit observes the shutdown and breaks the output gate with the shutdown
-  // exception rather than touching the closed database.
+  // exception rather than committing.
   KJ_EXPECT_THROW_MESSAGE(ActorCache::SHUTDOWN_ERROR_MESSAGE, test.gate.onBroken().wait(test.ws));
   test.pollAndExpectCalls({});
 
-  // A second shutdown() is a no-op.
+  // Closing with the implicit transaction still open rolls it back and releases the file.
+  test.db.close();
+  expectDatabaseClosed(test);
+
+  // A second shutdown() on a closed database is a no-op.
   test.actor.shutdown(kj::none);
   KJ_EXPECT_THROW_MESSAGE(ActorCache::SHUTDOWN_ERROR_MESSAGE, test.actor.getSqliteDatabase());
   expectDatabaseClosed(test);
 }
 
-KJ_TEST("shutdown() closes the database when storage is already broken") {
+KJ_TEST("shutdown() after a critical error keeps the original exception") {
   ActorSqliteTest test({.monitorOutputGate = false});
 
   test.put("committed", "yes");
@@ -2658,13 +2664,7 @@ KJ_TEST("shutdown() closes the database when storage is already broken") {
   auto txn = test.startTransaction();
   txn->put(kj::str("uncommitted"), kj::heapArray("yes"_kj.asBytes()), {}, nullptr);
   breakViaCriticalError(test, *txn);
-
-  // Storage is broken but the connection is still open until shutdown() runs, as it does when the
-  // broken output gate aborts the IoContext.
   KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken", test.actor.getSqliteDatabase());
-  test.db.run("SELECT 1");
-
-  test.actor.shutdown(kj::none);
 
   auto expectOriginalBrokenException = [&]() {
     KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { test.actor.getSqliteDatabase(); })) {
@@ -2675,12 +2675,16 @@ KJ_TEST("shutdown() closes the database when storage is already broken") {
       KJ_FAIL_EXPECT("getSqliteDatabase() should have thrown");
     }
   };
+
+  // shutdown() runs after the break (the broken output gate aborts the IoContext), then the owner
+  // closes the connection.
+  test.actor.shutdown(kj::none);
   expectOriginalBrokenException();
+  test.db.close();
   expectDatabaseClosed(test);
 
   test.actor.shutdown(kj::none);
   expectOriginalBrokenException();
-  expectDatabaseClosed(test);
 }
 
 KJ_TEST("shutdown() during in-flight commit does not unschedule the persisted alarm") {
@@ -2697,12 +2701,12 @@ KJ_TEST("shutdown() during in-flight commit does not unschedule the persisted al
   test.setAlarm(oneMs);
   auto scheduleFulfiller = kj::mv(test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]);
 
-  // Shut down (and thereby close the database) while that commit is parked.
+  // Shut down while that commit is parked.
   test.actor.shutdown(kj::none);
 
-  // Resume the commit. It must not consult the closed database's alarm state and must not issue
-  // any further scheduler requests. In particular it must not issue `scheduleRun(none)`, which
-  // would cancel the alarm that the database still persists.
+  // Resume the commit. Now that storage is broken, it must not consult the database's alarm state
+  // and must not issue any further scheduler requests. In particular it must not issue
+  // `scheduleRun(none)`, which would cancel the alarm that the database still persists.
   scheduleFulfiller->fulfill();
   test.pollAndExpectCalls({});
   KJ_EXPECT_THROW_MESSAGE(ActorCache::SHUTDOWN_ERROR_MESSAGE, test.gate.onBroken().wait(test.ws));

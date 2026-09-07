@@ -572,6 +572,7 @@ class Server::ActorNamespace final {
         auto reason = 0;
         a->shutdown(reason);
       }
+      closeStorage();
 
       // Drop the container client reference
       // If setInactivityTimeout() was called, there's still a timer holding a reference
@@ -734,12 +735,13 @@ class Server::ActorNamespace final {
       shutdownTask = kj::none;
       manager = kj::none;
       tracker->shutdown();
+      closeStorage();
       actor = kj::none;
       containerClient = kj::none;
 
-      // The actor (and every facet) shut down above, which closed their databases, so nothing on
-      // this node holds a handle into the actor's storage anymore. Drop ours and let another node
-      // (or a fresh container on this one) claim the actor.
+      // The actor (and every facet) shut down above and closeStorage() closed the database, so
+      // nothing on this node holds a handle into the actor's storage anymore. Drop ours and let
+      // another node (or a fresh container on this one) claim the actor.
       facetTreeIndex = kj::none;
       ownershipLock = kj::none;
 
@@ -762,6 +764,17 @@ class Server::ActorNamespace final {
           });
         }
       }
+    }
+
+    // Closes the actor's SQLite connection so the database file is fully and synchronously
+    // released (WAL checkpointed and removed; in NFS mode the EXCLUSIVE lock dropped). Must run
+    // after the actor has been shut down (so ActorSqlite is `broken` and will not touch the
+    // connection again) and before `actor` is dropped (see `sqliteDb`). Idempotent.
+    void closeStorage() {
+      KJ_IF_SOME(db, sqliteDb) {
+        db.close();
+      }
+      sqliteDb = kj::none;
     }
 
     kj::Own<ActorContainer> getFacetContainer(
@@ -885,10 +898,10 @@ class Server::ActorNamespace final {
     // request for the actor loop through self-bootstrap (see ActorNamespace::resolveNode()). The
     // lock is therefore released at the moment the container leaves the map (abort(),
     // monitorOnBroken()), not when the last reference to the container is dropped. Releasing it
-    // there is only safe because ActorSqlite::shutdown() closes the database: by the time either
-    // path hollows the container, every SQLite handle under the actor and its facets is already
-    // closed, so no handle into the actor's storage outlives the claim even if an in-flight
-    // request still holds the Worker::Actor.
+    // there is only safe because closeStorage() runs first: by the time either path hollows the
+    // container, every SQLite handle under the actor and its facets is already closed, so no handle
+    // into the actor's storage outlives the claim even if an in-flight request still holds the
+    // Worker::Actor.
     //
     // The lock file's contents alone carry no such guarantee: a failed claim or release can leave
     // this node's key behind with no OwnedLock held. acquireOrRoute() detects that (the OFD lock
@@ -897,6 +910,15 @@ class Server::ActorNamespace final {
 
     // The actor is constructed after the ActorContainer so it starts off empty.
     kj::Maybe<kj::Own<Worker::Actor>> actor;
+
+    // The actor's SQLite connection, owned by the ActorSqlite inside `actor`. Set by start() (the
+    // actor constructs its cache synchronously) and cleared by closeStorage(), which every path
+    // that drops `actor` calls first, so this never outlives the connection it refers to.
+    //
+    // The connection is closed here rather than in ActorSqlite::shutdown() because shutdown() can
+    // run synchronously inside a SQLite callback (e.g. a VFS write that hits a storage limit),
+    // where closing the handle is unsafe. The container only drops the actor from the event loop.
+    kj::Maybe<SqliteDatabase&> sqliteDb;
 
     kj::String key;
     kj::Own<RequestTracker> tracker;
@@ -1094,9 +1116,11 @@ class Server::ActorNamespace final {
       auto managerToDrop = kj::mv(manager);
 
       // onBroken fired only after IoContext::abort() shut down the actor cache, and the facets
-      // were aborted above, so every database under this actor is closed. Release the claim now,
-      // in the same synchronous continuation as the erase() below (see `ownershipLock`). Any stub
-      // still pinning this container after the erase keeps only a hollow shell.
+      // were aborted above, so closing the database now is safe and leaves every database under
+      // this actor closed. Release the claim in the same synchronous continuation as the erase()
+      // below (see `ownershipLock`). Any stub still pinning this container after the erase keeps
+      // only a hollow shell.
+      closeStorage();
       facetTreeIndex = kj::none;
       ownershipLock = kj::none;
 
@@ -1151,6 +1175,7 @@ class Server::ActorNamespace final {
         a->shutdown(0, KJ_EXCEPTION(DISCONNECTED, "broken.dropped; Actor freed due to inactivity"));
       }
       // Destroy the last strong Worker::Actor reference.
+      closeStorage();
       actor = kj::none;
 
       // Drop our reference to the ContainerClient
@@ -1219,6 +1244,7 @@ class Server::ActorNamespace final {
       onBrokenTask = kj::none;
 
       // Destroy the last strong Worker::Actor reference.
+      closeStorage();
       actor = kj::none;
 
       if (webSocketMode == IoChannelFactory::EvictWebSocketMode::CLOSE) {
@@ -1371,6 +1397,8 @@ class Server::ActorNamespace final {
               deleteDescendantStorage(dir, selfId);
             });
 
+            KJ_ASSERT(sqliteDb == kj::none);
+            sqliteDb = *db;
             return kj::heap<ActorSqlite>(kj::mv(db), outputGate,
                 [](SpanParent) -> kj::Promise<void> { return kj::READY_NOW; }, *sqliteHooks)
                 .attach(kj::mv(sqliteHooks));
@@ -1458,6 +1486,9 @@ class Server::ActorNamespace final {
             kj::mv(privileges));
       }
 
+      // If actor construction throws after makeActorCache ran, the database it recorded is
+      // destroyed along with the half-built actor; don't leave `sqliteDb` pointing at it.
+      KJ_ON_SCOPE_FAILURE(sqliteDb = kj::none);
       auto actor = actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
           kj::mv(makeActorCache), kj::mv(makeStorage), kj::mv(loopback), tryGetManagerRef(),
           kj::mv(container), kj::mv(containerImages), *this);
