@@ -2637,7 +2637,7 @@ KJ_TEST("shutdown() leaves the connection open; the owner closes it afterwards")
 
   // Storage is broken, but shutdown() must not close the connection itself: embedders may call it
   // from inside a SQLite callback, where closing is unsafe. The owner closes it later.
-  KJ_EXPECT_THROW_MESSAGE(ActorCache::SHUTDOWN_ERROR_MESSAGE, test.actor.getSqliteDatabase());
+  KJ_EXPECT_THROW_MESSAGE(ActorCache::SHUTDOWN_ERROR_MESSAGE, test.actor.getSqliteKv());
   test.db.run("SELECT 1");
 
   // The scheduled commit observes the shutdown and breaks the output gate with the shutdown
@@ -2651,7 +2651,7 @@ KJ_TEST("shutdown() leaves the connection open; the owner closes it afterwards")
 
   // A second shutdown() on a closed database is a no-op.
   test.actor.shutdown(kj::none);
-  KJ_EXPECT_THROW_MESSAGE(ActorCache::SHUTDOWN_ERROR_MESSAGE, test.actor.getSqliteDatabase());
+  KJ_EXPECT_THROW_MESSAGE(ActorCache::SHUTDOWN_ERROR_MESSAGE, test.actor.getSqliteKv());
   expectDatabaseClosed(test);
 }
 
@@ -2664,15 +2664,15 @@ KJ_TEST("shutdown() after a critical error keeps the original exception") {
   auto txn = test.startTransaction();
   txn->put(kj::str("uncommitted"), kj::heapArray("yes"_kj.asBytes()), {}, nullptr);
   breakViaCriticalError(test, *txn);
-  KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken", test.actor.getSqliteDatabase());
+  KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken", test.actor.getSqliteKv());
 
   auto expectOriginalBrokenException = [&]() {
-    KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { test.actor.getSqliteDatabase(); })) {
+    KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { test.actor.getSqliteKv(); })) {
       // The first exception wins: the shutdown exception must not replace the storage error.
       KJ_EXPECT(e.getDescription().contains("broken.outputGateBroken"), e);
       KJ_EXPECT(!e.getDescription().contains(ActorCache::SHUTDOWN_ERROR_MESSAGE), e);
     } else {
-      KJ_FAIL_EXPECT("getSqliteDatabase() should have thrown");
+      KJ_FAIL_EXPECT("getSqliteKv() should have thrown");
     }
   };
 

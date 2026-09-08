@@ -753,7 +753,8 @@ class Server::ActorNamespace final {
     }
 
     // Resets the actor's SQLite database while the connection is still open,
-    // avoiding file-locking issues on Windows. Storage that is already broken is skipped.
+    // avoiding file-locking issues on Windows. Storage that is already closed is skipped
+    // (reset() refuses to reopen a closed database).
     void resetStorage() {
       KJ_IF_SOME(a, actor) {
         KJ_IF_SOME(cache, a->getPersistent()) {
