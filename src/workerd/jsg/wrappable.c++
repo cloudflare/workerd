@@ -11,6 +11,7 @@
 
 #include <cppgc/allocation.h>
 #include <cppgc/garbage-collected.h>
+#include <cppgc/heap-consistency.h>
 #include <v8-cppgc.h>
 
 #include <kj/async.h>
@@ -347,6 +348,17 @@ void Wrappable::attachWrapper(
 
   KJ_REQUIRE(wrapper == kj::none);
   KJ_REQUIRE(strongWrapper.IsEmpty());
+
+  // No garbage collection may run for the duration of this function. Between creating the
+  // TracedReference below and linking `object` to its CppgcShim, the traced node exists but
+  // nothing in the cppgc object graph reaches it, so a major GC's ResetDeadNodes() would free the
+  // node -- zapping it with kTracedHandleFullGCResetZapValue -- while `object` itself stays
+  // alive. Marking cannot save the node either: constructing a TracedReference is an initializing
+  // store, which V8 deliberately does not black-allocate.
+  //
+  // The window is reachable because allocateShim() allocates on the cppgc heap, and cppgc reports
+  // its allocations to V8, which collects once the old-generation allocation limit is reached.
+  cppgc::subtle::NoGarbageCollectionScope noGcScope(isolate->GetCppHeap()->GetHeapHandle());
 
   // The C++ Wrappable object must hold a TracedReference to its own JavaScript wrapper, while
   // such a wrapper exists. This way, if the object is reached through C++ again later, we can
