@@ -39,12 +39,18 @@ function setupShouldAllowBadEntropy(Module: Module): void {
 }
 
 function shouldAllowBadEntropy(Module: Module): boolean {
-  const val = Module.HEAP8[allowed_entropy_calls_addr];
-  if (val) {
+  const val = Module.HEAP8[allowed_entropy_calls_addr]!;
+  if (val === -1) {
+    return true;
+  }
+  if (val > 0) {
     Module.HEAP8[allowed_entropy_calls_addr]!--;
     return true;
   }
-  return false;
+  if (val === 0) {
+    return false;
+  }
+  throw new Error(`Unexpected randomness allowance value: ${val}`);
 }
 
 let IN_REQUEST_CONTEXT = false;
@@ -73,7 +79,15 @@ export function getRandomValues(
     console.log('Python stack:');
     Module._dump_traceback();
     throw new PythonUserError(
-      'Disallowed operation called within global scope'
+      'Randomness is not allowed while a Python Worker is starting because startup ' +
+        'values will be repeated across Worker instances. If this error occurs from ' +
+        'importing a package, import the package from a function to load it after the Worker starts. ' +
+        'If it must load at startup, set ' +
+        'os.environ["PYTHON_WORKERS_ALLOW_TOP_LEVEL_ENTROPY"] = "1" ' +
+        'before importing it to allow randomness for all startup code. ' +
+        'Do not use this for secrets or unique IDs. ' +
+        'Please report the package at ' +
+        'https://github.com/cloudflare/workers-py/issues/new.'
     );
   }
   // "entropy" in the test suite is a bunch of 42's. Good to use a readily identifiable pattern
@@ -164,13 +178,18 @@ export function entropyBeforeRequest(Module: Module): void {
     return;
   }
   IN_REQUEST_CONTEXT = true;
-  isReady = true;
-  simpleRunPython(
-    Module,
-    `
+  try {
+    simpleRunPython(
+      Module,
+      `
 from _cloudflare.entropy_patches import before_first_request
 before_first_request()
 del before_first_request
     `
-  );
+    );
+  } catch (error) {
+    IN_REQUEST_CONTEXT = false;
+    throw error;
+  }
+  isReady = true;
 }

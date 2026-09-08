@@ -1,7 +1,5 @@
 """
-A metapath finder which calls get_import_context(module_name). If it returns a
-value that is not None, this is interpreted as a context manager that should be
-used when executing the module top level scope.
+A metapath finder which wraps registered modules in their import contexts.
 
 When we're done, we put back the original module. The wrapper module and wrapper
 stubs will persist in the wild, so we need to make sure they behave the same way
@@ -15,6 +13,11 @@ from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from functools import partial, wraps
 from typing import TYPE_CHECKING
+
+from .allow_entropy import (
+    TOP_LEVEL_ENTROPY_ERROR,
+    consume_bad_entropy_call,
+)
 
 if TYPE_CHECKING:
     from importlib.abc import Loader
@@ -138,9 +141,7 @@ class PatchLoader:
 
 
 class PatchFinder:
-    """Finder that returns our PatchLoader if get_import_context returns an import
-    context for the module. Otherwise, return None.
-    """
+    """Finder that wraps modules requiring an import context."""
 
     def invalidate_caches(self):
         pass
@@ -151,8 +152,8 @@ class PatchFinder:
         path,
         target,
     ):
-        import_context = patches.get(fullname, None)
-        if import_context is None:
+        registered_patch = patches.get(fullname, None)
+        if registered_patch is None:
             # Not ours
             return None
 
@@ -167,20 +168,21 @@ class PatchFinder:
         else:
             # Not found. This is going to be an ImportError.
             return None
-        # Overwrite the loader with our wrapped loader
-        spec.loader = PatchLoader(spec.loader, import_context)
+        if spec.loader is None:
+            return spec
+        spec.loader = PatchLoader(spec.loader, registered_patch)
         return spec
 
     @staticmethod
     def install():
+        PatchFinder.remove()
         sys.meta_path.insert(0, PatchFinder())
 
     @staticmethod
     def remove():
-        for idx, val in enumerate(sys.meta_path):  # noqa:B007
-            if isinstance(val, PatchFinder):
-                break
-        del sys.meta_path[idx]
+        sys.meta_path[:] = [
+            finder for finder in sys.meta_path if not isinstance(finder, PatchFinder)
+        ]
 
 
 def install_import_patch_manager():
@@ -202,13 +204,13 @@ IN_REQUEST_CONTEXT = False
 ORIG_MODULES = {}
 
 
-def block_calls(module, *, allowlist=()):
+def block_calls(module, *, allowlist=(), checkpoint=None):
     """Make top level calls to methods from the module that are not in allowlist fail.
 
     It gets removed automatically before the first request. Generally used with
     register_before_first_request.
     """
-    sys.modules[module.__name__] = BlockedCallModule(module, allowlist)
+    sys.modules[module.__name__] = BlockedCallModule(module, allowlist, checkpoint)
     ORIG_MODULES[module.__name__] = module
 
 
@@ -236,9 +238,10 @@ class BlockedCallModule:
     actually defines variables called _mod or _allow_list.
     """
 
-    def __init__(self, module, allowlist):
+    def __init__(self, module, allowlist, checkpoint=None):
         super().__setattr__("_mod", module)
         super().__setattr__("_allow_list", allowlist)
+        super().__setattr__("_checkpoint", checkpoint)
 
     def __getattribute__(self, key):
         mod = super().__getattribute__("_mod")
@@ -251,17 +254,30 @@ class BlockedCallModule:
         if key in super().__getattribute__("_allow_list"):
             return orig
 
+        checkpoint = super().__getattribute__("_checkpoint")
+
         # If we aren't in a request scope, the value is a callable, and it's not
         # in the allow_list, return a wrapper that raises an error if it's
         # called before entering the request scope.
         # TODO: this doesn't wrap classes correctly, does it matter?
         @wraps(orig)
         def wrapper(*args, **kwargs):
-            if not IN_REQUEST_CONTEXT:
+            if IN_REQUEST_CONTEXT:
+                return orig(*args, **kwargs)
+            if checkpoint is None or not consume_bad_entropy_call():
                 raise RuntimeError(
-                    f"Cannot use {mod.__name__}.{key}() outside of request context"
+                    f"Cannot use {mod.__name__}.{key}() outside of request context. "
+                    + TOP_LEVEL_ENTROPY_ERROR
                 )
-            return orig(*args, **kwargs)
+            try:
+                return orig(*args, **kwargs)
+            finally:
+                # When creating a snapshot, it validates that the random state hasn't changed
+                # from when we started executing the top level scope to when we finished
+                # executing it.
+                # However, in this case, we want to allow the random state to change, so we
+                # call the checkpoint function to update the expected state.
+                checkpoint()
 
         return wrapper
 

@@ -9,52 +9,35 @@ Calls to random should only work inside a request context.
 
 from random import choice, randbytes, random
 
-try:
-    random()
-except RuntimeError as e:
-    assert (
-        repr(e)
-        == "RuntimeError('Cannot use random.random() outside of request context')"
-    )
-else:
-    assert False
 
-try:
-    randbytes(5)
-except RuntimeError as e:
-    assert (
-        repr(e)
-        == "RuntimeError('Cannot use random.randbytes() outside of request context')"
-    )
-else:
-    assert False
+def assert_blocked(call):
+    try:
+        call()
+    except RuntimeError:
+        pass
+    else:
+        assert False
 
-try:
-    choice([1, 2, 3])
-except RuntimeError as e:
-    assert (
-        repr(e)
-        == "RuntimeError('Cannot use random.choice() outside of request context')"
-    )
-else:
-    assert False
+
+assert_blocked(random)
+assert_blocked(lambda: randbytes(5))
+assert_blocked(lambda: choice([1, 2, 3]))
 
 
 def t1():
     from random import randbytes, random
 
-    random()
-    randbytes(5)
-    choice([1, 2, 3])
+    return random(), randbytes(5), choice([1, 2, 3])
 
 
 def t2():
-    random()
-    randbytes(5)
-    choice([1, 2, 3])
-
-    t1()
+    first = random(), randbytes(5), choice([1, 2, 3])
+    second = t1()
+    return first, second
 
 
 def test():
-    t2()
+    for value, data, selection in t2():
+        assert 0 <= value < 1
+        assert len(data) == 5
+        assert selection in [1, 2, 3]

@@ -27,7 +27,11 @@ from functools import wraps
 
 # Import entropy_import_context for side effects
 from . import entropy_import_context  # noqa: F401
-from .allow_entropy import _set_in_request_context, raise_unless_entropy_allowed
+from .allow_entropy import (
+    _set_in_request_context,
+    clear_global_entropy,
+    raise_unless_entropy_allowed,
+)
 from .import_patch_manager import (
     after_snapshot_handlers,
     before_first_request_handlers,
@@ -81,5 +85,6 @@ def before_first_request():
     _set_in_request_context()
     restore_urandom()
     remove_import_patch_manager()
+    clear_global_entropy()
     for cb in before_first_request_handlers:
         cb()
