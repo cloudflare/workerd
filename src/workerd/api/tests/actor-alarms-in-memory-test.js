@@ -7,6 +7,7 @@ import * as assert from 'node:assert';
 export class DurableObjectExample {
   constructor(state, env) {
     this.state = state;
+    this.alarmsTriggered = 0;
   }
 
   async waitForAlarm(scheduledTime) {
@@ -41,12 +42,17 @@ export class DurableObjectExample {
     await this.state.storage.setAlarm(time);
     assert.equal(await this.state.storage.getAlarm(), time);
 
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
-    return new Response('OK');
+    return new Response(String(this.alarmsTriggered));
   }
 
-  async alarm() {}
+  async alarm() {
+    this.alarmsTriggered++;
+    if (this.alarmsTriggered === 1) {
+      await this.state.storage.setAlarm(Date.now() + 50);
+    }
+  }
 }
 
 export const test = {
@@ -55,6 +61,6 @@ export const test = {
     let obj = env.ns.get(id);
     let res = await obj.fetch('http://foo/test');
     let text = await res.text();
-    assert.equal(text, 'OK');
+    assert.equal(text, '2');
   },
 };
