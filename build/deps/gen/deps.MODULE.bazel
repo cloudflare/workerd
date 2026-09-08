@@ -38,7 +38,7 @@ use_repo(http, "capnp-cpp")
 git_repository(
     name = "com_googlesource_chromium_icu",
     build_file = "@v8//:bazel/BUILD.icu",
-    commit = "d578f2e8b7bd5938e21cfb6bf15c079e0aa5b738",
+    commit = "8cc91d9b6ab9991802fd208ee03a69714fd0251c",
     patch_cmds = [
         "find source -name BUILD.bazel | xargs rm",
     ],
@@ -127,10 +127,10 @@ archive_override(
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
         "//:patches/perfetto/0002-disable-info-level-logging-re2.patch",
     ],
-    sha256 = "60dd39e5f21800c4f61032ca9f9f73973cfc7d93db9f0d39e63ad3d8fb3740e9",
-    strip_prefix = "google-perfetto-25e635e",
+    sha256 = "4fcc98fe4754269a70e297f6caba429420039c89a1c6cb561dffb4057de63abb",
+    strip_prefix = "google-perfetto-9e9bdaf",
     type = "tgz",
-    url = "https://api.github.com/repos/google/perfetto/tarball/v56.1",
+    url = "https://api.github.com/repos/google/perfetto/tarball/v58.2",
 )
 
 # simdutf

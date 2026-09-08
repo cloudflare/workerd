@@ -5,24 +5,22 @@ Subject: Modify where to look for dragonbox
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index bd86f080c6e96327aec1addaa11cddd7eb947dd4..8fd8f17debe018b1c17e07b6a0d42ea3f912e8c9 100644
+index 29b68d89b4d54917c19a0de783fdea5ff3b5783f..30502729d7a58c28924fdad2d44e4b97237fda1b 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4178,14 +4178,9 @@ filegroup(
- )
+@@ -4186,13 +4186,8 @@ filegroup(
  
  v8_library(
--  name = "lib_dragonbox",
--  srcs = ["third_party/dragonbox/src/include/dragonbox/dragonbox.h"],
--  hdrs = [
--    "third_party/dragonbox/src/include/dragonbox/dragonbox.h",
--  ],
--  includes = [
--    "third_party/dragonbox/src/include",
--  ],
-+    name = "lib_dragonbox",
+     name = "lib_dragonbox",
+-    srcs = ["third_party/dragonbox/src/include/dragonbox/dragonbox.h"],
+-    hdrs = [
+-        "third_party/dragonbox/src/include/dragonbox/dragonbox.h",
+-    ],
+-    includes = [
+-        "third_party/dragonbox/src/include",
+-    ],
 +    srcs = [],
-+    deps = ["@dragonbox"]
++    deps = ["@dragonbox"],
  )
  
  cc_library(
