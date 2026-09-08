@@ -90,6 +90,54 @@ kj::Promise<size_t> turnTimeout(int n) {
   co_return 0;
 }
 
+struct AsyncSendState {
+  bool called = false;
+  kj::Array<kj::byte> observed;
+};
+
+class AsyncObservingDatagramChannel final: public DatagramChannel {
+ public:
+  explicit AsyncObservingDatagramChannel(AsyncSendState& state): state(state) {}
+
+  kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receive() override {
+    return kj::Promise<kj::Maybe<kj::Array<kj::byte>>>(kj::NEVER_DONE);
+  }
+
+  kj::Promise<void> send(kj::ArrayPtr<const kj::byte> datagram) override {
+    state.called = true;
+    return kj::evalLater(
+        [state = &state, datagram]() { state->observed = kj::heapArray<kj::byte>(datagram); });
+  }
+
+ private:
+  AsyncSendState& state;
+};
+
+KJ_TEST("UDP writable stream snapshots bytes before asynchronous send") {
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setStreamsJavaScriptControllers(true);
+  TestFixture fixture(TestFixture::SetupParams{.featureFlags = flags.asReader()});
+  AsyncSendState state;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto socket = setupDatagramSocket(
+        env.js, kj::heap<AsyncObservingDatagramChannel>(state), kj::none, kj::none);
+
+    auto data = jsg::JsUint8Array::create(env.js, "before"_kjb);
+    auto& handler = KJ_ASSERT_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<Datagram>>());
+    auto chunk = jsg::JsValue(handler.wrap(env.js, env.js.alloc<Datagram>(env.js, data)));
+    auto writePromise = socket->getWritable(env.js).writeForTest(env.js, chunk);
+    env.js.runMicrotasks();
+    KJ_REQUIRE(state.called);
+
+    data.asArrayPtr().copyFrom("after!"_kjb);
+    return env.context.awaitJs(env.js, kj::mv(writePromise));
+  });
+
+  KJ_EXPECT(state.observed.asPtr() == "before"_kjb);
+}
+
 // The output-gate write test body, run against both stream backends: with useTsStreams
 // the typescript_implemented_streams compat flag (plus the bootstrap autogate) is enabled
 // and the socket's streams are TypeScript-implemented.
