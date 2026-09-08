@@ -13189,7 +13189,7 @@ export type BrowserRunAcquireGuardrails = {
 };
 /** Options for acquiring a new browser session. */
 export type BrowserRunAcquireOptions = {
-  /** Idle session lifetime in seconds. */
+  /** Idle session lifetime in milliseconds. */
   keepAlive?: number;
   /** Record the browser session. */
   recording?: boolean;
