@@ -1186,7 +1186,8 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
         options.onlyIf.get('if-modified-since'),
         new Date(0).toUTCString()
       );
-      assert.strictEqual(options.range, 'bytes=1-3');
+      assert(options.range instanceof Headers);
+      assert.strictEqual(options.range.get('range'), 'bytes=1-3');
     }
     if (requestKey === 'onlyIfMultipleEtags') {
       assert(options.onlyIf instanceof Headers);
