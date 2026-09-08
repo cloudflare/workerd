@@ -276,7 +276,7 @@ class R2Bucket: public jsg::Object {
 
   struct GetOptionsRpc {
     jsg::Optional<kj::OneOf<ConditionalRpc, jsg::Ref<Headers>>> onlyIf;
-    jsg::Optional<kj::OneOf<Range, kj::String>> range;
+    jsg::Optional<kj::OneOf<Range, jsg::Ref<Headers>>> range;
     jsg::Optional<kj::String> ssecKey;
 
     JSG_STRUCT(onlyIf, range, ssecKey);
