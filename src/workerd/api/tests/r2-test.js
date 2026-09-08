@@ -317,6 +317,19 @@ const testWorker = {
             });
             break;
           }
+          case 'onlyIfMultipleEtags': {
+            assert.deepStrictEqual(jsonRequest.onlyIf, {
+              etagMatches: [
+                { value: 'strongEtag', type: 'strong' },
+                { value: 'weakEtag', type: 'weak' },
+              ],
+              etagDoesNotMatch: [
+                { value: 'firstEtag', type: 'strong' },
+                { value: 'secondEtag', type: 'strong' },
+              ],
+            });
+            break;
+          }
           case 'httpMetadata': {
             if (jsonRequest.method !== 'completeMultipartUpload') {
               assert.deepEqual(jsonRequest.httpFields, httpFields);
@@ -606,6 +619,19 @@ const testWorker = {
             });
             return buildGetResponse({ body });
           }
+          case 'onlyIfMultipleEtags': {
+            assert.deepStrictEqual(jsonRequest.onlyIf, {
+              etagMatches: [
+                { value: 'strongEtag', type: 'strong' },
+                { value: 'weakEtag', type: 'weak' },
+              ],
+              etagDoesNotMatch: [
+                { value: 'firstEtag', type: 'strong' },
+                { value: 'secondEtag', type: 'strong' },
+              ],
+            });
+            return buildGetResponse({ body });
+          }
           case 'httpMetadata': {
             const head = {
               httpFields,
@@ -828,6 +854,16 @@ const testWorker = {
           etagDoesNotMatch: 'strongEtag',
           uploadedBefore: new Date('0'),
         },
+      });
+      const multipleEtagHeaders = new Headers({
+        'if-match': '"strongEtag", W/"weakEtag"',
+        'if-none-match': '"firstEtag", "secondEtag"',
+      });
+      await env.BUCKET.put('onlyIfMultipleEtags', body, {
+        onlyIf: multipleEtagHeaders,
+      });
+      await env.BUCKET.get('onlyIfMultipleEtags', {
+        onlyIf: multipleEtagHeaders,
       });
       await env.BUCKET.get('onlyIfWildcard', {
         onlyIf: {
@@ -1137,14 +1173,31 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
       });
     }
     if (requestKey === 'rpc-header-options') {
-      assert.deepStrictEqual(options, {
-        onlyIf: {
-          etagMatches: 'strongEtag',
-          uploadedAfter: new Date(0),
-          secondsGranularity: true,
-        },
-        range: 'bytes=1-3',
-      });
+      assert(options.onlyIf instanceof Headers);
+      assert.strictEqual(
+        options.onlyIf.get('if-match'),
+        '"strongEtag", W/"weakEtag"'
+      );
+      assert.strictEqual(
+        options.onlyIf.get('if-none-match'),
+        '"firstEtag", "secondEtag"'
+      );
+      assert.strictEqual(
+        options.onlyIf.get('if-modified-since'),
+        new Date(0).toUTCString()
+      );
+      assert.strictEqual(options.range, 'bytes=1-3');
+    }
+    if (requestKey === 'onlyIfMultipleEtags') {
+      assert(options.onlyIf instanceof Headers);
+      assert.strictEqual(
+        options.onlyIf.get('if-match'),
+        '"strongEtag", W/"weakEtag"'
+      );
+      assert.strictEqual(
+        options.onlyIf.get('if-none-match'),
+        '"firstEtag", "secondEtag"'
+      );
     }
     if (requestKey === 'rpc-must-not-call') {
       throw new Error('get RPC method must not be called');
@@ -1224,6 +1277,28 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
       assert.deepStrictEqual(new Uint8Array(options.md5), md5Buffer);
       assert.strictEqual(options.storageClass, 'InfrequentAccess');
       assert.strictEqual(options.ssecKey, hexKey);
+    }
+    if (requestKey === 'rpc-put-header-options') {
+      assert(options.onlyIf instanceof Headers);
+      assert.strictEqual(
+        options.onlyIf.get('if-match'),
+        '"strongEtag", W/"weakEtag"'
+      );
+      assert.strictEqual(
+        options.onlyIf.get('if-none-match'),
+        '"firstEtag", "secondEtag"'
+      );
+    }
+    if (requestKey === 'onlyIfMultipleEtags') {
+      assert(options.onlyIf instanceof Headers);
+      assert.strictEqual(
+        options.onlyIf.get('if-match'),
+        '"strongEtag", W/"weakEtag"'
+      );
+      assert.strictEqual(
+        options.onlyIf.get('if-none-match'),
+        '"firstEtag", "secondEtag"'
+      );
     }
     if (requestKey.startsWith('large')) {
       await assertLargeRpcBody(requestKey, value, valueSize);
@@ -1488,7 +1563,8 @@ export const jsrpcTransportTests = {
     });
     await env.BUCKET.get('rpc-header-options', {
       onlyIf: new Headers({
-        'if-match': '"strongEtag"',
+        'if-match': '"strongEtag", W/"weakEtag"',
+        'if-none-match': '"firstEtag", "secondEtag"',
         'if-modified-since': new Date(0).toUTCString(),
       }),
       range: new Headers({ range: 'bytes=1-3' }),
@@ -1607,6 +1683,12 @@ export const jsrpcTransportTests = {
       md5: md5Buffer,
       storageClass: 'InfrequentAccess',
       ssecKey: bufferKey,
+    });
+    await env.BUCKET.put('rpc-put-header-options', body, {
+      onlyIf: new Headers({
+        'if-match': '"strongEtag", W/"weakEtag"',
+        'if-none-match': '"firstEtag", "secondEtag"',
+      }),
     });
 
     await assert.rejects(
