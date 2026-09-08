@@ -58,15 +58,14 @@ function sendAndReceive(client, port, data, timeoutMs = 5000) {
 }
 
 test('UDP connect() drops datagrams once the flow exceeds maxPendingBytes', async () => {
-  // The configured maxPendingBytes is 3. The worker echoes a priming ping immediately, which
+  // The configured maxPendingBytes is 95. The worker echoes a priming ping immediately, which
   // confirms it's already running (isolate/module startup already paid for) and about to enter
   // its 300ms delay -- only then do we fire the burst of single-byte datagrams that's meant to
-  // overflow the queue. Only the first 3 bytes fit; the rest are dropped rather than buffered.
+  // overflow the queue. A one-byte payload and its 24-byte kj::Array handle cost 25 bytes, so only
+  // the first three datagrams fit; the rest are dropped rather than buffered.
   const port = await workerd.getListenPort('udp');
   const client = createSocket('udp4');
   try {
-    // The priming ping must itself fit within maxPendingBytes (3), hence one byte, not the
-    // word "ping".
     await sendAndReceive(client, port, Buffer.from('p'));
 
     const received = [];
@@ -80,6 +79,25 @@ test('UDP connect() drops datagrams once the flow exceeds maxPendingBytes', asyn
     await scheduler.wait(1000);
 
     assert.deepStrictEqual(received, ['0', '1', '2']);
+  } finally {
+    client.close();
+  }
+});
+
+test('UDP connect() accounts for empty datagrams in maxPendingBytes', async () => {
+  const port = await workerd.getListenPort('udp');
+  const client = createSocket('udp4');
+  try {
+    await sendAndReceive(client, port, Buffer.from('p'));
+
+    let received = 0;
+    client.on('message', () => received++);
+    for (let i = 0; i < 6; i++) {
+      client.send(Buffer.alloc(0), port, '127.0.0.1');
+    }
+
+    await scheduler.wait(1000);
+    assert.strictEqual(received, 3);
   } finally {
     client.close();
   }

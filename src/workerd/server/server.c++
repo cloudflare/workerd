@@ -6751,8 +6751,8 @@ class Server::UdpListener final: public kj::Refcounted {
     // Called by UdpListener::run() when a new datagram arrives for this flow. The listener keeps
     // draining the kernel socket regardless of whether this flow's queue has room, so one slow
     // flow does not block delivery to other peers sharing the same socket.
-    // Once `maxPendingBytes` worth of datagrams are queued, further arrivals for this flow are
-    // dropped rather than buffered.
+    // Once `maxPendingBytes` worth of data is queued, further arrivals for
+    // this flow are dropped rather than buffered.
     void deliver(kj::Array<kj::byte> datagram) {
       if (ended) return;
       resetIdleTimer();
@@ -6761,10 +6761,11 @@ class Server::UdpListener final: public kj::Refcounted {
         waitingReceiver = kj::none;
         return;
       }
-      if (pendingBytes + datagram.size() > maxPendingBytes) {
+      auto queuedSize = datagram.size() + sizeof(datagram);
+      if (queuedSize > maxPendingBytes - pendingBytes) {
         return;
       }
-      pendingBytes += datagram.size();
+      pendingBytes += queuedSize;
       pending.push_back(kj::mv(datagram));
     }
 
@@ -6772,7 +6773,7 @@ class Server::UdpListener final: public kj::Refcounted {
       if (!pending.empty()) {
         auto result = kj::mv(pending.front());
         pending.pop_front();
-        pendingBytes -= result.size();
+        pendingBytes -= result.size() + sizeof(result);
         return kj::Maybe<kj::Array<kj::byte>>(kj::mv(result));
       }
       if (ended) {
