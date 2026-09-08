@@ -288,6 +288,30 @@ kj::String buildEtagsString(kj::ArrayPtr<R2Bucket::Etag> etagArray) {
   }, ", ");
 }
 
+R2Bucket::ConditionalRpc makeConditionalRpc(
+    jsg::Lock& js, R2Bucket::UnwrappedConditional& conditional, TraceContext& traceContext) {
+  R2Bucket::ConditionalRpc rpcConditional{.secondsGranularity = conditional.secondsGranularity};
+  KJ_IF_SOME(etags, conditional.etagMatches) {
+    auto value = buildEtagsString(etags);
+    traceContext.setTag("cloudflare.r2.request.only_if.etag_matches"_kjc, value.asPtr());
+    rpcConditional.etagMatches = kj::mv(value);
+  }
+  KJ_IF_SOME(etags, conditional.etagDoesNotMatch) {
+    auto value = buildEtagsString(etags);
+    traceContext.setTag("cloudflare.r2.request.only_if.etag_does_not_match"_kjc, value.asPtr());
+    rpcConditional.etagDoesNotMatch = kj::mv(value);
+  }
+  KJ_IF_SOME(date, conditional.uploadedBefore) {
+    traceContext.setTag("cloudflare.r2.request.only_if.uploaded_before"_kjc, toISOString(js, date));
+    rpcConditional.uploadedBefore = date;
+  }
+  KJ_IF_SOME(date, conditional.uploadedAfter) {
+    traceContext.setTag("cloudflare.r2.request.only_if.uploaded_after"_kjc, toISOString(js, date));
+    rpcConditional.uploadedAfter = date;
+  }
+  return rpcConditional;
+}
+
 template <typename Builder, typename Options>
 void initOnlyIf(TraceContext& traceContext, jsg::Lock& js, Builder& builder, Options& o) {
   KJ_IF_SOME(i, o.onlyIf) {
@@ -698,29 +722,16 @@ R2Bucket::getRpc(jsg::Lock& js,
           KJ_UNREACHABLE;
         }();
 
-        ConditionalRpc rpcConditional{.secondsGranularity = conditional.secondsGranularity};
-        KJ_IF_SOME(etags, conditional.etagMatches) {
-          auto value = buildEtagsString(etags);
-          traceContext.setTag("cloudflare.r2.request.only_if.etag_matches"_kjc, value.asPtr());
-          rpcConditional.etagMatches = kj::mv(value);
+        auto rpcConditional = makeConditionalRpc(js, conditional, traceContext);
+
+        KJ_SWITCH_ONEOF(i) {
+          KJ_CASE_ONEOF(conditional, Conditional) {
+            normalized.onlyIf = kj::mv(rpcConditional);
+          }
+          KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
+            normalized.onlyIf = kj::mv(headers);
+          }
         }
-        KJ_IF_SOME(etags, conditional.etagDoesNotMatch) {
-          auto value = buildEtagsString(etags);
-          traceContext.setTag(
-              "cloudflare.r2.request.only_if.etag_does_not_match"_kjc, value.asPtr());
-          rpcConditional.etagDoesNotMatch = kj::mv(value);
-        }
-        KJ_IF_SOME(date, conditional.uploadedBefore) {
-          traceContext.setTag(
-              "cloudflare.r2.request.only_if.uploaded_before"_kjc, toISOString(js, date));
-          rpcConditional.uploadedBefore = date;
-        }
-        KJ_IF_SOME(date, conditional.uploadedAfter) {
-          traceContext.setTag(
-              "cloudflare.r2.request.only_if.uploaded_after"_kjc, toISOString(js, date));
-          rpcConditional.uploadedAfter = date;
-        }
-        normalized.onlyIf = kj::mv(rpcConditional);
       }
 
       KJ_IF_SOME(range, o.range) {
@@ -820,14 +831,7 @@ jsg::Promise<void> R2Bucket::deleteRpc(jsg::Lock& js,
   return js.evalNow([&] {
     auto& context = IoContext::current();
     TraceContext traceContext = makeR2TraceContext("r2_delete"_kjc, "DeleteObject"_kjc);
-    KJ_SWITCH_ONEOF(keys) {
-      KJ_CASE_ONEOF(ks, kj::Array<kj::String>) {
-        traceContext.setTag("cloudflare.r2.request.keys"_kjc, kj::str(ks));
-      }
-      KJ_CASE_ONEOF(k, kj::String) {
-        traceContext.setTag("cloudflare.r2.request.keys"_kjc, kj::str(k));
-      }
-    }
+    traceContext.setTag("cloudflare.r2.request.keys"_kjc, kj::str(keys));
 
     // The result is discarded, matching delete_: a missing key is success, and per-key failures in
     // a batch delete are reported in a body the binding has never read.
@@ -910,29 +914,17 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lo
           }
           KJ_UNREACHABLE;
         }();
-        ConditionalRpc rpcConditional{.secondsGranularity = conditional.secondsGranularity};
-        KJ_IF_SOME(etags, conditional.etagMatches) {
-          auto value = buildEtagsString(etags);
-          traceContext.setTag("cloudflare.r2.request.only_if.etag_matches"_kjc, value.asPtr());
-          rpcConditional.etagMatches = kj::mv(value);
+
+        auto rpcConditional = makeConditionalRpc(js, conditional, traceContext);
+
+        KJ_SWITCH_ONEOF(condition) {
+          KJ_CASE_ONEOF(conditional, Conditional) {
+            onlyIf = kj::mv(rpcConditional);
+          }
+          KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
+            onlyIf = kj::mv(headers);
+          }
         }
-        KJ_IF_SOME(etags, conditional.etagDoesNotMatch) {
-          auto value = buildEtagsString(etags);
-          traceContext.setTag(
-              "cloudflare.r2.request.only_if.etag_does_not_match"_kjc, value.asPtr());
-          rpcConditional.etagDoesNotMatch = kj::mv(value);
-        }
-        KJ_IF_SOME(date, conditional.uploadedBefore) {
-          traceContext.setTag(
-              "cloudflare.r2.request.only_if.uploaded_before"_kjc, toISOString(js, date));
-          rpcConditional.uploadedBefore = date;
-        }
-        KJ_IF_SOME(date, conditional.uploadedAfter) {
-          traceContext.setTag(
-              "cloudflare.r2.request.only_if.uploaded_after"_kjc, toISOString(js, date));
-          rpcConditional.uploadedAfter = date;
-        }
-        onlyIf = kj::mv(rpcConditional);
       }
 
       jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;

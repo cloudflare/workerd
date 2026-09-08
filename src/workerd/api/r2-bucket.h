@@ -237,6 +237,9 @@ class R2Bucket: public jsg::Object {
     JSG_STRUCT_TS_OVERRIDE(R2PutOptions);
   };
 
+  // RPC representation of Conditional. The public type uses NonCoercible strings for input
+  // validation, but NonCoercible cannot be wrapped and converted back to JavaScript.
+  // Ordinary strings allow the conditional to be passed over JSRPC.
   struct ConditionalRpc {
     jsg::Optional<kj::String> etagMatches;
     jsg::Optional<kj::String> etagDoesNotMatch;
@@ -272,7 +275,7 @@ class R2Bucket: public jsg::Object {
   };
 
   struct GetOptionsRpc {
-    jsg::Optional<ConditionalRpc> onlyIf;
+    jsg::Optional<kj::OneOf<ConditionalRpc, jsg::Ref<Headers>>> onlyIf;
     jsg::Optional<kj::OneOf<Range, kj::String>> range;
     jsg::Optional<kj::String> ssecKey;
 
