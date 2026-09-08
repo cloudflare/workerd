@@ -135,6 +135,9 @@ struct Socket {
   # - "example.com:80": Perform a DNS lookup to determine the address, and then listen on it. If
   #     this resolves to multiple addresses, listen on all of them.
   #
+  # UDP sockets currently bind only the first address when a hostname resolves to multiple
+  # addresses. Specify a numeric address when selecting the address family matters.
+  #
   # (These are the formats supported by KJ's parseAddress().)
 
   union {
