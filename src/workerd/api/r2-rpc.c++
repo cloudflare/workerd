@@ -62,6 +62,7 @@ PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value) {
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(stream, JsReadableStream) {
       auto size = stream.tryGetLength(js, StreamEncoding::IDENTITY);
+
       JSG_REQUIRE(size != kj::none, TypeError,
           "Provided readable stream must have a known length (request/response body or readable "
           "half of FixedLengthStream)");
