@@ -41,16 +41,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
         "Part number must be between 1 and 10000 (inclusive). Actual value was: ", partNumber);
 
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("r2_uploadPart"_kjc);
-
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bucket->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "UploadPart"_kjc);
-    KJ_IF_SOME(b, this->bucket->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
+    TraceContext traceContext = bucket->makeR2TraceContext("r2_uploadPart"_kjc, "UploadPart"_kjc);
     traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
     traceContext.setTag("cloudflare.r2.request.part_number"_kjc, static_cast<int64_t>(partNumber));
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
@@ -151,15 +142,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPartRpc(j
     JSG_REQUIRE(partNumber >= 1 && partNumber <= 10000, TypeError,
         "Part number must be between 1 and 10000 (inclusive). Actual value was: ", partNumber);
 
-    TraceContext traceContext = IoContext::current().makeUserTraceSpan("r2_uploadPart"_kjc);
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bucket->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "UploadPart"_kjc);
-    KJ_IF_SOME(b, this->bucket->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
+    TraceContext traceContext = bucket->makeR2TraceContext("r2_uploadPart"_kjc, "UploadPart"_kjc);
     traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
     traceContext.setTag("cloudflare.r2.request.part_number"_kjc, static_cast<int64_t>(partNumber));
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
@@ -172,7 +155,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPartRpc(j
     }
 
     auto prepared = prepareR2RpcBody(js, value);
-    traceContext.setTag("cloudflare.r2.request.size"_kjc, prepared.size);
+    traceContext.setTag("cloudflare.r2.request.size"_kjc, static_cast<int64_t>(prepared.size));
 
     auto promise = callR2RpcMethod<UploadedPart>(js, KJ_ASSERT_NONNULL(rpcClient), "uploadPart"_kj,
         rpcPropHandler, uploadPartFnHandler, uploadPartResultHandler, partNumber,
@@ -191,16 +174,8 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("r2_completeMultipartUpload"_kjc);
-
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bucket->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "CompleteMultipartUpload"_kjc);
-    KJ_IF_SOME(b, this->bucket->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
+    TraceContext traceContext =
+        bucket->makeR2TraceContext("r2_completeMultipartUpload"_kjc, "CompleteMultipartUpload"_kjc);
     traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
     kj::String partIds =
@@ -262,15 +237,7 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::completeRpc(jsg:
     const jsg::TypeHandler<jsg::Promise<R2Bucket::HeadResultRpc>>& completeResultHandler) {
   return js.evalNow([&] {
     TraceContext traceContext =
-        IoContext::current().makeUserTraceSpan("r2_completeMultipartUpload"_kjc);
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bucket->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "CompleteMultipartUpload"_kjc);
-    KJ_IF_SOME(b, this->bucket->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
+        bucket->makeR2TraceContext("r2_completeMultipartUpload"_kjc, "CompleteMultipartUpload"_kjc);
     traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
     kj::String partIds =
@@ -299,16 +266,8 @@ jsg::Promise<void> R2MultipartUpload::abort(
     jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("r2_abortMultipartUpload"_kjc);
-
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bucket->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "AbortMultipartUpload"_kjc);
-    KJ_IF_SOME(b, this->bucket->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
+    TraceContext traceContext =
+        bucket->makeR2TraceContext("r2_abortMultipartUpload"_kjc, "AbortMultipartUpload"_kjc);
     traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
 
@@ -350,15 +309,8 @@ jsg::Promise<void> R2MultipartUpload::abortRpc(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Promise<void>>& abortResultHandler) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("r2_abortMultipartUpload"_kjc);
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bucket->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "AbortMultipartUpload"_kjc);
-    KJ_IF_SOME(b, this->bucket->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
+    TraceContext traceContext =
+        bucket->makeR2TraceContext("r2_abortMultipartUpload"_kjc, "AbortMultipartUpload"_kjc);
     traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
 
