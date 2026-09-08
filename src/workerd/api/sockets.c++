@@ -345,7 +345,9 @@ JsWritableStream newDatagramWritableStream(jsg::Lock& js, kj::Rc<DatagramChannel
     auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Datagram>>());
     auto datagram = JSG_REQUIRE_NONNULL(handler.tryUnwrap(js, chunk), TypeError,
         "This socket's writable stream only accepts Datagram instances.");
-    return IoContext::current().awaitIo(js, channel->send(datagram->getData(js).asArrayPtr()));
+    auto bytes = kj::heapArray<kj::byte>(datagram->getData(js).asArrayPtr());
+    auto sendPromise = channel->send(bytes).attach(kj::mv(bytes));
+    return IoContext::current().awaitIo(js, kj::mv(sendPromise));
   });
 }
 
