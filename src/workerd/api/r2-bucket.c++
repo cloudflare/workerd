@@ -770,7 +770,7 @@ R2Bucket::getRpc(jsg::Lock& js,
           KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
             KJ_IF_SOME(value, headers->getCommon(js, capnp::CommonHeaderName::RANGE)) {
               traceContext.setTag("cloudflare.r2.request.range"_kjc, value.asPtr());
-              normalized.range = kj::mv(value);
+              normalized.range = kj::mv(headers);
             }
           }
         }
