@@ -798,6 +798,10 @@ class R2Bucket: public jsg::Object {
 
   kj::Own<kj::HttpClient> getHttpClient(IoContext& context, TraceContext& traceContext);
 
+  TraceContext makeR2TraceContext(kj::LiteralStringConst spanName,
+      kj::LiteralStringConst operation,
+      kj::Maybe<kj::StringPtr> key = kj::none);
+
   // Look up a method on the gateway's entrypoint over this binding's subrequest
   // channel.
   jsg::Ref<JsRpcProperty> getRpcMethod(jsg::Lock& js, kj::StringPtr methodName);

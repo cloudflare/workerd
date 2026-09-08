@@ -12,21 +12,38 @@ using Workerd = import "/workerd/workerd.capnp";
 # default export and would not exercise named-entrypoint dispatch, which is the production shape.
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "r2-jsrpc-test",
+    ( name = "r2-test",
       worker = (
         modules = [
           ( name = "worker", esModule = embed "r2-test.js" )
         ],
         bindings = [
           ( name = "BUCKET",
-            r2Bucket = (name = "r2-jsrpc-test", entrypoint = "R2BindingEntrypoint") ),
+            r2Bucket = (name = "r2-test", entrypoint = "R2BindingEntrypoint") ),
           ( name = "R2_TRANSPORT", text = "jsrpc" ),
           ( name = "R2_LIST_HONOR_INCLUDE", text = "true" ),
         ],
         compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
-                              "streams_enable_constructors", "r2_list_honor_include",
-                              "r2_binding_jsrpc", "disable_fast_jsg_struct"],
+                               "streams_enable_constructors", "r2_list_honor_include",
+                               "r2_binding_jsrpc", "disable_fast_jsg_struct"],
+        streamingTails = ["tail"],
       )
     ),
+    (name = "tail", worker = .tailWorker),
   ],
+  extensions = [(
+    modules = [
+      (name = "test:instrumentation-tail", esModule = embed "instrumentation-tail-worker.js"),
+    ],
+  )],
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "r2-instrumentation-test.js"),
+  ],
+  bindings = [
+    (name = "R2_TRACE_TRANSPORT", text = "jsrpc"),
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat", "disable_fast_jsg_struct"],
 );
