@@ -6694,6 +6694,9 @@ class Server::UdpListener final: public kj::Refcounted {
       TRACE_EVENT("workerd", "UdpListener handle datagram");
 
       auto content = receiver->getContent();
+      if (content.isTruncated) {
+        continue;
+      }
       auto key = receiver->getSource().toString();
 
       Flow* flow;
@@ -7330,7 +7333,6 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
             "connection-oriented socket) are not supported for it."));
         continue;
       }
-
       auto idleTimeout = sock.getUdp().getIdleTimeoutMs() * kj::MILLISECONDS;
       size_t maxPendingBytes = sock.getUdp().getMaxPendingBytes();
       auto addrPromise = network.parseAddress(addrStr, 0);
