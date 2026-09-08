@@ -281,6 +281,10 @@ class Server::Service: public IoChannelFactory::SubrequestChannel {
   // Returns true if the service exports the given handler, e.g. `fetch`, `scheduled`, etc.
   virtual bool hasHandler(kj::StringPtr handlerName) = 0;
 
+  virtual bool supportsUdp() {
+    return false;
+  }
+
   // Return the service itself, or the underlying service if this instance wraps another service as
   // with EntrypointService.
   virtual Service* service() {
@@ -3397,6 +3401,10 @@ class Server::WorkerService final: public Service,
                                    private TimerChannel,
                                    private LimitEnforcer {
  public:
+  bool supportsUdp() override {
+    return true;
+  }
+
   // I/O channels, delivered when link() is called.
   struct LinkedIoChannels {
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> subrequest;
@@ -7331,6 +7339,11 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
         reportConfigError(kj::str("Socket \"", name,
             "\" is a UDP socket; --socket-fd overrides (which pass a listening "
             "connection-oriented socket) are not supported for it."));
+        continue;
+      }
+      if (!service->service()->supportsUdp()) {
+        reportConfigError(kj::str("Socket \"", name,
+            "\" is a UDP socket, but its target service is not an in-process Worker."));
         continue;
       }
       auto idleTimeout = sock.getUdp().getIdleTimeoutMs() * kj::MILLISECONDS;

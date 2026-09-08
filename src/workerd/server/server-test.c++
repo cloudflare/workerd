@@ -749,6 +749,28 @@ KJ_TEST("Server: UDP listener drops truncated datagrams") {
   KJ_EXPECT(!test.hasUdp("udp-address"));
 }
 
+KJ_TEST("Server: UDP sockets reject RPC-forwarded services") {
+  TestServer test(R"((
+    services = [(
+      name = "remote",
+      external = (
+        address = "remote-address",
+        http = (capnpConnectHost = "capnp")
+      )
+    )],
+    sockets = [(
+      name = "udp",
+      address = "udp-address",
+      udp = (),
+      service = "remote"
+    )]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.expectErrors(
+      "Socket \"udp\" is a UDP socket, but its target service is not an in-process Worker.\n");
+}
+
 KJ_TEST("Server: serve basic Service Worker") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
