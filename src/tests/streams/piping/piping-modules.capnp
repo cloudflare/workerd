@@ -13,4 +13,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "flow-control", esModule = embed "flow-control.js"),
   (name = "interop", esModule = embed "interop.js"),
   (name = "data-volumes", esModule = embed "data-volumes.js"),
+  (name = "special-buffers", esModule = embed "special-buffers.js"),
 ];

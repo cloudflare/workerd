@@ -90,3 +90,11 @@ export {
   largePipeJsToIdentity,
   largePipeIdentityToJs,
 } from 'data-volumes';
+
+export {
+  sabViewThroughCompressionRoundTrip,
+  sabViewThroughIdentityTransform,
+  sabViewThroughJsPipeChain,
+  resizableViewThroughIdentityTransform,
+  resizableViewThroughJsPipeChain,
+} from 'special-buffers';
