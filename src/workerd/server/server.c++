@@ -6696,14 +6696,19 @@ class Server::UdpListener final: public kj::Refcounted {
       auto content = receiver->getContent();
       auto key = receiver->getSource().toString();
 
-      Flow* flow;
+      kj::Rc<Flow> flow = nullptr;
       KJ_IF_SOME(existing, flows.find(key)) {
-        flow = existing;
-      } else {
-        auto newFlow = kj::heap<Flow>(
+        KJ_IF_SOME(strong, existing.upgrade()) {
+          flow = kj::mv(strong);
+        } else {
+          flows.erase(key);
+        }
+      }
+      if (flow == nullptr) {
+        auto newFlow = kj::rc<Flow>(
             *this, kj::str(key), receiver->getSource().clone(), idleTimeout, maxPendingBytes);
-        flow = newFlow.get();
-        flows.insert(kj::str(key), flow);
+        flow = newFlow.addRef();
+        flows.insert(kj::str(key), newFlow.downgrade());
         dispatch(kj::mv(newFlow));
       }
       flow->deliver(kj::heapArray<kj::byte>(content.value));
@@ -6717,8 +6722,8 @@ class Server::UdpListener final: public kj::Refcounted {
   // listener's shared DatagramPort.
   //
   // Ownership: the dispatch task owns Flow (see dispatch()), same as TcpListener::run() tasks owning
-  // per-connection state. `flows` below is a non-owning lookup pointer for routing datagrams.
-  class Flow final: public workerd::DatagramChannel {
+  // per-connection state. `flows` below holds weak references for routing datagrams.
+  class Flow final: public workerd::DatagramChannel, public kj::Refcounted {
    public:
     Flow(UdpListener& listener,
         kj::String key,
@@ -6821,9 +6826,12 @@ class Server::UdpListener final: public kj::Refcounted {
 
     void unregister() {
       KJ_IF_SOME(current, listener->flows.find(key)) {
-        if (current == this) {
-          listener->flows.erase(key);
+        KJ_IF_SOME(live, current.tryGet()) {
+          if (&live != this) {
+            return;
+          }
         }
+        listener->flows.erase(key);
       }
     }
   };
@@ -6835,12 +6843,11 @@ class Server::UdpListener final: public kj::Refcounted {
   kj::Duration idleTimeout;
   size_t maxPendingBytes;
 
-  // Flows keyed by the peer's address (as text): a non-owning lookup table used only to route a
-  // later datagram from the same peer to the Flow already dispatched for it. See Flow's class
-  // comment for the actual ownership model.
-  kj::HashMap<kj::String, Flow*> flows;
+  // Flows keyed by the peer's address (as text), used to route a later datagram from the same peer
+  // to the Flow already dispatched for it. See Flow's class comment for the ownership model.
+  kj::HashMap<kj::String, kj::WeakRc<Flow>> flows;
 
-  void dispatch(kj::Own<Flow> flow) {
+  void dispatch(kj::Rc<Flow> flow) {
     IoChannelFactory::SubrequestMetadata metadata;
     auto worker = service->startRequest(kj::mv(metadata));
     auto event = kj::heap<api::UdpConnectCustomEvent>(kj::str(addrStr), *flow);
