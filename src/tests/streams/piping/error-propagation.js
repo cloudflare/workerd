@@ -282,15 +282,21 @@ export const destAbortPromiseStates = {
   },
 };
 
-// preventAbort AND preventCancel together on a starts-errored source:
-// both suppressions hold and both ends stay un-shut-down.
+// An abort signal triggers both abort-destination and cancel-source
+// shutdown actions; preventAbort and preventCancel must suppress both.
 export const preventAbortAndCancelCombo = {
   async test() {
-    const err = new Error('src-err');
+    const err = new Error('abort-reason');
+    const abortController = new AbortController();
     let abortCalled = false;
+    let cancelCalled = false;
+    let controller;
     const rs = new ReadableStream({
       start(c) {
-        c.error(err);
+        controller = c;
+      },
+      cancel() {
+        cancelCalled = true;
       },
     });
     const ws = new WritableStream({
@@ -298,17 +304,20 @@ export const preventAbortAndCancelCombo = {
         abortCalled = true;
       },
     });
-    strictEqual(
-      await rejectionOf(
-        rs.pipeTo(ws, {
-          preventAbort: true,
-          preventCancel: true,
-          preventClose: true,
-        })
-      ),
-      err
-    );
+    const pipeP = rs.pipeTo(ws, {
+      preventAbort: true,
+      preventCancel: true,
+      preventClose: true,
+      signal: abortController.signal,
+    });
+    await scheduler.wait(1);
+    abortController.abort(err);
+    // Wake the pending read so both pipe loops observe the aborted signal.
+    controller.enqueue('chunk');
+    strictEqual(await rejectionOf(pipeP), err);
     strictEqual(abortCalled, false);
+    strictEqual(cancelCalled, false);
+    strictEqual(rs.locked, false);
     ws.getWriter(); // dest untouched and re-lockable
   },
 };
@@ -338,12 +347,18 @@ export const shutdownWaitsForInFlightWrite = {
       },
     });
     const pipeP = rs.pipeTo(ws);
+    let pipeSettled = false;
+    pipeP.then(
+      () => (pipeSettled = true),
+      () => (pipeSettled = true)
+    );
     controller.enqueue('chunk');
     await scheduler.wait(10);
     controller.error(err);
     await scheduler.wait(20);
-    // The write is still parked: abort must not have run yet.
+    // The write is still parked: the pipe and abort action must not settle yet.
     strictEqual(events.join(','), 'write-start');
+    strictEqual(pipeSettled, false);
     releaseWrite();
     strictEqual(await rejectionOf(pipeP), err);
     strictEqual(events.join(','), 'write-start,abort:src-err');

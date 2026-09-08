@@ -506,6 +506,10 @@ export const abortThenControllerErrorInFlightWrite = {
       },
     });
     const writer = ws.getWriter();
+    const closedExpectation = rejects(
+      writer.closed,
+      (e) => e === 'abort-reason'
+    );
     const write = writer.write('chunk');
     write.catch((e) => events.push(`write-rejected:${e.message}`));
     await scheduler.wait(1);
@@ -524,6 +528,7 @@ export const abortThenControllerErrorInFlightWrite = {
       events.join(' | '),
       'sink-abort:abort-reason | write-rejected:write-failure | abort-fulfilled'
     );
+    await closedExpectation;
   },
 };
 
