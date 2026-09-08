@@ -737,6 +737,7 @@ R2Bucket::getRpc(jsg::Lock& js,
       KJ_IF_SOME(range, o.range) {
         KJ_SWITCH_ONEOF(range) {
           KJ_CASE_ONEOF(value, Range) {
+            kj::Vector<jsg::Dict<double>::Field> fields;
             KJ_IF_SOME(offset, value.offset) {
               JSG_REQUIRE(offset >= 0, RangeError, "Invalid range. Starting offset (", offset,
                   ") must be greater than or equal to 0.");
@@ -744,6 +745,7 @@ R2Bucket::getRpc(jsg::Lock& js,
                   offset, ") must be an integer, not floating point.");
               traceContext.setTag(
                   "cloudflare.r2.request.range.offset"_kjc, static_cast<int64_t>(offset));
+              fields.add(jsg::Dict<double>::Field{.name = kj::str("offset"), .value = offset});
             }
             KJ_IF_SOME(length, value.length) {
               JSG_REQUIRE(length >= 0, RangeError, "Invalid range. Length (", length,
@@ -752,6 +754,7 @@ R2Bucket::getRpc(jsg::Lock& js,
                   ") must be an integer, not floating point.");
               traceContext.setTag(
                   "cloudflare.r2.request.range.length"_kjc, static_cast<int64_t>(length));
+              fields.add(jsg::Dict<double>::Field{.name = kj::str("length"), .value = length});
             }
             KJ_IF_SOME(suffix, value.suffix) {
               JSG_REQUIRE(
@@ -764,8 +767,9 @@ R2Bucket::getRpc(jsg::Lock& js,
                   ") must be an integer, not floating point.");
               traceContext.setTag(
                   "cloudflare.r2.request.range.suffix"_kjc, static_cast<int64_t>(suffix));
+              fields.add(jsg::Dict<double>::Field{.name = kj::str("suffix"), .value = suffix});
             }
-            normalized.range = kj::mv(value);
+            normalized.range = jsg::Dict<double>{.fields = fields.releaseAsArray()};
           }
           KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
             KJ_IF_SOME(value, headers->getCommon(js, capnp::CommonHeaderName::RANGE)) {
@@ -801,8 +805,8 @@ R2Bucket::getRpc(jsg::Lock& js,
           return kj::mv(result);
         }
         if (rpc.kind == "body") {
-          auto body = JSG_REQUIRE_NONNULL(kj::mv(rpc.body), Error,
-              "Malformed R2 get RPC result: body result did not have a body.");
+          auto body = KJ_ASSERT_NONNULL(
+              kj::mv(rpc.body), "Malformed R2 get RPC result: body result did not have a body.");
           auto object = headResultFromRpc(js, kj::mv(rpc.object), MissingMetadataPolicy::EMPTY);
           auto result = js.alloc<GetResult>(kj::mv(object->name), kj::mv(object->version),
               object->size, kj::mv(object->etag), kj::mv(object->checksums), object->uploaded,

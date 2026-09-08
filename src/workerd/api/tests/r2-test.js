@@ -10,6 +10,13 @@ const body = 'content';
 const rpcStreamBody = 'café';
 const rpcInlineBodyLimit = 16 << 20;
 const largeRpcBodySize = rpcInlineBodyLimit + 2;
+const rpcRanges = {
+  offset: { offset: 1 },
+  length: { length: 3 },
+  bounded: { offset: 0, length: 3 },
+  suffix: { suffix: 2 },
+  empty: {},
+};
 const httpMetaObj = {
   contentType: 'text/plain',
   contentLanguage: 'en-US',
@@ -1142,6 +1149,25 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
   }
 
   get(requestKey, options) {
+    if (requestKey.startsWith('rpc-range-')) {
+      const range = options?.range;
+      const rangeKey = requestKey.slice('rpc-range-'.length);
+      if (rangeKey === 'headers') {
+        assert(range instanceof Headers);
+        assert.strictEqual(range.get('range'), 'bytes=1-3');
+        assert.strictEqual(range.get('x-test'), 'preserved');
+      } else if (rangeKey === 'no-range') {
+        assert.strictEqual(range, undefined);
+      } else if (Object.hasOwn(rpcRanges, rangeKey)) {
+        assert.deepStrictEqual(range, rpcRanges[rangeKey]);
+        assert.strictEqual('suffix' in range, rangeKey === 'suffix');
+      } else {
+        assert.fail(
+          'Invalid ranges must be rejected before calling the gateway'
+        );
+      }
+      return null;
+    }
     if (requestKey === 'missing') {
       return null;
     }
@@ -1857,6 +1883,69 @@ export const jsrpcTransportTests = {
       partNumber: 3,
       etag: 'partEtag',
     });
+  },
+};
+
+export const jsrpcRangeTests = {
+  async test(controller, env) {
+    if (env.R2_TRANSPORT !== 'jsrpc') {
+      return;
+    }
+
+    for (const [rangeKey, range] of Object.entries(rpcRanges)) {
+      assert.strictEqual(
+        await env.BUCKET.get(`rpc-range-${rangeKey}`, { range }),
+        null
+      );
+    }
+    assert.strictEqual(
+      await env.BUCKET.get('rpc-range-offset', {
+        range: { offset: 1, length: undefined, suffix: undefined },
+      }),
+      null
+    );
+    assert.strictEqual(
+      await env.BUCKET.get('rpc-range-suffix', {
+        range: { offset: undefined, length: undefined, suffix: 2 },
+      }),
+      null
+    );
+    assert.strictEqual(
+      await env.BUCKET.get('rpc-range-empty', {
+        range: { offset: undefined, length: undefined, suffix: undefined },
+      }),
+      null
+    );
+
+    assert.strictEqual(
+      await env.BUCKET.get('rpc-range-headers', {
+        range: new Headers({ range: 'bytes=1-3', 'x-test': 'preserved' }),
+      }),
+      null
+    );
+    assert.strictEqual(await env.BUCKET.get('rpc-range-no-range'), null);
+    assert.strictEqual(await env.BUCKET.get('rpc-range-no-range', {}), null);
+    assert.strictEqual(
+      await env.BUCKET.get('rpc-range-no-range', { range: new Headers() }),
+      null
+    );
+
+    await assert.rejects(
+      env.BUCKET.get('rpc-range-invalid', { range: { suffix: 1, offset: 0 } }),
+      { name: 'TypeError', message: 'Suffix is incompatible with offset.' }
+    );
+    await assert.rejects(
+      env.BUCKET.get('rpc-range-invalid', { range: { suffix: 1, length: 1 } }),
+      { name: 'TypeError', message: 'Suffix is incompatible with length.' }
+    );
+    for (const field of ['offset', 'length', 'suffix']) {
+      for (const value of [-1, 0.5, NaN]) {
+        await assert.rejects(
+          env.BUCKET.get('rpc-range-invalid', { range: { [field]: value } }),
+          { name: 'RangeError' }
+        );
+      }
+    }
   },
 };
 
