@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test", "rust_unpretty")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_unpretty")
+load("//:build/wd_rust_test.bzl", "wd_rust_test")
 
 def rust_cxx_bridge(
         name,
@@ -151,28 +152,15 @@ def wd_rust_crate(
         }),
     )
 
-    rust_test(
+    wd_rust_test(
         name = name + "_test",
         crate = ":" + name,
-        env = {
-            "RUST_BACKTRACE": "1",
-            # rust test runner captures stderr by default, which makes debugging tests very hard
-            "RUST_TEST_NOCAPTURE": "1",
-            # our tests are usually very heavy and do not support concurrent invocation
-            "RUST_TEST_THREADS": "1",
-        } | test_env,
+        env = test_env,
         size = test_size,
-        # Tag with cpu:4 since this target depends on linkopts_default.
-        tags = test_tags + ["no-coverage", "cpu:4"],
-        experimental_use_cc_common_link = 1,
+        tags = test_tags,
         crate_features = crate_features,
         deps = test_deps,
-        link_deps = ["//build/deps:linkopts_default"],
         proc_macro_deps = test_proc_macro_deps,
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
     )
 
     if len(proc_macro_deps) + len(cxx_bridge_srcs) > 0:

@@ -1121,8 +1121,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     : metrics(kj::mv(metricsParam)),
       id(kj::str(id)),
       limitEnforcer(kj::mv(limitEnforcerParam)),
-      cpuLimitNearlyExceededCallback(
-          kj::MutexGuarded<kj::Maybe<kj::Function<void(void)>>>(kj::none)),
+      cpuLimitNearlyExceededCallback(kj::MutexGuarded<kj::Maybe<kj::Function<void()>>>(kj::none)),
       api(kj::mv(apiParam)),
       loggingOptions(loggingOptions),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
@@ -1660,7 +1659,7 @@ bool Worker::Isolate::Impl::Lock::checkInWithLimitEnforcer(Worker::Isolate& isol
   return limitEnforcer.exitJs(*lock);
 }
 
-kj::Maybe<kj::Function<void(void)>> Worker::Isolate::getCpuLimitNearlyExceededCallback() const {
+kj::Maybe<kj::Function<void()>> Worker::Isolate::getCpuLimitNearlyExceededCallback() const {
   auto lock = cpuLimitNearlyExceededCallback.lockExclusive();
   KJ_IF_SOME(cb, *lock) {
     return cb.reference();
@@ -1668,7 +1667,7 @@ kj::Maybe<kj::Function<void(void)>> Worker::Isolate::getCpuLimitNearlyExceededCa
   return kj::none;
 }
 
-void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) const {
+void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) const {
   auto lock = cpuLimitNearlyExceededCallback.lockExclusive();
   // Make sure we don't reassign the callback so we don't invalidate references we've passed out.
   if (*lock == kj::none) {

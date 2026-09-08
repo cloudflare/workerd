@@ -388,7 +388,7 @@ void LegacyHibernationManagerImpl::hibernateWebSockets(Worker::Lock& lock) {
 }
 
 void LegacyHibernationManagerImpl::setEventTimeout(kj::Maybe<uint32_t> timeoutMs) {
-  eventTimeoutMs = timeoutMs;
+  eventTimeoutMs = kj::mv(timeoutMs);
 }
 
 kj::Maybe<uint32_t> LegacyHibernationManagerImpl::getEventTimeout() {
