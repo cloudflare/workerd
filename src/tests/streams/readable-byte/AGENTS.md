@@ -34,11 +34,15 @@ behavior-parity (messages aside).
 | 17 | default-read delivery of a multi-chunk queue | COALESCES all queued chunks into one read | chunk-by-chunk (spec) | `byteDesiredSizeAccounting` |
 | 18 | buffer-hazard messages (read detached view, respond after view detach, respondWithNewView foreign buffer, WASM Memory) | own texts | own texts (behavior parity everywhere) | `buffer-lifecycle.js` |
 | 19 | close() with a pending UNFILLED BYOB read | read resolves done with an empty view | read PENDS FOREVER while close() succeeds (bounded; the #12 defect family without any min) — drain loops must close WITH the last enqueue, never against a parked empty read | `closeWithPendingUnfilledByobRead` |
+| 20 | remainder after a partial BYOB read, delivered to a DEFAULT read | copied into a fresh auto-allocated buffer (4096, or 16384 under the ledger #5 autogate), byteOffset 0 | view into the original enqueued buffer with its offset preserved (spec) | `partialViewThenDefaultRead` |
+| 21 | byobRequest after a PARTIAL enqueue into a pending BYOB read | original request invalidated; no replacement exposed (null) | original request invalidated; a fresh request exposes a view shrunk to the remaining byte count (spec) | `cancelWithPartiallyFilledPull` |
+| 22 | cancel() after a partial enqueue into a pending BYOB read | read resolves done with an empty view | read resolves done with value undefined (spec) | `cancelWithPartiallyFilledPull` |
 
 Parity worth noting (probed, pinned): byte hwm defaults to 0 with NO
 automatic pull; pull-throw and error-then-throw identity; enqueue
-discards the outstanding byobRequest; read-after-close resolves done
-with an empty view over a same-sized buffer (main cells); read(view)
+that fully fills a request discards the outstanding byobRequest;
+read-after-close resolves done with an empty view over a same-sized
+buffer (main cells); read(view)
 detaches the caller's buffer at call time on JS-BACKED streams in every
 era (see flags below); the whole releaseLock→second-reader cluster
 (respond, respond(1)×2 Uint16 assembly, respondWithNewView,
@@ -73,11 +77,11 @@ named suite test pins directly, differing only in incidental asserts.
 | autoAllocateChunkSize | auto-allocated byobRequest on default reads (ledger #5) | `byobRequestOnDefaultRead` |
 | Respond to pull() by enqueue() asynchronously / multiple pull() by separate enqueue() / read() twice then enqueue() twice / Push source without pull signal / enqueue()+getReader()+read() | pull-count and coalescing family (ledger #3, #17) | `pullCountShape`, `byteDesiredSizeAccounting` |
 | constructor rejects size with type "bytes" | ledger #1 | `sizeStrategyForBytes` |
-| cancel() with partially filled pending pull() | done-shape family + partial discard | `cancelWithPartiallyFilledPull` (direct) |
+| cancel() with partially filled pending pull() | partial-enqueue replacement request (ledger #21) and cancel-result shape (ledger #22) | `cancelWithPartiallyFilledPull` (direct) |
 | getReader(), read(view), then cancel() | pull runs before cancel under C++ | `readViewThenCancelOrdering` (direct) |
 | enqueue() with Uint16Array then read() / 3 byte + 2-element Uint16Array | mismatched view/enqueue granularity | `readableStreamBytesMismatchedSizes`, `byobUint16Array` |
 | read(view) Uint32Array filled by multiple enqueue() | partial fills across enqueues | `byobUint32Array`, `byobPartialRespondMisalignsFillOffset` |
-| enqueue(), read(view) partially, then read() | remainder to a default read | `partialViewThenDefaultRead` (direct; PARITY) |
+| enqueue(), read(view) partially, then read() | remainder copied vs viewed (ledger #20) | `partialViewThenDefaultRead` (direct) |
 | read(view) Uint16 on close()-d with 1 byte / errored if close()-d before fulfilling read(view) | close-with-partial (ledger #7) | `closeWithPartiallyFilledView` |
 | Throwing in pull ignored if errored / pull throw errors stream | pull-throw shapes | `pullThrowIgnoredIfErrored`, `pullThrowErrorsStream` |
 | enqueue() discards auto-allocated BYOB request | request invalidation | `enqueueDiscardsByobRequest` |
@@ -101,8 +105,8 @@ named suite test pins directly, differing only in incidental asserts.
 | --- | --- |
 | `construction.js` | ledger #1, #2, #4; byte hwm default 0 |
 | `pull-timing.js` | ledger #3; pull-throw seeds |
-| `controller.js` | ledger #5, #7; enqueue-discards-request; read-after-close; detach-at-call |
-| `byob-reader.js` | view-type matrix + offsets + auto-allocate sizing (migrated streams-byob-edge-cases) + mismatched sizes/types, subarray, multi-pending-reads, byobreaderRegression (migrated streams-js-test) |
+| `controller.js` | ledger #5, #7, #21, #22; enqueue-discards-request; read-after-close; detach-at-call |
+| `byob-reader.js` | ledger #20; view-type matrix + offsets + auto-allocate sizing (migrated streams-byob-edge-cases) + mismatched sizes/types, subarray, multi-pending-reads, byobreaderRegression (migrated streams-js-test) |
 | `respond.js` | ledger #6, #8, #15, #16; all 31 streams-respond-test tests (respond/respondWithNewView/pumps/cancel races/UAF shapes) + js-test respond family |
 | `release-relock.js` | ledger #9, #10; the WPT releaseLock→second-reader cluster |
 | `read-min.js` | ledger #11-#13; byobMin/constraints/readAtLeast (migrated streams-test.js); /chunked SELF endpoint |
@@ -126,13 +130,3 @@ streams-byte-cancel-uaf, streams-byte-handlePush-uaf,
 streams-byob-close-reentry, streams-byob-concurrent-readatleast,
 streams-internal-read-buffer-gc, streams-circ-ref-regression,
 streams-consumer-reentry-gc.
-
-## IDL shape (deliberately not pinned here)
-
-WebIDL function metadata — operation `.length` values (optional
-arguments do not count), and promise-typed attributes/operations
-REJECTING rather than throwing on a broken `this` — is enumerated
-per-implementation by WPT's `idlharness.any.js`: the C++ implementation
-carries the known deviations as expectedFailures in
-`src/wpt/streams-test.ts`; the TypeScript implementation matches spec.
-The suites do not duplicate that enumeration.

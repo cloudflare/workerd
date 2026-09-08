@@ -417,42 +417,20 @@ export const errorRaceWithCloseWritable = {
   },
 };
 
-// The WPT aborting residue, part 1: abort() called twice while a write
-// is in flight. Both promises fulfill undefined; DIVERGENCE on
-// identity — TypeScript returns the SAME pending abort promise for the
-// second call (spec), C++ mints a distinct promise.
-export const abortTwicePromiseIdentity = {
-  async test() {
-    let releaseWrite;
-    const ws = new WritableStream({
-      write() {
-        return new Promise((resolve) => (releaseWrite = resolve));
-      },
-    });
-    const writer = ws.getWriter();
-    writer.write('parked').catch(() => {});
-    await scheduler.wait(1);
-    const first = writer.abort('why');
-    const second = writer.abort('why-again');
-    strictEqual(first === second, usingTsImpl);
-    releaseWrite();
-    strictEqual(await first, undefined);
-    strictEqual(await second, undefined);
-  },
-};
-
-// Part 2: an OUTSTANDING (queued, not in-flight) write is rejected when
-// abort() runs — the rejection reason is pinned per implementation.
+// The WPT aborting residue: aborting with outstanding writes is another
+// startedness divergence (ledger #7).
 export const abortRejectsOutstandingWriteWithReason = {
   async test() {
     const reason = new Error('the-reason');
+    let writeCallCount = 0;
     const ws = new WritableStream({
       write() {
+        ++writeCallCount;
         return new Promise(() => {});
       },
     });
     const writer = ws.getWriter();
-    writer.write('in-flight').catch(() => {});
+    writer.write('first').catch(() => {});
     const queued = writer.write('queued');
     const abortP = writer.abort(reason);
     const outcome = await Promise.race([
@@ -469,10 +447,11 @@ export const abortRejectsOutstandingWriteWithReason = {
       ),
       scheduler.wait(100).then(() => 'pending'),
     ]);
+    strictEqual(writeCallCount, usingTsImpl ? 0 : 1);
     if (usingTsImpl) {
-      // Spec: the queued write rejects with the very abort reason, and
-      // the abort settles EAGERLY, not waiting for the parked in-flight
-      // write.
+      // abort() lands before start() settles, so neither sink write runs.
+      // The queue is flushed: the queued write rejects with the abort
+      // reason and the abort itself fulfills.
       strictEqual(outcome.state, 'rejected');
       strictEqual(outcome.reason, reason);
       strictEqual(abortOutcome, 'fulfilled');
@@ -483,85 +462,5 @@ export const abortRejectsOutstandingWriteWithReason = {
       strictEqual(outcome.state, 'pending');
       strictEqual(abortOutcome, 'pending');
     }
-  },
-};
-
-// Part 3: writer.abort() then controller.error() with an in-flight
-// write that later REJECTS — the settlement order and the stream's
-// final error are pinned.
-export const abortThenControllerErrorInFlightWrite = {
-  async test() {
-    const events = [];
-    let rejectWrite;
-    let controller;
-    const ws = new WritableStream({
-      start(c) {
-        controller = c;
-      },
-      write() {
-        return new Promise((resolve, reject) => (rejectWrite = reject));
-      },
-      abort(reason) {
-        events.push(`sink-abort:${reason}`);
-      },
-    });
-    const writer = ws.getWriter();
-    const closedExpectation = rejects(
-      writer.closed,
-      (e) => e === 'abort-reason'
-    );
-    const write = writer.write('chunk');
-    write.catch((e) => events.push(`write-rejected:${e.message}`));
-    await scheduler.wait(1);
-    const abortP = writer.abort('abort-reason');
-    abortP.then(
-      () => events.push('abort-fulfilled'),
-      (e) => events.push(`abort-rejected:${e.message}`)
-    );
-    controller.error(new Error('controller-error'));
-    rejectWrite(new Error('write-failure'));
-    await scheduler.wait(20);
-    // PARITY: both implementations run the sink's abort hook EAGERLY,
-    // before the in-flight write settles, then surface the write
-    // rejection, then fulfill the abort.
-    strictEqual(
-      events.join(' | '),
-      'sink-abort:abort-reason | write-rejected:write-failure | abort-fulfilled'
-    );
-    await closedExpectation;
-  },
-};
-
-// Part 4: controller.error() FIRST, then writer.abort() with the
-// in-flight write finishing normally — sink abort() must NOT run
-// (the stream was already erroring before abort was requested).
-export const controllerErrorThenAbortInFlightWrite = {
-  async test() {
-    const events = [];
-    let resolveWrite;
-    let controller;
-    const ws = new WritableStream({
-      start(c) {
-        controller = c;
-      },
-      write() {
-        return new Promise((resolve) => (resolveWrite = resolve));
-      },
-      abort() {
-        events.push('sink-abort');
-      },
-    });
-    const writer = ws.getWriter();
-    writer.write('chunk').catch(() => events.push('write-rejected'));
-    await scheduler.wait(1);
-    controller.error(new Error('controller-error'));
-    const abortP = writer.abort('late-abort');
-    abortP.then(
-      () => events.push('abort-fulfilled'),
-      (e) => events.push(`abort-rejected:${e.message}`)
-    );
-    resolveWrite();
-    await scheduler.wait(20);
-    strictEqual(events.join(' | '), 'abort-rejected:controller-error');
   },
 };

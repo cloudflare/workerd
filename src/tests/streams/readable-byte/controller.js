@@ -197,11 +197,11 @@ export const controllerType = {
 };
 
 // cancel() while a partially filled pull-into is pending (WPT
-// 'cancel() with partially filled pending pull() request'): the read
-// resolves done with the partial bytes DISCARDED on both sides —
-// DIVERGENCE only in the done shape (C++ an empty view, TypeScript
-// undefined; the done-read family). The cancel hook gets the reason
-// and the cancel fulfills on both.
+// 'cancel() with partially filled pending pull() request'). DIVERGENCE
+// (ledger #21): a partial enqueue invalidates the original request on
+// both sides; TypeScript exposes a fresh request with a view shrunk to
+// the remaining byte count (spec), while C++ exposes null. Cancellation
+// discards the partial bytes, with the result shape diverging (#22).
 export const cancelWithPartiallyFilledPull = {
   async test() {
     const events = [];
@@ -217,7 +217,17 @@ export const cancelWithPartiallyFilledPull = {
     });
     const reader = rs.getReader({ mode: 'byob' });
     const readP = reader.read(new Uint16Array(1)); // wants 2 bytes
+    const initialRequest = controller.byobRequest;
+    strictEqual(initialRequest.view.byteLength, 2);
     controller.enqueue(new Uint8Array([0x11])); // partial: 1 byte
+    strictEqual(initialRequest.view, null);
+    if (usingTsImpl) {
+      const remainingRequest = controller.byobRequest;
+      ok(remainingRequest !== initialRequest);
+      strictEqual(remainingRequest.view.byteLength, 1);
+    } else {
+      strictEqual(controller.byobRequest, null);
+    }
     await scheduler.wait(1);
     const cancelP = reader.cancel('why');
     const read = await Promise.race([
