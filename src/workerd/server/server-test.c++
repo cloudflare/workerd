@@ -322,6 +322,17 @@ class TestStream {
 
 class TestServer final: private kj::Filesystem, private kj::EntropySource, private kj::Clock {
  public:
+  struct QueuedDatagram {
+    kj::Array<kj::byte> content;
+    bool truncated;
+    kj::Own<kj::NetworkAddress> source;
+  };
+
+  struct DatagramState final: public kj::Refcounted {
+    kj::ProducerConsumerQueue<QueuedDatagram> incoming;
+    kj::ProducerConsumerQueue<kj::Array<kj::byte>> outgoing;
+  };
+
   TestServer(kj::StringPtr configText,
       Worker::ConsoleMode consoleMode = Worker::ConsoleMode::INSPECTOR_ONLY,
       kj::SourceLocation loc = {})
@@ -401,6 +412,13 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
   TestStream connect(kj::StringPtr addr) {
     return TestStream(ws, KJ_REQUIRE_NONNULL(sockets.find(addr), addr)->connect().wait(ws));
   }
+
+  void sendUdp(kj::StringPtr addr,
+      kj::StringPtr peer,
+      kj::ArrayPtr<const kj::byte> content,
+      bool truncated = false);
+
+  bool hasUdp(kj::StringPtr addr);
 
   // Try to connect to the address and return whether or not this connection attempt hangs,
   // i.e. a listener exists but connections are not being accepted.
@@ -487,6 +505,60 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
 
   class MockNetwork;
 
+  class MockDatagramReceiver final: public kj::DatagramReceiver {
+   public:
+    explicit MockDatagramReceiver(kj::Rc<DatagramState> state): state(kj::mv(state)) {}
+
+    kj::Promise<void> receive() override {
+      current = co_await state->incoming.pop();
+    }
+
+    MaybeTruncated<kj::ArrayPtr<const kj::byte>> getContent() override {
+      auto& datagram = KJ_REQUIRE_NONNULL(current);
+      return {datagram.content, datagram.truncated};
+    }
+
+    MaybeTruncated<kj::ArrayPtr<const kj::AncillaryMessage>> getAncillary() override {
+      return {nullptr, false};
+    }
+
+    kj::NetworkAddress& getSource() override {
+      return *KJ_REQUIRE_NONNULL(current).source;
+    }
+
+   private:
+    kj::Rc<DatagramState> state;
+    kj::Maybe<QueuedDatagram> current;
+  };
+
+  class MockDatagramPort final: public kj::DatagramPort {
+   public:
+    explicit MockDatagramPort(kj::Rc<DatagramState> state): state(kj::mv(state)) {}
+
+    kj::Promise<size_t> send(
+        kj::ArrayPtr<const kj::byte> buffer, kj::NetworkAddress& destination) override {
+      state->outgoing.push(kj::heapArray(buffer));
+      return buffer.size();
+    }
+
+    kj::Promise<size_t> send(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces,
+        kj::NetworkAddress& destination) override {
+      KJ_UNIMPLEMENTED("unused");
+    }
+
+    kj::Own<kj::DatagramReceiver> makeReceiver(kj::DatagramReceiver::Capacity capacity) override {
+      KJ_EXPECT(capacity.content == 65535);
+      return kj::heap<MockDatagramReceiver>(state.addRef());
+    }
+
+    uint getPort() override {
+      return 0;
+    }
+
+   private:
+    kj::Rc<DatagramState> state;
+  };
+
   struct SubrequestInfo {
     kj::Own<kj::PromiseFulfiller<kj::Own<kj::AsyncIoStream>>> fulfiller;
     kj::StringPtr peerFilter;
@@ -541,11 +613,14 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
       test.sockets.insert(kj::str(address), kj::mv(sender));
       return receiver;
     }
+    kj::Own<kj::DatagramPort> bindDatagramPort() override {
+      return kj::heap<MockDatagramPort>(test.getDatagramState(address).addRef());
+    }
     kj::Own<kj::NetworkAddress> clone() override {
-      KJ_UNIMPLEMENTED("unused");
+      return kj::heap<MockAddress>(test, peerFilter, kj::str(address));
     }
     kj::String toString() override {
-      KJ_UNIMPLEMENTED("unused");
+      return kj::str(address);
     }
 
    private:
@@ -582,6 +657,15 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
 
   MockNetwork mockNetwork;
 
+  kj::HashMap<kj::String, kj::Rc<DatagramState>> datagramStates;
+
+  kj::Rc<DatagramState>& getDatagramState(kj::StringPtr addr) {
+    return datagramStates.findOrCreate(addr, [&]() -> decltype(datagramStates)::Entry {
+      auto state = kj::rc<DatagramState>();
+      return {kj::str(addr), kj::mv(state)};
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // implements EntropySource
 
@@ -598,6 +682,16 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
     return fakeDate;
   }
 };
+
+void TestServer::sendUdp(
+    kj::StringPtr addr, kj::StringPtr peer, kj::ArrayPtr<const kj::byte> content, bool truncated) {
+  getDatagramState(addr)->incoming.push(QueuedDatagram{
+    kj::heapArray(content), truncated, kj::heap<MockAddress>(*this, "(none)"_kj, kj::str(peer))});
+}
+
+bool TestServer::hasUdp(kj::StringPtr addr) {
+  return getDatagramState(addr)->outgoing.pop().poll(ws);
+}
 
 // =======================================================================================
 // Test Workers
@@ -617,6 +711,42 @@ kj::String singleWorker(kj::StringPtr def) {
       )
     ]
   ))"_kj);
+}
+
+KJ_TEST("Server: UDP listener drops truncated datagrams") {
+  TestServer test(R"((
+    services = [(
+      name = "worker",
+      worker = (
+        compatibilityDate = "2024-01-01",
+        compatibilityFlags = ["experimental"],
+        modules = [(
+          name = "worker.js",
+          esModule =
+            `export default {
+            `  async connect(socket) {
+            `    const reader = socket.readable.getReader();
+            `    const writer = socket.writable.getWriter();
+            `    const { value } = await reader.read();
+            `    await writer.write(value);
+            `  }
+            `}
+        )]
+      )
+    )],
+    sockets = [(
+      name = "udp",
+      address = "udp-address",
+      udp = (),
+      service = "worker"
+    )]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  test.sendUdp("udp-address", "peer:1234", "bad"_kjb, true);
+
+  KJ_EXPECT(!test.hasUdp("udp-address"));
 }
 
 KJ_TEST("Server: serve basic Service Worker") {
