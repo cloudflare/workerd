@@ -6801,6 +6801,9 @@ class Server::UdpListener final: public kj::Refcounted {
       TRACE_EVENT("workerd", "UdpListener handle datagram");
 
       auto content = receiver->getContent();
+      if (content.isTruncated) {
+        continue;
+      }
       auto key = receiver->getSource().toString();
 
       kj::Rc<Flow> flow = nullptr;
