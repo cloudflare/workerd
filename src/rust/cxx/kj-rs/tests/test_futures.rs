@@ -30,6 +30,10 @@ pub async fn new_panicking_future_void() -> Result<()> {
     panic!("bridged future panicked on purpose");
 }
 
+pub async fn new_panicking_infallible_future_void() {
+    panic!("bridged infallible future panicked on purpose");
+}
+
 use crate::Error;
 use crate::Result;
 use crate::ffi::CloningAction;

@@ -155,15 +155,19 @@ pub mod repr {
             let fut = unsafe { *(fut.cast::<InfallibleFuturePtr<T>>()) };
             // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
             let fut = unsafe { Pin::new_unchecked(&mut *fut) };
-            let waker = Waker::from(waker);
-            let mut context = Context::from_waker(&waker);
-            match fut.poll(&mut context) {
-                Poll::Ready(value) => {
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let waker = Waker::from(waker);
+                let mut context = Context::from_waker(&waker);
+                fut.poll(&mut context)
+            })) {
+                Ok(Poll::Ready(value)) => {
                     // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
                     unsafe { std::ptr::write(ret.cast::<T>(), value) };
                     FuturePollStatus::COMPLETE
                 }
-                Poll::Pending => FuturePollStatus::PENDING,
+                Ok(Poll::Pending) => FuturePollStatus::PENDING,
+                // Safety: ret is the Error-arm storage supplied by FuturePoller.
+                Err(panic_payload) => unsafe { write_panic_as_exception(ret, panic_payload) },
             }
         }
 

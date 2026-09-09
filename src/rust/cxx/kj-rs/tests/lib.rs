@@ -22,6 +22,7 @@ use test_futures::new_kj_errored_future_void;
 use test_futures::new_layered_ready_future_void;
 use test_futures::new_naive_select_future_void;
 use test_futures::new_panicking_future_void;
+use test_futures::new_panicking_infallible_future_void;
 use test_futures::new_pending_future_void;
 use test_futures::new_promise_i32_awaiting_future_void;
 use test_futures::new_ready_future_i32;
@@ -285,6 +286,7 @@ pub mod ffi {
         fn get_side_effect_counter() -> u64;
         async fn new_side_effect_future_void();
         async fn new_panicking_future_void() -> Result<()>;
+        async fn new_panicking_infallible_future_void();
 
         // Cancellation test helpers.
         async fn new_future_awaiting_cancellable_promise() -> Result<()>;
