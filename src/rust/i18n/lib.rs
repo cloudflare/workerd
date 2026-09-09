@@ -166,23 +166,13 @@ unsafe fn transcode(
     from_encoding: ffi::Encoding,
     to_encoding: ffi::Encoding,
 ) -> ffi::MaybeLocal {
-    // SAFETY: forwarded from this function's own safety contract -- the C++
-    // caller (`i18n::transcode` in `i18n.c++`) guarantees `isolate` is valid,
-    // locked, and has an active HandleScope.
-    let mut lock = unsafe { Lock::from_isolate_ptr(isolate) };
-    match transcode_impl(&mut lock, source, from_encoding, to_encoding) {
-        Ok(local) => {
-            // SAFETY: `local` was just created in the isolate's active
-            // HandleScope; its FFI representation is handed to the C++ caller,
-            // which reconstitutes it via `maybe_local_from_ffi` and
-            // immediately passes it through `jsg::check()`.
-            let raw = unsafe { local.into_ffi() };
-            ffi::MaybeLocal { ptr: raw.ptr }
-        }
-        Err(err) => {
-            lock.throw_exception(&err.into());
-            ffi::MaybeLocal { ptr: 0 }
-        }
+    // SAFETY: forwarded from this function's own safety contract. The adapter
+    // owns the raw-isolate, exception, and local-handle FFI transitions; the
+    // feature callback operates only on safe JSG types.
+    unsafe {
+        v8::run_ffi_callback(isolate, |lock| {
+            transcode_impl(lock, source, from_encoding, to_encoding)
+        })
     }
 }
 
@@ -193,7 +183,7 @@ unsafe fn transcode(
 /// destination size up front, the buffer is allocated at exactly that size,
 /// and the returned view is narrowed to the bytes actually written.
 fn transcode_impl<'a>(
-    lock: &mut Lock,
+    lock: &'a mut Lock,
     source: &[u8],
     from_encoding: ffi::Encoding,
     to_encoding: ffi::Encoding,
