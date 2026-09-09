@@ -28,7 +28,7 @@ py_wd_test("asgi")
 
 py_wd_test("asgi-sse")
 
-py_wd_test("random")
+py_wd_test("top-level-entropy")
 
 py_wd_test("subdirectory")
 
