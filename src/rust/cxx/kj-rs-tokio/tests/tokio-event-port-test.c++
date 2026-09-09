@@ -635,5 +635,59 @@ KJ_TEST("already-due timer returns promptly from wait()") {
   KJ_EXPECT(kj::systemPreciseMonotonicClock().now() - start < 200 * kj::MILLISECONDS);
 }
 
+KJ_TEST("two tokio-ported loops on two threads executeAsync into each other concurrently") {
+  // Both directions at once, N round trips each way, so both ports' wake paths (Executor ->
+  // wake() -> block_on unpark) race under load. TSAN target. A lost wake hangs the test.
+  //
+  // Protocol: each side publishes its Executor, runs N round trips into the peer while its own
+  // loop services the peer's round trips, then fulfills the peer's "I'm finished" cross-thread
+  // fulfiller and waits (on its own loop, still servicing) for the peer's. Only when both have
+  // finished does either loop go away, so no call is ever left without a live target.
+  constexpr kj::uint N = 200;
+  using ExecSlot = kj::MutexGuarded<kj::Maybe<kj::Own<const kj::Executor>>>;
+  using FulfillerSlot =
+      kj::MutexGuarded<kj::Maybe<kj::Own<const kj::CrossThreadPromiseFulfiller<void>>>>;
+  ExecSlot mainExecSlot;
+  ExecSlot otherExecSlot;
+  // Each side creates its own PAF (the promise stays on its loop) and hands the fulfiller over.
+  FulfillerSlot mainFinishedSlot;   // fulfilled by `other` when it is done
+  FulfillerSlot otherFinishedSlot;  // fulfilled by main when it is done
+
+  auto takeFromSlot = [](auto &slot) {
+    auto lock = slot.lockExclusive();
+    lock.wait([](auto &v) { return v != kj::none; });
+    return kj::mv(KJ_ASSERT_NONNULL(*lock));
+  };
+
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto mainFinished = kj::newPromiseAndCrossThreadFulfiller<void>();
+  *mainFinishedSlot.lockExclusive() = kj::mv(mainFinished.fulfiller);
+  *mainExecSlot.lockExclusive() = kj::getCurrentThreadExecutor().addRef();
+
+  kj::Thread other([&]() noexcept {
+    auto io2 = setupTokioAsyncIo();
+    auto &ws2 = io2.getWaitScope();
+    auto otherFinished = kj::newPromiseAndCrossThreadFulfiller<void>();
+    *otherFinishedSlot.lockExclusive() = kj::mv(otherFinished.fulfiller);
+    *otherExecSlot.lockExclusive() = kj::getCurrentThreadExecutor().addRef();
+
+    auto mainExec = takeFromSlot(mainExecSlot);
+    for (kj::uint i = 0; i < N; i++) {
+      KJ_ASSERT(mainExec->executeAsync([i]() { return i; }).wait(ws2) == i);
+    }
+    takeFromSlot(mainFinishedSlot)->fulfill();
+    // Keep servicing main's round trips until it reports finished.
+    otherFinished.promise.wait(ws2);
+  });
+
+  auto otherExec = takeFromSlot(otherExecSlot);
+  for (kj::uint i = 0; i < N; i++) {
+    KJ_EXPECT(otherExec->executeAsync([i]() { return i * 2; }).wait(ws) == i * 2);
+  }
+  takeFromSlot(otherFinishedSlot)->fulfill();
+  mainFinished.promise.wait(ws);
+}
+
 }  // namespace
 }  // namespace kj_rs_tokio_test
