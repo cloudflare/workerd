@@ -70,7 +70,7 @@ const sha256Buffer = new Uint8Array([
 const objResponse = {
   name: key,
   version: 'objectVersion',
-  size: '123',
+  size: '7',
   etag: 'objectEtag',
   uploaded: '1724767257918',
   storageClass: 'Standard',
@@ -91,7 +91,7 @@ const HeadObject = {
   },
   httpEtag: '"objectEtag"',
   etag: 'objectEtag',
-  size: 123,
+  size: 7,
   version: 'objectVersion',
   key,
 };
@@ -585,7 +585,7 @@ const testWorker = {
             return buildGetResponse({
               head: {
                 range: {
-                  offset: '6',
+                  offset: '5',
                   length: '2',
                 },
               },
@@ -815,7 +815,7 @@ const testWorker = {
         {
           head: {
             range: {
-              offset: 6,
+              offset: 5,
               length: 2,
             },
           },
@@ -1236,7 +1236,7 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
       object.range = { offset: 1, length: 3 };
     } else if (requestKey === 'rangeSuff') {
       assert.deepStrictEqual(options, { range: { suffix: 2 } });
-      object.range = { offset: 6, length: 2 };
+      object.range = { offset: 5, length: 2 };
     }
 
     if (requestKey === 'rpc-conditional-metadata') {
@@ -1251,6 +1251,9 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
           : requestKey === 'rpc-json'
             ? JSON.stringify({ ok: true })
             : body;
+    if (object.range === undefined) {
+      object.size = new TextEncoder().encode(responseBody).byteLength;
+    }
     let sent = false;
     return {
       kind: 'body',
@@ -1946,6 +1949,502 @@ export const jsrpcRangeTests = {
         );
       }
     }
+  },
+};
+
+// The source-kind matrix uses the same four bytes and reports object.size = 4. It checks whether
+// the stream itself knows its byte count: PUT receives only the body, not object.size.
+const bodyLengthBytes = new TextEncoder().encode('data');
+const bodyLengthCopyCases = {
+  empty: { content: '', size: 0 },
+  utf8: { content: 'café🌍', size: 9 },
+  chunks: { content: 'data', size: 4 },
+  bounded: {
+    content: 'at',
+    size: 4,
+    options: { range: { offset: 1, length: 2 } },
+    range: { offset: 1, length: 2 },
+  },
+  offset: {
+    content: 'ta',
+    size: 4,
+    options: { range: { offset: 2 } },
+    range: { offset: 2, length: 2 },
+  },
+  suffix: {
+    content: 'ta',
+    size: 4,
+    options: { range: { suffix: 2 } },
+    range: { offset: 2, length: 2 },
+  },
+  shortened: {
+    content: 'ta',
+    size: 4,
+    options: { range: { offset: 2, length: 99 } },
+    range: { offset: 2, length: 2 },
+  },
+  remaining: { content: 'ata', size: 3 },
+};
+let bodyLengthReleased;
+let bodyLengthCancellation;
+
+function bodyLengthUploadBytes(requestKey) {
+  return requestKey === 'destination'
+    ? bodyLengthBytes
+    : new TextEncoder().encode(bodyLengthCopyCases[requestKey].content);
+}
+
+// The HTTP gateway sends [JSON metadata][object bytes]. A buffer gives the HTTP transport
+// a known length; wrapping the same bytes in an ordinary JS stream does not.
+function buildBodyLengthResponse(mode) {
+  const metadata = new TextEncoder().encode(
+    JSON.stringify({ ...objResponse, size: String(bodyLengthBytes.byteLength) })
+  );
+  const payload = new Uint8Array(
+    metadata.byteLength + bodyLengthBytes.byteLength
+  );
+  payload.set(metadata);
+  payload.set(bodyLengthBytes, metadata.byteLength);
+  return new Response(
+    mode === 'wrapped'
+      ? new ReadableStream({
+          type: 'bytes',
+          start(controller) {
+            controller.enqueue(payload);
+            controller.close();
+          },
+        })
+      : payload,
+    { headers: { 'cf-r2-metadata-size': String(metadata.byteLength) } }
+  );
+}
+
+async function createBodyLengthStream(mode, ctx) {
+  if (mode === 'native') {
+    // A response made from a fixed-size buffer already knows how many bytes it contains.
+    return new Response(bodyLengthBytes).body;
+  }
+  if (mode === 'fixed') {
+    // Explicitly give the stream its byte count using Cloudflare's FixedLengthStream.
+    const fixed = new FixedLengthStream(bodyLengthBytes.byteLength);
+    ctx.waitUntil(new Response(bodyLengthBytes).body.pipeTo(fixed.writable));
+    return fixed.readable;
+  }
+  if (mode === 'expected') {
+    // Cloudflare's nonstandard expectedLength option also gives a JS stream a byte count.
+    return new ReadableStream({
+      type: 'bytes',
+      expectedLength: bodyLengthBytes.byteLength,
+      start(controller) {
+        controller.enqueue(bodyLengthBytes.slice());
+        controller.close();
+      },
+    });
+  }
+  assert.strictEqual(mode, 'wrapped');
+  // Model the gateway's splitMetadataPrefix(): read the JSON, then forward the remaining
+  // bytes through a new JS stream. Reading size from the JSON does not give that new stream
+  // a known length. metadataSize counts only the JSON prefix, not the four object bytes.
+  const response = buildBodyLengthResponse('native');
+  const metadataSize = Number(response.headers.get('cf-r2-metadata-size'));
+  const reader = response.body.getReader({ mode: 'byob' });
+  const { value } = await reader.readAtLeast(
+    metadataSize,
+    new Uint8Array(metadataSize)
+  );
+  assert.strictEqual(
+    JSON.parse(new TextDecoder().decode(value)).size,
+    String(bodyLengthBytes.byteLength)
+  );
+  return new ReadableStream({
+    type: 'bytes',
+    async pull(controller) {
+      const next = await reader.read(new Uint8Array(64 * 1024));
+      if (!next.done) {
+        controller.enqueue(next.value);
+      } else {
+        reader.releaseLock();
+        controller.close();
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason);
+      } finally {
+        reader.releaseLock();
+      }
+    },
+  });
+}
+
+// A mock gateway serving both HTTP and RPC. Successful uploads must contain exactly "data",
+// so the copy tests check the actual bytes, not just whether PUT returns successfully.
+export class R2BodyLengthEntrypoint extends WorkerEntrypoint {
+  releaseBody() {
+    bodyLengthReleased = true;
+  }
+
+  waitForCancellation() {
+    return bodyLengthCancellation;
+  }
+
+  resumeMultipartUpload(requestKey, uploadId) {
+    assert.strictEqual(uploadId, 'body-length-upload');
+    return new R2BodyLengthUpload(requestKey);
+  }
+
+  async fetch(request) {
+    if (request.method === 'GET') {
+      const metadata = JSON.parse(request.headers.get('cf-r2-request'));
+      assert.strictEqual(metadata.method, 'get');
+      return buildBodyLengthResponse(metadata.object);
+    }
+    assert.strictEqual(request.method, 'PUT');
+    const metadataSize = Number(request.headers.get('cf-r2-metadata-size'));
+    const payload = new Uint8Array(await request.arrayBuffer());
+    const metadata = JSON.parse(
+      new TextDecoder().decode(payload.subarray(0, metadataSize))
+    );
+    assert.strictEqual(metadata.method, 'put');
+    assert.strictEqual(metadata.object, 'destination');
+    assert.deepStrictEqual(payload.subarray(metadataSize), bodyLengthBytes);
+    return Response.json({
+      ...objResponse,
+      name: 'destination',
+      size: String(bodyLengthBytes.byteLength),
+    });
+  }
+
+  async get(mode, options) {
+    const object = { ...buildRpcHead(mode), size: bodyLengthBytes.byteLength };
+    if (mode === 'missing') {
+      return null;
+    }
+    if (mode === 'metadata') {
+      return { kind: 'metadata', object };
+    }
+    if (mode === 'deferred') {
+      bodyLengthReleased = false;
+      return {
+        kind: 'body',
+        object,
+        body: new ReadableStream({
+          async pull(controller) {
+            // The test gateway waits in its own request context; releaseBody() only flips
+            // a flag. This timer models delayed upstream I/O, not a wait in the R2 caller.
+            while (!bodyLengthReleased) {
+              await scheduler.wait(1);
+            }
+            controller.enqueue(bodyLengthBytes.slice());
+            controller.close();
+          },
+        }),
+      };
+    }
+    if (mode === 'cancel' || mode === 'invalid-size') {
+      if (mode === 'invalid-size') {
+        object.size = -1;
+      }
+      let cancelled;
+      bodyLengthCancellation = new Promise((resolve) => {
+        cancelled = resolve;
+      });
+      return {
+        kind: 'body',
+        object,
+        body: new ReadableStream({
+          pull(controller) {
+            controller.enqueue(bodyLengthBytes.slice());
+          },
+          cancel() {
+            cancelled();
+          },
+        }),
+      };
+    }
+    if (mode === 'upstream-error') {
+      return {
+        kind: 'body',
+        object,
+        body: new ReadableStream({
+          pull(controller) {
+            controller.error(new Error('body source failed'));
+          },
+        }),
+      };
+    }
+    const invalidSizes = { short: 5, long: 3, 'zero-long': 0, unsafe: 2 ** 53 };
+    if (Object.hasOwn(invalidSizes, mode)) {
+      object.size = invalidSizes[mode];
+      return { kind: 'body', object, body: new Response(bodyLengthBytes).body };
+    }
+    if (mode === 'unsafe-range') {
+      object.range = { offset: 0, length: 2 ** 53 };
+      return { kind: 'body', object, body: new Response(bodyLengthBytes).body };
+    }
+    if (Object.hasOwn(bodyLengthCopyCases, mode)) {
+      const fixture = bodyLengthCopyCases[mode];
+      assert.deepStrictEqual(options?.range, fixture.options?.range);
+      object.size = fixture.size;
+      if (fixture.range !== undefined) {
+        object.range = fixture.range;
+      }
+      const bytes = new TextEncoder().encode(fixture.content);
+      let offset = 0;
+      return {
+        kind: 'body',
+        object,
+        body: new ReadableStream({
+          type: 'bytes',
+          pull(controller) {
+            if (offset < bytes.byteLength) {
+              controller.enqueue(bytes.slice(offset, ++offset));
+            } else {
+              controller.close();
+            }
+          },
+        }),
+      };
+    }
+    return {
+      kind: 'body',
+      object,
+      body: await createBodyLengthStream(mode, this.ctx),
+    };
+  }
+
+  async put(requestKey, value, options, valueSize) {
+    const expected = bodyLengthUploadBytes(requestKey);
+    // workerd supplies this hidden RPC argument from the stream's known length.
+    assert.strictEqual(valueSize, expected.byteLength);
+    assert.deepStrictEqual(
+      new Uint8Array(await new Response(value).arrayBuffer()),
+      expected
+    );
+    return {
+      ...buildRpcHead(requestKey),
+      key: requestKey,
+      size: expected.byteLength,
+    };
+  }
+}
+
+class R2BodyLengthUpload extends RpcTarget {
+  #key;
+
+  constructor(requestKey) {
+    super();
+    this.#key = requestKey;
+  }
+
+  getUploadId() {
+    return 'body-length-upload';
+  }
+
+  async uploadPart(partNumber, value, options, valueSize) {
+    const expected = bodyLengthUploadBytes(this.#key);
+    assert.strictEqual(valueSize, expected.byteLength);
+    assert.deepStrictEqual(
+      new Uint8Array(await new Response(value).arrayBuffer()),
+      expected
+    );
+    return { partNumber, etag: 'body-length-etag' };
+  }
+}
+
+async function assertBodyLengthCopy(bucket, source, knownLength, label) {
+  // Start PUT before any await, so the "immediate" cases cannot accidentally let RPC settle.
+  const copying = bucket.put('destination', source);
+  if (knownLength) {
+    const result = await copying.catch((error) => {
+      error.message = `${label}: ${error.message}`;
+      throw error;
+    });
+    assert.strictEqual(result.key, 'destination', label);
+    assert.strictEqual(result.size, bodyLengthBytes.byteLength, label);
+  } else {
+    // Ordinary unsized streams are still invalid PUT inputs. Service RPC can also return
+    // a sized stream before its receiving endpoint has finished setting up.
+    await assert.rejects(
+      copying,
+      {
+        name: 'TypeError',
+        message:
+          'Provided readable stream must have a known length (request/response body or readable half of FixedLengthStream)',
+      },
+      label
+    );
+  }
+}
+
+export const r2BodyLengthTests = {
+  async test(controller, env, ctx) {
+    // Only the dedicated body-length configuration runs this matrix; the main R2 suites
+    // also import this file but do not provide this binding.
+    if (env.R2_BODY_LENGTH_TRANSPORT === undefined) {
+      return;
+    }
+    if (env.R2_BODY_LENGTH_TRANSPORT === 'http') {
+      // HTTP control: native GET -> PUT succeeds because the original stream keeps its
+      // length tracking after the JSON prefix is read. The wrapped version fails even
+      // though both results still expose the correct object.size.
+      for (const mode of ['native', 'wrapped']) {
+        const result = await env.BUCKET.get(mode);
+        assert.strictEqual(result.size, bodyLengthBytes.byteLength);
+        await assertBodyLengthCopy(
+          env.BUCKET,
+          result.body,
+          mode === 'native',
+          `HTTP ${mode}`
+        );
+      }
+      return;
+    }
+
+    for (const mode of ['native', 'wrapped', 'fixed', 'expected']) {
+      // Create the body in the caller, without receiving it over RPC first. All three
+      // known-length sources copy successfully; the ordinary wrapped stream is rejected.
+      await assertBodyLengthCopy(
+        env.BUCKET,
+        await createBodyLengthStream(mode, ctx),
+        mode !== 'wrapped',
+        `local ${mode}`
+      );
+      // BUCKET goes through R2's get() binding; SERVICE calls the mock's get() directly
+      // over ordinary service RPC. Comparing them isolates RPC from R2 metadata parsing.
+      for (const transport of ['BUCKET', 'SERVICE']) {
+        // R2 attaches the byte count from its metadata, so every source copies immediately.
+        // Ordinary service RPC has no R2 metadata: sized streams need the diagnostic yield,
+        // and the gateway-style unsized wrapper stays unsized even after waiting.
+        // The TS stream backend snapshots the initially unknown length, so service RPC
+        // remains unsized there even after the yield. R2 does not depend on that snapshot.
+        for (const timing of ['immediate', 'after-event-loop-turn']) {
+          const result = await env[transport].get(mode);
+          assert.strictEqual(
+            transport === 'BUCKET' ? result.size : result.object.size,
+            bodyLengthBytes.byteLength
+          );
+          if (timing === 'after-event-loop-turn') {
+            // Let pending RPC setup run without consuming body bytes. This is a diagnostic
+            // event-loop yield, not a suggested workaround for application code.
+            await scheduler.wait(0);
+          }
+          await assertBodyLengthCopy(
+            env.BUCKET,
+            result.body,
+            transport === 'BUCKET' ||
+              (env.R2_BODY_LENGTH_TRANSPORT !== 'jsrpc-ts' &&
+                timing === 'after-event-loop-turn' &&
+                mode !== 'wrapped'),
+            `${transport} ${mode} ${timing}`
+          );
+        }
+      }
+    }
+
+    // The returned range describes the actual body, even when the requested range is longer.
+    // Empty bodies and multibyte UTF-8 text also need byte counts, not character counts.
+    for (const [requestKey, fixture] of Object.entries(bodyLengthCopyCases)) {
+      const result = await env.BUCKET.get(requestKey, fixture.options);
+      assert.strictEqual(result.size, fixture.size);
+      assert.strictEqual(result.range?.offset, fixture.range?.offset);
+      assert.strictEqual(result.range?.length, fixture.range?.length);
+      const copied = await env.BUCKET.put(requestKey, result.body);
+      assert.strictEqual(
+        copied.size,
+        new TextEncoder().encode(fixture.content).byteLength
+      );
+    }
+
+    // GET must finish before any bytes are available. Releasing the source only afterwards
+    // catches implementations that wait for the first byte or buffer the whole body.
+    const deferred = await env.BUCKET.get('deferred');
+    assert.strictEqual(deferred.bodyUsed, false);
+    assert.strictEqual(deferred.body.locked, false);
+    const copying = env.BUCKET.put('destination', deferred.body);
+    await env.SERVICE.releaseBody();
+    assert.strictEqual((await copying).size, bodyLengthBytes.byteLength);
+
+    // A partial read must reduce the known length. Tee gives us an undisturbed stream for
+    // RPC transfer; its length must describe only the three unread bytes, not all four.
+    const partial = await env.BUCKET.get('chunks');
+    const reader = partial.body.getReader({ mode: 'byob' });
+    const first = await reader.read(new Uint8Array(1));
+    assert.deepStrictEqual(first.value, bodyLengthBytes.slice(0, 1));
+    reader.releaseLock();
+    const [remaining, discarded] = partial.body.tee();
+    const discarding = discarded.cancel();
+    assert.strictEqual((await env.BUCKET.put('remaining', remaining)).size, 3);
+    await discarding;
+
+    // Multipart uploads use the same known-length requirement as PUT, including ranged bodies.
+    for (const requestKey of ['destination', 'bounded']) {
+      const fixture = bodyLengthCopyCases[requestKey];
+      const upload = env.BUCKET.resumeMultipartUpload(
+        requestKey,
+        'body-length-upload'
+      );
+      const source = await env.BUCKET.get(
+        requestKey === 'destination' ? 'wrapped' : requestKey,
+        fixture?.options
+      );
+      assert.deepStrictEqual(await upload.uploadPart(1, source.body), {
+        partNumber: 1,
+        etag: 'body-length-etag',
+      });
+    }
+
+    // Metadata is a promise about the bytes, not permission to truncate or pad a bad response.
+    for (const mode of ['short', 'long', 'zero-long']) {
+      const result = await env.BUCKET.get(mode);
+      // Read to EOF explicitly: text() can return immediately when the declared length is zero.
+      const reader = result.body.getReader();
+      await assert.rejects(
+        async () => {
+          let chunk;
+          do {
+            chunk = await reader.read();
+          } while (!chunk.done);
+        },
+        { name: 'TypeError' },
+        mode
+      );
+    }
+    await assert.rejects(env.BUCKET.get('unsafe'), {
+      message:
+        'Malformed R2 get RPC result: body length must be a safe integer.',
+    });
+    await assert.rejects(env.BUCKET.get('unsafe-range'), {
+      message:
+        'Malformed R2 get RPC result: body length must be a safe integer.',
+    });
+
+    // Wrapping must preserve upstream errors and let consumer cancellation reach the gateway.
+    await assert.rejects(
+      async () => (await env.BUCKET.get('upstream-error')).text(),
+      {
+        message: 'ReadableStream received over RPC disconnected prematurely.',
+      }
+    );
+    const cancelled = await env.BUCKET.get('cancel');
+    await cancelled.body.cancel('no longer needed');
+    await env.SERVICE.waitForCancellation();
+
+    // A rejected metadata result must cancel its body rather than leave the gateway pumping.
+    await assert.rejects(env.BUCKET.get('invalid-size'), {
+      message: 'Malformed R2 RPC result: size must be a non-negative integer.',
+    });
+    await env.SERVICE.waitForCancellation();
+
+    // Results without bodies do not need a length wrapper.
+    assert.strictEqual(await env.BUCKET.get('missing'), null);
+    assert.strictEqual((await env.BUCKET.get('metadata')).body, undefined);
+
+    // R2 bodies must remain usable with an application's own streaming transforms.
+    const transformed = (await env.BUCKET.get('wrapped')).body.pipeThrough(
+      new FixedLengthStream(bodyLengthBytes.byteLength)
+    );
+    assert.strictEqual(await new Response(transformed).text(), 'data');
   },
 };
 
