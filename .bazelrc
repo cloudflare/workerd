@@ -264,8 +264,9 @@ build:asan --per_file_copt='external/.*v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
 build:tsan-common --config=sanitizer-common
 build:tsan-common --copt="-fsanitize=thread" --linkopt="-fsanitize=thread"
 build:tsan-common --platforms=//build/platforms:sanitizer_thread_platform
-build:tsan-common --action_env=TSAN_OPTIONS=halt_on_error=true
-build:tsan-common --test_env=TSAN_OPTIONS=halt_on_error=true
+# Let death tests observe SIGABRT directly instead of routing it through TSan's signal handler.
+build:tsan-common --action_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0
+build:tsan-common --test_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0
 # Clang-tidy loads this shared object into an unsanitized process, which cannot resolve TSan hooks.
 build:tsan-common --per_file_copt='tools/clang-tidy@-fno-sanitize=thread'
 # TSan significantly increases test runtime.

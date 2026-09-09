@@ -165,14 +165,6 @@
       "freeze_version": "clang-tidy-22.1.5"
     },
     {
-      "name": "libunwind",
-      "type": "github_release",
-      "owner": "libunwind",
-      "repo": "libunwind",
-      "file_regex": "^libunwind-[0-9.]+\\.tar\\.gz$",
-      "build_file": "@workerd//:build/BUILD.libunwind"
-    },
-    {
       "name": "llvm_runtimes",
       "type": "git_clone",
       "url": "https://github.com/llvm/llvm-project.git",
@@ -185,6 +177,8 @@
         "libc/shared",
         "libc/src/__support",
         "libcxx",
+        "libcxxabi",
+        "libunwind",
         "runtimes"
       ]
     }

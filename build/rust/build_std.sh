@@ -14,12 +14,14 @@
 #   WORK_DIR             Scratch directory for the generated Cargo package.
 #   TARGET_TRIPLE        Rust target triple.
 #   SANITIZER            rustc -Zsanitizer value.
+#   PATCH_COUNT          Number of standard-library patch paths that follow.
+#   PATCH...             Patches to apply to the Rust standard-library sources.
 #   CRATE...             Standard-library crates declared as Bazel outputs.
 
 set -euo pipefail
 
 if [[ $# -lt 9 ]]; then
-  echo "usage: $0 RUST_TOOLCHAIN_ROOT RUST_LIBRARY TARGET_DIR OUTPUT_DIR WORK_DIR TARGET_TRIPLE SANITIZER CRATE..." >&2
+  echo "usage: $0 RUST_TOOLCHAIN_ROOT RUST_LIBRARY TARGET_DIR OUTPUT_DIR WORK_DIR TARGET_TRIPLE SANITIZER PATCH_COUNT [PATCH...] CRATE..." >&2
   exit 2
 fi
 
@@ -35,11 +37,33 @@ output_dir=$(abs_path "$4")
 work=$(abs_path "$5")
 target_triple=$6
 sanitizer=$7
-shift 7
+patch_count=$8
+shift 8
+if ! [[ $patch_count =~ ^[0-9]+$ ]] || ((patch_count > $#)); then
+  echo "invalid PATCH_COUNT: $patch_count" >&2
+  exit 2
+fi
+patches=()
+for ((i = 0; i < patch_count; i++)); do
+  patches+=("$(abs_path "$1")")
+  shift
+done
 crates=("$@")
 
 rm -rf "$target_dir" "$output_dir" "$work"
 mkdir -p "$work/src" "$work/cargo-home" "$output_dir"
+
+if ((patch_count > 0)); then
+  # Bazel inputs are immutable. Copy the source tree before applying patches, leaving the
+  # downloaded rust-src repository untouched.
+  patched_rust_library="$work/rust-library"
+  cp -RL "$rust_library" "$patched_rust_library"
+  chmod -R u+w "$patched_rust_library"
+  for rust_patch in "${patches[@]}"; do
+    (cd "$patched_rust_library" && patch -p0 < "$rust_patch")
+  done
+  rust_library="$patched_rust_library"
+fi
 
 cat > "$work/Cargo.toml" <<'EOF'
 [package]

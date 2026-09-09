@@ -70,6 +70,7 @@ def _rust_build_std_impl(ctx):
     ]
 
     output_dir = outputs[0].dirname
+    patches = ctx.files._patches
     ctx.actions.run(
         mnemonic = "RustBuildStd",
         progress_message = "Building the Rust standard library with {} instrumentation".format(ctx.attr.sanitizer),
@@ -82,9 +83,10 @@ def _rust_build_std_impl(ctx):
             output_dir + "-work",
             ctx.attr.target_triple,
             ctx.attr.sanitizer,
-        ] + _STDLIB_CRATES,
+            str(len(patches)),
+        ] + [patch.path for patch in patches] + _STDLIB_CRATES,
         inputs = depset(
-            ctx.files.rust_src + ctx.files.rust_toolchain_files,
+            ctx.files.rust_src + ctx.files.rust_toolchain_files + patches,
         ),
         outputs = outputs,
         tools = [ctx.executable.cargo, ctx.executable.rustc],
@@ -107,6 +109,10 @@ rust_build_std = rule(
             executable = True,
             allow_single_file = True,
             cfg = "exec",
+        ),
+        "_patches": attr.label(
+            default = Label("//patches/rust:patches"),
+            allow_files = True,
         ),
     },
 )
