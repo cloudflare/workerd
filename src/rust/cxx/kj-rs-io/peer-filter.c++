@@ -132,6 +132,8 @@ PeerFilter::PeerFilter(kj::ArrayPtr<const kj::StringPtr> allow,
     } else if (rule == "network") {
       KJ_FAIL_REQUIRE("don't deny 'network', allow 'local' instead");
     } else if (rule == "private") {
+      // KJ treats local addresses as a separate deny category even though its "private" allow
+      // category includes them. Keep that distinction so this port remains policy-compatible.
       denyCidrs.addAll(privateCidrs());
     } else if (rule == "public") {
       // Tricky: What if we allow 'network' and deny 'public'?
