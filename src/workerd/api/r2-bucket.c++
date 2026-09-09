@@ -1040,12 +1040,12 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUploadRpc(jsg
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
     const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, jsg::Optional<MultipartOptions>)>>&
         createFnHandler,
-    const jsg::TypeHandler<jsg::Function<jsg::Value()>>& getUploadIdFnHandler,
     const jsg::TypeHandler<jsg::Promise<kj::String>>& uploadIdResultHandler) {
   return js.evalNow([&] {
     TraceContext traceContext = makeR2TraceContext(
         "r2_createMultipartUpload"_kjc, "CreateMultipartUpload"_kjc, key.asPtr());
 
+    R2MultipartUpload::Metadata metadata;
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(metadata, o.httpMetadata) {
         auto normalized = normalizeHttpMetadata(js, kj::mv(metadata));
@@ -1064,31 +1064,30 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUploadRpc(jsg
       }
     }
 
-    auto createPromise = callR2RpcMethod(js, getRpcMethod(js, "createMultipartUpload"_kj),
-        rpcPropHandler, createFnHandler, kj::str(key), kj::mv(options));
-    auto target = R2RpcClient::fromCallResult(js, createPromise);
-    auto uploadIdPromise = target.call(js, "getUploadId"_kj, rpcPropHandler, getUploadIdFnHandler);
+    KJ_IF_SOME(o, options) {
+      KJ_IF_SOME(httpMetadata, o.httpMetadata) {
+        metadata.httpMetadata = httpMetadata.get<HttpMetadata>().clone();
+      }
+      KJ_IF_SOME(customMetadata, o.customMetadata) {
+        metadata.customMetadata.fields = KJ_MAP(field, customMetadata.fields) {
+          return jsg::Dict<kj::String>::Field{
+            .name = kj::str(field.name), .value = kj::str(field.value)};
+        };
+      }
+    }
 
-    return unwrapR2RpcPromise<kj::String>(js, kj::mv(uploadIdPromise), uploadIdResultHandler)
-        .then(js,
-            [bucket = JSG_THIS, key = kj::mv(key), target = kj::mv(target),
-                traceContext = kj::mv(traceContext)](jsg::Lock& js, kj::String uploadId) mutable {
+    auto uploadIdPromise =
+        callR2RpcMethod<kj::String>(js, getRpcMethod(js, "createMultipartUpload"_kj),
+            rpcPropHandler, createFnHandler, uploadIdResultHandler, kj::str(key), kj::mv(options));
+
+    return uploadIdPromise.then(js,
+        [bucket = JSG_THIS, key = kj::mv(key), metadata = kj::mv(metadata),
+            traceContext = kj::mv(traceContext)](jsg::Lock& js, kj::String uploadId) mutable {
       traceContext.setTag("cloudflare.r2.response.upload_id"_kjc, uploadId.asPtr());
       return js.alloc<R2MultipartUpload>(
-          kj::mv(key), kj::mv(uploadId), kj::mv(bucket), kj::mv(target));
+          kj::mv(key), kj::mv(uploadId), kj::mv(bucket), kj::mv(metadata));
     });
   });
-}
-
-jsg::Ref<R2MultipartUpload> R2Bucket::resumeMultipartUploadRpc(jsg::Lock& js,
-    kj::String key,
-    kj::String uploadId,
-    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
-    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, kj::String)>>& resumeFnHandler) {
-  auto resumePromise = callR2RpcMethod(js, getRpcMethod(js, "resumeMultipartUpload"_kj),
-      rpcPropHandler, resumeFnHandler, kj::str(key), kj::str(uploadId));
-  auto target = R2RpcClient::fromCallResult(js, resumePromise);
-  return js.alloc<R2MultipartUpload>(kj::mv(key), kj::mv(uploadId), JSG_THIS, kj::mv(target));
 }
 
 R2Bucket::FeatureFlags::FeatureFlags(CompatibilityFlags::Reader featureFlags)

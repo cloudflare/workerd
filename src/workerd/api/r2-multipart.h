@@ -26,16 +26,28 @@ class R2MultipartUpload: public jsg::Object {
     JSG_STRUCT_TS_OVERRIDE(R2UploadPartOptions);
   };
 
-  R2MultipartUpload(kj::String key, kj::String uploadId, jsg::Ref<R2Bucket> bucket)
-      : key(kj::mv(key)),
-        uploadId(kj::mv(uploadId)),
-        bucket(kj::mv(bucket)) {}
-  R2MultipartUpload(
-      kj::String key, kj::String uploadId, jsg::Ref<R2Bucket> bucket, R2RpcClient rpcClient)
+  // The gateway's completion response omits create-time metadata. Created RPC uploads retain
+  // these values locally; resumed uploads use only the metadata returned by the gateway.
+  struct Metadata {
+    R2Bucket::HttpMetadata httpMetadata;
+    jsg::Dict<kj::String> customMetadata;
+
+    Metadata clone() const;
+
+    JSG_MEMORY_INFO(Metadata) {
+      tracker.trackField("httpMetadata", httpMetadata);
+      tracker.trackField("customMetadata", customMetadata);
+    }
+  };
+
+  R2MultipartUpload(kj::String key,
+      kj::String uploadId,
+      jsg::Ref<R2Bucket> bucket,
+      kj::Maybe<Metadata> metadata = kj::none)
       : key(kj::mv(key)),
         uploadId(kj::mv(uploadId)),
         bucket(kj::mv(bucket)),
-        rpcClient(kj::mv(rpcClient)) {}
+        metadata(kj::mv(metadata)) {}
 
   kj::StringPtr getKey() const {
     return key;
@@ -59,16 +71,18 @@ class R2MultipartUpload: public jsg::Object {
       jsg::Optional<UploadPartOptions> options,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<jsg::Function<jsg::Value(
-          int, R2PutValueRpc, jsg::Optional<UploadPartOptions>, double)>>& uploadPartFnHandler,
+          kj::String, kj::String, int, R2PutValueRpc, jsg::Optional<UploadPartOptions>, double)>>&
+          uploadPartFnHandler,
       const jsg::TypeHandler<jsg::Promise<UploadedPart>>& uploadPartResultHandler);
   jsg::Promise<void> abortRpc(jsg::Lock& js,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
-      const jsg::TypeHandler<jsg::Function<jsg::Value()>>& abortFnHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, kj::String)>>& abortFnHandler,
       const jsg::TypeHandler<jsg::Promise<void>>& abortResultHandler);
   jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> completeRpc(jsg::Lock& js,
       kj::Array<UploadedPart> uploadedParts,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
-      const jsg::TypeHandler<jsg::Function<jsg::Value(kj::Array<UploadedPart>)>>& completeFnHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(
+          kj::String, kj::String, kj::Array<UploadedPart>)>>& completeFnHandler,
       const jsg::TypeHandler<jsg::Promise<R2Bucket::HeadResultRpc>>& completeResultHandler);
 
   JSG_RESOURCE_TYPE(R2MultipartUpload, CompatibilityFlags::Reader flags) {
@@ -89,16 +103,17 @@ class R2MultipartUpload: public jsg::Object {
     tracker.trackField("key", key);
     tracker.trackField("uploadId", uploadId);
     tracker.trackField("bucket", bucket);
-    tracker.trackFieldWithSize("rpcClient", sizeof(rpcClient));
+    tracker.trackField("metadata", metadata);
   }
 
  protected:
   kj::String key;
   kj::String uploadId;
   jsg::Ref<R2Bucket> bucket;
-  kj::Maybe<R2RpcClient> rpcClient;
 
  private:
+  kj::Maybe<Metadata> metadata;
+
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(bucket);
   }
