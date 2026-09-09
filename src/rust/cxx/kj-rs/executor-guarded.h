@@ -14,7 +14,7 @@ class ExecutorGuarded {
   template <typename... Args>
   ExecutorGuarded(Args&&... args): value(kj::fwd<Args>(args)...) {}
   ~ExecutorGuarded() noexcept(false) {
-    KJ_REQUIRE(executor.isCurrent(), "destruction on wrong event loop");
+    KJ_REQUIRE(executor->isCurrent(), "destruction on wrong event loop");
   }
   KJ_DISALLOW_COPY_AND_MOVE(ExecutorGuarded);
 
@@ -24,7 +24,7 @@ class ExecutorGuarded {
   // Throws an exception with `message` if the current thread is not running the expected event
   // loop.
   T& get(kj::LiteralStringConst message = "access on wrong event loop"_kjc) const {
-    KJ_REQUIRE(executor.isCurrent(), message);
+    KJ_REQUIRE(executor->isCurrent(), message);
 
     // Safety: const_cast is okay because we know that we are being accessed on a thread running our
     // original event loop. All successful accesses through `get()` are effectively single-threaded,
@@ -33,7 +33,7 @@ class ExecutorGuarded {
   }
 
   kj::Maybe<T&> tryGet() const {
-    if (executor.isCurrent()) {
+    if (executor->isCurrent()) {
       // Safety: const_cast is okay because we know that we are being accessed on a thread running our
       // original event loop. All successful accesses through `get()` are effectively single-threaded,
       // even though the event loop, and this object, may collectively move between threads.
@@ -44,7 +44,8 @@ class ExecutorGuarded {
   }
 
  private:
-  const kj::Executor& executor = kj::getCurrentThreadExecutor();
+  // Keep the executor address valid even when a Rust-owned guard outlives its event loop.
+  kj::Own<const kj::Executor> executor = kj::getCurrentThreadExecutor().addRef();
   T value;
 };
 
