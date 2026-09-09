@@ -265,5 +265,77 @@ KJ_TEST("cross-thread fulfiller wakes a blocked wait()") {
   KJ_EXPECT(paf.promise.wait(ws) == 123);
 }
 
+// =======================================================================================
+// Rust integration: spawned tokio tasks run while C++ is blocked in promise.wait(), and the
+// existing kj-rs future<->promise bridge works unchanged under the new port.
+
+KJ_TEST("Rust task spawned on the loop's runtime completes while C++ is "
+        "blocked in wait()") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+
+  KJ_EXPECT(has_loop_runtime_handle());
+
+  uint64_t completedBefore = completed_task_count();
+  auto promise = spawn_task_on_runtime(20, 42);
+  // This top-level wait() parks the thread inside the tokio runtime's block_on, which is what
+  // drives the spawned task (and its tokio sleep) to completion.
+  KJ_EXPECT(promise.wait(ws) == 42);
+  KJ_EXPECT(completed_task_count() == completedBefore + 1);
+}
+
+KJ_TEST("tokio timers inside spawned tasks work") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+
+  auto &sysClock = kj::systemPreciseMonotonicClock();
+  auto before = sysClock.now();
+  tokio_sleep_on_runtime(25).wait(ws);
+  KJ_EXPECT(sysClock.now() - before >= 25 * kj::MILLISECONDS);
+}
+
+KJ_TEST("promise.poll() pumps the tokio scheduler without blocking") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+
+  auto promise = spawn_task_on_runtime(500, 7);
+  // Not done yet; poll() must not sleep the task's 500 ms away. The bound is generous on
+  // purpose: it distinguishes "returned without parking" from "slept until the task finished",
+  // not scheduler latency.
+  auto &sysClock = kj::systemPreciseMonotonicClock();
+  auto before = sysClock.now();
+  KJ_EXPECT(!promise.poll(ws));
+  KJ_EXPECT(sysClock.now() - before < 250 * kj::MILLISECONDS);
+
+  KJ_EXPECT(promise.wait(ws) == 7);
+}
+
+KJ_TEST("kj-rs bridged Rust future with same-thread delayed waker works under the new "
+        "port") {
+  // A bridged Rust future that suspends, then is re-driven by a wake delivered from a task on the
+  // loop's own tokio runtime (same thread, via the TokioEventPort). Exercises the future⇄promise
+  // bridge's asynchronous same-thread re-drive path under the new port.
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+
+  threaded_wake_future().wait(ws);
+
+  []() -> kj::Promise<void> { co_await threaded_wake_future(); }().wait(ws);
+}
+
+KJ_TEST("KJ coroutine can co_await spawned Rust tasks and KJ timers together") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto &timer = io.getTimer();
+
+  int result = [&timer]() -> kj::Promise<int> {
+    co_await timer.afterDelay(5 * kj::MILLISECONDS);
+    uint32_t value = co_await spawn_task_on_runtime(5, 11);
+    co_await timer.afterDelay(5 * kj::MILLISECONDS);
+    co_return static_cast<int>(value) + 1;
+  }().wait(ws);
+  KJ_EXPECT(result == 12);
+}
+
 }  // namespace
 }  // namespace kj_rs_tokio_test
