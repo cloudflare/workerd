@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_unpretty")
+load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
 load("//:build/wd_rust_test.bzl", "wd_rust_test")
 
 def rust_cxx_bridge(
@@ -35,10 +36,7 @@ def rust_cxx_bridge(
         include_prefix = include_prefix,
         local_defines = local_defines,
         features = features,
-        linkstatic = select({
-            "@platforms//os:windows": True,
-            "//conditions:default": False,
-        }),
+        linkstatic = CC_LIBRARY_LINKSTATIC,
         deps = deps,
         visibility = visibility,
         tags = tags,

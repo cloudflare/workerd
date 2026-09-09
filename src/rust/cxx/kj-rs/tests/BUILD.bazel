@@ -1,5 +1,6 @@
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_unpretty")
 load("//:build/kj_test.bzl", "kj_test")
+load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_test.bzl", "wd_rust_test")
 load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
@@ -75,10 +76,7 @@ wd_cc_library(
         "test-promises.c++",
         "test-refcount.c++",
     ],
-    linkstatic = select({
-        "@platforms//os:windows": True,
-        "//conditions:default": False,
-    }),
+    linkstatic = CC_LIBRARY_LINKSTATIC,
     visibility = ["//visibility:public"],
     deps = [
         ":bridge",
@@ -90,10 +88,7 @@ wd_cc_library(
     srcs = [
         "test-maybe.c++",
     ],
-    linkstatic = select({
-        "@platforms//os:windows": True,
-        "//conditions:default": False,
-    }),
+    linkstatic = CC_LIBRARY_LINKSTATIC,
     visibility = ["//visibility:public"],
     deps = [
         ":bridge",
@@ -120,10 +115,7 @@ wd_cc_library(
     hdrs = [
         "test-date.h",
     ],
-    linkstatic = select({
-        "@platforms//os:windows": True,
-        "//conditions:default": False,
-    }),
+    linkstatic = CC_LIBRARY_LINKSTATIC,
     visibility = ["//visibility:public"],
     deps = [
         ":test-date-bridge",
