@@ -123,6 +123,7 @@ struct SharedState {
 pub struct TokioPort {
     runtime: EnteredRuntime,
     state: Arc<SharedState>,
+    owner_thread: std::thread::ThreadId,
 }
 
 // `wake()` is called through a `&TokioPort` shared with arbitrary threads, so the type must be
@@ -182,7 +183,11 @@ impl TokioPort {
         LOOP_LOCAL_SET.with(|l| {
             *l.borrow_mut() = Some(Rc::new(LocalSet::new()));
         });
-        Self { runtime, state }
+        Self {
+            runtime,
+            state,
+            owner_thread: std::thread::current().id(),
+        }
     }
 
     /// Handle to this port's runtime, usable to spawn tasks from any thread. (On the loop thread
@@ -209,6 +214,9 @@ impl TokioPort {
     /// (`OwnPromiseNode` and friends are `!Send`), so their order relative to the loop does
     /// not matter.
     pub fn cancel_spawned_tasks(&self) {
+        if self.owner_thread != std::thread::current().id() {
+            return;
+        }
         // Take the `Rc` out of the slot and drop it AFTER the borrow ends, so a cancelled
         // task's `Drop` that itself borrows the slot does not hit a re-entrant-borrow panic.
         // (A task `Drop` that tries to *spawn* during cancellation is unsupported: the slot is
@@ -384,6 +392,28 @@ mod tests {
             elapsed < Duration::from_millis(100),
             "port teardown waited for a blocking task: {elapsed:?}"
         );
+    }
+
+    #[test]
+    fn foreign_cancellation_does_not_cancel_the_callers_loop() {
+        let owner_port = TokioPort::new();
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let caller_port = TokioPort::new();
+                    let ran = Arc::new(AtomicBool::new(false));
+                    let task_ran = Arc::clone(&ran);
+                    let _task = spawn(async move {
+                        task_ran.store(true, Ordering::SeqCst);
+                    });
+
+                    owner_port.cancel_spawned_tasks();
+                    assert!(!caller_port.poll());
+                    assert!(ran.load(Ordering::SeqCst));
+                })
+                .join()
+                .unwrap();
+        });
     }
 
     #[test]
