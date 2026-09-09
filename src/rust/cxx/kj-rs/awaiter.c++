@@ -26,11 +26,24 @@ RustPromiseAwaiter::RustPromiseAwaiter(OwnPromiseNode nodeParam, kj::SourceLocat
 }
 
 RustPromiseAwaiter::~RustPromiseAwaiter() noexcept(false) {
-  // Our `tracePromise()` implementation checks for a null `node`, so we don't have to sever our
-  // LinkedGroup relationship before destroying `node`. If our FuturePollEvent (our LinkedGroup)
-  // tries to trace us between now and our destructor completing, `tracePromise()` will ignore the
-  // null `node`.
+  clearPollEvent();
   unwindDetector.catchExceptionsIfUnwinding([this]() { node = nullptr; });
+}
+
+void RustPromiseAwaiter::setPollEvent(FuturePollEvent& futurePollEvent) {
+  KJ_IF_SOME(old, weakPollEvent.tryGet()) {
+    if (&old == &futurePollEvent) return;
+    old.leaves.remove(*this);
+  }
+  futurePollEvent.leaves.add(*this);
+  weakPollEvent = futurePollEvent.addWeakRef();
+}
+
+void RustPromiseAwaiter::clearPollEvent() {
+  KJ_IF_SOME(old, weakPollEvent.tryGet()) {
+    old.leaves.remove(*this);
+  }
+  weakPollEvent = nullptr;
 }
 
 void RustPromiseAwaiter::fire() {
@@ -39,10 +52,10 @@ void RustPromiseAwaiter::fire() {
 
   done = true;
 
-  KJ_IF_SOME(futurePollEvent, linkedGroup().tryGet()) {
+  KJ_IF_SOME(futurePollEvent, weakPollEvent.tryGet()) {
     // Optimized path: we're still linked to a FuturePollEvent. Arm it directly.
     futurePollEvent.armDepthFirst();
-    linkedGroup().set(kj::none);
+    clearPollEvent();
   } else KJ_IF_SOME(waker, storedWaker) {
     auto owned = kj::mv(waker);
     storedWaker = kj::none;
@@ -55,7 +68,7 @@ void RustPromiseAwaiter::traceEvent(kj::_::TraceBuilder& builder) {
     node->tracePromise(builder, true);
   }
   // TODO(someday): Can we add an entry for the `.await` expression in Rust here?
-  KJ_IF_SOME(futurePollEvent, linkedGroup().tryGet()) {
+  KJ_IF_SOME(futurePollEvent, weakPollEvent.tryGet()) {
     futurePollEvent.traceEvent(builder);
   }
 }
@@ -91,7 +104,7 @@ bool RustPromiseAwaiter::poll(const WakerRef& waker, const KjWaker* maybeKjWaker
         // reference is weak, and will be cleared if the `co_await` expression happens to end before
         // our Promise is ready. In the more likely case that our Promise becomes ready while the
         // `co_await` expression is still active, we'll arm its Event so it can `poll()` us again.
-        linkedGroup().set(futurePollEvent);
+        setPollEvent(futurePollEvent);
 
         return false;
       }
@@ -109,7 +122,7 @@ bool RustPromiseAwaiter::poll(const WakerRef& waker, const KjWaker* maybeKjWaker
 
     // Clearing our reference to the FuturePollEvent (if we have one) tells our fire()
     // implementation to use our stored Waker to perform the wake.
-    linkedGroup().set(kj::none);
+    clearPollEvent();
 
     return false;
   } else {
@@ -136,6 +149,15 @@ void guarded_rust_promise_awaiter_drop_in_place(GuardedRustPromiseAwaiter* ptr) 
 
 // =======================================================================================
 // FuturePollEvent
+
+FuturePollEvent::~FuturePollEvent() noexcept(false) {
+  invalidateWeak();
+  for (;;) {
+    auto it = leaves.begin();
+    if (it == leaves.end()) break;
+    leaves.remove(*it);
+  }
+}
 
 void FuturePollEvent::exitPollScope(kj::Maybe<kj::Promise<void>> maybePromise) {
   // Await any LazyArcWaker promise that got created during the call to `poll()`. Note that if a
@@ -185,10 +207,9 @@ void FuturePollEvent::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNext
   // When tracing, we can only pick one branch to follow. Arbitrarily, I'm following the first
   // RustPromiseAwaiter branch, similar to how ExclusiveJoinPromiseNode chooses its left branch. In
   // the common case, this will be whatever OwnPromiseNode our Rust Future is currently `.await`ing.
-  auto rustPromiseAwaiters = linkedObjects();
-  if (rustPromiseAwaiters.begin() != rustPromiseAwaiters.end()) {
+  if (!leaves.empty()) {
     // Our Rust Future is awaiting an OwnPromiseNode. We'll pick the first one in our list.
-    rustPromiseAwaiters.front().tracePromise(builder, false);
+    leaves.front().tracePromise(builder, false);
   } else KJ_IF_SOME(node, arcWakerPromise) {
     // Our Rust Future is not awaiting any OwnPromiseNode, and instead cloned our Waker. We'll trace
     // our ArcWaker Promise instead.

@@ -1,12 +1,14 @@
 #pragma once
 
 #include "kj-rs/executor-guarded.h"
-#include "kj-rs/linked-group.h"
+#include "kj-rs/promise.h"
 #include "kj-rs/waker.h"
 
 #include <rust/cxx.h>
 
 #include <kj/debug.h>
+#include <kj/list.h>
+#include <kj/memory.h>
 
 namespace kj_rs {
 
@@ -42,17 +44,14 @@ struct RustWaker;
 // alignment using bindgen. See inside awaiter.c++ for a static_assert to remind us to re-run
 // bindgen.
 //
-// RustPromiseAwaiter has two base classes: KJ Event, and a LinkedObject template instantiation. We
-// use the Event to discover when our wrapped Promise is ready. Our Event fire() implementation
-// records the fact that we are done, then wakes our Waker or arms the FuturePollEvent, if we
-// have one. We access the FuturePollEvent via our LinkedObject base class mixin. It gives us the
-// ability to store a weak reference to the FuturePollEvent, if we were last polled by one.
+// RustPromiseAwaiter uses the Event to discover when our wrapped Promise is ready. Our Event
+// fire() implementation records the fact that we are done, then wakes our Waker or arms the
+// FuturePollEvent, if we have one.
 //
 // Cancellation: Dropping the RustPromiseAwaiter destroys its OwnPromiseNode, cancelling the
 // wrapped KJ promise. If the RustPromiseAwaiter was never constructed, Rust's OwnPromiseNode::drop()
 // cancels the promise directly.
-class RustPromiseAwaiter final: public kj::_::Event,
-                                public LinkedObject<FuturePollEvent, RustPromiseAwaiter> {
+class RustPromiseAwaiter final: public kj::_::Event {
  public:
   RustPromiseAwaiter(OwnPromiseNode node, kj::SourceLocation location = {});
   ~RustPromiseAwaiter() noexcept(false);
@@ -86,6 +85,13 @@ class RustPromiseAwaiter final: public kj::_::Event,
   OwnPromiseNode take_own_promise_node();
 
  private:
+  friend class FuturePollEvent;
+  void setPollEvent(FuturePollEvent& futurePollEvent);
+  void clearPollEvent();
+
+  kj::Weak<FuturePollEvent> weakPollEvent;
+  kj::ListLink<RustPromiseAwaiter> link;
+
   kj::Maybe<::rust::Box<RustWaker>> storedWaker;
   bool done = false;
 
@@ -125,13 +131,12 @@ void guarded_rust_promise_awaiter_drop_in_place(GuardedRustPromiseAwaiter*);
 // The PromiseNode base class is a hack to implement async tracing. That is, we only implement the
 // `tracePromise()` function, and decide which Promise to trace into if/when the coroutine calls our
 // `tracePromise()` implementation. This primarily makes the lifetimes easier to manage: our
-// RustPromiseAwaiter LinkedObjects have independent lifetimes from the FuturePollEvent, so we
-// mustn't leave references to them, or their members, lying around in the Coroutine class.
-class FuturePollEvent: public kj::_::PromiseNode,
-                       public kj::_::Event,
-                       public LinkedGroup<FuturePollEvent, RustPromiseAwaiter> {
+// Weakly-linked RustPromiseAwaiter leaves have independent lifetimes from the FuturePollEvent, so
+// we mustn't leave references to them, or their members, lying around in the Coroutine class.
+class FuturePollEvent: public kj::_::PromiseNode, public kj::_::Event, public kj::PtrTarget {
  public:
   FuturePollEvent(kj::SourceLocation location = {}): Event(location) {}
+  ~FuturePollEvent() noexcept(false);
 
   // -------------------------------------------------------
   // PromiseNode API
@@ -150,6 +155,13 @@ class FuturePollEvent: public kj::_::PromiseNode,
   class PollScope;
 
  private:
+  kj::Weak<FuturePollEvent> addWeakRef() {
+    return addWeakToThis();
+  }
+
+  friend class RustPromiseAwaiter;
+  kj::List<RustPromiseAwaiter, &RustPromiseAwaiter::link> leaves;
+
   // Private API for PollScope.
   void enterPollScope() noexcept;
   void exitPollScope(kj::Maybe<kj::Promise<void>> maybeLazyArcWakerPromise);
