@@ -572,6 +572,24 @@ KJ_TEST("Clone storm: many threads cloning and dropping one waker concurrently")
   new_clone_storm_future_void(4, 1000).wait(waitScope);
 }
 
+KJ_TEST("Repeated foreign wakes queue one replay per waker cell") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto promise = new_stash_wakers_future_void(4);
+  KJ_EXPECT(!promise.poll(waitScope));
+
+  start_wake_storm(4, 2000);
+  join_wake_storm();
+
+  auto sink = ::kj_rs::CrossThreadWakeSink::forCurrentLoop();
+  KJ_EXPECT(sink->getPendingCountForTest() == 1, sink->getPendingCountForTest(),
+      "duplicate wakes must coalesce before replay");
+
+  promise = nullptr;
+  clear_stashed_wakers_on_background_thread();
+}
+
 KJ_TEST("Wake storm racing future destruction") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);

@@ -40,8 +40,8 @@ kj::Promise<void> CrossThreadWakeSink::drainLoop(kj::Arc<CrossThreadWakeSink> si
     sink->arm(kj::mv(paf.fulfiller));
     co_await paf.promise;
     for (auto& cell: sink->takePending()) {
-      // Same-thread now: arms the event, or no-op if the event was destroyed meanwhile.
-      cell->wakeByRef();
+      // Same-thread now: release the queue claim, then arm the event (or no-op if it died).
+      cell->replayFromSink();
     }
   }
 }
@@ -56,6 +56,11 @@ void CrossThreadWakeSink::ensureDrain() const {
     // marked the drain stopped, so a later ensureDrain() retries.)
     KJ_LOG(ERROR, "kj-rs cross-thread wake drain stopped", exception);
   });
+}
+
+size_t CrossThreadWakeSink::getPendingCountForTest() const {
+  auto lock = state.lockShared();
+  return lock->pending.size();
 }
 
 kj::Arc<CrossThreadWakeSink> CrossThreadWakeSink::forCurrentLoop() {
@@ -121,7 +126,9 @@ void FutureWakerCell::wakeByRef() const {
     // Foreign thread (possibly one with no KJ event loop): hand ourselves to the owning loop's
     // sink, whose drain replays this wake on the owning thread. A closed sink (loop gone) drops
     // the reference; repeated wakes before the drain runs coalesce.
-    sink->enqueue(addRef());
+    if (!queued.exchange(true, std::memory_order_acq_rel)) {
+      sink->enqueue(addRef());
+    }
   }
   // else: our event is already gone (neutralized); nothing to wake, so do not bother the loop.
 }
