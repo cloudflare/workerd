@@ -4,6 +4,8 @@
 #include "kj-rs/linked-group.h"
 #include "kj-rs/waker.h"
 
+#include <rust/cxx.h>
+
 #include <kj/debug.h>
 
 namespace kj_rs {
@@ -20,14 +22,8 @@ namespace kj_rs {
 // of our own crate, like `std::task::Waker`.
 struct WakerRef;
 
-// Wrapper around an `Option<std::task::Waker>`. RustPromiseAwaiter calls `set()` with the WakerRef
-// passed to `poll()` if RustPromiseAwaiter is unable to find an optimized path for awaiting its
-// Promise. Later on, when its Promise becomes ready, RustPromiseAwaiter will use OptionWaker to
-// call wake the wrapped Waker.
-//
-// Otherwise, if RustPromiseAwaiter finds an optimized path for awaiting its Promise, it calls
-// `set_none()` on the OptionWaker to ensure it's empty.
-struct OptionWaker;
+// An owned clone of a `std::task::Waker`, held as a `rust::Box<RustWaker>`.
+struct RustWaker;
 
 // =======================================================================================
 // RustPromiseAwaiter
@@ -58,13 +54,7 @@ struct OptionWaker;
 class RustPromiseAwaiter final: public kj::_::Event,
                                 public LinkedObject<FuturePollEvent, RustPromiseAwaiter> {
  public:
-  // The Rust code which constructs RustPromiseAwaiter passes us a pointer to a OptionWaker, which can
-  // be thought of as a Rust-native component RustPromiseAwaiter. Its job is to hold a clone of
-  // of any non-KJ Waker that we are polled with, and forward calls to `wake()`. Ideally, we could
-  // store the clone of the Waker ourselves (it's just two pointers) on the C++ side, so the
-  // lifetime safety is more obvious. But, storing a reference works for now.
-  RustPromiseAwaiter(
-      OptionWaker& optionWaker, OwnPromiseNode node, kj::SourceLocation location = {});
+  RustPromiseAwaiter(OwnPromiseNode node, kj::SourceLocation location = {});
   ~RustPromiseAwaiter() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(RustPromiseAwaiter);
 
@@ -96,15 +86,8 @@ class RustPromiseAwaiter final: public kj::_::Event,
   OwnPromiseNode take_own_promise_node();
 
  private:
-  // The Rust code which instantiates RustPromiseAwaiter does so with a OptionWaker object right
-  // next to the RustPromiseAwaiter, such that it is dropped after RustPromiseAwaiter. Thus, our
-  // reference to our OptionWaker is stable. We use the OptionWaker to (optionally) store a clone of
-  // the Waker with which we were last polled.
-  //
-  // When we wake our enclosing Future, either with the FuturePollEvent or with OptionWaker, we
-  // nullify this Maybe. Therefore, this Maybe being kj::none means our OwnPromiseNode is ready, and
-  // it is safe to call `node->get()` on it.
-  kj::Maybe<OptionWaker&> maybeOptionWaker;
+  kj::Maybe<::rust::Box<RustWaker>> storedWaker;
+  bool done = false;
 
   kj::UnwindDetector unwindDetector;
   OwnPromiseNode node;
@@ -125,8 +108,7 @@ struct GuardedRustPromiseAwaiter: ExecutorGuarded<RustPromiseAwaiter> {
   }
 };
 
-void guarded_rust_promise_awaiter_new_in_place(
-    GuardedRustPromiseAwaiter*, OptionWaker*, OwnPromiseNode);
+void guarded_rust_promise_awaiter_new_in_place(GuardedRustPromiseAwaiter*, OwnPromiseNode);
 void guarded_rust_promise_awaiter_drop_in_place(GuardedRustPromiseAwaiter*);
 
 // =======================================================================================

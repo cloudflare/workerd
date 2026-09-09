@@ -1,7 +1,8 @@
 pub use bridge::*;
 
-use crate::awaiter::OptionWaker;
+use crate::awaiter::RustWaker;
 use crate::awaiter::WakerRef;
+use crate::awaiter::clone_waker;
 
 #[cxx::bridge(namespace = "kj_rs")]
 mod bridge {
@@ -9,24 +10,15 @@ mod bridge {
     /// Representation of a `GuardedRustPromiseAwaiter` in C++. The size of the blob should match.
     #[derive(Debug)]
     pub struct GuardedRustPromiseAwaiterRepr {
-        _bindgen_opaque_blob: [u64; 14usize],
+        _bindgen_opaque_blob: [u64; 15usize],
     }
 
     extern "Rust" {
         type WakerRef<'a>;
-    }
-
-    extern "Rust" {
-        // We expose the Rust Waker type to C++ through this OptionWaker reference wrapper. cxx-rs
-        // does not allow us to export types defined outside this crate, such as Waker, directly.
-        //
-        // `LazyRustPromiseAwaiter` (the implementation of `.await` syntax/the IntoFuture trait),
-        // stores a OptionWaker immediately after `GuardedRustPromiseAwaiter` in declaration order.
-        // pass the Waker to the `RustPromiseAwaiter` class, which is implemented in C++
-        type OptionWaker;
-        fn set(&mut self, waker: &WakerRef);
-        fn set_none(&mut self);
-        fn wake_if_some(&mut self);
+        type RustWaker;
+        fn wake(self: &RustWaker);
+        fn will_wake(self: &RustWaker, waker: &WakerRef) -> bool;
+        fn clone_waker(waker: &WakerRef) -> Box<RustWaker>;
     }
 
     unsafe extern "C++" {
@@ -63,7 +55,6 @@ mod bridge {
         /// The pointers must identify valid storage and a live waker for the awaiter's lifetime.
         unsafe fn guarded_rust_promise_awaiter_new_in_place(
             ptr: *mut GuardedRustPromiseAwaiter,
-            rust_waker_ptr: *mut OptionWaker,
             node: OwnPromiseNode,
         );
         /// # Safety
