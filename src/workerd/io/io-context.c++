@@ -587,6 +587,13 @@ void IoContext::addTask(kj::Promise<void> promise) {
 }
 
 void IoContext::addWaitUntil(kj::Promise<void> promise) {
+  KJ_IF_SOME(a, actor) {
+    auto handle = a.getMetrics().addedWaitUntilTask();
+    if (handle.get() != nullptr) {
+      promise = promise.attach(kj::mv(handle));
+    }
+  }
+
   // The empty check comes first: getMetrics() requires a current IncomingRequest, so consulting
   // it before checking would turn the recoverable no-request case into a fatal one. See addTask().
   if (incomingRequests.empty()) {
