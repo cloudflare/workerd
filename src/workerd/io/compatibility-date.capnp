@@ -1570,8 +1570,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   autoGrpcConvert @178 :Bool
       $compatEnableFlag("auto_grpc_convert")
-      $neededByFl
-      $experimental;
+      $neededByFl;
   # When enabled, a Worker's outbound gRPC-web subrequest is converted to gRPC at
   # the edge.
 
