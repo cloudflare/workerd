@@ -10,6 +10,7 @@
 
 #include <workerd/api/http.h>
 #include <workerd/api/r2-api.capnp.h>
+#include <workerd/api/streams/identity-transform-stream.h>
 #include <workerd/api/streams/readable.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-channels.h>
@@ -247,6 +248,30 @@ static kj::Maybe<jsg::Ref<T>> parseObjectMetadata(jsg::Lock& js,
 }
 
 namespace {
+
+class R2GetBodyStream final: public ReadableStreamSource {
+ public:
+  R2GetBodyStream(kj::Own<ReadableStreamSource> inner, kj::Promise<void> pump)
+      : inner(kj::mv(inner)),
+        pump(kj::mv(pump).catch_([](kj::Exception&&) {}).eagerlyEvaluate(nullptr)) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return inner->tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    return inner->tryGetLength(encoding);
+  }
+
+  void cancel(kj::Exception reason) override {
+    pump = nullptr;
+    inner->cancel(kj::mv(reason));
+  }
+
+ private:
+  kj::Own<ReadableStreamSource> inner;
+  kj::Promise<void> pump;
+};
 
 void addEtagsToBuilder(
     capnp::List<R2Etag>::Builder etagListBuilder, kj::ArrayPtr<R2Bucket::Etag> etagArray) {
@@ -807,7 +832,24 @@ R2Bucket::getRpc(jsg::Lock& js,
         if (rpc.kind == "body") {
           auto body = KJ_ASSERT_NONNULL(
               kj::mv(rpc.body), "Malformed R2 get RPC result: body result did not have a body.");
+          auto cancelReader = kj::defer([&] {
+            body.forceCancel(js, js.error("Malformed R2 get RPC result.")).markAsHandled(js);
+          });
           auto object = headResultFromRpc(js, kj::mv(rpc.object), MissingMetadataPolicy::EMPTY);
+          // retrieve body length from range/size metadata to avoid depending on the stream to report its length
+          auto bodyLength = object->size;
+          KJ_IF_SOME(range, object->range) {
+            bodyLength = range.length.orDefault(bodyLength);
+          }
+          JSG_REQUIRE(bodyLength <= 9007199254740991ull, Error,
+              "Malformed R2 get RPC result: body length must be a safe integer.");
+          auto& context = IoContext::current();
+          auto pipe = newIdentityPipe(static_cast<uint64_t>(bodyLength));
+          auto pump =
+              context.waitForDeferredProxy(body.pumpTo(js, kj::mv(pipe.out), EndStream::YES));
+          body = JsReadableStream::create(
+              js, context, kj::heap<R2GetBodyStream>(kj::mv(pipe.in), kj::mv(pump)));
+          cancelReader.cancel();
           auto result = js.alloc<GetResult>(kj::mv(object->name), kj::mv(object->version),
               object->size, kj::mv(object->etag), kj::mv(object->checksums), object->uploaded,
               kj::mv(object->httpMetadata), kj::mv(object->customMetadata), kj::mv(object->range),

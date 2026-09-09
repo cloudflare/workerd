@@ -375,6 +375,22 @@ wd_test(
 )
 
 wd_test(
+    src = "r2-body-length-test.wd-test",
+    args = ["--experimental"],
+    data = ["r2-test.js"],
+)
+
+wd_test(
+    src = "r2-body-length-ts-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "r2-body-length-test.wd-test",
+        "r2-test.js",
+    ],
+    lint = False,
+)
+
+wd_test(
     src = "r2-jsrpc-range-test.wd-test",
     args = ["--experimental"],
     data = ["r2-test.js"],
