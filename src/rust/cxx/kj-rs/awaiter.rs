@@ -17,6 +17,10 @@ pub struct PromiseAwaiter<Data: std::marker::Unpin> {
     // Safety: `option_waker` must be declared after `awaiter`, because `awaiter` contains a reference
     // to `option_waker`. This ensures `option_waker` will be dropped after `awaiter`.
     option_waker: OptionWaker,
+    // Suppresses the auto `Unpin` impl. After the first poll, `awaiter` holds an in-place C++
+    // Event and the promise node's self-pointer points into this memory. Moving `self` after that
+    // would leave both pointers dangling.
+    _pinned: std::marker::PhantomPinned,
 }
 
 impl<Data: std::marker::Unpin> PromiseAwaiter<Data> {
@@ -27,6 +31,7 @@ impl<Data: std::marker::Unpin> PromiseAwaiter<Data> {
             awaiter: MaybeUninit::uninit(),
             awaiter_initialized: false,
             option_waker: OptionWaker::empty(),
+            _pinned: std::marker::PhantomPinned,
         }
     }
 

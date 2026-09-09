@@ -150,3 +150,13 @@ impl<T> KjPromise for CallbacksFuture<T> {
 
 // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
 unsafe impl<T: Send> Send for CallbacksFuture<T> {}
+
+#[cfg(test)]
+mod pin_guards {
+    use static_assertions::assert_not_impl_any;
+
+    use super::CallbacksFuture;
+    use super::PromiseFuture;
+
+    assert_not_impl_any!(PromiseFuture<CallbacksFuture<u32>>: Unpin);
+}
