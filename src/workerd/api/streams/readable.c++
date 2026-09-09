@@ -12,6 +12,8 @@
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/ser.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::api {
 
@@ -714,6 +716,130 @@ RpcSerializerExternalHandler& requireReadableStreamRpcSerializer(jsg::Serializer
   return *externalHandler;
 }
 
+namespace {
+
+// The exception a ReadableStream's origin cancels its source with when the receiver of the
+// stream (over RPC) reports that it is done with it. If the receiver supplied a reason, its
+// serialized form rides along as SERIALIZED_CANCEL_REASON_DETAIL_ID.
+kj::Exception rpcReceiverCanceledException(kj::Maybe<kj::Array<kj::byte>> serializedReason) {
+  auto exception = JSG_KJ_EXCEPTION(DISCONNECTED, Error,
+      "ReadableStream sent over RPC was canceled or released by the remote execution context.");
+  KJ_IF_SOME(reason, serializedReason) {
+    exception.setDetail(SERIALIZED_CANCEL_REASON_DETAIL_ID, kj::mv(reason));
+  }
+  return exception;
+}
+
+// Where the receiver's cancel lands on the origin's side. Owned by the sink (below); the
+// StreamCanceler capability reaches it through a WeakRef, so the capability outliving the sink --
+// or being dropped without ever being called, which carries no meaning -- has no effect.
+class ReceiverCancelSignal final {
+ private:
+  // kj::Exception is not copyable, so the forked promise carries it in a refcounted box.
+  struct Box: public kj::Refcounted {
+    kj::Exception exception;
+    explicit Box(kj::Exception exception): exception(kj::mv(exception)) {}
+  };
+
+ public:
+  ReceiverCancelSignal(
+      kj::PromiseFulfillerPair<kj::Rc<Box>> paf = kj::newPromiseAndFulfiller<kj::Rc<Box>>())
+      : fulfiller(kj::mv(paf.fulfiller)),
+        promise(paf.promise.fork()) {}
+  ~ReceiverCancelSignal() noexcept(false) {
+    weakRef->invalidate();
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(ReceiverCancelSignal);
+
+  kj::Own<WeakRef<ReceiverCancelSignal>> addWeakRef() {
+    return weakRef->addRef();
+  }
+
+  kj::Promise<kj::Exception> whenCanceled() {
+    return promise.addBranch().then([](kj::Rc<Box> box) { return box->exception.clone(); });
+  }
+
+  void fire(kj::Exception exception) {
+    if (fulfiller->isWaiting()) {
+      fulfiller->fulfill(kj::rc<Box>(kj::mv(exception)));
+    }
+  }
+
+ private:
+  kj::Own<kj::PromiseFulfiller<kj::Rc<Box>>> fulfiller;
+  kj::ForkedPromise<kj::Rc<Box>> promise;
+  kj::Own<WeakRef<ReceiverCancelSignal>> weakRef =
+      kj::refcounted<WeakRef<ReceiverCancelSignal>>(kj::Badge<ReceiverCancelSignal>(), *this);
+};
+
+// The origin's end of the StreamCanceler return channel. Owned by the capability the receiver
+// holds, so it can outlive the origin's pump, sink and even IoContext.
+class StreamCancelerImpl final: public rpc::StreamCanceler::Server {
+ public:
+  explicit StreamCancelerImpl(kj::Own<WeakRef<ReceiverCancelSignal>> signal)
+      : signal(kj::mv(signal)) {}
+
+  kj::Promise<void> cancel(CancelContext context) override {
+    kj::Maybe<kj::Array<kj::byte>> serializedReason;
+    auto reason = context.getParams().getReason();
+    if (reason.hasV8Serialized() && reason.getV8Serialized().size() > 0) {
+      serializedReason = kj::heapArray<kj::byte>(reason.getV8Serialized());
+    }
+    signal->runIfAlive([&](ReceiverCancelSignal& signal) {
+      signal.fire(rpcReceiverCanceledException(kj::mv(serializedReason)));
+    });
+    return kj::READY_NOW;
+  }
+
+ private:
+  kj::Own<WeakRef<ReceiverCancelSignal>> signal;
+};
+
+// The sink a ReadableStream is pumped into when it is sent over RPC: the system stream over the
+// peer's ByteStream, plus knowledge of the receiver canceling the stream, reported through
+// whenWriteDisconnected() so the pump can cancel the source while it is idle.
+class RpcReadableStreamSink final: public WritableStreamSink {
+ public:
+  RpcReadableStreamSink(kj::Own<WritableStreamSink> inner, kj::Own<ReceiverCancelSignal> canceled)
+      : inner(kj::mv(inner)),
+        canceled(kj::mv(canceled)) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+    return inner->write(buffer);
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    return inner->write(pieces);
+  }
+  bool tryWriteSync(kj::ArrayPtr<const byte> buffer) override {
+    return inner->tryWriteSync(buffer);
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    return inner->tryWriteSync(pieces);
+  }
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> tryPumpFrom(
+      kj::Ptr<ReadableStreamSource> input, bool end) override {
+    return inner->tryPumpFrom(kj::mv(input), end);
+  }
+  kj::Promise<void> end() override {
+    return inner->end();
+  }
+  void abort(kj::Exception reason) override {
+    inner->abort(kj::mv(reason));
+  }
+  StreamEncoding disownEncodingResponsibility() override {
+    return inner->disownEncodingResponsibility();
+  }
+  kj::Promise<kj::Exception> whenWriteDisconnected() override {
+    return canceled->whenCanceled();
+  }
+
+ private:
+  kj::Own<WritableStreamSink> inner;
+  kj::Own<ReceiverCancelSignal> canceled;
+};
+
+}  // namespace
+
 kj::Own<WritableStreamSink> newReadableStreamSerializeSink(
     RpcSerializerExternalHandler& externalHandler,
     StreamEncoding encoding,
@@ -725,6 +851,16 @@ kj::Own<WritableStreamSink> newReadableStreamSerializeSink(
 
   IoContext& ioctx = IoContext::current();
 
+  // The receiver reports canceling or releasing its copy of the stream through a StreamCanceler
+  // capability that we host; its calls fire `canceled`, which the sink below exposes to the pump.
+  kj::Maybe<kj::Own<ReceiverCancelSignal>> canceled;
+  kj::Maybe<rpc::StreamCanceler::Client> canceler;
+  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_READABLE_CANCEL_PROPAGATION)) {
+    auto signal = kj::heap<ReceiverCancelSignal>();
+    canceler = rpc::StreamCanceler::Client(kj::heap<StreamCancelerImpl>(signal->addWeakRef()));
+    canceled = kj::mv(signal);
+  }
+
   capnp::ByteStream::Client streamCap = [&]() {
     auto req = externalHandler.getExternalPusher().pushByteStreamRequest(capnp::MessageSize{2, 0});
     KJ_IF_SOME(el, expectedLength) {
@@ -732,11 +868,15 @@ kj::Own<WritableStreamSink> newReadableStreamSerializeSink(
     }
     auto pipeline = req.sendForPipeline();
 
-    externalHandler.write([encoding, expectedLength, source = pipeline.getSource()](
-                              rpc::JsValue::External::Builder builder) mutable {
+    externalHandler.write(
+        [encoding, expectedLength, source = pipeline.getSource(), canceler = kj::mv(canceler)](
+            rpc::JsValue::External::Builder builder) mutable {
       auto rs = builder.initReadableStream();
       rs.setStream(kj::mv(source));
       rs.setEncoding(encoding);
+      KJ_IF_SOME(c, canceler) {
+        rs.setCanceler(kj::mv(c));
+      }
     });
 
     return pipeline.getSink();
@@ -745,7 +885,11 @@ kj::Own<WritableStreamSink> newReadableStreamSerializeSink(
   kj::Own<capnp::ExplicitEndOutputStream> kjStream =
       ioctx.getByteStreamFactory().capnpToKjExplicitEnd(kj::mv(streamCap));
 
-  return newSystemStream(kj::mv(kjStream), encoding, ioctx);
+  auto sink = newSystemStream(kj::mv(kjStream), encoding, ioctx);
+  KJ_IF_SOME(c, canceled) {
+    return kj::heap<RpcReadableStreamSink>(kj::mv(sink), kj::mv(c));
+  }
+  return kj::mv(sink);
 }
 
 void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
@@ -771,8 +915,181 @@ void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   }));
 }
 
-JsReadableStream hydrateRpcReadableStream(
-    jsg::Lock& js, IoContext& ioctx, rpc::JsValue::External::ReadableStream::Reader reader) {
+namespace {
+
+// The StreamCanceler that came along with a ReadableStream received over RPC, shared by every
+// RpcReadableStreamSource standing for that stream: the one built at hydration and, after each
+// tee(), one per branch. The origin is told to cancel its source once the last of them is done
+// with the stream before EOF, with the most recent reason any of them gave (if any). It is told
+// nothing once any of them reaches EOF or sees the origin's side fail, since the origin then has
+// nothing left to learn from this side.
+//
+// The canceler is a capability of the RPC session that delivered the stream, and the session (with
+// the callee's execution context) stays open while any such capability is held. It is therefore
+// released the moment the origin no longer needs to hear from this side, not when this object is
+// eventually collected.
+class RpcStreamCancelerState final: public kj::Refcounted {
+ public:
+  RpcStreamCancelerState(rpc::StreamCanceler::Client canceler, IoContext& ioctx)
+      : canceler(kj::mv(canceler)),
+        ioctx(ioctx) {}
+
+  void sourceCreated() {
+    ++liveSources;
+  }
+
+  // A source is done with the stream before EOF: canceled, with its reason, or destroyed. The
+  // origin is told once the last live source reports.
+  void sourceDone(kj::Maybe<kj::Exception&> reason) {
+    KJ_IF_SOME(r, reason) {
+      rememberReason(r);
+    }
+    KJ_DASSERT(liveSources > 0);
+    if (--liveSources == 0) {
+      notifyOrigin();
+    }
+  }
+
+  // The origin no longer needs to hear from this side: the stream was read to EOF, or the origin's
+  // side failed.
+  void originDone() {
+    canceler = kj::none;
+    serializedReason = kj::none;
+  }
+
+ private:
+  kj::Maybe<rpc::StreamCanceler::Client> canceler;
+  IoContext& ioctx;
+  uint liveSources = 0;
+  // The most recent reason a source was canceled with, serialized at the time (which needs the
+  // isolate lock) and held until the last source is done and it can be sent.
+  kj::Maybe<kj::Array<kj::byte>> serializedReason;
+
+  // The reason can only be serialized when this runs under the isolate lock, as it does for a
+  // JavaScript-initiated cancel(); KJ-side teardown supplies no reason and the origin synthesizes
+  // one. The serialized reason is subject to the same size limit as any other value sent over JS
+  // RPC; one that exceeds it is left out, and the origin synthesizes a reason for that case too.
+  void rememberReason(kj::Exception& reason) {
+    if (canceler == kj::none) return;
+    KJ_IF_SOME(lock, ioctx.tryGetCurrentLock()) {
+      jsg::Lock& js = lock;
+      jsg::Serializer serializer(js);
+      serializer.write(js, js.exceptionToJsValue(reason.clone()).getHandle(js));
+      auto data = serializer.release().data;
+      if (data.size() <= MAX_JS_RPC_MESSAGE_SIZE) {
+        serializedReason = kj::mv(data);
+      }
+    }
+  }
+
+  // Sends the cancel to the origin (at most once).
+  void notifyOrigin() {
+    KJ_IF_SOME(c, canceler) {
+      auto req = c.cancelRequest();
+      KJ_IF_SOME(r, serializedReason) {
+        req.getReason().setV8Serialized(r);
+      }
+      // Fire and forget: a failure here means the origin is already gone.
+      req.send().detach([](kj::Exception&&) {});
+      originDone();
+    }
+  }
+};
+
+// The receiving end of a ReadableStream transferred over RPC. Wraps the hydrated source and, when
+// this side is done with the stream before reaching EOF -- cancel(), with its reason, or being
+// dropped -- reports that to the shared RpcStreamCancelerState, which tells the origin so that it
+// cancels its source promptly instead of finding out on its next write (which, for an idle source,
+// may never come). Everything else forwards to the inner source; in particular pumpTo() and
+// tryTee() forward so that the inner system stream's optimizations still apply, with each tee
+// branch wrapped in another instance sharing the same state.
+class RpcReadableStreamSource final: public ReadableStreamSource {
+ public:
+  RpcReadableStreamSource(kj::Own<ReadableStreamSource> inner, kj::Rc<RpcStreamCancelerState> state)
+      : inner(kj::mv(inner)),
+        state(kj::mv(state)) {
+    this->state->sourceCreated();
+  }
+
+  ~RpcReadableStreamSource() noexcept(false) {
+    reportDone(kj::none);
+  }
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return inner->tryRead(buffer, minBytes, maxBytes)
+        .then([state = state.addRef(), minBytes](size_t amount) mutable {
+      if (amount < minBytes) state->originDone();
+      return amount;
+    }, [state = state.addRef()](kj::Exception&& exception) mutable -> size_t {
+      // The origin's side failed; there is nothing left to tell it.
+      state->originDone();
+      kj::throwFatalException(kj::mv(exception));
+    });
+  }
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    KJ_IF_SOME(amount, inner->tryReadSync(buffer, minBytes)) {
+      if (amount < minBytes) state->originDone();
+      return amount;
+    }
+    return kj::none;
+  }
+
+  kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end) override {
+    // A pump that completes has read the stream to EOF. One that fails or is dropped leaves
+    // the canceler in place: the pump's owner cancels the source in those cases, which reports
+    // to the origin with the failure as the reason.
+    return inner->pumpTo(kj::mv(output), end)
+        .then([state = state.addRef()](DeferredProxy<void> proxy) mutable {
+      proxy.proxyTask =
+          proxy.proxyTask.then([state = kj::mv(state)]() mutable { state->originDone(); });
+      return kj::mv(proxy);
+    });
+  }
+
+  StreamEncoding getPreferredEncoding() override {
+    return inner->getPreferredEncoding();
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    return inner->tryGetLength(encoding);
+  }
+
+  void cancel(kj::Exception reason) override {
+    reportDone(reason);
+    inner->cancel(kj::mv(reason));
+  }
+
+  kj::Maybe<Tee> tryTee(uint64_t limit) override {
+    KJ_IF_SOME(tee, inner->tryTee(limit)) {
+      // The branches take over the stream, each as another source sharing the state. This object's
+      // controller destroys it next, and that report leaves the branches as the state's live
+      // sources: the origin hears from this side only once the last of them is done before EOF.
+      for (auto& branch: tee.branches) {
+        branch = kj::heap<RpcReadableStreamSource>(kj::mv(branch), state.addRef());
+      }
+      return kj::mv(tee);
+    }
+    return kj::none;
+  }
+
+ private:
+  kj::Own<ReadableStreamSource> inner;
+  kj::Rc<RpcStreamCancelerState> state;
+  // Whether this object has reported itself done to the state, which happens at most once: on
+  // cancel(), or otherwise on destruction.
+  bool reported = false;
+
+  void reportDone(kj::Maybe<kj::Exception&> reason) {
+    if (reported) return;
+    reported = true;
+    state->sourceDone(reason);
+  }
+};
+
+// Constructs the source backing a ReadableStream received over RPC.
+kj::Own<ReadableStreamSource> newRpcReadableStreamSource(
+    IoContext& ioctx, rpc::JsValue::External::ReadableStream::Reader reader) {
   auto encoding = reader.getEncoding();
 
   KJ_REQUIRE(
@@ -781,10 +1098,24 @@ JsReadableStream hydrateRpcReadableStream(
 
   kj::Own<kj::AsyncInputStream> in = ioctx.getExternalPusher()->unwrapStream(reader.getStream());
 
+  kj::Own<ReadableStreamSource> source =
+      kj::heap<NoDeferredProxyReadableStream>(newSystemStream(kj::mv(in), encoding, ioctx), ioctx);
+
+  if (reader.hasCanceler() &&
+      util::Autogate::isEnabled(util::AutogateKey::JSRPC_READABLE_CANCEL_PROPAGATION)) {
+    source = kj::heap<RpcReadableStreamSource>(
+        kj::mv(source), kj::rc<RpcStreamCancelerState>(reader.getCanceler(), ioctx));
+  }
+  return kj::mv(source);
+}
+
+}  // namespace
+
+JsReadableStream hydrateRpcReadableStream(
+    jsg::Lock& js, IoContext& ioctx, rpc::JsValue::External::ReadableStream::Reader reader) {
   // JsReadableStream::create() dispatches on the typescript_implemented_streams compat flag,
   // so the received stream is backed by whichever implementation this isolate runs.
-  return JsReadableStream::create(js, ioctx,
-      kj::heap<NoDeferredProxyReadableStream>(newSystemStream(kj::mv(in), encoding, ioctx), ioctx));
+  return JsReadableStream::create(js, ioctx, newRpcReadableStreamSource(ioctx, reader));
 }
 
 JsReadableStream ReadableStream::deserialize(
@@ -810,20 +1141,9 @@ JsReadableStream ReadableStream::deserialize(
   auto reader = externalHandler->read();
   KJ_REQUIRE(reader.isReadableStream(), "external table slot type doesn't match serialization tag");
 
-  auto rs = reader.getReadableStream();
-  auto encoding = rs.getEncoding();
-
-  KJ_REQUIRE(
-      static_cast<uint>(encoding) < capnp::Schema::from<StreamEncoding>().getEnumerants().size(),
-      "unknown StreamEncoding received from peer");
-
   auto& ioctx = IoContext::current();
-
-  kj::Own<kj::AsyncInputStream> in = ioctx.getExternalPusher()->unwrapStream(rs.getStream());
-
-  return JsReadableStream(js.alloc<ReadableStream>(ioctx,
-      kj::heap<NoDeferredProxyReadableStream>(
-          newSystemStream(kj::mv(in), encoding, ioctx), ioctx)));
+  return JsReadableStream(js.alloc<ReadableStream>(
+      ioctx, newRpcReadableStreamSource(ioctx, reader.getReadableStream())));
 }
 
 kj::StringPtr ReaderImpl::jsgGetMemoryName() const {

@@ -11,6 +11,7 @@
 #include <workerd/api/util.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/ser.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/string-buffer.h>
 
@@ -495,6 +496,79 @@ bool WritableStreamSink::tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const byte
 kj::Maybe<kj::Promise<DeferredProxy<void>>> WritableStreamSink::tryPumpFrom(
     kj::Ptr<ReadableStreamSource> input, bool end) {
   return kj::none;
+}
+
+kj::Promise<kj::Exception> WritableStreamSink::whenWriteDisconnected() {
+  return kj::NEVER_DONE;
+}
+
+kj::Promise<DeferredProxy<void>> pumpOwnedSourceToSink(
+    kj::Own<ReadableStreamSource> source, kj::Own<WritableStreamSink> sink, bool end) {
+  struct Holder: public kj::Refcounted {
+    kj::Own<WritableStreamSink> sink;
+    kj::Own<ReadableStreamSource> source;
+    bool done = false;
+
+    Holder(kj::Own<WritableStreamSink> sink, kj::Own<ReadableStreamSource> source)
+        : sink(kj::mv(sink)),
+          source(kj::mv(source)) {}
+    ~Holder() noexcept(false) {
+      if (!done) {
+        // It appears the pump was canceled. We should make sure this propagates back to the
+        // source stream. This is important in particular when we're implementing the response
+        // pump for an HTTP event (see Response::send()). Presumably it was canceled because the
+        // client disconnected. If we don't cancel the source, then if the source is one end of
+        // a TransformStream, the write end will just hang. Of course, this is fine if there are
+        // no waitUntil()s running, because the whole I/O context will be canceled anyway. But if
+        // there are waitUntil()s, then the application probably expects to get an exception from
+        // the write() on cancellation, rather than have it hang.
+        source->cancel(KJ_EXCEPTION(DISCONNECTED, "pump canceled"));
+      }
+    }
+
+    void fail(const kj::Exception& exception) {
+      sink->abort(exception.clone());
+      source->cancel(exception.clone());
+      done = true;
+    }
+  };
+
+  auto holder = kj::rc<Holder>(kj::mv(sink), kj::mv(source));
+
+  // Both phases of the pump race against the sink reporting that its writes can no longer
+  // succeed. Without this, a source that is idle -- waiting for data that may never come -- would
+  // keep the pump parked long after the destination went away. The join drops the losing side
+  // before the continuation runs, so fail() never overlaps an in-flight pump operation.
+  auto& sinkRef = *holder->sink;
+  return holder->source->pumpTo(holder->sink->getPtr(), end)
+      .exclusiveJoin(rejectWhenWriteDisconnected<DeferredProxy<void>>(sinkRef))
+      .then([holder = holder.addRef()](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
+    auto& sinkRef = *holder->sink;
+    proxy.proxyTask = proxy.proxyTask.exclusiveJoin(rejectWhenWriteDisconnected<void>(sinkRef))
+                          .catch_([holder = holder.addRef()](kj::Exception&& exception) mutable {
+      holder->fail(exception);
+      kj::throwFatalException(kj::mv(exception));
+    }).attach(holder.addRef());
+    holder->done = true;
+    return kj::mv(proxy);
+  }, [holder = holder.addRef()](kj::Exception&& exception) mutable -> DeferredProxy<void> {
+    holder->fail(exception);
+    kj::throwFatalException(kj::mv(exception));
+  });
+}
+
+jsg::JsValue exceptionToCancelReason(jsg::Lock& js, kj::Exception exception) {
+  KJ_IF_SOME(serialized, exception.getDetail(SERIALIZED_CANCEL_REASON_DETAIL_ID)) {
+    // The bytes came from another isolate, possibly a different runtime version; if they cannot be
+    // read, the exception itself is still a faithful description of what happened.
+    return js.tryCatch([&]() -> jsg::JsValue {
+      jsg::Deserializer deserializer(js, serialized);
+      return deserializer.readValue(js);
+    }, [&](jsg::Value&& error) -> jsg::JsValue {
+      return js.exceptionToJsValue(kj::mv(exception)).getHandle(js);
+    });
+  }
+  return js.exceptionToJsValue(kj::mv(exception)).getHandle(js);
 }
 
 // =======================================================================================
@@ -2950,42 +3024,7 @@ kj::Own<ReadableStreamController> ReadableStreamInternalController::detach(
 kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
     jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) {
   auto source = KJ_ASSERT_NONNULL(removeSource(js));
-
-  struct Holder: public kj::Refcounted {
-    kj::Own<WritableStreamSink> sink;
-    kj::Own<ReadableStreamSource> source;
-    bool done = false;
-
-    Holder(kj::Own<WritableStreamSink> sink, kj::Own<ReadableStreamSource> source)
-        : sink(kj::mv(sink)),
-          source(kj::mv(source)) {}
-    ~Holder() noexcept(false) {
-      if (!done) {
-        // It appears the pump was canceled. We should make sure this propagates back to the
-        // source stream. This is important in particular when we're implementing the response
-        // pump for an HTTP event (see Response::send()). Presumably it was canceled because the
-        // client disconnected. If we don't cancel the source, then if the source is one end of
-        // a TransformStream, the write end will just hang. Of course, this is fine if there are
-        // no waitUntil()s running, because the whole I/O context will be canceled anyway. But if
-        // there are waitUntil()s, then the application probably expects to get an exception from
-        // the write() on cancellation, rather than have it hang.
-        source->cancel(KJ_EXCEPTION(DISCONNECTED, "pump canceled"));
-      }
-    }
-  };
-
-  auto holder = kj::rc<Holder>(kj::mv(sink), kj::mv(source));
-  return holder->source->pumpTo(holder->sink->getPtr(), end)
-      .then([holder = holder.addRef()](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
-    proxy.proxyTask = proxy.proxyTask.attach(holder.addRef());
-    holder->done = true;
-    return kj::mv(proxy);
-  }, [holder = holder.addRef()](kj::Exception&& ex) mutable {
-    holder->sink->abort(ex.clone());
-    holder->source->cancel(ex.clone());
-    holder->done = true;
-    return kj::mv(ex);
-  });
+  return pumpOwnedSourceToSink(kj::mv(source), kj::mv(sink), end);
 }
 
 StreamEncoding ReadableStreamInternalController::getPreferredEncoding() {

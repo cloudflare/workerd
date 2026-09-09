@@ -627,6 +627,10 @@ struct JsValue {
           unknown @5 :Void;
           known @6 :UInt64;
         }
+
+        canceler @21 :StreamCanceler;
+        # Hosted by the stream's origin. The receiver calls it when its copy of the stream is
+        # canceled or released before reaching EOF. Null when the sender does not support it.
       }
 
       obsolete7 @7 :Void;
@@ -747,6 +751,20 @@ interface AbortTrigger $Cxx.allowCancellation {
   release @1 () -> ();
   # Informs a cloned signal that the original signal is being destroyed, and the abort will never
   # be triggered. Otherwise, the cloned signal will treat a dropped cabability as an abort.
+}
+
+interface StreamCanceler $Cxx.allowCancellation {
+  # Accompanies a `readableStream` external (see `JsValue.External.readableStream.canceler`). The
+  # bytes of a transferred ReadableStream flow from the origin to the receiver over a `ByteStream`,
+  # which gives the receiver no way to tell the origin that it stopped reading: the origin only
+  # finds out when its next write fails, and a source that is waiting for more data never writes.
+  # This interface is the return channel. The origin hosts it; the receiver calls it when its copy
+  # of the stream is canceled or released before reaching EOF, and the origin then cancels its
+  # underlying source. Dropping the capability without calling cancel() carries no meaning.
+
+  cancel @0 (reason :JsValue);
+  # `reason` is the value the receiver's copy of the stream was canceled with, serialized, when the
+  # receiver can supply one. An empty `reason` means the stream was released without one.
 }
 
 interface JsRpcTarget extends(JsValue.ExternalPusher) $Cxx.allowCancellation {

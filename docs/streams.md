@@ -415,6 +415,35 @@ API (the same API Internal streams use). When `pumpTo()` is called on the adapte
 acquires the isolate lock and runs a promise loop: read from the JS stream, write to the
 kj output, repeat until the data is exhausted or an error occurs.
 
+### Streams sent over JS RPC
+
+A `ReadableStream` passed to (or returned from) a JS RPC method is not moved; the origin
+keeps the stream and pumps it into a Cap'n Proto `ByteStream` hosted by the receiver, which
+exposes the bytes as a new stream of its own. A `WritableStream` goes the other way: the
+receiver's writes are RPCs into a `ByteStream` hosted by the origin, wrapping the origin's
+`WritableStreamSink`.
+
+Termination is propagated in both directions, gated by autogates while it rolls out:
+
+- **Readable:** the origin attaches a `StreamCanceler` capability. When the receiver's copy
+  is canceled, or released before EOF, the receiver calls it and the origin's pump cancels the
+  source (`WritableStreamSink::whenWriteDisconnected()` reports the cancel to the pump, which
+  races it against its source read). The source's cancel algorithm receives the receiver's
+  reason when it was supplied, otherwise an `Error` describing the release. Without this
+  channel the origin would learn nothing until its next write failed, which for an idle source
+  never happens. If the receiver tees its copy, the branches share the canceler: the origin is
+  told only once the last branch is canceled or released, with the most recent reason given,
+  and not at all once either branch reaches EOF. Because the byte stream itself is the only
+  other channel, a receiver that has read to EOF releases the canceler immediately; holding it
+  would keep the RPC session open. The reason is subject to the same 32 MiB limit as other
+  JS RPC values; a larger one is dropped and the origin sees the generic `Error`.
+- **Writable:** the byte-stream protocol has no abort message, so the receiver aborting or
+  dropping its copy reaches the origin as the capability being released. The origin then
+  aborts its sink (unless the receiver ended the stream cleanly), so whatever is connected to
+  it -- for example the readable half of an `IdentityTransformStream` -- errors instead of
+  waiting forever. The abort reason is not carried; the origin sees a generic disconnection
+  error.
+
 ## The Complexity Budget
 
 The streams implementation balances several sources of complexity:

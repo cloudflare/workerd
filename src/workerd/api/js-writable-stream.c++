@@ -216,8 +216,8 @@ class TsWriterSink final: public WritableStreamSink {
   }
 
   void abort(kj::Exception reason) override {
-    // Nothing calls this in the RPC wiring (the adapter's revoke path drops the sink and the
-    // destructor handles the abort), but the interface requires it: forward the reason to
+    // Reached when the RPC adapter is dropped or revoked without a clean end() (the destructor
+    // below covers the remaining case of the sink being dropped directly): forward the reason to
     // the writer's abort algorithm.
     KJ_IF_SOME(w, writer) {
       scheduleAbort(kj::mv(w), kj::mv(reason));

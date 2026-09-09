@@ -134,7 +134,18 @@ namespace workerd::util {
      never enters JavaScript and byte-budgets its un-yielded work, while pumpToImpl() still        \
      suspends through the event loop on every iteration (only the write suspension is elided),     \
      leaving the JS-visible pull() ordering unchanged. */                                          \
-  V(STREAM_CONTROLLER_SYNC_FAST_PATHS)
+  V(STREAM_CONTROLLER_SYNC_FAST_PATHS)                                                             \
+  /* When a native WritableStream sent over JS RPC is dropped or revoked without a clean end(),   \
+     abort its underlying sink so that anything connected to it (e.g. the readable half of an      \
+     IdentityTransformStream) errors instead of hanging. When disabled, the sink is dropped        \
+     without abort. */                                                                             \
+  V(JSRPC_WRITABLE_DROP_ABORTS_SINK)                                                               \
+  /* Propagate cancellation of a ReadableStream sent over JS RPC back to its origin: the sender    \
+     attaches a StreamCanceler capability, the receiver calls it when its copy of the stream is    \
+     canceled or released before EOF, and the origin's pump cancels the source (running its       \
+     cancel algorithm with the receiver's reason). When disabled, neither side participates and    \
+     the origin learns of the loss only when its next write fails. */                             \
+  V(JSRPC_READABLE_CANCEL_PROPAGATION)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
