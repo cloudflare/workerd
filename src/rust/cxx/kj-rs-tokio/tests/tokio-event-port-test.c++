@@ -551,5 +551,89 @@ KJ_TEST("a KJ timer armed by a spawned task during a wait-forever park is honore
   done.store(true);
 }
 
+KJ_TEST("cross-thread bridged wake arriving while the loop is busy (not parked) is delivered") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto &timer = io.getTimer();
+  auto &sysClock = kj::systemPreciseMonotonicClock();
+
+  // The wake lands ~20 ms in; keep the loop turning events (never parking) for ~60 ms. The wake
+  // then travels cell -> cross-thread fulfiller -> Executor -> port.wake(); the loop only sees
+  // the latch through busy-poll's port.poll() (enabled here; KJ's default never busy-polls),
+  // never through wait().
+  ws.setBusyPollInterval(8);
+  auto woken = std_thread_wake_future();
+  auto busyUntil = sysClock.now() + 60 * kj::MILLISECONDS;
+  [&]() -> kj::Promise<void> {
+    while (sysClock.now() < busyUntil) {
+      co_await kj::evalLater([]() {});
+    }
+  }().wait(ws);
+
+  woken
+      .exclusiveJoin(timer.afterDelay(10 * kj::SECONDS).then([]() {
+    KJ_FAIL_ASSERT("cross-thread wake during a busy loop was lost");
+  })).wait(ws);
+}
+
+KJ_TEST("a bare TokioEventPort (no context) tears down cleanly with tasks holding KJ objects") {
+  // The port owns its loop and cancels spawned tasks before destroying anything, so even without
+  // a TokioAsyncIoContext a task holding a KJ timer promise and an armed awaiter event is dropped
+  // while the loop and timer are alive. ASAN target.
+  {
+    auto port = kj::heap<kj_rs_tokio::TokioEventPort>();
+    kj::WaitScope ws(port->getLoop());
+    setTestTimer(&port->getTimer());
+    KJ_DEFER(setTestTimer(nullptr));
+    spawn_task_holding_kj_timer();
+    spawn_task_awaiting_kj_never_promise();
+    kj::evalLater([]() {}).wait(ws);
+    ws.poll();
+    // `ws` is destroyed first (declared after `port`), then the port: tasks, loop, runtime, timer.
+  }
+  auto io = setupTokioAsyncIo();
+  KJ_EXPECT(kj::evalLater([]() { return 9; }).wait(io.getWaitScope()) == 9);
+}
+
+KJ_TEST("a task that yields forever keeps poll() bounded and does not starve the KJ loop") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+
+  spawn_yield_loop_task();
+  // poll() lets ready tasks run for a bounded number of turns (POLL_YIELD_BUDGET) and returns.
+  ws.poll();
+  ws.poll();
+  // The KJ side still makes progress alongside the spinning task.
+  KJ_EXPECT(kj::evalLater([]() { return 21; }).wait(ws) == 21);
+  KJ_EXPECT(spawn_task_on_runtime(1, 9).wait(ws) == 9);
+  // The spinning task is cancelled at teardown (LocalSet cancellation, above).
+}
+
+KJ_TEST("a spawned task re-entering promise.wait() gets a kj::Exception, not an abort") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  setTestWaitScope(&ws);
+  KJ_DEFER(setTestWaitScope(nullptr));
+
+  // Documented in tokio-event-port.h: nesting block_on inside block_on is rejected by tokio;
+  // the panic must reach the task as a catchable exception (an Err across the bridge), and the
+  // outer loop must stay healthy.
+  nested_wait_from_task().wait(ws);
+  KJ_EXPECT(kj::evalLater([]() { return 3; }).wait(ws) == 3);
+}
+
+KJ_TEST("already-due timer returns promptly from wait()") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto &timer = io.getTimer();
+
+  // timeoutToNextEvent() is zero: wait() must not sleep; it returns and advanceTo() fires the
+  // timer.
+  auto start = kj::systemPreciseMonotonicClock().now();
+  timer.afterDelay(0 * kj::MILLISECONDS).wait(ws);
+  timer.atTime(timer.now()).wait(ws);
+  KJ_EXPECT(kj::systemPreciseMonotonicClock().now() - start < 200 * kj::MILLISECONDS);
+}
+
 }  // namespace
 }  // namespace kj_rs_tokio_test
