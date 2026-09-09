@@ -35,25 +35,15 @@ import {
 } from 'pyodide-internal:util';
 import { PyodideVersion } from 'pyodide-internal:const';
 import { default as introspectionSource } from 'pyodide-internal:introspection.py';
-export { createImportProxy } from 'pyodide-internal:serializeJsModule';
+import { createImportProxy } from 'pyodide-internal:serializeJsModule';
+export { createImportProxy };
 
 type PyFuture<T> = Promise<T> & { copy(): PyFuture<T>; destroy(): void };
 
 const waitUntilPatched = new WeakSet();
-
-function patchWaitUntil(ctx: {
+function getPatchedWaitUntil(ctx: {
   waitUntil: (p: Promise<void> | PyFuture<void>) => void;
-}): void {
-  let tag;
-  try {
-    tag = Object.prototype.toString.call(ctx);
-  } catch (_e) {}
-  if (tag !== '[object ExecutionContext]') {
-    return;
-  }
-  if (waitUntilPatched.has(ctx)) {
-    return;
-  }
+}): (p: Promise<void> | PyFuture<void>) => void {
   const origWaitUntil: (p: Promise<void>) => void = ctx.waitUntil.bind(ctx);
   function waitUntil(p: Promise<void> | PyFuture<void>): void {
     origWaitUntil(
@@ -68,7 +58,23 @@ function patchWaitUntil(ctx: {
       })()
     );
   }
-  ctx.waitUntil = waitUntil;
+  return waitUntil;
+}
+
+function patchWaitUntil(ctx: {
+  waitUntil: (p: Promise<void> | PyFuture<void>) => void;
+}): void {
+  let tag;
+  try {
+    tag = Object.prototype.toString.call(ctx);
+  } catch (_e) {}
+  if (tag !== '[object ExecutionContext]') {
+    return;
+  }
+  if (waitUntilPatched.has(ctx)) {
+    return;
+  }
+  ctx.waitUntil = getPatchedWaitUntil(ctx);
   waitUntilPatched.add(ctx);
 }
 
@@ -93,13 +99,35 @@ function get_pyodide_entrypoint_helper(): PyodideEntrypointHelper {
   return _pyodide_entrypoint_helper;
 }
 
+async function getCloudflareWorkersModule(
+  doAnImport: (mod: string) => Promise<any>
+): Promise<{ env: any }> {
+  const cloudflareWorkersModule = await doAnImport('cloudflare:workers');
+  const waitUntil = createImportProxy(
+    'cloudflare:workers',
+    getPatchedWaitUntil(cloudflareWorkersModule),
+    ['waitUntil']
+  );
+  return new Proxy(cloudflareWorkersModule, {
+    get(_target: any, prop: string | symbol): any {
+      if (prop === 'waitUntil') {
+        return waitUntil;
+      }
+      // @ts-expect-error untyped Reflect.get
+      // eslint-disable-next-line prefer-rest-params
+      return Reflect.get(...arguments);
+    },
+  });
+}
+
 export async function setDoAnImport(
   doAnImport: (mod: string) => Promise<any>,
   workerEntrypoint: any
 ): Promise<void> {
+  const cloudflareWorkersModule = await getCloudflareWorkersModule(doAnImport);
   _pyodide_entrypoint_helper = {
     doAnImport,
-    cloudflareWorkersModule: await doAnImport('cloudflare:workers'),
+    cloudflareWorkersModule,
     cloudflareSocketsModule: await doAnImport('cloudflare:sockets'),
     workerEntrypoint,
     patchWaitUntil,
@@ -112,7 +140,12 @@ export async function setDoAnImport(
       throw new PythonWorkersInternalError(message);
     },
   };
-  await fillSnapshotJsModules(doAnImport);
+  await fillSnapshotJsModules(async (mod: string): Promise<any> => {
+    if (mod === 'cloudflare:workers') {
+      return cloudflareWorkersModule;
+    }
+    return await doAnImport(mod);
+  });
 }
 
 function handleSrcImport(pyodide: Pyodide, e: any): never {
