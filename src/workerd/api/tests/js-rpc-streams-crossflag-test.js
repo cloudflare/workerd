@@ -37,6 +37,12 @@ function makeConstructorBackedEchoPair() {
   return { readable, writable };
 }
 
+async function isCrossImplementationRunner(env) {
+  if (env.PEER === undefined) return false;
+  assert.notStrictEqual(usingTsImpl, await env.PEER.usesTypeScriptStreams());
+  return true;
+}
+
 export class Peer extends WorkerEntrypoint {
   usesTypeScriptStreams() {
     return usingTsImpl;
@@ -54,6 +60,14 @@ export class Peer extends WorkerEntrypoint {
     const writer = stream.getWriter();
     await writer.write(enc.encode('written by the peer'));
     await writer.close();
+  }
+
+  async abortWritable(stream) {
+    assert.ok(stream instanceof WritableStream);
+    const writer = stream.getWriter();
+    // Ending this execution context disconnects the RPC stream. The original abort reason is not
+    // currently propagated to the stream's origin.
+    writer.abort(new Error('aborted by the peer')).catch(() => {});
   }
 
   roundTrip(value) {
@@ -83,15 +97,26 @@ export class Peer extends WorkerEntrypoint {
   makeConstructorBackedEchoPair() {
     return makeConstructorBackedEchoPair();
   }
+
+  makeReadableErrorPair() {
+    let controller;
+    const readable = new ReadableStream({
+      start(c) {
+        controller = c;
+      },
+    });
+    const writable = new WritableStream({
+      write() {
+        controller.error(new Error('source failed'));
+      },
+    });
+    return { readable, writable };
+  }
 }
 
 export default {
   async test(controller, env) {
-    // Both services embed this file; only the runner in each config has the binding.
-    if (env.PEER === undefined) return;
-
-    // Keep this test honest if either config's flags are changed.
-    assert.notStrictEqual(usingTsImpl, await env.PEER.usesTypeScriptStreams());
+    if (!(await isCrossImplementationRunner(env))) return;
 
     // Caller-serialized -> peer-deserialized (argument direction), readable.
     {
@@ -177,5 +202,116 @@ export default {
       await writer.close();
       assert.strictEqual(await text, 'round-tripped across implementations');
     }
+  },
+};
+
+export const writableAbortDisconnectsOrigin = {
+  async test(controller, env) {
+    if (!(await isCrossImplementationRunner(env))) return;
+
+    // Abort reasons are not carried by the byte-stream protocol, so the origin observes the
+    // peer execution context disconnecting instead.
+    let abortCalls = 0;
+    const { promise, resolve } = Promise.withResolvers();
+    const writable = new WritableStream({
+      abort(reason) {
+        ++abortCalls;
+        resolve(reason);
+      },
+    });
+    await env.PEER.abortWritable(writable);
+    const reason = await promise;
+    assert.strictEqual(abortCalls, 1);
+    assert.strictEqual(reason.name, 'Error');
+    assert.strictEqual(
+      reason.message,
+      'WritableStream received over RPC was disconnected because the remote execution ' +
+        'context has ended.'
+    );
+  },
+};
+
+export const constructorReadableErrorDisconnectsPeer = {
+  async test(controller, env) {
+    if (!(await isCrossImplementationRunner(env))) return;
+
+    let sourceController;
+    const readable = new ReadableStream({
+      start(c) {
+        sourceController = c;
+      },
+    });
+    const read = env.PEER.readFrom(readable);
+    sourceController.enqueue(enc.encode('partial'));
+    sourceController.error(new Error('source failed'));
+    await assert.rejects(read, {
+      name: 'Error',
+      message: 'ReadableStream received over RPC disconnected prematurely.',
+    });
+  },
+};
+
+export const returnedReadableErrorDisconnectsCaller = {
+  async test(controller, env) {
+    if (!(await isCrossImplementationRunner(env))) return;
+
+    const { readable, writable } = await env.PEER.makeReadableErrorPair();
+    assert.ok(readable instanceof ReadableStream);
+    assert.ok(writable instanceof WritableStream);
+    const read = new Response(readable).text();
+    const writer = writable.getWriter();
+    await writer.write(enc.encode('trigger source error'));
+    await writer.close();
+    // Result streams surface different transport errors in the two receiving implementations.
+    await assert.rejects(read, {
+      name: 'Error',
+      message: usingTsImpl
+        ? 'ReadableStream received over RPC disconnected prematurely.'
+        : 'Network connection lost.',
+    });
+  },
+};
+
+export const nativeReadableAbortDisconnectsPeer = {
+  async test(controller, env) {
+    if (!(await isCrossImplementationRunner(env))) return;
+
+    const { readable, writable } = new IdentityTransformStream();
+    const read = env.PEER.readFrom(readable);
+    const writer = writable.getWriter();
+    await writer.write(enc.encode('partial'));
+    await writer.abort(new Error('producer failed'));
+    await assert.rejects(read, {
+      name: 'Error',
+      message: 'ReadableStream received over RPC disconnected prematurely.',
+    });
+  },
+};
+
+export const lockedStreamsRejected = {
+  async test(controller, env) {
+    if (!(await isCrossImplementationRunner(env))) return;
+
+    const { readable, writable } = makeConstructorBackedEchoPair();
+    const reader = readable.getReader();
+    const writer = writable.getWriter();
+    const write = writer.write(enc.encode('still usable'));
+
+    await assert.rejects(async () => env.PEER.writeTo(writable), {
+      name: 'TypeError',
+      message: usingTsImpl
+        ? 'Cannot get a writer for a stream that is locked'
+        : 'This WritableStream is currently locked to a writer.',
+    });
+    await assert.rejects(async () => env.PEER.readFrom(readable), {
+      name: 'TypeError',
+      message: 'The ReadableStream has been locked to a reader.',
+    });
+
+    const result = await reader.read();
+    assert.strictEqual(new TextDecoder().decode(result.value), 'still usable');
+    await write;
+    await writer.close();
+    assert.strictEqual((await reader.read()).done, true);
   },
 };
