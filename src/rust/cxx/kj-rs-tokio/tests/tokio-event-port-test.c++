@@ -689,5 +689,37 @@ KJ_TEST("two tokio-ported loops on two threads executeAsync into each other conc
   mainFinished.promise.wait(ws);
 }
 
+KJ_TEST("a spawned task that panics surfaces as a kj::Exception, not an abort") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+
+  // tokio isolates a spawned task's panic into a JoinError; the bridged future maps it to an
+  // Err, so co_await throws rather than aborting the process.
+  kj::Maybe<kj::Exception> maybeException;
+  try {
+    spawn_panicking_task().wait(ws);
+  } catch (...) {
+    maybeException = kj::getCaughtExceptionAsKj();
+  }
+  KJ_EXPECT(maybeException != kj::none, "a panicking spawned task must throw");
+
+  // The loop is still healthy afterward.
+  KJ_EXPECT(kj::evalLater([]() { return 11; }).wait(ws) == 11);
+}
+
+KJ_TEST("a detached spawned task (JoinHandle dropped) still runs to completion") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+
+  uint64_t before = completed_task_count();
+  spawn_detached_completing_task();  // drops the JoinHandle immediately
+  // Drive the loop until the detached task has run (bounded; each afterDelay lets the runtime
+  // turn). Dropping the handle must NOT have cancelled it.
+  for (int i = 0; i < 200 && completed_task_count() == before; i++) {
+    io.getTimer().afterDelay(2 * kj::MILLISECONDS).wait(ws);
+  }
+  KJ_EXPECT(completed_task_count() == before + 1);
+}
+
 }  // namespace
 }  // namespace kj_rs_tokio_test
