@@ -427,4 +427,72 @@ mod tests {
         }
         assert!(ran);
     }
+
+    #[test]
+    fn wake_latch_semantics() {
+        let port = TokioPort::new();
+        // No wake: a timed-out wait reports false.
+        assert!(!port.wait_timeout_ns(1_000_000));
+        // Wake before wait: latch is reported exactly once.
+        port.wake();
+        assert!(port.wait_timeout_ns(1_000_000));
+        assert!(!port.wait_timeout_ns(1_000_000));
+        // Wake is also consumed by poll().
+        port.wake();
+        assert!(port.poll());
+        assert!(!port.poll());
+    }
+
+    #[test]
+    fn wake_from_other_thread_unblocks_wait_forever() {
+        let port = TokioPort::new();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(10));
+                port.wake();
+            });
+            assert!(port.wait_forever());
+        });
+    }
+
+    /// The loop thread is inside the runtime's context for the port's whole life, so tokio
+    /// resources can be created outside `block_on` without any explicit `enter()`.
+    #[test]
+    fn loop_thread_is_permanently_in_the_runtime_context() {
+        assert!(tokio::runtime::Handle::try_current().is_err());
+        {
+            let port = TokioPort::new();
+            let current = tokio::runtime::Handle::try_current().expect("entered");
+            assert_eq!(current.id(), port.handle().id());
+            // A resource needing the I/O driver, created from plain sync code on this thread.
+            let std_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            std_listener.set_nonblocking(true).unwrap();
+            let _listener = tokio::net::TcpListener::from_std(std_listener).unwrap();
+        }
+        // Dropping the port leaves the context.
+        assert!(tokio::runtime::Handle::try_current().is_err());
+    }
+
+    #[test]
+    fn spawned_tasks_run_during_wait() {
+        let port = TokioPort::new();
+        let (tx, mut rx) = tokio::sync::oneshot::channel::<u32>();
+        let mut jh = spawn(async move {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            tx.send(42).unwrap();
+        });
+        // The task only runs inside wait_impl's block_on.
+        let mut done = false;
+        for _ in 0..100 {
+            let _ = port.wait_timeout_ns(20_000_000);
+            if let Ok(v) = rx.try_recv() {
+                assert_eq!(v, 42);
+                done = true;
+                break;
+            }
+        }
+        assert!(done);
+        // The JoinHandle should complete promptly now.
+        port.runtime.block_on(&mut jh).unwrap();
+    }
 }
