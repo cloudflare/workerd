@@ -342,16 +342,17 @@ mod bridge {
         async fn kj_stream_write(stream: &KjAsyncIoStream, buffer: &[u8]) -> Result<()>;
 
         /// Corresponds to `kj::AsyncIoStream::shutdownWrite()`. `Result`: the C++ side can
-        /// throw (e.g. `shutdown(2)` on an already-reset socket), and a C++ exception crossing a
-        /// non-`Result` shim would abort the process.
+        /// throw (e.g. `shutdown(2)` on an already-reset socket), and an infallible CXX
+        /// declaration would convert that exception to a Rust panic.
         #[cxx_name = "kjStreamShutdownWrite"]
         fn kj_stream_shutdown_write(stream: &KjAsyncIoStream) -> Result<()>;
 
         /// The stream's underlying raw OS socket handle (fd on unix, `SOCKET` on windows;
         /// `kj::AsyncIoStream::getFd()` / `getWin32Handle()`) as an `i64`, or -1 if it exposes
-        /// none. Backs the handle tier of [`take_kj_socket`].
+        /// none. Backs the handle tier of [`take_kj_socket`]. This is fallible because foreign
+        /// stream implementations may throw while retrieving their handle.
         #[cxx_name = "kjStreamGetHandle"]
-        fn kj_stream_get_handle(stream: &KjAsyncIoStream) -> i64;
+        fn kj_stream_get_handle(stream: &KjAsyncIoStream) -> Result<i64>;
     }
 }
 

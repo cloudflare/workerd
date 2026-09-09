@@ -93,6 +93,8 @@ mod ffi {
 
         fn is_in_flight(self: &NativeServeFailure) -> bool;
 
+        fn is_get_fd_failure(self: &NativeServeFailure) -> bool;
+
         fn take_stream(self: &NativeServeFailure) -> KjOwn<KjAsyncIoStream>;
 
         /// Whether the unwrap fast path was taken (perf observability surface).

@@ -321,7 +321,15 @@ pub fn take_kj_socket(
     }
     #[cfg(unix)]
     {
-        let handle = kj_stream_get_handle(&stream);
+        let handle = match kj_stream_get_handle(&stream) {
+            Ok(handle) => handle,
+            Err(error) => {
+                return Err(TakeSocketError {
+                    stream,
+                    error: KjError::from(error),
+                });
+            }
+        };
         if handle >= 0 {
             // A unix fd is a non-negative int, widened losslessly to i64 by the bridge.
             #[expect(clippy::cast_possible_truncation)]
