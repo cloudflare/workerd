@@ -420,14 +420,15 @@ KJ_TEST("bridged async fns are eager by default: the body runs at promise creati
 }
 
 KJ_TEST("RustFuture::lazily() opts out: nothing runs until the promise is first awaited") {
-  kj::EventLoop loop;
-  kj::WaitScope waitScope(loop);
-
   reset_side_effect_counter();
   ::kj_rs::repr::RustFuture fut;
   kj_rs_demo_lazy_side_effect_future(&fut);
   auto promise = fut.lazily<void>();
   KJ_EXPECT(get_side_effect_counter() == 0);
+
+  // A cold adapter does not capture an event loop until it is first polled.
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
 
   // Turning the event loop without awaiting the promise doesn't run it either.
   kj::evalLater([]() {}).wait(waitScope);

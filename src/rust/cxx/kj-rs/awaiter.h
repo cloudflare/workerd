@@ -182,10 +182,11 @@ class FuturePollEvent: public kj::_::PromiseNode, public kj::_::Event, public kj
   void tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) override;
 
  private:
-  // Hand out a new strong reference to this event's FutureWakerCell. Used by
-  // PollWaker::cloneCell(). The cell is created eagerly with this event (so even the borrowed
-  // per-poll waker can be cloned or woken from any thread) and lives until both this event and
-  // every Rust reference are gone; ~FuturePollEvent neutralizes it so late wakes no-op.
+  // Hand out a new strong reference to this event's FutureWakerCell. Used by PollWaker before
+  // every Rust poll. The first call creates the cell on the loop that is polling this event;
+  // this keeps a cold RustFuture adapter independent of any loop until it is actually polled.
+  // The cell then lives until both this event and every Rust reference are gone;
+  // ~FuturePollEvent neutralizes it so late wakes no-op.
   friend class PollWaker;
   kj::Arc<FutureWakerCell> cloneWakerCell();
 
@@ -209,7 +210,7 @@ class FuturePollEvent: public kj::_::PromiseNode, public kj::_::Event, public kj
   // Rust references become safe no-ops) before releasing it — the invalidation is tied to this
   // event's destruction structurally, not by a destructor body remembering to call it.
   struct NeutralizeGuard {
-    kj::Arc<FutureWakerCell> cell;
+    kj::Arc<FutureWakerCell> cell = nullptr;
     ~NeutralizeGuard() noexcept(false) {
       if (cell.get() != nullptr) {
         cell->neutralize();
