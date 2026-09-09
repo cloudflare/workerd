@@ -2,8 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! Safe wrappers around the ICU and simdutf primitives declared in
-//! [`crate::ffi`], which are raw C and C++ entry points taking bare pointers.
+//! Safe wrappers around the ICU primitives exposed by `rust_icu_sys` and the
+//! simdutf primitives declared in [`crate::ffi`]. Both are raw entry points
+//! taking bare pointers.
 //!
 //! Everything unsafe about calling them lives here: deriving pointers and
 //! lengths from slices, owning the `UConverter`, and turning their C-ish
@@ -14,31 +15,16 @@
 use std::ffi::CStr;
 use std::ffi::c_char;
 
+use rust_icu_sys as sys;
+use rust_icu_sys::versioned_function;
+
 use crate::error::TranscodeError;
 use crate::ffi;
 
-/// ICU's `UErrorCode`, a C enum whose underlying type is `int`.
-///
-/// ICU reports failure through an out parameter of this type rather than a
-/// return value, and requires it to be zeroed before each call that is not
-/// continuing a previous one.
-#[repr(transparent)]
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
-pub struct UErrorCode(pub i32);
-
-// SAFETY: layout matches ICU's UErrorCode, a plain C enum over int, which is
-// trivially copyable and trivially destructible.
-unsafe impl cxx::ExternType for UErrorCode {
-    type Id = cxx::type_id!("UErrorCode");
-    type Kind = cxx::kind::Trivial;
-}
-
-impl UErrorCode {
-    /// ICU treats positive codes as failures and negative codes as warnings,
-    /// matching the `U_FAILURE` macro.
-    fn is_failure(self) -> bool {
-        self.0 > 0
-    }
+/// ICU treats positive codes as failures and negative codes as warnings,
+/// matching the `U_FAILURE` macro.
+fn is_failure(error: sys::UErrorCode) -> bool {
+    error > sys::UErrorCode::U_ZERO_ERROR
 }
 
 /// Returns the ICU converter name for a transcodable encoding, matching
@@ -65,16 +51,17 @@ fn icu_name(encoding: ffi::Encoding) -> Result<&'static CStr, TranscodeError> {
 /// Holding a raw pointer makes the type neither `Send` nor `Sync`, which is
 /// what we want: ICU converters carry conversion state and are not safe to
 /// share between threads.
-pub struct Converter(*mut ffi::UConverter);
+pub struct Converter(*mut sys::UConverter);
 
 impl Converter {
     /// Opens an ICU converter for `encoding`.
     pub fn open(encoding: ffi::Encoding) -> Result<Self, TranscodeError> {
-        let mut err = UErrorCode::default();
+        let mut err = sys::UErrorCode::U_ZERO_ERROR;
         // SAFETY: `icu_name` returns a NUL-terminated static string, and `err`
         // is a live local for the duration of the call.
-        let cnv = unsafe { ffi::ucnv_open(icu_name(encoding)?.as_ptr(), &raw mut err) };
-        if err.is_failure() || cnv.is_null() {
+        let cnv =
+            unsafe { versioned_function!(ucnv_open)(icu_name(encoding)?.as_ptr(), &raw mut err) };
+        if is_failure(err) || cnv.is_null() {
             return Err(TranscodeError::ConverterOpenFailed);
         }
         Ok(Self(cnv))
@@ -84,7 +71,7 @@ impl Converter {
     /// converter's encoding.
     pub fn max_char_size(&self) -> usize {
         // SAFETY: `self.0` is non-null for as long as `self` is alive.
-        let size = unsafe { ffi::ucnv_getMaxCharSize(self.0) };
+        let size = unsafe { versioned_function!(ucnv_getMaxCharSize)(self.0) };
         // ICU returns a positive byte count; the cast cannot lose information.
         size.unsigned_abs().into()
     }
@@ -93,7 +80,7 @@ impl Converter {
     /// converter's encoding.
     pub fn min_char_size(&self) -> usize {
         // SAFETY: `self.0` is non-null for as long as `self` is alive.
-        let size = unsafe { ffi::ucnv_getMinCharSize(self.0) };
+        let size = unsafe { versioned_function!(ucnv_getMinCharSize)(self.0) };
         size.unsigned_abs().into()
     }
 
@@ -112,14 +99,19 @@ impl Converter {
         let length =
             i8::try_from(substitute.len()).map_err(|_| TranscodeError::SetSubstituteCharsFailed)?;
 
-        let mut err = UErrorCode::default();
+        let mut err = sys::UErrorCode::U_ZERO_ERROR;
         // SAFETY: `self.0` is non-null, and `substitute` outlives the call and
         // is at least `length` bytes long. ICU takes the sequence as bytes and
         // does not require NUL termination when given an explicit length.
         unsafe {
-            ffi::ucnv_setSubstChars(self.0, substitute.as_ptr().cast(), length, &raw mut err);
+            versioned_function!(ucnv_setSubstChars)(
+                self.0,
+                substitute.as_ptr().cast(),
+                length,
+                &raw mut err,
+            );
         }
-        if err.is_failure() {
+        if is_failure(err) {
             return Err(TranscodeError::SetSubstituteCharsFailed);
         }
         Ok(())
@@ -130,7 +122,7 @@ impl Drop for Converter {
     fn drop(&mut self) {
         // SAFETY: `self.0` was returned non-null by `ucnv_open` and is closed
         // exactly once, here.
-        unsafe { ffi::ucnv_close(self.0) }
+        unsafe { versioned_function!(ucnv_close)(self.0) }
     }
 }
 
@@ -146,13 +138,13 @@ pub fn convert_ex(
     let target_start: *mut c_char = target.as_mut_ptr().cast();
     let mut target_cursor = target_start;
     let mut source_cursor: *const c_char = source.as_ptr().cast();
-    let mut err = UErrorCode::default();
+    let mut err = sys::UErrorCode::U_ZERO_ERROR;
 
     // SAFETY: both cursors start at the base of a live slice and are bounded
     // by a limit one past that slice's end, which is what ICU advances them
     // against. Passing a null pivot asks ICU to use an internal one.
     unsafe {
-        ffi::ucnv_convertEx(
+        versioned_function!(ucnv_convertEx)(
             to.0,
             from.0,
             &raw mut target_cursor,
@@ -168,7 +160,7 @@ pub fn convert_ex(
             &raw mut err,
         );
     }
-    if err.is_failure() {
+    if is_failure(err) {
         return None;
     }
     // SAFETY: ICU advanced `target_cursor` within `target`, so both pointers
@@ -183,7 +175,7 @@ pub fn convert_ex(
 pub fn from_uchars(to: &Converter, source: &[u8], target: &mut [u8]) -> Option<usize> {
     let src_length = i32::try_from(source.len() / size_of::<u16>()).ok()?;
     let dest_capacity = i32::try_from(target.len()).ok()?;
-    let mut err = UErrorCode::default();
+    let mut err = sys::UErrorCode::U_ZERO_ERROR;
 
     // SAFETY: the pointers and lengths describe the two live slices. `source`
     // need not be `u16`-aligned -- it is caller-supplied buffer contents, which
@@ -192,7 +184,7 @@ pub fn from_uchars(to: &Converter, source: &[u8], target: &mut [u8]) -> Option<u
     // pointer is well-defined in Rust regardless of alignment; no reference to
     // the misaligned data is ever formed on this side.
     let len = unsafe {
-        ffi::ucnv_fromUChars(
+        versioned_function!(ucnv_fromUChars)(
             to.0,
             target.as_mut_ptr().cast(),
             dest_capacity,
@@ -201,7 +193,7 @@ pub fn from_uchars(to: &Converter, source: &[u8], target: &mut [u8]) -> Option<u
             &raw mut err,
         )
     };
-    if err.is_failure() {
+    if is_failure(err) {
         return None;
     }
     usize::try_from(len).ok()

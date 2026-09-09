@@ -57,6 +57,13 @@ crate.annotation(
     crate = "capnpc",
     gen_binaries = ["capnpc-rust"],
 )
+crate.annotation(
+    # rust_icu's checked-in bindings and symbol-renaming macro are selected by this value. Keep it
+    # synchronized with Chromium ICU's U_ICU_VERSION_MAJOR_NUM in build/deps/gen/deps.MODULE.bazel.
+    build_script_env = {"BAZEL": "1"},
+    crate = "rust_icu_sys",
+    rustc_env = {"RUST_ICU_MAJOR_VERSION_NUMBER": "78"},
+)
 crate.from_cargo(
     # TODO(cleanup): This name is a bit misleading now that we don't vendor. We can clean it up as a
     # followup.
