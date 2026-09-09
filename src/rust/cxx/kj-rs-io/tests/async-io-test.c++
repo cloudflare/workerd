@@ -737,11 +737,12 @@ KJ_TEST("onSignal is delivered even when another runtime's thread consumes the s
     *shutdown.lockExclusive() = kj::mv(paf.fulfiller);
     paf.promise.wait(io2.getWaitScope());
   });
-  KJ_DEFER({
+  auto fulfillShutdown = [&]() {
     KJ_IF_SOME(fulfiller, *shutdown.lockExclusive()) {
       fulfiller->fulfill();
     }
-  });
+  };
+  KJ_DEFER(fulfillShutdown());
   // Wait until the other loop is up and parked (and the shutdown fulfiller exists) before
   // raising any signals, so its runtime genuinely participates in the wake-byte race.
   shutdown.when([](auto &maybe) { return maybe != kj::none; }, [](auto &) {});
