@@ -28,6 +28,7 @@
 #![allow(unsafe_code)]
 
 use core::pin::Pin;
+use std::future::Future;
 
 /// Opaque binding of `kj::AsyncIoStream`, and the cxx-bridged operations on it (shared-receiver
 /// shims; safe to call). Re-exported as `crate::ffi::*` so the rest of the crate (and the
@@ -57,7 +58,6 @@ use crate::net::listener_local_addr;
 use crate::net::listener_port;
 use crate::net::network_get_sockaddr;
 use crate::net::network_parse_address;
-use crate::net::wrap_connecting_socket_fd;
 use crate::net::wrap_listen_fd;
 use crate::net::wrap_socket_fd;
 use crate::readiness::TokioFdWatcher;
@@ -251,7 +251,12 @@ mod bridge {
         /// Wraps an unconnected TCP socket handle and connects it to `sockaddr` (a raw
         /// `struct sockaddr`, AF_INET/AF_INET6 only; owned copy, since the caller's pointer
         /// need not outlive the call).
-        async fn wrap_connecting_socket_fd(
+        ///
+        /// # Safety
+        ///
+        /// `handle` must be a valid, open socket whose exclusive ownership transfers to this
+        /// call. The caller must not use or close it afterward, including on failure.
+        async unsafe fn wrap_connecting_socket_fd(
             handle: i64,
             sockaddr: Vec<u8>,
         ) -> Result<Box<TokioStream>>;
@@ -358,6 +363,34 @@ mod bridge {
 
 // ======================================================================================
 // Raw socket handles / file descriptors.
+
+/// Adopts the socket before constructing the connect future, so dropping it unpolled closes
+/// the transferred socket. The networking implementation receives an owned value, not a raw
+/// handle with an unchecked ownership contract.
+///
+/// # Safety
+///
+/// `handle` must be a valid, open socket whose exclusive ownership transfers to this call.
+/// On Unix it must fit a nonnegative `i32`; on Windows it must be a nonnegative `SOCKET`
+/// value representable as `i64`. The caller must not use or close it after the call.
+unsafe fn wrap_connecting_socket_fd(
+    handle: i64,
+    sockaddr: Vec<u8>,
+) -> impl Future<Output = Result<Box<TokioStream>>> {
+    #[cfg(any(unix, windows))]
+    {
+        let socket = own_socket_from_raw(handle);
+        crate::net::connect_socket(socket, sockaddr)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (handle, sockaddr);
+        std::future::ready(Err(crate::error::KjIoError::other(
+            "wrapConnectingSocketFd",
+            "not implemented on this platform",
+        )))
+    }
+}
 
 /// Materializes an owned file descriptor from a raw `i32` that arrived across the FFI bridge
 /// (the unix-only pipe tier — `wrap_input_fd`/`wrap_output_fd`; sockets go through
@@ -1075,5 +1108,64 @@ mod tests {
             port
         );
         // `socket` is the sole owner: dropping it closes the fd (socket2::Socket's drop glue).
+    }
+
+    #[cfg(any(unix, windows))]
+    fn assert_unpolled_connect_closes_peer<F: Future>(
+        connect: impl FnOnce(std::net::TcpStream) -> F,
+    ) {
+        use std::io::Read;
+        use std::net::TcpListener;
+        use std::net::TcpStream;
+        use std::time::Duration;
+
+        // A connected socket makes ownership observable through its peer. This future must
+        // never be polled: the test exercises cancellation, not a second connect operation.
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let socket = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        peer.set_nonblocking(true).unwrap();
+
+        let connect = connect(socket);
+
+        let mut byte = [0];
+        assert_eq!(
+            peer.read(&mut byte).unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        peer.set_nonblocking(false).unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        drop(connect);
+
+        // Wait for EOF rather than querying a raw handle number that another thread could
+        // already have reused. The timeout bounds failure when the transferred socket leaks.
+        assert_eq!(peer.read(&mut byte).unwrap(), 0);
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn dropping_an_unpolled_connect_closes_the_transferred_socket() {
+        #[cfg(unix)]
+        use std::os::fd::IntoRawFd;
+        #[cfg(windows)]
+        use std::os::windows::io::IntoRawSocket;
+
+        assert_unpolled_connect_closes_peer(|socket| {
+            #[cfg(unix)]
+            let handle = i64::from(socket.into_raw_fd());
+            #[cfg(windows)]
+            let handle = i64::try_from(socket.into_raw_socket()).unwrap();
+            // SAFETY: into_raw_fd/into_raw_socket consumed the sole owner of this live socket;
+            // its ownership transfers to the shim and the test never uses the raw handle again.
+            unsafe { wrap_connecting_socket_fd(handle, Vec::new()) }
+        });
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn dropping_an_unpolled_owned_connect_closes_the_socket() {
+        assert_unpolled_connect_closes_peer(|socket| {
+            crate::net::connect_socket(socket.into(), Vec::new())
+        });
     }
 }

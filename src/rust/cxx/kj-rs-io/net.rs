@@ -15,6 +15,7 @@
 //! (`"host:http"`), `unix-abstract:` addresses, and IPv6 scope IDs (`"fe80::1%eth0"`) are not
 //! supported.
 
+use std::future::Future;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
@@ -505,6 +506,7 @@ pub fn listener_local_addr(listener: &TokioListener) -> Result<Vec<u8>> {
 // ALREADY_CLOEXEC / ALREADY_NONBLOCK flags, dup'ing when not taking ownership). The platform
 // split lives entirely in `ffi::own_socket_from_raw` (the one conversion point); everything
 // here operates on the uniform `socket2::Socket` / std / tokio types.
+// The connecting-socket entry point instead receives an already-owned Socket from its FFI shim.
 
 #[cfg(any(unix, windows))]
 fn socket_from_raw(handle: i64) -> socket2::Socket {
@@ -613,37 +615,28 @@ pub fn wrap_listen_fd(handle: i64) -> Result<Box<TokioListener>> {
     }
 }
 
-pub async fn wrap_connecting_socket_fd(handle: i64, sockaddr: Vec<u8>) -> Result<Box<TokioStream>> {
-    #[cfg(any(unix, windows))]
-    {
-        on_loop_runtime(async move {
-            let addr = sockaddr_from_bytes(&sockaddr)?;
-            let socket_addr = addr.as_socket().ok_or_else(|| {
-                KjIoError::other(
-                    "wrapConnectingSocketFd",
-                    "only AF_INET/AF_INET6 sockaddrs are supported",
-                )
-            })?;
-            let socket = socket_from_raw(handle);
-            // TcpSocket::connect handles the nonblocking connect dance (EINPROGRESS, wait for
-            // writability, check SO_ERROR) and registers with the I/O driver.
-            let tcp_socket = tokio::net::TcpSocket::from_std_stream(socket.into());
-            let stream = tcp_socket
-                .connect(socket_addr)
-                .await
-                .map_err(op("connect()"))?;
-            Ok(Box::new(TokioStream::from_tcp(stream)))
-        })
-        .await
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = (handle, sockaddr);
-        Err(KjIoError::other(
-            "wrapConnectingSocketFd",
-            "not implemented on this platform",
-        ))
-    }
+#[cfg(any(unix, windows))]
+pub fn connect_socket(
+    socket: socket2::Socket,
+    sockaddr: Vec<u8>,
+) -> impl Future<Output = Result<Box<TokioStream>>> {
+    on_loop_runtime(async move {
+        let addr = sockaddr_from_bytes(&sockaddr)?;
+        let socket_addr = addr.as_socket().ok_or_else(|| {
+            KjIoError::other(
+                "wrapConnectingSocketFd",
+                "only AF_INET/AF_INET6 sockaddrs are supported",
+            )
+        })?;
+        // TcpSocket::connect handles the nonblocking connect dance (EINPROGRESS, wait for
+        // writability, check SO_ERROR) and registers with the I/O driver.
+        let tcp_socket = tokio::net::TcpSocket::from_std_stream(socket.into());
+        let stream = tcp_socket
+            .connect(socket_addr)
+            .await
+            .map_err(op("connect()"))?;
+        Ok(Box::new(TokioStream::from_tcp(stream)))
+    })
 }
 
 #[cfg(test)]

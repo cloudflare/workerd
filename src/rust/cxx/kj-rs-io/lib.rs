@@ -2,8 +2,8 @@
 //!
 //! The C++ side (`async-io.h`) implements `kj::AsyncIoStream`, `kj::ConnectionReceiver`,
 //! `kj::NetworkAddress`, `kj::Network`, `kj::AsyncIoProvider` and `kj::LowLevelAsyncIoProvider`
-//! as thin wrappers over the opaque Rust types in this crate. All async operations are plain
-//! `async fn`s bridged to `kj::Promise<T>` by workerd-cxx; dropping the promise drops the Rust
+//! as thin wrappers over the opaque Rust types in this crate. Async bridge declarations expose
+//! Rust futures as `kj::Promise<T>` through workerd-cxx; dropping the promise drops the Rust
 //! future, which releases any tokio readiness interest (cancellation is implicit).
 //!
 //! Every future returned from this crate must be polled on the thread that owns the

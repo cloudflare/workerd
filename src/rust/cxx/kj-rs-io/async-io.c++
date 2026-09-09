@@ -500,6 +500,15 @@ kj::Own<kj::AsyncIoStream> TokioLowLevelAsyncIoProvider::wrapSocketFd(Fd fd, kj:
 kj::Promise<kj::Own<kj::AsyncIoStream>> TokioLowLevelAsyncIoProvider::wrapConnectingSocketFd(
     Fd fd, const struct sockaddr *addr, kj::uint addrlen, kj::uint flags) {
   int64_t prepared = static_cast<int64_t>(prepareFd(fd, flags));
+  auto closeOnFailure = kj::defer([prepared]() {
+#if _WIN32
+    KJ_WINSOCK(closesocket(static_cast<SOCKET>(prepared))) {
+      break;
+    }
+#else
+    kj::OwnFd owned(static_cast<int>(prepared));
+#endif
+  });
   // The Rust side takes an owned copy of the sockaddr: the caller's pointer need not outlive
   // this call (KJ's own implementation copies too).
   ::rust::Vec<uint8_t> addrCopy;
@@ -508,6 +517,10 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> TokioLowLevelAsyncIoProvider::wrapConnec
   for (kj::uint i = 0; i < addrlen; i++) {
     addrCopy.push_back(addrBytes[i]);
   }
+  // Rust takes ownership synchronously, before constructing its future. Disarm this guard
+  // before the call: Rust closes the socket if a later step throws. A scope-failure guard
+  // spanning that call could then double-close the socket or close a reused handle.
+  closeOnFailure.cancel();
   return wrap_connecting_socket_fd(prepared, kj::mv(addrCopy))
       .then([](::rust::Box<TokioStream> stream) -> kj::Own<kj::AsyncIoStream> {
     return kj::heap<TokioAsyncIoStream>(kj::mv(stream));
