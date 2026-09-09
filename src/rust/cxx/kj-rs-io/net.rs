@@ -186,6 +186,9 @@ impl TokioAddress {
                     .get(index)
                     .ok_or_else(|| KjIoError::other("connect()", "address index out of range"))?;
                 let stream = TcpStream::connect(addr).await.map_err(op("connect()"))?;
+                stream
+                    .set_nodelay(true)
+                    .map_err(op("setsockopt(TCP_NODELAY)"))?;
                 Ok(Box::new(TokioStream::from_tcp(stream)))
             }
             #[cfg(unix)]
@@ -294,7 +297,9 @@ impl TokioListener {
         match &self.inner {
             ListenerInner::Tcp(listener) => {
                 let (stream, _peer) = listener.accept().await.map_err(op("accept()"))?;
-                let _ = stream.set_nodelay(true);
+                stream
+                    .set_nodelay(true)
+                    .map_err(op("setsockopt(TCP_NODELAY)"))?;
                 Ok(Box::new(TokioStream::from_tcp(stream)))
             }
             #[cfg(unix)]

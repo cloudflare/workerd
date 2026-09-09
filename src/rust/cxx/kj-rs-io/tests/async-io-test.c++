@@ -268,13 +268,15 @@ KJ_TEST("sockname/peername/sockopt/getFd passthrough") {
   KJ_EXPECT(peer.sin_port == local.sin_port);
   KJ_EXPECT(peer.sin_addr.s_addr == local.sin_addr.s_addr);
 
-  // setsockopt/getsockopt round-trip (this is also how setNoDelay-style options are applied).
-  int on = 1;
-  pair.client->setsockopt(IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
-  int result = 0;
-  kj::uint resultLen = sizeof(result);
-  pair.client->getsockopt(IPPROTO_TCP, TCP_NODELAY, &result, &resultLen);
-  KJ_EXPECT(result != 0);
+  int clientNoDelay = 0;
+  kj::uint clientNoDelayLen = sizeof(clientNoDelay);
+  pair.client->getsockopt(IPPROTO_TCP, TCP_NODELAY, &clientNoDelay, &clientNoDelayLen);
+  KJ_EXPECT(clientNoDelay != 0);
+
+  int serverNoDelay = 0;
+  kj::uint serverNoDelayLen = sizeof(serverNoDelay);
+  pair.server->getsockopt(IPPROTO_TCP, TCP_NODELAY, &serverNoDelay, &serverNoDelayLen);
+  KJ_EXPECT(serverNoDelay != 0);
 #endif
 }
 
