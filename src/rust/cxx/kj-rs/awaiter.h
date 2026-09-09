@@ -73,12 +73,8 @@ class RustPromiseAwaiter final: public kj::_::Event {
 
   // Poll this Promise for readiness.
   //
-  // If the Waker is a KjWaker, you may pass the KjWaker pointer as a second parameter. This may
-  // allow the implementation of `poll()` to optimize the wake by arming a KJ Event directly when
-  // the wrapped Promise becomes ready.
-  //
-  // If the Waker is not a KjWaker, the `maybeKjWaker` pointer argument must be nullptr.
-  bool poll(const WakerRef& waker, const KjWaker* maybeKjWaker);
+  bool poll(const WakerRef& waker);
+  bool poll(const WakerRef& waker, const PollWaker& pollWaker);
 
   // Release ownership of the OwnPromiseNode. Asserts if called before the Promise is ready; that
   // is, `poll()` must have returned true prior to calling `take_own_promise_node()`.
@@ -106,8 +102,11 @@ struct GuardedRustPromiseAwaiter: ExecutorGuarded<RustPromiseAwaiter> {
   // We need to inherit constructors or else placement-new will try to aggregate-initialize us.
   using ExecutorGuarded<RustPromiseAwaiter>::ExecutorGuarded;
 
-  bool poll(const WakerRef& waker, const KjWaker* maybeKjWaker) {
-    return get().poll(waker, maybeKjWaker);
+  bool poll(const WakerRef& waker) {
+    return get().poll(waker);
+  }
+  bool pollWithPollWaker(const WakerRef& waker, const PollWaker& pollWaker) {
+    return get().poll(waker, pollWaker);
   }
   OwnPromiseNode take_own_promise_node() {
     return get().take_own_promise_node();
@@ -135,7 +134,7 @@ void guarded_rust_promise_awaiter_drop_in_place(GuardedRustPromiseAwaiter*);
 // we mustn't leave references to them, or their members, lying around in the Coroutine class.
 class FuturePollEvent: public kj::_::PromiseNode, public kj::_::Event, public kj::PtrTarget {
  public:
-  FuturePollEvent(kj::SourceLocation location = {}): Event(location) {}
+  FuturePollEvent(kj::SourceLocation location = {});
   ~FuturePollEvent() noexcept(false);
 
   // -------------------------------------------------------
@@ -146,15 +145,10 @@ class FuturePollEvent: public kj::_::PromiseNode, public kj::_::Event, public kj
 
   void tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) override;
 
- protected:
-  // PollScope is a LazyArcWaker which is associated with a specific FuturePollEvent, allowing
-  // optimized Promise `.await`s. Additionally, PollScope's destructor arranges to await any
-  // ArcWaker promise which was lazily created.
-  //
-  // Used by FutureAwaiter<T>, our derived class.
-  class PollScope;
-
  private:
+  friend class PollWaker;
+  kj::Arc<FutureWakerCell> cloneWakerCell();
+
   kj::Weak<FuturePollEvent> addWeakRef() {
     return addWeakToThis();
   }
@@ -162,33 +156,15 @@ class FuturePollEvent: public kj::_::PromiseNode, public kj::_::Event, public kj
   friend class RustPromiseAwaiter;
   kj::List<RustPromiseAwaiter, &RustPromiseAwaiter::link> leaves;
 
-  // Private API for PollScope.
-  void enterPollScope() noexcept;
-  void exitPollScope(kj::Maybe<kj::Promise<void>> maybeLazyArcWakerPromise);
-
-  kj::Maybe<OwnPromiseNode> arcWakerPromise;
-};
-
-class FuturePollEvent::PollScope: public LazyArcWaker {
- public:
-  // `futurePollEvent` is the FuturePollEvent responsible for calling `Future::poll()`, and must
-  // outlive this PollScope.
-  PollScope(FuturePollEvent& futurePollEvent);
-  ~PollScope() noexcept(false);
-  KJ_DISALLOW_COPY_AND_MOVE(PollScope);
-
-  // The Event which is using this PollScope to poll() a Future. Waking this FuturePollEvent's
-  // PollScope arms this Event (possibly via a cross-thread promise fulfiller). We also arm the
-  // Event directly in the RustPromiseAwaiter class, to more optimally `.await` KJ Promises from
-  // within Rust. If the current thread's kj::Executor is not the same as the one which owns the
-  // FuturePollEvent, this function returns kj::none.
-  kj::Maybe<FuturePollEvent&> tryGetFuturePollEvent() const override;
-
- private:
-  struct FuturePollEventHolder {
-    FuturePollEvent& futurePollEvent;
+  struct NeutralizeGuard {
+    kj::Arc<FutureWakerCell> cell;
+    ~NeutralizeGuard() noexcept(false) {
+      if (cell.get() != nullptr) {
+        cell->neutralize();
+      }
+    }
   };
-  ExecutorGuarded<FuturePollEventHolder> holder;
+  NeutralizeGuard wakerCell;
 };
 
 // =======================================================================================
@@ -198,7 +174,7 @@ template <typename F>
 concept Future = requires(F f) {
   typename F::Output;
   {
-    f.poll(kj::instance<const KjWaker&>(),
+    f.poll(kj::instance<const PollWaker&>(),
         kj::instance<typename ::kj::_::ExceptionOr<typename F::Output>&>())
   } -> std::same_as<void>;
 };
@@ -250,15 +226,10 @@ class FutureAwaiter final: public FuturePollEvent {
   void poll() {
     if (isDone()) return;
 
-    // TODO(perf): Check if we already have an ArcWaker from a previous suspension and give it to
-    //   LazyArcWaker for cloning if we have the last reference to it at this point. This could save
-    //   memory allocations, but would depend on making XThreadFulfiller and XThreadPaf resettable
-    //   to really benefit.
-
     {
-      PollScope pollScope(*this);
+      PollWaker pollWaker(*this);
 
-      future.poll(pollScope, result);
+      future.poll(pollWaker, result);
       if (isDone()) {
         onReadyEvent.arm();
       }

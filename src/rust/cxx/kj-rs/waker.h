@@ -253,4 +253,22 @@ class LazyArcWaker: public KjWaker {
   mutable uint dropCount = 0;
 };
 
+// =======================================================================================
+// PollWaker
+
+// Stack-owned waker passed to `Future::poll()`. Clones retain the associated FutureWakerCell.
+class PollWaker final {
+ public:
+  explicit PollWaker(FuturePollEvent& futurePollEvent);
+  ~PollWaker() noexcept(false);
+  KJ_DISALLOW_COPY_AND_MOVE(PollWaker);
+
+  void wakeByRef() const;
+  kj::Arc<FutureWakerCell> cloneCell() const;
+  kj::Maybe<FuturePollEvent&> tryGetFuturePollEvent() const;
+
+ private:
+  kj::Arc<FutureWakerCell> cell;
+};
+
 }  // namespace kj_rs

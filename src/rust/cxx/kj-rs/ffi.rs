@@ -4,6 +4,12 @@ use crate::awaiter::RustWaker;
 use crate::awaiter::WakerRef;
 use crate::awaiter::clone_waker;
 
+// Safety: FutureWakerCell uses atomic reference counting and routes foreign-thread wakes through
+// its owning event loop's cross-thread sink.
+unsafe impl Send for bridge::FutureWakerCell {}
+// Safety: all shared operations on FutureWakerCell are thread-safe.
+unsafe impl Sync for bridge::FutureWakerCell {}
+
 #[cxx::bridge(namespace = "kj_rs")]
 mod bridge {
 
@@ -34,6 +40,23 @@ mod bridge {
     }
 
     unsafe extern "C++" {
+        include!("kj-rs/waker.h");
+
+        type PollWaker;
+        #[cxx_name = "wakeByRef"]
+        fn wake_by_ref(self: &PollWaker);
+        #[cxx_name = "cloneCell"]
+        fn clone_cell(self: &PollWaker) -> KjArc<FutureWakerCell>;
+
+        type FutureWakerCell;
+        #[cxx_name = "wakeByRef"]
+        fn wake_by_ref(self: &FutureWakerCell);
+        #[cxx_name = "addRef"]
+        fn add_ref(self: &FutureWakerCell) -> KjArc<FutureWakerCell>;
+        unsafe fn reown(self: &FutureWakerCell) -> KjArc<FutureWakerCell>;
+    }
+
+    unsafe extern "C++" {
         include!("kj-rs/promise.h");
 
         type OwnPromiseNode = crate::OwnPromiseNode;
@@ -61,12 +84,12 @@ mod bridge {
         /// `ptr` must point to an initialized guarded awaiter.
         unsafe fn guarded_rust_promise_awaiter_drop_in_place(ptr: *mut GuardedRustPromiseAwaiter);
 
-        /// # Safety
-        /// `maybe_kj_waker`, when non-null, must point to a live `KjWaker`.
-        unsafe fn poll(
+        fn poll(self: Pin<&mut GuardedRustPromiseAwaiter>, waker: &WakerRef) -> bool;
+        #[cxx_name = "pollWithPollWaker"]
+        fn poll_with_poll_waker(
             self: Pin<&mut GuardedRustPromiseAwaiter>,
             waker: &WakerRef,
-            maybe_kj_waker: *const KjWaker,
+            poll_waker: &PollWaker,
         ) -> bool;
 
         #[must_use]

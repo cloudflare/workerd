@@ -7,7 +7,7 @@ use crate::OwnPromiseNode;
 // Await syntax for OwnPromiseNode
 use crate::ffi::GuardedRustPromiseAwaiter;
 use crate::ffi::GuardedRustPromiseAwaiterRepr;
-use crate::waker::try_into_kj_waker_ptr;
+use crate::waker::try_poll_waker;
 
 pub struct PromiseAwaiter<Data: std::marker::Unpin> {
     node: Option<OwnPromiseNode>,
@@ -71,13 +71,13 @@ impl<Data: std::marker::Unpin> PromiseAwaiter<Data> {
     }
 
     pub fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> bool {
-        let maybe_kj_waker = try_into_kj_waker_ptr(cx.waker());
-        let awaiter = self.as_mut().get_awaiter();
-        // Safety: The awaiter is initialized by `get_awaiter()` above. `WakerRef` borrows the
-        // context's waker, which is alive for the duration of the call. `maybe_kj_waker` is null
-        // or points to the KjWaker inside the waker (validated by `try_into_kj_waker_ptr`).
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-        unsafe { awaiter.poll(&WakerRef(cx.waker()), maybe_kj_waker) }
+        match try_poll_waker(cx.waker()) {
+            Some(poll_waker) => self
+                .as_mut()
+                .get_awaiter()
+                .poll_with_poll_waker(&WakerRef(cx.waker()), poll_waker),
+            None => self.as_mut().get_awaiter().poll(&WakerRef(cx.waker())),
+        }
     }
 }
 

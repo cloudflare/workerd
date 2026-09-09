@@ -238,4 +238,25 @@ kj::Maybe<kj::Promise<void>> LazyArcWaker::reset() {
   }
 }
 
+// =======================================================================================
+// PollWaker
+
+PollWaker::PollWaker(FuturePollEvent& futurePollEvent): cell(futurePollEvent.cloneWakerCell()) {
+  cell->ensureCrossThreadDrain();
+}
+
+PollWaker::~PollWaker() noexcept(false) {}
+
+void PollWaker::wakeByRef() const {
+  cell->wakeByRef();
+}
+
+kj::Arc<FutureWakerCell> PollWaker::cloneCell() const {
+  return cell->addRef();
+}
+
+kj::Maybe<FuturePollEvent&> PollWaker::tryGetFuturePollEvent() const {
+  return cell->tryGetFuturePollEvent();
+}
+
 }  // namespace kj_rs

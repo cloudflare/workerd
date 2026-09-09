@@ -1,3 +1,7 @@
+// The CXX bridge expands KjArc vocabulary paths through the crate name, including from inside
+// this crate's own bridge module.
+extern crate self as kj_rs;
+
 pub use awaiter::PromiseAwaiter;
 pub use date::KjDate;
 pub use future::FuturePollStatus;
@@ -12,7 +16,9 @@ pub use promise::new_callbacks_promise_future;
 pub use refcount::repr::KjArc;
 pub use refcount::repr::KjRc;
 
+pub use crate::ffi::FutureWakerCell;
 pub use crate::ffi::KjWaker;
+pub use crate::ffi::PollWaker;
 
 mod awaiter;
 mod date;

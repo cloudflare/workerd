@@ -82,53 +82,35 @@ void RustPromiseAwaiter::tracePromise(kj::_::TraceBuilder& builder, bool stopAtN
   // TODO(someday): Can we add an entry for the `.await` expression in Rust here?
 }
 
-bool RustPromiseAwaiter::poll(const WakerRef& waker, const KjWaker* maybeKjWaker) {
+bool RustPromiseAwaiter::poll(const WakerRef& waker) {
   // TODO(perf): If `this->isNext()` is true, meaning our event is next in line to fire, can we
   //   disarm it, set `done = true`, etc.? If we can only suspend if our enclosing KJ coroutine has
   //   suspended at least once, we may be able to check for that through LazyArcWaker, but this path
   //   doesn't have access to one.
 
-  if (!done) {
-    // Our Promise is not yet ready.
-
-    // Check for an optimized wake path.
-    KJ_IF_SOME(kjWaker, maybeKjWaker) {
-      KJ_IF_SOME(futurePollEvent, kjWaker.tryGetFuturePollEvent()) {
-        // Optimized path. The Future which is polling our Promise is in turn being polled by a
-        // `co_await` expression somewhere up the stack from us. We can arrange to arm the
-        // `co_await` expression's KJ Event directly when our Promise is ready.
-
-        storedWaker = kj::none;
-
-        // Store a reference to the current `co_await` expression's Future polling Event. The
-        // reference is weak, and will be cleared if the `co_await` expression happens to end before
-        // our Promise is ready. In the more likely case that our Promise becomes ready while the
-        // `co_await` expression is still active, we'll arm its Event so it can `poll()` us again.
-        setPollEvent(futurePollEvent);
-
-        return false;
-      }
-    }
-
-    // Unoptimized fallback path.
-
-    bool haveEquivalentClone = false;
-    KJ_IF_SOME(stored, storedWaker) {
-      haveEquivalentClone = stored->will_wake(waker);
-    }
-    if (!haveEquivalentClone) {
-      storedWaker = clone_waker(waker);
-    }
-
-    // Clearing our reference to the FuturePollEvent (if we have one) tells our fire()
-    // implementation to use our stored Waker to perform the wake.
-    clearPollEvent();
-
-    return false;
-  } else {
-    // Our Promise is ready.
+  if (done) {
     return true;
   }
+
+  bool haveEquivalentClone = false;
+  KJ_IF_SOME(stored, storedWaker) {
+    haveEquivalentClone = stored->will_wake(waker);
+  }
+  if (!haveEquivalentClone) {
+    storedWaker = clone_waker(waker);
+  }
+  clearPollEvent();
+  return false;
+}
+
+bool RustPromiseAwaiter::poll(const WakerRef& waker, const PollWaker& pollWaker) {
+  KJ_IF_SOME(futurePollEvent, pollWaker.tryGetFuturePollEvent()) {
+    if (done) return true;
+    storedWaker = kj::none;
+    setPollEvent(futurePollEvent);
+    return false;
+  }
+  return poll(waker);
 }
 
 OwnPromiseNode RustPromiseAwaiter::take_own_promise_node() {
@@ -150,6 +132,10 @@ void guarded_rust_promise_awaiter_drop_in_place(GuardedRustPromiseAwaiter* ptr) 
 // =======================================================================================
 // FuturePollEvent
 
+FuturePollEvent::FuturePollEvent(kj::SourceLocation location)
+    : Event(location),
+      wakerCell{kj::arc<FutureWakerCell>(*this)} {}
+
 FuturePollEvent::~FuturePollEvent() noexcept(false) {
   invalidateWeak();
   for (;;) {
@@ -159,43 +145,8 @@ FuturePollEvent::~FuturePollEvent() noexcept(false) {
   }
 }
 
-void FuturePollEvent::exitPollScope(kj::Maybe<kj::Promise<void>> maybePromise) {
-  // Await any LazyArcWaker promise that got created during the call to `poll()`. Note that if a
-  // Future returns Ready _and_ synchronously wakes its Waker, the work done to await the
-  // LazyArcWaker promise is wasted, since we will immediately tear the entire BoxFutureAwaiter<T>
-  // down. However, that's an unlikely case, and this work here isn't likely to be a significant
-  // source of overhead.
-  KJ_IF_SOME(promise, maybePromise) {
-    auto& node = arcWakerPromise.emplace(kj::_::PromiseNode::from(kj::mv(promise)));
-    node->setSelfPointer(&node);
-    node->onReady(this);
-  }
-}
-
-void FuturePollEvent::enterPollScope() noexcept {
-  // Clear out any previous LazyArcWaker promise the FuturePollEvent was holding onto. Note that
-  // since there is no code path which rejects this Promise, this is not strictly required for
-  // correctness, but nevertheless serves as a useful assertion.
-  KJ_IF_SOME(node, arcWakerPromise) {
-    kj::_::ExceptionOr<kj::_::Void> output;
-
-    node->get(output);
-    KJ_IF_SOME(exception, kj::runCatchingExceptions([this]() { arcWakerPromise = kj::none; })) {
-      output.addException(kj::mv(exception));
-    }
-
-    // NOTE: `node` is now dangling.
-
-    KJ_IF_SOME(exception, output.exception) {
-      // We should only ever receive a WakeInstruction, never an exception. If we do receive an
-      // exception, it would be because our ArcWaker implementation allowed its cross-thread promise
-      // fulfiller to be destroyed without being fulfilled, or because we foolishly added an
-      // explicit call to the fulfiller's reject() function. Either way, it is a programming error,
-      // so we abort the process here by re-throwing across a noexcept boundary. This avoids having
-      // implement the ability to "reject" the Future poll() Event.
-      kj::throwFatalException(kj::mv(exception));
-    }
-  }
+kj::Arc<FutureWakerCell> FuturePollEvent::cloneWakerCell() {
+  return wakerCell.cell.addRef();
 }
 
 void FuturePollEvent::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) {
@@ -210,28 +161,6 @@ void FuturePollEvent::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNext
   if (!leaves.empty()) {
     // Our Rust Future is awaiting an OwnPromiseNode. We'll pick the first one in our list.
     leaves.front().tracePromise(builder, false);
-  } else KJ_IF_SOME(node, arcWakerPromise) {
-    // Our Rust Future is not awaiting any OwnPromiseNode, and instead cloned our Waker. We'll trace
-    // our ArcWaker Promise instead.
-    if (node.get() != nullptr) {
-      node->tracePromise(builder, false);
-    }
-  }
-}
-
-FuturePollEvent::PollScope::PollScope(FuturePollEvent& futurePollEvent): holder(futurePollEvent) {
-  futurePollEvent.enterPollScope();
-}
-
-FuturePollEvent::PollScope::~PollScope() noexcept(false) {
-  holder.get().futurePollEvent.exitPollScope(reset());
-}
-
-kj::Maybe<FuturePollEvent&> FuturePollEvent::PollScope::tryGetFuturePollEvent() const {
-  KJ_IF_SOME(h, holder.tryGet()) {
-    return h.futurePollEvent;
-  } else {
-    return kj::none;
   }
 }
 
