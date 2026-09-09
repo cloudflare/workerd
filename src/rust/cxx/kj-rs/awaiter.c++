@@ -170,14 +170,7 @@ void guarded_rust_promise_awaiter_drop_in_place(GuardedRustPromiseAwaiter* ptr) 
 // =======================================================================================
 // FuturePollEvent
 
-FuturePollEvent::FuturePollEvent(kj::SourceLocation location)
-    : Event(location),
-      // Created eagerly (not lazily on first clone): `&Waker` is Sync, so even the borrowed
-      // per-poll waker may be cloned or woken from a foreign thread during the very first poll,
-      // and both paths need the cell to already exist. One small allocation per awaited future,
-      // next to the coroutine frame and promise nodes already being allocated; the cross-thread
-      // machinery itself is shared per loop (CrossThreadWakeSink), not allocated here.
-      wakerCell{kj::arc<FutureWakerCell>(*this)} {}
+FuturePollEvent::FuturePollEvent(kj::SourceLocation location): Event(location) {}
 
 FuturePollEvent::~FuturePollEvent() noexcept(false) {
   // Expire every weak reference to us up front — the leaves' `weakPollEvent` links — so nothing
@@ -200,6 +193,12 @@ FuturePollEvent::~FuturePollEvent() noexcept(false) {
 }
 
 kj::Arc<FutureWakerCell> FuturePollEvent::cloneWakerCell() {
+  if (wakerCell.cell.get() == nullptr) {
+    // PollWaker calls this before exposing even a borrowed Waker to Rust, so the cell exists in
+    // time for the first poll to clone or wake it from another thread. Deferring until here keeps
+    // construction of a cold RustFuture adapter independent of an event loop.
+    wakerCell.cell = kj::arc<FutureWakerCell>(*this);
+  }
   // Hand out a new strong reference for Rust to retain.
   return wakerCell.cell.addRef();
 }
