@@ -52,7 +52,7 @@ thread_local! {
 pub struct EnteredRuntime {
     // Dropped first, explicitly, in `Drop::drop`; declared first as documentation of that order.
     guard: ManuallyDrop<EnterGuard<'static>>,
-    runtime: Runtime,
+    runtime: ManuallyDrop<Runtime>,
 }
 
 impl EnteredRuntime {
@@ -68,7 +68,7 @@ impl EnteredRuntime {
             unsafe { std::mem::transmute::<EnterGuard<'_>, EnterGuard<'static>>(guard) };
         Self {
             guard: ManuallyDrop::new(guard),
-            runtime,
+            runtime: ManuallyDrop::new(runtime),
         }
     }
 }
@@ -90,6 +90,11 @@ impl Drop for EnteredRuntime {
             // SAFETY: The sentinel proves Tokio's thread-local context is still available.
             unsafe { ManuallyDrop::drop(&mut self.guard) };
         }
+        // SAFETY: `runtime` is initialized in `new`, never taken elsewhere, and this `Drop`
+        // implementation runs once. Background shutdown cancels async work without waiting
+        // indefinitely for user-submitted blocking tasks.
+        let runtime = unsafe { ManuallyDrop::take(&mut self.runtime) };
+        runtime.shutdown_background();
     }
 }
 

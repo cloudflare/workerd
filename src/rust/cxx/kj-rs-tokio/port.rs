@@ -353,6 +353,40 @@ mod tests {
     }
 
     #[test]
+    fn port_drop_does_not_wait_for_blocking_tasks() {
+        let port = TokioPort::new();
+        let release = Arc::new(AtomicBool::new(false));
+        let task_release = Arc::clone(&release);
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        port.handle().spawn_blocking(move || {
+            started_tx.send(()).unwrap();
+            while !task_release.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            done_tx.send(()).unwrap();
+        });
+        started_rx.recv().unwrap();
+
+        let watchdog_release = Arc::clone(&release);
+        let watchdog = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            watchdog_release.store(true, Ordering::SeqCst);
+        });
+        let start = std::time::Instant::now();
+        drop(port);
+        let elapsed = start.elapsed();
+        release.store(true, Ordering::SeqCst);
+        done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        watchdog.join().unwrap();
+
+        assert!(
+            elapsed < Duration::from_millis(100),
+            "port teardown waited for a blocking task: {elapsed:?}"
+        );
+    }
+
+    #[test]
     fn bare_port_drop_cancels_spawned_tasks() {
         // A TokioPort NOT owned by a TokioEventPort: dropping it must still cancel tasks
         // spawned onto its LocalSet (the Drop fallback), and leave the thread clean so a fresh
