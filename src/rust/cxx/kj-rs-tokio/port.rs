@@ -43,6 +43,7 @@ thread_local! {
     /// promises), with `TokioPort::drop` as the fallback.
     static LOOP_LOCAL_SET: RefCell<Option<Rc<LocalSet>>> = const { RefCell::new(None) };
 }
+
 /// Returns a handle to this thread's KJ-loop tokio runtime, if a `TokioEventPort` exists on this
 /// thread.
 #[must_use]
