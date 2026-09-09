@@ -32,3 +32,29 @@ rust_cxx_bridge(
         "//src/rust/cxx/kj-rs-io:bridge",
     ],
 )
+
+cc_test(
+    name = "async-io-test",
+    # medium: several tests do real socket I/O plus timer-bounded waits (backpressure, signals,
+    # DNS), which can exceed small's 60 s budget under load / sanitizers.
+    size = "medium",
+    srcs = [
+        "async-io-test.c++",
+        "io-test-helpers.h",
+    ],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":bridge",
+        ":tests",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)
