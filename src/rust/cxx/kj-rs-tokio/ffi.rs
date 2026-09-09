@@ -17,6 +17,19 @@ use tokio::runtime::Runtime;
 use crate::port::TokioPort;
 use crate::port::new_tokio_port;
 
+struct TokioContextSentinel;
+
+impl Drop for TokioContextSentinel {
+    fn drop(&mut self) {}
+}
+
+thread_local! {
+    // Initialized after Tokio's context TLS. During thread teardown this sentinel is therefore
+    // destroyed first, making `try_with()` a reliable guard against touching Tokio's context
+    // after its destructor has run.
+    static TOKIO_CONTEXT_SENTINEL: TokioContextSentinel = const { TokioContextSentinel };
+}
+
 /// A tokio runtime whose context is entered on the owning thread for the runtime's whole life.
 ///
 /// The KJ event loop turns its events *outside* `block_on` (only `wait()`/`poll()` are inside),
@@ -45,6 +58,7 @@ pub struct EnteredRuntime {
 impl EnteredRuntime {
     pub fn new(runtime: Runtime) -> Self {
         let guard: EnterGuard<'_> = runtime.enter();
+        TOKIO_CONTEXT_SENTINEL.with(|_| {});
         // SAFETY: `EnterGuard<'a>`'s lifetime parameter exists only as `PhantomData<&'a Handle>`
         // (tokio `runtime/handle.rs`); the guard stores no reference or pointer into the runtime,
         // and its `Drop` touches only thread-local context state. Extending `'a` therefore cannot
@@ -72,7 +86,10 @@ impl Drop for EnteredRuntime {
         // only place it is dropped -- `Drop::drop` runs exactly once. It must go before `runtime`
         // (which the compiler drops right after this body), restoring the thread's previous
         // tokio context while the runtime it referred to is still alive.
-        unsafe { ManuallyDrop::drop(&mut self.guard) };
+        if TOKIO_CONTEXT_SENTINEL.try_with(|_| {}).is_ok() {
+            // SAFETY: The sentinel proves Tokio's thread-local context is still available.
+            unsafe { ManuallyDrop::drop(&mut self.guard) };
+        }
     }
 }
 
