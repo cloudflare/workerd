@@ -151,13 +151,7 @@ struct TokioAsyncIoContext {
       : port(kj::mv(port)),
         waitScope(kj::mv(waitScope)) {}
   ~TokioAsyncIoContext() noexcept(false);
-  // Move-CONSTRUCTIBLE only (setupTokioAsyncIo() returns by value; a moved-from context owns
-  // nothing and its destructor is a no-op). Move-ASSIGNMENT is deleted on purpose: it would
-  // destroy the existing members via their kj::Owns without running ~TokioAsyncIoContext first.
-  // Return-by-value needs only the move constructor, so nothing is lost.
-  TokioAsyncIoContext(TokioAsyncIoContext &&) = default;
-  TokioAsyncIoContext &operator=(TokioAsyncIoContext &&) = delete;
-  KJ_DISALLOW_COPY(TokioAsyncIoContext);
+  KJ_DISALLOW_COPY_AND_MOVE(TokioAsyncIoContext);
 
   kj::Own<TokioEventPort> port;
   kj::Own<kj::WaitScope> waitScope;

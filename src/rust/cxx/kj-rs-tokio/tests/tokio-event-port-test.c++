@@ -15,11 +15,14 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <type_traits>
 
 namespace kj_rs_tokio_test {
 namespace {
 
 using kj_rs_tokio::setupTokioAsyncIo;
+
+static_assert(!std::is_move_constructible_v<kj_rs_tokio::TokioAsyncIoContext>);
 
 void delayMillis(uint64_t millis) {
   std::this_thread::sleep_for(std::chrono::milliseconds(millis));
