@@ -12,7 +12,6 @@ wd_cc_library(
         "//conditions:default": False,
     }),
     visibility = [
-        "//src/rust/cxx/kj-rs-tokio:__pkg__",
         "//src/rust/cxx/tests:__pkg__",
     ],
     deps = [
