@@ -94,7 +94,7 @@ export const respectsViewOffsets = {
 };
 
 // An invalid chunk rejects ITS OWN write only; the stream stays usable
-// (parity — the DECIDED contract for the internal transforms, matching
+// (parity — the per-write contract of the internal transforms, matching
 // the C++ internal controllers; under TypeScript the sink signals the
 // rejection through the non-fatal write-rejection channel).
 export const rejectsNumberChunk = {
@@ -118,7 +118,7 @@ export const invalidChunkAfterQueuedValidWrites = {
     // An invalid chunk queued BEHIND valid writes must not cost them their
     // delivery: validation errors surface in FIFO order, after everything
     // written earlier has been consumed, and the stream survives the
-    // rejection (parity — the DECIDED per-write-rejection contract).
+    // rejection (parity — the per-write contract).
     const { readable, writable } = new IdentityTransformStream();
     const writer = writable.getWriter();
     const reader = readable.getReader();

@@ -21,7 +21,7 @@ const outcomeOf = (p, ms = 250) =>
     scheduler.wait(ms).then(() => ({ state: 'pending' })),
   ]);
 
-// Close-below-min follows the DECIDED readAtLeast tail contract on both
+// Close-below-min follows the readAtLeast tail contract on both
 // implementations: the available bytes are folded into a done=false
 // result, and a follow-up read resolves done. Tee-driven pulls under
 // TypeScript present a NULL byobRequest (readable-byte ledger #5/#6),
@@ -47,7 +47,7 @@ export const byobReadAtLeastAutomatic = {
     const reader = rs.getReader({ mode: 'byob' });
 
     // Close arrives below the 100-byte minimum: the available 10 bytes
-    // fold into a done=false result (the DECIDED tail contract, parity).
+    // fold into a done=false result (the tail contract, parity).
     const res = await reader.readAtLeast(100, new Uint8Array(100));
 
     strictEqual(res.done, false);
@@ -279,7 +279,7 @@ export const partiallyFilledByobAtLeast = {
   },
 };
 
-// The SUPPORTED tee source pattern (decided 2026-08-28): tee-driven
+// The SUPPORTED tee source pattern: tee-driven
 // pulls under the TypeScript shared-queue model present a NULL
 // byobRequest, so sources must be null-tolerant — fill the request when
 // present (the C++ path), enqueue() otherwise. Sources that touch
@@ -370,7 +370,7 @@ export const byobReadAtLeastTeeComplex1 = {
     strictEqual(dec.decode(r2.value.value), 'hellothere');
     strictEqual(r2.value.done, false);
     // The below-min tail at close is delivered done=false (a separate
-    // zero-length done read follows) — the DECIDED contract, parity.
+    // zero-length done read follows) — the tail contract, parity.
     strictEqual(r3.state, 'fulfilled');
     strictEqual(dec.decode(r3.value.value), 'ere');
     strictEqual(r3.value.done, false);
@@ -413,7 +413,7 @@ export const byobReadAtLeastTeeComplex2 = {
     strictEqual(dec.decode(r2.value.value), 'hellothere');
     strictEqual(r2.value.done, false);
     // The below-min tail at close is delivered done=false (a separate
-    // zero-length done read follows) — the DECIDED contract, parity.
+    // zero-length done read follows) — the tail contract, parity.
     strictEqual(r3.state, 'fulfilled');
     strictEqual(dec.decode(r3.value.value), 'ere');
     strictEqual(r3.value.done, false);

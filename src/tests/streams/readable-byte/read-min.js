@@ -4,10 +4,10 @@
 
 // The read-minimum machinery: the standard read(view, {min}) option and
 // the workerd readAtLeast(min, view) extension (implemented by BOTH
-// sides). Close-below-min follows the DECIDED tail contract (matching
-// C++, diverging from the spec's TypeError): the below-min bytes are
-// delivered done=false and a subsequent read resolves done with an
-// empty view. The WPT read-min.any suite stays disabled on the C++
+// sides). Close-below-min follows the C++ tail contract (diverging
+// from the spec, which leaves the read pending until respond(0)): the
+// below-min bytes are delivered done=false and a subsequent read
+// resolves done with an empty view. The WPT read-min.any suite stays disabled on the C++
 // side for its own hangs; the TypeScript side runs it.
 
 import { strictEqual, ok, throws, rejects } from 'node:assert';
@@ -212,7 +212,7 @@ export const readAtLeastByobReader = {
     result = await reader.readAtLeast(4, new Uint8Array(20));
     value = new TextDecoder().decode(result.value);
     strictEqual(value, 'az');
-    // End-of-stream tail shape (the DECIDED contract, parity): the
+    // End-of-stream tail shape (the tail contract, parity): the
     // below-min tail is delivered done=false; one more read resolves
     // done with an empty view (the pinned internal_stream_byob_return_view
     // behavior).

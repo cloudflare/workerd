@@ -52,7 +52,7 @@
 //     fill commits as { done: false, value: partialView }, the stream
 //     closes, and every subsequent read returns EOF (BYOB reads get a
 //     zero-length view over their transferred buffer). This is the
-//     decided C++-parity readAtLeast tail shape — the below-minimum
+//     C++-parity readAtLeast tail shape — the below-minimum
 //     tail is never fused with the done flag — and it matches the
 //     queued backend's deferred end-of-data settlement, so consumers
 //     observe the same tail on both backends. (Only an explicit
@@ -980,7 +980,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     // this read. Delivering fewer bytes than the requested minimum
     // (atLeast) signals end-of-stream: the partial fill commits
     // { done: false, value: partialView }, the stream closes, and every
-    // subsequent read returns EOF — the decided C++-parity readAtLeast
+    // subsequent read returns EOF — the C++-parity readAtLeast
     // tail shape. The conduit never re-pulls an unsatisfied read — any
     // accumulation toward the minimum happens inside the native source
     // (tryRead-style). State transitions before promise resolutions.

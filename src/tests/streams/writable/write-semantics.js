@@ -162,8 +162,7 @@ export const writableStreamPromisesResolvedInOrder = {
 // in-flight write never settles, so the queued write legitimately waits
 // forever on backpressure (bounded observation). The release itself
 // succeeds and the stream is re-lockable in both (migrated from
-// streams-test.js; reclassification decided 2026-08-29 — the earlier
-// reading of this pin as a TypeScript orphan defect was wrong).
+// streams-test.js).
 export const cancelWriteOnReleaseLock = {
   async test() {
     const ws = new WritableStream({

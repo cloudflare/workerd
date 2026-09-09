@@ -214,7 +214,7 @@ pattern; a change to either side fails its cell.
 | 3 | FLS length range | rejects > 2^53−1 (`TypeError`) | accepts full uint64 | `fixedLengthLengthsAboveMaxSafeInteger` |
 | 4 | `TransformStream` inheritance | `its instanceof TransformStream` is true | false (deliberate) | `identityBrandChecks` |
 | 5 | Accessor placement | inherited from `TransformStream.prototype` | own on `IdentityTransformStream.prototype` | `propertyPlacement` |
-| 6 | Invalid chunk aftermath | stream unaffected, remains usable | same — the sink signals the rejection through the non-fatal write-rejection channel; the write rejects, the stream survives (the DECIDED per-write contract) | `rejectsNumberChunk` |
+| 6 | Invalid chunk aftermath | stream unaffected, remains usable | same — the sink signals the rejection through the non-fatal write-rejection channel; the write rejects, the stream survives (the per-write contract of the internal transforms) | `rejectsNumberChunk` |
 | 7 | String `desiredSize` accounting | exact UTF-8 byte count | `length × 3` upper-bound estimate | `stringWriteDesiredSizeAccounting` |
 | 8 | Abort/cancel reason identity | re-created `Error`, same message (crosses kj); exception: `writer.closed` under abort gets the original instance | original instance everywhere | `abort-propagation.js`, `cancel-propagation.js` |
 | 9 | Writes after abort | `TypeError` "This WritableStream has been closed." | original abort reason | `abortRejectsSubsequentWrites` |
