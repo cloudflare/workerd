@@ -2,6 +2,8 @@
 
 #include <kj/debug.h>
 
+#include <cstdlib>
+
 namespace kj_rs_tokio {
 
 namespace {
@@ -22,7 +24,8 @@ const kj::MonotonicClock& requireNoActivePort() {
 }  // namespace
 
 TokioEventPort::TokioEventPort()
-    : clock(requireNoActivePort()),
+    : ownerThread(kj::ThreadId::current()),
+      clock(requireNoActivePort()),
       timerImpl(clock.now()),
       rustPort(new_tokio_port()),
       loop(kj::heap<kj::EventLoop>(*this)) {
@@ -30,6 +33,10 @@ TokioEventPort::TokioEventPort()
 }
 
 TokioEventPort::~TokioEventPort() noexcept(false) {
+  KJ_ASSERT(ownerThread == kj::ThreadId::current(),
+      "TokioEventPort destroyed on a thread other than its owner") {
+    std::abort();
+  }
   // Cancel spawned tasks while the loop and timer -- our members, destroyed after this body --
   // are still alive: a cancelled task's destructors may unlink an armed kj::_::Event from the
   // loop or deregister a kj::TimerImpl timer.
@@ -39,13 +46,20 @@ TokioEventPort::~TokioEventPort() noexcept(false) {
   }
 }
 
+void TokioEventPort::assertOwnerThread() const {
+  KJ_REQUIRE(ownerThread == kj::ThreadId::current(),
+      "TokioEventPort used from a thread other than its owner");
+}
+
 void TokioEventPort::cancelSpawnedTasks() {
+  assertOwnerThread();
   // Guarded so a task-drop panic (surfaced as a kj::Exception by the cxx fork) does not
   // std::terminate if the caller is already unwinding (this runs from destructors).
   unwindDetector.catchExceptionsIfUnwinding([this]() { rustPort->cancel_spawned_tasks(); });
 }
 
 void TokioEventPort::setRunnable(bool runnable) {
+  assertOwnerThread();
   // Called by the EventLoop on the loop thread on empty <-> runnable transitions. The loop
   // reports `false` right before it calls wait(), so a `true` that arrives while we are parked
   // means a tokio task armed a KJ event: hand the thread back to KJ.
@@ -55,6 +69,7 @@ void TokioEventPort::setRunnable(bool runnable) {
 }
 
 void TokioEventPort::updateNextTimerEvent(kj::Maybe<kj::TimePoint> time) {
+  assertOwnerThread();
   // A timer was armed or cancelled while we sleep. Only a deadline sooner than the one this
   // wait() was planned against needs the thread back: KJ must re-plan the sleep.
   KJ_IF_SOME(next, time) {
@@ -67,6 +82,7 @@ void TokioEventPort::updateNextTimerEvent(kj::Maybe<kj::TimePoint> time) {
 }
 
 bool TokioEventPort::wait() {
+  assertOwnerThread();
   bool woken;
   // Bound the sleep by the next KJ timer deadline, if any, and remember which deadline that was
   // so updateNextTimerEvent() can spot a sooner one armed during the park. `timeoutToNextEvent()`
@@ -91,6 +107,7 @@ bool TokioEventPort::wait() {
 }
 
 bool TokioEventPort::poll() {
+  assertOwnerThread();
   bool woken = rustPort->poll();
   timerImpl.advanceTo(clock.now());
   return woken;

@@ -81,6 +81,7 @@ class TokioEventPort final: public kj::EventPort, private kj::TimerImpl::SleepHo
 
   // The kj::EventLoop this port drives. Owned by the port (see the file comment).
   kj::EventLoop &getLoop() {
+    assertOwnerThread();
     return *loop;
   }
 
@@ -88,12 +89,14 @@ class TokioEventPort final: public kj::EventPort, private kj::TimerImpl::SleepHo
   // waits/polls, preserving stock KJ timer semantics (the port calls timerImpl.advanceTo() after
   // every wait()/poll() return; timers would silently never fire otherwise).
   kj::Timer &getTimer() {
+    assertOwnerThread();
     return timerImpl;
   }
 
   // The Rust half (runtime + wake state). Rust code on this thread can also reach the runtime
   // via kj_rs_tokio::current_handle() / kj_rs_tokio::spawn().
   const TokioPort &getRustPort() const {
+    assertOwnerThread();
     return *rustPort;
   }
 
@@ -109,9 +112,13 @@ class TokioEventPort final: public kj::EventPort, private kj::TimerImpl::SleepHo
   // kj::Timer::now() reads the live clock through getTimeWhileSleeping().
   void updateNextTimerEvent(kj::Maybe<kj::TimePoint> time) override;
   kj::TimePoint getTimeWhileSleeping() override {
+    assertOwnerThread();
     return clock.now();
   }
 
+  void assertOwnerThread() const;
+
+  const kj::ThreadId ownerThread;
   const kj::MonotonicClock &clock;
   // Declaration order is destruction order in reverse, and it matters: `loop` is destroyed
   // first, then `rustPort` (the runtime), then `timerImpl`. The destructor body cancels spawned
