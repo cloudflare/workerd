@@ -51,9 +51,12 @@ function getPatchedWaitUntil(ctx: {
         if ('copy' in p) {
           p = p.copy();
         }
-        await p;
-        if ('destroy' in p) {
-          p.destroy();
+        try {
+          await p;
+        } finally {
+          if ('destroy' in p) {
+            p.destroy();
+          }
         }
       })()
     );
