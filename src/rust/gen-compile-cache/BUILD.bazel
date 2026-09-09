@@ -1,3 +1,4 @@
+load("@workerd//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
 load("@workerd//:build/wd_cc_library.bzl", "wd_cc_library")
 load("@workerd//:build/wd_rust_binary.bzl", "wd_rust_binary")
 
@@ -22,10 +23,7 @@ wd_cc_library(
     hdrs = [
         "cxx-bridge.h",
     ],
-    linkstatic = select({
-        "@platforms//os:windows": True,
-        "//conditions:default": False,
-    }),
+    linkstatic = CC_LIBRARY_LINKSTATIC,
     deps = [
         "//src/rust/cxx-integration",
         "//src/workerd/jsg",

@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
 
 def kj_test(
         src,
@@ -19,13 +20,7 @@ def kj_test(
             "@capnp-cpp//src/kj:kj-test",
             "//build/deps:linkopts_default",
         ] + deps,
-        # libc++abi is static under TSan, so all code that participates in exception unwinding must
-        # be linked into the same image.
-        linkstatic = select({
-            "//build/platforms:sanitizer_thread_linux": 1,
-            "@platforms//os:linux": 0,
-            "//conditions:default": 1,
-        }),
+        linkstatic = CC_TEST_LINKSTATIC,
         data = data,
         # Tag with cpu:4 since this target depends on linkopts_default.
         tags = tags + ["cpu:4"],

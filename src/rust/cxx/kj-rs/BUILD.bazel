@@ -1,4 +1,5 @@
 load("@rules_rust//rust:defs.bzl", "rust_library")
+load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_test.bzl", "wd_rust_test")
 load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
@@ -8,10 +9,7 @@ wd_cc_library(
     srcs = glob(["*.c++"]),
     hdrs = glob(["*.h"]),
     include_prefix = "kj-rs",
-    linkstatic = select({
-        "@platforms//os:windows": True,
-        "//conditions:default": False,
-    }),
+    linkstatic = CC_LIBRARY_LINKSTATIC,
     visibility = ["//src/rust/cxx/tests:__pkg__"],
     deps = [
         ":bridge",
