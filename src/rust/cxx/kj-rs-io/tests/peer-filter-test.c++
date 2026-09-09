@@ -96,6 +96,14 @@ KJ_TEST("PeerFilter: 'private' allows RFC1918 + local, blocks public") {
   KJ_EXPECT(!allowsIp(*f, "8.8.8.8"));
 }
 
+KJ_TEST("PeerFilter: denying 'private' retains KJ's separate local category") {
+  auto f = filter({"private"_kj}, {"private"_kj});
+  KJ_EXPECT(!allowsIp(*f, "10.1.2.3"));
+  KJ_EXPECT(!allowsIp(*f, "fc00::1"));
+  KJ_EXPECT(allowsIp(*f, "127.0.0.1"));
+  KJ_EXPECT(allowsIp(*f, "::1"));
+}
+
 KJ_TEST("PeerFilter: explicit CIDR allow") {
   auto f = filter({"10.0.0.0/8"_kj});
   KJ_EXPECT(allowsIp(*f, "10.1.2.3"));
