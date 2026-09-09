@@ -681,6 +681,19 @@ KJ_TEST("Stashed PromiseFuture dropped after event loop destruction") {
   drop_stashed_future();
 }
 
+KJ_TEST("Executor-guarded state can be destroyed under a new loop after its owner dies") {
+  kj::Own<::kj_rs::ExecutorGuarded<uint>> guarded;
+  {
+    kj::EventLoop ownerLoop;
+    kj::WaitScope ownerWaitScope(ownerLoop);
+    guarded = kj::heap<::kj_rs::ExecutorGuarded<uint>>(123u);
+  }
+
+  kj::EventLoop unrelatedLoop;
+  kj::WaitScope unrelatedWaitScope(unrelatedLoop);
+  guarded = nullptr;
+}
+
 // =======================================================================================
 // Stored-Waker semantics (the generic, non-KJ-waker poll path)
 
