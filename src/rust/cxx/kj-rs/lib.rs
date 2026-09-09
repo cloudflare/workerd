@@ -17,7 +17,6 @@ pub use refcount::repr::KjArc;
 pub use refcount::repr::KjRc;
 
 pub use crate::ffi::FutureWakerCell;
-pub use crate::ffi::KjWaker;
 pub use crate::ffi::PollWaker;
 
 mod awaiter;

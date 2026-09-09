@@ -30,18 +30,6 @@ mod bridge {
     unsafe extern "C++" {
         include!("kj-rs/waker.h");
 
-        // Match the definition of the abstract virtual class in the C++ header.
-        type KjWaker;
-        #[cxx_name = "clone"]
-        fn clone_kj_waker(&self) -> *const KjWaker;
-        fn wake(&self);
-        fn wake_by_ref(&self);
-        fn drop(&self);
-    }
-
-    unsafe extern "C++" {
-        include!("kj-rs/waker.h");
-
         type PollWaker;
         #[cxx_name = "wakeByRef"]
         fn wake_by_ref(self: &PollWaker);
