@@ -57,6 +57,9 @@ class CrossThreadWakeSink final: public kj::AtomicRefcounted {
   // One relaxed atomic load when it is.
   void ensureDrain() const;
 
+  // Exposes the mutex-protected queue length for deterministic coalescing tests.
+  size_t getPendingCountForTest() const;
+
  private:
   // The per-loop owner: holds the sink and closes it when the loop destroys it. Defined in
   // waker.c++.
@@ -182,6 +185,15 @@ class FutureWakerCell final: public kj::AtomicRefcounted {
   }
 
  private:
+  friend class CrossThreadWakeSink;
+
+  // Owning thread only: release this cell's queue claim before replaying its wake. Clearing
+  // first lets a concurrent foreign wake claim the next replay without losing it.
+  void replayFromSink() const {
+    queued.store(false, std::memory_order_release);
+    wakeByRef();
+  }
+
   // The owning event loop's executor, used to route wakes: captured at construction (which
   // happens on the owning thread), immutable afterwards, safe to read from any thread. Owned via
   // addRef() so a cell retained by Rust past loop teardown still has a valid Executor to ask
@@ -197,6 +209,10 @@ class FutureWakerCell final: public kj::AtomicRefcounted {
   // thread can skip the sink for a waker whose future is already gone (a retained dead waker
   // parked in a busy channel would otherwise wake the loop for nothing on every wake).
   mutable std::atomic<bool> alive{true};
+
+  // True while the sink owns a pending replay for this cell. Rust's Waker contract permits
+  // coalescing, so redundant foreign wakes do not need additional strong references or work.
+  mutable std::atomic<bool> queued{false};
 
   // Weak, owner-invalidated reference to the owning FuturePollEvent: non-owning (the event lives
   // in the promise graph; the cell must observe its death, never extend its life) and nulled by
