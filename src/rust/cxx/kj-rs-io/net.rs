@@ -516,6 +516,29 @@ fn sockaddr_from_bytes(bytes: &[u8]) -> Result<socket2::SockAddr> {
     crate::ffi::sockaddr_from_bytes(bytes)
 }
 
+/// Owns an unconnected socket from the instant C++ transfers its raw handle. C++ constructs
+/// this synchronously before asking cxx to create the connect future, so dropping that future
+/// without polling it still closes the socket.
+pub struct OwnedConnectingSocket {
+    #[cfg(any(unix, windows))]
+    socket: socket2::Socket,
+}
+
+#[expect(clippy::unnecessary_box_returns)] // Opaque cxx types must cross the bridge boxed.
+pub fn own_connecting_socket(handle: i64) -> Box<OwnedConnectingSocket> {
+    #[cfg(any(unix, windows))]
+    {
+        Box::new(OwnedConnectingSocket {
+            socket: socket_from_raw(handle),
+        })
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = handle;
+        Box::new(OwnedConnectingSocket {})
+    }
+}
+
 /// The handle tier of [`crate::take_kj_socket`] (unix only; see that function's docs): wraps
 /// an *owned*, connected stream-socket fd (TCP or Unix domain, detected automatically) as a
 /// [`crate::serve::ServeIo`]. Unlike [`wrap_socket_fd`] the fd is a fresh dup of a kj stream's
@@ -613,7 +636,10 @@ pub fn wrap_listen_fd(handle: i64) -> Result<Box<TokioListener>> {
     }
 }
 
-pub async fn wrap_connecting_socket_fd(handle: i64, sockaddr: Vec<u8>) -> Result<Box<TokioStream>> {
+pub async fn wrap_connecting_socket_fd(
+    socket: Box<OwnedConnectingSocket>,
+    sockaddr: Vec<u8>,
+) -> Result<Box<TokioStream>> {
     #[cfg(any(unix, windows))]
     {
         on_loop_runtime(async move {
@@ -624,7 +650,7 @@ pub async fn wrap_connecting_socket_fd(handle: i64, sockaddr: Vec<u8>) -> Result
                     "only AF_INET/AF_INET6 sockaddrs are supported",
                 )
             })?;
-            let socket = socket_from_raw(handle);
+            let OwnedConnectingSocket { socket } = *socket;
             // TcpSocket::connect handles the nonblocking connect dance (EINPROGRESS, wait for
             // writability, check SO_ERROR) and registers with the I/O driver.
             let tcp_socket = tokio::net::TcpSocket::from_std_stream(socket.into());
@@ -638,7 +664,7 @@ pub async fn wrap_connecting_socket_fd(handle: i64, sockaddr: Vec<u8>) -> Result
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = (handle, sockaddr);
+        let _ = (socket, sockaddr);
         Err(KjIoError::other(
             "wrapConnectingSocketFd",
             "not implemented on this platform",

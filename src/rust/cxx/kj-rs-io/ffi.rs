@@ -44,6 +44,7 @@ use kj_rs::KjOwn;
 
 use crate::error::Result;
 use crate::error::op;
+use crate::net::OwnedConnectingSocket;
 use crate::net::TokioAddress;
 use crate::net::TokioListener;
 use crate::net::address_clone;
@@ -57,6 +58,7 @@ use crate::net::listener_local_addr;
 use crate::net::listener_port;
 use crate::net::network_get_sockaddr;
 use crate::net::network_parse_address;
+use crate::net::own_connecting_socket;
 use crate::net::wrap_connecting_socket_fd;
 use crate::net::wrap_listen_fd;
 use crate::net::wrap_socket_fd;
@@ -97,6 +99,7 @@ mod bridge {
         type TokioAddress;
         type TokioInputFd;
         type TokioOutputFd;
+        type OwnedConnectingSocket;
 
         // ==================================================================================
         // Streams (TCP or Unix domain, behind kj::AsyncIoStream)
@@ -248,11 +251,15 @@ mod bridge {
         /// Wraps a bound+listening socket handle (TCP or Unix domain, detected automatically).
         fn wrap_listen_fd(handle: i64) -> Result<Box<TokioListener>>;
 
-        /// Wraps an unconnected TCP socket handle and connects it to `sockaddr` (a raw
-        /// `struct sockaddr`, AF_INET/AF_INET6 only; owned copy, since the caller's pointer
-        /// need not outlive the call).
+        /// Takes ownership of an unconnected TCP socket handle synchronously, before the async
+        /// connect operation exists.
+        fn own_connecting_socket(handle: i64) -> Box<OwnedConnectingSocket>;
+
+        /// Connects an owned TCP socket to `sockaddr` (a raw `struct sockaddr`,
+        /// AF_INET/AF_INET6 only; owned copy, since the caller's pointer need not outlive the
+        /// call).
         async fn wrap_connecting_socket_fd(
-            handle: i64,
+            socket: Box<OwnedConnectingSocket>,
             sockaddr: Vec<u8>,
         ) -> Result<Box<TokioStream>>;
 
@@ -1074,5 +1081,31 @@ mod tests {
             port
         );
         // `socket` is the sole owner: dropping it closes the fd (socket2::Socket's drop glue).
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dropping_an_unpolled_connect_closes_the_transferred_socket() {
+        use std::os::fd::IntoRawFd;
+
+        let socket = socket2::Socket::new(
+            socket2::Domain::IPV4,
+            socket2::Type::STREAM,
+            Some(socket2::Protocol::TCP),
+        )
+        .unwrap();
+        let fd = socket.into_raw_fd();
+
+        let socket = crate::net::own_connecting_socket(i64::from(fd));
+        let connect = crate::net::wrap_connecting_socket_fd(socket, Vec::new());
+        drop(connect);
+
+        // SAFETY: F_GETFD only inspects the numeric descriptor; EBADF is the expected result
+        // after ownership passed into and was dropped with the unpolled future.
+        assert_eq!(unsafe { libc::fcntl(fd, libc::F_GETFD) }, -1);
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::EBADF)
+        );
     }
 }

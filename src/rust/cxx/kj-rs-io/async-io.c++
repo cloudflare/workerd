@@ -500,6 +500,9 @@ kj::Own<kj::AsyncIoStream> TokioLowLevelAsyncIoProvider::wrapSocketFd(Fd fd, kj:
 kj::Promise<kj::Own<kj::AsyncIoStream>> TokioLowLevelAsyncIoProvider::wrapConnectingSocketFd(
     Fd fd, const struct sockaddr *addr, kj::uint addrlen, kj::uint flags) {
   int64_t prepared = static_cast<int64_t>(prepareFd(fd, flags));
+  // Materialize Rust ownership before any later fallible work. The generated async bridge then
+  // moves this owner into its promise, so cancellation before the first poll still closes it.
+  auto socket = own_connecting_socket(prepared);
   // The Rust side takes an owned copy of the sockaddr: the caller's pointer need not outlive
   // this call (KJ's own implementation copies too).
   ::rust::Vec<uint8_t> addrCopy;
@@ -508,7 +511,7 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> TokioLowLevelAsyncIoProvider::wrapConnec
   for (kj::uint i = 0; i < addrlen; i++) {
     addrCopy.push_back(addrBytes[i]);
   }
-  return wrap_connecting_socket_fd(prepared, kj::mv(addrCopy))
+  return wrap_connecting_socket_fd(kj::mv(socket), kj::mv(addrCopy))
       .then([](::rust::Box<TokioStream> stream) -> kj::Own<kj::AsyncIoStream> {
     return kj::heap<TokioAsyncIoStream>(kj::mv(stream));
   });
