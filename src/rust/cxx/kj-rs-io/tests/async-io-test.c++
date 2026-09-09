@@ -9,6 +9,7 @@
 #include <kj/array.h>
 #include <kj/async.h>
 #include <kj/debug.h>
+#include <kj/io.h>
 #include <kj/test.h>
 #include <kj/thread.h>
 
@@ -609,6 +610,26 @@ KJ_TEST("wrapSocketFd wraps both ends of a socketpair") {
   kj::byte buffer[16];
   KJ_EXPECT(end1->tryRead(buffer, 10, sizeof(buffer)).wait(ws) == 10);
   KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 10) == "socketpair"_kjb);
+}
+
+KJ_TEST("wrapSocketFd normalizes a borrowed descriptor without consuming it") {
+  auto io = setupTokioAsyncIo();
+
+  int fds[2];
+  KJ_SYSCALL(socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
+  kj::OwnFd borrowed(fds[0]);
+  kj::OwnFd peer(fds[1]);
+
+  auto wrapped = io.getLowLevelProvider().wrapSocketFd(borrowed, 0);
+  auto wrappedFd = KJ_ASSERT_NONNULL(wrapped->getFd());
+  KJ_EXPECT(wrappedFd != borrowed.get());
+  int descriptorFlags;
+  KJ_SYSCALL(descriptorFlags = fcntl(wrappedFd, F_GETFD));
+  KJ_EXPECT((descriptorFlags & FD_CLOEXEC) != 0);
+  int statusFlags;
+  KJ_SYSCALL(statusFlags = fcntl(wrappedFd, F_GETFL));
+  KJ_EXPECT((statusFlags & O_NONBLOCK) != 0);
+  KJ_SYSCALL(fcntl(borrowed, F_GETFD));
 }
 
 KJ_TEST("wrapConnectingSocketFd completes a nonblocking connect") {
