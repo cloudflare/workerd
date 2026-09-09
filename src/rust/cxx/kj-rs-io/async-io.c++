@@ -1,6 +1,7 @@
 #include "kj-rs-io/async-io.h"
 
 #include <kj/debug.h>
+#include <kj/io.h>
 
 #include <cstring>
 
@@ -370,7 +371,15 @@ namespace {
 // Validated by Windows CI.
 uintptr_t prepareFd(uintptr_t fd, kj::uint flags) {
   SOCKET sock = static_cast<SOCKET>(fd);
-  if ((flags & kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP) == 0) {
+  bool ownsSocket = (flags & kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP) != 0;
+  auto closeOnFailure = kj::defer([&]() {
+    if (ownsSocket) {
+      KJ_WINSOCK(closesocket(sock)) {
+        break;
+      }
+    }
+  });
+  if (!ownsSocket) {
     WSAPROTOCOL_INFOW info;
     KJ_WINSOCK(WSADuplicateSocketW(sock, GetCurrentProcessId(), &info));
     SOCKET duped = WSASocketW(FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, &info, 0,
@@ -379,36 +388,41 @@ uintptr_t prepareFd(uintptr_t fd, kj::uint flags) {
       KJ_FAIL_WIN32("WSASocketW()", WSAGetLastError());
     }
     sock = duped;
+    ownsSocket = true;
   }
   // ALREADY_NONBLOCK does not exist on Windows (kj declares it under #if !_WIN32), so callers
   // cannot assert pre-set non-blocking mode; always enable it (idempotent).
   u_long mode = 1;
   KJ_WINSOCK(ioctlsocket(sock, FIONBIO, &mode));
+  closeOnFailure.cancel();
   return static_cast<uintptr_t>(sock);
 }
 #else
 // Normalizes KJ's fd-wrapping flags so Rust always receives an fd it owns, with CLOEXEC set and
 // in non-blocking mode.
 int prepareFd(int fd, kj::uint flags) {
+  kj::OwnFd ownedFd;
   if ((flags & kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP) == 0) {
-    // dup() shares the open file description — the O_NONBLOCK set below is observed through the
-    // caller's fd too, matching KJ (which sets O_NONBLOCK on the caller's fd directly) — while
-    // giving Rust a descriptor it can own and close.
+    // The duplicate shares the open file description, so O_NONBLOCK set below is observed through
+    // the caller's fd too, matching KJ, while Rust receives a descriptor it can own and close.
     int duped;
-    KJ_SYSCALL(duped = ::dup(fd));
-    fd = duped;
-    KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
-  } else if ((flags & kj::LowLevelAsyncIoProvider::ALREADY_CLOEXEC) == 0) {
-    KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
+    KJ_SYSCALL(duped = fcntl(fd, F_DUPFD_CLOEXEC, 0));
+    ownedFd = kj::OwnFd(duped);
+  } else {
+    ownedFd = kj::OwnFd(fd);
+  }
+  if ((flags & kj::LowLevelAsyncIoProvider::ALREADY_CLOEXEC) == 0 &&
+      (flags & kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP) != 0) {
+    KJ_SYSCALL(fcntl(ownedFd, F_SETFD, FD_CLOEXEC));
   }
   if ((flags & kj::LowLevelAsyncIoProvider::ALREADY_NONBLOCK) == 0) {
     int fl;
-    KJ_SYSCALL(fl = fcntl(fd, F_GETFL));
+    KJ_SYSCALL(fl = fcntl(ownedFd, F_GETFL));
     if ((fl & O_NONBLOCK) == 0) {
-      KJ_SYSCALL(fcntl(fd, F_SETFL, fl | O_NONBLOCK));
+      KJ_SYSCALL(fcntl(ownedFd, F_SETFL, fl | O_NONBLOCK));
     }
   }
-  return fd;
+  return ownedFd.release();
 }
 
 // kj::AsyncInputStream over an arbitrary readable fd (pipe, socket, character device).
