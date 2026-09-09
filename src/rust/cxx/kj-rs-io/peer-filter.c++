@@ -152,11 +152,12 @@ bool PeerFilter::shouldAllow(const struct sockaddr *addr, kj::uint addrlen) {
 #if !_WIN32
   if (addr->sa_family == AF_UNIX) {
     auto path = safeUnixPath(reinterpret_cast<const struct sockaddr_un *>(addr), addrlen);
-    if (path.size() > 0 && path[0] == '\0') {
-      return allowAbstractUnix;
-    } else {
-      return allowUnix;
+    bool allowed = path.size() > 0 && path[0] == '\0' ? allowAbstractUnix : allowUnix;
+    if (!allowed) return false;
+    KJ_IF_SOME(n, next) {
+      return n->shouldAllow(addr, addrlen);
     }
+    return true;
   }
 #endif
 

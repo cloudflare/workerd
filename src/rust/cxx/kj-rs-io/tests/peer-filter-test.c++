@@ -187,6 +187,14 @@ KJ_TEST("PeerFilter: unix and unix-abstract allow/deny") {
       kj::arr("private"_kj, "unix"_kj), kj::arr("unix"_kj), kj::rc<PeerFilter>());
   KJ_EXPECT(!allowsUnix(*denyUnix, "/tmp/sock"));
 }
+
+KJ_TEST("PeerFilter: nested filters intersect unix socket permissions") {
+  auto parent = kj::rc<PeerFilter>(kj::arr("public"_kj), nullptr, kj::rc<PeerFilter>());
+  auto child = kj::rc<PeerFilter>(kj::arr("unix"_kj, "unix-abstract"_kj), nullptr, kj::mv(parent));
+
+  KJ_EXPECT(!allowsUnix(*child, "/tmp/sock"));
+  KJ_EXPECT(!allowsUnix(*child, "abstract-name", true));
+}
 #endif  // !_WIN32
 
 }  // namespace
