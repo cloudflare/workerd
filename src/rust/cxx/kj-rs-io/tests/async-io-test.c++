@@ -13,6 +13,7 @@
 #include <kj/thread.h>
 
 #include <cstring>
+#include <type_traits>
 
 #if _WIN32
 #include <windows.h>  // Win32 APIs used by the Windows-only test arms below.
@@ -34,6 +35,8 @@ namespace {
 
 using kj_rs_io::setupTokioAsyncIo;
 using kj_rs_io::TokioAsyncIoContext;
+
+static_assert(!std::is_move_constructible_v<TokioAsyncIoContext>);
 
 // =======================================================================================
 // Helpers (shared ones: io-test-helpers.h)

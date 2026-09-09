@@ -512,11 +512,7 @@ kj::AsyncIoProvider::PipeThread TokioAsyncIoProvider::newPipeThread(
 }
 
 TokioAsyncIoContext setupTokioAsyncIo() {
-  auto base = kj_rs_tokio::setupTokioAsyncIo();
-  auto &timer = base.getTimer();
-  auto lowLevelProvider = kj::heap<TokioLowLevelAsyncIoProvider>(timer);
-  auto provider = kj::heap<TokioAsyncIoProvider>(timer);
-  return TokioAsyncIoContext(kj::mv(base), kj::mv(lowLevelProvider), kj::mv(provider));
+  return TokioAsyncIoContext();
 }
 
 // =======================================================================================

@@ -237,17 +237,11 @@ class TokioAsyncIoProvider final: public kj::AsyncIoProvider {
 // port (loop, runtime, timer). I/O objects created *through* the providers (streams, listeners,
 // addresses) must be destroyed before the context, as with kj::setupAsyncIo().
 struct TokioAsyncIoContext {
-  TokioAsyncIoContext(kj_rs_tokio::TokioAsyncIoContext base,
-      kj::Own<TokioLowLevelAsyncIoProvider> lowLevelProvider,
-      kj::Own<TokioAsyncIoProvider> provider)
-      : base(kj::mv(base)),
-        lowLevelProvider(kj::mv(lowLevelProvider)),
-        provider(kj::mv(provider)) {}
-  // Same move rules as the base context (move-constructible for return-by-value; no
-  // move-assignment, which would bypass the base's teardown ordering).
-  TokioAsyncIoContext(TokioAsyncIoContext &&) = default;
-  TokioAsyncIoContext &operator=(TokioAsyncIoContext &&) = delete;
-  KJ_DISALLOW_COPY(TokioAsyncIoContext);
+  TokioAsyncIoContext()
+      : base(kj_rs_tokio::setupTokioAsyncIo()),
+        lowLevelProvider(kj::heap<TokioLowLevelAsyncIoProvider>(base.getTimer())),
+        provider(kj::heap<TokioAsyncIoProvider>(base.getTimer())) {}
+  KJ_DISALLOW_COPY_AND_MOVE(TokioAsyncIoContext);
 
   kj_rs_tokio::TokioAsyncIoContext base;
   kj::Own<TokioLowLevelAsyncIoProvider> lowLevelProvider;
