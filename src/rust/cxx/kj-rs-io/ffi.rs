@@ -1028,6 +1028,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     #[should_panic(expected = "invalid fd crossed the FFI bridge")]
     fn own_fd_from_raw_rejects_negative_fds() {
