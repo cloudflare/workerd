@@ -149,6 +149,11 @@ export const test = {
     assert.ok(callerDispatch, 'Missing caller jsRpcCall for invokeCallbacks');
     assert.ok(calleeDispatch, 'Missing callee jsRpcCall for invokeCallbacks');
     assert.strictEqual(
+      callerDispatch.attrs['jsrpc.args'],
+      '[{"$type":"function"},{"$type":"object"},{"$type":"proxy"}]',
+      'Expected the caller span to preview each callback argument kind'
+    );
+    assert.strictEqual(
       calleeStubCalls.length,
       3,
       'Expected three outbound stub callback spans in the callee'
@@ -174,6 +179,11 @@ export const test = {
     // Callee stub calls must stay under the server dispatch after the async boundary.
     // This verifies the async trace scopes installed by JsRpcTargetBase::callImpl().
     for (const callbackSpan of calleeStubCalls) {
+      assert.strictEqual(
+        callbackSpan.attrs['jsrpc.args'],
+        '[]',
+        `Expected ${callbackSpan.attrs['jsrpc.method']} to preview its empty argument list`
+      );
       assert.strictEqual(
         callbackSpan.parentId,
         calleeDispatch.spanId,
