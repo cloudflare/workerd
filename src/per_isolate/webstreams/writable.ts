@@ -1136,44 +1136,19 @@ class WritableStreamDefaultController<
     PromisePrototypeThen(
       promise,
       () => {
-        writableStreamFinishInFlightWrite(stream);
-        const state = getWritableStreamState(stream);
-        // Dequeue AFTER the write completes (spec ordering).
-        const entry = ArrayPrototypeShift(this.#queue) as QueuedWrite<W>;
-        this.#queueTotalSize -= entry.size;
-        if (this.#queueTotalSize < 0) this.#queueTotalSize = 0;
-        if (
-          !writableStreamCloseQueuedOrInFlight(stream) &&
-          state === 'writable'
-        ) {
-          writableStreamUpdateBackpressure(
-            stream,
-            controllerGetDesiredSize(this) <= 0
-          );
-        }
-        this.#advanceQueueIfNeeded();
+        this.#completeInFlightWrite(() => {
+          writableStreamFinishInFlightWrite(stream);
+        });
       },
       (e: unknown) => {
-        // Workerd-internal non-fatal rejection (identity/compression
-        // invalid chunks): reject THIS write's request, keep the stream
-        // writable, and continue with the queue — the same bookkeeping
-        // as the fulfillment path, with the request rejected instead.
+        // Workerd-internal non-fatal rejection (identity-stream invalid
+        // chunks): reject THIS write's request but keep the stream
+        // writable and continue with the queue — the fulfillment
+        // bookkeeping with the request rejected instead of resolved.
         if (isNonFatalWriteRejection(e)) {
-          writableStreamFinishInFlightWriteWithNonFatalError(stream, e.error);
-          const state = getWritableStreamState(stream);
-          const entry = ArrayPrototypeShift(this.#queue) as QueuedWrite<W>;
-          this.#queueTotalSize -= entry.size;
-          if (this.#queueTotalSize < 0) this.#queueTotalSize = 0;
-          if (
-            !writableStreamCloseQueuedOrInFlight(stream) &&
-            state === 'writable'
-          ) {
-            writableStreamUpdateBackpressure(
-              stream,
-              controllerGetDesiredSize(this) <= 0
-            );
-          }
-          this.#advanceQueueIfNeeded();
+          this.#completeInFlightWrite(() => {
+            writableStreamFinishInFlightWriteWithNonFatalError(stream, e.error);
+          });
           return;
         }
         if (getWritableStreamState(stream) === 'writable') {
@@ -1182,6 +1157,26 @@ class WritableStreamDefaultController<
         writableStreamFinishInFlightWriteWithError(stream, e);
       }
     );
+  }
+
+  // Settles the in-flight write request via `finish`, then does the
+  // bookkeeping the stream needs regardless of how the request settled:
+  // dequeue AFTER the write completes (spec ordering), refresh
+  // backpressure, and advance the queue.
+  #completeInFlightWrite(finish: () => void): void {
+    const stream = this.#stream;
+    finish();
+    const state = getWritableStreamState(stream);
+    const entry = ArrayPrototypeShift(this.#queue) as QueuedWrite<W>;
+    this.#queueTotalSize -= entry.size;
+    if (this.#queueTotalSize < 0) this.#queueTotalSize = 0;
+    if (!writableStreamCloseQueuedOrInFlight(stream) && state === 'writable') {
+      writableStreamUpdateBackpressure(
+        stream,
+        controllerGetDesiredSize(this) <= 0
+      );
+    }
+    this.#advanceQueueIfNeeded();
   }
 }
 
