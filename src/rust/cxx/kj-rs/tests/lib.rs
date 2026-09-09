@@ -13,6 +13,7 @@ mod test_own;
 mod test_refcount;
 
 use kj_rs::KjOwn;
+use test_futures::get_side_effect_counter;
 use test_futures::new_drop_cancellable_promise_without_polling;
 use test_futures::new_error_handling_future_void_infallible;
 use test_futures::new_errored_future_void;
@@ -25,11 +26,13 @@ use test_futures::new_promise_i32_awaiting_future_void;
 use test_futures::new_ready_future_i32;
 use test_futures::new_ready_future_void;
 use test_futures::new_select_with_cancellation;
+use test_futures::new_side_effect_future_void;
 use test_futures::new_threaded_delay_future_void;
 use test_futures::new_two_step_cancellable_future;
 use test_futures::new_waking_future_void;
 use test_futures::new_wrapped_waker_future_void;
 use test_futures::poll_and_stash_promise_future;
+use test_futures::reset_side_effect_counter;
 use test_futures::unstash_and_await_promise_future;
 use test_maybe::take_maybe_own;
 use test_maybe::take_maybe_own_ret;
@@ -277,6 +280,10 @@ pub mod ffi {
 
         async unsafe fn work_before_poll<'a>(target: &'a mut u64) -> Result<()>;
 
+        fn reset_side_effect_counter();
+        fn get_side_effect_counter() -> u64;
+        async fn new_side_effect_future_void();
+
         // Cancellation test helpers.
         async fn new_future_awaiting_cancellable_promise() -> Result<()>;
         async fn new_two_step_cancellable_future() -> Result<()>;
@@ -358,6 +365,20 @@ fn work_before_poll(target: &mut u64) -> impl Future<Output = Result<()>> {
     async move {
         unimplemented!("not expected to be polled");
     }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kj_rs_demo_work_before_poll<'a>(
+    target: &'a mut u64,
+    out: *mut kj_rs::repr::RustFuture<'a, ()>,
+) {
+    let fut = kj_rs::repr::future(Box::pin(kj_rs::map_err(
+        work_before_poll(target),
+        file!(),
+        line!(),
+    )));
+    // Safety: the C++ caller passes uninitialized storage for one RustFuture and takes ownership.
+    unsafe { out.write(fut) };
 }
 
 #[cfg(test)]
