@@ -2539,6 +2539,43 @@ impl<'a, T> From<Option<Local<'a, T>>> for MaybeLocal<'a, T> {
     }
 }
 
+/// Runs a synchronous callback entered from C++ with a valid, locked V8 isolate.
+///
+/// The callback receives a safe [`Lock`] and returns a local handle. On success,
+/// the handle is transferred back across the CXX bridge as a [`ffi::MaybeLocal`].
+/// On failure, the error is scheduled as a JavaScript exception and an empty
+/// `MaybeLocal` is returned.
+///
+/// This centralizes the raw-isolate and local-handle ownership transitions for
+/// C++ entry points implemented in Rust. The callback itself contains no FFI
+/// safety obligations.
+///
+/// # Safety
+///
+/// `isolate` must point to a live V8 isolate locked by the current thread, and
+/// the C++ caller must keep its active `HandleScope` alive until it consumes the
+/// returned handle.
+pub unsafe fn run_ffi_callback<T, E, F>(isolate: *mut ffi::Isolate, callback: F) -> ffi::MaybeLocal
+where
+    E: Into<Error>,
+    F: for<'a> FnOnce(&'a mut Lock) -> Result<Local<'a, T>, E>,
+{
+    // SAFETY: forwarded from this function's safety contract.
+    let mut lock = unsafe { Lock::from_isolate_ptr(isolate) };
+    let result = callback(&mut lock).map(|local| {
+        // SAFETY: the callback's return lifetime is tied to `lock`, whose
+        // isolate is the one supplied by the active C++ HandleScope.
+        unsafe { local.into_ffi() }
+    });
+    match result {
+        Ok(local) => ffi::MaybeLocal { ptr: local.ptr },
+        Err(error) => {
+            lock.throw_exception(&error.into());
+            ffi::MaybeLocal { ptr: 0 }
+        }
+    }
+}
+
 impl Local<'_, String> {
     // Instance methods — correspond to `v8::String` member functions
 
