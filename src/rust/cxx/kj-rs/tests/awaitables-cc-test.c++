@@ -221,6 +221,16 @@ KJ_TEST("bridged async functions run eagerly at promise creation") {
   KJ_EXPECT(get_side_effect_counter() == 1);
 }
 
+KJ_TEST("a panic in a fallible bridged future rejects its promise") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto exception = KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { new_panicking_future_void().wait(waitScope); }));
+  KJ_EXPECT(exception.getDescription().contains("bridged future panicked on purpose"),
+      exception.getDescription());
+}
+
 // TODO(someday): More test cases.
 //   - Standalone ArcWaker tests. Ensure Rust calls ArcWaker destructor when we expect.
 //   - Throwing an exception from PromiseNode functions, including destructor.

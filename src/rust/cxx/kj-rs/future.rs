@@ -35,6 +35,34 @@ pub mod repr {
     use super::FuturePollStatus;
     use crate::ffi::PollWaker;
 
+    unsafe fn write_panic_as_exception(
+        ret: *mut c_void,
+        err: Box<dyn std::any::Any + Send>,
+    ) -> FuturePollStatus {
+        let msg = if let Some(s) = err.downcast_ref::<&'static str>() {
+            format!("panic in bridged future poll: {s}")
+        } else if let Some(s) = err.downcast_ref::<String>() {
+            format!("panic in bridged future poll: {s}")
+        } else if err.downcast_ref::<cxx::CanceledException>().is_some() {
+            "panic in bridged future poll: kj::CanceledException".to_owned()
+        } else {
+            "panic in bridged future poll".to_owned()
+        };
+        let exception = cxx::IntoKjException::into_kj_exception(
+            cxx::KjError::new(cxx::KjExceptionType::Failed, msg),
+            file!(),
+            line!(),
+        );
+        // Safety: FuturePoller provides storage for a kj::Exception pointer in its Error arm.
+        unsafe {
+            std::ptr::write(
+                ret.cast::<*mut c_void>(),
+                exception.into_raw().as_ptr().cast(),
+            );
+        }
+        FuturePollStatus::ERROR
+    }
+
     type PollCallback = for<'a> unsafe extern "C" fn(
         fut: *mut c_void,
         waker: &'a PollWaker,
@@ -80,15 +108,17 @@ pub mod repr {
             let fut = unsafe { *(fut.cast::<FuturePtr<T>>()) };
             // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
             let fut = unsafe { Pin::new_unchecked(&mut *fut) };
-            let waker = Waker::from(waker);
-            let mut context = Context::from_waker(&waker);
-            match fut.poll(&mut context) {
-                Poll::Ready(Ok(value)) => {
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let waker = Waker::from(waker);
+                let mut context = Context::from_waker(&waker);
+                fut.poll(&mut context)
+            })) {
+                Ok(Poll::Ready(Ok(value))) => {
                     // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
                     unsafe { std::ptr::write(ret.cast::<T>(), value) };
                     FuturePollStatus::COMPLETE
                 }
-                Poll::Ready(Err(error)) => {
+                Ok(Poll::Ready(Err(error))) => {
                     // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
                     unsafe {
                         std::ptr::write(
@@ -98,7 +128,9 @@ pub mod repr {
                     };
                     FuturePollStatus::ERROR
                 }
-                Poll::Pending => FuturePollStatus::PENDING,
+                Ok(Poll::Pending) => FuturePollStatus::PENDING,
+                // Safety: ret is the Error-arm storage supplied by FuturePoller.
+                Err(panic_payload) => unsafe { write_panic_as_exception(ret, panic_payload) },
             }
         }
 

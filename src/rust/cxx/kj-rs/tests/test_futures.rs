@@ -26,6 +26,10 @@ pub async fn new_side_effect_future_void() {
     SIDE_EFFECT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 
+pub async fn new_panicking_future_void() -> Result<()> {
+    panic!("bridged future panicked on purpose");
+}
+
 use crate::Error;
 use crate::Result;
 use crate::ffi::CloningAction;
