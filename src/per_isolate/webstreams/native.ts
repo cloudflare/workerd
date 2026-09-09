@@ -54,7 +54,7 @@
 //     zero-length view over their transferred buffer). This is the
 //     decided C++-parity readAtLeast tail shape — the below-minimum
 //     tail is never fused with the done flag — and it matches the
-//     queued backend's deferred end-of-data commit, so consumers
+//     queued backend's deferred end-of-data settlement, so consumers
 //     observe the same tail on both backends. (Only an explicit
 //     same-turn respond(0)-after-close on the QUEUED backend produces
 //     the spec's fused { done: true, value: partial } fold; the native

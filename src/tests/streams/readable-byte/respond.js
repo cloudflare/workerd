@@ -943,6 +943,49 @@ export const readableStreamByteRespond = {
   },
 };
 
+// close() leaves the pending pull-into available for respond(0), even when
+// the source responds from a later microtask. The read may settle first under
+// the decided C++-parity close behavior, but that must not invalidate the
+// source's request or let the later transfer detach the returned result.
+export const respondAfterCloseFromLaterMicrotask = {
+  async test() {
+    let finishRespond;
+    const responded = new Promise((resolve) => {
+      finishRespond = resolve;
+    });
+    let request;
+    let requestView;
+    let respondError;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      async pull(c) {
+        request = c.byobRequest;
+        requestView = request.view;
+        c.close();
+        await Promise.resolve();
+        try {
+          request.respond(0);
+        } catch (e) {
+          respondError = e;
+        }
+        finishRespond();
+      },
+    });
+
+    const reader = rs.getReader({ mode: 'byob' });
+    const { done, value } = await reader.read(new Uint8Array([1, 2, 3, 4]));
+    await responded;
+
+    strictEqual(respondError, undefined);
+    strictEqual(request.view, null);
+    strictEqual(requestView.byteLength, 0);
+    strictEqual(done, true);
+    strictEqual(value.byteLength, 0);
+    strictEqual(value.buffer.byteLength, 4);
+    strictEqual(new Uint8Array(value.buffer)[2], 3);
+  },
+};
+
 export const readableStreamByteRespondWithNewView = {
   async test() {
     // Basic respondWithNewView

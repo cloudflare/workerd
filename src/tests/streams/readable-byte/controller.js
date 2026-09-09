@@ -152,8 +152,8 @@ export const readDetachesCallerBuffer = {
 // close() while an UNFILLED BYOB read is pending: the read resolves done
 // with an empty view over the transferred buffer (parity; under
 // TypeScript the parked read settles via the deferred end-of-data
-// commit, one microtask after close() — a same-turn respond(0) would
-// win with the spec's committed shape instead).
+// snapshot, one microtask after close(); its descriptor remains available
+// for a later respond(0)).
 export const closeWithPendingUnfilledByobRead = {
   async test() {
     let controller;

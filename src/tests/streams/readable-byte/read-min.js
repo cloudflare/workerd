@@ -110,7 +110,7 @@ export const readMinValidation = {
 // done with an empty view — the DECIDED readAtLeast tail contract,
 // parity on both implementations. (The spec's TypeError-on-close shape
 // is implemented by neither side; TypeScript settles the parked read
-// via a deferred end-of-data commit one microtask after close().)
+// via a deferred end-of-data snapshot one microtask after close().)
 export const closeBelowMin = {
   async test() {
     const { rs, controller } = byteStream();

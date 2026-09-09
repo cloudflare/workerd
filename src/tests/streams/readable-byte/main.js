@@ -108,6 +108,7 @@ export {
   jsByteSourceLargeDataEnqueue,
   bodyPumpByobRequestPresence,
   readableStreamByteRespond,
+  respondAfterCloseFromLaterMicrotask,
   readableStreamByteRespondWithNewView,
   readableStreamByteRespondWithNewViewUsesNewElementSize,
   readableStreamAutoAllocateChunkSize,
