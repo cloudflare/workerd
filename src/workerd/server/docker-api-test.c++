@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "docker-api.capnp.h"
+#include <workerd/server/docker-api.capnp.h>
 
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
