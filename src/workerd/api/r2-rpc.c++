@@ -33,25 +33,6 @@ JsReadableStream makeR2RpcMemoryStream(
 
 }  // namespace
 
-R2RpcClient::R2RpcClient(rpc::JsRpcTarget::Client client)
-    : client(IoContext::current().addObject(kj::heap(kj::mv(client)))) {}
-
-R2RpcClient R2RpcClient::fromCallResult(jsg::Lock& js, jsg::Value& rpcPromise) {
-  auto value = jsg::JsValue(rpcPromise.getHandle(js));
-  auto object = KJ_ASSERT_NONNULL(value.tryCast<jsg::JsObject>());
-  auto promise = KJ_ASSERT_NONNULL(object.tryUnwrapAs<JsRpcPromise>(js));
-  kj::Vector<kj::StringPtr> path;
-  auto oneCall = promise->getClientForOneCall(js, path);
-  KJ_ASSERT(path.empty());
-  return R2RpcClient(kj::mv(oneCall.client));
-}
-
-R2RpcClient::Method R2RpcClient::getMethod(jsg::Lock& js, kj::StringPtr methodName) {
-  auto stub = js.alloc<JsRpcStub>(IoContext::current().addObject(kj::heap(*client)));
-  auto property = KJ_ASSERT_NONNULL(stub->getRpcMethod(js, kj::str(methodName)));
-  return {.stub = kj::mv(stub), .property = kj::mv(property)};
-}
-
 jsg::Promise<jsg::Value> normalizeR2RpcPromise(jsg::Lock& js, jsg::Value rpcPromise) {
   auto paf = js.newPromiseAndResolver<jsg::Value>();
   paf.resolver.resolve(js, kj::mv(rpcPromise));

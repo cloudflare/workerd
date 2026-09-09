@@ -17,42 +17,6 @@ namespace workerd::api {
 
 class ReadableStreamSource;
 
-// Owns a pipelined JSRPC target capability without retaining the JavaScript RpcStub that would
-// normally expose it. This transport is local to R2 bindings because their public resource types
-// must rebuild gateway results rather than return raw JSRPC values.
-class R2RpcClient {
- public:
-  explicit R2RpcClient(rpc::JsRpcTarget::Client client);
-  R2RpcClient(R2RpcClient&&) = default;
-  R2RpcClient& operator=(R2RpcClient&&) = default;
-  KJ_DISALLOW_COPY(R2RpcClient);
-
-  static R2RpcClient fromCallResult(jsg::Lock& js, jsg::Value& rpcPromise);
-
-  template <typename... Args>
-  jsg::Value call(jsg::Lock& js,
-      kj::StringPtr methodName,
-      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
-      const jsg::TypeHandler<jsg::Function<jsg::Value(Args...)>>& fnHandler,
-      Args... args) {
-    auto method = getMethod(js, methodName);
-    auto disposeStub = kj::defer([&method]() { method.stub->dispose(); });
-    auto wrappedProp = rpcPropHandler.wrap(js, kj::mv(method.property));
-    auto fn = KJ_ASSERT_NONNULL(fnHandler.tryUnwrap(js, wrappedProp));
-    return fn(js, kj::mv(args)...);
-  }
-
- private:
-  struct Method {
-    jsg::Ref<JsRpcStub> stub;
-    jsg::Ref<JsRpcProperty> property;
-  };
-
-  Method getMethod(jsg::Lock& js, kj::StringPtr methodName);
-
-  IoOwn<rpc::JsRpcTarget::Client> client;
-};
-
 // JsRpcPromise is a custom thenable. Resolving a fresh promise with it makes V8 adopt it even when
 // the unwrap_custom_thenables compatibility flag is disabled.
 jsg::Promise<jsg::Value> normalizeR2RpcPromise(jsg::Lock& js, jsg::Value rpcPromise);
@@ -85,18 +49,6 @@ jsg::Promise<Result> callR2RpcMethod(jsg::Lock& js,
     Args... args) {
   auto rpcPromise =
       callR2RpcMethod(js, kj::mv(rpcProp), rpcPropHandler, fnHandler, kj::mv(args)...);
-  return unwrapR2RpcPromise<Result>(js, kj::mv(rpcPromise), resultPromiseHandler);
-}
-
-template <typename Result, typename... Args>
-jsg::Promise<Result> callR2RpcMethod(jsg::Lock& js,
-    R2RpcClient& client,
-    kj::StringPtr methodName,
-    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
-    const jsg::TypeHandler<jsg::Function<jsg::Value(Args...)>>& fnHandler,
-    const jsg::TypeHandler<jsg::Promise<Result>>& resultPromiseHandler,
-    Args... args) {
-  auto rpcPromise = client.call(js, methodName, rpcPropHandler, fnHandler, kj::mv(args)...);
   return unwrapR2RpcPromise<Result>(js, kj::mv(rpcPromise), resultPromiseHandler);
 }
 

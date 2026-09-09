@@ -130,13 +130,21 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
   });
 }
 
+R2MultipartUpload::Metadata R2MultipartUpload::Metadata::clone() const {
+  return {.httpMetadata = httpMetadata.clone(),
+    .customMetadata = {.fields = KJ_MAP(field, customMetadata.fields) {
+    return jsg::Dict<kj::String>::Field{.name = kj::str(field.name), .value = kj::str(field.value)};
+  }}};
+}
+
 jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPartRpc(jsg::Lock& js,
     int partNumber,
     R2PutValue value,
     jsg::Optional<UploadPartOptions> options,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
     const jsg::TypeHandler<jsg::Function<jsg::Value(
-        int, R2PutValueRpc, jsg::Optional<UploadPartOptions>, double)>>& uploadPartFnHandler,
+        kj::String, kj::String, int, R2PutValueRpc, jsg::Optional<UploadPartOptions>, double)>>&
+        uploadPartFnHandler,
     const jsg::TypeHandler<jsg::Promise<UploadedPart>>& uploadPartResultHandler) {
   return js.evalNow([&] {
     JSG_REQUIRE(partNumber >= 1 && partNumber <= 10000, TypeError,
@@ -157,9 +165,9 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPartRpc(j
     auto prepared = prepareR2RpcBody(js, value);
     traceContext.setTag("cloudflare.r2.request.size"_kjc, static_cast<int64_t>(prepared.size));
 
-    auto promise = callR2RpcMethod<UploadedPart>(js, KJ_ASSERT_NONNULL(rpcClient), "uploadPart"_kj,
-        rpcPropHandler, uploadPartFnHandler, uploadPartResultHandler, partNumber,
-        kj::mv(prepared.value), kj::mv(options), prepared.size);
+    auto promise = callR2RpcMethod<UploadedPart>(js, bucket->getRpcMethod(js, "uploadPart"_kj),
+        rpcPropHandler, uploadPartFnHandler, uploadPartResultHandler, kj::str(key),
+        kj::str(uploadId), partNumber, kj::mv(prepared.value), kj::mv(options), prepared.size);
     return promise.then(js,
         [partNumber, traceContext = kj::mv(traceContext)](
             jsg::Lock& js, UploadedPart uploadedPart) mutable {
@@ -233,7 +241,8 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
 jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::completeRpc(jsg::Lock& js,
     kj::Array<UploadedPart> uploadedParts,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
-    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::Array<UploadedPart>)>>& completeFnHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(
+        kj::String, kj::String, kj::Array<UploadedPart>)>>& completeFnHandler,
     const jsg::TypeHandler<jsg::Promise<R2Bucket::HeadResultRpc>>& completeResultHandler) {
   return js.evalNow([&] {
     TraceContext traceContext =
@@ -250,11 +259,17 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::completeRpc(jsg:
           part.partNumber);
     }
 
-    auto promise =
-        callR2RpcMethod<R2Bucket::HeadResultRpc>(js, KJ_ASSERT_NONNULL(rpcClient), "complete"_kj,
-            rpcPropHandler, completeFnHandler, completeResultHandler, kj::mv(uploadedParts));
+    auto promise = callR2RpcMethod<R2Bucket::HeadResultRpc>(js,
+        bucket->getRpcMethod(js, "completeMultipartUpload"_kj), rpcPropHandler, completeFnHandler,
+        completeResultHandler, kj::str(key), kj::str(uploadId), kj::mv(uploadedParts));
     return promise.then(js,
-        [traceContext = kj::mv(traceContext)](jsg::Lock& js, R2Bucket::HeadResultRpc rpc) mutable {
+        [metadata = metadata.map([](const Metadata& m) { return m.clone(); }),
+            traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Bucket::HeadResultRpc rpc) mutable {
+      KJ_IF_SOME(m, metadata) {
+        rpc.httpMetadata = kj::mv(m.httpMetadata);
+        rpc.customMetadata = kj::mv(m.customMetadata);
+      }
       auto result = headResultFromRpc(js, kj::mv(rpc));
       addHeadResultSpanTags(js, traceContext, *result.get());
       return result;
@@ -305,7 +320,7 @@ jsg::Promise<void> R2MultipartUpload::abort(
 
 jsg::Promise<void> R2MultipartUpload::abortRpc(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
-    const jsg::TypeHandler<jsg::Function<jsg::Value()>>& abortFnHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, kj::String)>>& abortFnHandler,
     const jsg::TypeHandler<jsg::Promise<void>>& abortResultHandler) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
@@ -314,8 +329,8 @@ jsg::Promise<void> R2MultipartUpload::abortRpc(jsg::Lock& js,
     traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
 
-    auto promise = callR2RpcMethod<void>(js, KJ_ASSERT_NONNULL(rpcClient), "abort"_kj,
-        rpcPropHandler, abortFnHandler, abortResultHandler);
+    auto promise = callR2RpcMethod<void>(js, bucket->getRpcMethod(js, "abortMultipartUpload"_kj),
+        rpcPropHandler, abortFnHandler, abortResultHandler, kj::str(key), kj::str(uploadId));
     return context.attachSpans(js, kj::mv(promise), kj::mv(traceContext));
   });
 }
