@@ -314,6 +314,9 @@ unsafe impl Send for ffi::OpaqueAtomicRefcountedClass {}
 // Safety: the test type follows the thread-safety contract of its C++ implementation.
 unsafe impl Sync for ffi::OpaqueAtomicRefcountedClass {}
 
+static_assertions::assert_not_impl_any!(KjOwn<u64>: Send, Sync);
+static_assertions::assert_not_impl_any!(KjOwn<ffi::OpaqueCxxClass>: Send, Sync);
+
 pub fn modify_own_return(mut own: KjOwn<ffi::OpaqueCxxClass>) -> KjOwn<ffi::OpaqueCxxClass> {
     own.pin_mut().set_data(72);
     own
