@@ -1,9 +1,11 @@
 using Workerd = import "/workerd/workerd.capnp";
+%PYTHON_COMPAT_DATES_IMPORT;
 
 const unitTests :Workerd.Config = (
   services = [
     ( name = "ai-api-test",
       worker = (
+        %COMPAT_DATE,
         modules = [
           (name = "worker.py", pythonModule = embed "ai-api-test.py")
         ],
@@ -24,6 +26,7 @@ const unitTests :Workerd.Config = (
     ),
     ( name = "ai-mock",
       worker = (
+        %COMPAT_DATE,
         compatibilityFlags = ["experimental", "nodejs_compat"],
         modules = [
           (name = "worker", esModule = embed "ai-mock.js")

@@ -1,9 +1,11 @@
 using Workerd = import "/workerd/workerd.capnp";
+%PYTHON_COMPAT_DATES_IMPORT;
 
 const unitTests :Workerd.Config = (
   services = [
     ( name = "python-nodejs-compat",
       worker = (
+        %COMPAT_DATE,
         modules = [
           (name = "worker.py", pythonModule = embed "worker.py"),
         ],
@@ -12,6 +14,7 @@ const unitTests :Workerd.Config = (
           "nodejs_compat",
           "nodejs_compat_v2",
           "enable_nodejs_process_v2",
+          "disable_python_no_global_handlers",
         ],
       )
     ),

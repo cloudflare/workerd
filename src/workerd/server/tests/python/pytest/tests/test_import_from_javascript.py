@@ -46,4 +46,4 @@ def test_import_failures():
 
     # Assert that non existent modules throw ImportError
     with pytest.raises(ImportError):
-        import_from_javascript("crypto")
+        import_from_javascript("nonexistent-module")
