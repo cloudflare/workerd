@@ -706,6 +706,15 @@ export class ERR_SOCKET_CONNECTING extends NodeError {
   }
 }
 
+export class ERR_SOCKET_HANDLE_ADOPTED extends NodeError {
+  constructor() {
+    super(
+      'ERR_SOCKET_HANDLE_ADOPTED',
+      'The bound socket has already been adopted by a server or socket'
+    );
+  }
+}
+
 export class ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS extends NodeError {
   constructor(arg0: string, arg1: string) {
     super(

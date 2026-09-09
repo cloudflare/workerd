@@ -37,6 +37,7 @@ import {
   ERR_SOCKET_CLOSED,
   ERR_SOCKET_CLOSED_BEFORE_CONNECTION,
   ERR_SOCKET_CONNECTING,
+  ERR_SOCKET_HANDLE_ADOPTED,
   ERR_INVALID_IP_ADDRESS,
   ERR_INVALID_ADDRESS,
   EPIPE,
@@ -99,6 +100,13 @@ export const kReinitializeHandle = Symbol('kReinitializeHandle');
 // socket.opened promise will be stored here.
 const kSocketInfo = Symbol('kSocketInfo');
 
+// Holds the bound address of an adopted BoundSocket.
+const kBoundSource = Symbol('kBoundSource');
+const kBoundSocketConsume = Symbol('kBoundSocketConsume');
+
+const DEFAULT_IPV4_ADDR = '0.0.0.0';
+const DEFAULT_IPV6_ADDR = '::';
+
 // IPv4 Segment
 const v4Seg = '(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])';
 const v4Str = `(?:${v4Seg}\\.){3}${v4Seg}`;
@@ -134,7 +142,7 @@ export type SocketOptions = {
   writableObjectMode?: boolean;
   keepAliveInitialDelay?: number;
   fd?: number;
-  handle?: Socket['_handle'];
+  handle?: Socket['_handle'] | BoundSocket;
   noDelay?: boolean;
   keepAlive?: boolean;
   allowHalfOpen?: boolean;
@@ -143,6 +151,92 @@ export type SocketOptions = {
   onread?:
     ({ callback?: () => Uint8Array; buffer?: Uint8Array } & OnReadOpts) | null;
 };
+
+export type BoundSocketOptions = {
+  host?: string | null;
+  port?: number | string;
+  ipv6Only?: boolean;
+  reusePort?: boolean;
+};
+
+// Workers cannot bind a local endpoint, so the bound address is validated and
+// recorded here, then reported by the adopting Socket as its local address,
+// but the underlying transport does not honor it. With port 0 the port stays 0
+// since no ephemeral port is reserved.
+export class BoundSocket {
+  #address: AddressInfo | null;
+
+  constructor(options: BoundSocketOptions = {}) {
+    validateObject(options, 'options');
+
+    const port = validatePort(options.port ?? 0, 'options.port');
+
+    const ipv6Only = options.ipv6Only ?? false;
+    validateBoolean(ipv6Only, 'options.ipv6Only');
+
+    const reusePort = options.reusePort ?? false;
+    validateBoolean(reusePort, 'options.reusePort');
+
+    let { host } = options;
+    let addressType: number;
+    if (host === undefined || host === null) {
+      host = ipv6Only ? DEFAULT_IPV6_ADDR : DEFAULT_IPV4_ADDR;
+      addressType = ipv6Only ? 6 : 4;
+    } else {
+      validateString(host, 'options.host');
+      addressType = isIP(host);
+      if (addressType === 0) {
+        throw new ERR_INVALID_ARG_VALUE(
+          'options.host',
+          host,
+          'must be a numeric IP address; net.BoundSocket does not perform DNS resolution'
+        );
+      }
+    }
+
+    this.#address = {
+      address: host,
+      family: addressType === 6 ? 'IPv6' : 'IPv4',
+      port,
+    };
+  }
+
+  address(): AddressInfo {
+    if (this.#address === null) {
+      throw new ERR_SOCKET_HANDLE_ADOPTED();
+    }
+    return this.#address;
+  }
+
+  // Workers have no file descriptors; -1 matches Node.js on platforms without
+  // socket fds.
+  fd(): number {
+    if (this.#address === null) {
+      throw new ERR_SOCKET_HANDLE_ADOPTED();
+    }
+    return -1;
+  }
+
+  close(): void {
+    if (this.#address === null) {
+      throw new ERR_SOCKET_HANDLE_ADOPTED();
+    }
+    this.#address = null;
+  }
+
+  [Symbol.dispose](): void {
+    this.#address = null;
+  }
+
+  [kBoundSocketConsume](): AddressInfo {
+    if (this.#address === null) {
+      throw new ERR_SOCKET_HANDLE_ADOPTED();
+    }
+    const address = this.#address;
+    this.#address = null;
+    return address;
+  }
+}
 
 export function Server(): void {
   throw new Error('Server is not implemented');
@@ -182,6 +276,7 @@ export declare class Socket extends _Socket {
   };
   [kBytesRead]: number;
   [kBytesWritten]: number;
+  [kBoundSource]: AddressInfo | null;
   [kReinitializeHandle](handle: Socket['_handle']): void;
   _closeAfterHandlingError: boolean;
   _handle: null | {
@@ -327,6 +422,7 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   this[kSocketInfo] = null;
   this[kBytesRead] = 0;
   this[kBytesWritten] = 0;
+  this[kBoundSource] = null;
   this._closeAfterHandlingError = false;
   // @ts-expect-error TS2540 Required due to types
   this.autoSelectFamilyAttemptedAddresses = [];
@@ -343,7 +439,11 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
 
   if (options.handle) {
     validateObject(options.handle, 'options.handle');
-    this._handle = options.handle;
+    if (options.handle instanceof BoundSocket) {
+      this[kBoundSource] = options.handle[kBoundSocketConsume]();
+    } else {
+      this._handle = options.handle;
+    }
   }
 
   // We explicitly listen for all 'end' events, not only for once
@@ -471,6 +571,9 @@ Socket.prototype._getpeername = function (
 };
 
 Socket.prototype._getsockname = function (this: Socket): AddressInfo | {} {
+  if (this[kBoundSource] != null) {
+    return this[kBoundSource];
+  }
   if (this._handle == null) {
     return {};
   }
@@ -1147,6 +1250,17 @@ function initializeConnection(
     localPort,
   } = options;
   let { port } = options;
+  if (
+    socket[kBoundSource] != null &&
+    (localAddress !== undefined || localPort !== undefined)
+  ) {
+    throw new ERR_INVALID_ARG_VALUE(
+      'options',
+      options,
+      'localAddress and localPort cannot be used with an adopted bound socket'
+    );
+  }
+
   if (localAddress && !isIP(localAddress)) {
     throw new ERR_INVALID_IP_ADDRESS(localAddress);
   }
