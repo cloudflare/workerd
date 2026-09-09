@@ -8,6 +8,11 @@
 
 #include <kj/test.h>
 
+extern "C" {
+void kj_rs_demo_work_before_poll(uint64_t* target, ::kj_rs::repr::RustFuture* out);
+void kj_rs_demo_lazy_future_awaiting_cancellable_promise(::kj_rs::repr::RustFuture* out);
+}
+
 namespace kj_rs_demo {
 namespace {
 
@@ -218,8 +223,19 @@ KJ_TEST("Work before poll") {
   uint64_t val = 0;
   // It should be possible for rust function to do work before returning the future
   // even if we don't poll or cancel it.
-  auto promise = work_before_poll(val);
+  ::kj_rs::repr::RustFuture fut;
+  kj_rs_demo_work_before_poll(&val, &fut);
+  auto promise = fut.lazily<void>();
   KJ_EXPECT(val == 42);
+}
+
+KJ_TEST("bridged async functions run eagerly at promise creation") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  reset_side_effect_counter();
+  { auto promise = new_side_effect_future_void(); }
+  KJ_EXPECT(get_side_effect_counter() == 1);
 }
 
 // TODO(someday): More test cases.
@@ -240,7 +256,11 @@ KJ_TEST("Cancellation: drop never-polled Rust future") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  { auto promise = new_future_awaiting_cancellable_promise(); }
+  {
+    ::kj_rs::repr::RustFuture fut;
+    kj_rs_demo_lazy_future_awaiting_cancellable_promise(&fut);
+    auto promise = fut.lazily<void>();
+  }
 }
 
 KJ_TEST("Cancellation: C++ dropping promise cancels Rust future's awaited KJ promise") {

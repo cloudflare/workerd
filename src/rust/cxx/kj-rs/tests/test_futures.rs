@@ -12,6 +12,20 @@ use std::task::Poll;
 use std::task::Wake;
 use std::task::Waker;
 
+static SIDE_EFFECT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn reset_side_effect_counter() {
+    SIDE_EFFECT_COUNTER.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn get_side_effect_counter() -> u64 {
+    SIDE_EFFECT_COUNTER.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+pub async fn new_side_effect_future_void() {
+    SIDE_EFFECT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
 use crate::Error;
 use crate::Result;
 use crate::ffi::CloningAction;
@@ -290,6 +304,26 @@ pub async fn new_future_awaiting_cancellable_promise() -> Result<()> {
         .await
         .map_err(Error::other)?;
     Ok(())
+}
+
+pub async fn new_lazy_future_awaiting_cancellable_promise() -> Result<()> {
+    crate::ffi::new_cancellation_detecting_promise_void()
+        .await
+        .map_err(Error::other)?;
+    Ok(())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kj_rs_demo_lazy_future_awaiting_cancellable_promise(
+    out: *mut kj_rs::repr::RustFuture<'static, ()>,
+) {
+    let fut = kj_rs::repr::future(Box::pin(kj_rs::map_err(
+        new_lazy_future_awaiting_cancellable_promise(),
+        file!(),
+        line!(),
+    )));
+    // Safety: the C++ caller passes uninitialized storage for one RustFuture and takes ownership.
+    unsafe { out.write(fut) };
 }
 
 /// Two-step future: the first step completes normally, and the second step awaits a

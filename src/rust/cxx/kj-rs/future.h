@@ -85,6 +85,11 @@ struct RustFuture {
 
   template <typename T>
   operator kj::Promise<T>() {
+    return lazily<T>().eagerlyEvaluate(nullptr);
+  }
+
+  template <typename T>
+  kj::Promise<T> lazily() {
     struct Impl {
       using ExceptionOrValue = ::kj::_::ExceptionOr<::kj::_::FixVoid<T>>;
       using Output = ::kj::_::FixVoid<T>;
