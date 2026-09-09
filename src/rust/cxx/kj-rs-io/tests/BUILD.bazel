@@ -58,3 +58,25 @@ cc_test(
         "@capnp-cpp//src/kj:kj-test",
     ],
 )
+
+cc_test(
+    name = "file-watcher-test",
+    # medium: real I/O plus timer-bounded waits; small's 3 s budget is exceeded under parallel
+    # build load even though the suite runs in ~2 s alone.
+    size = "medium",
+    srcs = ["file-watcher-test.c++"],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":tests",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)
