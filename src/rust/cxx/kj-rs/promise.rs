@@ -9,7 +9,8 @@
 //! ```text
 //! FutureAwaiter<F> — a FuturePollEvent: the kj Event whose fire() polls the Future
 //!     │
-//!     ├── owns one persistent FutureWakerCell (kj::Arc — atomically refcounted, thread-safe)
+//!     ├── after its first poll, owns one persistent FutureWakerCell
+//!     │     (kj::Arc — atomically refcounted, thread-safe)
 //!     │       ├── weak Event link — nulled by the event's destructor, so wakes retained by
 //!     │       │     Rust past the future's life are safe no-ops (neutralize-on-drop)
 //!     │       ├── owning Executor — routes wakes: on the owning thread, arm the event
@@ -40,9 +41,9 @@
 //!     │     the optimized path when polled under a C++ co_await (readiness arms the event
 //!     │     directly, no Waker involved); the weak expires on the event's destruction and
 //!     │     the intrusive list is unlinked by either side's destructor
-//!     └── storedWaker — OUR OWN clone of an arbitrary `Waker`, held as its raw words
-//!           (RawWakerParts): the generic path when polled by any other runtime; fire()
-//!           reassembles and wakes it instead
+//!     └── storedWaker — OUR OWN clone of an arbitrary `Waker`, held in a
+//!           `rust::Box<RustWaker>`: the generic path when polled by any other runtime;
+//!           fire() wakes it and ordinary drop glue releases it
 //! ```
 #![allow(unsafe_code)]
 
