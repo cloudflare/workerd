@@ -6,7 +6,7 @@ Subject: Update illegal invocation error message in v8
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/src/common/message-template.h b/src/common/message-template.h
-index 4480bd4a9a9ac090def94116d8da123ff3acedea..718bf26860b7b292f380196b520f0fa4b6030324 100644
+index 4b47483f3998ada2320ed48f44a30b003ed97b6b..4591cbc5f6d721796efa19ecf02ebdc87b85b0df 100644
 --- a/src/common/message-template.h
 +++ b/src/common/message-template.h
 @@ -125,7 +125,11 @@ namespace internal {
@@ -23,10 +23,10 @@ index 4480bd4a9a9ac090def94116d8da123ff3acedea..718bf26860b7b292f380196b520f0fa4
      "Immutable prototype object '%' cannot have their prototype set")          \
    T(ImportAttributesDuplicateKey, "Import attribute has duplicate key '%'")    \
 diff --git a/test/cctest/test-api.cc b/test/cctest/test-api.cc
-index 0e5aefebed637304086356d66a92de5994946d11..30aee6a4c4d2369c3b7d886551976bc1dc98e3e0 100644
+index 3518564c582d148387ac0bd7785915def22c5f22..8bf9c1800f771d4a98aee6f4878b348f84c1024b 100644
 --- a/test/cctest/test-api.cc
 +++ b/test/cctest/test-api.cc
-@@ -227,6 +227,17 @@ THREADED_TEST(IsolateOfContext) {
+@@ -228,6 +228,17 @@ THREADED_TEST(IsolateOfContext) {
    CHECK(isolate->IsCurrent());
  }
  
@@ -44,7 +44,7 @@ index 0e5aefebed637304086356d66a92de5994946d11..30aee6a4c4d2369c3b7d886551976bc1
  static void TestSignatureLooped(const char* operation, Local<Value> receiver,
                                  v8::Isolate* isolate) {
    auto source = v8::base::OwnedVector<char>::NewForOverwrite(200);
-@@ -244,12 +255,7 @@ static void TestSignatureLooped(const char* operation, Local<Value> receiver,
+@@ -245,12 +256,7 @@ static void TestSignatureLooped(const char* operation, Local<Value> receiver,
    if (!expected_to_throw) {
      CHECK_EQ(10, signature_callback_count);
    } else {
@@ -58,7 +58,7 @@ index 0e5aefebed637304086356d66a92de5994946d11..30aee6a4c4d2369c3b7d886551976bc1
    }
    signature_expected_receiver_global.Reset();
  }
-@@ -276,12 +282,7 @@ static void TestSignatureOptimized(const char* operation, Local<Value> receiver,
+@@ -277,12 +283,7 @@ static void TestSignatureOptimized(const char* operation, Local<Value> receiver,
    if (!expected_to_throw) {
      CHECK_EQ(3, signature_callback_count);
    } else {

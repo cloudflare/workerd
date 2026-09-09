@@ -78,8 +78,9 @@ export CARGO_TARGET_DIR="$target_dir"
 # what Cargo itself uses to exercise -Zbuild-std against a separate source tree.
 export __CARGO_TESTS_ONLY_SRC_ROOT="$rust_library"
 
-# Cargo applies target-specific flags to the generated package and every
-# build-std dependency.
+# Cargo applies target-specific flags to the generated package and every build-std dependency. The
+# action only builds rlibs; sanitizer runtime selection is deferred to the final Bazel link, where
+# Rust and C++ share Clang's runtime.
 env_name="CARGO_TARGET_$(printf '%s' "$target_triple" | tr '[:lower:]-' '[:upper:]_')_RUSTFLAGS"
 export "$env_name=-Zsanitizer=$sanitizer"
 

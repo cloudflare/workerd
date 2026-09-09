@@ -281,8 +281,6 @@ build:tsan-common --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
 
 # Linux x86_64.
 build:tsan --config=tsan-common
-# A statically-linked unwinder in each shared library cannot propagate exceptions across DSOs.
-build:tsan --linkopt="-l:libunwind.so.8"
 
 # macOS arm64. ld64 does not accept the GNU-ld `-l:` syntax and has no equivalent need: libunwind is
 # part of libSystem and shared by every image.
@@ -556,3 +554,6 @@ coverage --build_tests_only
 # This config is defined internally and enabled on many machines.
 # Defining it as empty just so these machines can run build commands from the workerd repo
 build:rosetta-arm64 --define=rosetta_arm64_no_op=1
+
+# Local workstation overrides. /.local/ is gitgnored.
+try-import %workspace%/.local/bazelrc

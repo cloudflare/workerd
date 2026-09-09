@@ -230,6 +230,8 @@ class IoContext_IncomingRequest final {
 
   bool wasDelivered = false;
 
+  kj::UnwindDetector unwindDetector;
+
   // Used for debugging, tracks whether we properly called drain() or some other mechanism to
   // wait for waitUntil tasks.
   bool waitedForWaitUntil = false;

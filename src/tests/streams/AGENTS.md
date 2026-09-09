@@ -4,7 +4,7 @@ Streams test suite, organized WPT-style: one subdirectory per functional area
 (`identity/`, `encoding/`, `compression/`, `digest/`, `strategies/`,
 `readable/`, `readable-byte/`, `writable/`, `transform/`, `piping/`,
 `inspect/`, `r2-patterns/`, `iocontext/`, `cache/`, `htmlrewriter/`,
-`formdata/`). Every
+`formdata/`, `sockets/`). Every
 test here runs against **both** streams implementations — the legacy C++ one
 (`src/workerd/api/streams/`) and the TypeScript one
 (`src/per_isolate/webstreams/`) — to prove parity. A test that only makes
@@ -139,8 +139,6 @@ configs' flag lists).
 - `src/workerd/api/tests/ts-webstreams-test.js` — TypeScript-impl
   internals (native/buffer/iterable bodies ARE ts streams, pumpTo);
   single-implementation by nature.
-- `src/workerd/api/tests/pipe-write-special-buffer-test.js` —
-  SharedArrayBuffer/resizable-buffer pipe writes (special env).
 - Security regression singles in `src/workerd/api/tests/`
   (streams-byob-close-reentry, streams-byob-concurrent-readatleast,
   streams-byte-cancel-uaf, streams-byte-handlePush-uaf,
