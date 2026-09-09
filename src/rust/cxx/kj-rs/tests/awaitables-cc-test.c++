@@ -7,6 +7,9 @@
 #include <sys/types.h>
 
 #include <kj/test.h>
+#include <kj/thread.h>
+
+#include <csignal>
 
 extern "C" {
 void kj_rs_demo_work_before_poll(uint64_t* target, ::kj_rs::repr::RustFuture* out);
@@ -240,6 +243,18 @@ KJ_TEST("a panic in an infallible bridged future rejects its promise") {
   KJ_EXPECT(exception.getDescription().contains("bridged infallible future panicked on purpose"),
       exception.getDescription());
 }
+
+#if !_WIN32
+KJ_TEST("a panic in a bridged future's Drop aborts deterministically") {
+  KJ_EXPECT_SIGNAL(SIGABRT, {
+    kj::EventLoop loop;
+    kj::WaitScope waitScope(loop);
+    auto promise = new_panic_on_drop_future_void();
+    KJ_EXPECT(!promise.poll(waitScope));
+    promise = nullptr;
+  });
+}
+#endif
 
 // TODO(someday): More test cases.
 //   - Standalone ArcWaker tests. Ensure Rust calls ArcWaker destructor when we expect.

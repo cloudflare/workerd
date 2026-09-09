@@ -34,6 +34,26 @@ pub async fn new_panicking_infallible_future_void() {
     panic!("bridged infallible future panicked on purpose");
 }
 
+struct PanicOnDropFuture;
+
+impl Future for PanicOnDropFuture {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Poll::Pending
+    }
+}
+
+impl Drop for PanicOnDropFuture {
+    fn drop(&mut self) {
+        panic!("deliberate panic in a bridged future's Drop");
+    }
+}
+
+pub async fn new_panic_on_drop_future_void() {
+    PanicOnDropFuture.await;
+}
+
 use crate::Error;
 use crate::Result;
 use crate::ffi::CloningAction;

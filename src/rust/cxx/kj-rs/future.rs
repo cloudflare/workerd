@@ -141,7 +141,9 @@ pub mod repr {
             let fut = unsafe { Box::from_raw(fut) };
             // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
             let fut = unsafe { Pin::new_unchecked(fut) };
-            drop(fut);
+            cxx::private::prevent_unwind("kj_rs::repr::RustFuture::drop_in_place", move || {
+                drop(fut);
+            });
         }
     }
 
@@ -178,7 +180,12 @@ pub mod repr {
             let fut = unsafe { Box::from_raw(fut) };
             // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
             let fut = unsafe { Pin::new_unchecked(fut) };
-            drop(fut);
+            cxx::private::prevent_unwind(
+                "kj_rs::repr::RustInfallibleFuture::drop_in_place",
+                move || {
+                    drop(fut);
+                },
+            );
         }
     }
 
