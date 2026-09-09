@@ -20,16 +20,11 @@ pub struct OwnPromiseNode(*mut c_void /* kj::_::PromiseNode* */);
 // It is forgotten using `MaybeUninit` and its ownership passed over to c++ in `unwrap`.
 impl Drop for OwnPromiseNode {
     fn drop(&mut self) {
-        // Safety:
-        // 1. Pointer to self is non-null, and obviously points to valid memory.
-        // 2. We do not read or write to the OwnPromiseNode's memory, so there are no atomicity nor
-        //    interleaved pointer/reference access concerns.
-        //
-        // https://doc.rust-lang.org/std/ptr/index.html#safety
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-        unsafe {
-            crate::ffi::own_promise_node_drop_in_place(self);
-        }
+        // `own_promise_node_drop_in_place` placement-destructs the node behind `self`. The
+        // borrow is valid for the call; the value is only logically dead afterwards, inside
+        // this `drop`, and the inner `*mut c_void` has no drop glue, so there is no
+        // use-after-free or double-free. Expressed as a `&mut` binding, so no `unsafe` needed.
+        crate::ffi::own_promise_node_drop_in_place(self);
     }
 }
 
