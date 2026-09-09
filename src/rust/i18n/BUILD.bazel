@@ -13,10 +13,12 @@ wd_rust_crate(
         "@simdutf",
         "@workerd-v8//:v8",
     ],
+    rustc_env = {"RUST_ICU_MAJOR_VERSION_NUMBER": "78"},
     test_deps = ["//src/rust/jsg-test"],
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/jsg",
+        "@crates_vendor//:rust_icu_sys",
         "@crates_vendor//:thiserror",
     ],
 )

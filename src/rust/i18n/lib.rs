@@ -10,15 +10,10 @@
 //! ports the C++ dispatch/sizing/truncation logic to Rust, while [`codecs`]
 //! calls the exact same ICU and simdutf primitives the C++ path uses.
 //!
-//! Those primitives are bound directly by the [`ffi`] bridge, with no C++ of
-//! their own in between. Matching the C++ path's behaviour is a matter of
-//! calling the same codecs the same way, not of sharing code with it.
-
-// `ffi::ucnv_convertEx` takes thirteen parameters. The signature is ICU's, and
-// a binding that did not mirror it exactly would not be a binding. The allow
-// sits at crate level because `cxx::bridge` rejects lint attributes both on the
-// bridge module and on the extern blocks inside it.
-#![allow(clippy::too_many_arguments)]
+//! ICU is bound by `rust_icu_sys`, configured for the Chromium ICU version
+//! already linked into workerd. The simdutf primitives are bound directly by
+//! the [`ffi`] bridge. Matching the C++ path's behaviour is a matter of calling
+//! the same codecs the same way, not of sharing code with it.
 
 use jsg::Lock;
 use jsg::v8;
@@ -45,60 +40,6 @@ mod ffi {
         Latin1,
         Utf8,
         Utf16Le,
-    }
-
-    // ICU
-    //
-    // The same `ucnv_*` entry points `i18n.c++` calls. ICU renames every public
-    // symbol with its major version (`ucnv_open` -> `ucnv_open_78`) via
-    // `urename.h`; the generated bridge source is an ordinary translation unit
-    // that includes `<unicode/ucnv.h>`, so the rename applies there and no
-    // version appears in Rust.
-    //
-    // `UChar` is `char16_t`, so UTF-16 buffers use `c_char16` rather than
-    // `u16`: `uint16_t` would not match these declarations.
-    #[namespace = ""]
-    unsafe extern "C++" {
-        include!("unicode/ucnv.h");
-
-        type UConverter;
-        type UErrorCode = crate::codecs::UErrorCode;
-
-        unsafe fn ucnv_open(name: *const c_char, err: *mut UErrorCode) -> *mut UConverter;
-        unsafe fn ucnv_close(cnv: *mut UConverter);
-        unsafe fn ucnv_getMaxCharSize(cnv: *const UConverter) -> i8;
-        unsafe fn ucnv_getMinCharSize(cnv: *const UConverter) -> i8;
-        unsafe fn ucnv_setSubstChars(
-            cnv: *mut UConverter,
-            s: *const c_char,
-            length: i8,
-            err: *mut UErrorCode,
-        );
-
-        unsafe fn ucnv_convertEx(
-            target_cnv: *mut UConverter,
-            source_cnv: *mut UConverter,
-            target: *mut *mut c_char,
-            target_limit: *const c_char,
-            source: *mut *const c_char,
-            source_limit: *const c_char,
-            pivot_start: *mut c_char16,
-            pivot_source: *mut *mut c_char16,
-            pivot_target: *mut *mut c_char16,
-            pivot_limit: *const c_char16,
-            reset: i8,
-            flush: i8,
-            err: *mut UErrorCode,
-        );
-
-        unsafe fn ucnv_fromUChars(
-            cnv: *mut UConverter,
-            dest: *mut c_char,
-            dest_capacity: i32,
-            src: *const c_char16,
-            src_length: i32,
-            err: *mut UErrorCode,
-        ) -> i32;
     }
 
     // simdutf
