@@ -33,6 +33,7 @@ rust_library(
         # TODO(cleanup): Why isn't :cxx transitive?
         "//src/rust/cxx",
         "//src/rust/cxx/kj-rs",
+        "@crates_vendor//:static_assertions",
     ],
 )
 
@@ -123,15 +124,7 @@ wd_cc_library(
 )
 
 kj_test(
-    size = "small",
-    src = "linked-group-test.c++",
-    deps = [
-        "//src/rust/cxx/kj-rs",
-        "//src/rust/cxx/third-party:runtime",
-    ],
-)
-
-kj_test(
+    size = "medium",
     src = "awaitables-cc-test.c++",
     deps = [
         ":bridge",

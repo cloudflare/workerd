@@ -36,6 +36,22 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - `tests/` and `kj-rs/tests/` — Rust and C++ bridge integration tests
 - `tools/bazel/` — Bazel bridge-generation macro used by this component's tests
 
+## Async bridge semantics
+
+- Marking a fn `async` in `extern "Rust"` yields a `kj::Promise<T>` in C++; `async` in
+  `extern "C++"` yields an `impl Future` in Rust.
+- Bridged `kj::Promise<T>`s are **eager by default**: the Rust future is polled to its first
+  suspension point at the call (KJ code assumes hot promises), so callers never need
+  `.eagerlyEvaluate(nullptr)`. `RustFuture::lazily()` (kj-rs/future.h) is the C++-side
+  escape hatch for the rare cold case.
+- The waker bridge honors `Waker: Send + Sync` for real: a Rust `.await` of a KJ promise links
+  to the `FuturePollEvent` via an intrusive weak link (`RustPromiseAwaiter::link` /
+  `FuturePollEvent::leaves`), and a cloned waker is an atomically-refcounted `FutureWakerCell`
+  whose wake checks the owning executor — on the owning loop's thread it arms the
+  `FuturePollEvent` directly (the hot path), from any other thread it enqueues itself on the
+  loop's single `CrossThreadWakeSink` (a `kj::EventLoopLocal`), whose drain replays the wake on
+  the owning thread.
+
 ## Conventions
 
 - Follow the parent `src/rust/AGENTS.md` and repository `AGENTS.md`.
