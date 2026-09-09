@@ -134,12 +134,11 @@ class FutureWakerCell final: public kj::AtomicRefcounted {
   // state.
   //
   // `event` is unsynchronized, so this write must be on the owning thread -- the thread whose
-  // wakeByRef() reads it -- or on a thread with no event loop at all after the owning loop has
-  // been torn down (then no thread can take the same-thread read path any more). KJ promises are
-  // single-loop, which makes this true by construction; the check turns that into a debug-time
-  // guarantee rather than a comment.
+  // wakeByRef() reads it -- or after the owning loop has been torn down (then no thread can take
+  // the same-thread read path any more). KJ promises are single-loop, which makes this true by
+  // construction; the check turns that into a debug-time guarantee rather than a comment.
   void neutralize() const {
-    KJ_DREQUIRE(executor->isCurrent() || kj::tryGetCurrentThreadExecutor() == kj::none,
+    KJ_DREQUIRE(executor->isCurrent() || !executor->isLive(),
         "FutureWakerCell neutralized off its owning thread");
     event = kj::none;
     // Let foreign threads see the death too (below), so their wakes stop travelling to a loop
