@@ -51,23 +51,13 @@ export const stringChunkDiverges = {
     const cs = new CompressionStream('gzip');
     const writer = cs.writable.getWriter();
     if (usingTsImpl) {
-      // Rejected — but per-write only (the DECIDED invalid-chunk
-      // contract): the stream survives and later traffic flows.
+      // Rejected per spec; like any invalid chunk, it errors both sides.
       await rejects(writer.write('hi'), (err) => {
         strictEqual(err.constructor, TypeError);
         strictEqual(err.message, tsBadChunkMsg);
         return true;
       });
-      await writer.write(enc.encode('hi'));
-      await writer.close();
-      const chunks = [];
-      for await (const chunk of cs.readable) {
-        chunks.push(chunk);
-      }
-      strictEqual(
-        dec.decode(await pump(new DecompressionStream('gzip'), chunks)),
-        'hi'
-      );
+      await rejects(writer.closed, TypeError);
     } else {
       // Accepted and UTF-8 encoded, like the identity streams.
       await writer.write('hi');
@@ -84,36 +74,46 @@ export const stringChunkDiverges = {
   },
 };
 
-// SAB-backed chunks are accepted by copying the shared bytes (parity —
-// DECIDED 2026-08-28, matching the identity streams and C++; the strict
-// [AllowShared]-less BufferSource reading was considered and overridden,
-// which is why the WPT bad-chunks files are disabled for both impls).
-export const sharedArrayBufferChunkAccepted = {
+// SharedArrayBuffer and SAB-backed views: the C++ pair copies the shared
+// bytes out (its write path is shared with the identity streams);
+// TypeScript rejects per Web IDL — BufferSource without [AllowShared] —
+// as WPT compression-bad-chunks requires. The shared buffer is untouched
+// either way.
+export const sharedArrayBufferChunkDiverges = {
   async test() {
     const sab = new SharedArrayBuffer(1);
     new Uint8Array(sab)[0] = 0x41;
     for (const chunk of [sab, new Uint8Array(sab)]) {
       const cs = new CompressionStream('gzip');
       const writer = cs.writable.getWriter();
-      await writer.write(chunk);
-      await writer.close();
-      const chunks = [];
-      for await (const c of cs.readable) {
-        chunks.push(c);
+      if (usingTsImpl) {
+        await rejects(writer.write(chunk), (err) => {
+          strictEqual(err.constructor, TypeError);
+          strictEqual(err.message, tsBadChunkMsg);
+          return true;
+        });
+      } else {
+        await writer.write(chunk);
+        await writer.close();
+        const chunks = [];
+        for await (const c of cs.readable) {
+          chunks.push(c);
+        }
+        strictEqual(
+          dec.decode(await pump(new DecompressionStream('gzip'), chunks)),
+          'A'
+        );
       }
-      strictEqual(
-        dec.decode(await pump(new DecompressionStream('gzip'), chunks)),
-        'A'
-      );
-      // The shared bytes were copied, never consumed in place.
       strictEqual(new Uint8Array(sab)[0], 0x41);
     }
   },
 };
 
-// An invalid chunk rejects ITS OWN write only (message per impl); the
-// stream survives on both sides (parity — the DECIDED contract).
-export const invalidChunkRejectsWriteOnly = {
+// An invalid chunk rejects its write with a TypeError (message per impl).
+// Aftermath diverges: the C++ stream survives (later writes flow, close is
+// clean) while TypeScript errors BOTH sides, the spec's transform-time
+// error propagation (WPT compression-bad-chunks: the read rejects too).
+export const invalidChunkAftermathDiverges = {
   async test() {
     const cs = new CompressionStream('gzip');
     const writer = cs.writable.getWriter();
@@ -123,16 +123,21 @@ export const invalidChunkRejectsWriteOnly = {
       strictEqual(err.message, expectedMsg);
       return true;
     });
-    // The stream survives: later traffic flows and close is clean.
-    await writer.write(enc.encode('ok'));
-    await writer.close();
-    const chunks = [];
-    for await (const chunk of cs.readable) {
-      chunks.push(chunk);
+    if (usingTsImpl) {
+      await rejects(writer.write(enc.encode('x')), TypeError);
+      await rejects(writer.closed, TypeError);
+      await rejects(cs.readable.getReader().read(), TypeError);
+    } else {
+      await writer.write(enc.encode('ok'));
+      await writer.close();
+      const chunks = [];
+      for await (const chunk of cs.readable) {
+        chunks.push(chunk);
+      }
+      strictEqual(
+        dec.decode(await pump(new DecompressionStream('gzip'), chunks)),
+        'ok'
+      );
     }
-    strictEqual(
-      dec.decode(await pump(new DecompressionStream('gzip'), chunks)),
-      'ok'
-    );
   },
 };

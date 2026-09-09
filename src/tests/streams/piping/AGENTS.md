@@ -28,7 +28,7 @@ a deliberate defect pin, not a hole).
 | 8 | dest controller error()s while the pipe waits on a read | HALF-PROPAGATES: cancels the source with the error but FULFILLS the pipe promise | rejects the pipe and cancels the source with the error (spec) | `destControllerErrorsMidPipe` |
 | 9 | FixedLengthStream length violations via pipe | overflow: pipe NEVER SETTLES (bounded); underflow: never settles | overflow: rejects RangeError; underflow: never settles (parity of nonconformance) | `fixedLengthStreamPipeOverflow`/`Underflow` |
 | 10 | already-closed source → already-closed dest | rejects TypeError (a C++ deviation: the spec's ordered shutdown conditions give closing-forward priority) | FULFILLS (spec; WPT multiple-propagation 'closed readable to closed writable' pins the fulfillment) | `closedSourceToClosedDest` |
-| 11 | SharedArrayBuffer-backed views into CompressionStream | copies the shared bytes; round-trips | same (DECIDED 2026-08-28) | `sabViewThroughCompressionRoundTrip` |
+| 11 | SharedArrayBuffer-backed views into CompressionStream | copies the shared bytes; round-trips | write path REJECTS TypeError 'The provided value is not of type (ArrayBuffer or ArrayBufferView)' (spec: BufferSource without [AllowShared]) — while its identity stream ACCEPTS the same views | `sabViewThroughCompressionRoundTrip` |
 
 Parity worth noting (probed, pinned): the whole error-propagation-
 forward core matrix (starts-errored rejection/hook IDENTITY on both

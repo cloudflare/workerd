@@ -95,8 +95,8 @@ export {
 export {
   bufferSourceChunksAccepted,
   stringChunkDiverges,
-  sharedArrayBufferChunkAccepted,
-  invalidChunkRejectsWriteOnly,
+  sharedArrayBufferChunkDiverges,
+  invalidChunkAftermathDiverges,
 } from 'chunk-types';
 
 export {

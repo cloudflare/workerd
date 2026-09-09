@@ -7,18 +7,15 @@ import { type TestRunnerConfig } from 'harness/harness';
 // The compression WPT suite against the TypeScript streams implementation's
 // CompressionStream/DecompressionStream pair (webstreams/compression.ts over
 // the shared C++ CodecStage). Expectations match the legacy configuration
-// (compression-test.ts): the pair is behavior-matching by design.
+// (compression-test.ts) except where the TypeScript pair follows the spec
+// and the legacy one does not (bad chunks; IDL prototype attributes).
 export default {
+  // The legacy configuration disables this file (the C++ pair accepts
+  // SharedArrayBuffer chunks and keeps the stream usable after an invalid
+  // one); the TypeScript pair rejects both per spec.
   'compression-bad-chunks.any.js': {
-    comment:
-      'INTENTIONAL SPEC DIVERGENCE (decided 2026-08-28, matching the C++ ' +
-      'implementation and the identity streams): SharedArrayBuffer-backed ' +
-      'chunks are accepted by copying, and invalid chunks reject only ' +
-      "their own write, leaving the stream usable — so the file's " +
-      '"read should reject" assertions hang (the read legitimately stays ' +
-      'pending on a usable stream) and the whole file must be disabled, ' +
-      'mirroring the C++ configuration.',
-    disabledTests: true,
+    comment: 'brotli compression is not supported',
+    expectedFailures: [/brotli/],
   },
   'compression-constructor-error.any.js': {},
   'compression-including-empty-chunk.any.js': {
@@ -51,12 +48,8 @@ export default {
   },
   'compression-with-detach.any.js': {},
   'decompression-bad-chunks.any.js': {
-    comment:
-      'INTENTIONAL SPEC DIVERGENCE: same invalid-chunk contract as ' +
-      'compression-bad-chunks.any.js above (per-write rejection on a ' +
-      'usable stream hangs the "read should reject" assertions; SAB ' +
-      'chunks are accepted by copying).',
-    disabledTests: true,
+    comment: 'brotli compression is not supported',
+    expectedFailures: [/brotli/],
   },
   'decompression-buffersource.any.js': {
     comment: 'brotli compression is not supported',

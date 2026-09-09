@@ -75,12 +75,14 @@ function isActualObject(value: unknown): value is object {
 
 // A sink write() rejection wrapped in this marker rejects the WRITE
 // REQUEST but leaves the stream writable — the workerd-internal contract
-// for the identity and compression transforms (matching the C++ internal
-// controllers), where an invalid chunk is a per-write error, not a stream
-// error. Under pure WHATWG semantics every sink rejection errors the
-// stream, so this channel is unreachable for user-provided sinks: the
-// wrapper is minted only via internalsForPipe.nonFatalWriteRejection,
-// which user code cannot reach. Detection is by private brand.
+// for the identity transforms (IdentityTransformStream, FixedLengthStream;
+// matching the C++ internal controllers), where an invalid chunk is a
+// per-write error, not a stream error. The standard CompressionStream pair
+// does NOT use it: per spec an invalid chunk there errors both sides. Under
+// pure WHATWG semantics every sink rejection errors the stream, so this
+// channel is unreachable for user-provided sinks: the wrapper is minted
+// only via internalsForPipe.nonFatalWriteRejection, which user code cannot
+// reach. Detection is by private brand.
 let isNonFatalWriteRejection: (
   value: unknown
 ) => value is NonFatalWriteRejection;
@@ -1797,7 +1799,7 @@ module.exports = {
       getWritableStreamState(stream) === 'writable' &&
       !writableStreamCloseQueuedOrInFlight(stream),
     // Wraps a sink write() rejection so it rejects only ITS write request,
-    // leaving the stream writable (the identity/compression invalid-chunk
+    // leaving the stream writable (the identity streams' invalid-chunk
     // contract — see NonFatalWriteRejection). The sink throws (or rejects
     // with) the wrapper; the write request rejects with `error`.
     nonFatalWriteRejection: (error: unknown): NonFatalWriteRejection =>
