@@ -346,10 +346,10 @@ class TeeAdapter final: public kj::AsyncInputStream {
 
 class TeeBranch final: public ReadableStreamSource {
  public:
-  explicit TeeBranch(kj::Own<kj::AsyncInputStream> inner): inner(kj::mv(inner)) {}
+  explicit TeeBranch(kj::Rc<kj::AsyncInputStream> inner): inner(kj::mv(inner)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return inner->tryRead(buffer, minBytes, maxBytes);
+    return inner->tryRead(buffer, minBytes, maxBytes).attach(inner.addRef());
   }
 
   kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
@@ -371,19 +371,10 @@ class TeeBranch final: public ReadableStreamSource {
     // It is important we actually call `inner->pumpTo()` so that `kj::newTee()` is aware of this
     // pump operation's backpressure. So we can't use the default `ReadableStreamSource::pumpTo()`
     // implementation, and have to implement our own.
-
-    PumpAdapter outputAdapter(output);
-    co_await inner->pumpTo(outputAdapter);
-
-    if (end) {
-      co_await output->end();
-    }
-
-    // We only use `TeeBranch` when a locally-sourced stream was tee'd (because system streams
-    // implement `tryTee()` in a different way that doesn't use `TeeBranch`). So, we know that
-    // none of the pump can be performed without the IoContext active, and thus we do not
-    // `KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`.
-    co_return;
+    //
+    // Pipe cancellation can synchronously destroy this TeeBranch before the returned pump promise
+    // finishes unwinding. Give the operation its own reference to the wrapped stream.
+    return pumpToImpl(inner.addRef(), output, end);
   }
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
@@ -442,7 +433,23 @@ class TeeBranch final: public ReadableStreamSource {
     kj::Ptr<WritableStreamSink> inner;
   };
 
-  kj::Own<kj::AsyncInputStream> inner;
+  static kj::Promise<DeferredProxy<void>> pumpToImpl(
+      kj::Rc<kj::AsyncInputStream> inner, kj::Ptr<WritableStreamSink> output, bool end) {
+    PumpAdapter outputAdapter(output);
+    co_await inner->pumpTo(outputAdapter);
+
+    if (end) {
+      co_await output->end();
+    }
+
+    // We only use `TeeBranch` when a locally-sourced stream was tee'd (because system streams
+    // implement `tryTee()` in a different way that doesn't use `TeeBranch`). So, we know that
+    // none of the pump can be performed without the IoContext active, and thus we do not
+    // `KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`.
+    co_return;
+  }
+
+  kj::Rc<kj::AsyncInputStream> inner;
 };
 }  // namespace
 
