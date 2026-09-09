@@ -1262,17 +1262,27 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(
       js, lock.getTraceAsyncContextKey(), js.v8Ref(spanHandle));
 }
 
+namespace {
+
+constexpr auto USER_TRACING_INVOCATION_TAG = "workerd.userTracingInvocation"_kj;
+
+}  // namespace
+
 jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
     Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride) {
   auto& ioContext = IoContext::current();
   jsg::Lock& js = lock;
+  kj::Maybe<jsg::JsObject> invocationTag;
+  if (userSpanOverride != kj::none) {
+    invocationTag = getCurrentUserTracingInvocationTag(js);
+  }
+
   SpanParent userSpan(nullptr);
   KJ_IF_SOME(sp, kj::mv(userSpanOverride)) {
     userSpan = kj::mv(sp);
   } else {
     userSpan = getRootUserTraceSpan();
   }
-
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
   if (userSpan.isObserved()) {
     auto& baseContext = getCurrentIncomingRequest().getInvocationSpanContext();
@@ -1294,8 +1304,58 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
       kj::mv(userSpan), kj::mv(tracer), kj::mv(invocationSpanContext));
   auto ioOwnAsyncContext = ioContext.addObject(kj::mv(asyncContext));
   auto contextHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnAsyncContext));
+  jsg::JsObject contextHolder(contextHandle.As<v8::Object>());
+
+  if (invocationTag == kj::none) {
+    auto& request = getCurrentIncomingRequest();
+    KJ_IF_SOME(anchor, request.userTracingInvocationAnchor) {
+      invocationTag = anchor.getHandle(js);
+    } else {
+      request.userTracingInvocationAnchor = jsg::JsRef(js, contextHolder);
+      invocationTag = contextHolder;
+    }
+  }
+
+  contextHolder.setPrivate(js, USER_TRACING_INVOCATION_TAG, KJ_ASSERT_NONNULL(invocationTag));
   return jsg::AsyncContextFrame::StorageScope(
       js, lock.getUserTraceAsyncContextKey(), js.v8Ref(contextHandle));
+}
+
+kj::Maybe<jsg::JsObject> IoContext::getCurrentUserTracingInvocationTag(jsg::Lock& js) {
+  KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
+    auto key = getCurrentLock().getUserTraceAsyncContextKey();
+    KJ_IF_SOME(value, frame.get(*key)) {
+      jsg::JsObject holder(value.getHandle(js).As<v8::Object>());
+      if (holder.hasPrivate(js, USER_TRACING_INVOCATION_TAG)) {
+        return holder.getPrivate(js, USER_TRACING_INVOCATION_TAG).tryCast<jsg::JsObject>();
+      }
+    }
+  }
+  return kj::none;
+}
+
+kj::Maybe<jsg::JsObject> IoContext::getUserTracingInvocationTag(jsg::Lock& js) {
+  KJ_IF_SOME(tag, getCurrentUserTracingInvocationTag(js)) {
+    return kj::mv(tag);
+  }
+  if (!incomingRequests.empty()) {
+    KJ_IF_SOME(anchor, getCurrentIncomingRequest().userTracingInvocationAnchor) {
+      return anchor.getHandle(js);
+    }
+  }
+  return kj::none;
+}
+
+kj::Maybe<IoContext::IncomingRequest&> IoContext::getIncomingRequestForUserTracingInvocation(
+    jsg::Lock& js, jsg::JsObject invocationTag) {
+  for (auto& request: incomingRequests) {
+    KJ_IF_SOME(anchor, request.userTracingInvocationAnchor) {
+      if (jsg::JsValue(anchor.getHandle(js)).strictEquals(invocationTag)) {
+        return request;
+      }
+    }
+  }
+  return kj::none;
 }
 
 SpanParent IoContext::getCurrentTraceSpan() {
