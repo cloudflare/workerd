@@ -665,13 +665,7 @@ class R2Bucket: public jsg::Object {
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<
           jsg::Function<jsg::Value(kj::String, jsg::Optional<MultipartOptions>)>>& createFnHandler,
-      const jsg::TypeHandler<jsg::Function<jsg::Value()>>& getUploadIdFnHandler,
       const jsg::TypeHandler<jsg::Promise<kj::String>>& uploadIdResultHandler);
-  jsg::Ref<R2MultipartUpload> resumeMultipartUploadRpc(jsg::Lock& js,
-      kj::String key,
-      kj::String uploadId,
-      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
-      const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, kj::String)>>& resumeFnHandler);
   jsg::Promise<ListResult> listRpc(jsg::Lock& js,
       jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
@@ -685,16 +679,15 @@ class R2Bucket: public jsg::Object {
       CompatibilityFlags::Reader flags);
 
   JSG_RESOURCE_TYPE(R2Bucket, CompatibilityFlags::Reader flags) {
-    // The compatibility flag
-    // restricts the new transport to allowlisted workers, because it is marked $experimental and
-    // EWC decides who may opt in.
+    // The compatibility flag restricts the new transport to allowlisted
+    // workers, because it is marked $experimental and EWC decides who
+    // may opt in.
     if (flags.getR2BindingsJsrpc()) {
       JSG_METHOD_NAMED(head, headRpc);
       JSG_METHOD_NAMED(get, getRpc);
       JSG_METHOD_NAMED(delete, deleteRpc);
       JSG_METHOD_NAMED(put, putRpc);
       JSG_METHOD_NAMED(createMultipartUpload, createMultipartUploadRpc);
-      JSG_METHOD_NAMED(resumeMultipartUpload, resumeMultipartUploadRpc);
       JSG_METHOD_NAMED(list, listRpc);
     } else {
       JSG_METHOD(head);
@@ -702,9 +695,9 @@ class R2Bucket: public jsg::Object {
       JSG_METHOD_NAMED(delete, delete_);
       JSG_METHOD(put);
       JSG_METHOD(createMultipartUpload);
-      JSG_METHOD(resumeMultipartUpload);
       JSG_METHOD(list);
     }
+    JSG_METHOD(resumeMultipartUpload);
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE({
       // The order of these matters, since typescript tries to match function signatures in order

@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
-import { RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
+import { WorkerEntrypoint } from 'cloudflare:workers';
 
 const key = 'basicKey';
 const body = 'content';
@@ -1112,6 +1112,42 @@ const testWorker = {
   },
 };
 
+const finishedRpcUploads = new Set();
+
+// Checks that the key and upload ids match test expectations
+function assertMultipartIdentity(requestKey, uploadId, action) {
+  assert.strictEqual(typeof requestKey, 'string');
+  assert.strictEqual(typeof uploadId, 'string');
+  if (requestKey.startsWith('rpc-multipart-')) {
+    assert(
+      [`${requestKey}-id`, 'resumed-a', 'resumed-b', 'missing'].includes(
+        uploadId
+      )
+    );
+    const missing =
+      uploadId === 'missing' ||
+      finishedRpcUploads.has(JSON.stringify([requestKey, uploadId]));
+    if (missing && action !== 'abortMultipartUpload') {
+      throw new Error(`${action}: Upload not found (10024)`);
+    }
+    return;
+  }
+  const expected = {
+    'rpc-must-not-call': 'invalidPartUploadId',
+    rpcStream: 'streamedId',
+    largeBuffer: 'largeUploadId',
+    'rpc-wrong-part-number': 'wrongPartUploadId',
+  }[requestKey];
+  if (expected !== undefined) {
+    assert.strictEqual(uploadId, expected);
+  } else {
+    assert(
+      uploadId === 'multipartId' ||
+        (requestKey === key && uploadId === 'resumedId')
+    );
+  }
+}
+
 // The production gateway supports HTTP and named RPC on the same entrypoint. Keeping both here is
 // also necessary while operations are migrated incrementally: methods without an RPC implementation
 // continue to use fetch() even when the JSRPC compatibility flag is enabled.
@@ -1427,13 +1463,85 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
       assert.strictEqual(options.ssecKey, hexKey);
     }
     assert.strictEqual(typeof requestKey, 'string');
-    return new MultipartUploadTarget(requestKey, 'multipartId', options);
+    return requestKey.startsWith('rpc-multipart-')
+      ? `${requestKey}-id`
+      : 'multipartId';
   }
 
-  resumeMultipartUpload(requestKey, uploadId) {
-    assert.strictEqual(typeof requestKey, 'string');
-    assert.strictEqual(typeof uploadId, 'string');
-    return new MultipartUploadTarget(requestKey, uploadId);
+  async uploadPart(
+    requestKey,
+    uploadId,
+    partNumber,
+    value,
+    options,
+    valueSize
+  ) {
+    assertMultipartIdentity(requestKey, uploadId, 'uploadPart');
+    assert(partNumber >= 1 && partNumber <= 10000);
+    if (requestKey === 'rpc-must-not-call') {
+      throw new Error('uploadPart RPC method must not be called');
+    }
+    if (requestKey === 'largeBuffer') {
+      await assertLargeRpcBody(requestKey, value, valueSize);
+      return { partNumber, etag: 'partEtag' };
+    }
+    const uploaded = await new Response(value).text();
+    const expected =
+      requestKey === 'ssecMultipart'
+        ? 'hey'
+        : requestKey === 'rpcStream'
+          ? rpcStreamBody
+          : body;
+    assert.strictEqual(uploaded, expected);
+    assert.strictEqual(
+      valueSize,
+      new TextEncoder().encode(expected).byteLength
+    );
+    if (requestKey === 'ssecMultipart') {
+      assert.strictEqual(options?.ssecKey, hexKey);
+    }
+    return {
+      partNumber: requestKey === 'rpc-wrong-part-number' ? 9999 : partNumber,
+      etag: requestKey.startsWith('rpc-multipart-')
+        ? `${requestKey}/${uploadId}/${partNumber}`
+        : uploadId === 'resumedId'
+          ? 'resumedRpcPartEtag'
+          : 'partEtag',
+    };
+  }
+
+  abortMultipartUpload(requestKey, uploadId) {
+    assertMultipartIdentity(requestKey, uploadId, 'abortMultipartUpload');
+    if (requestKey.startsWith('rpc-multipart-')) {
+      finishedRpcUploads.add(JSON.stringify([requestKey, uploadId]));
+    }
+  }
+
+  completeMultipartUpload(requestKey, uploadId, uploadedParts) {
+    assertMultipartIdentity(requestKey, uploadId, 'completeMultipartUpload');
+    for (const part of uploadedParts) {
+      assert(part.partNumber >= 1 && part.partNumber <= 10000);
+      assert.strictEqual(typeof part.etag, 'string');
+      if (requestKey.startsWith('rpc-multipart-')) {
+        assert.strictEqual(
+          part.etag,
+          `${requestKey}/${uploadId}/${part.partNumber}`
+        );
+      }
+    }
+    const result = buildRpcHead(requestKey);
+    // The backend completion response omits create-time HTTP and custom metadata.
+    result.httpMetadata = {};
+    result.customMetadata = {};
+    if (requestKey.startsWith('rpc-multipart-')) {
+      finishedRpcUploads.add(JSON.stringify([requestKey, uploadId]));
+      result.key = requestKey;
+      result.version = uploadId;
+    }
+    if (uploadId === 'resumedId') {
+      result.version = 'resumedRpcObjectVersion';
+    }
+    return result;
   }
 }
 
@@ -1446,73 +1554,6 @@ function listRpcHead(requestKey, includes) {
     delete result.customMetadata;
   }
   return result;
-}
-
-class MultipartUploadTarget extends RpcTarget {
-  #key;
-  #uploadId;
-  #options;
-  #aborted = false;
-
-  constructor(requestKey, uploadId, options) {
-    super();
-    this.#key = requestKey;
-    this.#uploadId = uploadId;
-    this.#options = options;
-  }
-
-  getUploadId() {
-    return this.#uploadId;
-  }
-
-  async uploadPart(partNumber, value, options, valueSize) {
-    assert(partNumber >= 1 && partNumber <= 10000);
-    if (this.#key === 'rpc-must-not-call') {
-      throw new Error('uploadPart RPC method must not be called');
-    }
-    if (this.#key === 'largeBuffer') {
-      await assertLargeRpcBody(this.#key, value, valueSize);
-      return { partNumber, etag: 'partEtag' };
-    }
-    const uploaded = await new Response(value).text();
-    const expected =
-      this.#key === 'ssecMultipart'
-        ? 'hey'
-        : this.#key === 'rpcStream'
-          ? rpcStreamBody
-          : body;
-    assert.strictEqual(uploaded, expected);
-    assert.strictEqual(
-      valueSize,
-      new TextEncoder().encode(expected).byteLength
-    );
-    if (this.#key === 'ssecMultipart') {
-      assert.strictEqual(options?.ssecKey, hexKey);
-    }
-    return {
-      partNumber: this.#key === 'rpc-wrong-part-number' ? 9999 : partNumber,
-      etag: this.#uploadId === 'resumedId' ? 'resumedRpcPartEtag' : 'partEtag',
-    };
-  }
-
-  abort() {
-    this.#aborted = true;
-  }
-
-  complete(uploadedParts) {
-    if (this.#uploadId === 'resumedId') {
-      assert.strictEqual(this.#aborted, true);
-    }
-    for (const part of uploadedParts) {
-      assert(part.partNumber >= 1 && part.partNumber <= 10000);
-      assert.strictEqual(typeof part.etag, 'string');
-    }
-    const result = buildRpcHead(this.#key, this.#options);
-    if (this.#uploadId === 'resumedId') {
-      result.version = 'resumedRpcObjectVersion';
-    }
-    return result;
-  }
 }
 
 // These cases cover RPC boundary behavior that the HTTP-oriented fake cannot observe directly.
@@ -1738,32 +1779,6 @@ export const jsrpcTransportTests = {
       }),
       { message: 'You cannot specify multiple hashing algorithms.' }
     );
-    await assert.rejects(
-      env.BUCKET.createMultipartUpload('rpc-must-not-call', {
-        ssecKey: 'bad',
-      }),
-      { message: 'SSE-C Key must be 32 bytes in length' }
-    );
-    const invalidPartUpload = env.BUCKET.resumeMultipartUpload(
-      'rpc-must-not-call',
-      'invalidPartUploadId'
-    );
-    await assert.rejects(
-      invalidPartUpload.uploadPart(1, body, { ssecKey: 'bad' }),
-      { message: 'SSE-C Key must be 32 bytes in length' }
-    );
-
-    const createOptionsUpload = await env.BUCKET.createMultipartUpload(
-      'rpc-create-options',
-      {
-        httpMetadata: httpMetaHeaders,
-        customMetadata,
-        storageClass: 'InfrequentAccess',
-        ssecKey: bufferKey,
-      }
-    );
-    assert.strictEqual(createOptionsUpload.uploadId, 'multipartId');
-
     const encodedStreamBody = new TextEncoder().encode(rpcStreamBody);
     {
       const { readable, writable } = new FixedLengthStream(
@@ -1829,6 +1844,47 @@ export const jsrpcTransportTests = {
     const largeBlobBytes = new Uint8Array(largeRpcBodySize);
     largeBlobBytes.fill(0x5a);
     await env.BUCKET.put('largeBlob', new Blob([largeBlobBytes]));
+  },
+};
+
+export const jsrpcMultipartTests = {
+  async test(ctrl, env) {
+    if (env.R2_TRANSPORT !== 'jsrpc') {
+      return;
+    }
+
+    await assert.rejects(
+      env.BUCKET.createMultipartUpload('rpc-must-not-call', {
+        ssecKey: 'bad',
+      }),
+      { message: 'SSE-C Key must be 32 bytes in length' }
+    );
+    const invalidPartUpload = env.BUCKET.resumeMultipartUpload(
+      'rpc-must-not-call',
+      'invalidPartUploadId'
+    );
+    await assert.rejects(
+      invalidPartUpload.uploadPart(1, body, { ssecKey: 'bad' }),
+      { message: 'SSE-C Key must be 32 bytes in length' }
+    );
+
+    const createOptionsUpload = await env.BUCKET.createMultipartUpload(
+      'rpc-create-options',
+      {
+        httpMetadata: httpMetaHeaders,
+        customMetadata,
+        storageClass: 'InfrequentAccess',
+        ssecKey: bufferKey,
+      }
+    );
+    assert.strictEqual(createOptionsUpload.uploadId, 'multipartId');
+
+    const encodedStreamBody = new TextEncoder().encode(rpcStreamBody);
+    const largeBufferBacking = new Uint8Array(largeRpcBodySize + 2);
+    largeBufferBacking.fill(0x41);
+    const largeBuffer = largeBufferBacking.subarray(1, -1);
+    largeBuffer[0] = 0x11;
+    largeBuffer[largeBuffer.length - 1] = 0x22;
 
     const resumed = env.BUCKET.resumeMultipartUpload(key, 'resumedId');
     assert.strictEqual(resumed.key, key);
@@ -1838,7 +1894,6 @@ export const jsrpcTransportTests = {
       partNumber: 1,
       etag: 'resumedRpcPartEtag',
     });
-    await resumed.abort();
     const resumedObject = await resumed.complete([resumedPart]);
     assert.strictEqual(resumedObject.key, key);
     assert.strictEqual(resumedObject.version, 'resumedRpcObjectVersion');
@@ -1851,7 +1906,7 @@ export const jsrpcTransportTests = {
     resumedObject.writeHttpMetadata(resumedHeaders);
     assert.deepStrictEqual([...resumedHeaders], []);
     assert.strictEqual(typeof resumedObject.checksums.toJSON, 'function');
-    assert.deepStrictEqual(resumedObject.checksums.toJSON(), {});
+    assert.strictEqual(JSON.stringify(resumedObject.checksums), '{}');
 
     const streamedUpload = env.BUCKET.resumeMultipartUpload(
       'rpcStream',
@@ -1886,6 +1941,99 @@ export const jsrpcTransportTests = {
       partNumber: 3,
       etag: 'partEtag',
     });
+
+    // Each operation carries its key and upload ID, including interleaved calls on the same key.
+    const uploads = [];
+    for (const uploadKey of ['rpc-multipart-first', 'rpc-multipart-second']) {
+      const headers = new Headers(httpMetaHeaders);
+      const metadata = { uploadKey };
+      const creating = env.BUCKET.createMultipartUpload(uploadKey, {
+        httpMetadata: headers,
+        customMetadata: metadata,
+      });
+      headers.set('content-type', 'application/octet-stream');
+      metadata.uploadKey = 'mutated';
+      const upload = await creating;
+      assert.strictEqual(upload.key, uploadKey);
+      assert.strictEqual(upload.uploadId, `${uploadKey}-id`);
+      uploads.push(upload);
+    }
+    for (const uploadId of ['resumed-a', 'resumed-b']) {
+      const upload = env.BUCKET.resumeMultipartUpload(
+        'rpc-multipart-first',
+        uploadId
+      );
+      assert.strictEqual(upload.key, 'rpc-multipart-first');
+      assert.strictEqual(upload.uploadId, uploadId);
+      uploads.push(upload);
+    }
+    const uploadedParts = await Promise.all(
+      uploads.map(async (upload) => {
+        const first = await upload.uploadPart(1, body);
+        const rest = await Promise.all([
+          upload.uploadPart(2, body),
+          upload.uploadPart(3, body),
+        ]);
+        const parts = [first, ...rest];
+        assert.deepStrictEqual(
+          parts,
+          [1, 2, 3].map((partNumber) => ({
+            partNumber,
+            etag: `${upload.key}/${upload.uploadId}/${partNumber}`,
+          }))
+        );
+        return parts;
+      })
+    );
+
+    await assert.rejects(
+      uploads[0].complete([{ partNumber: 0, etag: 'invalid' }]),
+      {
+        message:
+          'Part number must be between 1 and 10000 (inclusive). Actual value was: 0',
+      }
+    );
+    for (let i = 0; i < uploads.length; i++) {
+      const upload = uploads[i];
+      const result = await upload.complete(uploadedParts[i]);
+      assert.strictEqual(result.key, upload.key);
+      assert.strictEqual(result.version, upload.uploadId);
+      // Created uploads preserve a snapshot of their options even when the response omits them.
+      const resultHeaders = new Headers();
+      result.writeHttpMetadata(resultHeaders);
+      assert.deepStrictEqual(
+        [...resultHeaders],
+        i < 2 ? [...httpMetaHeaders] : []
+      );
+      assert.deepStrictEqual(
+        result.customMetadata,
+        i < 2 ? { uploadKey: upload.key } : {}
+      );
+    }
+
+    const aborted = await env.BUCKET.createMultipartUpload(
+      'rpc-multipart-aborted'
+    );
+    await aborted.uploadPart(1, body);
+    // Abort must address the same upload when called through a separately resumed wrapper.
+    await env.BUCKET.resumeMultipartUpload(
+      aborted.key,
+      aborted.uploadId
+    ).abort();
+    const missing = env.BUCKET.resumeMultipartUpload(
+      'rpc-multipart-missing',
+      'missing'
+    );
+    for (const upload of [aborted, missing]) {
+      await assert.rejects(upload.uploadPart(2, body), {
+        message: 'uploadPart: Upload not found (10024)',
+      });
+      await assert.rejects(upload.complete([]), {
+        message: 'completeMultipartUpload: Upload not found (10024)',
+      });
+      await upload.abort();
+      await upload.abort();
+    }
   },
 };
 
@@ -2088,11 +2236,6 @@ export class R2BodyLengthEntrypoint extends WorkerEntrypoint {
     return bodyLengthCancellation;
   }
 
-  resumeMultipartUpload(requestKey, uploadId) {
-    assert.strictEqual(uploadId, 'body-length-upload');
-    return new R2BodyLengthUpload(requestKey);
-  }
-
   async fetch(request) {
     if (request.method === 'GET') {
       const metadata = JSON.parse(request.headers.get('cf-r2-request'));
@@ -2227,22 +2370,17 @@ export class R2BodyLengthEntrypoint extends WorkerEntrypoint {
       size: expected.byteLength,
     };
   }
-}
 
-class R2BodyLengthUpload extends RpcTarget {
-  #key;
-
-  constructor(requestKey) {
-    super();
-    this.#key = requestKey;
-  }
-
-  getUploadId() {
-    return 'body-length-upload';
-  }
-
-  async uploadPart(partNumber, value, options, valueSize) {
-    const expected = bodyLengthUploadBytes(this.#key);
+  async uploadPart(
+    requestKey,
+    uploadId,
+    partNumber,
+    value,
+    options,
+    valueSize
+  ) {
+    assert.strictEqual(uploadId, 'body-length-upload');
+    const expected = bodyLengthUploadBytes(requestKey);
     assert.strictEqual(valueSize, expected.byteLength);
     assert.deepStrictEqual(
       new Uint8Array(await new Response(value).arrayBuffer()),
