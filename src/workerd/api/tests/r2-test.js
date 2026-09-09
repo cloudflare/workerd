@@ -225,6 +225,10 @@ async function compareResponse(res, { head, body } = {}, bytes) {
   }
 }
 
+// TODO: Let each test configure expected calls and responses shared by both transports.
+// For example, head('missing') -> not found should produce HTTP 404 or JSRPC null.
+// Each adapter should verify the method and arguments, reject unexpected calls, and encode
+// the configured response in its transport's format.
 const testWorker = {
   // Handler for HTTP request binding makes to R2
   async fetch(request, env, ctx) {
@@ -1148,19 +1152,11 @@ function assertMultipartIdentity(requestKey, uploadId, action) {
   }
 }
 
-// The production gateway supports HTTP and named RPC on the same entrypoint. Keeping both here is
-// also necessary while operations are migrated incrementally: methods without an RPC implementation
-// continue to use fetch() even when the JSRPC compatibility flag is enabled.
+// This entrypoint rejects HTTP requests so the JSRPC tests detect any transport fallback.
+// The HTTP tests use the default export's backend.
 export class R2BindingEntrypoint extends WorkerEntrypoint {
-  fetch(request) {
-    const encodedRequest = request.headers.get('cf-r2-request');
-    if (
-      encodedRequest !== null &&
-      ['get', 'list'].includes(JSON.parse(encodedRequest).method)
-    ) {
-      throw new Error('get and list must use JSRPC');
-    }
-    return testWorker.fetch(request, this.env, this.ctx);
+  fetch() {
+    throw new Error('R2 JSRPC tests must not use HTTP');
   }
 
   head(requestKey) {
