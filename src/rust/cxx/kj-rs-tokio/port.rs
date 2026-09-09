@@ -495,4 +495,60 @@ mod tests {
         // The JoinHandle should complete promptly now.
         port.runtime.block_on(&mut jh).unwrap();
     }
+
+    #[test]
+    fn poll_never_sleeps() {
+        let port = TokioPort::new();
+        // A pending spawned task must not make poll() block.
+        let _jh = spawn(std::future::pending::<()>());
+        let start = std::time::Instant::now();
+        assert!(!port.poll());
+        assert!(start.elapsed() < Duration::from_millis(100));
+    }
+
+    /// `spawn` accepts `!Send` futures because it is backed by `LocalSet::spawn_local`. This
+    /// future holds an `Rc` — which is `!Send` — across an await point, exercising that path,
+    /// and proves such a task actually runs to completion on the loop thread.
+    #[test]
+    fn spawn_accepts_non_send_futures() {
+        use std::cell::Cell;
+        let port = TokioPort::new();
+        let counter = Rc::new(Cell::new(0u32));
+        let task_counter = Rc::clone(&counter);
+        // Detached on purpose; the `Rc` capture makes the future `!Send`.
+        let _jh = spawn(async move {
+            for _ in 0..3 {
+                tokio::task::yield_now().await;
+            }
+            task_counter.set(task_counter.get() + 1);
+        });
+        let mut done = false;
+        for _ in 0..100 {
+            let _ = port.wait_timeout_ns(1_000_000);
+            if counter.get() == 1 {
+                done = true;
+                break;
+            }
+        }
+        assert!(done, "non-Send spawned task did not run to completion");
+    }
+
+    /// Timed waits stay on tokio's timer wheel and remain accurate to its ~1 ms granularity --
+    /// the same granularity KJ's own epoll-based port has (`epoll_pwait` takes a millisecond
+    /// timeout).
+    #[test]
+    fn timeouts_are_accurate_to_the_wheel() {
+        let port = TokioPort::new();
+        let start = std::time::Instant::now();
+        let _ = port.wait_timeout_ns(20_000_000);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(19),
+            "woke early: {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "woke far too late: {elapsed:?}"
+        );
+    }
 }
