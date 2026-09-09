@@ -105,6 +105,10 @@ kj::Maybe<void *> TokioAsyncIoStream::getWin32Handle() const {
 }
 #endif
 
+bool isTokioStream(const kj::AsyncIoStream &stream) {
+  return kj::dynamicDowncastIfAvailable<const TokioAsyncIoStream>(stream) != kj::none;
+}
+
 ::rust::Box<TokioStream> unwrapTokioStream(kj::AsyncIoStream &stream) {
   KJ_IF_SOME(tokioStream, kj::dynamicDowncastIfAvailable<TokioAsyncIoStream>(stream)) {
     return tokioStream.unwrap();

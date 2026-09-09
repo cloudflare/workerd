@@ -12,6 +12,11 @@ namespace kj_rs_io {
 
 struct TokioStream;  // Opaque Rust type, defined in the generated lib.rs.h.
 
+// True if `stream` is the kj-rs-io wrapper accepted by unwrapTokioStream(). This lets Rust
+// distinguish a foreign stream, which may use a fallback transport, from a native wrapper whose
+// checked extraction failed and must be returned to the caller untouched.
+bool isTokioStream(const kj::AsyncIoStream &stream);
+
 // Recovers the native Rust stream out of a kj::AsyncIoStream created by kj-rs-io (the "unwrap
 // fast path"), leaving the wrapper hollow: any further I/O through the wrapper throws. Throws if
 // `stream` is not a kj-rs-io stream, was already unwrapped, or has I/O promises in flight (the

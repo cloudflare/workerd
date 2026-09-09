@@ -43,7 +43,7 @@
 //!     │                                   is an Err, not aliasing. None = hollow wrapper.
 //!     └── Inner::Tcp / Inner::Unix     -- the native tokio socket
 //!
-//! serve_kj_stream(KjOwn<AsyncIoStream>) -> ServedKjStream
+//! serve_kj_stream(KjOwn<AsyncIoStream>) -> Result<ServedKjStream, TakeSocketError>
 //!     ├── native path: unwrap -> ServeIo::Tcp/Unix, hollow wrapper destroyed
 //!     └── pump path:   ServeIo::Duplex (consumer end) + StreamPump (!Send) owning the KjOwn
 //!                      and the other duplex end, polled on the KJ thread

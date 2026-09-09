@@ -45,6 +45,7 @@ use tokio::net::UnixStream;
 use crate::ffi::KjAsyncIoStream;
 #[cfg(unix)]
 use crate::ffi::dup_raw_fd;
+use crate::ffi::is_tokio_stream;
 #[cfg(unix)]
 use crate::ffi::kj_stream_get_handle;
 use crate::ffi::split_kj_stream;
@@ -227,10 +228,13 @@ impl ServedKjStream {
 // =======================================================================================
 // Entry points
 
-/// [`take_kj_socket`]'s error: the failure, plus the untouched stream handed back so the
-/// caller can fall back to [`serve_kj_stream`]'s pump tier (or destroy it).
+/// A native-serving error, plus the untouched stream handed back to the caller.
+///
+/// A foreign-stream error from [`take_kj_socket`] can fall back to [`serve_kj_stream`]'s pump
+/// tier. A native extraction error must not: an operation still borrows the wrapper, so the
+/// caller must cancel that operation before retrying or destroying the returned stream.
 pub struct TakeSocketError {
-    /// The stream `take_kj_socket` consumed, returned untouched.
+    /// The stream consumed by the native-serving entry point, returned untouched.
     pub stream: KjOwn<KjAsyncIoStream>,
     /// Why the socket could not be taken natively.
     pub error: KjError,
@@ -258,11 +262,23 @@ impl From<TakeSocketError> for KjError {
 }
 
 /// Tier-1 unwrap: if the owned stream is kj-rs-io-originated, moves its native tokio socket
-/// out (leaving the C++ wrapper hollow) and returns it. `None` for a foreign stream.
-fn unwrap_native(stream: &mut KjOwn<KjAsyncIoStream>) -> Option<ServeIo> {
-    unwrap_tokio_stream(stream.as_mut())
-        .ok()
-        .and_then(|native| native.into_serve_io())
+/// out (leaving the C++ wrapper hollow) and returns it. `Ok(None)` for a foreign stream. A
+/// checked extraction failure remains distinct so callers do not reuse or destroy the native
+/// wrapper while an operation still borrows it.
+fn unwrap_native(
+    stream: &mut KjOwn<KjAsyncIoStream>,
+) -> std::result::Result<Option<ServeIo>, KjError> {
+    if !is_tokio_stream(stream.as_ref()) {
+        return Ok(None);
+    }
+
+    let native = unwrap_tokio_stream(stream.as_mut()).map_err(KjError::from)?;
+    native.into_serve_io().map(Some).ok_or_else(|| {
+        KjError::new(
+            KjExceptionType::Failed,
+            "native unwrap returned a hollow stream".to_owned(),
+        )
+    })
 }
 
 /// Takes the stream's socket natively (tiers 1 + 2).
@@ -294,10 +310,14 @@ pub fn take_kj_socket(
     stream: KjOwn<KjAsyncIoStream>,
 ) -> std::result::Result<ServeIo, TakeSocketError> {
     let mut stream = stream;
-    if let Some(io) = unwrap_native(&mut stream) {
-        // Tier 1: the wrapper is hollow; destroy it now.
-        drop(stream);
-        return Ok(io);
+    match unwrap_native(&mut stream) {
+        Ok(Some(io)) => {
+            // Tier 1: the wrapper is hollow; destroy it now.
+            drop(stream);
+            return Ok(io);
+        }
+        Ok(None) => {}
+        Err(error) => return Err(TakeSocketError { stream, error }),
     }
     #[cfg(unix)]
     {
@@ -344,23 +364,33 @@ pub fn take_kj_socket(
 /// kj stream, no I/O promises may be outstanding on it when ownership is handed over (for
 /// kj-rs-io streams the unwrap detects and rejects that; for foreign streams it remains KJ's
 /// own contract).
-#[must_use]
-pub fn serve_kj_stream(stream: KjOwn<KjAsyncIoStream>) -> ServedKjStream {
+///
+/// # Errors
+///
+/// Returns the untouched stream when it is a kj-rs-io wrapper whose native socket cannot be
+/// extracted, such as while an I/O operation still borrows it.
+pub fn serve_kj_stream(
+    stream: KjOwn<KjAsyncIoStream>,
+) -> std::result::Result<ServedKjStream, TakeSocketError> {
     let mut stream = stream;
-    if let Some(io) = unwrap_native(&mut stream) {
-        // Native path: the wrapper is hollow; destroy it now.
-        drop(stream);
-        return ServedKjStream { io, pump: None };
+    match unwrap_native(&mut stream) {
+        Ok(Some(io)) => {
+            // Native path: the wrapper is hollow; destroy it now.
+            drop(stream);
+            return Ok(ServedKjStream { io, pump: None });
+        }
+        Ok(None) => {}
+        Err(error) => return Err(TakeSocketError { stream, error }),
     }
 
     // Foreign stream (or, pathologically, an already-hollow wrapper, whose pump reads will
     // surface the "already unwrapped" error): bridge through a duplex pump owning the stream.
     let (consumer_end, kj_end) = tokio::io::duplex(DUPLEX_CAPACITY);
     let pump = Box::pin(pump_kj_stream(stream, kj_end));
-    ServedKjStream {
+    Ok(ServedKjStream {
         io: ServeIo::Duplex(consumer_end),
         pump: Some(pump),
-    }
+    })
 }
 
 /// Whether a bridged kj exception is peer-teardown-shaped (treated as EOF by the pump).

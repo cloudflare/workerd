@@ -34,6 +34,7 @@ use core::pin::Pin;
 /// crate-root re-exports) keep using `ffi::`.
 pub use bridge::KjAsyncIoStream;
 pub use bridge::KjPieces;
+pub use bridge::is_tokio_stream;
 pub use bridge::kj_piece;
 pub use bridge::kj_pieces_count;
 pub use bridge::kj_stream_get_handle;
@@ -312,6 +313,10 @@ mod bridge {
         #[namespace = "kj"]
         #[cxx_name = "AsyncIoStream"]
         type KjAsyncIoStream;
+
+        /// Whether the stream is the kj-rs-io wrapper accepted by `unwrap_tokio_stream`.
+        #[cxx_name = "isTokioStream"]
+        fn is_tokio_stream(stream: &KjAsyncIoStream) -> bool;
 
         /// Implemented in `async-io.c++`: downcasts to the kj-rs-io wrapper and moves the native
         /// stream out. Throws (surfaced as `Err`) for foreign streams.
