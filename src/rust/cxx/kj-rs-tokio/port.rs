@@ -324,3 +324,107 @@ impl Drop for TokioPort {
         // LocalSet); those are `Send` and so cannot hold KJ objects.
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bare_port_drop_cancels_spawned_tasks() {
+        // A TokioPort NOT owned by a TokioEventPort: dropping it must still cancel tasks
+        // spawned onto its LocalSet (the Drop fallback), and leave the thread clean so a fresh
+        // port can be created afterward.
+        {
+            let port = TokioPort::new();
+            drop(spawn(std::future::pending::<()>()));
+            assert!(current_handle().is_some());
+            drop(port);
+        }
+        // TLS is cleared: a new port on this thread succeeds (would panic-on-double-register
+        // otherwise).
+        assert!(current_handle().is_none());
+        let port2 = TokioPort::new();
+        assert!(current_handle().is_some());
+        drop(port2);
+    }
+
+    #[test]
+    fn concurrent_wake_storm_from_many_threads_terminates() {
+        // TSAN stressor for SharedState (notify + woken latch): four threads hammer wake()
+        // concurrently while the loop thread services wait_timeout_ns. The assertion is
+        // deliberately interleaving-agnostic -- it only requires termination and that at least
+        // one wake was observed -- because exact latch counts are inherently racy. (Scoped
+        // threads borrowing `&TokioPort`: the port is `Sync` but, by design, not `Send`.)
+        use std::sync::atomic::AtomicUsize;
+        let port = TokioPort::new();
+        let done = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    for _ in 0..250 {
+                        port.wake();
+                    }
+                    done.fetch_add(1, Ordering::SeqCst);
+                });
+            }
+            let mut latched = 0u64;
+            loop {
+                if port.wait_timeout_ns(1_000_000) {
+                    latched += 1;
+                }
+                // Once every waker has finished, one more wait must eventually drain to `false`.
+                if done.load(Ordering::SeqCst) == 4 && !port.wait_timeout_ns(1_000_000) {
+                    break;
+                }
+            }
+            assert!(latched >= 1);
+        });
+    }
+
+    #[test]
+    fn handle_spawns_a_runtime_task_from_another_thread() {
+        // `handle()` + `tokio::spawn` (the runtime-driven path, distinct from spawn()/LocalSet)
+        // from a foreign thread: the Send task runs when the loop next drives block_on.
+        let port = TokioPort::new();
+        let flag = Arc::new(AtomicBool::new(false));
+        let handle = port.handle();
+        let f2 = Arc::clone(&flag);
+        std::thread::spawn(move || {
+            handle.spawn(async move {
+                f2.store(true, Ordering::SeqCst);
+            });
+        })
+        .join()
+        .unwrap();
+        let mut ran = false;
+        for _ in 0..1000 {
+            let _ = port.wait_timeout_ns(1_000_000);
+            if flag.load(Ordering::SeqCst) {
+                ran = true;
+                break;
+            }
+        }
+        assert!(ran);
+    }
+
+    #[test]
+    fn poll_advances_a_ready_local_task() {
+        // Complements poll_never_sleeps (pending task): a ready LocalSet task (no await) is
+        // actually driven to completion by poll() within its budget, and poll() never latches.
+        let port = TokioPort::new();
+        let flag = Arc::new(AtomicBool::new(false));
+        let f2 = Arc::clone(&flag);
+        let _jh = spawn(async move {
+            f2.store(true, Ordering::SeqCst);
+        });
+        let mut ran = false;
+        for _ in 0..10 {
+            assert!(!port.poll(), "poll() must not report a wake latch here");
+            if flag.load(Ordering::SeqCst) {
+                ran = true;
+                break;
+            }
+        }
+        assert!(ran);
+    }
+}
