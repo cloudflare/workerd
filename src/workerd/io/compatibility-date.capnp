@@ -1672,4 +1672,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # When enabled, a Worker whose entrypoint is Python are automatically
   # considered as a Python Worker. This flag will be obsoleted once the feature
   # is stable.
+
+  durableObjectIoTasksPreventEviction @190 :Bool
+      $compatEnableFlag("durable_object_io_tasks_prevent_eviction");
+  # Allows the runtime to track actor IoContext wait-until tasks to prevent Durable Object eviction.
+  # The runtime limits how long each task provides eviction protection.
 }
