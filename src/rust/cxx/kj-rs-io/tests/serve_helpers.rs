@@ -19,6 +19,50 @@ fn kj_err(message: impl std::fmt::Display) -> KjError {
     KjError::new(cxx::KjExceptionType::Failed, message.to_string())
 }
 
+/// A native-serving failure whose stream remains owned until the C++ test has cancelled the
+/// operation that prevented extraction.
+pub struct NativeServeFailure {
+    stream: RefCell<Option<KjOwn<KjAsyncIoStream>>>,
+    in_flight: bool,
+}
+
+impl NativeServeFailure {
+    fn from_error(error: kj_rs_io::TakeSocketError) -> Box<Self> {
+        let in_flight = error.error.description().contains("in flight");
+        Box::new(Self {
+            stream: RefCell::new(Some(error.stream)),
+            in_flight,
+        })
+    }
+}
+
+pub fn expect_take_socket_failure(stream: KjOwn<KjAsyncIoStream>) -> Box<NativeServeFailure> {
+    match kj_rs_io::take_kj_socket(stream) {
+        Ok(_) => panic!("taking a native socket with I/O in flight unexpectedly succeeded"),
+        Err(error) => NativeServeFailure::from_error(error),
+    }
+}
+
+pub fn expect_serve_stream_failure(stream: KjOwn<KjAsyncIoStream>) -> Box<NativeServeFailure> {
+    match kj_rs_io::serve_kj_stream(stream) {
+        Ok(_) => panic!("serving a native stream with I/O in flight unexpectedly succeeded"),
+        Err(error) => NativeServeFailure::from_error(error),
+    }
+}
+
+impl NativeServeFailure {
+    pub fn is_in_flight(&self) -> bool {
+        self.in_flight
+    }
+
+    pub fn take_stream(&self) -> KjOwn<KjAsyncIoStream> {
+        self.stream
+            .borrow_mut()
+            .take()
+            .expect("failed native-serving stream already taken")
+    }
+}
+
 /// The echo task shared by every path: copy everything read back to the writer, then
 /// propagate the half-close. Reports completion through `done_tx`.
 async fn echo(io: ServeIo, done_tx: watch::Sender<bool>) -> std::io::Result<u64> {
@@ -62,23 +106,23 @@ pub struct ServeEchoSession {
     foreign: RefCell<Option<std::thread::JoinHandle<std::io::Result<u64>>>>,
 }
 
-pub fn start_serve_echo(stream: KjOwn<KjAsyncIoStream>) -> Box<ServeEchoSession> {
-    let served = kj_rs_io::serve_kj_stream(stream);
-    Box::new(ServeEchoSession::new(served.io, served.pump))
+pub fn start_serve_echo(stream: KjOwn<KjAsyncIoStream>) -> Result<Box<ServeEchoSession>> {
+    let served = kj_rs_io::serve_kj_stream(stream).map_err(KjError::from)?;
+    Ok(Box::new(ServeEchoSession::new(served.io, served.pump)))
 }
 
-pub fn start_serve_drop_consumer(stream: KjOwn<KjAsyncIoStream>) -> Box<ServeEchoSession> {
-    let served = kj_rs_io::serve_kj_stream(stream);
+pub fn start_serve_drop_consumer(stream: KjOwn<KjAsyncIoStream>) -> Result<Box<ServeEchoSession>> {
+    let served = kj_rs_io::serve_kj_stream(stream).map_err(KjError::from)?;
     let native = served.io.path() == ServePath::Native;
     let (done_tx, done_rx) = watch::channel(false);
     let consumer = kj_rs_tokio::spawn(read_then_drop(served.io, done_tx));
-    Box::new(ServeEchoSession {
+    Ok(Box::new(ServeEchoSession {
         native,
         pump: RefCell::new(served.pump),
         done_rx,
         echo: RefCell::new(Some(consumer)),
         foreign: RefCell::new(None),
-    })
+    }))
 }
 
 /// Like `start_serve_echo`, but the echo consumer runs on a SEPARATE OS thread with its own
@@ -87,9 +131,14 @@ pub fn start_serve_drop_consumer(stream: KjOwn<KjAsyncIoStream>) -> Box<ServeEch
 /// write / drop on it wakes the pump (parked on the KJ loop) cross-thread through the kj-rs
 /// `FutureWakerCell`. That is the scenario `ServedKjStream::io`'s docs describe as legal since
 /// the waker bridge became thread-safe; this proves it (and is a TSAN target).
-pub fn start_serve_echo_foreign_thread(stream: KjOwn<KjAsyncIoStream>) -> Box<ServeEchoSession> {
-    let served = kj_rs_io::serve_kj_stream(stream);
-    Box::new(ServeEchoSession::new_foreign_thread(served.io, served.pump))
+pub fn start_serve_echo_foreign_thread(
+    stream: KjOwn<KjAsyncIoStream>,
+) -> Result<Box<ServeEchoSession>> {
+    let served = kj_rs_io::serve_kj_stream(stream).map_err(KjError::from)?;
+    Ok(Box::new(ServeEchoSession::new_foreign_thread(
+        served.io,
+        served.pump,
+    )))
 }
 
 /// Like `start_serve_echo`, but through the native-only entry point (`take_kj_socket`,

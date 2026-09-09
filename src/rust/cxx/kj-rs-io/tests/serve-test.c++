@@ -73,6 +73,50 @@ KJ_TEST("serve_kj_stream takes the native path for kj-rs-io TCP streams and "
   kj::joinPromisesFailFast(kj::arr(kj::mv(drive), kj::mv(client))).wait(ws);
 }
 
+KJ_TEST("take_kj_socket preserves a native stream when extraction is blocked by in-flight I/O") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto pair = makeTcpPair(io);
+
+  kj::Own<kj::AsyncIoStream> recovered;
+  {
+    kj::byte pendingByte;
+    auto pendingRead = pair.server->tryRead(&pendingByte, 1, 1);
+    KJ_EXPECT(!pendingRead.poll(ws));
+
+    auto failure = expect_take_socket_failure(kj::mv(pair.server));
+    KJ_EXPECT(failure->is_in_flight());
+    recovered = failure->take_stream();
+  }
+
+  pair.client->write("ok"_kjb).wait(ws);
+  kj::byte buffer[2];
+  KJ_EXPECT(recovered->tryRead(buffer, 2, 2).wait(ws) == 2);
+  KJ_EXPECT(kj::arrayPtr(buffer) == "ok"_kjb);
+}
+
+KJ_TEST("serve_kj_stream preserves a native stream when extraction is blocked by in-flight I/O") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto pair = makeTcpPair(io);
+
+  kj::Own<kj::AsyncIoStream> recovered;
+  {
+    kj::byte pendingByte;
+    auto pendingRead = pair.server->tryRead(&pendingByte, 1, 1);
+    KJ_EXPECT(!pendingRead.poll(ws));
+
+    auto failure = expect_serve_stream_failure(kj::mv(pair.server));
+    KJ_EXPECT(failure->is_in_flight());
+    recovered = failure->take_stream();
+  }
+
+  pair.client->write("ok"_kjb).wait(ws);
+  kj::byte buffer[2];
+  KJ_EXPECT(recovered->tryRead(buffer, 2, 2).wait(ws) == 2);
+  KJ_EXPECT(kj::arrayPtr(buffer) == "ok"_kjb);
+}
+
 // =======================================================================================
 // Duplex pump fallback (foreign streams)
 
@@ -397,9 +441,9 @@ KJ_TEST("take_kj_socket serves a unix-domain (AF_UNIX) socket via its fd tier an
 #endif  // !_WIN32
 
 KJ_TEST("take_kj_socket on an already-unwrapped (hollow) kj-rs-io stream is refused") {
-  // Unwrap the stream first (leaving the C++ wrapper hollow), then take_kj_socket it: tier 1
-  // (unwrap) fails because it is hollow, and tier 2 (fd dup) finds no fd (getFd -> none on a
-  // hollow wrapper), so it is refused rather than crashing.
+  // Unwrap the stream first (leaving the C++ wrapper hollow), then take_kj_socket it. It is still
+  // recognizably a native wrapper, so the specific extraction failure must be preserved rather
+  // than falling through to the foreign-fd tier.
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   auto pair = makeTcpPair(io);
@@ -407,8 +451,7 @@ KJ_TEST("take_kj_socket on an already-unwrapped (hollow) kj-rs-io stream is refu
   // Unwrap + drop the native stream; pair.server is now a hollow wrapper.
   native_write_via_kj_unwrap(*pair.server, ::rust::Slice<const uint8_t>()).wait(ws);
 
-  KJ_EXPECT_THROW_MESSAGE(
-      "cannot take the stream's socket natively", start_take_socket_echo(kj::mv(pair.server)));
+  KJ_EXPECT_THROW_MESSAGE("already unwrapped", start_take_socket_echo(kj::mv(pair.server)));
 }
 
 KJ_TEST("take_kj_socket refuses fd-less foreign streams (no pump tier)") {

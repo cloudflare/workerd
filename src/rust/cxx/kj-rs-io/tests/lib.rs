@@ -8,7 +8,10 @@
 mod serve_helpers;
 mod test_helpers;
 
+use serve_helpers::NativeServeFailure;
 use serve_helpers::ServeEchoSession;
+use serve_helpers::expect_serve_stream_failure;
+use serve_helpers::expect_take_socket_failure;
 use serve_helpers::start_serve_drop_consumer;
 use serve_helpers::start_serve_echo;
 use serve_helpers::start_serve_echo_foreign_thread;
@@ -59,23 +62,38 @@ mod ffi {
         /// also destroys the owned stream.
         type ServeEchoSession;
 
-        fn start_serve_echo(stream: KjOwn<KjAsyncIoStream>) -> Box<ServeEchoSession>;
+        fn start_serve_echo(stream: KjOwn<KjAsyncIoStream>) -> Result<Box<ServeEchoSession>>;
 
         /// Like `start_serve_echo`, but the consumer reads one message and then DROPS its
         /// `ServeIo` without calling `shutdown()`: the pump must turn the dropped duplex end into
         /// `shutdownWrite()` on the kj stream.
-        fn start_serve_drop_consumer(stream: KjOwn<KjAsyncIoStream>) -> Box<ServeEchoSession>;
+        fn start_serve_drop_consumer(
+            stream: KjOwn<KjAsyncIoStream>,
+        ) -> Result<Box<ServeEchoSession>>;
 
         /// Like `start_serve_echo`, but the echo consumer runs on a separate OS thread with its
         /// own tokio runtime, driving a pumped stream's `ServeIo::Duplex` end off the KJ
         /// event-loop thread (cross-thread waker path; TSAN target).
-        fn start_serve_echo_foreign_thread(stream: KjOwn<KjAsyncIoStream>)
-        -> Box<ServeEchoSession>;
+        fn start_serve_echo_foreign_thread(
+            stream: KjOwn<KjAsyncIoStream>,
+        ) -> Result<Box<ServeEchoSession>>;
 
         /// Like `start_serve_echo`, but through the native-only `take_kj_socket` entry point
         /// (unwrap tier, else fd-dup tier): errors — instead of pumping — for streams that
         /// are neither. The consumed stream is destroyed before this returns.
         fn start_take_socket_echo(stream: KjOwn<KjAsyncIoStream>) -> Result<Box<ServeEchoSession>>;
+
+        /// Requires native socket extraction to reject an in-flight operation while retaining
+        /// ownership of the untouched stream.
+        type NativeServeFailure;
+
+        fn expect_take_socket_failure(stream: KjOwn<KjAsyncIoStream>) -> Box<NativeServeFailure>;
+
+        fn expect_serve_stream_failure(stream: KjOwn<KjAsyncIoStream>) -> Box<NativeServeFailure>;
+
+        fn is_in_flight(self: &NativeServeFailure) -> bool;
+
+        fn take_stream(self: &NativeServeFailure) -> KjOwn<KjAsyncIoStream>;
 
         /// Whether the unwrap fast path was taken (perf observability surface).
         fn is_native(self: &ServeEchoSession) -> bool;
