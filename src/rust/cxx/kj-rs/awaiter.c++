@@ -1,6 +1,6 @@
 #include "awaiter.h"
 
-#include <kj-rs/lib.rs.h>
+#include <kj-rs/ffi.rs.h>
 
 #include <kj/debug.h>
 
