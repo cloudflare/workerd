@@ -103,3 +103,27 @@ cc_test(
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
+
+cc_test(
+    name = "serve-test",
+    size = "small",
+    srcs = [
+        "io-test-helpers.h",
+        "serve-test.c++",
+    ],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":bridge",
+        ":tests",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)
