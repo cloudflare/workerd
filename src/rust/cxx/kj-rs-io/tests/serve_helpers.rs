@@ -24,14 +24,17 @@ fn kj_err(message: impl std::fmt::Display) -> KjError {
 pub struct NativeServeFailure {
     stream: RefCell<Option<KjOwn<KjAsyncIoStream>>>,
     in_flight: bool,
+    get_fd_failure: bool,
 }
 
 impl NativeServeFailure {
     fn from_error(error: kj_rs_io::TakeSocketError) -> Box<Self> {
         let in_flight = error.error.description().contains("in flight");
+        let get_fd_failure = error.error.description().contains("getFd failure for test");
         Box::new(Self {
             stream: RefCell::new(Some(error.stream)),
             in_flight,
+            get_fd_failure,
         })
     }
 }
@@ -53,6 +56,10 @@ pub fn expect_serve_stream_failure(stream: KjOwn<KjAsyncIoStream>) -> Box<Native
 impl NativeServeFailure {
     pub fn is_in_flight(&self) -> bool {
         self.in_flight
+    }
+
+    pub fn is_get_fd_failure(&self) -> bool {
+        self.get_fd_failure
     }
 
     pub fn take_stream(&self) -> KjOwn<KjAsyncIoStream> {

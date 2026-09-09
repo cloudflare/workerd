@@ -398,6 +398,38 @@ class FdOnlyStream final: public kj::AsyncIoStream {
   kj::Own<kj::AsyncIoStream> inner;
 };
 
+class ThrowingGetFdStream final: public kj::AsyncIoStream {
+ public:
+  kj::Maybe<int> getFd() const override {
+    KJ_FAIL_REQUIRE("getFd failure for test");
+  }
+
+  kj::Promise<size_t> tryRead(void *, size_t, size_t) override {
+    KJ_UNREACHABLE;
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte>) override {
+    KJ_UNREACHABLE;
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>>) override {
+    KJ_UNREACHABLE;
+  }
+  kj::Promise<void> whenWriteDisconnected() override {
+    KJ_UNREACHABLE;
+  }
+  void shutdownWrite() override {
+    KJ_UNREACHABLE;
+  }
+};
+
+KJ_TEST("take_kj_socket preserves exceptions from a foreign stream's getFd") {
+  auto io = setupTokioAsyncIo();
+
+  auto failure = expect_take_socket_failure(kj::heap<ThrowingGetFdStream>());
+  KJ_EXPECT(failure->is_get_fd_failure());
+  auto recovered = failure->take_stream();
+  KJ_EXPECT_THROW_MESSAGE("getFd failure for test", recovered->getFd());
+}
+
 KJ_TEST("take_kj_socket dups the fd of foreign fd-backed streams (tier 2); the "
         "original stream may be dropped") {
   auto io = setupTokioAsyncIo();
