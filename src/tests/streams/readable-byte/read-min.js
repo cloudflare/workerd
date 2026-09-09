@@ -107,10 +107,13 @@ export const readMinValidation = {
 
 // close() while a min-read holds SOME bytes (2 of 3): the read fulfills
 // with the partial bytes, done=false, and a subsequent read resolves
-// done with an empty view — the DECIDED readAtLeast tail contract,
-// parity on both implementations. (The spec's TypeError-on-close shape
-// is implemented by neither side; TypeScript settles the parked read
-// via a deferred end-of-data snapshot one microtask after close().)
+// done with an empty view — the readAtLeast tail contract, parity on
+// both implementations. The spec differs: 2 of 3 in a Uint8Array is
+// element-aligned, so close() succeeds and the read stays PENDING until
+// the source's respond(0) commits { done: true, value: the 2 bytes }
+// (RespondInClosedState). Only a fractional fill makes close() throw
+// (ledger #7). TypeScript settles the parked read one microtask after
+// close(), leaving the descriptor available for that later response.
 export const closeBelowMin = {
   async test() {
     const { rs, controller } = byteStream();
