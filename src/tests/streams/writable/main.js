@@ -73,6 +73,7 @@ export {
   writableStreamSinkAlgNoCallErrorBeforeAbort,
   writableStreamWriterWithPendingAbort,
   errorRaceWithCloseWritable,
+  abortRejectsOutstandingWriteWithReason,
 } from 'abort-semantics';
 
 export {
@@ -81,6 +82,7 @@ export {
   sinkAbortSkippedAfterBadStrategyError,
   inFlightWriteRejectionDuringAbort,
   abortThenControllerErrorInFlight,
+  abortThenControllerErrorInFlightRejects,
   controllerErrorThenAbortInFlight,
   abortSignalReason,
   concurrentAbortPromiseIdentity,

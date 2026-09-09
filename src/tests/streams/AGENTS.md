@@ -147,3 +147,13 @@ configs' flag lists).
   crash/UAF repros, deliberately not merged into suites.
 - `src/workerd/api/streams/streams-test.js` — `partiallyReadStream`
   (needs a KV binding).
+
+## IDL shape (deliberately not pinned here)
+
+WebIDL function metadata — operation `.length` values (optional
+arguments do not count), and promise-typed attributes/operations
+REJECTING rather than throwing on a broken `this` — is enumerated
+per-implementation by WPT's `idlharness.any.js`: the C++ implementation
+carries the known deviations as expectedFailures in
+`src/wpt/streams-test.ts`; the TypeScript implementation matches spec.
+The suites do not duplicate that enumeration.
