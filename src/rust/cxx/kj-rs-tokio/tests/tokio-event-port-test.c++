@@ -337,5 +337,125 @@ KJ_TEST("KJ coroutine can co_await spawned Rust tasks and KJ timers together") {
   KJ_EXPECT(result == 12);
 }
 
+// =======================================================================================
+// Teardown.
+
+kj::Timer *testTimer = nullptr;
+void setTestTimer(kj::Timer *timer) {
+  testTimer = timer;
+}
+kj::WaitScope *testWaitScope = nullptr;
+void setTestWaitScope(kj::WaitScope *ws) {
+  testWaitScope = ws;
+}
+kj::Maybe<kj::Own<kj::PromiseFulfiller<int>>> testFulfiller;
+}  // namespace
+
+// External linkage: called by the cxx bridge (kj_rs_tokio_test::kjTimerDelay etc.).
+kj::Promise<void> kjTimerDelay(uint64_t ms) {
+  KJ_REQUIRE(testTimer != nullptr, "setTestTimer() not called");
+  return testTimer->afterDelay(ms * kj::MILLISECONDS);
+}
+
+kj::Promise<void> kjNeverPromise() {
+  return kj::NEVER_DONE;
+}
+
+void nestedWait() {
+  KJ_REQUIRE(testWaitScope != nullptr, "setTestWaitScope() not called");
+  kj::evalLater([]() {}).wait(*testWaitScope);
+}
+
+void fulfillTestFulfiller(int32_t value) {
+  KJ_ASSERT_NONNULL(testFulfiller, "setTestFulfiller() not called")->fulfill(kj::cp(value));
+}
+
+namespace {
+
+KJ_TEST("context destruction with a spawned task HOLDING a KJ timer promise is clean") {
+  // Unlike the test below, the spawned task itself owns live KJ objects (TimerPromiseAdapter in
+  // the port's TimerImpl, armed RustPromiseAwaiter Event on the loop) at teardown. The LocalSet
+  // cancellation that drops them must run while the timer and loop still exist.
+  {
+    auto io = setupTokioAsyncIo();
+    auto &ws = io.getWaitScope();
+    setTestTimer(&io.getTimer());
+    KJ_DEFER(setTestTimer(nullptr));
+    spawn_task_holding_kj_timer();
+    // Let the task start: it registers the timer and arms its awaiter, then parks.
+    kj::evalLater([]() {}).wait(ws);
+    ws.poll();
+  }
+  {
+    auto io = setupTokioAsyncIo();
+    KJ_EXPECT(kj::evalLater([]() { return 7; }).wait(io.getWaitScope()) == 7);
+  }
+}
+
+KJ_TEST("context destruction with pending spawned tasks and armed timers is "
+        "clean") {
+  {
+    auto io = setupTokioAsyncIo();
+    auto &ws = io.getWaitScope();
+    auto &timer = io.getTimer();
+
+    // A detached, never-completing Rust task: must be dropped by the runtime at teardown.
+    spawn_pending_task();
+
+    // Armed timer and an in-flight spawned task; their promises are destroyed (canceling the
+    // KJ side) before the context itself, per declaration order.
+    auto timerPromise = timer.afterDelay(60 * kj::SECONDS);
+    auto spawnedPromise = spawn_task_on_runtime(60'000, 1);
+    KJ_EXPECT(!spawnedPromise.poll(ws));
+    KJ_EXPECT(!timerPromise.poll(ws));
+  }
+
+  // The thread is fully cleaned up: a fresh context on the same thread works.
+  {
+    auto io = setupTokioAsyncIo();
+    auto &ws = io.getWaitScope();
+    KJ_EXPECT(kj::evalLater([]() { return 5; }).wait(ws) == 5);
+    KJ_EXPECT(has_loop_runtime_handle());
+  }
+  KJ_EXPECT(!has_loop_runtime_handle());
+}
+
+KJ_TEST("context destruction with a spawned task awaiting a KJ promise is clean") {
+  // The task owns an OwnPromiseNode plus an armed RustPromiseAwaiter event registered with the
+  // loop. Cancellation must drop them while the loop still exists (else ~Event unlinks from a
+  // freed queue).
+  {
+    auto io = setupTokioAsyncIo();
+    auto &ws = io.getWaitScope();
+    spawn_task_awaiting_kj_never_promise();
+    kj::evalLater([]() {}).wait(ws);
+    ws.poll();
+  }
+  auto io = setupTokioAsyncIo();
+  KJ_EXPECT(kj::evalLater([]() { return 8; }).wait(io.getWaitScope()) == 8);
+}
+
+KJ_TEST("one TokioEventPort per thread") {
+  auto io = setupTokioAsyncIo();
+  // A second port on this thread is refused (KJ's one-loop-per-thread model): the C++ side
+  // KJ_REQUIREs it and the Rust side asserts it; either surfaces as a kj::Exception.
+  KJ_EXPECT_THROW(FAILED, kj::heap<kj_rs_tokio::TokioEventPort>());
+  // The failed construction must not have disturbed the live port.
+  KJ_EXPECT(kj::evalLater([]() { return 1; }).wait(io.getWaitScope()) == 1);
+  KJ_EXPECT(spawn_task_on_runtime(1, 4).wait(io.getWaitScope()) == 4);
+}
+
+KJ_TEST("bridged future woken from a plain std::thread while the loop is parked") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+
+  // The wake comes from a thread with neither a KJ loop nor a tokio context, ~20ms after the
+  // loop parks in the port's block_on: FutureWakerCell's cross-thread fulfiller -> this loop's
+  // Executor -> TokioEventPort::wake() -> unpark. A lost hop hangs this wait().
+  std_thread_wake_future().wait(ws);
+  // And again, back to back, so the second wake targets a freshly renewed fulfiller.
+  std_thread_wake_future().wait(ws);
+}
+
 }  // namespace
 }  // namespace kj_rs_tokio_test
