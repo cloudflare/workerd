@@ -986,6 +986,63 @@ export const respondAfterCloseFromLaterMicrotask = {
   },
 };
 
+// Same late respond(0), with the reader released in between: the settled
+// read's result (a partial fill here) keeps its buffer and bytes, and the
+// stream is re-lockable. Release rewrites the descriptor's reader state;
+// that must not re-arm the transfer the later response would perform.
+export const respondAfterCloseAndReleaseFromLaterMicrotask = {
+  async test() {
+    let finishRespond;
+    const responded = new Promise((resolve) => {
+      finishRespond = resolve;
+    });
+    let releaseReader;
+    const released = new Promise((resolve) => {
+      releaseReader = resolve;
+    });
+    let request;
+    let respondError;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      async pull(c) {
+        request = c.byobRequest;
+        request.view[0] = 7;
+        request.view[1] = 8;
+        request.respond(2);
+        // The next pull carries the same read (2 of 3 filled, min 3).
+        request = c.byobRequest;
+        c.close();
+        await released;
+        try {
+          request.respond(0);
+        } catch (e) {
+          respondError = e;
+        }
+        finishRespond();
+      },
+    });
+
+    const reader = rs.getReader({ mode: 'byob' });
+    const { done, value } = await reader.read(new Uint8Array(3), { min: 3 });
+    strictEqual(done, false);
+    strictEqual(value.byteLength, 2);
+    reader.releaseLock();
+    releaseReader();
+    await responded;
+
+    strictEqual(respondError, undefined);
+    strictEqual(request.view, null);
+    strictEqual(value.byteLength, 2);
+    strictEqual(value.buffer.byteLength, 3);
+    strictEqual(value[0], 7);
+    strictEqual(value[1], 8);
+    const reader2 = rs.getReader({ mode: 'byob' });
+    const tail = await reader2.read(new Uint8Array(3));
+    strictEqual(tail.done, true);
+    strictEqual(tail.value.byteLength, 0);
+  },
+};
+
 export const readableStreamByteRespondWithNewView = {
   async test() {
     // Basic respondWithNewView

@@ -17,14 +17,15 @@
 //   - The CLOSE_SENTINEL is always the LAST slot; it is the ONLY close-
 //     propagation mechanism (drain-then-close per cursor). BYOB
 //     descriptors facing the sentinel settle via a DEFERRED end-of-data
-//     snapshot (one microtask): a same-turn respond(0) first claims the
+//     settlement (one microtask): a same-turn respond(0) first claims the
 //     spec's RespondInClosedState fold (done: true with the partial bytes);
-//     otherwise the read settles with the decided C++-parity tail shape —
+//     otherwise the read settles with the C++-parity tail shape —
 //     element-aligned partial fills resolve { done: false, value: partial }
 //     and unfilled descriptors resolve { done: true, value: empty view }.
-//     The descriptor remains pending so a later respond(0) is still legal;
-//     its result uses a buffer copy so that response cannot detach it. (The
-//     spec leaves the read itself pending until that response — a footgun we
+//     The result owns the descriptor's buffer (transferred once, no copy);
+//     the descriptor remains listed, flagged settledAtEndOfData, so a later
+//     respond(0) is still legal and knows not to transfer again. (The spec
+//     leaves the read itself pending until that response — a footgun we
 //     deliberately do not reproduce.)
 //   - read() takes the fast path ONLY when no reads are pending (per-reader
 //     FIFO; entries and pending reads coexist under batched notification).
@@ -51,6 +52,7 @@ import type {
 
 const {
   ArrayBufferPrototypeSlice,
+  ArrayBufferPrototypeTransfer,
   ArrayPrototypePush,
   ArrayPrototypeShift,
   ArrayPrototypeSplice,
@@ -174,9 +176,17 @@ export interface PullIntoDescriptor {
   // 'default' = synthetic descriptor for a default read on a byte stream
   // with autoAllocateChunkSize set.
   // 'none' = descriptor whose reader was released (releaseLock), or whose
-  // read was settled by the end-of-data snapshot. In readable state,
-  // respond() enqueues the data rather than resolving a read promise.
+  // read was settled at end-of-data. In readable state, respond() enqueues
+  // the data rather than resolving a read promise.
   readerType: 'byob' | 'default' | 'none';
+  // Set when the deferred end-of-data settlement resolved this read: the
+  // result view was built over `buffer` (transferred once, at settlement),
+  // so the reader owns those bytes. The descriptor stays listed so a later
+  // closed-state respond(0)/respondWithNewView(empty) remains legal, but
+  // those paths MUST NOT re-transfer `buffer` — it would detach the
+  // delivered result. Independent of readerType: a releaseLock after
+  // settlement rewrites readerType to 'none' and must not lose this.
+  settledAtEndOfData: boolean;
   promise: Promise<ReadableStreamReadResult<ArrayBufferView>>;
   resolve: (result: ReadableStreamReadResult<ArrayBufferView>) => void;
   reject: (reason: unknown) => void;
@@ -941,7 +951,7 @@ class ByteStreamCursor
   // layer. The stream can still be readable while the QUEUE is already
   // closed (buffered data not yet drained — e.g. a tee branch that has
   // not read); a below-minimum fill that lands at the sentinel then
-  // settles via the deferred end-of-data snapshot.
+  // settles via the deferred end-of-data settlement.
   readBYOB(
     desc: PullIntoDescriptor
   ): Promise<ReadableStreamReadResult<ArrayBufferView>> {
@@ -965,7 +975,7 @@ class ByteStreamCursor
           return PromiseReject(e);
         }
         // Element-aligned (possibly empty) fill: settle via the deferred
-        // end-of-data snapshot.
+        // end-of-data settlement.
         this.#scheduleEndOfDataSettlement();
       }
     }
@@ -998,15 +1008,15 @@ class ByteStreamCursor
         // follow default-read close semantics: ReadableStreamClose drains
         // read requests with done, so they resolve { done: true } now.
         this.#resolveDefaultPullIntosAsDone();
-        // TRUE BYOB reads settle via the deferred end-of-data snapshot:
+        // TRUE BYOB reads settle via the deferred end-of-data settlement:
         // the source may still call respond(0) in this same turn
         // (RespondInClosedState reaches commitPullIntosOnClose() via the
         // controller and claims the spec's fold shape first); whatever is
-        // left when the microtask runs settles with the decided C++-parity
-        // tail shape while retaining its descriptor for a later closed-state
+        // left when the microtask runs settles with the C++-parity tail
+        // shape while retaining its descriptor for a later closed-state
         // response. In multi-cursor mode (tee branches),
         // byobRequest is null and respond(0) is unreachable, so the
-        // deferred snapshot is what settles every branch read.
+        // deferred settlement is what settles every branch read.
         this.#scheduleEndOfDataSettlement();
         break;
       }
@@ -1063,7 +1073,15 @@ class ByteStreamCursor
   // commit first via commitPullIntosOnClose() and claim the spec's
   // RespondInClosedState fold shape ({ done: true, value: partial }, the
   // WPT read-min pinned behavior). Otherwise the read falls through to the
-  // decided C++-parity tail shape, without invalidating the descriptor.
+  // C++-parity tail shape, without invalidating the descriptor.
+  //
+  // CONSEQUENCE — the result shape depends on microtask timing. With a
+  // partially filled read parked, `close(); respond(0)` in one turn yields
+  // { done: true, value: partial }, while `close(); await x; respond(0)`
+  // yields { done: false, value: partial } followed by { done: true,
+  // value: empty } on the next read. Same source, one await apart,
+  // different consumer-visible shape. Accepted: the spec alternative for a
+  // source that never responds after close() is a read that pends forever.
   #scheduleEndOfDataSettlement(): void {
     if (this.#endOfDataSettlementScheduled) return;
     this.#endOfDataSettlementScheduled = true;
@@ -1073,16 +1091,22 @@ class ByteStreamCursor
     });
   }
 
-  // Settle every still-pending read with the decided tail shape:
-  // element-aligned partial fills resolve { done: false, value: partial }
-  // (a subsequent read observes the closed stream and resolves done with
-  // an empty view — the C++ readAtLeast tail contract); unfilled
-  // descriptors resolve { done: true, value: empty view }, handing the
-  // transferred buffer contents back. The result uses a copy because the
-  // descriptor must remain available for a later RespondInClosedState,
-  // which transfers and detaches its buffer. Bails when the cursor no longer
-  // faces the sentinel: error() dropped the entries (getEntry returns
-  // undefined), and cancel()/respond(0) paths emptied the descriptor list.
+  // Settle every still-pending read with the tail shape: element-aligned
+  // partial fills resolve { done: false, value: partial } (a subsequent
+  // read observes the closed stream and resolves done with an empty view —
+  // the C++ readAtLeast tail contract); unfilled descriptors resolve
+  // { done: true, value: empty view }. Either way the reader gets its own
+  // buffer back: it is transferred once (O(1), no copy — the point of
+  // BYOB) so any view the source still holds over the old buffer
+  // (byobRequest.view) detaches, as the spec's commit-time transfer would.
+  // The descriptor stays listed, pointing at the transferred buffer, so a
+  // later closed-state response remains legal; settledAtEndOfData tells
+  // those paths not to transfer again. (A byobRequest minted after
+  // settlement therefore aliases the delivered buffer's unfilled tail;
+  // writing into it after close() is a source bug with no spec meaning.)
+  // Bails when the cursor no longer faces the sentinel: error() dropped
+  // the entries (getEntry returns undefined), and cancel()/respond(0)
+  // paths emptied the descriptor list.
   #settlePullIntosAtEndOfData(): void {
     if (this.queue.getEntry(this.position) !== CLOSE_SENTINEL) return;
     const pending = this.#pendingPullIntos;
@@ -1101,11 +1125,10 @@ class ByteStreamCursor
       } else {
         // assert: desc.bytesFilled % desc.elementSize === 0 (fractional
         // fills errored the stream before settlement could be scheduled)
-        const view = this.#convert(
-          desc,
-          ArrayBufferPrototypeSlice(desc.buffer, 0)
-        );
+        desc.buffer = ArrayBufferPrototypeTransfer(desc.buffer);
+        const view = this.#convert(desc);
         desc.readerType = 'none';
+        desc.settledAtEndOfData = true;
         if (desc.bytesFilled > 0) {
           desc.resolve(createReadResult(view, false));
         } else {

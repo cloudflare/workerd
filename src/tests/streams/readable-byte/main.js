@@ -109,6 +109,7 @@ export {
   bodyPumpByobRequestPresence,
   readableStreamByteRespond,
   respondAfterCloseFromLaterMicrotask,
+  respondAfterCloseAndReleaseFromLaterMicrotask,
   readableStreamByteRespondWithNewView,
   readableStreamByteRespondWithNewViewUsesNewElementSize,
   readableStreamAutoAllocateChunkSize,

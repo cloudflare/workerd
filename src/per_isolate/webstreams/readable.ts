@@ -811,6 +811,7 @@ function readViaAutoAllocateDescriptor(
     elementSize: 1,
     viewCtor: Uint8Array,
     readerType: 'default',
+    settledAtEndOfData: false,
     promise: withResolvers.promise,
     resolve: withResolvers.resolve,
     reject: withResolvers.reject,
@@ -1086,6 +1087,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
       elementSize: info.elementSize,
       viewCtor: info.viewCtor,
       readerType: 'byob',
+      settledAtEndOfData: false,
       promise: withResolvers.promise,
       resolve: withResolvers.resolve,
       reject: withResolvers.reject,
@@ -2080,8 +2082,13 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       }
     }
     // Spec: the descriptor's buffer is re-transferred on every respond;
-    // the result view and any remainder view target the NEW buffer.
-    head.buffer = ArrayBufferPrototypeTransfer(head.buffer);
+    // the result view and any remainder view target the NEW buffer. A
+    // descriptor already settled at end-of-data has handed that buffer to
+    // the reader's result (see PullIntoDescriptor.settledAtEndOfData), so
+    // it is left alone: the commit below has nothing left to resolve.
+    if (!head.settledAtEndOfData) {
+      head.buffer = ArrayBufferPrototypeTransfer(head.buffer);
+    }
     this.#invalidateByobRequest();
     if (state === 'closed') {
       // respond(0)-while-closed: commit all pending descriptors with
@@ -2159,7 +2166,12 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     if (head.bytesFilled + info.byteLength > head.byteLength) {
       throw new RangeError('The view exceeds the remaining space');
     }
-    head.buffer = ArrayBufferPrototypeTransfer(info.buffer);
+    // Same settled-descriptor exemption as respond(): the reader already
+    // owns the delivered buffer, so the replacement view's buffer is not
+    // adopted in its place.
+    if (!head.settledAtEndOfData) {
+      head.buffer = ArrayBufferPrototypeTransfer(info.buffer);
+    }
     this.#invalidateByobRequest();
     if (state === 'closed') {
       cursor.commitPullIntosOnClose();
