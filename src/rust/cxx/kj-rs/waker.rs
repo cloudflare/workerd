@@ -163,13 +163,43 @@ static CELL_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
 /// borrowed from `waker` itself. Owned-cell and foreign Wakers both return `None`: neither
 /// exposes a `FuturePollEvent` to arm directly, so `RustPromiseAwaiter` takes its generic
 /// fallback path for them.
+fn is_poll_waker(waker: &Waker) -> bool {
+    std::ptr::eq(waker.vtable(), &raw const POLL_WAKER_VTABLE)
+}
+
 pub fn try_poll_waker(waker: &Waker) -> Option<&PollWaker> {
-    if waker.vtable() == &POLL_WAKER_VTABLE {
+    if is_poll_waker(waker) {
         // Safety: Wakers carrying POLL_WAKER_VTABLE are only ever built by `From<&PollWaker>`
         // above, so `data` is a `&PollWaker` that outlives `waker` (the PollWaker is stack-owned
         // by the C++ poll driving this call); the returned borrow is tied to `waker`'s lifetime.
         Some(unsafe { &*waker.data().cast::<PollWaker>() })
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static EQUIVALENT_POLL_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
+        poll_waker_clone,
+        poll_waker_wake,
+        poll_waker_wake_by_ref,
+        poll_waker_drop,
+    );
+
+    #[test]
+    fn poll_waker_discriminator_requires_the_canonical_vtable() {
+        let equivalent_raw = RawWaker::new(std::ptr::null(), &EQUIVALENT_POLL_WAKER_VTABLE);
+        // SAFETY: this test only inspects and drops the Waker. Its drop entry accepts any data
+        // pointer and does nothing; none of the entries that dereference data can run.
+        let equivalent = unsafe { Waker::from_raw(equivalent_raw) };
+        assert!(!is_poll_waker(&equivalent));
+
+        let canonical_raw = RawWaker::new(std::ptr::null(), &POLL_WAKER_VTABLE);
+        // SAFETY: same reasoning as above.
+        let canonical = unsafe { Waker::from_raw(canonical_raw) };
+        assert!(is_poll_waker(&canonical));
     }
 }
