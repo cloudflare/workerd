@@ -15,6 +15,8 @@ thread_local TokioEventPort* activePort = nullptr;
 const kj::MonotonicClock& requireNoActivePort() {
   KJ_REQUIRE(activePort == nullptr,
       "only one TokioEventPort may exist per thread (KJ's one-loop-per-thread model)");
+  KJ_REQUIRE(kj::tryGetCurrentThreadExecutor() == kj::none,
+      "cannot create a TokioEventPort while another KJ event loop is current");
   return kj::systemPreciseMonotonicClock();
 }
 }  // namespace

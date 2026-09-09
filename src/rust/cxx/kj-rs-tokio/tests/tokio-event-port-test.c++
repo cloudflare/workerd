@@ -28,6 +28,18 @@ void delayMillis(uint64_t millis) {
 // =======================================================================================
 // Basics: the KJ event loop works as usual on top of the tokio-backed port.
 
+KJ_TEST("Tokio setup rejects an already-current KJ event loop before installing runtime TLS") {
+  {
+    kj::EventLoop loop;
+    kj::WaitScope waitScope(loop);
+    KJ_EXPECT_THROW_MESSAGE("cannot create a TokioEventPort while another KJ event loop is current",
+        setupTokioAsyncIo());
+  }
+
+  auto io = setupTokioAsyncIo();
+  KJ_EXPECT(kj::Promise<int>(42).wait(io.getWaitScope()) == 42);
+}
+
 KJ_TEST("promises resolve on a TokioEventPort loop") {
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
