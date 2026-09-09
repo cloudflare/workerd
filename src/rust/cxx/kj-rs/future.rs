@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 // This file contains boilerplate which must occur once per crate, rather than once per type.
 
 use std::pin::Pin;

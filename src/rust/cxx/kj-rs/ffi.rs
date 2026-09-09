@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 pub use bridge::*;
 
 use crate::awaiter::RustWaker;

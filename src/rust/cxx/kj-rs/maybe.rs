@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use std::mem::MaybeUninit;
 use std::pin::Pin;
 

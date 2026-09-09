@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use std::ffi::c_void;
 use std::future::Future;
 use std::marker::PhantomData;

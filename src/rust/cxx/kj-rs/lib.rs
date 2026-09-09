@@ -1,5 +1,36 @@
-// The CXX bridge expands KjArc vocabulary paths through the crate name, including from inside
-// this crate's own bridge module.
+// Safety & panic enforcement walls. Inherent-FFI crate: unsafe is
+// concentrated at the bridge and every op must sit in an explicit, documented unsafe
+// block; prod code returns Result/KjError rather than panicking (a panic on the async
+// poll path is a process abort). Test code is exempted below.
+#![deny(unsafe_op_in_unsafe_fn)]
+// Quarantine unsafe into named FFI islands: deny unsafe crate-wide, then re-allow it only on the
+// modules that genuinely need it (each carries its own `#![allow(unsafe_code)]`). Any module
+// without that opt-in — and any newly-added module — is compiler-proven unsafe-free, and no future
+// edit can smuggle unsafe into non-island code without tripping this deny.
+#![deny(unsafe_code)]
+#![deny(clippy::undocumented_unsafe_blocks)]
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    clippy::todo,
+    clippy::unimplemented
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented
+    )
+)]
+
+// The cxx bridge expands vocabulary builtins (KjRc, KjMaybe, ...) to `::kj_rs::...` paths; make
+// that path resolve inside this crate itself, since ffi.rs's bridge uses them too.
 extern crate self as kj_rs;
 
 pub use awaiter::PromiseAwaiter;
