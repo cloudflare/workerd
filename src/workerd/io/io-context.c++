@@ -310,7 +310,6 @@ kj::Date IoContext::IncomingRequest::nowForTraceOnset() {
 }
 
 IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
-  selfRef->invalidate();
   if (!wasDelivered) {
     KJ_IF_SOME(w, workerTracer) {
       w->markUnused();
@@ -1305,12 +1304,18 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
       kj::mv(userSpan), kj::mv(tracer), kj::mv(invocationSpanContext));
   auto ioOwnAsyncContext = ioContext.addObject(kj::mv(asyncContext));
   auto contextHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnAsyncContext));
+  jsg::JsObject contextHolder(contextHandle.As<v8::Object>());
 
   if (invocationTag == kj::none) {
-    invocationTag = getOrCreateUserTracingInvocationTag(js, getCurrentIncomingRequest());
+    auto& request = getCurrentIncomingRequest();
+    KJ_IF_SOME(anchor, request.userTracingInvocationAnchor) {
+      invocationTag = anchor.getHandle(js);
+    } else {
+      request.userTracingInvocationAnchor = jsg::JsRef(js, contextHolder);
+      invocationTag = contextHolder;
+    }
   }
 
-  jsg::JsObject contextHolder(contextHandle.As<v8::Object>());
   contextHolder.setPrivate(js, USER_TRACING_INVOCATION_TAG, KJ_ASSERT_NONNULL(invocationTag));
   return jsg::AsyncContextFrame::StorageScope(
       js, lock.getUserTraceAsyncContextKey(), js.v8Ref(contextHandle));
@@ -1334,19 +1339,23 @@ kj::Maybe<jsg::JsObject> IoContext::getUserTracingInvocationTag(jsg::Lock& js) {
     return kj::mv(tag);
   }
   if (!incomingRequests.empty()) {
-    return getOrCreateUserTracingInvocationTag(js, getCurrentIncomingRequest());
+    KJ_IF_SOME(anchor, getCurrentIncomingRequest().userTracingInvocationAnchor) {
+      return anchor.getHandle(js);
+    }
   }
   return kj::none;
 }
 
-jsg::JsObject IoContext::getOrCreateUserTracingInvocationTag(
-    jsg::Lock& js, IncomingRequest& incomingRequest) {
-  if (incomingRequest.userTracingInvocationTag == kj::none) {
-    auto state = kj::heap<UserTracingInvocationSpanTag>(incomingRequest.getWeakRef());
-    auto tag = js.opaque(addObject(kj::mv(state)));
-    incomingRequest.userTracingInvocationTag = jsg::JsRef(js, tag);
+kj::Maybe<IoContext::IncomingRequest&> IoContext::getIncomingRequestForUserTracingInvocation(
+    jsg::Lock& js, jsg::JsObject invocationTag) {
+  for (auto& request: incomingRequests) {
+    KJ_IF_SOME(anchor, request.userTracingInvocationAnchor) {
+      if (jsg::JsValue(anchor.getHandle(js)).strictEquals(invocationTag)) {
+        return request;
+      }
+    }
   }
-  return KJ_ASSERT_NONNULL(incomingRequest.userTracingInvocationTag).getHandle(js);
+  return kj::none;
 }
 
 SpanParent IoContext::getCurrentTraceSpan() {

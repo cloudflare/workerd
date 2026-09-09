@@ -30,6 +30,13 @@ const unitTests :Workerd.Config = (
           (
             name = "overlappingRequests",
             durableObjectNamespace = "OverlappingRequestsObject"
+          ),
+          (
+            name = "crossContext",
+            service = (
+              name = "tracing-helpers-test",
+              entrypoint = "CrossContextEntrypoint"
+            )
           )
         ],
       )

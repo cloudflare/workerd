@@ -534,14 +534,12 @@ jsg::Optional<jsg::Ref<user_tracing::Span>> getInvocationSpanFromTag(jsg::Lock& 
     jsg::JsObject tag,
     const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler) {
   constexpr auto CACHE_KEY = "workerd.invocationSpan"_kj;
-  auto& state = jsg::unwrapOpaqueRef<IoOwn<UserTracingInvocationSpanTag>>(js.v8Isolate, tag);
-  jsg::Optional<jsg::Ref<user_tracing::Span>> result;
-  state->request->runIfAlive([&](IoContext::IncomingRequest& request) {
+  auto& ioContext = IoContext::current();
+  KJ_IF_SOME(request, ioContext.getIncomingRequestForUserTracingInvocation(js, tag)) {
     if (tag.hasPrivate(js, CACHE_KEY)) {
       auto cached = tag.getPrivate(js, CACHE_KEY);
       KJ_IF_SOME(span, spanHandler.tryUnwrap(js, cached)) {
-        result = kj::mv(span);
-        return;
+        return kj::mv(span);
       }
     }
 
@@ -551,11 +549,11 @@ jsg::Optional<jsg::Ref<user_tracing::Span>> getInvocationSpanFromTag(jsg::Lock& 
     }
     kj::Own<user_tracing::SpanState> spanState = kj::refcounted<user_tracing::InvocationSpanState>(
         request.getRootUserTraceSpan(), kj::mv(tracer), request.getInvocationSpanContext().clone());
-    auto span = js.alloc<user_tracing::Span>(IoContext::current().addObject(kj::mv(spanState)));
+    auto span = js.alloc<user_tracing::Span>(ioContext.addObject(kj::mv(spanState)));
     tag.setPrivate(js, CACHE_KEY, jsg::JsValue(spanHandler.wrap(js, span.addRef())));
-    result = kj::mv(span);
-  });
-  return result;
+    return span;
+  }
+  return kj::none;
 }
 
 }  // namespace

@@ -4,7 +4,11 @@
 
 import assert from 'node:assert';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { DurableObject, tracing as publicTracing } from 'cloudflare:workers';
+import {
+  DurableObject,
+  WorkerEntrypoint,
+  tracing as publicTracing,
+} from 'cloudflare:workers';
 
 assert.strictEqual(publicTracing.getActiveSpan(), undefined);
 assert.strictEqual(publicTracing.getInvocationSpan(), undefined);
@@ -15,6 +19,33 @@ const getSpansOutsideInvocationContext = AsyncLocalStorage.bind(() => ({
     publicTracing.getInvocationSpan(),
   ],
 }));
+
+let getCrossContextInvocationSpan;
+
+export class CrossContextEntrypoint extends WorkerEntrypoint {
+  async fetch(request) {
+    const requestName = new URL(request.url).pathname.slice(1);
+
+    if (requestName === 'capture') {
+      const invocationSpan = publicTracing.getInvocationSpan();
+      assert(invocationSpan);
+      getCrossContextInvocationSpan = AsyncLocalStorage.bind(() =>
+        publicTracing.getInvocationSpan()
+      );
+      return new Response('captured');
+    }
+
+    try {
+      assert.strictEqual(getCrossContextInvocationSpan(), undefined);
+    } catch (error) {
+      assert.match(
+        error.message,
+        /Cannot call this AsyncLocalStorage bound function outside of the request/
+      );
+    }
+    return new Response('checked');
+  }
+}
 
 // Overlapping Durable Object requests share an IoContext, but each async continuation must retain
 // its originating request's tracing state. This verifies that request A resuming while request B is
@@ -33,7 +64,17 @@ export class OverlappingRequestsObject extends DurableObject {
   async fetch(request) {
     const requestName = new URL(request.url).pathname.slice(1);
 
+    if (requestName === 'stale') {
+      assert.strictEqual(this.getFirstInvocationSpan(), undefined);
+      return new Response('checked');
+    }
+
     if (requestName === 'a') {
+      const invocationSpan = publicTracing.getInvocationSpan();
+      assert(invocationSpan);
+      this.getFirstInvocationSpan = AsyncLocalStorage.bind(() =>
+        publicTracing.getInvocationSpan()
+      );
       this.firstIsWaiting = true;
       return new Response(
         new ReadableStream({
@@ -77,6 +118,25 @@ export const overlappingDurableObjectRequests = {
     const [firstEnd] = await Promise.all([firstReader.read(), second.text()]);
     assert.strictEqual(firstEnd.done, true);
     assert.deepStrictEqual([first.status, second.status], [200, 200]);
+    assert.strictEqual(
+      await (await stub.fetch('https://example.com/stale')).text(),
+      'checked'
+    );
+  },
+};
+
+export const crossIoContextInvocation = {
+  async test(ctrl, env) {
+    assert.strictEqual(
+      await (
+        await env.crossContext.fetch('https://example.com/capture')
+      ).text(),
+      'captured'
+    );
+    assert.strictEqual(
+      await (await env.crossContext.fetch('https://example.com/check')).text(),
+      'checked'
+    );
   },
 };
 

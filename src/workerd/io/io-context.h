@@ -107,8 +107,6 @@ class UserTraceAsyncContext final {
 // already completed.
 class IoContext_IncomingRequest final {
  public:
-  using WeakRef = workerd::WeakRef<IoContext_IncomingRequest>;
-
   IoContext_IncomingRequest(kj::Own<IoContext> context,
       kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
@@ -118,10 +116,6 @@ class IoContext_IncomingRequest final {
       kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
-
-  kj::Own<WeakRef> getWeakRef() {
-    return kj::addRef(*selfRef);
-  }
 
   IoContext& getContext() {
     return *context;
@@ -219,8 +213,7 @@ class IoContext_IncomingRequest final {
   kj::Rc<IoChannelFactory> ioChannelFactory;
   kj::Maybe<kj::Own<AccessInfo>> accessInfo;
   kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory;
-  kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<IoContext_IncomingRequest>(), *this);
-  kj::Maybe<jsg::JsRef<jsg::JsObject>> userTracingInvocationTag;
+  kj::Maybe<jsg::JsRef<jsg::JsObject>> userTracingInvocationAnchor;
 
   // Root user trace span for this request. Populated during delivered() via
   // BaseTracer::makeUserRequestSpan(); otherwise a null SpanParent. The tracer it references
@@ -259,15 +252,6 @@ class IoContext_IncomingRequest final {
   kj::Promise<T> maybeAddGcPassForTest(kj::Promise<T> promise);
 
   friend class IoContext;
-};
-
-// Request-specific state carried through the user-tracing async context as an opaque JS object.
-// The request is weakly referenced so captured async contexts cannot extend request lifetime.
-struct UserTracingInvocationSpanTag {
-  explicit UserTracingInvocationSpanTag(kj::Own<IoContext_IncomingRequest::WeakRef> request)
-      : request(kj::mv(request)) {}
-
-  kj::Own<IoContext_IncomingRequest::WeakRef> request;
 };
 
 // IoContext holds state associated with a single I/O context. For stateless requests, each
@@ -1136,6 +1120,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // attribution when execution is detached into the root async context.
   kj::Maybe<jsg::JsObject> getUserTracingInvocationTag(jsg::Lock& js);
 
+  // Finds the live request associated with an invocation tag in this IoContext.
+  kj::Maybe<IncomingRequest&> getIncomingRequestForUserTracingInvocation(
+      jsg::Lock& js, jsg::JsObject invocationTag) KJ_LIFETIMEBOUND;
+
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.
   SpanParent getCurrentTraceSpan();
@@ -1282,9 +1270,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   void taskFailed(kj::Exception&& exception) override;
   void requireCurrent();
   void checkFarGet(const DeleteQueue& expectedQueue, const std::type_info& type);
-  jsg::JsObject getOrCreateUserTracingInvocationTag(
-      jsg::Lock& js, IncomingRequest& incomingRequest);
-
   kj::Maybe<jsg::JsRef<jsg::JsObject>> promiseContextTag;
   kj::Maybe<jsg::JsRef<jsg::JsObject>> entrypointHandler;
 

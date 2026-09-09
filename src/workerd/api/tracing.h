@@ -192,10 +192,11 @@ class Tracing: public jsg::Object {
       jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
 
   // Returns the runtime-owned invocation span regardless of which user-created span is active.
-  // Returns undefined outside an invocation. The returned span can record attributes, but end() is
-  // a no-op because the runtime owns its lifecycle. In root-detached actor execution, this follows
-  // the invocation currently selected by runtime attribution, which may differ from the callback's
-  // originating invocation.
+  // Returns undefined outside an invocation, after the originating invocation has completed, or
+  // when the current async context originated in a different IoContext. The returned span can
+  // record attributes, but end() is a no-op because the runtime owns its lifecycle. In
+  // root-detached actor execution, this follows the invocation currently selected by runtime
+  // attribution, which may differ from the callback's originating invocation.
   jsg::Optional<jsg::Ref<user_tracing::Span>> getInvocationSpan(
       jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
 
