@@ -150,3 +150,22 @@ cc_test(
         "@capnp-cpp//src/kj:kj-test",
     ],
 )
+
+cc_test(
+    name = "peer-filter-test",
+    size = "small",
+    srcs = ["peer-filter-test.c++"],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "//src/rust/cxx/kj-rs-io:peer-filter-lib",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+    ],
+)
