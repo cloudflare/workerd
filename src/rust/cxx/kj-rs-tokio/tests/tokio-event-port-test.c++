@@ -457,5 +457,99 @@ KJ_TEST("bridged future woken from a plain std::thread while the loop is parked"
   std_thread_wake_future().wait(ws);
 }
 
+// =======================================================================================
+// A tokio task hands KJ work by means other than a bridged waker while the loop is parked in
+// wait(): KJ reports it to the port (setRunnable(true) for events, the TimerImpl SleepHooks for
+// timers) and the park must end. Each test is bounded by a long timer that turns "hangs forever"
+// into a failed assertion.
+
+KJ_TEST("a spawned task fulfilling a kj::PromiseFulfiller while the loop is parked wakes it") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto &timer = io.getTimer();
+  auto &sysClock = kj::systemPreciseMonotonicClock();
+
+  auto paf = kj::newPromiseAndFulfiller<int>();
+  testFulfiller = kj::mv(paf.fulfiller);
+  KJ_DEFER(testFulfiller = kj::none);
+
+  // The task fulfills ~20 ms into the park; the 10 s timer is the "we hung" bound. Without KJ
+  // reporting the arm (setRunnable(true)) it sits unserviced until that timer.
+  task_fulfills_kj_fulfiller(20, 42);
+  auto before = sysClock.now();
+  int value = paf.promise
+                  .exclusiveJoin(timer.afterDelay(10 * kj::SECONDS).then([]() -> int {
+    KJ_FAIL_ASSERT("KJ event armed by a tokio task was not serviced while the loop was parked");
+  })).wait(ws);
+  KJ_EXPECT(value == 42);
+  KJ_EXPECT(sysClock.now() - before < 2 * kj::SECONDS);
+}
+
+KJ_TEST("a spawned task fulfilling a kj::PromiseFulfiller during a wait-forever park wakes it") {
+  // No timer at all: wait() plans to sleep forever. A hang here is a real hang, so this test
+  // guards itself with a cross-thread kill switch instead of a KJ timer.
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+
+  auto paf = kj::newPromiseAndFulfiller<int>();
+  testFulfiller = kj::mv(paf.fulfiller);
+  KJ_DEFER(testFulfiller = kj::none);
+
+  auto bound = kj::newPromiseAndCrossThreadFulfiller<int>();
+  std::atomic<bool> done{false};
+  kj::Thread watchdog([&done, fulfiller = kj::mv(bound.fulfiller)]() mutable {
+    for (int i = 0; i < 1000 && !done.load(); i++) delayMillis(10);
+    if (!done.load()) fulfiller->fulfill(-1);
+  });
+
+  task_fulfills_kj_fulfiller(20, 7);
+  int value = paf.promise.exclusiveJoin(kj::mv(bound.promise)).wait(ws);
+  done.store(true);
+  KJ_EXPECT(
+      value == 7, "KJ event armed by a tokio task was not serviced during a wait-forever park");
+}
+
+KJ_TEST("a KJ timer armed by a spawned task during the park is honored at its own deadline") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto &timer = io.getTimer();
+  auto &sysClock = kj::systemPreciseMonotonicClock();
+  setTestTimer(&timer);
+  KJ_DEFER(setTestTimer(nullptr));
+
+  // wait() plans against the 10 s bound; 10 ms (wall clock) into the park the task arms a 20 ms
+  // KJ timer and awaits it to completion. The park must end at that timer, not at 10 s.
+  //
+  // The port is the TimerImpl's SleepHooks while parked, so kj::Timer::now() reads the live
+  // clock: the task's afterDelay(20ms) is measured from the moment it is armed (~10 ms in), and
+  // the timer is due at ~30 ms of wall time -- KJ's intended semantics for code using the timer
+  // while the loop sleeps (see kj::TimerImpl::setSleeping).
+  auto before = sysClock.now();
+  task_awaits_kj_timer(10, 20)
+      .exclusiveJoin(timer.afterDelay(10 * kj::SECONDS).then([]() {
+    KJ_FAIL_ASSERT("KJ timer armed by a tokio task during the park was not honored");
+  })).wait(ws);
+  auto elapsed = sysClock.now() - before;
+  KJ_EXPECT(elapsed >= 30 * kj::MILLISECONDS, elapsed / kj::MILLISECONDS);
+  KJ_EXPECT(elapsed < 2 * kj::SECONDS, elapsed / kj::MILLISECONDS);
+}
+
+KJ_TEST("a KJ timer armed by a spawned task during a wait-forever park is honored") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  setTestTimer(&io.getTimer());
+  KJ_DEFER(setTestTimer(nullptr));
+
+  auto bound = kj::newPromiseAndCrossThreadFulfiller<void>();
+  std::atomic<bool> done{false};
+  kj::Thread watchdog([&done, fulfiller = kj::mv(bound.fulfiller)]() mutable {
+    for (int i = 0; i < 1000 && !done.load(); i++) delayMillis(10);
+    if (!done.load()) fulfiller->reject(KJ_EXCEPTION(FAILED, "park never ended"));
+  });
+
+  task_awaits_kj_timer(10, 20).exclusiveJoin(kj::mv(bound.promise)).wait(ws);
+  done.store(true);
+}
+
 }  // namespace
 }  // namespace kj_rs_tokio_test
