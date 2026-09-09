@@ -31,7 +31,7 @@
 //       ├── Own<TokioEventPort>               -- the kj::EventPort; one per thread
 //       │       ├── kj::TimerImpl             -- fed from wait()/poll(); declared BEFORE the
 //       │       │                                 Rust half so it outlives cancelled tasks
-//       │       ├── rust::Box<TokioPort>      -- Send + Sync (wake() is called cross-thread)
+//       │       ├── rust::Box<TokioPort>      -- Sync but not Send; wake() is cross-thread
 //       │       │       ├── tokio::Runtime (current_thread, I/O + time drivers)
 //       │       │       └── Arc<SharedState>  -- Notify + `woken` latch + `in_wait` flag; the
 //       │       │                                ONE thing every wake source touches
@@ -102,7 +102,7 @@ class TokioEventPort final: public kj::EventPort, private kj::TimerImpl::SleepHo
 
   // Cancel every task spawned onto this thread's LocalSet (kj_rs_tokio::spawn()), running their
   // destructors now. The destructor does this itself, first; TokioAsyncIoContext also does it
-  // while its WaitScope is still alive. Idempotent.
+  // while its WaitScope is still alive. This terminal operation is a no-op when repeated.
   void cancelSpawnedTasks();
 
  private:
