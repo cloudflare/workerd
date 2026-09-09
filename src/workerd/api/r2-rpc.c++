@@ -24,11 +24,8 @@ constexpr size_t R2_RPC_INLINE_BODY_LIMIT = 16u << 20;
 
 JsReadableStream makeR2RpcMemoryStream(
     jsg::Lock& js, kj::ArrayPtr<const byte> bytes, kj::Maybe<kj::Own<void>> backing = kj::none) {
-  // TODO(EWC): Confirm that internal R2 transport streams should bypass
-  // typescript_implemented_streams until TypeScript-backed streams support JSRPC serialization.
-  auto stream =
-      js.alloc<ReadableStream>(IoContext::current(), newMemorySource(bytes, kj::mv(backing)));
-  return JsReadableStream(kj::mv(stream));
+  return JsReadableStream::create(
+      js, IoContext::current(), newMemorySource(bytes, kj::mv(backing)));
 }
 
 }  // namespace
