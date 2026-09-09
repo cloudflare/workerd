@@ -244,7 +244,7 @@ pattern; a change to either side fails its cell.
 | `backpressure.js` | writes and close queue unboundedly with settlement on consumption; advisory overfill (negative `desiredSize`); default HWM 1 with divergent accounting (ledger #17); explicit HWM as initial `desiredSize` (negative-zero HWM normalized to +0); byte-level tracking incl. in-flight bytes; string accounting (ledger #7); `ready` replacement and recovery |
 | `close-propagation.js` | pending read resolves done; post-close reads done; buffered data drains before done; `closed` promises settle; writes after a queued close reject (message per impl) without disturbing the close or delivered bytes |
 | `abort-propagation.js` | pending/subsequent reads and both `closed` promises reject (identity per ledger #8); modern abort clears a pending write, rejecting it with the abort reason (undefined or original instance); later writes (ledger #9) |
-| `cancel-propagation.js` | pending write/close reject (ledger #8, #10); canceling reader's reads resolve done |
+| `cancel-propagation.js` | pending write/close reject (ledger #8, #10); canceling reader's reads resolve done; in C++, cancellation of a pending `pipeTo()` sink write establishes the disconnection error before a later readable cancel reason |
 | `fixed-length.js` | exact-length delivery (one and two chunks); `FLS(0)`; HWM capping incl. bigint; capped-HWM data flow |
 | `fixed-length-errors.js` | over/underwrite and close-without-write error the stream with the documented messages (types/surfacing per ledger #11); abort skips the underwrite check |
 | `tee.js` | both branches observe full content (ITS and FLS); single-branch read does not hang |
