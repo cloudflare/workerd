@@ -330,6 +330,28 @@ impl Drop for TokioPort {
 mod tests {
     use super::*;
 
+    thread_local! {
+        static LATE_DROP_PORT: RefCell<Option<TokioPort>> = const { RefCell::new(None) };
+    }
+
+    #[test]
+    fn port_can_outlive_tokio_thread_locals() {
+        std::thread::spawn(|| {
+            // Initialize the holder before Tokio's context TLS. Thread-local values are dropped
+            // in reverse initialization order, so the stored port is destroyed after Tokio's
+            // context has already been torn down.
+            LATE_DROP_PORT.with(|holder| {
+                assert!(holder.borrow().is_none());
+            });
+            let port = TokioPort::new();
+            LATE_DROP_PORT.with(|holder| {
+                *holder.borrow_mut() = Some(port);
+            });
+        })
+        .join()
+        .expect("late TokioPort destruction must not panic");
+    }
+
     #[test]
     fn bare_port_drop_cancels_spawned_tasks() {
         // A TokioPort NOT owned by a TokioEventPort: dropping it must still cancel tasks
