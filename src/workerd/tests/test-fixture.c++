@@ -393,6 +393,7 @@ TestFixture::TestFixture(SetupParams&& params)
       headerTable(headerTableBuilder.build()),
       ioChannelFactory(kj::mv(params.ioChannelFactory)),
       requestObserverFactory(kj::mv(params.requestObserverFactory)),
+      actorObserverFactory(kj::mv(params.actorObserverFactory)),
       checkedSubrequestCount(params.checkedSubrequestCount) {
   KJ_IF_SOME(id, params.actorId) {
     KJ_IF_SOME(provided, params.actorLoopback) {
@@ -427,10 +428,15 @@ jsg::Ref<api::DurableObjectStorage> storageFactory(
 
 kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
   auto& loopback = KJ_ASSERT_NONNULL(savedActorLoopback);
+  kj::Own<ActorObserver> observer;
+  KJ_IF_SOME(factory, actorObserverFactory) {
+    observer = factory();
+  } else {
+    observer = kj::refcounted<ActorObserver>();
+  }
   return kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
       /*hasTransient=*/false, actorCacheFactory, /*classname=*/kj::none,
-      /*props=*/Frankenvalue(), storageFactory, loopback->addRef(), *timerChannel,
-      kj::refcounted<ActorObserver>(),
+      /*props=*/Frankenvalue(), storageFactory, loopback->addRef(), *timerChannel, kj::mv(observer),
       savedHibernationManager.map(
           [](kj::Own<Worker::Actor::HibernationManager>& m) { return m->addRef(); }),
       /*hibernationEventType=*/kj::none, /*container=*/kj::none,
