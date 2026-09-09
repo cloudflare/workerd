@@ -16,9 +16,9 @@ use tokio::task::LocalSet;
 
 use crate::ffi::EnteredRuntime;
 
-/// How many scheduler turns `poll()` grants the runtime. Each `yield_now` re-queues the main
-/// future at the back of the run queue, so every already-ready spawned task gets a chance to run
-/// (repeatedly, up to the budget) without ever parking the thread.
+/// How many bounded yield points `poll()` grants the runtime. This gives ready work opportunities
+/// to run without promising an ordering or an exact number of task or driver polls, which are
+/// Tokio scheduler implementation details.
 ///
 /// The value is a latency/throughput compromise, not derived from any tokio internal: large
 /// enough to drain a typical burst of already-ready tasks in one `poll()` call, small enough to
@@ -35,9 +35,9 @@ thread_local! {
 
     /// The `LocalSet` onto which [`spawn`] enqueues tasks, and which `wait_*`/`poll` drive. Held
     /// behind an `Rc` so `spawn` (which has no `&TokioPort`) can reach it while the port keeps
-    /// driving it. The `LocalSet` is `!Send`/`!Sync` and lives entirely on the loop thread, which
-    /// is why `TokioPort` itself does NOT hold it (it must stay `Send + Sync` for cross-thread
-    /// `wake()`); ownership lives here. It is dropped -- cancelling every still-pending spawned
+    /// driving it. The `LocalSet` is `!Send`/`!Sync` and lives entirely on the loop thread, so it
+    /// cannot be stored in the `Sync` TokioPort shared with cross-thread `wake()` callers;
+    /// ownership lives here. It is dropped -- cancelling every still-pending spawned
     /// task -- by [`TokioPort::cancel_spawned_tasks`], which the C++ `TokioEventPort` destructor
     /// calls while the KJ event loop and timer are still alive (spawned tasks may own KJ
     /// promises), with `TokioPort::drop` as the fallback.
@@ -64,8 +64,8 @@ fn current_local_set() -> Option<Rc<LocalSet>> {
 /// The future is spawned with [`LocalSet::spawn_local`], so it is pinned to this (the loop)
 /// thread and does **not** need to be `Send`: the per-thread `current_thread` runtime never
 /// migrates a task to another thread. This is what lets bridged futures that hold `!Send` KJ
-/// handles (`OwnPromiseNode`, `kj::Own`, ...) be spawned directly. `JoinHandle`/drop-cancels
-/// semantics are the same as `tokio::spawn`.
+/// handles (`OwnPromiseNode`, `kj::Own`, ...) be spawned directly. Dropping the returned
+/// `JoinHandle` detaches the task, matching `tokio::spawn`; port teardown cancels detached tasks.
 ///
 /// A spawned task may use KJ freely: complete bridged futures, fulfill `kj::PromiseFulfiller`s,
 /// arm KJ timers, create and await bridged promises. Every one of those either arms a KJ event,
@@ -205,9 +205,9 @@ impl TokioPort {
     /// registration in the port's `kj::TimerImpl` -- and dropping those requires the KJ event
     /// loop and timer to still exist. The C++ `TokioEventPort` owns both and calls this FIRST in
     /// its destructor, before any member is destroyed, which makes the teardown order a
-    /// structural guarantee rather than a rule spawned tasks have to follow. Idempotent; a later
-    /// call (including the one in `Drop`) finds nothing to do. Only ever affects the calling
-    /// thread's `LocalSet`: the slot is thread-local, so a call from any other thread is a no-op.
+    /// structural guarantee rather than a rule spawned tasks have to follow. This is a terminal
+    /// operation: repeated calls find nothing to do, but later spawn, wait, or poll operations are
+    /// invalid. A call from another thread is a no-op and never touches that caller's `LocalSet`.
     ///
     /// Tasks spawned with plain `tokio::spawn` onto the runtime are unaffected (they are
     /// cancelled when the runtime drops); being `Send`, they cannot hold KJ objects
@@ -271,9 +271,9 @@ impl TokioPort {
     }
 
     pub(crate) fn poll(&self) -> bool {
-        // Bounded, non-blocking pump: the main future is always immediately ready to run again
-        // after `yield_now`, so the scheduler never parks; it just interleaves any ready spawned
-        // tasks (LocalSet + runtime) with our yields until the budget is spent.
+        // Bounded, non-blocking pump: each yield gives ready LocalSet and runtime work an
+        // opportunity to run. Tokio does not guarantee exact scheduling order or driver-poll
+        // counts here, so only the number of yield attempts is part of this implementation.
         #[expect(
             clippy::expect_used,
             reason = "TokioPort::new registers this thread's LocalSet; poll() only runs while this port drives its own thread, so the LocalSet is always present — absence is an unreachable internal invariant"

@@ -118,7 +118,8 @@ mod bridge {
 
         /// Cancel every task spawned onto this thread's `LocalSet` (dropping their state now, on
         /// this thread). `TokioEventPort`'s destructor calls this before destroying the KJ event
-        /// loop and timer it owns, because spawned tasks may own KJ promises. Idempotent.
+        /// loop and timer it owns, because spawned tasks may own KJ promises. This terminal
+        /// operation is a no-op when repeated; the port must not be driven afterward.
         fn cancel_spawned_tasks(&self);
 
         /// Block until `wake()` or `notify_kj_service()` is called, running tokio tasks in the
