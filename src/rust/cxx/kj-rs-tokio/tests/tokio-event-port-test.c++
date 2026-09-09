@@ -90,5 +90,73 @@ KJ_TEST("evalLast fires when the loop would sleep") {
   KJ_EXPECT(order[1] == 2);
 }
 
+// =======================================================================================
+// Timers: kj::TimerImpl fed by the port; advanceTo() after every wait()/poll().
+
+KJ_TEST("timer.afterDelay fires with real elapsed time") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto &timer = io.getTimer();
+
+  auto &sysClock = kj::systemPreciseMonotonicClock();
+  auto before = sysClock.now();
+  auto timerBefore = timer.now();
+
+  // If the port forgot timerImpl.advanceTo() after waits, this would never resolve (caught by
+  // the test timeout).
+  timer.afterDelay(30 * kj::MILLISECONDS).wait(ws);
+
+  KJ_EXPECT(sysClock.now() - before >= 30 * kj::MILLISECONDS);
+  // Timer time is synced to the monotonic clock at each wait return.
+  KJ_EXPECT(timer.now() - timerBefore >= 30 * kj::MILLISECONDS);
+}
+
+KJ_TEST("multiple timers fire in deadline order") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto &timer = io.getTimer();
+
+  kj::Vector<int> order;
+  auto p3 = timer.afterDelay(30 * kj::MILLISECONDS).then([&]() {
+    order.add(3);
+  }).eagerlyEvaluate(nullptr);
+  auto p1 =
+      timer.afterDelay(5 * kj::MILLISECONDS).then([&]() { order.add(1); }).eagerlyEvaluate(nullptr);
+  auto p2 = timer.afterDelay(15 * kj::MILLISECONDS).then([&]() {
+    order.add(2);
+  }).eagerlyEvaluate(nullptr);
+
+  p3.wait(ws);
+  KJ_ASSERT(order.size() == 3);
+  KJ_EXPECT(order[0] == 1);
+  KJ_EXPECT(order[1] == 2);
+  KJ_EXPECT(order[2] == 3);
+  p1.wait(ws);
+  p2.wait(ws);
+}
+
+KJ_TEST("timer fires while blocked waiting on a cross-thread event") {
+  // The port must bound each sleep by timeoutToNextEvent(): the loop first wakes at the timer
+  // deadline (long before the cross-thread fulfill), fires the timer, then goes back to sleep.
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto &timer = io.getTimer();
+
+  auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
+  bool timerFired = false;
+  auto timerPromise = timer.afterDelay(10 * kj::MILLISECONDS).then([&]() {
+    timerFired = true;
+  }).eagerlyEvaluate(nullptr);
+
+  kj::Thread thread([fulfiller = kj::mv(paf.fulfiller)]() mutable {
+    delayMillis(100);
+    fulfiller->fulfill();
+  });
+
+  paf.promise.wait(ws);
+  KJ_EXPECT(timerFired);
+  timerPromise.wait(ws);
+}
+
 }  // namespace
 }  // namespace kj_rs_tokio_test
