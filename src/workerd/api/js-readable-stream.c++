@@ -349,41 +349,13 @@ class PrefixedSource final: public ReadableStreamSource {
   kj::Own<ReadableStreamSource> inner;
 };
 
-// Pumps an extracted native source into the sink, mirroring the legacy internal
-// controller's pump (ReadableStreamInternalController::pumpTo): the sink and source ride
-// a refcounted holder attached through both deferred-proxy phases; dropping the pump
-// cancels the source; a pump failure aborts the sink and cancels the source.
+// Pumps an extracted native source into the sink. Shares the legacy internal controller's pump
+// (see pumpOwnedSourceToSink()): the sink and source stay alive through both deferred-proxy
+// phases; dropping the pump cancels the source; a pump failure, or the sink disconnecting first,
+// aborts the sink and cancels the source.
 kj::Promise<DeferredProxy<void>> pumpExtractedSource(
     kj::Own<ReadableStreamSource> source, kj::Own<WritableStreamSink> sink, bool end) {
-  struct Holder {
-    kj::Own<WritableStreamSink> sink;
-    kj::Own<ReadableStreamSource> source;
-    bool done = false;
-
-    Holder(kj::Own<WritableStreamSink> sink, kj::Own<ReadableStreamSource> source)
-        : sink(kj::mv(sink)),
-          source(kj::mv(source)) {}
-    ~Holder() noexcept(false) {
-      if (!done) {
-        // The pump was canceled (e.g. the client disconnected); make sure the source
-        // finds out so anything feeding it doesn't hang.
-        source->cancel(KJ_EXCEPTION(DISCONNECTED, "pump canceled"));
-      }
-    }
-  };
-
-  auto holder = kj::rc<Holder>(kj::mv(sink), kj::mv(source));
-  return holder->source->pumpTo(holder->sink->getPtr(), end)
-      .then([holder = holder.addRef()](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
-    proxy.proxyTask = proxy.proxyTask.attach(holder.addRef());
-    holder->done = true;
-    return kj::mv(proxy);
-  }, [holder = holder.addRef()](kj::Exception&& exception) mutable -> DeferredProxy<void> {
-    holder->sink->abort(exception.clone());
-    holder->source->cancel(exception.clone());
-    holder->done = true;
-    kj::throwFatalException(kj::mv(exception));
-  });
+  return pumpOwnedSourceToSink(kj::mv(source), kj::mv(sink), end);
 }
 
 // Writes one drained batch to the sink and, when this is the final batch, ends it.
@@ -401,7 +373,28 @@ kj::Promise<void> queuedWriteStep(
 struct QueuedPumpState {
   jsg::JsRef<jsg::JsObject> reader;
   IoOwn<WritableStreamSink> sink;
+  // Cancels the reader if the sink disconnects while the pump is running; see
+  // pumpQueuedTsStream(). Declared after `sink` so that it is destroyed first.
+  kj::Maybe<IoOwn<kj::Promise<void>>> sinkDisconnectWatch;
 };
+
+// Cancels `reader` (a ReadableStreamDrainingReader) with `exception` as the reason, from outside
+// any JS-lock scope: the work is queued on the IoContext, which may already be gone, in which case
+// there is nothing left to cancel.
+void cancelReaderFromKj(
+    IoContext::WeakRef& weakContext, jsg::JsRef<jsg::JsObject> reader, kj::Exception exception) {
+  weakContext.runIfAlive([&](IoContext& context) {
+    context.addTask(context.run(
+        [reader = kj::mv(reader), exception = kj::mv(exception)](Worker::Lock& lock) mutable {
+      jsg::Lock& js = lock;
+      auto reason = exceptionToCancelReason(js, kj::mv(exception));
+      auto result = webstreams::invokeMethod(js, reader.getHandle(js), "cancel"_kj, reason);
+      KJ_IF_SOME(promise, JSG_TRY_CAST_PROMISE(result)) {
+        promise.markAsHandled(js);
+      }
+    }));
+  });
+}
 
 // One iteration of the queued-backend pump: collect everything the draining reader has
 // buffered (one isolate-lock trip per batch), copy it to KJ-owned memory, perform a
@@ -458,6 +451,21 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
 
   auto state = kj::rc<QueuedPumpState>(
       QueuedPumpState{.reader = reader.addRef(js), .sink = context.addObject(kj::mv(sink))});
+
+  // Should the sink report that its writes can no longer succeed (for example, the peer of an
+  // RPC-transferred stream canceled it), cancel the reader with the sink's reason rather than
+  // waiting for the source to produce data whose write would fail. The pending read then settles
+  // as done and the loop winds down; its final end() is best-effort against a destination that is
+  // already gone. The watch is owned by the pump state so that it ends with the pump, and it
+  // reaches the IoContext through a weak reference because it fires outside any JS-lock scope.
+  state->sinkDisconnectWatch = context.addObject(kj::heap<kj::Promise<void>>(
+      state->sink->whenWriteDisconnected()
+          .then([](kj::Exception&& exception) { return kj::mv(exception); },
+              [](kj::Exception&& exception) { return kj::mv(exception); })
+          .then([weakContext = context.getWeakRef(), reader = reader.addRef(js)](
+                    kj::Exception exception) mutable {
+    cancelReaderFromKj(*weakContext, kj::mv(reader), kj::mv(exception));
+  }).eagerlyEvaluate(nullptr)));
 
   auto loop = queuedPumpStep(js, state.addRef(), end)
                   .catch_(js,
