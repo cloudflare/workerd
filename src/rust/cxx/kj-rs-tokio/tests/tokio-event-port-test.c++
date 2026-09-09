@@ -40,6 +40,19 @@ KJ_TEST("Tokio setup rejects an already-current KJ event loop before installing 
   KJ_EXPECT(kj::Promise<int>(42).wait(io.getWaitScope()) == 42);
 }
 
+KJ_TEST("Tokio event-port operations reject a foreign physical thread") {
+  auto io = setupTokioAsyncIo();
+  auto &port = io.getPort();
+
+  kj::Thread thread([&port]() {
+    auto other = setupTokioAsyncIo();
+    KJ_EXPECT_THROW_MESSAGE("TokioEventPort used from a thread other than its owner", port.poll());
+    KJ_EXPECT(kj::Promise<int>(7).wait(other.getWaitScope()) == 7);
+  });
+
+  KJ_EXPECT(kj::Promise<int>(11).wait(io.getWaitScope()) == 11);
+}
+
 KJ_TEST("promises resolve on a TokioEventPort loop") {
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
