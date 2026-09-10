@@ -167,6 +167,15 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::HashMap<kj::String, kj::OneOf<kj::String, kj::Own<kj::ConnectionReceiver>>> socketOverrides;
   kj::HashMap<kj::String, kj::String> directoryOverrides;
 
+  // Sockets are bound before services start so that the ports they actually got are known while
+  // workers are created. Indexed by position in the config's socket list (names may repeat); none
+  // for a socket that failed to bind. Consumed by listenOnSockets().
+  struct BoundSocket {
+    kj::Own<kj::ConnectionReceiver> listener;
+    kj::String addrStr;
+  };
+  kj::Vector<kj::Maybe<BoundSocket>> boundSockets;
+
   // Overrides from the command line.
   //
   // String overrides are left as strings rather than parsed by the caller in order to reuse the
@@ -308,7 +317,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::Own<HttpRewriter> rewriter);
 
   kj::Promise<void> listenTcp(
-      kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::StringPtr addrStr);
+      kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::String authority);
 
   kj::Promise<void> listenDebugPort(kj::Own<kj::ConnectionReceiver> listener);
   rpc::WorkerdDebugPort::Client makeWorkerdDebugPortClient();
@@ -340,6 +349,8 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       config::Config::Reader config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       kj::ForkedPromise<void>& forkedDrainWhen);
+
+  kj::Promise<void> bindSockets(config::Config::Reader config);
 
   kj::Promise<void> listenOnSockets(config::Config::Reader config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
