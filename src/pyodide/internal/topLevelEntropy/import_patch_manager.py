@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from functools import partial, wraps
 from typing import TYPE_CHECKING
 
+from .allow_entropy import TOP_LEVEL_ENTROPY_ERROR
+
 if TYPE_CHECKING:
     from importlib.abc import Loader
     from importlib.machinery import ModuleSpec
@@ -259,7 +261,7 @@ class BlockedCallModule:
         def wrapper(*args, **kwargs):
             if not IN_REQUEST_CONTEXT:
                 raise RuntimeError(
-                    f"Cannot use {mod.__name__}.{key}() outside of request context"
+                    f"Cannot use {mod.__name__}.{key}() outside of request context. {TOP_LEVEL_ENTROPY_ERROR}"
                 )
             return orig(*args, **kwargs)
 
