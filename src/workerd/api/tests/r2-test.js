@@ -357,7 +357,7 @@ const testWorker = {
                   uploadId: 'multipartId',
                 });
               case 'completeMultipartUpload': {
-                return Response.json(head);
+                return Response.json(objResponse);
               }
             }
           }
@@ -378,7 +378,7 @@ const testWorker = {
                   uploadId: 'multipartId',
                 });
               case 'completeMultipartUpload':
-                return Response.json(head);
+                return Response.json(objResponse);
             }
           }
           // falls through
@@ -939,8 +939,7 @@ const testWorker = {
             await env.BUCKET.createMultipartUpload('httpMetadata', {
               httpMetadata,
             })
-          ).complete([]),
-          { head }
+          ).complete([])
         );
       }
       // customMetadata
@@ -991,8 +990,7 @@ const testWorker = {
             await env.BUCKET.createMultipartUpload('customMetadata', {
               customMetadata,
             })
-          ).complete([]),
-          { head }
+          ).complete([])
         );
       }
     }
@@ -1667,8 +1665,9 @@ export const jsrpcTransportTests = {
     await assert.rejects(env.BUCKET.get('rpc-malformed-metadata-body'), {
       message: 'Malformed R2 get RPC result: metadata result had a body.',
     });
+    // The missing-body assertion logs the details and exposes only an internal error reference.
     await assert.rejects(env.BUCKET.get('rpc-malformed-missing-body'), {
-      message: 'Malformed R2 get RPC result: body result did not have a body.',
+      message: /^internal error; reference = \S+$/,
     });
     await assert.rejects(env.BUCKET.get('rpc-get-boom'), {
       message: 'get: no such bucket (10006)',
@@ -1994,17 +1993,11 @@ export const jsrpcMultipartTests = {
       const result = await upload.complete(uploadedParts[i]);
       assert.strictEqual(result.key, upload.key);
       assert.strictEqual(result.version, upload.uploadId);
-      // Created uploads preserve a snapshot of their options even when the response omits them.
+      // Created and resumed uploads both use the metadata returned by the gateway.
+      assert.deepStrictEqual(result.customMetadata, {});
       const resultHeaders = new Headers();
       result.writeHttpMetadata(resultHeaders);
-      assert.deepStrictEqual(
-        [...resultHeaders],
-        i < 2 ? [...httpMetaHeaders] : []
-      );
-      assert.deepStrictEqual(
-        result.customMetadata,
-        i < 2 ? { uploadKey: upload.key } : {}
-      );
+      assert.deepStrictEqual([...resultHeaders], []);
     }
 
     const aborted = await env.BUCKET.createMultipartUpload(
@@ -2387,6 +2380,8 @@ export class R2BodyLengthEntrypoint extends WorkerEntrypoint {
 }
 
 async function assertBodyLengthCopy(bucket, source, knownLength, label) {
+  // knownLength is the expected test outcome, not information supplied to PUT. PUT receives
+  // only the stream and must discover its remaining length itself; it cannot use object.size.
   // Start PUT before any await, so the "immediate" cases cannot accidentally let RPC settle.
   const copying = bucket.put('destination', source);
   if (knownLength) {
@@ -2413,7 +2408,7 @@ async function assertBodyLengthCopy(bucket, source, knownLength, label) {
 
 export const r2BodyLengthTests = {
   async test(controller, env, ctx) {
-    // Only the dedicated body-length configuration runs this matrix; the main R2 suites
+    // Only the dedicated body-length configuration runs these checks; the main R2 suites
     // also import this file but do not provide this binding.
     if (env.R2_BODY_LENGTH_TRANSPORT === undefined) {
       return;
@@ -2435,6 +2430,16 @@ export const r2BodyLengthTests = {
       return;
     }
 
+    // Repeat the same copy attempt with four sources, all containing the four bytes "data":
+    // - native: a Response body backed by a byte array, with a known length.
+    // - wrapped: a new JS stream forwarding bytes after the gateway reads the metadata prefix;
+    //   the metadata says size=4, but this forwarding stream has no declared length.
+    // - fixed: the readable side of a FixedLengthStream(4).
+    // - expected: a JS byte stream with expectedLength=4.
+    //
+    // For each source, first try PUT with a locally created stream. Then get a fresh stream
+    // through each binding and try PUT either immediately or after one event-loop turn.
+    // This separates the source's own length from what the receiving RPC stream can report.
     for (const mode of ['native', 'wrapped', 'fixed', 'expected']) {
       // Create the body in the caller, without receiving it over RPC first. All three
       // known-length sources copy successfully; the ordinary wrapped stream is rejected.
@@ -2444,16 +2449,29 @@ export const r2BodyLengthTests = {
         mode !== 'wrapped',
         `local ${mode}`
       );
-      // BUCKET goes through R2's get() binding; SERVICE calls the mock's get() directly
-      // over ordinary service RPC. Comparing them isolates RPC from R2 metadata parsing.
+      // Both bindings call the same fake gateway's get(mode) over RPC. Both receive the
+      // stream and metadata saying size=4, but they process that result differently:
+      // - BUCKET runs R2's getRpc(), which uses the metadata to create a local fixed-length
+      //   wrapper. Even a "wrapped" source can therefore be copied immediately.
+      // - SERVICE returns the RPC result directly. Its stream's length depends on asynchronous
+      //   stream setup; ordinary service RPC does not interpret the sibling object.size field.
+      //
+      // Expected PUT outcomes ("sized" means native, fixed, or expected):
+      // Receiving path / source       Immediate PUT    PUT after an event-loop turn
+      // BUCKET / any                  succeeds         succeeds
+      // SERVICE, legacy / sized       length error     succeeds
+      // SERVICE, legacy / wrapped     length error     length error
+      // SERVICE, TypeScript / any     length error     length error
+      //
+      // The legacy receiver can discover a declared length once stream setup completes.
+      // The TypeScript receiver snapshots the initially unknown length, so waiting does not
+      // help it. The dedicated jsrpc-ts configuration runs this same loop with that receiver.
       for (const transport of ['BUCKET', 'SERVICE']) {
-        // R2 attaches the byte count from its metadata, so every source copies immediately.
-        // Ordinary service RPC has no R2 metadata: sized streams need the diagnostic yield,
-        // and the gateway-style unsized wrapper stays unsized even after waiting.
-        // The TS stream backend snapshots the initially unknown length, so service RPC
-        // remains unsized there even after the yield. R2 does not depend on that snapshot.
         for (const timing of ['immediate', 'after-event-loop-turn']) {
+          // Fetch again for every attempt: a stream consumed or cancelled by one PUT must
+          // not be reused by the next. Awaiting get() alone need not finish RPC stream setup.
           const result = await env[transport].get(mode);
+          // Metadata is correct in every case, including cases whose stream is still unsized.
           assert.strictEqual(
             transport === 'BUCKET' ? result.size : result.object.size,
             bodyLengthBytes.byteLength
@@ -2466,6 +2484,8 @@ export const r2BodyLengthTests = {
           await assertBodyLengthCopy(
             env.BUCKET,
             result.body,
+            // This boolean selects the expected outcome from the table above. All uploads
+            // use BUCKET.put(); transport selects only how we obtained the source body.
             transport === 'BUCKET' ||
               (env.R2_BODY_LENGTH_TRANSPORT !== 'jsrpc-ts' &&
                 timing === 'after-event-loop-turn' &&

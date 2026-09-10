@@ -263,13 +263,7 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::completeRpc(jsg:
         bucket->getRpcMethod(js, "completeMultipartUpload"_kj), rpcPropHandler, completeFnHandler,
         completeResultHandler, kj::str(key), kj::str(uploadId), kj::mv(uploadedParts));
     return promise.then(js,
-        [metadata = metadata.map([](const Metadata& m) { return m.clone(); }),
-            traceContext = kj::mv(traceContext)](
-            jsg::Lock& js, R2Bucket::HeadResultRpc rpc) mutable {
-      KJ_IF_SOME(m, metadata) {
-        rpc.httpMetadata = kj::mv(m.httpMetadata);
-        rpc.customMetadata = kj::mv(m.customMetadata);
-      }
+        [traceContext = kj::mv(traceContext)](jsg::Lock& js, R2Bucket::HeadResultRpc rpc) mutable {
       auto result = headResultFromRpc(js, kj::mv(rpc));
       addHeadResultSpanTags(js, traceContext, *result.get());
       return result;
