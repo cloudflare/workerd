@@ -1019,9 +1019,15 @@ Socket.prototype.connect = function (
   // This ensures that the previous handle is closed before initializing a new one.
   if (this._handle) {
     // A reconnect is a new underlying socket, so the previous local endpoint
-    // is dropped and the new connection autobinds.
+    // is dropped and the new connection autobinds. The old handle is detached
+    // first so that its EOF and close do not end this socket; writes buffer
+    // until the new connection opens.
     releaseBoundSource(this);
-    this._handle.socket.close().then(
+    const old = this._handle;
+    this._handle = null;
+    old.reading = false;
+    this.connecting = true;
+    old.socket.close().then(
       () => {
         initializeConnection(this, options);
       },
@@ -1425,7 +1431,13 @@ function initializeConnection(
       });
 
       handle.closed.then(
-        onConnectionClosed.bind(socket),
+        (): void => {
+          // A reconnect may have replaced the handle by the time the previous
+          // one reports closed.
+          if (socket._handle?.socket === handle) {
+            onConnectionClosed.call(socket);
+          }
+        },
         (error: unknown): void => {
           // Do not call socket.destroy.bind(socket) since user can override it.
           socket.destroy(error as Error);
@@ -1506,17 +1518,21 @@ export function onConnectionClosed(this: Socket): void {
   }
 
   if (!this.destroyed) {
-    // We have to manually trigger an 'end' event because we are using
-    // BYOB buffers with Socket class.
-    this.emit('end');
+    // The read loop may not observe EOF itself (it is idle while paused or
+    // waiting, and read errors are swallowed), so end the readable here;
+    // push(null) is a no-op if it already has. read(0) lets 'end' fire on a
+    // socket nobody is reading, as in Node.
+    this.push(null);
+    this.read(0);
   }
 }
 
 async function startRead(socket: Socket): Promise<void> {
-  if (!socket._handle) return;
-  const reader = socket._handle.reader;
+  const handle = socket._handle;
+  if (!handle) return;
+  const reader = handle.reader;
   try {
-    while (socket._handle.reading === true) {
+    while (handle.reading && socket._handle === handle) {
       const generatedBuffer = socket[kBufferGen]?.();
 
       // Let's be extra cautious here and handle nullish values.
@@ -1537,10 +1553,10 @@ async function startRead(socket: Socket): Promise<void> {
         generatedBuffer as Uint8Array<ArrayBuffer>
       );
 
-      // Make sure the socket was not destroyed while we were waiting.
-      // If it was, we're going to throw away the chunk of data we just
-      // read.
-      if (socket.destroyed) {
+      // Make sure the socket was not destroyed or reconnected while we were
+      // waiting. If it was, we're going to throw away the chunk of data we
+      // just read.
+      if (socket.destroyed || socket._handle !== handle) {
         // Doh! Well, this is awkward. Let's just stop reading and return.
         // There's really nothing else we should try to do here.
         break;
@@ -1562,7 +1578,7 @@ async function startRead(socket: Socket): Promise<void> {
       if (value.byteLength === 0) {
         continue;
       }
-      socket._handle.bytesRead += value.byteLength;
+      handle.bytesRead += value.byteLength;
 
       // The socket API is expected to produce Buffer instances, not Uint8Arrays
       const buffer = Buffer.from(
@@ -1594,11 +1610,7 @@ async function startRead(socket: Socket): Promise<void> {
     // This is mostly triggered for invalid sockets with following errors:
     // - "This ReadableStream belongs to an object that is closing."
   } finally {
-    // Disable eslint to match Node.js behavior
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (socket._handle != null) {
-      socket._handle.reading = false;
-    }
+    handle.reading = false;
   }
 }
 

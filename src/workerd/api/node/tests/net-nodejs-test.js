@@ -1252,6 +1252,12 @@ export const testNetLocalAddressPort = {
       });
       await once(c, 'connect');
       strictEqual(c.localPort, 50001);
+      // The reconnected socket is fully usable: the old handle's EOF did not
+      // end it.
+      c.setEncoding('utf8');
+      c.write('again');
+      const [echoed] = await once(c, 'data');
+      strictEqual(echoed, 'again');
       c.destroy();
       await once(c, 'close');
       new net.BoundSocket({ port: 50001 }).close();
