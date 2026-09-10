@@ -43,6 +43,15 @@ that adds workerd-specific static checks:
 - `workerd-consume`: flags calls to methods annotated with `WD_CONSUME` when
   the call is made directly through `kj::Ptr` instead of through
   `consume(kj::mv(ptr))->method(...)`.
+- `workerd-legacy-stream-alloc`: flags direct allocation of the legacy C++
+  `ReadableStream` / `WritableStream` (`js.alloc<ReadableStream>(...)`,
+  `js.allocAccounted<...>`, `jsg::alloc<...>`) anywhere other than inside
+  `JsReadableStream::create()` / `JsWritableStream::create()`, the dispatch
+  points that select the stream implementation by the
+  `typescript_implemented_streams` compatibility flag. The legacy
+  implementation's own internals and tests of the legacy implementation
+  suppress it with `NOLINT(workerd-legacy-stream-alloc)` plus a comment
+  explaining why the allocation has to be legacy.
 - `workerd-promise-ignore-result` - warns on superfluous `ignoreResult()` calls:
   on promises that are immediately `co_await`ed, and on `capnp::Request::send()`
   results, which should use `sendIgnoringResult()` instead
@@ -53,9 +62,11 @@ that adds workerd-specific static checks:
 Usage:
 
 - Run via `just clang-tidy <target>` (e.g., `just clang-tidy //src/workerd/api/...`).
-- Plugin sources live in `tools/clang-tidy/workerd-lint.c++` and
-  `tools/clang-tidy/unsafe-continuation-capture.c++`, built as a
-  `cc_shared_library` target `//tools/clang-tidy:workerd-lint`. The sources are
+- Plugin sources live in `tools/clang-tidy/`: one `.h`/`.c++` pair per check,
+  registered in `workerd-lint.c++`, built as a `cc_shared_library` target
+  `//tools/clang-tidy:workerd-lint`. Each check has a `<check>-test.sh` runner
+  driving `<check>-positive-test.c++` / `<check>-negative-test.c++` fixtures
+  (`bazel test //tools/clang-tidy/...`). The sources are
   also exported via `exports_files` so downstream projects can rebuild
   against their own clang/LLVM headers.
 - The clang-tidy binary itself is published to `cloudflare/workerd-tools`

@@ -512,6 +512,8 @@ JsReadableStream::StreamImpl newBackingStream(
     auto constructor = webstreams::getCppExport(js, "ReadableStream");
     return JsReadableStream::StreamImpl(constructor.newInstance(js, sourceObj).addRef(js));
   }
+  // The legacy arm of the dispatch that JsReadableStream::create() delegates to.
+  // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
   return JsReadableStream::StreamImpl(js.alloc<ReadableStream>(ioContext, kj::mv(source)));
 }
 

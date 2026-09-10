@@ -583,6 +583,9 @@ jsg::Ref<ReadableStream> ReadableStream::detach(jsg::Lock& js, bool ignoreDistur
   JSG_REQUIRE(
       !isDisturbed() || ignoreDisturbed, TypeError, "The ReadableStream has already been read.");
   JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
+  // The detached stream takes over this legacy stream's controller, so it is a legacy stream by
+  // construction.
+  // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
   return js.alloc<ReadableStream>(getController().detach(js, ignoreDisturbed));
 }
 
@@ -609,6 +612,10 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(jsg::Lock& js,
   // We account for the memory usage of the ReadableStream and its controller together because their
   // lifetimes are identical and memory accounting itself has a memory overhead.
   auto controller = newReadableStreamJsController();
+  // This is the legacy ReadableStream's own JS constructor, which necessarily produces the legacy
+  // type; under typescript_implemented_streams the global ReadableStream is the TypeScript class
+  // and this constructor is not reachable.
+  // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
   auto stream = js.allocAccounted<ReadableStream>(
       sizeof(ReadableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
   stream->getController().setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
@@ -821,6 +828,9 @@ JsReadableStream ReadableStream::deserialize(
 
   kj::Own<kj::AsyncInputStream> in = ioctx.getExternalPusher()->unwrapStream(rs.getStream());
 
+  // Legacy-streams isolates only (see above), and JsReadableStream::create() may run JS, which is
+  // forbidden here.
+  // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
   return JsReadableStream(js.alloc<ReadableStream>(ioctx,
       kj::heap<NoDeferredProxyReadableStream>(
           newSystemStream(kj::mv(in), encoding, ioctx), ioctx)));

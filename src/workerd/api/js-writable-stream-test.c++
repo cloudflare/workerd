@@ -254,8 +254,9 @@ KJ_TEST("JsWritableStream flush rejects when a writer is held; forceFlush succee
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    // Pre-lock the stream by attaching a writer to the underlying WritableStream before adopting
-    // it into the abstraction.
+    // Pre-lock the stream by attaching a writer to the underlying legacy WritableStream before
+    // adopting it into the abstraction.
+    // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
     auto ws = js.alloc<WritableStream>(env.context, state.makeSink(), kj::none);
     auto writer = ws->getWriter(js);
     JsWritableStream stream(kj::mv(ws));
@@ -281,6 +282,8 @@ KJ_TEST("JsWritableStream forceAbort succeeds despite a held writer") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
+    // Pre-lock the stream via the legacy WritableStream's writer before adopting it.
+    // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
     auto ws = js.alloc<WritableStream>(env.context, state.makeSink(), kj::none);
     auto writer = ws->getWriter(js);
     JsWritableStream stream(kj::mv(ws));
@@ -297,6 +300,8 @@ KJ_TEST("JsWritableStream forceClose succeeds despite a held writer") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
+    // Pre-lock the stream via the legacy WritableStream's writer before adopting it.
+    // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
     auto ws = js.alloc<WritableStream>(env.context, state.makeSink(), kj::none);
     auto writer = ws->getWriter(js);
     JsWritableStream stream(kj::mv(ws));
@@ -335,6 +340,8 @@ KJ_TEST("JsWritableStream detach throws when a writer is held") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto& js = env.js;
 
+    // Pre-lock the stream via the legacy WritableStream's writer before adopting it.
+    // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
     auto ws = js.alloc<WritableStream>(env.context, state.makeSink(), kj::none);
     auto writer = ws->getWriter(js);
     JsWritableStream stream(kj::mv(ws));
@@ -483,6 +490,8 @@ KJ_TEST("JsReadableStream pipeTo rejects when the destination is locked") {
     auto& js = env.js;
 
     JsReadableStream source(js, kj::str(kData));
+    // Pre-lock the destination via the legacy WritableStream's writer before adopting it.
+    // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
     auto ws = js.alloc<WritableStream>(env.context, state.makeSink(), kj::none);
     auto writer = ws->getWriter(js);
     JsWritableStream destination(kj::mv(ws));

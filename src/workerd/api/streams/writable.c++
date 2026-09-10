@@ -251,6 +251,11 @@ jsg::Ref<WritableStream> WritableStream::constructor(jsg::Lock& js,
   auto controller = newWritableStreamJsController();
   // We account for the memory usage of the WritableStream and its controller together because their
   // lifetimes are identical and memory accounting itself has a memory overhead.
+  //
+  // This is the legacy WritableStream's own JS constructor, which necessarily produces the legacy
+  // type; under typescript_implemented_streams the global WritableStream is the TypeScript class
+  // and this constructor is not reachable.
+  // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
   auto stream = js.allocAccounted<WritableStream>(
       sizeof(WritableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
   stream->getController().setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
@@ -613,6 +618,9 @@ JsWritableStream WritableStream::deserialize(
   auto stream = ioctx.getByteStreamFactory().capnpToKjExplicitEnd(ws.getByteStream());
   auto sink = newSystemStream(kj::mv(stream), encoding, ioctx);
 
+  // Legacy-streams isolates only (see above), and JsWritableStream::create() may run JS, which is
+  // forbidden here.
+  // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
   return JsWritableStream(js.alloc<WritableStream>(
       ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver()));
 }
