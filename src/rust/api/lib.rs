@@ -10,9 +10,11 @@ use std::pin::Pin;
 
 use jsg::ToJS;
 
+use crate::buffer::BufferUtil;
 use crate::dns::DnsUtil;
 use crate::url::UrlUtil;
 
+pub mod buffer;
 pub mod dns;
 pub mod url;
 
@@ -27,12 +29,29 @@ mod ffi {
     extern "Rust" {
         pub fn register_nodejs_modules(registry: Pin<&mut ModuleRegistry>);
 
+        // Registered separately so C++ can select exactly one implementation
+        // with the NODEJS_BUFFER_RUST autogate.
+        pub fn register_nodejs_buffer_module(registry: Pin<&mut ModuleRegistry>);
+
         // The Rust implementation of `node-internal:url`. Registered separately
         // because it is gated by the C++ `NODEJS_URL_RUST` autogate; when the
         // gate is off the C++ `UrlUtil` registers that module instead (see
         // node.h). Kept as its own entry point to avoid a boolean parameter.
         pub fn register_nodejs_url_module(registry: Pin<&mut ModuleRegistry>);
     }
+}
+
+pub fn register_nodejs_buffer_module(registry: Pin<&mut ffi::ModuleRegistry>) {
+    jsg::modules::add_builtin(
+        registry,
+        "node-internal:buffer",
+        // SAFETY: isolate is valid and locked — called from C++ module registration.
+        |isolate| unsafe {
+            let mut lock = jsg::Lock::from_isolate_ptr(isolate);
+            BufferUtil::new().to_js(&mut lock).into_ffi()
+        },
+        jsg::modules::ModuleType::Internal,
+    );
 }
 
 pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {

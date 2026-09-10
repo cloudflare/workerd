@@ -339,6 +339,51 @@ impl FromJS for std::string::String {
     }
 }
 
+// V8-local strings are used by native APIs which must preserve JavaScript's
+// UTF-16 representation, including unpaired surrogates. Converting through a
+// Rust `String` would necessarily replace those values.
+impl Type for v8::Local<'_, v8::String> {
+    fn class_name() -> &'static str {
+        "string"
+    }
+
+    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+        value.is_string()
+    }
+}
+
+impl ToJS for v8::Local<'_, v8::String> {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    where
+        'b: 'a,
+    {
+        // SAFETY: the callback lock names the same active HandleScope as this
+        // local. Rebinding the marker lifetime does not change the V8 handle.
+        unsafe { v8::Local::from_ffi(lock.isolate(), self.into_ffi()) }
+    }
+}
+
+impl Type for v8::Local<'_, v8::Uint8Array> {
+    fn class_name() -> &'static str {
+        "Uint8Array"
+    }
+
+    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+        value.is_uint8_array()
+    }
+}
+
+impl ToJS for v8::Local<'_, v8::Uint8Array> {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    where
+        'b: 'a,
+    {
+        // SAFETY: the callback lock names the same active HandleScope as this
+        // local. Rebinding the marker lifetime does not change the V8 handle.
+        unsafe { v8::Local::from_ffi(lock.isolate(), self.into_ffi()) }
+    }
+}
+
 // Number implementation for JavaScript numbers
 impl Type for Number {
     fn class_name() -> &'static str {

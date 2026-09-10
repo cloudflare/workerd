@@ -97,6 +97,9 @@ namespace workerd::util {
      implementation (api::node UrlUtil ported to src/rust/api) instead of the                      \
      C++ implementation. The C++ implementation is retained for rollback.*/                        \
   V(NODEJS_URL_RUST)                                                                               \
+  /* When enabled, the native `node-internal:buffer` module is provided by the Rust                \
+     implementation (src/rust/api/buffer.rs). The C++ implementation is retained for rollback. */  \
+  V(NODEJS_BUFFER_RUST)                                                                            \
   /* When enabled, Node.js-style exceptions (api::node createNodeException /                       \
      createUVException) are created by the Rust implementation                                     \
      (src/rust/node-exceptions) instead of the C++ implementation. The C++                         \

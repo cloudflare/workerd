@@ -22,6 +22,8 @@ mod codecs;
 mod dispatch;
 mod error;
 
+pub use ffi::Encoding;
+
 use crate::dispatch::Transcoder;
 use crate::error::TranscodeError;
 
@@ -151,6 +153,28 @@ fn transcode_impl<'a>(
     };
 
     Ok(v8::Uint8Array::from_buffer(lock, &buffer, 0, written))
+}
+
+/// Rust entry point used by Rust implementations of Node APIs.
+///
+/// The C++ bridge entry point above is retained for the autogated C++ caller.
+///
+/// # Safety
+///
+/// The returned local must not outlive the active V8 `HandleScope` named by
+/// `lock`.
+pub unsafe fn transcode_buffer<'a>(
+    lock: &mut Lock,
+    source: &[u8],
+    from_encoding: Encoding,
+    to_encoding: Encoding,
+) -> jsg::Result<v8::Local<'a, v8::Uint8Array>> {
+    let isolate = lock.isolate();
+    let local =
+        transcode_impl(lock, source, from_encoding, to_encoding).map_err(jsg::Error::from)?;
+    // SAFETY: the caller guarantees that the rebound marker lifetime does not
+    // escape the active HandleScope in which `local` was created.
+    Ok(unsafe { v8::Local::from_ffi(isolate, local.into_ffi()) })
 }
 
 #[cfg(test)]
