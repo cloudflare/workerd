@@ -10,6 +10,8 @@ export class PortTable {
   ephemeral(): number;
   tryBind(port: number, reusePort?: boolean): boolean;
   release(port: number): void;
+  register(owner: object, port: number): void;
+  unregister(owner: object): void;
   setHandler(port: number, handler: FetchHandler): void;
   getHandler(port: number): FetchHandler | undefined;
 }

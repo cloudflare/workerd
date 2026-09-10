@@ -1436,6 +1436,24 @@ export const testNetBoundSocketClientAdoption = {
 
     // The adopted port is released when the socket is destroyed.
     new net.BoundSocket({ host: '127.0.0.1', port: 4321 }).close();
+
+    // Adoption transfers a reusePort share to the socket, which releases it
+    // exactly once on destroy: the other holder keeps the port.
+    {
+      const a = new net.BoundSocket({ port: 4322, reusePort: true });
+      const b = new net.BoundSocket({ port: 4322, reusePort: true });
+      const s = new net.Socket({ handle: a });
+      throws(() => a.close(), { code: 'ERR_SOCKET_HANDLE_ADOPTED' });
+      const closed = once(s, 'close');
+      s.destroy();
+      await closed;
+      throws(() => new net.BoundSocket({ port: 4322 }), {
+        code: 'EADDRINUSE',
+      });
+      new net.BoundSocket({ port: 4322, reusePort: true }).close();
+      b.close();
+      new net.BoundSocket({ port: 4322 }).close();
+    }
   },
 };
 

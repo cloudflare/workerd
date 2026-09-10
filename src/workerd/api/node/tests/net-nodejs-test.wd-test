@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "net-nodejs-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "url_standard"],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "url_standard", "enable_weak_ref"],
         bindings = [
           (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
           (name = "SERVER_PORT", fromEnvironment = "SERVER_PORT"),

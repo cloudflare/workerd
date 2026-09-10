@@ -131,6 +131,7 @@ export function bindPort(
 
 function releaseBoundSource(socket: Socket): void {
   if (socket[kBoundReserved]) {
+    tcpPorts.unregister(socket);
     tcpPorts.release((socket[kBoundSource] as AddressInfo).port);
     socket[kBoundReserved] = false;
   }
@@ -240,6 +241,7 @@ export class BoundSocket {
       family: addressType === 6 ? 'IPv6' : 'IPv4',
       port: bindPort(host, port, reusePort),
     };
+    tcpPorts.register(this, this.#address.port);
   }
 
   address(): AddressInfo {
@@ -262,6 +264,7 @@ export class BoundSocket {
     if (this.#address === null) {
       throw new ERR_SOCKET_HANDLE_ADOPTED();
     }
+    tcpPorts.unregister(this);
     tcpPorts.release(this.#address.port);
     this.#address = null;
   }
@@ -276,6 +279,7 @@ export class BoundSocket {
     if (this.#address === null) {
       throw new ERR_SOCKET_HANDLE_ADOPTED();
     }
+    tcpPorts.unregister(this);
     const address = this.#address;
     this.#address = null;
     return address;
@@ -486,6 +490,7 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
     if (BoundSocket.isBoundSocket(options.handle)) {
       this[kBoundSource] = options.handle[kBoundSocketConsume]();
       this[kBoundReserved] = true;
+      tcpPorts.register(this, this[kBoundSource].port);
     } else {
       this._handle = options.handle;
     }
@@ -1383,6 +1388,7 @@ function initializeConnection(
             : tcpPorts.ephemeral(),
         };
         socket[kBoundReserved] = reserved;
+        if (reserved) tcpPorts.register(socket, socket[kBoundSource].port);
       }
 
       const handle = inner.connect(`${host}:${port}`, {

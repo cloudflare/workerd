@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "http-server-nodejs-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental", "enable_nodejs_http_modules", "enable_nodejs_http_server_modules", "streams_enable_constructors"],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental", "enable_nodejs_http_modules", "enable_nodejs_http_server_modules", "streams_enable_constructors", "enable_weak_ref"],
         bindings = [
           ( name = "SERVICE", service = "http-server-nodejs-test" ),
           ( name = "PONG_SERVER_PORT", fromEnvironment = "PONG_SERVER_PORT" ),
