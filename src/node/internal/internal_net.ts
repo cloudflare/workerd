@@ -166,6 +166,10 @@ export type BoundSocketOptions = {
 export class BoundSocket {
   #address: AddressInfo | null;
 
+  static isBoundSocket(value: unknown): value is BoundSocket {
+    return typeof value === 'object' && value !== null && #address in value;
+  }
+
   constructor(options: BoundSocketOptions = {}) {
     validateObject(options, 'options');
 
@@ -439,7 +443,7 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
 
   if (options.handle) {
     validateObject(options.handle, 'options.handle');
-    if (options.handle instanceof BoundSocket) {
+    if (BoundSocket.isBoundSocket(options.handle)) {
       this[kBoundSource] = options.handle[kBoundSocketConsume]();
     } else {
       this._handle = options.handle;
