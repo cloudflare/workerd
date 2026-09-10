@@ -40,6 +40,7 @@ import {
   ERR_SOCKET_HANDLE_ADOPTED,
   ERR_INVALID_IP_ADDRESS,
   ERR_INVALID_ADDRESS,
+  EADDRINUSE,
   EPIPE,
 } from 'node-internal:internal_errors';
 
@@ -100,12 +101,56 @@ export const kReinitializeHandle = Symbol('kReinitializeHandle');
 // socket.opened promise will be stored here.
 const kSocketInfo = Symbol('kSocketInfo');
 
-// Holds the bound address of an adopted BoundSocket.
+// The local address reserved for a Socket, either adopted from a BoundSocket or
+// autobound on connect. Released on destroy.
 const kBoundSource = Symbol('kBoundSource');
 const kBoundSocketConsume = Symbol('kBoundSocketConsume');
 
 const DEFAULT_IPV4_ADDR = '0.0.0.0';
 const DEFAULT_IPV6_ADDR = '::';
+
+// Per-isolate virtual local TCP port table shared by net and http servers. The
+// underlying transport does not honor local binding, but ports are allocated
+// and conflict-checked so that a bound port is unique within the isolate.
+const EPHEMERAL_PORT_MIN = 49152;
+const EPHEMERAL_PORT_MAX = 65535;
+const boundPorts = new Map<number, { refs: number; reusePort: boolean }>();
+let nextEphemeralPort = EPHEMERAL_PORT_MIN;
+
+export function bindPort(
+  address: string,
+  port: number,
+  reusePort = false
+): number {
+  if (port === 0) {
+    for (let i = EPHEMERAL_PORT_MIN; i <= EPHEMERAL_PORT_MAX; i++) {
+      const candidate = nextEphemeralPort;
+      nextEphemeralPort =
+        candidate === EPHEMERAL_PORT_MAX ? EPHEMERAL_PORT_MIN : candidate + 1;
+      if (!boundPorts.has(candidate)) {
+        port = candidate;
+        break;
+      }
+    }
+    if (port === 0) throw new EADDRINUSE(address, port);
+  }
+  const entry = boundPorts.get(port);
+  if (entry === undefined) {
+    boundPorts.set(port, { refs: 1, reusePort });
+  } else if (entry.reusePort && reusePort) {
+    entry.refs++;
+  } else {
+    throw new EADDRINUSE(address, port);
+  }
+  return port;
+}
+
+export function releasePort(port: number): void {
+  const entry = boundPorts.get(port);
+  if (entry !== undefined && --entry.refs === 0) {
+    boundPorts.delete(port);
+  }
+}
 
 // IPv4 Segment
 const v4Seg = '(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])';
@@ -159,10 +204,8 @@ export type BoundSocketOptions = {
   reusePort?: boolean;
 };
 
-// Workers cannot bind a local endpoint, so the bound address is validated and
-// recorded here, then reported by the adopting Socket as its local address,
-// but the underlying transport does not honor it. With port 0 the port stays 0
-// since no ephemeral port is reserved.
+// Reserves a port in the virtual port table; the adopting Socket reports the
+// bound address as its local address.
 export class BoundSocket {
   #address: AddressInfo | null;
 
@@ -201,7 +244,7 @@ export class BoundSocket {
     this.#address = {
       address: host,
       family: addressType === 6 ? 'IPv6' : 'IPv4',
-      port,
+      port: bindPort(host, port, reusePort),
     };
   }
 
@@ -225,11 +268,14 @@ export class BoundSocket {
     if (this.#address === null) {
       throw new ERR_SOCKET_HANDLE_ADOPTED();
     }
+    releasePort(this.#address.port);
     this.#address = null;
   }
 
   [Symbol.dispose](): void {
-    this.#address = null;
+    if (this.#address !== null) {
+      this.close();
+    }
   }
 
   [kBoundSocketConsume](): AddressInfo {
@@ -298,7 +344,6 @@ export declare class Socket extends _Socket {
       addressType: number;
     };
   };
-  _sockname?: null | AddressInfo;
   _onTimeout(): void;
   _unrefTimer(): void;
   _writeGeneric(
@@ -432,7 +477,6 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   this.autoSelectFamilyAttemptedAddresses = [];
 
   this._undestroy();
-  this._sockname = null;
   this._pendingData = null;
   this._pendingEncoding = '';
 
@@ -578,15 +622,12 @@ Socket.prototype._getsockname = function (this: Socket): AddressInfo | {} {
   if (this[kBoundSource] != null) {
     return this[kBoundSource];
   }
-  if (this._handle == null) {
-    return {};
+  // A wrapping socket (TLSSocket) shares the local endpoint of the socket it
+  // wraps.
+  if (this._parentWrap != null) {
+    return this._parentWrap._getsockname();
   }
-  this._sockname ??= {
-    address: '0.0.0.0',
-    port: 0,
-    family: 'IPv4',
-  };
-  return this._sockname;
+  return {};
 };
 
 Socket.prototype.address = function (this: Socket): {} | AddressInfo {
@@ -899,6 +940,11 @@ Socket.prototype._destroy = function (
     clearTimeout(s[kTimeout] as unknown as number);
   }
 
+  if (this[kBoundSource] != null) {
+    releasePort(this[kBoundSource].port);
+    this[kBoundSource] = null;
+  }
+
   if (this._handle != null) {
     this._handle.socket.close().then(
       () => {
@@ -1002,7 +1048,6 @@ Socket.prototype[kReinitializeHandle] = function reinitializeHandle(
 
   this._handle = handle;
   this._undestroy();
-  this._sockname = null;
 };
 
 // ======================================================================================
@@ -1326,6 +1371,19 @@ function initializeConnection(
     socket._host = `${host}`;
 
     try {
+      // Autobind the local endpoint, as connect(2) does, unless one was
+      // adopted from a BoundSocket.
+      if (socket[kBoundSource] == null) {
+        const address =
+          localAddress ??
+          (family === 6 ? DEFAULT_IPV6_ADDR : DEFAULT_IPV4_ADDR);
+        socket[kBoundSource] = {
+          address,
+          family: isIP(address) === 6 ? 'IPv6' : 'IPv4',
+          port: bindPort(address, localPort ?? 0),
+        };
+      }
+
       const handle = inner.connect(`${host}:${port}`, {
         allowHalfOpen: socket.allowHalfOpen,
         // A Node.js socket is always capable of being upgraded to the TLS socket.
@@ -1353,7 +1411,6 @@ function initializeConnection(
 
       // We need to undestroy the stream to connect to it.
       socket._undestroy();
-      socket._sockname = null;
 
       handle.opened.then(onConnectionOpened.bind(socket), (err: unknown) => {
         socket.emit('connectionAttemptFailed', host, port, addressType, err);
@@ -1422,7 +1479,6 @@ export function onConnectionOpened(this: Socket): void {
   }
 
   this.connecting = false;
-  this._sockname = null;
   this._unrefTimer();
   this.emit('connect');
   this.emit('ready');

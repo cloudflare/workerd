@@ -59,7 +59,11 @@ import {
   chunkExpression,
   _checkInvalidHeaderChar,
 } from 'node-internal:internal_http';
-import { _normalizeArgs } from 'node-internal:internal_net';
+import {
+  _normalizeArgs,
+  bindPort,
+  releasePort,
+} from 'node-internal:internal_net';
 import { Buffer } from 'node-internal:internal_buffer';
 
 import type {
@@ -177,6 +181,7 @@ export class Server
     httpServerPreClose(this);
     if (this.#port != null) {
       portMapper.delete(this.#port);
+      releasePort(this.#port);
       this.#port = null;
     }
     if (typeof callback === 'function') {
@@ -293,7 +298,7 @@ export class Server
       port = 0;
     }
 
-    if (this.#port != null || portMapper.has(port)) {
+    if (this.#port != null) {
       throw new ERR_SERVER_ALREADY_LISTEN();
     }
 
@@ -301,7 +306,7 @@ export class Server
       this.once('listening', callback as (...args: unknown[]) => unknown);
     }
 
-    this.#port = this.#findSuitablePort(port);
+    this.#port = bindPort('127.0.0.1', port);
     // @ts-expect-error TS2322 Type mismatch. Not needed.
     portMapper.set(this.#port, { fetch: this.#onRequest.bind(this) });
     queueMicrotask(() => {
@@ -311,26 +316,6 @@ export class Server
       this.emit('listening');
     });
     return this;
-  }
-
-  #findSuitablePort(port: number): number {
-    // We don't have to check if portMapper has it because the caller
-    // already validates the uniqueness of the port and calls this method.
-    if (port !== 0) {
-      return port;
-    }
-
-    // Let's try at most 10 times to find a suitable port.
-    // If we can't find by that time, let's bail and throw an error.
-    for (let i = 0; i < 10; i++) {
-      port = Math.floor(Math.random() * 65535) + 1;
-      if (!portMapper.has(port)) {
-        return port;
-      }
-    }
-
-    // This is unlikely to happen, but just in case.
-    throw new Error('Failed to find a suitable port after 10 attempts');
   }
 
   getConnections(callback?: (err: Error | null, count: number) => void): this {

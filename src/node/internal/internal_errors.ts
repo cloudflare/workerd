@@ -679,6 +679,18 @@ export class ERR_SOCKET_BAD_PORT extends NodeError {
   }
 }
 
+export class EADDRINUSE extends NodeError {
+  syscall = 'bind';
+  address: string;
+  port: number;
+
+  constructor(address: string, port: number) {
+    super('EADDRINUSE', `bind EADDRINUSE ${address}:${port}`);
+    this.address = address;
+    this.port = port;
+  }
+}
+
 export class EPIPE extends NodeError {
   constructor() {
     super('EPIPE', 'This socket has been ended by the other party');
