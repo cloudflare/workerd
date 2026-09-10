@@ -7,7 +7,6 @@
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/trace.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
-#include <workerd/jsg/memory.h>
 #include <workerd/util/own-util.h>
 #include <workerd/util/strong-bool.h>
 
@@ -394,11 +393,6 @@ struct FetchEventInfo final {
     void copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder) const;
     Header clone() const;
     kj::String toString() const;
-
-    JSG_MEMORY_INFO(Header) {
-      tracker.trackField("name", name);
-      tracker.trackField("value", value);
-    }
   };
 
   kj::HttpMethod method;
