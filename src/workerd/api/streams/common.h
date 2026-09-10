@@ -321,6 +321,13 @@ class ReadableStreamSource: public kj::PtrTarget {
 
   virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
 
+  // Chain-aware variant of tryGetLength(): `encodings` is the coding chain a sink will apply,
+  // in applied order, with an empty chain meaning identity. The default implementation answers
+  // via the single-encoding overload for chains of at most one coding and kj::none otherwise;
+  // only sources that can recognize a whole chain as their own (the encoded system streams)
+  // override it.
+  virtual kj::Maybe<uint64_t> tryGetLength(kj::ArrayPtr<const StreamEncoding> encodings);
+
   kj::Promise<kj::Array<byte>> readAllBytes(uint64_t limit);
   kj::Promise<kj::String> readAllText(
       uint64_t limit, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE);
@@ -653,6 +660,19 @@ class ReadableStreamController {
   virtual jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) = 0;
 
   virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) = 0;
+
+  // Chain-aware variant of tryGetLength(), mirroring ReadableStreamSource. The default maps
+  // chains of at most one coding onto the single-encoding overload and answers kj::none for
+  // longer chains; the internal controller overrides it to forward the chain to its source.
+  virtual kj::Maybe<uint64_t> tryGetLength(kj::ArrayPtr<const StreamEncoding> encodings) {
+    if (encodings.size() == 0) {
+      return tryGetLength(StreamEncoding::IDENTITY);
+    } else if (encodings.size() == 1) {
+      return tryGetLength(encodings[0]);
+    } else {
+      return kj::none;
+    }
+  }
 
   virtual void setup(jsg::Lock& js,
       jsg::Optional<UnderlyingSource> maybeUnderlyingSource,

@@ -462,6 +462,19 @@ kj::Maybe<uint64_t> ReadableStreamSource::tryGetLength(StreamEncoding encoding) 
   return kj::none;
 }
 
+kj::Maybe<uint64_t> ReadableStreamSource::tryGetLength(
+    kj::ArrayPtr<const StreamEncoding> encodings) {
+  // A source that doesn't understand chains can still answer for the trivial cases through the
+  // single-encoding overload.
+  if (encodings.size() == 0) {
+    return tryGetLength(StreamEncoding::IDENTITY);
+  } else if (encodings.size() == 1) {
+    return tryGetLength(encodings[0]);
+  } else {
+    return kj::none;
+  }
+}
+
 kj::Promise<kj::Array<byte>> ReadableStreamSource::readAllBytes(uint64_t limit) {
   AllReader allReader(addPtrToThis(), limit);
   co_return co_await allReader.readAllBytes();
@@ -2931,6 +2944,22 @@ kj::Maybe<uint64_t> ReadableStreamInternalController::tryGetLength(StreamEncodin
     }
     KJ_CASE_ONEOF(readable, Readable) {
       return readable->tryGetLength(encoding);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Maybe<uint64_t> ReadableStreamInternalController::tryGetLength(
+    kj::ArrayPtr<const StreamEncoding> encodings) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      return static_cast<uint64_t>(0);
+    }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      return kj::none;
+    }
+    KJ_CASE_ONEOF(readable, Readable) {
+      return readable->tryGetLength(encodings);
     }
   }
   KJ_UNREACHABLE;

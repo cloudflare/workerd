@@ -154,6 +154,12 @@ class JsReadableStream final {
   kj::Maybe<uint64_t> tryGetLength(
       jsg::Lock& js, StreamEncoding encoding = StreamEncoding::IDENTITY);
 
+  // Chain-aware variant: `encodings` is the coding chain a sink will apply, in applied order,
+  // with an empty chain meaning identity. Chains of at most one coding answer through the
+  // single-encoding overload; longer chains can only be answered by a native underlying source
+  // whose own chain matches (a passthrough), and are kj::none for everything else.
+  kj::Maybe<uint64_t> tryGetLength(jsg::Lock& js, kj::ArrayPtr<const StreamEncoding> encodings);
+
   // The encoding the stream's remaining content would prefer to be transferred in: forwarded
   // from the underlying native source when there is one (in a state where its preference
   // still describes the remainder), IDENTITY otherwise (JS-sourced streams produce identity
@@ -385,6 +391,11 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // tryGetLength arm of JsReadableStream, reached through the TypeScript side's
   // non-detaching source accessor.
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
+
+  // Chain-aware variant of the above: forwards a chain of more than one coding to the
+  // underlying source (which can only answer while no identity bytes are stashed); chains of
+  // at most one coding answer through the single-encoding overload.
+  kj::Maybe<uint64_t> tryGetLength(kj::ArrayPtr<const StreamEncoding> encodings);
 
   // The encoding the underlying source would prefer to deliver its remaining content in
   // (e.g. GZIP for a passthrough-compressed response body). IDENTITY once the source is
