@@ -59,9 +59,11 @@ function assertAllBytes(bytes, expectedLength, expectedByte) {
 // A SAB-backed view piped through CompressionStream. DIVERGENCE: C++
 // copies the shared bytes and round-trips them; the TypeScript
 // CompressionStream write path REJECTS SharedArrayBuffer-backed views
-// ('The provided value is not of type (ArrayBuffer or
+// per spec ('The provided value is not of type (ArrayBuffer or
 // ArrayBufferView)') even though its identity stream accepts them (see
-// the next test). The shared buffer is untouched either way.
+// the next test; the compression suite's sharedArrayBufferChunkDiverges
+// pins the direct-write shape). The shared buffer is untouched either
+// way.
 export const sabViewThroughCompressionRoundTrip = {
   async test() {
     const view = filledSabView(100, 0x41);
