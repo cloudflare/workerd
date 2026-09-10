@@ -4,6 +4,8 @@
 import {
   lookupHandler,
   type FetchHandler as Fetcher,
+  type ConnectHandler,
+  type InboundSocket,
 } from 'cloudflare-internal:http';
 
 interface ServerDescriptor {
@@ -12,7 +14,7 @@ interface ServerDescriptor {
 
 interface NodeStyleServer {
   listen(...args: unknown[]): this;
-  address(): { port?: number | null | undefined };
+  address(): { port?: number | null | undefined } | null;
 }
 
 function validatePort(port: unknown): number {
@@ -24,6 +26,65 @@ function validatePort(port: unknown): number {
     throw new Error('Failed to determine port for server');
   }
   return port as number;
+}
+
+function invalidArg(message: string): Error {
+  const error = new Error(message);
+  // @ts-expect-error TS2339 We're imitating Node.js errors.
+  error.code = 'ERR_INVALID_ARG_VALUE';
+  return error;
+}
+
+// Resolves the port a descriptor refers to: a number, { port }, or a Node-style
+// server, which is started with listen() if it has no address yet.
+function resolvePort(
+  desc: number | ServerDescriptor | NodeStyleServer
+): number {
+  if (typeof desc === 'number') {
+    desc = { port: desc };
+  }
+  // While the TypeScript type system prevents `desc` from being null or undefined,
+  // JavaScript does not, so we need to check for it at runtime.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (desc == null) {
+    throw new Error('Server descriptor cannot be null or undefined');
+  }
+
+  let port: number | null = null;
+  if (
+    (desc as ServerDescriptor).port == null &&
+    typeof (desc as NodeStyleServer).listen === 'function'
+  ) {
+    const server = desc as NodeStyleServer;
+    let serverPort = server.address()?.port;
+    if (typeof serverPort === 'number') {
+      port = serverPort;
+    } else {
+      // listen() assigns the port synchronously.
+      server.listen();
+      serverPort = server.address()?.port;
+      if (typeof serverPort === 'number') {
+        port = serverPort;
+      }
+    }
+  } else if (typeof (desc as ServerDescriptor).port === 'number') {
+    port = (desc as ServerDescriptor).port as number;
+  }
+
+  return validatePort(port);
+}
+
+// The port of an inbound socket is the port of its declared local address: the
+// CONNECT authority for a service binding, or the listener address for a
+// sockets entry.
+function portFromAuthority(authority: string | null | undefined): number {
+  const m = typeof authority === 'string' ? /:(\d+)$/.exec(authority) : null;
+  if (m === null) {
+    throw new Error(
+      `Failed to determine port for inbound socket from local address ${String(authority)}`
+    );
+  }
+  return validatePort(Number(m[1]));
 }
 
 export async function handleAsNodeRequest(
@@ -41,75 +102,51 @@ export async function handleAsNodeRequest(
   const port = validatePort(desc?.port);
   const instance = lookupHandler(port);
   if (!instance || !('fetch' in instance)) {
-    const error = new Error(
+    throw invalidArg(
       `Http server with port ${port} not found. This is likely a bug with your code. ` +
         `You should check if server.listen() was called with the same port (${port})`
     );
-    // @ts-expect-error TS2339 We're imitating Node.js errors.
-    error.code = 'ERR_INVALID_ARG_VALUE';
-    throw error;
   }
   return await instance.fetch(request, env, ctx);
+}
+
+// Routes an inbound platform socket to the net.Server listening on the port the
+// socket arrived on. Resolves when the connection is finished.
+export async function handleAsNodeConnection(
+  socket: InboundSocket,
+  env?: unknown,
+  ctx?: unknown
+): Promise<void> {
+  const port = portFromAuthority((await socket.opened).localAddress);
+  const instance = lookupHandler(port);
+  if (!instance || !('connect' in instance)) {
+    throw invalidArg(
+      `No net.Server is listening on port ${port}. Call server.listen(${port}) to accept ` +
+        `connections arriving on that port.`
+    );
+  }
+  await instance.connect(socket, env, ctx);
+}
+
+export function connectHandler(): ConnectHandler {
+  return {
+    async connect(
+      socket: InboundSocket,
+      env?: unknown,
+      ctx?: unknown
+    ): Promise<void> {
+      await handleAsNodeConnection(socket, env, ctx);
+    },
+  };
 }
 
 export function httpServerHandler(
   desc: number | ServerDescriptor | NodeStyleServer
 ): Fetcher {
-  if (typeof desc === 'number') {
-    desc = { port: desc };
-  }
-  // While the TypeScript type system prevents `desc` from being null or undefined,
-  // JavaScript does not, so we need to check for it at runtime.
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  if (desc == null) {
-    throw new Error('Server descriptor cannot be null or undefined');
-  }
-
-  // The desc can be a ServerDescriptor or a Server (where "Server" is defined
-  // as a type that has a "listen()" method and an "address()" method).
-  let port: number | null = null;
-
-  // If there is no port defined and desc has a listen method, we will try to
-  // access it as a Server, calling listen() if necessary to determine the port.
-  if (
-    (desc as ServerDescriptor).port == null &&
-    typeof (desc as NodeStyleServer).listen === 'function'
-  ) {
-    const server = desc as NodeStyleServer;
-    // First, let's see if the server-like thing already has a port.
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    let serverPort = server.address()?.port;
-    if (typeof serverPort === 'number') {
-      // Nice, we're already bound to a port.
-      port = serverPort;
-    } else {
-      // We're not yet bound to a port. Try calling listen() to start the server
-      // and determine the port.
-      server.listen();
-      // Did it work? We do expect the listen in this case to synchronously
-      // assign the port so we can check it immediately.
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      serverPort = server.address()?.port;
-      if (typeof serverPort === 'number') {
-        // Nice. We've got a port now.
-        port = serverPort;
-      }
-    }
-  } else if (typeof (desc as ServerDescriptor).port === 'number') {
-    // We're a ServerDescriptor with a port defined.
-    port = (desc as ServerDescriptor).port as number;
-  }
-
-  port = validatePort(port);
-
+  const port = resolvePort(desc);
   return {
     async fetch(req: Request, env?: unknown, ctx?: unknown): Promise<Response> {
-      return await handleAsNodeRequest(
-        { port: validatePort(port) },
-        req,
-        env,
-        ctx
-      );
+      return await handleAsNodeRequest({ port }, req, env, ctx);
     },
   };
 }

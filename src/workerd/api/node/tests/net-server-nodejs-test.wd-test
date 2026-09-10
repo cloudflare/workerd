@@ -1,0 +1,29 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "net-server-nodejs-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "net-server-nodejs-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental", "enable_nodejs_http_modules", "enable_nodejs_http_server_modules"],
+        durableObjectNamespaces = [
+          (className = "PortHost", uniqueKey = "e6b1f7d6a2c04f0e9a3b5c7d8e9f0a1b"),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [
+          (name = "SELF", service = "net-server-nodejs-test"),
+          (name = "HOSTS", durableObjectNamespace = "PortHost"),
+        ],
+      )
+    ),
+    ( name = "internet", network = ( allow = ["private"] ) ),
+  ],
+  # Port 0 so that the concurrent test variants never collide; the worker
+  # learns the bound ports as its declared inbound listeners.
+  sockets = [
+    (name = "tcp-a", address = "127.0.0.1:0", tcp = (), service = "net-server-nodejs-test"),
+    (name = "tcp-b", address = "127.0.0.1:0", tcp = (), service = "net-server-nodejs-test"),
+  ],
+);

@@ -428,6 +428,12 @@ js_binary(
 )
 
 wd_test(
+    src = "net-server-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["net-server-nodejs-test.js"],
+)
+
+wd_test(
     size = "large",
     src = "net-nodejs-test.wd-test",
     args = ["--experimental"],
