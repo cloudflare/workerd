@@ -23,7 +23,14 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { fail, ok, strictEqual, deepStrictEqual, throws } from 'node:assert';
+import {
+  fail,
+  ok,
+  strictEqual,
+  notStrictEqual,
+  deepStrictEqual,
+  throws,
+} from 'node:assert';
 import { mock } from 'node:test';
 import { once } from 'node:events';
 import * as net from 'node:net';
@@ -1148,17 +1155,107 @@ export const testNetLargeString = {
 };
 
 // test/parallel/test-net-local-address-port.js
-// The localAddress information is a non-op in our implementation
+// The local endpoint is autobound in the isolate's virtual port table; the
+// transport does not honor it.
 export const testNetLocalAddressPort = {
   async test(ctrl, env, ctx) {
-    const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
-    c.on('connect', () => {
-      strictEqual(c.localAddress, '0.0.0.0');
-      strictEqual(c.localPort, 0);
-      resolve();
-    });
-    await promise;
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
+      c.on('connect', () => {
+        strictEqual(c.localAddress, '0.0.0.0');
+        strictEqual(c.localFamily, 'IPv4');
+        ok(c.localPort >= 49152 && c.localPort <= 65535);
+        resolve();
+      });
+      await promise;
+    }
+
+    // localAddress/localPort are reserved when given; a conflict is reported
+    // via 'error'.
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const c = net.connect({
+        port: env.SERVER_PORT,
+        host: env.SIDECAR_HOSTNAME,
+        localAddress: '127.0.0.1',
+        localPort: 50000,
+      });
+      strictEqual(c.localAddress, '127.0.0.1');
+      strictEqual(c.localPort, 50000);
+      const c2 = net.connect({
+        port: env.SERVER_PORT,
+        host: env.SIDECAR_HOSTNAME,
+        localPort: 50000,
+      });
+      c2.on('error', (err) => {
+        strictEqual(err.code, 'EADDRINUSE');
+        strictEqual(err.syscall, 'bind');
+        resolve();
+      });
+      await promise;
+      c.destroy();
+      await once(c, 'close');
+      // Released on destroy.
+      new net.BoundSocket({ port: 50000 }).close();
+    }
+
+    // An autobound port is a label, not a reservation: it skips reserved ports
+    // but can itself be reserved while the socket is live, so sockets that are
+    // never destroyed do not exhaust the table.
+    {
+      const reserved = new net.BoundSocket({ port: 0 });
+      const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
+      const c2 = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
+      notStrictEqual(c.localPort, reserved.address().port);
+      notStrictEqual(c2.localPort, reserved.address().port);
+      notStrictEqual(c.localPort, c2.localPort);
+      new net.BoundSocket({ port: c.localPort }).close();
+      reserved.close();
+      c.destroy();
+      c2.destroy();
+      await Promise.all([once(c, 'close'), once(c2, 'close')]);
+    }
+
+    // localAddress alone, or localPort 0, is not a reservation: the address is
+    // reported but the port is an autobound label.
+    {
+      const c = net.connect({
+        port: env.SERVER_PORT,
+        host: env.SIDECAR_HOSTNAME,
+        localAddress: '127.0.0.1',
+        localPort: 0,
+      });
+      strictEqual(c.localAddress, '127.0.0.1');
+      ok(c.localPort >= 49152);
+      new net.BoundSocket({ port: c.localPort }).close();
+      const c2 = net.connect({
+        port: env.SERVER_PORT,
+        host: env.SIDECAR_HOSTNAME,
+        localAddress: null,
+        localPort: null,
+      });
+      strictEqual(c2.localAddress, '0.0.0.0');
+      c.destroy();
+      c2.destroy();
+      await Promise.all([once(c, 'close'), once(c2, 'close')]);
+    }
+
+    // A reconnect drops the previous local endpoint, so localPort may be given.
+    {
+      const c = net.connect(Number(env.ECHO_SERVER_PORT), env.SIDECAR_HOSTNAME);
+      await once(c, 'connect');
+      c.connect({
+        port: Number(env.ECHO_SERVER_PORT),
+        host: env.SIDECAR_HOSTNAME,
+        localPort: 50001,
+      });
+      await once(c, 'connect');
+      strictEqual(c.localPort, 50001);
+      c.destroy();
+      await once(c, 'close');
+      new net.BoundSocket({ port: 50001 }).close();
+    }
   },
 };
 
@@ -1188,6 +1285,250 @@ export const testNetLocalError = {
       'ERR_INVALID_ARG_TYPE',
       TypeError
     );
+  },
+};
+
+// test/parallel/test-net-boundsocket.js
+// Ports are reserved in the isolate's virtual port table; the transport does
+// not honor the local binding.
+export const testNetBoundSocket = {
+  test() {
+    const isEphemeral = (port) => port >= 49152 && port <= 65535;
+
+    {
+      const bound = new net.BoundSocket({ host: '127.0.0.1', port: 8080 });
+      deepStrictEqual(bound.address(), {
+        address: '127.0.0.1',
+        family: 'IPv4',
+        port: 8080,
+      });
+      strictEqual(bound.fd(), -1);
+      bound.close();
+      throws(() => bound.address(), { code: 'ERR_SOCKET_HANDLE_ADOPTED' });
+      throws(() => bound.fd(), { code: 'ERR_SOCKET_HANDLE_ADOPTED' });
+      throws(() => bound.close(), { code: 'ERR_SOCKET_HANDLE_ADOPTED' });
+    }
+
+    // Defaults: IPv4 wildcard, ephemeral port; ports are distinct while held.
+    {
+      const a = new net.BoundSocket({ port: 0 });
+      const b = new net.BoundSocket();
+      strictEqual(a.address().address, '0.0.0.0');
+      strictEqual(a.address().family, 'IPv4');
+      ok(isEphemeral(a.address().port));
+      ok(isEphemeral(b.address().port));
+      ok(a.address().port !== b.address().port);
+      a.close();
+      b.close();
+    }
+
+    // EADDRINUSE on an explicit port that is held; released on close().
+    {
+      const bound = new net.BoundSocket({ host: '127.0.0.1', port: 8081 });
+      throws(() => new net.BoundSocket({ host: '127.0.0.1', port: 8081 }), {
+        code: 'EADDRINUSE',
+        syscall: 'bind',
+        address: '127.0.0.1',
+        port: 8081,
+      });
+      bound.close();
+      const again = new net.BoundSocket({ host: '127.0.0.1', port: 8081 });
+      strictEqual(again.address().port, 8081);
+      again.close();
+    }
+
+    // IPv6 binds and ipv6Only default host.
+    {
+      const bound = new net.BoundSocket({ host: '::1', port: 0 });
+      strictEqual(bound.address().address, '::1');
+      strictEqual(bound.address().family, 'IPv6');
+      ok(isEphemeral(bound.address().port));
+      bound.close();
+    }
+    {
+      const bound = new net.BoundSocket({ ipv6Only: true, port: 0 });
+      strictEqual(bound.address().address, '::');
+      strictEqual(bound.address().family, 'IPv6');
+      bound.close();
+    }
+    {
+      const bound = new net.BoundSocket({ host: '::', port: 0 });
+      strictEqual(bound.address().family, 'IPv6');
+      bound.close();
+    }
+
+    // reusePort permits sharing a port only when all binders set it.
+    {
+      const first = new net.BoundSocket({ port: 8082, reusePort: true });
+      const second = new net.BoundSocket({ port: 8082, reusePort: true });
+      throws(() => new net.BoundSocket({ port: 8082 }), {
+        code: 'EADDRINUSE',
+      });
+      first.close();
+      throws(() => new net.BoundSocket({ port: 8082 }), {
+        code: 'EADDRINUSE',
+      });
+      second.close();
+      new net.BoundSocket({ port: 8082 }).close();
+      throws(() => new net.BoundSocket({ reusePort: 'yes' }), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+      throws(() => new net.BoundSocket({ ipv6Only: 1 }), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+    }
+
+    // Non-numeric host (no DNS resolution), non-string host, bad options.
+    throws(() => new net.BoundSocket({ host: 'localhost', port: 0 }), {
+      code: 'ERR_INVALID_ARG_VALUE',
+      name: 'TypeError',
+    });
+    throws(() => new net.BoundSocket({ host: 1234 }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    throws(() => new net.BoundSocket(0), { code: 'ERR_INVALID_ARG_TYPE' });
+    throws(() => new net.BoundSocket({ port: 65536 }), {
+      code: 'ERR_SOCKET_BAD_PORT',
+    });
+    // Pipes are not supported; rejected rather than silently binding TCP.
+    throws(() => new net.BoundSocket({ path: '/tmp/sock' }), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+
+    // Symbol.dispose closes an un-adopted handle and is a no-op afterwards.
+    {
+      const bound = new net.BoundSocket({ port: 8083 });
+      bound[Symbol.dispose]();
+      bound[Symbol.dispose]();
+      throws(() => bound.address(), { code: 'ERR_SOCKET_HANDLE_ADOPTED' });
+      new net.BoundSocket({ port: 8083 }).close();
+    }
+    {
+      const bound = new net.BoundSocket();
+      bound.close();
+      bound[Symbol.dispose]();
+    }
+
+    // Server is not implemented, so a bound socket cannot be adopted by one.
+    throws(() => net.createServer());
+  },
+};
+
+// Client adoption: new net.Socket({ handle: boundSocket }) consumes the bound
+// socket and exposes its address as the local address before and after
+// connect().
+export const testNetBoundSocketClientAdoption = {
+  async test(ctrl, env, ctx) {
+    const bound = new net.BoundSocket({ host: '127.0.0.1', port: 4321 });
+    const client = new net.Socket({ handle: bound });
+
+    throws(() => bound.address(), { code: 'ERR_SOCKET_HANDLE_ADOPTED' });
+    throws(() => bound.close(), { code: 'ERR_SOCKET_HANDLE_ADOPTED' });
+    throws(() => new net.Socket({ handle: bound }), {
+      code: 'ERR_SOCKET_HANDLE_ADOPTED',
+    });
+    bound[Symbol.dispose]();
+
+    strictEqual(client.localAddress, '127.0.0.1');
+    strictEqual(client.localPort, 4321);
+    strictEqual(client.localFamily, 'IPv4');
+    deepStrictEqual(client.address(), {
+      address: '127.0.0.1',
+      family: 'IPv4',
+      port: 4321,
+    });
+
+    const { promise, resolve } = Promise.withResolvers();
+    client.connect(Number(env.ECHO_SERVER_PORT), env.SIDECAR_HOSTNAME, () => {
+      client.end('ping');
+    });
+
+    // Available synchronously after connect() returns.
+    strictEqual(client.localAddress, '127.0.0.1');
+    strictEqual(client.localPort, 4321);
+
+    let response = '';
+    client.setEncoding('utf8');
+    client.on('data', (data) => (response += data));
+    client.on('connect', () => {
+      strictEqual(client.localAddress, '127.0.0.1');
+      strictEqual(client.localPort, 4321);
+    });
+    client.on('close', resolve);
+    await promise;
+    strictEqual(response, 'ping');
+
+    // The adopted port is released when the socket is destroyed.
+    new net.BoundSocket({ host: '127.0.0.1', port: 4321 }).close();
+
+    // Adoption transfers a reusePort share to the socket, which releases it
+    // exactly once on destroy: the other holder keeps the port.
+    {
+      const a = new net.BoundSocket({ port: 4322, reusePort: true });
+      const b = new net.BoundSocket({ port: 4322, reusePort: true });
+      const s = new net.Socket({ handle: a });
+      throws(() => a.close(), { code: 'ERR_SOCKET_HANDLE_ADOPTED' });
+      const closed = once(s, 'close');
+      s.destroy();
+      await closed;
+      throws(() => new net.BoundSocket({ port: 4322 }), {
+        code: 'EADDRINUSE',
+      });
+      new net.BoundSocket({ port: 4322, reusePort: true }).close();
+      b.close();
+      new net.BoundSocket({ port: 4322 }).close();
+    }
+  },
+};
+
+// net.connect({ handle }) adopts through the options path.
+export const testNetBoundSocketConnectOptions = {
+  async test(ctrl, env, ctx) {
+    const bound = new net.BoundSocket({ host: '::1', port: 0 });
+    const { port: localPort } = bound.address();
+    const { promise, resolve } = Promise.withResolvers();
+    const client = net.connect({
+      handle: bound,
+      host: env.SIDECAR_HOSTNAME,
+      port: Number(env.ECHO_SERVER_PORT),
+    });
+    throws(() => bound.address(), { code: 'ERR_SOCKET_HANDLE_ADOPTED' });
+    strictEqual(client.localAddress, '::1');
+    strictEqual(client.localFamily, 'IPv6');
+    strictEqual(client.localPort, localPort);
+    client.on('connect', () => client.end());
+    client.resume();
+    client.on('close', resolve);
+    await promise;
+  },
+};
+
+// connect() rejects localAddress/localPort when adopting a bound socket.
+export const testNetBoundSocketLocalAddressConflict = {
+  test() {
+    {
+      const bound = new net.BoundSocket({ host: '127.0.0.1', port: 0 });
+      const client = new net.Socket({ handle: bound });
+      throws(
+        () => client.connect({ host: '127.0.0.1', port: 1, localPort: 0 }),
+        { code: 'ERR_INVALID_ARG_VALUE' }
+      );
+      client.destroy();
+    }
+    {
+      const bound = new net.BoundSocket({ host: '127.0.0.1', port: 0 });
+      const client = new net.Socket({ handle: bound });
+      throws(
+        () =>
+          client.connect({
+            host: '127.0.0.1',
+            port: 1,
+            localAddress: '127.0.0.1',
+          }),
+        { code: 'ERR_INVALID_ARG_VALUE' }
+      );
+      client.destroy();
+    }
   },
 };
 

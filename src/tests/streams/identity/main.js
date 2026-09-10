@@ -101,6 +101,7 @@ export {
 export {
   cancelRejectsPendingWriteAndClose,
   cancelRejectsSubsequentWrites,
+  pipeCancellationWinsOverLaterReadableCancel,
   cancelResolvesReaderClosedPromise,
   cancelledReaderReadsResolveDone,
 } from 'cancel-propagation';

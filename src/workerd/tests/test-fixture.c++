@@ -117,13 +117,6 @@ class MockEntropySource final: public kj::EntropySource {
     }
   }
 
-  template <typename T>
-  T rand() {
-    T r;
-    this->generate(kj::arrayPtr(&r, 1).asBytes());
-    return r;
-  }
-
  private:
   kj::byte counter = 0;
 };

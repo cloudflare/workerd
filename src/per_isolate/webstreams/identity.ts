@@ -410,13 +410,13 @@ class IdentityTransformStream {
         );
       }
       const entry = ArrayPrototypeShift(snapshots) as SnapshotEntry;
-      // A recorded validation error surfaces here, at its FIFO turn: this
-      // write rejects and the stream errors, but everything written before
-      // it has already been delivered. Queued writes are discarded by the
-      // erroring writable without sink steps; their snapshots go with them.
+      // A recorded validation error surfaces here, at its FIFO turn, as a
+      // NON-FATAL write rejection: this write's promise rejects while the
+      // stream stays usable and queued writes behind it still deliver —
+      // the per-write invalid-chunk contract shared with the C++ internal
+      // controllers.
       if (!entry.ok) {
-        snapshots.length = 0;
-        throw entry.error;
+        throw writableInternals.nonFatalWriteRejection(entry.error);
       }
       const copied = entry.copied;
       if (copied === undefined) return; // zero-length no-op

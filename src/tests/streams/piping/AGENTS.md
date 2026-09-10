@@ -18,8 +18,8 @@ a deliberate defect pin, not a hole).
 
 | # | Area | C++ | TypeScript | Pinned in |
 | --- | --- | --- | --- | --- |
-| 1 | non-byte chunks piped into native identity | pipe rejects 'This WritableStream only supports writing byte types.' | STRINGS are UTF-8 ENCODED and pass through; a NUMBER chunk stalls the pipe silently — the next read pends forever (bounded defect pin) | `pipeThroughJsToInternal` |
-| 2 | writable lock after a completed pipeThrough | stays locked; getWriter throws | getWriter() SUCCEEDS; `.locked` is transient/racy (observed both values) — only getWriter pinned | `pipeThroughJsToInternalCloses` |
+| 1 | non-byte chunks piped into native identity | strings are UTF-8 encoded and pass through on both; the NUMBER chunk fails the pipe — C++ rejects 'This WritableStream only supports writing byte types.'; TypeScript surfaces the identity validation TypeError through the non-fatal write-rejection pipe path (dest aborted, downstream reads reject) | `pipeThroughJsToInternal` |
+| 2 | writable lock after a completed pipeThrough | stays locked; getWriter throws | spec finalize: both locks release when the pipe settles — one macrotask after the output's done, `.locked` is deterministically false and getWriter() succeeds (the release cascade is not synchronized with the output's done delivery, so loop-exit-instant reads are unspecified; `.locked` and getWriter share one predicate and never disagree at an instant) | `pipeThroughJsToInternalCloses` |
 | 3 | write-after-close rejection message | 'This WritableStream has been closed.' | 'Cannot write to a stream that is closing or closed' (`CLOSED_WRITE_MSG` helper) | `pipeToInternalToJsSimple`, `pipeToInternalToJsClose` |
 | 4 | ws.close() queued BEFORE pipeTo | pipe locks both ends, waits, cancels source with 'This destination writable stream is closed.', then RESOLVES (see the TODO(conform) in the test) | pipe REJECTS IMMEDIATELY 'Destination closed before the pipe completed', cancels source with the same error (preventCancel suppresses), locks never observed held | `pipeToJsToJsCloseQueuedDestination`(+`PreventCancel`) |
 | 5 | pipeTo brand check on a broken `this` | THROWS synchronously (before the capture_async_api_throws wrapper; the WPT general.any seed); a real stream with a bad destination REJECTS | both reject (spec) | `brandChecks` |
@@ -27,7 +27,8 @@ a deliberate defect pin, not a hole).
 | 7 | source queue after a preventCancel'd failing pipe | the not-yet-written chunk remains readable | read-ahead already consumed it; a fresh read PENDS (bounded) | `destWriteThrowsMidPipePreventCancel` |
 | 8 | dest controller error()s while the pipe waits on a read | HALF-PROPAGATES: cancels the source with the error but FULFILLS the pipe promise | rejects the pipe and cancels the source with the error (spec) | `destControllerErrorsMidPipe` |
 | 9 | FixedLengthStream length violations via pipe | overflow: pipe NEVER SETTLES (bounded); underflow: never settles | overflow: rejects RangeError; underflow: never settles (parity of nonconformance) | `fixedLengthStreamPipeOverflow`/`Underflow` |
-| 10 | already-closed source → already-closed dest | rejects TypeError (spec; the WPT multiple-propagation seed) | FULFILLS as a trivially complete pipe | `closedSourceToClosedDest` |
+| 10 | already-closed source → already-closed dest | rejects TypeError (a C++ deviation: the spec's ordered shutdown conditions give closing-forward priority) | FULFILLS (spec; WPT multiple-propagation 'closed readable to closed writable' pins the fulfillment) | `closedSourceToClosedDest` |
+| 11 | SharedArrayBuffer-backed views into CompressionStream | copies the shared bytes; round-trips | write path REJECTS TypeError 'The provided value is not of type (ArrayBuffer or ArrayBufferView)' (spec: BufferSource without [AllowShared]) — while its identity stream ACCEPTS the same views | `sabViewThroughCompressionRoundTrip` |
 
 Parity worth noting (probed, pinned): the whole error-propagation-
 forward core matrix (starts-errored rejection/hook IDENTITY on both
@@ -70,12 +71,14 @@ the source FIRST, then releasing the write (`pipeStopsPullingWhenDestStalls`).
 | `close-propagation.js` | the WPT-disabled backward territory, bounded: external close/abort on piped dest, write-throw backward propagation (ledger #7), idle dest-controller error (ledger #8) |
 | `flow-control.js` | backpressure chain (migrated from streams-backpressure-test.js), stalled-dest read-ahead bound |
 | `interop.js` | cancel propagation ×2 (migrated from api/streams/streams-test.js), FixedLengthStream (ledger #9), pre-settled pairings (ledger #10) |
+| `special-buffers.js` | SharedArrayBuffer-backed and resizable-buffer views through native and JS pipe endpoints (migrated from pipe-write-special-buffer-test.js, strengthened to content checks; ledger #11); the JS path delivers the very view uncopied, resizable buffers stay resizable |
 | `legacy-pipes.js` | the unflagged cell (flags table) |
 | `data-volumes.js` | end-to-end pipe volumes: 1 MiB pipeTo JS→JS, 8 MiB pipeThrough chain, 1 MiB JS→identity with body readback, 1 MiB identity→JS with a concurrent writer — all byte-exact |
 
-Consumed sources (deleted or shrunk): pipe-streams-test.js (deleted),
+Consumed sources (deleted or shrunk): pipe-streams-test.js and
+pipe-write-special-buffer-test.js (deleted),
 streams-error-edge-cases-test.js (−2), streams-backpressure-test.js
 (−1), api/streams/streams-test.js (−2; partiallyReadStream and inspect
 remain). The security regression files remain authoritative and
 separate: identity-transform-stream-uaf, pipe-source-error-uaf,
-pipe-write-special-buffer (SharedArrayBuffer/resizable shapes).
+identity-transform-stream-uaf and pipe-source-error-uaf.

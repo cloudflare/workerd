@@ -4,7 +4,9 @@
 
 #pragma once
 
+#include <kj/array.h>
 #include <kj/debug.h>
+#include <kj/exception.h>
 #include <kj/string.h>
 
 namespace workerd::jsg {
@@ -165,6 +167,35 @@ constexpr kj::Exception::DetailTypeId EXCEPTION_DURABLE_OBJECT_ABORT = 0x2900166
 // Set when a Durable Object abort should terminate the current alarm without retrying it.
 constexpr kj::Exception::DetailTypeId EXCEPTION_DURABLE_OBJECT_ABORT_NO_RETRY =
     0xff8bb5686c6156deull;
+
+// Set on a DISCONNECTED actor-call failure for an attempt that definitely did not enter user code.
+// Such failures are safe to retry; the caller decides whether to reuse the logical call's token
+// based on earlier attempts. Set by edgeworker's pre-delivery routing and getActor failure paths,
+// and by sandbox-side rejections before user code; read by the caller-side actor-call classifier.
+// The payload is a zero-length array (marker only).
+constexpr kj::Exception::DetailTypeId REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID =
+    0x1a07d0b6559baea6ull;
+
+inline void markActorRequestNotDelivered(kj::Exception& exception) {
+  if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
+    exception.setDetail(REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  }
+}
+
+// Set on a failure that is known to have occurred AFTER the call reached the actor (user code may
+// have run). Must not be retried as a delivery failure. Set at the receiving entrypoint's actor
+// catch so it survives the internal-exception description rewrite and serializes back across the RPC
+// boundary. The payload is a zero-length array (marker only).
+constexpr kj::Exception::DetailTypeId REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID = 0x7f6e0bece261e8eeull;
+
+// Set when an actor invocation is rejected before user code because its retry token could not be
+// claimed. This distinguishes a terminal claim rejection from other delivery failures. The payload
+// is a zero-length array (marker only).
+constexpr kj::Exception::DetailTypeId ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID = 0x6fb3a97323600af2ull;
+
+// Set when a draining predecessor rejects an actor invocation before user code. The caller can
+// retry the request against the replacement actor. The payload is a zero-length array (marker only).
+constexpr kj::Exception::DetailTypeId ACTOR_PREDECESSOR_REJECTED_DETAIL_ID = 0xaef1c0c972f21fe7ull;
 
 struct ExceptionToJsOptions {
   // When ignoreDetail is true, tells kjExceptionToJs() to ignore any serialized

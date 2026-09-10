@@ -10,6 +10,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/own-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
@@ -317,6 +318,42 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
     return;
   }
 
+  bool hadUndrainedWaitUntilTasks = !waitedForWaitUntil && !context->waitUntilTasks.isEmpty();
+  kj::Maybe<kj::Exception> cancellationException;
+
+  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING) && !context->isShared()) {
+    // Reentry callbacks may have spans attached to their pending promises. Cancel them while the
+    // request is still current so those spans close before the request outcome is reported.
+    while (!context->canceler.isEmpty()) {
+      KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+        KJ_IF_SOME(e, context->abortException) {
+          context->canceler.cancel(e);
+        } else {
+          context->canceler.cancel(JSG_KJ_EXCEPTION(
+              FAILED, Error, "The execution context responding to this call was canceled."));
+        }
+      })) {
+        // Canceler unlinks the callback before destroying its promise, so another attempt makes
+        // progress after a promise destructor throws.
+        if (cancellationException == kj::none) {
+          cancellationException = kj::mv(exception);
+        }
+      }
+    }
+
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { context->tasks.clear(); })) {
+      if (cancellationException == kj::none) {
+        cancellationException = kj::mv(exception);
+      }
+    }
+
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { context->waitUntilTasks.clear(); })) {
+      if (cancellationException == kj::none) {
+        cancellationException = kj::mv(exception);
+      }
+    }
+  }
+
   // Hack: We need to report an accurate time stamps for the STW outcome event, but the timer may
   // not be available when the outcome event gets reported. Define the outcome event time as the
   // time when the incoming request shuts down.
@@ -329,7 +366,7 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
     context->limitEnforcer->reportMetrics(*metrics);
     context->lastDeliveredLocation = deliveredLocation;
 
-    if (!waitedForWaitUntil && !context->waitUntilTasks.isEmpty()) {
+    if (hadUndrainedWaitUntilTasks) {
       KJ_LOG(WARNING, "failed to invoke drain() on IncomingRequest before destroying it",
           kj::getStackTrace());
     }
@@ -365,6 +402,11 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   // Remove incoming request after canceling waitUntil tasks, which may have spans attached that
   // require accessing a timer from the active request.
   context->incomingRequests.remove(*this);
+
+  KJ_IF_SOME(exception, cancellationException) {
+    unwindDetector.catchExceptionsIfUnwinding(
+        [&]() { kj::throwRecoverableException(kj::mv(exception)); });
+  }
 }
 
 InputGate::Lock IoContext::getInputLock() {

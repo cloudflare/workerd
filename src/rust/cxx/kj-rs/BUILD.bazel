@@ -1,5 +1,7 @@
-load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_library")
+load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_test.bzl", "wd_rust_test")
 load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
 
 wd_cc_library(
@@ -7,10 +9,7 @@ wd_cc_library(
     srcs = glob(["*.c++"]),
     hdrs = glob(["*.h"]),
     include_prefix = "kj-rs",
-    linkstatic = select({
-        "@platforms//os:windows": True,
-        "//conditions:default": False,
-    }),
+    linkstatic = CC_LIBRARY_LINKSTATIC,
     visibility = ["//src/rust/cxx/tests:__pkg__"],
     deps = [
         ":bridge",
@@ -37,16 +36,10 @@ rust_library(
     ],
 )
 
-rust_test(
+wd_rust_test(
     name = "kj-rs_test",
     crate = "kj-rs",
     edition = "2024",
-    experimental_use_cc_common_link = 1,
-    malloc = "//src/workerd/server:malloc",
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
 )
 
 rust_cxx_bridge(

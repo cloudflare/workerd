@@ -59,6 +59,9 @@ export {
   destStartsErroredPreventCancel,
   errorTypePreservationPipeTo,
   errorTypePreservationPipeThrough,
+  destAbortPromiseStates,
+  preventAbortAndCancelCombo,
+  shutdownWaitsForInFlightWrite,
 } from 'error-propagation';
 
 export {
@@ -90,3 +93,11 @@ export {
   largePipeJsToIdentity,
   largePipeIdentityToJs,
 } from 'data-volumes';
+
+export {
+  sabViewThroughCompressionRoundTrip,
+  sabViewThroughIdentityTransform,
+  sabViewThroughJsPipeChain,
+  resizableViewThroughIdentityTransform,
+  resizableViewThroughJsPipeChain,
+} from 'special-buffers';

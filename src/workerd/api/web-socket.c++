@@ -757,7 +757,7 @@ kj::Promise<void> LegacyWebSocketAdapter::Accepted::createAbortTask(
   } catch (...) {
     auto ex = kj::getCaughtExceptionAsKj();
     if (ex.getType() != kj::Exception::Type::DISCONNECTED) {
-      LOG_EXCEPTION("webSocketWhenAborted", ex);
+      LOG_EXCEPTION_IF_INTERNAL("webSocketWhenAborted", ex);
     }
   }
 }

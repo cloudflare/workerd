@@ -25,6 +25,7 @@
 
 import {
   BlockList,
+  BoundSocket,
   SocketAddress,
   Server,
   Socket,
@@ -45,6 +46,7 @@ export const Stream = Socket;
 
 export {
   BlockList,
+  BoundSocket,
   SocketAddress,
   Server,
   Socket,
@@ -63,6 +65,7 @@ export {
 
 export default {
   BlockList,
+  BoundSocket,
   SocketAddress,
   Stream: Socket,
   Server,

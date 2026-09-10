@@ -416,3 +416,51 @@ export const errorRaceWithCloseWritable = {
     strictEqual(await writePromise, undefined);
   },
 };
+
+// The WPT aborting residue: aborting with outstanding writes is another
+// startedness divergence (ledger #7).
+export const abortRejectsOutstandingWriteWithReason = {
+  async test() {
+    const reason = new Error('the-reason');
+    let writeCallCount = 0;
+    const ws = new WritableStream({
+      write() {
+        ++writeCallCount;
+        return new Promise(() => {});
+      },
+    });
+    const writer = ws.getWriter();
+    writer.write('first').catch(() => {});
+    const queued = writer.write('queued');
+    const abortP = writer.abort(reason);
+    const outcome = await Promise.race([
+      queued.then(
+        () => ({ state: 'fulfilled' }),
+        (e) => ({ state: 'rejected', reason: e })
+      ),
+      scheduler.wait(250).then(() => ({ state: 'pending' })),
+    ]);
+    const abortOutcome = await Promise.race([
+      abortP.then(
+        () => 'fulfilled',
+        () => 'rejected'
+      ),
+      scheduler.wait(100).then(() => 'pending'),
+    ]);
+    strictEqual(writeCallCount, usingTsImpl ? 0 : 1);
+    if (usingTsImpl) {
+      // abort() lands before start() settles, so neither sink write runs.
+      // The queue is flushed: the queued write rejects with the abort
+      // reason and the abort itself fulfills.
+      strictEqual(outcome.state, 'rejected');
+      strictEqual(outcome.reason, reason);
+      strictEqual(abortOutcome, 'fulfilled');
+    } else {
+      // DIVERGENCE (the WPT 'outstanding write() promises' failure):
+      // C++ leaves the queued write PENDING and the abort itself waits
+      // on the parked in-flight write forever (both bounded).
+      strictEqual(outcome.state, 'pending');
+      strictEqual(abortOutcome, 'pending');
+    }
+  },
+};

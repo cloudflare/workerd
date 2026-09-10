@@ -52,6 +52,8 @@ export {
   readDetachesCallerBuffer,
   closeWithPendingUnfilledByobRead,
   controllerType,
+  cancelWithPartiallyFilledPull,
+  readViewThenCancelOrdering,
 } from 'controller';
 
 export {
@@ -69,6 +71,7 @@ export {
   readableStreamBytesEnqueueSubarray,
   readableStreamMultiplePendingReads,
   byobreaderRegression,
+  partialViewThenDefaultRead,
 } from 'byob-reader';
 
 export {
@@ -105,6 +108,8 @@ export {
   jsByteSourceLargeDataEnqueue,
   bodyPumpByobRequestPresence,
   readableStreamByteRespond,
+  respondAfterCloseFromLaterMicrotask,
+  respondAfterCloseAndReleaseFromLaterMicrotask,
   readableStreamByteRespondWithNewView,
   readableStreamByteRespondWithNewViewUsesNewElementSize,
   readableStreamAutoAllocateChunkSize,

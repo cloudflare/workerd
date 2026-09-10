@@ -123,8 +123,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "enable_flag_name": "python_workers",
         "emscripten_version": "3.1.52",
         "python_version": "3.12.1",
-        "baseline_snapshot": "baseline-61eedf943.bin",
-        "baseline_snapshot_hash": "61eedf9432d635bdf091b26efece020b3543429a609fad7af9e8d4de2ec44f47",
+        "baseline_snapshot": "baseline-870a05cb2.bin",
+        "baseline_snapshot_hash": "870a05cb20cc4e2a75bf1d2bcb2df0602f0741d6a02b55637ef056b682ad945c",
         "vendored_packages_for_tests": VENDORED_VERSION_INDEPENDENT + [
             {
                 # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/fastapi-312-vendored-for-ew-testing.zip
@@ -151,8 +151,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "enable_flag_name": "python_workers_20250116",
         "emscripten_version": "4.0.9",
         "python_version": "3.13.2",
-        "baseline_snapshot": "baseline-4569679fb.bin",
-        "baseline_snapshot_hash": "4569679fb78a3c5c8dbfa73d57c61c6a5394617632fbac7b5873ba322c85463d",
+        "baseline_snapshot": "baseline-d8c2c898c.bin",
+        "baseline_snapshot_hash": "d8c2c898ca83b39583a04bb71c3e5daf2649d67c2aca3f911e1a319dcc1ba8fa",
         "dedicated_fastapi_snapshot": "snapshot_a6b652a95810783f5078b9a5dbd4a07c30718acb4ff724e82c25db7353dd7f2d.bin",
         "dedicated_fastapi_snapshot_hash": "4af6f012a5fb32f31a426e6f109e88ae85b18ee3dd131e1caaaad989cd962bbe",
         "vendored_packages_for_tests": VENDORED_VERSION_INDEPENDENT + [
@@ -185,8 +185,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "enable_flag_name": "python_workers_20260610",
         "emscripten_version": "5.0.3",
         "python_version": "3.14.2",
-        "baseline_snapshot": "baseline-2ffc5dfa7.bin",
-        "baseline_snapshot_hash": "2ffc5dfa7f3501356b7ecd8cc3a7fe351fbf825346175c1d852d2d9bb5617a48",
+        "baseline_snapshot": "baseline-aaa6da0e1.bin",
+        "baseline_snapshot_hash": "aaa6da0e1c928829e1c7dce7019440ddee4930d95bea739b7a7673c386ec440a",
         "vendored_packages_for_tests": VENDORED_VERSION_INDEPENDENT + [
             {
                 "name": "numpy",
@@ -205,8 +205,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "enable_flag_name": "python_workers_314",
         "emscripten_version": "5.0.3",
         "python_version": "3.14.2",
-        "baseline_snapshot": "baseline-68629a784.bin",
-        "baseline_snapshot_hash": "68629a7847e055b24e41a90ea3d64cdb5e9841f4104c2e56b28e5507eab7facd",
+        "baseline_snapshot": "baseline-3c6b03d57.bin",
+        "baseline_snapshot_hash": "3c6b03d57b4574515841f975b6d3a2069704786d4534bd8a4627c9ecdf0bbc03",
         "vendored_packages_for_tests": VENDORED_VERSION_INDEPENDENT + [
             {
                 "name": "numpy",

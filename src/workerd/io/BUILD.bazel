@@ -113,6 +113,7 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/jsg:inspector",
         "//src/workerd/jsg:script",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:checked-queue",
         "//src/workerd/util:consume",
         "//src/workerd/util:exception",
@@ -281,7 +282,6 @@ wd_cc_library(
     deps = [
         ":trace_capnp",
         ":worker-interface_capnp",
-        "//src/workerd/jsg:memory-tracker",
         "//src/workerd/util:own-util",
         "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp:capnp-rpc",
@@ -451,6 +451,10 @@ wd_capnp_library(src = "trace.capnp")
 
 wd_capnp_library(src = "compatibility-date.capnp")
 
+# The schema source lets text-based build rules read compatibility flag names
+# without a compiled helper to inspect the schema annotations.
+exports_files(["compatibility-date.capnp"])
+
 wd_capnp_library(src = "features.capnp")
 
 wd_capnp_library(src = "frankenvalue.capnp")
@@ -502,6 +506,7 @@ kj_test(
     deps = [
         ":actor",
         ":io-gate",
+        "//src/workerd/util:sentry",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
         "@sqlite3",
@@ -531,7 +536,6 @@ kj_test(
     src = "observer-test.c++",
     deps = [
         ":observer",
-        "//src/workerd/io:worker-interface",
         "//src/workerd/util:strings",
         "@capnp-cpp//src/capnp:capnpc",
     ],
@@ -630,6 +634,7 @@ kj_test(
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:autogate",
     ],
 )
 

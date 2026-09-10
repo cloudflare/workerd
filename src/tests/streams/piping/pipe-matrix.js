@@ -35,21 +35,21 @@ export const pipeThroughJsToInternal = {
 
     const output = [];
     if (usingTsImpl) {
-      // DIVERGENCE: TypeScript ENCODES string chunks through the native
-      // identity writable (UTF-8), and a NUMBER chunk stalls the pipe
-      // silently — the next read pends forever (bounded observation;
-      // defect shape). C++ rejects the pipe at the first non-byte chunk.
+      // Both implementations UTF-8-encode the string chunk through the
+      // identity writable and fail the pipe at the NUMBER chunk (whose
+      // write rejects non-fatally; the pipe aborts the destination with
+      // the validation error, so downstream reads reject). Message per
+      // implementation.
       const reader = readable.getReader();
       for (let i = 0; i < 3; i++) {
         output.push(dec.decode((await reader.read()).value));
       }
       deepStrictEqual(output, ['hello', 'there', 'hello']);
-      const outcome = await Promise.race([
-        reader.read().then(() => 'settled'),
-        scheduler.wait(100).then(() => 'pending'),
-      ]);
-      strictEqual(outcome, 'pending');
-      await reader.cancel('cleanup');
+      await rejects(reader.read(), {
+        name: 'TypeError',
+        message:
+          'IdentityTransformStream: chunk must be a BufferSource or string',
+      });
     } else {
       async function consumeStream() {
         for await (const chunk of readable) {
@@ -283,11 +283,17 @@ export const pipeThroughJsToInternalCloses = {
     }
 
     // DIVERGENCE: after the pipe completes, C++ keeps the writable
-    // locked (getWriter throws). Under TypeScript getWriter() SUCCEEDS;
-    // the .locked getter's value at this point is transient (observed
-    // both true and false across runs), so only the deterministic
-    // getWriter behavior is pinned.
+    // locked forever (getWriter throws). TypeScript follows the spec's
+    // pipe finalize: both locks release when the pipe settles. The
+    // release cascades through microtasks that are not synchronized
+    // with the OUTPUT's done delivery (pipeThrough discards the pipe
+    // promise), so .locked must not be read at the loop-exit instant;
+    // one macrotask later the state is deterministically settled —
+    // unlocked, getWriter succeeds. (.locked and getWriter() share one
+    // predicate and can never disagree at a single instant.)
     if (usingTsImpl) {
+      await scheduler.wait(0);
+      strictEqual(transform.writable.locked, false);
       transform.writable.getWriter();
     } else {
       strictEqual(transform.writable.locked, true);

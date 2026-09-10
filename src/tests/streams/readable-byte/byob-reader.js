@@ -8,6 +8,7 @@
 // streams-byob-edge-cases-test.js (all parity).
 
 import { strictEqual, ok } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 // Helper to create a byte stream that responds with data
 function createByteStreamWithData(data) {
@@ -505,5 +506,45 @@ export const byobreaderRegression = {
     const reader = rs.getReader({ mode: 'byob' });
     const { done } = await reader.read(new Uint8Array(10));
     ok(done);
+  },
+};
+
+// A BYOB read consumes part of an enqueued chunk; a later DEFAULT read
+// picks up the remainder (WPT 'enqueue(), read(view) partially, then
+// read()'). DIVERGENCE (ledger #20): C++ copies the remainder into a
+// fresh auto-allocated buffer; TypeScript returns a view into the
+// original enqueued buffer (spec).
+export const partialViewThenDefaultRead = {
+  async test() {
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        c.enqueue(new Uint8Array([1, 2, 3]));
+      },
+    });
+    const byob = rs.getReader({ mode: 'byob' });
+    const first = await byob.read(new Uint8Array(2));
+    byob.releaseLock();
+    const dflt = rs.getReader();
+    const second = await Promise.race([
+      dflt.read(),
+      scheduler.wait(200).then(() => null),
+    ]);
+    strictEqual(first.done, false);
+    strictEqual(Array.from(first.value).join(','), '1,2');
+    ok(second !== null, 'default read remained pending');
+    strictEqual(second.done, false);
+    strictEqual(second.value.constructor, Uint8Array);
+    strictEqual(Array.from(second.value).join(','), '3');
+    if (usingTsImpl) {
+      strictEqual(second.value.buffer.byteLength, 3);
+      strictEqual(second.value.byteOffset, 2);
+    } else {
+      ok(
+        second.value.buffer.byteLength === 4096 ||
+          second.value.buffer.byteLength === 16384
+      );
+      strictEqual(second.value.byteOffset, 0);
+    }
   },
 };

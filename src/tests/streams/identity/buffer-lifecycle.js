@@ -90,7 +90,8 @@ export const alreadyDetachedBufferAtWrite = {
     // Writing a buffer that is already detached diverges:
     // - C++ observes byteLength 0 and treats it as a zero-length no-op.
     // - TypeScript rejects the write with TypeError (the chunk cannot be
-    //   read at all), erroring the stream like any other invalid chunk.
+    //   read at all); like any other invalid chunk the rejection is
+    //   per-write — the stream survives it.
     const ab = new ArrayBuffer(4);
     ab.transfer();
     const { readable, writable } = new IdentityTransformStream();
@@ -98,6 +99,13 @@ export const alreadyDetachedBufferAtWrite = {
     const reader = readable.getReader();
     if (usingTsImpl) {
       await rejects(writer.write(ab), TypeError);
+      // The stream is usable after the rejection.
+      const writePromise = writer.write(new Uint8Array([9]));
+      const { value, done } = await reader.read();
+      strictEqual(done, false);
+      strictEqual(value[0], 9);
+      await writePromise;
+      await writer.close();
     } else {
       await writer.write(ab);
       const closePromise = writer.close();

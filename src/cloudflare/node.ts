@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import {
-  portMapper,
+  tcpPorts,
   type FetchHandler as Fetcher,
 } from 'cloudflare-internal:http';
 
@@ -39,7 +39,7 @@ export async function handleAsNodeRequest(
   // JavaScript does not enforce this, so we need to check at runtime.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   const port = validatePort(desc?.port);
-  const instance = portMapper.get(port);
+  const instance = tcpPorts.getHandler(port);
   if (!instance) {
     const error = new Error(
       `Http server with port ${port} not found. This is likely a bug with your code. ` +

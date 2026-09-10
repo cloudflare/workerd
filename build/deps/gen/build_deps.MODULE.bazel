@@ -20,7 +20,7 @@ bazel_dep(name = "aspect_rules_js", version = "3.4.1")
 bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
 
 # bazel_lib
-bazel_dep(name = "bazel_lib", version = "3.7.1")
+bazel_dep(name = "bazel_lib", version = "3.7.2")
 
 # bazel_skylib
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
@@ -63,11 +63,33 @@ http.file(
 )
 use_repo(http, "clang_tidy_linux_arm64")
 
+# llvm_runtimes
+git_repository(
+    name = "llvm_runtimes",
+    build_file = "@workerd//:build/BUILD.llvm-runtimes",
+    commit = "ca7933e47d3a3451d81e72ac174dcb5aa28b59d1",
+    remote = "https://github.com/llvm/llvm-project.git",
+    sparse_checkout_patterns = [
+        "cmake",
+        "libc/hdr",
+        "libc/include",
+        "libc/shared",
+        "libc/src/__support",
+        "libcxx",
+        "libcxxabi",
+        "libunwind",
+        "runtimes",
+    ],
+)
+
 # platforms
 bazel_dep(name = "platforms", version = "1.1.0")
 
 # rules_cc
 bazel_dep(name = "rules_cc", version = "0.2.22")
+
+# rules_foreign_cc
+bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
 
 # rules_multirun
 bazel_dep(name = "rules_multirun", version = "0.14.0")
@@ -79,7 +101,7 @@ bazel_dep(name = "rules_nodejs", version = "6.7.5")
 bazel_dep(name = "rules_oci", version = "2.3.0")
 
 # rules_python
-bazel_dep(name = "rules_python", version = "2.3.2")
+bazel_dep(name = "rules_python", version = "2.3.3")
 
 # rules_rust
 bazel_dep(name = "rules_rust", version = "0.74.0")
