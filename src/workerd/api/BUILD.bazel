@@ -10,6 +10,7 @@ filegroup(
     # their own targets, modularizing bazel targets makes incremental rebuilds faster.
     srcs = [
         "actor.c++",
+        "actor-call-retry.c++",
         "actor-state.c++",
         "basics.c++",
         "blob.c++",
@@ -64,6 +65,7 @@ filegroup(
     name = "hdrs",
     srcs = [
         "actor.h",
+        "actor-call-retry.h",
         "actor-state.h",
         "basics.h",
         "blob.h",
@@ -792,6 +794,13 @@ kj_test(
 kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "actor-call-retry-test.c++",
+    deps = [
+        "//src/workerd/io",
+    ],
 )
 
 kj_test(
