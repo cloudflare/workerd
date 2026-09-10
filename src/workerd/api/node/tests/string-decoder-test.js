@@ -222,6 +222,12 @@ export const stringDecoder = {
     strictEqual(decoder.write(Buffer.from('E18B', 'hex')), '');
     strictEqual(decoder.end(), '\ufffd');
 
+    // lastChar aliases the decoder's native state. Passing it back as input
+    // must have memmove semantics rather than observing partially-updated state.
+    decoder = new StringDecoder('utf8');
+    strictEqual(decoder.write(Buffer.from('E1', 'hex')), '');
+    strictEqual(decoder.write(decoder.lastChar), '\ufffd\ufffd\0\0\0');
+
     decoder = new StringDecoder('utf8');
     strictEqual(decoder.write(Buffer.from('\ufffd')), '\ufffd');
     strictEqual(decoder.end(), '');
@@ -256,6 +262,7 @@ export const stringDecoder = {
     decoder = new StringDecoder('utf16le');
     strictEqual(decoder.write(Buffer.from('3DD8', 'hex')), '');
     strictEqual(decoder.end(), '\ud83d');
+    strictEqual(Buffer.from('00D8', 'hex').toString('utf16le'), '\ud800');
 
     decoder = new StringDecoder('utf16le');
     strictEqual(decoder.write(Buffer.from('3DD8', 'hex')), '');
@@ -558,6 +565,17 @@ export const stringDecoderHacking = {
         message: 'Invalid StringDecoder state',
       }
     );
+
+    {
+      // The native decoder uses byte-sized counters. A forged UTF-16 state
+      // with no missing byte must wrap rather than panic while flushing.
+      const sd = new StringDecoder('utf16le');
+      const sym = Object.getOwnPropertySymbols(sd)[0];
+      sd[sym][4] = 0;
+      sd[sym][5] = 1;
+      strictEqual(sd.end(), '');
+      strictEqual(sd.lastNeed, 255);
+    }
 
     {
       // fuzz a bit with random values

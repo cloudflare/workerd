@@ -2311,6 +2311,19 @@ impl_typed_array_from_js!(
 impl_typed_array_from_js!(ArrayBuffer, is_array_buffer, "ArrayBuffer");
 impl_typed_array_from_js!(ArrayBufferView, is_array_buffer_view, "ArrayBufferView");
 
+impl crate::FromJS for Local<'_, String> {
+    type ResultType = Self;
+
+    fn from_js(_lock: &mut crate::Lock, value: Local<Value>) -> Result<Self, crate::Error> {
+        if !value.is_string() {
+            return Err(crate::Error::new_type_error("expected string"));
+        }
+        // SAFETY: the type check passed and the returned Local remains in the
+        // same active HandleScope as `value`.
+        Ok(unsafe { Self::from_ffi(value.isolate, value.into_ffi()) })
+    }
+}
+
 impl_typed_array!(Uint8Array, u8, local_uint8_array_get);
 impl_typed_array!(Uint16Array, u16, local_uint16_array_get);
 impl_typed_array!(Uint32Array, u32, local_uint32_array_get);
@@ -3187,6 +3200,15 @@ impl ToLocalValue for Number {
                 lock.isolate(),
                 ffi::local_new_number(lock.isolate().as_ffi(), self.value()),
             )
+        }
+    }
+}
+
+impl<T: ToLocalValue> ToLocalValue for Option<T> {
+    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
+        match self {
+            Some(value) => value.to_local(lock),
+            None => Local::<Value>::undefined(lock),
         }
     }
 }

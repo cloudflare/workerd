@@ -30,7 +30,6 @@ namespace workerd::api::node {
 
 #define NODEJS_MODULES(V)                                                                          \
   V(AsyncHooksModule, "node-internal:async_hooks")                                                 \
-  V(BufferUtil, "node-internal:buffer")                                                            \
   V(CryptoImpl, "node-internal:crypto")                                                            \
   V(ModuleUtil, "node-internal:module")                                                            \
   V(ProcessModule, "node-internal:process")                                                        \
@@ -125,6 +124,11 @@ void registerNodeJsCompatModules(
   if (!useRustUrl) {
     registry.template addBuiltinModule<UrlUtil>(
         "node-internal:url", workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  }
+  bool useRustBuffer = util::Autogate::isEnabled(util::AutogateKey::NODEJS_BUFFER_RUST);
+  if (!useRustBuffer) {
+    registry.template addBuiltinModule<BufferUtil>(
+        "node-internal:buffer", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   }
 
   bool nodeJsCompatEnabled = isNodeJsCompatEnabled(featureFlags);
@@ -254,6 +258,9 @@ void registerNodeJsCompatModules(
   if (useRustUrl) {
     ::workerd::rust::api::register_nodejs_url_module(r);
   }
+  if (useRustBuffer) {
+    ::workerd::rust::api::register_nodejs_buffer_module(r);
+  }
 }
 
 template <class TypeWrapper>
@@ -277,6 +284,11 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
     static const auto kUrlUtilSpecifier = "node-internal:url"_url;
     builder.addObject<UrlUtil, TypeWrapper>(kUrlUtilSpecifier);
   }
+  bool useRustBuffer = util::Autogate::isEnabled(util::AutogateKey::NODEJS_BUFFER_RUST);
+  if (!useRustBuffer) {
+    static const auto kBufferUtilSpecifier = "node-internal:buffer"_url;
+    builder.addObject<BufferUtil, TypeWrapper>(kBufferUtilSpecifier);
+  }
 
   if (moduleSource == nullptr) {
     jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(
@@ -297,6 +309,9 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
     ::workerd::rust::api::register_nodejs_modules(adapter);
     if (useRustUrl) {
       ::workerd::rust::api::register_nodejs_url_module(adapter);
+    }
+    if (useRustBuffer) {
+      ::workerd::rust::api::register_nodejs_buffer_module(adapter);
     }
   }
 
@@ -419,6 +434,9 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
     ::workerd::rust::api::register_nodejs_modules(adapter);
     if (util::Autogate::isEnabled(util::AutogateKey::NODEJS_URL_RUST)) {
       ::workerd::rust::api::register_nodejs_url_module(adapter);
+    }
+    if (util::Autogate::isEnabled(util::AutogateKey::NODEJS_BUFFER_RUST)) {
+      ::workerd::rust::api::register_nodejs_buffer_module(adapter);
     }
   }
   return builder.finish();
