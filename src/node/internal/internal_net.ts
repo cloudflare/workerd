@@ -26,6 +26,7 @@
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 
 import inner from 'cloudflare-internal:sockets';
+import { tcpPorts } from 'cloudflare-internal:http';
 
 import {
   AbortError,
@@ -111,57 +112,26 @@ const kBoundSocketConsume = Symbol('kBoundSocketConsume');
 const DEFAULT_IPV4_ADDR = '0.0.0.0';
 const DEFAULT_IPV6_ADDR = '::';
 
-// Per-isolate virtual local TCP port table shared by net and http servers. The
-// underlying transport does not honor local binding, but explicitly bound ports
-// are recorded and conflict-checked so that they are unique within the isolate.
-// Autobound sockets take an ephemeral label that skips recorded ports without
-// being recorded themselves: a socket whose request ends before it is destroyed
-// never runs its cleanup, so recording autobinds would leak table entries.
-const EPHEMERAL_PORT_MIN = 49152;
-const EPHEMERAL_PORT_MAX = 65535;
-const boundPorts = new Map<number, { refs: number; reusePort: boolean }>();
-let nextEphemeralPort = EPHEMERAL_PORT_MIN;
-
-export function ephemeralPort(): number {
-  for (let i = EPHEMERAL_PORT_MIN; i <= EPHEMERAL_PORT_MAX; i++) {
-    const candidate = nextEphemeralPort;
-    nextEphemeralPort =
-      candidate === EPHEMERAL_PORT_MAX ? EPHEMERAL_PORT_MIN : candidate + 1;
-    if (!boundPorts.has(candidate)) return candidate;
-  }
-  return 0;
-}
-
+// Reserves port in the isolate's TCP port table (shared with http servers),
+// allocating an ephemeral port for 0. Throws EADDRINUSE on conflict.
 export function bindPort(
   address: string,
   port: number,
   reusePort = false
 ): number {
   if (port === 0) {
-    port = ephemeralPort();
+    port = tcpPorts.ephemeral();
     if (port === 0) throw new EADDRINUSE(address, port);
   }
-  const entry = boundPorts.get(port);
-  if (entry === undefined) {
-    boundPorts.set(port, { refs: 1, reusePort });
-  } else if (entry.reusePort && reusePort) {
-    entry.refs++;
-  } else {
+  if (!tcpPorts.tryBind(port, reusePort)) {
     throw new EADDRINUSE(address, port);
   }
   return port;
 }
 
-export function releasePort(port: number): void {
-  const entry = boundPorts.get(port);
-  if (entry !== undefined && --entry.refs === 0) {
-    boundPorts.delete(port);
-  }
-}
-
 function releaseBoundSource(socket: Socket): void {
   if (socket[kBoundReserved]) {
-    releasePort((socket[kBoundSource] as AddressInfo).port);
+    tcpPorts.release((socket[kBoundSource] as AddressInfo).port);
     socket[kBoundReserved] = false;
   }
   socket[kBoundSource] = null;
@@ -292,7 +262,7 @@ export class BoundSocket {
     if (this.#address === null) {
       throw new ERR_SOCKET_HANDLE_ADOPTED();
     }
-    releasePort(this.#address.port);
+    tcpPorts.release(this.#address.port);
     this.#address = null;
   }
 
@@ -1408,7 +1378,9 @@ function initializeConnection(
         socket[kBoundSource] = {
           address,
           family: isIP(address) === 6 ? 'IPv6' : 'IPv4',
-          port: reserved ? bindPort(address, localPort ?? 0) : ephemeralPort(),
+          port: reserved
+            ? bindPort(address, localPort ?? 0)
+            : tcpPorts.ephemeral(),
         };
         socket[kBoundReserved] = reserved;
       }

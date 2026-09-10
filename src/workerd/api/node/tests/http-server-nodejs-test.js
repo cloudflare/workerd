@@ -646,7 +646,14 @@ export const testPortTableSharedWithNet = {
 
     const bound = new net.BoundSocket({ port: 0 });
     const { port } = bound.address();
-    throws(() => server.listen(port), { code: 'EADDRINUSE' });
+    throws(() => server.listen(port), {
+      code: 'EADDRINUSE',
+      message: `bind EADDRINUSE 127.0.0.1:${port}`,
+    });
+    throws(() => server.listen(port, '10.0.0.1'), {
+      code: 'EADDRINUSE',
+      message: `bind EADDRINUSE 10.0.0.1:${port}`,
+    });
     bound.close();
 
     await new Promise((resolve) => server.listen(port, resolve));

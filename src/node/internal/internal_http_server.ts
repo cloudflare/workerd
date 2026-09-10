@@ -38,7 +38,7 @@ import {
   validatePort,
   validateNumber,
 } from 'node-internal:validators';
-import { portMapper } from 'cloudflare-internal:http';
+import { tcpPorts } from 'cloudflare-internal:http';
 import {
   IncomingMessage,
   setIncomingMessageSocket,
@@ -59,11 +59,7 @@ import {
   chunkExpression,
   _checkInvalidHeaderChar,
 } from 'node-internal:internal_http';
-import {
-  _normalizeArgs,
-  bindPort,
-  releasePort,
-} from 'node-internal:internal_net';
+import { _normalizeArgs, bindPort } from 'node-internal:internal_net';
 import { Buffer } from 'node-internal:internal_buffer';
 
 import type {
@@ -180,8 +176,7 @@ export class Server
   close(callback?: VoidFunction): this {
     httpServerPreClose(this);
     if (this.#port != null) {
-      portMapper.delete(this.#port);
-      releasePort(this.#port);
+      tcpPorts.release(this.#port);
       this.#port = null;
     }
     if (typeof callback === 'function') {
@@ -306,9 +301,11 @@ export class Server
       this.once('listening', callback as (...args: unknown[]) => unknown);
     }
 
-    this.#port = bindPort('127.0.0.1', port);
-    // @ts-expect-error TS2322 Type mismatch. Not needed.
-    portMapper.set(this.#port, { fetch: this.#onRequest.bind(this) });
+    this.#port = bindPort(
+      typeof options.host === 'string' ? options.host : '127.0.0.1',
+      port
+    );
+    tcpPorts.setHandler(this.#port, { fetch: this.#onRequest.bind(this) });
     queueMicrotask(() => {
       // If any of the listening handlers (here and in any of the other queueMicrotask(...) instances here,
       // if the listening handlers throw an error, that will end up being reported to
