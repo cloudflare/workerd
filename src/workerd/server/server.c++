@@ -3965,7 +3965,8 @@ class Server::WorkerService final: public Service,
         kj::none,  // versionInfo
         kj::mv(triggerContext),
         false,  // isDynamicDispatch
-        kj::mv(accessInfo), kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub);
+        kj::mv(accessInfo), kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub,
+        kj::mv(metadata.clientIp));
   }
 
  private:
@@ -6666,7 +6667,18 @@ class Server::TcpListener final: public kj::Refcounted {
       kj::AuthenticatedStream stream = co_await listener->acceptAuthenticated();
       TRACE_EVENT("workerd", "TcpListener handle connection");
 
+      kj::PeerIdentity* peerId;
+      KJ_IF_SOME(tlsId, kj::tryDowncast<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
+        peerId = &tlsId.getNetworkIdentity();
+      } else {
+        peerId = stream.peerIdentity;
+      }
+
       IoChannelFactory::SubrequestMetadata metadata;
+      KJ_IF_SOME(remote, kj::tryDowncast<kj::NetworkPeerIdentity>(*peerId)) {
+        metadata.clientIp = remote.toString();
+      }
+
       auto req = service->startRequest(kj::mv(metadata));
       auto response = kj::heap<ResponseWrapper>();
       kj::HttpHeaders headers(headerTable);
