@@ -591,14 +591,14 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {{"data_version"_kj, PragmaSigna
 
 // =======================================================================================
 
-SqliteObserver SqliteObserver::DEFAULT = SqliteObserver{};
+const SqliteObserver SqliteObserver::DEFAULT = SqliteObserver{};
 
 SqliteDatabase::SqliteDatabase(const Vfs& vfs,
     kj::Path path,
     kj::Maybe<kj::WriteMode> maybeMode,
     size_t sqliteMaxMemoryBytes,
     size_t sqliteMaxMemoryPerProcessBytes,
-    SqliteObserver& sqliteObserver,
+    const SqliteObserver& sqliteObserver,
     kj::Maybe<const ActorAccountLimits&> actorAccountLimits)
     : vfs(vfs),
       path(kj::mv(path)),

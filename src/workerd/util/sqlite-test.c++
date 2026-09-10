@@ -855,16 +855,44 @@ KJ_TEST("reset database") {
   }
 }
 
+KJ_TEST("SQLite observer supports concurrent WAL size access") {
+  const SqliteObserver sqliteObserver;
+  std::atomic<bool> start = false;
+  uint64_t observedWalSize = 0;
+  constexpr uint64_t ITERATION_COUNT = 100000;
+
+  {
+    kj::Thread writer([&]() noexcept {
+      while (!start.load(std::memory_order_acquire)) {}
+      for (uint64_t i = 1; i <= ITERATION_COUNT; ++i) {
+        sqliteObserver.setDbWalSize(i);
+      }
+    });
+
+    kj::Thread reader([&]() noexcept {
+      while (!start.load(std::memory_order_acquire)) {}
+      for (uint64_t i = 0; i < ITERATION_COUNT; ++i) {
+        observedWalSize = sqliteObserver.getDbWalSize();
+      }
+    });
+
+    start.store(true, std::memory_order_release);
+  }
+
+  KJ_EXPECT(observedWalSize <= ITERATION_COUNT);
+  KJ_EXPECT(sqliteObserver.getDbWalSize() == ITERATION_COUNT);
+}
+
 KJ_TEST("SQLite observer addQueryStats") {
   class TestSqliteObserver: public SqliteObserver {
    public:
-    void addQueryStats(uint64_t read, uint64_t written) override {
+    void addQueryStats(uint64_t read, uint64_t written) const override {
       rowsRead += read;
       rowsWritten += written;
     }
 
-    uint64_t rowsRead = 0;
-    uint64_t rowsWritten = 0;
+    mutable uint64_t rowsRead = 0;
+    mutable uint64_t rowsWritten = 0;
   };
 
   class TestQueryStatsRegulator: public SqliteDatabase::Regulator {
@@ -950,7 +978,7 @@ KJ_TEST("SQLite observer addQueryStats") {
 KJ_TEST("SQLite observer reportQueryEvent") {
   class TestSqliteObserver: public SqliteObserver {
    public:
-    int capturedEvents = 0;
+    mutable int capturedEvents = 0;
 
     void reportQueryEvent(kj::Maybe<kj::String> queryStatement,
         uint64_t queryRowsRead,
@@ -960,7 +988,7 @@ KJ_TEST("SQLite observer reportQueryEvent") {
         int queryError,
         int extendedErrorCode,
         bool isInternalQuery,
-        kj::Maybe<kj::String> queryErrorDescription) override {
+        kj::Maybe<kj::String> queryErrorDescription) const override {
       KJ_IF_SOME(err, queryErrorDescription) {
         KJ_ASSERT(err.contains("query canceled because reset()"));
       }

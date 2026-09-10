@@ -13,6 +13,7 @@
 #include <kj/one-of.h>
 #include <kj/string.h>
 
+#include <atomic>
 #include <utility>
 
 struct sqlite3;
@@ -29,18 +30,18 @@ using kj::uint;
 // Used to collect periodic metrics about queries and size of sqlite db
 class SqliteObserver {
  public:
-  void setDbWalSize(uint64_t dbWalSize) {
-    this->dbWalSize = dbWalSize;
+  void setDbWalSize(uint64_t dbWalSize) const {
+    this->dbWalSize.store(dbWalSize, std::memory_order_relaxed);
   }
-  uint64_t getDbWalSize() {
-    return dbWalSize;
+  uint64_t getDbWalSize() const {
+    return dbWalSize.load(std::memory_order_relaxed);
   }
-  kj::TimePoint now() {
+  kj::TimePoint now() const {
     return monotonicClock.now();
   }
-  virtual void addQueryStats(uint64_t rowsRead, uint64_t rowsWritten) {}
+  virtual void addQueryStats(uint64_t rowsRead, uint64_t rowsWritten) const {}
   // The method is not used by the SqliteDatabase, it is added here for convenience
-  virtual void setSqliteStoredBytes(uint64_t sqliteStoredBytes) {}
+  virtual void setSqliteStoredBytes(uint64_t sqliteStoredBytes) const {}
 
   virtual void reportQueryEvent(kj::Maybe<kj::String> queryStatement,
       uint64_t queryRowsRead,
@@ -50,12 +51,12 @@ class SqliteObserver {
       int queryResult,
       int extendedErrorCode,
       bool isInternalQuery,
-      kj::Maybe<kj::String> queryErrorDescription) {}
+      kj::Maybe<kj::String> queryErrorDescription) const {}
 
-  static SqliteObserver DEFAULT;
+  static const SqliteObserver DEFAULT;
 
  private:
-  uint64_t dbWalSize = 0;
+  mutable std::atomic<uint64_t> dbWalSize = 0;
   const kj::MonotonicClock& monotonicClock = kj::systemPreciseMonotonicClock();
 };
 
@@ -116,7 +117,7 @@ class SqliteDatabase {
       kj::Maybe<kj::WriteMode> maybeMode = kj::none,
       size_t sqliteMaxMemoryBytes = kj::maxValue,
       size_t sqliteMaxMemoryPerProcessBytes = kj::maxValue,
-      SqliteObserver& sqliteObserver = SqliteObserver::DEFAULT,
+      const SqliteObserver& sqliteObserver = SqliteObserver::DEFAULT,
       kj::Maybe<const ActorAccountLimits&> actorAccountLimits = kj::none);
 
   // Returns the current value of the per-actor SQLite memory byte counter for metrics reporting.
@@ -349,7 +350,7 @@ class SqliteDatabase {
   const Vfs& vfs;
   kj::Path path;
   bool readOnly;
-  SqliteObserver& sqliteObserver;
+  const SqliteObserver& sqliteObserver;
 
   // The amount of memory in bytes used by this database for use by sqlite3_mem_methods.
   size_t sqliteMemoryBytes = 0;
@@ -647,7 +648,7 @@ class SqliteDatabase::Query final: private ResetListener {
  private:
   class QueryEvent {
    public:
-    explicit QueryEvent(SqliteObserver& sqliteObserver)
+    explicit QueryEvent(const SqliteObserver& sqliteObserver)
         : observer(sqliteObserver),
           dbWalSizeBefore(sqliteObserver.getDbWalSize()),
           startTime(sqliteObserver.now()) {}
@@ -685,7 +686,7 @@ class SqliteDatabase::Query final: private ResetListener {
     }
 
    private:
-    SqliteObserver& observer;
+    const SqliteObserver& observer;
     kj::Maybe<kj::String> queryStatement = kj::none;
     bool isInternalQuery = false;
     uint64_t dbWalSizeBefore;

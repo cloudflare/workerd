@@ -413,7 +413,7 @@ namespace {
 kj::Maybe<kj::Own<ActorCacheInterface>> actorCacheFactory(const ActorCache::SharedLru& sharedLru,
     OutputGate& outputGate,
     ActorCache::Hooks& hooks,
-    SqliteObserver& sqliteObserver) {
+    const SqliteObserver& sqliteObserver) {
   return kj::heap<ActorCache>(server::newEmptyReadOnlyActorStorage(), sharedLru, outputGate, hooks);
 }
 

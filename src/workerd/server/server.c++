@@ -1239,7 +1239,8 @@ class Server::ActorNamespace final {
 
       auto makeActorCache = [this, actorName = kj::mv(actorName)](
                                 const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
-                                ActorCache::Hooks& hooks, SqliteObserver& sqliteObserver) mutable {
+                                ActorCache::Hooks& hooks,
+                                const SqliteObserver& sqliteObserver) mutable {
         return ns.config.tryGet<Durable>().map(
             [&](const Durable& d) -> kj::Own<ActorCacheInterface> {
           KJ_IF_SOME(as, ns.actorStorage) {

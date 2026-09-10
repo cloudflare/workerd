@@ -855,7 +855,7 @@ class Worker::Actor final: public kj::Refcounted {
       kj::Function<kj::Maybe<kj::Own<ActorCacheInterface>>(const ActorCache::SharedLru& sharedLru,
           OutputGate& outputGate,
           ActorCache::Hooks& hooks,
-          SqliteObserver& sqliteObserver)>;
+          const SqliteObserver& sqliteObserver)>;
 
   // Callback which constructs the `DurableObjectStorage` instance for an actor. This can be used
   // to customize the JavaScript API.

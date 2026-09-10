@@ -20,13 +20,13 @@ static GlobalInit init;
 KJ_TEST("SQLite-KV") {
   class TestSqliteObserver: public SqliteObserver {
    public:
-    void addQueryStats(uint64_t read, uint64_t written) override {
+    void addQueryStats(uint64_t read, uint64_t written) const override {
       rowsRead += read;
       rowsWritten += written;
     }
 
-    uint64_t rowsRead = 0;
-    uint64_t rowsWritten = 0;
+    mutable uint64_t rowsRead = 0;
+    mutable uint64_t rowsWritten = 0;
   };
 
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
@@ -164,13 +164,13 @@ KJ_TEST("large key") {
 KJ_TEST("SQLite-KV multi-put") {
   class TestSqliteObserver: public SqliteObserver {
    public:
-    void addQueryStats(uint64_t read, uint64_t written) override {
+    void addQueryStats(uint64_t read, uint64_t written) const override {
       rowsRead += read;
       rowsWritten += written;
     }
 
-    uint64_t rowsRead = 0;
-    uint64_t rowsWritten = 0;
+    mutable uint64_t rowsRead = 0;
+    mutable uint64_t rowsWritten = 0;
   };
 
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
