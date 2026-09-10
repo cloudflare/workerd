@@ -3935,12 +3935,16 @@ class Server::WorkerService final: public Service,
     }
 
     KJ_IF_SOME(w, workerTracer) {
+      auto userSpanSubmitter = kj::refcounted<SequentialSpanSubmitter>(
+          w->getWeakRef(), threadContext.getEntropySource());
       w->setMakeUserRequestSpanFunc(
-          [&w = *w, &entropySource = threadContext.getEntropySource()](
-              tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
+          [userSpanSubmitter = kj::mv(userSpanSubmitter)](tracing::SpanContext context) mutable {
+        auto submitter = kj::addRef(*userSpanSubmitter);
+        if (context.getSpanId() != kj::none) {
+          return SpanParent(kj::rc<UserSpanObserver>(kj::mv(submitter), kj::mv(context)));
+        }
         return SpanParent(kj::rc<UserSpanObserver>(
-            kj::refcounted<SequentialSpanSubmitter>(w.getWeakRef(), entropySource), kj::mv(traceId),
-            traceFlags));
+            kj::mv(submitter), context.getTraceId(), context.getTraceFlags()));
       });
     }
     kj::Own<RequestObserver> observer =
