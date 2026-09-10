@@ -133,12 +133,6 @@ export class Server
   keepAliveTimeoutBuffer: number = 1_000;
   highWaterMark: number = getDefaultHighWaterMark();
   #port: number | null = null;
-  // Owned here so the port table's weak reference to it lives as long as the
-  // server does.
-  #handler = {
-    fetch: (request: Request, env: unknown, ctx: unknown): Promise<Response> =>
-      this.#onRequest(request, env, ctx),
-  };
 
   constructor(options?: ServerOptions, requestListener?: RequestListener) {
     if (!enableNodejsHttpServerModules) {
@@ -182,7 +176,6 @@ export class Server
   close(callback?: VoidFunction): this {
     httpServerPreClose(this);
     if (this.#port != null) {
-      tcpPorts.unregister(this);
       tcpPorts.release(this.#port);
       this.#port = null;
     }
@@ -312,8 +305,7 @@ export class Server
       typeof options.host === 'string' ? options.host : '127.0.0.1',
       port
     );
-    tcpPorts.register(this, this.#port);
-    tcpPorts.setHandler(this.#port, this.#handler);
+    tcpPorts.setHandler(this.#port, { fetch: this.#onRequest.bind(this) });
     queueMicrotask(() => {
       // If any of the listening handlers (here and in any of the other queueMicrotask(...) instances here,
       // if the listening handlers throw an error, that will end up being reported to

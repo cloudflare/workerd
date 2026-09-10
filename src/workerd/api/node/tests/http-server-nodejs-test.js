@@ -634,6 +634,24 @@ export const testInvalidPorts = {
   },
 };
 
+// A listening server the user keeps no reference to stays routable: the port
+// table entry is the GC root, as the libuv handle is in Node.
+export const testUnreferencedServerSurvivesGc = {
+  async test() {
+    http.createServer((req, res) => res.end('alive')).listen(18080);
+    await scheduler.wait(0);
+    gc();
+    await scheduler.wait(0);
+    gc();
+    await scheduler.wait(0);
+    const res = await handleAsNodeRequest(
+      { port: 18080 },
+      new Request('https://cloudflare.com/')
+    );
+    strictEqual(await res.text(), 'alive');
+  },
+};
+
 // http servers share the isolate's virtual port table with node:net.
 export const testPortTableSharedWithNet = {
   async test() {

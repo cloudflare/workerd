@@ -11,9 +11,9 @@ export interface FetchHandler {
 type PortEntry = {
   refs: number;
   reusePort: boolean;
-  // Held weakly so the handler's owner can be collected, letting the registry
-  // backstop release the entry.
-  handler?: WeakRef<FetchHandler>;
+  // Held strongly: a listening server the user keeps no reference to must stay
+  // routable for the isolate's lifetime, as it would in Node.
+  handler?: FetchHandler;
 };
 
 const EPHEMERAL_PORT_MIN = 49152;
@@ -27,9 +27,11 @@ const EPHEMERAL_PORT_MAX = 65535;
 export class PortTable {
   #entries = new Map<number, PortEntry>();
   #nextEphemeral = EPHEMERAL_PORT_MIN;
-  // Backstop for owners that are never closed: a request's IoContext teardown
-  // runs no JS, so an owner it strands would otherwise hold its entry for the
-  // isolate's lifetime. Deterministic release by the owner remains primary.
+  // Backstop for socket owners that are never closed: a request's IoContext
+  // teardown runs no JS, so a socket it strands would otherwise hold its entry
+  // for the isolate's lifetime. Deterministic release by the owner remains
+  // primary. Listening servers are not registered; their entry is meant to
+  // outlive any reference to them.
   // FinalizationRegistry is absent on compat dates before enable_weak_ref.
   #registry =
     typeof FinalizationRegistry === 'function'
@@ -83,14 +85,13 @@ export class PortTable {
     this.#registry?.unregister(owner);
   }
 
-  // The caller must keep handler reachable for as long as it should route.
   setHandler(port: number, handler: FetchHandler): void {
     const entry = this.#entries.get(port);
-    if (entry !== undefined) entry.handler = new WeakRef(handler);
+    if (entry !== undefined) entry.handler = handler;
   }
 
   getHandler(port: number): FetchHandler | undefined {
-    return this.#entries.get(port)?.handler?.deref();
+    return this.#entries.get(port)?.handler;
   }
 }
 
