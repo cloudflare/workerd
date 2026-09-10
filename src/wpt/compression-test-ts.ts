@@ -7,8 +7,12 @@ import { type TestRunnerConfig } from 'harness/harness';
 // The compression WPT suite against the TypeScript streams implementation's
 // CompressionStream/DecompressionStream pair (webstreams/compression.ts over
 // the shared C++ CodecStage). Expectations match the legacy configuration
-// (compression-test.ts): the pair is behavior-matching by design.
+// (compression-test.ts) except where the TypeScript pair follows the spec
+// and the legacy one does not (bad chunks; IDL prototype attributes).
 export default {
+  // The legacy configuration disables this file (the C++ pair accepts
+  // SharedArrayBuffer chunks and keeps the stream usable after an invalid
+  // one); the TypeScript pair rejects both per spec.
   'compression-bad-chunks.any.js': {
     comment: 'brotli compression is not supported',
     expectedFailures: [/brotli/],

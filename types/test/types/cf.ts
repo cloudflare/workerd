@@ -23,6 +23,21 @@ export const handler: ExportedHandler<{ SERVICE: Fetcher }> = {
     });
 
     await fetch("https://example.com", {
+      cf: { originRangeRequests: "on" },
+    });
+
+    await fetch("https://example.com", {
+      cf: { originRangeRequests: "off" },
+    });
+
+    await fetch("https://example.com", {
+      cf: {
+        // @ts-expect-error: default is a Cache Rules value, not a Workers value
+        originRangeRequests: "default",
+      },
+    });
+
+    await fetch("https://example.com", {
       cf: {
         vary: {
           default: { action: "bypass" },

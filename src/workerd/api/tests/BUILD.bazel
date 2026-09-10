@@ -594,6 +594,12 @@ wd_test(
 )
 
 wd_test(
+    src = "unhandled-rejection-reentry-test.wd-test",
+    args = ["--experimental"],
+    data = ["unhandled-rejection-reentry-test.js"],
+)
+
+wd_test(
     size = "large",
     src = "htmlrewriter-test.wd-test",
     args = ["--experimental"],
@@ -1281,11 +1287,6 @@ wd_test(
 wd_test(
     src = "byob-reader-resize-pending-read-test.wd-test",
     data = ["byob-reader-resize-pending-read-test.js"],
-)
-
-wd_test(
-    src = "pipe-write-special-buffer-test.wd-test",
-    data = ["pipe-write-special-buffer-test.js"],
 )
 
 wd_test(

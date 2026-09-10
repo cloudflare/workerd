@@ -59,6 +59,34 @@ export const cancelRejectsSubsequentWrites = {
   },
 };
 
+export const pipeCancellationWinsOverLaterReadableCancel = {
+  async test() {
+    // The C++ implementation cancels the pending sink write when pipeTo() is aborted. That
+    // disconnection must become the transform's terminal error before a later readable.cancel()
+    // can supply a different reason. The TypeScript implementation has no corresponding KJ
+    // operation.
+    if (usingTsImpl) return;
+
+    const source = new Response(new Uint8Array([1])).body;
+    const transform = new IdentityTransformStream();
+    const abortController = new AbortController();
+    const pipePromise = source.pipeTo(transform.writable, {
+      signal: abortController.signal,
+      preventAbort: true,
+      preventCancel: true,
+    });
+
+    await scheduler.wait(0);
+    abortController.abort(new Error('pipe canceled'));
+    await captureRejection(pipePromise);
+
+    await transform.readable.cancel(new Error('later readable cancel'));
+    const writer = transform.writable.getWriter();
+    const error = await captureRejection(writer.write(new Uint8Array([2])));
+    strictEqual(error.message, 'Network connection lost.');
+  },
+};
+
 export const cancelResolvesReaderClosedPromise = {
   async test() {
     // The canceling reader's own closed promise resolves (with undefined),

@@ -16,19 +16,17 @@ export const responseBodyMethodsJsByob = {
     const enc = new TextEncoder();
     const dec = new TextDecoder();
 
+    // With autoAllocateChunkSize set, the body pump's pulls carry a
+    // byobRequest on both implementations (bodyPumpByobRequestPresence
+    // pins the presence), so a respond()-only source works as a body.
     {
       const rs = new ReadableStream({
         type: 'bytes',
         autoAllocateChunkSize: 4096,
         async pull(c) {
-          if (c.byobRequest) {
-            enc.encodeInto('hello', c.byobRequest.view);
-            c.byobRequest.respond(5);
-            c.close();
-          } else {
-            c.enqueue(enc.encode('hello'));
-            c.close();
-          }
+          enc.encodeInto('hello', c.byobRequest.view);
+          c.byobRequest.respond(5);
+          c.close();
         },
       });
 
@@ -42,14 +40,9 @@ export const responseBodyMethodsJsByob = {
         type: 'bytes',
         autoAllocateChunkSize: 4096,
         async pull(c) {
-          if (c.byobRequest) {
-            enc.encodeInto('hello', c.byobRequest.view);
-            c.byobRequest.respond(5);
-            c.close();
-          } else {
-            c.enqueue(enc.encode('hello'));
-            c.close();
-          }
+          enc.encodeInto('hello', c.byobRequest.view);
+          c.byobRequest.respond(5);
+          c.close();
         },
       });
 
@@ -116,7 +109,9 @@ export const jsSourceAsyncPull = {
   },
 };
 
-// Test BYOB ReadableStream as Response body
+// Test BYOB ReadableStream as Response body. The body pump's pull
+// carries a byobRequest under both implementations when
+// autoAllocateChunkSize is set (see bodyPumpByobRequestPresence).
 export const jsByteSource = {
   async test() {
     const enc = new TextEncoder();
@@ -125,16 +120,9 @@ export const jsByteSource = {
       autoAllocateChunkSize: 4096,
       pull(c) {
         const request = c.byobRequest;
-        if (request != null) {
-          enc.encodeInto('hello', request.view);
-          request.respond(5);
-          c.close();
-        } else {
-          // The TypeScript Body pump reads without a BYOB request even
-          // with autoAllocateChunkSize (see bodyPumpByobRequestPresence).
-          c.enqueue(enc.encode('hello'));
-          c.close();
-        }
+        enc.encodeInto('hello', request.view);
+        request.respond(5);
+        c.close();
       },
     });
 
@@ -143,7 +131,9 @@ export const jsByteSource = {
   },
 };
 
-// Test BYOB ReadableStream with multiple chunks
+// Test BYOB ReadableStream with multiple chunks. No autoAllocateChunkSize
+// here, so the pump's byobRequest presence differs per implementation
+// (ledger #5/#6): the source stays dual-path.
 export const jsByteSourceMultipleChunks = {
   async test() {
     const enc = new TextEncoder();
@@ -873,7 +863,11 @@ export const bodyPumpByobRequestPresence = {
       },
     });
     strictEqual(await new Response(rs).text(), 'x');
-    strictEqual(seen, usingTsImpl ? 'null' : 'view(4096)');
+    // With autoAllocateChunkSize set, the body pump's pull carries a
+    // byobRequest over the auto-allocated buffer on both implementations
+    // (the TypeScript draining conduit synthesizes the descriptor for its
+    // wait-read). Without it, direct-read behavior is ledger #5's.
+    strictEqual(seen, 'view(4096)');
   },
 };
 
@@ -946,6 +940,106 @@ export const readableStreamByteRespond = {
       strictEqual(u82[1], 2);
       strictEqual(u82[2], 3);
     }
+  },
+};
+
+// close() leaves the pending pull-into available for respond(0), even when
+// the source responds from a later microtask. The read may settle first under
+// the decided C++-parity close behavior, but that must not invalidate the
+// source's request or let the later transfer detach the returned result.
+export const respondAfterCloseFromLaterMicrotask = {
+  async test() {
+    let finishRespond;
+    const responded = new Promise((resolve) => {
+      finishRespond = resolve;
+    });
+    let request;
+    let requestView;
+    let respondError;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      async pull(c) {
+        request = c.byobRequest;
+        requestView = request.view;
+        c.close();
+        await Promise.resolve();
+        try {
+          request.respond(0);
+        } catch (e) {
+          respondError = e;
+        }
+        finishRespond();
+      },
+    });
+
+    const reader = rs.getReader({ mode: 'byob' });
+    const { done, value } = await reader.read(new Uint8Array([1, 2, 3, 4]));
+    await responded;
+
+    strictEqual(respondError, undefined);
+    strictEqual(request.view, null);
+    strictEqual(requestView.byteLength, 0);
+    strictEqual(done, true);
+    strictEqual(value.byteLength, 0);
+    strictEqual(value.buffer.byteLength, 4);
+    strictEqual(new Uint8Array(value.buffer)[2], 3);
+  },
+};
+
+// Same late respond(0), with the reader released in between: the settled
+// read's result (a partial fill here) keeps its buffer and bytes, and the
+// stream is re-lockable. Release rewrites the descriptor's reader state;
+// that must not re-arm the transfer the later response would perform.
+export const respondAfterCloseAndReleaseFromLaterMicrotask = {
+  async test() {
+    let finishRespond;
+    const responded = new Promise((resolve) => {
+      finishRespond = resolve;
+    });
+    let releaseReader;
+    const released = new Promise((resolve) => {
+      releaseReader = resolve;
+    });
+    let request;
+    let respondError;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      async pull(c) {
+        request = c.byobRequest;
+        request.view[0] = 7;
+        request.view[1] = 8;
+        request.respond(2);
+        // The next pull carries the same read (2 of 3 filled, min 3).
+        request = c.byobRequest;
+        c.close();
+        await released;
+        try {
+          request.respond(0);
+        } catch (e) {
+          respondError = e;
+        }
+        finishRespond();
+      },
+    });
+
+    const reader = rs.getReader({ mode: 'byob' });
+    const { done, value } = await reader.read(new Uint8Array(3), { min: 3 });
+    strictEqual(done, false);
+    strictEqual(value.byteLength, 2);
+    reader.releaseLock();
+    releaseReader();
+    await responded;
+
+    strictEqual(respondError, undefined);
+    strictEqual(request.view, null);
+    strictEqual(value.byteLength, 2);
+    strictEqual(value.buffer.byteLength, 3);
+    strictEqual(value[0], 7);
+    strictEqual(value[1], 8);
+    const reader2 = rs.getReader({ mode: 'byob' });
+    const tail = await reader2.read(new Uint8Array(3));
+    strictEqual(tail.done, true);
+    strictEqual(tail.value.byteLength, 0);
   },
 };
 

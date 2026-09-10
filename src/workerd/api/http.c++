@@ -1471,96 +1471,6 @@ namespace {
 // Fetch spec requires (suggests?) 20: https://fetch.spec.whatwg.org/#http-redirect-fetch
 constexpr auto MAX_REDIRECT_COUNT = 20;
 
-class ActorRetryMetrics final: public kj::Refcounted {
- public:
-  explicit ActorRetryMetrics(RequestObserver& observer): observer(kj::addRef(observer)) {}
-
-  ~ActorRetryMetrics() noexcept(false) {
-    if (sawRetryRelevantFailure && !recordedOutcome) {
-      recordOutcome(ActorRetryOutcome::OTHER);
-    }
-  }
-
-  void noteRetryRelevantFailure() {
-    sawRetryRelevantFailure = true;
-  }
-
-  void observeAttemptFailure(const kj::Exception& exception) {
-    if (exception.getType() == kj::Exception::Type::DISCONNECTED ||
-        exception.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none) {
-      noteRetryRelevantFailure();
-    }
-  }
-
-  void recordRetry() {
-    observer->recordActorRetry(ActorRetryCallType::FETCH);
-  }
-
-  void recordOutcome(ActorRetryOutcome outcome) {
-    if (recordedOutcome) return;
-    recordedOutcome = true;
-    observer->recordActorRetryOutcome(ActorRetryCallType::FETCH, outcome);
-  }
-
- private:
-  kj::Own<RequestObserver> observer;
-  bool sawRetryRelevantFailure = false;
-  bool recordedOutcome = false;
-};
-
-class ActorFetchRetryState {
- public:
-  static ActorFetchRetryState create(TimerChannel& timer, RequestObserver& observer);
-
-  IoChannelFactory::ActorRetryRequestMetadata getMetadata() const {
-    return metadata;
-  }
-
-  bool isRetryEnabled() const {
-    return deadline != kj::none;
-  }
-
-  CountSubrequest countSubrequest() const {
-    return CountSubrequest(attemptCount == 1);
-  }
-
-  kj::Maybe<kj::Exception> checkDeadline();
-  kj::OneOf<kj::Duration, kj::Exception> prepareRetry(kj::Exception exception);
-  void recordRetry() {
-    if (attemptCount > 1) {
-      metrics->recordRetry();
-    }
-  }
-  kj::Rc<ActorRetryMetrics> addMetricsRef() {
-    return metrics.addRef();
-  }
-  void recordRecovered();
-  void recordAbort(const kj::Exception& exception);
-
- private:
-  static constexpr uint MAX_ATTEMPTS = 5;
-  static constexpr auto RETRY_BUDGET = 10 * kj::SECONDS;
-  static constexpr auto INITIAL_BACKOFF = 50 * kj::MILLISECONDS;
-
-  ActorFetchRetryState(IoChannelFactory::ActorRetryRequestMetadata metadata,
-      kj::Maybe<kj::TimePoint> deadline,
-      TimerChannel& timer,
-      kj::Rc<ActorRetryMetrics> metrics)
-      : metadata(kj::mv(metadata)),
-        deadline(kj::mv(deadline)),
-        timer(timer),
-        metrics(kj::mv(metrics)) {}
-
-  kj::Duration retryDelay();
-
-  IoChannelFactory::ActorRetryRequestMetadata metadata;
-  kj::Maybe<kj::TimePoint> deadline;
-  TimerChannel& timer;
-  kj::Rc<ActorRetryMetrics> metrics;
-  kj::Maybe<kj::Exception> originalDisconnect;
-  uint attemptCount = 1;
-};
-
 struct ActorFetchFailure {
   kj::Exception exception;
 };
@@ -1568,118 +1478,23 @@ struct ActorFetchFailure {
 template <typename T>
 using ActorFetchAttemptResult = kj::OneOf<T, ActorFetchFailure>;
 
-ActorFetchRetryState ActorFetchRetryState::create(TimerChannel& timer, RequestObserver& observer) {
-  bool retryGateEnabled = util::Autogate::isEnabled(
-      util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS);
-  auto metadata = generateActorRetryRequestMetadata(kj::systemCoarseCalendarClock().now(),
-      ActorRetryGateEnabled(retryGateEnabled));
-  kj::Maybe<kj::TimePoint> deadline;
-  if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH) &&
-      retryGateEnabled) {
-    deadline = timer.nowForLimitTimeout() + RETRY_BUDGET;
-  }
-  return ActorFetchRetryState(kj::mv(metadata), kj::mv(deadline), timer,
-      kj::rc<ActorRetryMetrics>(observer));
-}
-
-kj::Maybe<kj::Exception> ActorFetchRetryState::checkDeadline() {
-  KJ_IF_SOME(deadlineValue, deadline) {
-    if (attemptCount > 1 && timer.nowForLimitTimeout() >= deadlineValue) {
-      metrics->recordOutcome(ActorRetryOutcome::RETRIES_EXHAUSTED);
-      return KJ_ASSERT_NONNULL(originalDisconnect).clone();
-    }
-  }
-  return kj::none;
-}
-
-kj::Duration ActorFetchRetryState::retryDelay() {
-  static thread_local auto generator = [] {
-    uint64_t seed;
-    getEntropy(kj::asBytes(seed));
-    return std::mt19937_64(seed);
-  }();
-  auto maximum = INITIAL_BACKOFF * (1u << (attemptCount - 1));
-  std::uniform_int_distribution<uint64_t> distribution(0, maximum / kj::NANOSECONDS);
-  return distribution(generator) * kj::NANOSECONDS;
-}
-
-kj::OneOf<kj::Duration, kj::Exception> ActorFetchRetryState::prepareRetry(
-    kj::Exception exception) {
-  if (!isRetryEnabled()) {
-    return kj::mv(exception);
-  }
-  if (exception.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none) {
-    metrics->noteRetryRelevantFailure();
-    metrics->recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY);
-    KJ_IF_SOME(original, originalDisconnect) {
-      return kj::mv(original);
-    }
-    auto normalized = KJ_EXCEPTION(DISCONNECTED, "Durable Object fetch failed");
-    for (auto& detail: exception.getDetails()) {
-      normalized.setDetail(detail.id, kj::heapArray(detail.value.asPtr()));
-    }
-    return normalized;
-  }
-
-  if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
-    if (originalDisconnect != kj::none) {
-      metrics->recordOutcome(ActorRetryOutcome::OTHER);
-    }
-    return kj::mv(exception);
-  }
-  metrics->noteRetryRelevantFailure();
-  if (exception.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none) {
-    metrics->recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY);
-    return kj::mv(exception);
-  }
-  if (attemptCount >= MAX_ATTEMPTS) {
-    metrics->recordOutcome(ActorRetryOutcome::RETRIES_EXHAUSTED);
-    return KJ_ASSERT_NONNULL(originalDisconnect).clone();
-  }
-
-  if (attemptCount == 1) {
-    originalDisconnect = exception.clone();
-  }
-  if (exception.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none) {
-    metadata.isRetry = IsActorRetry::YES;
-  } else if (metadata.isRetry == IsActorRetry::NO) {
-    metadata = generateActorRetryRequestMetadata(
-        kj::systemCoarseCalendarClock().now(), metadata.retryGateEnabled);
-  }
-
-  auto delay = retryDelay();
-  auto deadline = KJ_ASSERT_NONNULL(this->deadline);
-  if (timer.nowForLimitTimeout() + delay >= deadline) {
-    metrics->recordOutcome(ActorRetryOutcome::RETRIES_EXHAUSTED);
-    return KJ_ASSERT_NONNULL(originalDisconnect).clone();
-  }
-  ++attemptCount;
-  return delay;
-}
-
-void ActorFetchRetryState::recordRecovered() {
-  if (originalDisconnect != kj::none) {
-    metrics->recordOutcome(ActorRetryOutcome::RECOVERED);
-  }
-}
-
-void ActorFetchRetryState::recordAbort(const kj::Exception& exception) {
-  if (originalDisconnect != kj::none || exception.getType() == kj::Exception::Type::DISCONNECTED ||
-      exception.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none) {
-    metrics->noteRetryRelevantFailure();
-    metrics->recordOutcome(ActorRetryOutcome::OTHER);
-  }
-}
-
 template <typename T>
-kj::Promise<ActorFetchAttemptResult<T>> captureActorFetchAttempt(
-    kj::Promise<T> promise, kj::Rc<ActorRetryMetrics> metrics) {
-  return kj::mv(promise)
+kj::Promise<ActorFetchAttemptResult<T>> captureActorFetchAttempt(jsg::Lock& js,
+    kj::Maybe<jsg::Ref<AbortSignal>>& signal,
+    kj::Promise<T> promise,
+    kj::Rc<ActorCallRetryState> retryState) {
+  auto result = kj::mv(promise)
       .then([](T&& result) -> ActorFetchAttemptResult<T> { return kj::mv(result); })
-      .catch_([metrics = kj::mv(metrics)](
+      .catch_([retryState = retryState.addRef()](
                   kj::Exception&& exception) mutable -> ActorFetchAttemptResult<T> {
-    metrics->observeAttemptFailure(exception);
+    retryState->maybeStartRetryLatencyTimer(exception);
     return ActorFetchFailure{kj::mv(exception)};
+  });
+  return AbortSignal::maybeCancelWrap(js, signal, kj::mv(result))
+      .catch_([retryState = kj::mv(retryState)](
+                  kj::Exception&& exception) mutable -> kj::Promise<ActorFetchAttemptResult<T>> {
+    retryState->recordCanceled();
+    return kj::mv(exception);
   });
 }
 
@@ -1687,7 +1502,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList,
-    kj::Maybe<ActorFetchRetryState> retryState);
+    kj::Maybe<kj::Rc<ActorCallRetryState>> retryState);
 
 jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
@@ -1773,26 +1588,31 @@ jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList,
-    ActorFetchRetryState state,
+    kj::Rc<ActorCallRetryState> retryState,
     kj::Exception exception) {
   KJ_IF_SOME(reason, getAbortReason(js, *jsRequest)) {
-    state.recordAbort(exception);
+    retryState->recordCanceled();
     return js.rejectedPromise<jsg::Ref<Response>>(kj::mv(reason));
   }
-  auto delayOrException = state.prepareRetry(kj::mv(exception));
+  auto delayOrException = retryState->handleAttemptFailure(kj::mv(exception));
   KJ_IF_SOME(exception, delayOrException.tryGet<kj::Exception>()) {
     return rejectFetch(js, kj::mv(exception));
   }
   auto delay = KJ_ASSERT_NONNULL(delayOrException.tryGet<kj::Duration>());
+  fetcher->onActorCallRetry();
   auto& ioContext = IoContext::current();
   jsRequest->rewindBody(js);
-  fetcher->onActorFetchRetry();
 
   auto signal = jsRequest->getSignal();
-  return ioContext.awaitIo(js,
-      AbortSignal::maybeCancelWrap(js, signal, ioContext.afterLimitTimeout(delay)),
+  auto delayPromise = AbortSignal::maybeCancelWrap(js, signal, ioContext.afterLimitTimeout(delay))
+                          .catch_([retryState = retryState.addRef()](
+                                      kj::Exception&& exception) mutable -> kj::Promise<void> {
+    retryState->recordCanceled();
+    return kj::mv(exception);
+  });
+  return ioContext.awaitIo(js, kj::mv(delayPromise),
       [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
-          retryState = kj::Maybe(kj::mv(state))](jsg::Lock& js) mutable {
+          retryState = kj::Maybe(kj::mv(retryState))](jsg::Lock& js) mutable {
     return fetchImplNoOutputLockAttempt(
         js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(retryState));
   });
@@ -1801,12 +1621,22 @@ jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
 jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
-    kj::Vector<kj::Url> urlList) {
-  kj::Maybe<ActorFetchRetryState> retryState;
-  if (jsRequest->canRewindBody() && fetcher->supportsActorFetchRetries()) {
+  kj::Vector<kj::Url> urlList) {
+  kj::Maybe<kj::Rc<ActorCallRetryState>> retryState;
+  if (fetcher->supportsActorCallRetries()) {
     auto& context = IoContext::current();
-    retryState = ActorFetchRetryState::create(
-        context.getIoChannelFactory().getTimer(), context.getMetrics());
+    auto observationEnabled = ActorRetryGateEnabled(
+        util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH));
+    auto enforcementEnabled = ActorRetryGateEnabled(util::Autogate::isEnabled(
+        util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS));
+    retryState = kj::rc<ActorCallRetryState>(context.getIoChannelFactory().getTimer(),
+        context.getMetrics(),
+        ActorCallRetryState::Config{
+          .callType = ActorRetryCallType::FETCH,
+          .observationEnabled = observationEnabled,
+          .enforcementEnabled = enforcementEnabled,
+          .payloadReplayable = ActorCallPayloadReplayable(jsRequest->canRewindBody()),
+        });
   }
 
   return fetchImplNoOutputLockAttempt(
@@ -1817,20 +1647,26 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList,
-    kj::Maybe<ActorFetchRetryState> retryState) {
+    kj::Maybe<kj::Rc<ActorCallRetryState>> retryState) {
   KJ_ASSERT(!urlList.empty());
 
   auto& ioContext = IoContext::current();
 
   auto signal = jsRequest->getSignal();
   KJ_IF_SOME(reason, getAbortReason(js, *jsRequest)) {
+    KJ_IF_SOME(state, retryState) {
+      state->recordCanceled();
+    }
     return js.rejectedPromise<jsg::Ref<Response>>(kj::mv(reason));
   }
+  kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt;
   KJ_IF_SOME(state, retryState) {
-    KJ_IF_SOME(exception, state.checkDeadline()) {
+    auto attemptOrException = state->startAttempt();
+    KJ_IF_SOME(exception, attemptOrException.tryGet<kj::Exception>()) {
       return rejectFetch(js, kj::mv(exception));
     }
-    state.recordRetry();
+    actorCallAttempt =
+        kj::mv(KJ_ASSERT_NONNULL(attemptOrException.tryGet<ActorCallRetryState::Attempt>()));
   }
 
   // Stash whether this request's body can be rewound (and so the request re-sent), before we lose
@@ -1841,17 +1677,17 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
   bool bodyRewindable = jsRequest->canRewindBody();
   ioContext.getMetrics().setNextSubrequestBodyRewindable(SubrequestBodyRewindable(bodyRewindable));
 
-  kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata;
-  auto countSubrequest = CountSubrequest::YES;
-  KJ_IF_SOME(state, retryState) {
-    actorRetryRequestMetadata = state.getMetadata();
-    countSubrequest = state.countSubrequest();
+  // Get client and trace context (if needed) in one clean call.
+  auto cfBlobJson = jsRequest->serializeCfBlobJson(js);
+  kj::Maybe<Fetcher::ClientWithTracing> maybeClientWithTracing;
+  KJ_IF_SOME(attempt, actorCallAttempt) {
+    maybeClientWithTracing = fetcher->getClientForActorCallAttempt(
+        ioContext, kj::mv(cfBlobJson), "fetch"_kjc, kj::mv(attempt));
+  } else {
+    maybeClientWithTracing =
+        fetcher->getClientWithTracing(ioContext, kj::mv(cfBlobJson), "fetch"_kjc);
   }
-
-  // Get client and trace context (if needed) in one clean call
-  auto clientWithTracing = fetcher->getClientWithTracing(ioContext,
-      jsRequest->serializeCfBlobJson(js), "fetch"_kjc,
-      kj::mv(actorRetryRequestMetadata), countSubrequest);
+  auto clientWithTracing = kj::mv(KJ_ASSERT_NONNULL(maybeClientWithTracing));
   auto traceContext = kj::mv(clientWithTracing.traceContext);
 
   // TODO(cleanup): Don't convert to HttpClient. Use the HttpService interface instead. This
@@ -1920,21 +1756,20 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       // subrequest.
       headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
     }
-    auto webSocketResponse =
-        AbortSignal::maybeCancelWrap(js, signal, client->openWebSocket(url, headers));
+    auto webSocketResponse = client->openWebSocket(url, headers);
     KJ_IF_SOME(state, retryState) {
-      if (state.isRetryEnabled()) {
-        auto resultPromise =
-            captureActorFetchAttempt(kj::mv(webSocketResponse), state.addMetricsRef());
+      if (state->isRetryEnabled()) {
+        auto resultPromise = captureActorFetchAttempt(
+            js, signal, kj::mv(webSocketResponse), state.addRef());
         return ioContext.awaitIo(js, kj::mv(resultPromise),
-            [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
-                urlList = kj::mv(urlList), client = kj::mv(client), signal = kj::mv(signal),
-                retryState = kj::mv(retryState)](jsg::Lock& js,
-                ActorFetchAttemptResult<kj::HttpClient::WebSocketResponse>&& result) mutable
-            -> jsg::Promise<jsg::Ref<Response>> {
-          KJ_SWITCH_ONEOF(result) {
-            KJ_CASE_ONEOF(response, kj::HttpClient::WebSocketResponse) {
-              KJ_ASSERT_NONNULL(retryState).recordRecovered();
+              [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
+                  urlList = kj::mv(urlList), client = kj::mv(client), signal = kj::mv(signal),
+                  retryState = kj::mv(retryState)](jsg::Lock& js,
+                  ActorFetchAttemptResult<kj::HttpClient::WebSocketResponse>&& result) mutable
+              -> jsg::Promise<jsg::Ref<Response>> {
+            KJ_SWITCH_ONEOF(result) {
+              KJ_CASE_ONEOF(response, kj::HttpClient::WebSocketResponse) {
+              KJ_ASSERT_NONNULL(retryState)->recordRecovered();
               return handleWebSocketFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest),
                   kj::mv(urlList), kj::mv(client), kj::mv(signal), kj::mv(response));
             }
@@ -1942,11 +1777,12 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
               return retryActorFetch(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
                   kj::mv(KJ_ASSERT_NONNULL(retryState)), kj::mv(failure.exception));
             }
-          }
-          KJ_UNREACHABLE;
-        });
+            }
+            KJ_UNREACHABLE;
+          });
       }
     }
+    webSocketResponse = AbortSignal::maybeCancelWrap(js, signal, kj::mv(webSocketResponse));
     return ioContext.awaitIo(js, kj::mv(webSocketResponse),
         [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
             client = kj::mv(client), signal = kj::mv(signal)](
@@ -2012,7 +1848,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, static_cast<uint64_t>(0));
     }
     auto responsePromise =
-        AbortSignal::maybeCancelWrap(js, signal, kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response))
+        kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response)
             .catch_([](kj::Exception&& exception) -> kj::Promise<kj::HttpClient::Response> {
       if (exception.getDescription().startsWith("invalid Content-Length header value")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, exception.getDescription());
@@ -2022,18 +1858,18 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       return kj::mv(exception);
     });
     KJ_IF_SOME(state, retryState) {
-      if (state.isRetryEnabled()) {
+      if (state->isRetryEnabled()) {
         auto resultPromise =
-            captureActorFetchAttempt(kj::mv(responsePromise), state.addMetricsRef());
+            captureActorFetchAttempt(js, signal, kj::mv(responsePromise), state.addRef());
         return ioContext.awaitIo(js, kj::mv(resultPromise),
-            [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
-                urlList = kj::mv(urlList), client = kj::mv(client),
-                traceContext = kj::mv(traceContext), retryState = kj::mv(retryState)](
-                jsg::Lock& js, ActorFetchAttemptResult<kj::HttpClient::Response>&& result) mutable
-            -> jsg::Promise<jsg::Ref<Response>> {
-          KJ_SWITCH_ONEOF(result) {
-            KJ_CASE_ONEOF(response, kj::HttpClient::Response) {
-              KJ_ASSERT_NONNULL(retryState).recordRecovered();
+              [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
+                  urlList = kj::mv(urlList), client = kj::mv(client),
+                  traceContext = kj::mv(traceContext), retryState = kj::mv(retryState)](
+                  jsg::Lock& js, ActorFetchAttemptResult<kj::HttpClient::Response>&& result) mutable
+              -> jsg::Promise<jsg::Ref<Response>> {
+            KJ_SWITCH_ONEOF(result) {
+              KJ_CASE_ONEOF(response, kj::HttpClient::Response) {
+              KJ_ASSERT_NONNULL(retryState)->recordRecovered();
               return handleHttpFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest),
                   kj::mv(urlList), kj::mv(client), traceContext, kj::mv(response));
             }
@@ -2041,11 +1877,12 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
               return retryActorFetch(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
                   kj::mv(KJ_ASSERT_NONNULL(retryState)), kj::mv(failure.exception));
             }
-          }
-          KJ_UNREACHABLE;
-        });
+            }
+            KJ_UNREACHABLE;
+          });
       }
     }
+    responsePromise = AbortSignal::maybeCancelWrap(js, signal, kj::mv(responsePromise));
     return ioContext.awaitIo(js, kj::mv(responsePromise),
         [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
             client = kj::mv(client), traceContext = kj::mv(traceContext)](
@@ -2094,7 +1931,6 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
   if (isRedirectStatusCode(response.statusCode) &&
       jsRequest->getRedirectEnum() == Request::Redirect::FOLLOW) {
     KJ_IF_SOME(l, response.headers->get(kj::HttpHeaderId::LOCATION)) {
-
       // Pump the response body to a singleton null stream before following the redirect.
       auto& ioContext = IoContext::current();
       return ioContext.awaitIo(js,
@@ -2867,40 +2703,43 @@ jsg::Promise<Fetcher::ScheduledResult> Fetcher::scheduled(
 
 kj::Own<WorkerInterface> Fetcher::getClient(
     IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
-  auto clientWithTracing = getClientWithTracing(
-      ioContext, kj::mv(cfStr), kj::mv(operationName), kj::none, CountSubrequest::YES);
+  auto clientWithTracing =
+      getClientWithTracing(ioContext, kj::mv(cfStr), kj::mv(operationName));
   return clientWithTracing.client.attach(kj::mv(clientWithTracing.traceContext));
 }
 
 Fetcher::ClientWithTracing Fetcher::getClientWithTracing(IoContext& ioContext,
     kj::Maybe<kj::String> cfStr,
+    kj::ConstString operationName) {
+  return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName));
+}
+
+Fetcher::ClientWithTracing Fetcher::getClientForActorCallAttempt(IoContext& ioContext,
+    kj::Maybe<kj::String> cfStr,
     kj::ConstString operationName,
-    kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
-    CountSubrequest countSubrequest) {
-  KJ_IF_SOME(metadata, actorRetryRequestMetadata) {
-    auto& outgoingFactory = KJ_REQUIRE_NONNULL(
-        channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>(),
-        "actor retry metadata supplied to an unsupported Fetcher");
-    KJ_REQUIRE(outgoingFactory->supportsActorFetchRetries(),
-        "actor retry metadata supplied to an unsupported Fetcher");
-    if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-      auto result = outgoingFactory->newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr),
-          kj::mv(metadata), countSubrequest,
-          [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
-      return ClientWithTracing{kj::mv(result.client), kj::none};
-    }
-    kj::Maybe<TraceContext> traceContext;
-    auto result = outgoingFactory->newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr),
-        kj::mv(metadata), countSubrequest,
-        [&](TraceContext& outerTraceContext) -> kj::Maybe<SpanParent> {
-      if (!outerTraceContext.isObserved()) return kj::none;
-      traceContext = outerTraceContext.getSpanParents().newChild(operationName.clone());
-      return KJ_ASSERT_NONNULL(traceContext).getUserSpanParent();
-    });
-    return ClientWithTracing{kj::mv(result.client), kj::mv(traceContext)};
+    ActorCallRetryState::Attempt attempt) {
+  if (!attempt.hasMetadata()) {
+    return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName));
   }
 
-  return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName));
+  auto& outgoingFactory = KJ_REQUIRE_NONNULL(
+      channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>(),
+      "actor call attempt supplied to an unsupported Fetcher");
+  KJ_REQUIRE(outgoingFactory->supportsActorCallRetries(),
+      "actor call attempt supplied to an unsupported Fetcher");
+  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
+    auto result = outgoingFactory->newActorCallAttempt(kj::mv(cfStr), kj::mv(attempt),
+        [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
+    return ClientWithTracing{kj::mv(result.client), kj::none};
+  }
+  kj::Maybe<TraceContext> traceContext;
+  auto result = outgoingFactory->newActorCallAttempt(kj::mv(cfStr), kj::mv(attempt),
+      [&](TraceContext& outerTraceContext) -> kj::Maybe<SpanParent> {
+    if (!outerTraceContext.isObserved()) return kj::none;
+    traceContext = outerTraceContext.getSpanParents().newChild(operationName.clone());
+    return KJ_ASSERT_NONNULL(traceContext).getUserSpanParent();
+  });
+  return ClientWithTracing{kj::mv(result.client), kj::mv(traceContext)};
 }
 
 Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
@@ -2959,11 +2798,20 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
   KJ_UNREACHABLE;
 }
 
-bool Fetcher::supportsActorFetchRetries() {
+bool Fetcher::supportsActorCallRetries() {
   KJ_IF_SOME(outgoingFactory, channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>()) {
-    return outgoingFactory->supportsActorFetchRetries();
+    return outgoingFactory->supportsActorCallRetries();
   }
   return false;
+}
+
+void Fetcher::onActorCallRetry() {
+  auto& outgoingFactory = KJ_REQUIRE_NONNULL(
+      channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>(),
+      "actor call retry requested from an unsupported Fetcher");
+  KJ_REQUIRE(outgoingFactory->supportsActorCallRetries(),
+      "actor call retry requested from an unsupported Fetcher");
+  outgoingFactory->onActorCallRetry();
 }
 
 Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
@@ -3023,15 +2871,6 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
     }
   }
   KJ_UNREACHABLE;
-}
-
-void Fetcher::onActorFetchRetry() {
-  auto& outgoingFactory = KJ_REQUIRE_NONNULL(
-      channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>(),
-      "actor fetch retry requested from an unsupported Fetcher");
-  KJ_REQUIRE(outgoingFactory->supportsActorFetchRetries(),
-      "actor fetch retry requested from an unsupported Fetcher");
-  outgoingFactory->onActorFetchRetry();
 }
 
 kj::Own<IoChannelFactory::SubrequestChannel> Fetcher::getSubrequestChannel(IoContext& ioContext) {

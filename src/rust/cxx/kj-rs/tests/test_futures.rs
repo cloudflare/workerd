@@ -142,6 +142,40 @@ pub async fn new_threaded_delay_future_void() {
     ThreadedDelayFuture::new().await
 }
 
+thread_local! {
+    static RETAINED_WAKER: std::cell::RefCell<Option<Waker>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+struct RetainedWakerFuture;
+
+impl Future for RetainedWakerFuture {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        RETAINED_WAKER.with(|waker| {
+            *waker.borrow_mut() = Some(cx.waker().clone());
+        });
+        Poll::Pending
+    }
+}
+
+pub async fn new_retained_waker_future_void() {
+    RetainedWakerFuture.await
+}
+
+pub fn wake_retained_waker_from_background_thread() {
+    let waker =
+        RETAINED_WAKER.with(|waker| waker.borrow().as_ref().expect("no retained waker").clone());
+    on_background_thread(move || waker.wake_by_ref());
+}
+
+pub fn clear_retained_waker() {
+    RETAINED_WAKER.with(|waker| {
+        drop(waker.borrow_mut().take().expect("no retained waker"));
+    });
+}
+
 pub async fn new_layered_ready_future_void() -> Result<()> {
     crate::ffi::new_ready_promise_void()
         .await

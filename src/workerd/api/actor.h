@@ -348,13 +348,12 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 
   Result newSingleUseClient(
       kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override;
-  bool supportsActorFetchRetries() const override {
+  bool supportsActorCallRetries() const override {
     return true;
   }
-  void onActorFetchRetry() override;
-  Result newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
-      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
-      CountSubrequest countSubrequest,
+  void onActorCallRetry() override;
+  Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
+      ActorCallRetryState::Attempt attempt,
       MakeUserSpanParent makeUserSpanParent) override;
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
@@ -417,16 +416,15 @@ class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 
   Result newSingleUseClient(
       kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override;
-  bool supportsActorFetchRetries() const override {
+  bool supportsActorCallRetries() const override {
     return true;
   }
-  void onActorFetchRetry() override {
-    // Keep the pre-resolved primary channel. Reconnecting a broken channel requires routing state
-    // that this factory does not own, but request-level disconnects can still succeed on retry.
+  void onActorCallRetry() override {
+    // Keep the pre-resolved primary channel on retries. Reconnecting a broken channel requires
+    // routing state that this factory does not own, but request-level disconnects can still succeed.
   }
-  Result newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
-      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
-      CountSubrequest countSubrequest,
+  Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
+      ActorCallRetryState::Attempt attempt,
       MakeUserSpanParent makeUserSpanParent) override;
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 

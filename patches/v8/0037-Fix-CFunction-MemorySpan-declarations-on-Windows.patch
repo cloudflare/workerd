@@ -11,7 +11,7 @@ which leaves the type incomplete and fails under clang-cl with MSVC's STL.
 Include v8-fast-api-calls.h before these declarations so CFunction is complete.
 
 diff --git a/include/v8-template.h b/include/v8-template.h
-index f270c74681ad3eeb35500697dbccef24b1949f93..103bbf2a1f626978f9de718cd1e14ad67f387005 100644
+index 182293f05bd8699958f4d61ff552be6a9decd349..14272332bc4826849c560509ab88f44eae2d1a47 100644
 --- a/include/v8-template.h
 +++ b/include/v8-template.h
 @@ -11,6 +11,7 @@

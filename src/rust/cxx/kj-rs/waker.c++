@@ -13,6 +13,9 @@ ArcWakerPromiseNode::ArcWakerPromiseNode(kj::Promise<void> promise)
 }
 
 void ArcWakerPromiseNode::destroy() noexcept {
+  // Cancel the cross-thread promise before releasing the owner. Rust may retain
+  // and wake a cloned waker after the FuturePollEvent has been destroyed.
+  node = nullptr;
   auto drop = kj::mv(owner);
 }
 

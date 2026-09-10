@@ -106,10 +106,14 @@ export const nativeBackedMinReadUnderDelivery = {
     const stream = new Blob(['hello world']).stream();
     const reader = stream.getReader({ mode: 'byob' });
     // A minimum larger than the source's total: KJ tryRead semantics make the short read
-    // the EOF signal, and the partial fill commits fused as {done: true, value: partial}.
+    // the EOF signal. The partial fill is delivered done=false and the stream closes; the
+    // next read observes EOF with an empty view (the C++-parity readAtLeast tail shape).
     const { done, value } = await reader.read(new Uint8Array(64), { min: 20 });
-    strictEqual(done, true);
+    strictEqual(done, false);
     strictEqual(new TextDecoder().decode(value), 'hello world');
+    const eof = await reader.read(new Uint8Array(16));
+    strictEqual(eof.done, true);
+    strictEqual(eof.value.byteLength, 0);
   },
 };
 

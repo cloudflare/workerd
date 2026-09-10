@@ -30,15 +30,15 @@ enum class ActorRetryCallType : uint8_t {
   FETCH,
   JSRPC,
   OTHER,
-  COUNT,
 };
 
 enum class ActorRetryOutcome : uint8_t {
   RECOVERED,
   RETRIES_EXHAUSTED,
   UNABLE_TO_RETRY,
+  CLAIM_REJECTED,
+  CANCELED,
   OTHER,
-  COUNT,
 };
 
 class WorkerInterface;
@@ -142,14 +142,10 @@ class RequestObserver: public kj::Refcounted {
   // Wrap an HttpClient to observe its request and response activity. `countSubrequest` controls
   // whether its usage contributes to the request's logical subrequest count.
   virtual kj::Own<WorkerInterface> wrapSubrequestClient(
-      kj::Own<WorkerInterface> client, CountSubrequest countSubrequest) {
-    return kj::mv(client);
-  }
+      kj::Own<WorkerInterface> client, CountSubrequest countSubrequest);
 
   // Wrap an HttpClient so that its usage is counted in the request's actor subrequest count.
-  virtual kj::Own<WorkerInterface> wrapActorSubrequestClient(kj::Own<WorkerInterface> client) {
-    return kj::mv(client);
-  }
+  virtual kj::Own<WorkerInterface> wrapActorSubrequestClient(kj::Own<WorkerInterface> client);
 
   // Record whether the next outgoing subrequest's request body can be rewound (e.g. a buffered or
   // null fetch body). Consumed when the subrequest client for that call is constructed. The
@@ -162,8 +158,10 @@ class RequestObserver: public kj::Refcounted {
   // Records an additional outgoing actor call started by a runtime retry loop.
   virtual void recordActorRetry(ActorRetryCallType callType) {}
 
-  // Records the terminal outcome of an outgoing actor call after a retry-relevant failure.
-  virtual void recordActorRetryOutcome(ActorRetryCallType callType, ActorRetryOutcome outcome) {}
+  // Records the terminal outcome and added latency of an outgoing actor retry loop that started at
+  // least one retry attempt.
+  virtual void recordActorRetryOutcome(
+      ActorRetryCallType callType, ActorRetryOutcome outcome, kj::Duration retryAddedLatency) {}
 
   // Fired immediately before an actor fetch dispatches into user code, so an observer can claim the
   // request's retry-token nonce against the actor's claim store. No-op in the base observer;

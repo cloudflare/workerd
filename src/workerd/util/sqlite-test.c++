@@ -337,6 +337,13 @@ void doLockTest(bool walMode) {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
 
+  auto expectBusy = [](const kj::Exception& e) {
+    KJ_EXPECT(e.getDescription().contains("database is locked"), e);
+    KJ_EXPECT(!e.getDescription().contains("NOSENTRY"), e);
+    auto sentryTag = KJ_ASSERT_NONNULL(e.getDetail(SENTRY_TAG_DETAIL_ID));
+    KJ_EXPECT(sentryTag.asChars() == "NOSENTRY"_kj, e);
+  };
+
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
   if (walMode) {
@@ -376,7 +383,7 @@ void doLockTest(bool walMode) {
   {
     // Arrange for two threads to increment in a loop simultaneously. Eventually one will fail with
     // a conflict.
-    kj::Thread thread([&vfs = vfs, &stop, &counter]() noexcept {
+    kj::Thread thread([&vfs = vfs, &stop, &counter, &expectBusy]() noexcept {
       KJ_DEFER(stop.store(true, std::memory_order_relaxed););
       SqliteDatabase db2(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
       while (!stop.load(std::memory_order_relaxed)) {
@@ -384,7 +391,7 @@ void doLockTest(bool walMode) {
           db2.run(INCREMENT);
           counter.fetch_add(1, std::memory_order_relaxed);
         })) {
-          KJ_EXPECT(e.getDescription().contains("database is locked"), e);
+          expectBusy(e);
           break;
         }
       }
@@ -398,7 +405,7 @@ void doLockTest(bool walMode) {
           db.run(INCREMENT);
           counter.fetch_add(1, std::memory_order_relaxed);
         })) {
-          KJ_EXPECT(e.getDescription().contains("database is locked"), e);
+          expectBusy(e);
           break;
         }
       }

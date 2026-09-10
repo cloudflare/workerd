@@ -237,3 +237,130 @@ export const errorTypePreservationPipeThrough = {
     strictEqual(reason.code, 'ERR_PIPE');
   },
 };
+
+// The WPT 'starts errored … abort promise' residue: the destination's
+// abort() hook returns a PROMISE. Fulfilled: consumed silently, the
+// pipe still rejects with the SOURCE error. Rejected: per spec the
+// shutdown action's failure REPLACES the rejection reason.
+export const destAbortPromiseStates = {
+  async test() {
+    // Fulfilled abort promise.
+    {
+      const err = new Error('src-err');
+      let abortCalled = false;
+      const rs = new ReadableStream({
+        start(c) {
+          c.error(err);
+        },
+      });
+      const ws = new WritableStream({
+        abort() {
+          abortCalled = true;
+          return Promise.resolve('ignored');
+        },
+      });
+      strictEqual(await rejectionOf(rs.pipeTo(ws)), err);
+      strictEqual(abortCalled, true);
+    }
+    // Rejected abort promise.
+    {
+      const err = new Error('src-err');
+      const abortErr = new Error('abort-failed');
+      const rs = new ReadableStream({
+        start(c) {
+          c.error(err);
+        },
+      });
+      const ws = new WritableStream({
+        abort() {
+          return Promise.reject(abortErr);
+        },
+      });
+      const reason = await rejectionOf(rs.pipeTo(ws));
+      strictEqual(reason, abortErr);
+    }
+  },
+};
+
+// An abort signal triggers both abort-destination and cancel-source
+// shutdown actions; preventAbort and preventCancel must suppress both.
+export const preventAbortAndCancelCombo = {
+  async test() {
+    const err = new Error('abort-reason');
+    const abortController = new AbortController();
+    let abortCalled = false;
+    let cancelCalled = false;
+    let controller;
+    const rs = new ReadableStream({
+      start(c) {
+        controller = c;
+      },
+      cancel() {
+        cancelCalled = true;
+      },
+    });
+    const ws = new WritableStream({
+      abort() {
+        abortCalled = true;
+      },
+    });
+    const pipeP = rs.pipeTo(ws, {
+      preventAbort: true,
+      preventCancel: true,
+      preventClose: true,
+      signal: abortController.signal,
+    });
+    await scheduler.wait(1);
+    abortController.abort(err);
+    // Wake the pending read so both pipe loops observe the aborted signal.
+    controller.enqueue('chunk');
+    strictEqual(await rejectionOf(pipeP), err);
+    strictEqual(abortCalled, false);
+    strictEqual(cancelCalled, false);
+    strictEqual(rs.locked, false);
+    ws.getWriter(); // dest untouched and re-lockable
+  },
+};
+
+// The WPT 'shutdown must not occur until the final write completes'
+// shape: the source errors while a write is IN FLIGHT — the
+// destination's abort must not run until that write settles.
+export const shutdownWaitsForInFlightWrite = {
+  async test() {
+    const err = new Error('src-err');
+    const events = [];
+    let releaseWrite;
+    const parked = new Promise((resolve) => (releaseWrite = resolve));
+    let controller;
+    const rs = new ReadableStream({
+      start(c) {
+        controller = c;
+      },
+    });
+    const ws = new WritableStream({
+      write() {
+        events.push('write-start');
+        return parked;
+      },
+      abort(reason) {
+        events.push(`abort:${reason.message}`);
+      },
+    });
+    const pipeP = rs.pipeTo(ws);
+    let pipeSettled = false;
+    pipeP.then(
+      () => (pipeSettled = true),
+      () => (pipeSettled = true)
+    );
+    controller.enqueue('chunk');
+    await scheduler.wait(10);
+    controller.error(err);
+    await scheduler.wait(20);
+    // The write is still parked: the pipe and abort action must not settle yet.
+    strictEqual(events.join(','), 'write-start');
+    strictEqual(pipeSettled, false);
+    releaseWrite();
+    strictEqual(await rejectionOf(pipeP), err);
+    strictEqual(events.join(','), 'write-start,abort:src-err');
+  },
+};

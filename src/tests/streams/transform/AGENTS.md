@@ -81,7 +81,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `reentrancy.js` | size()-error UAF regressions (#2) + sequential/identity shapes; all 9 WPT reentrant-in-size() ops: 6 parity at finite hwm, #10-#12 divergences |
 | `buffer-lifecycle.js` | chunk identity; detach-while-queued observed by reader (parity) |
 | `then-interceptors.js` | ledger #7 |
-| `roundtrip.js` | JS transform → ITS pipe does not hang (regression) |
+| `roundtrip.js` | JS transform → ITS pipe does not hang (regression); the workerd `TransformStream({ expectedLength })` extension surfaces a concrete Content-Length on fetch/Request bodies (parity; issue #5113 regression — the TS transform advertises the value through its readable's controller) |
 | `gc.js` | write→read handoff survives gc() with the stream dropped (--expose-gc) |
 | `legacy-identity-fallback.js` / `legacy-backpressure.js` | see Compatibility flags |
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): writes flow through the transformer into conduit reads; a readable-side backlog plus close sentinel swept in one batch; flush() output rides the final batch; expectedLength undefined; transformer errors propagate |

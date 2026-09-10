@@ -29,8 +29,7 @@ struct GeneratorNext {
 };
 
 template <typename Signature, typename TypeWrapper>
-static kj::Maybe<Signature> tryGetGeneratorFunction(
-    Lock& js, JsObject& object, kj::StringPtr name) {
+kj::Maybe<Signature> tryGetGeneratorFunction(Lock& js, JsObject& object, kj::StringPtr name) {
   auto value = object.get(js, name);
   return TypeWrapper::from(js.v8Isolate)
       .tryUnwrap(js, js.v8Context(), value, static_cast<Signature*>(nullptr),

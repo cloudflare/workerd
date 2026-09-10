@@ -73,6 +73,37 @@ function isActualObject(value: unknown): value is object {
   return value != null && typeof value === 'object';
 }
 
+// A sink write() rejection wrapped in this marker rejects the WRITE
+// REQUEST but leaves the stream writable — the workerd-internal contract
+// for the identity transforms (IdentityTransformStream, FixedLengthStream;
+// matching the C++ internal controllers), where an invalid chunk is a
+// per-write error, not a stream error. The standard CompressionStream pair
+// does NOT use it: per spec an invalid chunk there errors both sides. Under
+// pure WHATWG semantics every sink rejection errors the stream, so this
+// channel is unreachable for user-provided sinks: the wrapper is minted
+// only via internalsForPipe.nonFatalWriteRejection, which user code cannot
+// reach. Detection is by private brand.
+let isNonFatalWriteRejection: (
+  value: unknown
+) => value is NonFatalWriteRejection;
+
+class NonFatalWriteRejection {
+  #error: unknown;
+
+  static {
+    isNonFatalWriteRejection = (value): value is NonFatalWriteRejection =>
+      isActualObject(value) && #error in value;
+  }
+
+  constructor(error: unknown) {
+    this.#error = error;
+  }
+
+  get error(): unknown {
+    return this.#error;
+  }
+}
+
 function assertPrivateSymbol(symbol: symbol): void {
   if (symbol !== kPrivateSymbol) {
     throw new TypeError('Illegal constructor');
@@ -122,6 +153,10 @@ let writableStreamFinishErroringIfNeeded: <W>(
 ) => void;
 let writableStreamMarkFirstWriteRequestInFlight: <W>(
   stream: WritableStream<W>
+) => void;
+let writableStreamFinishInFlightWriteWithNonFatalError: <W>(
+  stream: WritableStream<W>,
+  error: unknown
 ) => void;
 let writableStreamFinishInFlightWrite: <W>(stream: WritableStream<W>) => void;
 let writableStreamFinishInFlightWriteWithError: <W>(
@@ -583,6 +618,17 @@ class WritableStream<W = unknown> {
       stream.#inFlightWriteRequest = undefined;
       request.reject(error);
       writableStreamDealWithRejection(stream, error);
+    };
+
+    // The non-fatal variant (see NonFatalWriteRejection): rejects the
+    // in-flight write's request WITHOUT the deal-with-rejection state
+    // transition — the stream stays writable and the queue keeps going.
+    writableStreamFinishInFlightWriteWithNonFatalError = (stream, error) => {
+      // assert: in-flight write request is set (caller guarantee)
+      const request = stream
+        .#inFlightWriteRequest as PromiseWithResolversType<void>;
+      stream.#inFlightWriteRequest = undefined;
+      request.reject(error);
     };
 
     writableStreamMarkCloseRequestInFlight = (stream) => {
@@ -1090,30 +1136,47 @@ class WritableStreamDefaultController<
     PromisePrototypeThen(
       promise,
       () => {
-        writableStreamFinishInFlightWrite(stream);
-        const state = getWritableStreamState(stream);
-        // Dequeue AFTER the write completes (spec ordering).
-        const entry = ArrayPrototypeShift(this.#queue) as QueuedWrite<W>;
-        this.#queueTotalSize -= entry.size;
-        if (this.#queueTotalSize < 0) this.#queueTotalSize = 0;
-        if (
-          !writableStreamCloseQueuedOrInFlight(stream) &&
-          state === 'writable'
-        ) {
-          writableStreamUpdateBackpressure(
-            stream,
-            controllerGetDesiredSize(this) <= 0
-          );
-        }
-        this.#advanceQueueIfNeeded();
+        this.#completeInFlightWrite(() => {
+          writableStreamFinishInFlightWrite(stream);
+        });
       },
       (e: unknown) => {
+        // Workerd-internal non-fatal rejection (identity-stream invalid
+        // chunks): reject THIS write's request but keep the stream
+        // writable and continue with the queue — the fulfillment
+        // bookkeeping with the request rejected instead of resolved.
+        if (isNonFatalWriteRejection(e)) {
+          this.#completeInFlightWrite(() => {
+            writableStreamFinishInFlightWriteWithNonFatalError(stream, e.error);
+          });
+          return;
+        }
         if (getWritableStreamState(stream) === 'writable') {
           this.#clearAlgorithms();
         }
         writableStreamFinishInFlightWriteWithError(stream, e);
       }
     );
+  }
+
+  // Settles the in-flight write request via `finish`, then does the
+  // bookkeeping the stream needs regardless of how the request settled:
+  // dequeue AFTER the write completes (spec ordering), refresh
+  // backpressure, and advance the queue.
+  #completeInFlightWrite(finish: () => void): void {
+    const stream = this.#stream;
+    finish();
+    const state = getWritableStreamState(stream);
+    const entry = ArrayPrototypeShift(this.#queue) as QueuedWrite<W>;
+    this.#queueTotalSize -= entry.size;
+    if (this.#queueTotalSize < 0) this.#queueTotalSize = 0;
+    if (!writableStreamCloseQueuedOrInFlight(stream) && state === 'writable') {
+      writableStreamUpdateBackpressure(
+        stream,
+        controllerGetDesiredSize(this) <= 0
+      );
+    }
+    this.#advanceQueueIfNeeded();
   }
 }
 
@@ -1730,6 +1793,12 @@ module.exports = {
     willAcceptWrite: <W>(stream: WritableStream<W>): boolean =>
       getWritableStreamState(stream) === 'writable' &&
       !writableStreamCloseQueuedOrInFlight(stream),
+    // Wraps a sink write() rejection so it rejects only ITS write request,
+    // leaving the stream writable (the identity streams' invalid-chunk
+    // contract — see NonFatalWriteRejection). The sink throws (or rejects
+    // with) the wrapper; the write request rejects with `error`.
+    nonFatalWriteRejection: (error: unknown): NonFatalWriteRejection =>
+      new NonFatalWriteRejection(error),
     getWriterReadyPromise: <W>(writer: WritableStreamDefaultWriter<W>) =>
       getWriterReadyPromiseInternal(writer),
     getWriterClosedPromise: <W>(writer: WritableStreamDefaultWriter<W>) =>

@@ -679,6 +679,18 @@ export class ERR_SOCKET_BAD_PORT extends NodeError {
   }
 }
 
+export class EADDRINUSE extends NodeError {
+  syscall = 'bind';
+  address: string;
+  port: number;
+
+  constructor(address: string, port: number) {
+    super('EADDRINUSE', `bind EADDRINUSE ${address}:${port}`);
+    this.address = address;
+    this.port = port;
+  }
+}
+
 export class EPIPE extends NodeError {
   constructor() {
     super('EPIPE', 'This socket has been ended by the other party');
@@ -703,6 +715,15 @@ export class ERR_SOCKET_CLOSED extends NodeError {
 export class ERR_SOCKET_CONNECTING extends NodeError {
   constructor() {
     super('ERR_SOCKET_CONNECTING', 'Socket is already connecting');
+  }
+}
+
+export class ERR_SOCKET_HANDLE_ADOPTED extends NodeError {
+  constructor() {
+    super(
+      'ERR_SOCKET_HANDLE_ADOPTED',
+      'The bound socket has already been adopted by a server or socket'
+    );
   }
 }
 

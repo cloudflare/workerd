@@ -149,10 +149,11 @@ export const readDetachesCallerBuffer = {
   },
 };
 
-// close() while an UNFILLED BYOB read is pending. DIVERGENCE: C++
-// resolves the read done with an empty view; the TypeScript read PENDS
-// FOREVER while close() itself succeeds (bounded observation — the
-// close-below-min defect family, without any min involved).
+// close() while an UNFILLED BYOB read is pending: the read resolves done
+// with an empty view over the transferred buffer (parity; under
+// TypeScript the parked read settles via the deferred end-of-data
+// settlement, one microtask after close(); its descriptor remains
+// available for a later respond(0)).
 export const closeWithPendingUnfilledByobRead = {
   async test() {
     let controller;
@@ -172,13 +173,9 @@ export const closeWithPendingUnfilledByobRead = {
       ),
       scheduler.wait(250).then(() => ({ state: 'pending' })),
     ]);
-    if (usingTsImpl) {
-      strictEqual(outcome.state, 'pending');
-    } else {
-      strictEqual(outcome.state, 'fulfilled');
-      strictEqual(outcome.r.done, true);
-      strictEqual(outcome.r.value.byteLength, 0);
-    }
+    strictEqual(outcome.state, 'fulfilled');
+    strictEqual(outcome.r.done, true);
+    strictEqual(outcome.r.value.byteLength, 0);
     await reader.closed;
   },
 };
@@ -193,5 +190,95 @@ export const controllerType = {
       },
     });
     strictEqual(c instanceof ReadableByteStreamController, true);
+  },
+};
+
+// cancel() while a partially filled pull-into is pending (WPT
+// 'cancel() with partially filled pending pull() request'). DIVERGENCE
+// (ledger #21): a partial enqueue invalidates the original request on
+// both sides; TypeScript exposes a fresh request with a view shrunk to
+// the remaining byte count (spec), while C++ exposes null. Cancellation
+// discards the partial bytes, with the result shape diverging (#22).
+export const cancelWithPartiallyFilledPull = {
+  async test() {
+    const events = [];
+    let controller;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        controller = c;
+      },
+      cancel(reason) {
+        events.push(`cancel:${reason}`);
+      },
+    });
+    const reader = rs.getReader({ mode: 'byob' });
+    const readP = reader.read(new Uint16Array(1)); // wants 2 bytes
+    const initialRequest = controller.byobRequest;
+    strictEqual(initialRequest.view.byteLength, 2);
+    controller.enqueue(new Uint8Array([0x11])); // partial: 1 byte
+    strictEqual(initialRequest.view, null);
+    if (usingTsImpl) {
+      const remainingRequest = controller.byobRequest;
+      ok(remainingRequest !== initialRequest);
+      strictEqual(remainingRequest.view.byteLength, 1);
+    } else {
+      strictEqual(controller.byobRequest, null);
+    }
+    await scheduler.wait(1);
+    const cancelP = reader.cancel('why');
+    const read = await Promise.race([
+      readP.then(
+        (r) =>
+          `read:done=${r.done},len=${r.value ? r.value.byteLength : 'undef'}`,
+        (e) => `read-rejected:${e.name}`
+      ),
+      scheduler.wait(200).then(() => 'read:pending'),
+    ]);
+    const cancel = await Promise.race([
+      cancelP.then(
+        () => 'cancel:fulfilled',
+        (e) => `cancel-rejected:${e.name}`
+      ),
+      scheduler.wait(200).then(() => 'cancel:pending'),
+    ]);
+    strictEqual(
+      read,
+      usingTsImpl ? 'read:done=true,len=undef' : 'read:done=true,len=0'
+    );
+    strictEqual(cancel, 'cancel:fulfilled');
+    strictEqual(events.join(','), 'cancel:why');
+  },
+};
+
+// read(view) then immediate cancel() (WPT 'getReader(), read(view),
+// then cancel()'): DIVERGENCE — C++ pulls proactively on the read, so
+// pull runs BEFORE the cancel hook; TypeScript never pulls (spec: the
+// cancel wins). The read resolves done on both.
+export const readViewThenCancelOrdering = {
+  async test() {
+    const events = [];
+    const rs = new ReadableStream({
+      type: 'bytes',
+      pull() {
+        events.push('pull');
+      },
+      cancel(reason) {
+        events.push(`cancel:${reason}`);
+      },
+    });
+    const reader = rs.getReader({ mode: 'byob' });
+    const readP = reader.read(new Uint8Array(4));
+    const cancelP = reader.cancel('stop');
+    await Promise.all([
+      readP.then((r) => events.push(`read:done=${r.done}`)),
+      cancelP,
+    ]);
+    strictEqual(
+      events.join(','),
+      usingTsImpl
+        ? 'cancel:stop,read:done=true'
+        : 'pull,cancel:stop,read:done=true'
+    );
   },
 };

@@ -26,6 +26,7 @@
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 
 import inner from 'cloudflare-internal:sockets';
+import { tcpPorts } from 'cloudflare-internal:http';
 
 import {
   AbortError,
@@ -37,8 +38,10 @@ import {
   ERR_SOCKET_CLOSED,
   ERR_SOCKET_CLOSED_BEFORE_CONNECTION,
   ERR_SOCKET_CONNECTING,
+  ERR_SOCKET_HANDLE_ADOPTED,
   ERR_INVALID_IP_ADDRESS,
   ERR_INVALID_ADDRESS,
+  EADDRINUSE,
   EPIPE,
 } from 'node-internal:internal_errors';
 
@@ -99,6 +102,42 @@ export const kReinitializeHandle = Symbol('kReinitializeHandle');
 // socket.opened promise will be stored here.
 const kSocketInfo = Symbol('kSocketInfo');
 
+// The local address of a Socket, either adopted from a BoundSocket or autobound
+// on connect. kBoundReserved marks an entry held in the port table that must be
+// released on destroy.
+const kBoundSource = Symbol('kBoundSource');
+const kBoundReserved = Symbol('kBoundReserved');
+const kBoundSocketConsume = Symbol('kBoundSocketConsume');
+
+const DEFAULT_IPV4_ADDR = '0.0.0.0';
+const DEFAULT_IPV6_ADDR = '::';
+
+// Reserves port in the isolate's TCP port table (shared with http servers),
+// allocating an ephemeral port for 0. Throws EADDRINUSE on conflict.
+export function bindPort(
+  address: string,
+  port: number,
+  reusePort = false
+): number {
+  if (port === 0) {
+    port = tcpPorts.ephemeral();
+    if (port === 0) throw new EADDRINUSE(address, port);
+  }
+  if (!tcpPorts.tryBind(port, reusePort)) {
+    throw new EADDRINUSE(address, port);
+  }
+  return port;
+}
+
+function releaseBoundSource(socket: Socket): void {
+  if (socket[kBoundReserved]) {
+    tcpPorts.unregister(socket);
+    tcpPorts.release((socket[kBoundSource] as AddressInfo).port);
+    socket[kBoundReserved] = false;
+  }
+  socket[kBoundSource] = null;
+}
+
 // IPv4 Segment
 const v4Seg = '(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])';
 const v4Str = `(?:${v4Seg}\\.){3}${v4Seg}`;
@@ -134,7 +173,7 @@ export type SocketOptions = {
   writableObjectMode?: boolean;
   keepAliveInitialDelay?: number;
   fd?: number;
-  handle?: Socket['_handle'];
+  handle?: Socket['_handle'] | BoundSocket;
   noDelay?: boolean;
   keepAlive?: boolean;
   allowHalfOpen?: boolean;
@@ -143,6 +182,109 @@ export type SocketOptions = {
   onread?:
     ({ callback?: () => Uint8Array; buffer?: Uint8Array } & OnReadOpts) | null;
 };
+
+export type BoundSocketOptions = {
+  host?: string | null;
+  port?: number | string;
+  path?: string;
+  ipv6Only?: boolean;
+  reusePort?: boolean;
+};
+
+// Reserves a port in the virtual port table; the adopting Socket reports the
+// bound address as its local address.
+export class BoundSocket {
+  #address: AddressInfo | null;
+
+  static isBoundSocket(value: unknown): value is BoundSocket {
+    return typeof value === 'object' && value !== null && #address in value;
+  }
+
+  constructor(options: BoundSocketOptions = {}) {
+    validateObject(options, 'options');
+
+    if (options.path !== undefined) {
+      throw new ERR_INVALID_ARG_VALUE(
+        'options.path',
+        options.path,
+        'is not supported'
+      );
+    }
+
+    const port = validatePort(options.port ?? 0, 'options.port');
+
+    const ipv6Only = options.ipv6Only ?? false;
+    validateBoolean(ipv6Only, 'options.ipv6Only');
+
+    const reusePort = options.reusePort ?? false;
+    validateBoolean(reusePort, 'options.reusePort');
+
+    let { host } = options;
+    let addressType: number;
+    if (host === undefined || host === null) {
+      host = ipv6Only ? DEFAULT_IPV6_ADDR : DEFAULT_IPV4_ADDR;
+      addressType = ipv6Only ? 6 : 4;
+    } else {
+      validateString(host, 'options.host');
+      addressType = isIP(host);
+      if (addressType === 0) {
+        throw new ERR_INVALID_ARG_VALUE(
+          'options.host',
+          host,
+          'must be a numeric IP address; net.BoundSocket does not perform DNS resolution'
+        );
+      }
+    }
+
+    this.#address = {
+      address: host,
+      family: addressType === 6 ? 'IPv6' : 'IPv4',
+      port: bindPort(host, port, reusePort),
+    };
+    tcpPorts.register(this, this.#address.port);
+  }
+
+  address(): AddressInfo {
+    if (this.#address === null) {
+      throw new ERR_SOCKET_HANDLE_ADOPTED();
+    }
+    return this.#address;
+  }
+
+  // Workers have no file descriptors; -1 matches Node.js on platforms without
+  // socket fds.
+  fd(): number {
+    if (this.#address === null) {
+      throw new ERR_SOCKET_HANDLE_ADOPTED();
+    }
+    return -1;
+  }
+
+  close(): void {
+    if (this.#address === null) {
+      throw new ERR_SOCKET_HANDLE_ADOPTED();
+    }
+    tcpPorts.unregister(this);
+    tcpPorts.release(this.#address.port);
+    this.#address = null;
+  }
+
+  [Symbol.dispose](): void {
+    if (this.#address !== null) {
+      this.close();
+    }
+  }
+
+  [kBoundSocketConsume](): AddressInfo {
+    if (this.#address === null) {
+      throw new ERR_SOCKET_HANDLE_ADOPTED();
+    }
+    tcpPorts.unregister(this);
+    const address = this.#address;
+    this.#address = null;
+    return address;
+  }
+}
 
 export function Server(): void {
   throw new Error('Server is not implemented');
@@ -182,6 +324,8 @@ export declare class Socket extends _Socket {
   };
   [kBytesRead]: number;
   [kBytesWritten]: number;
+  [kBoundSource]: AddressInfo | null;
+  [kBoundReserved]: boolean;
   [kReinitializeHandle](handle: Socket['_handle']): void;
   _closeAfterHandlingError: boolean;
   _handle: null | {
@@ -199,7 +343,6 @@ export declare class Socket extends _Socket {
       addressType: number;
     };
   };
-  _sockname?: null | AddressInfo;
   _onTimeout(): void;
   _unrefTimer(): void;
   _writeGeneric(
@@ -327,12 +470,13 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   this[kSocketInfo] = null;
   this[kBytesRead] = 0;
   this[kBytesWritten] = 0;
+  this[kBoundSource] = null;
+  this[kBoundReserved] = false;
   this._closeAfterHandlingError = false;
   // @ts-expect-error TS2540 Required due to types
   this.autoSelectFamilyAttemptedAddresses = [];
 
   this._undestroy();
-  this._sockname = null;
   this._pendingData = null;
   this._pendingEncoding = '';
 
@@ -343,7 +487,13 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
 
   if (options.handle) {
     validateObject(options.handle, 'options.handle');
-    this._handle = options.handle;
+    if (BoundSocket.isBoundSocket(options.handle)) {
+      this[kBoundSource] = options.handle[kBoundSocketConsume]();
+      this[kBoundReserved] = true;
+      tcpPorts.register(this, this[kBoundSource].port);
+    } else {
+      this._handle = options.handle;
+    }
   }
 
   // We explicitly listen for all 'end' events, not only for once
@@ -471,15 +621,15 @@ Socket.prototype._getpeername = function (
 };
 
 Socket.prototype._getsockname = function (this: Socket): AddressInfo | {} {
-  if (this._handle == null) {
-    return {};
+  if (this[kBoundSource] != null) {
+    return this[kBoundSource];
   }
-  this._sockname ??= {
-    address: '0.0.0.0',
-    port: 0,
-    family: 'IPv4',
-  };
-  return this._sockname;
+  // A wrapping socket (TLSSocket) shares the local endpoint of the socket it
+  // wraps.
+  if (this._parentWrap != null) {
+    return this._parentWrap._getsockname();
+  }
+  return {};
 };
 
 Socket.prototype.address = function (this: Socket): {} | AddressInfo {
@@ -792,6 +942,8 @@ Socket.prototype._destroy = function (
     clearTimeout(s[kTimeout] as unknown as number);
   }
 
+  releaseBoundSource(this);
+
   if (this._handle != null) {
     this._handle.socket.close().then(
       () => {
@@ -866,6 +1018,9 @@ Socket.prototype.connect = function (
   // Previous connected handle needs to emit "close" event.
   // This ensures that the previous handle is closed before initializing a new one.
   if (this._handle) {
+    // A reconnect is a new underlying socket, so the previous local endpoint
+    // is dropped and the new connection autobinds.
+    releaseBoundSource(this);
     this._handle.socket.close().then(
       () => {
         initializeConnection(this, options);
@@ -895,7 +1050,6 @@ Socket.prototype[kReinitializeHandle] = function reinitializeHandle(
 
   this._handle = handle;
   this._undestroy();
-  this._sockname = null;
 };
 
 // ======================================================================================
@@ -1147,6 +1301,17 @@ function initializeConnection(
     localPort,
   } = options;
   let { port } = options;
+  if (
+    socket[kBoundSource] != null &&
+    (localAddress !== undefined || localPort !== undefined)
+  ) {
+    throw new ERR_INVALID_ARG_VALUE(
+      'options',
+      options,
+      'localAddress and localPort cannot be used with an adopted bound socket'
+    );
+  }
+
   if (localAddress && !isIP(localAddress)) {
     throw new ERR_INVALID_IP_ADDRESS(localAddress);
   }
@@ -1208,6 +1373,24 @@ function initializeConnection(
     socket._host = `${host}`;
 
     try {
+      // Autobind the local endpoint, as connect(2) does, unless one was
+      // adopted from a BoundSocket.
+      if (socket[kBoundSource] == null) {
+        const address =
+          localAddress ??
+          (family === 6 ? DEFAULT_IPV6_ADDR : DEFAULT_IPV4_ADDR);
+        // Only a concrete localPort claims a table entry; localAddress alone
+        // (and localPort 0) autobinds, with the address kept as the label.
+        const reserved = localPort != null && localPort !== 0;
+        socket[kBoundSource] = {
+          address,
+          family: isIP(address) === 6 ? 'IPv6' : 'IPv4',
+          port: reserved ? bindPort(address, localPort) : tcpPorts.ephemeral(),
+        };
+        socket[kBoundReserved] = reserved;
+        if (reserved) tcpPorts.register(socket, socket[kBoundSource].port);
+      }
+
       const handle = inner.connect(`${host}:${port}`, {
         allowHalfOpen: socket.allowHalfOpen,
         // A Node.js socket is always capable of being upgraded to the TLS socket.
@@ -1235,7 +1418,6 @@ function initializeConnection(
 
       // We need to undestroy the stream to connect to it.
       socket._undestroy();
-      socket._sockname = null;
 
       handle.opened.then(onConnectionOpened.bind(socket), (err: unknown) => {
         socket.emit('connectionAttemptFailed', host, port, addressType, err);
@@ -1304,7 +1486,6 @@ export function onConnectionOpened(this: Socket): void {
   }
 
   this.connecting = false;
-  this._sockname = null;
   this._unrefTimer();
   this.emit('connect');
   this.emit('ready');

@@ -110,24 +110,24 @@ IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChan
   return *KJ_REQUIRE_NONNULL(actorChannel);
 }
 
-void GlobalActorOutgoingFactory::onActorFetchRetry() {
+Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::newSingleUseClient(
+    kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) {
+  return newActorCallAttempt(kj::mv(cfStr),
+      ActorCallRetryState::Attempt(kj::none, IsFirstActorCallAttempt::YES),
+      kj::mv(makeUserSpanParent));
+}
+
+void GlobalActorOutgoingFactory::onActorCallRetry() {
   // The cached channel may contain the disconnected routing pipeline. Clear it so the retry
   // resolves a fresh route instead of reusing that pipeline.
   actorChannel = kj::none;
   channelMemoryAdjustment = kj::none;
 }
 
-Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::newSingleUseClient(
-    kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) {
-  return newSingleUseClientWithActorRetryMetadata(
-      kj::mv(cfStr), kj::none, CountSubrequest::YES, kj::mv(makeUserSpanParent));
-}
-
-Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::
-    newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
-        kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
-        CountSubrequest countSubrequest,
-        MakeUserSpanParent makeUserSpanParent) {
+Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::newActorCallAttempt(
+    kj::Maybe<kj::String> cfStr,
+    ActorCallRetryState::Attempt attempt,
+    MakeUserSpanParent makeUserSpanParent) {
   auto& context = IoContext::current();
 
   kj::Maybe<TraceContextParent> spanParents;
@@ -143,9 +143,9 @@ Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::
         .startRequest({.cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
           .userSpanParent = kj::mv(userSpanParent),
-          .actorRetryRequestMetadata = kj::mv(actorRetryRequestMetadata)});
+          .actorRetryRequestMetadata = attempt.takeMetadata()});
   };
-  auto client = startActorSubrequest(context, makeClient, countSubrequest);
+  auto client = startActorSubrequest(context, makeClient, attempt.getCountSubrequest());
   return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 
@@ -156,15 +156,15 @@ kj::Own<IoChannelFactory::SubrequestChannel> GlobalActorOutgoingFactory::getSubr
 
 Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::newSingleUseClient(
     kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) {
-  return newSingleUseClientWithActorRetryMetadata(
-      kj::mv(cfStr), kj::none, CountSubrequest::YES, kj::mv(makeUserSpanParent));
+  return newActorCallAttempt(kj::mv(cfStr),
+      ActorCallRetryState::Attempt(kj::none, IsFirstActorCallAttempt::YES),
+      kj::mv(makeUserSpanParent));
 }
 
-Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::
-    newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
-        kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
-        CountSubrequest countSubrequest,
-        MakeUserSpanParent makeUserSpanParent) {
+Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::newActorCallAttempt(
+    kj::Maybe<kj::String> cfStr,
+    ActorCallRetryState::Attempt attempt,
+    MakeUserSpanParent makeUserSpanParent) {
   auto& context = IoContext::current();
 
   kj::Maybe<TraceContextParent> spanParents;
@@ -181,9 +181,9 @@ Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::
     return actorChannel->startRequest({.cfBlobJson = kj::mv(cfStr),
       .parentSpan = tracing.getInternalSpanParent(),
       .userSpanParent = kj::mv(userSpanParent),
-      .actorRetryRequestMetadata = kj::mv(actorRetryRequestMetadata)});
+      .actorRetryRequestMetadata = attempt.takeMetadata()});
   };
-  auto client = startActorSubrequest(context, startRequest, countSubrequest);
+  auto client = startActorSubrequest(context, startRequest, attempt.getCountSubrequest());
   return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 
