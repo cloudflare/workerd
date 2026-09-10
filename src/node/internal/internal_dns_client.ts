@@ -53,9 +53,25 @@ export interface SuccessResponse {
   Additional?: Answer;
 }
 
+const DNS_RECORD_TYPES = {
+  A: 1,
+  NS: 2,
+  CNAME: 5,
+  SOA: 6,
+  PTR: 12,
+  MX: 15,
+  TXT: 16,
+  AAAA: 28,
+  SRV: 33,
+  NAPTR: 35,
+  CAA: 257,
+} as const;
+
+type DnsRecordType = keyof typeof DNS_RECORD_TYPES;
+
 export async function sendDnsRequest(
   name: string,
-  type: string
+  type: DnsRecordType
 ): Promise<SuccessResponse> {
   // We are using cloudflare-dns.com and not 1.1.1.1 because of certificate issues.
   // TODO(soon): Replace this when KJ certificate issues are resolved.
@@ -94,6 +110,12 @@ export async function sendDnsRequest(
     throw new DnsError(name, errorCodes.BADRESP, syscall);
   }
 
+  if (json.Answer != null) {
+    json.Answer = json.Answer.filter(
+      (answer) => answer.type === DNS_RECORD_TYPES[type]
+    );
+  }
+
   if (json.Answer?.at(0)?.name === '') {
     throw new DnsError(name, errorCodes.NOTFOUND, syscall);
   }
@@ -106,7 +128,7 @@ export function validateAnswer(
   name: string,
   query: string
 ): asserts answer is Answer[] {
-  if (answer == null) {
+  if (!Array.isArray(answer) || answer.length === 0) {
     throw new DnsError(name, errorCodes.NOTFOUND, query);
   }
 }
