@@ -1379,13 +1379,13 @@ function initializeConnection(
         const address =
           localAddress ??
           (family === 6 ? DEFAULT_IPV6_ADDR : DEFAULT_IPV4_ADDR);
-        const reserved = localAddress !== undefined || localPort !== undefined;
+        // Only a concrete localPort claims a table entry; localAddress alone
+        // (and localPort 0) autobinds, with the address kept as the label.
+        const reserved = localPort != null && localPort !== 0;
         socket[kBoundSource] = {
           address,
           family: isIP(address) === 6 ? 'IPv6' : 'IPv4',
-          port: reserved
-            ? bindPort(address, localPort ?? 0)
-            : tcpPorts.ephemeral(),
+          port: reserved ? bindPort(address, localPort) : tcpPorts.ephemeral(),
         };
         socket[kBoundReserved] = reserved;
         if (reserved) tcpPorts.register(socket, socket[kBoundSource].port);

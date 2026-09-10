@@ -1217,6 +1217,30 @@ export const testNetLocalAddressPort = {
       await Promise.all([once(c, 'close'), once(c2, 'close')]);
     }
 
+    // localAddress alone, or localPort 0, is not a reservation: the address is
+    // reported but the port is an autobound label.
+    {
+      const c = net.connect({
+        port: env.SERVER_PORT,
+        host: env.SIDECAR_HOSTNAME,
+        localAddress: '127.0.0.1',
+        localPort: 0,
+      });
+      strictEqual(c.localAddress, '127.0.0.1');
+      ok(c.localPort >= 49152);
+      new net.BoundSocket({ port: c.localPort }).close();
+      const c2 = net.connect({
+        port: env.SERVER_PORT,
+        host: env.SIDECAR_HOSTNAME,
+        localAddress: null,
+        localPort: null,
+      });
+      strictEqual(c2.localAddress, '0.0.0.0');
+      c.destroy();
+      c2.destroy();
+      await Promise.all([once(c, 'close'), once(c2, 'close')]);
+    }
+
     // A reconnect drops the previous local endpoint, so localPort may be given.
     {
       const c = net.connect(Number(env.ECHO_SERVER_PORT), env.SIDECAR_HOSTNAME);
