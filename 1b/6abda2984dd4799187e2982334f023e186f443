@@ -1,0 +1,37 @@
+src/workerd/api/http.c++
+  s_6ba2030b43c23b::t_f7a16f47ea876b 2318
+src/workerd/api/http.h
+  s_6ba2030b43c23b::t_46234e9f05e956 339,433
+src/workerd/api/worker-rpc.c++
+  s_6ba2030b43c23b::t_278b75a5c451b5 93,111-116,120-126,252-258,279-280,282-283,464,523-524,526-529,630-633,636-656,658-659,661-662,665-666,669,672,675,684-686,703-715,719-733,757-762,1048,1131-1133,1174-1179,1200-1205,1214-1218,2132-2135
+  s_6ba2030b43c23b::t_cef2fca944d286 57,66-92,94-96,99,103,2268-2269,2298,2327-2328,2330-2331,2341-2342,2356,2368-2369,2377-2378,2408,2424-2425
+src/workerd/api/jsrpc-call-plan-test.c++
+  s_6ba2030b43c23b::t_3b28b63297881f 43-44,82-86,89-90,92-93,104-105,107-142,146-147,149-150,154-234
+  s_6ba2030b43c23b::t_1d0304fb2a228e 16-30,38
+src/workerd/api/worker-rpc.h
+  s_6ba2030b43c23b::t_fa954154a119b2 99,128,190,193,203-204,324-331,333,370,462-466,578
+  s_6ba2030b43c23b::t_1718e95934811c 50-55,98,100-104,126-127,129,170,180,187-189,191-192
+src/workerd/api/tests/js-rpc-params-transfer-ownership-test.js
+  s_6ba2030b43c23b::t_e1709475aa9d28 1-73
+src/workerd/api/tests/BUILD.bazel
+  s_6ba2030b43c23b::t_fb76a0ced03882 656-660
+  s_6ba2030b43c23b::t_13b888a1138329 655
+src/workerd/api/tests/js-rpc-params-transfer-ownership-test.wd-test
+  s_6ba2030b43c23b::t_90224e7333e353 1-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1b6abda2984dd4799187e2982334f023e186f443",
+  "prompts": {},
+  "sessions": {
+    "s_6ba2030b43c23b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f7fdd34c1ffeJ4joNLMehWneBI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
