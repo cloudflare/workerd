@@ -3969,6 +3969,7 @@ interface Socket {
   get secureTransport(): "on" | "off" | "starttls";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
+  proxyTo(sock: Socket, options?: StreamPipeOptions): void;
 }
 interface SocketOptions {
   secureTransport?: string;
