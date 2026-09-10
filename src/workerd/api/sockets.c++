@@ -781,8 +781,9 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
   KJ_ASSERT(!getAllowHalfOpen(options));
 
   // Do not call `close` on a stream that has already been closed or is in the process
-  // of closing.
+  // of closing. Both sides are done at this point, so `closed` settles here as it does below.
   if (writable.isClosedOrClosing(js)) {
+    closedResolver.resolve(js);
     return js.resolvedPromise();
   }
 
