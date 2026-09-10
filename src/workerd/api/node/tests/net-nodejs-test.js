@@ -23,7 +23,14 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { fail, ok, strictEqual, deepStrictEqual, throws } from 'node:assert';
+import {
+  fail,
+  ok,
+  strictEqual,
+  notStrictEqual,
+  deepStrictEqual,
+  throws,
+} from 'node:assert';
 import { mock } from 'node:test';
 import { once } from 'node:events';
 import * as net from 'node:net';
@@ -1192,6 +1199,39 @@ export const testNetLocalAddressPort = {
       // Released on destroy.
       new net.BoundSocket({ port: 50000 }).close();
     }
+
+    // An autobound port is a label, not a reservation: it skips reserved ports
+    // but can itself be reserved while the socket is live, so sockets that are
+    // never destroyed do not exhaust the table.
+    {
+      const reserved = new net.BoundSocket({ port: 0 });
+      const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
+      const c2 = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
+      notStrictEqual(c.localPort, reserved.address().port);
+      notStrictEqual(c2.localPort, reserved.address().port);
+      notStrictEqual(c.localPort, c2.localPort);
+      new net.BoundSocket({ port: c.localPort }).close();
+      reserved.close();
+      c.destroy();
+      c2.destroy();
+      await Promise.all([once(c, 'close'), once(c2, 'close')]);
+    }
+
+    // A reconnect drops the previous local endpoint, so localPort may be given.
+    {
+      const c = net.connect(Number(env.ECHO_SERVER_PORT), env.SIDECAR_HOSTNAME);
+      await once(c, 'connect');
+      c.connect({
+        port: Number(env.ECHO_SERVER_PORT),
+        host: env.SIDECAR_HOSTNAME,
+        localPort: 50001,
+      });
+      await once(c, 'connect');
+      strictEqual(c.localPort, 50001);
+      c.destroy();
+      await once(c, 'close');
+      new net.BoundSocket({ port: 50001 }).close();
+    }
   },
 };
 
@@ -1325,6 +1365,10 @@ export const testNetBoundSocket = {
     throws(() => new net.BoundSocket(0), { code: 'ERR_INVALID_ARG_TYPE' });
     throws(() => new net.BoundSocket({ port: 65536 }), {
       code: 'ERR_SOCKET_BAD_PORT',
+    });
+    // Pipes are not supported; rejected rather than silently binding TCP.
+    throws(() => new net.BoundSocket({ path: '/tmp/sock' }), {
+      code: 'ERR_INVALID_ARG_VALUE',
     });
 
     // Symbol.dispose closes an un-adopted handle and is a no-op afterwards.

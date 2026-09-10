@@ -101,21 +101,36 @@ export const kReinitializeHandle = Symbol('kReinitializeHandle');
 // socket.opened promise will be stored here.
 const kSocketInfo = Symbol('kSocketInfo');
 
-// The local address reserved for a Socket, either adopted from a BoundSocket or
-// autobound on connect. Released on destroy.
+// The local address of a Socket, either adopted from a BoundSocket or autobound
+// on connect. kBoundReserved marks an entry held in the port table that must be
+// released on destroy.
 const kBoundSource = Symbol('kBoundSource');
+const kBoundReserved = Symbol('kBoundReserved');
 const kBoundSocketConsume = Symbol('kBoundSocketConsume');
 
 const DEFAULT_IPV4_ADDR = '0.0.0.0';
 const DEFAULT_IPV6_ADDR = '::';
 
 // Per-isolate virtual local TCP port table shared by net and http servers. The
-// underlying transport does not honor local binding, but ports are allocated
-// and conflict-checked so that a bound port is unique within the isolate.
+// underlying transport does not honor local binding, but explicitly bound ports
+// are recorded and conflict-checked so that they are unique within the isolate.
+// Autobound sockets take an ephemeral label that skips recorded ports without
+// being recorded themselves: a socket whose request ends before it is destroyed
+// never runs its cleanup, so recording autobinds would leak table entries.
 const EPHEMERAL_PORT_MIN = 49152;
 const EPHEMERAL_PORT_MAX = 65535;
 const boundPorts = new Map<number, { refs: number; reusePort: boolean }>();
 let nextEphemeralPort = EPHEMERAL_PORT_MIN;
+
+export function ephemeralPort(): number {
+  for (let i = EPHEMERAL_PORT_MIN; i <= EPHEMERAL_PORT_MAX; i++) {
+    const candidate = nextEphemeralPort;
+    nextEphemeralPort =
+      candidate === EPHEMERAL_PORT_MAX ? EPHEMERAL_PORT_MIN : candidate + 1;
+    if (!boundPorts.has(candidate)) return candidate;
+  }
+  return 0;
+}
 
 export function bindPort(
   address: string,
@@ -123,15 +138,7 @@ export function bindPort(
   reusePort = false
 ): number {
   if (port === 0) {
-    for (let i = EPHEMERAL_PORT_MIN; i <= EPHEMERAL_PORT_MAX; i++) {
-      const candidate = nextEphemeralPort;
-      nextEphemeralPort =
-        candidate === EPHEMERAL_PORT_MAX ? EPHEMERAL_PORT_MIN : candidate + 1;
-      if (!boundPorts.has(candidate)) {
-        port = candidate;
-        break;
-      }
-    }
+    port = ephemeralPort();
     if (port === 0) throw new EADDRINUSE(address, port);
   }
   const entry = boundPorts.get(port);
@@ -150,6 +157,14 @@ export function releasePort(port: number): void {
   if (entry !== undefined && --entry.refs === 0) {
     boundPorts.delete(port);
   }
+}
+
+function releaseBoundSource(socket: Socket): void {
+  if (socket[kBoundReserved]) {
+    releasePort((socket[kBoundSource] as AddressInfo).port);
+    socket[kBoundReserved] = false;
+  }
+  socket[kBoundSource] = null;
 }
 
 // IPv4 Segment
@@ -200,6 +215,7 @@ export type SocketOptions = {
 export type BoundSocketOptions = {
   host?: string | null;
   port?: number | string;
+  path?: string;
   ipv6Only?: boolean;
   reusePort?: boolean;
 };
@@ -215,6 +231,14 @@ export class BoundSocket {
 
   constructor(options: BoundSocketOptions = {}) {
     validateObject(options, 'options');
+
+    if (options.path !== undefined) {
+      throw new ERR_INVALID_ARG_VALUE(
+        'options.path',
+        options.path,
+        'is not supported'
+      );
+    }
 
     const port = validatePort(options.port ?? 0, 'options.port');
 
@@ -327,6 +351,7 @@ export declare class Socket extends _Socket {
   [kBytesRead]: number;
   [kBytesWritten]: number;
   [kBoundSource]: AddressInfo | null;
+  [kBoundReserved]: boolean;
   [kReinitializeHandle](handle: Socket['_handle']): void;
   _closeAfterHandlingError: boolean;
   _handle: null | {
@@ -472,6 +497,7 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   this[kBytesRead] = 0;
   this[kBytesWritten] = 0;
   this[kBoundSource] = null;
+  this[kBoundReserved] = false;
   this._closeAfterHandlingError = false;
   // @ts-expect-error TS2540 Required due to types
   this.autoSelectFamilyAttemptedAddresses = [];
@@ -489,6 +515,7 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
     validateObject(options.handle, 'options.handle');
     if (BoundSocket.isBoundSocket(options.handle)) {
       this[kBoundSource] = options.handle[kBoundSocketConsume]();
+      this[kBoundReserved] = true;
     } else {
       this._handle = options.handle;
     }
@@ -940,10 +967,7 @@ Socket.prototype._destroy = function (
     clearTimeout(s[kTimeout] as unknown as number);
   }
 
-  if (this[kBoundSource] != null) {
-    releasePort(this[kBoundSource].port);
-    this[kBoundSource] = null;
-  }
+  releaseBoundSource(this);
 
   if (this._handle != null) {
     this._handle.socket.close().then(
@@ -1019,6 +1043,9 @@ Socket.prototype.connect = function (
   // Previous connected handle needs to emit "close" event.
   // This ensures that the previous handle is closed before initializing a new one.
   if (this._handle) {
+    // A reconnect is a new underlying socket, so the previous local endpoint
+    // is dropped and the new connection autobinds.
+    releaseBoundSource(this);
     this._handle.socket.close().then(
       () => {
         initializeConnection(this, options);
@@ -1377,11 +1404,13 @@ function initializeConnection(
         const address =
           localAddress ??
           (family === 6 ? DEFAULT_IPV6_ADDR : DEFAULT_IPV4_ADDR);
+        const reserved = localAddress !== undefined || localPort !== undefined;
         socket[kBoundSource] = {
           address,
           family: isIP(address) === 6 ? 'IPv6' : 'IPv4',
-          port: bindPort(address, localPort ?? 0),
+          port: reserved ? bindPort(address, localPort ?? 0) : ephemeralPort(),
         };
+        socket[kBoundReserved] = reserved;
       }
 
       const handle = inner.connect(`${host}:${port}`, {
