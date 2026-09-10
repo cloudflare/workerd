@@ -609,6 +609,19 @@ class Worker::Api {
   // Api.
   virtual CompatibilityFlags::Reader getFeatureFlags() const = 0;
 
+  // An inbound socket listener configured to deliver connections to this worker, as bound.
+  struct InboundListener {
+    kj::String protocol;  // "tcp" | "udp"
+    kj::String address;   // host part as configured
+    uint16_t port;        // as bound, so resolved for a configured port of 0
+  };
+  // The inbound listeners targeting this worker. Their ports seed the worker's virtual port
+  // table so that a server listening in the worker takes the port connections actually arrive
+  // on. Empty when the embedder does not declare listeners.
+  virtual kj::ArrayPtr<const InboundListener> getInboundListeners() const {
+    return nullptr;
+  }
+
   struct NewContextOptions {
     // If the worker is using the new module registry system, this is the registry to
     // install on the newly created context. If null, the old system is assumed.

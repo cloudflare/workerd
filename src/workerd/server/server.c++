@@ -5745,9 +5745,19 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();
+  kj::Array<Worker::Api::InboundListener> listeners;
+  KJ_IF_SOME(l, inboundListeners.find(name)) {
+    listeners = KJ_MAP(listener, l) {
+      return Worker::Api::InboundListener{
+        .protocol = kj::str(listener.protocol),
+        .address = kj::str(listener.address),
+        .port = listener.port,
+      };
+    };
+  }
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
       limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
-      pythonConfig);
+      pythonConfig, kj::mv(listeners));
 
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
@@ -7192,6 +7202,20 @@ kj::Promise<void> Server::bindSockets(config::Config::Reader config) {
     } else {
       auto parsed = co_await network.parseAddress(addrStr, defaultPortFor(sock));
       listener = parsed->listen();
+    }
+
+    if (sock.which() == config::Socket::TCP && sock.getService().hasName()) {
+      inboundListeners
+          .findOrCreate(sock.getService().getName(),
+              [&]() {
+        return decltype(inboundListeners)::Entry{
+          kj::str(sock.getService().getName()), kj::Vector<Worker::Api::InboundListener>()};
+      })
+          .add(Worker::Api::InboundListener{
+            .protocol = kj::str("tcp"),
+            .address = hostOfAddress(addrStr),
+            .port = static_cast<uint16_t>(listener->getPort()),
+          });
     }
 
     boundSockets.add(BoundSocket{kj::mv(listener), kj::mv(addrStr)});

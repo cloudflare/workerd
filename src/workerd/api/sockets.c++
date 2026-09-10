@@ -1054,6 +1054,28 @@ jsg::Optional<kj::StringPtr> SocketsModule::getCallerDnsOverride(
   return ioContext.getCurrentLock().getGlobalScope().getDnsOverride(hostname);
 }
 
+jsg::Optional<jsg::JsObject> SocketsModule::getPortScopeKey(jsg::Lock& js) {
+  // A Durable Object instance is its own host for port binding; a stateless worker's host is
+  // the isolate, since a server it listens on must be reachable from every request.
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+    if (ioContext.getActor() != kj::none) {
+      return ioContext.getPortScopeKey(js);
+    }
+  }
+  return kj::none;
+}
+
+kj::Array<SocketsModule::InboundListener> SocketsModule::getInboundListeners(jsg::Lock& js) {
+  auto listeners = Worker::Api::current().getInboundListeners();
+  return KJ_MAP(l, listeners) {
+    return InboundListener{
+      .protocol = kj::str(l.protocol),
+      .address = kj::str(l.address),
+      .port = l.port,
+    };
+  };
+}
+
 kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
   // Set this so that if `close` is called after this, that no closure steps are taken and instead
   // the `close` is a no-op.

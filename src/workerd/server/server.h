@@ -167,14 +167,17 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::HashMap<kj::String, kj::OneOf<kj::String, kj::Own<kj::ConnectionReceiver>>> socketOverrides;
   kj::HashMap<kj::String, kj::String> directoryOverrides;
 
-  // Sockets are bound before services start so that the ports they actually got are known while
-  // workers are created. Indexed by position in the config's socket list (names may repeat); none
-  // for a socket that failed to bind. Consumed by listenOnSockets().
+  // Sockets are bound before services start so that a worker can learn the actual port of each
+  // inbound listener that targets it (Worker::Api::getInboundListeners()). Indexed by position in
+  // the config's socket list (names may repeat); none for a socket that failed to bind. Consumed
+  // by listenOnSockets().
   struct BoundSocket {
     kj::Own<kj::ConnectionReceiver> listener;
     kj::String addrStr;
   };
   kj::Vector<kj::Maybe<BoundSocket>> boundSockets;
+  // Bound TCP listeners by the name of the service they deliver to.
+  kj::HashMap<kj::String, kj::Vector<Worker::Api::InboundListener>> inboundListeners;
 
   // Overrides from the command line.
   //

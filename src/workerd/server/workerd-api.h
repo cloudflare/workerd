@@ -43,13 +43,15 @@ class WorkerdApi final: public Worker::Api {
       v8::IsolateGroup group,
       kj::Own<JsgIsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
-      const PythonConfig& pythonConfig);
+      const PythonConfig& pythonConfig,
+      kj::Array<Worker::Api::InboundListener> inboundListeners = nullptr);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);
 
   kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const override;
   CompatibilityFlags::Reader getFeatureFlags() const override;
+  kj::ArrayPtr<const Worker::Api::InboundListener> getInboundListeners() const override;
   jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(
       jsg::Lock& lock, Worker::Api::NewContextOptions options = {}) const override;
   jsg::Dict<NamedExport> unwrapExports(
@@ -343,6 +345,7 @@ class WorkerdApi final: public Worker::Api {
  private:
   struct Impl;
   kj::Own<Impl> impl;
+  kj::Array<Worker::Api::InboundListener> inboundListeners;
 };
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
