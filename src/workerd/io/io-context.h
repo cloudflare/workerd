@@ -213,6 +213,7 @@ class IoContext_IncomingRequest final {
   kj::Rc<IoChannelFactory> ioChannelFactory;
   kj::Maybe<kj::Own<AccessInfo>> accessInfo;
   kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory;
+  kj::Maybe<jsg::JsRef<jsg::JsObject>> userTracingInvocationAnchor;
 
   // Root user trace span for this request. Populated during delivered() via
   // BaseTracer::makeUserRequestSpan(); otherwise a null SpanParent. The tracer it references
@@ -1111,6 +1112,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // delete queue) is safe because the tracer reference is weak.
   jsg::AsyncContextFrame::StorageScope makeUserAsyncTraceScope(
       Worker::Lock& lock, kj::Maybe<SpanParent> userSpan = kj::none) KJ_WARN_UNUSED_RESULT;
+
+  // Returns the root user-tracing context holder propagated by the current async context.
+  kj::Maybe<jsg::JsObject> getCurrentUserTracingInvocationTag(jsg::Lock& js);
 
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.

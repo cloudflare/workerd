@@ -13,17 +13,30 @@
 // The parent/child relationships are asserted in the tail worker's test() handler (see
 // jsrpc-pipelined-trace-test-tail.js).
 
-import { WorkerEntrypoint, RpcTarget } from 'cloudflare:workers';
+import assert from 'node:assert';
+import {
+  WorkerEntrypoint,
+  RpcTarget,
+  tracing as publicTracing,
+} from 'cloudflare:workers';
 
 class Counter extends RpcTarget {
   #value = 0;
+  #invocationSpan;
+
+  constructor(invocationSpan) {
+    super();
+    this.#invocationSpan = invocationSpan;
+  }
 
   increment(amount) {
+    assert.strictEqual(publicTracing.getInvocationSpan(), this.#invocationSpan);
     this.#value += amount;
     return this.#value;
   }
 
   incrementDuplicate(amount) {
+    assert.strictEqual(publicTracing.getInvocationSpan(), this.#invocationSpan);
     this.#value += amount;
     return this.#value;
   }
@@ -33,7 +46,9 @@ export class CounterService extends WorkerEntrypoint {
   // Returns a stub. Calls the caller subsequently makes on it reuse this same session, and so are
   // delivered to this same invocation.
   async getCounter() {
-    return new Counter();
+    const invocationSpan = publicTracing.getInvocationSpan();
+    assert(invocationSpan);
+    return new Counter(invocationSpan);
   }
 }
 

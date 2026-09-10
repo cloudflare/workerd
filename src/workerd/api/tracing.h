@@ -190,11 +190,17 @@ class Tracing: public jsg::Object {
   jsg::Optional<jsg::Ref<user_tracing::Span>> getActiveSpan(
       jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
 
+  // Returns the runtime-owned invocation span regardless of which user-created span is active.
+  // Returns undefined outside an invocation.
+  jsg::Optional<jsg::Ref<user_tracing::Span>> getInvocationSpan(
+      jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
+
   JSG_RESOURCE_TYPE(Tracing) {
     JSG_METHOD(enterSpan);
     JSG_METHOD(startActiveSpan);
     JSG_METHOD(startSpan);
     JSG_METHOD(getActiveSpan);
+    JSG_METHOD(getInvocationSpan);
 
     // Use the _NAMED variant so the property ends up as `tracing.Span` rather than
     // `tracing["user_tracing::Span"]`.
@@ -217,6 +223,7 @@ class Tracing: public jsg::Object {
       ): T;
       startSpan(name: string): Span;
       getActiveSpan(): Span | undefined;
+      getInvocationSpan(): Span | undefined;
     });
   }
 };

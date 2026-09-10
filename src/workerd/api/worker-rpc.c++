@@ -1572,6 +1572,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
     jsg::AsyncContextFrame::StorageScope traceScope =
         ctx.makeAsyncTraceScope(lock, kj::mv(traceParent));
+    jsg::AsyncContextFrame::StorageScope invocationUserTraceScope =
+        ctx.makeUserAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope =
         ctx.makeUserAsyncTraceScope(lock, kj::mv(userTraceParent));
     return dispatch().attach(kj::mv(jsRpcCallSpan));

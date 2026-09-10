@@ -86,6 +86,10 @@ declare const tracing: {
   // outside an invocation or when execution is detached into the root async context.
   getActiveSpan(): Span | undefined;
 
+  // Returns the runtime-owned invocation span regardless of which user-created span is active.
+  // Returns undefined outside an invocation.
+  getInvocationSpan(): Span | undefined;
+
   // The `Span` class is exposed as a nested type so callers can reference the type via
   // `InstanceType<typeof tracing.Span>` (see `tracing-helpers.ts`).
   readonly Span: typeof Span;
