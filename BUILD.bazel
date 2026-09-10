@@ -43,6 +43,7 @@ genrule(
     outs = ["merged.clang-tidy"],
     cmd = "$(location //build/tools/clang_tidy:merge_clang_tidy_configs) $@ $(location :.clang-tidy) $(location @capnp-cpp//:.clang-tidy)",
     tools = ["//build/tools/clang_tidy:merge_clang_tidy_configs"],
+    visibility = ["//visibility:public"],
 )
 
 # Plugin to generate .js files

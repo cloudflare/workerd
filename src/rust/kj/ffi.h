@@ -46,6 +46,10 @@ inline kj::Own<kj::HttpHeaders> clone_shallow(const HttpHeaders& headers) {
   return kj::heap(headers.cloneShallow());
 }
 
+inline void clear_headers(HttpHeaders& headers) {
+  headers.clear();
+}
+
 inline kj::HttpHeaderId toHeaderId(BuiltinIndicesEnum id) {
   switch (id) {
     case kj::HttpHeaders::BuiltinIndicesEnum::CONNECTION:
@@ -100,6 +104,27 @@ inline kj::Maybe<::rust::Slice<const kj::byte>> get_header_by_id(
     const HttpHeaders& headers, const HttpHeaderId& id) {
   auto header = headers.get(id);
   return header.map([](auto header) { return header.asBytes().template as<kj_rs::Rust>(); });
+}
+
+// Case-insensitive lookup of a header by name. Note that kj::HttpHeaders::forEach only visits
+// headers that have been explicitly set, so a header registered in the HttpHeaderTable but never
+// set will not be found (returns none, matching get_header/get_header_by_id).
+inline kj::Maybe<::rust::Slice<const kj::byte>> get_header_by_name(
+    const HttpHeaders& headers, ::rust::Str requestedName) {
+  auto requested = kj::ArrayPtr<const char>(requestedName.data(), requestedName.size());
+  auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c; };
+  kj::Maybe<kj::StringPtr> result;
+  headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+    // kj::HttpHeaders::get() (used by get_header/get_header_by_id) returns the first set value, so
+    // keep the first match here too and ignore any subsequent duplicate header names.
+    if (result != kj::none) return;
+    if (name.size() != requested.size()) return;
+    for (size_t i = 0; i < name.size(); ++i) {
+      if (lower(name[i]) != lower(requested[i])) return;
+    }
+    result = value;
+  });
+  return result.map([](auto header) { return header.asBytes().template as<kj_rs::Rust>(); });
 }
 
 // --- kj::HttpService ffi

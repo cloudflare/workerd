@@ -1,0 +1,13 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "memory-cache-ffi",
+    cxx_bridge_deps = [
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+    cxx_bridge_src = "lib.rs",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/memory-cache",
+    ],
+)

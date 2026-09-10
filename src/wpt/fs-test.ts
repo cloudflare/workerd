@@ -15,6 +15,10 @@ navigator.storage.getDirectory =
   };
 
 export default {
+  'FileSystemBaseHandle-IndexedDB-deferred-deserialization.https.any.js': {
+    comment: 'IndexedDB is not implemented in workers',
+    disabledTests: true,
+  },
   'FileSystemBaseHandle-IndexedDB.https.any.js': {
     comment: 'IndexedDB is not implemented in workers',
     disabledTests: true,
@@ -23,13 +27,16 @@ export default {
     comment: 'StorageBuckets is not implemented in workers',
     disabledTests: true,
   },
-  'FileSystemBaseHandle-getUniqueId.https.any.js': {
-    comment: '...',
-    expectedFailures: [],
-  },
+  'FileSystemBaseHandle-getUniqueId.https.any.js': {},
   'FileSystemBaseHandle-isSameEntry.https.any.js': {
-    comment: '...',
-    expectedFailures: [],
+    comment:
+      'TODO(soon): FileSystemHandle is not serializable, so handles cannot be round-tripped ' +
+      'through postMessage. These ought to pass once it implements structured cloning.',
+    expectedFailures: [
+      'isSameEntry with a file handle that was just cloned via postMessage',
+      'isSameEntry with a directory handle that was just cloned via postMessage',
+      'isSameEntry with a root directory handle that was just cloned via postMessage',
+    ],
   },
   'FileSystemBaseHandle-postMessage-BroadcastChannel.https.window.js': {
     comment: 'BroadcastChannel is not implemented in workers',
@@ -64,28 +71,16 @@ export default {
     disabledTests: true,
   },
   'FileSystemBaseHandle-remove.https.any.js': {
-    comment: '...',
+    comment: 'see inline comments',
     disabledTests: [
       // Intentionally unsupported
       'can remove the root of a sandbox file system',
     ],
   },
-  'FileSystemDirectoryHandle-getDirectoryHandle.https.any.js': {
-    comment: '...',
-    expectedFailures: [],
-  },
-  'FileSystemDirectoryHandle-getFileHandle.https.any.js': {
-    comment: '...',
-    expectedFailures: [],
-  },
-  'FileSystemDirectoryHandle-iteration.https.any.js': {
-    comment: '...',
-    expectedFailures: [],
-  },
-  'FileSystemDirectoryHandle-removeEntry.https.any.js': {
-    comment: '...',
-    expectedFailures: [],
-  },
+  'FileSystemDirectoryHandle-getDirectoryHandle.https.any.js': {},
+  'FileSystemDirectoryHandle-getFileHandle.https.any.js': {},
+  'FileSystemDirectoryHandle-iteration.https.any.js': {},
+  'FileSystemDirectoryHandle-removeEntry.https.any.js': {},
   'FileSystemDirectoryHandle-resolve.https.any.js': {
     comment:
       'We currently do not implement the resolve() method on directories',
@@ -94,6 +89,7 @@ export default {
       'Resolve returns correct path',
       'Resolve returns correct path with non-ascii characters',
       'Resolve returns null when entry is not a child',
+      'Resolve returns null when sibling directory name is a prefix',
     ],
   },
   'FileSystemFileHandle-create-sync-access-handle.https.window.js': {
@@ -101,7 +97,7 @@ export default {
     disabledTests: ['Attempt to create a sync access handle.'],
   },
   'FileSystemFileHandle-getFile.https.any.js': {
-    comment: '...',
+    comment: 'see inline comments',
     expectedFailures: [
       // TODO(node-fs): We currently do not implement time stamp modification
       // of files via webfs so this test is expected to fail. This is temporary
@@ -167,7 +163,7 @@ export default {
     disabledTests: true,
   },
   'FileSystemWritableFileStream-write.https.any.js': {
-    comment: '...',
+    comment: 'see inline comments',
     disabledTests: [
       // We don't support this case. In the test a Blob is created from a
       // file that is then removed, then that Blob is written to a file.
@@ -206,6 +202,10 @@ export default {
   'opaque-origin.https.window.js': {
     comment: 'Not relevant to workers',
     disabledTests: true,
+  },
+  'opfs-shared-worker-coep.https.window.js': {
+    comment: 'SharedWorker tests are not applicable to workerd',
+    omittedTests: true,
   },
   'root-name.https.any.js': {
     comment:

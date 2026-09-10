@@ -283,6 +283,22 @@ export const cancelableListener = {
   },
 };
 
+export const cancelableListenerWithSelfSignal = {
+  test() {
+    const controller = new AbortController();
+    const { signal } = controller;
+    const noop = () => {};
+
+    // Fill typeMap so registering the native abort handler below grows it.
+    signal.addEventListener('one', noop);
+    signal.addEventListener('two', noop);
+    signal.addEventListener('three', noop);
+
+    signal.addEventListener('victim', noop, { signal });
+    controller.abort();
+  },
+};
+
 export const cancelableListenerAbortPropagation = {
   test() {
     // TODO(bug): Cancelable event listeners should be removed by signal even when
@@ -359,8 +375,9 @@ export const globalIsEventTarget = {
 
 export const errorInHandler = {
   test() {
-    // TODO(bug): Erroring in one event handler should not prevent others from being
-    // run but we currently do not implement this correctly.
+    // A throwing event handler must not prevent the remaining handlers from running, nor
+    // propagate out of dispatchEvent(); the exception is reported to the global scope via
+    // the (cancelable) 'error' event.
     const event = new Event('foo');
     const target = new EventTarget();
     let dispatchCount = 0;
@@ -372,11 +389,47 @@ export const errorInHandler = {
       dispatchCount++;
     });
 
-    throws(() => target.dispatchEvent(event));
+    let reported = null;
+    const errorHandler = (errEvent) => {
+      reported = errEvent.error;
+      // The report is handled; suppress the console fallback.
+      errEvent.preventDefault();
+    };
+    globalThis.addEventListener('error', errorHandler);
+    try {
+      strictEqual(target.dispatchEvent(event), true);
+    } finally {
+      globalThis.removeEventListener('error', errorHandler);
+    }
 
-    // The dispatchCount here should be 2, but with the current bug, it's only 1
-    // strictEqual(dispatchCount, 2);
-    strictEqual(dispatchCount, 1);
+    strictEqual(dispatchCount, 2);
+    strictEqual(reported?.message, 'boom');
+  },
+};
+
+export const listenersAddedDuringDispatch = {
+  test() {
+    // Listeners added while an event is being dispatched do not run for the in-flight
+    // event, but do run for subsequent dispatches — including when many are added at once
+    // (which historically stressed handler storage mutation during iteration).
+    const target = new EventTarget();
+    let outer = 0;
+    let added = 0;
+    target.addEventListener('foo', () => {
+      outer++;
+      for (let i = 0; i < 16; i++) {
+        target.addEventListener('foo', () => added++);
+      }
+    });
+    target.addEventListener('foo', () => outer++);
+
+    target.dispatchEvent(new Event('foo'));
+    strictEqual(outer, 2);
+    strictEqual(added, 0);
+
+    target.dispatchEvent(new Event('foo'));
+    strictEqual(outer, 4);
+    strictEqual(added, 16);
   },
 };
 
@@ -445,5 +498,347 @@ export const handlerThis = {
     et.dispatchEvent(new Event('foo'));
     strictEqual(handler.mock.callCount(), 1);
     strictEqual(handlerObject.handleEvent.mock.callCount(), 1);
+  },
+};
+
+export const isTrustedDefaults = {
+  async test() {
+    // User-constructed events are never trusted...
+    const userEvents = [
+      new Event('foo'),
+      new CustomEvent('foo'),
+      new MessageEvent('foo', { data: 'bar' }),
+      new ErrorEvent('foo'),
+      new CloseEvent('foo'),
+    ];
+    for (const event of userEvents) {
+      strictEqual(event.isTrusted, false);
+      // ...including when observed by a listener during dispatch.
+      const target = new EventTarget();
+      let trusted;
+      target.addEventListener('foo', (e) => {
+        trusted = e.isTrusted;
+      });
+      target.dispatchEvent(event);
+      strictEqual(trusted, false);
+    }
+
+    // Events constructed and dispatched by the runtime are trusted.
+    {
+      const ac = new AbortController();
+      let trusted;
+      ac.signal.addEventListener('abort', (e) => {
+        trusted = e.isTrusted;
+      });
+      ac.abort();
+      strictEqual(trusted, true);
+    }
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const handler = (e) => resolve(e.isTrusted);
+      addEventListener('unhandledrejection', handler);
+      Promise.reject(new Error('boom'));
+      strictEqual(await promise, true);
+      removeEventListener('unhandledrejection', handler);
+    }
+  },
+};
+
+// Under the REPORT dispatch policy, a listener exception is reported to the global scope's
+// 'error' event synchronously, between the throwing listener and the next one.
+export const reportedListenerErrorInterleaving = {
+  test() {
+    const order = [];
+    const boom = new Error('boom');
+    const globalHandler = (event) => {
+      order.push('global-error');
+      strictEqual(event.error, boom);
+    };
+    addEventListener('error', globalHandler);
+    try {
+      const target = new EventTarget();
+      target.addEventListener('foo', () => {
+        order.push('l1');
+        throw boom;
+      });
+      target.addEventListener('foo', () => order.push('l2'));
+      // dispatchEvent() itself must not throw.
+      target.dispatchEvent(new Event('foo'));
+      deepStrictEqual(order, ['l1', 'global-error', 'l2']);
+    } finally {
+      removeEventListener('error', globalHandler);
+    }
+  },
+};
+
+// A throwing global 'error' listener must not break the REPORT no-throw contract: the
+// nested report is routed to the console (HTML's "in error reporting mode" guard) instead
+// of propagating or recursing.
+export const throwingGlobalErrorListener = {
+  test() {
+    const order = [];
+    const globalHandler = () => {
+      order.push('global-error');
+      throw new Error('error handler boom');
+    };
+    addEventListener('error', globalHandler);
+    try {
+      // Via a REPORT dispatch on an EventTarget.
+      const target = new EventTarget();
+      target.addEventListener('foo', () => {
+        order.push('l1');
+        throw new Error('boom');
+      });
+      target.addEventListener('foo', () => order.push('l2'));
+      target.dispatchEvent(new Event('foo'));
+      deepStrictEqual(order, ['l1', 'global-error', 'l2']);
+
+      // Via AbortController.abort(), which the spec forbids from throwing.
+      order.length = 0;
+      const ac = new AbortController();
+      ac.signal.addEventListener('abort', () => {
+        order.push('abort1');
+        throw new Error('abort boom');
+      });
+      ac.signal.addEventListener('abort', () => order.push('abort2'));
+      ac.abort();
+      deepStrictEqual(order, ['abort1', 'global-error', 'abort2']);
+
+      // Via reportError() directly.
+      reportError(new Error('reported boom'));
+    } finally {
+      removeEventListener('error', globalHandler);
+    }
+  },
+};
+
+// The report-an-exception console fallback reads `error.stack`, which can run arbitrary
+// user code (a getter or proxy trap). A throwing stack getter must not escape any of the
+// no-throw report paths: reportError() itself, a REPORT dispatch, or the nested
+// (in-error-reporting-mode) report.
+export const throwingStackGetter = {
+  test() {
+    const makeEvil = (msg) => ({
+      get stack() {
+        throw new Error(`evil stack: ${msg}`);
+      },
+    });
+
+    // Via reportError() directly: must not throw.
+    reportError(makeEvil('direct'));
+
+    // Via a REPORT dispatch: the listener's thrown value has a throwing stack getter;
+    // dispatchEvent() must not throw and the remaining listeners still run.
+    const order = [];
+    const target = new EventTarget();
+    target.addEventListener('foo', () => {
+      order.push('l1');
+      throw makeEvil('listener');
+    });
+    target.addEventListener('foo', () => order.push('l2'));
+    target.dispatchEvent(new Event('foo'));
+    deepStrictEqual(order, ['l1', 'l2']);
+
+    // Via abort(), which the spec forbids from throwing.
+    const ac = new AbortController();
+    ac.signal.addEventListener('abort', () => {
+      order.push('abort1');
+      throw makeEvil('abort');
+    });
+    ac.signal.addEventListener('abort', () => order.push('abort2'));
+    ac.abort();
+    deepStrictEqual(order, ['l1', 'l2', 'abort1', 'abort2']);
+
+    // Via the nested report: a global 'error' listener throws a value whose stack getter
+    // throws. The nested report goes to the console and must neither propagate nor stop
+    // the original dispatch.
+    order.length = 0;
+    const globalHandler = () => {
+      order.push('global-error');
+      throw makeEvil('nested');
+    };
+    addEventListener('error', globalHandler);
+    try {
+      target.dispatchEvent(new Event('foo'));
+      deepStrictEqual(order, ['l1', 'global-error', 'l2']);
+    } finally {
+      removeEventListener('error', globalHandler);
+    }
+  },
+};
+
+// User code running during the mid-dispatch report can mutate the original listener list;
+// removals are honored for listeners that have not run yet.
+export const midReportListenerRemoval = {
+  test() {
+    const order = [];
+    const target = new EventTarget();
+    const l2 = () => order.push('l2');
+    const globalHandler = () => {
+      order.push('global-error');
+      target.removeEventListener('foo', l2);
+    };
+    addEventListener('error', globalHandler);
+    try {
+      target.addEventListener('foo', () => {
+        order.push('l1');
+        throw new Error('boom');
+      });
+      target.addEventListener('foo', l2);
+      target.dispatchEvent(new Event('foo'));
+      deepStrictEqual(order, ['l1', 'global-error']);
+    } finally {
+      removeEventListener('error', globalHandler);
+    }
+  },
+};
+
+// A throwing WebSocket 'message' listener has its exception reported and the remaining
+// listeners still run, but the WebSocket is still errored out afterwards (fail-fast).
+export const webSocketThrowingMessageListener = {
+  async test() {
+    const order = [];
+    const boom = new Error('ws boom');
+    const globalHandler = () => order.push('global-error');
+    addEventListener('error', globalHandler);
+    try {
+      const { 0: client, 1: server } = new WebSocketPair();
+      client.accept();
+      server.accept();
+
+      const errorPromise = new Promise((resolve) => {
+        client.addEventListener('error', (event) => resolve(event.error));
+      });
+      const l2Promise = new Promise((resolve) => {
+        client.addEventListener('message', () => {
+          order.push('l1');
+          throw boom;
+        });
+        client.addEventListener('message', () => {
+          // The fail-fast teardown happens strictly after the dispatch completes: this
+          // listener still observes a live, usable WebSocket even though the previous
+          // listener threw.
+          order.push(`l2:readyState=${client.readyState}`);
+          client.send('still-works');
+          resolve();
+        });
+      });
+
+      const serverReceived = new Promise((resolve) => {
+        server.addEventListener('message', (event) => resolve(event.data));
+      });
+
+      server.send('hello');
+      await l2Promise;
+      deepStrictEqual(order, [
+        'l1',
+        'global-error',
+        `l2:readyState=${WebSocket.READY_STATE_OPEN}`,
+      ]);
+      // The send() from the second listener made it out before the teardown.
+      strictEqual(await serverReceived, 'still-works');
+      // The fail-fast reaction errors the WebSocket with the listener's exception. The
+      // exception crosses the JS/KJ boundary in the read loop and is reconstructed, so
+      // only the message survives.
+      ok(String(await errorPromise).includes('ws boom'));
+    } finally {
+      removeEventListener('error', globalHandler);
+    }
+  },
+};
+
+// The standard MessageEventInit members are all supported (and optional) for
+// user-constructed events, with spec defaults.
+export const messageEventSpecInit = {
+  test() {
+    const defaults = new MessageEvent('message');
+    strictEqual(defaults.data, null);
+    strictEqual(defaults.origin, '');
+    strictEqual(defaults.lastEventId, '');
+    strictEqual(defaults.source, null);
+    deepStrictEqual(defaults.ports, []);
+    strictEqual(defaults.bubbles, false);
+    strictEqual(defaults.cancelable, false);
+    strictEqual(defaults.composed, false);
+
+    const data = { hello: 'world' };
+    const event = new MessageEvent('message', {
+      data,
+      origin: 'https://example.org',
+      lastEventId: '42',
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+    strictEqual(event.data, data);
+    strictEqual(event.origin, 'https://example.org');
+    strictEqual(event.lastEventId, '42');
+    strictEqual(event.bubbles, true);
+    strictEqual(event.cancelable, true);
+    strictEqual(event.composed, true);
+    event.preventDefault();
+    strictEqual(event.defaultPrevented, true);
+  },
+};
+
+// CloseEventInit supports the common EventInit members.
+export const closeEventSpecInit = {
+  test() {
+    const defaults = new CloseEvent('close');
+    strictEqual(defaults.code, 0);
+    strictEqual(defaults.reason, '');
+    strictEqual(defaults.wasClean, false);
+    strictEqual(defaults.bubbles, false);
+    strictEqual(defaults.cancelable, false);
+    strictEqual(defaults.composed, false);
+
+    const event = new CloseEvent('close', {
+      code: 1000,
+      reason: 'done',
+      wasClean: true,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+    strictEqual(event.code, 1000);
+    strictEqual(event.reason, 'done');
+    strictEqual(event.wasClean, true);
+    strictEqual(event.bubbles, true);
+    strictEqual(event.cancelable, true);
+    strictEqual(event.composed, true);
+  },
+};
+
+// ErrorEventInit supports the common EventInit members.
+export const errorEventSpecInit = {
+  test() {
+    const defaults = new ErrorEvent('error');
+    strictEqual(defaults.message, '');
+    strictEqual(defaults.bubbles, false);
+    strictEqual(defaults.cancelable, false);
+    strictEqual(defaults.composed, false);
+
+    const err = new Error('boom');
+    const event = new ErrorEvent('error', {
+      message: 'boom',
+      filename: 'test.js',
+      lineno: 1,
+      colno: 2,
+      error: err,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+    strictEqual(event.message, 'boom');
+    strictEqual(event.filename, 'test.js');
+    strictEqual(event.lineno, 1);
+    strictEqual(event.colno, 2);
+    strictEqual(event.error, err);
+    strictEqual(event.bubbles, true);
+    strictEqual(event.cancelable, true);
+    strictEqual(event.composed, true);
+    event.preventDefault();
+    strictEqual(event.defaultPrevented, true);
   },
 };

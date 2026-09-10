@@ -18,7 +18,6 @@
 #include <kj/array.h>
 #include <kj/common.h>
 #include <kj/compat/gzip.h>
-#include <kj/compat/tls.h>
 #include <kj/debug.h>
 #include <kj/encoding.h>
 #include <kj/string.h>
@@ -387,6 +386,10 @@ kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
     bool isEnabled = capnp::toDynamic(featureFlags).get(field.field).as<bool>();
     if (!isEnabled) {
       continue;
+    }
+
+    if (field.pythonSnapshotRelease.getFlagName() == "pythonWorkersDevPyodide") {
+      return field.pythonSnapshotRelease;
     }
 
     // We pick the flag with the highest ordinal value that is enabled and has a

@@ -14,6 +14,7 @@ def _run_binary_target_impl(ctx):
         tools = [tool],
         use_default_shell_env = True,
         command = cmd,
+        mnemonic = "RunBinaryTarget",
     )
 
 run_binary_target = rule(

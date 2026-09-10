@@ -43,6 +43,52 @@ class NoopSink final: public WritableStreamSink {
   void abort(kj::Exception) override {}
 };
 
+KJ_TEST("IdentityTransformStream declines tryReadSync/tryWriteSync") {
+  // IdentityTransformStreamImpl deliberately does not implement the synchronous fast paths:
+  // serving the read/write rendezvous synchronously would make the result observable to
+  // JavaScript ahead of the counterpart's controller-level completion bookkeeping (write
+  // promise resolution and highWaterMark accounting), inverting the ordering guaranteed by
+  // the asynchronous path. See the note in identity-transform-stream.c++ and
+  // identitytransformstream-backpressure-test.js. This test guards against the fast path
+  // being added without preserving that ordering, and verifies that declining has no
+  // side effects.
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto pipe = newIdentityPipe();
+
+  kj::byte buf[16]{};
+
+  // Nothing pending: declined.
+  KJ_EXPECT(pipe.in->tryReadSync(kj::arrayPtr(buf), 1) == kj::none);
+  KJ_EXPECT(!pipe.out->tryWriteSync("abc"_kjb));
+
+  {
+    // A pending write is not served synchronously, and declining has no side effects: the
+    // async path then completes normally with the same arguments.
+    auto writePromise = pipe.out->write("foobar"_kjb);
+    KJ_EXPECT(pipe.in->tryReadSync(kj::arrayPtr(buf), 1) == kj::none);
+    KJ_EXPECT(!writePromise.poll(ws));
+    KJ_EXPECT(pipe.in->tryRead(buf, 1, sizeof(buf)).wait(ws) == 6);
+    KJ_EXPECT(kj::arrayPtr(buf).first(6) == "foobar"_kjb);
+    writePromise.wait(ws);
+  }
+
+  {
+    // A pending read is not served synchronously, and declining has no side effects.
+    auto readPromise = pipe.in->tryRead(buf, 1, sizeof(buf));
+    KJ_EXPECT(!pipe.out->tryWriteSync("abc"_kjb));
+    KJ_EXPECT(!readPromise.poll(ws));
+    pipe.out->write("abc"_kjb).wait(ws);
+    KJ_EXPECT(readPromise.wait(ws) == 3);
+    KJ_EXPECT(kj::arrayPtr(buf).first(3) == "abc"_kjb);
+  }
+
+  // EOF is likewise reported only via the async path.
+  pipe.out->end().wait(ws);
+  KJ_EXPECT(pipe.in->tryReadSync(kj::arrayPtr(buf), 1) == kj::none);
+}
+
 // Creates a TestFixture with common flags for stream tests
 TestFixture makeStreamTestFixture() {
   capnp::MallocMessageBuilder message;
@@ -327,7 +373,8 @@ KJ_TEST("WritableStreamInternalController operations reject when piped to") {
     auto expectReject = [&](jsg::Promise<void> promise, bool& flag) {
       promise.catch_(env.js, [&](jsg::Lock& js, jsg::Value value) {
         flag = true;
-        KJ_ASSERT(js.exceptionToKj(kj::mv(value)).getDescription() == expectedError);
+        auto exception = js.exceptionToKj(kj::mv(value));
+        KJ_ASSERT(exception.getDescription() == expectedError);
       });
     };
 
@@ -754,8 +801,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read with zero-sized buffer") {
     auto rs = makeByteStream(env.js);
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 0);
-    auto view = v8::Uint8Array::New(buffer, 0, 0);
+    auto view = jsg::JsArrayBufferView(jsg::JsUint8Array::create(env.js, 0));
 
     bool rejected = false;
     reader->read(env.js, view, kj::none)
@@ -778,8 +824,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read with atLeast=0") {
     auto rs = makeByteStream(env.js);
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
-    auto view = v8::Uint8Array::New(buffer, 0, 10);
+    auto view = jsg::JsArrayBufferView(jsg::JsUint8Array::create(env.js, 10));
 
     bool rejected = false;
     reader->readAtLeast(env.js, 0, view)
@@ -802,8 +847,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read when atLeast exceeds buffer size"
     auto rs = makeByteStream(env.js);
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
-    auto view = v8::Uint8Array::New(buffer, 0, 10);
+    auto view = jsg::JsArrayBufferView(jsg::JsUint8Array::create(env.js, 10));
 
     bool rejected = false;
     reader->readAtLeast(env.js, 20, view)
@@ -830,7 +874,7 @@ KJ_TEST("ReadableStreamBYOBReader readAtLeast with element count within capacity
 
     // Uint32Array: element size 4, byteLength 40, length 10
     auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 40);
-    auto view = v8::Uint32Array::New(buffer, 0, 10);
+    auto view = jsg::JsArrayBufferView(v8::Uint32Array::New(buffer, 0, 10));
 
     bool rejected = false;
     reader->readAtLeast(env.js, 10, view)
@@ -857,7 +901,7 @@ KJ_TEST("ReadableStreamBYOBReader readAtLeast rejects when element count exceeds
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
     auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 40);
-    auto view = v8::Uint32Array::New(buffer, 0, 10);
+    auto view = jsg::JsArrayBufferView(v8::Uint32Array::New(buffer, 0, 10));
 
     bool rejected = false;
     reader->readAtLeast(env.js, 11, view)
@@ -881,7 +925,7 @@ KJ_TEST("ReadableStreamBYOBReader readAtLeast rejects byteLength as element coun
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
     auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 4096);
-    auto view = v8::Uint32Array::New(buffer, 0, 1024);
+    auto view = jsg::JsArrayBufferView(v8::Uint32Array::New(buffer, 0, 1024));
 
     bool rejected = false;
     reader->readAtLeast(env.js, 4096, view)
@@ -907,7 +951,7 @@ KJ_TEST("ReadableStreamBYOBReader read() with min exceeding element capacity rej
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
     auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 40);
-    auto view = v8::Uint32Array::New(buffer, 0, 10);
+    auto view = jsg::JsArrayBufferView(v8::Uint32Array::New(buffer, 0, 10));
 
     ReadableStreamBYOBReader::ReadableStreamBYOBReaderReadOptions opts;
     opts.min = 11;
@@ -931,8 +975,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read after releaseLock") {
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
     reader->releaseLock(env.js);
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
-    auto view = v8::Uint8Array::New(buffer, 0, 10);
+    auto view = jsg::JsArrayBufferView(jsg::JsUint8Array::create(env.js, 10));
 
     bool rejected = false;
     reader->read(env.js, view, kj::none)
@@ -944,6 +987,81 @@ KJ_TEST("ReadableStreamBYOBReader rejects read after releaseLock") {
     });
     env.js.runMicrotasks();
     KJ_ASSERT(rejected, "Expected read() to reject after releaseLock");
+  });
+}
+
+// ======================================================================================
+// BYOB read destination placement
+//
+// ReadableStreamInternalController::read() derives the tryRead() destination from the
+// live view's byteOffset/byteLength at the time the read is issued; there is no separately
+// cached copy of those values that could disagree with the view. Out-of-bounds destinations
+// therefore cannot be produced through any API; the controller's check against the
+// BackingStore's out-of-cage length exists purely as sandbox hardening against corrupted
+// in-cage view metadata, and jsg::JsArrayBufferView::asArrayPtr() independently validates
+// the same bounds when the destination pointer is derived.
+
+// Fills the entire destination it is handed with a recognizable pattern, so a test can
+// verify exactly where read data lands in the caller's buffer.
+class PatternSource final: public ReadableStreamSource {
+ public:
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    auto bytes = kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes);
+    for (auto i: kj::indices(bytes)) {
+      bytes[i] = static_cast<kj::byte>('A' + (i % 26));
+    }
+    return maxBytes;
+  }
+};
+
+KJ_TEST("BYOB read into an offset view fills only the view's region, returns a Uint8Array") {
+  static constexpr size_t kBufferSize = 64;
+  static constexpr size_t kViewOffset = 16;
+  static constexpr size_t kViewLength = 32;
+
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto rs = js.alloc<ReadableStream>(env.context, kj::heap<PatternSource>());
+
+    auto buffer = jsg::JsArrayBuffer::create(js, kBufferSize);
+    // A non-Uint8Array view type verifies that the result type does not depend on the
+    // view type passed in.
+    auto view =
+        jsg::JsArrayBufferView(buffer.newUint32View(kViewOffset, kViewLength / sizeof(uint32_t)));
+
+    auto options = ReadableStreamController::ByobOptions{
+      .bufferView = view.addRef(js),
+      .atLeast = 1,
+      .detachBuffer = false,
+    };
+
+    auto maybePromise = rs->getController().read(js, kj::mv(options));
+    auto promise = kj::mv(KJ_ASSERT_NONNULL(maybePromise));
+
+    return env.context.awaitJs(js, kj::mv(promise).then(js, JSG_VISITABLE_LAMBDA((bufferRef = buffer.addRef(js), rs = rs.addRef()), (bufferRef, rs), (jsg::Lock& js, ReadResult result) {
+      KJ_ASSERT(!result.done);
+      auto& value = KJ_REQUIRE_NONNULL(result.value);
+      auto handle = value.getHandle(js);
+
+      // The result is a Uint8Array over the same buffer, covering the view's region.
+      v8::Local<v8::Uint8Array> u8 = KJ_ASSERT_NONNULL(handle.tryCast<jsg::JsUint8Array>());
+      auto buffer = bufferRef.getHandle(js);
+      KJ_ASSERT(u8->Buffer() == static_cast<v8::Local<v8::ArrayBuffer>>(buffer));
+      KJ_ASSERT(u8->ByteOffset() == kViewOffset);
+      KJ_ASSERT(u8->ByteLength() == kViewLength);
+
+      // The data landed exactly in [kViewOffset, kViewOffset + kViewLength); the rest of
+      // the buffer is untouched (v8::ArrayBuffer allocations are zero-initialized).
+      auto data = buffer.asArrayPtr();
+      for (size_t i: kj::zeroTo(kBufferSize)) {
+      if (i >= kViewOffset && i < kViewOffset + kViewLength) {
+      KJ_ASSERT(data[i] == static_cast<kj::byte>('A' + ((i - kViewOffset) % 26)), i);
+      } else {
+      KJ_ASSERT(data[i] == 0, i);
+      }
+      }
+    })));
   });
 }
 
@@ -967,6 +1085,71 @@ KJ_TEST("Writing SharedArrayBuffer works") {
     auto sab = v8::SharedArrayBuffer::New(env.js.v8Isolate, 5);
     auto writePromise = writer->write(env.js, jsg::JsSharedArrayBuffer(sab));
     env.js.runMicrotasks();
+  });
+}
+
+KJ_TEST("internal pipe force-cancel drops pending read before destroying source") {
+  class PendingReadSource final: public ReadableStreamSource {
+   public:
+    PendingReadSource(kj::Promise<size_t> readPromise, kj::Vector<kj::String>& events)
+        : readPromise(kj::mv(readPromise)),
+          events(events) {}
+
+    ~PendingReadSource() noexcept(false) {
+      events.add(kj::str("source destroyed"));
+    }
+
+    kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+      KJ_ASSERT(minBytes <= 1);
+      KJ_ASSERT(maxBytes >= 1);
+
+      static_cast<kj::byte*>(buffer)[0] = 1;
+      events.add(kj::str("read started"));
+
+      return kj::mv(readPromise).attach(kj::defer([&events = events] {
+        events.add(kj::str("read promise dropped"));
+      }));
+    }
+
+    void cancel(kj::Exception reason) override {
+      events.add(kj::str("source canceled"));
+    }
+
+   private:
+    kj::Promise<size_t> readPromise;
+    kj::Vector<kj::String>& events;
+  };
+
+  auto fixture = makeStreamTestFixture();
+  kj::Vector<kj::String> events;
+  bool pipeRejected = false;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto read = kj::newPromiseAndFulfiller<size_t>();
+
+    auto source = env.js.alloc<ReadableStream>(
+        env.context, kj::heap<PendingReadSource>(kj::mv(read.promise), events));
+    auto destination = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::none);
+
+    auto pipe = source->pipeTo(env.js, destination.addRef(), PipeToOptions{})
+                    .catch_(env.js, [&](jsg::Lock&, jsg::Value) { pipeRejected = true; });
+
+    KJ_ASSERT(events.size() == 1);
+    KJ_ASSERT(events[0] == "read started");
+
+    // Bypass the pipe lock like JsReadableStream::forceCancel().
+    source->getController().cancel(env.js, kj::none);
+
+    // The fix must synchronously cancel the pending read before freeing its source.
+    KJ_ASSERT(events.size() == 4);
+    KJ_ASSERT(events[1] == "read promise dropped");
+    KJ_ASSERT(events[2] == "source canceled");
+    KJ_ASSERT(events[3] == "source destroyed");
+
+    // Without the fix, this resumes pumpTo() with a dangling source pointer.
+    read.fulfiller->fulfill(1);
+
+    return env.context.awaitJs(env.js, kj::mv(pipe)).then([&] { KJ_ASSERT(pipeRejected); });
   });
 }
 

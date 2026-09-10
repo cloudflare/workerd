@@ -53,11 +53,7 @@ function validateAbortSignal(
 }
 
 type StreamType =
-  | Readable
-  | Writable
-  | Transform
-  | ReadableStream
-  | WritableStream;
+  Readable | Writable | Transform | ReadableStream | WritableStream;
 
 export function addAbortSignal<T extends StreamType>(
   signal: unknown,

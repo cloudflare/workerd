@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <workerd/jsg/jsvalue-defs.h>
+
 #include <v8-profiler.h>
 
 #include <kj/common.h>
@@ -15,6 +17,7 @@
 #include <kj/exception.h>
 #include <kj/hash.h>
 #include <kj/map.h>
+#include <kj/refcount.h>
 #include <kj/string.h>
 #include <kj/table.h>
 
@@ -183,6 +186,11 @@ class MemoryTracker final {
       const kj::Own<T>& value,
       kj::Maybe<kj::StringPtr> nodeName = kj::none);
 
+  template <MemoryRetainer T>
+  inline void trackField(kj::StringPtr edgeName,
+      const kj::Arc<T>& value,
+      kj::Maybe<kj::StringPtr> nodeName = kj::none);
+
   template <MemoryRetainer T, typename D>
   inline void trackField(kj::StringPtr edgeName,
       const std::unique_ptr<T, D>& value,
@@ -200,6 +208,10 @@ class MemoryTracker final {
   template <MemoryRetainer T>
   inline void trackField(
       kj::StringPtr edgeName, const Ref<T>& value, kj::Maybe<kj::StringPtr> nodeName = kj::none);
+
+  template <IsJsValue T>
+  inline void trackField(
+      kj::StringPtr edgeName, const JsRef<T>& value, kj::Maybe<kj::StringPtr> nodeName = kj::none);
 
   template <MemoryRetainer T>
   inline void trackField(
@@ -373,6 +385,14 @@ void MemoryTracker::trackField(
 template <MemoryRetainer T>
 void MemoryTracker::trackField(
     kj::StringPtr edgeName, const kj::Own<T>& value, kj::Maybe<kj::StringPtr> nodeName) {
+  if (value.get() != nullptr) {
+    trackField(edgeName, value.get(), nodeName);
+  }
+}
+
+template <MemoryRetainer T>
+void MemoryTracker::trackField(
+    kj::StringPtr edgeName, const kj::Arc<T>& value, kj::Maybe<kj::StringPtr> nodeName) {
   if (value.get() != nullptr) {
     trackField(edgeName, value.get(), nodeName);
   }

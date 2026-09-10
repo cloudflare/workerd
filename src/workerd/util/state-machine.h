@@ -862,7 +862,7 @@ class StateMachine {
   // Constructors and assignment
   // ==========================================================================
 
-  // Default constructor is private - use StateMachine::create<State>(...) instead.
+  // There is no default constructor - use StateMachine::create<State>(...) instead.
   // This ensures all state machines are properly initialized.
 
   // Destructor checks for outstanding locks
@@ -899,14 +899,11 @@ class StateMachine {
   // that typically aren't copyable either (e.g., stream controllers).
   KJ_DISALLOW_COPY(StateMachine);
 
-  // Factory function for clearer initialization
   template <typename S, typename... TArgs>
   static StateMachine create(TArgs&&... args)
     requires(_::isInTuple<S, StatesTuple>)
   {
-    StateMachine m;
-    m.state.template init<S>(kj::fwd<TArgs>(args)...);
-    return m;
+    return StateMachine(InitTag<S>{}, kj::fwd<TArgs>(args)...);
   }
 
   // ---------------------------------------------------------------------------
@@ -1656,9 +1653,17 @@ class StateMachine {
   }
 
  private:
-  // Private default constructor - use create<State>() factory function instead.
-  // Making this private ensures state machines are always initialized.
-  StateMachine() = default;
+  // In-place construction of the initial state, used only by create(). Keeping this
+  // private ensures create<State>() is the only way to construct a StateMachine, so
+  // machines are always initialized.
+  template <typename S>
+  struct InitTag {};
+  template <typename S, typename... TArgs>
+  explicit StateMachine(InitTag<S>, TArgs&&... args)
+    requires(_::isInTuple<S, StatesTuple>)
+  {
+    state.template init<S>(kj::fwd<TArgs>(args)...);
+  }
 
   StateUnion state;
 

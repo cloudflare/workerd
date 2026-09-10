@@ -18,8 +18,6 @@ namespace {
 // want this number to be big enough to be useful for tracing, but small enough to make it hard to
 // DoS the C++ heap -- keeping in mind we can record a trace per handler run during a request. For
 // streaming tail worker, this is the maximum size per tail event.
-// TODO(streaming-tail): Add a clear indicator for events being truncated based on MAX_TRACE_BYTES
-// so that developers can understand why this happens.
 static constexpr size_t MAX_TRACE_BYTES = 256 * 1024;
 
 tracing::Attribute::Value cloneAttributeValue(const tracing::Attribute::Value& value) {
@@ -38,6 +36,43 @@ tracing::Attribute::Value cloneAttributeValue(const tracing::Attribute::Value& v
     }
   }
   KJ_UNREACHABLE;
+}
+
+void reportExceptionToTailStream(tracing::TailStreamWriter& writer,
+    const tracing::InvocationSpanContext& context,
+    kj::Date timestamp,
+    kj::Maybe<tracing::Exception::Code> code,
+    kj::StringPtr name,
+    kj::StringPtr message,
+    kj::Maybe<kj::StringPtr> stack) {
+  kj::Maybe<tracing::Exception::Code> truncatedCode;
+  size_t codeSize = 0;
+  KJ_IF_SOME(c, code) {
+    KJ_SWITCH_ONEOF(c) {
+      KJ_CASE_ONEOF(text, kj::String) {
+        codeSize = kj::min(text.size(), MAX_TRACE_BYTES);
+        truncatedCode = kj::str(text.first(codeSize));
+      }
+      KJ_CASE_ONEOF(number, double) {
+        codeSize = sizeof(double);
+        truncatedCode = number;
+      }
+    }
+  }
+  auto truncatedName = name.first(kj::min(name.size(), MAX_TRACE_BYTES - codeSize));
+  auto truncatedMessage =
+      message.first(kj::min(message.size(), MAX_TRACE_BYTES - codeSize - truncatedName.size()));
+  kj::Maybe<kj::String> truncatedStack;
+  size_t truncatedStackSize = 0;
+  KJ_IF_SOME(s, stack) {
+    truncatedStackSize = kj::min(
+        s.size(), MAX_TRACE_BYTES - codeSize - truncatedName.size() - truncatedMessage.size());
+    truncatedStack = kj::heapString(s.first(truncatedStackSize));
+  }
+  writer.report(context,
+      {tracing::Exception(timestamp, kj::str(truncatedName), kj::str(truncatedMessage),
+          kj::mv(truncatedStack), kj::mv(truncatedCode))},
+      timestamp, codeSize + truncatedName.size() + truncatedMessage.size() + truncatedStackSize);
 }
 }  // namespace
 
@@ -122,27 +157,47 @@ constexpr kj::LiteralStringConst logSizeExceeded =
 void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     LogLevel logLevel,
-    kj::String message) {
+    kj::String message,
+    tracing::LogErrorInfo errorInfo) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
+  }
+
+  // Compute the heap size of errorInfo once for both the streaming and buffered paths.
+  size_t errorInfoSize = 0;
+  KJ_IF_SOME(infos, errorInfo) {
+    for (const auto& entry: infos) {
+      KJ_IF_SOME(info, entry) {
+        errorInfoSize += info.name.size() + info.message.size();
+        KJ_IF_SOME(s, info.stack) {
+          errorInfoSize += s.size();
+        }
+      }
+    }
   }
 
   // TODO(streaming-tail): Here we add the log to the trace object and the tail stream writer, if
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
   // to the buffered trace object is not needed; this will be addressed in a future refactor.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    // If message is too big on its own, truncate it.
+    // If message is too big on its own, truncate it. A truncated message is no longer valid JSON,
+    // so signal truncation to the receiver, which then exposes it as a raw string.
     size_t messageSize = kj::min(message.size(), MAX_TRACE_BYTES);
+    auto truncated =
+        message.size() > MAX_TRACE_BYTES ? tracing::LogTruncated::YES : tracing::LogTruncated::NO;
+    // Clone errorInfo for the STW path because the batched-tail path below also needs it.
+    auto streamErrorInfo = tracing::cloneLogErrorInfo(errorInfo);
     writer->report(context,
-        {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)))}, timestamp,
-        messageSize);
+        {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)),
+            kj::mv(streamErrorInfo), truncated)},
+        timestamp, messageSize + errorInfoSize);
   }
 
   if (trace->exceededLogLimit) {
     return;
   }
 
-  size_t messageSize = sizeof(tracing::Log) + message.size();
+  size_t messageSize = sizeof(tracing::Log) + message.size() + errorInfoSize;
   if (trace->bytesUsed + messageSize > MAX_TRACE_BYTES) {
     // We use a JSON encoded array/string to match other console.log() recordings:
     trace->logs.add(timestamp, LogLevel::WARN, kj::str(logSizeExceeded));
@@ -150,7 +205,7 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     trace->truncated = true;
   } else {
     trace->bytesUsed += messageSize;
-    trace->logs.add(timestamp, logLevel, kj::mv(message));
+    trace->logs.add(timestamp, logLevel, kj::mv(message), kj::mv(errorInfo));
   }
 }
 
@@ -237,21 +292,11 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     messageSize += s.size();
   }
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    auto maybeTruncatedName = name.first(kj::min(name.size(), MAX_TRACE_BYTES));
-    auto maybeTruncatedMessage =
-        message.first(kj::min(message.size(), MAX_TRACE_BYTES - maybeTruncatedName.size()));
-    kj::Maybe<kj::String> maybeTruncatedStack;
-    auto maybeTruncatedStackSize = 0;
+    kj::Maybe<kj::StringPtr> stackPtr;
     KJ_IF_SOME(s, stack) {
-      maybeTruncatedStackSize = kj::min(
-          s.size(), MAX_TRACE_BYTES - maybeTruncatedName.size() - maybeTruncatedMessage.size());
-      maybeTruncatedStack = kj::heapString(s.first(maybeTruncatedStackSize));
+      stackPtr = s;
     }
-    writer->report(context,
-        {tracing::Exception(timestamp, kj::str(maybeTruncatedName), kj::str(maybeTruncatedMessage),
-            kj::mv(maybeTruncatedStack))},
-        timestamp,
-        maybeTruncatedName.size() + maybeTruncatedMessage.size() + maybeTruncatedStackSize);
+    reportExceptionToTailStream(*writer, context, timestamp, kj::none, name, message, stackPtr);
   }
 
   if (trace->exceededExceptionLimit) {
@@ -267,6 +312,28 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     trace->bytesUsed += messageSize;
     trace->exceptions.add(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
   }
+}
+
+void WorkerTracer::addSpanException(tracing::SpanId spanId,
+    kj::Date timestamp,
+    kj::Maybe<tracing::Exception::Code> code,
+    kj::String name,
+    kj::String message,
+    kj::Maybe<kj::String> stack) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+
+  auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+  auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
+      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+
+  kj::Maybe<kj::StringPtr> stackPtr;
+  KJ_IF_SOME(s, stack) {
+    stackPtr = s;
+  }
+  reportExceptionToTailStream(*writer, context, timestamp, kj::mv(code), name, message, stackPtr);
 }
 
 void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContext& context,
@@ -310,7 +377,7 @@ void WorkerTracer::setEventInfo(
   KJ_ASSERT(weakIoContext == kj::none, "tracer can only be used for a single event");
   weakIoContext = incomingRequest.getContext().getWeakRef();
   setEventInfoInternal(
-      incomingRequest.getInvocationSpanContext(), incomingRequest.now(), kj::mv(info));
+      incomingRequest.getInvocationSpanContext(), incomingRequest.nowForTraceOnset(), kj::mv(info));
 }
 
 void WorkerTracer::setEventInfoInternal(
@@ -399,6 +466,16 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   trace->outcome = outcome;
   trace->cpuTime = cpuTime;
   trace->wallTime = wallTime;
+
+  if (outcome == EventOutcome::EXCEPTION && pipelineLogLevel != PipelineLogLevel::NONE &&
+      !trace->exceededExceptionLimit && trace->exceptions.empty()) {
+    LOG_PERIODICALLY(WARNING,
+        "NOSENTRY reporting trace with exception outcome, but no actual exceptions",
+        trace->eventInfo);
+  } else if (outcome != EventOutcome::EXCEPTION && !trace->exceptions.empty()) {
+    LOG_PERIODICALLY(WARNING, "NOSENTRY reporting trace with exceptions, but no exception outcome",
+        trace->eventInfo);
+  }
 
   // Defer reporting the actual outcome event to the WorkerTracer destructor: The outcome is
   // reported when the metrics request is deallocated, but with ctx.waitUntil() there might be spans
@@ -526,6 +603,41 @@ void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value)
   attributes.add(tracing::Attribute{kj::mv(key), kj::mv(value)});
 }
 
+void WorkerTracer::addSpanAttribute(const tracing::InvocationSpanContext& context,
+    kj::ConstString key,
+    tracing::Attribute::Value value) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE || maybeTailStreamWriter == kj::none) {
+    return;
+  }
+  addSpanAttributeInternal(context, kj::mv(key), kj::mv(value), getTime());
+}
+
+void WorkerTracer::addSpanAttributeInternal(const tracing::InvocationSpanContext& context,
+    kj::ConstString key,
+    tracing::Attribute::Value value,
+    kj::Date timestamp) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+
+  auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+  size_t size = key.size();
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(string, kj::ConstString) {
+      size += string.size();
+    }
+    KJ_CASE_ONEOF_DEFAULT {
+      size += sizeof(double);
+    }
+  }
+  if (size > MAX_TRACE_BYTES) {
+    return;
+  }
+
+  tracing::CustomInfo attributes = kj::arr(tracing::Attribute(kj::mv(key), kj::mv(value)));
+  tailStreamWriter->report(context, kj::mv(attributes), timestamp, size);
+}
+
 SpanParent BaseTracer::makeUserRequestSpan(
     tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
   KJ_IF_SOME(func, makeUserRequestSpanFunc) {
@@ -558,12 +670,16 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
   }
 }
 
-kj::Own<SpanObserver> UserSpanObserver::newChild() {
-  return kj::refcounted<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags);
+void WorkerTracer::markUnused() {
+  markedUnused = true;
 }
 
-kj::Own<SpanObserver> UserSpanObserver::newChildFromUserCode() {
-  return kj::refcounted<UserSpanObserver>(
+kj::Rc<SpanObserver> UserSpanObserver::newChild() {
+  return kj::rc<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags);
+}
+
+kj::Rc<SpanObserver> UserSpanObserver::newChildFromUserCode() {
+  return kj::rc<UserSpanObserver>(
       kj::addRef(*submitter), spanId, traceId, traceFlags, /*fromUserCode=*/true);
 }
 
@@ -590,6 +706,17 @@ void UserSpanObserver::onOpen(kj::ConstString operationName, kj::Date startTime)
         submitter->submitUserSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
   } else {
     wasAccepted = submitter->submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+  }
+}
+
+void UserSpanObserver::onException(kj::Date timestamp,
+    kj::Maybe<tracing::Exception::Code> code,
+    kj::String name,
+    kj::String message,
+    kj::Maybe<kj::String> stack) {
+  if (wasAccepted) {
+    submitter->submitSpanException(
+        spanId, timestamp, kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
   }
 }
 

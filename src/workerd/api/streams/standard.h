@@ -290,7 +290,7 @@ class WritableImpl {
     }
   };
 
-  WritableImpl(jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
+  WritableImpl(jsg::Lock& js, kj::Weak<WritableStream> owner, jsg::Ref<AbortSignal> abortSignal);
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue reason);
 
@@ -405,7 +405,7 @@ class WritableImpl {
   // uses this WritableImpl. This creates a strong circular reference between jsg::Refs
   // that isn't allowed. GcTracing ends up with a stack overflow as the two jsg::Refs
   // try tracing each other.
-  kj::Maybe<kj::Own<WeakRef<WritableStream>>> owner;
+  kj::Weak<WritableStream> owner;
   jsg::Ref<AbortSignal> signal;
   State state = State::template create<Writable>();
   Algorithms algorithms;
@@ -490,7 +490,6 @@ class ReadableStreamDefaultController: public jsg::Object {
   kj::Maybe<StreamStates::Errored> getMaybeErrorState(jsg::Lock& js);
 
  private:
-  kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
 
   void visitForGc(jsg::GcVisitor& visitor);
@@ -522,13 +521,13 @@ class ReadableStreamBYOBRequest: public jsg::Object {
   // added to support the readAtLeast extension on the ReadableStreamBYOBReader.
   kj::Maybe<int> getAtLeast();
 
-  kj::Maybe<jsg::V8Ref<v8::Uint8Array>> getView(jsg::Lock& js);
+  kj::Maybe<jsg::JsUint8Array> getView(jsg::Lock& js);
 
   void invalidate(jsg::Lock& js);
 
   void respond(jsg::Lock& js, int bytesWritten);
 
-  void respondWithNewView(jsg::Lock& js, jsg::BufferSource view);
+  void respondWithNewView(jsg::Lock& js, jsg::JsBufferSource view);
 
   JSG_RESOURCE_TYPE(ReadableStreamBYOBRequest) {
     JSG_READONLY_PROTOTYPE_PROPERTY(view, getView);
@@ -548,7 +547,7 @@ class ReadableStreamBYOBRequest: public jsg::Object {
   struct Impl {
     kj::Own<ByteQueue::ByobRequest> readRequest;
     kj::Rc<WeakRef<ReadableByteStreamController>> controller;
-    jsg::V8Ref<v8::Uint8Array> view;
+    jsg::JsRef<jsg::JsUint8Array> view;
 
     size_t originalBufferByteLength;
     size_t originalByteOffsetPlusBytesFilled;
@@ -560,7 +559,6 @@ class ReadableStreamBYOBRequest: public jsg::Object {
     void updateView(jsg::Lock& js);
   };
 
-  kj::Maybe<IoContext&> ioContext;
   kj::Maybe<Impl> maybeImpl;
 
   void visitForGc(jsg::GcVisitor& visitor);
@@ -588,7 +586,7 @@ class ReadableByteStreamController: public jsg::Object {
 
   void close(jsg::Lock& js);
 
-  void enqueue(jsg::Lock& js, jsg::BufferSource chunk);
+  void enqueue(jsg::Lock& js, jsg::JsBufferSource chunk);
 
   void error(jsg::Lock& js, jsg::JsValue reason);
 
@@ -627,7 +625,6 @@ class ReadableByteStreamController: public jsg::Object {
 
  private:
   kj::Rc<WeakRef<ReadableByteStreamController>> weakSelf;
-  kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> maybeByobRequest;
 
@@ -648,7 +645,7 @@ class WritableStreamDefaultController: public jsg::Object {
   using WritableImpl = WritableImpl<WritableStreamDefaultController>;
 
   explicit WritableStreamDefaultController(
-      jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
+      jsg::Lock& js, kj::Weak<WritableStream> owner, jsg::Ref<AbortSignal> abortSignal);
 
   ~WritableStreamDefaultController() noexcept(false);
 
@@ -694,7 +691,6 @@ class WritableStreamDefaultController: public jsg::Object {
   void clearAlgorithms();
 
  private:
-  kj::Maybe<IoContext&> ioContext;
   WritableImpl impl;
 
   void visitForGc(jsg::GcVisitor& visitor);
@@ -704,12 +700,10 @@ class WritableStreamDefaultController: public jsg::Object {
 
 // The relationship between the TransformStreamDefaultController and the
 // readable/writable streams associated with it can be complicated.
-// Strong references to the TransformStreamDefaultController are held by
-// the *algorithms* passed into the readable and writable streams using
-// JSG_VISITABLE_LAMBDAs. When those algorithms are cleared, the strong
-// references holding the TransformStreamDefaultController are freed.
-// However, user code can do silly things like hold the Transform controller
-// long after both the readable and writable sides have been GC'ed.
+// Strong references to the TransformStreamDefaultController are held by the algorithms passed
+// into the readable and writable streams. The controller holds weak C++ references back to the
+// sides and traced references to their JavaScript wrappers. This preserves the sides' lifetimes
+// while keeping the C++ ownership graph acyclic so V8 can collect an unreachable cycle.
 class TransformStreamDefaultController: public jsg::Object {
  public:
   TransformStreamDefaultController(jsg::Lock& js);
@@ -717,6 +711,8 @@ class TransformStreamDefaultController: public jsg::Object {
   void init(jsg::Lock& js,
       jsg::Ref<ReadableStream>& readable,
       jsg::Ref<WritableStream>& writable,
+      jsg::JsRef<jsg::JsValue> readableOwner,
+      jsg::JsRef<jsg::JsValue> writableOwner,
       jsg::Optional<Transformer> maybeTransformer);
 
   // The startPromise is used by both the readable and writable sides in their respective
@@ -726,7 +722,7 @@ class TransformStreamDefaultController: public jsg::Object {
     return startPromise.promise.whenResolved(js);
   }
 
-  kj::Maybe<int> getDesiredSize();
+  kj::Maybe<int> getDesiredSize(jsg::Lock& js);
 
   void enqueue(jsg::Lock& js, jsg::JsValue chunk);
 
@@ -785,19 +781,20 @@ class TransformStreamDefaultController: public jsg::Object {
   jsg::Promise<void> performTransform(jsg::Lock& js, jsg::JsValue chunk);
   void setBackpressure(jsg::Lock& js, bool newBackpressure);
 
-  kj::Maybe<IoContext&> ioContext;
   jsg::PromiseResolverPair<void> startPromise;
 
-  kj::Maybe<ReadableStreamDefaultController&> tryGetReadableController();
-  kj::Maybe<WritableStreamJsController&> tryGetWritableController();
+  kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> tryGetReadableController(jsg::Lock& js);
+  kj::Maybe<jsg::Ref<WritableStream>> tryGetWritable(jsg::Lock& js);
 
   kj::Maybe<jsg::JsRef<jsg::JsValue>> getReadableErrorState(jsg::Lock& js);
 
   // Currently, JS-backed transform streams only support value-oriented streams.
   // In the future, that may change and this will need to become a kj::OneOf
   // that includes a ReadableByteStreamController.
-  kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> readable;
-  kj::Maybe<jsg::Ref<WritableStream>> writable;
+  kj::Maybe<jsg::WeakRef<ReadableStreamDefaultController>> readable;
+  kj::Maybe<jsg::WeakRef<WritableStream>> writable;
+  jsg::JsRef<jsg::JsValue> readableOwner;
+  jsg::JsRef<jsg::JsValue> writableOwner;
   Algorithms algorithms;
   bool backpressure = false;
   kj::Maybe<jsg::PromiseResolverPair<void>> maybeBackpressureChange;

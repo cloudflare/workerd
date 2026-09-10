@@ -1,0 +1,18 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The htmlrewriter streams suite runs the same test modules under two
+# configs: htmlrewriter-cpp against the C++ implementation,
+# htmlrewriter-ts against the TypeScript implementation.
+
+htmlrewriter_suite_srcs = glob(["*.js"]) + ["htmlrewriter-modules.capnp"]
+
+wd_test(
+    src = "htmlrewriter-cpp.wd-test",
+    data = htmlrewriter_suite_srcs,
+)
+
+wd_test(
+    src = "htmlrewriter-ts.wd-test",
+    args = ["--experimental"],
+    data = htmlrewriter_suite_srcs,
+)

@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+using StrategiesModules = import "strategies-modules.capnp";
+
+# Runs the full suite against the C++ implementation with the dateless
+# opt-in pedantic_wpt flag added to strategies-cpp.wd-test's pinned set,
+# pinning the ABSENCE of pedantic effects on this surface: the strategy
+# classes consult no flags, and the standard-streams machinery reachable
+# through the integration module changes nothing the suite pins.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-strategies-cpp-pedantic",
+      worker = (
+        modules = StrategiesModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+          "pedantic_wpt",
+        ],
+      )
+    ),
+  ],
+);

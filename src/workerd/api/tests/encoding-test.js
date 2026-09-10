@@ -946,21 +946,6 @@ export const fatalStreamGb18030Gbk = {
   },
 };
 
-export const textDecoderStream = {
-  test() {
-    const stream = new TextDecoderStream('utf-16', {
-      fatal: true,
-      ignoreBOM: true,
-    });
-    strictEqual(stream.encoding, 'utf-16le');
-    strictEqual(stream.fatal, true);
-    strictEqual(stream.ignoreBOM, true);
-
-    const enc = new TextEncoderStream();
-    strictEqual(enc.encoding, 'utf-8');
-  },
-};
-
 // Per WHATWG Big5 decoder step 1, when end-of-queue is reached with a
 // pending lead byte, the decoder must return error (U+FFFD in replacement
 // mode, throw in fatal mode). This tests the streaming case where a lead

@@ -11,8 +11,6 @@
 #include <workerd/jsg/setup.h>
 
 #include <capnp/message.h>
-#include <capnp/rpc-twoparty.h>
-#include <capnp/rpc.h>
 #include <kj/encoding.h>
 #include <kj/test.h>
 

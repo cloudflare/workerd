@@ -368,8 +368,9 @@ KJ_TEST("Read/Write TraceEventInfo works") {
   auto infoBuilder = builder.initRoot<rpc::Trace::TraceEventInfo>();
 
   kj::Vector<kj::Own<Trace>> items(1);
-  items.add(kj::heap<Trace>(kj::none, kj::str("foo"), kj::none, kj::none, kj::none,
-      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS));
+  items.add(kj::rc<Trace>(kj::none, kj::str("foo"), kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS)
+                .toOwn());
 
   TraceEventInfo info(items.asPtr());
   info.copyTo(infoBuilder);
@@ -440,7 +441,7 @@ KJ_TEST("Read/Write Log works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Log>();
 
-  Log info(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("foo"));
+  Log info(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("foo"), kj::none, LogTruncated::YES);
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
@@ -448,11 +449,13 @@ KJ_TEST("Read/Write Log works") {
   KJ_ASSERT(info.timestamp == info2.timestamp);
   KJ_ASSERT(info2.logLevel == LogLevel::INFO);
   KJ_ASSERT(info2.message == "foo"_kj);
+  KJ_ASSERT(info2.truncated);
 
   Log info3 = info.clone();
   KJ_ASSERT(info.timestamp == info3.timestamp);
   KJ_ASSERT(info3.logLevel == LogLevel::INFO);
   KJ_ASSERT(info3.message == "foo"_kj);
+  KJ_ASSERT(info3.truncated);
 }
 
 KJ_TEST("Read/Write Exception works") {
@@ -468,12 +471,29 @@ KJ_TEST("Read/Write Exception works") {
   KJ_ASSERT(info2.name == "foo"_kj);
   KJ_ASSERT(info2.message == "bar"_kj);
   KJ_ASSERT(info2.stack == kj::none);
+  KJ_ASSERT(info2.code == kj::none);
 
   Exception info3 = info.clone();
   KJ_ASSERT(info.timestamp == info3.timestamp);
   KJ_ASSERT(info3.name == "foo"_kj);
   KJ_ASSERT(info3.message == "bar"_kj);
   KJ_ASSERT(info3.stack == kj::none);
+  KJ_ASSERT(info3.code == kj::none);
+
+  capnp::MallocMessageBuilder stringCodeBuilder;
+  auto stringCodeRoot = stringCodeBuilder.initRoot<rpc::Trace::Exception>();
+  kj::Maybe<Exception::Code> stringCode = Exception::Code(kj::str("ERR_TEST"));
+  Exception stringCodeInfo(
+      kj::UNIX_EPOCH, kj::str("foo"), kj::str("bar"), kj::none, kj::mv(stringCode));
+  stringCodeInfo.copyTo(stringCodeRoot);
+  Exception stringCodeRoundTrip(stringCodeRoot.asReader());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(stringCodeRoundTrip.code).get<kj::String>() == "ERR_TEST"_kj);
+
+  kj::Maybe<Exception::Code> numericCode = Exception::Code(42.0);
+  Exception numericCodeInfo(
+      kj::UNIX_EPOCH, kj::str("foo"), kj::str("bar"), kj::none, kj::mv(numericCode));
+  Exception numericCodeClone = numericCodeInfo.clone();
+  KJ_ASSERT(KJ_ASSERT_NONNULL(numericCodeClone.code).get<double>() == 42.0);
 }
 
 KJ_TEST("Read/Write StreamDiagnosticsEvent works") {
@@ -786,6 +806,41 @@ KJ_TEST("SpanContext::tryFromTraceparent rejects invalid inputs") {
   KJ_EXPECT(unsampled.getTraceId() == TraceId(0x9900aabbccddeeff, 0x1122334455667788));
   KJ_EXPECT(KJ_ASSERT_NONNULL(unsampled.getSpanId()) == SpanId(0xa1b2c3d4e5f60718));
   KJ_EXPECT(KJ_ASSERT_NONNULL(unsampled.getTraceFlags()) == 0x00);
+}
+
+KJ_TEST("SpanContext::toTraceparent round-trips") {
+  // Includes a flags byte beyond the sampled bit, which must survive verbatim.
+  for (auto tp: {"00-11223344556677889900aabbccddeeff-a1b2c3d4e5f60718-01"_kj,
+         "00-11223344556677889900aabbccddeeff-a1b2c3d4e5f60718-00"_kj,
+         "00-11223344556677889900aabbccddeeff-a1b2c3d4e5f60718-03"_kj}) {
+    auto ctx = KJ_ASSERT_NONNULL(SpanContext::tryFromTraceparent(tp));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(ctx.toTraceparent()) == tp);
+  }
+}
+
+KJ_TEST("SpanContext::toTraceparent zero-pads all fields") {
+  SpanContext ctx(TraceId(0x1, 0), SpanId(0x1), TraceFlags(0x00));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(ctx.toTraceparent()) ==
+      "00-00000000000000000000000000000001-0000000000000001-00"_kj);
+}
+
+KJ_TEST("SpanContext::toTraceparent is none without traceFlags") {
+  SpanContext ctx(TraceId(0x9900aabbccddeeff, 0x1122334455667788), SpanId(0xa1b2c3d4e5f60718));
+  KJ_EXPECT(ctx.toTraceparent() == kj::none);
+}
+
+KJ_TEST("SpanContext::toTraceparent is none without a spanId") {
+  SpanContext ctx(TraceId(0x9900aabbccddeeff, 0x1122334455667788), kj::none, TraceFlags(0x01));
+  KJ_EXPECT(ctx.toTraceparent() == kj::none);
+}
+
+KJ_TEST("SpanContext::toTraceparent is none for zero ids") {
+  SpanContext zeroTrace(TraceId::nullId, SpanId(0xa1b2c3d4e5f60718), TraceFlags(0x01));
+  KJ_EXPECT(zeroTrace.toTraceparent() == kj::none);
+
+  SpanContext zeroSpan(
+      TraceId(0x9900aabbccddeeff, 0x1122334455667788), SpanId::nullId, TraceFlags(0x01));
+  KJ_EXPECT(zeroSpan.toTraceparent() == kj::none);
 }
 
 }  // namespace

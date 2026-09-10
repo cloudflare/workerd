@@ -43,11 +43,7 @@ impl Worker {
     }
 
     fn error(&self, file: &str, line: u32) -> KjError {
-        KjError::new(
-            cxx::KjExceptionType::Failed,
-            format!("jsg.Error: {}", self.message),
-        )
-        .with_location(file.to_owned(), line)
+        kj::failed!("jsg.Error: {}", self.message).with_location(file.to_owned(), line)
     }
 }
 
@@ -96,7 +92,7 @@ impl Interface for Worker {
 
     async fn custom_event(
         &mut self,
-        _event: Pin<&mut crate::CustomEvent>,
+        _event: crate::KjOwn<crate::CustomEvent>,
     ) -> crate::Result<crate::CustomEventResult> {
         Err(self.error(file!(), line!()))
     }

@@ -20,14 +20,3 @@ config_setting(
     values = {"define": "never_match=true"},  # This will never match
     visibility = ["//visibility:public"],
 )
-
-# Whether rules_rust binaries/tests should link via cc_common.link (see the
-# wd_rust_* macros). Always false standalone; an embedder may override this
-# when it needs these targets to link through the cc toolchain (e.g. to pick
-# up a custom allocator selected via --custom_malloc). Kept off here because
-# standalone workerd builds with non-hermetic system clang.
-config_setting(
-    name = "rust_cc_common_link",
-    values = {"define": "never_match=true"},  # This will never match
-    visibility = ["//visibility:public"],
-)

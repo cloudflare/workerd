@@ -1,0 +1,21 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Fully-unflagged legacy cell (C++ only): without
+# streams_enable_constructors the JS-backed `new WritableStream()`
+# constructor throws an Error directing the user at the flag. See
+# legacy-ctor-gate.js. The BUILD rule disables the @all-compat-flags
+# variant, which would turn the omitted flags back on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-writable-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "legacy-ctor-gate", esModule = embed "legacy-ctor-gate.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

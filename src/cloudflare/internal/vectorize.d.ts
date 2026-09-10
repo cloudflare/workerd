@@ -22,8 +22,7 @@ type VectorizeVectorMetadataValue = string | number | boolean | string[];
  * Additional information to associate with a vector.
  */
 type VectorizeVectorMetadata =
-  | VectorizeVectorMetadataValue
-  | Record<string, VectorizeVectorMetadataValue>;
+  VectorizeVectorMetadataValue | Record<string, VectorizeVectorMetadataValue>;
 
 type VectorFloatArray = Float32Array | Float64Array;
 
@@ -38,12 +37,7 @@ interface VectorizeError {
  * This list is expected to grow as support for more operations are released.
  */
 type VectorizeVectorMetadataFilterOp =
-  | '$eq'
-  | '$ne'
-  | '$lt'
-  | '$lte'
-  | '$gt'
-  | '$gte';
+  '$eq' | '$ne' | '$lt' | '$lte' | '$gt' | '$gte';
 type VectorizeVectorMetadataFilterCollectionOp = '$in' | '$nin';
 
 /**

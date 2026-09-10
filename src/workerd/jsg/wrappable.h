@@ -18,6 +18,9 @@
 #include <kj/refcount.h>
 #include <kj/vector.h>
 
+#include <atomic>
+#include <typeinfo>
+
 // Niche value optimization for v8::TracedReference<T>. This teaches kj::Maybe to use
 // TracedReference's built-in empty state (IsEmpty()) as the "none" representation, eliminating
 // the extra bool + alignment padding that kj::Maybe normally adds. This saves 8 bytes per
@@ -86,6 +89,7 @@ using kj::uint;
 
 class GcVisitor;
 class HeapTracer;
+class Object;
 class Wrappable;  // Forward declaration for WeakRefAnchor.
 
 // Shared alive/dead flag for weak references to Wrappable objects. Allocated lazily in
@@ -155,7 +159,10 @@ class Wrappable: public kj::Refcounted {
     INTERNAL_FIELD_COUNT,
   };
 
-  static constexpr v8::CppHeapPointerTag WRAPPABLE_TAG = v8::CppHeapPointerTag::kDefaultTag;
+  // kFirstObjectWrappableTag is the first embedder-assignable wrappable tag. It is valid in both
+  // sandbox configurations (workerd uses a single tag consistently for all of its objects).
+  static constexpr v8::CppHeapPointerTag WRAPPABLE_TAG =
+      v8::CppHeapPointerTag::kFirstObjectWrappableTag;
 
   // The value pointed to by the internal field field `WRAPPABLE_TAG_FIELD_INDEX`.
   //
@@ -168,6 +175,36 @@ class Wrappable: public kj::Refcounted {
                static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX)) ==
         &WORKERD_WRAPPABLE_TAG;
   }
+
+  // Returns true if this object's V8 wrapper was traced by GC during the most recent
+  // *completed* major GC cycle, or if no wrapper (i.e. no v8::TracedReference) currently
+  // exists. A false return means the TracedReference was zapped by V8's ResetDeadNodes and
+  // is no longer safe to dereference, even though the C++ object (and its weak-ref anchor)
+  // may still be alive: V8 zaps dead droppable traced nodes during a full GC without calling
+  // ResetRoot(), and the CppgcShim destructor that would release the object can be deferred
+  // past the end of the cycle. Comparing against the completed epoch (not the in-flight
+  // epoch) ensures that objects not yet traced during an in-progress incremental marking
+  // cycle are not falsely reported as dead.
+  inline bool wasTracedInLastGc() const;
+
+  // Invalidate all outstanding jsg::WeakRef<T>s pointing at this object. Called lazily from
+  // WeakRef::tryAddRef() when a zapped wrapper is detected; ~Wrappable() performs the same
+  // invalidation for ordinary destruction. Deliberately NOT called from detachWrapper():
+  // that also runs when V8 drops an unmodified droppable wrapper via ResetRoot() and at
+  // isolate shutdown, while the object remains alive and usable — a WeakRef tracks object
+  // lifetime, not wrapper lifetime.
+  void invalidateWeakRefs() {
+    KJ_IF_SOME(a, weakRefAnchor) {
+      a->invalidate();
+    }
+  }
+
+  // Mark this object as condemned: its wrapper's TracedReference was zapped by a completed
+  // major GC, but the CppgcShim destructor that will release the object has not run yet.
+  // Invalidates outstanding weak refs and bumps the isolate's condemned counter (see
+  // HeapTracer::getCondemnedWrapperCount()). Called from WeakRef::tryAddRef() on the sole
+  // path that can observe the condition.
+  inline void condemn();
 
   void addStrongRef();
   void removeStrongRef();
@@ -211,6 +248,14 @@ class Wrappable: public kj::Refcounted {
   // If `handle` was originally returned by attachOpaqueWrapper(), return the Wrappable it wraps.
   // Otherwise, return nullptr.
   static kj::Maybe<Wrappable&> tryUnwrapOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle);
+
+  // If this is a `jsg::Object`, return it, otherwise null. `Object` inherits `Wrappable`
+  // privately, which makes it impossible to `dynamic_cast` from a `Wrappable` to an `Object` (or
+  // to any of its subclasses); this hands the caller a pointer it can cast from. Named with the
+  // `jsg` prefix because it pollutes the namespace of JSG_RESOURCE types.
+  virtual Object* jsgTryGetObject() {
+    return nullptr;
+  }
 
   // Perform GC visitation. This is named with the `jsg` prefix because it pollutes the
   // namespace of JSG_RESOURCE types.
@@ -281,6 +326,18 @@ class Wrappable: public kj::Refcounted {
   // When `wrapperRef` is non-empty, the Wrappable is a member of the list `HeapTracer::wrappers`.
   kj::ListLink<Wrappable> link;
 
+  // Stamped with the active GC epoch in traceFromV8() each time V8 traces this wrapper, and
+  // with the completed epoch in attachWrapper(). wasTracedInLastGc() compares this against
+  // the last *completed* GC epoch to detect wrappers whose TracedReference was zapped by a
+  // full GC (see that method's comment).
+  //
+  // The CppHeap is configured with atomic marking (see newCppHeap() in setup.c++), so
+  // traceFromV8() only runs on the main thread during the atomic pause and no concurrent
+  // access occurs today; the atomic is defensive hardening in case that configuration ever
+  // changes. Relaxed ordering suffices: reads happen under the isolate lock on the same
+  // thread that runs the GC callbacks.
+  std::atomic<uint64_t> tracedEpoch{0};
+
   // Lazy-allocated shared state for jsg::WeakRef<T>. Zero overhead for objects that never
   // have weak references taken. Created on first call to getOrCreateWeakRefAnchor().
   kj::Maybe<kj::Rc<WeakRefAnchor>> weakRefAnchor;
@@ -335,6 +392,41 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   Wrappable::CppgcShim* allocateShim(Wrappable& wrappable);
   void clearFreelistedShims();
 
+  // The epoch of the currently active (possibly in-flight) major GC cycle. Advanced once
+  // per cycle in whichever prologue fires first (incremental-marking start or the
+  // mark-compact prologue). Wrappable::traceFromV8() stamps this value into
+  // Wrappable::tracedEpoch.
+  uint64_t getActiveGcEpoch() const {
+    return activeGcEpoch;
+  }
+
+  // The epoch of the last fully completed major GC cycle. Catches up to activeGcEpoch in
+  // the mark-compact epilogue, which runs after ResetDeadNodes() has zapped dead traced
+  // nodes but before control returns to JavaScript. Wrappable::wasTracedInLastGc() compares
+  // against this value, so objects not yet traced in an in-flight cycle are not falsely
+  // reported as dead.
+  uint64_t getCompletedGcEpoch() const {
+    return completedGcEpoch;
+  }
+
+  // Number of times WeakRef::tryAddRef() has detected a condemned target in this isolate, i.e.
+  // the number of times the dangling-TracedReference hazard has actually been caught rather
+  // than merely guarded against.
+  //
+  // This exists so that the regression test can assert it reached the hazard. The window is
+  // only reachable under a *natural* major GC: a forced GC (v8::Isolate::
+  // RequestGarbageCollectionForTesting, and hence --gc-stress) sweeps atomically, so cppgc
+  // runs ~CppgcShim inside the GC and no deferred window exists to observe. That makes the
+  // test inherently probabilistic, and without this counter a pass would be
+  // indistinguishable from never having exercised the code path at all.
+  //
+  // Not test-only: the increment sits on an already-cold path (a WeakRef promotion that is
+  // about to fail), so it costs nothing in production, and the count is useful for
+  // diagnosing how often this occurs in the wild.
+  uint64_t getCondemnedWrapperCount() const {
+    return condemnedWrapperCount;
+  }
+
   // implements EmbedderRootsHandler -------------------------------------------
   void ResetRoot(const v8::TracedReference<v8::Value>& handle) override;
   bool TryResetRoot(const v8::TracedReference<v8::Value>& handle) override;
@@ -363,7 +455,47 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   // List of shim objects for wrappers that were collected during a minor GC. The shim objects
   // can be reused for future allocations.
   kj::Maybe<Wrappable::CppgcShim&> freelistedShims;
+
+  // Major GC epoch counters; see getActiveGcEpoch()/getCompletedGcEpoch(). The two are equal
+  // exactly when no major cycle is in flight (the mark-compact epilogue restores equality),
+  // which is how the prologue advances the epoch exactly once per cycle: an incremental cycle
+  // fires prologues both at incremental-marking start and again at the atomic pause, and only
+  // the first of those observes equality.
+  uint64_t activeGcEpoch = 0;
+  uint64_t completedGcEpoch = 0;
+
+  // See getCondemnedWrapperCount(). Plain (non-atomic) because it is only ever touched from
+  // Wrappable::condemn(), which runs under the isolate lock.
+  uint64_t condemnedWrapperCount = 0;
+
+  friend class Wrappable;
 };
+
+inline void Wrappable::condemn() {
+  // Only reachable from wasTracedInLastGc() returning false, which implies a wrapper exists,
+  // which implies attachWrapper() set `isolate`.
+  KJ_DASSERT(isolate != nullptr);
+  ++HeapTracer::getTracer(isolate).condemnedWrapperCount;
+  invalidateWeakRefs();
+}
+
+inline bool Wrappable::wasTracedInLastGc() const {
+  // The hazard being detected is a dangling v8::TracedReference, so the check applies only
+  // when one exists. `wrapper` reads as none both when no wrapper was ever attached and after
+  // detachWrapper() (including when V8 drops an unmodified droppable wrapper via ResetRoot()
+  // while the object stays alive); in those states there is nothing to zap, and code paths
+  // that would touch the wrapper (e.g. addStrongRef()) already handle its absence. Note that
+  // `isolate` cannot be used to detect "never wrapped": GC visitation propagates it to
+  // wrapper-less children (see Wrappable::visitRef()).
+  //
+  // Reading the Maybe is safe even when the TracedReference dangles: its emptiness is a
+  // property of the local handle, not of the (possibly freed) node it points at.
+  if (wrapper == kj::none) return true;
+  // `wrapper` is only ever set in attachWrapper(), which also sets `isolate`.
+  KJ_DASSERT(isolate != nullptr);
+  return tracedEpoch.load(std::memory_order_relaxed) >=
+      HeapTracer::getTracer(isolate).getCompletedGcEpoch();
+}
 
 // Try to use this in any scope where JavaScript wrapped objects are destroyed, to confirm that
 // they don't hold disallowed references to KJ I/O objects. IoOwn's destructor will explicitly
@@ -374,6 +506,51 @@ class HeapTracer: public v8::EmbedderRootsHandler {
       "JavaScript heap objects must not contain KJ I/O objects without a IoOwn")
 // TODO(soon):
 // - Track memory usage of native objects.
+
+// Log the types involved in a failed downcast and abort.  Out-of-line and not
+// templated, to keep the code that unwrappers inline as small as possible.
+[[noreturn]] void reportWrapperTypeMismatch(
+    const std::type_info& expected, const std::type_info& actual);
+
+// Cast an `Object` that came from a wrapper to the type the callsite expects,
+// aborting if the object is not of that type.
+//
+// In-sandbox corruption may allow an attacker to confuse types.  An object's
+// RTTI lives outside the V8 sandbox, out of reach of such a substitution, so
+// use that to confirm the type instead.
+//
+// Defined in jsg.h, where `Object` is complete.
+template <typename T>
+T& downcastObject(Object& object);
+
+// Cast a `Wrappable` taken from a wrapper's internal field to the type the
+// callsite expects, aborting if the object is not of that type.
+template <typename T>
+T& downcastWrappable(Wrappable& wrappable) {
+  if constexpr (kj::canConvert<T&, Object&>()) {
+    // A `dynamic_cast` cannot start from `Wrappable`: the runtime check is
+    // specified to succeed only through a public base, so a
+    // privately-inherited one fails regardless of what access the callsite
+    // has. Every resource type reaches `T` through the public `Object` base,
+    // so start from there. This also lands on the correct address for a `T`
+    // that inherits `Object` at a non-zero offset, which a `reinterpret_cast`
+    // would not.
+    Object* object = wrappable.jsgTryGetObject();
+    if (object == nullptr) {
+      reportWrapperTypeMismatch(typeid(T), typeid(wrappable));
+    }
+    return downcastObject<T>(*object);
+  } else {
+    // Wrappables that are not `Object`s -- `WrappableFunction` and
+    // `OpaqueWrappable` -- inherit `Wrappable` publicly, so they can be cast
+    // directly.
+    T* result = dynamic_cast<T*>(&wrappable);
+    if (result == nullptr) {
+      reportWrapperTypeMismatch(typeid(T), typeid(wrappable));
+    }
+    return *result;
+  }
+}
 
 // Given a handle to a resource type, extract the raw C++ object pointer.
 template <typename T, bool isContext>
@@ -394,7 +571,7 @@ T& extractInternalPointer(
     auto* ptr = object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
         static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
     KJ_ASSERT(ptr != nullptr, "EPT type-tag mismatch: internal field returned nullptr");
-    return *reinterpret_cast<T*>(ptr);
+    return downcastWrappable<T>(*reinterpret_cast<Wrappable*>(ptr));
   }
 }
 

@@ -289,6 +289,14 @@ class File: public kj::Refcounted {
   // will not count towards the isolate external memory usage.
   static kj::Rc<File> newReadable(kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
 
+  // Same as newReadable(kj::ArrayPtr) above, but the file takes ownership of the
+  // data. Use this when the backing buffer would not otherwise outlive the file
+  // -- e.g. bundle module bodies transpiled at load time (TypeScript), whose
+  // storage is freed once worker setup completes (VULN-136997). Like the
+  // non-owning overload, the file is read-only and its contents are not tracked
+  // and do not count towards the isolate external memory usage.
+  static kj::Rc<File> newReadable(kj::Array<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
+
   virtual kj::StringPtr jsgGetMemoryName() const = 0;
   virtual size_t jsgGetMemorySelfSize() const = 0;
   virtual void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const = 0;

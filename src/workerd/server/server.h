@@ -41,7 +41,8 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::Network& network,
       kj::EntropySource& entropySource,
       Worker::LoggingOptions loggingOptions,
-      kj::Function<void(kj::String)> reportConfigError);
+      kj::Function<void(kj::String)> reportConfigError,
+      kj::Function<void(kj::String)> reportConfigWarning);
   ~Server() noexcept;
 
   // Permit experimental features to be used. These features may break backwards compatibility
@@ -131,6 +132,10 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
     reportConfigError(kj::mv(error));
   }
 
+  void handleReportConfigWarning(kj::String warning) {
+    reportConfigWarning(kj::mv(warning));
+  }
+
  private:
   kj::Filesystem& fs;
   kj::Timer& timer;
@@ -140,6 +145,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::Network& network;
   kj::EntropySource& entropySource;
   kj::Function<void(kj::String)> reportConfigError;
+  kj::Function<void(kj::String)> reportConfigWarning;
   PythonConfig pythonConfig = PythonConfig{.packageDiskCacheRoot = kj::none,
     .pyodideDiskCacheRoot = kj::none,
     .createSnapshot = false,
@@ -305,6 +311,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::StringPtr addrStr);
 
   kj::Promise<void> listenDebugPort(kj::Own<kj::ConnectionReceiver> listener);
+  rpc::WorkerdDebugPort::Client makeWorkerdDebugPortClient();
 
   class InvalidConfigService;
   class InvalidConfigActorClass;
@@ -318,6 +325,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   class HttpListener;
   class TcpListener;
   class DebugPortListener;
+  class WorkerdDebugPortImpl;
 
   struct ErrorReporter;
   struct ConfigErrorReporter;

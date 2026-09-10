@@ -4,7 +4,10 @@
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/script.h>
+#include <workerd/jsg/wrappable.h>
 #include <workerd/util/autogate.h>
+
+#include <span>
 
 namespace workerd::api {
 
@@ -205,7 +208,7 @@ jsg::JsValue UnsafeEval::newWasmModule(jsg::Lock& js, kj::Array<kj::byte> src) {
   KJ_DEFER(js.setAllowEval(false));
 
   auto maybeWasmModule = v8::WasmModuleObject::Compile(
-      js.v8Isolate, v8::MemorySpan<const uint8_t>(src.begin(), src.size()));
+      js.v8Isolate, std::span<const uint8_t>(src.begin(), src.size()));
   return jsg::JsValue(jsg::check(maybeWasmModule));
 }
 
@@ -256,6 +259,12 @@ jsg::Promise<void> UnsafeModule::evictAllDurableObjects(
 
 bool UnsafeModule::isTestAutogateEnabled() {
   return util::Autogate::isEnabled(util::AutogateKey::TEST_WORKERD);
+}
+
+double UnsafeModule::getCondemnedWrapperCount(jsg::Lock& js) {
+  // double rather than uint64_t: JSG has no BigInt-free mapping for 64-bit integers, and this
+  // counter will not plausibly exceed 2^53.
+  return static_cast<double>(jsg::HeapTracer::getTracer(js.v8Isolate).getCondemnedWrapperCount());
 }
 
 #ifdef WORKERD_FUZZILLI

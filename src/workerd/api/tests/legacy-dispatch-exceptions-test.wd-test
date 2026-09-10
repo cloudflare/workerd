@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "legacy-dispatch-exceptions-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "legacy-dispatch-exceptions-test.js")
+        ],
+        # The disable flag is pinned so that every test variant — including
+        # @all-compat-flags — exercises the legacy PROPAGATE dispatch path.
+        compatibilityFlags = ["nodejs_compat", "experimental", "streams_enable_constructors", "expose_global_message_channel", "no_spec_compliant_dispatch_exceptions"],
+      )
+    ),
+  ],
+);

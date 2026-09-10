@@ -126,6 +126,26 @@ struct TupleRttiBuilder {
   }
 };
 
+// Delegated RTTI
+//
+// A C++ type that converts to/from an existing JavaScript type (typically a SelfConvertible
+// type, see type-wrapper.h) can opt into RTTI by declaring a delegate:
+//
+//     class MyType {
+//      public:
+//       using JsgRttiDelegate = jsg::Ref<SomeApiType>;
+//       ...
+//     };
+//
+// RTTI (and therefore generated TypeScript) will then describe MyType exactly as it describes
+// the delegate type.
+template <typename Configuration, typename T>
+struct BuildRtti<Configuration, T, std::void_t<typename T::JsgRttiDelegate>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    BuildRtti<Configuration, typename T::JsgRttiDelegate>::build(builder, rtti);
+  }
+};
+
 // Primitives
 
 template <typename Configuration>
@@ -194,6 +214,14 @@ template <typename Configuration>
 struct BuildRtti<Configuration, jsg::JsSymbol> {
   // This isn't really unknown but we currently do not expose these types at all, so
   // this is OK for now.
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    builder.setUnknown();
+  }
+};
+
+template <typename Configuration>
+struct BuildRtti<Configuration, v8::WasmModuleObject> {
+  // Renders as `unknown`; use a TS override to name it `WebAssembly.Module` where exposed.
   static void build(Type::Builder builder, Builder<Configuration>& rtti) {
     builder.setUnknown();
   }
@@ -472,7 +500,6 @@ struct BuildRtti<Configuration, v8::Promise> {
   F(jsg::JsArrayBuffer, BuiltinType::Type::V8_ARRAY_BUFFER)                                        \
   F(jsg::JsArrayBufferView, BuiltinType::Type::V8_ARRAY_BUFFER_VIEW)                               \
   F(jsg::JsBufferSource, BuiltinType::Type::JSG_BUFFER_SOURCE)                                     \
-  F(jsg::BufferSource, BuiltinType::Type::JSG_BUFFER_SOURCE)                                       \
   F(kj::Date, BuiltinType::Type::KJ_DATE)                                                          \
   F(v8::ArrayBufferView, BuiltinType::Type::V8_ARRAY_BUFFER_VIEW)                                  \
   F(v8::ArrayBuffer, BuiltinType::Type::V8_ARRAY_BUFFER)                                           \
@@ -637,6 +664,9 @@ struct MemberCounter {
     ++members;
   }
 
+  template <const char* name>
+  inline void registerPrivateSymbol() { /* not included in RTTI */ }
+
   template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
   inline void registerInstanceProperty() {
     ++members;
@@ -743,6 +773,9 @@ struct MembersBuilder {
     prop.setReadonly(true);
     BuildRtti<Configuration, T>::build(prop.initType(), rtti);
   }
+
+  template <const char* name>
+  inline void registerPrivateSymbol() { /* not included in RTTI */ }
 
   template <const char* name, typename Getter, Getter getter, bool readOnly>
   inline void registerLazyInstanceProperty() {

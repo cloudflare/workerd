@@ -5,10 +5,10 @@ Subject: Return false on Object.hasOwnProperty with interceptors
 
 
 diff --git a/src/objects/js-objects.cc b/src/objects/js-objects.cc
-index 7813b7777b39b2135acd74f8e98a74e6c2ec0c64..adea65e73e615a616c032bf188f476f4e1204177 100644
+index b8786f952e36930a9b80844dd5578095911b02d3..3d41abbd64eb3a2f89fdc825b4c90d8507abe8d4 100644
 --- a/src/objects/js-objects.cc
 +++ b/src/objects/js-objects.cc
-@@ -158,6 +158,9 @@ Maybe<bool> JSReceiver::HasOwnProperty(Isolate* isolate,
+@@ -165,6 +165,9 @@ Maybe<bool> JSReceiver::HasOwnProperty(Isolate* isolate,
    if (IsJSObject(*object)) {  // Shortcut.
      PropertyKey key(isolate, name);
      LookupIterator it(isolate, object, key, LookupIterator::OWN);

@@ -1,11 +1,11 @@
 diff -u5 -r sqlite-src-pristine/src/shell.c.in sqlite-src-modified/src/shell.c.in
---- sqlite-src-pristine/src/shell.c.in	2024-10-21 11:47:53
-+++ sqlite-src-modified/src/shell.c.in	2024-11-05 08:16:15
-@@ -3411,10 +3411,15 @@
-     sqlite3_fprintf(out,
+--- sqlite-src-pristine/src/shell.c.in	2026-08-19 19:37:52
++++ sqlite-src-modified/src/shell.c.in	2026-08-19 21:03:33
+@@ -2942,10 +2942,15 @@
+     cli_printf(out,
             "Number of times run:                 %d\n", iCur);
      iCur = sqlite3_stmt_status(pArg->pStmt, SQLITE_STMTSTATUS_MEMUSED, bReset);
-     sqlite3_fprintf(out,
+     cli_printf(out,
             "Memory used by prepared stmt:        %d\n", iCur);
 +
 +    iCur = sqlite3_stmt_status(pArg->pStmt, LIBSQL_STMTSTATUS_ROWS_READ, bReset);
@@ -18,9 +18,9 @@ diff -u5 -r sqlite-src-pristine/src/shell.c.in sqlite-src-modified/src/shell.c.i
    displayLinuxIoStats(pArg->out);
  #endif
 diff -u5 -r sqlite-src-pristine/src/sqlite.h.in sqlite-src-modified/src/sqlite.h.in
---- sqlite-src-pristine/src/sqlite.h.in	2024-10-21 11:47:53
-+++ sqlite-src-modified/src/sqlite.h.in	2024-11-05 08:13:50
-@@ -8907,20 +8907,32 @@
+--- sqlite-src-pristine/src/sqlite.h.in	2026-08-19 19:37:52
++++ sqlite-src-modified/src/sqlite.h.in	2026-08-19 21:02:27
+@@ -9298,20 +9298,32 @@
  ** used to store the prepared statement.  ^This value is not actually
  ** a counter, and so the resetFlg parameter to sqlite3_stmt_status()
  ** is ignored when the opcode is SQLITE_STMTSTATUS_MEMUSED.
@@ -54,9 +54,9 @@ diff -u5 -r sqlite-src-pristine/src/sqlite.h.in sqlite-src-modified/src/sqlite.h
  **
  ** The sqlite3_pcache type is opaque.  It is implemented by
 diff -u5 -r sqlite-src-pristine/src/vdbe.c sqlite-src-modified/src/vdbe.c
---- sqlite-src-pristine/src/vdbe.c	2024-10-21 11:47:53
-+++ sqlite-src-modified/src/vdbe.c	2024-11-05 08:13:50
-@@ -3737,10 +3737,11 @@
+--- sqlite-src-pristine/src/vdbe.c	2026-08-19 19:37:52
++++ sqlite-src-modified/src/vdbe.c	2026-08-19 21:02:27
+@@ -3804,10 +3804,11 @@
    if( pOp->p3 ){
      nEntry = sqlite3BtreeRowCountEst(pCrsr);
    }else{
@@ -68,7 +68,7 @@ diff -u5 -r sqlite-src-pristine/src/vdbe.c sqlite-src-modified/src/vdbe.c
    pOut = out2Prerelease(p, pOp);
    pOut->u.i = nEntry;
    goto check_for_interrupt;
-@@ -4900,10 +4901,11 @@
+@@ -4969,10 +4970,11 @@
      if( eqOnly && r.eqSeen==0 ){
        assert( res!=0 );
        goto seek_not_found;
@@ -80,7 +80,7 @@ diff -u5 -r sqlite-src-pristine/src/vdbe.c sqlite-src-modified/src/vdbe.c
  #endif
    if( oc>=OP_SeekGE ){  assert( oc==OP_SeekGE || oc==OP_SeekGT );
      if( res<0 || (res==0 && oc==OP_SeekGT) ){
-@@ -5470,10 +5472,11 @@
+@@ -5539,10 +5541,11 @@
    pC->nullRow = 0;
    pC->cacheStatus = CACHE_STALE;
    pC->deferredMoveto = 0;
@@ -92,7 +92,7 @@ diff -u5 -r sqlite-src-pristine/src/vdbe.c sqlite-src-modified/src/vdbe.c
      if( pOp->p2==0 ){
        rc = SQLITE_CORRUPT_BKPT;
      }else{
-@@ -5727,10 +5730,11 @@
+@@ -5796,10 +5799,11 @@
    }
    if( pOp->p5 & OPFLAG_ISNOOP ) break;
  #endif
@@ -104,7 +104,7 @@ diff -u5 -r sqlite-src-pristine/src/vdbe.c sqlite-src-modified/src/vdbe.c
      if( pOp->p5 & OPFLAG_LASTROWID ) db->lastRowid = x.nKey;
    }
    assert( (pData->flags & (MEM_Blob|MEM_Str))!=0 || pData->n==0 );
-@@ -5920,10 +5924,11 @@
+@@ -5989,10 +5993,11 @@
    pC->seekResult = 0;
    if( rc ) goto abort_due_to_error;
  
@@ -116,7 +116,7 @@ diff -u5 -r sqlite-src-pristine/src/vdbe.c sqlite-src-modified/src/vdbe.c
        db->xUpdateCallback(db->pUpdateArg, SQLITE_DELETE, zDb, pTab->zName,
            pC->movetoTarget);
        assert( pC->iDb>=0 );
-@@ -6207,10 +6212,11 @@
+@@ -6276,10 +6281,11 @@
    rc = sqlite3BtreeLast(pCrsr, &res);
    pC->nullRow = (u8)res;
    pC->deferredMoveto = 0;
@@ -128,7 +128,7 @@ diff -u5 -r sqlite-src-pristine/src/vdbe.c sqlite-src-modified/src/vdbe.c
      if( res ) goto jump_to_p2;
    }
    break;
-@@ -6326,10 +6332,11 @@
+@@ -6395,10 +6401,11 @@
      pC->deferredMoveto = 0;
      pC->cacheStatus = CACHE_STALE;
    }
@@ -140,7 +140,7 @@ diff -u5 -r sqlite-src-pristine/src/vdbe.c sqlite-src-modified/src/vdbe.c
      if( res ) goto jump_to_p2;
    }
    break;
-@@ -6431,10 +6438,11 @@
+@@ -6526,10 +6533,11 @@
    pC->cacheStatus = CACHE_STALE;
    VdbeBranchTaken(rc==SQLITE_OK,2);
    if( rc==SQLITE_OK ){
@@ -152,7 +152,7 @@ diff -u5 -r sqlite-src-pristine/src/vdbe.c sqlite-src-modified/src/vdbe.c
  #endif
      goto jump_to_p2_and_check_for_interrupt;
    }
-@@ -6482,10 +6490,11 @@
+@@ -6577,10 +6585,11 @@
    assert( pC!=0 );
    assert( !isSorter(pC) );
    pIn2 = &aMem[pOp->p2];
@@ -164,7 +164,7 @@ diff -u5 -r sqlite-src-pristine/src/vdbe.c sqlite-src-modified/src/vdbe.c
    rc = ExpandBlob(pIn2);
    if( rc ) goto abort_due_to_error;
    x.nKey = pIn2->n;
-@@ -6882,10 +6891,11 @@
+@@ -6983,10 +6992,11 @@
    assert( p->readOnly==0 );
    assert( DbMaskTest(p->btreeMask, pOp->p2) );
    rc = sqlite3BtreeClearTable(db->aDb[pOp->p2].pBt, (u32)pOp->p1, &nChange);
@@ -176,7 +176,7 @@ diff -u5 -r sqlite-src-pristine/src/vdbe.c sqlite-src-modified/src/vdbe.c
        memAboutToChange(p, &aMem[pOp->p3]);
        aMem[pOp->p3].u.i += nChange;
      }
-@@ -8466,10 +8476,11 @@
+@@ -8630,10 +8640,11 @@
    ** some other method is next invoked on the save virtual table cursor.
    */
    rc = pModule->xNext(pCur->uc.pVCur);
@@ -188,7 +188,7 @@ diff -u5 -r sqlite-src-pristine/src/vdbe.c sqlite-src-modified/src/vdbe.c
    if( !res ){
      /* If there is data, jump to P2 */
      goto jump_to_p2_and_check_for_interrupt;
-@@ -8587,10 +8598,11 @@
+@@ -8752,10 +8763,11 @@
          rc = SQLITE_OK;
        }else{
          p->errorAction = ((pOp->p5==OE_Replace) ? OE_Abort : pOp->p5);
@@ -201,9 +201,9 @@ diff -u5 -r sqlite-src-pristine/src/vdbe.c sqlite-src-modified/src/vdbe.c
    }
    break;
 diff -u5 -r sqlite-src-pristine/src/vdbeInt.h sqlite-src-modified/src/vdbeInt.h
---- sqlite-src-pristine/src/vdbeInt.h	2024-10-21 11:47:53
-+++ sqlite-src-modified/src/vdbeInt.h	2024-11-05 08:13:50
-@@ -496,10 +496,11 @@
+--- sqlite-src-pristine/src/vdbeInt.h	2026-08-19 19:37:52
++++ sqlite-src-modified/src/vdbeInt.h	2026-08-19 21:02:27
+@@ -508,10 +508,11 @@
    bft bIsReader:1;        /* True for statements that read */
    bft haveEqpOps:1;       /* Bytecode supports EXPLAIN QUERY PLAN */
    yDbMask btreeMask;      /* Bitmask of db->aDb[] entries referenced */
@@ -216,9 +216,9 @@ diff -u5 -r sqlite-src-pristine/src/vdbeInt.h sqlite-src-modified/src/vdbeInt.h
    DblquoteStr *pDblStr;   /* List of double-quoted string literals */
  #endif
 diff -u5 -r sqlite-src-pristine/src/vdbeapi.c sqlite-src-modified/src/vdbeapi.c
---- sqlite-src-pristine/src/vdbeapi.c	2024-10-21 11:47:53
-+++ sqlite-src-modified/src/vdbeapi.c	2024-11-05 08:13:50
-@@ -2072,11 +2072,11 @@
+--- sqlite-src-pristine/src/vdbeapi.c	2026-08-19 19:37:52
++++ sqlite-src-modified/src/vdbeapi.c	2026-08-19 21:02:27
+@@ -2112,11 +2112,11 @@
  int sqlite3_stmt_status(sqlite3_stmt *pStmt, int op, int resetFlag){
    Vdbe *pVdbe = (Vdbe*)pStmt;
    u32 v;
@@ -231,7 +231,7 @@ diff -u5 -r sqlite-src-pristine/src/vdbeapi.c sqlite-src-modified/src/vdbeapi.c
      return 0;
    }
  #endif
-@@ -2089,10 +2089,13 @@
+@@ -2129,10 +2129,13 @@
      db->lookaside.pEnd = db->lookaside.pStart;
      sqlite3VdbeDelete(pVdbe);
      db->pnBytesFreed = 0;

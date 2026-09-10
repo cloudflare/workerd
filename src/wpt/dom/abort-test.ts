@@ -6,16 +6,7 @@ import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'AbortSignal.any.js': {},
-  'abort-signal-any.any.js': {
-    comment: 'Order of event firing should be investigated.',
-    expectedFailures: [
-      'Abort events for AbortSignal.any() signals fire in the right order (using AbortController)',
-    ],
-  },
+  'abort-signal-any.any.js': {},
   'event.any.js': {},
-  'timeout-shadowrealm.any.js': {
-    comment: 'Enable when ShadowRealm is implemented',
-    disabledTests: true,
-  },
   'timeout.any.js': {},
 } satisfies TestRunnerConfig;

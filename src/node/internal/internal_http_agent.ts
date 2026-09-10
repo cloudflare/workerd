@@ -11,7 +11,6 @@ import type {
   Agent as _Agent,
   AgentOptions,
   ClientRequest,
-  IncomingMessage,
 } from 'node:http';
 import type { Socket, NetConnectOpts } from 'node:net';
 import type { Duplex } from 'node:stream';
@@ -34,7 +33,7 @@ export class Agent extends EventEmitter implements _Agent {
   totalSocketCount: number;
   readonly freeSockets: NodeJS.ReadOnlyDict<Socket[]> = {};
   readonly sockets: NodeJS.ReadOnlyDict<Socket[]> = {};
-  readonly requests: NodeJS.ReadOnlyDict<IncomingMessage[]> = {};
+  readonly requests: NodeJS.ReadOnlyDict<ClientRequest[]> = {};
 
   constructor(options?: AgentOptions) {
     super({});
@@ -52,11 +51,12 @@ export class Agent extends EventEmitter implements _Agent {
     if (!('proxyEnv' in opts)) {
       opts.proxyEnv = undefined;
     }
+
+    if (opts.noDelay === undefined) opts.noDelay = true;
+
     /* eslint-enable @typescript-eslint/no-unsafe-assignment,
        @typescript-eslint/no-unsafe-member-access,
        @typescript-eslint/no-explicit-any */
-
-    if (this.options.noDelay === undefined) this.options.noDelay = true;
 
     // Don't confuse net and make it think that we're connecting to a pipe
     this.keepAliveMsecs = this.options.keepAliveMsecs || 1000;

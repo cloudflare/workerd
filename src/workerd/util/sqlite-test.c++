@@ -2,9 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "sentry.h"
 #include "sqlite.h"
 
 #include <fcntl.h>
+#include <sqlite3.h>
 
 #include <kj/refcount.h>
 #include <kj/test.h>
@@ -103,6 +105,14 @@ void checkSql(SqliteDatabase& db) {
     KJ_EXPECT(query.isDone());
   }
 }
+
+class DefaultRegulatorForTest: public SqliteDatabase::Regulator {
+ public:
+  bool isAllowedName(kj::StringPtr name) const override {
+    return name.size() < 4 || sqlite3_strnicmp(name.begin(), "_cf_", 4) != 0;
+  }
+};
+static constexpr DefaultRegulatorForTest DEFAULT_REGULATOR_FOR_TEST;
 
 KJ_TEST("SQLite backed by in-memory directory") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
@@ -327,6 +337,13 @@ void doLockTest(bool walMode) {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
 
+  auto expectBusy = [](const kj::Exception& e) {
+    KJ_EXPECT(e.getDescription().contains("database is locked"), e);
+    KJ_EXPECT(!e.getDescription().contains("NOSENTRY"), e);
+    auto sentryTag = KJ_ASSERT_NONNULL(e.getDetail(SENTRY_TAG_DETAIL_ID));
+    KJ_EXPECT(sentryTag.asChars() == "NOSENTRY"_kj, e);
+  };
+
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
   if (walMode) {
@@ -366,7 +383,7 @@ void doLockTest(bool walMode) {
   {
     // Arrange for two threads to increment in a loop simultaneously. Eventually one will fail with
     // a conflict.
-    kj::Thread thread([&vfs = vfs, &stop, &counter]() noexcept {
+    kj::Thread thread([&vfs = vfs, &stop, &counter, &expectBusy]() noexcept {
       KJ_DEFER(stop.store(true, std::memory_order_relaxed););
       SqliteDatabase db2(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
       while (!stop.load(std::memory_order_relaxed)) {
@@ -374,7 +391,7 @@ void doLockTest(bool walMode) {
           db2.run(INCREMENT);
           counter.fetch_add(1, std::memory_order_relaxed);
         })) {
-          KJ_EXPECT(e.getDescription().contains("database is locked"), e);
+          expectBusy(e);
           break;
         }
       }
@@ -388,7 +405,7 @@ void doLockTest(bool walMode) {
           db.run(INCREMENT);
           counter.fetch_add(1, std::memory_order_relaxed);
         })) {
-          KJ_EXPECT(e.getDescription().contains("database is locked"), e);
+          expectBusy(e);
           break;
         }
       }
@@ -418,7 +435,7 @@ KJ_TEST("SQLite Regulator") {
 
     bool isAllowedName(kj::StringPtr name) const override {
       if (alwaysFail) return false;
-      return name != blocked;
+      return sqlite3_stricmp(name.cStr(), blocked.cStr()) != 0;
     }
 
     bool alwaysFail = false;
@@ -1135,7 +1152,7 @@ KJ_TEST("SQLite onRollback") {
     db.onRollback(cb.create());
     KJ_EXPECT(cb.isStillLive());
 
-    db.run("RELEASE SAVEPOINT foo");
+    db.run("RELEASE SAVEPOINT FOO");
 
     KJ_EXPECT(cb.wasCommitted());
   }
@@ -1604,6 +1621,21 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
   }
 };
 
+void expectDoSentryDisposition(const kj::Exception& exception) {
+  auto disposition = KJ_ASSERT_NONNULL(exception.getDetail(SENTRY_TAG_DETAIL_ID));
+  KJ_EXPECT(disposition.asChars() == "SENTRY_DO"_kj, exception);
+}
+
+KJ_TEST("SQLite open errors are tagged for DO Sentry") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  auto exception = KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { SqliteDatabase(vfs, kj::Path({"missing"}), kj::none); }));
+  KJ_EXPECT(exception.getDescription().contains("unable to open database file: SQLITE_CANTOPEN"),
+      exception);
+  expectDoSentryDisposition(exception);
+}
+
 KJ_TEST("SQLite memory metering enforces SQLITE_NOMEM when limit is exceeded") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
@@ -1674,10 +1706,13 @@ KJ_TEST("I/O exceptions pass through SQLite") {
   KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "test-vfs-error");
 
   // It should pass through.
-  KJ_EXPECT_THROW_MESSAGE(
-      "test-vfs-error", db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str(R"(
+  auto exception = KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
+    db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str(R"(
     INSERT INTO things(value) VALUES (456);
-  )")));
+  )"));
+  }));
+  KJ_EXPECT(exception.getDescription() == "test-vfs-error", exception);
+  expectDoSentryDisposition(exception);
 }
 
 void testCriticalError(const char* expectedErrorMessage,
@@ -1782,14 +1817,7 @@ KJ_TEST("SQLite Regulator blocks RENAME TO reserved name") {
   SqliteDatabase::Vfs vfs(*dir);
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
-  // Regulator that blocks names starting with _cf_ (mirrors SqlStorageRegulator).
-  class CfRegulator: public SqliteDatabase::Regulator {
-   public:
-    bool isAllowedName(kj::StringPtr name) const override {
-      return !name.startsWith("_cf_");
-    }
-  };
-  static CfRegulator reg;
+  auto& reg = DEFAULT_REGULATOR_FOR_TEST;
 
   // Create a user table and populate it.
   db.run("CREATE TABLE user_data (key TEXT PRIMARY KEY, value BLOB)");
@@ -1805,6 +1833,88 @@ KJ_TEST("SQLite Regulator blocks RENAME TO reserved name") {
 
   // Verify the table was NOT renamed — it should still be other_data.
   KJ_EXPECT(db.prepare(reg, "SELECT value FROM other_data").run().getBlob(0).size() == 4);
+}
+
+KJ_TEST("SQLite restrict internal functions to nested parse") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run(
+      "CREATE TABLE users (name TEXT DEFAULT (sqlite_drop_column(0, 'CREATE TABLE target(a, b)', 0)))");
+  KJ_EXPECT_THROW_MESSAGE("unknown function: sqlite_drop_column(): SQLITE_ERROR",
+      db.run("INSERT INTO users DEFAULT VALUES;"));
+}
+
+KJ_TEST("SQLite authorizer is called in default column expressions") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  auto& regulator = DEFAULT_REGULATOR_FOR_TEST;
+  db.run("CREATE TABLE users (name TEXT DEFAULT (sqlite_version()))");
+  KJ_EXPECT_THROW_MESSAGE(
+      "not authorized", db.run({.regulator = regulator}, "INSERT INTO users DEFAULT VALUES;"));
+}
+
+KJ_TEST("SQLite authorizer matches default function names case-insensitively") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  auto& regulator = DEFAULT_REGULATOR_FOR_TEST;
+  db.run("CREATE TABLE users (created TEXT DEFAULT CURRENT_TIMESTAMP)");
+  db.run({.regulator = regulator}, "INSERT INTO users DEFAULT VALUES");
+
+  auto query = db.run({.regulator = regulator}, "SELECT created FROM users");
+  KJ_EXPECT(query.getText(0).size() > 0);
+}
+
+KJ_TEST("SQLite R*Tree extension is enabled") {
+  // Regression test to ensure that the SQLite R*Tree extension is enabled and usable.
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  auto& regulator = DEFAULT_REGULATOR_FOR_TEST;
+
+  db.run({.regulator = regulator}, R"(
+    CREATE VIRTUAL TABLE demo_index USING rtree(
+      id,
+      minX, maxX,
+      minY, maxY
+    );
+  )");
+
+  db.run({.regulator = regulator}, R"(
+    INSERT INTO demo_index VALUES
+      (1, -1.0, 1.0, -1.0, 1.0),
+      (2, 10.0, 12.0, 10.0, 12.0),
+      (3, -5.0, -3.0, -5.0, -3.0);
+  )");
+
+  {
+    auto query = db.run({.regulator = regulator}, R"(
+      SELECT id FROM demo_index
+      WHERE minX <= 2.0 AND maxX >= -2.0
+        AND minY <= 2.0 AND maxY >= -2.0
+      ORDER BY id;
+    )");
+
+    KJ_ASSERT(!query.isDone());
+    KJ_EXPECT(query.getInt(0) == 1);
+    query.nextRow();
+    KJ_EXPECT(query.isDone());
+  }
+
+  {
+    auto query = db.run({.regulator = regulator}, R"(
+      SELECT rtreecheck('demo_index');
+    )");
+
+    KJ_ASSERT(!query.isDone());
+    KJ_EXPECT(query.getText(0) == "ok"_kj);
+  }
 }
 
 // NOTE: This test sets a process-global SQLite hard_heap_limit that is never reset.

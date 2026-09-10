@@ -24,8 +24,8 @@
 //! `dyn GarbageCollected` — the data part is the `Rc::into_raw` pointer (pointing to `R`
 //! inside the `Rc` allocation) and the vtable part carries `R`'s `GarbageCollected` impl.
 //! On destruction, `wrappable_invoke_drop` reconstructs the `Rc` via `Rc::from_raw` and
-//! drops it, which may drop the resource. The Rust `Ref<R>` smart pointer holds its own
-//! `Rc<R>` plus a `WrappableRc` (`KjRc<Wrappable>`) for reference-counted ownership. On
+//! drops it, which may drop the resource. The Rust `jsg::Rc<R>` smart pointer holds its own
+//! `std::Rc<R>` plus a `WrappableRc` (`KjRc<Wrappable>`) for reference-counted ownership. On
 //! drop, `wrappable_remove_strong_ref()` handles GC cleanup via `maybeDeferDestruction()`,
 //! then the `WrappableRc` drop decrements the `kj::Rc` refcount.
 
@@ -42,14 +42,11 @@ use crate::Error;
 use crate::FromJS;
 use crate::GarbageCollected;
 use crate::Lock;
+use crate::Nullable;
 use crate::Number;
 use crate::Resource;
 #[expect(clippy::missing_safety_doc)]
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
-#[expect(
-    clippy::fn_params_excessive_bools,
-    reason = "bool parameters in FFI are dictated by the C++ interface"
-)]
 pub mod ffi {
     #[derive(Debug)]
     struct Local {
@@ -286,6 +283,7 @@ pub mod ffi {
         pub unsafe fn local_is_biguint64_array(value: &Local) -> bool;
         pub unsafe fn local_is_float16_array(value: &Local) -> bool;
         pub unsafe fn local_is_uint8clamped_array(value: &Local) -> bool;
+        pub unsafe fn local_is_typed_array(value: &Local) -> bool;
         pub unsafe fn local_is_array_buffer(value: &Local) -> bool;
         pub unsafe fn local_is_array_buffer_view(value: &Local) -> bool;
         pub unsafe fn local_is_shared_array_buffer(value: &Local) -> bool;
@@ -397,7 +395,13 @@ pub mod ffi {
             index: u32,
             value: Local,
         );
-        pub unsafe fn local_array_iterate(isolate: *mut Isolate, value: Local) -> Vec<Global>;
+        // Fallible: KJ_REQUIREs the value is an array, and tunnels any JS exception
+        // thrown by a proxy trap/getter encountered while iterating elements. See
+        // "Unwrappers" below.
+        pub unsafe fn local_array_iterate(
+            isolate: *mut Isolate,
+            value: Local,
+        ) -> Result<Vec<Global>>;
 
         // Local<TypedArray>
         pub unsafe fn local_typed_array_length(isolate: *mut Isolate, array: &Local) -> usize;
@@ -466,10 +470,6 @@ pub mod ffi {
         pub unsafe fn global_to_local(isolate: *mut Isolate, value: &Global) -> Local;
 
         // Wrappable - data access
-        #[expect(
-            clippy::needless_lifetimes,
-            reason = "CXX bridge requires explicit lifetimes on return references"
-        )]
         pub unsafe fn wrappable_get_trait_object<'a>(
             wrappable: &'a Wrappable,
         ) -> &'a TraitObjectPtr;
@@ -506,19 +506,33 @@ pub mod ffi {
         pub unsafe fn traced_reference_reset(traced: &mut TracedReference);
 
         // Unwrappers
-        pub unsafe fn unwrap_string(isolate: *mut Isolate, value: Local) -> String;
+        //
+        // Shims that can throw (coercion via jsg::check, building rust::String/Vec
+        // from V8 data, or KJ_REQUIRE) MUST return Result<T>: workerd-cxx then
+        // catches the throw in C++ instead of aborting across the nounwind FFI
+        // frame. Shims that provably can't throw stay bare (see unwrap_boolean).
+        pub unsafe fn unwrap_string(isolate: *mut Isolate, value: Local) -> Result<String>;
+        // Infallible: ToBoolean can't throw and builds no rust::String/Vec.
         pub unsafe fn unwrap_boolean(isolate: *mut Isolate, value: Local) -> bool;
-        pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local) -> f64;
-        pub unsafe fn unwrap_uint8_array(isolate: *mut Isolate, value: Local) -> Vec<u8>;
-        pub unsafe fn unwrap_uint16_array(isolate: *mut Isolate, value: Local) -> Vec<u16>;
-        pub unsafe fn unwrap_uint32_array(isolate: *mut Isolate, value: Local) -> Vec<u32>;
-        pub unsafe fn unwrap_int8_array(isolate: *mut Isolate, value: Local) -> Vec<i8>;
-        pub unsafe fn unwrap_int16_array(isolate: *mut Isolate, value: Local) -> Vec<i16>;
-        pub unsafe fn unwrap_int32_array(isolate: *mut Isolate, value: Local) -> Vec<i32>;
-        pub unsafe fn unwrap_float32_array(isolate: *mut Isolate, value: Local) -> Vec<f32>;
-        pub unsafe fn unwrap_float64_array(isolate: *mut Isolate, value: Local) -> Vec<f64>;
-        pub unsafe fn unwrap_bigint64_array(isolate: *mut Isolate, value: Local) -> Vec<i64>;
-        pub unsafe fn unwrap_biguint64_array(isolate: *mut Isolate, value: Local) -> Vec<u64>;
+        pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local) -> Result<f64>;
+        pub unsafe fn unwrap_uint8_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u8>>;
+        pub unsafe fn unwrap_uint16_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u16>>;
+        pub unsafe fn unwrap_uint32_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u32>>;
+        pub unsafe fn unwrap_int8_array(isolate: *mut Isolate, value: Local) -> Result<Vec<i8>>;
+        pub unsafe fn unwrap_int16_array(isolate: *mut Isolate, value: Local) -> Result<Vec<i16>>;
+        pub unsafe fn unwrap_int32_array(isolate: *mut Isolate, value: Local) -> Result<Vec<i32>>;
+        pub unsafe fn unwrap_float32_array(isolate: *mut Isolate, value: Local)
+        -> Result<Vec<f32>>;
+        pub unsafe fn unwrap_float64_array(isolate: *mut Isolate, value: Local)
+        -> Result<Vec<f64>>;
+        pub unsafe fn unwrap_bigint64_array(
+            isolate: *mut Isolate,
+            value: Local,
+        ) -> Result<Vec<i64>>;
+        pub unsafe fn unwrap_biguint64_array(
+            isolate: *mut Isolate,
+            value: Local,
+        ) -> Result<Vec<u64>>;
 
         // ArrayBuffer detach/detachable/was-detached
         pub unsafe fn local_array_buffer_detach(isolate: *mut Isolate, buffer: &mut Local);
@@ -542,10 +556,11 @@ pub mod ffi {
         pub unsafe fn fci_set_return_value(args: *mut FunctionCallbackInfo, value: Local);
 
         // Errors
-        pub unsafe fn exception_create(
+        pub unsafe fn exception_create_from_bytes(
             isolate: *mut Isolate,
             exception_type: ExceptionType,
-            message: &str,
+            data: *const u8,
+            length: i32,
         ) -> Local;
 
         // Isolate
@@ -635,6 +650,8 @@ pub mod ffi {
             args: Pin<&mut FunctionCallbackInfo>,
         );
 
+        // Infallible: only defensive tag checks; returns kj::none for non-Rust
+        // wrappables rather than throwing.
         pub unsafe fn unwrap_resource(
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
@@ -1304,6 +1321,12 @@ impl<'a, T> Local<'a, T> {
         unsafe { ffi::local_is_array_buffer_view(&self.handle) }
     }
 
+    /// Returns true if the value is a `TypedArray`
+    pub fn is_typed_array(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_typed_array(&self.handle) }
+    }
+
     /// Returns true if the value is a `SharedArrayBuffer`.
     pub fn is_shared_array_buffer(&self) -> bool {
         // SAFETY: handle is valid within the current HandleScope.
@@ -1520,11 +1543,7 @@ impl_local_cast!(Float64Array -> Value, is_float64_array);
 impl_local_cast!(BigInt64Array -> Value, is_bigint64_array);
 impl_local_cast!(BigUint64Array -> Value, is_biguint64_array);
 impl_local_cast!(Uint8ClampedArray -> Value, is_uint8clamped_array);
-
-// TypedArray base type to Value. Uses `is_array_buffer_view` which also matches
-// `DataView`, but this is acceptable because `TypedArray` is only constructed from
-// concrete typed array types (Uint8Array, etc.) that are always ArrayBufferViews.
-impl_local_cast!(TypedArray -> Value, is_array_buffer_view);
+impl_local_cast!(TypedArray -> Value, is_typed_array);
 
 // Concrete typed arrays to TypedArray base
 impl_local_cast!(Uint8Array -> TypedArray, is_uint8_array);
@@ -1542,7 +1561,7 @@ impl_local_cast!(Uint8ClampedArray -> TypedArray, is_uint8clamped_array);
 // Upcasts to Object (Function, Array, TypedArray are all Object subtypes in V8)
 impl_local_cast!(Function -> Object, is_function);
 impl_local_cast!(Array -> Object, is_array);
-impl_local_cast!(TypedArray -> Object, is_array_buffer_view);
+impl_local_cast!(TypedArray -> Object, is_typed_array);
 
 // ArrayBuffer <-> Value, ArrayBuffer <-> Object
 impl_local_cast!(ArrayBuffer -> Value, is_array_buffer);
@@ -1603,13 +1622,16 @@ impl Local<'_, Array> {
 
     /// Iterates over array elements using V8's native `Array::Iterate()`.
     /// Returns Global handles because Local handles get reused during iteration.
-    pub fn iterate(self) -> Vec<Global<Value>> {
+    /// Errs (rather than aborting) if the value is not an array, or if a proxy
+    /// trap/getter throws while an element is being read during iteration.
+    pub fn iterate(self) -> crate::Result<Vec<Global<Value>>> {
         // SAFETY: handle is valid within the current HandleScope.
-        unsafe { ffi::local_array_iterate(self.isolate.as_ffi(), self.into_ffi()) }
+        let globals = unsafe { ffi::local_array_iterate(self.isolate.as_ffi(), self.into_ffi()) }?;
+        Ok(globals
             .into_iter()
             // SAFETY: each Global handle was created by the C++ side and is valid.
             .map(|g| unsafe { Global::from_ffi(g) })
-            .collect()
+            .collect())
     }
 }
 
@@ -3085,6 +3107,16 @@ impl ToLocalValue for Number {
     }
 }
 
+impl<T: ToLocalValue> ToLocalValue for Nullable<T> {
+    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
+        match self {
+            Self::Some(v) => v.to_local(lock),
+            Self::Null => Local::<Value>::null(lock),
+            Self::Undefined => Local::<Value>::undefined(lock),
+        }
+    }
+}
+
 pub struct FunctionCallbackInfo<'a>(*mut ffi::FunctionCallbackInfo, PhantomData<&'a ()>);
 
 impl<'a> FunctionCallbackInfo<'a> {
@@ -3115,7 +3147,7 @@ impl<'a> FunctionCallbackInfo<'a> {
     }
 
     pub fn get(&self, index: usize) -> Local<'a, Value> {
-        debug_assert!(index <= self.len(), "index out of bounds");
+        debug_assert!(index < self.len(), "index out of bounds");
         // SAFETY: self.0 is a valid FunctionCallbackInfo pointer (guaranteed by constructor).
         unsafe { Local::from_ffi(self.isolate(), ffi::fci_get_arg(self.0, index)) }
     }
@@ -3466,7 +3498,7 @@ impl IsolatePtr {
 ///
 /// `Clone` / `Drop` only affect the `KjRc` refcount (`kj::Rc` reference counting).
 /// GC strong-ref tracking (`addStrongRef` / `removeStrongRef`) is handled by
-/// `Ref<R>`, not here.
+/// `Rc<R>`, not here.
 #[derive(Clone)]
 pub struct WrappableRc {
     handle: kj_rs::KjRc<ffi::Wrappable>,
@@ -3598,7 +3630,7 @@ impl WrappableRc {
 
     /// Increments the strong reference count on the underlying Wrappable.
     ///
-    /// Called when a new `Ref<R>` is created (clone, unwrap) to inform the GC
+    /// Called when a new `Rc<R>` is created (clone, unwrap) to inform the GC
     /// that this Wrappable has an additional strong reference from Rust.
     pub(crate) fn add_strong_ref(&mut self) {
         // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
@@ -3607,16 +3639,12 @@ impl WrappableRc {
 
     /// Decrements the strong reference count and potentially defers destruction.
     ///
-    /// Called when a `Ref<R>` is dropped. Calls `maybeDeferDestruction` on
+    /// Called when a `Rc<R>` is dropped. Calls `maybeDeferDestruction` on
     /// the C++ side with the ref's current `strong` flag. If `is_strong` is
     /// true, `~RefToDelete` will call `removeStrongRef()`; if false (the ref
     /// was already weakened by GC tracing), it skips the decrement.
     // The bool maps directly to the C++ FFI parameter; an enum would just
     // convert back to bool immediately before crossing the boundary.
-    #[expect(
-        clippy::fn_params_excessive_bools,
-        reason = "thin wrapper over FFI; bool is dictated by the C++ interface"
-    )]
     pub(crate) fn remove_strong_ref(&mut self, is_strong: bool) {
         // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
         unsafe { ffi::wrappable_remove_strong_ref(self.as_pin_mut(), is_strong) };

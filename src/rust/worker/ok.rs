@@ -6,7 +6,6 @@ use std::pin::Pin;
 use std::time::SystemTime;
 
 use cxx::KjError;
-use cxx::KjExceptionType;
 use kj::http::ConnectResponse;
 use kj::http::ConnectSettings;
 use kj::http::HeadersRef;
@@ -38,10 +37,7 @@ pub struct Worker;
 
 impl Worker {
     fn not_implemented(name: &str) -> KjError {
-        KjError::new(
-            KjExceptionType::Unimplemented,
-            format!("{name} not implemented"),
-        )
+        kj::not_implemented!("{name} not implemented")
     }
 }
 
@@ -93,7 +89,7 @@ impl Interface for Worker {
 
     async fn custom_event(
         &mut self,
-        _event: Pin<&mut crate::CustomEvent>,
+        _event: crate::KjOwn<crate::CustomEvent>,
     ) -> crate::Result<crate::CustomEventResult> {
         Err(Self::not_implemented("custom_event"))
     }

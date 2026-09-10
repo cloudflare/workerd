@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "events-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "set_event_target_this", "workers_api_getters_setters_on_prototype", "dont_substitute_null_on_type_error"]
+        compatibilityFlags = ["nodejs_compat", "set_event_target_this", "workers_api_getters_setters_on_prototype", "dont_substitute_null_on_type_error", "spec_compliant_dispatch_exceptions"]
       )
     ),
   ],

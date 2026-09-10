@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 """
 Usage: update-deps.py [dep_name]
 """
@@ -13,9 +13,12 @@ import re
 import subprocess
 import sys
 import tarfile
+import tomllib
 import urllib.request
 import zipfile
 from pathlib import Path
+
+import jsonc
 
 TARGET_FILTER = None if len(sys.argv) < 2 else sys.argv[1]
 
@@ -41,6 +44,10 @@ GITHUB_RELEASE_FILE_URL_TEMPLATE = (
     "https://github.com/{owner}/{repo}/releases/download/v{version}/{file}"
 )
 
+RUST_NIGHTLY_MANIFEST_URL = (
+    "https://static.rust-lang.org/dist/{date}channel-rust-nightly.toml"
+)
+
 EXT_DEP_TEMPLATE = """# {name}
 {ext_name}.{rule_name}({attrs}
 )
@@ -60,6 +67,28 @@ BAZEL_DEP_TEMPLATE = """# {name}
 bazel_dep({attrs})
 
 """
+
+RUST_NIGHTLY_TEMPLATE = '''# {name}
+RUST_NIGHTLY_VERSION = "nightly/{date}"
+
+http.archive(
+    name = "{name}_src",
+    build_file_content = """
+filegroup(
+    name = "rust_src",
+    srcs = glob(["library/**"]),
+    visibility = ["//visibility:public"],
+)
+exports_files(["library/Cargo.toml"])
+""",
+    sha256 = "{sha256}",
+    strip_prefix = "rust-src-nightly/rust-src/lib/rustlib/src/rust",
+    type = "tar.xz",
+    url = "{url}",
+)
+use_repo(http, "{name}_src")
+
+'''
 
 BAZEL_DEP_OVERRIDE_TEMPLATE = """# {name}
 bazel_dep({bazel_dep_attrs})
@@ -195,6 +224,8 @@ def repo_attributes(repo):
         "downloaded_file_path",
         "build_file_content",
         "patches",
+        "patch_cmds",
+        "patch_cmds_win",
     ):
         if option in repo:
             repo_attrs[option] = repo[option]
@@ -418,33 +449,63 @@ def get_release_asset(repo, release):
 def gen_git_clone(repo):
     url = repo["url"]
 
-    # We used to clone the repository here to get a shallow_since timestamp, but based
-    # on # https://github.com/bazelbuild/bazel/issues/12857 it is unclear if this is
-    # actually helpful.
-    ls_remote = subprocess.run(
-        ["git", "ls-remote", url, repo["branch"]], capture_output=True, text=True
-    )
-    ls_remote.check_returncode()
-    commit = ls_remote.stdout.strip().split()[0]
+    if repo.get("use_bazel_dep") and "sparse_checkout_patterns" in repo:
+        raise UnsupportedException(
+            "sparse_checkout_patterns is not supported with use_bazel_dep"
+        )
 
-    if "freeze_commit" in repo:
-        freeze_commit = repo["freeze_commit"]
-        if freeze_commit != commit:
-            print(
-                "frozen, update available ",
-                repo["freeze_commit"][:7],
-                " -> ",
-                commit[:7],
-                end="",
-            )
-            commit = freeze_commit
-        else:
-            print(commit[:7], end="")
+    if "tag" in repo:
+        tag = repo["tag"]
+        tag_ref = f"refs/tags/{tag}"
+        ls_remote = subprocess.run(
+            ["git", "ls-remote", url, tag_ref, f"{tag_ref}^{{}}"],
+            capture_output=True,
+            text=True,
+        )
+        ls_remote.check_returncode()
+        commits = {
+            ref: commit
+            for commit, ref in (line.split() for line in ls_remote.stdout.splitlines())
+        }
+        commit = commits.get(f"{tag_ref}^{{}}", commits.get(tag_ref))
+        if commit is None:
+            raise UnsupportedException(f"Tag not found: {tag}")
 
-    attrs = dict(
-        remote=url,
-        commit=commit,
-    )
+        print(tag, commit[:7], end="")
+        attrs = dict(
+            remote=url,
+            commit=commit,
+        )
+    else:
+        # We used to clone the repository here to get a shallow_since timestamp, but based
+        # on https://github.com/bazelbuild/bazel/issues/12857 it is unclear if this is
+        # actually helpful.
+        ls_remote = subprocess.run(
+            ["git", "ls-remote", url, repo["branch"]], capture_output=True, text=True
+        )
+        ls_remote.check_returncode()
+        commit = ls_remote.stdout.strip().split()[0]
+
+        if "freeze_commit" in repo:
+            freeze_commit = repo["freeze_commit"]
+            if freeze_commit != commit:
+                print(
+                    "frozen, update available ",
+                    repo["freeze_commit"][:7],
+                    " -> ",
+                    commit[:7],
+                    end="",
+                )
+                commit = freeze_commit
+            else:
+                print(commit[:7], end="")
+
+        attrs = dict(
+            remote=url,
+            commit=commit,
+        )
+    if "sparse_checkout_patterns" in repo:
+        attrs["sparse_checkout_patterns"] = repo["sparse_checkout_patterns"]
 
     if repo.get("use_bazel_dep"):
         return format_bazel_dep_with_override(
@@ -479,6 +540,40 @@ def get_bcr_version(name: str) -> str:
             # version scheme for BCR dependencies, so this would definitely fail on some deps.
 
             return version
+
+
+def get_rust_nightly_manifest(date=""):
+    date_path = f"{date}/" if date else ""
+    url = RUST_NIGHTLY_MANIFEST_URL.format(date=date_path)
+    return tomllib.loads(urllib.request.urlopen(url).read().decode())
+
+
+def gen_rust_nightly(repo):
+    latest_date = get_rust_nightly_manifest()["date"]
+
+    if "freeze_version" in repo:
+        date = repo["freeze_version"]
+        if date != latest_date:
+            print(f"frozen, update available: {date} -> {latest_date}", end="")
+        manifest = get_rust_nightly_manifest(date)
+    else:
+        date = latest_date
+        print(date, end="")
+        manifest = get_rust_nightly_manifest(date)
+
+    rust_src = manifest["pkg"]["rust-src"]["target"]["*"]
+    rust_version = manifest["pkg"]["rust"]["version"].split()[0]
+    (GEN_DIR / "build_deps.bzl").write_text(
+        "# WARNING: THIS FILE IS AUTOGENERATED BY update-deps.py DO NOT EDIT\n\n"
+        + f'RUST_NIGHTLY_DATE = "{date}"\n'
+        + f'RUST_NIGHTLY_VERSION = "{rust_version}"\n'
+    )
+    return RUST_NIGHTLY_TEMPLATE.format(
+        name=repo["name"],
+        date=date,
+        url=rust_src["xz_url"],
+        sha256=rust_src["xz_hash"],
+    )
 
 
 def gen_bazel_dep(repo):
@@ -529,6 +624,8 @@ def gen_repo_str(repo):
         return gen_git_clone(repo)
     elif repo["type"] == "bazel_dep":
         return gen_bazel_dep(repo)
+    elif repo["type"] == "rust_nightly":
+        return gen_rust_nightly(repo)
     else:
         raise UnsupportedException(f"Unsupported repo type: {repo['type']}")
 
@@ -591,14 +688,6 @@ def split_bzl_file(file: Path) -> dict[str, str]:
     return deps
 
 
-def strip_comments(text):
-    # capture string literals first, comments send
-    regex = re.compile(r"(\".*\")|(//.*$)", re.MULTILINE)
-    return regex.sub(
-        lambda match: "" if match.group(2) is not None else match.group(1), text
-    )
-
-
 def read_access_token():
     if not sys.stdin.isatty():
         return ""
@@ -651,13 +740,12 @@ def process_config(deps_file):
 
     try:
         with deps_path.open() as fp:
-            json_text = strip_comments(fp.read())
-            process_deps(json.loads(json_text), current_deps, bzl_path)
+            process_deps(jsonc.load(fp).data, current_deps, bzl_path)
     except FileNotFoundError:
         pass
 
 
-def run():
+def main():
     global GITHUB_ACCESS_TOKEN
     GITHUB_ACCESS_TOKEN = read_access_token()
 
@@ -670,4 +758,5 @@ def run():
         process_config(deps)
 
 
-run()
+if __name__ == "__main__":
+    main()

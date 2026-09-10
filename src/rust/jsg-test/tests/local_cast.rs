@@ -444,3 +444,25 @@ fn array_object_roundtrip() {
         Ok(())
     });
 }
+
+/// A `DataView` is an `ArrayBufferView` but not a `TypedArray`; the downcast
+/// `From<Local<Value>> for Local<TypedArray>` should reject it.
+#[test]
+fn data_view_cannot_cast_to_typed_array() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|_lock, ctx| {
+        let val = ctx.eval_raw("new DataView(new ArrayBuffer(8))").unwrap();
+        assert!(val.is_array_buffer_view());
+        assert!(!val.is_typed_array());
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ta: v8::Local<v8::TypedArray> = val.clone().into();
+        }));
+        assert!(
+            result.is_err(),
+            "DataView must not cast to Local<TypedArray>"
+        );
+
+        Ok(())
+    });
+}

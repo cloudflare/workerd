@@ -1,0 +1,23 @@
+using Workerd = import "/workerd/workerd.capnp";
+using HtmlrewriterModules = import "htmlrewriter-modules.capnp";
+
+# The SAME modules against the TypeScript implementation: the rewriter
+# must consume TS-implemented bodies and streamed replacement content.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-htmlrewriter-ts",
+      worker = (
+        modules = HtmlrewriterModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

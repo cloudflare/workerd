@@ -68,6 +68,12 @@ export default {
     omittedTests: true,
   },
   'eventsource-constructor-url-bogus.any.js': {},
+  'eventsource-cross-origin-redirect-origin.any.js': {
+    comment: 'EventSource does not support relative URLs in workerd',
+    expectedFailures: [
+      'MessageEvent.origin is the origin of the final URL after a cross-origin redirect',
+    ],
+  },
   'eventsource-cross-origin.window.js': {
     comment: 'Window-specific tests are not supported',
     omittedTests: true,

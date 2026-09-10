@@ -44,21 +44,35 @@ KJ_TEST("getPythonSnapshotRelease") {
   featureFlags.setPythonWorkers20250116(true);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    KJ_ASSERT(res.getPyodide() == "0.28.2");
-    KJ_ASSERT(res.getFlagName() == "pythonWorkers20250116");
+    KJ_ASSERT(res.getPyodide() == "dev");
+    KJ_ASSERT(res.getFlagName() == "pythonWorkersDevPyodide");
   }
 
   featureFlags.setPythonWorkers20260610(true);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    KJ_ASSERT(res.getPyodide() == "314.0.0");
-    KJ_ASSERT(res.getFlagName() == "pythonWorkers20260610");
+    KJ_ASSERT(res.getPyodide() == "dev");
+    KJ_ASSERT(res.getFlagName() == "pythonWorkersDevPyodide");
+  }
+
+  featureFlags.setPythonWorkers314(true);
+  {
+    auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
+    KJ_ASSERT(res.getPyodide() == "dev");
+    KJ_ASSERT(res.getFlagName() == "pythonWorkersDevPyodide");
   }
 
   featureFlags.setPythonWorkersDevPyodide(false);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    KJ_ASSERT(res.getPyodide() == "314.0.0");
+    KJ_ASSERT(res.getPyodide() == "314.0.6");
+    KJ_ASSERT(res.getFlagName() == "pythonWorkers314");
+  }
+
+  featureFlags.setPythonWorkers314(false);
+  {
+    auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
+    KJ_ASSERT(res.getPyodide() == "314.0.4");
     KJ_ASSERT(res.getFlagName() == "pythonWorkers20260610");
   }
 
@@ -68,26 +82,6 @@ KJ_TEST("getPythonSnapshotRelease") {
     KJ_ASSERT(res.getPyodide() == "0.28.2");
     KJ_ASSERT(res.getFlagName() == "pythonWorkers20250116");
   }
-}
-
-template <typename... Params>
-kj::Array<kj::String> strArray(Params&&... params) {
-  return kj::arr(kj::str(params)...);
-}
-
-template <typename... Params>
-kj::Array<kj::Array<kj::byte>> bytesArray(Params&&... params) {
-  return kj::arr(kj::heapArray<kj::byte>(kj::str(params).asBytes())...);
-}
-
-template <typename... Params>
-kj::HashSet<kj::String> strSet(Params&&... params) {
-  auto array = strArray(params...);
-  kj::HashSet<kj::String> set;
-  for (auto& str: array) {
-    set.insert(kj::mv(str));
-  }
-  return set;
 }
 
 KJ_TEST("computePyodideBundleIntegrity produces sha256 subresource-integrity strings") {

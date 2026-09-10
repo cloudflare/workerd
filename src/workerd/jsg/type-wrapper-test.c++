@@ -357,5 +357,66 @@ KJ_TEST("unimplemented errors") {
   e.expectEval("takeStructWithUnimplementedMembers(undefined)", "undefined", "undefined");
 }
 
+// ========================================================================================
+
+struct LockTypeHandlerContext: public ContextGlobalObject {
+  struct Widget: public Object {
+    JSG_RESOURCE_TYPE(Widget) {}
+  };
+
+  // Deliberately NOT registered with the isolate below.
+  struct UnregisteredWidget: public Object {
+    JSG_RESOURCE_TYPE(UnregisteredWidget) {}
+  };
+
+  struct Point {
+    double x;
+    double y;
+    JSG_STRUCT(x, y);
+  };
+
+  // These methods exercise Lock::tryGetTypeHandler() -- acquiring TypeHandlers directly
+  // from the Lock rather than through JSG parameter injection. (The lookup path is
+  // identical no matter where the Lock came from; nothing below relies on being inside a
+  // JSG callback.)
+
+  bool wrapAndUnwrapResource(Lock& js) {
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<Ref<Widget>>());
+    auto widget = js.alloc<Widget>();
+    Widget* ptr = widget.get();
+    auto handle = handler.wrap(js, kj::mv(widget));
+    KJ_ASSERT(handle->IsObject());
+    auto unwrapped = KJ_ASSERT_NONNULL(handler.tryUnwrap(js, handle));
+    return unwrapped.get() == ptr;
+  }
+
+  bool structTypeYieldsNone(Lock& js) {
+    // Only resource types are eagerly registered; value types (which may be deliberately
+    // one-directional) continue to use TypeHandler parameter injection.
+    return js.tryGetTypeHandler<Point>() == kj::none;
+  }
+
+  bool unregisteredTypeYieldsNone(Lock& js) {
+    return js.tryGetTypeHandler<Ref<UnregisteredWidget>>() == kj::none;
+  }
+
+  JSG_RESOURCE_TYPE(LockTypeHandlerContext) {
+    JSG_METHOD(wrapAndUnwrapResource);
+    JSG_METHOD(structTypeYieldsNone);
+    JSG_METHOD(unregisteredTypeYieldsNone);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(LockTypeHandlerIsolate,
+    LockTypeHandlerContext,
+    LockTypeHandlerContext::Widget,
+    LockTypeHandlerContext::Point);
+
+KJ_TEST("Lock::tryGetTypeHandler acquires handlers without JSG parameter injection") {
+  Evaluator<LockTypeHandlerContext, LockTypeHandlerIsolate> e(v8System);
+  e.expectEval("wrapAndUnwrapResource()", "boolean", "true");
+  e.expectEval("structTypeYieldsNone()", "boolean", "true");
+  e.expectEval("unregisteredTypeYieldsNone()", "boolean", "true");
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

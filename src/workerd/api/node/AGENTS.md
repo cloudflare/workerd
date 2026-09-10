@@ -14,7 +14,7 @@ C++ implementations of Node.js built-in modules. Each module = JSG-bound class r
 2. Define `EW_NODE_<MODULE>_ISOLATE_TYPES` macro in header
 3. Add `V(ClassName, "node-internal:<name>")` to `NODEJS_MODULES(V)` in `node.h` (or `NODEJS_MODULES_EXPERIMENTAL(V)` for staging)
 4. Append to `EW_NODE_ISOLATE_TYPES` at bottom of `node.h`
-5. Per-module compat flags gated in `registerNodeJsCompatModules()` — add `isNode*Module()` + `featureFlags.getEnable*()` check
+5. Per-module compat flags are gated in **two places that must stay in sync**: `registerNodeJsCompatModules()` (legacy registry) and `getExternalNodeJsCompatModuleBundle()` (new module registry), both in `node.h` — add the `isNode*Module()` + `featureFlags.getEnable*()` check to **both** filter lists or the two registries will expose different module sets for the same flags
 
 ## TESTING
 

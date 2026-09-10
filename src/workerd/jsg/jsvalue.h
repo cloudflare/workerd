@@ -255,6 +255,9 @@ class JsArrayBuffer final: public JsBase<v8::ArrayBuffer, JsArrayBuffer> {
 
   size_t size() const;
 
+  // Used for safety checks
+  size_t backingStoreSize() const;
+
   // Return a copy of this buffer's data as a kj::Array.
   kj::Array<kj::byte> copy();
 
@@ -538,8 +541,7 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
 };
 
 // A lightweight wrapper for ArrayBuffer | ArrayBufferView (the Web IDL "BufferSource"
-// type). Unlike jsg::BufferSource, this does NOT maintain a BackingStore, does NOT
-// support detach, and is stack-only. Use JsRef<JsBufferSource> for persistent storage.
+// type). Use JsRef<JsBufferSource> for persistent storage.
 //
 // This type is based on v8::Value (not a specific V8 type) because there is no single
 // V8 type that represents both ArrayBuffer and ArrayBufferView. It is NOT included in
@@ -671,6 +673,8 @@ class JsPromise final: public JsBase<v8::Promise, JsPromise> {
   PromiseState state();
   JsValue result();
   using JsBase<v8::Promise, JsPromise>::JsBase;
+
+  void markAsHandled(Lock& js);
 };
 
 class JsProxy final: public JsBase<v8::Proxy, JsProxy> {
@@ -717,6 +721,10 @@ class JsBigInt final: public JsBase<v8::BigInt, JsBigInt> {
   // and schedules an exception on the isolate.
   kj::Maybe<uint64_t> toUint64(Lock& js) const KJ_WARN_UNUSED_RESULT;
 
+  // If the BigInt value does not fit in int64_t, returns kj::none.
+  // Does not schedule an exception on the isolate.
+  kj::Maybe<uint64_t> tryToUint64(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
   using JsBase<v8::BigInt, JsBigInt>::JsBase;
 };
 
@@ -747,13 +755,21 @@ class JsObject final: public JsBase<v8::Object, JsObject> {
  public:
   template <typename T>
   bool isInstanceOf(Lock& js) {
-    return js.getInstance(inner, typeid(T)) != kj::none;
+    KJ_IF_SOME(instance, js.getInstance(inner, typeid(T))) {
+      // getInstance() checks the prototype chain, but the wrapper may be
+      // pointing at the wrong object after a V8 sandbox corruption, so defense
+      // in depth means we need to confirm the type before answering yes.
+      downcastObject<T>(instance);
+      return true;
+    } else {
+      return false;
+    }
   }
 
   template <typename T>
   kj::Maybe<jsg::Ref<T>> tryUnwrapAs(Lock& js) {
-    KJ_IF_SOME(ins, js.getInstance(inner, typeid(T))) {
-      return _jsgThis(static_cast<T*>(&ins));
+    KJ_IF_SOME(instance, js.getInstance(inner, typeid(T))) {
+      return _jsgThis(&downcastObject<T>(instance));
     } else {
       return kj::none;
     }
@@ -950,6 +966,19 @@ class JsFunction final: public JsBase<v8::Function, JsFunction> {
   // as the receiver, the global object is used instead.
   JsValue callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const;
 
+  // Calls the function as a constructor with the given arguments, returning the
+  // new object.
+  template <IsJsValue... Args>
+  JsObject newInstance(Lock& js, Args... args) const {
+    v8::Local<v8::Function> fn = *this;
+    v8::Local<v8::Value> argv[] = {args...};
+    return JsObject(check(fn->NewInstance(js.v8Context(), sizeof...(Args), argv)));
+  }
+
+  // Calls the function as a constructor with the given arguments, returning the
+  // new object.
+  JsObject newInstance(Lock& js, v8::LocalVector<v8::Value>& args) const;
+
   // Gets the function's length property.
   size_t length(Lock& js) const;
 
@@ -1123,6 +1152,9 @@ struct JsValueWrapper {
   V(Value)                                                                                         \
   JS_TYPE_CLASSES(V)
 
+  // Fallback for JsValueType types that have no corresponding V8 type, and so can only name
+  // themselves. The `TYPES_TO_WRAP` overloads below take precedence for the types they cover,
+  // being non-templates.
   template <JsValueType T>
   static constexpr const std::type_info& getName(T*) {
     return typeid(T);
@@ -1133,7 +1165,28 @@ struct JsValueWrapper {
     return typeid(T);
   }
 
+  // `BufferSource` is a Web IDL type with no V8 equivalent, so name it explicitly rather than
+  // falling through to the templates above, which would name the C++ class.
+  static constexpr const char* getName(JsBufferSource*) {
+    return "BufferSource";
+  }
+
+  static constexpr const char* getName(JsRef<JsBufferSource>*) {
+    return "BufferSource";
+  }
+
+  // `getName()` supplies the type name that appears in the TypeError thrown when unwrapping a
+  // parameter fails. Name the V8 type rather than the C++ wrapper class, so that a `JsArrayBuffer`
+  // parameter is reported as 'ArrayBuffer' -- the name the script author wrote -- and not as
+  // 'JsArrayBuffer', which means nothing outside this codebase. `typeName()` strips the `v8::`
+  // namespace qualifier.
 #define V(Name)                                                                                    \
+  static constexpr const std::type_info& getName(Js##Name*) {                                      \
+    return typeid(v8::Name);                                                                       \
+  }                                                                                                \
+  static constexpr const std::type_info& getName(JsRef<Js##Name>*) {                               \
+    return typeid(v8::Name);                                                                       \
+  }                                                                                                \
   v8::Local<v8::Name> wrap(jsg::Lock& js, v8::Local<v8::Context> context,                          \
       kj::Maybe<v8::Local<v8::Object>> creator, Js##Name value) {                                  \
     return value;                                                                                  \
@@ -1325,8 +1378,16 @@ inline JsString Lock::strExtern(kj::ArrayPtr<const char> str) {
   return JsString(newExternalOneByteString(*this, str));
 }
 
+inline JsString Lock::strExtern(kj::Arc<OwnedAscii> str) {
+  return JsString(newExternalOneByteString(*this, kj::mv(str)));
+}
+
 inline JsString Lock::strExtern(kj::ArrayPtr<const uint16_t> str) {
   return JsString(newExternalTwoByteString(*this, str));
+}
+
+inline JsString Lock::strExtern(kj::Arc<OwnedUtf16> str) {
+  return JsString(newExternalTwoByteString(*this, kj::mv(str)));
 }
 
 inline JsObject Lock::obj() {
@@ -1436,4 +1497,24 @@ inline size_t JsString::utf8Length(jsg::Lock& js) const {
 #endif
 }
 
+template <IsJsValue T>
+void MemoryTracker::trackField(
+    kj::StringPtr edgeName, const JsRef<T>& value, kj::Maybe<kj::StringPtr> nodeName) {
+  auto& js = Lock::from(isolate_);
+  v8::Local<v8::Value> handle = value.getHandle(js);
+  trackField(edgeName, handle, nodeName);
+}
+
 }  // namespace workerd::jsg
+
+// Convenience macros for JsValue::tryCast<T>() at call sites where the jsg:: qualification
+// would otherwise dominate the expression. Each expands to a kj::Maybe of the target Js type,
+// suitable for KJ_IF_SOME / KJ_REQUIRE_NONNULL / JSG_REQUIRE_NONNULL. The named forms cover
+// the commonly-checked types; use the base form for anything else, e.g.
+// JSG_TRY_CAST(value, JsBigInt).
+#define JSG_TRY_CAST(val, type) (val).tryCast<jsg::type>()
+#define JSG_TRY_CAST_OBJECT(val) JSG_TRY_CAST(val, JsObject)
+#define JSG_TRY_CAST_FUNCTION(val) JSG_TRY_CAST(val, JsFunction)
+#define JSG_TRY_CAST_PROMISE(val) JSG_TRY_CAST(val, JsPromise)
+#define JSG_TRY_CAST_ARRAYBUFFER(val) JSG_TRY_CAST(val, JsArrayBuffer)
+#define JSG_TRY_CAST_UINT8ARRAY(val) JSG_TRY_CAST(val, JsUint8Array)

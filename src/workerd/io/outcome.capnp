@@ -29,4 +29,5 @@ enum EventOutcome {
   responseStreamDisconnected @10;
   internalError @11;
   exceededWallTime @12;
+  aborted @13;
 }

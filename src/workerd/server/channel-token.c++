@@ -602,8 +602,8 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
     ChannelToken::Type type,
     IoChannelFactory::ChannelTokenUsage usage,
     kj::ArrayPtr<const byte> token) {
-  kj::ArrayPtr<const byte> plaintext;
   kj::Array<byte> ownPlaintext;
+  kj::ArrayPtr<const byte> plaintext;
 
   switch (usage) {
     case IoChannelFactory::ChannelTokenUsage::RPC: {

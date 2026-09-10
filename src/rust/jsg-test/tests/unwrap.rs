@@ -89,19 +89,22 @@ fn v8_unwrap_number_returns_correct_values() {
         let num = Number::new(2.5).to_local(lock);
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
         let unwrapped =
-            unsafe { jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), num.into_ffi()) };
+            unsafe { jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), num.into_ffi()) }
+                .unwrap();
         assert!((unwrapped - 2.5).abs() < f64::EPSILON);
 
         let zero = Number::new(0.0).to_local(lock);
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
         let unwrapped_zero =
-            unsafe { jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), zero.into_ffi()) };
+            unsafe { jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), zero.into_ffi()) }
+                .unwrap();
         assert!(unwrapped_zero.abs() < f64::EPSILON);
 
         let negative = Number::new(-42.5).to_local(lock);
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
         let unwrapped_neg =
-            unsafe { jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), negative.into_ffi()) };
+            unsafe { jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), negative.into_ffi()) }
+                .unwrap();
         assert!((unwrapped_neg - (-42.5)).abs() < f64::EPSILON);
         Ok(())
     });
@@ -114,19 +117,21 @@ fn v8_unwrap_string_returns_correct_values() {
         let s = "hello world".to_local(lock);
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
         let unwrapped =
-            unsafe { jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), s.into_ffi()) };
+            unsafe { jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), s.into_ffi()) }.unwrap();
         assert_eq!(unwrapped.as_str(), "hello world");
 
         let empty = "".to_local(lock);
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
         let unwrapped_empty =
-            unsafe { jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), empty.into_ffi()) };
+            unsafe { jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), empty.into_ffi()) }
+                .unwrap();
         assert_eq!(unwrapped_empty.as_str(), "");
 
         let unicode = "こんにちは".to_local(lock);
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
         let unwrapped_unicode =
-            unsafe { jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), unicode.into_ffi()) };
+            unsafe { jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), unicode.into_ffi()) }
+                .unwrap();
         assert_eq!(unwrapped_unicode.as_str(), "こんにちは");
         Ok(())
     });

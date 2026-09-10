@@ -2,6 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+// Production code must not panic; test code is exempt via clippy.toml allow-*-in-tests.
+#![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
+#![deny(clippy::todo, clippy::unimplemented)]
+
 //! WHATWG Encoding Standard legacy decoders via `encoding_rs`.
 //!
 //! Exposes a streaming decoder to C++ via CXX bridge. All legacy encodings
@@ -53,8 +57,7 @@ mod ffi {
 
         /// Create a new streaming decoder for the given encoding.
         // CXX bridge requires Box for opaque types.
-        #[expect(clippy::unnecessary_box_returns)]
-        fn new_decoder(encoding: Encoding) -> Box<Decoder>;
+        fn new_decoder(encoding: Encoding) -> Result<Box<Decoder>>;
 
         /// Decode a chunk of bytes. The decoded UTF-16 output is stored in
         /// the decoder's internal buffer; the returned `DecodeResult`
@@ -85,8 +88,15 @@ pub struct Decoder {
 
 /// Map a CXX-shared `Encoding` variant to the corresponding
 /// `encoding_rs` static.
-fn to_encoding(enc: ffi::Encoding) -> &'static encoding_rs::Encoding {
-    match enc {
+///
+/// CXX shared enums are open (a `#[repr(u16)]` value, not a closed set), so the
+/// match needs a catch-all. Under normal operation the C++ caller
+/// (`toRustEncoding`) constructs only the defined variants, so the catch-all is
+/// unreachable; it becomes reachable only on discriminant drift (a variant added
+/// without updating this match) or a corrupt value from C++. Rather than abort
+/// the process, surface it as a `Failed` exception across the bridge.
+fn to_encoding(enc: ffi::Encoding) -> Result<&'static encoding_rs::Encoding, cxx::KjError> {
+    Ok(match enc {
         ffi::Encoding::Big5 => encoding_rs::BIG5,
         ffi::Encoding::EucJp => encoding_rs::EUC_JP,
         ffi::Encoding::EucKr => encoding_rs::EUC_KR,
@@ -96,18 +106,23 @@ fn to_encoding(enc: ffi::Encoding) -> &'static encoding_rs::Encoding {
         ffi::Encoding::ShiftJis => encoding_rs::SHIFT_JIS,
         ffi::Encoding::Windows1252 => encoding_rs::WINDOWS_1252,
         ffi::Encoding::XUserDefined => encoding_rs::X_USER_DEFINED,
-        _ => unreachable!(),
-    }
+        other => {
+            return Err(cxx::KjError::new(
+                cxx::KjExceptionType::Failed,
+                format!("unknown encoding discriminant: {}", other.repr),
+            ));
+        }
+    })
 }
 
-pub fn new_decoder(encoding: ffi::Encoding) -> Box<Decoder> {
-    let encoding = to_encoding(encoding);
-    Box::new(Decoder {
+pub fn new_decoder(encoding: ffi::Encoding) -> Result<Box<Decoder>, cxx::KjError> {
+    let encoding = to_encoding(encoding)?;
+    Ok(Box::new(Decoder {
         inner: encoding.new_decoder_without_bom_handling(),
         encoding,
         output: Vec::new(),
         needs_reset: false,
-    })
+    }))
 }
 
 pub fn decode<'a>(
@@ -202,4 +217,26 @@ pub fn reset(state: &mut Decoder) {
     // water mark. This is acceptable because the Decoder is owned by a JS
     // TextDecoder object and is GC'd with it, so the buffer lifetime is
     // bounded by the object's reachability.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_encoding_constructs_a_decoder() {
+        assert!(new_decoder(ffi::Encoding::Windows1252).is_ok());
+    }
+
+    #[test]
+    fn unknown_encoding_returns_error_instead_of_panicking() {
+        // Simulate discriminant drift / a corrupt value from C++: an out-of-range
+        // `Encoding` (the shared cxx enum is a `#[repr(u16)]` open value). This must
+        // surface as a clean error rather than aborting the process.
+        let bad = ffi::Encoding { repr: u16::MAX };
+        match new_decoder(bad) {
+            Ok(_) => panic!("out-of-range discriminant should error"),
+            Err(err) => assert!(err.description().contains("unknown encoding discriminant")),
+        }
+    }
 }

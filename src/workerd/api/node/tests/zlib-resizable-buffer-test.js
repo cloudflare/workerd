@@ -5,7 +5,7 @@
 // TOCTOU between buffer snapshot and ToUint32 coercion in CompressionStream::write[Sync] allowed a
 // guest to resize or detach the underlying storage between the buffer snapshot and the bounds
 // check, causing zlib to write into PROT_NONE pages.
-import { rejects, throws } from 'node:assert';
+import { deepStrictEqual, rejects, strictEqual, throws } from 'node:assert';
 import zlib from 'node:zlib';
 
 const N = 1 << 16;
@@ -149,5 +149,53 @@ export const regression_AUTOVULN_CLOUDFLARE_WORKERD_295_non_zero_byte_offset = {
         message: 'Output access is not within bounds',
       }
     );
+  },
+};
+
+export const writeCallbackMustNotRetainOutputBuffer = {
+  test() {
+    const handle = zlib.createDeflateRaw()._handle;
+    const outputBuffer = new ArrayBuffer(32);
+
+    let callbackCount = 0;
+    handle.initialize(
+      /*windowBits=*/ 9,
+      zlib.constants.Z_NO_COMPRESSION,
+      /*memLevel=*/ 1,
+      zlib.constants.Z_DEFAULT_STRATEGY,
+      /*writeState=*/ new Uint32Array(2),
+      () => {
+        callbackCount++;
+
+        // Take the underlying buffer from the zlib handle, keeping a copy for comparison.
+        const transferred = structuredClone(outputBuffer, {
+          transfer: [outputBuffer],
+        });
+        const transferredCopy = new Uint8Array(transferred).slice();
+
+        // A call to `params` should not mutate the moved array while attempting to flush the
+        // stream.
+        handle.params(
+          zlib.constants.Z_DEFAULT_COMPRESSION,
+          zlib.constants.Z_DEFAULT_STRATEGY
+        );
+
+        // The copied array should not have been mutated.
+        deepStrictEqual(new Uint8Array(transferred), transferredCopy);
+      }
+    );
+
+    const input = new Uint8Array(64).fill(0x41);
+    const output = new Uint8Array(outputBuffer);
+    handle.write(
+      zlib.constants.Z_NO_FLUSH,
+      input,
+      input.byteOffset,
+      input.byteLength,
+      output,
+      output.byteOffset,
+      output.byteLength
+    );
+    strictEqual(callbackCount, 1);
   },
 };

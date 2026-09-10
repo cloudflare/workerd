@@ -33,8 +33,8 @@ KJ_TEST("Streams tee stack overflow regression") {
   TestFixture testFixture;
   testFixture.runInIoContext([](const TestFixture::Environment& env) {
     auto& js = jsg::Lock::from(env.isolate);
-    ReadableStream s(env.context, kj::heap<FakeStreamSource>(10 * 1024 * 1024));
-    auto readableStreams = s.tee(js);
+    auto s = js.alloc<ReadableStream>(env.context, kj::heap<FakeStreamSource>(10 * 1024 * 1024));
+    auto readableStreams = s->tee(js);
     for (size_t i = 0; i < teeDepth; i++) {
       readableStreams = readableStreams[0]->tee(js);
     }
@@ -95,8 +95,7 @@ KJ_TEST("Reading from byob reader") {
       KJ_REQUIRE(reader.is<jsg::Ref<ReadableStreamBYOBReader>>());
       auto& byobReader = reader.get<jsg::Ref<ReadableStreamBYOBReader>>();
 
-      auto buffer = v8::Uint8Array::New(
-          v8::ArrayBuffer::New(js.v8Isolate, test.bufferSize), 0, test.bufferSize);
+      auto buffer = jsg::JsArrayBufferView(jsg::JsUint8Array::create(js, test.bufferSize));
 
       return env.context.awaitJs(js, byobReader->read(js, buffer, {}).then(js,
                   JSG_VISITABLE_LAMBDA(

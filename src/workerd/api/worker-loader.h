@@ -67,10 +67,18 @@ class WorkerLoader: public jsg::Object {
     jsg::Optional<kj::Array<const byte>> data;  // byte blob, imports as ArrayBuffer
     jsg::Optional<jsg::Value> json;             // arbitrary JS value, will be serialized to JSON
                                                 // and then parsed again when imported
-    jsg::Optional<kj::String> py;               // Python module
-    jsg::Optional<kj::Array<const byte>> wasm;  // compiled WASM module
+
+    jsg::Optional<kj::String> py;  // Python module
+
+    // WASM module, given either as bytes to compile, or an already-compiled WebAssembly.Module
+    // whose compiled code is shared with the loaded worker.
+    jsg::Optional<kj::OneOf<kj::Array<const byte>, jsg::V8Ref<v8::WasmModuleObject>>> wasm;
 
     JSG_STRUCT(js, cjs, text, data, json, py, wasm);
+
+    JSG_STRUCT_TS_OVERRIDE(WorkerLoaderModule {
+      wasm?: ArrayBuffer | ArrayBufferView | WebAssembly.Module;
+    });
 
     // HACK: When we serialize the JSON in extractSource() we need to place the owned kj::String
     //   somewhere since Worker::Script::Source only gets a kj::StringPtr.
@@ -89,9 +97,11 @@ class WorkerLoader: public jsg::Object {
     // Modules are specified as an object mapping names to content. If the content is just a
     // string, an ES module is assumed for '.js' files and a Python module for '.py' files. For
     // Python dynamic workers, any other file name is treated as a text module as long as it's
-    // in the python_modules/ directory. If the content is an object, the type of module is
-    // determined based on which property is set.
-    jsg::Dict<kj::OneOf<Module, kj::String>> modules;
+    // in the python_modules/ directory. If the content is a `WebAssembly.Module` (e.g. obtained
+    // via a source phase import), it becomes a WASM module sharing the already-compiled code.
+    // If the content is any other object, the type of module is determined based on which
+    // property is set.
+    jsg::Dict<kj::OneOf<jsg::V8Ref<v8::WasmModuleObject>, Module, kj::String>> modules;
 
     // Any RPC-serializable value!
     jsg::Optional<jsg::JsRef<jsg::JsObject>> env;
@@ -119,6 +129,10 @@ class WorkerLoader: public jsg::Object {
         globalOutbound,
         tails,
         streamingTails);
+
+    JSG_STRUCT_TS_OVERRIDE(WorkerLoaderWorkerCode {
+      modules: Record<string, string | WebAssembly.Module | WorkerLoaderModule>;
+    });
   };
 
   jsg::Ref<WorkerStub> get(

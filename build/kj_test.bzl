@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
 
 def kj_test(
         src,
@@ -7,6 +8,7 @@ def kj_test(
         deps = [],
         tags = [],
         size = "medium",
+        target_compatible_with = [],
         **kwargs):
     test_name = src.removesuffix(".c++")
     binary_name = test_name + "_binary"
@@ -16,25 +18,16 @@ def kj_test(
         srcs = [src],
         deps = [
             "@capnp-cpp//src/kj:kj-test",
+            "//build/deps:linkopts_default",
         ] + deps,
-        linkstatic = select({
-            "@platforms//os:linux": 0,
-            "//conditions:default": 1,
-        }),
-        # For test binaries, reduce thinLTO optimizations and inlining to speed up linking. This
-        # only has an effect if thinLTO is enabled. Also apply dead_strip on macOS to manage binary
-        # sizes.
-        linkopts = select({
-            "@platforms//os:linux": ["-Wl,--lto-O1", "-Wl,-mllvm,-import-instr-limit=5"],
-            "@//:use_dead_strip": ["-Wl,-dead_strip", "-Wl,-no_exported_symbols"],
-            "//conditions:default": [""],
-        }),
+        linkstatic = CC_TEST_LINKSTATIC,
         data = data,
-        tags = tags,
+        # Tag with cpu:4 since this target depends on linkopts_default.
+        tags = tags + ["cpu:4"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
-        }),
+        }) + target_compatible_with,
         **kwargs
     )
 
@@ -46,6 +39,7 @@ def kj_test(
             "@//build/config:prebuilt_binaries_arm64": "@//:bin.arm64/tmp/workerd/{}/{}.aarch64-linux-gnu".format(pkg, binary_name),
             "//conditions:default": binary_name,
         }),
+        target_compatible_with = target_compatible_with,
     )
 
     sh_test(
@@ -55,6 +49,7 @@ def kj_test(
         data = data + [cross_alias],
         tags = tags,
         size = size,
+        target_compatible_with = target_compatible_with,
     )
 
     sh_test(
@@ -66,4 +61,5 @@ def kj_test(
         # Tag with no-coverage to reduce coverage CI time
         tags = tags + ["no-coverage"],
         size = size,
+        target_compatible_with = target_compatible_with,
     )

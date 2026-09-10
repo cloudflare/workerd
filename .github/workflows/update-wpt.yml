@@ -1,0 +1,56 @@
+name: WPT updater
+
+on:
+  schedule:
+    # Run at 18:30 UTC every two weeks
+    - cron: '30 18 1,15 * *'
+  # Allow manual triggering for testing
+  workflow_dispatch:
+
+concurrency:
+  group: wpt-updater
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  issue:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+          token: ${{ secrets.DEVPROD_PAT }}
+          ref: main
+      - name: Setup Runner
+        uses: ./.github/actions/setup-runner
+      - name: Update WPT
+        run: build/deps/update_wpt.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Reformat changed files
+        run: ./tools/cross/format.py git
+      - name: Open pull request
+        id: create-pr
+        uses: peter-evans/create-pull-request@v8
+        with:
+          commit-message: "update WPT to latest version"
+          branch: "automatic-update-wpt"
+          title: "Update WPT"
+          token: ${{ secrets.DEVPROD_PAT }}
+          author: "Workers DevProd <workers-devprod@cloudflare.com>"
+          committer: "Workers DevProd <workers-devprod@cloudflare.com>"
+          body: |
+            This is an automated pull request for updating WPT in workerd.
+          delete-branch: true
+          add-paths: |
+            build/deps/shared_deps.jsonc
+            build/deps/gen
+      - name: Enable Pull Request Automerge
+        run: gh pr merge --rebase --auto ${{ steps.create-pr.outputs.pull-request-number }}
+        env:
+          GH_TOKEN: ${{ secrets.DEVPROD_PAT }}

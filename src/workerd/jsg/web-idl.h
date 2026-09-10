@@ -109,7 +109,7 @@ concept NonCallbackInterfaceType = NonCallbackInterfaceType_<T> || isRefToResour
 template <typename T>
 concept BufferSourceType = kj::isSameType<T, kj::Array<kj::byte>>() ||
     kj::isSameType<T, kj::ArrayPtr<kj::byte>>() || kj::isSameType<T, kj::Array<const kj::byte>>() ||
-    kj::isSameType<T, kj::ArrayPtr<const kj::byte>>() || kj::isSameType<T, jsg::BufferSource>();
+    kj::isSameType<T, kj::ArrayPtr<const kj::byte>>() || kj::isSameType<T, jsg::JsBufferSource>();
 
 // Helper for record type detection
 template <typename T>

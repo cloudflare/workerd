@@ -12,47 +12,47 @@
 
 namespace workerd {
 
-// A simple wrapper around kj::Canceler that can be safely
-// shared by multiple objects. This is used, for instance,
-// to support fetch() requests that use an AbortSignal.
-// The AbortSignal (see api/basics.h) creates an instance
-// of RefcountedCanceler then passes references to it out
-// to various other objects that will use it to wrap their
-// Promises.
-class RefcountedCanceler: public kj::Refcounted {
+// A canceler that combines a kj::Canceler with sticky cancellation state and observer
+// callbacks and (unlike kj::Canceler, whose destructor implicitly cancels) releases
+// any still-wrapped promises when dropped without having been canceled.
+//
+// This is used, for instance, to support fetch() requests that use an AbortSignal:
+// the signal's abort registration cancels it (via a reference whose validity the
+// registration's RAII handle guarantees; see api::AbortSignal), while wrappers like
+// AbortableInputStream wrap their promises through it and observe cancellation through
+// Listener.
+class ReleasingCanceler final {
  public:
-  class Listener {
+  // Invokes fn when the canceler is canceled. If the canceler was ALREADY canceled at
+  // registration time, fn is invoked immediately. The fn is invoked at most once.
+  //
+  // A listener is only linked to the canceler while it is still awaiting cancellation: once
+  // it has fired (or if it registered after cancellation), it no longer references the
+  // canceler and may safely outlive it. A listener that has NOT yet fired must be destroyed
+  // before the canceler.
+  class Listener final {
    public:
-    explicit Listener(RefcountedCanceler& canceler, kj::Function<void()> fn)
-        : fn(kj::mv(fn)),
-          canceler(canceler) {
-      canceler.addListener(*this);
-    }
+    explicit Listener(ReleasingCanceler& canceler, kj::Function<void()> fn);
+    ~Listener() noexcept(false);
 
-    ~Listener() {
-      canceler.removeListener(*this);
-    }
+    // Also implied by the ListLink member (and the reference member, for assignment), but
+    // stated explicitly for clarity and better diagnostics: a linked Listener's address must
+    // remain stable, and it must not outlive its canceler.
+    KJ_DISALLOW_COPY_AND_MOVE(Listener);
 
    private:
     kj::Function<void()> fn;
-    RefcountedCanceler& canceler;
+    ReleasingCanceler& canceler;
     kj::ListLink<Listener> link;
 
-    friend class RefcountedCanceler;
+    friend class ReleasingCanceler;
   };
 
-  RefcountedCanceler(kj::Maybe<kj::Exception> reason = kj::none): reason(kj::mv(reason)) {}
+  ReleasingCanceler(kj::Maybe<kj::Exception> reason = kj::none);
 
-  ~RefcountedCanceler() noexcept(false) {
-    // `listeners` has to be empty since each listener should have held a strong reference.
-    KJ_ASSERT(listeners.empty());
+  ~ReleasingCanceler() noexcept(false);
 
-    // RefcountedCanceler is used in use cases where we don't want to cancel by default if the
-    // canceler is destroyed, so release any remaining wrapped promises.
-    canceler.release();
-  }
-
-  KJ_DISALLOW_COPY_AND_MOVE(RefcountedCanceler);
+  KJ_DISALLOW_COPY_AND_MOVE(ReleasingCanceler);
 
   template <typename T>
   kj::Promise<T> wrap(kj::Promise<T> promise) {
@@ -62,48 +62,18 @@ class RefcountedCanceler: public kj::Refcounted {
     return canceler.wrap(kj::mv(promise));
   }
 
-  void cancel(kj::StringPtr cancelReason) {
-    if (reason == kj::none) {
-      cancel(kj::Exception(
-          kj::Exception::Type::DISCONNECTED, __FILE__, __LINE__, kj::str(cancelReason)));
-    }
-  }
+  void cancel(const kj::Exception& exception);
 
-  void cancel(const kj::Exception& exception) {
-    if (reason == kj::none) {
-      reason = exception.clone();
-      canceler.cancel(exception);
-      for (auto& listener: listeners) {
-        listener.fn();
-      }
-    }
-  }
+  void throwIfCanceled();
 
-  bool isEmpty() const {
-    return canceler.isEmpty();
-  }
-
-  void throwIfCanceled() {
-    KJ_IF_SOME(ex, reason) {
-      kj::throwFatalException(ex.clone());
-    }
-  }
-
-  bool isCanceled() const {
-    return reason != kj::none;
-  }
-
-  void addListener(Listener& listener) {
-    listeners.add(listener);
-  }
-
-  void removeListener(Listener& listener) {
-    listeners.remove(listener);
-  }
+  bool isCanceled() const;
 
  private:
   kj::Canceler canceler;
   kj::Maybe<kj::Exception> reason;
+
+  void addListener(Listener& listener);
+  void removeListener(Listener& listener);
 
   kj::List<Listener, &Listener::link> listeners;
 };

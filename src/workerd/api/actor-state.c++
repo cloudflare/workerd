@@ -986,20 +986,28 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
         name(kj::mv(name)),
         getStartInfo(kj::mv(getStartInfo)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
+  Result newSingleUseClient(
+      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override {
     auto& context = IoContext::current();
 
-    return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
+    kj::Maybe<TraceContextParent> spanParents;
+    auto client = context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
         [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
       tracing.setTag("facet_name"_kjc, name.asPtr());
+      spanParents = tracing.getSpanParents();
+      auto userSpanParent = tracing.getUserSpanParent();
+      KJ_IF_SOME(parent, makeUserSpanParent(tracing)) {
+        userSpanParent = kj::mv(parent);
+      }
 
       return getOrCreateActorChannel().startRequest({.cfBlobJson = kj::mv(cfStr),
         .parentSpan = tracing.getInternalSpanParent(),
-        .userSpanParent = tracing.getUserSpanParent()});
+        .userSpanParent = kj::mv(userSpanParent)});
     },
         {.inHouse = true,
           .wrapMetrics = true,
           .operationName = kj::ConstString("facet_subrequest"_kjc)}));
+    return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
   }
 
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override {
@@ -1039,8 +1047,17 @@ jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
 
   kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo =
       ioCtx.makeReentryCallbackWeak(
-          [&ioCtx, getStartupOptions = kj::mv(getStartupOptions)](jsg::Lock& js) mutable {
-    return getStartupOptions(js).then(js, [&ioCtx](jsg::Lock& js, StartupOptions options) {
+          [getStartupOptions = kj::mv(getStartupOptions)](jsg::Lock& js, IoContext& ioCtx) mutable {
+    // Note: We reference the original context via a weak ref rather than `IoContext::current()`.
+    // `getStartupOptions` is application-provided and may resolve its promise from a *different*
+    // context, in which case `IoContext::current()` inside this continuation would not be the
+    // context we want. Unlike the outer callback's captures, this weak ref is created (and
+    // destroyed) on the context's own thread as part of the promise chain, so it does not
+    // participate in the cross-thread destruction race.
+    return getStartupOptions(js).then(
+        js, [weakIoctx = ioCtx.getWeakRef()](jsg::Lock& js, StartupOptions options) {
+      auto& ioCtx = JSG_REQUIRE_NONNULL(weakIoctx->tryGet(), Error,
+          "The request which initiated this facet startup has already completed.");
       Worker::Actor::Id id;
       KJ_IF_SOME(i, options.id) {
         KJ_SWITCH_ONEOF(i) {
@@ -1132,6 +1149,7 @@ DurableObjectState::DurableObjectState(jsg::Lock& js,
     kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
     kj::Maybe<rpc::Container::Client> container,
     bool containerRunning,
+    jsg::Dict<kj::String> containerImages,
     kj::Maybe<Worker::Actor::FacetManager&> facetManager,
     kj::Maybe<ActorVersion> version)
     : id(kj::mv(actorId)),
@@ -1139,7 +1157,7 @@ DurableObjectState::DurableObjectState(jsg::Lock& js,
       props(js, props),
       storage(kj::mv(storage)),
       container(container.map([&](rpc::Container::Client& cap) {
-        return js.alloc<Container>(kj::mv(cap), containerRunning);
+        return js.alloc<Container>(kj::mv(cap), containerRunning, kj::mv(containerImages));
       })),
       facetManager(facetManager.map(
           [](Worker::Actor::FacetManager& ref) { return IoContext::current().addObject(ref); })),
@@ -1166,7 +1184,8 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectState::blockConcurrencyWhile
   return IoContext::current().blockConcurrencyWhile(js, kj::mv(callback));
 }
 
-void DurableObjectState::abort(jsg::Lock& js, jsg::Optional<kj::String> reason) {
+void DurableObjectState::abort(
+    jsg::Lock& js, jsg::Optional<kj::String> reason, jsg::Optional<AbortOptions> options) {
   kj::String description = kj::mv(reason)
                                .map([](kj::String&& text) {
     return kj::str("broken.outputGateBroken; jsg.Error: ", text);
@@ -1177,6 +1196,12 @@ void DurableObjectState::abort(jsg::Lock& js, jsg::Optional<kj::String> reason) 
 
   kj::Exception error(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::mv(description));
   error.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<byte>(0));
+  error.setDetail(jsg::EXCEPTION_DURABLE_OBJECT_ABORT, kj::heapArray<byte>(0));
+  KJ_IF_SOME(o, options) {
+    if (!o.retryAlarm.orDefault(true)) {
+      error.setDetail(jsg::EXCEPTION_DURABLE_OBJECT_ABORT_NO_RETRY, kj::heapArray<byte>(0));
+    }
+  }
 
   KJ_IF_SOME(s, storage) {
     // Make sure we _synchronously_ break storage so that there's no chance our promise fulfilling

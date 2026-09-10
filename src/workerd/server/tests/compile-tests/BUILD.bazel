@@ -15,5 +15,9 @@ sh_test(
         "//samples:helloworld/worker.js",
         "//src/workerd/server:workerd",
     ],
-    tags = ["no-qemu"],
+    # Requires curl, which may not be available under remote execution
+    tags = [
+        "no-qemu",
+        "no-remote-exec",
+    ],
 )

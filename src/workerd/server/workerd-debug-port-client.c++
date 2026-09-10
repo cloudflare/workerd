@@ -130,4 +130,11 @@ jsg::Ref<WorkerdDebugPortClient> WorkerdDebugPortConnector::connect(
   return js.alloc<WorkerdDebugPortClient>(context.addObject(kj::mv(state)));
 }
 
+jsg::Ref<WorkerdDebugPortClient> WorkerdDebugPortConnector::current(jsg::Lock& js) {
+  auto& context = IoContext::current();
+  auto state =
+      kj::refcounted<DebugPortConnectionState>(context.getIoChannelFactory().getWorkerdDebugPort());
+  return js.alloc<WorkerdDebugPortClient>(context.addObject(kj::mv(state)));
+}
+
 }  // namespace workerd::server

@@ -51,19 +51,27 @@ declare abstract class Workflow<PARAMS = unknown> {
 }
 
 type WorkflowDurationLabel =
-  | 'second'
-  | 'minute'
-  | 'hour'
-  | 'day'
-  | 'week'
-  | 'month'
-  | 'year';
+  'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year';
 
 type WorkflowSleepDuration =
-  | `${number} ${WorkflowDurationLabel}${'s' | ''}`
-  | number;
+  `${number} ${WorkflowDurationLabel}${'s' | ''}` | number;
 
 type WorkflowRetentionDuration = WorkflowSleepDuration;
+
+/** Geographic regions supported when creating a Workflow instance.
+ * Location hints are best-effort placement preferences. */
+type WorkflowInstanceLocationHint =
+  | 'wnam'
+  | 'enam'
+  | 'sam'
+  | 'weur'
+  | 'eeur'
+  | 'apac'
+  | 'apac-ne'
+  | 'apac-se'
+  | 'oc'
+  | 'afr'
+  | 'me';
 
 interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
@@ -83,6 +91,9 @@ interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
     successRetention?: WorkflowRetentionDuration;
     errorRetention?: WorkflowRetentionDuration;
   };
+  /** A best-effort geographic placement preference for the Workflow instance.
+   * See `WorkflowInstanceLocationHint` for supported regions. */
+  locationHint?: WorkflowInstanceLocationHint;
 }
 
 type InstanceStatus = {
@@ -138,6 +149,68 @@ interface WorkflowInstanceRestartOptions {
   };
 }
 
+type WorkflowInstanceEventCommon = {
+  instanceId: string;
+  eventId: number;
+  timestamp: number;
+};
+
+type WorkflowInstanceEvent = WorkflowInstanceEventCommon &
+  (
+    | { type: 'workflow_queued' }
+    | { type: 'workflow_started'; params?: unknown }
+    | { type: 'workflow_completed'; output?: unknown }
+    | { type: 'workflow_failed'; error: { name: string; message: string } }
+    | { type: 'workflow_terminated' }
+    | { type: 'step_started'; stepName: string }
+    | { type: 'step_completed'; stepName: string; output?: unknown }
+    | { type: 'step_failed'; stepName: string }
+    | { type: 'attempt_started'; stepName: string; attempt: number }
+    | { type: 'attempt_completed'; stepName: string; attempt: number }
+    | {
+        type: 'attempt_failed';
+        stepName: string;
+        attempt: number;
+        retryDelayMs?: number;
+        error: { name: string; message: string };
+      }
+    | { type: 'sleep_started'; stepName: string; durationMs: number }
+    | { type: 'sleep_completed'; stepName: string }
+    | { type: 'wait_started'; stepName: string; eventType: string }
+    | { type: 'wait_completed'; stepName: string }
+    | { type: 'wait_timed_out'; stepName: string }
+    | { type: 'rollback_started' }
+    | { type: 'rollback_step_started'; stepName: string }
+    | { type: 'rollback_step_completed'; stepName: string }
+    | {
+        type: 'rollback_step_failed';
+        stepName: string;
+        error: { name: string; message: string };
+      }
+    | { type: 'rollback_attempt_started'; stepName: string; attempt: number }
+    | { type: 'rollback_attempt_completed'; stepName: string; attempt: number }
+    | {
+        type: 'rollback_attempt_failed';
+        stepName: string;
+        attempt: number;
+        retryDelayMs?: number;
+        error: { name: string; message: string };
+      }
+    | { type: 'rollback_completed' }
+    | { type: 'rollback_failed' }
+  );
+
+type WorkflowInstanceEventType = WorkflowInstanceEvent['type'];
+
+type WorkflowInstanceSubscribeOptions = {
+  cursor?: number;
+  filter?: WorkflowInstanceEventType[];
+};
+
+interface WorkflowInstanceSubscription extends Disposable {
+  next(): Promise<IteratorResult<WorkflowInstanceEvent, undefined>>;
+}
+
 declare abstract class WorkflowInstance {
   id: string;
 
@@ -179,4 +252,8 @@ declare abstract class WorkflowInstance {
     type: string;
     payload: unknown;
   }): Promise<void>;
+
+  subscribe(
+    options?: WorkflowInstanceSubscribeOptions
+  ): Promise<WorkflowInstanceSubscription>;
 }

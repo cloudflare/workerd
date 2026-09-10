@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "pipe-source-error-uaf-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "pipe-source-error-uaf-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+      )
+    ),
+  ],
+);

@@ -32,9 +32,9 @@ struct Docker {
   }
 
   struct DeviceMapping {
-    pathOnHost @0 :Text;
-    pathInContainer @1 :Text;
-    cgroupPermissions @2 :Text;
+    pathOnHost @0 :Text $Json.name("PathOnHost");
+    pathInContainer @1 :Text $Json.name("PathInContainer");
+    cgroupPermissions @2 :Text $Json.name("CgroupPermissions");
   }
 
   struct DeviceRequest {
@@ -283,6 +283,7 @@ struct Docker {
   struct ImageInspectResponse {
     id @0 :Text $Json.name("Id");
     size @1 :UInt64 $Json.name("Size");
+    parent @2 :Text $Json.name("Parent");
   }
 
   struct ExecCreateRequest {
@@ -303,6 +304,9 @@ struct Docker {
   struct ExecStartRequest {
     detach @0 :Bool = false $Json.name("Detach");
     tty @1 :Bool = false $Json.name("Tty");
+    consoleSize @2 :List(UInt16) $Json.name("ConsoleSize");
+    # Initial [height, width] of the TTY. Only meaningful when tty is true. Left unset (and
+    # therefore omitted from the JSON) when no explicit dimensions were requested.
   }
 
   struct ExecInspectResponse {

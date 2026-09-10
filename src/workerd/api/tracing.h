@@ -28,55 +28,68 @@ constexpr size_t MAX_USER_OPERATION_NAME_BYTES = 64;
 // The types allowed for tag and log values from JavaScript.
 using TagValue = kj::OneOf<bool, double, kj::String>;
 
-// Refcounted wrapper around workerd::SpanBuilder, exposing the JS Span surface: bytes-used
-// limit enforcement and JS-side TagValue forwarding. Span lifecycle (onOpen/onClose) is
-// delegated to SpanBuilder.
-class SpanImpl final: public kj::Refcounted {
+struct ExceptionData {
+  // JSG dictionaries cannot express "at least one field is required". recordException()
+  // validates the OpenTelemetry Exception union after conversion.
+  jsg::Optional<kj::OneOf<kj::String, double>> code;
+  jsg::Optional<kj::String> name;
+  jsg::Optional<kj::String> message;
+  jsg::Optional<kj::String> stack;
+
+  JSG_STRUCT(code, name, message, stack);
+};
+
+// Polymorphic state behind the JS Span wrapper. Concrete states represent recording user spans and
+// no-op spans, while sharing JS-side attribute byte-limit enforcement.
+class SpanState: public kj::Refcounted {
  public:
-  // Construct an observed span. The builder drives the observer's onOpen immediately.
-  SpanImpl(kj::Own<workerd::SpanObserver> observer, kj::ConstString operationName);
-
-  // Construct a no-op span (not recording). Used when there is no current user trace span
-  // (e.g., running outside a traced request) or when we are in a context where we cannot
-  // safely observe spans.
-  explicit SpanImpl(decltype(nullptr));
-
-  KJ_DISALLOW_COPY_AND_MOVE(SpanImpl);
-
-  ~SpanImpl() noexcept(false);
+  virtual ~SpanState() noexcept(false) = default;
+  KJ_DISALLOW_COPY_AND_MOVE(SpanState);
 
   // Submits the span and marks it as no longer traced. Idempotent; the destructor calls
   // end() as well.
-  void end();
+  virtual void end() = 0;
 
-  bool getIsTraced();
+  virtual bool getIsTraced() = 0;
 
   // Returns a SpanParent wrapping this span's observer, or a null SpanParent if the span has
   // ended or has no observer. Used by Tracing methods to push onto the AsyncContextFrame.
-  workerd::SpanParent makeSpanParent();
+  virtual workerd::SpanParent makeSpanParent() = 0;
 
   // Sets a single attribute on the span. If value is kj::none, the attribute is not set.
   void setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue);
 
+  void recordException(kj::Maybe<tracing::Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack);
+
+ protected:
+  SpanState() = default;
+  virtual bool canRecordAttributes() = 0;
+  virtual void recordAttribute(kj::String key, TagValue value) = 0;
+  virtual void recordExceptionImpl(kj::Maybe<tracing::Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) = 0;
+  virtual void recordSpanDataLimitError(
+      kj::StringPtr itemKind, kj::StringPtr name, size_t valueSize) {}
+
  private:
-  workerd::SpanBuilder builder;
-
   size_t bytesUsed = 0;
-
-  void setSpanDataLimitError(kj::StringPtr itemKind, kj::StringPtr name, size_t valueSize);
 };
 
 // JavaScript-accessible tracing span (exposed as `Span`). From the user's perspective this
-// is the only kind of span there is; internal C++ plumbing lives on SpanImpl. Kept in the
+// is the only kind of span there is; internal C++ plumbing lives on SpanState. Kept in the
 // workerd::api::user_tracing namespace (not workerd::api) to avoid collision with the
 // runtime's own workerd::Span type.
 //
-// The impl is wrapped in IoOwn when an IoContext exists, so that destruction is funneled
+// The state is wrapped in IoOwn when an IoContext exists, so that destruction is funneled
 // through the IoContext's delete queue and cannot cross threads. When no IoContext is
 // available (unusual for user tracing - typically startup paths), a plain kj::Own is used.
 class Span: public jsg::Object {
  public:
-  explicit Span(kj::OneOf<kj::Own<SpanImpl>, IoOwn<SpanImpl>> impl);
+  explicit Span(kj::OneOf<kj::Own<SpanState>, IoOwn<SpanState>> state);
 
   // Returns true if this span will be recorded. False when the current async context is not
   // being traced, or when the span has already been submitted (which happens automatically
@@ -84,9 +97,14 @@ class Span: public jsg::Object {
   // code on this.
   bool getIsTraced();
 
-  // Sets a single attribute. If `value` is undefined, the attribute is not set - useful for
-  // optional fields.
-  void setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<TagValue> value);
+  // Sets a single attribute. If `value` is undefined, the attribute is not set.
+  jsg::Ref<Span> setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<TagValue> value);
+
+  // Sets each attribute in `attributes` as if by calling setAttribute().
+  jsg::Ref<Span> setAttributes(jsg::Lock& js, jsg::Dict<jsg::Optional<TagValue>> attributes);
+
+  void recordException(
+      jsg::Lock& js, jsg::Value exception, const jsg::TypeHandler<ExceptionData>& exceptionHandler);
 
   // Ends the span and submits its content to the tracing system. Idempotent.
   void end();
@@ -95,11 +113,24 @@ class Span: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(isTraced, getIsTraced);
 
     JSG_METHOD(setAttribute);
+    JSG_METHOD(setAttributes);
+    JSG_METHOD(recordException);
     JSG_METHOD(end);
+
+    JSG_TS_OVERRIDE({
+      setAttribute(key: string, value: boolean | number | string): this;
+      setAttributes(
+        attributes: Record<string, boolean | number | string | undefined>
+      ): this;
+      recordException(exception: string
+        | { code: string | number; name?: string; message?: string; stack?: string }
+        | { code?: string | number; name: string; message?: string; stack?: string }
+        | { code?: string | number; name?: string; message: string; stack?: string }): void;
+    });
   }
 
  private:
-  kj::OneOf<kj::Own<SpanImpl>, IoOwn<SpanImpl>> impl;
+  kj::OneOf<kj::Own<SpanState>, IoOwn<SpanState>> state;
 
   friend class ::workerd::api::Tracing;
 };
@@ -142,16 +173,28 @@ class Tracing: public jsg::Object {
   // Creates a new child span, pushes it onto the AsyncContextFrame while invoking
   // callback(span, ...args), and returns the callback result without ending the span.
   // The caller must call span.end() explicitly; forgotten spans are still ended by
-  // SpanImpl's destructor when the request-owned span object is destroyed.
+  // SpanState's destructor when the request-owned span object is destroyed.
   v8::Local<v8::Value> startActiveSpan(jsg::Lock& js,
       kj::String operationName,
       v8::Local<v8::Function> callback,
       jsg::Arguments<jsg::Value> args,
       const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
 
+  // Creates a child span of the current user tracing span without making it active. The caller
+  // must call span.end() explicitly. If no IoContext is available, returns a no-op span.
+  jsg::Ref<user_tracing::Span> startSpan(jsg::Lock& js, kj::String operationName);
+
+  // Returns the span associated with the current async context, or the invocation span when no
+  // user-created span is active. Returns undefined outside an invocation or when execution is
+  // detached into the root async context.
+  jsg::Optional<jsg::Ref<user_tracing::Span>> getActiveSpan(
+      jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
+
   JSG_RESOURCE_TYPE(Tracing) {
     JSG_METHOD(enterSpan);
     JSG_METHOD(startActiveSpan);
+    JSG_METHOD(startSpan);
+    JSG_METHOD(getActiveSpan);
 
     // Use the _NAMED variant so the property ends up as `tracing.Span` rather than
     // `tracing["user_tracing::Span"]`.
@@ -172,6 +215,8 @@ class Tracing: public jsg::Object {
         callback: (span: Span, ...args: A) => T,
         ...args: A
       ): T;
+      startSpan(name: string): Span;
+      getActiveSpan(): Span | undefined;
     });
   }
 };
@@ -196,4 +241,5 @@ kj::Own<jsg::modules::ModuleBundle> getInternalTracingModuleBundle(auto featureF
 
 }  // namespace workerd::api
 
-#define EW_TRACING_ISOLATE_TYPES api::Tracing, api::user_tracing::Span
+#define EW_TRACING_ISOLATE_TYPES                                                                   \
+  api::Tracing, api::user_tracing::Span, api::user_tracing::ExceptionData

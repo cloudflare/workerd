@@ -130,6 +130,79 @@ export const test_images_transform = {
   },
 };
 
+export const test_images_response_default_headers = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .input(inputStream(['png']))
+      .output({ format: 'image/avif' });
+
+    const response = result.response();
+
+    assert.strictEqual(
+      response.headers.get('content-type'),
+      'application/json'
+    );
+    assert.strictEqual(response.headers.get('cache-control'), null);
+  },
+};
+
+export const test_images_response_custom_headers = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .input(inputStream(['png']))
+      .output({ format: 'image/avif' });
+
+    const response = result.response({
+      headers: {
+        'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+        'Cache-Tag': 'my-tag',
+      },
+    });
+
+    assert.strictEqual(
+      response.headers.get('cache-control'),
+      'public, max-age=3600, stale-while-revalidate=86400'
+    );
+    assert.strictEqual(response.headers.get('cache-tag'), 'my-tag');
+    // content-type still reflects the transformed image
+    assert.strictEqual(
+      response.headers.get('content-type'),
+      'application/json'
+    );
+  },
+};
+
+export const test_images_response_content_type_not_overridable = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .input(inputStream(['png']))
+      .output({ format: 'image/avif' });
+
+    // Attempting to set a conflicting content-type
+    // the transformed image's actual content type always wins.
+    const response = result.response({
+      headers: { 'Content-Type': 'text/plain' },
+    });
+
+    assert.strictEqual(
+      response.headers.get('content-type'),
+      'application/json'
+    );
+  },
+};
+
 export const test_images_nested_draw = {
   /**
    * @param {unknown} _
@@ -511,6 +584,23 @@ export const test_images_getImage_not_found = {
   },
 };
 
+export const test_images_signed_url = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const url = await env.images.hosted
+      .image('test-image-id')
+      .signedUrl({ variant: 'private' });
+
+    assert.equal(
+      url,
+      'https://imagedelivery.example/test-image-id/private?sig=mock-signature'
+    );
+  },
+};
+
 // UPLOAD
 export const test_images_upload_with_options = {
   /**
@@ -645,6 +735,27 @@ export const test_images_list_with_options = {
   },
 };
 
+export const test_images_list_metadata_filter_forwards_correctly = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.list({
+      filter: {
+        metadata: {
+          status: 'active',
+          priority: { gte: 1, lte: 3 },
+          'config.region': 'eu-west',
+        },
+      },
+    });
+
+    assert.equal(result.images.length, 1);
+    assert.equal(result.images[0].id, 'image-1');
+  },
+};
+
 // UPLOAD with base64 encoding
 export const test_images_upload_base64_stream = {
   /**
@@ -685,5 +796,307 @@ export const test_images_upload_base64_arraybuffer = {
 
     assert.equal(metadata.filename, 'base64-buffer-test.jpg');
     assert.notEqual(metadata.id, null);
+  },
+};
+
+export const test_images_text_only = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .text('Hello World', {
+        font: { url: 'https://example.com/font.ttf' },
+        size: 48,
+        color: '#FF0000',
+      })
+      .output({ format: 'image/png' });
+
+    const body = await result.response().json();
+    assert.deepStrictEqual(body.text_input, {
+      text: 'Hello World',
+      font: { url: 'https://example.com/font.ttf' },
+      size: 48,
+      color: '#FF0000',
+    });
+    assert.equal(body.output_format, 'image/png');
+  },
+};
+
+export const test_images_text_minimal_options = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .text('Minimal Text', {
+        font: { url: 'https://example.com/font.ttf' },
+      })
+      .output({ format: 'image/png' });
+
+    const body = await result.response().json();
+    // size and color should be omitted when not provided
+    assert.deepStrictEqual(body.text_input, {
+      text: 'Minimal Text',
+      font: { url: 'https://example.com/font.ttf' },
+    });
+    assert.equal(body.output_format, 'image/png');
+  },
+};
+
+export const test_images_text_with_transform = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .text('Rotated Text', {
+        font: { url: 'https://example.com/font.ttf' },
+        size: 64,
+        color: 'blue',
+      })
+      .transform({ rotate: 90 })
+      .output({ format: 'image/png' });
+
+    const body = await result.response().json();
+    assert.deepStrictEqual(body.text_input, {
+      text: 'Rotated Text',
+      font: { url: 'https://example.com/font.ttf' },
+      size: 64,
+      color: 'blue',
+    });
+    assert.deepStrictEqual(body.transforms, [{ rotate: 90, imageIndex: 0 }]);
+  },
+};
+
+export const test_images_draw_text_on_image = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .input(inputStream(['png']))
+      .draw(
+        env.images.text('Overlay', {
+          font: { url: 'https://example.com/font.ttf' },
+          size: 72,
+          color: 'red',
+        }),
+        { top: 20, left: 10, opacity: 0.9 }
+      )
+      .output({ format: 'image/png' });
+
+    const body = await result.response().json();
+    assert.equal(body.image, 'png');
+    assert.deepStrictEqual(body.draw_text, [
+      {
+        text: 'Overlay',
+        font: { url: 'https://example.com/font.ttf' },
+        size: 72,
+        color: 'red',
+      },
+    ]);
+  },
+};
+
+export const test_images_draw_image_on_text = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .text('Background Text', {
+        font: { url: 'https://example.com/font.ttf' },
+        size: 100,
+        color: '#0000FF',
+      })
+      .draw(env.images.input(inputStream(['logo'])), {
+        top: 10,
+        left: 10,
+      })
+      .output({ format: 'image/png' });
+
+    const body = await result.response().json();
+    assert.deepStrictEqual(body.text_input, {
+      text: 'Background Text',
+      font: { url: 'https://example.com/font.ttf' },
+      size: 100,
+      color: '#0000FF',
+    });
+    assert.deepStrictEqual(body.draw_image, ['logo']);
+  },
+};
+
+export const test_images_draw_text_on_text = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .text('Background', {
+        font: { url: 'https://example.com/bg-font.ttf' },
+        size: 100,
+        color: 'blue',
+      })
+      .draw(
+        env.images.text('Foreground', {
+          font: { url: 'https://example.com/fg-font.ttf' },
+          size: 50,
+          color: 'red',
+        }),
+        { top: 50, left: 50 }
+      )
+      .output({ format: 'image/png' });
+
+    const body = await result.response().json();
+    assert.deepStrictEqual(body.text_input, {
+      text: 'Background',
+      font: { url: 'https://example.com/bg-font.ttf' },
+      size: 100,
+      color: 'blue',
+    });
+    assert.deepStrictEqual(body.draw_text, [
+      {
+        text: 'Foreground',
+        font: { url: 'https://example.com/fg-font.ttf' },
+        size: 50,
+        color: 'red',
+      },
+    ]);
+  },
+};
+
+export const test_images_mixed_overlays = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images
+      .input(inputStream(['product']))
+      .draw(inputStream(['logo']))
+      .draw(
+        env.images.text('SALE!', {
+          font: { url: 'https://example.com/bold.ttf' },
+          size: 72,
+          color: '#FF0000',
+        })
+      )
+      .draw(
+        env.images.text('50% OFF', {
+          font: { url: 'https://example.com/bold.ttf' },
+          size: 48,
+          color: '#FFD700',
+        })
+      )
+      .output({ format: 'image/jpeg' });
+
+    const body = await result.response().json();
+    assert.equal(body.image, 'product');
+    assert.deepStrictEqual(body.draw_image, ['logo']);
+    assert.deepStrictEqual(body.draw_text, [
+      {
+        text: 'SALE!',
+        font: { url: 'https://example.com/bold.ttf' },
+        size: 72,
+        color: '#FF0000',
+      },
+      {
+        text: '50% OFF',
+        font: { url: 'https://example.com/bold.ttf' },
+        size: 48,
+        color: '#FFD700',
+      },
+    ]);
+  },
+};
+
+// CREATE DIRECT UPLOAD
+export const test_images_create_direct_upload_default = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.createDirectUpload();
+
+    assert.notEqual(result.id, null);
+    assert.equal(result.uploadURL.includes(result.id), true);
+  },
+};
+
+export const test_images_create_direct_upload_with_options = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.createDirectUpload({
+      id: 'custom-upload-id',
+      requireSignedURLs: true,
+      metadata: { userId: 'abc123' },
+      creator: 'direct-upload-creator',
+      expiresIn: 600,
+    });
+
+    assert.equal(result.id, 'custom-upload-id');
+    assert.equal(result.uploadURL.includes('custom-upload-id'), true);
+  },
+};
+
+export const test_images_input_accepts_arraybuffer = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const buffer = new TextEncoder().encode('test image data').buffer;
+    const result = await env.images
+      .input(buffer)
+      .output({ format: 'image/avif' });
+
+    const response = await result.response();
+    assert.equal(response.status, 200);
+  },
+};
+
+export const test_images_input_accepts_uint8array = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const uint8 = new TextEncoder().encode('test image data');
+    const result = await env.images
+      .input(uint8)
+      .output({ format: 'image/avif' });
+
+    const response = await result.response();
+    assert.equal(response.status, 200);
+  },
+};
+
+export const test_images_draw_accepts_arraybuffer = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const imageBuffer = new TextEncoder().encode('base image').buffer;
+    const overlayBuffer = new TextEncoder().encode('overlay image').buffer;
+
+    const result = await env.images
+      .input(imageBuffer)
+      .draw(env.images.input(overlayBuffer))
+      .output({ format: 'image/png' });
+
+    const response = await result.response();
+    assert.equal(response.status, 200);
   },
 };

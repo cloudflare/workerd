@@ -1,0 +1,33 @@
+using Workerd = import "/workerd/workerd.capnp";
+using TransformModules = import "transform-modules.capnp";
+
+# Runs the transform streams suite against the TypeScript implementation,
+# with byte-for-byte the same modules as transform-cpp.wd-test. The flags
+# pinned there are deliberately absent: the TypeScript implementation
+# hard-codes the modern behaviors, and the `@` / `@all-compat-flags`
+# variants verify that indifference with the flags all off and all on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-transform-ts",
+      worker = (
+        modules = TransformModules.modules,
+        bindings = [
+          ( name = "SELF", service = "streams-transform-ts" ),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "expose_draining_reader",
+          "experimental",
+          "enable_weak_ref",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+  # For gc.js (added with the expansion pass).
+  v8Flags = ["--expose-gc"],
+);

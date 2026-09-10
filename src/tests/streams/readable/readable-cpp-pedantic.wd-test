@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+using ReadableModules = import "readable-modules.capnp";
+
+# The main C++ cell plus the dateless opt-in pedantic_wpt flag. As with
+# the writable and transform suites, the flag's finish-coordination sites
+# produce no observable deltas on this suite's probed surface, so the
+# shared modules run unbranched (which-impl exports pedanticWpt should a
+# delta ever appear).
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-readable-cpp-pedantic",
+      worker = (
+        modules = ReadableModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "fixup-transform-stream-backpressure",
+          "capture_async_api_throws",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+          "writable_stream_spec_compliant_writer",
+          "pedantic_wpt",
+          "enable_weak_ref",
+        ],
+        bindings = [
+          ( name = "SELF", service = "streams-readable-cpp-pedantic" ),
+        ],
+      )
+    ),
+  ],
+  # For gc.js.
+  v8Flags = ["--expose-gc"],
+);

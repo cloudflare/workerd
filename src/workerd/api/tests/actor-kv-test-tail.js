@@ -20,6 +20,16 @@ export const test = {
         objectId:
           'aa299662980ce671dbcb09a5d7ab26ab30e45465bcd12f263f2bdd7d5edd804a',
       },
+      {
+        name: 'fetch',
+        closed: true,
+        'network.protocol.name': 'http',
+        'network.protocol.version': 'HTTP/1.1',
+        'http.request.method': 'GET',
+        'url.full': 'http://test.example/kv-test',
+        'http.response.status_code': 200n,
+        'http.response.body.size': 34n,
+      },
       { name: 'durable_object_storage_put', closed: true },
       { name: 'durable_object_storage_put', closed: true },
       { name: 'durable_object_storage_get', closed: true },

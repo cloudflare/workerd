@@ -46,8 +46,8 @@ wd_cc_library(
     deps = [
         ":lib.rs@cxx",
         ":v8.rs@cxx",
+        "//src/rust/cxx/kj-rs",
         "//src/workerd/jsg:jsg-core",
-        "@workerd-cxx//kj-rs",
         "@workerd-v8//:v8",
     ],
 )

@@ -5,10 +5,10 @@
 //! GC (garbage collection) tests for Rust resources.
 //!
 //! These tests verify that Rust resources are properly cleaned up when:
-//! 1. All Rust `Ref` handles are dropped and no JavaScript wrapper exists (immediate cleanup)
-//! 2. All Rust `Ref` handles are dropped and V8 garbage collects the JS wrapper
+//! 1. All Rust `Rc` handles are dropped and no JavaScript wrapper exists (immediate cleanup)
+//! 2. All Rust `Rc` handles are dropped and V8 garbage collects the JS wrapper
 //!
-//! Note: Circular references through `Ref<T>` are NOT collected, matching the behavior
+//! Note: Circular references through `Rc<T>` are NOT collected, matching the behavior
 //! of C++ `jsg::Rc<T>` which uses `kj::Own<T>` cross-references.
 
 use std::cell::Cell;
@@ -60,10 +60,10 @@ impl Drop for ParentResource {
 #[jsg_resource]
 impl ParentResource {}
 
-/// Tests that resources are dropped immediately when all Rust Refs are dropped
+/// Tests that resources are dropped immediately when all Rust `Rc`s are dropped
 /// and no JS wrapper exists.
 ///
-/// In the Wrappable model, dropping the last Ref decrements the kj refcount to 0,
+/// In the Wrappable model, dropping the last `Rc` decrements the kj refcount to 0,
 /// which immediately destroys the Wrappable (and thus the Rust resource).
 /// No GC is needed.
 #[test]
@@ -86,7 +86,7 @@ fn supports_gc_via_ref_drop() {
 /// Tests that resources are dropped via V8 GC when JS wrapper is collected.
 ///
 /// When a resource is wrapped for JavaScript:
-/// 1. Dropping all Rust `Ref` handles calls `removeStrongRef()` but the `CppgcShim`
+/// 1. Dropping all Rust `Rc` handles calls `removeStrongRef()` but the `CppgcShim`
 ///    still holds a `kj::Own` keeping the object alive
 /// 2. V8 GC collects the wrapper, `CppgcShim` is destroyed, `kj::Own` is dropped
 /// 3. kj refcount reaches 0, Wrappable is destroyed
@@ -172,7 +172,7 @@ fn child_traced_ref_kept_alive_by_parent() {
         // by not storing it. The wrapper is now only held weakly by cppgc.
         let _ = parent.clone().to_js(lock);
 
-        // Child not collected because parent still holds a Ref (which holds a kj::Own)
+        // Child not collected because parent still holds an `Rc` (which holds a kj::Own)
         std::mem::drop(child);
         crate::Harness::request_gc(lock);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
@@ -420,7 +420,7 @@ fn weak_ref_upgrade_with_wrapped_resource_prevents_gc() {
         assert_eq!(upgraded.name, "persistent");
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
 
-        // The upgraded Ref keeps the resource alive
+        // The upgraded `Rc` keeps the resource alive
         std::mem::drop(upgraded);
         Ok(())
     });
@@ -490,10 +490,10 @@ fn weak_ref_trace_does_not_prevent_gc() {
 }
 
 // =============================================================================
-// Ref tests
+// Rc tests
 // =============================================================================
 
-/// Tests that `Ref::clone()` keeps the resource alive after the original is dropped.
+/// Tests that `Rc::clone()` keeps the resource alive after the original is dropped.
 #[test]
 fn ref_clone_keeps_resource_alive() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
@@ -521,7 +521,7 @@ fn ref_clone_keeps_resource_alive() {
     });
 }
 
-/// Tests that dropping multiple Refs only triggers destruction on the last one.
+/// Tests that dropping multiple `Rc`s only triggers destruction on the last one.
 #[test]
 fn multiple_ref_drops_only_last_triggers_destruction() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
@@ -550,7 +550,7 @@ fn multiple_ref_drops_only_last_triggers_destruction() {
     });
 }
 
-/// Tests that `Ref::deref()` returns the correct resource data.
+/// Tests that `Rc::deref()` returns the correct resource data.
 #[test]
 fn ref_deref_returns_correct_resource_data() {
     let harness = crate::Harness::new();
@@ -574,9 +574,9 @@ fn ref_deref_returns_correct_resource_data() {
 // unwrap / FromJS tests
 // =============================================================================
 
-/// Tests that `FromJS for Ref<R>` creates a strong reference from a JS wrapper.
+/// Tests that `FromJS for Rc<R>` creates a strong reference from a JS wrapper.
 ///
-/// The returned `Ref<R>` must keep the resource alive even after dropping the original.
+/// The returned `Rc<R>` must keep the resource alive even after dropping the original.
 #[test]
 fn from_js_creates_strong_reference_from_js_wrapper() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
@@ -596,7 +596,7 @@ fn from_js_creates_strong_reference_from_js_wrapper() {
                 .expect("FromJS should succeed for a wrapped resource");
         assert_eq!(new_ref.name, "unwrap-me");
 
-        // Drop the original Ref — the unwrapped ref should keep it alive
+        // Drop the original Rc — the unwrapped ref should keep it alive
         std::mem::drop(resource);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
 
@@ -729,7 +729,7 @@ fn resource_data_survives_gc_via_js_global() {
 
 /// Tests parent-child relationships where parent is only held by JS.
 ///
-/// When the parent is wrapped and held by a JS global, its `Ref<SimpleResource>` child
+/// When the parent is wrapped and held by a JS global, its `Rc<SimpleResource>` child
 /// should be traced during GC and kept alive even without any Rust strong refs.
 #[test]
 fn parent_ref_keeps_child_alive_through_gc() {
@@ -752,7 +752,7 @@ fn parent_ref_keeps_child_alive_through_gc() {
         std::mem::drop(child);
         std::mem::drop(parent);
 
-        // GC should NOT collect the parent (held by global) or child (held by parent's Ref)
+        // GC should NOT collect the parent (held by global) or child (held by parent's Rc)
         crate::Harness::request_gc(lock);
         assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
@@ -770,7 +770,7 @@ fn parent_ref_keeps_child_alive_through_gc() {
 
 /// Tests that dropping all strong refs correctly invalidates ALL weak refs.
 ///
-/// Creates multiple `WeakRef`s from different `Ref`s, verifies they all see death at the same time.
+/// Creates multiple `Weak`s from different `Rc`s, verifies they all see death at the same time.
 #[test]
 fn instance_drop_invalidates_all_weak_refs() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
@@ -811,7 +811,7 @@ fn instance_drop_invalidates_all_weak_refs() {
 }
 
 // =============================================================================
-// Nullable<Ref<T>> tracing tests
+// Nullable<Rc<T>> tracing tests
 // =============================================================================
 
 /// Counter to track how many `NullableParent` instances have been dropped.
@@ -831,7 +831,7 @@ impl Drop for NullableParent {
 #[jsg_resource]
 impl NullableParent {}
 
-/// Tests that `Nullable<Ref<T>>` with `Nullable::Some` keeps the child alive through GC tracing.
+/// Tests that `Nullable<Rc<T>>` with `Nullable::Some` keeps the child alive through GC tracing.
 #[test]
 fn nullable_ref_some_keeps_child_alive_through_gc() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
@@ -868,7 +868,7 @@ fn nullable_ref_some_keeps_child_alive_through_gc() {
     });
 }
 
-/// Tests that `Nullable<Ref<T>>` with `Nullable::Null` doesn't cause issues during GC.
+/// Tests that `Nullable<Rc<T>>` with `Nullable::Null` doesn't cause issues during GC.
 #[test]
 fn nullable_ref_null_does_not_crash_during_gc() {
     NULLABLE_PARENT_DROPS.store(0, Ordering::SeqCst);
@@ -896,7 +896,7 @@ fn nullable_ref_null_does_not_crash_during_gc() {
     });
 }
 
-/// Tests that `Nullable<Ref<T>>` with `Nullable::Undefined` doesn't cause issues during GC.
+/// Tests that `Nullable<Rc<T>>` with `Nullable::Undefined` doesn't cause issues during GC.
 #[test]
 fn nullable_ref_undefined_does_not_crash_during_gc() {
     NULLABLE_PARENT_DROPS.store(0, Ordering::SeqCst);
@@ -925,7 +925,7 @@ fn nullable_ref_undefined_does_not_crash_during_gc() {
 }
 
 // ---------------------------------------------------------------------------
-// Rc<NativeState> shared ownership — native object outlives Ref but is
+// Rc<NativeState> shared ownership — native object outlives Rc but is
 // dropped when V8 GC collects the JS wrapper.
 // ---------------------------------------------------------------------------
 
@@ -959,13 +959,13 @@ impl NativeOwnerResource {
 
 /// Regression test for the `strong` flag bug in `wrappable_remove_strong_ref`.
 ///
-/// When a parent resource (with a JS wrapper) holds a `Ref<Child>`, GC tracing
+/// When a parent resource (with a JS wrapper) holds a `Rc<Child>`, GC tracing
 /// transitions the child's ref from strong→weak via `visitRef`, which calls
 /// `removeStrongRef()` once.
 ///
 /// **Bug**: `wrappable_remove_strong_ref` always passed `strong=true` to
 /// `maybeDeferDestruction`, so when the parent was later collected and the
-/// child `Ref` dropped, `~RefToDelete` called `removeStrongRef()` a second
+/// child `Rc` dropped, `~RefToDelete` called `removeStrongRef()` a second
 /// time — underflowing the strong refcount.
 ///
 /// This test keeps a direct Rust ref to the child alive so we can observe

@@ -1,0 +1,18 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The iocontext suite runs the same test modules under two configs:
+# iocontext-cpp against the C++ implementation, iocontext-ts against the
+# TypeScript implementation.
+
+iocontext_suite_srcs = glob(["*.js"]) + ["iocontext-modules.capnp"]
+
+wd_test(
+    src = "iocontext-cpp.wd-test",
+    data = iocontext_suite_srcs,
+)
+
+wd_test(
+    src = "iocontext-ts.wd-test",
+    args = ["--experimental"],
+    data = iocontext_suite_srcs,
+)

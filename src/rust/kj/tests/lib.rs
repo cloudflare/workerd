@@ -43,6 +43,17 @@ pub mod ffi {
             id: &HttpHeaderId,
         ) -> KjMaybe<&'a [u8]>;
 
+        /// Look up a header value by name via `HeadersRef::get_by_name`, returning the value if
+        /// present. This exercises the C++ -> Rust -> C++ round-trip for name-based lookup.
+        unsafe fn get_header_value_via_name<'a>(
+            headers: &'a HttpHeaders,
+            name: &str,
+        ) -> KjMaybe<&'a [u8]>;
+
+        /// Clear all headers via the `clear_headers` FFI shim. This exercises the
+        /// C++ -> Rust -> C++ round-trip for clearing headers.
+        fn clear_headers_via_rust(headers: Pin<&mut HttpHeaders>);
+
         /// Receive an array of HttpHeaderIdpointers, convert to &[HttpHeaderIdRef] via
         /// from_ptr_slice, look up each header, and assert all are present.
         /// This exercises passing a kj::ArrayPtr<const kj::HttpHeaderId> into Rust.
@@ -103,6 +114,14 @@ fn get_header_value_via_id<'a>(
 ) -> KjMaybe<&'a [u8]> {
     // SAFETY: headers is a valid HttpHeaders ref and id is a valid HttpHeaderId from C++.
     unsafe { kj::http::ffi::get_header_by_id(headers, id) }
+}
+
+fn get_header_value_via_name<'a>(headers: &'a ffi::HttpHeaders, name: &str) -> KjMaybe<&'a [u8]> {
+    HeadersRef::from(headers).get_by_name(name).into()
+}
+
+fn clear_headers_via_rust(headers: Pin<&mut ffi::HttpHeaders>) {
+    kj::http::ffi::clear_headers(headers);
 }
 
 /// # Safety

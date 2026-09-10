@@ -4,8 +4,7 @@
 
 #pragma once
 
-#include "workerd/api/pyodide/pyodide.h"
-
+#include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
@@ -333,7 +332,6 @@ class WorkerdApi final: public Worker::Api {
 
   // Create the ModuleRegistry instance for the worker.
   static kj::Arc<jsg::modules::ModuleRegistry> newWorkerdModuleRegistry(
-      const jsg::ResolveObserver& resolveObserver,
       kj::Maybe<const Worker::Script::ModulesSource&> source,
       const CompatibilityFlags::Reader& featureFlags,
       const PythonConfig& pythonConfig,

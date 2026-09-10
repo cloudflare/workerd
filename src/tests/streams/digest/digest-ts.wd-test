@@ -1,0 +1,29 @@
+using Workerd = import "/workerd/workerd.capnp";
+using DigestModules = import "digest-modules.capnp";
+
+# Runs the digest streams suite against the TypeScript implementation, with
+# byte-for-byte the same modules as digest-cpp.wd-test.
+#
+# The flags pinned in digest-cpp.wd-test are deliberately absent: the
+# TypeScript implementation hard-codes the modern behaviors, and the `@` /
+# `@all-compat-flags` variants verify that indifference with the flags all
+# off and all on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-digest-ts",
+      worker = (
+        modules = DigestModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+  v8Flags = ["--expose-gc"],
+);

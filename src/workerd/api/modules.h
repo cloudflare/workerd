@@ -14,6 +14,7 @@
 #include <workerd/api/tracing.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/workers-module.h>
+#include <workerd/api/wrapped-binding.h>
 #include <workerd/jsg/modules-new.h>
 
 #include <cloudflare/cloudflare.capnp.h>
@@ -50,8 +51,9 @@ class EnvModule final: public jsg::Object {
 };
 
 template <class Registry>
-void registerModules(Registry& registry, auto featureFlags) {
-  node::registerNodeJsCompatModules(registry, featureFlags);
+void registerModules(
+    Registry& registry, auto featureFlags, const node::ModuleSource* nodeModuleSource = nullptr) {
+  node::registerNodeJsCompatModules(registry, featureFlags, nodeModuleSource);
   registerUnsafeModules(registry, featureFlags);
   if (featureFlags.getRttiApi()) {
     registerRTTIModule(registry);
@@ -65,6 +67,7 @@ void registerModules(Registry& registry, auto featureFlags) {
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
   registerWorkersModule(registry, featureFlags);
   registerTracingModule(registry, featureFlags);
+  registerWrappedBindingModule(registry, featureFlags);
   registry.template addBuiltinModule<EnvModule>(
       "cloudflare-internal:env", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   registry.template addBuiltinModule<FileSystemModule>(
@@ -72,9 +75,12 @@ void registerModules(Registry& registry, auto featureFlags) {
 }
 
 template <class TypeWrapper>
-void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto featureFlags) {
-  builder.add(node::getInternalNodeJsCompatModuleBundle<TypeWrapper>(featureFlags));
-  builder.add(node::getExternalNodeJsCompatModuleBundle(featureFlags));
+void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder,
+    auto featureFlags,
+    const node::ModuleSource* nodeModuleSource = nullptr) {
+  builder.add(
+      node::getInternalNodeJsCompatModuleBundle<TypeWrapper>(featureFlags, nodeModuleSource));
+  builder.add(node::getExternalNodeJsCompatModuleBundle(featureFlags, nodeModuleSource));
   builder.add(getInternalSocketModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalBase64ModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalMessageChannelModuleBundle<TypeWrapper>(featureFlags));
@@ -82,9 +88,13 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
 
   builder.add(getInternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalTracingModuleBundle<TypeWrapper>(featureFlags));
+  builder.add(getInternalWrappedBindingModuleBundle<TypeWrapper>(featureFlags));
   if (featureFlags.getUnsafeModule()) {
     builder.add(getExternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
   }
+#ifdef WORKERD_FUZZILLI
+  builder.add(getExternalFuzzilliModuleBundle<TypeWrapper>(featureFlags));
+#endif
 
   if (featureFlags.getRttiApi()) {
     builder.add(getExternalRttiModuleBundle<TypeWrapper>(featureFlags));

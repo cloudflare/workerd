@@ -349,65 +349,65 @@ KJ_TEST("runTunnelingExceptions") {
 }
 
 KJ_TEST("isTunneledException") {
-  TunneledContext context;
+  auto context = kj::rc<TunneledContext>();
   try {
-    context.throwTunneledTypeError();
+    context->throwTunneledTypeError();
     KJ_UNREACHABLE;
   } catch (kj::Exception& e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
   try {
-    context.throwTunneledTypeErrorWithoutMessage();
+    context->throwTunneledTypeErrorWithoutMessage();
     KJ_UNREACHABLE;
   } catch (kj::Exception& e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
   try {
-    context.throwTunneledTypeErrorLateColon();
+    context->throwTunneledTypeErrorLateColon();
     KJ_UNREACHABLE;
   } catch (kj::Exception& e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
   try {
-    context.throwTunneledTypeErrorWithExpectation();
+    context->throwTunneledTypeErrorWithExpectation();
     KJ_UNREACHABLE;
   } catch (kj::Exception& e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
   try {
-    context.throwTunneledOperationError();
+    context->throwTunneledOperationError();
     KJ_UNREACHABLE;
   } catch (kj::Exception& e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
   try {
-    context.throwTunneledOperationErrorLateColon();
+    context->throwTunneledOperationErrorLateColon();
     KJ_UNREACHABLE;
   } catch (kj::Exception& e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
   try {
-    context.throwTunneledOperationErrorWithExpectation();
+    context->throwTunneledOperationErrorWithExpectation();
     KJ_UNREACHABLE;
   } catch (kj::Exception& e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
 
   try {
-    context.throwBadTunneledError();
+    context->throwBadTunneledError();
     KJ_UNREACHABLE;
   } catch (kj::Exception& e) {
     KJ_EXPECT(!isTunneledException(e.getDescription()), e.getDescription());
   }
   try {
-    context.throwBadTunneledErrorWithExpectation();
+    context->throwBadTunneledErrorWithExpectation();
     KJ_UNREACHABLE;
   } catch (kj::Exception& e) {
     KJ_EXPECT(!isTunneledException(e.getDescription()), e.getDescription());
   }
 
   try {
-    context.throwRemoteCpuExceededError();
+    context->throwRemoteCpuExceededError();
     KJ_UNREACHABLE;
   } catch (kj::Exception& e) {
     KJ_EXPECT(!isTunneledException(e.getDescription()), e.getDescription());

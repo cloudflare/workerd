@@ -9,6 +9,7 @@
 
 #include <capnp/compat/byte-stream.h>
 #include <kj/async-io.h>
+#include <kj/mutex.h>
 
 namespace workerd {
 
@@ -30,14 +31,24 @@ class ExternalPusherImpl: public rpc::JsValue::ExternalPusher::Server, public kj
   // Box which holds the reason why an AbortSignal was aborted. May be either:
   // - A serialized V8 value if the signal was aborted from JavaScript.
   // - A KJ exception if the connection from the trigger was lost.
+  // A pending abort reason received (or synthesized on disconnect) for an AbortSignal that
+  // was deserialized from RPC. A null OneOf means no abort has arrived yet.
   using PendingAbortReason = kj::OneOf<kj::Array<byte>, kj::Exception>;
+
+  // The box holding a PendingAbortReason. It is written at most once, from the receiving
+  // IoContext's thread, but may be read — under the mutex — from any thread: an AbortSignal
+  // that has crossed request boundaries polls it to answer getAborted()/getReason()
+  // synchronously everywhere.
+  struct PendingAbortReasonBox: public kj::AtomicRefcounted {
+    kj::MutexGuarded<PendingAbortReason> value;
+  };
 
   struct AbortSignal {
     // Resolves when `reason` has been filled in.
     kj::Promise<void> signal;
 
-    // The abort reason box, will be uninitialized until `signal` resolves.
-    kj::Rc<PendingAbortReason> reason;
+    // The abort reason box, unfilled until `signal` resolves.
+    kj::Arc<PendingAbortReasonBox> reason;
   };
 
   AbortSignal unwrapAbortSignal(ExternalPusher::AbortSignal::Client cap);
@@ -60,7 +71,7 @@ class ExternalPusherImpl: public rpc::JsValue::ExternalPusher::Server, public kj
       ExternalPusher::InputStream::Client cap);
 
   kj::Promise<void> unwrapAbortSignalImpl(
-      ExternalPusher::AbortSignal::Client cap, kj::Rc<PendingAbortReason> pendingReason);
+      ExternalPusher::AbortSignal::Client cap, kj::Arc<PendingAbortReasonBox> pendingReason);
 
   class InputStreamImpl;
   class AbortSignalImpl;

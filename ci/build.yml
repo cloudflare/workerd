@@ -2,7 +2,7 @@ variables:
   GIT_DEPTH: 1000
   FLAVOR: trixie
 
-stages: [build]
+stages: [build, downstream]
 
 .cfsetup-input-template: &cfsetup-input-template
   stage: "build"
@@ -50,13 +50,21 @@ include:
       jobPrefix: "linux-x64-lint"
       CFSETUP_TARGET: "ci-bazel-x64-lint"
 
-  - component: $CI_SERVER_FQDN/cloudflare/ci/ai/opencode@mschwarzl/APPSEC-2912
+  - local: templates/v8-nightly.yml
+    inputs:
+      pipeline-rule: $CI_COMMIT_BRANCH != null && $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_TASK == "v8-nightly"
+
+  - component: $CI_SERVER_FQDN/cloudflare/ci/ai/opencode@canary
     inputs:
       stage: build
       runOnMR: true
       runOnBranches: false
       USE_COORDINATOR: true
-      OPENCODE_MODEL: "cloudflare-ai-gateway/anthropic/claude-opus-4-7"
+      OPENCODE_MODEL: "cloudflare-ai-gateway/anthropic/claude-opus-5"
+      # Auto reviewer assignment is off for now due to developers getting assigned to an excessive
+      # amount of PRs
+      # Docs: https://backstage.cfdata.org/docs/default/component/ai-code-reviewer/reviewer-assignment/
+      ASSIGN_REVIEWERS: false
 
   - component: $CI_SERVER_FQDN/cloudflare/ci/python/run@~latest
     inputs:
@@ -66,7 +74,6 @@ include:
       runOnBranches: "^$"
       SCRIPT: |
         import os
-        import runpy
         import subprocess
         import sys
 
@@ -77,7 +84,9 @@ include:
             "requests",
         ])
 
-        sys.argv = [
+        subprocess.check_call([
+            sys.executable,
+            "-u",
             "./tools/cross/internal_build.py",
             os.environ["CI_MERGE_REQUEST_IID"],
             os.environ["CI_COMMIT_SHA"],
@@ -87,9 +96,7 @@ include:
             os.environ["CI_URL"],
             os.environ["CI_CLIENT_ID"],
             os.environ["CI_CLIENT_SECRET"],
-        ]
-
-        runpy.run_path("./tools/cross/internal_build.py", run_name="__main__")
+        ])
 
 linux-x64-build:
   <<: *job-template
@@ -106,3 +113,16 @@ linux-x64-lint-build:
 opencode-review:
   image: docker-registry.cfdata.org/branches/ci/ai/opencode-reviewer/mschwarzl/appsec-2912:392-9648062@sha256:18c838ff972e62facd24e4f25ea7b1fe5b701718d7d28aae5f3c0d09a5c4d5a8
   allow_failure: true
+
+trigger-edgeworker-v8-nightly:
+  stage: downstream
+  needs:
+    - v8-nightly-build
+  variables:
+    SCHEDULE_TASK: v8-nightly
+  trigger:
+    project: cloudflare/ew/edgeworker
+    branch: master
+    strategy: depend
+  rules:
+    - if: $CI_COMMIT_BRANCH != null && $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_TASK == "v8-nightly"

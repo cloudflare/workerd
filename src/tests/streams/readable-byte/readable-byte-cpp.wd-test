@@ -1,0 +1,48 @@
+using Workerd = import "/workerd/workerd.capnp";
+using ReadableByteModules = import "readable-byte-modules.capnp";
+
+# Runs the readable-byte suite against the C++ streams implementation.
+#
+# Pinned compatibility flags (the date axis belongs to the wd_test
+# variants; every date-gated behavior observed here is pinned by name):
+# - nodejs_compat: node:assert.
+# - streams_enable_constructors: new ReadableStream({type:'bytes'}) (the
+#   suite's subject); unflagged side guarded by the legacy cell.
+# - streams_byob_reader_detaches_buffer: read(view) transfers the
+#   caller's buffer (spec); pre-flag window guarded by the nodetach
+#   legacy cell.
+# - internal_stream_byob_return_view: close-time BYOB reads resolve with
+#   an empty view over the supplied buffer rather than undefined.
+# - transformstream_enable_standard_constructor +
+#   fixup-transform-stream-backpressure: the respond-pump tests drive
+#   byte sources through JS TransformStreams.
+# - capture_async_api_throws, workers_api_getters_setters_on_prototype,
+#   set_tostring_tag, writable_stream_spec_compliant_writer: as in the
+#   readable suite (accessor placement, locked pipeTo shape, writer
+#   behavior in pump interactions).
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-readable-byte-cpp",
+      worker = (
+        modules = ReadableByteModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "streams_byob_reader_detaches_buffer",
+          "internal_stream_byob_return_view",
+          "transformstream_enable_standard_constructor",
+          "fixup-transform-stream-backpressure",
+          "capture_async_api_throws",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+          "writable_stream_spec_compliant_writer",
+        ],
+        bindings = [
+          ( name = "SELF", service = "streams-readable-byte-cpp" ),
+        ],
+      )
+    ),
+  ],
+  # For gc.js.
+  v8Flags = ["--expose-gc"],
+);

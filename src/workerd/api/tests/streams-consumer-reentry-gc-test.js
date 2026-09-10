@@ -43,6 +43,7 @@ export default {
     reader.read().catch(() => {});
 
     let armed = false;
+    let thenFired = false;
     const noopThen = function (resolve, reject) {
       /* never settle */
     };
@@ -59,6 +60,7 @@ export default {
       get() {
         if (armed) {
           armed = false;
+          thenFired = true;
           try {
             controller.error(new Error('boom'));
           } catch {
@@ -79,7 +81,15 @@ export default {
     armed = false;
     delete Object.prototype.then;
 
-    // If we get here without SIGSEGV, the fix works.
-    strictEqual(true, true, 'survived re-entrant error during close drain');
+    // Reaching here without SIGSEGV means the extract-to-local and selfRef
+    // guards hold.
+    //
+    // The getter must also never have run at all. jsg's opaque wrappers are
+    // given a null prototype (Wrappable::attachOpaqueWrapper), so the
+    // Get(resolution, "then") thenable check cannot reach Object.prototype and
+    // therefore cannot reach a user getter. That hardening, not the guards, is
+    // the primary defence; assert it directly so that losing it is caught here
+    // rather than silently falling back to the guards.
+    strictEqual(thenFired, false, 'thenable getter must not have fired');
   },
 };

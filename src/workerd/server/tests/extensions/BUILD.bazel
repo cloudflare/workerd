@@ -7,3 +7,12 @@ wd_test(
         "*.capnp",
     ]),
 )
+
+wd_test(
+    src = "extensions-nmr-test.wd-test",
+    args = ["--experimental"],
+    data = glob([
+        "*.js",
+        "*.capnp",
+    ]),
+)
