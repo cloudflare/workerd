@@ -26,7 +26,7 @@
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 
 import inner from 'cloudflare-internal:sockets';
-import { tcpPorts } from 'cloudflare-internal:http';
+import { tcpPorts, type PortTable } from 'cloudflare-internal:http';
 
 import {
   AbortError,
@@ -103,37 +103,40 @@ export const kReinitializeHandle = Symbol('kReinitializeHandle');
 const kSocketInfo = Symbol('kSocketInfo');
 
 // The local address of a Socket, either adopted from a BoundSocket or autobound
-// on connect. kBoundReserved marks an entry held in the port table that must be
-// released on destroy.
+// on connect. kBoundTable is the port table holding its reservation, to be
+// released on destroy; null when the address is only a label.
 const kBoundSource = Symbol('kBoundSource');
-const kBoundReserved = Symbol('kBoundReserved');
+const kBoundTable = Symbol('kBoundTable');
 const kBoundSocketConsume = Symbol('kBoundSocketConsume');
 
 const DEFAULT_IPV4_ADDR = '0.0.0.0';
 const DEFAULT_IPV6_ADDR = '::';
 
-// Reserves port in the isolate's TCP port table (shared with http servers),
-// allocating an ephemeral port for 0. Throws EADDRINUSE on conflict.
+// Reserves port in table (shared with http servers). Port 0 takes an unclaimed
+// declared port when the platform declares any, else an ephemeral one. Throws
+// EADDRINUSE on conflict.
 export function bindPort(
+  table: PortTable,
   address: string,
   port: number,
   reusePort = false
 ): number {
   if (port === 0) {
-    port = tcpPorts.ephemeral();
+    port = table.hasDeclared() ? table.unclaimedDeclared() : table.ephemeral();
     if (port === 0) throw new EADDRINUSE(address, port);
   }
-  if (!tcpPorts.tryBind(port, reusePort)) {
+  if (!table.tryBind(port, reusePort)) {
     throw new EADDRINUSE(address, port);
   }
   return port;
 }
 
 function releaseBoundSource(socket: Socket): void {
-  if (socket[kBoundReserved]) {
-    tcpPorts.unregister(socket);
-    tcpPorts.release((socket[kBoundSource] as AddressInfo).port);
-    socket[kBoundReserved] = false;
+  const table = socket[kBoundTable];
+  if (table !== null) {
+    table.unregister(socket);
+    table.release((socket[kBoundSource] as AddressInfo).port);
+    socket[kBoundTable] = null;
   }
   socket[kBoundSource] = null;
 }
@@ -195,6 +198,7 @@ export type BoundSocketOptions = {
 // bound address as its local address.
 export class BoundSocket {
   #address: AddressInfo | null;
+  #table = tcpPorts();
 
   static isBoundSocket(value: unknown): value is BoundSocket {
     return typeof value === 'object' && value !== null && #address in value;
@@ -239,9 +243,9 @@ export class BoundSocket {
     this.#address = {
       address: host,
       family: addressType === 6 ? 'IPv6' : 'IPv4',
-      port: bindPort(host, port, reusePort),
+      port: bindPort(this.#table, host, port, reusePort),
     };
-    tcpPorts.register(this, this.#address.port);
+    this.#table.register(this, this.#address.port);
   }
 
   address(): AddressInfo {
@@ -264,8 +268,8 @@ export class BoundSocket {
     if (this.#address === null) {
       throw new ERR_SOCKET_HANDLE_ADOPTED();
     }
-    tcpPorts.unregister(this);
-    tcpPorts.release(this.#address.port);
+    this.#table.unregister(this);
+    this.#table.release(this.#address.port);
     this.#address = null;
   }
 
@@ -275,14 +279,15 @@ export class BoundSocket {
     }
   }
 
-  [kBoundSocketConsume](): AddressInfo {
+  // Transfers the reservation, and the table it lives in, to the adopter.
+  [kBoundSocketConsume](): { address: AddressInfo; table: PortTable } {
     if (this.#address === null) {
       throw new ERR_SOCKET_HANDLE_ADOPTED();
     }
-    tcpPorts.unregister(this);
+    this.#table.unregister(this);
     const address = this.#address;
     this.#address = null;
-    return address;
+    return { address, table: this.#table };
   }
 }
 
@@ -325,7 +330,7 @@ export declare class Socket extends _Socket {
   [kBytesRead]: number;
   [kBytesWritten]: number;
   [kBoundSource]: AddressInfo | null;
-  [kBoundReserved]: boolean;
+  [kBoundTable]: PortTable | null;
   [kReinitializeHandle](handle: Socket['_handle']): void;
   _closeAfterHandlingError: boolean;
   _handle: null | {
@@ -471,7 +476,7 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   this[kBytesRead] = 0;
   this[kBytesWritten] = 0;
   this[kBoundSource] = null;
-  this[kBoundReserved] = false;
+  this[kBoundTable] = null;
   this._closeAfterHandlingError = false;
   // @ts-expect-error TS2540 Required due to types
   this.autoSelectFamilyAttemptedAddresses = [];
@@ -488,9 +493,10 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   if (options.handle) {
     validateObject(options.handle, 'options.handle');
     if (BoundSocket.isBoundSocket(options.handle)) {
-      this[kBoundSource] = options.handle[kBoundSocketConsume]();
-      this[kBoundReserved] = true;
-      tcpPorts.register(this, this[kBoundSource].port);
+      const { address, table } = options.handle[kBoundSocketConsume]();
+      this[kBoundSource] = address;
+      this[kBoundTable] = table;
+      table.register(this, address.port);
     } else {
       this._handle = options.handle;
     }
@@ -1387,14 +1393,19 @@ function initializeConnection(
           (family === 6 ? DEFAULT_IPV6_ADDR : DEFAULT_IPV4_ADDR);
         // Only a concrete localPort claims a table entry; localAddress alone
         // (and localPort 0) autobinds, with the address kept as the label.
+        const table = tcpPorts();
         const reserved = localPort != null && localPort !== 0;
         socket[kBoundSource] = {
           address,
           family: isIP(address) === 6 ? 'IPv6' : 'IPv4',
-          port: reserved ? bindPort(address, localPort) : tcpPorts.ephemeral(),
+          port: reserved
+            ? bindPort(table, address, localPort)
+            : table.ephemeral(),
         };
-        socket[kBoundReserved] = reserved;
-        if (reserved) tcpPorts.register(socket, socket[kBoundSource].port);
+        if (reserved) {
+          socket[kBoundTable] = table;
+          table.register(socket, socket[kBoundSource].port);
+        }
       }
 
       const handle = inner.connect(`${host}:${port}`, {

@@ -34,3 +34,15 @@ export function connect(
 ): Socket;
 
 export function internalNewHttpClient(socket: Socket): Promise<ServiceStub>;
+
+// Identity for the current Durable Object's port scope; undefined when not in one.
+export function getPortScopeKey(): object | undefined;
+
+export type InboundListener = {
+  protocol: 'tcp' | 'udp';
+  address: string;
+  port: number;
+};
+
+// The inbound socket listeners configured to deliver connections to this worker.
+export function getInboundListeners(): InboundListener[];
