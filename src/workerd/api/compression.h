@@ -455,7 +455,8 @@ class ZstdContext {
     jsg::Optional<jsg::Dict<int>> params;
     jsg::Optional<kj::uint> maxOutputLength;
     jsg::Optional<uint64_t> pledgedSrcSize;
-    JSG_STRUCT(flush, finishFlush, chunkSize, params, maxOutputLength, pledgedSrcSize);
+    jsg::Optional<kj::Array<kj::byte>> dictionary;
+    JSG_STRUCT(flush, finishFlush, chunkSize, params, maxOutputLength, pledgedSrcSize, dictionary);
   };
 
  protected:
@@ -474,7 +475,11 @@ class ZstdEncoderContext final: public ZstdContext {
   KJ_DISALLOW_COPY_AND_MOVE(ZstdEncoderContext);
 
   void work();
-  kj::Maybe<CompressionError> initialize(uint64_t pledgedSrcSize);
+  // An empty `dictionary` means no dictionary, matching Node.js, which passes an empty
+  // std::string_view for the same case. The bytes are copied into the context, so the
+  // caller does not need to keep them alive.
+  kj::Maybe<CompressionError> initialize(
+      uint64_t pledgedSrcSize, kj::ArrayPtr<const kj::byte> dictionary = nullptr);
   kj::Maybe<CompressionError> resetStream();
   kj::Maybe<CompressionError> setParams(int key, int value);
   kj::Maybe<CompressionError> getError() const;
@@ -495,7 +500,8 @@ class ZstdDecoderContext final: public ZstdContext {
   KJ_DISALLOW_COPY_AND_MOVE(ZstdDecoderContext);
 
   void work();
-  kj::Maybe<CompressionError> initialize();
+  // See the note on ZstdEncoderContext::initialize() regarding `dictionary`.
+  kj::Maybe<CompressionError> initialize(kj::ArrayPtr<const kj::byte> dictionary = nullptr);
   kj::Maybe<CompressionError> resetStream();
   kj::Maybe<CompressionError> setParams(int key, int value);
   kj::Maybe<CompressionError> getError() const;
