@@ -57,6 +57,8 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     // `Persistent::YES` if this request was started on a channel reconstructed from a stored
     // ("persistent") stub. The entrypoint re-verifies that the target worker still has the
     // `allow_irrevocable_stub_storage` compat flag enabled and rejects the request otherwise.
-    Persistent fromPersistentStub = Persistent::NO);
+    Persistent fromPersistentStub = Persistent::NO,
+    // Address of the client on whose behalf this event is being delivered.
+    kj::Maybe<kj::String> clientIp = kj::none);
 
 }  // namespace workerd

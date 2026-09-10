@@ -30,6 +30,10 @@ struct SocketAddress {
 };
 
 struct SocketInfo {
+  // The remote address — i.e. the address on the other side of the socket. For outbound sockets
+  // created via `connect()`, this is the "host:port" string that was passed to `connect()`. For
+  // inbound sockets delivered to a worker's `connect(socket)` handler, this is the address of the
+  // client on whose behalf the tunnel was established, when the peer supplied one.
   jsg::Optional<kj::String> remoteAddress;
 
   // The local address — i.e. the address on this side of the socket. For outbound sockets created
