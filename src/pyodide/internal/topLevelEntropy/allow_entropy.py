@@ -1,10 +1,26 @@
 # Control number of allowed entropy calls.
+import os
 import sys
 from array import array
 from contextlib import contextmanager
 
 ALLOWED_ENTROPY_CALLS = array("b", [0])
 IN_REQUEST_CONTEXT = False
+# TODO(maybe): for now, this is a boolean flag, but we could extend it to support
+# specific modules if needed
+PYTHON_WORKERS_ALLOW_TOP_LEVEL_ENTROPY = "PYTHON_WORKERS_ALLOW_TOP_LEVEL_ENTROPY"
+TOP_LEVEL_ENTROPY_CONFIGURATION = False
+
+TOP_LEVEL_ENTROPY_ERROR = (
+    "Randomness is not allowed while a Worker is starting because startup "
+    "values will be repeated across Worker instances. If this error occurs from "
+    "importing a package, import the package from a function to load it after the Worker starts. "
+    "If it must load at startup, set "
+    'os.environ["PYTHON_WORKERS_ALLOW_TOP_LEVEL_ENTROPY"] = "1" '
+    "before importing it to allow randomness for all startup code. "
+    "Do not use this for secrets or unique IDs. Please report the package at "
+    "https://github.com/cloudflare/workers-py/issues/new."
+)
 
 
 def in_request_context():
@@ -31,7 +47,7 @@ def should_allow_entropy_call():
 def raise_unless_entropy_allowed():
     if not should_allow_entropy_call():
         EIO = 29
-        raise OSError(EIO, "Cannot get entropy outside of request context")
+        raise OSError(EIO, TOP_LEVEL_ENTROPY_ERROR)
 
 
 def get_bad_entropy_flag():
@@ -45,16 +61,68 @@ def is_bad_entropy_enabled():
     """This is used in entropy_patches.py to let calls to disabled functions
     through if we are allowing bad entropy
     """
-    return ALLOWED_ENTROPY_CALLS[0] > 0
+    return is_top_level_entropy_enabled() or ALLOWED_ENTROPY_CALLS[0] != 0
+
+
+def consume_bad_entropy_call():
+    """
+    Similar to shouldAllowBadEntropy in JS but for python random module.
+    Python's random module do not use crypto.getRandomValues directly, so we need to track
+    the calls here.
+    """
+    allow_all = is_top_level_entropy_enabled()
+    value = ALLOWED_ENTROPY_CALLS[0]
+    if allow_all or value == -1:
+        return True
+    if value > 0:
+        ALLOWED_ENTROPY_CALLS[0] -= 1
+        return True
+    if value == 0:
+        return False
+    raise RuntimeError(f"Unexpected randomness allowance value: {value}")
+
+
+def is_top_level_entropy_enabled():
+    global TOP_LEVEL_ENTROPY_CONFIGURATION
+
+    if not TOP_LEVEL_ENTROPY_CONFIGURATION:
+        TOP_LEVEL_ENTROPY_CONFIGURATION = (
+            os.environ.get(PYTHON_WORKERS_ALLOW_TOP_LEVEL_ENTROPY, "").strip() == "1"
+        )
+    if TOP_LEVEL_ENTROPY_CONFIGURATION:
+        ALLOWED_ENTROPY_CALLS[0] = -1
+    return TOP_LEVEL_ENTROPY_CONFIGURATION
+
+
+def clear_global_entropy():
+    global TOP_LEVEL_ENTROPY_CONFIGURATION
+
+    TOP_LEVEL_ENTROPY_CONFIGURATION = False
+    ALLOWED_ENTROPY_CALLS[0] = 0
 
 
 @contextmanager
 def allow_bad_entropy_calls(n):
     old_allowed_entropy_calls = ALLOWED_ENTROPY_CALLS[0]
+    if old_allowed_entropy_calls == -1:
+        yield
+        return
+
     ALLOWED_ENTROPY_CALLS[0] = n
-    yield
-    if ALLOWED_ENTROPY_CALLS[0] > 0:
+    try:
+        yield
+    finally:
+        leftover_entropy_calls = ALLOWED_ENTROPY_CALLS[0]
+        allow_all = is_top_level_entropy_enabled()
+        ALLOWED_ENTROPY_CALLS[0] = -1 if allow_all else old_allowed_entropy_calls
+
+    if not allow_all and leftover_entropy_calls > 0:
         raise RuntimeError(
-            f"{ALLOWED_ENTROPY_CALLS[0]} unexpected leftover getentropy calls "
+            f"{leftover_entropy_calls} unexpected leftover getentropy calls"
         )
-    ALLOWED_ENTROPY_CALLS[0] = old_allowed_entropy_calls
+
+
+@contextmanager
+def allow_bad_entropy():
+    with allow_bad_entropy_calls(-1):
+        yield
