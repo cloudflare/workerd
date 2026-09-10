@@ -1,0 +1,45 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Same test as socket-close-als-gc-test.wd-test on the TypeScript streams implementation.
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+    # Required to receive the transferred socket streams on the TypeScript implementation.
+    "workerd-autogate-rpc-externals-hydration",
+    # Required for the rpcClose mode, which returns a Socket over RPC.
+    "workerd-autogate-socket-rpc-transfer",
+  ],
+  services = [
+    ( name = "socket-close-als-gc-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "socket-close-als-gc-test.js")],
+        # enable_weak_ref: the default wd_test variant runs with the oldest compat date.
+        compatibilityFlags = [
+          "typescript_implemented_streams",
+          "nodejs_compat",
+          "enable_weak_ref",
+          "experimental",
+        ],
+        globalOutbound = (name = "socket-close-als-gc-test", entrypoint = "peer"),
+        bindings = [
+          (name = "SUBJECT", service = "socket-close-als-gc-test"),
+          (name = "PRODUCER", service = "producer-loop"),
+        ],
+      ),
+    ),
+    ( name = "producer-loop",
+      external = (
+        address = "loopback:producer-loop",
+        http = (capnpConnectHost = "cappy"),
+      ),
+    ),
+  ],
+  sockets = [
+    ( name = "producer-loop",
+      address = "loopback:producer-loop",
+      service = (name = "socket-close-als-gc-test", entrypoint = "Producer"),
+      http = (capnpConnectHost = "cappy"),
+    ),
+  ],
+);
