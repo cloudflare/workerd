@@ -530,6 +530,18 @@ v8::Local<v8::Value> runSpan(jsg::Lock& js,
   }
 }
 
+jsg::Ref<user_tracing::Span> createInvocationSpan(
+    jsg::Lock& js, UserTraceInvocationContext& invocation) {
+  kj::Maybe<kj::Own<BaseTracer::WeakRef>> tracer;
+  KJ_IF_SOME(value, invocation.getTracer()) {
+    tracer = value.addRef();
+  }
+  kj::Own<user_tracing::SpanState> state =
+      kj::refcounted<user_tracing::InvocationSpanState>(invocation.getSpan(), kj::mv(tracer),
+          invocation.getContext().map([](auto& context) { return context.clone(); }));
+  return js.alloc<user_tracing::Span>(IoContext::current().addObject(kj::mv(state)));
+}
+
 }  // namespace
 
 v8::Local<v8::Value> Tracing::enterSpan(jsg::Lock& js,
@@ -607,6 +619,24 @@ jsg::Optional<jsg::Ref<user_tracing::Span>> Tracing::getActiveSpan(
     }
   }
 
+  return kj::none;
+}
+
+jsg::Optional<jsg::Ref<user_tracing::Span>> Tracing::getInvocationSpan(jsg::Lock& js) {
+  if (!IoContext::hasCurrent()) {
+    return kj::none;
+  }
+  auto& ioContext = IoContext::current();
+  KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
+    auto key = ioContext.getCurrentLock().getUserTraceAsyncContextKey();
+    KJ_IF_SOME(value, frame.get(*key)) {
+      auto& asyncContext =
+          jsg::unwrapOpaqueRef<IoOwn<UserTraceAsyncContext>>(js.v8Isolate, value.getHandle(js));
+      KJ_IF_SOME(invocation, asyncContext->getInvocation()) {
+        return createInvocationSpan(js, invocation);
+      }
+    }
+  }
   return kj::none;
 }
 

@@ -57,6 +57,39 @@ WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
 
 class IoContext;
 
+// Invocation-root tracing state shared by every user-tracing async context in an invocation.
+class UserTraceInvocationContext final: public kj::Refcounted {
+ public:
+  UserTraceInvocationContext(SpanParent span,
+      kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer,
+      kj::Maybe<tracing::InvocationSpanContext> context)
+      : span(kj::mv(span)),
+        tracer(kj::mv(tracer)),
+        context(kj::mv(context)) {}
+
+  KJ_DISALLOW_COPY_AND_MOVE(UserTraceInvocationContext);
+
+  SpanParent getSpan() {
+    return span.addRef();
+  }
+
+  kj::Maybe<workerd::WeakRef<BaseTracer>&> getTracer() {
+    KJ_IF_SOME(value, tracer) {
+      return *value;
+    }
+    return kj::none;
+  }
+
+  kj::Maybe<tracing::InvocationSpanContext&> getContext() {
+    return context;
+  }
+
+ private:
+  SpanParent span;
+  kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
+  kj::Maybe<tracing::InvocationSpanContext> context;
+};
+
 // Request-specific user-tracing state captured in an AsyncContextFrame. Durable Object requests
 // share an IoContext and may overlap, so ambient IoContext state can refer to a newer request when
 // an older continuation resumes. Keeping the span, tracer, and invocation context together ensures
@@ -65,10 +98,12 @@ class UserTraceAsyncContext final {
  public:
   UserTraceAsyncContext(SpanParent span,
       kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer,
-      kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext)
+      kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext,
+      kj::Maybe<kj::Own<UserTraceInvocationContext>> invocation)
       : span(kj::mv(span)),
         tracer(kj::mv(tracer)),
-        invocationSpanContext(kj::mv(invocationSpanContext)) {}
+        invocationSpanContext(kj::mv(invocationSpanContext)),
+        invocation(kj::mv(invocation)) {}
 
   SpanParent getSpan() {
     return span.addRef();
@@ -85,10 +120,18 @@ class UserTraceAsyncContext final {
     return invocationSpanContext;
   }
 
+  kj::Maybe<UserTraceInvocationContext&> getInvocation() {
+    KJ_IF_SOME(value, invocation) {
+      return *value;
+    }
+    return kj::none;
+  }
+
  private:
   SpanParent span;
   kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
+  kj::Maybe<kj::Own<UserTraceInvocationContext>> invocation;
 };
 
 // Represents one incoming request being handled by a IoContext. In non-actor scenarios,

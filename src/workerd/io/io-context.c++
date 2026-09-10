@@ -1266,6 +1266,21 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
     Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride) {
   auto& ioContext = IoContext::current();
   jsg::Lock& js = lock;
+  bool isInvocationRoot = userSpanOverride == kj::none;
+  kj::Maybe<kj::Own<UserTraceInvocationContext>> invocation;
+  if (!isInvocationRoot) {
+    KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
+      auto key = getCurrentLock().getUserTraceAsyncContextKey();
+      KJ_IF_SOME(value, frame.get(*key)) {
+        auto& current =
+            jsg::unwrapOpaqueRef<IoOwn<UserTraceAsyncContext>>(js.v8Isolate, value.getHandle(js));
+        KJ_IF_SOME(currentInvocation, current->getInvocation()) {
+          invocation = kj::addRef(currentInvocation);
+        }
+      }
+    }
+  }
+
   SpanParent userSpan(nullptr);
   KJ_IF_SOME(sp, kj::mv(userSpanOverride)) {
     userSpan = kj::mv(sp);
@@ -1290,8 +1305,18 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
     tracer = value.getWeakRef();
   }
 
+  if (isInvocationRoot) {
+    kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> invocationTracer;
+    KJ_IF_SOME(value, tracer) {
+      invocationTracer = value->addRef();
+    }
+    invocation =
+        kj::refcounted<UserTraceInvocationContext>(userSpan.addRef(), kj::mv(invocationTracer),
+            invocationSpanContext.map([](auto& context) { return context.clone(); }));
+  }
+
   auto asyncContext = kj::heap<UserTraceAsyncContext>(
-      kj::mv(userSpan), kj::mv(tracer), kj::mv(invocationSpanContext));
+      kj::mv(userSpan), kj::mv(tracer), kj::mv(invocationSpanContext), kj::mv(invocation));
   auto ioOwnAsyncContext = ioContext.addObject(kj::mv(asyncContext));
   auto contextHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnAsyncContext));
   return jsg::AsyncContextFrame::StorageScope(
