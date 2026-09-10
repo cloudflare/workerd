@@ -43,6 +43,99 @@ class NoopSink final: public WritableStreamSink {
   void abort(kj::Exception) override {}
 };
 
+KJ_TEST("IdentityTransformStream records cancellation before a later readable cancel") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto pipe = newIdentityPipe();
+  auto buffer = kj::heapArray<kj::byte>(64);
+  memset(buffer.begin(), 'x', buffer.size());
+
+  {
+    auto writePromise = pipe.out->write(buffer.asPtr());
+    KJ_EXPECT(!writePromise.poll(ws));
+  }
+
+  // Destroying the pending write promise cancels it. That cancellation must synchronously become
+  // the stream's terminal state rather than allowing a later readable-side cancellation to win.
+  pipe.in->cancel(KJ_EXCEPTION(FAILED, "later readable cancel"));
+  KJ_EXPECT_THROW(DISCONNECTED, pipe.out->write("y"_kjb).wait(ws));
+}
+
+KJ_TEST("IdentityTransformStream records read cancellation before a later writable abort") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto pipe = newIdentityPipe();
+  auto buffer = kj::heapArray<kj::byte>(64);
+
+  {
+    auto readPromise = pipe.in->tryRead(buffer.begin(), 1, buffer.size());
+    KJ_EXPECT(!readPromise.poll(ws));
+  }
+
+  // Destroying the pending read promise cancels it. A later writable-side abort must not replace
+  // that terminal disconnection state.
+  pipe.out->abort(KJ_EXCEPTION(FAILED, "later writable abort"));
+  KJ_EXPECT_THROW(DISCONNECTED, pipe.in->tryRead(buffer.begin(), 1, buffer.size()).wait(ws));
+}
+
+KJ_TEST("IdentityTransformStream releases a pending read buffer when its promise is canceled") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto pipe = newIdentityPipe();
+  auto buffer = kj::heapArray<kj::byte>(64);
+
+  {
+    auto readPromise = pipe.in->tryRead(buffer.begin(), 1, buffer.size());
+    KJ_EXPECT(!readPromise.poll(ws));
+  }
+
+  // The transform must leave ReadRequest synchronously when the promise is canceled, before the
+  // storage backing its borrowed destination is released.
+  buffer = nullptr;
+}
+
+KJ_TEST("IdentityTransformStream releases a pending write buffer when its promise is canceled") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto pipe = newIdentityPipe();
+  auto buffer = kj::heapArray<kj::byte>(64);
+  memset(buffer.begin(), 'x', buffer.size());
+
+  {
+    auto writePromise = pipe.out->write(buffer.asPtr());
+    KJ_EXPECT(!writePromise.poll(ws));
+  }
+
+  // Destroying the pending promise cancels the write. The transform must synchronously leave the
+  // WriteRequest state so that it no longer borrows buffer when the owner is destroyed.
+  buffer = nullptr;
+}
+
+KJ_TEST("IdentityTransformStream releases a partially-consumed write buffer on cancellation") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto pipe = newIdentityPipe();
+  kj::byte destination[2];
+  auto readPromise = pipe.in->tryRead(destination, 1, sizeof(destination));
+
+  auto buffer = kj::heapArray<kj::byte>(4);
+  memset(buffer.begin(), 'x', buffer.size());
+  {
+    auto writePromise = pipe.out->write(buffer.asPtr());
+    KJ_EXPECT(readPromise.wait(ws) == sizeof(destination));
+    KJ_EXPECT(!writePromise.poll(ws));
+  }
+
+  // The first two bytes completed the pending read, leaving the rest as a pending WriteRequest.
+  // Canceling that write must release the remaining view before its owner is destroyed.
+  buffer = nullptr;
+}
+
 KJ_TEST("IdentityTransformStream declines tryReadSync/tryWriteSync") {
   // IdentityTransformStreamImpl deliberately does not implement the synchronous fast paths:
   // serving the read/write rendezvous synchronously would make the result observable to
