@@ -58,6 +58,71 @@ export const webfsTest = {
   },
 };
 
+// A write command whose `position` is past the end of the file zero-pads up to
+// that position. What it must NOT do is resize the file down to the current
+// cursor first, which discarded everything between the cursor and the old EOF.
+//
+// Each case below seeds 50 bytes and leaves the cursor at 10, so the bytes in
+// 10..50 are the ones a regression destroys. The `position` is read before the
+// command type is dispatched, so all three commands are affected.
+async function seededWritable(name) {
+  const file = await temp.getFileHandle(name, { create: true });
+  const seed = await file.createWritable();
+  await seed.write('A'.repeat(50));
+  await seed.close();
+
+  const writable = await file.createWritable({ keepExistingData: true });
+  await writable.seek(10);
+  return { file, writable };
+}
+
+async function bytesOf(file) {
+  return new Uint8Array(await (await file.getFile()).arrayBuffer());
+}
+
+// slice() rather than subarray() so the comparands are byteOffset-0 copies.
+const fiftyAs = new Uint8Array(50).fill(0x41);
+
+export const writeParamsPositionPastEof = {
+  async test() {
+    const { file, writable } = await seededWritable('past-eof-write.txt');
+    await writable.write({ type: 'write', position: 200, data: 'X' });
+    await writable.close();
+
+    const bytes = await bytesOf(file);
+    strictEqual(bytes.length, 201);
+    deepStrictEqual(bytes.slice(0, 50), fiftyAs);
+    deepStrictEqual(bytes.slice(50, 200), new Uint8Array(150));
+    strictEqual(bytes[200], 0x58);
+  },
+};
+
+export const seekParamsPositionPastEof = {
+  async test() {
+    const { file, writable } = await seededWritable('past-eof-seek.txt');
+    await writable.write({ type: 'seek', position: 200 });
+    await writable.close();
+
+    const bytes = await bytesOf(file);
+    strictEqual(bytes.length, 200);
+    deepStrictEqual(bytes.slice(0, 50), fiftyAs);
+    deepStrictEqual(bytes.slice(50), new Uint8Array(150));
+  },
+};
+
+export const truncateParamsPositionPastEof = {
+  async test() {
+    const { file, writable } = await seededWritable('past-eof-truncate.txt');
+    await writable.write({ type: 'truncate', size: 100, position: 200 });
+    await writable.close();
+
+    const bytes = await bytesOf(file);
+    strictEqual(bytes.length, 100);
+    deepStrictEqual(bytes.slice(0, 50), fiftyAs);
+    deepStrictEqual(bytes.slice(50), new Uint8Array(50));
+  },
+};
+
 // TODO(node-fs): Rework this test now that createSyncAccessHandle has been removed.
 // We can still test this using the the stream API but it needs to be structured
 // a little differently.

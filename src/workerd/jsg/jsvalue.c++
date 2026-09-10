@@ -1,6 +1,5 @@
 #include "jsvalue.h"
 
-#include "buffersource.h"
 #include "ser.h"
 #include "simdutf.h"
 
@@ -256,6 +255,16 @@ kj::Maybe<uint64_t> JsBigInt::toUint64(Lock& js) const {
   uint64_t value = inner->Uint64Value(&lossless);
   if (!lossless) {
     js.v8Isolate->ThrowException(js.rangeError("BigInt value does not fit in uint64_t"));
+    return kj::none;
+  }
+  return value;
+}
+
+kj::Maybe<uint64_t> JsBigInt::tryToUint64(Lock& js) const {
+  KJ_ASSERT(!inner.IsEmpty());
+  bool lossless = false;
+  uint64_t value = inner->Uint64Value(&lossless);
+  if (!lossless) {
     return kj::none;
   }
   return value;
@@ -550,6 +559,10 @@ JsValue JsPromise::result() {
   return JsValue(inner->Result());
 }
 
+void JsPromise::markAsHandled(Lock& js) {
+  inner->MarkAsHandled();
+}
+
 JsValue JsProxy::target() {
   return JsValue(inner->GetTarget());
 }
@@ -661,6 +674,11 @@ JsValue JsFunction::callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) c
   return call(js, js.null(), args);
 }
 
+JsObject JsFunction::newInstance(Lock& js, v8::LocalVector<v8::Value>& args) const {
+  v8::Local<v8::Function> fn = *this;
+  return JsObject(check(fn->NewInstance(js.v8Context(), args.size(), args.data())));
+}
+
 uint JsFunction::hashCode() const {
   v8::Local<v8::Function> obj = *this;
   return kj::hashCode(obj->GetIdentityHash());
@@ -732,6 +750,11 @@ JsArrayBuffer JsArrayBuffer::slice(Lock& js, size_t newLength) const {
 size_t JsArrayBuffer::size() const {
   v8::Local<v8::ArrayBuffer> inner = *this;
   return inner->ByteLength();
+}
+
+size_t JsArrayBuffer::backingStoreSize() const {
+  v8::Local<v8::ArrayBuffer> inner = *this;
+  return inner->GetBackingStore()->ByteLength();
 }
 
 kj::Array<kj::byte> JsArrayBuffer::copy() {

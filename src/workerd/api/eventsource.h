@@ -9,8 +9,11 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>
+#include <workerd/util/strong-bool.h>
 
 namespace workerd::api {
+
+WD_STRONG_BOOL(AlreadyReported);
 
 using kj::uint;
 class Fetcher;
@@ -65,40 +68,30 @@ class EventSource: public EventTarget {
   // or underlying fetch used. The ReadableStream instance must produce bytes. It will be
   // locked and disturbed, and will be read until it either ends or errors. Calling close()
   // will cause the stream to be canceled.
-  static jsg::Ref<EventSource> from(jsg::Lock& js, jsg::Ref<ReadableStream> stream);
+  static jsg::Ref<EventSource> from(jsg::Lock& js, JsReadableStream stream);
 
+  // The onopen, onmessage, and onerror event handler IDL attributes
+  // (see EventTarget::setEventHandlerAttribute).
   kj::Maybe<jsg::JsValue> getOnOpen(jsg::Lock& js) {
-    return onopenValue.map(
-        [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
+    return getEventHandlerAttribute(js, "open"_kj);
   }
-  void setOnOpen(jsg::Lock& js, jsg::JsValue value) {
-    if (!value.isObject() && !value.isFunction()) {
-      onopenValue = kj::none;
-    } else {
-      onopenValue = jsg::JsRef<jsg::JsValue>(js, value);
-    }
+  void setOnOpen(
+      jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler) {
+    setEventHandlerAttribute(js, "open"_kj, kj::mv(handler));
   }
   kj::Maybe<jsg::JsValue> getOnMessage(jsg::Lock& js) {
-    return onmessageValue.map(
-        [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
+    return getEventHandlerAttribute(js, "message"_kj);
   }
-  void setOnMessage(jsg::Lock& js, jsg::JsValue value) {
-    if (!value.isObject() && !value.isFunction()) {
-      onmessageValue = kj::none;
-    } else {
-      onmessageValue = jsg::JsRef<jsg::JsValue>(js, value);
-    }
+  void setOnMessage(
+      jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler) {
+    setEventHandlerAttribute(js, "message"_kj, kj::mv(handler));
   }
   kj::Maybe<jsg::JsValue> getOnError(jsg::Lock& js) {
-    return onerrorValue.map(
-        [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
+    return getEventHandlerAttribute(js, "error"_kj);
   }
-  void setOnError(jsg::Lock& js, jsg::JsValue value) {
-    if (!value.isObject() && !value.isFunction()) {
-      onerrorValue = kj::none;
-    } else {
-      onerrorValue = jsg::JsRef<jsg::JsValue>(js, value);
-    }
+  void setOnError(
+      jsg::Lock& js, jsg::Optional<kj::OneOf<EventTarget::HandlerFunction, jsg::JsValue>> handler) {
+    setEventHandlerAttribute(js, "error"_kj, kj::mv(handler));
   }
 
   JSG_RESOURCE_TYPE(EventSource) {
@@ -129,7 +122,8 @@ class EventSource: public EventTarget {
 
   // Called by the internal implementation to notify the EventSource about messages
   // received from the server.
-  void enqueueMessages(kj::Array<PendingMessage> messages);
+  void enqueueMessages(
+      kj::Array<PendingMessage> messages, kj::Rc<jsg::WeakRef<EventSource>> weakSelf);
 
   // Called by the internal implementation to notify the EventSource that the server
   // has provided a new reconnection time.
@@ -172,9 +166,6 @@ class EventSource: public EventTarget {
 
   // The EventSource spec defines onopen, onmessage, and onerror as prototype
   // properties on the class.
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> onopenValue;
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> onmessageValue;
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> onerrorValue;
 
   // The default reconnection wait time. This is fairly arbitrary and is left
   // entirely up to the implementation. The event stream can provide a new value.
@@ -185,12 +176,18 @@ class EventSource: public EventTarget {
   kj::Duration reconnectionTime = DEFAULT_RECONNECTION_TIME;
 
   void notifyOpen(jsg::Lock& js);
-  void notifyError(jsg::Lock& js, const jsg::JsValue& error, bool reconnecting = false);
+  // AlreadyReported::YES indicates the error was already delivered to the global scope's
+  // report-an-exception machinery (a reported listener exception), so notifyError() must
+  // not log it again.
+  void notifyError(jsg::Lock& js,
+      const jsg::JsValue& error,
+      bool reconnecting = false,
+      AlreadyReported alreadyReported = AlreadyReported::NO);
   void notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messages);
 
   // The run() method handles the actual processing of the stream.
   void run(jsg::Lock& js,
-      jsg::Ref<ReadableStream> stream,
+      JsReadableStream stream,
       bool withReconnection = true,
       kj::Maybe<jsg::Ref<Response>> response = kj::none,
       kj::Maybe<jsg::Ref<Fetcher>> fetcher = kj::none);

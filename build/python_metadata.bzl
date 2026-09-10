@@ -21,8 +21,12 @@ PYODIDE_VERSIONS = [
         "sha256": "c9f6dd067d119e50850849f7428e3c636ecbc2684a0d2ff992f3bd48a1062b6c",
     },
     {
-        "version": "314.0.0",
-        "sha256": "a4a568ca2ee0c8dcaaff00a714b42613a3298a7efb85b9e682a27bba0fce81f9",
+        "version": "314.0.4",
+        "sha256": "e775e35fe447beeceaf6f33ab2d2242454a8b6e5401d9769d118eca164d234db",
+    },
+    {
+        "version": "314.0.6",
+        "sha256": "1016c31e39ce3764d9a418cbb491a392c802c1b86ccc1367f009f5c59bf8f5fd",
     },
 ]
 
@@ -113,8 +117,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "pyodide_version": "0.26.0a2",
         "pyodide_date": "2024-03-01",
         "packages": "20240829.4",
-        "backport": "83",
-        "integrity": "sha256-b5xYvWAd5U7jolloM/yW2xESIrvmGMRHXzYUktezCGk=",
+        "backport": "84",
+        "integrity": "sha256-pwZ73EU5MG72in/L9pbb4jx54SJ4Gan17IpZDk+zuo0=",
         "flag": "pythonWorkers",
         "enable_flag_name": "python_workers",
         "emscripten_version": "3.1.52",
@@ -141,8 +145,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "pyodide_version": "0.28.2",
         "pyodide_date": "2025-01-16",
         "packages": "20250808",
-        "backport": "14",
-        "integrity": "sha256-dFxfG3CZ3z3B6fKYJ9SYVMtvGuY+6zZSoElCIbF4xw0=",
+        "backport": "15",
+        "integrity": "sha256-5iDL/nW4k1cCImd156LvkajxPgr9u7m+UePFHcxj9l4=",
         "flag": "pythonWorkers20250116",
         "enable_flag_name": "python_workers_20250116",
         "emscripten_version": "4.0.9",
@@ -170,17 +174,19 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         ],
     },
     {
-        "name": "314.0.0",
-        "pyodide_version": "314.0.0",
+        "name": "314.0.4",
+        "released": True,
+        "test_by_default": False,
+        "pyodide_version": "314.0.4",
         "pyodide_date": "2026-06-10",
-        "backport": "6",
-        "integrity": "sha256-TlRjur4ijCdSOVGHvZT7/m7SAEb2lc2cQqADSvKvzJY=",
+        "backport": "15",
+        "integrity": "sha256-QF3NLzeV2QWH8uEj7CFogWptnEZEITN004v6bVzo62Q=",
         "flag": "pythonWorkers20260610",
         "enable_flag_name": "python_workers_20260610",
         "emscripten_version": "5.0.3",
         "python_version": "3.14.2",
-        "baseline_snapshot": "baseline-8816cf608.bin",
-        "baseline_snapshot_hash": "8816cf608779af2529000ff21292019d387591abe9b86c1287b120cb25447cb0",
+        "baseline_snapshot": "baseline-2ffc5dfa7.bin",
+        "baseline_snapshot_hash": "2ffc5dfa7f3501356b7ecd8cc3a7fe351fbf825346175c1d852d2d9bb5617a48",
         "vendored_packages_for_tests": VENDORED_VERSION_INDEPENDENT + [
             {
                 "name": "numpy",
@@ -190,8 +196,29 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         ],
     },
     {
-        "real_pyodide_version": "314.0.0",
+        "name": "314.0.6",
+        "pyodide_version": "314.0.6",
+        "pyodide_date": "2026-08-17",
+        "backport": "2",
+        "integrity": "sha256-x7rlqnQKYsWtgX0QP0BBVbJI6rP0XL1SuMXl99hYhEE=",
+        "flag": "pythonWorkers314",
+        "enable_flag_name": "python_workers_314",
+        "emscripten_version": "5.0.3",
+        "python_version": "3.14.2",
+        "baseline_snapshot": "baseline-68629a784.bin",
+        "baseline_snapshot_hash": "68629a7847e055b24e41a90ea3d64cdb5e9841f4104c2e56b28e5507eab7facd",
+        "vendored_packages_for_tests": VENDORED_VERSION_INDEPENDENT + [
+            {
+                "name": "numpy",
+                "abi": "3.14",
+                "sha256": "28bea03aa0a18bbc1884ea4cebe8d93a9004455c497417e172c221f0a245b439",
+            },
+        ],
+    },
+    {
+        "real_pyodide_version": "314.0.6",
         "name": "development",
+        "test_by_default": True,
         "pyodide_version": "dev",
         "pyodide_date": "dev",
         "id": "dev",
@@ -199,3 +226,12 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "enable_flag_name": "python_workers_development",
     },
 ])
+
+# Version names from BUNDLE_VERSION_INFO that the test macros expand `python_flags = "all"` into.
+# An entry opts out with `"test_by_default": False`, which keeps it selectable by an explicit
+# `python_flags` list while removing it from default expansion.
+DEFAULT_PYTHON_TEST_FLAGS = [
+    name
+    for name, entry in BUNDLE_VERSION_INFO.items()
+    if entry.get("test_by_default") != False
+]

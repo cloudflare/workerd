@@ -20,8 +20,8 @@ void AnalyticsEngine::writeDataPoint(
   // awaitIo() and such by not going back to the event loop at all.
   KJ_IF_SOME(promise, context.waitForOutputLocksIfNecessary()) {
     context.awaitIo(
-        js, kj::mv(promise), [this, self = JSG_THIS, event = kj::mv(event)](jsg::Lock& js) mutable {
-      writeDataPointNoOutputLock(js, kj::mv(event));
+        js, kj::mv(promise), [self = JSG_THIS, event = kj::mv(event)](jsg::Lock& js) mutable {
+      self->writeDataPointNoOutputLock(js, kj::mv(event));
     });
   } else {
     writeDataPointNoOutputLock(js, kj::mv(event));

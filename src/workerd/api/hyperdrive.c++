@@ -66,18 +66,47 @@ kj::StringPtr Hyperdrive::getScheme() {
   return this->scheme;
 }
 
-kj::StringPtr Hyperdrive::getHost() {
-  if (!registeredConnectOverride) {
-    // Returns the random hostname and ensures the connect override is registered on the
-    // ServiceWorkerGlobalScope for the Worker. This getter has a side effect: it registers (or
-    // re-registers) an entry in the ServiceWorkerGlobalScope's connectOverrides HashMap so that
-    // cloudflare:sockets's connect() will route connections to this magic hostname through Hyperdrive.
-    auto& globalScope = IoContext::current().getCurrentLock().getGlobalScope();
-    globalScope.setConnectOverride(kj::str(randomHost, ":", getPort()),
-        [self = JSG_THIS](jsg::Lock& js) mutable { return self->connect(js); });
-    registeredConnectOverride = true;
+void Hyperdrive::registerConnectOverride() {
+  if (registeredConnectOverride) {
+    return;
   }
+  auto& globalScope = IoContext::current().getCurrentLock().getGlobalScope();
+  auto port = getPort();
+
+  // Assign a synthetic IPv4 from 240.0.0.0/16 (within the reserved, non-routable 240.0.0.0/4 block)
+  // so it can never collide with a real host the Worker might legitimately connect to. The low 16
+  // bits identify this binding; start at a random suffix and walk until we find one not already
+  // claimed by another Hyperdrive binding.
+  kj::FixedArray<kj::byte, 2> suffixBytes;
+  getEntropy(suffixBytes.asPtr());
+  uint16_t start = (static_cast<uint16_t>(suffixBytes[0]) << 8) | suffixBytes[1];
+  uint16_t suffix = start;
+  for (;;) {
+    auto candidate = kj::str("240.0.", suffix >> 8, ".", suffix & 0xff);
+    if (globalScope.getConnectOverride(kj::str(candidate, ":", port)) == kj::none) {
+      randomIp = kj::mv(candidate);
+      break;
+    }
+    JSG_REQUIRE(++suffix != start, Error, "no free Hyperdrive address available");
+  }
+
+  globalScope.setConnectOverride(kj::str(randomHost, ":", port),
+      [self = JSG_THIS](jsg::Lock& js) mutable { return self->connect(js); });
+  globalScope.setConnectOverride(kj::str(randomIp, ":", port),
+      [self = JSG_THIS](jsg::Lock& js) mutable { return self->connect(js); });
+  globalScope.setDnsOverride(kj::str(randomHost), kj::str(randomIp));
+  registeredConnectOverride = true;
+}
+
+kj::StringPtr Hyperdrive::getHost() {
+  // Reading the host/IP lazily registers the overrides that route it through Hyperdrive.
+  registerConnectOverride();
   return randomHost;
+}
+
+kj::StringPtr Hyperdrive::getIP() {
+  registerConnectOverride();
+  return randomIp;
 }
 
 // We currently only support Postgres and MySQL

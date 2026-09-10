@@ -1,6 +1,7 @@
 // Copyright (c) 2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
+import assert from 'node:assert';
 
 // A simple test to confirm we can close() a websocket from the close handler.
 export class DurableObjectExample {
@@ -20,6 +21,8 @@ export class DurableObjectExample {
     let server = pair[0];
     if (request.url.endsWith('/hibernation')) {
       this.state.acceptWebSocket(server);
+    } else if (request.url.endsWith('/throw')) {
+      throw new Error('boom');
     } else {
       server.accept();
       server.addEventListener('message', () => {
@@ -86,5 +89,14 @@ export const test = {
       'http://example.com/hibernation',
       'Hibernatable close from DO'
     );
+
+    // Test throwing behavior
+    await assert.rejects(async () => {
+      await obj.fetch('http://example.com/throw', {
+        headers: {
+          Upgrade: 'websocket',
+        },
+      });
+    });
   },
 };

@@ -7,7 +7,6 @@
 //
 // Any files declaring an API to export to JavaScript will need to include this header.
 
-#include "kj/common.h"
 #include "util.h"
 #include "wrappable.h"
 
@@ -30,6 +29,9 @@
 #include <kj/one-of.h>
 #include <kj/string.h>
 #include <kj/time.h>
+
+#include <span>
+#include <typeinfo>
 
 using kj::byte;
 using kj::uint;
@@ -490,6 +492,37 @@ namespace workerd::jsg {
     registry.template registerStaticConstant<NAME, decltype(constant)>(constant);                  \
   } while (false)
 
+// Use inside a JSG_RESOURCE_TYPE block to attach a marker property to every instance of
+// the resource type. The property is keyed by a symbol acquired from V8's API symbol
+// registry (v8::Symbol::ForApi) using the stringified `name`, and its value is the symbol
+// itself. The property is created directly on each instance (not the prototype) as
+// read-only, non-enumerable, and non-configurable:
+//
+//     class Foo: public jsg::Object {
+//      public:
+//       JSG_RESOURCE_TYPE(Foo) {
+//         JSG_PRIVATE_SYMBOL(kUniqueSymbol);
+//       }
+//     };
+//
+// Because the symbol lives in the per-isolate API symbol registry, C++ code can re-acquire
+// the exact same symbol at any time via v8::Symbol::ForApi(isolate, "kUniqueSymbol") --
+// there is nothing to store or plumb around. Runtime-provided JavaScript can likewise be
+// handed the symbol (e.g. the per-isolate bootstrap exposes utils.getApiSymbol()), while
+// user code cannot mint it: the API registry is distinct from the Symbol.for() registry.
+// This makes the property a tamper-resistant brand/marker that both C++ and
+// runtime-provided JavaScript can recognize on instances via an own-property check.
+//
+// Note that the symbol registry is keyed process-wide by name (per isolate), so two
+// resource types declaring JSG_PRIVATE_SYMBOL with the same identifier share the same
+// symbol. The property itself remains visible to reflection (Object.getOwnPropertySymbols)
+// on instances, so it is a brand, not a secret.
+#define JSG_PRIVATE_SYMBOL(name)                                                                   \
+  do {                                                                                             \
+    static const char NAME[] = #name;                                                              \
+    registry.template registerPrivateSymbol<NAME>();                                               \
+  } while (false)
+
 // Use inside a JSG_RESOURCE_TYPE block to declare that this type inherits from another type,
 // which must also have a JSG_RESOURCE_TYPE block. This type must singly, non-virtually inherit
 // from the specified type. (Multiple inheritance and virtual inheritance will not work since we
@@ -711,17 +744,11 @@ concept HasStructTypeScriptDefine = requires { T::_JSG_STRUCT_TS_DEFINE_DO_NOT_U
 #define JSG_STRUCT(...)                                                                            \
   static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = ::workerd::jsg::JsgKind::STRUCT;   \
   static constexpr char JSG_FOR_EACH(JSG_STRUCT_FIELD_NAME, , __VA_ARGS__);                        \
-  template <typename TypeWrapper, typename Self>                                                   \
-  using JsgFieldWrappers =                                                                         \
-      ::workerd::jsg::TypeTuple<JSG_FOR_EACH(JSG_STRUCT_FIELD, , __VA_ARGS__)>;                    \
+  static constexpr ::kj::StringPtr _JSG_STRUCT_FIELD_NAMES_DO_NOT_USE_DIRECTLY[] KJ_UNUSED = {     \
+    JSG_FOR_EACH(JSG_STRUCT_FIELD_EXPORTED_NAME, , __VA_ARGS__)};                                  \
   template <typename Self>                                                                         \
-  static v8::Local<v8::DictionaryTemplate> jsgGetTemplate(v8::Isolate* isolate) {                  \
-    kj::Vector<std::string_view> names;                                                            \
-    JSG_FOR_EACH(JSG_STRUCT_FIELD_COL, , __VA_ARGS__);                                             \
-    auto namesPtr = names.asPtr().asConst();                                                       \
-    return v8::DictionaryTemplate::New(                                                            \
-        isolate, v8::MemorySpan<const std::string_view>(namesPtr.begin(), namesPtr.size()));       \
-  }                                                                                                \
+  using _JSG_STRUCT_FIELDS_DO_NOT_USE_DIRECTLY =                                                   \
+      ::workerd::jsg::StructFields<JSG_FOR_EACH(JSG_STRUCT_FIELD, , __VA_ARGS__)>;                 \
   template <typename Registry, typename Self, typename Config>                                     \
   static void registerMembersInternal(Registry& registry, Config arg) {                            \
     JSG_FOR_EACH(JSG_STRUCT_REGISTER_MEMBER, , __VA_ARGS__);                                       \
@@ -759,20 +786,24 @@ inline consteval size_t prefixLengthToStrip(const char (&s)[N]) {
   return s[0] == '$' ? 1 : 0;
 }
 
+// The name a JSG_STRUCT field is exported to JavaScript under: its C++ name minus the `$` prefix
+// that lets a field be named after a JavaScript keyword.
+template <size_t N>
+inline consteval kj::StringPtr exportedFieldName(const char (&s)[N]) {
+  return kj::StringPtr(s + prefixLengthToStrip(s), N - 1 - prefixLengthToStrip(s));
+}
+
 // This string may not be what's actually exported to v8. For example, if it starts with a `$`, then
-// this value will still contain the `$` even though the `FieldWrapper` template argument will have
-// it stripped.
+// this value will still contain the `$` even though `_JSG_STRUCT_FIELD_NAMES_DO_NOT_USE_DIRECTLY`
+// will have it stripped.
 #define JSG_STRUCT_FIELD_NAME(_, name) name##_JSG_NAME_DO_NOT_USE_DIRECTLY[] = #name
 
-#define JSG_STRUCT_FIELD_COL(_, name)                                                              \
-  ::workerd::jsg::jsgAddToStructNames<decltype(::kj::instance<Self>().name),                       \
-      name##_JSG_NAME_DO_NOT_USE_DIRECTLY + ::workerd::jsg::prefixLengthToStrip(#name)>(names)
+// (Internal implementation details for JSG_STRUCT.)
+#define JSG_STRUCT_FIELD_EXPORTED_NAME(_, name)                                                    \
+  ::workerd::jsg::exportedFieldName(name##_JSG_NAME_DO_NOT_USE_DIRECTLY)
 
 // (Internal implementation details for JSG_STRUCT.)
-#define JSG_STRUCT_FIELD(_, name)                                                                  \
-  ::workerd::jsg::FieldWrapper<TypeWrapper, Self, decltype(::kj::instance<Self>().name),           \
-      &Self::name,                                                                                 \
-      name##_JSG_NAME_DO_NOT_USE_DIRECTLY + ::workerd::jsg::prefixLengthToStrip(#name)>
+#define JSG_STRUCT_FIELD(_, name) &Self::name
 // (Internal implementation details for JSG_STRUCT.)
 #define JSG_STRUCT_REGISTER_MEMBER(_, name)                                                        \
   registry.template registerStructProperty<decltype(::kj::instance<Self>().name), &Self::name>(    \
@@ -1243,11 +1274,6 @@ template <typename U>
 static constexpr bool isUsableStructField = !kj::isSameType<U, SelfRef>() &&
     !kj::isSameType<U, Unimplemented>() && !kj::isSameType<U, WontImplement>();
 
-template <typename T, const char* exportedName>
-void jsgAddToStructNames(auto& names) {
-  if constexpr (isUsableStructField<T>) names.add(exportedName);
-}
-
 // A USVString has the exact same representation as a kj::String, but we guarantee that it meets
 // the WHATWG definition of a "scalar value string". Particularly, a USVString will never contain
 // invalid surrogate characters. A USVString should be used when implementing a Web API that
@@ -1357,6 +1383,10 @@ class Object: private Wrappable {
   // to explicitly declare the default constructor.
   Object() = default;
 
+  inline Object* jsgTryGetObject() override {
+    return this;
+  }
+
   inline void jsgVisitForGc(GcVisitor& visitor) override {}
 
   // Subclasses should override these to provide appropriate information for
@@ -1404,6 +1434,10 @@ class Object: private Wrappable {
   friend kj::Own<T> kj::addRef(T& object);
   template <typename T, typename... Params>
   friend kj::Own<T> kj::refcounted(Params&&... params);
+  template <typename T, typename... Params>
+  friend kj::Rc<T> kj::rc(Params&&... params);
+  template <typename T, typename U>
+  friend constexpr bool kj::canConvert();
   friend class GcVisitor;
   template <typename, typename...>
   friend class TypeWrapper;
@@ -1414,7 +1448,19 @@ class Object: private Wrappable {
   template <typename>
   friend class SelfPropertyReader;
   friend class MemoryTracker;
+  template <typename>
+  friend class WeakRef;
 };
+
+// Declared in wrappable.h; see there for why this check exists.
+template <typename T>
+T& downcastObject(Object& object) {
+  T* result = dynamic_cast<T*>(&object);
+  if (result == nullptr) {
+    reportWrapperTypeMismatch(typeid(T), typeid(object));
+  }
+  return *result;
+}
 
 // Ref<T> is a reference to a resource type (a type with a JSG_RESOURCE_TYPE block) living on
 // the V8 heap.
@@ -1596,9 +1642,23 @@ Ref<T> _jsgThis(T* obj) {
 // wrapper is collected), the WeakRef automatically becomes invalid — no manual invalidation
 // is required.
 //
+// The accessors answer two different questions:
+//
+// - tryGet() and operator->() answer "is the C++ object still alive?". They require no
+//   isolate lock, and the result is valid for pure C++/KJ access ONLY. The target may be
+//   *condemned*: its JS wrapper died in a major GC whose deferred cleanup has not yet
+//   destroyed the object, in which case its V8-facing state (the wrapper TracedReference,
+//   V8Ref/JsRef members, promise resolvers) is already zapped. Taking a Ref, calling
+//   getHandle(), dispatching events, or touching any V8 handle through the result can be a
+//   use-after-free.
+//
+// - tryAddRef(js) answers "is the object still usable from JS?". It requires the isolate
+//   lock and returns kj::none for condemned objects (see Wrappable::wasTracedInLastGc()).
+//   Any JS-facing work through a WeakRef must go through tryAddRef().
+//
 // Use operator->() for convenient single-expression access that asserts liveness:
 //
-//     weakFoo->doSomething();  // throws kj::Exception if dead
+//     weakFoo->doPureCppThing();  // throws kj::Exception if dead
 //
 // Use tryGet() or tryAddRef() when the target might legitimately be dead:
 //
@@ -1659,6 +1719,9 @@ class WeakRef {
 
   // Dereference. Asserts if the target has been destroyed.
   // Safe for single-expression use: weakFoo->doSomething()
+  //
+  // Valid for pure C++/KJ access only — the target may be condemned (see the class comment).
+  // Use tryAddRef() for anything that touches V8 state.
   T* operator->() const KJ_LIFETIMEBOUND {
     auto& i = KJ_ASSERT_NONNULL(impl, "attempt to access destroyed jsg::WeakRef target");
     KJ_ASSERT(i.anchor->isAlive(), "attempt to access invalidated jsg::WeakRef target");
@@ -1680,6 +1743,9 @@ class WeakRef {
   // Use of tryGet is discouraged because it does return a raw reference that can
   // dangle. Use it only for single-expression access, essentially as a non-asserting
   // version of operator->().
+  //
+  // Valid for pure C++/KJ access only — the target may be condemned (see the class comment).
+  // Use tryAddRef() for anything that touches V8 state.
   kj::Maybe<T&> tryGet() const KJ_LIFETIMEBOUND {
     KJ_IF_SOME(i, impl) {
       if (i.anchor->isAlive()) {
@@ -1689,10 +1755,12 @@ class WeakRef {
     return kj::none;
   }
 
-  // Try to promote to a strong Ref<T>. Returns kj::none if the target has been destroyed.
-  kj::Maybe<Ref<T>> tryAddRef(Lock&) const {
-    return tryGet().map([](T& t) { return Ref<T>(kj::addRef(t)); });
-  }
+  // Try to promote to a strong Ref<T>. Returns kj::none if the target has been destroyed,
+  // or if the target's V8 wrapper died in a major GC whose deferred cleanup has not yet
+  // released the target (detected via the GC epoch check in Wrappable::wasTracedInLastGc();
+  // see the implementation in setup.h). In the latter case the target is condemned and this
+  // WeakRef is permanently invalidated.
+  kj::Maybe<Ref<T>> tryAddRef(Lock&) const;
 
   // Create another weak ref to the same target.
   WeakRef addRef(jsg::Lock& js) &;
@@ -2078,8 +2146,6 @@ class JsContext {
   Ref<T> object;
 };
 
-class BufferSource;
-
 constexpr bool hasPublicVisitForGc_(...) {
   return false;
 }
@@ -2164,8 +2230,6 @@ class GcVisitor {
       visit(value);
     }
   }
-
-  void visit(BufferSource& bufferSource);
 
   template <typename T, typename = kj::EnableIf<hasPublicVisitForGc<T>()>()>
   void visit(T& supportsVisit) {
@@ -2260,6 +2324,11 @@ class TypeHandler {
   // Unwrap by value. Returns null if not the right type.
   virtual kj::Maybe<T> tryUnwrap(Lock& js, v8::Local<v8::Value> handle) const = 0;
 };
+
+// Internal implementation detail of Lock::tryGetTypeHandler(). Looks up the type-erased
+// TypeHandler singleton registered with the isolate for the given typeid(TypeHandler<T>).
+// Defined in setup.c++ (the registry lives on IsolateBase).
+kj::Maybe<const void*> tryGetTypeHandlerErased(v8::Isolate* isolate, const std::type_info& type);
 
 // Utility that allows C++ code in a resource type to examine properties that have been added to
 // its JavaScript wrapper.
@@ -2431,7 +2500,7 @@ struct JsgConfig {
 static constexpr JsgConfig DEFAULT_JSG_CONFIG = {};
 
 template <typename Config>
-static const JsgConfig& getConfig(const Config& config) {
+const JsgConfig& getConfig(const Config& config) {
   if constexpr (kj::isSameType<Config, JsgConfig>() || kj::canConvert<Config, JsgConfig>()) {
     // Returning a reference to a parameter is harmless here since call sites pass in a reference to
     // config, which they can continue to use if returned here.
@@ -2509,45 +2578,6 @@ class JsRef;
   V(Unscopables)                                                                                   \
   V(Dispose)                                                                                       \
   V(AsyncDispose)
-
-class JsValue;
-class JsMessage;
-#define JS_TYPE_CLASSES(V)                                                                         \
-  V(Object)                                                                                        \
-  V(Boolean)                                                                                       \
-  V(Array)                                                                                         \
-  V(String)                                                                                        \
-  V(Symbol)                                                                                        \
-  V(BigInt)                                                                                        \
-  V(Number)                                                                                        \
-  V(Int32)                                                                                         \
-  V(Uint32)                                                                                        \
-  V(Date)                                                                                          \
-  V(RegExp)                                                                                        \
-  V(Map)                                                                                           \
-  V(Set)                                                                                           \
-  V(Promise)                                                                                       \
-  V(Proxy)                                                                                         \
-  V(Function)                                                                                      \
-  V(Uint8Array)                                                                                    \
-  V(ArrayBuffer)                                                                                   \
-  V(ArrayBufferView)                                                                               \
-  V(SharedArrayBuffer)
-
-#define V(Name) class Js##Name;
-JS_TYPE_CLASSES(V)
-#undef V
-
-// JsBufferSource is not in JS_TYPE_CLASSES because there is no v8::BufferSource
-// type (and hence no v8::Value::IsBufferSource() check). It is instead handled
-// with special-case logic in JsValue::tryCast and JsValueWrapper.
-class JsBufferSource;
-
-#define V(Name) || kj::isSameType<T, Js##Name>()
-template <typename T>
-concept IsJsValue = kj::isSameType<T, JsValue>() ||
-    kj::isSameType<T, JsMessage>() JS_TYPE_CLASSES(V) || kj::isSameType<T, JsBufferSource>();
-#undef V
 
 class DOMException;
 class ExternalMemoryAdjustment;
@@ -2983,12 +3013,55 @@ class Lock {
   virtual jsg::Dict<v8::Local<v8::Value>> toDict(v8::Local<v8::Value> value) = 0;
   virtual jsg::Dict<JsValue> toDict(const jsg::JsValue& value) = 0;
   virtual Promise<Value> toPromise(v8::Local<v8::Value> promise) = 0;
+  virtual Promise<void> toVoidPromise(v8::Local<v8::Value> promise) = 0;
+
+  // Looks up the TypeHandler for type T among the RESOURCE types registered with this
+  // isolate via JSG_DECLARE_ISOLATE_TYPE, returning kj::none if T was not registered.
+  // Request the resource type's handler as TypeHandler<jsg::Ref<T>>.
+  //
+  // Unlike TypeHandler parameter injection (which is only available in JSG-called
+  // functions), this works anywhere a Lock is available. It is useful when C++-initiated
+  // code needs to wrap a fresh resource object into its JavaScript wrapper (or unwrap a
+  // JS value) outside of any JSG callback.
+  //
+  // Only resource types are registered: their handlers always support both wrap and
+  // tryUnwrap. Value types (JSG_STRUCTs etc.) are not available here because eagerly
+  // instantiating their handlers requires both directions to compile, and some structs
+  // are deliberately one-directional; they continue to use parameter injection. See
+  // TypeWrapper::forEachTypeHandler in type-wrapper.h.
+  template <typename T>
+  kj::Maybe<const TypeHandler<T>&> tryGetTypeHandler() {
+    KJ_IF_SOME(handler, tryGetTypeHandlerErased(v8Isolate, typeid(TypeHandler<T>))) {
+      return *static_cast<const TypeHandler<T>*>(handler);
+    }
+    return kj::none;
+  }
 
   // ---------------------------------------------------------------------------
   // Setup stuff
 
   // Use to enable/disable dynamic code evaluation (via eval(), new Function(), or WebAssembly).
   void setAllowEval(bool allow);
+  bool isEvalAllowed();
+
+  // RAII scope that temporarily sets whether dynamic code evaluation (eval(),
+  // new Function(), WebAssembly compilation) is permitted, restoring the
+  // previous setting on destruction. Prefer this over paired setAllowEval()
+  // calls with a hard-coded restore value: such a restore revokes permission
+  // granted by an enclosing scope. For example, Wasm modules compile lazily at
+  // evaluation time, which can be nested inside the worker-startup window
+  // where the allow_eval_during_startup compat flag has already permitted
+  // eval; that permission must survive the compilation.
+  class AllowEvalScope {
+   public:
+    AllowEvalScope(Lock& js, bool allow);
+    ~AllowEvalScope() noexcept(false);
+    KJ_DISALLOW_COPY_AND_MOVE(AllowEvalScope);
+
+   private:
+    Lock& js;
+    bool previous;
+  };
 
   // Tracks whether JavaScript execution is currently disallowed so that conversions in unwrap()
   // can choose a safe, non-JS-invoking path. Prefer the RAII `DisallowJavaScriptScope` (which
@@ -3080,7 +3153,9 @@ class Lock {
   JsString str(kj::ArrayPtr<const kj::byte>) KJ_WARN_UNUSED_RESULT;
   JsString strIntern(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
   JsString strExtern(kj::ArrayPtr<const char>) KJ_WARN_UNUSED_RESULT;
+  JsString strExtern(kj::Arc<OwnedAscii>) KJ_WARN_UNUSED_RESULT;
   JsString strExtern(kj::ArrayPtr<const uint16_t>) KJ_WARN_UNUSED_RESULT;
+  JsString strExtern(kj::Arc<OwnedUtf16>) KJ_WARN_UNUSED_RESULT;
   JsSymbol symbol(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
   JsSymbol symbolShared(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
   JsSymbol symbolInternal(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
@@ -3160,6 +3235,18 @@ class Lock {
 
   // Request an extra microtask checkpoint after the current one completes.
   void requestExtraMicrotaskCheckpoint();
+
+  bool isEvaluatingModule();
+
+  class ModuleEvaluationScope {
+   public:
+    explicit ModuleEvaluationScope(Lock& js);
+    ~ModuleEvaluationScope() noexcept(false);
+    KJ_DISALLOW_COPY_AND_MOVE(ModuleEvaluationScope);
+
+   private:
+    Lock& js;
+  };
 
   // Sets the terminate-execution flag on the isolate so that the next time code tries to run, it
   // will be terminated. (But note that V8 only checks the flag at certain times, so it's possible

@@ -48,6 +48,11 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 - `OutputGate::lockWhile(promise)` blocks outgoing responses until the promise resolves
 - `InputGate::CriticalSection` must succeed or permanently breaks the gate
 - Observer classes (`RequestObserver`, `IsolateObserver`, etc.) have no-op defaults; all methods optional
+- Module registry selection: **always** use `isNewModuleRegistryEnabled(flags)` (`features.h`), never read `getNewModuleRegistry()` directly — Python workers ignore the flag and must not end up split across the two registries
+
+## Adding a compatibility flag
+
+When needing to add a compatibility flag, see [`adding-a-compatibility-flag.md`](../../../docs/reference/adding-a-compatibility-flag.md) for guidance.
 
 ## ANTI-PATTERNS
 

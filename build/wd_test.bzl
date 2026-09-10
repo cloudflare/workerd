@@ -241,6 +241,12 @@ def _wd_test_impl(ctx):
     )
 
     runfiles = ctx.runfiles(files = ctx.files.data)
+
+    # Add runfiles for the workerd binary, such as shared libraries (if any)
+    workerd_runfiles = ctx.attr.workerd[DefaultInfo].default_runfiles
+    if workerd_runfiles:
+        runfiles = runfiles.merge(workerd_runfiles)
+
     if ctx.file.sidecar:
         runfiles = runfiles.merge(ctx.runfiles(files = [ctx.file.sidecar]))
 

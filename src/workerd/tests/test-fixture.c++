@@ -13,6 +13,7 @@
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/observer.h>
 #include <workerd/io/tracer.h>
+#include <workerd/io/worker-entrypoint.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/server/workerd-api.h>
@@ -116,23 +117,23 @@ class MockEntropySource final: public kj::EntropySource {
     }
   }
 
-  template <typename T>
-  T rand() {
-    T r;
-    this->generate(kj::arrayPtr(&r, 1).asBytes());
-    return r;
-  }
-
  private:
   kj::byte counter = 0;
 };
 
 struct MockLimitEnforcer final: public LimitEnforcer {
+  MockLimitEnforcer(kj::Maybe<uint&> checkedSubrequestCount = kj::none)
+      : checkedSubrequestCount(checkedSubrequestCount) {}
+
   kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) override {
     return {};
   }
   void topUpActor() override {}
-  void newSubrequest(bool isInHouse) override {}
+  void newSubrequest(bool isInHouse) override {
+    KJ_IF_SOME(count, checkedSubrequestCount) {
+      ++count;
+    }
+  }
   void newKvRequest(KvOpType op) override {}
   void newAnalyticsEngineRequest() override {}
   kj::Promise<void> limitDrain() override {
@@ -162,6 +163,8 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   size_t getSqliteMemoryUsage() const override {
     return 0;
   }
+
+  kj::Maybe<uint&> checkedSubrequestCount;
 };
 
 struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
@@ -244,12 +247,15 @@ inline server::config::Worker::Reader buildConfig(
   modules[0].setName(mainModuleName);
   modules[0].setEsModule(params.mainModuleSource.orDefault(mainModuleSource));
 
-  // Initialize autogates with an empty config. TODO(later): allow TestFixture to accept autogate
-  // states and pass them in here.
+  // Initialize autogates (with an empty config unless the test supplied gate names).
   //
   // This needs to happen here because `buildConfig` is called early in the construction of
   // `TestFixture`.
-  util::Autogate::initAutogate({});
+  KJ_IF_SOME(gates, params.autogates) {
+    util::Autogate::initAutogateNamesForTest(gates);
+  } else {
+    util::Autogate::initAutogate({});
+  }
 
   return config;
 }
@@ -346,7 +352,7 @@ TestFixture::TestFixture(SetupParams&& params)
       api(kj::heap<server::WorkerdApi>(testV8System,
           params.featureFlags.orDefault(CompatibilityFlags::Reader()),
           capnp::List<server::config::Extension>::Reader{},
-          kj::heap<MockIsolateLimitEnforcer>()->getCreateParams(),
+          kj::rc<MockIsolateLimitEnforcer>()->getCreateParams(),
           isolateGroup,
           kj::atomicRefcounted<JsgIsolateObserver>(),
           *memoryCacheProvider,
@@ -355,7 +361,7 @@ TestFixture::TestFixture(SetupParams&& params)
       workerIsolate(kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
           kj::atomicRefcounted<IsolateObserver>(),
           scriptId,
-          kj::heap<MockIsolateLimitEnforcer>(kj::atomicAddRef(*heapLimitFlag)),
+          kj::rc<MockIsolateLimitEnforcer>(kj::atomicAddRef(*heapLimitFlag)).toOwn(),
           Worker::Isolate::InspectorPolicy::DISALLOW)),
       workerScript(kj::atomicRefcounted<Worker::Script>(kj::atomicAddRef(*workerIsolate),
           scriptId,
@@ -369,7 +375,11 @@ TestFixture::TestFixture(SetupParams&& params)
           kj::none,
           SpanParent(nullptr),
           newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()),
-          kj::none /* new module registry */)),
+          // TestFixture does not support the new module registry: no registry
+          // is constructed here, and Worker::Script rejects feature flags that
+          // enable it without one. A test that needs the new registry must
+          // build one (see WorkerdApi::newWorkerdModuleRegistry) and pass it.
+          kj::none)),
       worker(kj::atomicRefcounted<Worker>(kj::atomicAddRef(*workerScript),
           kj::atomicRefcounted<WorkerObserver>(),
           [](jsg::Lock&, const Worker::Api&, v8::Local<v8::Object>, v8::Local<v8::Object>) {
@@ -382,13 +392,16 @@ TestFixture::TestFixture(SetupParams&& params)
       waitUntilTasks(*errorHandler),
       headerTable(headerTableBuilder.build()),
       ioChannelFactory(kj::mv(params.ioChannelFactory)),
-      requestObserverFactory(kj::mv(params.requestObserverFactory)) {
+      requestObserverFactory(kj::mv(params.requestObserverFactory)),
+      checkedSubrequestCount(params.checkedSubrequestCount) {
   KJ_IF_SOME(id, params.actorId) {
     KJ_IF_SOME(provided, params.actorLoopback) {
       savedActorLoopback = kj::mv(provided);
     } else {
       savedActorLoopback = kj::refcounted<MockActorLoopback>();
     }
+    savedHibernationManager = kj::mv(params.hibernationManager);
+    savedHolderToken = params.holderToken;
     actor = makeActor(kj::mv(id));
   }
 }
@@ -417,11 +430,19 @@ kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
   return kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
       /*hasTransient=*/false, actorCacheFactory, /*classname=*/kj::none,
       /*props=*/Frankenvalue(), storageFactory, loopback->addRef(), *timerChannel,
-      kj::refcounted<ActorObserver>(), kj::none, kj::none);
+      kj::refcounted<ActorObserver>(),
+      savedHibernationManager.map(
+          [](kj::Own<Worker::Actor::HibernationManager>& m) { return m->addRef(); }),
+      /*hibernationEventType=*/kj::none, /*container=*/kj::none,
+      /*containerImages=*/jsg::Dict<kj::String>{}, /*facetManager=*/kj::none,
+      /*version=*/kj::none, savedHolderToken);
 }
 
 void TestFixture::resetActor() {
-  auto id = KJ_ASSERT_NONNULL(actor)->cloneId();
+  resetActor(KJ_ASSERT_NONNULL(actor)->cloneId());
+}
+
+void TestFixture::resetActor(Worker::Actor::Id id) {
   actor = kj::none;  // Drop the old Actor (and its OutputGate / InputGate / ActorCache).
   actor = makeActor(kj::mv(id));
 }
@@ -458,8 +479,8 @@ void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environmen
 }
 
 kj::Own<IoContext> TestFixture::newIoContext() {
-  return kj::refcounted<IoContext>(
-      threadContext, kj::atomicAddRef(*worker), actor, kj::heap<MockLimitEnforcer>());
+  return kj::refcounted<IoContext>(threadContext, kj::atomicAddRef(*worker), actor,
+      kj::heap<MockLimitEnforcer>(checkedSubrequestCount));
 }
 
 kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest() {
@@ -468,11 +489,18 @@ kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest() {
 }
 
 kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest(IoContext& context) {
-  kj::Own<IoChannelFactory> channelFactory;
+  auto incomingRequest = newUndeliveredIncomingRequest(context);
+  incomingRequest->delivered();
+  return incomingRequest;
+}
+
+kj::Own<IoContext::IncomingRequest> TestFixture::newUndeliveredIncomingRequest(
+    IoContext& context, kj::Maybe<kj::Own<BaseTracer>> workerTracer) {
+  kj::Rc<IoChannelFactory> channelFactory;
   KJ_IF_SOME(factory, ioChannelFactory) {
     channelFactory = factory(*timerChannel);
   } else {
-    channelFactory = kj::heap<DummyIoChannelFactory>(*timerChannel);
+    channelFactory = kj::rc<DummyIoChannelFactory>(*timerChannel);
   }
   kj::Own<RequestObserver> observer;
   KJ_IF_SOME(factory, requestObserverFactory) {
@@ -480,9 +508,8 @@ kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest(IoContext& c
   } else {
     observer = kj::refcounted<RequestObserver>();
   }
-  auto incomingRequest = kj::heap<IoContext::IncomingRequest>(
-      kj::addRef(context), kj::mv(channelFactory), kj::mv(observer), kj::none, kj::none);
-  incomingRequest->delivered();
+  auto incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::addRef(context),
+      kj::mv(channelFactory), kj::mv(observer), kj::mv(workerTracer), kj::none);
   return incomingRequest;
 }
 
@@ -502,6 +529,31 @@ TestFixture::Response TestFixture::runRequest(
   });
 
   return {.statusCode = response.statusCode, .body = response.body->str()};
+}
+
+kj::Own<WorkerInterface> TestFixture::makeWorkerEntrypoint() {
+  kj::Rc<IoChannelFactory> channelFactory;
+  KJ_IF_SOME(factory, ioChannelFactory) {
+    channelFactory = factory(*timerChannel);
+  } else {
+    channelFactory = kj::rc<DummyIoChannelFactory>(*timerChannel);
+  }
+
+  kj::Own<RequestObserver> observer;
+  KJ_IF_SOME(factory, requestObserverFactory) {
+    observer = factory();
+  } else {
+    observer = kj::refcounted<RequestObserver>();
+  }
+
+  kj::Maybe<kj::Own<Worker::Actor>> actorRef;
+  KJ_IF_SOME(a, actor) {
+    actorRef = kj::addRef(*a);
+  }
+
+  return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), kj::none, Frankenvalue(),
+      kj::mv(actorRef), kj::heap<MockLimitEnforcer>(), kj::Own<void>(), kj::mv(channelFactory),
+      kj::mv(observer), waitUntilTasks, false, kj::none, kj::none, kj::none);
 }
 
 }  // namespace workerd

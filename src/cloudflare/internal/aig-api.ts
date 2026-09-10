@@ -89,8 +89,7 @@ export type AIGatewayProviders =
 
 export type AIGatewayHeaders = {
   'cf-aig-metadata':
-    | Record<string, number | string | boolean | null | bigint>
-    | string;
+    Record<string, number | string | boolean | null | bigint> | string;
   'cf-aig-custom-cost':
     | { per_token_in?: number; per_token_out?: number }
     | { total_cost?: number }

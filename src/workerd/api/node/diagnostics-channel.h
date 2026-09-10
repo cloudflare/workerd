@@ -52,7 +52,7 @@ class Channel: public jsg::Object {
 
  private:
   struct StoreEntry {
-    kj::Own<jsg::AsyncContextFrame::StorageKey> key;
+    kj::Arc<jsg::AsyncContextFrame::StorageKey> key;
     TransformCallback transform;
     JSG_MEMORY_INFO(StoreEntry) {
       tracker.trackField("transform", transform);
@@ -60,23 +60,22 @@ class Channel: public jsg::Object {
   };
 
   struct StoreCallbacks {
-    auto& keyForRow(StoreEntry& row) const {
+    const auto& keyForRow(const StoreEntry& row) const {
       return *row.key;
     }
 
-    bool matches(const StoreEntry& a, jsg::AsyncContextFrame::StorageKey& key) const {
+    bool matches(const StoreEntry& a, const jsg::AsyncContextFrame::StorageKey& key) const {
       return a.key.get() == &key;
     }
 
-    uint hashCode(jsg::AsyncContextFrame::StorageKey& key) const {
+    uint hashCode(const jsg::AsyncContextFrame::StorageKey& key) const {
       return key.hashCode();
     }
   };
 
-  // jsg::Name has a private visitForGc and is visited through NameWrapper
-  // rather than through the GcVisitor::visit() overload set, so we cannot
-  // and do not visit it from Channel::visitForGc.
-  jsg::Name name;  // NOLINT(jsg-visit-for-gc)
+  // Not GC-visited: jsg::Name's visitForGc is private. The symbol handle (if
+  // any) is a strong root for the Channel's lifetime.
+  jsg::Name name;
   kj::HashMap<jsg::HashableV8Ref<v8::Object>, MessageCallback> subscribers;
   kj::Table<StoreEntry, kj::HashIndex<StoreCallbacks>> stores;
 

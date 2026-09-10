@@ -1,0 +1,31 @@
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_rust//rust:defs.bzl", "rust_static_library")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+
+# Windows build fixes due to rust libraries missing symbols:
+# https://github.com/bazelbuild/rules_rust/blob/144d34fd/ffi/cc/global_allocator_library/BUILD.bazel#L3
+# `empty_lib` static library will bring all the symbols in.
+wd_cc_library(
+    name = "runtime",
+    linkopts = select({
+        "@platforms//os:windows": [
+            "ntdll.lib",
+        ],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [":empty_lib"],
+)
+
+write_file(
+    name = "lib_rs",
+    out = "lib.rs",
+    tags = ["manual"],
+)
+
+rust_static_library(
+    name = "empty_lib",
+    srcs = [":lib.rs"],
+    edition = "2024",
+    tags = ["manual"],
+)

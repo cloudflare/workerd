@@ -1,0 +1,47 @@
+using Workerd = import "/workerd/workerd.capnp";
+using ReadableModules = import "readable-modules.capnp";
+
+# Runs the readable suite against the C++ streams implementation.
+#
+# Pinned compatibility flags (see src/tests/streams/AGENTS.md — the date
+# axis belongs to the wd_test variants, so every date-gated behavior the
+# suite observes is pinned by name):
+# - nodejs_compat: node:assert for the tests themselves.
+# - streams_enable_constructors: new ReadableStream() etc. (the suite's
+#   subject); unflagged side guarded by the legacy cell.
+# - transformstream_enable_standard_constructor: the tee-reentrancy tests
+#   drive tee through JS TransformStreams.
+# - fixup-transform-stream-backpressure: same tests observe transform
+#   backpressure.
+# - capture_async_api_throws: locked-stream pipeTo() rejects instead of
+#   throwing synchronously.
+# - workers_api_getters_setters_on_prototype: accessor placement observed
+#   by the api-surface tests.
+# - set_tostring_tag: Symbol.toStringTag observed by api-surface tests.
+# - writable_stream_spec_compliant_writer: writer behavior in the
+#   integration tests' pipe interactions.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-readable-cpp",
+      worker = (
+        modules = ReadableModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "fixup-transform-stream-backpressure",
+          "capture_async_api_throws",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+          "writable_stream_spec_compliant_writer",
+          "enable_weak_ref",
+        ],
+        bindings = [
+          ( name = "SELF", service = "streams-readable-cpp" ),
+        ],
+      )
+    ),
+  ],
+  # For gc.js.
+  v8Flags = ["--expose-gc"],
+);

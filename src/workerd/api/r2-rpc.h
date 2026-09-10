@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/api/blob.h>
+#include <workerd/api/js-readable-stream.h>
 #include <workerd/jsg/jsg.h>
 
 namespace kj {
@@ -14,7 +15,6 @@ class HttpClient;
 namespace workerd::api {
 
 class ReadableStreamSource;
-class ReadableStream;
 
 // NOTE: We don't currently actually use this as a structured object (hence the `kj::Own<R2Error>`
 // that we see pop up).
@@ -64,10 +64,8 @@ class R2Error: public jsg::Object {
   friend struct R2Result;
 };
 
-using R2PutValue = kj::OneOf<jsg::Ref<ReadableStream>,
-    kj::Array<kj::byte>,
-    jsg::NonCoercible<kj::String>,
-    jsg::Ref<Blob>>;
+using R2PutValue =
+    kj::OneOf<JsReadableStream, kj::Array<kj::byte>, jsg::NonCoercible<kj::String>, jsg::Ref<Blob>>;
 
 struct R2Result {
   uint httpStatus;
@@ -102,7 +100,10 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
     kj::Maybe<kj::StringPtr> jwt,
     CompatibilityFlags::Reader flags);
 
-kj::Promise<R2Result> doR2HTTPPutRequest(kj::Own<kj::HttpClient> client,
+// Note: takes a jsg::Lock because computing the expected body size of a JsReadableStream value
+// requires it. The lock is used synchronously (before any I/O) and is not retained.
+kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js,
+    kj::Own<kj::HttpClient> client,
     kj::Maybe<R2PutValue> value,
     kj::Maybe<uint64_t> streamSize,
     // Deprecated. For internal beta API only.

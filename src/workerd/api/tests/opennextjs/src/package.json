@@ -10,12 +10,12 @@
   },
   "dependencies": {
     "@opennextjs/cloudflare": "1.17.2",
-    "next": "16.2.1",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "wrangler": "4.76.0"
+    "next": "16.2.12",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "wrangler": "4.120.1"
   },
   "devDependencies": {
-    "esbuild": "^0.27.4"
+    "esbuild": "^0.27.7"
   }
 }

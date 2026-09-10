@@ -1,0 +1,120 @@
+# Same as js-rpc-socket-test.wd-test but with the TypeScript streams implementation and the
+# rpc-externals-hydration autogate enabled, pinning socket transfer over RPC (and the rest of
+# the js-rpc suite) for TypeScript-backed streams. Socket transfer exercises the whole-socket
+# hydration slot: the socket external subsumes its two stream externals.
+#
+# Note that in the BUILD file we explicitly disable info logging for this test because it's too
+# noisy.
+
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "js-rpc-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "js-rpc-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "fetcher_no_get_put_delete",
+          "enable_abortsignal_rpc",
+          "enhanced_error_serialization",
+          "enable_ctx_exports",
+          "experimental",
+          "streams_enable_constructors",
+          "http_headers_getsetcookie",
+          "fetch_legacy_url",
+          "rpc_params_transfer_stubs",
+          "typescript_implemented_streams"],
+        bindings = [
+          (name = "self", service = "nonClass-loop"),
+          (name = "MyService", service = "MyService-loop"),
+          (name = "MyServiceProxy", service = "MyServiceProxy-loop"),
+          (name = "MyActor", durableObjectNamespace = "MyActor"),
+          (name = "ActorNoExtends", durableObjectNamespace = "ActorNoExtends"),
+          (name = "defaultExport", service = "default-loop"),
+          (name = "twelve", json = "12"),
+          (name = "GreeterFactory", service = "GreeterFactory-loop"),
+          # Only present in the socket (loopback) variant: gates the socket-transfer assertions in
+          # js-rpc-test.js, which require a real RPC boundary to keep the producer context alive.
+          (name = "socketTransfer", json = "true"),
+        ],
+
+        durableObjectNamespaces = [
+          (className = "MyActor", uniqueKey = "foo"),
+          (className = "ActorNoExtends", uniqueKey = "bar"),
+        ],
+
+        durableObjectStorage = (inMemory = void),
+      )
+    ),
+    ( name = "MyService-loop",
+      external = (
+        address = "loopback:MyService-loop",
+        http = (capnpConnectHost = "cappy")
+      )
+    ),
+    ( name = "MyServiceProxy-loop",
+      external = (
+        address = "loopback:MyServiceProxy-loop",
+        http = (capnpConnectHost = "cappy")
+      )
+    ),
+    ( name = "nonClass-loop",
+      external = (
+        address = "loopback:nonClass-loop",
+        http = (capnpConnectHost = "cappy")
+      )
+    ),
+    ( name = "default-loop",
+      external = (
+        address = "loopback:default-loop",
+        http = (capnpConnectHost = "cappy")
+      )
+    ),
+    ( name = "GreeterFactory-loop",
+      external = (
+        address = "loopback:GreeterFactory-loop",
+        http = (capnpConnectHost = "cappy")
+      )
+    ),
+    ( name = "internet", network = ( allow = ["private"] ) ),
+  ],
+  sockets = [
+    ( name = "MyService-loop",
+      address = "loopback:MyService-loop",
+      service = (name = "js-rpc-test", entrypoint = "MyService"),
+      http = (capnpConnectHost = "cappy")
+    ),
+    ( name = "MyServiceProxy-loop",
+      address = "loopback:MyServiceProxy-loop",
+      service = (name = "js-rpc-test", entrypoint = "MyServiceProxy"),
+      http = (capnpConnectHost = "cappy")
+    ),
+    ( name = "nonClass-loop",
+      address = "loopback:nonClass-loop",
+      service = (name = "js-rpc-test", entrypoint = "nonClass"),
+      http = (capnpConnectHost = "cappy")
+    ),
+    ( name = "default-loop",
+      address = "loopback:default-loop",
+      service = (name = "js-rpc-test"),
+      http = (capnpConnectHost = "cappy")
+    ),
+    ( name = "GreeterFactory-loop",
+      address = "loopback:GreeterFactory-loop",
+      service = (name = "js-rpc-test", entrypoint = "GreeterFactory"),
+      http = (capnpConnectHost = "cappy")
+    ),
+    # For testing connect() handler
+    (name = "tcp", address = "*:8081", tcp = (), service = "js-rpc-test")
+  ],
+  v8Flags = [ "--expose-gc" ],
+  # Required by the socket-transfer assertions guarded by the `socketTransfer` binding above.
+  autogates = [
+    "workerd-autogate-socket-rpc-transfer",
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+    "workerd-autogate-rpc-externals-hydration",
+  ],
+);

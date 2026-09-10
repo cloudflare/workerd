@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+using ReadableByteModules = import "readable-byte-modules.capnp";
+
+# Runs the SAME modules against the TypeScript streams implementation.
+# The TypeScript implementation hard-codes the modern behaviors, so the
+# C++ cell's semantic flags are deliberately omitted: their absence
+# asserts the TS implementation does not consult them.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-readable-byte-ts",
+      worker = (
+        modules = ReadableByteModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "expose_draining_reader",
+          "experimental",
+        ],
+        bindings = [
+          ( name = "SELF", service = "streams-readable-byte-ts" ),
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+  # For gc.js.
+  v8Flags = ["--expose-gc"],
+);

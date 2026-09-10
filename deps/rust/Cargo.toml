@@ -1,7 +1,7 @@
 [package]
 name = "direct-cargo-bazel-deps"
 version = "0.0.1"
-edition = "2021"
+edition = "2024"
 publish = false
 
 # This synthetic crate exists only to drive Cargo dependency resolution for Bazel.
@@ -9,7 +9,7 @@ publish = false
 path = "fake.rs"
 
 [dependencies]
-# dependencies from workerd-cxx
+# dependencies from src/rust/cxx
 cc = "1"
 # clap also includes features needed by workerd
 clap = { version = "4", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
@@ -25,17 +25,28 @@ syn = { version = "2", features = ["full"] }
 # We prefer single-digit dependencies to stay up to date as much as possible
 # When adding packages here, please only enable features as needed to keep compile times and
 # binary sizes bounded.
-ada-url = "3"
+# The `bundled` feature is disabled (it is part of the default feature set): with
+# it off we skip compiling the crate's vendored copy of ada and instead link
+# workerd's existing C++ `@ada-url`, avoiding a duplicate copy of ada in the
+# binary.
+ada-url = { version = "4", default-features = false, features = ["std"] }
 anyhow = "1"
 async-trait = { version = "0", default-features = false }
+bytes = { version = "1", default-features = false }
 capnp = "0"
 capnpc = "0"
 capnp-rpc = "0"
 clang-ast = "0"
 encoding_rs = "0"
 flate2 = "1"
+# Memory-safe Rust implementation of the zlib C API, exposed to C++ under
+# zlib_rs_-prefixed symbols by src/rust/zlib-rs. rust-allocator only:
+# zalloc/zfree left NULL use Rust's global allocator.
+libz-rs-sys = { version = "0.6", default-features = false, features = ["std", "rust-allocator"] }
 futures = "0"
-lol_html_c_api = { git = "https://github.com/cloudflare/lol-html", tag = "v2.7.2" }
+libc = "0"
+lol_html_c_api = { git = "https://github.com/cloudflare/lol-html" }
+hashlink = "0"
 nix = "0"
 pico-args = "0"
 ruff_python_ast = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
@@ -45,7 +56,7 @@ serde_json = { version = "1", features = ["unbounded_depth"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 # tokio is huge, let's enable only features when we actually need them.
-tokio = { version = "1", default-features = false, features = ["net", "rt", "rt-multi-thread", "time"] }
+tokio = { version = "1", default-features = false, features = ["net", "rt", "rt-multi-thread", "sync", "time"] }
 tracing = { version = "0", default-features = false, features = ["std"] }
-swc_common = "21"
-swc_ts_fast_strip = "49"
+swc_common = "25"
+swc_ts_fast_strip = "57"

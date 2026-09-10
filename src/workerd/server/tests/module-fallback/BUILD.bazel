@@ -1,0 +1,12 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+js_test(
+    name = "module-fallback-test",
+    size = "large",
+    data = ["//src/workerd/server:workerd"],
+    entry_point = "module-fallback-test.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+    },
+    tags = ["js-test"],
+)

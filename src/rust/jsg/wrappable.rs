@@ -282,41 +282,62 @@ pub trait FromJS: Sized {
 // Primitive type implementations
 // =============================================================================
 
-/// Implements `Type`, `ToJS`, and `FromJS` for primitive types.
-macro_rules! impl_primitive {
-    { $type:ty, $class_name:literal, $is_exact:ident, $unwrap_fn:ident } => {
-        impl Type for $type {
-            fn class_name() -> &'static str {
-                $class_name
-            }
+// Boolean implementation for JavaScript booleans.
+impl Type for bool {
+    fn class_name() -> &'static str {
+        "boolean"
+    }
 
-            fn is_exact(value: &v8::Local<v8::Value>) -> bool {
-                value.$is_exact()
-            }
-        }
-
-        impl ToJS for $type {
-            fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-            where
-                'b: 'a,
-            {
-                self.to_local(lock)
-            }
-        }
-
-        impl FromJS for $type {
-            type ResultType = Self;
-
-            fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
-                // SAFETY: The isolate is locked and value is a valid V8 local handle.
-                Ok(unsafe { v8::ffi::$unwrap_fn(lock.isolate().as_ffi(), value.into_ffi()) })
-            }
-        }
-    };
+    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+        value.is_boolean()
+    }
 }
 
-impl_primitive!(std::string::String, "string", is_string, unwrap_string);
-impl_primitive!(bool, "boolean", is_boolean, unwrap_boolean);
+impl ToJS for bool {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    where
+        'b: 'a,
+    {
+        self.to_local(lock)
+    }
+}
+
+impl FromJS for bool {
+    type ResultType = Self;
+
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        // SAFETY: The isolate is locked and value is a valid V8 local handle.
+        Ok(unsafe { v8::ffi::unwrap_boolean(lock.isolate().as_ffi(), value.into_ffi()) })
+    }
+}
+
+impl Type for std::string::String {
+    fn class_name() -> &'static str {
+        "string"
+    }
+
+    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+        value.is_string()
+    }
+}
+
+impl ToJS for std::string::String {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    where
+        'b: 'a,
+    {
+        self.to_local(lock)
+    }
+}
+
+impl FromJS for std::string::String {
+    type ResultType = Self;
+
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        // SAFETY: The isolate is locked and value is a valid V8 local handle.
+        Ok(unsafe { v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi()) }?)
+    }
+}
 
 // Number implementation for JavaScript numbers
 impl Type for Number {
@@ -344,7 +365,7 @@ impl FromJS for Number {
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         // SAFETY: The isolate is locked and value is a valid V8 local handle.
         let f64_value =
-            unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) };
+            unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
         Ok(Self::new(f64_value))
     }
 }
@@ -367,7 +388,7 @@ impl FromJS for &str {
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         // SAFETY: The isolate is locked and value is a valid V8 local handle.
-        Ok(unsafe { v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi()) })
+        Ok(unsafe { v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi()) }?)
     }
 }
 
@@ -418,7 +439,7 @@ macro_rules! impl_integer_from_js {
                 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                 fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
                     // SAFETY: The isolate is locked and value is a valid V8 local handle.
-                    let num = unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) };
+                    let num = unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
                     Ok(num as $type)
                 }
             }
@@ -506,7 +527,7 @@ impl<T: Type + FromJS> FromJS for NonCoercible<T> {
     }
 }
 
-impl<T: Type + FromJS> FromJS for Nullable<T> {
+impl<T: FromJS> FromJS for Nullable<T> {
     type ResultType = Nullable<T::ResultType>;
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
@@ -556,7 +577,7 @@ impl<T: Type + FromJS<ResultType = T>> FromJS for Vec<T> {
             .try_as::<v8::Array>()
             .ok_or_else(|| Error::new_type_error(format!("Expected Array but got {type_name}")))?;
 
-        let globals = array.iterate();
+        let globals = array.iterate()?;
         let mut result = Self::with_capacity(globals.len());
         for global in globals {
             let local = global.as_local(lock);
@@ -644,7 +665,7 @@ macro_rules! impl_typed_array {
                     )));
                 }
                 // SAFETY: The isolate is locked and value is a valid V8 local handle of the correct TypedArray type.
-                Ok(unsafe { v8::ffi::$unwrap_fn(lock.isolate().as_ffi(), value.into_ffi()) })
+                Ok(unsafe { v8::ffi::$unwrap_fn(lock.isolate().as_ffi(), value.into_ffi()) }?)
             }
         }
 

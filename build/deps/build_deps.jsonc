@@ -44,8 +44,7 @@
     },
     {
       "name": "aspect_rules_js",
-      "type": "bazel_dep",
-      "freeze_version": "3.1.1"
+      "type": "bazel_dep"
     },
     {
       "name": "aspect_rules_ts",
@@ -73,6 +72,15 @@
     {
       "name": "rules_rust",
       "type": "bazel_dep"
+    },
+    {
+      "name": "rules_foreign_cc",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "rust_nightly",
+      "type": "rust_nightly",
+      "freeze_version": "2026-07-16"
     },
     // wasm-tools
     {
@@ -155,6 +163,24 @@
       "file_regex": "llvm-.*-linux-amd64-clang-tidy-dev\\.tar\\.xz$",
       "build_file": "@workerd//tools/clang-tidy:BUILD.headers",
       "freeze_version": "clang-tidy-22.1.5"
+    },
+    {
+      "name": "llvm_runtimes",
+      "type": "git_clone",
+      "url": "https://github.com/llvm/llvm-project.git",
+      "tag": "llvmorg-22.1.8",
+      "build_file": "@workerd//:build/BUILD.llvm-runtimes",
+      "sparse_checkout_patterns": [
+        "cmake",
+        "libc/hdr",
+        "libc/include",
+        "libc/shared",
+        "libc/src/__support",
+        "libcxx",
+        "libcxxabi",
+        "libunwind",
+        "runtimes"
+      ]
     }
   ]
 }

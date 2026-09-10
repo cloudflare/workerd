@@ -7,8 +7,4 @@ wd_rust_crate(
     ],
     cxx_bridge_src = "lib.rs",
     visibility = ["//visibility:public"],
-    deps = [
-        "@crates_vendor//:tokio",
-        "@crates_vendor//:tracing",
-    ],
 )

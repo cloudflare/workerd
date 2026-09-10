@@ -2,7 +2,6 @@
 
 use std::io::Error;
 use std::pin::Pin;
-use std::time::Duration;
 
 use tracing::debug;
 use tracing::error;
@@ -79,17 +78,6 @@ mod ffi {
     extern "Rust" {
         fn get_string() -> String;
         fn get_str() -> &'static str;
-    }
-
-    // test async
-    unsafe extern "C++" {
-        type UsizeCallback;
-        #[cxx_name = "operatorCALL"]
-        fn call(self: Pin<&mut UsizeCallback>, x: usize);
-    }
-    extern "Rust" {
-        fn async_immediate(callback: Pin<&'static mut UsizeCallback>);
-        fn async_sleep(callback: Pin<&'static mut UsizeCallback>);
     }
 }
 
@@ -181,24 +169,6 @@ fn get_string() -> String {
 
 fn get_str() -> &'static str {
     "rust_str"
-}
-
-// SAFETY: UsizeCallback is only accessed from the Tokio runtime thread after being moved there.
-unsafe impl Send for ffi::UsizeCallback {}
-// SAFETY: UsizeCallback is only accessed from one thread at a time via Pin<&mut>.
-unsafe impl Sync for ffi::UsizeCallback {}
-
-fn async_immediate(callback: Pin<&'static mut ffi::UsizeCallback>) {
-    cxx_integration::tokio::spawn(async move {
-        callback.call(42);
-    });
-}
-
-fn async_sleep(callback: Pin<&'static mut ffi::UsizeCallback>) {
-    cxx_integration::tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(1)).await;
-        callback.call(42);
-    });
 }
 
 #[cfg(all(test, feature = "sanitizer_address"))]

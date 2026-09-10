@@ -6,6 +6,13 @@ See `docs/streams.md` for narrative tutorial.
 
 ## ARCHITECTURE
 
+NOTE: C++ code outside this directory does not use `jsg::Ref<ReadableStream>` or
+`jsg::Ref<WritableStream>` directly; it goes through the `JsReadableStream` / `JsWritableStream`
+abstractions in `src/workerd/api/js-{readable,writable}-stream.{h,c++}`, which hide which stream
+implementation backs a given stream (and provide `JsReadableWritablePair` +
+`pipeTo`/`pipeThrough` for abstraction-level pipelines). New C++ consumers of streams should use
+those abstractions, not the types defined here.
+
 Dual implementation behind unified API:
 
 - **Internal** (`internal.h`): kj-backed, byte-only, single pending read, no JS queue
@@ -27,10 +34,6 @@ Key deps: `util/state-machine.h` (stream state FSM), `util/weak-refs.h`, `util/r
 | `identity-transform-stream.{h,c++}` | Internal identity transform (byte-only, 1:1 read↔write)                                             |
 | `internal.{h,c++}`                  | `ReadableStreamInternalController`, `WritableStreamInternalController`                              |
 | `standard.{h,c++}`                  | `ReadableStreamJsController`, `WritableStreamJsController` — main complexity (~5400 lines combined) |
-| `readable-source.{h,c++}`           | `ReadableStreamSource` — kj `AsyncInputStream` adapter                                              |
-| `writable-sink.{h,c++}`             | `WritableStreamSink` — kj `AsyncOutputStream` adapter                                               |
-| `readable-source-adapter.{h,c++}`   | Standard→Internal bridge (wraps JS controller as `ReadableStreamSource`)                            |
-| `writable-sink-adapter.{h,c++}`     | Standard→Internal bridge (wraps JS controller as `WritableStreamSink`)                              |
 | `common.{h,c++}`                    | Shared types: `ReadResult`, `StreamStates`, controller interfaces                                   |
 | `queue.{h,c++}`                     | `ValueQueue`/`ByteQueue` for Standard stream backpressure                                           |
 | `compression.{h,c++}`               | `CompressionStream`/`DecompressionStream` (zlib transforms)                                         |

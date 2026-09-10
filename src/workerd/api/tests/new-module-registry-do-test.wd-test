@@ -1,0 +1,32 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Exercises the new module registry inside Durable Objects: static imports in
+# actor code, dynamic import and CommonJS evaluation at request time within
+# the actor's context, and the actor storage machinery alongside the registry.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "new-module-registry-do-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "new-module-registry-do-test.js"),
+          (name = "helper", esModule = "export const VALUE = 42; export const url = import.meta.url;"),
+          (name = "cjs", commonJsModule = "module.exports = { fromRequire: require('cjs-dep').n };"),
+          (name = "cjs-dep", commonJsModule = "exports.n = 42;"),
+          (name = "words", text = "hello from text module"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat_v2",
+          "new_module_registry",
+          "rpc",
+        ],
+        durableObjectNamespaces = [
+          (className = "TestActor", uniqueKey = "TestActor"),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [
+          (name = "ns", durableObjectNamespace = "TestActor"),
+        ],
+      )
+    ),
+  ],
+);

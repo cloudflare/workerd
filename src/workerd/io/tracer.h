@@ -37,10 +37,17 @@ class BaseTracer: public kj::Refcounted {
   }
 
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
+  //
+  // `errorInfo` carries per-argument structured Error fields for the originating console.*
+  // call. See `tracing::LogErrorInfo` for the semantics: the outer kj::Maybe is none when
+  // none of the arguments was a native Error; otherwise the inner array's length matches
+  // the argument count, with kj::none in slots whose argument was not an Error. Pass
+  // `kj::none` for non-console internal warning paths.
   virtual void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       LogLevel logLevel,
-      kj::String message) = 0;
+      kj::String message,
+      tracing::LogErrorInfo errorInfo = kj::none) = 0;
   // Add a span open event.
   virtual void addSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
@@ -48,9 +55,20 @@ class BaseTracer: public kj::Refcounted {
       kj::Date startTime) = 0;
   // Add a span close event.
   virtual void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) = 0;
+  virtual void addSpanAttribute(const tracing::InvocationSpanContext& context,
+      kj::ConstString key,
+      tracing::Attribute::Value value) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) = 0;
+
+  // Records an exception event on a span without treating the invocation as having thrown.
+  virtual void addSpanException(tracing::SpanId spanId,
+      kj::Date timestamp,
+      kj::Maybe<tracing::Exception::Code> code,
       kj::String name,
       kj::String message,
       kj::Maybe<kj::String> stack) = 0;
@@ -95,9 +113,7 @@ class BaseTracer: public kj::Refcounted {
 
   // Mark this tracer as intentionally unused (e.g., for duplicate alarm requests).
   // When set, the destructor will not log a warning about missing Onset event.
-  void markUnused() {
-    markedUnused = true;
-  }
+  virtual void markUnused() = 0;
 
  protected:
   // Retrieves the current timestamp. If the IoContext is no longer available, we assume that the
@@ -117,10 +133,6 @@ class BaseTracer: public kj::Refcounted {
 
   // Weak reference to the IoContext, used to report span end time if available.
   kj::Maybe<kj::Own<IoContext::WeakRef>> weakIoContext;
-
-  // When true, the destructor will not log a warning about missing Onset event.
-  // Set via markUnused() when a tracer is intentionally not used (e.g., duplicate alarm requests).
-  bool markedUnused = false;
 
  private:
   friend class workerd::WeakRef<BaseTracer>;
@@ -146,14 +158,29 @@ class WorkerTracer final: public BaseTracer {
   void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       LogLevel logLevel,
-      kj::String message) override;
+      kj::String message,
+      tracing::LogErrorInfo errorInfo = kj::none) override;
   void addSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override;
   void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
+  void addSpanAttribute(const tracing::InvocationSpanContext& context,
+      kj::ConstString key,
+      tracing::Attribute::Value value) override;
+  // Variant for RPC-based tracing, where the caller supplies the timestamp from its IoContext.
+  void addSpanAttributeInternal(const tracing::InvocationSpanContext& context,
+      kj::ConstString key,
+      tracing::Attribute::Value value,
+      kj::Date timestamp);
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) override;
+  void addSpanException(tracing::SpanId spanId,
+      kj::Date timestamp,
+      kj::Maybe<tracing::Exception::Code> code,
       kj::String name,
       kj::String message,
       kj::Maybe<kj::String> stack) override;
@@ -185,6 +212,8 @@ class WorkerTracer final: public BaseTracer {
       kj::Date timestamp,
       const kj::ConstString& methodName) override;
 
+  void markUnused() override;
+
  private:
   PipelineLogLevel pipelineLogLevel;
   kj::Own<Trace> trace;
@@ -195,6 +224,10 @@ class WorkerTracer final: public BaseTracer {
   // for trace events. This should no longer be needed after merging the existing span ID and
   // InvocationSpanContext interfaces.
   kj::Maybe<tracing::InvocationSpanContext> topLevelInvocationSpanContext;
+
+  // When true, the destructor will not log a warning about missing Onset event.
+  // Set via markUnused() when a tracer is intentionally not used (e.g., duplicate alarm requests).
+  bool markedUnused = false;
 
   // own an instance of the pipeline to make sure it doesn't get destroyed
   // before we're finished tracing. kj::Refcounted serves as a fill-in here since the pipeline
@@ -226,6 +259,13 @@ class SpanSubmitter: public kj::Refcounted {
   // Called when a span is closed. Together with the open data, provides all span information.
   virtual void submitSpanClose(
       tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) = 0;
+
+  virtual void submitSpanException(tracing::SpanId spanId,
+      kj::Date timestamp,
+      kj::Maybe<tracing::Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) = 0;
 
   virtual tracing::SpanId makeSpanId() = 0;
 };
@@ -264,10 +304,15 @@ class UserSpanObserver final: public SpanObserver {
         fromUserCode(fromUserCode) {}
   KJ_DISALLOW_COPY(UserSpanObserver);
 
-  kj::Own<SpanObserver> newChild() override;
-  kj::Own<SpanObserver> newChildFromUserCode() override;
+  kj::Rc<SpanObserver> newChild() override;
+  kj::Rc<SpanObserver> newChildFromUserCode() override;
   void onOpen(kj::ConstString operationName, kj::Date startTime) override;
   void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override;
+  void onException(kj::Date timestamp,
+      kj::Maybe<tracing::Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) override;
   kj::Date getTime() override;
   kj::Maybe<tracing::SpanContext> toSpanContext() override;
   tracing::SpanId getSpanId() override;

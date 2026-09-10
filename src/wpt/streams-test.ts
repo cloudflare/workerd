@@ -194,7 +194,6 @@ export default {
       'ReadableStream with byte source: getReader(), read(view), then cancel()',
       'ReadableStream with byte source: read(view) with Uint32Array, then fill it by multiple enqueue() calls',
       'ReadableStream with byte source: enqueue(), read(view) partially, then read()',
-      'ReadableStream with byte source: read(view), then respond() and close() in pull()',
       // TODO(conform): The spec expects the read to fail here. Instead, we end up cancelling
       // it with a zero-length result, with the subsequent read marked as done.
       'ReadableStream with byte source: read(view) with Uint16Array on close()-d stream with 1 byte enqueue()-d must fail',
@@ -274,7 +273,6 @@ export default {
       'ReadableStream teeing with byte source: canceling both branches in reverse order should aggregate the cancel reasons into an array',
       'ReadableStream teeing with byte source: pull with BYOB reader, then pull with default reader',
       'ReadableStream teeing with byte source: failing to cancel the original stream should cause cancel() to reject on branches',
-      'ReadableStream teeing with byte source: should be able to read one branch to the end without affecting the other',
       'ReadableStream teeing with byte source: canceling branch1 should not impact branch2',
       'ReadableStream teeing with byte source: canceling branch2 should not impact branch1',
       'ReadableStream teeing with byte source: canceling both branches in sequence with delay',
@@ -409,7 +407,13 @@ export default {
       'Floating point arithmetic must manifest near 0 (total ends up zero)',
     ],
   },
-  'readable-streams/from.any.js': {},
+  'readable-streams/from.any.js': {
+    comment:
+      'Intentional divergence: we treat strings as single chunks, not code-point iterables',
+    expectedFailures: [
+      'ReadableStream.from throws on invalid iterables; specifically a string',
+    ],
+  },
   'readable-streams/garbage-collection.any.js': {
     comment: 'See comments on individual tests',
     disabledTests: [
@@ -446,32 +450,6 @@ export default {
       // TODO(conform): The spec expects us to call pull twice even tho we've only had a single
       // read. We currently only call it when we have an actual read to fulfill.
       "ReadableStream: should not call pull until the previous pull call's promise fulfills",
-    ],
-  },
-  'readable-streams/owning-type-message-port.any.js': {
-    comment: 'Enable once MessageChannel/MessagePort is implemented',
-    expectedFailures: [
-      'Transferred MessageChannel works as expected',
-      'Second branch of owning ReadableStream tee should end up into errors with transfer only values',
-    ],
-  },
-  'readable-streams/owning-type-video-frame.any.js': {
-    comment: 'VideoFrame is not implemented',
-    expectedFailures: [
-      'ReadableStream of type owning should close serialized chunks',
-      'ReadableStream of type owning should transfer JS chunks with transferred values',
-      'ReadableStream of type owning should error when trying to enqueue not serializable values',
-      'ReadableStream of type owning should clone serializable objects when teeing',
-      'ReadableStream of type owning should clone JS Objects with serializables when teeing',
-    ],
-  },
-  'readable-streams/owning-type.any.js': {
-    comment: "Type 'owning' is not implemented",
-    expectedFailures: [
-      'ReadableStream can be constructed with owning type',
-      'ReadableStream of type owning should call start with a ReadableStreamDefaultController',
-      'ReadableStream should be able to call enqueue with an empty transfer list',
-      'ReadableStream of type owning should transfer enqueued chunks',
     ],
   },
   'readable-streams/patched-global.any.js': {

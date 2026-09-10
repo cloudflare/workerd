@@ -25,14 +25,22 @@ export default {
     comment: 'Argon2 is not supported',
     omittedTests: true,
   },
+  'derive_bits_keys/cfrg_curves.js': {},
   'derive_bits_keys/cfrg_curves_bits.js': {},
   'derive_bits_keys/cfrg_curves_bits_curve25519.https.any.js': {},
   'derive_bits_keys/cfrg_curves_bits_fixtures.js': {},
   'derive_bits_keys/cfrg_curves_keys.js': {},
   'derive_bits_keys/cfrg_curves_keys_curve25519.https.any.js': {},
+  'derive_bits_keys/derive.js': {},
   'derive_bits_keys/derive_key_and_encrypt.https.any.js': {},
   'derive_bits_keys/derive_key_and_encrypt.js': {},
-  'derive_bits_keys/derived_bits_length.https.any.js': {},
+  'derive_bits_keys/derived_bits_length.https.any.js': {
+    comment:
+      'deriveBits converts non-finite lengths to zero instead of enforcing [EnforceRange]',
+    expectedFailures: [
+      /^(HKDF|PBKDF2|ECDH|X25519) derivation with (NaN|Infinity) as 'length' parameter$/,
+    ],
+  },
   'derive_bits_keys/derived_bits_length.js': {},
   'derive_bits_keys/derived_bits_length_testcases.js': {
     comment:
@@ -40,8 +48,10 @@ export default {
     omittedTests: true,
   },
   'derive_bits_keys/derived_bits_length_vectors.js': {},
+  'derive_bits_keys/ecdh.js': {},
   'derive_bits_keys/ecdh_bits.https.any.js': {},
   'derive_bits_keys/ecdh_bits.js': {},
+  'derive_bits_keys/ecdh_fixtures.js': {},
   'derive_bits_keys/ecdh_keys.https.any.js': {},
   'derive_bits_keys/ecdh_keys.js': {},
   'derive_bits_keys/hkdf.https.any.js': {
@@ -50,6 +60,7 @@ export default {
   },
   'derive_bits_keys/hkdf.js': {},
   'derive_bits_keys/hkdf_vectors.js': {},
+  'derive_bits_keys/kdf.js': {},
   'derive_bits_keys/pbkdf2.https.any.js': {
     comment: 'Cannot cope with this many iterations, keeps timing out',
     omittedTests: [/with 100000 iterations/],
@@ -66,6 +77,9 @@ export default {
       'empty algorithm object with long',
     ],
   },
+  'digest/digest.js': {},
+  'digest/digest_test_data.js': {},
+  'digest/xof_digest.js': {},
 
   'encap_decap/ml_kem_vectors.js': {
     comment: 'ML-KEM (post-quantum key encapsulation) is not supported',
@@ -75,6 +89,7 @@ export default {
   'encrypt_decrypt/aes.js': {},
   'encrypt_decrypt/aes_cbc.https.any.js': {},
   'encrypt_decrypt/aes_cbc_vectors.js': {},
+  'encrypt_decrypt/aes_common_fixtures.js': {},
   'encrypt_decrypt/aes_ctr.https.any.js': {},
   'encrypt_decrypt/aes_ctr_vectors.js': {},
   'encrypt_decrypt/aes_gcm.https.any.js': {},
@@ -94,52 +109,21 @@ export default {
   'encrypt_decrypt/rsa_oaep.https.any.js': {},
   'encrypt_decrypt/rsa_vectors.js': {},
 
+  'generateKey/algorithm_registry.js': {},
   'generateKey/failures.js': {},
-  'generateKey/failures_AES-CBC.https.any.js': {
-    comment: 'Wrong type of error returned',
-    expectedFailures: [/^(Empty|Bad) algorithm:/],
-  },
-  'generateKey/failures_AES-CTR.https.any.js': {
-    comment: 'Wrong type of error returned',
-    expectedFailures: [/^(Empty|Bad) algorithm:/],
-  },
-  'generateKey/failures_AES-GCM.https.any.js': {
-    comment: 'Wrong type of error returned',
-    expectedFailures: [/^(Empty|Bad) algorithm:/],
-  },
-  'generateKey/failures_AES-KW.https.any.js': {
-    comment: 'Wrong type of error returned',
-    expectedFailures: [/^(Empty|Bad) algorithm:/],
-  },
-  'generateKey/failures_ECDH.https.any.js': {
-    comment: 'Wrong type of error returned',
-    expectedFailures: [/^(Empty|Bad) algorithm:/],
-  },
-  'generateKey/failures_ECDSA.https.any.js': {
-    comment: 'Wrong type of error returned',
-    expectedFailures: [/^(Empty|Bad) algorithm:/],
-  },
-  'generateKey/failures_Ed25519.https.any.js': {
-    comment: 'Wrong type of error returned',
-    expectedFailures: [/^(Empty|Bad) algorithm:/],
-  },
-  'generateKey/failures_HMAC.https.any.js': {
-    comment: 'Wrong type of error returned',
-    expectedFailures: [/^(Empty|Bad) algorithm:/],
-  },
-  'generateKey/failures_RSA-OAEP.https.any.js': {
-    comment: 'Wrong type of error returned',
-    expectedFailures: [/^(Empty|Bad) algorithm:/],
-  },
-  'generateKey/failures_RSA-PSS.https.any.js': {
-    comment: 'Wrong type of error returned',
-    expectedFailures: [/^(Empty|Bad) algorithm:/],
-  },
-  'generateKey/failures_RSASSA-PKCS1-v1_5.https.any.js': {
-    comment: 'Wrong type of error returned',
-    expectedFailures: [/^(Empty|Bad) algorithm:/],
-  },
-  'generateKey/failures_X25519.https.any.js': {
+  'generateKey/failures_AES-CBC.https.any.js': {},
+  'generateKey/failures_AES-CTR.https.any.js': {},
+  'generateKey/failures_AES-GCM.https.any.js': {},
+  'generateKey/failures_AES-KW.https.any.js': {},
+  'generateKey/failures_ECDH.https.any.js': {},
+  'generateKey/failures_ECDSA.https.any.js': {},
+  'generateKey/failures_Ed25519.https.any.js': {},
+  'generateKey/failures_HMAC.https.any.js': {},
+  'generateKey/failures_RSA-OAEP.https.any.js': {},
+  'generateKey/failures_RSA-PSS.https.any.js': {},
+  'generateKey/failures_RSASSA-PKCS1-v1_5.https.any.js': {},
+  'generateKey/failures_X25519.https.any.js': {},
+  'generateKey/failures_bad_algorithm.https.any.js': {
     comment: 'Wrong type of error returned',
     expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
@@ -226,16 +210,8 @@ export default {
     ],
   },
 
-  'import_export/ML-DSA_importKey.js': {
-    comment: 'ML-DSA (post-quantum signature algorithm) is not supported',
-    omittedTests: true,
-  },
   'import_export/ML-DSA_importKey_fixtures.js': {
     comment: 'ML-DSA (post-quantum signature algorithm) is not supported',
-    omittedTests: true,
-  },
-  'import_export/ML-KEM_importKey.js': {
-    comment: 'ML-KEM (post-quantum key encapsulation) is not supported',
     omittedTests: true,
   },
   'import_export/ML-KEM_importKey_fixtures.js': {
@@ -268,6 +244,11 @@ export default {
   },
   'import_export/ec_importKey_failures_fixtures.js': {},
   'import_export/importKey_failures.js': {},
+  'import_export/ml_importKey.js': {
+    comment:
+      'Shared by ML-DSA and ML-KEM import/export tests; both post-quantum algorithms are not supported',
+    omittedTests: true,
+  },
   'import_export/okp_importKey.js': {},
   'import_export/okp_importKey_Ed25519.https.any.js': {
     comment: 'Investigate this',
@@ -318,7 +299,11 @@ export default {
     ],
   },
   'import_export/okp_importKey_failures_fixtures.js': {},
-  'import_export/okp_importKey_fixtures.js': {},
+  'import_export/okp_importKey_fixtures.js': {
+    comment:
+      'References okpKeyData, which is only defined when loaded after util/okp_key_fixtures.js via META scripts; cannot run standalone',
+    omittedTests: true,
+  },
   'import_export/rsa_importKey.https.any.js': {},
   'import_export/symmetric_importKey.https.any.js': {},
   'import_export/symmetric_importKey.js': {},
@@ -330,6 +315,58 @@ export default {
   },
 
   'randomUUID.https.any.js': {},
+
+  // CryptoKey has no structured clone implementation, so every test in these
+  // files fails with DataCloneError.
+  'serialization/aes-cbc.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/aes-ctr.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/aes-gcm.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/aes-kw.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/ecdh.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/ecdsa.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/ed25519.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/hmac.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/rsa-oaep.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/rsa-pss.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/rsassa-pkcs1-v1_5.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/serialization.js': {},
+  'serialization/x25519.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
 
   'sign_verify/ecdsa.https.any.js': {},
   'sign_verify/ecdsa.js': {},
@@ -367,6 +404,7 @@ export default {
     comment: 'KMAC is not supported',
     omittedTests: true,
   },
+  'sign_verify/mac.js': {},
   'sign_verify/mldsa.js': {
     comment: 'ML-DSA (post-quantum signature algorithm) is not supported',
     omittedTests: true,
@@ -380,13 +418,23 @@ export default {
   'sign_verify/rsa_pkcs_vectors.js': {},
   'sign_verify/rsa_pss.https.any.js': {},
   'sign_verify/rsa_pss_vectors.js': {},
+  'sign_verify/signature.js': {},
 
+  'util/ec_key_fixtures.js': {},
   'util/helpers.js': {},
+  'util/mldsa_key_fixtures.js': {},
+  'util/okp_key_fixtures.js': {},
+  'util/rsa_key_fixtures.js': {},
+  'util/supports.js': {},
   'util/worker-report-crypto-subtle-presence.js': {
     comment: 'ReferenceError: postMessage is not defined',
     disabledTests: true,
   },
 
   'wrapKey_unwrapKey/wrapKey_unwrapKey.https.any.js': {},
-  'wrapKey_unwrapKey/wrapKey_unwrapKey_vectors.js': {},
+  'wrapKey_unwrapKey/wrapKey_unwrapKey_vectors.js': {
+    comment:
+      'References okpKeyData, which is only defined when loaded after util/okp_key_fixtures.js via META scripts; cannot run standalone',
+    omittedTests: true,
+  },
 } satisfies TestRunnerConfig;

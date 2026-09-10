@@ -25,6 +25,9 @@ MODULE.bazel.lock
 /.cache/
 
 /.bazel-cache
+/artifacts
+/.gitlab-ci-ca-file
+/.gitlab-ci-gitconfig
 
 /workerd-*
 

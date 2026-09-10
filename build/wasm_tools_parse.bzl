@@ -14,6 +14,7 @@ def _impl(ctx):
         ],
         progress_message = "Running wasm-tools parse on %s" % in_file.short_path,
         command = "$1 parse $2 -o $3",
+        mnemonic = "WasmToolsParse",
     )
 
     return [DefaultInfo(files = depset([out_file]))]

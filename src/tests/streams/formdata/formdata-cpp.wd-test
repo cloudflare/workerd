@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+using FormdataModules = import "formdata-modules.capnp";
+
+# FormData × streams against the C++ implementation.
+# formdata_parser_supports_files makes multipart file entries parse as
+# File objects (as in the api/tests form-data configs).
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-formdata-cpp",
+      worker = (
+        modules = FormdataModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "formdata_parser_supports_files",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+        ],
+      )
+    ),
+  ],
+);

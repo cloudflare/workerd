@@ -8,15 +8,35 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "test.js")
         ],
-        compatibilityFlags = ["enable_ctx_exports", "nodejs_compat", "experimental", "containers_pid_namespace", "streams_enable_constructors"],
+        compatibilityFlags = ["enable_ctx_exports", "nodejs_compat", "experimental", "containers_pid_namespace", "streams_enable_constructors", "enable_abortsignal_rpc"],
         containerEngine = (localDocker = (socketPath = "unix:/var/run/docker.sock", containerEgressInterceptorImage = "cloudflare/proxy-everything:main")),
         durableObjectNamespaces = [
           ( className = "DurableObjectExample",
             uniqueKey = "container-client-test-DurableObjectExample",
-            container = (imageName = "cloudflare/workerd/container-client-test") ),
+            container = (
+              imageName = "cloudflare/workerd/container-client-test",
+              images = [
+                (
+                  name = "api",
+                  image = "registry.example.com/api@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                ),
+                (
+                  name = "worker",
+                  image = "registry.example.com/worker@sha256:2222222222222222222222222222222222222222222222222222222222222222",
+                ),
+              ],
+            ) ),
           ( className = "DurableObjectExample2",
             uniqueKey = "container-client-test-DurableObjectExample2",
-            container = (imageName = "cloudflare/workerd/container-client-test") ),
+            container = (
+              imageName = "cloudflare/workerd/container-client-test",
+              images = [
+                (
+                  name = "tools",
+                  image = "registry.example.com/tools@sha256:3333333333333333333333333333333333333333333333333333333333333333",
+                ),
+              ],
+            ) ),
         ],
         durableObjectStorage = (localDisk = "TEST_TMPDIR"),
         bindings = [

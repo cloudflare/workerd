@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "als-only-test.js")
         ],
-        compatibilityFlags = ["nodejs_als"]
+        compatibilityFlags = ["nodejs_als", "no_nodejs_compat", "no_nodejs_compat_v2"]
       )
     ),
   ],

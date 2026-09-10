@@ -23,6 +23,24 @@ class IoContext;
 // Whether an outgoing subrequest's request body can be rewound (e.g. a buffered or null body), and
 // so the request could be re-sent. See RequestObserver::setNextSubrequestBodyRewindable().
 WD_STRONG_BOOL(SubrequestBodyRewindable);
+// Whether an outgoing request contributes to the logical subrequest count.
+WD_STRONG_BOOL(CountSubrequest);
+
+enum class ActorRetryCallType : uint8_t {
+  FETCH,
+  JSRPC,
+  OTHER,
+};
+
+enum class ActorRetryOutcome : uint8_t {
+  RECOVERED,
+  RETRIES_EXHAUSTED,
+  UNABLE_TO_RETRY,
+  CLAIM_REJECTED,
+  CANCELED,
+  OTHER,
+};
+
 class WorkerInterface;
 class LimitEnforcer;
 class TimerChannel;
@@ -121,8 +139,10 @@ class RequestObserver: public kj::Refcounted {
     return worker;
   }
 
-  // Wrap an HttpClient so that its usage is counted in the request's subrequest stats.
-  virtual kj::Own<WorkerInterface> wrapSubrequestClient(kj::Own<WorkerInterface> client) {
+  // Wrap an HttpClient to observe its request and response activity. `countSubrequest` controls
+  // whether its usage contributes to the request's logical subrequest count.
+  virtual kj::Own<WorkerInterface> wrapSubrequestClient(
+      kj::Own<WorkerInterface> client, CountSubrequest countSubrequest) {
     return kj::mv(client);
   }
 
@@ -138,6 +158,14 @@ class RequestObserver: public kj::Refcounted {
   // so it applies equally to actor and (potentially, in the future) non-actor subrequests. No-op in
   // the base observer; edgeworker overrides it to feed retry classification.
   virtual void setNextSubrequestBodyRewindable(SubrequestBodyRewindable bodyRewindable) {}
+
+  // Records an additional outgoing actor call started by a runtime retry loop.
+  virtual void recordActorRetry(ActorRetryCallType callType) {}
+
+  // Records the terminal outcome and added latency of an outgoing actor retry loop that started at
+  // least one retry attempt.
+  virtual void recordActorRetryOutcome(
+      ActorRetryCallType callType, ActorRetryOutcome outcome, kj::Duration retryAddedLatency) {}
 
   // Fired immediately before an actor fetch dispatches into user code, so an observer can claim the
   // request's retry-token nonce against the actor's claim store. No-op in the base observer;
@@ -155,8 +183,6 @@ class RequestObserver: public kj::Refcounted {
   virtual SpanParent getSpan() {
     return nullptr;
   }
-
-  virtual void setOutcome(EventOutcome outcome) {}
 
   virtual kj::Own<void> addedContextTask() {
     return kj::Own<void>();
@@ -321,6 +347,10 @@ class ActorObserver: public kj::Refcounted, public SqliteObserver {
 
   virtual void startRequest() {}
   virtual void endRequest() {}
+
+  // Called when the actor's JavaScript class constructor has run to completion successfully.
+  // Not called for actors that have no class, nor when the constructor throws.
+  virtual void constructorCompleted() {}
 
   virtual void webSocketAccepted() {}
   virtual void webSocketClosed() {}

@@ -21,6 +21,10 @@ export const validateSpans = {
     // Get all spans and prepare for validation
     const allSpans = collector.spans.values();
     const spansByTest = groupSpansBy(allSpans, 'test');
+    const invocations = [...collector.invocations.values()];
+    const rootAttributes = invocations.flatMap(
+      (invocation) => invocation.attributes
+    );
 
     // Core tests that validate withSpan produces a correctly-closed span of the given name.
     const testValidations = [
@@ -34,11 +38,17 @@ export const validateSpans = {
         test: 'setAttributeUndefined',
         expectedSpan: 'undefined-attr-op',
       },
+      { test: 'setAttributes', expectedSpan: 'set-attributes-op' },
       { test: 'publicImportTracing', expectedSpan: 'public-import-op' },
       {
         test: 'publicImportStartActiveSpan',
         expectedSpan: 'public-start-active-op',
       },
+      {
+        test: 'publicImportStartSpan',
+        expectedSpan: 'public-start-span-op',
+      },
+      { test: 'getActiveSpan', expectedSpan: 'get-active-span-op' },
       { test: 'ctxTracing', expectedSpan: 'ctx-tracing-op' },
       {
         test: 'detachedSpanEndsAfterStreamDrain',
@@ -89,6 +99,15 @@ export const validateSpans = {
     }
 
     {
+      const span = (spansByTest.get('publicImportStartSpan') || []).find(
+        (s) => s.name === 'public-start-span-op'
+      );
+      assert(span, 'publicImportStartSpan: span present');
+      assert.strictEqual(span.path, 'import-from-cloudflare-workers');
+      assert(span.closed, 'Public startSpan span should be closed');
+    }
+
+    {
       const span = (spansByTest.get('helperStartActiveSpan') || []).find(
         (s) => s.name === 'helper-detached-op'
       );
@@ -104,6 +123,45 @@ export const validateSpans = {
       assert(span, 'startActiveSpanSyncThrow: span present');
       assert.strictEqual(span['after.throw'], true);
       assert(span.closed, 'Manual throw span should be explicitly closed');
+    }
+
+    assert.deepStrictEqual(
+      rootAttributes.find(({ name }) => name === 'test'),
+      { name: 'test', value: 'getActiveSpanInvocation' }
+    );
+
+    for (const requestName of ['a', 'b']) {
+      const request = invocations.find(
+        (invocation) =>
+          invocation.onset.executionModel === 'durableObject' &&
+          invocation.onset.entrypoint === 'OverlappingRequestsObject' &&
+          new URL(invocation.onset.info.url).pathname === `/${requestName}`
+      );
+      assert(
+        request,
+        `Missing tail trace for overlapping request ${requestName}`
+      );
+      assert.deepStrictEqual(
+        request.attributeEvents
+          .filter(({ name }) => name === 'overlapping.request')
+          .map(({ spanId, value }) => ({ spanId, value })),
+        [{ spanId: request.rootSpanId, value: requestName }]
+      );
+    }
+
+    // setAttributes should record each supported value and ignore undefined values.
+    {
+      const span = (spansByTest.get('setAttributes') || []).find(
+        (s) => s.name === 'set-attributes-op'
+      );
+      assert(span, 'setAttributes: span present');
+      assert.strictEqual(span.stringValue, 'value');
+      assert.strictEqual(span.numberValue, 42);
+      assert.strictEqual(span.booleanValue, true);
+      assert(
+        !('skipped' in span),
+        'setAttributes should ignore undefined values'
+      );
     }
 
     // Nested spans: verify both outer and inner spans exist and both are closed.

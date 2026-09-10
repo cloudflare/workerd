@@ -74,17 +74,12 @@ void EvalContext::set_global(::rust::Str name, ::workerd::rust::jsg::Local value
   ::workerd::jsg::check(ctx->Global()->Set(ctx, key, v8Value));
 }
 
-EvalResult EvalContext::eval(::rust::Str code) const {
+namespace {
+EvalResult runScript(
+    v8::Isolate* v8Isolate, v8::Local<v8::Context> ctx, v8::Local<v8::Script> script) {
   EvalResult result;
   result.success = false;
 
-  v8::Local<v8::Context> ctx = v8Context.Get(v8Isolate);
-
-  v8::Local<v8::String> source = ::workerd::jsg::check(v8::String::NewFromUtf8(
-      v8Isolate, code.data(), v8::NewStringType::kNormal, static_cast<int>(code.size())));
-
-  v8::Local<v8::Script> script;
-  KJ_ASSERT(v8::Script::Compile(ctx, source).ToLocal(&script), "Failed to compile script");
   v8::TryCatch catcher(v8Isolate);
 
   v8::Local<v8::Value> value;
@@ -100,6 +95,27 @@ EvalResult EvalContext::eval(::rust::Str code) const {
   }
 
   return result;
+}
+}  // namespace
+
+EvalResult EvalContext::eval(::rust::Str code, kj::Maybe<::rust::Str> maybeResourceName) const {
+  v8::Local<v8::Context> ctx = v8Context.Get(v8Isolate);
+
+  v8::Local<v8::String> source = ::workerd::jsg::check(v8::String::NewFromUtf8(
+      v8Isolate, code.data(), v8::NewStringType::kNormal, static_cast<int>(code.size())));
+
+  v8::Local<v8::Script> script;
+  KJ_IF_SOME(resourceName, maybeResourceName) {
+    auto resourceNameStr = ::workerd::jsg::check(v8::String::NewFromUtf8(v8Isolate,
+        resourceName.data(), v8::NewStringType::kNormal, static_cast<int>(resourceName.size())));
+    v8::ScriptOrigin origin(resourceNameStr);
+    v8::ScriptCompiler::Source scriptSource(source, origin);
+    script = ::workerd::jsg::check(v8::ScriptCompiler::Compile(ctx, &scriptSource));
+  } else {
+    script = ::workerd::jsg::check(v8::Script::Compile(ctx, source));
+  }
+
+  return runScript(v8Isolate, ctx, script);
 }
 
 void TestHarness::run_in_context(

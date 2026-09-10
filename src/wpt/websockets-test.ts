@@ -121,6 +121,8 @@ export default {
   'Create-non-absolute-url.any.js': {
     comment: 'workerd throws SyntaxError for non-absolute URLs',
     expectedFailures: [
+      // Trailing space is significant: the subtest name interpolates the input, which is ''.
+      'Create WebSocket - Pass a non absolute URL: ',
       'Create WebSocket - Pass a non absolute URL: test',
       'Create WebSocket - Pass a non absolute URL: ?',
       'Create WebSocket - Pass a non absolute URL: null',
@@ -306,6 +308,17 @@ export default {
   },
   'constants.sub.js': {},
   'constructor.any.js': {},
+  'constructor/option-bag.any.js': {
+    comment: 'WebSocket constructor option bags are not supported',
+    expectedFailures: [
+      'Empty option bag should be accepted',
+      'Option bag with protocols array should be accepted',
+    ],
+  },
+  'constructor/target-address-space.any.js': {
+    comment: 'Local Network Access checks are browser-specific',
+    omittedTests: true,
+  },
   'cookies/support/websocket-cookies-helper.sub.js': {
     comment: 'Cookie support helper, not an actual test',
     omittedTests: true,

@@ -20,6 +20,17 @@ class FrankenvalueHandler;
 class IoContext_IncomingRequest;
 struct Worker_VersionInfo;
 
+// Identifies exceptions propagated after `IncomingRequest::delivered()`. This detail survives RPC,
+// allowing consumers to distinguish runtime failures from startup failures. Any path that calls
+// `delivered()` must add it before propagating an exception.
+constexpr kj::Exception::DetailTypeId WORKER_REQUEST_DELIVERED_DETAIL_ID = 0x9d3c7f2e6b1a8450ull;
+
+inline void markExceptionAsDelivered(kj::Exception& exception) {
+  if (exception.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) == kj::none) {
+    exception.setDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  }
+}
+
 // An interface representing the services made available by a worker/pipeline to handle a
 // request.
 class WorkerInterface: public kj::HttpService {
@@ -102,10 +113,12 @@ class WorkerInterface: public kj::HttpService {
   // Trigger a scheduled event with the given scheduled (unix timestamp) time and cron string.
   // The cron string must be valid until the returned promise completes.
   // Async work is queued in a "waitUntil" task set.
-  virtual kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) = 0;
+  [[nodiscard]] virtual kj::Promise<ScheduledResult> runScheduled(
+      kj::Date scheduledTime, kj::StringPtr cron) = 0;
 
   // Trigger an alarm event with the given scheduled (unix timestamp) time.
-  virtual kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) = 0;
+  [[nodiscard]] virtual kj::Promise<AlarmResult> runAlarm(
+      kj::Date scheduledTime, uint32_t retryCount) = 0;
 
   // Called when AlarmManager has given up retrying an alarm after too many counted failures.
   // The actor should clear its alarm state so getAlarm() reflects the deletion.
@@ -138,8 +151,8 @@ class WorkerInterface: public kj::HttpService {
       EventOutcome outcome;
     };
 
-    // Deliver the event to an isolate in this process. `incomingRequest` has been newly-allocated
-    // for this event.
+    // Deliver the event to an isolate in this process. `incomingRequest` is new for this event;
+    // implementations must call `delivered()` before starting work.
     virtual kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
         kj::Maybe<kj::StringPtr> entrypointName,
         kj::Maybe<Worker_VersionInfo> versionInfo,

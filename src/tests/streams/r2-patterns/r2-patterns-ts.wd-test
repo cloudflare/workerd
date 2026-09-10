@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+using R2PatternsModules = import "r2-patterns-modules.capnp";
+
+# The SAME modules against the TypeScript implementation — readAtLeast
+# and BYOB consumption shapes are divergence-prone (see the
+# readable-byte suite's read-min ledger), so every divergence found here
+# is pinned via which-impl.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-r2-patterns-ts",
+      worker = (
+        modules = R2PatternsModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

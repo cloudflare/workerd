@@ -149,12 +149,3 @@ def dep_pyodide():
 
     deps += _snapshot_http_files()
     return deps
-
-def _impl(module_ctx):
-    deps = dep_pyodide()
-    return module_ctx.extension_metadata(
-        root_module_direct_deps = deps,
-        root_module_direct_dev_deps = [],
-    )
-
-pyodide = module_extension(implementation = _impl)

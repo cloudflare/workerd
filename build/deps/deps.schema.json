@@ -161,6 +161,9 @@
               "branch": {
                 "type": "string"
               },
+              "tag": {
+                "type": "string"
+              },
               "build_file": {
                 "type": "string"
               },
@@ -187,6 +190,24 @@
               },
               "repo_name": {
                 "type": "string"
+              },
+              "patch_cmds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "patch_cmds_win": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sparse_checkout_patterns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [
@@ -216,6 +237,25 @@
               "type",
               "name",
               "build_file"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "rust_nightly"
+              },
+              "name": {
+                "type": "string"
+              },
+              "freeze_version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "name"
             ],
             "additionalProperties": false
           },

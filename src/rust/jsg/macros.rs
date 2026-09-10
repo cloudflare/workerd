@@ -84,10 +84,10 @@ macro_rules! jsg_traced {
 macro_rules! jsg_require {
     ($cond:expr, $err_type:ident, $msg:literal $(, $arg:expr)* $(,)?) => {
         if !($cond) {
-            return Err($crate::Error {
-                name: $crate::ExceptionType::$err_type,
-                message: format!($msg $(, $arg)*),
-            });
+            return Err($crate::Error::from_type(
+                $crate::ExceptionType::$err_type,
+                format!($msg $(, $arg)*),
+            ));
         }
     };
 }
@@ -151,9 +151,9 @@ macro_rules! jsg_require {
 #[macro_export]
 macro_rules! jsg_fail_require {
     ($err_type:ident, $msg:literal $(, $arg:expr)* $(,)?) => {
-        return Err($crate::Error {
-            name: $crate::ExceptionType::$err_type,
-            message: format!($msg $(, $arg)*),
-        })
+        return Err($crate::Error::from_type(
+            $crate::ExceptionType::$err_type,
+            format!($msg $(, $arg)*),
+        ))
     };
 }

@@ -1,0 +1,39 @@
+# RPC stream transfer with booby-trapped public stream prototypes: serialization must
+# drive the streams through internal operations only. See the header comment in the JS.
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "js-rpc-streams-pollution-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "typescript_implemented_streams",
+        ],
+        bindings = [
+          (name = "PEER", service = (name = "peer", entrypoint = "Peer")),
+        ],
+      )
+    ),
+    ( name = "peer",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "js-rpc-streams-pollution-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "typescript_implemented_streams",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+    "workerd-autogate-rpc-externals-hydration",
+  ],
+);

@@ -7,6 +7,7 @@
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
+#include <workerd/jsg/util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 
@@ -21,14 +22,25 @@ template <typename T>
 class Promise;
 
 enum class InstantiateModuleOptions {
-  // Allows pending top-level await in the module when evaluated. Will cause
-  // the microtask queue to be drained once in an attempt to resolve those.
+  // Allows pending top-level await in the module when evaluated. Will cause the microtask
+  // queue to be drained once in an attempt to resolve those, but only when not nested inside
+  // another module's evaluation; when nested, a pending evaluation is reported as an
+  // unsettled top-level await instead.
   DEFAULT,
   // Throws if the module evaluation results in a pending promise.
   NO_TOP_LEVEL_AWAIT,
+  // Like DEFAULT, but when nested inside another module's evaluation and the evaluation is
+  // still pending, returns that promise instead of throwing, so the caller can chain on it.
+  // Only usable by callers that can return a promise to their own caller. Used by dynamic
+  // import: V8 runs HostImportModuleDynamically while the importing module is still
+  // kEvaluating, and with no active IoContext the requested module is instantiated
+  // synchronously right there, so it cannot settle until we unwind to depth 0.
+  ALLOW_PENDING_EVALUATION,
 };
 
-void instantiateModule(jsg::Lock& js,
+// Returns the still-pending evaluation promise when called with DYNAMIC_IMPORT from inside
+// another module's evaluation; kj::none means evaluation is fully settled.
+kj::Maybe<v8::Local<v8::Promise>> instantiateModule(jsg::Lock& js,
     v8::Local<v8::Module>& module,
     InstantiateModuleOptions options = InstantiateModuleOptions::DEFAULT);
 
@@ -169,6 +181,13 @@ class ModuleRegistry {
 
     ModuleInfo(jsg::Lock& js,
         kj::StringPtr name,
+        StaticExternalStringSource content,
+        kj::ArrayPtr<const kj::byte> compileCache,
+        ModuleInfoCompileOption flags,
+        const CompilationObserver& observer);
+
+    ModuleInfo(jsg::Lock& js,
+        kj::StringPtr name,
         kj::Maybe<kj::ArrayPtr<const kj::StringPtr>> maybeExports,
         SyntheticModuleInfo synthetic);
 
@@ -283,6 +302,14 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   }
 
   void add(kj::Path& specifier, ModuleInfo&& info) {
+    // Report duplicates as a JS-visible error rather than letting the table
+    // insert below throw: a raw table exception surfaces to the user as an
+    // opaque "internal error" while this is a worker configuration mistake.
+    // (This matches the error the new module registry reports for the same
+    // mistake, which phrases the specifier as a URL rather than a path.)
+    using Key = Entry::Key;
+    JSG_REQUIRE(entries.find(Key(specifier, Type::BUNDLE)) == kj::none, Error, "Module \"",
+        specifier.toString(false), "\" already added to bundle");
     entries.insert(kj::heap<Entry>(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
   }
 
@@ -296,8 +323,11 @@ class ModuleRegistryImpl final: public ModuleRegistry {
           // src/workerd/server/workerd-api.c++.
           addBuiltinModule(specifier,
               [specifier, module, this](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
-            lock.setAllowEval(true);
-            KJ_DEFER(lock.setAllowEval(false));
+            // Wasm compilation requires code-generation permission. The scope
+            // restores the prior setting on exit: builtin modules resolve
+            // lazily, potentially inside a window where eval is already
+            // permitted, and that permission must survive the compilation.
+            Lock::AllowEvalScope allowEvalScope(lock, true);
 
             // Allow Wasm compilation to spawn a background thread for tier-up, i.e.
             // recompiling Wasm with optimizations in the background. Otherwise Wasm startup
@@ -346,11 +376,11 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     }
   }
 
-  template <typename Func>
-  void addBuiltinBundleFiltered(Bundle::Reader bundle, Func filter) {
+  template <typename Filter, typename AddModule>
+  void addBuiltinBundleFiltered(Bundle::Reader bundle, Filter filter, AddModule addModule) {
     for (auto module: bundle.getModules()) {
       if (filter(module)) {
-        addBuiltinModule(module);
+        addModule(module);
       }
     }
   }
@@ -368,6 +398,15 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     KJ_ASSERT(type != Type::BUNDLE);
     auto path = kj::Path::parse(specifier);
     entries.insert(kj::heap<Entry>(path, type, sourceCode, compileCache));
+  }
+
+  void addBuiltinModule(kj::StringPtr specifier,
+      StaticExternalStringSource sourceCode,
+      Type type = Type::BUILTIN,
+      kj::ArrayPtr<const kj::byte> compileCache = {}) {
+    KJ_ASSERT(type != Type::BUNDLE);
+    auto path = kj::Path::parse(specifier);
+    entries.insert(kj::heap<Entry>(path, type, kj::mv(sourceCode), compileCache));
   }
 
   void addBuiltinModule(
@@ -515,7 +554,16 @@ class ModuleRegistryImpl final: public ModuleRegistry {
         auto handler = [&info, isolate = js.v8Isolate]() -> Value {
           auto& js = Lock::from(isolate);
           auto module = info.module.getHandle(js);
-          instantiateModule(js, module);
+          KJ_IF_SOME(pending,
+              instantiateModule(js, module, InstantiateModuleOptions::ALLOW_PENDING_EVALUATION)) {
+            // Evaluation is suspended on a top-level await and we are nested inside another
+            // module's evaluation, so we must not drain the microtask queue here. Hand back a
+            // promise for the namespace instead; it settles once we unwind to depth 0 and the
+            // outer instantiation drains.
+            auto ns = js.v8Ref<v8::Value>(module->GetModuleNamespace());
+            return js.v8Ref<v8::Value>(js.wrapSimplePromise(js.toPromise(pending).then(
+                js, [ns = kj::mv(ns)](Lock& js, Value) mutable { return kj::mv(ns); })));
+          }
           return js.v8Ref(module->GetModuleNamespace());
         };
         return func(js, kj::mv(handler));
@@ -554,7 +602,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   // we need to be able to search it by path (filename) as well as search for a specific module
   // object by identity. We use a kj::Table!
   struct Entry {
-    using Info = kj::OneOf<ModuleInfo, kj::ArrayPtr<const char>, ModuleCallback>;
+    using Info = kj::OneOf<ModuleInfo, StaticExternalStringSource, ModuleCallback>;
 
     struct Key {
       const kj::Path& specifier;
@@ -591,7 +639,16 @@ class ModuleRegistryImpl final: public ModuleRegistry {
         kj::ArrayPtr<const kj::byte> compileCache)
         : specifier(specifier.clone()),
           type(type),
-          info(src),
+          info(StaticExternalStringSource(src)),
+          compileCache(compileCache) {}
+
+    Entry(const kj::Path& specifier,
+        Type type,
+        StaticExternalStringSource src,
+        kj::ArrayPtr<const kj::byte> compileCache)
+        : specifier(specifier.clone()),
+          type(type),
+          info(kj::mv(src)),
           compileCache(compileCache) {}
 
     Entry(const kj::Path& specifier, Type type, ModuleCallback factory)
@@ -611,7 +668,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
         KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
           return kj::Maybe<ModuleInfo&>(moduleInfo);
         }
-        KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
+        KJ_CASE_ONEOF(src, StaticExternalStringSource) {
           info = ModuleInfo(js, specifier.toString(), src, compileCache,
               ModuleInfoCompileOption::BUILTIN, observer);
           return info.tryGet<ModuleInfo>();

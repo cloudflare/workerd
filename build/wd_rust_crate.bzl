@@ -1,5 +1,7 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test", "rust_unpretty")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_unpretty")
+load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
+load("//:build/wd_rust_test.bzl", "wd_rust_test")
 
 def rust_cxx_bridge(
         name,
@@ -19,8 +21,8 @@ def rust_cxx_bridge(
             src + ".h",
             src + ".cc",
         ],
-        cmd = "$(location @workerd-cxx//:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
-        tools = ["@workerd-cxx//:codegen"],
+        cmd = "$(location //src/rust/cxx:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
+        tools = ["//src/rust/cxx:codegen"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
@@ -34,10 +36,7 @@ def rust_cxx_bridge(
         include_prefix = include_prefix,
         local_defines = local_defines,
         features = features,
-        linkstatic = select({
-            "@platforms//os:windows": True,
-            "//conditions:default": False,
-        }),
+        linkstatic = CC_LIBRARY_LINKSTATIC,
         deps = deps,
         visibility = visibility,
         tags = tags,
@@ -105,8 +104,8 @@ def wd_rust_crate(
     # Add cxx dependency if there are any cxx bridges
     if len(cxx_bridge_srcs) > 0:
         deps = deps + [
-            "@workerd-cxx//kj-rs",
-            "@workerd-cxx//:cxx",
+            "//src/rust/cxx/kj-rs",
+            "//src/rust/cxx:cxx",
         ]
 
     include_prefix = "workerd/" + native.package_name().removeprefix("src/")
@@ -122,8 +121,8 @@ def wd_rust_crate(
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.
             deps = cxx_bridge_deps.get(bridge_src, []) + [
-                "@workerd-cxx//kj-rs",
-                "@workerd-cxx//:cxx",
+                "//src/rust/cxx/kj-rs",
+                "//src/rust/cxx:cxx",
             ],
             tags = cxx_bridge_tags,
             local_defines = cxx_bridge_local_defines,
@@ -151,27 +150,15 @@ def wd_rust_crate(
         }),
     )
 
-    rust_test(
+    wd_rust_test(
         name = name + "_test",
         crate = ":" + name,
-        env = {
-            "RUST_BACKTRACE": "1",
-            # rust test runner captures stderr by default, which makes debugging tests very hard
-            "RUST_TEST_NOCAPTURE": "1",
-            # our tests are usually very heavy and do not support concurrent invocation
-            "RUST_TEST_THREADS": "1",
-        } | test_env,
+        env = test_env,
         size = test_size,
-        tags = test_tags + ["no-coverage"],
+        tags = test_tags,
         crate_features = crate_features,
         deps = test_deps,
         proc_macro_deps = test_proc_macro_deps,
-        # Optionally link via cc_common.link so embedder-selected cc link settings
-        # (e.g. --custom_malloc) take effect. Off standalone (see //build/config).
-        experimental_use_cc_common_link = select({
-            "@//build/config:rust_cc_common_link": 1,
-            "//conditions:default": -1,
-        }),
     )
 
     if len(proc_macro_deps) + len(cxx_bridge_srcs) > 0:

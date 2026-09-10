@@ -3,11 +3,13 @@ export type MarkdownDocument = {
   blob: Blob;
 }
 
+export type OutputFormat = 'markdown' | 'text';
+
 export type ConversionResponse = {
   id: string;
   name: string;
   mimeType: string;
-  format: 'markdown';
+  format: OutputFormat;
   tokens: number;
   data: string;
 } | {
@@ -27,7 +29,12 @@ export type EmbeddedImageConversionOptions = ImageConversionOptions & {
   maxConvertedImages?: number;
 };
 
+export type ConversionOutputOptions = {
+  format?: OutputFormat;
+}
+
 export type ConversionOptions = {
+  output?: ConversionOutputOptions,
   html?: {
     images?: EmbeddedImageConversionOptions & { convertOGImage?: boolean };
     hostname?: string;

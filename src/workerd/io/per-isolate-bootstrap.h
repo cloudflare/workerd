@@ -31,4 +31,12 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags);
 // Must be called before the context is destroyed (e.g., from disposeContext()).
 void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context);
 
+// Returns a Maybe<JsValue> with the named bootstrap module export if it exists, or
+// kj::none if it does not. The module must have already been instantiated/required
+// as part of the per-isolate bootstrap process. This is used by the worker runtime
+// to access the bootstrap modules from C++ code. Typically, the export should be
+// an object, but there's always the possibility it could be any JS value type.
+// The caller is responsible for checking the type.
+kj::Maybe<jsg::JsValue> tryGetBootstrapExport(jsg::Lock& js, kj::StringPtr specifier);
+
 }  // namespace workerd

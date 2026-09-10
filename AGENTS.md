@@ -111,7 +111,7 @@ Key elements: `modules` (embed JS/TS files), `compatibilityFlags`, `bindings` (s
 
 ### Dependencies
 
-- **Cap'n Proto source code** available in `external/capnp-cpp` - contains KJ C++ base library and
+- **Cap'n Proto source code** available in `external/+http+capnp-cpp/` - it contains KJ C++ base library and
   capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/` includes and
   `kj::` and `capnp::` namespaces.
 
@@ -185,7 +185,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Add Node.js compat     | `src/workerd/api/node/` (C++) + `src/node/` (TS)              | Dual-layer; register in `api/node/node.h` NODEJS_MODULES macro                                               |
 | Add Cloudflare API     | `src/cloudflare/`                                             | TypeScript; mock in `internal/test/<product>/`                                                               |
 | Modify compat flags    | `src/workerd/io/compatibility-date.capnp`                     | ~1400 lines; annotations define flag names + enable dates                                                    |
-| Add autogate           | `src/workerd/util/autogate.h` + `.c++`                        | Enum + string map; both must stay in sync                                                                    |
+| Add autogate           | `src/workerd/util/autogate.h`                                 | Add key to WORKERD_AUTOGATES macro; kebab-case name auto-derived; see header comment                         |
 | Config schema          | `src/workerd/server/workerd.capnp`                            | Cap'n Proto; capability-based security                                                                       |
 | Worker lifecycle       | `src/workerd/io/worker.{h,c++}`                               | Isolate, Script, Worker, Actor classes                                                                       |
 | Request lifecycle      | `src/workerd/io/io-context.{h,c++}`                           | IoContext: the per-request god object                                                                        |
@@ -205,6 +205,15 @@ This project generally follows the [KJ Style Guide](https://github.com/capnproto
 - **Pre-commit hook**: Blocks `KJ_DBG` in staged code; runs format check
 - **Commit discipline**: Split PRs into small commits; each must compile + pass tests; no fixup commits
 - **TypeScript**: Strict mode, `exactOptionalPropertyTypes`, private `#` syntax enforced, explicit return types
+
+### Comment guidelines
+
+These apply to every kind of commentary that ships with the code, not just code comments: doc comments, Markdown under `docs/`, and READMEs all count. Read "comment" as "comment or document" and "code" as "code or document" throughout. Commit messages are the counterpart and the exception: they are where the narrative of a change belongs.
+
+- Write comments that describe the current state of the system, not the task, change, or debugging that produced the code.
+- Don't refer to a prior state as if the reader already knows it; the reader has only the code in front of them, not the diff or the ticket. When you correct a comment or a document, the story of the correction goes in the commit message; don't leave behind a note about what the previous version claimed.
+- Referring to historical state is occasionally legitimate, but it's rare and must be explicitly introduced as history, ideally explaining what problem the old approach caused (e.g. "Historically we did X, but that caused Y, so now we do Z").
+- Don't explain what a widely-used tag, flag, or API does at every use site; document such conventions once where they're defined and let readers find that via search.
 
 ### Use KJ types, not STL
 
@@ -246,6 +255,11 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 - The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
   validates that GC-visitable fields are traced in `visitForGc()`. Run via
   `just clang-tidy <target>`. See `build/AGENTS.md` for details.
+- The `workerd-unsafe-continuation-capture` clang-tidy check flags lambdas
+  passed to async sinks (`kj/jsg::Promise::then`, `IoContext::run/awaitIo/...`,
+  `kj::evalLater`, ...) that capture bare references, `[this]`, or non-owning
+  views. See `docs/reference/detail/async-patterns.md` §Continuation Captures
+  for the safe-capture pattern catalog.
 
 ### Feature Management
 
@@ -262,7 +276,6 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 - **NEVER** call `recursivelyFreeze()` on user-provided content (unsafe for cyclic values)
 - **NEVER** add new `Fetcher` methods without compat flag (conflicts with JS RPC wildcard)
 - **NEVER** change `Headers::Guard` enum values (serialized)
-- **NEVER** use `getWaitUntilTasks()` (use `addWaitUntil()`)
 - **NEVER** use boolean arguments; prefer `WD_STRONG_BOOL`
 - `Ref<T>` stored in C++ objects visible from JS heap **MUST** implement `visitForGc()`; C++ reference cycles are **NEVER** collected
 - SQLite `SQLITE_MISUSE` errors always throw (never suppressed); transactions disallowed in DO SQLite
@@ -275,6 +288,16 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 
 - Strong backwards compatibility commitment - features cannot be removed or changed once deployed
 - We use compatibility-date.capnp to introduce feature flags when we need to change the behavior
+- Review additions to the standard API surface exposed to Workers, including
+  those introduced by V8 updates. Record the compatibility decision in the
+  commit message: use a compatibility flag or explicitly accept the risk.
+- Autogates support gradual rollout and fast rollback, but do not preserve
+  existing Workers' API surface. Compatibility failures may be invisible to
+  runtime metrics or reported late by customers, so a quiet rollout alone
+  does not establish safety.
+- When changing V8 flags in `src/workerd/jsg/setup.c++`, deleting a flag does
+  not disable a feature V8 enables by default; negate the flag instead (for
+  example, `--nojs-float16array`), unless V8 has removed it.
 
 ## Development Workflow
 
@@ -300,6 +323,8 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 See [docs/v8-updates.md](docs/v8-updates.md) for instructions on updating the V8 engine version used by workerd. These steps include syncing the V8 source, applying workerd patches, rebasing onto the new version, regenerating patches, and updating dependency versions in Bazel files.
 
 When updating V8, ensure that all tests pass. Look for new deprecations when building and flag those for users if necessary.
+
+V8 updates can enable globals through changed defaults; apply the [compatibility rules](#backward-compatibility).
 
 If asked to help with a V8 update, ask for the specific target V8 version to update to and ask clarifying questions about any specific patches or customizations that need to be preserved before proceeding. Merge conflicts are common during V8 updates, so be prepared to resolve those carefully. These almost always require human judgment to ensure that workerd-specific changes are preserved while still applying the upstream V8 changes correctly. Do not attempt to resolve merge conflicts automatically without human review.
 

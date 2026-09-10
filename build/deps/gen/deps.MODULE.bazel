@@ -5,7 +5,7 @@ http = use_extension("@//:build/exts/http.bzl", "http")
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
 # ada-url
-bazel_dep(name = "ada-url", version = "3.4.4")
+bazel_dep(name = "ada-url", version = "4.0.0")
 
 # boringssl
 bazel_dep(name = "boringssl", repo_name = "ssl")
@@ -22,17 +22,31 @@ archive_override(
 )
 
 # brotli
-bazel_dep(name = "brotli", version = "1.2.0.bcr.1")
+bazel_dep(name = "brotli", version = "1.2.0.bcr.3")
 
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "94e5bcd03d14b8f1a1713e2477941e00b130b63b5a1aad97a10ff5edf05b6765",
-    strip_prefix = "capnproto-capnproto-e9fa5c7/c++",
+    sha256 = "dcd96af005ea6fab167e63b6d53b05db13c03339766d26c07e0b3cbe54e1982e",
+    strip_prefix = "capnproto-capnproto-851c45b/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/e9fa5c7dc98192fc0dc0098ec770db68f997a938",
+    url = "https://github.com/capnproto/capnproto/tarball/851c45bb39c34c3f20f9d9ebe9f34a7e39109b6f",
 )
 use_repo(http, "capnp-cpp")
+
+# com_googlesource_chromium_icu
+git_repository(
+    name = "com_googlesource_chromium_icu",
+    build_file = "@v8//:bazel/BUILD.icu",
+    commit = "8cc91d9b6ab9991802fd208ee03a69714fd0251c",
+    patch_cmds = [
+        "find source -name BUILD.bazel | xargs rm",
+    ],
+    patch_cmds_win = [
+        "Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item",
+    ],
+    remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
+)
 
 # dragonbox
 http.archive(
@@ -52,10 +66,10 @@ archive_override(
     build_file_content = "cc_library(name = 'fast_float', hdrs = glob(['include/fast_float/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/fast_float/src')",
     remote_file_integrity = {"MODULE.bazel": "sha256-Q1BGZO/fpMbPE0libIcTXJuHkmMlxyBFjzlu7iVWjto="},
     remote_file_urls = {"MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/fast_float/8.0.2/MODULE.bazel"]},
-    sha256 = "aa2ab8d370d1011a7a6d4ab90589b298b7e5973fe00041c06ecc7298328c25b4",
-    strip_prefix = "fastfloat-fast_float-05087a3",
+    sha256 = "9b239eaa54c58fc3a1bb7e1a11030b67211e38ce7f4781b41b004f26f6fd1528",
+    strip_prefix = "fastfloat-fast_float-34164f5",
     type = "tgz",
-    url = "https://github.com/fastfloat/fast_float/tarball/05087a303dad9c98768b33c829d398223a649bc6",
+    url = "https://github.com/fastfloat/fast_float/tarball/34164f547b7df3f5d794ff67e9f885c36819ebfc",
 )
 
 # fp16
@@ -65,10 +79,10 @@ archive_override(
     build_file_content = "exports_files(glob(['**']))",
     remote_file_integrity = {"MODULE.bazel": "sha256-2YAHXAyoWo6FapWo2MBLpWyewByY+F4tSWUMbYt8gmg="},
     remote_file_urls = {"MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/fp16/0.0.0-20210320-0a92994/MODULE.bazel"]},
-    sha256 = "81686dc45a7897cf958ee99f655879a066dde41db5fc1379a1e8db338ad17589",
-    strip_prefix = "Maratyszcza-FP16-3d2de18",
+    sha256 = "ee835b205fabb4035d2c64a2dda54f2e8ff720f9f77a1945b8fa71ba61290c70",
+    strip_prefix = "Maratyszcza-FP16-782eea1",
     type = "tgz",
-    url = "https://github.com/Maratyszcza/FP16/tarball/3d2de1816307bac63c16a297e8c4dc501b4076df",
+    url = "https://github.com/Maratyszcza/FP16/tarball/782eea126dc5c755827be751a099eb01826175cf",
 )
 
 # highway
@@ -113,42 +127,32 @@ archive_override(
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
         "//:patches/perfetto/0002-disable-info-level-logging-re2.patch",
     ],
-    sha256 = "60dd39e5f21800c4f61032ca9f9f73973cfc7d93db9f0d39e63ad3d8fb3740e9",
-    strip_prefix = "google-perfetto-25e635e",
+    sha256 = "4fcc98fe4754269a70e297f6caba429420039c89a1c6cb561dffb4057de63abb",
+    strip_prefix = "google-perfetto-9e9bdaf",
     type = "tgz",
-    url = "https://api.github.com/repos/google/perfetto/tarball/v56.1",
+    url = "https://api.github.com/repos/google/perfetto/tarball/v58.2",
 )
 
 # simdutf
 http.archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "c47c68cd51025ec66509bc36215b4c4f1f0f0a98129139ee55c541531b652526",
+    sha256 = "33c0693a49dd70f286c90df9002e1f1416d19a54d5ebf7da7b49298d7a941992",
     strip_prefix = "",
     type = "zip",
-    url = "https://github.com/simdutf/simdutf/releases/download/v9.0.0/singleheader.zip",
+    url = "https://github.com/simdutf/simdutf/releases/download/v9.1.1/singleheader.zip",
 )
 use_repo(http, "simdutf")
 
 # tcmalloc
-bazel_dep(name = "tcmalloc", version = "0.0.0-20250927-12f2552")
-
-# workerd-cxx
-http.archive(
-    name = "workerd-cxx",
-    sha256 = "d4db1075562a134a19dee7751adfc79bba95cad7740bb42d5621c4dfd78158d3",
-    strip_prefix = "cloudflare-workerd-cxx-5cb35c5",
-    type = "tgz",
-    url = "https://github.com/cloudflare/workerd-cxx/tarball/5cb35c57a904f3c949b13583a66a4ae55ebb6eda",
-)
-use_repo(http, "workerd-cxx")
+bazel_dep(name = "tcmalloc", version = "0.0.0-20260818-15db23d")
 
 # zlib
 bazel_dep(name = "zlib")
 git_override(
     module_name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    commit = "8b3aa8a1cd7585c0c4c67351481227b046a662a0",
+    commit = "285e94b8fa95ad3b7d16b80798ec8dce6febb8c8",
     patch_strip = 1,
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",

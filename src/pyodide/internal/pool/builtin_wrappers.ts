@@ -110,7 +110,10 @@ export function setGetRandomValues(func: typeof getRandomValuesType): void {
   getRandomValuesInner = func;
 }
 
-export function getRandomValues(Module: Module, arr: Uint8Array): Uint8Array {
+export function getRandomValues(
+  Module: Module,
+  arr: Uint8Array<ArrayBuffer>
+): Uint8Array<ArrayBuffer> {
   return getRandomValuesInner(Module, arr);
 }
 
@@ -233,12 +236,13 @@ function prepareStackTrace(
   Error.prepareStackTrace = undefined;
   // Counting up, the bottom of the stack is `checkCallee`, then
   // `newWasmModule`, and the third entry should be our callee.
-  if (stack.length < 3) {
+  const caller = stack[2];
+  if (stack.length < 3 || caller === undefined) {
     return [false, ''];
   }
   try {
-    const funcName = stack[2].getFunctionName();
-    const fileName = stack[2].getFileName();
+    const funcName = caller.getFunctionName();
+    const fileName = caller.getFileName();
     if (fileName !== 'pyodideRuntime-internal:emscriptenSetup') {
       return [false, funcName];
     }

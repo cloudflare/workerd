@@ -1,0 +1,29 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "rpc-stub-gc-warning-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "rpc-stub-gc-warning-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [
+          (name = "MyService", service = (
+            name = "rpc-stub-gc-warning-test",
+            entrypoint = "MyService")),
+        ],
+        # The tracer is what routes the GC-time warning through the async-context lookup that
+        # creates handles, so a streaming tail worker is required to exercise the bug.
+        streamingTails = ["no-op-tail"],
+      )
+    ),
+    ( name = "no-op-tail",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "tail-worker-test-no-op.js")
+        ],
+      ),
+    ),
+  ],
+);

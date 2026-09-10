@@ -13,12 +13,23 @@ const unitTests :Workerd.Config = (
           "transformstream_enable_standard_constructor"
         ],
         streamingTails = ["tail"],
+        durableObjectNamespaces = [
+          (
+            className = "OverlappingRequestsObject",
+            uniqueKey = "tracing-helpers-overlapping-requests"
+          )
+        ],
+        durableObjectStorage = (inMemory = void),
         bindings = [
           (
             name = "tracingTest",
             wrapped = (
               moduleName = "cloudflare-internal:test-tracing-wrapper"
             )
+          ),
+          (
+            name = "overlappingRequests",
+            durableObjectNamespace = "OverlappingRequestsObject"
           )
         ],
       )

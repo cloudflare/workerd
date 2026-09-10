@@ -31,6 +31,13 @@ class WorkerInterface;
 // bindings of a flag-enabled worker are `Persistent::YES`; everything else is `Persistent::NO`.
 // A `Persistent::YES` channel/token may be stored in long-term storage; `Persistent::NO` may not.
 WD_STRONG_BOOL(Persistent);
+WD_STRONG_BOOL(ReresolveActorPipeline);
+
+// Whether an actor request is a retry of an earlier attempt.
+WD_STRONG_BOOL(IsActorRetry);
+
+// Whether the sender's enforce gate is enabled for this logical call.
+WD_STRONG_BOOL(ActorRetryGateEnabled);
 
 // Interface for talking to the Cache API. Needs to be declared here so that IoContext can
 // contain it.
@@ -76,6 +83,11 @@ class TimerChannel {
   // time limits on some sort of operation, not for implementing application-driven timing, as it does
   // not implement any Spectre mitigations.
   virtual kj::Promise<void> afterLimitTimeout(kj::Duration t) = 0;
+
+  // Returns the precise monotonic time used to calculate deadlines for afterLimitTimeout().
+  virtual kj::TimePoint nowForLimitTimeout() {
+    return kj::systemPreciseMonotonicClock().now();
+  }
 };
 
 class WorkerStubChannel;
@@ -104,7 +116,7 @@ struct DynamicWorkerSource;
 // I/O, i.e. the event that started the Worker. If IoChannelFactory is implemented such that
 // all methods throw exceptions, then the Worker will be completely unable to communicate with
 // anything in the world except for the client -- this is a useful property for sandboxing!
-class IoChannelFactory {
+class IoChannelFactory: public virtual kj::Refcounted {
  public:
   enum class EvictWebSocketMode {
     HIBERNATE,
@@ -124,6 +136,14 @@ class IoChannelFactory {
   // `ctx.restore()` is never used, and so that any exceptions thrown while constructing the token
   // surface only when the token is genuinely required.
   class SelfTokenFactory: public kj::Refcounted {};
+
+  // The sender-selected retry token and retry flag for one logical actor call attempt.
+  struct ActorRetryRequestMetadata {
+    uint64_t nonce;
+    kj::Date createdAt;
+    IsActorRetry isRetry;
+    ActorRetryGateEnabled retryGateEnabled;
+  };
 
   // Contains metadata attached to an outgoing subrequest from a worker, independent of the type
   // of request.
@@ -152,6 +172,15 @@ class IoChannelFactory {
     // appropriate to pass down to the IoContext as the `selfTokenFactory`, for use by the
     // implementation of `ctx.restore()`, so that it can determine its own base token.
     kj::Maybe<kj::Own<SelfTokenFactory>> restoredSelfTokenFactory;
+
+    // Present when the caller classified this as a retry-eligible actor request and selected its
+    // logical-call token.
+    kj::Maybe<ActorRetryRequestMetadata> actorRetryRequestMetadata;
+
+    // A hibernatable WebSocket event wakes an actor over a loopback that outlives it. With no live
+    // actor owning the manager, the pipeline that loopback holds can name a version that is no
+    // longer current, so runtimes with mutable actor code should re-resolve it from its script ID.
+    ReresolveActorPipeline reresolveActorPipeline = ReresolveActorPipeline::NO;
 
     // True if this request was started on a channel that was reconstructed from a stored
     // ("persistent") stub. The target worker re-verifies that it still has the
@@ -210,7 +239,7 @@ class IoChannelFactory {
 
   // Base class for all channel types that can be tokenized, e.g. SubrequestChannel,
   // ActorClassChannel.
-  class TokenizableChannel: public kj::Refcounted, public Frankenvalue::CapTableEntry {
+  class TokenizableChannel: public virtual kj::Refcounted, public Frankenvalue::CapTableEntry {
    public:
     kj::Own<CapTableEntry> clone() override final {
       return kj::addRef(*this);
@@ -438,6 +467,11 @@ class IoChannelFactory {
     JSG_FAIL_REQUIRE(Error, "WorkerdDebugPort bindings are not supported by this runtime.");
   }
 
+  // Get direct access to the current workerd process's debug port interface.
+  virtual rpc::WorkerdDebugPort::Client getWorkerdDebugPort() {
+    JSG_FAIL_REQUIRE(Error, "WorkerdDebugPort bindings are not supported by this runtime.");
+  }
+
   // Converts a token created with {SubrequestChannel,ActorClassChannel}::getToken() back into a
   // live channel. Default implementations throw.
   virtual kj::Own<SubrequestChannel> subrequestChannelFromToken(
@@ -493,15 +527,6 @@ class IoChannelFactory {
       kj::Own<SelfTokenFactory> selfTokenFactory,
       Frankenvalue restoreParams,
       Persistent persistent);
-
-  // Return a strong reference to this same factory. Used in the implementations of
-  // getSubrequestChannel() and getActorClass() when delayed resolution is needed.
-  //
-  // TODO(cleanup): This is hacky. IoChannelFactory isn't declared to simply extend kj::Refcounted
-  //   because the workerd implementation is privately implemented by Server::WorkerService, which
-  //   inherits kj::Refcounted a different way. But maybe it's time for Server::WorkerService to
-  //   stop working that way?
-  virtual kj::Own<void> addRef() = 0;
 };
 
 // ResourceLimits provides a means to control the resource allocation for a worker stage via a
@@ -640,5 +665,9 @@ kj::Own<IoChannelFactory::ActorClassChannel> newPromisedChannel<
 template <>
 kj::Own<IoChannelFactory::RpcChannel> newPromisedChannel<IoChannelFactory::RpcChannel>(
     kj::Promise<kj::Own<IoChannelFactory::RpcChannel>> promise);
+
+// Creates caller-owned metadata for the first attempt of a retry-eligible actor invocation.
+IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(
+    kj::Date createdAt, ActorRetryGateEnabled retryGateEnabled);
 
 }  // namespace workerd

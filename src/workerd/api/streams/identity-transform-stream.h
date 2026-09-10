@@ -6,6 +6,9 @@
 
 namespace workerd::api {
 
+// See /src/tests/streams/identity/AGENTS.md for the IdentityTransformStream
+// and FixedLengthStream specification.
+
 // The IdentityTransformStream is a non-standard TransformStream implementation that passes
 // the exact bytes written to the writable side on to the readable side without modification.
 // Unlike standard the TransformStream, the readable side of an IdentityTransformStream
@@ -58,6 +61,6 @@ struct OneWayPipe {
 
 OneWayPipe newIdentityPipe(kj::Maybe<uint64_t> expectedLength = kj::none);
 
-bool isIdentityTransformStream(WritableStreamSink& sink);
+bool isIdentityTransformStream(kj::Ptr<WritableStreamSink> sink);
 
 }  // namespace workerd::api

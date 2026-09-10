@@ -9,6 +9,7 @@
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/memory.h>
 #include <workerd/util/own-util.h>
+#include <workerd/util/strong-bool.h>
 
 #include <kj/map.h>
 #include <kj/one-of.h>
@@ -36,6 +37,8 @@ using ExecutionModel = rpc::Trace::ExecutionModel;
 class Trace;
 
 namespace tracing {
+WD_STRONG_BOOL(LogTruncated);
+
 // A 128-bit globally unique trace identifier. This will be used for both
 // external and internal tracing. Specifically, for internal tracing, this
 // is used to represent tracing IDs for jaeger traces. For external tracing,
@@ -306,6 +309,9 @@ class InvocationSpanContext final {
   kj::Maybe<TraceFlags> traceFlags;
 };
 
+// Format a W3C traceparent ("{version}-{trace-id}-{parent-id}-{flags}").
+kj::String formatW3CTraceparent(const TraceId& traceId, SpanId spanId, TraceFlags traceFlags);
+
 // SpanContext as used for streaming tail worker tail events. spanId is always set except for Onset
 // events that don't inherit context from another invocation.
 struct SpanContext {
@@ -346,6 +352,9 @@ struct SpanContext {
   // Parse a W3C traceparent string into a SpanContext.
   // Format: "{version}-{trace-id}-{parent-id}-{flags}"
   static kj::Maybe<SpanContext> tryFromTraceparent(kj::StringPtr traceparent);
+
+  // Serialize to a W3C traceparent.
+  kj::Maybe<kj::String> toTraceparent() const;
 
  private:
   TraceId traceId;
@@ -425,6 +434,7 @@ class ConnectEventInfo {
 
   void copyTo(rpc::Trace::ConnectEventInfo::Builder builder) const;
   ConnectEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a scheduled request
@@ -440,6 +450,7 @@ struct ScheduledEventInfo final {
 
   void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder) const;
   ScheduledEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a Durable Object alarm request
@@ -454,6 +465,7 @@ struct AlarmEventInfo final {
 
   void copyTo(rpc::Trace::AlarmEventInfo::Builder builder) const;
   AlarmEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a queue worker request
@@ -469,6 +481,7 @@ struct QueueEventInfo final {
 
   void copyTo(rpc::Trace::QueueEventInfo::Builder builder) const;
   QueueEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes an email request
@@ -485,6 +498,7 @@ struct EmailEventInfo final {
 
   void copyTo(rpc::Trace::EmailEventInfo::Builder builder) const;
   EmailEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a buffered tail worker request
@@ -530,6 +544,7 @@ struct TraceEventInfo final {
 
   void copyTo(rpc::Trace::TraceEventInfo::Builder builder) const;
   TraceEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a hibernatable web socket event
@@ -554,12 +569,14 @@ struct HibernatableWebSocketEventInfo final {
   void copyTo(rpc::Trace::HibernatableWebSocketEventInfo::Builder builder) const;
   HibernatableWebSocketEventInfo clone() const;
   static Type readFrom(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
+  kj::String toString() const;
 };
 
 // Describes a custom event
 struct CustomEventInfo final {
   explicit CustomEventInfo() {};
   CustomEventInfo(rpc::Trace::CustomEventInfo::Reader reader) {};
+  kj::String toString() const;
 };
 
 // Describes a fetch response
@@ -607,9 +624,43 @@ struct StreamDiagnosticsEvent final {
   StreamDiagnosticsEvent clone() const;
 };
 
+// Describes structured Error fields extracted from an Error argument passed to a
+// console.* call. Attached to a Log entry via Log::errorInfo. Mirrors the shape of
+// tracing::Exception (which represents uncaught exceptions) but has no timestamp of
+// its own — the enclosing Log already carries one.
+struct ErrorInfo final {
+  explicit ErrorInfo(kj::String name, kj::String message, kj::Maybe<kj::String> stack);
+  ErrorInfo(rpc::Trace::ErrorInfo::Reader reader);
+  ErrorInfo(ErrorInfo&&) noexcept = default;
+  KJ_DISALLOW_COPY(ErrorInfo);
+  ~ErrorInfo() noexcept(false) = default;
+
+  kj::String name;
+  kj::String message;
+  kj::Maybe<kj::String> stack;
+
+  void copyTo(rpc::Trace::ErrorInfo::Builder builder) const;
+  ErrorInfo clone() const;
+};
+
+// Per-argument errorInfo for a Log. The outer kj::Maybe is `kj::none` when none
+// of the originating console call's arguments was a native Error (the dominant
+// case, kept cheap on the wire). When present, the inner array's length matches
+// the argument count; slot `i` is `kj::some(ErrorInfo)` if `info[i]` was a native
+// Error, `kj::none` otherwise.
+using LogErrorInfo = kj::Maybe<kj::Array<kj::Maybe<ErrorInfo>>>;
+
+// Helper: deep-copy a LogErrorInfo. Needed because kj::Array is move-only and
+// ErrorInfo contains non-copyable strings.
+LogErrorInfo cloneLogErrorInfo(const LogErrorInfo& src);
+
 // Describes a log event
 struct Log final {
-  explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
+  explicit Log(kj::Date timestamp,
+      LogLevel logLevel,
+      kj::String message,
+      LogErrorInfo errorInfo = kj::none,
+      LogTruncated truncated = LogTruncated::NO);
   Log(rpc::Trace::Log::Reader reader);
   Log(Log&&) noexcept = default;
   KJ_DISALLOW_COPY(Log);
@@ -621,6 +672,10 @@ struct Log final {
   LogLevel logLevel;
   // TODO(soon): Just string for now.  Eventually, capture serialized JS objects.
   kj::String message;
+  bool truncated;
+
+  // Per-argument structured Error fields. See LogErrorInfo above for semantics.
+  LogErrorInfo errorInfo;
 
   void copyTo(rpc::Trace::Log::Builder builder) const;
   Log clone() const;
@@ -628,8 +683,13 @@ struct Log final {
 
 // Describes an exception event
 struct Exception final {
-  explicit Exception(
-      kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
+  using Code = kj::OneOf<kj::String, double>;
+
+  explicit Exception(kj::Date timestamp,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack,
+      kj::Maybe<Code> code = kj::none);
   Exception(rpc::Trace::Exception::Reader reader);
   Exception(Exception&&) noexcept = default;
   KJ_DISALLOW_COPY(Exception);
@@ -642,6 +702,7 @@ struct Exception final {
   kj::String message;
 
   kj::Maybe<kj::String> stack;
+  kj::Maybe<Code> code;
 
   void copyTo(rpc::Trace::Exception::Builder builder) const;
   Exception clone() const;
@@ -1072,7 +1133,7 @@ class SpanParent {
   // Make a SpanParent that causes children not to be reported anywhere.
   SpanParent(decltype(nullptr)) {}
 
-  SpanParent(kj::Maybe<kj::Own<SpanObserver>> observer): observer(kj::mv(observer)) {}
+  SpanParent(kj::Rc<SpanObserver> observer): observer(kj::mv(observer)) {}
 
   SpanParent(SpanParent&& other) = default;
   SpanParent& operator=(SpanParent&& other) = default;
@@ -1088,7 +1149,7 @@ class SpanParent {
 
   // Useful to skip unnecessary code when not observed.
   bool isObserved() {
-    return observer != kj::none;
+    return observer != nullptr;
   }
 
   // Get the underlying SpanObserver representing the parent span.
@@ -1097,7 +1158,8 @@ class SpanParent {
   // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
   // the `SpanObserver` to the expected observer type in order to extract the trace ID.
   kj::Maybe<SpanObserver&> getObserver() {
-    return observer;
+    if (observer != nullptr) return *observer;
+    return kj::none;
   }
 
   // Return the serializable identity of this span for cross-boundary propagation.
@@ -1111,8 +1173,12 @@ class SpanParent {
   static SpanParent fromSpanContext(tracing::SpanContext context);
 
  private:
-  kj::Maybe<kj::Own<SpanObserver>> observer;
+  kj::Rc<SpanObserver> observer;
 };
+
+// Whether the span tag is a custom tag added using the user tracing binding, we do not log for
+// overwritten tags in that case.
+WD_STRONG_BOOL(IsCustomTag);
 
 // Interface for writing a span. Essentially, this is a mutable interface to a `Span` object,
 // given only to the code which is meant to create the span, whereas code that merely collects
@@ -1129,7 +1195,7 @@ class SpanBuilder {
   //
   // `operationName` should be a string literal with infinite lifetime, or somehow otherwise be
   // attached to the observer observing this span.
-  explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
+  explicit SpanBuilder(kj::Rc<SpanObserver> observer,
       kj::ConstString operationName,
       kj::Maybe<kj::Date> startTime = kj::none);
 
@@ -1149,7 +1215,7 @@ class SpanBuilder {
 
   // Useful to skip unnecessary code when not observed.
   bool isObserved() {
-    return observer != kj::none;
+    return observer != nullptr;
   }
 
   // Get the underlying SpanObserver representing the span.
@@ -1158,7 +1224,8 @@ class SpanBuilder {
   // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
   // the `SpanObserver` to the expected observer type in order to extract the trace ID.
   kj::Maybe<SpanObserver&> getObserver() {
-    return observer;
+    if (observer != nullptr) return *observer;
+    return kj::none;
   }
 
   // Create a new child span.
@@ -1186,7 +1253,7 @@ class SpanBuilder {
       double,
       int64_t>;
 
-  void setTag(kj::ConstString key, TagInitValue value);
+  void setTag(kj::ConstString key, TagInitValue value, IsCustomTag isCustom = IsCustomTag::NO);
 
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
@@ -1195,8 +1262,14 @@ class SpanBuilder {
   // duplicate keys.
   void addLog(kj::Date timestamp, kj::ConstString key, TagValue value);
 
+  // Records an exception associated with this span. Calls after end() are ignored.
+  void recordException(kj::Maybe<tracing::Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack);
+
  private:
-  kj::Maybe<kj::Own<SpanObserver>> observer;
+  kj::Rc<SpanObserver> observer;
   // The under-construction span, or null if the span has ended.
   kj::Maybe<Span> span;
 
@@ -1215,12 +1288,12 @@ class SpanObserver: public kj::Refcounted {
   // Allocate a new child span.
   //
   // Note that children can be created long after a span has completed.
-  [[nodiscard]] virtual kj::Own<SpanObserver> newChild() = 0;
+  [[nodiscard]] virtual kj::Rc<SpanObserver> newChild() = 0;
 
   // Allocate a child for a span initiated directly by user JavaScript (via
   // `ctx.tracing.enterSpan`). Allows implementations to apply different policies than for
   // runtime-issued spans (notably, edgeworker bypasses its operation-name allowlist here).
-  [[nodiscard]] virtual kj::Own<SpanObserver> newChildFromUserCode() {
+  [[nodiscard]] virtual kj::Rc<SpanObserver> newChildFromUserCode() {
     return newChild();
   }
 
@@ -1232,6 +1305,12 @@ class SpanObserver: public kj::Refcounted {
   // Called exactly once per observer, after onOpen(). Tags and logs are moved from the span;
   // the observer takes ownership.
   virtual void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) = 0;
+
+  virtual void onException(kj::Date timestamp,
+      kj::Maybe<tracing::Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) {}
 
   // Called when the operation name is changed after the span was opened (via
   // SpanBuilder::setOperationName()). Observers that eagerly stream the open event should handle
@@ -1266,7 +1345,7 @@ class NonRecordingSpanObserver final: public SpanObserver {
  public:
   explicit NonRecordingSpanObserver(tracing::SpanContext context): context(kj::mv(context)) {}
 
-  kj::Own<SpanObserver> newChild() override {
+  kj::Rc<SpanObserver> newChild() override {
     return {};
   }
   void onOpen(kj::ConstString, kj::Date) override {}
@@ -1280,40 +1359,65 @@ class NonRecordingSpanObserver final: public SpanObserver {
 };
 
 inline kj::Maybe<tracing::SpanContext> SpanParent::toSpanContext() {
-  KJ_IF_SOME(obs, observer) {
-    return obs->toSpanContext();
-  }
+  if (observer != nullptr) return observer->toSpanContext();
   return kj::none;
 }
 
 inline tracing::SpanId SpanParent::getSpanId() {
-  KJ_IF_SOME(obs, observer) {
-    return obs->getSpanId();
-  }
+  if (observer != nullptr) return observer->getSpanId();
   return tracing::SpanId::nullId;
 }
 
 inline SpanParent SpanParent::fromSpanContext(tracing::SpanContext context) {
-  return SpanParent(kj::refcounted<NonRecordingSpanObserver>(kj::mv(context)));
+  return SpanParent(kj::rc<NonRecordingSpanObserver>(kj::mv(context)));
 }
 
-inline SpanParent::SpanParent(SpanBuilder& builder): observer(mapAddRef(builder.observer)) {}
+inline SpanParent::SpanParent(SpanBuilder& builder): observer(builder.observer.addRef()) {}
 
 inline SpanParent SpanParent::addRef() {
-  return SpanParent(mapAddRef(observer));
+  return SpanParent(observer.addRef());
 }
 
 inline SpanBuilder SpanParent::newChild(
     kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
-  return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
-      kj::mv(operationName), startTime);
+  if (observer == nullptr) return nullptr;
+  return SpanBuilder(observer->newChild(), kj::mv(operationName), startTime);
 }
 
 inline SpanBuilder SpanBuilder::newChild(
     kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
-  return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
-      kj::mv(operationName), startTime);
+  if (observer == nullptr) return nullptr;
+  return SpanBuilder(observer->newChild(), kj::mv(operationName), startTime);
 }
+
+class TraceContext;
+
+// Pair of span parents (internal + user) used to express "open new spans nested
+// under these". Doesn't own SpanBuilders, unlike TraceContext.
+class TraceContextParent {
+ public:
+  TraceContextParent(SpanParent internalSpan, SpanParent userSpan)
+      : internalSpan(kj::mv(internalSpan)),
+        userSpan(kj::mv(userSpan)) {}
+  TraceContextParent(TraceContextParent&& other) = default;
+  TraceContextParent& operator=(TraceContextParent&& other) = default;
+  KJ_DISALLOW_COPY(TraceContextParent);
+
+  TraceContextParent addRef() {
+    return TraceContextParent(internalSpan.addRef(), userSpan.addRef());
+  }
+
+  // Useful to skip unnecessary work (e.g. creating child spans) when not observed.
+  bool isObserved() {
+    return internalSpan.isObserved() || userSpan.isObserved();
+  }
+
+  [[nodiscard]] TraceContext newChild(kj::ConstString operationName);
+
+ private:
+  SpanParent internalSpan;
+  SpanParent userSpan;
+};
 
 // TraceContext to keep track of user tracing/existing tracing better
 class TraceContext {
@@ -1339,10 +1443,31 @@ class TraceContext {
     return SpanParent(userSpan);
   }
 
+  TraceContextParent getSpanParents() {
+    return TraceContextParent(SpanParent(span), SpanParent(userSpan));
+  }
+
+  // Like getSpanParents(), but returns kj::none when neither span is observed. Use this when the
+  // parents may be retained beyond the current call (e.g. stored on a returned stub/promise):
+  // storing nothing on the untraced path avoids holding span state, while the traced path still
+  // nests follow-up calls correctly.
+  kj::Maybe<TraceContextParent> getSpanParentsIfObserved() {
+    if (!isObserved()) return kj::none;
+    return getSpanParents();
+  }
+
  private:
   SpanBuilder span;
   SpanBuilder userSpan;
 };
+
+inline TraceContext TraceContextParent::newChild(kj::ConstString operationName) {
+  // newChild() consumes its operationName argument, so clone it for the internal child and move
+  // the original into the user child.
+  auto internalChild = internalSpan.newChild(operationName.clone());
+  auto userChild = userSpan.newChild(kj::mv(operationName));
+  return TraceContext(kj::mv(internalChild), kj::mv(userChild));
+}
 
 // RAII object that measures the time duration over its lifetime. It tags this duration onto a
 // given request span using a specified tag name. Ideal for automatically tracking and logging

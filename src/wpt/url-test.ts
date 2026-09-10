@@ -5,8 +5,8 @@
 import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
-  'IdnaTestV2-removed.window.js': {},
-  'IdnaTestV2.window.js': {},
+  'IdnaTestV2-removed.any.js': {},
+  'IdnaTestV2.any.js': {},
   'historical.any.js': {},
   'idlharness.any.js': {
     comment:

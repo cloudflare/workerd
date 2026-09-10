@@ -1,0 +1,23 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Under the new module registry, Wasm modules compile lazily during top-level
+# evaluation, inside the startup window where allow_eval_during_startup
+# permits dynamic code evaluation. The compilation must not revoke that
+# permission for the rest of startup.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "new-module-registry-startup-eval-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "new-module-registry-startup-eval-test.js"),
+          (name = "wasm", wasm = embed "test.wasm"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat_v2",
+          "new_module_registry",
+          "allow_eval_during_startup",
+        ],
+      ),
+    ),
+  ],
+);

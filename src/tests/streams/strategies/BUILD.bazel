@@ -1,0 +1,25 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The queuing strategies suite runs the same test modules under two
+# configs: strategies-cpp against the C++ implementation, strategies-ts
+# against the TypeScript implementation.
+
+strategies_suite_srcs = glob(["*.js"]) + ["strategies-modules.capnp"]
+
+wd_test(
+    src = "strategies-cpp.wd-test",
+    data = strategies_suite_srcs,
+)
+
+wd_test(
+    src = "strategies-ts.wd-test",
+    args = ["--experimental"],
+    data = strategies_suite_srcs,
+)
+
+# The main C++ cell plus the dateless opt-in pedantic_wpt flag, enforcing
+# that pedantic mode changes nothing on this suite's surface.
+wd_test(
+    src = "strategies-cpp-pedantic.wd-test",
+    data = strategies_suite_srcs,
+)

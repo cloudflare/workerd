@@ -124,6 +124,9 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
 
   v8::V8::SetDcheckErrorHandler(&v8DcheckError);
   v8::V8::SetFatalErrorHandler(&v8DcheckError);
+  // V8 can fail to allocate a sandbox before there is a current isolate, so the process-wide OOM
+  // handler must be installed in addition to each isolate's handler.
+  v8::V8::SetFatalMemoryErrorCallback(&IsolateBase::oomError);
 
   // Note that v8::V8::SetFlagsFromString() simply ignores flags it doesn't recognize, which means
   // typos don't generate any error. SetFlagsFromCommandLine() has the `remove_flags` option which
@@ -155,11 +158,6 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // (It turns out you can call v8::V8::SetFlagsFromString() as many times as you want to add
   // more flags.)
   v8::V8::SetFlagsFromString("--noincremental-marking");
-
-  // These features are completed and enabled by default in Chrome, but not
-  // in V8. Follows Node.js: https://github.com/nodejs/node/pull/58154
-  v8::V8::SetFlagsFromString("--js-explicit-resource-management");
-  v8::V8::SetFlagsFromString("--js-float16array");
 
   // Enable source phase imports for WebAssembly modules
   v8::V8::SetFlagsFromString("--js-source-phase-imports");
@@ -215,6 +213,24 @@ void V8System::setFatalErrorCallback(FatalErrorCallback* callback) {
 
 IsolateBase& IsolateBase::from(v8::Isolate* isolate) {
   return *static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
+}
+
+void IsolateBase::registerTypeHandler(const std::type_info& type, const void* handler) {
+  typeHandlerRegistry.upsert(
+      TypeHandlerKey{.type = &type}, handler, [](const void*& existing, const void*&& replacement) {
+    // Re-registration can only ever supply the same singleton again (the instances are
+    // static constexpr, one per handler type).
+    existing = replacement;
+  });
+}
+
+kj::Maybe<const void*> IsolateBase::tryGetTypeHandlerErased(const std::type_info& type) const {
+  return typeHandlerRegistry.find(TypeHandlerKey{.type = &type})
+      .map([](const void* const& handler) { return handler; });
+}
+
+kj::Maybe<const void*> tryGetTypeHandlerErased(v8::Isolate* isolate, const std::type_info& type) {
+  return IsolateBase::from(isolate).tryGetTypeHandlerErased(type);
 }
 
 void IsolateBase::buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* graph, void* data) {
@@ -281,21 +297,38 @@ HeapTracer::HeapTracer(v8::Isolate* isolate)
     : isolate(isolate) {
   isolate->AddGCPrologueCallback(
       [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
-    // We can expect that any freelisted shims will be collected during a major GC, because
-    // they are not in use therefore not reachable. We should therefore clear the freelist now,
-    // before the trace starts.
-    //
-    // Note that we cannot simply depend on the destructor of CppgcShim to remove objects from
-    // the freelist, because destructors do not actually run at trace time. They may be deferred
-    // to run some time after the trace is done. If we accidentally reuse a shim during that
-    // time, we'll have a problem as the shim will still be destroyed as it was already
-    // determined to be unreachable.
-    //
-    // We must clear the freelist in the GC prologue, not the epilogue, because when building in
-    // ASAN mode, V8 will poison the objects' memory, so our attempt to clear the freelist after
-    // the fact will trigger a spurious ASAN failure.
-    static_cast<HeapTracer*>(data)->clearFreelistedShims();
-  }, this, v8::GCType::kGCTypeMarkSweepCompact);
+    auto& self = *static_cast<HeapTracer*>(data);
+    if (type == v8::GCType::kGCTypeMarkSweepCompact) {
+      // We can expect that any freelisted shims will be collected during a major GC, because
+      // they are not in use therefore not reachable. We should therefore clear the freelist
+      // now, before the trace starts.
+      //
+      // Note that we cannot simply depend on the destructor of CppgcShim to remove objects
+      // from the freelist, because destructors do not actually run at trace time. They may be
+      // deferred to run some time after the trace is done. If we accidentally reuse a shim
+      // during that time, we'll have a problem as the shim will still be destroyed as it was
+      // already determined to be unreachable.
+      //
+      // We must clear the freelist in the GC prologue, not the epilogue, because when building
+      // in ASAN mode, V8 will poison the objects' memory, so our attempt to clear the freelist
+      // after the fact will trigger a spurious ASAN failure.
+      self.clearFreelistedShims();
+    }
+    // Advance the GC epoch at the start of a major GC cycle, exactly once per cycle. An
+    // incremental cycle fires kGCTypeIncrementalMarking at marking start and then
+    // kGCTypeMarkSweepCompact again at the atomic pause; a non-incremental major GC fires
+    // only the latter. activeGcEpoch == completedGcEpoch identifies "no cycle in flight"
+    // (the mark-compact epilogue restores that equality), so the second prologue of the
+    // same cycle is a no-op. traceFromV8() stamps the active epoch into each wrapper it
+    // visits, and wasTracedInLastGc() compares against the last *completed* epoch — so
+    // objects not yet traced by an in-progress cycle are correctly treated as alive (they
+    // still carry the previous completed epoch).
+    if (self.activeGcEpoch == self.completedGcEpoch) {
+      ++self.activeGcEpoch;
+    }
+  }, this,
+      static_cast<v8::GCType>(
+          v8::GCType::kGCTypeMarkSweepCompact | v8::GCType::kGCTypeIncrementalMarking));
 
   isolate->AddGCEpilogueCallback(
       [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
@@ -304,6 +337,13 @@ HeapTracer::HeapTracer(v8::Isolate* isolate)
       wrappable->detachWrapper(true);
     }
     self.detachLater.clear();
+    if (type == v8::GCType::kGCTypeMarkSweepCompact) {
+      // Promote the active epoch to completed. V8 has already zapped dead traced nodes
+      // (ResetDeadNodes runs during the atomic pause), so from this point — still before
+      // control returns to JavaScript — wasTracedInLastGc() reports false for any wrapper
+      // not traced during this cycle.
+      self.completedGcEpoch = self.activeGcEpoch;
+    }
   }, this, v8::GCType::kGCTypeAll);
 }
 
@@ -393,8 +433,9 @@ IsolateBase::IsolateBase(V8System& system,
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
       ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group)),
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
-      envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
-      exportsAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
+      envAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
+      exportsAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
+      activeSpanAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)),
       externalStringAllocator(kj::mv(externalStringAllocator)) {
@@ -403,11 +444,6 @@ IsolateBase::IsolateBase(V8System& system,
 
     ptr->SetFatalErrorHandler(&fatalError);
     ptr->SetOOMErrorHandler(&oomError);
-    // We also set the global OOM error handler.  This is a bit of
-    // a hack: Later in the run the allocation of a sandbox may fail
-    // due to OOM.  In that case we want our handler to be called
-    // even though there is no current isolate.
-    v8::V8::SetFatalMemoryErrorCallback(&oomError);
 
     ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
     ptr->SetData(SET_DATA_ISOLATE_BASE, this);

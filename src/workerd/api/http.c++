@@ -8,18 +8,18 @@
 #include "headers.h"
 #include "queue.h"
 #include "sockets.h"
-#include "streams/readable-source.h"
 #include "system-streams.h"
 #include "util.h"
 #include "worker-rpc.h"
-#include "workerd/jsg/jsvalue.h"
 
+#include <workerd/api/global-scope.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/stored-value.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/entropy.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
@@ -33,6 +33,8 @@
 #include <kj/encoding.h>
 #include <kj/memory.h>
 #include <kj/parse/char.h>
+
+#include <random>
 
 namespace workerd::api {
 
@@ -74,65 +76,45 @@ jsg::Optional<kj::StringPtr> getCacheModeName(Request::CacheMode mode) {
 // capitalization). So, it's certainly not worth it to try to keep the original capitalization
 // across serialization.
 
-Body::Buffer Body::Buffer::clone(jsg::Lock& js) {
-  Buffer result;
-  result.view = view;
-  KJ_SWITCH_ONEOF(ownBytes) {
-    KJ_CASE_ONEOF(ref, jsg::JsRef<jsg::JsBufferSource>) {
-      result.ownBytes = ref.addRef(js);
-    }
-    KJ_CASE_ONEOF(refcounted, kj::Own<RefcountedBytes>) {
-      result.ownBytes = kj::addRef(*refcounted);
-    }
-    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-      result.ownBytes = blob.addRef();
-    }
-  }
-  return result;
-}
-
 Body::ExtractedBody::ExtractedBody(
-    jsg::Ref<ReadableStream> stream, kj::Maybe<Buffer> buffer, kj::Maybe<kj::String> contentType)
-    : impl{kj::mv(stream), kj::mv(buffer)},
+    jsg::Lock& js, JsReadableStream stream, kj::Maybe<kj::String> contentType)
+    : stream(kj::mv(stream)),
       contentType(kj::mv(contentType)) {
   // This check is in the constructor rather than `extractBody()`, because we often construct
   // ExtractedBodys from ReadableStreams directly.
-  JSG_REQUIRE(!impl.stream->isDisturbed(), TypeError,
+  JSG_REQUIRE(!this->stream.isDisturbed(js), TypeError,
       "This ReadableStream is disturbed (has already been read from), and cannot "
       "be used as a body.");
 }
 
 Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
-  Buffer buffer;
-  kj::Maybe<kj::String> contentType;
-
+  // The buffer-like cases below construct buffer-backed (rewindable) JsReadableStreams. The
+  // buffer handling -- including copying JsBufferSource inputs (a Fetch spec requirement that
+  // also severs any dependency on a detachable V8 backing store) and the no-deferred-proxying
+  // rule for data with V8 heap provenance -- lives in JsReadableStream's converting constructors.
   KJ_SWITCH_ONEOF(init) {
-    KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-      return kj::mv(stream);
+    KJ_CASE_ONEOF(stream, JsReadableStream) {
+      return ExtractedBody(js, kj::mv(stream));
     }
     KJ_CASE_ONEOF(gen, jsg::AsyncGeneratorIgnoringStrings<jsg::Value>) {
-      return ReadableStream::from(js, gen.release());
+      return ExtractedBody(js, JsReadableStream::from(js, gen.release()));
     }
     KJ_CASE_ONEOF(text, kj::String) {
-      contentType = kj::str(MimeType::PLAINTEXT_STRING);
-      buffer = kj::mv(text);
+      auto contentType = kj::str(MimeType::PLAINTEXT_STRING);
+      return ExtractedBody(js, JsReadableStream(js, kj::mv(text)), kj::mv(contentType));
     }
     KJ_CASE_ONEOF(bytesRef, jsg::JsRef<jsg::JsBufferSource>) {
-      // Per the Fetch spec we must copy the input buffer here. Beyond spec conformance, this
-      // fixes a UAF: the incoming data may alias a v8::BackingStore whose underlying memory can
-      // be freed if the original ArrayBuffer is detached and transferred (e.g. via structuredClone
-      // with a transfer list) and then garbage collected. This applies to both resizable and
-      // fixed-size buffers. Copying severs the dependency on the V8 backing store.
-      buffer = kj::heapArray(bytesRef.getHandle(js).asArrayPtr());
+      return ExtractedBody(js, JsReadableStream(js, kj::mv(bytesRef)));
     }
     KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
       // Blobs always have a type, but it defaults to an empty string. We should NOT set
       // Content-Type when the blob type is empty.
+      kj::Maybe<kj::String> contentType;
       kj::StringPtr blobType = blob->getType();
       if (blobType != nullptr) {
         contentType = kj::str(blobType);
       }
-      buffer = kj::mv(blob);
+      return ExtractedBody(js, JsReadableStream(js, kj::mv(blob)), kj::mv(contentType));
     }
     KJ_CASE_ONEOF(formData, jsg::Ref<FormData>) {
       // Make an array of characters containing random hexadecimal digits.
@@ -144,161 +126,125 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       kj::FixedArray<kj::byte, 16> boundaryBuffer;
       workerd::getEntropy(boundaryBuffer);
       auto boundary = kj::encodeHex(boundaryBuffer);
-      contentType = MimeType::formDataWithBoundary(boundary);
-      buffer = formData->serialize(boundary);
+      auto contentType = MimeType::formDataWithBoundary(boundary);
+      return ExtractedBody(
+          js, JsReadableStream(js, formData->serialize(boundary)), kj::mv(contentType));
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<URLSearchParams>) {
-      contentType = MimeType::formUrlEncodedWithCharset("UTF-8"_kj);
-      buffer = searchParams->toString();
+      return ExtractedBody(js, JsReadableStream(js, kj::mv(searchParams)),
+          MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<url::URLSearchParams>) {
-      contentType = MimeType::formUrlEncodedWithCharset("UTF-8"_kj);
-      buffer = searchParams->toString();
+      return ExtractedBody(js, JsReadableStream(js, kj::mv(searchParams)),
+          MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
   }
-
-  auto buf = buffer.clone(js);
-
-  // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
-  // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
-  // V8 heap provenance. Some buffer types (e.g. Blob data) may reference V8 heap memory
-  // and we must ensure the data is consumed and destroyed while under the isolate lock,
-  // which means deferred proxying is not allowed.
-  auto rs = streams::newMemorySource(buf.view, kj::heap(kj::mv(buf.ownBytes)));
-
-  return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs)), kj::mv(buffer),
-    kj::mv(contentType)};
+  KJ_UNREACHABLE;
 }
 
-Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
-    : impl(kj::mv(init).map([&headers](auto i) -> Impl {
-        KJ_IF_SOME(ct, i.contentType) {
-          if (!headers.hasCommon(capnp::CommonHeaderName::CONTENT_TYPE)) {
-            // The spec allows the user to override the Content-Type, if they wish, so we only set
-            // the Content-Type if it doesn't already exist.
-            headers.setCommon(capnp::CommonHeaderName::CONTENT_TYPE, kj::mv(ct));
-          } else KJ_IF_SOME(parsed, MimeType::tryParse(ct)) {
-            if (MimeType::FORM_DATA == parsed) {
-              // Custom content-type request/responses with FormData are broken since they require a
-              // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.
-              IoContext::current().logWarning(
-                  "A FormData body was provided with a custom Content-Type header when constructing "
-                  "a Request or Response object. This will prevent the recipient of the Request or "
-                  "Response from being able to parse the body. Consider omitting the custom "
-                  "Content-Type header.");
-            }
-          }
+Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers): headersRef(headers) {
+  KJ_IF_SOME(i, init) {
+    KJ_IF_SOME(ct, i.contentType) {
+      if (!headers.hasCommon(capnp::CommonHeaderName::CONTENT_TYPE)) {
+        // The spec allows the user to override the Content-Type, if they wish, so we only set
+        // the Content-Type if it doesn't already exist.
+        headers.setCommon(capnp::CommonHeaderName::CONTENT_TYPE, kj::mv(ct));
+      } else KJ_IF_SOME(parsed, MimeType::tryParse(ct)) {
+        if (MimeType::FORM_DATA == parsed) {
+          // Custom content-type request/responses with FormData are broken since they require a
+          // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.
+          IoContext::current().logWarning(
+              "A FormData body was provided with a custom Content-Type header when constructing "
+              "a Request or Response object. This will prevent the recipient of the Request or "
+              "Response from being able to parse the body. Consider omitting the custom "
+              "Content-Type header.");
         }
-        return kj::mv(i.impl);
-      })),
-      headersRef(headers) {}
-
-kj::Maybe<Body::Buffer> Body::getBodyBuffer(jsg::Lock& js) {
-  KJ_IF_SOME(i, impl) {
-    KJ_IF_SOME(b, i.buffer) {
-      return b.clone(js);
+      }
     }
+    bodyStream = kj::mv(i.stream);
   }
-  return kj::none;
 }
 
 bool Body::canRewindBody() {
-  KJ_IF_SOME(i, impl) {
-    // We can only rewind buffer-backed bodies.
-    return i.buffer != kj::none;
-  }
-  // Null bodies are trivially "rewindable".
-  return true;
+  // We can only rewind null or buffer-backed bodies.
+  return bodyStream.isNull() || bodyStream.isBufferBacked();
 }
 
 void Body::rewindBody(jsg::Lock& js) {
   KJ_DASSERT(canRewindBody());
 
-  KJ_IF_SOME(i, impl) {
-    auto bufferCopy = KJ_ASSERT_NONNULL(i.buffer).clone(js);
-
-    // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
-    // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
-    // V8 heap provenance. Specifically, the bufferCopy.view here, while being a kj::ArrayPtr,
-    // will typically be wrapping a v8::BackingStore, and we must ensure that is is consumed
-    // and destroyed while under the isolate lock, which means deferred proxying is not allowed.
-    auto rs = streams::newMemorySource(bufferCopy.view, kj::heap(kj::mv(bufferCopy.ownBytes)));
-    i.stream = js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs));
+  KJ_IF_SOME(rewound, bodyStream.tryClone(js)) {
+    bodyStream = kj::mv(rewound);
   }
+  // A null body is trivially "rewound" (there is nothing to do).
 }
 
 void Body::nullifyBody() {
-  impl = kj::none;
+  bodyStream.nullify();
 }
 
-kj::Maybe<jsg::Ref<ReadableStream>> Body::getBody() {
-  KJ_IF_SOME(i, impl) {
-    return i.stream.addRef();
-  }
-  return kj::none;
+uint64_t Body::bufferingLimit() {
+  return IoContext::current().getLimitEnforcer().getBufferingLimit();
 }
-bool Body::getBodyUsed() {
-  KJ_IF_SOME(i, impl) {
-    return i.stream->isDisturbed();
+
+kj::Maybe<JsReadableStream> Body::getBody(jsg::Lock& js) {
+  if (bodyStream.isNull()) {
+    return kj::none;
   }
-  return false;
+  return bodyStream.addRef(js);
+}
+bool Body::getBodyUsed(jsg::Lock& js) {
+  return bodyStream.isDisturbed(js);
 }
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> Body::arrayBuffer(jsg::Lock& js) {
-  KJ_IF_SOME(i, impl) {
-    return js.evalNow([&] {
-      JSG_REQUIRE(!i.stream->isDisturbed(), TypeError,
-          "Body has already been used. "
-          "It can only be used once. Use tee() first if you need to read it twice.");
-      return i.stream->getController().readAllBytes(
-          js, IoContext::current().getLimitEnforcer().getBufferingLimit());
-    });
-  }
-
-  // If there's no body, we just return an empty array.
+  // A null body yields an empty result without consulting the IoContext (see bufferingLimit()).
   // See https://fetch.spec.whatwg.org/#concept-body-consume-body
-  auto ab = jsg::JsArrayBuffer::create(js, 0);
-  return js.resolvedPromise(ab.addRef(js));
+  if (bodyStream.isNull()) {
+    return bodyStream.arrayBuffer(js, 0);
+  }
+  return js.evalNow([&] { return bodyStream.arrayBuffer(js, bufferingLimit()); });
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> Body::bytes(jsg::Lock& js) {
-  return arrayBuffer(js).then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> data) {
-    auto handle = data.getHandle(js);
-    return jsg::JsUint8Array::create(js, handle).addRef(js);
-  });
+  if (bodyStream.isNull()) {
+    return bodyStream.bytes(js, 0);
+  }
+  return js.evalNow([&] { return bodyStream.bytes(js, bufferingLimit()); });
 }
 
 jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
-  KJ_IF_SOME(i, impl) {
-    return js.evalNow([&] {
-      JSG_REQUIRE(!i.stream->isDisturbed(), TypeError,
-          "Body has already been used. "
-          "It can only be used once. Use tee() first if you need to read it twice.");
-
-      // A common mistake is to call .text() on non-text content, e.g. because you're implementing a
-      // search-and-replace across your whole site and you forgot that it'll apply to images too.
-      // When running with a warning handler, let's warn the developer if they do this.
-      auto& context = IoContext::current();
-      if (context.hasWarningHandler()) {
-        KJ_IF_SOME(type, headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {
-          maybeWarnIfNotText(js, type);
-        }
-      }
-
-      return i.stream->getController().readAllText(
-          js, context.getLimitEnforcer().getBufferingLimit());
-    });
+  // A null body yields an empty string without consulting the IoContext.
+  // See https://fetch.spec.whatwg.org/#concept-body-consume-body
+  if (bodyStream.isNull()) {
+    return bodyStream.text(js, 0);
   }
 
-  // If there's no body, we just return an empty string.
-  // See https://fetch.spec.whatwg.org/#concept-body-consume-body
-  return js.resolvedPromise(kj::String());
+  return js.evalNow([&] {
+    // Check for a disturbed body before emitting the non-text warning below. (bodyStream.text()
+    // performs the same check with the same error message; this one just runs first.)
+    JSG_REQUIRE(!bodyStream.isDisturbed(js), TypeError,
+        "Body has already been used. "
+        "It can only be used once. Use tee() first if you need to read it twice.");
+
+    // A common mistake is to call .text() on non-text content, e.g. because you're implementing a
+    // search-and-replace across your whole site and you forgot that it'll apply to images too.
+    // When running with a warning handler, let's warn the developer if they do this.
+    auto& context = IoContext::current();
+    if (context.hasWarningHandler()) {
+      KJ_IF_SOME(type, headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {
+        maybeWarnIfNotText(js, type);
+      }
+    }
+
+    return bodyStream.text(js, context.getLimitEnforcer().getBufferingLimit());
+  });
 }
 
 jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
   auto formData = js.alloc<FormData>();
 
   return js.evalNow([&] {
-    JSG_REQUIRE(!getBodyUsed(), TypeError,
+    JSG_REQUIRE(!getBodyUsed(js), TypeError,
         "Body has already been used. "
         "It can only be used once. Use tee() first if you need to read it twice.");
 
@@ -306,11 +252,9 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
         JSG_REQUIRE_NONNULL(headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE),
             TypeError, "Parsing a Body as FormData requires a Content-Type header.");
 
-    KJ_IF_SOME(i, impl) {
-      KJ_ASSERT(!i.stream->isDisturbed());
-      auto& context = IoContext::current();
-      return i.stream->getController()
-          .readAllText(js, context.getLimitEnforcer().getBufferingLimit())
+    if (!bodyStream.isNull()) {
+      KJ_ASSERT(!bodyStream.isDisturbed(js));
+      return bodyStream.text(js, bufferingLimit())
           .then(js,
               [contentType = kj::mv(contentType), formData = kj::mv(formData)](
                   auto& js, kj::String rawText) mutable {
@@ -337,8 +281,8 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
   // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
   // the promise continuation is pending. Without it, the bare `this` pointer dangles.
   return arrayBuffer(js).then(
-      js, [this, self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) {
-    kj::String contentType = headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
+      js, [self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
+    kj::String contentType = self->headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
                                  .map([](auto&& b) -> kj::String {
       return kj::mv(b);
     }).orDefault(nullptr);
@@ -355,15 +299,15 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
 }
 
 kj::Maybe<Body::ExtractedBody> Body::clone(jsg::Lock& js) {
-  KJ_IF_SOME(i, impl) {
-    auto branches = i.stream->tee(js);
-
-    i.stream = kj::mv(branches[0]);
-
-    return ExtractedBody{kj::mv(branches[1]), i.buffer.map([&](Buffer& b) { return b.clone(js); })};
+  if (bodyStream.isNull()) {
+    return kj::none;
   }
 
-  return kj::none;
+  // tee() nullifies bodyStream and hands back two branches, each of which carries the retransmit
+  // buffer (if any). We keep one branch and give the other to the new Body.
+  auto tee = bodyStream.tee(js);
+  bodyStream = kj::mv(tee.branch1);
+  return ExtractedBody(js, kj::mv(tee.branch2));
 }
 
 // =======================================================================================
@@ -447,16 +391,17 @@ jsg::Ref<Request> Request::constructor(
       headers = js.alloc<Headers>(js, *oldRequest->headers);
       cf = oldRequest->cf.deepClone(js);
       if (!ignoreInputBody) {
-        JSG_REQUIRE(!oldRequest->getBodyUsed(), TypeError,
+        JSG_REQUIRE(!oldRequest->getBodyUsed(js), TypeError,
             "Cannot reconstruct a Request with a used body.");
-        KJ_IF_SOME(oldJsBody, oldRequest->getBody()) {
+        KJ_IF_SOME(oldJsBody, oldRequest->getBody(js)) {
           // The stream spec says to "create a proxy" for the passed in readable, which it
           // defines generically as creating a TransformStream and using pipeThrough to pass
           // the input stream through, giving the TransformStream's readable to the extracted
-          // body below. We don't need to do that. Instead, we just create a new ReadableStream
-          // that takes over ownership of the internals of the given stream. The given stream
-          // is left in a locked/disturbed mode so that it can no longer be used.
-          body = Body::ExtractedBody((oldJsBody)->detach(js), oldRequest->getBodyBuffer(js));
+          // body below. We don't need to do that. Instead, we just create a new stream that
+          // takes over ownership of the internals of the given stream (carrying the retransmit
+          // buffer forward, if any). The given stream is left in a locked/disturbed mode so
+          // that it can no longer be used.
+          body = Body::ExtractedBody(js, oldJsBody.detach(js));
         }
       }
       cacheMode = oldRequest->getCacheMode();
@@ -575,11 +520,11 @@ jsg::Ref<Request> Request::constructor(
         signal = otherRequest->getSignal();
         headers = js.alloc<Headers>(js, *otherRequest->headers);
         cf = otherRequest->cf.deepClone(js);
-        KJ_IF_SOME(b, otherRequest->getBody()) {
+        KJ_IF_SOME(b, otherRequest->getBody(js)) {
           // Note that unlike when `input` (Request ctor's 1st parameter) is a Request object, here
           // we're NOT stealing the other request's body, because we're supposed to pretend that the
           // other request is just a dictionary.
-          body = Body::ExtractedBody(kj::mv(b));
+          body = Body::ExtractedBody(js, kj::mv(b));
         }
       }
     }
@@ -837,8 +782,8 @@ void Request::serialize(jsg::Lock& js,
 
     .headers = headers.addRef(),
 
-    .body = getBody().map([](jsg::Ref<ReadableStream> stream) -> Body::Initializer {
-      // jsg::Ref<ReadableStream> is one of the possible variants of Body::Initializer.
+    .body = getBody(js).map([](JsReadableStream stream) -> Body::Initializer {
+      // JsReadableStream is one of the possible variants of Body::Initializer.
       return kj::mv(stream);
     }),
 
@@ -1142,11 +1087,12 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
       //   no one relies on this behavior, we should remove this non-conformity.
 
       // Fail if the body is not backed by a buffer (i.e., it's an opaque ReadableStream).
-      auto& buffer = JSG_REQUIRE_NONNULL(KJ_ASSERT_NONNULL(body).impl.buffer, TypeError,
+      auto& extractedBody = KJ_ASSERT_NONNULL(body);
+      JSG_REQUIRE(extractedBody.stream.isBufferBacked(), TypeError,
           "Response with null body status (101, 204, 205, or 304) cannot have a body.");
 
       // Fail if the body is backed by a non-zero-length buffer.
-      JSG_REQUIRE(buffer.view.size() == 0, TypeError,
+      JSG_REQUIRE(KJ_ASSERT_NONNULL(extractedBody.stream.tryGetLength(js)) == 0, TypeError,
           "Response with null body status (101, 204, 205, or 304) cannot have a body.");
 
       auto& context = IoContext::current();
@@ -1285,7 +1231,7 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     kj::HttpService::Response& outer,
     SendOptions options,
     kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders) {
-  JSG_REQUIRE(!getBodyUsed(), TypeError,
+  JSG_REQUIRE(!getBodyUsed(js), TypeError,
       "Body has already been used. "
       "It can only be used once. Use tee() first if you need to read it twice.");
 
@@ -1351,15 +1297,15 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
       }
     }
     return wsPromise;
-  } else KJ_IF_SOME(jsBody, getBody()) {
+  } else KJ_IF_SOME(jsBody, getBody(js)) {
     auto encoding = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
-    auto maybeLength = jsBody->tryGetLength(encoding);
+    auto maybeLength = jsBody.tryGetLength(js, encoding);
     auto stream =
         newSystemStream(outer.send(statusCode, getStatusText(), outHeaders, maybeLength), encoding);
     // We need to enter the AsyncContextFrame that was captured when the
     // Response was created before starting the loop.
     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
-    return jsBody->pumpTo(js, kj::mv(stream), true);
+    return jsBody.pumpTo(js, kj::mv(stream), EndStream::YES);
   } else {
     outer.send(statusCode, getStatusText(), outHeaders, static_cast<uint64_t>(0));
     return addNoopDeferredProxy(kj::READY_NOW);
@@ -1408,8 +1354,8 @@ jsg::Optional<jsg::JsObject> Response::getCf(jsg::Lock& js) {
 void Response::serialize(jsg::Lock& js,
     jsg::Serializer& serializer,
     const jsg::TypeHandler<InitializerDict>& initDictHandler,
-    const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler) {
-  serializer.write(js, jsg::JsValue(streamHandler.wrap(js, getBody())));
+    const jsg::TypeHandler<kj::Maybe<JsReadableStream>>& streamHandler) {
+  serializer.write(js, jsg::JsValue(streamHandler.wrap(js, getBody(js))));
 
   // As with Request, we serialize the initializer dict as a JS object.
   serializer.write(js,
@@ -1439,7 +1385,7 @@ jsg::Ref<Response> Response::deserialize(jsg::Lock& js,
     rpc::SerializationTag tag,
     jsg::Deserializer& deserializer,
     const jsg::TypeHandler<InitializerDict>& initDictHandler,
-    const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler) {
+    const jsg::TypeHandler<kj::Maybe<JsReadableStream>>& streamHandler) {
   auto body = KJ_UNWRAP_OR(streamHandler.tryUnwrap(js, deserializer.readValue(js)), {
     JSG_FAIL_REQUIRE(DOMDataCloneError,
         "Deserialization failed: could not deserialize Response body");
@@ -1525,6 +1471,239 @@ namespace {
 // Fetch spec requires (suggests?) 20: https://fetch.spec.whatwg.org/#http-redirect-fetch
 constexpr auto MAX_REDIRECT_COUNT = 20;
 
+class ActorRetryMetrics final: public kj::Refcounted {
+ public:
+  explicit ActorRetryMetrics(RequestObserver& observer): observer(kj::addRef(observer)) {}
+
+  ~ActorRetryMetrics() noexcept(false) {
+    if (retryStartTime != kj::none && !recordedOutcome) {
+      recordOutcome(ActorRetryOutcome::OTHER);
+    }
+  }
+
+  void startRetryLatencyTimer() {
+    if (retryStartTime == kj::none) {
+      retryStartTime = kj::systemPreciseMonotonicClock().now();
+    }
+  }
+
+  void observeAttemptFailure(const kj::Exception& exception) {
+    if (exception.getType() == kj::Exception::Type::DISCONNECTED ||
+        exception.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none) {
+      startRetryLatencyTimer();
+    }
+  }
+
+  void recordRetry() {
+    retryStarted = true;
+    observer->recordActorRetry(ActorRetryCallType::FETCH);
+  }
+
+  void recordCanceled() {
+    recordOutcome(ActorRetryOutcome::CANCELED);
+  }
+
+  void recordOutcome(ActorRetryOutcome outcome) {
+    if (recordedOutcome) return;
+    recordedOutcome = true;
+    if (!retryStarted) return;
+    auto startTime = KJ_ASSERT_NONNULL(retryStartTime);
+    observer->recordActorRetryOutcome(ActorRetryCallType::FETCH, outcome,
+        kj::systemPreciseMonotonicClock().now() - startTime);
+  }
+
+ private:
+  kj::Own<RequestObserver> observer;
+  kj::Maybe<kj::TimePoint> retryStartTime;
+  bool retryStarted = false;
+  bool recordedOutcome = false;
+};
+
+class ActorFetchRetryState {
+ public:
+  static ActorFetchRetryState create(TimerChannel& timer, RequestObserver& observer);
+
+  IoChannelFactory::ActorRetryRequestMetadata getMetadata() const {
+    return metadata;
+  }
+
+  bool isRetryEnabled() const {
+    return deadline != kj::none;
+  }
+
+  CountSubrequest countSubrequest() const {
+    return CountSubrequest(attemptCount == 1);
+  }
+
+  kj::Maybe<kj::Exception> checkDeadline();
+  kj::OneOf<kj::Duration, kj::Exception> prepareRetry(kj::Exception exception);
+  void recordRetry() {
+    if (attemptCount > 1) {
+      metrics->recordRetry();
+    }
+  }
+  kj::Rc<ActorRetryMetrics> addMetricsRef() {
+    return metrics.addRef();
+  }
+  void recordRecovered();
+  void recordCanceled() {
+    metrics->recordCanceled();
+  }
+
+ private:
+  static constexpr uint MAX_ATTEMPTS = 5;
+  static constexpr auto RETRY_BUDGET = 10 * kj::SECONDS;
+  static constexpr auto INITIAL_BACKOFF = 50 * kj::MILLISECONDS;
+
+  ActorFetchRetryState(IoChannelFactory::ActorRetryRequestMetadata metadata,
+      kj::Maybe<kj::TimePoint> deadline,
+      TimerChannel& timer,
+      kj::Rc<ActorRetryMetrics> metrics)
+      : metadata(kj::mv(metadata)),
+        deadline(kj::mv(deadline)),
+        timer(timer),
+        metrics(kj::mv(metrics)) {}
+
+  kj::Duration retryDelay();
+
+  IoChannelFactory::ActorRetryRequestMetadata metadata;
+  kj::Maybe<kj::TimePoint> deadline;
+  TimerChannel& timer;
+  kj::Rc<ActorRetryMetrics> metrics;
+  kj::Maybe<kj::Exception> originalDisconnect;
+  uint attemptCount = 1;
+};
+
+struct ActorFetchFailure {
+  kj::Exception exception;
+};
+
+template <typename T>
+using ActorFetchAttemptResult = kj::OneOf<T, ActorFetchFailure>;
+
+ActorFetchRetryState ActorFetchRetryState::create(TimerChannel& timer, RequestObserver& observer) {
+  bool retryGateEnabled = util::Autogate::isEnabled(
+      util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS);
+  auto metadata = generateActorRetryRequestMetadata(kj::systemCoarseCalendarClock().now(),
+      ActorRetryGateEnabled(retryGateEnabled));
+  kj::Maybe<kj::TimePoint> deadline;
+  if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH) &&
+      retryGateEnabled) {
+    deadline = timer.nowForLimitTimeout() + RETRY_BUDGET;
+  }
+  return ActorFetchRetryState(
+      kj::mv(metadata), kj::mv(deadline), timer, kj::rc<ActorRetryMetrics>(observer));
+}
+
+kj::Maybe<kj::Exception> ActorFetchRetryState::checkDeadline() {
+  KJ_IF_SOME(deadlineValue, deadline) {
+    if (attemptCount > 1 && timer.nowForLimitTimeout() >= deadlineValue) {
+      metrics->recordOutcome(ActorRetryOutcome::RETRIES_EXHAUSTED);
+      return KJ_ASSERT_NONNULL(originalDisconnect).clone();
+    }
+  }
+  return kj::none;
+}
+
+kj::Duration ActorFetchRetryState::retryDelay() {
+  static thread_local auto generator = [] {
+    uint64_t seed;
+    getEntropy(kj::asBytes(seed));
+    return std::mt19937_64(seed);
+  }();
+  auto maximum = INITIAL_BACKOFF * (1u << (attemptCount - 1));
+  std::uniform_int_distribution<uint64_t> distribution(0, maximum / kj::NANOSECONDS);
+  return distribution(generator) * kj::NANOSECONDS;
+}
+
+kj::OneOf<kj::Duration, kj::Exception> ActorFetchRetryState::prepareRetry(
+    kj::Exception exception) {
+  if (!isRetryEnabled()) {
+    return kj::mv(exception);
+  }
+  if (exception.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none) {
+    metrics->startRetryLatencyTimer();
+    metrics->recordOutcome(ActorRetryOutcome::CLAIM_REJECTED);
+    KJ_IF_SOME(original, originalDisconnect) {
+      return kj::mv(original);
+    }
+    auto normalized = KJ_EXCEPTION(DISCONNECTED, "Durable Object fetch failed");
+    for (auto& detail: exception.getDetails()) {
+      normalized.setDetail(detail.id, kj::heapArray(detail.value.asPtr()));
+    }
+    return normalized;
+  }
+
+  if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
+    if (originalDisconnect != kj::none) {
+      metrics->recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY);
+    }
+    return kj::mv(exception);
+  }
+  metrics->startRetryLatencyTimer();
+  if (exception.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none) {
+    metrics->recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY);
+    return kj::mv(exception);
+  }
+  if (attemptCount >= MAX_ATTEMPTS) {
+    metrics->recordOutcome(ActorRetryOutcome::RETRIES_EXHAUSTED);
+    return KJ_ASSERT_NONNULL(originalDisconnect).clone();
+  }
+
+  if (attemptCount == 1) {
+    originalDisconnect = exception.clone();
+  }
+  if (exception.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none) {
+    metadata.isRetry = IsActorRetry::YES;
+  } else if (metadata.isRetry == IsActorRetry::NO) {
+    auto requestGateEnabled = metadata.retryGateEnabled;
+    metadata = generateActorRetryRequestMetadata(
+        kj::systemCoarseCalendarClock().now(), requestGateEnabled);
+  }
+
+  auto delay = retryDelay();
+  auto deadline = KJ_ASSERT_NONNULL(this->deadline);
+  if (timer.nowForLimitTimeout() + delay >= deadline) {
+    metrics->recordOutcome(ActorRetryOutcome::RETRIES_EXHAUSTED);
+    return KJ_ASSERT_NONNULL(originalDisconnect).clone();
+  }
+  ++attemptCount;
+  return delay;
+}
+
+void ActorFetchRetryState::recordRecovered() {
+  if (originalDisconnect != kj::none) {
+    metrics->recordOutcome(ActorRetryOutcome::RECOVERED);
+  }
+}
+
+template <typename T>
+kj::Promise<ActorFetchAttemptResult<T>> captureActorFetchAttempt(jsg::Lock& js,
+    kj::Maybe<jsg::Ref<AbortSignal>>& signal,
+    kj::Promise<T> promise,
+    kj::Rc<ActorRetryMetrics> metrics) {
+  auto cancellationMetrics = metrics.addRef();
+  auto result = kj::mv(promise)
+      .then([](T&& result) -> ActorFetchAttemptResult<T> { return kj::mv(result); })
+      .catch_([metrics = kj::mv(metrics)](
+                  kj::Exception&& exception) mutable -> ActorFetchAttemptResult<T> {
+    metrics->observeAttemptFailure(exception);
+    return ActorFetchFailure{kj::mv(exception)};
+  });
+  return AbortSignal::maybeCancelWrap(js, signal, kj::mv(result))
+      .catch_([metrics = kj::mv(cancellationMetrics)](
+                  kj::Exception&& exception) mutable -> kj::Promise<ActorFetchAttemptResult<T>> {
+    metrics->recordCanceled();
+    return kj::mv(exception);
+  });
+}
+
+jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
+    jsg::Ref<Fetcher> fetcher,
+    jsg::Ref<Request> jsRequest,
+    kj::Vector<kj::Url> urlList,
+    kj::Maybe<ActorFetchRetryState> retryState);
+
 jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
@@ -1537,20 +1716,144 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(jsg::Lock& js,
     uint status,
     kj::StringPtr location);
 
+jsg::Promise<jsg::Ref<Response>> handleWebSocketFetchResponse(jsg::Lock& js,
+    jsg::Ref<Fetcher> fetcher,
+    jsg::Ref<Request> jsRequest,
+    kj::Vector<kj::Url> urlList,
+    kj::Own<kj::HttpClient> client,
+    kj::Maybe<jsg::Ref<AbortSignal>> signal,
+    kj::HttpClient::WebSocketResponse response) {
+  KJ_SWITCH_ONEOF(response.webSocketOrBody) {
+    KJ_CASE_ONEOF(body, kj::Own<kj::AsyncInputStream>) {
+      body = body.attach(kj::mv(client));
+      return handleHttpResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
+          {response.statusCode, response.statusText, response.headers, kj::mv(body)});
+    }
+    KJ_CASE_ONEOF(webSocket, kj::Own<kj::WebSocket>) {
+      KJ_ASSERT(response.statusCode == 101);
+      webSocket = webSocket.attach(kj::mv(client));
+      KJ_IF_SOME(s, signal) {
+        if (s->getAborted(js)) {
+          return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
+        }
+        auto cancellation = s->newCanceler(js);
+        webSocket = kj::refcounted<AbortableWebSocket>(kj::mv(webSocket),
+            kj::mv(cancellation.canceler), kj::mv(cancellation.registration));
+      }
+      return js.resolvedPromise(makeHttpResponse(js, jsRequest->getMethodEnum(), kj::mv(urlList),
+          response.statusCode, response.statusText, *response.headers, newNullInputStream(),
+          js.alloc<WebSocket>(js, kj::mv(webSocket)), jsRequest->getResponseBodyEncoding(),
+          kj::mv(signal)));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+jsg::Promise<jsg::Ref<Response>> handleHttpFetchResponse(jsg::Lock& js,
+    jsg::Ref<Fetcher> fetcher,
+    jsg::Ref<Request> jsRequest,
+    kj::Vector<kj::Url> urlList,
+    kj::Own<kj::HttpClient> client,
+    kj::Maybe<TraceContext>& traceContext,
+    kj::HttpClient::Response response) {
+  response.body = response.body.attach(kj::mv(client));
+  KJ_IF_SOME(ctx, traceContext) {
+    ctx.setTag("http.response.status_code"_kjc, static_cast<int64_t>(response.statusCode));
+    KJ_IF_SOME(length, response.body->tryGetLength()) {
+      ctx.setTag("http.response.body.size"_kjc, static_cast<int64_t>(length));
+    }
+    auto headerIds = IoContext::current().getHeaderIds();
+    KJ_IF_SOME(cfRay, response.headers->get(headerIds.cfRay)) {
+      ctx.setTag("cloudflare.ray_id"_kjc, cfRay);
+    }
+  }
+  return handleHttpResponse(
+      js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(response));
+}
+
+jsg::Promise<jsg::Ref<Response>> rejectFetch(jsg::Lock& js, kj::Exception&& exception) {
+  return js.rejectedPromise<jsg::Ref<Response>>(js.exceptionToJsValue(kj::mv(exception)));
+}
+
+kj::Maybe<jsg::JsValue> getAbortReason(jsg::Lock& js, Request& request) {
+  KJ_IF_SOME(signal, request.getSignal()) {
+    if (signal->getAborted(js)) {
+      return signal->getReason(js);
+    }
+  }
+  return kj::none;
+}
+
+jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
+    jsg::Ref<Fetcher> fetcher,
+    jsg::Ref<Request> jsRequest,
+    kj::Vector<kj::Url> urlList,
+    ActorFetchRetryState state,
+    kj::Exception exception) {
+  KJ_IF_SOME(reason, getAbortReason(js, *jsRequest)) {
+    state.recordCanceled();
+    return js.rejectedPromise<jsg::Ref<Response>>(kj::mv(reason));
+  }
+  auto delayOrException = state.prepareRetry(kj::mv(exception));
+  KJ_IF_SOME(exception, delayOrException.tryGet<kj::Exception>()) {
+    return rejectFetch(js, kj::mv(exception));
+  }
+  auto delay = KJ_ASSERT_NONNULL(delayOrException.tryGet<kj::Duration>());
+  auto& ioContext = IoContext::current();
+  jsRequest->rewindBody(js);
+  fetcher->onActorFetchRetry();
+
+  auto signal = jsRequest->getSignal();
+  auto delayPromise = AbortSignal::maybeCancelWrap(js, signal, ioContext.afterLimitTimeout(delay))
+                          .catch_([metrics = state.addMetricsRef()](
+                                      kj::Exception&& exception) mutable -> kj::Promise<void> {
+    metrics->recordCanceled();
+    return kj::mv(exception);
+  });
+  return ioContext.awaitIo(js, kj::mv(delayPromise),
+      [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
+          retryState = kj::Maybe(kj::mv(state))](jsg::Lock& js) mutable {
+    return fetchImplNoOutputLockAttempt(
+        js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(retryState));
+  });
+}
+
 jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList) {
+  kj::Maybe<ActorFetchRetryState> retryState;
+  if (jsRequest->canRewindBody() && fetcher->supportsActorFetchRetries()) {
+    auto& context = IoContext::current();
+    retryState = ActorFetchRetryState::create(
+        context.getIoChannelFactory().getTimer(), context.getMetrics());
+  }
+
+  return fetchImplNoOutputLockAttempt(
+      js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(retryState));
+}
+
+jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
+    jsg::Ref<Fetcher> fetcher,
+    jsg::Ref<Request> jsRequest,
+    kj::Vector<kj::Url> urlList,
+    kj::Maybe<ActorFetchRetryState> retryState) {
   KJ_ASSERT(!urlList.empty());
 
   auto& ioContext = IoContext::current();
 
   auto signal = jsRequest->getSignal();
-  KJ_IF_SOME(s, signal) {
-    // If the AbortSignal has already been triggered, then we need to stop here.
-    if (s->getAborted(js)) {
-      return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
+  KJ_IF_SOME(reason, getAbortReason(js, *jsRequest)) {
+    KJ_IF_SOME(state, retryState) {
+      state.recordCanceled();
     }
+    return js.rejectedPromise<jsg::Ref<Response>>(kj::mv(reason));
+  }
+  KJ_IF_SOME(state, retryState) {
+    KJ_IF_SOME(exception, state.checkDeadline()) {
+      return rejectFetch(js, kj::mv(exception));
+    }
+    state.recordRetry();
   }
 
   // Stash whether this request's body can be rewound (and so the request re-sent), before we lose
@@ -1558,11 +1861,20 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   // (Durable Object), to classify retry eligibility for disconnected calls; for other fetches the
   // value is simply overwritten by the next call and never read. The set->getClientWithTracing->
   // wrap*SubrequestClient sequence is synchronous, so there is no stale-attribution risk.
-  ioContext.getMetrics().setNextSubrequestBodyRewindable(
-      SubrequestBodyRewindable(jsRequest->canRewindBody()));
+  bool bodyRewindable = jsRequest->canRewindBody();
+  ioContext.getMetrics().setNextSubrequestBodyRewindable(SubrequestBodyRewindable(bodyRewindable));
 
-  // Get client and trace context (if needed) in one clean call
-  auto clientWithTracing = fetcher->getClientWithTracing(ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kjc);
+  kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata;
+  auto countSubrequest = CountSubrequest::YES;
+  KJ_IF_SOME(state, retryState) {
+    actorRetryRequestMetadata = state.getMetadata();
+    countSubrequest = state.countSubrequest();
+  }
+
+  // Get client and trace context (if needed) in one clean call.
+  auto clientWithTracing = fetcher->getClientWithTracing(ioContext,
+      jsRequest->serializeCfBlobJson(js), "fetch"_kjc,
+      kj::mv(actorRetryRequestMetadata), countSubrequest);
   auto traceContext = kj::mv(clientWithTracing.traceContext);
 
   // TODO(cleanup): Don't convert to HttpClient. Use the HttpService interface instead. This
@@ -1632,43 +1944,46 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
     }
     auto webSocketResponse = client->openWebSocket(url, headers);
-    return ioContext.awaitIo(js,
-        AbortSignal::maybeCancelWrap(js, signal, kj::mv(webSocketResponse)),
+    KJ_IF_SOME(state, retryState) {
+      if (state.isRetryEnabled()) {
+        auto resultPromise = captureActorFetchAttempt(
+            js, signal, kj::mv(webSocketResponse), state.addMetricsRef());
+        return ioContext.awaitIo(js, kj::mv(resultPromise),
+            [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
+                urlList = kj::mv(urlList), client = kj::mv(client), signal = kj::mv(signal),
+                retryState = kj::mv(retryState)](jsg::Lock& js,
+                ActorFetchAttemptResult<kj::HttpClient::WebSocketResponse>&& result) mutable
+            -> jsg::Promise<jsg::Ref<Response>> {
+          KJ_SWITCH_ONEOF(result) {
+            KJ_CASE_ONEOF(response, kj::HttpClient::WebSocketResponse) {
+              KJ_ASSERT_NONNULL(retryState).recordRecovered();
+              return handleWebSocketFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest),
+                  kj::mv(urlList), kj::mv(client), kj::mv(signal), kj::mv(response));
+            }
+            KJ_CASE_ONEOF(failure, ActorFetchFailure) {
+              return retryActorFetch(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
+                  kj::mv(KJ_ASSERT_NONNULL(retryState)), kj::mv(failure.exception));
+            }
+          }
+          KJ_UNREACHABLE;
+        });
+      }
+    }
+    webSocketResponse = AbortSignal::maybeCancelWrap(js, signal, kj::mv(webSocketResponse));
+    return ioContext.awaitIo(js, kj::mv(webSocketResponse),
         [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
             client = kj::mv(client), signal = kj::mv(signal)](
-            jsg::Lock& js, kj::HttpClient::WebSocketResponse&& response) mutable
-        -> jsg::Promise<jsg::Ref<Response>> {
-      KJ_SWITCH_ONEOF(response.webSocketOrBody) {
-        KJ_CASE_ONEOF(body, kj::Own<kj::AsyncInputStream>) {
-          body = body.attach(kj::mv(client));
-          return handleHttpResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
-              {response.statusCode, response.statusText, response.headers, kj::mv(body)});
-        }
-        KJ_CASE_ONEOF(webSocket, kj::Own<kj::WebSocket>) {
-          KJ_ASSERT(response.statusCode == 101);
-          webSocket = webSocket.attach(kj::mv(client));
-          KJ_IF_SOME(s, signal) {
-            // If the AbortSignal has already been triggered, then we need to stop here.
-            if (s->getAborted(js)) {
-              return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
-            }
-            webSocket = kj::refcounted<AbortableWebSocket>(kj::mv(webSocket), s->getCanceler());
-          }
-          return js.resolvedPromise(makeHttpResponse(js, jsRequest->getMethodEnum(),
-              kj::mv(urlList), response.statusCode, response.statusText, *response.headers,
-              newNullInputStream(), js.alloc<WebSocket>(js, kj::mv(webSocket)),
-              jsRequest->getResponseBodyEncoding(), kj::mv(signal)));
-        }
-      }
-      KJ_UNREACHABLE;
+            jsg::Lock& js, kj::HttpClient::WebSocketResponse&& response) mutable {
+      return handleWebSocketFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
+          kj::mv(client), kj::mv(signal), kj::mv(response));
     });
   } else {
     kj::Maybe<kj::HttpClient::Request> nativeRequest;
-    KJ_IF_SOME(jsBody, jsRequest->getBody()) {
+    KJ_IF_SOME(jsBody, jsRequest->getBody(js)) {
       // Note that for requests, we do not automatically handle Content-Encoding, because the fetch()
       // standard does not say that we should. Hence, we always use StreamEncoding::IDENTITY.
       // https://github.com/whatwg/fetch/issues/589
-      auto maybeLength = jsBody->tryGetLength(StreamEncoding::IDENTITY);
+      auto maybeLength = jsBody.tryGetLength(js, StreamEncoding::IDENTITY);
       KJ_IF_SOME(ctx, traceContext) {
         KJ_IF_SOME(length, maybeLength) {
           ctx.setTag("http.request.body.size"_kjc, static_cast<int64_t>(length));
@@ -1713,14 +2028,14 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
 
       // TODO(someday): Allow deferred proxying for bidirectional streaming.
       ioContext.addWaitUntil(handleCancelablePump(
-          AbortSignal::maybeCancelWrap(
-              js, signal, ioContext.waitForDeferredProxy(jsBody->pumpTo(js, kj::mv(stream), true))),
-          jsBody.addRef()));
+          AbortSignal::maybeCancelWrap(js, signal,
+              ioContext.waitForDeferredProxy(jsBody.pumpTo(js, kj::mv(stream), EndStream::YES))),
+          jsBody.addRef(js)));
     } else {
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, static_cast<uint64_t>(0));
     }
-    return ioContext.awaitIo(js,
-        AbortSignal::maybeCancelWrap(js, signal, kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response))
+    auto responsePromise =
+        kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response)
             .catch_([](kj::Exception&& exception) -> kj::Promise<kj::HttpClient::Response> {
       if (exception.getDescription().startsWith("invalid Content-Length header value")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, exception.getDescription());
@@ -1728,23 +2043,39 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
         return JSG_KJ_EXCEPTION(FAILED, Error, "Worker not found.");
       }
       return kj::mv(exception);
-    }),
-        [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
-            client = kj::mv(client), traceContext = kj::mv(traceContext)](jsg::Lock& js,
-            kj::HttpClient::Response&& response) mutable -> jsg::Promise<jsg::Ref<Response>> {
-      response.body = response.body.attach(kj::mv(client));
-      KJ_IF_SOME(ctx, traceContext) {
-        ctx.setTag("http.response.status_code"_kjc, static_cast<int64_t>(response.statusCode));
-        KJ_IF_SOME(length, response.body->tryGetLength()) {
-          ctx.setTag("http.response.body.size"_kjc, static_cast<int64_t>(length));
-        }
-        auto headerIds = IoContext::current().getHeaderIds();
-        KJ_IF_SOME(cfRay, response.headers->get(headerIds.cfRay)) {
-          ctx.setTag("cloudflare.ray_id"_kjc, cfRay);
-        }
+    });
+    KJ_IF_SOME(state, retryState) {
+      if (state.isRetryEnabled()) {
+        auto resultPromise =
+            captureActorFetchAttempt(js, signal, kj::mv(responsePromise), state.addMetricsRef());
+        return ioContext.awaitIo(js, kj::mv(resultPromise),
+            [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
+                urlList = kj::mv(urlList), client = kj::mv(client),
+                traceContext = kj::mv(traceContext), retryState = kj::mv(retryState)](
+                jsg::Lock& js, ActorFetchAttemptResult<kj::HttpClient::Response>&& result) mutable
+            -> jsg::Promise<jsg::Ref<Response>> {
+          KJ_SWITCH_ONEOF(result) {
+            KJ_CASE_ONEOF(response, kj::HttpClient::Response) {
+              KJ_ASSERT_NONNULL(retryState).recordRecovered();
+              return handleHttpFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest),
+                  kj::mv(urlList), kj::mv(client), traceContext, kj::mv(response));
+            }
+            KJ_CASE_ONEOF(failure, ActorFetchFailure) {
+              return retryActorFetch(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
+                  kj::mv(KJ_ASSERT_NONNULL(retryState)), kj::mv(failure.exception));
+            }
+          }
+          KJ_UNREACHABLE;
+        });
       }
-      return handleHttpResponse(
-          js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(response));
+    }
+    responsePromise = AbortSignal::maybeCancelWrap(js, signal, kj::mv(responsePromise));
+    return ioContext.awaitIo(js, kj::mv(responsePromise),
+        [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
+            client = kj::mv(client), traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, kj::HttpClient::Response&& response) mutable {
+      return handleHttpFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
+          kj::mv(client), traceContext, kj::mv(response));
     });
   }
 }
@@ -1779,13 +2110,14 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
     if (s->getAborted(js)) {
       return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
     }
-    response.body = kj::refcounted<AbortableInputStream>(kj::mv(response.body), s->getCanceler());
+    auto cancellation = s->newCanceler(js);
+    response.body = kj::refcounted<AbortableInputStream>(
+        kj::mv(response.body), kj::mv(cancellation.canceler), kj::mv(cancellation.registration));
   }
 
   if (isRedirectStatusCode(response.statusCode) &&
       jsRequest->getRedirectEnum() == Request::Redirect::FOLLOW) {
     KJ_IF_SOME(l, response.headers->get(kj::HttpHeaderId::LOCATION)) {
-
       // Pump the response body to a singleton null stream before following the redirect.
       auto& ioContext = IoContext::current();
       return ioContext.awaitIo(js,
@@ -1961,9 +2293,10 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
   // and the Fetch spec doesn't allow users to create Requests with CONNECT methods.
   kj::Maybe<Body::ExtractedBody> responseBody = kj::none;
   if (method != kj::HttpMethod::HEAD && !isNullBodyStatusCode(statusCode)) {
-    responseBody = Body::ExtractedBody(js.alloc<ReadableStream>(context,
-        newSystemStream(kj::mv(body),
-            getContentEncoding(context, headers, bodyEncoding, FeatureFlags::get(js)))));
+    responseBody = Body::ExtractedBody(js,
+        JsReadableStream::create(js, context,
+            newSystemStream(kj::mv(body),
+                getContentEncoding(context, headers, bodyEncoding, FeatureFlags::get(js)))));
   }
 
   // The Fetch spec defines "response URLs" as having no fragments. Since the last URL in the list
@@ -2027,7 +2360,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
 
     KJ_IF_SOME(dataUrl, DataUrl::tryParse(jsRequest->getUrl())) {
       // If the URL is a data URL, we need to handle it specially.
-      kj::Maybe<jsg::Ref<ReadableStream>> maybeResponseBody;
+      kj::Maybe<JsReadableStream> maybeResponseBody;
       auto type = dataUrl.getMimeType().toString();
 
       // The Fetch spec defines responses to HEAD or CONNECT requests, or responses with null body
@@ -2038,8 +2371,9 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       // and the Fetch spec doesn't allow users to create Requests with CONNECT methods.
       if (jsRequest->getMethodEnum() == kj::HttpMethod::GET) {
         auto view = dataUrl.getData();
-        auto rs = streams::newMemorySource(view, kj::heap(kj::mv(dataUrl)));
-        maybeResponseBody.emplace(js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs)));
+        auto rs = newMemorySource(view, kj::heap(kj::mv(dataUrl)));
+        maybeResponseBody.emplace(
+            JsReadableStream::create(js, IoContext::current(), kj::mv(rs)));
       }
 
       auto headers = js.alloc<Headers>();
@@ -2081,6 +2415,38 @@ jsg::Ref<Socket> Fetcher::connect(
   return connectImpl(js, JSG_THIS, kj::mv(address), kj::mv(options));
 }
 
+void Fetcher::registerOverride(jsg::Lock& js, IsHyperdrive isHyperdrive, uint16_t overridePort) {
+  if (registeredConnectOverride) {
+    return;
+  }
+  KJ_DASSERT(host == kj::none);
+  kj::FixedArray<kj::byte, 16> randomBytes;
+  workerd::getEntropy(randomBytes);
+  host = kj::str(kj::encodeHex(randomBytes), isHyperdrive ? ".hyperdrive.local" : ".workers.alt");
+
+  // Register an entry in the global scope connectOverrides HashMap so that cloudflare:sockets's
+  // connect() will route connections to this magic hostname through the fetcher.
+  auto& globalScope = IoContext::current().getCurrentLock().getGlobalScope();
+  globalScope.setConnectOverride(
+    kj::str(KJ_ASSERT_NONNULL(host), ":", overridePort),
+    [self = JSG_THIS](jsg::Lock& js) mutable {
+      return self->connect(
+          js,
+          kj::str(KJ_ASSERT_NONNULL(self->host), ":", KJ_ASSERT_NONNULL(self->port)),
+          kj::none);
+    });
+  // port may already be set for extended fetchers, in that case this is a no-op
+  port = overridePort;
+  registeredConnectOverride = true;
+}
+
+kj::StringPtr ExtendedFetcher::getHost(jsg::Lock& js) {
+  // Ensures the connect override is registered on the global scope using registerOverride(), then
+  // returns the random hostname.
+  registerOverride(js, isHyperdrive, KJ_ASSERT_NONNULL(port));
+  return KJ_ASSERT_NONNULL(host);
+}
+
 jsg::Promise<jsg::Ref<Response>> Fetcher::fetch(jsg::Lock& js,
     kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
     jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit) {
@@ -2092,7 +2458,7 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethod(jsg::Lock& js, kj::Stri
   // each time the method is called (handled by `getClientForOneCall()`, below).
 
   auto flags = FeatureFlags::get(js);
-  if (!flags.getFetcherRpc() && !flags.getWorkerdExperimental()) {
+  if (!rpcCompatGateBypassed && !flags.getFetcherRpc() && !flags.getWorkerdExperimental()) {
     // We need to pretend that we haven't implemented a wildcard property, as unfortunately it
     // breaks some workers in the wild. We would, however, like to warn users who are trying to use
     // RPC so they understand why it isn't working.
@@ -2132,26 +2498,52 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethodInternal(jsg::Lock& js, 
   return js.alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
 }
 
-rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
+kj::LiteralStringConst Fetcher::getRpcTargetKind() {
+  return "fetcher"_kjc;
+}
+
+JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
     jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
   auto& ioContext = IoContext::current();
-  auto worker = getClient(ioContext, kj::none, "jsRpcSession"_kjc);
-  auto event = kj::heap<api::JsRpcSessionCustomEvent>(
-      JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
+
+  kj::Maybe<TraceContext> callSpan;
+  kj::Maybe<TraceContextParent> callSpanParents;
+  ClientWithTracing clientWithTracing;
+  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
+    // The "jsRpcSession" trace context is attached to the customEvent task below so it covers the
+    // whole session. The first jsRpcCall span is opened before the session client so its user span
+    // can also become the callee invocation's parent.
+    clientWithTracing = buildClient(ioContext, kj::none, "jsRpcSession"_kjc,
+        [&](TraceContext& sessionSpan) -> kj::Maybe<SpanParent> {
+      callSpan = sessionSpan.getSpanParents().newChild("jsRpcCall"_kjc);
+      return KJ_ASSERT_NONNULL(callSpan).getUserSpanParent();
+    });
+    callSpanParents = clientWithTracing.traceContext.map(
+        [](TraceContext& tc) { return tc.getSpanParents(); });
+  } else {
+    clientWithTracing = ClientWithTracing{
+      .client = getClient(ioContext, kj::none, "jsRpcSession"_kjc),
+    };
+  }
+  auto worker = kj::mv(clientWithTracing.client);
+  auto event = kj::heap<api::JsRpcSessionCustomEvent>(JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
 
   auto result = event->getCap();
 
   // Arrange to cancel the CustomEvent if our I/O context is destroyed. But otherwise, we don't
   // actually care about the result of the event. If it throws, the membrane will already have
-  // propagated the exception to any RPC calls that we're waiting on, so we even ignore errors
-  // here -- otherwise they'll end up logged as "uncaught exceptions" even if they were, in fact,
-  // caught elsewhere.
-  ioContext.addTask(worker->customEvent(kj::mv(event)).attach(kj::mv(worker)).then([](auto&&) {
-  }, [](kj::Exception&&) {}));
+  // propagated the exception to any RPC calls that we're waiting on, so we even ignore errors here
+  // -- otherwise they'll end up logged as "uncaught exceptions" even if they were, in fact, caught
+  // elsewhere.
+  ioContext.addTask(worker->customEvent(kj::mv(event))
+          .attach(kj::mv(worker), kj::mv(clientWithTracing.traceContext))
+          .then([](auto&&) {}, [](kj::Exception&&) {}));
 
   // (Don't extend `path` because we're the root.)
 
-  return result;
+  return {.client = kj::mv(result),
+    .callSpanParents = kj::mv(callSpanParents),
+    .callSpan = kj::mv(callSpan)};
 }
 
 void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
@@ -2226,8 +2618,21 @@ void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   JSG_FAIL_REQUIRE(DOMDataCloneError, "ServiceStub cannot be serialized in this context.");
 }
 
-jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
-    rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+jsg::Ref<Fetcher> Fetcher::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  return deserializeImpl(js, tag, deserializer, RpcCompatGateBypassed::NO);
+}
+
+jsg::Ref<Fetcher> Fetcher::deserializeForWrappedBinding(
+    jsg::Lock& js, jsg::Deserializer& deserializer) {
+  return deserializeImpl(js, rpc::SerializationTag::SERVICE_STUB, deserializer,
+      RpcCompatGateBypassed::YES);
+}
+
+jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
+    rpc::SerializationTag tag,
+    jsg::Deserializer& deserializer,
+    RpcCompatGateBypassed rpcCompatGateBypassed) {
   KJ_IF_SOME(handler, deserializer.getExternalHandler()) {
     KJ_IF_SOME(frankenvalueHandler, kj::tryDowncast<Frankenvalue::CapTableReader>(handler)) {
       // Decoding a Frankenvalue (e.g. for dynamic loopback props or dynamic isolate env).
@@ -2236,12 +2641,13 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
 
       KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(cap)) {
         // Probably decoding dynamic ctx.props.
-        return js.alloc<Fetcher>(IoContext::current().addObject(kj::addRef(channel)));
+        return js.alloc<Fetcher>(IoContext::current().addObject(kj::addRef(channel)),
+            RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
       } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
         // Probably decoding dynamic isolate env.
         return js.alloc<Fetcher>(
             channel.getChannelNumber(IoChannelCapTableEntry::Type::SUBREQUEST),
-            RequiresHostAndProtocol::YES, /*isInHouse=*/false);
+            RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
       } else {
         KJ_FAIL_REQUIRE("ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
       }
@@ -2263,7 +2669,8 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
         KJ_FAIL_REQUIRE("wrong external type for Fetcher", external.which());
       }
 
-      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
+      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)),
+          RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
     } else KJ_IF_SOME(storedHandler,
         kj::tryDowncast<StoredExternalHandler::Deserializer>(handler)) {
       // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This
@@ -2281,7 +2688,8 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
         // Token stored out-of-line as an external.
         channel = storedHandler.readSubrequestChannel(ioctx.getIoChannelFactory());
       }
-      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
+      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)),
+          RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
     }
   }
 
@@ -2305,11 +2713,11 @@ static jsg::Promise<Fetcher::GetResult> parseResponse(
   auto typeName =
       type.map([](const kj::String& s) -> kj::StringPtr { return s; }).orDefault("text");
   if (typeName == "stream") {
-    KJ_IF_SOME(body, response->getBody()) {
+    KJ_IF_SOME(body, response->getBody(js)) {
       return js.resolvedPromise(Fetcher::GetResult(kj::mv(body)));
     } else {
       // Empty body.
-      return js.resolvedPromise(Fetcher::GetResult(js.alloc<ReadableStream>(
+      return js.resolvedPromise(Fetcher::GetResult(JsReadableStream::create(js,
           IoContext::current(), newSystemStream(newNullInputStream(), StreamEncoding::IDENTITY))));
     }
   }
@@ -2482,15 +2890,63 @@ jsg::Promise<Fetcher::ScheduledResult> Fetcher::scheduled(
 
 kj::Own<WorkerInterface> Fetcher::getClient(
     IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
-  auto clientWithTracing = getClientWithTracing(ioContext, kj::mv(cfStr), kj::mv(operationName));
+  auto clientWithTracing = getClientWithTracing(
+      ioContext, kj::mv(cfStr), kj::mv(operationName), kj::none, CountSubrequest::YES);
   return clientWithTracing.client.attach(kj::mv(clientWithTracing.traceContext));
 }
 
-Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
-    IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
+Fetcher::ClientWithTracing Fetcher::getClientWithTracing(IoContext& ioContext,
+    kj::Maybe<kj::String> cfStr,
+    kj::ConstString operationName,
+    kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
+    CountSubrequest countSubrequest) {
+  KJ_IF_SOME(metadata, actorRetryRequestMetadata) {
+    auto& outgoingFactory = KJ_REQUIRE_NONNULL(
+        channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>(),
+        "actor retry metadata supplied to an unsupported Fetcher");
+    KJ_REQUIRE(outgoingFactory->supportsActorFetchRetries(),
+        "actor retry metadata supplied to an unsupported Fetcher");
+    if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
+      auto result = outgoingFactory->newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr),
+          kj::mv(metadata), countSubrequest,
+          [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
+      return ClientWithTracing{kj::mv(result.client), kj::none};
+    }
+    kj::Maybe<TraceContext> traceContext;
+    auto result = outgoingFactory->newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr),
+        kj::mv(metadata), countSubrequest,
+        [&](TraceContext& outerTraceContext) -> kj::Maybe<SpanParent> {
+      if (!outerTraceContext.isObserved()) return kj::none;
+      traceContext = outerTraceContext.getSpanParents().newChild(operationName.clone());
+      return KJ_ASSERT_NONNULL(traceContext).getUserSpanParent();
+    });
+    return ClientWithTracing{kj::mv(result.client), kj::mv(traceContext)};
+  }
+
+  return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName));
+}
+
+Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
+    OutgoingFactory::Result result, kj::ConstString operationName) {
+  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
+    return ClientWithTracing{kj::mv(result.client), kj::none};
+  }
+  KJ_IF_SOME(parents, result.spanParents) {
+    // Factories populate `spanParents` unconditionally. Only build the inner span when tracing is
+    // actually observed; otherwise returning a (non-recording) TraceContext would still force the
+    // fetch hot path to eagerly evaluate span tags (method, URL, etc.) that end up discarded.
+    if (parents.isObserved()) {
+      return ClientWithTracing{kj::mv(result.client), parents.newChild(kj::mv(operationName))};
+    }
+  }
+  return ClientWithTracing{kj::mv(result.client), kj::none};
+}
+
+Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
+    kj::Maybe<kj::String> cfStr,
+    kj::ConstString operationName) {
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
-      // For channels, create trace context
       auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
       auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
@@ -2510,20 +2966,95 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
-      // Outgoing factories are responsible for routing through getSubrequestNoChecks() (or
-      // getSubrequest()) internally if they create HTTP connections, to ensure external memory
-      // adjustment and other subrequest accounting are applied.
-      auto client = outgoingFactory->newSingleUseClient(kj::mv(cfStr));
-      return ClientWithTracing{kj::mv(client), kj::none};
+      // The factory creates its own outer dispatch span (e.g. durable_object_subrequest)
+      // and exposes it as `result.spanParents`. Nest our inner span under it so the trace
+      // tree shows `outerSpan -> operationName`.
+      auto result = outgoingFactory->newSingleUseClient(kj::mv(cfStr),
+          [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
+      return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName));
     }
     KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
-      // Same as OutgoingFactory above -- the factory is responsible for routing through
-      // getSubrequestNoChecks() internally.
-      auto client = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr));
-      return ClientWithTracing{kj::mv(client), kj::none};
+      auto result = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr),
+          [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
+      return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName));
     }
   }
   KJ_UNREACHABLE;
+}
+
+bool Fetcher::supportsActorFetchRetries() {
+  KJ_IF_SOME(outgoingFactory, channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>()) {
+    return outgoingFactory->supportsActorFetchRetries();
+  }
+  return false;
+}
+
+Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
+    kj::Maybe<kj::String> cfStr,
+    kj::ConstString operationName,
+    MakeUserSpanParent makeUserSpanParent) {
+  KJ_SWITCH_ONEOF(channelOrClientFactory) {
+    KJ_CASE_ONEOF(channel, uint) {
+      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
+      auto userSpanParent = makeUserSpanParent(traceContext);
+      kj::Own<WorkerInterface> client;
+      KJ_IF_SOME(parent, userSpanParent) {
+        client = ioContext.getSubrequestChannel(
+            channel, isInHouse, kj::mv(cfStr), traceContext, kj::mv(parent));
+      } else {
+        client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
+      }
+      return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
+    }
+    KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
+      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
+      auto propagatedUserSpanParent = traceContext.getUserSpanParent();
+      KJ_IF_SOME(parent, makeUserSpanParent(traceContext)) {
+        propagatedUserSpanParent = kj::mv(parent);
+      }
+      auto client = ioContext.getSubrequest(
+          [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
+        return channel->startRequest({.cfBlobJson = kj::mv(cfStr),
+            .parentSpan = tracing.getInternalSpanParent(),
+            .userSpanParent = kj::mv(propagatedUserSpanParent)});
+      }, {
+        .inHouse = isInHouse,
+        .wrapMetrics = !isInHouse,
+        .existingTraceContext = traceContext,
+      });
+      return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
+    }
+    KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
+      kj::Maybe<TraceContext> traceContext;
+      auto result = outgoingFactory->newSingleUseClient(kj::mv(cfStr),
+          [&](TraceContext& outerTraceContext) -> kj::Maybe<SpanParent> {
+        if (!outerTraceContext.isObserved()) return kj::none;
+        traceContext = outerTraceContext.getSpanParents().newChild(operationName.clone());
+        return makeUserSpanParent(KJ_ASSERT_NONNULL(traceContext));
+      });
+      return ClientWithTracing{kj::mv(result.client), kj::mv(traceContext)};
+    }
+    KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
+      kj::Maybe<TraceContext> traceContext;
+      auto result = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr),
+          [&](TraceContext& outerTraceContext) -> kj::Maybe<SpanParent> {
+        if (!outerTraceContext.isObserved()) return kj::none;
+        traceContext = outerTraceContext.getSpanParents().newChild(operationName.clone());
+        return makeUserSpanParent(KJ_ASSERT_NONNULL(traceContext));
+      });
+      return ClientWithTracing{kj::mv(result.client), kj::mv(traceContext)};
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+void Fetcher::onActorFetchRetry() {
+  auto& outgoingFactory = KJ_REQUIRE_NONNULL(
+      channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>(),
+      "actor fetch retry requested from an unsupported Fetcher");
+  KJ_REQUIRE(outgoingFactory->supportsActorFetchRetries(),
+      "actor fetch retry requested from an unsupported Fetcher");
+  outgoingFactory->onActorFetchRetry();
 }
 
 kj::Own<IoChannelFactory::SubrequestChannel> Fetcher::getSubrequestChannel(IoContext& ioContext) {

@@ -24,8 +24,7 @@ export function maybeSerializeJsModule(
   modules: Set<string>
 ): SerializedJsModule | undefined {
   const obj = obj_ as
-    | { [importName]: string; [getAccessorList]: string[] }
-    | undefined;
+    { [importName]: string; [getAccessorList]: string[] } | undefined;
   const moduleName = obj?.[importName];
   if (!moduleName) {
     return undefined;

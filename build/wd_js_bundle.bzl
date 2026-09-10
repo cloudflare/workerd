@@ -56,6 +56,7 @@ def _gen_compile_cache_impl(ctx):
         command = run_under + " " + ctx.executable._tool.path + " $@",
         arguments = [args],
         use_default_shell_env = True,
+        mnemonic = "GenCompileCache",
         tools = [ctx.executable._tool],
     )
 

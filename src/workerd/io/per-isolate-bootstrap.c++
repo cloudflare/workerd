@@ -4,11 +4,15 @@
 
 #include "per-isolate-bootstrap.h"
 
+#include <workerd/api/compression.h>
+#include <workerd/api/crypto/digest-bootstrap.h>
+#include <workerd/api/filesystem-bootstrap.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 #include <per_isolate/per_isolate.capnp.h>
 
@@ -93,6 +97,7 @@ struct BootstrapState {
 #define VALUE_METHOD_MAP(V)                                                                        \
   V(ArrayBuffer)                                                                                   \
   V(ArrayBufferView)                                                                               \
+  V(DataView)                                                                                      \
   V(Promise)                                                                                       \
   V(SharedArrayBuffer)                                                                             \
   V(Uint8Array)
@@ -132,10 +137,53 @@ static void MarkPromiseHandledFastApi(v8::Local<v8::Value> unused, v8::Local<v8:
 }
 
 static void GetApiSymbol(const v8::FunctionCallbackInfo<v8::Value>& args) {
-  auto name = jsg::JsValue(args[0]);
-  auto str = JSG_REQUIRE_NONNULL(
-      name.tryCast<jsg::JsString>(), TypeError, "getApiSymbol() expects a string argument");
-  args.GetReturnValue().Set(v8::Symbol::ForApi(args.GetIsolate(), str));
+  // liftKj converts a thrown kj/jsg exception (the validation TypeError below) into a JS
+  // exception; without it the raw callback would let it escape and take down the process.
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto name = jsg::JsValue(args[0]);
+    auto str = JSG_REQUIRE_NONNULL(
+        name.tryCast<jsg::JsString>(), TypeError, "getApiSymbol() expects a string argument");
+    return v8::Symbol::ForApi(args.GetIsolate(), str);
+  });
+}
+
+// Creates the native digest object backing the TypeScript DigestStream. Unlike
+// its neighbors this allocates and can throw (an unrecognized algorithm name
+// raises a DOMNotSupportedError), so it is registered as a plain method rather
+// than a fast-API call, and needs liftKj to turn a thrown kj::Exception into a
+// JS exception.
+static void CreateDigestContext(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      auto name = jsg::JsValue(args[0]);
+      auto str = JSG_REQUIRE_NONNULL(name.tryCast<jsg::JsString>(), TypeError,
+          "createDigestContext() expects a string argument");
+      // The caller has already reduced the option bag to a boolean, so this is
+      // ToBoolean on an actual boolean and cannot run user code.
+      auto toWellFormed = api::ToWellFormed(args[1]->BooleanValue(args.GetIsolate()));
+      args.GetReturnValue().Set(
+          v8::Local<v8::Value>(api::createDigestContext(js, str.toString(js), toWellFormed)));
+    });
+  });
+}
+
+// Creates the native write context backing the TypeScript
+// FileSystemWritableFileStream. Like CreateDigestContext this allocates and can
+// throw -- a DOMException when the file cannot be opened, a TypeError when the
+// receiver is not a FileSystemFileHandle -- so it is a plain method rather than a
+// fast-API call, and needs liftKj.
+static void CreateFileSystemWriteContext(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      // The caller has already reduced the option bag to a boolean, so this is
+      // ToBoolean on an actual boolean and cannot run user code.
+      auto keepExistingData = api::KeepExistingData(args[1]->BooleanValue(args.GetIsolate()));
+      args.GetReturnValue().Set(v8::Local<v8::Value>(
+          api::createFileSystemWriteContext(js, jsg::JsValue(args[0]), keepExistingData)));
+    });
+  });
 }
 
 static const v8::CFunction fast_mark_promise_handled_ =
@@ -166,7 +214,10 @@ v8::Local<v8::Value> getMethod(jsg::Lock& js, v8::FunctionCallback callback) {
 // Creates an object with methods for performing fast type checks on JS values.
 // Because we are not fully bootstrapped at this point, we don't want to rely
 // on jsg::Object and the type wrapper system, etc. Instead, just use a plain
-// object with some properties set.
+// object with some properties set. (Members implemented in the api layer, like
+// newCompressionCodec, keep their knowledge there and are wired here by name;
+// their callbacks may use the type wrapper at CALL time -- the isolate is fully
+// set up by then -- through jsg::Lock's type-handler lookup.)
 jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
   static constexpr std::string_view names[] = {
 #define V(Name) "is" #Name,
@@ -176,6 +227,9 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
         "isAnyArrayBuffer",
     "markPromiseHandled",
     "getApiSymbol",
+    "newCompressionCodec",
+    "createDigestContext",
+    "createFileSystemWriteContext",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -185,6 +239,9 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
         getFastMethodNoSideEffect(js, IsAnyArrayBuffer, &fast_is_any_array_buffer_),
     getFastMethod(js, MarkPromiseHandled, &fast_mark_promise_handled_),
     getMethod(js, GetApiSymbol),
+    getMethod(js, api::newCompressionCodecCallback),
+    getMethod(js, CreateDigestContext),
+    getMethod(js, CreateFileSystemWriteContext),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
@@ -375,10 +432,9 @@ jsg::JsRef<jsg::JsObject> buildCompatFlagsObject(jsg::Lock& js, CompatibilityFla
 jsg::JsRef<jsg::JsObject> buildAutogatesObject(jsg::Lock& js) {
   auto obj = js.obj();
 
-  for (auto i = util::AutogateKey(0); i < util::AutogateKey::NumOfKeys;
-       i = util::AutogateKey(static_cast<int>(i) + 1)) {
-    if (util::Autogate::isEnabled(i)) {
-      auto name = kj::str(i);
+  for (util::AutogateKey key: util::getAutogateKeys()) {
+    if (util::Autogate::isEnabled(key)) {
+      auto name = kj::str(key);
       obj.set(js, name, js.boolean(true));
     }
   }
@@ -434,13 +490,19 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
   // The result is cached in state and injected as a pseudo-global into every
   // subsequent script via the context extension object.
   JSG_TRY(js) {
-    auto result =
-        state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("primordials"_kj));
-    state->primordials = result.addRef(js);
+    {
+      TRACE_EVENT("workerd", "PerIsolateBootrap::primordials");
+      auto result =
+          state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("primordials"_kj));
+      state->primordials = result.addRef(js);
+    }
 
-    // Run the entry point. This synchronously executes main.js, which may
-    // require() other scripts. All execution is synchronous.
-    state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("main"_kj));
+    {
+      TRACE_EVENT("workerd", "PerIsolateBootstrap::main");
+      // Run the entry point. This synchronously executes main.js, which may
+      // require() other scripts. All execution is synchronous.
+      state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("main"_kj));
+    }
 
     if (!flags.getJsWeakRef()) {
       jsg::deleteWeakRefGlobals(js.v8Isolate, context);
@@ -459,6 +521,18 @@ void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context) {
     jsg::setAlignedPointerInEmbedderData(
         context, jsg::ContextPointerSlot::BOOTSTRAP_STATE, nullptr);
   }
+}
+
+kj::Maybe<jsg::JsValue> tryGetBootstrapExport(jsg::Lock& js, kj::StringPtr specifier) {
+  auto& state = getBootstrapState(js);
+  auto normalized = normalizeSpecifier(specifier);
+
+  // The cache is populated by require() calls during bootstrap. If the module
+  // was never required, it won't be in the cache and we return none.
+  KJ_IF_SOME(cached, state.cache.find(normalized)) {
+    return cached.getHandle(js);
+  }
+  return kj::none;
 }
 
 }  // namespace workerd

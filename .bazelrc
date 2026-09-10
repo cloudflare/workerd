@@ -54,6 +54,9 @@ build:unix --features=external_include_paths --host_features=external_include_pa
 # Disable deprecated cfg = "host" Bazel rule setting. Blocked on perfetto.
 # common --incompatible_disable_starlark_host_transitions
 
+# Globally disable the "diabolic behavior" of implicit __init__.py creation (https://github.com/bazel-contrib/rules_python/issues/2945)
+common --incompatible_default_to_explicit_init_py
+
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
 build --per_file_copt='external@-Wno-error'
 build --per_file_copt='external@-Wno-suggest-override'
@@ -83,6 +86,13 @@ build:macos --per_file_copt=v8/src/heap/heap.cc@-O3
 # macros that reference symbols only available with V8_VERIFY_WRITE_BARRIERS (a debug-only define),
 # causing compile errors. Undefine DEBUG to match Linux behavior.
 build:macos --copt=-UDEBUG
+
+# Keep workerd and V8's Perfetto build configurations in sync.
+build:perfetto --//src/workerd/util:use_perfetto=True
+build:perfetto --@v8//:v8_use_perfetto=True
+build:no-perfetto --//src/workerd/util:use_perfetto=False
+build:no-perfetto --@v8//:v8_use_perfetto=False
+build:unix --config=perfetto
 
 # Increasing the optimization level of V8 significantly speeds up tests using V8 a lot, especially
 # python tests. This is useful for both CI and local development and enabled by default, but still
@@ -231,15 +241,51 @@ build:sanitizer-common --copt="-Og"
 build:sanitizer-common --copt="-g" --strip=never
 build:sanitizer-common --copt="-fno-optimize-sibling-calls"
 build:sanitizer-common --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-frame-pointer"
+# Rust's sanitizer support requires nightly
+build:sanitizer-common --@rules_rust//rust/toolchain/channel:channel=nightly
 
 # address sanitizer (https://github.com/google/sanitizers/wiki/AddressSanitizer)
 build:asan --config=sanitizer-common
+build:asan --platforms=//build/platforms:sanitizer_address_platform
 build:asan --copt="-fsanitize=address" --linkopt="-fsanitize=address"
 build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
 build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
 build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
 build:asan --per_file_copt='external/.*v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
+
+# thread sanitizer (https://github.com/google/sanitizers/wiki/ThreadSanitizerCppManual)
+#
+# Instruments both C++ and Rust (nightly rustc with -Zsanitizer=thread plus a TSan-built standard
+# library, see //build/rust). Supported hosts: Linux x86_64 (`--config=tsan`) and macOS arm64
+# (`--config=tsan-macos`). The two differ only in the Linux-specific unwinder linkopt below --
+# bazelrc has no way to make a single flag OS-conditional, hence the two entry points sharing
+# `tsan-common`.
+build:tsan-common --config=sanitizer-common
+build:tsan-common --copt="-fsanitize=thread" --linkopt="-fsanitize=thread"
+build:tsan-common --platforms=//build/platforms:sanitizer_thread_platform
+# Let death tests observe SIGABRT directly instead of routing it through TSan's signal handler.
+build:tsan-common --action_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0
+build:tsan-common --test_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0
+# Clang-tidy loads this shared object into an unsanitized process, which cannot resolve TSan hooks.
+build:tsan-common --per_file_copt='tools/clang-tidy@-fno-sanitize=thread'
+# TSan significantly increases test runtime.
+build:tsan-common --test_timeout=30,150,600,2400
+# Enable V8's TSan-specific generated code and synchronization annotations. V8's Bazel build does
+# not currently derive these defines from the compiler's sanitizer flags.
+build:tsan-common --copt="-DV8_IS_TSAN"
+build:tsan-common --per_file_copt='external/.*v8@-DTHREAD_SANITIZER'
+# One toolchain per host; resolution picks the one matching the (host-parented) tsan platform.
+build:tsan-common --extra_toolchains=//build/rust:tsan_toolchain_linux_x86_64,//build/rust:tsan_toolchain_macos_aarch64
+build:tsan-common --@rules_rust//:extra_rustc_flag=-Zsanitizer=thread
+build:tsan-common --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
+
+# Linux x86_64.
+build:tsan --config=tsan-common
+
+# macOS arm64. ld64 does not accept the GNU-ld `-l:` syntax and has no equivalent need: libunwind is
+# part of libSystem and shared by every image.
+build:tsan-macos --config=tsan-common
 
 # fuzzilli (https://github.com/googleprojectzero/fuzzilli/)
 build:fuzzilli --config=asan
@@ -282,10 +328,15 @@ build:unix --cxxopt='-Wsuggest-override'
 build:linux --config=unix
 build:macos --config=unix
 
+# Disable the deprecated rules_cc macOS toolchain – no need to configure this since we always use
+# the apple_support one, this will be removed in the future. See https://github.com/bazelbuild/rules_cc/issues/754
+# for context.
+build:macos --repo_env=BAZEL_USE_LEGACY_MACOS_TOOLCHAIN=0
+
 # Support macOS 13 as the minimum version. There should be at least a warning when backward
-# compatibility is broken as -Wunguarded-availability-new is enabled by default. Only enable for
-# target configuration as host configuration tools are only used during the build process.
+# compatibility is broken as -Wunguarded-availability-new is enabled by default.
 build:macos --macos_minimum_os=13.5
+build:macos --host_macos_minimum_os=13.5
 
 # Avoid emitting duplicate unwind info where compact unwind info can be used. This reduces the
 # object size by ~5% on average, improving disk space usage and link times. The final binary size
@@ -333,6 +384,9 @@ build:linux --copt="-fdata-sections" --host_copt="-fdata-sections"
 
 # On Linux, use clang lld.
 build:linux --linkopt="-fuse-ld=lld"
+# Improve link performance by limiting the link stage to 8 threads – LLD link times see little if
+# any improvement beyond 8 threads (see https://reviews.llvm.org/D147493).
+build:linux --linkopt="-Wl,--threads=8"
 
 #
 # Windows
@@ -501,3 +555,6 @@ coverage --build_tests_only
 # This config is defined internally and enabled on many machines.
 # Defining it as empty just so these machines can run build commands from the workerd repo
 build:rosetta-arm64 --define=rosetta_arm64_no_op=1
+
+# Local workstation overrides. /.local/ is gitgnored.
+try-import %workspace%/.local/bazelrc

@@ -137,7 +137,60 @@ export const validateHierarchy = {
       assertTopLevelParent(b, 'siblingEnterSpans (b)');
     }
 
-    // ---------- Case 6: abandonedPromiseSpan ----------
+    // ---------- Case 6: startSpanDoesNotBecomeActive ----------
+    // startSpan() creates a span but does not push it into the active async context, so
+    // a following enterSpan() should be a sibling of the detached span, not its child.
+    {
+      const detached = findSpanByName(state, 'hierarchy-detached-start-span');
+      const afterDetached = findSpanByName(
+        state,
+        'hierarchy-after-detached-start-span'
+      );
+      assert.strictEqual(detached.role, 'detached');
+      assert.strictEqual(afterDetached.role, 'after-detached');
+      assert.ok(detached.closed);
+      assert.ok(afterDetached.closed);
+      assert.strictEqual(
+        detached.invocationId,
+        afterDetached.invocationId,
+        'startSpanDoesNotBecomeActive: both should share the same invocation'
+      );
+      assertTopLevelParent(detached, 'startSpanDoesNotBecomeActive (detached)');
+      assertTopLevelParent(
+        afterDetached,
+        'startSpanDoesNotBecomeActive (afterDetached)'
+      );
+    }
+
+    // ---------- Case 7: startSpanUsesCurrentActiveSpan ----------
+    // startSpan() should use the current active user span as parent, but still not become active.
+    {
+      const outer = findSpanByName(state, 'hierarchy-start-span-active-parent');
+      const detached = findSpanByName(state, 'hierarchy-detached-active-child');
+      const afterDetached = findSpanByName(
+        state,
+        'hierarchy-after-detached-active-child'
+      );
+      assert.strictEqual(outer.role, 'outer');
+      assert.strictEqual(detached.role, 'detached');
+      assert.strictEqual(afterDetached.role, 'after-detached');
+      assert.ok(outer.closed);
+      assert.ok(detached.closed);
+      assert.ok(afterDetached.closed);
+      assertParent(
+        detached,
+        outer,
+        'startSpanUsesCurrentActiveSpan (detached)'
+      );
+      assertParent(
+        afterDetached,
+        outer,
+        'startSpanUsesCurrentActiveSpan (afterDetached)'
+      );
+      assertTopLevelParent(outer, 'startSpanUsesCurrentActiveSpan (outer)');
+    }
+
+    // ---------- Case 8: abandonedPromiseSpan ----------
     // Reaching this point proves the outcome event for the abandoned-promise invocation
     // was emitted in order: invocationPromises only resolve on "outcome", and
     // waitForCompletion() awaits them all. BaseTracer::WeakRef prevents the abandoned

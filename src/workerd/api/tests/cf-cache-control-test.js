@@ -139,6 +139,7 @@ export const additionalCacheSettings = {
           stripLastModified: false,
           cacheDeceptionArmor: true,
           cacheReserveMinimumFileSize: 1024,
+          originRangeRequests: 'off',
           vary: {
             default: { action: 'bypass' },
             headers: {
@@ -158,6 +159,7 @@ export const additionalCacheSettings = {
       assert.strictEqual(req.cf.stripLastModified, false);
       assert.strictEqual(req.cf.cacheDeceptionArmor, true);
       assert.strictEqual(req.cf.cacheReserveMinimumFileSize, 1024);
+      assert.strictEqual(req.cf.originRangeRequests, 'off');
       assert.deepStrictEqual(req.cf.vary, {
         default: { action: 'bypass' },
         headers: {

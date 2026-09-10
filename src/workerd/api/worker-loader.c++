@@ -7,6 +7,7 @@
 #include <workerd/io/io-context.h>
 
 #include <capnp/message.h>
+#include <kj/vector.h>
 
 namespace workerd::api {
 
@@ -80,15 +81,16 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
   // WorkerStub and any entrypoint stubs in vends until they are GC'd. We don't want to create
   // a cycle where a request context holds itself open (which would block DO hibernation).
   auto reenterAndGetCode = ioctx.makeReentryCallbackWeak(
-      [weakIoctx = ioctx.getWeakRef(), getCode = kj::mv(getCode),
-          compatDateValidation = compatDateValidation](jsg::Lock& js) mutable {
+      [getCode = kj::mv(getCode), compatDateValidation = compatDateValidation](
+          jsg::Lock& js, IoContext& ioctx) mutable {
+    // getCode() is application-provided and may resolve its promise from a different context.
+    // Binding the continuation to this context ensures that it either runs here or throws before
+    // accessing the context.
     return getCode(js).then(js,
-        [weakIoctx = kj::addRef(*weakIoctx), compatDateValidation](
-            jsg::Lock& js, WorkerCode code) -> DynamicWorkerSource {
-      auto& ioctx = JSG_REQUIRE_NONNULL(weakIoctx->tryGet(), Error,
-          "The request which initiated this dynamic worker load has already completed.");
+        ioctx.addFunctor([compatDateValidation](jsg::Lock& js, IoContext& ioctx,
+                             WorkerCode code) -> DynamicWorkerSource {
       return toDynamicWorkerSource(js, ioctx, compatDateValidation, kj::mv(code));
-    });
+    }));
   });
 
   auto isolateChannel =
@@ -126,33 +128,50 @@ DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
     CompatibilityDateValidation compatDateValidation,
     WorkerCode code) {
   auto extractedSource = extractSource(js, code);
-  auto ownCompatFlags = extractCompatFlags(js, code, compatDateValidation);
-  CompatibilityFlags::Reader compatFlags = *ownCompatFlags;
 
-  // Set up compat flags for Python Workers so that the caller doesn't have to specify them manually.
+  // Set up compat flags for Python Workers so that the caller doesn't have to specify them
+  // manually.
   if (code.mainModule.endsWith(".py"_kj)) {
-    capnp::MallocMessageBuilder flagsMessage;
-    flagsMessage.setRoot(compatFlags);
-    auto flagsBuilder = flagsMessage.getRoot<CompatibilityFlags>();
-    flagsBuilder.setPythonWorkers(true);
+    bool hasPythonWorkers = false;
     bool userExplicitlyEnabledExternalSdk = false;
+    bool hasExternalSdkDisabled = false;
 
     KJ_IF_SOME(f, code.compatibilityFlags) {
       for (auto& flag: f) {
-        if (flag == "enable_python_external_sdk") {
+        if (flag == "python_workers"_kj) {
+          hasPythonWorkers = true;
+        } else if (flag == "enable_python_external_sdk"_kj) {
           userExplicitlyEnabledExternalSdk = true;
-          break;
+        } else if (flag == "disable_python_external_sdk"_kj) {
+          hasExternalSdkDisabled = true;
         }
       }
     }
-    if (!userExplicitlyEnabledExternalSdk) {
-      // TODO: We currently need to disable this because we have no way to include the SDK
-      // in dynamic workers. Once RM-28738 is implemented we may be able to get rid of this.
-      flagsBuilder.setPythonExternalSDK(false);
+
+    // TODO: We currently need to disable the external SDK because we have no way to include the
+    // SDK in dynamic workers. Once RM-28738 is implemented we may be able to get rid of this.
+    bool addExternalSdkDisable = !userExplicitlyEnabledExternalSdk && !hasExternalSdkDisabled;
+
+    if (!hasPythonWorkers || addExternalSdkDisable) {
+      kj::Vector<kj::String> flags;
+      KJ_IF_SOME(f, code.compatibilityFlags) {
+        flags.reserve(f.size() + 2);
+        for (auto& flag: f) {
+          flags.add(kj::mv(flag));
+        }
+      }
+      if (!hasPythonWorkers) {
+        flags.add(kj::str("python_workers"_kj));
+      }
+      if (addExternalSdkDisable) {
+        flags.add(kj::str("disable_python_external_sdk"_kj));
+      }
+      code.compatibilityFlags = flags.releaseAsArray();
     }
-    ownCompatFlags = capnp::clone(flagsBuilder.asReader());
-    compatFlags = *ownCompatFlags;
   }
+
+  auto ownCompatFlags = extractCompatFlags(js, code, compatDateValidation);
+  CompatibilityFlags::Reader compatFlags = *ownCompatFlags;
 
   Frankenvalue env;
   KJ_IF_SOME(codeEnv, code.env) {
@@ -215,6 +234,19 @@ DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
     .ownContentIsRpcResponse = false};
 }
 
+// Builds WASM module content from an already-compiled `WebAssembly.Module`, sharing the compiled
+// code with the loaded worker rather than recompiling. `body` points at the module's wire bytes,
+// which are owned by the compiled module itself.
+static Worker::Script::ModuleContent extractWasmModuleContent(
+    jsg::Lock& js, jsg::V8Ref<v8::WasmModuleObject>& wasmModule) {
+  auto compiled = wasmModule.getHandle(js)->GetCompiledModule();
+  auto wireBytes = compiled.GetWireBytesRef();
+  return Worker::Script::WasmModule{
+    .body = kj::arrayPtr(wireBytes.data(), wireBytes.size()),
+    .compiledModule = kj::mv(compiled),
+  };
+}
+
 Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& code) {
   JSG_REQUIRE(code.modules.fields.size() > 0, TypeError,
       "Dynamic Worker code must contain at least one module.");
@@ -258,6 +290,13 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
             "Module name must end with '.js' or '.py' (or the content must be an object ",
             "indicating the type explicitly). Got: ", entry.name);
       }
+      KJ_CASE_ONEOF(wasmModule, jsg::V8Ref<v8::WasmModuleObject>) {
+        // An already-compiled `WebAssembly.Module` (e.g. from a source phase import).
+        return {
+          .name = entry.name,
+          .content = extractWasmModuleContent(js, wasmModule),
+        };
+      }
       KJ_CASE_ONEOF(module, Module) {
         uint fieldCount = (module.js != kj::none) + (module.cjs != kj::none) +
             (module.text != kj::none) + (module.data != kj::none) + (module.json != kj::none) +
@@ -293,9 +332,19 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
           } else KJ_IF_SOME(py, module.py) {
             return Worker::Script::PythonModule{.body = py};
           } else KJ_IF_SOME(wasm, module.wasm) {
-            // Same as `data` above: copy out of the V8 BackingStore before going async.
-            wasm = kj::heapArray<const kj::byte>(wasm.asPtr());
-            return Worker::Script::WasmModule{.body = wasm};
+            KJ_SWITCH_ONEOF(wasm) {
+              KJ_CASE_ONEOF(bytes, kj::Array<const byte>) {
+                // Same as `data` above: copy out of the V8 BackingStore before going async.
+                bytes = kj::heapArray<const kj::byte>(bytes.asPtr());
+                return Worker::Script::WasmModule{.body = bytes};
+              }
+              KJ_CASE_ONEOF(wasmModule, jsg::V8Ref<v8::WasmModuleObject>) {
+                // No copy needed here: the wire bytes are owned by the compiled module itself,
+                // not the V8 heap.
+                return extractWasmModuleContent(js, wasmModule);
+              }
+            }
+            KJ_UNREACHABLE;
           } else {
             KJ_UNREACHABLE;
           }
@@ -306,16 +355,12 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
   };
 
   bool isPython = code.mainModule.endsWith(".py"_kj);
-  // Disallow Python modules when the main module is a JS module, and vice versa. Also tally up the
+  // Disallow Python modules when the main module is a JS module. Also tally up the
   // total size of all module bodies so we can enforce the worker code size limit.
+  // This behavior is deliberately not replicated for Python main modules since Python packages
+  // can contain arbitrary .js files.
   size_t totalCodeSize = 0;
   for (auto& module: modules) {
-    auto isJsModule = module.content.is<Worker::Script::EsModule>() ||
-        module.content.is<Worker::Script::CommonJsModule>();
-    if (isPython && isJsModule) {
-      JSG_FAIL_REQUIRE(TypeError, "Module \"", module.name,
-          "\" is a JS module, but the main module is a Python module.");
-    }
     auto isPythonModule = module.content.is<Worker::Script::PythonModule>();
     if (!isPython && isPythonModule) {
       JSG_FAIL_REQUIRE(TypeError, "Module \"", module.name,

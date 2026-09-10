@@ -132,7 +132,7 @@ void SharedMemoryCache::putWhileLocked(ThreadUnsafeData& data,
     const kj::String& key,
     kj::Own<CacheValue>&& value,
     kj::Maybe<double> expiration) const {
-  size_t valueSize = value->bytes.size();
+  size_t valueSize = value->size();
 
   auto writeSpan = IoContext::current().makeTraceSpan("memory_cache_write"_kjc);
   writeSpan.setTag("key"_kjc, key.asPtr());
@@ -292,7 +292,7 @@ kj::Maybe<kj::Own<CacheValue>> SharedMemoryCache::Use::getWithoutFallback(
   // Track cache hit/miss
   readSpan.setTag("cache_hit"_kjc, result != kj::none);
   KJ_IF_SOME(value, result) {
-    readSpan.setTag("entry_size"_kjc, static_cast<double>(value->bytes.size()));
+    readSpan.setTag("entry_size"_kjc, static_cast<double>(value->size()));
   }
   readSpan.setTag("cache_total_size"_kjc, static_cast<double>(data->totalValueSize));
   readSpan.setTag("cache_entry_count"_kjc, static_cast<double>(data->cache.size()));
@@ -310,7 +310,7 @@ SharedMemoryCache::Use::getWithFallback(const kj::String& key, SpanBuilder& read
   KJ_IF_SOME(existingValue, cache->getWhileLocked(*data, key)) {
     // Cache hit
     readSpan.setTag("cache_hit"_kjc, true);
-    readSpan.setTag("entry_size"_kjc, static_cast<double>(existingValue->bytes.size()));
+    readSpan.setTag("entry_size"_kjc, static_cast<double>(existingValue->size()));
     readSpan.setTag("cache_total_size"_kjc, static_cast<double>(data->totalValueSize));
     readSpan.setTag("cache_entry_count"_kjc, static_cast<double>(data->cache.size()));
     return kj::mv(existingValue);
@@ -469,10 +469,10 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
   auto userReadSpan = IoContext::current().makeUserTraceSpan("memory_cache_read"_kjc);
 
   KJ_IF_SOME(fallback, optionalFallback) {
-    KJ_SWITCH_ONEOF(cacheUse.getWithFallback(key.value, readSpan)) {
+    KJ_SWITCH_ONEOF(cacheUse->getWithFallback(key.value, readSpan)) {
       KJ_CASE_ONEOF(result, kj::Own<CacheValue>) {
         // Optimization: Don't even release the isolate lock if the value is already in cache.
-        jsg::Deserializer deserializer(js, result->bytes.asPtr());
+        jsg::Deserializer deserializer(js, result->asBytes());
         auto value = jsg::JsRef(js, deserializer.readValue(js));
 
         return js.resolvedPromise(kj::mv(value));
@@ -486,9 +486,9 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
           KJ_SWITCH_ONEOF(cacheResult) {
             KJ_CASE_ONEOF(serialized, kj::Own<CacheValue>) {
               readSpan.setTag("fallback_cache_hit"_kjc, true);
-              readSpan.setTag("entry_size"_kjc, static_cast<double>(serialized->bytes.size()));
+              readSpan.setTag("entry_size"_kjc, static_cast<double>(serialized->size()));
 
-              jsg::Deserializer deserializer(js, serialized->bytes.asPtr());
+              jsg::Deserializer deserializer(js, serialized->asBytes());
               return js.resolvedPromise(jsg::JsRef(js, deserializer.readValue(js)));
             }
             KJ_CASE_ONEOF(callback, SharedMemoryCache::Use::FallbackDoneCallback) {
@@ -515,7 +515,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
 
                 auto serialized = hackySerialize(js, result.value);
                 fallbackSpan->setTag(
-                    "fallback_result_size"_kjc, static_cast<double>(serialized->bytes.size()));
+                    "fallback_result_size"_kjc, static_cast<double>(serialized->size()));
 
                 KJ_IF_SOME(expiration, result.expiration) {
                   JSG_REQUIRE(
@@ -549,8 +549,8 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
     }
     KJ_UNREACHABLE;
   } else {
-    KJ_IF_SOME(cacheValue, cacheUse.getWithoutFallback(key.value, readSpan)) {
-      jsg::Deserializer deserializer(js, cacheValue->bytes.asPtr());
+    KJ_IF_SOME(cacheValue, cacheUse->getWithoutFallback(key.value, readSpan)) {
+      jsg::Deserializer deserializer(js, cacheValue->asBytes());
       return js.resolvedPromise(jsg::JsRef(js, deserializer.readValue(js)));
     }
     return js.resolvedPromise(jsg::JsRef(js, js.undefined()));
@@ -567,7 +567,7 @@ void MemoryCache::delete_(jsg::Lock& js, jsg::NonCoercible<kj::String> key) {
   auto deleteSpan = IoContext::current().makeTraceSpan("memory_cache_delete"_kjc);
   deleteSpan.setTag("key"_kjc, key.value.asPtr());
 
-  cacheUse.delete_(key.value);
+  cacheUse->delete_(key.value);
 
   deleteSpan.setTag("delete_completed"_kjc, true);
 }

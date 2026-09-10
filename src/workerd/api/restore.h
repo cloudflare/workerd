@@ -26,6 +26,27 @@ class JsRpcStub;
 using RestoreRehydrateCallback =
     kj::Function<kj::Own<Frankenvalue::CapTableEntry>(kj::Own<Frankenvalue::CapTableEntry>)>;
 
+// Abstract interface used when receiving restore events over RPC (i.e. implementing
+// `EventDispatcher.restoreService()` / `restoreRpcStub()`). It provides the two embedder-specific
+// operations needed to reconstruct a restore custom event from the RPC message:
+//
+// - deserializing the event's `params` Frankenvalue, whose cap-table encoding is
+//   environment-specific (like `FrankenvalueHandler`, but for the receiving direction), and
+// - constructing the `RestoreRehydrateCallback` (if any) to pass to the event.
+//
+// This is refcounted because the `service` capability returned by `restoreService()` must keep the
+// handler alive in order to handle subsequent hops of a restore chain, which arrive as further
+// `restoreService()` / `restoreRpcStub()` calls on that capability.
+class RestoreParamsHandler: public kj::Refcounted {
+ public:
+  // Deserialize the `params` carried by a `restoreService()` / `restoreRpcStub()` RPC.
+  virtual Frankenvalue fromCapnp(rpc::Frankenvalue::Reader params) = 0;
+
+  // Construct the callback used to rehydrate the deserialized params' cap-table entries once the
+  // target IoContext has been entered, or kj::none if the entries are already live.
+  virtual kj::Maybe<RestoreRehydrateCallback> makeRehydrateCallback() = 0;
+};
+
 // Implementation of ctx.restore(). Invokes `[restore](params)` on the current entrypoint,
 // constructs the appropriate channel token for the result, and returns a Fetcher or JsRpcStub
 // imbued with that token.
@@ -102,14 +123,16 @@ class RestoreServiceCustomEvent final: public WorkerInterface::CustomEvent {
   using RestoreServiceContext = capnp::CallContext<rpc::EventDispatcher::RestoreServiceParams,
       rpc::EventDispatcher::RestoreServiceResults>;
 
-  // Common implementation of `EventDispatcher::restoreService()`. Dispatches the (already
-  // constructed) event to `worker`, then returns a `WorkerdBootstrap` representing the restored
-  // service. The caller is responsible for constructing `event` with the deserialized
-  // `restoreParams` and (in the edge runtime) a `RestoreRehydrateCallback`. `ownWorker` is held
-  // alive for the duration of the dispatched event (e.g. the multi-use dispatcher server).
+  // Common implementation of `EventDispatcher::restoreService()`. Constructs the event (using
+  // `paramsHandler` to deserialize the params carried by `context`), dispatches it to `worker`,
+  // then returns a `WorkerdBootstrap` representing the restored service. That bootstrap also
+  // accepts further `restoreService()` / `restoreRpcStub()` calls -- delivering subsequent hops of
+  // a restore chain to the restored service -- so it holds on to `paramsHandler` for that purpose.
+  // `ownWorker` is held alive for the duration of the dispatched event (e.g. the multi-use
+  // dispatcher server).
   static kj::Promise<void> receiveRpc(RestoreServiceContext context,
       capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
-      kj::Own<RestoreServiceCustomEvent> event,
+      kj::Rc<RestoreParamsHandler> paramsHandler,
       WorkerInterface& worker,
       kj::Own<void> ownWorker);
 
@@ -189,13 +212,13 @@ class RestoreRpcStubCustomEvent final: public WorkerInterface::CustomEvent {
   using RestoreRpcStubContext = capnp::CallContext<rpc::EventDispatcher::RestoreRpcStubParams,
       rpc::EventDispatcher::RestoreRpcStubResults>;
 
-  // Common implementation of `EventDispatcher::restoreRpcStub()`. Dispatches the (already
-  // constructed) event to `worker` and hooks up the resulting `JsRpcTarget` + `session`, modeled
-  // on `JsRpcSessionCustomEvent::receiveRpc()`. The caller is responsible for constructing `event`
-  // with the deserialized `restoreParams` and (in the edge runtime) a `RestoreRehydrateCallback`.
-  // `ownWorker` is held alive until the session completes.
+  // Common implementation of `EventDispatcher::restoreRpcStub()`. Constructs the event (using
+  // `paramsHandler` to deserialize the params carried by `context`), dispatches it to `worker`,
+  // and hooks up the resulting `JsRpcTarget` + `session`, modeled on
+  // `JsRpcSessionCustomEvent::receiveRpc()`. `ownWorker` is held alive until the session
+  // completes.
   static kj::Promise<void> receiveRpc(RestoreRpcStubContext context,
-      kj::Own<RestoreRpcStubCustomEvent> event,
+      kj::Rc<RestoreParamsHandler> paramsHandler,
       WorkerInterface& worker,
       kj::Own<void> ownWorker);
 

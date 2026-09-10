@@ -266,5 +266,71 @@ KJ_TEST("Module names exceeding max bundle path depth are skipped") {
   });
 }
 
+KJ_TEST("Transpiled bundle module bodies outlive the WorkerSource (VULN-136997)") {
+  // Regression test for VULN-136997: a heap use-after-free.
+  //
+  // When a module is transpiled at load time (e.g. TypeScript type-stripping),
+  // the resulting bytes are owned by WorkerSource::EsModule::ownBody -- a
+  // transient rust::String that lives only as long as the WorkerSource. The
+  // /bundle directory is materialized lazily, long after the WorkerSource has
+  // been destroyed, so the File must take ownership of those bytes rather than
+  // aliasing them.
+  //
+  // This test builds such a source, obtains the (lazy) bundle directory, then
+  // destroys the source *before* the directory is materialized and read. Under
+  // the bug the read aliases freed memory; run under ASAN (`just test-asan`) to
+  // detect the regression deterministically. The content assertions additionally
+  // verify that the copied bytes are correct.
+  TestFixture fixture;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    kj::StringPtr kBody = "export default 42; // transpiled at load time"_kj;
+
+    kj::Maybe<kj::Rc<Directory>> maybeDir;
+    {
+      // `ownBody` owns the bytes; `body` is a non-owning view into them -- exactly
+      // how workerd-api.c++ sets up a module transpiled during load.
+      ::rust::String ownBody(kBody.begin(), kBody.size());
+      kj::ArrayPtr<const char> bodyView(ownBody.data(), ownBody.size());
+
+      kj::Vector<WorkerSource::Module> modules(1);
+      modules.add(WorkerSource::Module{
+        .name = "a/transpiled.js"_kj,
+        .content = WorkerSource::EsModule{.body = bodyView, .ownBody = kj::mv(ownBody)},
+      });
+
+      auto config = WorkerSource(WorkerSource::ModulesSource{
+        .mainModule = "a/transpiled.js"_kj, .modules = modules.releaseAsArray()});
+
+      maybeDir = getBundleDirectory(config);
+
+      // config -- and thus ownBody's backing buffer -- is destroyed here, before
+      // the lazy directory below is ever materialized.
+    }
+
+    auto& dir = KJ_ASSERT_NONNULL(maybeDir);
+
+    // The first tryOpen materializes the whole tree (creating the File and
+    // discarding the builder closure), so the subsequent reads exercise the
+    // File's own storage with both the source and the closure long gone.
+    auto maybeFile = dir->tryOpen(env.js, kj::Path({"a", "transpiled.js"}));
+    auto& file = KJ_ASSERT_NONNULL(maybeFile).get<kj::Rc<File>>();
+
+    auto stat = file->stat(env.js);
+    KJ_EXPECT(stat.type == FsType::FILE);
+    KJ_EXPECT(stat.size == kBody.size());
+
+    auto readText = file->readAllText(env.js).get<jsg::JsString>();
+    KJ_EXPECT(readText == env.js.str(kBody));
+
+    auto readBytes = file->readAllBytes(env.js).get<jsg::JsRef<jsg::JsUint8Array>>();
+    KJ_EXPECT(readBytes.getHandle(env.js).asArrayPtr() == kBody.asArray().asBytes());
+
+    // The bundle remains read-only even for files that own their body.
+    auto error = dir->remove(env.js, kj::Path({"a", "transpiled.js"})).get<FsError>();
+    KJ_EXPECT(error == FsError::READ_ONLY);
+  });
+}
+
 }  // namespace
 }  // namespace workerd

@@ -19,10 +19,14 @@ class ContextGlobalObject: public Object, public ContextGlobal {};
 
 struct Foo: public Object {
   kj::String bar = kj::str("test");
+  kj::Maybe<jsg::JsRef<jsg::JsObject>> ref;
+
+  Foo(jsg::Lock& js): ref(js.obj().addRef(js)) {}
 
   JSG_RESOURCE_TYPE(Foo) {}
   void visitForMemoryInfo(MemoryTracker& tracker) const {
     tracker.trackField("bar", bar);
+    tracker.trackField("ref", ref);
   }
 };
 
@@ -55,7 +59,7 @@ KJ_TEST("MemoryTracker test") {
       return true;
     });
 
-    auto foo = fooHandler.wrap(js, js.alloc<Foo>());
+    auto foo = fooHandler.wrap(js, js.alloc<Foo>(js));
     KJ_ASSERT(foo->IsObject());
 
     auto profiler = js.v8Isolate->GetHeapProfiler();
@@ -86,14 +90,15 @@ KJ_TEST("MemoryTracker test") {
     checks.insert(kj::str("workerd / CppgcShim"));
     checks.insert(kj::str("workerd / MemoryTrackerContext"));
     checks.insert(kj::str("workerd / Foo"));
+    checks.insert(kj::str("ref"));
+    checks.insert(kj::str("bar"));
 
     // Find what we're looking for... this is slow but, you know
     for (size_t n = 0; n < array.size(); n++) {
       JsValue check = array.get(js, n);
       auto str = check.toString(js);
-      if (str.startsWith("workerd /")) {
+      if (checks.find(str) != kj::none) {
         count++;
-        KJ_ASSERT(checks.find(str) != kj::none);
       }
     }
     KJ_ASSERT(count == checks.size());

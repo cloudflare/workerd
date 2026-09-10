@@ -1,0 +1,128 @@
+--- sqlite-src-pristine/src/alter.c	2026-08-20 19:56:12
++++ sqlite-src-modified/src/alter.c	2026-08-20 19:57:57
+@@ -177,12 +177,13 @@
+     goto exit_rename_table;
+   }
+ #endif
+ 
+ #ifndef SQLITE_OMIT_AUTHORIZATION
+-  /* Invoke the authorization callback. */
+-  if( sqlite3AuthCheck(pParse, SQLITE_ALTER_TABLE, zDb, pTab->zName, 0) ){
++  /* Invoke the authorization callback. Pass the new table name as the 4th
++  ** argument so the authorizer can reject renames into reserved namespaces. */
++  if( sqlite3AuthCheck(pParse, SQLITE_ALTER_TABLE, zDb, pTab->zName, zName) ){
+     goto exit_rename_table;
+   }
+ #endif
+ 
+ #ifndef SQLITE_OMIT_VIRTUALTABLE
+--- sqlite-src-pristine/test/auth.test	2026-08-20 19:56:10
++++ sqlite-src-modified/test/auth.test	2026-08-20 20:00:21
+@@ -1780,11 +1780,11 @@
+       do_test auth-1.264 {
+         execsql {SELECT name FROM sqlite_temp_master WHERE type='table'}
+       } {t1x}
+       do_test auth-1.265 {
+         set authargs
+-      } {temp t1 {} {}}
++      } {temp t1 t1x {}}
+       do_test auth-1.266 {
+         proc auth {code arg1 arg2 arg3 arg4 args} {
+           if {$code=="SQLITE_ALTER_TABLE"} {
+             set ::authargs [list $arg1 $arg2 $arg3 $arg4]
+             return SQLITE_IGNORE
+@@ -1798,11 +1798,11 @@
+       do_test auth-1.267 {
+         execsql {SELECT name FROM temp.sqlite_master WHERE type='table'}
+       } {t1x}
+       do_test auth-1.268 {
+         set authargs
+-      } {temp t1x {} {}}
++      } {temp t1x t1 {}}
+       do_test auth-1.269 {
+         proc auth {code arg1 arg2 arg3 arg4 args} {
+           if {$code=="SQLITE_ALTER_TABLE"} {
+             set ::authargs [list $arg1 $arg2 $arg3 $arg4]
+             return SQLITE_DENY
+@@ -1817,11 +1817,11 @@
+         execsql {SELECT name FROM sqlite_temp_master WHERE type='table'}
+       } {t1x}
+   
+       do_test auth-1.271 {
+         set authargs
+-      } {temp t1x {} {}}
++      } {temp t1x t1 {}}
+     } ;# ifcapable altertable
+   
+   } else {
+     db authorizer {}
+     db eval {
+@@ -1849,11 +1849,11 @@
+ do_test auth-1.273 {
+   execsql {SELECT name FROM sqlite_master WHERE type='table'}
+ } {t2x}
+ do_test auth-1.274 {
+   set authargs
+-} {main t2 {} {}}
++} {main t2 t2x {}}
+ do_test auth-1.275 {
+   proc auth {code arg1 arg2 arg3 arg4 args} {
+     if {$code=="SQLITE_ALTER_TABLE"} {
+       set ::authargs [list $arg1 $arg2 $arg3 $arg4]
+       return SQLITE_IGNORE
+@@ -1867,11 +1867,11 @@
+ do_test auth-1.276 {
+   execsql {SELECT name FROM sqlite_master WHERE type='table'}
+ } {t2x}
+ do_test auth-1.277 {
+   set authargs
+-} {main t2x {} {}}
++} {main t2x t2 {}}
+ do_test auth-1.278 {
+   proc auth {code arg1 arg2 arg3 arg4 args} {
+     if {$code=="SQLITE_ALTER_TABLE"} {
+       set ::authargs [list $arg1 $arg2 $arg3 $arg4]
+       return SQLITE_DENY
+@@ -1885,11 +1885,11 @@
+ do_test auth-1.279 {
+   execsql {SELECT name FROM sqlite_master WHERE type='table'}
+ } {t2x}
+ do_test auth-1.280 {
+   set authargs
+-} {main t2x {} {}}
++} {main t2x t2 {}}
+ db authorizer {}
+ catchsql {ALTER TABLE t2x RENAME TO t2}
+ 
+ } ;# ifcapable altertable
+ 
+--- sqlite-src-pristine/test/alterauth.test	2026-08-20 19:56:10
++++ sqlite-src-modified/test/alterauth.test	2026-08-20 19:57:57
+@@ -34,11 +34,11 @@
+ 
+ do_test 1.1 {
+   set ::auth [list]
+   execsql { ALTER TABLE t1 RENAME TO t2 }
+   set ::auth
+-} {{SQLITE_ALTER_TABLE main t1 {} {}}}
++} {{SQLITE_ALTER_TABLE main t1 t2 {}}}
+ 
+ do_test 1.2 {
+   set ::auth [list]
+   execsql { ALTER TABLE t2 RENAME c TO ccc }
+   set ::auth
+--- sqlite-src-pristine/test/alterauth2.test	2026-08-20 19:56:11
++++ sqlite-src-modified/test/alterauth2.test	2026-08-20 20:00:31
+@@ -53,11 +53,11 @@
+ }
+ 
+ do_auth_test 1.1 {
+   ALTER TABLE t1 RENAME TO t2;
+ } {
+-    {SQLITE_ALTER_TABLE main t1 {} {}} 
++    {SQLITE_ALTER_TABLE main t1 t2 {}} 
+     {SQLITE_FUNCTION {} like {} {}} 
+   {SQLITE_FUNCTION {} sqlite_rename_table {} {}} 
+   {SQLITE_FUNCTION {} sqlite_rename_test {} {}} 
+     {SQLITE_FUNCTION {} substr {} {}} 
+     {SQLITE_READ sqlite_master name main {}} 

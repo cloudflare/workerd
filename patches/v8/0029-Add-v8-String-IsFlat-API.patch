@@ -24,10 +24,10 @@ index 8466df80175de9362dd785d83fa527a20a3be1a6..c28282462218fb5e7c66face4402e39d
      enum {
        kNone = 0,
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 723181b6eb39d2deabaa65fd0cc8109483f32640..af43652cab06174938e10cf50ea03ab6eb51f047 100644
+index 5c8016ba4b1be43f1075a12b457935305625b174..747df1c576e29c0e341302407517cb1eecb60258 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -5825,6 +5825,10 @@ bool String::IsOneByte() const {
+@@ -5954,6 +5954,10 @@ bool String::IsOneByte() const {
    return Utils::OpenDirectHandle(this)->IsOneByteRepresentation();
  }
  

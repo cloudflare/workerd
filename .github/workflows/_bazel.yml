@@ -27,6 +27,10 @@ on:
         type: boolean
         required: false
         default: true
+      build_target:
+        type: string
+        required: false
+        default: //...
       test_target:
         type: string
         required: false
@@ -123,7 +127,7 @@ jobs:
           fi
       - name: Bazel build
         run: |
-          bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} //...
+          bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.build_target }}
       - name: Configure Docker daemon for IPv6
         if: inputs.build_container_images
         run: |

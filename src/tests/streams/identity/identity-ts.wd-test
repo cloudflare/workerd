@@ -1,0 +1,40 @@
+using Workerd = import "/workerd/workerd.capnp";
+using IdentityModules = import "identity-modules.capnp";
+
+# Runs the identity streams suite against the TypeScript implementation
+# (typescript_implemented_streams + the per-isolate bootstrap autogate).
+# The embedded modules are byte-for-byte the same ones identity-cpp.wd-test
+# runs against the legacy C++ implementation.
+#
+# The semantic flags pinned in identity-cpp.wd-test are deliberately absent
+# here: the TypeScript implementation hard-codes the modern behaviors they
+# select, and this cell verifies that indifference — the `@` variant runs
+# with all of them OFF (a pre-flag compat date opting into TS streams still
+# gets modern semantics), and `@all-compat-flags` runs with all of them ON.
+#
+# expose_draining_reader IS consulted by the TS bootstrap: it installs the
+# internal ReadableStreamDrainingReader global (the C++ bridge's bulk-drain
+# conduit) so draining-reader.js can exercise it. No such global exists
+# under the C++ implementation regardless of flags.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-identity-ts",
+      worker = (
+        # The shared module list: see identity-modules.capnp.
+        modules = IdentityModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "expose_draining_reader",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+  # For gc-interplay.js.
+  v8Flags = ["--expose-gc"],
+);

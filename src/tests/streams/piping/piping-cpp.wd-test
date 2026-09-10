@@ -1,0 +1,35 @@
+using Workerd = import "/workerd/workerd.capnp";
+using PipingModules = import "piping-modules.capnp";
+
+# Runs the piping suite against the C++ streams implementation.
+#
+# Pinned compatibility flags (the date axis belongs to the wd_test
+# variants; every date-gated behavior observed here is pinned by name):
+# - nodejs_compat: node:assert + node:test mock.
+# - streams_enable_constructors +
+#   transformstream_enable_standard_constructor: the JS-backed pipe
+#   endpoints; unflagged side guarded by the legacy cell.
+# - capture_async_api_throws, workers_api_getters_setters_on_prototype,
+#   set_tostring_tag, fixup-transform-stream-backpressure,
+#   writable_stream_spec_compliant_writer: as in the sibling suites
+#   (rejection vs throw shapes, accessor placement, pump backpressure,
+#   writer behavior at the pipe destination).
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-piping-cpp",
+      worker = (
+        modules = PipingModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "capture_async_api_throws",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+          "fixup-transform-stream-backpressure",
+          "writable_stream_spec_compliant_writer",
+        ],
+      )
+    ),
+  ],
+);

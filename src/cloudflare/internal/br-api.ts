@@ -2,16 +2,19 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+import wrappedBinding from 'cloudflare-internal:wrapped-binding';
+
 interface Fetcher {
   fetch: typeof fetch;
 }
 
-export class BrowserRendering {
+export class BrowserRendering extends wrappedBinding.WrappedBinding {
   // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
   private readonly fetcher: Fetcher;
 
   constructor(fetcher: Fetcher) {
+    super(fetcher);
     this.fetcher = fetcher;
   }
 

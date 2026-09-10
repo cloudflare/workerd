@@ -16,11 +16,12 @@ import * as assert from 'node:assert';
 /**
  * Creates module-level state for instrumentation tests.
  * This mirrors the original test pattern with module-level variables.
- * @returns {Object} State object with invocationPromises and spans
+ * @returns {Object} State object with invocationPromises, invocations, and spans
  */
 export function createInstrumentationState() {
   return {
     invocationPromises: [],
+    invocations: new Map(),
     spans: new Map(),
   };
 }
@@ -31,7 +32,7 @@ export function createInstrumentationState() {
  * @returns {Function} The tailStream handler function
  */
 export function createTailStreamHandler(state) {
-  return (event, env, ctx) => {
+  return (onset, env, ctx) => {
     // For each "onset" event, store a promise which we will resolve when
     // we receive the equivalent "outcome" event
     let resolveFn;
@@ -40,6 +41,15 @@ export function createTailStreamHandler(state) {
         resolveFn = resolve;
       })
     );
+
+    const invocation = {
+      invocationId: onset.invocationId,
+      rootSpanId: onset.event.spanId,
+      onset: onset.event,
+      attributes: [],
+      attributeEvents: [],
+    };
+    state.invocations.set(onset.invocationId, invocation);
 
     // Accumulate the span info for easier testing
     return (event) => {
@@ -50,11 +60,23 @@ export function createTailStreamHandler(state) {
           state.spans.set(spanKey, { name: event.event.name });
           break;
         case 'attributes': {
-          let span = state.spans.get(spanKey);
-          for (let { name, value } of event.event.info) {
+          for (const { name, value } of event.event.info) {
+            invocation.attributeEvents.push({
+              spanId: event.spanContext.spanId,
+              name,
+              value,
+            });
+          }
+          if (event.spanContext.spanId === invocation.rootSpanId) {
+            invocation.attributes.push(...event.event.info);
+            break;
+          }
+
+          const span = state.spans.get(spanKey);
+          if (!span) break;
+          for (const { name, value } of event.event.info) {
             span[name] = value;
           }
-          state.spans.set(spanKey, span);
           break;
         }
         case 'spanClose': {
@@ -64,6 +86,7 @@ export function createTailStreamHandler(state) {
           break;
         }
         case 'outcome':
+          invocation.outcome = event.event;
           resolveFn();
           break;
       }
@@ -170,7 +193,7 @@ export function findSpanByName(state, name, filterFn = () => true) {
  * @param {Array} expectedSpans - The expected spans to compare against
  * @param {Object} options - Options for the test
  * @param {Function} options.mapFn - Map function to transform spans before comparison (default: x => x)
- * @param {Function} options.filterFn - Filter function for spans (default: filters out jsRpcSession)
+ * @param {Function} options.filterFn - Filter function for spans (default: filters out jsRpcSession and jsRpcCall)
  * @param {string} options.testName - Name for the test (default: 'instrumentation')
  * @param {boolean} options.logReceived - Log received spans for debugging (default: false)
  *
@@ -185,7 +208,8 @@ export async function runInstrumentationTest(
 ) {
   const {
     mapFn = (x) => x,
-    filterFn = (span) => span.name !== 'jsRpcSession',
+    filterFn = (span) =>
+      span.name !== 'jsRpcSession' && span.name !== 'jsRpcCall',
     testName = 'instrumentation',
     logReceived = false,
   } = options;
@@ -234,8 +258,9 @@ export function createTailStreamCollector() {
 
   const tailStream = createTailStreamHandler(state);
 
-  let spans = state.spans;
-  let invocationPromises = state.invocationPromises;
+  const spans = state.spans;
+  const invocations = state.invocations;
+  const invocationPromises = state.invocationPromises;
   const waitForCompletion = () => {
     return Promise.allSettled(invocationPromises);
   };
@@ -243,6 +268,7 @@ export function createTailStreamCollector() {
   return {
     tailStream,
     waitForCompletion,
+    invocations,
     spans,
   };
 }
