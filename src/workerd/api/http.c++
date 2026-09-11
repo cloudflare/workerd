@@ -1669,15 +1669,13 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
         kj::mv(KJ_ASSERT_NONNULL(attemptOrException.tryGet<ActorCallRetryState::Attempt>()));
   }
 
-  // Stash whether this request's body can be rewound (and so the request re-sent) and whether the
-  // target supports retries, before we lose access to the JS-level request. This is currently
-  // consumed only when the target is an actor (Durable Object), to classify retry eligibility for
-  // disconnected calls; for other fetches the values are simply overwritten by the next call and
-  // never read. The set->getClientWithTracing->wrap*SubrequestClient sequence is synchronous, so
-  // there is no stale-attribution risk.
+  // Stash the payload and target retryability before we lose access to the JS-level request. This
+  // is consumed only when the target is an actor; for other fetches the value is overwritten by the
+  // next call. The set->getClientWithTracing->wrap*SubrequestClient sequence is synchronous.
+  auto targetRetryable = fetcher->getActorTargetRetryability()
+                             .orDefault(ActorCallTargetRetryable::NO);
   ioContext.getMetrics().setNextSubrequestRetryEligibility(
-      SubrequestBodyRewindable(jsRequest->canRewindBody()),
-      ActorCallTargetRetryable(fetcher->supportsActorCallRetries()));
+      SubrequestBodyRewindable(jsRequest->canRewindBody()), targetRetryable);
 
   // Get client and trace context (if needed) in one clean call.
   auto cfBlobJson = jsRequest->serializeCfBlobJson(js);
@@ -2821,11 +2819,11 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
   KJ_UNREACHABLE;
 }
 
-bool Fetcher::supportsActorCallRetries() {
+kj::Maybe<ActorCallTargetRetryable> Fetcher::getActorTargetRetryability() {
   KJ_IF_SOME(outgoingFactory, channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>()) {
-    return outgoingFactory->supportsActorCallRetries();
+    return outgoingFactory->getActorTargetRetryability();
   }
-  return false;
+  return kj::none;
 }
 
 void Fetcher::onActorCallRetry() {
