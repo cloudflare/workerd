@@ -1,0 +1,40 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the LEGACY (unflagged) node:http server cell against the C++ streams
+# implementation: the regression guard for what workers with compat dates
+# predating the streams constructor flag still get. http-server-cpp.wd-test
+# pins that flag ON; this config deliberately omits it:
+# - streams_enable_constructors OFF: the ServerResponse builds its body with
+#   `new ReadableStream({ type: 'bytes' })` when the headers go out, so the
+#   first body write throws the constructor-gate Error and a response can
+#   carry no body. Bodiless responses and the request body (a stream the
+#   runtime provides) keep working.
+# The http module flags are pinned as in the flagged cells; nodejs_compat_v2
+# is again deliberately absent.
+#
+# C++ only: the TypeScript implementation always exposes the constructor,
+# so there is no TS legacy cell. The BUILD rule disables the
+# @all-compat-flags variant — at the 2999-12-31 date the omitted flag turns
+# on, which would contradict this config's purpose.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "node-http-server-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "harness", esModule = embed "harness.js"),
+          (name = "legacy-constructor-gate", esModule = embed "legacy-constructor-gate.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_http_modules",
+          "enable_nodejs_http_server_modules",
+        ],
+        bindings = [
+          (name = "SERVICE", service = "node-http-server-cpp-legacy"),
+        ],
+      )
+    ),
+  ],
+);
