@@ -70,9 +70,10 @@ Tests run sequentially, one server (`withServer`) at a time.
 - Every chunk type is delivered (string, Buffer, `Uint8Array`, explicit
   encoding), empty writes contribute nothing, many small and large writes
   arrive whole. A declared Content-Length caps the body (extra bytes
-  dropped, fewer sent as they are). 204 and 304 have a null body and drop
-  their writes. A web `ReadableStream` can be `pipeline()`d into the
-  response.
+  dropped, fewer sent as they are). 204 and 304, and the reply to a HEAD
+  (marked bodiless before the handler runs), have a null body and drop
+  their writes — accepted, callback called. A web `ReadableStream` can be
+  `pipeline()`d into the response.
 - `write()` reports backpressure against the response's own buffer before
   the headers, with 'drain' following; once the headers are out every
   write is accepted (the body stream queues whatever the handler writes;
@@ -127,7 +128,7 @@ lifecycle" — and the pure-streams behavior belongs to
 | --- | --- |
 | `request-body.js` | GET ends at once; Buffer/string chunks and `complete`; late 'data' listener; 256 KiB in several events; streaming body incremental + chunked headers; `FixedLengthStream` Content-Length; pause/resume (small chunks, and a body above the high-water mark); pipe echo; several pipe destinations; `pipeline` through a `TransformStream` |
 | `request-destroy.js` | `destroy(err)` with listener; bare `destroy()` closes quietly; unlistened `destroy(err)` swallowed; mid-body destroy cancels the body stream with the reason and stops 'data'; bare destroy cancels with `undefined`; no cancel after completion |
-| `response-body.js` | implicit headers and chunk types; streaming before `end()`; large and many writes; Content-Length capping; 204/304; cork/uncork; backpressure signaling and 'drain' parity; acceptance after headers with `highWaterMark`; web source pipelined in; 'finish' then 'close' with `closed`; write after end via callback only |
+| `response-body.js` | implicit headers and chunk types; streaming before `end()`; large and many writes; Content-Length capping; 204/304; HEAD (`_hasBody`, dropped writes, null body); cork/uncork; backpressure signaling and 'drain' parity; acceptance after headers with `highWaterMark`; web source pipelined in; 'finish' then 'close' with `closed`; write after end via callback only |
 | `response-lifecycle.js` | `destroy(err)` before headers rejects the fetch with it; bare destroy before headers → 'Premature close'; `destroy(err)` after headers errors the body, 'error' then 'close'; bare destroy after headers → premature close, 'close' only; client cancel → destroyed with the reason, `ERR_STREAM_DESTROYED` on later writes |
 | `harness.js`, `which-impl.js` | shared machinery |
 
@@ -139,5 +140,5 @@ Guarded by `http-server-cpp-legacy.wd-test` (C++ only):
 | --- | --- |
 | `writeHead()` succeeds; the first body write throws the constructor-gate `Error` synchronously; a handler that catches it and ends anyway never yields a Response — the fetch fails with 'Premature close' | `legacyFirstBodyWriteHitsConstructorGate` |
 | The gate `Error` left uncaught fails the fetch with that `Error` | `legacyUncaughtGateErrorFailsFetch` |
-| 204 and 304 construct no stream: status and headers delivered, body null, writes dropped | `legacyBodilessResponsesWork` |
+| 204, 304 and the reply to a HEAD construct no stream: status and headers delivered, body null, writes dropped | `legacyBodilessResponsesWork` |
 | The request body (a runtime stream) is pumped as usual | `legacyRequestBodyIsPumped` |

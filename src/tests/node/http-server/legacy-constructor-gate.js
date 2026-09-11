@@ -60,9 +60,10 @@ export const legacyUncaughtGateErrorFailsFetch = {
   },
 };
 
-// Responses whose status forbids a body (204, 304) construct no stream:
-// they carry their status and headers with a null body, and the writes
-// the handler still issues are dropped.
+// Responses without a body — a status that forbids one (204, 304), or the
+// reply to a HEAD — construct no stream: they carry their status and
+// headers with a null body, and the writes the handler still issues are
+// dropped.
 export const legacyBodilessResponsesWork = {
   async test(ctrl, env) {
     await withServer(
@@ -72,8 +73,12 @@ export const legacyBodilessResponsesWork = {
         res.end('dropped too');
       },
       async () => {
-        for (const status of [204, 304]) {
-          const res = await env.SERVICE.fetch(`http://x/${status}`);
+        for (const [status, method] of [
+          [204, 'GET'],
+          [304, 'GET'],
+          [200, 'HEAD'],
+        ]) {
+          const res = await env.SERVICE.fetch(`http://x/${status}`, { method });
           strictEqual(res.status, status);
           strictEqual(res.headers.get('X-Path'), `/${status}`);
           strictEqual(res.body, null);

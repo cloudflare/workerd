@@ -43,6 +43,7 @@ export {
   largeAndManyWrites,
   contentLengthCapsBody,
   noBodyStatuses,
+  headResponseHasNoBody,
   corkAndUncork,
   backpressureSignaling,
   writesAlwaysAcceptedAfterHeaders,
