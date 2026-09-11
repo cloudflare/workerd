@@ -10,6 +10,7 @@
 #include <kj/thread.h>
 
 #include <csignal>
+#include <thread>
 
 // Raw-RustFuture test helpers, defined in tests/lib.rs and tests/test_futures.rs. The
 // bridge's generated `async fn` shims always apply RustFuture's eager-by-default
@@ -624,6 +625,58 @@ KJ_TEST("Repeated foreign wakes queue one replay per waker cell") {
 
   promise = nullptr;
   clear_stashed_wakers_on_background_thread();
+}
+
+KJ_TEST("A coalesced foreign wake publishes its writes to the next poll") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  struct ObserveFuture {
+    using Output = int;
+    using ExceptionOrValue = kj::_::ExceptionOr<Output>;
+
+    int& published;
+    int& observed;
+
+    void poll(const kj_rs::PollWaker&, ExceptionOrValue&) {
+      observed = published;
+    }
+  };
+
+  int published = 0;
+  int observed = 0;
+  kj_rs::FutureAwaiter<ObserveFuture> event(ObserveFuture{published, observed});
+  kj_rs::PollWaker waker(event);
+  auto cell = waker.cloneCell();
+
+  // Queue an earlier wake without running the loop. Its synchronization predates the payload.
+  {
+    kj::Thread firstWake([cell = cell.addRef()]() { cell->wakeByRef(); });
+  }
+  auto sink = kj_rs::CrossThreadWakeSink::forCurrentLoop();
+  KJ_ASSERT(sink->getPendingCountForTest() == 1);
+
+  std::atomic<bool> wakeFinished{false};
+  std::atomic<bool> pollFinished{false};
+  kj::Thread producer([cell = cell.addRef(), &published, &wakeFinished, &pollFinished]() {
+    published = 42;
+    cell->wakeByRef();
+    // Schedule the coalesced wake before replay, but do not publish the payload through this
+    // handshake. Only the waker's synchronization may make the following plain read safe.
+    wakeFinished.store(true, std::memory_order_relaxed);
+    while (!pollFinished.load(std::memory_order_relaxed)) {
+      std::this_thread::yield();
+    }
+  });
+  KJ_DEFER(pollFinished.store(true, std::memory_order_relaxed));
+
+  while (!wakeFinished.load(std::memory_order_relaxed)) {
+    std::this_thread::yield();
+  }
+  waitScope.poll();
+  KJ_EXPECT(observed == 42);
+  // The producer is joined only after the read. ThreadSanitizer can therefore detect a missing
+  // acquire in the real replay path even on hardware that happens to observe the latest value.
 }
 
 KJ_TEST("Waker woken from a thread running a DIFFERENT KJ event loop") {

@@ -194,7 +194,9 @@ class FutureWakerCell final: public kj::AtomicRefcounted {
   // the flag and enqueues a fresh slot (picked up by the drain's next arm()), while a wake that
   // lost the race rode in on the arm+re-poll this call is about to perform.
   void replayFromSink() const {
-    queued.store(false, std::memory_order_release);
+    // Coalesced wakes bypass the sink mutex. Acquire their release exchanges before arming
+    // the poll so that it observes the state they published, not just the original enqueue.
+    queued.exchange(false, std::memory_order_acq_rel);
     wakeByRef();
   }
 
