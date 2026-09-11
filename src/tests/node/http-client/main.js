@@ -33,6 +33,14 @@ export {
   responseDestroyMidBodyReachesServer,
   serverDroppingConnectionAbortsResponse,
   completedResponseIsFinal,
+  connectionFailureErrorsRequest,
+  responseEndClosesRequest,
+  destroyBeforeResponseHangsUp,
+  destroyWithErrorBeforeResponse,
+  destroyBeforeEndSendsNothing,
+  destroyMidBodyAbortsResponse,
+  destroyWithErrorMidBody,
+  responseAfterDestroyIsDropped,
 } from 'lifecycle';
 
 export {

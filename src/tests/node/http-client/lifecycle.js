@@ -208,10 +208,10 @@ export const destroyBeforeEndSendsNothing = {
   },
 };
 
-// req.destroy() mid-body, in Node's order: the response is aborted, the
-// request closes without an error of its own, the response errors with
-// ECONNRESET 'aborted' (for listeners) and closes; the body stream's
-// cancellation reaches the server.
+// req.destroy() mid-body: the response is aborted at once and errors with
+// ECONNRESET 'aborted' (for listeners), the request closes without an error
+// of its own, the response closes; the body stream's cancellation reaches
+// the server.
 export const destroyMidBodyAbortsResponse = {
   async test(ctrl, env) {
     const id = uniqueId('req-destroy');
@@ -243,8 +243,9 @@ export const destroyMidBodyAbortsResponse = {
   },
 };
 
-// req.destroy(err) mid-body: the request reports err, the response is
-// destroyed with it.
+// req.destroy(err) mid-body: the response is aborted at once; the request
+// reports err on the next tick and closes; the response errors with err
+// and closes.
 export const destroyWithErrorMidBody = {
   async test(ctrl, env) {
     const log = [];
@@ -256,8 +257,8 @@ export const destroyWithErrorMidBody = {
     res.on('data', () => req.destroy(new Error('enough')));
     await closed;
     deepStrictEqual(log, [
-      'req:error(Error/-/enough)',
       'res:aborted',
+      'req:error(Error/-/enough)',
       'req:close',
       'res:error(Error/-/enough)',
       'res:close',
