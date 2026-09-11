@@ -1,0 +1,31 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("//:build/wd_test.bzl", "wd_test")
+
+# The node:http client suite runs the same test modules under two configs:
+# http-client-cpp against the C++ streams implementation, http-client-ts
+# against the TypeScript implementation. A sidecar provides the HTTP server
+# the client talks to.
+
+js_binary(
+    name = "http-servers",
+    entry_point = "http-servers.js",
+)
+
+http_client_suite_srcs = glob(["*.js"]) + ["http-client-modules.capnp"]
+
+http_client_ports = ["HTTP_SERVER_PORT"]
+
+wd_test(
+    src = "http-client-cpp.wd-test",
+    data = http_client_suite_srcs,
+    sidecar = "http-servers",
+    sidecar_port_bindings = http_client_ports,
+)
+
+wd_test(
+    src = "http-client-ts.wd-test",
+    args = ["--experimental"],
+    data = http_client_suite_srcs,
+    sidecar = "http-servers",
+    sidecar_port_bindings = http_client_ports,
+)

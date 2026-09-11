@@ -1,0 +1,40 @@
+using Workerd = import "/workerd/workerd.capnp";
+using HttpClientModules = import "http-client-modules.capnp";
+
+# The SAME modules against the TypeScript streams implementation: the
+# Response body the client pumps into its IncomingMessage is a TypeScript
+# stream here.
+#
+# The streams-semantic flags pinned in http-client-cpp.wd-test are
+# deliberately absent: the TypeScript implementation hard-codes those
+# behaviors, and the `@` / `@all-compat-flags` variants prove its
+# indifference to them.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "node-http-client-ts",
+      worker = (
+        modules = HttpClientModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_http_modules",
+          "nodejs_zlib",
+          "typescript_implemented_streams",
+          "experimental",
+        ],
+        bindings = [
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+          (name = "HTTP_SERVER_PORT", fromEnvironment = "HTTP_SERVER_PORT"),
+        ],
+      )
+    ),
+    ( name = "internet",
+      network = (
+        allow = ["private"],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);
