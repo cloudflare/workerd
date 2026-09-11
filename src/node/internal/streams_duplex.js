@@ -271,10 +271,10 @@ class Duplexify extends Duplex {
         ? undefined
         : options.writable) === false
     ) {
-      this['_readableState'].writable = false;
-      this['_readableState'].ending = true;
-      this['_readableState'].ended = true;
-      this['_readableState'].finished = true;
+      this['_writableState'].writable = false;
+      this['_writableState'].ending = true;
+      this['_writableState'].ended = true;
+      this['_writableState'].finished = true;
     }
   }
 }
