@@ -313,12 +313,26 @@ wd_cc_library(
     exclude = [
         # defined below
         "macro-meta-test.c++",
+        "modules-new-test.c++",
         "resource-test.c++",
         "rtti-test.c++",
         "url-test.c++",
         "multiple-typewrappers-test.c++",
     ],
 )]
+
+# Pulled out of the glob above because it calls kj::setupAsyncIo(); :jsg only pulls the core kj
+# target, so it depends on the io-backend seam (//src/workerd/util:setup-async-io) which supplies
+# kj::setupAsyncIo() for whichever backend is selected -- native under cxx, tokio under
+# --//:io_backend=rust -- with no #if in the test source.
+kj_test(
+    src = "modules-new-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [
+        ":jsg",
+        "//src/workerd/util:setup-async-io",
+    ],
+)
 
 # Moved out as macro-meta-test does not depend on V8 or JSG proper, this makes the test much
 # smaller.

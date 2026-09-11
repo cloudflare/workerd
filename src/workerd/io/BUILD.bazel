@@ -126,7 +126,7 @@ wd_cc_library(
         "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-io",
         "@ncrypto",
         "@ssl",
     ],
@@ -159,7 +159,7 @@ wd_cc_library(
         ":worker-interface_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -251,7 +251,7 @@ wd_cc_library(
         "//src/workerd/util:sqlite",
         "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp:capnp-rpc",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -316,7 +316,7 @@ wd_cc_library(
     deps = [
         ":trace",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -328,7 +328,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 

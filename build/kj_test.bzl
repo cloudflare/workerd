@@ -1,6 +1,7 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
+load("//:build/rust_io_backend.bzl", "rust_io_backend_local_defines")
 
 def kj_test(
         src,
@@ -9,6 +10,7 @@ def kj_test(
         tags = [],
         size = "medium",
         target_compatible_with = [],
+        local_defines = [],
         **kwargs):
     test_name = src.removesuffix(".c++")
     binary_name = test_name + "_binary"
@@ -20,6 +22,11 @@ def kj_test(
             "@capnp-cpp//src/kj:kj-test",
             "//build/deps:linkopts_default",
         ] + deps,
+        # Under --//:io_backend=rust the native kj::setupAsyncIo()/UnixEventPort aren't linked, so
+        # tests that need an event loop swap to the tokio backend behind
+        # `#if WORKERD_RUST_IO_BACKEND_RUST`. Supplied to every kj_test TU here (cheap, harmless
+        # where unused) instead of repeating it per target.
+        local_defines = local_defines + rust_io_backend_local_defines(),
         linkstatic = CC_TEST_LINKSTATIC,
         data = data,
         # Tag with cpu:4 since this target depends on linkopts_default.
