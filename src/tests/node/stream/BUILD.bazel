@@ -1,0 +1,19 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The node:stream web-interop suite runs the same test modules under two
+# configs: stream-cpp against the C++ streams implementation, stream-ts
+# against the TypeScript implementation. A test that cannot pass under both
+# belongs in an implementation-specific suite, not here.
+
+stream_suite_srcs = glob(["*.js"]) + ["stream-modules.capnp"]
+
+wd_test(
+    src = "stream-cpp.wd-test",
+    data = stream_suite_srcs,
+)
+
+wd_test(
+    src = "stream-ts.wd-test",
+    args = ["--experimental"],
+    data = stream_suite_srcs,
+)
