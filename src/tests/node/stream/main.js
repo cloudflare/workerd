@@ -136,4 +136,18 @@ export {
   fromWebStreamErrorPropagates,
 } from 'readable-from';
 
+export {
+  pipelineWebReadableToNodeWritable,
+  pipelineNodeReadableToWebWritable,
+  pipelineThroughWebTransform,
+  pipelineWebTransformAsSource,
+  pipelineGeneratorBetweenWebStreams,
+  pipelineWebSinkErrorFailsPipeline,
+  pipelineWebSourceErrorFailsPipeline,
+  pipelineNodeSinkErrorCancelsWebSource,
+  promisesPipelineTrailingWebWritable,
+  promisesPipelineEndFalseLeavesWebWritableOpen,
+  promisesPipelineSignalAbortsWebWritable,
+} from 'pipeline-web';
+
 export { duplexFromWebStreamHalves } from 'duplex-from';

@@ -8,4 +8,6 @@ export {
   legacyToWebHitsConstructorGate,
   legacyStreamWebConstructorsGated,
   legacyFromWebOverRuntimeStreams,
+  legacyPipelineOverRuntimeStreams,
+  legacyTransformStreamIgnoresTransformer,
 } from 'legacy-constructor-gate';
