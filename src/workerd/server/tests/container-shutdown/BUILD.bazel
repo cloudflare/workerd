@@ -1,0 +1,22 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+js_test(
+    name = "container-shutdown-test",
+    size = "enormous",
+    data = [
+        ":config.capnp",
+        ":worker.mjs",
+        "//src/workerd/server:workerd",
+        "//src/workerd/server/tests:server-harness_js_lib",
+    ],
+    entry_point = "test.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_CONFIG": "$(rootpath :config.capnp)",
+    },
+    tags = [
+        "js-test",
+        "requires-container-engine",
+        "requires-network",  # Accesses unix:///var/run/docker.sock
+    ],
+)
