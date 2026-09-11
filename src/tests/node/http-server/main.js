@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+// Entry point for the node:http server suite. The default export routes
+// every incoming Request (a test's env.SERVICE.fetch) to the test's server;
+// the named re-exports are the tests. Explicit named re-exports only.
+
+import { route } from 'harness';
+
+export default {
+  fetch(request, env, ctx) {
+    return route(request, env, ctx);
+  },
+};
+
+export {
+  getRequestEndsImmediately,
+  postBodyArrivesAsBuffers,
+  lateDataListenerReceivesBody,
+  largeBodyArrivesInChunks,
+  streamingBodyArrivesIncrementally,
+  fixedLengthBodyCarriesContentLength,
+  pausedBodyResumesWithoutLoss,
+  echoThroughPipe,
+  bodyPipedToSeveralDestinations,
+  bodyThroughWebTransformPipeline,
+} from 'request-body';
+
+export {
+  destroyWithErrorEmitsError,
+  destroyWithoutErrorClosesQuietly,
+  destroyWithErrorAndNoListenerIsSwallowed,
+} from 'request-destroy';
+
+export {
+  implicitHeadersAndChunkTypes,
+  bodyStreamsBeforeEnd,
+  largeAndManyWrites,
+  contentLengthCapsBody,
+  noBodyStatuses,
+  corkAndUncork,
+  backpressureSignaling,
+  writesAlwaysAcceptedAfterHeaders,
+  webSourcePipelinedIntoResponse,
+} from 'response-body';
+
+export { destroyWithErrorBeforeHeadersRejectsFetch } from 'response-lifecycle';
