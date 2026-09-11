@@ -173,6 +173,16 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
                 "abi": "3.13",
                 "sha256": "2e5c462cb32ee8697b3647dfc9d5c88dcdfd0702da34a2d7dc6b07b8090dd321",
             },
+            {
+                "name": "Pillow",
+                "abi": "3.13",
+                "sha256": "0fcbba0fd1af97d41103bef1fc887a4c0db871af73a4c57112a1c0ddc9af99e0",
+            },
+            {
+                "name": "pywavelets",
+                "abi": "3.13",
+                "sha256": "96ac5c0993549217de48ea762e2fd0cb5847987ee2e043fda58baada5caf258d",
+            },
         ],
     },
     {
@@ -218,6 +228,21 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
                 "name": "numpy",
                 "abi": "3.14",
                 "sha256": "28bea03aa0a18bbc1884ea4cebe8d93a9004455c497417e172c221f0a245b439",
+            },
+            {
+                "name": "shapely",
+                "abi": "3.14",
+                "sha256": "d2106a18c04be9da7bce46488f12b6ee42717eaa99e08904b2419e2f99e0248e",
+            },
+            {
+                "name": "Pillow",
+                "abi": "3.14",
+                "sha256": "c8c11eecbf65007c30342bff5e1e5bb40458f1480e23338ac41a8d3144a7e834",
+            },
+            {
+                "name": "pywavelets",
+                "abi": "3.14",
+                "sha256": "919033aa22e5200a5b3f29f08a0525b465d6d9a6ab15a65012de7c38ef16f93a",
             },
         ],
     },

@@ -4,6 +4,9 @@
 pyodide = use_extension("@//build/deps:pyodide.bzl", "pyodide")
 use_repo(
     pyodide,
+    "Pillow_src_0.28.2",
+    "Pillow_src_314.0.6",
+    "Pillow_src_development",
     "all_pyodide_wheels_20240829.4",
     "all_pyodide_wheels_20250808",
     "beautifulsoup4_src_0.26.0a2",
@@ -44,6 +47,11 @@ use_repo(
     "python-workers-runtime-sdk_src_314.0.4",
     "python-workers-runtime-sdk_src_314.0.6",
     "python-workers-runtime-sdk_src_development",
+    "pywavelets_src_0.28.2",
+    "pywavelets_src_314.0.6",
+    "pywavelets_src_development",
     "scipy_src_0.26.0a2",
     "shapely_src_0.28.2",
+    "shapely_src_314.0.6",
+    "shapely_src_development",
 )
