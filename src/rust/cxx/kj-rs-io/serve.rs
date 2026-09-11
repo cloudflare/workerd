@@ -200,16 +200,12 @@ pub struct ServedKjStream {
     /// The tokio-side stream.
     ///
     /// Thread affinity: every variant may be handed to a connection task on any runtime thread.
-    /// The NATIVE variants (`Tcp`/`Unix`) stay registered with the I/O driver that created them
-    /// (for kj-rs-io streams, this thread's KJ-loop runtime) and wake their consumer via
-    /// tokio's own task waker. The [`ServeIo::Duplex`] variant's peer end lives inside `pump`,
-    /// which is polled as a bridged future, so the waker parked in the duplex's internal waker
-    /// slots is a `kj_rs` `FutureWakerCell` clone -- atomically refcounted and honoring the full
-    /// `Waker: Send + Sync` contract: a read/write/drop of the duplex from another thread wakes
-    /// the pump through the cell's cross-thread fulfiller. That hop is a bit more expensive
-    /// than a same-thread wake, so co-locating a `Duplex` consumer with the KJ event-loop
-    /// thread is a performance recommendation (check [`ServedKjStream::path`]), not a
-    /// soundness requirement.
+    /// The native variants (`Tcp`/`Unix`) stay registered with the I/O driver that created them
+    /// and wake their consumer through tokio's task waker. The [`ServeIo::Duplex`] variant's
+    /// peer end lives inside `pump`, which is polled as a bridged future on the KJ event loop.
+    /// Its stored waker owns an atomically refcounted kj-rs `ArcWaker`; waking it fulfills a
+    /// cross-thread promise that schedules the pump on its owning KJ loop. The consumer may
+    /// therefore run on another thread while the pump and its KJ stream remain on their owner.
     pub io: ServeIo,
     /// Present iff `io` is [`ServeIo::Duplex`]: the pump that actually moves the bytes, owning
     /// the kj stream it bridges. The caller must poll it on the KJ event-loop thread until it

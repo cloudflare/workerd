@@ -105,10 +105,10 @@ pub fn spawn_task_awaiting_kj_never_promise() {
     }));
 }
 
-/// A bridged future woken from a plain `std::thread` (no tokio, no KJ) ~20ms after its first
-/// poll, while the loop is parked in the port's `wait()`. Exercises the full cross-thread path
-/// into a PARKED tokio port: `FutureWakerCell` cross-thread fulfiller -> loop `Executor` -> port
-/// `wake()` -> `block_on` unpark. (Prep's cross-thread tests all run on a plain `kj::EventLoop`.)
+/// A bridged future woken from a plain `std::thread` (no tokio, no KJ) about 20ms after its
+/// first poll, while the loop is parked in the port's `wait()`. The cloned `ArcWaker` fulfills
+/// its cross-thread promise through the loop's `Executor`, which calls the port's `wake()`
+/// and unparks `block_on`.
 pub async fn std_thread_wake_future() -> Result<()> {
     struct F {
         woken: std::sync::Arc<std::sync::atomic::AtomicBool>,

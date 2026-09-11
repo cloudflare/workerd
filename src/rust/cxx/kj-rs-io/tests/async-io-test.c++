@@ -741,12 +741,10 @@ KJ_TEST("restrictPeers filters accepted peers (disallowed peers are dropped, "
 }
 
 KJ_TEST("onSignal is delivered even when another runtime's thread consumes the signal") {
-  // Regression test for a SIGTERM hang observed in workerd: tokio's signal registry is
-  // process-global, and whichever runtime's driver consumes the signal's wake byte performs the
-  // broadcast. With a second tokio runtime parked on another thread (workerd's inspector thread,
-  // in the wild), the broadcast often runs on THAT thread — a cross-thread wake of this loop's
-  // waker. Before the kj-rs waker bridge was thread-safe, that wake was lost and workerd ignored
-  // SIGTERM until killed; now it must always be delivered (kj-rs/waker.h's cross-thread path).
+  // Tokio's process-global signal registry broadcasts from whichever runtime consumes the
+  // signal's wake byte. A second parked runtime can therefore wake this loop's signal future
+  // from another thread, as workerd's inspector runtime can. ArcWaker must deliver that wake
+  // through its cross-thread fulfiller so this loop observes the signal.
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
 

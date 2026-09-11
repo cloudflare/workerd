@@ -14,16 +14,13 @@
 //! - tokio's signal registration is process-wide and persists for the life of the process
 //!   (dropping the future stops *watching*, but does not restore `SIG_DFL`).
 //!
-//! Cross-thread delivery note: tokio's signal registry is process-global, and its broadcast can
-//! run on a different thread — another runtime's loop thread on unix (whichever runtime's driver
-//! consumes the signal's wake byte, e.g. workerd's inspector thread), or the OS-spawned
-//! console-ctrl thread on Windows. That is fine: the kj-rs waker bridge is thread-safe (a
-//! cross-thread wake is delivered through the `FutureWakerCell`'s cross-thread fulfiller; see
-//! kj-rs/waker.h), so the streams are awaited directly from the bridged future here. The
-//! multi-runtime case is covered by the "onSignal is delivered even when another runtime's
-//! thread consumes the signal" test in tests/async-io-test.c++ — the scenario that, before the
-//! bridge was thread-safe, made workerd ignore SIGTERM whenever the inspector thread's runtime
-//! won the race.
+//! Tokio's signal registry is process-global. Its broadcast may run on another runtime's
+//! thread on Unix, or on the OS-created console-control thread on Windows. The bridged
+//! future's cloned waker owns a kj-rs `ArcWaker`, whose cross-thread fulfiller schedules the
+//! next poll on the owning KJ loop. Signal streams can therefore be awaited directly here.
+//! The test "onSignal is delivered even when another runtime's thread consumes the signal"
+//! in tests/async-io-test.c++ exercises delivery with another runtime parked on a different
+//! thread, as can happen with workerd's inspector runtime.
 //!
 //! On Windows the signums workerd actually passes are mapped to their conventional console
 //! control events: SIGTERM -> `ctrl_shutdown`, SIGINT -> `ctrl_c`. Anything else errors.

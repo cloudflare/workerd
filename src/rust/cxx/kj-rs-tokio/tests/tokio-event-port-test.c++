@@ -477,11 +477,11 @@ KJ_TEST("bridged future woken from a plain std::thread while the loop is parked"
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
 
-  // The wake comes from a thread with neither a KJ loop nor a tokio context, ~20ms after the
-  // loop parks in the port's block_on: FutureWakerCell's cross-thread fulfiller -> this loop's
-  // Executor -> TokioEventPort::wake() -> unpark. A lost hop hangs this wait().
+  // The wake comes from a thread with neither a KJ loop nor a tokio context, about 20ms after
+  // this loop parks in block_on. ArcWaker fulfills its cross-thread promise through the loop's
+  // Executor, which calls TokioEventPort::wake() and unparks the loop.
   std_thread_wake_future().wait(ws);
-  // And again, back to back, so the second wake targets a freshly renewed fulfiller.
+  // Repeat with a new future and its own ArcWaker promise.
   std_thread_wake_future().wait(ws);
 }
 

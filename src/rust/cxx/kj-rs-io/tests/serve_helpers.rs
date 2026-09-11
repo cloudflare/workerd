@@ -132,12 +132,10 @@ pub fn start_serve_drop_consumer(stream: KjOwn<KjAsyncIoStream>) -> Result<Box<S
     }))
 }
 
-/// Like `start_serve_echo`, but the echo consumer runs on a SEPARATE OS thread with its own
-/// plain tokio runtime instead of this thread's KJ-loop runtime. For a pumped (Duplex) stream
-/// this drives the `ServeIo::Duplex` end entirely off the KJ event-loop thread: every read /
-/// write / drop on it wakes the pump (parked on the KJ loop) cross-thread through the kj-rs
-/// `FutureWakerCell`. That is the scenario `ServedKjStream::io`'s docs describe as legal since
-/// the waker bridge became thread-safe; this proves it (and is a TSAN target).
+/// Like `start_serve_echo`, but the echo consumer runs on another OS thread with its own
+/// tokio runtime. For a pumped stream, this drives `ServeIo::Duplex` off the KJ loop thread;
+/// its notifications wake the pump through kj-rs's `ArcWaker` and cross-thread fulfiller.
+/// The pump and its owned KJ stream remain on the KJ loop thread.
 pub fn start_serve_echo_foreign_thread(
     stream: KjOwn<KjAsyncIoStream>,
 ) -> Result<Box<ServeEchoSession>> {

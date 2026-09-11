@@ -175,10 +175,9 @@ KJ_TEST("serve_kj_stream pump: dropping the pump aborts the bridge (drop-abort)"
 }
 
 KJ_TEST("serve_kj_stream pump: the Duplex consumer may be driven from another thread") {
-  // ServedKjStream::io's docs promise the Duplex variant is safe to drive off the KJ event-loop
-  // thread since the waker bridge became thread-safe. Here the echo consumer runs on its own OS
-  // thread and runtime, so every read/write/drop on the Duplex wakes the pump (parked on this
-  // KJ loop) cross-thread through the FutureWakerCell. TSAN target.
+  // ServedKjStream::io permits a Duplex consumer on a different thread from its KJ pump.
+  // Here the echo consumer runs on its own thread and runtime. Notifications from its Duplex
+  // endpoint wake the pump through ArcWaker's cross-thread fulfiller.
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   auto pipe = kj::newTwoWayPipe();

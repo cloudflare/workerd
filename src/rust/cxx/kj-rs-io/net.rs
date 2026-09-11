@@ -371,23 +371,19 @@ impl TokioListener {
 // ======================================================================================
 // Bridge entry points (see lib.rs).
 
-/// Resolves a hostname via blocking `getaddrinfo` on tokio's blocking pool. A task on the loop's
-/// `LocalSet` owns the blocking `JoinHandle`, so the blocking-pool completion wakes tokio's own
-/// scheduler waker and the result comes back over a oneshot, waking the awaiting future
-/// same-thread. The kj-rs waker bridge is thread-safe, so `tokio::net::lookup_host` (whose
-/// `JoinHandle` wake lands on the caller's waker cross-thread) would also be *correct*; this
-/// shape is kept as an optimization — it keeps every bridged-waker wake on the loop thread's
-/// fast path instead of a cross-thread fulfiller hop per lookup. Same blocking `getaddrinfo`
-/// call and NSS/`/etc/hosts` parity as `lookup_host`.
+/// Resolves a hostname via blocking `getaddrinfo` on tokio's blocking pool. A task on the
+/// loop's `LocalSet` owns the blocking `JoinHandle` and forwards its result through a oneshot.
+/// Dropping the awaiting future aborts the forwarding task, and loop teardown cancels it.
+/// The blocking syscall itself cannot be interrupted. Resolution uses the same system
+/// resolver, including NSS and `/etc/hosts`, as tokio's `lookup_host`.
 async fn resolve_host(host: &str, port: u16) -> Result<Vec<SocketAddr>> {
     let host = host.to_owned();
     let (tx, rx) = tokio::sync::oneshot::channel::<std::io::Result<Vec<SocketAddr>>>();
 
-    // The forwarding task's waker is tokio's own scheduler waker (Send + Sync), so the
-    // cross-thread completion from the blocking pool terminates inside tokio's scheduler
-    // (unparking this loop), never at a rust cross-thread waker. The task forwards the result on
-    // the loop thread, waking the awaiting future same-thread. Spawned onto the loop's LocalSet
-    // (kj_rs_tokio::spawn) so it is cancelled with the loop rather than with the runtime.
+    // The blocking-pool completion wakes the LocalSet task through tokio's scheduler.
+    // That task sends the result on the loop thread; the receiver's cloned ArcWaker then
+    // fulfills its promise to schedule the bridged future. LocalSet ownership ties the
+    // forwarding task to the KJ loop's lifetime.
     let task = kj_rs_tokio::spawn(async move {
         let resolved = match tokio::task::spawn_blocking(move || {
             (host.as_str(), port)
