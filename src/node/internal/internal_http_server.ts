@@ -15,6 +15,7 @@
 
 import {
   ERR_METHOD_NOT_IMPLEMENTED,
+  ERR_STREAM_PREMATURE_CLOSE,
   ERR_HTTP_HEADERS_SENT,
   ERR_HTTP_INVALID_STATUS_CODE,
   ERR_INVALID_CHAR,
@@ -378,7 +379,10 @@ let getServerResponseFetchResponse: (
 //    - Set up listeners for future data
 // 3. After headers: Data streams directly without buffering
 //    - New '_dataWritten' events are immediately enqueued to the stream
-// 4. Completion: 'finish' event closes the ReadableStream
+// 4. Completion: 'finish' event closes the ReadableStream; 'close' follows
+// 5. Destruction (destroy(), or the body's cancel): before headers the
+//    Response promise rejects; after, the ReadableStream errors with the
+//    destroy reason (ERR_STREAM_PREMATURE_CLOSE without one); 'close' follows
 // @ts-expect-error TS2720 Trailers related methods/attributes are missing.
 export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
   extends OutgoingMessage
@@ -456,6 +460,12 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
 
     this.on('_dataWritten', handleData);
     this.once('error', reject);
+    // A response destroyed before its headers were sent never yields a
+    // Response: the fetch fails instead of waiting forever. (A no-op once
+    // the headers have resolved the promise.)
+    this.once('close', () => {
+      reject(new ERR_STREAM_PREMATURE_CLOSE());
+    });
 
     this.once(
       '_headersSent',
@@ -483,13 +493,36 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
             },
           })
         );
-
-        this._closed = true;
-        this.emit('close');
       }
     );
 
+    // As in Node, 'close' follows the response's completion ('finish'), or
+    // its destruction (see destroy()).
+    this.once('finish', () => {
+      queueMicrotask(() => {
+        this.#emitClose();
+      });
+    });
+
     this.#fetchResponse = promise;
+  }
+
+  // A closed response counts as destroyed (as in Node): writes after it
+  // fail through their callback only, never as an 'error' event.
+  #emitClose(): void {
+    if (this._closed) return;
+    this.destroyed = true;
+    this._closed = true;
+    this.emit('close');
+  }
+
+  override destroy(err?: unknown, cb?: (err?: unknown) => void): this {
+    if (this.destroyed) return this;
+    super.destroy(err, cb);
+    queueMicrotask(() => {
+      this.#emitClose();
+    });
+    return this;
   }
 
   #toFetchResponse({
@@ -510,10 +543,23 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
         type: 'bytes',
         start: (controller): void => {
           onStreamStart(controller);
+          let settled = false;
           this.once('finish', () => {
+            settled = true;
             controller.close();
           });
-          this.on('error', controller.error.bind(controller));
+          this.on('error', (err: unknown) => {
+            if (settled) return;
+            settled = true;
+            controller.error(err);
+          });
+          // Destroyed before finishing, with or without an error: the body
+          // ends prematurely rather than staying open.
+          this.once('close', () => {
+            if (settled) return;
+            settled = true;
+            controller.error(this.errored ?? new ERR_STREAM_PREMATURE_CLOSE());
+          });
         },
         cancel: (reason: unknown): void => {
           this.destroy(reason);
