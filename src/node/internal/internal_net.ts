@@ -1392,7 +1392,12 @@ function initializeConnection(
       }
 
       const handle = inner.connect(`${host}:${port}`, {
-        allowHalfOpen: socket.allowHalfOpen,
+        // The Duplex owns the half-open policy: with allowHalfOpen false it
+        // ends the writable side itself once the readable has ended (see
+        // onReadableStreamEnd), after flushing whatever was queued. The
+        // connect() socket must not race it by closing the writable half on
+        // EOF as well.
+        allowHalfOpen: true,
         // A Node.js socket is always capable of being upgraded to the TLS socket.
         secureTransport: socket.encrypted ? 'on' : 'starttls',
         // We are not going to pass the high water-mark here. The outer Node.js

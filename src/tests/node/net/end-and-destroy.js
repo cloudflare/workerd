@@ -115,3 +115,48 @@ export const endFlushesQueuedWrites = {
     strictEqual(report, String(100 * 1000 + 7));
   },
 };
+
+// end() with and without data/encoding invokes its callback once the
+// writable side has finished.
+export const endCallbackForms = {
+  async test(ctrl, env) {
+    for (const args of [[], ['foo'], ['foo', 'utf8']]) {
+      const socket = endsImmediately(env);
+      socket.resume();
+      await once(socket, 'connect');
+      await new Promise((resolve) => socket.end(...args, resolve));
+      strictEqual(socket.writableFinished, true);
+      await once(socket, 'close');
+    }
+  },
+};
+
+// Property access and no-op methods on a closed socket do not throw.
+export const closedSocketIsInert = {
+  async test(ctrl, env) {
+    const socket = endsImmediately(env);
+    socket.resume();
+    await once(socket, 'close');
+    socket.setNoDelay();
+    socket.setKeepAlive();
+    socket.pause();
+    socket.resume();
+    socket.address();
+    for (const property of [
+      'bufferSize',
+      'remoteAddress',
+      'remotePort',
+      'remoteFamily',
+      'bytesRead',
+      'bytesWritten',
+    ]) {
+      void socket[property];
+    }
+    const during = endsImmediately(env);
+    during.destroy();
+    void during.remoteAddress;
+    void during.remoteFamily;
+    void during.remotePort;
+    await once(during, 'close');
+  },
+};

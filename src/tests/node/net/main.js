@@ -25,6 +25,8 @@ export {
   defaultDisallowsHalfOpen,
   halfOpenWriteAfterPeerEof,
   halfOpenRequiresExplicitEnd,
+  peerEofEndsBothSides,
+  writeAfterPeerEofIsEpipe,
 } from 'half-close';
 
 export {
@@ -34,6 +36,8 @@ export {
   writeWithoutHandle,
   writeRejectsInvalidChunk,
   endFlushesQueuedWrites,
+  endCallbackForms,
+  closedSocketIsInert,
 } from 'end-and-destroy';
 
 export {
