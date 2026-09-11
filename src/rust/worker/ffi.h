@@ -5,8 +5,9 @@
 #pragma once
 
 #include <workerd/io/worker-interface.h>
-#include <workerd/rust/kj/ffi.h>
-#include <workerd/rust/kj/http.rs.h>
+
+#include <kj-rs-http/ffi.h>
+#include <kj-rs-http/http.rs.h>
 
 #include <kj/compat/http.h>
 

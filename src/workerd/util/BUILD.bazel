@@ -105,7 +105,7 @@ wd_cc_library(
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async-core",
         # TODO(cleanup): Only for abortable.h, factor out
-        "@capnp-cpp//src/kj/compat:kj-http",
+        "//src/workerd/util:kj-http",
     ],
 )
 
@@ -187,7 +187,7 @@ wd_cc_library(
     hdrs = ["uuid.h"],
     implementation_deps = [
         ":entropy",
-        "@capnp-cpp//src/kj/compat:kj-http",
+        "//src/workerd/util:kj-http",
         "@ssl",
     ],
     visibility = ["//visibility:public"],
@@ -292,7 +292,7 @@ wd_cc_library(
     hdrs = ["thread-scopes.h"],
     visibility = ["//visibility:public"],
     deps = [
-        "@capnp-cpp//src/kj/compat:kj-http",
+        "//src/workerd/util:kj-http",
     ],
 )
 
@@ -367,7 +367,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg:exception",
-        "@capnp-cpp//src/kj/compat:kj-http",
+        "//src/workerd/util:kj-http",
     ],
 )
 
@@ -523,6 +523,37 @@ kj_test(
 #     WORKERD_RUST_IO_BACKEND_RUST) defines a tokio-backed kj::setupAsyncIo() plus an inert
 #     kj::UnixEventPort (whose real defs live in the unlinked async-unix.c++). //deps:rust_runtime
 #     supplies the Rust allocator shims.
+# The kj-http "seam", one layer above :setup-async-io: supplies the kj-http implementation
+# symbols appropriately for each I/O backend, so call sites depend on this target and use
+# kj::newHttpClient()/kj::HttpServer unchanged in both configs (no #if at the call site, and
+# kj/compat/http.h itself is untouched).
+#   * default (cxx): kj-http-tokio.c++ compiles to an empty TU; the native implementations come
+#     from the @capnp-cpp kj-http umbrella. Byte-identical to depending on kj-http directly.
+#   * --//:io_backend=rust: only the kj-http TYPES (:kj-http-types -- header table/headers
+#     object model, interface defaults, PausableReadAsyncIoStream) are
+#     linked; the concrete C++ HTTP implementation (:kj-http-impl) is NOT (and is forbidden by
+#     the rust-io-hermeticity gate). The .c++ (gated on WORKERD_RUST_IO_BACKEND_RUST) defines
+#     hyper-backed kj::newHttpClient(table, stream&) / kj::newHttpClient(timer, table, addr&) /
+#     kj::HttpServer instead. Implementation entry points nothing links (the network-client
+#     overload, newWebSocket, newHttpInputStream) are deliberately left undefined: a new call
+#     site fails to link rather than silently serving traffic on a C++ HTTP implementation.
+wd_cc_library(
+    name = "kj-http",
+    srcs = ["kj-http-tokio.c++"],
+    local_defines = rust_io_backend_local_defines(),
+    visibility = ["//visibility:public"],
+    deps = select({
+        "//:io_backend_rust": [
+            "//src/rust/cxx/kj-hyper",
+            # The generated kj-rs-http/http.rs.h header (the rust text-codec entry points the
+            # shim's HttpHeaders/range/method definitions call).
+            "//src/rust/cxx/kj-rs-http:http-bridge",
+            "@capnp-cpp//src/kj/compat:kj-http-types",
+        ],
+        "//conditions:default": ["@capnp-cpp//src/kj/compat:kj-http"],
+    }),
+)
+
 wd_cc_library(
     name = "setup-async-io",
     srcs = ["setup-async-io-tokio.c++"],

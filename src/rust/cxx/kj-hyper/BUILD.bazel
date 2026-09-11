@@ -1,0 +1,118 @@
+# kj-hyper: the hyper-backed HTTP client/server behind the KJ interfaces. Folds on top of the
+# kj-rs-http bridge.
+#
+# The crate is ~99% generic; the only workerd-specific parameterization (~60 LOC) is injected as
+# constructor args/config: jsgify_websocket_errors, the WORKERD_HYPER_IO_STALL_GRACE_MS env name,
+# and MANUAL_COMPRESSION.
+#
+# It is a SIBLING crate to kj-rs-http rather than merged into it: both crates' roots are lib.rs (a
+# merge would collide two crate roots and two #[cxx::bridge] roots), and folding would burden the
+# base "kj" FFI crate -- which every consumer depends on -- with the ~15-crate hyper/rustls
+# dependency set. The Rust crate name is `kj_hyper` and the C++ namespace `workerd::rust::kj_hyper`,
+# which consumer references (server.c++) bind to.
+
+load("@rules_rust//rust:defs.bzl", "rust_library")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
+
+rust_library(
+    name = "kj-hyper",
+    srcs = glob(["*.rs"]),
+    # crate_name is "kj_hyper", referenced by its own bridge (and out-of-crate consumers of
+    # kj_hyper::client / ::translate). The bazel target/dir is kj-hyper for repo-layout consistency.
+    crate_name = "kj_hyper",
+    edition = "2024",
+    link_deps = [
+        ":bridge",
+        ":server-ffi",
+    ],
+    proc_macro_deps = ["@crates_vendor//:async-trait"],
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/kj-rs-http",
+        # take_kj_socket / ServeIo: the native socket handoff for externally-accepted
+        # connections (HyperConnection).
+        "//src/rust/cxx/kj-rs-io",
+        "@crates_vendor//:base64",
+        "@crates_vendor//:bytes",
+        "@crates_vendor//:flate2",
+        "@crates_vendor//:futures",
+        "@crates_vendor//:http",
+        "@crates_vendor//:http-body",
+        "@crates_vendor//:http-body-util",
+        "@crates_vendor//:hyper",
+        "@crates_vendor//:hyper-util",
+        "@crates_vendor//:rand",
+        "@crates_vendor//:rustls",
+        "@crates_vendor//:rustls-native-certs",
+        "@crates_vendor//:rustls-pemfile",
+        "@crates_vendor//:rustls-platform-verifier",
+        "@crates_vendor//:sha1",
+        "@crates_vendor//:tokio",
+        "@crates_vendor//:tokio-rustls",
+        # Connection/accept/pump tasks are spawned onto the KJ thread's per-thread
+        # current_thread runtime (the one-runtime model).
+        "//src/rust/cxx/kj-rs-tokio",
+        "//src/rust/cxx",
+    ],
+)
+
+# The C++ side of ffi.rs's #[cxx::bridge]. Owns ALL of this crate's C++ headers (hyper-http.h,
+# hyper-server-ffi.h, peer-filter.h) so the generated ffi.rs.cc -- which include!()s
+# hyper-server-ffi.h and peer-filter.h -- and downstream consumers see one header set, avoiding a
+# bridge <-> server-ffi include cycle.
+rust_cxx_bridge(
+    name = "bridge",
+    src = "ffi.rs",
+    hdrs = [
+        "hyper-http.h",
+        "hyper-server-ffi.h",
+        "peer-filter.h",
+        "ws-pipe-ffi.h",
+    ],
+    include_prefix = "kj-hyper",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/kj-rs-http:ffi-hdr",
+        # peer-filter.h wraps kj_rs_io::PeerFilter (its C++ header + the Rust lib).
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "@capnp-cpp//src/kj:kj",
+        "@capnp-cpp//src/kj:kj-async-core",
+        # Abstract kj streams (kj/async-io.h: AsyncIoStream / AsyncInputStream); no OS event loop.
+        "@capnp-cpp//src/kj:kj-async-io",
+        "@capnp-cpp//src/kj/compat:kj-http-types",
+        "//src/rust/cxx:core",
+    ],
+)
+
+# Out-of-line C++ impls: the hyper-server-ffi wrappers (kj::AsyncInputStream / WebSocket /
+# ConnectResponse over the Rust bridge types) and the HyperPeerFilter restrictPeers wrapper.
+wd_cc_library(
+    name = "server-ffi",
+    srcs = [
+        "hyper-server-ffi.c++",
+        "peer-filter.c++",
+    ],
+    include_prefix = "kj-hyper",
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    strip_include_prefix = "/src/rust/cxx/kj-hyper",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":bridge",
+        "//src/rust/cxx/kj-rs-http:ffi",
+        # kj_rs_io::PeerFilter, wrapped by HyperPeerFilter (peer-filter.{h,c++}).
+        "//src/rust/cxx/kj-rs-io",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj/compat:kj-http-types",
+    ],
+)

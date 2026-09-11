@@ -7,7 +7,7 @@ wd_rust_crate(
     cxx_bridge_deps = {
         "ffi.rs": [
             "@workerd//src/workerd/io:worker-interface",
-            "@workerd//src/rust/kj",
+            "//src/rust/cxx/kj-rs-http",
         ],
         "error.rs": [
             ":ffi.rs@cxx",
@@ -33,7 +33,7 @@ wd_rust_crate(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "@workerd//src/rust/kj",
+        "//src/rust/cxx/kj-rs-http",
         "@workerd//src/workerd/io:outcome_capnp_rust",
     ],
 )

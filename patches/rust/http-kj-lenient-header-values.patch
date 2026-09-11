@@ -1,0 +1,17 @@
+--- a/src/header/value.rs
++++ b/src/header/value.rs
+@@ -561,7 +561,13 @@
+ 
+ #[inline]
+ fn is_valid(b: u8) -> bool {
+-    b >= 32 && b != 127 || b == b'\t'
++    // workerd: relaxed to match KJ's HttpHeaders::isValidHeaderValue(), which (following the
++    // browsers' lead -- see https://github.com/httpwg/http11bis/issues/19) forbids only NUL,
++    // CR, and LF in header values. The other C0 control bytes and DEL are opaque octets that
++    // KJ both emits and accepts, and workerd's Rust HTTP path (kj-hyper) must round-trip them
++    // byte-for-byte for parity with kj-http. CR/LF remain forbidden, so header/request
++    // splitting stays impossible.
++    b != 0 && b != b'\r' && b != b'\n'
+ }
+ 
+ impl fmt::Debug for InvalidHeaderValue {

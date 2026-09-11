@@ -1,0 +1,107 @@
+# C++ integration tests for the hyper client/server behind the KJ interfaces. Migrated from
+# workerd's src/rust/kj-hyper/tests. They drive the tokio-backed KJ event loop
+# (kj-rs-tokio + kj-rs-io via setupTokioAsyncIo): hyper's tasks run on the KJ thread's per-thread
+# current_thread runtime, matching workerd's --experimental-rust-runtime one-runtime model.
+# (workerd used its kj_test macro + cxx-integration's global-runtime init(); here we use plain
+# cc_test + kj-test, and the global multi-thread runtime -- unused by the one-runtime model -- is
+# not initialized, exactly as the kj-rs-io tests run.)
+
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+
+# Shared scaffolding for the three hyper C++ integration test suites: the tokio-backed loop
+# fixture (TokioTestIo), header-table construction (HeaderIds), header/frame helpers, the
+# keep-alive CountingReceiver, and the WebSocket echo service body. Only genuinely-identical
+# setup lives here; the per-suite TestHttpService bodies and fixtures stay inline.
+wd_cc_library(
+    name = "test-harness",
+    testonly = True,
+    hdrs = ["test-harness.h"],
+    include_prefix = "kj-hyper/tests",
+    strip_include_prefix = "/src/rust/cxx/kj-hyper/tests",
+    deps = [
+        "//src/rust/cxx/kj-rs-io",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+cc_test(
+    name = "hyper-client-test",
+    size = "large",
+    srcs = ["hyper-client-test.c++"],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":test-harness",
+        "//src/rust/cxx/kj-hyper",
+        "//src/rust/cxx/kj-hyper:server-ffi",
+        "//src/rust/cxx/kj-rs-http",
+        "//src/rust/cxx/kj-rs-http:ffi",
+        "//src/rust/cxx/kj-rs-io",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+cc_test(
+    name = "hyper-server-test",
+    size = "large",
+    srcs = ["hyper-server-test.c++"],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":test-harness",
+        "//src/rust/cxx/kj-hyper",
+        "//src/rust/cxx/kj-hyper:server-ffi",
+        "//src/rust/cxx/kj-rs-http",
+        "//src/rust/cxx/kj-rs-http:ffi",
+        "//src/rust/cxx/kj-rs-io",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+cc_test(
+    name = "hyper-tls-test",
+    size = "large",
+    srcs = ["hyper-tls-test.c++"],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":test-harness",
+        "//src/rust/cxx/kj-hyper",
+        "//src/rust/cxx/kj-hyper:server-ffi",
+        "//src/rust/cxx/kj-rs-http",
+        "//src/rust/cxx/kj-rs-http:ffi",
+        "//src/rust/cxx/kj-rs-io",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/rust/cxx/third-party:runtime",
+        "@capnp-cpp//src/kj:kj-test",
+        "@capnp-cpp//src/kj/compat:kj-http",
+        "@capnp-cpp//src/kj/compat:kj-tls",
+    ],
+)

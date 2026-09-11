@@ -131,16 +131,15 @@ bool_flag(
 # =============================================================================
 # I/O backend selection: a build/compile/link-time hermeticity guarantee.
 #
-#   --//:io_backend=rust  (default) -- the rust I/O layer: the process event loop is tokio
-#                         (kj-rs-tokio) and every socket/stream is tokio-backed (kj-rs-io); the
-#                         C++ layers above the streams (kj-http, kj-tls, capnp-rpc) are unchanged
-#                         and run over those tokio streams. In this config the forbidden concrete
-#                         C++ OS-I/O target must be ABSENT from the link, enforced by the
-#                         build-graph aspect in //build:rust_io_backend.bzl (whose forbidden
-#                         set grows as later migration stages move more of the stack to rust).
-#   --//:io_backend=cxx   -- workerd's I/O is the concrete C++ stack end to end, including the
-#                         kj OS event loop and sockets. Byte-identical to the pre-migration
-#                         build.
+#   --//:io_backend=rust  (default) -- the rust I/O + HTTP/TLS layer: hyper (HTTP), rustls
+#                         (TLS), tokio (event loop + sockets). capnp-rpc remains the unchanged
+#                         C++ implementation, running over tokio-backed streams. In this config
+#                         the forbidden concrete C++ I/O targets must be ABSENT from the link,
+#                         enforced by the build-graph aspect in //build:rust_io_backend.bzl
+#                         (whose forbidden set grows as later stages move more of the stack).
+#   --//:io_backend=cxx   -- workerd's I/O is the concrete C++ stack end to end: kj-http,
+#                         kj-tls, and the kj OS event loop. Byte-identical to the
+#                         pre-migration build.
 #
 # Code that must differ per backend keys off the WORKERD_RUST_IO_BACKEND define (see
 # //src/workerd/util:setup-async-io) or off the config_settings below in a select().

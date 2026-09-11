@@ -25,6 +25,10 @@
 #include <kj/async.h>
 #include <kj/cidr.h>
 #include <kj/compat/http.h>
+
+#if WORKERD_RUST_IO_BACKEND_RUST
+#include <kj-hyper/hyper-http.h>
+#endif
 #include <kj/debug.h>
 #include <kj/encoding.h>
 #include <kj/exception.h>
@@ -95,7 +99,10 @@ struct DockerBinaryResponse {
 struct DockerStreamedResponse {
   kj::uint statusCode;
   kj::String statusText;
-  kj::Own<kj::AsyncIoStream> connection;
+  // Present iff statusCode == 101: the hijacked raw byte stream.
+  kj::Maybe<kj::Own<kj::AsyncIoStream>> connection;
+  // Present otherwise: the response body (error details).
+  kj::Maybe<kj::Own<kj::AsyncInputStream>> errorBody;
 };
 
 // Validates an absolute path for snapshot use and returns the parsed component path.
@@ -661,6 +668,7 @@ kj::Promise<void> removeContainer(
   }
 }
 
+#if !WORKERD_RUST_IO_BACKEND_RUST
 kj::Maybe<size_t> tryFindHttpHeaderEnd(kj::ArrayPtr<const kj::byte> bytes) {
   for (auto i: kj::zeroTo(bytes.size())) {
     if (i + 4 > bytes.size()) {
@@ -712,10 +720,18 @@ kj::Promise<DockerStreamedResponse> readDockerStreamedResponse(
         prefixedConnection =
             kj::heap<BufferedAsyncIoStream>(kj::mv(prefixedConnection), kj::mv(prefetchedBytes));
       }
+      if (statusCode == 101) {
+        co_return DockerStreamedResponse{
+          .statusCode = statusCode,
+          .statusText = kj::mv(statusText),
+          .connection = kj::mv(prefixedConnection),
+        };
+      }
+      // Not hijacked: what follows on the wire is the response body (error details).
       co_return DockerStreamedResponse{
         .statusCode = statusCode,
         .statusText = kj::mv(statusText),
-        .connection = kj::mv(prefixedConnection),
+        .errorBody = kj::Own<kj::AsyncInputStream>(kj::mv(prefixedConnection)),
       };
     }
 
@@ -726,6 +742,7 @@ kj::Promise<DockerStreamedResponse> readDockerStreamedResponse(
     KJ_REQUIRE(buffer.size() <= 65536, "Docker streamed response headers exceeded 64KiB");
   }
 }
+#endif  // !WORKERD_RUST_IO_BACKEND_RUST
 
 kj::Promise<DockerStreamedResponse> dockerApiStreamedRequest(kj::Network& network,
     kj::String dockerPath,
@@ -736,6 +753,22 @@ kj::Promise<DockerStreamedResponse> dockerApiStreamedRequest(kj::Network& networ
   auto address = co_await network.parseAddress(dockerPath);
   auto connection = co_await address->connect();
 
+#if WORKERD_RUST_IO_BACKEND_RUST
+  // The hyper stream client's native upgrade request -- the one HTTP shape kj::HttpClient
+  // cannot express (a non-WebSocket 101 taking over the connection), which is why the default
+  // build hand-serializes below (and why this is the container client's one per-config arm):
+  // 101 hands back the hijacked raw stream, anything else the response body.
+  kj::HttpHeaderTable responseHeaderTable;
+  auto service = rust::kj_hyper::newHyperStreamHttpService(responseHeaderTable, kj::mv(connection));
+  auto response = co_await service->upgradeRequest(
+      method, endpoint, headers, body.orDefault(kj::ArrayPtr<const kj::byte>()));
+  co_return DockerStreamedResponse{
+    .statusCode = response.statusCode,
+    .statusText = kj::mv(response.statusText),
+    .connection = kj::mv(response.connection),
+    .errorBody = kj::mv(response.body),
+  };
+#else
   auto requestHeaders = headers.serializeRequest(method, endpoint);
   KJ_IF_SOME(requestBody, body) {
     kj::ArrayPtr<const kj::byte> pieces[] = {requestHeaders.asBytes(), requestBody};
@@ -745,6 +778,7 @@ kj::Promise<DockerStreamedResponse> dockerApiStreamedRequest(kj::Network& networ
   }
 
   co_return co_await readDockerStreamedResponse(kj::mv(connection));
+#endif
 }
 
 // Docker multiplexed stream frames: 1 byte stream ID + 3 reserved + 4 bytes big-endian length.
@@ -1980,13 +2014,14 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> ContainerClient::startExec(
   auto response = co_await dockerApiStreamedRequest(network, kj::str(dockerPath),
       kj::HttpMethod::POST, kj::str("/exec/", execId, "/start"), headers, encodedBodyBytes);
   if (response.statusCode != 101) {
-    auto errorBodyBytes = co_await response.connection->readAllBytes(MAX_JSON_RESPONSE_SIZE);
+    auto errorBodyBytes =
+        co_await KJ_ASSERT_NONNULL(response.errorBody)->readAllBytes(MAX_JSON_RESPONSE_SIZE);
     auto errorBody = kj::str(errorBodyBytes.asChars());
     JSG_FAIL_REQUIRE(Error, "Starting Docker exec failed with [", response.statusCode, "] ",
         response.statusText, " ", errorBody);
   }
 
-  co_return kj::mv(response.connection);
+  co_return KJ_ASSERT_NONNULL(kj::mv(response.connection));
 }
 
 kj::Promise<void> ContainerClient::resizeExec(kj::StringPtr execId, uint16_t cols, uint16_t rows) {
