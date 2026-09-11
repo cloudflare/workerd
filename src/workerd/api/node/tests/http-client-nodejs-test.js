@@ -6,18 +6,15 @@ import http from 'node:http';
 import { strictEqual, ok, throws, deepStrictEqual } from 'node:assert';
 import { once } from 'node:events';
 import { get } from 'node:http';
-import { gunzipSync } from 'node:zlib';
 
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
     const keys = [
       'SIDECAR_HOSTNAME',
       'PONG_SERVER_PORT',
-      'ASD_SERVER_PORT',
       'DEFAULT_HEADERS_EXIST_PORT',
       'REQUEST_ARGUMENTS_PORT',
       'HELLO_WORLD_SERVER_PORT',
-      'GZIP_SERVER_PORT',
       'HOST_ECHO_SERVER_PORT',
     ];
     for (const key of keys) {
@@ -42,48 +39,6 @@ export const checkPortsSetCorrectly = {
 //     await promise;
 //   },
 // };
-
-// Test is taken from test/parallel/test-http-client-res-destroyed.js
-export const testHttpClientResDestroyed = {
-  async test(_ctrl, env) {
-    {
-      const { promise, resolve } = Promise.withResolvers();
-      http.get(
-        {
-          hostname: env.SIDECAR_HOSTNAME,
-          port: env.ASD_SERVER_PORT,
-        },
-        (res) => {
-          strictEqual(res.destroyed, false);
-          res.destroy();
-          strictEqual(res.destroyed, true);
-          res.on('close', resolve);
-        }
-      );
-      await promise;
-    }
-
-    {
-      const { promise, resolve } = Promise.withResolvers();
-      http.get(
-        {
-          hostname: env.SIDECAR_HOSTNAME,
-          port: env.ASD_SERVER_PORT,
-        },
-        (res) => {
-          strictEqual(res.destroyed, false);
-          res
-            .on('close', () => {
-              strictEqual(res.destroyed, true);
-              resolve();
-            })
-            .resume();
-        }
-      );
-      await promise;
-    }
-  },
-};
 
 // TODO(soon): Support this test case, if possible with the current implementation
 // Test is taken from test/parallel/test-http-client-response-timeout.js
@@ -182,31 +137,6 @@ export const testHttpClientDefaults = {
   },
 };
 
-// Test is taken from test/parallel/test-http-client-encoding.js
-export const testHttpClientEncoding = {
-  async test(_ctrl, env) {
-    const { promise, resolve } = Promise.withResolvers();
-    http
-      .request(
-        {
-          hostname: env.SIDECAR_HOSTNAME,
-          port: env.PONG_SERVER_PORT,
-          encoding: 'utf8',
-        },
-        (res) => {
-          let data = '';
-          res.on('data', (chunk) => (data += chunk));
-          res.on('end', () => {
-            strictEqual(data, 'pong');
-            resolve();
-          });
-        }
-      )
-      .end();
-    await promise;
-  },
-};
-
 // Test is taken from test/parallel/test-http-client-headers-host-array.js
 export const testHttpClientHeadersHostArray = {
   async test() {
@@ -227,31 +157,6 @@ export const testHttpClientHeadersHostArray = {
       },
       'http request should throw when passing array as header host'
     );
-  },
-};
-
-// Test is taken from test/parallel/test-http-client-input-function.js
-export const testHttpClientInputFunction = {
-  async test(_ctrl, env) {
-    const { promise, resolve } = Promise.withResolvers();
-    const req = new http.ClientRequest(
-      { hostname: env.SIDECAR_HOSTNAME, port: env.PONG_SERVER_PORT },
-      (response) => {
-        let body = '';
-        response.setEncoding('utf8');
-        response.on('data', (chunk) => {
-          body += chunk;
-        });
-
-        response.on('end', () => {
-          strictEqual(body, 'pong');
-          resolve();
-        });
-      }
-    );
-
-    req.end();
-    await promise;
   },
 };
 
@@ -420,55 +325,6 @@ export const testGetExport = {
   },
 };
 
-export const testPostRequestBodyEcho = {
-  async test(_ctrl, env) {
-    const { promise, resolve, reject } = Promise.withResolvers();
-    const testData =
-      'Hello, this is test data for POST request with body echoing!';
-
-    const req = http.request(
-      {
-        hostname: env.SIDECAR_HOSTNAME,
-        port: env.HELLO_WORLD_SERVER_PORT,
-        path: '/echo',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain',
-          'Content-Length': Buffer.byteLength(testData),
-        },
-      },
-      (res) => {
-        let responseBody = '';
-        res.on('data', (chunk) => {
-          responseBody += chunk.toString();
-        });
-        res.on('end', () => {
-          try {
-            strictEqual(res.statusCode, 200);
-            strictEqual(
-              responseBody,
-              testData,
-              `Response body should match the request body. Expected: ${JSON.stringify(testData)}, Got: ${JSON.stringify(responseBody)}`
-            );
-            resolve();
-          } catch (err) {
-            reject(err);
-          }
-        });
-      }
-    );
-
-    req.on('error', (err) => {
-      reject(new Error(`Request failed: ${err.message}`));
-    });
-
-    req.write(testData);
-    req.end();
-
-    await promise;
-  },
-};
-
 export const testHttpGetTestSearchParams = {
   async test(_ctrl, env) {
     const { promise, resolve } = Promise.withResolvers();
@@ -483,81 +339,6 @@ export const testHttpGetTestSearchParams = {
         strictEqual(res.statusCode, 200);
         strictEqual(res.headers.url, '/search-path?hello=world');
         resolve();
-      }
-    );
-    await promise;
-  },
-};
-
-// Regression test for https://github.com/cloudflare/workerd/issues/5148
-export const testBodyDataDuplicationRegression = {
-  async test(_ctrl, env) {
-    const { promise, resolve, reject } = Promise.withResolvers();
-
-    http
-      .request(
-        {
-          hostname: env.SIDECAR_HOSTNAME,
-          port: env.HELLO_WORLD_SERVER_PORT,
-          path: '/echo',
-          method: 'post',
-          headers: {
-            'content-type': 'application/json;charset=utf-8',
-          },
-        },
-        (response) => {
-          strictEqual(response.statusCode, 200);
-          let expected = '';
-          response.on('data', (chunk) => (expected += chunk));
-          response.on('end', () => {
-            strictEqual(
-              expected,
-              '{"email":"posting-wrangler@email.mail","from":"wrangler"}'
-            );
-            resolve(response);
-          });
-        }
-      )
-      .on('error', reject)
-      .end(
-        Buffer.from(
-          JSON.stringify({
-            email: 'posting-wrangler@email.mail',
-            from: 'wrangler',
-          })
-        )
-      );
-
-    await promise;
-  },
-};
-
-// Verify that the http module does not automatically decompress response bodies.
-// Node.js http passes raw bytes through, leaving Content-Encoding handling to the caller.
-export const testHttpClientGzipResponseNotAutoDecompressed = {
-  async test(_ctrl, env) {
-    const { promise, resolve, reject } = Promise.withResolvers();
-    http.get(
-      {
-        hostname: env.SIDECAR_HOSTNAME,
-        port: env.GZIP_SERVER_PORT,
-      },
-      (res) => {
-        strictEqual(res.headers['content-encoding'], 'gzip');
-        const chunks = [];
-        res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () => {
-          try {
-            const raw = Buffer.concat(chunks);
-            // The body should still be compressed — manually gunzipping
-            // should recover the original text.
-            const decompressed = gunzipSync(raw);
-            strictEqual(decompressed.toString(), 'hello from gzip server');
-            resolve();
-          } catch (err) {
-            reject(err);
-          }
-        });
       }
     );
     await promise;

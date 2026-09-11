@@ -1,0 +1,45 @@
+using Workerd = import "/workerd/workerd.capnp";
+using HttpClientModules = import "http-client-modules.capnp";
+
+# Runs the node:http client suite against the C++ streams implementation.
+# The sidecar (http-servers.js) is the server the client talks to; its port
+# arrives through a fromEnvironment binding. http-client-ts.wd-test runs the
+# identical modules against the TypeScript implementation.
+#
+# No compatibilityDate is set: the wd_test variants supply the date axis.
+# The semantics the tests depend on are pinned by flag:
+# - nodejs_compat: node:http (date-enabled 2026-08-04). nodejs_compat_v2 is
+#   deliberately NOT pinned: the http layer must not depend on its globals.
+# - enable_nodejs_http_modules: the client classes (date-implied 2025-08-15).
+# - nodejs_zlib: node:zlib, which the tests use to check that a compressed
+#   response body passes through untouched (date-implied 2024-09-23).
+# - streams_enable_constructors, transformstream_enable_standard_constructor:
+#   the interop tests build web streams to pipe responses into and through.
+# The TypeScript implementation hard-codes these modern behaviors, so the
+# flags also keep the two cells comparable at the oldest compat date.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "node-http-client-cpp",
+      worker = (
+        modules = HttpClientModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_http_modules",
+          "nodejs_zlib",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+        ],
+        bindings = [
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+          (name = "HTTP_SERVER_PORT", fromEnvironment = "HTTP_SERVER_PORT"),
+        ],
+      )
+    ),
+    ( name = "internet",
+      network = (
+        allow = ["private"],
+      )
+    ),
+  ],
+);

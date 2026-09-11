@@ -3,12 +3,11 @@
 Test suites for the parts of the Node.js compatibility layer (`src/node/`)
 that sit on top of the Web Streams implementation: the `node:stream`
 web-interop adapters, `node:net` sockets over `connect()` stream halves,
-and the `node:http` server over `fetch()` bodies. One subdirectory per
-area. Every test
-here runs against **both** streams implementations — the legacy C++ one
-(`src/workerd/api/streams/`) and the TypeScript one
-(`src/per_isolate/webstreams/`) — to prove the node layer behaves
-identically on either.
+and the `node:http` client and server over `fetch()` bodies. One
+subdirectory per area. Every test here runs against **both** streams
+implementations — the legacy C++ one (`src/workerd/api/streams/`) and the
+TypeScript one (`src/per_isolate/webstreams/`) — to prove the node layer
+behaves identically on either.
 
 The suite rules are those of `src/tests/streams/AGENTS.md`, applied
 verbatim: one file per behavior; `main.js` with explicit named re-exports;
@@ -47,6 +46,7 @@ tests plus the divergence ledger. Read that file first.
 | `stream/` | `Readable/Writable/Duplex.toWeb/fromWeb`, `pipeline`, `stream/web`, `stream/consumers` | none |
 | `net/` | `net.Socket` over the `connect()` socket's BYOB reader and writer | node sidecar TCP servers |
 | `http-server/` | `http.Server`: the Request body pump and the `ServerResponse` body stream | the worker itself (service binding) |
+| `http-client/` | `http.request()`: the Blob request body, the Response body pump, the exchange's teardown | node sidecar HTTP server |
 
 ## Running
 

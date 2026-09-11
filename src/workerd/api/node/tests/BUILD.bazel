@@ -581,11 +581,9 @@ wd_test(
     sidecar = "http-client-nodejs-server",
     sidecar_port_bindings = [
         "PONG_SERVER_PORT",
-        "ASD_SERVER_PORT",
         "DEFAULT_HEADERS_EXIST_PORT",
         "REQUEST_ARGUMENTS_PORT",
         "HELLO_WORLD_SERVER_PORT",
-        "GZIP_SERVER_PORT",
         "HOST_ECHO_SERVER_PORT",
     ],
 )
