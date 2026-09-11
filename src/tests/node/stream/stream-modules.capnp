@@ -16,5 +16,6 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "consumers", esModule = embed "consumers.js"),
   (name = "readable-from", esModule = embed "readable-from.js"),
   (name = "pipeline-web", esModule = embed "pipeline-web.js"),
+  (name = "finished-and-abort", esModule = embed "finished-and-abort.js"),
   (name = "duplex-from", esModule = embed "duplex-from.js"),
 ];

@@ -26,6 +26,7 @@
 import {
   AbortError,
   ERR_INVALID_ARG_TYPE,
+  ERR_WEB_STREAM_INTEROP_UNSUPPORTED,
 } from 'node-internal:internal_errors';
 
 import {
@@ -77,19 +78,27 @@ export function addAbortSignalNoValidate<T extends StreamType>(
   if (signal == null || typeof signal !== 'object' || !('aborted' in signal)) {
     return stream;
   }
-  const onAbort = isNodeStream(stream)
-    ? (): void => {
-        stream.destroy(new AbortError(undefined, { cause: signal.reason }));
+  let onAbort: () => void;
+  if (isNodeStream(stream)) {
+    onAbort = (): void => {
+      stream.destroy(new AbortError(undefined, { cause: signal.reason }));
+    };
+  } else {
+    const errorStream = (
+      stream as ReadableStream & {
+        [kControllerErrorFunction]?: (err: Error) => void;
       }
-    : (): void => {
-        (
-          stream as ReadableStream & {
-            [kControllerErrorFunction]: (err: Error) => void;
-          }
-        )[kControllerErrorFunction](
-          new AbortError(undefined, { cause: signal.reason })
-        );
-      };
+    )[kControllerErrorFunction];
+    if (typeof errorStream !== 'function') {
+      throw new ERR_WEB_STREAM_INTEROP_UNSUPPORTED('addAbortSignal()');
+    }
+    onAbort = (): void => {
+      errorStream.call(
+        stream,
+        new AbortError(undefined, { cause: signal.reason })
+      );
+    };
+  }
   if (signal.aborted) {
     onAbort();
   } else {

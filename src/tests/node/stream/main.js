@@ -154,4 +154,18 @@ export {
   pipelineWebSourceErrorUnderNodeBackpressure,
 } from 'pipeline-web';
 
+export {
+  interopHooksPresence,
+  finishedObservesReadableClose,
+  finishedObservesReadableError,
+  finishedObservesWritable,
+  finishedOnSettledStream,
+  finishedWithSignal,
+  promisesFinishedWebStreams,
+  addAbortSignalErrorsReadable,
+  addAbortSignalErrorsWritable,
+  addAbortSignalAlreadyAborted,
+  addAbortSignalOnResponseBody,
+} from 'finished-and-abort';
+
 export { duplexFromWebStreamHalves } from 'duplex-from';

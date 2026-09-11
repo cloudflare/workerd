@@ -250,6 +250,7 @@ const StringPrototypeStartsWith = uncurryThis(String.prototype.startsWith);
 const SymbolIterator = Symbol.iterator;
 const SymbolAsyncIterator = Symbol.asyncIterator;
 const SymbolToStringTag = Symbol.toStringTag;
+const SymbolFor = Symbol.for;
 // Only the sync disposer is captured: JSG's guidance (jsg.h, JSG_DISPOSE) is to
 // implement Symbol.dispose and avoid defining Symbol.asyncDispose alongside it,
 // and no bootstrap class defines the async form.
@@ -816,6 +817,7 @@ module.exports = ObjectFreeze({
   // Symbol
   SymbolAsyncIterator,
   SymbolDispose,
+  SymbolFor,
   SymbolIterator,
   SymbolToStringTag,
 
