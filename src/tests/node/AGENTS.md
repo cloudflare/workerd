@@ -40,7 +40,7 @@ tests plus the divergence ledger. Read that file first.
 
 | Directory | Subject | Peer |
 | --- | --- | --- |
-| `stream/` | `Readable/Writable/Duplex.toWeb/fromWeb`, `stream/web`, `stream/consumers` | none |
+| `stream/` | `Readable/Writable/Duplex.toWeb/fromWeb`, `pipeline`, `stream/web`, `stream/consumers` | none |
 
 ## Running
 
