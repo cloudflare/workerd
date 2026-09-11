@@ -8,7 +8,9 @@
 // _destroy() aborts (with an error) or closes (without one).
 
 import { Writable } from 'node:stream';
-import { strictEqual } from 'node:assert';
+import { Buffer } from 'node:buffer';
+import { strictEqual, deepStrictEqual, throws } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -201,5 +203,212 @@ export const fromWebBatchedWriteRejectionFailsCallbacks = {
       strictEqual(errors[0], boom);
       strictEqual(w.destroyed, true);
     });
+  },
+};
+
+// Anything that is not a WritableStream (by duck type: getWriter and abort
+// functions, and not a node stream) is rejected with ERR_INVALID_ARG_TYPE.
+export const fromWebRejectsNonWritableStream = {
+  test() {
+    for (const input of [{}, new ReadableStream(), new Writable(), null]) {
+      throws(() => Writable.fromWeb(input), {
+        name: 'TypeError',
+        code: 'ERR_INVALID_ARG_TYPE',
+        message:
+          /"writableStream" argument must be an instance of WritableStream/,
+      });
+    }
+  },
+};
+
+// Options are validated before the writer is acquired, so a rejected call
+// leaves the stream unlocked.
+export const writableFromWebValidatesOptionsBeforeLocking = {
+  test() {
+    const ws = new WritableStream();
+    throws(() => Writable.fromWeb(ws, 5), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      message: /"options" argument must be of type object/,
+    });
+    throws(() => Writable.fromWeb(ws, { objectMode: 1 }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      message: /"options\.objectMode" property must be of type boolean/,
+    });
+    throws(() => Writable.fromWeb(ws, { decodeStrings: 'y' }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      message: /"options\.decodeStrings" property must be of type boolean/,
+    });
+    strictEqual(ws.locked, false);
+  },
+};
+
+// The adapter takes a writer at construction and keeps it: the web stream is
+// locked for as long as the Writable lives, and an already locked stream
+// cannot be adapted.
+export const writableFromWebLocksTheStream = {
+  test() {
+    const ws = new WritableStream();
+    Writable.fromWeb(ws);
+    strictEqual(ws.locked, true);
+    const lockedMessage = usingTsImpl
+      ? 'Cannot get a writer for a stream that is locked'
+      : 'This WritableStream is currently locked to a writer.';
+    throws(() => ws.getWriter(), { name: 'TypeError', message: lockedMessage });
+    const locked = new WritableStream();
+    locked.getWriter();
+    throws(() => Writable.fromWeb(locked), {
+      name: 'TypeError',
+      message: lockedMessage,
+    });
+  },
+};
+
+// Chunks reach the web sink as the node Writable hands them to _write():
+// strings decoded to Buffers (per the encoding argument), a Buffer by
+// identity, a Uint8Array as a Buffer over the same memory.
+export const fromWebChunksReachSinkAsNodeChunks = {
+  async test() {
+    const seen = [];
+    const w = Writable.fromWeb(
+      new WritableStream({
+        write(chunk) {
+          seen.push(chunk);
+        },
+      })
+    );
+    const buffer = Buffer.from('buf');
+    const u8 = new Uint8Array([1, 2, 3]);
+    for (const [chunk, encoding] of [
+      ['héllo'],
+      ['68656c6c6f', 'hex'],
+      [buffer],
+      [u8],
+    ]) {
+      await new Promise((resolve) => w.write(chunk, encoding, resolve));
+    }
+    strictEqual(seen.length, 4);
+    strictEqual(Buffer.isBuffer(seen[0]), true);
+    strictEqual(seen[0].toString(), 'héllo');
+    strictEqual(seen[1].toString(), 'hello');
+    strictEqual(seen[2], buffer);
+    strictEqual(Buffer.isBuffer(seen[3]), true);
+    strictEqual(seen[3] === u8, false);
+    strictEqual(seen[3].buffer, u8.buffer);
+  },
+};
+
+// decodeStrings: false hands strings to the sink untouched; objectMode
+// passes any value by identity.
+export const fromWebDecodeStringsAndObjectMode = {
+  async test() {
+    const strings = [];
+    const w = Writable.fromWeb(
+      new WritableStream({
+        write(chunk) {
+          strings.push(chunk);
+        },
+      }),
+      { decodeStrings: false }
+    );
+    await new Promise((resolve) => w.write('raw', resolve));
+    deepStrictEqual(strings, ['raw']);
+
+    const objects = [];
+    const object = { id: 1 };
+    const wo = Writable.fromWeb(
+      new WritableStream({
+        write(chunk) {
+          objects.push(chunk);
+        },
+      }),
+      { objectMode: true }
+    );
+    await new Promise((resolve) => wo.write(object, resolve));
+    await new Promise((resolve) => wo.write(42, resolve));
+    strictEqual(objects[0], object);
+    strictEqual(objects[1], 42);
+  },
+};
+
+// end() closes the web stream: the sink's close() runs before the node
+// stream finishes.
+export const fromWebEndClosesWebStream = {
+  async test() {
+    const events = [];
+    const w = Writable.fromWeb(
+      new WritableStream({
+        close() {
+          events.push('sink close');
+        },
+      })
+    );
+    w.on('finish', () => events.push('finish'));
+    await new Promise((resolve) => w.end(resolve));
+    deepStrictEqual(events, ['sink close', 'finish']);
+    strictEqual(w.writableFinished, true);
+  },
+};
+
+// destroy(error) aborts the web stream with the error; destroy() without an
+// error closes it instead.
+export const fromWebDestroyAbortsOrClosesWebStream = {
+  async test() {
+    const record = () => {
+      const events = [];
+      const ws = new WritableStream({
+        close() {
+          events.push('close');
+        },
+        abort(reason) {
+          events.push(`abort:${reason?.message}`);
+        },
+      });
+      return { ws, events };
+    };
+    const withError = record();
+    const w1 = Writable.fromWeb(withError.ws);
+    w1.on('error', () => {});
+    const closed1 = once(w1, 'close');
+    w1.destroy(new Error('gone'));
+    await closed1;
+    deepStrictEqual(withError.events, ['abort:gone']);
+
+    const withoutError = record();
+    const w2 = Writable.fromWeb(withoutError.ws);
+    const closed2 = once(w2, 'close');
+    w2.destroy();
+    await closed2;
+    deepStrictEqual(withoutError.events, ['close']);
+  },
+};
+
+// Each node write completes only when the web sink has accepted the chunk:
+// a slow sink holds the node callbacks, and the sink sees the chunks in
+// order.
+export const fromWebWritesCompleteWhenSinkAccepts = {
+  async test() {
+    const pending = [];
+    const seen = [];
+    const w = Writable.fromWeb(
+      new WritableStream({
+        write(chunk) {
+          seen.push(dec.decode(chunk));
+          return new Promise((resolve) => pending.push(resolve));
+        },
+      })
+    );
+    const done = [];
+    w.write('a', () => done.push('a'));
+    w.write('b', () => done.push('b'));
+    await scheduler.wait(5);
+    deepStrictEqual(seen, ['a']);
+    deepStrictEqual(done, []);
+    pending.shift()();
+    await scheduler.wait(5);
+    deepStrictEqual(done, ['a']);
+    deepStrictEqual(seen, ['a', 'b']);
+    pending.shift()();
+    await scheduler.wait(5);
+    deepStrictEqual(done, ['a', 'b']);
   },
 };

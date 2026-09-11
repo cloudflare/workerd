@@ -13,12 +13,36 @@ export {
   toWebCancelDestroysSource,
   toWebCancelWithoutReasonDestroysWithAbortError,
   toWebPipeToFailureDestroysSource,
+  toWebRejectsNonReadable,
+  toWebCopiesByteChunks,
+  toWebObjectModePassesChunksByIdentity,
+  toWebObjectModeBackpressureCountsChunks,
+  toWebByteModeBackpressureCountsBytes,
+  toWebExplicitStrategyOverridesDerived,
+  toWebEndClosesStream,
+  toWebSourceErrorRejectsRead,
+  toWebSourceDestroyBecomesAbortError,
+  toWebUnreadableSourceYieldsCancelledStream,
 } from 'readable-to-web';
 
 export {
   fromWebDeliversDataEvents,
   fromWebErroredAtStartRejectsAsyncIteration,
   fromWebPullErrorRejectsAsyncIteration,
+  fromWebRejectsNonReadableStream,
+  fromWebValidatesOptionsBeforeLocking,
+  fromWebLocksTheStream,
+  fromWebLockedInputThrows,
+  fromWebPullsOnlyOnDemand,
+  fromWebCloseEmitsEndThenClose,
+  fromWebErrorWithoutPendingReadDestroys,
+  fromWebErrorWithPendingReadDestroys,
+  fromWebDestroyCancelsWebStream,
+  fromWebDestroyAfterCloseSkipsCancel,
+  fromWebEncodingOption,
+  fromWebObjectModeOption,
+  fromWebHighWaterMarkOption,
+  fromWebSignalOption,
 } from 'readable-from-web';
 
 export {
@@ -33,6 +57,12 @@ export {
   toWebNodeDestroyWithErrorErrorsStream,
   toWebAbortDestroysNodeWritable,
   toWebAbortWithoutReasonDestroysWithAbortError,
+  toWebRejectsNonWritable,
+  toWebDuckTypedInputYieldsClosedStream,
+  toWebUnwritableSourceYieldsClosedStream,
+  toWebStrategyFollowsWritable,
+  toWebBackpressureFollowsDrain,
+  toWebChunksReachSinkAsNodeWrites,
 } from 'writable-to-web';
 
 export {
@@ -43,9 +73,26 @@ export {
   fromWebBackToBackWritesDeliverChunks,
   fromWebCorkedWritesDeliverChunks,
   fromWebBatchedWriteRejectionFailsCallbacks,
+  fromWebRejectsNonWritableStream,
+  writableFromWebValidatesOptionsBeforeLocking,
+  writableFromWebLocksTheStream,
+  fromWebChunksReachSinkAsNodeChunks,
+  fromWebDecodeStringsAndObjectMode,
+  fromWebEndClosesWebStream,
+  fromWebDestroyAbortsOrClosesWebStream,
+  fromWebWritesCompleteWhenSinkAccepts,
 } from 'writable-from-web';
 
-export { toWebPairRoundTrip } from 'duplex-to-web';
+export {
+  toWebPairRoundTrip,
+  toWebRejectsNonDuplex,
+  toWebDestroyedDuplexYieldsClosedPair,
+  toWebHalfDuplexes,
+  toWebReadableIsNotByteStream,
+  toWebDestroyWithErrorErrorsBothHalves,
+  toWebClosingWritableWaitsForReadableEnd,
+  toWebReadableEofWaitsForWritableFinish,
+} from 'duplex-to-web';
 
 export {
   fromWebPairRoundTrip,
@@ -58,4 +105,29 @@ export {
   fromWebPairIterationToCompletionIsClean,
 } from 'duplex-from-web';
 
-export { toWebAsResponseBody } from 'bodies';
+export {
+  toWebAsResponseBody,
+  toWebAsRequestBody,
+  toWebLargeResponseBody,
+  fromWebResponseBody,
+  fromWebTextDecoderStreamBody,
+  fromWebIdentityTransformWritable,
+  fromWebFixedLengthExact,
+  fromWebFixedLengthOverwrite,
+  fromWebFixedLengthUnderwrite,
+  adaptersInPipeThroughChains,
+} from 'bodies';
+
+export {
+  consumersDrainWebStream,
+  textDecodesAcrossChunksAndStrings,
+  consumersReleaseLock,
+  consumersPropagateStreamError,
+  consumersAcceptNodeAndAsyncIterables,
+} from 'consumers';
+
+export {
+  fromWebStreamChunkTypes,
+  fromWebStreamDestroyCancelsSource,
+  fromWebStreamErrorPropagates,
+} from 'readable-from';
