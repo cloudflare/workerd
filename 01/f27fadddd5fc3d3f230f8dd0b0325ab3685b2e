@@ -1,0 +1,22 @@
+src/workerd/io/observer.h
+  s_907c34cfcb44ef::t_e3d99a731587b8 108-116
+src/workerd/io/worker.c++
+  s_907c34cfcb44ef::t_6539cfc5e0c8fd 4498
+  s_907c34cfcb44ef::t_085f0979a7f2f6 4452-4455
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "01f27fadddd5fc3d3f230f8dd0b0325ab3685b2e",
+  "prompts": {},
+  "sessions": {
+    "s_907c34cfcb44ef": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd31f0c87ffeX9dy4yYTDmj71c",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,54 @@
+src/workerd/api/tests/ctx-access-identity-mock.js
+  s_0e56c3301e5173::t_c150794364885f 5-6
+  s_0e56c3301e5173::t_a4555d7edf8216 1-4,7-14
+src/workerd/api/tests/ctx-access-identity-test.js
+  s_0e56c3301e5173::t_d43a4aee1ea304 1-4,6,9-23
+  s_0e56c3301e5173::t_2c7688e75c9334 5,7-8
+src/workerd/server/workerd.capnp
+  s_0e56c3301e5173::t_948d3795ab6ab9 751
+  s_0e56c3301e5173::t_5106f7ac9dd514 744-745,752-755
+  s_0e56c3301e5173::t_be2981312d1031 742-743,746-750
+  s_0e56c3301e5173::t_0573c37a0fc70b 756
+src/workerd/api/tests/ctx-access-config-test.wd-test
+  s_0e56c3301e5173::t_d554db88c1a0ad 1-17
+src/workerd/server/server-test.c++
+  s_0e56c3301e5173::t_2d1a3fd02ab45b 7019-7059
+src/workerd/api/tests/BUILD.bazel
+  s_0e56c3301e5173::t_57d0c6edae3a9b 246-258
+src/workerd/server/server.c++
+  s_0e56c3301e5173::t_75db0eeec17d9e 5312-5314
+  s_0e56c3301e5173::t_bdf0087a4c7216 5315-5332
+  s_0e56c3301e5173::t_f540b576e4224d 5768-5769
+  s_0e56c3301e5173::t_3859496764c41a 4815-4817
+  s_0e56c3301e5173::t_c3eec1c496150d 5770-5775,5785-5786
+  s_0e56c3301e5173::t_1f7c0bc44d3a3c 3968
+  s_0e56c3301e5173::t_9d42e1712d635f 63-65
+  s_0e56c3301e5173::t_8312af84b052a9 66-84
+  s_0e56c3301e5173::t_53827ce097701d 17
+  s_0e56c3301e5173::t_d164cec49237e8 3722
+  s_0e56c3301e5173::t_092a7d48a30fb9 5377-5379
+  s_0e56c3301e5173::t_70387f4e93717b 3360,3377
+  s_0e56c3301e5173::t_78d5714496f59f 4818-4820
+src/workerd/api/tests/ctx-access-identity-test.wd-test
+  s_0e56c3301e5173::t_518a4bfddc076b 1-26
+src/workerd/api/tests/ctx-access-config-test.js
+  s_0e56c3301e5173::t_6958495e26e149 1-4,6,9-17,19-22
+  s_0e56c3301e5173::t_d8eafbd23652e5 5,7-8
+  s_0e56c3301e5173::t_7da5da3d72010c 18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7b68dcc2d532bb0554cc1c8a281436eeaa21d265",
+  "prompts": {},
+  "sessions": {
+    "s_0e56c3301e5173": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_09dbefc92ffel4Y7irj65GOs7y",
+        "model": "unknown"
+      },
+      "human_author": "Matt Provost <mprovost@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+src/workerd/io/observer.h
+  s_0f868da28cf400::t_aae2288ad81d72 331-335
+  s_0f868da28cf400::t_0efe0bc6fae97a 30-33
+src/workerd/io/worker.c++
+  s_0f868da28cf400::t_e480437cb3a2ae 4493
+  s_0f868da28cf400::t_42e2cd317b0cf2 4443-4446
+types/generated-snapshot/index.d.ts
+  s_8d31555d8aa9a2::t_3beef020ffd5f0 15141
+types/generated-snapshot/index.ts
+  s_8d31555d8aa9a2::t_3beef020ffd5f0 15119
+src/workerd/io/compatibility-date.capnp
+  s_8d31555d8aa9a2::t_ffe0aed6a5831d 1654
+types/defines/rpc.d.ts
+  s_8d31555d8aa9a2::t_909cf43dd2afc0 268
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "338efa52bdefcbbebaf84eeff93ba682a98330cc",
+  "prompts": {},
+  "sessions": {
+    "s_0f868da28cf400": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_012591357ffeA7cXF67TJsjeKU",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    },
+    "s_8477a641ffe5eb": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_008d9ca05ffeQi15m42VuWDJj7",
+        "model": "grok-4.6"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    },
+    "s_8d31555d8aa9a2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_00bb15518ffeqay9X4yN1Vlme7",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+src/workerd/api/fetch-retry-claim-hook-test.c++
+  s_32c146faff5e8a::t_280c36453473f9 19-23,27-31,36-55,58,60-62,74-75,79-90,92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cb8c81790884b47f7b36516cefbaa10dee02e6fb",
+  "prompts": {},
+  "sessions": {
+    "s_32c146faff5e8a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f999ac473ffeWPspiSUdGx3hGT",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

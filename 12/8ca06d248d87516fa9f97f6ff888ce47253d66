@@ -1,0 +1,23 @@
+.github/workflows/bigbonk.yml
+  s_ab212b5ea87e48::t_ed55690dc4d63d 39,43-46
+.github/workflows/bonk.yml
+  s_ab212b5ea87e48::t_2a14bd5151b4b8 39,42-45
+.github/workflows/new-pr-review.yml
+  s_ab212b5ea87e48::t_687ab92adb6860 45,48-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "128ca06d248d87516fa9f97f6ff888ce47253d66",
+  "prompts": {},
+  "sessions": {
+    "s_ab212b5ea87e48": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f66b4-cb21-71f2-9485-081dfb1c0279",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Steve Faulkner <sfaulkner@cloudflare.com>"
+    }
+  }
+}

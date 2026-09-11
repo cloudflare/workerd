@@ -1,0 +1,51 @@
+src/workerd/io/worker-interface.capnp
+  s_ce3a68f51a41f7::t_d85ed9f4234069 128-132
+src/workerd/io/tracer.h
+  s_ce3a68f51a41f7::t_7a7420ab8b59e3 68,178,254,301
+src/workerd/api/tracing.c++
+  s_ce3a68f51a41f7::t_1e3bb7fd410796 108-111,117-126,135,196,202-208,210,213,217-218,232,235
+src/workerd/server/server.c++
+  s_ce3a68f51a41f7::t_7a7420ab8b59e3 3204,3212-3213
+src/workerd/io/trace-stream.c++
+  s_ce3a68f51a41f7::t_9f86acbac7c796 497-506
+types/defines/trace.d.ts
+  s_ce3a68f51a41f7::t_431cd17e092e63 145
+src/cloudflare/internal/test/tracing/tracing-log-attribution-instrumentation-test.js
+  s_ce3a68f51a41f7::t_ac85c058cd6d36 90,180-189,325-326,338,341-351
+src/workerd/api/tracing.h
+  s_ce3a68f51a41f7::t_1e3bb7fd410796 32-33,72-75
+src/cloudflare/internal/tracing.d.ts
+  s_ce3a68f51a41f7::t_d85ed9f4234069 8-33,46,91
+src/workerd/io/trace.h
+  s_ce3a68f51a41f7::t_d85ed9f4234069 680-681,683-686,699,1259-1261,1303-1305
+  s_ce3a68f51a41f7::t_0555dceed1673b 1258,1302
+  s_ce3a68f51a41f7::t_fa03a590475e1d 682,1301
+src/workerd/io/tracer.c++
+  s_ce3a68f51a41f7::t_0c837a9c4811f4 44,48-62,64,299,319,674-677,679-680
+  s_ce3a68f51a41f7::t_fa03a590475e1d 68-69,73-75,336,673
+src/workerd/io/trace-test.c++
+  s_ce3a68f51a41f7::t_dd4cd259dbdf2e 486-487
+  s_ce3a68f51a41f7::t_783469e9f1580e 474,481-484,488-491,495-496
+  s_ce3a68f51a41f7::t_705a64a1edb5b8 485,492-494
+src/workerd/io/trace.c++
+  s_ce3a68f51a41f7::t_9672beafb20e7f 850-853,857-858,890-900,910-919,923-935,1949-1951,1956
+  s_ce3a68f51a41f7::t_fa03a590475e1d 849,1948
+src/cloudflare/internal/test/tracing/tracing-log-attribution-test.js
+  s_ce3a68f51a41f7::t_ac85c058cd6d36 100-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "92e1b7062ed961801a0f0e01fc25e5bba1790370",
+  "prompts": {},
+  "sessions": {
+    "s_ce3a68f51a41f7": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04a6cb5c5ffecOo3BnrCwoKl1p",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    }
+  }
+}

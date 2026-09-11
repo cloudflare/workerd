@@ -1,0 +1,97 @@
+ci/v8_update.py
+  s_f76de78c08f5ec::t_16cad6bde5cf51 48
+  s_03acf2309a4ac3::t_494206ed95d53a 73,76-77,80,83-84,90,93-94,97,100-101
+  s_f76de78c08f5ec::t_11822e503498b2 87-89
+  s_3d52627c39d3e5::t_e6430fd1ff89c4 16
+  s_f76de78c08f5ec::t_30980dc7df6dad 6,22-23,25-30,32
+  s_f76de78c08f5ec::t_58ab4db1c8611a 1-5,7-14,19,21,33-40,44-45,71-72,74-75,78-79,81-82,85-86,91-92,95-96,98,102-113,116-119,121-129,132-134,136-141,143-152,154-168,170-191
+  s_3d52627c39d3e5::t_c55ca5e621e898 17-18,42-43,99
+  s_03acf2309a4ac3::t_42ec84d01de051 61,64-65
+  s_f76de78c08f5ec::t_ff20d96f2c45d0 20,46-47,49-60,62-63,66-70,192
+  s_f76de78c08f5ec::t_08ea5befb379d1 24
+  s_f76de78c08f5ec::t_09d5dd22c125e5 31
+  s_f76de78c08f5ec::t_3918654d5169ff 114-115
+  s_f76de78c08f5ec::t_2b9709ea5b8e00 120
+  s_f76de78c08f5ec::t_9425e9eb701f23 130-131
+  s_f76de78c08f5ec::t_ef0215715e153d 135
+  s_f76de78c08f5ec::t_16e70e4f3ca831 142
+  s_f76de78c08f5ec::t_4ed880389809d3 153
+  s_f76de78c08f5ec::t_217d3cf887f196 169
+ci/v8_nightly.py
+  s_f76de78c08f5ec::t_682527a1413784 2,68
+  s_3d52627c39d3e5::t_0bc1e8a5bbe07b 7,30,36-37,70
+  s_3d52627c39d3e5::t_a5a2071a37be29 67
+  s_3d52627c39d3e5::t_d25e7e1fa4027d 32
+  s_3d52627c39d3e5::t_da14c42c1ff517 39,41-42,47-54,61
+  s_f76de78c08f5ec::t_7e49b61bd65b91 1,3-5,8-9,11-13,15-24,26,28-29,71-74
+  s_3d52627c39d3e5::t_35b8128a83408f 40
+  s_3d52627c39d3e5::t_64c66b5bcc7fd0 69
+  s_f76de78c08f5ec::t_dd44c0d510c73a 10
+  s_f76de78c08f5ec::t_748af6960f8489 14
+  s_f76de78c08f5ec::t_524e44cb1481b5 25
+  s_f76de78c08f5ec::t_9d12ec7b4b5ed4 27
+  s_3d52627c39d3e5::t_a8cab454afcf0e 31
+  s_3d52627c39d3e5::t_6f1f0899ad22be 33-35
+  s_3d52627c39d3e5::t_509d3e12f1ab45 38
+  s_3d52627c39d3e5::t_45f42ee79af5f0 43-46
+  s_3d52627c39d3e5::t_a241a163fc2b7f 55-60
+  s_3d52627c39d3e5::t_3ce32d2831101d 62-66
+ci/build.yml
+  s_3d52627c39d3e5::t_9ca83c8f2da239 53
+  s_f76de78c08f5ec::t_16c71426036965 5,54,56,112-115,117-123
+  s_3d52627c39d3e5::t_68ede04b9054ae 116
+  s_f76de78c08f5ec::t_fcd8db0030c901 124
+  s_f76de78c08f5ec::t_08b2e9f86429c1 55
+.gitignore
+  s_f76de78c08f5ec::t_16c71426036965 28
+templates/v8-nightly.yml
+  s_3d52627c39d3e5::t_9ca83c8f2da239 1-55
+ci/v8_nightly_shared.py
+  s_03acf2309a4ac3::t_e8ee8d7c5dfaf6 60
+  s_03acf2309a4ac3::t_7e9e5c36ababaa 83-84,86-87,90-91,93-98,163
+  s_03acf2309a4ac3::t_bba4bd2e667747 15
+  s_03acf2309a4ac3::t_ae6160da69e3d8 75-80,92
+  s_03acf2309a4ac3::t_38134fdd029cb7 85,88-89
+  s_03acf2309a4ac3::t_cb81b379568d53 164-169
+  s_03acf2309a4ac3::t_900162a93053c1 12-14
+  s_03acf2309a4ac3::t_103fcf53f74e83 16-18,57-59
+  s_03acf2309a4ac3::t_b0aedb34f23a2d 61-63,72-74
+  s_03acf2309a4ac3::t_78685249f0f077 81-82
+  s_03acf2309a4ac3::t_7dda426aeea876 99-101,160-162
+  s_03acf2309a4ac3::t_529e8d41faffbb 170-172
+cfsetup.yaml
+  s_f76de78c08f5ec::t_16c71426036965 45-51,55
+  s_3d52627c39d3e5::t_360a38d9912aa5 52-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "382c0f83bd54125d530907923b373eb9600f1b72",
+  "prompts": {},
+  "sessions": {
+    "s_03acf2309a4ac3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_075d7c3a5ffeUU1f0YdOY4tEVX",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    },
+    "s_3d52627c39d3e5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_07f3956a4ffe5XwuD2oblTWD6c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    },
+    "s_f76de78c08f5ec": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_08f255e09ffeRZThJCK8sAVkxE",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}

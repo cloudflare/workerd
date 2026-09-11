@@ -1,0 +1,49 @@
+src/workerd/io/access-info.h
+  s_0e56c3301e5173::t_f79c6c2d6533f8 40,46-50
+src/workerd/server/server.c++
+  s_0e56c3301e5173::t_529d4a4437783e 89-109,111-122
+  s_0e56c3301e5173::t_d5e6e2f280c15b 154-157
+  s_0e56c3301e5173::t_5cb4b75b58b041 4144
+  s_0e56c3301e5173::t_8312af84b052a9 67,69,71-76,84-85
+  s_0e56c3301e5173::t_61c31b58f4a181 5535-5544
+  s_0e56c3301e5173::t_60281e2f2fb518 6423
+  s_0e56c3301e5173::t_de2fafa9d47bfc 110
+  s_0e56c3301e5173::t_98dd4e293a135b 87,123-153,158-206
+  s_0e56c3301e5173::t_659aaa6d19f98b 88
+  s_0e56c3301e5173::t_2bc395cb5d4f71 3742-3757,3759-3766,3772-3773,3897
+  s_0e56c3301e5173::t_53827ce097701d 17
+  s_0e56c3301e5173::t_0f21b871791bf5 3758
+  s_0e56c3301e5173::t_0c105f1d0c5bcf 5003-5006
+  s_0e56c3301e5173::t_7ad06afc956070 5534
+  s_0e56c3301e5173::t_793b103a419e8e 5937-5938
+  s_0e56c3301e5173::t_4e14d9fbf1bdaf 3510-3511,3527-3528
+  s_0e56c3301e5173::t_01781a8438c7a1 63-66,68,70,77-83,86
+src/workerd/api/global-scope.c++
+  s_0e56c3301e5173::t_3af0ab8781cbfa 121-122,140-146,148-149
+  s_0e56c3301e5173::t_1283b4dbdf0e35 147
+src/workerd/server/workerd.capnp
+  s_0e56c3301e5173::t_be2981312d1031 766
+  s_0e56c3301e5173::t_3e4c4033e2d9dc 769-774
+  s_0e56c3301e5173::t_0bc62dc598b63c 986
+  s_0e56c3301e5173::t_cbc0b344c0d5c3 767-768
+src/workerd/server/server-test.c++
+  s_0e56c3301e5173::t_74f1838f90def9 7101,7107,7130,7135
+  s_0e56c3301e5173::t_2d1a3fd02ab45b 7124-7125,7134,7136-7137,7149-7150,7152-7170
+  s_0e56c3301e5173::t_16cbc662566c91 7102-7106,7108-7123,7126-7129,7131-7133,7138-7148,7151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3a3f747e7c4e79c82461796f001cba657ab244e2",
+  "prompts": {},
+  "sessions": {
+    "s_0e56c3301e5173": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_09dbefc92ffel4Y7irj65GOs7y",
+        "model": "unknown"
+      },
+      "human_author": null
+    }
+  }
+}

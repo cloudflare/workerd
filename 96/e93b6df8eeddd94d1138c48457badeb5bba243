@@ -1,0 +1,56 @@
+src/cloudflare/internal/test/tracing/tracing-helpers-instrumentation-test.js
+  s_ebf47686d728a3::t_40160ac595a845 13-29,63,140-143,148
+  s_ebf47686d728a3::t_25dffa37aa29c4 144-147
+src/cloudflare/internal/test/tracing/tracing-helpers-test.js
+  s_ebf47686d728a3::t_fd4027c5b492bc 6,9,18,266-270,277-283,285-286,289-296
+  s_ebf47686d728a3::t_f997e0f89b6c97 10-17,265,271-276,284,287-288
+src/cloudflare/internal/tracing.d.ts
+  s_ebf47686d728a3::t_a3fe3f8277ea2e 24,59-63
+  s_ebf47686d728a3::t_aaa5aaa86ac9c8 25,64-70
+src/workerd/api/tracing.c++
+  s_ebf47686d728a3::t_e78ae9d18687fb 139-190,394-400,410,412,468-482,485,488,497-499
+  s_ebf47686d728a3::t_9f9f8e18034b90 416-442,483-484,486-487,489-496
+src/workerd/api/tracing.h
+  s_ebf47686d728a3::t_7e372f6d79903f 160-165,178,201
+  s_ebf47686d728a3::t_b0e4350bafb3e6 86-87,166-173,179,202
+src/workerd/io/tracer.c++
+  s_ebf47686d728a3::t_98c5afd827f44a 557-581
+src/workerd/io/tracer.h
+  s_ebf47686d728a3::t_d847a7ebc3a0e6 58-60,166-168
+src/workerd/jsg/setup.c++
+  s_ebf47686d728a3::t_891452ad2c7c4b 440
+src/workerd/jsg/setup.h
+  s_ebf47686d728a3::t_fa7d9448fcec4b 348-351,531-533
+types/generated-snapshot/experimental/index.d.ts
+  s_ebf47686d728a3::t_1fb16a69fd9da9 4832
+  s_ebf47686d728a3::t_c6894e393d8e33 4833
+types/generated-snapshot/experimental/index.ts
+  s_ebf47686d728a3::t_2c85343fd603bd 4841
+  s_ebf47686d728a3::t_857b9a016fd167 4842
+types/generated-snapshot/index.d.ts
+  s_ebf47686d728a3::t_71cd0bff021e78 4557
+  s_ebf47686d728a3::t_f04baee2c1223f 4558
+types/generated-snapshot/index.ts
+  s_ebf47686d728a3::t_dbfebcd27b8d25 4566
+  s_ebf47686d728a3::t_fbb287bda49db4 4567
+src/workerd/io/io-context.c++
+  s_ebf47686d728a3::t_8ba1d3379167ae 312,1190-1195,1199-1203,1212-1218,1223-1255
+src/workerd/io/io-context.h
+  s_ebf47686d728a3::t_2655708da780cb 76-77,88-91,188-189,228-236,1070-1076,1222-1223
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "96e93b6df8eeddd94d1138c48457badeb5bba243",
+  "prompts": {},
+  "sessions": {
+    "s_ebf47686d728a3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe81e04f4ffegtcU3p2joqak5h",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    }
+  }
+}

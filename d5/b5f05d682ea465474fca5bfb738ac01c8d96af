@@ -1,0 +1,34 @@
+src/workerd/tests/test-fixture.h
+  s_b89908ec6702ef::t_ffdaabd09e5136 115-117
+  s_b89908ec6702ef::t_e6bd6dbc8faafd 118
+src/workerd/io/worker-entrypoint.c++
+  s_b89908ec6702ef::t_e6bd6dbc8faafd 566-573
+src/workerd/tests/test-fixture.c++
+  s_b89908ec6702ef::t_ffdaabd09e5136 508-509,521-522,529-537
+  s_b89908ec6702ef::t_fe8b7d03f23a9d 517-520
+  s_b89908ec6702ef::t_e6bd6dbc8faafd 16,510-516,523-528
+  s_b89908ec6702ef::t_1dd45c4bc216c0 538-539
+src/workerd/api/fetch-retry-claim-hook-test.c++
+  s_b89908ec6702ef::t_e6bd6dbc8faafd 29-38,65-73,75-76,79-82
+  s_b89908ec6702ef::t_549df6b267a404 74
+  s_b89908ec6702ef::t_ffdaabd09e5136 77-78
+  s_b89908ec6702ef::t_17ea4228ba8ad5 83-84
+src/workerd/tests/BUILD.bazel
+  s_b89908ec6702ef::t_d31550717b0a5a 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d5b5f05d682ea465474fca5bfb738ac01c8d96af",
+  "prompts": {},
+  "sessions": {
+    "s_b89908ec6702ef": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_099438990ffeWe36UqrxWBC8Si",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

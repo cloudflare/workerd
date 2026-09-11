@@ -1,0 +1,19 @@
+templates/v8-nightly.yml
+  s_14fcac689fd66d::t_a5afacd6374ee1 39-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d40fc487e655046e2153f8c28bbc8be4ba23fdb6",
+  "prompts": {},
+  "sessions": {
+    "s_14fcac689fd66d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0705714e9ffes5CqOApnG9oOBs",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}

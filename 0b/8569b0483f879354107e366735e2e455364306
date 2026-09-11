@@ -1,0 +1,27 @@
+src/workerd/api/tests/do-pre-shutdown-test.wd-test
+  s_0f868da28cf400::t_f578bb084e2434 22
+  s_0f868da28cf400::t_a6f1dbfcd954f0 31
+src/workerd/io/limit-enforcer.h
+  s_0f868da28cf400::t_3a2aa1e589ebf8 180-186
+src/workerd/api/tests/do-pre-shutdown-test.js
+  s_0f868da28cf400::t_1de66abdd0d0ab 171-191,193
+  s_0f868da28cf400::t_ff7ac80f8e3a34 74-96
+src/workerd/api/global-scope.c++
+  s_0f868da28cf400::t_367c3d092e572d 813-817
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0b8569b0483f879354107e366735e2e455364306",
+  "prompts": {},
+  "sessions": {
+    "s_0f868da28cf400": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_012591357ffeA7cXF67TJsjeKU",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}

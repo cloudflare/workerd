@@ -1,0 +1,65 @@
+src/workerd/io/incoming-request-test.c++
+  s_ab4e43acd62623::t_2a789e9e3eb7e7 90-144,146,156,158-161,168,171-173,176,180,182-185,188
+  s_ab4e43acd62623::t_5a06b02698726e 145
+  s_ab4e43acd62623::t_250aaa6b063a2b 147-149,153-155
+  s_ab4e43acd62623::t_6f1911a7545de2 157
+  s_ab4e43acd62623::t_c1218c3d4047fc 162-167
+  s_ab4e43acd62623::t_a417980e09f7dc 169-170
+  s_ab4e43acd62623::t_680ae579d4a39e 174-175
+  s_ab4e43acd62623::t_23c523af79039e 177-179
+  s_ab4e43acd62623::t_a694c1494cd211 181
+  s_ab4e43acd62623::t_5103e671d4d667 186-187
+  s_ab4e43acd62623::t_9984dc1bc86f88 189
+src/workerd/io/io-context.c++
+  s_8d3ff6b9908116::t_5e3af1518fa39d 320-327,340,356,363,713-716,725,727-746
+src/workerd/io/io-context.h
+  s_ab4e43acd62623::t_d29102c2a758cf 1194-1195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2e2b1f61c5e0073acf245e07993226003253b744",
+  "prompts": {},
+  "sessions": {
+    "s_1e024e77d05daf": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fdb02ef23ffeK04umsMAByNDsE",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_68959d5fe8e08d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ff07ec157ffeC7x2Y13Ir1AaVS",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_8d3ff6b9908116": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fc63bb043ffeWOJMRbxvOXrGJK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_9723e246fdbb73": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fcc287630ffellbbLmjaACAVsy",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_ab4e43acd62623": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0dd95e56cffeOLXlCNwX9ixaK3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
