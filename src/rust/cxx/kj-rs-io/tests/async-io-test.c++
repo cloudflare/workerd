@@ -544,7 +544,8 @@ KJ_TEST("unwrap fast path: recover the native tokio stream and write from Rust")
 
   // ...and Rust can drive the connection natively: it writes via the tokio readiness API and
   // closes; C++ reads the bytes plus EOF through the (still wrapped) client end.
-  auto writeDone = native_write_via_unwrap(kj::mv(native), toRustVec("native write"_kjb));
+  auto writeDone = native_write_via_unwrap(kj::mv(native), toRustVec("native write"_kjb))
+                       .eagerlyEvaluate(nullptr);
   KJ_EXPECT(pair.client->tryRead(buffer, 12, sizeof(buffer)).wait(ws) == 12);
   KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 12) == "native write"_kjb);
   writeDone.wait(ws);
@@ -558,7 +559,8 @@ KJ_TEST("unwrap fast path: Rust-side unwrap_kj_stream() from a "
   auto pair = makeTcpPair(io);
 
   // Rust receives only a kj::AsyncIoStream& and performs the unwrap + native write itself.
-  auto writeDone = native_write_via_kj_unwrap(*pair.server, toRust("rust unwrap"_kjb));
+  auto writeDone =
+      native_write_via_kj_unwrap(*pair.server, toRust("rust unwrap"_kjb)).eagerlyEvaluate(nullptr);
   kj::byte buffer[32];
   KJ_EXPECT(pair.client->tryRead(buffer, 11, sizeof(buffer)).wait(ws) == 11);
   KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 11) == "rust unwrap"_kjb);
@@ -674,7 +676,7 @@ KJ_TEST("wrapInputFd/wrapOutputFd move bytes through an OS pipe and observe EOF"
   kj::byte buffer[16];
   auto readPromise = input->tryRead(buffer, 9, 9);
   KJ_EXPECT(!readPromise.poll(ws));
-  auto writePromise = output->write("pipe fd io"_kjb);
+  auto writePromise = output->write("pipe fd io"_kjb).eagerlyEvaluate(nullptr);
   KJ_EXPECT(readPromise.wait(ws) == 9);
   writePromise.wait(ws);
   KJ_EXPECT(input->tryRead(buffer, 1, sizeof(buffer)).wait(ws) == 1);  // "o"
