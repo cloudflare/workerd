@@ -41,7 +41,8 @@ export const implicitHeadersAndChunkTypes = {
   },
 };
 
-// The Response resolves at writeHead(), while the handler is still writing;
+// The Response resolves once the headers go out (writeHead() only formats
+// them; the first write sends them), while the handler is still writing;
 // chunks written afterwards are readable as they are written, before end().
 export const bodyStreamsBeforeEnd = {
   async test(ctrl, env) {
