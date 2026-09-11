@@ -136,14 +136,16 @@ export const connectionFailureErrorsRequest = {
   },
 };
 
-// A completed exchange closes the request after the response ends, and
-// leaves it destroyed.
+// The response is the request's `res`; a completed exchange closes the
+// request after the response ends, and leaves it destroyed.
 export const responseEndClosesRequest = {
   async test(ctrl, env) {
     const log = [];
     const req = get(env, '/asd');
     record(log, 'req', req, ['finish', 'error', 'close']);
+    strictEqual(req.res, undefined);
     const res = await response(req);
+    strictEqual(req.res, res);
     strictEqual(req.destroyed, false);
     record(log, 'res', res, ['end', 'close']);
     const closed = Promise.all([once(req, 'close'), once(res, 'close')]);
