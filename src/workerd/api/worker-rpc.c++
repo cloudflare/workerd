@@ -54,12 +54,88 @@ void maybeAddDurableObjectId(
 
 capnp::Orphan<capnp::List<rpc::JsValue::External>> RpcSerializerExternalHandler::build(
     capnp::Orphanage orphanage) {
+  KJ_REQUIRE(externals.size() == externalOwnerships.size());
   auto result = orphanage.newOrphan<capnp::List<rpc::JsValue::External>>(externals.size());
   auto builder = result.get();
   for (auto i: kj::indices(externals)) {
     externals[i](builder[i]);
   }
   return result;
+}
+
+namespace {
+
+void validateExternalOwnership(rpc::JsValue::External::Reader external,
+    RpcSerializerExternalHandler::ExternalOwnership ownership) {
+  using External = rpc::JsValue::External;
+  using Ownership = RpcSerializerExternalHandler::ExternalOwnership;
+
+  switch (external.which()) {
+    case External::RPC_TARGET:
+      KJ_REQUIRE(ownership != Ownership::NONE, "RPC target external is missing ownership metadata");
+      return;
+    case External::INVALID:
+    case External::WRITABLE_STREAM:
+    case External::READABLE_STREAM:
+    case External::OBSOLETE7:
+    case External::ABORT_SIGNAL:
+    case External::SUBREQUEST_CHANNEL_TOKEN:
+    case External::ACTOR_CLASS_CHANNEL_TOKEN:
+    case External::DELAYED_SUBREQUEST_CHANNEL_TOKEN:
+    case External::DELAYED_ACTOR_CLASS_CHANNEL_TOKEN:
+    case External::SOCKET:
+      KJ_REQUIRE(ownership == Ownership::NONE,
+          "non-RPC-target external has RPC target ownership metadata");
+      return;
+  }
+}
+
+}  // namespace
+
+JsRpcCallPlan::JsRpcCallPlan(kj::Own<capnp::MallocMessageBuilder> message,
+    kj::Array<const byte> serializedData,
+    kj::Array<RpcSerializerExternalHandler::ExternalOwnership> externalOwnerships,
+    RpcSerializerExternalHandler::Replayability serializerReplayability)
+    : message(kj::mv(message)),
+      serializedData(kj::mv(serializedData)),
+      externalOwnerships(kj::mv(externalOwnerships)),
+      replayable(false) {
+  auto operation = getParams().getOperation();
+  if (!operation.isCallWithArgs()) return;
+
+  KJ_REQUIRE(operation.hasCallWithArgs() == (this->serializedData.size() > 0),
+      "RPC call plan has inconsistent serialized arguments");
+  auto externals = operation.getCallWithArgs().getExternals();
+  KJ_REQUIRE(externals.size() == this->externalOwnerships.size(),
+      "RPC call plan has inconsistent external metadata");
+  for (auto i: kj::indices(externals)) {
+    validateExternalOwnership(externals[i], this->externalOwnerships[i]);
+  }
+  replayable = serializerReplayability == RpcSerializerExternalHandler::Replayability::REPLAYABLE;
+  KJ_REQUIRE(
+      !replayable || externals.size() == 0, "RPC call plan has externals marked as replayable");
+}
+
+void JsRpcCallPlan::copyTo(rpc::JsRpcTarget::CallParams::Builder builder) {
+  auto params = getParams();
+  switch (params.which()) {
+    case rpc::JsRpcTarget::CallParams::METHOD_NAME:
+      builder.setMethodName(params.getMethodName());
+      break;
+    case rpc::JsRpcTarget::CallParams::METHOD_PATH:
+      builder.setMethodPath(params.getMethodPath());
+      break;
+  }
+
+  auto operation = params.getOperation();
+  if (operation.isCallWithArgs()) {
+    if (operation.hasCallWithArgs()) {
+      builder.getOperation().setCallWithArgs(operation.getCallWithArgs());
+      builder.getOperation().getCallWithArgs().setV8Serialized(serializedData);
+    }
+  } else {
+    builder.getOperation().setGetProperty();
+  }
 }
 
 RpcDeserializerExternalHandler::~RpcDeserializerExternalHandler() noexcept(false) {
@@ -165,15 +241,13 @@ kj::Maybe<jsg::JsRef<jsg::JsObject>> RpcDeserializerExternalHandler::claimPrebui
 
 namespace {
 
-// Call to construct an `rpc::JsValue` from a JS value.
-//
-// `makeBuilder` is a function which takes a capnp::MessageSize hint and returns the
-// rpc::JsValue::Builder to fill in.
-template <typename Func>
-void serializeJsValue(jsg::Lock& js,
-    jsg::JsValue value,
-    RpcSerializerExternalHandler& externalHandler,
-    Func makeBuilder) {
+struct SerializedJsValue {
+  kj::Array<const byte> data;
+  capnp::MessageSize sizeHint;
+};
+
+SerializedJsValue serializeJsValue(
+    jsg::Lock& js, jsg::JsValue value, RpcSerializerExternalHandler& externalHandler) {
   jsg::Serializer serializer(js,
       jsg::Serializer::Options{
         .version = 15,
@@ -194,13 +268,11 @@ void serializeJsValue(jsg::Lock& js,
   hint.wordCount += externalHandler.size() * capnp::sizeInWords<rpc::JsValue::External>();
   hint.capCount += externalHandler.size();
 
-  rpc::JsValue::Builder builder = makeBuilder(hint);
+  return {.data = kj::mv(data), .sizeHint = hint};
+}
 
-  // TODO(perf): It would be nice if we could serialize directly into the capnp message to avoid
-  // a redundant copy of the bytes here. Maybe we could even cancel serialization early if it
-  // goes over the size limit.
-  builder.setV8Serialized(data);
-
+void buildJsValueExternals(
+    rpc::JsValue::Builder builder, RpcSerializerExternalHandler& externalHandler) {
   if (externalHandler.size() > 0) {
     builder.adoptExternals(
         externalHandler.build(capnp::Orphanage::getForMessageContaining(builder)));
@@ -381,9 +453,7 @@ void JsRpcPromise::dispose(jsg::Lock& js) {
 static rpc::JsRpcTarget::Client makeJsRpcTargetForSingleLoopbackCall(
     jsg::Lock& js, jsg::JsObject obj);
 
-JsRpcClientProvider::ClientForOneCall JsRpcPromise::getClientForOneCall(
-    jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
-  // (Don't extend `path` because we're the root.)
+JsRpcClientProvider::ClientForOneCall JsRpcPromise::getClientForOneCall(jsg::Lock& js) {
   auto callSpanParents =
       originatingCall.map([](IoOwn<TraceContextParent>& p) { return p->addRef(); });
   KJ_SWITCH_ONEOF(state) {
@@ -442,11 +512,13 @@ JsRpcClientProvider::ClientForOneCall JsRpcPromise::getClientForOneCall(
   KJ_UNREACHABLE;
 }
 
-JsRpcClientProvider::ClientForOneCall JsRpcProperty::getClientForOneCall(
-    jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
-  auto result = parent->getClientForOneCall(js, path);
+void JsRpcProperty::appendPath(kj::Vector<kj::StringPtr>& path) {
+  parent->appendPath(path);
   path.add(name);
-  return result;
+}
+
+JsRpcClientProvider::ClientForOneCall JsRpcProperty::getClientForOneCall(jsg::Lock& js) {
+  return parent->getClientForOneCall(js);
 }
 
 namespace {
@@ -547,51 +619,53 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
 
       // `path` is filled in with the chain of property names leading to the method.
       kj::Vector<kj::StringPtr> path;
-      auto oneCall = parent.getClientForOneCall(js, path);
-      auto client = kj::mv(oneCall.client);
+      parent.appendPath(path);
+
+      auto operation = maybeArgs != kj::none ? JsRpcOperation::CALL : JsRpcOperation::GET_PROPERTY;
+      auto destinationSupportsRetries = parent.supportsActorCallRetries();
 
       TraceContext jsRpcCallSpan;
-      if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-        // Per-call dispatch span, captured into the awaitIo callback below so it stays open until
-        // the response settles.
-        auto operation =
-            maybeArgs != kj::none ? JsRpcOperation::CALL : JsRpcOperation::GET_PROPERTY;
-        KJ_IF_SOME(span, oneCall.callSpan) {
-          jsRpcCallSpan = kj::mv(span);
-          setJsRpcCallSpanTags(jsRpcCallSpan, parent, name, path.asPtr(), operation);
-        } else {
-          jsRpcCallSpan = makeJsRpcCallSpan(
-              ioContext, parent, name, path.asPtr(), kj::mv(oneCall.callSpanParents), operation);
+      kj::Maybe<JsRpcClientProvider::ClientForOneCall> oneCall;
+      auto resolveOneCall = [&]() -> JsRpcClientProvider::ClientForOneCall& {
+        if (oneCall == kj::none) {
+          oneCall = parent.getClientForOneCall(js);
+          auto& result = KJ_ASSERT_NONNULL(oneCall);
+          if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
+            // Per-call dispatch span, captured into the awaitIo callback below so it stays open
+            // until the response settles.
+            KJ_IF_SOME(span, result.callSpan) {
+              jsRpcCallSpan = kj::mv(span);
+              setJsRpcCallSpanTags(jsRpcCallSpan, parent, name, path.asPtr(), operation);
+            } else {
+              jsRpcCallSpan = makeJsRpcCallSpan(
+                  ioContext, parent, name, path.asPtr(), kj::mv(result.callSpanParents), operation);
+            }
+          }
+          KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
+            // A promise client keeps calls made while serializing externals behind the output gate.
+            result.client =
+                lock.then([client = kj::mv(result.client)]() mutable { return kj::mv(client); });
+          }
         }
+        return KJ_ASSERT_NONNULL(oneCall);
+      };
+
+      if (!destinationSupportsRetries) {
+        resolveOneCall();
       }
 
-      KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
-        // Replace the client with a promise client that will delay the call until the output gate
-        // is open.
-        client = lock.then([client = kj::mv(client)]() mutable { return kj::mv(client); });
-      }
-
-      auto builder = client.callRequest();
-
-      // Tell the callee which caller span corresponds to this dispatch. A session carries many
-      // calls (e.g. calls pipelined on a returned stub), so the context propagated when the session
-      // opened identifies only the first call. Yields kj::none when untraced.
-      KJ_IF_SOME(callerSpanContext, jsRpcCallSpan.getUserSpanParent().toSpanContext()) {
-        callerSpanContext.toCapnp(builder.initCallerSpanContext());
-      }
-
-      // This code here is slightly overcomplicated in order to avoid pushing anything to the
-      // kj::Vector in the common case that the parent path is empty. I'm probably trying too hard
-      // but oh well.
+      auto planMessage = kj::heap<capnp::MallocMessageBuilder>(
+          JsRpcCallPlan::METADATA_SEGMENT_WORDS, capnp::AllocationStrategy::FIXED_SIZE);
+      auto planBuilder = planMessage->initRoot<rpc::JsRpcTarget::CallParams>();
       if (path.empty()) {
         KJ_IF_SOME(n, name) {
-          builder.setMethodName(n);
+          planBuilder.setMethodName(n);
         } else {
           // No name and no path, must be directly calling a stub.
-          builder.initMethodPath(0);
+          planBuilder.initMethodPath(0);
         }
       } else {
-        auto pathBuilder = builder.initMethodPath(path.size() + (name != kj::none));
+        auto pathBuilder = planBuilder.initMethodPath(path.size() + (name != kj::none));
         for (auto i: kj::indices(path)) {
           pathBuilder.set(i, path[i]);
         }
@@ -600,6 +674,9 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
         }
       }
 
+      kj::Array<const byte> serializedData;
+      kj::Array<RpcSerializerExternalHandler::ExternalOwnership> externalOwnerships;
+      auto serializerReplayability = RpcSerializerExternalHandler::Replayability::REPLAYABLE;
       KJ_IF_SOME(args, maybeArgs) {
         // If we have arguments, serialize them.
         // Note that we may fail to serialize some element, in which case this will throw back to
@@ -616,16 +693,37 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
               ? RpcSerializerExternalHandler::DUPLICATE
               : RpcSerializerExternalHandler::TRANSFER;
 
-          RpcSerializerExternalHandler externalHandler(
-              stubOwnership, client, jsRpcCallSpan.getSpanParentsIfObserved());
-          serializeJsValue(js, jsg::JsValue(arr), externalHandler, [&](capnp::MessageSize hint) {
-            // TODO(perf): Actually use the size hint.
-            return builder.getOperation().initCallWithArgs();
-          });
+          RpcSerializerExternalHandler externalHandler(stubOwnership,
+              RpcSerializerExternalHandler::GetExternalPusher(
+                  [&]() { return resolveOneCall().client; }),
+              RpcSerializerExternalHandler::ResolveDestinationAndGetSpanParents([&]() {
+            resolveOneCall();
+            return jsRpcCallSpan.getSpanParentsIfObserved();
+          }));
+          auto serialized = serializeJsValue(js, jsg::JsValue(arr), externalHandler);
+          auto argsBuilder = planBuilder.getOperation().initCallWithArgs();
+          buildJsValueExternals(argsBuilder, externalHandler);
+          serializedData = kj::mv(serialized.data);
+          serializerReplayability = externalHandler.getReplayability();
+          externalOwnerships = externalHandler.releaseExternalOwnerships();
         }
       } else {
         // This is a property access.
-        builder.getOperation().setGetProperty();
+        planBuilder.getOperation().setGetProperty();
+      }
+
+      JsRpcCallPlan callPlan(kj::mv(planMessage), kj::mv(serializedData),
+          kj::mv(externalOwnerships), serializerReplayability);
+
+      auto client = kj::mv(resolveOneCall().client);
+      auto builder = client.callRequest();
+      callPlan.copyTo(builder);
+
+      // Tell the callee which caller span corresponds to this dispatch. A session carries many
+      // calls (e.g. calls pipelined on a returned stub), so the context propagated when the session
+      // opened identifies only the first call. Yields kj::none when untraced.
+      KJ_IF_SOME(callerSpanContext, jsRpcCallSpan.getUserSpanParent().toSpanContext()) {
+        callerSpanContext.toCapnp(builder.initCallerSpanContext());
       }
 
       // Unfortunately, we always have to send the ExternalPusher since we don't know whether the
@@ -935,9 +1033,7 @@ kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> JsRpcStub::getRpcChannel(IoCont
   }
 }
 
-JsRpcClientProvider::ClientForOneCall JsRpcStub::getClientForOneCall(
-    jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
-  // (Don't extend `path` because we're the root.)
+JsRpcClientProvider::ClientForOneCall JsRpcStub::getClientForOneCall(jsg::Lock& js) {
   return {
     .client = getClient(),
     .callSpanParents =
@@ -1020,6 +1116,9 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       serializer.writeRawUint32(frankenvalueHandler.add(kj::mv(channel)));
       return;
     } else KJ_IF_SOME(externalHandler, kj::tryDowncast<RpcSerializerExternalHandler>(handler)) {
+      // Confirm that the destination can be opened before serialization can consume this stub.
+      externalHandler.resolveDestinationAndGetSpanParents();
+
       // We may be forwarding a stub that points to some other isolate. Consider the case where we
       // are returning the stub to our client. The RPC session remains live as long as the client is
       // holding any remaining stubs obtained from this session, due to CompletionMembrane. However,
@@ -1043,7 +1142,9 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       // receiving end to invoke the restore chain if desired?
       auto cap = capnp::membrane(
           getClient(), kj::refcounted<AttachmentMembrane>(ioctx.registerPendingEvent()));
-
+      auto ownership = externalHandler.getStubOwnership() == RpcSerializerExternalHandler::DUPLICATE
+          ? RpcSerializerExternalHandler::ExternalOwnership::RPC_TARGET_DUPLICATED
+          : RpcSerializerExternalHandler::ExternalOwnership::RPC_TARGET_TRANSFERRED;
       // If a channel is present, send a channel token for it.
       kj::Maybe<kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>>> channelToken;
       kj::Own<IoChannelFactory::RpcChannel> ownChannel;
@@ -1061,8 +1162,9 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       KJ_IF_SOME(token, channelToken) {
         KJ_SWITCH_ONEOF(token) {
           KJ_CASE_ONEOF(token, kj::Array<byte>) {
-            externalHandler.write([cap = kj::mv(cap), token = kj::mv(token)](
-                                      rpc::JsValue::External::Builder builder) mutable {
+            externalHandler.writeRpcTarget(ownership,
+                [cap = kj::mv(cap), token = kj::mv(token)](
+                    rpc::JsValue::External::Builder builder) mutable {
               auto target = builder.initRpcTarget();
               target.setCap(kj::mv(cap));
               target.setChannelToken(token);
@@ -1083,8 +1185,9 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
               fulfiller->fulfill(req.send().getCap());
             }));
 
-            externalHandler.write([cap = kj::mv(cap), promise = kj::mv(paf.promise)](
-                                      rpc::JsValue::External::Builder builder) mutable {
+            externalHandler.writeRpcTarget(ownership,
+                [cap = kj::mv(cap), promise = kj::mv(paf.promise)](
+                    rpc::JsValue::External::Builder builder) mutable {
               auto target = builder.initRpcTarget();
               target.setCap(kj::mv(cap));
               target.setDelayedChannelToken(kj::mv(promise));
@@ -1093,7 +1196,8 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
         }
       } else {
         // No channel token.
-        externalHandler.write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
+        externalHandler.writeRpcTarget(
+            ownership, [cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
           builder.initRpcTarget().setCap(kj::mv(cap));
         });
       }
@@ -2007,7 +2111,10 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
   // Now that we've extracted our dispose function, we can serialize our value.
   RpcSerializerExternalHandler externalHandler(
       RpcSerializerExternalHandler::TRANSFER, kj::mv(externalPusher), kj::none);
-  serializeJsValue(js, value, externalHandler, kj::mv(makeBuilder));
+  auto serialized = serializeJsValue(js, value, externalHandler);
+  auto builder = makeBuilder(serialized.sizeHint);
+  builder.setV8Serialized(serialized.data);
+  buildJsValueExternals(builder, externalHandler);
 
   auto stubDisposers = externalHandler.releaseStubDisposers();
 
@@ -2140,7 +2247,8 @@ void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
   // Handle can't possibly be missing during serialization, it's how we got here.
   auto handle = jsg::JsObject(KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js)));
-
+  auto originatingCall = externalHandler->resolveDestinationAndGetSpanParents();
+  auto ownership = RpcSerializerExternalHandler::ExternalOwnership::RPC_TARGET_TRANSFERRED;
   if (externalHandler->getStubOwnership() == RpcSerializerExternalHandler::DUPLICATE) {
     // This message isn't supposed to take ownership of stubs. What does that mean for an
     // RpcTarget? You might argue that it means we should never call the disposer. But that's not
@@ -2161,18 +2269,19 @@ void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
     auto dup = handle.get(js, "dup");
     KJ_IF_SOME(dupFunc, dup.tryCast<jsg::JsFunction>()) {
       auto replacement = dupFunc.call(js, handle);
-      bool replaced = false;
 
       // We got a duplicate. Is it still an RpcTarget?
       KJ_IF_SOME(replacementObj, replacement.tryCast<jsg::JsObject>()) {
         if (replacementObj.isInstanceOf<JsRpcTarget>(js)) {
           // It is! Let's replace our handle with the duplicate!
           handle = replacementObj;
-          replaced = true;
+          ownership = RpcSerializerExternalHandler::ExternalOwnership::RPC_TARGET_DUPLICATED;
         }
       }
 
-      JSG_REQUIRE(replaced, DOMDataCloneError,
+      JSG_REQUIRE(
+          ownership == RpcSerializerExternalHandler::ExternalOwnership::RPC_TARGET_DUPLICATED,
+          DOMDataCloneError,
           "Couldn't create a stub for the RcpTarget because it has a dup() method which did not "
           "return another RpcTarget. Either remove the dup() method or make sure it returns an "
           "RpcTarget.");
@@ -2197,10 +2306,11 @@ void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
     }
   }
 
-  rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle,
-      AllowInstanceProperties::NO, externalHandler->getOriginatingCall());
+  rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(
+      js, IoContext::current(), handle, AllowInstanceProperties::NO, kj::mv(originatingCall));
 
-  externalHandler->write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
+  externalHandler->writeRpcTarget(
+      ownership, [cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
     builder.initRpcTarget().setCap(kj::mv(cap));
   });
 }
@@ -2210,24 +2320,24 @@ void RpcSerializerExternalHandler::serializeFunction(
   serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::JS_RPC_STUB));
 
   auto handle = jsg::JsObject(func);
-
+  auto originatingCall = resolveDestinationAndGetSpanParents();
+  auto ownership = ExternalOwnership::RPC_TARGET_TRANSFERRED;
   // Similar to JsRpcTarget::serialize(), we may need to dup() the function.
   if (stubOwnership == RpcSerializerExternalHandler::DUPLICATE) {
     auto dup = handle.get(js, "dup");
     KJ_IF_SOME(dupFunc, dup.tryCast<jsg::JsFunction>()) {
       auto replacement = dupFunc.call(js, handle);
-      bool replaced = false;
 
       // We got a duplicate. Is it still a Function?
       KJ_IF_SOME(replacementObj, replacement.tryCast<jsg::JsObject>()) {
         if (isFunctionForRpc(js, replacementObj)) {
           // It is! Let's replace our handle with the duplicate!
           handle = replacementObj;
-          replaced = true;
+          ownership = ExternalOwnership::RPC_TARGET_DUPLICATED;
         }
       }
 
-      JSG_REQUIRE(replaced, DOMDataCloneError,
+      JSG_REQUIRE(ownership == ExternalOwnership::RPC_TARGET_DUPLICATED, DOMDataCloneError,
           "Couldn't create a stub for the function because it has a dup() method which did not "
           "return another function. Either remove the dup() method or make sure it returns a "
           "function.");
@@ -2235,8 +2345,8 @@ void RpcSerializerExternalHandler::serializeFunction(
   }
 
   rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(
-      js, IoContext::current(), handle, AllowInstanceProperties::YES, getOriginatingCall());
-  write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
+      js, IoContext::current(), handle, AllowInstanceProperties::YES, kj::mv(originatingCall));
+  writeRpcTarget(ownership, [cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
     builder.initRpcTarget().setCap(kj::mv(cap));
   });
 }
@@ -2244,6 +2354,8 @@ void RpcSerializerExternalHandler::serializeFunction(
 void RpcSerializerExternalHandler::serializeProxy(
     jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Proxy> proxy) {
   auto handle = jsg::JsObject(proxy);
+  auto originatingCall = resolveDestinationAndGetSpanParents();
+  auto ownership = ExternalOwnership::RPC_TARGET_TRANSFERRED;
 
   // Proxies are allowed to present themselves as anything that you could pass to `new RpcStub`.
   //
@@ -2259,13 +2371,11 @@ void RpcSerializerExternalHandler::serializeProxy(
       "Proxy could not be serialized because it is not a valid RPC receiver type. The "
       "Proxy must emulate either a plain object or an RpcTarget, as indicated by the "
       "Proxy's prototype chain.");
-
   // Similar to JsRpcTarget::serialize(), we may need to dup() the proxy.
   if (stubOwnership == RpcSerializerExternalHandler::DUPLICATE) {
     auto dup = handle.get(js, "dup");
     KJ_IF_SOME(dupFunc, dup.tryCast<jsg::JsFunction>()) {
       auto replacement = dupFunc.call(js, handle);
-      bool replaced = false;
 
       // We got a duplicate. Is it still the same type?
       KJ_IF_SOME(replacementObj, replacement.tryCast<jsg::JsObject>()) {
@@ -2273,12 +2383,12 @@ void RpcSerializerExternalHandler::serializeProxy(
           if (stubType == allowInstanceProperties) {
             // It is! Let's replace our handle with the duplicate!
             handle = replacementObj;
-            replaced = true;
+            ownership = ExternalOwnership::RPC_TARGET_DUPLICATED;
           }
         }
       }
 
-      JSG_REQUIRE(replaced, DOMDataCloneError,
+      JSG_REQUIRE(ownership == ExternalOwnership::RPC_TARGET_DUPLICATED, DOMDataCloneError,
           "Couldn't create a stub for the Proxy because it has a dup() method which did not "
           "return the same underlying type (RpcTarget or Function) as the Proxy itself represents. "
           "Either remove the dup() method or make sure it returns an RpcTarget.");
@@ -2289,8 +2399,8 @@ void RpcSerializerExternalHandler::serializeProxy(
   serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::JS_RPC_STUB));
 
   rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle,
-      AllowInstanceProperties(allowInstanceProperties), getOriginatingCall());
-  write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
+      AllowInstanceProperties(allowInstanceProperties), kj::mv(originatingCall));
+  writeRpcTarget(ownership, [cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
     builder.initRpcTarget().setCap(kj::mv(cap));
   });
 }

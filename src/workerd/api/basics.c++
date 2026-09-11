@@ -1115,6 +1115,7 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
   JSG_REQUIRE(
       externalHandler != nullptr, DOMDataCloneError, "AbortSignal can only be serialized for RPC.");
+  externalHandler->markReplayIneligible();
 
   serializer.writeRawUint32(static_cast<uint>(getAborted(js)));
   serializer.writeRawUint32(static_cast<uint>(flag));

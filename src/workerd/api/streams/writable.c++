@@ -524,6 +524,10 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // TODO(soon): Support JS-backed WritableStreams. Currently this only supports native streams
   //   and IdentityTransformStream, since only they are backed by WritableStreamSink.
 
+  // Destination setup can fail synchronously. Resolve it before removeSink() or getWriter()
+  // changes the source stream.
+  externalHandler->resolveDestinationAndGetSpanParents();
+
   KJ_IF_SOME(sink, getController().removeSink(js)) {
     // NOTE: We're counting on `removeSink()`, to check that the stream is not locked and other
     //   common checks. It's important we don't modify the WritableStream before this call.
