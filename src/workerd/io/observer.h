@@ -163,11 +163,10 @@ class RequestObserver: public kj::Refcounted {
   // Wrap an HttpClient so that its usage is counted in the request's actor subrequest count.
   virtual kj::Own<WorkerInterface> wrapActorSubrequestClient(kj::Own<WorkerInterface> client);
 
-  // Record whether the next outgoing subrequest's request body can be rewound (e.g. a buffered or
-  // null fetch body) and whether its target supports runtime retries. Consumed when the
-  // subrequest client for that call is constructed. The set->consume window is synchronous, so the
-  // values always correspond to the next call. No-op in the base observer; edgeworker overrides it
-  // to feed retry classification.
+  // Record whether the next outgoing subrequest's request body can be rewound and whether its
+  // target supports runtime retries. Consumed when the subrequest client for that call is
+  // constructed. The set->consume window is synchronous, so the values correspond to the next
+  // call. No-op in the base observer; edgeworker overrides it to feed retry classification.
   virtual void setNextSubrequestRetryEligibility(
       SubrequestBodyRewindable bodyRewindable, ActorCallTargetRetryable targetRetryable) {}
 

@@ -87,8 +87,8 @@ class RetryMetadataOutgoingFactory final: public Fetcher::OutgoingFactory {
     return {.client = kj::heap<MockFetchTarget>(), .spanParents = kj::none};
   }
 
-  bool supportsActorCallRetries() const override {
-    return true;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable::YES;
   }
 
   void onActorCallRetry() override {}
@@ -333,8 +333,8 @@ class ReplayOutgoingFactory final: public Fetcher::OutgoingFactory {
     return {.client = kj::heap<ReplayFetchTarget>(state), .spanParents = kj::none};
   }
 
-  bool supportsActorCallRetries() const override {
-    return state.retriesAllowed.toBool();
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable(state.retriesAllowed.toBool());
   }
 
   void onActorCallRetry() override {
