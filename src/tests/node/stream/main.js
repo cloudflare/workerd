@@ -16,7 +16,17 @@ export {
   fromWebPullErrorRejectsAsyncIteration,
 } from 'readable-from-web';
 
-export { toWebWritesReachNodeSink } from 'writable-to-web';
+export {
+  toWebWritesReachNodeSink,
+  toWebCloseEndsNodeWritable,
+  toWebPipeToCompletes,
+  toWebSyncNodeErrorRejectsPendingWrite,
+  toWebAsyncNodeErrorErrorsStream,
+  toWebFinalErrorRejectsClose,
+  toWebNodeEndWithoutCloseAbortsStream,
+  toWebNodeDestroyBecomesAbortError,
+  toWebNodeDestroyWithErrorErrorsStream,
+} from 'writable-to-web';
 
 export { fromWebWritesReachWebSink } from 'writable-from-web';
 

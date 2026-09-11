@@ -49,7 +49,7 @@ import {
   isWritableStream,
   handleKnownInternalErrors,
 } from 'node-internal:streams_util';
-import { finished, eos, nop } from 'node-internal:streams_end_of_stream';
+import { eos, nop } from 'node-internal:streams_end_of_stream';
 import { addAbortSignal } from 'node-internal:streams_add_abort_signal';
 import {
   getHighWaterMark,
@@ -1290,7 +1290,7 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
     if (backpressurePromise !== undefined) backpressurePromise.resolve();
   }
 
-  const cleanup = finished(streamWritable, (error) => {
+  const cleanup = eos(streamWritable, (error) => {
     error = handleKnownInternalErrors(error);
 
     cleanup();
