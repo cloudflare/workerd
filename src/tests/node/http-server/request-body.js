@@ -278,6 +278,47 @@ export const pausedBodyResumesWithoutLoss = {
   },
 };
 
+// A body larger than the readable high-water mark, paused on its first
+// chunk: the pump stops on backpressure and continues after resume() with
+// the same reader, delivering everything.
+export const pausedLargeBodyResumes = {
+  async test(ctrl, env) {
+    await withServer(
+      (req, res) => {
+        const events = [];
+        let total = 0;
+        req.on('data', (chunk) => {
+          total += chunk.length;
+          if (events.length === 0) {
+            events.push('pause');
+            req.pause();
+            setTimeout(() => {
+              events.push('resume');
+              req.resume();
+            }, 30);
+          }
+        });
+        req.on('error', (err) => events.push(`error:${err.message}`));
+        req.on('end', () => {
+          events.push(`end:${total}`);
+          res.end(JSON.stringify(events));
+        });
+      },
+      async () => {
+        const res = await env.SERVICE.fetch('http://x/', {
+          method: 'POST',
+          body: new Uint8Array(256 * 1024),
+        });
+        deepStrictEqual(await res.json(), [
+          'pause',
+          'resume',
+          `end:${256 * 1024}`,
+        ]);
+      }
+    );
+  },
+};
+
 // req.pipe(res): the request body echoed straight back.
 export const echoThroughPipe = {
   async test(ctrl, env) {

@@ -207,6 +207,9 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     this.#stream = this.#response.body;
   }
 
+  // Pumps the body's reader into the Readable until backpressure (push()
+  // returning false) or EOF. The reader is acquired once and held for the
+  // message's lifetime, so a paused message can resume the pump later.
   async #tryRead(): Promise<void> {
     if (this.#stream == null || this.#reading) return;
 
@@ -232,7 +235,6 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       this.destroy(e as Error);
     } finally {
       this.#reading = false;
-      this.#reader?.releaseLock();
     }
   }
 

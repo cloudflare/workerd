@@ -22,6 +22,7 @@ export {
   streamingBodyArrivesIncrementally,
   fixedLengthBodyCarriesContentLength,
   pausedBodyResumesWithoutLoss,
+  pausedLargeBodyResumes,
   echoThroughPipe,
   bodyPipedToSeveralDestinations,
   bodyThroughWebTransformPipeline,
