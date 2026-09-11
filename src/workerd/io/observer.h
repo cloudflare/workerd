@@ -27,6 +27,9 @@ WD_STRONG_BOOL(SubrequestBodyRewindable);
 WD_STRONG_BOOL(ActorCallTargetRetryable);
 // Whether an outgoing request contributes to the logical subrequest count.
 WD_STRONG_BOOL(CountSubrequest);
+// Whether an outgoing actor call's payload can be sent again unchanged, e.g. a fetch with a
+// rewindable body or an RPC call whose arguments hold no externals.
+WD_STRONG_BOOL(ActorCallPayloadReplayable);
 
 enum class ActorRetryCallType : uint8_t {
   FETCH,
@@ -72,6 +75,16 @@ class ByteStreamObserver {
   // Called when a chunk of size `bytes` is dequeued from the stream (e.g. when a writable byte
   // stream writes the chunk to its corresponding sink).
   virtual void onChunkDequeued(size_t bytes) {};
+};
+
+// Observes one physical attempt of an outgoing Durable Object RPC call, from the moment it is sent
+// until its result settles. Destroying the observer without recording a result means the attempt
+// was canceled.
+class OutgoingActorCallObserver {
+ public:
+  virtual ~OutgoingActorCallObserver() noexcept(false) = default;
+  virtual void recordSuccess() {}
+  virtual void recordFailure(kj::Exception& e) {}
 };
 
 // Observes a specific request to a specific worker. Also observes outgoing subrequests.
@@ -157,6 +170,16 @@ class RequestObserver: public kj::Refcounted {
   // to feed retry classification.
   virtual void setNextSubrequestRetryEligibility(
       SubrequestBodyRewindable bodyRewindable, ActorCallTargetRetryable targetRetryable) {}
+
+  // Observes one `JsRpcTarget.call()` attempt on a Durable Object stub. The session carrying the
+  // call is not observed through wrapActorSubrequestClient(); its lifetime ends with capability
+  // teardown rather than with the call's result, so it says nothing about call latency or outcome.
+  // `payloadReplayable` is the call's serialized-argument classification; `targetRetryable` is
+  // whether the stub's factory can retry at all.
+  virtual kj::Maybe<kj::Own<OutgoingActorCallObserver>> observeOutgoingActorRpcCall(
+      ActorCallPayloadReplayable payloadReplayable, ActorCallTargetRetryable targetRetryable) {
+    return kj::none;
+  }
 
   // Records an additional outgoing actor call started by a runtime retry loop.
   virtual void recordActorRetry(ActorRetryCallType callType) {}
