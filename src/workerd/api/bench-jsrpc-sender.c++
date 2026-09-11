@@ -90,8 +90,8 @@ class LocalOutgoingFactory final: public Fetcher::OutgoingFactory {
     return {.client = receiver.makeWorkerEntrypoint(), .spanParents = kj::none};
   }
 
-  bool supportsActorCallRetries() const override {
-    return true;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable::YES;
   }
 
  private:
@@ -155,13 +155,13 @@ class JsRpcSenderHarness {
     int64_t externalWhilePending = 0;
     kj::Maybe<kj::Promise<void>> pending;
     sender->enterContext(*request, [&](const TestFixture::Environment& env) {
-      externalBefore = static_cast<int64_t>(env.js.v8Isolate->GetExternalMemory());
+      externalBefore = env.js.v8Isolate->GetExternalMemory();
       auto promises = kj::heapArrayBuilder<kj::Promise<void>>(callCount);
       for (size_t i = 0; i < callCount; ++i) {
         promises.add(call(env, KJ_ASSERT_NONNULL(accept), ArgumentKind::PLAIN));
       }
       pending = kj::joinPromises(promises.finish());
-      externalWhilePending = static_cast<int64_t>(env.js.v8Isolate->GetExternalMemory());
+      externalWhilePending = env.js.v8Isolate->GetExternalMemory();
     });
     auto allocatedWhilePending = currentAllocatedBytes();
     callGate.release(callCount);
