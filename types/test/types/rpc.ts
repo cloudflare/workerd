@@ -132,6 +132,12 @@ class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
   method() {
     return null;
   }
+  unknownMethod(): unknown {
+    return null;
+  }
+  unknownArrayObjectMethod(): { bar: unknown[] } {
+    return { bar: [] };
+  }
   async asyncMethod() {
     return true;
   }
@@ -540,6 +546,10 @@ export default <ExportedHandler<Env>>{
       s[symbolMethod];
 
       expectTypeOf(s.method()).toEqualTypeOf<Promise<null>>(); // (always async)
+      expectTypeOf(s.unknownMethod()).toEqualTypeOf<Promise<unknown>>();
+      const unknownArrayObject = await s.unknownArrayObjectMethod();
+      expectTypeOf(unknownArrayObject).not.toBeNever();
+      expectTypeOf(unknownArrayObject.bar).toEqualTypeOf<unknown[]>();
       expectTypeOf(await s.asyncMethod()).toEqualTypeOf<boolean>();
 
       expectTypeOf(s.voidMethod).toEqualTypeOf<(x?: number) => Promise<void>>(); // (always async)
