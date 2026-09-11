@@ -336,7 +336,7 @@ class Fetcher: public JsRpcClientProvider {
       kj::ConstString operationName,
       ActorCallRetryState::Attempt attempt);
 
-  bool supportsActorCallRetries();
+  bool supportsActorCallRetries() override;
   void onActorCallRetry();
 
   // Get a SubrequestChannel representing this Fetcher.
@@ -430,7 +430,7 @@ class Fetcher: public JsRpcClientProvider {
     return getRpcMethod(js, kj::mv(name));
   }
 
-  ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+  ClientForOneCall getClientForOneCall(jsg::Lock& js) override;
 
   kj::LiteralStringConst getRpcTargetKind() override;
 
