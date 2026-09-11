@@ -57,6 +57,7 @@ declare const primordials: {
   readonly SymbolAsyncIterator: typeof Symbol.asyncIterator;
   readonly SymbolToStringTag: typeof Symbol.toStringTag;
   readonly SymbolDispose: typeof Symbol.dispose;
+  readonly SymbolFor: typeof Symbol.for;
 
   // uncurryThis accepts Function (the typeof-narrowed type) in addition to
   // properly typed callables, so callers don't need to cast after a

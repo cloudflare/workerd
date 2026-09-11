@@ -63,9 +63,25 @@ private-brand dispatch, no `instanceof`) apply here — see
   before the scope entirely (stream construction via
   `RpcDeserializerExternalHandler::prepare()`'s externals hydration).
 
+## NODE.JS INTEROP HOOKS
+
+`ReadableStream.prototype` and `WritableStream.prototype` carry two
+non-enumerable members keyed by the well-known symbols Node's own web
+streams use: a `Symbol.for('nodejs.webstream.isClosedPromise')` getter
+(an object whose `promise` settles with the stream: fulfilled on close,
+rejected with the stored error, created lazily and marked handled) and a
+`Symbol.for('nodejs.webstream.controllerErrorFunction')` method (errors
+the stream as its controller's `error()` would; a native-backed readable
+also cancels its source). `src/node`'s `finished()`/`eos()`,
+`addAbortSignal()` and `compose()` rely on them to observe or error a web
+stream without taking its lock. The C++ implementation has no equivalent,
+and the node layer raises `ERR_WEB_STREAM_INTEROP_UNSUPPORTED` there.
+Suite: `src/tests/node/stream/finished-and-abort.js`.
+
 ## ANTI-PATTERNS
 
 - **NEVER** expose internals on user-visible exports. `streams.ts` exports
   exactly the user-visible classes plus `ReadableStreamDrainingReader`,
   which `main.ts` installs only under the internal-testing
-  `expose_draining_reader` flag.
+  `expose_draining_reader` flag. (The Node.js interop hooks above are the
+  one deliberate, symbol-keyed exception.)

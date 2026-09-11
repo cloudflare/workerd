@@ -26,7 +26,7 @@
 // Ported from https://github.com/mafintosh/end-of-stream with
 // permission from the author, Mathias Buus (@mafintosh).
 
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-unsafe-member-access */
 
 import { Readable } from 'node-internal:streams_readable';
 import { Writable } from 'node-internal:streams_writable';
@@ -37,6 +37,7 @@ import {
   AbortError,
   ERR_INVALID_ARG_TYPE,
   ERR_STREAM_PREMATURE_CLOSE,
+  ERR_WEB_STREAM_INTEROP_UNSUPPORTED,
 } from 'node-internal:internal_errors';
 import { once } from 'node-internal:internal_http_util';
 import {
@@ -340,6 +341,14 @@ function eosWeb(
   options: { signal?: AbortSignal },
   callback: (...args: unknown[]) => void
 ): () => void {
+  const closed = (
+    stream as ReadableStream & {
+      [kIsClosedPromise]?: { promise: Promise<unknown> };
+    }
+  )[kIsClosedPromise];
+  if (closed === undefined) {
+    throw new ERR_WEB_STREAM_INTEROP_UNSUPPORTED('finished()');
+  }
   let isAborted = false;
   let abort = nop;
   if (options.signal) {
@@ -368,8 +377,7 @@ function eosWeb(
       });
     }
   };
-  // @ts-expect-error TS7053 Symbols are not defined in types yet.
-  stream[kIsClosedPromise].promise.then(resolverFn, resolverFn);
+  closed.promise.then(resolverFn, resolverFn);
   return nop;
 }
 

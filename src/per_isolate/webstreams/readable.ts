@@ -68,6 +68,7 @@ const {
   SafeWeakMap,
   Symbol,
   SymbolAsyncIterator,
+  SymbolFor,
   SymbolIterator,
   SymbolToStringTag,
   TextDecoder,
@@ -278,6 +279,24 @@ let isByteStreamController: (value: unknown) => boolean;
 // scope. Proxies deliberately do not convey it (the C++ check rejects
 // proxies up front), matching the #-brand's no-tunneling behavior.
 const kReadableStreamBrand: symbol = utils.getApiSymbol('kReadableStreamBrand');
+
+// The Node.js stream-interop hooks, keyed by the well-known symbols Node's
+// own web streams carry. node:stream's finished()/eos() observes a web
+// stream's completion through `stream[kIsClosedPromise].promise` (which
+// settles with the stream: fulfilled on close, rejected with the stored
+// error), and addAbortSignal() errors a stream from outside through
+// `stream[kControllerErrorFunction](reason)`. Both are prototype members
+// (a getter and a method) so instances pay nothing until asked. The
+// symbols are deliberately the Symbol.for() ones rather than API-registry
+// symbols: userland ports of Node's streams look for exactly these.
+const kIsClosedPromise: symbol = SymbolFor('nodejs.webstream.isClosedPromise');
+const kControllerErrorFunction: symbol = SymbolFor(
+  'nodejs.webstream.controllerErrorFunction'
+);
+
+// Settles the stream's closed-promise hook (if one was ever requested) to
+// match a state transition; assigned in ReadableStream's static block.
+let settleReadableStreamClosedPromise: <R>(stream: ReadableStream<R>) => void;
 
 // BACKEND-DISPATCH: the byte-CAPABLE gate (one of the five sanctioned
 // dispatch points). True for any controller whose backend can satisfy
@@ -1129,6 +1148,7 @@ function readableStreamClose<R>(stream: ReadableStream<R>): void {
   if (reader !== undefined) {
     resolveGenericReaderPromise(reader);
   }
+  settleReadableStreamClosedPromise(stream);
   notifyBranchSettled(stream);
 }
 
@@ -1140,6 +1160,7 @@ function readableStreamError<R>(stream: ReadableStream<R>, e: unknown): void {
   if (reader !== undefined) {
     rejectGenericReaderPromise(reader, e);
   }
+  settleReadableStreamClosedPromise(stream);
   notifyBranchSettled(stream);
 }
 
@@ -2964,6 +2985,11 @@ class ReadableStream<R> {
   #disturbed: boolean = false;
   #state: 'readable' | 'closed' | 'errored' = 'readable';
   #storedError?: unknown;
+  // The Node.js interop closed-promise (see kIsClosedPromise), created on
+  // first request and settled by readableStreamClose/readableStreamError.
+  // Terminal-state shells (tee and detach copies) never transition, so a
+  // request against one is settled immediately from its state.
+  #closedPromise?: PromiseWithResolversType<void> | undefined;
   // The pending-closure gate (JsReadableStream::setPendingClosure): set by
   // the stream's owning object (a Socket) the moment its closure begins, so
   // that new reads, pipes, and tees fail fast with a descriptive error
@@ -3590,6 +3616,16 @@ class ReadableStream<R> {
       stream.#state = state;
     };
 
+    settleReadableStreamClosedPromise = <R>(stream: ReadableStream<R>) => {
+      const closed = stream.#closedPromise;
+      if (closed === undefined) return;
+      if (stream.#state === 'closed') {
+        closed.resolve();
+      } else if (stream.#state === 'errored') {
+        closed.reject(stream.#storedError);
+      }
+    };
+
     setReadableStreamDisturbed = <R>(stream: ReadableStream<R>) => {
       stream.#disturbed = true;
     };
@@ -4122,6 +4158,41 @@ class ReadableStream<R> {
     preventCancel?: boolean;
   }): AsyncIterableIterator<R> {
     return this.values(options);
+  }
+
+  // Node.js interop (see kIsClosedPromise): an object whose promise settles
+  // with the stream — fulfilled on close, rejected with the stored error.
+  // Nothing may ever look at the rejection, so it is marked handled.
+  get [kIsClosedPromise](): { promise: Promise<void> } {
+    assertIsReadableStream(this);
+    let closed = this.#closedPromise;
+    if (closed === undefined) {
+      closed = PromiseWithResolvers() as PromiseWithResolversType<void>;
+      markPromiseHandled(closed.promise);
+      this.#closedPromise = closed;
+      settleReadableStreamClosedPromise(this);
+    }
+    return { promise: closed.promise };
+  }
+
+  // Node.js interop (see kControllerErrorFunction): errors a readable stream
+  // from outside, as its controller's error() does — pending reads reject
+  // and the state becomes errored. A native-backed stream also cancels its
+  // C++ source, which has lost its consumer. On a tee branch the shared
+  // controller errors every branch (the queued backend's single-queue tee
+  // model).
+  [kControllerErrorFunction](reason: unknown): void {
+    assertIsReadableStream(this);
+    if (this.#state !== 'readable') return;
+    const controller = this.#controller;
+    if (controller === undefined) {
+      readableStreamError(this, reason);
+      return;
+    }
+    controller.error(reason);
+    if (isNativeController(controller)) {
+      markPromiseHandled(controllerCancelSteps(controller, reason));
+    }
   }
 }
 
