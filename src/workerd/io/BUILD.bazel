@@ -283,11 +283,11 @@ wd_cc_library(
         ":trace_capnp",
         ":worker-interface_capnp",
         "//src/workerd/jsg:memory-tracker",
+        "//src/workerd/util:kj-http",
         "//src/workerd/util:own-util",
         "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
-        "@capnp-cpp//src/kj/compat:kj-http",
         "@ssl",
     ],
 )

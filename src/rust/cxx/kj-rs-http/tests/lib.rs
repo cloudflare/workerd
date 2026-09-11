@@ -1,40 +1,47 @@
 use std::pin::Pin;
 
 use kj::Result;
-use kj::http::ConnectResponse;
-use kj::http::ConnectSettings;
 use kj::http::CustomHeaderId;
-use kj::http::CxxService;
-use kj::http::DynHttpService;
 use kj::http::HeadersRef;
-use kj::http::Method;
-use kj::http::Service;
-use kj::http::ServiceResponse;
-use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use kj_rs::KjMaybe;
-use kj_rs::KjOwn;
 
 #[cxx::bridge(namespace = "kj::rust::tests")]
+// The named `'a` on the mirrored `HttpConnectSettings<'a>` shared struct cannot be elided to
+// `'_` in a struct definition and is required by the cxx::bridge dialect.
+#[allow(clippy::elidable_lifetime_names)]
 pub mod ffi {
     #[namespace = "kj::rust"]
     unsafe extern "C++" {
-        include!("workerd/rust/kj/ffi.h");
+        include!("kj-rs-http/ffi.h");
         type HttpService = kj::http::ffi::HttpService;
         type HttpHeaders = kj::http::ffi::HttpHeaders;
         type HttpHeaderId = kj::http::ffi::HttpHeaderId;
+        type AsyncIoStream = kj::io::ffi::AsyncIoStream;
+        type ConnectResponse = kj::http::ffi::ConnectResponse;
+        type TlsStarterCallback = kj::http::ffi::TlsStarterCallback;
     }
 
+    /// Mirror of `kj::http::ffi::HttpConnectSettings` (shared structs cannot be aliased across
+    /// bridges; the C++ definition is include-guarded, so the duplicate is benign).
     #[namespace = "kj::rust"]
-    extern "Rust" {
-        type DynHttpService = kj::http::DynHttpService;
+    struct HttpConnectSettings<'a> {
+        use_tls: bool,
+        tls_starter: KjMaybe<Pin<&'a mut TlsStarterCallback>>,
     }
 
     extern "Rust" {
-        type ProxyHttpService;
-
-        #[expect(clippy::unnecessary_box_returns)]
-        fn new_proxy_http_service(service: KjOwn<HttpService>) -> Box<DynHttpService>;
+        /// Forward a connect() call to `service` from Rust, passing `settings` through. This
+        /// exercises the C++ -> Rust -> C++ round-trip for HttpConnectSettings (including the
+        /// outbound tls_starter).
+        async unsafe fn connect_through_rust<'a>(
+            service: Pin<&'a mut HttpService>,
+            host: &'a [u8],
+            headers: &'a HttpHeaders,
+            connection: Pin<&'a mut AsyncIoStream>,
+            response: Pin<&'a mut ConnectResponse>,
+            settings: HttpConnectSettings<'a>,
+        ) -> Result<()>;
 
         /// Look up a header value by HttpHeaderId, returning the value if present.
         /// This exercises the C++ -> Rust -> C++ round-trip for HttpHeaderId.
@@ -61,51 +68,22 @@ pub mod ffi {
     }
 }
 
-struct ProxyHttpService {
-    target: CxxService<'static>,
-}
-
-#[async_trait::async_trait(?Send)]
-impl Service for ProxyHttpService {
-    async fn request<'a>(
-        &'a mut self,
-        method: Method,
-        url: &'a [u8],
-        headers: HeadersRef<'a>,
-        request_body: Pin<&'a mut AsyncInputStream>,
-        response: ServiceResponse<'a>,
-    ) -> Result<()> {
-        self.target
-            .request(method, url, headers, request_body, response)
-            .await?;
-        Ok(())
-    }
-
-    fn connect<'a, 'b>(
-        &'a mut self,
-        host: &'a [u8],
-        headers: HeadersRef<'a>,
-        connection: Pin<&'a mut AsyncIoStream>,
-        response: ConnectResponse<'a>,
-        settings: ConnectSettings<'a>,
-    ) -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = Result<()>> + 'b>>
-    where
-        'a: 'b,
-        Self: 'b,
-    {
-        Box::pin(
-            self.target
-                .connect(host, headers, connection, response, settings),
-        )
-    }
-}
-
-#[expect(clippy::unnecessary_box_returns)]
-fn new_proxy_http_service(service: KjOwn<ffi::HttpService>) -> Box<DynHttpService> {
-    ProxyHttpService {
-        target: service.into(),
-    }
-    .into_ffi()
+async fn connect_through_rust<'a>(
+    service: Pin<&'a mut ffi::HttpService>,
+    host: &'a [u8],
+    headers: &'a ffi::HttpHeaders,
+    connection: Pin<&'a mut AsyncIoStream>,
+    response: Pin<&'a mut ffi::ConnectResponse>,
+    settings: ffi::HttpConnectSettings<'a>,
+) -> Result<()> {
+    // Rebuild the settings as the main bridge's identical struct (see the bridge definition),
+    // then forward to kj::HttpService::connect the same way CxxService does.
+    let settings = kj::http::ffi::HttpConnectSettings {
+        use_tls: settings.use_tls,
+        tls_starter: settings.tls_starter,
+    };
+    kj::http::ffi::connect(service, host, headers, connection, response, settings).await?;
+    Ok(())
 }
 
 fn get_header_value_via_id<'a>(

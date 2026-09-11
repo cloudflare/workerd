@@ -7,6 +7,7 @@
 #include "alarm-scheduler.h"
 #include "container-client.h"
 #include "pyodide.h"
+#include "tls-network.h"
 #include "workerd-api.h"
 
 #include <workerd/api/actor-state.h>
@@ -50,7 +51,6 @@
 #include <capnp/message.h>
 #include <capnp/rpc-twoparty.h>
 #include <kj/compat/http.h>
-#include <kj/compat/tls.h>
 #include <kj/compat/url.h>
 #include <kj/debug.h>
 #include <kj/encoding.h>
@@ -1759,60 +1759,14 @@ class Server::ActorNamespace final {
 
 // =======================================================================================
 
-kj::Own<kj::TlsContext> Server::makeTlsContext(config::TlsOptions::Reader conf) {
-  kj::TlsContext::Options options;
-
-  struct Attachments {
-    kj::Maybe<kj::TlsKeypair> keypair;
-    kj::Array<kj::TlsCertificate> trustedCerts;
-  };
-  auto attachments = kj::heap<Attachments>();
-
-  if (conf.hasKeypair()) {
-    auto pairConf = conf.getKeypair();
-    options.defaultKeypair = attachments->keypair.emplace(
-        kj::TlsKeypair{.privateKey = kj::TlsPrivateKey(pairConf.getPrivateKey()),
-          .certificate = kj::TlsCertificate(pairConf.getCertificateChain())});
-  }
-
-  options.verifyClients = conf.getRequireClientCerts();
-  options.useSystemTrustStore = conf.getTrustBrowserCas();
-
-  auto trustList = conf.getTrustedCertificates();
-  if (trustList.size() > 0) {
-    attachments->trustedCerts = KJ_MAP(cert, trustList) { return kj::TlsCertificate(cert); };
-    options.trustedCertificates = attachments->trustedCerts;
-  }
-
-  switch (conf.getMinVersion()) {
-    case config::TlsOptions::Version::GOOD_DEFAULT:
-      // Don't change.
-      goto validVersion;
-    case config::TlsOptions::Version::SSL3:
-      options.minVersion = kj::TlsVersion::SSL_3;
-      goto validVersion;
-    case config::TlsOptions::Version::TLS1_DOT0:
-      options.minVersion = kj::TlsVersion::TLS_1_0;
-      goto validVersion;
-    case config::TlsOptions::Version::TLS1_DOT1:
-      options.minVersion = kj::TlsVersion::TLS_1_1;
-      goto validVersion;
-    case config::TlsOptions::Version::TLS1_DOT2:
-      options.minVersion = kj::TlsVersion::TLS_1_2;
-      goto validVersion;
-    case config::TlsOptions::Version::TLS1_DOT3:
-      options.minVersion = kj::TlsVersion::TLS_1_3;
-      goto validVersion;
-  }
-  reportConfigError(kj::str("Encountered unknown TlsOptions::minVersion setting. Was the "
-                            "config compiled with a newer version of the schema?"));
-
-validVersion:
-  if (conf.hasCipherList()) {
-    options.cipherList = conf.getCipherList();
-  }
-
-  return kj::heap<kj::TlsContext>(kj::mv(options)).attach(kj::mv(attachments));
+kj::Own<kj::SecureNetworkWrapper> Server::makeTlsContext(config::TlsOptions::Reader conf) {
+  // The TLS engine comes from the tls-network seam: kj::TlsContext (OpenSSL) in the default
+  // build -- upstream's mapping, verbatim -- or rustls under --//:io_backend=rust. Either way
+  // the returned object provides kj::TlsContext's kj::SecureNetworkWrapper surface
+  // (wrapAddress/wrapNetwork for clients, wrapPort/wrapServer for TLS listeners), so the call
+  // sites below keep upstream's shape.
+  return workerd::server::makeTlsContext(
+      conf, [this](kj::String error) { reportConfigError(kj::mv(error)); });
 }
 
 kj::Promise<kj::Own<kj::NetworkAddress>> Server::makeTlsNetworkAddress(
@@ -6454,15 +6408,10 @@ class Server::HttpListener final: public kj::Refcounted {
 
         kj::PeerIdentity* peerId;
 
-        KJ_IF_SOME(tlsId, kj::tryDowncast<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
-          peerId = &tlsId.getNetworkIdentity();
-
-          // TODO(someday): Add client certificate info to the cf blob? At present, KJ only
-          //   supplies the common name, but that doesn't even seem to be one of the fields that
-          //   Cloudflare-hosted Workers receive. We should probably try to match those.
-        } else {
-          peerId = stream.peerIdentity;
-        }
+        // A TLS listener's accepted streams carry a TLS peer identity wrapping the network
+        // identity; unwrap it via the tls-network seam (the kj::TlsPeerIdentity downcast under
+        // the default build; the rustls wrapper passes the network identity through directly).
+        peerId = &unwrapTlsPeerIdentity(*stream.peerIdentity);
 
         KJ_IF_SOME(remote, kj::tryDowncast<kj::NetworkPeerIdentity>(*peerId)) {
           cfBlobJson = kj::str("{\"clientIp\": ", escapeJsonString(remote.toString()), "}");
@@ -6919,7 +6868,15 @@ uint startInspector(
   // Start the InspectorService thread.
   kj::Thread thread([inspectorAddress, &inspectorPort, &registrar,
                         isolateThreadExecutor = kj::mv(isolateThreadExecutor)]() mutable {
-    kj::AsyncIoContext io = kj::setupAsyncIo();
+    // This side thread runs its own event loop via kj::setupAsyncIo(), which transparently
+    // supplies the native KJ loop in the default (cxx) build and a tokio-backed loop (one
+    // TokioEventPort / current_thread runtime per thread) under --//:io_backend=rust (see
+    // //src/workerd/util:setup-async-io). Either way the cross-thread bridging below is the same:
+    // the isolate thread's kj::Executor (captured above) is invoked from this thread via
+    // executeAsync(), and the isolate thread notifies this thread's loop through
+    // XThreadNotifier's cross-thread fulfillers, both of which rely only on the target loop's
+    // EventPort::wake() contract, which both ports implement.
+    auto io = kj::setupAsyncIo();
 
     kj::HttpHeaderTable::Builder headerTableBuilder;
 
@@ -7073,10 +7030,10 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
   services.findOrCreate("internet"_kj, [&]() {
     auto publicNetwork = network.restrictPeers({"public"_kj});
 
-    kj::TlsContext::Options options;
-    options.useSystemTrustStore = true;
-
-    kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
+    // System (default) trust store, from the tls-network seam: kj::TlsContext with
+    // useSystemTrustStore in the default build, rustls with the platform verifier under
+    // --//:io_backend=rust.
+    kj::Own<kj::SecureNetworkWrapper> tls = newSystemTrustTlsNetworkWrapper();
     auto tlsNetwork = tls->wrapNetwork(*publicNetwork);
 
     // Attaching to refcounted NetworkService is safe since services map is long-lived
@@ -7179,7 +7136,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
 
     KJ_IF_SOME(t, socketConfig.tls) {
       listener = ([](kj::Promise<kj::Own<kj::ConnectionReceiver>> promise,
-                      kj::Own<kj::TlsContext> tls) -> PromisedReceived {
+                      kj::Own<kj::SecureNetworkWrapper> tls) -> PromisedReceived {
         auto port = co_await promise;
         co_return tls->wrapPort(kj::mv(port)).attach(kj::mv(tls));
       })(kj::mv(listener), kj::mv(t));

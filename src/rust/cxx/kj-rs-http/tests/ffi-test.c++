@@ -2,9 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <workerd/rust/kj/http.rs.h>
-#include <workerd/rust/kj/tests/lib.rs.h>
-
+#include <kj-rs-http/http.rs.h>
+#include <kj-rs-http/tests/lib.rs.h>
 #include <kj-rs/kj-rs.h>
 
 #include <kj/test.h>
@@ -203,9 +202,6 @@ KJ_TEST("http connect settings") {
   kj::WaitScope waitScope(loop);
 
   auto mock = kj::heap<MockHttpService>();
-  auto mockRef = *mock;
-
-  auto proxy = kj::rust::tests::new_proxy_http_service(kj::mv(mock));
 
   kj::StringPtr host = "example.com";
   kj::HttpHeaderTable headerTable;
@@ -220,7 +216,8 @@ KJ_TEST("http connect settings") {
   ::kj::rust::HttpConnectSettings settings = {.use_tls = false, .tls_starter = kj::none};
   settings.tls_starter = tlsStarter;
 
-  auto promise = proxy->connect(host.asBytes().as<Rust>(), headers, connection, tunnel, settings);
+  auto promise = kj::rust::tests::connect_through_rust(
+      *mock, host.asBytes().as<Rust>(), headers, connection, tunnel, settings);
   KJ_ASSERT_NONNULL (*tlsStarter)(host).wait(waitScope);
   KJ_EXPECT(tlsHost == host);
 }

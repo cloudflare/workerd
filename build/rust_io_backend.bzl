@@ -15,12 +15,15 @@ IMPORTANT -- the gate is opt-in: //src/workerd/server:rust-io-hermeticity is tag
 so `bazel build //...` never runs it. The rust-config CI lane must build it EXPLICITLY for
 the guarantee to hold.
 
-The forbidden set grows in lockstep with what `=rust` means per migration stage (v1: the
-tokio event loop + I/O; later stages append kj-http/kj-tls, then capnp-rpc). Deliberately
-ALLOWED today: @capnp-cpp//src/kj:kj-async-core and :kj-async-io (the abstract Promise and
-stream/Network layers the rust backend itself is built on), kj-http/kj-tls/capnp-rpc (still
-the only implementation in both configs; they consume abstract streams, no OS I/O), and the
-kj-gzip/kj-brotli codecs (not a transport).
+The forbidden set grows in lockstep with what `=rust` means: the tokio event loop + I/O, and
+hyper + rustls for HTTP/TLS (a later stage adds the Cap'n Proto RPC wire). Deliberately
+ALLOWED: @capnp-cpp//src/kj:kj-async-core and :kj-async-io (the abstract Promise and
+stream/Network layers the rust backend itself is built on), //src/kj/compat:kj-http-types (the
+kj-http types: header table/objects, the interface default methods, PausableReadAsyncIoStream --
+the concrete HTTP/1.1 client/server implementation half, :kj-http-impl, is forbidden and
+replaced by hyper
+behind //src/workerd/util:kj-http's symbol shim), //src/capnp:capnp-rpc (still the one-and-only RPC wire in both configs; it consumes
+abstract streams, no OS I/O), and the kj-gzip/kj-brotli codecs (not a transport).
 """
 
 visibility("public")
@@ -39,6 +42,12 @@ def rust_io_backend_local_defines():
 # Forbidden concrete C++ I/O targets, as "//package:target" label suffixes (suffix-matched so
 # bzlmod repo-name canonicalization doesn't have to be spelled out). The single source of truth.
 _FORBIDDEN = [
+    # kj::TlsContext (OpenSSL), replaced by rustls.
+    "//src/kj/compat:kj-tls",
+    # The concrete C++ HTTP/1.1 client/server implementation (kj/compat/http.c++), replaced by
+    # hyper via //src/workerd/util:kj-http's shim; the types half
+    # (:kj-http-types) stays ALLOWED. Reaching this also catches the :kj-http umbrella.
+    "//src/kj/compat:kj-http-impl",
     # The kj OS event loop / socket layer (setupAsyncIo, UnixEventPort/Win32IocpEventPort),
     # replaced by kj-rs-tokio + kj-rs-io.
     "//src/kj:kj-async-os",

@@ -9,6 +9,8 @@
 #include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
 
+#include <kj-rs-tokio/tokio-event-port.h>
+
 #include <capnp/compat/http-over-capnp.h>
 #include <capnp/rpc-twoparty.h>
 #include <kj/async-queue.h>
@@ -332,7 +334,31 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
   TestServer(kj::StringPtr configText,
       Worker::ConsoleMode consoleMode = Worker::ConsoleMode::INSPECTOR_ONLY,
       kj::SourceLocation loc = {})
-      : ws(loop),
+      : TestServer(makeTokioPort(), configText, consoleMode, loc) {}
+
+ private:
+  // Every test drives its loop with a kj-rs-tokio TokioEventPort. It is required whenever a test
+  // exercises hyper in either direction -- its connection tasks run on the KJ thread's per-thread
+  // tokio runtime, which only exists, and only runs, with a TokioEventPort driving this thread's
+  // loop. Tests that never touch hyper are unaffected (the port drives a plain KJ loop).
+  static kj::Maybe<kj::Own<kj_rs_tokio::TokioEventPort>> makeTokioPort() {
+    return kj::heap<kj_rs_tokio::TokioEventPort>();
+  }
+
+  static kj::Own<kj::EventLoop> makeLoop(kj::Maybe<kj::Own<kj_rs_tokio::TokioEventPort>>& port) {
+    KJ_IF_SOME(p, port) {
+      return kj::heap<kj::EventLoop>(*p);
+    }
+    return kj::heap<kj::EventLoop>();
+  }
+
+  TestServer(kj::Maybe<kj::Own<kj_rs_tokio::TokioEventPort>> tokioPortParam,
+      kj::StringPtr configText,
+      Worker::ConsoleMode consoleMode,
+      kj::SourceLocation loc)
+      : tokioPort(kj::mv(tokioPortParam)),
+        loop(makeLoop(tokioPort)),
+        ws(*loop),
         config(parseConfig(configText, loc)),
         root(kj::newInMemoryDirectory(*this)),
         pwd(kj::Path({"current", "dir"})),
@@ -362,6 +388,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
         fakeDate(kj::UNIX_EPOCH),
         mockNetwork(*this, {}, {}) {}
 
+ public:
   ~TestServer() noexcept(false) {
     for (auto& subq: subrequests) {
       subq.value->rejectAll(KJ_EXCEPTION(FAILED, "test ended"));
@@ -417,6 +444,14 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
 
   // Expect an incoming connection on the given address and from a network with the given
   // allowed / denied peer list.
+  //
+  // All outbound traffic flows through kj::Network::parseAddress() (addresses are opaque
+  // string keys here) in BOTH build configs: external services dial their configured address
+  // through kj::newHttpClient(timer, table, addr), and network services (including the
+  // built-in "internet") dial through kj::newHttpClient(timer, table, network, tlsNetwork,
+  // ...) over the restricted network -- under --//:io_backend=rust those entry points are the
+  // hyper-backed shim (//src/workerd/util:kj-http), which dials through the same kj::Network,
+  // so this mock observes every dial and every restrictPeers filter in both backends.
   TestStream receiveSubrequest(kj::StringPtr addr,
       kj::ArrayPtr<const kj::StringPtr> allowedPeers = nullptr,
       kj::ArrayPtr<const kj::StringPtr> deniedPeers = nullptr,
@@ -454,7 +489,10 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
     return ws;
   }
 
-  kj::EventLoop loop;
+  // The TokioEventPort driving this test's loop (see makeTokioPort); must be declared before
+  // (and thus destroyed after) the loop it drives.
+  kj::Maybe<kj::Own<kj_rs_tokio::TokioEventPort>> tokioPort;
+  kj::Own<kj::EventLoop> loop;
   kj::WaitScope ws;
 
   kj::Own<config::Config::Reader> config;
@@ -1246,6 +1284,10 @@ KJ_TEST("Server: WebCrypto bindings") {
       "ec extractable? false, true");
 }
 
+// This drives the built-in "internet" service's HTTP outbound over the mock network in both
+// build configs: the network client (kj's under cxx, the hyper-backed shim under
+// --//:io_backend=rust) dials through Server's kj::Network, so the mock observes the dial and
+// the public-only peer filter either way.
 KJ_TEST("Server: subrequest to default outbound") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
@@ -2129,6 +2171,11 @@ KJ_TEST("Server: invalid entrypoint") {
 KJ_TEST("Server: referencing non-extant default entrypoint is not an error") {
   // For historical reasons, it's not a config error to refer to to the default entrypoint of
   // a service that has no default export.
+  //
+  // The fall-through subrequest this test expects (see below) is incidental, so it is routed
+  // through an explicit globalOutbound external service, which keeps it on the kj HTTP client
+  // over the in-memory mock network under both I/O backends (see the note on
+  // TestServer::receiveSubrequest).
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -2144,8 +2191,10 @@ KJ_TEST("Server: referencing non-extant default entrypoint is not an error") {
                 `}
             )
           ],
+          globalOutbound = "fallback-outbound",
         )
       ),
+      ( name = "fallback-outbound", external = "fallback-host" ),
     ],
     sockets = [
       ( name = "main", address = "test-addr", service = "hello" ),
@@ -2168,7 +2217,7 @@ KJ_TEST("Server: referencing non-extant default entrypoint is not an error") {
   //
   // So... we expect... a subrequest...
   {
-    auto subreq = test.receiveSubrequest("foo", {"public"});
+    auto subreq = test.receiveSubrequest("fallback-host");
     subreq.recv(R"(
       GET / HTTP/1.1
       Host: foo
@@ -2252,6 +2301,10 @@ KJ_TEST("Server: referencing DO class as entrypoint is not an error") {
 KJ_TEST("Server: exporting a DO class as the default export is not an error") {
   // For historical reasons, it's not a config error to export a DO class as the default
   // entrypoint. It doesn't work at runtime, but it's not a config error.
+  //
+  // As in "referencing non-extant default entrypoint is not an error" above, the fall-through
+  // subrequest is incidental and is routed through a globalOutbound external service so it
+  // reaches the in-memory mock under both I/O backends.
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -2269,8 +2322,10 @@ KJ_TEST("Server: exporting a DO class as the default export is not an error") {
                 `}
             )
           ],
+          globalOutbound = "fallback-outbound",
         )
       ),
+      ( name = "fallback-outbound", external = "fallback-host" ),
     ],
     sockets = [
       ( name = "main",
@@ -2306,7 +2361,7 @@ KJ_TEST("Server: exporting a DO class as the default export is not an error") {
   conn.sendHttpGet("/");
 
   {
-    auto subreq = test.receiveSubrequest("foo", {"public"});
+    auto subreq = test.receiveSubrequest("fallback-host");
     subreq.recv(R"(
       GET / HTTP/1.1
       Host: foo
@@ -3712,6 +3767,10 @@ KJ_TEST("Server: Durable Objects websocket constructor blockConcurrencyWhile thr
   // 2. Observe the "normal" behavior when `LegacyWebSocketAdapter::pump` is canceled after `ctx.abort()`.
   // This test showcases that the only situation in which `ws` can be freed during the pump loop is when
   // we throw from the constructor.
+  //
+  // The constructor's fetch exists only to yield from JS to the IO event loop; it is routed
+  // through a globalOutbound external service so it reaches the in-memory mock under both I/O
+  // backends (see TestServer::receiveSubrequest).
   TestServer test(R"((
     services = [(
       name = "main",
@@ -3756,7 +3815,11 @@ KJ_TEST("Server: Durable Objects websocket constructor blockConcurrencyWhile thr
           uniqueKey = "repro-key",
         )],
         durableObjectStorage = (inMemory = void),
+        globalOutbound = "subhost-outbound",
       ),
+    ), (
+      name = "subhost-outbound",
+      external = "subhost",
     )],
     sockets = [(name = "main", address = "test-addr", service = "main")],
   ))"_kj);
@@ -3774,7 +3837,7 @@ KJ_TEST("Server: Durable Objects websocket constructor blockConcurrencyWhile thr
 
   // The reconstructed actor's constructor makes an outbound fetch to yield from JS to IO event loop,
   // we need wait for it.
-  auto subreq = test.receiveInternetSubrequest("subhost");
+  auto subreq = test.receiveSubrequest("subhost");
   subreq.recv(R"(
     GET /foo HTTP/1.1
     Host: subhost
@@ -3799,6 +3862,10 @@ KJ_TEST("Server: Durable Objects websocket constructor blockConcurrencyWhile thr
 }
 
 KJ_TEST("Server: tail workers") {
+  // Each tail worker's report fetch is incidental to what's tested here (tail event delivery);
+  // each is routed through its own globalOutbound external service (one per tail worker, so
+  // each report lands on its own mock queue and the receive order below stays deterministic).
+  // See TestServer::receiveSubrequest.
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -3835,6 +3902,7 @@ KJ_TEST("Server: tail workers") {
                 `}
             )
           ],
+          globalOutbound = "tail-outbound",
         )
       ),
       ( name = "tail2",
@@ -3850,8 +3918,11 @@ KJ_TEST("Server: tail workers") {
                 `}
             )
           ],
+          globalOutbound = "tail2-outbound",
         )
       ),
+      ( name = "tail-outbound", external = "tail" ),
+      ( name = "tail2-outbound", external = "tail2" ),
     ],
     sockets = [
       ( name = "main",
@@ -3866,7 +3937,7 @@ KJ_TEST("Server: tail workers") {
   conn.sendHttpGet("/");
   conn.recvHttp200("OK");
 
-  auto subreq = test.receiveInternetSubrequest("tail");
+  auto subreq = test.receiveSubrequest("tail");
   subreq.recv(R"(
     POST / HTTP/1.1
     Content-Length: 23
@@ -3875,7 +3946,7 @@ KJ_TEST("Server: tail workers") {
 
     [["foo","bar"],["baz"]])"_blockquote);
 
-  auto subreq2 = test.receiveInternetSubrequest("tail2");
+  auto subreq2 = test.receiveSubrequest("tail2");
   subreq2.recv(R"(
     GET /2 HTTP/1.1
     Host: tail2
@@ -3896,6 +3967,7 @@ KJ_TEST("Server: tail workers") {
 }
 
 // =======================================================================================
+
 // Test HttpOptions on receive
 
 KJ_TEST("Server: serve proxy requests") {
@@ -4171,6 +4243,10 @@ KJ_TEST("Server: drain incoming HTTP connections") {
 // We're going to stop using JavaScript here because it's not really helping. We can directly
 // connect a socket to a non-Worker service.
 
+// This drives a network service's HTTP outbound over the mock network in both build configs:
+// the config allow/deny lists arrive at kj::Network::restrictPeers(), which the mock observes
+// and asserts on, because the network client (kj's under cxx, the hyper-backed shim under
+// --//:io_backend=rust) dials through the restricted network either way.
 KJ_TEST("Server: network outbound with allow/deny") {
   TestServer test(R"((
     services = [
@@ -5244,6 +5320,10 @@ KJ_TEST("Server: cache name is passed through to service") {
 KJ_TEST("Server: JS RPC over HTTP connections") {
   // Test that we can send RPC over an ExternalServer pointing back to our own loopback socket,
   // as long as both are configured with a `capnpConnectHost`.
+  //
+  // "loopback" is not an explicit host:port, so under both I/O backends the external service
+  // uses the kj HTTP client over TestServer's in-memory mock network (addresses are opaque
+  // string keys there); see the note on TestServer::receiveSubrequest.
 
   TestServer test(R"((
     services = [
@@ -5465,6 +5545,9 @@ KJ_TEST("Server: loopback binding calls accept version property") {
 // TODO(beta): Test CLI overrides
 
 KJ_TEST("Server: encodeResponseBody: manual option") {
+  // The subrequest's destination is incidental to what's tested here (manual response-body
+  // encoding); it is routed through a globalOutbound external service so it reaches the
+  // in-memory mock under both I/O backends (see TestServer::receiveSubrequest).
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -5492,9 +5575,11 @@ KJ_TEST("Server: encodeResponseBody: manual option") {
                 `  }
                 `}
             )
-          ]
+          ],
+          globalOutbound = "subhost-outbound"
         )
-      )
+      ),
+      ( name = "subhost-outbound", external = "subhost" )
     ],
     sockets = [
       ( name = "main",
@@ -5508,7 +5593,7 @@ KJ_TEST("Server: encodeResponseBody: manual option") {
   auto conn = test.connect("test-addr");
   conn.sendHttpGet("/");
 
-  auto subreq = test.receiveInternetSubrequest("subhost");
+  auto subreq = test.receiveSubrequest("subhost");
   subreq.recv(R"(
     GET /foo HTTP/1.1
     Host: subhost
@@ -5534,6 +5619,7 @@ KJ_TEST("Server: encodeResponseBody: manual option") {
 }
 
 KJ_TEST("Server: encodeResponseBody: manual pass-through") {
+  // As above, the subrequest destination is incidental; see TestServer::receiveSubrequest.
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -5551,9 +5637,11 @@ KJ_TEST("Server: encodeResponseBody: manual pass-through") {
                 `  }
                 `}
             )
-          ]
+          ],
+          globalOutbound = "subhost-outbound"
         )
-      )
+      ),
+      ( name = "subhost-outbound", external = "subhost" )
     ],
     sockets = [
       ( name = "main",
@@ -5567,7 +5655,7 @@ KJ_TEST("Server: encodeResponseBody: manual pass-through") {
   auto conn = test.connect("test-addr");
   conn.sendHttpGet("/");
 
-  auto subreq = test.receiveInternetSubrequest("subhost");
+  auto subreq = test.receiveSubrequest("subhost");
   subreq.recv(R"(
     GET /foo HTTP/1.1
     Host: subhost

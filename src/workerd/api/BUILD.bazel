@@ -456,9 +456,9 @@ wd_cc_library(
         "//src/pyodide:python_packages_capnp",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
+        "//src/workerd/util:kj-http",
         "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@capnp-cpp//src/kj/compat:kj-http",
         "@ssl",
     ],
 )

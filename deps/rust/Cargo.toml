@@ -32,31 +32,76 @@ syn = { version = "2", features = ["full"] }
 ada-url = { version = "4", default-features = false, features = ["std"] }
 anyhow = "1"
 async-trait = { version = "0", default-features = false }
+# base64/sha1/rand back the WebSocket handshake (Sec-WebSocket-Key/-Accept) and client-side
+# frame masking in src/rust/kj-hyper.
+base64 = "0"
 bytes = { version = "1", default-features = false }
 capnp = "0"
 capnpc = "0"
 capnp-rpc = "0"
 clang-ast = "0"
 encoding_rs = "0"
-flate2 = "1"
+# The zlib-rs backend (pure Rust) is used instead of the default miniz_oxide because
+# src/rust/kj-hyper's WebSocket permessage-deflate needs custom window bits
+# (Compress/Decompress::new_with_window_bits), which miniz_oxide does not support. kj-http uses
+# zlib itself, so this also matches kj's wire behavior bit-for-bit closer.
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 # Memory-safe Rust implementation of the zlib C API, exposed to C++ under
 # zlib_rs_-prefixed symbols by src/rust/zlib-rs. rust-allocator only:
 # zalloc/zfree left NULL use Rust's global allocator.
 libz-rs-sys = { version = "0.6", default-features = false, features = ["std", "rust-allocator"] }
 futures = "0"
+http = "1"
+http-body = "1"
+http-body-util = "0"
+# hyper powers the outbound HTTP client and inbound server behind kj::HttpService
+# (src/rust/kj-hyper).
+hyper = { version = "1", default-features = false, features = ["client", "http1", "server"] }
+# hyper-util is used only for the tokio Read/Write adapter (TokioIo).
+hyper-util = { version = "0", default-features = false, features = ["tokio"] }
 libc = "0"
 lol_html_c_api = { git = "https://github.com/cloudflare/lol-html" }
 hashlink = "0"
 nix = "0"
 pico-args = "0"
+rand = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
+sha1 = { version = "0", default-features = false }
 ruff_python_ast = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
 ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
+# rustls (+ tokio-rustls) backs TLS in src/rust/kj-hyper's outbound HTTPS client. The `ring`
+# crypto provider is used instead of the default aws-lc-rs because ring's crates.io package
+# ships pregenerated assembly (plain cc build, no cmake/NASM), which keeps the Bazel build
+# hermetic across all supported platforms. `tls12` is required: workerd's TlsOptions supports a
+# TLS 1.2 minimum (kj's default).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# System trust store loading for TlsOptions.trustBrowserCas (kj::TlsContext::Options::
+# useSystemTrustStore reads the platform store via OpenSSL/Windows APIs; this is the rustls
+# equivalent). Chosen over webpki-roots so locally-installed CAs keep working.
+rustls-native-certs = "0.8"
+# PEM parsing for TlsOptions trustedCertificates / keypair (certs + PKCS#8/PKCS#1/SEC1 keys).
+rustls-pemfile = "2"
+# Platform-delegated certificate verification (macOS Security.framework / Windows CryptoAPI;
+# webpki over the native store on Linux) for kj-hyper's DEFAULT client trust path
+# (trustBrowserCas with no explicit trustedCertificates). Unlike a webpki RootCertStore built
+# from rustls-native-certs, the OS verifier handles locally-installed corporate CAs whose key
+# types rustls' ring provider cannot verify (e.g. ECDSA P-521 TLS-interception CAs). See
+# src/rust/kj-hyper tls.rs.
+rustls-platform-verifier = "0.7"
 # param_extractor depends on unbounded_depth feature
 serde_json = { version = "1", features = ["unbounded_depth"] }
 serde = { version = "1", features = ["derive"] }
+# Used by src/rust/cxx/kj-rs-io (tokio-backed KJ sockets need raw socket options).
 socket2 = "0.6"
 thiserror = "2"
+# tokio is huge, let's enable only features when we actually need them.
+# The "signal" feature backs kj_rs_io::onSignal() (src/rust/cxx/kj-rs-io), the SIGTERM drain path.
+# "macros" (`tokio::select!`/`try_join!`) and "io-util" (`AsyncRead/WriteExt`, `io::split`) back
+# src/rust/cxx/kj-hyper's WebSocket/tunnel pumps and kj-rs-io's serve loop.
 tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
+# TLS-over-tokio for src/rust/kj-hyper's HTTPS client; see the rustls entry above for the
+# provider choice.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tracing = { version = "0", default-features = false, features = ["std"] }
 swc_common = "25"
 swc_ts_fast_strip = "57"
+

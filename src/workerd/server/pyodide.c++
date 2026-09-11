@@ -3,12 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "pyodide.h"
 
+#include "tls-network.h"
+
 #include <workerd/api/pyodide/pyodide.h>
 
 #include <kj/array.h>
 #include <kj/common.h>
 #include <kj/compat/gzip.h>
-#include <kj/compat/tls.h>
 #include <kj/debug.h>
 #include <kj/string.h>
 
@@ -71,12 +72,13 @@ kj::Promise<kj::Maybe<jsg::Bundle::Reader>> fetchPyodideBundle(
   kj::String url =
       kj::str("https://pyodide-capnp-bin.edgeworker.net/pyodide_", version, ".capnp.bin");
   KJ_LOG(INFO, "Loading Pyodide bundle from internet", url);
+
   kj::HttpHeaderTable table;
 
-  kj::TlsContext::Options options;
-  options.useSystemTrustStore = true;
-
-  kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
+  // The build's TLS engine with default (system) trust -- kj::TlsContext (OpenSSL) in the
+  // default build, rustls under --//:io_backend=rust; see tls-network.h. The kj HTTP client
+  // machinery below is identical in both configs.
+  kj::Own<kj::SecureNetworkWrapper> tls = newSystemTrustTlsNetworkWrapper();
   auto tlsNetwork = tls->wrapNetwork(network);
   auto client = kj::newHttpClient(timer, table, network, *tlsNetwork);
 

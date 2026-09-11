@@ -57,6 +57,34 @@ crate.annotation(
     crate = "capnpc",
     gen_binaries = ["capnpc-rust"],
 )
+
+# Header-value leniency patches for the Rust HTTP path (kj-hyper / hyper): KJ, following the
+# browsers' lead, forbids only NUL, CR, and LF in header values, while the `http` crate's
+# HeaderValue constructors and `httparse`'s wire parser additionally reject the other C0
+# control bytes and DEL. workerd must round-trip such values byte-for-byte in both directions
+# (WPT fetch/api headers/header-values*.any.js asserts exactly this), so both validators are
+# relaxed to KJ's rule. CR/LF stay forbidden, so header injection/splitting stays impossible.
+crate.annotation(
+    crate = "http",
+    patch_args = ["-p1"],
+    patches = ["//:patches/rust/http-kj-lenient-header-values.patch"],
+)
+crate.annotation(
+    crate = "httparse",
+    patch_args = ["-p1"],
+    patches = ["//:patches/rust/httparse-kj-lenient-header-values.patch"],
+)
+
+# Header-name case fidelity: kj-http writes header names in exactly the case the application
+# supplied, and workerd's tests (and some peers) assert the raw bytes. hyper's encoder already
+# honors a per-message HeaderCaseMap extension (falling back to title-casing), but upstream
+# only populates it for forwarded messages; this patch makes the type constructible so the
+# kj<->hyper translation layer can populate it for locally-built requests/responses.
+crate.annotation(
+    crate = "hyper",
+    patch_args = ["-p1"],
+    patches = ["//:patches/rust/hyper-public-header-case-map.patch"],
+)
 crate.from_cargo(
     # TODO(cleanup): This name is a bit misleading now that we don't vendor. We can clean it up as a
     # followup.

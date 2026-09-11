@@ -163,6 +163,14 @@ impl TokioPort {
             // tokio-backed KJ streams). It is only *driven* while this runtime is inside
             // `block_on` (i.e. in `wait_*`/`poll`), which is exactly when the KJ loop sleeps.
             .enable_io()
+            // The scheduler polls the I/O driver when it parks OR every `event_interval` task
+            // polls. `poll()`'s yield loop never parks (its main future is always ready again),
+            // so the interval is the ONLY thing that turns the reactor there — the default (61)
+            // exceeds POLL_YIELD_BUDGET, leaving `kj::WaitScope::poll()` passes that deliver no
+            // socket readiness at all (kj then reports "no progress" while I/O is pending; kj
+            // poll()-driven tests observe this as responses that never arrive). Keep it below
+            // the budget so every `poll()` turns the reactor at least once.
+            .event_interval(POLL_YIELD_BUDGET / 2)
             .build()
             .expect("failed to build current_thread tokio runtime");
         // Enter the runtime context for the life of the port (see EnteredRuntime): from here on,
