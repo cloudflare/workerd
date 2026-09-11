@@ -52,6 +52,7 @@ export {
   errorIdempotence,
   closeTerminality,
   closeDrainsQueue,
+  errorAfterCloseWithQueuedChunk,
   controllerType,
 } from 'controller';
 

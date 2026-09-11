@@ -32,10 +32,12 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 | 15 | adopted body stream lock after consumption | released | kept locked | `bodyIdentityAndLockCoupling` |
 | 16 | then-getter fires during a read cycle | 1 (harness context) | 2 | `thenGetterFireCountOnRead` |
 | 17 | close-twice / enqueue-after-close / size-not-function / from-return validation messages | own texts | own texts | `closeTerminality`, `sizeMustBeFunction`, `fromReturnValidationMessages` |
+| 18 | error() while a close() is still pending (chunk queued) | ignored: the requested close is final, the chunk drains to a clean close, desiredSize stays 0 | errors the stream (spec: close() only requested the close, the state is still "readable"): chunk discarded, reads/closed reject, desiredSize null | `errorAfterCloseWithQueuedChunk` |
 
 Parity worth noting (probed, pinned): pull serialization (never
 re-entered); pull/async-start rejection identity; error-undefined
-preserved through closed; error() twice / after close are no-ops;
+preserved through closed; error() twice / after a completed close are
+no-ops (a close still pending is ledger #18);
 desiredSize lifecycle (1 → 0 close, null error, 0 cancel) and
 enqueue-skips-queue-with-pending-read; cancel-with-pending-pull; cancel
 reason identity + once; locked-stream cancel rejects without running the
@@ -74,7 +76,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `api-surface.js` | globals, controller not constructable, getReader modes, locked lifecycle |
 | `construction.js` | ledger #1-#3, default hwm 1 |
 | `source-algorithms.js` | ledger #4-#6, pull serialization, rejection identity, cancel-with-pending-pull |
-| `controller.js` | desiredSize accounting/terminal states, error idempotence, close terminality (#17), close-drains-queue |
+| `controller.js` | desiredSize accounting/terminal states, error idempotence, close terminality (#17), close-drains-queue, error during a pending close (#18) |
 | `reader.js` | read ordering, releaseLock, closed replacement (#7), undefined error, reader.cancel, reader swap |
 | `cancel.js` | reason identity, locked-cancel, hook rejection identity, queue discard |
 | `bad-strategies.js` | ledger #8, #9, size-not-function |

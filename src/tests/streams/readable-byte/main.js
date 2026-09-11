@@ -52,6 +52,7 @@ export {
   readDetachesCallerBuffer,
   closeWithPendingUnfilledByobRead,
   controllerType,
+  errorAfterCloseWithQueuedBytes,
   cancelWithPartiallyFilledPull,
   readViewThenCancelOrdering,
 } from 'controller';

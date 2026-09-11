@@ -113,8 +113,10 @@ export const controllerErrorRejectsReads = {
   },
 };
 
-// error() twice and error() after close are silent no-ops on both sides
-// (the WPT bad-underlying-sources seeds fail on other grounds).
+// error() twice and error() after a completed close (empty queue, so the
+// stream has closed) are silent no-ops on both sides (the WPT
+// bad-underlying-sources seeds fail on other grounds). For error() while
+// a close is still pending see errorAfterCloseWithQueuedChunk.
 export const errorIdempotence = {
   test() {
     let c1;
@@ -177,6 +179,40 @@ export const closeDrainsQueue = {
     strictEqual((await reader.read()).value, 'a');
     strictEqual((await reader.read()).value, 'b');
     strictEqual((await reader.read()).done, true);
+  },
+};
+
+// DIVERGENCE (ledger #18): error() while a close() is still pending (a
+// chunk queued). Per spec the stream is still "readable" — close() only
+// requested the close — so the TypeScript implementation errors it: the
+// queued chunk is discarded, reads and closed reject with the error and
+// desiredSize turns null. The C++ implementation treats the requested
+// close as final: the late error is ignored, the chunk drains to a clean
+// close, and desiredSize stays 0. error() throws on neither side.
+export const errorAfterCloseWithQueuedChunk = {
+  async test() {
+    const err = new Error('late');
+    let controller;
+    const rs = new ReadableStream({
+      start(c) {
+        controller = c;
+      },
+    });
+    controller.enqueue('a');
+    controller.close();
+    strictEqual(controller.desiredSize, 0);
+    controller.error(err);
+    const reader = rs.getReader();
+    if (usingTsImpl) {
+      strictEqual(controller.desiredSize, null);
+      strictEqual(await rejectionOf(reader.read()), err);
+      strictEqual(await rejectionOf(reader.closed), err);
+    } else {
+      strictEqual(controller.desiredSize, 0);
+      strictEqual((await reader.read()).value, 'a');
+      strictEqual((await reader.read()).done, true);
+      await reader.closed;
+    }
   },
 };
 
