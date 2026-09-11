@@ -57,33 +57,6 @@ export const checkPortsSetCorrectly = {
 //   },
 // };
 
-// TODO(soon): Handle this edge case.
-// Test is taken from test/parallel/test-http-client-close-event.js
-// export const testHttpClientCloseEvent = {
-//   async test(_ctrl, env) {
-//     const { promise, resolve, reject } = Promise.withResolvers();
-//     const req = http.get({ port: env.PONG_SERVER_PORT }, () => {
-//       reject(new Error('Should not have called this callback'));
-//     });
-
-//     const errFn = mock.fn((err) => {
-//       strictEqual(err.constructor, Error);
-//       strictEqual(err.message, 'socket hang up');
-//       strictEqual(err.code, 'ECONNRESET');
-//     });
-//     req.on('error', errFn);
-
-//     req.on('close', () => {
-//       strictEqual(req.destroyed, true);
-//       strictEqual(errFn.mock.callCount(), 1);
-//       resolve();
-//     });
-
-//     req.destroy();
-//     await promise;
-//   },
-// };
-
 // Test is taken from test/parallel/test-http-client-default-headers-exist.js
 export const testHttpClientDefaultHeadersExist = {
   async test(_ctrl, env) {

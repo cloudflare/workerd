@@ -244,7 +244,10 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
   _keepAliveTimeout = 0;
 
   constructor(req?: IncomingMessage, options?: OutgoingMessageOptions) {
-    super();
+    // As in Node, an outgoing message is destroyed by destroy() or by the
+    // end of its exchange, never by its own 'finish': a ClientRequest is
+    // still live, awaiting its response, after end().
+    super({ autoDestroy: false });
     this.req = req;
     this[kHighWaterMark] = options?.highWaterMark ?? getDefaultHighWaterMark();
     this[kRejectNonStandardBodyWrites] =

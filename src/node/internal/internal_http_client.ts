@@ -20,6 +20,7 @@ import {
   ERR_INVALID_ARG_VALUE,
   ERR_HTTP_HEADERS_SENT,
   ERR_METHOD_NOT_IMPLEMENTED,
+  ConnResetException,
 } from 'node-internal:internal_errors';
 import {
   validateInteger,
@@ -40,7 +41,10 @@ import {
   IncomingMessage,
   setIncomingMessageFetchResponse,
 } from 'node-internal:internal_http_incoming';
-import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
+import {
+  OutgoingMessage,
+  kErrored,
+} from 'node-internal:internal_http_outgoing';
 import { Agent, globalAgent } from 'node-internal:internal_http_agent';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 import type { Socket } from 'node:net';
@@ -425,14 +429,29 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   }
 
   #handleFetchResponse(response: Response): void {
+    // Destroyed while the response was on its way: nobody will read it.
+    if (this.destroyed) {
+      response.body?.cancel().catch(() => {});
+      return;
+    }
+
     // Sets headersSent
     this._header = Array.from(response.headers.keys())
       .map((key) => `${key}=${response.headers.get(key)}}`)
       .join('\r\n');
     const incoming = new IncomingMessage();
     setIncomingMessageFetchResponse(incoming, response);
+    // The response's own failure (its body erroring, or its destroy()) is
+    // the request's too, as a socket error would be in Node; a request
+    // being destroyed reports its error itself.
     incoming.on('error', (error) => {
-      this.emit('error', error);
+      if (!this.destroyed) {
+        this.emit('error', error);
+      }
+    });
+    // The exchange is over once the response is: the request closes.
+    incoming.once('close', () => {
+      this.#emitClose();
     });
 
     this.emit('response', incoming);
@@ -441,14 +460,56 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     this.#incomingMessage = incoming;
   }
 
+  // A fetch that fails before yielding a response (the connection could
+  // not be made, the request was rejected). The rejection of a fetch this
+  // request aborted itself is not news.
   #handleFetchError(error: Error): void {
-    if (!this.destroyed) {
-      this.emit('error', error);
-    } else {
-      console.log(error);
-    }
+    if (this.destroyed) return;
+    this.destroy(error);
+  }
+
+  // Marks the request closed and destroyed, once; the end of every
+  // exchange, completed or torn down, comes through here.
+  #emitClose(): void {
+    if (this._closed) return;
+    this._closed = true;
     this.destroyed = true;
-    this._ended = true;
+    this.emit('close');
+  }
+
+  // Tears the exchange down as Node does when the socket goes away. The
+  // request reports `err` — or, for a bare destroy() before any response
+  // (and not through abort()), that the connection hung up — on a later
+  // tick, as a socket error would arrive; a response in flight is aborted
+  // at once, with `err` or ECONNRESET 'aborted', which cancels its body so
+  // the server learns of it; a fetch still awaiting its response is
+  // aborted; 'close' follows.
+  override destroy(err?: unknown, _cb?: (err?: unknown) => void): this {
+    if (this.destroyed) return this;
+    this.destroyed = true;
+    this[kErrored] = (err as Error | null | undefined) ?? null;
+    this.#resetTimers({ finished: true });
+
+    const incoming = this.#incomingMessage;
+    if (incoming === undefined && err == null && !this.aborted) {
+      err = new ConnResetException('socket hang up');
+    }
+    if (err != null) {
+      queueMicrotask(() => {
+        this.emit('error', err);
+      });
+    }
+    if (incoming === undefined) {
+      this.#abortController.abort();
+    } else if (!incoming.complete) {
+      incoming.destroy(
+        (err as Error | undefined) ?? new ConnResetException('aborted')
+      );
+    }
+    queueMicrotask(() => {
+      this.#emitClose();
+    });
+    return this;
   }
 
   onSocket(_socket: Socket): void {
@@ -538,6 +599,8 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     encoding?: BufferEncoding | VoidFunction,
     callback?: VoidFunction
   ): this {
+    // A destroyed request has nothing left to send and never finishes.
+    if (this.destroyed) return this;
     this._ended = true;
 
     if (typeof data === 'function') {
