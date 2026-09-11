@@ -7,8 +7,10 @@
 // sink abort() destroys, and a node-side error or 'drain' settles the
 // corresponding web promises.
 
-import { Writable } from 'node:stream';
-import { strictEqual, rejects } from 'node:assert';
+import { Writable, Readable, Duplex } from 'node:stream';
+import { Buffer } from 'node:buffer';
+import { strictEqual, deepStrictEqual, rejects, throws } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -233,5 +235,161 @@ export const toWebAbortWithoutReasonDestroysWithAbortError = {
     strictEqual(writable.destroyed, true);
     strictEqual(writable.errored?.name, 'AbortError');
     strictEqual(writable.errored?.code, 'ABORT_ERR');
+  },
+};
+
+// Anything without write() and on() functions is rejected with
+// ERR_INVALID_ARG_TYPE: a Readable (which has on() but no write()), a plain
+// object, and null all fail the same way.
+export const toWebRejectsNonWritable = {
+  test() {
+    for (const input of [new Readable(), {}, null, undefined, 'text']) {
+      throws(() => Writable.toWeb(input), {
+        name: 'TypeError',
+        code: 'ERR_INVALID_ARG_TYPE',
+        message: /"streamWritable" argument must be an stream\.Writable/,
+      });
+    }
+  },
+};
+
+// The type check is a duck check (write and on functions), so a
+// Writable-shaped object that is not a node stream is accepted; but since it
+// is not a writable node stream either, the result is a stream that is
+// already closed.
+export const toWebDuckTypedInputYieldsClosedStream = {
+  async test() {
+    let writes = 0;
+    const duck = {
+      write() {
+        writes++;
+        return true;
+      },
+      on() {},
+    };
+    const writer = Writable.toWeb(duck).getWriter();
+    await writer.closed;
+    await rejects(writer.write('x'), {
+      name: 'TypeError',
+      message: usingTsImpl
+        ? 'Cannot write to a stream that is closing or closed'
+        : 'This WritableStream has been closed.',
+    });
+    strictEqual(writes, 0);
+  },
+};
+
+// A Writable that is already destroyed or ended, or a Duplex created without
+// a writable side, yields a stream that is already closed.
+export const toWebUnwritableSourceYieldsClosedStream = {
+  async test() {
+    const destroyed = recordingWritable().writable;
+    destroyed.destroy();
+    await once(destroyed, 'close');
+
+    const ended = recordingWritable().writable;
+    ended.end();
+    await once(ended, 'finish');
+
+    const halfDuplex = new Duplex({ writable: false, read() {} });
+
+    for (const source of [destroyed, ended, halfDuplex]) {
+      const ws = Writable.toWeb(source);
+      strictEqual(ws.locked, false);
+      const writer = ws.getWriter();
+      await writer.closed;
+      await rejects(writer.write(enc.encode('x')), { name: 'TypeError' });
+    }
+  },
+};
+
+// The queuing strategy follows the node stream: a byte-mode Writable gets a
+// strategy with its writableHighWaterMark and the default size of 1 per
+// chunk, an objectMode Writable a CountQueuingStrategy with its (chunk
+// count) writableHighWaterMark.
+export const toWebStrategyFollowsWritable = {
+  test() {
+    const bytes = recordingWritable({ highWaterMark: 5 }).writable;
+    const bytesWriter = Writable.toWeb(bytes).getWriter();
+    strictEqual(bytesWriter.desiredSize, 5);
+    const objects = recordingWritable({ objectMode: true }).writable;
+    const objectsWriter = Writable.toWeb(objects).getWriter();
+    strictEqual(objectsWriter.desiredSize, objects.writableHighWaterMark);
+    const defaults = recordingWritable().writable;
+    strictEqual(
+      Writable.toWeb(defaults).getWriter().desiredSize,
+      defaults.writableHighWaterMark
+    );
+  },
+};
+
+// Backpressure crosses the adapter through 'drain': a web write whose node
+// write() returns false stays pending until the node side drains, and
+// writes queued behind it wait their turn.
+export const toWebBackpressureFollowsDrain = {
+  async test() {
+    const callbacks = [];
+    const writable = new Writable({
+      highWaterMark: 1,
+      write(chunk, encoding, callback) {
+        callbacks.push(callback);
+      },
+    });
+    const writer = Writable.toWeb(writable).getWriter();
+    const settled = [];
+    const first = writer
+      .write(enc.encode('1'))
+      .then(() => settled.push('first'));
+    await scheduler.wait(0);
+    strictEqual(writable.writableNeedDrain, true);
+    strictEqual(writer.desiredSize, 0);
+    deepStrictEqual(settled, []);
+    const second = writer
+      .write(enc.encode('2'))
+      .then(() => settled.push('second'));
+    await scheduler.wait(0);
+    strictEqual(writer.desiredSize, -1);
+    deepStrictEqual(settled, []);
+    strictEqual(callbacks.length, 1);
+
+    callbacks.shift()();
+    await first;
+    deepStrictEqual(settled, ['first']);
+    await scheduler.wait(0);
+    strictEqual(callbacks.length, 1);
+
+    callbacks.shift()();
+    await second;
+    deepStrictEqual(settled, ['first', 'second']);
+    await writer.ready;
+    strictEqual(writer.desiredSize, 1);
+  },
+};
+
+// Chunks reach the node sink the way Writable.prototype.write() would
+// deliver them: a Buffer by identity, a Uint8Array as a Buffer over the same
+// memory, a string as its UTF-8 bytes; in objectMode everything by identity.
+export const toWebChunksReachSinkAsNodeWrites = {
+  async test() {
+    const { writable, chunks } = recordingWritable();
+    const writer = Writable.toWeb(writable).getWriter();
+    const buffer = Buffer.from('buf');
+    const u8 = new Uint8Array([1, 2, 3]);
+    await writer.write(buffer);
+    await writer.write(u8);
+    await writer.write('str');
+    strictEqual(chunks[0], buffer);
+    strictEqual(Buffer.isBuffer(chunks[1]), true);
+    strictEqual(chunks[1] === u8, false);
+    strictEqual(chunks[1].buffer, u8.buffer);
+    strictEqual(chunks[2].toString(), 'str');
+
+    const objects = recordingWritable({ objectMode: true });
+    const objectWriter = Writable.toWeb(objects.writable).getWriter();
+    const object = { id: 1 };
+    await objectWriter.write(object);
+    await objectWriter.write(u8);
+    strictEqual(objects.chunks[0], object);
+    strictEqual(objects.chunks[1], u8);
   },
 };

@@ -13,4 +13,6 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "duplex-to-web", esModule = embed "duplex-to-web.js"),
   (name = "duplex-from-web", esModule = embed "duplex-from-web.js"),
   (name = "bodies", esModule = embed "bodies.js"),
+  (name = "consumers", esModule = embed "consumers.js"),
+  (name = "readable-from", esModule = embed "readable-from.js"),
 ];

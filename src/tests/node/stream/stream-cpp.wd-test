@@ -16,6 +16,10 @@ using StreamModules = import "stream-modules.capnp";
 # - streams_enable_constructors: Readable.toWeb / Writable.toWeb /
 #   Duplex.toWeb build their streams with `new ReadableStream()` /
 #   `new WritableStream()`, which the C++ implementation gates on this flag.
+# - transformstream_enable_standard_constructor: bodies.js chains adapted
+#   streams through `new TransformStream({ transform })`; without the flag
+#   the C++ constructor ignores the transformer and builds an identity
+#   transform.
 # The TypeScript implementation hard-codes these modern behaviors, so the
 # flags also keep the two cells comparable at the oldest compat date.
 
@@ -28,6 +32,7 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
         ],
       )
     ),

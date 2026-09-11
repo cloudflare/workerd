@@ -6,10 +6,11 @@ using StreamModules = import "stream-modules.capnp";
 # autogate). The embedded modules are byte-for-byte the same ones
 # stream-cpp.wd-test runs against the legacy C++ implementation.
 #
-# streams_enable_constructors, pinned in stream-cpp.wd-test, is deliberately
-# absent here: the TypeScript implementation always exposes the standard
-# constructors, and this cell verifies that indifference — the `@` variant
-# runs with the flag OFF and `@all-compat-flags` with it ON.
+# The streams_enable_constructors and transformstream_enable_standard_constructor
+# flags pinned in stream-cpp.wd-test are deliberately absent here: the
+# TypeScript implementation always exposes the standard constructors, and
+# this cell verifies that indifference — the `@` variant runs with them OFF
+# and `@all-compat-flags` with them ON.
 
 const unitTests :Workerd.Config = (
   services = [
