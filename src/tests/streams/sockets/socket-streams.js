@@ -273,3 +273,86 @@ export const largeEchoVolume = {
     await socket.close();
   },
 };
+
+// CLOSE WITH A PIPE CLOSE IN FLIGHT: a connect() handler pipes an inbound
+// socket to an outbound one; once the pipes settle it closes both. Under the
+// C++ implementation the pipe's close of the writable may still be queued at
+// that point (pipeTo resolves before it completes; TypeScript resolves after),
+// and socket.close() aborts it. Whatever a later writer's closed promise then
+// reports must be a real error, never undefined.
+export default {
+  async connect(socket, env) {
+    const { localAddress } = await socket.opened;
+    void socket.closed.catch(() => {});
+    if (localAddress.startsWith('echo:')) {
+      // Explicit loop: a same-socket pipeTo over an in-process pipe splices,
+      // so the peer's write could not complete before it reads the echo.
+      const reader = socket.readable.getReader();
+      const writer = socket.writable.getWriter();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        await writer.write(value);
+      }
+      // The socket closes its write side itself on the peer's FIN; the
+      // TypeScript implementation reports a close racing that as an error.
+      await writer.close().catch(() => {});
+      await socket.close();
+      return;
+    }
+    const target = env.SELF.connect('echo:1', { allowHalfOpen: true });
+    void target.closed.catch(() => {});
+    await Promise.allSettled([
+      socket.readable.pipeTo(target.writable),
+      target.readable.pipeTo(socket.writable),
+    ]);
+    const closes = await Promise.allSettled([socket.close(), target.close()]);
+    const abortReasons = [];
+    for (const s of [socket, target]) {
+      let writer;
+      try {
+        writer = s.writable.getWriter();
+      } catch {
+        // Still locked to the pipe (TypeScript); nothing to observe.
+        continue;
+      }
+      abortReasons.push(
+        await writer.closed.then(
+          () => 'resolved',
+          (e) => e
+        )
+      );
+    }
+    globalThis.proxyOutcome = {
+      closes: closes.map((r) => r.status),
+      abortReasons,
+    };
+  },
+};
+
+export const closeWithPipeCloseInFlight = {
+  async test(ctrl, env) {
+    const socket = env.SELF.connect('proxy:1');
+    const writer = socket.writable.getWriter();
+    await writer.write(new TextEncoder().encode('hello'));
+    const reader = socket.readable.getReader();
+    const { value } = await reader.read();
+    strictEqual(new TextDecoder().decode(value), 'hello');
+    reader.releaseLock();
+    await writer.close();
+    strictEqual((await drainToBytes(socket.readable)).length, 0);
+    // The handler runs in its own request; give its closes a moment.
+    for (let i = 0; i < 50 && globalThis.proxyOutcome === undefined; i++) {
+      await scheduler.wait(10);
+    }
+    const outcome = globalThis.proxyOutcome;
+    deepStrictEqual(outcome.closes, ['fulfilled', 'fulfilled']);
+    for (const reason of outcome.abortReasons) {
+      // Resolved when the queued close completed before the abort took effect
+      // (compat dates before internal_writable_stream_abort_clears_queue).
+      if (reason === 'resolved') continue;
+      ok(reason instanceof TypeError, String(reason));
+      strictEqual(reason.message, 'This socket has been closed.');
+    }
+  },
+};

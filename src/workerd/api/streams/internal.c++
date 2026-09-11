@@ -2098,8 +2098,10 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         writeState.transitionTo<Unlocked>();
         // If the source is closed, the spec requires us to close the destination
         // unless the preventClose option is true.
+        // The close is its own request with its own write loop; its outcome is not this
+        // loop's, so a forced abort that rejects it while in flight does not fail this task.
         if (!preventClose && !isClosedOrClosing()) {
-          return close(js, true).catch_(js, [](jsg::Lock&, jsg::Value) {});
+          close(js, true);
         }
         return js.resolvedPromise();
       }
@@ -2200,10 +2202,10 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           // unlocked after the pipe completes.
           controller.writeState.transitionTo<Unlocked>();
 
+          // The close is its own request with its own write loop; its outcome is not this
+          // loop's, so a forced abort that rejects it while in flight does not fail this task.
           if (!preventClose) {
-            // The close's outcome belongs to its own request; a forced abort (Socket::close())
-            // that rejects it while it is in flight must not fail this write-loop task.
-            return controller.close(js, true).catch_(js, [](jsg::Lock&, jsg::Value) {});
+            controller.close(js, true);
           }
           return js.resolvedPromise();
         }),
