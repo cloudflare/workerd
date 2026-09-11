@@ -169,7 +169,7 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
             {
                 "name": "shapely",
                 "abi": "3.13",
-                "sha256": "2e5c462cb32ee8697b3647dfc9d5c88dcdfd0702da34a2d7dc6b07b8090dd321",
+                "sha256": "67300050ba000bc08f10029ecd300a529132b99acaeba85cc1331205cb6d803b",
             },
         ],
     },
