@@ -44,6 +44,11 @@ export {
   abortBeforeResponseIsQuiet,
   abortBeforeEndSendsNothing,
   abortMidBodyAbortsResponse,
+  timeoutBeforeHeadersDestroysRequest,
+  timeoutOptionAndCallback,
+  timeoutMidBodyAbortsResponse,
+  timeoutDisarmedByCompletion,
+  setTimeoutZeroClears,
 } from 'lifecycle';
 
 export {

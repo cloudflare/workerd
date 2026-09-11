@@ -21,6 +21,7 @@ import {
   ERR_HTTP_HEADERS_SENT,
   ERR_METHOD_NOT_IMPLEMENTED,
   ConnResetException,
+  AbortError,
 } from 'node-internal:internal_errors';
 import {
   validateInteger,
@@ -75,6 +76,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   #body: (Buffer | Uint8Array)[] = [];
   #incomingMessage?: IncomingMessage;
   #timer: number | null = null;
+  #sent = false;
 
   _ended: boolean = false;
 
@@ -349,13 +351,8 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       }
     }
 
-    if (this.timeout) {
-      this.#timer = setTimeout(() => {
-        this.emit('timeout');
-        this.#incomingMessage?.emit('timeout');
-        this.#abortController.abort();
-      }, this.timeout) as unknown as number;
-    }
+    this.#sent = true;
+    this.#armTimer();
 
     if (
       this.host &&
@@ -475,6 +472,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     if (this._closed) return;
     this._closed = true;
     this.destroyed = true;
+    this.#clearTimer();
     this.emit('close');
   }
 
@@ -489,7 +487,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     if (this.destroyed) return this;
     this.destroyed = true;
     this[kErrored] = (err as Error | null | undefined) ?? null;
-    this.#resetTimers({ finished: true });
+    this.#clearTimer();
 
     const incoming = this.#incomingMessage;
     if (incoming === undefined && err == null && !this.aborted) {
@@ -560,14 +558,11 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     this.setTimeout(0, cb);
   }
 
+  // Arms (or, with 0, clears) the timeout, which runs from the moment the
+  // request is sent and this method has been called, whichever is later.
   setTimeout(msecs: number, callback?: VoidFunction): this {
-    if (this.#timer) {
-      clearTimeout(this.#timer);
-      this.#timer = null;
-    }
-
     this.timeout = getTimerDuration(msecs, 'msecs');
-    this.#resetTimers({ finished: false });
+    this.#armTimer();
 
     if (callback) this.once('timeout', callback);
 
@@ -618,20 +613,26 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     return this;
   }
 
-  #resetTimers({ finished }: { finished: boolean }): void {
-    if (finished) {
-      clearTimeout(this.#timer as number);
+  #clearTimer(): void {
+    if (this.#timer !== null) {
+      clearTimeout(this.#timer);
       this.#timer = null;
-    } else if (this.timeout) {
-      if (this.#timer) {
-        clearTimeout(this.#timer);
-      }
-      this.#timer = setTimeout(() => {
-        this.emit('timeout');
-        this.#incomingMessage?.emit('timeout');
-        this.#abortController.abort();
-      }, this.timeout) as unknown as number;
     }
+  }
+
+  // One timer at a time, once the request has been sent. Firing emits
+  // 'timeout' on the request and its response, then destroys the request
+  // with an AbortError. (Node only emits and leaves the teardown to the
+  // listener; a request left open would otherwise hold the fetch.)
+  #armTimer(): void {
+    this.#clearTimer();
+    if (!this.timeout || !this.#sent || this.destroyed) return;
+    this.#timer = setTimeout(() => {
+      this.#timer = null;
+      this.emit('timeout');
+      this.#incomingMessage?.emit('timeout');
+      this.destroy(new AbortError());
+    }, this.timeout) as unknown as number;
   }
 
   override _implicitHeader(): void {
