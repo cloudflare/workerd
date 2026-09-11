@@ -194,12 +194,6 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     this.statusCode = response.status;
     this.statusMessage = response.statusText;
 
-    this.once('end', () => {
-      // We need to emit close in a queueMicrotask because
-      // this is the only way we can ensure that the close event is emitted after destroy.
-      queueMicrotask(() => this.emit('close'));
-    });
-
     this.on('timeout', () => {
       this._consuming = false;
     });
