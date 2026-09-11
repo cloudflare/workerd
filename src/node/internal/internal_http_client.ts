@@ -452,10 +452,10 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       this.#emitClose();
     });
 
-    this.emit('response', incoming);
-    // @ts-expect-error TS2540 This is a read-only property.
-    this.req = this.#incomingMessage;
     this.#incomingMessage = incoming;
+    // @ts-expect-error TS2540 This is a read-only property.
+    this.res = incoming;
+    this.emit('response', incoming);
   }
 
   // A fetch that fails before yielding a response (the connection could
