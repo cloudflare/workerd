@@ -47,6 +47,14 @@ export {
   backpressureSignaling,
   writesAlwaysAcceptedAfterHeaders,
   webSourcePipelinedIntoResponse,
+  finishThenClose,
+  writeAfterEndFails,
 } from 'response-body';
 
-export { destroyWithErrorBeforeHeadersRejectsFetch } from 'response-lifecycle';
+export {
+  destroyWithErrorBeforeHeadersRejectsFetch,
+  destroyBeforeHeadersRejectsFetch,
+  destroyWithErrorAfterHeadersErrorsBody,
+  destroyAfterHeadersEndsBodyPrematurely,
+  clientCancelDestroysResponse,
+} from 'response-lifecycle';

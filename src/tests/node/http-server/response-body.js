@@ -11,7 +11,7 @@
 
 import { pipeline } from 'node:stream';
 import { Buffer } from 'node:buffer';
-import { strictEqual, ok } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual } from 'node:assert';
 import { withServer } from 'harness';
 
 const enc = new TextEncoder();
@@ -286,6 +286,50 @@ export const webSourcePipelinedIntoResponse = {
       async () => {
         const res = await env.SERVICE.fetch('http://x/');
         strictEqual(await res.text(), 'from a web source');
+      }
+    );
+  },
+};
+
+// 'finish' fires once the body has been handed off; 'close' follows it.
+export const finishThenClose = {
+  async test(ctrl, env) {
+    const events = [];
+    await withServer(
+      (req, res) => {
+        res.on('finish', () => events.push(`finish:${res.closed}`));
+        res.on('close', () => events.push(`close:${res.closed}`));
+        res.end('bye');
+      },
+      async () => {
+        const res = await env.SERVICE.fetch('http://x/');
+        strictEqual(await res.text(), 'bye');
+        await scheduler.wait(5);
+        deepStrictEqual(events, ['finish:false', 'close:true']);
+      }
+    );
+  },
+};
+
+// Writes after end() fail with ERR_STREAM_WRITE_AFTER_END (and a second
+// end() is inert); the body already sent is unaffected.
+export const writeAfterEndFails = {
+  async test(ctrl, env) {
+    const errors = [];
+    await withServer(
+      (req, res) => {
+        res.write('hello');
+        res.end();
+        queueMicrotask(() => {
+          res.end('world');
+          res.write('world', (err) => errors.push(err.code));
+        });
+      },
+      async () => {
+        const res = await env.SERVICE.fetch('http://x/');
+        strictEqual(await res.text(), 'hello');
+        await scheduler.wait(5);
+        deepStrictEqual(errors, ['ERR_STREAM_WRITE_AFTER_END']);
       }
     );
   },
