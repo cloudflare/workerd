@@ -11,7 +11,7 @@
 
 import { pipeline } from 'node:stream';
 import { Buffer } from 'node:buffer';
-import { strictEqual, ok, deepStrictEqual } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
 import { withServer } from 'harness';
 
 const enc = new TextEncoder();
@@ -195,6 +195,32 @@ export const headResponseHasNoBody = {
           'finish',
         ]);
       }
+    );
+  },
+};
+
+// With the server's rejectNonStandardBodyWrites option, a body write on a
+// bodiless response (204, or the reply to a HEAD) throws
+// ERR_HTTP_BODY_NOT_ALLOWED instead of being dropped; the response still
+// completes without one.
+export const rejectNonStandardBodyWritesThrows = {
+  async test(ctrl, env) {
+    await withServer(
+      (req, res) => {
+        res.writeHead(req.method === 'HEAD' ? 200 : 204);
+        throws(() => res.write('body'), { code: 'ERR_HTTP_BODY_NOT_ALLOWED' });
+        throws(() => res.end('body'), { code: 'ERR_HTTP_BODY_NOT_ALLOWED' });
+        res.end();
+      },
+      async () => {
+        const noContent = await env.SERVICE.fetch('http://x/');
+        strictEqual(noContent.status, 204);
+        strictEqual(noContent.body, null);
+        const head = await env.SERVICE.fetch('http://x/', { method: 'HEAD' });
+        strictEqual(head.status, 200);
+        strictEqual(head.body, null);
+      },
+      { rejectNonStandardBodyWrites: true }
     );
   },
 };
