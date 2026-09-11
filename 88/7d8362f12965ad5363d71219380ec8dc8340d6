@@ -1,0 +1,39 @@
+build/kj_test.bzl
+  s_b5100e8818a1d4::t_45fe7f8556ccba 4,13,25-29
+src/workerd/jsg/BUILD.bazel
+  s_b5100e8818a1d4::t_c1881aad049952 316,324-336
+src/workerd/server/cli-io-backend.c++
+  s_b5100e8818a1d4::t_aab17de3af3d5b 1-323
+src/workerd/server/cli-io-backend.h
+  s_b5100e8818a1d4::t_9d467ff70c2d02 1-68
+src/workerd/server/workerd.c++
+  s_b5100e8818a1d4::t_610361d723908d 12,947,1002-1003,1196,1225,1253-1254,1349,1543
+src/workerd/util/setup-async-io-tokio.c++
+  s_b5100e8818a1d4::t_78ac83b1a7ee74 1-173
+BUILD.bazel
+  s_b5100e8818a1d4::t_9876fd5a40a8b3 4,131-168
+build/rust_io_backend.bzl
+  s_b5100e8818a1d4::t_5b6b4b69f598f0 1-165
+src/workerd/server/BUILD.bazel
+  s_b5100e8818a1d4::t_ea4bf74cbeca06 5,71,81,86-126,140,178,195,290,292,338,354,356,465
+src/workerd/tests/BUILD.bazel
+  s_b5100e8818a1d4::t_d5cf2708198782 43
+src/workerd/util/BUILD.bazel
+  s_b5100e8818a1d4::t_9a317f04f8aeaf 4,106,154,240,516-545
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "887d8362f12965ad5363d71219380ec8dc8340d6",
+  "prompts": {},
+  "sessions": {
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
