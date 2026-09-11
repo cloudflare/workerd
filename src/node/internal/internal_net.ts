@@ -549,14 +549,16 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
 Object.setPrototypeOf(Socket.prototype, Duplex.prototype);
 Object.setPrototypeOf(Socket, Duplex);
 
+// Restarts the idle timer (of this socket and of any wrapping TLS socket)
+// after activity, keeping the 'timeout' listeners as they are.
 Socket.prototype._unrefTimer = function _unrefTimer(this: Socket): void {
   // eslint-disable-next-line @typescript-eslint/no-this-alias
   for (let s: Socket | null = this; s != null; s = s._parentWrap) {
     if (s[kTimeout] != null) {
       clearTimeout(s[kTimeout] as unknown as number);
-      s[kTimeout] = this.setTimeout(s.timeout, (): void => {
+      s[kTimeout] = setTimeout((): void => {
         s._onTimeout();
-      });
+      }, s.timeout) as unknown as Socket;
     }
   }
 };
