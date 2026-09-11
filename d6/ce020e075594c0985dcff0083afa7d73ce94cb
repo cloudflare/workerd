@@ -1,0 +1,21 @@
+src/workerd/io/incoming-request-test.c++
+  s_ab4e43acd62623::t_b8ea5e30100d90 111-113
+src/workerd/io/io-context.c++
+  s_ab4e43acd62623::t_0911416dccc640 320
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d6ce020e075594c0985dcff0083afa7d73ce94cb",
+  "prompts": {},
+  "sessions": {
+    "s_ab4e43acd62623": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0dd95e56cffeOLXlCNwX9ixaK3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

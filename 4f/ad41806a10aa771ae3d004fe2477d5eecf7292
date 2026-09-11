@@ -1,0 +1,19 @@
+src/rust/cxx/kj-rs-io/tests/BUILD.bazel
+  s_ad98b07a2ebbe9::t_90112b1bf8be41 36-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4fad41806a10aa771ae3d004fe2477d5eecf7292",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

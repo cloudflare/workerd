@@ -1,0 +1,21 @@
+src/workerd/server/server.c++
+  s_0724a6fa055ea8::t_e65133f23c4027 3390,4465-4472,6010,6646,6648-6649,6652-6655,6657-6660,6662-6666,6668,6670-6676,6678-6683,6685-6690,6694-6698,6700-6736,6738-6743,6745-6748,6750-6757,6759-6762,6764-6767,6770-6774
+src/workerd/server/workerd-debug-port-client.c++
+  s_0724a6fa055ea8::t_f5f1b21d182ad9 133-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fafe713b2e5bcfc9a4448ea557fae7110713e8d8",
+  "prompts": {},
+  "sessions": {
+    "s_0724a6fa055ea8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fffd063c4ffeNRRadReZ6I5wyl",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Samuel Macleod <smacleod@cloudflare.com>"
+    }
+  }
+}

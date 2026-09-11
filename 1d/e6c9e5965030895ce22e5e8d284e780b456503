@@ -1,0 +1,21 @@
+src/workerd/tests/test-fixture.c++
+  s_68959d5fe8e08d::t_52a0c750374b4b 131-133,138-142,172-173,401-402,478-479
+src/workerd/tests/test-fixture.h
+  s_68959d5fe8e08d::t_4a46cbbd8d76ce 58-59,273
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1de6c9e5965030895ce22e5e8d284e780b456503",
+  "prompts": {},
+  "sessions": {
+    "s_68959d5fe8e08d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ff07ec157ffeC7x2Y13Ir1AaVS",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

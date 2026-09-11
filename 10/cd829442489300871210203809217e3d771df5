@@ -1,0 +1,35 @@
+src/rust/cxx/AGENTS.md
+  s_2427bf394889ab::t_ccae63c32e4790 58-60
+src/rust/cxx/kj-rs/awaiter.c++
+  s_2427bf394889ab::t_a239368d6e4767 178-180,183-185,190-191
+src/rust/cxx/kj-rs/awaiter.h
+  s_2427bf394889ab::t_ab024b7f80ed22 170
+src/rust/cxx/kj-rs/promise.rs
+  s_2427bf394889ab::t_5da7c66ed3766a 16-19
+src/rust/cxx/kj-rs/tests/awaitables-cc-test.c++
+  s_2427bf394889ab::t_395fbcfca48577 12-13,312-387,749-763
+src/rust/cxx/kj-rs/tests/lib.rs
+  s_2427bf394889ab::t_9061058c19c87e 20,35,333-335,356-358
+src/rust/cxx/kj-rs/tests/test_futures.rs
+  s_2427bf394889ab::t_353d074aa18cf6 1164-1196
+src/rust/cxx/kj-rs/waker.c++
+  s_2427bf394889ab::t_65f7b14333e30f 7-106,120-124,126,133-135
+src/rust/cxx/kj-rs/waker.h
+  s_2427bf394889ab::t_c679c8f2e33c4f 7-9,14-86,103-106,113-114,124,128-131,142-151,155,188,191-200,225-226,235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "10cd829442489300871210203809217e3d771df5",
+  "prompts": {},
+  "sessions": {
+    "s_2427bf394889ab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28753db2-9693-4557-828c-5c58d097f066",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

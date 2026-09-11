@@ -1,17 +1,17 @@
-src/workerd/io/hibernation-manager-test.c++
-  s_c7b7c4c088d044::t_094eee03ea25c9 46,60,63,292-295,297-300,302,304,306,308
-  s_c7b7c4c088d044::t_c8f5773dffcb20 310-311
-  s_c7b7c4c088d044::t_5c61c73389aa41 296,307
-  s_c7b7c4c088d044::t_7bbd2cde2ad5c0 61-62
-  s_c7b7c4c088d044::t_f7ab044de0c0ec 305,309
-  s_c7b7c4c088d044::t_297f283d9d16d4 291,301,303
 src/workerd/io/legacy-hibernation-manager.c++
-  s_c7b7c4c088d044::t_9bd51c19edf565 260
-  s_c7b7c4c088d044::t_7587b9d2e5d087 272,384
-  s_c7b7c4c088d044::t_19e2d1aea3fe1f 261,263-264
+  s_c7b7c4c088d044::t_414b2dd1b3eb00 261,263-264
   s_c7b7c4c088d044::t_fe566e6de070c7 298
   s_c7b7c4c088d044::t_2f196e1ba601f4 262,266-268
+  s_c7b7c4c088d044::t_9bd51c19edf565 260
+  s_c7b7c4c088d044::t_7587b9d2e5d087 272,384
   s_c7b7c4c088d044::t_297f283d9d16d4 265
+src/workerd/io/hibernation-manager-test.c++
+  s_c7b7c4c088d044::t_094eee03ea25c9 46,60,63,292-295,297-300,302,304,306,308
+  s_c7b7c4c088d044::t_7bbd2cde2ad5c0 61-62
+  s_c7b7c4c088d044::t_297f283d9d16d4 291,301,303
+  s_c7b7c4c088d044::t_5c61c73389aa41 296,307
+  s_c7b7c4c088d044::t_f7ab044de0c0ec 305,309
+  s_c7b7c4c088d044::t_c8f5773dffcb20 310-311
 ---
 {
   "schema_version": "authorship/3.0.0",
