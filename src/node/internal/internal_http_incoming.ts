@@ -209,7 +209,8 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
 
   // Pumps the body's reader into the Readable until backpressure (push()
   // returning false) or EOF. The reader is acquired once and held for the
-  // message's lifetime, so a paused message can resume the pump later.
+  // message's lifetime, so a paused message can resume the pump later;
+  // _destroy() cancels it.
   async #tryRead(): Promise<void> {
     if (this.#stream == null || this.#reading) return;
 
@@ -220,6 +221,11 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
 
       while (!this.destroyed) {
         const data = await this.#reader.read();
+        // Destroyed while the read was pending (destroy() may have run in
+        // the meantime, which the narrowing of the loop condition does not
+        // see): its result is void.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (this.destroyed) break;
         if (data.done) {
           this.complete = true;
           this.push(null);
@@ -278,6 +284,16 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     if (!this.readableEnded || !this.complete) {
       this.aborted = true;
       this.emit('aborted');
+    }
+
+    // A destroyed message never reads its body again: cancel the stream so
+    // the producer (a fetch upload, a response body) learns of it now.
+    if (!this.complete && this.#stream != null) {
+      const cancelled =
+        this.#reader !== undefined
+          ? this.#reader.cancel(error ?? undefined)
+          : this.#stream.cancel(error ?? undefined);
+      cancelled.catch(() => {});
     }
 
     queueMicrotask(() => {

@@ -32,6 +32,9 @@ export {
   destroyWithErrorEmitsError,
   destroyWithoutErrorClosesQuietly,
   destroyWithErrorAndNoListenerIsSwallowed,
+  destroyMidBodyCancelsBodyStream,
+  destroyWithoutReasonCancelsBodyStream,
+  destroyAfterCompleteLeavesStreamAlone,
 } from 'request-destroy';
 
 export {

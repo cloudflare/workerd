@@ -6,8 +6,10 @@
 // 'error' only for listeners, 'close' always; and the body stream underneath
 // is cancelled so the producer learns of it.
 
-import { strictEqual } from 'node:assert';
-import { withServer } from 'harness';
+import { strictEqual, deepStrictEqual } from 'node:assert';
+import { withServer, remember, dispatch, manualStream } from 'harness';
+
+const enc = new TextEncoder();
 
 // destroy(err) with an 'error' listener: the error is delivered and the
 // handler can still respond.
@@ -67,6 +69,96 @@ export const destroyWithErrorAndNoListenerIsSwallowed = {
           await (await env.SERVICE.fetch('http://x/')).text(),
           'closed'
         );
+      }
+    );
+  },
+};
+
+// Destroying mid-body (direct dispatch, so the Request's body IS the test's
+// stream): 'aborted' and 'close' fire, no more 'data', and the body stream
+// is cancelled at once with the destroy reason.
+export const destroyMidBodyCancelsBodyStream = {
+  async test(ctrl, env) {
+    remember(env, ctrl);
+    const { stream, controller, cancels } = manualStream();
+    const events = [];
+    await withServer(
+      (req, res) => {
+        req.on('data', (chunk) => {
+          events.push(`data:${chunk}`);
+          req.destroy(new Error('enough'));
+        });
+        req.on('aborted', () => events.push('aborted'));
+        req.on('error', (err) => events.push(`error:${err.message}`));
+        req.on('end', () => events.push('end'));
+        req.on('close', () => {
+          events.push('close');
+          setTimeout(() => res.end('done'), 30);
+        });
+      },
+      async () => {
+        const pending = dispatch(
+          new Request('http://x/', { method: 'POST', body: stream })
+        );
+        controller.enqueue(enc.encode('one'));
+        await scheduler.wait(20);
+        strictEqual(cancels.length, 1);
+        strictEqual(cancels[0].message, 'enough');
+        strictEqual(await (await pending).text(), 'done');
+        deepStrictEqual(events, [
+          'data:one',
+          'aborted',
+          'error:enough',
+          'close',
+        ]);
+      }
+    );
+  },
+};
+
+// destroy() without a reason cancels the body stream with undefined.
+export const destroyWithoutReasonCancelsBodyStream = {
+  async test(ctrl, env) {
+    remember(env, ctrl);
+    const { stream, controller, cancels } = manualStream();
+    await withServer(
+      (req, res) => {
+        req.on('data', () => req.destroy());
+        req.on('close', () => res.end('done'));
+      },
+      async () => {
+        const pending = dispatch(
+          new Request('http://x/', { method: 'POST', body: stream })
+        );
+        controller.enqueue(enc.encode('one'));
+        strictEqual(await (await pending).text(), 'done');
+        deepStrictEqual(cancels, [undefined]);
+      }
+    );
+  },
+};
+
+// A message whose body was fully read is not cancelled by destroy().
+export const destroyAfterCompleteLeavesStreamAlone = {
+  async test(ctrl, env) {
+    remember(env, ctrl);
+    const { stream, controller, cancels } = manualStream();
+    await withServer(
+      (req, res) => {
+        req.resume();
+        req.on('end', () => {
+          req.destroy();
+          res.end(String(req.complete));
+        });
+      },
+      async () => {
+        const pending = dispatch(
+          new Request('http://x/', { method: 'POST', body: stream })
+        );
+        controller.enqueue(enc.encode('all'));
+        controller.close();
+        strictEqual(await (await pending).text(), 'true');
+        deepStrictEqual(cancels, []);
       }
     );
   },
