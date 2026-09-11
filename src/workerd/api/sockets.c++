@@ -498,9 +498,12 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   })
       .then(js,
           [self = JSG_THIS](jsg::Lock& js) mutable {
-    // Forcibly abort the readable/writable streams.
-    auto cancelPromise = self->readable.forceCancel(js, kj::none);
-    auto abortPromise = self->writable.forceAbort(js, kj::none);
+    // Forcibly abort the readable/writable streams. Operations still queued on them (a pipe's
+    // pending close, for instance) are rejected with this reason, so it must be a real error
+    // rather than the undefined that a reasonless abort() produces.
+    auto reason = jsg::JsValue(js.typeError("This socket has been closed."_kj));
+    auto cancelPromise = self->readable.forceCancel(js, reason);
+    auto abortPromise = self->writable.forceAbort(js, reason);
 
     // The below is effectively `Promise.all(cancelPromise, abortPromise)`
     return cancelPromise.then(js, [abortPromise = kj::mv(abortPromise)](jsg::Lock& js) mutable {
