@@ -42,6 +42,7 @@ export {
   fromWebSinkCloseRejectionErrorsNodeWritable,
   fromWebBackToBackWritesDeliverChunks,
   fromWebCorkedWritesDeliverChunks,
+  fromWebBatchedWriteRejectionFailsCallbacks,
 } from 'writable-from-web';
 
 export { toWebPairRoundTrip } from 'duplex-to-web';
