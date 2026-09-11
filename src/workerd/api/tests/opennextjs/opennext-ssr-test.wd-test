@@ -13,6 +13,7 @@ const unitTests :Workerd.Config = (
           "nodejs_compat_v2",
           "enable_nodejs_fs_module",
           "enable_nodejs_os_module",
+          "enable_nodejs_tty_module",
           "enable_nodejs_vm_module",
           "enable_nodejs_http_modules",
           "enable_nodejs_inspector_module",
