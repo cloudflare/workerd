@@ -13180,6 +13180,181 @@ export type BrowserRunJsonErrorResponse = BrowserRunErrorResponse & {
   /** Raw AI response text for debugging */
   rawAiResponse?: string;
 };
+/** Session-scoped guardrails applied when acquiring a browser session. */
+export type BrowserRunAcquireGuardrails = {
+  /** Domains that the browser may access. An empty list denies all domains. */
+  allowedDomains?: string[];
+  /** Named domain sets that the browser may access. */
+  allowedDomainSets?: string[];
+};
+/** Options for acquiring a new browser session. */
+export type BrowserRunAcquireOptions = {
+  /** Idle session lifetime in milliseconds. */
+  keepAlive?: number;
+  /** Record the browser session. */
+  recording?: boolean;
+  /** Geoegress hint as an ISO-3166 alpha-2 country code. */
+  location?: string;
+  /** Map hostnames to caller-provided Workers that handle outbound requests. */
+  outboundByHost?: Record<string, Fetcher>;
+  /** Session-scoped network guardrails. */
+  guardrails?: BrowserRunAcquireGuardrails;
+  /** Include the session's DevTools targets in the result. */
+  targets?: boolean;
+  /** Lifetime of target live-view URLs in milliseconds. */
+  liveViewUrlExpiresInMs?: number;
+};
+/** Metadata returned when a browser session is acquired. */
+export type BrowserRunAcquireResult = {
+  sessionId: string;
+  targets?: BrowserRunDevToolsTarget[];
+};
+/** Options for connecting to an already-acquired browser session. */
+export type BrowserRunConnectOptions = {
+  /** Connect to a specific page target instead of the browser-level CDP endpoint. */
+  targetId?: string;
+};
+/** Connection capability returned by `connectSession()` and `launch()`. */
+export type BrowserRunConnection = {
+  sessionId: string;
+  /** A session-pinned Fetcher. Use its `fetch()` method for a WebSocket upgrade. */
+  webSocket: Fetcher;
+  targets?: BrowserRunDevToolsTarget[];
+};
+/** The UI mode for a live-view link. */
+export type BrowserRunLiveViewMode = "devtools" | "tab" | "full";
+/** Connection-scoped guardrails applied to a live-view link. */
+export type BrowserRunConnectionGuardrails = {
+  mode: "readonly";
+};
+/** Options for minting a live-view link. */
+export type BrowserRunLiveViewOptions = {
+  mode?: BrowserRunLiveViewMode;
+  targetId?: string;
+  expiresInMs?: number;
+  guardrails?: BrowserRunConnectionGuardrails;
+};
+/** Live-view link metadata. */
+export type BrowserRunLiveView = {
+  webSocketDebuggerUrl: string;
+  devtoolsFrontendUrl: string;
+  id: string;
+  options: {
+    mode: BrowserRunLiveViewMode;
+    guardrails?: BrowserRunConnectionGuardrails;
+  };
+};
+/** Options for listing active browser sessions. */
+export type BrowserRunListSessionsOptions = {
+  limit?: number;
+  offset?: number;
+};
+/** Options for listing session history. */
+export type BrowserRunHistoryOptions = {
+  limit?: number;
+  offset?: number;
+};
+/** A browser session returned by the session-management methods. */
+export type BrowserRunSession = {
+  sessionId: string;
+  startTime?: number;
+  endTime?: number;
+  closeReason?: number;
+  closeReasonText?: string;
+  connectionId?: string;
+  connectionStartTime?: number;
+  connectionEndTime?: number;
+  lastUpdated?: number;
+  webSocketDebuggerUrl?: string;
+  devtoolsFrontendUrl?: string;
+};
+/** Account browser-session and browser-time limits. */
+export type BrowserRunLimits = {
+  activeSessions: Array<{
+    id: string;
+  }>;
+  maxConcurrentSessions: number;
+  allowedBrowserAcquisitions: number;
+  timeUntilNextAllowedBrowserAcquisition: number;
+  usedBrowserTimeSeconds?: number;
+};
+/** A browser target returned by the DevTools JSON methods. */
+export type BrowserRunDevToolsTarget = {
+  id: string;
+  type: string;
+  url: string;
+  title?: string;
+  description?: string;
+  webSocketDebuggerUrl?: string;
+  devtoolsFrontendUrl?: string;
+};
+/** Browser and protocol version metadata. */
+export type BrowserRunDevToolsVersion = {
+  Browser: string;
+  "Protocol-Version": string;
+  "User-Agent": string;
+  "V8-Version": string;
+  "WebKit-Version": string;
+  webSocketDebuggerUrl: string;
+};
+/** A DevTools protocol domain. Protocol definitions may gain additional fields over time. */
+export interface BrowserRunDevToolsProtocolDomain extends Record<
+  string,
+  unknown
+> {
+  domain: string;
+  experimental?: boolean;
+  dependencies?: string[];
+  types?: Array<Record<string, any>>;
+  commands?: Array<Record<string, any>>;
+  events?: Array<Record<string, any>>;
+}
+/** The DevTools protocol definition. Additional protocol fields may be returned by Chrome. */
+export interface BrowserRunDevToolsProtocol extends Record<string, any> {
+  domains: BrowserRunDevToolsProtocolDomain[];
+  version?: {
+    major: string;
+    minor: string;
+  };
+}
+/** Options shared by DevTools target-listing and target-creation methods. */
+export type BrowserRunTargetOptions = {
+  liveViewUrlExpiresInMs?: number;
+};
+/** Result returned by DevTools target activation and close methods. */
+export type BrowserRunTargetActionResult = {
+  message: string;
+};
+/** Methods exposed by the nested `devtools` binding target. */
+export type BrowserRunDevtools = {
+  getVersion(sessionId: string): Promise<BrowserRunDevToolsVersion>;
+  getProtocol(sessionId: string): Promise<BrowserRunDevToolsProtocol>;
+  listTargets(
+    sessionId: string,
+    options?: BrowserRunTargetOptions,
+  ): Promise<BrowserRunDevToolsTarget[]>;
+  getTarget(
+    sessionId: string,
+    targetId: string,
+  ): Promise<BrowserRunDevToolsTarget>;
+  newTarget(
+    sessionId: string,
+    url?: string,
+    options?: BrowserRunTargetOptions,
+  ): Promise<BrowserRunDevToolsTarget>;
+  activateTarget(
+    sessionId: string,
+    targetId: string,
+  ): Promise<BrowserRunTargetActionResult>;
+  closeTarget(
+    sessionId: string,
+    targetId: string,
+  ): Promise<BrowserRunTargetActionResult>;
+};
+/** Result returned when closing a browser session. */
+export type BrowserRunCloseSessionResult = {
+  status: "closing" | "closed";
+};
 /**
  * Browser Run API binding for automating headless browsers.
  * @see https://developers.cloudflare.com/browser-run/
@@ -13368,6 +13543,34 @@ export declare abstract class BrowserRun {
     action: "accessibilityTree",
     options: BrowserRunAccessibilityTreeOptions,
   ): Promise<Response>;
+  /** Acquire a new browser session and return its metadata. */
+  acquire(options?: BrowserRunAcquireOptions): Promise<BrowserRunAcquireResult>;
+  /** Acquire a browser session and return a session-pinned WebSocket capability. */
+  launch(options?: BrowserRunAcquireOptions): Promise<BrowserRunConnection>;
+  /** Return a session-pinned WebSocket capability for an existing session. */
+  connectSession(
+    sessionId: string,
+    options?: BrowserRunConnectOptions,
+  ): Promise<BrowserRunConnection>;
+  /** Mint an authenticated live-view link for a browser session. */
+  getLiveView(
+    sessionId: string,
+    options?: BrowserRunLiveViewOptions,
+  ): Promise<BrowserRunLiveView>;
+  /** List the caller's active browser sessions. */
+  listSessions(
+    options?: BrowserRunListSessionsOptions,
+  ): Promise<BrowserRunSession[]>;
+  /** List recent active and closed browser sessions. */
+  history(options?: BrowserRunHistoryOptions): Promise<BrowserRunSession[]>;
+  /** Return the caller's browser-session and browser-time limits. */
+  limits(): Promise<BrowserRunLimits>;
+  /** Return details for one browser session, or `null` when it does not exist. */
+  getSession(sessionId: string): Promise<BrowserRunSession | null>;
+  /** Close a browser session. */
+  closeSession(sessionId: string): Promise<BrowserRunCloseSessionResult>;
+  /** DevTools JSON methods exposed through one nested binding target. */
+  get devtools(): BrowserRunDevtools;
 }
 /**
  * In addition to the properties you can set in the RequestInit dict
