@@ -277,6 +277,10 @@ export class Server
     const response = new this[kServerResponse](incoming, {
       highWaterMark: this.highWaterMark,
     });
+    // The reply to a HEAD carries no body, whatever the handler writes.
+    if (request.method === 'HEAD') {
+      response._hasBody = false;
+    }
     return { incoming, response };
   }
 

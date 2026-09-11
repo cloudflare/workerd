@@ -166,6 +166,39 @@ export const noBodyStatuses = {
   },
 };
 
+// The reply to a HEAD has no body: the response is marked bodiless before
+// the handler runs, its writes are accepted (callback and all) and dropped,
+// and the client sees the headers with a null body.
+export const headResponseHasNoBody = {
+  async test(ctrl, env) {
+    const events = [];
+    await withServer(
+      (req, res) => {
+        events.push(`hasBody:${res._hasBody}`);
+        res.writeHead(200, { 'Content-Length': '5' });
+        const accepted = res.write('hel', (err) =>
+          events.push(`writecb:${err?.code ?? 'ok'}`)
+        );
+        events.push(`write:${accepted}`);
+        res.end('lo', () => events.push('finish'));
+      },
+      async () => {
+        const res = await env.SERVICE.fetch('http://x/', { method: 'HEAD' });
+        strictEqual(res.status, 200);
+        strictEqual(res.headers.get('Content-Length'), '5');
+        strictEqual(res.body, null);
+        await scheduler.wait(5);
+        deepStrictEqual(events, [
+          'hasBody:false',
+          'write:true',
+          'writecb:ok',
+          'finish',
+        ]);
+      }
+    );
+  },
+};
+
 // cork()/uncork(): corked writes queue (writableLength counts the header
 // bytes too) and flush together.
 export const corkAndUncork = {
