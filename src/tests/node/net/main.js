@@ -58,6 +58,13 @@ export {
 } from 'timeouts';
 
 export {
+  fixedBufferReceivesEveryFill,
+  fixedSubarrayKeepsItsRange,
+  generatedBuffersReceiveFills,
+  callbackFalseStopsReading,
+} from 'onread';
+
+export {
   pipeIntoWritableFromWeb,
   socketAsResponseBody,
   pipelineSocketThroughWebTransform,
