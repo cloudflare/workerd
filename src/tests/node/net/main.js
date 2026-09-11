@@ -10,6 +10,7 @@ export {
   writeBeforeAndAfterConnect,
   destroyBeforeConnect,
   immediateDestroySkipsConnect,
+  writesBeforeConnectAreDeferred,
 } from 'connect-lifecycle';
 
 export {
@@ -19,6 +20,7 @@ export {
   bytesWrittenLarge,
   echoLargeVolume,
   corkedWritesBatch,
+  byteAccounting,
 } from 'echo-roundtrip';
 
 export {
