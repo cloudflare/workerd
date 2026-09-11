@@ -170,3 +170,36 @@ export const fromWebCorkedWritesDeliverChunks = {
     strictEqual(seen.map((c) => dec.decode(c)).join(''), 'abc');
   },
 };
+
+// When a batched (_writev) write fails in the web sink, every callback in
+// the batch receives the sink's error, the node Writable errors once with
+// it, and no rejection is left unhandled.
+export const fromWebBatchedWriteRejectionFailsCallbacks = {
+  async test() {
+    await withRejectionGuard(async () => {
+      const boom = new Error('second chunk rejected');
+      let writes = 0;
+      const ws = new WritableStream({
+        write() {
+          if (++writes === 2) throw boom;
+        },
+      });
+      const w = Writable.fromWeb(ws);
+      const errors = [];
+      w.on('error', (err) => errors.push(err));
+      const closed = once(w, 'close');
+      w.cork();
+      const results = ['a', 'b', 'c'].map(
+        (text) => new Promise((resolve) => w.write(text, resolve))
+      );
+      w.uncork();
+      const errs = await Promise.all(results);
+      strictEqual(errs.length, 3);
+      for (const err of errs) strictEqual(err, boom);
+      await closed;
+      strictEqual(errors.length, 1);
+      strictEqual(errors[0], boom);
+      strictEqual(w.destroyed, true);
+    });
+  },
+};

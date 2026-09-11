@@ -1400,9 +1400,8 @@ export function newStreamWritableFromWritableStream(
 
     writev(chunks, callback) {
       function done(error) {
-        error = error.filter((e) => e);
         try {
-          callback(error.length === 0 ? undefined : error);
+          callback(error);
         } catch (error) {
           // In a next tick because this is happening within
           // a promise context, and if there are any errors
@@ -1413,9 +1412,11 @@ export function newStreamWritableFromWritableStream(
         }
       }
 
+      // Promise.all rejects with the first failed write's error; its
+      // fulfillment value (the per-chunk results) is not one.
       writer.ready.then(() => {
         return Promise.all(chunks.map((data) => writer.write(data.chunk))).then(
-          done,
+          () => done(),
           done
         );
       }, done);
