@@ -352,3 +352,95 @@ export const abortMidBodyAbortsResponse = {
     });
   },
 };
+
+// The timeout fires once, whether armed before or after end(), and tears
+// the request down with an AbortError: 'timeout', 'error', 'close'; no
+// 'response'.
+export const timeoutBeforeHeadersDestroysRequest = {
+  async test(ctrl, env) {
+    for (const armBeforeEnd of [true, false]) {
+      const log = [];
+      const req = request(env, '/slow-headers?delay=300');
+      record(log, 'req', req, ['timeout', 'response', 'error', 'close']);
+      if (armBeforeEnd) req.setTimeout(50);
+      req.end();
+      if (!armBeforeEnd) req.setTimeout(50);
+      await once(req, 'close');
+      await scheduler.wait(350);
+      deepStrictEqual(log, [
+        'req:timeout',
+        'req:error(AbortError/ABORT_ERR/The operation was aborted)',
+        'req:close',
+      ]);
+      strictEqual(req.destroyed, true);
+    }
+  },
+};
+
+// The `timeout` option arms the same timer, and the setTimeout() callback
+// is the 'timeout' listener.
+export const timeoutOptionAndCallback = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = request(env, '/slow-headers?delay=300', { timeout: 50 });
+    req.on('error', () => log.push('error'));
+    req.setTimeout(40, () => log.push('callback'));
+    req.end();
+    await once(req, 'close');
+    deepStrictEqual(log, ['callback', 'error']);
+  },
+};
+
+// A timeout mid-body: 'timeout' on the request and the response, then the
+// response is aborted and both error with the AbortError and close.
+export const timeoutMidBodyAbortsResponse = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = get(env, '/slow-body?delay=300');
+    req.setTimeout(80);
+    record(log, 'req', req, ['timeout', 'error', 'close']);
+    const res = await response(req);
+    record(log, 'res', res, ['timeout', 'aborted', 'error', 'end', 'close']);
+    res.on('data', (chunk) => log.push(`data:${chunk}`));
+    await Promise.all([once(req, 'close'), once(res, 'close')]);
+    deepStrictEqual(log, [
+      'data:first',
+      'req:timeout',
+      'res:timeout',
+      'res:aborted',
+      'req:error(AbortError/ABORT_ERR/The operation was aborted)',
+      'req:close',
+      'res:error(AbortError/ABORT_ERR/The operation was aborted)',
+      'res:close',
+    ]);
+    strictEqual(res.complete, false);
+  },
+};
+
+// A completed exchange disarms the timer: no 'timeout' afterwards.
+export const timeoutDisarmedByCompletion = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = get(env, '/asd');
+    req.setTimeout(40);
+    record(log, 'req', req, ['timeout', 'error']);
+    const res = await response(req);
+    strictEqual((await collect(res)).toString(), 'asd');
+    await scheduler.wait(100);
+    deepStrictEqual(log, []);
+  },
+};
+
+// setTimeout(0) clears a pending timeout; the response then arrives.
+export const setTimeoutZeroClears = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = get(env, '/slow-headers?delay=60');
+    req.setTimeout(20);
+    req.setTimeout(0);
+    record(log, 'req', req, ['timeout', 'error']);
+    const res = await response(req);
+    strictEqual((await collect(res)).toString(), 'late');
+    deepStrictEqual(log, []);
+  },
+};
