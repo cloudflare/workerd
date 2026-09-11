@@ -60,6 +60,7 @@ import {
 } from 'node-internal:validators';
 
 import { isUint8Array, isArrayBufferView } from 'node-internal:internal_types';
+import { nextTick } from 'node-internal:internal_process';
 import { Duplex } from 'node-internal:streams_duplex';
 import { Buffer } from 'node-internal:internal_buffer';
 import {
@@ -1277,12 +1278,19 @@ function cleanupAfterDestroy(
   socket[kLastWriteQueueSize] = 0;
   socket[kSocketInfo] = null;
 
-  // If there's an error, emit it before the close event
+  if (cb != null) {
+    // The Duplex destroy machinery emits 'error' from its callback on the
+    // next tick. emitClose is off for sockets, so 'close' (with hadError)
+    // is emitted here, queued behind that 'error'.
+    cb(error);
+    nextTick(() => socket.emit('close', isException));
+    return;
+  }
+
+  // No destroy callback (a handle being replaced): emit both directly.
   if (error != null) {
     socket.emit('error', error);
   }
-
-  cb?.(error);
   socket.emit('close', isException);
 }
 

@@ -160,3 +160,26 @@ export const closedSocketIsInert = {
     await once(during, 'close');
   },
 };
+
+// destroy(err): 'error' with that error, then 'close' with hadError true.
+export const destroyWithError = {
+  async test(ctrl, env) {
+    const socket = echo(env);
+    await once(socket, 'connect');
+    const events = [];
+    socket.on('error', (err) => events.push(['error', err]));
+    const closed = new Promise((resolve) =>
+      socket.once('close', (hadError) => {
+        events.push(['close', hadError]);
+        resolve();
+      })
+    );
+    const boom = new Error('torn down');
+    socket.destroy(boom);
+    await closed;
+    deepStrictEqual(events, [
+      ['error', boom],
+      ['close', true],
+    ]);
+  },
+};

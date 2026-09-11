@@ -40,6 +40,7 @@ export {
   endFlushesQueuedWrites,
   endCallbackForms,
   closedSocketIsInert,
+  destroyWithError,
 } from 'end-and-destroy';
 
 export {
