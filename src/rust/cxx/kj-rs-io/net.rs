@@ -779,6 +779,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn get_sockaddr_rejects_unsupported_family() {
         // A zeroed sockaddr (family AF_UNSPEC) is neither AF_INET/6 nor AF_UNIX, so

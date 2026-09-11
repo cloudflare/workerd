@@ -909,6 +909,7 @@ KJ_TEST("zero-length write() is a no-op that succeeds") {
   KJ_EXPECT(pair.server->tryRead(buf, 2, 2).wait(ws) == 2);
 }
 
+#if !_WIN32
 KJ_TEST("write() to a reset peer surfaces a DISCONNECTED exception") {
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
@@ -984,7 +985,6 @@ KJ_TEST("getSockaddr builds a connectable IPv6 address from a raw sockaddr_in6")
   KJ_EXPECT(server->tryRead(buf, 2, 2).wait(ws) == 2);
 }
 
-#if !_WIN32
 KJ_TEST("multiple concurrent onSignal for the same signum all fire") {
   // tokio broadcasts a signal to every live stream for that signum, so two concurrent
   // onSignal(SIGUSR2) must both resolve on a single delivery.

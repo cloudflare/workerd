@@ -19,7 +19,6 @@ namespace kj_rs_io_test {
 namespace {
 
 using kj_rs_io::setupTokioAsyncIo;
-using kj_rs_io::TokioAsyncIoContext;
 
 // The client side of an echo round trip: write `data` (in chunks) and concurrently read the
 // echo back and verify it (concurrent, so bounded transports -- the pump duplex, socket

@@ -911,6 +911,7 @@ pub fn unwrap_kj_stream(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use cxx::KjError;
 
     use super::*;

@@ -159,7 +159,7 @@ kj::Own<kj::PeerIdentity> peerIdentityFromSockaddr(
       if (creds.uid != static_cast<uid_t>(-1)) {
         result.uid = creds.uid;
       }
-#elif defined(LOCAL_PEERCRED)
+#elifdef LOCAL_PEERCRED
       struct xucred creds;
       kj::uint length = sizeof(creds);
       stream.getsockopt(SOL_LOCAL, LOCAL_PEERCRED, &creds, &length);
