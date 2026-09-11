@@ -90,20 +90,18 @@ def _capnp_bundle(id = None, integrity = None, **_kwds):
     )
     return [name]
 
-def _snapshot_http_file(bundle_name, folder, snapshot, integrity, hash, r2_base = PYODIDE_CAPN_BIN):
+def _snapshot_http_file(bundle_name, snapshot, integrity, url_prefix, key):
     if not snapshot:
         return []
     if not integrity:
         fail("Snapshot %s from bundle %s has missing integrity" % (snapshot, bundle_name))
-    if folder == "baseline-snapshot/":
-        key = hash
-    else:
-        key = snapshot
+    if not key:
+        fail("Snapshot %s from bundle %s has missing hash" % (snapshot, bundle_name))
     return [struct(
         name = "pyodide-snapshot-" + snapshot,
         snapshot = snapshot,
         integrity = integrity,
-        url = r2_base + folder + key,
+        url = url_prefix + key,
     )]
 
 def _snapshot_http_files_version(
@@ -113,9 +111,16 @@ def _snapshot_http_files_version(
         baseline_snapshot_integrity = None,
         dedicated_fastapi_snapshot = None,
         dedicated_fastapi_snapshot_integrity = None,
+        dedicated_numpy_vendor_snapshot = None,
+        dedicated_numpy_vendor_snapshot_hash = None,
+        dedicated_numpy_vendor_snapshot_integrity = None,
         **_kwds):
-    return (_snapshot_http_file(name, "baseline-snapshot/", baseline_snapshot, baseline_snapshot_integrity, baseline_snapshot_hash) +
-            _snapshot_http_file(name, "", dedicated_fastapi_snapshot, dedicated_fastapi_snapshot_integrity, None, VENDOR_R2))
+    # Snapshots produced by src/pyodide/make_snapshots.py live in the pyodide-capnp-bin bucket, keyed
+    # by their sha256 digest. The fastapi dedicated snapshot was produced by the production validator
+    # and lives in the vendor bucket under its file name.
+    return (_snapshot_http_file(name, baseline_snapshot, baseline_snapshot_integrity, PYODIDE_CAPN_BIN + "baseline-snapshot/", baseline_snapshot_hash) +
+            _snapshot_http_file(name, dedicated_fastapi_snapshot, dedicated_fastapi_snapshot_integrity, VENDOR_R2, dedicated_fastapi_snapshot) +
+            _snapshot_http_file(name, dedicated_numpy_vendor_snapshot, dedicated_numpy_vendor_snapshot_integrity, PYODIDE_CAPN_BIN + "dedicated-snapshot/", dedicated_numpy_vendor_snapshot_hash))
 
 def _snapshot_http_files():
     files = []
