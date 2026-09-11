@@ -10,6 +10,7 @@
 
 import net from 'node:net';
 import { strictEqual, ok, deepStrictEqual } from 'node:assert';
+import { Buffer } from 'node:buffer';
 import { echo, endsImmediately, once } from 'servers';
 
 // The socket's handle wraps the connect() socket's halves with a BYOB
@@ -101,5 +102,30 @@ export const immediateDestroySkipsConnect = {
     socket.destroy();
     await closed;
     strictEqual(connects, 0);
+  },
+};
+
+// Writes issued while connecting are held and flushed after 'connect'; the
+// write callback observes the connected state. bytesWritten counts bytes,
+// not characters.
+export const writesBeforeConnectAreDeferred = {
+  async test(ctrl, env) {
+    const socket = echo(env, { highWaterMark: 0 });
+    strictEqual(socket.bytesWritten, 0);
+    const a = "L'État, c'est ";
+    const b = 'moi';
+    let result = '';
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk) => (result += chunk));
+    const written = new Promise((resolve) => socket.write(a, resolve));
+    const closed = once(socket, 'close');
+    socket.end(b);
+    await written;
+    strictEqual(socket.pending, false);
+    strictEqual(socket.connecting, false);
+    strictEqual(socket.readyState, 'readOnly');
+    strictEqual(socket.bytesWritten, Buffer.byteLength(a + b));
+    await closed;
+    strictEqual(result, a + b);
   },
 };

@@ -143,3 +143,20 @@ export const corkedWritesBatch = {
     strictEqual(socket.bytesWritten, 3 + 4);
   },
 };
+
+// bytesRead counts echoed bytes as they are pushed; bytesWritten is the
+// flushed count once the writable side has finished.
+export const byteAccounting = {
+  async test(ctrl, env) {
+    const socket = echo(env);
+    let delivered = 0;
+    socket.on('data', (chunk) => (delivered += chunk.byteLength));
+    const ended = once(socket, 'end');
+    socket.write('hello');
+    socket.end();
+    await ended;
+    strictEqual(delivered, 5);
+    strictEqual(socket.bytesRead, 5);
+    strictEqual(socket.bytesWritten, 5);
+  },
+};

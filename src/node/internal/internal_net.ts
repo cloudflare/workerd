@@ -767,7 +767,7 @@ Socket.prototype._writeGeneric = function (
           }
         }
       );
-      lastWriteSize = (data as unknown as Buffer).byteLength;
+      lastWriteSize = bufferData.byteLength;
     }
     this[kLastWriteQueueSize] = lastWriteSize;
   } catch (err) {
