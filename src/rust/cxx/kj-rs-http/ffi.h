@@ -12,12 +12,22 @@
 namespace kj::rust {
 
 struct HttpConnectSettings;
+struct HttpHeaderEntry;
 
 // --- Async IO
 
 using AsyncInputStream = kj::AsyncInputStream;
 using AsyncOutputStream = kj::AsyncOutputStream;
 using AsyncIoStream = kj::AsyncIoStream;
+
+inline kj::Promise<size_t> async_input_stream_try_read(
+    AsyncInputStream& stream, ::rust::Slice<kj::byte> buffer, size_t minBytes) {
+  return stream.tryRead(buffer.data(), minBytes, buffer.size());
+}
+
+inline kj::Maybe<uint64_t> async_input_stream_try_get_length(AsyncInputStream& stream) {
+  return stream.tryGetLength();
+}
 
 inline kj::Promise<void> async_output_stream_write(
     AsyncOutputStream& stream, ::rust::Slice<const kj::byte> buffer) {
@@ -28,12 +38,44 @@ inline kj::Promise<void> async_output_stream_when_write_disconnected(AsyncOutput
   return stream.whenWriteDisconnected();
 }
 
+// AsyncIoStream variants: a two-way stream must be readable and writable *concurrently*
+// (e.g. a tunnel pump reads and writes the same stream from two futures), so
+// these take the stream itself rather than requiring the caller to split it into its
+// AsyncInputStream/AsyncOutputStream bases (two simultaneous Pin<&mut> views of one
+// object are not expressible through the bridge).
+inline kj::Promise<size_t> async_io_stream_try_read(
+    AsyncIoStream& stream, ::rust::Slice<kj::byte> buffer, size_t minBytes) {
+  return stream.tryRead(buffer.data(), minBytes, buffer.size());
+}
+
+inline kj::Promise<void> async_io_stream_write(
+    AsyncIoStream& stream, ::rust::Slice<const kj::byte> buffer) {
+  return stream.write(kj::from<kj_rs::Rust>(buffer));
+}
+
+inline void async_io_stream_shutdown_write(AsyncIoStream& stream) {
+  stream.shutdownWrite();
+}
+
 // --- kj::HttpHeaders ffi
 
 using BuiltinIndicesEnum = kj::HttpHeaders::BuiltinIndicesEnum;
 using HttpHeaderTable = kj::HttpHeaderTable;
 using HttpHeaders = kj::HttpHeaders;
 using HttpHeaderId = kj::HttpHeaderId;
+
+// Normalize a kj::Own<T> so it can safely cross the FFI boundary as a kj-rs KjOwn.
+//
+// KjOwn erases the pointee type and disposes through kj::Own<void> with the *stored* pointer.
+// That is only safe if the disposer ignores the pointer or the stored pointer equals the
+// most-derived object address; a concrete type using multiple inheritance (e.g. kj::NullStream,
+// where AsyncOutputStream is a non-first base) would otherwise pass a shifted pointer to
+// HeapDisposer and corrupt the heap. attach() re-homes ownership in a DisposableOwnedBundle
+// whose disposeImpl() ignores the pointer argument entirely, making the erasure safe.
+template <typename T>
+inline kj::Own<T> normalizeForRust(kj::Own<T> own) {
+  return own.attach();
+}
 
 inline kj::Own<kj::HttpHeaders> new_http_headers(const HttpHeaderTable& table) {
   // There is no C++ stack frame to hold the new instance, so we heap allocate it for Rust.
@@ -127,6 +169,62 @@ inline kj::Maybe<::rust::Slice<const kj::byte>> get_header_by_name(
   return result.map([](auto header) { return header.asBytes().template as<kj_rs::Rust>(); });
 }
 
+// Returns every set header as a (name, value) pair via forEach. Defined out-of-line in ffi.c++
+// because HttpHeaderEntry is generated into the cxx bridge header, which ffi.h cannot include
+// without creating an include cycle.
+::rust::Vec<HttpHeaderEntry> get_all_headers(const HttpHeaders& headers);
+
+// Appends a header by name, taking ownership of copies of both name and value. kj-http rejects
+// values containing '\0', '\r' or '\n' with an exception (surfaced to Rust as Result::Err); any
+// other bytes (including non-UTF-8 obs-text) pass through unchanged.
+inline void add_header(
+    HttpHeaders& headers, ::rust::Str name, ::rust::Slice<const kj::byte> value) {
+  headers.add(kj::str(name), kj::str(kj::from<kj_rs::Rust>(value).asChars()));
+}
+
+// Batch-appends a whole request's headers borrowing from a single arena buffer, replacing the
+// two per-header kj::String allocations of add_header() (name + value) with ONE allocation for
+// the entire header block. This mirrors what kj::HttpServer does natively: it parses request
+// headers in place and stores borrowed StringPtrs into the connection read buffer rather than
+// heap-allocating an owned String per field. Here the borrowed-from buffer is a kj-owned copy of
+// the Rust arena, attached to `headers` via takeOwnership so the StringPtrs stay valid for the
+// life of the HttpHeaders (the same lifetime contract kj::HttpServer relies on).
+//
+// `arena` is packed by the Rust caller as, for each header in add() order: name bytes, a '\0',
+// value bytes, a '\0'. `lens` is the flat [name_len, value_len, name_len, value_len, ...]
+// sequence (two u32 per header), so each field's span is [off, off+len) with a readable NUL at
+// off+len -- exactly the [ptr, len+1) content span kj::StringPtr requires (asArray/size derive
+// from content.size()-1, and addNoCheck calls name.cStr()).
+//
+// Validation and ordering are identical to repeated add_header()/add(String,String) calls: each
+// field goes through addPtrPtr(), which runs requireValidHeaderName/requireValidHeaderValue and
+// then addNoCheck (indexed storage + duplicate-concatenation). The first invalid header throws,
+// surfaced to Rust as Result::Err, exactly as the per-call path did; any fields added before it
+// are discarded with the HttpHeaders by the caller (which sends a 400), matching the old loop.
+inline void add_headers_arena(
+    HttpHeaders& headers, ::rust::Slice<const kj::byte> arena, ::rust::Slice<const uint32_t> lens) {
+  // One heap allocation: copy the packed bytes into kj-owned storage whose address is stable for
+  // the life of `headers`. kj::Array move (in takeOwnership) transfers the pointer without
+  // reallocating, so `base` remains valid for the borrowed StringPtrs added below.
+  auto owned = kj::heapArray<char>(reinterpret_cast<const char*>(arena.data()), arena.size());
+  const char* base = owned.begin();
+  headers.takeOwnership(kj::mv(owned));
+
+  size_t pos = 0;
+  for (size_t i = 0; i + 1 < lens.size(); i += 2) {
+    size_t nameLen = lens[i];
+    size_t valueLen = lens[i + 1];
+    // The public ptr+size StringPtr ctor: it forms content = [ptr, len+1) and (in debug)
+    // asserts ptr[len] == '\0' -- exactly the arena's NUL, which also gives addNoCheck's
+    // name.cStr() a valid C string.
+    kj::StringPtr name(base + pos, nameLen);
+    pos += nameLen + 1;
+    kj::StringPtr value(base + pos, valueLen);
+    pos += valueLen + 1;
+    headers.addPtrPtr(name, value);
+  }
+}
+
 // --- kj::HttpService ffi
 using AsyncInputStream = kj::AsyncInputStream;
 using AsyncIoStream = kj::AsyncIoStream;
@@ -141,7 +239,11 @@ inline kj::Own<AsyncOutputStream> response_send(HttpServiceResponse& response,
     ::rust::Str statusText,
     const HttpHeaders& headers,
     kj::Maybe<uint64_t> expectedBodySize) {
-  return response.send(statusCode, kj::str(statusText), headers, expectedBodySize);
+  // normalizeForRust: send() may return a stream whose concrete type uses multiple inheritance
+  // (e.g. kj::NullStream for HEAD responses in kj's HttpClientAdapter), which KjOwn cannot
+  // dispose safely without normalization.
+  return normalizeForRust(
+      response.send(statusCode, kj::str(statusText), headers, expectedBodySize));
 }
 
 inline void connect_response_accept(ConnectResponse& response,
@@ -156,7 +258,9 @@ inline kj::Own<AsyncOutputStream> connect_response_reject(ConnectResponse& respo
     ::rust::Str statusText,
     const HttpHeaders& headers,
     kj::Maybe<uint64_t> expectedBodySize) {
-  return response.reject(statusCode, kj::str(statusText), headers, expectedBodySize);
+  // normalizeForRust: see response_send.
+  return normalizeForRust(
+      response.reject(statusCode, kj::str(statusText), headers, expectedBodySize));
 }
 
 inline kj::Promise<void> request(HttpService& service,
