@@ -2,9 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Tearing the exchange down: destroying the response cancels the body
-// stream underneath, which reaches the server; the server going away
-// mid-body aborts the response; and the message's own end.
+// Tearing the exchange down: destroying the request aborts the fetch (or
+// cancels the response body) and reports it as Node does; destroying the
+// response cancels the body stream underneath, which reaches the server;
+// the server going away mid-body aborts the response; a failed connection
+// errors the request; and the request closes once the exchange is over.
 
 import { strictEqual, deepStrictEqual, ok } from 'node:assert';
 import {
@@ -29,7 +31,7 @@ export const responseDestroyCloses = {
   },
 };
 
-// A consumed response ends, then closes, destroyed.
+// A consumed response ends, then closes — once — destroyed.
 export const consumedResponseEndsThenCloses = {
   async test(ctrl, env) {
     const res = await response(get(env, '/asd'));
@@ -38,8 +40,8 @@ export const consumedResponseEndsThenCloses = {
     res.on('close', () => events.push(`close:${res.destroyed}`));
     res.resume();
     await once(res, 'close');
-    strictEqual(events[0], 'end:false');
-    strictEqual(events[1], 'close:true');
+    await scheduler.wait(10);
+    deepStrictEqual(events, ['end:false', 'close:true']);
   },
 };
 
@@ -111,5 +113,171 @@ export const completedResponseIsFinal = {
     strictEqual(res.aborted, false);
     strictEqual(res.readableEnded, true);
     strictEqual(res.read(), null);
+  },
+};
+
+// A connection that cannot be made fails the request: 'error', then
+// 'close'; no 'response'.
+export const connectionFailureErrorsRequest = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = request(env, '/', { port: 1 });
+    record(log, 'req', req, ['response', 'close']);
+    const errors = [];
+    req.on('error', (err) => {
+      errors.push(err);
+      log.push('req:error');
+    });
+    req.end();
+    await once(req, 'close');
+    deepStrictEqual(log, ['req:error', 'req:close']);
+    ok(errors[0] instanceof Error);
+    strictEqual(req.destroyed, true);
+  },
+};
+
+// A completed exchange closes the request after the response ends, and
+// leaves it destroyed.
+export const responseEndClosesRequest = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = get(env, '/asd');
+    record(log, 'req', req, ['finish', 'error', 'close']);
+    const res = await response(req);
+    strictEqual(req.destroyed, false);
+    record(log, 'res', res, ['end', 'close']);
+    const closed = Promise.all([once(req, 'close'), once(res, 'close')]);
+    res.resume();
+    await closed;
+    deepStrictEqual(log, ['req:finish', 'res:end', 'req:close', 'res:close']);
+    strictEqual(req.destroyed, true);
+  },
+};
+
+// A bare destroy() before any response: the request reports the
+// connection as hung up (ECONNRESET), then closes; no 'response' follows,
+// and the request never finishes.
+export const destroyBeforeResponseHangsUp = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = get(env, '/slow-headers?delay=150');
+    record(log, 'req', req, ['response', 'error', 'close']);
+    await scheduler.wait(10);
+    req.destroy();
+    strictEqual(req.destroyed, true);
+    await once(req, 'close');
+    deepStrictEqual(log, [
+      'req:error(Error/ECONNRESET/socket hang up)',
+      'req:close',
+    ]);
+    await scheduler.wait(200);
+    strictEqual(log.length, 2);
+  },
+};
+
+// destroy(err) before any response reports that error instead.
+export const destroyWithErrorBeforeResponse = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = get(env, '/slow-headers?delay=150');
+    record(log, 'req', req, ['response', 'error', 'close']);
+    await scheduler.wait(10);
+    req.destroy(new Error('boom'));
+    await once(req, 'close');
+    deepStrictEqual(log, ['req:error(Error/-/boom)', 'req:close']);
+    strictEqual(req.errored?.message, 'boom');
+  },
+};
+
+// destroy() before end(): nothing is sent, end() is inert (no 'finish'),
+// and the request hangs up and closes.
+export const destroyBeforeEndSendsNothing = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = request(env, '/pong', { method: 'POST' });
+    record(log, 'req', req, ['finish', 'response', 'error', 'close']);
+    req.write('never sent');
+    req.destroy();
+    req.end();
+    await once(req, 'close');
+    await scheduler.wait(50);
+    deepStrictEqual(log, [
+      'req:error(Error/ECONNRESET/socket hang up)',
+      'req:close',
+    ]);
+  },
+};
+
+// req.destroy() mid-body, in Node's order: the response is aborted, the
+// request closes without an error of its own, the response errors with
+// ECONNRESET 'aborted' (for listeners) and closes; the body stream's
+// cancellation reaches the server.
+export const destroyMidBodyAbortsResponse = {
+  async test(ctrl, env) {
+    const id = uniqueId('req-destroy');
+    const log = [];
+    const req = get(env, `/never-ends?id=${id}`);
+    record(log, 'req', req, ['error', 'close']);
+    const res = await response(req);
+    record(log, 'res', res, ['aborted', 'error', 'end', 'close']);
+    const closed = Promise.all([once(req, 'close'), once(res, 'close')]);
+    res.on('data', (chunk) => {
+      log.push(`data:${chunk}`);
+      req.destroy();
+    });
+    await closed;
+    deepStrictEqual(log, [
+      'data:first',
+      'res:aborted',
+      'req:close',
+      'res:error(Error/ECONNRESET/aborted)',
+      'res:close',
+    ]);
+    strictEqual(res.aborted, true);
+    strictEqual(res.complete, false);
+    await scheduler.wait(50);
+    deepStrictEqual(await neverEndsStats(env, id), {
+      opened: true,
+      closed: true,
+    });
+  },
+};
+
+// req.destroy(err) mid-body: the request reports err, the response is
+// destroyed with it.
+export const destroyWithErrorMidBody = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = get(env, `/never-ends?id=${uniqueId('req-destroy-err')}`);
+    record(log, 'req', req, ['error', 'close']);
+    const res = await response(req);
+    record(log, 'res', res, ['aborted', 'error', 'close']);
+    const closed = Promise.all([once(req, 'close'), once(res, 'close')]);
+    res.on('data', () => req.destroy(new Error('enough')));
+    await closed;
+    deepStrictEqual(log, [
+      'req:error(Error/-/enough)',
+      'res:aborted',
+      'req:close',
+      'res:error(Error/-/enough)',
+      'res:close',
+    ]);
+  },
+};
+
+// A response that arrives after the request was destroyed is dropped, its
+// body cancelled: no 'response' ever fires.
+export const responseAfterDestroyIsDropped = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = get(env, '/asd');
+    record(log, 'req', req, ['response', 'error', 'close']);
+    req.destroy();
+    await once(req, 'close');
+    await scheduler.wait(100);
+    deepStrictEqual(log, [
+      'req:error(Error/ECONNRESET/socket hang up)',
+      'req:close',
+    ]);
   },
 };
