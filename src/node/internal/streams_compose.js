@@ -25,50 +25,73 @@
 
 import { pipeline } from 'node-internal:streams_pipeline';
 import { Duplex } from 'node-internal:streams_duplex';
-import {
-  Readable as ReadableConstructor,
-  from,
-} from 'node-internal:streams_readable';
+import { Readable as ReadableConstructor } from 'node-internal:streams_readable';
 import {
   isNodeStream,
   isReadable,
   isWritable,
+  isWebStream,
+  isTransformStream,
+  isWritableStream,
+  isReadableStream,
+  kIsClosedPromise,
 } from 'node-internal:streams_util';
 import { destroyer } from 'node-internal:streams_destroy';
+import { eos } from 'node-internal:streams_end_of_stream';
 import {
   AbortError,
   ERR_INVALID_ARG_VALUE,
   ERR_MISSING_ARGS,
+  ERR_WEB_STREAM_INTEROP_UNSUPPORTED,
 } from 'node-internal:internal_errors';
 
 export function compose(...streams) {
   if (streams.length === 0) {
     throw new ERR_MISSING_ARGS('streams');
   }
+
   if (streams.length === 1) {
-    return from(Duplex, streams[0]);
+    return Duplex.from(streams[0]);
   }
+
   const orgStreams = [...streams];
+
   if (typeof streams[0] === 'function') {
-    streams[0] = from(Duplex, streams[0]);
+    streams[0] = Duplex.from(streams[0]);
   }
+
   if (typeof streams[streams.length - 1] === 'function') {
     const idx = streams.length - 1;
-    streams[idx] = from(Duplex, streams[idx]);
+    streams[idx] = Duplex.from(streams[idx]);
   }
+
   for (let n = 0; n < streams.length; ++n) {
-    if (!isNodeStream(streams[n])) {
+    if (!isNodeStream(streams[n]) && !isWebStream(streams[n])) {
       // TODO(ronag): Add checks for non streams.
       continue;
     }
-    if (n < streams.length - 1 && !isReadable(streams[n])) {
+    if (
+      n < streams.length - 1 &&
+      !(
+        isReadable(streams[n]) ||
+        isReadableStream(streams[n]) ||
+        isTransformStream(streams[n])
+      )
+    ) {
       throw new ERR_INVALID_ARG_VALUE(
         `streams[${n}]`,
         orgStreams[n],
         'must be readable'
       );
     }
-    if (n > 0 && !isWritable(streams[n])) {
+    if (
+      n > 0 &&
+      !(
+        isWritable(streams[n]) ||
+        isWritableStream(streams[n]) ||
+        isTransformStream(streams[n])
+      )
+    ) {
       throw new ERR_INVALID_ARG_VALUE(
         `streams[${n}]`,
         orgStreams[n],
@@ -76,14 +99,17 @@ export function compose(...streams) {
       );
     }
   }
+
   let ondrain;
   let onfinish;
   let onreadable;
   let onclose;
   let d;
+
   function onfinished(err) {
     const cb = onclose;
     onclose = null;
+
     if (cb) {
       cb(err);
     } else if (err) {
@@ -92,50 +118,88 @@ export function compose(...streams) {
       d.destroy();
     }
   }
+
   const head = streams[0];
   const tail = pipeline(streams, onfinished);
-  const writable = !!isWritable(head);
-  const readable = !!isReadable(tail);
+
+  const writable = !!(
+    isWritable(head) ||
+    isWritableStream(head) ||
+    isTransformStream(head)
+  );
+  const readable = !!(
+    isReadable(tail) ||
+    isReadableStream(tail) ||
+    isTransformStream(tail)
+  );
 
   // TODO(ronag): Avoid double buffering.
   // Implement Writable/Readable/Duplex traits.
   // See, https://github.com/nodejs/node/pull/33515.
   d = new Duplex({
     // TODO (ronag): highWaterMark?
-    writableObjectMode: !!(
-      head !== null &&
-      head !== undefined &&
-      head.writableObjectMode
-    ),
-    readableObjectMode: !!(
-      tail !== null &&
-      tail !== undefined &&
-      tail.writableObjectMode
-    ),
+    writableObjectMode: !!head?.writableObjectMode,
+    readableObjectMode: !!tail?.readableObjectMode,
     writable,
     readable,
   });
+
   if (writable) {
-    const w = head;
-    d._write = function (chunk, encoding, callback) {
-      if (head.write(chunk, encoding)) {
-        callback();
-      } else {
-        ondrain = callback;
-      }
-    };
-    d._final = function (callback) {
-      w.end();
-      onfinish = callback;
-    };
-    w.on('drain', function () {
-      if (ondrain) {
-        const cb = ondrain;
-        ondrain = null;
-        cb();
-      }
-    });
-    tail.on('finish', function () {
+    if (isNodeStream(head)) {
+      d._write = function (chunk, encoding, callback) {
+        if (head.write(chunk, encoding)) {
+          callback();
+        } else {
+          ondrain = callback;
+        }
+      };
+
+      d._final = function (callback) {
+        head.end();
+        onfinish = callback;
+      };
+
+      head.on('drain', function () {
+        if (ondrain) {
+          const cb = ondrain;
+          ondrain = null;
+          cb();
+        }
+      });
+    } else if (isWebStream(head)) {
+      const writable = isTransformStream(head) ? head.writable : head;
+      const writer = writable.getWriter();
+
+      d._write = async function (chunk, encoding, callback) {
+        try {
+          await writer.ready;
+          writer.write(chunk).catch(() => {});
+          callback();
+        } catch (err) {
+          callback(err);
+        }
+      };
+
+      d._final = async function (callback) {
+        try {
+          await writer.ready;
+          writer.close().catch(() => {});
+          onfinish = callback;
+        } catch (err) {
+          callback(err);
+        }
+      };
+    }
+
+    const toRead = isTransformStream(tail) ? tail.readable : tail;
+
+    // Observing a web tail needs the Node.js interop hook; without it the
+    // composed stream could never learn that the tail finished.
+    if (isWebStream(toRead) && toRead[kIsClosedPromise] === undefined) {
+      throw new ERR_WEB_STREAM_INTEROP_UNSUPPORTED('compose()');
+    }
+
+    eos(toRead, () => {
       if (onfinish) {
         const cb = onfinish;
         onfinish = null;
@@ -143,44 +207,78 @@ export function compose(...streams) {
       }
     });
   }
+
   if (readable) {
-    tail.on('readable', function () {
-      if (onreadable) {
-        const cb = onreadable;
-        onreadable = null;
-        cb();
-      }
-    });
-    tail.on('end', function () {
-      d.push(null);
-    });
-    d._read = function (_n) {
-      while (true) {
-        const buf = tail.read();
-        if (buf === null) {
-          onreadable = d._read;
-          return;
+    if (isNodeStream(tail)) {
+      tail.on('readable', function () {
+        if (onreadable) {
+          const cb = onreadable;
+          onreadable = null;
+          cb();
         }
-        if (!d.push(buf)) {
-          return;
+      });
+
+      tail.on('end', function () {
+        d.push(null);
+      });
+
+      d._read = function () {
+        while (true) {
+          const buf = tail.read();
+          if (buf === null) {
+            onreadable = d._read;
+            return;
+          }
+
+          if (!d.push(buf)) {
+            return;
+          }
         }
-      }
-    };
+      };
+    } else if (isWebStream(tail)) {
+      const readable = isTransformStream(tail) ? tail.readable : tail;
+      const reader = readable.getReader();
+      d._read = async function () {
+        while (true) {
+          try {
+            const { value, done } = await reader.read();
+
+            if (!d.push(value)) {
+              return;
+            }
+
+            if (done) {
+              d.push(null);
+              return;
+            }
+          } catch {
+            return;
+          }
+        }
+      };
+    }
   }
+
   d._destroy = function (err, callback) {
     if (!err && onclose !== null) {
       err = new AbortError();
     }
+
     onreadable = null;
     ondrain = null;
     onfinish = null;
+
+    if (isNodeStream(tail)) {
+      destroyer(tail, err);
+    }
+
     if (onclose === null) {
       callback(err);
     } else {
       onclose = callback;
-      destroyer(tail, err);
     }
   };
+
   return d;
 }
 

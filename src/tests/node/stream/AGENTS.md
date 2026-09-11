@@ -2,8 +2,8 @@
 
 An informal specification of the `node:stream` web-interop surface —
 `Readable.toWeb/fromWeb`, `Writable.toWeb/fromWeb`, `Duplex.toWeb/fromWeb`,
-`Duplex.from`, `Readable.from` over a web stream, `pipeline`, `finished`,
-`addAbortSignal`, `node:stream/web`, `node:stream/consumers` —
+`Duplex.from`, `Readable.from` over a web stream, `pipeline`, `compose`,
+`finished`, `addAbortSignal`, `node:stream/web`, `node:stream/consumers` —
 derived from and kept in lockstep with the test suite in this directory.
 **The tests are the normative artifact**; this document maps behaviors to
 the tests that assert them. Every test runs against the C++ streams
@@ -16,8 +16,9 @@ The implementation under test is `src/node/internal/streams_readable.js`
 `streams_writable.js` (`newWritableStreamFromStreamWritable`,
 `newStreamWritableFromWritableStream`), `streams_duplex.js`
 (`newReadableWritablePairFromDuplex`, `newStreamDuplexFromReadableWritablePair`,
-`duplexify`), `streams_pipeline.js`, `streams_end_of_stream.ts`,
-`streams_add_abort_signal.ts`, and `src/node/stream/{web,consumers}.js`.
+`duplexify`), `streams_pipeline.js`, `streams_compose.js`,
+`streams_end_of_stream.ts`, `streams_add_abort_signal.ts`, and
+`src/node/stream/{web,consumers}.js`.
 
 ## Core semantics
 
@@ -159,6 +160,11 @@ The implementation under test is `src/node/internal/streams_readable.js`
   source locked, as Node does). A stage that cancels its reader on abort
   lets the pipeline settle with the failure and releases the source.
 
+### compose
+
+- `compose()`: web streams are validated by position; a web head is
+  written through its writer, a web tail read through its reader.
+
 ### finished / addAbortSignal
 
 - `finished()` and `addAbortSignal()` need the Node.js interop hooks (see
@@ -240,4 +246,5 @@ Guarded by `stream-cpp-legacy.wd-test` (C++ only):
 | `new ReadableStream()` / `new WritableStream()` from `node:stream/web` throw the gate | `legacyStreamWebConstructorsGated` |
 | `Readable.fromWeb`, `Writable.fromWeb`, `Duplex.fromWeb` work over runtime-provided streams (fetch bodies, `IdentityTransformStream`) | `legacyFromWebOverRuntimeStreams` |
 | `pipeline()` works over runtime-provided web streams | `legacyPipelineOverRuntimeStreams` |
+| `compose()` works over runtime-provided web streams | `legacyComposeOverRuntimeStreams` |
 | `new TransformStream({ transform })` is an identity transform; the transformer is never called | `legacyTransformStreamIgnoresTransformer` |
