@@ -1,0 +1,35 @@
+using Workerd = import "/workerd/workerd.capnp";
+using StreamModules = import "stream-modules.capnp";
+
+# Runs the node:stream web-interop suite against the legacy C++ streams
+# implementation. stream-ts.wd-test runs the identical modules against the
+# TypeScript implementation; sharing the test modules is the point —
+# behavioral drift between the two implementations fails one config or the
+# other.
+#
+# No compatibilityDate is set: the wd_test variants supply the date axis
+# (2000-01-01 for `@`, 2999-12-31 for `@all-compat-flags`), and the tests
+# must hold at both extremes. The semantics the tests depend on are pinned
+# by naming the specific flags instead:
+# - nodejs_compat: the node:* modules under test (date-enabled 2026-08-04,
+#   so the `@` variant needs it named).
+# - streams_enable_constructors: Readable.toWeb / Writable.toWeb /
+#   Duplex.toWeb build their streams with `new ReadableStream()` /
+#   `new WritableStream()`, which the C++ implementation gates on this flag.
+# The TypeScript implementation hard-codes these modern behaviors, so the
+# flags also keep the two cells comparable at the oldest compat date.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "node-stream-cpp",
+      worker = (
+        # The shared module list: see stream-modules.capnp.
+        modules = StreamModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+        ],
+      )
+    ),
+  ],
+);
