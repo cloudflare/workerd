@@ -63,6 +63,7 @@ use crate::stream::stream_peer_addr;
 use crate::stream::stream_peer_credentials;
 use crate::stream::stream_raw_handle;
 use crate::stream::stream_shutdown_write;
+use crate::stream::stream_take;
 use crate::stream::stream_when_write_disconnected;
 use crate::stream::stream_write;
 use crate::stream::stream_write_pieces;
@@ -155,6 +156,16 @@ mod bridge {
         fn stream_peer_addr(stream: &TokioStream) -> Result<SocketAddress>;
         fn stream_peer_credentials(stream: &TokioStream) -> Result<PeerCredentials>;
         fn stream_raw_handle(stream: &TokioStream) -> i64;
+
+        /// Moves the native stream out into a fresh handle, leaving `stream` hollow (all
+        /// further operations error; `stream_raw_handle` reports -1). Fails, leaving `stream`
+        /// untouched, if it is already hollow or any I/O future is in flight on it: the
+        /// `TokioStream` tracks in-flight operations itself, so this is a checked operation,
+        /// not a caller contract. Backs `TokioAsyncIoStream::unwrap()` / `unwrapTokioStream()`.
+        fn stream_take(stream: &TokioStream) -> Result<Box<TokioStream>>;
+
+        /// `kj::AsyncIoProvider::newTwoWayPipe` (and `newOneWayPipe` on Windows): a connected
+        /// socket pair, both ends registered with the loop runtime.
         fn new_socket_pair() -> Result<SocketPair>;
 
         // --- kj::Network / kj::NetworkAddress (net.rs). Peer filtering is the C++ adapter's:

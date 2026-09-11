@@ -1,0 +1,113 @@
+# kj-rs-http: the generic "KJ HttpService / HttpHeaders / AsyncIoStream" FFI bridge.
+#
+# Fully generic, nothing workerd-specific — the KJ HttpService/header/stream bridge
+# foundation plus the `normalizeForRust` KJ multiple-inheritance disposal fix. This is the
+# kj-rs-http layer; the hyper implementation folds in on top.
+
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
+
+# Header-only forward-decl surface shared by ffi.c++ and both generated bridges. Kept
+# separate so ffi.h has a single owner (both bridges `include!` it), avoiding a
+# duplicate-header conflict and the ffi.c++ <-> bridge include cycle.
+wd_cc_library(
+    name = "ffi-hdr",
+    hdrs = ["ffi.h"],
+    include_prefix = "kj-rs-http",
+    strip_include_prefix = "/src/rust/cxx/kj-rs-http",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx:core",
+        "//src/rust/cxx/kj-rs",
+        "@capnp-cpp//src/kj/compat:kj-http-types",
+    ],
+)
+
+rust_cxx_bridge(
+    name = "http-bridge",
+    src = "http.rs",
+    include_prefix = "kj-rs-http",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ffi-hdr",
+        "//src/rust/cxx:core",
+        "//src/rust/cxx/kj-rs",
+        "@capnp-cpp//src/kj:kj",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj/compat:kj-http-types",
+    ],
+)
+
+rust_cxx_bridge(
+    name = "io-bridge",
+    src = "io.rs",
+    include_prefix = "kj-rs-http",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ffi-hdr",
+        "//src/rust/cxx:core",
+        "//src/rust/cxx/kj-rs",
+        "@capnp-cpp//src/kj:kj",
+        "@capnp-cpp//src/kj:kj-async-core",
+    ],
+)
+
+# ffi.c++ out-of-line impls (connect, get_all_headers). Includes kj-rs-http/http.rs.h.
+# This is the target external consumers use for the C++ ffi surface (was
+# //src/rust/kj:ffi in workerd).
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    include_prefix = "kj-rs-http",
+    linkstatic = CC_LIBRARY_LINKSTATIC,
+    strip_include_prefix = "/src/rust/cxx/kj-rs-http",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ffi-hdr",
+        ":http-bridge",
+        "//src/rust/cxx:core",
+        "//src/rust/cxx/kj-rs",
+        "@capnp-cpp//src/kj/compat:kj-http-types",
+    ],
+)
+
+rust_library(
+    name = "kj-rs-http",
+    srcs = glob(["*.rs"]),
+    compile_data = ["ffi.h"],
+    # crate_name stays "kj" (not "kj_rs_http"): the Rust module path kj::http / kj::io is
+    # referenced at ~180 sites across the workerd consumers (kj-hyper, worker)
+    # and this crate's own bridges. The bazel target/dir is kj-rs-http for repo-layout
+    # consistency; the Rust crate remains the "kj FFI bindings", named kj.
+    crate_name = "kj",
+    edition = "2024",
+    link_deps = [
+        ":ffi",
+        ":http-bridge",
+        ":io-bridge",
+    ],
+    proc_macro_deps = ["@crates_vendor//:async-trait"],
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx",
+        "//src/rust/cxx/kj-rs",
+        "@crates_vendor//:futures",
+        "@crates_vendor//:static_assertions",
+    ],
+)
+
+rust_test(
+    name = "kj-rs-http_test",
+    crate = "kj-rs-http",
+    edition = "2024",
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)

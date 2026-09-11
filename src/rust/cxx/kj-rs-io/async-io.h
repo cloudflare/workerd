@@ -80,6 +80,15 @@ class TokioAsyncIoStream final: public kj::AsyncIoStream {
   kj::Maybe<void *> getWin32Handle() const override;
 #endif
 
+  // Unwrap fast path: moves the native tokio stream out, leaving this wrapper hollow (all
+  // further operations throw; getFd() returns none). Throws if I/O promises are in flight --
+  // the Rust side tracks in-flight operations, so this is checked rather than a caller
+  // contract. Prefer the free function unwrapTokioStream() (bridge.h) when holding only a
+  // kj::AsyncIoStream&.
+  ::rust::Box<TokioStream> unwrap() {
+    return stream_take(*inner);
+  }
+
  private:
   kj::Promise<void> writePieces(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces);
 

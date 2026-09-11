@@ -69,7 +69,16 @@ use crate::ffi::SocketAddress;
 /// A connected tokio stream (TCP or Unix domain) behind a `kj::AsyncIoStream`. See the module
 /// docs for its ownership model.
 pub struct TokioStream {
-    inner: Arc<Inner>,
+    /// `None` once the native socket has been taken out (see [`TokioStream::take`]): the
+    /// wrapper is then "hollow" and every operation fails. The lock is held only for the
+    /// synchronous clone or swap of the `Arc`, never across an operation.
+    inner: std::sync::Mutex<Option<Arc<Inner>>>,
+}
+
+/// The wrapper's native socket was taken out ([`TokioStream::take`]); nothing is left to
+/// operate on.
+fn hollow() -> KjIoError {
+    KjIoError::other("kj_rs_io", "stream was unwrapped (hollow wrapper)")
 }
 
 /// The shared state behind a [`TokioStream`] and every operation in flight on it.
@@ -390,21 +399,105 @@ impl Inner {
 impl TokioStream {
     /// Wraps a socket net.rs registered with the loop's runtime.
     pub(crate) fn new(socket: Socket) -> Result<Self> {
-        Ok(Self {
-            inner: Arc::new(Inner {
-                socket,
-                owner: crate::current_loop_runtime_id()?,
-                #[cfg(unix)]
-                hangup_watch: std::sync::OnceLock::new(),
-                read_aborted: std::sync::atomic::AtomicBool::new(false),
-                read_abort: tokio::sync::Notify::new(),
-            }),
-        })
+        Ok(Self::from_inner(Inner {
+            socket,
+            owner: crate::current_loop_runtime_id()?,
+            #[cfg(unix)]
+            hangup_watch: std::sync::OnceLock::new(),
+            read_aborted: std::sync::atomic::AtomicBool::new(false),
+            read_abort: tokio::sync::Notify::new(),
+        }))
     }
 
-    /// A share of the state, for an operation's future to own (see the module docs).
-    fn shared(&self) -> Arc<Inner> {
-        Arc::clone(&self.inner)
+    fn from_inner(inner: Inner) -> Self {
+        Self {
+            inner: std::sync::Mutex::new(Some(Arc::new(inner))),
+        }
+    }
+
+    /// A share of the state, for an operation's future to own (see the module docs). Errors if
+    /// the wrapper is hollow (its socket was taken out, see [`TokioStream::take`]).
+    fn shared(&self) -> Result<Arc<Inner>> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or_else(hollow)
+    }
+
+    /// Moves the native state out, leaving this wrapper hollow. Fails, leaving the wrapper as
+    /// it was, if it is already hollow, if called off the loop runtime that owns the socket, or
+    /// if any operation still holds a share of the state (an I/O future in flight, or an
+    /// outstanding `whenWriteDisconnected()`): that is the checked half of KJ's "no I/O in
+    /// flight when handing over a stream" contract, detected here rather than assumed.
+    fn take_inner(&self) -> Result<Inner> {
+        let mut slot = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let inner = slot.take().ok_or_else(|| {
+            KjIoError::other("kj_rs_io", "stream was already unwrapped (hollow wrapper)")
+        })?;
+        match crate::current_loop_runtime_id() {
+            Ok(id) if id == inner.owner => {}
+            other => {
+                *slot = Some(inner);
+                other?;
+                return Err(KjIoError::other(
+                    "kj_rs_io",
+                    "cannot take the stream's socket from a loop other than its owner",
+                ));
+            }
+        }
+        match Arc::try_unwrap(inner) {
+            Ok(inner) => Ok(inner),
+            Err(shared) => {
+                *slot = Some(shared);
+                Err(KjIoError::other(
+                    "kj_rs_io",
+                    "cannot take the stream's socket: an I/O operation is still in flight on it",
+                ))
+            }
+        }
+    }
+
+    /// Moves the native stream out into a fresh handle, leaving this one hollow (see
+    /// [`TokioStream::take_inner`] for the failure cases). Backs `unwrapTokioStream()`.
+    pub(crate) fn take(&self) -> Result<Box<Self>> {
+        Ok(Box::new(Self::from_inner(self.take_inner()?)))
+    }
+
+    /// Recovers the native tokio socket, consuming the wrapper: the unwrap fast path Rust
+    /// servers use to serve a connection natively. The socket stays registered with the loop
+    /// runtime that created it (see the module docs).
+    ///
+    /// # Errors
+    ///
+    /// Already unwrapped, called off the owning loop, or an operation still in flight (see
+    /// [`TokioStream::take_inner`]).
+    pub fn into_socket(self) -> Result<Socket> {
+        Ok(self.take_inner()?.socket)
+    }
+
+    /// Test observability: how many shares of the state exist (the handle plus one per
+    /// operation in flight); 0 when hollow.
+    #[cfg(test)]
+    fn share_count(&self) -> usize {
+        self.shared()
+            .map_or(0, |inner| Arc::strong_count(&inner) - 1)
+    }
+
+    /// Test observability: the raw fd of the `whenWriteDisconnected` dup, once created.
+    #[cfg(all(test, unix))]
+    fn hangup_watch_fd(&self) -> Option<i32> {
+        use std::os::fd::AsRawFd;
+        self.shared().ok().and_then(|inner| {
+            inner
+                .hangup_watch
+                .get()
+                .map(|afd| afd.get_ref().as_raw_fd())
+        })
     }
 
     /// `kj::AsyncIoStream::tryRead` as a future owning its share of the stream. `buf` may be
@@ -415,7 +508,10 @@ impl TokioStream {
         min_bytes: usize,
     ) -> impl Future<Output = Result<usize>> + use<'b> {
         let inner = self.shared();
-        async move { read_min(&inner, buf, min_bytes).await }
+        async move {
+            let inner = inner?;
+            read_min(&inner, buf, min_bytes).await
+        }
     }
 
     /// `kj::AsyncIoStream::write` (write-all) as a future owning its share of the stream.
@@ -424,7 +520,10 @@ impl TokioStream {
         buf: &'b [u8],
     ) -> impl Future<Output = Result<()>> + use<'b> {
         let inner = self.shared();
-        async move { write_all(&inner, buf).await }
+        async move {
+            let inner = inner?;
+            write_all(&inner, buf).await
+        }
     }
 
     /// `kj::AsyncIoStream::write(pieces)` as a future owning its share of the stream.
@@ -433,20 +532,23 @@ impl TokioStream {
         pieces: &'b crate::ffi::KjPieces,
     ) -> impl Future<Output = Result<()>> + use<'b> {
         let inner = self.shared();
-        async move { write_all_pieces(&inner, pieces).await }
+        async move {
+            let inner = inner?;
+            write_all_pieces(&inner, pieces).await
+        }
     }
 
     /// `kj::AsyncIoStream::whenWriteDisconnected` as a future owning its share of the stream.
     pub(crate) fn when_write_disconnected(&self) -> impl Future<Output = Result<()>> + use<> {
         let inner = self.shared();
-        async move { inner.when_write_disconnected().await }
+        async move { inner?.when_write_disconnected().await }
     }
 
     /// `shutdown(SHUT_WR)`: cleanly shut down the write end, keeping the read end open.
     /// `shutdown(2)` acts on the socket, not on a descriptor, so a `SockRef` borrow of the live
     /// socket is all it needs, identical on unix and windows.
     fn shutdown_write(&self) -> Result<()> {
-        self.shared()
+        self.shared()?
             .socket
             .with_sock_ref(|sock| sock.shutdown(std::net::Shutdown::Write))
             .map_err(op("shutdown(SHUT_WR)"))
@@ -458,7 +560,7 @@ impl TokioStream {
     /// `shutdown(SHUT_RD)` as KJ's `AsyncStreamFd::abortRead` does, so the peer-facing effect is
     /// KJ's too. Errors surface as KJ's own `KJ_SYSCALL` would.
     fn abort_read(&self) -> Result<()> {
-        let inner = self.shared();
+        let inner = self.shared()?;
         inner
             .read_aborted
             .store(true, std::sync::atomic::Ordering::Release);
@@ -472,13 +574,19 @@ impl TokioStream {
     /// Raw `struct sockaddr` bytes of the socket's locally-bound address (the `getsockname()`
     /// passthrough behind `kj::AsyncIoStream::getsockname`).
     fn local_addr(&self) -> Result<SocketAddress> {
-        self.inner.socket.local_addr().map_err(op("getsockname()"))
+        self.shared()?
+            .socket
+            .local_addr()
+            .map_err(op("getsockname()"))
     }
 
     /// Raw `struct sockaddr` bytes of the connected peer's address (the `getpeername()`
     /// passthrough behind `kj::AsyncIoStream::getpeername`).
     fn peer_addr(&self) -> Result<SocketAddress> {
-        self.inner.socket.peer_addr().map_err(op("getpeername()"))
+        self.shared()?
+            .socket
+            .peer_addr()
+            .map_err(op("getpeername()"))
     }
 
     /// The connected Unix-domain peer's process credentials, with KJ's validity rules
@@ -486,7 +594,7 @@ impl TokioStream {
     /// if not `(uid_t)-1`. tokio reads `SO_PEERCRED` (Linux) / `LOCAL_PEERCRED` +
     /// `LOCAL_PEERPID` (macOS, BSDs) for us.
     fn peer_credentials(&self) -> Result<crate::ffi::PeerCredentials> {
-        match &self.shared().socket {
+        match &self.shared()?.socket {
             #[cfg(unix)]
             Socket::Unix(s) => {
                 let cred = s.peer_cred().map_err(op("getsockopt(SO_PEERCRED)"))?;
@@ -508,10 +616,15 @@ impl TokioStream {
     /// The underlying raw OS socket handle, widened to `i64`: a Unix fd
     /// (`kj::AsyncIoStream::getFd()`) or a win32 `SOCKET` (`getWin32Handle()`).
     fn raw_handle(&self) -> i64 {
+        // -1 when hollow: `getFd()` / `getWin32Handle()` return a `kj::Maybe`, so the C++ side
+        // maps it to `none` instead of using exception catching as control flow.
+        let Ok(inner) = self.shared() else {
+            return -1;
+        };
         #[cfg(unix)]
         {
             use std::os::fd::AsRawFd;
-            i64::from(self.inner.socket.as_borrowed_fd().as_raw_fd())
+            i64::from(inner.socket.as_borrowed_fd().as_raw_fd())
         }
         #[cfg(windows)]
         {
@@ -519,7 +632,7 @@ impl TokioStream {
             // A live SOCKET fits in i64 (Windows handles fit in 32 bits); the bridge carries
             // its bits verbatim.
             #[allow(clippy::cast_possible_wrap)]
-            (self.inner.socket.as_borrowed_socket().as_raw_socket() as i64)
+            (inner.socket.as_borrowed_socket().as_raw_socket() as i64)
         }
     }
 }
@@ -558,6 +671,10 @@ pub fn stream_abort_read(stream: &TokioStream) -> Result<()> {
 
 pub fn stream_raw_handle(stream: &TokioStream) -> i64 {
     stream.raw_handle()
+}
+
+pub fn stream_take(stream: &TokioStream) -> Result<Box<TokioStream>> {
+    stream.take()
 }
 
 pub fn stream_local_addr(stream: &TokioStream) -> Result<SocketAddress> {
@@ -614,7 +731,7 @@ mod tests {
         let mut read = Box::pin(stream.try_read_min(&mut buf, 1));
         assert!(poll_once(&mut read).is_pending());
         assert_eq!(
-            Arc::strong_count(&stream.inner),
+            stream.share_count(),
             2,
             "the handle and the read own a share"
         );
@@ -659,11 +776,11 @@ mod tests {
         let mut write = Box::pin(stream.write_all(&payload));
         assert!(poll_once(&mut read).is_pending());
         assert!(poll_once(&mut write).is_pending());
-        assert_eq!(Arc::strong_count(&stream.inner), 3);
+        assert_eq!(stream.share_count(), 3);
         drop(read);
-        assert_eq!(Arc::strong_count(&stream.inner), 2);
+        assert_eq!(stream.share_count(), 2);
         drop(write);
-        assert_eq!(Arc::strong_count(&stream.inner), 1);
+        assert_eq!(stream.share_count(), 1);
     }
 
     /// The hangup watcher's `dup(2)` is per stream, not per call: the first
@@ -717,16 +834,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn write_disconnected_dups_the_socket_once_per_stream() {
-        use std::os::fd::AsRawFd;
         let port = kj_rs_tokio::TokioPort::new();
         let (stream, _client) = connected_pair(&port);
-        let watch_fd = || {
-            stream
-                .inner
-                .hangup_watch
-                .get()
-                .map(|afd| afd.get_ref().as_raw_fd())
-        };
+        let watch_fd = || stream.hangup_watch_fd();
         assert_eq!(watch_fd(), None, "no dup before the first wait");
         let mut first = Box::pin(stream.when_write_disconnected());
         assert!(poll_once(&mut first).is_pending());
@@ -768,5 +878,49 @@ mod tests {
                 .description()
                 .contains("other than this thread's TokioEventPort runtime")
         );
+    }
+    fn message(error: &KjIoError) -> String {
+        format!("{error:?}")
+    }
+
+    /// `take()`'s error (`TokioStream` is not `Debug`, so no `unwrap_err`).
+    fn take_error(stream: &TokioStream) -> KjIoError {
+        match stream.take() {
+            Ok(_) => panic!("take() unexpectedly succeeded"),
+            Err(error) => error,
+        }
+    }
+
+    #[test]
+    fn take_leaves_a_hollow_wrapper_that_rejects_every_operation_and_a_second_take() {
+        let port = kj_rs_tokio::TokioPort::new();
+        let (stream, _client) = connected_pair(&port);
+        let taken = stream.take().expect("nothing in flight: take succeeds");
+        assert_eq!(taken.share_count(), 1);
+        // The original is hollow now: -1 handle, every operation fails, a second take too.
+        assert_eq!(stream.raw_handle(), -1);
+        assert!(message(&stream.shutdown_write().unwrap_err()).contains("hollow"));
+        assert!(message(&stream.abort_read().unwrap_err()).contains("hollow"));
+        assert!(message(&take_error(&stream)).contains("already unwrapped"));
+        // The taken handle is fully live.
+        assert!(taken.raw_handle() >= 0);
+        drop(port);
+    }
+
+    #[test]
+    fn take_while_an_operation_is_in_flight_is_an_error_not_aliasing() {
+        let port = kj_rs_tokio::TokioPort::new();
+        let (stream, _client) = connected_pair(&port);
+        let mut buf = [MaybeUninit::<u8>::uninit(); 8];
+        let mut read = Box::pin(stream.try_read_min(&mut buf, 1));
+        assert!(poll_once(&mut read).is_pending());
+        let error = take_error(&stream);
+        assert!(message(&error).contains("in flight"), "{error:?}");
+        // The wrapper is untouched: still live, still sharing with the read.
+        assert_eq!(stream.share_count(), 2);
+        drop(read);
+        assert_eq!(stream.share_count(), 1);
+        assert!(stream.take().is_ok());
+        drop(port);
     }
 }

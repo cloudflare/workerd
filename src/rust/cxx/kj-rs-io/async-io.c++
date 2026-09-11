@@ -1,5 +1,7 @@
 #include "kj-rs-io/async-io.h"
 
+#include "kj-rs-io/unwrap.h"
+
 #include <kj/debug.h>
 #include <kj/exception.h>
 #include <kj/io.h>
@@ -16,6 +18,13 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#endif
+
+// The unwrap fast path (unwrapTokioStream / isTokioStream) recognizes kj-rs-io streams by
+// dynamic_cast. Without RTTI every stream would silently be treated as foreign and take the
+// pump path; make that a build error rather than a performance mystery.
+#if KJ_NO_RTTI
+#error "kj-rs-io's unwrap fast path requires RTTI (dynamicDowncastIfAvailable); KJ_NO_RTTI is set"
 #endif
 
 namespace kj_rs_io {
@@ -271,6 +280,20 @@ kj::Promise<PeerStream> acceptAllowed(
 }  // namespace
 
 // =======================================================================================
+// Unwrap fast path
+
+bool isTokioStream(const kj::AsyncIoStream &stream) {
+  return kj::dynamicDowncastIfAvailable<const TokioAsyncIoStream>(stream) != kj::none;
+}
+
+::rust::Box<TokioStream> unwrapTokioStream(kj::AsyncIoStream &stream) {
+  KJ_IF_SOME(tokioStream, kj::dynamicDowncastIfAvailable<TokioAsyncIoStream>(stream)) {
+    return tokioStream.unwrap();
+  }
+  KJ_FAIL_REQUIRE("stream is not a kj-rs-io tokio-backed stream; cannot unwrap");
+}
+
+// =======================================================================================
 // TokioAsyncIoStream
 
 kj::Promise<size_t> TokioAsyncIoStream::tryRead(void *buffer, size_t minBytes, size_t maxBytes) {
@@ -318,13 +341,19 @@ kj::Maybe<int> TokioAsyncIoStream::getFd() const {
 #if _WIN32
   return kj::none;
 #else
-  return static_cast<int>(stream_raw_handle(*inner));
+  // On unix the raw socket handle is the fd, widened losslessly to int64 by the bridge; -1
+  // means the wrapper is hollow (unwrapped).
+  auto handle = stream_raw_handle(*inner);
+  if (handle < 0) return kj::none;
+  return static_cast<int>(handle);
 #endif
 }
 
 #if _WIN32
 kj::Maybe<void *> TokioAsyncIoStream::getWin32Handle() const {
-  return reinterpret_cast<void *>(static_cast<uintptr_t>(stream_raw_handle(*inner)));
+  auto handle = stream_raw_handle(*inner);
+  if (handle < 0) return kj::none;  // hollow (unwrapped)
+  return reinterpret_cast<void *>(static_cast<uintptr_t>(handle));
 }
 #endif
 
