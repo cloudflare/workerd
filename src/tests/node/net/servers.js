@@ -6,6 +6,8 @@
 // and small event helpers.
 
 import net from 'node:net';
+import { Buffer } from 'node:buffer';
+import { ok } from 'node:assert';
 
 function connectTo(env, portName, options = {}) {
   return net.connect({
@@ -28,6 +30,22 @@ export const GREETING = 'hello from greet';
 
 export function once(emitter, event) {
   return new Promise((resolve) => emitter.once(event, resolve));
+}
+
+// Writes the segments to an echo socket one at a time, waiting for each
+// one's echo — `receivedLength()` reaching the bytes sent so far — before
+// sending the next, so that every segment is delivered on its own whatever
+// TCP makes of the timing. Gives up, failing the test, after a few seconds.
+export async function echoSegments(socket, segments, receivedLength) {
+  let sent = 0;
+  for (const segment of segments) {
+    socket.write(segment);
+    sent += Buffer.byteLength(segment);
+    for (let i = 0; receivedLength() < sent; i++) {
+      ok(i < 2000, `echo of ${JSON.stringify(segment)} never arrived`);
+      await scheduler.wait(2);
+    }
+  }
 }
 
 // Resolves with the concatenation of everything the socket emits as

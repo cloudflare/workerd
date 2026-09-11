@@ -12,5 +12,6 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "end-and-destroy", esModule = embed "end-and-destroy.js"),
   (name = "backpressure", esModule = embed "backpressure.js"),
   (name = "timeouts", esModule = embed "timeouts.js"),
+  (name = "onread", esModule = embed "onread.js"),
   (name = "interop", esModule = embed "interop.js"),
 ];

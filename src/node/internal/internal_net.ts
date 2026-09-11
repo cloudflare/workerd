@@ -719,7 +719,13 @@ export declare class Socket extends _Socket {
   _handle: null | {
     writeQueueSize?: number;
     lastWriteQueueSize?: number;
+    // Whether the socket wants to be reading (pause/resume state).
     reading: boolean | undefined;
+    // Set while startRead's loop is running over this handle, so that the
+    // several places that start reading (connect, resume, read, a TLS
+    // upgrade) never run two loops — and thus two BYOB reads — against the
+    // same reader at once.
+    readLoopActive?: boolean;
     bytesRead: number;
     bytesWritten: number;
     socket: ReturnType<typeof inner.connect>;
@@ -906,8 +912,13 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
       this[kBuffer] = true;
       this[kBufferGen] = onread.buffer;
     } else {
+      // A fixed buffer. Each BYOB read transfers the buffer it is handed, so
+      // the read loop replaces kBuffer with a view over the transferred
+      // backing store after every read (see startRead); the generator
+      // always hands out the current view.
       this[kBuffer] = onread.buffer;
-      this[kBufferGen] = (): Uint8Array | undefined => onread.buffer;
+      this[kBufferGen] = (): Uint8Array | undefined =>
+        this[kBuffer] as Uint8Array;
     }
     // eslint-disable-next-line @typescript-eslint/unbound-method
     this[kBufferCb] = onread.callback;
@@ -1941,23 +1952,24 @@ export function onConnectionClosed(this: Socket): void {
 
 async function startRead(socket: Socket): Promise<void> {
   const handle = socket._handle;
-  if (!handle) return;
+  if (!handle || handle.readLoopActive) return;
+  handle.readLoopActive = true;
   const reader = handle.reader;
   try {
     while (handle.reading && socket._handle === handle) {
       const generatedBuffer = socket[kBufferGen]?.();
 
-      // Let's be extra cautious here and handle nullish values.
+      // A BYOB read needs a non-empty view; a generator that hands out
+      // nothing (or an empty view) ends the read loop.
       if (generatedBuffer == null || generatedBuffer.length === 0) {
-        // When reading a static buffer with fixed length, it's highly likely to
-        // read the whole buffer in a single take, which will make the second
-        // operation to read an empty buffer.
-        //
-        // Workerd throws the following exception when reading empty buffers
-        // TypeError: You must call read() on a "byob" reader with a positive-sized TypedArray object.
-        // Therefore, let's skip calling read operation and stop reading here.
         break;
       }
+
+      // The view's range within its buffer, taken before the read: a BYOB
+      // read transfers the buffer and detaches the view, which then reports
+      // neither.
+      const { byteOffset: viewOffset, byteLength: viewLength } =
+        generatedBuffer;
 
       // The [kBufferGen] function should always be a function that returns
       // a Uint8Array we can read into.
@@ -1989,6 +2001,14 @@ async function startRead(socket: Socket): Promise<void> {
         // would try to start reading again.
         Duplex.prototype.read.call(socket, 0);
         break;
+      }
+
+      // The BYOB read transferred the view's buffer. A fixed onread buffer
+      // continues over the transferred backing store as a view of the same
+      // range — the caller's offset and capacity, not the whole allocation —
+      // so the next read fills exactly the region the caller handed out.
+      if (isUint8Array(socket[kBuffer])) {
+        socket[kBuffer] = new Uint8Array(value.buffer, viewOffset, viewLength);
       }
 
       // If the byteLength is zero, skip the push.
@@ -2027,6 +2047,7 @@ async function startRead(socket: Socket): Promise<void> {
     // This is mostly triggered for invalid sockets with following errors:
     // - "This ReadableStream belongs to an object that is closing."
   } finally {
+    handle.readLoopActive = false;
     handle.reading = false;
   }
 }
