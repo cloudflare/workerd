@@ -1520,9 +1520,9 @@ export function onConnectionClosed(this: Socket): void {
     clearTimeout(s[kTimeout] as unknown as number);
   }
 
-  if (!this.destroyed) {
-    // We have to manually trigger an 'end' event because we are using
-    // BYOB buffers with Socket class.
+  if (!this.destroyed && !this.readableEnded) {
+    // The connection closed before the read loop observed EOF (it was not
+    // reading): surface the end of the readable side.
     this.emit('end');
   }
 }
@@ -1570,6 +1570,11 @@ async function startRead(socket: Socket): Promise<void> {
         // should allow the current write queue to drain but not allow any
         // further writes to be queued.
         socket.push(null);
+        // As in Node's onStreamRead: with nothing buffered, EOF must surface
+        // as 'end' right away, even when nobody is consuming the socket. The
+        // Readable's own read(0) does that; the socket's read() override
+        // would try to start reading again.
+        Duplex.prototype.read.call(socket, 0);
         break;
       }
 

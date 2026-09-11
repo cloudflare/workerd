@@ -1421,8 +1421,10 @@ export const testNetSocketTimeout = {
 
     {
       const { promise, resolve, reject } = Promise.withResolvers();
+      // A peer that stays silent: the idle timer must fire before anything
+      // else (such as the peer's EOF) settles the socket.
       const socket = net.createConnection(
-        env.SERVER_PORT,
+        env.ECHO_SERVER_PORT,
         env.SIDECAR_HOSTNAME
       );
       strictEqual(

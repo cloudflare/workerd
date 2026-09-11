@@ -8,7 +8,7 @@
 // writable side stays usable after 'end'.
 
 import net from 'node:net';
-import { strictEqual, ok } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual } from 'node:assert';
 import { endsImmediately, greet, once, GREETING } from 'servers';
 
 // The socket registers its half-open enforcer on 'end' unconditionally (it
@@ -107,5 +107,23 @@ export const writeAfterPeerEofIsEpipe = {
     strictEqual(err.code, 'EPIPE');
     await scheduler.wait(5);
     strictEqual(errors.length, 0);
+  },
+};
+
+// The peer's EOF surfaces even when nobody is reading the socket: the read
+// loop pushes EOF and reads zero bytes so an empty stream ends at once
+// (Node's onStreamRead does the same), and with allowHalfOpen false the
+// socket then ends its own side and closes.
+export const peerEofWithoutConsumerEnds = {
+  async test(ctrl, env) {
+    const socket = endsImmediately(env);
+    const events = [];
+    socket.on('end', () => events.push('end'));
+    socket.on('finish', () => events.push('finish'));
+    const closed = once(socket, 'close');
+    await closed;
+    deepStrictEqual(events, ['end', 'finish']);
+    strictEqual(socket.readableEnded, true);
+    strictEqual(socket.destroyed, true);
   },
 };
