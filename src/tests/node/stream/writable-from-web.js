@@ -125,3 +125,48 @@ export const fromWebSinkCloseRejectionErrorsNodeWritable = {
     });
   },
 };
+
+// Writes issued back to back, without waiting for the first to complete,
+// are batched by the node Writable into _writev(); every batched chunk
+// reaches the web sink as the chunk itself, in order.
+export const fromWebBackToBackWritesDeliverChunks = {
+  async test() {
+    const seen = [];
+    const ws = new WritableStream({
+      write(chunk) {
+        seen.push(chunk);
+      },
+    });
+    const w = Writable.fromWeb(ws);
+    w.write(enc.encode('one'));
+    w.write(enc.encode('two'));
+    w.write(enc.encode('three'));
+    await new Promise((resolve) => w.end(resolve));
+    strictEqual(seen.length, 3);
+    for (const chunk of seen) {
+      strictEqual(chunk instanceof Uint8Array, true);
+    }
+    strictEqual(seen.map((c) => dec.decode(c)).join(','), 'one,two,three');
+  },
+};
+
+// Corked writes take the same _writev() path.
+export const fromWebCorkedWritesDeliverChunks = {
+  async test() {
+    const seen = [];
+    const ws = new WritableStream({
+      write(chunk) {
+        seen.push(chunk);
+      },
+    });
+    const w = Writable.fromWeb(ws);
+    w.cork();
+    w.write('a');
+    w.write('b');
+    w.write('c');
+    w.uncork();
+    await new Promise((resolve) => w.end(resolve));
+    strictEqual(seen.length, 3);
+    strictEqual(seen.map((c) => dec.decode(c)).join(''), 'abc');
+  },
+};
