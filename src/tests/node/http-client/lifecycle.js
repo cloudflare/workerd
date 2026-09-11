@@ -282,3 +282,73 @@ export const responseAfterDestroyIsDropped = {
     ]);
   },
 };
+
+// abort() before any response is the quiet teardown: aborted and destroyed
+// are set at once, 'abort' then 'close' fire, no 'error'; a second abort()
+// is inert.
+export const abortBeforeResponseIsQuiet = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = get(env, '/slow-headers?delay=150');
+    record(log, 'req', req, ['abort', 'response', 'error', 'close']);
+    await scheduler.wait(10);
+    strictEqual(req.aborted, false);
+    req.abort();
+    strictEqual(req.aborted, true);
+    strictEqual(req.destroyed, true);
+    req.abort();
+    await once(req, 'close');
+    await scheduler.wait(200);
+    deepStrictEqual(log, ['req:abort', 'req:close']);
+  },
+};
+
+// abort() before end(): nothing is sent, end() is inert.
+export const abortBeforeEndSendsNothing = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = request(env, '/pong', { method: 'POST' });
+    record(log, 'req', req, ['abort', 'finish', 'response', 'error', 'close']);
+    req.write('never sent');
+    req.abort();
+    req.end();
+    await once(req, 'close');
+    await scheduler.wait(50);
+    deepStrictEqual(log, ['req:abort', 'req:close']);
+  },
+};
+
+// abort() mid-body: the response is aborted at once and errors with
+// ECONNRESET 'aborted' (for listeners); 'abort' and 'close' fire on the
+// request, no 'error'; the server sees the connection close.
+export const abortMidBodyAbortsResponse = {
+  async test(ctrl, env) {
+    const id = uniqueId('req-abort');
+    const log = [];
+    const req = get(env, `/never-ends?id=${id}`);
+    record(log, 'req', req, ['abort', 'error', 'close']);
+    const res = await response(req);
+    record(log, 'res', res, ['aborted', 'error', 'end', 'close']);
+    const closed = Promise.all([once(req, 'close'), once(res, 'close')]);
+    res.on('data', (chunk) => {
+      log.push(`data:${chunk}`);
+      req.abort();
+    });
+    await closed;
+    deepStrictEqual(log, [
+      'data:first',
+      'res:aborted',
+      'req:abort',
+      'req:close',
+      'res:error(Error/ECONNRESET/aborted)',
+      'res:close',
+    ]);
+    strictEqual(res.aborted, true);
+    strictEqual(res.complete, false);
+    await scheduler.wait(50);
+    deepStrictEqual(await neverEndsStats(env, id), {
+      opened: true,
+      closed: true,
+    });
+  },
+};

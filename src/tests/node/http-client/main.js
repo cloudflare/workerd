@@ -41,6 +41,9 @@ export {
   destroyMidBodyAbortsResponse,
   destroyWithErrorMidBody,
   responseAfterDestroyIsDropped,
+  abortBeforeResponseIsQuiet,
+  abortBeforeEndSendsNothing,
+  abortMidBodyAbortsResponse,
 } from 'lifecycle';
 
 export {

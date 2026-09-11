@@ -87,8 +87,9 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   joinDuplicateHeaders: boolean | undefined;
   agent: Agent | undefined;
 
-  // Unused fields required to be Node.js compatible.
   override aborted: boolean = false;
+
+  // Unused fields required to be Node.js compatible.
   reusedSocket: boolean = false;
   maxHeadersCount: number = Infinity;
   connection: Socket | null = null;
@@ -523,16 +524,15 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     throw new ERR_METHOD_NOT_IMPLEMENTED('addTrailers');
   }
 
-  abort(error?: Error | null): void {
-    this.destroyed = true;
-    this.#resetTimers({ finished: true });
-    if (this.#incomingMessage) {
-      this.#incomingMessage.destroyed = true;
-    }
-    this.#abortController.abort();
-    if (error) {
-      this.emit('error', error);
-    }
+  // The quiet teardown: 'abort' on the next tick, then the destroy() of a
+  // bare request without its 'socket hang up'.
+  abort(): void {
+    if (this.aborted) return;
+    this.aborted = true;
+    queueMicrotask(() => {
+      this.emit('abort');
+    });
+    this.destroy();
   }
 
   override _write(
