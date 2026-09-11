@@ -82,3 +82,28 @@ export const corkCyclesStaySynchronous = {
     deepStrictEqual([...new Set(Buffer.concat(chunks))], [0x61]);
   },
 };
+
+// A read loop that stopped on the readable high-water mark restarts when
+// the consumer reads again (paused mode with explicit read()).
+export const readRestartsReadLoop = {
+  async test(ctrl, env) {
+    const socket = echo(env, { highWaterMark: 4 });
+    await once(socket, 'connect');
+    socket.write(Buffer.alloc(64, 1));
+    socket.write(Buffer.alloc(64, 2));
+    await once(socket, 'readable');
+    let total = 0;
+    for (;;) {
+      const chunk = socket.read();
+      if (chunk === null) {
+        if (total >= 128) break;
+        await once(socket, 'readable');
+        continue;
+      }
+      total += chunk.byteLength;
+    }
+    strictEqual(total, 128);
+    socket.end();
+    await once(socket, 'close');
+  },
+};

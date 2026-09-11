@@ -29,6 +29,7 @@ export {
   halfOpenRequiresExplicitEnd,
   peerEofEndsBothSides,
   writeAfterPeerEofIsEpipe,
+  peerEofWithoutConsumerEnds,
 } from 'half-close';
 
 export {
@@ -47,6 +48,7 @@ export {
   pauseStopsDelivery,
   writeBackpressureAndDrain,
   corkCyclesStaySynchronous,
+  readRestartsReadLoop,
 } from 'backpressure';
 
 export {

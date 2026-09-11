@@ -1983,6 +1983,11 @@ async function startRead(socket: Socket): Promise<void> {
         // should allow the current write queue to drain but not allow any
         // further writes to be queued.
         socket.push(null);
+        // As in Node's onStreamRead: with nothing buffered, EOF must surface
+        // as 'end' right away, even when nobody is consuming the socket. The
+        // Readable's own read(0) does that; the socket's read() override
+        // would try to start reading again.
+        Duplex.prototype.read.call(socket, 0);
         break;
       }
 
