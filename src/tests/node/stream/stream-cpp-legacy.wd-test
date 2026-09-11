@@ -1,0 +1,31 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the LEGACY (unflagged) node:stream web-interop cell against the C++
+# implementation: the regression guard for what workers with compat dates
+# predating the streams constructor flags still get. stream-cpp.wd-test
+# pins those flags ON; this config deliberately omits them:
+# - streams_enable_constructors OFF: Readable.toWeb / Writable.toWeb /
+#   Duplex.toWeb and `new ReadableStream()` / `new WritableStream()` from
+#   node:stream/web throw the constructor-gate Error, while the fromWeb
+#   adapters keep working over runtime-provided streams.
+# - transformstream_enable_standard_constructor OFF: `new TransformStream()`
+#   builds an identity transform that ignores its transformer.
+#
+# C++ only: the TypeScript implementation always exposes the constructors,
+# so there is no TS legacy cell. The BUILD rule disables the
+# @all-compat-flags variant — at the 2999-12-31 date both omitted flags turn
+# on, which would contradict this config's purpose.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "node-stream-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "legacy-constructor-gate", esModule = embed "legacy-constructor-gate.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

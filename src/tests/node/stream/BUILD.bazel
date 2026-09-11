@@ -17,3 +17,20 @@ wd_test(
     args = ["--experimental"],
     data = stream_suite_srcs,
 )
+
+# The main C++ cell plus the dateless opt-in pedantic_wpt flag, enforcing
+# that pedantic mode changes nothing on this suite's surface.
+wd_test(
+    src = "stream-cpp-pedantic.wd-test",
+    data = stream_suite_srcs,
+)
+
+# Legacy (unflagged) regression guard, C++ implementation only. The
+# @all-compat-flags variant is disabled: at the 2999-12-31 date the
+# constructor flags this config deliberately omits would turn on,
+# contradicting its purpose of asserting the pre-flag behaviors.
+wd_test(
+    src = "stream-cpp-legacy.wd-test",
+    data = stream_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)
