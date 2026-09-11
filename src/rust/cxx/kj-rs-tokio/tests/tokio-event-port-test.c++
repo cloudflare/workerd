@@ -219,14 +219,16 @@ KJ_TEST("wake() from another thread interrupts a loop cycling through short time
   KJ_EXPECT(elapsed < 1000 * kj::MILLISECONDS, elapsed / kj::MILLISECONDS);
 }
 
-KJ_TEST("long sleeps are accurate") {
+KJ_TEST("absolute timer deadlines remain accurate after time outside the loop") {
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   auto &timer = io.getTimer();
   auto &sysClock = kj::systemPreciseMonotonicClock();
 
+  // Time spent outside the event loop can leave the timer's cached clock behind the real clock.
+  delayMillis(5);
   auto before = sysClock.now();
-  timer.afterDelay(20 * kj::MILLISECONDS).wait(ws);
+  timer.atTime(before + 20 * kj::MILLISECONDS).wait(ws);
   auto elapsed = sysClock.now() - before;
   KJ_EXPECT(elapsed >= 20 * kj::MILLISECONDS, elapsed / kj::MILLISECONDS);
   KJ_EXPECT(elapsed < 1000 * kj::MILLISECONDS, elapsed / kj::MILLISECONDS);
