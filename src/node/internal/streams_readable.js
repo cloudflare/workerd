@@ -2406,7 +2406,7 @@ export function newReadableStreamFromStreamReadable(
 
       cancel(reason) {
         wasCanceled = true;
-        destroy(streamReadable, reason);
+        destroyer(streamReadable, reason);
       },
       type: createTypeBytes ? 'bytes' : undefined,
     },

@@ -8,7 +8,12 @@
 
 export { streamWebReexportsGlobals, adapterEntryPoints } from 'api-surface';
 
-export { toWebDeliversPushedChunk } from 'readable-to-web';
+export {
+  toWebDeliversPushedChunk,
+  toWebCancelDestroysSource,
+  toWebCancelWithoutReasonDestroysWithAbortError,
+  toWebPipeToFailureDestroysSource,
+} from 'readable-to-web';
 
 export {
   fromWebDeliversDataEvents,
@@ -26,9 +31,16 @@ export {
   toWebNodeEndWithoutCloseAbortsStream,
   toWebNodeDestroyBecomesAbortError,
   toWebNodeDestroyWithErrorErrorsStream,
+  toWebAbortDestroysNodeWritable,
+  toWebAbortWithoutReasonDestroysWithAbortError,
 } from 'writable-to-web';
 
-export { fromWebWritesReachWebSink } from 'writable-from-web';
+export {
+  fromWebWritesReachWebSink,
+  fromWebWebErrorDestroysNodeWritable,
+  fromWebSinkRejectionErrorsNodeWritableOnce,
+  fromWebSinkCloseRejectionErrorsNodeWritable,
+} from 'writable-from-web';
 
 export { toWebPairRoundTrip } from 'duplex-to-web';
 

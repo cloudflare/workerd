@@ -1338,7 +1338,7 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
       },
 
       abort(reason) {
-        destroy(streamWritable, reason);
+        destroyImpl.destroyer(streamWritable, reason);
       },
 
       close() {
@@ -1409,7 +1409,7 @@ export function newStreamWritableFromWritableStream(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          nextTick(() => destroy(writable, error));
+          nextTick(() => destroyImpl.destroyer(writable, error));
         }
       }
 
@@ -1441,7 +1441,7 @@ export function newStreamWritableFromWritableStream(
         try {
           callback(error);
         } catch (error) {
-          destroy(writable, error);
+          destroyImpl.destroyer(writable, error);
         }
       }
 
@@ -1488,7 +1488,7 @@ export function newStreamWritableFromWritableStream(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          nextTick(() => destroy(writable, error));
+          nextTick(() => destroyImpl.destroyer(writable, error));
         }
       }
 
@@ -1504,13 +1504,13 @@ export function newStreamWritableFromWritableStream(
       // ended, we signal an error on the stream.Writable.
       closed = true;
       if (!isWritableEnded(writable))
-        destroy(writable, new ERR_STREAM_PREMATURE_CLOSE());
+        destroyImpl.destroyer(writable, new ERR_STREAM_PREMATURE_CLOSE());
     },
     (error) => {
       // If the WritableStream errors before the stream.Writable has been
       // destroyed, signal an error on the stream.Writable.
       closed = true;
-      destroy(writable, error);
+      destroyImpl.destroyer(writable, error);
     }
   );
 
