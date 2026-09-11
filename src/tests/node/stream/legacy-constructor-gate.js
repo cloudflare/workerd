@@ -6,12 +6,19 @@
 // `new ReadableStream()` / `new WritableStream()`, and the toWeb adapters,
 // which construct their streams that way, fail with that Error. The
 // fromWeb adapters construct nothing and keep working over streams the
-// runtime provides (fetch bodies, the identity transforms), as does
-// pipeline over such streams. Without
+// runtime provides (fetch bodies, the identity transforms), as do pipeline
+// and compose over such streams. Without
 // transformstream_enable_standard_constructor, `new TransformStream()`
 // still constructs — as an identity transform that ignores its transformer.
 
-import { Readable, Writable, Duplex, PassThrough, pipeline } from 'node:stream';
+import {
+  Readable,
+  Writable,
+  Duplex,
+  PassThrough,
+  pipeline,
+  compose,
+} from 'node:stream';
 import * as web from 'node:stream/web';
 import { Buffer } from 'node:buffer';
 import { strictEqual, throws } from 'node:assert';
@@ -114,6 +121,16 @@ export const legacyPipelineOverRuntimeStreams = {
       )
     );
     strictEqual(await text, 'to identity');
+  },
+};
+
+// compose() with a runtime-provided web stream works too.
+export const legacyComposeOverRuntimeStreams = {
+  async test() {
+    const composed = compose(new Response('composed').body, new PassThrough());
+    const composedChunks = [];
+    for await (const chunk of composed) composedChunks.push(chunk);
+    strictEqual(Buffer.concat(composedChunks).toString(), 'composed');
   },
 };
 

@@ -174,4 +174,13 @@ export {
   addAbortSignalOnResponseBody,
 } from 'finished-and-abort';
 
+export {
+  composeValidatesWebStreamPositions,
+  composeSingleWebStream,
+  composeWebHeadNodeTail,
+  composeWebReadableIntoNodeWritable,
+  composeNodeHeadWebTail,
+  readableComposeWithWebTransform,
+} from 'compose-web';
+
 export { duplexFromWebStreamHalves } from 'duplex-from';

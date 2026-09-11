@@ -7,7 +7,8 @@ using Workerd = import "/workerd/workerd.capnp";
 # - streams_enable_constructors OFF: Readable.toWeb / Writable.toWeb /
 #   Duplex.toWeb and `new ReadableStream()` / `new WritableStream()` from
 #   node:stream/web throw the constructor-gate Error, while the fromWeb
-#   adapters and pipeline keep working over runtime-provided streams.
+#   adapters, pipeline and compose keep working over runtime-provided
+#   streams.
 # - transformstream_enable_standard_constructor OFF: `new TransformStream()`
 #   builds an identity transform that ignores its transformer.
 #

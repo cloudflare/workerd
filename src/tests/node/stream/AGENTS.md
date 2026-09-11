@@ -2,8 +2,8 @@
 
 An informal specification of the `node:stream` web-interop surface —
 `Readable.toWeb/fromWeb`, `Writable.toWeb/fromWeb`, `Duplex.toWeb/fromWeb`,
-`Duplex.from`, `Readable.from` over a web stream, `pipeline`, `finished`,
-`addAbortSignal`, `node:stream/web`, `node:stream/consumers` —
+`Duplex.from`, `Readable.from` over a web stream, `pipeline`, `compose`,
+`finished`, `addAbortSignal`, `node:stream/web`, `node:stream/consumers` —
 derived from and kept in lockstep with the test suite in this directory.
 **The tests are the normative artifact**; this document maps behaviors to
 the tests that assert them. Every test runs against the C++ streams
@@ -16,8 +16,9 @@ The implementation under test is `src/node/internal/streams_readable.js`
 `streams_writable.js` (`newWritableStreamFromStreamWritable`,
 `newStreamWritableFromWritableStream`), `streams_duplex.js`
 (`newReadableWritablePairFromDuplex`, `newStreamDuplexFromReadableWritablePair`,
-`duplexify`), `streams_pipeline.js`, `streams_end_of_stream.ts`,
-`streams_add_abort_signal.ts`, and `src/node/stream/{web,consumers}.js`.
+`duplexify`), `streams_pipeline.js`, `streams_compose.js`,
+`streams_end_of_stream.ts`, `streams_add_abort_signal.ts`, and
+`src/node/stream/{web,consumers}.js`.
 
 ## Core semantics
 
@@ -146,10 +147,16 @@ The implementation under test is `src/node/internal/streams_readable.js`
   idle; a pending sink write is allowed to settle first. `stream/promises`
   treats a trailing web stream as a destination.
 
+### compose
+
+- `compose()`: web streams are validated by position; a web head is
+  written through its writer, a web tail read through its reader.
+
 ### finished / addAbortSignal
 
 - `finished()` and `addAbortSignal()` need the Node.js interop hooks (see
-  ledger #5). `addAbortSignal()` on one branch of a tee errors that branch
+  ledger #5); `compose()` needs them only when its head is writable and its
+  tail is a web stream. `addAbortSignal()` on one branch of a tee errors that branch
   alone: the sibling keeps its buffered chunks and its reads, and the
   source is cancelled only once every consumer is gone, with each one's
   reason; on a branch that has itself been teed it does nothing (the
@@ -181,7 +188,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | 2 | Write to a pre-closed `Writable.toWeb` stream | `TypeError` `This WritableStream has been closed.` | `TypeError` `Cannot write to a stream that is closing or closed` | `toWebDuckTypedInputYieldsClosedStream` |
 | 3 | BYOB reader on a `toWeb` readable | `This ReadableStream does not support BYOB reads.` | `BYOB reader can only be used on a stream with a byte source` | `toWebReadableIsNotByteStream` |
 | 4 | `FixedLengthStream` enforcement through `Writable.fromWeb` (identity ledger #11) | readable errors with `TypeError`; the node write and end succeed | write/close reject `RangeError`; the node Writable errors; readable errors with the same `RangeError` | `fromWebFixedLengthOverwrite`, `fromWebFixedLengthUnderwrite` |
-| 5 | Node.js interop hooks (`Symbol.for('nodejs.webstream.isClosedPromise')`, `…controllerErrorFunction`) | absent; `finished()`, `promises.finished()` and `addAbortSignal()` throw `ERR_WEB_STREAM_INTEROP_UNSUPPORTED` up front | non-enumerable prototype getter and method; the APIs work as in Node, including on native-backed streams (a `Response` body) | `finished-and-abort.js` |
+| 5 | Node.js interop hooks (`Symbol.for('nodejs.webstream.isClosedPromise')`, `…controllerErrorFunction`) | absent; `finished()`, `promises.finished()`, `addAbortSignal()` and a writable-head/web-tail `compose()` throw `ERR_WEB_STREAM_INTEROP_UNSUPPORTED` up front | non-enumerable prototype getter and method; the APIs work as in Node, including on native-backed streams (a `Response` body) | `finished-and-abort.js`, `composeNodeHeadWebTail` |
 
 ## Assertion catalogue
 
@@ -199,6 +206,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `consumers.js` | `text/json/buffer/arrayBuffer/blob` over web streams; multi-chunk and string decoding; lock release; error propagation; node Readables and async generators |
 | `readable-from.js` | `Readable.from(webStream)`: chunk types by objectMode, destroy → cancel + lock release, error propagation |
 | `finished-and-abort.js` | ledger #5: hook presence per implementation; `finished()` on readable close/error, writable close/error, settled streams, with a signal; `promises.finished`; `addAbortSignal` on readable/writable, already-aborted, one tee branch (default and byte streams; sibling spared, sibling cancel reaching the source, a teed-away branch inert incl. a pending BYOB read on its branch, cancel settling with a deferred or failing source cleanup in both orders), Response body |
+| `compose-web.js` | position validation; single web stream; web head/node tail; web readable into node writable; node head/web tail (ledger #5); `Readable.prototype.compose` |
 | `pipeline-web.js` | web source/destination/transform stages, generator stages, `TransformStream` head; sink/source/node-sink failures (incl. a node sink failing while the web source is idle, a web sink erroring or rejecting a write while the source is idle, and a web source erroring while a stuck node sink holds the pump); a detached-view chunk failing the pipeline (`TypeError`, source cancelled without a reason); promise-valued chunks by identity; a locked web destination (callback and promise forms, node and web sources); `stream/promises` trailing web destination, `end: false`, signal abort of a node-headed and of an idle all-web pipeline, and during a pending web read |
 | `which-impl.js` | implementation detection |
 
@@ -212,4 +220,5 @@ Guarded by `stream-cpp-legacy.wd-test` (C++ only):
 | `new ReadableStream()` / `new WritableStream()` from `node:stream/web` throw the gate | `legacyStreamWebConstructorsGated` |
 | `Readable.fromWeb`, `Writable.fromWeb`, `Duplex.fromWeb` work over runtime-provided streams (fetch bodies, `IdentityTransformStream`) | `legacyFromWebOverRuntimeStreams` |
 | `pipeline()` works over runtime-provided web streams | `legacyPipelineOverRuntimeStreams` |
+| `compose()` works over runtime-provided web streams | `legacyComposeOverRuntimeStreams` |
 | `new TransformStream({ transform })` is an identity transform; the transformer is never called | `legacyTransformStreamIgnoresTransformer` |
