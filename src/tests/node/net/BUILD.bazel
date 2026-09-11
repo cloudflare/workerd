@@ -35,3 +35,16 @@ wd_test(
     sidecar = "tcp-servers",
     sidecar_port_bindings = net_ports,
 )
+
+# Legacy (unflagged) regression guard, C++ implementation only. The
+# @all-compat-flags variant is disabled: at the 2999-12-31 date the BYOB
+# flags this config deliberately omits would turn on, contradicting its
+# purpose of asserting the pre-flag behavior.
+wd_test(
+    src = "net-cpp-legacy.wd-test",
+    args = ["--experimental"],
+    data = net_suite_srcs,
+    generate_all_compat_flags_variant = False,
+    sidecar = "tcp-servers",
+    sidecar_port_bindings = net_ports,
+)

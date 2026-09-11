@@ -1,0 +1,46 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the LEGACY (unflagged) node:net cell against the C++ streams
+# implementation: the regression guard for what workers with compat dates
+# predating the BYOB flags still get. net-cpp.wd-test pins those flags ON;
+# this config deliberately omits them:
+# - streams_byob_reader_detaches_buffer OFF: the socket's BYOB reads fill
+#   the onread fixed buffer in place, so the caller's Uint8Array is never
+#   detached and every callback sees the same backing store.
+# - internal_stream_byob_return_view OFF: a BYOB read at EOF resolves with
+#   value undefined (the read loop checks done first, so nothing observable
+#   changes on this surface).
+#
+# C++ only: the TypeScript implementation always transfers the buffer. The
+# BUILD rule disables the @all-compat-flags variant — at the 2999-12-31 date
+# the omitted flags turn on, contradicting this config's purpose.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "node-net-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "legacy-onread", esModule = embed "legacy-onread.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+        ],
+        bindings = [
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+          (name = "NET_ECHO_PORT", fromEnvironment = "NET_ECHO_PORT"),
+          (name = "NET_END_PORT", fromEnvironment = "NET_END_PORT"),
+          (name = "NET_GREET_PORT", fromEnvironment = "NET_GREET_PORT"),
+          (name = "NET_SINK_PORT", fromEnvironment = "NET_SINK_PORT"),
+          (name = "NET_TICKER_PORT", fromEnvironment = "NET_TICKER_PORT"),
+        ],
+      )
+    ),
+    ( name = "internet",
+      network = (
+        allow = ["private"],
+      )
+    ),
+  ],
+);
