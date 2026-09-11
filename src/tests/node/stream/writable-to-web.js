@@ -197,3 +197,41 @@ export const toWebNodeDestroyWithErrorErrorsStream = {
     await rejects(writer.closed, (err) => err === boom);
   },
 };
+
+// writer.abort(reason) destroys the node Writable with that reason: abort()
+// resolves, and the node stream reports destroyed and errored with the
+// reason, emitting 'error' then 'close'.
+export const toWebAbortDestroysNodeWritable = {
+  async test() {
+    const { writable } = recordingWritable();
+    const events = [];
+    writable.on('error', (err) => events.push(['error', err]));
+    writable.on('close', () => events.push(['close']));
+    const writer = Writable.toWeb(writable).getWriter();
+    const closed = once(writable, 'close');
+    const reason = new Error('abandoned');
+    await writer.abort(reason);
+    await closed;
+    strictEqual(writable.destroyed, true);
+    strictEqual(writable.errored, reason);
+    strictEqual(events.length, 2);
+    strictEqual(events[0][0], 'error');
+    strictEqual(events[0][1], reason);
+    strictEqual(events[1][0], 'close');
+  },
+};
+
+// Aborting without a reason destroys the node Writable with an AbortError.
+export const toWebAbortWithoutReasonDestroysWithAbortError = {
+  async test() {
+    const { writable } = recordingWritable();
+    writable.on('error', () => {});
+    const writer = Writable.toWeb(writable).getWriter();
+    const closed = once(writable, 'close');
+    await writer.abort();
+    await closed;
+    strictEqual(writable.destroyed, true);
+    strictEqual(writable.errored?.name, 'AbortError');
+    strictEqual(writable.errored?.code, 'ABORT_ERR');
+  },
+};

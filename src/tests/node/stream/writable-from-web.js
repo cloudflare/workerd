@@ -33,3 +33,95 @@ export const fromWebWritesReachWebSink = {
     await Promise.all([promise, written.promise]);
   },
 };
+
+function once(emitter, event) {
+  return new Promise((resolve) => emitter.once(event, resolve));
+}
+
+// Collects unhandled promise rejections while a test runs; the adapter's
+// error paths must not leak any.
+async function withRejectionGuard(fn) {
+  const unhandled = [];
+  const onUnhandled = (event) => {
+    unhandled.push(event.reason);
+    event.preventDefault();
+  };
+  globalThis.addEventListener('unhandledrejection', onUnhandled);
+  try {
+    await fn();
+    await scheduler.wait(5);
+  } finally {
+    globalThis.removeEventListener('unhandledrejection', onUnhandled);
+  }
+  strictEqual(unhandled.length, 0, `unhandled: ${unhandled.join(', ')}`);
+}
+
+// A web stream that errors on its own (its controller errors it) destroys
+// the node Writable with that error, with no write ever issued.
+export const fromWebWebErrorDestroysNodeWritable = {
+  async test() {
+    await withRejectionGuard(async () => {
+      const boom = new Error('controller error');
+      const ws = new WritableStream({
+        start(controller) {
+          controller.error(boom);
+        },
+      });
+      const w = Writable.fromWeb(ws);
+      const [err] = await Promise.all([once(w, 'error'), once(w, 'close')]);
+      strictEqual(err, boom);
+      strictEqual(w.destroyed, true);
+      strictEqual(w.errored, boom);
+    });
+  },
+};
+
+// A rejected sink write fails the node write callback with the error and
+// errors the node Writable exactly once, leaving no unhandled rejection.
+export const fromWebSinkRejectionErrorsNodeWritableOnce = {
+  async test() {
+    await withRejectionGuard(async () => {
+      const boom = new Error('sink rejected');
+      const ws = new WritableStream({
+        write() {
+          return Promise.reject(boom);
+        },
+      });
+      const w = Writable.fromWeb(ws);
+      const errors = [];
+      w.on('error', (err) => errors.push(err));
+      const { promise, resolve } = Promise.withResolvers();
+      w.write(enc.encode('x'), resolve);
+      strictEqual(await promise, boom);
+      await once(w, 'close');
+      strictEqual(errors.length, 1);
+      strictEqual(errors[0], boom);
+      strictEqual(w.destroyed, true);
+    });
+  },
+};
+
+// A sink close() that rejects fails the node stream's finish with that
+// error, again without unhandled rejections.
+export const fromWebSinkCloseRejectionErrorsNodeWritable = {
+  async test() {
+    await withRejectionGuard(async () => {
+      const boom = new Error('close rejected');
+      const ws = new WritableStream({
+        close() {
+          throw boom;
+        },
+      });
+      const w = Writable.fromWeb(ws);
+      let finished = false;
+      w.on('finish', () => {
+        finished = true;
+      });
+      w.end();
+      const [err] = await Promise.all([once(w, 'error'), once(w, 'close')]);
+      strictEqual(err, boom);
+      strictEqual(finished, false);
+      strictEqual(w.destroyed, true);
+    });
+  },
+};
