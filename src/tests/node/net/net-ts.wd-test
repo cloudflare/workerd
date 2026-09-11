@@ -1,0 +1,42 @@
+using Workerd = import "/workerd/workerd.capnp";
+using NetModules = import "net-modules.capnp";
+
+# The SAME modules against the TypeScript streams implementation: the
+# connect() socket's readable/writable halves are TypeScript wrappers over
+# the native socket streams, and node:net's BYOB read loop and writer run
+# on top of them.
+#
+# The streams-semantic flags pinned in net-cpp.wd-test are deliberately
+# absent: the TypeScript implementation hard-codes those behaviors, and the
+# `@` / `@all-compat-flags` variants prove its indifference to them.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "node-net-ts",
+      worker = (
+        modules = NetModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "typescript_implemented_streams",
+        ],
+        bindings = [
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+          (name = "NET_ECHO_PORT", fromEnvironment = "NET_ECHO_PORT"),
+          (name = "NET_END_PORT", fromEnvironment = "NET_END_PORT"),
+          (name = "NET_GREET_PORT", fromEnvironment = "NET_GREET_PORT"),
+          (name = "NET_SINK_PORT", fromEnvironment = "NET_SINK_PORT"),
+          (name = "NET_TICKER_PORT", fromEnvironment = "NET_TICKER_PORT"),
+        ],
+      )
+    ),
+    ( name = "internet",
+      network = (
+        allow = ["private"],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

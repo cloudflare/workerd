@@ -1,0 +1,53 @@
+using Workerd = import "/workerd/workerd.capnp";
+using NetModules = import "net-modules.capnp";
+
+# Runs the node:net suite against the C++ streams implementation. The
+# sidecar provides the TCP servers; their ports arrive through
+# fromEnvironment bindings. net-ts.wd-test runs the identical modules
+# against the TypeScript implementation.
+#
+# No compatibilityDate is set: the wd_test variants supply the date axis
+# (2000-01-01 for `@`, 2999-12-31 for `@all-compat-flags`). The semantics
+# the tests depend on are pinned by flag:
+# - nodejs_compat: node:net itself (date-enabled 2026-08-04).
+# - experimental: connect() sockets.
+# - streams_byob_reader_detaches_buffer: the socket's read loop is a BYOB
+#   reader over the connect() socket's readable; the buffer it passes is
+#   transferred, which is what the onread fixed-buffer tests observe.
+# - internal_stream_byob_return_view: a BYOB read at EOF returns a
+#   zero-length view rather than undefined.
+# - streams_enable_constructors, transformstream_enable_standard_constructor:
+#   the interop tests build web streams to pipe sockets into and through.
+# The TypeScript implementation hard-codes these modern behaviors, so the
+# flags also keep the two cells comparable at the oldest compat date.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "node-net-cpp",
+      worker = (
+        modules = NetModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "streams_byob_reader_detaches_buffer",
+          "internal_stream_byob_return_view",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+        ],
+        bindings = [
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+          (name = "NET_ECHO_PORT", fromEnvironment = "NET_ECHO_PORT"),
+          (name = "NET_END_PORT", fromEnvironment = "NET_END_PORT"),
+          (name = "NET_GREET_PORT", fromEnvironment = "NET_GREET_PORT"),
+          (name = "NET_SINK_PORT", fromEnvironment = "NET_SINK_PORT"),
+          (name = "NET_TICKER_PORT", fromEnvironment = "NET_TICKER_PORT"),
+        ],
+      )
+    ),
+    ( name = "internet",
+      network = (
+        allow = ["private"],
+      )
+    ),
+  ],
+);

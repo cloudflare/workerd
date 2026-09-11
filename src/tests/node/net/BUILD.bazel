@@ -1,0 +1,37 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("//:build/wd_test.bzl", "wd_test")
+
+# The node:net suite runs the same test modules under two configs: net-cpp
+# against the C++ streams implementation, net-ts against the TypeScript
+# implementation. A sidecar provides the TCP servers.
+
+js_binary(
+    name = "tcp-servers",
+    entry_point = "tcp-servers.js",
+)
+
+net_suite_srcs = glob(["*.js"]) + ["net-modules.capnp"]
+
+net_ports = [
+    "NET_ECHO_PORT",
+    "NET_END_PORT",
+    "NET_GREET_PORT",
+    "NET_SINK_PORT",
+    "NET_TICKER_PORT",
+]
+
+wd_test(
+    src = "net-cpp.wd-test",
+    args = ["--experimental"],
+    data = net_suite_srcs,
+    sidecar = "tcp-servers",
+    sidecar_port_bindings = net_ports,
+)
+
+wd_test(
+    src = "net-ts.wd-test",
+    args = ["--experimental"],
+    data = net_suite_srcs,
+    sidecar = "tcp-servers",
+    sidecar_port_bindings = net_ports,
+)
