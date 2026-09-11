@@ -65,3 +65,47 @@ export const halfOpenRequiresExplicitEnd = {
     await closed;
   },
 };
+
+// allowHalfOpen false: peer EOF → 'end' (socket not yet destroyed) →
+// automatic end of the writable side → 'finish' → 'close'.
+export const peerEofEndsBothSides = {
+  async test(ctrl, env) {
+    const socket = endsImmediately(env);
+    strictEqual(socket.allowHalfOpen, false);
+    socket.resume();
+    const events = [];
+    socket.on('end', () => {
+      events.push('end');
+      strictEqual(socket.destroyed, false);
+      strictEqual(socket.writable, true);
+    });
+    socket.on('finish', () => {
+      events.push('finish');
+      strictEqual(socket.destroyed, false);
+    });
+    await once(socket, 'close');
+    strictEqual(events.join(','), 'end,finish');
+    strictEqual(socket.destroyed, true);
+  },
+};
+
+// allowHalfOpen false: a write after the peer's EOF (once the writable side
+// has been ended) fails with EPIPE. By then the socket has auto-destroyed
+// (both sides done), so the EPIPE destroy is a no-op and no 'error' event
+// follows.
+export const writeAfterPeerEofIsEpipe = {
+  async test(ctrl, env) {
+    const socket = endsImmediately(env);
+    socket.resume();
+    const errors = [];
+    socket.on('error', (err) => errors.push(err));
+    const closed = once(socket, 'close');
+    await once(socket, 'finish');
+    await closed;
+    strictEqual(socket.destroyed, true);
+    const err = await new Promise((resolve) => socket.write('late', resolve));
+    strictEqual(err.code, 'EPIPE');
+    await scheduler.wait(5);
+    strictEqual(errors.length, 0);
+  },
+};
