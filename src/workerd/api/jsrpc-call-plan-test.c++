@@ -344,11 +344,21 @@ KJ_TEST("retry-capable RPC calls resolve the destination only after safe seriali
 }
 
 constexpr kj::StringPtr RECEIVER_SOURCE = R"JS(
-  import { WorkerEntrypoint } from "cloudflare:workers";
+  import { RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
+
+  class Counter extends RpcTarget {
+    constructor(value) {
+      super();
+      this.value = value;
+    }
+
+    increment(amount) { return this.value += amount; }
+  }
 
   export default class extends WorkerEntrypoint {
     echo(value) { return value.x; }
     get nested() { return { echo(value) { return value.x; } }; }
+    makeCounter(value) { return new Counter(value); }
   }
 )JS"_kj;
 
@@ -366,6 +376,34 @@ class ReceiverOutgoingFactory final: public Fetcher::OutgoingFactory {
 
  private:
   TestFixture& receiver;
+};
+
+class GatedReceiverOutgoingFactory final: public Fetcher::OutgoingFactory {
+ public:
+  GatedReceiverOutgoingFactory(
+      TestFixture& receiver, kj::Promise<void> gate, uint& destinationCallCount)
+      : receiver(receiver),
+        gate(gate.fork()),
+        destinationCallCount(destinationCallCount) {}
+
+  Result newSingleUseClient(kj::Maybe<kj::String>, MakeUserSpanParent) override {
+    ++destinationCallCount;
+    auto destination = receiver.makeWorkerEntrypoint();
+    return {
+      .client = newPromisedWorkerInterface(gate.addBranch().then(
+          [destination = kj::mv(destination)]() mutable { return kj::mv(destination); })),
+      .spanParents = kj::none,
+    };
+  }
+
+  bool supportsActorCallRetries() const override {
+    return true;
+  }
+
+ private:
+  TestFixture& receiver;
+  kj::ForkedPromise<void> gate;
+  uint& destinationCallCount;
 };
 
 KJ_TEST("the sender serializes a structured-clone argument once per call") {
@@ -426,6 +464,57 @@ KJ_TEST("the sender serializes a structured-clone argument once per call") {
   });
   KJ_EXPECT(getterCount == 2);
   KJ_EXPECT(resultCount == 2);
+}
+
+KJ_TEST("an unresolved retry-capable destination supports promise pipelining") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setFetcherRpc(true);
+  TestFixture receiver(TestFixture::SetupParams{
+    .waitScope = io.waitScope,
+    .mainModuleSource = RECEIVER_SOURCE,
+    .useRealTimers = false,
+  });
+  TestFixture sender(TestFixture::SetupParams{
+    .waitScope = io.waitScope,
+    .featureFlags = flags.asReader(),
+    .useRealTimers = false,
+  });
+
+  auto gate = kj::newPromiseAndFulfiller<void>();
+  uint destinationCallCount = 0;
+  sender.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto fetcher = env.js.alloc<Fetcher>(
+        env.context.addObject<Fetcher::OutgoingFactory>(kj::heap<GatedReceiverOutgoingFactory>(
+            receiver, kj::mv(gate.promise), destinationCallCount)),
+        Fetcher::RequiresHostAndProtocol::YES);
+
+    v8::LocalVector<v8::Value> makeCounterArgs(env.js.v8Isolate);
+    makeCounterArgs.push_back(env.js.num(12));
+    auto makeCounter = wrapMethod(env.js, *fetcher, "makeCounter"_kj);
+    auto counterValue = jsg::JsFunction(makeCounter.getHandle(env.js))
+                            .call(env.js, env.js.undefined(), makeCounterArgs);
+    auto& promiseHandler = KJ_REQUIRE_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<JsRpcPromise>>());
+    auto counter = KJ_REQUIRE_NONNULL(promiseHandler.tryUnwrap(env.js, counterValue));
+
+    v8::LocalVector<v8::Value> incrementArgs(env.js.v8Isolate);
+    incrementArgs.push_back(env.js.num(3));
+    auto increment =
+        wrapMethod(env.js, KJ_REQUIRE_NONNULL(counter->getProperty(env.js, kj::str("increment"))));
+    auto incrementValue = jsg::JsFunction(increment.getHandle(env.js))
+                              .call(env.js, env.js.undefined(), incrementArgs);
+    auto checked =
+        env.js.toPromise(incrementValue).then(env.js, [](jsg::Lock& js, jsg::Value value) {
+      KJ_EXPECT(jsg::JsValue(value.getHandle(js)).strictEquals(js.num(15)));
+    });
+    KJ_EXPECT(destinationCallCount == 1);
+    gate.fulfiller->fulfill();
+    return env.context.awaitJs(env.js, kj::mv(checked))
+        .attach(kj::mv(increment), kj::mv(counter), kj::mv(makeCounter), kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(destinationCallCount == 1);
 }
 
 class RecordingSink final: public WritableStreamSink {
