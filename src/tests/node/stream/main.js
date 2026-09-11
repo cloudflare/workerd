@@ -40,6 +40,8 @@ export {
   fromWebWebErrorDestroysNodeWritable,
   fromWebSinkRejectionErrorsNodeWritableOnce,
   fromWebSinkCloseRejectionErrorsNodeWritable,
+  fromWebBackToBackWritesDeliverChunks,
+  fromWebCorkedWritesDeliverChunks,
 } from 'writable-from-web';
 
 export { toWebPairRoundTrip } from 'duplex-to-web';
@@ -47,6 +49,7 @@ export { toWebPairRoundTrip } from 'duplex-to-web';
 export {
   fromWebPairRoundTrip,
   fromWebObjectModeStrings,
+  fromWebPairCorkedWritesDeliverChunks,
 } from 'duplex-from-web';
 
 export { toWebAsResponseBody } from 'bodies';

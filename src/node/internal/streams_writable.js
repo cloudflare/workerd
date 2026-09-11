@@ -1414,7 +1414,7 @@ export function newStreamWritableFromWritableStream(
       }
 
       writer.ready.then(() => {
-        return Promise.all(chunks.map((data) => writer.write(data))).then(
+        return Promise.all(chunks.map((data) => writer.write(data.chunk))).then(
           done,
           done
         );

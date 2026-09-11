@@ -76,3 +76,30 @@ export const fromWebObjectModeStrings = {
     await Promise.all([read.promise, sinkWrote.promise]);
   },
 };
+
+// Corked writes are batched through _writev() and reach the web sink as
+// the chunks themselves, in order.
+export const fromWebPairCorkedWritesDeliverChunks = {
+  async test() {
+    const seen = [];
+    const duplex = Duplex.fromWeb({
+      readable: new ReadableStream(),
+      writable: new WritableStream({
+        write(chunk) {
+          seen.push(chunk);
+        },
+      }),
+    });
+    duplex.cork();
+    duplex.write('a');
+    duplex.write('b');
+    duplex.write('c');
+    duplex.uncork();
+    await new Promise((resolve) => duplex.end(resolve));
+    strictEqual(seen.length, 3);
+    for (const chunk of seen) {
+      strictEqual(chunk instanceof Uint8Array, true);
+    }
+    strictEqual(Buffer.concat(seen).toString(), 'abc');
+  },
+};
