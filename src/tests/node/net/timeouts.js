@@ -7,7 +7,7 @@
 // duration; delivered data resets it; setTimeout(0) clears it.
 
 import { strictEqual } from 'node:assert';
-import { echo, once } from 'servers';
+import { echo, ticker, once } from 'servers';
 
 // An idle socket times out; the socket stays open and usable.
 export const idleSocketTimesOut = {
@@ -37,6 +37,22 @@ export const zeroClearsTimeout = {
     socket.setTimeout(30, () => timeouts++);
     socket.setTimeout(0);
     await scheduler.wait(80);
+    strictEqual(timeouts, 0);
+    socket.end();
+    await once(socket, 'close');
+  },
+};
+
+// Data arriving from the peer keeps resetting the timer.
+export const incomingDataResetsTimeout = {
+  async test(ctrl, env) {
+    const socket = ticker(env);
+    await once(socket, 'connect');
+    let timeouts = 0;
+    socket.on('timeout', () => timeouts++);
+    socket.setTimeout(80);
+    socket.resume();
+    await scheduler.wait(250);
     strictEqual(timeouts, 0);
     socket.end();
     await once(socket, 'close');

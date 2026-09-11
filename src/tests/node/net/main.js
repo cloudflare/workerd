@@ -49,7 +49,11 @@ export {
   corkCyclesStaySynchronous,
 } from 'backpressure';
 
-export { idleSocketTimesOut, zeroClearsTimeout } from 'timeouts';
+export {
+  idleSocketTimesOut,
+  incomingDataResetsTimeout,
+  zeroClearsTimeout,
+} from 'timeouts';
 
 export {
   pipeIntoWritableFromWeb,
