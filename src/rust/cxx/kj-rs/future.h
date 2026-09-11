@@ -83,13 +83,15 @@ using DropCallback = void (*)(void /* RustFuture::fut */* fut);
 // which drops the Rust Future and transitively cancels any KJ sub-promises it was .await'ing.
 struct RustFuture {
 
+  // Start polling without waiting for a consumer. The caller retains cancellation ownership.
   template <typename T>
-  operator kj::Promise<T>() {
-    return lazily<T>().eagerlyEvaluate(nullptr);
+  kj::Promise<T> eagerly() {
+    return static_cast<kj::Promise<T>>(*this).eagerlyEvaluate(nullptr);
   }
 
+  // Keep the Rust future cold until the returned promise is polled or explicitly started.
   template <typename T>
-  kj::Promise<T> lazily() {
+  operator kj::Promise<T>() {
     struct Impl {
       using ExceptionOrValue = ::kj::_::ExceptionOr<::kj::_::FixVoid<T>>;
       using Output = ::kj::_::FixVoid<T>;

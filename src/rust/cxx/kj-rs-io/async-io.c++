@@ -30,7 +30,10 @@ kj::Promise<size_t> TokioAsyncIoStream::tryRead(void *buffer, size_t minBytes, s
 }
 
 kj::Promise<void> TokioAsyncIoStream::write(kj::ArrayPtr<const kj::byte> buffer) {
-  return stream_write(*inner, ::rust::Slice<const uint8_t>(buffer.begin(), buffer.size()));
+  // KJ's HTTP header queue calls write() without necessarily awaiting its result. Start the
+  // Rust write here so that queuing headers can transmit them without a subsequent body write.
+  return stream_write(*inner, ::rust::Slice<const uint8_t>(buffer.begin(), buffer.size()))
+      .eagerlyEvaluate(nullptr);
 }
 
 kj::Promise<void> TokioAsyncIoStream::write(
@@ -540,8 +543,7 @@ TokioAsyncIoContext setupTokioAsyncIo() {
 // Signals
 
 kj::Promise<void> onSignal(int signum) {
-  // The bridged future is eager-by-default, so the tokio signal handler is registered as soon
-  // as the event loop runs, even if the caller parks the promise without awaiting it immediately.
+  // The handler is installed on the first poll. Merely retaining the promise does not register it.
   return wait_for_signal(signum);
 }
 

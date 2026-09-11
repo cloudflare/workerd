@@ -278,7 +278,8 @@ TokioAsyncIoContext setupTokioAsyncIo();
 // kj::UnixEventPort::onSignal() (workerd's SIGTERM graceful drain). Must be awaited on the
 // thread owning the TokioEventPort. Unlike UnixEventPort, KJ does not block/capture the signal
 // beforehand: the tokio handler is registered when the promise is first polled, so a signal
-// delivered before the event loop first runs takes its default disposition (see signal.rs).
+// delivered before that first poll takes its default disposition (see signal.rs). Callers that
+// retain the watcher must poll or explicitly start it before relying on signal delivery.
 // On Windows, SIGTERM/SIGINT are mapped to the ctrl_shutdown/ctrl_c console control events;
 // the promise rejects for other signums.
 kj::Promise<void> onSignal(int signum);

@@ -57,8 +57,7 @@ kj::Promise<void> writeBody(
   // Dropping `body` (coroutine frame teardown) finishes the request body.
 }
 
-KJ_TEST("bodyless GET works (regression: kj-http never awaits its header-write "
-        "queue for bodyless requests, relying on KJ hot-promise write semantics)") {
+KJ_TEST("bodyless GET sends headers without a subsequent body write") {
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   kj::HttpHeaderTable table;

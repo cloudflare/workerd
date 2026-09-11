@@ -26,6 +26,19 @@ pub async fn new_side_effect_future_void() {
     SIDE_EFFECT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 
+/// # Safety
+///
+/// `out` must point to aligned, writable, uninitialized storage for one `RustInfallibleFuture`.
+/// The caller takes ownership and must consume or drop the returned future exactly once.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kj_rs_demo_side_effect_future(
+    out: *mut kj_rs::repr::RustInfallibleFuture<'static, ()>,
+) {
+    let fut = kj_rs::repr::infallible_future(Box::pin(new_side_effect_future_void()));
+    // Safety: the C++ caller supplies storage for the ABI-compatible RustFuture and takes ownership.
+    unsafe { out.write(fut) };
+}
+
 use crate::Error;
 use crate::Result;
 use crate::ffi::CloningAction;
@@ -313,6 +326,10 @@ pub async fn new_lazy_future_awaiting_cancellable_promise() -> Result<()> {
     Ok(())
 }
 
+/// # Safety
+///
+/// `out` must point to aligned, writable, uninitialized storage for one `RustFuture`.
+/// The caller takes ownership and must consume or drop the returned future exactly once.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kj_rs_demo_lazy_future_awaiting_cancellable_promise(
     out: *mut kj_rs::repr::RustFuture<'static, ()>,

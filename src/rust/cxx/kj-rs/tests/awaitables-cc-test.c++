@@ -11,6 +11,7 @@
 extern "C" {
 void kj_rs_demo_work_before_poll(uint64_t* target, ::kj_rs::repr::RustFuture* out);
 void kj_rs_demo_lazy_future_awaiting_cancellable_promise(::kj_rs::repr::RustFuture* out);
+void kj_rs_demo_side_effect_future(::kj_rs::repr::RustFuture* out);
 }
 
 namespace kj_rs_demo {
@@ -225,17 +226,56 @@ KJ_TEST("Work before poll") {
   // even if we don't poll or cancel it.
   ::kj_rs::repr::RustFuture fut;
   kj_rs_demo_work_before_poll(&val, &fut);
-  auto promise = fut.lazily<void>();
+  kj::Promise<void> promise = fut;
   KJ_EXPECT(val == 42);
 }
 
-KJ_TEST("bridged async functions run eagerly at promise creation") {
+KJ_TEST("bridged async functions stay cold until awaited") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  reset_side_effect_counter();
+  auto promise = new_side_effect_future_void();
+  KJ_EXPECT(get_side_effect_counter() == 0);
+  kj::evalLater([]() {}).wait(waitScope);
+  KJ_EXPECT(get_side_effect_counter() == 0);
+  promise.wait(waitScope);
+  KJ_EXPECT(get_side_effect_counter() == 1);
+}
+
+KJ_TEST("dropping a cold bridged future does not enter its body") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
   reset_side_effect_counter();
   { auto promise = new_side_effect_future_void(); }
+  KJ_EXPECT(get_side_effect_counter() == 0);
+}
+
+KJ_TEST("explicit eager conversion starts a bridged future") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  reset_side_effect_counter();
+  ::kj_rs::repr::RustFuture fut;
+  kj_rs_demo_side_effect_future(&fut);
+  auto promise = fut.eagerly<void>();
   KJ_EXPECT(get_side_effect_counter() == 1);
+  promise.wait(waitScope);
+}
+
+KJ_TEST("canceling an explicitly started future cancels its KJ dependency") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  reset_cancellation_counter();
+  {
+    ::kj_rs::repr::RustFuture fut;
+    kj_rs_demo_lazy_future_awaiting_cancellable_promise(&fut);
+    auto promise = fut.eagerly<void>();
+    KJ_EXPECT(!promise.poll(waitScope));
+  }
+  KJ_EXPECT(get_cancellation_counter() == 1);
 }
 
 // TODO(someday): More test cases.
@@ -259,7 +299,7 @@ KJ_TEST("Cancellation: drop never-polled Rust future") {
   {
     ::kj_rs::repr::RustFuture fut;
     kj_rs_demo_lazy_future_awaiting_cancellable_promise(&fut);
-    auto promise = fut.lazily<void>();
+    kj::Promise<void> promise = fut;
   }
 }
 

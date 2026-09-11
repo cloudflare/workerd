@@ -185,7 +185,7 @@ KJ_TEST("serve_kj_stream pump: the Duplex consumer may be driven from another th
   KJ_EXPECT(!session->is_native());
 
   auto data = makePatternedData(512 * 1024, 5);
-  auto drive = session->drive();  // drives the pump here; the consumer echoes on its own thread
+  auto drive = session->drive();  // the join below drives the pump alongside the client
   auto client = echoRoundTrip(*pipe.ends[1], data);
   kj::joinPromisesFailFast(kj::arr(kj::mv(drive), kj::mv(client))).wait(ws);
 }
@@ -239,7 +239,7 @@ KJ_TEST("serve_kj_stream pump: a DISCONNECTED read is treated as EOF, not as an 
   auto session = start_serve_echo(kj::heap<DisconnectingStream>(kj::mv(pipe.ends[0]), false));
   KJ_EXPECT(!session->is_native());
 
-  auto drive = session->drive();
+  auto drive = session->drive().eagerlyEvaluate(nullptr);
   // One message goes through, then the client goes away abruptly: the pump's read fails
   // DISCONNECTED. The echo consumer must see EOF (and echo back what it got), and the pump must
   // settle Ok -- abrupt client disconnects are normal load, not failures.
@@ -258,7 +258,7 @@ KJ_TEST("serve_kj_stream pump: a DISCONNECTED write ends the direction without a
   auto pipe = kj::newTwoWayPipe();
 
   auto session = start_serve_echo(kj::heap<DisconnectingStream>(kj::mv(pipe.ends[0]), true));
-  auto drive = session->drive();
+  auto drive = session->drive().eagerlyEvaluate(nullptr);
   // The consumer's echo of "ping" is written to a peer that already reset: the pump must not
   // fail. Half-close so the read direction finishes normally too.
   pipe.ends[1]->write("ping"_kjb).wait(ws);
@@ -276,7 +276,7 @@ KJ_TEST("serve_kj_stream pump: the consumer dropping its end (no shutdown) half-
   // A consumer that reads one message and then simply drops its ServeIo: no shutdown() call.
   auto session = start_serve_drop_consumer(kj::mv(pipe.ends[0]));
   KJ_EXPECT(!session->is_native());
-  auto drive = session->drive();
+  auto drive = session->drive().eagerlyEvaluate(nullptr);
 
   pipe.ends[1]->write("ping"_kjb).wait(ws);
   // The drop must surface as shutdownWrite() on the kj stream: the client reads EOF.
