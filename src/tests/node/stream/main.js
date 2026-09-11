@@ -131,3 +131,5 @@ export {
   fromWebStreamDestroyCancelsSource,
   fromWebStreamErrorPropagates,
 } from 'readable-from';
+
+export { duplexFromWebStreamHalves } from 'duplex-from';
