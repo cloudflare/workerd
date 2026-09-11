@@ -1,7 +1,8 @@
 // Safety & panic enforcement walls. Inherent-FFI crate: unsafe is
 // concentrated at the bridge and every op must sit in an explicit, documented unsafe
-// block; prod code returns Result/KjError rather than panicking (a panic on the async
-// poll path is a process abort). Test code is exempted below.
+// block; prod code returns Result/KjError rather than panicking. Unwinding panics
+// escaping a bridged future's poll reject its C++ promise; a panic while the bridge
+// destroys that future aborts. Test code is exempted from the panic lints below.
 #![deny(unsafe_op_in_unsafe_fn)]
 // Quarantine unsafe into named FFI islands: deny unsafe crate-wide, then re-allow it only on the
 // modules that genuinely need it (each carries its own `#![allow(unsafe_code)]`). Any module
