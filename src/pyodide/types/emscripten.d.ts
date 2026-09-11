@@ -130,6 +130,9 @@ interface Module {
     handle: number,
     size: number
   ): number;
+  recordFfiClosureAlloc(closure: number, index: number);
+  recordFfiClosureFree(closure: number, index: number);
+  recordFfiPrepClosureLoc(closure: number, index: number, sig: string);
   promise: Promise<void>;
   reportUndefinedSymbols(): void;
   wasmTable: WebAssembly.Table;

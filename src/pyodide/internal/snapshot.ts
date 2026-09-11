@@ -42,12 +42,27 @@ type DsoHandles = {
   [name: string]: { handles: number[] };
 };
 
+type ClosureAllocEvent = {
+  name: 'closureAlloc';
+  closure: number;
+  index: number;
+};
+type ClosureFreeEvent = { name: 'closureFree'; closure: number; index: number };
+type ClosurePrepEvent = {
+  name: 'closurePrep';
+  closure: number;
+  index: number;
+  sig: string;
+};
+type LoadEvent =
+  string | ClosureAllocEvent | ClosureFreeEvent | ClosurePrepEvent;
+
 // This is the info about Dsos that we record in getMemoryPatched. Namely the load order and where
 // their metadata is allocated. It would be natural to also have dsoHandles in here, but we don't
 // need a global variable to calculate dsoHandles since it is calculable from the information that
 // Emscripten stores in Module.LDSO (see recordDsoHandles).
 type DsoLoadInfo = {
-  readonly loadOrder: string[];
+  readonly loadOrder: LoadEvent[];
   readonly soMemoryBases: { [name: string]: number };
   readonly soTableBases?: { [name: string]: number };
 };
@@ -65,6 +80,7 @@ type OldSnapshotMeta = DsoHandles & {
 type LoadedSnapshotSettings = {
   readonly snapshotType: ArtifactBundler.SnapshotType;
   readonly compatFlags: CompatibilityFlags;
+  readonly skipReserveTrampolinePointer: boolean;
 };
 
 type SnapshotSettings = {
@@ -129,6 +145,7 @@ const CREATED_SNAPSHOT_META: Required<DsoLoadInfo> = {
   soTableBases: {},
   loadOrder: [],
 };
+let SKIP_RESERVE_TRAMPOLINE_POINTER: boolean = false;
 if (LOADED_SNAPSHOT_META) {
   // Make sure we include the soMemoryBases and loadOrder from the baseline snapshot when we are
   // generating stacked snapshots.
@@ -283,6 +300,51 @@ function getMemoryPatched(
   }
 }
 
+function recordFfiClosureAlloc(closure: number, index: number): void {
+  const { loadOrder } = CREATED_SNAPSHOT_META;
+  loadOrder.push({ name: 'closureAlloc', closure, index });
+}
+
+function recordFfiClosureFree(closure: number, index: number): void {
+  const { loadOrder } = CREATED_SNAPSHOT_META;
+  loadOrder.push({ name: 'closureFree', closure, index });
+}
+
+function recordFfiPrepClosureLoc(
+  closure: number,
+  index: number,
+  sig: string
+): void {
+  const { loadOrder } = CREATED_SNAPSHOT_META;
+  loadOrder.push({ name: 'closurePrep', closure, index, sig });
+}
+
+function handleFfiClosureAlloc(
+  Module: Module,
+  { index }: ClosureAllocEvent
+): void {
+  const newIndex = Module.getEmptyTableSlot();
+  if (newIndex !== index) {
+    throw new PythonWorkersInternalError(
+      `Error processing closure alloc: expected index ${index}, got index ${newIndex}`
+    );
+  }
+}
+
+function handleFfiClosureFree(
+  Module: Module,
+  { index }: ClosureFreeEvent
+): void {
+  Module.freeTableIndexes.push(index);
+}
+
+function handleFfiPrepClosureLoc(
+  _Module: Module,
+  _event: ClosurePrepEvent
+): void {
+  throw new PythonWorkersInternalError('Not implemented: ffi prep closure loc');
+}
+
 function loadDynlibFromTarFs(
   Module: Module,
   base: string,
@@ -361,7 +423,7 @@ function preloadDynamicLibs026(Module: Module): void {
  */
 function preloadDynamicLibsMain(
   Module: Module,
-  loadOrder: string[] | undefined
+  loadOrder: LoadEvent[] | undefined
 ): void {
   if (!loadOrder) {
     return;
@@ -372,6 +434,19 @@ function preloadDynamicLibsMain(
   const dynlibPath = '/usr/lib/';
   const userBundleNames = MetadataReader.getNames();
   for (let path of loadOrder) {
+    if (typeof path === 'object') {
+      switch (path.name) {
+        case 'closureAlloc':
+          handleFfiClosureAlloc(Module, path);
+          continue;
+        case 'closureFree':
+          handleFfiClosureFree(Module, path);
+          continue;
+        case 'closurePrep':
+          handleFfiPrepClosureLoc(Module, path);
+          continue;
+      }
+    }
     let root = sitePackagesRoot;
     let base = '';
     if (path.startsWith(sitePackages)) {
@@ -399,14 +474,16 @@ function preloadDynamicLibsMain(
 }
 
 function maybeReserveTrampolinePointer(Module: Module): Disposable {
+  Module.snapshotDebug = true;
   // This is only needed for Python 3.13 (Pyodide 0.28.2). For Python 314.0.4
   // and 314.0.6 it isn't needed but getting rid of it would break snapshot
   // stability so we have to keep it. In all newer versions do nothing.
-  if (
+  SKIP_RESERVE_TRAMPOLINE_POINTER =
     Module.API.version !== PyodideVersion.V0_28_2 &&
-    Module.API.version !== PyodideVersion.V314_0_4 &&
-    Module.API.version !== PyodideVersion.V314_0_6
-  ) {
+    ((Module.API.version !== PyodideVersion.V314_0_4 &&
+      Module.API.version !== PyodideVersion.V314_0_6) ||
+      LOADED_SNAPSHOT_META?.settings.skipReserveTrampolinePointer !== false);
+  if (SKIP_RESERVE_TRAMPOLINE_POINTER) {
     return { [Symbol.dispose](): void {} };
   }
   // In Pyodide 0.28 we switched from using top level EM_JS to initialize the CountArgs function
@@ -651,6 +728,7 @@ function makeLinearMemorySnapshot(
     baselineSnapshot: snapshotType === 'baseline',
     snapshotType,
     compatFlags: COMPATIBILITY_FLAGS,
+    skipReserveTrampolinePointer: SKIP_RESERVE_TRAMPOLINE_POINTER,
   };
   return encodeSnapshot(Module.HEAP8, {
     version: 1,
@@ -732,6 +810,7 @@ function decodeSnapshot(
         snapshotType: 'baseline',
         compatFlags: {},
         ...meta.settings,
+        skipReserveTrampolinePointer: false,
       },
       jsModuleNames: [],
       ...extras,
@@ -744,6 +823,8 @@ function decodeSnapshot(
       ...meta.settings,
       snapshotType: meta.settings.snapshotType ?? 'baseline',
       compatFlags: meta.settings.compatFlags ?? {},
+      skipReserveTrampolinePointer:
+        meta.settings.skipReserveTrampolinePointer ?? false,
     },
   };
 }
@@ -796,6 +877,9 @@ function checkSnapshotType(snapshotType: string): void {
 export function maybeRestoreSnapshot(Module: Module): void {
   Module.noInitialRun = isRestoringSnapshot();
   Module.getMemoryPatched = getMemoryPatched;
+  Module.recordFfiClosureAlloc = recordFfiClosureAlloc;
+  Module.recordFfiClosureFree = recordFfiClosureFree;
+  Module.recordFfiPrepClosureLoc = recordFfiPrepClosureLoc;
   // Make sure memory is large enough
   Module.growMemory(LOADED_SNAPSHOT_META?.snapshotSize ?? 0);
   enterJaegerSpan('preload_dynamic_libs', () => {

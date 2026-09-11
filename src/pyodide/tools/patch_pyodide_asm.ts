@@ -256,6 +256,49 @@ function patch<T extends AnyNode>(spec: {
   return { ...spec, replace: (node) => spec.replace(node as T) };
 }
 
+/**
+ * Define a patch that inserts `insertStatement` into the body of the function declaration named
+ * `functionName`, directly after the first body statement accepted by `insertAfterPredicate`.
+ */
+function addToFunctionAfter({
+  name,
+  functionName,
+  insertAfterPredicate,
+  insertStatement,
+}: {
+  name: string;
+  functionName: string;
+  insertAfterPredicate: (statement: Statement) => boolean;
+  insertStatement: string;
+}): Patch {
+  return patch({
+    name,
+    expected: 1,
+    match: (node): node is FunctionDeclaration =>
+      isFunctionDeclarationNamed(node, functionName),
+    replace: (node) => {
+      const body = node.body.body;
+      const index = body.findIndex(insertAfterPredicate);
+      if (index === -1) {
+        throw new Error(
+          `${functionName} has no statement matching the insertion point for "${name}"`
+        );
+      }
+      return {
+        ...node,
+        body: {
+          ...node.body,
+          body: [
+            ...body.slice(0, index + 1),
+            stmt(insertStatement),
+            ...body.slice(index + 1),
+          ],
+        },
+      };
+    },
+  });
+}
+
 const COMMON_PATCHES: Patch[] = [
   patch({
     name: 'new WebAssembly.Module(...) -> newWasmModule(...)',
@@ -355,6 +398,26 @@ const COMMON_PATCHES: Patch[] = [
       ),
     ],
   },
+  addToFunctionAfter({
+    name: 'record table slot allocations in ffi_closure_alloc_js',
+    functionName: 'ffi_closure_alloc_js',
+    insertAfterPredicate: (s) => isVariableDeclarationOf(s, 'index'),
+    insertStatement: 'Module.recordFfiClosureAlloc?.(closure, index);',
+  }),
+  addToFunctionAfter({
+    name: 'record table slot frees in ffi_closure_free_js',
+    functionName: 'ffi_closure_free_js',
+    insertAfterPredicate: (s) => isVariableDeclarationOf(s, 'index'),
+    insertStatement: 'Module.recordFfiClosureFree?.(closure, index);',
+  }),
+  addToFunctionAfter({
+    name: 'record table slot assignments in ffi_prep_closure_loc_js',
+    functionName: 'ffi_prep_closure_loc_js',
+    insertAfterPredicate: (s) =>
+      s.type === 'ExpressionStatement' &&
+      isCallOf(s.expression, 'setWasmTableEntry'),
+    insertStatement: 'Module.recordFfiPrepClosureLoc?.(closure, codeloc, sig);',
+  }),
 ];
 
 // pyodide.asm.js in these versions is a CommonJS/UMD-style script; convert it to an ES module.
