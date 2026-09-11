@@ -254,8 +254,14 @@ class Fetcher: public JsRpcClientProvider {
     virtual Result newSingleUseClient(
         kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) = 0;
 
-    virtual bool supportsActorCallRetries() const {
-      return false;
+    // Whether this factory dispatches to a Durable Object, and whether that target can create fresh
+    // retry attempts. Actor calls are observed whether or not the target supports retries.
+    virtual kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const {
+      return kj::none;
+    }
+
+    bool supportsActorCallRetries() const {
+      return getActorTargetRetryability().orDefault(ActorCallTargetRetryable::NO).toBool();
     }
 
     virtual void onActorCallRetry() {
@@ -342,7 +348,7 @@ class Fetcher: public JsRpcClientProvider {
       ActorCallRetryState::Attempt attempt,
       MakeUserSpanParent makeUserSpanParent);
 
-  bool supportsActorCallRetries() override;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() override;
   void onActorCallRetry();
 
   // Get a SubrequestChannel representing this Fetcher.
