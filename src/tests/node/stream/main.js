@@ -51,6 +51,11 @@ export {
   fromWebPairRoundTrip,
   fromWebObjectModeStrings,
   fromWebPairCorkedWritesDeliverChunks,
+  fromWebPairBatchedWriteRejectionFailsCallbacks,
+  fromWebPairErroredReadableDestroysDuplex,
+  fromWebPairLaterReadableErrorDestroysDuplex,
+  fromWebPairErroredWritableDestroysDuplex,
+  fromWebPairIterationToCompletionIsClean,
 } from 'duplex-from-web';
 
 export { toWebAsResponseBody } from 'bodies';

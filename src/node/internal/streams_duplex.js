@@ -23,9 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
 import { Buffer } from 'node-internal:internal_buffer';
 import {
   Readable,
@@ -793,7 +790,7 @@ export function newStreamDuplexFromReadableWritablePair(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          nextTick(() => destroy.call(duplex, error));
+          nextTick(() => destroyer(duplex, error));
         }
       }
 
@@ -828,7 +825,7 @@ export function newStreamDuplexFromReadableWritablePair(
         try {
           callback(error);
         } catch (error) {
-          destroy.call(duplex, error);
+          destroyer(duplex, error);
         }
       }
 
@@ -847,7 +844,7 @@ export function newStreamDuplexFromReadableWritablePair(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          nextTick(() => destroy.call(duplex, error));
+          nextTick(() => destroyer(duplex, error));
         }
       }
 
@@ -865,7 +862,7 @@ export function newStreamDuplexFromReadableWritablePair(
             duplex.push(chunk.value);
           }
         },
-        (error) => destroy.call(duplex, error)
+        (error) => destroyer(duplex, error)
       );
     },
 
@@ -906,12 +903,12 @@ export function newStreamDuplexFromReadableWritablePair(
     () => {
       writableClosed = true;
       if (!isWritableEnded(duplex))
-        destroy.call(duplex, new ERR_STREAM_PREMATURE_CLOSE());
+        destroyer(duplex, new ERR_STREAM_PREMATURE_CLOSE());
     },
     (error) => {
       writableClosed = true;
       readableClosed = true;
-      destroy.call(duplex, error);
+      destroyer(duplex, error);
     }
   );
 
@@ -922,7 +919,7 @@ export function newStreamDuplexFromReadableWritablePair(
     (error) => {
       writableClosed = true;
       readableClosed = true;
-      destroy.call(duplex, error);
+      destroyer(duplex, error);
     }
   );
 
