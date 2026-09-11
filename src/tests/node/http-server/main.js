@@ -44,6 +44,7 @@ export {
   contentLengthCapsBody,
   noBodyStatuses,
   headResponseHasNoBody,
+  rejectNonStandardBodyWritesThrows,
   corkAndUncork,
   backpressureSignaling,
   writesAlwaysAcceptedAfterHeaders,
