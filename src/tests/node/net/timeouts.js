@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+// setTimeout(): the idle timer fires 'timeout' (without closing the socket)
+// when neither the read loop delivers nor the writer flushes for the
+// duration; delivered data resets it; setTimeout(0) clears it.
+
+import { strictEqual } from 'node:assert';
+import { echo, once } from 'servers';
+
+// An idle socket times out; the socket stays open and usable.
+export const idleSocketTimesOut = {
+  async test(ctrl, env) {
+    const socket = echo(env);
+    await once(socket, 'connect');
+    let timeouts = 0;
+    socket.setTimeout(30, () => timeouts++);
+    await once(socket, 'timeout');
+    strictEqual(timeouts, 1);
+    strictEqual(socket.destroyed, false);
+    const echoed = once(socket, 'data');
+    socket.write('still here');
+    strictEqual((await echoed).toString(), 'still here');
+    socket.end();
+    await once(socket, 'close');
+  },
+};
+
+// setTimeout(0) cancels a pending timer.
+export const zeroClearsTimeout = {
+  async test(ctrl, env) {
+    const socket = echo(env);
+    socket.resume();
+    await once(socket, 'connect');
+    let timeouts = 0;
+    socket.setTimeout(30, () => timeouts++);
+    socket.setTimeout(0);
+    await scheduler.wait(80);
+    strictEqual(timeouts, 0);
+    socket.end();
+    await once(socket, 'close');
+  },
+};

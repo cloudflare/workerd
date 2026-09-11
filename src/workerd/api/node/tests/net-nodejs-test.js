@@ -43,8 +43,6 @@ export const checkPortsSetCorrectly = {
       'SERVER_PORT',
       'ECHO_SERVER_PORT',
       'TIMEOUT_SERVER_PORT',
-      'END_SERVER_PORT',
-      'SERVER_THAT_DIES_PORT',
       'RECONNECT_SERVER_PORT',
     ];
     for (const key of keys) {
@@ -65,65 +63,6 @@ export const testNetAccessBytesWritten = {
       undefined
     );
     strictEqual(tls.TLSSocket.prototype.bytesWritten, undefined);
-  },
-};
-
-// test/parallel/test-net-after-close.js
-export const testNetAfterClose = {
-  async test(ctrl, env, ctx) {
-    const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(Number(env.SERVER_PORT), env.SIDECAR_HOSTNAME);
-    c.resume();
-    c.on('close', () => resolve());
-    await promise;
-
-    // Calling functions / accessing properties of a closed socket should not throw
-    c.setNoDelay();
-    c.setKeepAlive();
-    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-    c.bufferSize;
-    c.pause();
-    c.resume();
-    c.address();
-    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-    c.remoteAddress;
-    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-    c.remotePort;
-  },
-};
-
-// test/parallel/test-net-allow-half-open.js
-export const testNetAllowHalfOpen = {
-  async test(ctrl, env, ctx) {
-    // Verify that the socket closes properly when the other end closes
-    // and allowHalfOpen is false.
-
-    const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(Number(env.SERVER_PORT), env.SIDECAR_HOSTNAME);
-    strictEqual(c.allowHalfOpen, false);
-    c.resume();
-
-    const endFn = mock.fn(() => {
-      queueMicrotask(() => {
-        ok(!c.destroyed);
-      });
-    });
-    const finishFn = mock.fn(() => {
-      ok(!c.destroyed);
-    });
-    const closeFn = mock.fn(resolve);
-    c.on('end', endFn);
-
-    // Even tho we're not writing anything, since the socket receives a
-    // EOS and allowHalfOpen is false, the socket should close both the
-    // readable and writable sides, meaning we should definitely get a
-    // finish event.
-    c.on('finish', finishFn);
-    c.on('close', closeFn);
-    await promise;
-    strictEqual(endFn.mock.callCount(), 1);
-    strictEqual(finishFn.mock.callCount(), 1);
-    strictEqual(closeFn.mock.callCount(), 1);
   },
 };
 
@@ -153,117 +92,6 @@ export const testNetBetterErrorMessagesPortHostname = {
     c.on('error', errorFn);
     await promise;
     strictEqual(errorFn.mock.callCount(), 1);
-  },
-};
-
-// test/parallel/test-net-binary.js
-export const testNetBinary = {
-  async test(ctrl, env, ctx) {
-    const { promise, resolve } = Promise.withResolvers();
-
-    // Connect to the echo server
-    const c = net.connect(env.ECHO_SERVER_PORT, env.SIDECAR_HOSTNAME);
-    c.setEncoding('latin1');
-    let result = '';
-    c.on('data', (chunk) => {
-      result += chunk;
-    });
-
-    let binaryString = '';
-    for (let i = 255; i >= 0; i--) {
-      c.write(String.fromCharCode(i), 'latin1');
-      binaryString += String.fromCharCode(i);
-    }
-    c.end();
-    c.on('close', () => {
-      resolve();
-    });
-    await promise;
-    strictEqual(result, binaryString);
-  },
-};
-
-// test/parallel/test-net-buffersize.js
-export const testNetBuffersize = {
-  async test(ctrl, env, ctx) {
-    const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
-    const finishFn = mock.fn(() => {
-      strictEqual(c.bufferSize, 0);
-      resolve();
-    });
-    c.on('finish', finishFn);
-
-    strictEqual(c.bufferSize, 0);
-    c.write('a');
-    c.end();
-    strictEqual(c.bufferSize, 1);
-    await promise;
-    strictEqual(finishFn.mock.callCount(), 1);
-  },
-};
-
-// test/parallel/test-net-bytes-read.js
-export const testNetBytesRead = {
-  async test(ctrl, env, ctx) {
-    const { promise, resolve } = Promise.withResolvers();
-    // Connect to the echo server
-    const c = net.connect(env.ECHO_SERVER_PORT, env.SIDECAR_HOSTNAME);
-    c.resume();
-    c.write('hello');
-    c.end();
-    const endFn = mock.fn(() => {
-      strictEqual(c.bytesRead, 5);
-      resolve();
-    });
-    c.on('end', endFn);
-
-    await promise;
-
-    strictEqual(endFn.mock.callCount(), 1);
-  },
-};
-
-export const testNetBytesStats = {
-  async test(ctrl, env) {
-    // This is intentionally not a completely faithful reproduction of the
-    // original test which checks the bytesRead on the server side.
-    // Connect to the echo server
-    const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(env.ECHO_SERVER_PORT, env.SIDECAR_HOSTNAME);
-    let bytesDelivered = 0;
-    c.on('data', (chunk) => (bytesDelivered += chunk.byteLength));
-    c.write('hello');
-    c.end();
-    const endFn = mock.fn(() => {
-      strictEqual(c.bytesWritten, 0);
-      strictEqual(bytesDelivered, 5);
-      strictEqual(c.bytesRead, 5);
-      resolve();
-    });
-    c.on('end', endFn);
-
-    await promise;
-    strictEqual(endFn.mock.callCount(), 1);
-  },
-};
-
-// test/parallel/test-net-bytes-written-large.js
-const N = 10000000;
-export const testNetBytesWrittenLargeVariant1 = {
-  async test(ctrl, env, ctx) {
-    const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(env.ECHO_SERVER_PORT, env.SIDECAR_HOSTNAME);
-    c.resume();
-
-    const writeFn = mock.fn(() => {
-      strictEqual(c.bytesWritten, N);
-      resolve();
-    });
-
-    c.end(Buffer.alloc(N), writeFn);
-
-    await promise;
   },
 };
 
@@ -389,95 +217,6 @@ export const testNetConnectAfterDestroy = {
   },
 };
 
-// test/parallel/test-net-connect-buffer.js
-export const testNetConnectBuffer = {
-  async test(ctrl, env, ctx) {
-    const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect({
-      port: env.ECHO_SERVER_PORT,
-      host: env.SIDECAR_HOSTNAME,
-      highWaterMark: 0,
-    });
-
-    strictEqual(c.pending, true);
-    strictEqual(c.connecting, true);
-    strictEqual(c.readyState, 'opening');
-    strictEqual(c.bytesWritten, 0);
-
-    // Write a string that contains a multi-byte character sequence to test that
-    // `bytesWritten` is incremented with the # of bytes, not # of characters.
-    const a = "L'État, c'est ";
-    const b = 'moi';
-
-    let result = '';
-    c.setEncoding('utf8');
-    c.on('data', (chunk) => {
-      result += chunk;
-    });
-    const endFn = mock.fn(() => {
-      strictEqual(result, a + b);
-    });
-    c.on('end', endFn);
-
-    const writeFn = mock.fn(() => {
-      strictEqual(c.pending, false);
-      strictEqual(c.connecting, false);
-      strictEqual(c.readyState, 'readOnly');
-      strictEqual(c.bytesWritten, Buffer.from(a + b).length);
-    });
-    c.write(a, writeFn);
-
-    const closeFn = mock.fn(() => {
-      resolve();
-    });
-    c.on('close', closeFn);
-
-    c.end(b);
-
-    await promise;
-    strictEqual(closeFn.mock.callCount(), 1);
-    strictEqual(writeFn.mock.callCount(), 1);
-    strictEqual(endFn.mock.callCount(), 1);
-  },
-};
-
-// test/parallel/test-net-connect-destroy.js
-export const testNetConnectDestroy = {
-  async test(ctrl, env, ctx) {
-    const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
-    c.on('close', () => resolve());
-    c.destroy();
-    await promise;
-  },
-};
-
-// test/parallel/test-net-connect-immediate-destroy.js
-export const testNetConnectImmediateDestroy = {
-  async test(ctrl, env, ctx) {
-    const connectFn = mock.fn();
-    const socket = net.connect(
-      env.SERVER_PORT,
-      env.SIDECAR_HOSTNAME,
-      connectFn
-    );
-    socket.destroy();
-    await Promise.resolve();
-    strictEqual(connectFn.mock.callCount(), 0);
-  },
-};
-
-// test/parallel/test-net-connect-immediate-finish.js
-export const testNetConnectImmediateFinish = {
-  async text(ctrl, env, ctx) {
-    const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
-    c.end();
-    c.on('finish', () => resolve());
-    await promise;
-  },
-};
-
 // test/parallel/test-net-connect-keepalive.js
 // test/parallel/test-net-keepalive.js
 // We don't actually support keep alive so this test does
@@ -524,33 +263,6 @@ export const testNetConnectNoArg = {
       code: 'ERR_MISSING_ARGS',
       message: 'The "options" or "port" or "path" argument must be specified',
     });
-  },
-};
-
-// test/parallel/test-net-connect-options-allowhalfopen.js
-// Simplified version of the equivalent Node.js test
-export const testNetConnectOptionsAllowHalfOpen = {
-  async test(ctrl, env, ctx) {
-    const { promise, resolve, reject } = Promise.withResolvers();
-    const c = net.connect({
-      host: env.SIDECAR_HOSTNAME,
-      port: env.SERVER_PORT,
-      allowHalfOpen: true,
-    });
-    c.resume();
-    const writeFn = mock.fn(() => {
-      c.write('hello', (err) => {
-        if (err) reject(err);
-        resolve();
-      });
-    });
-    const endFn = mock.fn(() => {
-      strictEqual(c.readable, false);
-      strictEqual(c.writable, true);
-      queueMicrotask(writeFn);
-    });
-    c.on('end', endFn);
-    await promise;
   },
 };
 
@@ -718,36 +430,6 @@ export const testNetDnsLookupSkip = {
       net.connect({ host, port: env.SERVER_PORT, lookup }).destroy();
     });
     strictEqual(lookup.mock.callCount(), 0);
-  },
-};
-
-// test/parallel/test-net-during-close.js
-export const testNetDuringClose = {
-  test(ctrl, env, ctx) {
-    const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
-    c.destroy();
-    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-    c.remoteAddress;
-    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-    c.remoteFamily;
-    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-    c.remotePort;
-  },
-};
-
-// test/parallel/test-net-end-destroyed.js
-export const testNetEndDestroyed = {
-  async test(ctrl, env, ctx) {
-    const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
-    c.resume();
-
-    const endFn = mock.fn(() => {
-      strictEqual(c.destroyed, false);
-      resolve();
-    });
-    c.on('end', endFn);
-    await promise;
   },
 };
 
@@ -1136,24 +818,6 @@ export const testNetIsIpv6 = {
   },
 };
 
-// test/parallel/test-net-large-string.js
-export const testNetLargeString = {
-  async test(ctrl, env, ctx) {
-    const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(env.ECHO_SERVER_PORT, env.SIDECAR_HOSTNAME);
-    let response = '';
-    const size = 40 * 1024;
-    const data = 'あ'.repeat(size);
-    c.setEncoding('utf8');
-    c.on('data', (data) => (response += data));
-    c.end(data);
-    c.on('close', resolve);
-    await promise;
-    strictEqual(response.length, size);
-    strictEqual(response, data);
-  },
-};
-
 // test/parallel/test-net-local-address-port.js
 // The local endpoint is autobound in the isolate's virtual port table; the
 // transport does not honor it.
@@ -1532,33 +1196,6 @@ export const testNetBoundSocketLocalAddressConflict = {
   },
 };
 
-// test/parallel/test-net-onread-static-buffer.js
-export const testNetOnReadStaticBuffer = {
-  async test(ctrl, env, ctx) {
-    const { promise, resolve } = Promise.withResolvers();
-    const buffer = Buffer.alloc(1024);
-    const fn = mock.fn((nread, buf) => {
-      strictEqual(nread, 5);
-      strictEqual(buf.buffer.byteLength, 1024);
-      resolve();
-    });
-    const c = net.connect({
-      port: env.ECHO_SERVER_PORT,
-      host: env.SIDECAR_HOSTNAME,
-      onread: {
-        buffer,
-        callback: fn,
-      },
-    });
-    c.on('data', () => {
-      throw new Error('Should not have failed');
-    });
-    c.write('hello');
-    await promise;
-    strictEqual(fn.mock.callCount(), 1);
-  },
-};
-
 export const testNetReconnect = {
   async test(ctrl, env) {
     const { promise, resolve } = Promise.withResolvers();
@@ -1605,39 +1242,6 @@ export const testNetRemoteAddress = {
       resolve();
     });
     await promise;
-  },
-};
-
-// // test/parallel/test-net-socket-byteswritten.js
-export const testNetSocketBytesWritten = {
-  async test(ctrl, env) {
-    const { promise, resolve } = Promise.withResolvers();
-    const socket = net.connect(env.END_SERVER_PORT, env.SIDECAR_HOSTNAME);
-
-    // Cork the socket, then write twice; this should cause a writev, which
-    // previously caused an err in the bytesWritten count.
-    socket.cork();
-
-    socket.write('one');
-    socket.write(Buffer.from('twø', 'utf8'));
-
-    socket.uncork();
-
-    // one = 3 bytes, twø = 4 bytes
-    strictEqual(socket.bytesWritten, 3 + 4);
-
-    const connectFn = mock.fn(() => {
-      strictEqual(socket.bytesWritten, 3 + 4);
-    });
-    socket.on('connect', connectFn);
-
-    socket.on('end', function () {
-      strictEqual(socket.bytesWritten, 3 + 4);
-      resolve();
-    });
-
-    await promise;
-    strictEqual(connectFn.mock.callCount(), 1);
   },
 };
 
@@ -1716,69 +1320,6 @@ export const testNetSocketConnecting = {
     // Legacy getter
     strictEqual(client._connecting, true);
     await promise;
-  },
-};
-
-// test/parallel/test-net-socket-destroy-send.js
-export const testNetSocketDestroySend = {
-  async test(ctrl, env) {
-    const { promise, resolve, reject } = Promise.withResolvers();
-    const conn = net.createConnection(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
-
-    conn.on('connect', function () {
-      // Test destroy returns this, even on multiple calls when it short-circuits.
-      strictEqual(conn, conn.destroy().destroy());
-      conn.on('error', reject);
-
-      conn.write(Buffer.from('kaboom'), (err) => {
-        strictEqual(err.code, 'ERR_STREAM_DESTROYED');
-        strictEqual(err.name, 'Error');
-        strictEqual(
-          err.message,
-          'Cannot call write after a stream was destroyed'
-        );
-        resolve();
-      });
-    });
-
-    await promise;
-  },
-};
-
-// test/parallel/test-net-socket-end-callback.js
-export const testNetSocketEndCallback = {
-  async test(ctrl, env) {
-    const { promise, resolve } = Promise.withResolvers();
-    const connect = (...args) => {
-      const socket = net.createConnection(
-        env.SERVER_PORT,
-        env.SIDECAR_HOSTNAME,
-        () => {
-          socket.end(...args);
-        }
-      );
-    };
-
-    let count = 0;
-    const cb = mock.fn(() => {
-      if (++count === 3) {
-        resolve();
-      }
-    });
-
-    connect(cb);
-    connect('foo', cb);
-    connect('foo', 'utf8', cb);
-    await promise;
-    strictEqual(cb.mock.callCount(), 3);
-  },
-};
-
-// test/parallel/test-net-socket-no-halfopen-enforcer.js
-export const testNetSocketNoHalfopenEnforcer = {
-  async test() {
-    const socket = new net.Socket({ allowHalfOpen: false });
-    strictEqual(socket.listenerCount('end'), 1);
   },
 };
 
@@ -1902,78 +1443,6 @@ export const testNetSocketTimeout = {
   },
 };
 
-// test/parallel/test-net-socket-write-after-close.js
-export const testNetSocketWriteAfterClose = {
-  async test(ctrl, env) {
-    {
-      const { promise, resolve } = Promise.withResolvers();
-      const client = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME, () => {
-        client.on('error', (err) => {
-          strictEqual(err.name, 'Error');
-          // Node.js tests for a different error message.
-          strictEqual(err.message, 'Socket is closed');
-          strictEqual(err.code, 'ERR_SOCKET_CLOSED');
-          resolve();
-        });
-        client._handle = null;
-        client.write('foo');
-      });
-      await promise;
-    }
-  },
-};
-
-// test/parallel/test-net-socket-write-error.js
-export const testNetSocketWriteError = {
-  async test(ctrl, env) {
-    const { promise, resolve, reject } = Promise.withResolvers();
-    const client = net.createConnection(
-      env.SERVER_PORT,
-      env.SIDECAR_HOSTNAME,
-      () => {
-        client.on('error', reject);
-        throws(
-          () => {
-            client.write(1337);
-          },
-          {
-            code: 'ERR_INVALID_ARG_TYPE',
-            name: 'TypeError',
-          }
-        );
-
-        resolve();
-      }
-    );
-    await promise;
-  },
-};
-
-// test/parallel/test-net-sync-cork.js
-export const testNetSyncCork = {
-  async test(ctrl, env) {
-    const N = 100;
-    const buf = Buffer.alloc(2, 'a');
-
-    const { promise, resolve } = Promise.withResolvers();
-    const conn = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
-
-    conn.on('connect', () => {
-      let res = true;
-      let i = 0;
-      for (; i < N && res; i++) {
-        conn.cork();
-        conn.write(buf);
-        res = conn.write(buf);
-        conn.uncork();
-      }
-      strictEqual(i, N);
-      resolve();
-    });
-    await promise;
-  },
-};
-
 // test/parallel/test-net-timeout-no-handle.js
 export const testNetTimeoutNoHandle = {
   async test() {
@@ -1990,20 +1459,6 @@ export const testNetTimeoutNoHandle = {
 
     // Since the timeout is unrefed, the code will exit without this
     setTimeout(() => {}, 200);
-    await promise;
-  },
-};
-
-// test/parallel/test-net-writable.js
-export const testNetWritable = {
-  async test(ctrl, env) {
-    const { promise, resolve } = Promise.withResolvers();
-    const socket = net.connect(env.SERVER_THAT_DIES_PORT, env.SIDECAR_HOSTNAME);
-    socket.on('end', () => {
-      strictEqual(socket.writable, true);
-      socket.write('hello world');
-      resolve();
-    });
     await promise;
   },
 };
@@ -2040,56 +1495,6 @@ export const testNetWriteArguments = {
         );
       }
     );
-  },
-};
-
-// test/parallel/test-net-write-cb-on-destroy-before-connect.js
-export const testNetWriteCbOnDestroyBefureConnected = {
-  async test(ctrl, env) {
-    const { promise, resolve } = Promise.withResolvers();
-    const socket = new net.Socket();
-
-    socket.on('connect', () => {
-      throw new Error('Connect should not have been called');
-    });
-
-    socket.connect(Number(env.SERVER_PORT), env.SIDECAR_HOSTNAME);
-
-    ok(socket.connecting);
-
-    socket.write('foo', (err) => {
-      strictEqual(err.code, 'ERR_SOCKET_CLOSED_BEFORE_CONNECTION');
-      strictEqual(err.name, 'Error');
-      resolve();
-    });
-
-    socket.destroy();
-    await promise;
-  },
-};
-
-// test/parallel/test-net-write-connect-write.js
-export const testNetWriteConnectWrite = {
-  async test(ctrl, env) {
-    const { promise, resolve } = Promise.withResolvers();
-    const conn = net.connect(env.ECHO_SERVER_PORT, env.SIDECAR_HOSTNAME);
-    let received = '';
-
-    conn.setEncoding('utf8');
-    conn.on('connect', function () {
-      conn.write(' after');
-    });
-    conn.on('data', function (buf) {
-      received += buf;
-      conn.end();
-    });
-    conn.write('before');
-
-    conn.on('end', function () {
-      strictEqual(received, 'before after');
-      resolve();
-    });
-    await promise;
   },
 };
 
