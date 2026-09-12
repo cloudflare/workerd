@@ -2,8 +2,8 @@
 
 An informal specification of the `node:stream` web-interop surface —
 `Readable.toWeb/fromWeb`, `Writable.toWeb/fromWeb`, `Duplex.toWeb/fromWeb`,
-`Duplex.from`, `Readable.from` over a web stream, `node:stream/web`,
-`node:stream/consumers` —
+`Duplex.from`, `Readable.from` over a web stream, `pipeline`,
+`node:stream/web`, `node:stream/consumers` —
 derived from and kept in lockstep with the test suite in this directory.
 **The tests are the normative artifact**; this document maps behaviors to
 the tests that assert them. Every test runs against the C++ streams
@@ -16,7 +16,7 @@ The implementation under test is `src/node/internal/streams_readable.js`
 `streams_writable.js` (`newWritableStreamFromStreamWritable`,
 `newStreamWritableFromWritableStream`), `streams_duplex.js`
 (`newReadableWritablePairFromDuplex`, `newStreamDuplexFromReadableWritablePair`,
-`duplexify`), and `src/node/stream/{web,consumers}.js`.
+`duplexify`), `streams_pipeline.js`, and `src/node/stream/{web,consumers}.js`.
 
 ## Core semantics
 
@@ -116,6 +116,35 @@ The implementation under test is `src/node/internal/streams_readable.js`
 - `Duplex.from()` over a lone web stream yields a Duplex whose missing side
   is marked finished/ended.
 
+### pipeline
+
+- `pipeline()`: a `ReadableStream` (or a `TransformStream`'s readable) is
+  consumed through a reader the pump owns, its chunks passed on as they
+  are (a promise-valued chunk stays a promise); a `WritableStream` (or a
+  `TransformStream`'s writable) is fed through a writer that honors
+  `ready`, closes at the end unless `end: false`, and aborts on failure —
+  the pump keeps the writer, so a web destination stays locked. The
+  pipeline's teardown (a signal abort, a failed stage) reaches the web
+  stages through those handles: the source's reader is cancelled with the
+  pipeline's error, which settles a pending read (a source the pump never
+  started reading is cancelled too), and the destination's writer is
+  aborted with it. A web destination's own failure — its controller
+  erroring, a write rejecting — is observed independently of the source,
+  so it fails the pipeline even while the source is idle; a web source's
+  own failure is observed independently of the destination, so it fails
+  the pipeline (destroying the destination) even while the pump waits on
+  a node destination's backpressure — one that never drains would
+  otherwise hang it. A failed web sink
+  fails the pipeline and destroys the node source (its own abort algorithm
+  does not run: the stream is already errored); a failed web source
+  destroys the node destination; a failed node destination — even one
+  failing while the web source is idle — cancels the web source. A web
+  destination that is already locked fails the pipeline with the lock
+  error and leaves the lock with its owner. A signal abort fails the
+  pipeline with an `AbortError`, also when every stage is a web stream and
+  idle; a pending sink write is allowed to settle first. `stream/promises`
+  treats a trailing web stream as a destination.
+
 ## Compatibility flags
 
 `stream-cpp.wd-test` pins `streams_enable_constructors` (the toWeb adapters
@@ -128,6 +157,7 @@ the full module set with `pedantic_wpt` added and asserts nothing changes.
 | Flag (enable date) | Selects | Unflagged behavior tested by |
 | --- | --- | --- |
 | `streams_enable_constructors` (2022-11-30) | toWeb adapters and `node:stream/web` constructors work | `legacyToWebHitsConstructorGate`, `legacyStreamWebConstructorsGated` |
+| `transformstream_enable_standard_constructor` (2022-11-30) | `new TransformStream({ transform })` honors its transformer | `legacyTransformStreamIgnoresTransformer` |
 
 ## Divergence ledger (C++ vs TypeScript)
 
@@ -155,6 +185,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `bodies.js` | Response/Request bodies through `Readable.toWeb` (incl. a megabyte); `Readable.fromWeb` over a Response body and a `TextDecoderStream` chain; `Writable.fromWeb` over `IdentityTransformStream` and `FixedLengthStream` (ledger #4); pipeThrough chains in both directions |
 | `consumers.js` | `text/json/buffer/arrayBuffer/blob` over web streams; multi-chunk and string decoding; lock release; error propagation; node Readables and async generators |
 | `readable-from.js` | `Readable.from(webStream)`: chunk types by objectMode, destroy → cancel + lock release, error propagation |
+| `pipeline-web.js` | web source/destination/transform stages, generator stages, `TransformStream` head; sink/source/node-sink failures (incl. a node sink failing while the web source is idle, a web sink erroring or rejecting a write while the source is idle, and a web source erroring while a stuck node sink holds the pump); a detached-view chunk failing the pipeline (`TypeError`, source cancelled without a reason); promise-valued chunks by identity; a locked web destination (callback and promise forms, node and web sources); `stream/promises` trailing web destination, `end: false`, signal abort of a node-headed and of an idle all-web pipeline, and during a pending web read |
 | `which-impl.js` | implementation detection |
 
 ## Legacy (unflagged) behaviors
@@ -166,3 +197,5 @@ Guarded by `stream-cpp-legacy.wd-test` (C++ only):
 | `Readable.toWeb`, `Writable.toWeb`, `Duplex.toWeb` (writable half first) throw the constructor-gate `Error`, also for destroyed/unreadable inputs | `legacyToWebHitsConstructorGate` |
 | `new ReadableStream()` / `new WritableStream()` from `node:stream/web` throw the gate | `legacyStreamWebConstructorsGated` |
 | `Readable.fromWeb`, `Writable.fromWeb`, `Duplex.fromWeb` work over runtime-provided streams (fetch bodies, `IdentityTransformStream`) | `legacyFromWebOverRuntimeStreams` |
+| `pipeline()` works over runtime-provided web streams | `legacyPipelineOverRuntimeStreams` |
+| `new TransformStream({ transform })` is an identity transform; the transformer is never called | `legacyTransformStreamIgnoresTransformer` |

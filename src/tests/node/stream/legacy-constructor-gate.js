@@ -6,9 +6,12 @@
 // `new ReadableStream()` / `new WritableStream()`, and the toWeb adapters,
 // which construct their streams that way, fail with that Error. The
 // fromWeb adapters construct nothing and keep working over streams the
-// runtime provides (fetch bodies, the identity transforms).
+// runtime provides (fetch bodies, the identity transforms), as does
+// pipeline over such streams. Without
+// transformstream_enable_standard_constructor, `new TransformStream()`
+// still constructs — as an identity transform that ignores its transformer.
 
-import { Readable, Writable, Duplex, PassThrough } from 'node:stream';
+import { Readable, Writable, Duplex, PassThrough, pipeline } from 'node:stream';
 import * as web from 'node:stream/web';
 import { Buffer } from 'node:buffer';
 import { strictEqual, throws } from 'node:assert';
@@ -83,5 +86,64 @@ export const legacyFromWebOverRuntimeStreams = {
     await new Promise((resolve) => duplex.once('end', resolve));
     strictEqual(Buffer.concat(read).toString(), 'in');
     strictEqual(await out, 'out');
+  },
+};
+
+// pipeline() with runtime-provided web streams works too.
+export const legacyPipelineOverRuntimeStreams = {
+  async test() {
+    const sinkChunks = [];
+    const sink = new Writable({
+      write(chunk, encoding, callback) {
+        sinkChunks.push(chunk);
+        callback();
+      },
+    });
+    await new Promise((resolve) =>
+      pipeline(new Response('piped').body, sink, resolve)
+    );
+    strictEqual(Buffer.concat(sinkChunks).toString(), 'piped');
+
+    const identity = new IdentityTransformStream();
+    const text = new Response(identity.readable).text();
+    await new Promise((resolve) =>
+      pipeline(
+        Readable.from([Buffer.from('to identity')]),
+        identity.writable,
+        resolve
+      )
+    );
+    strictEqual(await text, 'to identity');
+  },
+};
+
+// Without transformstream_enable_standard_constructor a TransformStream is
+// an identity transform: the transformer passed to it is never consulted.
+export const legacyTransformStreamIgnoresTransformer = {
+  async test() {
+    let transformCalls = 0;
+    const transform = new TransformStream({
+      transform(chunk, controller) {
+        transformCalls++;
+        controller.enqueue(new TextEncoder().encode('TRANSFORMED'));
+      },
+    });
+    const sinkChunks = [];
+    const sink = new Writable({
+      write(chunk, encoding, callback) {
+        sinkChunks.push(chunk);
+        callback();
+      },
+    });
+    await new Promise((resolve) =>
+      pipeline(
+        Readable.from([Buffer.from('as-is')], { objectMode: false }),
+        transform,
+        sink,
+        resolve
+      )
+    );
+    strictEqual(transformCalls, 0);
+    strictEqual(Buffer.concat(sinkChunks).toString(), 'as-is');
   },
 };

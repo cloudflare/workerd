@@ -23,23 +23,25 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
 import {
   isIterable,
   isReadable,
   isReadableNodeStream,
   isNodeStream,
+  isTransformStream,
+  isWebStream,
+  isReadableStream,
+  isReadableFinished,
 } from 'node-internal:streams_util';
 import { eos } from 'node-internal:streams_end_of_stream';
 import { destroyer as destroyerImpl } from 'node-internal:streams_destroy';
 import { once } from 'node-internal:internal_http_util';
+import { addAbortListener } from 'node-internal:events';
 
 import { nextTick } from 'node-internal:internal_process';
 import { PassThrough } from 'node-internal:streams_transform';
 import { Duplex } from 'node-internal:streams_duplex';
-import { Readable, from } from 'node-internal:streams_readable';
+import { Readable } from 'node-internal:streams_readable';
 import {
   aggregateTwoErrors,
   ERR_INVALID_ARG_TYPE,
@@ -105,7 +107,7 @@ async function* fromReadable(val) {
   yield* Readable.prototype[Symbol.asyncIterator].call(val);
 }
 
-async function pump(iterable, writable, finish, { end }) {
+async function pumpToNode(iterable, writable, finish, { end }) {
   let error;
   let onresolve = null;
   const resume = (err) => {
@@ -152,14 +154,154 @@ async function pump(iterable, writable, finish, { end }) {
     }
     if (end) {
       writable.end();
+      await wait();
     }
-    await wait();
     finish();
   } catch (err) {
     finish(error !== err ? aggregateTwoErrors(error, err) : err);
   } finally {
     cleanup();
     writable.off('drain', resume);
+  }
+}
+
+// A web ReadableStream as a pump's source: the async iteration the stream
+// itself offers, but through a reader the pipeline's teardown (destroys) can
+// reach. Nothing can interrupt the stream's own iterator's pending read,
+// whereas cancelling the reader settles it; the iteration then fails with
+// the error the pipeline was torn down with. Leaving the loop early (the
+// destination failed) cancels the stream, as the stream's own iterator
+// would. Written out rather than as an async generator: yield would await a
+// promise-valued chunk, which must reach the destination as it is, and a
+// pending one could not be interrupted. The source's own failure is
+// reported through onError as soon as it happens, as eos() reports a node
+// source's: a pump waiting on its destination's backpressure would
+// otherwise learn of it only at its next read, which a destination that
+// never drains would never let it make.
+function readWeb(readable, destroys, onError) {
+  let reader;
+  let error;
+  let released = false;
+  destroys.push((err) => {
+    error = err || new ERR_STREAM_DESTROYED('pipe');
+    // A source the pump has not started reading is cancelled too: a failed
+    // pipeline leaves no stage behind.
+    const cancelled =
+      reader === undefined ? readable.cancel(error) : reader.cancel(error);
+    cancelled.catch(() => {});
+  });
+  async function release() {
+    if (released || reader === undefined) {
+      return;
+    }
+    released = true;
+    try {
+      await reader.cancel(error);
+    } catch {
+      // The stream had already errored.
+    }
+    reader.releaseLock();
+  }
+  return {
+    [Symbol.asyncIterator]() {
+      return this;
+    },
+    async next() {
+      try {
+        if (reader === undefined) {
+          reader = readable.getReader();
+          // The pipeline records the error and tears its stages down,
+          // which wakes a pump waiting on the destination; a read in
+          // flight rejects with the same error on its own.
+          reader.closed.then(undefined, (err) => {
+            if (!released) {
+              onError(err);
+            }
+          });
+        }
+        if (error === undefined) {
+          const result = await reader.read();
+          if (error === undefined && !result.done) {
+            return result;
+          }
+        }
+      } catch (err) {
+        await release();
+        throw err;
+      }
+      await release();
+      if (error !== undefined) {
+        throw error;
+      }
+      return { value: undefined, done: true };
+    },
+    async return() {
+      await release();
+      return { value: undefined, done: true };
+    },
+  };
+}
+
+async function pumpToWeb(
+  readable,
+  writable,
+  finish,
+  { end, destroys, onError }
+) {
+  if (isTransformStream(writable)) {
+    writable = writable.writable;
+  }
+  // https://streams.spec.whatwg.org/#example-manual-write-with-backpressure
+  let writer;
+  try {
+    writer = writable.getWriter();
+  } catch (err) {
+    // A locked destination fails the pump as a failed write would, once the
+    // pipeline has finished wiring its stages.
+    nextTick(finish, err);
+    return;
+  }
+  // The pipeline's teardown aborts the destination with the pipeline's
+  // error, which also wakes a pump waiting on the writer. A pump that has
+  // completed is left alone: with end false its writer stays open.
+  let settled = false;
+  destroys.push((err) => {
+    if (!settled) {
+      writer.abort(err || new ERR_STREAM_DESTROYED('pipe')).catch(() => {});
+    }
+  });
+  // The destination's failure is observed on its own, as eos() observes a
+  // node destination's: a pump waiting on an idle source would otherwise
+  // learn of a rejected write, or of the sink erroring, only from its next
+  // write. The pipeline records the error and tears its stages down, which
+  // fails this pump's read; the pump then finishes once, below.
+  writer.closed.then(undefined, (err) => {
+    if (!settled) {
+      onError(err);
+    }
+  });
+  try {
+    for await (const chunk of readable) {
+      await writer.ready;
+      writer.write(chunk).catch(() => {});
+    }
+
+    await writer.ready;
+
+    if (end) {
+      await writer.close();
+    }
+
+    settled = true;
+    finish();
+  } catch (err) {
+    settled = true;
+    try {
+      await writer.abort(err);
+      finish(err);
+    } catch (err) {
+      finish(err);
+    }
   }
 }
 
@@ -182,19 +324,29 @@ export function pipelineImpl(streams, callback, opts) {
   // https://github.com/nodejs/node/issues/35452
   const lastStreamCleanup = [];
   validateAbortSignal(outerSignal, 'options.signal');
+
   function abort() {
-    finishImpl(new AbortError());
+    finishImpl(new AbortError(undefined, { cause: outerSignal?.reason }));
   }
-  outerSignal === null || outerSignal === undefined
-    ? undefined
-    : outerSignal.addEventListener('abort', abort);
+
+  let disposable;
+  if (outerSignal) {
+    disposable = addAbortListener(outerSignal, abort);
+  }
+
   let error;
   let value;
   const destroys = [];
   let finishCount = 0;
+
   function finish(err) {
     finishImpl(err, --finishCount === 0);
   }
+
+  function finishOnlyHandleError(err) {
+    finishImpl(err, false);
+  }
+
   function finishImpl(err, final) {
     if (err && (!error || error.code === 'ERR_STREAM_PREMATURE_CLOSE')) {
       error = err;
@@ -205,9 +357,7 @@ export function pipelineImpl(streams, callback, opts) {
     while (destroys.length) {
       destroys.shift()(error);
     }
-    outerSignal === null || outerSignal === undefined
-      ? undefined
-      : outerSignal.removeEventListener('abort', abort);
+    disposable?.[Symbol.dispose]();
     ac.abort();
     if (final) {
       if (!error) {
@@ -216,15 +366,15 @@ export function pipelineImpl(streams, callback, opts) {
       nextTick(callback, error, value);
     }
   }
+
   let ret;
   for (let i = 0; i < streams.length; i++) {
     const stream = streams[i];
     const reading = i < streams.length - 1;
     const writing = i > 0;
-    const end =
-      reading ||
-      (opts === null || opts === undefined ? undefined : opts.end) !== false;
+    const end = reading || opts?.end !== false;
     const isLastStream = i === streams.length - 1;
+
     if (isNodeStream(stream)) {
       if (end) {
         const { destroy, cleanup } = destroyer(stream, reading, writing);
@@ -241,7 +391,7 @@ export function pipelineImpl(streams, callback, opts) {
           err.name !== 'AbortError' &&
           err.code !== 'ERR_STREAM_PREMATURE_CLOSE'
         ) {
-          finish(err);
+          finishOnlyHandleError(err);
         }
       }
       stream.on('error', onError);
@@ -251,11 +401,10 @@ export function pipelineImpl(streams, callback, opts) {
         });
       }
     }
+
     if (i === 0) {
       if (typeof stream === 'function') {
-        ret = stream({
-          signal,
-        });
+        ret = stream({ signal });
         if (!isIterable(ret)) {
           throw new ERR_INVALID_RETURN_VALUE(
             'Iterable, AsyncIterable or Stream',
@@ -263,16 +412,23 @@ export function pipelineImpl(streams, callback, opts) {
             ret
           );
         }
-      } else if (isIterable(stream) || isReadableNodeStream(stream)) {
+      } else if (
+        isIterable(stream) ||
+        isReadableNodeStream(stream) ||
+        isTransformStream(stream)
+      ) {
         ret = stream;
       } else {
-        ret = from(Duplex, stream);
+        ret = Duplex.from(stream);
       }
     } else if (typeof stream === 'function') {
-      ret = makeAsyncIterable(ret);
-      ret = stream(ret, {
-        signal,
-      });
+      if (isTransformStream(ret)) {
+        ret = makeAsyncIterable(ret?.readable);
+      } else {
+        ret = makeAsyncIterable(ret);
+      }
+      ret = stream(ret, { signal });
+
       if (reading) {
         if (!isIterable(ret, true)) {
           throw new ERR_INVALID_RETURN_VALUE(
@@ -282,7 +438,6 @@ export function pipelineImpl(streams, callback, opts) {
           );
         }
       } else {
-        let _ret;
         // If the last argument to pipeline is not a stream
         // we must create a proxy stream so that pipeline(...)
         // always returns a stream which can be further
@@ -294,8 +449,7 @@ export function pipelineImpl(streams, callback, opts) {
 
         // Handle Promises/A+ spec, `then` could be a getter that throws on
         // second use.
-        const then =
-          (_ret = ret) === null || _ret === undefined ? undefined : _ret.then;
+        const then = ret?.then;
         if (typeof then === 'function') {
           finishCount++;
           then.call(
@@ -317,9 +471,16 @@ export function pipelineImpl(streams, callback, opts) {
           );
         } else if (isIterable(ret, true)) {
           finishCount++;
-          pump(ret, pt, finish, {
-            end,
-          });
+          pumpToNode(ret, pt, finish, { end });
+        } else if (isReadableStream(ret) || isTransformStream(ret)) {
+          const toRead = ret.readable || ret;
+          finishCount++;
+          pumpToNode(
+            readWeb(toRead, destroys, finishOnlyHandleError),
+            pt,
+            finish,
+            { end }
+          );
         } else {
           throw new ERR_INVALID_RETURN_VALUE(
             'AsyncIterable or Promise',
@@ -327,7 +488,9 @@ export function pipelineImpl(streams, callback, opts) {
             ret
           );
         }
+
         ret = pt;
+
         const { destroy, cleanup } = destroyer(ret, false, true);
         destroys.push(destroy);
         if (isLastStream) {
@@ -337,60 +500,120 @@ export function pipelineImpl(streams, callback, opts) {
     } else if (isNodeStream(stream)) {
       if (isReadableNodeStream(ret)) {
         finishCount += 2;
-        const cleanup = pipe(ret, stream, finish, {
+        const cleanup = pipe(ret, stream, finish, finishOnlyHandleError, {
           end,
         });
         if (isReadable(stream) && isLastStream) {
           lastStreamCleanup.push(cleanup);
         }
+      } else if (isTransformStream(ret) || isReadableStream(ret)) {
+        const toRead = ret.readable || ret;
+        finishCount++;
+        pumpToNode(
+          readWeb(toRead, destroys, finishOnlyHandleError),
+          stream,
+          finish,
+          { end }
+        );
       } else if (isIterable(ret)) {
         finishCount++;
-        pump(ret, stream, finish, {
-          end,
-        });
+        pumpToNode(ret, stream, finish, { end });
       } else {
         throw new ERR_INVALID_ARG_TYPE(
           'val',
-          ['Readable', 'Iterable', 'AsyncIterable'],
+          [
+            'Readable',
+            'Iterable',
+            'AsyncIterable',
+            'ReadableStream',
+            'TransformStream',
+          ],
+          ret
+        );
+      }
+      ret = stream;
+    } else if (isWebStream(stream)) {
+      const pumpOptions = { end, destroys, onError: finishOnlyHandleError };
+      if (isReadableNodeStream(ret)) {
+        finishCount++;
+        pumpToWeb(makeAsyncIterable(ret), stream, finish, pumpOptions);
+      } else if (isReadableStream(ret)) {
+        finishCount++;
+        pumpToWeb(
+          readWeb(ret, destroys, finishOnlyHandleError),
+          stream,
+          finish,
+          pumpOptions
+        );
+      } else if (isIterable(ret)) {
+        finishCount++;
+        pumpToWeb(ret, stream, finish, pumpOptions);
+      } else if (isTransformStream(ret)) {
+        finishCount++;
+        pumpToWeb(
+          readWeb(ret.readable, destroys, finishOnlyHandleError),
+          stream,
+          finish,
+          pumpOptions
+        );
+      } else {
+        throw new ERR_INVALID_ARG_TYPE(
+          'val',
+          [
+            'Readable',
+            'Iterable',
+            'AsyncIterable',
+            'ReadableStream',
+            'TransformStream',
+          ],
           ret
         );
       }
       ret = stream;
     } else {
-      ret = from(Duplex, stream);
+      ret = Duplex.from(stream);
     }
   }
-  if (
-    (signal !== null && signal !== undefined && signal.aborted) ||
-    (outerSignal !== null && outerSignal !== undefined && outerSignal.aborted)
-  ) {
+
+  if (signal?.aborted || outerSignal?.aborted) {
     nextTick(abort);
   }
+
   return ret;
 }
 
-export function pipe(src, dst, finish, { end }) {
+export function pipe(src, dst, finish, finishOnlyHandleError, { end }) {
   let ended = false;
   dst.on('close', () => {
     if (!ended) {
       // Finish if the destination closes before the source has completed.
-      finish(new ERR_STREAM_PREMATURE_CLOSE());
+      finishOnlyHandleError(new ERR_STREAM_PREMATURE_CLOSE());
     }
   });
-  src.pipe(dst, {
-    end,
-  });
+
+  // If end is true we already will have a listener to end dst.
+  src.pipe(dst, { end: false });
+
   if (end) {
     // Compat. Before node v10.12.0 stdio used to throw an error so
     // pipe() did/does not end() stdio destinations.
     // Now they allow it but "secretly" don't close the underlying fd.
-    src.once('end', () => {
+
+    function endFn() {
       ended = true;
       dst.end();
-    });
+    }
+
+    if (isReadableFinished(src)) {
+      // End the destination if the source has already ended.
+      nextTick(endFn);
+    } else {
+      src.once('end', endFn);
+    }
   } else {
     finish();
   }
+
   eos(
     src,
     {
