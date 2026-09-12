@@ -23,6 +23,10 @@ interface Fetcher {
   createBatch(
     options: WorkflowInstanceCreateOptions[]
   ): Promise<{ id: string }[]>;
+  createBatch(options: WorkflowBatchCreateOptions): Promise<{
+    created: { id: string }[];
+    errors: WorkflowBatchCreateResult['errors'];
+  }>;
   deleteBatch(options: {
     instances: string[];
   }): Promise<WorkflowBatchDeleteResult>;
@@ -123,10 +127,29 @@ class WorkflowImpl extends wrappedBinding.WrappedBinding {
 
   async createBatch(
     options: WorkflowInstanceCreateOptions[]
-  ): Promise<WorkflowInstance[]> {
-    const results = await this.#fetcher.createBatch(options);
+  ): Promise<WorkflowInstance[]>;
+  async createBatch(
+    options: WorkflowBatchCreateOptions
+  ): Promise<WorkflowBatchCreateResult>;
+  async createBatch(
+    options: WorkflowInstanceCreateOptions[] | WorkflowBatchCreateOptions
+  ): Promise<WorkflowInstance[] | WorkflowBatchCreateResult> {
+    if (Array.isArray(options)) {
+      const results = await this.#fetcher.createBatch(options);
 
-    return results.map((result) => new InstanceImpl(result.id, this.#fetcher));
+      return results.map(
+        (result) => new InstanceImpl(result.id, this.#fetcher)
+      );
+    }
+
+    const result = await this.#fetcher.createBatch(options);
+
+    return {
+      created: result.created.map(
+        ({ id }) => new InstanceImpl(id, this.#fetcher)
+      ),
+      errors: result.errors,
+    };
   }
 
   async deleteBatch(instanceIds: string[]): Promise<WorkflowBatchDeleteResult> {
