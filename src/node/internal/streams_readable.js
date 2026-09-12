@@ -2458,8 +2458,16 @@ export function newStreamReadableFromReadableStream(
           if (chunk.done) {
             // Value should always be undefined here.
             readable.push(null);
-          } else {
+            return;
+          }
+          // A chunk the Readable cannot take (a view over a detached
+          // ArrayBuffer cannot become a Buffer) fails it; the throw would
+          // otherwise be lost in this promise and the stream never read
+          // again.
+          try {
             readable.push(chunk.value);
+          } catch (error) {
+            destroy.call(readable, error);
           }
         },
         (error) => destroy.call(readable, error)

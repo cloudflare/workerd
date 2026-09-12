@@ -31,6 +31,45 @@ async function withRejectionGuard(fn) {
   strictEqual(unhandled.length, 0, `unhandled: ${unhandled.join(', ')}`);
 }
 
+// A chunk the duplex cannot take from the pair's readable (a view over a
+// detached ArrayBuffer) destroys it with the conversion's TypeError; the
+// readable is cancelled with it and the writable aborted.
+export const fromWebPairDetachedChunkDestroysDuplex = {
+  async test() {
+    await withRejectionGuard(async () => {
+      const cancels = [];
+      const aborts = [];
+      const readable = new ReadableStream({
+        start(controller) {
+          const gone = new Uint8Array(4);
+          structuredClone(gone.buffer, { transfer: [gone.buffer] });
+          controller.enqueue(gone);
+        },
+        cancel(reason) {
+          cancels.push(reason);
+        },
+      });
+      const writable = new WritableStream({
+        abort(reason) {
+          aborts.push(reason);
+        },
+      });
+      const d = Duplex.fromWeb({ readable, writable });
+      const errored = once(d, 'error');
+      const closed = once(d, 'close');
+      d.resume();
+      const err = await errored;
+      await closed;
+      strictEqual(err.name, 'TypeError');
+      strictEqual(d.destroyed, true);
+      strictEqual(cancels.length, 1);
+      strictEqual(cancels[0], err);
+      strictEqual(aborts.length, 1);
+      strictEqual(aborts[0], err);
+    });
+  },
+};
+
 // Data written to the duplex reaches the web writable's sink; chunks from
 // the web readable surface as 'data'.
 export const fromWebPairRoundTrip = {

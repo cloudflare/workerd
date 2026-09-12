@@ -243,6 +243,41 @@ export const fromWebErrorWithPendingReadDestroys = {
   },
 };
 
+// A chunk the Readable cannot take — a view over a detached ArrayBuffer,
+// which cannot become a Buffer — destroys it with the conversion's
+// TypeError (Node's adapter leaves such a stream hanging), and the web
+// stream is cancelled with that error.
+export const fromWebDetachedChunkDestroysWithTypeError = {
+  async test() {
+    const cancels = [];
+    const rs = new ReadableStream({
+      start(controller) {
+        controller.enqueue(enc.encode('ok'));
+        const gone = new Uint8Array(4);
+        structuredClone(gone.buffer, { transfer: [gone.buffer] });
+        controller.enqueue(gone);
+        controller.enqueue(enc.encode('never'));
+      },
+      cancel(reason) {
+        cancels.push(reason);
+      },
+    });
+    const r = Readable.fromWeb(rs);
+    const chunks = [];
+    r.on('data', (chunk) => chunks.push(dec.decode(chunk)));
+    const errored = once(r, 'error');
+    const closed = once(r, 'close');
+    const err = await errored;
+    await closed;
+    strictEqual(err.name, 'TypeError');
+    strictEqual(r.destroyed, true);
+    strictEqual(r.errored, err);
+    deepStrictEqual(chunks, ['ok']);
+    strictEqual(cancels.length, 1);
+    strictEqual(cancels[0], err);
+  },
+};
+
 // Destroying the Readable cancels the web stream with the destroy reason;
 // destroy() without a reason cancels with null.
 export const fromWebDestroyCancelsWebStream = {

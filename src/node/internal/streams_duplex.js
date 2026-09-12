@@ -858,8 +858,14 @@ export function newStreamDuplexFromReadableWritablePair(
         (chunk) => {
           if (chunk.done) {
             duplex.push(null);
-          } else {
+            return;
+          }
+          // As in Readable.fromWeb: a chunk the duplex cannot take fails it
+          // rather than being lost in this promise.
+          try {
             duplex.push(chunk.value);
+          } catch (error) {
+            destroyer(duplex, error);
           }
         },
         (error) => destroyer(duplex, error)

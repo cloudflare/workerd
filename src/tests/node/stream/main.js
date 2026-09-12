@@ -37,6 +37,7 @@ export {
   fromWebCloseEmitsEndThenClose,
   fromWebErrorWithoutPendingReadDestroys,
   fromWebErrorWithPendingReadDestroys,
+  fromWebDetachedChunkDestroysWithTypeError,
   fromWebDestroyCancelsWebStream,
   fromWebDestroyAfterCloseSkipsCancel,
   fromWebEncodingOption,
@@ -95,6 +96,7 @@ export {
 } from 'duplex-to-web';
 
 export {
+  fromWebPairDetachedChunkDestroysDuplex,
   fromWebPairRoundTrip,
   fromWebObjectModeStrings,
   fromWebPairCorkedWritesDeliverChunks,

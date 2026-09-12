@@ -56,7 +56,13 @@ The implementation under test is `src/node/internal/streams_readable.js`
   is cancelled with it.
 - Without objectMode only byte-like chunks are accepted (strings become
   Buffers, anything else errors with `ERR_INVALID_ARG_TYPE`); `encoding`
-  decodes to strings.
+  decodes to strings. A chunk that cannot become a Buffer (a view over a
+  detached ArrayBuffer) destroys the Readable with the conversion's
+  `TypeError` and cancels the web stream with it — Node's adapter leaves
+  such a stream hanging. The same holds for `Duplex.fromWeb`'s readable
+  half, for `compose()`'s web tail (the composition fails) and for a
+  `pipeline()` web source (the pipeline fails; the source is cancelled
+  without a reason, by the pump's iteration leaving early, as in Node).
 
 ### Writable.toWeb(writable)
 
@@ -210,11 +216,11 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | --- | --- |
 | `api-surface.js` | `node:stream/web` named and default exports are the globals; adapter statics on the classes and legacy aliases |
 | `readable-to-web.js` | delivery; argument validation; byte copy / objectMode identity; derived and explicit strategies with the pause/resume they produce; end, error, premature-close propagation; cancel (with and without reason) and pipeTo-failure destroying the source; unreadable inputs |
-| `readable-from-web.js` | delivery; errored/erroring sources through async iteration; validation before locking; lock and locked-input errors (ledger #1); pull on demand; end/close ordering; errors with and without a read in flight; destroy → cancel (reason, `null`, skipped after close); `encoding`, `objectMode`, `highWaterMark`, `signal` |
+| `readable-from-web.js` | delivery; errored/erroring sources through async iteration; validation before locking; lock and locked-input errors (ledger #1); pull on demand; end/close ordering; errors with and without a read in flight; a detached-view chunk → `TypeError`, cancel with it; destroy → cancel (reason, `null`, skipped after close); `encoding`, `objectMode`, `highWaterMark`, `signal` |
 | `writable-to-web.js` | delivery; close → end → finish; pipeTo completion; sync and async node errors; `_final` error; node-initiated end/destroy → `AbortError`; abort (with and without reason); validation; duck input and unwritable inputs → closed stream (ledger #2); derived strategy; drain-driven backpressure; chunk conversion |
 | `writable-from-web.js` | delivery; web error / sink rejection / close rejection destroying the Writable once with no unhandled rejection; back-to-back and corked writes through `_writev`; failed batch; validation before locking; lock (ledger #1); chunk conversion; `decodeStrings`/`objectMode`; end → close; destroy → abort or close; writes complete on sink acceptance |
 | `duplex-to-web.js` | pair round trip; validation; destroyed and half Duplexes; non-byte readable (ledger #3); destroy(err) erroring both halves; the whole-Duplex end-of-stream coupling of the halves |
-| `duplex-from-web.js` | pair round trip; objectMode strings; corked writes; failed batch; errored readable / writable and later readable error destroying the duplex (and what is left untouched); clean `for await` consumption |
+| `duplex-from-web.js` | a detached-view chunk destroying the duplex (`TypeError`; readable cancelled and writable aborted with it); pair round trip; objectMode strings; corked writes; failed batch; errored readable / writable and later readable error destroying the duplex (and what is left untouched); clean `for await` consumption |
 | `duplex-from.js` | `Duplex.from()` over a lone web stream marks the missing side |
 | `bodies.js` | Response/Request bodies through `Readable.toWeb` (incl. a megabyte); `Readable.fromWeb` over a Response body and a `TextDecoderStream` chain; `Writable.fromWeb` over `IdentityTransformStream` and `FixedLengthStream` (ledger #4); pipeThrough chains in both directions |
 | `consumers.js` | `text/json/buffer/arrayBuffer/blob` over web streams; multi-chunk and string decoding; lock release; error propagation; node Readables and async generators |
