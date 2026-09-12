@@ -442,7 +442,12 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       setTimeout: (msecs) => {
         this.#setIdleTimeout(msecs);
       },
+      touch: () => {
+        this.#armTimer();
+      },
     });
+    // The response's arrival is activity on the connection.
+    this.#armTimer();
     // The response's own failure (its body erroring, or its destroy()) is
     // the request's too, as a socket error would be in Node; a request
     // being destroyed reports its error itself.
@@ -567,9 +572,10 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     this.setTimeout(0, cb);
   }
 
-  // Arms (or, with 0, clears) the timeout, which runs from the moment the
-  // request is sent and this method has been called, whichever is later.
-  // The response's setTimeout() sets the same timer.
+  // Arms (or, with 0, clears) the idle timeout, which runs from the moment
+  // the request is sent and this method has been called, whichever is
+  // later, and starts over on every chunk of the response. The response's
+  // setTimeout() sets the same timer.
   setTimeout(msecs: number, callback?: VoidFunction): this {
     this.#setIdleTimeout(getTimerDuration(msecs, 'msecs'));
 
@@ -638,10 +644,13 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     }
   }
 
-  // One timer at a time, once the request has been sent. Firing emits
-  // 'timeout' on the request and its response, then destroys the request
-  // with an AbortError. (Node only emits and leaves the teardown to the
-  // listener; a request left open would otherwise hold the fetch.)
+  // One timer at a time, once the request has been sent; arming again
+  // restarts it, which is how activity on the connection (the response,
+  // each of its chunks) keeps an idle timer from firing, as the socket's
+  // does in Node. Firing emits 'timeout' on the request and its response,
+  // then destroys the request with an AbortError. (Node only emits and
+  // leaves the teardown to the listener; a request left open would
+  // otherwise hold the fetch.)
   #armTimer(): void {
     this.#clearTimer();
     if (!this.timeout || !this.#sent || this.destroyed) return;

@@ -57,6 +57,7 @@ export {
   timeoutBeforeHeadersDestroysRequest,
   timeoutOptionAndCallback,
   timeoutMidBodyAbortsResponse,
+  timeoutIsIdleNotDeadline,
   timeoutDisarmedByCompletion,
   setTimeoutZeroClears,
   unhandledResponseIsDumped,

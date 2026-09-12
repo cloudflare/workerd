@@ -653,6 +653,27 @@ export const timeoutMidBodyAbortsResponse = {
   },
 };
 
+// The timer is an idle timer, as Node's socket.setTimeout() is: a body that
+// keeps arriving never times out, however long it takes in total — only a
+// silence of `ms` does. Fifteen chunks 40 ms apart (600 ms) pass a 250 ms
+// timeout untouched.
+export const timeoutIsIdleNotDeadline = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = get(env, '/chunked?n=15&delay=40');
+    req.setTimeout(250);
+    record(log, 'req', req, ['timeout', 'error']);
+    const res = await response(req);
+    record(log, 'res', res, ['timeout', 'aborted', 'error']);
+    strictEqual(
+      (await collect(res)).toString(),
+      Array.from({ length: 15 }, (_, i) => `chunk-${i}|`).join('')
+    );
+    strictEqual(res.complete, true);
+    deepStrictEqual(log, []);
+  },
+};
+
 // A completed exchange disarms the timer: no 'timeout' afterwards.
 export const timeoutDisarmedByCompletion = {
   async test(ctrl, env) {
