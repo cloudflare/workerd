@@ -272,18 +272,27 @@ export function compose(...streams) {
       tailReader = reader;
       d._read = async function () {
         while (true) {
+          let result;
           try {
-            const { value, done } = await reader.read();
-
-            if (done) {
-              d.push(null);
-              return;
-            }
-
+            result = await reader.read();
+          } catch {
+            // The tail failed; the pipeline reports it.
+            return;
+          }
+          const { value, done } = result;
+          if (done) {
+            d.push(null);
+            return;
+          }
+          // A chunk the composed stream cannot take (a view over a detached
+          // ArrayBuffer) fails the composition; left to the promise, the
+          // throw would be lost and _read never called again.
+          try {
             if (!d.push(value)) {
               return;
             }
-          } catch {
+          } catch (err) {
+            d.destroy(err);
             return;
           }
         }

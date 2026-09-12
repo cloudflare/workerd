@@ -186,6 +186,8 @@ export {
   composeWebTailDestroyBeforeWrite,
   composeWebTailDestroyUnderBackpressure,
   composeWebTailClosedReadableDestroy,
+  composeWebTailUnconvertibleChunkFails,
+  composeWebTailUnconvertibleChunkFailsReadableHead,
   composeWebTailDeferredCloseCompletesCleanly,
   composeWebTailBareDestroyIsAbortError,
   readableComposeWithWebTransform,
