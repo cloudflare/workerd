@@ -778,25 +778,7 @@ Socket.prototype._writeGeneric = function (
         (err: unknown): void => {
           this[kLastWriteQueueSize] = 0;
           this._unrefTimer();
-
-          // Think of the following code:
-          //
-          // const socket = net.connect(env.SERVER_THAT_DIES_PORT);
-          // socket.on('end', () => {
-          //   strictEqual(socket.writable, true);
-          //   socket.write('hello world');
-          //   resolve();
-          // });
-          //
-          // If we don't omit the error message for CLOSED, socket.write()
-          // will throw an error. This is not compliant with Node.js behavior.
-          if (
-            (err as Error).message !== 'This WritableStream has been closed.'
-          ) {
-            cb(err as Error);
-          } else {
-            cb();
-          }
+          cb(err as Error);
         }
       );
       lastWriteSize = bufferData.byteLength;
