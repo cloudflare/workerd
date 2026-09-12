@@ -1500,21 +1500,33 @@ export function newStreamWritableFromWritableStream(
     },
   });
 
-  writer.closed.then(
-    () => {
-      // If the WritableStream closes before the stream.Writable has been
-      // ended, we signal an error on the stream.Writable.
-      closed = true;
-      if (!isWritableEnded(writable))
-        destroyImpl.destroyer(writable, new ERR_STREAM_PREMATURE_CLOSE());
-    },
-    (error) => {
-      // If the WritableStream errors before the stream.Writable has been
-      // destroyed, signal an error on the stream.Writable.
-      closed = true;
-      destroyImpl.destroyer(writable, error);
-    }
-  );
+  try {
+    writer.closed.then(
+      () => {
+        // If the WritableStream closes before the stream.Writable has been
+        // ended, we signal an error on the stream.Writable.
+        closed = true;
+        if (!isWritableEnded(writable))
+          destroyImpl.destroyer(writable, new ERR_STREAM_PREMATURE_CLOSE());
+      },
+      (error) => {
+        // If the WritableStream errors before the stream.Writable has been
+        // destroyed, signal an error on the stream.Writable.
+        closed = true;
+        destroyImpl.destroyer(writable, error);
+      }
+    );
+  } catch (err) {
+    // As in Readable.fromWeb: a throwing then must not leave the stream
+    // locked, and the Writable nobody will have is destroyed quietly first
+    // (the web stream, marked closed here, is neither aborted nor closed),
+    // so that the release rejecting the writer's closed promise has nothing
+    // left to destroy.
+    closed = true;
+    writable.destroy();
+    writer.releaseLock();
+    throw err;
+  }
 
   return writable;
 }

@@ -905,29 +905,42 @@ export function newStreamDuplexFromReadableWritablePair(
     },
   });
 
-  writer.closed.then(
-    () => {
-      writableClosed = true;
-      if (!isWritableEnded(duplex))
-        destroyer(duplex, new ERR_STREAM_PREMATURE_CLOSE());
-    },
-    (error) => {
-      writableClosed = true;
-      readableClosed = true;
-      destroyer(duplex, error);
-    }
-  );
+  try {
+    writer.closed.then(
+      () => {
+        writableClosed = true;
+        if (!isWritableEnded(duplex))
+          destroyer(duplex, new ERR_STREAM_PREMATURE_CLOSE());
+      },
+      (error) => {
+        writableClosed = true;
+        readableClosed = true;
+        destroyer(duplex, error);
+      }
+    );
 
-  reader.closed.then(
-    () => {
-      readableClosed = true;
-    },
-    (error) => {
-      writableClosed = true;
-      readableClosed = true;
-      destroyer(duplex, error);
-    }
-  );
+    reader.closed.then(
+      () => {
+        readableClosed = true;
+      },
+      (error) => {
+        writableClosed = true;
+        readableClosed = true;
+        destroyer(duplex, error);
+      }
+    );
+  } catch (err) {
+    // As in Readable.fromWeb: a throwing then must not leave either stream
+    // locked. The duplex, never handed out, is destroyed quietly first, so
+    // that the release (which rejects the writer's closed promise, possibly
+    // into the handler registered above) has nothing left to destroy.
+    writableClosed = true;
+    readableClosed = true;
+    duplex.destroy();
+    writer.releaseLock();
+    reader.releaseLock();
+    throw err;
+  }
 
   return duplex;
 }

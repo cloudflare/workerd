@@ -224,6 +224,23 @@ The implementation under test is `src/node/internal/streams_readable.js`
   the source of a native-backed tee (a `Response` body), never settles —
   open items, pinned in `finishedOnTeedAwayShellStaysPending`.
 
+### Prototype pollution
+
+- The adapters, unlike Node's, use no primordials: they call the live
+  `Promise.prototype.then` (and `Promise.all`, `withResolvers`, `finally`),
+  so a patched `then` sees every hop (a three-chunk `fromWeb`/`fromWeb`/
+  `toWeb` round trip makes 18 calls under C++, 15 under TypeScript — not
+  pinned), and a `then` getter on `Object.prototype` is consulted when
+  plain objects (the reader's `{ value, done }` results) are assimilated.
+  A transparent patch changes nothing about the data. A `then` that throws
+  during construction throws out of `fromWeb` (all three) with the web
+  stream(s) left unlocked and usable — neither cancelled nor aborted — and
+  the node stream, never handed out, destroyed quietly *before* the lock
+  is released, so a `then` that registered the adapter's `closed` handlers
+  before throwing leaves nothing behind: the release rejecting `closed`
+  into those handlers finds the node stream already destroyed, and no
+  `'error'` escapes from a stream nobody could listen to.
+
 ## Compatibility flags
 
 `stream-cpp.wd-test` pins `streams_enable_constructors` (the toWeb adapters
@@ -262,13 +279,14 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `duplex-to-web.js` | pair round trip; validation; destroyed and half Duplexes; non-byte readable (ledger #3); destroy(err) erroring both halves; the asymmetric end-of-stream coupling of the halves (writable close waits for readable end; readable EOF does not wait for the writable) |
 | `duplex-from-web.js` | a detached-view chunk destroying the duplex (`TypeError`; readable cancelled and writable aborted with it); pair round trip; objectMode strings; pair validation before locking; locked readable leaving the writer lock taken (ledger #1); corked writes; failed batch; errored readable / writable and later readable error destroying the duplex (and what is left untouched); `allowHalfOpen` default: readable EOF ending the writable side and closing the web writable; `for await` consumption aborting it instead; destroy → abort + cancel (reason, `null`) |
 | `duplex-from.js` | `Duplex.from()` over a lone web stream marks the missing side |
+| `then-pollution.js` | transparent patched `then`: data intact through the three adapters, patch called; hostile `then` during construction: throw, streams unlocked and reusable (Readable, Writable, Duplex `fromWeb`), also when it registers the handlers before throwing (nothing escapes, under the uncaught guard); `Object.prototype.then` getter consulted, data intact |
 | `bodies.js` | Response/Request bodies through `Readable.toWeb` (incl. a megabyte); `Readable.fromWeb` over a Response body and a `TextDecoderStream` chain; `Writable.fromWeb` over `IdentityTransformStream` and `FixedLengthStream` (ledger #4); pipeThrough chains in both directions |
 | `consumers.js` | `text/json/buffer/arrayBuffer/blob` over web streams; multi-chunk and string decoding; lock release; error propagation; node Readables and async generators |
 | `readable-from.js` | `Readable.from(webStream)`: chunk types by objectMode, destroy → cancel + lock release, error propagation |
 | `finished-and-abort.js` | ledger #5: hook presence per implementation; `finished()` on readable close/error, writable close/error, settled streams, with a signal; `promises.finished`; `finished()` on a teed source (default and byte): settled by `close()` before any branch reads, by a `tee()` after `close()`, by both branches cancelling, by the source's error (also after `close()`, which errors the undrained branches); never settled on a teed-away branch or a native tee's source; `addAbortSignal` on readable/writable, already-aborted, a Response body (a byte stream, errored where Node is inert), the source of a tee (errors every branch; inert once the source has closed); on tee branches (default and byte): the sibling spared, the source cancelled once the sibling cancels too, a teed-away branch inert, a branch's `cancel()` settling with the source's cleanup |
 | `pipeline-web.js` | web source/destination/transform stages, generator stages (incl. a web source reaching a function stage as the stream itself, and a signal-honoring stage releasing it on a late node-sink failure), `TransformStream` head; sink/source/node-sink failures (incl. a node sink failing while the web source is idle, a web sink erroring or rejecting a write while the source is idle, and a web source erroring while a stuck node sink holds the pump); a detached-view chunk failing the pipeline (`TypeError`, source cancelled without a reason); promise-valued chunks by identity; a locked web destination (callback and promise forms, node and web sources); a `ReadableStream` in a destination slot (`ERR_INVALID_ARG_TYPE` thrown synchronously, callback and promise forms, middle slot too); `stream/promises` trailing web destination, `end: false`, signal abort of a node-headed and of an idle all-web pipeline, and during a pending web read |
 | `compose-web.js` | position validation; a single web stream (`Duplex.from`); web head with node tail, web readable into node or web writable, node head with web transform or web writable tail, `Readable.prototype.compose()`; `end()` completing without a consumer for node and web tails alike; the refused shape (ledger #5) leaving the head's buffer and listeners and the web stream's locks untouched, asserted by every test whose shape needs the hook; destroy tearing the pipeline down before the first write, under the tail's backpressure (the drain parked at the high-water mark, the pump on the writer), behind a closed readable, and bare (`AbortError`); an unconvertible tail chunk failing the composition (writable and readable-only heads); a deferred tail `close()` gating finish and the automatic destroy; one pending tail `read()` at a time |
-| `which-impl.js` | implementation detection |
+| `which-impl.js`, `helpers.js` | implementation detection; `once`, `withUncaughtGuard` (fails a test that lets an exception or rejection escape) |
 
 ## Legacy (unflagged) behaviors
 
