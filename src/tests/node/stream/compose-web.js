@@ -8,13 +8,23 @@
 // interop hook (see finished-and-abort.js), so that shape is refused with
 // ERR_WEB_STREAM_INTEROP_UNSUPPORTED under the C++ implementation.
 
-import { compose, Readable, Writable, PassThrough } from 'node:stream';
+import {
+  compose,
+  promises,
+  Readable,
+  Writable,
+  PassThrough,
+} from 'node:stream';
 import { Buffer } from 'node:buffer';
-import { strictEqual, deepStrictEqual, throws } from 'node:assert';
+import { strictEqual, deepStrictEqual, throws, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+
+function once(emitter, event) {
+  return new Promise((resolve) => emitter.once(event, resolve));
+}
 
 function upperTransform() {
   return new TransformStream({
@@ -179,6 +189,249 @@ export const composeNodeHeadWebTail = {
     composed.end('gh');
     strictEqual(await collected, 'EFGH');
     strictEqual(composed.writableFinished, true);
+  },
+};
+
+// A node head with a web WritableStream tail: the composition has a
+// writable side only; its end() completes once the sink has closed, and it
+// closes cleanly (needs the interop hook to observe the sink).
+export const composeNodeHeadWebWritableTail = {
+  async test() {
+    if (!usingTsImpl) return;
+    const seen = [];
+    const sink = new WritableStream({
+      write(chunk) {
+        seen.push(dec.decode(chunk));
+      },
+      close() {
+        seen.push('close');
+      },
+    });
+    const composed = compose(new PassThrough(), sink);
+    strictEqual(composed.writable, true);
+    strictEqual(composed.readable, false);
+    composed.on('error', (err) => {
+      throw err;
+    });
+    const closed = once(composed, 'close');
+    composed.write('kl');
+    await new Promise((resolve) => composed.end('mn', resolve));
+    await closed;
+    // The head may hand the pump both writes as one chunk.
+    strictEqual(seen.at(-1), 'close');
+    strictEqual(seen.slice(0, -1).join(''), 'klmn');
+  },
+};
+
+// A web readable head into a web writable tail: a Duplex with neither side
+// that closes cleanly once the pipeline completes.
+export const composeWebReadableIntoWebWritable = {
+  async test() {
+    const seen = [];
+    const source = new ReadableStream({
+      start(controller) {
+        controller.enqueue(enc.encode('op'));
+        controller.close();
+      },
+    });
+    const sink = new WritableStream({
+      write(chunk) {
+        seen.push(dec.decode(chunk));
+      },
+      close() {
+        seen.push('close');
+      },
+    });
+    const composed = compose(source, sink);
+    strictEqual(composed.readable, false);
+    strictEqual(composed.writable, false);
+    composed.on('error', (err) => {
+      throw err;
+    });
+    await once(composed, 'close');
+    deepStrictEqual(seen, ['op', 'close']);
+  },
+};
+
+// Destroying a composition with a web tail tears the pipeline down: the
+// composed stream reports the destroy error and closes, the node head is
+// destroyed and the web tail's writable side is aborted with that same error
+// — before anything was written, with the pump waiting on the head.
+export const composeWebTailDestroyBeforeWrite = {
+  async test() {
+    if (!usingTsImpl) return;
+    const head = new PassThrough();
+    const tail = new TransformStream();
+    const composed = compose(head, tail);
+    const boom = new Error('torn down before the first write');
+    const errored = once(composed, 'error');
+    const closed = once(composed, 'close');
+    composed.destroy(boom);
+    strictEqual(await errored, boom);
+    await closed;
+    strictEqual(composed.destroyed, true);
+    strictEqual(head.destroyed, true);
+    await rejects(promises.finished(tail.writable), (err) => err === boom);
+  },
+};
+
+// The same with the pump parked on the web tail's backpressure: the
+// transform's readable is never read, so its writable side stops accepting
+// and the pump waits on the writer. Destroying aborts that writer and the
+// composition completes its teardown.
+export const composeWebTailDestroyUnderBackpressure = {
+  async test() {
+    if (!usingTsImpl) return;
+    const head = new PassThrough();
+    const tail = new TransformStream();
+    const composed = compose(head, tail);
+    composed.write('a');
+    composed.write('b');
+    composed.write('c');
+    await scheduler.wait(5);
+    const boom = new Error('torn down under backpressure');
+    const errored = once(composed, 'error');
+    const closed = once(composed, 'close');
+    composed.destroy(boom);
+    strictEqual(await errored, boom);
+    await closed;
+    strictEqual(head.destroyed, true);
+    await rejects(promises.finished(tail.writable), (err) => err === boom);
+  },
+};
+
+// A web tail whose readable side has already closed while its writable side
+// stays open (an accepted { readable, writable } pair): the pipeline is still
+// waiting on the head, and destroying the composition tears it down all the
+// same — the head is destroyed, the pair's writable aborted with the error.
+export const composeWebTailClosedReadableDestroy = {
+  async test() {
+    if (!usingTsImpl) return;
+    const head = new PassThrough();
+    const aborts = [];
+    const pair = {
+      readable: new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      }),
+      writable: new WritableStream({
+        abort(reason) {
+          aborts.push(reason);
+        },
+      }),
+    };
+    const composed = compose(head, pair);
+    // Let the composition observe the closed readable.
+    await scheduler.wait(5);
+    const boom = new Error('torn down behind a closed readable');
+    const errored = once(composed, 'error');
+    const closed = once(composed, 'close');
+    composed.destroy(boom);
+    strictEqual(await errored, boom);
+    await closed;
+    strictEqual(head.destroyed, true);
+    strictEqual(aborts.length, 1);
+    strictEqual(aborts[0], boom);
+  },
+};
+
+// A web tail whose close() closes its readable side at once but settles
+// later (an accepted { readable, writable } pair): the composition's
+// writable side finishes only once that close has settled, so a
+// composition consumed to its end still closes cleanly — with a consumer
+// draining it, and readable-only.
+export const composeWebTailDeferredCloseCompletesCleanly = {
+  async test() {
+    if (!usingTsImpl) return;
+    const deferredClosePair = () => {
+      let readableController;
+      let finishClose;
+      const pair = {
+        readable: new ReadableStream({
+          start(controller) {
+            readableController = controller;
+          },
+        }),
+        writable: new WritableStream({
+          write(chunk) {
+            readableController.enqueue(chunk);
+          },
+          close() {
+            readableController.close();
+            return new Promise((resolve) => {
+              finishClose = resolve;
+            });
+          },
+        }),
+      };
+      return { pair, finishClose: () => finishClose() };
+    };
+
+    // Consumed through 'data' (as with resume()): the automatic destroy then
+    // waits for both sides, whereas async iteration destroys the stream as
+    // soon as its readable side ends.
+    const drain = (stream) => {
+      let out = '';
+      stream.on('data', (chunk) => (out += chunk));
+      return once(stream, 'end').then(() => out);
+    };
+
+    const { pair, finishClose } = deferredClosePair();
+    const composed = compose(new PassThrough(), pair);
+    composed.on('error', (err) => {
+      throw err;
+    });
+    const closed = once(composed, 'close');
+    const output = drain(composed);
+    composed.end('qr');
+    strictEqual(await output, 'qr');
+    // The tail's readable has closed and been drained; the pipeline still
+    // awaits the deferred close, and so does the composition's finish.
+    await scheduler.wait(10);
+    strictEqual(composed.writableFinished, false);
+    strictEqual(composed.destroyed, false);
+    finishClose();
+    await closed;
+    strictEqual(composed.writableFinished, true);
+    strictEqual(composed.errored, null);
+
+    const readableOnly = deferredClosePair();
+    const source = new ReadableStream({
+      start(controller) {
+        controller.enqueue(enc.encode('st'));
+        controller.close();
+      },
+    });
+    const readOnly = compose(source, readableOnly.pair);
+    readOnly.on('error', (err) => {
+      throw err;
+    });
+    let readOnlyClosed = false;
+    readOnly.once('close', () => (readOnlyClosed = true));
+    strictEqual(await drain(readOnly), 'st');
+    // Both sides are done (there is no writable side): the automatic
+    // destroy begins, but leaves the still-running pipeline to complete
+    // and follows its outcome.
+    await scheduler.wait(10);
+    strictEqual(readOnlyClosed, false);
+    readableOnly.finishClose();
+    await once(readOnly, 'close');
+    strictEqual(readOnly.errored, null);
+  },
+};
+
+// A bare destroy() of a running composition reports an AbortError, as it
+// does with a node tail.
+export const composeWebTailBareDestroyIsAbortError = {
+  async test() {
+    if (!usingTsImpl) return;
+    const composed = compose(new PassThrough(), new TransformStream());
+    const errored = once(composed, 'error');
+    const closed = once(composed, 'close');
+    composed.destroy();
+    strictEqual((await errored).name, 'AbortError');
+    await closed;
   },
 };
 

@@ -152,7 +152,18 @@ The implementation under test is `src/node/internal/streams_readable.js`
 - `compose()`: web streams are validated by position; a web head is
   written through its writer, a web tail read through its reader; a node
   tail's output is drained into the composed stream's own buffer as it is
-  produced, so `end()` completes without a consumer.
+  produced, so `end()` completes without a consumer. With a web tail the
+  composed writable side finishes once the tail's readable side has closed
+  AND the pipeline has completed (a tail's `close()` may close its readable
+  at once yet settle later). Destroying a running composition fails its
+  pipeline with the destroy error — a node tail is destroyed as a stage;
+  with a web tail the pipeline is failed directly, whatever state its
+  readable side is in — so every stage is destroyed with that error (the
+  head, a web tail's writable side) and the composed stream reports it — an
+  `AbortError` for a bare `destroy()` while the pipeline runs — then
+  closes. A composition whose sides have both completed (the automatic
+  destroy, a readable-only composition drained to its end) leaves its
+  pipeline to complete and reports the pipeline's (clean) outcome.
 
 ### finished / addAbortSignal
 
@@ -209,7 +220,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `consumers.js` | `text/json/buffer/arrayBuffer/blob` over web streams; multi-chunk and string decoding; lock release; error propagation; node Readables and async generators |
 | `readable-from.js` | `Readable.from(webStream)`: chunk types by objectMode, destroy → cancel + lock release, error propagation |
 | `finished-and-abort.js` | ledger #5: hook presence per implementation; `finished()` on readable close/error, writable close/error, settled streams, with a signal; `promises.finished`; `addAbortSignal` on readable/writable, already-aborted, one tee branch (default and byte streams; sibling spared, sibling cancel reaching the source, a teed-away branch inert incl. a pending BYOB read on its branch, cancel settling with a deferred or failing source cleanup in both orders), Response body |
-| `compose-web.js` | position validation; single web stream; web head/node tail; web readable into node writable; `end()` completing without a consumer; node head/web tail (ledger #5, incl. what the refusal leaves untouched); `Readable.prototype.compose` |
+| `compose-web.js` | position validation; single web stream; web head/node tail; web readable into node writable and into web writable; node head/web writable tail; `end()` completing without a consumer; node head/web tail (ledger #5, incl. what the refusal leaves untouched); destroy with a web tail before the first write, under backpressure, behind a closed readable, and bare; a deferred web close() completing cleanly (consumed and readable-only); `Readable.prototype.compose` |
 | `pipeline-web.js` | web source/destination/transform stages, generator stages, `TransformStream` head; sink/source/node-sink failures (incl. a node sink failing while the web source is idle, a web sink erroring or rejecting a write while the source is idle, and a web source erroring while a stuck node sink holds the pump); a detached-view chunk failing the pipeline (`TypeError`, source cancelled without a reason); promise-valued chunks by identity; a locked web destination (callback and promise forms, node and web sources); `stream/promises` trailing web destination, `end: false`, signal abort of a node-headed and of an idle all-web pipeline, and during a pending web read |
 | `which-impl.js` | implementation detection |
 

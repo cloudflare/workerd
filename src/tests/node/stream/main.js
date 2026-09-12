@@ -181,6 +181,13 @@ export {
   composeWebReadableIntoNodeWritable,
   composeEndCompletesBeforeReading,
   composeNodeHeadWebTail,
+  composeNodeHeadWebWritableTail,
+  composeWebReadableIntoWebWritable,
+  composeWebTailDestroyBeforeWrite,
+  composeWebTailDestroyUnderBackpressure,
+  composeWebTailClosedReadableDestroy,
+  composeWebTailDeferredCloseCompletesCleanly,
+  composeWebTailBareDestroyIsAbortError,
   readableComposeWithWebTransform,
 } from 'compose-web';
 

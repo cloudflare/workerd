@@ -23,7 +23,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { pipeline } from 'node-internal:streams_pipeline';
+import { pipelineImpl } from 'node-internal:streams_pipeline';
 import { Duplex } from 'node-internal:streams_duplex';
 import { Readable as ReadableConstructor } from 'node-internal:streams_readable';
 import {
@@ -38,6 +38,7 @@ import {
 } from 'node-internal:streams_util';
 import { destroyer } from 'node-internal:streams_destroy';
 import { eos } from 'node-internal:streams_end_of_stream';
+import { once } from 'node-internal:internal_http_util';
 import {
   AbortError,
   ERR_INVALID_ARG_VALUE,
@@ -103,11 +104,16 @@ export function compose(...streams) {
   let ondrain;
   let onfinish;
   let onclose;
+  let tailReader;
+  let teardownPipeline;
+  let tailFinished = false;
+  let pipelineDone = false;
   let d;
 
   function onfinished(err) {
     const cb = onclose;
     onclose = null;
+    pipelineDone = true;
 
     if (cb) {
       cb(err);
@@ -115,7 +121,27 @@ export function compose(...streams) {
       d.destroy(err);
     } else if (!readable && !writable) {
       d.destroy();
+    } else {
+      finishWritable();
     }
+  }
+
+  // Completes _final once the tail has finished — and, for a web tail, once
+  // the pipeline has completed too. A web tail is observed through its
+  // readable side (eos over the interop hook), which can close before the
+  // pipeline's last write into it has settled (a close() that closes the
+  // readable at once but resolves later); a node tail's eos() covers both of
+  // its sides.
+  function finishWritable() {
+    if (!onfinish || !tailFinished) {
+      return;
+    }
+    if (!pipelineDone && !isNodeStream(tail)) {
+      return;
+    }
+    const cb = onfinish;
+    onfinish = null;
+    cb();
   }
 
   const head = streams[0];
@@ -138,7 +164,16 @@ export function compose(...streams) {
     }
   }
 
-  const tail = pipeline(streams, onfinished);
+  // Destroying the composed stream while the pipeline runs must tear the
+  // pipeline down. A node tail is destroyed as a stage and the pipeline
+  // follows; a web tail cannot be, so the pipeline is failed directly with
+  // the destroy error instead (see streams_pipeline.js), which destroys
+  // every stage the same way.
+  const tail = pipelineImpl(streams, once(onfinished), {
+    onTeardown: (teardown) => {
+      teardownPipeline = teardown;
+    },
+  });
 
   const readable = !!(
     isReadable(tail) ||
@@ -211,11 +246,8 @@ export function compose(...streams) {
     // composed stream's buffer on its own, so the writable side's completion
     // does not wait for a consumer.
     eos(toRead, () => {
-      if (onfinish) {
-        const cb = onfinish;
-        onfinish = null;
-        cb();
-      }
+      tailFinished = true;
+      finishWritable();
     });
   }
 
@@ -237,17 +269,18 @@ export function compose(...streams) {
     } else if (isWebStream(tail)) {
       const readable = isTransformStream(tail) ? tail.readable : tail;
       const reader = readable.getReader();
+      tailReader = reader;
       d._read = async function () {
         while (true) {
           try {
             const { value, done } = await reader.read();
 
-            if (!d.push(value)) {
+            if (done) {
+              d.push(null);
               return;
             }
 
-            if (done) {
-              d.push(null);
+            if (!d.push(value)) {
               return;
             }
           } catch {
@@ -268,8 +301,20 @@ export function compose(...streams) {
 
     if (isNodeStream(tail)) {
       destroyer(tail, err);
+    } else if (!d.readableEnded || !d.writableFinished) {
+      // A running composition is torn down. One whose sides have both
+      // completed (the automatic destroy that follows) is not: its pipeline
+      // is completing on its own — a web tail's readable side can close
+      // before the pipeline's last write into it settles — and the composed
+      // stream reports the pipeline's outcome, as with a node tail. The
+      // tail's reader is cancelled as well: a pipeline that had already
+      // completed still holds the tail's unread output.
+      teardownPipeline(err);
+      tailReader?.cancel(err).catch(() => {});
     }
 
+    // Either way the pipeline reports `err` (or its own earlier error), and
+    // the composed stream reports what the pipeline does.
     if (onclose === null) {
       callback(err);
     } else {
