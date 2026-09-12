@@ -226,6 +226,40 @@ export const pipelineLockedWebDestinationFails = {
   },
 };
 
+// A web source yielding a chunk the node destination cannot take (a view
+// over a detached ArrayBuffer) fails the pipeline with the conversion's
+// TypeError: callback and destination error. The source is cancelled by
+// the pump's iteration leaving early — with no reason, as in Node, since
+// the iterator's return() runs before the pipeline's teardown.
+export const pipelineWebSourceUnconvertibleChunkFails = {
+  async test() {
+    const cancels = [];
+    const source = new ReadableStream({
+      start(controller) {
+        const gone = new Uint8Array(4);
+        structuredClone(gone.buffer, { transfer: [gone.buffer] });
+        controller.enqueue(gone);
+      },
+      cancel(reason) {
+        cancels.push(reason);
+      },
+    });
+    const sink = new Writable({
+      write(chunk, encoding, callback) {
+        callback();
+      },
+    });
+    const err = await new Promise((resolve) =>
+      pipeline(source, sink, (e) => resolve(e))
+    );
+    strictEqual(err.name, 'TypeError');
+    strictEqual(sink.destroyed, true);
+    strictEqual(sink.errored, err);
+    strictEqual(cancels.length, 1);
+    strictEqual(cancels[0], undefined);
+  },
+};
+
 // Chunks pass through a web source untouched, promise-valued ones included:
 // resolved, rejected and pending promises reach an objectMode node
 // destination — and a web one — as the very objects that were enqueued, and
@@ -470,5 +504,49 @@ export const promisesPipelineSignalAbortsWebWritable = {
     await scheduler.wait(5);
     strictEqual(aborts.length, 1);
     strictEqual(aborts[0].name, 'AbortError');
+  },
+};
+
+// A signal aborted while the pump's read on the web source is pending (the
+// node destination idle, nothing to write): the pipeline rejects with an
+// AbortError, once; the source is cancelled with it — settling the pending
+// read — and its lock released; the destination is destroyed with it.
+export const promisesPipelineSignalAbortsPendingWebRead = {
+  async test() {
+    let cancelReason;
+    const source = new ReadableStream({
+      start(controller) {
+        controller.enqueue(enc.encode('first'));
+      },
+      cancel(reason) {
+        cancelReason = reason;
+      },
+    });
+    const written = [];
+    const events = [];
+    const dest = new Writable({
+      write(chunk, encoding, callback) {
+        written.push(dec.decode(chunk));
+        callback();
+      },
+    });
+    dest.on('error', (err) => events.push(['error', err]));
+    dest.on('close', () => events.push(['close']));
+    const ac = new AbortController();
+    const pipelined = promises.pipeline(source, dest, { signal: ac.signal });
+    while (written.length === 0) await scheduler.wait(1);
+    ac.abort();
+    let failure;
+    await rejects(pipelined, (err) => {
+      strictEqual(err.name, 'AbortError');
+      strictEqual(err.code, 'ABORT_ERR');
+      failure = err;
+      return true;
+    });
+    strictEqual(cancelReason, failure);
+    strictEqual(source.locked, false);
+    deepStrictEqual(written, ['first']);
+    strictEqual(dest.destroyed, true);
+    deepStrictEqual(events, [['error', failure], ['close']]);
   },
 };
