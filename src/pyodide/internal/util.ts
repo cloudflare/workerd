@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+import type { PyodideVersionType } from './const';
+
 // Callback used to report PythonWorkersInternalError construction to C++ metrics (via the
 // WorkerFatalReporter module). Registered by `python.ts` at module init in the main workerd
 // context.
@@ -37,6 +39,21 @@ export class PythonWorkersInternalError extends Error {
 
   override get name(): string {
     return this.constructor.name;
+  }
+}
+
+export function checkVersion(
+  Module: Module,
+  funcName: string,
+  versions: PyodideVersionType[] | PyodideVersionType
+): void {
+  if (typeof versions === 'string') {
+    versions = [versions];
+  }
+  if (!versions.includes(Module.API.version)) {
+    throw new PythonWorkersInternalError(
+      `${funcName} should not be called with Pyodide version ${Module.API.version}`
+    );
   }
 }
 

@@ -47,25 +47,30 @@ const SNIPPET_OPTIONS: Options = {
 // Later versions ship pyodide.asm.mjs which is already an ES module.
 const COMMONJS_VERSIONS = ['0.26.0a2', '0.28.2'];
 
-const PRELUDE = `
-import {
-    addEventListener,
-    getRandomValues,
-    location,
-    monotonicDateNow,
-    newWasmModule,
-    patchedApplyFunc,
-    patchedLoadLibData,
-    reportUndefinedSymbolsPatched,
-    wasmInstantiate,
-    patched_PyEM_CountFuncParams,
-} from "pyodide-internal:pool/builtin_wrappers";
-`;
+// Imports of the wrappers that the patches refer to; prepended to the patched module.
+function prelude(imports: string[]): string {
+  return `
+  import {
+    ${imports.join(',\n') + ','}
+  } from "pyodide-internal:pool/builtin_wrappers";
+  `;
+}
+
+const PATCHED_IMPORTS = [
+  'addEventListener',
+  'getRandomValues',
+  'location',
+  'monotonicDateNow',
+  'newWasmModule',
+  'patchedApplyFunc',
+  'patchedLoadLibData',
+  'wasmInstantiate',
+];
 
 // Direct eval is disallowed in esbuild, see: https://esbuild.github.io/content-types/#direct-eval
 const EVAL_REPLACEMENT = `(() => {
   throw new Error(
-    "Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file's contents"
+    "Internal Emscripten code tried to eval, this should not happen, please file a bug report"
   );
 })()`;
 
@@ -238,6 +243,8 @@ type Replacement = AnyNode | AnyNode[];
 interface Patch {
   name: string;
   expected: ExpectedCount;
+  /** If set, only nodes inside a function declaration with this name are candidates. */
+  functionName?: string;
   /** Whether this node is a patch site. `parent` is what contains the node (see Container). */
   match: (node: AnyNode, parent: Container) => boolean;
   replace: (node: AnyNode) => Replacement;
@@ -250,53 +257,11 @@ interface Patch {
 function patch<T extends AnyNode>(spec: {
   name: string;
   expected: ExpectedCount;
+  functionName?: string;
   match: (node: AnyNode, parent: Container) => node is T;
   replace: (node: T) => Replacement;
 }): Patch {
   return { ...spec, replace: (node) => spec.replace(node as T) };
-}
-
-/**
- * Define a patch that inserts `insertStatement` into the body of the function declaration named
- * `functionName`, directly after the first body statement accepted by `insertAfterPredicate`.
- */
-function addToFunctionAfter({
-  name,
-  functionName,
-  insertAfterPredicate,
-  insertStatement,
-}: {
-  name: string;
-  functionName: string;
-  insertAfterPredicate: (statement: Statement) => boolean;
-  insertStatement: string;
-}): Patch {
-  return patch({
-    name,
-    expected: 1,
-    match: (node): node is FunctionDeclaration =>
-      isFunctionDeclarationNamed(node, functionName),
-    replace: (node) => {
-      const body = node.body.body;
-      const index = body.findIndex(insertAfterPredicate);
-      if (index === -1) {
-        throw new Error(
-          `${functionName} has no statement matching the insertion point for "${name}"`
-        );
-      }
-      return {
-        ...node,
-        body: {
-          ...node.body,
-          body: [
-            ...body.slice(0, index + 1),
-            stmt(insertStatement),
-            ...body.slice(index + 1),
-          ],
-        },
-      };
-    },
-  });
 }
 
 const COMMON_PATCHES: Patch[] = [
@@ -317,13 +282,6 @@ const COMMON_PATCHES: Patch[] = [
     expected: { '0.26.0a2': 18, default: 22 },
     match: (node) => memberPath(node) === 'Date.now',
     replace: () => expr('monotonicDateNow'),
-  },
-  {
-    name: 'reportUndefinedSymbols() -> reportUndefinedSymbolsPatched(Module)',
-    expected: 3,
-    match: (node) =>
-      isCallOf(node, 'reportUndefinedSymbols') && node.arguments.length === 0,
-    replace: () => expr('reportUndefinedSymbolsPatched(Module)'),
   },
   patch({
     name: 'crypto.getRandomValues(...) -> getRandomValues(Module, ...)',
@@ -347,14 +305,13 @@ const COMMON_PATCHES: Patch[] = [
     expected: 1,
     match: (node): node is FunctionDeclaration =>
       isFunctionDeclarationNamed(node, 'loadLibData'),
-    replace: (node) => [
+    replace: () => [
       stmt(`
         function loadLibData() {
           var libData = patchedLoadLibData(Module, libName, flags.rpath);
           return flags.loadAsync ? Promise.resolve(libData) : libData;
         }
       `),
-      { ...node, id: identifier('dummiedOutOrigLoadLibData') },
     ],
   }),
   patch({
@@ -369,28 +326,12 @@ const COMMON_PATCHES: Patch[] = [
         ...node.arguments,
       ]),
   }),
-  patch({
-    // Only 0.26.0a2 still has this function; later versions restructured it upstream.
-    name: 'function _PyEM_CountFuncParams(func) -> patched_PyEM_CountFuncParams',
-    expected: { '0.26.0a2': 1, default: 0 },
-    match: (node): node is FunctionDeclaration =>
-      isFunctionDeclarationNamed(node, '_PyEM_CountFuncParams'),
-    replace: (node) => ({
-      ...node,
-      body: {
-        ...node.body,
-        body: [
-          stmt('return patched_PyEM_CountFuncParams(Module, func);'),
-          ...node.body.body,
-        ],
-      },
-    }),
-  }),
   {
     name: 'log loadWebAssemblyModule after `var tableBase = ...`',
     expected: 1,
+    functionName: 'loadModule',
     match: (node, parent) =>
-      isVariableDeclarationOf(node, 'tableBase') && Array.isArray(parent),
+      Array.isArray(parent) && isVariableDeclarationOf(node, 'tableBase'),
     replace: (node) => [
       node,
       stmt(
@@ -398,60 +339,73 @@ const COMMON_PATCHES: Patch[] = [
       ),
     ],
   },
-  addToFunctionAfter({
-    name: 'record table slot allocations in ffi_closure_alloc_js',
-    functionName: 'ffi_closure_alloc_js',
-    insertAfterPredicate: (s) => isVariableDeclarationOf(s, 'index'),
-    insertStatement: 'Module.recordFfiClosureAlloc?.(closure, index);',
-  }),
-  addToFunctionAfter({
-    name: 'record table slot frees in ffi_closure_free_js',
-    functionName: 'ffi_closure_free_js',
-    insertAfterPredicate: (s) => isVariableDeclarationOf(s, 'index'),
-    insertStatement: 'Module.recordFfiClosureFree?.(closure, index);',
-  }),
-  addToFunctionAfter({
-    name: 'record table slot assignments in ffi_prep_closure_loc_js',
-    functionName: 'ffi_prep_closure_loc_js',
-    insertAfterPredicate: (s) =>
-      s.type === 'ExpressionStatement' &&
-      isCallOf(s.expression, 'setWasmTableEntry'),
-    insertStatement: 'Module.recordFfiPrepClosureLoc?.(closure, codeloc, sig);',
-  }),
-];
-
-// pyodide.asm.js in these versions is a CommonJS/UMD-style script; convert it to an ES module.
-// When we link our own Pyodide we can pass `-sES6_MODULE` to the linker and it will do this for us
-// automatically.
-const COMMONJS_PATCHES: Patch[] = [
-  patch({
-    name: 'var _createPyodideModule -> prelude + export const _createPyodideModule',
-    expected: 1,
-    match: (node, parent): node is VariableDeclaration =>
-      Array.isArray(parent) &&
-      isVariableDeclarationOf(node, '_createPyodideModule'),
-    replace: (node) => [
-      ...stmts(PRELUDE),
-      exportNamed({ declaration: { ...node, kind: 'const' } }),
-    ],
-  }),
+  // Let the runtime observe libffi closures: the table slot handed out to each closure, its release,
+  // and the assignment of the trampoline into the slot.
   {
-    name: 'remove `globalThis._createPyodideModule = _createPyodideModule;`',
+    name: 'record table slot allocations in ffi_closure_alloc_js',
     expected: 1,
+    functionName: 'ffi_closure_alloc_js',
+    match: (node, parent) =>
+      Array.isArray(parent) && isVariableDeclarationOf(node, 'index'),
+    replace: (node) => [
+      node,
+      stmt('Module.recordFfiClosureAlloc?.(closure, index);'),
+    ],
+  },
+  {
+    name: 'record table slot frees in ffi_closure_free_js',
+    expected: 1,
+    functionName: 'ffi_closure_free_js',
+    match: (node, parent) =>
+      Array.isArray(parent) && isVariableDeclarationOf(node, 'index'),
+    replace: (node) => [
+      node,
+      stmt('Module.recordFfiClosureFree?.(closure, index);'),
+    ],
+  },
+  {
+    name: 'record table slot assignments in ffi_prep_closure_loc_js',
+    expected: 1,
+    functionName: 'ffi_prep_closure_loc_js',
     match: (node, parent) =>
       Array.isArray(parent) &&
       node.type === 'ExpressionStatement' &&
-      node.expression.type === 'AssignmentExpression' &&
-      node.expression.operator === '=' &&
-      memberPath(node.expression.left) === 'globalThis._createPyodideModule' &&
-      isIdentifier(node.expression.right, '_createPyodideModule'),
+      isCallOf(node.expression, 'setWasmTableEntry'),
+    replace: (node) => [
+      node,
+      stmt('Module.recordFfiPrepClosureLoc?.(closure, codeloc, sig);'),
+    ],
+  },
+];
+
+const PATCHES_0_26_0A2: Patch[] = [
+  {
+    name: 'Remove reportUndefinedSymbols()',
+    expected: 3,
+    match: (node, parent) =>
+      Array.isArray(parent) &&
+      node.type === 'ExpressionStatement' &&
+      isCallOf(node.expression, 'reportUndefinedSymbols') &&
+      node.expression.arguments.length === 0,
     replace: () => [],
   },
   patch({
-    // To fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7, which is included
-    // upstream from 0.28 onwards.
+    name: 'function _PyEM_CountFuncParams(func) -> patched_PyEM_CountFuncParams',
+    expected: 1,
+    match: (node): node is FunctionDeclaration =>
+      isFunctionDeclarationNamed(node, '_PyEM_CountFuncParams'),
+    replace: (node) => ({
+      ...node,
+      body: {
+        ...node.body,
+        body: [stmt('return patched_PyEM_CountFuncParams(Module, func);')],
+      },
+    }),
+  }),
+  patch({
+    // To fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7.
     name: 'nullToUndefined(func.apply(...)) -> nullToUndefined(patchedApplyFunc(API, func, ...))',
-    expected: { '0.26.0a2': 2, default: 0 },
+    expected: 2,
     match: (node): node is CallExpression & { arguments: [CallExpression] } =>
       isCallOf(node, 'nullToUndefined') &&
       node.arguments.length === 1 &&
@@ -468,17 +422,42 @@ const COMMONJS_PATCHES: Patch[] = [
   }),
 ];
 
+// pyodide.asm.js in these versions is a CommonJS/UMD-style script; convert it to an ES module.
+// When we link our own Pyodide we can pass `-sES6_MODULE` to the linker and it will do this for us
+// automatically.
+const COMMONJS_PATCHES: Patch[] = [
+  patch({
+    name: 'var _createPyodideModule -> export const _createPyodideModule',
+    expected: 1,
+    match: (node, parent): node is VariableDeclaration =>
+      Array.isArray(parent) &&
+      isVariableDeclarationOf(node, '_createPyodideModule'),
+    replace: (node) => exportNamed({ declaration: { ...node, kind: 'const' } }),
+  }),
+  {
+    name: 'remove `globalThis._createPyodideModule = _createPyodideModule;`',
+    expected: 1,
+    match: (node, parent) =>
+      Array.isArray(parent) &&
+      node.type === 'ExpressionStatement' &&
+      node.expression.type === 'AssignmentExpression' &&
+      node.expression.operator === '=' &&
+      memberPath(node.expression.left) === 'globalThis._createPyodideModule' &&
+      isIdentifier(node.expression.right, '_createPyodideModule'),
+    replace: () => [],
+  },
+];
+
 // pyodide.asm.mjs in later versions is already an ES module.
 const ES_MODULE_PATCHES: Patch[] = [
   {
-    name: 'export default _createPyodideModule -> prelude + default and named export',
+    name: 'export default _createPyodideModule -> default and named export',
     expected: 1,
     match: (node, parent) =>
       Array.isArray(parent) &&
       node.type === 'ExportDefaultDeclaration' &&
       isIdentifier(node.declaration, '_createPyodideModule'),
     replace: (node) => [
-      ...stmts(PRELUDE),
       node,
       // Still expose _createPyodideModule for compatibility (import { _createPyodideModule }).
       exportNamed({ names: ['_createPyodideModule'] }),
@@ -487,10 +466,16 @@ const ES_MODULE_PATCHES: Patch[] = [
 ];
 
 function patchesForVersion(version: string): Patch[] {
-  const extra = COMMONJS_VERSIONS.includes(version)
-    ? COMMONJS_PATCHES
-    : ES_MODULE_PATCHES;
-  return [...COMMON_PATCHES, ...extra];
+  const patches = [...COMMON_PATCHES];
+  if (version === '0.26.0a2') {
+    patches.push(...PATCHES_0_26_0A2);
+  }
+  patches.push(
+    ...(COMMONJS_VERSIONS.includes(version)
+      ? COMMONJS_PATCHES
+      : ES_MODULE_PATCHES)
+  );
+  return patches;
 }
 
 function expectedCount(spec: Patch, version: string): number {
@@ -520,8 +505,15 @@ function visit(
   container: Container,
   key: string | number,
   patches: Patch[],
-  counts: Map<string, number>
+  counts: Map<string, number>,
+  enclosingFunctions: string[]
 ): number {
+  // Names of the function declarations the children are nested in, innermost last.
+  const childScope =
+    node.type === 'FunctionDeclaration' && node.id !== null
+      ? [...enclosingFunctions, node.id.name]
+      : enclosingFunctions;
+
   // Visit children first so that replacements are never re-visited.
   const fields = node as unknown as Record<string, unknown>;
   for (const childKey of Object.keys(fields)) {
@@ -532,15 +524,28 @@ function visit(
       for (let i = 0; i < list.length; i++) {
         const element = list[i];
         if (isNode(element)) {
-          i += visit(element, list as AnyNode[], i, patches, counts);
+          i += visit(
+            element,
+            list as AnyNode[],
+            i,
+            patches,
+            counts,
+            childScope
+          );
         }
       }
     } else if (isNode(child)) {
-      visit(child, node, childKey, patches, counts);
+      visit(child, node, childKey, patches, counts, childScope);
     }
   }
 
   for (const spec of patches) {
+    if (
+      spec.functionName !== undefined &&
+      !enclosingFunctions.includes(spec.functionName)
+    ) {
+      continue;
+    }
     if (!spec.match(node, container)) {
       continue;
     }
@@ -573,7 +578,14 @@ function patchSource(source: string, version: string): string {
   const patches = patchesForVersion(version);
   const ast = parse(source, ACORN_OPTIONS);
   const counts = new Map<string, number>();
-  visit(ast, null, 0, patches, counts);
+  visit(ast, null, 0, patches, counts, []);
+  // Import the wrappers the patches above refer to. Done after visiting so that the prelude itself
+  // is never a candidate for patching.
+  const imports = Array.from(PATCHED_IMPORTS);
+  if (version === '0.26.0a2') {
+    imports.push('patched_PyEM_CountFuncParams');
+  }
+  ast.body.unshift(...stmts(prelude(imports)));
 
   const mismatches: string[] = [];
   for (const spec of patches) {
