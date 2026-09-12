@@ -18,6 +18,9 @@ net_ports = [
     "NET_GREET_PORT",
     "NET_SINK_PORT",
     "NET_TICKER_PORT",
+    "NET_RESET_PORT",
+    "NET_TRICKLE_PORT",
+    "NET_UTF8_SPLIT_PORT",
 ]
 
 wd_test(

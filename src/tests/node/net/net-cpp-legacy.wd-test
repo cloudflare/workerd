@@ -34,6 +34,9 @@ const unitTests :Workerd.Config = (
           (name = "NET_GREET_PORT", fromEnvironment = "NET_GREET_PORT"),
           (name = "NET_SINK_PORT", fromEnvironment = "NET_SINK_PORT"),
           (name = "NET_TICKER_PORT", fromEnvironment = "NET_TICKER_PORT"),
+          (name = "NET_RESET_PORT", fromEnvironment = "NET_RESET_PORT"),
+          (name = "NET_TRICKLE_PORT", fromEnvironment = "NET_TRICKLE_PORT"),
+          (name = "NET_UTF8_SPLIT_PORT", fromEnvironment = "NET_UTF8_SPLIT_PORT"),
         ],
       )
     ),
