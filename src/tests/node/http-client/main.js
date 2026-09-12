@@ -90,3 +90,10 @@ export {
   setTimeoutInsideTimeoutDoesNotOutliveTeardown,
   responseDestroyInsideAborted,
 } from 'reentrancy';
+
+export {
+  largeResponseWithPauses,
+  manyChunkedPieces,
+  tenThousandTinyWritesFormOneBody,
+  largeRequestBody,
+} from 'data-volumes';
