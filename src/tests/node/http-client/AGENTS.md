@@ -43,6 +43,11 @@ need an `internet` network service allowing `private`.
   byte count of everything written) rather than chunked encoding. A body
   without a Content-Type carries none; a POST that ends without writing
   sends Content-Length 0; GET and HEAD send no body whatever is written.
+- A chunk's bytes are captured at `write()` (copied), as Node has them on
+  the wire by then: mutating, detaching or shrinking the buffer afterwards
+  does not change what is sent. Views over a `SharedArrayBuffer` or a
+  `WebAssembly.Memory` are sent like any other; a zero-length view, a
+  detached one included, is accepted and sends nothing.
 - The request is sent through `fetch()` with `redirect: 'manual'` and
   `encodeResponseBody: 'manual'`; a finished request stays live until its
   exchange ends.
@@ -138,7 +143,7 @@ unchanged under both implementations.
 | Module | Asserts |
 | --- | --- |
 | `response-body.js` | Buffer chunks and `complete`; `setEncoding`; incremental chunked delivery; a megabyte intact; pause/resume; bodiless statuses; HEAD; compression passthrough; waiting for a consumer |
-| `request-body.js` | string body echoed with the server-side Content-Type/Length; `end(Buffer)` sent once; chunk forms and encodings; nothing sent before `end()`; length and type as the server sees them; empty POST; GET/HEAD ignore writes |
+| `request-body.js` | string body echoed with the server-side Content-Type/Length; `end(Buffer)` sent once; chunk forms and encodings; nothing sent before `end()`; length and type as the server sees them; empty POST; chunk captured at `write()` (mutated, detached, shrunk afterwards); SAB/WebAssembly.Memory views sent, empty and detached views accepted; GET/HEAD ignore writes |
 | `lifecycle.js` | `res.destroy()` closes; end then one close; `res.destroy(err)` mid-body reaching the server; server dropping the connection; completed response final; connection failure; `req.res` and request close after the response; `req.destroy()` before the response (hang up), with an error, before `end()`, mid-body (bare and with an error), response after destroy dropped; `abort()` before the response, before `end()`, mid-body; timeout before headers (armed before/after `end()`), `timeout` option and callback, mid-body, disarmed by completion, cleared by `setTimeout(0)` |
 | `interop.js` | pipe into `Writable.fromWeb`; `Readable.toWeb` body; pipeline through a `TransformStream`; `stream/consumers` and async iteration |
 | `harness.js`, `which-impl.js` | shared machinery |

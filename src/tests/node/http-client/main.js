@@ -24,6 +24,8 @@ export {
   requestIsSentAtEnd,
   lengthAndTypeReachTheServer,
   emptyPostSendsNoBody,
+  chunkIsCapturedAtWrite,
+  sharedWasmEmptyAndDetachedViews,
   getAndHeadIgnoreWrites,
 } from 'request-body';
 

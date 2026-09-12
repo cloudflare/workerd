@@ -136,6 +136,60 @@ export const emptyPostSendsNoBody = {
   },
 };
 
+// A chunk's bytes are captured at write(), as Node has them on the wire or
+// copied into its pending queue by then: what the caller does to the
+// buffer afterwards — mutate it, detach it, shrink it — does not change
+// what is sent.
+export const chunkIsCapturedAtWrite = {
+  async test(ctrl, env) {
+    const enc = new TextEncoder();
+    const req = request(env, '/echo', { method: 'POST' });
+    const mutated = enc.encode('1234');
+    req.write(mutated);
+    mutated.set(enc.encode('5678'));
+
+    const detached = enc.encode('AB');
+    req.write(detached);
+    structuredClone(detached.buffer, { transfer: [detached.buffer] });
+    strictEqual(detached.buffer.detached, true);
+
+    const resizable = new ArrayBuffer(4, { maxByteLength: 8 });
+    const shrunk = new Uint8Array(resizable);
+    shrunk.set(enc.encode('abcd'));
+    req.write(shrunk);
+    resizable.resize(2);
+    strictEqual(shrunk.byteLength, 2);
+
+    req.end();
+    const res = await response(req);
+    strictEqual((await collect(res)).toString(), '1234ABabcd');
+  },
+};
+
+// Views over a SharedArrayBuffer and over a WebAssembly.Memory are sent as
+// any other chunk; a zero-length view, a detached one included, sends
+// nothing and is accepted.
+export const sharedWasmEmptyAndDetachedViews = {
+  async test(ctrl, env) {
+    const enc = new TextEncoder();
+    const req = request(env, '/echo', { method: 'POST' });
+    const shared = new Uint8Array(new SharedArrayBuffer(4));
+    shared.set(enc.encode('SAB!'));
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    const wasm = new Uint8Array(memory.buffer, 0, 4);
+    wasm.set(enc.encode('WASM'));
+    const gone = new Uint8Array(4);
+    structuredClone(gone.buffer, { transfer: [gone.buffer] });
+    strictEqual(req.write(shared), true);
+    strictEqual(req.write(new Uint8Array(0)), true);
+    strictEqual(req.write(gone), true);
+    strictEqual(req.write(wasm), true);
+    req.end();
+    const res = await response(req);
+    strictEqual((await collect(res)).toString(), 'SAB!WASM');
+  },
+};
+
 // GET and HEAD requests carry no body, whatever is written to them.
 export const getAndHeadIgnoreWrites = {
   async test(ctrl, env) {
