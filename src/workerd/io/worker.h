@@ -42,6 +42,8 @@ namespace workerd {
 
 WD_STRONG_BOOL(StructuredLogging);
 WD_STRONG_BOOL(ProcessStdioPrefixed);
+// Inspector stack capture enters V8 and is unsafe from GC finalizers.
+WD_STRONG_BOOL(CaptureInspectorStackTrace);
 
 namespace api {
 class DurableObjectState;
@@ -461,11 +463,15 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       kj::WebSocket& webSocket) const;
 
   // Log a warning to the inspector if attached, and log an INFO severity message.
-  void logWarning(kj::StringPtr description, Worker::Lock& lock);
+  void logWarning(kj::StringPtr description,
+      Worker::Lock& lock,
+      CaptureInspectorStackTrace captureStackTrace = CaptureInspectorStackTrace::YES);
 
   // logWarningOnce() only logs the warning if it has not already been logged for this
   // worker instance.
-  void logWarningOnce(kj::StringPtr description, Worker::Lock& lock);
+  void logWarningOnce(kj::StringPtr description,
+      Worker::Lock& lock,
+      CaptureInspectorStackTrace captureStackTrace = CaptureInspectorStackTrace::YES);
 
   // Log an ERROR severity message, if it has not already been logged for this worker instance.
   void logErrorOnce(kj::StringPtr description);
@@ -570,7 +576,10 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   // Log a message as if with console.{log,warn,error,etc}. `type` must be one of the cdp::LogType
   // enum, which unfortunately we cannot forward-declare, ugh.
-  void logMessage(jsg::Lock& js, uint16_t type, kj::StringPtr description);
+  void logMessage(jsg::Lock& js,
+      uint16_t type,
+      kj::StringPtr description,
+      CaptureInspectorStackTrace captureStackTrace = CaptureInspectorStackTrace::YES);
 
   class SubrequestClient;
   class ResponseStreamWrapper;
@@ -741,8 +750,10 @@ class Worker::Lock {
   v8::Local<v8::Context> getContext();
 
   bool isInspectorEnabled();
-  void logWarning(kj::StringPtr description);
-  void logWarningOnce(kj::StringPtr description);
+  void logWarning(kj::StringPtr description,
+      CaptureInspectorStackTrace captureStackTrace = CaptureInspectorStackTrace::YES);
+  void logWarningOnce(kj::StringPtr description,
+      CaptureInspectorStackTrace captureStackTrace = CaptureInspectorStackTrace::YES);
 
   void logErrorOnce(kj::StringPtr description);
 

@@ -849,7 +849,8 @@ JsRpcStub::~JsRpcStub() noexcept(false) {
           "let the other side know that you are no longer using them. You cannot rely on "
           "the garbage collector for this because it may take arbitrarily long before actually "
           "collecting unreachable objects. As a shortcut, calling dispose() on the result of "
-          "an RPC call disposes all stubs within it."_kj);
+          "an RPC call disposes all stubs within it."_kj,
+          CaptureInspectorStackTrace::NO);
     }
   }
 
@@ -885,7 +886,8 @@ RpcStubDisposalGroup::~RpcStubDisposalGroup() noexcept(false) {
             "An RPC result was not disposed properly. One of the RPC calls you made expects you "
             "to call dispose() on the return value, but you didn't do so. You cannot rely on "
             "the garbage collector for this because it may take arbitrarily long before actually "
-            "collecting unreachable objects."_kj);
+            "collecting unreachable objects."_kj,
+            CaptureInspectorStackTrace::NO);
       }
     }
   } else {
