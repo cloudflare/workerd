@@ -4,6 +4,7 @@
 
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/js-writable-stream.h>
+#include <workerd/api/streams/standard.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
@@ -308,6 +309,31 @@ JsWritableStream JsWritableStream::create(jsg::Lock& js,
   }
   return JsWritableStream(js.alloc<WritableStream>(
       ioContext, kj::mv(sink), kj::mv(observer), maybeHighWaterMark, kj::mv(maybeClosureWaitable)));
+}
+
+JsWritableStream JsWritableStream::fromWrite(
+    jsg::Lock& js, kj::Function<jsg::Promise<void>(jsg::Lock&, jsg::JsValue)> write) {
+  if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+    UnderlyingSink underlyingSink;
+    underlyingSink.write = [write = kj::mv(write)](jsg::Lock& js, jsg::JsValue chunk,
+                               UnderlyingSink::Controller) mutable { return write(js, chunk); };
+    return JsWritableStream(WritableStream::constructor(js, kj::mv(underlyingSink), kj::none));
+  }
+
+  // TypeScript arm
+  auto tsWrite = js.wrapPromiseReturningFunction(js.v8Context(),
+      [write = kj::mv(write)](jsg::Lock& js,
+          const v8::FunctionCallbackInfo<v8::Value>& info) mutable -> jsg::Promise<jsg::Value> {
+    return write(js, jsg::JsValue(info[0])).then(js, [](jsg::Lock& js) {
+      return js.v8Ref<v8::Value>(js.v8Undefined());
+    });
+  });
+
+  auto sinkObj = js.obj();
+  sinkObj.set(js, "write"_kj, jsg::JsValue(tsWrite));
+
+  auto constructor = webstreams::getCppExport(js, "WritableStream");
+  return JsWritableStream(js, constructor.newInstance(js, jsg::JsValue(sinkObj)).addRef(js));
 }
 
 JsWritableStream JsWritableStream::addRef(jsg::Lock& js) {

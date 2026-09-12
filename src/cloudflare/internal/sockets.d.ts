@@ -10,6 +10,7 @@ export class Socket {
   readonly readable: unknown;
   readonly writable: unknown;
   readonly closed: Promise<void>;
+  readonly protocol: 'tcp' | 'udp';
   close(): Promise<void>;
   startTls(options: TlsOptions): Socket;
 }

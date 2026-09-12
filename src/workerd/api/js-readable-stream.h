@@ -9,6 +9,7 @@
 #include <workerd/util/strong-bool.h>
 
 #include <kj/common.h>
+#include <kj/function.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
 
@@ -121,6 +122,19 @@ class JsReadableStream final {
   // C++-built JS underlying source driving the generator; otherwise this delegates to the
   // legacy ReadableStream::from().
   static JsReadableStream from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator);
+
+  // Create a stream-backed, value-mode JsReadableStream driven directly by a C++ pull
+  // function: each call is awaited, and its result is either enqueued as-is
+  // or, on kj::none, taken to mean the stream has ended. There is no
+  // queue-level chunking or splitting: whatever `pull` produces becomes exactly one chunk.
+  //
+  // Like create()/from(), this is a compatibility-flag dispatch point: under
+  // typescript_implemented_streams, `pull` is wrapped as a real JS function and the
+  // TypeScript stream is constructed over a plain (non-native-marked) underlying source,
+  // which resolves to its QUEUED backend; otherwise this builds the legacy C++
+  // ReadableStreamJsController directly.
+  static JsReadableStream fromPull(
+      jsg::Lock& js, kj::Function<jsg::Promise<kj::Maybe<jsg::Value>>(jsg::Lock&)> pull);
 
   // Returns a new JsReadableStream sharing this one's underlying stream (and retransmit
   // buffer, if any). Both instances observe the same underlying stream state (e.g. the stream

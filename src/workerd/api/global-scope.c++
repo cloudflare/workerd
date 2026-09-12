@@ -249,12 +249,46 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // We set isDefaultFetchPort to false here – sockets.c++ sets it for ports 443 and 8080 to
     // provide a more descriptive error message for HTTP, but this is not relevant on the TCP server
     // side.
-    jsg::Ref<Socket> jsSocket =
-        setupSocket(js, ownConnection.addRef().toOwn(), kj::none /* remoteAddress */, kj::mv(host),
-            kj::none, kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::none, false, kj::none);
+    jsg::Ref<Socket> jsSocket = setupSocket(js, ownConnection.addRef().toOwn(),
+        kj::none /* remoteAddress */, kj::mv(host), kj::none, kj::mv(nullTlsStarter),
+        SecureTransportKind::OFF, SocketProtocol::TCP, kj::none, false, kj::none);
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
     // connection is already open at this point, exception handling is not required.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
+
+    kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
+    auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
+    return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span), kj::mv(deferredNeuter));
+  }
+  lock.logWarningOnce("Received a connect event but we lack a handler. "
+                      "Did you remember to export a connect() function?");
+  JSG_FAIL_REQUIRE(Error, "Handler does not export a connect() function.");
+}
+
+kj::Promise<void> ServiceWorkerGlobalScope::connectUdp(kj::String host,
+    DatagramChannel& channel,
+    Worker::Lock& lock,
+    kj::Maybe<ExportedHandler&> exportedHandler) {
+  ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
+      "Connect ingress is not currently supported with Service Workers syntax.");
+  KJ_REQUIRE(FeatureFlags::get(lock).getWorkerdExperimental(),
+      "UDP ingress requires the experimental flag.");
+
+  KJ_IF_SOME(handler, eh.connect) {
+    // Using a neuterable wrapper to manage lifetime, exactly like connect()'s NeuterableIoStream:
+    // we MUST neuter this when the promise returned to the caller resolves, since `channel` is
+    // only guaranteed valid for that long, while the JS Socket can outlive us via ctx.waitUntil().
+    auto ownChannel = newNeuterableDatagramChannel(channel);
+    auto deferredNeuter = kj::defer([ref = ownChannel.addRef()]() mutable {
+      ref->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
+    });
+    KJ_ON_SCOPE_FAILURE(ownChannel->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
+
+    auto& ioContext = IoContext::current();
+    jsg::Lock& js = lock;
+
+    jsg::Ref<Socket> jsSocket = setupDatagramSocket(
+        js, ownChannel.addRef().toOwn(), kj::none /* remoteAddress */, kj::mv(host));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
     auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());

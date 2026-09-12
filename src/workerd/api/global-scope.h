@@ -19,6 +19,7 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-timers.h>
+#include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::jsg {
@@ -27,6 +28,7 @@ class DOMException;
 
 namespace workerd {
 class AccessInfo;
+class DatagramChannel;
 }  // namespace workerd
 
 namespace workerd::api {
@@ -68,6 +70,7 @@ class TextDecoderStream;
 class Blob;
 class File;
 class FormData;
+class Datagram;
 
 class URLPattern;
 namespace urlpattern {
@@ -697,6 +700,16 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
+  // Received UDP/datagram ingress (called from C++, not JS, via UdpConnectCustomEvent). Dispatches
+  // to the same exported `connect(socket)` handler as TCP, but the delivered Socket's readable and
+  // writable streams are value-mode (see setupDatagramSocket()) and its `protocol` is "udp".
+  //
+  // `channel` is borrowed, not owned.
+  kj::Promise<void> connectUdp(kj::String host,
+      DatagramChannel& channel,
+      Worker::Lock& lock,
+      kj::Maybe<ExportedHandler&> exportedHandler);
+
   // Received sendTraces (called from C++, not JS).
   void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
       Worker::Lock& lock,
@@ -1020,6 +1033,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(FixedLengthStream);
     JSG_NESTED_TYPE(IdentityTransformStream);
     JSG_NESTED_TYPE(HTMLRewriter);
+    JSG_NESTED_TYPE(Datagram);
 
     // Performance API
     if (flags.getEnableGlobalPerformanceClasses() || flags.getEnableNodeJsPerfHooksModule()) {
