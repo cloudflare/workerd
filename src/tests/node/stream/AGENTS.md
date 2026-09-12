@@ -165,7 +165,18 @@ The implementation under test is `src/node/internal/streams_readable.js`
 - `compose()`: web streams are validated by position; a web head is
   written through its writer, a web tail read through its reader; a node
   tail's output is drained into the composed stream's own buffer as it is
-  produced, so `end()` completes without a consumer.
+  produced, so `end()` completes without a consumer. With a web tail the
+  composed writable side finishes once the tail's readable side has closed
+  AND the pipeline has completed (a tail's `close()` may close its readable
+  at once yet settle later). Destroying a running composition fails its
+  pipeline with the destroy error — a node tail is destroyed as a stage;
+  with a web tail the pipeline is failed directly, whatever state its
+  readable side is in — so every stage is destroyed with that error (the
+  head, a web tail's writable side) and the composed stream reports it — an
+  `AbortError` for a bare `destroy()` while the pipeline runs — then
+  closes. A composition whose sides have both completed (the automatic
+  destroy, a readable-only composition drained to its end) leaves its
+  pipeline to complete and reports the pipeline's (clean) outcome.
 
 ### finished / addAbortSignal
 
