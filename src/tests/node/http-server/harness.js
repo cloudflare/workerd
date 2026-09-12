@@ -70,3 +70,28 @@ export function manualStream() {
   });
   return { stream, controller, cancels: events };
 }
+
+// Runs fn while recording every uncaught exception and unhandled rejection
+// the isolate reports (waiting a beat for late ones), and returns them;
+// the caller decides which, if any, were expected.
+export async function collectUncaught(fn) {
+  const leaked = [];
+  const onError = (event) => {
+    leaked.push(event.error ?? event.message);
+    event.preventDefault();
+  };
+  const onRejection = (event) => {
+    leaked.push(event.reason);
+    event.preventDefault();
+  };
+  globalThis.addEventListener('error', onError);
+  globalThis.addEventListener('unhandledrejection', onRejection);
+  try {
+    await fn();
+    await scheduler.wait(20);
+  } finally {
+    globalThis.removeEventListener('error', onError);
+    globalThis.removeEventListener('unhandledrejection', onRejection);
+  }
+  return leaked;
+}
