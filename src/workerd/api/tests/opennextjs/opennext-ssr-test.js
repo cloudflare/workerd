@@ -351,9 +351,21 @@ export const redirectPageWithoutTarget = {
 
 export const rscRequestBasic = {
   async test() {
-    const response = await fetchWorker('/', {
-      headers: { accept: '*/*', RSC: '1' },
-    });
+    const rscHeaders = { accept: '*/*', RSC: '1' };
+    let response = await fetchWorker('/', { headers: rscHeaders });
+
+    // Next.js 16.3+ enables validateRSCRequestHeaders by default, which
+    // returns a 307 redirect to a URL with a valid _rsc query parameter
+    // when the request lacks one. Follow the redirect to get the actual
+    // RSC payload.
+    if (response.status === 307) {
+      const location = response.headers.get('location');
+      ok(location, 'Redirect should have a Location header');
+      const redirectUrl = new URL(location, 'http://localhost');
+      response = await fetchWorker(redirectUrl.pathname + redirectUrl.search, {
+        headers: rscHeaders,
+      });
+    }
 
     ok(
       response.status >= 200 && response.status < 500,
