@@ -284,6 +284,261 @@ export const addAbortSignalAlreadyAborted = {
   },
 };
 
+// addAbortSignal() on one branch of a tee errors that branch alone: the
+// sibling keeps its buffered chunks, keeps receiving what the source
+// enqueues afterwards, and closes with the source. The source is not
+// cancelled while the sibling is still reading.
+export const addAbortSignalOnTeeBranchSparesSibling = {
+  async test() {
+    if (!usingTsImpl) return;
+    let sourceController;
+    let cancelReason;
+    const source = new ReadableStream({
+      start(c) {
+        sourceController = c;
+        c.enqueue('a');
+        c.enqueue('b');
+      },
+      cancel(reason) {
+        cancelReason = reason;
+      },
+    });
+    const [branch1, branch2] = source.tee();
+    const controller = new AbortController();
+    addAbortSignal(controller.signal, branch1);
+    const reader1 = branch1.getReader();
+    const reader2 = branch2.getReader();
+    strictEqual((await reader1.read()).value, 'a');
+    strictEqual((await reader1.read()).value, 'b');
+    const pending = reader1.read();
+    const reason = new Error('one consumer gives up');
+    controller.abort(reason);
+    await rejects(pending, (err) => {
+      strictEqual(err.name, 'AbortError');
+      strictEqual(err.cause, reason);
+      return true;
+    });
+    await rejects(reader1.closed, { name: 'AbortError' });
+    // The sibling's buffered data and later chunks are intact.
+    strictEqual((await reader2.read()).value, 'a');
+    strictEqual((await reader2.read()).value, 'b');
+    sourceController.enqueue('c');
+    strictEqual((await reader2.read()).value, 'c');
+    strictEqual(cancelReason, undefined);
+    sourceController.close();
+    strictEqual((await reader2.read()).done, true);
+    await reader2.closed;
+  },
+};
+
+// Once the aborted branch's sibling cancels too, the source has no consumer
+// left and is cancelled — the aborted branch counts as gone.
+export const addAbortSignalOnTeeBranchThenSiblingCancel = {
+  async test() {
+    if (!usingTsImpl) return;
+    let cancelReason;
+    const source = new ReadableStream({
+      pull() {
+        return new Promise(() => {});
+      },
+      cancel(reason) {
+        cancelReason = reason;
+      },
+    });
+    const [branch1, branch2] = source.tee();
+    const controller = new AbortController();
+    addAbortSignal(controller.signal, branch1);
+    controller.abort();
+    await rejects(branch1.getReader().read(), { name: 'AbortError' });
+    strictEqual(cancelReason, undefined);
+    const bye = new Error('the other consumer leaves too');
+    await branch2.cancel(bye);
+    ok(cancelReason instanceof AggregateError);
+    ok(cancelReason.errors.includes(bye));
+    ok(cancelReason.errors.some((err) => err.name === 'AbortError'));
+  },
+};
+
+// A branch that has itself been teed is a permanently locked, inert shell:
+// under the queued tee model its two branches took its place as consumers
+// of the shared queue, and there is no per-branch controller for the hook
+// to error (a deliberate divergence from the spec's tee). Aborting it
+// changes nothing — not for its branches, not for its sibling — and the
+// source is cancelled only once every consumer has left, with each one's
+// reason.
+export const addAbortSignalOnTeedAwayBranchIsInert = {
+  async test() {
+    if (!usingTsImpl) return;
+    let sourceController;
+    let cancelReason;
+    const source = new ReadableStream({
+      start(c) {
+        sourceController = c;
+      },
+      cancel(reason) {
+        cancelReason = reason;
+      },
+    });
+    const [a, b] = source.tee();
+    const [a1, a2] = a.tee();
+    strictEqual(a.locked, true);
+    const controller = new AbortController();
+    addAbortSignal(controller.signal, a);
+    const readers = [a1, a2, b].map((branch) => branch.getReader());
+    const pending = readers.map((reader) => reader.read());
+    controller.abort(new Error('aimed at the teed-away branch'));
+    sourceController.enqueue('x');
+    for (const read of pending) {
+      strictEqual((await read).value, 'x');
+    }
+    strictEqual(a.locked, true);
+    strictEqual(cancelReason, undefined);
+    const reasons = [new Error('a1'), new Error('a2'), new Error('b')];
+    const cancels = readers.map((reader, i) => reader.cancel(reasons[i]));
+    await Promise.all(cancels);
+    ok(cancelReason instanceof AggregateError);
+    strictEqual(cancelReason.errors.length, 3);
+    for (let i = 0; i < reasons.length; i++) {
+      strictEqual(cancelReason.errors[i], reasons[i]);
+    }
+  },
+};
+
+// The same on a byte stream, with a BYOB read pending on one of the
+// branches: aborting the teed-away branch leaves it pending; aborting that
+// branch itself rejects it, and its sibling and the outer branch read on.
+export const addAbortSignalOnTeedAwayByteBranchIsInert = {
+  async test() {
+    if (!usingTsImpl) return;
+    let sourceController;
+    const source = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        sourceController = c;
+      },
+    });
+    const [a, b] = source.tee();
+    const [a1, a2] = a.tee();
+    const teedAway = new AbortController();
+    addAbortSignal(teedAway.signal, a);
+    const leaf = new AbortController();
+    addAbortSignal(leaf.signal, a1);
+    const byob = a1.getReader({ mode: 'byob' });
+    const pendingByob = byob.read(new Uint8Array(8));
+    const reader2 = a2.getReader();
+    const readerB = b.getReader();
+    teedAway.abort();
+    strictEqual(
+      await Promise.race([
+        pendingByob,
+        scheduler.wait(20).then(() => 'still pending'),
+      ]),
+      'still pending'
+    );
+    leaf.abort();
+    await rejects(pendingByob, { name: 'AbortError' });
+    sourceController.enqueue(new Uint8Array([7]));
+    strictEqual((await reader2.read()).value[0], 7);
+    strictEqual((await readerB.read()).value[0], 7);
+    sourceController.close();
+    strictEqual((await reader2.read()).done, true);
+    strictEqual((await readerB.read()).done, true);
+  },
+};
+
+// A branch's cancel() promise settles with the source's cleanup, whether
+// the sibling is aborted before or after the cancel: a deferred cleanup
+// keeps it pending until the cleanup is done, a failing one rejects it.
+export const addAbortSignalOnTeeBranchSettlesWithSourceCleanup = {
+  async test() {
+    if (!usingTsImpl) return;
+    for (const abortFirst of [false, true]) {
+      let finishCleanup;
+      const deferred = new ReadableStream({
+        pull() {
+          return new Promise(() => {});
+        },
+        cancel() {
+          return new Promise((resolve) => {
+            finishCleanup = resolve;
+          });
+        },
+      });
+      const [b1, b2] = deferred.tee();
+      const ac = new AbortController();
+      addAbortSignal(ac.signal, b2);
+      let cancelled;
+      if (abortFirst) {
+        ac.abort();
+        cancelled = b1.cancel('done');
+      } else {
+        cancelled = b1.cancel('done');
+        ac.abort();
+      }
+      let settled = false;
+      cancelled.then(
+        () => (settled = true),
+        () => (settled = true)
+      );
+      await scheduler.wait(5);
+      strictEqual(settled, false);
+      finishCleanup();
+      await cancelled;
+
+      const cleanupFailure = new Error('cleanup failed');
+      const failing = new ReadableStream({
+        pull() {
+          return new Promise(() => {});
+        },
+        cancel() {
+          throw cleanupFailure;
+        },
+      });
+      const [c1, c2] = failing.tee();
+      const ac2 = new AbortController();
+      addAbortSignal(ac2.signal, c2);
+      let failed;
+      if (abortFirst) {
+        ac2.abort();
+        failed = c1.cancel('done');
+      } else {
+        failed = c1.cancel('done');
+        ac2.abort();
+      }
+      await rejects(failed, (err) => err === cleanupFailure);
+    }
+  },
+};
+
+// The same for a byte stream's tee: a pending BYOB read on the aborted
+// branch rejects, and the sibling keeps reading what arrives afterwards.
+export const addAbortSignalOnByteTeeBranchSparesSibling = {
+  async test() {
+    if (!usingTsImpl) return;
+    let sourceController;
+    const source = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        sourceController = c;
+      },
+    });
+    const [branch1, branch2] = source.tee();
+    const controller = new AbortController();
+    addAbortSignal(controller.signal, branch1);
+    const reader1 = branch1.getReader({ mode: 'byob' });
+    const reader2 = branch2.getReader();
+    const pending = reader1.read(new Uint8Array(4));
+    controller.abort();
+    await rejects(pending, { name: 'AbortError' });
+    await rejects(reader1.closed, { name: 'AbortError' });
+    sourceController.enqueue(new Uint8Array([1, 2, 3]));
+    const { value } = await reader2.read();
+    strictEqual(Array.from(value).join(','), '1,2,3');
+    sourceController.close();
+    strictEqual((await reader2.read()).done, true);
+  },
+};
+
 // The hooks cover runtime-provided (native-backed) streams too: aborting a
 // Response body errors its reads.
 export const addAbortSignalOnResponseBody = {

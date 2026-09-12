@@ -192,8 +192,9 @@ export const teeErrorPropagatesBothBranches = {
 // two tests that HANG the TypeScript WPT run): when both branches
 // cancel, the spec passes the source an ARRAY [reason1, reason2].
 // TypeScript intentionally passes an AggregateError carrying both
-// reasons (in branch order, by identity), and the FIRST branch's cancel
-// promise stays pending until the second branch cancels. C++ runs the
+// reasons (in the order the branches cancelled, by identity), and the
+// FIRST branch's cancel promise stays pending until the second branch
+// cancels. C++ runs the
 // source cancel with only the reason of whichever branch completed the
 // pair, and the first branch's cancel promise fulfills immediately.
 export const teeCancelReasonComposite = {
@@ -228,9 +229,9 @@ export const teeCancelReasonComposite = {
   },
 };
 
-// The C++ single-reason behavior is order-dependent: whichever branch
-// completes the pair supplies the reason (reversed order pinned here;
-// TypeScript aggregates in branch order regardless).
+// Both behaviors are order-dependent: under C++ whichever branch completes
+// the pair supplies the reason; TypeScript aggregates the reasons in the
+// order the branches cancelled (reversed order pinned here).
 export const teeCancelReverseOrder = {
   async test() {
     const r1 = { branch: 1 };
@@ -247,8 +248,9 @@ export const teeCancelReverseOrder = {
     await scheduler.wait(10);
     if (usingTsImpl) {
       ok(cancelReason instanceof AggregateError);
-      strictEqual(cancelReason.errors[0], r1);
-      strictEqual(cancelReason.errors[1], r2);
+      strictEqual(cancelReason.errors.length, 2);
+      strictEqual(cancelReason.errors[0], r2);
+      strictEqual(cancelReason.errors[1], r1);
     } else {
       strictEqual(cancelReason, r1);
     }
