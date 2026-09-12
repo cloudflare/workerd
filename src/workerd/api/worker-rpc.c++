@@ -17,6 +17,8 @@
 
 #include <capnp/membrane.h>
 
+#include <cmath>
+
 namespace workerd::api {
 
 namespace {
@@ -471,6 +473,84 @@ enum class JsRpcOperation {
   GET_PROPERTY,
 };
 
+constexpr size_t JSRPC_ARGS_PREVIEW_LIMIT = 4096;
+constexpr int JSRPC_ARGS_PREVIEW_MAX_ARGS = 16;
+constexpr size_t JSRPC_ARGS_PREVIEW_STRING_LIMIT = 128;
+constexpr kj::StringPtr JSRPC_ARGS_PREVIEW_OMITTED = R"({"$type":"omitted"})"_kj;
+
+static kj::String makeJsRpcArgPreview(jsg::Lock& js, v8::Local<v8::Value> value) {
+  if (value->IsProxy()) return kj::str(R"({"$type":"proxy"})");
+  if (value->IsUndefined()) return kj::str(R"({"$type":"undefined"})");
+  if (value->IsNull()) return kj::str("null");
+  if (value->IsBoolean()) {
+    return kj::str(value.As<v8::Boolean>()->Value() ? "true" : "false");
+  }
+  if (value->IsNumber()) {
+    auto number = value.As<v8::Number>()->Value();
+    if (kj::isNaN(number)) return kj::str(R"({"$type":"number","value":"NaN"})");
+    if (std::isinf(number)) {
+      return number < 0 ? kj::str(R"({"$type":"number","value":"-Infinity"})")
+                        : kj::str(R"({"$type":"number","value":"Infinity"})");
+    }
+    if (number == 0 && std::signbit(number)) {
+      return kj::str(R"({"$type":"number","value":"-0"})");
+    }
+    return js.serializeJson(value);
+  }
+  if (value->IsString()) {
+    jsg::JsString string(value.As<v8::String>());
+    auto length = static_cast<size_t>(string.length(js));
+    auto prefix = kj::heapArray<uint16_t>(kj::min(length, JSRPC_ARGS_PREVIEW_STRING_LIMIT));
+    auto copied = string.writeInto(js, prefix.asPtr());
+    KJ_ASSERT(copied.written == prefix.size());
+    auto encoded = js.serializeJson(js.str(prefix.asPtr()));
+    if (length > prefix.size()) {
+      return kj::str(R"({"$type":"string","value":)", encoded, R"(,"truncated":true})");
+    }
+    return encoded;
+  }
+  if (value->IsBigInt()) return kj::str(R"({"$type":"bigint"})");
+  if (value->IsFunction()) return kj::str(R"({"$type":"function"})");
+  if (value->IsArray()) {
+    return kj::str(R"({"$type":"array","length":)", value.As<v8::Array>()->Length(), "}");
+  }
+  if (value->IsSymbol()) return kj::str(R"({"$type":"symbol"})");
+  if (value->IsObject()) return kj::str(R"({"$type":"object"})");
+  return kj::str(R"({"$type":"unknown"})");
+}
+
+static void appendJsRpcArgPreview(kj::Vector<char>& output, kj::StringPtr item) {
+  if (output.size() > 1) output.add(',');
+  output.addAll(item);
+}
+
+static kj::String makeJsRpcArgsPreview(
+    jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+  kj::Vector<char> output(JSRPC_ARGS_PREVIEW_LIMIT + 1);
+  output.add('[');
+
+  auto count = kj::min(args.Length(), JSRPC_ARGS_PREVIEW_MAX_ARGS);
+  for (int i = 0; i < count; ++i) {
+    auto item = makeJsRpcArgPreview(js, args[i]);
+    auto hasRemaining = i + 1 < args.Length();
+    auto required = (i > 0 ? 1 : 0) + item.size() + 1;
+    if (hasRemaining) required += 1 + JSRPC_ARGS_PREVIEW_OMITTED.size();
+    if (output.size() + required > JSRPC_ARGS_PREVIEW_LIMIT) {
+      appendJsRpcArgPreview(output, JSRPC_ARGS_PREVIEW_OMITTED);
+      break;
+    }
+
+    appendJsRpcArgPreview(output, item);
+    if (i + 1 == count && hasRemaining) {
+      appendJsRpcArgPreview(output, JSRPC_ARGS_PREVIEW_OMITTED);
+    }
+  }
+
+  output.add(']');
+  output.add('\0');
+  return kj::String(output.releaseAsArray());
+}
+
 static void setJsRpcCallSpanTags(TraceContext& span,
     JsRpcClientProvider& parent,
     kj::Maybe<const kj::String&> name,
@@ -622,6 +702,11 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
             // TODO(perf): Actually use the size hint.
             return builder.getOperation().initCallWithArgs();
           });
+          if (jsRpcCallSpan.isObserved()) {
+            jsRpcCallSpan.setTag("jsrpc.args"_kjc, makeJsRpcArgsPreview(js, args));
+          }
+        } else if (jsRpcCallSpan.isObserved()) {
+          jsRpcCallSpan.setTag("jsrpc.args"_kjc, "[]"_kjc);
         }
       } else {
         // This is a property access.
