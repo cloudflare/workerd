@@ -8,6 +8,10 @@
     different directories to use angled brackets
   - `workerd-consume`: validates that calls to methods annotated with
     WD_CONSUME are made through consume() when invoked on kj::Ptr.
+  - `workerd-legacy-stream-alloc`: flags direct allocation of the legacy C++
+    ReadableStream / WritableStream (`js.alloc<ReadableStream>(...)`) outside
+    JsReadableStream::create() / JsWritableStream::create(), the dispatch
+    points that select the stream implementation by compatibility flag.
   - `workerd-promise-ignore-result` - warns on superfluous `ignoreResult()`
     calls: on promises that are immediately `co_await`ed, and on
     `capnp::Request::send()` results, which should use `sendIgnoringResult()`
@@ -33,6 +37,7 @@ filegroup(
     srcs = [
         "angled-includes.c++",
         "consume.c++",
+        "legacy-stream-alloc.c++",
         "promise-ignore-result.c++",
         "unsafe-continuation-capture.c++",
         "visit-for-gc.c++",
@@ -46,6 +51,7 @@ filegroup(
     srcs = [
         "angled-includes.h",
         "consume.h",
+        "legacy-stream-alloc.h",
         "promise-ignore-result.h",
         "unsafe-continuation-capture.h",
         "visit-for-gc.h",
@@ -103,6 +109,22 @@ sh_test(
     data = [
         ":consume-negative-test.c++",
         ":consume-positive-test.c++",
+        ":workerd-lint",
+        "//tools:clang-tidy",
+    ],
+    tags = ["no-asan"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+sh_test(
+    name = "legacy-stream-alloc-test",
+    srcs = ["legacy-stream-alloc-test.sh"],
+    data = [
+        ":legacy-stream-alloc-negative-test.c++",
+        ":legacy-stream-alloc-positive-test.c++",
         ":workerd-lint",
         "//tools:clang-tidy",
     ],

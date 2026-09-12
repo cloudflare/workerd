@@ -5,6 +5,10 @@
 
 #include <kj/test.h>
 
+// These tests exercise the legacy C++ streams implementation directly, so they allocate the
+// legacy ReadableStream rather than going through the JsReadableStream implementation dispatch.
+// NOLINTBEGIN(workerd-legacy-stream-alloc)
+
 namespace workerd::api {
 
 namespace {
@@ -199,3 +203,5 @@ KJ_TEST("ReadableStream pumpTo pending write cancellation regression") {
 
 }  // namespace
 }  // namespace workerd::api
+
+// NOLINTEND(workerd-legacy-stream-alloc)

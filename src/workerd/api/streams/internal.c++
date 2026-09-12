@@ -1067,6 +1067,10 @@ ReadableStreamController::Tee ReadableStreamInternalController::tee(jsg::Lock& j
       !isPendingClosure, TypeError, "This ReadableStream belongs to an object that is closing.");
   readState.transitionTo<Locked>();
   disturbed = true;
+  // The branches of a legacy stream are legacy streams by construction: they are built directly
+  // over this controller's state and sources, not through the implementation dispatch in
+  // JsReadableStream::create().
+  // NOLINTBEGIN(workerd-legacy-stream-alloc)
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       // Create two closed ReadableStreams.
@@ -1108,6 +1112,7 @@ ReadableStreamController::Tee ReadableStreamInternalController::tee(jsg::Lock& j
           kj::heap<TeeBranch>(newTeeErrorAdapter(kj::mv(tee.branches[1]))));
     }
   }
+  // NOLINTEND(workerd-legacy-stream-alloc)
 
   KJ_UNREACHABLE;
 }
