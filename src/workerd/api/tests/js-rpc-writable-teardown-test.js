@@ -9,17 +9,24 @@
 // IncomingRequest is gone (during TaskSet teardown). IoContext::run() requires a current
 // IncomingRequest, so the abort must be skipped in that window rather than attempted.
 //
-// Two configurations embed this file, so both writer-driven adapters are covered: without
-// typescript_implemented_streams the JS-backed sink below has no WritableStreamSink to detach
-// and serializes through the legacy adapter, and with the flag the same stream is a TypeScript
-// stream and serializes through the TypeScript writer sink.
+// Same-implementation and cross-implementation configurations embed this file. Without
+// typescript_implemented_streams the JS-backed sink below has no WritableStreamSink to detach and
+// serializes through the legacy adapter; with the flag it serializes through the TypeScript writer
+// sink. The cross-implementation configurations also cover each received-stream implementation.
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import * as assert from 'node:assert';
 
 const enc = new TextEncoder();
+const usingTsImpl =
+  globalThis.Cloudflare.compatibilityFlags['typescript_implemented_streams'] ===
+  true;
 
 export class Peer extends WorkerEntrypoint {
+  usesTypeScriptStreams() {
+    return usingTsImpl;
+  }
+
   // Writes into the received writable and returns without closing it, so the writer is still
   // live when the runner drops the stream.
   async writeAndAbandon(stream) {
@@ -33,6 +40,13 @@ export default {
   async test(controller, env) {
     // Both services embed this file; only the runner has the binding.
     if (env.PEER === undefined) return;
+
+    if (env.EXPECT_CROSS_IMPL !== undefined) {
+      assert.notStrictEqual(
+        usingTsImpl,
+        await env.PEER.usesTypeScriptStreams()
+      );
+    }
 
     // A JS-backed sink accepts each chunk immediately, so the peer's write settles without
     // anything draining the stream and the call returns with the writer still held.
