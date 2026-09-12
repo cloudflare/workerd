@@ -61,6 +61,7 @@ import {
   isNodeStream,
   willEmitClose as _willEmitClose,
   kIsClosedPromise,
+  isOutgoingMessage,
 } from 'node-internal:streams_util';
 import { addAbortListener } from 'node-internal:events';
 import type Stream from 'node:stream';
@@ -121,8 +122,16 @@ export function eos(
     );
   }
 
+  // An http OutgoingMessage (a ClientRequest, a ServerResponse) counts as
+  // readable as well as writable, as Node's does — Node's is a legacy
+  // Stream without a _writableState: 'finish' alone does not finish it,
+  // its 'close' (the end of the exchange) does — so finished() on a request
+  // reports the response's end, and addAbortSignal() stays armed for the
+  // whole exchange. Ours is a Writable, told apart by its own state fields,
+  // not by shape: a plain Writable carrying a setHeader() is a writable.
   const readable =
-    (options as EOSOptions).readable ?? isReadableNodeStream(stream);
+    (options as EOSOptions).readable ??
+    (isOutgoingMessage(stream) || isReadableNodeStream(stream));
   const writable =
     (options as EOSOptions).writable ?? isWritableNodeStream(stream);
 

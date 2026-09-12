@@ -109,8 +109,9 @@ Tests run sequentially, one server (`withServer`) at a time.
 
 - 'finish' fires once the body has been handed off, and closes the stream;
   'close' follows it (a microtask later), once, and marks the response
-  destroyed (a `destroy()` from inside 'finish' adds nothing — the whole
-  body reaches the client, 'close' once, no 'error'): a `write()` after `end()` fails through its callback with
+  destroyed (`stream.finished(res)` reports that 'close', as in Node; a
+  `destroy()` from inside 'finish' adds nothing — the whole body reaches
+  the client, 'close' once, no 'error'): a `write()` after `end()` fails through its callback with
   `ERR_STREAM_WRITE_AFTER_END` (a second `end()` is inert) and, once the
   response is closed, never as an 'error' event.
 - `destroy(err)` emits 'error' then 'close'. Before the headers, the
@@ -163,7 +164,7 @@ lifecycle" — and the pure-streams behavior belongs to
 | --- | --- |
 | `request-body.js` | GET ends at once; Buffer/string chunks and `complete`; late 'data' listener; 256 KiB in several events; streaming body incremental + chunked headers; `FixedLengthStream` Content-Length; pause/resume (small chunks, and a body above the high-water mark); pipe echo; several pipe destinations; `pipeline` through a `TransformStream` |
 | `request-destroy.js` | `destroy(err)` with listener; bare `destroy()` closes quietly; unlistened `destroy(err)` swallowed; mid-body destroy cancels the body stream with the reason and stops 'data'; bare destroy cancels with `undefined`; no cancel after completion |
-| `response-body.js` | implicit headers and chunk types; streaming before `end()`; large and many writes; Content-Length capping; 204/304; HEAD (`_hasBody`, dropped writes, null body); `rejectNonStandardBodyWrites`; cork/uncork; backpressure signaling and 'drain' parity; acceptance after headers with `highWaterMark`; web source pipelined in; 'finish' then 'close' with `closed`; write after end via callback only; Content-Length lies (`abc`, `0`, negative, fraction, padded) |
+| `response-body.js` | implicit headers and chunk types; streaming before `end()`; large and many writes; Content-Length capping; 204/304; HEAD (`_hasBody`, dropped writes, null body); `rejectNonStandardBodyWrites`; cork/uncork; backpressure signaling and 'drain' parity; acceptance after headers with `highWaterMark`; web source pipelined in; 'finish' then 'close' with `closed`; `finished(res)` after 'close'; write after end via callback only; Content-Length lies (`abc`, `0`, negative, fraction, padded) |
 | `piping.js` | 1 MiB into a 16 KiB slow sink: bounded buffer, pauses/resumes, all bytes; `unpipe()` after the first chunk ('pipe'/'unpipe' on the destination, delivery stops, source paused, rest to a 'data' listener, destination not ended); erroring destination unpiped ('unpipe' before its 'error', one write only, source paused); source error not forwarded (destination stays piped, open, unerrored) |
 | `request-body-failures.js` | body stream erroring mid-upload and while paused (aborted, error, close incomplete, response still sent); a detached-view chunk (`TypeError`) |
 | `reentrancy.js` | `destroy()` inside 'finish'; pause/resume inside every 'data' |
