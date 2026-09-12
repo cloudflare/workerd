@@ -1,0 +1,35 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Exercise the bucket multipart RPC contract with both struct-wrapping modes.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "fast-structs",
+      worker = (
+        modules = [
+          (name = "worker", esModule = "export { R2BindingEntrypoint, jsrpcMultipartTests } from './r2-test.js';"),
+          (name = "r2-test.js", esModule = embed "r2-test.js"),
+        ],
+        bindings = [
+          (name = "BUCKET", r2Bucket = (name = "fast-structs", entrypoint = "R2BindingEntrypoint")),
+          (name = "R2_TRANSPORT", text = "jsrpc"),
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
+                              "streams_enable_constructors", "r2_binding_jsrpc", "enable_fast_jsg_struct"],
+      ),
+    ),
+    ( name = "slow-structs",
+      worker = (
+        modules = [
+          (name = "worker", esModule = "export { R2BindingEntrypoint, jsrpcMultipartTests } from './r2-test.js';"),
+          (name = "r2-test.js", esModule = embed "r2-test.js"),
+        ],
+        bindings = [
+          (name = "BUCKET", r2Bucket = (name = "slow-structs", entrypoint = "R2BindingEntrypoint")),
+          (name = "R2_TRANSPORT", text = "jsrpc"),
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
+                              "streams_enable_constructors", "r2_binding_jsrpc", "disable_fast_jsg_struct"],
+      ),
+    ),
+  ],
+);

@@ -1,0 +1,37 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The main R2 JSRPC suite disables fast structs. Exercise both modes here because fast structs
+# materialize absent optional fields as undefined, while the gateway identifies suffix ranges
+# by property presence. Offset/length ranges must reach the gateway without a suffix property.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "fast-structs",
+      worker = (
+        modules = [
+          (name = "worker", esModule = "export { R2BindingEntrypoint, jsrpcRangeTests } from './r2-test.js';"),
+          (name = "r2-test.js", esModule = embed "r2-test.js"),
+        ],
+        bindings = [
+          (name = "BUCKET", r2Bucket = (name = "fast-structs", entrypoint = "R2BindingEntrypoint")),
+          (name = "R2_TRANSPORT", text = "jsrpc"),
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
+                              "r2_binding_jsrpc", "enable_fast_jsg_struct"],
+      ),
+    ),
+    ( name = "slow-structs",
+      worker = (
+        modules = [
+          (name = "worker", esModule = "export { R2BindingEntrypoint, jsrpcRangeTests } from './r2-test.js';"),
+          (name = "r2-test.js", esModule = embed "r2-test.js"),
+        ],
+        bindings = [
+          (name = "BUCKET", r2Bucket = (name = "slow-structs", entrypoint = "R2BindingEntrypoint")),
+          (name = "R2_TRANSPORT", text = "jsrpc"),
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
+                              "r2_binding_jsrpc", "disable_fast_jsg_struct"],
+      ),
+    ),
+  ],
+);

@@ -6,6 +6,7 @@
 
 #include <workerd/api/blob.h>
 #include <workerd/api/js-readable-stream.h>
+#include <workerd/api/worker-rpc.h>
 #include <workerd/jsg/jsg.h>
 
 namespace kj {
@@ -15,6 +16,41 @@ class HttpClient;
 namespace workerd::api {
 
 class ReadableStreamSource;
+
+// JsRpcPromise is a custom thenable. Resolving a fresh promise with it makes V8 adopt it even when
+// the unwrap_custom_thenables compatibility flag is disabled.
+jsg::Promise<jsg::Value> normalizeR2RpcPromise(jsg::Lock& js, jsg::Value rpcPromise);
+
+template <typename... Args>
+jsg::Value callR2RpcMethod(jsg::Lock& js,
+    jsg::Ref<JsRpcProperty> rpcProp,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(Args...)>>& fnHandler,
+    Args... args) {
+  auto wrappedProp = rpcPropHandler.wrap(js, kj::mv(rpcProp));
+  auto fn = KJ_ASSERT_NONNULL(fnHandler.tryUnwrap(js, wrappedProp));
+  return fn(js, kj::mv(args)...);
+}
+
+template <typename Result>
+jsg::Promise<Result> unwrapR2RpcPromise(jsg::Lock& js,
+    jsg::Value rpcPromise,
+    const jsg::TypeHandler<jsg::Promise<Result>>& resultPromiseHandler) {
+  auto normalizedPromise = normalizeR2RpcPromise(js, kj::mv(rpcPromise));
+  return KJ_ASSERT_NONNULL(resultPromiseHandler.tryUnwrap(js, normalizedPromise.consumeHandle(js)));
+}
+
+template <typename Result, typename... Args>
+jsg::Promise<Result> callR2RpcMethod(jsg::Lock& js,
+    jsg::Ref<JsRpcProperty> rpcProp,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(Args...)>>& fnHandler,
+    const jsg::TypeHandler<jsg::Promise<Result>>& resultPromiseHandler,
+    Args... args) {
+  auto rpcPromise =
+      callR2RpcMethod(js, kj::mv(rpcProp), rpcPropHandler, fnHandler, kj::mv(args)...);
+  return unwrapR2RpcPromise<Result>(js, kj::mv(rpcPromise), resultPromiseHandler);
+}
 
 // NOTE: We don't currently actually use this as a structured object (hence the `kj::Own<R2Error>`
 // that we see pop up).
@@ -66,6 +102,16 @@ class R2Error: public jsg::Object {
 
 using R2PutValue =
     kj::OneOf<JsReadableStream, kj::Array<kj::byte>, jsg::NonCoercible<kj::String>, jsg::Ref<Blob>>;
+using R2PutValueRpc = kj::OneOf<JsReadableStream, kj::Array<kj::byte>, kj::String, jsg::Ref<Blob>>;
+
+struct PreparedR2RpcBody {
+  R2PutValueRpc value;
+  double size;
+};
+
+// Prepares the transport value and the exact byte length passed alongside it. The length is an
+// internal argument to the gateway's named RPC method, not part of the public R2 API.
+PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value);
 
 struct R2Result {
   uint httpStatus;

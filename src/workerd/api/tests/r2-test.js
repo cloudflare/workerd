@@ -3,9 +3,20 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
+import { WorkerEntrypoint } from 'cloudflare:workers';
 
 const key = 'basicKey';
 const body = 'content';
+const rpcStreamBody = 'café';
+const rpcInlineBodyLimit = 16 << 20;
+const largeRpcBodySize = rpcInlineBodyLimit + 2;
+const rpcRanges = {
+  offset: { offset: 1 },
+  length: { length: 3 },
+  bounded: { offset: 0, length: 3 },
+  suffix: { suffix: 2 },
+  empty: {},
+};
 const httpMetaObj = {
   contentType: 'text/plain',
   contentLanguage: 'en-US',
@@ -59,7 +70,7 @@ const sha256Buffer = new Uint8Array([
 const objResponse = {
   name: key,
   version: 'objectVersion',
-  size: '123',
+  size: '7',
   etag: 'objectEtag',
   uploaded: '1724767257918',
   storageClass: 'Standard',
@@ -80,10 +91,87 @@ const HeadObject = {
   },
   httpEtag: '"objectEtag"',
   etag: 'objectEtag',
-  size: 123,
+  size: 7,
   version: 'objectVersion',
   key,
 };
+
+function buildRpcHead(requestKey, multipartOptions) {
+  const result = {
+    key,
+    version: objResponse.version,
+    size: Number(objResponse.size),
+    etag: objResponse.etag,
+    uploaded: new Date(Number(objResponse.uploaded)),
+    storageClass: multipartOptions?.storageClass ?? objResponse.storageClass,
+    checksums: {},
+    httpMetadata: {},
+    customMetadata: multipartOptions?.customMetadata ?? {},
+  };
+
+  if (multipartOptions?.httpMetadata !== undefined) {
+    result.httpMetadata =
+      multipartOptions.httpMetadata instanceof Headers
+        ? httpMetaObj
+        : multipartOptions.httpMetadata;
+  }
+
+  switch (requestKey) {
+    case 'httpMetadata':
+      result.httpMetadata = httpMetaObj;
+      break;
+    case 'customMetadata':
+      result.customMetadata = customMetadata;
+      break;
+    case 'classInfrequentAccess':
+      result.storageClass = 'InfrequentAccess';
+      break;
+    case 'ssec':
+    case 'ssecMultipart':
+      result.ssecKeyMd5 = keyMd5;
+      break;
+    case 'multipleChecksums':
+      result.checksums = {
+        md5: md5Buffer.buffer,
+        sha1: sha1Buffer.buffer,
+        sha256: sha256Buffer.buffer,
+      };
+      break;
+    case 'ranged':
+      result.range = { offset: 10, length: 20 };
+      break;
+  }
+
+  return result;
+}
+
+async function assertLargeRpcBody(requestKey, value, valueSize) {
+  assert(value instanceof ReadableStream);
+  assert.strictEqual(valueSize, largeRpcBodySize);
+  const uploaded = new Uint8Array(await new Response(value).arrayBuffer());
+  assert.strictEqual(uploaded.byteLength, largeRpcBodySize);
+
+  switch (requestKey) {
+    case 'largeBuffer':
+      assert.strictEqual(uploaded[0], 0x11);
+      assert.strictEqual(uploaded[1], 0x41);
+      assert.strictEqual(uploaded.at(-2), 0x41);
+      assert.strictEqual(uploaded.at(-1), 0x22);
+      break;
+    case 'largeString':
+      assert.strictEqual(uploaded[0], 0xc3);
+      assert.strictEqual(uploaded[1], 0xa9);
+      assert.strictEqual(uploaded.at(-2), 0xc3);
+      assert.strictEqual(uploaded.at(-1), 0xa9);
+      break;
+    case 'largeBlob':
+      assert.strictEqual(uploaded[0], 0x5a);
+      assert.strictEqual(uploaded.at(-1), 0x5a);
+      break;
+    default:
+      assert.fail(`unexpected large RPC body key: ${requestKey}`);
+  }
+}
 
 function buildGetResponse({ head, body, isList } = {}) {
   const encoder = new TextEncoder();
@@ -114,6 +202,7 @@ function buildGetResponse({ head, body, isList } = {}) {
     },
   });
 }
+
 async function compareResponse(res, { head, body } = {}, bytes) {
   // Destructuring syntax looks ugly, but gets around needing to construct HeadResponse objects(somehow?)
   const { ...obj } = await res;
@@ -136,7 +225,11 @@ async function compareResponse(res, { head, body } = {}, bytes) {
   }
 }
 
-export default {
+// TODO: Let each test configure expected calls and responses shared by both transports.
+// For example, head('missing') -> not found should produce HTTP 404 or JSRPC null.
+// Each adapter should verify the method and arguments, reject unexpected calls, and encode
+// the configured response in its transport's format.
+const testWorker = {
   // Handler for HTTP request binding makes to R2
   async fetch(request, env, ctx) {
     // We only expect PUT/Get
@@ -235,6 +328,19 @@ export default {
             });
             break;
           }
+          case 'onlyIfMultipleEtags': {
+            assert.deepStrictEqual(jsonRequest.onlyIf, {
+              etagMatches: [
+                { value: 'strongEtag', type: 'strong' },
+                { value: 'weakEtag', type: 'weak' },
+              ],
+              etagDoesNotMatch: [
+                { value: 'firstEtag', type: 'strong' },
+                { value: 'secondEtag', type: 'strong' },
+              ],
+            });
+            break;
+          }
           case 'httpMetadata': {
             if (jsonRequest.method !== 'completeMultipartUpload') {
               assert.deepEqual(jsonRequest.httpFields, httpFields);
@@ -251,7 +357,7 @@ export default {
                   uploadId: 'multipartId',
                 });
               case 'completeMultipartUpload': {
-                return Response.json(head);
+                return Response.json(objResponse);
               }
             }
           }
@@ -272,7 +378,7 @@ export default {
                   uploadId: 'multipartId',
                 });
               case 'completeMultipartUpload':
-                return Response.json(head);
+                return Response.json(objResponse);
             }
           }
           // falls through
@@ -483,7 +589,7 @@ export default {
             return buildGetResponse({
               head: {
                 range: {
-                  offset: '6',
+                  offset: '5',
                   length: '2',
                 },
               },
@@ -521,6 +627,19 @@ export default {
                 },
               ],
               uploadedAfter: conditionalDate,
+            });
+            return buildGetResponse({ body });
+          }
+          case 'onlyIfMultipleEtags': {
+            assert.deepStrictEqual(jsonRequest.onlyIf, {
+              etagMatches: [
+                { value: 'strongEtag', type: 'strong' },
+                { value: 'weakEtag', type: 'weak' },
+              ],
+              etagDoesNotMatch: [
+                { value: 'firstEtag', type: 'strong' },
+                { value: 'secondEtag', type: 'strong' },
+              ],
             });
             return buildGetResponse({ body });
           }
@@ -620,7 +739,10 @@ export default {
       // GetObject(.bytes())
       await compareResponse(env.BUCKET.get(key), { body }, true);
       // HeadObject
-      await compareResponse(env.BUCKET.head(key));
+      const headObject = await env.BUCKET.head(key);
+      await compareResponse(headObject);
+      assert.strictEqual(typeof headObject.writeHttpMetadata, 'function');
+      assert.strictEqual(typeof headObject.checksums.toJSON, 'function');
       // MultipartUploads
       {
         // CreateMultipartUpload
@@ -662,8 +784,11 @@ export default {
       }
       // DeleteObject
       {
-        await env.BUCKET.delete(key);
-        await env.BUCKET.delete([key, 'basicKey2']);
+        assert.strictEqual(await env.BUCKET.delete(key), undefined);
+        assert.strictEqual(
+          await env.BUCKET.delete([key, 'basicKey2']),
+          undefined
+        );
       }
     }
     // Ranged Reads
@@ -694,7 +819,7 @@ export default {
         {
           head: {
             range: {
-              offset: 6,
+              offset: 5,
               length: 2,
             },
           },
@@ -704,26 +829,22 @@ export default {
     }
     // Conditionals
     {
-      try {
-        await env.BUCKET.put('throwOnInvalidEtag', body, {
+      await assert.rejects(
+        env.BUCKET.put('throwOnInvalidEtag', body, {
           onlyIf: new Headers({
             'if-match': 'strongEtag',
           }),
-        });
-        throw new Error('This should have thrown');
-      } catch {
-        // intentionally empty
-      }
-      try {
-        await env.BUCKET.put('throwOnInvalidEtag', body, {
+        }),
+        { message: 'Invalid ETag in if-match header' }
+      );
+      await assert.rejects(
+        env.BUCKET.put('throwOnInvalidEtag', body, {
           onlyIf: new Headers({
             'if-none-match': 'strongEtag',
           }),
-        });
-        throw new Error('This should have thrown');
-      } catch {
-        // intentionally empty
-      }
+        }),
+        { message: 'Invalid ETag in if-none-match header' }
+      );
       await env.BUCKET.put('onlyIfStrongEtag', body, {
         onlyIf: {
           etagMatches: 'strongEtag',
@@ -744,6 +865,16 @@ export default {
           etagDoesNotMatch: 'strongEtag',
           uploadedBefore: new Date('0'),
         },
+      });
+      const multipleEtagHeaders = new Headers({
+        'if-match': '"strongEtag", W/"weakEtag"',
+        'if-none-match': '"firstEtag", "secondEtag"',
+      });
+      await env.BUCKET.put('onlyIfMultipleEtags', body, {
+        onlyIf: multipleEtagHeaders,
+      });
+      await env.BUCKET.get('onlyIfMultipleEtags', {
+        onlyIf: multipleEtagHeaders,
       });
       await env.BUCKET.get('onlyIfWildcard', {
         onlyIf: {
@@ -789,9 +920,16 @@ export default {
           });
           list.objects[0] = { ...list.objects[0] };
           list.objects[0].checksums = { ...list.objects[0].checksums };
+          const expected = { ...HeadObject, ...head };
+          if (
+            env.R2_TRANSPORT === 'jsrpc' &&
+            env.R2_LIST_HONOR_INCLUDE === 'true'
+          ) {
+            expected.customMetadata = undefined;
+          }
           assert.deepEqual(list, {
             delimitedPrefixes: [],
-            objects: [{ ...HeadObject, ...head }],
+            objects: [expected],
             truncated: false,
           });
         }
@@ -801,8 +939,7 @@ export default {
             await env.BUCKET.createMultipartUpload('httpMetadata', {
               httpMetadata,
             })
-          ).complete([]),
-          { head }
+          ).complete([])
         );
       }
       // customMetadata
@@ -834,9 +971,16 @@ export default {
           });
           list.objects[0] = { ...list.objects[0] };
           list.objects[0].checksums = { ...list.objects[0].checksums };
+          const expected = { ...HeadObject, ...head };
+          if (
+            env.R2_TRANSPORT === 'jsrpc' &&
+            env.R2_LIST_HONOR_INCLUDE === 'true'
+          ) {
+            expected.httpMetadata = undefined;
+          }
           assert.deepEqual(list, {
             delimitedPrefixes: [],
-            objects: [{ ...HeadObject, ...head }],
+            objects: [expected],
             truncated: false,
           });
         }
@@ -846,8 +990,7 @@ export default {
             await env.BUCKET.createMultipartUpload('customMetadata', {
               customMetadata,
             })
-          ).complete([]),
-          { head }
+          ).complete([])
         );
       }
     }
@@ -952,7 +1095,1511 @@ export default {
 
       // Also test HEAD operation to verify checksum tags
       const headResp = await env.BUCKET.head('multipleChecksums');
-      assert.ok(headResp);
+      assert.deepStrictEqual(new Uint8Array(headResp.checksums.md5), md5Buffer);
+      assert.deepStrictEqual(
+        new Uint8Array(headResp.checksums.sha1),
+        sha1Buffer
+      );
+      assert.deepStrictEqual(
+        new Uint8Array(headResp.checksums.sha256),
+        sha256Buffer
+      );
+      assert.deepStrictEqual(headResp.checksums.toJSON(), {
+        md5: '9a0364b9e99bb480dd25e1f0284c8555',
+        sha1: '2a0364b9e99bb480dd25e1f0284c855511223344',
+        sha256:
+          '3a0364b9e99bb480dd25e1f0284c8555112233445566778899aabbccddeeff00',
+      });
     }
   },
 };
+
+const finishedRpcUploads = new Set();
+
+// Checks that the key and upload ids match test expectations
+function assertMultipartIdentity(requestKey, uploadId, action) {
+  assert.strictEqual(typeof requestKey, 'string');
+  assert.strictEqual(typeof uploadId, 'string');
+  if (requestKey.startsWith('rpc-multipart-')) {
+    assert(
+      [`${requestKey}-id`, 'resumed-a', 'resumed-b', 'missing'].includes(
+        uploadId
+      )
+    );
+    const missing =
+      uploadId === 'missing' ||
+      finishedRpcUploads.has(JSON.stringify([requestKey, uploadId]));
+    if (missing && action !== 'abortMultipartUpload') {
+      throw new Error(`${action}: Upload not found (10024)`);
+    }
+    return;
+  }
+  const expected = {
+    'rpc-must-not-call': 'invalidPartUploadId',
+    rpcStream: 'streamedId',
+    largeBuffer: 'largeUploadId',
+    'rpc-wrong-part-number': 'wrongPartUploadId',
+  }[requestKey];
+  if (expected !== undefined) {
+    assert.strictEqual(uploadId, expected);
+  } else {
+    assert(
+      uploadId === 'multipartId' ||
+        (requestKey === key && uploadId === 'resumedId')
+    );
+  }
+}
+
+// This entrypoint rejects HTTP requests so the JSRPC tests detect any transport fallback.
+// The HTTP tests use the default export's backend.
+export class R2BindingEntrypoint extends WorkerEntrypoint {
+  fetch() {
+    throw new Error('R2 JSRPC tests must not use HTTP');
+  }
+
+  head(requestKey) {
+    if (requestKey === 'missing') {
+      return null;
+    }
+    if (requestKey === 'boom') {
+      throw new Error('head: no such bucket (10006)');
+    }
+
+    const result = buildRpcHead(requestKey);
+    if (requestKey === 'rpc-malformed-size') {
+      result.size = -1;
+    }
+    if (requestKey === 'rpc-malformed-range') {
+      result.range = { offset: -1, length: 1 };
+    }
+    if (requestKey === 'rpc-malformed-date') {
+      result.uploaded = new Date(NaN);
+    }
+    return result;
+  }
+
+  get(requestKey, options) {
+    if (requestKey.startsWith('rpc-range-')) {
+      const range = options?.range;
+      const rangeKey = requestKey.slice('rpc-range-'.length);
+      if (rangeKey === 'headers') {
+        assert(range instanceof Headers);
+        assert.strictEqual(range.get('range'), 'bytes=1-3');
+        assert.strictEqual(range.get('x-test'), 'preserved');
+      } else if (rangeKey === 'no-range') {
+        assert.strictEqual(range, undefined);
+      } else if (Object.hasOwn(rpcRanges, rangeKey)) {
+        assert.deepStrictEqual(range, rpcRanges[rangeKey]);
+        assert.strictEqual('suffix' in range, rangeKey === 'suffix');
+      } else {
+        assert.fail(
+          'Invalid ranges must be rejected before calling the gateway'
+        );
+      }
+      return null;
+    }
+    if (requestKey === 'missing') {
+      return null;
+    }
+    if (requestKey === 'rpc-get-boom') {
+      throw new Error('get: no such bucket (10006)');
+    }
+    if (requestKey === 'rpc-malformed-kind') {
+      return { kind: 'other', object: buildRpcHead(requestKey) };
+    }
+    if (requestKey === 'rpc-malformed-metadata-body') {
+      return {
+        kind: 'metadata',
+        object: buildRpcHead(requestKey),
+        body: new ReadableStream(),
+      };
+    }
+    if (requestKey === 'rpc-malformed-missing-body') {
+      return { kind: 'body', object: buildRpcHead(requestKey) };
+    }
+    if (requestKey === 'rpc-options') {
+      assert.deepStrictEqual(options, {
+        onlyIf: {
+          etagMatches: 'strongEtag',
+          uploadedBefore: new Date(0),
+          secondsGranularity: false,
+        },
+        range: { offset: 1, length: 3 },
+        ssecKey: hexKey,
+      });
+    }
+    if (requestKey === 'rpc-header-options') {
+      assert(options.onlyIf instanceof Headers);
+      assert.strictEqual(
+        options.onlyIf.get('if-match'),
+        '"strongEtag", W/"weakEtag"'
+      );
+      assert.strictEqual(
+        options.onlyIf.get('if-none-match'),
+        '"firstEtag", "secondEtag"'
+      );
+      assert.strictEqual(
+        options.onlyIf.get('if-modified-since'),
+        new Date(0).toUTCString()
+      );
+      assert(options.range instanceof Headers);
+      assert.strictEqual(options.range.get('range'), 'bytes=1-3');
+    }
+    if (requestKey === 'onlyIfMultipleEtags') {
+      assert(options.onlyIf instanceof Headers);
+      assert.strictEqual(
+        options.onlyIf.get('if-match'),
+        '"strongEtag", W/"weakEtag"'
+      );
+      assert.strictEqual(
+        options.onlyIf.get('if-none-match'),
+        '"firstEtag", "secondEtag"'
+      );
+    }
+    if (requestKey === 'rpc-must-not-call') {
+      throw new Error('get RPC method must not be called');
+    }
+
+    const object = buildRpcHead(requestKey);
+    if (requestKey === 'rangeOffLen') {
+      assert.deepStrictEqual(options, { range: { offset: 1, length: 3 } });
+      object.range = { offset: 1, length: 3 };
+    } else if (requestKey === 'rangeSuff') {
+      assert.deepStrictEqual(options, { range: { suffix: 2 } });
+      object.range = { offset: 5, length: 2 };
+    }
+
+    if (requestKey === 'rpc-conditional-metadata') {
+      return { kind: 'metadata', object };
+    }
+
+    const responseBody =
+      requestKey === 'rangeOffLen'
+        ? 'ont'
+        : requestKey === 'rangeSuff'
+          ? 'nt'
+          : requestKey === 'rpc-json'
+            ? JSON.stringify({ ok: true })
+            : body;
+    if (object.range === undefined) {
+      object.size = new TextEncoder().encode(responseBody).byteLength;
+    }
+    let sent = false;
+    return {
+      kind: 'body',
+      object,
+      body: new ReadableStream({
+        pull(controller) {
+          assert.strictEqual(sent, false);
+          sent = true;
+          controller.enqueue(new TextEncoder().encode(responseBody));
+          controller.close();
+        },
+      }),
+    };
+  }
+
+  delete(keys) {
+    if (keys === 'boom') {
+      throw new Error('delete: bad keys (10021)');
+    }
+    if (Array.isArray(keys)) {
+      assert.deepEqual(keys, [key, key + '2']);
+    } else {
+      assert.strictEqual(keys, key);
+    }
+  }
+
+  async put(requestKey, value, options, valueSize) {
+    if (requestKey === 'rpc-must-not-call') {
+      throw new Error('put RPC method must not be called');
+    }
+    if (requestKey === 'rpc-null-value') {
+      assert.strictEqual(value, null);
+      assert.strictEqual(valueSize, 0);
+      return buildRpcHead(requestKey);
+    }
+    if (requestKey === 'rpc-conditional-null') {
+      assert.deepStrictEqual(options.onlyIf, {
+        etagMatches: 'strongEtag',
+        secondsGranularity: false,
+      });
+      return null;
+    }
+    if (requestKey === 'rpc-put-options') {
+      assert.deepStrictEqual(options.onlyIf, {
+        etagMatches: 'strongEtag',
+        uploadedBefore: new Date(0),
+        secondsGranularity: false,
+      });
+      assert.deepStrictEqual(options.httpMetadata, httpMetaObj);
+      assert.deepStrictEqual(options.customMetadata, customMetadata);
+      assert.deepStrictEqual(new Uint8Array(options.md5), md5Buffer);
+      assert.strictEqual(options.storageClass, 'InfrequentAccess');
+      assert.strictEqual(options.ssecKey, hexKey);
+    }
+    if (requestKey === 'rpc-put-header-options') {
+      assert(options.onlyIf instanceof Headers);
+      assert.strictEqual(
+        options.onlyIf.get('if-match'),
+        '"strongEtag", W/"weakEtag"'
+      );
+      assert.strictEqual(
+        options.onlyIf.get('if-none-match'),
+        '"firstEtag", "secondEtag"'
+      );
+    }
+    if (requestKey === 'onlyIfMultipleEtags') {
+      assert(options.onlyIf instanceof Headers);
+      assert.strictEqual(
+        options.onlyIf.get('if-match'),
+        '"strongEtag", W/"weakEtag"'
+      );
+      assert.strictEqual(
+        options.onlyIf.get('if-none-match'),
+        '"firstEtag", "secondEtag"'
+      );
+    }
+    if (requestKey.startsWith('large')) {
+      await assertLargeRpcBody(requestKey, value, valueSize);
+      return buildRpcHead(requestKey, options);
+    }
+    const uploaded = await new Response(value).text();
+    const expected = requestKey === 'rpcStream' ? rpcStreamBody : body;
+    assert.strictEqual(uploaded, expected);
+    assert.strictEqual(
+      valueSize,
+      new TextEncoder().encode(expected).byteLength
+    );
+    return buildRpcHead(requestKey, options);
+  }
+
+  list(options) {
+    const honorsIncludes = this.env.R2_LIST_HONOR_INCLUDE === 'true';
+    const effectiveIncludes = honorsIncludes
+      ? (options?.include ?? [])
+      : ['httpMetadata', 'customMetadata'];
+
+    if (options?.prefix === 'rpc-boom') {
+      throw new Error('list: no such bucket (10006)');
+    }
+    if (options?.prefix === 'rpc-malformed') {
+      return { objects: [{}], truncated: false };
+    }
+    if (options?.prefix === 'rpc-options') {
+      assert.deepStrictEqual(options, {
+        limit: 2,
+        prefix: 'rpc-options',
+        cursor: 'cursor-in',
+        delimiter: '/',
+        startAfter: 'after',
+        include: effectiveIncludes,
+      });
+      return {
+        objects: [],
+        truncated: true,
+        cursor: 'cursor-out',
+        delimitedPrefixes: ['rpc-options/'],
+      };
+    }
+
+    if (options?.prefix === 'basic') {
+      assert.deepStrictEqual(options, {
+        limit: 1,
+        prefix: 'basic',
+        cursor: 'ai',
+        delimiter: '/',
+        include: effectiveIncludes,
+      });
+      return {
+        objects: [listRpcHead('basic', effectiveIncludes)],
+        truncated: true,
+        cursor: 'ai',
+      };
+    }
+    if (options?.prefix === 'httpMeta') {
+      return {
+        objects: [listRpcHead('httpMetadata', effectiveIncludes)],
+        truncated: false,
+      };
+    }
+    if (options?.prefix === 'customMeta') {
+      return {
+        objects: [listRpcHead('customMetadata', effectiveIncludes)],
+        truncated: false,
+      };
+    }
+    if (options?.prefix === 'rpc-metadata') {
+      return {
+        objects: [listRpcHead('basic', effectiveIncludes)],
+        truncated: false,
+      };
+    }
+
+    if (honorsIncludes) {
+      assert.strictEqual(options, undefined);
+    } else {
+      assert.deepStrictEqual(options, {
+        include: ['httpMetadata', 'customMetadata'],
+      });
+    }
+    return { objects: [], truncated: false };
+  }
+
+  createMultipartUpload(requestKey, options) {
+    if (requestKey === 'rpc-must-not-call') {
+      throw new Error('createMultipartUpload RPC method must not be called');
+    }
+    if (requestKey === 'rpc-create-options') {
+      assert.deepStrictEqual(options.httpMetadata, httpMetaObj);
+      assert.deepStrictEqual(options.customMetadata, customMetadata);
+      assert.strictEqual(options.storageClass, 'InfrequentAccess');
+      assert.strictEqual(options.ssecKey, hexKey);
+    }
+    assert.strictEqual(typeof requestKey, 'string');
+    return requestKey.startsWith('rpc-multipart-')
+      ? `${requestKey}-id`
+      : 'multipartId';
+  }
+
+  async uploadPart(
+    requestKey,
+    uploadId,
+    partNumber,
+    value,
+    options,
+    valueSize
+  ) {
+    assertMultipartIdentity(requestKey, uploadId, 'uploadPart');
+    assert(partNumber >= 1 && partNumber <= 10000);
+    if (requestKey === 'rpc-must-not-call') {
+      throw new Error('uploadPart RPC method must not be called');
+    }
+    if (requestKey === 'largeBuffer') {
+      await assertLargeRpcBody(requestKey, value, valueSize);
+      return { partNumber, etag: 'partEtag' };
+    }
+    const uploaded = await new Response(value).text();
+    const expected =
+      requestKey === 'ssecMultipart'
+        ? 'hey'
+        : requestKey === 'rpcStream'
+          ? rpcStreamBody
+          : body;
+    assert.strictEqual(uploaded, expected);
+    assert.strictEqual(
+      valueSize,
+      new TextEncoder().encode(expected).byteLength
+    );
+    if (requestKey === 'ssecMultipart') {
+      assert.strictEqual(options?.ssecKey, hexKey);
+    }
+    return {
+      partNumber: requestKey === 'rpc-wrong-part-number' ? 9999 : partNumber,
+      etag: requestKey.startsWith('rpc-multipart-')
+        ? `${requestKey}/${uploadId}/${partNumber}`
+        : uploadId === 'resumedId'
+          ? 'resumedRpcPartEtag'
+          : 'partEtag',
+    };
+  }
+
+  abortMultipartUpload(requestKey, uploadId) {
+    assertMultipartIdentity(requestKey, uploadId, 'abortMultipartUpload');
+    if (requestKey.startsWith('rpc-multipart-')) {
+      finishedRpcUploads.add(JSON.stringify([requestKey, uploadId]));
+    }
+  }
+
+  completeMultipartUpload(requestKey, uploadId, uploadedParts) {
+    assertMultipartIdentity(requestKey, uploadId, 'completeMultipartUpload');
+    for (const part of uploadedParts) {
+      assert(part.partNumber >= 1 && part.partNumber <= 10000);
+      assert.strictEqual(typeof part.etag, 'string');
+      if (requestKey.startsWith('rpc-multipart-')) {
+        assert.strictEqual(
+          part.etag,
+          `${requestKey}/${uploadId}/${part.partNumber}`
+        );
+      }
+    }
+    const result = buildRpcHead(requestKey);
+    // The backend completion response omits create-time HTTP and custom metadata.
+    result.httpMetadata = {};
+    result.customMetadata = {};
+    if (requestKey.startsWith('rpc-multipart-')) {
+      finishedRpcUploads.add(JSON.stringify([requestKey, uploadId]));
+      result.key = requestKey;
+      result.version = uploadId;
+    }
+    if (uploadId === 'resumedId') {
+      result.version = 'resumedRpcObjectVersion';
+    }
+    return result;
+  }
+}
+
+function listRpcHead(requestKey, includes) {
+  const result = buildRpcHead(requestKey);
+  if (!includes.includes('httpMetadata')) {
+    delete result.httpMetadata;
+  }
+  if (!includes.includes('customMetadata')) {
+    delete result.customMetadata;
+  }
+  return result;
+}
+
+// These cases cover RPC boundary behavior that the HTTP-oriented fake cannot observe directly.
+// The canonical API suite remains identical for both transport configurations.
+export const jsrpcTransportTests = {
+  async test(ctrl, env, ctx) {
+    if (env.R2_TRANSPORT !== 'jsrpc') {
+      return;
+    }
+
+    assert.strictEqual(await env.BUCKET.head('missing'), null);
+
+    const ranged = await env.BUCKET.head('ranged');
+    assert.deepStrictEqual(ranged.range, { offset: 10, length: 20 });
+
+    await assert.rejects(env.BUCKET.head('boom'), (err) => {
+      assert.strictEqual(err.message, 'head: no such bucket (10006)');
+      assert.strictEqual(err.code, undefined);
+      return true;
+    });
+    await assert.rejects(env.BUCKET.head('rpc-malformed-size'), {
+      message: 'Malformed R2 RPC result: size must be a non-negative integer.',
+    });
+    await assert.rejects(env.BUCKET.head('rpc-malformed-range'), {
+      message:
+        'Malformed R2 RPC result: range offset must be a non-negative integer.',
+    });
+    await assert.rejects(env.BUCKET.head('rpc-malformed-date'), {
+      message: 'The value cannot be converted because it is not a valid Date.',
+    });
+
+    await assert.rejects(env.BUCKET.delete('boom'), {
+      message: 'delete: bad keys (10021)',
+    });
+
+    const coerced = await env.BUCKET.head(12345);
+    assert.strictEqual(coerced.key, key);
+
+    assert.strictEqual(await env.BUCKET.get('missing'), null);
+
+    const conditional = await env.BUCKET.get('rpc-conditional-metadata', {
+      onlyIf: { etagMatches: 'objectEtag' },
+    });
+    assert.strictEqual(conditional.body, undefined);
+    assert.deepStrictEqual(conditional.httpMetadata, {});
+    assert.deepStrictEqual(conditional.customMetadata, {});
+    assert.strictEqual(typeof conditional.writeHttpMetadata, 'function');
+
+    const lazyBody = await env.BUCKET.get('rpc-lazy-body');
+    assert.strictEqual(lazyBody.bodyUsed, false);
+    assert(lazyBody.body instanceof ReadableStream);
+    assert.strictEqual(await lazyBody.text(), body);
+    assert.strictEqual(lazyBody.bodyUsed, true);
+
+    const bytesResult = await env.BUCKET.get('rpc-bytes');
+    assert.deepStrictEqual(
+      await bytesResult.bytes(),
+      new TextEncoder().encode(body)
+    );
+    assert.strictEqual(bytesResult.bodyUsed, true);
+    const bufferResult = await env.BUCKET.get('rpc-array-buffer');
+    assert.deepStrictEqual(
+      new Uint8Array(await bufferResult.arrayBuffer()),
+      new TextEncoder().encode(body)
+    );
+    const jsonResult = await env.BUCKET.get('rpc-json');
+    assert.deepStrictEqual(await jsonResult.json(), { ok: true });
+    const blobResult = await env.BUCKET.get('rpc-blob');
+    assert.strictEqual(await (await blobResult.blob()).text(), body);
+
+    await env.BUCKET.get('rpc-options', {
+      onlyIf: {
+        etagMatches: 'strongEtag',
+        uploadedBefore: new Date(0),
+      },
+      range: { offset: 1, length: 3 },
+      ssecKey: bufferKey,
+    });
+    await env.BUCKET.get('rpc-header-options', {
+      onlyIf: new Headers({
+        'if-match': '"strongEtag", W/"weakEtag"',
+        'if-none-match': '"firstEtag", "secondEtag"',
+        'if-modified-since': new Date(0).toUTCString(),
+      }),
+      range: new Headers({ range: 'bytes=1-3' }),
+    });
+
+    await assert.rejects(
+      env.BUCKET.get('rpc-must-not-call', { range: { offset: -1 } }),
+      {
+        message:
+          'Invalid range. Starting offset (-1) must be greater than or equal to 0.',
+      }
+    );
+    await assert.rejects(
+      env.BUCKET.get('rpc-must-not-call', { range: { suffix: 1, length: 1 } }),
+      { message: 'Suffix is incompatible with length.' }
+    );
+    await assert.rejects(
+      env.BUCKET.get('rpc-must-not-call', { ssecKey: 'bad' }),
+      { message: 'SSE-C Key must be 32 bytes in length' }
+    );
+    await assert.rejects(
+      env.BUCKET.get('rpc-must-not-call', {
+        onlyIf: { etagMatches: '"quoted"' },
+      }),
+      {
+        message: 'Conditional ETag should not be wrapped in quotes ("quoted").',
+      }
+    );
+
+    await assert.rejects(env.BUCKET.get('rpc-malformed-kind'), {
+      message: 'Malformed R2 get RPC result: unknown result kind other.',
+    });
+    await assert.rejects(env.BUCKET.get('rpc-malformed-metadata-body'), {
+      message: 'Malformed R2 get RPC result: metadata result had a body.',
+    });
+    // The missing-body assertion logs the details and exposes only an internal error reference.
+    await assert.rejects(env.BUCKET.get('rpc-malformed-missing-body'), {
+      message: /^internal error; reference = \S+$/,
+    });
+    await assert.rejects(env.BUCKET.get('rpc-get-boom'), {
+      message: 'get: no such bucket (10006)',
+    });
+
+    const emptyList = await env.BUCKET.list();
+    assert.deepStrictEqual(emptyList, {
+      objects: [],
+      truncated: false,
+      delimitedPrefixes: [],
+    });
+
+    const optionList = await env.BUCKET.list({
+      limit: 2,
+      prefix: 'rpc-options',
+      cursor: 'cursor-in',
+      delimiter: '/',
+      startAfter: 'after',
+      include: [],
+    });
+    assert.deepStrictEqual(optionList, {
+      objects: [],
+      truncated: true,
+      cursor: 'cursor-out',
+      delimitedPrefixes: ['rpc-options/'],
+    });
+
+    if (env.R2_LIST_HONOR_INCLUDE === 'true') {
+      for (const include of [
+        [],
+        ['httpMetadata'],
+        ['customMetadata'],
+        ['httpMetadata', 'customMetadata'],
+      ]) {
+        const listed = await env.BUCKET.list({
+          prefix: 'rpc-metadata',
+          include,
+        });
+        const object = listed.objects[0];
+        assert.strictEqual(typeof object.writeHttpMetadata, 'function');
+        assert.strictEqual(typeof object.checksums.toJSON, 'function');
+        assert.strictEqual(
+          object.httpMetadata === undefined,
+          !include.includes('httpMetadata')
+        );
+        assert.strictEqual(
+          object.customMetadata === undefined,
+          !include.includes('customMetadata')
+        );
+        if (include.includes('httpMetadata')) {
+          assert.deepStrictEqual(object.httpMetadata, {});
+        }
+        if (include.includes('customMetadata')) {
+          assert.deepStrictEqual(object.customMetadata, {});
+        }
+      }
+    }
+
+    await assert.rejects(env.BUCKET.list({ prefix: 'rpc-boom' }), {
+      message: 'list: no such bucket (10006)',
+    });
+    await assert.rejects(env.BUCKET.list({ prefix: 'rpc-malformed' }));
+
+    const nullPut = await env.BUCKET.put('rpc-null-value', null);
+    assert.strictEqual(nullPut.key, key);
+    assert.strictEqual(
+      await env.BUCKET.put('rpc-conditional-null', body, {
+        onlyIf: { etagMatches: 'strongEtag' },
+      }),
+      null
+    );
+    await env.BUCKET.put('rpc-put-options', body, {
+      onlyIf: {
+        etagMatches: 'strongEtag',
+        uploadedBefore: new Date(0),
+      },
+      httpMetadata: httpMetaHeaders,
+      customMetadata,
+      md5: md5Buffer,
+      storageClass: 'InfrequentAccess',
+      ssecKey: bufferKey,
+    });
+    await env.BUCKET.put('rpc-put-header-options', body, {
+      onlyIf: new Headers({
+        'if-match': '"strongEtag", W/"weakEtag"',
+        'if-none-match': '"firstEtag", "secondEtag"',
+      }),
+    });
+
+    await assert.rejects(
+      env.BUCKET.put('rpc-must-not-call', body, { md5: new Uint8Array(1) }),
+      { message: 'MD5 is 16 bytes, not 1' }
+    );
+    await assert.rejects(
+      env.BUCKET.put('rpc-must-not-call', body, {
+        md5: 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
+      }),
+      { message: "Provided MD5 wasn't a valid hex string" }
+    );
+    await assert.rejects(
+      env.BUCKET.put('rpc-must-not-call', body, {
+        md5: md5Buffer,
+        sha1: sha1Buffer,
+      }),
+      { message: 'You cannot specify multiple hashing algorithms.' }
+    );
+    const encodedStreamBody = new TextEncoder().encode(rpcStreamBody);
+    {
+      const { readable, writable } = new FixedLengthStream(
+        encodedStreamBody.byteLength
+      );
+      const writer = writable.getWriter();
+      const writing = writer
+        .write(encodedStreamBody)
+        .then(() => writer.close());
+      const result = await env.BUCKET.put('rpcStream', readable);
+      await writing;
+      assert.strictEqual(result.size, Number(objResponse.size));
+    }
+
+    let unknownLengthCancelReason;
+    await assert.rejects(
+      env.BUCKET.put(
+        'unknownLengthStream',
+        new ReadableStream({
+          cancel(reason) {
+            unknownLengthCancelReason = reason;
+          },
+        })
+      ),
+      {
+        message:
+          'Provided readable stream must have a known length (request/response body or readable half of FixedLengthStream)',
+      }
+    );
+    assert.strictEqual(
+      unknownLengthCancelReason.message,
+      'Stream cancelled because the associated put operation encountered an error.'
+    );
+
+    const invalidOptionsStream = new FixedLengthStream(1);
+    const invalidOptionsWriter = invalidOptionsStream.writable.getWriter();
+    const invalidOptionsWriting = invalidOptionsWriter.write(
+      new Uint8Array([1])
+    );
+    await assert.rejects(
+      env.BUCKET.put('rpc-must-not-call', invalidOptionsStream.readable, {
+        onlyIf: { etagMatches: '"quoted"' },
+      }),
+      {
+        message: 'Conditional ETag should not be wrapped in quotes ("quoted").',
+      }
+    );
+    await assert.rejects(invalidOptionsWriting, {
+      message:
+        'Stream cancelled because the associated put operation encountered an error.',
+    });
+
+    const largeBufferBacking = new Uint8Array(largeRpcBodySize + 2);
+    largeBufferBacking.fill(0x41);
+    const largeBuffer = largeBufferBacking.subarray(1, -1);
+    largeBuffer[0] = 0x11;
+    largeBuffer[largeBuffer.length - 1] = 0x22;
+    await env.BUCKET.put('largeBuffer', largeBuffer);
+
+    const largeString = 'é'.repeat(largeRpcBodySize / 2);
+    await env.BUCKET.put('largeString', largeString);
+
+    const largeBlobBytes = new Uint8Array(largeRpcBodySize);
+    largeBlobBytes.fill(0x5a);
+    await env.BUCKET.put('largeBlob', new Blob([largeBlobBytes]));
+  },
+};
+
+export const jsrpcMultipartTests = {
+  async test(ctrl, env) {
+    if (env.R2_TRANSPORT !== 'jsrpc') {
+      return;
+    }
+
+    await assert.rejects(
+      env.BUCKET.createMultipartUpload('rpc-must-not-call', {
+        ssecKey: 'bad',
+      }),
+      { message: 'SSE-C Key must be 32 bytes in length' }
+    );
+    const invalidPartUpload = env.BUCKET.resumeMultipartUpload(
+      'rpc-must-not-call',
+      'invalidPartUploadId'
+    );
+    await assert.rejects(
+      invalidPartUpload.uploadPart(1, body, { ssecKey: 'bad' }),
+      { message: 'SSE-C Key must be 32 bytes in length' }
+    );
+
+    const createOptionsUpload = await env.BUCKET.createMultipartUpload(
+      'rpc-create-options',
+      {
+        httpMetadata: httpMetaHeaders,
+        customMetadata,
+        storageClass: 'InfrequentAccess',
+        ssecKey: bufferKey,
+      }
+    );
+    assert.strictEqual(createOptionsUpload.uploadId, 'multipartId');
+
+    const encodedStreamBody = new TextEncoder().encode(rpcStreamBody);
+    const largeBufferBacking = new Uint8Array(largeRpcBodySize + 2);
+    largeBufferBacking.fill(0x41);
+    const largeBuffer = largeBufferBacking.subarray(1, -1);
+    largeBuffer[0] = 0x11;
+    largeBuffer[largeBuffer.length - 1] = 0x22;
+
+    const resumed = env.BUCKET.resumeMultipartUpload(key, 'resumedId');
+    assert.strictEqual(resumed.key, key);
+    assert.strictEqual(resumed.uploadId, 'resumedId');
+    const resumedPart = await resumed.uploadPart(1, body);
+    assert.deepStrictEqual(resumedPart, {
+      partNumber: 1,
+      etag: 'resumedRpcPartEtag',
+    });
+    const resumedObject = await resumed.complete([resumedPart]);
+    assert.strictEqual(resumedObject.key, key);
+    assert.strictEqual(resumedObject.version, 'resumedRpcObjectVersion');
+    assert.strictEqual(resumedObject.etag, objResponse.etag);
+    assert.strictEqual(resumedObject.httpEtag, `"${objResponse.etag}"`);
+    assert.strictEqual(resumedObject.size, Number(objResponse.size));
+    assert(resumedObject.uploaded instanceof Date);
+    assert.strictEqual(resumedObject.storageClass, objResponse.storageClass);
+    const resumedHeaders = new Headers();
+    resumedObject.writeHttpMetadata(resumedHeaders);
+    assert.deepStrictEqual([...resumedHeaders], []);
+    assert.strictEqual(typeof resumedObject.checksums.toJSON, 'function');
+    assert.strictEqual(JSON.stringify(resumedObject.checksums), '{}');
+
+    const streamedUpload = env.BUCKET.resumeMultipartUpload(
+      'rpcStream',
+      'streamedId'
+    );
+    const { readable, writable } = new FixedLengthStream(
+      encodedStreamBody.byteLength
+    );
+    const writer = writable.getWriter();
+    const writing = writer.write(encodedStreamBody).then(() => writer.close());
+    const streamedPart = await streamedUpload.uploadPart(2, readable);
+    await writing;
+    assert.deepStrictEqual(streamedPart, {
+      partNumber: 2,
+      etag: 'partEtag',
+    });
+
+    const largeUpload = env.BUCKET.resumeMultipartUpload(
+      'largeBuffer',
+      'largeUploadId'
+    );
+    assert.deepStrictEqual(await largeUpload.uploadPart(1, largeBuffer), {
+      partNumber: 1,
+      etag: 'partEtag',
+    });
+
+    const wrongPartUpload = env.BUCKET.resumeMultipartUpload(
+      'rpc-wrong-part-number',
+      'wrongPartUploadId'
+    );
+    assert.deepStrictEqual(await wrongPartUpload.uploadPart(3, body), {
+      partNumber: 3,
+      etag: 'partEtag',
+    });
+
+    // Each operation carries its key and upload ID, including interleaved calls on the same key.
+    const uploads = [];
+    for (const uploadKey of ['rpc-multipart-first', 'rpc-multipart-second']) {
+      const headers = new Headers(httpMetaHeaders);
+      const metadata = { uploadKey };
+      const creating = env.BUCKET.createMultipartUpload(uploadKey, {
+        httpMetadata: headers,
+        customMetadata: metadata,
+      });
+      headers.set('content-type', 'application/octet-stream');
+      metadata.uploadKey = 'mutated';
+      const upload = await creating;
+      assert.strictEqual(upload.key, uploadKey);
+      assert.strictEqual(upload.uploadId, `${uploadKey}-id`);
+      uploads.push(upload);
+    }
+    for (const uploadId of ['resumed-a', 'resumed-b']) {
+      const upload = env.BUCKET.resumeMultipartUpload(
+        'rpc-multipart-first',
+        uploadId
+      );
+      assert.strictEqual(upload.key, 'rpc-multipart-first');
+      assert.strictEqual(upload.uploadId, uploadId);
+      uploads.push(upload);
+    }
+    const uploadedParts = await Promise.all(
+      uploads.map(async (upload) => {
+        const first = await upload.uploadPart(1, body);
+        const rest = await Promise.all([
+          upload.uploadPart(2, body),
+          upload.uploadPart(3, body),
+        ]);
+        const parts = [first, ...rest];
+        assert.deepStrictEqual(
+          parts,
+          [1, 2, 3].map((partNumber) => ({
+            partNumber,
+            etag: `${upload.key}/${upload.uploadId}/${partNumber}`,
+          }))
+        );
+        return parts;
+      })
+    );
+
+    await assert.rejects(
+      uploads[0].complete([{ partNumber: 0, etag: 'invalid' }]),
+      {
+        message:
+          'Part number must be between 1 and 10000 (inclusive). Actual value was: 0',
+      }
+    );
+    for (let i = 0; i < uploads.length; i++) {
+      const upload = uploads[i];
+      const result = await upload.complete(uploadedParts[i]);
+      assert.strictEqual(result.key, upload.key);
+      assert.strictEqual(result.version, upload.uploadId);
+      // Created and resumed uploads both use the metadata returned by the gateway.
+      assert.deepStrictEqual(result.customMetadata, {});
+      const resultHeaders = new Headers();
+      result.writeHttpMetadata(resultHeaders);
+      assert.deepStrictEqual([...resultHeaders], []);
+    }
+
+    const aborted = await env.BUCKET.createMultipartUpload(
+      'rpc-multipart-aborted'
+    );
+    await aborted.uploadPart(1, body);
+    // Abort must address the same upload when called through a separately resumed wrapper.
+    await env.BUCKET.resumeMultipartUpload(
+      aborted.key,
+      aborted.uploadId
+    ).abort();
+    const missing = env.BUCKET.resumeMultipartUpload(
+      'rpc-multipart-missing',
+      'missing'
+    );
+    for (const upload of [aborted, missing]) {
+      await assert.rejects(upload.uploadPart(2, body), {
+        message: 'uploadPart: Upload not found (10024)',
+      });
+      await assert.rejects(upload.complete([]), {
+        message: 'completeMultipartUpload: Upload not found (10024)',
+      });
+      await upload.abort();
+      await upload.abort();
+    }
+  },
+};
+
+export const jsrpcRangeTests = {
+  async test(controller, env) {
+    if (env.R2_TRANSPORT !== 'jsrpc') {
+      return;
+    }
+
+    for (const [rangeKey, range] of Object.entries(rpcRanges)) {
+      assert.strictEqual(
+        await env.BUCKET.get(`rpc-range-${rangeKey}`, { range }),
+        null
+      );
+    }
+    assert.strictEqual(
+      await env.BUCKET.get('rpc-range-offset', {
+        range: { offset: 1, length: undefined, suffix: undefined },
+      }),
+      null
+    );
+    assert.strictEqual(
+      await env.BUCKET.get('rpc-range-suffix', {
+        range: { offset: undefined, length: undefined, suffix: 2 },
+      }),
+      null
+    );
+    assert.strictEqual(
+      await env.BUCKET.get('rpc-range-empty', {
+        range: { offset: undefined, length: undefined, suffix: undefined },
+      }),
+      null
+    );
+
+    assert.strictEqual(
+      await env.BUCKET.get('rpc-range-headers', {
+        range: new Headers({ range: 'bytes=1-3', 'x-test': 'preserved' }),
+      }),
+      null
+    );
+    assert.strictEqual(await env.BUCKET.get('rpc-range-no-range'), null);
+    assert.strictEqual(await env.BUCKET.get('rpc-range-no-range', {}), null);
+    assert.strictEqual(
+      await env.BUCKET.get('rpc-range-no-range', { range: new Headers() }),
+      null
+    );
+
+    await assert.rejects(
+      env.BUCKET.get('rpc-range-invalid', { range: { suffix: 1, offset: 0 } }),
+      { name: 'TypeError', message: 'Suffix is incompatible with offset.' }
+    );
+    await assert.rejects(
+      env.BUCKET.get('rpc-range-invalid', { range: { suffix: 1, length: 1 } }),
+      { name: 'TypeError', message: 'Suffix is incompatible with length.' }
+    );
+    for (const field of ['offset', 'length', 'suffix']) {
+      for (const value of [-1, 0.5, NaN]) {
+        await assert.rejects(
+          env.BUCKET.get('rpc-range-invalid', { range: { [field]: value } }),
+          { name: 'RangeError' }
+        );
+      }
+    }
+  },
+};
+
+// The source-kind matrix uses the same four bytes and reports object.size = 4. It checks whether
+// the stream itself knows its byte count: PUT receives only the body, not object.size.
+const bodyLengthBytes = new TextEncoder().encode('data');
+const bodyLengthCopyCases = {
+  empty: { content: '', size: 0 },
+  utf8: { content: 'café🌍', size: 9 },
+  chunks: { content: 'data', size: 4 },
+  bounded: {
+    content: 'at',
+    size: 4,
+    options: { range: { offset: 1, length: 2 } },
+    range: { offset: 1, length: 2 },
+  },
+  offset: {
+    content: 'ta',
+    size: 4,
+    options: { range: { offset: 2 } },
+    range: { offset: 2, length: 2 },
+  },
+  suffix: {
+    content: 'ta',
+    size: 4,
+    options: { range: { suffix: 2 } },
+    range: { offset: 2, length: 2 },
+  },
+  shortened: {
+    content: 'ta',
+    size: 4,
+    options: { range: { offset: 2, length: 99 } },
+    range: { offset: 2, length: 2 },
+  },
+  remaining: { content: 'ata', size: 3 },
+};
+let bodyLengthReleased;
+let bodyLengthCancellation;
+
+function bodyLengthUploadBytes(requestKey) {
+  return requestKey === 'destination'
+    ? bodyLengthBytes
+    : new TextEncoder().encode(bodyLengthCopyCases[requestKey].content);
+}
+
+// The HTTP gateway sends [JSON metadata][object bytes]. A buffer gives the HTTP transport
+// a known length; wrapping the same bytes in an ordinary JS stream does not.
+function buildBodyLengthResponse(mode) {
+  const metadata = new TextEncoder().encode(
+    JSON.stringify({ ...objResponse, size: String(bodyLengthBytes.byteLength) })
+  );
+  const payload = new Uint8Array(
+    metadata.byteLength + bodyLengthBytes.byteLength
+  );
+  payload.set(metadata);
+  payload.set(bodyLengthBytes, metadata.byteLength);
+  return new Response(
+    mode === 'wrapped'
+      ? new ReadableStream({
+          type: 'bytes',
+          start(controller) {
+            controller.enqueue(payload);
+            controller.close();
+          },
+        })
+      : payload,
+    { headers: { 'cf-r2-metadata-size': String(metadata.byteLength) } }
+  );
+}
+
+async function createBodyLengthStream(mode, ctx) {
+  if (mode === 'native') {
+    // A response made from a fixed-size buffer already knows how many bytes it contains.
+    return new Response(bodyLengthBytes).body;
+  }
+  if (mode === 'fixed') {
+    // Explicitly give the stream its byte count using Cloudflare's FixedLengthStream.
+    const fixed = new FixedLengthStream(bodyLengthBytes.byteLength);
+    ctx.waitUntil(new Response(bodyLengthBytes).body.pipeTo(fixed.writable));
+    return fixed.readable;
+  }
+  if (mode === 'expected') {
+    // Cloudflare's nonstandard expectedLength option also gives a JS stream a byte count.
+    return new ReadableStream({
+      type: 'bytes',
+      expectedLength: bodyLengthBytes.byteLength,
+      start(controller) {
+        controller.enqueue(bodyLengthBytes.slice());
+        controller.close();
+      },
+    });
+  }
+  assert.strictEqual(mode, 'wrapped');
+  // Model the gateway's splitMetadataPrefix(): read the JSON, then forward the remaining
+  // bytes through a new JS stream. Reading size from the JSON does not give that new stream
+  // a known length. metadataSize counts only the JSON prefix, not the four object bytes.
+  const response = buildBodyLengthResponse('native');
+  const metadataSize = Number(response.headers.get('cf-r2-metadata-size'));
+  const reader = response.body.getReader({ mode: 'byob' });
+  const { value } = await reader.readAtLeast(
+    metadataSize,
+    new Uint8Array(metadataSize)
+  );
+  assert.strictEqual(
+    JSON.parse(new TextDecoder().decode(value)).size,
+    String(bodyLengthBytes.byteLength)
+  );
+  return new ReadableStream({
+    type: 'bytes',
+    async pull(controller) {
+      const next = await reader.read(new Uint8Array(64 * 1024));
+      if (!next.done) {
+        controller.enqueue(next.value);
+      } else {
+        reader.releaseLock();
+        controller.close();
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason);
+      } finally {
+        reader.releaseLock();
+      }
+    },
+  });
+}
+
+// A mock gateway serving both HTTP and RPC. Successful uploads must contain exactly "data",
+// so the copy tests check the actual bytes, not just whether PUT returns successfully.
+export class R2BodyLengthEntrypoint extends WorkerEntrypoint {
+  releaseBody() {
+    bodyLengthReleased = true;
+  }
+
+  waitForCancellation() {
+    return bodyLengthCancellation;
+  }
+
+  async fetch(request) {
+    if (request.method === 'GET') {
+      const metadata = JSON.parse(request.headers.get('cf-r2-request'));
+      assert.strictEqual(metadata.method, 'get');
+      return buildBodyLengthResponse(metadata.object);
+    }
+    assert.strictEqual(request.method, 'PUT');
+    const metadataSize = Number(request.headers.get('cf-r2-metadata-size'));
+    const payload = new Uint8Array(await request.arrayBuffer());
+    const metadata = JSON.parse(
+      new TextDecoder().decode(payload.subarray(0, metadataSize))
+    );
+    assert.strictEqual(metadata.method, 'put');
+    assert.strictEqual(metadata.object, 'destination');
+    assert.deepStrictEqual(payload.subarray(metadataSize), bodyLengthBytes);
+    return Response.json({
+      ...objResponse,
+      name: 'destination',
+      size: String(bodyLengthBytes.byteLength),
+    });
+  }
+
+  async get(mode, options) {
+    const object = { ...buildRpcHead(mode), size: bodyLengthBytes.byteLength };
+    if (mode === 'missing') {
+      return null;
+    }
+    if (mode === 'metadata') {
+      return { kind: 'metadata', object };
+    }
+    if (mode === 'deferred') {
+      bodyLengthReleased = false;
+      return {
+        kind: 'body',
+        object,
+        body: new ReadableStream({
+          async pull(controller) {
+            // The test gateway waits in its own request context; releaseBody() only flips
+            // a flag. This timer models delayed upstream I/O, not a wait in the R2 caller.
+            while (!bodyLengthReleased) {
+              await scheduler.wait(1);
+            }
+            controller.enqueue(bodyLengthBytes.slice());
+            controller.close();
+          },
+        }),
+      };
+    }
+    if (mode === 'cancel' || mode === 'invalid-size') {
+      if (mode === 'invalid-size') {
+        object.size = -1;
+      }
+      let cancelled;
+      bodyLengthCancellation = new Promise((resolve) => {
+        cancelled = resolve;
+      });
+      return {
+        kind: 'body',
+        object,
+        body: new ReadableStream({
+          pull(controller) {
+            controller.enqueue(bodyLengthBytes.slice());
+          },
+          cancel() {
+            cancelled();
+          },
+        }),
+      };
+    }
+    if (mode === 'upstream-error') {
+      return {
+        kind: 'body',
+        object,
+        body: new ReadableStream({
+          pull(controller) {
+            controller.error(new Error('body source failed'));
+          },
+        }),
+      };
+    }
+    const invalidSizes = { short: 5, long: 3, 'zero-long': 0, unsafe: 2 ** 53 };
+    if (Object.hasOwn(invalidSizes, mode)) {
+      object.size = invalidSizes[mode];
+      return { kind: 'body', object, body: new Response(bodyLengthBytes).body };
+    }
+    if (mode === 'unsafe-range') {
+      object.range = { offset: 0, length: 2 ** 53 };
+      return { kind: 'body', object, body: new Response(bodyLengthBytes).body };
+    }
+    if (Object.hasOwn(bodyLengthCopyCases, mode)) {
+      const fixture = bodyLengthCopyCases[mode];
+      assert.deepStrictEqual(options?.range, fixture.options?.range);
+      object.size = fixture.size;
+      if (fixture.range !== undefined) {
+        object.range = fixture.range;
+      }
+      const bytes = new TextEncoder().encode(fixture.content);
+      let offset = 0;
+      return {
+        kind: 'body',
+        object,
+        body: new ReadableStream({
+          type: 'bytes',
+          pull(controller) {
+            if (offset < bytes.byteLength) {
+              controller.enqueue(bytes.slice(offset, ++offset));
+            } else {
+              controller.close();
+            }
+          },
+        }),
+      };
+    }
+    return {
+      kind: 'body',
+      object,
+      body: await createBodyLengthStream(mode, this.ctx),
+    };
+  }
+
+  async put(requestKey, value, options, valueSize) {
+    const expected = bodyLengthUploadBytes(requestKey);
+    // workerd supplies this hidden RPC argument from the stream's known length.
+    assert.strictEqual(valueSize, expected.byteLength);
+    assert.deepStrictEqual(
+      new Uint8Array(await new Response(value).arrayBuffer()),
+      expected
+    );
+    return {
+      ...buildRpcHead(requestKey),
+      key: requestKey,
+      size: expected.byteLength,
+    };
+  }
+
+  async uploadPart(
+    requestKey,
+    uploadId,
+    partNumber,
+    value,
+    options,
+    valueSize
+  ) {
+    assert.strictEqual(uploadId, 'body-length-upload');
+    const expected = bodyLengthUploadBytes(requestKey);
+    assert.strictEqual(valueSize, expected.byteLength);
+    assert.deepStrictEqual(
+      new Uint8Array(await new Response(value).arrayBuffer()),
+      expected
+    );
+    return { partNumber, etag: 'body-length-etag' };
+  }
+}
+
+async function assertBodyLengthCopy(bucket, source, knownLength, label) {
+  // knownLength is the expected test outcome, not information supplied to PUT. PUT receives
+  // only the stream and must discover its remaining length itself; it cannot use object.size.
+  // Start PUT before any await, so the "immediate" cases cannot accidentally let RPC settle.
+  const copying = bucket.put('destination', source);
+  if (knownLength) {
+    const result = await copying.catch((error) => {
+      error.message = `${label}: ${error.message}`;
+      throw error;
+    });
+    assert.strictEqual(result.key, 'destination', label);
+    assert.strictEqual(result.size, bodyLengthBytes.byteLength, label);
+  } else {
+    // Ordinary unsized streams are still invalid PUT inputs. Service RPC can also return
+    // a sized stream before its receiving endpoint has finished setting up.
+    await assert.rejects(
+      copying,
+      {
+        name: 'TypeError',
+        message:
+          'Provided readable stream must have a known length (request/response body or readable half of FixedLengthStream)',
+      },
+      label
+    );
+  }
+}
+
+export const r2BodyLengthTests = {
+  async test(controller, env, ctx) {
+    // Only the dedicated body-length configuration runs these checks; the main R2 suites
+    // also import this file but do not provide this binding.
+    if (env.R2_BODY_LENGTH_TRANSPORT === undefined) {
+      return;
+    }
+    if (env.R2_BODY_LENGTH_TRANSPORT === 'http') {
+      // HTTP control: native GET -> PUT succeeds because the original stream keeps its
+      // length tracking after the JSON prefix is read. The wrapped version fails even
+      // though both results still expose the correct object.size.
+      for (const mode of ['native', 'wrapped']) {
+        const result = await env.BUCKET.get(mode);
+        assert.strictEqual(result.size, bodyLengthBytes.byteLength);
+        await assertBodyLengthCopy(
+          env.BUCKET,
+          result.body,
+          mode === 'native',
+          `HTTP ${mode}`
+        );
+      }
+      return;
+    }
+
+    // Repeat the same copy attempt with four sources, all containing the four bytes "data":
+    // - native: a Response body backed by a byte array, with a known length.
+    // - wrapped: a new JS stream forwarding bytes after the gateway reads the metadata prefix;
+    //   the metadata says size=4, but this forwarding stream has no declared length.
+    // - fixed: the readable side of a FixedLengthStream(4).
+    // - expected: a JS byte stream with expectedLength=4.
+    //
+    // For each source, first try PUT with a locally created stream. Then get a fresh stream
+    // through each binding and try PUT either immediately or after one event-loop turn.
+    // This separates the source's own length from what the receiving RPC stream can report.
+    for (const mode of ['native', 'wrapped', 'fixed', 'expected']) {
+      // Create the body in the caller, without receiving it over RPC first. All three
+      // known-length sources copy successfully; the ordinary wrapped stream is rejected.
+      await assertBodyLengthCopy(
+        env.BUCKET,
+        await createBodyLengthStream(mode, ctx),
+        mode !== 'wrapped',
+        `local ${mode}`
+      );
+      // Both bindings call the same fake gateway's get(mode) over RPC. Both receive the
+      // stream and metadata saying size=4, but they process that result differently:
+      // - BUCKET runs R2's getRpc(), which uses the metadata to create a local fixed-length
+      //   wrapper. Even a "wrapped" source can therefore be copied immediately.
+      // - SERVICE returns the RPC result directly. Its stream's length depends on asynchronous
+      //   stream setup; ordinary service RPC does not interpret the sibling object.size field.
+      //
+      // Expected PUT outcomes ("sized" means native, fixed, or expected):
+      // Receiving path / source       Immediate PUT    PUT after an event-loop turn
+      // BUCKET / any                  succeeds         succeeds
+      // SERVICE, legacy / sized       length error     succeeds
+      // SERVICE, legacy / wrapped     length error     length error
+      // SERVICE, TypeScript / any     length error     length error
+      //
+      // The legacy receiver can discover a declared length once stream setup completes.
+      // The TypeScript receiver snapshots the initially unknown length, so waiting does not
+      // help it. The dedicated jsrpc-ts configuration runs this same loop with that receiver.
+      for (const transport of ['BUCKET', 'SERVICE']) {
+        for (const timing of ['immediate', 'after-event-loop-turn']) {
+          // Fetch again for every attempt: a stream consumed or cancelled by one PUT must
+          // not be reused by the next. Awaiting get() alone need not finish RPC stream setup.
+          const result = await env[transport].get(mode);
+          // Metadata is correct in every case, including cases whose stream is still unsized.
+          assert.strictEqual(
+            transport === 'BUCKET' ? result.size : result.object.size,
+            bodyLengthBytes.byteLength
+          );
+          if (timing === 'after-event-loop-turn') {
+            // Let pending RPC setup run without consuming body bytes. This is a diagnostic
+            // event-loop yield, not a suggested workaround for application code.
+            await scheduler.wait(0);
+          }
+          await assertBodyLengthCopy(
+            env.BUCKET,
+            result.body,
+            // This boolean selects the expected outcome from the table above. All uploads
+            // use BUCKET.put(); transport selects only how we obtained the source body.
+            transport === 'BUCKET' ||
+              (env.R2_BODY_LENGTH_TRANSPORT !== 'jsrpc-ts' &&
+                timing === 'after-event-loop-turn' &&
+                mode !== 'wrapped'),
+            `${transport} ${mode} ${timing}`
+          );
+        }
+      }
+    }
+
+    // The returned range describes the actual body, even when the requested range is longer.
+    // Empty bodies and multibyte UTF-8 text also need byte counts, not character counts.
+    for (const [requestKey, fixture] of Object.entries(bodyLengthCopyCases)) {
+      const result = await env.BUCKET.get(requestKey, fixture.options);
+      assert.strictEqual(result.size, fixture.size);
+      assert.strictEqual(result.range?.offset, fixture.range?.offset);
+      assert.strictEqual(result.range?.length, fixture.range?.length);
+      const copied = await env.BUCKET.put(requestKey, result.body);
+      assert.strictEqual(
+        copied.size,
+        new TextEncoder().encode(fixture.content).byteLength
+      );
+    }
+
+    // GET must finish before any bytes are available. Releasing the source only afterwards
+    // catches implementations that wait for the first byte or buffer the whole body.
+    const deferred = await env.BUCKET.get('deferred');
+    assert.strictEqual(deferred.bodyUsed, false);
+    assert.strictEqual(deferred.body.locked, false);
+    const copying = env.BUCKET.put('destination', deferred.body);
+    await env.SERVICE.releaseBody();
+    assert.strictEqual((await copying).size, bodyLengthBytes.byteLength);
+
+    // A partial read must reduce the known length. Tee gives us an undisturbed stream for
+    // RPC transfer; its length must describe only the three unread bytes, not all four.
+    const partial = await env.BUCKET.get('chunks');
+    const reader = partial.body.getReader({ mode: 'byob' });
+    const first = await reader.read(new Uint8Array(1));
+    assert.deepStrictEqual(first.value, bodyLengthBytes.slice(0, 1));
+    reader.releaseLock();
+    const [remaining, discarded] = partial.body.tee();
+    const discarding = discarded.cancel();
+    assert.strictEqual((await env.BUCKET.put('remaining', remaining)).size, 3);
+    await discarding;
+
+    // Multipart uploads use the same known-length requirement as PUT, including ranged bodies.
+    for (const requestKey of ['destination', 'bounded']) {
+      const fixture = bodyLengthCopyCases[requestKey];
+      const upload = env.BUCKET.resumeMultipartUpload(
+        requestKey,
+        'body-length-upload'
+      );
+      const source = await env.BUCKET.get(
+        requestKey === 'destination' ? 'wrapped' : requestKey,
+        fixture?.options
+      );
+      assert.deepStrictEqual(await upload.uploadPart(1, source.body), {
+        partNumber: 1,
+        etag: 'body-length-etag',
+      });
+    }
+
+    // Metadata is a promise about the bytes, not permission to truncate or pad a bad response.
+    for (const mode of ['short', 'long', 'zero-long']) {
+      const result = await env.BUCKET.get(mode);
+      // Read to EOF explicitly: text() can return immediately when the declared length is zero.
+      const reader = result.body.getReader();
+      await assert.rejects(
+        async () => {
+          let chunk;
+          do {
+            chunk = await reader.read();
+          } while (!chunk.done);
+        },
+        { name: 'TypeError' },
+        mode
+      );
+    }
+    await assert.rejects(env.BUCKET.get('unsafe'), {
+      message:
+        'Malformed R2 get RPC result: body length must be a safe integer.',
+    });
+    await assert.rejects(env.BUCKET.get('unsafe-range'), {
+      message:
+        'Malformed R2 get RPC result: body length must be a safe integer.',
+    });
+
+    // Wrapping must preserve upstream errors and let consumer cancellation reach the gateway.
+    await assert.rejects(
+      async () => (await env.BUCKET.get('upstream-error')).text(),
+      {
+        message: 'ReadableStream received over RPC disconnected prematurely.',
+      }
+    );
+    const cancelled = await env.BUCKET.get('cancel');
+    await cancelled.body.cancel('no longer needed');
+    await env.SERVICE.waitForCancellation();
+
+    // A rejected metadata result must cancel its body rather than leave the gateway pumping.
+    await assert.rejects(env.BUCKET.get('invalid-size'), {
+      message: 'Malformed R2 RPC result: size must be a non-negative integer.',
+    });
+    await env.SERVICE.waitForCancellation();
+
+    // Results without bodies do not need a length wrapper.
+    assert.strictEqual(await env.BUCKET.get('missing'), null);
+    assert.strictEqual((await env.BUCKET.get('metadata')).body, undefined);
+
+    // R2 bodies must remain usable with an application's own streaming transforms.
+    const transformed = (await env.BUCKET.get('wrapped')).body.pipeThrough(
+      new FixedLengthStream(bodyLengthBytes.byteLength)
+    );
+    assert.strictEqual(await new Response(transformed).text(), 'data');
+  },
+};
+
+export default testWorker;
