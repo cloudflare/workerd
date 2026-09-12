@@ -11,7 +11,7 @@
 
 import { Readable, Writable, pipeline, promises } from 'node:stream';
 import { Buffer } from 'node:buffer';
-import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
+import { strictEqual, deepStrictEqual, rejects, throws } from 'node:assert';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -183,6 +183,46 @@ export const pipelineWebSourceErrorFailsPipeline = {
     strictEqual(await run(source, writable), boom);
     strictEqual(writable.destroyed, true);
     strictEqual(writable.errored, boom);
+  },
+};
+
+// A web destination that is already locked fails the pipeline with the lock
+// error — through the callback and through stream/promises alike — rather
+// than leaving it pending: the source is destroyed and the existing writer
+// keeps its lock.
+export const pipelineLockedWebDestinationFails = {
+  async test() {
+    const locked = { name: 'TypeError', message: /locked/ };
+
+    const sink = new WritableStream();
+    const owner = sink.getWriter();
+    const source = new Readable({ read() {} });
+    const err = await run(source, sink);
+    throws(() => {
+      throw err;
+    }, locked);
+    strictEqual(source.destroyed, true);
+    strictEqual(sink.locked, true);
+    await owner.close();
+
+    const sink2 = new WritableStream();
+    const owner2 = sink2.getWriter();
+    let cancelled;
+    const webSource = new ReadableStream({
+      pull() {
+        return new Promise(() => {});
+      },
+      cancel(reason) {
+        cancelled = reason;
+      },
+    });
+    await rejects(promises.pipeline(webSource, sink2), locked);
+    strictEqual(sink2.locked, true);
+    // A web source the pump never started reading is cancelled with the
+    // failure, as the node source was destroyed with it.
+    strictEqual(cancelled?.name, 'TypeError');
+    strictEqual(webSource.locked, false);
+    await owner2.close();
   },
 };
 
