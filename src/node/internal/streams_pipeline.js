@@ -228,7 +228,12 @@ function readWeb(readable, destroys) {
   };
 }
 
-async function pumpToWeb(readable, writable, finish, { end, destroys }) {
+async function pumpToWeb(
+  readable,
+  writable,
+  finish,
+  { end, destroys, onError }
+) {
   if (isTransformStream(writable)) {
     writable = writable.writable;
   }
@@ -241,6 +246,16 @@ async function pumpToWeb(readable, writable, finish, { end, destroys }) {
   destroys.push((err) => {
     if (!settled) {
       writer.abort(err || new ERR_STREAM_DESTROYED('pipe')).catch(() => {});
+    }
+  });
+  // The destination's failure is observed on its own, as eos() observes a
+  // node destination's: a pump waiting on an idle source would otherwise
+  // learn of a rejected write, or of the sink erroring, only from its next
+  // write. The pipeline records the error and tears its stages down, which
+  // fails this pump's read; the pump then finishes once, below.
+  writer.closed.then(undefined, (err) => {
+    if (!settled) {
+      onError(err);
     }
   });
   try {
@@ -486,7 +501,7 @@ export function pipelineImpl(streams, callback, opts) {
       }
       ret = stream;
     } else if (isWebStream(stream)) {
-      const pumpOptions = { end, destroys };
+      const pumpOptions = { end, destroys, onError: finishOnlyHandleError };
       if (isReadableNodeStream(ret)) {
         finishCount++;
         pumpToWeb(makeAsyncIterable(ret), stream, finish, pumpOptions);

@@ -128,14 +128,16 @@ The implementation under test is `src/node/internal/streams_readable.js`
   stages through those handles: the source's reader is cancelled with the
   pipeline's error, which settles a pending read (a source the pump never
   started reading is cancelled too), and the destination's writer is
-  aborted with it. A failed web sink fails the pipeline and destroys the
-  node source (its own abort algorithm does not run: the stream is already
-  errored); a failed web source destroys the node destination; a failed
-  node destination — even one failing while the web source is idle —
-  cancels the web source. A signal abort fails the pipeline with an
-  `AbortError`, also when every stage is a web stream and idle; a pending
-  sink write is allowed to settle first. `stream/promises` treats a
-  trailing web stream as a destination.
+  aborted with it. A web destination's own failure — its controller
+  erroring, a write rejecting — is observed independently of the source,
+  so it fails the pipeline even while the source is idle. A failed web sink
+  fails the pipeline and destroys the node source (its own abort algorithm
+  does not run: the stream is already errored); a failed web source
+  destroys the node destination; a failed node destination — even one
+  failing while the web source is idle — cancels the web source. A signal
+  abort fails the pipeline with an `AbortError`, also when every stage is a
+  web stream and idle; a pending sink write is allowed to settle first.
+  `stream/promises` treats a trailing web stream as a destination.
 
 ## Compatibility flags
 
@@ -177,7 +179,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `bodies.js` | Response/Request bodies through `Readable.toWeb` (incl. a megabyte); `Readable.fromWeb` over a Response body and a `TextDecoderStream` chain; `Writable.fromWeb` over `IdentityTransformStream` and `FixedLengthStream` (ledger #4); pipeThrough chains in both directions |
 | `consumers.js` | `text/json/buffer/arrayBuffer/blob` over web streams; multi-chunk and string decoding; lock release; error propagation; node Readables and async generators |
 | `readable-from.js` | `Readable.from(webStream)`: chunk types by objectMode, destroy → cancel + lock release, error propagation |
-| `pipeline-web.js` | web source/destination/transform stages, generator stages, `TransformStream` head; sink/source/node-sink failures (incl. a node sink failing while the web source is idle); promise-valued chunks by identity; `stream/promises` trailing web destination, `end: false`, signal abort of a node-headed and of an idle all-web pipeline |
+| `pipeline-web.js` | web source/destination/transform stages, generator stages, `TransformStream` head; sink/source/node-sink failures (incl. a node sink failing while the web source is idle, and a web sink erroring or rejecting a write while the source is idle); promise-valued chunks by identity; `stream/promises` trailing web destination, `end: false`, signal abort of a node-headed and of an idle all-web pipeline |
 | `which-impl.js` | implementation detection |
 
 ## Legacy (unflagged) behaviors
