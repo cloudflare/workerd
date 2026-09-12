@@ -14,6 +14,7 @@ mod test_refcount;
 
 use kj_rs::KjOwn;
 use test_futures::clear_retained_waker;
+use test_futures::get_side_effect_counter;
 use test_futures::new_drop_cancellable_promise_without_polling;
 use test_futures::new_error_handling_future_void_infallible;
 use test_futures::new_errored_future_void;
@@ -27,11 +28,13 @@ use test_futures::new_ready_future_i32;
 use test_futures::new_ready_future_void;
 use test_futures::new_retained_waker_future_void;
 use test_futures::new_select_with_cancellation;
+use test_futures::new_side_effect_future_void;
 use test_futures::new_threaded_delay_future_void;
 use test_futures::new_two_step_cancellable_future;
 use test_futures::new_waking_future_void;
 use test_futures::new_wrapped_waker_future_void;
 use test_futures::poll_and_stash_promise_future;
+use test_futures::reset_side_effect_counter;
 use test_futures::unstash_and_await_promise_future;
 use test_futures::wake_retained_waker_from_background_thread;
 use test_maybe::take_maybe_own;
@@ -282,6 +285,12 @@ pub mod ffi {
         async fn new_pass_through_feature_shared() -> Shared;
 
         async unsafe fn work_before_poll<'a>(target: &'a mut u64) -> Result<()>;
+
+        // Cold-by-default probes: the body of a bridged async fn runs only once its promise is
+        // polled.
+        fn reset_side_effect_counter();
+        fn get_side_effect_counter() -> u64;
+        async fn new_side_effect_future_void();
 
         // Cancellation test helpers.
         async fn new_future_awaiting_cancellable_promise() -> Result<()>;
