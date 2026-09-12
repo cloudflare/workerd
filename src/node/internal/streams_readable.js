@@ -2324,6 +2324,15 @@ Readable.prototype.find = find;
  * }} [options]
  * @returns {ReadableStream}
  */
+// The web stream each node readable has been adapted to (Readable.toWeb),
+// kept alive by the node readable. The C++ streams implementation's
+// controller does not keep its stream alive: once the stream is collected,
+// enqueue() drops the chunk and desiredSize stays put, so a source holding
+// only the controller (this adapter's 'data' listener) would never be
+// paused, and a reader awaiting a read could be collected with the stream.
+// The entry lives exactly as long as the node readable does.
+const adaptedReadableStreams = new WeakMap();
+
 export function newReadableStreamFromStreamReadable(
   streamReadable,
   options = {},
@@ -2394,7 +2403,7 @@ export function newReadableStreamFromStreamReadable(
 
   streamReadable.on('data', onData);
 
-  return new globalThis.ReadableStream(
+  const stream = new globalThis.ReadableStream(
     {
       start(c) {
         controller = c;
@@ -2412,6 +2421,8 @@ export function newReadableStreamFromStreamReadable(
     },
     strategy
   );
+  adaptedReadableStreams.set(streamReadable, stream);
+  return stream;
 }
 
 /**

@@ -187,6 +187,18 @@ The implementation under test is `src/node/internal/streams_readable.js`
   `src/per_isolate/webstreams/AGENTS.md`); a branch's `cancel()` promise
   settles with the source's cleanup in either order.
 
+### Liveness
+
+- The node stream keeps the web stream it was adapted to alive (`toWeb`,
+  both directions, ephemerally: exactly as long as the node stream lives).
+  The C++ streams implementation's controller does not keep its stream
+  alive (readable ledger #19 in `src/tests/streams`), and the node side —
+  which its own pending I/O keeps alive — holds only the controller: a
+  full GC could otherwise collect a `toWeb` stream reachable only through
+  a pending `writer.closed`/`write()` continuation (which then never
+  settles), or leave a `Readable.toWeb` source pushing into a collected
+  stream, never paused. The gc.js module forces GCs in that window.
+
 ### Prototype pollution
 
 - The adapters, unlike Node's, use no primordials: they call the live
@@ -212,6 +224,7 @@ and `transformstream_enable_standard_constructor` (the transform chains).
 `stream-ts.wd-test` omits both; its variants prove the TypeScript
 implementation is indifferent to them. `stream-cpp-pedantic.wd-test` runs
 the full module set with `pedantic_wpt` added and asserts nothing changes.
+The three cells pass `--expose-gc` to V8 for `gc.js`.
 
 | Flag (enable date) | Selects | Unflagged behavior tested by |
 | --- | --- | --- |
@@ -242,6 +255,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `duplex-to-web.js` | pair round trip; validation; destroyed and half Duplexes; non-byte readable (ledger #3); destroy(err) erroring both halves; the whole-Duplex end-of-stream coupling of the halves |
 | `duplex-from-web.js` | a detached-view chunk destroying the duplex (`TypeError`; readable cancelled and writable aborted with it); pair round trip; objectMode strings; corked writes; failed batch; errored readable / writable and later readable error destroying the duplex (and what is left untouched); clean `for await` consumption |
 | `duplex-from.js` | `Duplex.from()` over a lone web stream marks the missing side |
+| `gc.js` | forced GCs while only a pending read / `writer.closed` / Duplex.toWeb read+close continuation holds the web side and the node side has pending I/O: all settle |
 | `then-pollution.js` | transparent patched `then`: data intact through the three adapters, patch called; hostile `then` during construction: throw, streams unlocked and reusable (Readable, Writable, Duplex `fromWeb`), also when it registers the handlers before throwing (nothing escapes, under the uncaught guard); `Object.prototype.then` getter consulted, data intact |
 | `bodies.js` | Response/Request bodies through `Readable.toWeb` (incl. a megabyte); `Readable.fromWeb` over a Response body and a `TextDecoderStream` chain; `Writable.fromWeb` over `IdentityTransformStream` and `FixedLengthStream` (ledger #4); pipeThrough chains in both directions |
 | `consumers.js` | `text/json/buffer/arrayBuffer/blob` over web streams; multi-chunk and string decoding; lock release; error propagation; node Readables and async generators |

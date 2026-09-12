@@ -173,6 +173,7 @@ export {
   pendingReadSurvivesGc,
   asyncIterationSurvivesGc,
   readableStreamFromPendingPromiseCollects,
+  controllerOnlyHeldStreamLiveness,
 } from 'gc';
 
 export { thenGetterFireCountOnRead } from 'then-interceptors';

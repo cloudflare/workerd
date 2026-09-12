@@ -29,4 +29,6 @@ const unitTests :Workerd.Config = (
   autogates = [
     "workerd-autogate-per-isolate-javascript-bootstrap",
   ],
+  # For the forced-GC tests in gc.js.
+  v8Flags = ["--expose-gc"],
 );

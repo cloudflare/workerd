@@ -205,3 +205,9 @@ export {
   hostileThenAfterRegisteringLeavesNothingBehind,
   objectPrototypeThenGetterIsConsultedNotObeyed,
 } from 'then-pollution';
+
+export {
+  toWebPendingReadSurvivesGc,
+  toWebWriterClosedSurvivesGc,
+  duplexToWebPendingOperationsSurviveGc,
+} from 'gc';

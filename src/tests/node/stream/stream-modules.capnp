@@ -21,4 +21,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "compose-web", esModule = embed "compose-web.js"),
   (name = "duplex-from", esModule = embed "duplex-from.js"),
   (name = "then-pollution", esModule = embed "then-pollution.js"),
+  (name = "gc", esModule = embed "gc.js"),
 ];

@@ -33,6 +33,7 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 | 16 | then-getter fires during a read cycle | 1 (harness context) | 2 | `thenGetterFireCountOnRead` |
 | 17 | close-twice / enqueue-after-close / size-not-function / from-return validation messages | own texts | own texts | `closeTerminality`, `sizeMustBeFunction`, `fromReturnValidationMessages` |
 | 18 | error() while a close() is still pending (chunk queued) | ignored: the requested close is final, the chunk drains to a clean close, desiredSize stays 0 | errors the stream (spec: close() only requested the close, the state is still "readable"): chunk discarded, reads/closed reject, desiredSize null | `errorAfterCloseWithQueuedChunk` |
+| 19 | controller held, stream dropped and collected | the controller does not keep its stream alive: its consumer leaves the queue, enqueue() drops the chunk silently, desiredSize stays at the high-water mark (no backpressure for a producer holding only the controller) | the controller references the stream (spec [[stream]]): enqueues count, desiredSize 4 → 0 | `controllerOnlyHeldStreamLiveness` |
 
 Parity worth noting (probed, pinned): pull serialization (never
 re-entered); pull/async-start rejection identity; error-undefined
@@ -89,7 +90,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `buffer-lifecycle.js` | chunk by reference, detach observed |
 | `integration-body.js` | readAll family, normalization (incl. detached views, resizable-extent pinning), clone, cancel-then-consume, SELF round-trips |
 | `integration-locked-disturbed.js` | disturbed rejected, locked accepted, body identity + lock coupling (#15) |
-| `gc.js` | pending read + async iteration survive gc() |
+| `gc.js` | pending read + async iteration survive gc(); a controller held with its stream collected (ledger #19) |
 | `then-interceptors.js` | ledger #16 |
 | `legacy-constructors.js` | the unflagged cell (see flags table) |
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): a queued backlog plus the close sentinel swept in ONE batched read; value chunks pass through UNTOUCHED (object identity); pull-driven yields per read with EOF as a separate empty batch; expectedLength undefined; error/cancel propagation; lock exclusivity and release |

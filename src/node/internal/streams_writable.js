@@ -1253,6 +1253,15 @@ Writable.prototype[Symbol.asyncDispose] = async function () {
  * @param {Writable} streamWritable
  * @returns {WritableStream}
  */
+// The web stream each node writable has been adapted to (Writable.toWeb),
+// kept alive by the node writable. The C++ streams implementation's
+// controller does not keep its stream alive; the node side — which its own
+// pending I/O keeps alive — holds only the controller, so a full GC could
+// collect the web stream, its writer and whatever awaits them (a
+// writer.closed or write() that then never settles). The entry lives
+// exactly as long as the node writable does.
+const adaptedWritableStreams = new WeakMap();
+
 export function newWritableStreamFromStreamWritable(streamWritable) {
   // Not using the internal/streams/utils isWritableNodeStream utility
   // here because it will return false if streamWritable is a Duplex
@@ -1322,7 +1331,7 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
 
   streamWritable.on('drain', onDrain);
 
-  return new globalThis.WritableStream(
+  const stream = new globalThis.WritableStream(
     {
       start(c) {
         controller = c;
@@ -1355,6 +1364,8 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
     },
     strategy
   );
+  adaptedWritableStreams.set(streamWritable, stream);
+  return stream;
 }
 
 /**
