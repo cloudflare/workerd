@@ -29,6 +29,7 @@ export {
   getAndHeadIgnoreWrites,
   writeAfterEndFails,
   endAfterEndReportsAndStillSends,
+  invalidChunkThrows,
 } from 'request-body';
 
 export {
@@ -82,3 +83,10 @@ export {
   patchedThenPassthroughKeepsData,
   hostileThenDuringSendFailsRequest,
 } from 'then-pollution';
+
+export {
+  destroyInsideResponse,
+  abortInsideTimeout,
+  setTimeoutInsideTimeoutDoesNotOutliveTeardown,
+  responseDestroyInsideAborted,
+} from 'reentrancy';

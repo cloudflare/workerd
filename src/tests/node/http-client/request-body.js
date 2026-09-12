@@ -8,7 +8,7 @@
 // Content-Length rather than chunked encoding.
 
 import { Buffer } from 'node:buffer';
-import { strictEqual, deepStrictEqual } from 'node:assert';
+import { strictEqual, deepStrictEqual, throws } from 'node:assert';
 import { request, response, collect, once, record } from 'harness';
 
 async function summary(req) {
@@ -269,5 +269,22 @@ export const endAfterEndReportsAndStillSends = {
       'req:error(Error/ERR_STREAM_WRITE_AFTER_END/write after end)',
       'after-finish-end:ERR_STREAM_ALREADY_FINISHED',
     ]);
+  },
+};
+
+// A chunk that is neither a string nor a byte view is refused synchronously
+// with ERR_INVALID_ARG_TYPE, before anything is captured.
+export const invalidChunkThrows = {
+  async test(ctrl, env) {
+    const req = request(env, '/echo', { method: 'POST' });
+    for (const chunk of [42, {}, [1, 2], true]) {
+      throws(() => req.write(chunk), {
+        name: 'TypeError',
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+    }
+    req.end('ok');
+    const res = await response(req);
+    strictEqual((await collect(res)).toString(), 'ok');
   },
 };
