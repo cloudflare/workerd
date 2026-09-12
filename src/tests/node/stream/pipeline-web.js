@@ -186,6 +186,133 @@ export const pipelineWebSourceErrorFailsPipeline = {
   },
 };
 
+// Chunks pass through a web source untouched, promise-valued ones included:
+// resolved, rejected and pending promises reach an objectMode node
+// destination — and a web one — as the very objects that were enqueued, and
+// the pipeline can still be aborted while the pending one is in flight.
+export const pipelineWebSourcePreservesPromiseChunks = {
+  async test() {
+    const resolved = Promise.resolve('x');
+    const rejected = Promise.reject(new Error('rejected chunk'));
+    rejected.catch(() => {});
+    const pending = new Promise(() => {});
+    const promiseSource = () =>
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(resolved);
+          controller.enqueue(rejected);
+          controller.enqueue(pending);
+        },
+      });
+
+    const nodeChunks = [];
+    const nodeSink = new Writable({
+      objectMode: true,
+      write(chunk, encoding, callback) {
+        nodeChunks.push(chunk);
+        callback();
+      },
+    });
+    const source = promiseSource();
+    const controller = new AbortController();
+    const done = promises.pipeline(source, nodeSink, {
+      signal: controller.signal,
+    });
+    // Bounded: a pump stuck on a promise chunk must fail here, not hang.
+    for (let i = 0; i < 100 && nodeChunks.length < 3; i++) {
+      await scheduler.wait(2);
+    }
+    // By identity: the deep comparator treats distinct promises as equal.
+    strictEqual(nodeChunks.length, 3);
+    strictEqual(nodeChunks[0], resolved);
+    strictEqual(nodeChunks[1], rejected);
+    strictEqual(nodeChunks[2], pending);
+    controller.abort();
+    await rejects(done, { name: 'AbortError' });
+    strictEqual(source.locked, false);
+
+    const webChunks = [];
+    const webSink = new WritableStream({
+      write(chunk) {
+        webChunks.push(chunk);
+      },
+    });
+    const webController = new AbortController();
+    const webDone = promises.pipeline(promiseSource(), webSink, {
+      signal: webController.signal,
+    });
+    for (let i = 0; i < 100 && webChunks.length < 3; i++) {
+      await scheduler.wait(2);
+    }
+    strictEqual(webChunks.length, 3);
+    strictEqual(webChunks[0], resolved);
+    strictEqual(webChunks[1], rejected);
+    strictEqual(webChunks[2], pending);
+    webController.abort();
+    await rejects(webDone, { name: 'AbortError' });
+  },
+};
+
+// Aborting an idle, fully web-backed pipeline: the source's pending read is
+// interrupted and the source cancelled, the destination is aborted, and the
+// promise rejects with the AbortError.
+export const promisesPipelineSignalAbortsIdleWebPipeline = {
+  async test() {
+    let cancelled;
+    const source = new ReadableStream({
+      pull() {
+        return new Promise(() => {});
+      },
+      cancel(reason) {
+        cancelled = reason;
+      },
+    });
+    const aborts = [];
+    const sink = new WritableStream({
+      abort(reason) {
+        aborts.push(reason);
+      },
+    });
+    const controller = new AbortController();
+    const done = promises.pipeline(source, sink, {
+      signal: controller.signal,
+    });
+    await scheduler.wait(5);
+    controller.abort();
+    await rejects(done, { name: 'AbortError', code: 'ABORT_ERR' });
+    strictEqual(cancelled?.name, 'AbortError');
+    strictEqual(source.locked, false);
+    strictEqual(aborts.length, 1);
+    strictEqual(aborts[0].name, 'AbortError');
+  },
+};
+
+// A node destination that fails while the web source is idle: the pump's
+// pending read is interrupted, the source is cancelled with the failure,
+// and the pipeline fails with it.
+export const pipelineNodeSinkAsyncErrorInterruptsIdleWebSource = {
+  async test() {
+    const boom = new Error('late node sink failure');
+    let cancelled;
+    const source = new ReadableStream({
+      start(controller) {
+        controller.enqueue(enc.encode('a'));
+      },
+      cancel(reason) {
+        cancelled = reason;
+      },
+    });
+    const writable = new Writable({
+      write(chunk, encoding, callback) {
+        setTimeout(() => callback(boom), 5);
+      },
+    });
+    strictEqual(await run(source, writable), boom);
+    strictEqual(cancelled, boom);
+    strictEqual(source.locked, false);
+  },
+};
+
 // A failing node destination fails the pipeline and cancels the web source
 // through the iterator's return.
 export const pipelineNodeSinkErrorCancelsWebSource = {
@@ -235,9 +362,8 @@ export const promisesPipelineEndFalseLeavesWebWritableOpen = {
 
 // An aborted signal fails the pipeline with an AbortError: the node source
 // is destroyed, the pump's iteration fails, and the web destination is
-// aborted with an AbortError. (The pump only notices once a pending sink
-// write settles: a sink that never settles a write parks the pump forever,
-// as in Node.)
+// aborted with an AbortError. (The pipeline completes once a pending sink
+// write settles: the abort of the destination waits for it, as in Node.)
 export const promisesPipelineSignalAbortsWebWritable = {
   async test() {
     const aborts = [];

@@ -165,12 +165,84 @@ async function pumpToNode(iterable, writable, finish, { end }) {
   }
 }
 
-async function pumpToWeb(readable, writable, finish, { end }) {
+// A web ReadableStream as a pump's source: the async iteration the stream
+// itself offers, but through a reader the pipeline's teardown (destroys) can
+// reach. Nothing can interrupt the stream's own iterator's pending read,
+// whereas cancelling the reader settles it; the iteration then fails with
+// the error the pipeline was torn down with. Leaving the loop early (the
+// destination failed) cancels the stream, as the stream's own iterator
+// would. Written out rather than as an async generator: yield would await a
+// promise-valued chunk, which must reach the destination as it is, and a
+// pending one could not be interrupted.
+function readWeb(readable, destroys) {
+  let reader;
+  let error;
+  let released = false;
+  destroys.push((err) => {
+    error = err || new ERR_STREAM_DESTROYED('pipe');
+    // A source the pump has not started reading is cancelled too: a failed
+    // pipeline leaves no stage behind.
+    const cancelled =
+      reader === undefined ? readable.cancel(error) : reader.cancel(error);
+    cancelled.catch(() => {});
+  });
+  async function release() {
+    if (released || reader === undefined) {
+      return;
+    }
+    released = true;
+    try {
+      await reader.cancel(error);
+    } catch {
+      // The stream had already errored.
+    }
+    reader.releaseLock();
+  }
+  return {
+    [Symbol.asyncIterator]() {
+      return this;
+    },
+    async next() {
+      try {
+        reader ??= readable.getReader();
+        if (error === undefined) {
+          const result = await reader.read();
+          if (error === undefined && !result.done) {
+            return result;
+          }
+        }
+      } catch (err) {
+        await release();
+        throw err;
+      }
+      await release();
+      if (error !== undefined) {
+        throw error;
+      }
+      return { value: undefined, done: true };
+    },
+    async return() {
+      await release();
+      return { value: undefined, done: true };
+    },
+  };
+}
+
+async function pumpToWeb(readable, writable, finish, { end, destroys }) {
   if (isTransformStream(writable)) {
     writable = writable.writable;
   }
   // https://streams.spec.whatwg.org/#example-manual-write-with-backpressure
   const writer = writable.getWriter();
+  // The pipeline's teardown aborts the destination with the pipeline's
+  // error, which also wakes a pump waiting on the writer. A pump that has
+  // completed is left alone: with end false its writer stays open.
+  let settled = false;
+  destroys.push((err) => {
+    if (!settled) {
+      writer.abort(err || new ERR_STREAM_DESTROYED('pipe')).catch(() => {});
+    }
+  });
   try {
     for await (const chunk of readable) {
       await writer.ready;
@@ -183,8 +255,10 @@ async function pumpToWeb(readable, writable, finish, { end }) {
       await writer.close();
     }
 
+    settled = true;
     finish();
   } catch (err) {
+    settled = true;
     try {
       await writer.abort(err);
       finish(err);
@@ -364,7 +438,7 @@ export function pipelineImpl(streams, callback, opts) {
         } else if (isReadableStream(ret) || isTransformStream(ret)) {
           const toRead = ret.readable || ret;
           finishCount++;
-          pumpToNode(toRead, pt, finish, { end });
+          pumpToNode(readWeb(toRead, destroys), pt, finish, { end });
         } else {
           throw new ERR_INVALID_RETURN_VALUE(
             'AsyncIterable or Promise',
@@ -393,7 +467,7 @@ export function pipelineImpl(streams, callback, opts) {
       } else if (isTransformStream(ret) || isReadableStream(ret)) {
         const toRead = ret.readable || ret;
         finishCount++;
-        pumpToNode(toRead, stream, finish, { end });
+        pumpToNode(readWeb(toRead, destroys), stream, finish, { end });
       } else if (isIterable(ret)) {
         finishCount++;
         pumpToNode(ret, stream, finish, { end });
@@ -412,15 +486,19 @@ export function pipelineImpl(streams, callback, opts) {
       }
       ret = stream;
     } else if (isWebStream(stream)) {
+      const pumpOptions = { end, destroys };
       if (isReadableNodeStream(ret)) {
         finishCount++;
-        pumpToWeb(makeAsyncIterable(ret), stream, finish, { end });
-      } else if (isReadableStream(ret) || isIterable(ret)) {
+        pumpToWeb(makeAsyncIterable(ret), stream, finish, pumpOptions);
+      } else if (isReadableStream(ret)) {
         finishCount++;
-        pumpToWeb(ret, stream, finish, { end });
+        pumpToWeb(readWeb(ret, destroys), stream, finish, pumpOptions);
+      } else if (isIterable(ret)) {
+        finishCount++;
+        pumpToWeb(ret, stream, finish, pumpOptions);
       } else if (isTransformStream(ret)) {
         finishCount++;
-        pumpToWeb(ret.readable, stream, finish, { end });
+        pumpToWeb(readWeb(ret.readable, destroys), stream, finish, pumpOptions);
       } else {
         throw new ERR_INVALID_ARG_TYPE(
           'val',
