@@ -574,14 +574,18 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     encoding?: BufferEncoding | WriteCallback | null,
     callback?: WriteCallback
   ): boolean {
-    // Capture the data for the request body
+    // The body is sent at end(); a chunk's bytes are captured now, as Node
+    // has them on the wire or copied into its pending queue by the time
+    // write() returns: what the caller does to the buffer afterwards does
+    // not change what is sent. (The copy also frees the Blob from views it
+    // could not take as they are, such as one over a SharedArrayBuffer.)
     if (this.method !== 'GET' && this.method !== 'HEAD' && chunk) {
       if (typeof chunk === 'string') {
         this.#body.push(
           Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8')
         );
-      } else {
-        this.#body.push(chunk);
+      } else if (chunk.byteLength > 0) {
+        this.#body.push(new Uint8Array(chunk));
       }
     }
 
