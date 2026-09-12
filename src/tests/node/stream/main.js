@@ -62,6 +62,7 @@ export {
   toWebAbortWithoutReasonDestroysWithAbortError,
   toWebRejectsNonWritable,
   toWebDuckTypedInputYieldsClosedStream,
+  toWebLiveDuckIsTakenAtItsWord,
   toWebUnwritableSourceYieldsClosedStream,
   toWebStrategyFollowsWritable,
   toWebBackpressureFollowsDrain,
