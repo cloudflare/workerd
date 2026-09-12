@@ -5,6 +5,8 @@ When reviewing workerd C++ code, check for each of these items.
 - **Always** check for STL leaking in: `std::string`, `std::vector`, `std::optional`, `std::unique_ptr`, etc.
 - **Never** allow raw `new`/`delete`**. Should be `kj::heap<T>()` or similar
 - **Never** use `throw` statements. Should use `KJ_ASSERT`/`KJ_REQUIRE`/`KJ_FAIL_ASSERT`/etc
+- **Always** prefer `KJ_TRY` / `KJ_CATCH` over raw `try` / `catch`, including in tests, when catchable exceptions should be normalized to `kj::Exception`.
+- **Always** rethrow from `KJ_CATCH` with `kj::throwFatalException(kj::mv(exception))`, not `throw;`. The body is not a real C++ catch handler, and `kj::throwFatalException()` extends the stack trace after `kj::getCaughtExceptionAsKj()` truncated its common portion.
 - **Never** use `noexcept`
 - **Always** use `noexcept(false)` on explicit destructors
 - **Never** use `[=]` lambda captures
