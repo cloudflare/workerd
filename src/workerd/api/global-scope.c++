@@ -218,6 +218,7 @@ void ServiceWorkerGlobalScope::clear() {
 }
 
 kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
+    kj::Maybe<kj::String> clientIp,
     const kj::HttpHeaders& headers,
     kj::AsyncIoStream& connection,
     kj::HttpService::ConnectResponse& response,
@@ -250,8 +251,8 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // provide a more descriptive error message for HTTP, but this is not relevant on the TCP server
     // side.
     jsg::Ref<Socket> jsSocket =
-        setupSocket(js, ownConnection.addRef().toOwn(), kj::none /* remoteAddress */, kj::mv(host),
-            kj::none, kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::none, false, kj::none);
+        setupSocket(js, ownConnection.addRef().toOwn(), kj::mv(clientIp), kj::mv(host), kj::none,
+            kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::none, false, kj::none);
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
     // connection is already open at this point, exception handling is not required.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
