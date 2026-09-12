@@ -20,6 +20,7 @@ import {
   ERR_INVALID_ARG_VALUE,
   ERR_HTTP_HEADERS_SENT,
   ERR_METHOD_NOT_IMPLEMENTED,
+  ERR_STREAM_ALREADY_FINISHED,
   ConnResetException,
   AbortError,
 } from 'node-internal:internal_errors';
@@ -599,7 +600,13 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     // write() returns: what the caller does to the buffer afterwards does
     // not change what is sent. (The copy also frees the Blob from views it
     // could not take as they are, such as one over a SharedArrayBuffer.)
-    if (this.method !== 'GET' && this.method !== 'HEAD' && chunk) {
+    // A write after end() is refused below, as a write after end.
+    if (
+      this.method !== 'GET' &&
+      this.method !== 'HEAD' &&
+      chunk &&
+      !this.writableEnded
+    ) {
       if (typeof chunk === 'string') {
         this.#body.push(
           Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8')
@@ -618,22 +625,51 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     encoding?: BufferEncoding | VoidFunction,
     callback?: VoidFunction
   ): this {
+    if (typeof data === 'function') {
+      callback = data as VoidFunction;
+      data = undefined;
+    } else if (typeof encoding === 'function') {
+      callback = encoding;
+      encoding = undefined;
+    }
+
+    // Ended already, as OutgoingMessage.end() has it: a chunk is a write
+    // after end (its callback and 'error' report it; the request, already
+    // on its way, is unaffected); a bare end() calls back once the request
+    // has finished, or at once if it already has.
+    if (this.writableEnded) {
+      if (data) {
+        this.write(
+          data,
+          encoding as BufferEncoding | undefined,
+          callback as WriteCallback | undefined
+        );
+      } else if (typeof callback === 'function') {
+        if (!this.writableFinished) {
+          this.once('finish', () => {
+            callback();
+          });
+        } else {
+          (callback as WriteCallback)(new ERR_STREAM_ALREADY_FINISHED('end'));
+        }
+      }
+      return this;
+    }
     // A destroyed request has nothing left to send and never finishes.
     if (this.destroyed) return this;
     this._ended = true;
 
-    if (typeof data === 'function') {
-      callback = data as VoidFunction;
-      data = undefined;
-    }
-
-    // Don't duplicate data here - let the parent's end() call write() which will handle it
+    // The Writable's end() writes the last chunk and finishes the request
+    // (its 'finish' sends it); the request counts as finished from here
+    // on, so that a later write() is a write after end.
     Writable.prototype.end.call(
       this,
       data,
       encoding as BufferEncoding,
       callback
     );
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    this.finished = true;
     return this;
   }
 
