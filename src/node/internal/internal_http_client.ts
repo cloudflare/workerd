@@ -438,7 +438,11 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       .map((key) => `${key}=${response.headers.get(key)}}`)
       .join('\r\n');
     const incoming = new IncomingMessage();
-    setIncomingMessageFetchResponse(incoming, response);
+    setIncomingMessageFetchResponse(incoming, response, {
+      setTimeout: (msecs) => {
+        this.#setIdleTimeout(msecs);
+      },
+    });
     // The response's own failure (its body erroring, or its destroy()) is
     // the request's too, as a socket error would be in Node; a request
     // being destroyed reports its error itself.
@@ -565,13 +569,18 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
 
   // Arms (or, with 0, clears) the timeout, which runs from the moment the
   // request is sent and this method has been called, whichever is later.
+  // The response's setTimeout() sets the same timer.
   setTimeout(msecs: number, callback?: VoidFunction): this {
-    this.timeout = getTimerDuration(msecs, 'msecs');
-    this.#armTimer();
+    this.#setIdleTimeout(getTimerDuration(msecs, 'msecs'));
 
     if (callback) this.once('timeout', callback);
 
     return this;
+  }
+
+  #setIdleTimeout(msecs: number): void {
+    this.timeout = msecs;
+    this.#armTimer();
   }
 
   override write(

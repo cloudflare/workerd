@@ -8,7 +8,7 @@
 // the server going away mid-body aborts the response; a failed connection
 // errors the request; and the request closes once the exchange is over.
 
-import { strictEqual, deepStrictEqual, ok } from 'node:assert';
+import { strictEqual, deepStrictEqual, ok, throws } from 'node:assert';
 import { finished } from 'node:stream';
 import {
   request,
@@ -702,6 +702,97 @@ export const setTimeoutZeroClears = {
     record(log, 'req', req, ['timeout', 'error']);
     const res = await response(req);
     strictEqual((await collect(res)).toString(), 'late');
+    deepStrictEqual(log, []);
+  },
+};
+
+// The response's setTimeout() sets the exchange's one timer — in Node the
+// socket's idle timer, which the request's setTimeout() sets too — so a
+// body that goes quiet fires 'timeout' on both sides and tears the
+// exchange down as a request timeout does. The callback is the response's
+// 'timeout' listener; setTimeout() returns the response.
+export const responseSetTimeoutArmsTheTimer = {
+  async test(ctrl, env) {
+    const id = uniqueId('res-timeout');
+    const log = [];
+    const req = get(env, `/never-ends?id=${id}`);
+    record(log, 'req', req, ['timeout', 'error', 'close']);
+    const res = await response(req);
+    record(log, 'res', res, ['timeout', 'aborted', 'error', 'end', 'close']);
+    res.on('data', (chunk) => log.push(`data:${chunk}`));
+    strictEqual(
+      res.setTimeout(50, () => log.push('res:callback')),
+      res
+    );
+    await Promise.all([once(req, 'close'), once(res, 'close')]);
+    deepStrictEqual(log, [
+      'data:first',
+      'req:timeout',
+      'res:timeout',
+      'res:callback',
+      'res:aborted',
+      'req:error(AbortError/ABORT_ERR/The operation was aborted)',
+      'req:close',
+      'res:error(AbortError/ABORT_ERR/The operation was aborted)',
+      'res:close',
+    ]);
+    strictEqual(res.complete, false);
+  },
+};
+
+// One timer, whichever side set it last: a response's shorter timeout
+// replaces the request's longer one.
+export const responseSetTimeoutReplacesRequestTimeout = {
+  async test(ctrl, env) {
+    const id = uniqueId('res-timeout-shorter');
+    const log = [];
+    const req = get(env, `/never-ends?id=${id}`);
+    req.setTimeout(30_000);
+    record(log, 'req', req, ['timeout', 'error', 'close']);
+    const res = await response(req);
+    res.resume();
+    const started = Date.now();
+    res.setTimeout(50);
+    await once(req, 'close');
+    ok(Date.now() - started < 10_000, 'the response timeout fired');
+    deepStrictEqual(log, [
+      'req:timeout',
+      'req:error(AbortError/ABORT_ERR/The operation was aborted)',
+      'req:close',
+    ]);
+  },
+};
+
+// setTimeout(0) from the response clears the request's pending timeout.
+export const responseSetTimeoutZeroClears = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = get(env, '/slow-body?delay=100');
+    req.setTimeout(40);
+    record(log, 'req', req, ['timeout', 'error']);
+    const res = await response(req);
+    res.setTimeout(0);
+    strictEqual((await collect(res)).toString(), 'firstlast');
+    deepStrictEqual(log, []);
+  },
+};
+
+// msecs is validated on either side as Node's socket.setTimeout validates
+// it: a non-number is ERR_INVALID_ARG_TYPE, a negative or non-finite one
+// ERR_OUT_OF_RANGE; nothing is armed by a rejected call.
+export const setTimeoutValidatesMsecs = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = get(env, '/slow-body?delay=60');
+    record(log, 'req', req, ['timeout', 'error']);
+    const res = await response(req);
+    for (const target of [req, res]) {
+      throws(() => target.setTimeout('abc'), { code: 'ERR_INVALID_ARG_TYPE' });
+      throws(() => target.setTimeout(-1), { code: 'ERR_OUT_OF_RANGE' });
+      throws(() => target.setTimeout(NaN), { code: 'ERR_OUT_OF_RANGE' });
+      throws(() => target.setTimeout(Infinity), { code: 'ERR_OUT_OF_RANGE' });
+    }
+    strictEqual((await collect(res)).toString(), 'firstlast');
     deepStrictEqual(log, []);
   },
 };
