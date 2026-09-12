@@ -15,6 +15,7 @@
 
 import {
   ERR_METHOD_NOT_IMPLEMENTED,
+  ERR_STREAM_PREMATURE_CLOSE,
   ERR_HTTP_HEADERS_SENT,
   ERR_HTTP_INVALID_STATUS_CODE,
   ERR_INVALID_CHAR,
@@ -138,7 +139,9 @@ export class Server
     if (!enableNodejsHttpServerModules) {
       throw new ERR_METHOD_NOT_IMPLEMENTED('Server');
     }
-    super();
+    // Async listeners' rejections are captured (see the rejection hook
+    // below): a 'request' listener's failure must reach its response.
+    super({ captureRejections: true });
 
     if (options != null) {
       // @ts-expect-error TS2345 TODO(soon): Find a better way to handle this type mismatch.
@@ -215,6 +218,26 @@ export class Server
     return this;
   }
 
+  // An async 'request' listener whose promise rejects: the response is torn
+  // down with the error, as a listener throwing synchronously tears it down
+  // (see #onRequest) — a Worker cannot die of an unhandled rejection as
+  // Node's process would, and the client would otherwise wait for a
+  // response that never comes. Another event's listener rejecting is
+  // re-raised, uncaught, as it would have gone unhandled.
+  override [EventEmitter.captureRejectionSymbol](
+    err: unknown,
+    event: string | symbol,
+    ...args: unknown[]
+  ): void {
+    if (event === 'request') {
+      (args[1] as ServerResponse).destroy(err);
+      return;
+    }
+    queueMicrotask(() => {
+      throw err;
+    });
+  }
+
   async #onRequest(
     request: Request,
     env: unknown,
@@ -275,7 +298,12 @@ export class Server
 
     const response = new this[kServerResponse](incoming, {
       highWaterMark: this.highWaterMark,
+      rejectNonStandardBodyWrites: this.rejectNonStandardBodyWrites,
     });
+    // The reply to a HEAD carries no body, whatever the handler writes.
+    if (request.method === 'HEAD') {
+      response._hasBody = false;
+    }
     return { incoming, response };
   }
 
@@ -378,7 +406,10 @@ let getServerResponseFetchResponse: (
 //    - Set up listeners for future data
 // 3. After headers: Data streams directly without buffering
 //    - New '_dataWritten' events are immediately enqueued to the stream
-// 4. Completion: 'finish' event closes the ReadableStream
+// 4. Completion: 'finish' event closes the ReadableStream; 'close' follows
+// 5. Destruction (destroy(), or the body's cancel): before headers the
+//    Response promise rejects; after, the ReadableStream errors with the
+//    destroy reason (ERR_STREAM_PREMATURE_CLOSE without one); 'close' follows
 // @ts-expect-error TS2720 Trailers related methods/attributes are missing.
 export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
   extends OutgoingMessage
@@ -418,13 +449,18 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     const { promise, resolve, reject } = Promise.withResolvers<Response>();
 
     let streamController: ReadableStreamController<Uint8Array> | null = null;
-    const chunks: (Buffer | Uint8Array)[] = [];
+    const chunks: Uint8Array<ArrayBuffer>[] = [];
     const state: { bytesWritten: number; contentLength: number | null } = {
       bytesWritten: 0,
       contentLength: null,
     };
 
     const handleData = (events: DataWrittenEvent[]): void => {
+      // A destroyed response sends nothing more: its body has been errored
+      // (or closed), so a chunk the message buffer still held when the
+      // response was destroyed — by a handler throwing after writing it —
+      // is dropped, as a destroyed socket's pending writes are in Node.
+      if (this.destroyed) return;
       for (const event of events) {
         let chunk = this.#dataFromDataWrittenEvent(event);
 
@@ -442,20 +478,30 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
         }
 
         state.bytesWritten += chunk.length;
+        if (chunk.length === 0) continue;
 
+        // The byte stream's enqueue transfers the buffer it is given, so
+        // the bytes are copied: a written buffer stays the caller's (as in
+        // Node, reusable once the write's callback has fired), and a view
+        // over memory that cannot be transferred — a SharedArrayBuffer, a
+        // WebAssembly.Memory — is written like any other.
+        const copy = new Uint8Array(chunk);
         if (streamController) {
-          if (chunk.length > 0) {
-            // @ts-expect-error TS2345 Buffer extends Uint8Array, but has ArrayBufferLike instead of ArrayBuffer.
-            streamController.enqueue(chunk);
-          }
+          streamController.enqueue(copy);
         } else {
-          chunks[event.index] = chunk;
+          chunks[event.index] = copy;
         }
       }
     };
 
     this.on('_dataWritten', handleData);
     this.once('error', reject);
+    // A response destroyed before its headers were sent never yields a
+    // Response: the fetch fails instead of waiting forever. (A no-op once
+    // the headers have resolved the promise.)
+    this.once('close', () => {
+      reject(new ERR_STREAM_PREMATURE_CLOSE());
+    });
 
     this.once(
       '_headersSent',
@@ -476,20 +522,42 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
             onStreamStart: (controller) => {
               streamController = controller;
               for (const chunk of chunks) {
-                // @ts-expect-error TS2345 Buffer extends Uint8Array, but has ArrayBufferLike instead of ArrayBuffer.
                 controller.enqueue(chunk);
               }
               chunks.length = 0;
             },
           })
         );
-
-        this._closed = true;
-        this.emit('close');
       }
     );
 
+    // As in Node, 'close' follows the response's completion ('finish'), or
+    // its destruction (see destroy()).
+    this.once('finish', () => {
+      queueMicrotask(() => {
+        this.#emitClose();
+      });
+    });
+
     this.#fetchResponse = promise;
+  }
+
+  // A closed response counts as destroyed (as in Node): writes after it
+  // fail through their callback only, never as an 'error' event.
+  #emitClose(): void {
+    if (this._closed) return;
+    this.destroyed = true;
+    this._closed = true;
+    this.emit('close');
+  }
+
+  override destroy(err?: unknown, cb?: (err?: unknown) => void): this {
+    if (this.destroyed) return this;
+    super.destroy(err, cb);
+    queueMicrotask(() => {
+      this.#emitClose();
+    });
+    return this;
   }
 
   #toFetchResponse({
@@ -510,10 +578,23 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
         type: 'bytes',
         start: (controller): void => {
           onStreamStart(controller);
+          let settled = false;
           this.once('finish', () => {
+            settled = true;
             controller.close();
           });
-          this.on('error', controller.error.bind(controller));
+          this.on('error', (err: unknown) => {
+            if (settled) return;
+            settled = true;
+            controller.error(err);
+          });
+          // Destroyed before finishing, with or without an error: the body
+          // ends prematurely rather than staying open.
+          this.once('close', () => {
+            if (settled) return;
+            settled = true;
+            controller.error(this.errored ?? new ERR_STREAM_PREMATURE_CLOSE());
+          });
         },
         cancel: (reason: unknown): void => {
           this.destroy(reason);

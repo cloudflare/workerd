@@ -1,0 +1,42 @@
+using Workerd = import "/workerd/workerd.capnp";
+using HttpServerModules = import "http-server-modules.capnp";
+
+# Runs the node:http server suite against the C++ streams implementation.
+# http-server-ts.wd-test runs the identical modules against the TypeScript
+# implementation. The worker is bound to itself as SERVICE: a test's
+# fetch() re-enters the worker, whose default handler hands the Request to
+# the test's http.Server through handleAsNodeRequest.
+#
+# No compatibilityDate is set: the wd_test variants supply the date axis.
+# The semantics the tests depend on are pinned by flag:
+# - nodejs_compat: node:http (date-enabled 2026-08-04). nodejs_compat_v2 is
+#   deliberately NOT pinned: the http layer must not depend on its globals.
+# - enable_nodejs_http_modules, enable_nodejs_http_server_modules: the
+#   server classes (date-implied 2025-08-15 / 2025-09-01).
+# - streams_enable_constructors: ServerResponse builds its body with
+#   `new ReadableStream({ type: 'bytes' })`, and the tests build web
+#   streams to feed requests and pipelines.
+# - transformstream_enable_standard_constructor: pipeline stages built with
+#   `new TransformStream({ transform })`.
+# The TypeScript implementation hard-codes these modern behaviors, so the
+# flags also keep the two cells comparable at the oldest compat date.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "node-http-server-cpp",
+      worker = (
+        modules = HttpServerModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_http_modules",
+          "enable_nodejs_http_server_modules",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+        ],
+        bindings = [
+          (name = "SERVICE", service = "node-http-server-cpp"),
+        ],
+      )
+    ),
+  ],
+);

@@ -1,0 +1,30 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The node:http server suite runs the same test modules under two configs:
+# http-server-cpp against the C++ streams implementation, http-server-ts
+# against the TypeScript implementation. The worker is bound to itself
+# (SERVICE), so a test's fetch() enters the worker's default handler, which
+# routes it to the test's node http.Server.
+
+http_server_suite_srcs = glob(["*.js"]) + ["http-server-modules.capnp"]
+
+wd_test(
+    src = "http-server-cpp.wd-test",
+    data = http_server_suite_srcs,
+)
+
+wd_test(
+    src = "http-server-ts.wd-test",
+    args = ["--experimental"],
+    data = http_server_suite_srcs,
+)
+
+# Legacy (unflagged) regression guard, C++ implementation only. The
+# @all-compat-flags variant is disabled: at the 2999-12-31 date the
+# constructor flag this config deliberately omits would turn on,
+# contradicting its purpose of asserting the pre-flag behavior.
+wd_test(
+    src = "http-server-cpp-legacy.wd-test",
+    data = http_server_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)
