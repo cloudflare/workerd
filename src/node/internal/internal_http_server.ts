@@ -434,6 +434,11 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     };
 
     const handleData = (events: DataWrittenEvent[]): void => {
+      // A destroyed response sends nothing more: its body has been errored
+      // (or closed), so a chunk the message buffer still held when the
+      // response was destroyed — by a handler throwing after writing it —
+      // is dropped, as a destroyed socket's pending writes are in Node.
+      if (this.destroyed) return;
       for (const event of events) {
         let chunk = this.#dataFromDataWrittenEvent(event);
 

@@ -59,6 +59,8 @@ export {
   destroyWithErrorAfterHeadersErrorsBody,
   destroyAfterHeadersEndsBodyPrematurely,
   clientCancelDestroysResponse,
+  handlerThrowBeforeHeadersRejectsFetch,
+  handlerThrowAfterPartialBodyRejectsFetch,
 } from 'response-lifecycle';
 
 export {

@@ -12,7 +12,7 @@
 // Request, whose Response body is the very stream the handler feeds.
 
 import { rejects, strictEqual, deepStrictEqual } from 'node:assert';
-import { withServer, remember, dispatch } from 'harness';
+import { withServer, remember, dispatch, collectUncaught } from 'harness';
 
 const dec = new TextDecoder();
 
@@ -132,6 +132,67 @@ export const clientCancelDestroysResponse = {
         );
         strictEqual(err.code, 'ERR_STREAM_DESTROYED');
       }
+    );
+  },
+};
+
+// A request listener throwing synchronously before any header is sent: the
+// response is destroyed with the error ('error', 'close') and the fetch
+// rejects with it. Nothing but that error escapes.
+export const handlerThrowBeforeHeadersRejectsFetch = {
+  async test(ctrl, env) {
+    const events = [];
+    const boom = new Error('handler boom');
+    const leaked = await collectUncaught(() =>
+      withServer(
+        (req, res) => {
+          res.on('error', (err) => events.push(['error', err]));
+          res.on('close', () => events.push(['close']));
+          throw boom;
+        },
+        async () => {
+          await rejects(env.SERVICE.fetch('http://x/'), {
+            message: 'handler boom',
+          });
+        }
+      )
+    );
+    deepStrictEqual(events, [['error', boom], ['close']]);
+    deepStrictEqual(
+      leaked.filter((err) => err !== boom),
+      []
+    );
+  },
+};
+
+// The same throw after writeHead() and a write(): the Response, ready since
+// the first write, is discarded — the fetch rejects with the error — and the
+// chunk still in the message buffer when the handler threw is dropped with
+// the destroyed response, never enqueued into its errored body.
+export const handlerThrowAfterPartialBodyRejectsFetch = {
+  async test(ctrl, env) {
+    const events = [];
+    const boom = new Error('handler boom after write');
+    const leaked = await collectUncaught(() =>
+      withServer(
+        (req, res) => {
+          res.on('error', (err) => events.push(['error', err]));
+          res.on('close', () => events.push(['close']));
+          res.writeHead(200, { 'Content-Type': 'text/plain' });
+          res.write('partial');
+          throw boom;
+        },
+        async () => {
+          await rejects(env.SERVICE.fetch('http://x/'), {
+            message: 'handler boom after write',
+          });
+        }
+      )
+    );
+    deepStrictEqual(events, [['error', boom], ['close']]);
+    deepStrictEqual(
+      leaked.filter((err) => err !== boom),
+      []
     );
   },
 };
