@@ -96,7 +96,8 @@ network service allowing `private`.
 
 - `setTimeout(ms)` arms a one-shot idle timer; delivered or flushed data
   re-arms it without registering listeners; it fires 'timeout' without
-  closing the socket; `setTimeout(0)` clears it.
+  closing the socket; `setTimeout(0)` clears it, and activity afterwards
+  arms nothing.
 
 ### Interop
 
@@ -134,7 +135,7 @@ policy to the Duplex; see "The handle".)
 | `half-close.js` | enforcer registration and default; peer EOF ending both sides; `EPIPE` after EOF; half-open writes after EOF; explicit end with half-open; EOF surfacing without a consumer |
 | `end-and-destroy.js` | end callback forms; `bufferSize`; destroy with/without error (events, `hadError`); writes after destroy, without handle, with invalid chunks; inert closed socket; all queued writes flushed before end |
 | `backpressure.js` | pause/resume against a ticking peer; paused-mode `read()` restarting the loop; `write()` false and 'drain'; cork cycles |
-| `timeouts.js` | idle timeout without closing; data resets; `setTimeout(0)` clears |
+| `timeouts.js` | idle timeout without closing; data resets; `setTimeout(0)` clears, also across later traffic |
 | `onread.js` | fixed buffer across several fills (and its detachment); a fixed view into a larger allocation keeping its range; generated buffers; callback `false` stopping and `resume()` restarting |
 | `interop.js` | pipe into `Writable.fromWeb`; `Readable.toWeb(socket)` body; pipeline through a TransformStream and from a web source; `Duplex.toWeb` round trip; locked halves |
 | `servers.js`, `which-impl.js` | shared machinery |

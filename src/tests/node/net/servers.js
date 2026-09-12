@@ -48,6 +48,24 @@ export async function echoSegments(socket, segments, receivedLength) {
   }
 }
 
+// Resolves with the socket's 'data' concatenated until at least `length`
+// bytes have arrived.
+export function readAtLeast(socket, length) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    let total = 0;
+    const onData = (chunk) => {
+      chunks.push(chunk);
+      total += chunk.length;
+      if (total >= length) {
+        socket.off('data', onData);
+        resolve(Buffer.concat(chunks));
+      }
+    };
+    socket.on('data', onData);
+  });
+}
+
 // Resolves with the concatenation of everything the socket emits as
 // 'data' until 'end'.
 export function readAll(socket) {
