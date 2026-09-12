@@ -3555,7 +3555,13 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
       });
       ioContext.addTask(forwardToFulfiller(kj::mv(promise), kj::mv(prp.fulfiller)));
 
-      DrainingReadResult result = co_await prp.promise;
+      // The read races the sink reporting that its writes can no longer succeed (for example, the
+      // peer of an RPC-transferred stream canceled it). A source that is idle would otherwise keep
+      // this pump parked indefinitely, and its cancel algorithm would run only when data finally
+      // arrived and the write failed. Losing the race throws into the catch block below, which
+      // cancels the reader with the sink's reason. The join drops whichever side lost.
+      DrainingReadResult result = co_await prp.promise.exclusiveJoin(
+          rejectWhenWriteDisconnected<DrainingReadResult>(*sink));
 
       // Write all the chunks we received using vectored write for efficiency.
       // Fast path: hand chunks to the sink synchronously via tryWriteSync() when it can
@@ -3589,8 +3595,8 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
                                      jsg::Lock& js) mutable -> kj::Promise<void> {
       auto& ioContext = IoContext::current();
       KJ_IF_SOME(reader, weakReader.tryGet()) {
-        auto error = js.exceptionToJsValue(kj::mv(ex));
-        return ioContext.awaitJs(js, reader.cancel(js, error.getHandle(js)));
+        auto reason = exceptionToCancelReason(js, kj::mv(ex));
+        return ioContext.awaitJs(js, reader.cancel(js, reason));
       } else {
         return KJ_EXCEPTION(DISCONNECTED, "The pump was canceled.");
       }

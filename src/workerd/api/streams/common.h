@@ -271,6 +271,17 @@ class WritableStreamSink: public kj::PtrTarget {
   // TODO(conform): abort() should return a promise after which closed fulfillers should be
   //   rejected. This may necessitate an "erroring" state.
 
+  // Returns a promise that resolves once the sink has learned that further write()s are certain to
+  // fail -- for example, the remote end of an RPC-transferred stream canceled it -- with the
+  // exception that such a write would fail with. A pump that is parked waiting for its source can
+  // race this against the read (see rejectWhenWriteDisconnected()) and cancel the source right
+  // away, instead of leaving the source open until it next produces data. Most sinks cannot detect
+  // this condition without attempting a write; the default implementation never resolves.
+  //
+  // Like kj::AsyncOutputStream::whenWriteDisconnected(), this may be called repeatedly, and the
+  // returned promise must not outlive the sink.
+  virtual kj::Promise<kj::Exception> whenWriteDisconnected();
+
   // Tells the sink that it is no longer to be responsible for encoding in the correct format.
   // Instead, the caller takes responsibility. The expected encoding is returned; the caller
   // promises that all future writes will use this encoding. The default implementation returns
@@ -347,6 +358,35 @@ class ReadableStreamSource: public kj::PtrTarget {
   // method, which relies upon `tryRead()`. The default implementation returns nullptr.
   virtual kj::Maybe<Tee> tryTee(uint64_t limit);
 };
+
+// Pumps `source` into `sink`, ending the sink afterwards if `end` is set, and keeps both alive for
+// the duration -- including the deferred-proxy phase. If the pump fails, or the sink reports
+// disconnection (WritableStreamSink::whenWriteDisconnected()) before the pump finishes, the sink
+// is aborted and the source canceled with the failure. Dropping the returned promise while the
+// pump is in its first phase cancels the source.
+kj::Promise<DeferredProxy<void>> pumpOwnedSourceToSink(
+    kj::Own<ReadableStreamSource> source, kj::Own<WritableStreamSink> sink, bool end);
+
+// Returns a promise that never resolves and rejects with the sink's disconnection exception once
+// WritableStreamSink::whenWriteDisconnected() reports it. Intended for racing against an
+// operation with kj::Promise<T>::exclusiveJoin(): `co_await read.exclusiveJoin(
+// rejectWhenWriteDisconnected<T>(sink))`. A rejection of the underlying promise is also treated
+// as a disconnection, since either way the sink is not going to accept further writes.
+template <typename T>
+kj::Promise<T> rejectWhenWriteDisconnected(WritableStreamSink& sink) {
+  return sink.whenWriteDisconnected().then([](kj::Exception&& exception) -> T {
+    kj::throwFatalException(kj::mv(exception));
+  }, [](kj::Exception&& exception) -> T { kj::throwFatalException(kj::mv(exception)); });
+}
+
+// A cancellation exception may carry, as this detail, the v8-serialized JavaScript value that the
+// far end of an RPC-transferred stream passed to cancel(). exceptionToCancelReason() unpacks it.
+constexpr kj::Exception::DetailTypeId SERIALIZED_CANCEL_REASON_DETAIL_ID = 0xb7e3a1c95d2f6480ull;
+
+// Converts an exception that is canceling a stream into the reason to hand to the stream's cancel
+// algorithm: the JavaScript value carried in the exception's SERIALIZED_CANCEL_REASON detail when
+// present, otherwise the exception itself as a JavaScript error.
+jsg::JsValue exceptionToCancelReason(jsg::Lock& js, kj::Exception exception);
 
 struct PipeToOptions {
   jsg::Optional<bool> preventAbort;
