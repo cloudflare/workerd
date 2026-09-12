@@ -13,7 +13,10 @@ js_binary(
 
 http_client_suite_srcs = glob(["*.js"]) + ["http-client-modules.capnp"]
 
-http_client_ports = ["HTTP_SERVER_PORT"]
+http_client_ports = [
+    "HTTP_SERVER_PORT",
+    "HTTP_RAW_PORT",
+]
 
 wd_test(
     src = "http-client-cpp.wd-test",

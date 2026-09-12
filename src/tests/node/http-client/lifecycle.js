@@ -12,6 +12,7 @@ import { strictEqual, deepStrictEqual, ok } from 'node:assert';
 import {
   request,
   get,
+  getRaw,
   response,
   collect,
   once,
@@ -133,6 +134,118 @@ export const connectionFailureErrorsRequest = {
     deepStrictEqual(log, ['req:error', 'req:close']);
     ok(errors[0] instanceof Error);
     strictEqual(req.destroyed, true);
+  },
+};
+
+// A body shorter than its Content-Length, then the connection closing
+// (the raw server): the response arrives with the announced length, the
+// bytes that came are delivered, then 'aborted', the same codeless error
+// on the response and the request, and the closes; complete stays false.
+export const truncatedBodyAbortsResponse = {
+  async test(ctrl, env) {
+    const log = [];
+    const errors = [];
+    const req = getRaw(env, '/short-body');
+    req.on('error', (err) => {
+      errors.push(err);
+      log.push('req:error');
+    });
+    record(log, 'req', req, ['close']);
+    const res = await response(req);
+    strictEqual(res.statusCode, 200);
+    strictEqual(res.headers['content-length'], '10');
+    res.on('error', (err) => {
+      errors.push(err);
+      log.push('res:error');
+    });
+    record(log, 'res', res, ['aborted', 'end', 'close']);
+    res.on('data', (chunk) => log.push(`data:${chunk}`));
+    await once(res, 'close');
+    deepStrictEqual(log, [
+      'data:short',
+      'res:aborted',
+      'req:error',
+      'res:error',
+      'req:close',
+      'res:close',
+    ]);
+    strictEqual(errors.length, 2);
+    strictEqual(errors[0], errors[1]);
+    ok(errors[0] instanceof Error);
+    strictEqual(errors[0].code, undefined);
+    strictEqual(res.complete, false);
+  },
+};
+
+// Bytes beyond the Content-Length are not the body: the response ends,
+// complete, after exactly the announced length.
+export const bytesBeyondContentLengthAreIgnored = {
+  async test(ctrl, env) {
+    const res = await response(getRaw(env, '/long-body'));
+    strictEqual(res.headers['content-length'], '4');
+    strictEqual((await collect(res)).toString(), 'long');
+    strictEqual(res.complete, true);
+  },
+};
+
+// Malformed chunked framing after a good chunk: the good chunk is
+// delivered, then the response aborts as a truncated one does, with the
+// runtime's framing error on both response and request.
+export const malformedChunkedFramingAbortsResponse = {
+  async test(ctrl, env) {
+    const log = [];
+    const errors = [];
+    const req = getRaw(env, '/bad-chunked');
+    req.on('error', (err) => {
+      errors.push(err);
+      log.push('req:error');
+    });
+    record(log, 'req', req, ['close']);
+    const res = await response(req);
+    strictEqual(res.headers['transfer-encoding'], 'chunked');
+    res.on('error', (err) => {
+      errors.push(err);
+      log.push('res:error');
+    });
+    record(log, 'res', res, ['aborted', 'end', 'close']);
+    res.on('data', (chunk) => log.push(`data:${chunk}`));
+    await once(res, 'close');
+    deepStrictEqual(log, [
+      'data:ok',
+      'res:aborted',
+      'req:error',
+      'res:error',
+      'req:close',
+      'res:close',
+    ]);
+    strictEqual(errors.length, 2);
+    strictEqual(errors[0], errors[1]);
+    ok(errors[0] instanceof Error);
+    strictEqual(res.complete, false);
+  },
+};
+
+// Replies the runtime cannot parse at all never become a response: an
+// empty reply (the connection closing without a byte) and a garbage status
+// line each fail the request — 'error' with a codeless Error whose text is
+// the runtime's, then 'close' — with no 'response'.
+export const unparseableRepliesFailTheRequest = {
+  async test(ctrl, env) {
+    for (const path of ['/empty-reply', '/garbage']) {
+      const log = [];
+      const errors = [];
+      const req = getRaw(env, path);
+      record(log, 'req', req, ['response', 'close']);
+      req.on('error', (err) => {
+        errors.push(err);
+        log.push('req:error');
+      });
+      await once(req, 'close');
+      deepStrictEqual(log, ['req:error', 'req:close'], path);
+      ok(errors[0] instanceof Error, path);
+      strictEqual(errors[0].code, undefined, path);
+      strictEqual(req.destroyed, true, path);
+    }
   },
 };
 
