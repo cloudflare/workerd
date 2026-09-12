@@ -62,6 +62,10 @@ export {
   fixedSubarrayKeepsItsRange,
   generatedBuffersReceiveFills,
   callbackFalseStopsReading,
+  generatorThrowDestroysSocket,
+  generatorGarbageDestroysSocket,
+  emptyOrDetachedBufferDestroysSocketWithEnobufs,
+  sharedOnreadBufferDestroysSocket,
 } from 'onread';
 
 export {

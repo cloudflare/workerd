@@ -43,6 +43,7 @@ import {
   ERR_INVALID_ADDRESS,
   EADDRINUSE,
   EPIPE,
+  ENOBUFS,
 } from 'node-internal:internal_errors';
 
 import {
@@ -339,6 +340,10 @@ export declare class Socket extends _Socket {
     // upgrade) never run two loops — and thus two BYOB reads — against the
     // same reader at once.
     readLoopActive?: boolean;
+    // Set by a TLS upgrade before it releases this handle's reader and
+    // writer and carries the connection over to a new handle: the read
+    // loop's pending read then rejects, which is not a failure.
+    handedOver?: boolean;
     bytesRead: number;
     bytesWritten: number;
     socket: ReturnType<typeof inner.connect>;
@@ -1552,12 +1557,23 @@ async function startRead(socket: Socket): Promise<void> {
   const reader = handle.reader;
   try {
     while (handle.reading === true) {
+      // The generator is the caller's (an onread option), or hands out the
+      // fixed onread buffer, or a fresh 4 KiB view. What it throws, or
+      // hands out that cannot be read into, is the socket's error (see the
+      // catch below). Node reuses its previous buffer when a generator
+      // returns a non-Uint8Array; the transferring read here has none to
+      // reuse. An empty view — including a fixed buffer the callback has
+      // detached — fails as Node's read into an empty buffer does.
       const generatedBuffer = socket[kBufferGen]?.();
-
-      // A BYOB read needs a non-empty view; a generator that hands out
-      // nothing (or an empty view) ends the read loop.
-      if (generatedBuffer == null || generatedBuffer.length === 0) {
-        break;
+      if (!isUint8Array(generatedBuffer)) {
+        throw new ERR_INVALID_ARG_TYPE(
+          'onread.buffer',
+          ['Buffer', 'Uint8Array'],
+          generatedBuffer
+        );
+      }
+      if (generatedBuffer.byteLength === 0) {
+        throw new ENOBUFS();
       }
 
       // The view's range within its buffer, taken before the read: a BYOB
@@ -1566,8 +1582,6 @@ async function startRead(socket: Socket): Promise<void> {
       const { byteOffset: viewOffset, byteLength: viewLength } =
         generatedBuffer;
 
-      // The [kBufferGen] function should always be a function that returns
-      // a Uint8Array we can read into.
       const { value, done } = await reader.read(
         generatedBuffer as Uint8Array<ArrayBuffer>
       );
@@ -1637,10 +1651,16 @@ async function startRead(socket: Socket): Promise<void> {
         break;
       }
     }
-  } catch (_err) {
-    // Ignore error, and don't log them.
-    // This is mostly triggered for invalid sockets with following errors:
-    // - "This ReadableStream belongs to an object that is closing."
+  } catch (err) {
+    // A pending read rejects when the socket is destroyed (its stream is
+    // closing) or when a TLS upgrade releases this loop's reader (the
+    // handle is handed over; the parent socket keeps pointing at it):
+    // neither is news. Anything else — a failing generator or buffer
+    // (above), a read the runtime refuses — destroys the socket with the
+    // error rather than leaving it open and silent.
+    if (socket._handle === handle && !handle.handedOver && !socket.destroyed) {
+      socket.destroy(err as Error);
+    }
   } finally {
     // The loop's own handle: a TLS upgrade may have replaced socket._handle
     // (releasing this loop's reader) while a read was pending.

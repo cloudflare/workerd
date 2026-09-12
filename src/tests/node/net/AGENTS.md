@@ -65,6 +65,16 @@ network service allowing `private`.
   and each callback's Buffer is valid until the next read.
 - EOF (`done`) pushes EOF and reads zero bytes, so 'end' fires at once even
   with no consumer. `bytesRead` counts pushed bytes.
+- The loop's failures are the socket's 'error' (then 'close'), never a
+  silent stop with the socket open: a generator that throws (its error), a
+  generator returning anything but a `Uint8Array` (`ERR_INVALID_ARG_TYPE`;
+  Node reuses its previous buffer, which the transferring read has no way
+  to), an empty view — a zero-length one, or the fixed buffer once the
+  callback has detached it — (`ENOBUFS`, code and `syscall: 'read'`, as
+  Node's read into an empty buffer), a view the read refuses (one over a
+  `SharedArrayBuffer`: the runtime's `TypeError`). A read rejected because
+  the socket is being destroyed, or because a TLS upgrade replaced the
+  handle, is ignored.
 
 ### The write path
 
@@ -136,7 +146,7 @@ policy to the Duplex; see "The handle".)
 | `end-and-destroy.js` | end callback forms; `bufferSize`; destroy with/without error (events, `hadError`); writes after destroy, without handle, with invalid chunks; inert closed socket; all queued writes flushed before end |
 | `backpressure.js` | pause/resume against a ticking peer; paused-mode `read()` restarting the loop; `write()` false and 'drain'; cork cycles |
 | `timeouts.js` | idle timeout without closing; data resets; `setTimeout(0)` clears, also across later traffic |
-| `onread.js` | fixed buffer across several fills (and its detachment); a fixed view into a larger allocation keeping its range; generated buffers; callback `false` stopping and `resume()` restarting |
+| `onread.js` | fixed buffer across several fills (and its detachment); a fixed view into a larger allocation keeping its range; generated buffers; callback `false` stopping and `resume()` restarting; a throwing generator (its error), garbage from the generator (`ERR_INVALID_ARG_TYPE`), an empty view and a callback-detached fixed buffer (`ENOBUFS`), a SAB view (`TypeError`) — each destroying the socket |
 | `interop.js` | pipe into `Writable.fromWeb`; `Readable.toWeb(socket)` body; pipeline through a TransformStream and from a web source; `Duplex.toWeb` round trip; locked halves |
 | `servers.js`, `which-impl.js` | shared machinery |
 

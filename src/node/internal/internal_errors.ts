@@ -697,6 +697,16 @@ export class EPIPE extends NodeError {
   }
 }
 
+// A read into an empty buffer, as Node reports it (the errno exception of
+// a read that libuv refuses with UV_ENOBUFS).
+export class ENOBUFS extends NodeError {
+  syscall = 'read';
+
+  constructor() {
+    super('ENOBUFS', 'read ENOBUFS');
+  }
+}
+
 export class ERR_SOCKET_CLOSED_BEFORE_CONNECTION extends NodeError {
   constructor() {
     super(
