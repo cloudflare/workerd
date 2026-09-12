@@ -240,3 +240,10 @@ export {
   toWebWriterClosedSurvivesGc,
   duplexToWebPendingOperationsSurviveGc,
 } from 'gc';
+
+export {
+  tenThousandTinyChunksThroughToWeb,
+  alternatingTinyAndLargeThroughFromWeb,
+  eightMebibyteChunkBothWays,
+  objectModeIndexedThroughPipeline,
+} from 'data-volumes';

@@ -22,4 +22,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "duplex-from", esModule = embed "duplex-from.js"),
   (name = "then-pollution", esModule = embed "then-pollution.js"),
   (name = "gc", esModule = embed "gc.js"),
+  (name = "data-volumes", esModule = embed "data-volumes.js"),
 ];
