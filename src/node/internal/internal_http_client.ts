@@ -324,7 +324,18 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
 
   #onFinish(): void {
     if (this.destroyed) return;
+    // A failure to send — a URL the host or path cannot form, a Blob that
+    // cannot be built, fetch() itself throwing — fails the request as a
+    // connection failure does, rather than escaping the 'finish' emission
+    // and leaving the request unsent, never to close.
+    try {
+      this.#send();
+    } catch (err) {
+      this.destroy(err);
+    }
+  }
 
+  #send(): void {
     let body: BodyInit | null = null;
     if (this.method !== 'GET' && this.method !== 'HEAD') {
       if (this.#body.length > 0) {

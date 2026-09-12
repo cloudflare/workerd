@@ -817,3 +817,22 @@ export const setTimeoutValidatesMsecs = {
     deepStrictEqual(log, []);
   },
 };
+
+// The send itself failing synchronously — here a `host` mutated into
+// something no URL can hold — fails the request as a connection failure
+// does: 'error' with the failure, then 'close'; no 'response', nothing
+// escaping the 'finish' emission that sends it.
+export const sendFailureDestroysRequest = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = request(env, '/asd');
+    record(log, 'req', req, ['response', 'error', 'close']);
+    req.host = 'no host';
+    req.end();
+    await once(req, 'close');
+    strictEqual(log.length, 2);
+    ok(log[0].startsWith('req:error(TypeError/'), log[0]);
+    strictEqual(log[1], 'req:close');
+    strictEqual(req.destroyed, true);
+  },
+};

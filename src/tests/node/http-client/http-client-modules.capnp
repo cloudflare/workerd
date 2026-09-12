@@ -10,4 +10,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "request-body", esModule = embed "request-body.js"),
   (name = "lifecycle", esModule = embed "lifecycle.js"),
   (name = "interop", esModule = embed "interop.js"),
+  (name = "then-pollution", esModule = embed "then-pollution.js"),
 ];
