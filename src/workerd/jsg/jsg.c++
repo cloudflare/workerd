@@ -27,7 +27,7 @@ kj::String stringifyHandle(v8::Local<v8::Value> value) {
     if (*utf8 == nullptr) {
       return kj::str("(couldn't stringify)");
     } else {
-      return kj::str(*utf8);
+      return kj::str(kj::arrayPtr(*utf8, utf8.length()));
     }
   });
 }
