@@ -25,6 +25,7 @@ export {
   toWebUnreadableSourceYieldsCancelledStream,
   toWebLyingStrategyDestroysSource,
   toWebCancelFromDataListenerIsQuiet,
+  toWebInvalidHighWaterMarkLeavesSourceUntouched,
 } from 'readable-to-web';
 
 export {
@@ -65,6 +66,7 @@ export {
   toWebRejectsNonWritable,
   toWebDuckTypedInputYieldsClosedStream,
   toWebLiveDuckIsTakenAtItsWord,
+  toWebInvalidHighWaterMarkLeavesWritableUntouched,
   toWebUnwritableSourceYieldsClosedStream,
   toWebStrategyFollowsWritable,
   toWebBackpressureFollowsDrain,

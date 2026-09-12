@@ -414,6 +414,37 @@ export const toWebLiveDuckIsTakenAtItsWord = {
   },
 };
 
+// A writable misreporting its writableHighWaterMark (NaN, negative) makes
+// the web stream's construction throw — a RangeError under TypeScript, the
+// C++ implementation's TypeError (streams readable ledger #3). The web
+// stream is constructed before the writable is touched, so the throw
+// leaves it as it was: no listeners, and ending it afterwards finishes
+// quietly rather than tripping a dangling end-of-stream bridge.
+export const toWebInvalidHighWaterMarkLeavesWritableUntouched = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      for (const value of [NaN, -1]) {
+        const { writable, chunks } = recordingWritable();
+        Object.defineProperty(writable, 'writableHighWaterMark', {
+          get: () => value,
+        });
+        throws(() => Writable.toWeb(writable), {
+          name: usingTsImpl ? 'RangeError' : 'TypeError',
+        });
+        for (const event of ['drain', 'finish', 'error', 'close']) {
+          strictEqual(writable.listenerCount(event), 0, event);
+        }
+        writable.end(enc.encode('still fine'));
+        await once(writable, 'finish');
+        deepStrictEqual(
+          chunks.map((chunk) => dec.decode(chunk)),
+          ['still fine']
+        );
+      }
+    });
+  },
+};
+
 // A Writable that is already destroyed or ended, or a Duplex created without
 // a writable side, yields a stream that is already closed.
 export const toWebUnwritableSourceYieldsClosedStream = {
