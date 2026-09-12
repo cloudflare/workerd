@@ -561,7 +561,9 @@ Object.setPrototypeOf(Socket.prototype, Duplex.prototype);
 Object.setPrototypeOf(Socket, Duplex);
 
 // Restarts the idle timer (of this socket and of any wrapping TLS socket)
-// after activity, keeping the 'timeout' listeners as they are.
+// after activity, keeping the 'timeout' listeners as they are. A socket
+// whose timeout is disabled holds no timer (kTimeout is null, see
+// clearSocketTimers), so there is nothing to restart.
 Socket.prototype._unrefTimer = function _unrefTimer(this: Socket): void {
   // eslint-disable-next-line @typescript-eslint/no-this-alias
   for (let s: Socket | null = this; s != null; s = s._parentWrap) {
@@ -573,6 +575,16 @@ Socket.prototype._unrefTimer = function _unrefTimer(this: Socket): void {
     }
   }
 };
+
+// Disables the idle timer of this socket and of any wrapping TLS socket.
+// kTimeout is cleared as well as the timer, so that later activity
+// (_unrefTimer) does not arm a new one.
+function clearSocketTimers(socket: Socket): void {
+  for (let s: Socket | null = socket; s != null; s = s._parentWrap) {
+    clearTimeout(s[kTimeout] as unknown as number);
+    s[kTimeout] = null;
+  }
+}
 
 Socket.prototype.setTimeout = function (
   this: Socket,
@@ -589,6 +601,7 @@ Socket.prototype.setTimeout = function (
   // Attempt to clear an existing timer in both cases -
   // even if it will be rescheduled we don't want to leak an existing timer.
   clearTimeout(this[kTimeout] as unknown as number);
+  this[kTimeout] = null;
 
   if (msecs === 0) {
     if (callback !== undefined) {
@@ -951,10 +964,7 @@ Socket.prototype._destroy = function (
 ): void {
   this.connecting = false;
 
-  // eslint-disable-next-line @typescript-eslint/no-this-alias
-  for (let s: Socket | null = this; s !== null; s = s._parentWrap) {
-    clearTimeout(s[kTimeout] as unknown as number);
-  }
+  clearSocketTimers(this);
 
   releaseBoundSource(this);
 
@@ -1526,10 +1536,7 @@ export function onConnectionClosed(this: Socket): void {
     // No need to handle this particular close event.
     return;
   }
-  // eslint-disable-next-line @typescript-eslint/no-this-alias
-  for (let s: Socket | null = this; s !== null; s = s._parentWrap) {
-    clearTimeout(s[kTimeout] as unknown as number);
-  }
+  clearSocketTimers(this);
 
   if (!this.destroyed && !this.readableEnded) {
     // The connection closed before the read loop observed EOF (it was not

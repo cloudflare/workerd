@@ -7,7 +7,7 @@
 // duration; delivered data resets it; setTimeout(0) clears it.
 
 import { strictEqual } from 'node:assert';
-import { echo, ticker, once } from 'servers';
+import { echo, ticker, once, readAtLeast } from 'servers';
 
 // An idle socket times out; the socket stays open and usable.
 export const idleSocketTimesOut = {
@@ -19,7 +19,7 @@ export const idleSocketTimesOut = {
     await once(socket, 'timeout');
     strictEqual(timeouts, 1);
     strictEqual(socket.destroyed, false);
-    const echoed = once(socket, 'data');
+    const echoed = readAtLeast(socket, 'still here'.length);
     socket.write('still here');
     strictEqual((await echoed).toString(), 'still here');
     socket.end();
@@ -27,15 +27,21 @@ export const idleSocketTimesOut = {
   },
 };
 
-// setTimeout(0) cancels a pending timer.
+// setTimeout(0) cancels a pending timer, and the socket stays without one:
+// activity afterwards (a write, data arriving) restarts nothing.
 export const zeroClearsTimeout = {
   async test(ctrl, env) {
     const socket = echo(env);
-    socket.resume();
     await once(socket, 'connect');
     let timeouts = 0;
-    socket.setTimeout(30, () => timeouts++);
+    socket.on('timeout', () => timeouts++);
+    socket.setTimeout(30);
     socket.setTimeout(0);
+    await scheduler.wait(80);
+    strictEqual(timeouts, 0);
+    const echoed = readAtLeast(socket, 'still untimed'.length);
+    socket.write('still untimed');
+    strictEqual((await echoed).toString(), 'still untimed');
     await scheduler.wait(80);
     strictEqual(timeouts, 0);
     socket.end();
