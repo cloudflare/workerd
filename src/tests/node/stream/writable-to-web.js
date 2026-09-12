@@ -170,6 +170,106 @@ export const toWebNodeEndWithoutCloseAbortsStream = {
   },
 };
 
+// Collects uncaught errors and unhandled rejections while fn runs; the
+// adapter must leak neither.
+async function withUncaughtGuard(fn) {
+  const leaked = [];
+  const onError = (event) => {
+    leaked.push(event.error ?? event.message);
+    event.preventDefault();
+  };
+  const onRejection = (event) => {
+    leaked.push(event.reason);
+    event.preventDefault();
+  };
+  globalThis.addEventListener('error', onError);
+  globalThis.addEventListener('unhandledrejection', onRejection);
+  try {
+    await fn();
+    await scheduler.wait(20);
+  } finally {
+    globalThis.removeEventListener('error', onError);
+    globalThis.removeEventListener('unhandledrejection', onRejection);
+  }
+  strictEqual(leaked.length, 0, `leaked: ${leaked.join(', ')}`);
+}
+
+// The node side ended directly and the writer closed before it finishes:
+// close() waits for the finish (a slow _final()) rather than resolving at
+// once, and the stream closes cleanly — nothing escapes the adapter.
+export const toWebCloseAfterNodeEndWaitsForFinish = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      let finishFinal;
+      const writable = new Writable({
+        write(chunk, encoding, callback) {
+          callback();
+        },
+        final(callback) {
+          finishFinal = callback;
+        },
+      });
+      const writer = Writable.toWeb(writable).getWriter();
+      writable.end();
+      let closeSettled = false;
+      const closing = writer.close().then(() => (closeSettled = true));
+      await scheduler.wait(10);
+      strictEqual(closeSettled, false);
+      strictEqual(writable.writableFinished, false);
+      finishFinal();
+      await closing;
+      strictEqual(writable.writableFinished, true);
+      await writer.closed;
+    });
+  },
+};
+
+// The same with a _final() that fails after the writer's close(): close()
+// and writer.closed reject with that error, the node side reports it, and
+// nothing escapes the adapter. A _final() failing synchronously in the
+// direct end() is reported the same way.
+export const toWebCloseAfterNodeEndRejectsWithFinalError = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const boom = new Error('late final failed');
+      let failFinal;
+      const writable = new Writable({
+        write(chunk, encoding, callback) {
+          callback();
+        },
+        final(callback) {
+          failFinal = () => callback(boom);
+        },
+      });
+      const errored = once(writable, 'error');
+      const writer = Writable.toWeb(writable).getWriter();
+      writable.end();
+      const closing = writer.close();
+      await scheduler.wait(10);
+      failFinal();
+      await rejects(closing, (err) => err === boom);
+      await rejects(writer.closed, (err) => err === boom);
+      strictEqual(await errored, boom);
+    });
+    await withUncaughtGuard(async () => {
+      const boom = new Error('final failed');
+      const writable = new Writable({
+        write(chunk, encoding, callback) {
+          callback();
+        },
+        final(callback) {
+          callback(boom);
+        },
+      });
+      writable.on('error', () => {});
+      const writer = Writable.toWeb(writable).getWriter();
+      writable.end();
+      await rejects(writer.close(), (err) => err === boom);
+      await rejects(writer.closed, (err) => err === boom);
+    });
+  },
+};
+
 // The node side being destroyed without an error surfaces as an AbortError
 // whose cause is the premature-close error.
 export const toWebNodeDestroyBecomesAbortError = {

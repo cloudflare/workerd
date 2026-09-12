@@ -1342,14 +1342,15 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
       },
 
       close() {
-        if (closed === undefined && !isWritableEnded(streamWritable)) {
-          closed = Promise.withResolvers();
+        // The node side completes on its own terms — a _final() may still
+        // be running when the caller ended it directly — so close() settles
+        // with its finish or its error (the eos callback above), ending it
+        // only if the caller has not.
+        closed = Promise.withResolvers();
+        if (!isWritableEnded(streamWritable)) {
           streamWritable.end();
-          return closed.promise;
         }
-
-        controller = undefined;
-        return Promise.resolve();
+        return closed.promise;
       },
     },
     strategy

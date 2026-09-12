@@ -54,6 +54,8 @@ export {
   toWebAsyncNodeErrorErrorsStream,
   toWebFinalErrorRejectsClose,
   toWebNodeEndWithoutCloseAbortsStream,
+  toWebCloseAfterNodeEndWaitsForFinish,
+  toWebCloseAfterNodeEndRejectsWithFinalError,
   toWebNodeDestroyBecomesAbortError,
   toWebNodeDestroyWithErrorErrorsStream,
   toWebAbortDestroysNodeWritable,
