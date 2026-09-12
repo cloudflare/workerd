@@ -78,3 +78,11 @@ export {
   duplexToWebRoundTrip,
   socketHalvesAreLocked,
 } from 'interop';
+
+export {
+  trickledBytesArriveInOrder,
+  splitUtf8IsReassembledBySetEncoding,
+  splitUtf8BytesConcatenate,
+  manyTinyWritesAreAllDelivered,
+  largeEchoWithPauses,
+} from 'data-volumes';
