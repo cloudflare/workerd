@@ -26,6 +26,18 @@ export function get(env, path, options = {}, callback) {
   return request(env, path, options, callback).end();
 }
 
+// A request to the raw TCP server (hand-written replies), ended at once.
+export function getRaw(env, path, options = {}) {
+  return http
+    .request({
+      hostname: env.SIDECAR_HOSTNAME,
+      port: Number(env.HTTP_RAW_PORT),
+      path,
+      ...options,
+    })
+    .end();
+}
+
 export function once(emitter, event) {
   return new Promise((resolve) => emitter.once(event, resolve));
 }

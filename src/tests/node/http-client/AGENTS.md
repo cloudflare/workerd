@@ -28,8 +28,14 @@ replies (`/pong`, `/asd`), chunked (`/chunked`) and large (`/large`)
 bodies, bodiless statuses (`/status/CODE`), a compressed body (`/gzip`), a
 connection dropped mid-body (`/error-mid-body`), a response held open whose
 close the sidecar records (`/never-ends?id=` + `/stats?id=`), and delayed
-headers or body (`/slow-headers`, `/slow-body`). `harness.js` builds the
-requests (`request`, `get`) and collects responses and events. Both cells
+headers or body (`/slow-headers`, `/slow-body`). A second, raw TCP server
+(`HTTP_RAW_PORT`) writes hand-crafted replies, segment by segment 20 ms
+apart and with `Connection: close` (the runtime would otherwise pipeline
+the next request onto the connection): a body short of its Content-Length
+(`/short-body`), bytes beyond it (`/long-body`), malformed chunked framing
+after a good chunk (`/bad-chunked`), nothing at all (`/empty-reply`), a
+garbage status line (`/garbage`). `harness.js` builds the requests
+(`request`, `get`, `getRaw`) and collects responses and events. Both cells
 need an `internet` network service allowing `private`.
 
 ## Core semantics
@@ -75,7 +81,16 @@ need an `internet` network service allowing `private`.
   the response — and, as a socket error would in Node, on the request —
   then 'close'. The body stream is cancelled, which the server observes as
   its connection closing. The server dropping the connection mid-body
-  aborts the response the same way, with the runtime's error on both.
+  aborts the response the same way, with the runtime's error on both; so
+  do a body cut short of its Content-Length and malformed chunked framing
+  (the bytes before the fault are delivered, `complete` stays false).
+  Bytes beyond the Content-Length are not the body: the response ends,
+  complete, after the announced length. A reply the runtime cannot parse
+  at all — the connection closing without a byte, a garbage status line —
+  never becomes a response: the request errors (a codeless `Error` with
+  the runtime's text: "Network connection lost." for the former, an
+  "internal error; reference = …" for the latter and for the framing
+  fault — not pinned) and closes.
 - `req.destroy(err)`: the request is destroyed at once and closes on a
   later tick; it reports `err`, or `Error: socket hang up` (ECONNRESET)
   for a bare `destroy()` before any response, on the next tick. A pending
@@ -146,6 +161,6 @@ unchanged under both implementations.
 | --- | --- |
 | `response-body.js` | Buffer chunks and `complete`; `setEncoding`; incremental chunked delivery; a megabyte intact; pause/resume; bodiless statuses; HEAD; compression passthrough; waiting for a consumer |
 | `request-body.js` | string body echoed with the server-side Content-Type/Length; `end(Buffer)` sent once; chunk forms and encodings; nothing sent before `end()`; length and type as the server sees them; empty POST; chunk captured at `write()` (mutated, detached, shrunk afterwards); SAB/WebAssembly.Memory views sent, empty and detached views accepted; GET/HEAD ignore writes |
-| `lifecycle.js` | `res.destroy()` closes; end then one close; `res.destroy(err)` mid-body reaching the server; server dropping the connection; completed response final; connection failure; `req.res` and request close after the response; `req.destroy()` before the response (hang up), with an error, before `end()`, mid-body (bare and with an error), response after destroy dropped; `abort()` before the response, before `end()`, mid-body; timeout before headers (armed before/after `end()`), `timeout` option and callback, mid-body, disarmed by completion, cleared by `setTimeout(0)` |
+| `lifecycle.js` | `res.destroy()` closes; end then one close; `res.destroy(err)` mid-body reaching the server; server dropping the connection; completed response final; connection failure; truncated body (raw server) aborting the response; bytes beyond Content-Length ignored; malformed chunked framing aborting after the good chunk; empty and garbage replies failing the request with no 'response'; `req.res` and request close after the response; `req.destroy()` before the response (hang up), with an error, before `end()`, mid-body (bare and with an error), response after destroy dropped; `abort()` before the response, before `end()`, mid-body; timeout before headers (armed before/after `end()`), `timeout` option and callback, mid-body, disarmed by completion, cleared by `setTimeout(0)` |
 | `interop.js` | pipe into `Writable.fromWeb`; pipe into a 16 KiB slow sink (bounded buffer, pauses); `Readable.toWeb` body; pipeline through a `TransformStream`; `stream/consumers` and async iteration |
 | `harness.js`, `which-impl.js` | shared machinery |

@@ -28,8 +28,23 @@
 //                  waits MS ms, then 200 "late".
 // /slow-body?delay=MS
 //                  200, "first", waits MS ms, then "last" and end.
+//
+// A second, raw TCP server (HTTP_RAW_PORT) answers with hand-written bytes
+// chosen by the request path, for responses a real server would not
+// produce. Each reply's segments are written 20 ms apart (the headers
+// first, so the response is delivered before what follows), then the
+// connection closes; the headers say `Connection: close` so that the
+// runtime does not reuse the connection for the next request:
+//
+// /short-body      Content-Length: 10, then only "short" (5 bytes).
+// /long-body       Content-Length: 4, then "longer body".
+// /bad-chunked     Transfer-Encoding: chunked, then one good chunk "ok",
+//                  then "zz" where a chunk size belongs.
+// /empty-reply     nothing at all.
+// /garbage         "this is not http\r\n\r\n".
 
 import http from 'node:http';
+import net from 'node:net';
 import { gzipSync } from 'node:zlib';
 
 const host = process.env.SIDECAR_HOSTNAME ?? '127.0.0.1';
@@ -185,4 +200,51 @@ const server = http.createServer(async (req, res) => {
 
 server.listen({ port: 0, host }, () => {
   console.log(`HTTP_SERVER_PORT=${server.address().port}`);
+});
+
+const rawReplies = {
+  '/short-body': [
+    'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: 10\r\n\r\n',
+    'short',
+  ],
+  '/long-body': [
+    'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: 4\r\n\r\n',
+    'longer body',
+  ],
+  '/bad-chunked': [
+    'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\nTransfer-Encoding: chunked\r\n\r\n',
+    '2\r\nok\r\n',
+    'zz\r\n',
+  ],
+  '/empty-reply': [],
+  '/garbage': ['this is not http\r\n\r\n'],
+};
+
+const raw = net.createServer((socket) => {
+  socket.on('error', () => {});
+  let head = '';
+  let replying = false;
+  socket.on('data', (data) => {
+    if (replying) return;
+    head += data.toString('latin1');
+    if (!head.includes('\r\n\r\n')) return;
+    replying = true;
+    const path = head.split(' ')[1] ?? '';
+    const segments = rawReplies[path] ?? rawReplies['/garbage'];
+    let i = 0;
+    const step = () => {
+      if (socket.destroyed) return;
+      if (i === segments.length) {
+        socket.end();
+        return;
+      }
+      socket.write(segments[i++]);
+      setTimeout(step, 20);
+    };
+    setTimeout(step, 20);
+  });
+});
+
+raw.listen({ port: 0, host }, () => {
+  console.log(`HTTP_RAW_PORT=${raw.address().port}`);
 });
