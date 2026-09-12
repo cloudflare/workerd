@@ -114,7 +114,12 @@ need an `internet` network service allowing `private`.
   response 'error' (for listeners), response 'close'; the server sees the
   connection close.
 - A fetch that fails before yielding a response (a connection that cannot
-  be made) destroys the request with the failure: 'error', 'close'.
+  be made) destroys the request with the failure: 'error', 'close'. So
+  does the send itself failing synchronously — a `host` or `path` mutated
+  into something no URL can hold, a body the Blob cannot take, `fetch()`
+  throwing, a `Promise.prototype.then` that throws on its promise — rather
+  than the throw escaping the 'finish' emission and the request never
+  being sent.
 - `req.abort()`: `aborted` and `destroyed` are set at once, 'abort' fires
   on the next tick, and the request is destroyed without the 'socket hang
   up': 'abort', 'close' before any response; 'aborted', 'abort', 'close',
@@ -145,6 +150,13 @@ need an `internet` network service allowing `private`.
   request is a legacy stream that `finished()` waits on as a readable too;
   `end-of-stream` gives a workerd `OutgoingMessage` (a `Writable`) the same
   treatment by shape.
+
+### Prototype pollution
+
+- The client uses no primordials: a patched `Promise.prototype.then` sees
+  the exchange's hops (the count is not pinned) and a transparent patch
+  changes nothing; a `then` that throws as the request is sent fails the
+  request ('error', 'close', no 'response').
 
 ### Interop
 
@@ -199,6 +211,7 @@ unchanged under both implementations.
 | --- | --- |
 | `response-body.js` | Buffer chunks and `complete`; `setEncoding`; incremental chunked delivery; a megabyte intact; pause/resume; bodiless statuses; HEAD; compression passthrough; waiting for a consumer |
 | `request-body.js` | string body echoed with the server-side Content-Type/Length; `end(Buffer)` sent once; chunk forms and encodings; nothing sent before `end()`; length and type as the server sees them; empty POST; chunk captured at `write()` (mutated, detached, shrunk afterwards); SAB/WebAssembly.Memory views sent, empty and detached views accepted; GET/HEAD ignore writes; `write()`/`end(chunk)` after `end()` (from 'finish' too) → `ERR_STREAM_WRITE_AFTER_END`, request still completes; bare `end(cb)` after `end()` and after the exchange |
-| `lifecycle.js` | `res.destroy()` closes; end then one close; `res.destroy(err)` mid-body reaching the server; server dropping the connection; completed response final; connection failure; truncated body (raw server) aborting the response; bytes beyond Content-Length ignored; malformed chunked framing aborting after the good chunk; empty and garbage replies failing the request with no 'response'; `req.res` and request close after the response; `req.destroy()` before the response (hang up), with an error, before `end()`, mid-body (bare and with an error), response after destroy dropped; `abort()` before the response, before `end()`, mid-body; timeout before headers (armed before/after `end()`), `timeout` option and callback, mid-body, idle not deadline (a 600 ms trickle passing a 250 ms timeout), disarmed by completion, cleared by `setTimeout(0)`; the response's `setTimeout` arming the timer (callback, teardown shape), replacing the request's, clearing with `0`; `ms` validation on both sides; `signal` already aborted / aborted before `end()` / mid-body (with cause) / after completion; `finished(req)` after 'close'; a response with no 'response' listener dumped (request closes, `finished(req)` resolves, `res.complete`) |
+| `lifecycle.js` | `res.destroy()` closes; end then one close; `res.destroy(err)` mid-body reaching the server; server dropping the connection; completed response final; connection failure; truncated body (raw server) aborting the response; bytes beyond Content-Length ignored; malformed chunked framing aborting after the good chunk; empty and garbage replies failing the request with no 'response'; `req.res` and request close after the response; `req.destroy()` before the response (hang up), with an error, before `end()`, mid-body (bare and with an error), response after destroy dropped; `abort()` before the response, before `end()`, mid-body; timeout before headers (armed before/after `end()`), `timeout` option and callback, mid-body, idle not deadline (a 600 ms trickle passing a 250 ms timeout), disarmed by completion, cleared by `setTimeout(0)`; the response's `setTimeout` arming the timer (callback, teardown shape), replacing the request's, clearing with `0`; `ms` validation on both sides; `signal` already aborted / aborted before `end()` / mid-body (with cause) / after completion; `finished(req)` after 'close'; a synchronous send failure (invalid host) → 'error', 'close'; a response with no 'response' listener dumped (request closes, `finished(req)` resolves, `res.complete`) |
+| `then-pollution.js` | transparent patched `then` (echo intact); hostile `then` during the send → request 'error', 'close', no 'response' |
 | `interop.js` | pipe into `Writable.fromWeb`; pipe into a 16 KiB slow sink (bounded buffer, pauses); `Readable.toWeb` body; pipeline through a `TransformStream`; `stream/consumers` and async iteration |
 | `harness.js`, `which-impl.js` | shared machinery |

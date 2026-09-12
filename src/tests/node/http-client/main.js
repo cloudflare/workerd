@@ -67,6 +67,7 @@ export {
   responseSetTimeoutReplacesRequestTimeout,
   responseSetTimeoutZeroClears,
   setTimeoutValidatesMsecs,
+  sendFailureDestroysRequest,
 } from 'lifecycle';
 
 export {
@@ -76,3 +77,8 @@ export {
   pipelineThroughWebTransform,
   consumersAndAsyncIteration,
 } from 'interop';
+
+export {
+  patchedThenPassthroughKeepsData,
+  hostileThenDuringSendFailsRequest,
+} from 'then-pollution';
