@@ -242,7 +242,9 @@ fn pick_includes_and_builtins(out: &mut OutFile, apis: &[Api]) {
                 Some(Isize) => out.builtin.rust_isize = true,
                 Some(CxxString) => out.include.string = true,
                 Some(RustString) => out.builtin.rust_string = true,
-                Some(Bool | Char | F32 | F64) | None => {}
+                // bool, char, char16_t, float and double are C++ keywords; no
+                // header supplies them.
+                Some(Bool | Char | Char16 | F32 | F64) | None => {}
             },
             Type::RustBox(_) => out.builtin.rust_box = true,
             Type::RustVec(_) => out.builtin.rust_vec = true,
@@ -1374,6 +1376,7 @@ fn write_atom(out: &mut OutFile, atom: Atom) {
     match atom {
         Bool => write!(out, "bool"),
         Char => write!(out, "char"),
+        Char16 => write!(out, "char16_t"),
         U8 => write!(out, "::std::uint8_t"),
         U16 => write!(out, "::std::uint16_t"),
         U32 => write!(out, "::std::uint32_t"),

@@ -467,6 +467,26 @@ pub type String = CxxString;
 /// import and use `CxxVector`.
 pub type Vector<T> = CxxVector<T>;
 
+/// Rust spelling of C++'s `char16_t`, for UTF-16 data crossing the bridge.
+///
+/// `char16_t` and `uint16_t` are layout-identical but distinct C++ types, so
+/// C++ mangles them differently and overloads on them separately. `u16` in a
+/// bridge means `uint16_t`; use `c_char16` where the signature must name
+/// `char16_t`, which is the usual case for UTF-16 buffers.
+///
+/// This is a plain alias rather than a newtype, following `c_char`, so a
+/// `&[c_char16]` argument accepts a `&[u16]` from `str::encode_utf16` or
+/// `encoding_rs` with no cast. The alias means `c_char16` and `u16` are one
+/// Rust type; only their C++ spelling differs. The two therefore cannot both
+/// be used as the element type of a `CxxVector` in the same program, and
+/// `CxxVector<c_char16>` is rejected for the same reason `CxxVector<c_char>`
+/// is.
+///
+/// `char16_t` is guaranteed by the C++ standard to be a distinct type whose
+/// underlying type is `uint_least16_t`. `cxx.cc` asserts that it really is 16
+/// bits wide on the target, which is what makes this alias sound.
+pub type c_char16 = u16;
+
 // Not public API.
 #[doc(hidden)]
 pub mod private {
