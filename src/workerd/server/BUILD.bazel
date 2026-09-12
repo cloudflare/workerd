@@ -403,6 +403,15 @@ kj_test(
 )
 
 kj_test(
+    src = "docker-api-test.c++",
+    deps = [
+        ":docker-api_capnp",
+        "@capnp-cpp//src/capnp/compat:json",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+kj_test(
     src = "facet-tree-index-test.c++",
     deps = [
         ":facet-tree-index",
