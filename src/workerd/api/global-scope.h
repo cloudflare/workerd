@@ -691,6 +691,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
   // Received TCP/socket ingress (called from C++, not JS).
   kj::Promise<void> connect(kj::String host,
+      kj::Maybe<kj::String> clientAddress,
       const kj::HttpHeaders& headers,
       kj::AsyncIoStream& connection,
       kj::HttpService::ConnectResponse& response,

@@ -187,6 +187,9 @@ class IoChannelFactory: public virtual kj::Refcounted {
     // `allow_irrevocable_stub_storage` compat flag enabled; if not, it rejects the request. See
     // `WorkerEntrypoint::construct()`.
     Persistent fromPersistentStub = Persistent::NO;
+
+    // Address of the client as IP:port on whose behalf this request is being made.
+    kj::Maybe<kj::String> clientAddress;
   };
 
   // Parameters that can influence the version of a worker that is used to serve a subrequest.
