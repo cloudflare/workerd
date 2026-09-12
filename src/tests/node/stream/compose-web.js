@@ -118,17 +118,38 @@ export const composeWebReadableIntoNodeWritable = {
 
 // A node head with a web TransformStream tail: the composed writable side
 // must observe the web tail's completion — available only with the interop
-// hook.
+// hook. Where the hook is missing the shape is refused before anything is
+// started: the head keeps its buffered input and gains no listeners, and
+// the web stream's sides stay unlocked.
 export const composeNodeHeadWebTail = {
   async test() {
     const make = () => compose(new PassThrough(), upperTransform());
     if (!usingTsImpl) {
-      throws(make, {
+      const unsupported = {
         name: 'TypeError',
         code: 'ERR_WEB_STREAM_INTEROP_UNSUPPORTED',
         message:
           'compose() is not supported for web streams by the streams implementation in use',
-      });
+      };
+      throws(make, unsupported);
+
+      const head = new PassThrough();
+      head.write('kept');
+      const tail = upperTransform();
+      const listeners = Object.fromEntries(
+        head.eventNames().map((name) => [name, head.listenerCount(name)])
+      );
+      throws(() => compose(head, tail), unsupported);
+      strictEqual(tail.writable.locked, false);
+      strictEqual(tail.readable.locked, false);
+      deepStrictEqual(
+        Object.fromEntries(
+          head.eventNames().map((name) => [name, head.listenerCount(name)])
+        ),
+        listeners
+      );
+      strictEqual(head.readableLength, 4);
+      strictEqual(head.read().toString(), 'kept');
       return;
     }
     const composed = make();
