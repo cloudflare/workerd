@@ -69,3 +69,10 @@ export {
   trimmedWriteLeavesBufferIntact,
   emptyAndDetachedViewsContributeNothing,
 } from 'buffer-lifecycle';
+
+export {
+  pipeHonorsDestinationBackpressure,
+  unpipeStopsDelivery,
+  erroringDestinationIsUnpiped,
+  sourceErrorIsNotForwarded,
+} from 'piping';

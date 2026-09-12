@@ -11,4 +11,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "response-body", esModule = embed "response-body.js"),
   (name = "response-lifecycle", esModule = embed "response-lifecycle.js"),
   (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
+  (name = "piping", esModule = embed "piping.js"),
 ];

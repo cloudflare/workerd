@@ -455,33 +455,6 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     return this;
   }
 
-  override pipe<T extends NodeJS.WritableStream>(
-    destination: T,
-    options?: { end?: boolean }
-  ): T {
-    const shouldEnd = options?.end !== false;
-
-    // Handle the piping manually for better control
-    this.on('data', (chunk: string | Uint8Array) => {
-      destination.write(chunk);
-    });
-
-    this.once('end', () => {
-      if (shouldEnd) {
-        destination.end();
-      }
-    });
-
-    this.once('error', (err: unknown) => {
-      destination.emit('error', err);
-    });
-
-    // Always ensure reading starts - call resume to trigger the stream
-    this.resume();
-
-    return destination;
-  }
-
   set connection(value: unknown) {
     this.#socket = value;
   }

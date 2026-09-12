@@ -51,7 +51,12 @@ Tests run sequentially, one server (`withServer`) at a time.
   'data' listener attached inside the handler still sees the body.
 - `pause()` holds delivery, `resume()` continues it without loss, also for
   a body larger than the high-water mark. `pipe()` to one or several node
-  destinations and `pipeline(req, TransformStream, res)` work.
+  destinations and `pipeline(req, TransformStream, res)` work; `pipe()` is
+  the Readable's: a destination's backpressure pauses the body and 'drain'
+  resumes it, the destination hears 'pipe'/'unpipe', a destination that
+  errors is unpiped (no further write reaches it), `unpipe()` stops
+  delivery and pauses a source left without destinations, and a source
+  error is not forwarded to the destination (that is `pipeline()`'s job).
 - `destroy()`: 'aborted' when the body was not complete, 'error' only when
   the message has an 'error' listener (an unlistened `destroy(err)` is
   swallowed), 'close' always; the body stream is cancelled with the destroy
@@ -138,6 +143,7 @@ lifecycle" — and the pure-streams behavior belongs to
 | `request-body.js` | GET ends at once; Buffer/string chunks and `complete`; late 'data' listener; 256 KiB in several events; streaming body incremental + chunked headers; `FixedLengthStream` Content-Length; pause/resume (small chunks, and a body above the high-water mark); pipe echo; several pipe destinations; `pipeline` through a `TransformStream` |
 | `request-destroy.js` | `destroy(err)` with listener; bare `destroy()` closes quietly; unlistened `destroy(err)` swallowed; mid-body destroy cancels the body stream with the reason and stops 'data'; bare destroy cancels with `undefined`; no cancel after completion |
 | `response-body.js` | implicit headers and chunk types; streaming before `end()`; large and many writes; Content-Length capping; 204/304; HEAD (`_hasBody`, dropped writes, null body); `rejectNonStandardBodyWrites`; cork/uncork; backpressure signaling and 'drain' parity; acceptance after headers with `highWaterMark`; web source pipelined in; 'finish' then 'close' with `closed`; write after end via callback only |
+| `piping.js` | 1 MiB into a 16 KiB slow sink: bounded buffer, pauses/resumes, all bytes; `unpipe()` after the first chunk ('pipe'/'unpipe' on the destination, delivery stops, source paused, rest to a 'data' listener, destination not ended); erroring destination unpiped ('unpipe' before its 'error', one write only, source paused); source error not forwarded (destination stays piped, open, unerrored) |
 | `buffer-lifecycle.js` | fill/write/refill after the callback (intact, not detached, both payloads received); chunk given to `end()` and its parent allocation intact; mutation after the callback not sent; SAB and WebAssembly.Memory views written, 'finish' only; Content-Length-trimmed writes leave their buffers intact; empty and detached views accepted and skipped |
 | `response-lifecycle.js` | `destroy(err)` before headers rejects the fetch with it; bare destroy before headers → 'Premature close'; `destroy(err)` after headers errors the body, 'error' then 'close'; bare destroy after headers → premature close, 'close' only; client cancel → destroyed with the reason, `ERR_STREAM_DESTROYED` on later writes |
 | `harness.js`, `which-impl.js` | shared machinery |
