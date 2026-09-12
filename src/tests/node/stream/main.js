@@ -171,6 +171,12 @@ export {
   addAbortSignalErrorsReadable,
   addAbortSignalErrorsWritable,
   addAbortSignalAlreadyAborted,
+  addAbortSignalOnTeeBranchSparesSibling,
+  addAbortSignalOnTeeBranchThenSiblingCancel,
+  addAbortSignalOnTeedAwayBranchIsInert,
+  addAbortSignalOnTeedAwayByteBranchIsInert,
+  addAbortSignalOnTeeBranchSettlesWithSourceCleanup,
+  addAbortSignalOnByteTeeBranchSparesSibling,
   addAbortSignalOnResponseBody,
 } from 'finished-and-abort';
 

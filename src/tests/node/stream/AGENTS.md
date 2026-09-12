@@ -162,7 +162,13 @@ The implementation under test is `src/node/internal/streams_readable.js`
 ### finished / addAbortSignal
 
 - `finished()` and `addAbortSignal()` need the Node.js interop hooks (see
-  ledger #5).
+  ledger #5). `addAbortSignal()` on one branch of a tee errors that branch
+  alone: the sibling keeps its buffered chunks and its reads, and the
+  source is cancelled only once every consumer is gone, with each one's
+  reason; on a branch that has itself been teed it does nothing (the
+  queued tee model's inert shell, see
+  `src/per_isolate/webstreams/AGENTS.md`); a branch's `cancel()` promise
+  settles with the source's cleanup in either order.
 
 ## Compatibility flags
 

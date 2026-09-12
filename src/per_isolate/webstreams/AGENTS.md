@@ -22,6 +22,31 @@ private-brand dispatch, no `instanceof`) apply here — see
 | `streams.ts`  | Module aggregator (user-visible classes + the flag-gated DrainingReader)                     |
 | `types.d.ts`  | TypeScript type definitions for the streams API                                              |
 
+## THE QUEUED TEE MODEL (deliberate spec divergence)
+
+The spec's `tee()` gives each branch its own controller and queue, fed by a
+reader on the original. The queued backend instead has ONE queue with N
+consumers (cursors), one per live branch: `tee()` forks the stream's cursor
+into two branch cursors, removes the original's, and leaves the original a
+permanently locked, inert shell — it consumes nothing, and there is no
+per-branch controller to close or error. A tee of a branch does the same to
+the branch: its two branches join the queue as consumers alongside their
+aunt. Consequences, all handled by the controller (`readable.ts`,
+`controllerConsumerLeaving`):
+
+- The source is cancelled only when the LAST consumer leaves the queue
+  (cancelled, or errored through the Node.js interop hook), with the reason
+  of every consumer that left — one reason as is, several as an
+  `AggregateError` in the order they left (the spec passes
+  `[reason1, reason2]`). A consumer that leaves while others remain gets a
+  promise settled with that cancel, or with `undefined` once the source
+  closes or errors on its own (the spec's shared cancel promise).
+- Erroring the source's own stream (its controller's `error()`, the
+  interop hook) errors every consumer; erroring a live branch errors that
+  branch alone; erroring a teed-away shell does nothing — it stays locked.
+- Nothing walks a tree of streams: closing, cancelling and erroring act on
+  cursors and their owners, and no stream retains another.
+
 ## KEY RULES
 
 - The reader layer must stay backend-blind; backend divergence is
@@ -72,7 +97,10 @@ streams use: a `Symbol.for('nodejs.webstream.isClosedPromise')` getter
 rejected with the stored error, created lazily and marked handled) and a
 `Symbol.for('nodejs.webstream.controllerErrorFunction')` method (errors
 the stream as its controller's `error()` would; a native-backed readable
-also cancels its source). `src/node`'s `finished()`/`eos()`,
+also cancels its source; a queued tee branch, whose controller is shared
+with its siblings, errors alone — its cursor leaves the queue as a
+cancelled branch's would; a branch that has itself been teed is inert, see
+the tee model below). `src/node`'s `finished()`/`eos()`,
 `addAbortSignal()` and `compose()` rely on them to observe or error a web
 stream without taking its lock. The C++ implementation has no equivalent,
 and the node layer raises `ERR_WEB_STREAM_INTEROP_UNSUPPORTED` there.

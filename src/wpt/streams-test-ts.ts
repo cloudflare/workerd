@@ -77,10 +77,6 @@ export default {
       'ReadableStream teeing with byte source: canceling both branches in reverse order should aggregate the cancel reasons into an array',
     ],
     expectedFailures: [
-      // AggregateError cancel reason: cancel reason is AggregateError
-      // instead of spec [r1, r2] array. These fail fast on assertion.
-      'ReadableStream teeing with byte source: failing to cancel when canceling both branches in sequence with delay',
-      'ReadableStream teeing with byte source: failing to cancel the original stream should cause cancel() to reject on branches',
       // Shared-queue tee model: pull count / pull sequencing differs
       // from the spec's per-branch clone model.
       'ReadableStream teeing with byte source: stops pulling when original stream errors while both branches are reading',
