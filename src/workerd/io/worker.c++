@@ -3757,6 +3757,9 @@ struct Worker::Actor::Impl {
     // Implements ActorCache::Hooks
 
     void updateAlarmInMemory(kj::Maybe<kj::Date> newAlarmTime) override;
+    void setIoContext(IoContext& context) {
+      ioContext = context;
+    }
     void storageReadCompleted(kj::Duration latency) override {
       metrics.storageReadCompleted(latency);
     }
@@ -3769,7 +3772,8 @@ struct Worker::Actor::Impl {
     TimerChannel& timerChannel;  // only for afterLimitTimeout() and updateAlarmInMemory()
     ActorObserver& metrics;
 
-    kj::Maybe<kj::Promise<void>> maybeAlarmPreviewTask;
+    kj::Maybe<kj::ForkedPromise<void>> maybeAlarmPreviewTask;
+    kj::Maybe<IoContext&> ioContext;
   };
 
   HooksImpl hooks;
@@ -4262,7 +4266,13 @@ void Worker::Actor::assertCanSetAlarm() {
 
 void Worker::Actor::Impl::HooksImpl::updateAlarmInMemory(kj::Maybe<kj::Date> newTime) {
   if (newTime == kj::none) {
-    maybeAlarmPreviewTask = kj::none;
+    auto task = kj::mv(maybeAlarmPreviewTask);
+    KJ_IF_SOME(context, ioContext) {
+      context.addTask(kj::evalLater([task = kj::mv(task)]() mutable { task = kj::none; }));
+    } else {
+      maybeAlarmPreviewTask =
+          kj::evalLater([task = kj::mv(task)]() mutable { task = kj::none; }).fork();
+    }
     return;
   }
 
@@ -4285,7 +4295,13 @@ void Worker::Actor::Impl::HooksImpl::updateAlarmInMemory(kj::Maybe<kj::Date> new
     }
   });
 
-  maybeAlarmPreviewTask = retry();
+  KJ_IF_SOME(context, ioContext) {
+    auto task = retry().fork();
+    context.addTask(task.addBranch());
+    maybeAlarmPreviewTask = kj::mv(task);
+  } else {
+    maybeAlarmPreviewTask = retry().fork();
+  }
 }
 
 kj::Maybe<kj::Promise<WorkerInterface::AlarmOutcome>> Worker::Actor::getAlarm(
@@ -4427,6 +4443,9 @@ void Worker::Actor::setIoContext(kj::Own<IoContext> context) {
   }
   auto& limitEnforcer = context->getLimitEnforcer();
   impl->ioContext = kj::mv(context);
+  KJ_IF_SOME(ioContext, impl->ioContext) {
+    impl->hooks.setIoContext(*ioContext);
+  }
   impl->metricsFlushLoopTask =
       impl->metrics->flushLoop(impl->timerChannel, limitEnforcer)
           .eagerlyEvaluate([](kj::Exception&& e) { LOG_EXCEPTION("actorMetricsFlushLoop", e); });
