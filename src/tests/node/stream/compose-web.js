@@ -336,6 +336,61 @@ export const composeWebTailClosedReadableDestroy = {
   },
 };
 
+// A web tail yielding a chunk the composed stream cannot take (a view over
+// a detached ArrayBuffer) fails the composition with the conversion's
+// TypeError: the composed stream errors and closes, the head is destroyed.
+// A writable head with a web tail needs the interop hooks (ledger #5), so
+// this shape runs under TypeScript only; the readable-only head below
+// covers the same failure on both implementations.
+export const composeWebTailUnconvertibleChunkFails = {
+  async test() {
+    if (!usingTsImpl) return;
+    const head = new PassThrough();
+    const tail = new TransformStream({
+      transform(chunk, controller) {
+        const gone = new Uint8Array(chunk);
+        structuredClone(gone.buffer, { transfer: [gone.buffer] });
+        controller.enqueue(gone);
+      },
+    });
+    const composed = compose(head, tail);
+    composed.resume();
+    const errored = once(composed, 'error');
+    const closed = once(composed, 'close');
+    composed.write('x');
+    const err = await errored;
+    await closed;
+    strictEqual(err.name, 'TypeError');
+    strictEqual(composed.destroyed, true);
+    strictEqual(head.destroyed, true);
+  },
+};
+
+// The same failure behind a readable-only head (Readable.from), which
+// needs no interop hook: on both implementations the composition errors
+// with the conversion's TypeError, closes, and destroys the head.
+export const composeWebTailUnconvertibleChunkFailsReadableHead = {
+  async test() {
+    const head = Readable.from([Buffer.from('x')]);
+    const tail = new TransformStream({
+      transform(chunk, controller) {
+        const gone = new Uint8Array(chunk);
+        structuredClone(gone.buffer, { transfer: [gone.buffer] });
+        controller.enqueue(gone);
+      },
+    });
+    const composed = compose(head, tail);
+    composed.resume();
+    const errored = once(composed, 'error');
+    const closed = once(composed, 'close');
+    const err = await errored;
+    await closed;
+    strictEqual(err.name, 'TypeError');
+    strictEqual(composed.destroyed, true);
+    strictEqual(head.destroyed, true);
+  },
+};
+
 // A web tail whose close() closes its readable side at once but settles
 // later (an accepted { readable, writable } pair): the composition's
 // writable side finishes only once that close has settled, so a
