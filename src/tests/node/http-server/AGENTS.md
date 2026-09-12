@@ -76,6 +76,13 @@ Tests run sequentially, one server (`withServer`) at a time.
   `rejectNonStandardBodyWrites` option, refuse them with
   `ERR_HTTP_BODY_NOT_ALLOWED`. A web `ReadableStream` can be `pipeline()`d
   into the response.
+- A written buffer stays the caller's: the response copies each chunk as
+  it flushes it into the body stream (whose enqueue would otherwise
+  transfer, i.e. detach, the buffer), so a buffer is reusable once the
+  write's callback has fired and a mutation after that is not sent (one in
+  the same tick as the write is, as with Node's corked socket). Views over
+  a `SharedArrayBuffer` or a `WebAssembly.Memory` are written like any
+  other; zero-length views, detached ones included, contribute nothing.
 - `write()` reports backpressure against the response's own buffer before
   the headers, with 'drain' following; once the headers are out every
   write is accepted (the body stream queues whatever the handler writes;
@@ -131,6 +138,7 @@ lifecycle" — and the pure-streams behavior belongs to
 | `request-body.js` | GET ends at once; Buffer/string chunks and `complete`; late 'data' listener; 256 KiB in several events; streaming body incremental + chunked headers; `FixedLengthStream` Content-Length; pause/resume (small chunks, and a body above the high-water mark); pipe echo; several pipe destinations; `pipeline` through a `TransformStream` |
 | `request-destroy.js` | `destroy(err)` with listener; bare `destroy()` closes quietly; unlistened `destroy(err)` swallowed; mid-body destroy cancels the body stream with the reason and stops 'data'; bare destroy cancels with `undefined`; no cancel after completion |
 | `response-body.js` | implicit headers and chunk types; streaming before `end()`; large and many writes; Content-Length capping; 204/304; HEAD (`_hasBody`, dropped writes, null body); `rejectNonStandardBodyWrites`; cork/uncork; backpressure signaling and 'drain' parity; acceptance after headers with `highWaterMark`; web source pipelined in; 'finish' then 'close' with `closed`; write after end via callback only |
+| `buffer-lifecycle.js` | fill/write/refill after the callback (intact, not detached, both payloads received); chunk given to `end()` and its parent allocation intact; mutation after the callback not sent; SAB and WebAssembly.Memory views written, 'finish' only; Content-Length-trimmed writes leave their buffers intact; empty and detached views accepted and skipped |
 | `response-lifecycle.js` | `destroy(err)` before headers rejects the fetch with it; bare destroy before headers → 'Premature close'; `destroy(err)` after headers errors the body, 'error' then 'close'; bare destroy after headers → premature close, 'close' only; client cancel → destroyed with the reason, `ERR_STREAM_DESTROYED` on later writes |
 | `harness.js`, `which-impl.js` | shared machinery |
 

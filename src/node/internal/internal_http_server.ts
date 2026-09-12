@@ -427,7 +427,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     const { promise, resolve, reject } = Promise.withResolvers<Response>();
 
     let streamController: ReadableStreamController<Uint8Array> | null = null;
-    const chunks: (Buffer | Uint8Array)[] = [];
+    const chunks: Uint8Array<ArrayBuffer>[] = [];
     const state: { bytesWritten: number; contentLength: number | null } = {
       bytesWritten: 0,
       contentLength: null,
@@ -451,14 +451,18 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
         }
 
         state.bytesWritten += chunk.length;
+        if (chunk.length === 0) continue;
 
+        // The byte stream's enqueue transfers the buffer it is given, so
+        // the bytes are copied: a written buffer stays the caller's (as in
+        // Node, reusable once the write's callback has fired), and a view
+        // over memory that cannot be transferred — a SharedArrayBuffer, a
+        // WebAssembly.Memory — is written like any other.
+        const copy = new Uint8Array(chunk);
         if (streamController) {
-          if (chunk.length > 0) {
-            // @ts-expect-error TS2345 Buffer extends Uint8Array, but has ArrayBufferLike instead of ArrayBuffer.
-            streamController.enqueue(chunk);
-          }
+          streamController.enqueue(copy);
         } else {
-          chunks[event.index] = chunk;
+          chunks[event.index] = copy;
         }
       }
     };
@@ -491,7 +495,6 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
             onStreamStart: (controller) => {
               streamController = controller;
               for (const chunk of chunks) {
-                // @ts-expect-error TS2345 Buffer extends Uint8Array, but has ArrayBufferLike instead of ArrayBuffer.
                 controller.enqueue(chunk);
               }
               chunks.length = 0;
