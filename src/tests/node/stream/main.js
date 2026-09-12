@@ -145,6 +145,7 @@ export {
   pipelineWebSinkErrorFailsPipeline,
   pipelineWebSourceErrorFailsPipeline,
   pipelineWebSourcePreservesPromiseChunks,
+  pipelineWebSinkFailureWithIdleSource,
   promisesPipelineSignalAbortsIdleWebPipeline,
   pipelineNodeSinkAsyncErrorInterruptsIdleWebSource,
   pipelineNodeSinkErrorCancelsWebSource,

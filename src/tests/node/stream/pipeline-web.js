@@ -253,6 +253,45 @@ export const pipelineWebSourcePreservesPromiseChunks = {
   },
 };
 
+// A web destination failing on its own while the source is idle — its
+// controller erroring, or a write rejecting once the source has gone quiet —
+// fails the pipeline at once with the sink's error and destroys the source.
+export const pipelineWebSinkFailureWithIdleSource = {
+  async test() {
+    let sinkController;
+    const erroring = new WritableStream({
+      start(controller) {
+        sinkController = controller;
+      },
+    });
+    const idle = new Readable({ read() {} });
+    const idleDone = run(idle, erroring);
+    await scheduler.wait(5);
+    const boom = new Error('sink errored while the source was idle');
+    sinkController.error(boom);
+    strictEqual(await idleDone, boom);
+    strictEqual(idle.destroyed, true);
+
+    const rejection = new Error('write rejected');
+    const rejecting = new WritableStream({
+      write() {
+        return Promise.reject(rejection);
+      },
+    });
+    let pushed = false;
+    const single = new Readable({
+      read() {
+        if (!pushed) {
+          pushed = true;
+          this.push('only');
+        }
+      },
+    });
+    strictEqual(await run(single, rejecting), rejection);
+    strictEqual(single.destroyed, true);
+  },
+};
+
 // Aborting an idle, fully web-backed pipeline: the source's pending read is
 // interrupted and the source cancelled, the destination is aborted, and the
 // promise rejects with the AbortError.
