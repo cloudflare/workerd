@@ -9,7 +9,7 @@
 
 import { Buffer } from 'node:buffer';
 import { strictEqual, deepStrictEqual } from 'node:assert';
-import { request, response, collect } from 'harness';
+import { request, response, collect, once, record } from 'harness';
 
 async function summary(req) {
   const res = await response(req);
@@ -203,5 +203,71 @@ export const getAndHeadIgnoreWrites = {
       contentLength: null,
       transferEncoding: null,
     });
+  },
+};
+
+// end() ends the body: `writableEnded` is set at once, and a write()
+// afterwards — also one issued from inside 'finish' — is a write after
+// end: it returns false, its callback and the request's 'error' report
+// ERR_STREAM_WRITE_AFTER_END, nothing of it is sent, and the request
+// completes with what was written before.
+export const writeAfterEndFails = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = request(env, '/echo', { method: 'POST' });
+    record(log, 'req', req, ['error']);
+    req.on('finish', () => {
+      strictEqual(
+        req.write('from finish', (err) => log.push(`finish-write:${err.code}`)),
+        false
+      );
+    });
+    req.write('kept');
+    strictEqual(req.writableEnded, false);
+    req.end();
+    strictEqual(req.writableEnded, true);
+    strictEqual(
+      req.write('late', (err) => log.push(`late-write:${err.code}`)),
+      false
+    );
+    const res = await once(req, 'response');
+    strictEqual((await collect(res)).toString(), 'kept');
+    await once(req, 'close');
+    deepStrictEqual(log, [
+      'late-write:ERR_STREAM_WRITE_AFTER_END',
+      'req:error(Error/ERR_STREAM_WRITE_AFTER_END/write after end)',
+      'finish-write:ERR_STREAM_WRITE_AFTER_END',
+      'req:error(Error/ERR_STREAM_WRITE_AFTER_END/write after end)',
+    ]);
+  },
+};
+
+// end(chunk) after end() is a write after end too (callback and 'error',
+// reported after the 'finish' the first end() had already scheduled); the
+// request, already ended, is still sent and answered. A bare end(cb) after
+// end() calls back once the request has finished, or at once with
+// ERR_STREAM_ALREADY_FINISHED if it already has — also once the exchange
+// is over and the request destroyed.
+export const endAfterEndReportsAndStillSends = {
+  async test(ctrl, env) {
+    const log = [];
+    const req = request(env, '/echo', { method: 'POST' });
+    record(log, 'req', req, ['error']);
+    req.end('kept');
+    req.end('late', (err) => log.push(`late-end:${err.code}`));
+    req.end((err) =>
+      log.push(`bare-end:${err === undefined ? 'ok' : err.code}`)
+    );
+    const res = await once(req, 'response');
+    strictEqual((await collect(res)).toString(), 'kept');
+    await once(req, 'close');
+    req.end((err) => log.push(`after-finish-end:${err.code}`));
+    await scheduler.wait(5);
+    deepStrictEqual(log, [
+      'bare-end:ok',
+      'late-end:ERR_STREAM_WRITE_AFTER_END',
+      'req:error(Error/ERR_STREAM_WRITE_AFTER_END/write after end)',
+      'after-finish-end:ERR_STREAM_ALREADY_FINISHED',
+    ]);
   },
 };

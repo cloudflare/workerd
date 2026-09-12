@@ -54,6 +54,15 @@ need an `internet` network service allowing `private`.
   does not change what is sent. Views over a `SharedArrayBuffer` or a
   `WebAssembly.Memory` are sent like any other; a zero-length view, a
   detached one included, is accepted and sends nothing.
+- `end()` ends the body at once (`writableEnded`). A `write()` afterwards
+  — one issued from inside 'finish' included — is a write after end, as in
+  Node: it returns false, reports `ERR_STREAM_WRITE_AFTER_END` to its
+  callback and as the request's 'error', and sends nothing; so does an
+  `end(chunk)` after `end()`. The request, already on its way, completes
+  with what was written before. A bare `end(cb)` after `end()` calls back
+  at 'finish', or at once with `ERR_STREAM_ALREADY_FINISHED` once the
+  request has finished (the exchange over and the request destroyed
+  included).
 - The request is sent through `fetch()` with `redirect: 'manual'` and
   `encodeResponseBody: 'manual'`; a finished request stays live until its
   exchange ends.
@@ -173,6 +182,12 @@ behavior was itself a defect rather than a contract, and the new one is
 what Node documents and what code written against Node already handles.
 `req.abort()` remains the quiet teardown.
 
+The same reasoning applies to a `write()` or `end(chunk)` after `end()`:
+historically accepted (`true`, callback called) and silently dropped — and
+a late `end(chunk)` even kept the request from ever being sent — it now
+reports `ERR_STREAM_WRITE_AFTER_END` through the callback and as 'error',
+as Node's does.
+
 ## Divergence ledger (C++ vs TypeScript)
 
 No divergence is observable through the client: every assertion holds
@@ -183,7 +198,7 @@ unchanged under both implementations.
 | Module | Asserts |
 | --- | --- |
 | `response-body.js` | Buffer chunks and `complete`; `setEncoding`; incremental chunked delivery; a megabyte intact; pause/resume; bodiless statuses; HEAD; compression passthrough; waiting for a consumer |
-| `request-body.js` | string body echoed with the server-side Content-Type/Length; `end(Buffer)` sent once; chunk forms and encodings; nothing sent before `end()`; length and type as the server sees them; empty POST; chunk captured at `write()` (mutated, detached, shrunk afterwards); SAB/WebAssembly.Memory views sent, empty and detached views accepted; GET/HEAD ignore writes |
+| `request-body.js` | string body echoed with the server-side Content-Type/Length; `end(Buffer)` sent once; chunk forms and encodings; nothing sent before `end()`; length and type as the server sees them; empty POST; chunk captured at `write()` (mutated, detached, shrunk afterwards); SAB/WebAssembly.Memory views sent, empty and detached views accepted; GET/HEAD ignore writes; `write()`/`end(chunk)` after `end()` (from 'finish' too) → `ERR_STREAM_WRITE_AFTER_END`, request still completes; bare `end(cb)` after `end()` and after the exchange |
 | `lifecycle.js` | `res.destroy()` closes; end then one close; `res.destroy(err)` mid-body reaching the server; server dropping the connection; completed response final; connection failure; truncated body (raw server) aborting the response; bytes beyond Content-Length ignored; malformed chunked framing aborting after the good chunk; empty and garbage replies failing the request with no 'response'; `req.res` and request close after the response; `req.destroy()` before the response (hang up), with an error, before `end()`, mid-body (bare and with an error), response after destroy dropped; `abort()` before the response, before `end()`, mid-body; timeout before headers (armed before/after `end()`), `timeout` option and callback, mid-body, idle not deadline (a 600 ms trickle passing a 250 ms timeout), disarmed by completion, cleared by `setTimeout(0)`; the response's `setTimeout` arming the timer (callback, teardown shape), replacing the request's, clearing with `0`; `ms` validation on both sides; `signal` already aborted / aborted before `end()` / mid-body (with cause) / after completion; `finished(req)` after 'close'; a response with no 'response' listener dumped (request closes, `finished(req)` resolves, `res.complete`) |
 | `interop.js` | pipe into `Writable.fromWeb`; pipe into a 16 KiB slow sink (bounded buffer, pauses); `Readable.toWeb` body; pipeline through a `TransformStream`; `stream/consumers` and async iteration |
 | `harness.js`, `which-impl.js` | shared machinery |

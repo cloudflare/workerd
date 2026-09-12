@@ -27,6 +27,8 @@ export {
   chunkIsCapturedAtWrite,
   sharedWasmEmptyAndDetachedViews,
   getAndHeadIgnoreWrites,
+  writeAfterEndFails,
+  endAfterEndReportsAndStillSends,
 } from 'request-body';
 
 export {
