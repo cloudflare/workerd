@@ -134,6 +134,12 @@ configs' flag lists).
 
 ## Streams tests that live elsewhere (by design)
 
+- `src/tests/node/` — the Node.js compatibility layer's USE of web
+  streams (`node:stream` adapters, `node:net` sockets, the `node:http`
+  client and server), under the same suite rules and the same cpp/ts
+  cells; each suite's `AGENTS.md` there carries its own ledger. A pure
+  web-streams behavior found through the node layer is pinned here, not
+  there (e.g. `readable` ledger #18).
 - `src/workerd/api/tests/js-rpc-streams-*` — stream serialization over
   JS RPC (including ts-impl cells); owned by the worker-rpc domain.
 - `src/workerd/api/tests/ts-webstreams-test.js` — TypeScript-impl
