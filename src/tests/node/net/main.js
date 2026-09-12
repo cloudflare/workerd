@@ -42,6 +42,8 @@ export {
   endCallbackForms,
   closedSocketIsInert,
   destroyWithError,
+  peerResetMidReadErrors,
+  peerResetMidWriteFailsCallbacks,
 } from 'end-and-destroy';
 
 export {

@@ -25,6 +25,16 @@ export const greet = (env, options) =>
 export const sink = (env, options) => connectTo(env, 'NET_SINK_PORT', options);
 export const ticker = (env, options) =>
   connectTo(env, 'NET_TICKER_PORT', options);
+export const resetter = (env, options) =>
+  connectTo(env, 'NET_RESET_PORT', options);
+export const trickle = (env, options) =>
+  connectTo(env, 'NET_TRICKLE_PORT', options);
+export const utf8Split = (env, options) =>
+  connectTo(env, 'NET_UTF8_SPLIT_PORT', options);
+
+// What the UTF8_SPLIT server writes, one byte at a time.
+export const UTF8_SPLIT_TEXT =
+  'a\u00e9b\u20acc\u{1F600}d\u00e9\u20ac\u{1F600}e';
 
 export const GREETING = 'hello from greet';
 

@@ -19,7 +19,7 @@ timeout and byte-accounting logic around them.
 
 ## Infrastructure
 
-A node sidecar (`tcp-servers.js`) runs five TCP servers whose ports arrive
+A node sidecar (`tcp-servers.js`) runs eight TCP servers whose ports arrive
 through `fromEnvironment` bindings (plus `SIDECAR_HOSTNAME`):
 
 - **echo** (`NET_ECHO_PORT`): echoes every byte; ends after the client ends.
@@ -30,6 +30,13 @@ through `fromEnvironment` bindings (plus `SIDECAR_HOSTNAME`):
   the decimal count and ends.
 - **ticker** (`NET_TICKER_PORT`): writes `tick` every 20 ms until the client
   ends.
+- **reset** (`NET_RESET_PORT`): writes `ready`, then resets the connection
+  (RST, no FIN) on the client's first bytes.
+- **trickle** (`NET_TRICKLE_PORT`): writes bytes 0..1999 (`i % 251`) one
+  per millisecond, then ends.
+- **utf8-split** (`NET_UTF8_SPLIT_PORT`): writes `UTF8_SPLIT_TEXT`
+  (`servers.js`; 2-, 3- and 4-byte sequences) one byte per millisecond, so
+  every sequence is split at every boundary, then ends.
 
 Both cells need `experimental` (the `connect()` socket) and an `internet`
 network service allowing `private`.
@@ -101,6 +108,13 @@ network service allowing `private`.
   whose handle is gone fails with `ERR_SOCKET_CLOSED`; a non-byte chunk
   throws `ERR_INVALID_ARG_TYPE`. Property access on a closed socket is
   harmless.
+- A peer's RST: the connection's failure surfaces as 'error' (a plain
+  `Error` without a code — Node reports `ECONNRESET`), then 'close' with
+  `hadError` true, and the socket is destroyed with that error; writes
+  after it fail through their callbacks with `ERR_STREAM_DESTROYED`. The
+  runtime may report the readable's end before the failure, in which case
+  'end' precedes the error (Node emits none); neither that nor the error's
+  text is pinned.
 
 ### Timeouts
 
@@ -143,7 +157,7 @@ policy to the Duplex; see "The handle".)
 | `connect-lifecycle.js` | handle locks (BYOB reader, default writer); connect → ready and state properties; deferred writes before connect (order, callback state, `bytesWritten`); destroy before connect (`ERR_SOCKET_CLOSED_BEFORE_CONNECTION`, no 'connect') |
 | `echo-roundtrip.js` | Buffers and event order; `setEncoding` (latin1 byte round trip); 40 KiB multi-byte utf8; byte accounting; 10 MB `bytesWritten`; 256 KiB patterned volume; corked batch |
 | `half-close.js` | enforcer registration and default; peer EOF ending both sides; `EPIPE` after EOF; half-open writes after EOF; explicit end with half-open; EOF surfacing without a consumer |
-| `end-and-destroy.js` | end callback forms; `bufferSize`; destroy with/without error (events, `hadError`); writes after destroy, without handle, with invalid chunks; inert closed socket; all queued writes flushed before end |
+| `end-and-destroy.js` | end callback forms; `bufferSize`; destroy with/without error (events, `hadError`); writes after destroy, without handle, with invalid chunks; inert closed socket; all queued writes flushed before end; peer RST mid-read (codeless 'error', 'close' true; 'end' optional) and the writes after it (`ERR_STREAM_DESTROYED` callbacks, one 'error') |
 | `backpressure.js` | pause/resume against a ticking peer; paused-mode `read()` restarting the loop; `write()` false and 'drain'; cork cycles |
 | `timeouts.js` | idle timeout without closing; data resets; `setTimeout(0)` clears, also across later traffic |
 | `onread.js` | fixed buffer across several fills (and its detachment); a fixed view into a larger allocation keeping its range; generated buffers; callback `false` stopping and `resume()` restarting; a throwing generator (its error), garbage from the generator (`ERR_INVALID_ARG_TYPE`), an empty view and a callback-detached fixed buffer (`ENOBUFS`), a SAB view (`TypeError`) — each destroying the socket |

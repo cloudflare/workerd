@@ -19,6 +19,17 @@
 //
 // TICKER (NET_TICKER_PORT): writes "tick" every 20 ms until the client
 // ends, then ends.
+//
+// RESET (NET_RESET_PORT): writes "ready", then resets the connection (RST,
+// no FIN) as soon as the first bytes from the client arrive.
+//
+// TRICKLE (NET_TRICKLE_PORT): writes bytes 0..1999 (i % 251) one at a
+// time, one per millisecond, then ends; discards input.
+//
+// UTF8_SPLIT (NET_UTF8_SPLIT_PORT): writes the text of `utf8SplitText` (its
+// bytes are known to the suite as UTF8_SPLIT_TEXT)
+// one BYTE per write with a 1 ms gap, so that every multi-byte sequence is
+// split at every boundary, then ends; discards input.
 
 import net from 'node:net';
 
@@ -67,6 +78,56 @@ listen(
     socket.on('end', () => socket.end(String(count)));
   }),
   'NET_SINK_PORT'
+);
+
+listen(
+  net.createServer((socket) => {
+    socket.on('error', () => {});
+    socket.write('ready');
+    socket.once('data', () => socket.resetAndDestroy());
+  }),
+  'NET_RESET_PORT'
+);
+
+function writeSlowly(socket, bytes) {
+  let i = 0;
+  const timer = setInterval(() => {
+    if (socket.destroyed) {
+      clearInterval(timer);
+      return;
+    }
+    if (i === bytes.length) {
+      clearInterval(timer);
+      socket.end();
+      return;
+    }
+    socket.write(bytes.subarray(i, i + 1));
+    i++;
+  }, 1);
+  socket.on('close', () => clearInterval(timer));
+}
+
+listen(
+  net.createServer((socket) => {
+    socket.on('error', () => {});
+    socket.resume();
+    const bytes = new Uint8Array(2000);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = i % 251;
+    writeSlowly(socket, bytes);
+  }),
+  'NET_TRICKLE_PORT'
+);
+
+// Two-, three- and four-byte sequences (é, €, 😀) between ASCII letters.
+const utf8SplitText = 'a\u00e9b\u20acc\u{1F600}d\u00e9\u20ac\u{1F600}e';
+
+listen(
+  net.createServer((socket) => {
+    socket.on('error', () => {});
+    socket.resume();
+    writeSlowly(socket, new TextEncoder().encode(utf8SplitText));
+  }),
+  'NET_UTF8_SPLIT_PORT'
 );
 
 listen(

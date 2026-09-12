@@ -10,7 +10,7 @@
 
 import { strictEqual, deepStrictEqual } from 'node:assert';
 import { Buffer } from 'node:buffer';
-import { echo, endsImmediately, sink, once } from 'servers';
+import { echo, endsImmediately, sink, resetter, once } from 'servers';
 
 // bufferSize reflects the queued-but-unflushed bytes while writing and is 0
 // once finished.
@@ -181,5 +181,73 @@ export const destroyWithError = {
       ['error', boom],
       ['close', true],
     ]);
+  },
+};
+
+// The peer resets the connection (RST, no FIN) while the socket is
+// reading: the connection's failure surfaces as 'error' (a plain Error
+// without a code, where Node reports ECONNRESET), then 'close' with
+// hadError true, and the socket is destroyed with that error. The runtime
+// may report the readable's end before the failure, in which case 'end'
+// precedes the error (Node emits no 'end' on a reset); the order of the
+// two is not pinned.
+export const peerResetMidReadErrors = {
+  async test(ctrl, env) {
+    const socket = resetter(env);
+    const events = [];
+    socket.on('data', (chunk) => events.push(`data(${chunk})`));
+    let ended = false;
+    socket.on('end', () => (ended = true));
+    socket.on('error', (err) => {
+      events.push('error');
+      strictEqual(err instanceof Error, true);
+      strictEqual(err.code, undefined);
+      strictEqual(socket.errored, err);
+    });
+    const closed = new Promise((resolve) =>
+      socket.once('close', (hadError) => {
+        events.push(`close(${hadError})`);
+        resolve();
+      })
+    );
+    await once(socket, 'data');
+    socket.write('go');
+    await closed;
+    deepStrictEqual(events, ['data(ready)', 'error', 'close(true)']);
+    strictEqual(socket.destroyed, true);
+    strictEqual(typeof ended, 'boolean');
+  },
+};
+
+// Writes after the reset fail through their callbacks with
+// ERR_STREAM_DESTROYED (the socket was torn down by the failure), return
+// false, and add no 'error' of their own.
+export const peerResetMidWriteFailsCallbacks = {
+  async test(ctrl, env) {
+    const socket = resetter(env);
+    const errors = [];
+    socket.on('data', () => {});
+    socket.on('error', (err) => errors.push(err));
+    await once(socket, 'data');
+    socket.write('go');
+    await once(socket, 'close');
+    const callbacks = [];
+    const returned = [];
+    for (let i = 0; i < 3; i++) {
+      returned.push(
+        socket.write(Buffer.alloc(64 * 1024, 1), (err) =>
+          callbacks.push(err?.code)
+        )
+      );
+    }
+    await scheduler.wait(20);
+    deepStrictEqual(returned, [false, false, false]);
+    deepStrictEqual(callbacks, [
+      'ERR_STREAM_DESTROYED',
+      'ERR_STREAM_DESTROYED',
+      'ERR_STREAM_DESTROYED',
+    ]);
+    strictEqual(errors.length, 1);
+    strictEqual(socket.writable, false);
   },
 };
