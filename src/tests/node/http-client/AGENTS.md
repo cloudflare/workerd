@@ -117,6 +117,17 @@ need an `internet` network service allowing `private`.
   Firing emits 'timeout' on the request and its response, once, then
   destroys the request with an `AbortError` (code `ABORT_ERR`) — where
   Node only emits and leaves the teardown to the listener.
+- The `signal` option is armed for the whole exchange: aborted before the
+  request is sent (already aborted, or before `end()`), the request errors
+  with an `AbortError` (`ABORT_ERR`) and closes, nothing sent; aborted
+  while the response arrives, the response aborts as on a timeout, both
+  reporting an `AbortError` whose `cause` is the signal's reason; aborted
+  after the exchange, nothing happens.
+- `stream.finished(req)` reports the request's 'close' — the end of the
+  exchange — not its 'finish' (the request sent), as in Node, where the
+  request is a legacy stream that `finished()` waits on as a readable too;
+  `end-of-stream` gives a workerd `OutgoingMessage` (a `Writable`) the same
+  treatment by shape.
 
 ### Interop
 
@@ -165,6 +176,6 @@ unchanged under both implementations.
 | --- | --- |
 | `response-body.js` | Buffer chunks and `complete`; `setEncoding`; incremental chunked delivery; a megabyte intact; pause/resume; bodiless statuses; HEAD; compression passthrough; waiting for a consumer |
 | `request-body.js` | string body echoed with the server-side Content-Type/Length; `end(Buffer)` sent once; chunk forms and encodings; nothing sent before `end()`; length and type as the server sees them; empty POST; chunk captured at `write()` (mutated, detached, shrunk afterwards); SAB/WebAssembly.Memory views sent, empty and detached views accepted; GET/HEAD ignore writes |
-| `lifecycle.js` | `res.destroy()` closes; end then one close; `res.destroy(err)` mid-body reaching the server; server dropping the connection; completed response final; connection failure; truncated body (raw server) aborting the response; bytes beyond Content-Length ignored; malformed chunked framing aborting after the good chunk; empty and garbage replies failing the request with no 'response'; `req.res` and request close after the response; `req.destroy()` before the response (hang up), with an error, before `end()`, mid-body (bare and with an error), response after destroy dropped; `abort()` before the response, before `end()`, mid-body; timeout before headers (armed before/after `end()`), `timeout` option and callback, mid-body, disarmed by completion, cleared by `setTimeout(0)`; a response with no 'response' listener dumped (request closes, `finished(req)` resolves, `res.complete`) |
+| `lifecycle.js` | `res.destroy()` closes; end then one close; `res.destroy(err)` mid-body reaching the server; server dropping the connection; completed response final; connection failure; truncated body (raw server) aborting the response; bytes beyond Content-Length ignored; malformed chunked framing aborting after the good chunk; empty and garbage replies failing the request with no 'response'; `req.res` and request close after the response; `req.destroy()` before the response (hang up), with an error, before `end()`, mid-body (bare and with an error), response after destroy dropped; `abort()` before the response, before `end()`, mid-body; timeout before headers (armed before/after `end()`), `timeout` option and callback, mid-body, disarmed by completion, cleared by `setTimeout(0)`; `signal` already aborted / aborted before `end()` / mid-body (with cause) / after completion; `finished(req)` after 'close'; a response with no 'response' listener dumped (request closes, `finished(req)` resolves, `res.complete`) |
 | `interop.js` | pipe into `Writable.fromWeb`; pipe into a 16 KiB slow sink (bounded buffer, pauses); `Readable.toWeb` body; pipeline through a `TransformStream`; `stream/consumers` and async iteration |
 | `harness.js`, `which-impl.js` | shared machinery |

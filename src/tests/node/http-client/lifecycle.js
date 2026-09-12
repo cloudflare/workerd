@@ -250,6 +250,126 @@ export const unparseableRepliesFailTheRequest = {
   },
 };
 
+// The `signal` option. An already-aborted signal, or one aborted before
+// end(): 'error' with an AbortError (ABORT_ERR) then 'close', nothing
+// sent, no 'response'.
+export const signalAbortBeforeSendFailsRequest = {
+  async test(ctrl, env) {
+    const already = new AbortController();
+    already.abort();
+    for (const [label, signal, abortNow] of [
+      ['already aborted', already.signal, () => {}],
+      ['aborted before end()', undefined, undefined],
+    ]) {
+      const controller = new AbortController();
+      const log = [];
+      const errors = [];
+      const req = request(env, '/sink', {
+        method: 'POST',
+        signal: signal ?? controller.signal,
+      });
+      record(log, 'req', req, ['response', 'finish', 'close']);
+      req.on('error', (err) => {
+        errors.push(err);
+        log.push('req:error');
+      });
+      req.write('never sent');
+      (abortNow ?? (() => controller.abort()))();
+      req.end();
+      await once(req, 'close');
+      deepStrictEqual(log, ['req:error', 'req:close'], label);
+      strictEqual(errors[0].name, 'AbortError', label);
+      strictEqual(errors[0].code, 'ABORT_ERR', label);
+      strictEqual(req.destroyed, true, label);
+    }
+  },
+};
+
+// The signal stays armed for the whole exchange: aborted while the
+// response body is arriving, the response aborts and both report an
+// AbortError whose cause is the signal's reason — the shape of a timeout.
+export const signalAbortMidBodyAbortsResponse = {
+  async test(ctrl, env) {
+    const controller = new AbortController();
+    const log = [];
+    const errors = [];
+    const req = get(env, '/chunked?n=6&delay=30', {
+      signal: controller.signal,
+    });
+    req.on('error', (err) => {
+      errors.push(err);
+      log.push('req:error');
+    });
+    record(log, 'req', req, ['close']);
+    const res = await response(req);
+    res.on('error', (err) => {
+      errors.push(err);
+      log.push('res:error');
+    });
+    record(log, 'res', res, ['aborted', 'end', 'close']);
+    res.on('data', () => log.push('data'));
+    await once(res, 'data');
+    const reason = new Error('enough');
+    controller.abort(reason);
+    await once(res, 'close');
+    deepStrictEqual(log, [
+      'data',
+      'res:aborted',
+      'req:error',
+      'req:close',
+      'res:error',
+      'res:close',
+    ]);
+    strictEqual(errors.length, 2);
+    strictEqual(errors[0], errors[1]);
+    strictEqual(errors[0].name, 'AbortError');
+    strictEqual(errors[0].code, 'ABORT_ERR');
+    strictEqual(errors[0].cause, reason);
+    strictEqual(res.complete, false);
+    strictEqual(req.destroyed, true);
+  },
+};
+
+// Aborting the signal once the exchange is over changes nothing.
+export const signalAbortAfterCompletionIsInert = {
+  async test(ctrl, env) {
+    const controller = new AbortController();
+    const errors = [];
+    const req = get(env, '/pong', { signal: controller.signal });
+    req.on('error', (err) => errors.push(err));
+    const res = await response(req);
+    strictEqual((await collect(res)).toString(), 'pong');
+    await once(req, 'close');
+    controller.abort();
+    await scheduler.wait(20);
+    strictEqual(errors.length, 0);
+    strictEqual(req.errored, null);
+  },
+};
+
+// stream.finished(req) reports the end of the exchange (the request's
+// 'close'), not the request having been sent ('finish'): as in Node,
+// where the request is a legacy stream that finished() also waits on as a
+// readable.
+export const finishedOnRequestWaitsForClose = {
+  async test(ctrl, env) {
+    const req = get(env, '/chunked?n=2&delay=20');
+    const events = [];
+    req.on('finish', () => events.push('finish'));
+    req.on('close', () => events.push('close'));
+    const done = new Promise((resolve) =>
+      finished(req, (err) => {
+        events.push(`finished(${err === undefined ? '' : err.message})`);
+        resolve();
+      })
+    );
+    const res = await response(req);
+    strictEqual((await collect(res)).toString(), 'chunk-0|chunk-1|');
+    await done;
+    deepStrictEqual(events, ['finish', 'close', 'finished()']);
+  },
+};
+
 // The response is the request's `res`; a completed exchange closes the
 // request after the response ends, and leaves it destroyed.
 export const responseEndClosesRequest = {
@@ -568,11 +688,7 @@ export const unhandledResponseIsDumped = {
     if (outcome !== 'closed') req.destroy();
     strictEqual(outcome, 'closed');
     strictEqual(req.res.complete, true);
-    deepStrictEqual(
-      events.filter((e) => e !== 'finished()'),
-      ['finish', 'close']
-    );
-    ok(events.includes('finished()'));
+    deepStrictEqual(events, ['finish', 'close', 'finished()']);
   },
 };
 

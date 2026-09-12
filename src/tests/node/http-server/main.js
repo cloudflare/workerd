@@ -51,6 +51,7 @@ export {
   writesAlwaysAcceptedAfterHeaders,
   webSourcePipelinedIntoResponse,
   finishThenClose,
+  finishedOnResponseWaitsForClose,
   writeAfterEndFails,
   contentLengthLies,
 } from 'response-body';

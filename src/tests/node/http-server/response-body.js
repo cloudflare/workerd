@@ -9,7 +9,7 @@
 // stream on 'finish'. The fetch() therefore resolves as soon as the headers
 // go out and the body streams after.
 
-import { pipeline } from 'node:stream';
+import { pipeline, finished } from 'node:stream';
 import { Buffer } from 'node:buffer';
 import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
 import { withServer } from 'harness';
@@ -366,6 +366,34 @@ export const finishThenClose = {
         strictEqual(await res.text(), 'bye');
         await scheduler.wait(5);
         deepStrictEqual(events, ['finish:false', 'close:true']);
+      }
+    );
+  },
+};
+
+// stream.finished(res) reports the response's 'close', after 'finish' —
+// as in Node, where the response is a legacy stream that finished() also
+// waits on as a readable (Node's test-http-outgoing-finished).
+export const finishedOnResponseWaitsForClose = {
+  async test(ctrl, env) {
+    const events = [];
+    let done;
+    const settled = new Promise((resolve) => (done = resolve));
+    await withServer(
+      (req, res) => {
+        res.on('finish', () => events.push('finish'));
+        res.on('close', () => events.push('close'));
+        finished(res, (err) => {
+          events.push(`finished(${err === undefined ? '' : err.message})`);
+          done();
+        });
+        res.end('bye');
+      },
+      async () => {
+        const res = await env.SERVICE.fetch('http://x/');
+        strictEqual(await res.text(), 'bye');
+        await settled;
+        deepStrictEqual(events, ['finish', 'close', 'finished()']);
       }
     );
   },
