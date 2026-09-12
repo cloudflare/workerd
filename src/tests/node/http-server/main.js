@@ -90,3 +90,10 @@ export {
 export { destroyInsideFinish, pauseResumeInsideData } from 'reentrancy';
 
 export { patchedThenPassthroughKeepsData } from 'then-pollution';
+
+export {
+  largeRequestBodyThroughBinding,
+  manyTinyResponseWrites,
+  alternatingWriteShapes,
+  splitUtf8ReassembledBySetEncoding,
+} from 'data-volumes';
