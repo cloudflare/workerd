@@ -485,6 +485,29 @@ export const testHttpServerTimeoutsValidation = {
   },
 };
 
+// req.setTimeout() validates msecs as Node's socket.setTimeout() does and
+// registers the callback as a 'timeout' listener. A server request has no
+// socket to go idle, so nothing arms a timer.
+export const testIncomingMessageSetTimeout = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      throws(() => req.setTimeout('abc'), { code: 'ERR_INVALID_ARG_TYPE' });
+      throws(() => req.setTimeout(-1), { code: 'ERR_OUT_OF_RANGE' });
+      throws(() => req.setTimeout(NaN), { code: 'ERR_OUT_OF_RANGE' });
+      const callback = () => {};
+      strictEqual(req.setTimeout(10, callback), req);
+      strictEqual(req.listenerCount('timeout'), 1);
+      strictEqual(req.listeners('timeout')[0], callback);
+      res.end('ok');
+    });
+    await new Promise((resolve) => server.listen(0, resolve));
+    currentTestPort = server.address().port;
+
+    const res = await env.SERVICE.fetch('https://cloudflare.com');
+    strictEqual(await res.text(), 'ok');
+  },
+};
+
 export const testHandleZeroNullUndefinedPortNumber = {
   async test() {
     // Test zero port number.

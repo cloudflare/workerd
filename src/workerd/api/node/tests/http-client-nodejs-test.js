@@ -40,23 +40,6 @@ export const checkPortsSetCorrectly = {
 //   },
 // };
 
-// TODO(soon): Support this test case, if possible with the current implementation
-// Test is taken from test/parallel/test-http-client-response-timeout.js
-// export const testHttpClientResponseTimeout = {
-//   async test(_ctrl, env) {
-//     const { promise, resolve } = Promise.withResolvers();
-//     const req =
-//       http.get({ port: env.TIMEOUT_SERVER_PORT }, (res) => {
-//         res.on('timeout', () => {
-//           resolve();
-//           req.destroy();
-//         });
-//         res.setTimeout(1);
-//       });
-//     await promise;
-//   },
-// };
-
 // Test is taken from test/parallel/test-http-client-default-headers-exist.js
 export const testHttpClientDefaultHeadersExist = {
   async test(_ctrl, env) {

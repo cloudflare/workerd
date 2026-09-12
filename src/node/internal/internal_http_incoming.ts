@@ -5,7 +5,7 @@
 
 import { EventEmitter } from 'node-internal:events';
 import { Readable } from 'node-internal:streams_readable';
-import { isIPv4, Socket } from 'node-internal:internal_net';
+import { isIPv4, Socket, getTimerDuration } from 'node-internal:internal_net';
 import type {
   IncomingMessage as _IncomingMessage,
   IncomingHttpHeaders,
@@ -14,10 +14,17 @@ const kHeaders = Symbol('kHeaders');
 const kHeadersDistinct = Symbol('kHeadersDistinct');
 const kHeadersCount = Symbol('kHeadersCount');
 
+// The idle timer of the connection a client response arrives on. In Node
+// it is the socket's, which the request's and the response's setTimeout()
+// both set; here the ClientRequest keeps it.
+export interface IncomingMessageIdleTimer {
+  setTimeout(msecs: number): void;
+}
+
 export let setIncomingMessageFetchResponse: (
   incoming: IncomingMessage,
   response: Response,
-  resetTimers?: (opts: { finished: boolean }) => void
+  idleTimer?: IncomingMessageIdleTimer
 ) => void;
 
 export let setIncomingMessageSocket: (
@@ -39,6 +46,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   #reading = false;
   #socket: unknown;
   #stream: ReadableStream | null = null;
+  #idleTimer: IncomingMessageIdleTimer | undefined;
 
   override aborted = false;
   url: string = '';
@@ -79,8 +87,10 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   static {
     setIncomingMessageFetchResponse = (
       incoming: IncomingMessage,
-      response: Response
+      response: Response,
+      idleTimer?: IncomingMessageIdleTimer
     ): void => {
+      incoming.#idleTimer = idleTimer;
       incoming.#setFetchResponse(response);
     };
 
@@ -442,10 +452,16 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     }
   }
 
-  setTimeout(_msecs: number, callback?: () => void): this {
+  // Node sets the socket's idle timer, the one the request's setTimeout()
+  // sets too; a client response reaches its ClientRequest's through the
+  // idle timer hook. A server request has no socket and no timer: its
+  // callback is registered, nothing arms it.
+  setTimeout(msecs: number, callback?: () => void): this {
+    msecs = getTimerDuration(msecs, 'msecs');
     if (callback) {
       this.on('timeout', callback);
     }
+    this.#idleTimer?.setTimeout(msecs);
     return this;
   }
 

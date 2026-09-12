@@ -60,6 +60,10 @@ export {
   timeoutDisarmedByCompletion,
   setTimeoutZeroClears,
   unhandledResponseIsDumped,
+  responseSetTimeoutArmsTheTimer,
+  responseSetTimeoutReplacesRequestTimeout,
+  responseSetTimeoutZeroClears,
+  setTimeoutValidatesMsecs,
 } from 'lifecycle';
 
 export {
