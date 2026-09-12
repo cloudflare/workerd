@@ -577,7 +577,7 @@ kj::Own<EVP_PKEY> ellipticJwkReader(
     }
 
     auto x = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.x), DOMDataError, "Invalid ", crv,
-        " key in JSON WebKey; missing or invalid public key component (\"x\").");
+        " key in JSON WebKey: missing or invalid public key component (\"x\").");
     JSG_REQUIRE(x.size() == 32, DOMDataError, "Invalid length ", x.size(), " for public key");
 
     if (keyDataJwk.d == kj::none) {
@@ -596,7 +596,7 @@ kj::Own<EVP_PKEY> ellipticJwkReader(
     // seems to throw it away when a private key is provided.
 
     auto d = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.d), DOMDataError, "Invalid ", curveName,
-        " key in JSON Web Key; missing or invalid private key component (\"d\").");
+        " key in JSON Web Key: missing or invalid private key component (\"d\").");
     JSG_REQUIRE(d.size() == 32, DOMDataError, "Invalid length ", d.size(), " for private key");
 
     return OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_private_key(evpId, nullptr, d.begin(), d.size()),
@@ -634,9 +634,9 @@ kj::Own<EVP_PKEY> ellipticJwkReader(
       "Error importing EC key", tryDescribeOpensslErrors());
 
   auto x = UNWRAP_JWK_BIGNUM(
-      kj::mv(keyDataJwk.x), DOMDataError, "Invalid EC key in JSON Web Key; missing \"x\".");
+      kj::mv(keyDataJwk.x), DOMDataError, "Invalid EC key in JSON Web Key: missing \"x\".");
   auto y = UNWRAP_JWK_BIGNUM(
-      kj::mv(keyDataJwk.y), DOMDataError, "Invalid EC key in JSON Web Key; missing \"y\".");
+      kj::mv(keyDataJwk.y), DOMDataError, "Invalid EC key in JSON Web Key: missing \"y\".");
 
   auto group = EC_KEY_get0_group(ecKey);
 
@@ -647,23 +647,23 @@ kj::Own<EVP_PKEY> ellipticJwkReader(
 
   auto point = OSSL_NEW(EC_POINT, group);
   JSG_REQUIRE(1 == EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr),
-      DOMOperationError, "Invalid EC key; public key coordinates \"x\" and \"y\" are invalid",
+      DOMOperationError, "Invalid EC key: public key coordinates \"x\" and \"y\" are invalid",
       tryDescribeOpensslErrors());
   JSG_REQUIRE(1 == EC_KEY_set_public_key(ecKey, point), DOMOperationError,
-      "Invalid EC key; public key coordinates \"x\" and \"y\" are invalid",
+      "Invalid EC key: public key coordinates \"x\" and \"y\" are invalid",
       tryDescribeOpensslErrors());
 
   if (keyDataJwk.d != kj::none) {
     // This is a private key.
 
     auto d = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.d), DOMDataError,
-        "Invalid EC key in JSON Web Key; missing or invalid private key component (\"d\").");
+        "Invalid EC key in JSON Web Key: missing or invalid private key component (\"d\").");
 
     auto bigD = JSG_REQUIRE_NONNULL(toBignum(d), InternalDOMOperationError,
         "Error importing EC key", internalDescribeOpensslErrors());
 
     JSG_REQUIRE(1 == EC_KEY_set_private_key(ecKey, bigD), DOMOperationError,
-        "Invalid EC key; "
+        "Invalid EC key: "
         "private key component \"d\" is invalid",
         tryDescribeOpensslErrors());
   }

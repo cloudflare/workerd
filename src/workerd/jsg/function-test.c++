@@ -62,7 +62,7 @@ KJ_TEST("callbacks") {
   e.expectEval("callCallbackReturningBox(() => {\n"
                "  return 'foo';\n"
                "})",
-      "throws", "TypeError: Callback returned incorrect type; expected 'NumberBox'");
+      "throws", "TypeError: Callback returned incorrect type: expected 'NumberBox'");
 
   e.expectEval("class Frobber {\n"
                "  constructor(s, n) {\n"

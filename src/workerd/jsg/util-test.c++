@@ -150,6 +150,14 @@ KJ_TEST("throw internal error") {
 // ========================================================================================
 
 struct TunneledContext: public ContextGlobalObject {
+  void throwDescription(kj::String description) {
+    kj::throwFatalException(
+        kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::mv(description)));
+  }
+  void throwSerializedException(jsg::Lock& js, v8::Local<v8::Value> value) {
+    auto exception = createTunneledException(js.v8Isolate, value);
+    js.throwException(kj::mv(exception), {.trusted = true});
+  }
   void throwTunneledTypeError() {
     JSG_FAIL_REQUIRE(TypeError, "thrown from throwTunneledTypeError");
   }
@@ -250,6 +258,8 @@ struct TunneledContext: public ContextGlobalObject {
 
   JSG_RESOURCE_TYPE(TunneledContext) {
     JSG_NESTED_TYPE(DOMException);
+    JSG_METHOD(throwDescription);
+    JSG_METHOD(throwSerializedException);
     JSG_METHOD(throwTunneledTypeError);
     JSG_METHOD(throwTunneledTypeErrorWithoutMessage);
     JSG_METHOD(throwTunneledTypeErrorLateColon);
@@ -340,6 +350,67 @@ KJ_TEST("throw tunneled exception") {
     e.expectEval("throwTunneledGarbledDOMException()", "throws",
         "Error: internal error; reference = 0123456789abcdefghijklmn");
   }
+}
+
+KJ_TEST("tunneled exceptions containing diagnostic delimiters are not exposed to JS") {
+  setPredictableModeForTest();
+  Evaluator<TunneledContext, TunneledIsolate> e(v8System);
+  for (auto prefix: {"jsg.Error: ", "jsg.TypeError: ", "jsg.DOMException(OperationError): ",
+         "jsg-internal.Error: ", "expected condition; jsg.Error: ",
+         "remote exception: remote.broken.outputGateBroken; jsg.Error: "}) {
+    auto description = kj::str(prefix, "Replica disconnected from primary.; ownerId = secret; ");
+    KJ_EXPECT(!isTunneledException(description));
+    KJ_EXPECT(extractTunneledExceptionDescription(description) == "Error: internal error");
+    KJ_EXPECT_LOG(ERROR, "ownerId = secret");
+    KJ_EXPECT_LOG(WARNING, "Almost returned an exception with internal details to user");
+    e.expectEval(kj::str("throwDescription('", description, "')"), "throws",
+        "Error: internal error; reference = 0123456789abcdefghijklmn");
+  }
+
+  e.expectEval("throwDescription('expected condition; jsg.Error: safe')", "throws", "Error: safe");
+  e.expectEval("throwDescription('remote.broken.outputGateBroken; jsg.Error: safe')", "throws",
+      "Error: safe");
+  e.expectEval(
+      "throwDescription('jsg.Error: safe;without-space')", "throws", "Error: safe;without-space");
+}
+
+KJ_TEST("serialized exceptions cannot bypass diagnostic delimiter protection") {
+  setPredictableModeForTest();
+  Evaluator<TunneledContext, TunneledIsolate> e(v8System);
+  for (auto message: {"public message; ownerId = secret", "public\\0; ownerId = secret",
+         "internal error; reference = abc; ownerId = secret"}) {
+    KJ_EXPECT_LOG(ERROR, "ownerId = secret");
+    KJ_EXPECT_LOG(WARNING, "Almost returned an exception with internal details to user");
+    e.expectEval(kj::str("try { throwSerializedException(new Error('", message,
+                     "')); } catch (e) { e.message; }"),
+        "string", "internal error; reference = 0123456789abcdefghijklmn");
+  }
+  e.expectEval("throwSerializedException(new TypeError('safe'))", "throws", "TypeError: safe");
+}
+
+KJ_TEST("internal-error references are the only allowed diagnostic delimiter") {
+  Evaluator<TunneledContext, TunneledIsolate> e(v8System);
+  for (auto prefix: {"jsg.Error: ", "jsg.TypeError: ", "jsg.DOMException(OperationError): ",
+         "remote exception: remote.broken.outputGateBroken; jsg.Error: "}) {
+    auto description = kj::str(prefix, "internal error; reference = abc");
+    KJ_EXPECT(isTunneledException(description));
+    e.expectEval(kj::str("try { throwDescription('", description, "'); } catch (e) { e.message; }"),
+        "string", "internal error; reference = abc");
+    KJ_EXPECT(!isTunneledException(kj::str(description, "; ownerId = secret")));
+  }
+  KJ_EXPECT(!isTunneledException("jsg.Error: public; internal error; reference = abc"));
+  KJ_EXPECT(!isTunneledException("jsg.Error: internal error; referenceOther = secret"));
+  KJ_EXPECT(
+      !isTunneledException("jsg.DOMException(internal; details): internal error; reference = abc"));
+  KJ_EXPECT(!hasInternalExceptionDetails("wrapper: internal error; reference = abc"));
+  KJ_EXPECT(
+      hasInternalExceptionDetails("ownerId = secret; wrapper: internal error; reference = abc"));
+  KJ_EXPECT(
+      hasInternalExceptionDetails("wrapper: internal error; reference = abc; ownerId = secret"));
+  e.expectEval("throwDescription('jsg.Error: wrapper: internal error; reference = abc')", "throws",
+      "Error: wrapper: internal error; reference = abc");
+  e.expectEval("throwSerializedException(new Error('internal error; reference = abc'))", "throws",
+      "Error: internal error; reference = abc");
 }
 
 KJ_TEST("runTunnelingExceptions") {
