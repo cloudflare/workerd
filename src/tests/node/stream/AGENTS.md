@@ -131,7 +131,12 @@ The implementation under test is `src/node/internal/streams_readable.js`
   `writer.abort(err)`; `destroy()` → `writer.close()`. A web-side error
   (even with no write issued) or a rejected sink `close()` destroys the
   Writable with that error. `decodeStrings: false` passes strings through;
-  objectMode passes anything by identity.
+  objectMode passes anything by identity. Chunks are handed to the sink by
+  reference: a `Uint8Array` arrives as a Buffer over the caller's memory
+  (views over a `SharedArrayBuffer` or a `WebAssembly.Memory` included),
+  so a sink that transfers the chunk's buffer detaches the caller's view; a
+  view over an already-detached buffer is refused synchronously by the
+  Writable itself, as in Node.
 - `ERR_STREAM_PREMATURE_CLOSE` (web side closing before the Writable ended)
   is unreachable while the adapter holds the writer: only `destroy()` can
   close it, and a destroyed Writable ignores a second destroy.
@@ -153,7 +158,12 @@ The implementation under test is `src/node/internal/streams_readable.js`
   web writable; a web writable error destroys it without cancelling the web
   readable. Consuming it to completion with `for await` destroys it with
   an `AbortError` (its writable half is not finished yet), aborting the web
-  writable.
+  writable. A bare `destroy()` from inside `'data'` while a write is in
+  flight cancels the readable at once and aborts the writable only once
+  the sink has settled that write, whose callback reports success. A
+  second `end()` from inside `'finish'` reports `ERR_STREAM_ALREADY_FINISHED`
+  to its callback; `end(chunk)` there is a write after end (callback and
+  `'error'`, which destroys the duplex), as in Node.
 
 ### Duplex.from(webStream)
 
@@ -286,9 +296,9 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `readable-to-web.js` | delivery; argument validation; byte copy / objectMode identity; derived and explicit strategies with the pause/resume they produce; end, error, premature-close propagation; cancel (with and without reason) and pipeTo-failure destroying the source; a failing user `size()` (ledger #6, nothing uncaught); cancel from an earlier `'data'` listener (quiet); an invalid high-water mark leaving the source untouched (ledger #7); a late `'error'` after end swallowed; destroy inside the pulled `_read()` → `AbortError`; unreadable inputs |
 | `readable-from-web.js` | delivery; errored/erroring sources through async iteration; validation before locking; lock and locked-input errors (ledger #1); pull on demand; end/close ordering; errors with and without a read in flight; a detached-view chunk → `TypeError`, cancel with it; destroy → cancel (reason, `null`, skipped after close); `encoding`, `objectMode`, `highWaterMark`, `signal` |
 | `writable-to-web.js` | delivery; close → end → finish; pipeTo completion; sync and async node errors; `_final` error; `destroy(err)` and `writer.abort()` from inside `_write` (once, in-flight write settled per spec); a non-byte web chunk erroring the stream only; node-initiated end/destroy → `AbortError`; close after a direct end() waiting for a slow `_final` and rejecting with its error (sync and async), nothing uncaught; abort (with and without reason); validation; duck input and unwritable inputs → closed stream (ledger #2); a live duck (non-chaining `on()`, `needDrain` liar, truthy/falsy `write()` returns); an invalid high-water mark leaving the writable untouched (ledger #7); derived strategy; drain-driven backpressure; chunk conversion |
-| `writable-from-web.js` | delivery; web error / sink rejection / close rejection destroying the Writable once with no unhandled rejection; back-to-back and corked writes through `_writev`; failed batch; validation before locking; lock (ledger #1); chunk conversion; `decodeStrings`/`objectMode`; end → close; destroy → abort or close; writes complete on sink acceptance |
+| `writable-from-web.js` | delivery; web error / sink rejection / close rejection destroying the Writable once with no unhandled rejection; back-to-back and corked writes through `_writev`; failed batch; validation before locking; lock (ledger #1); chunk conversion; by-reference hand-off (SAB and WebAssembly.Memory views, a transferring sink detaching the caller's view, a detached view refused); `decodeStrings`/`objectMode`; end → close; destroy → abort or close; writes complete on sink acceptance |
 | `duplex-to-web.js` | pair round trip; validation; destroyed and half Duplexes; non-byte readable (ledger #3); destroy(err) erroring both halves; the whole-Duplex end-of-stream coupling of the halves |
-| `duplex-from-web.js` | a detached-view chunk destroying the duplex (`TypeError`; readable cancelled and writable aborted with it); pair round trip; objectMode strings; corked writes; failed batch; errored readable / writable and later readable error destroying the duplex (and what is left untouched); clean `for await` consumption |
+| `duplex-from-web.js` | a detached-view chunk destroying the duplex (`TypeError`; readable cancelled and writable aborted with it); pair round trip; objectMode strings; corked writes; failed batch; errored readable / writable and later readable error destroying the duplex (and what is left untouched); clean `for await` consumption; destroy from `'data'` with a write in flight; `end()` again from `'finish'` |
 | `duplex-from.js` | `Duplex.from()` over a lone web stream marks the missing side |
 | `gc.js` | forced GCs while only a pending read / `writer.closed` / Duplex.toWeb read+close continuation holds the web side and the node side has pending I/O: all settle |
 | `then-pollution.js` | transparent patched `then`: data intact through the three adapters, patch called; hostile `then` during construction: throw, streams unlocked and reusable (Readable, Writable, Duplex `fromWeb`), also when it registers the handlers before throwing (nothing escapes, under the uncaught guard); `Object.prototype.then` getter consulted, data intact |

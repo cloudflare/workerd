@@ -7,7 +7,7 @@
 
 import { Duplex } from 'node:stream';
 import { Buffer } from 'node:buffer';
-import { strictEqual } from 'node:assert';
+import { strictEqual, deepStrictEqual } from 'node:assert';
 
 function once(emitter, event) {
   return new Promise((resolve) => emitter.once(event, resolve));
@@ -322,6 +322,109 @@ export const fromWebPairIterationToCompletionIsClean = {
       strictEqual(chunks.length, 2);
       strictEqual(duplex.destroyed, true);
       strictEqual(seen.join(','), 'abort:AbortError:ABORT_ERR');
+    });
+  },
+};
+
+// A bare destroy() from inside 'data' while a node write is in flight (the
+// web sink still holding its write promise): the pair's readable is
+// cancelled at once; the writable is aborted only after the in-flight sink
+// write settles (the spec finishes an in-flight write before erroring), and
+// that write's callback reports success; 'close' follows, no 'error'.
+export const fromWebPairDestroyInDataWithWriteInFlight = {
+  async test() {
+    await withRejectionGuard(async () => {
+      const events = [];
+      let releaseSink;
+      const writable = new WritableStream({
+        write() {
+          return new Promise((resolve) => (releaseSink = resolve));
+        },
+        abort(reason) {
+          events.push(['sink abort', reason]);
+        },
+      });
+      let controller;
+      const readable = new ReadableStream({
+        start(c) {
+          controller = c;
+        },
+        cancel(reason) {
+          events.push(['readable cancel', reason]);
+        },
+      });
+      const duplex = Duplex.fromWeb({ readable, writable });
+      duplex.on('error', (err) => events.push(['error', err]));
+      duplex.on('close', () => events.push(['close']));
+      const written = Promise.withResolvers();
+      duplex.write(Buffer.from('in flight'), (err) => {
+        events.push(['write callback', err]);
+        written.resolve();
+      });
+      while (releaseSink === undefined) await scheduler.wait(1);
+      duplex.on('data', () => {
+        events.push(['data']);
+        duplex.destroy();
+      });
+      controller.enqueue(new Uint8Array([1]));
+      await scheduler.wait(10);
+      deepStrictEqual(events, [['data'], ['readable cancel', null]]);
+      strictEqual(duplex.destroyed, true);
+      const closed = once(duplex, 'close');
+      releaseSink();
+      await Promise.all([written.promise, closed]);
+      deepStrictEqual(events, [
+        ['data'],
+        ['readable cancel', null],
+        ['sink abort', null],
+        ['write callback', undefined],
+        ['close'],
+      ]);
+    });
+  },
+};
+
+// end() again from inside 'finish': a bare end(cb) reports
+// ERR_STREAM_ALREADY_FINISHED to its callback and changes nothing; an
+// end(chunk) is a write after end — ERR_STREAM_WRITE_AFTER_END to the
+// callback and as 'error', which destroys the duplex — as in Node.
+export const fromWebPairEndInsideFinish = {
+  async test() {
+    await withRejectionGuard(async () => {
+      const events = [];
+      const writable = new WritableStream({
+        close() {
+          events.push(['sink close']);
+        },
+      });
+      const readable = new ReadableStream({
+        start(c) {
+          c.close();
+        },
+      });
+      const duplex = Duplex.fromWeb({ readable, writable });
+      duplex.on('error', (err) => events.push(['error', err.code]));
+      duplex.on('close', () => events.push(['close']));
+      const closed = once(duplex, 'close');
+      duplex.on('finish', () => {
+        events.push(['finish']);
+        duplex.end((err) => events.push(['end() callback', err.code]));
+        duplex.end('late', (err) =>
+          events.push(['end(chunk) callback', err.code])
+        );
+      });
+      duplex.resume();
+      duplex.end();
+      await closed;
+      await scheduler.wait(5);
+      deepStrictEqual(events, [
+        ['sink close'],
+        ['finish'],
+        ['end() callback', 'ERR_STREAM_ALREADY_FINISHED'],
+        ['error', 'ERR_STREAM_WRITE_AFTER_END'],
+        ['close'],
+        ['end(chunk) callback', 'ERR_STREAM_WRITE_AFTER_END'],
+      ]);
     });
   },
 };
