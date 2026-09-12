@@ -2315,8 +2315,7 @@ kj::LiteralStringConst Fetcher::getRpcTargetKind() {
   return "fetcher"_kjc;
 }
 
-JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
-    jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
+JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(jsg::Lock& js) {
   auto& ioContext = IoContext::current();
 
   kj::Maybe<TraceContext> callSpan;
@@ -2351,8 +2350,6 @@ JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
   ioContext.addTask(worker->customEvent(kj::mv(event))
           .attach(kj::mv(worker), kj::mv(clientWithTracing.traceContext))
           .then([](auto&&) {}, [](kj::Exception&&) {}));
-
-  // (Don't extend `path` because we're the root.)
 
   return {.client = kj::mv(result),
     .callSpanParents = kj::mv(callSpanParents),

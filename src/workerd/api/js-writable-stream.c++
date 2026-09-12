@@ -519,6 +519,10 @@ void JsWritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
       IoContext& ioctx = IoContext::current();
 
+      // Destination setup can fail synchronously. Resolve it before acquiring a writer changes
+      // the source stream.
+      externalHandler->resolveDestinationAndGetSpanParents();
+
       // NOTE: We're counting on writer acquisition to check that the stream is not locked
       // and other common checks. It's important we don't modify the WritableStream before
       // this call. Acquisition goes through the frozen cppExports internals -- NOT the
