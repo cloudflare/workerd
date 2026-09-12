@@ -120,13 +120,27 @@ export function compose(...streams) {
   }
 
   const head = streams[0];
-  const tail = pipeline(streams, onfinished);
+  const last = streams[streams.length - 1];
 
   const writable = !!(
     isWritable(head) ||
     isWritableStream(head) ||
     isTransformStream(head)
   );
+
+  // A composed stream with a writable side must learn when its tail
+  // finishes; for a web tail that takes the Node.js interop hook (see
+  // streams_end_of_stream.ts). Refused before the pipeline starts and before
+  // any lock is taken, so the caller's streams are left as they were.
+  if (writable && isWebStream(last)) {
+    const toRead = isTransformStream(last) ? last.readable : last;
+    if (toRead[kIsClosedPromise] === undefined) {
+      throw new ERR_WEB_STREAM_INTEROP_UNSUPPORTED('compose()');
+    }
+  }
+
+  const tail = pipeline(streams, onfinished);
+
   const readable = !!(
     isReadable(tail) ||
     isReadableStream(tail) ||
@@ -192,12 +206,6 @@ export function compose(...streams) {
     }
 
     const toRead = isTransformStream(tail) ? tail.readable : tail;
-
-    // Observing a web tail needs the Node.js interop hook; without it the
-    // composed stream could never learn that the tail finished.
-    if (isWebStream(toRead) && toRead[kIsClosedPromise] === undefined) {
-      throw new ERR_WEB_STREAM_INTEROP_UNSUPPORTED('compose()');
-    }
 
     eos(toRead, () => {
       if (onfinish) {
