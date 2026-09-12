@@ -2396,6 +2396,29 @@ export function newReadableStreamFromStreamReadable(
     if (controller.desiredSize <= 0) streamReadable.pause();
   }
 
+  // The web stream is constructed before the source is touched: its
+  // constructor rejects an invalid high-water mark, and a throw there must
+  // leave the source as it was, not paused with this adapter's listeners
+  // on it. The first pull() comes no earlier than a later microtask.
+  const stream = new globalThis.ReadableStream(
+    {
+      start(c) {
+        controller = c;
+      },
+
+      pull() {
+        streamReadable.resume();
+      },
+
+      cancel(reason) {
+        wasCanceled = true;
+        destroyer(streamReadable, reason);
+      },
+      type: createTypeBytes ? 'bytes' : undefined,
+    },
+    strategy
+  );
+
   streamReadable.pause();
 
   const cleanup = eos(streamReadable, (error) => {
@@ -2415,24 +2438,6 @@ export function newReadableStreamFromStreamReadable(
 
   streamReadable.on('data', onData);
 
-  const stream = new globalThis.ReadableStream(
-    {
-      start(c) {
-        controller = c;
-      },
-
-      pull() {
-        streamReadable.resume();
-      },
-
-      cancel(reason) {
-        wasCanceled = true;
-        destroyer(streamReadable, reason);
-      },
-      type: createTypeBytes ? 'bytes' : undefined,
-    },
-    strategy
-  );
   adaptedReadableStreams.set(streamReadable, stream);
   return stream;
 }

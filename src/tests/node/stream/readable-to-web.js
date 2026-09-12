@@ -418,3 +418,54 @@ export const toWebCancelFromDataListenerIsQuiet = {
     });
   },
 };
+
+// A source misreporting its readableHighWaterMark (NaN, negative) makes the
+// web stream's construction throw — a RangeError under TypeScript, the C++
+// implementation's TypeError (streams readable ledger #3; ∞ is valid under
+// TypeScript only). The web stream is constructed before the source is
+// touched, so the throw leaves the source as it was: not paused, no
+// listeners, still consumable. A getter that throws surfaces its own error
+// the same way.
+export const toWebInvalidHighWaterMarkLeavesSourceUntouched = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const boom = new Error('hwm boom');
+      const cases = [
+        [NaN, { name: usingTsImpl ? 'RangeError' : 'TypeError' }],
+        [-1, { name: usingTsImpl ? 'RangeError' : 'TypeError' }],
+        [
+          () => {
+            throw boom;
+          },
+          (err) => err === boom,
+        ],
+      ];
+      for (const [value, expected] of cases) {
+        const source = new Readable({ read() {} });
+        Object.defineProperty(source, 'readableHighWaterMark', {
+          get: typeof value === 'function' ? value : () => value,
+        });
+        throws(() => Readable.toWeb(source), expected);
+        strictEqual(source.isPaused(), false);
+        for (const event of ['data', 'end', 'error', 'close']) {
+          strictEqual(source.listenerCount(event), 0, event);
+        }
+        source.push(enc.encode('still fine'));
+        source.push(null);
+        const chunks = [];
+        for await (const chunk of source) chunks.push(dec.decode(chunk));
+        deepStrictEqual(chunks, ['still fine']);
+      }
+
+      const infinite = new Readable({ read() {} });
+      Object.defineProperty(infinite, 'readableHighWaterMark', {
+        get: () => Infinity,
+      });
+      if (usingTsImpl) {
+        strictEqual(Readable.toWeb(infinite) instanceof ReadableStream, true);
+      } else {
+        throws(() => Readable.toWeb(infinite), { name: 'TypeError' });
+      }
+    });
+  },
+};

@@ -1299,6 +1299,43 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
     if (backpressurePromise !== undefined) backpressurePromise.resolve();
   }
 
+  // The web stream is constructed before the writable is touched: its
+  // constructor rejects an invalid high-water mark, and a throw there must
+  // leave the writable as it was, without this adapter's listeners on it.
+  const stream = new globalThis.WritableStream(
+    {
+      start(c) {
+        controller = c;
+      },
+
+      write(chunk) {
+        if (streamWritable.writableNeedDrain || !streamWritable.write(chunk)) {
+          backpressurePromise = Promise.withResolvers();
+          return backpressurePromise.promise.finally(() => {
+            backpressurePromise = undefined;
+          });
+        }
+      },
+
+      abort(reason) {
+        destroyImpl.destroyer(streamWritable, reason);
+      },
+
+      close() {
+        // The node side completes on its own terms — a _final() may still
+        // be running when the caller ended it directly — so close() settles
+        // with its finish or its error (the eos callback below), ending it
+        // only if the caller has not.
+        closed = Promise.withResolvers();
+        if (!isWritableEnded(streamWritable)) {
+          streamWritable.end();
+        }
+        return closed.promise;
+      },
+    },
+    strategy
+  );
+
   const cleanup = eos(streamWritable, (error) => {
     error = handleKnownInternalErrors(error);
 
@@ -1331,39 +1368,6 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
 
   streamWritable.on('drain', onDrain);
 
-  const stream = new globalThis.WritableStream(
-    {
-      start(c) {
-        controller = c;
-      },
-
-      write(chunk) {
-        if (streamWritable.writableNeedDrain || !streamWritable.write(chunk)) {
-          backpressurePromise = Promise.withResolvers();
-          return backpressurePromise.promise.finally(() => {
-            backpressurePromise = undefined;
-          });
-        }
-      },
-
-      abort(reason) {
-        destroyImpl.destroyer(streamWritable, reason);
-      },
-
-      close() {
-        // The node side completes on its own terms — a _final() may still
-        // be running when the caller ended it directly — so close() settles
-        // with its finish or its error (the eos callback above), ending it
-        // only if the caller has not.
-        closed = Promise.withResolvers();
-        if (!isWritableEnded(streamWritable)) {
-          streamWritable.end();
-        }
-        return closed.promise;
-      },
-    },
-    strategy
-  );
   adaptedWritableStreams.set(streamWritable, stream);
   return stream;
 }
