@@ -195,6 +195,12 @@ brand, not a secret. Not represented in RTTI/generated types.
 
 ### Error Handling
 
+Tunneled native exceptions whose message contains `; ` are treated as internal errors, including
+when a serialized JavaScript error is attached. One `internal error; reference = ` fragment is
+allowed anywhere in the message, but any `; ` before or after it is rejected. Transport and assertion
+prefixes are removed before this check. Internal diagnostics remain in native logs, not in the
+JavaScript error message.
+
 | Macro                                      | Description                                   |
 | ------------------------------------------ | --------------------------------------------- |
 | `JSG_REQUIRE(cond, type, msg...)`          | Throw JS error if condition false             |

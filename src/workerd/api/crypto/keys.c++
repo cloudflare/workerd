@@ -406,7 +406,7 @@ AsymmetricKeyData importAsymmetricForWebCrypto(jsg::Lock& js,
         for (const auto& op: ops) {
           JSG_REQUIRE(normalizedName != "ECDH" && normalizedName != "X25519", DOMDataError,
               "A JSON Web Key should have either a Public Key Use parameter (\"use\") or a Key "
-              "Operations parameter (\"key_ops\"); otherwise, the parameters must be consistent "
+              "Operations parameter (\"key_ops\"). Otherwise, the parameters must be consistent "
               "with each other. For public ",
               normalizedName,
               " keys, there are no valid usages,"
@@ -416,7 +416,7 @@ AsymmetricKeyData importAsymmetricForWebCrypto(jsg::Lock& js,
           //   using the Web Crypto API...
           JSG_REQUIRE(op == op0 || op == op1, DOMDataError,
               "A JSON Web Key should have either a Public Key Use parameter (\"use\") or a Key "
-              "Operations parameter (\"key_ops\"); otherwise, the parameters must be consistent "
+              "Operations parameter (\"key_ops\"). Otherwise, the parameters must be consistent "
               "with each other. A Public Key Use for ",
               normalizedName,
               " would allow a Key "
