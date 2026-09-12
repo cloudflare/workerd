@@ -2498,15 +2498,28 @@ export function newStreamReadableFromReadableStream(
     },
   });
 
-  reader.closed.then(
-    () => {
-      closed = true;
-    },
-    (error) => {
-      closed = true;
-      destroy.call(readable, error);
-    }
-  );
+  try {
+    reader.closed.then(
+      () => {
+        closed = true;
+      },
+      (error) => {
+        closed = true;
+        destroy.call(readable, error);
+      }
+    );
+  } catch (err) {
+    // A Promise.prototype.then that throws (the adapter calls the live one):
+    // the caller gets the throw, not a stream left locked for a Readable
+    // nobody will have. That Readable is destroyed quietly first (the web
+    // stream, marked closed here, is not cancelled), so that the release —
+    // which rejects the reader's closed promise, possibly into a handler
+    // the throwing then did register — has nothing left to destroy.
+    closed = true;
+    readable.destroy();
+    reader.releaseLock();
+    throw err;
+  }
 
   return readable;
 }

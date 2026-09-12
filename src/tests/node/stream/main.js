@@ -198,3 +198,10 @@ export {
 } from 'compose-web';
 
 export { duplexFromWebStreamHalves } from 'duplex-from';
+
+export {
+  patchedThenPassthroughKeepsData,
+  hostileThenDuringFromWebLeavesStreamUnlocked,
+  hostileThenAfterRegisteringLeavesNothingBehind,
+  objectPrototypeThenGetterIsConsultedNotObeyed,
+} from 'then-pollution';

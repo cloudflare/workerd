@@ -5,6 +5,7 @@ using Workerd = import "/workerd/workerd.capnp";
 const modules :List(Workerd.Worker.Module) = [
   (name = "main", esModule = embed "main.js"),
   (name = "which-impl", esModule = embed "which-impl.js"),
+  (name = "helpers", esModule = embed "helpers.js"),
   (name = "api-surface", esModule = embed "api-surface.js"),
   (name = "readable-to-web", esModule = embed "readable-to-web.js"),
   (name = "readable-from-web", esModule = embed "readable-from-web.js"),
@@ -19,4 +20,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "finished-and-abort", esModule = embed "finished-and-abort.js"),
   (name = "compose-web", esModule = embed "compose-web.js"),
   (name = "duplex-from", esModule = embed "duplex-from.js"),
+  (name = "then-pollution", esModule = embed "then-pollution.js"),
 ];
