@@ -550,3 +550,45 @@ export const promisesPipelineSignalAbortsPendingWebRead = {
     deepStrictEqual(events, [['error', failure], ['close']]);
   },
 };
+
+// A web source failing while the pump waits on the node destination's
+// backpressure (a write in flight that never completes, another buffered):
+// the source's failure is observed on its own, as a web destination's is,
+// so the pipeline fails with it at once — the destination is destroyed with
+// the error, its stuck write never completed — rather than at the pump's
+// next read, which a destination that never drains would never make.
+export const pipelineWebSourceErrorUnderNodeBackpressure = {
+  async test() {
+    let controller;
+    const source = new ReadableStream({
+      start(c) {
+        controller = c;
+      },
+    });
+    const events = [];
+    const dest = new Writable({
+      highWaterMark: 1,
+      write(chunk, encoding, callback) {
+        events.push(['write', chunk.length]);
+        // Never calls back: the destination is stuck.
+      },
+    });
+    dest.on('error', (err) => events.push(['error', err]));
+    dest.on('close', () => events.push(['close']));
+    const done = new Promise((resolve) =>
+      pipeline(source, dest, (err) => resolve(err))
+    );
+    controller.enqueue(new Uint8Array(4));
+    controller.enqueue(new Uint8Array(4));
+    while (!dest.writableNeedDrain) await scheduler.wait(1);
+    const boom = new Error('source boom');
+    controller.error(boom);
+    const outcome = await Promise.race([
+      done,
+      scheduler.wait(500).then(() => 'still pending'),
+    ]);
+    strictEqual(outcome, boom);
+    strictEqual(dest.destroyed, true);
+    deepStrictEqual(events, [['write', 4], ['error', boom], ['close']]);
+  },
+};
