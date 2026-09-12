@@ -2391,6 +2391,96 @@ KJ_TEST("Server: configuring a DO namespace with no class export is not an error
     Internal Server Error)"_blockquote);
 }
 
+KJ_TEST("Server: named images and directory snapshots are not startup sources") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2026-08-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  fetch(request, env) {
+                `    return env.ns.get(env.ns.idFromName("test")).fetch(request);
+                `  }
+                `}
+                `export class NamedImageContainer extends DurableObject {
+                `  async fetch() {
+                `    const before = Number(await (await this.env.dockerCheck.fetch(
+                `        "http://docker/check")).text());
+                `    this.ctx.container.start({
+                `      directorySnapshots: [{
+                `        snapshot: {id: "unused", size: 0, dir: "/data"},
+                `      }],
+                `    });
+                `    try {
+                `      await this.ctx.container.monitor();
+                `      return new Response("no error");
+                `    } catch (error) {
+                `      const response = await this.env.dockerCheck.fetch("http://docker/check");
+                `      const requests = Number(await response.text()) - before;
+                `      return new Response(`${error.message}; Docker requests: ${requests}`);
+                `    }
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            (name = "ns", durableObjectNamespace = "NamedImageContainer"),
+            (name = "dockerCheck", service = "docker"),
+          ],
+          durableObjectNamespaces = [
+            ( className = "NamedImageContainer",
+              uniqueKey = "named-image-container",
+              container = (
+                images = [(name = "app", image = "registry.example.com/app:latest")],
+              ),
+            ),
+          ],
+          durableObjectStorage = (inMemory = void),
+          containerEngine = (localDocker = (
+            socketPath = "docker-addr",
+            containerEgressInterceptorImage = "unused",
+          )),
+        )
+      ),
+      ( name = "docker",
+        worker = (
+          compatibilityDate = "2026-08-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `let requests = 0;
+                `export default {
+                `  fetch(request) {
+                `    const path = new URL(request.url).pathname;
+                `    if (path === "/check") {
+                `      return new Response(String(requests));
+                `    }
+                `    // The process-wide stale-volume scan is not part of container startup.
+                `    if (path !== "/volumes") ++requests;
+                `    return new Response(null, {status: 404});
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+      ( name = "docker", address = "docker-addr", service = "docker" ),
+    ],
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "Container failed to start; Docker requests: 0");
+}
+
 KJ_TEST("Server: call queue handler on service binding") {
   TestServer test(R"((
     services = [

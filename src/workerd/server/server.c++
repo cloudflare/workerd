@@ -1323,8 +1323,10 @@ class Server::ActorNamespace final {
       kj::Maybe<rpc::Container::Client> container = kj::none;
       jsg::Dict<kj::String> containerImages;
       KJ_IF_SOME(config, containerOptions) {
-        KJ_ASSERT(config.hasImageName(), "Image name is required");
-        auto imageName = config.getImageName();
+        kj::Maybe<kj::StringPtr> imageName = kj::none;
+        if (config.hasImageName() && config.getImageName().size() > 0) {
+          imageName = config.getImageName();
+        }
         containerImages.fields = KJ_MAP(image, config.getImages()) {
           return jsg::Dict<kj::String>::Field{
             .name = kj::str(image.getName()),
@@ -1423,8 +1425,9 @@ class Server::ActorNamespace final {
     })->addRef();
   }
 
-  kj::Own<ContainerClient> getContainerClient(
-      kj::StringPtr containerId, kj::StringPtr imageName, ContainerPrivileges privileges) {
+  kj::Own<ContainerClient> getContainerClient(kj::StringPtr containerId,
+      kj::Maybe<kj::StringPtr> imageName,
+      ContainerPrivileges privileges) {
     KJ_IF_SOME(existingClient, containerClients.find(containerId)) {
       return existingClient->addRef();
     }
@@ -1479,7 +1482,8 @@ class Server::ActorNamespace final {
     };
 
     auto client = kj::refcounted<ContainerClient>(byteStreamFactory, timer, dockerNetwork,
-        kj::str(dockerPathRef), kj::str(containerId), kj::str(imageName),
+        kj::str(dockerPathRef), kj::str(containerId),
+        imageName.map([](kj::StringPtr image) { return kj::str(image); }),
         kj::str(KJ_ASSERT_NONNULL(containerEgressInterceptorImage,
             "containerEgressInterceptorImage must be configured for containers.")),
         waitUntilTasks, kj::mv(previousCleanup), kj::mv(cleanupCallback), channelTokenHandler,

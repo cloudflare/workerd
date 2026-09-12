@@ -40,6 +40,7 @@ struct CapturedInstance {
   bool isCustom = false;
   kj::String named;
   kj::String image;
+  kj::String containerSnapshotId;
   double vcpu = 0;
   uint64_t memoryMib = 0;
   uint64_t diskMb = 0;
@@ -60,6 +61,8 @@ class MockContainerServer final: public rpc::Container::Server {
     auto source = params.getSource();
     if (source.which() == rpc::Container::StartParams::Source::IMAGE) {
       captured.image = kj::str(source.getImage());
+    } else if (source.which() == rpc::Container::StartParams::Source::CONTAINER_SNAPSHOT_ID) {
+      captured.containerSnapshotId = kj::str(source.getContainerSnapshotId());
     }
     switch (instance.which()) {
       case rpc::Container::StartInstance::NAMED:
@@ -783,6 +786,26 @@ KJ_TEST("Container::start forwards an image") {
     return kj::mv(promise)
         .then([](CapturedInstance captured) {
       KJ_EXPECT(captured.image == "registry.example.com/image:tag");
+    }).attach(kj::mv(container));
+  });
+}
+
+KJ_TEST("Container::start forwards a container snapshot") {
+  auto fixture = makeFixture();
+  auto paf = kj::newPromiseAndFulfiller<CapturedInstance>();
+  auto promise = kj::mv(paf.promise);
+
+  fixture.runInIoContext([promise = kj::mv(promise), fulfiller = kj::mv(paf.fulfiller)](
+                             const TestFixture::Environment& env) mutable {
+    auto container = kj::rc<Container>(
+        rpc::Container::Client(kj::heap<MockContainerServer>(kj::mv(fulfiller))), false);
+    container->start(env.js,
+        Container::StartupOptions{
+          .containerSnapshot = Container::SnapshotRestoreParams{.id = kj::str("snapshot-id")},
+        });
+    return kj::mv(promise)
+        .then([](CapturedInstance captured) {
+      KJ_EXPECT(captured.containerSnapshotId == "snapshot-id");
     }).attach(kj::mv(container));
   });
 }

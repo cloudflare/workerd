@@ -57,8 +57,6 @@ constexpr kj::StringPtr SNAPSHOT_VOLUME_PREFIX = "workerd-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_CLONE_VOLUME_PREFIX = "workerd-snap-clone-"_kj;
 constexpr kj::StringPtr CONTAINER_SNAPSHOT_IMAGE_PREFIX = "workerd-container-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_VOLUME_CREATED_AT_LABEL = "dev.workerd.snapshot-created-at"_kj;
-constexpr size_t MAX_SNAPSHOT_IMAGE_ANCESTRY_DEPTH = 128;
-
 constexpr auto SNAPSHOT_STALE_AGE = 30 * kj::DAYS;
 
 // Maximum size of a snapshot tar archive held in memory during snapshot create/restore.
@@ -1034,7 +1032,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::Network& network,
     kj::String dockerPath,
     kj::String containerName,
-    kj::String imageName,
+    kj::Maybe<kj::String> imageName,
     kj::String containerEgressInterceptorImage,
     kj::TaskSet& waitUntilTasks,
     kj::Promise<void> pendingCleanup,
@@ -2221,8 +2219,7 @@ kj::Promise<void> ContainerClient::commitContainer(kj::StringPtr imageRef) {
       "': ", response.statusCode, " ", response.body);
 }
 
-kj::Promise<ContainerClient::ImageInspectResponse> ContainerClient::inspectImage(
-    kj::StringPtr imageRef) {
+kj::Promise<uint64_t> ContainerClient::inspectImageSize(kj::StringPtr imageRef) {
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
       kj::str("/images/", kj::encodeUriComponent(imageRef), "/json"));
   JSG_REQUIRE(response.statusCode == 200, Error, "Failed to inspect Docker image '", imageRef,
@@ -2230,7 +2227,7 @@ kj::Promise<ContainerClient::ImageInspectResponse> ContainerClient::inspectImage
 
   auto message = decodeJsonResponse<docker_api::Docker::ImageInspectResponse>(response.body);
   auto root = message->getRoot<docker_api::Docker::ImageInspectResponse>();
-  co_return ImageInspectResponse{kj::str(root.getId()), root.getSize(), kj::str(root.getParent())};
+  co_return root.getSize();
 }
 
 kj::Promise<void> ContainerClient::deleteImage(kj::String imageRef) {
@@ -2246,7 +2243,9 @@ kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
-  jsonRoot.setImage(imageName);
+  // This helper only provides filesystem access to snapshot volumes, so it uses the infrastructure
+  // sidecar image.
+  jsonRoot.setImage(containerEgressInterceptorImage);
 
   auto hostConfig = jsonRoot.initHostConfig();
   auto binds = hostConfig.initBinds(1);
@@ -2447,6 +2446,34 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
     environment = params.getEnvironmentVariables();
   }
 
+  kj::String snapshotImageRef;
+  kj::Maybe<kj::StringPtr> effectiveImage =
+      imageName.map([](kj::String& image) -> kj::StringPtr { return image; });
+  auto source = params.getSource();
+  switch (source.which()) {
+    case rpc::Container::StartParams::Source::IMAGE:
+      JSG_REQUIRE(
+          source.getImage().size() > 0, Error, "Container image reference cannot be empty.");
+      effectiveImage = source.getImage();
+      break;
+    case rpc::Container::StartParams::Source::CONTAINER_SNAPSHOT_ID: {
+      if (!source.hasContainerSnapshotId()) break;
+
+      auto snapshotRef = source.getContainerSnapshotId();
+      JSG_REQUIRE(snapshotRef.size() > 0, Error, "Container snapshot ID cannot be empty.");
+
+      auto snapshotId = parseSnapshotId(snapshotRef);
+      snapshotImageRef = kj::str(CONTAINER_SNAPSHOT_IMAGE_PREFIX, snapshotId);
+      // Snapshot existence is validated before sidecar and directory-volume setup.
+      co_await inspectImageSize(snapshotImageRef);
+      effectiveImage = snapshotImageRef;
+      break;
+    }
+  }
+
+  auto image = JSG_REQUIRE_NONNULL(
+      effectiveImage, Error, "Container.start() requires an image or container snapshot.");
+
   internetEnabled = params.getEnableInternet();
 
   labels.clear();
@@ -2455,33 +2482,6 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
     labels.reserve(lbls.size());
     for (auto i: kj::zeroTo(lbls.size())) {
       labels.insert(kj::str(lbls[i].getName()), kj::str(lbls[i].getValue()));
-    }
-  }
-
-  kj::String snapshotImageRef;
-  kj::StringPtr effectiveImage = imageName;
-  auto source = params.getSource();
-  switch (source.which()) {
-    case rpc::Container::StartParams::Source::IMAGE:
-      effectiveImage = source.getImage();
-      break;
-    case rpc::Container::StartParams::Source::CONTAINER_SNAPSHOT_ID: {
-      if (!source.hasContainerSnapshotId()) break;
-
-      auto selectedImage = co_await inspectImage(effectiveImage);
-      auto snapshotId = parseSnapshotId(source.getContainerSnapshotId());
-      snapshotImageRef = kj::str(CONTAINER_SNAPSHOT_IMAGE_PREFIX, snapshotId);
-      auto snapshotImage = co_await inspectImage(snapshotImageRef);
-      for (size_t depth = 0;
-           snapshotImage.id != selectedImage.id && snapshotImage.parent.size() > 0; ++depth) {
-        JSG_REQUIRE(depth < MAX_SNAPSHOT_IMAGE_ANCESTRY_DEPTH, Error,
-            "Container snapshot image ancestry is too deep");
-        snapshotImage = co_await inspectImage(snapshotImage.parent);
-      }
-      JSG_REQUIRE(snapshotImage.id == selectedImage.id, Error,
-          "Container snapshot does not match the requested image");
-      effectiveImage = snapshotImageRef;
-      break;
     }
   }
 
@@ -2534,7 +2534,7 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   }
 
   caCertInjected.store(false, std::memory_order_release);
-  co_await createContainer(effectiveImage, entrypoint, environment, restoreMounts.asPtr(), params);
+  co_await createContainer(image, entrypoint, environment, restoreMounts.asPtr(), params);
 
   for (auto& mapping: egressState->mappings) {
     if (mapping.protocol == EgressProtocol::HTTPS) {
@@ -2797,11 +2797,11 @@ kj::Promise<void> ContainerClient::snapshotContainer(SnapshotContainerContext co
   co_await commitContainer(imageRef);
   imageCommitted = true;
 
-  auto image = co_await inspectImage(imageRef);
+  auto imageSize = co_await inspectImageSize(imageRef);
 
   auto result = context.getResults().initSnapshot();
   result.setId(snapshotId);
-  result.setSize(image.size);
+  result.setSize(imageSize);
   if (params.hasName() && params.getName().size() > 0) {
     result.setName(params.getName());
   }
