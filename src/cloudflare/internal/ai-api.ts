@@ -111,6 +111,27 @@ function isFormData(obj: unknown): obj is FormData {
 }
 
 /**
+ * Check if a model ID should be handled by AI Gateway
+ * AI Gateway models follow the pattern "provider/model-name" (e.g., "xai/grok-voice")
+ * Workers AI models start with "@cf/" or "@hf/" (e.g., "@cf/meta/llama-3.1-8b-instruct")
+ */
+function isHandledByAiGateway(modelId: string): boolean {
+  // Workers AI models
+  if (modelId.startsWith('@cf/') || modelId.startsWith('@hf/')) {
+    return false;
+  }
+
+  // Skip processing models (e.g., "skipProcessing:...")
+  if (modelId.includes(':')) {
+    return false;
+  }
+
+  // AI Gateway models follow "provider/model-name" pattern
+  const HANDLED_BY_AIG = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
+  return HANDLED_BY_AIG.test(modelId);
+}
+
+/**
  * Find keys in inputs that have a ReadableStream
  * */
 function findReadableStreamKeys(
@@ -286,8 +307,22 @@ export class Ai extends wrappedBinding.WrappedBinding {
     }
 
     const aiEndpoint = new URL(`${this.#endpointURL}/run`);
-    aiEndpoint.searchParams.set('version', '3');
-    aiEndpoint.searchParams.set('body', body);
+    
+    // AI Gateway models expect inputs as query params, not version/body
+    if (isHandledByAiGateway(model) || options.gateway) {
+      aiEndpoint.searchParams.set('model', model);
+      
+      // Add all inputs as query parameters
+      for (const [key, value] of Object.entries(inputs)) {
+        if (value !== null && value !== undefined) {
+          aiEndpoint.searchParams.set(key, String(value));
+        }
+      }
+    } else {
+      // Workers AI models use version and body query params
+      aiEndpoint.searchParams.set('version', '3');
+      aiEndpoint.searchParams.set('body', body);
+    }
 
     return await this.#fetcher.fetch(aiEndpoint, fetchOptions);
   }
