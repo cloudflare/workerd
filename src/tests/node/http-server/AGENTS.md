@@ -113,7 +113,13 @@ Tests run sequentially, one server (`withServer`) at a time.
   socket's pending writes are in Node.
 - A request listener that throws synchronously destroys the response with
   the error ('error', 'close') and the fetch rejects with it — also after
-  `writeHead()` and a `write()`, whose Response is then discarded.
+  `writeHead()` and a `write()`, whose Response is then discarded. An
+  async listener whose promise rejects ends the same way (the server
+  captures its listeners' rejections; Node's process would die of the
+  unhandled rejection, a Worker cannot): before any header the fetch
+  rejects with the error, after a partial body the Response's body errors
+  with it. A rejection from another event's listener is re-raised
+  uncaught.
 - The body stream's `cancel(reason)` — a client abandoning the response —
   destroys the response with `reason`: 'error', 'close', later writes fail
   with `ERR_STREAM_DESTROYED`.
@@ -150,7 +156,7 @@ lifecycle" — and the pure-streams behavior belongs to
 | `response-body.js` | implicit headers and chunk types; streaming before `end()`; large and many writes; Content-Length capping; 204/304; HEAD (`_hasBody`, dropped writes, null body); `rejectNonStandardBodyWrites`; cork/uncork; backpressure signaling and 'drain' parity; acceptance after headers with `highWaterMark`; web source pipelined in; 'finish' then 'close' with `closed`; write after end via callback only |
 | `piping.js` | 1 MiB into a 16 KiB slow sink: bounded buffer, pauses/resumes, all bytes; `unpipe()` after the first chunk ('pipe'/'unpipe' on the destination, delivery stops, source paused, rest to a 'data' listener, destination not ended); erroring destination unpiped ('unpipe' before its 'error', one write only, source paused); source error not forwarded (destination stays piped, open, unerrored) |
 | `buffer-lifecycle.js` | fill/write/refill after the callback (intact, not detached, both payloads received); chunk given to `end()` and its parent allocation intact; mutation after the callback not sent; SAB and WebAssembly.Memory views written, 'finish' only; Content-Length-trimmed writes leave their buffers intact; empty and detached views accepted and skipped |
-| `response-lifecycle.js` | `destroy(err)` before headers rejects the fetch with it; bare destroy before headers → 'Premature close'; `destroy(err)` after headers errors the body, 'error' then 'close'; bare destroy after headers → premature close, 'close' only; client cancel → destroyed with the reason, `ERR_STREAM_DESTROYED` on later writes; a listener throwing before headers / after a partial body → fetch rejects with it, nothing else escapes |
+| `response-lifecycle.js` | `destroy(err)` before headers rejects the fetch with it; bare destroy before headers → 'Premature close'; `destroy(err)` after headers errors the body, 'error' then 'close'; bare destroy after headers → premature close, 'close' only; client cancel → destroyed with the reason, `ERR_STREAM_DESTROYED` on later writes; a listener throwing before headers / after a partial body → fetch rejects with it, nothing else escapes; an async listener rejecting before headers / after a partial body → destroyed with the error, fetch or body failing with it |
 | `harness.js`, `which-impl.js` | shared machinery (`collectUncaught` gathers what escapes the isolate during a test) |
 
 ## Legacy (unflagged) behaviors
