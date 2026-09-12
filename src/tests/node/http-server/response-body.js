@@ -394,3 +394,34 @@ export const writeAfterEndFails = {
     );
   },
 };
+
+// A Content-Length the handler sets is taken at parseInt's word, and is
+// what the client receives: a non-numeric one leaves the body uncapped, a
+// zero or negative one drops every chunk, a fraction or padded number caps
+// at its integer part.
+export const contentLengthLies = {
+  async test(ctrl, env) {
+    const cases = {
+      '/abc': ['abc', 'abc', '0123456789'],
+      '/zero': ['0', '0', ''],
+      '/negative': ['-5', '-5', ''],
+      '/fraction': ['5.9', '5.9', '01234'],
+      '/padded': [' 4 ', '4', '0123'],
+    };
+    await withServer(
+      (req, res) => {
+        res.writeHead(200, { 'Content-Length': cases[req.url][0] });
+        res.write('0123456789');
+        res.end();
+      },
+      async () => {
+        for (const [path, [, header, body]] of Object.entries(cases)) {
+          const res = await env.SERVICE.fetch(`http://x${path}`);
+          strictEqual(res.status, 200);
+          strictEqual(res.headers.get('content-length'), header);
+          strictEqual(await res.text(), body);
+        }
+      }
+    );
+  },
+};

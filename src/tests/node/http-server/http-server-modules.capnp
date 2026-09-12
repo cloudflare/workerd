@@ -12,4 +12,7 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "response-lifecycle", esModule = embed "response-lifecycle.js"),
   (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
   (name = "piping", esModule = embed "piping.js"),
+  (name = "request-body-failures", esModule = embed "request-body-failures.js"),
+  (name = "reentrancy", esModule = embed "reentrancy.js"),
+  (name = "then-pollution", esModule = embed "then-pollution.js"),
 ];

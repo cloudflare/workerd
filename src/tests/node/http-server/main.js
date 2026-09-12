@@ -51,6 +51,7 @@ export {
   webSourcePipelinedIntoResponse,
   finishThenClose,
   writeAfterEndFails,
+  contentLengthLies,
 } from 'response-body';
 
 export {
@@ -79,3 +80,13 @@ export {
   erroringDestinationIsUnpiped,
   sourceErrorIsNotForwarded,
 } from 'piping';
+
+export {
+  bodyStreamErrorAbortsMessage,
+  bodyStreamErrorWhilePausedAbortsMessage,
+  detachedBodyChunkAbortsMessage,
+} from 'request-body-failures';
+
+export { destroyInsideFinish, pauseResumeInsideData } from 'reentrancy';
+
+export { patchedThenPassthroughKeepsData } from 'then-pollution';
