@@ -196,3 +196,57 @@ export const handlerThrowAfterPartialBodyRejectsFetch = {
     );
   },
 };
+
+// An async request listener whose promise rejects ends the response as a
+// synchronous throw does — a Worker cannot die of an unhandled rejection as
+// Node's process would, and the client would otherwise wait for a response
+// that never comes. Before any header: the response is destroyed with the
+// error ('error', 'close') and the fetch rejects with it. After a partial
+// body: the Response already handed over has its body error with it.
+export const asyncHandlerRejectionDestroysResponse = {
+  async test(ctrl, env) {
+    for (const partialBody of [false, true]) {
+      const events = [];
+      const boom = new Error(`async boom ${partialBody ? 'after' : 'before'}`);
+      const outcome = (promise) =>
+        Promise.race([
+          promise.then(
+            () => 'resolved',
+            (err) => err
+          ),
+          scheduler.wait(1000).then(() => 'still pending'),
+        ]);
+      const leaked = await collectUncaught(() =>
+        withServer(
+          async (req, res) => {
+            res.on('error', (err) => events.push(['error', err]));
+            res.on('close', () => events.push(['close']));
+            if (partialBody) {
+              res.writeHead(200);
+              res.write('partial');
+            }
+            await scheduler.wait(5);
+            throw boom;
+          },
+          async () => {
+            if (partialBody) {
+              const res = await env.SERVICE.fetch('http://x/');
+              strictEqual(res.status, 200);
+              strictEqual((await outcome(res.text())).message, boom.message);
+            } else {
+              strictEqual(
+                (await outcome(env.SERVICE.fetch('http://x/'))).message,
+                boom.message
+              );
+            }
+          }
+        )
+      );
+      deepStrictEqual(events, [['error', boom], ['close']]);
+      deepStrictEqual(
+        leaked.filter((err) => err !== boom),
+        []
+      );
+    }
+  },
+};

@@ -139,7 +139,9 @@ export class Server
     if (!enableNodejsHttpServerModules) {
       throw new ERR_METHOD_NOT_IMPLEMENTED('Server');
     }
-    super();
+    // Async listeners' rejections are captured (see the rejection hook
+    // below): a 'request' listener's failure must reach its response.
+    super({ captureRejections: true });
 
     if (options != null) {
       // @ts-expect-error TS2345 TODO(soon): Find a better way to handle this type mismatch.
@@ -214,6 +216,26 @@ export class Server
       this.once('timeout', callback);
     }
     return this;
+  }
+
+  // An async 'request' listener whose promise rejects: the response is torn
+  // down with the error, as a listener throwing synchronously tears it down
+  // (see #onRequest) — a Worker cannot die of an unhandled rejection as
+  // Node's process would, and the client would otherwise wait for a
+  // response that never comes. Another event's listener rejecting is
+  // re-raised, uncaught, as it would have gone unhandled.
+  override [EventEmitter.captureRejectionSymbol](
+    err: unknown,
+    event: string | symbol,
+    ...args: unknown[]
+  ): void {
+    if (event === 'request') {
+      (args[1] as ServerResponse).destroy(err);
+      return;
+    }
+    queueMicrotask(() => {
+      throw err;
+    });
   }
 
   async #onRequest(

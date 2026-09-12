@@ -61,6 +61,7 @@ export {
   clientCancelDestroysResponse,
   handlerThrowBeforeHeadersRejectsFetch,
   handlerThrowAfterPartialBodyRejectsFetch,
+  asyncHandlerRejectionDestroysResponse,
 } from 'response-lifecycle';
 
 export {
