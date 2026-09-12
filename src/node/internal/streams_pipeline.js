@@ -173,8 +173,12 @@ async function pumpToNode(iterable, writable, finish, { end }) {
 // destination failed) cancels the stream, as the stream's own iterator
 // would. Written out rather than as an async generator: yield would await a
 // promise-valued chunk, which must reach the destination as it is, and a
-// pending one could not be interrupted.
-function readWeb(readable, destroys) {
+// pending one could not be interrupted. The source's own failure is
+// reported through onError as soon as it happens, as eos() reports a node
+// source's: a pump waiting on its destination's backpressure would
+// otherwise learn of it only at its next read, which a destination that
+// never drains would never let it make.
+function readWeb(readable, destroys, onError) {
   let reader;
   let error;
   let released = false;
@@ -204,7 +208,17 @@ function readWeb(readable, destroys) {
     },
     async next() {
       try {
-        reader ??= readable.getReader();
+        if (reader === undefined) {
+          reader = readable.getReader();
+          // The pipeline records the error and tears its stages down,
+          // which wakes a pump waiting on the destination; a read in
+          // flight rejects with the same error on its own.
+          reader.closed.then(undefined, (err) => {
+            if (!released) {
+              onError(err);
+            }
+          });
+        }
         if (error === undefined) {
           const result = await reader.read();
           if (error === undefined && !result.done) {
@@ -461,7 +475,12 @@ export function pipelineImpl(streams, callback, opts) {
         } else if (isReadableStream(ret) || isTransformStream(ret)) {
           const toRead = ret.readable || ret;
           finishCount++;
-          pumpToNode(readWeb(toRead, destroys), pt, finish, { end });
+          pumpToNode(
+            readWeb(toRead, destroys, finishOnlyHandleError),
+            pt,
+            finish,
+            { end }
+          );
         } else {
           throw new ERR_INVALID_RETURN_VALUE(
             'AsyncIterable or Promise',
@@ -490,7 +509,12 @@ export function pipelineImpl(streams, callback, opts) {
       } else if (isTransformStream(ret) || isReadableStream(ret)) {
         const toRead = ret.readable || ret;
         finishCount++;
-        pumpToNode(readWeb(toRead, destroys), stream, finish, { end });
+        pumpToNode(
+          readWeb(toRead, destroys, finishOnlyHandleError),
+          stream,
+          finish,
+          { end }
+        );
       } else if (isIterable(ret)) {
         finishCount++;
         pumpToNode(ret, stream, finish, { end });
@@ -515,13 +539,23 @@ export function pipelineImpl(streams, callback, opts) {
         pumpToWeb(makeAsyncIterable(ret), stream, finish, pumpOptions);
       } else if (isReadableStream(ret)) {
         finishCount++;
-        pumpToWeb(readWeb(ret, destroys), stream, finish, pumpOptions);
+        pumpToWeb(
+          readWeb(ret, destroys, finishOnlyHandleError),
+          stream,
+          finish,
+          pumpOptions
+        );
       } else if (isIterable(ret)) {
         finishCount++;
         pumpToWeb(ret, stream, finish, pumpOptions);
       } else if (isTransformStream(ret)) {
         finishCount++;
-        pumpToWeb(readWeb(ret.readable, destroys), stream, finish, pumpOptions);
+        pumpToWeb(
+          readWeb(ret.readable, destroys, finishOnlyHandleError),
+          stream,
+          finish,
+          pumpOptions
+        );
       } else {
         throw new ERR_INVALID_ARG_TYPE(
           'val',

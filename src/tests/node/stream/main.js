@@ -151,6 +151,7 @@ export {
   promisesPipelineEndFalseLeavesWebWritableOpen,
   promisesPipelineSignalAbortsWebWritable,
   promisesPipelineSignalAbortsPendingWebRead,
+  pipelineWebSourceErrorUnderNodeBackpressure,
 } from 'pipeline-web';
 
 export { duplexFromWebStreamHalves } from 'duplex-from';
