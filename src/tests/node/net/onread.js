@@ -10,7 +10,7 @@
 // each callback sees a Buffer over it whose contents are valid until the
 // next read.
 
-import { strictEqual, ok } from 'node:assert';
+import { strictEqual, deepStrictEqual, ok, throws } from 'node:assert';
 import { Buffer } from 'node:buffer';
 import { echo, once, echoSegments } from 'servers';
 
@@ -282,6 +282,42 @@ export const sharedOnreadBufferDestroysSocket = {
     const err = await errored;
     await closed;
     strictEqual(err.name, 'TypeError');
+    strictEqual(socket.destroyed, true);
+  },
+};
+
+// A fixed buffer over a resizable ArrayBuffer: the BYOB read transfers it
+// like any other (the caller's buffer is detached, so resizing it throws),
+// and the transferred backing store the loop continues over — the one the
+// callback's Buffer sits on, until the next read transfers it again —
+// keeps the resizability. The loop's view is fixed to the caller's range:
+// shrinking the current store below it from the callback leaves the next
+// read an empty view, which fails as ENOBUFS.
+export const resizableOnreadBufferIsTransferredResizable = {
+  async test(ctrl, env) {
+    const original = new ArrayBuffer(8, { maxByteLength: 64 });
+    const fills = [];
+    const socket = echo(env, {
+      onread: {
+        buffer: new Uint8Array(original),
+        callback(nread, buf) {
+          fills.push(nread);
+          strictEqual(buf.buffer.resizable, true);
+          strictEqual(buf.buffer.byteLength, 8);
+          throws(() => original.resize(4), { name: 'TypeError' });
+          buf.buffer.resize(4);
+        },
+      },
+    });
+    await once(socket, 'connect');
+    strictEqual(original.detached, true);
+    const errored = once(socket, 'error');
+    const closed = once(socket, 'close');
+    socket.write('abc');
+    const err = await errored;
+    await closed;
+    deepStrictEqual(fills, [3]);
+    strictEqual(err.code, 'ENOBUFS');
     strictEqual(socket.destroyed, true);
   },
 };

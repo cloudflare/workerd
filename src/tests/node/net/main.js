@@ -68,6 +68,7 @@ export {
   generatorGarbageDestroysSocket,
   emptyOrDetachedBufferDestroysSocketWithEnobufs,
   sharedOnreadBufferDestroysSocket,
+  resizableOnreadBufferIsTransferredResizable,
 } from 'onread';
 
 export {
@@ -86,3 +87,16 @@ export {
   manyTinyWritesAreAllDelivered,
   largeEchoWithPauses,
 } from 'data-volumes';
+
+export {
+  writeFromOnreadCallback,
+  destroyFromOnreadCallback,
+  pauseResumeStormInsideData,
+  endInsideDataFlushesQueuedWrites,
+  endFromWriteCallbackFlushesQueue,
+} from 'reentrancy';
+
+export {
+  patchedThenPassthroughKeepsData,
+  hostileThenDuringConnectErrorsSocket,
+} from 'then-pollution';

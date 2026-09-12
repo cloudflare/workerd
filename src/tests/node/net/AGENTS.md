@@ -69,7 +69,12 @@ network service allowing `private`.
   same range — the caller's offset and capacity, so a view into a larger
   allocation never grows to it and the bytes around it are never written;
   the caller's original `Uint8Array` is detached from the first read on,
-  and each callback's Buffer is valid until the next read.
+  and each callback's Buffer is valid until the next read. A buffer over a
+  resizable `ArrayBuffer` is transferred like any other — the caller's is
+  detached (resizing it throws) — and the transferred store keeps the
+  resizability; the loop's view stays fixed to the caller's range, so a
+  store shrunk below it from the callback leaves the next read an empty
+  view (`ENOBUFS`).
 - EOF (`done`) pushes EOF and reads zero bytes, so 'end' fires at once even
   with no consumer. `bytesRead` counts pushed bytes.
 - The loop's failures are the socket's 'error' (then 'close'), never a
@@ -123,6 +128,24 @@ network service allowing `private`.
   closing the socket; `setTimeout(0)` clears it, and activity afterwards
   arms nothing.
 
+### Re-entrancy
+
+- The socket may be driven from inside its own deliveries: a `write()` from
+  the `onread` callback goes out in order (each echo triggering the next);
+  a `destroy()` there stops the loop after that fill and closes without an
+  error; `pause()`/`resume()` toggled repeatedly inside `'data'` leave the
+  one read loop running and lose nothing; an `end()` from inside `'data'`
+  or from a write callback, with writes still queued, flushes every queued
+  byte before the FIN.
+
+### Prototype pollution
+
+- The socket uses no primordials: a patched `Promise.prototype.then` sees
+  its hops (the count is not pinned) and a transparent patch changes
+  nothing; a `then` that throws during `connect()`'s setup surfaces as the
+  socket's `'error'` (then `'close'` with `hadError`), `'connect'` never
+  firing — `connect()` itself returns the socket.
+
 ### Interop
 
 - The socket is a Duplex, so `socket.pipe(Writable.fromWeb(ws))`,
@@ -161,7 +184,9 @@ policy to the Duplex; see "The handle".)
 | `backpressure.js` | pause/resume against a ticking peer; paused-mode `read()` restarting the loop; `write()` false and 'drain'; cork cycles |
 | `timeouts.js` | idle timeout without closing; data resets; `setTimeout(0)` clears, also across later traffic |
 | `data-volumes.js` | 2000 trickled bytes (order, pattern, many reads, `bytesRead`); split UTF-8 reassembled by `setEncoding('utf8')` without replacement characters, and concatenating cleanly without it; 20,000 one-byte writes (`bytesWritten`, callbacks, sink count); a 4 MiB echo round trip paused after every 256 KiB (pattern exact, pauses honored) |
-| `onread.js` | fixed buffer across several fills (and its detachment); a fixed view into a larger allocation keeping its range; generated buffers; callback `false` stopping and `resume()` restarting; a throwing generator (its error), garbage from the generator (`ERR_INVALID_ARG_TYPE`), an empty view and a callback-detached fixed buffer (`ENOBUFS`), a SAB view (`TypeError`) — each destroying the socket |
+| `onread.js` | fixed buffer across several fills (and its detachment); a fixed view into a larger allocation keeping its range; generated buffers; callback `false` stopping and `resume()` restarting; a throwing generator (its error), garbage from the generator (`ERR_INVALID_ARG_TYPE`), an empty view and a callback-detached fixed buffer (`ENOBUFS`), a SAB view (`TypeError`) — each destroying the socket; a resizable buffer transferred resizable, its shrinking → `ENOBUFS` |
+| `reentrancy.js` | write and destroy from the `onread` callback; pause/resume storm inside `'data'` (one loop, no loss); `end()` from inside `'data'` and from a write callback flushing the queue |
+| `then-pollution.js` | transparent patched `then` (data intact); hostile `then` during `connect()` → socket `'error'`, `'close'` true, no `'connect'` |
 | `interop.js` | pipe into `Writable.fromWeb`; `Readable.toWeb(socket)` body; pipeline through a TransformStream and from a web source; `Duplex.toWeb` round trip; locked halves |
 | `servers.js`, `which-impl.js` | shared machinery |
 
