@@ -76,7 +76,11 @@ The implementation under test is `src/node/internal/streams_readable.js`
   decodes to strings. A chunk that cannot become a Buffer (a view over a
   detached ArrayBuffer) destroys the Readable with the conversion's
   `TypeError` and cancels the web stream with it — Node's adapter leaves
-  such a stream hanging. The same holds for `Duplex.fromWeb`'s readable
+  such a stream hanging; so does a 'data' listener throwing during the
+  delivery (the delivery runs inside the web read's promise). A chunk
+  over a `SharedArrayBuffer` is delivered as a Buffer over that buffer,
+  one over a resizable buffer aliases it until delivery, and zero-length
+  chunks contribute nothing. The same holds for `Duplex.fromWeb`'s readable
   half, for `compose()`'s web tail (the composition fails) and for a
   `pipeline()` web source (the pipeline fails; the source is cancelled
   without a reason, by the pump's iteration leaving early, as in Node).
@@ -294,7 +298,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | --- | --- |
 | `api-surface.js` | `node:stream/web` named and default exports are the globals; adapter statics on the classes and legacy aliases |
 | `readable-to-web.js` | delivery; argument validation; byte copy / objectMode identity; derived and explicit strategies with the pause/resume they produce; end, error, premature-close propagation; cancel (with and without reason) and pipeTo-failure destroying the source; a failing user `size()` (ledger #6, nothing uncaught); cancel from an earlier `'data'` listener (quiet); an invalid high-water mark leaving the source untouched (ledger #7); a late `'error'` after end swallowed; destroy inside the pulled `_read()` → `AbortError`; unreadable inputs |
-| `readable-from-web.js` | delivery; errored/erroring sources through async iteration; validation before locking; lock and locked-input errors (ledger #1); pull on demand; end/close ordering; errors with and without a read in flight; a detached-view chunk → `TypeError`, cancel with it; destroy → cancel (reason, `null`, skipped after close); `encoding`, `objectMode`, `highWaterMark`, `signal` |
+| `readable-from-web.js` | delivery; errored/erroring sources through async iteration; validation before locking; lock and locked-input errors (ledger #1); pull on demand; end/close ordering; errors with and without a read in flight; a detached-view chunk → `TypeError`, cancel with it; SAB chunk by reference and empty chunks skipped; a resizable chunk aliasing until delivery; a 'data' listener's throw erroring the Readable; destroy → cancel (reason, `null`, skipped after close); `encoding`, `objectMode`, `highWaterMark`, `signal` |
 | `writable-to-web.js` | delivery; close → end → finish; pipeTo completion; sync and async node errors; `_final` error; `destroy(err)` and `writer.abort()` from inside `_write` (once, in-flight write settled per spec); a non-byte web chunk erroring the stream only; node-initiated end/destroy → `AbortError`; close after a direct end() waiting for a slow `_final` and rejecting with its error (sync and async), nothing uncaught; abort (with and without reason); validation; duck input and unwritable inputs → closed stream (ledger #2); a live duck (non-chaining `on()`, `needDrain` liar, truthy/falsy `write()` returns); an invalid high-water mark leaving the writable untouched (ledger #7); derived strategy; drain-driven backpressure; chunk conversion |
 | `writable-from-web.js` | delivery; web error / sink rejection / close rejection destroying the Writable once with no unhandled rejection; back-to-back and corked writes through `_writev`; failed batch; validation before locking; lock (ledger #1); chunk conversion; by-reference hand-off (SAB and WebAssembly.Memory views, a transferring sink detaching the caller's view, a detached view refused); `decodeStrings`/`objectMode`; end → close; destroy → abort or close; writes complete on sink acceptance |
 | `duplex-to-web.js` | pair round trip; validation; destroyed and half Duplexes; non-byte readable (ledger #3); destroy(err) erroring both halves; the whole-Duplex end-of-stream coupling of the halves |

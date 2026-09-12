@@ -278,6 +278,100 @@ export const fromWebDetachedChunkDestroysWithTypeError = {
   },
 };
 
+// A chunk over a SharedArrayBuffer is delivered as a Buffer over that very
+// buffer (by reference, as Node); zero-length chunks contribute nothing
+// and do not stall the flow.
+export const fromWebSharedAndEmptyChunks = {
+  async test() {
+    const shared = new Uint8Array(new SharedArrayBuffer(3));
+    shared.set([1, 2, 3]);
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(new Uint8Array(0));
+        c.enqueue(shared);
+        c.enqueue(new Uint8Array(0));
+        c.enqueue(new Uint8Array([4]));
+        c.close();
+      },
+    });
+    const chunks = [];
+    for await (const chunk of Readable.fromWeb(rs)) chunks.push(chunk);
+    strictEqual(chunks.length, 2);
+    deepStrictEqual([...chunks[0]], [1, 2, 3]);
+    strictEqual(chunks[0].buffer, shared.buffer);
+    deepStrictEqual([...chunks[1]], [4]);
+  },
+};
+
+// A chunk over a resizable ArrayBuffer aliases it until delivery: grown
+// after the enqueue, the consumer sees the grown contents (a
+// length-tracking view, as Node's Buffer over the same buffer would).
+export const fromWebResizableChunkAliasesUntilDelivery = {
+  async test() {
+    const resizable = new ArrayBuffer(2, { maxByteLength: 8 });
+    const view = new Uint8Array(resizable);
+    view.set([1, 2]);
+    let controller;
+    const rs = new ReadableStream({
+      start(c) {
+        controller = c;
+      },
+    });
+    controller.enqueue(view);
+    resizable.resize(4);
+    new Uint8Array(resizable).set([1, 2, 3, 4]);
+    const r = Readable.fromWeb(rs);
+    const chunks = [];
+    r.on('data', (chunk) => chunks.push([...chunk]));
+    await scheduler.wait(10);
+    controller.close();
+    await once(r, 'end');
+    deepStrictEqual(chunks, [[1, 2, 3, 4]]);
+  },
+};
+
+// A 'data' listener that throws while a chunk is delivered (here, by
+// shrinking the chunk's resizable buffer under its own feet and reading
+// it) errors the Readable with that throw — the delivery runs inside the
+// web read's promise, where the throw would otherwise be lost and the
+// stream hang.
+export const fromWebListenerThrowDestroysReadable = {
+  async test() {
+    const resizable = new ArrayBuffer(4, { maxByteLength: 8 });
+    const view = new Uint8Array(resizable);
+    view.set([1, 2, 3, 4]);
+    const cancels = [];
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(view);
+      },
+      cancel(reason) {
+        cancels.push(reason);
+      },
+    });
+    const r = Readable.fromWeb(rs);
+    const errored = once(r, 'error');
+    const closed = once(r, 'close');
+    let delivered;
+    let again;
+    r.on('data', (chunk) => {
+      delivered = Array.from(chunk);
+      resizable.resize(2);
+      // The delivered Buffer is a fixed-length view now out of bounds:
+      // iterating it throws.
+      again = Array.from(chunk);
+    });
+    const err = await errored;
+    await closed;
+    deepStrictEqual(delivered, [1, 2, 3, 4]);
+    strictEqual(again, undefined);
+    strictEqual(err.name, 'TypeError');
+    strictEqual(r.errored, err);
+    strictEqual(cancels.length, 1);
+    strictEqual(cancels[0], err);
+  },
+};
+
 // Destroying the Readable cancels the web stream with the destroy reason;
 // destroy() without a reason cancels with null.
 export const fromWebDestroyCancelsWebStream = {
