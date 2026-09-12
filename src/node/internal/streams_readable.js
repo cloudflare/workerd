@@ -2380,7 +2380,19 @@ export function newReadableStreamFromStreamReadable(
   function onData(chunk) {
     // Copy the Buffer to detach it from the pool.
     if (Buffer.isBuffer(chunk) && !objectMode) chunk = new Uint8Array(chunk);
-    controller.enqueue(chunk);
+    // An enqueue that fails — the strategy's size() throwing or returning
+    // an invalid size, or the stream having just been cancelled from an
+    // earlier 'data' listener — has errored the stream (or found it
+    // closed); thrown from here it would escape the source's 'data'
+    // emission as an uncaught exception. The source has no consumer left:
+    // destroy it with the error (a no-op for a source the cancel already
+    // destroyed).
+    try {
+      controller.enqueue(chunk);
+    } catch (err) {
+      destroyer(streamReadable, err);
+      return;
+    }
     if (controller.desiredSize <= 0) streamReadable.pause();
   }
 

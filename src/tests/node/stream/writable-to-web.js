@@ -11,6 +11,7 @@ import { Writable, Readable, Duplex } from 'node:stream';
 import { Buffer } from 'node:buffer';
 import { strictEqual, deepStrictEqual, rejects, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
+import { once, withUncaughtGuard } from 'helpers';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -27,10 +28,6 @@ function recordingWritable(options = {}) {
     },
   });
   return { writable, chunks };
-}
-
-function once(emitter, event) {
-  return new Promise((resolve) => emitter.once(event, resolve));
 }
 
 // A chunk written through the web writer reaches the node _write().
@@ -172,28 +169,6 @@ export const toWebNodeEndWithoutCloseAbortsStream = {
 
 // Collects uncaught errors and unhandled rejections while fn runs; the
 // adapter must leak neither.
-async function withUncaughtGuard(fn) {
-  const leaked = [];
-  const onError = (event) => {
-    leaked.push(event.error ?? event.message);
-    event.preventDefault();
-  };
-  const onRejection = (event) => {
-    leaked.push(event.reason);
-    event.preventDefault();
-  };
-  globalThis.addEventListener('error', onError);
-  globalThis.addEventListener('unhandledrejection', onRejection);
-  try {
-    await fn();
-    await scheduler.wait(20);
-  } finally {
-    globalThis.removeEventListener('error', onError);
-    globalThis.removeEventListener('unhandledrejection', onRejection);
-  }
-  strictEqual(leaked.length, 0, `leaked: ${leaked.join(', ')}`);
-}
-
 // The node side ended directly and the writer closed before it finishes:
 // close() waits for the finish (a slow _final()) rather than resolving at
 // once, and the stream closes cleanly — nothing escapes the adapter.

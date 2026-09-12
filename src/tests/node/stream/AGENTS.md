@@ -40,6 +40,16 @@ The implementation under test is `src/node/internal/streams_readable.js`
 - `reader.cancel(reason)` destroys the source with `reason` (an
   `AbortError` when none is given) — through `destroyer`, so a `pipeTo()`
   whose destination fails destroys the source with the destination's error.
+  A `cancel()` issued from a user `'data'` listener that runs before the
+  adapter's is quiet: the adapter's enqueue into the just-cancelled stream
+  fails, and the failure is dropped (the source is already being destroyed
+  with the reason) rather than escaping the `'data'` emission.
+- A user strategy whose `size()` fails (throws, or returns NaN, a negative
+  number, ∞) fails the enqueue and errors the stream with that error; reads
+  reject with it. Under TypeScript the enqueue also throws (spec) and the
+  adapter destroys the source with the error — where Node lets it escape
+  as an uncaught exception per chunk; under C++ the enqueue swallows the
+  failure and the source is left paused, alive (ledger #6).
 - A destroyed or ended source, or a Duplex created with `readable: false`,
   yields an already-cancelled stream. A non-Readable is
   `ERR_INVALID_ARG_TYPE`.
@@ -247,13 +257,14 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | 3 | BYOB reader on a `toWeb` readable | `This ReadableStream does not support BYOB reads.` | `BYOB reader can only be used on a stream with a byte source` | `toWebReadableIsNotByteStream` |
 | 4 | `FixedLengthStream` enforcement through `Writable.fromWeb` (identity ledger #11) | readable errors with `TypeError`; the node write and end succeed | write/close reject `RangeError`; the node Writable errors; readable errors with the same `RangeError` | `fromWebFixedLengthOverwrite`, `fromWebFixedLengthUnderwrite` |
 | 5 | Node.js interop hooks (`Symbol.for('nodejs.webstream.isClosedPromise')`, `…controllerErrorFunction`) | absent; `finished()`, `promises.finished()`, `addAbortSignal()` and a writable-head/web-tail `compose()` throw `ERR_WEB_STREAM_INTEROP_UNSUPPORTED` up front | non-enumerable prototype getter and method; the APIs work as in Node, including on native-backed streams (a `Response` body) | `finished-and-abort.js`, `composeNodeHeadWebTail` |
+| 6 | `Readable.toWeb` with a user strategy whose `size()` throws or returns an invalid size (readable ledger #8/#9 in `src/tests/streams`) | `enqueue` errors the stream without throwing (a `TypeError` "cannot be converted" for NaN/negative); the source stays paused and alive | `enqueue` errors the stream and throws (`RangeError` "Invalid chunk size" for NaN/negative); the adapter destroys the source with the error | `toWebLyingStrategyDestroysSource` |
 
 ## Assertion catalogue
 
 | Module | Asserts |
 | --- | --- |
 | `api-surface.js` | `node:stream/web` named and default exports are the globals; adapter statics on the classes and legacy aliases |
-| `readable-to-web.js` | delivery; argument validation; byte copy / objectMode identity; derived and explicit strategies with the pause/resume they produce; end, error, premature-close propagation; cancel (with and without reason) and pipeTo-failure destroying the source; unreadable inputs |
+| `readable-to-web.js` | delivery; argument validation; byte copy / objectMode identity; derived and explicit strategies with the pause/resume they produce; end, error, premature-close propagation; cancel (with and without reason) and pipeTo-failure destroying the source; a failing user `size()` (ledger #6, nothing uncaught); cancel from an earlier `'data'` listener (quiet); unreadable inputs |
 | `readable-from-web.js` | delivery; errored/erroring sources through async iteration; validation before locking; lock and locked-input errors (ledger #1); pull on demand; end/close ordering; errors with and without a read in flight; a detached-view chunk → `TypeError`, cancel with it; destroy → cancel (reason, `null`, skipped after close); `encoding`, `objectMode`, `highWaterMark`, `signal` |
 | `writable-to-web.js` | delivery; close → end → finish; pipeTo completion; sync and async node errors; `_final` error; node-initiated end/destroy → `AbortError`; close after a direct end() waiting for a slow `_final` and rejecting with its error (sync and async), nothing uncaught; abort (with and without reason); validation; duck input and unwritable inputs → closed stream (ledger #2); a live duck (non-chaining `on()`, `needDrain` liar, truthy/falsy `write()` returns); derived strategy; drain-driven backpressure; chunk conversion |
 | `writable-from-web.js` | delivery; web error / sink rejection / close rejection destroying the Writable once with no unhandled rejection; back-to-back and corked writes through `_writev`; failed batch; validation before locking; lock (ledger #1); chunk conversion; `decodeStrings`/`objectMode`; end → close; destroy → abort or close; writes complete on sink acceptance |

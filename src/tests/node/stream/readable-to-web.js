@@ -10,6 +10,8 @@
 import { Readable, Writable, Duplex } from 'node:stream';
 import { Buffer } from 'node:buffer';
 import { strictEqual, deepStrictEqual, rejects, throws } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
+import { once, withUncaughtGuard } from 'helpers';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -30,10 +32,6 @@ export const toWebDeliversPushedChunk = {
     strictEqual(dec.decode(value), 'ok');
   },
 };
-
-function once(emitter, event) {
-  return new Promise((resolve) => emitter.once(event, resolve));
-}
 
 // Canceling the web reader destroys the node source with the cancel reason:
 // the reader's cancel() resolves, and the source reports destroyed and
@@ -319,5 +317,104 @@ export const toWebUnreadableSourceYieldsCancelledStream = {
       strictEqual(done, true);
       strictEqual(value, undefined);
     }
+  },
+};
+
+// A user strategy whose size() fails (throws, or returns an invalid size)
+// fails the enqueue, which errors the web stream with that error: reads
+// reject with it. Under TypeScript the failed enqueue also throws, inside
+// the 'data' delivery; the adapter catches it and destroys the source with
+// the error — in Node it escapes as an uncaught exception, once per chunk
+// the source keeps pushing. Under C++ the enqueue swallows the failure
+// (streams readable ledger #8/#9): the stream errors all the same but
+// nothing is thrown, and the source is left paused, alive (ledger #6).
+export const toWebLyingStrategyDestroysSource = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const boom = new Error('size boom');
+      const cases = [
+        [
+          () => {
+            throw boom;
+          },
+          (err) => strictEqual(err, boom),
+        ],
+        [
+          () => NaN,
+          (err) =>
+            strictEqual(err.name, usingTsImpl ? 'RangeError' : 'TypeError'),
+        ],
+      ];
+      for (const [size, check] of cases) {
+        const source = new Readable({
+          read() {
+            this.push(enc.encode('a'));
+            this.push(enc.encode('b'));
+            this.push(null);
+          },
+        });
+        const events = [];
+        source.on('error', (err) => events.push(['error', err]));
+        source.on('close', () => events.push(['close']));
+        const reader = Readable.toWeb(source, {
+          strategy: { highWaterMark: 4, size },
+        }).getReader();
+        let failure;
+        try {
+          for (;;) await reader.read();
+        } catch (err) {
+          failure = err;
+        }
+        check(failure);
+        await rejects(reader.closed, (err) => err === failure);
+        if (usingTsImpl) {
+          if (!source.closed) await once(source, 'close');
+          strictEqual(source.destroyed, true);
+          strictEqual(source.errored, failure);
+          deepStrictEqual(events, [['error', failure], ['close']]);
+        } else {
+          await scheduler.wait(10);
+          strictEqual(source.destroyed, false);
+          strictEqual(source.isPaused(), true);
+          deepStrictEqual(events, []);
+        }
+      }
+    });
+  },
+};
+
+// reader.cancel() from a user 'data' listener registered before the
+// adaptation: the adapter's own listener, next in line for the same chunk,
+// enqueues into a stream that has just been cancelled. The throw is caught
+// and — the source being destroyed by the cancel already — dropped: nothing
+// escapes, the read reports done, the source reports the cancel reason.
+export const toWebCancelFromDataListenerIsQuiet = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const reason = new Error('enough');
+      const source = new Readable({
+        read() {
+          this.push(enc.encode('a'));
+          this.push(enc.encode('b'));
+        },
+      });
+      let reader;
+      const seen = [];
+      source.on('data', (chunk) => {
+        seen.push(dec.decode(chunk));
+        if (seen.length === 1) reader.cancel(reason);
+      });
+      const events = [];
+      source.on('error', (err) => events.push(['error', err]));
+      source.on('close', () => events.push(['close']));
+      reader = Readable.toWeb(source).getReader();
+      const closed = once(source, 'close');
+      const { done, value } = await reader.read();
+      strictEqual(done, true);
+      strictEqual(value, undefined);
+      await closed;
+      strictEqual(source.errored, reason);
+      deepStrictEqual(events, [['error', reason], ['close']]);
+    });
   },
 };
