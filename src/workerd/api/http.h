@@ -548,6 +548,7 @@ class Fetcher: public JsRpcClientProvider {
 
   [[nodiscard]] ClientWithTracing buildClient(
       IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
+  [[nodiscard]] ClientWithTracing buildJsRpcClient(IoContext& ioContext, SpanParent userSpanParent);
   [[nodiscard]] ClientWithTracing buildClient(IoContext& ioContext,
       kj::Maybe<kj::String> cfStr,
       kj::ConstString operationName,

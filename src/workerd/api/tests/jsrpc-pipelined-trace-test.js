@@ -2,16 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Test for JSRPC tracing: the callee invocation must be parented to the caller's first per-call
-// jsRpcCall span, and every callee call must link to its corresponding caller span.
-//
-// A single JSRPC session carries many calls: `getCounter()` opens the session, and the calls on
-// the returned stub reuse it. The callee therefore has one invocation (one onset) covering every
-// call, so the onset's parent alone can't attribute work to an individual call. The caller sends
-// its per-call span identity with each call so the callee can attribute every dispatch precisely.
-//
-// The parent/child relationships are asserted in the tail worker's test() handler (see
-// jsrpc-pipelined-trace-test-tail.js).
+// Test for JSRPC tracing: each logical server call must be parented to its matching client call.
+// Promise-pipelined calls remain children of the call whose promise they use, while calls on an
+// already-resolved stub use the current async context. The transport session is not a user span.
+// The relationships are asserted in jsrpc-pipelined-trace-test-tail.js.
 
 import { WorkerEntrypoint, RpcTarget } from 'cloudflare:workers';
 

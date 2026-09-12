@@ -2320,19 +2320,13 @@ JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
   auto& ioContext = IoContext::current();
 
   kj::Maybe<TraceContext> callSpan;
-  kj::Maybe<TraceContextParent> callSpanParents;
   ClientWithTracing clientWithTracing;
   if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-    // The "jsRpcSession" trace context is attached to the customEvent task below so it covers the
-    // whole session. The first jsRpcCall span is opened before the session client so its user span
-    // can also become the callee invocation's parent.
-    clientWithTracing = buildClient(ioContext, kj::none, "jsRpcSession"_kjc,
-        [&](TraceContext& sessionSpan) -> kj::Maybe<SpanParent> {
-      callSpan = sessionSpan.getSpanParents().newChild("jsRpcCall"_kjc);
-      return KJ_ASSERT_NONNULL(callSpan).getUserSpanParent();
-    });
-    callSpanParents = clientWithTracing.traceContext.map(
-        [](TraceContext& tc) { return tc.getSpanParents(); });
+    // The session is transport state, not a user operation. Keep an internal session span for
+    // runtime diagnostics, but make the logical call a child of the current user operation.
+    callSpan = ioContext.makeUserTraceSpan("jsRpcCall"_kjc);
+    clientWithTracing =
+        buildJsRpcClient(ioContext, KJ_ASSERT_NONNULL(callSpan).getUserSpanParent());
   } else {
     clientWithTracing = ClientWithTracing{
       .client = getClient(ioContext, kj::none, "jsRpcSession"_kjc),
@@ -2354,9 +2348,7 @@ JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
 
   // (Don't extend `path` because we're the root.)
 
-  return {.client = kj::mv(result),
-    .callSpanParents = kj::mv(callSpanParents),
-    .callSpan = kj::mv(callSpan)};
+  return {.client = kj::mv(result), .callSpan = kj::mv(callSpan)};
 }
 
 void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
@@ -2756,6 +2748,48 @@ Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
     }
   }
   return ClientWithTracing{kj::mv(result.client), kj::none};
+}
+
+Fetcher::ClientWithTracing Fetcher::buildJsRpcClient(
+    IoContext& ioContext, SpanParent userSpanParent) {
+  KJ_SWITCH_ONEOF(channelOrClientFactory) {
+    KJ_CASE_ONEOF(channel, uint) {
+      TraceContext traceContext(ioContext.makeTraceSpan("jsRpcSession"_kjc), nullptr);
+      auto client = ioContext.getSubrequestChannel(
+          channel, isInHouse, kj::none, traceContext, userSpanParent.addRef());
+      return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
+    }
+    KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
+      TraceContext traceContext(ioContext.makeTraceSpan("jsRpcSession"_kjc), nullptr);
+      auto propagatedUserSpanParent = userSpanParent.addRef();
+      auto client = ioContext.getSubrequest(
+          [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
+        return channel->startRequest({.cfBlobJson = kj::none,
+            .parentSpan = tracing.getInternalSpanParent(),
+            .userSpanParent = kj::mv(propagatedUserSpanParent)});
+      }, {
+        .inHouse = isInHouse,
+        .wrapMetrics = !isInHouse,
+        .existingTraceContext = traceContext,
+      });
+      return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
+    }
+    KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
+      auto result = outgoingFactory->newSingleUseClient(
+          kj::none, [&](TraceContext&) { return userSpanParent.addRef(); });
+      auto traceContext = result.spanParents.map(
+          [](TraceContextParent& parents) { return parents.newInternalChild("jsRpcSession"_kjc); });
+      return ClientWithTracing{kj::mv(result.client), kj::mv(traceContext)};
+    }
+    KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
+      auto result = outgoingFactory->newSingleUseClient(
+          ioContext, kj::none, [&](TraceContext&) { return userSpanParent.addRef(); });
+      auto traceContext = result.spanParents.map(
+          [](TraceContextParent& parents) { return parents.newInternalChild("jsRpcSession"_kjc); });
+      return ClientWithTracing{kj::mv(result.client), kj::mv(traceContext)};
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,

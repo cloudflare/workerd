@@ -217,8 +217,8 @@ wd_test(
     tags = ["no-coverage"],
 )
 
-# Test: a callee invocation is parented to the first caller jsRpcCall, and each dispatch links to
-# its corresponding caller span.
+# Test: each logical JSRPC server call is parented to its matching client call without exposing
+# the transport session as a user span.
 wd_test(
     src = "jsrpc-pipelined-trace-test.wd-test",
     args = ["--experimental"],

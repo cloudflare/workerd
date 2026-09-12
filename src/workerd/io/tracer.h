@@ -99,9 +99,9 @@ class BaseTracer: public kj::Refcounted {
 
   SpanParent makeUserRequestSpan(
       tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags);
+  SpanParent makeUserSpanParent(tracing::SpanContext context);
 
-  using MakeUserRequestSpanFunc =
-      kj::Function<SpanParent(tracing::TraceId, kj::Maybe<tracing::TraceFlags>)>;
+  using MakeUserRequestSpanFunc = kj::Function<SpanParent(tracing::SpanContext)>;
 
   // Allow setting the user request span after the tracer has been created so its observer can
   // reference the tracer. This can only be set once.
@@ -288,6 +288,14 @@ class UserSpanObserver final: public SpanObserver {
         parentSpanId(tracing::SpanId::nullId),
         traceId(kj::mv(traceId)),
         traceFlags(traceFlags) {}
+  // Constructor for an observer that represents a remotely-created parent. It is only wrapped in
+  // SpanParent, so it does not emit open or close events itself; children are submitted locally.
+  UserSpanObserver(kj::Own<SpanSubmitter> submitter, tracing::SpanContext context)
+      : submitter(kj::mv(submitter)),
+        spanId(KJ_ASSERT_NONNULL(context.getSpanId())),
+        parentSpanId(tracing::SpanId::nullId),
+        traceId(context.getTraceId()),
+        traceFlags(context.getTraceFlags()) {}
   // constructor for subsequent observers attached to a span. `fromUserCode` is true for
   // spans created directly via `ctx.tracing.enterSpan`; this routes onOpen() through
   // submitUserSpanOpen() so submitters can apply different policies than for runtime spans.
