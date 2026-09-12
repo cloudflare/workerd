@@ -16,9 +16,11 @@ const kHeadersCount = Symbol('kHeadersCount');
 
 // The idle timer of the connection a client response arrives on. In Node
 // it is the socket's, which the request's and the response's setTimeout()
-// both set; here the ClientRequest keeps it.
+// both set and every byte read restarts; here the ClientRequest keeps it.
 export interface IncomingMessageIdleTimer {
   setTimeout(msecs: number): void;
+  // Activity on the connection: the idle countdown starts over.
+  touch(): void;
 }
 
 export let setIncomingMessageFetchResponse: (
@@ -235,6 +237,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
           this.push(null);
           break;
         }
+        this.#idleTimer?.touch();
 
         // Backpressure - stop reading until _read() is called again
         if (!this.push(data.value)) {
