@@ -145,6 +145,7 @@ export {
   pipelineWebSinkErrorFailsPipeline,
   pipelineWebSourceErrorFailsPipeline,
   pipelineLockedWebDestinationFails,
+  pipelineWebSourceUnconvertibleChunkFails,
   pipelineWebSourcePreservesPromiseChunks,
   pipelineWebSinkFailureWithIdleSource,
   promisesPipelineSignalAbortsIdleWebPipeline,
@@ -153,6 +154,7 @@ export {
   promisesPipelineTrailingWebWritable,
   promisesPipelineEndFalseLeavesWebWritableOpen,
   promisesPipelineSignalAbortsWebWritable,
+  promisesPipelineSignalAbortsPendingWebRead,
 } from 'pipeline-web';
 
 export { duplexFromWebStreamHalves } from 'duplex-from';
