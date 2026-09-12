@@ -63,6 +63,12 @@ Tests run sequentially, one server (`withServer`) at a time.
   reason (`undefined` for a bare `destroy()`), through the held reader when
   the pump had acquired one, unless the body was already read to completion.
   A read pending across `destroy()` is dropped.
+- The body stream failing under the message — erroring mid-upload, or while
+  the handler has the message paused with a read pending underneath, or
+  yielding a chunk the message cannot take (a view over a detached
+  ArrayBuffer: the conversion's `TypeError`) — aborts it: 'aborted', the
+  error, 'close' with `complete` false; the response can still be sent.
+  `pause()` then `resume()` inside every 'data' loses nothing.
 
 ### The response body
 
@@ -75,7 +81,10 @@ Tests run sequentially, one server (`withServer`) at a time.
 - Every chunk type is delivered (string, Buffer, `Uint8Array`, explicit
   encoding), empty writes contribute nothing, many small and large writes
   arrive whole. A declared Content-Length caps the body (extra bytes
-  dropped, fewer sent as they are). 204 and 304, and the reply to a HEAD
+  dropped, fewer sent as they are) at `parseInt`'s reading of it — a
+  non-numeric value leaves the body uncapped, zero or a negative value
+  drops every chunk, a fraction or padded number caps at its integer part
+  — and is sent to the client as the handler set it. 204 and 304, and the reply to a HEAD
   (marked bodiless before the handler runs), have a null body and drop
   their writes — accepted, callback called — or, under the server's
   `rejectNonStandardBodyWrites` option, refuse them with
@@ -100,7 +109,8 @@ Tests run sequentially, one server (`withServer`) at a time.
 
 - 'finish' fires once the body has been handed off, and closes the stream;
   'close' follows it (a microtask later), once, and marks the response
-  destroyed: a `write()` after `end()` fails through its callback with
+  destroyed (a `destroy()` from inside 'finish' adds nothing — the whole
+  body reaches the client, 'close' once, no 'error'): a `write()` after `end()` fails through its callback with
   `ERR_STREAM_WRITE_AFTER_END` (a second `end()` is inert) and, once the
   response is closed, never as an 'error' event.
 - `destroy(err)` emits 'error' then 'close'. Before the headers, the
@@ -153,8 +163,11 @@ lifecycle" — and the pure-streams behavior belongs to
 | --- | --- |
 | `request-body.js` | GET ends at once; Buffer/string chunks and `complete`; late 'data' listener; 256 KiB in several events; streaming body incremental + chunked headers; `FixedLengthStream` Content-Length; pause/resume (small chunks, and a body above the high-water mark); pipe echo; several pipe destinations; `pipeline` through a `TransformStream` |
 | `request-destroy.js` | `destroy(err)` with listener; bare `destroy()` closes quietly; unlistened `destroy(err)` swallowed; mid-body destroy cancels the body stream with the reason and stops 'data'; bare destroy cancels with `undefined`; no cancel after completion |
-| `response-body.js` | implicit headers and chunk types; streaming before `end()`; large and many writes; Content-Length capping; 204/304; HEAD (`_hasBody`, dropped writes, null body); `rejectNonStandardBodyWrites`; cork/uncork; backpressure signaling and 'drain' parity; acceptance after headers with `highWaterMark`; web source pipelined in; 'finish' then 'close' with `closed`; write after end via callback only |
+| `response-body.js` | implicit headers and chunk types; streaming before `end()`; large and many writes; Content-Length capping; 204/304; HEAD (`_hasBody`, dropped writes, null body); `rejectNonStandardBodyWrites`; cork/uncork; backpressure signaling and 'drain' parity; acceptance after headers with `highWaterMark`; web source pipelined in; 'finish' then 'close' with `closed`; write after end via callback only; Content-Length lies (`abc`, `0`, negative, fraction, padded) |
 | `piping.js` | 1 MiB into a 16 KiB slow sink: bounded buffer, pauses/resumes, all bytes; `unpipe()` after the first chunk ('pipe'/'unpipe' on the destination, delivery stops, source paused, rest to a 'data' listener, destination not ended); erroring destination unpiped ('unpipe' before its 'error', one write only, source paused); source error not forwarded (destination stays piped, open, unerrored) |
+| `request-body-failures.js` | body stream erroring mid-upload and while paused (aborted, error, close incomplete, response still sent); a detached-view chunk (`TypeError`) |
+| `reentrancy.js` | `destroy()` inside 'finish'; pause/resume inside every 'data' |
+| `then-pollution.js` | transparent patched `then`: request and response bodies intact |
 | `buffer-lifecycle.js` | fill/write/refill after the callback (intact, not detached, both payloads received); chunk given to `end()` and its parent allocation intact; mutation after the callback not sent; SAB and WebAssembly.Memory views written, 'finish' only; Content-Length-trimmed writes leave their buffers intact; empty and detached views accepted and skipped |
 | `response-lifecycle.js` | `destroy(err)` before headers rejects the fetch with it; bare destroy before headers → 'Premature close'; `destroy(err)` after headers errors the body, 'error' then 'close'; bare destroy after headers → premature close, 'close' only; client cancel → destroyed with the reason, `ERR_STREAM_DESTROYED` on later writes; a listener throwing before headers / after a partial body → fetch rejects with it, nothing else escapes; an async listener rejecting before headers / after a partial body → destroyed with the error, fetch or body failing with it |
 | `harness.js`, `which-impl.js` | shared machinery (`collectUncaught` gathers what escapes the isolate during a test) |
