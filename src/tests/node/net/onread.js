@@ -170,3 +170,118 @@ export const callbackFalseStopsReading = {
     await once(socket, 'close');
   },
 };
+
+// The read loop's failures surface as the socket's 'error' (then 'close'),
+// instead of silently ending the loop with the socket open: here, a
+// generator that throws — its error is the socket's.
+export const generatorThrowDestroysSocket = {
+  async test(ctrl, env) {
+    const boom = new Error('no buffer for you');
+    let calls = 0;
+    const socket = echo(env, {
+      onread: {
+        buffer() {
+          if (++calls === 2) throw boom;
+          return new Uint8Array(16);
+        },
+        callback() {},
+      },
+    });
+    await once(socket, 'connect');
+    const errored = once(socket, 'error');
+    const closed = once(socket, 'close');
+    socket.write('x');
+    strictEqual(await errored, boom);
+    await closed;
+    strictEqual(socket.destroyed, true);
+    strictEqual(calls, 2);
+  },
+};
+
+// A generator returning anything but a Uint8Array: ERR_INVALID_ARG_TYPE
+// (Node keeps reading into the previous buffer, which the transferring
+// read here no longer has).
+export const generatorGarbageDestroysSocket = {
+  async test(ctrl, env) {
+    for (const garbage of [undefined, null, 'string', 42, {}, [1, 2]]) {
+      let calls = 0;
+      const socket = echo(env, {
+        onread: {
+          buffer() {
+            return ++calls === 1 ? new Uint8Array(16) : garbage;
+          },
+          callback() {},
+        },
+      });
+      await once(socket, 'connect');
+      const errored = once(socket, 'error');
+      const closed = once(socket, 'close');
+      socket.write('x');
+      const err = await errored;
+      await closed;
+      strictEqual(err.code, 'ERR_INVALID_ARG_TYPE', String(garbage));
+      strictEqual(socket.destroyed, true);
+    }
+  },
+};
+
+// An empty view — a zero-length one, or the fixed buffer once the callback
+// has detached it — cannot be read into: the socket errors with ENOBUFS,
+// as Node's read into an empty buffer does.
+export const emptyOrDetachedBufferDestroysSocketWithEnobufs = {
+  async test(ctrl, env) {
+    const empty = echo(env, {
+      onread: {
+        buffer() {
+          return new Uint8Array(0);
+        },
+        callback() {},
+      },
+    });
+    const emptyErrored = once(empty, 'error');
+    const emptyClosed = once(empty, 'close');
+    const err = await emptyErrored;
+    await emptyClosed;
+    strictEqual(err.code, 'ENOBUFS');
+    strictEqual(err.syscall, 'read');
+
+    let fills = 0;
+    const detaching = echo(env, {
+      onread: {
+        buffer: Buffer.alloc(64),
+        callback(nread, buf) {
+          fills++;
+          structuredClone(buf.buffer, { transfer: [buf.buffer] });
+        },
+      },
+    });
+    await once(detaching, 'connect');
+    const errored = once(detaching, 'error');
+    const closed = once(detaching, 'close');
+    detaching.write('x');
+    const detachedErr = await errored;
+    await closed;
+    strictEqual(detachedErr.code, 'ENOBUFS');
+    strictEqual(fills, 1);
+    strictEqual(detaching.destroyed, true);
+  },
+};
+
+// A view over a SharedArrayBuffer cannot be read into (the read transfers
+// its buffer): the read's TypeError is the socket's error.
+export const sharedOnreadBufferDestroysSocket = {
+  async test(ctrl, env) {
+    const socket = echo(env, {
+      onread: {
+        buffer: new Uint8Array(new SharedArrayBuffer(64)),
+        callback() {},
+      },
+    });
+    const errored = once(socket, 'error');
+    const closed = once(socket, 'close');
+    const err = await errored;
+    await closed;
+    strictEqual(err.name, 'TypeError');
+    strictEqual(socket.destroyed, true);
+  },
+};
