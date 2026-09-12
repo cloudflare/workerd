@@ -14,4 +14,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "timeouts", esModule = embed "timeouts.js"),
   (name = "onread", esModule = embed "onread.js"),
   (name = "interop", esModule = embed "interop.js"),
+  (name = "data-volumes", esModule = embed "data-volumes.js"),
 ];
