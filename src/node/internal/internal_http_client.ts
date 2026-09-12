@@ -455,7 +455,12 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     this.#incomingMessage = incoming;
     // @ts-expect-error TS2540 This is a read-only property.
     this.res = incoming;
-    this.emit('response', incoming);
+    // A response nobody listens for cannot be consumed by anyone: dump it,
+    // as Node does, so the exchange completes and closes instead of holding
+    // the response body open.
+    if (!this.emit('response', incoming)) {
+      incoming._dump();
+    }
   }
 
   // A fetch that fails before yielding a response (the connection could

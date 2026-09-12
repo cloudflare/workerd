@@ -9,6 +9,7 @@
 // errors the request; and the request closes once the exchange is over.
 
 import { strictEqual, deepStrictEqual, ok } from 'node:assert';
+import { finished } from 'node:stream';
 import {
   request,
   get,
@@ -543,6 +544,35 @@ export const timeoutDisarmedByCompletion = {
     strictEqual((await collect(res)).toString(), 'asd');
     await scheduler.wait(100);
     deepStrictEqual(log, []);
+  },
+};
+
+// A response arriving with no 'response' listener is dumped, as Node's is
+// ("the response will be entirely discarded"): its body is consumed and
+// dropped, the response completes and the request closes, so finished(req)
+// resolves and nothing holds the exchange open. req.res is set all the
+// same.
+export const unhandledResponseIsDumped = {
+  async test(ctrl, env) {
+    const req = get(env, '/asd');
+    const events = [];
+    req.on('finish', () => events.push('finish'));
+    req.on('close', () => events.push('close'));
+    finished(req, (err) => {
+      events.push(`finished(${err === undefined ? '' : err.message})`);
+    });
+    const outcome = await Promise.race([
+      once(req, 'close').then(() => 'closed'),
+      scheduler.wait(1000).then(() => 'still open'),
+    ]);
+    if (outcome !== 'closed') req.destroy();
+    strictEqual(outcome, 'closed');
+    strictEqual(req.res.complete, true);
+    deepStrictEqual(
+      events.filter((e) => e !== 'finished()'),
+      ['finish', 'close']
+    );
+    ok(events.includes('finished()'));
   },
 };
 

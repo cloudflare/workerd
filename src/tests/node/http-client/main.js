@@ -55,6 +55,7 @@ export {
   timeoutMidBodyAbortsResponse,
   timeoutDisarmedByCompletion,
   setTimeoutZeroClears,
+  unhandledResponseIsDumped,
 } from 'lifecycle';
 
 export {
