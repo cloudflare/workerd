@@ -1170,6 +1170,19 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   TimeoutId::Generator timeoutIdGenerator;
   // The generator for all timeout IDs associated with this scope.
 
+  // IDs of setTimeout() calls made outside of a request (e.g. during top-level module
+  // evaluation) with a delay of exactly zero, which are honored by scheduling a microtask
+  // rather than throwing (see setTimeout()'s implementation). An id remains here from the time
+  // it is scheduled until either the microtask runs or clearTimeout() cancels it. In practice
+  // this is expected to hold very few entries at a time, since it only exists for the duration
+  // of top-level evaluation.
+  kj::Vector<TimeoutId::NumberType> pendingGlobalScopeTimeouts;
+
+  // If `id` is present in `pendingGlobalScopeTimeouts`, removes it and returns true. Used both
+  // to cancel one of these timeouts (clearTimeout()) and, when the scheduled microtask runs, to
+  // check whether it's still pending (i.e. wasn't already canceled) before invoking it.
+  bool removePendingGlobalScopeTimeout(TimeoutId::NumberType id);
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("unhandledRejections", unhandledRejections);
   }
