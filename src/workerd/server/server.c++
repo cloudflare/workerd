@@ -3966,7 +3966,7 @@ class Server::WorkerService final: public Service,
         kj::mv(triggerContext),
         false,  // isDynamicDispatch
         kj::mv(accessInfo), kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub,
-        kj::mv(metadata.clientIp));
+        kj::mv(metadata.clientAddress));
   }
 
  private:
@@ -6676,7 +6676,7 @@ class Server::TcpListener final: public kj::Refcounted {
 
       IoChannelFactory::SubrequestMetadata metadata;
       KJ_IF_SOME(remote, kj::tryDowncast<kj::NetworkPeerIdentity>(*peerId)) {
-        metadata.clientIp = remote.toString();
+        metadata.clientAddress = remote.toString();
       }
 
       auto req = service->startRequest(kj::mv(metadata));

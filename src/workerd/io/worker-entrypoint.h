@@ -58,7 +58,7 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     // ("persistent") stub. The entrypoint re-verifies that the target worker still has the
     // `allow_irrevocable_stub_storage` compat flag enabled and rejects the request otherwise.
     Persistent fromPersistentStub = Persistent::NO,
-    // Address of the client on whose behalf this event is being delivered.
-    kj::Maybe<kj::String> clientIp = kj::none);
+    // Address of the client as IP:port on whose behalf this event is being delivered.
+    kj::Maybe<kj::String> clientAddress = kj::none);
 
 }  // namespace workerd

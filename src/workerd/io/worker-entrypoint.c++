@@ -71,7 +71,7 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Maybe<kj::Own<AccessInfo>> accessInfo,
       kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
       Persistent fromPersistentStub,
-      kj::Maybe<kj::String> clientIp);
+      kj::Maybe<kj::String> clientAddress);
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
@@ -105,7 +105,7 @@ class WorkerEntrypoint final: public WorkerInterface {
   Frankenvalue props;
   kj::Maybe<kj::String> cfBlobJson;
   kj::Maybe<Worker::VersionInfo> versionInfo;
-  kj::Maybe<kj::String> clientIp;
+  kj::Maybe<kj::String> clientAddress;
 
   // Hacky members used to hold some temporary state while processing a request.
   // See gory details in WorkerEntrypoint::request().
@@ -157,7 +157,7 @@ class WorkerEntrypoint final: public WorkerInterface {
       Frankenvalue props,
       kj::Maybe<kj::String> cfBlobJson,
       kj::Maybe<Worker::VersionInfo> versionInfo,
-      kj::Maybe<kj::String> clientIp);
+      kj::Maybe<kj::String> clientAddress);
 };
 
 // Simple wrapper around `HttpService::Response` to let us know if the response was sent
@@ -216,7 +216,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
     kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
     Persistent fromPersistentStub,
-    kj::Maybe<kj::String> clientIp) {
+    kj::Maybe<kj::String> clientAddress) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
 
   // If this request came from a stored ("persistent") stub, re-verify that the target worker still
@@ -239,7 +239,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
 
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
       waitUntilTasks, canceler, tunnelExceptions, isDynamicDispatch, kj::mv(entrypointName),
-      kj::mv(props), kj::mv(cfBlobJson), kj::mv(versionInfo), kj::mv(clientIp));
+      kj::mv(props), kj::mv(cfBlobJson), kj::mv(versionInfo), kj::mv(clientAddress));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
       kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo), kj::mv(selfTokenFactory));
@@ -257,7 +257,7 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
     Frankenvalue props,
     kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<Worker::VersionInfo> versionInfo,
-    kj::Maybe<kj::String> clientIp)
+    kj::Maybe<kj::String> clientAddress)
     : threadContext(threadContext),
       waitUntilTasks(waitUntilTasks),
       canceler(canceler),
@@ -267,7 +267,7 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
       props(kj::mv(props)),
       cfBlobJson(kj::mv(cfBlobJson)),
       versionInfo(kj::mv(versionInfo)),
-      clientIp(kj::mv(clientIp)) {}
+      clientAddress(kj::mv(clientAddress)) {}
 
 void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Maybe<kj::Own<Worker::Actor>> actor,
@@ -739,11 +739,12 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       context
           .run([this, &headers, &connection, &response, entrypointName = entrypointName.clone(),
                    versionInfo = kj::mv(versionInfo), host = kj::str(host),
-                   clientIp = kj::mv(clientIp)](Worker::Lock& lock, IoContext& context) mutable {
+                   clientAddress = kj::mv(clientAddress)](
+                   Worker::Lock& lock, IoContext& context) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
-    return lock.getGlobalScope().connect(kj::mv(host), kj::mv(clientIp), headers, connection,
+    return lock.getGlobalScope().connect(kj::mv(host), kj::mv(clientAddress), headers, connection,
         response, lock,
         lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props),
             context.getActor(), isDynamicDispatch));
@@ -1132,13 +1133,13 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
     kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
     Persistent fromPersistentStub,
-    kj::Maybe<kj::String> clientIp) {
+    kj::Maybe<kj::String> clientAddress) {
   return WorkerEntrypoint::construct(threadContext, kj::mv(worker), kj::mv(entrypointName),
       kj::mv(props), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::mv(metrics), waitUntilTasks, tunnelExceptions,
       kj::mv(workerTracer), kj::mv(cfBlobJson), kj::mv(versionInfo),
       kj::mv(maybeTriggerInvocationSpan), isDynamicDispatch, kj::mv(accessInfo),
-      kj::mv(selfTokenFactory), fromPersistentStub, kj::mv(clientIp));
+      kj::mv(selfTokenFactory), fromPersistentStub, kj::mv(clientAddress));
 }
 
 }  // namespace workerd

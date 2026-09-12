@@ -218,7 +218,7 @@ void ServiceWorkerGlobalScope::clear() {
 }
 
 kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
-    kj::Maybe<kj::String> clientIp,
+    kj::Maybe<kj::String> clientAddress,
     const kj::HttpHeaders& headers,
     kj::AsyncIoStream& connection,
     kj::HttpService::ConnectResponse& response,
@@ -253,9 +253,9 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // The handler is the server side of this connection: the peer half-closing means it has
     // finished sending, not that the reply is over, so the write side stays open until the handler
     // closes it or returns.
-    jsg::Ref<Socket> jsSocket = setupSocket(js, ownConnection.addRef().toOwn(), kj::mv(clientIp),
-        kj::mv(host), SocketOptions{.allowHalfOpen = true}, kj::mv(nullTlsStarter),
-        SecureTransportKind::OFF, kj::none, false, kj::none);
+    jsg::Ref<Socket> jsSocket = setupSocket(js, ownConnection.addRef().toOwn(),
+        kj::mv(clientAddress), kj::mv(host), SocketOptions{.allowHalfOpen = true},
+        kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::none, false, kj::none);
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
     // connection is already open at this point, exception handling is not required.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
