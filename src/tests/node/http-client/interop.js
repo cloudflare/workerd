@@ -10,7 +10,7 @@
 import { Readable, Writable, pipeline } from 'node:stream';
 import { text } from 'node:stream/consumers';
 import { Buffer } from 'node:buffer';
-import { strictEqual } from 'node:assert';
+import { strictEqual, ok } from 'node:assert';
 import { get, response } from 'harness';
 
 const enc = new TextEncoder();
@@ -37,6 +37,37 @@ export const pipeIntoWebSink = {
     await scheduler.wait(5);
     strictEqual(received.join(''), 'chunk-0|chunk-1|chunk-2|');
     strictEqual(closed, true);
+  },
+};
+
+// res.pipe(slowSink): the Readable's pipe(), so the sink's backpressure
+// pauses the response and 'drain' resumes it — the sink never holds more
+// than its high-water mark plus the chunk that crossed it.
+export const pipeHonorsSinkBackpressure = {
+  async test(ctrl, env) {
+    const res = await response(get(env, '/large?bytes=1048576'));
+    let bytes = 0;
+    let largestChunk = 0;
+    let maxBuffered = 0;
+    let pauses = 0;
+    const sink = new Writable({
+      highWaterMark: 16 * 1024,
+      write(chunk, encoding, callback) {
+        bytes += chunk.length;
+        largestChunk = Math.max(largestChunk, chunk.length);
+        maxBuffered = Math.max(maxBuffered, sink.writableLength);
+        setTimeout(callback, 1);
+      },
+    });
+    res.on('pause', () => pauses++);
+    res.pipe(sink);
+    await new Promise((resolve) => sink.on('finish', resolve));
+    strictEqual(bytes, 1048576);
+    ok(
+      maxBuffered <= 16 * 1024 + largestChunk,
+      `buffered ${maxBuffered} with chunks up to ${largestChunk}`
+    );
+    ok(pauses > 0, 'the response was never paused');
   },
 };
 

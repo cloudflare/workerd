@@ -61,6 +61,8 @@ need an `internet` network service allowing `private`.
   large bodies; `pause()`/`resume()` hold and continue delivery without
   loss. Bodiless statuses (204, 304, an empty 200) and the reply to a HEAD
   end at once with `complete` set. Without a consumer the body waits.
+  `pipe()` is the Readable's: a slow destination's backpressure pauses
+  the response and 'drain' resumes it.
 - Bytes pass through untouched: a compressed body keeps its
   Content-Encoding and is not decompressed.
 
@@ -145,5 +147,5 @@ unchanged under both implementations.
 | `response-body.js` | Buffer chunks and `complete`; `setEncoding`; incremental chunked delivery; a megabyte intact; pause/resume; bodiless statuses; HEAD; compression passthrough; waiting for a consumer |
 | `request-body.js` | string body echoed with the server-side Content-Type/Length; `end(Buffer)` sent once; chunk forms and encodings; nothing sent before `end()`; length and type as the server sees them; empty POST; chunk captured at `write()` (mutated, detached, shrunk afterwards); SAB/WebAssembly.Memory views sent, empty and detached views accepted; GET/HEAD ignore writes |
 | `lifecycle.js` | `res.destroy()` closes; end then one close; `res.destroy(err)` mid-body reaching the server; server dropping the connection; completed response final; connection failure; `req.res` and request close after the response; `req.destroy()` before the response (hang up), with an error, before `end()`, mid-body (bare and with an error), response after destroy dropped; `abort()` before the response, before `end()`, mid-body; timeout before headers (armed before/after `end()`), `timeout` option and callback, mid-body, disarmed by completion, cleared by `setTimeout(0)` |
-| `interop.js` | pipe into `Writable.fromWeb`; `Readable.toWeb` body; pipeline through a `TransformStream`; `stream/consumers` and async iteration |
+| `interop.js` | pipe into `Writable.fromWeb`; pipe into a 16 KiB slow sink (bounded buffer, pauses); `Readable.toWeb` body; pipeline through a `TransformStream`; `stream/consumers` and async iteration |
 | `harness.js`, `which-impl.js` | shared machinery |
