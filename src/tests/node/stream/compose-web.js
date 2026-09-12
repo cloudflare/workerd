@@ -116,6 +116,25 @@ export const composeWebReadableIntoNodeWritable = {
   },
 };
 
+// The composed stream's end() completes without a consumer: the tail's
+// output is drained into the composed stream's own buffer as it is
+// produced, so the writable side finishes on its own and the output is
+// still there to be read afterwards. With a node tail this holds whether
+// the head is a node stream or a web transform.
+export const composeEndCompletesBeforeReading = {
+  async test() {
+    const nodeHead = compose(new PassThrough(), new PassThrough());
+    await new Promise((resolve) => nodeHead.end('x', resolve));
+    strictEqual(nodeHead.writableFinished, true);
+    strictEqual(await collect(nodeHead), 'x');
+
+    const webHead = compose(upperTransform(), new PassThrough());
+    await new Promise((resolve) => webHead.end('y', resolve));
+    strictEqual(webHead.writableFinished, true);
+    strictEqual(await collect(webHead), 'Y');
+  },
+};
+
 // A node head with a web TransformStream tail: the composed writable side
 // must observe the web tail's completion — available only with the interop
 // hook. Where the hook is missing the shape is refused before anything is

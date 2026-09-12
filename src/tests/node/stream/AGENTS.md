@@ -163,7 +163,9 @@ The implementation under test is `src/node/internal/streams_readable.js`
 ### compose
 
 - `compose()`: web streams are validated by position; a web head is
-  written through its writer, a web tail read through its reader.
+  written through its writer, a web tail read through its reader; a node
+  tail's output is drained into the composed stream's own buffer as it is
+  produced, so `end()` completes without a consumer.
 
 ### finished / addAbortSignal
 
