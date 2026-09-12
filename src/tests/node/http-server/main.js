@@ -60,3 +60,12 @@ export {
   destroyAfterHeadersEndsBodyPrematurely,
   clientCancelDestroysResponse,
 } from 'response-lifecycle';
+
+export {
+  writtenBufferIsReusableAfterCallback,
+  chunkGivenToEndStaysUsable,
+  mutationAfterCallbackIsNotSent,
+  sharedAndWasmMemoryViewsAreWritten,
+  trimmedWriteLeavesBufferIntact,
+  emptyAndDetachedViewsContributeNothing,
+} from 'buffer-lifecycle';

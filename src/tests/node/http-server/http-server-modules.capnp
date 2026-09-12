@@ -10,4 +10,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "request-destroy", esModule = embed "request-destroy.js"),
   (name = "response-body", esModule = embed "response-body.js"),
   (name = "response-lifecycle", esModule = embed "response-lifecycle.js"),
+  (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
 ];
