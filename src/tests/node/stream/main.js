@@ -23,6 +23,8 @@ export {
   toWebSourceErrorRejectsRead,
   toWebSourceDestroyBecomesAbortError,
   toWebUnreadableSourceYieldsCancelledStream,
+  toWebLyingStrategyDestroysSource,
+  toWebCancelFromDataListenerIsQuiet,
 } from 'readable-to-web';
 
 export {
