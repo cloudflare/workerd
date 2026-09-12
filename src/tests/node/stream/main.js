@@ -179,6 +179,7 @@ export {
   composeSingleWebStream,
   composeWebHeadNodeTail,
   composeWebReadableIntoNodeWritable,
+  composeEndCompletesBeforeReading,
   composeNodeHeadWebTail,
   readableComposeWithWebTransform,
 } from 'compose-web';

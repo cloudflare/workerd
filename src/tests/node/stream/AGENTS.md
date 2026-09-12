@@ -150,7 +150,9 @@ The implementation under test is `src/node/internal/streams_readable.js`
 ### compose
 
 - `compose()`: web streams are validated by position; a web head is
-  written through its writer, a web tail read through its reader.
+  written through its writer, a web tail read through its reader; a node
+  tail's output is drained into the composed stream's own buffer as it is
+  produced, so `end()` completes without a consumer.
 
 ### finished / addAbortSignal
 
@@ -207,7 +209,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `consumers.js` | `text/json/buffer/arrayBuffer/blob` over web streams; multi-chunk and string decoding; lock release; error propagation; node Readables and async generators |
 | `readable-from.js` | `Readable.from(webStream)`: chunk types by objectMode, destroy → cancel + lock release, error propagation |
 | `finished-and-abort.js` | ledger #5: hook presence per implementation; `finished()` on readable close/error, writable close/error, settled streams, with a signal; `promises.finished`; `addAbortSignal` on readable/writable, already-aborted, one tee branch (default and byte streams; sibling spared, sibling cancel reaching the source, a teed-away branch inert incl. a pending BYOB read on its branch, cancel settling with a deferred or failing source cleanup in both orders), Response body |
-| `compose-web.js` | position validation; single web stream; web head/node tail; web readable into node writable; node head/web tail (ledger #5, incl. what the refusal leaves untouched); `Readable.prototype.compose` |
+| `compose-web.js` | position validation; single web stream; web head/node tail; web readable into node writable; `end()` completing without a consumer; node head/web tail (ledger #5, incl. what the refusal leaves untouched); `Readable.prototype.compose` |
 | `pipeline-web.js` | web source/destination/transform stages, generator stages, `TransformStream` head; sink/source/node-sink failures (incl. a node sink failing while the web source is idle, a web sink erroring or rejecting a write while the source is idle, and a web source erroring while a stuck node sink holds the pump); a detached-view chunk failing the pipeline (`TypeError`, source cancelled without a reason); promise-valued chunks by identity; a locked web destination (callback and promise forms, node and web sources); `stream/promises` trailing web destination, `end: false`, signal abort of a node-headed and of an idle all-web pipeline, and during a pending web read |
 | `which-impl.js` | implementation detection |
 
