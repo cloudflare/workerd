@@ -132,6 +132,12 @@ wd_test(
     data = ["connect-neuter-test.js"],
 )
 
+wd_test(
+    src = "connect-half-open-test.wd-test",
+    args = ["--experimental"],
+    data = ["connect-half-open-test.js"],
+)
+
 # Regression test for AUTOVULN-EW-EDGEWORKER-17: Socket::close() bare-this UAF.
 wd_test(
     src = "socket-close-gc-test.wd-test",

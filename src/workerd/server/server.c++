@@ -5745,9 +5745,19 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();
+  kj::Array<Worker::Api::InboundListener> listeners;
+  KJ_IF_SOME(l, inboundListeners.find(name)) {
+    listeners = KJ_MAP(listener, l) {
+      return Worker::Api::InboundListener{
+        .protocol = kj::str(listener.protocol),
+        .address = kj::str(listener.address),
+        .port = listener.port,
+      };
+    };
+  }
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
       limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
-      pythonConfig);
+      pythonConfig, kj::mv(listeners));
 
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
@@ -6643,12 +6653,12 @@ class Server::TcpListener final: public kj::Refcounted {
       kj::Own<kj::ConnectionReceiver> listener,
       kj::Own<Service> service,
       kj::HttpHeaderTable& headerTable,
-      kj::StringPtr addrStr)
+      kj::String authority)
       : owner(owner),
         listener(kj::mv(listener)),
         service(kj::mv(service)),
         headerTable(headerTable),
-        addrStr(addrStr) {}
+        authority(kj::mv(authority)) {}
 
   kj::Promise<void> run() {
     TRACE_EVENT("workerd", "TcpListener::run");
@@ -6660,7 +6670,7 @@ class Server::TcpListener final: public kj::Refcounted {
       auto req = service->startRequest(kj::mv(metadata));
       auto response = kj::heap<ResponseWrapper>();
       kj::HttpHeaders headers(headerTable);
-      owner.tasks.add(req->connect(addrStr, headers, *stream.stream, *response, {})
+      owner.tasks.add(req->connect(authority, headers, *stream.stream, *response, {})
                           .attach(kj::mv(stream.stream), kj::mv(response))
                           .attach(kj::mv(req)));
     }
@@ -6671,7 +6681,7 @@ class Server::TcpListener final: public kj::Refcounted {
   kj::Own<kj::ConnectionReceiver> listener;
   kj::Own<Service> service;
   kj::HttpHeaderTable& headerTable;
-  kj::StringPtr addrStr;
+  kj::String authority;
 
   struct ResponseWrapper final: public kj::HttpService::ConnectResponse {
     void accept(
@@ -6699,9 +6709,9 @@ kj::Promise<void> Server::listenHttp(kj::Own<kj::ConnectionReceiver> listener,
 }
 
 kj::Promise<void> Server::listenTcp(
-    kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::StringPtr addrStr) {
+    kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::String authority) {
   auto obj = kj::refcounted<TcpListener>(
-      *this, kj::mv(listener), kj::mv(service), globalContext->headerTable, addrStr);
+      *this, kj::mv(listener), kj::mv(service), globalContext->headerTable, kj::mv(authority));
   co_return co_await obj->run();
 }
 
@@ -6887,6 +6897,7 @@ kj::Promise<void> Server::run(
 
   auto forkedDrainWhen = handleDrain(kj::mv(drainWhen)).fork();
 
+  co_await bindSockets(config);
   co_await startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
 
   auto listenPromise = listenOnSockets(config, headerTableBuilder, forkedDrainWhen);
@@ -7094,12 +7105,41 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
   }
 }
 
+namespace {
+
+// The host part of a "host[:port]" listen address ("*", "127.0.0.1", "[::1]"). Unix socket
+// addresses have no host and are returned whole.
+kj::String hostOfAddress(kj::StringPtr addrStr) {
+  if (addrStr.startsWith("unix:")) return kj::str(addrStr);
+  KJ_IF_SOME(colon, addrStr.findLast(':')) {
+    // A bare IPv6 literal without brackets contains colons but no port.
+    if (addrStr.startsWith("[") || addrStr.findFirst(':') == colon) {
+      return kj::str(addrStr.first(colon));
+    }
+  }
+  return kj::str(addrStr);
+}
+
+uint defaultPortFor(config::Socket::Reader sock) {
+  switch (sock.which()) {
+    case config::Socket::HTTP:
+      return 80;
+    case config::Socket::HTTPS:
+      return 443;
+    case config::Socket::TCP:
+      return 0;
+  }
+  return 0;
+}
+
+}  // namespace
+
 kj::Maybe<Server::SocketTypeConfig> Server::parseSocketType(
     config::Socket::Reader sock, kj::StringPtr name) {
   switch (sock.which()) {
     case config::Socket::HTTP: {
       SocketTypeConfig result;
-      result.defaultPort = 80;
+      result.defaultPort = defaultPortFor(sock);
       result.httpOptions = sock.getHttp();
       result.physicalProtocol = "http";
       return kj::mv(result);
@@ -7107,7 +7147,7 @@ kj::Maybe<Server::SocketTypeConfig> Server::parseSocketType(
     case config::Socket::HTTPS: {
       auto https = sock.getHttps();
       SocketTypeConfig result;
-      result.defaultPort = 443;
+      result.defaultPort = defaultPortFor(sock);
       result.httpOptions = https.getOptions();
       result.tls = makeTlsContext(https.getTlsOptions());
       result.physicalProtocol = "https";
@@ -7127,19 +7167,12 @@ kj::Maybe<Server::SocketTypeConfig> Server::parseSocketType(
   return kj::none;
 }
 
-kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
-    kj::HttpHeaderTable::Builder& headerTableBuilder,
-    kj::ForkedPromise<void>& forkedDrainWhen,
-    bool forTest) {
-  // ---------------------------------------------------------------------------
-  // Start sockets
-  TRACE_EVENT("workerd", "listenOnSockets");
+kj::Promise<void> Server::bindSockets(config::Config::Reader config) {
+  TRACE_EVENT("workerd", "bindSockets");
   for (auto sock: config.getSockets()) {
     kj::String name = kj::str(sock.getName());
     kj::String addrStr;
     kj::Maybe<kj::Own<kj::ConnectionReceiver>> listenerOverride;
-
-    kj::Own<Service> service = lookupService(sock.getService(), kj::str("Socket \"", name, "\""));
 
     KJ_IF_SOME(override, socketOverrides.findEntry(name)) {
       KJ_SWITCH_ONEOF(override.value) {
@@ -7159,48 +7192,85 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       reportConfigError(kj::str("Socket \"", name,
           "\" has no address in the config, so must be specified on the "
           "command line with `--socket-addr`."));
+      boundSockets.add(kj::none);
       continue;
     }
+
+    kj::Own<kj::ConnectionReceiver> listener;
+    KJ_IF_SOME(l, listenerOverride) {
+      listener = kj::mv(l);
+    } else {
+      auto parsed = co_await network.parseAddress(addrStr, defaultPortFor(sock));
+      listener = parsed->listen();
+    }
+
+    if (sock.which() == config::Socket::TCP && sock.getService().hasName()) {
+      inboundListeners
+          .findOrCreate(sock.getService().getName(),
+              [&]() {
+        return decltype(inboundListeners)::Entry{
+          kj::str(sock.getService().getName()), kj::Vector<Worker::Api::InboundListener>()};
+      })
+          .add(Worker::Api::InboundListener{
+            .protocol = kj::str("tcp"),
+            .address = hostOfAddress(addrStr),
+            .port = static_cast<uint16_t>(listener->getPort()),
+          });
+    }
+
+    boundSockets.add(BoundSocket{kj::mv(listener), kj::mv(addrStr)});
+  }
+}
+
+kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
+    kj::HttpHeaderTable::Builder& headerTableBuilder,
+    kj::ForkedPromise<void>& forkedDrainWhen,
+    bool forTest) {
+  // ---------------------------------------------------------------------------
+  // Start sockets
+  TRACE_EVENT("workerd", "listenOnSockets");
+  auto sockets = config.getSockets();
+  KJ_ASSERT(boundSockets.size() == sockets.size());
+  for (auto i: kj::indices(sockets)) {
+    auto sock = sockets[i];
+    kj::String name = kj::str(sock.getName());
+
+    // Sockets that failed to bind have already reported a config error.
+    kj::Own<kj::ConnectionReceiver> listener;
+    kj::String addrStr;
+    KJ_IF_SOME(bound, boundSockets[i]) {
+      listener = kj::mv(bound.listener);
+      addrStr = kj::mv(bound.addrStr);
+      boundSockets[i] = kj::none;
+    } else {
+      continue;
+    }
+
+    kj::Own<Service> service = lookupService(sock.getService(), kj::str("Socket \"", name, "\""));
 
     auto maybeSocketConfig = parseSocketType(sock, name);
     if (maybeSocketConfig == kj::none) continue;
     auto& socketConfig = KJ_ASSERT_NONNULL(maybeSocketConfig);
 
-    using PromisedReceived = kj::Promise<kj::Own<kj::ConnectionReceiver>>;
-    PromisedReceived listener = nullptr;
-    KJ_IF_SOME(l, listenerOverride) {
-      listener = kj::mv(l);
-    } else {
-      listener = ([](kj::Promise<kj::Own<kj::NetworkAddress>> promise) -> PromisedReceived {
-        auto parsed = co_await promise;
-        co_return parsed->listen();
-      })(network.parseAddress(addrStr, socketConfig.defaultPort));
-    }
-
     KJ_IF_SOME(t, socketConfig.tls) {
-      listener = ([](kj::Promise<kj::Own<kj::ConnectionReceiver>> promise,
-                      kj::Own<kj::TlsContext> tls) -> PromisedReceived {
-        auto port = co_await promise;
-        co_return tls->wrapPort(kj::mv(port)).attach(kj::mv(tls));
-      })(kj::mv(listener), kj::mv(t));
+      listener = t->wrapPort(kj::mv(listener)).attach(kj::mv(t));
     }
 
     // Need to create rewriter before waiting on anything since `headerTableBuilder` will no longer
     // be available later.
     auto rewriter = kj::heap<HttpRewriter>(socketConfig.httpOptions, headerTableBuilder);
 
-    auto handle = kj::coCapture(
-        [this, service = kj::mv(service), rewriter = kj::mv(rewriter),
-            physicalProtocol = socketConfig.physicalProtocol, name = kj::mv(name),
-            isHttp = sock.which() != config::Socket::TCP, addrStr = kj::mv(addrStr)](
-            kj::Promise<kj::Own<kj::ConnectionReceiver>> promise) mutable -> kj::Promise<void> {
+    auto handle =
+        kj::coCapture([this, service = kj::mv(service), rewriter = kj::mv(rewriter),
+                          physicalProtocol = socketConfig.physicalProtocol, name = kj::mv(name),
+                          isHttp = sock.which() != config::Socket::TCP, addrStr = kj::mv(addrStr)](
+                          kj::Own<kj::ConnectionReceiver> listener) mutable -> kj::Promise<void> {
       if (isHttp) {
         TRACE_EVENT("workerd", "setup listenHttp");
       } else {
         TRACE_EVENT("workerd", "setup listenTcp");
       }
 
-      auto listener = co_await promise;
       KJ_IF_SOME(stream, controlOverride) {
         auto message = kj::str("{\"event\":\"listen\",\"socket\":\"", name,
             "\",\"port\":", listener->getPort(), "}\n");
@@ -7214,7 +7284,10 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       if (isHttp) {
         co_await listenHttp(kj::mv(listener), kj::mv(service), physicalProtocol, kj::mv(rewriter));
       } else {
-        co_await listenTcp(kj::mv(listener), kj::mv(service), addrStr);
+        // The authority handed to the connect() handler is the endpoint as bound, so it is
+        // truthful for a configured port of 0.
+        auto authority = kj::str(hostOfAddress(addrStr), ":", listener->getPort());
+        co_await listenTcp(kj::mv(listener), kj::mv(service), kj::mv(authority));
       }
     });
     tasks.add(handle(kj::mv(listener)).exclusiveJoin(forkedDrainWhen.addBranch()));
@@ -7313,6 +7386,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
 
   auto forkedDrainWhen = kj::Promise<void>(kj::NEVER_DONE).fork();
 
+  co_await bindSockets(config);
   co_await startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
 
   // Tests usually do not configure sockets, but they can, especially loopback sockets. Arrange

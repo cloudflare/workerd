@@ -1150,6 +1150,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   jsg::JsObject getPromiseContextTag(jsg::Lock& js);
 
+  // An object whose identity stands for this IoContext, for JS-side state scoped to it (a
+  // Durable Object's virtual port table, for instance). Created lazily; lives as long as the
+  // IoContext.
+  jsg::JsObject getPortScopeKey(jsg::Lock& js);
+
   // The IoChannelFactory must be accessed through the
   // currentIncomingRequest because it has some tracing context built in.
   //
@@ -1260,6 +1265,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   void checkFarGet(const DeleteQueue& expectedQueue, const std::type_info& type);
 
   kj::Maybe<jsg::JsRef<jsg::JsObject>> promiseContextTag;
+  kj::Maybe<jsg::JsRef<jsg::JsObject>> portScopeKey;
   kj::Maybe<jsg::JsRef<jsg::JsObject>> entrypointHandler;
 
   class Runnable {

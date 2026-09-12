@@ -289,7 +289,8 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     v8::IsolateGroup group,
     kj::Own<JsgIsolateObserver> observer,
     api::MemoryCacheProvider& memoryCacheProvider,
-    const PythonConfig& pythonConfig)
+    const PythonConfig& pythonConfig,
+    kj::Array<Worker::Api::InboundListener> inboundListeners)
     : impl(kj::heap<Impl>(v8System,
           features,
           extensions,
@@ -297,7 +298,8 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
           group,
           kj::mv(observer),
           memoryCacheProvider,
-          pythonConfig)) {}
+          pythonConfig)),
+      inboundListeners(kj::mv(inboundListeners)) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
 
 kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
@@ -305,6 +307,9 @@ kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
 }
 CompatibilityFlags::Reader WorkerdApi::getFeatureFlags() const {
   return *impl->features;
+}
+kj::ArrayPtr<const Worker::Api::InboundListener> WorkerdApi::getInboundListeners() const {
+  return inboundListeners;
 }
 jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(
     jsg::Lock& lock, Worker::Api::NewContextOptions options) const {

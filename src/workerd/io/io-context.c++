@@ -1741,6 +1741,13 @@ jsg::JsObject IoContext::getPromiseContextTag(jsg::Lock& js) {
   return KJ_REQUIRE_NONNULL(promiseContextTag).getHandle(js);
 }
 
+jsg::JsObject IoContext::getPortScopeKey(jsg::Lock& js) {
+  if (portScopeKey == kj::none) {
+    portScopeKey = jsg::JsRef(js, js.obj());
+  }
+  return KJ_REQUIRE_NONNULL(portScopeKey).getHandle(js);
+}
+
 kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
   // The promise that is returned is held by the IoContext itself, so when the
   // IoContext is destroyed, the promise will be canceled and the loop will
