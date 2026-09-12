@@ -249,7 +249,8 @@ export function eos(
     }
   } else if (writable && !wState) {
     // legacy streams
-    (stream as Stream).on('end', onlegacyfinish).on('close', onlegacyfinish);
+    (stream as Stream).on('end', onlegacyfinish);
+    (stream as Stream).on('close', onlegacyfinish);
   }
 
   // Not all streams will emit 'close' after 'aborted'.

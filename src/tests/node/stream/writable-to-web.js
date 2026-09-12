@@ -379,6 +379,66 @@ export const toWebDuckTypedInputYieldsClosedStream = {
   },
 };
 
+// A duck that also claims `writable: true` is a live legacy writable:
+// end-of-stream subscribes to its 'end'/'close'/'finish'/'error' through
+// plain on() calls (whatever on() returns), and the adapter takes the duck
+// at its word on backpressure — a `writableNeedDrain` that stays true keeps
+// the web write pending without even calling write(); a truthy non-boolean
+// return from write() counts as accepted, a falsy one as backpressure that
+// only a 'drain' the duck never emits would release.
+export const toWebLiveDuckIsTakenAtItsWord = {
+  async test() {
+    const liveDuck = (overrides) => ({
+      writable: true,
+      writableNeedDrain: false,
+      writes: [],
+      write(chunk) {
+        this.writes.push(chunk);
+        return true;
+      },
+      // A legacy emitter's on() need not return anything.
+      on() {},
+      once() {},
+      removeListener() {},
+      end() {},
+      ...overrides,
+    });
+    const outcome = (promise) =>
+      Promise.race([
+        promise.then(
+          () => 'settled',
+          () => 'rejected'
+        ),
+        scheduler.wait(50).then(() => 'pending'),
+      ]);
+
+    const liar = liveDuck({ writableNeedDrain: true });
+    const liarWriter = Writable.toWeb(liar).getWriter();
+    strictEqual(await outcome(liarWriter.write(enc.encode('x'))), 'pending');
+    strictEqual(liar.writes.length, 0);
+
+    const truthy = liveDuck({
+      write(chunk) {
+        this.writes.push(chunk);
+        return 'yes';
+      },
+    });
+    const truthyWriter = Writable.toWeb(truthy).getWriter();
+    strictEqual(await outcome(truthyWriter.write(enc.encode('x'))), 'settled');
+    strictEqual(truthy.writes.length, 1);
+
+    const falsy = liveDuck({
+      write(chunk) {
+        this.writes.push(chunk);
+        return 0;
+      },
+    });
+    const falsyWriter = Writable.toWeb(falsy).getWriter();
+    strictEqual(await outcome(falsyWriter.write(enc.encode('x'))), 'pending');
+    strictEqual(falsy.writes.length, 1);
+  },
+};
+
 // A Writable that is already destroyed or ended, or a Duplex created without
 // a writable side, yields a stream that is already closed.
 export const toWebUnwritableSourceYieldsClosedStream = {
