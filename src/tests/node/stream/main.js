@@ -26,6 +26,8 @@ export {
   toWebLyingStrategyDestroysSource,
   toWebCancelFromDataListenerIsQuiet,
   toWebInvalidHighWaterMarkLeavesSourceUntouched,
+  toWebLateErrorAfterEndIsSwallowed,
+  toWebDestroyInsidePullBecomesAbortError,
 } from 'readable-to-web';
 
 export {
@@ -67,6 +69,9 @@ export {
   toWebDuckTypedInputYieldsClosedStream,
   toWebLiveDuckIsTakenAtItsWord,
   toWebInvalidHighWaterMarkLeavesWritableUntouched,
+  toWebDestroyInsideWriteErrorsOnce,
+  toWebAbortInsideWriteFinishesTheWrite,
+  toWebInvalidWebChunkErrorsStreamOnly,
   toWebUnwritableSourceYieldsClosedStream,
   toWebStrategyFollowsWritable,
   toWebBackpressureFollowsDrain,

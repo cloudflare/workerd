@@ -36,7 +36,10 @@ The implementation under test is `src/node/internal/streams_readable.js`
   chunks pass by identity.
 - Source end → stream closes; source error → stream errors with the same
   instance; source destroyed without error → `AbortError` whose `cause` is
-  `ERR_STREAM_PREMATURE_CLOSE`.
+  `ERR_STREAM_PREMATURE_CLOSE` — also when the source destroys itself from
+  inside the `_read()` the adapter's `pull()` reaches through `resume()`.
+  An `'error'` a legacy source emits after it has ended is swallowed by the
+  no-op listener the bridge leaves behind.
 - `reader.cancel(reason)` destroys the source with `reason` (an
   `AbortError` when none is given) — through `destroyer`, so a `pipeTo()`
   whose destination fails destroys the source with the destination's error.
@@ -107,7 +110,14 @@ The implementation under test is `src/node/internal/streams_readable.js`
   node side finishing or being destroyed on its own, before any
   `writer.close()`, errors the stream with an `AbortError`;
   `writer.abort(reason)` destroys the writable with `reason` (an
-  `AbortError` when none).
+  `AbortError` when none). Re-entered from inside a `_write()`: a
+  `destroy(err)` there rejects the write in flight and `writer.closed` with
+  `err` and the node side reports it once; a `writer.abort(reason)` there
+  lets the write in flight resolve (the spec finishes an in-flight write
+  before erroring), then rejects `closed` with `reason`. A web write of a
+  chunk a byte-mode Writable cannot take (a number, a plain object) throws
+  `ERR_INVALID_ARG_TYPE` inside the sink, erroring the stream only: the
+  node writable, as in Node, stays intact and directly writable.
 
 ### Writable.fromWeb(stream, { highWaterMark, decodeStrings, objectMode, signal })
 
@@ -273,9 +283,9 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | Module | Asserts |
 | --- | --- |
 | `api-surface.js` | `node:stream/web` named and default exports are the globals; adapter statics on the classes and legacy aliases |
-| `readable-to-web.js` | delivery; argument validation; byte copy / objectMode identity; derived and explicit strategies with the pause/resume they produce; end, error, premature-close propagation; cancel (with and without reason) and pipeTo-failure destroying the source; a failing user `size()` (ledger #6, nothing uncaught); cancel from an earlier `'data'` listener (quiet); an invalid high-water mark leaving the source untouched (ledger #7); unreadable inputs |
+| `readable-to-web.js` | delivery; argument validation; byte copy / objectMode identity; derived and explicit strategies with the pause/resume they produce; end, error, premature-close propagation; cancel (with and without reason) and pipeTo-failure destroying the source; a failing user `size()` (ledger #6, nothing uncaught); cancel from an earlier `'data'` listener (quiet); an invalid high-water mark leaving the source untouched (ledger #7); a late `'error'` after end swallowed; destroy inside the pulled `_read()` → `AbortError`; unreadable inputs |
 | `readable-from-web.js` | delivery; errored/erroring sources through async iteration; validation before locking; lock and locked-input errors (ledger #1); pull on demand; end/close ordering; errors with and without a read in flight; a detached-view chunk → `TypeError`, cancel with it; destroy → cancel (reason, `null`, skipped after close); `encoding`, `objectMode`, `highWaterMark`, `signal` |
-| `writable-to-web.js` | delivery; close → end → finish; pipeTo completion; sync and async node errors; `_final` error; node-initiated end/destroy → `AbortError`; close after a direct end() waiting for a slow `_final` and rejecting with its error (sync and async), nothing uncaught; abort (with and without reason); validation; duck input and unwritable inputs → closed stream (ledger #2); a live duck (non-chaining `on()`, `needDrain` liar, truthy/falsy `write()` returns); an invalid high-water mark leaving the writable untouched (ledger #7); derived strategy; drain-driven backpressure; chunk conversion |
+| `writable-to-web.js` | delivery; close → end → finish; pipeTo completion; sync and async node errors; `_final` error; `destroy(err)` and `writer.abort()` from inside `_write` (once, in-flight write settled per spec); a non-byte web chunk erroring the stream only; node-initiated end/destroy → `AbortError`; close after a direct end() waiting for a slow `_final` and rejecting with its error (sync and async), nothing uncaught; abort (with and without reason); validation; duck input and unwritable inputs → closed stream (ledger #2); a live duck (non-chaining `on()`, `needDrain` liar, truthy/falsy `write()` returns); an invalid high-water mark leaving the writable untouched (ledger #7); derived strategy; drain-driven backpressure; chunk conversion |
 | `writable-from-web.js` | delivery; web error / sink rejection / close rejection destroying the Writable once with no unhandled rejection; back-to-back and corked writes through `_writev`; failed batch; validation before locking; lock (ledger #1); chunk conversion; `decodeStrings`/`objectMode`; end → close; destroy → abort or close; writes complete on sink acceptance |
 | `duplex-to-web.js` | pair round trip; validation; destroyed and half Duplexes; non-byte readable (ledger #3); destroy(err) erroring both halves; the whole-Duplex end-of-stream coupling of the halves |
 | `duplex-from-web.js` | a detached-view chunk destroying the duplex (`TypeError`; readable cancelled and writable aborted with it); pair round trip; objectMode strings; corked writes; failed batch; errored readable / writable and later readable error destroying the duplex (and what is left untouched); clean `for await` consumption |

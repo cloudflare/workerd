@@ -469,3 +469,52 @@ export const toWebInvalidHighWaterMarkLeavesSourceUntouched = {
     });
   },
 };
+
+// A legacy-minded source that emits 'error' after it has ended: the
+// end-of-stream bridge, done with the source, leaves a no-op 'error'
+// listener behind, so the late error is swallowed — nothing escapes, and
+// the closed stream stays closed.
+export const toWebLateErrorAfterEndIsSwallowed = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const source = new Readable({ read() {} });
+      const reader = Readable.toWeb(source).getReader();
+      source.push(enc.encode('a'));
+      source.push(null);
+      strictEqual(dec.decode((await reader.read()).value), 'a');
+      strictEqual((await reader.read()).done, true);
+      await reader.closed;
+      strictEqual(source.listenerCount('error'), 1);
+      source.emit('error', new Error('late'));
+      await reader.closed;
+      strictEqual((await reader.read()).done, true);
+    });
+  },
+};
+
+// The source destroying itself from inside the read the adapter's pull()
+// triggers (its _read(), reached through resume()): the pending web read
+// rejects with the premature-close AbortError, once, and nothing escapes.
+export const toWebDestroyInsidePullBecomesAbortError = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const source = new Readable({
+        read() {
+          this.destroy();
+        },
+      });
+      const closed = once(source, 'close');
+      const reader = Readable.toWeb(source).getReader();
+      for (const p of [reader.read(), reader.closed]) {
+        await rejects(p, (err) => {
+          strictEqual(err.name, 'AbortError');
+          strictEqual(err.code, 'ABORT_ERR');
+          strictEqual(err.cause?.code, 'ERR_STREAM_PREMATURE_CLOSE');
+          return true;
+        });
+      }
+      await closed;
+      strictEqual(source.destroyed, true);
+    });
+  },
+};
