@@ -412,3 +412,63 @@ export const fromWebWritesCompleteWhenSinkAccepts = {
     deepStrictEqual(done, ['a', 'b']);
   },
 };
+
+// Chunks are handed to the web sink by reference: a Uint8Array arrives as a
+// Buffer over the caller's own memory (a view over a SharedArrayBuffer or a
+// WebAssembly.Memory included — the default WritableStream never transfers),
+// so a sink that transfers the chunk's buffer detaches the caller's view. A
+// view over an already-detached buffer is refused synchronously by the
+// Writable itself, as in Node.
+export const fromWebChunksAreHandedOverByReference = {
+  async test() {
+    const seen = [];
+    const transferring = new WritableStream({
+      write(chunk) {
+        seen.push([chunk.constructor.name, chunk.buffer.constructor.name]);
+        if (chunk.buffer instanceof ArrayBuffer) {
+          structuredClone(chunk.buffer, { transfer: [chunk.buffer] });
+        }
+      },
+    });
+    const w = Writable.fromWeb(transferring);
+
+    const detachedBuffer = new ArrayBuffer(4);
+    const detachedView = new Uint8Array(detachedBuffer);
+    structuredClone(detachedBuffer, { transfer: [detachedBuffer] });
+    throws(() => w.write(detachedView), { name: 'TypeError' });
+
+    const shared = new Uint8Array(new SharedArrayBuffer(4));
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    const wasmView = new Uint8Array(memory.buffer, 0, 4);
+    const plain = new Uint8Array([1, 2, 3, 4]);
+    const written = [];
+    for (const chunk of [shared, plain]) {
+      await new Promise((resolve) =>
+        w.write(chunk, (err) => {
+          written.push(err);
+          resolve();
+        })
+      );
+    }
+    deepStrictEqual(written, [undefined, undefined]);
+    deepStrictEqual(seen, [
+      ['Buffer', 'SharedArrayBuffer'],
+      ['Buffer', 'ArrayBuffer'],
+    ]);
+    strictEqual(shared.byteLength, 4);
+    strictEqual(plain.byteLength, 0);
+    strictEqual(plain.buffer.detached, true);
+    // A WebAssembly.Memory's buffer cannot be transferred; the sink's
+    // attempt would throw, so it is only forwarded, by reference.
+    const forwarding = Writable.fromWeb(
+      new WritableStream({
+        write(chunk) {
+          seen.push([chunk.constructor.name, chunk.buffer === memory.buffer]);
+        },
+      })
+    );
+    await new Promise((resolve) => forwarding.write(wasmView, resolve));
+    deepStrictEqual(seen.at(-1), ['Buffer', true]);
+    strictEqual(wasmView.byteLength, 4);
+  },
+};

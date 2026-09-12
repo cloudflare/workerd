@@ -94,6 +94,7 @@ export {
   fromWebEndClosesWebStream,
   fromWebDestroyAbortsOrClosesWebStream,
   fromWebWritesCompleteWhenSinkAccepts,
+  fromWebChunksAreHandedOverByReference,
 } from 'writable-from-web';
 
 export {
@@ -121,6 +122,8 @@ export {
   fromWebPairReadableEofEndsWritable,
   fromWebPairIterationToCompletionIsClean,
   fromWebPairDestroyAbortsWriterAndCancelsReader,
+  fromWebPairDestroyInDataWithWriteInFlight,
+  fromWebPairEndInsideFinish,
 } from 'duplex-from-web';
 
 export {
