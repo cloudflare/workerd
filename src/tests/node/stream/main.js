@@ -140,6 +140,7 @@ export {
   pipelineGeneratorBetweenWebStreams,
   pipelineWebSinkErrorFailsPipeline,
   pipelineWebSourceErrorFailsPipeline,
+  pipelineLockedWebDestinationFails,
   pipelineWebSourcePreservesPromiseChunks,
   pipelineWebSinkFailureWithIdleSource,
   promisesPipelineSignalAbortsIdleWebPipeline,

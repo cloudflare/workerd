@@ -134,10 +134,12 @@ The implementation under test is `src/node/internal/streams_readable.js`
   fails the pipeline and destroys the node source (its own abort algorithm
   does not run: the stream is already errored); a failed web source
   destroys the node destination; a failed node destination — even one
-  failing while the web source is idle — cancels the web source. A signal
-  abort fails the pipeline with an `AbortError`, also when every stage is a
-  web stream and idle; a pending sink write is allowed to settle first.
-  `stream/promises` treats a trailing web stream as a destination.
+  failing while the web source is idle — cancels the web source. A web
+  destination that is already locked fails the pipeline with the lock
+  error and leaves the lock with its owner. A signal abort fails the
+  pipeline with an `AbortError`, also when every stage is a web stream and
+  idle; a pending sink write is allowed to settle first. `stream/promises`
+  treats a trailing web stream as a destination.
 
 ## Compatibility flags
 
@@ -179,7 +181,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `bodies.js` | Response/Request bodies through `Readable.toWeb` (incl. a megabyte); `Readable.fromWeb` over a Response body and a `TextDecoderStream` chain; `Writable.fromWeb` over `IdentityTransformStream` and `FixedLengthStream` (ledger #4); pipeThrough chains in both directions |
 | `consumers.js` | `text/json/buffer/arrayBuffer/blob` over web streams; multi-chunk and string decoding; lock release; error propagation; node Readables and async generators |
 | `readable-from.js` | `Readable.from(webStream)`: chunk types by objectMode, destroy → cancel + lock release, error propagation |
-| `pipeline-web.js` | web source/destination/transform stages, generator stages, `TransformStream` head; sink/source/node-sink failures (incl. a node sink failing while the web source is idle, and a web sink erroring or rejecting a write while the source is idle); promise-valued chunks by identity; `stream/promises` trailing web destination, `end: false`, signal abort of a node-headed and of an idle all-web pipeline |
+| `pipeline-web.js` | web source/destination/transform stages, generator stages, `TransformStream` head; sink/source/node-sink failures (incl. a node sink failing while the web source is idle, and a web sink erroring or rejecting a write while the source is idle); promise-valued chunks by identity; a locked web destination (callback and promise forms, node and web sources); `stream/promises` trailing web destination, `end: false`, signal abort of a node-headed and of an idle all-web pipeline |
 | `which-impl.js` | implementation detection |
 
 ## Legacy (unflagged) behaviors

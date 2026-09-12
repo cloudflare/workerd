@@ -238,7 +238,15 @@ async function pumpToWeb(
     writable = writable.writable;
   }
   // https://streams.spec.whatwg.org/#example-manual-write-with-backpressure
-  const writer = writable.getWriter();
+  let writer;
+  try {
+    writer = writable.getWriter();
+  } catch (err) {
+    // A locked destination fails the pump as a failed write would, once the
+    // pipeline has finished wiring its stages.
+    nextTick(finish, err);
+    return;
+  }
   // The pipeline's teardown aborts the destination with the pipeline's
   // error, which also wakes a pump waiting on the writer. A pump that has
   // completed is left alone: with end false its writer stays open.
