@@ -7,7 +7,7 @@ description: Step-by-step guide for updating the V8 JavaScript engine in workerd
 
 V8 updates are high-risk changes that require careful patch management and human judgment for merge conflicts. This skill covers the full process. **Always confirm the target version with the developer before starting.**
 
-See also: `docs/v8-updates.md` for the original reference document.
+See also the [V8 update reference](../../../docs/v8-updates.md).
 
 **Always** communicate and confirm with the developer at each step.
 **Never** take irreversible actions (like dropping patches or updating hashes) without explicit confirmation.
