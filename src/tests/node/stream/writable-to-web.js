@@ -559,3 +559,96 @@ export const toWebChunksReachSinkAsNodeWrites = {
     strictEqual(objects.chunks[1], u8);
   },
 };
+
+// The node _write() destroying its own stream with an error, synchronously,
+// before completing the write: the web write in flight rejects with that
+// error, so does writer.closed, and the node side reports it once —
+// 'error', then 'close'. Nothing escapes.
+export const toWebDestroyInsideWriteErrorsOnce = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const boom = new Error('destroyed in _write');
+      const writable = new Writable({
+        write(chunk, encoding, callback) {
+          this.destroy(boom);
+          callback();
+        },
+      });
+      const events = [];
+      writable.on('error', (err) => events.push(['error', err]));
+      writable.on('close', () => events.push(['close']));
+      const closed = once(writable, 'close');
+      const writer = Writable.toWeb(writable).getWriter();
+      await rejects(writer.write(enc.encode('x')), (err) => err === boom);
+      await rejects(writer.closed, (err) => err === boom);
+      await closed;
+      deepStrictEqual(events, [['error', boom], ['close']]);
+    });
+  },
+};
+
+// writer.abort(reason) issued from inside the node _write() the write in
+// flight reached: that write still resolves — the spec lets an in-flight
+// write finish before the stream errors — abort() resolves, writer.closed
+// rejects with the reason, and the node side is destroyed with it, once.
+export const toWebAbortInsideWriteFinishesTheWrite = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const reason = new Error('aborted in _write');
+      let writer;
+      let aborted;
+      const writable = new Writable({
+        write(chunk, encoding, callback) {
+          aborted = writer.abort(reason);
+          callback();
+        },
+      });
+      const events = [];
+      writable.on('error', (err) => events.push(['error', err]));
+      writable.on('close', () => events.push(['close']));
+      const closed = once(writable, 'close');
+      writer = Writable.toWeb(writable).getWriter();
+      await writer.write(enc.encode('x'));
+      await aborted;
+      await rejects(writer.closed, (err) => err === reason);
+      await closed;
+      strictEqual(writable.errored, reason);
+      deepStrictEqual(events, [['error', reason], ['close']]);
+    });
+  },
+};
+
+// A web write of something a byte-mode Writable cannot take (a number, a
+// plain object): the node write() throws ERR_INVALID_ARG_TYPE inside the
+// sink, which errors the web stream — the write and writer.closed reject
+// with it — while the node writable itself, as in Node, is left intact:
+// neither destroyed nor errored, still writable directly.
+export const toWebInvalidWebChunkErrorsStreamOnly = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      for (const chunk of [42, { a: 1 }]) {
+        const { writable, chunks } = recordingWritable();
+        const events = [];
+        writable.on('error', (err) => events.push(['error', err]));
+        writable.on('close', () => events.push(['close']));
+        const writer = Writable.toWeb(writable).getWriter();
+        const check = (err) => {
+          strictEqual(err.name, 'TypeError');
+          strictEqual(err.code, 'ERR_INVALID_ARG_TYPE');
+          return true;
+        };
+        await rejects(writer.write(chunk), check);
+        await rejects(writer.closed, check);
+        strictEqual(writable.destroyed, false);
+        strictEqual(writable.errored, null);
+        deepStrictEqual(events, []);
+        writable.end(enc.encode('direct'));
+        await once(writable, 'finish');
+        deepStrictEqual(
+          chunks.map((c) => dec.decode(c)),
+          ['direct']
+        );
+      }
+    });
+  },
+};
