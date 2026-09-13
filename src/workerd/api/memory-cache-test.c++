@@ -2,7 +2,6 @@
 // leader/waiter handoff, and the FallbackDoneCallback contract. The storage and
 // coordination logic itself is covered by the Rust crate's own tests.
 
-#include "memory-cache-v2-test.h"
 #include "memory-cache.h"
 
 #include <workerd/io/trace.h>
@@ -38,7 +37,7 @@ KJ_TEST("serializes concurrent final release and acquisition") {
   }
   auto first = provider.getUse("shared"_kj, testLimits());
   auto second = provider.getUse("shared"_kj, testLimits());
-  KJ_EXPECT(getMemoryCacheV2StatsForTest(*first).bindings == 2);
+  KJ_EXPECT(first->getStatsForTest().bindings == 2);
 }
 
 KJ_TEST("provider teardown does not invalidate a live binding") {
@@ -78,17 +77,17 @@ KJ_TEST("canceled waiters unlink immediately") {
     {
       auto follower = cache->getWithFallback(key, span);
       KJ_ASSERT(follower.is<kj::Promise<Outcome>>());
-      KJ_EXPECT(getMemoryCacheV2StatsForTest(*cache).waiters == 1);
+      KJ_EXPECT(cache->getStatsForTest().waiters == 1);
     }
-    KJ_EXPECT(getMemoryCacheV2StatsForTest(*cache).waiters == 0);
-    KJ_EXPECT(getMemoryCacheV2StatsForTest(*cache).canceledWaiters == 1);
+    KJ_EXPECT(cache->getStatsForTest().waiters == 0);
+    KJ_EXPECT(cache->getStatsForTest().canceledWaiters == 1);
 
     return kj::mv(leader.get<kj::Promise<Outcome>>())
         .then([cache = kj::mv(cache)](Outcome outcome) mutable {
       KJ_ASSERT(outcome.is<FallbackDoneCallback>());
       SpanBuilder span(nullptr);
       outcome.get<FallbackDoneCallback>()(kj::none, span);
-      auto stats = getMemoryCacheV2StatsForTest(*cache);
+      auto stats = cache->getStatsForTest();
       KJ_EXPECT(stats.inFlightFallbacks == 0);
       KJ_EXPECT(stats.waiters == 0);
       KJ_EXPECT(stats.canceledWaiters == 1);
@@ -116,7 +115,7 @@ KJ_TEST("abandoned fallback token promotes the next waiter") {
         KJ_ASSERT(outcome.is<FallbackDoneCallback>());
         SpanBuilder span(nullptr);
         outcome.get<FallbackDoneCallback>()(kj::none, span);
-        KJ_EXPECT(getMemoryCacheV2StatsForTest(*cache).inFlightFallbacks == 0);
+        KJ_EXPECT(cache->getStatsForTest().inFlightFallbacks == 0);
       });
     });
   });
@@ -163,13 +162,13 @@ KJ_TEST("canceled fallback waiters do not overflow the stack") {
       KJ_ASSERT(waiter.is<kj::Promise<Outcome>>());
     }
 
-    KJ_EXPECT(getMemoryCacheV2StatsForTest(*cache).waiters == 0);
-    KJ_EXPECT(getMemoryCacheV2StatsForTest(*cache).canceledWaiters == waiterCount);
+    KJ_EXPECT(cache->getStatsForTest().waiters == 0);
+    KJ_EXPECT(cache->getStatsForTest().canceledWaiters == waiterCount);
 
     return leaderCallback.then([cache = kj::mv(cache)](FallbackDoneCallback callback) mutable {
       SpanBuilder span(nullptr);
       callback(kj::none, span);
-      KJ_EXPECT(getMemoryCacheV2StatsForTest(*cache).inFlightFallbacks == 0);
+      KJ_EXPECT(cache->getStatsForTest().inFlightFallbacks == 0);
     });
   });
 }
