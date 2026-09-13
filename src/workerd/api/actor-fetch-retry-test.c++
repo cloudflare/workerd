@@ -234,6 +234,11 @@ class RetryRecordingObserver final: public RequestObserver {
     state.outcomes.add(outcome);
   }
 
+  void setNextSubrequestRetryEligibility(
+      SubrequestBodyRewindable, ActorCallTargetRetryable targetRetryable) override {
+    KJ_EXPECT(targetRetryable.toBool() == state.retriesAllowed.toBool());
+  }
+
  private:
   ReplayState& state;
 };

@@ -21,8 +21,10 @@ namespace workerd {
 class IoContext;
 
 // Whether an outgoing subrequest's request body can be rewound (e.g. a buffered or null body), and
-// so the request could be re-sent. See RequestObserver::setNextSubrequestBodyRewindable().
+// so the request could be re-sent. See RequestObserver::setNextSubrequestRetryEligibility().
 WD_STRONG_BOOL(SubrequestBodyRewindable);
+// Whether an outgoing actor call's target supports runtime retries. Colo-local actors do not.
+WD_STRONG_BOOL(ActorCallTargetRetryable);
 // Whether an outgoing request contributes to the logical subrequest count.
 WD_STRONG_BOOL(CountSubrequest);
 
@@ -148,12 +150,12 @@ class RequestObserver: public kj::Refcounted {
   virtual kj::Own<WorkerInterface> wrapActorSubrequestClient(kj::Own<WorkerInterface> client);
 
   // Record whether the next outgoing subrequest's request body can be rewound (e.g. a buffered or
-  // null fetch body). Consumed when the subrequest client for that call is constructed. The
-  // set->consume window is synchronous, so the value always corresponds to the next call. This is
-  // intentionally target-agnostic: the signal is a property of the request body, not of the callee,
-  // so it applies equally to actor and (potentially, in the future) non-actor subrequests. No-op in
-  // the base observer; edgeworker overrides it to feed retry classification.
-  virtual void setNextSubrequestBodyRewindable(SubrequestBodyRewindable bodyRewindable) {}
+  // null fetch body) and whether its target supports runtime retries. Consumed when the
+  // subrequest client for that call is constructed. The set->consume window is synchronous, so the
+  // values always correspond to the next call. No-op in the base observer; edgeworker overrides it
+  // to feed retry classification.
+  virtual void setNextSubrequestRetryEligibility(
+      SubrequestBodyRewindable bodyRewindable, ActorCallTargetRetryable targetRetryable) {}
 
   // Records an additional outgoing actor call started by a runtime retry loop.
   virtual void recordActorRetry(ActorRetryCallType callType) {}

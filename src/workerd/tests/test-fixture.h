@@ -60,7 +60,7 @@ struct TestFixture {
     kj::Maybe<uint64_t> holderToken;
     // If set, called to create the RequestObserver for each IncomingRequest instead of the default
     // no-op base RequestObserver. Lets tests observe metrics hooks (e.g. recording the values
-    // passed to setNextSubrequestBodyRewindable()).
+    // passed to setNextSubrequestRetryEligibility()).
     kj::Maybe<kj::Function<kj::Own<RequestObserver>()>> requestObserverFactory;
     // If set, incremented whenever the fixture's limit enforcer checks a new subrequest.
     kj::Maybe<uint&> checkedSubrequestCount;
