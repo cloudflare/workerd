@@ -235,13 +235,14 @@ export const setStatus = {
     errorSpan.setStatus({ code: 'error', message: 'second error' });
     errorSpan.setStatus({ code: 'unset' });
     errorSpan.end();
+    // All span mutations are no-ops after end().
     errorSpan.setStatus({ code: 'ok' });
 
     const okSpan = publicTracing.startSpan('status-ok-op');
     okSpan.setAttribute('test', 'setStatus');
     okSpan.setStatus({ code: 'error', message: 'temporary error' });
-    okSpan.setStatus({ code: 'ok', message: 'ignored' });
-    okSpan.setStatus({ code: 'error', message: 'also ignored' });
+    okSpan.setStatus({ code: 'ok', message: 'not retained' });
+    okSpan.setStatus({ code: 'error', message: 'error after ok' });
     okSpan.end();
   },
 };

@@ -103,7 +103,7 @@ export const validateSpans = {
         { type: 'status', status: { code: 'ok' } },
         {
           type: 'status',
-          status: { code: 'error', message: 'also ignored' },
+          status: { code: 'error', message: 'error after ok' },
         },
       ]);
     }
