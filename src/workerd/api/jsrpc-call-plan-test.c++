@@ -47,6 +47,23 @@ class FailingOutgoingFactory final: public Fetcher::OutgoingFactory {
   uint& callCount;
 };
 
+class RejectingClaimObserver final: public RequestObserver {
+ public:
+  void claimRetryTokenBeforeUserCode() override {
+    ++claimCount;
+    auto exception = KJ_EXCEPTION(FAILED, "retry claim rejected");
+    exception.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+    kj::throwFatalException(kj::mv(exception));
+  }
+
+  void delivered() override {
+    ++deliveredCount;
+  }
+
+  uint claimCount = 0;
+  uint deliveredCount = 0;
+};
+
 capnp::Capability::Client brokenCap() {
   return capnp::Capability::Client(KJ_EXCEPTION(FAILED, "test cap"));
 }
@@ -515,6 +532,98 @@ KJ_TEST("an unresolved retry-capable destination supports promise pipelining") {
   });
 
   KJ_EXPECT(destinationCallCount == 1);
+}
+
+KJ_TEST("JSRPC claim rejection reaches the session capability before delivery") {
+  auto observer = kj::refcounted<RejectingClaimObserver>();
+  TestFixture fixture(TestFixture::SetupParams{
+    .actorId = Worker::Actor::Id(kj::str("jsrpc-claim-test")),
+    .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
+        [&observer]() -> kj::Own<RequestObserver> { return kj::addRef(*observer); }),
+  });
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto event = kj::heap<JsRpcSessionCustomEvent>(JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
+  auto cap = event->getCap();
+
+  auto eventException = kj::runCatchingExceptions(
+      [&]() { entrypoint->customEvent(kj::mv(event)).wait(fixture.getWaitScope()); });
+  auto& rejectedEvent = KJ_ASSERT_NONNULL(eventException);
+  KJ_EXPECT(rejectedEvent.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none);
+  KJ_EXPECT(rejectedEvent.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) == kj::none);
+  KJ_EXPECT(observer->claimCount == 1);
+  KJ_EXPECT(observer->deliveredCount == 0);
+
+  auto capException =
+      kj::runCatchingExceptions([&]() { cap.whenResolved().wait(fixture.getWaitScope()); });
+  auto& rejectedCap = KJ_ASSERT_NONNULL(capException);
+  KJ_EXPECT(rejectedCap.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none);
+  KJ_EXPECT(rejectedCap.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) == kj::none);
+}
+
+KJ_TEST("actor JSRPC method failures carry delivered details") {
+  static constexpr auto source = R"(
+    import { DurableObject } from "cloudflare:workers";
+    export default class extends DurableObject {
+      fail() { throw new Error("method failed"); }
+    }
+  )"_kj;
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = source,
+    .actorId = Worker::Actor::Id(kj::str("jsrpc-delivery-test")),
+    .actorClassName = "default"_kj,
+  });
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto event = kj::heap<JsRpcSessionCustomEvent>(JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
+  auto cap = event->getCap();
+  auto session = entrypoint->customEvent(kj::mv(event)).eagerlyEvaluate(nullptr);
+
+  auto callRequest = cap.callRequest();
+  callRequest.setMethodName("fail");
+  auto exception =
+      kj::runCatchingExceptions([&]() { callRequest.send().wait(fixture.getWaitScope()); });
+  auto& methodFailure = KJ_ASSERT_NONNULL(exception);
+  KJ_EXPECT(methodFailure.getDescription().contains("method failed"), methodFailure);
+  KJ_EXPECT(methodFailure.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) != kj::none);
+  KJ_EXPECT(methodFailure.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none);
+  KJ_EXPECT(methodFailure.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none);
+
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
+}
+
+KJ_TEST("actor JSRPC session abort marks in-flight calls delivered") {
+  static constexpr auto source = R"(
+    import { DurableObject } from "cloudflare:workers";
+    export default class extends DurableObject {
+      hang() {
+        this.ctx.abort("test abort");
+        return new Promise(() => {});
+      }
+    }
+  )"_kj;
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = source,
+    .actorId = Worker::Actor::Id(kj::str("jsrpc-abort-test")),
+    .actorClassName = "default"_kj,
+  });
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto event = kj::heap<JsRpcSessionCustomEvent>(JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
+  auto cap = event->getCap();
+  auto session = entrypoint->customEvent(kj::mv(event)).eagerlyEvaluate(nullptr);
+
+  auto hangRequest = cap.callRequest();
+  hangRequest.setMethodName("hang");
+  auto hangException =
+      kj::runCatchingExceptions([&]() { hangRequest.send().wait(fixture.getWaitScope()); });
+  auto& abortedCall = KJ_ASSERT_NONNULL(hangException);
+  KJ_EXPECT(abortedCall.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) != kj::none, abortedCall);
+  KJ_EXPECT(
+      abortedCall.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, abortedCall);
+  KJ_EXPECT(abortedCall.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none);
+
+  auto sessionException =
+      kj::runCatchingExceptions([&]() { session.wait(fixture.getWaitScope()); });
+  KJ_ASSERT_NONNULL(sessionException);
 }
 
 class RecordingSink final: public WritableStreamSink {
