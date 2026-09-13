@@ -11,11 +11,11 @@ static constexpr size_t MAX_KEY_SIZE = 2 * 1024;
 
 // Attempts to serialize a JavaScript value. If that fails, this function throws
 // a tunneled exception, see jsg::createTunneledException().
-static kj::Own<CacheValue> hackySerialize(jsg::Lock& js, jsg::JsRef<jsg::JsValue>& value) {
+static kj::Array<kj::byte> hackySerialize(jsg::Lock& js, jsg::JsRef<jsg::JsValue>& value) {
   JSG_TRY(js) {
     jsg::Serializer serializer(js);
     serializer.write(js, value.getHandle(js));
-    return kj::atomicRefcounted<CacheValue>(serializer.release().data);
+    return serializer.release().data;
   }
   JSG_CATCH(exception) {
     // We run into big problems with tunneled exceptions here. When
@@ -93,7 +93,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
 
                 auto serialized = hackySerialize(js, result.value);
                 fallbackSpan->setTag(
-                    "fallback_result_size"_kjc, static_cast<double>(serialized->size()));
+                    "fallback_result_size"_kjc, static_cast<double>(serialized.size()));
 
                 KJ_IF_SOME(expiration, result.expiration) {
                   JSG_REQUIRE(
