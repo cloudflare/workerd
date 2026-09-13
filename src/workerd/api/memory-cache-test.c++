@@ -1,29 +1,21 @@
-// Regression test: a FallbackDoneCallback returned by getWithFallback() must
-// remain safe to invoke even after the SharedMemoryCache::Use that created it
-// has been destroyed. Previously, the callback captured a bare pointer to the
-// Use, leading to a use-after-free when the callback outlived the Use.
-//
-// This is representative of production behavior: MemoryCache::read() on a
-// shared cache can queue fallback callbacks across isolates via
-// CrossThreadPromiseFulfiller. If one worker's fallback fails,
-// handleFallbackFailure() ships a new FallbackDoneCallback to the next queued
-// worker — which may be on a different thread. If the originating worker's
-// isolate is torn down before that callback fires, the Use is destroyed while
-// the callback is still live. This test simulates that sequence: obtain a
-// callback, destroy the Use, then invoke it.
+// Tests for the C++ side of the memory cache: binding lifetime, singleflight
+// leader/waiter handoff, and the FallbackDoneCallback contract. The storage and
+// coordination logic itself is covered by the Rust crate's own tests.
 
 #include "memory-cache-v2-test.h"
 #include "memory-cache.h"
 
 #include <workerd/io/trace.h>
 #include <workerd/tests/test-fixture.h>
-#include <workerd/util/autogate.h>
 
 #include <kj/test.h>
 #include <kj/thread.h>
 
 namespace workerd::api {
 namespace {
+
+using Outcome = MemoryCacheUse::GetWithFallbackOutcome;
+using FallbackDoneCallback = MemoryCacheUse::FallbackDoneCallback;
 
 static MemoryCacheLimits testLimits() {
   return {
@@ -33,17 +25,7 @@ static MemoryCacheLimits testLimits() {
   };
 }
 
-static bool memoryCacheV2Enabled() {
-  return util::Autogate::isEnabled(util::AutogateKey::MEMORY_CACHE_V2);
-}
-
-KJ_TEST("MemoryCacheProvider captures its implementation at construction") {
-  const auto& clock = kj::systemCoarseMonotonicClock();
-  MemoryCacheProvider provider(clock);
-  KJ_EXPECT(isMemoryCacheV2ForTest(provider) == memoryCacheV2Enabled());
-}
-
-KJ_TEST("V2 serializes concurrent final release and acquisition") {
+KJ_TEST("serializes concurrent final release and acquisition") {
   auto cacheNamespace = MemoryCacheNamespace::create(MemoryCachePolicy{kj::none});
   auto run = [&cacheNamespace]() {
     for (size_t i = 0; i < 1000; ++i) {
@@ -59,9 +41,7 @@ KJ_TEST("V2 serializes concurrent final release and acquisition") {
   KJ_EXPECT(getMemoryCacheV2StatsForTest(*first).bindings == 2);
 }
 
-KJ_TEST("V2 provider teardown does not invalidate a live binding") {
-  if (!memoryCacheV2Enabled()) return;
-
+KJ_TEST("provider teardown does not invalidate a live binding") {
   TestFixture fixture;
   fixture.runInIoContext([&](const TestFixture::Environment&) -> kj::Promise<void> {
     kj::Own<MemoryCacheUse> use;
@@ -74,20 +54,19 @@ KJ_TEST("V2 provider teardown does not invalidate a live binding") {
 
     SpanBuilder span(nullptr);
     auto result = use->getWithFallback(kj::str("key"), span);
-    KJ_ASSERT(result.is<kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>());
-    return kj::mv(result.get<kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>())
-        .then([use = kj::mv(use), privateUse = kj::mv(privateUse)](
-                  SharedMemoryCache::Use::GetWithFallbackOutcome outcome) mutable {
+    KJ_ASSERT(result.is<kj::Promise<Outcome>>());
+    return kj::mv(result.get<kj::Promise<Outcome>>())
+        .then([use = kj::mv(use), privateUse = kj::mv(privateUse)](Outcome outcome) mutable {
       (void)use;
       (void)privateUse;
-      KJ_ASSERT(outcome.is<SharedMemoryCache::Use::FallbackDoneCallback>());
+      KJ_ASSERT(outcome.is<FallbackDoneCallback>());
       SpanBuilder span(nullptr);
-      outcome.get<SharedMemoryCache::Use::FallbackDoneCallback>()(kj::none, span);
+      outcome.get<FallbackDoneCallback>()(kj::none, span);
     });
   });
 }
 
-KJ_TEST("V2 canceled waiters unlink immediately") {
+KJ_TEST("canceled waiters unlink immediately") {
   TestFixture fixture;
   fixture.runInIoContext([&](const TestFixture::Environment&) -> kj::Promise<void> {
     auto cacheNamespace = MemoryCacheNamespace::create(MemoryCachePolicy{kj::none});
@@ -95,21 +74,20 @@ KJ_TEST("V2 canceled waiters unlink immediately") {
     auto key = kj::str("key");
     SpanBuilder span(nullptr);
     auto leader = cache->getWithFallback(key, span);
-    KJ_ASSERT(leader.is<kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>());
+    KJ_ASSERT(leader.is<kj::Promise<Outcome>>());
     {
       auto follower = cache->getWithFallback(key, span);
-      KJ_ASSERT(follower.is<kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>());
+      KJ_ASSERT(follower.is<kj::Promise<Outcome>>());
       KJ_EXPECT(getMemoryCacheV2StatsForTest(*cache).waiters == 1);
     }
     KJ_EXPECT(getMemoryCacheV2StatsForTest(*cache).waiters == 0);
     KJ_EXPECT(getMemoryCacheV2StatsForTest(*cache).canceledWaiters == 1);
 
-    return kj::mv(leader.get<kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>())
-        .then([cache = kj::mv(cache)](
-                  SharedMemoryCache::Use::GetWithFallbackOutcome outcome) mutable {
-      KJ_ASSERT(outcome.is<SharedMemoryCache::Use::FallbackDoneCallback>());
+    return kj::mv(leader.get<kj::Promise<Outcome>>())
+        .then([cache = kj::mv(cache)](Outcome outcome) mutable {
+      KJ_ASSERT(outcome.is<FallbackDoneCallback>());
       SpanBuilder span(nullptr);
-      outcome.get<SharedMemoryCache::Use::FallbackDoneCallback>()(kj::none, span);
+      outcome.get<FallbackDoneCallback>()(kj::none, span);
       auto stats = getMemoryCacheV2StatsForTest(*cache);
       KJ_EXPECT(stats.inFlightFallbacks == 0);
       KJ_EXPECT(stats.waiters == 0);
@@ -118,7 +96,7 @@ KJ_TEST("V2 canceled waiters unlink immediately") {
   });
 }
 
-KJ_TEST("V2 abandoned fallback token promotes the next waiter") {
+KJ_TEST("abandoned fallback token promotes the next waiter") {
   TestFixture fixture;
   fixture.runInIoContext([&](const TestFixture::Environment&) -> kj::Promise<void> {
     auto cacheNamespace = MemoryCacheNamespace::create(MemoryCachePolicy{kj::none});
@@ -127,27 +105,24 @@ KJ_TEST("V2 abandoned fallback token promotes the next waiter") {
     SpanBuilder span(nullptr);
     auto leader = cache->getWithFallback(key, span);
     auto follower = cache->getWithFallback(key, span);
-    KJ_ASSERT(leader.is<kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>());
-    KJ_ASSERT(follower.is<kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>());
-    auto followerPromise =
-        kj::mv(follower.get<kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>());
-    return kj::mv(leader.get<kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>())
-        .then([follower = kj::mv(followerPromise), cache = kj::mv(cache)](
-                  SharedMemoryCache::Use::GetWithFallbackOutcome outcome) mutable {
-      KJ_ASSERT(outcome.is<SharedMemoryCache::Use::FallbackDoneCallback>());
-      { auto abandoned = kj::mv(outcome.get<SharedMemoryCache::Use::FallbackDoneCallback>()); }
-      return kj::mv(follower).then(
-          [cache = kj::mv(cache)](SharedMemoryCache::Use::GetWithFallbackOutcome outcome) {
-        KJ_ASSERT(outcome.is<SharedMemoryCache::Use::FallbackDoneCallback>());
+    KJ_ASSERT(leader.is<kj::Promise<Outcome>>());
+    KJ_ASSERT(follower.is<kj::Promise<Outcome>>());
+    auto followerPromise = kj::mv(follower.get<kj::Promise<Outcome>>());
+    return kj::mv(leader.get<kj::Promise<Outcome>>())
+        .then([follower = kj::mv(followerPromise), cache = kj::mv(cache)](Outcome outcome) mutable {
+      KJ_ASSERT(outcome.is<FallbackDoneCallback>());
+      { auto abandoned = kj::mv(outcome.get<FallbackDoneCallback>()); }
+      return kj::mv(follower).then([cache = kj::mv(cache)](Outcome outcome) {
+        KJ_ASSERT(outcome.is<FallbackDoneCallback>());
         SpanBuilder span(nullptr);
-        outcome.get<SharedMemoryCache::Use::FallbackDoneCallback>()(kj::none, span);
+        outcome.get<FallbackDoneCallback>()(kj::none, span);
         KJ_EXPECT(getMemoryCacheV2StatsForTest(*cache).inFlightFallbacks == 0);
       });
     });
   });
 }
 
-KJ_TEST("V2 fallback callback is one-shot") {
+KJ_TEST("fallback callback is one-shot") {
   TestFixture fixture;
   fixture.runInIoContext([&](const TestFixture::Environment&) -> kj::Promise<void> {
     auto cacheNamespace = MemoryCacheNamespace::create(MemoryCachePolicy{kj::none});
@@ -155,11 +130,10 @@ KJ_TEST("V2 fallback callback is one-shot") {
     auto key = kj::str("key");
     SpanBuilder span(nullptr);
     auto leader = cache->getWithFallback(key, span);
-    KJ_ASSERT(leader.is<kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>());
-    return kj::mv(leader.get<kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>())
-        .then([](SharedMemoryCache::Use::GetWithFallbackOutcome outcome) {
-      KJ_ASSERT(outcome.is<SharedMemoryCache::Use::FallbackDoneCallback>());
-      auto callback = kj::mv(outcome.get<SharedMemoryCache::Use::FallbackDoneCallback>());
+    KJ_ASSERT(leader.is<kj::Promise<Outcome>>());
+    return kj::mv(leader.get<kj::Promise<Outcome>>()).then([](Outcome outcome) {
+      KJ_ASSERT(outcome.is<FallbackDoneCallback>());
+      auto callback = kj::mv(outcome.get<FallbackDoneCallback>());
       SpanBuilder span(nullptr);
       callback(kj::none, span);
       KJ_EXPECT_THROW_MESSAGE(
@@ -168,7 +142,7 @@ KJ_TEST("V2 fallback callback is one-shot") {
   });
 }
 
-KJ_TEST("V2 canceled fallback waiters do not overflow the stack") {
+KJ_TEST("canceled fallback waiters do not overflow the stack") {
   TestFixture fixture;
   fixture.runInIoContext([&](const TestFixture::Environment&) -> kj::Promise<void> {
     auto cacheNamespace = MemoryCacheNamespace::create(MemoryCachePolicy{kj::none});
@@ -177,71 +151,27 @@ KJ_TEST("V2 canceled fallback waiters do not overflow the stack") {
     SpanBuilder span(nullptr);
 
     auto leader = cache->getWithFallback(key, span);
-    KJ_ASSERT(leader.is<kj::Promise<MemoryCacheUse::GetWithFallbackOutcome>>());
-    auto leaderCallback = kj::mv(leader.get<kj::Promise<MemoryCacheUse::GetWithFallbackOutcome>>())
-                              .then([](MemoryCacheUse::GetWithFallbackOutcome outcome) {
-      KJ_ASSERT(outcome.is<MemoryCacheUse::FallbackDoneCallback>());
-      return kj::mv(outcome.get<MemoryCacheUse::FallbackDoneCallback>());
+    KJ_ASSERT(leader.is<kj::Promise<Outcome>>());
+    auto leaderCallback = kj::mv(leader.get<kj::Promise<Outcome>>()).then([](Outcome outcome) {
+      KJ_ASSERT(outcome.is<FallbackDoneCallback>());
+      return kj::mv(outcome.get<FallbackDoneCallback>());
     });
 
     constexpr size_t waiterCount = 50'000;
     for (size_t i = 0; i < waiterCount; ++i) {
       auto waiter = cache->getWithFallback(key, span);
-      KJ_ASSERT(waiter.is<kj::Promise<MemoryCacheUse::GetWithFallbackOutcome>>());
+      KJ_ASSERT(waiter.is<kj::Promise<Outcome>>());
     }
 
     KJ_EXPECT(getMemoryCacheV2StatsForTest(*cache).waiters == 0);
     KJ_EXPECT(getMemoryCacheV2StatsForTest(*cache).canceledWaiters == waiterCount);
 
-    return leaderCallback.then(
-        [cache = kj::mv(cache)](MemoryCacheUse::FallbackDoneCallback callback) mutable {
+    return leaderCallback.then([cache = kj::mv(cache)](FallbackDoneCallback callback) mutable {
       SpanBuilder span(nullptr);
       callback(kj::none, span);
       KJ_EXPECT(getMemoryCacheV2StatsForTest(*cache).inFlightFallbacks == 0);
     });
   });
-}
-
-KJ_TEST("regression: FallbackDoneCallback survives Use destruction") {
-  kj::EventLoop loop;
-  kj::WaitScope waitScope(loop);
-
-  const auto& clock = kj::systemCoarseMonotonicClock();
-  auto cache = SharedMemoryCache::create(kj::none, "test-cache"_kj, kj::none, clock);
-
-  auto limits = testLimits();
-  auto key = kj::str("test-key");
-
-  SpanBuilder noopSpan(nullptr);
-
-  kj::Maybe<SharedMemoryCache::Use::FallbackDoneCallback> savedCallback;
-
-  {
-    SharedMemoryCache::Use useA(kj::atomicAddRef(*cache), limits);
-
-    // Trigger a cache miss and save the callback.
-    auto result = useA.getWithFallback(key, noopSpan);
-    KJ_ASSERT(result.is<kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>());
-    auto& promise = result.get<kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>();
-    KJ_ASSERT(promise.poll(waitScope));
-    auto outcome = promise.wait(waitScope);
-    KJ_ASSERT(outcome.is<SharedMemoryCache::Use::FallbackDoneCallback>());
-    savedCallback = kj::mv(outcome.get<SharedMemoryCache::Use::FallbackDoneCallback>());
-  }
-
-  auto& callback = KJ_ASSERT_NONNULL(savedCallback);
-  callback(kj::none, noopSpan);
-
-  // If we reach here without crashing, the fix is working. The InProgress
-  // entry should have been cleaned up since there are no waiters.
-
-  // Verify the cache is still functional after the callback.
-  {
-    SharedMemoryCache::Use useC(kj::atomicAddRef(*cache), limits);
-    auto cached = useC.getWithoutFallback(key, noopSpan);
-    // Key should not be in cache (fallback failed, no value stored).
-    KJ_ASSERT(cached == kj::none);
-  }
 }
 
 }  // namespace

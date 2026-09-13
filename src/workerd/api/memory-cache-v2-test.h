@@ -12,6 +12,5 @@ struct MemoryCacheV2TestStats {
 };
 
 MemoryCacheV2TestStats getMemoryCacheV2StatsForTest(const MemoryCacheUse& use);
-bool isMemoryCacheV2ForTest(const MemoryCacheProvider& provider);
 
 }  // namespace workerd::api
