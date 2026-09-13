@@ -246,6 +246,30 @@ export const setStatus = {
   },
 };
 
+export const updateName = {
+  async test() {
+    const span = publicTracing.startSpan('update-name-original');
+    span.setAttribute('test', 'updateName');
+    assert.strictEqual(span.updateName('update-name-intermediate'), span);
+    span.updateName(`updated-${'x'.repeat(100)}`);
+    span.end();
+    span.updateName('update-name-after-end');
+  },
+};
+
+export const updateInvocationSpan = {
+  async test() {
+    const span = publicTracing.getActiveSpan();
+    assert(span);
+    span.setAttribute('test', 'updateInvocationSpan');
+    assert.strictEqual(span.updateName('updated-invocation'), span);
+    assert.strictEqual(
+      span.setStatus({ code: 'error', message: 'invocation error' }),
+      span
+    );
+  },
+};
+
 // Verify that nested withSpan calls produce correctly nested spans. This exercises the
 // AsyncContextFrame push path in enterSpan: the inner span should be parented on the
 // outer span.

@@ -55,8 +55,11 @@ declare class Span {
   // Records an exception event on the span. Calls after the span has ended are ignored.
   recordException(exception: Exception): void;
 
-  // Sets the span status. "unset" is ignored, "error" replaces an existing error, and "ok"
-  // prevents subsequent changes. Messages are retained only for errors.
+  // Changes the span name. Calls after the span has ended are ignored.
+  updateName(name: string): this;
+
+  // Sets the span status. Calls after the span has ended are ignored. Messages are retained only
+  // for errors.
   setStatus(status: TracingSpanStatus): this;
 
   // Ends the span and submits its attributes to the tracing system. Idempotent.
