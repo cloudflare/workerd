@@ -1,4 +1,3 @@
-#include "memory-cache-v2-test.h"
 #include "memory-cache.h"
 
 #include <workerd/api/util.h>
@@ -183,7 +182,7 @@ class MemoryCacheUseV2 final: public MemoryCacheUse {
   kj::OneOf<kj::Own<CacheValue>, kj::Promise<GetWithFallbackOutcome>> getWithFallback(
       const kj::String& key, SpanBuilder& readSpan) const override;
   void delete_(const kj::String& key) const override;
-  MemoryCacheV2TestStats getStatsForTest() const;
+  Stats getStatsForTest() const override;
 
  private:
   ::rust::Box<rustCache::Binding> binding;
@@ -271,13 +270,14 @@ void MemoryCacheUseV2::delete_(const kj::String& key) const {
   binding->remove(asRustBytes(key));
 }
 
-MemoryCacheV2TestStats MemoryCacheUseV2::getStatsForTest() const {
+MemoryCacheUse::Stats MemoryCacheUseV2::getStatsForTest() const {
   auto stats = binding->stats();
-  return {stats.bindings, stats.in_flight_fallbacks, stats.waiters, stats.canceled_waiters};
-}
-
-MemoryCacheV2TestStats getMemoryCacheV2StatsForTest(const MemoryCacheUse& use) {
-  return static_cast<const MemoryCacheUseV2&>(use).getStatsForTest();
+  return {
+    .bindings = stats.bindings,
+    .inFlightFallbacks = stats.in_flight_fallbacks,
+    .waiters = stats.waiters,
+    .canceledWaiters = stats.canceled_waiters,
+  };
 }
 
 }  // namespace workerd::api
