@@ -14,6 +14,7 @@
 //
 // See worker-interface.capnp for the underlying protocol.
 
+#include <workerd/api/actor-call-retry.h>
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/io/io-context.h>
@@ -308,7 +309,8 @@ class JsRpcClientProvider: public jsg::Object {
   }
 
   // Get a capnp client that can be used to dispatch one call.
-  virtual ClientForOneCall getClientForOneCall(jsg::Lock& js) = 0;
+  virtual ClientForOneCall getClientForOneCall(
+      jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) = 0;
 
   // Tracing tag value for jsrpc.target_kind on the client-side per-call span
   // (see JsRpcTargetBase::getTargetKind for the server-side equivalent).
@@ -345,7 +347,8 @@ class JsRpcPromise: public JsRpcClientProvider {
   void resolve(jsg::Lock& js, jsg::JsValue result);
   void dispose(jsg::Lock& js);
 
-  ClientForOneCall getClientForOneCall(jsg::Lock& js) override;
+  ClientForOneCall getClientForOneCall(
+      jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;
 
   kj::LiteralStringConst getRpcTargetKind() override {
     return "promise"_kjc;
@@ -441,7 +444,8 @@ class JsRpcProperty: public JsRpcClientProvider {
   bool supportsActorCallRetries() override {
     return parent->supportsActorCallRetries();
   }
-  ClientForOneCall getClientForOneCall(jsg::Lock& js) override;
+  ClientForOneCall getClientForOneCall(
+      jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;
 
   // Forward to parent: a property chain dispatches to the root's target, and
   // the property path itself is captured separately by jsrpc.method.
@@ -553,7 +557,8 @@ class JsRpcStub: public JsRpcClientProvider {
   // If the stub is backed by a persistable RpcChannel, return it.
   kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> getRpcChannel(IoContext& ioctx);
 
-  ClientForOneCall getClientForOneCall(jsg::Lock& js) override;
+  ClientForOneCall getClientForOneCall(
+      jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;
 
   kj::LiteralStringConst getRpcTargetKind() override {
     return "stub"_kjc;

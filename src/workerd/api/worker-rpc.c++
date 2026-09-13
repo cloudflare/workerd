@@ -450,7 +450,9 @@ void JsRpcPromise::dispose(jsg::Lock& js) {
 static rpc::JsRpcTarget::Client makeJsRpcTargetForSingleLoopbackCall(
     jsg::Lock& js, jsg::JsObject obj);
 
-JsRpcClientProvider::ClientForOneCall JsRpcPromise::getClientForOneCall(jsg::Lock& js) {
+JsRpcClientProvider::ClientForOneCall JsRpcPromise::getClientForOneCall(
+    jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) {
+  KJ_REQUIRE(actorCallAttempt == kj::none, "actor call attempt supplied to a transient RPC target");
   auto callSpanParents =
       originatingCall.map([](IoOwn<TraceContextParent>& p) { return p->addRef(); });
   KJ_SWITCH_ONEOF(state) {
@@ -514,8 +516,9 @@ void JsRpcProperty::appendPath(kj::Vector<kj::StringPtr>& path) {
   path.add(name);
 }
 
-JsRpcClientProvider::ClientForOneCall JsRpcProperty::getClientForOneCall(jsg::Lock& js) {
-  return parent->getClientForOneCall(js);
+JsRpcClientProvider::ClientForOneCall JsRpcProperty::getClientForOneCall(
+    jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) {
+  return parent->getClientForOneCall(js, kj::mv(actorCallAttempt));
 }
 
 namespace {
@@ -623,9 +626,10 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
 
       TraceContext jsRpcCallSpan;
       kj::Maybe<JsRpcClientProvider::ClientForOneCall> oneCall;
+      kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt;
       auto resolveOneCall = [&]() -> JsRpcClientProvider::ClientForOneCall& {
         if (oneCall == kj::none) {
-          oneCall = parent.getClientForOneCall(js);
+          oneCall = parent.getClientForOneCall(js, kj::mv(actorCallAttempt));
           auto& result = KJ_ASSERT_NONNULL(oneCall);
           if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
             // Per-call dispatch span, captured into the awaitIo callback below so it stays open
@@ -708,6 +712,17 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       }
 
       JsRpcCallPlan callPlan(kj::mv(planMessage), kj::mv(serializedData), serializerReplayability);
+
+      // JSRPC retries build on the fetch retry machinery, so the fetch gate remains a shared
+      // prerequisite while the JSRPC gate controls this event type's separate rollout.
+      if (destinationSupportsRetries && callPlan.getReplayable() &&
+          util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH) &&
+          util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_JSRPC)) {
+        actorCallAttempt.emplace(
+            generateActorRetryRequestMetadata(
+                kj::systemCoarseCalendarClock().now(), ActorRetryGateEnabled::NO),
+            IsFirstActorCallAttempt::YES);
+      }
 
       auto client = kj::mv(resolveOneCall().client);
       auto builder = client.callRequest();
@@ -1027,7 +1042,9 @@ kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> JsRpcStub::getRpcChannel(IoCont
   }
 }
 
-JsRpcClientProvider::ClientForOneCall JsRpcStub::getClientForOneCall(jsg::Lock& js) {
+JsRpcClientProvider::ClientForOneCall JsRpcStub::getClientForOneCall(
+    jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) {
+  KJ_REQUIRE(actorCallAttempt == kj::none, "actor call attempt supplied to a transient RPC target");
   return {
     .client = getClient(),
     .callSpanParents =
@@ -2452,9 +2469,9 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       KJ_IF_SOME(t, ioCtx.getWorkerTracer()) {
         t.setReturn(ioCtx.now());
       }
-    }).catch_([this](kj::Exception&& exception) -> kj::Promise<void> {
+    }).catch_([this](kj::Exception&& exception) {
       markJsRpcExceptionAsDelivered(ioCtx, exception);
-      return kj::mv(exception);
+      kj::throwFatalException(kj::mv(exception));
     });
   }
 
