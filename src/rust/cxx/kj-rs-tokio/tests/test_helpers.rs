@@ -213,3 +213,52 @@ pub async fn task_awaits_kj_timer(delay_ms: u64, timer_ms: u64) -> Result<()> {
     .await
     .map_err(Error::other)
 }
+
+// =======================================================================================
+// Stored-waker ordering under the tokio port (see the C++ test of the same name)
+
+static STASHED_WAKER: std::sync::Mutex<Option<std::task::Waker>> = std::sync::Mutex::new(None);
+static STASHED_POLLS: AtomicU64 = AtomicU64::new(0);
+static STASHED_WOKEN: AtomicBool = AtomicBool::new(false);
+
+/// Counts its polls and stashes a clone of its waker on every Pending poll; completes once
+/// `wake_stashed_waker()` has been called. The stash is what a channel or oneshot would hold.
+struct StashWakerFuture;
+
+impl Future for StashWakerFuture {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        STASHED_POLLS.fetch_add(1, Ordering::SeqCst);
+        if STASHED_WOKEN.load(Ordering::SeqCst) {
+            return Poll::Ready(());
+        }
+        *STASHED_WAKER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(cx.waker().clone());
+        Poll::Pending
+    }
+}
+
+pub async fn stash_waker_future() -> Result<()> {
+    STASHED_POLLS.store(0, Ordering::SeqCst);
+    STASHED_WOKEN.store(false, Ordering::SeqCst);
+    StashWakerFuture.await;
+    Ok(())
+}
+
+/// Wakes the most recently stashed waker (on the calling thread) and lets the future complete.
+pub fn wake_stashed_waker() {
+    STASHED_WOKEN.store(true, Ordering::SeqCst);
+    let waker = STASHED_WAKER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    if let Some(waker) = waker {
+        waker.wake();
+    }
+}
+
+pub fn stashed_future_poll_count() -> u64 {
+    STASHED_POLLS.load(Ordering::SeqCst)
+}
