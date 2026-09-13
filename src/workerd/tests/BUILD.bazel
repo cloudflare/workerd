@@ -67,6 +67,14 @@ wd_cc_benchmark(
 )
 
 wd_cc_benchmark(
+    name = "bench-sqlite-kv",
+    srcs = ["bench-sqlite-kv.c++"],
+    deps = [
+        "//src/workerd/util:sqlite",
+    ],
+)
+
+wd_cc_benchmark(
     name = "bench-kj-headers",
     srcs = ["bench-kj-headers.c++"],
     deps = [

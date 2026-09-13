@@ -90,49 +90,89 @@ SqliteKv::Initialized& SqliteKv::ensureInitialized(bool allowUnconfirmed) {
   KJ_UNREACHABLE;
 }
 
-kj::Own<SqliteKv::ListCursor> SqliteKv::list(
-    KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order) {
-  if (!tableCreated) return kj::heap<ListCursor>(nullptr);
-  auto& stmts = KJ_UNWRAP_OR(state.tryGet<Initialized>(), return kj::heap<ListCursor>(nullptr));
+SqliteKv::ListStatements::ListStatements(SqliteDatabase& db, kj::StringPtr columns)
+    : plain(db.prepare(
+          regulator, kj::str("SELECT ", columns, " FROM _cf_KV WHERE key >= ? ORDER BY key"))),
+      bounded(db.prepare(regulator,
+          kj::str("SELECT ", columns, " FROM _cf_KV WHERE key >= ? AND key < ? ORDER BY key"))),
+      limited(db.prepare(regulator,
+          kj::str("SELECT ", columns, " FROM _cf_KV WHERE key >= ? ORDER BY key LIMIT ?"))),
+      boundedLimited(db.prepare(regulator,
+          kj::str(
+              "SELECT ", columns, " FROM _cf_KV WHERE key >= ? AND key < ? ORDER BY key LIMIT ?"))),
+      plainRev(db.prepare(
+          regulator, kj::str("SELECT ", columns, " FROM _cf_KV WHERE key >= ? ORDER BY key DESC"))),
+      boundedRev(db.prepare(regulator,
+          kj::str(
+              "SELECT ", columns, " FROM _cf_KV WHERE key >= ? AND key < ? ORDER BY key DESC"))),
+      limitedRev(db.prepare(regulator,
+          kj::str("SELECT ", columns, " FROM _cf_KV WHERE key >= ? ORDER BY key DESC LIMIT ?"))),
+      boundedLimitedRev(db.prepare(regulator,
+          kj::str("SELECT ",
+              columns,
+              " FROM _cf_KV WHERE key >= ? AND key < ? ORDER BY key DESC LIMIT ?"))) {}
 
+kj::Own<SqliteKv::ListCursor> SqliteKv::makeListCursor(ListStatements& stmts,
+    ValueMode mode,
+    KeyPtr begin,
+    kj::Maybe<KeyPtr> end,
+    kj::Maybe<uint> limit,
+    Order order) {
   if (order == Order::FORWARD) {
     KJ_IF_SOME(e, end) {
       KJ_IF_SOME(l, limit) {
-        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimit, begin, e,
-            static_cast<int64_t>(l));
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), mode, *this, stmts.boundedLimited, begin,
+            e, static_cast<int64_t>(l));
       } else {
-        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEnd, begin, e);
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), mode, *this, stmts.bounded, begin, e);
       }
     } else {
       KJ_IF_SOME(l, limit) {
         return kj::heap<ListCursor>(
-            kj::Badge<SqliteKv>(), *this, stmts.stmtListLimit, begin, static_cast<int64_t>(l));
+            kj::Badge<SqliteKv>(), mode, *this, stmts.limited, begin, static_cast<int64_t>(l));
       } else {
-        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtList, begin);
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), mode, *this, stmts.plain, begin);
       }
     }
   } else {
     KJ_IF_SOME(e, end) {
       KJ_IF_SOME(l, limit) {
-        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimitReverse,
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), mode, *this, stmts.boundedLimitedRev,
             begin, e, static_cast<int64_t>(l));
       } else {
-        return kj::heap<ListCursor>(
-            kj::Badge<SqliteKv>(), *this, stmts.stmtListEndReverse, begin, e);
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), mode, *this, stmts.boundedRev, begin, e);
       }
     } else {
       KJ_IF_SOME(l, limit) {
-        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListLimitReverse, begin,
-            static_cast<int64_t>(l));
+        return kj::heap<ListCursor>(
+            kj::Badge<SqliteKv>(), mode, *this, stmts.limitedRev, begin, static_cast<int64_t>(l));
       } else {
-        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListReverse, begin);
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), mode, *this, stmts.plainRev, begin);
       }
     }
   }
 }
 
-kj::Maybe<SqliteKv::ListCursor::KeyValuePair> SqliteKv::ListCursor::next() {
-  auto& state = KJ_UNWRAP_OR(this->state, return kj::none);
+kj::Own<SqliteKv::ListCursor> SqliteKv::list(
+    KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order) {
+  if (!tableCreated) return kj::heap<ListCursor>(nullptr, WITH_VALUES);
+  auto& stmts =
+      KJ_UNWRAP_OR(state.tryGet<Initialized>(), return kj::heap<ListCursor>(nullptr, WITH_VALUES));
+
+  return makeListCursor(stmts.listStmts, WITH_VALUES, begin, end, limit, order);
+}
+
+kj::Own<SqliteKv::ListCursor> SqliteKv::listKeys(
+    KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order) {
+  if (!tableCreated) return kj::heap<ListCursor>(nullptr, KEYS_ONLY);
+  auto& stmts =
+      KJ_UNWRAP_OR(state.tryGet<Initialized>(), return kj::heap<ListCursor>(nullptr, KEYS_ONLY));
+
+  return makeListCursor(stmts.ensureKeyOnlyListStatements(), KEYS_ONLY, begin, end, limit, order);
+}
+
+bool SqliteKv::ListCursor::advance() {
+  auto& state = KJ_UNWRAP_OR(this->state, return false);
   if (first) {
     first = false;
   } else {
@@ -140,10 +180,25 @@ kj::Maybe<SqliteKv::ListCursor::KeyValuePair> SqliteKv::ListCursor::next() {
   }
   if (state.query.isDone()) {
     this->state = kj::none;
-    return kj::none;
+    return false;
   }
+  return true;
+}
 
+kj::Maybe<SqliteKv::ListCursor::KeyValuePair> SqliteKv::ListCursor::next() {
+  // Load-bearing, not merely defensive: a keys-only query has no column 1, and reading past the
+  // last column yields an empty blob rather than failing, so without this check the caller would
+  // silently see every value as empty.
+  KJ_REQUIRE(mode == WITH_VALUES, "next() requires a cursor created by list(), not listKeys()");
+  if (!advance()) return kj::none;
+  auto& state = KJ_ASSERT_NONNULL(this->state);
   return KeyValuePair{state.query.getText(0), state.query.getBlob(1)};
+}
+
+kj::Maybe<SqliteKv::KeyPtr> SqliteKv::ListCursor::nextKey() {
+  if (!advance()) return kj::none;
+  auto& state = KJ_ASSERT_NONNULL(this->state);
+  return state.query.getText(0);
 }
 
 void SqliteKv::put(KeyPtr key, ValuePtr value) {

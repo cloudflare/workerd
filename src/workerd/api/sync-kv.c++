@@ -29,8 +29,30 @@ jsg::JsValue SyncKvStorage::get(jsg::Lock& js, kj::String key) {
   }
 }
 
+SyncKvStorage::Projection SyncKvStorage::parseProjection(jsg::Optional<kj::String>& projection) {
+  KJ_IF_SOME(p, projection) {
+    if (p == "entries") return Projection::ENTRIES;
+    if (p == "keys") return Projection::KEYS;
+    if (p == "values") return Projection::VALUES;
+    JSG_FAIL_REQUIRE(TypeError, "options.projection must be \"keys\", \"values\", or \"entries\".");
+  }
+  return Projection::ENTRIES;
+}
+
 jsg::Ref<SyncKvStorage::ListIterator> SyncKvStorage::list(
     jsg::Lock& js, jsg::Optional<ListOptions> maybeOptions) {
+  // Validate the projection up front: before the trace span exists, so that an invalid value is
+  // reported like any other bad argument rather than recording a storage operation that never
+  // happened; before the options are moved below; and before the empty-range early return, so that
+  // an invalid value is rejected regardless of the key range.
+  Projection projection = Projection::ENTRIES;
+  KJ_IF_SOME(o, maybeOptions) {
+    projection = parseProjection(o.projection);
+  }
+
+  // The keys projection never looks at the value, so ask the storage layer not to read it.
+  auto valueMode = projection == Projection::KEYS ? SqliteKv::KEYS_ONLY : SqliteKv::WITH_VALUES;
+
   TraceContext traceContext =
       IoContext::current().makeUserTraceSpan("durable_object_storage_kv_list"_kjc);
   SqliteKv& sqliteKv = getSqliteKv(js);
@@ -58,6 +80,20 @@ jsg::Ref<SyncKvStorage::ListIterator> SyncKvStorage::list(
       traceContext.setTag(
           "cloudflare.durable_object.kv.query.limit"_kjc, static_cast<int64_t>(limit));
     }
+
+    if (o.projection != kj::none) {
+      switch (projection) {
+        case Projection::ENTRIES:
+          traceContext.setTag("cloudflare.durable_object.kv.query.projection"_kjc, "entries"_kjc);
+          break;
+        case Projection::KEYS:
+          traceContext.setTag("cloudflare.durable_object.kv.query.projection"_kjc, "keys"_kjc);
+          break;
+        case Projection::VALUES:
+          traceContext.setTag("cloudflare.durable_object.kv.query.projection"_kjc, "values"_kjc);
+          break;
+      }
+    }
   }
 
   // Convert our options to DurableObjectStorageOperations::ListOptions (which also have the
@@ -75,22 +111,44 @@ jsg::Ref<SyncKvStorage::ListIterator> SyncKvStorage::list(
 
   auto [start, end, reverse, limit] =
       KJ_UNWRAP_OR(DurableObjectStorageOperations::compileListOptions(asyncOptions), {
-        // Key range is empty. Return empty map.
-        return js.alloc<SyncKvStorage::ListIterator>(
-            IoContext::current().createObject<SqliteKv::ListCursor>(nullptr));
+        // Key range is empty. Return an exhausted iterator.
+        return js.alloc<SyncKvStorage::ListIterator>(ListState{
+          .cursor = IoContext::current().createObject<SqliteKv::ListCursor>(nullptr, valueMode),
+          .projection = projection,
+        });
       });
 
-  auto cursor = sqliteKv.list(start, end, limit, reverse ? SqliteKv::REVERSE : SqliteKv::FORWARD)
+  auto order = reverse ? SqliteKv::REVERSE : SqliteKv::FORWARD;
+  auto cursor = (valueMode == SqliteKv::KEYS_ONLY ? sqliteKv.listKeys(start, end, limit, order)
+                                                  : sqliteKv.list(start, end, limit, order))
                     .attach(kj::mv(start), kj::mv(end));
 
-  return js.alloc<SyncKvStorage::ListIterator>(IoContext::current().addObject(kj::mv(cursor)));
+  return js.alloc<SyncKvStorage::ListIterator>(ListState{
+    .cursor = IoContext::current().addObject(kj::mv(cursor)),
+    .projection = projection,
+  });
 }
 
-kj::Maybe<jsg::JsArray> SyncKvStorage::listNext(jsg::Lock& js, IoOwn<SqliteKv::ListCursor>& state) {
-  auto& stateRef = *state;
-  KJ_IF_SOME(pair, stateRef.next()) {
-    return js.arr(js.str(pair.key), deserializeV8Value(js, pair.key, pair.value));
-  } else if (stateRef.wasCanceled()) {
+kj::Maybe<jsg::JsValue> SyncKvStorage::listNext(jsg::Lock& js, ListState& state) {
+  auto& cursor = *state.cursor;
+
+  if (state.projection == Projection::KEYS) {
+    // The cursor came from listKeys() and has no value column to read.
+    KJ_IF_SOME(key, cursor.nextKey()) {
+      jsg::JsValue result = js.str(key);
+      return result;
+    }
+  } else {
+    KJ_IF_SOME(pair, cursor.next()) {
+      if (state.projection == Projection::VALUES) {
+        return deserializeV8Value(js, pair.key, pair.value);
+      }
+      jsg::JsValue entry = js.arr(js.str(pair.key), deserializeV8Value(js, pair.key, pair.value));
+      return entry;
+    }
+  }
+
+  if (cursor.wasCanceled()) {
     JSG_FAIL_REQUIRE(Error,
         "kv.list() iterator was invalidated because a new call to kv.list() was started. Only one "
         "kv.list() iterator can exist at a time.");

@@ -4424,6 +4424,16 @@ export interface LoopbackDurableObjectNamespace extends DurableObjectNamespace {
 export interface LoopbackColoLocalActorNamespace extends ColoLocalActorNamespace {}
 export interface SyncKvStorage {
   get<T = unknown>(key: string): T | undefined;
+  list<T = unknown>(
+    options: SyncKvListOptions & {
+      projection: "keys";
+    },
+  ): Iterable<string>;
+  list<T = unknown>(
+    options: SyncKvListOptions & {
+      projection: "values";
+    },
+  ): Iterable<T>;
   list<T = unknown>(options?: SyncKvListOptions): Iterable<[string, T]>;
   put<T>(key: string, value: T): void;
   delete(key: string): boolean;
@@ -4435,6 +4445,7 @@ export interface SyncKvListOptions {
   prefix?: string;
   reverse?: boolean;
   limit?: number;
+  projection?: "keys" | "values" | "entries";
 }
 export interface WorkerStub {
   getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined>(

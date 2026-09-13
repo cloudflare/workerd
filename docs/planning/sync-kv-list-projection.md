@@ -307,6 +307,13 @@ return, so that an invalid projection throws even when the key range is provably
 ordering is behaviour, not style: it decides whether `list({end: "a", start: "b", projection: "nope"})`
 throws.
 
+Validate before the trace span is created, too. Every other option is validated by JSG while the
+arguments are unwrapped, which happens before the body of `list()` runs and therefore before the
+span exists: a bad `start` or `prefix` records no span. Parsing the projection after
+`makeUserTraceSpan()` would make an invalid projection the one argument error that reports a
+storage operation, and the span carries no error status, so it would be indistinguishable from a
+successful empty `list()`. Parse the projection first, then open the span, then set the tag.
+
 Trace tag, emitted only when the option was supplied (matching how the other tags behave):
 
 ```cpp
@@ -460,6 +467,29 @@ Two details that make this safe:
 While restructuring, change `SELECT *` to an explicit `SELECT key, value`. `ListCursor` already
 depends on the column order positionally; making it explicit is free.
 
+#### Measured result
+
+`src/workerd/tests/bench-sqlite-kv.c++` lists 1000 keys each way, sweeping the value size. Run
+with `bazel run -c opt //src/workerd/tests:bench-sqlite-kv`; three repetitions, all coefficients
+of variation under 1%:
+
+| Value size | `list()` | `listKeys()` | Speedup |
+| ---------- | -------- | ------------ | ------- |
+| 256 B      | 115 µs   | 76.2 µs      | 1.5x    |
+| 1 KiB      | 288 µs   | 84.1 µs      | 3.4x    |
+| 8 KiB      | 526 µs   | 85.1 µs      | 6.2x    |
+| 64 KiB     | 3504 µs  | 102 µs       | 34x     |
+
+There is no crossover: keys-only is faster at every size measured, so the KEYS projection can
+take this path unconditionally. `listKeys()` is nearly flat — 76 µs to 102 µs while the value size
+grows by 256x — which is the signature of never materializing the value at all; the residual
+growth is b-tree traversal across more pages. Even at 256 B the gap is real, because `_cf_KV` is
+`WITHOUT ROWID` and so spills to overflow pages well below the sizes an ordinary table would.
+
+The benchmark uses an in-memory directory, so it measures the CPU cost of materializing values —
+overflow traversal and copying — and excludes cold-cache disk I/O. A deployment reading overflow
+pages from disk should see a wider gap than the table above, not a narrower one.
+
 ## 6. Compatibility analysis
 
 `SyncKvStorage` is exposed unconditionally — `JSG_LAZY_INSTANCE_PROPERTY(kv, getKv)` in
@@ -503,9 +533,44 @@ recommend it: it buys nothing against a risk this small and leaves a permanent w
 
 ## 8. Trade-offs and risks
 
-- **TypeScript overload fall-through.** A caller passing a `projection` variable typed as the full
-  union gets the `"entries"` overload and thus the wrong element type. Inherent to Option A.
-  Document it; recommend branching on the literal.
+- **TypeScript overload fall-through.** A `projection` that is still a union where `list()` is
+  called cannot select the `"keys"` or `"values"` overload, so it falls through to the `"entries"`
+  signature and the element type is reported as a pair even on the runs that yield bare keys. Only
+  the static type is affected; `parseProjection()` reads the actual string, so the values are
+  correct at runtime. Inherent to Option A. Recommend narrowing before the call, or one call per
+  branch.
+
+  The condition is precisely "the literal type is not available at the call site", which is worth
+  stating that way because "passing a variable" both over- and under-estimates it. A variable is
+  usually fine; an annotated *options object* is not. `types/test/types/do.ts` pins every case
+  below:
+
+  | At the call site | Resolves to | Sound? |
+  | ---------------- | ----------- | ------ |
+  | `list({projection: "keys"})` | `Iterable<string>` | yes |
+  | `const p = "keys"` | `Iterable<string>` | yes — narrows to the literal |
+  | `const p: "keys" \| "entries" = "keys"` | `Iterable<string>` | yes — a const narrows to its initializer |
+  | `{projection: "keys", …} as const` | `Iterable<string>` | yes |
+  | `list({projection: undefined})` | `Iterable<[string, T]>` | yes — absent means the default |
+  | `list<T>({projection: "keys"})` | `Iterable<string>` | yes — *see the unused type parameter below* |
+  | `let p = "keys"` (widens to `string`) | no overload matches | yes — rejected at compile time |
+  | `const o = {projection: "keys"}` (unannotated) | no overload matches | yes — rejected at compile time |
+  | `(p: "keys" \| "entries") => list({projection: p})` | `Iterable<[string, unknown]>` | **no** |
+  | `const o: SyncKvStorageListOptions = {projection: "keys"}` | `Iterable<[string, unknown]>` | **no** |
+  | `list({projection: cond ? "keys" : "values"})` | `Iterable<[string, unknown]>` | **no** |
+
+  Two things fall out of this that are not obvious:
+
+  - **A widened `string` is rejected, not mistyped.** Because `projection` is declared as a literal
+    union, the most likely accidental route — building an options object without `as const` — fails
+    loudly at compile time instead of quietly returning the wrong element type.
+  - **The `"keys"` overload declares an unused `T`.** Without it that overload has no type
+    parameter, so `list<Foo>({projection: "keys"})` cannot select it and lands on the entries
+    signature, reporting `Iterable<[string, Foo]>` while yielding bare strings. That spelling is
+    natural for anyone used to passing the value type, and it failed silently. The unused parameter
+    makes the stray type argument accepted and ignored, which is the honest outcome: projecting
+    keys has no value type to name. This is the one unsound case that overloads *can* fix, so it is
+    fixed; the remaining two cannot be.
 - **Runtime-varying return shape.** `list()` returning three different element types is harder to
   reason about than three methods would be. Mitigated by the precedent
   (`getReader`, `storage.get`, `storage.delete` all already do this) but it is a real cost.
@@ -540,12 +605,12 @@ Decided:
   impossible.
 - **The iterator element type widens to `jsg::JsValue`** and `"keys"` yields bare strings, so
   `[...kv.list({projection: "keys"})]` is `["bar", "foo"]`. Appendix A covers the alternatives.
+- **Public docs are owned by the requester** and land separately in `cloudflare-docs`. They do not
+  gate the runtime change. §10 step 4 records what the page needs to say.
 
 Open:
 
-1. **Public docs ownership.** The user-facing page lives in the `cloudflare-docs` repo, not here.
-   Who owns that change, and must it land before or with the runtime change?
-2. **Does the `"keys"` yield want `js.str()` or an explicit `jsg::JsString`?** Mechanical;
+1. **Does the `"keys"` yield want `js.str()` or an explicit `jsg::JsString`?** Mechanical;
    `js.str(pair.key)` returns a `JsString` which converts implicitly to `JsValue`. Resolves at
    compile time — listed only so the implementer does not stall on it.
 
@@ -553,24 +618,30 @@ Open:
 
 Each step compiles, passes tests, and is revertible on its own.
 
-- [ ] **1. API layer.** Add `Projection`, `ListState`, `parseProjection()`, the `projection`
+- [x] **1. API layer.** Add `Projection`, `ListState`, `parseProjection()`, the `projection`
       field, and the `jsg::JsArray` → `jsg::JsValue` widening. Parse the projection before the
-      options are moved and before the empty-range early return. Add the trace tag using a
-      `kj::ConstString` literal. Verify the `Next` JSG_STRUCT compiles with
-      `Optional<jsg::JsValue>`.
-- [ ] **2. Tests.** Extend `sync-kv-test.js` with keys/values/all cases, invalid-projection
+      trace span is created, before the options are moved, and before the empty-range early
+      return. Add the trace tag using a `kj::ConstString` literal. Verify the `Next` JSG_STRUCT
+      compiles with `Optional<jsg::JsValue>`.
+- [x] **2. Tests.** Extend `sync-kv-test.js` with keys/values/entries cases, invalid-projection
       `TypeError` cases (including the empty-range ordering case), and cursor invalidation under
       a non-default projection. Append the matching spans to
       `sync-kv-instrumentation-test.js` in the same commit, including one span asserting the new
       `cloudflare.durable_object.kv.query.projection` tag. Run all three variants of
       `//src/workerd/api/tests:sync-kv-test@`.
-- [ ] **3. Types.** Add the `JSG_TS_OVERRIDE` overloads and the `JSG_STRUCT_TS_OVERRIDE` field
+- [x] **3. Types.** Add the `JSG_TS_OVERRIDE` overloads and the `JSG_STRUCT_TS_OVERRIDE` field
       override, run `just generate-types`, commit the snapshot, and add a `test/types/` case
       asserting each projection's element type.
-- [ ] **4. Docs.** Update the `storage.kv.list()` reference in `cloudflare-docs`, stating that
-      `"values"` is ergonomic rather than faster and that the async `storage.list()` has no
-      equivalent.
-- [ ] **5. Storage layer.** Add `SqliteKv::listKeys()`, `ListCursor::nextKey()`, the
+- [ ] **4. Docs** — *owned by the requester, tracked outside this repo, does not block steps 1–3
+      or 5.* The `storage.kv.list()` page needs: the three projection values with `"entries"` as
+      the default; that `"values"` is ergonomic rather than faster (§5.1); that the async
+      `storage.list()` has no equivalent (§2); the TypeScript caveat that a `projection` whose
+      literal type is not visible at the call site falls through to the `"entries"` element type —
+      affecting the static type only, not the values — for which the cases worth showing are a
+      union parameter and an options object annotated `SyncKvStorageListOptions`, with `as const`
+      as the fix (§8); and that `"keys"` is cheaper at every
+      value size measured, by 1.5x at 256 B rising to 34x at 64 KiB (§5.5).
+- [x] **5. Storage layer.** Add `SqliteKv::listKeys()`, `ListCursor::nextKey()`, the
       `ListStatements` grouping with lazy key-only initialization, and the
       `SELECT *` → `SELECT key, value` cleanup. Extend `//src/workerd/util:sqlite-kv-test@`,
       including a case asserting `next()` fails on a `listKeys()` cursor. Switch the

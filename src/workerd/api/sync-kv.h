@@ -17,6 +17,13 @@ class SyncKvStorage: public jsg::Object {
  public:
   SyncKvStorage(jsg::Ref<DurableObjectStorage> storage): storage(kj::mv(storage)) {}
 
+  // Selects which parts of each record `list()` yields.
+  enum class Projection {
+    ENTRIES,  // [key, value]
+    KEYS,     // key
+    VALUES,   // value
+  };
+
   struct ListOptions {
     jsg::Optional<kj::String> start;
     jsg::Optional<kj::String> startAfter;
@@ -24,14 +31,26 @@ class SyncKvStorage: public jsg::Object {
     jsg::Optional<kj::String> prefix;
     jsg::Optional<bool> reverse;
     jsg::Optional<int> limit;
+    jsg::Optional<kj::String> projection;
 
-    JSG_STRUCT(start, startAfter, end, prefix, reverse, limit);
-    JSG_STRUCT_TS_OVERRIDE(SyncKvListOptions);  // Rename from SyncKvStorageListOptions
+    JSG_STRUCT(start, startAfter, end, prefix, reverse, limit, projection);
+    JSG_STRUCT_TS_OVERRIDE(SyncKvListOptions {  // Rename from SyncKvStorageListOptions
+      projection?: "keys" | "values" | "entries";
+    });
   };
 
   jsg::JsValue get(jsg::Lock& js, kj::String key);
 
-  JSG_ITERATOR_TYPE(ListIterator, jsg::JsArray, IoOwn<SqliteKv::ListCursor>, listNext);
+  // Iterator state: the underlying cursor plus which parts of each record to yield.
+  struct ListState {
+    IoOwn<SqliteKv::ListCursor> cursor;
+    Projection projection;
+  };
+
+  // The element type is `jsg::JsValue` rather than `jsg::JsArray` because the yielded shape
+  // depends on `ListState::projection`: a string for KEYS, the stored value for VALUES, and a
+  // [key, value] pair for ENTRIES. `jsg::IteratorBase` admits only one element type per iterator.
+  JSG_ITERATOR_TYPE(ListIterator, jsg::JsValue, ListState, listNext);
 
   jsg::Ref<ListIterator> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
 
@@ -48,6 +67,8 @@ class SyncKvStorage: public jsg::Object {
     JSG_TS_OVERRIDE({
       get<T = unknown>(key: string): T | undefined;
 
+      list<T = unknown>(options: SyncKvStorageListOptions & { projection: "keys" }): Iterable<string>;
+      list<T = unknown>(options: SyncKvStorageListOptions & { projection: "values" }): Iterable<T>;
       list<T = unknown>(options?: SyncKvStorageListOptions): Iterable<[string, T]>;
 
       put<T>(key: string, value: T): void;
@@ -67,7 +88,10 @@ class SyncKvStorage: public jsg::Object {
     return storage->getSqliteKv(js);
   }
 
-  static kj::Maybe<jsg::JsArray> listNext(jsg::Lock& js, IoOwn<SqliteKv::ListCursor>& state);
+  // Validate the `projection` option. Throws TypeError if it is present but not recognized.
+  static Projection parseProjection(jsg::Optional<kj::String>& projection);
+
+  static kj::Maybe<jsg::JsValue> listNext(jsg::Lock& js, ListState& state);
 };
 
 #define EW_SYNC_KV_ISOLATE_TYPES api::SyncKvStorage, api::SyncKvStorage::ListOptions,              \

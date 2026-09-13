@@ -53,9 +53,19 @@ class SqliteKv: private SqliteDatabase::ResetListener {
   uint list(
       KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order, Func&& callback);
 
+  // Whether a list cursor reads the `value` column. A KEYS_ONLY cursor never materializes the
+  // value, which for a large value avoids walking its overflow-page chain, and which avoids the
+  // per-row externals lookup that deserializing a value can trigger.
+  enum ValueMode { WITH_VALUES, KEYS_ONLY };
+
   // List returning a cursor which can be iterated one at a time.
   class ListCursor;
   kj::Own<ListCursor> list(KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order);
+
+  // List keys in a range without reading the values. Cheaper than list() when values are large.
+  // The returned cursor supports nextKey() but not next().
+  kj::Own<ListCursor> listKeys(
+      KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order);
 
   struct WriteOptions {
     bool allowUnconfirmed = false;
@@ -98,6 +108,18 @@ class SqliteKv: private SqliteDatabase::ResetListener {
  private:
   struct Uninitialized {};
 
+  // The eight shapes of a list query: {unbounded, bounded} x {unlimited, limited} x
+  // {forward, reverse}. `columns` is spliced into the SELECT clause so that the same eight shapes
+  // can also be prepared for key-only listing.
+  struct ListStatements {
+    static constexpr SqliteKvRegulator regulator;
+
+    SqliteDatabase::Statement plain, bounded, limited, boundedLimited;
+    SqliteDatabase::Statement plainRev, boundedRev, limitedRev, boundedLimitedRev;
+
+    ListStatements(SqliteDatabase& db, kj::StringPtr columns);
+  };
+
   struct Initialized {
     // This reference is redundant but storing it here makes the prepared statement code below
     // easier to manage.
@@ -115,50 +137,19 @@ class SqliteKv: private SqliteDatabase::ResetListener {
     SqliteDatabase::Statement stmtDelete = db.prepare(regulator, R"(
       DELETE FROM _cf_KV WHERE key = ?
     )");
-    SqliteDatabase::Statement stmtList = db.prepare(regulator, R"(
-      SELECT * FROM _cf_KV
-      WHERE key >= ?
-      ORDER BY key
-    )");
-    SqliteDatabase::Statement stmtListEnd = db.prepare(regulator, R"(
-      SELECT * FROM _cf_KV
-      WHERE key >= ? AND key < ?
-      ORDER BY key
-    )");
-    SqliteDatabase::Statement stmtListLimit = db.prepare(regulator, R"(
-      SELECT * FROM _cf_KV
-      WHERE key >= ?
-      ORDER BY key
-      LIMIT ?
-    )");
-    SqliteDatabase::Statement stmtListEndLimit = db.prepare(regulator, R"(
-      SELECT * FROM _cf_KV
-      WHERE key >= ? AND key < ?
-      ORDER BY key
-      LIMIT ?
-    )");
-    SqliteDatabase::Statement stmtListReverse = db.prepare(regulator, R"(
-      SELECT * FROM _cf_KV
-      WHERE key >= ?
-      ORDER BY key DESC
-    )");
-    SqliteDatabase::Statement stmtListEndReverse = db.prepare(regulator, R"(
-      SELECT * FROM _cf_KV
-      WHERE key >= ? AND key < ?
-      ORDER BY key DESC
-    )");
-    SqliteDatabase::Statement stmtListLimitReverse = db.prepare(regulator, R"(
-      SELECT * FROM _cf_KV
-      WHERE key >= ?
-      ORDER BY key DESC
-      LIMIT ?
-    )");
-    SqliteDatabase::Statement stmtListEndLimitReverse = db.prepare(regulator, R"(
-      SELECT * FROM _cf_KV
-      WHERE key >= ? AND key < ?
-      ORDER BY key DESC
-      LIMIT ?
-    )");
+    ListStatements listStmts{db, "key, value"_kj};
+
+    // Prepared on first use: the overwhelming majority of sessions never list keys-only, and
+    // preparing these eagerly would add eight sqlite3_prepare_v2() calls to every first write.
+    kj::Maybe<ListStatements> keyOnlyListStmts;
+
+    ListStatements& ensureKeyOnlyListStatements() {
+      KJ_IF_SOME(s, keyOnlyListStmts) {
+        return s;
+      }
+      return keyOnlyListStmts.emplace(db, "key"_kj);
+    }
+
     SqliteDatabase::Statement stmtCountKeys = db.prepare(regulator, R"(
       SELECT count(*) FROM _cf_KV
     )");
@@ -209,6 +200,16 @@ class SqliteKv: private SqliteDatabase::ResetListener {
 
   void cancelCurrentCursor();
 
+  // Pick the statement matching the {bounded, limited, order} shape of the request and open a
+  // cursor on it. Shared by list() and listKeys(), which differ only in which statement group
+  // they draw from.
+  kj::Own<ListCursor> makeListCursor(ListStatements& stmts,
+      ValueMode mode,
+      KeyPtr begin,
+      kj::Maybe<KeyPtr> end,
+      kj::Maybe<uint> limit,
+      Order order);
+
   Initialized& ensureInitialized(bool allowUnconfirmed);
   // Make sure the KV table is created and prepared statements are ready. Not called until the
   // first write.
@@ -233,15 +234,18 @@ class SqliteKv: private SqliteDatabase::ResetListener {
 class SqliteKv::ListCursor {
  public:
   template <typename... Params>
-  ListCursor(kj::Badge<SqliteKv>, SqliteKv& parent, Params&&... params) {
+  ListCursor(kj::Badge<SqliteKv>, ValueMode mode, SqliteKv& parent, Params&&... params)
+      : mode(mode) {
     parent.cancelCurrentCursor();
     state.emplace(parent, kj::fwd<Params>(params)...);
     parent.currentCursor = *this;
   }
-  ListCursor(decltype(nullptr)) {}
+  ListCursor(decltype(nullptr), ValueMode mode): mode(mode) {}
 
   template <typename Func>
   uint forEach(Func&& callback) {
+    KJ_REQUIRE(
+        mode == WITH_VALUES, "forEach() requires a cursor created by list(), not listKeys()");
     auto& query = KJ_UNWRAP_OR(state, return 0).query;
     size_t count = 0;
     while (!query.isDone()) {
@@ -256,7 +260,13 @@ class SqliteKv::ListCursor {
     kj::StringPtr key;
     kj::ArrayPtr<const byte> value;
   };
+
+  // Advance and return the key and value. Requires the cursor to have been created by list(),
+  // not listKeys().
   kj::Maybe<KeyValuePair> next();
+
+  // Advance and return the key only. Valid in either ValueMode.
+  kj::Maybe<KeyPtr> nextKey();
 
   // If true, the cursor was canceled due to a new list() operation starting. Only one list() is
   // allowed at a time.
@@ -280,10 +290,16 @@ class SqliteKv::ListCursor {
 
   kj::Maybe<State> state;
 
+  ValueMode mode;
+
   // Are we at the beginning of the list?
   bool first = true;
 
   bool canceled = false;
+
+  // Step to the next row, returning false once the cursor is exhausted. Shared by next() and
+  // nextKey().
+  bool advance();
 
   friend class SqliteKv;
 };

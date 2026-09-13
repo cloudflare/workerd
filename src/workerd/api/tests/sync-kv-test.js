@@ -111,6 +111,76 @@ export class MyActor extends DurableObject {
         ['foo', 123],
       ]
     );
+
+    // Projections. The store now holds baz=false, foo=123.
+    assert.deepStrictEqual(
+      [...kv.list({ projection: 'keys' })],
+      ['baz', 'foo']
+    );
+    assert.deepStrictEqual(
+      [...kv.list({ projection: 'values' })],
+      [false, 123]
+    );
+
+    // "entries" is the default, stated explicitly.
+    assert.deepStrictEqual(
+      [...kv.list({ projection: 'entries' })],
+      [
+        ['baz', false],
+        ['foo', 123],
+      ]
+    );
+
+    // Projections compose with the other options.
+    assert.deepStrictEqual(
+      [...kv.list({ projection: 'keys', reverse: true })],
+      ['foo', 'baz']
+    );
+    assert.deepStrictEqual(
+      [...kv.list({ projection: 'values', limit: 1 })],
+      [false]
+    );
+    assert.deepStrictEqual(
+      [...kv.list({ projection: 'keys', prefix: 'ba' })],
+      ['baz']
+    );
+
+    // An empty key range yields an exhausted iterator under any projection.
+    assert.deepStrictEqual(
+      [...kv.list({ start: 'z', end: 'z', projection: 'keys' })],
+      []
+    );
+
+    // A new call to kv.list() invalidates any previous iterator, regardless of projection.
+    {
+      let cursor1 = kv.list({ projection: 'keys' });
+      let cursor2 = kv.list({ projection: 'values' });
+
+      assert.throws(() => [...cursor1], {
+        name: 'Error',
+        message:
+          'kv.list() iterator was invalidated because a new call to kv.list() was started. ' +
+          'Only one kv.list() iterator can exist at a time.',
+      });
+
+      assert.deepStrictEqual([...cursor2], [false, 123]);
+    }
+
+    // An unrecognized projection is rejected. Matching is exact and case-sensitive.
+    const badProjection = {
+      name: 'TypeError',
+      message: 'options.projection must be "keys", "values", or "entries".',
+    };
+    assert.throws(() => kv.list({ projection: 'bogus' }), badProjection);
+    assert.throws(() => kv.list({ projection: 'Keys' }), badProjection);
+    assert.throws(() => kv.list({ projection: '' }), badProjection);
+
+    // The projection is validated even when the key range is empty, i.e. validation happens
+    // before the early return for an empty range.
+    assert.throws(
+      () => kv.list({ start: 'z', end: 'z', projection: 'bogus' }),
+      badProjection
+    );
   }
 }
 

@@ -145,6 +145,82 @@ KJ_TEST("SQLite-KV") {
   }
 }
 
+KJ_TEST("SQLite-KV listKeys") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteKv kv(db);
+
+  constexpr auto F = SqliteKv::FORWARD;
+  constexpr auto R = SqliteKv::REVERSE;
+
+  // Listing keys before anything has ever been written yields an exhausted cursor rather than
+  // failing: the table does not exist yet.
+  KJ_EXPECT(kv.listKeys(nullptr, kj::none, kj::none, F)->nextKey() == kj::none);
+
+  kv.put("foo", "abc"_kj.asBytes());
+  kv.put("bar", "def"_kj.asBytes());
+  kv.put("baz", "123"_kj.asBytes());
+  kv.put("qux", "321"_kj.asBytes());
+
+  auto listKeys = [&](auto&&... params) {
+    auto cursor = kv.listKeys(params...);
+    kj::Vector<kj::String> results;
+    for (;;) {
+      KJ_IF_SOME(key, cursor->nextKey()) {
+        results.add(kj::str(key));
+      } else {
+        break;
+      }
+    }
+    return kj::strArray(results, ", ");
+  };
+
+  // Each of the eight statement shapes: {unbounded, bounded} x {unlimited, limited} x
+  // {forward, reverse}.
+  KJ_EXPECT(listKeys(nullptr, kj::none, kj::none, F) == "bar, baz, foo, qux");
+  KJ_EXPECT(listKeys(nullptr, "foo"_kj, kj::none, F) == "bar, baz");
+  KJ_EXPECT(listKeys(nullptr, kj::none, 2, F) == "bar, baz");
+  KJ_EXPECT(listKeys(nullptr, "foo"_kj, 1, F) == "bar");
+  KJ_EXPECT(listKeys(nullptr, kj::none, kj::none, R) == "qux, foo, baz, bar");
+  KJ_EXPECT(listKeys(nullptr, "foo"_kj, kj::none, R) == "baz, bar");
+  KJ_EXPECT(listKeys(nullptr, kj::none, 2, R) == "qux, foo");
+  KJ_EXPECT(listKeys(nullptr, "foo"_kj, 1, R) == "baz");
+
+  // The begin bound is honoured, and is inclusive.
+  KJ_EXPECT(listKeys("baz"_kj, kj::none, kj::none, F) == "baz, foo, qux");
+
+  // A keys-only cursor refuses to hand out values, because it never selected the value column.
+  {
+    auto cursor = kv.listKeys(nullptr, kj::none, kj::none, F);
+    KJ_EXPECT_THROW_MESSAGE("next() requires a cursor created by list()", cursor->next());
+  }
+
+  // nextKey() is also valid on a cursor that did select values.
+  {
+    auto cursor = kv.list(nullptr, kj::none, kj::none, F);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(cursor->nextKey()) == "bar");
+    KJ_EXPECT(KJ_ASSERT_NONNULL(cursor->next()).key == "baz");
+  }
+
+  // Only one cursor may be open at a time; starting a second cancels the first, whichever kind
+  // each one is.
+  {
+    auto cursor1 = kv.listKeys(nullptr, kj::none, kj::none, F);
+    auto cursor2 = kv.list(nullptr, kj::none, kj::none, F);
+    KJ_EXPECT(cursor1->nextKey() == kj::none);
+    KJ_EXPECT(cursor1->wasCanceled());
+    KJ_EXPECT(!cursor2->wasCanceled());
+    KJ_EXPECT(KJ_ASSERT_NONNULL(cursor2->next()).key == "bar");
+  }
+
+  // The lazily-prepared key-only statements survive being used again after the first time.
+  KJ_EXPECT(listKeys(nullptr, kj::none, kj::none, F) == "bar, baz, foo, qux");
+
+  KJ_EXPECT(kv.deleteAll() == 4);
+  KJ_EXPECT(listKeys(nullptr, kj::none, kj::none, F) == "");
+}
+
 KJ_TEST("large key") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
