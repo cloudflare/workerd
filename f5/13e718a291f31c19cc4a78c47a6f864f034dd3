@@ -1,0 +1,19 @@
+src/rust/memory-cache/ffi/BUILD.bazel
+  s_b5100e8818a1d4::t_8cc4516258d2a2 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f513e718a291f31c19cc4a78c47a6f864f034dd3",
+  "prompts": {},
+  "sessions": {
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
