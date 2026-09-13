@@ -149,8 +149,4 @@ void MemoryCache::delete_(jsg::Lock& js, jsg::NonCoercible<kj::String> key) {
   deleteSpan.setTag("delete_completed"_kjc, true);
 }
 
-// ======================================================================================
-
-MemoryCacheProvider::~MemoryCacheProvider() noexcept(false) = default;
-
 }  // namespace workerd::api
