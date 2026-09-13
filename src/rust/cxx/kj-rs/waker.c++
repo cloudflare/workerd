@@ -1,5 +1,7 @@
 #include "waker.h"
 
+#include "awaiter.h"  // FuturePollEvent (an Event), the same-thread wake target
+
 #include <kj/debug.h>
 
 namespace kj_rs {
@@ -14,7 +16,12 @@ ArcWakerPromiseNode::ArcWakerPromiseNode(kj::Promise<void> promise)
 
 void ArcWakerPromiseNode::destroy() noexcept {
   // Cancel the cross-thread promise before releasing the owner. Rust may retain
-  // and wake a cloned waker after the FuturePollEvent has been destroyed.
+  // and wake a cloned waker after the FuturePollEvent has been destroyed: revoke the direct-arm
+  // target too, so such a wake falls back to the (now abandoned) fulfiller instead of arming a
+  // freed event. This runs on the owning thread (the next poll, or the event's destructor).
+  if (owner.get() != nullptr) {
+    owner->event = kj::none;
+  }
   node = nullptr;
   auto drop = kj::mv(owner);
 }
@@ -41,12 +48,12 @@ void ArcWakerPromiseNode::tracePromise(kj::_::TraceBuilder& builder, bool stopAt
 // =======================================================================================
 // ArcWaker
 
-PromiseArcWakerPair ArcWaker::create(const kj::Executor& executor) {
+PromiseArcWakerPair ArcWaker::create(const kj::Executor& executor, kj::Maybe<kj::_::Event&> event) {
   // TODO(perf): newPromiseAndCrossThreadFulfiller() makes two heap allocations, but it is probably
   //   optimizable to one.
   // TODO(perf): This heap allocation could also probably be collapsed into the fulfiller's.
-  auto waker =
-      kj::arc<ArcWaker>(kj::Badge<ArcWaker>(), executor.newPromiseAndCrossThreadFulfiller<void>());
+  auto waker = kj::arc<ArcWaker>(
+      kj::Badge<ArcWaker>(), executor, executor.newPromiseAndCrossThreadFulfiller<void>(), event);
   auto promise = const_cast<ArcWaker*>(waker.get())->getPromise();
   return {
     .promise = kj::mv(promise),
@@ -60,9 +67,14 @@ kj::Promise<void> ArcWaker::getPromise() {
   return kj::_::PromiseNode::to<kj::Promise<void>>(OwnPromiseNode(&node));
 }
 
-ArcWaker::ArcWaker(kj::Badge<ArcWaker>, kj::PromiseCrossThreadFulfillerPair<void> paf)
+ArcWaker::ArcWaker(kj::Badge<ArcWaker>,
+    const kj::Executor& executor,
+    kj::PromiseCrossThreadFulfillerPair<void> paf,
+    kj::Maybe<kj::_::Event&> event)
     : node(kj::mv(paf.promise)),
-      fulfiller(kj::mv(paf.fulfiller)) {}
+      executor(executor.addRef()),
+      fulfiller(kj::mv(paf.fulfiller)),
+      event(event) {}
 
 const KjWaker* ArcWaker::clone() const {
   return addRefToThis().disown();
@@ -72,6 +84,17 @@ void ArcWaker::wake() const {
   drop();
 }
 void ArcWaker::wake_by_ref() const {
+  // Same-thread fast path (see the class comment): arm the poll event now, in KJ event order.
+  // Executor::isCurrent() never throws, so this is safe from any thread; only the owning thread
+  // ever reads `event`. armDepthFirst() on an event that is already armed, or that is currently
+  // firing (a wake from inside the poll), is a no-op or a harmless re-poll respectively: fire()
+  // returns without polling once the future is done.
+  if (executor->isCurrent()) {
+    KJ_IF_SOME(e, event) {
+      e.armDepthFirst();
+      return;
+    }
+  }
   fulfiller->fulfill();
 }
 void ArcWaker::drop() const {
@@ -94,8 +117,17 @@ const KjWaker* LazyArcWaker::clone() const {
   auto lock = cloned.lockExclusive();
 
   if (*lock == kj::none) {
-    // We haven't been cloned before, so make a new ArcWaker.
-    *lock = ArcWaker::create(executor);
+    // We haven't been cloned before, so make a new ArcWaker. It learns the FuturePollEvent this
+    // poll belongs to (a PollScope knows it; a bare LazyArcWaker does not), for same-thread wakes.
+    // The lookup itself needs the owning loop on this thread, so a clone made from another thread
+    // (allowed: Rust may clone a waker anywhere) gets no event and wakes through the fulfiller.
+    kj::Maybe<kj::_::Event&> event;
+    if (executor.isCurrent()) {
+      KJ_IF_SOME(futurePollEvent, tryGetFuturePollEvent()) {
+        event = static_cast<kj::_::Event&>(futurePollEvent);
+      }
+    }
+    *lock = ArcWaker::create(executor, event);
   }
 
   return KJ_ASSERT_NONNULL(*lock).waker->clone();

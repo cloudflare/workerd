@@ -377,5 +377,61 @@ KJ_TEST("Cancellation: Rust dropping never-polled KJ promise future") {
   KJ_EXPECT(get_cancellation_counter() == 1);
 }
 
+KJ_TEST("a stored waker woken by another KJ event re-polls the bridged future before "
+        "later-queued events") {
+  // A bridged future's stored waker (what a tokio oneshot or channel holds) woken from another KJ
+  // event on the loop thread arms the future's poll event immediately, in KJ event order: the
+  // future is re-polled before a KJ event queued after the wake runs -- the same order a
+  // kj::PromiseFulfiller gives a waiting coroutine. Before ArcWaker's same-thread arm, the wake
+  // went through a cross-thread fulfiller that KJ dispatched only once the loop ran out of
+  // runnable events, i.e. after B here. Consumers hand values between bridged futures through
+  // stored wakers and rely on the receiver resuming before anything queued later (a teardown
+  // continuation, say) can observe the handoff.
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto promise = stash_waker_future();
+  KJ_EXPECT(!promise.poll(ws));  // Polled; a waker is stashed.
+  auto pollsBeforeWake = stashed_future_poll_count();
+  KJ_EXPECT(pollsBeforeWake >= 1);
+
+  uint64_t pollsSeenByB = 0;
+  auto a = kj::evalLater([]() { wake_stashed_waker(); }).eagerlyEvaluate(nullptr);
+  auto b =
+      kj::evalLater([&]() { pollsSeenByB = stashed_future_poll_count(); }).eagerlyEvaluate(nullptr);
+  b.wait(ws);
+
+  // A's wake re-polled the future (completing it) before B ran.
+  KJ_EXPECT(pollsSeenByB == pollsBeforeWake + 1, pollsSeenByB, pollsBeforeWake);
+  promise.wait(ws);
+}
+
+KJ_TEST("a retained Rust waker can wake repeatedly after event-loop destruction") {
+  {
+    kj::EventLoop loop;
+    kj::WaitScope ws(loop);
+    auto promise = new_retained_waker_future_void();
+    KJ_ASSERT(!promise.poll(ws));
+  }
+  KJ_DEFER(clear_retained_waker());
+
+  wake_retained_waker_from_background_thread();
+  wake_retained_waker_from_background_thread();
+}
+
+KJ_TEST("a fulfilled retained waker survives destruction of its executor") {
+  kj::Arc<const kj_rs::ArcWaker> waker = nullptr;
+  {
+    kj::EventLoop loop;
+    kj::WaitScope ws(loop);
+    auto pair = kj_rs::ArcWaker::create(kj::getCurrentThreadExecutor());
+    waker = kj::mv(pair.waker);
+    waker->wake_by_ref();
+    pair.promise.wait(ws);
+  }
+
+  waker->wake_by_ref();
+}
+
 }  // namespace
 }  // namespace kj_rs_demo
