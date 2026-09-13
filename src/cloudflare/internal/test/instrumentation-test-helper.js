@@ -87,13 +87,7 @@ export function createTailStreamHandler(state) {
           break;
         }
         case 'spanUpdate': {
-          state.spanUpdates.push({ spanKey, info: event.event.info });
-          const target =
-            event.spanContext.spanId === invocation.rootSpanId
-              ? invocation
-              : state.spans.get(spanKey);
-          if (!target) break;
-          applySpanUpdate(target, event.event.info);
+          state.spanUpdates.push(event);
           break;
         }
         case 'outcome':
@@ -103,18 +97,6 @@ export function createTailStreamHandler(state) {
       }
     };
   };
-}
-
-function applySpanUpdate(target, info) {
-  switch (info.type) {
-    case 'name':
-      target.name = info.name;
-      break;
-    case 'status':
-      if (info.status.code === 'unset' || target.status?.code === 'ok') break;
-      target.status = info.status;
-      break;
-  }
 }
 
 /**
@@ -174,12 +156,6 @@ export function createHierarchyAwareCollector() {
           const span = state.spans.get(spanKey);
           if (!span) break;
           span.closed = true;
-          break;
-        }
-        case 'spanUpdate': {
-          const span = state.spans.get(spanKey);
-          if (!span) break;
-          applySpanUpdate(span, event.event.info);
           break;
         }
         case 'outcome':
