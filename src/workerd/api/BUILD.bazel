@@ -342,13 +342,8 @@ wd_cc_library(
 
 wd_cc_library(
     name = "memory-cache",
-    srcs = [
-        "memory-cache.c++",
-        "memory-cache-v2.c++",
-    ],
-    hdrs = [
-        "memory-cache.h",
-    ],
+    srcs = ["memory-cache.c++"],
+    hdrs = ["memory-cache.h"],
     implementation_deps = [
         "//src/rust/memory-cache/ffi:memory-cache-ffi",
         "//src/workerd/io",

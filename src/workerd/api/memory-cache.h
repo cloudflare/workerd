@@ -28,6 +28,10 @@ namespace workerd::api {
 // JS primitives other than Symbol, ordinary JavaScript objects but not class
 // instances, etc). Objects that represent i/o (like streams or promises are
 // explicitly not supported.
+//
+// The cache storage and singleflight coordination live in the Rust crate at
+// src/rust/memory-cache. The classes here adapt that crate to JSG and hide the
+// generated CXX bridge types from the rest of the code base.
 
 // A serialized JavaScript value read from the cache. The backing bytes are
 // owned by the cache implementation and stay valid for the lifetime of this
@@ -50,7 +54,7 @@ struct CacheValueProduceResult {
 
 // Limits suggested by a single binding. Bindings that share a cache each
 // contribute their limits; the effective limits are the component-wise maximum
-// over all live bindings.
+// over all live bindings, capped by the provider's MemoryCachePolicy.
 struct MemoryCacheLimits {
   // The maximum number of keys that may exist within the cache at the same
   // time. The cache size grows at least linearly in the number of entries.
@@ -65,12 +69,20 @@ struct MemoryCacheLimits {
   uint64_t maxTotalValueSize;
 };
 
+// Process-wide policy applied on top of the limits suggested by bindings.
 struct MemoryCachePolicy {
+  // Upper bound for the effective maxTotalValueSize of every cache owned by the
+  // provider, regardless of what the bindings request.
   kj::Maybe<uint64_t> maxTotalValueSize;
 };
 
+// A binding's handle to a cache. Each MemoryCache JS object owns one of these.
+// Destroying it withdraws the binding's suggested limits from the cache; once
+// the last binding for a shared cache is gone, the cache itself is dropped.
 class MemoryCacheUse {
  public:
+  virtual ~MemoryCacheUse() noexcept(false) = default;
+
   struct FallbackResult {
     kj::Array<kj::byte> value;
     kj::Maybe<double> expiration;
@@ -81,8 +93,6 @@ class MemoryCacheUse {
   // the fallback so that the next coalesced reader is promoted to run it.
   using FallbackDoneCallback = kj::Function<void(kj::Maybe<FallbackResult>, SpanBuilder&)>;
   using GetWithFallbackOutcome = kj::OneOf<kj::Own<CacheValue>, FallbackDoneCallback>;
-
-  virtual ~MemoryCacheUse() noexcept(false) = default;
 
   // Returns a cached value for the given key if one exists (and has not
   // expired). If no such value exists, nothing is returned, regardless of any
@@ -113,7 +123,6 @@ class MemoryCacheUse {
 };
 
 // JavaScript class that allows accessing an in-memory cache.
-// Each instance forwards JavaScript calls to the selected backend lease.
 class MemoryCache: public jsg::Object {
  public:
   MemoryCache(kj::Own<MemoryCacheUse> use): cacheUse(kj::mv(use)) {}
