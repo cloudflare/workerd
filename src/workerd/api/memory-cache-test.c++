@@ -174,5 +174,41 @@ KJ_TEST("canceled fallback waiters do not overflow the stack") {
   });
 }
 
+KJ_TEST("fallback callback stores the value and survives binding destruction") {
+  TestFixture fixture;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto cacheNamespace = MemoryCacheNamespace::create(MemoryCachePolicy{kj::none});
+    auto key = kj::str("test-key");
+    SpanBuilder span(nullptr);
+
+    // Keep a second binding alive so the shared cache outlives the first one.
+    auto reader = cacheNamespace->getBinding("shared"_kj, testLimits());
+
+    auto leader = [&]() {
+      auto writer = cacheNamespace->getBinding("shared"_kj, testLimits());
+      auto result = writer->getWithFallback(key, span);
+      KJ_ASSERT(result.is<kj::Promise<Outcome>>());
+      return kj::mv(result.get<kj::Promise<Outcome>>());
+      // `writer` is destroyed here while the leader promise is still pending.
+    }();
+
+    // Completing the fallback emits trace spans, which requires running inside
+    // the I/O context like the JS caller does in production.
+    return leader.then([context = kj::addRef(env.context), reader = kj::mv(reader),
+                           key = kj::mv(key)](Outcome outcome) mutable {
+      KJ_ASSERT(outcome.is<FallbackDoneCallback>());
+      return context->run([outcome = kj::mv(outcome), reader = kj::mv(reader), key = kj::mv(key)](
+                              Worker::Lock&) mutable {
+        SpanBuilder span(nullptr);
+        outcome.get<FallbackDoneCallback>()(
+            MemoryCacheUse::FallbackResult{kj::heapArray<kj::byte>({1, 2, 3}), kj::none}, span);
+
+        auto cached = KJ_ASSERT_NONNULL(reader->getWithoutFallback(key, span));
+        KJ_EXPECT(cached->asBytes() == kj::ArrayPtr<const kj::byte>({1, 2, 3}));
+      });
+    });
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api

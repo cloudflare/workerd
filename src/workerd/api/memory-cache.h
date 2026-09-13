@@ -31,34 +31,17 @@ namespace workerd::api {
 // instances, etc). Objects that represent i/o (like streams or promises are
 // explicitly not supported.
 
-class CacheValueBacking {
+// A serialized JavaScript value read from the cache. The backing bytes are
+// owned by the cache implementation and stay valid for the lifetime of this
+// object, even if the entry is evicted in the meantime.
+class CacheValue {
  public:
+  virtual ~CacheValue() noexcept(false) = default;
   virtual kj::ArrayPtr<const kj::byte> asBytes() const = 0;
-  virtual ~CacheValueBacking() noexcept(false) = default;
-};
-
-struct CacheValue: kj::AtomicRefcounted {
-  CacheValue(kj::Array<kj::byte>&& bytes): data(kj::mv(bytes)) {}
-  CacheValue(kj::Own<CacheValueBacking> backing): data(kj::mv(backing)) {}
-
-  kj::ArrayPtr<const kj::byte> asBytes() const {
-    KJ_SWITCH_ONEOF(data) {
-      KJ_CASE_ONEOF(d, kj::Array<kj::byte>) {
-        return d.asPtr();
-      }
-      KJ_CASE_ONEOF(b, kj::Own<CacheValueBacking>) {
-        return b->asBytes();
-      }
-    }
-    KJ_UNREACHABLE;
-  }
 
   size_t size() const {
     return asBytes().size();
   }
-
- private:
-  kj::OneOf<kj::Array<kj::byte>, kj::Own<CacheValueBacking>> data;
 };
 
 struct CacheValueProduceResult {
@@ -91,9 +74,13 @@ struct MemoryCachePolicy {
 class MemoryCacheUse {
  public:
   struct FallbackResult {
-    kj::Own<CacheValue> value;
+    kj::Array<kj::byte> value;
     kj::Maybe<double> expiration;
   };
+  // Invoked exactly once by the caller that was elected to run the fallback.
+  // Passing a result stores it and publishes it to all coalesced readers.
+  // Passing kj::none (or dropping the callback without invoking it) releases
+  // the fallback so that the next coalesced reader is promoted to run it.
   using FallbackDoneCallback = kj::Function<void(kj::Maybe<FallbackResult>, SpanBuilder&)>;
   using GetWithFallbackOutcome = kj::OneOf<kj::Own<CacheValue>, FallbackDoneCallback>;
 
