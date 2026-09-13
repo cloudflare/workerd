@@ -191,12 +191,10 @@ class MemoryCacheUseV2 final: public MemoryCacheUse {
 
 }  // namespace
 
-MemoryCacheProvider::MemoryCacheProvider(const kj::MonotonicClock& timer)
-    : MemoryCacheProvider(timer, MemoryCachePolicy{}) {}
+MemoryCacheProvider::MemoryCacheProvider(): MemoryCacheProvider(MemoryCachePolicy{}) {}
 
-MemoryCacheProvider::MemoryCacheProvider(const kj::MonotonicClock& timer, MemoryCachePolicy policy)
-    : cacheNamespace(MemoryCacheNamespace::create(policy)),
-      timer(timer) {}
+MemoryCacheProvider::MemoryCacheProvider(MemoryCachePolicy policy)
+    : cacheNamespace(MemoryCacheNamespace::create(policy)) {}
 
 kj::Own<MemoryCacheUse> MemoryCacheProvider::getUse(
     kj::Maybe<kj::StringPtr> cacheId, MemoryCacheLimits limits) const {
