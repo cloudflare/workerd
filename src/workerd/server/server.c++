@@ -237,7 +237,7 @@ Server::Server(kj::Filesystem& fs,
       reportConfigError(kj::mv(reportConfigError)),
       reportConfigWarning(kj::mv(reportConfigWarning)),
       loggingOptions(loggingOptions),
-      memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(timer)),
+      memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()),
       channelTokenHandler(*this),
       tasks(*this) {}
 
