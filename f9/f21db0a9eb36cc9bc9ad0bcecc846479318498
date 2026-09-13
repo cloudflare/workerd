@@ -1,0 +1,33 @@
+src/workerd/api/sync-kv.c++
+  s_58c1441b4856b3::t_41fb9537161251 32-41,44-55,83-96,114-118,121-123,126-129,132-151
+src/workerd/api/tests/sync-kv-test.js
+  s_58c1441b4856b3::t_0e243556305ce3 114-183
+src/workerd/util/sqlite-kv.c++
+  s_58c1441b4856b3::t_9b53482268ff3c 93-120,124-125,127,132,134,140,143,147-148,150,156-175,183,185-186,188-194,198-203
+src/workerd/util/sqlite-kv.h
+  s_58c1441b4856b3::t_ab2d98faf70d8c 56-60,65-69,111-122,140-152,203-212,237-238,243,247-248,263-265,268-270,293-294,300-303
+types/generated-snapshot/experimental/index.d.ts
+  s_58c1441b4856b3::t_4bc6e589c61c9a 4418-4427,4439
+types/generated-snapshot/experimental/index.ts
+  s_58c1441b4856b3::t_ad96476cd72b0a 4427-4436,4448
+types/generated-snapshot/index.d.ts
+  s_58c1441b4856b3::t_f140dd40d4c4f3 4141-4150,4162
+types/generated-snapshot/index.ts
+  s_58c1441b4856b3::t_2f53605b8269c2 4150-4159,4171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f9f21db0a9eb36cc9bc9ad0bcecc846479318498",
+  "prompts": {},
+  "sessions": {
+    "s_58c1441b4856b3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f6b9cd89effeeqYYP6aWJ0Nhu1",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Lambros Petrou <lambros@cloudflare.com>"
+    }
+  }
+}
