@@ -274,7 +274,7 @@ struct TestFixture {
   // it constructs.
   kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> savedHibernationManager;
   kj::Maybe<uint64_t> savedHolderToken;
-  kj::Maybe<kj::StringPtr> savedActorClassName;
+  kj::Maybe<kj::String> savedActorClassName;
   capnp::ByteStreamFactory byteStreamFactory;
   kj::HttpHeaderTable::Builder headerTableBuilder;
   ThreadContext::HeaderIdBundle threadContextHeaderBundle;
