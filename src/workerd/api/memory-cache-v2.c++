@@ -15,7 +15,7 @@ namespace {
 
 namespace rustCache = workerd::rust::memory_cache;
 
-using Limits = SharedMemoryCache::Limits;
+using Limits = MemoryCacheLimits;
 using Outcome = MemoryCacheUse::GetWithFallbackOutcome;
 using FallbackResult = MemoryCacheUse::FallbackResult;
 using FallbackDoneCallback = MemoryCacheUse::FallbackDoneCallback;
@@ -234,7 +234,7 @@ MemoryCacheProvider::MemoryCacheProvider(const kj::MonotonicClock& timer, Memory
 }
 
 kj::Own<MemoryCacheUse> MemoryCacheProvider::getUse(
-    kj::Maybe<kj::StringPtr> cacheId, SharedMemoryCache::Limits limits) const {
+    kj::Maybe<kj::StringPtr> cacheId, MemoryCacheLimits limits) const {
   KJ_IF_SOME(cacheNamespace, namespaceV2) {
     return cacheNamespace->getBinding(cacheId, limits);
   }

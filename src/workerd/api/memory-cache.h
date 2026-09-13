@@ -110,6 +110,60 @@ struct CacheValueProduceResult {
 
 class MemoryCacheProvider;
 
+// Limits suggested by a single binding. Bindings that share a cache each
+// contribute their limits; the effective limits are the component-wise maximum
+// over all live bindings.
+struct MemoryCacheLimits {
+  // The maximum number of keys that may exist within the cache at the same
+  // time. The cache size grows at least linearly in the number of entries.
+  uint32_t maxKeys;
+
+  // The maximum size of each individual value, when serialized.
+  uint32_t maxValueSize;
+
+  // The maximum sum of all stored values. This is essentially the cache size,
+  // except that it only includes the sizes of the values and does not account
+  // for keys and the overhead of the data structures themselves.
+  uint64_t maxTotalValueSize;
+
+  bool operator<(const MemoryCacheLimits& b) const {
+    if (maxTotalValueSize != b.maxTotalValueSize) {
+      return maxTotalValueSize < b.maxTotalValueSize;
+    }
+    if (maxKeys != b.maxKeys) {
+      return maxKeys < b.maxKeys;
+    }
+    return maxTotalValueSize < b.maxTotalValueSize;
+  }
+
+  MemoryCacheLimits normalize() const KJ_WARN_UNUSED_RESULT {
+    // Avoid surprises due to misconfigured bindings that set one or more limits to 0.
+    if (maxKeys == 0 || maxValueSize == 0 || maxTotalValueSize == 0) {
+      return min();
+    }
+
+    // If a binding specifies a maxValueSize that exceeds the maxTotalValueSize, remedy
+    // that by reducing the maxValueSize.
+    return MemoryCacheLimits{
+      .maxKeys = maxKeys,
+      .maxValueSize = static_cast<uint32_t>(kj::min(maxValueSize, maxTotalValueSize)),
+      .maxTotalValueSize = maxTotalValueSize,
+    };
+  }
+
+  static constexpr MemoryCacheLimits min() {
+    return {0, 0, 0};
+  }
+
+  static MemoryCacheLimits max(const MemoryCacheLimits& a, const MemoryCacheLimits& b) {
+    return MemoryCacheLimits{
+      std::max(a.maxKeys, b.maxKeys),
+      std::max(a.maxValueSize, b.maxValueSize),
+      std::max(a.maxTotalValueSize, b.maxTotalValueSize),
+    };
+  }
+};
+
 // An in-memory cache that can be accessed by any number of workers/isolates
 // within the same process.
 // TODO(soon): We plan to explore replacing this implementation with a memcached-based
@@ -123,56 +177,7 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
  public:
   struct ThreadUnsafeData;
 
-  struct Limits {
-    // The maximum number of keys that may exist within the cache at the same
-    // time. The cache size grows at least linearly in the number of entries.
-    uint32_t maxKeys;
-
-    // The maximum size of each individual value, when serialized.
-    uint32_t maxValueSize;
-
-    // The maximum sum of all stored values. This is essentially the cache size,
-    // except that it only includes the sizes of the values and does not account
-    // for keys and the overhead of the data structures themselves.
-    uint64_t maxTotalValueSize;
-
-    bool operator<(const Limits& b) const {
-      if (maxTotalValueSize != b.maxTotalValueSize) {
-        return maxTotalValueSize < b.maxTotalValueSize;
-      }
-      if (maxKeys != b.maxKeys) {
-        return maxKeys < b.maxKeys;
-      }
-      return maxTotalValueSize < b.maxTotalValueSize;
-    }
-
-    Limits normalize() const KJ_WARN_UNUSED_RESULT {
-      // Avoid surprises due to misconfigured bindings that set one or more limits to 0.
-      if (maxKeys == 0 || maxValueSize == 0 || maxTotalValueSize == 0) {
-        return min();
-      }
-
-      // If a binding specifies a maxValueSize that exceeds the maxTotalValueSize, remedy
-      // that by reducing the maxValueSize.
-      return Limits{
-        .maxKeys = maxKeys,
-        .maxValueSize = static_cast<uint32_t>(kj::min(maxValueSize, maxTotalValueSize)),
-        .maxTotalValueSize = maxTotalValueSize,
-      };
-    }
-
-    static constexpr Limits min() {
-      return {0, 0, 0};
-    }
-
-    static Limits max(const Limits& a, const Limits& b) {
-      return Limits{
-        std::max(a.maxKeys, b.maxKeys),
-        std::max(a.maxValueSize, b.maxValueSize),
-        std::max(a.maxTotalValueSize, b.maxTotalValueSize),
-      };
-    }
-  };
+  using Limits = MemoryCacheLimits;
 
   KJ_DISALLOW_COPY_AND_MOVE(SharedMemoryCache);
 
@@ -518,7 +523,7 @@ class MemoryCacheNamespace {
   static kj::Own<MemoryCacheNamespace> create(MemoryCachePolicy policy);
   virtual ~MemoryCacheNamespace() noexcept(false) = default;
   virtual kj::Own<MemoryCacheUse> getBinding(
-      kj::Maybe<kj::StringPtr> id, SharedMemoryCache::Limits limits) const = 0;
+      kj::Maybe<kj::StringPtr> id, MemoryCacheLimits limits) const = 0;
 };
 
 // JavaScript class that allows accessing an in-memory cache.
@@ -565,8 +570,7 @@ class MemoryCacheProvider {
   KJ_DISALLOW_COPY_AND_MOVE(MemoryCacheProvider);
   ~MemoryCacheProvider() noexcept(false);
 
-  kj::Own<MemoryCacheUse> getUse(
-      kj::Maybe<kj::StringPtr> cacheId, SharedMemoryCache::Limits limits) const;
+  kj::Own<MemoryCacheUse> getUse(kj::Maybe<kj::StringPtr> cacheId, MemoryCacheLimits limits) const;
   kj::Own<const SharedMemoryCache> getInstance(kj::Maybe<kj::StringPtr> cacheId = kj::none) const;
 
   void removeInstance(const SharedMemoryCache& instance) const;
