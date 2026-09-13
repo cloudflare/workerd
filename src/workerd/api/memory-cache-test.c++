@@ -26,18 +26,18 @@ static MemoryCacheLimits testLimits() {
 }
 
 KJ_TEST("serializes concurrent final release and acquisition") {
-  auto cacheNamespace = MemoryCacheNamespace::create(MemoryCachePolicy{kj::none});
-  auto run = [&cacheNamespace]() {
+  MemoryCacheProvider provider;
+  auto run = [&provider]() {
     for (size_t i = 0; i < 1000; ++i) {
-      auto binding = cacheNamespace->getBinding("shared"_kj, testLimits());
+      auto binding = provider.getUse("shared"_kj, testLimits());
     }
   };
   {
     kj::Thread first(run);
     kj::Thread second(run);
   }
-  auto first = cacheNamespace->getBinding("shared"_kj, testLimits());
-  auto second = cacheNamespace->getBinding("shared"_kj, testLimits());
+  auto first = provider.getUse("shared"_kj, testLimits());
+  auto second = provider.getUse("shared"_kj, testLimits());
   KJ_EXPECT(getMemoryCacheV2StatsForTest(*first).bindings == 2);
 }
 
@@ -69,8 +69,8 @@ KJ_TEST("provider teardown does not invalidate a live binding") {
 KJ_TEST("canceled waiters unlink immediately") {
   TestFixture fixture;
   fixture.runInIoContext([&](const TestFixture::Environment&) -> kj::Promise<void> {
-    auto cacheNamespace = MemoryCacheNamespace::create(MemoryCachePolicy{kj::none});
-    auto cache = cacheNamespace->getBinding("shared"_kj, testLimits());
+    MemoryCacheProvider provider;
+    auto cache = provider.getUse("shared"_kj, testLimits());
     auto key = kj::str("key");
     SpanBuilder span(nullptr);
     auto leader = cache->getWithFallback(key, span);
@@ -99,8 +99,8 @@ KJ_TEST("canceled waiters unlink immediately") {
 KJ_TEST("abandoned fallback token promotes the next waiter") {
   TestFixture fixture;
   fixture.runInIoContext([&](const TestFixture::Environment&) -> kj::Promise<void> {
-    auto cacheNamespace = MemoryCacheNamespace::create(MemoryCachePolicy{kj::none});
-    auto cache = cacheNamespace->getBinding("shared"_kj, testLimits());
+    MemoryCacheProvider provider;
+    auto cache = provider.getUse("shared"_kj, testLimits());
     auto key = kj::str("key");
     SpanBuilder span(nullptr);
     auto leader = cache->getWithFallback(key, span);
@@ -125,8 +125,8 @@ KJ_TEST("abandoned fallback token promotes the next waiter") {
 KJ_TEST("fallback callback is one-shot") {
   TestFixture fixture;
   fixture.runInIoContext([&](const TestFixture::Environment&) -> kj::Promise<void> {
-    auto cacheNamespace = MemoryCacheNamespace::create(MemoryCachePolicy{kj::none});
-    auto cache = cacheNamespace->getBinding("shared"_kj, testLimits());
+    MemoryCacheProvider provider;
+    auto cache = provider.getUse("shared"_kj, testLimits());
     auto key = kj::str("key");
     SpanBuilder span(nullptr);
     auto leader = cache->getWithFallback(key, span);
@@ -145,8 +145,8 @@ KJ_TEST("fallback callback is one-shot") {
 KJ_TEST("canceled fallback waiters do not overflow the stack") {
   TestFixture fixture;
   fixture.runInIoContext([&](const TestFixture::Environment&) -> kj::Promise<void> {
-    auto cacheNamespace = MemoryCacheNamespace::create(MemoryCachePolicy{kj::none});
-    auto cache = cacheNamespace->getBinding("shared"_kj, testLimits());
+    MemoryCacheProvider provider;
+    auto cache = provider.getUse("shared"_kj, testLimits());
     auto key = kj::str("test-key");
     SpanBuilder span(nullptr);
 
@@ -177,15 +177,15 @@ KJ_TEST("canceled fallback waiters do not overflow the stack") {
 KJ_TEST("fallback callback stores the value and survives binding destruction") {
   TestFixture fixture;
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
-    auto cacheNamespace = MemoryCacheNamespace::create(MemoryCachePolicy{kj::none});
+    MemoryCacheProvider provider;
     auto key = kj::str("test-key");
     SpanBuilder span(nullptr);
 
     // Keep a second binding alive so the shared cache outlives the first one.
-    auto reader = cacheNamespace->getBinding("shared"_kj, testLimits());
+    auto reader = provider.getUse("shared"_kj, testLimits());
 
     auto leader = [&]() {
-      auto writer = cacheNamespace->getBinding("shared"_kj, testLimits());
+      auto writer = provider.getUse("shared"_kj, testLimits());
       auto result = writer->getWithFallback(key, span);
       KJ_ASSERT(result.is<kj::Promise<Outcome>>());
       return kj::mv(result.get<kj::Promise<Outcome>>());

@@ -101,14 +101,6 @@ class MemoryCacheUse {
   virtual void delete_(const kj::String& key) const = 0;
 };
 
-class MemoryCacheNamespace {
- public:
-  static kj::Own<MemoryCacheNamespace> create(MemoryCachePolicy policy);
-  virtual ~MemoryCacheNamespace() noexcept(false) = default;
-  virtual kj::Own<MemoryCacheUse> getBinding(
-      kj::Maybe<kj::StringPtr> id, MemoryCacheLimits limits) const = 0;
-};
-
 // JavaScript class that allows accessing an in-memory cache.
 // Each instance forwards JavaScript calls to the selected backend lease.
 class MemoryCache: public jsg::Object {
@@ -137,8 +129,11 @@ class MemoryCache: public jsg::Object {
   kj::Own<MemoryCacheUse> cacheUse;
 };
 
-// The MemoryCacheProvider provides the internal implementation of the MemoryCache mechanism.
-// It owns the namespace of caches and hands out bindings to them as needed.
+// Owns the namespace of caches for one process (or one sandbox). Caches with
+// the same id are shared between all bindings that request them; bindings
+// without an id get a private cache. The provider only has to outlive the
+// calls to getUse(): the returned MemoryCacheUse keeps its cache alive by
+// itself, so it is safe to destroy the provider while bindings still exist.
 // TODO(later): It may be worth considering some kind of metrics observer for the provider
 // that can be passed along to the individual cache instances so we can monitor just how much
 // the in memory cache is being used.
@@ -152,7 +147,8 @@ class MemoryCacheProvider {
   kj::Own<MemoryCacheUse> getUse(kj::Maybe<kj::StringPtr> cacheId, MemoryCacheLimits limits) const;
 
  private:
-  kj::Own<MemoryCacheNamespace> cacheNamespace;
+  struct Impl;
+  kj::Own<Impl> impl;
 };
 
 // clang-format off

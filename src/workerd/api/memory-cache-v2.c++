@@ -191,37 +191,28 @@ class MemoryCacheUseV2 final: public MemoryCacheUse {
 
 }  // namespace
 
+struct MemoryCacheProvider::Impl {
+  explicit Impl(MemoryCachePolicy policy)
+      : cacheNamespace(rustCache::namespace_new(policy.maxTotalValueSize)) {}
+
+  ::rust::Box<rustCache::Namespace> cacheNamespace;
+};
+
 MemoryCacheProvider::MemoryCacheProvider(): MemoryCacheProvider(MemoryCachePolicy{}) {}
 
-MemoryCacheProvider::MemoryCacheProvider(MemoryCachePolicy policy)
-    : cacheNamespace(MemoryCacheNamespace::create(policy)) {}
+MemoryCacheProvider::MemoryCacheProvider(MemoryCachePolicy policy): impl(kj::heap<Impl>(policy)) {}
+
+MemoryCacheProvider::~MemoryCacheProvider() noexcept(false) = default;
 
 kj::Own<MemoryCacheUse> MemoryCacheProvider::getUse(
     kj::Maybe<kj::StringPtr> cacheId, MemoryCacheLimits limits) const {
-  return cacheNamespace->getBinding(cacheId, limits);
-}
-
-kj::Own<MemoryCacheNamespace> MemoryCacheNamespace::create(MemoryCachePolicy policy) {
-  class V2 final: public MemoryCacheNamespace {
-   public:
-    explicit V2(MemoryCachePolicy policy)
-        : cacheNamespace(rustCache::namespace_new(policy.maxTotalValueSize)) {}
-
-    kj::Own<MemoryCacheUse> getBinding(kj::Maybe<kj::StringPtr> id, Limits limits) const override {
-      ::rust::Str name;
-      bool isPrivate = id == kj::none;
-      KJ_IF_SOME(value, id) {
-        name = asRustStr(value);
-      }
-      auto binding = cacheNamespace->bind(name, isPrivate, toRustLimits(limits));
-      return kj::heap<MemoryCacheUseV2>(kj::mv(binding));
-    }
-
-   private:
-    ::rust::Box<rustCache::Namespace> cacheNamespace;
-  };
-
-  return kj::heap<V2>(policy);
+  ::rust::Str name;
+  bool isPrivate = cacheId == kj::none;
+  KJ_IF_SOME(id, cacheId) {
+    name = asRustStr(id);
+  }
+  auto binding = impl->cacheNamespace->bind(name, isPrivate, toRustLimits(limits));
+  return kj::heap<MemoryCacheUseV2>(kj::mv(binding));
 }
 
 kj::Maybe<kj::Own<CacheValue>> MemoryCacheUseV2::getWithoutFallback(
