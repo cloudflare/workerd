@@ -1,16 +1,16 @@
-src/workerd/io/worker-entrypoint.c++
-  s_4cbeffab6dcecf::t_222c1de1ff77c9 567-574
+src/workerd/api/export-loopback.h
+  s_78769e78586072::t_efb7f8ebdc5b12 165-166,169-170
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.6.10",
-  "base_commit_sha": "fdb86a0ec5ee8c93b950924b32071cc6a9e0addc",
+  "base_commit_sha": "75cd6c806f38cb76b9d21f3321778e73c4d4b138",
   "prompts": {},
   "sessions": {
-    "s_4cbeffab6dcecf": {
+    "s_78769e78586072": {
       "agent_id": {
         "tool": "opencode",
-        "id": "ses_f8d46a17effeT7EnvmYqOMFDdE",
+        "id": "ses_fbc9ebe86ffeC6UD7t8jfQyh7x",
         "model": "gpt-5.6-sol"
       },
       "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
