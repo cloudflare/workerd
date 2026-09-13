@@ -77,5 +77,4 @@ struct SpanEndData {
   # List of span attributes
   tags @1 :List(Tag);
   spanId @2 :UInt64;
-  status @3 :SpanStatus;
 }

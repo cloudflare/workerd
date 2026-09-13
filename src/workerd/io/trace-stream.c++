@@ -86,6 +86,7 @@ namespace {
   V(SPANID, "spanId")                                                                              \
   V(TRACEFLAGS, "traceFlags")                                                                      \
   V(SPANOPEN, "spanOpen")                                                                          \
+  V(SPANUPDATE, "spanUpdate")                                                                      \
   V(STACK, "stack")                                                                                \
   V(STATUS, "status")                                                                              \
   V(STATUSCODE, "statusCode")                                                                      \
@@ -503,9 +504,24 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanClose& spanClose, StringCache& cache)
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANCLOSE_STR));
   obj.set(js, OUTCOME_STR, ToJs(js, spanClose.outcome, cache));
-  if (spanClose.status.code != SpanStatusCode::UNSET) {
-    obj.set(js, STATUS_STR, ToJs(js, spanClose.status, cache));
+  return obj;
+}
+
+jsg::JsValue ToJs(jsg::Lock& js, const SpanUpdate& spanUpdate, StringCache& cache) {
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, SPANUPDATE_STR));
+  auto info = js.obj();
+  KJ_SWITCH_ONEOF(spanUpdate.info) {
+    KJ_CASE_ONEOF(operationName, kj::ConstString) {
+      info.set(js, TYPE_STR, cache.get(js, NAME_STR));
+      info.set(js, NAME_STR, js.str(operationName));
+    }
+    KJ_CASE_ONEOF(status, SpanStatus) {
+      info.set(js, TYPE_STR, cache.get(js, STATUS_STR));
+      info.set(js, STATUS_STR, ToJs(js, status, cache));
+    }
   }
+  obj.set(js, INFO_STR, kj::mv(info));
   return obj;
 }
 
@@ -647,6 +663,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
     KJ_CASE_ONEOF(spanClose, SpanClose) {
       obj.set(js, EVENT_STR, ToJs(js, spanClose, cache));
     }
+    KJ_CASE_ONEOF(spanUpdate, SpanUpdate) {
+      obj.set(js, EVENT_STR, ToJs(js, spanUpdate, cache));
+    }
     KJ_CASE_ONEOF(de, DiagnosticChannelEvent) {
       obj.set(js, EVENT_STR, ToJs(js, de, cache));
     }
@@ -685,6 +704,9 @@ kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
     }
     KJ_CASE_ONEOF(_, SpanClose) {
       return SPANCLOSE_STR;
+    }
+    KJ_CASE_ONEOF(_, SpanUpdate) {
+      return SPANUPDATE_STR;
     }
     KJ_CASE_ONEOF(_, DiagnosticChannelEvent) {
       return DIAGNOSTICCHANNEL_STR;

@@ -22,6 +22,7 @@ export const validateSpans = {
     const allSpans = collector.spans.values();
     const spansByTest = groupSpansBy(allSpans, 'test');
     const invocations = [...collector.invocations.values()];
+    const truncatedUpdatedName = `updated-${'x'.repeat(56)}`;
     const rootAttributes = invocations.flatMap(
       (invocation) => invocation.attributes
     );
@@ -40,6 +41,7 @@ export const validateSpans = {
       },
       { test: 'setAttributes', expectedSpan: 'set-attributes-op' },
       { test: 'setStatus', expectedSpan: 'status-error-op' },
+      { test: 'updateName', expectedSpan: truncatedUpdatedName },
       { test: 'publicImportTracing', expectedSpan: 'public-import-op' },
       {
         test: 'publicImportStartActiveSpan',
@@ -76,6 +78,85 @@ export const validateSpans = {
         message: 'second error',
       });
       assert.deepStrictEqual(okSpan.status, { code: 'ok' });
+
+      const entries = [...collector.spans.entries()];
+      const errorKey = entries.find(([, span]) => span === errorSpan)[0];
+      const okKey = entries.find(([, span]) => span === okSpan)[0];
+      assert.deepStrictEqual(
+        collector.spanUpdates
+          .filter(({ spanKey }) => spanKey === errorKey)
+          .map(({ info }) => info),
+        [
+          {
+            type: 'status',
+            status: { code: 'error', message: 'first error' },
+          },
+          {
+            type: 'status',
+            status: { code: 'error', message: 'second error' },
+          },
+          { type: 'status', status: { code: 'unset' } },
+        ]
+      );
+      assert.deepStrictEqual(
+        collector.spanUpdates
+          .filter(({ spanKey }) => spanKey === okKey)
+          .map(({ info }) => info),
+        [
+          {
+            type: 'status',
+            status: { code: 'error', message: 'temporary error' },
+          },
+          { type: 'status', status: { code: 'ok' } },
+          {
+            type: 'status',
+            status: { code: 'error', message: 'also ignored' },
+          },
+        ]
+      );
+    }
+
+    {
+      const [[spanKey]] = [...collector.spans.entries()].filter(
+        ([, span]) => span.test === 'updateName'
+      );
+      assert.deepStrictEqual(
+        collector.spanUpdates
+          .filter((update) => update.spanKey === spanKey)
+          .map((update) => update.info),
+        [
+          { type: 'name', name: 'update-name-intermediate' },
+          { type: 'name', name: truncatedUpdatedName },
+        ]
+      );
+    }
+
+    {
+      const invocation = invocations.find((candidate) =>
+        candidate.attributes.some(
+          ({ name, value }) =>
+            name === 'test' && value === 'updateInvocationSpan'
+        )
+      );
+      assert(invocation, 'updateInvocationSpan: invocation present');
+      assert.strictEqual(invocation.name, 'updated-invocation');
+      assert.deepStrictEqual(invocation.status, {
+        code: 'error',
+        message: 'invocation error',
+      });
+      const spanKey = `${invocation.invocationId}#${invocation.rootSpanId}`;
+      assert.deepStrictEqual(
+        collector.spanUpdates
+          .filter((update) => update.spanKey === spanKey)
+          .map((update) => update.info),
+        [
+          { type: 'name', name: 'updated-invocation' },
+          {
+            type: 'status',
+            status: { code: 'error', message: 'invocation error' },
+          },
+        ]
+      );
     }
 
     // setAttributeUndefined should NOT have a 'skipped' attribute recorded.

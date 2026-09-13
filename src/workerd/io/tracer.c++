@@ -272,9 +272,21 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
     };
     tailStreamWriter->report(spanComponentContext, kj::mv(attr), span.endTime, spanTagsSize);
   }
-  auto statusSize = span.status.size();
-  tailStreamWriter->report(spanComponentContext,
-      tracing::SpanClose(EventOutcome::OK, kj::mv(span.status)), span.endTime, statusSize);
+  tailStreamWriter->report(
+      spanComponentContext, tracing::SpanClose(EventOutcome::OK), span.endTime, 0);
+}
+
+void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+
+  auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+  auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
+      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+  auto size = update.size();
+  tailStreamWriter->report(context, kj::mv(update), getTime(), size);
 }
 
 void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
@@ -692,14 +704,24 @@ kj::Maybe<tracing::SpanContext> UserSpanObserver::toSpanContext() {
   return tracing::SpanContext(traceId, spanId, traceFlags);
 }
 
-void UserSpanObserver::onClose(kj::Date endTime,
-    tracing::SpanStatus&& status,
-    Span::TagMap&& tags,
-    kj::Vector<Span::Log>&& logs) {
+void UserSpanObserver::onClose(
+    kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) {
   // span logs are not supported in user tracing.
   (void)logs;
   if (wasAccepted) {
-    submitter->submitSpanClose(spanId, startTime, endTime, kj::mv(status), kj::mv(tags));
+    submitter->submitSpanClose(spanId, startTime, endTime, kj::mv(tags));
+  }
+}
+
+void UserSpanObserver::onUpdateName(kj::ConstString operationName) {
+  if (wasAccepted) {
+    submitter->submitSpanUpdate(spanId, tracing::SpanUpdate(kj::mv(operationName)));
+  }
+}
+
+void UserSpanObserver::onUpdateStatus(tracing::SpanStatus&& status) {
+  if (wasAccepted) {
+    submitter->submitSpanUpdate(spanId, tracing::SpanUpdate(kj::mv(status)));
   }
 }
 

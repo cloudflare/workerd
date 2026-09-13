@@ -125,6 +125,10 @@ class UserSpanState final: public SpanState {
     return workerd::SpanParent(builder);
   }
 
+  void updateName(kj::ConstString operationName) override {
+    builder.setOperationName(kj::mv(operationName));
+  }
+
   void setStatus(tracing::SpanStatus status) override {
     builder.setStatus(kj::mv(status));
   }
@@ -203,6 +207,27 @@ class InvocationSpanState final: public SpanState {
     return parent.addRef();
   }
 
+  void updateName(kj::ConstString operationName) override {
+    KJ_IF_SOME(valueContext, context) {
+      KJ_IF_SOME(valueTracer, tracer) {
+        valueTracer->runIfAlive([&](BaseTracer& tracer) {
+          tracer.addSpanUpdate(
+              valueContext.getSpanId(), tracing::SpanUpdate(kj::mv(operationName)));
+        });
+      }
+    }
+  }
+
+  void setStatus(tracing::SpanStatus status) override {
+    KJ_IF_SOME(valueContext, context) {
+      KJ_IF_SOME(valueTracer, tracer) {
+        valueTracer->runIfAlive([&](BaseTracer& tracer) {
+          tracer.addSpanUpdate(valueContext.getSpanId(), tracing::SpanUpdate(kj::mv(status)));
+        });
+      }
+    }
+  }
+
  protected:
   bool canRecordAttributes() override {
     return getIsTraced();
@@ -263,6 +288,8 @@ class NoopSpanState final: public SpanState {
   workerd::SpanParent makeSpanParent() override {
     return workerd::SpanParent(nullptr);
   }
+
+  void updateName(kj::ConstString) override {}
 
   void setStatus(tracing::SpanStatus) override {}
 
@@ -369,6 +396,22 @@ void Span::recordException(
       s->recordException(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
     }
   }
+}
+
+jsg::Ref<Span> Span::updateName(jsg::Lock& js, kj::String operationName) {
+  if (operationName.size() > MAX_USER_OPERATION_NAME_BYTES) {
+    operationName = kj::str(operationName.first(MAX_USER_OPERATION_NAME_BYTES));
+  }
+  auto name = kj::ConstString(kj::mv(operationName));
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
+      s->updateName(kj::mv(name));
+    }
+    KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
+      s->updateName(kj::mv(name));
+    }
+  }
+  return JSG_THIS;
 }
 
 jsg::Ref<Span> Span::setStatus(jsg::Lock& js, TracingSpanStatus status) {

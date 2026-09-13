@@ -19,7 +19,7 @@ class Tracing;  // Forward decl; defined further down after user_tracing::Span.
 // the surrounding workerd::api namespace.
 namespace workerd::api::user_tracing {
 
-// Max length of a user-supplied operation name in `ctx.tracing.enterSpan(name, ...)`.
+// Max length of a user-supplied span operation name.
 // Longer names are truncated at the API surface so the limit holds for every downstream
 // SpanSubmitter. Span names identify operations, not carry data; the bound is tight on
 // purpose.
@@ -68,6 +68,7 @@ class SpanState: public kj::Refcounted {
   // ended or has no observer. Used by Tracing methods to push onto the AsyncContextFrame.
   virtual workerd::SpanParent makeSpanParent() = 0;
 
+  virtual void updateName(kj::ConstString operationName) = 0;
   virtual void setStatus(tracing::SpanStatus status) = 0;
 
   // Sets a single attribute on the span. If value is kj::none, the attribute is not set.
@@ -120,8 +121,11 @@ class Span: public jsg::Object {
   void recordException(
       jsg::Lock& js, jsg::Value exception, const jsg::TypeHandler<ExceptionData>& exceptionHandler);
 
-  // Sets the span status. "unset" never changes the current status, "error" replaces an existing
-  // error, and "ok" prevents all subsequent changes. Messages are retained only for errors.
+  // Changes the span name. Calls after the span has ended are ignored.
+  jsg::Ref<Span> updateName(jsg::Lock& js, kj::String operationName);
+
+  // Sets the span status. Calls after the span has ended are ignored. Messages are retained only
+  // for errors.
   jsg::Ref<Span> setStatus(jsg::Lock& js, TracingSpanStatus status);
 
   // Ends the span and submits its content to the tracing system. Idempotent.
@@ -133,6 +137,7 @@ class Span: public jsg::Object {
     JSG_METHOD(setAttribute);
     JSG_METHOD(setAttributes);
     JSG_METHOD(recordException);
+    JSG_METHOD(updateName);
     JSG_METHOD(setStatus);
     JSG_METHOD(end);
 
@@ -145,6 +150,7 @@ class Span: public jsg::Object {
         | { code: string | number; name?: string; message?: string; stack?: string }
         | { code?: string | number; name: string; message?: string; stack?: string }
         | { code?: string | number; name?: string; message: string; stack?: string }): void;
+      updateName(name: string): this;
       setStatus(status: TracingSpanStatus): this;
     });
   }

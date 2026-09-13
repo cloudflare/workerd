@@ -23,6 +23,7 @@ export function createInstrumentationState() {
     invocationPromises: [],
     invocations: new Map(),
     spans: new Map(),
+    spanUpdates: [],
   };
 }
 
@@ -82,8 +83,17 @@ export function createTailStreamHandler(state) {
         case 'spanClose': {
           let span = state.spans.get(spanKey);
           span['closed'] = true;
-          if (event.event.status) span['status'] = event.event.status;
           state.spans.set(spanKey, span);
+          break;
+        }
+        case 'spanUpdate': {
+          state.spanUpdates.push({ spanKey, info: event.event.info });
+          const target =
+            event.spanContext.spanId === invocation.rootSpanId
+              ? invocation
+              : state.spans.get(spanKey);
+          if (!target) break;
+          applySpanUpdate(target, event.event.info);
           break;
         }
         case 'outcome':
@@ -93,6 +103,18 @@ export function createTailStreamHandler(state) {
       }
     };
   };
+}
+
+function applySpanUpdate(target, info) {
+  switch (info.type) {
+    case 'name':
+      target.name = info.name;
+      break;
+    case 'status':
+      if (info.status.code === 'unset' || target.status?.code === 'ok') break;
+      target.status = info.status;
+      break;
+  }
 }
 
 /**
@@ -152,7 +174,12 @@ export function createHierarchyAwareCollector() {
           const span = state.spans.get(spanKey);
           if (!span) break;
           span.closed = true;
-          if (event.event.status) span.status = event.event.status;
+          break;
+        }
+        case 'spanUpdate': {
+          const span = state.spans.get(spanKey);
+          if (!span) break;
+          applySpanUpdate(span, event.event.info);
           break;
         }
         case 'outcome':
@@ -261,6 +288,7 @@ export function createTailStreamCollector() {
   const tailStream = createTailStreamHandler(state);
 
   const spans = state.spans;
+  const spanUpdates = state.spanUpdates;
   const invocations = state.invocations;
   const invocationPromises = state.invocationPromises;
   const waitForCompletion = () => {
@@ -272,6 +300,7 @@ export function createTailStreamCollector() {
     waitForCompletion,
     invocations,
     spans,
+    spanUpdates,
   };
 }
 

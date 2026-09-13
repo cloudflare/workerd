@@ -53,7 +53,6 @@ struct SpanStatus {
   SpanStatusCode code = SpanStatusCode::UNSET;
   kj::Maybe<kj::ConstString> message;
 
-  void update(SpanStatus&& status);
   void copyTo(rpc::SpanStatus::Builder builder) const;
   SpanStatus clone() const;
   size_t size() const;
@@ -801,7 +800,6 @@ struct SpanEndData {
   tracing::SpanId spanId;
 
   kj::Date endTime;
-  SpanStatus status;
   // Should be Span::TagMap, but we can't forward-declare that.
   kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
 
@@ -810,11 +808,9 @@ struct SpanEndData {
   explicit SpanEndData(tracing::SpanId spanId,
       kj::Date endTime,
       kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags =
-          kj::HashMap<kj::ConstString, tracing::Attribute::Value>(),
-      SpanStatus status = {})
+          kj::HashMap<kj::ConstString, tracing::Attribute::Value>())
       : spanId(spanId),
         endTime(endTime),
-        status(kj::mv(status)),
         tags(kj::mv(tags)) {}
 };
 
@@ -864,18 +860,35 @@ struct SpanOpen final {
 // Once emitted, no further mark events should occur within the closed
 // span.
 struct SpanClose final {
-  explicit SpanClose(EventOutcome outcome = EventOutcome::OK, SpanStatus status = {});
+  explicit SpanClose(EventOutcome outcome = EventOutcome::OK);
   SpanClose(rpc::Trace::SpanClose::Reader reader);
   SpanClose(SpanClose&&) noexcept = default;
   SpanClose& operator=(SpanClose&&) = default;
   KJ_DISALLOW_COPY(SpanClose);
 
   EventOutcome outcome = EventOutcome::OK;
-  SpanStatus status;
 
   void copyTo(rpc::Trace::SpanClose::Builder builder) const;
   SpanClose clone() const;
   kj::String toString() const;
+};
+
+struct SpanUpdate final {
+  using Info = kj::OneOf<kj::ConstString, SpanStatus>;
+
+  explicit SpanUpdate(kj::ConstString operationName);
+  explicit SpanUpdate(SpanStatus status);
+  SpanUpdate(rpc::Trace::SpanUpdate::Reader reader);
+  SpanUpdate(SpanUpdate&&) noexcept = default;
+  SpanUpdate& operator=(SpanUpdate&&) = default;
+  KJ_DISALLOW_COPY(SpanUpdate);
+
+  Info info;
+
+  void copyTo(rpc::Trace::SpanUpdate::Builder builder) const;
+  SpanUpdate clone() const;
+  kj::String toString() const;
+  size_t size() const;
 };
 
 // The Onset and Outcome event types are special forms of SpanOpen and
@@ -940,15 +953,16 @@ struct Outcome final {
 // A streaming tail worker receives a series of Tail Events. Tail events always
 // occur within an InvocationSpanContext. The first TailEvent delivered to a
 // streaming tail session is always an Onset. The final TailEvent delivered is
-// always an Outcome. Between those can be any number of SpanOpen, SpanClose,
-// and Mark events. Every SpanOpen *must* be associated with a SpanClose unless
-// the stream was abruptly terminated.
+// always an Outcome. Between those can be any number of SpanOpen, SpanUpdate,
+// SpanClose, and Mark events. Every SpanOpen *must* be associated with a
+// SpanClose unless the stream was abruptly terminated.
 // A future version may add support for Link events again.
 struct TailEvent final {
   using Event = kj::OneOf<Onset,
       Outcome,
       SpanOpen,
       SpanClose,
+      SpanUpdate,
       DiagnosticChannelEvent,
       Exception,
       Log,
@@ -1116,7 +1130,6 @@ struct Span {
   kj::ConstString operationName;
   kj::Date startTime;
   kj::Date endTime;
-  tracing::SpanStatus status;
   TagMap tags;
   kj::Vector<Log> logs;
 
@@ -1304,7 +1317,7 @@ class SpanBuilder {
 //
 // A new SpanObserver is created at the start of each Span. The SpanBuilder drives the observer
 // through its lifecycle: onOpen() is called when the span is created, onClose() when the span
-// ends, and onUpdateName() if the operation name changes between open and close.
+// ends, and update methods are called when mutable properties change between open and close.
 class SpanObserver: public kj::Refcounted {
  public:
   // Allocate a new child span.
@@ -1326,10 +1339,7 @@ class SpanObserver: public kj::Refcounted {
   // Called when the span is closed. Delivers the end time, tags, and logs.
   // Called exactly once per observer, after onOpen(). Tags and logs are moved from the span;
   // the observer takes ownership.
-  virtual void onClose(kj::Date endTime,
-      tracing::SpanStatus&& status,
-      Span::TagMap&& tags,
-      kj::Vector<Span::Log>&& logs) = 0;
+  virtual void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) = 0;
 
   virtual void onException(kj::Date timestamp,
       kj::Maybe<tracing::Exception::Code> code,
@@ -1341,6 +1351,8 @@ class SpanObserver: public kj::Refcounted {
   // SpanBuilder::setOperationName()). Observers that eagerly stream the open event should handle
   // this; others may simply update their buffered state. Default implementation is a no-op.
   virtual void onUpdateName(kj::ConstString operationName) {}
+
+  virtual void onUpdateStatus(tracing::SpanStatus&& status) {}
 
   // The current time to be provided for the span. For user tracing, we will override this to
   // provide I/O time. This *requires* that spans are only created when an IOContext is available
@@ -1374,7 +1386,7 @@ class NonRecordingSpanObserver final: public SpanObserver {
     return {};
   }
   void onOpen(kj::ConstString, kj::Date) override {}
-  void onClose(kj::Date, tracing::SpanStatus&&, Span::TagMap&&, kj::Vector<Span::Log>&&) override {}
+  void onClose(kj::Date, Span::TagMap&&, kj::Vector<Span::Log>&&) override {}
   kj::Maybe<tracing::SpanContext> toSpanContext() override {
     return tracing::SpanContext::clone(context);
   }

@@ -3217,19 +3217,21 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
   SequentialSpanSubmitter(kj::Own<BaseTracer::WeakRef> weakTracer, kj::EntropySource& entropySource)
       : weakTracer(kj::mv(weakTracer)),
         entropySource(entropySource) {}
-  void submitSpanClose(tracing::SpanId spanId,
-      kj::Date startTime,
-      kj::Date endTime,
-      tracing::SpanStatus status,
-      Span::TagMap&& tags) override {
+  void submitSpanClose(
+      tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) override {
     weakTracer->runIfAlive([&](BaseTracer& tracer) {
-      tracing::SpanEndData spanEnd(spanId, endTime, kj::mv(tags), kj::mv(status));
+      tracing::SpanEndData spanEnd(spanId, endTime, kj::mv(tags));
       if (isPredictableModeForTest()) {
         startTime = spanEnd.endTime = kj::UNIX_EPOCH;
       }
 
       tracer.addSpanClose(kj::mv(spanEnd), startTime);
     });
+  }
+
+  void submitSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) override {
+    weakTracer->runIfAlive(
+        [&](BaseTracer& tracer) { tracer.addSpanUpdate(spanId, kj::mv(update)); });
   }
 
   void submitSpanException(tracing::SpanId spanId,
