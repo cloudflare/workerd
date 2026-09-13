@@ -25,7 +25,7 @@
 namespace workerd::api {
 namespace {
 
-static SharedMemoryCache::Limits testLimits() {
+static MemoryCacheLimits testLimits() {
   return {
     .maxKeys = 100,
     .maxValueSize = 1024,
