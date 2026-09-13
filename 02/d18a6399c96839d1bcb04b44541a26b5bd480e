@@ -1,0 +1,49 @@
+src/workerd/api/actor-state.c++
+  s_3725c7a238f252::t_0dcf0e2774f288 1152,1160
+src/workerd/api/actor-state.h
+  s_3725c7a238f252::t_42c7de6bc86356 595
+src/workerd/api/container-test.c++
+  s_3725c7a238f252::t_add1d875e13401 662-700
+src/workerd/api/container.c++
+  s_3725c7a238f252::t_a8db61f0f55edf 301-303,326-337
+src/workerd/api/container.h
+  s_3725c7a238f252::t_2c33774485ab0e 199-201,334,364,387,392
+src/workerd/io/worker.c++
+  s_3725c7a238f252::t_dbef9c9e79fe43 3685,3859,3868,3919,3927,4005-4014,4018-4019
+src/workerd/io/worker.h
+  s_3725c7a238f252::t_0ca59e0e2fcf40 977
+src/workerd/server/server.c++
+  s_3725c7a238f252::t_4a1c1cf1d8a14d 321,1324,1328-1333,1374-1376,2034,4135,4153,5499,5503
+src/workerd/server/tests/container-client/container-client.wd-test
+  s_3725c7a238f252::t_fd8d166ebaf7ad 16-28,31-39
+src/workerd/server/tests/container-client/test.js
+  s_3725c7a238f252::t_2ff04d18a2d80a 25-33,2906-2930
+src/workerd/server/workerd.capnp
+  s_3725c7a238f252::t_9b2161d6c7dd17 679-687
+src/workerd/tests/test-fixture.c++
+  s_3725c7a238f252::t_9c6bf04ab2bad1 443-444
+types/generated-snapshot/experimental/index.d.ts
+  s_3725c7a238f252::t_eadf3f4251d07f 4073
+types/generated-snapshot/experimental/index.ts
+  s_3725c7a238f252::t_ccaf5f76fa828f 4082
+types/generated-snapshot/index.d.ts
+  s_3725c7a238f252::t_7ac5c9de1cb683 3986
+types/generated-snapshot/index.ts
+  s_3725c7a238f252::t_f41198b483530e 3995
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "02d18a6399c96839d1bcb04b44541a26b5bd480e",
+  "prompts": {},
+  "sessions": {
+    "s_3725c7a238f252": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fd31e-cf47-7423-90ec-e5aaf3f09f91",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Nafeez Nazer <nafeez@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+src/workerd/io/observer.c++
+  s_6ba2030b43c23b::t_d6114e674414c7 14-23
+src/workerd/io/observer.h
+  s_6ba2030b43c23b::t_ac1478223d83d0 145,148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "77a45fa6a240f4fcb9d59639041307dcc0cfa7b0",
+  "prompts": {},
+  "sessions": {
+    "s_6ba2030b43c23b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f7fdd34c1ffeJ4joNLMehWneBI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+src/workerd/io/BUILD.bazel
+  s_78769e78586072::t_64d12cf98df2d9 303
+src/workerd/io/observer.h
+  s_78769e78586072::t_5a8bce30c0c638 10,108-116,337-341
+src/workerd/io/worker.c++
+  s_78769e78586072::t_d3ee1c7fedc665 4447,4453-4456,4499,4503
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "261bf2b458d3755fe8a8eb2e3eb791bb2d94e538",
+  "prompts": {},
+  "sessions": {
+    "s_78769e78586072": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fbc9ebe86ffeC6UD7t8jfQyh7x",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
