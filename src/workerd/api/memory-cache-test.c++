@@ -47,7 +47,7 @@ KJ_TEST("provider teardown does not invalidate a live binding") {
     kj::Own<MemoryCacheUse> use;
     kj::Own<MemoryCacheUse> privateUse;
     {
-      MemoryCacheProvider provider(kj::systemCoarseMonotonicClock());
+      MemoryCacheProvider provider;
       use = provider.getUse("shared"_kj, testLimits());
       privateUse = provider.getUse(kj::none, testLimits());
     }

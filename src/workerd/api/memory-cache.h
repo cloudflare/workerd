@@ -3,8 +3,6 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 
-#include <kj/time.h>
-
 namespace workerd {
 class SpanBuilder;
 }
@@ -146,8 +144,8 @@ class MemoryCache: public jsg::Object {
 // the in memory cache is being used.
 class MemoryCacheProvider {
  public:
-  explicit MemoryCacheProvider(const kj::MonotonicClock& timer);
-  MemoryCacheProvider(const kj::MonotonicClock& timer, MemoryCachePolicy policy);
+  MemoryCacheProvider();
+  explicit MemoryCacheProvider(MemoryCachePolicy policy);
   KJ_DISALLOW_COPY_AND_MOVE(MemoryCacheProvider);
   ~MemoryCacheProvider() noexcept(false);
 
@@ -155,8 +153,6 @@ class MemoryCacheProvider {
 
  private:
   kj::Own<MemoryCacheNamespace> cacheNamespace;
-
-  const kj::MonotonicClock& timer;
 };
 
 // clang-format off
