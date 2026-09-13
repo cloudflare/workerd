@@ -2414,6 +2414,14 @@ bool RpcSerializerExternalHandler::trySerializeClassInstance(
   return false;
 }
 
+static void markJsRpcExceptionAsDelivered(IoContext& ioctx, kj::Exception& exception) {
+  markExceptionAsDelivered(exception);
+  if (ioctx.getActor() != kj::none) {
+    exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
+    exception.setDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  }
+}
+
 // JsRpcTarget implementation specific to entrypoints. This is used to deliver the first, top-level
 // call of an RPC session.
 class EntrypointJsRpcTarget final: public JsRpcTargetBase {
@@ -2440,10 +2448,14 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   // This marks when the handler returned a value, NOT when all data has been streamed or all
   // capabilities released.
   kj::Promise<void> call(CallContext callContext) override {
-    return JsRpcTargetBase::call(kj::mv(callContext)).then([this]() {
+    return JsRpcTargetBase::call(kj::mv(callContext))
+        .then([this]() {
       KJ_IF_SOME(t, ioCtx.getWorkerTracer()) {
         t.setReturn(ioCtx.now());
       }
+    }).catch_([this](kj::Exception&& exception) -> kj::Promise<void> {
+      markJsRpcExceptionAsDelivered(ioCtx, exception);
+      return kj::mv(exception);
     });
   }
 
@@ -2566,6 +2578,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     bool isDynamicDispatch) {
   IoContext& ioctx = incomingRequest->getContext();
 
+  try {
+    incomingRequest->getMetrics().claimRetryTokenBeforeUserCode();
+  } catch (...) {
+    auto exception = kj::getCaughtExceptionAsKj();
+    failed(exception);
+    kj::throwFatalException(kj::mv(exception));
+  }
   incomingRequest->delivered();
 
   KJ_DEFER({
@@ -2591,6 +2610,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // If the cancellation occurred because the Actor or IoContext was aborted, we'd rather
     // propagate the abort error. So check for one, and revoke with that if present.
     KJ_IF_SOME(r, incomingRequest->getContext().getAbortReason()) {
+      markJsRpcExceptionAsDelivered(ioctx, r);
       revocableTarget.revoke(kj::mv(r));
     } else {
       // silence bogus clang warning about dangling else
@@ -2612,7 +2632,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // Make sure the top-level capability is revoked with the same exception that `run()` is
     // throwing, rather than some generic revocation exception.
     auto e = kj::getCaughtExceptionAsKj();
-    markExceptionAsDelivered(e);
+    markJsRpcExceptionAsDelivered(ioctx, e);
     // These are exceptions for a top-level jsRpc call and will cause the jsRpc customEvent to have
     // an exception outcome – log the exception to avoid reporting an exception outcome without the
     // actual exception.
