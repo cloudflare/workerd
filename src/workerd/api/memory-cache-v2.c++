@@ -5,7 +5,6 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>
 #include <workerd/rust/memory-cache/ffi/lib.rs.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/thread-scopes.h>
 
 #include <kj/time.h>
@@ -19,29 +18,6 @@ using Limits = MemoryCacheLimits;
 using Outcome = MemoryCacheUse::GetWithFallbackOutcome;
 using FallbackResult = MemoryCacheUse::FallbackResult;
 using FallbackDoneCallback = MemoryCacheUse::FallbackDoneCallback;
-
-class MemoryCacheUseV1 final: public MemoryCacheUse {
- public:
-  MemoryCacheUseV1(kj::Own<const SharedMemoryCache> cache, Limits limits)
-      : use(kj::mv(cache), limits) {}
-
-  kj::Maybe<kj::Own<CacheValue>> getWithoutFallback(
-      const kj::String& key, SpanBuilder& readSpan) const override {
-    return use.getWithoutFallback(key, readSpan);
-  }
-
-  kj::OneOf<kj::Own<CacheValue>, kj::Promise<GetWithFallbackOutcome>> getWithFallback(
-      const kj::String& key, SpanBuilder& readSpan) const override {
-    return use.getWithFallback(key, readSpan);
-  }
-
-  void delete_(const kj::String& key) const override {
-    use.delete_(key);
-  }
-
- private:
-  SharedMemoryCache::Use use;
-};
 
 static ::rust::Str asRustStr(kj::StringPtr value) {
   return ::rust::Str(value.begin(), value.size());
@@ -220,25 +196,12 @@ MemoryCacheProvider::MemoryCacheProvider(const kj::MonotonicClock& timer)
     : MemoryCacheProvider(timer, MemoryCachePolicy{}) {}
 
 MemoryCacheProvider::MemoryCacheProvider(const kj::MonotonicClock& timer, MemoryCachePolicy policy)
-    : additionalResizeMemoryLimitHandler([policy](SharedMemoryCache::ThreadUnsafeData& data) {
-        KJ_IF_SOME(cap, policy.maxTotalValueSize) {
-          data.effectiveLimits.maxTotalValueSize =
-              kj::min(data.effectiveLimits.maxTotalValueSize, cap);
-        }
-        data.effectiveLimits = data.effectiveLimits.normalize();
-      }),
-      timer(timer) {
-  if (util::Autogate::isEnabled(util::AutogateKey::MEMORY_CACHE_V2)) {
-    namespaceV2 = MemoryCacheNamespace::create(policy);
-  }
-}
+    : cacheNamespace(MemoryCacheNamespace::create(policy)),
+      timer(timer) {}
 
 kj::Own<MemoryCacheUse> MemoryCacheProvider::getUse(
     kj::Maybe<kj::StringPtr> cacheId, MemoryCacheLimits limits) const {
-  KJ_IF_SOME(cacheNamespace, namespaceV2) {
-    return cacheNamespace->getBinding(cacheId, limits);
-  }
-  return kj::heap<MemoryCacheUseV1>(getInstance(cacheId), limits);
+  return cacheNamespace->getBinding(cacheId, limits);
 }
 
 kj::Own<MemoryCacheNamespace> MemoryCacheNamespace::create(MemoryCachePolicy policy) {
@@ -327,10 +290,6 @@ MemoryCacheV2TestStats MemoryCacheUseV2::getStatsForTest() const {
 
 MemoryCacheV2TestStats getMemoryCacheV2StatsForTest(const MemoryCacheUse& use) {
   return static_cast<const MemoryCacheUseV2&>(use).getStatsForTest();
-}
-
-bool isMemoryCacheV2ForTest(const MemoryCacheProvider& provider) {
-  return provider.namespaceV2 != kj::none;
 }
 
 }  // namespace workerd::api
