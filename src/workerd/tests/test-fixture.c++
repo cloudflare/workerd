@@ -402,7 +402,8 @@ TestFixture::TestFixture(SetupParams&& params)
     }
     savedHibernationManager = kj::mv(params.hibernationManager);
     savedHolderToken = params.holderToken;
-    savedActorClassName = params.actorClassName;
+    savedActorClassName =
+        params.actorClassName.map([](kj::StringPtr name) { return kj::str(name); });
     actor = makeActor(kj::mv(id));
   }
 }
@@ -429,7 +430,8 @@ jsg::Ref<api::DurableObjectStorage> storageFactory(
 kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
   auto& loopback = KJ_ASSERT_NONNULL(savedActorLoopback);
   return kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
-      /*hasTransient=*/false, actorCacheFactory, savedActorClassName,
+      /*hasTransient=*/false, actorCacheFactory,
+      savedActorClassName.map([](kj::String& name) { return name.asPtr(); }),
       /*props=*/Frankenvalue(), storageFactory, loopback->addRef(), *timerChannel,
       kj::refcounted<ActorObserver>(),
       savedHibernationManager.map(
