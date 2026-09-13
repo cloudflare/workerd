@@ -48,9 +48,9 @@ static double cacheNow() {
   return (kj::systemPreciseCalendarClock().now() - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 }
 
-class RustCacheValueBacking final: public CacheValueBacking {
+class RustCacheValue final: public CacheValue {
  public:
-  explicit RustCacheValueBacking(::rust::Box<rustCache::Value> value): value(kj::mv(value)) {}
+  explicit RustCacheValue(::rust::Box<rustCache::Value> value): value(kj::mv(value)) {}
 
   kj::ArrayPtr<const kj::byte> asBytes() const override {
     auto bytes = value->bytes();
@@ -62,7 +62,7 @@ class RustCacheValueBacking final: public CacheValueBacking {
 };
 
 static kj::Own<CacheValue> makeCacheValue(::rust::Box<rustCache::Value> value) {
-  return kj::atomicRefcounted<CacheValue>(kj::heap<RustCacheValueBacking>(kj::mv(value)));
+  return kj::heap<RustCacheValue>(kj::mv(value));
 }
 
 class FallbackPermitOwner final {
@@ -149,9 +149,8 @@ static FallbackDoneCallback makeFallback(
              kj::Maybe<FallbackResult> result, SpanBuilder& fallbackSpan) mutable {
     auto currentPermit = permit->take();
     KJ_IF_SOME(value, result) {
-      auto source = value.value->asBytes();
       KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
-        auto trace = currentPermit->succeed(asRustBytes(source), value.expiration, cacheNow());
+        auto trace = currentPermit->succeed(asRustBytes(value.value), value.expiration, cacheNow());
         emitWriteTrace(key, trace);
         fallbackSpan.setTag("waiters_notified"_kjc, static_cast<double>(trace.waiters_notified));
       })) {
