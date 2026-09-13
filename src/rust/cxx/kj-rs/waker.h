@@ -89,14 +89,29 @@ struct PromiseArcWakerPair {
 // `CrossThreadPromiseFulfiller` aspect makes it safe to call `wake_by_ref()` concurrently. Finally,
 // `wake()` is implemented in terms of `wake_by_ref()` and `drop()`.
 //
+// A wake on the thread that owns the future's event loop does not go through the fulfiller: KJ
+// dispatches a cross-thread fulfillment only when the event port's wait()/poll() reports it, i.e.
+// after every already-runnable event has run. A stored waker (what a channel or oneshot holds)
+// woken from another KJ event would therefore resume its future one loop-idle later than a
+// kj::PromiseFulfiller resumes a waiting coroutine. Instead, a same-thread wake arms the
+// FuturePollEvent directly (Event::armDepthFirst()), in KJ event order. The event reference is
+// revoked -- and wakes fall back to the fulfiller -- at the same point the ArcWaker promise is
+// abandoned (ArcWakerPromiseNode::destroy(): the next poll, or the FuturePollEvent's destruction),
+// so a waker Rust retains past that point can never arm a freed event.
+//
 // This class is mostly an implementation detail of LazyArcWaker.
 class ArcWaker: public kj::AtomicRefcounted, public KjWaker {
  public:
   // Construct a new promise and ArcWaker promise pair, with the Promise to be scheduled on the
-  // event loop associated with `executor`.
-  static PromiseArcWakerPair create(const kj::Executor& executor);
+  // event loop associated with `executor`. `event`, if given, is the FuturePollEvent a same-thread
+  // wake arms directly (see above).
+  static PromiseArcWakerPair create(
+      const kj::Executor& executor, kj::Maybe<kj::_::Event&> event = kj::none);
 
-  ArcWaker(kj::Badge<ArcWaker>, kj::PromiseCrossThreadFulfillerPair<void> paf);
+  ArcWaker(kj::Badge<ArcWaker>,
+      const kj::Executor& executor,
+      kj::PromiseCrossThreadFulfillerPair<void> paf,
+      kj::Maybe<kj::_::Event&> event);
   KJ_DISALLOW_COPY_AND_MOVE(ArcWaker);
 
   const KjWaker* clone() const override;
@@ -108,7 +123,14 @@ class ArcWaker: public kj::AtomicRefcounted, public KjWaker {
   kj::Promise<void> getPromise();
 
   ArcWakerPromiseNode node;
+  const kj::Executor& executor;
   kj::Own<const kj::CrossThreadPromiseFulfiller<void>> fulfiller;
+  // Touched only on the owning thread: set at construction, cleared by
+  // ArcWakerPromiseNode::destroy(), read by wake_by_ref() behind `executor.isCurrent()`. A wake
+  // from any other thread never looks at it.
+  mutable kj::Maybe<kj::_::Event&> event;
+
+  friend class ArcWakerPromiseNode;
 };
 
 // =======================================================================================
