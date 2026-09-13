@@ -12,6 +12,21 @@ use std::task::Poll;
 use std::task::Wake;
 use std::task::Waker;
 
+static SIDE_EFFECT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn reset_side_effect_counter() {
+    SIDE_EFFECT_COUNTER.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn get_side_effect_counter() -> u64 {
+    SIDE_EFFECT_COUNTER.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Its only observable effect is the counter bump: the body runs iff the future is polled.
+pub async fn new_side_effect_future_void() {
+    SIDE_EFFECT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
 use crate::Error;
 use crate::Result;
 use crate::ffi::CloningAction;

@@ -56,7 +56,13 @@ serde_json = { version = "1", features = ["unbounded_depth"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 # tokio is huge, let's enable only features when we actually need them.
-tokio = { version = "1", default-features = false, features = ["net", "rt", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
+# socket2 provides sockaddr handling for the tokio-backed kj-rs-io networking layer.
+socket2 = "0.6"
+# notify backs kj-rs-io's --watch file watcher (inotify / kqueue / ReadDirectoryChangesW). The
+# kqueue backend is selected on macOS (not FSEvents) for the same per-file semantics and latency
+# as workerd's native watcher.
+notify = { version = "8", default-features = false, features = ["macos_kqueue"] }
 tracing = { version = "0", default-features = false, features = ["std"] }
 swc_common = "25"
 swc_ts_fast_strip = "57"

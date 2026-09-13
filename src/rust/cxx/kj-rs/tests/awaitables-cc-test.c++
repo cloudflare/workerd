@@ -222,6 +222,45 @@ KJ_TEST("Work before poll") {
   KJ_EXPECT(val == 42);
 }
 
+KJ_TEST("bridged async functions stay cold until awaited") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  // A returned promise does not run the Rust body: not on return, not on an unrelated loop
+  // turn. Adapters that need KJ's start-inside-the-call semantics (kj-rs-io's I/O methods)
+  // start it explicitly with kj::Promise::eagerlyEvaluate().
+  reset_side_effect_counter();
+  auto promise = new_side_effect_future_void();
+  KJ_EXPECT(get_side_effect_counter() == 0);
+  kj::evalLater([]() {}).wait(waitScope);
+  KJ_EXPECT(get_side_effect_counter() == 0);
+  promise.wait(waitScope);
+  KJ_EXPECT(get_side_effect_counter() == 1);
+}
+
+KJ_TEST("dropping a cold bridged future does not enter its body") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  reset_side_effect_counter();
+  { auto promise = new_side_effect_future_void(); }
+  KJ_EXPECT(get_side_effect_counter() == 0);
+}
+
+KJ_TEST("eagerlyEvaluate() starts a bridged future inside the call") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  // The first poll happens synchronously, before eagerlyEvaluate() returns: the same
+  // start-inside-the-call semantics KJ's native I/O streams have, which is why kj-rs-io's
+  // adapters wrap every returned I/O promise this way.
+  reset_side_effect_counter();
+  auto promise = new_side_effect_future_void().eagerlyEvaluate(nullptr);
+  KJ_EXPECT(get_side_effect_counter() == 1);
+  promise.wait(waitScope);
+  KJ_EXPECT(get_side_effect_counter() == 1);
+}
+
 // TODO(someday): More test cases.
 //   - Standalone ArcWaker tests. Ensure Rust calls ArcWaker destructor when we expect.
 //   - Throwing an exception from PromiseNode functions, including destructor.
