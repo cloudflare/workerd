@@ -345,7 +345,6 @@ wd_cc_library(
     srcs = [
         "memory-cache.c++",
         "memory-cache-v2.c++",
-        "memory-cache-v2-test.h",
     ],
     hdrs = [
         "memory-cache.h",
@@ -360,13 +359,6 @@ wd_cc_library(
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
     ],
-)
-
-wd_cc_library(
-    name = "memory-cache-test-support",
-    testonly = True,
-    hdrs = ["memory-cache-v2-test.h"],
-    deps = [":memory-cache"],
 )
 
 wd_cc_library(
@@ -644,7 +636,6 @@ kj_test(
     src = "memory-cache-test.c++",
     deps = [
         ":memory-cache",
-        ":memory-cache-test-support",
         "//src/workerd/io:trace",
         "//src/workerd/tests:test-fixture",
     ],

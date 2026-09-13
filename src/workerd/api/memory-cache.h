@@ -99,6 +99,17 @@ class MemoryCacheUse {
       const kj::String& key, SpanBuilder& readSpan) const = 0;
 
   virtual void delete_(const kj::String& key) const = 0;
+
+  struct Stats {
+    size_t bindings;
+    size_t inFlightFallbacks;
+    size_t waiters;
+    size_t canceledWaiters;
+  };
+  // Best-effort counters for the cache this binding is attached to. The
+  // waiter counts are maintained without holding the cache lock and are only
+  // meant for assertions in tests.
+  virtual Stats getStatsForTest() const = 0;
 };
 
 // JavaScript class that allows accessing an in-memory cache.
