@@ -1,0 +1,21 @@
+src/workerd/api/actor-state.c++
+  s_80fd8e845a3525::t_30839e85515215 1013-1016
+src/workerd/api/jsrpc-call-observation-test.c++
+  s_80fd8e845a3525::t_ce39df2519a354 21-22,27-28,43,51,73,82-84,86-87,109,112,117-118,148-151,162,170-185,190-193,195,237,248-299
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "21f393eba5eb0e672cd2251ab36d89395f8fd1cf",
+  "prompts": {},
+  "sessions": {
+    "s_80fd8e845a3525": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f6e9d45fbffe5iEZ6BSRFX4oBB",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
