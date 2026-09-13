@@ -39,6 +39,9 @@ struct TestFixture {
     kj::Maybe<kj::StringPtr> mainModuleSource;
     // If set, make a stub of an Actor with the given id.
     kj::Maybe<Worker::Actor::Id> actorId;
+    // If set, the actor is an instance of this exported Durable Object class (e.g. "default"),
+    // constructed on the first incoming request. Otherwise the actor has no class.
+    kj::Maybe<kj::StringPtr> actorClassName;
     // If true, use real timers instead of mock timers that never advance.
     // Requires waitScope to be kj::none (so that the fixture creates its own AsyncIoContext).
     bool useRealTimers;
@@ -268,6 +271,7 @@ struct TestFixture {
   // it constructs.
   kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> savedHibernationManager;
   kj::Maybe<uint64_t> savedHolderToken;
+  kj::Maybe<kj::StringPtr> savedActorClassName;
   capnp::ByteStreamFactory byteStreamFactory;
   kj::HttpHeaderTable::Builder headerTableBuilder;
   ThreadContext::HeaderIdBundle threadContextHeaderBundle;
