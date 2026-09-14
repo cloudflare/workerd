@@ -37,6 +37,7 @@ behavior-parity (messages aside).
 | 20 | remainder after a partial BYOB read, delivered to a DEFAULT read | copied into a fresh auto-allocated buffer (4096, or 16384 under the ledger #5 autogate), byteOffset 0 | view into the original enqueued buffer with its offset preserved (spec) | `partialViewThenDefaultRead` |
 | 21 | byobRequest after a PARTIAL enqueue into a pending BYOB read | original request invalidated; no replacement exposed (null) | original request invalidated; a fresh request exposes a view shrunk to the remaining byte count (spec) | `cancelWithPartiallyFilledPull` |
 | 22 | cancel() after a partial enqueue into a pending BYOB read | read resolves done with an empty view | read resolves done with value undefined (spec) | `cancelWithPartiallyFilledPull` |
+| 23 | error() while a close() is still pending (bytes queued) — readable #18 mirror | ignored: desiredSize already 0, the bytes drain to a clean close for default and BYOB readers | desiredSize is hwm minus the queued bytes (-2) until the error, then the stream errors: bytes discarded, default/BYOB reads and closed reject | `errorAfterCloseWithQueuedBytes` |
 
 Parity worth noting (probed, pinned): byte hwm defaults to 0 with NO
 automatic pull; pull-throw and error-then-throw identity; enqueue
@@ -105,7 +106,7 @@ named suite test pins directly, differing only in incidental asserts.
 | --- | --- |
 | `construction.js` | ledger #1, #2, #4; byte hwm default 0 |
 | `pull-timing.js` | ledger #3; pull-throw seeds |
-| `controller.js` | ledger #5, #7, #21, #22; enqueue-discards-request; read-after-close; detach-at-call |
+| `controller.js` | ledger #5, #7, #21, #22, #23; enqueue-discards-request; read-after-close; detach-at-call |
 | `byob-reader.js` | ledger #20; view-type matrix + offsets + auto-allocate sizing (migrated streams-byob-edge-cases) + mismatched sizes/types, subarray, multi-pending-reads, byobreaderRegression (migrated streams-js-test) |
 | `respond.js` | ledger #6, #8, #15, #16; all 31 streams-respond-test tests (respond/respondWithNewView/pumps/cancel races/UAF shapes) + js-test respond family |
 | `release-relock.js` | ledger #9, #10; the WPT releaseLock→second-reader cluster |
