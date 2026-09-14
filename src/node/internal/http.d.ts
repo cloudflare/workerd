@@ -23,10 +23,10 @@ export interface ConnectHandler {
 
 export type PortHandler = FetchHandler | ConnectHandler;
 
+export const HOST_ADDRESS: string;
 export const GATEWAY_ADDRESS: string;
 
 export class PortTable {
-  readonly hostAddress: string;
   ephemeral(): number;
   declare(port: number): void;
   hasDeclared(): boolean;
@@ -41,5 +41,4 @@ export class PortTable {
   getHandler(port: number): PortHandler | undefined;
 }
 
-export function tcpPorts(): PortTable;
-export function lookupHandler(port: number): PortHandler | undefined;
+export const tcpPorts: PortTable;

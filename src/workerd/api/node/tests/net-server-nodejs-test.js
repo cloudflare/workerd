@@ -2,19 +2,17 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import {
-  ok,
-  strictEqual,
-  notStrictEqual,
-  deepStrictEqual,
-  throws,
-} from 'node:assert';
+import { ok, strictEqual, notStrictEqual, throws, rejects } from 'node:assert';
 import { once } from 'node:events';
 import * as net from 'node:net';
 import * as http from 'node:http';
 import { connect } from 'cloudflare:sockets';
 import { DurableObject } from 'cloudflare:workers';
-import { connectHandler, handleAsNodeConnection } from 'cloudflare:node';
+import {
+  connectHandler,
+  handleAsNodeConnection,
+  httpServerHandler,
+} from 'cloudflare:node';
 
 // Inbound connections on this worker's two declared TCP listeners are routed to
 // whichever net.Server listens on the port they arrived on.
@@ -137,7 +135,7 @@ export const testInboundOnDeclaredPort = {
     const socket = connect(`127.0.0.1:${port}`);
     const writer = socket.writable.getWriter();
     await writer.write(new TextEncoder().encode('ping'));
-    // The wildcard bind resolved to the namespace's host address, not the
+    // The wildcard bind resolved to the isolate's host address, not the
     // listener's 127.0.0.1 authority.
     strictEqual(await readAll(socket), `240.1.0.1:${port}:PING`);
     await socket.closed;
@@ -145,22 +143,34 @@ export const testInboundOnDeclaredPort = {
   },
 };
 
-// Each Durable Object instance is its own host: both bind 25565 and the caller
-// picks the port via the CONNECT authority.
+// The isolate is the port namespace: Durable Object instances in it share the
+// table with each other and with the entrypoint, as processes on one host do.
 export class PortHost extends DurableObject {
   #server = null;
   #bound = null;
+  #http = null;
+
+  // Listens on port (0 claims a declared port); returns the port, or the
+  // error code.
+  async listen(port) {
+    const server = net.createServer((s) =>
+      s.end(`${this.ctx.id.toString()} ${s.localAddress} ${s.remoteAddress}`)
+    );
+    const outcome = await new Promise((resolve) => {
+      server.once('error', (err) => resolve(err.code));
+      server.once('listening', () => resolve(server.address().port));
+      server.listen(port);
+    });
+    if (typeof outcome === 'number') this.#server = server;
+    return outcome;
+  }
+
+  closeServer() {
+    this.#server.close();
+    this.#server = null;
+  }
 
   async connect(socket) {
-    if (this.#server === null) {
-      this.#server = net
-        .createServer((s) =>
-          s.end(
-            `${this.ctx.id.toString()} ${s.localAddress} ${s.remoteAddress}`
-          )
-        )
-        .listen(25565);
-    }
     try {
       await handleAsNodeConnection(socket);
     } catch (err) {
@@ -180,7 +190,7 @@ export class PortHost extends DurableObject {
     this.#bound = null;
   }
 
-  // Whether port is free in this instance's table.
+  // Whether port is free in the table as seen from this instance.
   probe(port) {
     try {
       new net.BoundSocket({ port }).close();
@@ -189,50 +199,86 @@ export class PortHost extends DurableObject {
       return false;
     }
   }
+
+  listenHttp(port) {
+    this.#http = http
+      .createServer((req, res) => res.end(`http ${this.ctx.id.toString()}`))
+      .listen(port);
+    return this.#http.address().port;
+  }
+
+  closeHttp() {
+    this.#http.close();
+    this.#http = null;
+  }
+
+  async fetchHttp(port) {
+    const res = await httpServerHandler({ port }).fetch(
+      new Request('http://example.com/')
+    );
+    return res.text();
+  }
 }
 
-export const testDurableObjectScoping = {
+export const testDurableObjectsShareIsolatePorts = {
   async test(ctrl, env) {
     const a = env.HOSTS.get(env.HOSTS.idFromName('a'));
     const b = env.HOSTS.get(env.HOSTS.idFromName('b'));
+    const aId = env.HOSTS.idFromName('a').toString();
 
-    const [aId, aHost, aPeer] = (await readAll(a.connect('world:25565'))).split(
+    // A server listened on in one instance holds the port for the isolate and
+    // is what a connection to any instance on that port reaches.
+    const port = await a.listen(0);
+    ok(port > 0);
+    strictEqual(await b.listen(port), 'EADDRINUSE');
+    throws(() => new net.BoundSocket({ port }), { code: 'EADDRINUSE' });
+    strictEqual(
+      (await listenError(net.createServer(), port)).code,
+      'EADDRINUSE'
+    );
+    const [id, host, peer] = (await readAll(a.connect(`world:${port}`))).split(
       ' '
     );
-    const [bId, bHost] = (await readAll(b.connect('world:25565'))).split(' ');
-    strictEqual(aId, env.HOSTS.idFromName('a').toString());
-    strictEqual(bId, env.HOSTS.idFromName('b').toString());
-    // Each instance is its own host with its own synthetic address, distinct
-    // from the entrypoint's; the stub caller appears behind the gateway.
-    ok(aHost.startsWith('240.1.') && bHost.startsWith('240.1.'));
-    notStrictEqual(aHost, bHost);
-    notStrictEqual(aHost, '240.1.0.1');
-    strictEqual(aPeer, '240.1.255.254');
-    // Servers persist across requests to the same instance.
-    strictEqual(
-      (await readAll(a.connect('world:25565'))).split(' ')[0],
-      env.HOSTS.idFromName('a').toString()
-    );
+    strictEqual(id, aId);
+    // One host address for the isolate; the stub caller is behind the gateway.
+    strictEqual(host, '240.1.0.1');
+    strictEqual(peer, '240.1.255.254');
+    strictEqual((await readAll(b.connect(`world:${port}`))).split(' ')[0], aId);
     ok(
       (await readAll(a.connect('world:1'))).startsWith(
         'No net.Server is listening on port 1.'
       )
     );
+    await a.closeServer();
+    new net.BoundSocket({ port }).close();
 
-    // A reservation made in one request to an instance is released in that
-    // instance's table from a later request, and never leaks to another
-    // instance or the entrypoint.
+    // Reservations are likewise shared, and released across requests.
     strictEqual(await a.reserve(9000), 9000);
-    strictEqual(await a.probe(9000), false);
-    strictEqual(await b.probe(9000), true);
-    new net.BoundSocket({ port: 9000 }).close();
+    strictEqual(await b.probe(9000), false);
+    throws(() => new net.BoundSocket({ port: 9000 }), { code: 'EADDRINUSE' });
     await a.release();
-    strictEqual(await a.probe(9000), true);
-
-    // Entrypoint bindings are invisible inside an instance.
-    deepStrictEqual(await b.probe(25565), false);
+    strictEqual(await b.probe(9000), true);
     const held = new net.BoundSocket({ port: 9001 });
-    strictEqual(await a.probe(9001), true);
+    strictEqual(await a.probe(9001), false);
     held.close();
+    strictEqual(await a.probe(9001), true);
+
+    // An http server listened on inside an instance is served through
+    // httpServerHandler from the entrypoint and from another instance.
+    strictEqual(await a.listenHttp(8085), 8085);
+    const res = await httpServerHandler({ port: 8085 }).fetch(
+      new Request('http://example.com/')
+    );
+    strictEqual(await res.text(), `http ${aId}`);
+    strictEqual(await b.fetchHttp(8085), `http ${aId}`);
+    throws(() => http.createServer().listen(8085), { code: 'EADDRINUSE' });
+    await rejects(b.listenHttp(8085), /EADDRINUSE/);
+    await a.closeHttp();
+    const entry = http
+      .createServer((req, res) => res.end('http entry'))
+      .listen(8085);
+    strictEqual(await a.fetchHttp(8085), 'http entry');
+    entry.close();
+    await rejects(a.fetchHttp(8085), /Http server with port 8085 not found/);
   },
 };

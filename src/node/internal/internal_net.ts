@@ -28,10 +28,10 @@
 import inner from 'cloudflare-internal:sockets';
 import {
   tcpPorts,
+  HOST_ADDRESS,
   GATEWAY_ADDRESS,
   type ConnectHandler,
   type InboundSocket,
-  type PortTable,
 } from 'cloudflare-internal:http';
 import { EventEmitter } from 'node-internal:events';
 
@@ -113,10 +113,10 @@ export const kReinitializeHandle = Symbol('kReinitializeHandle');
 const kSocketInfo = Symbol('kSocketInfo');
 
 // The local address of a Socket, either adopted from a BoundSocket or autobound
-// on connect. kBoundTable is the port table holding its reservation, to be
-// released on destroy; null when the address is only a label.
+// on connect. kBoundReserved marks a port table reservation to be released on
+// destroy; false when the address is only a label.
 const kBoundSource = Symbol('kBoundSource');
-const kBoundTable = Symbol('kBoundTable');
+const kBoundReserved = Symbol('kBoundReserved');
 const kBoundSocketConsume = Symbol('kBoundSocketConsume');
 
 const DEFAULT_IPV4_ADDR = '0.0.0.0';
@@ -132,41 +132,37 @@ function forFamily(address: string, family: string | undefined): string {
 }
 
 // The concrete address a socket bound to the wildcard reports once connected
-// or accepted: the namespace's host address, as Linux reports the interface
-// the connection uses.
-function concreteLocal(
-  bound: LocalAddressInfo,
-  table: PortTable
-): LocalAddressInfo {
+// or accepted: the isolate's host address, as Linux reports the interface the
+// connection uses.
+function concreteLocal(bound: LocalAddressInfo): LocalAddressInfo {
   if (!isWildcard(bound.address)) return bound;
-  return { ...bound, address: forFamily(table.hostAddress, bound.family) };
+  return { ...bound, address: forFamily(HOST_ADDRESS, bound.family) };
 }
 
-// Reserves port in table (shared with http servers), allocating an ephemeral
-// port for 0. Throws EADDRINUSE on conflict. Binding is role-neutral, so a
-// declared listener port is never taken here; Server.listen() claims one.
+// Reserves port in the isolate's table (shared with http servers), allocating
+// an ephemeral port for 0. Throws EADDRINUSE on conflict. Binding is
+// role-neutral, so a declared listener port is never taken here;
+// Server.listen() claims one.
 export function bindPort(
-  table: PortTable,
   address: string,
   port: number,
   reusePort = false
 ): number {
   if (port === 0) {
-    port = table.ephemeral();
+    port = tcpPorts.ephemeral();
     if (port === 0) throw new EADDRINUSE(address, port);
   }
-  if (!table.tryBind(port, reusePort)) {
+  if (!tcpPorts.tryBind(port, reusePort)) {
     throw new EADDRINUSE(address, port);
   }
   return port;
 }
 
 function releaseBoundSource(socket: Socket): void {
-  const table = socket[kBoundTable];
-  if (table !== null) {
-    table.unregister(socket);
-    table.release((socket[kBoundSource] as LocalAddressInfo).port);
-    socket[kBoundTable] = null;
+  if (socket[kBoundReserved]) {
+    tcpPorts.unregister(socket);
+    tcpPorts.release((socket[kBoundSource] as LocalAddressInfo).port);
+    socket[kBoundReserved] = false;
   }
   socket[kBoundSource] = null;
 }
@@ -228,7 +224,6 @@ export type BoundSocketOptions = {
 // bound address as its local address.
 export class BoundSocket {
   #address: AddressInfo | null;
-  #table = tcpPorts();
   // Bound with port 0, so a server adopting it may re-home it onto a declared
   // listener port.
   #ephemeral: boolean;
@@ -277,9 +272,9 @@ export class BoundSocket {
     this.#address = {
       address: host,
       family: addressType === 6 ? 'IPv6' : 'IPv4',
-      port: bindPort(this.#table, host, port, reusePort),
+      port: bindPort(host, port, reusePort),
     };
-    this.#table.register(this, this.#address.port);
+    tcpPorts.register(this, this.#address.port);
   }
 
   address(): AddressInfo {
@@ -302,8 +297,8 @@ export class BoundSocket {
     if (this.#address === null) {
       throw new ERR_SOCKET_HANDLE_ADOPTED();
     }
-    this.#table.unregister(this);
-    this.#table.release(this.#address.port);
+    tcpPorts.unregister(this);
+    tcpPorts.release(this.#address.port);
     this.#address = null;
   }
 
@@ -313,19 +308,15 @@ export class BoundSocket {
     }
   }
 
-  // Transfers the reservation, and the table it lives in, to the adopter.
-  [kBoundSocketConsume](): {
-    address: AddressInfo;
-    table: PortTable;
-    ephemeral: boolean;
-  } {
+  // Transfers the reservation to the adopter.
+  [kBoundSocketConsume](): { address: AddressInfo; ephemeral: boolean } {
     if (this.#address === null) {
       throw new ERR_SOCKET_HANDLE_ADOPTED();
     }
-    this.#table.unregister(this);
+    tcpPorts.unregister(this);
     const address = this.#address;
     this.#address = null;
-    return { address, table: this.#table, ephemeral: this.#ephemeral };
+    return { address, ephemeral: this.#ephemeral };
   }
 }
 
@@ -388,7 +379,6 @@ type ListenOptions = {
 // per connection.
 export class Server extends EventEmitter {
   #address: LocalAddressInfo | null = null;
-  #table: PortTable | null = null;
   #connections = 0;
   #closing = false;
   #handler: ConnectHandler = {
@@ -461,20 +451,19 @@ export class Server extends EventEmitter {
     };
 
     let address: LocalAddressInfo;
-    let table: PortTable;
     if (bound !== null) {
       // Adoption transfers the reservation to the server.
       let ephemeral: boolean;
-      ({ address, table, ephemeral } = bound[kBoundSocketConsume]());
-      if (table.hasDeclared() && !table.isDeclared(address.port)) {
-        table.release(address.port);
+      ({ address, ephemeral } = bound[kBoundSocketConsume]());
+      if (tcpPorts.hasDeclared() && !tcpPorts.isDeclared(address.port)) {
+        tcpPorts.release(address.port);
         if (!ephemeral) {
           return fail(new EADDRNOTAVAIL(address.address, address.port));
         }
         // A socket bound with port 0 becomes a listener on a declared port,
         // so new BoundSocket() + listen(bound) lands where connections arrive.
-        const declared = table.unclaimedDeclared();
-        if (declared === 0 || !table.tryBind(declared)) {
+        const declared = tcpPorts.unclaimedDeclared();
+        if (declared === 0 || !tcpPorts.tryBind(declared)) {
           return fail(new EADDRINUSE(address.address, 0));
         }
         address = { ...address, port: declared };
@@ -506,21 +495,20 @@ export class Server extends EventEmitter {
         validateString(host, 'options.host');
         if (host === 'localhost') host = '127.0.0.1';
       }
-      table = tcpPorts();
       // Where the platform declares the ports it delivers connections on, a
       // server can only listen on one of them, and port 0 takes the first
       // unclaimed one.
-      if (table.hasDeclared()) {
+      if (tcpPorts.hasDeclared()) {
         if (port === 0) {
-          port = table.unclaimedDeclared();
+          port = tcpPorts.unclaimedDeclared();
           if (port === 0) return fail(new EADDRINUSE(host, 0));
-        } else if (!table.isDeclared(port)) {
+        } else if (!tcpPorts.isDeclared(port)) {
           return fail(new EADDRNOTAVAIL(host, port));
         }
       }
       let boundPort: number;
       try {
-        boundPort = bindPort(table, host, port, reusePort);
+        boundPort = bindPort(host, port, reusePort);
       } catch (err) {
         return fail(err as Error);
       }
@@ -530,10 +518,9 @@ export class Server extends EventEmitter {
     }
 
     this.#address = address;
-    this.#table = table;
     // A pending close from a previous listen is cancelled.
     this.#closing = false;
-    table.setHandler(address.port, this.#handler);
+    tcpPorts.setHandler(address.port, this.#handler);
     queueMicrotask(() => {
       this.emit('listening');
     });
@@ -559,11 +546,9 @@ export class Server extends EventEmitter {
       }
     }
     if (this.#address !== null) {
-      const table = this.#table as PortTable;
-      table.clearHandler(this.#address.port, this.#handler);
-      table.release(this.#address.port);
+      tcpPorts.clearHandler(this.#address.port, this.#handler);
+      tcpPorts.release(this.#address.port);
       this.#address = null;
-      this.#table = null;
     }
     this.#closing = true;
     this.#maybeEmitClose();
@@ -618,14 +603,13 @@ export class Server extends EventEmitter {
     // the platform does not report (a service binding's) appears behind the
     // gateway address with its own port, since a connected socket always has
     // a distinct peer.
-    const table = this.#table as PortTable;
-    const localAddress = concreteLocal(this.#address, table);
+    const localAddress = concreteLocal(this.#address);
     const remoteAddress: LocalAddressInfo = parseAuthority(
       info.remoteAddress
     ) ?? {
       address: forFamily(GATEWAY_ADDRESS, localAddress.family),
       family: localAddress.family ?? 'IPv4',
-      port: table.ephemeral(),
+      port: tcpPorts.ephemeral(),
     };
     if (
       this.maxConnections !== undefined &&
@@ -726,7 +710,7 @@ export declare class Socket extends _Socket {
   [kBytesRead]: number;
   [kBytesWritten]: number;
   [kBoundSource]: LocalAddressInfo | null;
-  [kBoundTable]: PortTable | null;
+  [kBoundReserved]: boolean;
   server: Server | null;
   _server: Server | null;
   [kReinitializeHandle](handle: Socket['_handle']): void;
@@ -874,7 +858,7 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   this[kBytesRead] = 0;
   this[kBytesWritten] = 0;
   this[kBoundSource] = null;
-  this[kBoundTable] = null;
+  this[kBoundReserved] = false;
   this.server = null;
   this._server = null;
   this._closeAfterHandlingError = false;
@@ -893,10 +877,10 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   if (options.handle) {
     validateObject(options.handle, 'options.handle');
     if (BoundSocket.isBoundSocket(options.handle)) {
-      const { address, table } = options.handle[kBoundSocketConsume]();
+      const { address } = options.handle[kBoundSocketConsume]();
       this[kBoundSource] = address;
-      this[kBoundTable] = table;
-      table.register(this, address.port);
+      this[kBoundReserved] = true;
+      tcpPorts.register(this, address.port);
     } else {
       this._handle = options.handle;
     }
@@ -1793,28 +1777,22 @@ function initializeConnection(
           (family === 6 ? DEFAULT_IPV6_ADDR : DEFAULT_IPV4_ADDR);
         // Only a concrete localPort claims a table entry; localAddress alone
         // (and localPort 0) autobinds, with the address kept as the label.
-        const table = tcpPorts();
         const reserved = localPort != null && localPort !== 0;
         socket[kBoundSource] = {
           address,
           family: isIP(address) === 6 ? 'IPv6' : 'IPv4',
-          port: reserved
-            ? bindPort(table, address, localPort)
-            : table.ephemeral(),
+          port: reserved ? bindPort(address, localPort) : tcpPorts.ephemeral(),
         };
         if (reserved) {
-          socket[kBoundTable] = table;
-          table.register(socket, socket[kBoundSource].port);
+          socket[kBoundReserved] = true;
+          tcpPorts.register(socket, socket[kBoundSource].port);
         }
       }
       // connect(2) resolves a wildcard bind to the source address actually
       // used. The platform does not report an outbound socket's source
       // (SocketInfo.localAddress is empty for outbound sockets); if it did, it
       // would replace the synthetic host address here, from handle.opened.
-      socket[kBoundSource] = concreteLocal(
-        socket[kBoundSource],
-        socket[kBoundTable] ?? tcpPorts()
-      );
+      socket[kBoundSource] = concreteLocal(socket[kBoundSource]);
 
       const handle = inner.connect(`${host}:${port}`, {
         allowHalfOpen: socket.allowHalfOpen,

@@ -331,9 +331,6 @@ class SocketsModule final: public jsg::Object {
   // Returns the synthetic IP registered for a magic hostname, or undefined. Used by node:dns.
   jsg::Optional<kj::StringPtr> getCallerDnsOverride(jsg::Lock& js, kj::String hostname);
 
-  // Identity for the current Durable Object's port scope, or undefined when not in one.
-  jsg::Optional<jsg::JsObject> getPortScopeKey(jsg::Lock& js);
-
   struct InboundListener {
     kj::String protocol;
     kj::String address;
@@ -346,7 +343,6 @@ class SocketsModule final: public jsg::Object {
   JSG_RESOURCE_TYPE(SocketsModule, CompatibilityFlags::Reader flags) {
     JSG_METHOD(connect);
     JSG_METHOD(getCallerDnsOverride);
-    JSG_METHOD(getPortScopeKey);
     JSG_METHOD(getInboundListeners);
 
     if (flags.getWorkerdExperimental()) {
