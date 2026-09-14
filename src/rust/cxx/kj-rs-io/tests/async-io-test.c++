@@ -1623,6 +1623,55 @@ KJ_TEST("wrapConnectingSocketFd is an intentional UNIMPLEMENTED stub") {
           -1, reinterpret_cast<struct sockaddr *>(&sin), sizeof(sin), 0));
 }
 
+#if !_WIN32
+KJ_TEST("unsupported connecting-socket wrapping closes a transferred socket") {
+  auto io = setupTokioAsyncIo();
+  auto pair = makeTcpPair(io);
+  int duplicate;
+  KJ_SYSCALL(duplicate = fcntl(rawSocketOf(*pair.client), F_DUPFD_CLOEXEC, 0));
+  kj::OwnFd transferred(duplicate);
+  pair.client = nullptr;
+
+  struct sockaddr_in address;
+  memset(&address, 0, sizeof(address));
+  address.sin_family = AF_INET;
+  address.sin_port = htons(pair.listener->getPort());
+  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  KJ_EXPECT_THROW_MESSAGE("wrapConnectingSocketFd is not implemented",
+      io.getLowLevelProvider().wrapConnectingSocketFd(
+          kj::mv(transferred), reinterpret_cast<struct sockaddr *>(&address), sizeof(address)));
+
+  kj::byte byte;
+  auto read = pair.server->tryRead(&byte, 1, 1);
+  KJ_EXPECT(io.getTimer().timeoutAfter(5 * kj::SECONDS, kj::mv(read)).wait(io.getWaitScope()) == 0);
+}
+
+KJ_TEST("unsupported listen filter closes a transferred listening socket") {
+  auto io = setupTokioAsyncIo();
+  auto prebound = create_prebound_listener_fd();
+  kj::OwnFd transferred(prebound.fd);
+  auto address = parseNow(io, kj::str("127.0.0.1:", prebound.port));
+  auto client = address->connect().wait(io.getWaitScope());
+
+  class RejectAll final: public kj::LowLevelAsyncIoProvider::NetworkFilter {
+   public:
+    bool shouldAllow(const struct sockaddr *, kj::uint) override {
+      return false;
+    }
+  } filter;
+  KJ_EXPECT_THROW_MESSAGE("wrapListenSocketFd with a caller-owned NetworkFilter is not implemented",
+      io.getLowLevelProvider().wrapListenSocketFd(kj::mv(transferred), filter));
+
+  kj::byte byte;
+  auto closed = client->tryRead(&byte, 1, 1).then([](size_t count) {
+    KJ_EXPECT(count == 0);
+  }, [](kj::Exception &&exception) {
+    KJ_EXPECT(exception.getType() == kj::Exception::Type::DISCONNECTED);
+  });
+  io.getTimer().timeoutAfter(5 * kj::SECONDS, kj::mv(closed)).wait(io.getWaitScope());
+}
+#endif
+
 KJ_TEST("wrapInputFd/wrapOutputFd take sockets, not pipes (kj's win32 definition, on every "
         "platform)") {
   auto io = setupTokioAsyncIo();

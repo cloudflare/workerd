@@ -431,6 +431,18 @@ static_assert(kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP == 1 << 0);
 static_assert(kj::LowLevelAsyncIoProvider::ALREADY_CLOEXEC == 1 << 1);
 static_assert(kj::LowLevelAsyncIoProvider::ALREADY_NONBLOCK == 1 << 2);
 #endif  // !_WIN32
+
+auto closeTransferredFdOnFailure(kj::LowLevelAsyncIoProvider::Fd fd, kj::uint flags) {
+  return kj::defer([fd, flags]() {
+    if (flags & kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP) {
+#if _WIN32
+      kj::LowLevelAsyncIoProvider::OwnFd owned(reinterpret_cast<void *>(fd));
+#else
+      kj::LowLevelAsyncIoProvider::OwnFd owned(fd);
+#endif
+    }
+  });
+}
 }  // namespace
 
 // wrapInputFd / wrapOutputFd take sockets, as kj's win32 provider defines them: workerd hands
@@ -451,13 +463,15 @@ kj::Own<kj::AsyncIoStream> TokioLowLevelAsyncIoProvider::wrapSocketFd(Fd fd, kj:
 // No workerd caller (it connects through kj::Network), and the one KJ operation that would need
 // a hand-written non-blocking connect(2) + SO_ERROR sequence over a foreign descriptor.
 kj::Promise<kj::Own<kj::AsyncIoStream>> TokioLowLevelAsyncIoProvider::wrapConnectingSocketFd(
-    Fd, const struct sockaddr *, kj::uint, kj::uint) {
+    Fd fd, const struct sockaddr *, kj::uint, kj::uint flags) {
+  auto closeOnFailure = closeTransferredFdOnFailure(fd, flags);
   KJ_UNIMPLEMENTED("wrapConnectingSocketFd is not implemented by the tokio backend; connect "
                    "through kj::Network instead");
 }
 
 kj::Own<kj::ConnectionReceiver> TokioLowLevelAsyncIoProvider::wrapListenSocketFd(
     Fd fd, NetworkFilter &filter, kj::uint flags) {
+  auto closeOnFailure = closeTransferredFdOnFailure(fd, flags);
   // KJ's interface lends the filter by reference for the receiver's lifetime. workerd's only
   // call (inherited listen sockets, server/workerd.c++) uses the two-argument overload, whose
   // filter is KJ's static allow-all; that one is recognised by identity and given an owned
@@ -467,8 +481,12 @@ kj::Own<kj::ConnectionReceiver> TokioLowLevelAsyncIoProvider::wrapListenSocketFd
     KJ_UNIMPLEMENTED("wrapListenSocketFd with a caller-owned NetworkFilter is not implemented by "
                      "the tokio backend (no workerd caller); use the two-argument overload");
   }
-  return kj::heap<TokioConnectionReceiver>(
-      wrap_listen_fd(static_cast<int64_t>(fd), flags), kj::arc<PeerFilter>());
+  auto peerFilter = kj::arc<PeerFilter>();
+  // Rust adopts the descriptor synchronously, including on its error paths. Disarm the C++
+  // owner immediately before that handoff so only one side can close it.
+  closeOnFailure.cancel();
+  auto listener = wrap_listen_fd(static_cast<int64_t>(fd), flags);
+  return kj::heap<TokioConnectionReceiver>(kj::mv(listener), kj::mv(peerFilter));
 }
 
 // =======================================================================================
