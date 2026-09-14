@@ -234,6 +234,17 @@ struct ServiceDesignator {
   # TODO(someday): Allow adding an outgoing middleware stack here (see TODO in Service, above).
 }
 
+struct WorkflowsEngine {
+  actorClass @0 :ServiceDesignator;
+  workflows @1 :List(Workflow);
+
+  struct Workflow {
+    className @0 :Text;
+    name @1 :Text;
+    bindingService @2 :ServiceDesignator;
+  }
+}
+
 struct Worker {
   union {
     modules @0 :List(Module);
@@ -794,6 +805,8 @@ struct Worker {
   #
   # If not set, `ctx.access.getIdentity()` resolves to `undefined` (even when `accessBlobHeader`
   # is configured and `ctx.access.aud` is available).
+
+  workflowsEngine @20 :WorkflowsEngine;
 }
 
 struct ExternalServer {
