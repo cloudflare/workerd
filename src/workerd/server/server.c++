@@ -62,6 +62,8 @@
 
 namespace workerd::server {
 
+WD_STRONG_BOOL(ActorStorageIsLocalDisk);
+
 // Escape a string value for embedding in a JSON string literal. Returns the escaped text
 // wrapped in double quotes, e.g. `"hello \"world\""`.
 static kj::String escapeJsonString(kj::StringPtr text) {
@@ -265,6 +267,8 @@ class Server::Service: public IoChannelFactory::SubrequestChannel {
  public:
   // Cross-links this service with other services. Must be called once before `startRequest()`.
   virtual void link(Worker::ValidationErrorReporter& errorReporter) {}
+
+  virtual void linkActorNamespaces(Worker::ValidationErrorReporter& errorReporter) {}
 
   // Drops any cross-links created during link(). This called just before all the services are
   // destroyed. An `Own<T>` cannot be destroyed unless the object it points to still exists, so
@@ -3446,11 +3450,13 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers,
       kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints,
       kj::HashSet<kj::String> actorClassEntrypointsParam,
+      kj::HashSet<kj::String> workflowClassEntrypointsParam,
       LinkCallback linkCallback,
       AbortActorsCallback abortActorsCallback,
       DeleteActorsCallback deleteActorsCallback,
       kj::Maybe<kj::String> dockerPathParam,
       kj::Maybe<kj::String> containerEgressInterceptorImageParam,
+      ActorStorageIsLocalDisk actorStorageIsLocalDisk,
       bool isDynamic,
       kj::Maybe<kj::Function<void()>> abortIsolateCallback = kj::none,
       kj::Maybe<kj::String> accessBlobHeaderNameParam = kj::none)
@@ -3463,11 +3469,13 @@ class Server::WorkerService final: public Service,
         defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
         namedEntrypoints(kj::mv(namedEntrypoints)),
         actorClassEntrypoints(kj::mv(actorClassEntrypointsParam)),
+        workflowClassEntrypoints(kj::mv(workflowClassEntrypointsParam)),
         waitUntilTasks(*this),
         abortActorsCallback(kj::mv(abortActorsCallback)),
         deleteActorsCallback(kj::mv(deleteActorsCallback)),
         dockerPath(kj::mv(dockerPathParam)),
         containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImageParam)),
+        actorStorageIsLocalDisk(actorStorageIsLocalDisk),
         isDynamic(isDynamic),
         abortIsolateCallback(kj::mv(abortIsolateCallback)),
         accessBlobHeaderName(kj::mv(accessBlobHeaderNameParam)) {}
@@ -3480,6 +3488,10 @@ class Server::WorkerService final: public Service,
       kj::Network& network) {
     actorNamespaces.reserve(actorClasses.size());
     for (auto& entry: actorClasses) {
+      KJ_IF_SOME(durable, entry.value.tryGet<Durable>()) {
+        if (durable.isWorkflow) continue;
+      }
+
       if (!actorClassEntrypoints.contains(entry.key)) {
         KJ_LOG(WARNING,
             kj::str("A DurableObjectNamespace in the config referenced the class \"", entry.key,
@@ -3500,6 +3512,22 @@ class Server::WorkerService final: public Service,
       }
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
+  }
+
+  void initWorkflowActorNamespace(const ActorConfig& config,
+      kj::Own<ActorClass> actorClass,
+      WorkerService& storageService,
+      Persistent selfTokensArePersistent,
+      kj::HashMap<kj::StringPtr, ActorNamespace*>& actorNamespacesByUniqueKey,
+      kj::Network& network) {
+    auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), config, kj::systemPreciseCalendarClock(),
+        threadContext.getUnsafeTimer(), threadContext.getByteStreamFactory(), channelTokenHandler,
+        network, dockerPath, containerEgressInterceptorImage, waitUntilTasks,
+        selfTokensArePersistent);
+    auto& durable = KJ_ASSERT_NONNULL(config.tryGet<Durable>());
+    actorNamespacesByUniqueKey.insert(durable.uniqueKey, ns.get());
+    workflowActorStorageSources.insert(kj::str(durable.uniqueKey), &storageService);
+    actorNamespaces.insert(durable.uniqueKey, kj::mv(ns));
   }
 
   void requireAllowsTransfer() override {
@@ -3609,6 +3637,13 @@ class Server::WorkerService final: public Service,
     return defaultEntrypointHandlers != kj::none;
   }
 
+  bool hasStatelessEntrypoint(kj::Maybe<kj::StringPtr> name) {
+    KJ_IF_SOME(n, name) {
+      return namedEntrypoints.find(n) != kj::none && !workflowClassEntrypoints.contains(n);
+    }
+    return hasDefaultEntrypoint();
+  }
+
   void setAccessBindingServiceChannel(kj::uint channel) {
     accessBindingServiceChannel = channel;
   }
@@ -3621,16 +3656,46 @@ class Server::WorkerService final: public Service,
     return KJ_MAP(name, actorClassEntrypoints) -> kj::StringPtr { return name; };
   }
 
+  bool hasWorkflowClass(kj::StringPtr name) {
+    return workflowClassEntrypoints.contains(name);
+  }
+
+  bool hasActorClass(kj::StringPtr name) {
+    return actorClassEntrypoints.contains(name);
+  }
+
+  bool hasLocalDiskActorStorage() {
+    return actorStorageIsLocalDisk.toBool();
+  }
+
+  kj::Maybe<const kj::Directory&> getActorStorage() {
+    return KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called")
+        .actorStorage;
+  }
+
   void link(Worker::ValidationErrorReporter& errorReporter) override {
     LinkCallback callback =
         kj::mv(KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkCallback>(), "already called link()"));
     auto linked = callback(*this, errorReporter);
 
-    for (auto& ns: actorNamespaces) {
-      ns.value->link(linked.actorStorage);
-    }
-
     ioChannels = kj::mv(linked);
+  }
+
+  void linkActorNamespaces(Worker::ValidationErrorReporter& errorReporter) override {
+    auto& linked =
+        KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
+    for (auto& ns: actorNamespaces) {
+      KJ_IF_SOME(storageService, workflowActorStorageSources.find(ns.key)) {
+        auto storage = storageService->getActorStorage();
+        if (storage == kj::none) {
+          errorReporter.addError(kj::str("Workflow ActorNamespace \"", ns.key,
+              "\" could not resolve its bindingService's durableObjectStorage.localDisk."));
+        }
+        ns.value->link(storage);
+      } else {
+        ns.value->link(linked.actorStorage);
+      }
+    }
   }
 
   void unlink() override {
@@ -4204,12 +4269,15 @@ class Server::WorkerService final: public Service,
   kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers;
   kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
   kj::HashSet<kj::String> actorClassEntrypoints;
+  kj::HashSet<kj::String> workflowClassEntrypoints;
   kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>> actorNamespaces;
+  kj::HashMap<kj::String, WorkerService*> workflowActorStorageSources;
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
   DeleteActorsCallback deleteActorsCallback;
   kj::Maybe<kj::String> dockerPath;
   kj::Maybe<kj::String> containerEgressInterceptorImage;
+  ActorStorageIsLocalDisk actorStorageIsLocalDisk;
   bool isDynamic;
   kj::Maybe<kj::Function<void()>> abortIsolateCallback;
   kj::Maybe<kj::String> accessBlobHeaderName;
@@ -5078,6 +5146,7 @@ struct Server::WorkerDef {
   FutureSubrequestChannel globalOutbound;
   kj::Maybe<FutureSubrequestChannel> cacheApiOutbound;
   kj::Vector<FutureSubrequestChannel> subrequestChannels;
+  kj::HashMap<kj::String, uint> workflowBindingChannels;
   kj::Vector<FutureActorChannel> actorChannels;
   kj::Vector<FutureActorClassChannel> actorClassChannels;
   kj::Vector<kj::Own<IoChannelFactory::RpcChannel>> rpcChannels;
@@ -5382,6 +5451,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet:
       errorReporter.throwIfErrors();
 
       service->link(errorReporter);
+      service->linkActorNamespaces(errorReporter);
       errorReporter.throwIfErrors();
 
       this->service = kj::mv(service);
@@ -5606,6 +5676,30 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
     }
   }
 
+  kj::HashMap<kj::String, uint> workflowBindingChannels;
+  if (conf.hasWorkflowsEngine()) {
+    kj::HashSet<kj::String> workflowClasses;
+    kj::HashSet<kj::String> workflowNames;
+    for (auto workflow: conf.getWorkflowsEngine().getWorkflows()) {
+      auto className = workflow.getClassName();
+      auto workflowName = workflow.getName();
+      if (workflowClasses.contains(className) || workflowNames.contains(workflowName)) continue;
+      workflowClasses.insert(kj::str(className));
+      workflowNames.insert(kj::str(workflowName));
+
+      auto namespaceKey = kj::str("loopback-workflows-", workflowName);
+      auto& actorConfig = KJ_UNWRAP_OR(localActorConfigs.find(namespaceKey), continue);
+      auto& durable = KJ_UNWRAP_OR(actorConfig.tryGet<Durable>(), continue);
+      if (!durable.isWorkflow) continue;
+
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      subrequestChannels.add(FutureSubrequestChannel{workflow.getBindingService(),
+        kj::str("Worker \"", name, "\"'s Workflow \"", workflowName, "\"'s bindingService")});
+      workflowBindingChannels.insert(kj::str(className), channel);
+    }
+  }
+
   // Construct `WorkerDef` from `conf`.
   WorkerDef def{
     .featureFlags = featureFlags.asReader(),
@@ -5627,6 +5721,7 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
         : kj::none,
 
     .subrequestChannels = kj::mv(subrequestChannels),
+    .workflowBindingChannels = kj::mv(workflowBindingChannels),
     .actorChannels = kj::mv(actorChannels),
     .actorClassChannels = kj::mv(actorClassChannels),
     .workerLoaderChannels = kj::mv(workerLoaderChannels),
@@ -5854,12 +5949,17 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
         .value = Global::LoopbackServiceStub{.channel = nextSubrequestChannel++}});
     }
     for (auto& ep: errorReporter.namedEntrypoints) {
-      // Workflow classes are treated as stateless entrypoints for runtime purposes, but should
-      // NOT be reflected in ctx.exports.
-      // TODO(someday): Currently Workflows must be given a name independent of their class name,
-      //   and the binding must reference that name. If the name were just the class name -- like
-      //   Durable Object namespaces -- then we could put a `Workflow` binding into `ctx.exports`.
-      if (!errorReporter.workflowClasses.contains(ep.key)) {
+      if (errorReporter.workflowClasses.contains(ep.key)) {
+        KJ_IF_SOME(channel, def.workflowBindingChannels.find(ep.key)) {
+          auto innerBindings = kj::heapArray<Global>(1);
+          innerBindings[0] = Global{.name = kj::str("fetcher"),
+            .value = Global::Fetcher{.channel = channel, .requiresHost = true, .isInHouse = false}};
+          ctxExports.add(Global{.name = kj::str(ep.key),
+            .value = Global::Wrapped{.moduleName = kj::str("cloudflare-internal:workflows-api"),
+              .entrypoint = kj::str("default"),
+              .innerBindings = kj::mv(innerBindings)}});
+        }
+      } else {
         ctxExports.add(Global{.name = kj::str(ep.key),
           .value = Global::LoopbackServiceStub{.channel = nextSubrequestChannel++}});
       }
@@ -5923,11 +6023,16 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
 
     auto entrypointNames = workerService.getEntrypointNames();
     auto actorClassNames = workerService.getActorClassNames();
+    uint loopbackEntrypointCount = 0;
+    for (auto& ep: entrypointNames) {
+      if (!workerService.hasWorkflowClass(ep)) ++loopbackEntrypointCount;
+    }
 
     bool hasAccessBinding = def.accessBindingServiceDesignator != kj::none;
     auto services = kj::heapArrayBuilder<kj::Own<IoChannelFactory::SubrequestChannel>>(
         def.subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT +
-        entrypointNames.size() + workerService.hasDefaultEntrypoint() + (hasAccessBinding ? 1 : 0));
+        loopbackEntrypointCount + workerService.hasDefaultEntrypoint() +
+        (hasAccessBinding ? 1 : 0));
 
     auto globalService = kj::mv(def.globalOutbound).lookup(*this);
 
@@ -5948,7 +6053,9 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       services.add(workerService.getLoopbackEntrypoint(/*name=*/kj::none));
     }
     for (auto& ep: entrypointNames) {
-      services.add(workerService.getLoopbackEntrypoint(ep));
+      if (!workerService.hasWorkflowClass(ep)) {
+        services.add(workerService.getLoopbackEntrypoint(ep));
+      }
     }
 
     // Add the access binding service as a subrequest channel slot. Per-request props (aud,
@@ -6097,13 +6204,15 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   kj::Maybe<kj::StringPtr> serviceName;
   if (!def.isDynamic) serviceName = name;
 
-  auto result = kj::refcounted<WorkerService>(channelTokenHandler, serviceName,
-      globalContext->threadContext, monotonicClock, kj::mv(worker),
-      kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
-      kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
-      KJ_BIND_METHOD(*this, abortAllActors), KJ_BIND_METHOD(*this, deleteAllActors),
-      kj::mv(dockerPath), kj::mv(containerEgressInterceptorImage), def.isDynamic,
-      kj::mv(abortIsolateCallback), kj::mv(accessBlobHeaderName));
+  auto result =
+      kj::refcounted<WorkerService>(channelTokenHandler, serviceName, globalContext->threadContext,
+          monotonicClock, kj::mv(worker), kj::mv(errorReporter.defaultEntrypoint),
+          kj::mv(errorReporter.namedEntrypoints), kj::mv(errorReporter.actorClasses),
+          kj::mv(errorReporter.workflowClasses), kj::mv(linkCallback),
+          KJ_BIND_METHOD(*this, abortAllActors), KJ_BIND_METHOD(*this, deleteAllActors),
+          kj::mv(dockerPath), kj::mv(containerEgressInterceptorImage),
+          ActorStorageIsLocalDisk(def.actorStorageConf.isLocalDisk()), def.isDynamic,
+          kj::mv(abortIsolateCallback), kj::mv(accessBlobHeaderName));
   result->initActorNamespaces(def.localActorConfigs, actorNamespacesByUniqueKey, network);
   co_return result;
 }
@@ -6981,6 +7090,15 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
   TRACE_EVENT("workerd", "startServices");
 
   // First pass: Extract actor namespace configs.
+  kj::HashSet<kj::String> durableNamespaceKeys;
+  for (auto serviceConf: config.getServices()) {
+    if (!serviceConf.isWorker()) continue;
+    for (auto ns: serviceConf.getWorker().getDurableObjectNamespaces()) {
+      if (ns.isUniqueKey()) durableNamespaceKeys.insert(kj::str(ns.getUniqueKey()));
+    }
+  }
+
+  kj::HashSet<kj::String> workflowNamespaceKeys;
   for (auto serviceConf: config.getServices()) {
     kj::StringPtr name = serviceConf.getName();
     kj::HashMap<kj::String, ActorConfig> serviceActorConfigs;
@@ -7013,6 +7131,87 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
             name, "\", class \"", ns.getClassName(),
             "\". Was the config compiled with a newer version "
             "of the schema?"));
+      }
+
+      if (workerConf.hasWorkflowsEngine()) {
+        auto workflowsEngine = workerConf.getWorkflowsEngine();
+        bool hasActorClass =
+            workflowsEngine.hasActorClass() && workflowsEngine.getActorClass().getName().size() > 0;
+        if (!hasActorClass) {
+          reportConfigError(
+              kj::str("Worker service \"", name, "\"'s workflowsEngine is missing actorClass."));
+        }
+
+        kj::HashSet<kj::String> workflowClasses;
+        kj::HashSet<kj::String> workflowNames;
+        for (auto workflow: workflowsEngine.getWorkflows()) {
+          auto className = workflow.getClassName();
+          auto workflowName = workflow.getName();
+          bool valid = hasActorClass;
+
+          if (className.size() == 0) {
+            reportConfigError(
+                kj::str("Worker service \"", name, "\" configures a Workflow without className."));
+            valid = false;
+          } else if (workflowClasses.contains(className)) {
+            reportConfigError(kj::str("Worker service \"", name,
+                "\" configures multiple Workflows for class \"", className, "\"."));
+            valid = false;
+          } else {
+            workflowClasses.insert(kj::str(className));
+          }
+
+          if (workflowName.size() == 0) {
+            reportConfigError(
+                kj::str("Worker service \"", name, "\" configures a Workflow without name."));
+            valid = false;
+          } else if (workflowName.findFirst('/') != kj::none ||
+              workflowName.findFirst('\\') != kj::none) {
+            reportConfigError(kj::str("Worker service \"", name, "\" configures Workflow name \"",
+                workflowName, "\" containing a path separator."));
+            valid = false;
+          } else if (workflowNames.contains(workflowName)) {
+            reportConfigError(kj::str("Worker service \"", name,
+                "\" configures multiple Workflows named \"", workflowName, "\"."));
+            valid = false;
+          } else {
+            workflowNames.insert(kj::str(workflowName));
+          }
+
+          if (!workflow.hasBindingService() || workflow.getBindingService().getName().size() == 0) {
+            reportConfigError(kj::str("Worker service \"", name, "\"'s Workflow \"", workflowName,
+                "\" is missing bindingService."));
+            valid = false;
+          }
+
+          if (!valid) continue;
+
+          auto namespaceKey = kj::str("loopback-workflows-", workflowName);
+          if (serviceActorConfigs.find(namespaceKey) != kj::none) {
+            reportConfigError(kj::str("Worker service \"", name,
+                "\"'s Workflow namespace conflicts with Durable Object class \"", namespaceKey,
+                "\"."));
+            continue;
+          }
+          if (durableNamespaceKeys.contains(namespaceKey)) {
+            reportConfigError(kj::str("Workflow ActorNamespace key \"", namespaceKey,
+                "\" conflicts with a Durable Object namespace unique key."));
+            continue;
+          }
+          if (workflowNamespaceKeys.contains(namespaceKey)) {
+            reportConfigError(kj::str("Workflow ActorNamespace key \"", namespaceKey,
+                "\" is configured by more than one Worker."));
+            continue;
+          }
+
+          workflowNamespaceKeys.insert(kj::str(namespaceKey));
+          serviceActorConfigs.insert(kj::str(namespaceKey),
+              Durable{.uniqueKey = kj::mv(namespaceKey),
+                .isEvictable = false,
+                .enableSql = true,
+                .containerOptions = kj::none,
+                .isWorkflow = true});
+        }
       }
 
       switch (workerConf.getDurableObjectStorage().which()) {
@@ -7087,10 +7286,129 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
     return decltype(services)::Entry{kj::str("internet"_kj), kj::mv(service)};
   });
 
+  for (auto serviceConf: config.getServices()) {
+    if (!serviceConf.isWorker() || !serviceConf.getWorker().hasWorkflowsEngine()) continue;
+
+    auto name = serviceConf.getName();
+    ConfigErrorReporter errorReporter(*this, name);
+    auto& appService = KJ_ASSERT_NONNULL(services.find(name));
+    auto& appWorker = KJ_UNWRAP_OR(kj::tryDowncast<WorkerService>(*appService), {
+      errorReporter.addError(
+          kj::str("Worker service \"", name, "\" could not initialize its workflowsEngine."));
+      continue;
+    });
+    auto workflowsEngine = serviceConf.getWorker().getWorkflowsEngine();
+    if (!workflowsEngine.hasActorClass()) continue;
+
+    auto actorClassDesignator = workflowsEngine.getActorClass();
+    if (actorClassDesignator.getName().size() == 0) continue;
+    if (!actorClassDesignator.getProps().isEmpty()) {
+      errorReporter.addError(
+          kj::str("workflowsEngine.actorClass must not specify props; Workflow props are supplied "
+                  "by the runtime."));
+      continue;
+    }
+
+    auto& engineService = KJ_UNWRAP_OR(services.find(actorClassDesignator.getName()), {
+      errorReporter.addError(kj::str("workflowsEngine.actorClass refers to a service \"",
+          actorClassDesignator.getName(), "\", but no such service is defined."));
+      continue;
+    });
+    auto& engineWorker = KJ_UNWRAP_OR(kj::tryDowncast<WorkerService>(*engineService), {
+      errorReporter.addError(kj::str("workflowsEngine.actorClass refers to service \"",
+          actorClassDesignator.getName(), "\", but it is not a Worker."));
+      continue;
+    });
+
+    kj::Maybe<kj::StringPtr> actorClassName;
+    if (actorClassDesignator.hasEntrypoint()) {
+      actorClassName = actorClassDesignator.getEntrypoint();
+    }
+
+    kj::HashSet<kj::String> workflowClasses;
+    kj::HashSet<kj::String> workflowNames;
+    for (auto workflow: workflowsEngine.getWorkflows()) {
+      auto className = workflow.getClassName();
+      auto workflowName = workflow.getName();
+      if (workflowClasses.contains(className) || workflowNames.contains(workflowName)) continue;
+      workflowClasses.insert(kj::str(className));
+      workflowNames.insert(kj::str(workflowName));
+
+      auto namespaceKey = kj::str("loopback-workflows-", workflowName);
+      auto& localActorConfigs = KJ_ASSERT_NONNULL(actorConfigs.find(name));
+      auto& actorConfig = KJ_UNWRAP_OR(localActorConfigs.find(namespaceKey), continue);
+      auto& workflowActorConfig = KJ_UNWRAP_OR(actorConfig.tryGet<Durable>(), continue);
+      if (!workflowActorConfig.isWorkflow) continue;
+
+      if (appWorker.hasActorClass(namespaceKey)) {
+        errorReporter.addError(kj::str("Workflow \"", workflowName, "\" namespace \"", namespaceKey,
+            "\" conflicts with an exported Durable Object class."));
+        continue;
+      }
+      if (!appWorker.hasWorkflowClass(className)) {
+        errorReporter.addError(kj::str("Workflow \"", workflowName, "\" refers to class \"",
+            className, "\", but the Worker exports no such WorkflowEntrypoint."));
+        continue;
+      }
+
+      auto& bindingService = KJ_UNWRAP_OR(services.find(workflow.getBindingService().getName()), {
+        errorReporter.addError(
+            kj::str("Workflow \"", workflowName, "\"'s bindingService refers to a service \"",
+                workflow.getBindingService().getName(), "\", but no such service is defined."));
+        continue;
+      });
+      auto& bindingWorker = KJ_UNWRAP_OR(kj::tryDowncast<WorkerService>(*bindingService), {
+        errorReporter.addError(
+            kj::str("Workflow \"", workflowName, "\"'s bindingService refers to service \"",
+                workflow.getBindingService().getName(), "\", but it is not a Worker."));
+        continue;
+      });
+      kj::Maybe<kj::StringPtr> bindingEntrypointName;
+      if (workflow.getBindingService().hasEntrypoint()) {
+        bindingEntrypointName = workflow.getBindingService().getEntrypoint();
+      }
+      if (!bindingWorker.hasStatelessEntrypoint(bindingEntrypointName)) {
+        errorReporter.addError(kj::str("Workflow \"", workflowName,
+            "\"'s bindingService Worker does not export WorkerEntrypoint \"",
+            bindingEntrypointName.orDefault("default"), "\"."));
+        continue;
+      }
+      if (!bindingWorker.hasLocalDiskActorStorage()) {
+        errorReporter.addError(kj::str("Workflow \"", workflowName,
+            "\"'s bindingService Worker must configure durableObjectStorage.localDisk; in-memory "
+            "and absent storage are unsupported."));
+        continue;
+      }
+
+      Frankenvalue props;
+      props.setProperty(kj::str("workflowClass"),
+          Frankenvalue::fromCapability(static_cast<uint16_t>(rpc::SerializationTag::SERVICE_STUB),
+              appWorker.getLoopbackEntrypoint(className)));
+      props.setProperty(
+          kj::str("workflowClassName"), Frankenvalue::fromJson(escapeJsonString(className)));
+      props.setProperty(
+          kj::str("workflowName"), Frankenvalue::fromJson(escapeJsonString(workflowName)));
+
+      auto actorClass = KJ_UNWRAP_OR(engineWorker.getActorClass(actorClassName, kj::mv(props)), {
+        errorReporter.addError(kj::str("workflowsEngine.actorClass refers to service \"",
+            actorClassDesignator.getName(), "\" with Durable Object entrypoint \"",
+            actorClassName.orDefault("default"), "\", but no such class is exported."));
+        continue;
+      });
+      appWorker.initWorkflowActorNamespace(actorConfig, kj::mv(actorClass), bindingWorker,
+          engineWorker.selfTokensArePersistent(), actorNamespacesByUniqueKey, network);
+    }
+  }
+
   // Third pass: Cross-link services.
   for (auto& service: services) {
     ConfigErrorReporter errorReporter(*this, service.key);
     service.value->link(errorReporter);
+  }
+
+  for (auto& service: services) {
+    ConfigErrorReporter errorReporter(*this, service.key);
+    service.value->linkActorNamespaces(errorReporter);
   }
 }
 
