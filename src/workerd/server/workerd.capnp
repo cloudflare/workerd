@@ -664,6 +664,16 @@ struct Worker {
     # Durable Object based on the given image. The Durable Object can access the container via the
     # ctx.container API. TODO(CloudChamber): add link to docs.
 
+    unsafeUseIsolateNodePortScope @6 :Bool = false;
+    # Makes Node.js HTTP and TCP servers created by instances of this class share the worker
+    # isolate's virtual port table instead of using a table scoped to each Durable Object instance.
+    #
+    # This is a workerd-only escape hatch for pinned, singleton actors that local-development
+    # tooling uses as an artificial module-evaluation context. It must not be enabled for user
+    # Durable Objects: separate instances would otherwise bind and route through the same ports.
+    # `preventEviction` must also be true so that handlers stored in the isolate table cannot
+    # outlive the actor instance that created them.
+
     struct ContainerOptions {
       imageName @0 :Text;
       # Image name to be used to create the container using supported provider.

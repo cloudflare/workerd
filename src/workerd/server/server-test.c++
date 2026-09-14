@@ -2391,6 +2391,30 @@ KJ_TEST("Server: configuring a DO namespace with no class export is not an error
     Internal Server Error)"_blockquote);
 }
 
+KJ_TEST("Server: isolate Node port scope requires a pinned Durable Object") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2026-09-14",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `export default { fetch() { return new Response("OK"); } };
+          `export class MyActorClass { fetch() { return new Response("OK"); } }
+      )
+    ],
+    durableObjectNamespaces = [
+      ( className = "MyActorClass",
+        uniqueKey = "mykey",
+        unsafeUseIsolateNodePortScope = true,
+      )
+    ],
+    durableObjectStorage = (inMemory = void),
+  ))"_kj));
+
+  test.expectErrors(R"(
+    Durable Object namespace for class "MyActorClass" in service "hello" sets unsafeUseIsolateNodePortScope without preventEviction. Actors sharing the isolate's Node.js port scope must not be evictable.
+  )"_blockquote);
+}
+
 KJ_TEST("Server: call queue handler on service binding") {
   TestServer test(R"((
     services = [

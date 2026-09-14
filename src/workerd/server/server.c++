@@ -3490,7 +3490,17 @@ class Server::WorkerService final: public Service,
                 "workerd may make this a startup-time error."));
       }
 
-      auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, Frankenvalue());
+      UseIsolateNodePortScope useIsolateNodePortScope = UseIsolateNodePortScope::NO;
+      KJ_SWITCH_ONEOF(entry.value) {
+        KJ_CASE_ONEOF(config, Durable) {
+          useIsolateNodePortScope = config.useIsolateNodePortScope;
+        }
+        KJ_CASE_ONEOF(config, Ephemeral) {
+          useIsolateNodePortScope = config.useIsolateNodePortScope;
+        }
+      }
+      auto actorClass = kj::refcounted<ActorClassImpl>(
+          *this, entry.key, Frankenvalue(), Persistent::NO, useIsolateNodePortScope);
       auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
           kj::systemPreciseCalendarClock(), threadContext.getUnsafeTimer(),
           threadContext.getByteStreamFactory(), channelTokenHandler, network, dockerPath,
@@ -4115,11 +4125,13 @@ class Server::WorkerService final: public Service,
     ActorClassImpl(WorkerService& service,
         kj::StringPtr className,
         kj::Maybe<Frankenvalue> props,
-        Persistent persistent = Persistent::NO)
+        Persistent persistent = Persistent::NO,
+        UseIsolateNodePortScope useIsolateNodePortScope = UseIsolateNodePortScope::NO)
         : service(kj::addRef(service)),
           className(className),
           props(kj::mv(props)),
-          persistent(persistent) {}
+          persistent(persistent),
+          useIsolateNodePortScope(useIsolateNodePortScope) {}
 
     void requireAllowsTransfer() override {
       service->requireAllowsTransfer();
@@ -4150,7 +4162,8 @@ class Server::WorkerService final: public Service,
       return kj::refcounted<Worker::Actor>(*service->worker, tracker, kj::mv(actorId), true,
           kj::mv(makeActorCache), className, kj::mv(props), kj::mv(makeStorage), kj::mv(loopback),
           timerChannel, kj::refcounted<ActorObserver>(), kj::mv(manager), hibernationEventTypeId,
-          kj::mv(container), kj::mv(containerImages), facetManager);
+          kj::mv(container), kj::mv(containerImages), facetManager, kj::none, kj::none,
+          useIsolateNodePortScope);
     }
 
     kj::Own<WorkerInterface> startRequest(
@@ -4167,7 +4180,8 @@ class Server::WorkerService final: public Service,
         return ActorClass::forProps(kj::mv(props), persistent);
       }
 
-      return kj::refcounted<ActorClassImpl>(*service, className, kj::mv(props), persistent);
+      return kj::refcounted<ActorClassImpl>(
+          *service, className, kj::mv(props), persistent, useIsolateNodePortScope);
     }
 
     kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
@@ -4186,6 +4200,7 @@ class Server::WorkerService final: public Service,
     kj::StringPtr className;
     kj::Maybe<Frankenvalue> props;
     Persistent persistent;
+    UseIsolateNodePortScope useIsolateNodePortScope;
   };
 
   ChannelTokenHandler& channelTokenHandler;
@@ -7000,6 +7015,14 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
       auto workerConf = serviceConf.getWorker();
       bool hadDurable = false;
       for (auto ns: workerConf.getDurableObjectNamespaces()) {
+        auto useIsolateNodePortScope =
+            UseIsolateNodePortScope(ns.getUnsafeUseIsolateNodePortScope());
+        if (useIsolateNodePortScope && !ns.getPreventEviction()) {
+          reportConfigError(kj::str("Durable Object namespace for class \"", ns.getClassName(),
+              "\" in service \"", name,
+              "\" sets unsafeUseIsolateNodePortScope without preventEviction. "
+              "Actors sharing the isolate's Node.js port scope must not be evictable."));
+        }
         switch (ns.which()) {
           case config::Worker::DurableObjectNamespace::UNIQUE_KEY:
             hadDurable = true;
@@ -7007,6 +7030,7 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
                 Durable{.uniqueKey = kj::str(ns.getUniqueKey()),
                   .isEvictable = !ns.getPreventEviction(),
                   .enableSql = ns.getEnableSql(),
+                  .useIsolateNodePortScope = useIsolateNodePortScope,
                   .containerOptions = ns.hasContainer() ? kj::Maybe(ns.getContainer()) : kj::none});
             continue;
           case config::Worker::DurableObjectNamespace::EPHEMERAL_LOCAL:
@@ -7017,7 +7041,9 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
                   "workerd with `--experimental` to use this feature."));
             }
             serviceActorConfigs.insert(kj::str(ns.getClassName()),
-                Ephemeral{.isEvictable = !ns.getPreventEviction(), .enableSql = ns.getEnableSql()});
+                Ephemeral{.isEvictable = !ns.getPreventEviction(),
+                  .enableSql = ns.getEnableSql(),
+                  .useIsolateNodePortScope = useIsolateNodePortScope});
             continue;
         }
         reportConfigError(kj::str("Encountered unknown DurableObjectNamespace type in service \"",

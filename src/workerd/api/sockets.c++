@@ -1059,11 +1059,14 @@ jsg::Optional<kj::StringPtr> SocketsModule::getCallerDnsOverride(
 }
 
 jsg::Optional<jsg::JsObject> SocketsModule::getPortScopeKey(jsg::Lock& js) {
-  // A Durable Object instance is its own host for port binding; a stateless worker's host is
-  // the isolate, since a server it listens on must be reachable from every request.
+  // A Durable Object instance is normally its own host for port binding; a stateless worker's
+  // host is the isolate, since a server it listens on must be reachable from every request. A
+  // pinned internal actor may explicitly act as an artificial context for the isolate instead.
   KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-    if (ioContext.getActor() != kj::none) {
-      return ioContext.getPortScopeKey(js);
+    KJ_IF_SOME(actor, ioContext.getActor()) {
+      if (!actor.getUseIsolateNodePortScope()) {
+        return ioContext.getPortScopeKey(js);
+      }
     }
   }
   return kj::none;

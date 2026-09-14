@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "http-server-nodejs-port-scope-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "http-server-nodejs-port-scope-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental", "enable_nodejs_http_modules", "enable_nodejs_http_server_modules", "streams_enable_constructors"],
+        durableObjectNamespaces = [
+          ( className = "SharedPortHost",
+            uniqueKey = "a096f09f90d14da094a89cc26ea2400f",
+            preventEviction = true,
+            unsafeUseIsolateNodePortScope = true,
+          ),
+          ( className = "DurablePortHost",
+            uniqueKey = "b197f19f90d14da094a89cc26ea2400f",
+          ),
+          ( className = "EphemeralPortHost",
+            ephemeralLocal = void,
+            preventEviction = true,
+          ),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [
+          (name = "SHARED", durableObjectNamespace = "SharedPortHost"),
+          (name = "DURABLE", durableObjectNamespace = "DurablePortHost"),
+          (name = "EPHEMERAL", durableObjectNamespace = "EphemeralPortHost"),
+        ],
+      )
+    ),
+  ],
+);

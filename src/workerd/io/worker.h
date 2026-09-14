@@ -42,6 +42,8 @@ namespace workerd {
 
 WD_STRONG_BOOL(StructuredLogging);
 WD_STRONG_BOOL(ProcessStdioPrefixed);
+// Selects the isolate-level virtual Node.js port table for a pinned internal actor.
+WD_STRONG_BOOL(UseIsolateNodePortScope);
 
 namespace api {
 class DurableObjectState;
@@ -990,7 +992,8 @@ class Worker::Actor final: public kj::Refcounted {
       jsg::Dict<kj::String> containerImages = jsg::Dict<kj::String>{},
       kj::Maybe<FacetManager&> facetManager = kj::none,
       kj::Maybe<ActorVersion> version = kj::none,
-      kj::Maybe<uint64_t> holderToken = kj::none);
+      kj::Maybe<uint64_t> holderToken = kj::none,
+      UseIsolateNodePortScope useIsolateNodePortScope = UseIsolateNodePortScope::NO);
 
   ~Actor() noexcept(false);
 
@@ -1098,6 +1101,11 @@ class Worker::Actor final: public kj::Refcounted {
     return *worker;
   }
 
+  // Whether this actor acts as an artificial execution context for its isolate's Node servers.
+  UseIsolateNodePortScope getUseIsolateNodePortScope() const {
+    return useIsolateNodePortScope;
+  }
+
   void assertCanSetAlarm();
 
   // If there is a scheduled or running alarm with the given `scheduledTime`, return a promise to
@@ -1128,6 +1136,7 @@ class Worker::Actor final: public kj::Refcounted {
 
   kj::Own<const Worker> worker;
   kj::Maybe<kj::Own<RequestTracker>> tracker;
+  UseIsolateNodePortScope useIsolateNodePortScope;
   struct Impl;
   kj::Own<Impl> impl;
 

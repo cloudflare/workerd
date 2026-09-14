@@ -619,6 +619,12 @@ wd_test(
     ],
 )
 
+wd_test(
+    src = "http-server-nodejs-port-scope-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-server-nodejs-port-scope-test.js"],
+)
+
 js_binary(
     name = "http-agent-nodejs-server",
     entry_point = "http-agent-nodejs-server.js",

@@ -3920,9 +3920,11 @@ Worker::Actor::Actor(const Worker& worker,
     jsg::Dict<kj::String> containerImages,
     kj::Maybe<FacetManager&> facetManager,
     kj::Maybe<ActorVersion> version,
-    kj::Maybe<uint64_t> holderToken)
+    kj::Maybe<uint64_t> holderToken,
+    UseIsolateNodePortScope useIsolateNodePortScope)
     : worker(kj::atomicAddRef(worker)),
-      tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
+      tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })),
+      useIsolateNodePortScope(useIsolateNodePortScope) {
   impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache), kj::mv(props),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
       hibernationEventType, kj::mv(container), kj::mv(containerImages), facetManager);
