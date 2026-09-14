@@ -53,13 +53,24 @@ export class EphemeralPortHost extends PortHost {}
 // Local-development runners evaluate user modules inside a pinned artificial
 // actor, then invoke their exports from the stateless worker. The marked actor
 // therefore registers its Node server in the isolate table.
-export const testPinnedRunnerActorUsesIsolatePortScope = {
+export const testConfiguredRunnerActorUsesIsolatePortScope = {
   async test(_controller, env) {
-    const host = env.SHARED.get(env.SHARED.idFromName('singleton'));
+    const host = env.SHARED.get('singleton');
+    const other = env.SHARED.get('other');
     await host.listen(SHARED_PORT, 'shared');
+    await other.listen(SHARED_PORT, 'other');
 
-    strictEqual(await requestPort(SHARED_PORT, 'request'), 'shared:request');
+    strictEqual(
+      await requestPort(SHARED_PORT, 'stateless'),
+      'shared:stateless'
+    );
+    strictEqual(
+      await host.request(SHARED_PORT, 'singleton'),
+      'shared:singleton'
+    );
+    strictEqual(await other.request(SHARED_PORT, 'actor'), 'other:actor');
     await host.close();
+    await other.close();
   },
 };
 

@@ -2391,7 +2391,32 @@ KJ_TEST("Server: configuring a DO namespace with no class export is not an error
     Internal Server Error)"_blockquote);
 }
 
-KJ_TEST("Server: isolate Node port scope requires a pinned Durable Object") {
+KJ_TEST("Server: isolate Node port scope requires a pinned actor") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2026-09-14",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `export default { fetch() { return new Response("OK"); } };
+          `export class MyActorClass { fetch() { return new Response("OK"); } }
+      )
+    ],
+    durableObjectNamespaces = [
+      ( className = "MyActorClass",
+        ephemeralLocal = void,
+        unsafeUseIsolateNodePortScopeForActor = "singleton",
+      )
+    ],
+    durableObjectStorage = (inMemory = void),
+  ))"_kj));
+
+  test.server.allowExperimental();
+  test.expectErrors(R"(
+    Durable Object namespace for class "MyActorClass" in service "hello" sets unsafeUseIsolateNodePortScopeForActor without preventEviction. The actor sharing the isolate's Node.js port scope must not be evictable.
+  )"_blockquote);
+}
+
+KJ_TEST("Server: isolate Node port scope requires an ephemeral-local actor") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2026-09-14",
     modules = [
@@ -2404,14 +2429,47 @@ KJ_TEST("Server: isolate Node port scope requires a pinned Durable Object") {
     durableObjectNamespaces = [
       ( className = "MyActorClass",
         uniqueKey = "mykey",
-        unsafeUseIsolateNodePortScope = true,
+        preventEviction = true,
+        unsafeUseIsolateNodePortScopeForActor = "singleton",
       )
     ],
     durableObjectStorage = (inMemory = void),
   ))"_kj));
 
   test.expectErrors(R"(
-    Durable Object namespace for class "MyActorClass" in service "hello" sets unsafeUseIsolateNodePortScope without preventEviction. Actors sharing the isolate's Node.js port scope must not be evictable.
+    Durable Object namespace for class "MyActorClass" in service "hello" sets unsafeUseIsolateNodePortScopeForActor without ephemeralLocal. Only an ephemeral-local actor can share the isolate's Node.js port scope.
+  )"_blockquote);
+}
+
+KJ_TEST("Server: isolate Node port scope allows one actor per worker") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2026-09-14",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `export default { fetch() { return new Response("OK"); } };
+          `export class FirstActorClass { fetch() { return new Response("OK"); } }
+          `export class SecondActorClass { fetch() { return new Response("OK"); } }
+      )
+    ],
+    durableObjectNamespaces = [
+      ( className = "FirstActorClass",
+        ephemeralLocal = void,
+        preventEviction = true,
+        unsafeUseIsolateNodePortScopeForActor = "first",
+      ),
+      ( className = "SecondActorClass",
+        ephemeralLocal = void,
+        preventEviction = true,
+        unsafeUseIsolateNodePortScopeForActor = "second",
+      )
+    ],
+    durableObjectStorage = (inMemory = void),
+  ))"_kj));
+
+  test.server.allowExperimental();
+  test.expectErrors(R"(
+    Durable Object namespace for class "SecondActorClass" in service "hello" sets unsafeUseIsolateNodePortScopeForActor, but the namespace for class "FirstActorClass" already sets it. At most one actor per worker can share the isolate's Node.js port scope.
   )"_blockquote);
 }
 

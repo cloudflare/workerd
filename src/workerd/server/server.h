@@ -117,13 +117,12 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
     kj::String uniqueKey;
     bool isEvictable;
     bool enableSql;
-    UseIsolateNodePortScope useIsolateNodePortScope;
     kj::Maybe<config::Worker::DurableObjectNamespace::ContainerOptions::Reader> containerOptions;
   };
   struct Ephemeral {
     bool isEvictable;
     bool enableSql;
-    UseIsolateNodePortScope useIsolateNodePortScope;
+    kj::Maybe<kj::String> isolateNodePortScopeActorId;
   };
   using ActorConfig = kj::OneOf<Durable, Ephemeral>;
 
