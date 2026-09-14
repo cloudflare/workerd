@@ -137,10 +137,10 @@ archive_override(
 http.archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "33c0693a49dd70f286c90df9002e1f1416d19a54d5ebf7da7b49298d7a941992",
+    sha256 = "631d95aaf39371505897b0916be2a60dd7c17ae16cec8bd5036d15d23bd0ac21",
     strip_prefix = "",
     type = "zip",
-    url = "https://github.com/simdutf/simdutf/releases/download/v9.1.1/singleheader.zip",
+    url = "https://github.com/simdutf/simdutf/releases/download/v9.1.2/singleheader.zip",
 )
 use_repo(http, "simdutf")
 
