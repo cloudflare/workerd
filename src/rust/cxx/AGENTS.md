@@ -63,12 +63,13 @@ guarantee by type, and what the **C++ adapters** guarantee by construction.
   `Rc` or a `Cell` in one fails the build. Every bridged operation captures a share of its
   object's state, never a borrow (`fn -> impl Future + use<..>`), so a `rust::Box` destroyed or
   carried to another thread is never a memory-safety question.
-- **Every bridged operation starts with `ensure_loop_thread()`.** kj-rs-io is ordinary tokio
-  code: a `TokioEventPort` thread is a tokio runtime thread for its whole life
-  (kj-rs-tokio/port.rs), so tokio's own constructors register with the loop's driver as they
-  are; do not add steering (entering handles, wrapper constructors) or lints around them. The one
-  addition is the loop-thread check, at the start of *every* operation -- accept included, not
-  only registrations -- turning a call from the wrong thread into a `kj::Exception`.
+- **Tokio I/O operations check their port.** A `TokioEventPort` thread is a tokio runtime thread
+  for its whole life (kj-rs-tokio/port.rs), so tokio's constructors register with the loop's
+  driver as they are; do not add steering (entering handles or wrapper constructors) around
+  them. Check the active port before registering a Tokio resource, and check the creating port
+  before polling a registered stream or listener -- accept included. The file watcher is
+  runtime-independent: notify delivers from its own thread and `tokio::sync::Notify` stores
+  wakeups without a runtime, so it does not need a port check.
 - **Raw handles and buffers become typed at the bridge.** `ffi.rs` is the crate's only module
   allowed to write `unsafe`. An fd/SOCKET arrives as an integer and becomes a `socket2::Socket` /
   `OwnedFd` in one `unsafe` block naming the C++ contract; a `tryRead` buffer arrives as pointer +

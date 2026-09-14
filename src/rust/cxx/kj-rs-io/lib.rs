@@ -33,11 +33,12 @@
 //! calling thread, and kj-rs-tokio makes a `TokioEventPort` thread a tokio runtime thread for its
 //! whole life (port.rs, `EnteredRuntime`), so `TcpStream::connect`, `UnixListener::bind_addr`,
 //! `AsyncFd::with_interest`, `signal()`, `spawn_blocking` and friends register with the loop's
-//! driver as they are. The one thing this crate adds is [`ensure_loop_thread`] at the start of
-//! every bridged operation -- connect, accept, listen, wrap, resolve, the hangup watch, signals,
-//! the file watcher -- so that a call on a thread without a port, or under another runtime
-//! entered over the port's, fails with a `kj::Exception` instead of tokio's "no reactor running"
-//! panic (a process abort at the bridge) or a wait on a driver that never turns.
+//! driver as they are. This crate checks the active port before registering a Tokio resource and
+//! checks the creating port before polling a registered stream or listener. Calls from a thread
+//! without the right port then fail with a `kj::Exception` instead of tokio's "no reactor
+//! running" panic (a process abort at the bridge) or a wait on a driver that never turns. The
+//! file watcher is runtime-independent: notify supplies events from its own thread, and
+//! `tokio::sync::Notify` only provides executor-independent wake storage.
 //!
 //! # Scope: workerd's provider
 //!
