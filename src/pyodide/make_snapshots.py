@@ -280,7 +280,7 @@ def supports_dedicated_snapshots(info: dict) -> bool:
 
 
 def make_snapshots(
-    cache: Path, outdir: Path, update_released: bool
+    cache: Path, outdir: Path, update_released_baseline_snapshots: bool
 ) -> list[tuple[str, list[tuple[str, str]]]]:
     res = []
     for ver, info in bundle_version_info().items():
@@ -289,12 +289,11 @@ def make_snapshots(
         released = info.get("released", False)
         compat_flags = list({"python_workers", info["enable_flag_name"]})
 
-        make_baseline = update_released or not released
-        # Released versions keep their existing snapshots so that the stability tests keep
-        # exercising the artifacts that were deployed, but a snapshot that has never been
-        # generated still needs to be created.
-        make_numpy_vendor = supports_dedicated_snapshots(info) and (
-            make_baseline or not info.get("dedicated_numpy_vendor_snapshot")
+        make_baseline = update_released_baseline_snapshots or not released
+        # Existing dedicated snapshots are kept so that the stability tests keep exercising the
+        # artifacts that were deployed; one is only generated if it doesn't exist yet.
+        make_numpy_vendor = supports_dedicated_snapshots(info) and not info.get(
+            "dedicated_numpy_vendor_snapshot"
         )
         if not make_baseline and not make_numpy_vendor:
             continue
@@ -365,9 +364,9 @@ def main() -> int:
         description="Upload Pyodide bundles and update metadata"
     )
     parser.add_argument(
-        "--update-released",
+        "--update-released-baseline-snapshots",
         action="store_true",
-        help="Update already released versions?",
+        help="Update already released baseline snapshots?",
     )
     args = parser.parse_args()
 
@@ -389,7 +388,7 @@ def main() -> int:
 
     with TemporaryDirectory() as package_cache:
         cache = Path(package_cache)
-        res = make_snapshots(cache, outdir, args.update_released)
+        res = make_snapshots(cache, outdir, args.update_released_baseline_snapshots)
 
     update_python_metadata_bzl(res)
 

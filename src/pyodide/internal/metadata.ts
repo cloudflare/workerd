@@ -4,9 +4,13 @@
 
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
+import type { PyodideVersionType } from 'pyodide-internal:const';
 
 export const IS_WORKERD = MetadataReader.isWorkerd();
 export const IS_TRACING = MetadataReader.isTracing();
+
+export const PYODIDE_VERSION =
+  MetadataReader.getPyodideVersion() as PyodideVersionType;
 
 // Snapshots
 export const SHOULD_SNAPSHOT_TO_DISK = MetadataReader.shouldSnapshotToDisk();
