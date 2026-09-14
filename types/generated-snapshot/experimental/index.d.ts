@@ -4928,6 +4928,7 @@ interface Tracing {
 }
 declare abstract class Span {
   get isTraced(): boolean;
+  spanContext(): TracingSpanContext;
   setAttribute(key: string, value: boolean | number | string): this;
   setAttributes(
     attributes: Record<string, boolean | number | string | undefined>,
@@ -4962,6 +4963,11 @@ type TracingSpanStatusCode = "unset" | "ok" | "error";
 interface TracingSpanStatus {
   code: TracingSpanStatusCode;
   message?: string;
+}
+interface TracingSpanContext {
+  traceId: string;
+  spanId: string;
+  traceFlags: number;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.
