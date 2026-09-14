@@ -27,7 +27,11 @@ export const test = {
       { name: 'durable_object_storage_delete', closed: true },
       { name: 'durable_object_storage_list', closed: true },
       { name: 'durable_object_storage_deleteAll', closed: true },
-      { name: 'durable_object_storage_setAlarm', closed: true },
+      {
+        name: 'durable_object_storage_setAlarm',
+        closed: true,
+        'cloudflare.durable_object.alarm.scheduled_time': 50n,
+      },
       { name: 'durable_object_storage_getAlarm', closed: true },
       { name: 'durable_object_storage_deleteAlarm', closed: true },
       { name: 'durable_object_storage_transaction', closed: true },

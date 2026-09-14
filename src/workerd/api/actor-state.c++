@@ -479,6 +479,8 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
 
   auto& context = IoContext::current();
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_setAlarm"_kjc);
+  traceContext.setTag("cloudflare.durable_object.alarm.scheduled_time"_kjc,
+      (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
   // This doesn't check if we have an alarm handler per say. It checks if we have an initialized
   // (post-ctor) JS durable object with an alarm handler. Notably, this means this won't throw if
   // `setAlarm` is invoked in the DO ctor even if the DO class does not have an alarm handler. This
