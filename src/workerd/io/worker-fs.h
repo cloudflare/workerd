@@ -282,20 +282,11 @@ class File: public kj::Refcounted {
   static kj::Rc<File> newWritable(
       jsg::Lock& js, kj::Maybe<uint32_t> size = kj::none) KJ_WARN_UNUSED_RESULT;
 
-  // Creates a new readable in-memory file wrapping the given data. The file
-  // does not take ownership of the data and the data must remain valid for the
-  // lifetime of the file. The file will be read-only. It will not be initially
-  // included in a directory. The contents of the file will not be tracked and
-  // will not count towards the isolate external memory usage.
-  static kj::Rc<File> newReadable(kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
-
-  // Same as newReadable(kj::ArrayPtr) above, but the file takes ownership of the
-  // data. Use this when the backing buffer would not otherwise outlive the file
-  // -- e.g. bundle module bodies transpiled at load time (TypeScript), whose
-  // storage is freed once worker setup completes (VULN-136997). Like the
-  // non-owning overload, the file is read-only and its contents are not tracked
-  // and do not count towards the isolate external memory usage.
-  static kj::Rc<File> newReadable(kj::Array<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
+  // Creates a new readable in-memory file sharing ownership of the given data.
+  // The file will be read-only and will not initially be included in a directory.
+  // Its contents are controlled by the runtime, so they are not tracked and do not
+  // count towards the isolate external memory usage.
+  static kj::Rc<File> newReadable(kj::Rc<kj::Array<const kj::byte>> data) KJ_WARN_UNUSED_RESULT;
 
   virtual kj::StringPtr jsgGetMemoryName() const = 0;
   virtual size_t jsgGetMemorySelfSize() const = 0;
