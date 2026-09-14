@@ -590,6 +590,10 @@ kj::Maybe<uint64_t> ReadableStream::tryGetLength(StreamEncoding encoding) {
   return getController().tryGetLength(encoding);
 }
 
+kj::Maybe<uint64_t> ReadableStream::tryGetLength(kj::ArrayPtr<const StreamEncoding> encodings) {
+  return getController().tryGetLength(encodings);
+}
+
 kj::Promise<DeferredProxy<void>> ReadableStream::pumpTo(
     jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) {
   JSG_REQUIRE(
