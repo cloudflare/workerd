@@ -1,0 +1,19 @@
+src/workerd/api/jsrpc-call-observation-test.c++
+  s_29743b6b20a528::t_c0f6401862ee53 82-83,177-178,270-271,282-283
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0dfe7112df1c8f681f609a36542680a654daf975",
+  "prompts": {},
+  "sessions": {
+    "s_29743b6b20a528": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f60d29d7affe9cTTo7zk9geRdo",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
