@@ -137,6 +137,17 @@ fn notify_error(op: &'static str) -> impl Fn(notify::Error) -> KjIoError {
     move |e| KjIoError::other(op, e)
 }
 
+fn recommended_watcher(wake: &Arc<Notify>) -> Result<RecommendedWatcher> {
+    let producer_wake = Arc::clone(wake);
+    // The backend's thread only says "look again"; what changed is decided by re-stamping
+    // (see the module docs). Errors and overflows are wake-ups like any other event.
+    RecommendedWatcher::new(
+        move |_event: notify::Result<Event>| producer_wake.notify_one(),
+        Config::default(),
+    )
+    .map_err(notify_error("FileWatcher"))
+}
+
 /// A path as `kj::Path::toNativeString` produced it: arbitrary bytes on unix, UTF-8 on Windows.
 #[cfg_attr(
     unix,
@@ -218,14 +229,7 @@ impl TokioFileWatcher {
     /// Creates the platform watcher, bound to this thread's loop.
     pub fn new() -> Result<Self> {
         let wake = Arc::new(Notify::new());
-        let producer_wake = Arc::clone(&wake);
-        // The backend's thread only says "look again"; what changed is decided by re-stamping
-        // (see the module docs). Errors and overflows are wake-ups like any other event.
-        let watcher = RecommendedWatcher::new(
-            move |_event: notify::Result<Event>| producer_wake.notify_one(),
-            Config::default(),
-        )
-        .map_err(notify_error("FileWatcher"))?;
+        let watcher = recommended_watcher(&wake)?;
         Ok(Self {
             shared: Arc::new(Shared {
                 backend: Mutex::new(Backend {
@@ -250,12 +254,16 @@ impl TokioFileWatcher {
                 format!("not a file path: {}", path.display()),
             ));
         };
-        shared.watch_dir(dir)?;
+        let parent_key = shared.watch_dir(dir)?;
         // A symlink's target may live elsewhere: watch that directory too, or edits to the
         // target produce no event here. (Best effort: the target may not exist yet.)
         let resolved = canonical(&path);
         if let Some(target_dir) = resolved.as_deref().and_then(Path::parent) {
-            shared.watch_dir(target_dir)?;
+            let target_key =
+                std::fs::canonicalize(target_dir).unwrap_or_else(|_| target_dir.to_path_buf());
+            if target_key != parent_key {
+                shared.watch_dir(target_dir)?;
+            }
         }
         let state = FileState {
             canonical: resolved,
@@ -285,20 +293,42 @@ impl Drop for WaitGuard<'_> {
 }
 
 impl Shared {
-    /// Registers `dir` with the backend, once per directory however it is spelled.
-    fn watch_dir(&self, dir: &Path) -> Result<()> {
+    /// Registers `dir` with the backend. A repeated canonical path rebuilds the live directory
+    /// set because the path may now name a replacement directory.
+    fn watch_dir(&self, dir: &Path) -> Result<PathBuf> {
         let key = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
         let mut backend = lock(&self.backend, "FileWatcher::watch")?;
         if backend.dirs.contains(&key) {
-            return Ok(());
+            // A replaced directory can retain the same path while the native backend has already
+            // discarded its old registration. Rebuilding avoids stale backend events removing a
+            // newly-installed registration that happens to reuse the same native watch ID.
+            let mut dirs = backend
+                .dirs
+                .iter()
+                .filter(|path| path.is_dir())
+                .cloned()
+                .collect::<HashSet<_>>();
+            dirs.insert(key.clone());
+            let mut watcher = recommended_watcher(&self.wake)?;
+            for path in &dirs {
+                watcher
+                    .watch(path, RecursiveMode::NonRecursive)
+                    .map_err(notify_error("FileWatcher::watch"))?;
+            }
+            backend.watcher = watcher;
+            backend.dirs = dirs;
+            // A change to another watched file during the backend swap may not produce a native
+            // event on either registration. Make the consumer re-stamp every file once.
+            self.wake.notify_one();
+            return Ok(key);
         }
         backend
             .watcher
             .watch(dir, RecursiveMode::NonRecursive)
             .map_err(notify_error("FileWatcher::watch"))?;
-        backend.dirs.insert(key);
+        backend.dirs.insert(key.clone());
         drop(backend);
-        Ok(())
+        Ok(key)
     }
 
     /// Re-stamps the watched files and registers the directories retargeted symlinks now point
@@ -581,6 +611,57 @@ mod tests {
             files.by_path[&link].canonical,
             Some(new_dir.join("missing.txt"))
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn rewatching_a_recreated_directory_reinstalls_the_backend_watch() {
+        let _port = kj_rs_tokio::TokioPort::new();
+        let dir = scratch_dir("recreated-directory");
+        let file = dir.join("watched.txt");
+        std::fs::write(&file, b"one").unwrap();
+        let watcher = TokioFileWatcher::new().unwrap();
+        watch_path(&watcher, &file);
+
+        std::fs::remove_file(&file).unwrap();
+        std::fs::remove_dir(&dir).unwrap();
+        let mut cx = Context::from_waker(Waker::noop());
+        let mut deletion = Box::pin(watcher.on_change());
+        assert!(matches!(
+            deletion.as_mut().poll(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
+        drop(deletion);
+
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(&file, b"two").unwrap();
+        watch_path(&watcher, &file);
+        let mut change = Box::pin(watcher.on_change());
+        let quiet_until = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        while std::time::Instant::now() < quiet_until {
+            assert!(change.as_mut().poll(&mut cx).is_pending());
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        std::fs::write(&file, b"two more").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            match change.as_mut().poll(&mut cx) {
+                Poll::Ready(Ok(())) => break,
+                Poll::Ready(Err(error)) => {
+                    panic!(
+                        "onChange failed: {}",
+                        cxx::KjError::from(error).description()
+                    )
+                }
+                Poll::Pending if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Poll::Pending => panic!("the recreated directory was not watched"),
+            }
+        }
+        drop(change);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
