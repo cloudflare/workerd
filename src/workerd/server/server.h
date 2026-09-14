@@ -118,6 +118,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
     bool isEvictable;
     bool enableSql;
     kj::Maybe<config::Worker::DurableObjectNamespace::ContainerOptions::Reader> containerOptions;
+    bool isWorkflow = false;
   };
   struct Ephemeral {
     bool isEvictable;

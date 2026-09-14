@@ -4404,9 +4404,13 @@ export type LoopbackForExport<
   ? LoopbackServiceStub<InstanceType<T>>
   : T extends new (...args: any[]) => Rpc.DurableObjectBranded
     ? LoopbackDurableObjectClass<InstanceType<T>>
-    : T extends ExportedHandler<any, any, any>
-      ? LoopbackServiceStub<undefined>
-      : undefined;
+    : T extends new (
+          ...args: any[]
+        ) => CloudflareWorkersModule.WorkflowEntrypoint<any, infer Params>
+      ? Workflow<Params>
+      : T extends ExportedHandler<any, any, any>
+        ? LoopbackServiceStub<undefined>
+        : undefined;
 export type LoopbackServiceStub<
   T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
 > = Fetcher<T> &
