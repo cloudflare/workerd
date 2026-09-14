@@ -592,6 +592,22 @@ async fn connect_to(target: SocketAddress) -> Result<Box<TokioStream>> {
 // ======================================================================================
 // Socket pairs (kj::AsyncIoProvider::newTwoWayPipe)
 
+#[cfg(any(windows, test))]
+fn accept_socket_pair_peer(
+    listener: &std::net::TcpListener,
+    client: &std::net::TcpStream,
+) -> std::io::Result<std::net::TcpStream> {
+    let expected = client.local_addr()?;
+    loop {
+        let (stream, peer) = listener.accept()?;
+        // The loopback listener is visible to other local processes. Only the connection made
+        // by our client belongs to this socket pair.
+        if peer == expected {
+            return Ok(stream);
+        }
+    }
+}
+
 /// A connected pair of stream sockets, both registered with the loop runtime: an `AF_UNIX`
 /// socketpair on unix; on Windows a loopback TCP connection, the way kj's own win32 provider
 /// builds its pipes (`newOsSocketpair`).
@@ -610,7 +626,7 @@ pub fn socket_pair() -> Result<(Box<TokioStream>, Box<TokioStream>)> {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(op("bind()"))?;
         let addr = listener.local_addr().map_err(op("getsockname()"))?;
         let client = std::net::TcpStream::connect(addr).map_err(op("connect()"))?;
-        let (server, _) = listener.accept().map_err(op("accept()"))?;
+        let server = accept_socket_pair_peer(&listener, &client).map_err(op("accept()"))?;
         let (first, second) = (socket2::Socket::from(client), socket2::Socket::from(server));
         first.set_nonblocking(true).map_err(op("fcntl()"))?;
         second.set_nonblocking(true).map_err(op("fcntl()"))?;
@@ -1011,6 +1027,19 @@ mod tests {
             #[cfg(unix)]
             Spec::Unix(_) => panic!("expected an IP address"),
         }
+    }
+
+    #[test]
+    fn socket_pair_accepts_only_its_own_client() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let foreign = std::net::TcpStream::connect(addr).unwrap();
+        let client = std::net::TcpStream::connect(addr).unwrap();
+
+        let server = accept_socket_pair_peer(&listener, &client).unwrap();
+        assert_eq!(server.peer_addr().unwrap(), client.local_addr().unwrap());
+
+        drop(foreign);
     }
 
     #[test]
