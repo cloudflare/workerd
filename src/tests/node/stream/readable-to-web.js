@@ -14,14 +14,23 @@ import { strictEqual, deepStrictEqual, rejects, throws } from 'node:assert';
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
+// A Readable whose read() pushes the given chunks one per call and then
+// pushes nothing more, staying open. A read() that pushes on every call
+// would fill the source's 16 KiB buffer and the web queue with thousands of
+// tiny chunks before backpressure paused it: seconds of work in a debug
+// build, for tests that only ever look at the first chunk.
+function sourceOf(...chunks) {
+  return new Readable({
+    read() {
+      if (chunks.length > 0) this.push(chunks.shift());
+    },
+  });
+}
+
 // A chunk pushed by the source arrives at the web reader.
 export const toWebDeliversPushedChunk = {
   async test() {
-    const r = new Readable({
-      read() {
-        this.push(enc.encode('ok'));
-      },
-    });
+    const r = sourceOf(enc.encode('ok'));
     const rs = Readable.toWeb(r);
     strictEqual(rs instanceof ReadableStream, true);
     const reader = rs.getReader();
@@ -79,11 +88,7 @@ export const toWebCancelWithoutReasonDestroysWithAbortError = {
 // the node source with the destination's error.
 export const toWebPipeToFailureDestroysSource = {
   async test() {
-    const source = new Readable({
-      read() {
-        this.push(enc.encode('x'));
-      },
-    });
+    const source = sourceOf(enc.encode('x'));
     source.on('error', () => {});
     const boom = new Error('destination failed');
     const destination = new WritableStream({

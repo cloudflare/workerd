@@ -153,7 +153,11 @@ export const fromWebLockedInputThrows = {
 };
 
 // Reads are issued only on demand: with the web stream's own queue disabled
-// (highWaterMark 0) the source is not pulled until the Readable is read.
+// (highWaterMark 0) the source is not pulled until the Readable is read, and
+// the Readable's highWaterMark bounds how far it reads ahead of the consumer.
+// A 1-byte highWaterMark keeps that to a single chunk: with the default
+// 16 KiB the Readable would keep pulling these few-byte chunks thousands of
+// times after the consumer paused, seconds of work in a debug build.
 export const fromWebPullsOnlyOnDemand = {
   async test() {
     let pulls = 0;
@@ -166,13 +170,15 @@ export const fromWebPullsOnlyOnDemand = {
       },
       { highWaterMark: 0 }
     );
-    const r = Readable.fromWeb(rs);
+    const r = Readable.fromWeb(rs, { highWaterMark: 1 });
     await scheduler.wait(5);
     strictEqual(pulls, 0);
     const chunk = await once(r, 'data');
     strictEqual(dec.decode(chunk), 'chunk1');
     r.pause();
     ok(pulls >= 1);
+    await scheduler.wait(5);
+    ok(pulls <= 2, `read ahead past the highWaterMark: ${pulls} pulls`);
   },
 };
 
