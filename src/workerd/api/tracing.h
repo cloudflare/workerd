@@ -39,6 +39,16 @@ struct ExceptionData {
   JSG_STRUCT(code, name, message, stack);
 };
 
+// The serializable identity of a span. This matches OpenTelemetry's required SpanContext fields;
+// isRemote and traceState are omitted because workerd does not currently retain either value.
+struct TracingSpanContext {
+  kj::String traceId;
+  kj::String spanId;
+  uint traceFlags;
+
+  JSG_STRUCT(traceId, spanId, traceFlags);
+};
+
 // Polymorphic state behind the JS Span wrapper. Concrete states represent recording user spans and
 // no-op spans, while sharing JS-side attribute byte-limit enforcement.
 class SpanState: public kj::Refcounted {
@@ -51,6 +61,9 @@ class SpanState: public kj::Refcounted {
   virtual void end() = 0;
 
   virtual bool getIsTraced() = 0;
+
+  // Returns a snapshot of the span identity. The snapshot remains available after end().
+  virtual kj::Maybe<tracing::SpanContext> getSpanContext() = 0;
 
   // Returns a SpanParent wrapping this span's observer, or a null SpanParent if the span has
   // ended or has no observer. Used by Tracing methods to push onto the AsyncContextFrame.
@@ -97,6 +110,9 @@ class Span: public jsg::Object {
   // code on this.
   bool getIsTraced();
 
+  // Returns an OpenTelemetry-compatible serializable identity for this span.
+  TracingSpanContext spanContext();
+
   // Sets a single attribute. If `value` is undefined, the attribute is not set.
   jsg::Ref<Span> setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<TagValue> value);
 
@@ -112,6 +128,7 @@ class Span: public jsg::Object {
   JSG_RESOURCE_TYPE(Span) {
     JSG_READONLY_PROTOTYPE_PROPERTY(isTraced, getIsTraced);
 
+    JSG_METHOD(spanContext);
     JSG_METHOD(setAttribute);
     JSG_METHOD(setAttributes);
     JSG_METHOD(recordException);
@@ -242,4 +259,5 @@ kj::Own<jsg::modules::ModuleBundle> getInternalTracingModuleBundle(auto featureF
 }  // namespace workerd::api
 
 #define EW_TRACING_ISOLATE_TYPES                                                                   \
-  api::Tracing, api::user_tracing::Span, api::user_tracing::ExceptionData
+  api::Tracing, api::user_tracing::Span, api::user_tracing::ExceptionData,                         \
+      api::user_tracing::TracingSpanContext

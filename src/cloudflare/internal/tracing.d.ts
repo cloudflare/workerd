@@ -33,11 +33,22 @@ interface ExceptionWithName {
 type Exception =
   ExceptionWithCode | ExceptionWithMessage | ExceptionWithName | string;
 
+// The required fields of OpenTelemetry's SpanContext interface. isRemote and
+// traceState are optional in OpenTelemetry and are not currently retained by workerd.
+interface TracingSpanContext {
+  traceId: string;
+  spanId: string;
+  traceFlags: number;
+}
+
 declare class Span {
   // Returns true if this span will be recorded to the tracing system. False when the
   // current async context is not being traced, or when the span has already been submitted.
   // Callers can gate expensive attribute-computation code on this.
   readonly isTraced: boolean;
+
+  // Returns an immutable, serializable identity that remains usable after the span ends.
+  spanContext(): TracingSpanContext;
 
   // Sets a single attribute on the span.
   setAttribute(key: string, value: SpanValue): this;
@@ -95,4 +106,4 @@ export default tracing;
 // Re-export `Span` as a named type export for callers that prefer `import type { Span }`
 // over `InstanceType<typeof tracing.Span>`. The runtime module does not have a named
 // `Span` export - this is purely a type-level convenience.
-export type { Exception, Span };
+export type { Exception, Span, TracingSpanContext };
