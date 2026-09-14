@@ -1,0 +1,51 @@
+BUILD.bazel
+  s_ad98b07a2ebbe9::t_17eaba47b5fa33 4,131-168
+build/fixtures/BUILD.bazel
+  s_ad98b07a2ebbe9::t_152c70707b3f60 1-4
+build/fixtures/rust_io_link_check.sh
+  s_ad98b07a2ebbe9::t_8e93a4c43d7958 1-63
+build/kj_test.bzl
+  s_ad98b07a2ebbe9::t_57329c9398466b 4,13,25-29
+build/rust_io_backend.bzl
+  s_ad98b07a2ebbe9::t_5550e115336ecd 1-165
+src/rust/memory-cache/ffi/BUILD.bazel
+  s_ad98b07a2ebbe9::t_fd673476b79512 6
+src/workerd/api/BUILD.bazel
+  s_ad98b07a2ebbe9::t_ecd5f1e61a7d7f 461,539
+src/workerd/io/BUILD.bazel
+  s_ad98b07a2ebbe9::t_e740a37fd565c1 129,162,254,319,331
+src/workerd/jsg/BUILD.bazel
+  s_ad98b07a2ebbe9::t_dbae35962335df 316,324-336
+src/workerd/server/BUILD.bazel
+  s_ad98b07a2ebbe9::t_aecdb07c025223 4,6,72,82,87-144,158,196,213,308,310,356,372,374,483
+src/workerd/server/cli-io-backend.c++
+  s_ad98b07a2ebbe9::t_a0242417e88643 1-331
+src/workerd/server/cli-io-backend.h
+  s_ad98b07a2ebbe9::t_1cd0b488485d14 1-69
+src/workerd/server/workerd.c++
+  s_ad98b07a2ebbe9::t_e74e5b822da7cf 12,947,1002-1003,1196,1225,1253-1254,1349,1543
+src/workerd/tests/BUILD.bazel
+  s_ad98b07a2ebbe9::t_1f34522c8a9023 43
+src/workerd/util/BUILD.bazel
+  s_ad98b07a2ebbe9::t_7a9fa9969d9797 4,106,154,240,516-571
+src/workerd/util/setup-async-io-test.c++
+  s_ad98b07a2ebbe9::t_48d62ef71388ce 1-54
+src/workerd/util/setup-async-io-tokio.c++
+  s_ad98b07a2ebbe9::t_c389fed92eb627 1-173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2e8a21c7a238ad3fcc1e8c9daae255d11b8515fa",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
