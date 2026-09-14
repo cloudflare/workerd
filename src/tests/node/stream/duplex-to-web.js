@@ -135,11 +135,11 @@ export const toWebDestroyWithErrorErrorsBothHalves = {
   },
 };
 
-// Both halves observe the whole Duplex through end-of-stream, which for a
-// Duplex means both of its sides. With allowHalfOpen (the Duplex default),
-// closing the writable half finishes the node writable side and the readable
-// half keeps flowing, but the close() promise settles only once the readable
-// side has ended as well.
+// The writable half observes the whole Duplex through end-of-stream, which
+// for a Duplex means both of its sides. With allowHalfOpen (the Duplex
+// default), closing the writable half finishes the node writable side and
+// the readable half keeps flowing, but the close() promise settles only once
+// the readable side has ended as well.
 export const toWebClosingWritableWaitsForReadableEnd = {
   async test() {
     const duplex = new Duplex({
@@ -172,31 +172,36 @@ export const toWebClosingWritableWaitsForReadableEnd = {
   },
 };
 
-// Symmetrically, the readable half reports done only once the node writable
-// side has finished too: a pushed EOF alone leaves the read pending until
-// the writer is closed.
-export const toWebReadableEofWaitsForWritableFinish = {
+// The readable half is not symmetric: it observes the readable side alone,
+// so a pushed EOF reports done while the node writable side is still open
+// (a socket whose peer has sent FIN). The writable half keeps working after
+// the readable has closed.
+export const toWebReadableEofDoesNotWaitForWritable = {
   async test() {
+    const writes = [];
     const duplex = new Duplex({
       read() {},
       write(chunk, encoding, callback) {
+        writes.push(chunk);
         callback();
       },
     });
+    strictEqual(duplex.allowHalfOpen, true);
     const { readable, writable } = Duplex.toWeb(duplex);
     const reader = readable.getReader();
     duplex.push(Buffer.from('only'));
     strictEqual(Buffer.from((await reader.read()).value).toString(), 'only');
     duplex.push(null);
-    let readSettled = false;
-    const tail = reader.read().then((result) => {
-      readSettled = true;
-      return result;
-    });
-    await scheduler.wait(5);
+    strictEqual((await reader.read()).done, true);
+    await reader.closed;
     strictEqual(duplex.readableEnded, true);
-    strictEqual(readSettled, false);
-    await writable.getWriter().close();
-    strictEqual((await tail).done, true);
+    strictEqual(duplex.writableEnded, false);
+
+    const writer = writable.getWriter();
+    await writer.write(Buffer.from('late'));
+    strictEqual(writes.length, 1);
+    strictEqual(writes[0].toString(), 'late');
+    await writer.close();
+    strictEqual(duplex.writableFinished, true);
   },
 };

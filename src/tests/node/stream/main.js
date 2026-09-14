@@ -91,7 +91,7 @@ export {
   toWebReadableIsNotByteStream,
   toWebDestroyWithErrorErrorsBothHalves,
   toWebClosingWritableWaitsForReadableEnd,
-  toWebReadableEofWaitsForWritableFinish,
+  toWebReadableEofDoesNotWaitForWritable,
 } from 'duplex-to-web';
 
 export {

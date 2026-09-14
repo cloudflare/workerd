@@ -32,9 +32,10 @@ The implementation under test is `src/node/internal/streams_readable.js`
   a fresh buffer (the source's `Buffer`, and any `Uint8Array` the source
   pushed — the Readable itself wraps those in a pooled Buffer). objectMode
   chunks pass by identity.
-- Source end → stream closes; source error → stream errors with the same
-  instance; source destroyed without error → `AbortError` whose `cause` is
-  `ERR_STREAM_PREMATURE_CLOSE`.
+- Source end → stream closes (for a Duplex source, on its readable side's
+  end alone — the end-of-stream watch is `{ writable: false }`); source
+  error → stream errors with the same instance; source destroyed without
+  error → `AbortError` whose `cause` is `ERR_STREAM_PREMATURE_CLOSE`.
 - `reader.cancel(reason)` destroys the source with `reason` (an
   `AbortError` when none is given) — through `destroyer`, so a `pipeTo()`
   whose destination fails destroys the source with the destination's error.
@@ -96,10 +97,12 @@ The implementation under test is `src/node/internal/streams_readable.js`
 
 - `toWeb` is the two adapters over the two halves; a destroyed Duplex or a
   missing side yields the corresponding pre-cancelled/pre-closed half. The
-  readable half is a default (non-byte) stream. **Both halves observe the
-  whole Duplex through end-of-stream**, so `writer.close()` settles only
-  once the readable side has ended too, and the readable reports `done`
-  only once the writable side has finished.
+  readable half is a default (non-byte) stream. The halves observe
+  end-of-stream **asymmetrically**: the writable half watches the whole
+  Duplex, so `writer.close()` settles only once the readable side has ended
+  too, while the readable half watches the readable side alone, so a pushed
+  EOF reports `done` while the writable side is still open (a socket whose
+  peer sent FIN) and the writable half stays usable afterwards.
 - `fromWeb` validates the pair with `instanceof` (an already-locked
   readable leaves the writer lock taken), defaults `allowHalfOpen` to
   **false** (readable EOF ends the writable side and closes the web
@@ -149,7 +152,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `readable-from-web.js` | delivery; errored/erroring sources through async iteration; validation before locking; lock and locked-input errors (ledger #1); pull on demand; end/close ordering; errors with and without a read in flight; destroy → cancel (reason, `null`, skipped after close); `encoding`, `objectMode`, `highWaterMark`, `signal` |
 | `writable-to-web.js` | delivery; close → end → finish; pipeTo completion; sync and async node errors; `_final` error; node-initiated end/destroy → `AbortError`; abort (with and without reason); validation; duck input and unwritable inputs → closed stream (ledger #2); derived strategy; drain-driven backpressure; chunk conversion |
 | `writable-from-web.js` | delivery; web error / sink rejection / close rejection destroying the Writable once with no unhandled rejection; back-to-back and corked writes through `_writev`; failed batch; validation before locking; lock (ledger #1); chunk conversion; `decodeStrings`/`objectMode`; end → close; destroy → abort or close; writes complete on sink acceptance |
-| `duplex-to-web.js` | pair round trip; validation; destroyed and half Duplexes; non-byte readable (ledger #3); destroy(err) erroring both halves; the whole-Duplex end-of-stream coupling of the halves |
+| `duplex-to-web.js` | pair round trip; validation; destroyed and half Duplexes; non-byte readable (ledger #3); destroy(err) erroring both halves; the asymmetric end-of-stream coupling of the halves (writable close waits for readable end; readable EOF does not wait for the writable) |
 | `duplex-from-web.js` | pair round trip; objectMode strings; corked writes; failed batch; errored readable / writable and later readable error destroying the duplex (and what is left untouched); clean `for await` consumption |
 | `duplex-from.js` | `Duplex.from()` over a lone web stream marks the missing side |
 | `bodies.js` | Response/Request bodies through `Readable.toWeb` (incl. a megabyte); `Readable.fromWeb` over a Response body and a `TextDecoderStream` chain; `Writable.fromWeb` over `IdentityTransformStream` and `FixedLengthStream` (ledger #4); pipeThrough chains in both directions |
