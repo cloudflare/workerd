@@ -273,14 +273,14 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
   kj::Own<Fetcher::OutgoingFactory> outgoingFactory;
   KJ_SWITCH_ONEOF(channel) {
     KJ_CASE_ONEOF(channelId, uint) {
-      outgoingFactory =
-          kj::heap<GlobalActorOutgoingFactory>(channelId, id.addRef(), kj::mv(locationHint), mode,
-              enableReplicaRouting, routingMode, kj::mv(version), persistent);
+      outgoingFactory = kj::heap<GlobalActorOutgoingFactory>(channelId, id.addRef(),
+          kj::mv(locationHint), mode, enableReplicaRouting, routingMode, kj::mv(version),
+          actorCallRetriesAllowed, persistent);
     }
     KJ_CASE_ONEOF(channelFactory, IoOwn<ActorChannelFactory>) {
       outgoingFactory = kj::heap<GlobalActorOutgoingFactory>(kj::addRef(*channelFactory),
           id.addRef(), kj::mv(locationHint), mode, enableReplicaRouting, routingMode,
-          kj::mv(version), persistent);
+          kj::mv(version), actorCallRetriesAllowed, persistent);
     }
   }
 
@@ -299,12 +299,13 @@ jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(
   // inherits the `persistent` bit.
   KJ_SWITCH_ONEOF(channel) {
     KJ_CASE_ONEOF(channelId, uint) {
-      return js.alloc<api::DurableObjectNamespace>(channelId, kj::mv(newIdFactory), persistent);
+      return js.alloc<api::DurableObjectNamespace>(
+          channelId, kj::mv(newIdFactory), actorCallRetriesAllowed, persistent);
     }
     KJ_CASE_ONEOF(channelFactory, IoOwn<ActorChannelFactory>) {
       return js.alloc<api::DurableObjectNamespace>(
           IoContext::current().addObject(kj::addRef(*channelFactory)), kj::mv(newIdFactory),
-          persistent);
+          actorCallRetriesAllowed, persistent);
     }
   }
 

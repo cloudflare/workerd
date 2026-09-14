@@ -667,13 +667,13 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
     KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
       value = lock.wrap(context,
-          lock.alloc<api::DurableObjectNamespace>(
-              ns.actorChannel, kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
+          lock.alloc<api::DurableObjectNamespace>(ns.actorChannel,
+              kj::heap<ActorIdFactoryImpl>(ns.uniqueKey), api::ActorCallRetriesAllowed::YES));
     }
     KJ_CASE_ONEOF(ns, Global::LoopbackDurableActorNamespace) {
       value = lock.wrap(context,
           lock.alloc<api::LoopbackDurableObjectNamespace>(ns.actorChannel,
-              kj::heap<ActorIdFactoryImpl>(ns.uniqueKey),
+              kj::heap<ActorIdFactoryImpl>(ns.uniqueKey), api::ActorCallRetriesAllowed::YES,
               lock.alloc<api::LoopbackDurableObjectClass>(ns.classChannel), featureFlags));
     }
 
