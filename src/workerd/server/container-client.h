@@ -116,6 +116,12 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   kj::Own<ContainerClient> addRef();
 
+  // Test-only: lets a unit test drive DockerPort::connect() without a live sidecar container by
+  // presetting the ingress proxy port that connect() reads.
+  void setSidecarIngressHostPortForTest(uint16_t port) {
+    sidecarIngressHostPort = port;
+  }
+
  private:
   capnp::ByteStreamFactory& byteStreamFactory;
   kj::HttpHeaderTable headerTable;
