@@ -200,7 +200,7 @@ impl Files {
                 state.stamp = now;
                 changed = true;
             }
-            if file_changed || state.canonical.is_none() {
+            if file_changed || state.stamp.is_none() || state.canonical.is_none() {
                 let resolved = canonical(path);
                 if resolved != state.canonical {
                     if let Some(dir) = resolved.as_deref().and_then(Path::parent) {
@@ -557,6 +557,30 @@ mod tests {
         new_dirs.clear();
         assert!(!files.rescan(&mut new_dirs), "...once");
         assert!(new_dirs.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rescan_follows_a_dangling_symlink_retargeted_to_another_missing_file() {
+        let dir = scratch_dir("dangling-retarget");
+        let (old_dir, new_dir) = (dir.join("old"), dir.join("new"));
+        std::fs::create_dir_all(&old_dir).unwrap();
+        std::fs::create_dir_all(&new_dir).unwrap();
+        let link = dir.join("link.txt");
+        std::os::unix::fs::symlink(old_dir.join("missing.txt"), &link).unwrap();
+
+        let mut files = files_for(&[&link]);
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(new_dir.join("missing.txt"), &link).unwrap();
+
+        let mut new_dirs = Vec::new();
+        files.rescan(&mut new_dirs);
+        assert_eq!(new_dirs, vec![std::fs::canonicalize(&new_dir).unwrap()]);
+        assert_eq!(
+            files.by_path[&link].canonical,
+            Some(new_dir.join("missing.txt"))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
