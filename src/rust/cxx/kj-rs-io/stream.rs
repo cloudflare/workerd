@@ -61,7 +61,6 @@ use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
 
-#[cfg(unix)]
 use crate::ensure_loop_thread;
 use crate::error::KjIoError;
 use crate::error::Result;
@@ -317,7 +316,6 @@ impl Inner {
                 .as_borrowed_fd()
                 .try_clone_to_owned()
                 .map_err(op("dup()"))?;
-            ensure_loop_thread()?;
             let async_fd = tokio::io::unix::AsyncFd::with_interest(owned, Interest::WRITABLE)
                 .map_err(op("whenWriteDisconnected"))?;
             // A concurrent first caller may have stored its own registration meanwhile; then
@@ -372,7 +370,10 @@ impl TokioStream {
         min_bytes: usize,
     ) -> impl Future<Output = Result<usize>> + use<'b> {
         let inner = self.shared();
-        async move { read_min(&inner.socket, buf, min_bytes).await }
+        async move {
+            ensure_loop_thread()?;
+            read_min(&inner.socket, buf, min_bytes).await
+        }
     }
 
     /// `kj::AsyncIoStream::write` (write-all) as a future owning its share of the stream.
@@ -381,7 +382,10 @@ impl TokioStream {
         buf: &'b [u8],
     ) -> impl Future<Output = Result<()>> + use<'b> {
         let inner = self.shared();
-        async move { write_all(&inner.socket, buf).await }
+        async move {
+            ensure_loop_thread()?;
+            write_all(&inner.socket, buf).await
+        }
     }
 
     /// `kj::AsyncIoStream::write(pieces)` as a future owning its share of the stream.
@@ -390,13 +394,19 @@ impl TokioStream {
         pieces: &'b crate::ffi::KjPieces,
     ) -> impl Future<Output = Result<()>> + use<'b> {
         let inner = self.shared();
-        async move { write_all_pieces(&inner.socket, pieces).await }
+        async move {
+            ensure_loop_thread()?;
+            write_all_pieces(&inner.socket, pieces).await
+        }
     }
 
     /// `kj::AsyncIoStream::whenWriteDisconnected` as a future owning its share of the stream.
     pub(crate) fn when_write_disconnected(&self) -> impl Future<Output = Result<()>> + use<> {
         let inner = self.shared();
-        async move { inner.when_write_disconnected().await }
+        async move {
+            ensure_loop_thread()?;
+            inner.when_write_disconnected().await
+        }
     }
 
     /// `shutdown(SHUT_WR)`: cleanly shut down the write end, keeping the read end open.

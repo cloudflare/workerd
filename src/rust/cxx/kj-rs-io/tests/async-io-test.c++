@@ -1704,5 +1704,22 @@ KJ_TEST("accept() on a thread without a TokioEventPort fails instead of waiting 
   });
 }
 
+KJ_TEST("tryRead() on a thread without a TokioEventPort fails instead of waiting forever") {
+  auto io = setupTokioAsyncIo();
+  auto pair = makeTcpPair(io);
+  kj::Thread other([stream = kj::mv(pair.server)]() mutable {
+    kj::EventLoop loop;
+    kj::WaitScope ws(loop);
+    kj::byte buffer[1];
+    auto read = stream->tryRead(buffer, 1, sizeof(buffer));
+    auto ready = read.poll(ws);
+    KJ_EXPECT(ready, "tryRead() remained pending without a TokioEventPort");
+    if (ready) {
+      auto exception = kj::runCatchingExceptions([&] { read.wait(ws); });
+      KJ_EXPECT(KJ_ASSERT_NONNULL(exception).getDescription().contains("no TokioEventPort"));
+    }
+  });
+}
+
 }  // namespace
 }  // namespace kj_rs_io_test
