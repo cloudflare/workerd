@@ -73,16 +73,15 @@ test('UDP connect() handler reports protocol "udp" (TS streams)', async () => {
   }
 });
 
-test('UDP connect() preserves datagram boundaries for a >4KiB datagram (TS streams)', async () => {
-  // Byte-mode streams would split this at the auto-allocated chunk size (4KiB/16KiB); the
-  // value-mode datagram readable must deliver it as a single chunk.
+/// macOS limits the size of UDP packets to 9,216 bytes maximum, so this test chooses a value below this.
+test('UDP connect() round-trips a large datagram (TS streams)', async () => {
   const port = await workerd.getListenPort('udp');
   const client = createSocket('udp4');
   try {
     const first = await sendAndReceive(client, port, Buffer.from('start'));
     assert.strictEqual(first.toString(), 'first:udp:start');
 
-    const big = Buffer.alloc(20000, 'X');
+    const big = Buffer.alloc(9000, 'X');
     const reply = await sendAndReceive(client, port, big);
     assert.strictEqual(reply.toString(), 'echo:' + big.toString());
   } finally {
