@@ -182,13 +182,16 @@ export const closeDrainsQueue = {
   },
 };
 
-// DIVERGENCE (ledger #18): error() while a close() is still pending (a
-// chunk queued). Per spec the stream is still "readable" — close() only
-// requested the close — so the TypeScript implementation errors it: the
-// queued chunk is discarded, reads and closed reject with the error and
-// desiredSize turns null. The C++ implementation treats the requested
-// close as final: the late error is ignored, the chunk drains to a clean
-// close, and desiredSize stays 0. error() throws on neither side.
+// DIVERGENCE (ledger #18): error() while a close() is still pending
+// (chunks queued). Per spec the stream is still "readable" — close() only
+// requested the close — so the TypeScript implementation reports
+// desiredSize as hwm minus the queued chunks (-1) before the error, then
+// errors the stream: the queued chunks are discarded, reads and closed
+// reject with the error and desiredSize turns null. The C++ implementation
+// treats the requested close as final: desiredSize is already 0, the late
+// error is ignored and the chunks drain to a clean close. error() throws
+// on neither side. Two chunks are queued so the pre-error desiredSize
+// discriminates: at hwm 1 a single chunk reads 0 on both sides.
 export const errorAfterCloseWithQueuedChunk = {
   async test() {
     const err = new Error('late');
@@ -199,8 +202,9 @@ export const errorAfterCloseWithQueuedChunk = {
       },
     });
     controller.enqueue('a');
+    controller.enqueue('b');
     controller.close();
-    strictEqual(controller.desiredSize, 0);
+    strictEqual(controller.desiredSize, usingTsImpl ? -1 : 0);
     controller.error(err);
     const reader = rs.getReader();
     if (usingTsImpl) {
@@ -210,6 +214,7 @@ export const errorAfterCloseWithQueuedChunk = {
     } else {
       strictEqual(controller.desiredSize, 0);
       strictEqual((await reader.read()).value, 'a');
+      strictEqual((await reader.read()).value, 'b');
       strictEqual((await reader.read()).done, true);
       await reader.closed;
     }

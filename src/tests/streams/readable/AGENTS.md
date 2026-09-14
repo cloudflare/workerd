@@ -32,7 +32,7 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 | 15 | adopted body stream lock after consumption | released | kept locked | `bodyIdentityAndLockCoupling` |
 | 16 | then-getter fires during a read cycle | 1 (harness context) | 2 | `thenGetterFireCountOnRead` |
 | 17 | close-twice / enqueue-after-close / size-not-function / from-return validation messages | own texts | own texts | `closeTerminality`, `sizeMustBeFunction`, `fromReturnValidationMessages` |
-| 18 | error() while a close() is still pending (chunk queued) | ignored: the requested close is final, the chunk drains to a clean close, desiredSize stays 0 | errors the stream (spec: close() only requested the close, the state is still "readable"): chunk discarded, reads/closed reject, desiredSize null | `errorAfterCloseWithQueuedChunk` |
+| 18 | error() while a close() is still pending (chunks queued) | ignored: the requested close is final, desiredSize is already 0 and the chunks drain to a clean close | desiredSize is hwm minus the queued chunks (-1) until the error, then the stream errors (spec: close() only requested the close, the state is still "readable"): chunks discarded, reads/closed reject, desiredSize null | `errorAfterCloseWithQueuedChunk` |
 
 Parity worth noting (probed, pinned): pull serialization (never
 re-entered); pull/async-start rejection identity; error-undefined
