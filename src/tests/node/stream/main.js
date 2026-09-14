@@ -97,12 +97,16 @@ export {
 export {
   fromWebPairRoundTrip,
   fromWebObjectModeStrings,
+  fromWebPairRejectsNonStreamPair,
+  fromWebPairLockedReadableLeavesWriterLocked,
   fromWebPairCorkedWritesDeliverChunks,
   fromWebPairBatchedWriteRejectionFailsCallbacks,
   fromWebPairErroredReadableDestroysDuplex,
   fromWebPairLaterReadableErrorDestroysDuplex,
   fromWebPairErroredWritableDestroysDuplex,
+  fromWebPairReadableEofEndsWritable,
   fromWebPairIterationToCompletionIsClean,
+  fromWebPairDestroyAbortsWriterAndCancelsReader,
 } from 'duplex-from-web';
 
 export {
