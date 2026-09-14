@@ -531,7 +531,7 @@ impl TokioAddress {
                 UnixListener::bind_addr(&name.to_tokio()?).map_err(op("bind()"))?,
             )],
         };
-        Ok(Box::new(TokioListener::new(inners)))
+        Ok(Box::new(TokioListener::new(inners)?))
     }
 
     /// `kj::NetworkAddress::toString`, byte for byte like KJ's: `"ip:port"`, `"[v6]:port"`,
@@ -586,7 +586,7 @@ async fn connect_to(target: SocketAddress) -> Result<Box<TokioStream>> {
             ));
         }
     };
-    Ok(Box::new(TokioStream::new(socket)))
+    Ok(Box::new(TokioStream::new(socket)?))
 }
 
 // ======================================================================================
@@ -617,8 +617,8 @@ pub fn socket_pair() -> Result<(Box<TokioStream>, Box<TokioStream>)> {
         ensure_loop_thread()?;
         let (first, second) = UnixStream::pair().map_err(op("socketpair()"))?;
         Ok((
-            Box::new(TokioStream::new(Socket::Unix(first))),
-            Box::new(TokioStream::new(Socket::Unix(second))),
+            Box::new(TokioStream::new(Socket::Unix(first))?),
+            Box::new(TokioStream::new(Socket::Unix(second))?),
         ))
     }
     #[cfg(windows)]
@@ -673,6 +673,8 @@ struct ListenerShared {
     /// Round-robin start index for the next `accept()` poll, so a busy first socket cannot
     /// starve the others.
     next: AtomicUsize,
+    /// Runtime whose I/O driver owns every listener registration.
+    owner_runtime: tokio::runtime::Id,
 }
 
 enum ListenerInner {
@@ -805,7 +807,7 @@ impl ListenerShared {
     /// One accepted connection: KJ's transient errors are retried here; whether the peer is
     /// allowed is the adapter's decision (module docs, "Where filtering happens").
     async fn accept(&self) -> Result<PeerStream> {
-        ensure_loop_thread()?;
+        crate::ensure_owner_loop(self.owner_runtime)?;
         loop {
             let (socket, peer) = match std::future::poll_fn(|cx| self.poll_accept_any(cx)).await {
                 Ok(accepted) => accepted,
@@ -819,7 +821,7 @@ impl ListenerShared {
                 return Err(op("setsockopt(TCP_NODELAY)")(e));
             }
             return Ok(PeerStream {
-                stream: Box::new(TokioStream::new(socket)),
+                stream: Box::new(TokioStream::new(socket)?),
                 peer,
             });
         }
@@ -827,13 +829,14 @@ impl ListenerShared {
 }
 
 impl TokioListener {
-    fn new(inners: Vec<ListenerInner>) -> Self {
-        Self {
+    fn new(inners: Vec<ListenerInner>) -> Result<Self> {
+        Ok(Self {
             shared: Arc::new(ListenerShared {
                 inners,
                 next: AtomicUsize::new(0),
+                owner_runtime: crate::current_loop_runtime_id()?,
             }),
-        }
+        })
     }
 
     /// `kj::ConnectionReceiver::getPort`: the first socket's, like KJ's aggregate receiver.
@@ -945,7 +948,7 @@ pub fn wrap_socket(socket: socket2::Socket) -> Result<Box<TokioStream>> {
             ));
         }
     };
-    Ok(Box::new(TokioStream::new(socket)))
+    Ok(Box::new(TokioStream::new(socket)?))
 }
 
 /// `wrapListenSocketFd`'s counterpart of [`wrap_socket`].
@@ -967,7 +970,7 @@ pub fn wrap_listener(socket: socket2::Socket) -> Result<Box<TokioListener>> {
             ));
         }
     };
-    Ok(Box::new(TokioListener::new(vec![inner])))
+    Ok(Box::new(TokioListener::new(vec![inner])?))
 }
 
 #[cfg(test)]
@@ -1395,6 +1398,27 @@ mod tests {
         .join()
         .unwrap();
         assert!(err.description().contains("no TokioEventPort"));
+    }
+
+    #[test]
+    fn accept_on_a_different_loop_thread_is_refused() {
+        let _port = kj_rs_tokio::TokioPort::new();
+        let listener = TokioAddress::from_socket_addrs(vec!["127.0.0.1:0".parse().unwrap()])
+            .listen()
+            .unwrap();
+        let accept = listener_accept(&listener);
+        let err = std::thread::spawn(move || {
+            let _other_port = kj_rs_tokio::TokioPort::new();
+            let mut accept = Box::pin(accept);
+            let mut cx = Context::from_waker(Waker::noop());
+            match accept.as_mut().poll(&mut cx) {
+                Poll::Ready(Err(e)) => KjError::from(e),
+                _ => panic!("accept on a different loop thread must fail at once"),
+            }
+        })
+        .join()
+        .unwrap();
+        assert!(err.description().contains("different TokioEventPort"));
     }
 
     #[test]

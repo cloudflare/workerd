@@ -1770,5 +1770,21 @@ KJ_TEST("tryRead() on a thread without a TokioEventPort fails instead of waiting
   });
 }
 
+KJ_TEST("tryRead() on a different TokioEventPort fails instead of waiting forever") {
+  auto io = setupTokioAsyncIo();
+  auto pair = makeTcpPair(io);
+  kj::Thread other([stream = kj::mv(pair.server)]() mutable {
+    auto otherIo = setupTokioAsyncIo();
+    kj::byte buffer[1];
+    auto read = stream->tryRead(buffer, 1, sizeof(buffer));
+    auto ready = read.poll(otherIo.getWaitScope());
+    KJ_EXPECT(ready, "tryRead() remained pending on the socket's foreign TokioEventPort");
+    if (ready) {
+      auto exception = kj::runCatchingExceptions([&] { read.wait(otherIo.getWaitScope()); });
+      KJ_EXPECT(KJ_ASSERT_NONNULL(exception).getDescription().contains("different TokioEventPort"));
+    }
+  });
+}
+
 }  // namespace
 }  // namespace kj_rs_io_test

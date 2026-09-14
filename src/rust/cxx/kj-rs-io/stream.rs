@@ -61,7 +61,6 @@ use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
 
-use crate::ensure_loop_thread;
 use crate::error::KjIoError;
 use crate::error::Result;
 use crate::error::op;
@@ -76,6 +75,8 @@ pub struct TokioStream {
 /// The shared state behind a [`TokioStream`] and every operation in flight on it.
 struct Inner {
     socket: Socket,
+    /// Runtime whose I/O driver owns the socket registration.
+    owner_runtime: tokio::runtime::Id,
     /// The `dup(2)` + I/O-driver registration behind `whenWriteDisconnected`, created on the
     /// first call and shared by every later one (kj-http calls it once per server connection;
     /// KJ itself forks one observation per stream). One extra fd per stream at most, not per
@@ -347,14 +348,15 @@ impl Inner {
 
 impl TokioStream {
     /// Wraps a socket net.rs registered with the loop's runtime.
-    pub(crate) fn new(socket: Socket) -> Self {
-        Self {
+    pub(crate) fn new(socket: Socket) -> Result<Self> {
+        Ok(Self {
             inner: Arc::new(Inner {
                 socket,
+                owner_runtime: crate::current_loop_runtime_id()?,
                 #[cfg(unix)]
                 hangup_watch: std::sync::OnceLock::new(),
             }),
-        }
+        })
     }
 
     /// A share of the state, for an operation's future to own (see the module docs).
@@ -371,7 +373,7 @@ impl TokioStream {
     ) -> impl Future<Output = Result<usize>> + use<'b> {
         let inner = self.shared();
         async move {
-            ensure_loop_thread()?;
+            crate::ensure_owner_loop(inner.owner_runtime)?;
             read_min(&inner.socket, buf, min_bytes).await
         }
     }
@@ -383,7 +385,7 @@ impl TokioStream {
     ) -> impl Future<Output = Result<()>> + use<'b> {
         let inner = self.shared();
         async move {
-            ensure_loop_thread()?;
+            crate::ensure_owner_loop(inner.owner_runtime)?;
             write_all(&inner.socket, buf).await
         }
     }
@@ -395,7 +397,7 @@ impl TokioStream {
     ) -> impl Future<Output = Result<()>> + use<'b> {
         let inner = self.shared();
         async move {
-            ensure_loop_thread()?;
+            crate::ensure_owner_loop(inner.owner_runtime)?;
             write_all_pieces(&inner.socket, pieces).await
         }
     }
@@ -404,7 +406,7 @@ impl TokioStream {
     pub(crate) fn when_write_disconnected(&self) -> impl Future<Output = Result<()>> + use<> {
         let inner = self.shared();
         async move {
-            ensure_loop_thread()?;
+            crate::ensure_owner_loop(inner.owner_runtime)?;
             inner.when_write_disconnected().await
         }
     }
@@ -554,7 +556,7 @@ mod tests {
         let (server, _) = listener.accept().unwrap();
         server.set_nonblocking(true).unwrap();
         let server = TcpStream::from_std(server).unwrap();
-        (TokioStream::new(Socket::Tcp(server)), client)
+        (TokioStream::new(Socket::Tcp(server)).unwrap(), client)
     }
 
     fn poll_once<T>(fut: &mut std::pin::Pin<Box<impl Future<Output = T>>>) -> std::task::Poll<T> {

@@ -137,7 +137,7 @@ mod watcher;
 /// tokio runtime"): the calling thread has a `TokioEventPort`, and its runtime is the one
 /// entered. Both failures would otherwise be a tokio panic (a process abort at the bridge) or a
 /// resource registered with a driver that never turns.
-pub(crate) fn ensure_loop_thread() -> error::Result<()> {
+fn current_loop_runtime_id() -> error::Result<tokio::runtime::Id> {
     let port = kj_rs_tokio::current_handle().ok_or_else(|| {
         error::KjIoError::other(
             "kj_rs_io",
@@ -146,11 +146,27 @@ pub(crate) fn ensure_loop_thread() -> error::Result<()> {
         )
     })?;
     match tokio::runtime::Handle::try_current() {
-        Ok(entered) if entered.id() == port.id() => Ok(()),
+        Ok(entered) if entered.id() == port.id() => Ok(port.id()),
         _ => Err(error::KjIoError::other(
             "kj_rs_io",
             "a tokio runtime other than this thread's TokioEventPort runtime is entered",
         )),
+    }
+}
+
+pub(crate) fn ensure_loop_thread() -> error::Result<()> {
+    current_loop_runtime_id().map(drop)
+}
+
+fn ensure_owner_loop(owner: tokio::runtime::Id) -> error::Result<()> {
+    let current = current_loop_runtime_id()?;
+    if current == owner {
+        Ok(())
+    } else {
+        Err(error::KjIoError::other(
+            "kj_rs_io",
+            "this resource belongs to a different TokioEventPort",
+        ))
     }
 }
 
