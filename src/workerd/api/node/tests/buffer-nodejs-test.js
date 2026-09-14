@@ -5992,6 +5992,25 @@ export const isUtf8Test = {
 };
 
 // Adapted from test/parallel/test-icu-transcode.js
+export const transcodeDoesNotExposeUninitializedMemoryTest = {
+  test(ctrl, env, ctx) {
+    const result = transcode(Buffer.from('☕'), 'utf8', 'ascii');
+    deepStrictEqual(result, Buffer.from('?'));
+
+    const backingStore = new Uint8Array(result.buffer);
+    const visibleStart = result.byteOffset;
+    const visibleEnd = visibleStart + result.byteLength;
+    deepStrictEqual(
+      backingStore.slice(0, visibleStart),
+      new Uint8Array(visibleStart)
+    );
+    deepStrictEqual(
+      backingStore.slice(visibleEnd),
+      new Uint8Array(backingStore.length - visibleEnd)
+    );
+  },
+};
+
 export const transcodeTest = {
   test(ctrl, env, ctx) {
     const orig = Buffer.from('těst ☕', 'utf8');
