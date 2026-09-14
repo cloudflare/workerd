@@ -7510,6 +7510,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       auto idleTimeout = sock.getUdp().getIdleTimeoutMs() * kj::MILLISECONDS;
       size_t maxPendingBytes = sock.getUdp().getMaxPendingBytes();
 
+      // Server owns and cancels its listener tasks before teardown, so `this` cannot outlive it.
       auto handle = kj::coCapture(
           [this, service = kj::mv(service), name = kj::mv(name), addrStr = kj::mv(addrStr),
               idleTimeout, maxPendingBytes](
