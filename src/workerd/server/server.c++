@@ -7511,10 +7511,9 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       size_t maxPendingBytes = sock.getUdp().getMaxPendingBytes();
 
       // Server owns and cancels its listener tasks before teardown, so `this` cannot outlive it.
-      auto handle = kj::coCapture(
-          [this, service = kj::mv(service), name = kj::mv(name), addrStr = kj::mv(addrStr),
-              idleTimeout, maxPendingBytes](
-              kj::Own<kj::DatagramPort> port) mutable -> kj::Promise<void> {
+      auto handle = kj::coCapture([this, service = kj::mv(service), name = kj::mv(name),
+                                      addrStr = kj::mv(addrStr), idleTimeout, maxPendingBytes](
+                                      kj::Own<kj::DatagramPort> port) mutable -> kj::Promise<void> {
         TRACE_EVENT("workerd", "setup listenUdp");
         KJ_IF_SOME(stream, controlOverride) {
           auto message = kj::str(
