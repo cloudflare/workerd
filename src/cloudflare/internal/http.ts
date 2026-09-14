@@ -199,7 +199,7 @@ export class PortTable {
 // as a separate host would; everything else in the isolate shares one table,
 // seeded with the ports the platform delivers inbound connections on, so that a
 // server is reachable from every request.
-const isolateTcpPorts = new PortTable();
+export const isolateTcpPorts = new PortTable();
 for (const listener of sockets.getInboundListeners()) {
   if (listener.protocol === 'tcp') isolateTcpPorts.declare(listener.port);
 }
@@ -222,4 +222,12 @@ export function tcpPorts(): PortTable {
 // Inbound routing: a Durable Object's table shadows the isolate table.
 export function lookupHandler(port: number): PortHandler | undefined {
   return tcpPorts().getHandler(port) ?? isolateTcpPorts.getHandler(port);
+}
+
+// An http.Server's port is a lookup key for httpServerHandler, never an address
+// a peer connects to, so it has no host to belong to: http servers bind in the
+// isolate table from any scope and are found there from any scope.
+export function lookupHttpHandler(port: number): FetchHandler | undefined {
+  const handler = isolateTcpPorts.getHandler(port);
+  return handler !== undefined && 'fetch' in handler ? handler : undefined;
 }

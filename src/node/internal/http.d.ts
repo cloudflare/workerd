@@ -41,5 +41,7 @@ export class PortTable {
   getHandler(port: number): PortHandler | undefined;
 }
 
+export const isolateTcpPorts: PortTable;
 export function tcpPorts(): PortTable;
 export function lookupHandler(port: number): PortHandler | undefined;
+export function lookupHttpHandler(port: number): FetchHandler | undefined;

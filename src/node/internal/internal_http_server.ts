@@ -39,7 +39,7 @@ import {
   validatePort,
   validateNumber,
 } from 'node-internal:validators';
-import { tcpPorts, type PortTable } from 'cloudflare-internal:http';
+import { isolateTcpPorts } from 'cloudflare-internal:http';
 import {
   IncomingMessage,
   setIncomingMessageSocket,
@@ -134,9 +134,6 @@ export class Server
   keepAliveTimeoutBuffer: number = 1_000;
   highWaterMark: number = getDefaultHighWaterMark();
   #port: number | null = null;
-  // The port table the server bound in; release goes through it since close()
-  // may run in another request's context.
-  #table: PortTable | null = null;
 
   constructor(options?: ServerOptions, requestListener?: RequestListener) {
     if (!enableNodejsHttpServerModules) {
@@ -180,9 +177,8 @@ export class Server
   close(callback?: VoidFunction): this {
     httpServerPreClose(this);
     if (this.#port != null) {
-      (this.#table as PortTable).release(this.#port);
+      isolateTcpPorts.release(this.#port);
       this.#port = null;
-      this.#table = null;
     }
     if (typeof callback === 'function') {
       this.once('close', callback);
@@ -306,17 +302,18 @@ export class Server
       this.once('listening', callback as (...args: unknown[]) => unknown);
     }
 
-    const table = tcpPorts();
+    // An http server is reached through httpServerHandler rather than by a peer
+    // addressing a host, so it binds in the isolate table even inside a Durable
+    // Object, and port 0 never takes a declared port.
     const host = typeof options.host === 'string' ? options.host : '127.0.0.1';
-    // An http server is reached through httpServerHandler rather than an
-    // inbound connect listener, so port 0 never takes a declared port.
     if (port === 0) {
-      port = table.ephemeral();
+      port = isolateTcpPorts.ephemeral();
       if (port === 0) throw new EADDRINUSE(host, port);
     }
-    this.#port = bindPort(table, host, port);
-    this.#table = table;
-    table.setHandler(this.#port, { fetch: this.#onRequest.bind(this) });
+    this.#port = bindPort(isolateTcpPorts, host, port);
+    isolateTcpPorts.setHandler(this.#port, {
+      fetch: this.#onRequest.bind(this),
+    });
     queueMicrotask(() => {
       // If any of the listening handlers (here and in any of the other queueMicrotask(...) instances here,
       // if the listening handlers throw an error, that will end up being reported to

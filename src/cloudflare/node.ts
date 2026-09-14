@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 import {
   lookupHandler,
+  lookupHttpHandler,
   type FetchHandler as Fetcher,
   type ConnectHandler,
   type InboundSocket,
@@ -100,8 +101,8 @@ export async function handleAsNodeRequest(
   // JavaScript does not enforce this, so we need to check at runtime.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   const port = validatePort(desc?.port);
-  const instance = lookupHandler(port);
-  if (!instance || !('fetch' in instance)) {
+  const instance = lookupHttpHandler(port);
+  if (!instance) {
     throw invalidArg(
       `Http server with port ${port} not found. This is likely a bug with your code. ` +
         `You should check if server.listen() was called with the same port (${port})`

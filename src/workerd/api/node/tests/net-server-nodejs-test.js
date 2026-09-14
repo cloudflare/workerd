@@ -8,13 +8,18 @@ import {
   notStrictEqual,
   deepStrictEqual,
   throws,
+  rejects,
 } from 'node:assert';
 import { once } from 'node:events';
 import * as net from 'node:net';
 import * as http from 'node:http';
 import { connect } from 'cloudflare:sockets';
 import { DurableObject } from 'cloudflare:workers';
-import { connectHandler, handleAsNodeConnection } from 'cloudflare:node';
+import {
+  connectHandler,
+  handleAsNodeConnection,
+  httpServerHandler,
+} from 'cloudflare:node';
 
 // Inbound connections on this worker's two declared TCP listeners are routed to
 // whichever net.Server listens on the port they arrived on.
@@ -189,6 +194,27 @@ export class PortHost extends DurableObject {
       return false;
     }
   }
+
+  #http = null;
+
+  listenHttp(port) {
+    this.#http = http
+      .createServer((req, res) => res.end(`http ${this.ctx.id.toString()}`))
+      .listen(port);
+    return this.#http.address().port;
+  }
+
+  closeHttp() {
+    this.#http.close();
+    this.#http = null;
+  }
+
+  async fetchHttp(port) {
+    const res = await httpServerHandler({ port }).fetch(
+      new Request('http://example.com/')
+    );
+    return res.text();
+  }
 }
 
 export const testDurableObjectScoping = {
@@ -234,5 +260,38 @@ export const testDurableObjectScoping = {
     const held = new net.BoundSocket({ port: 9001 });
     strictEqual(await a.probe(9001), true);
     held.close();
+  },
+};
+
+// An http.Server's port is a lookup key for httpServerHandler, not an address a
+// peer connects to, so http servers share the isolate table from every scope:
+// one listened on inside a Durable Object is reached from the entrypoint and
+// from another instance, holds the port against them, and the reverse holds.
+export const testHttpServerIsolateScoped = {
+  async test(ctrl, env) {
+    const a = env.HOSTS.get(env.HOSTS.idFromName('a'));
+    const b = env.HOSTS.get(env.HOSTS.idFromName('b'));
+    const aId = env.HOSTS.idFromName('a').toString();
+
+    strictEqual(await a.listenHttp(8085), 8085);
+    const res = await httpServerHandler({ port: 8085 }).fetch(
+      new Request('http://example.com/')
+    );
+    strictEqual(await res.text(), `http ${aId}`);
+    strictEqual(await b.fetchHttp(8085), `http ${aId}`);
+    throws(() => http.createServer().listen(8085), { code: 'EADDRINUSE' });
+    await rejects(b.listenHttp(8085), /EADDRINUSE/);
+    // One namespace with net ports at isolate scope.
+    throws(() => new net.BoundSocket({ port: 8085 }), { code: 'EADDRINUSE' });
+    await a.closeHttp();
+    new net.BoundSocket({ port: 8085 }).close();
+
+    const entry = http
+      .createServer((req, res) => res.end('http entry'))
+      .listen(8085);
+    strictEqual(await a.fetchHttp(8085), 'http entry');
+    await rejects(a.listenHttp(8085), /EADDRINUSE/);
+    entry.close();
+    await rejects(a.fetchHttp(8085), /Http server with port 8085 not found/);
   },
 };
