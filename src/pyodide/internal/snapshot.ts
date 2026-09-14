@@ -35,7 +35,10 @@ import {
   maybeSerializeJsModule,
   type SerializedJsModule,
 } from 'pyodide-internal:serializeJsModule';
-import { PyodideVersion } from 'pyodide-internal:const';
+import {
+  PyodideVersion,
+  type PyodideVersionType,
+} from 'pyodide-internal:const';
 
 // A handle is the pointer into the linear memory returned by dlopen. Multiple dlopens will return
 // multiple pointers.
@@ -78,17 +81,36 @@ type OldSnapshotMeta = DsoHandles & {
   readonly version?: undefined;
 };
 
+type Pyodide314X = (typeof PyodideVersion)['V314_0_4' | 'V314_0_6'];
+
+type PerVersionSettings =
+  | {
+      pyodideVersion: Exclude<PyodideVersionType, Pyodide314X>;
+    }
+  | {
+      pyodideVersion: Pyodide314X;
+      // Whether a function table slot was reserved for the Python call trampoline before loading
+      // dynamic libraries. See RESERVE_TRAMPOLINE_POINTER.
+      reserveTrampolinePointer: boolean;
+    };
+
+// Old snapshots won't have added fields so we have to fill them in
+// fillDefaultPerVersionSettings().
+type WirePerVersionSettings = Partial<PerVersionSettings> & {
+  pyodideVersion: PyodideVersionType;
+};
+
 type LoadedSnapshotSettings = {
   readonly snapshotType: ArtifactBundler.SnapshotType;
   readonly compatFlags: CompatibilityFlags;
-  // Whether a function table slot was reserved for the Python call trampoline before loading
-  // dynamic libraries. See RESERVE_TRAMPOLINE_POINTER.
-  readonly reserveTrampolinePointer: boolean;
+  readonly perVersionSettings: PerVersionSettings;
 };
 
 type SnapshotSettings = {
   readonly baselineSnapshot?: boolean;
-} & Partial<LoadedSnapshotSettings>;
+} & Partial<Omit<LoadedSnapshotSettings, 'perVersionSettings'>> & {
+    perVersionSettings?: WirePerVersionSettings;
+  };
 
 // The new wire format, with additional information about the hiwire state, the order that dsos were
 // loaded in, and their memory bases. We also moved settings out of the dsoHandles.
@@ -157,11 +179,12 @@ const RESERVE_TRAMPOLINE_POINTER: boolean = ((): boolean => {
   if (PYODIDE_VERSION === PyodideVersion.V0_28_2) {
     return true;
   }
+  const settings = LOADED_SNAPSHOT_META?.settings.perVersionSettings;
   if (
-    PYODIDE_VERSION === PyodideVersion.V314_0_4 ||
-    PYODIDE_VERSION === PyodideVersion.V314_0_6
+    settings?.pyodideVersion === PyodideVersion.V314_0_4 ||
+    settings?.pyodideVersion === PyodideVersion.V314_0_6
   ) {
-    return LOADED_SNAPSHOT_META?.settings.reserveTrampolinePointer ?? false;
+    return settings.reserveTrampolinePointer;
   }
   return false;
 })();
@@ -276,7 +299,7 @@ function getMemoryPatched(
   libPath: string,
   size: number
 ): number {
-  if (Module.API.version === PyodideVersion.V0_26_0a2) {
+  if (PYODIDE_VERSION === PyodideVersion.V0_26_0a2) {
     return Module.getMemory(size);
   }
   // Sometimes the module is loaded once by path and once by name, in either order. I'm not really
@@ -515,7 +538,7 @@ function maybeReserveTrampolinePointer(Module: Module): Disposable {
 }
 
 function preloadDynamicLibs(Module: Module): void {
-  if (Module.API.version === PyodideVersion.V0_26_0a2) {
+  if (PYODIDE_VERSION === PyodideVersion.V0_26_0a2) {
     // In 0.26.0a2 we need to preload dynamic libraries even if we aren't restoring a snapshot.
     preloadDynamicLibs026(Module);
     return;
@@ -729,16 +752,29 @@ function makeLinearMemorySnapshot(
   const dsoHandles = recordDsoHandles(Module);
   let hiwire: SnapshotConfig | undefined;
   const jsModuleNames: Set<string> = new Set();
-  if (Module.API.version !== PyodideVersion.V0_26_0a2) {
+  const pyodideVersion = PYODIDE_VERSION;
+  if (pyodideVersion !== PyodideVersion.V0_26_0a2) {
     hiwire = Module.API.serializeHiwireState(
       getHiwireSerializer(customSerializedObjects, jsModuleNames)
     );
+  }
+  let perVersionSettings: PerVersionSettings;
+  if (
+    pyodideVersion === PyodideVersion.V314_0_4 ||
+    pyodideVersion === PyodideVersion.V314_0_6
+  ) {
+    perVersionSettings = {
+      pyodideVersion,
+      reserveTrampolinePointer: RESERVE_TRAMPOLINE_POINTER,
+    };
+  } else {
+    perVersionSettings = { pyodideVersion };
   }
   const settings: SnapshotSettings = {
     baselineSnapshot: snapshotType === 'baseline',
     snapshotType,
     compatFlags: COMPATIBILITY_FLAGS,
-    reserveTrampolinePointer: RESERVE_TRAMPOLINE_POINTER,
+    perVersionSettings,
   };
   return encodeSnapshot(Module.HEAP8, {
     version: 1,
@@ -771,6 +807,45 @@ function encodeSnapshot(heap: Uint8Array, meta: SnapshotMeta): Uint8Array {
   header[3] = jsonByteLength;
   toUpload.subarray(snapshotOffset).set(heap);
   return toUpload;
+}
+
+function getFallbackPerVersionSettings(): PerVersionSettings {
+  if (
+    PYODIDE_VERSION !== '0.26.0a2' &&
+    PYODIDE_VERSION !== '0.28.2' &&
+    PYODIDE_VERSION !== '314.0.4' &&
+    PYODIDE_VERSION !== '314.0.6'
+  ) {
+    throw new PythonWorkersInternalError(
+      'New snapshots should always have PerVersionSettings'
+    );
+  }
+  if (PYODIDE_VERSION === '314.0.4' || PYODIDE_VERSION === '314.0.6') {
+    return {
+      pyodideVersion: PYODIDE_VERSION,
+      // Old 3.14.x snapshots reserveTrampolinePointer, new ones don't.
+      reserveTrampolinePointer: true,
+    };
+  }
+  return { pyodideVersion: PYODIDE_VERSION };
+}
+
+function fillDefaultPerVersionSettings(
+  settings: WirePerVersionSettings
+): PerVersionSettings {
+  if (
+    settings.pyodideVersion === '314.0.4' ||
+    settings.pyodideVersion === '314.0.6'
+  ) {
+    return {
+      pyodideVersion: settings.pyodideVersion,
+      reserveTrampolinePointer: settings.reserveTrampolinePointer ?? true,
+    };
+  } else {
+    return {
+      pyodideVersion: settings.pyodideVersion,
+    };
+  }
 }
 
 /**
@@ -820,7 +895,7 @@ function decodeSnapshot(
         snapshotType: 'baseline',
         compatFlags: {},
         ...meta.settings,
-        reserveTrampolinePointer: true,
+        perVersionSettings: getFallbackPerVersionSettings(),
       },
       jsModuleNames: [],
       ...extras,
@@ -833,8 +908,9 @@ function decodeSnapshot(
       ...meta.settings,
       snapshotType: meta.settings.snapshotType ?? 'baseline',
       compatFlags: meta.settings.compatFlags ?? {},
-      // Snapshots made before this was recorded always reserved the pointer.
-      reserveTrampolinePointer: meta.settings.reserveTrampolinePointer ?? true,
+      perVersionSettings: meta.settings.perVersionSettings
+        ? fillDefaultPerVersionSettings(meta.settings.perVersionSettings)
+        : getFallbackPerVersionSettings(),
     },
   };
 }
@@ -905,6 +981,11 @@ export function maybeRestoreSnapshot(Module: Module): void {
   const { snapshotSize, snapshotOffset, snapshotReader, settings } =
     LOADED_SNAPSHOT_META;
   checkSnapshotType(settings.snapshotType);
+  if (settings.perVersionSettings.pyodideVersion !== PYODIDE_VERSION) {
+    throw new PythonWorkersInternalError(
+      `Received snapshot for version ${settings.perVersionSettings.pyodideVersion}, expected version ${PYODIDE_VERSION}`
+    );
+  }
 
   Module.growMemory(snapshotSize);
   snapshotReader.readMemorySnapshot(snapshotOffset, Module.HEAP8);
@@ -957,7 +1038,7 @@ export function maybeCollectDedicatedSnapshot(
     return;
   }
 
-  if (Module.API.version == PyodideVersion.V0_26_0a2) {
+  if (PYODIDE_VERSION == PyodideVersion.V0_26_0a2) {
     // 0.26.0a2 does not support serialisation of the hiwire state, so it cannot support dedicated
     // snapshots.
     throw new PythonWorkersInternalError(
@@ -998,8 +1079,8 @@ export function finalizeBootstrap(
 ): void {
   Module.API.config._makeSnapshot =
     IS_CREATING_SNAPSHOT &&
-    Module.API.version !== PyodideVersion.V0_26_0a2 &&
-    Module.API.version !== PyodideVersion.V0_28_2;
+    PYODIDE_VERSION !== PyodideVersion.V0_26_0a2 &&
+    PYODIDE_VERSION !== PyodideVersion.V0_28_2;
   enterJaegerSpan('finalize_bootstrap', () => {
     Module.API.finalizeBootstrap(
       LOADED_SNAPSHOT_META?.hiwire,
