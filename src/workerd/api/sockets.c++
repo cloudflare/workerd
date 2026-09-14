@@ -498,9 +498,12 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   })
       .then(js,
           [self = JSG_THIS](jsg::Lock& js) mutable {
-    // Forcibly abort the readable/writable streams.
-    auto cancelPromise = self->readable.forceCancel(js, kj::none);
-    auto abortPromise = self->writable.forceAbort(js, kj::none);
+    // Forcibly abort the readable/writable streams. Operations still queued on them (a pipe's
+    // pending close, for instance) are rejected with this reason, so it must be a real error
+    // rather than the undefined that a reasonless abort() produces.
+    auto reason = js.typeError("This socket has been closed."_kj);
+    auto cancelPromise = self->readable.forceCancel(js, reason);
+    auto abortPromise = self->writable.forceAbort(js, reason);
 
     // The below is effectively `Promise.all(cancelPromise, abortPromise)`
     return cancelPromise.then(js, [abortPromise = kj::mv(abortPromise)](jsg::Lock& js) mutable {
@@ -781,8 +784,9 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
   KJ_ASSERT(!getAllowHalfOpen(options));
 
   // Do not call `close` on a stream that has already been closed or is in the process
-  // of closing.
+  // of closing. Both sides are done at this point, so `closed` settles here as it does below.
   if (writable.isClosedOrClosing(js)) {
+    closedResolver.resolve(js);
     return js.resolvedPromise();
   }
 
@@ -1052,6 +1056,17 @@ jsg::Optional<kj::StringPtr> SocketsModule::getCallerDnsOverride(
     jsg::Lock& js, kj::String hostname) {
   auto& ioContext = IoContext::current();
   return ioContext.getCurrentLock().getGlobalScope().getDnsOverride(hostname);
+}
+
+kj::Array<SocketsModule::InboundListener> SocketsModule::getInboundListeners(jsg::Lock& js) {
+  auto listeners = Worker::Api::current().getInboundListeners();
+  return KJ_MAP(l, listeners) {
+    return InboundListener{
+      .protocol = kj::str(l.protocol),
+      .address = kj::str(l.address),
+      .port = l.port,
+    };
+  };
 }
 
 kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {

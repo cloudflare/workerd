@@ -56,4 +56,18 @@ vendored_py_wd_test(
     vendored_package_name = "fastapi",
 )
 
+# The dedicated numpy snapshot is generated from numpy_vendor.wd-test by
+# src/pyodide/make_snapshots.py, so this test reuses the same template and main module.
+vendored_py_wd_test(
+    "existing_dedicated_numpy",
+    feature_flags = ["python_dedicated_snapshot"],
+    main_py_file = "numpy.py",
+    make_snapshot = False,
+    # 0.26.0a2 does not support dedicated snapshots.
+    skip_python_flags = ["0.26.0a2"],
+    test_template = "numpy_vendor.wd-test",
+    use_snapshot = "dedicated_numpy_vendor",
+    vendored_package_name = "numpy",
+)
+
 exports_files(["generate_modules.py"])
