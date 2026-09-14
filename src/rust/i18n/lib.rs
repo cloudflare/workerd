@@ -131,12 +131,12 @@ fn transcode_impl<'a>(
 ) -> Result<v8::Local<'a, v8::Uint8Array>, TranscodeError> {
     let transcoder = Transcoder::new(source, from_encoding, to_encoding)?;
 
-    // Every byte of the buffer is either written by the conversion or excluded
-    // from the returned view, so zeroing it first would be wasted work.
+    // JavaScript can access the whole backing store through the returned
+    // view's `buffer` property, including bytes excluded from the view.
     let mut buffer = v8::ArrayBuffer::new_with_mode(
         lock,
         transcoder.dest_len(),
-        v8::ffi::BackingStoreInitializationMode::Uninitialized,
+        v8::ffi::BackingStoreInitializationMode::ZeroInitialized,
     )
     .ok_or(TranscodeError::AllocationFailed)?;
 
