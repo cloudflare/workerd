@@ -753,6 +753,29 @@ export class DurableObjectExample extends DurableObject {
     await restoreMonitor;
   }
 
+  async testImageAlias() {
+    const container = this.ctx.container;
+    const image = 'cloudflare/debian-trixie';
+
+    container.start({
+      enableInternet: true,
+      image,
+      entrypoint: [
+        'node',
+        '-e',
+        "require('http').createServer((_, res) => res.end('Hello World!')).listen(8080)",
+      ],
+    });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const info = await container.inspect();
+    assert.strictEqual(info.image, 'cloudflare/debian-trixie');
+
+    await container.destroy();
+    await monitor;
+  }
+
   async testInstanceTypeValidation() {
     const container = this.ctx.container;
 
