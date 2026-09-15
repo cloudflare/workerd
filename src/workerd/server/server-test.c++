@@ -336,6 +336,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
   };
 
   struct DatagramState final: public kj::Refcounted {
+    uint port = 0;
     kj::ProducerConsumerQueue<QueuedDatagram> incoming;
     kj::ProducerConsumerQueue<kj::Array<kj::byte>> outgoing;
   };
@@ -426,6 +427,12 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
       bool truncated = false);
 
   bool hasUdp(kj::StringPtr addr);
+
+  kj::Array<kj::byte> receiveUdp(kj::StringPtr addr);
+
+  void setUdpPort(kj::StringPtr addr, uint port) {
+    getDatagramState(addr)->port = port;
+  }
 
   // Try to connect to the address and return whether or not this connection attempt hangs,
   // i.e. a listener exists but connections are not being accepted.
@@ -559,7 +566,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
     }
 
     uint getPort() override {
-      return 0;
+      return state->port;
     }
 
    private:
@@ -700,6 +707,12 @@ bool TestServer::hasUdp(kj::StringPtr addr) {
   return getDatagramState(addr)->outgoing.pop().poll(ws);
 }
 
+kj::Array<kj::byte> TestServer::receiveUdp(kj::StringPtr addr) {
+  auto packet = getDatagramState(addr)->outgoing.pop();
+  KJ_REQUIRE(packet.poll(ws), "no UDP response available", addr);
+  return packet.wait(ws);
+}
+
 // =======================================================================================
 // Test Workers
 
@@ -718,6 +731,44 @@ kj::String singleWorker(kj::StringPtr def) {
       )
     ]
   ))"_kj);
+}
+
+kj::String singleUdpWorker(kj::StringPtr script,
+    kj::StringPtr udpOptions = "()"_kj,
+    kj::StringPtr address = "udp-address"_kj) {
+  return kj::str("(services = [(name = \"worker\", worker = ("
+                 "compatibilityDate = \"2024-01-01\", compatibilityFlags = [\"experimental\"], "
+                 "modules = [(name = \"worker.js\", esModule = \"",
+      kj::encodeCEscape(script), "\")]))], sockets = [(name = \"udp\", address = \"",
+      kj::encodeCEscape(address), "\", udp = ", udpOptions, ", service = \"worker\")])");
+}
+
+KJ_TEST("Server: UDP opened reports the bound local port") {
+  struct AddressCase {
+    kj::StringPtr configured;
+    kj::StringPtr expected;
+  };
+  for (auto testCase:
+      kj::arr(AddressCase{"127.0.0.1:0", "127.0.0.1:12345"}, AddressCase{"[::1]:0", "[::1]:12345"},
+          AddressCase{"example.com", "example.com:12345"})) {
+    TestServer test(singleUdpWorker(R"JS(
+      export default {
+        async connect(socket) {
+          await socket.readable.getReader().read();
+          const info = await socket.opened;
+          await socket.writable.getWriter().write(
+            new Datagram(new TextEncoder().encode(info.localAddress)));
+        }
+      };
+    )JS"_kj,
+        "()", testCase.configured));
+    test.setUdpPort(testCase.configured, 12345);
+    test.server.allowExperimental();
+    test.start();
+    test.sendUdp(testCase.configured, "peer:1234", "first"_kjb);
+    auto reply = test.receiveUdp(testCase.configured);
+    KJ_EXPECT(reply.asPtr() == testCase.expected.asBytes());
+  }
 }
 
 KJ_TEST("Server: UDP listener drops truncated datagrams") {
