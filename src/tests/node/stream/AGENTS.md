@@ -162,21 +162,32 @@ The implementation under test is `src/node/internal/streams_readable.js`
 
 ### compose
 
-- `compose()`: web streams are validated by position; a web head is
-  written through its writer, a web tail read through its reader; a node
-  tail's output is drained into the composed stream's own buffer as it is
-  produced, so `end()` completes without a consumer. With a web tail the
-  composed writable side finishes once the tail's readable side has closed
-  AND the pipeline has completed (a tail's `close()` may close its readable
-  at once yet settle later). Destroying a running composition fails its
-  pipeline with the destroy error — a node tail is destroyed as a stage;
-  with a web tail the pipeline is failed directly, whatever state its
-  readable side is in — so every stage is destroyed with that error (the
-  head, a web tail's writable side) and the composed stream reports it — an
-  `AbortError` for a bare `destroy()` while the pipeline runs — then
-  closes. A composition whose sides have both completed (the automatic
-  destroy, a readable-only composition drained to its end) leaves its
-  pipeline to complete and reports the pipeline's (clean) outcome.
+- Positions and bridging: web streams are validated by position (a
+  `WritableStream` cannot lead, a `ReadableStream` cannot follow). A web
+  head is written through its writer, a web tail read through its reader.
+  The tail's output, node or web, is drained into the composed stream's
+  own buffer as it is produced, bounded by its high-water mark, so `end()`
+  completes without a consumer and the output is there to be read
+  afterwards; a web tail is read by one loop at a time, never holding more
+  than one pending `read()`. A web head or tail gives its side of the
+  composition no objectMode.
+- Finishing: the composed writable side finishes once the tail has
+  finished. With a web tail that means its readable side has closed AND
+  the pipeline has completed (a tail's `close()` may close its readable at
+  once yet settle later). Observing a web tail's completion takes the
+  interop hook (ledger #5); without it the shape is refused up front, with
+  the head's buffer and listeners untouched and the web stream unlocked.
+- Destroying a running composition fails its pipeline with the destroy
+  error (an `AbortError` for a bare `destroy()`): a node tail is destroyed
+  as a stage; with a web tail the pipeline is failed directly, whatever
+  state its readable side is in. Every stage is destroyed with that error
+  (the head, a web tail's writable side) and the composed stream reports
+  it, then closes. A web tail chunk the composed stream cannot take (a
+  view over a detached ArrayBuffer) destroys the composition with the
+  conversion's `TypeError`.
+- A composition whose sides have both completed (the automatic destroy; a
+  readable-only composition drained to its end) leaves its pipeline to
+  complete and reports the pipeline's (clean) outcome.
 
 ### finished / addAbortSignal
 
@@ -228,7 +239,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | 2 | Write to a pre-closed `Writable.toWeb` stream | `TypeError` `This WritableStream has been closed.` | `TypeError` `Cannot write to a stream that is closing or closed` | `toWebDuckTypedInputYieldsClosedStream` |
 | 3 | BYOB reader on a `toWeb` readable | `This ReadableStream does not support BYOB reads.` | `BYOB reader can only be used on a stream with a byte source` | `toWebReadableIsNotByteStream` |
 | 4 | `FixedLengthStream` enforcement through `Writable.fromWeb` (identity ledger #11) | readable errors with `TypeError`; the node write and end succeed | write/close reject `RangeError`; the node Writable errors; readable errors with the same `RangeError` | `fromWebFixedLengthOverwrite`, `fromWebFixedLengthUnderwrite` |
-| 5 | Node.js interop hooks (`Symbol.for('nodejs.webstream.isClosedPromise')`, `…controllerErrorFunction`) | absent; `finished()`, `promises.finished()` and `addAbortSignal()` throw `ERR_WEB_STREAM_INTEROP_UNSUPPORTED` up front | non-enumerable prototype getter and method; the APIs work as in Node, including on native-backed streams (a `Response` body), with one deliberate difference from Node: `addAbortSignal()` errors byte streams too, where Node's readable hook is a no-op | `finished-and-abort.js` |
+| 5 | Node.js interop hooks (`Symbol.for('nodejs.webstream.isClosedPromise')`, `…controllerErrorFunction`) | absent; `finished()`, `promises.finished()` and `addAbortSignal()` throw `ERR_WEB_STREAM_INTEROP_UNSUPPORTED` up front, as does `compose()` for a composition whose writable side would have to observe a web tail | non-enumerable prototype getter and method; the APIs work as in Node, including on native-backed streams (a `Response` body), with one deliberate difference from Node: `addAbortSignal()` errors byte streams too, where Node's readable hook is a no-op | `finished-and-abort.js`, `compose-web.js` |
 
 ## Assertion catalogue
 
@@ -247,6 +258,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `readable-from.js` | `Readable.from(webStream)`: chunk types by objectMode, destroy → cancel + lock release, error propagation |
 | `finished-and-abort.js` | ledger #5: hook presence per implementation; `finished()` on readable close/error, writable close/error, settled streams, with a signal; `promises.finished`; `finished()` on a teed source (default and byte): settled by `close()` before any branch reads, by a `tee()` after `close()`, by both branches cancelling, by the source's error (also after `close()`, which errors the undrained branches); never settled on a teed-away branch or a native tee's source; `addAbortSignal` on readable/writable, already-aborted, a Response body (a byte stream, errored where Node is inert), the source of a tee (errors every branch; inert once the source has closed); on tee branches (default and byte): the sibling spared, the source cancelled once the sibling cancels too, a teed-away branch inert, a branch's `cancel()` settling with the source's cleanup |
 | `pipeline-web.js` | web source/destination/transform stages, generator stages (incl. a web source reaching a function stage as the stream itself, and a signal-honoring stage releasing it on a late node-sink failure), `TransformStream` head; sink/source/node-sink failures (incl. a node sink failing while the web source is idle, a web sink erroring or rejecting a write while the source is idle, and a web source erroring while a stuck node sink holds the pump); a detached-view chunk failing the pipeline (`TypeError`, source cancelled without a reason); promise-valued chunks by identity; a locked web destination (callback and promise forms, node and web sources); a `ReadableStream` in a destination slot (`ERR_INVALID_ARG_TYPE` thrown synchronously, callback and promise forms, middle slot too); `stream/promises` trailing web destination, `end: false`, signal abort of a node-headed and of an idle all-web pipeline, and during a pending web read |
+| `compose-web.js` | position validation; a single web stream (`Duplex.from`); web head with node tail, web readable into node or web writable, node head with web transform or web writable tail, `Readable.prototype.compose()`; `end()` completing without a consumer for node and web tails alike; the refused shape (ledger #5) leaving the head's buffer and listeners and the web stream's locks untouched, asserted by every test whose shape needs the hook; destroy tearing the pipeline down before the first write, under the tail's backpressure (the drain parked at the high-water mark, the pump on the writer), behind a closed readable, and bare (`AbortError`); an unconvertible tail chunk failing the composition (writable and readable-only heads); a deferred tail `close()` gating finish and the automatic destroy; one pending tail `read()` at a time |
 | `which-impl.js` | implementation detection |
 
 ## Legacy (unflagged) behaviors

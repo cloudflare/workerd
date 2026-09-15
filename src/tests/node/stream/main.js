@@ -202,6 +202,7 @@ export {
   composeWebTailUnconvertibleChunkFailsReadableHead,
   composeWebTailDeferredCloseCompletesCleanly,
   composeWebTailBareDestroyIsAbortError,
+  composeWebTailReadsOneAtATime,
   readableComposeWithWebTransform,
 } from 'compose-web';
 

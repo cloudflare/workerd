@@ -40,6 +40,18 @@ async function collect(readable) {
   return Buffer.concat(chunks).toString();
 }
 
+// What the C++ implementation throws for a composition whose writable side
+// would have to observe a web tail (ledger #5). Every test whose shape needs
+// the hook asserts this on the C++ side before returning, so the cpp cells
+// prove both that the shape is still refused and that the test's own setup
+// is the refused shape.
+const unsupported = {
+  name: 'TypeError',
+  code: 'ERR_WEB_STREAM_INTEROP_UNSUPPORTED',
+  message:
+    'compose() is not supported for web streams by the streams implementation in use',
+};
+
 // Position validation applies to web streams too: a WritableStream cannot
 // lead, a ReadableStream cannot follow.
 export const composeValidatesWebStreamPositions = {
@@ -129,8 +141,10 @@ export const composeWebReadableIntoNodeWritable = {
 // The composed stream's end() completes without a consumer: the tail's
 // output is drained into the composed stream's own buffer as it is
 // produced, so the writable side finishes on its own and the output is
-// still there to be read afterwards. With a node tail this holds whether
-// the head is a node stream or a web transform.
+// still there to be read afterwards. This holds for a node tail and for a
+// web tail alike, whatever the head — a web transform tail would otherwise
+// take the pipeline's writes only once someone read the composition, its
+// readable side pulling only when read.
 export const composeEndCompletesBeforeReading = {
   async test() {
     const nodeHead = compose(new PassThrough(), new PassThrough());
@@ -142,6 +156,22 @@ export const composeEndCompletesBeforeReading = {
     await new Promise((resolve) => webHead.end('y', resolve));
     strictEqual(webHead.writableFinished, true);
     strictEqual(await collect(webHead), 'Y');
+
+    // A web tail behind a writable head needs the interop hook (ledger #5).
+    if (!usingTsImpl) {
+      throws(() => compose(new PassThrough(), upperTransform()), unsupported);
+      throws(() => compose(upperTransform(), upperTransform()), unsupported);
+      return;
+    }
+    const webTail = compose(new PassThrough(), upperTransform());
+    await new Promise((resolve) => webTail.end('z', resolve));
+    strictEqual(webTail.writableFinished, true);
+    strictEqual(await collect(webTail), 'Z');
+
+    const allWeb = compose(upperTransform(), upperTransform());
+    await new Promise((resolve) => allWeb.end('w', resolve));
+    strictEqual(allWeb.writableFinished, true);
+    strictEqual(await collect(allWeb), 'W');
   },
 };
 
@@ -154,12 +184,6 @@ export const composeNodeHeadWebTail = {
   async test() {
     const make = () => compose(new PassThrough(), upperTransform());
     if (!usingTsImpl) {
-      const unsupported = {
-        name: 'TypeError',
-        code: 'ERR_WEB_STREAM_INTEROP_UNSUPPORTED',
-        message:
-          'compose() is not supported for web streams by the streams implementation in use',
-      };
       throws(make, unsupported);
 
       const head = new PassThrough();
@@ -197,7 +221,6 @@ export const composeNodeHeadWebTail = {
 // closes cleanly (needs the interop hook to observe the sink).
 export const composeNodeHeadWebWritableTail = {
   async test() {
-    if (!usingTsImpl) return;
     const seen = [];
     const sink = new WritableStream({
       write(chunk) {
@@ -207,6 +230,10 @@ export const composeNodeHeadWebWritableTail = {
         seen.push('close');
       },
     });
+    if (!usingTsImpl) {
+      throws(() => compose(new PassThrough(), sink), unsupported);
+      return;
+    }
     const composed = compose(new PassThrough(), sink);
     strictEqual(composed.writable, true);
     strictEqual(composed.readable, false);
@@ -259,9 +286,12 @@ export const composeWebReadableIntoWebWritable = {
 // — before anything was written, with the pump waiting on the head.
 export const composeWebTailDestroyBeforeWrite = {
   async test() {
-    if (!usingTsImpl) return;
     const head = new PassThrough();
     const tail = new TransformStream();
+    if (!usingTsImpl) {
+      throws(() => compose(head, tail), unsupported);
+      return;
+    }
     const composed = compose(head, tail);
     const boom = new Error('torn down before the first write');
     const errored = once(composed, 'error');
@@ -275,20 +305,33 @@ export const composeWebTailDestroyBeforeWrite = {
   },
 };
 
-// The same with the pump parked on the web tail's backpressure: the
-// transform's readable is never read, so its writable side stops accepting
-// and the pump waits on the writer. Destroying aborts that writer and the
-// composition completes its teardown.
+// The same with the pump parked on the web tail's backpressure. The tail's
+// output is drained into the composed stream's buffer only up to its
+// high-water mark: a first chunk that size fills it and parks the drain,
+// so the transform's readable is not read further, its writable side stops
+// accepting, and the pump waits on the writer with a write of its own
+// still pending. Destroying aborts that writer and the composition
+// completes its teardown.
 export const composeWebTailDestroyUnderBackpressure = {
   async test() {
-    if (!usingTsImpl) return;
     const head = new PassThrough();
     const tail = new TransformStream();
+    if (!usingTsImpl) {
+      throws(() => compose(head, tail), unsupported);
+      return;
+    }
     const composed = compose(head, tail);
-    composed.write('a');
+    // Spaced out, so each reaches the pump as its own chunk: the first
+    // fills the composed stream, the second is held by the transform's
+    // backpressure, the third parks the pump on the writer.
+    composed.write('a'.repeat(composed.readableHighWaterMark));
+    await scheduler.wait(5);
     composed.write('b');
+    await scheduler.wait(5);
     composed.write('c');
     await scheduler.wait(5);
+    strictEqual(composed.readableLength, composed.readableHighWaterMark);
+    strictEqual(tail.writable.locked, true);
     const boom = new Error('torn down under backpressure');
     const errored = once(composed, 'error');
     const closed = once(composed, 'close');
@@ -306,7 +349,6 @@ export const composeWebTailDestroyUnderBackpressure = {
 // same — the head is destroyed, the pair's writable aborted with the error.
 export const composeWebTailClosedReadableDestroy = {
   async test() {
-    if (!usingTsImpl) return;
     const head = new PassThrough();
     const aborts = [];
     const pair = {
@@ -321,6 +363,10 @@ export const composeWebTailClosedReadableDestroy = {
         },
       }),
     };
+    if (!usingTsImpl) {
+      throws(() => compose(head, pair), unsupported);
+      return;
+    }
     const composed = compose(head, pair);
     // Let the composition observe the closed readable.
     await scheduler.wait(5);
@@ -344,7 +390,6 @@ export const composeWebTailClosedReadableDestroy = {
 // covers the same failure on both implementations.
 export const composeWebTailUnconvertibleChunkFails = {
   async test() {
-    if (!usingTsImpl) return;
     const head = new PassThrough();
     const tail = new TransformStream({
       transform(chunk, controller) {
@@ -353,6 +398,10 @@ export const composeWebTailUnconvertibleChunkFails = {
         controller.enqueue(gone);
       },
     });
+    if (!usingTsImpl) {
+      throws(() => compose(head, tail), unsupported);
+      return;
+    }
     const composed = compose(head, tail);
     composed.resume();
     const errored = once(composed, 'error');
@@ -395,10 +444,10 @@ export const composeWebTailUnconvertibleChunkFailsReadableHead = {
 // later (an accepted { readable, writable } pair): the composition's
 // writable side finishes only once that close has settled, so a
 // composition consumed to its end still closes cleanly — with a consumer
-// draining it, and readable-only.
+// draining it (a shape that needs the interop hook), and readable-only
+// (which does not, and runs on both implementations).
 export const composeWebTailDeferredCloseCompletesCleanly = {
   async test() {
-    if (!usingTsImpl) return;
     const deferredClosePair = () => {
       let readableController;
       let finishClose;
@@ -433,23 +482,27 @@ export const composeWebTailDeferredCloseCompletesCleanly = {
     };
 
     const { pair, finishClose } = deferredClosePair();
-    const composed = compose(new PassThrough(), pair);
-    composed.on('error', (err) => {
-      throw err;
-    });
-    const closed = once(composed, 'close');
-    const output = drain(composed);
-    composed.end('qr');
-    strictEqual(await output, 'qr');
-    // The tail's readable has closed and been drained; the pipeline still
-    // awaits the deferred close, and so does the composition's finish.
-    await scheduler.wait(10);
-    strictEqual(composed.writableFinished, false);
-    strictEqual(composed.destroyed, false);
-    finishClose();
-    await closed;
-    strictEqual(composed.writableFinished, true);
-    strictEqual(composed.errored, null);
+    if (!usingTsImpl) {
+      throws(() => compose(new PassThrough(), pair), unsupported);
+    } else {
+      const composed = compose(new PassThrough(), pair);
+      composed.on('error', (err) => {
+        throw err;
+      });
+      const closed = once(composed, 'close');
+      const output = drain(composed);
+      composed.end('qr');
+      strictEqual(await output, 'qr');
+      // The tail's readable has closed and been drained; the pipeline still
+      // awaits the deferred close, and so does the composition's finish.
+      await scheduler.wait(10);
+      strictEqual(composed.writableFinished, false);
+      strictEqual(composed.destroyed, false);
+      finishClose();
+      await closed;
+      strictEqual(composed.writableFinished, true);
+      strictEqual(composed.errored, null);
+    }
 
     const readableOnly = deferredClosePair();
     const source = new ReadableStream({
@@ -480,13 +533,51 @@ export const composeWebTailDeferredCloseCompletesCleanly = {
 // does with a node tail.
 export const composeWebTailBareDestroyIsAbortError = {
   async test() {
-    if (!usingTsImpl) return;
-    const composed = compose(new PassThrough(), new TransformStream());
+    const make = () => compose(new PassThrough(), new TransformStream());
+    if (!usingTsImpl) {
+      throws(make, unsupported);
+      return;
+    }
+    const composed = make();
     const errored = once(composed, 'error');
     const closed = once(composed, 'close');
     composed.destroy();
     strictEqual((await errored).name, 'AbortError');
     await closed;
+  },
+};
+
+// A web tail is read by one loop at a time. The composed stream's push()
+// clears its reading flag, which has _read() called again while the loop's
+// read() is still pending; a loop started on every such call would hold one
+// more pending read() per chunk. Pinned by counting the tail reader's
+// concurrently pending read() calls over a stream of small chunks: never
+// more than one. A readable-only head needs no interop hook, so this runs
+// on both implementations.
+export const composeWebTailReadsOneAtATime = {
+  async test() {
+    const proto = ReadableStreamDefaultReader.prototype;
+    const read = proto.read;
+    let pending = 0;
+    let maxPending = 0;
+    proto.read = function (...args) {
+      pending++;
+      maxPending = Math.max(maxPending, pending);
+      return read.apply(this, args).finally(() => pending--);
+    };
+    try {
+      const source = Readable.from(
+        Array.from({ length: 200 }, () => new Uint8Array(1)),
+        { objectMode: false }
+      );
+      const composed = compose(source, new TransformStream());
+      const chunks = [];
+      for await (const chunk of composed) chunks.push(chunk);
+      strictEqual(Buffer.concat(chunks).length, 200);
+    } finally {
+      proto.read = read;
+    }
+    strictEqual(maxPending, 1);
   },
 };
 

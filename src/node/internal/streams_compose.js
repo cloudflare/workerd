@@ -186,6 +186,11 @@ export function compose(...streams) {
   // See, https://github.com/nodejs/node/pull/33515.
   d = new Duplex({
     // TODO (ronag): highWaterMark?
+    // TODO: A web stream has no writableObjectMode/readableObjectMode, so a
+    // composition is byte-mode on the side a web head or tail supplies: a
+    // TransformStream head that would take objects has the composed stream's
+    // write() refuse them with ERR_INVALID_ARG_TYPE. Upstream has the same
+    // gap.
     writableObjectMode: !!head?.writableObjectMode,
     readableObjectMode: !!tail?.readableObjectMode,
     writable,
@@ -241,10 +246,10 @@ export function compose(...streams) {
 
     const toRead = isTransformStream(tail) ? tail.readable : tail;
 
-    // The tail is finished once both its sides are: for a Duplex tail that
-    // includes its readable side, which the bridge below drains into the
-    // composed stream's buffer on its own, so the writable side's completion
-    // does not wait for a consumer.
+    // The tail is finished once both its sides are: for a Duplex or a web
+    // transform tail that includes its readable side, which the bridge below
+    // drains into the composed stream's buffer on its own, so the writable
+    // side's completion does not wait for a consumer.
     eos(toRead, () => {
       tailFinished = true;
       finishWritable();
@@ -270,33 +275,57 @@ export function compose(...streams) {
       const readable = isTransformStream(tail) ? tail.readable : tail;
       const reader = readable.getReader();
       tailReader = reader;
-      d._read = async function () {
-        while (true) {
-          let result;
-          try {
-            result = await reader.read();
-          } catch {
-            // The tail failed; the pipeline reports it.
-            return;
-          }
-          const { value, done } = result;
-          if (done) {
-            d.push(null);
-            return;
-          }
-          // A chunk the composed stream cannot take (a view over a detached
-          // ArrayBuffer) fails the composition; left to the promise, the
-          // throw would be lost and _read never called again.
-          try {
-            if (!d.push(value)) {
+      let tailReading = false;
+
+      // Drains the tail into the composed stream's buffer as it is produced,
+      // as the node bridge above does through 'data': one read loop at a
+      // time, parked when push() reports backpressure and restarted from
+      // _read(). The latch matters because push() clears the composed
+      // stream's reading flag, which has _read() called again while this
+      // loop's read is still pending; a second loop would hold a second
+      // pending read, and so on with every chunk. Started at once rather
+      // than from the first _read(): a web transform's readable side pulls
+      // only when read, and its writable side takes the pipeline's writes
+      // only when the readable side has pulled, so a composition nobody is
+      // reading yet could not otherwise complete its end().
+      const readTail = async function () {
+        if (tailReading) {
+          return;
+        }
+        tailReading = true;
+        try {
+          while (true) {
+            let result;
+            try {
+              result = await reader.read();
+            } catch {
+              // The tail failed; the pipeline reports it.
               return;
             }
-          } catch (err) {
-            d.destroy(err);
-            return;
+            const { value, done } = result;
+            if (done) {
+              d.push(null);
+              return;
+            }
+            // A chunk the composed stream cannot take (a view over a detached
+            // ArrayBuffer) fails the composition; left to the promise, the
+            // throw would be lost and _read never called again.
+            try {
+              if (!d.push(value)) {
+                return;
+              }
+            } catch (err) {
+              d.destroy(err);
+              return;
+            }
           }
+        } finally {
+          tailReading = false;
         }
       };
+
+      d._read = readTail;
+      readTail();
     }
   }
 
