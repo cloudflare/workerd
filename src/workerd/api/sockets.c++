@@ -318,7 +318,7 @@ DisconnectWatcher watchForDisconnect(kj::AsyncIoStream& connection) {
 // call and enqueues exactly what came back as one Datagram chunk. Uses
 // JsReadableStream::fromPull() rather than create(), since create() requires a byte-oriented
 // ReadableStreamSource.
-JsReadableStream newDatagramReadableStream(jsg::Lock& js, kj::Rc<DatagramChannel> channel) {
+JsReadableStream newDatagramReadableStream(jsg::Lock& js, IoOwn<DatagramChannel> channel) {
   return JsReadableStream::fromPull(js,
       [channel = kj::mv(channel)](jsg::Lock& js) mutable -> jsg::Promise<kj::Maybe<jsg::Value>> {
     auto& ioContext = IoContext::current();
@@ -339,7 +339,7 @@ JsReadableStream newDatagramReadableStream(jsg::Lock& js, kj::Rc<DatagramChannel
 // one DatagramChannel::send() call. Only Datagram instances are accepted -- writing a raw
 // Uint8Array or any other value is a TypeError, since UDP's chunk boundaries are packet
 // boundaries, unlike a byte stream's.
-JsWritableStream newDatagramWritableStream(jsg::Lock& js, kj::Rc<DatagramChannel> channel) {
+JsWritableStream newDatagramWritableStream(jsg::Lock& js, IoOwn<DatagramChannel> channel) {
   return JsWritableStream::fromWrite(js,
       [channel = kj::mv(channel)](jsg::Lock& js, jsg::JsValue chunk) mutable -> jsg::Promise<void> {
     auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Datagram>>());
@@ -433,14 +433,14 @@ jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
   auto closedPrPair = js.newPromiseAndResolver<void>();
   closedPrPair.promise.markAsHandled(js);
 
-  JsReadableStream readable(newDatagramReadableStream(js, channel.addRef()));
+  JsReadableStream readable(newDatagramReadableStream(js, ioContext.addObject(channel.addRef())));
   // UDP sockets have no allowHalfOpen option: `closed` always resolves from read-EOF once the
   // flow ends, mirroring the allowHalfOpen == false behavior for TCP sockets below.
   auto eofPromise = readable.onEof(js);
 
   auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
   openedPrPair.promise.markAsHandled(js);
-  auto writable = newDatagramWritableStream(js, channel.addRef());
+  auto writable = newDatagramWritableStream(js, ioContext.addObject(channel.addRef()));
 
   auto result = js.alloc<Socket>(js, ioContext, kj::mv(channel), kj::mv(remoteAddress),
       kj::mv(localAddress), kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair),
