@@ -41,16 +41,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
         "Part number must be between 1 and 10000 (inclusive). Actual value was: ", partNumber);
 
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("r2_uploadPart"_kjc);
-
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bucket->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "UploadPart"_kjc);
-    KJ_IF_SOME(b, this->bucket->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
+    TraceContext traceContext = bucket->makeR2TraceContext("r2_uploadPart"_kjc, "UploadPart"_kjc);
     traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
     traceContext.setTag("cloudflare.r2.request.part_number"_kjc, static_cast<int64_t>(partNumber));
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
@@ -139,21 +130,60 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
   });
 }
 
+R2MultipartUpload::Metadata R2MultipartUpload::Metadata::clone() const {
+  return {.httpMetadata = httpMetadata.clone(),
+    .customMetadata = {.fields = KJ_MAP(field, customMetadata.fields) {
+    return jsg::Dict<kj::String>::Field{.name = kj::str(field.name), .value = kj::str(field.value)};
+  }}};
+}
+
+jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPartRpc(jsg::Lock& js,
+    int partNumber,
+    R2PutValue value,
+    jsg::Optional<UploadPartOptions> options,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(
+        kj::String, kj::String, int, R2PutValueRpc, jsg::Optional<UploadPartOptions>, double)>>&
+        uploadPartFnHandler,
+    const jsg::TypeHandler<jsg::Promise<UploadedPart>>& uploadPartResultHandler) {
+  return js.evalNow([&] {
+    JSG_REQUIRE(partNumber >= 1 && partNumber <= 10000, TypeError,
+        "Part number must be between 1 and 10000 (inclusive). Actual value was: ", partNumber);
+
+    TraceContext traceContext = bucket->makeR2TraceContext("r2_uploadPart"_kjc, "UploadPart"_kjc);
+    traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
+    traceContext.setTag("cloudflare.r2.request.part_number"_kjc, static_cast<int64_t>(partNumber));
+    traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+
+    KJ_IF_SOME(o, options) {
+      KJ_IF_SOME(ssecKey, buildSsecKey(kj::mv(o.ssecKey))) {
+        traceContext.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
+        o.ssecKey = kj::mv(ssecKey);
+      }
+    }
+
+    auto prepared = prepareR2RpcBody(js, value);
+    traceContext.setTag("cloudflare.r2.request.size"_kjc, static_cast<int64_t>(prepared.size));
+
+    auto promise = callR2RpcMethod<UploadedPart>(js, bucket->getRpcMethod(js, "uploadPart"_kj),
+        rpcPropHandler, uploadPartFnHandler, uploadPartResultHandler, kj::str(key),
+        kj::str(uploadId), partNumber, kj::mv(prepared.value), kj::mv(options), prepared.size);
+    return promise.then(js,
+        [partNumber, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, UploadedPart uploadedPart) mutable {
+      traceContext.setTag("cloudflare.r2.response.etag"_kjc, uploadedPart.etag.asPtr());
+      return UploadedPart{.partNumber = partNumber, .etag = kj::mv(uploadedPart.etag)};
+    });
+  });
+}
+
 jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lock& js,
     kj::Array<UploadedPart> uploadedParts,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("r2_completeMultipartUpload"_kjc);
-
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bucket->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "CompleteMultipartUpload"_kjc);
-    KJ_IF_SOME(b, this->bucket->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
+    TraceContext traceContext =
+        bucket->makeR2TraceContext("r2_completeMultipartUpload"_kjc, "CompleteMultipartUpload"_kjc);
     traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
     kj::String partIds =
@@ -208,20 +238,45 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
   });
 }
 
+jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::completeRpc(jsg::Lock& js,
+    kj::Array<UploadedPart> uploadedParts,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(
+        kj::String, kj::String, kj::Array<UploadedPart>)>>& completeFnHandler,
+    const jsg::TypeHandler<jsg::Promise<R2Bucket::HeadResultRpc>>& completeResultHandler) {
+  return js.evalNow([&] {
+    TraceContext traceContext =
+        bucket->makeR2TraceContext("r2_completeMultipartUpload"_kjc, "CompleteMultipartUpload"_kjc);
+    traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
+    traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+    kj::String partIds =
+        kj::strArray(KJ_MAP(part, uploadedParts) { return kj::str(part.partNumber); }, ", ");
+    traceContext.setTag("cloudflare.r2.request.uploaded_parts"_kjc, kj::mv(partIds));
+
+    for (auto& part: uploadedParts) {
+      JSG_REQUIRE(part.partNumber >= 1 && part.partNumber <= 10000, TypeError,
+          "Part number must be between 1 and 10000 (inclusive). Actual value was: ",
+          part.partNumber);
+    }
+
+    auto promise = callR2RpcMethod<R2Bucket::HeadResultRpc>(js,
+        bucket->getRpcMethod(js, "completeMultipartUpload"_kj), rpcPropHandler, completeFnHandler,
+        completeResultHandler, kj::str(key), kj::str(uploadId), kj::mv(uploadedParts));
+    return promise.then(js,
+        [traceContext = kj::mv(traceContext)](jsg::Lock& js, R2Bucket::HeadResultRpc rpc) mutable {
+      auto result = headResultFromRpc(js, kj::mv(rpc));
+      addHeadResultSpanTags(js, traceContext, *result.get());
+      return result;
+    });
+  });
+}
+
 jsg::Promise<void> R2MultipartUpload::abort(
     jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("r2_abortMultipartUpload"_kjc);
-
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bucket->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "AbortMultipartUpload"_kjc);
-    KJ_IF_SOME(b, this->bucket->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
+    TraceContext traceContext =
+        bucket->makeR2TraceContext("r2_abortMultipartUpload"_kjc, "AbortMultipartUpload"_kjc);
     traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
 
@@ -254,6 +309,23 @@ jsg::Promise<void> R2MultipartUpload::abort(
 
       r2Result.throwIfError("abortMultipartUpload", errorType);
     });
+  });
+}
+
+jsg::Promise<void> R2MultipartUpload::abortRpc(jsg::Lock& js,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, kj::String)>>& abortFnHandler,
+    const jsg::TypeHandler<jsg::Promise<void>>& abortResultHandler) {
+  return js.evalNow([&] {
+    auto& context = IoContext::current();
+    TraceContext traceContext =
+        bucket->makeR2TraceContext("r2_abortMultipartUpload"_kjc, "AbortMultipartUpload"_kjc);
+    traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
+    traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+
+    auto promise = callR2RpcMethod<void>(js, bucket->getRpcMethod(js, "abortMultipartUpload"_kj),
+        rpcPropHandler, abortFnHandler, abortResultHandler, kj::str(key), kj::str(uploadId));
+    return context.attachSpans(js, kj::mv(promise), kj::mv(traceContext));
   });
 }
 }  // namespace workerd::api::public_beta
