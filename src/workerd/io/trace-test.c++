@@ -525,6 +525,87 @@ KJ_TEST("Read/Write Attribute works") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(info2.value[1].tryGet<double>()) == 321.2);
 }
 
+KJ_TEST("Read/Write array TagValue works") {
+  // Array values round-trip through rpc::TagValue as a single value, so a one-element or empty
+  // array is not confused with a scalar or a missing value.
+  {
+    capnp::MallocMessageBuilder builder;
+    auto valueBuilder = builder.initRoot<rpc::TagValue>();
+    Attribute::Value value = kj::arr(kj::ConstString("stop"_kjc));
+    serializeTagValue(valueBuilder, value);
+    KJ_ASSERT(valueBuilder.asReader().which() == rpc::TagValue::STRING_ARRAY);
+
+    auto deserialized = deserializeTagValue(valueBuilder.asReader());
+    auto& roundTripped = KJ_ASSERT_NONNULL(deserialized.tryGet<kj::Array<kj::ConstString>>());
+    KJ_ASSERT(roundTripped.size() == 1);
+    KJ_ASSERT(roundTripped[0] == "stop"_kj);
+  }
+  {
+    capnp::MallocMessageBuilder builder;
+    auto valueBuilder = builder.initRoot<rpc::TagValue>();
+    Attribute::Value value = kj::Array<kj::ConstString>();
+    serializeTagValue(valueBuilder, value);
+    KJ_ASSERT(valueBuilder.asReader().which() == rpc::TagValue::STRING_ARRAY);
+
+    auto deserialized = deserializeTagValue(valueBuilder.asReader());
+    auto& roundTripped = KJ_ASSERT_NONNULL(deserialized.tryGet<kj::Array<kj::ConstString>>());
+    KJ_ASSERT(roundTripped.size() == 0);
+  }
+  {
+    capnp::MallocMessageBuilder builder;
+    auto valueBuilder = builder.initRoot<rpc::TagValue>();
+    Attribute::Value value = kj::arr<bool>(true, false, true);
+    serializeTagValue(valueBuilder, value);
+    KJ_ASSERT(valueBuilder.asReader().which() == rpc::TagValue::BOOL_ARRAY);
+
+    auto deserialized = deserializeTagValue(valueBuilder.asReader());
+    auto& roundTripped = KJ_ASSERT_NONNULL(deserialized.tryGet<kj::Array<bool>>());
+    KJ_ASSERT(roundTripped.size() == 3);
+    KJ_ASSERT(roundTripped[0] == true);
+    KJ_ASSERT(roundTripped[1] == false);
+    KJ_ASSERT(roundTripped[2] == true);
+  }
+  {
+    capnp::MallocMessageBuilder builder;
+    auto valueBuilder = builder.initRoot<rpc::TagValue>();
+    Attribute::Value value = kj::arr<double>(1.5, -2.0);
+    serializeTagValue(valueBuilder, value);
+    KJ_ASSERT(valueBuilder.asReader().which() == rpc::TagValue::FLOAT64_ARRAY);
+
+    auto deserialized = deserializeTagValue(valueBuilder.asReader());
+    auto& roundTripped = KJ_ASSERT_NONNULL(deserialized.tryGet<kj::Array<double>>());
+    KJ_ASSERT(roundTripped.size() == 2);
+    KJ_ASSERT(roundTripped[0] == 1.5);
+    KJ_ASSERT(roundTripped[1] == -2.0);
+  }
+
+  // spanTagClone() deep-copies array values.
+  {
+    Attribute::Value value = kj::arr(kj::ConstString("a"_kjc), kj::ConstString("b"_kjc));
+    auto cloned = spanTagClone(value);
+    auto& clonedArray = KJ_ASSERT_NONNULL(cloned.tryGet<kj::Array<kj::ConstString>>());
+    KJ_ASSERT(clonedArray.size() == 2);
+    KJ_ASSERT(clonedArray[0] == "a"_kj);
+    KJ_ASSERT(clonedArray[1] == "b"_kj);
+    KJ_ASSERT(clonedArray.begin() != value.get<kj::Array<kj::ConstString>>().begin());
+  }
+
+  // An Attribute holding one array value keeps its array identity through capnp, unlike the
+  // legacy multi-value encoding where a single element collapses to a scalar.
+  {
+    capnp::MallocMessageBuilder builder;
+    auto attrBuilder = builder.initRoot<rpc::Trace::Attribute>();
+    Attribute attr("finish_reasons"_kjc, Attribute::Value(kj::arr(kj::ConstString("stop"_kjc))));
+    attr.copyTo(attrBuilder);
+
+    Attribute attr2(attrBuilder.asReader());
+    KJ_ASSERT(attr2.value.size() == 1);
+    auto& arr = KJ_ASSERT_NONNULL(attr2.value[0].tryGet<kj::Array<kj::ConstString>>());
+    KJ_ASSERT(arr.size() == 1);
+    KJ_ASSERT(arr[0] == "stop"_kj);
+  }
+}
+
 KJ_TEST("Read/Write Return works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Return>();
