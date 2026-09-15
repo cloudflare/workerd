@@ -12,6 +12,7 @@
 #include <kj/string.h>
 #include <kj/time.h>
 
+#include <atomic>
 #include <cstdint>
 
 namespace workerd {
@@ -69,6 +70,23 @@ inline bool isInterestingException(const kj::Exception& e) {
       e.getType() != kj::Exception::Type::OVERLOADED;
 }
 
+struct LogPeriodically {
+  bool shouldLog() {
+    const auto now = kj::systemCoarseMonotonicClock().now();
+    const auto nowNanos = (now - kj::origin<kj::TimePoint>()) / kj::NANOSECONDS;
+    const auto lastLogged = lastLoggedNanos.load(std::memory_order_relaxed);
+    if (KJ_LIKELY(nowNanos - lastLogged < 1 * kj::HOURS / kj::NANOSECONDS)) {
+      return false;
+    }
+
+    lastLoggedNanos.store(nowNanos, std::memory_order_relaxed);
+    return true;
+  }
+
+ private:
+  std::atomic<int64_t> lastLoggedNanos{-(1 * kj::HOURS / kj::NANOSECONDS)};
+};
+
 #define LOG_NOSENTRY(severity, ...) KJ_LOG(severity, "NOSENTRY " __VA_ARGS__);
 
 #define LOG_IF_INTERESTING(exception, severity, ...)                                               \
@@ -98,11 +116,8 @@ inline bool isInterestingException(const kj::Exception& e) {
 // be prohibitive.
 #define LOG_PERIODICALLY(severity, ...)                                                            \
   do {                                                                                             \
-    static kj::TimePoint KJ_UNIQUE_NAME(lastLogged) = kj::origin<kj::TimePoint>() - 1 * kj::HOURS; \
-    const auto KJ_UNIQUE_NAME(now) = kj::systemCoarseMonotonicClock().now();                       \
-    const auto KJ_UNIQUE_NAME(elapsed) = KJ_UNIQUE_NAME(now) - KJ_UNIQUE_NAME(lastLogged);         \
-    if (KJ_UNLIKELY(KJ_UNIQUE_NAME(elapsed) >= 1 * kj::HOURS)) {                                   \
-      KJ_UNIQUE_NAME(lastLogged) = KJ_UNIQUE_NAME(now);                                            \
+    static ::workerd::LogPeriodically KJ_UNIQUE_NAME(logPeriodically);                             \
+    if (KJ_UNLIKELY(KJ_UNIQUE_NAME(logPeriodically).shouldLog())) {                                \
       KJ_LOG(severity, __VA_ARGS__);                                                               \
     }                                                                                              \
   } while (0)

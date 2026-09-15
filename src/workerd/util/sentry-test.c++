@@ -5,6 +5,7 @@
 #include "sentry.h"
 
 #include <kj/test.h>
+#include <kj/thread.h>
 
 namespace {
 
@@ -24,6 +25,13 @@ KJ_TEST("Sentry tags are applied only when logging") {
   expectSentryTag("SENTRY_DO"_kj);
   expectSentryTag("SENTRY_RT"_kj);
   expectSentryTag("NOSENTRY"_kj);
+}
+
+KJ_TEST("periodic logging is thread-safe") {
+  auto log = []() { LOG_PERIODICALLY(INFO, "concurrent periodic log"); };
+
+  kj::Thread first(log);
+  kj::Thread second(log);
 }
 
 }  // namespace
