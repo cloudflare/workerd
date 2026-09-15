@@ -27,6 +27,7 @@ import {
   ERR_BUFFER_OUT_OF_BOUNDS,
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
+  ERR_OUT_OF_RANGE,
 } from 'node-internal:internal_errors';
 import {
   validateAbortSignal,
@@ -404,37 +405,33 @@ export function validateWriteArgs(
     if (typeof offsetOrOptions === 'object' && offsetOrOptions != null) {
       ({
         offset = 0,
-        length = buffer.byteLength,
+        length,
         position = null,
-      } = (offsetOrOptions as WriteSyncOptions | null) || {});
+      } = offsetOrOptions as WriteSyncOptions);
       offset ??= 0;
       validateInteger(offset, 'offset', 0);
-      offset += buffer.byteOffset;
     } else {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (offset != null) {
         validateInteger(offset, 'offset', 0);
       }
       offset ??= 0;
-      offset += buffer.byteOffset;
-      length ??= buffer.byteLength;
       position ??= null;
     }
 
     validatePosition(position, 'position');
-    validateInteger(length, 'length', 0);
-
-    // Validate that the offset + length do not exceed the buffer's byte length.
-    if (length > buffer.byteLength) {
-      throw new ERR_BUFFER_OUT_OF_BOUNDS('length');
-    }
-    if (offset > length) {
+    if (offset > buffer.byteLength) {
       throw new ERR_BUFFER_OUT_OF_BOUNDS('offset');
+    }
+    length ??= buffer.byteLength - offset;
+    validateInteger(length, 'length', 0);
+    if (length > buffer.byteLength - offset) {
+      throw new ERR_BUFFER_OUT_OF_BOUNDS('length');
     }
 
     return {
       fd,
-      buffer: [Buffer.from(buffer.buffer, offset, length)],
+      buffer: [Buffer.from(buffer.buffer, buffer.byteOffset + offset, length)],
       position,
     };
   }
@@ -558,8 +555,8 @@ export function validateReadArgs(
     );
   }
 
-  let actualOffset = buffer.byteOffset;
-  let actualLength = buffer.byteLength;
+  let actualOffset: number;
+  let actualLength: number;
   let actualPosition = position;
 
   // Handle the case where the third argument is an options object
@@ -569,13 +566,13 @@ export function validateReadArgs(
       length = buffer.byteLength - offset,
       position = null,
     } = offsetOrOptions;
-    actualOffset += offset;
+    actualOffset = offset;
     actualLength = length;
     actualPosition = position;
   }
   // Handle the case where the third argument is a number (offset)
   else if (typeof offsetOrOptions === 'number') {
-    actualOffset += offsetOrOptions;
+    actualOffset = offsetOrOptions;
     actualLength = length ?? buffer.byteLength - offsetOrOptions;
     actualPosition = position;
   } else {
@@ -590,15 +587,28 @@ export function validateReadArgs(
   validateUint32(actualLength, 'length');
   validatePosition(actualPosition, 'position');
 
-  // The actualOffset plus actualLength must not exceed the backing buffer's byte length.
-  const backingBufferLength = buffer.buffer.byteLength;
-  if (actualOffset + actualLength > backingBufferLength) {
-    throw new ERR_INVALID_ARG_VALUE('offset', actualOffset, 'out of bounds');
+  // As in Node, a zero-length read is a no-op regardless of offset.
+  if (actualLength === 0) {
+    return { fd, buffer: [], length: 0, position: actualPosition };
+  }
+
+  if (actualOffset + actualLength > buffer.byteLength) {
+    throw new ERR_OUT_OF_RANGE(
+      'length',
+      `<= ${buffer.byteLength - actualOffset}`,
+      actualLength
+    );
   }
 
   return {
     fd,
-    buffer: [Buffer.from(buffer.buffer, actualOffset, actualLength)],
+    buffer: [
+      Buffer.from(
+        buffer.buffer,
+        buffer.byteOffset + actualOffset,
+        actualLength
+      ),
+    ],
     length: actualLength,
     position: actualPosition,
   };
