@@ -11,6 +11,75 @@
 namespace kj_rs_demo {
 namespace {
 
+KJ_TEST("re-polling cancels an unready waker promise without consuming its result") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  struct UnreadyPromise final: kj::_::PromiseNode {
+    UnreadyPromise(bool& consumed, bool& canceled): consumed(consumed), canceled(canceled) {}
+    void onReady(kj::_::Event*) noexcept override {}
+    void get(kj::_::ExceptionOrValue&) noexcept override {
+      consumed = true;
+    }
+    void destroy() override {
+      canceled = true;
+      freePromise(this);
+    }
+    void tracePromise(kj::_::TraceBuilder&, bool) override {}
+    bool& consumed;
+    bool& canceled;
+  };
+
+  struct PollEvent final: kj_rs::FuturePollEvent {
+    void awaitWake(kj::Promise<void> promise) {
+      exitPollScope(kj::mv(promise));
+    }
+    void poll() {
+      PollScope scope(*this);
+      scope.drop();
+    }
+    void onReady(kj::_::Event*) noexcept override {}
+    void get(kj::_::ExceptionOrValue&) noexcept override {}
+    void destroy() override {}
+    void fire() override {}
+    void traceEvent(kj::_::TraceBuilder&) override {}
+  };
+
+  bool consumed = false;
+  bool canceled = false;
+  PollEvent event;
+  event.awaitWake(kj::_::PromiseNode::to<kj::Promise<void>>(
+      kj::_::allocPromise<UnreadyPromise>(consumed, canceled)));
+  event.poll();
+  KJ_EXPECT(canceled);
+  KJ_EXPECT(!consumed);
+}
+
+KJ_TEST("a joined KJ promise can re-poll Rust before cross-thread wake dispatch") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  // Readiness probes must not directly re-poll Rust and replace the waker being tested.
+  auto promise = new_joined_waker_future_void().eagerlyEvaluate(nullptr);
+  KJ_EXPECT(!promise.poll(waitScope));
+  KJ_DEFER(clear_retained_waker());
+
+  fulfill_stored_promise();
+  // Dispatch RustPromiseAwaiter, which directly arms the shared FuturePollEvent.
+  loop.run(1);
+
+  start_retained_wake();
+  KJ_DEFER(join_retained_wake());
+  // run() dispatches queued events without polling the cross-thread executor.
+  loop.run(1);
+  KJ_EXPECT(!promise.poll(waitScope));
+
+  // The KJ-driven re-poll installed a replacement waker, which must still work.
+  complete_joined_waker_future();
+  KJ_ASSERT(promise.poll(waitScope));
+  promise.wait(waitScope);
+}
+
 KJ_TEST("polling pending future") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);

@@ -7,6 +7,8 @@ use std::future::IntoFuture;
 use std::pin::Pin;
 use std::pin::pin;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::task::Context;
 use std::task::Poll;
 use std::task::Wake;
@@ -145,6 +147,14 @@ pub async fn new_threaded_delay_future_void() {
 thread_local! {
     static RETAINED_WAKER: std::cell::RefCell<Option<Waker>> =
         const { std::cell::RefCell::new(None) };
+    static WAKING_THREAD: std::cell::RefCell<Option<WakingThread>> =
+        const { std::cell::RefCell::new(None) };
+    static JOINED_WAKER_READY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+struct WakingThread {
+    finished: Arc<AtomicBool>,
+    handle: std::thread::JoinHandle<()>,
 }
 
 struct RetainedWakerFuture;
@@ -162,6 +172,67 @@ impl Future for RetainedWakerFuture {
 
 pub async fn new_retained_waker_future_void() {
     RetainedWakerFuture.await
+}
+
+pub async fn new_joined_waker_future_void() -> Result<()> {
+    JOINED_WAKER_READY.with(|ready| ready.set(false));
+    let mut promise = pin!(crate::ffi::new_fulfillable_promise_void().into_future());
+    future::poll_fn(|cx| {
+        let _ = pin!(RetainedWakerFuture).poll(cx);
+        promise.as_mut().poll(cx)
+    })
+    .await
+    .map_err(Error::other)?;
+
+    future::poll_fn(|cx| {
+        if JOINED_WAKER_READY.with(std::cell::Cell::get) {
+            Poll::Ready(())
+        } else {
+            pin!(RetainedWakerFuture).poll(cx)
+        }
+    })
+    .await;
+    Ok(())
+}
+
+pub fn complete_joined_waker_future() {
+    JOINED_WAKER_READY.with(|ready| ready.set(true));
+    wake_retained_waker_from_background_thread();
+}
+
+pub fn start_retained_wake() {
+    let waker =
+        RETAINED_WAKER.with(|waker| waker.borrow().as_ref().expect("no retained waker").clone());
+    let finished = Arc::new(AtomicBool::new(false));
+    let thread_finished = finished.clone();
+    let handle = std::thread::spawn(move || {
+        waker.wake_by_ref();
+        thread_finished.store(true, Ordering::Relaxed);
+    });
+    // Control the schedule without providing the happens-before edge that the
+    // cross-thread notification must establish. Join only after the re-poll.
+    while !finished.load(Ordering::Relaxed) {
+        std::hint::spin_loop();
+    }
+    WAKING_THREAD.with(|thread| {
+        // Keep the Arc alive until join: its final drop would acquire from the
+        // background thread and hide the missing notification synchronization.
+        assert!(
+            thread
+                .borrow_mut()
+                .replace(WakingThread { finished, handle })
+                .is_none()
+        );
+    });
+}
+
+pub fn join_retained_wake() {
+    WAKING_THREAD.with(|thread| {
+        let WakingThread { finished, handle } =
+            thread.borrow_mut().take().expect("no waking thread");
+        handle.join().expect("waking thread panicked");
+        assert!(finished.load(Ordering::Relaxed));
+    });
 }
 
 pub fn wake_retained_waker_from_background_thread() {
