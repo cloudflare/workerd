@@ -151,9 +151,9 @@ struct Socket {
     }
 
     udp :group {
-      # Listen for UDP datagrams. Bindings to this service will only support the `connect()`
-      # method, same as `tcp`; `fetch()` will throw an exception. Unlike `tcp`, the delivered
-      # Socket's `readable`/`writable` are value-mode: each chunk read or written is exactly one
+      # Listen for UDP datagrams and dispatch each flow to the target service's
+      # connect() handler. Unlike TCP, the delivered Socket's readable/writable
+      # streams are value-mode: each chunk read or written is exactly one
       # datagram (see Socket.protocol).
       #
       # Datagrams from a given peer address/port are grouped into one flow, dispatched to one
