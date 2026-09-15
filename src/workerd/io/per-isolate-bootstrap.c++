@@ -10,8 +10,10 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/sentry.h>
 #include <workerd/util/use-perfetto-categories.h>
 
 #include <per_isolate/per_isolate.capnp.h>
@@ -356,6 +358,7 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
       // properties available as variables in the function scope without
       // putting them on globalThis.
       auto source = script.getSrc();
+      auto& observer = jsg::IsolateBase::from(js.v8Isolate).getObserver();
 #if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
       // Under LSAN, use a copied string to avoid false-positive leak reports.
       // The ExternString resource is properly owned by V8 (freed via Dispose()
@@ -378,8 +381,12 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
         // buffer (which lives in the static capnp bundle data).
         cachedData = new v8::ScriptCompiler::CachedData(compileCache.begin(), compileCache.size(),
             v8::ScriptCompiler::CachedData::BufferNotOwned);
-        if (cachedData->CompatibilityCheck(js.v8Isolate) !=
-            v8::ScriptCompiler::CachedData::kSuccess) {
+        auto check = cachedData->CompatibilityCheck(js.v8Isolate);
+        if (check != v8::ScriptCompiler::CachedData::kSuccess) {
+          LOG_WARNING_ONCE("NOSENTRY per-isolate bootstrap compile cache failed its "
+                           "compatibility check; scripts will be compiled from source",
+              normalized, static_cast<int>(check));
+          observer.onCompileCacheRejected(js.v8Isolate);
           delete cachedData;
           cachedData = nullptr;
         }
@@ -396,6 +403,17 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
       v8::Local<v8::Object> ext = extObj;
       auto fn = jsg::JsFunction(jsg::check(v8::ScriptCompiler::CompileFunction(
           js.v8Context(), &compilerSource, 0, nullptr, 1, &ext, options)));
+
+      if (options == v8::ScriptCompiler::kConsumeCodeCache) {
+        if (compilerSource.GetCachedData()->rejected) {
+          LOG_WARNING_ONCE("NOSENTRY per-isolate bootstrap compile cache was rejected by V8 "
+                           "while compiling; scripts will be compiled from source",
+              normalized);
+          observer.onCompileCacheRejected(js.v8Isolate);
+        } else {
+          observer.onCompileCacheFound(js.v8Isolate);
+        }
+      }
 
       // Execute the script.
       fn.call(js, js.undefined());
