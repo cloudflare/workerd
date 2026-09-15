@@ -493,7 +493,7 @@ class Server::ActorNamespace final {
                    .orDefault(*this)),
           parent(parent),
           timer(timer),
-          lastAccess(timer.now()) {
+          lastAccess(makeLastAccess(parent, timer)) {
       KJ_SWITCH_ONEOF(classAndIdParam) {
         KJ_CASE_ONEOF(value, ClassAndId) {
           // `classAndId` is immediately available.
@@ -574,13 +574,10 @@ class Server::ActorNamespace final {
           [&](kj::Own<Worker::Actor::HibernationManager>& m) { return kj::addRef(*m); });
     }
     void updateAccessTime() {
-      lastAccess = timer.now();
-      KJ_IF_SOME(p, parent) {
-        p.updateAccessTime();
-      }
+      *lastAccess = timer.now();
     }
     kj::TimePoint getLastAccess() {
-      return lastAccess;
+      return *lastAccess;
     }
 
     bool hasClients() {
@@ -834,7 +831,8 @@ class Server::ActorNamespace final {
     ActorContainer& root;
     kj::Maybe<ActorContainer&> parent;
     kj::Timer& timer;
-    kj::TimePoint lastAccess;
+    // Namespace expiration is tracked at the root, so the whole facet tree shares this timestamp.
+    kj::Rc<kj::TimePoint> lastAccess;
     kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager;
     kj::Maybe<kj::Promise<void>> shutdownTask;
     kj::Maybe<kj::Promise<void>> onBrokenTask;
@@ -855,6 +853,14 @@ class Server::ActorNamespace final {
     kj::Maybe<uint> facetId;
 
     ActorMap facets;
+
+    static kj::Rc<kj::TimePoint> makeLastAccess(
+        kj::Maybe<ActorContainer&> parent, kj::Timer& timer) {
+      KJ_IF_SOME(p, parent) {
+        return p.lastAccess.addRef();
+      }
+      return kj::rc<kj::TimePoint>(timer.now());
+    }
 
     // Get the facet ID for this facet. The root facet always has ID zero, but all other facets
     // need to be looked up in the index to make sure they are assigned consistent IDs.
