@@ -9,5 +9,6 @@ export {
   legacyStreamWebConstructorsGated,
   legacyFromWebOverRuntimeStreams,
   legacyPipelineOverRuntimeStreams,
+  legacyComposeOverRuntimeStreams,
   legacyTransformStreamIgnoresTransformer,
 } from 'legacy-constructor-gate';

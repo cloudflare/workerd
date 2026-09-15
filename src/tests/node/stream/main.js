@@ -186,4 +186,24 @@ export {
   finishedOnTeedAwayShellStaysPending,
 } from 'finished-and-abort';
 
+export {
+  composeValidatesWebStreamPositions,
+  composeSingleWebStream,
+  composeWebHeadNodeTail,
+  composeWebReadableIntoNodeWritable,
+  composeEndCompletesBeforeReading,
+  composeNodeHeadWebTail,
+  composeNodeHeadWebWritableTail,
+  composeWebReadableIntoWebWritable,
+  composeWebTailDestroyBeforeWrite,
+  composeWebTailDestroyUnderBackpressure,
+  composeWebTailClosedReadableDestroy,
+  composeWebTailUnconvertibleChunkFails,
+  composeWebTailUnconvertibleChunkFailsReadableHead,
+  composeWebTailDeferredCloseCompletesCleanly,
+  composeWebTailBareDestroyIsAbortError,
+  composeWebTailReadsOneAtATime,
+  readableComposeWithWebTransform,
+} from 'compose-web';
+
 export { duplexFromWebStreamHalves } from 'duplex-from';
