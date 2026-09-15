@@ -1,0 +1,41 @@
+src/rust/cxx/kj-rs-tokio/tests/lib.rs
+  s_b5100e8818a1d4::t_880e8c3fd59330 18-19,25,91-98
+src/rust/cxx/kj-rs-tokio/tests/test_helpers.rs
+  s_b5100e8818a1d4::t_da8fcb42bcdc7a 216-264
+src/rust/cxx/kj-rs-tokio/tests/tokio-event-port-test.c++
+  s_b5100e8818a1d4::t_088b5cb00beb33 356-382
+src/rust/cxx/kj-rs/tests/awaitables-cc-test.c++
+  s_b5100e8818a1d4::t_efd8e1d1ed718d 311-339
+src/rust/cxx/kj-rs/tests/lib.rs
+  s_b5100e8818a1d4::t_6154bcdf645f3f 35-36,39,269-276
+src/rust/cxx/kj-rs/tests/test_futures.rs
+  s_b5100e8818a1d4::t_ef7c7dc90cb600 381-431
+src/rust/cxx/kj-rs/waker.c++
+  s_b5100e8818a1d4::t_6db867370a14d2 3-4,19-24,51,55-56,70-73,75-77,87-97,120-130
+src/rust/cxx/kj-rs/waker.h
+  s_b5100e8818a1d4::t_ddec92cc19a4a1 92-101,106-114,126,128-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3b427bc6311a14ebd0f7bb83ad5cbda15ed1a2ab",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
