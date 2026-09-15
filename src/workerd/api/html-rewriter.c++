@@ -474,7 +474,7 @@ kj::Promise<void> Rewriter::write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> p
     return getFiberPool().startFiber([this, pieces](kj::WaitScope& scope) {
       maybeWaitScope = scope;
       if (!isPoisoned()) {
-        for (auto bytes: pieces) {
+        for (const auto& bytes: pieces) {
           auto chars = bytes.asChars();
           // Cannot use `check()` because `finishWrite()` implements the error path.
           auto rc = lol_html_rewriter_write(rewriter, chars.begin(), chars.size());
@@ -657,7 +657,7 @@ class ReplacerStreamSink final: public WritableStreamSink {
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-    for (auto bytes: pieces) {
+    for (const auto& bytes: pieces) {
       auto err = lol_html_streaming_sink_write_utf8_chunk(
           sink, bytes.asChars().begin(), bytes.size(), isHtml);
       if (err != 0) {

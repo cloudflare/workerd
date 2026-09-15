@@ -1033,7 +1033,7 @@ kj::Maybe<kj::String> makeCompatJson(kj::ArrayPtr<kj::StringPtr> enableFlags) {
   json.addAll(PREFIX);
 
   bool first = true;
-  for (auto flag: enableFlags) {
+  for (const auto& flag: enableFlags) {
     if (first) {
       first = false;
     } else {
