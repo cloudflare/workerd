@@ -22,6 +22,8 @@ def wd_cc_benchmark(
             # Use same linker flags as with test binaries – wd_cc_benchmark is used with
             # microbenchmarks, which will produce relatively accurate results without thinLTO.
             "//build/deps:linkopts_default",
+            # The kj::setupAsyncIo() seam, linked per binary (see kj_test.bzl).
+            "//src/workerd/util:setup-async-io",
         ],
         # use the same malloc we use for server
         malloc = "//src/workerd/server:malloc",

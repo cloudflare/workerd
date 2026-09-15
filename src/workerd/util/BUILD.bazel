@@ -1,6 +1,7 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//:build/kj_test.bzl", "kj_test")
+load("//:build/rust_io_backend.bzl", "rust_io_backend_local_defines")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 bool_flag(
@@ -511,4 +512,37 @@ wd_cc_library(
 kj_test(
     src = "state-machine-test.c++",
     deps = [":state-machine"],
+)
+
+# The kj::setupAsyncIo() "seam": supplies that single symbol appropriately for each I/O backend.
+# Call sites call kj::setupAsyncIo() unchanged in both configs (no #if at the call site, and
+# kj/async-io.h itself is untouched); BINARIES link this target -- the workerd binary directly,
+# every kj_test / wd_cc_benchmark through its macro -- and libraries never do, so which backend
+# a binary runs on is that binary's choice alone and no link can contain two event loops.
+#   * default (cxx): setup-async-io-tokio.c++ compiles to an empty TU; native kj::setupAsyncIo()
+#     comes from the :kj-async umbrella. Byte-identical to depending on :kj-async directly.
+#   * --//:io_backend=rust: kj-async-os (the OS event loop) is NOT linked; the .c++ (gated on
+#     WORKERD_RUST_IO_BACKEND_RUST) defines a tokio-backed kj::setupAsyncIo() plus an inert
+#     kj::UnixEventPort (whose real defs live in the unlinked async-unix.c++).
+# The per-backend dependency set lives in //src/rust/cxx/kj-rs-io:active-backend.
+wd_cc_library(
+    name = "setup-async-io",
+    srcs = ["setup-async-io-tokio.c++"],
+    local_defines = rust_io_backend_local_defines(),
+    visibility = ["//visibility:public"],
+    deps = ["//src/rust/cxx/kj-rs-io:active-backend"],
+)
+
+# Runtime check of the seam through its public entry point: kj::setupAsyncIo() must hand back the
+# configured backend (the tokio providers under --//:io_backend=rust, whose event loop is then
+# proven live by a timer wait; the native kj providers otherwise). The only test TU that reads
+# WORKERD_RUST_IO_BACKEND_RUST, hence the only one that gets the define. :setup-async-io itself
+# comes from the kj_test macro, as for every test binary.
+kj_test(
+    src = "setup-async-io-test.c++",
+    local_defines = rust_io_backend_local_defines(),
+    deps = select({
+        "//:io_backend_rust": ["//src/rust/cxx/kj-rs-io"],
+        "//conditions:default": [],
+    }),
 )
