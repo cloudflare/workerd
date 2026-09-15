@@ -124,6 +124,7 @@ jobs:
       extra_bazel_args: '--config=lint --config=ci-test --config=ci-linux-common'
       run_tests: false
       parse_headers: true
+      check_io_backend_graph: true
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}

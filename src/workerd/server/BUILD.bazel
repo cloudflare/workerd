@@ -1,6 +1,7 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/rust_io_backend.bzl", "rust_io_backend_local_defines")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
@@ -99,6 +100,33 @@ wd_cc_library(
     local_defines = rust_io_backend_local_defines(),
     visibility = ["//visibility:public"],
     deps = ["//src/rust/cxx/kj-rs-io:active-backend"],
+)
+
+# The link-time complement of build/rust_io_graph_check.sh: that query forbids dependency EDGES to
+# the kj OS I/O layer in the graph; this test inspects the symbols of the linked :workerd binary and
+# fails if kj's own setupAsyncIo()/OS provider made it in anyway (or the tokio shim did not). It
+# exists because a binary that silently links kj-async-os and lets kj's setupAsyncIo() win the
+# link passes every test that constructs its own event loop. Rust config, unix, unstripped only.
+sh_test(
+    name = "rust-io-link-check",
+    # One grep pass over the unstripped workerd binary: seconds locally, longer on CI runners.
+    size = "large",
+    srcs = ["//build/fixtures:rust_io_link_check.sh"],
+    # rlocationpath, not location: the binary is looked up under $TEST_SRCDIR so the check also
+    # works when workerd is built as an external repository (the internal build).
+    args = ["$(rlocationpath :workerd)"],
+    data = [":workerd"],
+    # Needs an unstripped binary: the ASAN lane strips (--strip=always), so it is excluded there
+    # by tag (test:asan filters -no-asan) rather than passing vacuously.
+    tags = ["no-asan"],
+    target_compatible_with = select({
+        "//:io_backend_rust": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        # The script matches Itanium-mangled names; MSVC mangling is not covered.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )
 
 wd_cc_library(

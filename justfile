@@ -50,6 +50,10 @@ test *args="//...":
 test-asan *args="//...":
   just test {{args}} --config=asan
 
+# The workerd binary must not reach kj's own event loop (kj-async-os) under --//:io_backend=rust
+check-io-backend-graph *args:
+  bash build/rust_io_graph_check.sh {{args}}
+
 # e.g. just stream-test //src/cloudflare:cloudflare.capnp@eslint
 stream-test *args:
   bazel test {{args}} --test_output=streamed --nocache_test_results --test_tag_filters= --test_size_filters=

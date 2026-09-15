@@ -71,6 +71,10 @@ on:
         type: boolean
         required: false
         default: false
+      check_io_backend_graph:
+        type: boolean
+        required: false
+        default: false
     secrets:
       BAZEL_CACHE_KEY:
         required: true
@@ -128,6 +132,11 @@ jobs:
       - name: Bazel build
         run: |
           bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.build_target }}
+      - name: Check I/O backend dependency graph
+        # One cquery: the workerd binary must not reach kj-async-os under --//:io_backend=rust.
+        if: inputs.check_io_backend_graph
+        run: |
+          bash build/rust_io_graph_check.sh --config=ci ${{ inputs.extra_bazel_args }}
       - name: Configure Docker daemon for IPv6
         if: inputs.build_container_images
         run: |
