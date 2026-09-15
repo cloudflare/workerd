@@ -37,7 +37,22 @@ jsg::Promise<Result> unwrapR2RpcPromise(jsg::Lock& js,
     jsg::Value rpcPromise,
     const jsg::TypeHandler<jsg::Promise<Result>>& resultPromiseHandler) {
   auto normalizedPromise = normalizeR2RpcPromise(js, kj::mv(rpcPromise));
-  return KJ_ASSERT_NONNULL(resultPromiseHandler.tryUnwrap(js, normalizedPromise.consumeHandle(js)));
+  if constexpr (kj::isSameType<Result, void>()) {
+    return KJ_ASSERT_NONNULL(
+        resultPromiseHandler.tryUnwrap(js, normalizedPromise.consumeHandle(js)));
+  } else {
+    // Decode only fulfilled responses so gateway rejections retain their public API errors.
+    // Failures converting a response into the internal wire types are gateway contract violations.
+    return normalizedPromise.then(js, [&resultPromiseHandler](jsg::Lock& js, jsg::Value value) {
+      auto fulfilled = js.resolvedPromise(kj::mv(value));
+      auto parsed =
+          KJ_ASSERT_NONNULL(resultPromiseHandler.tryUnwrap(js, fulfilled.consumeHandle(js)));
+      return parsed.catch_(js, [](jsg::Lock& js, jsg::Value error) -> Result {
+        auto exception = js.exceptionToKj(kj::mv(error));
+        KJ_FAIL_ASSERT("Malformed R2 RPC result.", exception);
+      });
+    });
+  }
 }
 
 template <typename Result, typename... Args>

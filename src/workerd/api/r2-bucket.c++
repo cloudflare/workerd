@@ -650,21 +650,21 @@ jsg::Ref<JsRpcProperty> R2Bucket::getRpcMethod(jsg::Lock& js, kj::StringPtr meth
 // Validates HeadResult shape from JSRPC call.
 jsg::Ref<R2Bucket::HeadResult> headResultFromRpc(
     jsg::Lock& js, R2Bucket::HeadResultRpc rpc, MissingMetadataPolicy policy) {
-  JSG_REQUIRE(std::isfinite(rpc.size) && rpc.size >= 0 && isWholeNumber(rpc.size), Error,
+  KJ_ASSERT(std::isfinite(rpc.size) && rpc.size >= 0 && isWholeNumber(rpc.size),
       "Malformed R2 RPC result: size must be a non-negative integer.");
   KJ_IF_SOME(range, rpc.range) {
     KJ_IF_SOME(offset, range.offset) {
-      JSG_REQUIRE(std::isfinite(offset) && offset >= 0 && isWholeNumber(offset), Error,
+      KJ_ASSERT(std::isfinite(offset) && offset >= 0 && isWholeNumber(offset),
           "Malformed R2 RPC result: range offset must be a non-negative integer.");
     }
     KJ_IF_SOME(length, range.length) {
-      JSG_REQUIRE(std::isfinite(length) && length >= 0 && isWholeNumber(length), Error,
+      KJ_ASSERT(std::isfinite(length) && length >= 0 && isWholeNumber(length),
           "Malformed R2 RPC result: range length must be a non-negative integer.");
     }
     KJ_IF_SOME(suffix, range.suffix) {
-      JSG_REQUIRE(range.offset == kj::none && range.length == kj::none, Error,
+      KJ_ASSERT(range.offset == kj::none && range.length == kj::none,
           "Malformed R2 RPC result: range suffix is incompatible with offset or length.");
-      JSG_REQUIRE(std::isfinite(suffix) && suffix >= 0 && isWholeNumber(suffix), Error,
+      KJ_ASSERT(std::isfinite(suffix) && suffix >= 0 && isWholeNumber(suffix),
           "Malformed R2 RPC result: range suffix must be a non-negative integer.");
     }
   }
@@ -823,7 +823,7 @@ R2Bucket::getRpc(jsg::Lock& js,
           KJ_IF_SOME(body, rpc.body) {
             body.forceCancel(
                 js, js.error("Malformed R2 get RPC result: metadata result had a body."));
-            JSG_FAIL_REQUIRE(Error, "Malformed R2 get RPC result: metadata result had a body.");
+            KJ_FAIL_ASSERT("Malformed R2 get RPC result: metadata result had a body.");
           }
           auto result = headResultFromRpc(js, kj::mv(rpc.object), MissingMetadataPolicy::EMPTY);
           addHeadResultSpanTags(js, traceContext, *result.get());
@@ -841,7 +841,7 @@ R2Bucket::getRpc(jsg::Lock& js,
           KJ_IF_SOME(range, object->range) {
             bodyLength = range.length.orDefault(bodyLength);
           }
-          JSG_REQUIRE(bodyLength <= 9007199254740991ull, Error,
+          KJ_ASSERT(bodyLength <= 9007199254740991ull,
               "Malformed R2 get RPC result: body length must be a safe integer.");
           auto& context = IoContext::current();
           auto pipe = newIdentityPipe(static_cast<uint64_t>(bodyLength));
@@ -861,7 +861,7 @@ R2Bucket::getRpc(jsg::Lock& js,
         KJ_IF_SOME(body, rpc.body) {
           body.forceCancel(js, js.error("Malformed R2 get RPC result: unknown result kind."));
         }
-        JSG_FAIL_REQUIRE(Error, "Malformed R2 get RPC result: unknown result kind ", rpc.kind, ".");
+        KJ_FAIL_ASSERT("Malformed R2 get RPC result: unknown result kind ", rpc.kind, ".");
       }
       return kj::Maybe<jsg::Ref<GetResult>>(kj::none);
     });
