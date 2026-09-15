@@ -67,6 +67,7 @@ wd_cc_binary(
     malloc = ":malloc",
     visibility = ["//visibility:public"],
     deps = [
+        ":cli-io-backend",
         ":cpp-capnp-schema",
         ":json-logger",
         ":server",
@@ -79,6 +80,18 @@ wd_cc_binary(
         "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/kj:kj-async",
     ],
+)
+
+# The CLI main()'s two direct uses of the OS event loop -- the --watch file watcher and the SIGTERM
+# graceful drain -- behind backend-agnostic entry points (workerd::server::makeFileWatcher /
+# captureSigterm / onSigterm), moved out of workerd.c++ so that the I/O backend can be selected in
+# one place.
+wd_cc_library(
+    name = "cli-io-backend",
+    srcs = ["cli-io-backend.c++"],
+    hdrs = ["cli-io-backend.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj:kj-async"],
 )
 
 wd_cc_library(
