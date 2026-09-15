@@ -354,7 +354,7 @@ TestFixture::TestFixture(SetupParams&& params)
           capnp::List<server::config::Extension>::Reader{},
           kj::rc<MockIsolateLimitEnforcer>()->getCreateParams(),
           isolateGroup,
-          kj::atomicRefcounted<JsgIsolateObserver>(),
+          kj::mv(params.jsgIsolateObserver).orDefault(kj::atomicRefcounted<JsgIsolateObserver>()),
           *memoryCacheProvider,
           defaultPythonConfig)),
       heapLimitFlag(kj::atomicRefcounted<HeapLimitFlag>()),

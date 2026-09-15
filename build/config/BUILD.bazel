@@ -1,4 +1,4 @@
-load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+load("@bazel_skylib//rules:common_settings.bzl", "repeatable_string_flag", "string_flag")
 
 # Similar to --run_under flag to be able to run cross-compiled target binaries.
 string_flag(
@@ -18,5 +18,15 @@ config_setting(
 config_setting(
     name = "prebuilt_binaries_arm64",
     values = {"define": "never_match=true"},  # This will never match
+    visibility = ["//visibility:public"],
+)
+
+# V8 flags to pass to gen-compile-cache when producing the compile caches
+# embedded in the builtin bundles (//src/node, //src/per_isolate, ...).
+# Must match the flags used by the consumer when compiling, otherwise flag
+# hash will mismatch and it'll be rejected.
+repeatable_string_flag(
+    name = "compile_cache_v8_flags",
+    build_setting_default = [],
     visibility = ["//visibility:public"],
 )

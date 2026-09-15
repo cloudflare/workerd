@@ -64,6 +64,9 @@ struct TestFixture {
     kj::Maybe<kj::Function<kj::Own<RequestObserver>()>> requestObserverFactory;
     // If set, incremented whenever the fixture's limit enforcer checks a new subrequest.
     kj::Maybe<uint&> checkedSubrequestCount;
+    // If set, used as the jsg::IsolateObserver for the worker's isolate instead of a no-op one.
+    // Lets tests observe compilation hooks (e.g. onCompileCacheFound / onCompileCacheRejected).
+    kj::Maybe<kj::Own<JsgIsolateObserver>> jsgIsolateObserver;
   };
 
   TestFixture(SetupParams&& params = {.useRealTimers = false});
