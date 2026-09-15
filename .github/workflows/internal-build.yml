@@ -16,19 +16,19 @@ jobs:
   internal-build:
     runs-on: ubuntu-latest
     steps:
-      # Check if this is a fork and if the owner is a Cloudflare org member
-      - name: Check fork status and org membership
+      # Check if this is a fork and if the owner is either a cloudflare organization member or explicit repository collaborator.
+      - name: Check fork status and collaborator access
         if: github.event.pull_request.head.repo.fork
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORK_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
         run: |
-          echo "Fork detected. Checking if $FORK_OWNER is a Cloudflare org member..."
+          echo "Fork detected. Checking if $FORK_OWNER is a repository collaborator..."
 
-          if gh api "orgs/cloudflare/members/$FORK_OWNER" --silent 2>/dev/null; then
-            echo "✓ Cloudflare org member confirmed"
+          if gh api "repos/cloudflare/workerd/collaborators/$FORK_OWNER" --silent 2>/dev/null; then
+            echo "✓ Repository collaborator confirmed"
           else
-            echo "✗ Fork owner '$FORK_OWNER' is not a public Cloudflare org member."
+            echo "✗ Fork owner '$FORK_OWNER' is not a repository collaborator."
             echo ""
             echo "GitHub's public membership API cannot verify private organization membership."
             echo "If you are a Cloudflare org member, open the page below, find your account,"
@@ -52,7 +52,7 @@ jobs:
         continue-on-error: true
         with:
           # Fork PRs reach this step only after their owner is confirmed to be a
-          # public Cloudflare org member. Workflow tooling runs from the trusted checkout.
+          # repository collaborator. Workflow tooling runs from the trusted checkout.
           allow-unsafe-pr-checkout: true
           path: pull-request
           persist-credentials: false
