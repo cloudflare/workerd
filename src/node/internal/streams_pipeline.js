@@ -31,6 +31,7 @@ import {
   isTransformStream,
   isWebStream,
   isReadableStream,
+  isWritableStream,
   isReadableFinished,
 } from 'node-internal:streams_util';
 import { eos } from 'node-internal:streams_end_of_stream';
@@ -533,6 +534,15 @@ export function pipelineImpl(streams, callback, opts) {
       }
       ret = stream;
     } else if (isWebStream(stream)) {
+      // A web stage past the head is written to; only a WritableStream, or
+      // a TransformStream through its writable, can be.
+      if (!isWritableStream(stream) && !isTransformStream(stream)) {
+        throw new ERR_INVALID_ARG_TYPE(
+          'destination',
+          ['WritableStream', 'TransformStream'],
+          stream
+        );
+      }
       const pumpOptions = { end, destroys, onError: finishOnlyHandleError };
       if (isReadableNodeStream(ret)) {
         finishCount++;

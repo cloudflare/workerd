@@ -143,10 +143,20 @@ The implementation under test is `src/node/internal/streams_readable.js`
   destroys the node destination; a failed node destination — even one
   failing while the web source is idle — cancels the web source. A web
   destination that is already locked fails the pipeline with the lock
-  error and leaves the lock with its owner. A signal abort fails the
+  error and leaves the lock with its owner. A `ReadableStream` in a slot
+  past the head is `ERR_INVALID_ARG_TYPE`, thrown synchronously (the
+  `stream/promises` form rejects with it), with the stages ahead of it
+  left as they were. A signal abort fails the
   pipeline with an `AbortError`, also when every stage is a web stream and
   idle; a pending sink write is allowed to settle first. `stream/promises`
   treats a trailing web stream as a destination.
+- A web source (or a `TransformStream`'s readable) ahead of a **function
+  stage** reaches the function as the stream itself, as in Node, not
+  through a reader the pipeline's teardown holds: nothing cancels it when
+  the pipeline fails, so a stage still reading when that happens must honor
+  its `signal` (one that ignores it leaves the pipeline pending and the
+  source locked, as Node does). A stage that cancels its reader on abort
+  lets the pipeline settle with the failure and releases the source.
 
 ## Compatibility flags
 
@@ -188,7 +198,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `bodies.js` | Response/Request bodies through `Readable.toWeb` (incl. a megabyte); `Readable.fromWeb` over a Response body and a `TextDecoderStream` chain; `Writable.fromWeb` over `IdentityTransformStream` and `FixedLengthStream` (ledger #4); pipeThrough chains in both directions |
 | `consumers.js` | `text/json/buffer/arrayBuffer/blob` over web streams; multi-chunk and string decoding; lock release; error propagation; node Readables and async generators |
 | `readable-from.js` | `Readable.from(webStream)`: chunk types by objectMode, destroy → cancel + lock release, error propagation |
-| `pipeline-web.js` | web source/destination/transform stages, generator stages, `TransformStream` head; sink/source/node-sink failures (incl. a node sink failing while the web source is idle, a web sink erroring or rejecting a write while the source is idle, and a web source erroring while a stuck node sink holds the pump); a detached-view chunk failing the pipeline (`TypeError`, source cancelled without a reason); promise-valued chunks by identity; a locked web destination (callback and promise forms, node and web sources); `stream/promises` trailing web destination, `end: false`, signal abort of a node-headed and of an idle all-web pipeline, and during a pending web read |
+| `pipeline-web.js` | web source/destination/transform stages, generator stages (incl. a web source reaching a function stage as the stream itself, and a signal-honoring stage releasing it on a late node-sink failure), `TransformStream` head; sink/source/node-sink failures (incl. a node sink failing while the web source is idle, a web sink erroring or rejecting a write while the source is idle, and a web source erroring while a stuck node sink holds the pump); a detached-view chunk failing the pipeline (`TypeError`, source cancelled without a reason); promise-valued chunks by identity; a locked web destination (callback and promise forms, node and web sources); a `ReadableStream` in a destination slot (`ERR_INVALID_ARG_TYPE` thrown synchronously, callback and promise forms, middle slot too); `stream/promises` trailing web destination, `end: false`, signal abort of a node-headed and of an idle all-web pipeline, and during a pending web read |
 | `which-impl.js` | implementation detection |
 
 ## Legacy (unflagged) behaviors

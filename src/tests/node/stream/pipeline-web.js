@@ -141,6 +141,60 @@ export const pipelineGeneratorBetweenWebStreams = {
   },
 };
 
+// A web source ahead of a function stage reaches the function as the
+// ReadableStream itself, as in Node — not through a reader the pipeline's
+// teardown holds — so a stage still reading when the pipeline fails must
+// honor its signal. One that cancels its reader on abort lets a node
+// destination's late failure settle the pipeline with that failure, the
+// source cancelled with the signal's reason and its lock released.
+export const pipelineWebSourceToFunctionStageHonoringSignal = {
+  async test() {
+    let cancelled;
+    const source = new ReadableStream({
+      pull() {
+        return new Promise(() => {});
+      },
+      cancel(reason) {
+        cancelled = reason;
+      },
+    });
+    const sink = new Writable({
+      write(chunk, encoding, callback) {
+        callback();
+      },
+    });
+    let received;
+    const done = run(
+      source,
+      async function* (src, { signal }) {
+        received = src;
+        const reader = src.getReader();
+        const onAbort = () => reader.cancel(signal.reason).catch(() => {});
+        signal.addEventListener('abort', onAbort, { once: true });
+        try {
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) return;
+            yield value;
+          }
+        } finally {
+          signal.removeEventListener('abort', onAbort);
+          reader.releaseLock();
+        }
+      },
+      sink
+    );
+    await scheduler.wait(5);
+    strictEqual(received, source);
+    strictEqual(source.locked, true);
+    const boom = new Error('late node sink failure');
+    sink.destroy(boom);
+    strictEqual(await done, boom);
+    strictEqual(cancelled?.name, 'AbortError');
+    strictEqual(source.locked, false);
+  },
+};
+
 // A failing web sink fails the pipeline with the sink's error and destroys
 // the node source. The pump's abort() of the sink is a no-op — the stream is
 // already errored — so the sink's abort algorithm never runs.
@@ -223,6 +277,42 @@ export const pipelineLockedWebDestinationFails = {
     strictEqual(cancelled?.name, 'TypeError');
     strictEqual(webSource.locked, false);
     await owner2.close();
+  },
+};
+
+// A ReadableStream in a slot past the head is a destination nothing can
+// write to: pipeline() throws ERR_INVALID_ARG_TYPE synchronously, as it
+// does for a stage whose output nothing can consume, and stream/promises
+// rejects with it. The stages ahead of it are left as they were, the stream
+// unlocked.
+export const pipelineWebReadableAsDestinationThrows = {
+  async test() {
+    const expected = {
+      name: 'TypeError',
+      code: 'ERR_INVALID_ARG_TYPE',
+      message:
+        'The "destination" argument must be an instance of WritableStream ' +
+        'or TransformStream. Received an instance of ReadableStream',
+    };
+
+    const source = new Readable({ read() {} });
+    const notWritable = new ReadableStream();
+    throws(() => pipeline(source, notWritable, () => {}), expected);
+    strictEqual(source.destroyed, false);
+    strictEqual(notWritable.locked, false);
+
+    await rejects(promises.pipeline(source, notWritable), expected);
+    strictEqual(source.destroyed, false);
+    strictEqual(notWritable.locked, false);
+
+    // In the middle of a pipeline as much as at its end.
+    const head = bytesStream('a');
+    throws(
+      () => pipeline(head, notWritable, recordingWritable().writable, () => {}),
+      expected
+    );
+    strictEqual(head.locked, false);
+    strictEqual(notWritable.locked, false);
   },
 };
 
