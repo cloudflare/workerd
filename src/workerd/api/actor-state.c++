@@ -284,7 +284,8 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::getOne(
 jsg::Promise<kj::Maybe<double>> DurableObjectStorageOperations::getAlarm(
     jsg::Lock& js, jsg::Optional<GetAlarmOptions> maybeOptions) {
   auto& context = IoContext::current();
-  auto traceContext = context.makeUserTraceSpan("durable_object_storage_getAlarm"_kjc);
+  auto traceContext =
+      context.addObject(kj::heap(context.makeUserTraceSpan("durable_object_storage_getAlarm"_kjc)));
   // Even if we do not have an alarm handler, we might once have had one. It's fine to return
   // whatever a previous alarm setting or a falsy result.
   auto options = configureOptions(maybeOptions
@@ -293,13 +294,15 @@ jsg::Promise<kj::Maybe<double>> DurableObjectStorageOperations::getAlarm(
   }).orDefault(GetOptions{}));
   auto result = getCache(OP_GET_ALARM).getAlarm(options);
 
-  return context.attachSpans(js,
-      transformCacheResult(js, kj::mv(result), options,
-          [](jsg::Lock&, kj::Maybe<kj::Date> date) {
-    return date.map(
-        [](auto& date) { return static_cast<double>((date - kj::UNIX_EPOCH) / kj::MILLISECONDS); });
-  }),
-      kj::mv(traceContext));
+  return transformCacheResult(js, kj::mv(result), options,
+      [traceContext = kj::mv(traceContext)](jsg::Lock& js, kj::Maybe<kj::Date> date) mutable {
+    return date.map([&](auto& date) {
+      auto scheduledTime = (date - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+      traceContext->setTag(
+          "cloudflare.durable_object.alarm.scheduled_time"_kjc, js.date(date).toISOString(js));
+      return static_cast<double>(scheduledTime);
+    });
+  });
 }
 
 kj::Maybe<DurableObjectStorageOperations::CompiledListOptions> DurableObjectStorageOperations::
@@ -470,6 +473,8 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
 
   auto& context = IoContext::current();
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_setAlarm"_kjc);
+  traceContext.setTag(
+      "cloudflare.durable_object.alarm.scheduled_time"_kjc, js.date(scheduledTime).toISOString(js));
   // This doesn't check if we have an alarm handler per say. It checks if we have an initialized
   // (post-ctor) JS durable object with an alarm handler. Notably, this means this won't throw if
   // `setAlarm` is invoked in the DO ctor even if the DO class does not have an alarm handler. This
