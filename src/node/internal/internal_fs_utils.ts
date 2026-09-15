@@ -587,6 +587,11 @@ export function validateReadArgs(
   validateUint32(actualLength, 'length');
   validatePosition(actualPosition, 'position');
 
+  // As in Node, a zero-length read is a no-op regardless of offset.
+  if (actualLength === 0) {
+    return { fd, buffer: [], length: 0, position: actualPosition };
+  }
+
   if (actualOffset + actualLength > buffer.byteLength) {
     throw new ERR_OUT_OF_RANGE(
       'length',

@@ -548,10 +548,12 @@ export const writeReadOffsetBeyondLength = {
     deepStrictEqual([...destView.subarray(12)], [10, 11, 20, 21]);
     deepStrictEqual([...dest.subarray(24, 26)], [0, 0]);
 
-    throws(() => readSync(fd, dest, 65, 0, 0), kErrOutOfRange);
+    // Zero-length reads are a no-op regardless of offset, as in Node.
+    strictEqual(readSync(fd, dest, 65, 0, 0), 0);
+    strictEqual(readSync(fd, destView, 17, 0, 0), 0);
     throws(() => readSync(fd, dest, 60, 5, 0), kErrOutOfRange);
     throws(() => readSync(fd, destView, 12, 5, 0), kErrOutOfRange);
-    throws(() => readSync(fd, destView, 17, 0, 0), kErrOutOfRange);
+    throws(() => readSync(fd, dest, 65, 1, 0), kErrOutOfRange);
 
     // Callback and promise variants share the same validation.
     await new Promise((resolve, reject) => {
@@ -569,6 +571,13 @@ export const writeReadOffsetBeyondLength = {
         resolve();
       });
     });
+    await new Promise((resolve, reject) => {
+      read(fd, dest, 65, 0, 0, (err, bytesRead) => {
+        if (err) return reject(err);
+        strictEqual(bytesRead, 0);
+        resolve();
+      });
+    });
     closeSync(fd);
 
     const handle = await promises.open('/tmp/test.txt', 'r+');
@@ -576,6 +585,7 @@ export const writeReadOffsetBeyondLength = {
     strictEqual((await handle.read(dest, 40, 2, 15)).bytesRead, 2);
     strictEqual((await handle.read(dest, 62)).bytesRead, 2);
     strictEqual((await handle.read(destView, 12, 4, 15)).bytesRead, 2);
+    strictEqual((await handle.read(dest, 65, 0, 0)).bytesRead, 0);
     await handle.close();
   },
 };

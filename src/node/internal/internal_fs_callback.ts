@@ -874,7 +874,8 @@ export function read<T extends NodeJS.ArrayBufferView>(
   if (
     actualOffset < 0 ||
     actualLength < 0 ||
-    actualOffset + actualLength > actualBuffer.byteLength
+    (actualLength !== 0 &&
+      actualOffset + actualLength > actualBuffer.byteLength)
   ) {
     throw new ERR_INVALID_ARG_VALUE(
       'offset',
