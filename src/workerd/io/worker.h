@@ -900,6 +900,7 @@ class Worker::Actor final: public kj::Refcounted {
     virtual void acceptWebSocket(jsg::Ref<api::WebSocket> ws, kj::ArrayPtr<kj::String> tags) = 0;
     virtual kj::Vector<jsg::Ref<api::WebSocket>> getWebSockets(
         jsg::Lock& js, kj::Maybe<kj::StringPtr> tag) = 0;
+    virtual uint64_t getWebSocketCount() const = 0;
     virtual void hibernateWebSockets(Worker::Lock& lock) = 0;
     virtual void setWebSocketAutoResponse(
         kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) = 0;

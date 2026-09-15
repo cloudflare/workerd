@@ -252,6 +252,10 @@ kj::Vector<jsg::Ref<api::WebSocket>> LegacyHibernationManagerImpl::getWebSockets
   return kj::mv(matches);
 }
 
+uint64_t LegacyHibernationManagerImpl::getWebSocketCount() const {
+  return allWs.size();
+}
+
 void LegacyHibernationManagerImpl::setWebSocketAutoResponse(
     kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) {
   KJ_IF_SOME(req, request) {

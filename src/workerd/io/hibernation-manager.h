@@ -22,6 +22,7 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
   void acceptWebSocket(jsg::Ref<api::WebSocket> ws, kj::ArrayPtr<kj::String> tags) override;
   kj::Vector<jsg::Ref<api::WebSocket>> getWebSockets(
       jsg::Lock& js, kj::Maybe<kj::StringPtr> tag) override;
+  uint64_t getWebSocketCount() const override;
   void hibernateWebSockets(Worker::Lock& lock) override;
   void setWebSocketAutoResponse(
       kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) override;
