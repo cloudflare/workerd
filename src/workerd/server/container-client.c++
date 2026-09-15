@@ -57,6 +57,27 @@ constexpr kj::StringPtr SNAPSHOT_VOLUME_PREFIX = "workerd-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_CLONE_VOLUME_PREFIX = "workerd-snap-clone-"_kj;
 constexpr kj::StringPtr CONTAINER_SNAPSHOT_IMAGE_PREFIX = "workerd-container-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_VOLUME_CREATED_AT_LABEL = "dev.workerd.snapshot-created-at"_kj;
+
+struct ContainerImageAlias {
+  kj::StringPtr alias;
+  kj::StringPtr image;
+};
+
+constexpr ContainerImageAlias CONTAINER_IMAGE_ALIASES[] = {{
+  .alias = "cloudflare/debian-trixie"_kj,
+  .image = "docker.io/library/node:24.20.0-trixie-slim@"
+           "sha256:a747ad80c8a161b650d79a6da9c422005b91148b18b8d2c669eb5a0b7c07e600"_kj,
+}};
+
+kj::StringPtr getContainerImageAlias(kj::StringPtr image) {
+  for (const auto& entry: CONTAINER_IMAGE_ALIASES) {
+    if (entry.image == image) {
+      return entry.alias;
+    }
+  }
+  return image;
+}
+
 constexpr auto SNAPSHOT_STALE_AGE = 30 * kj::DAYS;
 
 // Maximum size of a snapshot tar archive held in memory during snapshot create/restore.
@@ -1798,7 +1819,7 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
-  jsonRoot.setImage(effectiveImage);
+  jsonRoot.setImage(getContainerImageAlias(effectiveImage));
   // Add entrypoint if provided
   KJ_IF_SOME(ep, entrypoint) {
     auto jsonCmd = jsonRoot.initCmd(ep.size());
