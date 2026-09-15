@@ -53,6 +53,7 @@ import {
   EADDRINUSE,
   EADDRNOTAVAIL,
   EPIPE,
+  ENOBUFS,
 } from 'node-internal:internal_errors';
 
 import {
@@ -70,6 +71,7 @@ import {
 } from 'node-internal:validators';
 
 import { isUint8Array, isArrayBufferView } from 'node-internal:internal_types';
+import { nextTick } from 'node-internal:internal_process';
 import { Duplex } from 'node-internal:streams_duplex';
 import { Buffer } from 'node-internal:internal_buffer';
 import {
@@ -102,6 +104,7 @@ const kTimeout = Symbol('kTimeout');
 const kBuffer = Symbol('kBuffer');
 const kBufferCb = Symbol('kBufferCb');
 const kBufferGen = Symbol('kBufferGen');
+const kBufferContinuations = Symbol('kBufferContinuations');
 const kBytesRead = Symbol('kBytesRead');
 const kBytesWritten = Symbol('kBytesWritten');
 const kUpdateTimer = Symbol('kUpdateTimer');
@@ -697,10 +700,14 @@ export declare class Socket extends _Socket {
   };
   [kLastWriteQueueSize]: number | null | undefined;
   [kTimeout]: Socket | null | undefined;
-  [kBuffer]: null | boolean | Uint8Array;
+  [kBuffer]: null | boolean;
   [kBufferCb]:
     null | undefined | ((len?: number, buf?: Buffer) => boolean | Uint8Array);
   [kBufferGen]: null | (() => undefined | Uint8Array);
+  // For an onread buffer: each view the caller has handed to the read loop,
+  // mapped to the loop's view over the backing store that view's BYOB read
+  // transferred it to (the same range of it). See startRead.
+  [kBufferContinuations]: null | WeakMap<Uint8Array, Uint8Array>;
   [kSocketInfo]: null | {
     address?: string;
     port?: number;
@@ -718,7 +725,17 @@ export declare class Socket extends _Socket {
   _handle: null | {
     writeQueueSize?: number;
     lastWriteQueueSize?: number;
+    // Whether the socket wants to be reading (pause/resume state).
     reading: boolean | undefined;
+    // Set while startRead's loop is running over this handle, so that the
+    // several places that start reading (connect, resume, read, a TLS
+    // upgrade) never run two loops — and thus two BYOB reads — against the
+    // same reader at once.
+    readLoopActive?: boolean;
+    // Set by a TLS upgrade before it releases this handle's reader and
+    // writer and carries the connection over to a new handle: the read
+    // loop's pending read then rejects, which is not a failure.
+    handedOver?: boolean;
     bytesRead: number;
     bytesWritten: number;
     socket: ReturnType<typeof inner.connect>;
@@ -854,6 +871,7 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   this[kBuffer] = null;
   this[kBufferCb] = null;
   this[kBufferGen] = null;
+  this[kBufferContinuations] = null;
   this[kSocketInfo] = null;
   this[kBytesRead] = 0;
   this[kBytesWritten] = 0;
@@ -902,12 +920,16 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
     typeof onread.callback === 'function'
   ) {
     if (typeof onread.buffer === 'function') {
-      this[kBuffer] = true;
       this[kBufferGen] = onread.buffer;
     } else {
-      this[kBuffer] = onread.buffer;
-      this[kBufferGen] = (): Uint8Array | undefined => onread.buffer;
+      const { buffer } = onread;
+      this[kBufferGen] = (): Uint8Array => buffer;
     }
+    this[kBuffer] = true;
+    // The read loop's BYOB reads transfer the buffers they are handed, so a
+    // caller reusing one — a fixed buffer, or a generator handing out the
+    // same buffers again — is continued over the store it moved to.
+    this[kBufferContinuations] = new WeakMap();
     // eslint-disable-next-line @typescript-eslint/unbound-method
     this[kBufferCb] = onread.callback;
   } else {
@@ -938,17 +960,31 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
 Object.setPrototypeOf(Socket.prototype, Duplex.prototype);
 Object.setPrototypeOf(Socket, Duplex);
 
+// Restarts the idle timer (of this socket and of any wrapping TLS socket)
+// after activity, keeping the 'timeout' listeners as they are. A socket
+// whose timeout is disabled holds no timer (kTimeout is null, see
+// clearSocketTimers), so there is nothing to restart.
 Socket.prototype._unrefTimer = function _unrefTimer(this: Socket): void {
   // eslint-disable-next-line @typescript-eslint/no-this-alias
   for (let s: Socket | null = this; s != null; s = s._parentWrap) {
     if (s[kTimeout] != null) {
       clearTimeout(s[kTimeout] as unknown as number);
-      s[kTimeout] = this.setTimeout(s.timeout, (): void => {
+      s[kTimeout] = setTimeout((): void => {
         s._onTimeout();
-      });
+      }, s.timeout) as unknown as Socket;
     }
   }
 };
+
+// Disables the idle timer of this socket and of any wrapping TLS socket.
+// kTimeout is cleared as well as the timer, so that later activity
+// (_unrefTimer) does not arm a new one.
+function clearSocketTimers(socket: Socket): void {
+  for (let s: Socket | null = socket; s != null; s = s._parentWrap) {
+    clearTimeout(s[kTimeout] as unknown as number);
+    s[kTimeout] = null;
+  }
+}
 
 Socket.prototype.setTimeout = function (
   this: Socket,
@@ -965,6 +1001,7 @@ Socket.prototype.setTimeout = function (
   // Attempt to clear an existing timer in both cases -
   // even if it will be rescheduled we don't want to leak an existing timer.
   clearTimeout(this[kTimeout] as unknown as number);
+  this[kTimeout] = null;
 
   if (msecs === 0) {
     if (callback !== undefined) {
@@ -1136,28 +1173,10 @@ Socket.prototype._writeGeneric = function (
         (err: unknown): void => {
           this[kLastWriteQueueSize] = 0;
           this._unrefTimer();
-
-          // Think of the following code:
-          //
-          // const socket = net.connect(env.SERVER_THAT_DIES_PORT);
-          // socket.on('end', () => {
-          //   strictEqual(socket.writable, true);
-          //   socket.write('hello world');
-          //   resolve();
-          // });
-          //
-          // If we don't omit the error message for CLOSED, socket.write()
-          // will throw an error. This is not compliant with Node.js behavior.
-          if (
-            (err as Error).message !== 'This WritableStream has been closed.'
-          ) {
-            cb(err as Error);
-          } else {
-            cb();
-          }
+          cb(err as Error);
         }
       );
-      lastWriteSize = (data as unknown as Buffer).byteLength;
+      lastWriteSize = bufferData.byteLength;
     }
     this[kLastWriteQueueSize] = lastWriteSize;
   } catch (err) {
@@ -1327,10 +1346,7 @@ Socket.prototype._destroy = function (
 ): void {
   this.connecting = false;
 
-  // eslint-disable-next-line @typescript-eslint/no-this-alias
-  for (let s: Socket | null = this; s !== null; s = s._parentWrap) {
-    clearTimeout(s[kTimeout] as unknown as number);
-  }
+  clearSocketTimers(this);
 
   releaseBoundSource(this);
 
@@ -1673,12 +1689,19 @@ function cleanupAfterDestroy(
   socket[kLastWriteQueueSize] = 0;
   socket[kSocketInfo] = null;
 
-  // If there's an error, emit it before the close event
+  if (cb != null) {
+    // The Duplex destroy machinery emits 'error' from its callback on the
+    // next tick. emitClose is off for sockets, so 'close' (with hadError)
+    // is emitted here, queued behind that 'error'.
+    cb(error);
+    nextTick(() => socket.emit('close', isException));
+    return;
+  }
+
+  // No destroy callback (a handle being replaced): emit both directly.
   if (error != null) {
     socket.emit('error', error);
   }
-
-  cb?.(error);
   socket.emit('close', isException);
 }
 
@@ -1795,7 +1818,13 @@ function initializeConnection(
       socket[kBoundSource] = concreteLocal(socket[kBoundSource]);
 
       const handle = inner.connect(`${host}:${port}`, {
-        allowHalfOpen: socket.allowHalfOpen,
+        // The Duplex owns the half-open policy: with allowHalfOpen false,
+        // Readable's endReadableNT schedules endWritableNT, which calls end()
+        // a tick after 'end' and so flushes whatever was queued (the socket's
+        // own 'end' listener, onReadableStreamEnd, only installs writeAfterFIN
+        // to refuse later writes). The connect() socket must not race it by
+        // closing the writable half on EOF as well.
+        allowHalfOpen: true,
         // A Node.js socket is always capable of being upgraded to the TLS socket.
         secureTransport: socket.encrypted ? 'on' : 'starttls',
         // We are not going to pass the high water-mark here. The outer Node.js
@@ -1904,50 +1933,64 @@ export function onConnectionOpened(this: Socket): void {
 }
 
 export function onConnectionClosed(this: Socket): void {
-  if (this._handle?.socket.upgraded) {
+  const handle = this._handle;
+  if (handle?.socket.upgraded) {
     // The socket is being upgraded from insecure to TLS.
     // No need to handle this particular close event.
     return;
   }
-  // eslint-disable-next-line @typescript-eslint/no-this-alias
-  for (let s: Socket | null = this; s !== null; s = s._parentWrap) {
-    clearTimeout(s[kTimeout] as unknown as number);
+  clearSocketTimers(this);
+
+  if (this.destroyed || handle == null || handle.readLoopActive) {
+    // A pending read reports the connection's outcome itself: EOF as its
+    // done result, a failure (a peer's reset) as a rejection that destroys
+    // the socket with the error. Ending the readable here as well would
+    // announce EOF for a connection that failed, and with allowHalfOpen
+    // false go on to end the writable side before the failure is reported.
+    return;
   }
 
-  if (!this.destroyed) {
-    // The read loop may not observe EOF itself (it is idle while paused or
-    // waiting, and read errors are swallowed), so end the readable here;
-    // push(null) is a no-op if it already has. read(0) lets 'end' fire on a
-    // socket nobody is reading, as in Node.
-    this.push(null);
-    this.read(0);
-  }
+  // Nobody is reading (the socket is paused or stopped on backpressure), so
+  // no read will observe the connection's end: end the readable here.
+  // push(null) is a no-op if it already has; read(0) lets 'end' fire on a
+  // socket nobody is reading, as in Node.
+  this.push(null);
+  this.read(0);
 }
 
 async function startRead(socket: Socket): Promise<void> {
   const handle = socket._handle;
-  if (!handle) return;
+  if (!handle || handle.readLoopActive) return;
+  handle.readLoopActive = true;
   const reader = handle.reader;
   try {
     while (handle.reading && socket._handle === handle) {
       const generatedBuffer = socket[kBufferGen]?.();
-
-      // Let's be extra cautious here and handle nullish values.
-      if (generatedBuffer == null || generatedBuffer.length === 0) {
-        // When reading a static buffer with fixed length, it's highly likely to
-        // read the whole buffer in a single take, which will make the second
-        // operation to read an empty buffer.
-        //
-        // Workerd throws the following exception when reading empty buffers
-        // TypeError: You must call read() on a "byob" reader with a positive-sized TypedArray object.
-        // Therefore, let's skip calling read operation and stop reading here.
-        break;
+      if (!isUint8Array(generatedBuffer)) {
+        throw new ERR_INVALID_ARG_TYPE(
+          'onread.buffer',
+          ['Buffer', 'Uint8Array'],
+          generatedBuffer
+        );
+      }
+      // A view the loop has read into before was detached by that read's
+      // transfer of its buffer. Handed out again — a fixed onread buffer, or a
+      // generator reusing its buffers, as Node's in-place fills allow — it
+      // means the same range of the store the buffer moved to, which the
+      // loop kept as the view's continuation.
+      const view =
+        socket[kBufferContinuations]?.get(generatedBuffer) ?? generatedBuffer;
+      if (view.byteLength === 0) {
+        throw new ENOBUFS();
       }
 
-      // The [kBufferGen] function should always be a function that returns
-      // a Uint8Array we can read into.
+      // The view's range within its buffer, taken before the read: a BYOB
+      // read transfers the buffer and detaches the view, which then reports
+      // neither.
+      const { byteOffset: viewOffset, byteLength: viewLength } = view;
+
       const { value, done } = await reader.read(
-        generatedBuffer as Uint8Array<ArrayBuffer>
+        view as Uint8Array<ArrayBuffer>
       );
 
       // Make sure the socket was not destroyed or reconnected while we were
@@ -1968,8 +2011,27 @@ async function startRead(socket: Socket): Promise<void> {
         // should allow the current write queue to drain but not allow any
         // further writes to be queued.
         socket.push(null);
+        // As in Node's onStreamRead: with nothing buffered, EOF must surface
+        // as 'end' right away, even when nobody is consuming the socket. The
+        // Readable's own read(0) does that; the socket's read() override
+        // would try to start reading again.
+        Duplex.prototype.read.call(socket, 0);
         break;
       }
+
+      // The BYOB read transferred the view's buffer. Continue the caller's
+      // view over the transferred backing store as a view of the same range
+      // — the caller's offset and capacity, not the whole allocation — so a
+      // read into it again fills exactly the region the caller handed out. A
+      // store the read left too small for that range (detached or shrunk
+      // while the read was pending, which only a non-transferring read can
+      // see) is continued as an empty view, so reading into it is ENOBUFS.
+      socket[kBufferContinuations]?.set(
+        generatedBuffer,
+        viewOffset + viewLength <= value.buffer.byteLength
+          ? new Uint8Array(value.buffer, viewOffset, viewLength)
+          : new Uint8Array(0)
+      );
 
       // If the byteLength is zero, skip the push.
       if (value.byteLength === 0) {
@@ -2002,11 +2064,18 @@ async function startRead(socket: Socket): Promise<void> {
         break;
       }
     }
-  } catch (_err) {
-    // Ignore error, and don't log them.
-    // This is mostly triggered for invalid sockets with following errors:
-    // - "This ReadableStream belongs to an object that is closing."
+  } catch (err) {
+    // A pending read rejects when the socket is destroyed (its stream is
+    // closing) or when a TLS upgrade releases this loop's reader (the
+    // handle is handed over; the parent socket keeps pointing at it):
+    // neither is news. Anything else — a failing generator or buffer
+    // (above), a read the runtime refuses — destroys the socket with the
+    // error rather than leaving it open and silent.
+    if (socket._handle === handle && !handle.handedOver && !socket.destroyed) {
+      socket.destroy(err as Error);
+    }
   } finally {
+    handle.readLoopActive = false;
     handle.reading = false;
   }
 }

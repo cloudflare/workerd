@@ -1,8 +1,9 @@
 # src/tests/node/
 
 Test suites for the parts of the Node.js compatibility layer (`src/node/`)
-that sit on top of the Web Streams implementation, starting with the
-`node:stream` web-interop adapters. One subdirectory per area. Every test
+that sit on top of the Web Streams implementation: the `node:stream`
+web-interop adapters and `node:net` sockets over `connect()` stream
+halves. One subdirectory per area. Every test
 here runs against **both** streams implementations — the legacy C++ one
 (`src/workerd/api/streams/`) and the TypeScript one
 (`src/per_isolate/webstreams/`) — to prove the node layer behaves
@@ -35,12 +36,15 @@ tests plus the divergence ledger. Read that file first.
   The TypeScript implementation does not consult the flag.
 - `nodejs_compat` is date-enabled (2026-08-04) and is pinned explicitly so
   the `@` variant (2000-01-01) still loads `node:*`.
+- Suites that talk to a peer use a node sidecar (`js_binary` +
+  `sidecar_port_bindings`), following `src/tests/streams/sockets/`.
 
 ## Suites
 
 | Directory | Subject | Peer |
 | --- | --- | --- |
 | `stream/` | `Readable/Writable/Duplex.toWeb/fromWeb`, `pipeline`, `stream/web`, `stream/consumers` | none |
+| `net/` | `net.Socket` over the `connect()` socket's BYOB reader and writer | node sidecar TCP servers |
 
 ## Running
 
