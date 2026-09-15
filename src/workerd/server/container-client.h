@@ -86,7 +86,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       kj::Network& network,
       kj::String dockerPath,
       kj::String containerName,
-      kj::String imageName,
+      kj::Maybe<kj::String> imageName,
       kj::String containerEgressInterceptorImage,
       kj::TaskSet& waitUntilTasks,
       kj::Promise<void> pendingCleanup,
@@ -124,7 +124,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::String dockerPath;
   kj::String containerName;
   kj::String sidecarContainerName;
-  kj::String imageName;
+  kj::Maybe<kj::String> imageName;
 
   // Container egress interceptor image name (sidecar for egress proxy)
   kj::String containerEgressInterceptorImage;
@@ -172,12 +172,6 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
     kj::String cloneVolume;
   };
 
-  struct ImageInspectResponse {
-    kj::String id;
-    uint64_t size;
-    kj::String parent;
-  };
-
   struct ExecInspectResponse {
     int32_t exitCode;
     bool running;
@@ -213,7 +207,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> createVolume(kj::StringPtr volumeName);
   kj::Promise<void> deleteVolume(kj::String volumeName);
   kj::Promise<void> commitContainer(kj::StringPtr imageRef);
-  kj::Promise<ImageInspectResponse> inspectImage(kj::StringPtr imageRef);
+  kj::Promise<uint64_t> inspectImageSize(kj::StringPtr imageRef);
   kj::Promise<void> deleteImage(kj::String imageRef);
   kj::Promise<kj::String> createTempContainerWithVolume(
       kj::StringPtr volumeName, kj::StringPtr mountPath);

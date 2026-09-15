@@ -37,11 +37,32 @@ const unitTests :Workerd.Config = (
                 ),
               ],
             ) ),
+          ( className = "NamedImagesOnlyDurableObject",
+            uniqueKey = "container-client-test-NamedImagesOnlyDurableObject",
+            container = (
+              images = [
+                (
+                  name = "app",
+                  image = "cloudflare/workerd/container-client-test",
+                ),
+              ],
+            ) ),
+          ( className = "EmptyContainerDurableObject",
+            uniqueKey = "container-client-test-EmptyContainerDurableObject",
+            container = () ),
+          ( className = "SnapshotRestoreWithDifferentDefaultDurableObject",
+            uniqueKey = "container-client-test-SnapshotRestoreWithDifferentDefaultDurableObject",
+            container = (
+              imageName = "cloudflare/proxy-everything:main",
+            ) ),
         ],
         durableObjectStorage = (localDisk = "TEST_TMPDIR"),
         bindings = [
           ( name = "MY_CONTAINER", durableObjectNamespace = "DurableObjectExample" ),
           ( name = "MY_DUPLICATE_CONTAINER", durableObjectNamespace = "DurableObjectExample2" ),
+          ( name = "MY_NAMED_IMAGES_ONLY_CONTAINER", durableObjectNamespace = "NamedImagesOnlyDurableObject" ),
+          ( name = "MY_EMPTY_CONTAINER", durableObjectNamespace = "EmptyContainerDurableObject" ),
+          ( name = "MY_DIFFERENT_DEFAULT_CONTAINER", durableObjectNamespace = "SnapshotRestoreWithDifferentDefaultDurableObject" ),
         ],
       )
     ),

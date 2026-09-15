@@ -346,9 +346,21 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   auto flags = FeatureFlags::get(js);
   JSG_REQUIRE(
       !getRunning(), Error, "start() cannot be called on a container that is already running.");
-  invalidateTcpPortStates();
 
   StartupOptions options = kj::mv(maybeOptions).orDefault({});
+
+  JSG_REQUIRE(options.image == kj::none || options.containerSnapshot == kj::none, TypeError,
+      "`image` and `containerSnapshot` are mutually exclusive.");
+
+  KJ_IF_SOME(image, options.image) {
+    JSG_REQUIRE(image.size() > 0, TypeError, "Container image reference cannot be empty.");
+  }
+  KJ_IF_SOME(containerSnapshot, options.containerSnapshot) {
+    JSG_REQUIRE(
+        containerSnapshot.id.size() > 0, TypeError, "Container snapshot ID cannot be empty.");
+  }
+
+  invalidateTcpPortStates();
 
   auto req = rpcClient->startRequest();
   KJ_IF_SOME(spanContext, IoContext::current().getCurrentTraceSpan().toSpanContext()) {
@@ -372,8 +384,6 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
     }
   }
 
-  JSG_REQUIRE(options.image == kj::none || options.containerSnapshot == kj::none, TypeError,
-      "`image` and `containerSnapshot` are mutually exclusive.");
   if (flags.getWorkerdExperimental()) {
     KJ_IF_SOME(hardTimeoutMs, options.hardTimeout) {
       JSG_REQUIRE(hardTimeoutMs > 0, RangeError, "Hard timeout must be greater than 0");
