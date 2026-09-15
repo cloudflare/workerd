@@ -121,6 +121,13 @@ interface Outcome {
   readonly wallTime: number;
 }
 
+type SpanStatusCode = "unset" | "ok" | "error";
+
+interface SpanStatus {
+  readonly code: SpanStatusCode;
+  readonly message?: string;
+}
+
 interface SpanOpen {
   readonly type: "spanOpen";
   readonly name: string;
@@ -132,6 +139,15 @@ interface SpanOpen {
 interface SpanClose {
   readonly type: "spanClose";
   readonly outcome: EventOutcome;
+}
+
+type SpanUpdateInfo =
+  | { readonly type: "name"; readonly name: string }
+  | { readonly type: "status"; readonly status: SpanStatus };
+
+interface SpanUpdate {
+  readonly type: "spanUpdate";
+  readonly info: SpanUpdateInfo;
 }
 
 interface DiagnosticChannelEvent {
@@ -198,6 +214,7 @@ type EventType =
   | Outcome
   | SpanOpen
   | SpanClose
+  | SpanUpdate
   | DiagnosticChannelEvent
   | Exception
   | Log
@@ -244,6 +261,7 @@ type TailEventHandlerObject = {
   outcome?: TailEventHandler<Outcome>;
   spanOpen?: TailEventHandler<SpanOpen>;
   spanClose?: TailEventHandler<SpanClose>;
+  spanUpdate?: TailEventHandler<SpanUpdate>;
   diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
   exception?: TailEventHandler<Exception>;
   log?: TailEventHandler<Log>;

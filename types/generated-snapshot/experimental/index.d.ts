@@ -4880,7 +4880,14 @@ declare abstract class Span {
           stack?: string;
         },
   ): void;
+  updateName(name: string): this;
+  setStatus(status: TracingSpanStatus): this;
   end(): void;
+}
+type TracingSpanStatusCode = "unset" | "ok" | "error";
+interface TracingSpanStatus {
+  code: TracingSpanStatusCode;
+  message?: string;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.
@@ -17142,6 +17149,11 @@ declare namespace TailStream {
     readonly cpuTime: number;
     readonly wallTime: number;
   }
+  type SpanStatusCode = "unset" | "ok" | "error";
+  interface SpanStatus {
+    readonly code: SpanStatusCode;
+    readonly message?: string;
+  }
   interface SpanOpen {
     readonly type: "spanOpen";
     readonly name: string;
@@ -17152,6 +17164,19 @@ declare namespace TailStream {
   interface SpanClose {
     readonly type: "spanClose";
     readonly outcome: EventOutcome;
+  }
+  type SpanUpdateInfo =
+    | {
+        readonly type: "name";
+        readonly name: string;
+      }
+    | {
+        readonly type: "status";
+        readonly status: SpanStatus;
+      };
+  interface SpanUpdate {
+    readonly type: "spanUpdate";
+    readonly info: SpanUpdateInfo;
   }
   interface DiagnosticChannelEvent {
     readonly type: "diagnosticChannel";
@@ -17222,6 +17247,7 @@ declare namespace TailStream {
     | Outcome
     | SpanOpen
     | SpanClose
+    | SpanUpdate
     | DiagnosticChannelEvent
     | Exception
     | Log
@@ -17264,6 +17290,7 @@ declare namespace TailStream {
     outcome?: TailEventHandler<Outcome>;
     spanOpen?: TailEventHandler<SpanOpen>;
     spanClose?: TailEventHandler<SpanClose>;
+    spanUpdate?: TailEventHandler<SpanUpdate>;
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;

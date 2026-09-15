@@ -61,6 +61,43 @@ void addBigEndianBytes(kj::Vector<byte>& out, uint64_t v) {
 };
 }  // namespace
 
+SpanStatus::SpanStatus(rpc::SpanStatus::Reader reader) {
+  switch (reader.getCode()) {
+    case SpanStatusCode::UNSET:
+      break;
+    case SpanStatusCode::OK:
+      code = SpanStatusCode::OK;
+      break;
+    case SpanStatusCode::ERROR: {
+      code = SpanStatusCode::ERROR;
+      auto message = reader.getMessage();
+      if (message.isText()) {
+        this->message = kj::ConstString(kj::heapString(message.getText()));
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+void SpanStatus::copyTo(rpc::SpanStatus::Builder builder) const {
+  builder.setCode(code);
+  auto messageBuilder = builder.initMessage();
+  KJ_IF_SOME(value, message) {
+    messageBuilder.setText(value.asPtr());
+  }
+}
+
+SpanStatus SpanStatus::clone() const {
+  return SpanStatus(code, message.map([](const kj::ConstString& value) { return value.clone(); }));
+}
+
+size_t SpanStatus::size() const {
+  return sizeof(code) +
+      message.map([](const kj::ConstString& value) { return value.size(); }).orDefault(0);
+}
+
 // Reference: https://github.com/jaegertracing/jaeger/blob/e46f8737/model/ids.go#L58
 kj::Maybe<TraceId> TraceId::fromGoString(kj::ArrayPtr<const char> s) {
   auto n = s.size();
@@ -286,6 +323,9 @@ kj::String KJ_STRINGIFY(const TailEvent::Event& event) {
     }
     KJ_CASE_ONEOF(spanClose, SpanClose) {
       return spanClose.toString();
+    }
+    KJ_CASE_ONEOF(spanUpdate, SpanUpdate) {
+      return spanUpdate.toString();
     }
     KJ_CASE_ONEOF(diagnosticChannelEvent, DiagnosticChannelEvent) {
       return kj::str("diagnosticChannelEvent");
@@ -1379,6 +1419,70 @@ kj::String SpanClose::toString() const {
   return kj::str("SpanClose: ", outcome);
 }
 
+SpanUpdate::SpanUpdate(kj::ConstString operationName): info(kj::mv(operationName)) {}
+
+SpanUpdate::SpanUpdate(SpanStatus status): info(kj::mv(status)) {}
+
+SpanUpdate::SpanUpdate(rpc::Trace::SpanUpdate::Reader reader)
+    : info([&]() -> Info {
+        auto update = reader.getInfo();
+        switch (update.which()) {
+          case rpc::Trace::SpanUpdate::Info::NAME:
+            return kj::ConstString(kj::str(update.getName()));
+          case rpc::Trace::SpanUpdate::Info::STATUS:
+            return SpanStatus(update.getStatus());
+        }
+        KJ_UNREACHABLE;
+      }()) {}
+
+void SpanUpdate::copyTo(rpc::Trace::SpanUpdate::Builder builder) const {
+  auto update = builder.initInfo();
+  KJ_SWITCH_ONEOF(info) {
+    KJ_CASE_ONEOF(operationName, kj::ConstString) {
+      update.setName(operationName.asPtr());
+    }
+    KJ_CASE_ONEOF(status, SpanStatus) {
+      status.copyTo(update.initStatus());
+    }
+  }
+}
+
+SpanUpdate SpanUpdate::clone() const {
+  KJ_SWITCH_ONEOF(info) {
+    KJ_CASE_ONEOF(operationName, kj::ConstString) {
+      return SpanUpdate(operationName.clone());
+    }
+    KJ_CASE_ONEOF(status, SpanStatus) {
+      return SpanUpdate(status.clone());
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::String SpanUpdate::toString() const {
+  KJ_SWITCH_ONEOF(info) {
+    KJ_CASE_ONEOF(operationName, kj::ConstString) {
+      return kj::str("SpanUpdate: name = ", operationName);
+    }
+    KJ_CASE_ONEOF(status, SpanStatus) {
+      return kj::str("SpanUpdate: status = ", static_cast<uint>(status.code));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+size_t SpanUpdate::size() const {
+  KJ_SWITCH_ONEOF(info) {
+    KJ_CASE_ONEOF(operationName, kj::ConstString) {
+      return operationName.size();
+    }
+    KJ_CASE_ONEOF(status, SpanStatus) {
+      return status.size();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 Onset::Info readOnsetInfo(const rpc::Trace::Onset::Info::Reader& info) {
   switch (info.which()) {
     case rpc::Trace::Onset::Info::FETCH: {
@@ -1688,6 +1792,9 @@ TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Reader& rea
     case rpc::Trace::TailEvent::Event::SPAN_CLOSE: {
       return SpanClose(event.getSpanClose());
     }
+    case rpc::Trace::TailEvent::Event::SPAN_UPDATE: {
+      return SpanUpdate(event.getSpanUpdate());
+    }
     case rpc::Trace::TailEvent::Event::ATTRIBUTE: {
       auto listReader = event.getAttribute();
       kj::Vector<Attribute> attrs(listReader.size());
@@ -1742,6 +1849,9 @@ void TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
     KJ_CASE_ONEOF(close, SpanClose) {
       close.copyTo(eventBuilder.initSpanClose());
     }
+    KJ_CASE_ONEOF(update, SpanUpdate) {
+      update.copyTo(eventBuilder.initSpanUpdate());
+    }
     KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
       diag.copyTo(eventBuilder.initDiagnosticChannelEvent());
     }
@@ -1781,6 +1891,9 @@ TailEvent TailEvent::clone() const {
       }
       KJ_CASE_ONEOF(close, SpanClose) {
         return close.clone();
+      }
+      KJ_CASE_ONEOF(update, SpanUpdate) {
+        return update.clone();
       }
       KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
         return diag.clone();
@@ -1889,6 +2002,14 @@ void SpanBuilder::setOperationName(kj::ConstString operationName) {
       observer->onUpdateName(operationName.clone());
     }
     s.operationName = kj::mv(operationName);
+  }
+}
+
+void SpanBuilder::setStatus(tracing::SpanStatus status) {
+  KJ_IF_SOME(_, span) {
+    if (observer != nullptr) {
+      observer->onUpdateStatus(kj::mv(status));
+    }
   }
 }
 

@@ -576,6 +576,36 @@ KJ_TEST("Read/Write SpanClose works") {
   KJ_ASSERT(info3.outcome == EventOutcome::EXCEPTION);
 }
 
+KJ_TEST("Read/Write SpanUpdate name works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::SpanUpdate>();
+  SpanUpdate info(kj::ConstString(kj::str("renamed")));
+  info.copyTo(infoBuilder);
+
+  SpanUpdate info2(infoBuilder.asReader());
+  KJ_ASSERT(info2.info.get<kj::ConstString>() == "renamed");
+
+  SpanUpdate info3 = info.clone();
+  KJ_ASSERT(info3.info.get<kj::ConstString>() == "renamed");
+}
+
+KJ_TEST("Read/Write SpanUpdate status works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::SpanUpdate>();
+  SpanUpdate info(SpanStatus(SpanStatusCode::ERROR, kj::ConstString(kj::str("failed"))));
+  info.copyTo(infoBuilder);
+
+  SpanUpdate info2(infoBuilder.asReader());
+  auto& status2 = info2.info.get<SpanStatus>();
+  KJ_ASSERT(status2.code == SpanStatusCode::ERROR);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(status2.message) == "failed");
+
+  SpanUpdate info3 = info.clone();
+  auto& status3 = info3.info.get<SpanStatus>();
+  KJ_ASSERT(status3.code == SpanStatusCode::ERROR);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(status3.message) == "failed");
+}
+
 KJ_TEST("Read/Write Onset works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Onset>();

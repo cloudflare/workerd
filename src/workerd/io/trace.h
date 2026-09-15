@@ -38,6 +38,26 @@ class Trace;
 namespace tracing {
 WD_STRONG_BOOL(LogTruncated);
 
+using SpanStatusCode = rpc::SpanStatusCode;
+
+struct SpanStatus {
+  SpanStatus() = default;
+  explicit SpanStatus(SpanStatusCode code, kj::Maybe<kj::ConstString> message = kj::none)
+      : code(code),
+        message(kj::mv(message)) {}
+  SpanStatus(rpc::SpanStatus::Reader reader);
+  SpanStatus(SpanStatus&&) noexcept = default;
+  SpanStatus& operator=(SpanStatus&&) = default;
+  KJ_DISALLOW_COPY(SpanStatus);
+
+  SpanStatusCode code = SpanStatusCode::UNSET;
+  kj::Maybe<kj::ConstString> message;
+
+  void copyTo(rpc::SpanStatus::Builder builder) const;
+  SpanStatus clone() const;
+  size_t size() const;
+};
+
 // A 128-bit globally unique trace identifier. This will be used for both
 // external and internal tracing. Specifically, for internal tracing, this
 // is used to represent tracing IDs for jaeger traces. For external tracing,
@@ -853,6 +873,24 @@ struct SpanClose final {
   kj::String toString() const;
 };
 
+struct SpanUpdate final {
+  using Info = kj::OneOf<kj::ConstString, SpanStatus>;
+
+  explicit SpanUpdate(kj::ConstString operationName);
+  explicit SpanUpdate(SpanStatus status);
+  SpanUpdate(rpc::Trace::SpanUpdate::Reader reader);
+  SpanUpdate(SpanUpdate&&) noexcept = default;
+  SpanUpdate& operator=(SpanUpdate&&) = default;
+  KJ_DISALLOW_COPY(SpanUpdate);
+
+  Info info;
+
+  void copyTo(rpc::Trace::SpanUpdate::Builder builder) const;
+  SpanUpdate clone() const;
+  kj::String toString() const;
+  size_t size() const;
+};
+
 // The Onset and Outcome event types are special forms of SpanOpen and
 // SpanClose that explicitly mark the start and end of the root span.
 // A streaming tail session will always begin with an Onset event, and
@@ -915,15 +953,16 @@ struct Outcome final {
 // A streaming tail worker receives a series of Tail Events. Tail events always
 // occur within an InvocationSpanContext. The first TailEvent delivered to a
 // streaming tail session is always an Onset. The final TailEvent delivered is
-// always an Outcome. Between those can be any number of SpanOpen, SpanClose,
-// and Mark events. Every SpanOpen *must* be associated with a SpanClose unless
-// the stream was abruptly terminated.
+// always an Outcome. Between those can be any number of SpanOpen, SpanUpdate,
+// SpanClose, and Mark events. Every SpanOpen *must* be associated with a
+// SpanClose unless the stream was abruptly terminated.
 // A future version may add support for Link events again.
 struct TailEvent final {
   using Event = kj::OneOf<Onset,
       Outcome,
       SpanOpen,
       SpanClose,
+      SpanUpdate,
       DiagnosticChannelEvent,
       Exception,
       Log,
@@ -1233,6 +1272,8 @@ class SpanBuilder {
   // `operationName` should be a string literal with infinite lifetime.
   void setOperationName(kj::ConstString operationName);
 
+  void setStatus(tracing::SpanStatus status);
+
   using TagValue = Span::TagValue;
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
@@ -1276,7 +1317,7 @@ class SpanBuilder {
 //
 // A new SpanObserver is created at the start of each Span. The SpanBuilder drives the observer
 // through its lifecycle: onOpen() is called when the span is created, onClose() when the span
-// ends, and onUpdateName() if the operation name changes between open and close.
+// ends, and update methods are called when mutable properties change between open and close.
 class SpanObserver: public kj::Refcounted {
  public:
   // Allocate a new child span.
@@ -1310,6 +1351,8 @@ class SpanObserver: public kj::Refcounted {
   // SpanBuilder::setOperationName()). Observers that eagerly stream the open event should handle
   // this; others may simply update their buffered state. Default implementation is a no-op.
   virtual void onUpdateName(kj::ConstString operationName) {}
+
+  virtual void onUpdateStatus(tracing::SpanStatus&& status) {}
 
   // The current time to be provided for the span. For user tracing, we will override this to
   // provide I/O time. This *requires* that spans are only created when an IOContext is available
