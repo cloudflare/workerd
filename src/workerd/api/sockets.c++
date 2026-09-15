@@ -318,20 +318,25 @@ DisconnectWatcher watchForDisconnect(kj::AsyncIoStream& connection) {
 // call and enqueues exactly what came back as one Datagram chunk. Uses
 // JsReadableStream::fromPull() rather than create(), since create() requires a byte-oriented
 // ReadableStreamSource.
-JsReadableStream newDatagramReadableStream(jsg::Lock& js, IoOwn<DatagramChannel> channel) {
+JsReadableStream newDatagramReadableStream(
+    jsg::Lock& js, IoOwn<DatagramChannel> channel, jsg::Promise<void>::Resolver eofResolver) {
   return JsReadableStream::fromPull(js,
-      [channel = kj::mv(channel)](jsg::Lock& js) mutable -> jsg::Promise<kj::Maybe<jsg::Value>> {
-    auto& ioContext = IoContext::current();
-    return ioContext.awaitIo(js, channel->receive(),
-        [](jsg::Lock& js, kj::Maybe<kj::Array<kj::byte>> datagram) -> kj::Maybe<jsg::Value> {
-      KJ_IF_SOME(bytes, datagram) {
-        auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Datagram>>());
-        auto data = jsg::JsUint8Array::create(js, bytes.asPtr());
-        return js.v8Ref<v8::Value>(handler.wrap(js, js.alloc<Datagram>(js, data)));
-      }
-      return kj::none;
-    });
-  });
+      JSG_VISITABLE_LAMBDA((channel = kj::mv(channel), eofResolver = kj::mv(eofResolver)),
+          (eofResolver), (jsg::Lock & js) mutable->jsg::Promise<kj::Maybe<jsg::Value>> {
+            auto& ioContext = IoContext::current();
+            return ioContext.awaitIo(js, channel->receive(),
+                [eofResolver = eofResolver.addRef(js)](jsg::Lock& js,
+                    kj::Maybe<kj::Array<kj::byte>> datagram) mutable -> kj::Maybe<jsg::Value> {
+              KJ_IF_SOME(bytes, datagram) {
+              auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Datagram>>());
+              auto data = jsg::JsUint8Array::create(js, bytes.asPtr());
+              return js.v8Ref<v8::Value>(handler.wrap(js, js.alloc<Datagram>(js, data)));
+              } else {
+              eofResolver.resolve(js);
+              return kj::none;
+              }
+            });
+          }));
 }
 
 // Builds a value-mode WritableStream whose write() sends exactly one outbound datagram per call.
@@ -433,10 +438,11 @@ jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
   auto closedPrPair = js.newPromiseAndResolver<void>();
   closedPrPair.promise.markAsHandled(js);
 
-  JsReadableStream readable(newDatagramReadableStream(js, ioContext.addObject(channel.addRef())));
-  // UDP sockets have no allowHalfOpen option: `closed` always resolves from read-EOF once the
-  // flow ends, mirroring the allowHalfOpen == false behavior for TCP sockets below.
-  auto eofPromise = readable.onEof(js);
+  // Value-mode streams do not emit the native byte stream's onEof signal. The pull callback
+  // reports channel EOF so the Socket can close its writable side after queued sends finish.
+  auto eof = js.newPromiseAndResolver<void>();
+  JsReadableStream readable(
+      newDatagramReadableStream(js, ioContext.addObject(channel.addRef()), kj::mv(eof.resolver)));
 
   auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
   openedPrPair.promise.markAsHandled(js);
@@ -451,7 +457,7 @@ jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
       SecureTransportKind::OFF, SocketProtocol::UDP, kj::none /* domain */,
       false /* isDefaultFetchPort */, kj::mv(openedPrPair));
 
-  result->handleReadableEof(js, kj::mv(eofPromise));
+  result->handleReadableEof(js, kj::mv(eof.promise));
   // The flow already exists by the time a Socket is minted for it, so `opened` resolves
   // immediately, mirroring the inbound TCP connect() handler path.
   result->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));

@@ -9,7 +9,6 @@
 #include <workerd/util/strong-bool.h>
 
 #include <kj/common.h>
-#include <kj/function.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
 
@@ -133,8 +132,9 @@ class JsReadableStream final {
   // TypeScript stream is constructed over a plain (non-native-marked) underlying source,
   // which resolves to its QUEUED backend; otherwise this builds the legacy C++
   // ReadableStreamJsController directly.
+  // GC-visitable pull callbacks keep their captured JavaScript references traceable.
   static JsReadableStream fromPull(
-      jsg::Lock& js, kj::Function<jsg::Promise<kj::Maybe<jsg::Value>>(jsg::Lock&)> pull);
+      jsg::Lock& js, jsg::Function<jsg::Promise<kj::Maybe<jsg::Value>>()> pull);
 
   // Returns a new JsReadableStream sharing this one's underlying stream (and retransmit
   // buffer, if any). Both instances observe the same underlying stream state (e.g. the stream

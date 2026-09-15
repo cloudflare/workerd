@@ -639,23 +639,23 @@ JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::
 }
 
 JsReadableStream JsReadableStream::fromPull(
-    jsg::Lock& js, kj::Function<jsg::Promise<kj::Maybe<jsg::Value>>(jsg::Lock&)> pull) {
+    jsg::Lock& js, jsg::Function<jsg::Promise<kj::Maybe<jsg::Value>>()> pull) {
   if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
     UnderlyingSource underlyingSource;
-    underlyingSource.pull = [pull = kj::mv(pull)](jsg::Lock& js,
-                                UnderlyingSource::Controller c) mutable -> jsg::Promise<void> {
-      auto defaultController =
-          KJ_ASSERT_NONNULL(c.tryGet<jsg::Ref<ReadableStreamDefaultController>>()).addRef();
-      return pull(js).then(js,
-          [defaultController = kj::mv(defaultController)](
-              jsg::Lock& js, kj::Maybe<jsg::Value> value) mutable {
-        KJ_IF_SOME(v, value) {
-          defaultController->enqueue(js, jsg::JsValue(v.getHandle(js)));
-        } else {
-          defaultController->close(js);
-        }
-      });
-    };
+    underlyingSource.pull = JSG_VISITABLE_LAMBDA((pull = kj::mv(pull)), (pull),
+        (jsg::Lock & js, UnderlyingSource::Controller c) mutable->jsg::Promise<void> {
+          auto defaultController =
+              KJ_ASSERT_NONNULL(c.tryGet<jsg::Ref<ReadableStreamDefaultController>>()).addRef();
+          return pull(js).then(js,
+              JSG_VISITABLE_LAMBDA((defaultController = kj::mv(defaultController)),
+                  (defaultController), (jsg::Lock & js, kj::Maybe<jsg::Value> value) mutable {
+                    KJ_IF_SOME(v, value) {
+                    defaultController->enqueue(js, jsg::JsValue(v.getHandle(js)));
+                    } else {
+                    defaultController->close(js);
+                    }
+                  }));
+        });
     return JsReadableStream(ReadableStream::constructor(
         js, kj::mv(underlyingSource), StreamQueuingStrategy{.highWaterMark = 0}));
   }
@@ -663,23 +663,24 @@ JsReadableStream JsReadableStream::fromPull(
   // TypeScript arm: same idea as from()'s TypeScript arm, but driving `pull` directly rather
   // than an async generator's next().
   auto tsPull = js.wrapPromiseReturningFunction(js.v8Context(),
-      [pull = kj::mv(pull)](
-          jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
-    auto controller =
-        jsg::JsRef(js, KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>()));
-    return pull(js).then(js,
-        [controller = kj::mv(controller)](
-            jsg::Lock& js, kj::Maybe<jsg::Value> value) mutable -> jsg::Promise<jsg::Value> {
-      KJ_IF_SOME(v, value) {
-        webstreams::dispatchCall(js, "readableControllerEnqueue",
-            jsg::JsValue(controller.getHandle(js)), jsg::JsValue(v.getHandle(js)));
-      } else {
-        webstreams::dispatchCall(
-            js, "readableControllerClose", jsg::JsValue(controller.getHandle(js)));
-      }
-      return js.resolvedPromise(js.v8Ref<v8::Value>(js.v8Undefined()));
-    });
-  });
+      JSG_VISITABLE_LAMBDA((pull = kj::mv(pull)), (pull),
+          (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
+            auto controller =
+                jsg::JsRef(js, KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>()));
+            return pull(js).then(js,
+                JSG_VISITABLE_LAMBDA((controller = kj::mv(controller)), (controller),
+                    (jsg::Lock & js,
+                        kj::Maybe<jsg::Value> value) mutable->jsg::Promise<jsg::Value> {
+                      KJ_IF_SOME(v, value) {
+                      webstreams::dispatchCall(js, "readableControllerEnqueue",
+                          jsg::JsValue(controller.getHandle(js)), jsg::JsValue(v.getHandle(js)));
+                      } else {
+                      webstreams::dispatchCall(
+                          js, "readableControllerClose", jsg::JsValue(controller.getHandle(js)));
+                      }
+                      return js.resolvedPromise(js.v8Ref<v8::Value>(js.v8Undefined()));
+                    }));
+          }));
 
   auto sourceObj = js.obj();
   sourceObj.set(js, "pull"_kj, jsg::JsValue(tsPull));
