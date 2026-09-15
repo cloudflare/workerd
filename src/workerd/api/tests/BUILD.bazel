@@ -397,6 +397,12 @@ wd_test(
 )
 
 wd_test(
+    src = "r2-jsrpc-response-test.wd-test",
+    args = ["--experimental"],
+    data = ["r2-test.js"],
+)
+
+wd_test(
     src = "r2-jsrpc-test.wd-test",
     args = ["--experimental"],
     data = [
