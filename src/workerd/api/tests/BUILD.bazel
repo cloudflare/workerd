@@ -27,6 +27,12 @@ ts_project(
 )
 
 wd_test(
+    src = "datagram-global-test.wd-test",
+    args = ["--experimental"],
+    data = ["datagram-global-test.js"],
+)
+
+wd_test(
     src = "stdio-writesync-reentry-uaf-test.wd-test",
     args = ["--experimental"],
     data = ["stdio-writesync-reentry-uaf-test.js"],

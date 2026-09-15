@@ -384,7 +384,6 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   FixedLengthStream: typeof FixedLengthStream;
   IdentityTransformStream: typeof IdentityTransformStream;
   HTMLRewriter: typeof HTMLRewriter;
-  Datagram: typeof Datagram;
   Performance: typeof Performance;
   PerformanceEntry: typeof PerformanceEntry;
   PerformanceMark: typeof PerformanceMark;
@@ -3900,10 +3899,6 @@ interface TlsOptions {
 interface SocketInfo {
   remoteAddress?: string;
   localAddress?: string;
-}
-declare class Datagram {
-  constructor(data: Uint8Array);
-  get data(): Uint8Array;
 }
 /**
  * The **`EventSource`** interface is web content's interface to server-sent events.
