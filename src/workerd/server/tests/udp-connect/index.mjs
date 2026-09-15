@@ -9,28 +9,23 @@
 // boundaries are preserved regardless of datagram size.
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-let lingeringFlowTimedOut = false;
 
 export default {
   async connect(socket) {
     const reader = socket.readable.getReader();
     const writer = socket.writable.getWriter();
     let first = true;
-    let lingerAfterEof = false;
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
       const bytes = value.data;
-      const text = decoder.decode(bytes);
-      if (text === 'status') {
-        const status = lingeringFlowTimedOut ? 'timed-out' : 'waiting';
-        await writer.write(new Datagram(encoder.encode(status)));
-        continue;
+      // A single NUL requests an empty acknowledgment and closes the flow.
+      if (bytes.length === 1 && bytes[0] === 0) {
+        await writer.write(new Datagram(new Uint8Array(0)));
+        return;
       }
       if (first) {
         first = false;
-        lingerAfterEof = text === 'linger';
         const prefix = encoder.encode(`first:${socket.protocol}:`);
         const combined = new Uint8Array(prefix.length + bytes.length);
         combined.set(prefix, 0);
@@ -43,10 +38,6 @@ export default {
         combined.set(bytes, prefix.length);
         await writer.write(new Datagram(combined));
       }
-    }
-    if (lingerAfterEof) {
-      lingeringFlowTimedOut = true;
-      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   },
 };

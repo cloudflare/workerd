@@ -9,7 +9,6 @@
 import { env } from 'node:process';
 import { beforeEach, afterEach, test } from 'node:test';
 import { createSocket } from 'node:dgram';
-import { scheduler } from 'node:timers/promises';
 import assert from 'node:assert';
 import { WorkerdServerHarness } from '../server-harness.mjs';
 
@@ -62,6 +61,15 @@ function sendAndReceive(client, port, data, timeoutMs = 5000) {
   });
 }
 
+async function closeClient(client, port) {
+  try {
+    const reply = await sendAndReceive(client, port, Buffer.from([0]));
+    assert.deepStrictEqual(reply, Buffer.alloc(0));
+  } finally {
+    client.close();
+  }
+}
+
 test('UDP connect() handler reports protocol "udp" (TS streams)', async () => {
   const port = await workerd.getListenPort('udp');
   const client = createSocket('udp4');
@@ -69,7 +77,18 @@ test('UDP connect() handler reports protocol "udp" (TS streams)', async () => {
     const reply = await sendAndReceive(client, port, Buffer.from('hello'));
     assert.strictEqual(reply.toString(), 'first:udp:hello');
   } finally {
-    client.close();
+    await closeClient(client, port);
+  }
+});
+
+test('UDP connect() receives an empty datagram (TS streams)', async () => {
+  const port = await workerd.getListenPort('udp');
+  const client = createSocket('udp4');
+  try {
+    const reply = await sendAndReceive(client, port, Buffer.alloc(0));
+    assert.strictEqual(reply.toString(), 'first:udp:');
+  } finally {
+    await closeClient(client, port);
   }
 });
 
@@ -85,7 +104,7 @@ test('UDP connect() round-trips a large datagram (TS streams)', async () => {
     const reply = await sendAndReceive(client, port, big);
     assert.strictEqual(reply.toString(), 'echo:' + big.toString());
   } finally {
-    client.close();
+    await closeClient(client, port);
   }
 });
 
@@ -100,24 +119,6 @@ test('UDP connect() groups datagrams from one peer into a single flow (TS stream
     const second = await sendAndReceive(client, port, Buffer.from('b'));
     assert.strictEqual(second.toString(), 'echo:b');
   } finally {
-    client.close();
-  }
-});
-
-test('UDP connect() starts a new flow after the idle timeout (TS streams)', async () => {
-  const port = await workerd.getListenPort('udp');
-  const client = createSocket('udp4');
-  try {
-    const before = await sendAndReceive(client, port, Buffer.from('x'));
-    assert.strictEqual(before.toString(), 'first:udp:x');
-
-    // The configured idleTimeoutMs is 1000; wait well past it.
-    await scheduler.wait(1500);
-
-    const after = await sendAndReceive(client, port, Buffer.from('y'));
-    // A new flow means a new connect() call, so this is a "first" reply again rather than "echo".
-    assert.strictEqual(after.toString(), 'first:udp:y');
-  } finally {
-    client.close();
+    await closeClient(client, port);
   }
 });

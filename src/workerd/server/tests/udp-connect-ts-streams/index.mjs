@@ -17,6 +17,11 @@ export default {
       const { value, done } = await reader.read();
       if (done) break;
       const bytes = value.data;
+      // A single NUL requests an empty acknowledgment and closes the flow.
+      if (bytes.length === 1 && bytes[0] === 0) {
+        await writer.write(new Datagram(new Uint8Array(0)));
+        return;
+      }
       if (first) {
         first = false;
         const prefix = encoder.encode(`first:${socket.protocol}:`);
