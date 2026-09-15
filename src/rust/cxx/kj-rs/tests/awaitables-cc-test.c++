@@ -337,5 +337,32 @@ KJ_TEST("a stored waker woken by another KJ event re-polls the bridged future be
   promise.wait(ws);
 }
 
+KJ_TEST("a retained Rust waker can wake repeatedly after event-loop destruction") {
+  {
+    kj::EventLoop loop;
+    kj::WaitScope ws(loop);
+    auto promise = new_retained_waker_future_void();
+    KJ_ASSERT(!promise.poll(ws));
+  }
+  KJ_DEFER(clear_retained_waker());
+
+  wake_retained_waker_from_background_thread();
+  wake_retained_waker_from_background_thread();
+}
+
+KJ_TEST("a fulfilled retained waker survives destruction of its executor") {
+  kj::Arc<const kj_rs::ArcWaker> waker = nullptr;
+  {
+    kj::EventLoop loop;
+    kj::WaitScope ws(loop);
+    auto pair = kj_rs::ArcWaker::create(kj::getCurrentThreadExecutor());
+    waker = kj::mv(pair.waker);
+    waker->wake_by_ref();
+    pair.promise.wait(ws);
+  }
+
+  waker->wake_by_ref();
+}
+
 }  // namespace
 }  // namespace kj_rs_demo

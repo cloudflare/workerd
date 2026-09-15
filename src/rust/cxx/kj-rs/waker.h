@@ -123,10 +123,13 @@ class ArcWaker: public kj::AtomicRefcounted, public KjWaker {
   kj::Promise<void> getPromise();
 
   ArcWakerPromiseNode node;
-  const kj::Executor& executor;
+  // The waker may outlive the event loop after Rust retains a clone. Keep the executor object
+  // alive so wake_by_ref() can safely ask whether its loop is current; once the loop is gone,
+  // isCurrent() reports false and the wake falls back to the abandoned fulfiller.
+  kj::Own<const kj::Executor> executor;
   kj::Own<const kj::CrossThreadPromiseFulfiller<void>> fulfiller;
   // Touched only on the owning thread: set at construction, cleared by
-  // ArcWakerPromiseNode::destroy(), read by wake_by_ref() behind `executor.isCurrent()`. A wake
+  // ArcWakerPromiseNode::destroy(), read by wake_by_ref() behind `executor->isCurrent()`. A wake
   // from any other thread never looks at it.
   mutable kj::Maybe<kj::_::Event&> event;
 

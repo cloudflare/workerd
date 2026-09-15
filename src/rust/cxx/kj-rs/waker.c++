@@ -72,7 +72,7 @@ ArcWaker::ArcWaker(kj::Badge<ArcWaker>,
     kj::PromiseCrossThreadFulfillerPair<void> paf,
     kj::Maybe<kj::_::Event&> event)
     : node(kj::mv(paf.promise)),
-      executor(executor),
+      executor(executor.addRef()),
       fulfiller(kj::mv(paf.fulfiller)),
       event(event) {}
 
@@ -89,7 +89,7 @@ void ArcWaker::wake_by_ref() const {
   // ever reads `event`. armDepthFirst() on an event that is already armed, or that is currently
   // firing (a wake from inside the poll), is a no-op or a harmless re-poll respectively: fire()
   // returns without polling once the future is done.
-  if (executor.isCurrent()) {
+  if (executor->isCurrent()) {
     KJ_IF_SOME(e, event) {
       e.armDepthFirst();
       return;
