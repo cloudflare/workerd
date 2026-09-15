@@ -1,0 +1,24 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Legacy-writer combination cell (C++ only): streams_enable_constructors
+# is pinned so streams can be built at all, while capture_async_api_throws
+# and writable_stream_spec_compliant_writer stay off, reproducing the
+# original writer semantics (double close throws synchronously; a
+# releaseLock() from inside strategy.size() does not doom the write; a
+# release leaves a resolved ready promise in place). See legacy-writer.js.
+# The BUILD rule disables the @all-compat-flags variant, which would turn
+# the omitted flags back on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-writable-cpp-legacy-writer",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-writer-main.js"),
+          (name = "legacy-writer", esModule = embed "legacy-writer.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+      )
+    ),
+  ],
+);

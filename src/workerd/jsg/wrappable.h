@@ -8,8 +8,6 @@
 // This file defines basic helpers involved in wrapping C++ objects for JavaScript consumption,
 // including garbage-collecting those objects.
 
-#include <workerd/jsg/wrappable-tag.h>
-
 #include <v8-context.h>
 #include <v8-object.h>
 #include <v8-version.h>
@@ -154,12 +152,10 @@ class Wrappable: public kj::Refcounted {
     // tag that helps us to identify a v8 API object as one of our own.
     WRAPPABLE_TAG_FIELD_INDEX,
 
+    // Index of the internal field that points back to the `Wrappable`.
+    WRAPPED_OBJECT_FIELD_INDEX,
+
     // Number of internal fields in a wrapper object.
-    //
-    // The pointer back to the C++ Wrappable is NOT stored in an internal field: it lives only in
-    // V8's CppHeap pointer table, reached via the CppgcShim (see attachWrapper / unwrapFromShim).
-    // Keeping a single tagged handle -- rather than a second, independently-corruptible internal
-    // field -- is what prevents wrapper type-confusion and use-after-free.
     INTERNAL_FIELD_COUNT,
   };
 
@@ -235,22 +231,16 @@ class Wrappable: public kj::Refcounted {
   // Attach to a JavaScript object. This increments the Wrappable's refcount until `object`
   // is garbage-collected (or unlink() is called).
   //
-  // The object MUST have exactly INTERNAL_FIELD_COUNT internal field slots. Internal field 0 holds
-  // the workerd-API marker (see isWorkerdApiObject); the C++ object pointer itself is stored in
-  // V8's CppHeap pointer table rather than an internal field.
+  // The object MUST have exactly 2 internal field slots, which will be initialized by this
+  // call as follows:
+  // - Internal field 0 is special and is used by the GC tracing implementation.
+  // - Internal field 1 is set to a pointer to the Wrappable. It can be used to unwrap the
+  //   object.
   //
   // If `needsGcTracing` is true, then the virtual method jsgVisitForGc() will be called to
   // perform GC tracing. If false, the method is never called (may be more efficient, if the
   // method does nothing anyway).
-  //
-  // `tag` is the per-type CppHeapPointerTag identifying the wrapped object's type. It is stored
-  // in V8's CppHeap pointer table (via Object::Wrap) and range-checked at unwrap time to reject
-  // type-confused handles. Resource types pass their own tag (TypeWrapper::wrappableTag<T>());
-  // non-resource wrappables (functions, opaque wrappers) pass kNonResourceWrappableTag.
-  void attachWrapper(v8::Isolate* isolate,
-      v8::Local<v8::Object> object,
-      bool needsGcTracing,
-      v8::CppHeapPointerTag tag);
+  void attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object, bool needsGcTracing);
 
   // Attach an empty, null-prototype object as the wrapper.
   v8::Local<v8::Object> attachOpaqueWrapper(v8::Local<v8::Context> context, bool needsGcTracing);
@@ -297,37 +287,6 @@ class Wrappable: public kj::Refcounted {
   // Detaches the wrapper from V8 and returns the reference that V8 had previously held.
   // (Typically, the caller will ignore the return value, thus dropping the reference.)
   kj::Own<Wrappable> detachWrapper(bool shouldFreelistShim);
-
-  // Given a JS wrapper object, unwrap it back to its Wrappable, requiring that the object's tag
-  // (stored in V8's CppHeap pointer table by attachWrapper) lies within `tagRange`. Returns
-  // nullptr if the object was never wrapped or its tag is outside the range (i.e. a type-confused
-  // or forged handle). Dispatch goes through the CppgcShim's owning reference, so the pointer
-  // returned is always the lifetime-correct one.
-  static Wrappable* unwrapFromShim(
-      v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange);
-
-  // Like unwrapFromShim(), but accepts any wrappable tag. For call sites that have already
-  // established the object's type by another means (a prototype-chain check, or an
-  // isWorkerdApiObject() marker check plus a dynamic-type lookup) and only need the pointer.
-  // Returns nullptr if the object was never wrapped.
-  static Wrappable* unwrapFromShimAnyType(v8::Isolate* isolate, v8::Local<v8::Object> object);
-
-  // Unwrap an object already known to be one of our wrappers (the caller has done a prototype-chain
-  // check for `tagRange`'s type), requiring its stored tag to fall within `tagRange`, and abort if
-  // it does not.
-  //
-  // The prototype-chain check the caller performed accepts exactly the objects whose own map was
-  // built from this type's template -- i.e. genuine, JSG-wrapped instances of the type or a
-  // subclass, all of whose tags fall in `tagRange`. The only way to reach here with an out-of-range
-  // tag is therefore a wrapper whose CppHeap handle or shim tag was corrupted in-sandbox, which is a
-  // memory-safety violation. We abort so it is surfaced rather than silently ignored; returning a
-  // pointer would risk type confusion, and returning "not found" would hide the attack.
-  //
-  // The range check is done in C++ (via a wide-range unwrap) rather than by passing `tagRange` to
-  // Object::Unwrap, because a checked V8 build turns a narrow-range miss into its own fatal DCHECK
-  // before returning, producing a different (and less informative) crash than the abort here.
-  static Wrappable* unwrapFromShimInRangeOrAbort(
-      v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange);
 
   // Called by HeapTracer when V8 tells us that it found a reference to this object.
   void traceFromV8(cppgc::Visitor& cppgcVisitor);
@@ -430,15 +389,9 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   void clearWrappers();
 
   void addToFreelist(Wrappable::CppgcShim& shim);
-  Wrappable::CppgcShim* allocateShim(Wrappable& wrappable, v8::CppHeapPointerTag tag);
+  Wrappable::CppgcShim* allocateShim(Wrappable& wrappable);
   void clearFreelistedShims();
 
- private:
-  // Returns the head slot of the intrusive freelist for `tag`. The slot has a stable address (it
-  // lives in the fixed-size freelistedShimsByTag array), so freelisted shims may point back to it.
-  kj::Maybe<Wrappable::CppgcShim&>& freelistHeadFor(v8::CppHeapPointerTag tag);
-
- public:
   // The epoch of the currently active (possibly in-flight) major GC cycle. Advanced once
   // per cycle in whichever prologue fires first (incremental-marking start or the
   // mark-compact prologue). Wrappable::traceFromV8() stamps this value into
@@ -499,22 +452,9 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   // List of all Wrappables for which a JavaScript wrapper exists.
   kj::List<Wrappable, &Wrappable::link> wrappers;
 
-  // Freelists of shim objects for wrappers that were collected during a minor GC. The shim
-  // objects can be reused for future allocations before the next major GC.
-  //
-  // A shim's single CppHeap-pointer-table entry carries its object's per-type tag, written once at
-  // Wrap time. When a shim is recycled it is re-Wrapped, which would rewrite that tag -- so a shim
-  // must only ever be reused for the same type across its whole lifetime, or a stale wrapper
-  // handle for an old occupant could pass the tag check against a new occupant of a different
-  // type. We therefore partition the freelist by tag: each bucket only ever holds shims that last
-  // served (and will next serve) that tag.
-  //
-  // A fixed-size array indexed by dense bucket index (wrappableTagBucketIndex(tag)). Each element
-  // is the head of an intrusive LIFO list; freelisted shims store a raw pointer back to their head
-  // slot, so the array elements must have stable addresses -- hence a plain array rather than a
-  // grown-on-demand vector. Sized by kMaxWrappableTags, which is enforced at wrap time by a
-  // static_assert in TypeWrapper::wrappableTag<T>().
-  kj::Maybe<Wrappable::CppgcShim&> freelistedShimsByTag[kMaxWrappableTags] = {};
+  // List of shim objects for wrappers that were collected during a minor GC. The shim objects
+  // can be reused for future allocations.
+  kj::Maybe<Wrappable::CppgcShim&> freelistedShims;
 
   // Major GC epoch counters; see getActiveGcEpoch()/getCompletedGcEpoch(). The two are equal
   // exactly when no major cycle is in flight (the mark-compact epilogue restores equality),
@@ -613,48 +553,26 @@ T& downcastWrappable(Wrappable& wrappable) {
 }
 
 // Given a handle to a resource type, extract the raw C++ object pointer.
-//
-// `tagRange` is the set of CppHeapPointerTags that the receiver's static type accepts: the
-// receiver type's own tag through the tags of all its subclasses. If the wrapper's tag is outside
-// this range -- i.e. the handle names an object of an unrelated type -- unwrapping fails,
-// signalling a type-confusion attempt. Callers compute the range via
-// TypeWrapper::wrappableTagRange<T>() (resource types) or kNonResourceWrappableTag (functions and
-// opaque wrappers).
 template <typename T, bool isContext>
-T& extractInternalPointer(v8::Isolate* isolate,
-    const v8::Local<v8::Context>& context,
-    const v8::Local<v8::Object>& object,
-    v8::CppHeapPointerTagRange tagRange) {
+T& extractInternalPointer(
+    const v8::Local<v8::Context>& context, const v8::Local<v8::Object>& object) {
   // Due to bugs in V8, we can't use internal fields on the global object:
   //   https://groups.google.com/d/msg/v8-users/RET5b3KOa5E/3EvpRBzwAQAJ
   //
   // So, when wrapping a global object, we store the pointer in the "embedder data" of the context
-  // instead of the internal fields of the object. The global is a per-context singleton and is
-  // not reached through the tagged CppHeap-pointer path, so the tag range does not apply to it.
+  // instead of the internal fields of the object.
 
   if constexpr (isContext) {
     // V8 docs say EmbedderData slot 0 is special, so we use slot 1. (See comments in newContext().)
     return KJ_ASSERT_NONNULL(
         getAlignedPointerFromEmbedderData<T>(context, ContextPointerSlot::GLOBAL_WRAPPER));
   } else {
-    // A tag outside the range for the type this dispatch site expects is a memory-safety violation
-    // (an object whose CppHeap handle has been redirected to an unrelated type), so this aborts
-    // rather than throwing, which JSG would catch and turn into a recoverable JS exception.
-    Wrappable* ptr = Wrappable::unwrapFromShimInRangeOrAbort(isolate, object, tagRange);
-    return downcastWrappable<T>(*ptr);
+    KJ_ASSERT(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
+    auto* ptr = object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+        static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+    KJ_ASSERT(ptr != nullptr, "EPT type-tag mismatch: internal field returned nullptr");
+    return downcastWrappable<T>(*reinterpret_cast<Wrappable*>(ptr));
   }
-}
-
-// Convenience wrapper around extractInternalPointer for resource types, filling in the accepted
-// tag range from TypeWrapper::wrappableTagRange<T>() so dispatch sites don't each repeat it. The
-// range is an isolate-wide value that only TypeWrapper can compute, so it can't be a default
-// argument on extractInternalPointer itself (which lives here, where TypeWrapper is not visible).
-template <typename TypeWrapper, typename T, bool isContext>
-T& extractInternalPointerFor(v8::Isolate* isolate,
-    const v8::Local<v8::Context>& context,
-    const v8::Local<v8::Object>& object) {
-  return extractInternalPointer<T, isContext>(
-      isolate, context, object, TypeWrapper::template wrappableTagRange<T>());
 }
 
 }  // namespace workerd::jsg

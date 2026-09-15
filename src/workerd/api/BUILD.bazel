@@ -10,6 +10,7 @@ filegroup(
     # their own targets, modularizing bazel targets makes incremental rebuilds faster.
     srcs = [
         "actor.c++",
+        "actor-call-retry.c++",
         "actor-state.c++",
         "basics.c++",
         "blob.c++",
@@ -19,6 +20,7 @@ filegroup(
         "eventsource.c++",
         "export-loopback.c++",
         "filesystem.c++",
+        "filesystem-bootstrap.c++",
         "form-data.c++",
         "global-scope.c++",
         "headers.c++",
@@ -63,6 +65,7 @@ filegroup(
     name = "hdrs",
     srcs = [
         "actor.h",
+        "actor-call-retry.h",
         "actor-state.h",
         "basics.h",
         "blob.h",
@@ -72,6 +75,7 @@ filegroup(
         "eventsource.h",
         "export-loopback.h",
         "filesystem.h",
+        "filesystem-bootstrap.h",
         "form-data.h",
         "global-scope.h",
         "headers.h",
@@ -454,7 +458,7 @@ wd_cc_library(
         "//src/pyodide:python_packages_capnp",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-http",
         "@ssl",
@@ -532,7 +536,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -790,6 +794,22 @@ kj_test(
 kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "actor-call-retry-test.c++",
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+kj_test(
+    src = "actor-fetch-retry-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
 
 kj_test(

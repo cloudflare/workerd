@@ -36,12 +36,10 @@ bool endsWithQualified(llvm::StringRef qualifiedName, llvm::StringRef suffix) {
 }
 
 // Visitable leaf templates: each holds a GC root and has a public visitForGc.
-// jsg::AsyncGenerator is absent: it has no visitForGc, so holders cannot
-// visit one; its handles are strong roots.
 const llvm::StringRef kVisitableLeafTemplates[] = {
     "jsg::Ref",      "jsg::V8Ref",   "jsg::JsRef",
     "jsg::Function", "jsg::Promise", "jsg::HashableV8Ref",
-    "jsg::MemoizedIdentity", "jsg::Generator",
+    "jsg::MemoizedIdentity", "jsg::Generator", "jsg::AsyncGenerator",
 };
 
 // Non-template visitable leaf types. jsg::Name is deliberately absent: its

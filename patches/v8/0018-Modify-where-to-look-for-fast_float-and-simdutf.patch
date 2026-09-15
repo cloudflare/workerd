@@ -12,18 +12,18 @@ include changes are needed.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 6970a5d09ce7574d654161583b6cec023620cdaa..8f9091a93b039c9ea08ceb6ab5b92eb726acb084 100644
+index e81f10725cc9678cc8d1a8b8feef786e061dad9e..696d5d9e0c86e37ec1351e52677951d996215077 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4666,17 +4666,19 @@ cc_library(
+@@ -4673,17 +4673,19 @@ cc_library(
      ],
  )
  
 -cc_library(
--  name = "simdutf",
--  srcs = ["third_party/simdutf/simdutf.cpp"],
--  hdrs = ["third_party/simdutf/simdutf.h"],
--  copts = select({
+-    name = "simdutf",
+-    srcs = ["third_party/simdutf/simdutf.cpp"],
+-    hdrs = ["third_party/simdutf/simdutf.h"],
+-    copts = select({
 -        "@v8//bazel/config:is_clang": ["-std=c++20"],
 -        "@v8//bazel/config:is_gcc": ["-std=gnu++2a"],
 -        "@v8//bazel/config:is_windows": ["/std:c++20"],
@@ -33,10 +33,10 @@ index 6970a5d09ce7574d654161583b6cec023620cdaa..8f9091a93b039c9ea08ceb6ab5b92eb7
 +# The simdutf library is commented out to avoid conflicts with
 +# the version we use in workers
 +# cc_library(
-+#   name = "simdutf",
-+#   srcs = ["third_party/simdutf/simdutf.cpp"],
-+#   hdrs = ["third_party/simdutf/simdutf.h"],
-+#   copts = select({
++#     name = "simdutf",
++#     srcs = ["third_party/simdutf/simdutf.cpp"],
++#     hdrs = ["third_party/simdutf/simdutf.h"],
++#     copts = select({
 +#         "@v8//bazel/config:is_clang": ["-std=c++20"],
 +#         "@v8//bazel/config:is_gcc": ["-std=gnu++2a"],
 +#         "@v8//bazel/config:is_windows": ["/std:c++20"],
@@ -46,7 +46,7 @@ index 6970a5d09ce7574d654161583b6cec023620cdaa..8f9091a93b039c9ea08ceb6ab5b92eb7
  
  v8_library(
      name = "v8_libshared",
-@@ -4707,15 +4709,15 @@ v8_library(
+@@ -4714,15 +4716,15 @@ v8_library(
      ],
      deps = [
          ":lib_dragonbox",

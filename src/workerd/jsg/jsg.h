@@ -59,7 +59,7 @@ namespace workerd::jsg {
 
 #define JSG_RESOURCE_TYPE(Type, ...)                                                               \
   static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = ::workerd::jsg::JsgKind::RESOURCE; \
-  using jsgSuper = typename Type::jsgThis;                                                         \
+  using jsgSuper = jsgThis;                                                                        \
   using jsgThis = Type;                                                                            \
   inline kj::StringPtr jsgGetMemoryName() const override {                                         \
     return #Type##_kjc;                                                                            \
@@ -744,17 +744,11 @@ concept HasStructTypeScriptDefine = requires { T::_JSG_STRUCT_TS_DEFINE_DO_NOT_U
 #define JSG_STRUCT(...)                                                                            \
   static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = ::workerd::jsg::JsgKind::STRUCT;   \
   static constexpr char JSG_FOR_EACH(JSG_STRUCT_FIELD_NAME, , __VA_ARGS__);                        \
-  template <typename TypeWrapper, typename Self>                                                   \
-  using JsgFieldWrappers =                                                                         \
-      ::workerd::jsg::TypeTuple<JSG_FOR_EACH(JSG_STRUCT_FIELD, , __VA_ARGS__)>;                    \
+  static constexpr ::kj::StringPtr _JSG_STRUCT_FIELD_NAMES_DO_NOT_USE_DIRECTLY[] KJ_UNUSED = {     \
+    JSG_FOR_EACH(JSG_STRUCT_FIELD_EXPORTED_NAME, , __VA_ARGS__)};                                  \
   template <typename Self>                                                                         \
-  static v8::Local<v8::DictionaryTemplate> jsgGetTemplate(v8::Isolate* isolate) {                  \
-    kj::Vector<std::string_view> names;                                                            \
-    JSG_FOR_EACH(JSG_STRUCT_FIELD_COL, , __VA_ARGS__);                                             \
-    auto namesPtr = names.asPtr().asConst();                                                       \
-    return v8::DictionaryTemplate::New(                                                            \
-        isolate, std::span<const std::string_view>(namesPtr.begin(), namesPtr.size()));            \
-  }                                                                                                \
+  using _JSG_STRUCT_FIELDS_DO_NOT_USE_DIRECTLY =                                                   \
+      ::workerd::jsg::StructFields<JSG_FOR_EACH(JSG_STRUCT_FIELD, , __VA_ARGS__)>;                 \
   template <typename Registry, typename Self, typename Config>                                     \
   static void registerMembersInternal(Registry& registry, Config arg) {                            \
     JSG_FOR_EACH(JSG_STRUCT_REGISTER_MEMBER, , __VA_ARGS__);                                       \
@@ -792,20 +786,24 @@ inline consteval size_t prefixLengthToStrip(const char (&s)[N]) {
   return s[0] == '$' ? 1 : 0;
 }
 
+// The name a JSG_STRUCT field is exported to JavaScript under: its C++ name minus the `$` prefix
+// that lets a field be named after a JavaScript keyword.
+template <size_t N>
+inline consteval kj::StringPtr exportedFieldName(const char (&s)[N]) {
+  return kj::StringPtr(s + prefixLengthToStrip(s), N - 1 - prefixLengthToStrip(s));
+}
+
 // This string may not be what's actually exported to v8. For example, if it starts with a `$`, then
-// this value will still contain the `$` even though the `FieldWrapper` template argument will have
-// it stripped.
+// this value will still contain the `$` even though `_JSG_STRUCT_FIELD_NAMES_DO_NOT_USE_DIRECTLY`
+// will have it stripped.
 #define JSG_STRUCT_FIELD_NAME(_, name) name##_JSG_NAME_DO_NOT_USE_DIRECTLY[] = #name
 
-#define JSG_STRUCT_FIELD_COL(_, name)                                                              \
-  ::workerd::jsg::jsgAddToStructNames<decltype(::kj::instance<Self>().name),                       \
-      name##_JSG_NAME_DO_NOT_USE_DIRECTLY + ::workerd::jsg::prefixLengthToStrip(#name)>(names)
+// (Internal implementation details for JSG_STRUCT.)
+#define JSG_STRUCT_FIELD_EXPORTED_NAME(_, name)                                                    \
+  ::workerd::jsg::exportedFieldName(name##_JSG_NAME_DO_NOT_USE_DIRECTLY)
 
 // (Internal implementation details for JSG_STRUCT.)
-#define JSG_STRUCT_FIELD(_, name)                                                                  \
-  ::workerd::jsg::FieldWrapper<TypeWrapper, Self, decltype(::kj::instance<Self>().name),           \
-      &Self::name,                                                                                 \
-      name##_JSG_NAME_DO_NOT_USE_DIRECTLY + ::workerd::jsg::prefixLengthToStrip(#name)>
+#define JSG_STRUCT_FIELD(_, name) &Self::name
 // (Internal implementation details for JSG_STRUCT.)
 #define JSG_STRUCT_REGISTER_MEMBER(_, name)                                                        \
   registry.template registerStructProperty<decltype(::kj::instance<Self>().name), &Self::name>(    \
@@ -1276,11 +1274,6 @@ template <typename U>
 static constexpr bool isUsableStructField = !kj::isSameType<U, SelfRef>() &&
     !kj::isSameType<U, Unimplemented>() && !kj::isSameType<U, WontImplement>();
 
-template <typename T, const char* exportedName>
-void jsgAddToStructNames(auto& names) {
-  if constexpr (isUsableStructField<T>) names.add(exportedName);
-}
-
 // A USVString has the exact same representation as a kj::String, but we guarantee that it meets
 // the WHATWG definition of a "scalar value string". Particularly, a USVString will never contain
 // invalid surrogate characters. A USVString should be used when implementing a Web API that
@@ -1448,6 +1441,8 @@ class Object: private Wrappable {
   friend class GcVisitor;
   template <typename, typename...>
   friend class TypeWrapper;
+  template <typename>
+  friend class TypeWrapperOps;
   template <typename, typename>
   friend class ResourceWrapper;
   template <typename>
@@ -1574,12 +1569,8 @@ class Ref {
   //
   // It is an error to attach a wrapper when another wrapper is already attached. Hence,
   // typically this should only be called on a newly-allocated object.
-  // `tag` is the per-type CppHeapPointerTag for T, computed by the caller via
-  // TypeWrapper::wrappableTag<T>() (the caller has the TypeWrapper and thus the full type list
-  // needed to number T; Ref<T> does not).
-  void attachWrapper(
-      v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTag tag) {
-    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>(), tag);
+  void attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object) {
+    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>());
   }
 
   // Obtain a weak reference to the referenced object. The weak reference does not keep the
@@ -2394,6 +2385,8 @@ class PropertyReflection {
 
   template <typename, typename...>
   friend class TypeWrapper;
+  template <typename>
+  friend class TypeWrapperOps;
 };
 
 template <typename T>
@@ -2511,7 +2504,7 @@ struct JsgConfig {
 static constexpr JsgConfig DEFAULT_JSG_CONFIG = {};
 
 template <typename Config>
-static const JsgConfig& getConfig(const Config& config) {
+const JsgConfig& getConfig(const Config& config) {
   if constexpr (kj::isSameType<Config, JsgConfig>() || kj::canConvert<Config, JsgConfig>()) {
     // Returning a reference to a parameter is harmless here since call sites pass in a reference to
     // config, which they can continue to use if returned here.
@@ -3073,11 +3066,6 @@ class Lock {
     Lock& js;
     bool previous;
   };
-
-  // Enable the experimental WebAssembly memory.discard proposal on the current context, installing
-  // `WebAssembly.Memory.prototype.discard` and allowing the `memory.discard` opcode. Gated by a
-  // compatibility flag.
-  void installWasmMemoryDiscard();
 
   // Tracks whether JavaScript execution is currently disallowed so that conversions in unwrap()
   // can choose a safe, non-JS-invoking path. Prefer the RAII `DisallowJavaScriptScope` (which

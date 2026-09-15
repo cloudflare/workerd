@@ -19,6 +19,7 @@ selects.config_setting_group(
         ":set_use_perfetto",
         "//:is_unix",
     ],
+    visibility = ["//visibility:public"],
 )
 
 # The routing layer owning the unprefixed zlib symbol names; @zlib//:zlib depends on this, so
@@ -101,7 +102,7 @@ wd_cc_library(
     deps = [
         ":duration-exceeded-logger",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
         # TODO(cleanup): Only for abortable.h, factor out
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
@@ -149,7 +150,7 @@ wd_cc_library(
         ":strings",
         "//src/workerd/jsg:memory-tracker",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
     ],
 )
 
@@ -226,6 +227,7 @@ wd_cc_library(
     ],
     implementation_deps = [
         ":autogate",
+        ":strings",
         "//src/workerd/jsg:exception",
         "@sqlite3",
     ],
@@ -234,7 +236,7 @@ wd_cc_library(
         ":account-limits",
         ":sentry",
         ":sqlite-metering",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
     ],
 )
 
@@ -413,9 +415,24 @@ kj_test(
 )
 
 kj_test(
+    src = "stream-utils-test.c++",
+    deps = [
+        ":util",
+    ],
+)
+
+kj_test(
+    src = "sentry-test.c++",
+    deps = [
+        ":sentry",
+    ],
+)
+
+kj_test(
     size = "large",
     src = "sqlite-test.c++",
     deps = [
+        ":sentry",
         ":sqlite",
         "//src/workerd/io:io-gate",
         "@sqlite3",

@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Fully-unflagged legacy cell (C++ only): without
+# transformstream_enable_standard_constructor the codec transformer is
+# dropped and both classes fall back to identity streams; without
+# capture_async_api_throws invalid chunks throw synchronously. See
+# legacy-identity-fallback.js. The BUILD rule disables the
+# @all-compat-flags variant, which would turn the omitted flags back on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-encoding-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "legacy-identity-fallback", esModule = embed "legacy-identity-fallback.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

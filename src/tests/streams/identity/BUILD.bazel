@@ -18,6 +18,13 @@ wd_test(
     data = identity_suite_srcs,
 )
 
+# The main C++ cell plus the dateless opt-in pedantic_wpt flag, enforcing
+# that pedantic mode changes nothing on this suite's surface.
+wd_test(
+    src = "identity-cpp-pedantic.wd-test",
+    data = identity_suite_srcs,
+)
+
 # Legacy (unflagged) regression guard, C++ implementation only. The
 # @all-compat-flags variant is disabled: at the 2999-12-31 date the semantic
 # flags this config deliberately omits would all turn on, contradicting its

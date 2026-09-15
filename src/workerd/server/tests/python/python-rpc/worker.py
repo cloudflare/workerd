@@ -10,14 +10,16 @@ from http import HTTPMethod
 from unittest import TestCase
 
 import js
-from workers import Blob, Request, Response, WorkerEntrypoint, handler
+from workers import Blob, Request, Response, WorkerEntrypoint, handler, waitUntil
 
-from pyodide.ffi import JsException, JsProxy, to_js
+from pyodide.ffi import JsException, JsProxy, create_proxy, to_js
 
 assertRaises = TestCase().assertRaises
 assertRaisesRegex = TestCase().assertRaisesRegex
 
 testFuture = Future()
+globalWaitUntilFuture = Future()
+explicitProxyWaitUntilFuture = Future()
 
 
 class PythonRpcTester(WorkerEntrypoint):
@@ -65,6 +67,20 @@ class PythonRpcTester(WorkerEntrypoint):
 
     async def test_wait_until_coroutine_lifetime(self):
         self.ctx.waitUntil(self.sleep_then_set_result())
+
+    async def explicit_proxy_wait_until(self):
+        async def set_result():
+            await sleep(0.1)
+            explicitProxyWaitUntilFuture.set_result(100)
+
+        self.ctx.waitUntil(create_proxy(set_result()))
+
+    async def sleep_then_set_global_wait_until_result(self):
+        await sleep(0.1)
+        globalWaitUntilFuture.set_result(100)
+
+    async def test_global_wait_until_coroutine_lifetime(self):
+        waitUntil(self.sleep_then_set_global_wait_until_result())
 
 
 class CustomType:
@@ -280,3 +296,15 @@ async def test(ctrl, env, ctx):
     assert not testFuture.done()
     await sleep(0.2)
     assert testFuture.result() == 100
+
+    # Check that waitUntil() accepts a PyProxy explicitly created by the user.
+    await env.PythonRpc.explicit_proxy_wait_until()
+    assert not explicitProxyWaitUntilFuture.done()
+    await sleep(0.2)
+    assert explicitProxyWaitUntilFuture.result() == 100
+
+    # Check that the module-level waitUntil() also keeps its coroutine alive.
+    await env.PythonRpc.test_global_wait_until_coroutine_lifetime()
+    assert not globalWaitUntilFuture.done()
+    await sleep(0.2)
+    assert globalWaitUntilFuture.result() == 100

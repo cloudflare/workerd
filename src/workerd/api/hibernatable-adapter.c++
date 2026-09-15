@@ -147,7 +147,8 @@ kj::Maybe<kj::Date> HibernatableWebSocketAdapter::getAutoResponseTimestamp() {
   unimplemented();
 }
 
-kj::Promise<void> HibernatableWebSocketAdapter::sendAutoResponse(kj::String, kj::WebSocket&) {
+kj::Promise<void> HibernatableWebSocketAdapter::sendAutoResponse(
+    kj::String, kj::WebSocket&, kj::Promise<void>) {
   unimplemented();
 }
 

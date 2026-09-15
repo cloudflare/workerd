@@ -1,0 +1,21 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Fully-unflagged legacy cell (C++ only): without
+# workers_api_getters_setters_on_prototype the digest promise is an own
+# instance property, and without set_tostring_tag instances stringify as
+# [object Object]. See legacy-shape.js. The BUILD rule disables the
+# @all-compat-flags variant, which would turn the omitted flags back on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-digest-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "legacy-shape", esModule = embed "legacy-shape.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

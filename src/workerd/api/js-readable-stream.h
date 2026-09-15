@@ -49,8 +49,8 @@ class JsReadableStream final {
   // is always kj-heap memory: the streams built from it are read on the kj event loop without
   // the isolate lock, so the bytes must not sit in the V8 sandbox.
   struct Buffer {
-    kj::ArrayPtr<const kj::byte> view;
     kj::Array<const kj::byte> owned;
+    kj::ArrayPtr<const kj::byte> view;
 
     explicit Buffer(kj::Array<const kj::byte> data);
     explicit Buffer(jsg::Ref<Blob> data);

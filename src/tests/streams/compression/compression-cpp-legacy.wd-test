@@ -1,0 +1,21 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Fully-unflagged legacy cell (C++ only): without strict_compression_checks
+# DecompressionStream tolerates trailing data, empty close, and truncated
+# members; without capture_async_api_throws invalid chunks throw
+# synchronously. The BUILD rule disables the @all-compat-flags variant,
+# which would turn the omitted flags back on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-compression-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "legacy-nonstrict", esModule = embed "legacy-nonstrict.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

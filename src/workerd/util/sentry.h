@@ -16,6 +16,8 @@
 
 namespace workerd {
 
+constexpr kj::Exception::DetailTypeId SENTRY_TAG_DETAIL_ID = 0xd3b1bbd08ecf715ull;
+
 // For internal errors, we generate an ID to include when rendering user-facing "internal error"
 // exceptions and writing internal exception logs, to make it easier to search for logs
 // corresponding to "internal error" exceptions reported by users.
@@ -36,14 +38,29 @@ InternalErrorId makeInternalErrorId();
 #define LOG_EXCEPTION(context, exception)                                                          \
   [&](const kj::Exception& e) {                                                                    \
     constexpr auto sentryErrorContext = context;                                                   \
+    KJ_IF_SOME(d, e.getDetail(::workerd::SENTRY_TAG_DETAIL_ID)) {                                  \
+      auto sentryTag = d.asChars();                                                                \
+      if (sentryTag.size() > 0) {                                                                  \
+        KJ_LOG(ERROR, e, sentryErrorContext, sentryTag);                                           \
+        return;                                                                                    \
+      }                                                                                            \
+    }                                                                                              \
     KJ_LOG(ERROR, e, sentryErrorContext);                                                          \
   }(exception)
 
+// This is just log LOG_EXCEPTION, except it also records id specifically as wdErrId.
 #define LOG_EXCEPTION_WITH_ID(context, exception, id)                                              \
-  [&](const kj::Exception& e) {                                                                    \
+  [&](const kj::Exception& e, const ::workerd::InternalErrorId& wdErrId) {                         \
     constexpr auto sentryErrorContext = context;                                                   \
-    KJ_LOG(ERROR, e, sentryErrorContext, id);                                                      \
-  }(exception)
+    KJ_IF_SOME(d, e.getDetail(::workerd::SENTRY_TAG_DETAIL_ID)) {                                  \
+      auto sentryTag = d.asChars();                                                                \
+      if (sentryTag.size() > 0) {                                                                  \
+        KJ_LOG(ERROR, e, sentryErrorContext, wdErrId, sentryTag);                                  \
+        return;                                                                                    \
+      }                                                                                            \
+    }                                                                                              \
+    KJ_LOG(ERROR, e, sentryErrorContext, wdErrId);                                                 \
+  }(exception, id)
 
 #define ACTOR_STORAGE_OP_PREFIX "; actorStorageOp = "
 

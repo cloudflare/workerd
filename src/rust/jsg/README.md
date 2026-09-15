@@ -80,6 +80,7 @@ let r: jsg::Rc<MyResource> = jsg::Rc::from_js(&mut lock, js_val)?;
 | `jsg::Rc<T>` | Yes — strong edge | Keeps target alive through GC |
 | `Option<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::Nullable<jsg::Rc<T>>` | Yes — when `Some` | |
+| `jsg::Lenient<jsg::Rc<T>>` | Yes — when `Some` or `Unconvertable` | |
 | `Cell<jsg::Rc<T>>` | Yes — strong edge | Use `Cell` when field needs interior mutability |
 | `Cell<Option<jsg::Rc<T>>>` | Yes — when `Some` | |
 | `Cell<jsg::Nullable<jsg::Rc<T>>>` | Yes — when `Some` | |

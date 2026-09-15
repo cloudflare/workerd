@@ -676,6 +676,15 @@ struct Worker {
       # they can expose arbitrary host devices, disable security profiles, or grant capabilities
       # such as CAP_SYS_ADMIN that may provide host-level access. Only use trusted configuration.
 
+      images @2 :List(NamedImage);
+      # Named image references exposed to the Durable Object through ctx.container.images.
+      # These do not change imageName, which remains the default when start() omits an image.
+
+      struct NamedImage {
+        name @0 :Text;
+        image @1 :Text;
+      }
+
       struct ContainerPrivileges {
         capabilities @0 :List(Text);
         # Docker HostConfig.CapAdd values.

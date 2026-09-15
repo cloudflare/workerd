@@ -296,8 +296,13 @@ class WritableStreamInternalController: public WritableStreamController {
   void doClose(jsg::Lock& js);
   void doError(jsg::Lock& js, jsg::JsValue reason);
   void ensureWriting(jsg::Lock& js);
-  jsg::Promise<void> writeLoop(jsg::Lock& js, IoContext& ioContext);
-  jsg::Promise<void> writeLoopAfterFrontOutputLock(jsg::Lock& js);
+
+  // `syncDepth` counts consecutive synchronous loop continuations (writes completed via
+  // tryWriteSync() and zero-length writes), bounding the recursion through
+  // writeLoop() -> writeLoopAfterFrontOutputLock(). When the budget is exhausted, the next
+  // write takes the asynchronous path, which resets the depth.
+  jsg::Promise<void> writeLoop(jsg::Lock& js, IoContext& ioContext, size_t syncDepth = 0);
+  jsg::Promise<void> writeLoopAfterFrontOutputLock(jsg::Lock& js, size_t syncDepth = 0);
 
   void drain(jsg::Lock& js, jsg::JsValue reason);
   void finishClose(jsg::Lock& js);

@@ -1,35 +1,24 @@
-load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test", "rust_unpretty")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_unpretty")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_test.bzl", "wd_rust_test")
 load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
 
-rust_test(
+wd_rust_test(
     name = "test",
     size = "small",
     srcs = ["test.rs"],
     edition = "2024",
-    experimental_use_cc_common_link = 1,
-    malloc = "//src/workerd/server:malloc",
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         ":cxx_test_suite",
         "//src/rust/cxx",
     ],
 )
 
-rust_test(
+wd_rust_test(
     name = "cxx_gen_test",
     size = "small",
     srcs = ["cxx_gen.rs"],
     edition = "2024",
-    experimental_use_cc_common_link = 1,
-    malloc = "//src/workerd/server:malloc",
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         ":cxx_test_suite",
         "//src/rust/cxx",

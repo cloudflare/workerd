@@ -159,11 +159,6 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // more flags.)
   v8::V8::SetFlagsFromString("--noincremental-marking");
 
-  // These features are completed and enabled by default in Chrome, but not
-  // in V8. Follows Node.js: https://github.com/nodejs/node/pull/58154
-  v8::V8::SetFlagsFromString("--js-explicit-resource-management");
-  v8::V8::SetFlagsFromString("--js-float16array");
-
   // Enable source phase imports for WebAssembly modules
   v8::V8::SetFlagsFromString("--js-source-phase-imports");
 
@@ -365,32 +360,16 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // V8 calls this to tell us when our wrapper can be dropped. See comment about droppable
   // references in Wrappable::attachWrapper() for details.
   v8::HandleScope scope(isolate);
-
-  // V8 can only hand this polymorphic callback  an object that is in one of
-  // the sandbox-external tables, so it's genuinely one of our objects.  But
-  // sandbox-internal corruption can cause it to pick us the wrong object and
-  // since it is polymorphic we can't use a tag check.  Instead check that
-  // the wrappable points back at the object being dropped.
-  auto object = handle.As<v8::Object>().Get(isolate);
-  // unwrapFromShimAnyType() returning null is a sign of in-sandbox corruption.
-  Wrappable* wrappablePtr = Wrappable::unwrapFromShimAnyType(isolate, object);
-  if (wrappablePtr == nullptr) {
-    KJ_LOG(
-        FATAL, "wrapper type mismatch: dropped object's CppHeap handle resolves to no wrappable");
-    abort();
-  }
-  auto& wrappable = *wrappablePtr;
-  auto& backReference = KJ_ASSERT_NONNULL(wrappable.wrapper);
-  if (backReference.Get(isolate) != object) {
-    KJ_LOG(FATAL, "wrapper type mismatch: dropped object's CppHeap handle names another wrappable");
-    abort();
-  }
+  auto& wrappable = *static_cast<Wrappable*>(
+      handle.As<v8::Object>().Get(isolate)->GetAlignedPointerFromInternalField(
+          Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+          static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
 
   // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
   // (which is what `detachWrapper()` will do) it is not satisfied, and will come back and try to
   // visit the reference again, but it will DCHECK-fail on that second attempt because the
   // reference is in an inconsistent state at that point.
-  backReference.Reset();
+  KJ_ASSERT_NONNULL(wrappable.wrapper).Reset();
 
   // We don't want to call `detachWrapper()` now because it may create new handles (specifically,
   // if the wrappable has strong references, which means that its outgoing references need to be
@@ -456,6 +435,7 @@ IsolateBase::IsolateBase(V8System& system,
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       exportsAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
+      activeSpanAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)),
       externalStringAllocator(kj::mv(externalStringAllocator)) {
@@ -470,7 +450,6 @@ IsolateBase::IsolateBase(V8System& system,
 
     ptr->SetModifyCodeGenerationFromStringsCallback(&modifyCodeGenCallback);
     ptr->SetAllowWasmCodeGenerationCallback(&allowWasmCallback);
-    ptr->SetWasmMemoryDiscardEnabledCallback(&wasmMemoryDiscardEnabledCallback);
 
     // We don't support SharedArrayBuffer so Atomics.wait() doesn't make sense, and might allow DoS
     // attacks.
@@ -638,12 +617,6 @@ bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8
   IsolateBase* self =
       static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
   return self->evalAllowed;
-}
-
-bool IsolateBase::wasmMemoryDiscardEnabledCallback(v8::Local<v8::Context> context) {
-  IsolateBase* self =
-      static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
-  return self->wasmMemoryDiscardEnabled;
 }
 
 void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {

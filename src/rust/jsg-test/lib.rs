@@ -45,7 +45,11 @@ mod ffi {
             callback: unsafe fn(usize /* callback */, *mut Isolate, Pin<&mut EvalContext>),
         );
 
-        pub unsafe fn eval(self: &EvalContext, code: &str) -> EvalResult;
+        pub unsafe fn eval(
+            self: &EvalContext,
+            code: &str,
+            resource_name: KjMaybe<&str>,
+        ) -> EvalResult;
         pub unsafe fn set_global(self: &EvalContext, name: &str, value: Local);
 
         /// Triggers garbage collection for testing purposes.
@@ -102,7 +106,7 @@ impl EvalContext<'_> {
         T: jsg::FromJS<ResultType = T>,
     {
         // SAFETY: self.inner is a valid EvalContext from C++; code is a valid str.
-        let result = unsafe { self.inner.eval(code) };
+        let result = unsafe { self.inner.eval(code, None.into()) };
         let opt_local: Option<v8::ffi::Local> = result.value.into();
 
         if result.success {
@@ -137,7 +141,26 @@ impl EvalContext<'_> {
     /// Useful for obtaining handles (e.g. functions) that aren't `FromJS` types.
     pub fn eval_raw(&self, code: &str) -> Result<v8::Local<'_, v8::Value>, EvalError<'_>> {
         // SAFETY: self.inner is a valid EvalContext from C++; code is a valid str.
-        let result = unsafe { self.inner.eval(code) };
+        let result = unsafe { self.inner.eval(code, None.into()) };
+        self.raw_result(result)
+    }
+
+    /// Like [`EvalContext::eval_raw`], but compiles the code with a `ScriptOrigin` whose resource
+    /// name is `resource_name`.
+    pub fn eval_raw_named(
+        &self,
+        code: &str,
+        resource_name: &str,
+    ) -> Result<v8::Local<'_, v8::Value>, EvalError<'_>> {
+        // SAFETY: self.inner is a valid EvalContext from C++; code and resource_name are valid strs.
+        let result = unsafe { self.inner.eval(code, Some(resource_name).into()) };
+        self.raw_result(result)
+    }
+
+    fn raw_result(
+        &self,
+        result: ffi::EvalResult,
+    ) -> Result<v8::Local<'_, v8::Value>, EvalError<'_>> {
         let opt_local: Option<v8::ffi::Local> = result.value.into();
 
         if result.success {

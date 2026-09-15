@@ -429,9 +429,15 @@ Rewriter::Rewriter(jsg::Lock& js,
 
 namespace {
 
+#if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+// encoding_rs decoder frames can consume over 60 KiB in ASan debug builds. Leave room for
+// the rest of the rewriter's call stack as well.
+const size_t FIBER_STACK_SIZE = 1024 * 256;
+#else
 // The stack size floor enforced by kj. We could go lower,
 // but it'd always be increased to this anyway.
 const size_t FIBER_STACK_SIZE = 1024 * 64;
+#endif
 
 const kj::FiberPool& getFiberPool() {
   const static kj::FiberPool FIBER_POOL(FIBER_STACK_SIZE);

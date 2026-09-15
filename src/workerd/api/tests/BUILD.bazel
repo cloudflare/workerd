@@ -35,11 +35,7 @@ wd_test(
 wd_test(
     src = "wasm-memory-discard-test.wd-test",
     args = ["--experimental"],
-    data = [
-        "wasm-memory-discard.wasm",
-        "wasm-memory-discard-disabled-test.js",
-        "wasm-memory-discard-test.js",
-    ],
+    data = ["wasm-memory-discard-disabled-test.js"],
 )
 
 wd_test(
@@ -136,6 +132,12 @@ wd_test(
     data = ["connect-neuter-test.js"],
 )
 
+wd_test(
+    src = "connect-half-open-test.wd-test",
+    args = ["--experimental"],
+    data = ["connect-half-open-test.js"],
+)
+
 # Regression test for AUTOVULN-EW-EDGEWORKER-17: Socket::close() bare-this UAF.
 wd_test(
     src = "socket-close-gc-test.wd-test",
@@ -203,8 +205,8 @@ wd_test(
     tags = ["no-coverage"],
 )
 
-# Regression test: a callback passed as an RPC argument, when invoked by the callee, must
-# produce a jsRpcCall span nested under the method's server-side jsRpcCall span.
+# Regression test for callback ancestry across outbound stub calls and transient re-entry
+# dispatches.
 wd_test(
     src = "jsrpc-callback-trace-test.wd-test",
     args = ["--experimental"],
@@ -306,14 +308,6 @@ wd_test(
         "cache-mock.js",
         "cache-operations-test.js",
         "instrumentation-tail-worker.js",
-    ],
-)
-
-wd_test(
-    src = "cache-put-stream-test.wd-test",
-    data = [
-        "cache-mock.js",
-        "cache-put-stream-test.js",
     ],
 )
 
@@ -514,18 +508,6 @@ wd_test(
 )
 
 wd_test(
-    src = "crypto-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["crypto-streams-test.js"],
-)
-
-wd_test(
-    src = "crypto-streams-ts-test.wd-test",
-    args = ["--experimental"],
-    data = ["crypto-streams-test.js"],
-)
-
-wd_test(
     src = "data-url-fetch-test.wd-test",
     args = ["--experimental"],
     data = ["data-url-fetch-test.js"],
@@ -535,12 +517,6 @@ wd_test(
     src = "encoding-test.wd-test",
     args = ["--experimental"],
     data = ["encoding-test.js"],
-)
-
-wd_test(
-    src = "encoding-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["encoding-streams-test.js"],
 )
 
 wd_test(
@@ -624,10 +600,9 @@ wd_test(
 )
 
 wd_test(
-    size = "large",
-    src = "decompression-stream-unhandled-rejection-test.wd-test",
+    src = "unhandled-rejection-reentry-test.wd-test",
     args = ["--experimental"],
-    data = ["decompression-stream-unhandled-rejection-test.js"],
+    data = ["unhandled-rejection-reentry-test.js"],
 )
 
 wd_test(
@@ -732,15 +707,10 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
     src = "scheduler-test.wd-test",
     args = ["--experimental"],
     data = ["scheduler-test.js"],
-)
-
-wd_test(
-    src = "streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-test.js"],
 )
 
 wd_test(
@@ -756,21 +726,9 @@ wd_test(
 )
 
 wd_test(
-    src = "ts-compression-streams-test.wd-test",
+    src = "globals-iteration-test.wd-test",
     args = ["--experimental"],
-    data = ["ts-compression-streams-test.js"],
-)
-
-wd_test(
-    src = "compression-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["compression-streams-test.js"],
-)
-
-wd_test(
-    src = "transform-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["transform-streams-test.js"],
+    data = ["globals-iteration-test.js"],
 )
 
 wd_test(
@@ -802,12 +760,6 @@ wd_test(
 )
 
 wd_test(
-    src = "pipe-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["pipe-streams-test.js"],
-)
-
-wd_test(
     src = "pipe-source-error-uaf-test.wd-test",
     args = ["--experimental"],
     data = ["pipe-source-error-uaf-test.js"],
@@ -826,21 +778,9 @@ wd_test(
 )
 
 wd_test(
-    src = "streams-r2-patterns-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-r2-patterns-test.js"],
-)
-
-wd_test(
     src = "autovuln-88-test.wd-test",
     args = ["--experimental"],
     data = ["autovuln-88-test.js"],
-)
-
-wd_test(
-    src = "streams-respond-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-respond-test.js"],
 )
 
 wd_test(
@@ -850,45 +790,15 @@ wd_test(
 )
 
 wd_test(
-    src = "streams-no-auto-allocate-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-no-auto-allocate-test.js"],
-)
-
-wd_test(
-    src = "streams-js-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-js-test.js"],
-)
-
-wd_test(
     src = "autovuln-60-test.wd-test",
     args = ["--experimental"],
     data = ["autovuln-60-test.js"],
 )
 
 wd_test(
-    src = "streams-iocontext-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-iocontext-test.js"],
-)
-
-wd_test(
-    src = "streams-backpressure-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-backpressure-test.js"],
-)
-
-wd_test(
     src = "streams-error-edge-cases-test.wd-test",
     args = ["--experimental"],
     data = ["streams-error-edge-cases-test.js"],
-)
-
-wd_test(
-    src = "streams-byob-edge-cases-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-byob-edge-cases-test.js"],
 )
 
 wd_test(
@@ -901,18 +811,6 @@ wd_test(
     src = "streams-byob-concurrent-readatleast-test.wd-test",
     args = ["--experimental"],
     data = ["streams-byob-concurrent-readatleast-test.js"],
-)
-
-wd_test(
-    src = "streams-tee-edge-cases-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-tee-edge-cases-test.js"],
-)
-
-wd_test(
-    src = "streams-async-iterator-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams-async-iterator-test.js"],
 )
 
 wd_test(
@@ -1202,6 +1100,18 @@ wd_test(
 )
 
 wd_test(
+    src = "webfs-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["webfs-test.js"],
+)
+
+wd_test(
+    src = "ts-webfs-writable-test.wd-test",
+    args = ["--experimental"],
+    data = ["ts-webfs-writable-test.js"],
+)
+
+wd_test(
     src = "worker-test.wd-test",
     args = ["--experimental"],
     data = ["worker-test.js"],
@@ -1232,11 +1142,15 @@ wd_test(
 )
 
 wd_test(
-    size = "large",
+    size = "enormous",
     src = "worker-loader-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-test.js"],
-    tags = ["requires-network"],
+    # Needs to fetch pyodide which is not supported under RBE
+    tags = [
+        "no-remote-exec",
+        "requires-network",
+    ],
 )
 
 wd_test(
@@ -1382,19 +1296,8 @@ wd_test(
 )
 
 wd_test(
-    src = "pipe-write-special-buffer-test.wd-test",
-    data = ["pipe-write-special-buffer-test.js"],
-)
-
-wd_test(
     src = "htmlrewriter-transform-cancel-test.wd-test",
     data = ["htmlrewriter-transform-cancel-test.js"],
-)
-
-wd_test(
-    src = "ts-digest-stream-test.wd-test",
-    args = ["--experimental"],
-    data = ["ts-digest-stream-test.js"],
 )
 
 wd_test(

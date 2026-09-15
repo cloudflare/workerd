@@ -107,7 +107,6 @@ wd_cc_library(
         "v8-platform-wrapper.h",
         "web-idl.h",
         "wrappable.h",
-        "wrappable-tag.h",
     ],
     # Some JSG headers can't be compiled on their own
     features = ["-parse_headers"],

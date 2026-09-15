@@ -92,7 +92,7 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
       kj::mv(mainModule),
       names.finish(),
       contents.finish(),
-      kj::str(pythonRelease.getPyodide()),
+      kj::str(pythonRelease.getRealPyodideVersion()),
       kj::str(pythonRelease.getPackages()),
       kj::mv(lock),
       isWorkerd,

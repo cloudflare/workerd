@@ -1,7 +1,10 @@
 # src/tests/streams/
 
 Streams test suite, organized WPT-style: one subdirectory per functional area
-(`identity/`, eventually `readable/`, `writable/`, `piping/`, ...). Every
+(`identity/`, `encoding/`, `compression/`, `digest/`, `strategies/`,
+`readable/`, `readable-byte/`, `writable/`, `transform/`, `piping/`,
+`inspect/`, `r2-patterns/`, `iocontext/`, `cache/`, `htmlrewriter/`,
+`formdata/`, `sockets/`). Every
 test here runs against **both** streams implementations — the legacy C++ one
 (`src/workerd/api/streams/`) and the TypeScript one
 (`src/per_isolate/webstreams/`) — to prove parity. A test that only makes
@@ -43,13 +46,14 @@ Configs do **not** set `compatibilityDate`. The `wd_test` variant machinery
 owns the date axis (`@` runs at 2000-01-01, `@all-compat-flags` at
 2999-12-31) and the tests must pass at both extremes. Every date-gated
 behavior a test depends on is pinned by naming its flag in **both** configs.
-The pinned set currently includes `streams_byob_reader_detaches_buffer`,
-`internal_stream_byob_return_view`,
-`internal_writable_stream_abort_clears_queue`,
-`workers_api_getters_setters_on_prototype`, `capture_async_api_throws`,
-`set_tostring_tag`, and `enhanced_error_serialization` — see the comment in
-`identity-cpp.wd-test` for what each pins. The TypeScript implementation hard-codes these modern behaviors, so
-pinning them also keeps the two cells comparable at the oldest date.
+Each suite's `<name>-cpp.wd-test` documents its pinned set with a one-line
+reason per flag, and the suite's AGENTS.md tables the flags against the
+legacy tests that guard their unflagged sides. The TypeScript implementation
+hard-codes the modern behaviors, so pinning them also keeps the two cells
+comparable at the oldest date. Dateless opt-in flags that gate behaviors on
+a suite's surface (e.g. `pedantic_wpt`) get a dedicated cell running the
+full shared module set with the flag added, with the flag-off side pinned
+in the legacy cells.
 
 If a test fails only under `@all-compat-flags`, a date-gated flag changes the
 behavior: identify it (`compatibility-date.capnp`) and pin it, don't pin a
@@ -127,3 +131,35 @@ and `@all-autogates` variants, plus `@gc-stress` (off-by-default; run with
 `--test_tag_filters=`). `workerd test` requires an exported `test()` handler
 per case; assertions come from `node:assert` (`nodejs_compat` is in both
 configs' flag lists).
+
+## Streams tests that live elsewhere (by design)
+
+- `src/tests/node/` — the Node.js compatibility layer's USE of web
+  streams (`node:stream` adapters, `node:net` sockets, the `node:http`
+  client and server), under the same suite rules and the same cpp/ts
+  cells; each suite's `AGENTS.md` there carries its own ledger. A pure
+  web-streams behavior found through the node layer is pinned here, not
+  there (e.g. `readable` ledger #18).
+- `src/workerd/api/tests/js-rpc-streams-*` — stream serialization over
+  JS RPC (including ts-impl cells); owned by the worker-rpc domain.
+- `src/workerd/api/tests/ts-webstreams-test.js` — TypeScript-impl
+  internals (native/buffer/iterable bodies ARE ts streams, pumpTo);
+  single-implementation by nature.
+- Security regression singles in `src/workerd/api/tests/`
+  (streams-byob-close-reentry, streams-byob-concurrent-readatleast,
+  streams-byte-cancel-uaf, streams-byte-handlePush-uaf,
+  streams-circ-ref-regression, streams-consumer-reentry-gc,
+  streams-internal-read-buffer-gc, autovuln-*) — authoritative
+  crash/UAF repros, deliberately not merged into suites.
+- `src/workerd/api/streams/streams-test.js` — `partiallyReadStream`
+  (needs a KV binding).
+
+## IDL shape (deliberately not pinned here)
+
+WebIDL function metadata — operation `.length` values (optional
+arguments do not count), and promise-typed attributes/operations
+REJECTING rather than throwing on a broken `this` — is enumerated
+per-implementation by WPT's `idlharness.any.js`: the C++ implementation
+carries the known deviations as expectedFailures in
+`src/wpt/streams-test.ts`; the TypeScript implementation matches spec.
+The suites do not duplicate that enumeration.

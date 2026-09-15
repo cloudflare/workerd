@@ -4079,6 +4079,7 @@ export interface ExecProcess {
 }
 export interface Container {
   get running(): boolean;
+  get images(): Record<string, string>;
   start(options?: ContainerStartupOptions): void;
   monitor(): Promise<void>;
   destroy(error?: any): Promise<void>;
@@ -4087,16 +4088,16 @@ export interface Container {
   setInactivityTimeout(durationMs: number | bigint): Promise<void>;
   interceptOutboundHttp(addr: string, binding: Fetcher): Promise<void>;
   interceptAllOutboundHttp(binding: Fetcher): Promise<void>;
-  snapshotDirectory(
-    options: ContainerDirectorySnapshotOptions,
-  ): Promise<ContainerDirectorySnapshot>;
   snapshotContainer(
     options: ContainerSnapshotOptions,
   ): Promise<ContainerSnapshot>;
   interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
   exec(cmd: string[], options?: ContainerExecOptions): Promise<ExecProcess>;
-  interceptOutboundTcp(addr: string, binding: Fetcher): Promise<void>;
   inspect(): Promise<ContainerInfo | null>;
+  interceptOutboundTcp(addr: string, binding: Fetcher): Promise<void>;
+  snapshotDirectory(
+    options: ContainerDirectorySnapshotOptions,
+  ): Promise<ContainerDirectorySnapshot>;
   setLabels(labels: Record<string, string>): Promise<void>;
 }
 export interface ContainerDirectorySnapshot {
@@ -4857,6 +4858,7 @@ export interface Tracing {
     ...args: A
   ): T;
   startSpan(name: string): Span;
+  getActiveSpan(): Span | undefined;
   Span: typeof Span;
 }
 export declare abstract class Span {
@@ -4865,6 +4867,28 @@ export declare abstract class Span {
   setAttributes(
     attributes: Record<string, boolean | number | string | undefined>,
   ): this;
+  recordException(
+    exception:
+      | string
+      | {
+          code: string | number;
+          name?: string;
+          message?: string;
+          stack?: string;
+        }
+      | {
+          code?: string | number;
+          name: string;
+          message?: string;
+          stack?: string;
+        }
+      | {
+          code?: string | number;
+          name?: string;
+          message: string;
+          stack?: string;
+        },
+  ): void;
   end(): void;
 }
 /**
@@ -12819,6 +12843,15 @@ export interface BrowserRunBaseOptions {
    */
   cacheTTL?: number;
 }
+/**
+ * Backend selection, mixed into the options of the quick actions that support it.
+ * Deliberately not part of `BrowserRunBaseOptions`: `scrape`, `links` and `snapshot`
+ * reject an alternate backend, so they must not accept the field.
+ */
+export interface BrowserRunAlternateBackendOptions {
+  /** Render with an alternate browser backend instead of the default one. */
+  browser?: "kitesurf";
+}
 /** Common options shared by all quick actions. Exactly one of `url` or `html` must be provided.*/
 export type BrowserRunCommonOptions =
   | (BrowserRunBaseOptions & {
@@ -12855,7 +12888,7 @@ export type BrowserRunScreenshotOptions = BrowserRunCommonOptions & {
   scrollPage?: boolean;
   /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
   screenshotOptions?: BrowserRunPuppeteerScreenshotOptions;
-};
+} & BrowserRunAlternateBackendOptions;
 export type BrowserRunPDFOptions = BrowserRunCommonOptions & {
   /** @see https://pptr.dev/api/puppeteer.pdfoptions */
   pdfOptions?: {
@@ -12902,7 +12935,7 @@ export type BrowserRunPDFOptions = BrowserRunCommonOptions & {
     /** @default 30000 */
     timeout?: number;
   };
-};
+} & BrowserRunAlternateBackendOptions;
 export type BrowserRunScrapeOptions = BrowserRunCommonOptions & {
   /** CSS selectors to scrape. At least one element is required. */
   elements: Array<{
@@ -12938,7 +12971,7 @@ export type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
    * HTTP 200; a malformed selector is an error.
    */
   root?: string;
-};
+} & BrowserRunAlternateBackendOptions;
 export interface BrowserRunJsonBaseOptions {
   /** Custom AI models to try in order. Max 3. Falls back to next on error. */
   custom_ai?: Array<{
@@ -12953,6 +12986,7 @@ export interface BrowserRunJsonBaseOptions {
  * At least one of `prompt` or `response_format` must be provided.
  */
 export type BrowserRunJsonOptions = BrowserRunCommonOptions &
+  BrowserRunAlternateBackendOptions &
   BrowserRunJsonBaseOptions &
   (
     | {
@@ -12968,8 +13002,10 @@ export type BrowserRunJsonOptions = BrowserRunCommonOptions &
         response_format: AiTextGenerationResponseFormat;
       }
   );
-export type BrowserRunContentOptions = BrowserRunCommonOptions;
-export type BrowserRunMarkdownOptions = BrowserRunCommonOptions;
+export type BrowserRunContentOptions = BrowserRunCommonOptions &
+  BrowserRunAlternateBackendOptions;
+export type BrowserRunMarkdownOptions = BrowserRunCommonOptions &
+  BrowserRunAlternateBackendOptions;
 export type BrowserRunRedirectHop = {
   /** URL that returned the redirect. */
   url: string;
@@ -13371,6 +13407,14 @@ export interface RequestInitCfProperties extends Record<string, unknown> {
    * (e.g. { '200-299': 86400, '404': 1, '500-599': 0 })
    */
   cacheTtlByStatus?: Record<string, number>;
+  /**
+   * Controls whether Cloudflare uses range requests when fetching the response
+   * from the origin.
+   *
+   * - `"on"`: enable origin range requests for this request.
+   * - `"off"`: disable origin range requests for this request.
+   */
+  originRangeRequests?: "on" | "off";
   /** Controls how responses with a `Vary` header are cached for this request. */
   vary?: RequestInitCfPropertiesVary;
   /**
@@ -14992,6 +15036,78 @@ export interface Hyperdrive {
    * The name of the database to connect to.
    */
   readonly database: string;
+}
+/**
+ * A handle to a dynamically-provisioned Hyperdrive connection, returned by
+ * `HyperdriveApi.get()`.
+ */
+export interface HyperdriveDynamic extends Disposable {
+  /**
+   * The database name to use when connecting through this Hyperdrive.
+   */
+  readonly database: Promise<string>;
+  /*
+   * The randomly generated user to use when authenticating to your
+   * database via Hyperdrive.
+   */
+  readonly user: Promise<string>;
+  /*
+   * The randomly generated password to use when authenticating to your
+   * database via Hyperdrive.
+   */
+  readonly password: Promise<string>;
+  /**
+   * Open a TCP socket to the target database through this Hyperdrive.
+   *
+   */
+  connect(): Promise<Socket>;
+}
+/**
+ * Binding that provisions Hyperdrive connections at request time, rather than
+ * from static configuration.
+ */
+export interface HyperdriveDynamicApi {
+  /**
+   * Provision a connection for the database described by `args`.
+   *
+   */
+  get(args: HyperdriveDynamicConfig): Promise<HyperdriveDynamic>;
+  /**
+   * Get a pre-generated connection string used for connecting to dynamic Hyperdrive.
+   */
+  getHyperdriveConnectionString(connectionString: string): Promise<string>;
+}
+/**
+ * Parameters identifying the database that a dynamically-provisioned
+ * Hyperdrive connection should target.
+ */
+export interface HyperdriveDynamicConfig {
+  /**
+   * Generated connection string to pass into the dynamic worker.
+   *
+   */
+  dynamicHyperdriveConnectionString: string;
+  /**
+   * Connection string for the origin database Hyperdrive should connect to.
+   * Contains credentials, so treat it as a secret.
+   *
+   * The scheme selects the database engine. PostgreSQL origins are supported.
+   */
+  connectionString: string;
+  /**
+   * Region in which to place the connection pool. See the Hyperdrive
+   * documentation for the set of supported regions.
+   */
+  targetRegion: string;
+  /**
+   * Whether Hyperdrive should cache query results for this connection.
+   */
+  cachingEnabled?: boolean;
+  /**
+   * Maximum number of connections the pool may open to the origin database.
+   * Defaults to 60.
+   */
+  maxConnections?: number;
 }
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
@@ -16972,6 +17088,7 @@ export declare namespace TailStream {
   }
   interface Exception {
     readonly type: "exception";
+    readonly code?: string | number;
     readonly name: string;
     readonly message: string;
     readonly stack?: string;
@@ -17584,6 +17701,7 @@ export type InstanceStatus = {
     | "complete"
     | "waiting" // instance is hibernating and waiting for sleep or event to finish
     | "waitingForPause" // instance is finishing the current work to pause
+    | "rollingBack"
     | "unknown";
   error?: {
     name: string;
@@ -17622,6 +17740,176 @@ export interface WorkflowInstanceRestartOptions {
      */
     type?: "do" | "sleep" | "waitForEvent";
   };
+}
+/** An event emitted by a Workflow instance. */
+export type WorkflowInstanceEvent = {
+  instanceId: string;
+  eventId: number;
+  timestamp: number;
+} & (
+  | {
+      type: "workflow_queued";
+    }
+  | {
+      type: "workflow_started";
+      params?: unknown;
+    }
+  | {
+      type: "workflow_running";
+    }
+  | {
+      type: "workflow_paused";
+    }
+  | {
+      type: "workflow_waiting_for_pause";
+    }
+  | {
+      type: "workflow_waiting";
+    }
+  | {
+      type: "workflow_completed";
+      output?: unknown;
+    }
+  | {
+      type: "workflow_errored";
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "workflow_terminated";
+    }
+  | {
+      type: "step_started";
+      stepName: string;
+      config?: {
+        retries: {
+          limit: number;
+          delay: WorkflowSleepDuration | "[dynamic]";
+          backoff?: "constant" | "linear" | "exponential";
+        };
+        timeout: WorkflowSleepDuration;
+        sensitive?: "output";
+      };
+    }
+  | {
+      type: "step_completed";
+      stepName: string;
+      output?: unknown;
+    }
+  | {
+      type: "step_errored";
+      stepName: string;
+    }
+  | {
+      type: "attempt_started";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "attempt_completed";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "attempt_errored";
+      stepName: string;
+      attempt: number;
+      retryDelayMs?: number;
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "sleep_started";
+      stepName: string;
+      durationMs: number;
+    }
+  | {
+      type: "sleep_completed";
+      stepName: string;
+    }
+  | {
+      type: "wait_started";
+      stepName: string;
+      eventType: string;
+    }
+  | {
+      type: "wait_completed";
+      stepName: string;
+    }
+  | {
+      type: "wait_timed_out";
+      stepName: string;
+    }
+  | {
+      type: "rollback_started";
+    }
+  | {
+      type: "rollback_step_started";
+      stepName: string;
+      config?: {
+        retries: {
+          limit: number;
+          delay: WorkflowSleepDuration | "[dynamic]";
+          backoff?: "constant" | "linear" | "exponential";
+        };
+        timeout: WorkflowSleepDuration;
+        sensitive?: "output";
+      };
+    }
+  | {
+      type: "rollback_step_completed";
+      stepName: string;
+    }
+  | {
+      type: "rollback_step_errored";
+      stepName: string;
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "rollback_attempt_started";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "rollback_attempt_completed";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "rollback_attempt_errored";
+      stepName: string;
+      attempt: number;
+      retryDelayMs?: number;
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "rollback_completed";
+    }
+  | {
+      type: "rollback_errored";
+    }
+);
+export type WorkflowInstanceEventType = WorkflowInstanceEvent["type"];
+/** Options available for a Workflow instance subscription. */
+export type WorkflowInstanceSubscribeOptions = {
+  /** The value from which to start the subscription. */
+  cursor?: number;
+  /** The event types to include in the subscription. */
+  filter?: WorkflowInstanceEventType[];
+};
+/** A disposable subscription to a Workflow instance's events. */
+export interface WorkflowInstanceSubscription extends Disposable {
+  next(): Promise<IteratorResult<WorkflowInstanceEvent, void>>;
 }
 export declare abstract class WorkflowInstance {
   public id: string;
@@ -17662,4 +17950,10 @@ export declare abstract class WorkflowInstance {
     type: string;
     payload: unknown;
   }): Promise<void>;
+  /**
+   * Subscribe to events emitted by this instance.
+   */
+  public subscribe(
+    options?: WorkflowInstanceSubscribeOptions,
+  ): Promise<WorkflowInstanceSubscription>;
 }

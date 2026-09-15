@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import http from 'node:http';
+import net from 'node:net';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { strictEqual, ok, throws, notStrictEqual, rejects } from 'node:assert';
 import { httpServerHandler, handleAsNodeRequest } from 'cloudflare:node';
@@ -630,6 +631,54 @@ export const testInvalidPorts = {
       });
     }
     strictEqual(server.listening, false);
+  },
+};
+
+// A listening server the user keeps no reference to stays routable: the port
+// table entry is the GC root, as the libuv handle is in Node.
+export const testUnreferencedServerSurvivesGc = {
+  async test() {
+    http.createServer((req, res) => res.end('alive')).listen(18080);
+    await scheduler.wait(0);
+    gc();
+    await scheduler.wait(0);
+    gc();
+    await scheduler.wait(0);
+    const res = await handleAsNodeRequest(
+      { port: 18080 },
+      new Request('https://cloudflare.com/')
+    );
+    strictEqual(await res.text(), 'alive');
+  },
+};
+
+// http servers share the isolate's virtual port table with node:net.
+export const testPortTableSharedWithNet = {
+  async test() {
+    const other = http.createServer();
+    await new Promise((resolve) => other.listen(0, resolve));
+    const server = http.createServer();
+    throws(() => server.listen(other.address().port), { code: 'EADDRINUSE' });
+    strictEqual(server.listening, false);
+    other.close();
+
+    const bound = new net.BoundSocket({ port: 0 });
+    const { port } = bound.address();
+    throws(() => server.listen(port), {
+      code: 'EADDRINUSE',
+      message: `bind EADDRINUSE 127.0.0.1:${port}`,
+    });
+    throws(() => server.listen(port, '10.0.0.1'), {
+      code: 'EADDRINUSE',
+      message: `bind EADDRINUSE 10.0.0.1:${port}`,
+    });
+    bound.close();
+
+    await new Promise((resolve) => server.listen(port, resolve));
+    strictEqual(server.address().port, port);
+    throws(() => new net.BoundSocket({ port }), { code: 'EADDRINUSE' });
+    server.close();
+    new net.BoundSocket({ port }).close();
   },
 };
 

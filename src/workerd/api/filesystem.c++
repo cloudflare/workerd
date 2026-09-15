@@ -2621,61 +2621,18 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler,
     const jsg::TypeHandler<FileSystemWritableData>& dataHandler) {
 
-  // Per the spec, the writable stream we create here is expected to write into
-  // a temporary space until the stream is closed. When closed, the original file
-  // contents are replaced with the new contents. If the stream is aborted or
-  // errored, the temporary file data is discarded.
   auto opts = options.orDefault(FileSystemCreateWritableOptions{});
-
-  // If keepExistingData is true, the temporary file is created with a copy of
-  // the original file data. Otherwise, the temporary file is created empty,
-  // which means that if we create a writable stream and close it without writing
-  // anything, the original file data is lost.
   bool keepExistingData = opts.keepExistingData.orDefault(false);
 
-  kj::Maybe<kj::Rc<workerd::File>> fileData;
-  KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
-    if (keepExistingData) {
-      KJ_SWITCH_ONEOF(existing) {
-        KJ_CASE_ONEOF(err, workerd::FsError) {
-          return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
-              deHandler.wrap(js, fsErrorToDomException(js, err)));
-        }
-        KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-          KJ_SWITCH_ONEOF(file->clone(js)) {
-            KJ_CASE_ONEOF(err, workerd::FsError) {
-              return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
-                  deHandler.wrap(js, fsErrorToDomException(js, err)));
-            }
-            KJ_CASE_ONEOF(cloned, kj::Rc<workerd::File>) {
-              fileData = kj::mv(cloned);
-            }
-          }
-        }
-        KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-          auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Is a directory"));
-          return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
-              deHandler.wrap(js, kj::mv(ex)));
-        }
-        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-          auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Is a symbolic link"));
-          return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
-              deHandler.wrap(js, kj::mv(ex)));
-        }
-      }
-    } else {
-      fileData = workerd::File::newWritable(js);
-    }
-  } else {
-    auto ex = js.domException(kj::str("NotFoundError"), kj::str("File not found"));
+  auto opened = FileSystemWriteContextHandle::open(js, JSG_THIS, keepExistingData);
+  KJ_IF_SOME(ex, opened.tryGet<jsg::Ref<jsg::DOMException>>()) {
     return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
         deHandler.wrap(js, kj::mv(ex)));
   }
+  auto context = kj::mv(opened.get<jsg::Ref<FileSystemWriteContextHandle>>());
 
-  auto sharedState = kj::rc<FileSystemWritableFileStream::State>(
-      js, getVfs(), JSG_THIS, KJ_ASSERT_NONNULL(kj::mv(fileData)));
   auto stream =
-      js.alloc<FileSystemWritableFileStream>(newWritableStreamJsController(), sharedState.addRef());
+      js.alloc<FileSystemWritableFileStream>(newWritableStreamJsController(), context.addRef());
 
   UnderlyingSink sink;
   // Per the WHATWG spec, the type property for WritableStream's underlying sink must be undefined.
@@ -2684,72 +2641,141 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
   if (!FeatureFlags::get(js).getPedanticWpt()) {
     sink.type = kj::str("bytes");
   }
-  sink.write = [state = sharedState.addRef(), &deHandler, &dataHandler](
+  // Each closure holds its own ref to the context. These are separate jsg::Refs from the
+  // one the stream holds, so each has its own tracing-parent slot; they stay strong and
+  // untraced, while the stream's is what the GC traces.
+  sink.write = [context = context.addRef(), &deHandler, &dataHandler](
                    jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
     return js.tryCatch([&] {
       KJ_IF_SOME(unwrapped, dataHandler.tryUnwrap(js, chunk)) {
-        return FileSystemWritableFileStream::writeImpl(js, kj::mv(unwrapped), *state, deHandler);
+        return context->write(js, kj::mv(unwrapped), deHandler);
       }
       return js.rejectedPromise<void>(
           js.typeError("WritableStream received a value that is not writable"));
     }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
   };
-  sink.abort = [state = sharedState.addRef()](jsg::Lock& js, auto reason) mutable {
-    // When aborted, we just drop any of the written data on the floor.
-    state->clear();
+  sink.abort = [context = context.addRef()](jsg::Lock& js, auto reason) mutable {
+    context->discard(js);
     return js.resolvedPromise();
   };
-  sink.close = [state = sharedState.addRef(), &deHandler](jsg::Lock& js) mutable {
-    KJ_DEFER(state->clear());
-    return js.tryCatch([&] {
-      KJ_IF_SOME(temp, state->temp) {
-        auto basePath = kj::str(state->file->getLocator().getPathname().slice(1));
-        kj::Path root{};
-        auto base = root.eval(basePath);
-
-        KJ_IF_SOME(existing,
-            state->vfs.getRoot(js)->tryOpen(js, base,
-                {
-                  .createAs = workerd::FsType::FILE,
-                })) {
-          KJ_SWITCH_ONEOF(existing) {
-            KJ_CASE_ONEOF(err, workerd::FsError) {
-              return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
-            }
-            KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-              auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Is a directory"));
-              return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
-            }
-            KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-              KJ_IF_SOME(err, file->replace(js, temp.addRef())) {
-                return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
-              }
-              return js.resolvedPromise();
-            }
-            KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-              auto ex =
-                  js.domException(kj::str("TypeMismatchError"), kj::str("Is a symbolic link"));
-              return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
-            }
-          }
-          KJ_UNREACHABLE;
-        }
-        auto ex =
-            js.domException(kj::str("InvalidStateError"), kj::str("Failed to open or create file"));
-        return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
-      }
-      return js.resolvedPromise();
-    }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
-  };
+  sink.close = [context = context.addRef(), &deHandler](
+                   jsg::Lock& js) mutable { return context->commit(js, deHandler); };
   stream->getController().setup(js, kj::mv(sink), kj::none);
 
   return js.resolvedPromise(kj::mv(stream));
 }
 
+FileSystemWriteContextHandle::FileSystemWriteContextHandle(jsg::Lock& js,
+    const workerd::VirtualFileSystem& vfs,
+    jsg::Ref<FileSystemFileHandle> file,
+    kj::Rc<workerd::File> temp)
+    : vfs(vfs),
+      temp(kj::mv(temp)),
+      file(kj::mv(file)),
+      lock(vfs.lock(js, this->file->getLocator())) {}
+
+kj::OneOf<jsg::Ref<FileSystemWriteContextHandle>, jsg::Ref<jsg::DOMException>>
+FileSystemWriteContextHandle::open(
+    jsg::Lock& js, jsg::Ref<FileSystemFileHandle> file, bool keepExistingData) {
+  auto& vfs = file->getVfs();
+
+  // An empty temporary means that creating a writable and closing it without
+  // writing anything replaces the file with nothing, losing the original data.
+  // keepExistingData seeds the temporary with a copy instead, so a commit that
+  // wrote nothing is a no-op.
+  kj::Maybe<kj::Rc<workerd::File>> fileData;
+  KJ_IF_SOME(existing, vfs.resolve(js, file->getLocator(), {})) {
+    if (keepExistingData) {
+      KJ_SWITCH_ONEOF(existing) {
+        KJ_CASE_ONEOF(err, workerd::FsError) {
+          return fsErrorToDomException(js, err);
+        }
+        KJ_CASE_ONEOF(existingFile, kj::Rc<workerd::File>) {
+          KJ_SWITCH_ONEOF(existingFile->clone(js)) {
+            KJ_CASE_ONEOF(err, workerd::FsError) {
+              return fsErrorToDomException(js, err);
+            }
+            KJ_CASE_ONEOF(cloned, kj::Rc<workerd::File>) {
+              fileData = kj::mv(cloned);
+            }
+          }
+        }
+        KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+          return js.domException(kj::str("TypeMismatchError"), kj::str("Is a directory"));
+        }
+        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+          return js.domException(kj::str("TypeMismatchError"), kj::str("Is a symbolic link"));
+        }
+      }
+    } else {
+      fileData = workerd::File::newWritable(js);
+    }
+  } else {
+    return js.domException(kj::str("NotFoundError"), kj::str("File not found"));
+  }
+
+  return js.alloc<FileSystemWriteContextHandle>(
+      js, vfs, kj::mv(file), KJ_ASSERT_NONNULL(kj::mv(fileData)));
+}
+
+void FileSystemWriteContextHandle::clear() {
+  temp = kj::none;
+  position = 0;
+  lock = kj::none;
+}
+
+void FileSystemWriteContextHandle::discard(jsg::Lock& js) {
+  // When aborted, we just drop any of the written data on the floor.
+  clear();
+}
+
+jsg::Promise<void> FileSystemWriteContextHandle::commit(
+    jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
+  KJ_DEFER(clear());
+  return js.tryCatch([&] {
+    KJ_IF_SOME(inner, temp) {
+      auto basePath = kj::str(file->getLocator().getPathname().slice(1));
+      kj::Path root{};
+      auto base = root.eval(basePath);
+
+      KJ_IF_SOME(existing,
+          vfs.getRoot(js)->tryOpen(js, base,
+              {
+                .createAs = workerd::FsType::FILE,
+              })) {
+        KJ_SWITCH_ONEOF(existing) {
+          KJ_CASE_ONEOF(err, workerd::FsError) {
+            return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+          }
+          KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+            auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Is a directory"));
+            return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+          }
+          KJ_CASE_ONEOF(target, kj::Rc<workerd::File>) {
+            KJ_IF_SOME(err, target->replace(js, inner.addRef())) {
+              return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+            }
+            return js.resolvedPromise();
+          }
+          KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+            auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Is a symbolic link"));
+            return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+      auto ex =
+          js.domException(kj::str("InvalidStateError"), kj::str("Failed to open or create file"));
+      return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+    }
+    return js.resolvedPromise();
+  }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
+}
+
 FileSystemWritableFileStream::FileSystemWritableFileStream(
-    kj::Own<WritableStreamController> controller, kj::Rc<State> sharedState)
+    kj::Own<WritableStreamController> controller, jsg::Ref<FileSystemWriteContextHandle> context)
     : WritableStream(kj::mv(controller)),
-      sharedState(kj::mv(sharedState)) {}
+      context(kj::mv(context)) {}
 
 jsg::Promise<void> FileSystemWritableFileStream::write(jsg::Lock& js,
     FileSystemWritableData data,
@@ -2758,20 +2784,30 @@ jsg::Promise<void> FileSystemWritableFileStream::write(jsg::Lock& js,
       "Cannot write to a stream that is locked to a reader");
   auto writer = getWriter(js);
   KJ_DEFER(writer->releaseLock(js));
-  return writeImpl(js, kj::mv(data), *sharedState, deHandler);
+  return context->write(js, kj::mv(data), deHandler);
 }
 
-jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,
-    FileSystemWritableData data,
-    State& state,
+jsg::Promise<void> FileSystemWritableFileStream::seek(jsg::Lock& js,
+    uint32_t position,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
-  KJ_IF_SOME(inner, state.temp) {
+  return context->seek(js, position, deHandler);
+}
+
+jsg::Promise<void> FileSystemWritableFileStream::truncate(
+    jsg::Lock& js, uint32_t size, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
+  return context->truncate(js, size, deHandler);
+}
+
+jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js,
+    FileSystemWritableData data,
+    const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
+  KJ_IF_SOME(inner, temp) {
     return js.tryCatch([&] {
       KJ_SWITCH_ONEOF(data) {
         KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-          KJ_SWITCH_ONEOF(inner->write(js, state.position, blob->getData())) {
+          KJ_SWITCH_ONEOF(inner->write(js, position, blob->getData())) {
             KJ_CASE_ONEOF(written, uint32_t) {
-              state.position += written;
+              position += written;
             }
             KJ_CASE_ONEOF(err, workerd::FsError) {
               return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
@@ -2780,9 +2816,9 @@ jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,
         }
         KJ_CASE_ONEOF(buffer, jsg::JsRef<jsg::JsBufferSource>) {
           auto handle = buffer.getHandle(js);
-          KJ_SWITCH_ONEOF(inner->write(js, state.position, handle.asArrayPtr())) {
+          KJ_SWITCH_ONEOF(inner->write(js, position, handle.asArrayPtr())) {
             KJ_CASE_ONEOF(written, uint32_t) {
-              state.position += written;
+              position += written;
             }
             KJ_CASE_ONEOF(err, workerd::FsError) {
               return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
@@ -2790,21 +2826,24 @@ jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,
           }
         }
         KJ_CASE_ONEOF(str, kj::String) {
-          KJ_SWITCH_ONEOF(inner->write(js, state.position, str)) {
+          KJ_SWITCH_ONEOF(inner->write(js, position, str)) {
             KJ_CASE_ONEOF(written, uint32_t) {
-              state.position += written;
+              position += written;
             }
             KJ_CASE_ONEOF(err, workerd::FsError) {
               return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
             }
           }
         }
-        KJ_CASE_ONEOF(params, WriteParams) {
-          uint32_t offset = state.position;
+        KJ_CASE_ONEOF(params, FileSystemFileWriteParams) {
+          uint32_t offset = position;
           KJ_IF_SOME(pos, params.position) {
             auto stat = inner->stat(js);
             if (pos > stat.size) {
-              KJ_IF_SOME(err, inner->resize(js, offset)) {
+              // Grow to the requested position so the write below lands: writing past
+              // the end is implementation-defined (File::write may resize or throw).
+              // Growing zero-fills, which is what the spec requires for a gap.
+              KJ_IF_SOME(err, inner->resize(js, pos)) {
                 return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
               }
             }
@@ -2818,7 +2857,7 @@ jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,
                   KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
                     KJ_SWITCH_ONEOF(inner->write(js, offset, blob->getData())) {
                       KJ_CASE_ONEOF(written, uint32_t) {
-                        state.position = offset + written;
+                        position = offset + written;
                         return js.resolvedPromise();
                       }
                       KJ_CASE_ONEOF(err, workerd::FsError) {
@@ -2832,7 +2871,7 @@ jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,
                     auto handle = buffer.getHandle(js);
                     KJ_SWITCH_ONEOF(inner->write(js, offset, handle.asArrayPtr())) {
                       KJ_CASE_ONEOF(written, uint32_t) {
-                        state.position = offset + written;
+                        position = offset + written;
                         return js.resolvedPromise();
                       }
                       KJ_CASE_ONEOF(err, workerd::FsError) {
@@ -2845,7 +2884,7 @@ jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,
                   KJ_CASE_ONEOF(str, kj::String) {
                     KJ_SWITCH_ONEOF(inner->write(js, offset, str)) {
                       KJ_CASE_ONEOF(written, uint32_t) {
-                        state.position = offset + written;
+                        position = offset + written;
                         return js.resolvedPromise();
                       }
                       KJ_CASE_ONEOF(err, workerd::FsError) {
@@ -2875,10 +2914,10 @@ jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,
                   js.domException(
                       kj::str("SyntaxError"), kj::str("seek() requires a position parameter"))));
             }
-            state.position = pos;
+            position = pos;
             auto stat = inner->stat(js);
-            if (state.position > stat.size) {
-              KJ_IF_SOME(err, inner->resize(js, state.position)) {
+            if (position > stat.size) {
+              KJ_IF_SOME(err, inner->resize(js, position)) {
                 return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
               }
             }
@@ -2895,8 +2934,8 @@ jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,
               return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
             }
             auto stat = inner->stat(js);
-            if (state.position > stat.size) {
-              state.position = stat.size;
+            if (position > stat.size) {
+              position = stat.size;
             }
           } else {
             return js.rejectedPromise<void>(
@@ -2912,36 +2951,36 @@ jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,
   return js.rejectedPromise<void>(js.typeError("write() after closed"));
 }
 
-jsg::Promise<void> FileSystemWritableFileStream::seek(jsg::Lock& js,
-    uint32_t position,
+jsg::Promise<void> FileSystemWriteContextHandle::seek(jsg::Lock& js,
+    uint32_t newPosition,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
-  KJ_IF_SOME(inner, sharedState->temp) {
+  KJ_IF_SOME(inner, temp) {
     auto stat = inner->stat(js);
-    if (position > stat.size) {
-      KJ_IF_SOME(err, inner->resize(js, position)) {
+    if (newPosition > stat.size) {
+      KJ_IF_SOME(err, inner->resize(js, newPosition)) {
         return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
       }
     }
-    sharedState->position = position;
+    position = newPosition;
     return js.resolvedPromise();
   }
 
   return js.rejectedPromise<void>(js.typeError("seek() after closed"));
 }
 
-jsg::Promise<void> FileSystemWritableFileStream::truncate(
+jsg::Promise<void> FileSystemWriteContextHandle::truncate(
     jsg::Lock& js, uint32_t size, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
-  KJ_IF_SOME(inner, sharedState->temp) {
+  KJ_IF_SOME(inner, temp) {
     KJ_IF_SOME(err, inner->resize(js, size)) {
       return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
     }
     auto stat = inner->stat(js);
-    if (sharedState->position > stat.size) {
-      sharedState->position = stat.size;
+    if (position > stat.size) {
+      position = stat.size;
     }
     return js.resolvedPromise();
   }
 
-  return js.rejectedPromise<void>(js.typeError("seek() after closed"));
+  return js.rejectedPromise<void>(js.typeError("truncate() after closed"));
 }
 }  // namespace workerd::api

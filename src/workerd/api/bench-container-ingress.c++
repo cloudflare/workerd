@@ -234,7 +234,7 @@ class DirectOutgoingFactory final: public Fetcher::OutgoingFactory {
         [this, &makeUserSpanParent](auto& tracing, auto& channelFactory) {
       makeUserSpanParent(tracing);
       return kj::heap<DirectWorkerInterface>(client);
-    }, {.inHouse = false, .wrapMetrics = false});
+    }, {.inHouse = false, .wrapMetrics = false}, CountSubrequest::YES);
     return {.client = kj::mv(result), .spanParents = kj::none};
   }
 

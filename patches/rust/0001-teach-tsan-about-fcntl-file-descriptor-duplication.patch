@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mike Aizatsky <maizatskyi@cloudflare.com>
+Date: Fri, 4 Sep 2026 12:18:53 -0700
+Subject: [PATCH] Teach TSan about fcntl file descriptor duplication
+
+TSan does not intercept fcntl(F_DUPFD_CLOEXEC), so replace the new
+file descriptor with an equivalent dup3() duplicate that TSan can
+track.
+
+Remove this patch once https://github.com/llvm/llvm-project/pull/221064
+is available in our toolchain.
+
+---
+--- std/src/lib.rs
++++ std/src/lib.rs
+@@ -275,6 +275,7 @@
+ #![feature(allow_internal_unstable)]
+ #![feature(asm_experimental_arch)]
+ #![feature(autodiff)]
++#![feature(cfg_sanitize)]
+ #![feature(cfg_sanitizer_cfi)]
+ #![feature(cfg_target_has_threads)]
+ #![feature(cfg_target_thread_local)]
+--- std/src/os/fd/owned.rs
++++ std/src/os/fd/owned.rs
+@@ -127,4 +127,14 @@
+         // Avoid using file descriptors below 3 as they are used for stdio
+         let fd = cvt(unsafe { libc::fcntl(self.as_raw_fd(), cmd, 3) })?;
++
++        // TSan does not intercept fcntl(F_DUPFD_CLOEXEC), but it does intercept dup3(). Replacing
++        // the new descriptor with an equivalent duplicate teaches TSan that both descriptors
++        // refer to the same open file description while preserving atomic CLOEXEC semantics.
++        #[cfg(all(target_os = "linux", sanitize = "thread"))]
++        if let Err(error) = cvt(unsafe { libc::dup3(self.as_raw_fd(), fd, libc::O_CLOEXEC) }) {
++            unsafe { libc::close(fd) };
++            return Err(error);
++        }
++
+         Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+     }

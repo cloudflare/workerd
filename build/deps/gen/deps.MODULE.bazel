@@ -27,10 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.0.bcr.3")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "4f23e7e1b816b2b1039164934d77b20e8f901d59e5c933e23c117cdc51582569",
-    strip_prefix = "capnproto-capnproto-1cde2d1/c++",
+    sha256 = "9addcc52046fa8073adcd41975fd353004871d6ed58ab460bce7ccf7b39a45fe",
+    strip_prefix = "capnproto-capnproto-a836bf0/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/1cde2d11a11a2ee58ac9fcd7d5f35cab05ef18d6",
+    url = "https://github.com/capnproto/capnproto/tarball/a836bf03b31934d5289db1158e1436e8b67ef984",
 )
 use_repo(http, "capnp-cpp")
 
@@ -38,7 +38,7 @@ use_repo(http, "capnp-cpp")
 git_repository(
     name = "com_googlesource_chromium_icu",
     build_file = "@v8//:bazel/BUILD.icu",
-    commit = "d578f2e8b7bd5938e21cfb6bf15c079e0aa5b738",
+    commit = "8cc91d9b6ab9991802fd208ee03a69714fd0251c",
     patch_cmds = [
         "find source -name BUILD.bazel | xargs rm",
     ],
@@ -127,20 +127,20 @@ archive_override(
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
         "//:patches/perfetto/0002-disable-info-level-logging-re2.patch",
     ],
-    sha256 = "60dd39e5f21800c4f61032ca9f9f73973cfc7d93db9f0d39e63ad3d8fb3740e9",
-    strip_prefix = "google-perfetto-25e635e",
+    sha256 = "4fcc98fe4754269a70e297f6caba429420039c89a1c6cb561dffb4057de63abb",
+    strip_prefix = "google-perfetto-9e9bdaf",
     type = "tgz",
-    url = "https://api.github.com/repos/google/perfetto/tarball/v56.1",
+    url = "https://api.github.com/repos/google/perfetto/tarball/v58.2",
 )
 
 # simdutf
 http.archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "9de890413ccb528f60aa5a327e6340a4dc29f6cdf3673211320df6f3a971ea44",
+    sha256 = "631d95aaf39371505897b0916be2a60dd7c17ae16cec8bd5036d15d23bd0ac21",
     strip_prefix = "",
     type = "zip",
-    url = "https://github.com/simdutf/simdutf/releases/download/v9.1.0/singleheader.zip",
+    url = "https://github.com/simdutf/simdutf/releases/download/v9.1.2/singleheader.zip",
 )
 use_repo(http, "simdutf")
 
@@ -152,7 +152,7 @@ bazel_dep(name = "zlib")
 git_override(
     module_name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    commit = "5eb4d7ed380f214e7a0a23c18f629048d3ba9e00",
+    commit = "285e94b8fa95ad3b7d16b80798ec8dce6febb8c8",
     patch_strip = 1,
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",

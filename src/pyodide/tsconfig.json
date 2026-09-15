@@ -14,5 +14,5 @@
     "allowArbitraryExtensions": true
   },
   "include": ["./**/*"],
-  "exclude": ["./**/generated/**/*", "node_modules", "**/*.mjs"]
+  "exclude": ["./**/generated/**/*", "./tools/**/*", "node_modules", "**/*.mjs"]
 }

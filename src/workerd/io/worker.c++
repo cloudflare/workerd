@@ -34,6 +34,7 @@
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uuid.h>
 #include <workerd/util/xthreadnotifier.h>
 
@@ -153,6 +154,7 @@ void maybePerIsolateBootstrap(CompatibilityFlags::Reader& featureFlags,
     v8::Local<v8::Context> context,
     kj::Maybe<ValidationErrorReporter&> errorReporter) {
   if (util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
+    TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
     JSG_WITHIN_CONTEXT_SCOPE(
         lock, context, [&](jsg::Lock& js) { runPerIsolateBootstrap(js, featureFlags); });
   } else if (featureFlags.getTypeScriptImplementedStreams()) {
@@ -1119,8 +1121,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     : metrics(kj::mv(metricsParam)),
       id(kj::str(id)),
       limitEnforcer(kj::mv(limitEnforcerParam)),
-      cpuLimitNearlyExceededCallback(
-          kj::MutexGuarded<kj::Maybe<kj::Function<void(void)>>>(kj::none)),
+      cpuLimitNearlyExceededCallback(kj::MutexGuarded<kj::Maybe<kj::Function<void()>>>(kj::none)),
       api(kj::mv(apiParam)),
       loggingOptions(loggingOptions),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
@@ -1658,7 +1659,7 @@ bool Worker::Isolate::Impl::Lock::checkInWithLimitEnforcer(Worker::Isolate& isol
   return limitEnforcer.exitJs(*lock);
 }
 
-kj::Maybe<kj::Function<void(void)>> Worker::Isolate::getCpuLimitNearlyExceededCallback() const {
+kj::Maybe<kj::Function<void()>> Worker::Isolate::getCpuLimitNearlyExceededCallback() const {
   auto lock = cpuLimitNearlyExceededCallback.lockExclusive();
   KJ_IF_SOME(cb, *lock) {
     return cb.reference();
@@ -1666,7 +1667,7 @@ kj::Maybe<kj::Function<void(void)>> Worker::Isolate::getCpuLimitNearlyExceededCa
   return kj::none;
 }
 
-void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) const {
+void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) const {
   auto lock = cpuLimitNearlyExceededCallback.lockExclusive();
   // Make sure we don't reassign the callback so we don't invalidate references we've passed out.
   if (*lock == kj::none) {
@@ -2686,24 +2687,36 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
       auto report = [&](kj::Maybe<kj::StringPtr> name, api::ExportedHandler& exported) {
         auto handle = exported.self.getHandle(js);
         if (handle->IsArray()) {
-          // HACK: toDict() will throw a TypeError if given an array, because jsg::DictWrapper is
-          //   designed to treat arrays as not matching when a dict is expected. However,
-          //   StructWrapper has no such restriction, and therefore an exported array will
-          //   successfully produce an ExportedHandler (presumably with no handler functions), and
-          //   hence we will see it here. Rather than try to correct this inconsistency between
-          //   struct and dict handling (which could have unintended consequences), let's just
-          //   work around by ignoring arrays here.
+          // HACK: jsg::DictWrapper is designed to treat arrays as not matching when a dict is
+          //   expected. However, StructWrapper has no such restriction, and therefore an exported
+          //   array will successfully produce an ExportedHandler (presumably with no handler
+          //   functions), and hence we will see it here. Rather than try to correct this
+          //   inconsistency between struct and dict handling (which could have unintended
+          //   consequences), let's just work around by ignoring arrays here -- otherwise we'd
+          //   report the array's indices as if they were handler names.
           errorReporter.addEntrypoint(name, kj::Array<kj::String>());
         } else {
           // Use a HashSet to avoid duplicates when methods exist both as own properties
           // and in the prototype chain
           kj::HashSet<kj::String> methodSet;
 
-          // First, check for own properties (like a plain object literal)
-          auto dict = js.toDict(handle);
-          for (auto& field: dict.fields) {
-            if (!ignoredHandlers.contains(field.name)) {
-              methodSet.upsert(kj::mv(field.name), [&](auto&, auto&&) {});
+          // First, check for own properties (like a plain object literal).
+          //
+          // We deliberately read only the property names here, never their values. Reading
+          // values (as `toDict()` does) invokes application-defined getters, which can throw
+          // arbitrary exceptions and end up reported as an internal error instead of a
+          // user-visible script error. The handler values themselves were already validated
+          // when the export was unwrapped into an ExportedHandler, so we don't need them here.
+          //
+          jsg::JsArray ownProperties =
+              jsg::JsObject(handle).getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
+                  static_cast<jsg::PropertyFilter>(
+                      jsg::PropertyFilter::ONLY_ENUMERABLE | jsg::PropertyFilter::SKIP_SYMBOLS),
+                  jsg::IndexFilter::INCLUDE_INDICES);
+          for (auto i: kj::zeroTo(ownProperties.size())) {
+            auto propName = ownProperties.get(js, i).toString(js);
+            if (!ignoredHandlers.contains(propName)) {
+              methodSet.upsert(kj::mv(propName), [&](auto&, auto&&) {});
             }
           }
 
@@ -3670,8 +3683,13 @@ struct Worker::Actor::Impl {
   kj::Maybe<jsg::JsRef<jsg::JsObject>> ctxObject;
 
   kj::Maybe<rpc::Container::Client> container;
+  jsg::Dict<kj::String> containerImages;
   kj::Maybe<FacetManager&> facetManager;
   kj::Maybe<ActorVersion> version;
+
+  // Names the holder this actor belongs to, where the embedder supplies one. Actors of one holder
+  // share it; sibling facets do not.
+  kj::Maybe<uint64_t> holderToken;
 
   struct NoClass {};
   struct Initializing {};
@@ -3839,6 +3857,7 @@ struct Worker::Actor::Impl {
       kj::Maybe<kj::Own<HibernationManager>> manager,
       kj::Maybe<uint16_t>& hibernationEventType,
       kj::Maybe<rpc::Container::Client> container,
+      jsg::Dict<kj::String> containerImages,
       kj::Maybe<FacetManager&> facetManager,
       kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
       : actorId(kj::mv(actorId)),
@@ -3847,6 +3866,7 @@ struct Worker::Actor::Impl {
         metrics(kj::mv(metricsParam)),
         transient(hasTransient),
         container(kj::mv(container)),
+        containerImages(kj::mv(containerImages)),
         facetManager(facetManager),
         hooks(loopback->addRef(), timerChannel, *metrics),
         inputGate(hooks),
@@ -3897,14 +3917,17 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Maybe<kj::Own<HibernationManager>> manager,
     kj::Maybe<uint16_t> hibernationEventType,
     kj::Maybe<rpc::Container::Client> container,
+    jsg::Dict<kj::String> containerImages,
     kj::Maybe<FacetManager&> facetManager,
-    kj::Maybe<ActorVersion> version)
+    kj::Maybe<ActorVersion> version,
+    kj::Maybe<uint64_t> holderToken)
     : worker(kj::atomicAddRef(worker)),
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
   impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache), kj::mv(props),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
-      hibernationEventType, kj::mv(container), facetManager);
+      hibernationEventType, kj::mv(container), kj::mv(containerImages), facetManager);
   impl->version = kj::mv(version);
+  impl->holderToken = holderToken;
 
   KJ_IF_SOME(c, className) {
     KJ_IF_SOME(cls, worker.impl->actorClasses.find(c)) {
@@ -3917,6 +3940,18 @@ Worker::Actor::Actor(const Worker& worker,
     }
   } else {
     impl->classInstance = Impl::NoClass();
+  }
+
+  // Attach only once this actor is fully built: attaching releases events queued while the previous
+  // generation went away, and delivering one reaches straight back into `impl`.
+  KJ_IF_SOME(m, impl->hibernationManager) {
+    if (ownsHibernatedSockets(*m)) {
+      attachHibernationManager(*m);
+    } else {
+      // Another actor's sockets. Letting go leaves them with the actor they belong to, and lets
+      // this actor build its own manager if it accepts a hibernatable WebSocket.
+      impl->hibernationManager = kj::none;
+    }
   }
 }
 
@@ -3968,12 +4003,21 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
         storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
       }
 
+      auto containerImages = jsg::Dict<kj::String>{
+        .fields =
+            KJ_MAP(field, impl->containerImages.fields) {
+        return jsg::Dict<kj::String>::Field{
+          .name = kj::str(field.name),
+          .value = kj::str(field.value),
+        };
+      },
+      };
+
       auto ctx = js.alloc<api::DurableObjectState>(js, cloneId(),
           jsg::JsValue(KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).getHandle(js)),
           impl->props.toJs(js), kj::mv(storage), kj::mv(impl->container), containerRunning,
-          impl->facetManager, impl->version.map([](ActorVersion& v) {
-        return ActorVersion{.cohort = v.cohort.map([](kj::String& s) { return kj::str(s); })};
-      }));
+          kj::mv(containerImages), impl->facetManager,
+          impl->version.map([](ActorVersion& v) { return v.clone(); }));
 
       auto handler =
           info.cls(lock, ctx.addRef(), KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
@@ -4020,6 +4064,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
 Worker::Actor::~Actor() noexcept(false) {
   // Note: We do not need an isolate lock to destroy the actor impl. Everything in it is specific
   // to our thread, or is a handle that can be dropped outside of the lock.
+
+  selfRef->invalidate();
 }
 
 void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error) {
@@ -4399,16 +4445,65 @@ kj::Maybe<Worker::Actor::HibernationManager&> Worker::Actor::getHibernationManag
       [](kj::Own<HibernationManager>& hib) -> HibernationManager& { return *hib; });
 }
 
-void Worker::Actor::setHibernationManager(kj::Own<HibernationManager> hib) {
-  KJ_REQUIRE(impl->hibernationManager == kj::none);
-  hib->setTimerChannel(impl->timerChannel);
+kj::Maybe<uint64_t> Worker::Actor::getHolderToken() {
+  return impl->holderToken;
+}
+
+bool Worker::Actor::ownsHibernatedSockets(HibernationManager& manager) {
+  KJ_IF_SOME(owner, manager.getOwningActor()) {
+    // The owner is still running, so nothing was handed over. Another actor taking the manager
+    // would redirect the owner's events to itself.
+    return &owner == this;
+  }
+
+  // The owner is gone, which is what a code update or an eviction leaves behind. Its sockets pass
+  // to the next actor of the same holder, and to nothing else.
+  KJ_IF_SOME(ownerToken, manager.getOwningHolderToken()) {
+    KJ_IF_SOME(token, getHolderToken()) {
+      return token == ownerToken;
+    }
+    return false;
+  }
+
+  // No token to compare, so fall back to the ID. That admits a sibling facet, which uses its
+  // parent's ID by default, so embedders running facets are expected to supply a token.
+  KJ_IF_SOME(ownerId, manager.getOwningActorId()) {
+    return idsEqual(ownerId, getId());
+  }
+
+  // Never owned, so there is nothing to inherit and nothing to disturb.
+  return true;
+}
+
+void Worker::Actor::attachHibernationManager(HibernationManager& manager) {
   // Not the cleanest way to provide hibernation manager with a timer channel reference, but
   // where HibernationManager is constructed (actor-state), we don't have a timer channel ref.
+  manager.setTimerChannel(impl->timerChannel);
+
+  manager.setOwningActor(*this);
+
+  // The loopback goes last: supplying it releases events the manager queued while it had no actor,
+  // and those dispatch against the owning actor set just above.
+  manager.setLoopback(impl->loopback->addRef());
+}
+
+void Worker::Actor::setHibernationManager(kj::Own<HibernationManager> hib) {
+  KJ_REQUIRE(impl->hibernationManager == kj::none);
+
+  // A manager built by acceptWebSocket() already points here, but an adopted one still carries the
+  // loopback and owning actor of the outgoing generation. Leaving those in place would send its
+  // events to a dead generation, or queue them for a loopback nothing will supply.
+  attachHibernationManager(*hib);
+
   impl->hibernationManager = kj::mv(hib);
 }
 
 kj::Maybe<uint16_t> Worker::Actor::getHibernationEventType() {
   return impl->hibernationEventType;
+}
+
+kj::Own<Worker::Actor::WeakRef> Worker::Actor::getWeakRef() {
+  return kj::addRef(*selfRef);
 }
 
 kj::Own<Worker::Actor> Worker::Actor::addRef() {
@@ -4588,6 +4683,16 @@ class Worker::Isolate::ResponseStreamWrapper final: public kj::AsyncOutputStream
 
   // Intentionally not wrapping `tryPumpFrom` to force consumer to use `write` in a loop which,
   // in turn, will report each chunk to the inspector to show progress of a slow response.
+  //
+  // tryWriteSync() is likewise intentionally not overridden. The inherited default always
+  // declines, forcing every chunk through write() above so that it is reported to the
+  // inspector. Do NOT add a forwarding override that calls reportBytes(): reportBytes()
+  // unconditionally acquires the isolate lock, and unlike write() -- which is only invoked
+  // from the response pump without the isolate lock held -- tryWriteSync() is reached from
+  // paths that already hold it (e.g. a JS writer.write() taking the internal controller's
+  // synchronous fast path through EncodedAsyncOutputStream), so it would recursively acquire
+  // the lock. This wrapper only exists while an inspector session has network inspection
+  // enabled, so the lost fast path is not a concern.
 
   kj::Promise<void> whenWriteDisconnected() override {
     return inner->whenWriteDisconnected();

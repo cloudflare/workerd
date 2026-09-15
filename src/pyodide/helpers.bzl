@@ -1,4 +1,5 @@
 load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
+load("@aspect_rules_js//js:defs.bzl", "js_run_binary")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
@@ -29,6 +30,18 @@ def _copy_to_generated(src, version = None, out_name = None, name = None):
     if version:
         name += "@" + version
     copy_file(name = name, src = src, out = _out_path(out_name, version))
+
+def _bin_relative_path(path):
+    # js_run_binary runs its tool with the bin directory as the working directory. Returns the
+    # path, relative to that directory, of a file in the current package. Works whether this
+    # package is in the main repository or (as when workerd is a dependency) an external one.
+    package = native.package_name()
+    if package:
+        path = package + "/" + path
+    repo = native.repo_name()
+    if repo:
+        path = "external/" + repo + "/" + path
+    return path
 
 def _copy_and_capnp_embed(src):
     out_name = _out_name(src)
@@ -159,132 +172,6 @@ def pyodide_static():
         tsconfig_json = "tsconfig.json",
     )
 
-_PRELUDE = """
-import {
-    addEventListener,
-    getRandomValues,
-    location,
-    monotonicDateNow,
-    newWasmModule,
-    patchedApplyFunc,
-    patchedLoadLibData,
-    reportUndefinedSymbolsPatched,
-    wasmInstantiate,
-    patched_PyEM_CountFuncParams,
-} from "pyodide-internal:pool/builtin_wrappers";
-"""
-
-# pyodide.asm.mjs patches
-# TODO: all of these should be fixed by linking our own Pyodide or by upstreaming.
-_REPLACEMENTS_COMMON = [
-    [
-        "new WebAssembly.Module",
-        "newWasmModule",
-    ],
-    [
-        "WebAssembly.instantiate",
-        "wasmInstantiate",
-    ],
-    [
-        "Date.now",
-        "monotonicDateNow",
-    ],
-    [
-        "reportUndefinedSymbols()",
-        "reportUndefinedSymbolsPatched(Module)",
-    ],
-    [
-        "crypto.getRandomValues(",
-        "getRandomValues(Module, ",
-    ],
-    [
-        # Direct eval disallowed in esbuild, see:
-        # https://esbuild.github.io/content-types/#direct-eval
-        "eval(func)",
-        "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
-    ],
-    [
-        "eval(data)",
-        "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
-    ],
-    [
-        "eval(UTF8ToString(ptr))",
-        "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
-    ],
-    # Dynamic linking patches:
-    # library lookup
-    [
-        "function loadLibData(){",
-        """
-        function loadLibData(){
-            var libData = patchedLoadLibData(Module, libName, flags.rpath);
-            return flags.loadAsync ? Promise.resolve(libData) : libData;
-        }
-        function dummiedOutOrigLoadLibData(){
-        """,
-    ],
-    # for ensuring memory base of dynlib is stable when restoring snapshots
-    [
-        "getMemory(",
-        "Module.getMemoryPatched(Module, libName, ",
-    ],
-    [
-        "function _PyEM_CountFuncParams(func){",
-        "function _PyEM_CountFuncParams(func){ return patched_PyEM_CountFuncParams(Module, func);",
-    ],
-    [
-        "var tableBase=metadata.tableSize?wasmTable.length:0;",
-        "var tableBase=metadata.tableSize?wasmTable.length:0;" +
-        "Module.snapshotDebug && console.log('loadWebAssemblyModule', libName, memoryBase, tableBase);",
-    ],
-    # to ensure we report every fatal error, not just the first one
-    [
-        'console.error("Recursive call to fatal_error. Inner error was:");',
-        'console.error("Recursive call to fatal_error. Inner error was:");\n' +
-        "try { API.on_fatal?.(e); } catch(e2) { console.error(e2); }\n",
-    ],
-]
-
-_REPLACEMENTS_COMMON_0_26_0_28 = [
-    # for 0.28.2 or earlier, pyodide.asm.js was a commonjs module
-    [
-        # Convert pyodide.asm.js into an es6 module.
-        # When we link our own we can pass `-sES6_MODULE` to the linker and it will do this for us
-        # automatically.
-        "var _createPyodideModule",
-        _PRELUDE + "export const _createPyodideModule",
-    ],
-    [
-        "globalThis._createPyodideModule = _createPyodideModule;",
-        "",
-    ],
-    # to fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7
-    [
-        "nullToUndefined(func.apply(",
-        "nullToUndefined(patchedApplyFunc(API, func, ",
-    ],
-    [
-        "nullToUndefined(Function.prototype.apply.apply",
-        "nullToUndefined(API.config.jsglobals.Function.prototype.apply.apply",
-    ],
-]
-
-_REPLACEMENTS_COMMON_314 = [
-    # for 314 or later, pyodide.asm.mjs is es6 module
-    [
-        "export default _createPyodideModule;",
-        # still expose _createPyodideModule for compatibility (import { _createPyodideModule })
-        _PRELUDE + "export default _createPyodideModule; export { _createPyodideModule };",
-    ],
-]
-
-_REPLACEMENTS = {
-    "0.26.0a2": _REPLACEMENTS_COMMON + _REPLACEMENTS_COMMON_0_26_0_28,
-    "0.28.2": _REPLACEMENTS_COMMON + _REPLACEMENTS_COMMON_0_26_0_28,
-    "314.0.4": _REPLACEMENTS_COMMON + _REPLACEMENTS_COMMON_314,
-    "314.0.6": _REPLACEMENTS_COMMON + _REPLACEMENTS_COMMON_314,
-}
-
 def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, python_stdlib_zip = None, emscripten_setup_override = None):
     pyodide_package = "@pyodide-%s//" % version
     if not pyodide_asm_wasm:
@@ -304,11 +191,26 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
 
     _copy_to_generated(python_stdlib_zip, version, out_name = "python_stdlib.zip")
 
-    expand_template(
+    # Apply workerd's patches to the Emscripten-generated module (see tools/patch_pyodide_asm.ts).
+    # The upstream file is first copied into this package so that both the tool's input and
+    # output can be addressed relative to the bin directory it runs in.
+    upstream_asm_mjs = _out_path("pyodide.asm.upstream.mjs", version)
+    patched_asm_mjs = _out_path("pyodide.asm.mjs", version)
+    _copy_to_generated(pyodide_asm_mjs, version, out_name = "pyodide.asm.upstream.mjs")
+    js_run_binary(
         name = "pyodide.asm.mjs@rule@" + version,
-        out = _out_path("pyodide.asm.mjs", version),
-        substitutions = dict(_REPLACEMENTS[version]),
-        template = pyodide_asm_mjs,
+        srcs = [upstream_asm_mjs],
+        outs = [patched_asm_mjs],
+        args = [
+            "--version",
+            version,
+            "--input",
+            _bin_relative_path(upstream_asm_mjs),
+            "--output",
+            _bin_relative_path(patched_asm_mjs),
+        ],
+        mnemonic = "PatchPyodideAsm",
+        tool = Label("//src/pyodide/tools:patch_pyodide_asm"),
     )
 
     js_file(

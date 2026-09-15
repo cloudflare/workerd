@@ -13,15 +13,15 @@ jsg::Ref<Immediate> TimersUtil::setImmediate(jsg::Lock& js,
     jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
     jsg::Arguments<jsg::Value> args) {
   auto context = js.v8Context();
-  auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
-      js.v8Isolate, context, context->Global(), jsg::kNonResourceWrappableTagRange);
+  auto& global =
+      jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(context, context->Global());
   return global.setImmediate(js, kj::mv(function), kj::mv(args));
 }
 
 void TimersUtil::clearImmediate(jsg::Lock& js, kj::Maybe<jsg::Ref<Immediate>> maybeImmediate) {
   auto context = js.v8Context();
-  auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
-      js.v8Isolate, context, context->Global(), jsg::kNonResourceWrappableTagRange);
+  auto& global =
+      jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(context, context->Global());
   global.clearImmediate(kj::mv(maybeImmediate));
 }
 }  // namespace workerd::api::node

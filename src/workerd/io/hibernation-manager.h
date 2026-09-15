@@ -27,7 +27,14 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
       kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) override;
   kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse(
       jsg::Lock& js) override;
+  kj::Own<void> beginLoopbackHandoff() override KJ_WARN_UNUSED_RESULT;
+  void setLoopback(kj::Own<Worker::Actor::Loopback> loopback) override;
   void setTimerChannel(TimerChannel& timerChannel) override;
+  void setOwningActor(Worker::Actor& actor) override;
+  kj::Maybe<Worker::Actor&> getOwningActor() override;
+  kj::Maybe<const Worker::Actor::Id&> getOwningActorId() override;
+  kj::Maybe<uint64_t> getOwningHolderToken() override;
+  void forgetOwningHolder() override;
   kj::Own<HibernationManager> addRef() override;
   void setEventTimeout(kj::Maybe<uint32_t> timeoutMs) override;
   kj::Maybe<uint32_t> getEventTimeout() override;

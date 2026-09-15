@@ -6,7 +6,10 @@ import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'compression-bad-chunks.any.js': {
-    comment: 'Test times out - needs investigation',
+    comment:
+      'The C++ implementation accepts string and SharedArrayBuffer chunks ' +
+      '(src/tests/streams/compression/AGENTS.md ledger #1-#2), so the ' +
+      'expected rejections never arrive and the test times out',
     disabledTests: true,
   },
   'compression-constructor-error.any.js': {},

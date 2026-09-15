@@ -360,6 +360,44 @@ KJ_TEST("compatibility flag parsing") {
       {}, CompatibilityDateValidation::FUTURE_FOR_TEST, false, false);
 }
 
+KJ_TEST("auto-injected pythonWorkers compat flags in flag implication") {
+  capnp::MallocMessageBuilder message;
+  auto orphanage = message.getOrphanage();
+
+  auto flagListOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(1);
+  auto flagList = flagListOrphan.get();
+  flagList.set(0, "auto_inject_python_workers"_kj);
+
+  auto outputOrphan = orphanage.newOrphan<CompatibilityFlags>();
+  auto output = outputOrphan.get();
+
+  // When python is a main module, the auto-injected flags should be set
+  SimpleWorkerErrorReporter errorReporter;
+  compileCompatibilityFlags("2025-10-16", flagList.asReader(), output, errorReporter, true,
+      CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr, MainModuleIsPython::YES);
+  KJ_EXPECT(errorReporter.errors.size() == 0, kj::strArray(errorReporter.errors, "; "));
+
+  auto flags = output.asReader();
+  KJ_EXPECT(flags.getAutoInjectPythonWorkers());
+  KJ_EXPECT(flags.getPythonWorkers());
+  KJ_EXPECT(flags.getPythonWorkflows());
+  KJ_EXPECT(flags.getPythonWorkers20250116());
+  KJ_EXPECT(flags.getPythonDedicatedSnapshot());
+
+  // Without the gate, a Python main module alone injects nothing.
+  auto emptyFlagsOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(0);
+  auto gateOffOrphan = orphanage.newOrphan<CompatibilityFlags>();
+  auto gateOffOutput = gateOffOrphan.get();
+  compileCompatibilityFlags("2025-10-16", emptyFlagsOrphan.get().asReader(), gateOffOutput,
+      errorReporter, true, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr,
+      MainModuleIsPython::YES);
+  KJ_EXPECT(errorReporter.errors.size() == 0, kj::strArray(errorReporter.errors, "; "));
+
+  auto gateOffFlags = gateOffOutput.asReader();
+  KJ_EXPECT(!gateOffFlags.getAutoInjectPythonWorkers());
+  KJ_EXPECT(!gateOffFlags.getPythonWorkers());
+}
+
 KJ_TEST("a reporter that ignores warnings accepts a redundant compatibility flag") {
   // A reporter that leaves `addWarning()` at its default -- as deploy-time validation does, since
   // it distinguishes only valid configurations from invalid ones -- must not see a redundant flag

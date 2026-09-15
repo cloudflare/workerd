@@ -114,7 +114,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
     auto tmpl = getCapnpTemplate(js, client.getSchema());
     auto obj = jsg::check(tmpl->InstanceTemplate()->NewInstance(context));
     auto ref = js.alloc<CapnpCapability>(kj::mv(client));
-    ref.attachWrapper(js.v8Isolate, obj, TypeWrapper::template wrappableTag<CapnpCapability>());
+    ref.attachWrapper(js.v8Isolate, obj);
     KJ_IF_SOME(r, refToInitialize) {
       r = kj::mv(ref);
     }
@@ -357,7 +357,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
               jsg::V8Ref<v8::Object>(js.v8Isolate, arg.As<v8::Object>()), wrapper));
       auto ptr = js.alloc<CapnpCapability>(kj::mv(client));
 
-      ptr.attachWrapper(js.v8Isolate, obj, TypeWrapper::template wrappableTag<CapnpCapability>());
+      ptr.attachWrapper(js.v8Isolate, obj);
     });
   }
 
@@ -371,8 +371,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
       auto& js = jsg::Lock::from(args.GetIsolate());
       auto obj = args.This();
       auto& wrapper = TypeWrapper::from(js.v8Isolate);
-      auto& self = jsg::extractInternalPointerFor<TypeWrapper, CapnpCapability, false>(
-          js.v8Isolate, js.v8Context(), obj);
+      auto& self = jsg::extractInternalPointer<CapnpCapability, false>(js.v8Context(), obj);
 
       return wrapper.wrap(js, js.v8Context(), obj, self.call(js, method, args[0], wrapper));
     });

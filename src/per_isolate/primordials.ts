@@ -386,8 +386,7 @@ const DataViewPrototypeGetByteLength = getProtoGetter<
 // lookups can't be confused via Object.prototype pollution. DataView is not
 // in this map (the getter returns undefined for it) — detect it separately
 // and use the DataView capture above.
-// Float16Array is enabled unconditionally via --js-float16array (jsg
-// setup.c++), so a plain capture is safe.
+// Float16Array is enabled unconditionally, so a plain capture is safe.
 const TypedArrayCtorByName = ObjectFreeze(
   ObjectSetPrototypeOf(
     {
@@ -634,6 +633,7 @@ const EventTargetRemoveEventListener = uncurryThis(
 
 const TextDecoderCtor = globalThis.TextDecoder;
 const TextEncoderCtor = globalThis.TextEncoder;
+const DOMException = globalThis.DOMException;
 
 const TextEncoderEncode = uncurryThis(TextEncoderCtor.prototype.encode) as (
   encoder: TextEncoder,
@@ -733,6 +733,9 @@ module.exports = ObjectFreeze({
   ArrayPrototypeShift,
   ArrayPrototypeSlice,
   ArrayPrototypeSplice,
+
+  // DOMException
+  DOMException,
 
   // Map
   MapPrototypeGet,

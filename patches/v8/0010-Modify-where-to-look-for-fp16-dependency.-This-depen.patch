@@ -8,29 +8,25 @@ Subject: Modify where to look for fp16 dependency. This dependency is normally
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 37a39771739b475e2a367d4f4b3b0b68aacfe6ec..1bf532f07dd3e6f45d57df1a2ee744a62e0156a3 100644
+index 6851d7182f7644fd03e4cd3ef4a4185e116ae100..f91de11e04244e88a5e57adffa497ff0b8e79ab7 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4180,17 +4180,23 @@ v8_library(
-   ],
+@@ -4187,17 +4187,23 @@ v8_library(
+     ],
  )
  
 -v8_library(
--  name = "lib_fp16",
--  srcs = ["third_party/fp16/src/include/fp16.h"],
--  hdrs = [
--    "third_party/fp16/src/include/fp16/fp16.h",
--    "third_party/fp16/src/include/fp16/bitcasts.h",
--    "third_party/fp16/src/include/fp16/macros.h",
--  ],
--  includes = [
--    "third_party/fp16/src/include",
--  ],
 +cc_library(
-+    name = "lib_fp16",
-+    hdrs = [
+     name = "lib_fp16",
+-    srcs = ["third_party/fp16/src/include/fp16.h"],
+     hdrs = [
+-        "third_party/fp16/src/include/fp16/fp16.h",
+-        "third_party/fp16/src/include/fp16/bitcasts.h",
+-        "third_party/fp16/src/include/fp16/macros.h",
 +        "@fp16//:include/fp16.h",
-+    ],
+     ],
+-    includes = [
+-        "third_party/fp16/src/include",
 +    include_prefix = "third_party/fp16/src",
 +    deps = [":lib_fp16_includes"],
 +)
@@ -41,7 +37,7 @@ index 37a39771739b475e2a367d4f4b3b0b68aacfe6ec..1bf532f07dd3e6f45d57df1a2ee744a6
 +        "@fp16//:include/fp16/bitcasts.h",
 +        "@fp16//:include/fp16/macros.h",
 +        "@fp16//:include/fp16/fp16.h",
-+    ],
+     ],
 +    strip_include_prefix = "include",
  )
  
