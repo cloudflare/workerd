@@ -43,7 +43,29 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
   closes or errors on its own (the spec's shared cancel promise).
 - Erroring the source's own stream (its controller's `error()`, the
   interop hook) errors every consumer; erroring a live branch errors that
-  branch alone; erroring a teed-away shell does nothing — it stays locked.
+  branch alone.
+- The source's own stream, once teed away, is closed by the source's own
+  events, never by the branches' progress: it closes when close is
+  requested (having no cursor, it has nothing to drain — so before any
+  branch has read, while chunks may still be buffered for them), or when
+  the last consumer's leaving cancels the source; it errors when the
+  source errors. That is what `finished()` on a teed source observes (the
+  spec's source closes once the tee's reader has drained it, or both
+  branches have cancelled). The source itself ends later — errored,
+  cancelled, or closed with every consumer drained — and that, not its
+  stream's state, gates the controller's `error()`: an `error()` after
+  `close()` still errors the branches that have chunks to drain, although
+  the source's stream has already closed. `addAbortSignal()` on that
+  stream, which stops listening once its stream has finished, no longer
+  reaches them by then, and the interop hook is a no-op on it as on any
+  stream that is no longer readable.
+- A branch that has itself been teed is a shell that is not the
+  controller's stream, so none of the source's events reach it: erroring
+  it does nothing, and its closed promise never settles. The same holds
+  for the source of a native-backed tee (a `Response` body), whose C++
+  source is swapped out at tee time while its data keeps flowing into the
+  branch sources. Both are open items, to be looked at separately; pinned
+  in `src/tests/node/stream/finished-and-abort.js`.
 - Nothing walks a tree of streams: closing, cancelling and erroring act on
   cursors and their owners, and no stream retains another.
 
@@ -100,9 +122,13 @@ the stream as its controller's `error()` would; a native-backed readable
 also cancels its source; a queued tee branch, whose controller is shared
 with its siblings, errors alone — its cursor leaves the queue as a
 cancelled branch's would; a branch that has itself been teed is inert, see
-the tee model below). `src/node`'s `finished()`/`eos()`,
-`addAbortSignal()` and `compose()` rely on them to observe or error a web
-stream without taking its lock. The C++ implementation has no equivalent,
+the tee model above). The readable method errors byte streams too, native
+ones included; Node's is deliberately a no-op for byte stream controllers,
+so `addAbortSignal()` on a `Response` body (a byte stream in Node) is
+inert there and errors the body here. `src/node`'s `finished()`/`eos()`
+(also behind `stream/promises`) and `addAbortSignal()` rely on the hooks
+to observe or error a web stream without taking its lock; nothing else in
+the node layer touches them. The C++ implementation has no equivalent,
 and the node layer raises `ERR_WEB_STREAM_INTEROP_UNSUPPORTED` there.
 Suite: `src/tests/node/stream/finished-and-abort.js`.
 

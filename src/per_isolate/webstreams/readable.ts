@@ -1250,6 +1250,13 @@ class ReadableStreamDefaultController<
   #pullAgain: boolean = false;
   #closeRequested: boolean = false;
   #cancelPromise: Promise<void> | undefined;
+  // The source has reached its end: errored, cancelled, or closed with
+  // every consumer drained (the spec's "stream is no longer readable",
+  // which gates error()). Tracked here rather than read off #stream: once
+  // that stream is teed away its state follows the source's own events
+  // (see #maybeCloseStream), while what the branches have yet to drain
+  // after a close is this controller's business.
+  #done: boolean = false;
   // Consumers that left the queue (see controllerConsumerLeaving) while
   // others remained: their reasons, for the composite the last one to leave
   // hands the source, and the promise their cancel() returned, settled with
@@ -1506,7 +1513,8 @@ class ReadableStreamDefaultController<
 
   error(reason: unknown = undefined): void {
     assertIsReadableStreamDefaultController(this);
-    if (getReadableStreamGetState(this.#stream) !== 'readable') return;
+    if (this.#done) return;
+    this.#done = true;
     // Propagate to every live consumer stream (tee branches) via the
     // cursors' weak owner refs — no strong retention of branches. The
     // primary stream is handled explicitly: a tee'd-away parent has no
@@ -1555,17 +1563,25 @@ class ReadableStreamDefaultController<
         anyOpen = true;
       }
     }
-    // Also check the parent stream itself (pre-tee path: only one consumer).
+    // The source's own stream. With a cursor it drains to the sentinel like
+    // any consumer; without one (teed away, or detached) it consumes
+    // nothing, so there is nothing to drain and it closes now. The source's
+    // own events close it — close requested here, cancelled in
+    // #cancelSteps, errored in error() — never the branches' progress (the
+    // queued tee model, AGENTS.md). Its closing does not end the source:
+    // that is #done, below, once every consumer has drained.
     const parentCursor = getReadableStreamConsumer(this.#stream) as
       QueueCursorType<R, R> | undefined;
-    if (parentCursor !== undefined) {
-      if (this.#queue.getEntry(parentCursor.position) === CLOSE_SENTINEL) {
-        readableStreamClose(this.#stream);
-      } else {
-        anyOpen = true;
-      }
+    if (
+      parentCursor === undefined ||
+      this.#queue.getEntry(parentCursor.position) === CLOSE_SENTINEL
+    ) {
+      readableStreamClose(this.#stream);
+    } else {
+      anyOpen = true;
     }
     if (!anyOpen) {
+      this.#done = true;
       this.#clearAlgorithms();
       // Every remaining consumer has closed: the source will never be
       // cancelled, and consumers that had left are owed undefined (spec
@@ -1575,9 +1591,11 @@ class ReadableStreamDefaultController<
   }
 
   // A consumer leaves the queue; see controllerConsumerLeaving. Decided
-  // BEFORE the cursor's removal (QueueCursor.cancelStream), so that this
-  // reason-carrying cancel wins #cancelSteps' cache over the all-cursors-gone
-  // hook's undefined-reason call.
+  // BEFORE the cursor's removal (QueueCursor.cancelStream): removing it
+  // first would make the leaving consumer look like it was not the last
+  // (parking the cancel in #pendingCancel with nobody left to settle it)
+  // and fire the all-cursors-gone hook, which clears the cancel algorithm
+  // before #cancelSteps could run it.
   #consumerLeaving(reason: unknown, isLastConsumer: boolean): Promise<void> {
     const reasons = this.#departedReasons;
     ArrayPrototypePush(reasons, reason);
@@ -1625,11 +1643,20 @@ class ReadableStreamDefaultController<
     );
   }
 
-  // Cancel the underlying source (spec CancelSteps). Idempotent and cached:
-  // this can be reached from both an explicit stream/branch cancel and the
-  // all-cursors-gone hook.
+  // Cancel the underlying source (spec CancelSteps). Idempotent and cached.
+  // Reached through #consumerLeaving once the last consumer has left the
+  // queue — an explicit stream/branch cancel, or a branch errored through
+  // the Node.js interop hook. The all-cursors-gone GC hook never comes
+  // here: it only clears the algorithms (see the constructor).
   #cancelSteps(reason: unknown): Promise<void> {
     if (this.#cancelPromise !== undefined) return this.#cancelPromise;
+    this.#done = true;
+    // The source's own stream, if teed away, closes with this cancel, as
+    // readableStreamCancel closes an un-teed stream before its cancel
+    // steps; being locked, nothing else can reach it.
+    if (getReadableStreamConsumer(this.#stream) === undefined) {
+      readableStreamClose(this.#stream);
+    }
     const cancelAlgorithm = this.#cancelAlgorithm;
     this.#clearAlgorithms();
     this.#cancelPromise =
@@ -1776,6 +1803,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   #closeRequested: boolean = false;
   #cancelPromise: Promise<void> | undefined;
   // As the default controller's: see there.
+  #done: boolean = false;
   #departedReasons: unknown[] = [];
   #pendingCancel: PromiseWithResolversType<void> | undefined;
   #byobRequest: ReadableStreamBYOBRequest | null = null;
@@ -2112,7 +2140,8 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
   error(reason: unknown = undefined): void {
     assertIsReadableByteStreamController(this);
-    if (getReadableStreamGetState(this.#stream) !== 'readable') return;
+    if (this.#done) return;
+    this.#done = true;
     this.#invalidateByobRequest();
     // Branch propagation — see the default controller's error() for why.
     const owners = this.#queue.getLiveOwners();
@@ -2297,14 +2326,16 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     }
     const parentCursor = getReadableStreamConsumer(this.#stream) as
       QueueCursorType<ByteQueueEntry, Uint8Array> | undefined;
-    if (parentCursor !== undefined) {
-      if (this.#queue.getEntry(parentCursor.position) === CLOSE_SENTINEL) {
-        readableStreamClose(this.#stream);
-      } else {
-        anyOpen = true;
-      }
+    if (
+      parentCursor === undefined ||
+      this.#queue.getEntry(parentCursor.position) === CLOSE_SENTINEL
+    ) {
+      readableStreamClose(this.#stream);
+    } else {
+      anyOpen = true;
     }
     if (!anyOpen) {
+      this.#done = true;
       this.#clearAlgorithms();
       this.#pendingCancel?.resolve();
     }
@@ -2357,6 +2388,10 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
   #cancelSteps(reason: unknown): Promise<void> {
     if (this.#cancelPromise !== undefined) return this.#cancelPromise;
+    this.#done = true;
+    if (getReadableStreamConsumer(this.#stream) === undefined) {
+      readableStreamClose(this.#stream);
+    }
     this.#invalidateByobRequest();
     const cancelAlgorithm = this.#cancelAlgorithm;
     this.#clearAlgorithms();
@@ -3446,6 +3481,10 @@ class ReadableStream<R> {
             );
         queue.removeCursor(cursor);
         stream.#consumer = undefined;
+        // With close already requested, the source's own stream — now
+        // consuming nothing — closes here rather than when a branch next
+        // reads (see #maybeCloseStream).
+        if (controller !== undefined) controllerMaybeCloseStream(controller);
       }
 
       // Cancellation needs no wiring of its own: the branches are now two
@@ -3569,6 +3608,9 @@ class ReadableStream<R> {
         queue.removeCursor(cursor);
       }
       neutralize();
+      // As in tee: with close already requested, the husk closes now if it
+      // is the source's own stream (see #maybeCloseStream).
+      if (controller !== undefined) controllerMaybeCloseStream(controller);
       return shell;
     };
 
@@ -4185,10 +4227,8 @@ class ReadableStream<R> {
     this.#consumer = undefined;
     cursor.errorAllReads(reason);
     readableStreamError(this, reason);
-    // Decided BEFORE the cursor's removal, so that this reason-carrying
-    // cancel wins the controller's idempotency cache over the
-    // all-cursors-gone hook's undefined-reason call (as in
-    // QueueCursor.cancelStream).
+    // Decided BEFORE the cursor's removal, for the reasons given at
+    // #consumerLeaving (as in QueueCursor.cancelStream).
     markPromiseHandled(
       controllerConsumerLeaving(
         controller,

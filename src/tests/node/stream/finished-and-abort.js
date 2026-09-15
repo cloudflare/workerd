@@ -13,8 +13,11 @@
 //
 // The two implementations diverge wholesale here. The TypeScript streams
 // carry both hooks as non-enumerable prototype members, so the APIs work as
-// in Node. The C++ streams carry neither, and the APIs fail up front with
-// ERR_WEB_STREAM_INTEROP_UNSUPPORTED rather than partially working.
+// in Node — with one deliberate difference: the readable error hook errors
+// byte streams too (a Response body included), where Node's is a no-op for
+// byte stream controllers. The C++ streams carry neither hook, and the APIs
+// fail up front with ERR_WEB_STREAM_INTEROP_UNSUPPORTED rather than
+// partially working.
 
 import { finished, addAbortSignal, promises } from 'node:stream';
 import { strictEqual, throws, rejects, ok } from 'node:assert';
@@ -33,6 +36,30 @@ const unsupported = (api) => ({
 
 function callbackOf(fn) {
   return new Promise((resolve) => fn(resolve));
+}
+
+// Whether a promise has settled within a short grace period.
+function settlement(promise, ms = 20) {
+  return Promise.race([
+    promise.then(
+      () => 'settled',
+      () => 'settled'
+    ),
+    scheduler.wait(ms).then(() => 'pending'),
+  ]);
+}
+
+// A source of the given kind whose controller is captured.
+function sourceStream(bytes, extra = {}) {
+  let controller;
+  const stream = new ReadableStream({
+    ...(bytes ? { type: 'bytes' } : {}),
+    start(c) {
+      controller = c;
+    },
+    ...extra,
+  });
+  return { stream, controller, chunk: bytes ? new Uint8Array([1]) : 'a' };
 }
 
 // The hooks' presence per implementation. Under TypeScript they live on the
@@ -209,6 +236,122 @@ export const promisesFinishedWebStreams = {
   },
 };
 
+// finished() on a teed source. Under the queued tee model the source's
+// stream consumes nothing after tee(): it is closed by the source's own
+// events — close requested, cancelled, errored — never by the branches'
+// progress (src/per_isolate/webstreams/AGENTS.md). Closing the source
+// settles it at once, before any branch has read, and the branches still
+// deliver what was buffered. (The spec's source closes once the tee's
+// reader has drained it.)
+export const finishedObservesTeedSourceClose = {
+  async test() {
+    if (!usingTsImpl) return;
+    for (const bytes of [false, true]) {
+      const { stream: source, controller, chunk } = sourceStream(bytes);
+      // Registered before the tee, so its closed promise already exists.
+      const before = callbackOf((cb) => finished(source, cb));
+      const [branch1, branch2] = source.tee();
+      const after = callbackOf((cb) => finished(source, cb));
+      controller.enqueue(chunk);
+      strictEqual(await settlement(before), 'pending');
+      controller.close();
+      strictEqual(await before, undefined);
+      strictEqual(await after, undefined);
+      for (const branch of [branch1, branch2]) {
+        const reader = branch.getReader();
+        strictEqual((await reader.read()).done, false);
+        strictEqual((await reader.read()).done, true);
+      }
+    }
+  },
+};
+
+// close() before tee() with a chunk still buffered: the source stops
+// consuming at the tee, and that is when its stream closes.
+export const finishedObservesTeedSourceClosedBeforeTee = {
+  async test() {
+    if (!usingTsImpl) return;
+    for (const bytes of [false, true]) {
+      const { stream: source, controller, chunk } = sourceStream(bytes);
+      controller.enqueue(chunk);
+      controller.close();
+      const done = callbackOf((cb) => finished(source, cb));
+      strictEqual(await settlement(done), 'pending');
+      const [branch1, branch2] = source.tee();
+      strictEqual(await done, undefined);
+      for (const branch of [branch1, branch2]) {
+        const reader = branch.getReader();
+        strictEqual((await reader.read()).done, false);
+        strictEqual((await reader.read()).done, true);
+      }
+    }
+  },
+};
+
+// Both branches cancelling cancels the source, which closes its stream:
+// finished() settles without error, also for a source that never closes
+// on its own. One branch cancelling alone leaves it pending.
+export const finishedObservesTeedSourceCancel = {
+  async test() {
+    if (!usingTsImpl) return;
+    for (const bytes of [false, true]) {
+      let cancelled = false;
+      const { stream: source } = sourceStream(bytes, {
+        pull() {
+          return new Promise(() => {});
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+      const [branch1, branch2] = source.tee();
+      const done = callbackOf((cb) => finished(source, cb));
+      // Pending until the sibling cancels too (the shared cancel promise).
+      const first = branch1.cancel('first');
+      strictEqual(await settlement(done), 'pending');
+      strictEqual(cancelled, false);
+      await branch2.cancel('second');
+      await first;
+      strictEqual(cancelled, true);
+      strictEqual(await done, undefined);
+    }
+  },
+};
+
+// The source's error reaches its stream after tee(). An error after
+// close(), while the branches still have chunks to drain, still errors the
+// branches — the source's stream, closed by the close, keeps its
+// settlement.
+export const finishedObservesTeedSourceError = {
+  async test() {
+    if (!usingTsImpl) return;
+    for (const bytes of [false, true]) {
+      {
+        const { stream: source, controller } = sourceStream(bytes);
+        const [branch1, branch2] = source.tee();
+        const done = callbackOf((cb) => finished(source, cb));
+        const boom = new Error('errored after tee');
+        controller.error(boom);
+        strictEqual(await done, boom);
+        await rejects(branch1.getReader().read(), (err) => err === boom);
+        await rejects(branch2.getReader().read(), (err) => err === boom);
+      }
+      {
+        const { stream: source, controller, chunk } = sourceStream(bytes);
+        const [branch1, branch2] = source.tee();
+        const done = callbackOf((cb) => finished(source, cb));
+        controller.enqueue(chunk);
+        controller.close();
+        strictEqual(await done, undefined);
+        const boom = new Error('errored after close');
+        controller.error(boom);
+        await rejects(branch1.getReader().read(), (err) => err === boom);
+        await rejects(branch2.getReader().read(), (err) => err === boom);
+      }
+    }
+  },
+};
+
 // addAbortSignal() on a web ReadableStream: aborting errors the stream with
 // an AbortError (cause: the signal's reason); pending and later reads reject
 // with it. The stream is never locked by the registration.
@@ -328,6 +471,46 @@ export const addAbortSignalOnTeeBranchSparesSibling = {
     sourceController.close();
     strictEqual((await reader2.read()).done, true);
     await reader2.closed;
+  },
+};
+
+// addAbortSignal() on the source itself errors every branch, as its
+// controller's error() does. Once the source's stream has closed — for a
+// teed source, at close() — the node layer treats it as finished:
+// addAbortSignal() stops listening, as on any finished stream, and the
+// hook is a no-op on a stream that is no longer readable, so a later abort
+// leaves the branches to drain what was buffered. (The controller's own
+// error() still errors them: finishedObservesTeedSourceError.)
+export const addAbortSignalOnTeedSourceErrorsBranches = {
+  async test() {
+    if (!usingTsImpl) return;
+    for (const bytes of [false, true]) {
+      {
+        const { stream: source } = sourceStream(bytes);
+        const [branch1, branch2] = source.tee();
+        const controller = new AbortController();
+        addAbortSignal(controller.signal, source);
+        controller.abort();
+        await rejects(branch1.getReader().read(), { name: 'AbortError' });
+        await rejects(branch2.getReader().read(), { name: 'AbortError' });
+      }
+      {
+        const { stream: source, controller, chunk } = sourceStream(bytes);
+        const [branch1, branch2] = source.tee();
+        const ac = new AbortController();
+        addAbortSignal(ac.signal, source);
+        controller.enqueue(chunk);
+        controller.close();
+        strictEqual(await callbackOf((cb) => finished(source, cb)), undefined);
+        ac.abort();
+        source[kControllerErrorFunction](new Error('after close'));
+        for (const branch of [branch1, branch2]) {
+          const reader = branch.getReader();
+          strictEqual((await reader.read()).done, false);
+          strictEqual((await reader.read()).done, true);
+        }
+      }
+    }
   },
 };
 
@@ -540,7 +723,8 @@ export const addAbortSignalOnByteTeeBranchSparesSibling = {
 };
 
 // The hooks cover runtime-provided (native-backed) streams too: aborting a
-// Response body errors its reads.
+// Response body errors its reads. (In Node a Response body is a byte
+// stream and its hook is a no-op there, so this registration does nothing.)
 export const addAbortSignalOnResponseBody = {
   async test() {
     if (!usingTsImpl) return;
@@ -551,5 +735,37 @@ export const addAbortSignalOnResponseBody = {
     controller.abort();
     await rejects(reader.read(), { name: 'AbortError' });
     await rejects(reader.closed, { name: 'AbortError' });
+  },
+};
+
+// Never settled, to be looked at separately: finished() on a branch that
+// has itself been teed (a shell that is not the controller's stream, so
+// none of the source's events reach it), and on the source of a
+// native-backed tee (a Response body: its C++ source is swapped out at tee
+// time while the data keeps flowing into the branch sources, so nothing
+// reports its end). Both stay pending after every branch has drained; the
+// source of a queued tee settles.
+export const finishedOnTeedAwayShellStaysPending = {
+  async test() {
+    if (!usingTsImpl) return;
+    const source = new ReadableStream({
+      start(c) {
+        c.enqueue('a');
+        c.close();
+      },
+    });
+    const [a, b] = source.tee();
+    const [a1, a2] = a.tee();
+    const shell = callbackOf((cb) => finished(a, cb));
+    const body = new Response('x').body;
+    const [n1, n2] = body.tee();
+    const native = callbackOf((cb) => finished(body, cb));
+    for (const branch of [a1, a2, b, n1, n2]) {
+      const reader = branch.getReader();
+      while (!(await reader.read()).done);
+    }
+    strictEqual(await callbackOf((cb) => finished(source, cb)), undefined);
+    strictEqual(await settlement(shell), 'pending');
+    strictEqual(await settlement(native), 'pending');
   },
 };
