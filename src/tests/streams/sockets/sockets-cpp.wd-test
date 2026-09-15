@@ -20,6 +20,7 @@ const unitTests :Workerd.Config = (
           (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
           (name = "STREAMS_ECHO_PORT", fromEnvironment = "STREAMS_ECHO_PORT"),
           (name = "STREAMS_GREET_PORT", fromEnvironment = "STREAMS_GREET_PORT"),
+          (name = "SELF", service = "streams-sockets-cpp"),
         ],
       )
     ),

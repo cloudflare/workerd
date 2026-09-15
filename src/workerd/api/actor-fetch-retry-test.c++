@@ -203,6 +203,7 @@ class DeterministicTimerChannel final: public TimerChannel {
 
 struct ReplayState {
   kj::Array<ReplayAction> actions;
+  ActorCallRetriesAllowed retriesAllowed = ActorCallRetriesAllowed::YES;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> pauseStartedFulfiller;
   bool acceptWebSocket = false;
   kj::Maybe<kj::Own<kj::WebSocket>> acceptedWebSocket;
@@ -328,7 +329,7 @@ class ReplayOutgoingFactory final: public Fetcher::OutgoingFactory {
   }
 
   bool supportsActorCallRetries() const override {
-    return true;
+    return state.retriesAllowed.toBool();
   }
 
   void onActorCallRetry() override {
@@ -723,6 +724,21 @@ KJ_TEST("actor fetch does not retry when the enforce gate is disabled") {
   KJ_EXPECT(state.outcomes.size() == 0);
 }
 
+KJ_TEST("actor fetch does not retry an ambiguous disconnect when the factory disallows retries") {
+  ReplayState state{
+    .actions = kj::arr(ReplayAction::AMBIGUOUS),
+    .retriesAllowed = ActorCallRetriesAllowed::NO,
+  };
+
+  KJ_EXPECT(
+      runActorFetch(state, ActorRetryGateEnabled::YES, kj::none, ActorFetchKind::HTTP) != kj::none);
+  KJ_EXPECT(state.requestCount == 1);
+  KJ_EXPECT(state.retryCount == 0);
+  KJ_EXPECT(state.metadata.size() == 0);
+  KJ_EXPECT(state.observedRetryCount == 0);
+  KJ_EXPECT(state.outcomes.size() == 0);
+}
+
 KJ_TEST("actor fetch does not report an ordinary failure when retries are disabled") {
   ReplayState state{.actions = kj::arr(ReplayAction::NON_RETRYABLE_FAILURE)};
 
@@ -1101,7 +1117,7 @@ KJ_TEST("GlobalActorOutgoingFactory forwards metadata and recreates channels for
         GlobalActorOutgoingFactory::ChannelIdOrFactory(static_cast<uint>(1)),
         env.js.alloc<DurableObjectId>(kj::heap<MockActorId>()), kj::str("location"),
         ActorGetMode::GET_OR_CREATE, false, ActorRoutingMode::DEFAULT,
-        ActorVersion{.cohort = kj::str("cohort")}, Persistent::NO);
+        ActorVersion{.cohort = kj::str("cohort")}, ActorCallRetriesAllowed::YES, Persistent::NO);
     KJ_EXPECT(factory.supportsActorCallRetries());
 
     auto client = factory.newActorCallAttempt(kj::none,
@@ -1145,6 +1161,13 @@ KJ_TEST("GlobalActorOutgoingFactory forwards metadata and recreates channels for
     KJ_ASSERT(countSubrequests.size() == 2);
     KJ_EXPECT(countSubrequests[0] == CountSubrequest::YES);
     KJ_EXPECT(countSubrequests[1] == CountSubrequest::NO);
+
+    GlobalActorOutgoingFactory retriesDisallowedFactory(
+        GlobalActorOutgoingFactory::ChannelIdOrFactory(static_cast<uint>(1)),
+        env.js.alloc<DurableObjectId>(kj::heap<MockActorId>()), kj::none,
+        ActorGetMode::GET_OR_CREATE, false, ActorRoutingMode::DEFAULT, kj::none,
+        ActorCallRetriesAllowed::NO, Persistent::NO);
+    KJ_EXPECT(!retriesDisallowedFactory.supportsActorCallRetries());
   });
 }
 

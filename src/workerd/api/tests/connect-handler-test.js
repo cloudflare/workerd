@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import { connect } from 'cloudflare:sockets';
-import { strictEqual } from 'assert';
+import { ok, strictEqual } from 'assert';
 
 export const connectHandler = {
   async test() {
@@ -15,7 +15,19 @@ export const connectHandler = {
       result += dec.decode(chunk, { stream: true });
     }
     result += dec.decode();
-    strictEqual(result, 'hello');
+
+    // The TCP listener reports the accepted connection's peer address, which for this loopback
+    // connection is an ephemeral port on some spelling of localhost.
+    const prefix = 'hello:';
+    ok(result.startsWith(prefix), result);
+    const remoteAddress = result.slice(prefix.length);
+    ok(
+      /^(127\.0\.0\.1|\[(::1|::ffff:127\.0\.0\.1)\]):[0-9]+$/.test(
+        remoteAddress
+      ),
+      `Unexpected remote address: ${remoteAddress}`
+    );
+
     await socket.closed;
   },
 };
@@ -54,16 +66,22 @@ export const localAddressViaServiceBinding = {
       result += dec.decode(chunk, { stream: true });
     }
     result += dec.decode();
-    strictEqual(result, `OK:${AUTHORITY}`);
+
+    const { localAddress, remoteAddress } = JSON.parse(result);
+    strictEqual(localAddress, AUTHORITY);
+    // The service-binding path supplies no client IP.
+    strictEqual(remoteAddress, null);
+
     await socket.closed;
   },
 };
 
 export default {
   async connect(socket) {
+    const { remoteAddress } = await socket.opened;
     const enc = new TextEncoder();
     let writer = socket.writable.getWriter();
-    await writer.write(enc.encode('hello'));
+    await writer.write(enc.encode(`hello:${remoteAddress}`));
     await writer.close();
   },
 };

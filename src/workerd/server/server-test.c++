@@ -3111,6 +3111,86 @@ KJ_TEST("Server: Durable Object alarm persistence (on disk)") {
   }
 }
 
+KJ_TEST("Server: alarm timeout with live facet channel") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2026-04-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let id = ctx.exports.Parent.idFromName("test");
+                `    let actor = ctx.exports.Parent.get(id);
+                `    if (new URL(request.url).pathname === "/start") {
+                `      await actor.start();
+                `      return new Response("started");
+                `    }
+                `    return new Response(await actor.status());
+                `  }
+                `}
+                `export class Parent extends DurableObject {
+                `  async start() {
+                `    await this.ctx.storage.setAlarm(1);
+                `  }
+                `  async status() {
+                `    return (await this.ctx.storage.get("alarmStarted")) || "not started";
+                `  }
+                `  async alarm() {
+                `    await this.ctx.storage.put("alarmStarted", "started");
+                `    let facet = this.ctx.facets.get("child",
+                `        () => ({class: this.ctx.exports.Child}));
+                `    await facet.ping();
+                `    await new Promise(() => {});
+                `  }
+                `}
+                `export class Child extends DurableObject {
+                `  ping() { return "pong"; }
+                `}
+            )
+          ],
+          durableObjectNamespaces = [
+            ( className = "Parent",
+              uniqueKey = "parentkey",
+              enableSql = true,
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+
+  {
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/start", "started");
+  }
+
+  test.wait(15 * 60 + 1);
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/status", "started");
+}
+
 KJ_TEST("Server: Ephemeral Objects") {
   TestServer test(R"((
     services = [

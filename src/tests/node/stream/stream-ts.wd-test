@@ -1,0 +1,32 @@
+using Workerd = import "/workerd/workerd.capnp";
+using StreamModules = import "stream-modules.capnp";
+
+# Runs the node:stream web-interop suite against the TypeScript streams
+# implementation (typescript_implemented_streams + the per-isolate bootstrap
+# autogate). The embedded modules are byte-for-byte the same ones
+# stream-cpp.wd-test runs against the legacy C++ implementation.
+#
+# The streams_enable_constructors and transformstream_enable_standard_constructor
+# flags pinned in stream-cpp.wd-test are deliberately absent here: the
+# TypeScript implementation always exposes the standard constructors, and
+# this cell verifies that indifference — the `@` variant runs with them OFF
+# and `@all-compat-flags` with them ON.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "node-stream-ts",
+      worker = (
+        # The shared module list: see stream-modules.capnp.
+        modules = StreamModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

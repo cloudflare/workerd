@@ -1,0 +1,24 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("//:build/wd_ts_project.bzl", "wd_ts_project")
+
+# Build-time tool that applies workerd's patches to Pyodide's pyodide.asm.js / pyodide.asm.mjs as
+# AST rewrites. Used by python_bundles() in //src/pyodide:helpers.bzl.
+wd_ts_project(
+    name = "patch_pyodide_asm_lib",
+    srcs = ["patch_pyodide_asm.ts"],
+    eslintrc_json = "eslint.config.mjs",
+    tsconfig_json = "tsconfig.json",
+    deps = [
+        "//:node_modules/@types/estree",
+        "//:node_modules/@types/node",
+        "//:node_modules/acorn",
+        "//:node_modules/astring",
+    ],
+)
+
+js_binary(
+    name = "patch_pyodide_asm",
+    data = [":patch_pyodide_asm_lib"],
+    entry_point = "patch_pyodide_asm.js",
+    visibility = ["//src/pyodide:__pkg__"],
+)

@@ -24,6 +24,7 @@ import {
 import {
   LEGACY_VENDOR_PATH,
   PROCESS_PTH_FILES,
+  PYODIDE_VERSION,
   setCpuLimitNearlyExceededCallback,
 } from 'pyodide-internal:metadata';
 import { default as FatalReporter } from 'pyodide-internal:fatal-reporter';
@@ -38,7 +39,6 @@ import {
   setInternalErrorReporter,
 } from 'pyodide-internal:util';
 import { loadPackages } from 'pyodide-internal:loadPackage';
-import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { default as setupPythonSearchPathSource } from 'pyodide-internal:setup_python_search_path.py';
 import { getTrustedReadFunc } from 'pyodide-internal:readOnlyFS';
 import { PyodideVersion } from 'pyodide-internal:const';
@@ -105,13 +105,9 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
  * we expect.
  */
 function validatePyodideVersion(pyodide: Pyodide): void {
-  const expectedPyodideVersion = MetadataReader.getPyodideVersion();
-  if (expectedPyodideVersion == 'dev') {
-    return;
-  }
-  if (pyodide.version !== expectedPyodideVersion) {
+  if (pyodide.version !== PYODIDE_VERSION) {
     throw new PythonWorkersInternalError(
-      `Pyodide version mismatch, expected '${expectedPyodideVersion}'`
+      `Pyodide version mismatch, expected '${PYODIDE_VERSION}'`
     );
   }
 }

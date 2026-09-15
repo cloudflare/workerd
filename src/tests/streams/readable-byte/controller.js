@@ -180,6 +180,48 @@ export const closeWithPendingUnfilledByobRead = {
   },
 };
 
+// DIVERGENCE (ledger #23, the byte mirror of readable #18): error() while
+// a close() is still pending (bytes queued). Per spec the stream is still
+// "readable", so the TypeScript implementation reports desiredSize as
+// hwm minus the queued bytes (-2) before the error, then errors the
+// stream: the queued bytes are discarded and default and BYOB reads, and
+// closed, reject with the error. The C++ implementation treats the
+// requested close as final: desiredSize is already 0, the late error is
+// ignored and the bytes drain to a clean close.
+export const errorAfterCloseWithQueuedBytes = {
+  async test() {
+    const err = new Error('late');
+    for (const mode of [undefined, 'byob']) {
+      let controller;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        start(c) {
+          controller = c;
+        },
+      });
+      controller.enqueue(new Uint8Array([1, 2]));
+      controller.close();
+      strictEqual(controller.desiredSize, usingTsImpl ? -2 : 0);
+      controller.error(err);
+      const reader = rs.getReader({ mode });
+      const read = () =>
+        mode === 'byob' ? reader.read(new Uint8Array(4)) : reader.read();
+      if (usingTsImpl) {
+        strictEqual(controller.desiredSize, null);
+        strictEqual(await rejectionOf(read()), err);
+        strictEqual(await rejectionOf(reader.closed), err);
+      } else {
+        strictEqual(controller.desiredSize, 0);
+        const first = await read();
+        strictEqual(first.done, false);
+        strictEqual(first.value.byteLength, 2);
+        strictEqual((await read()).done, true);
+        await reader.closed;
+      }
+    }
+  },
+};
+
 export const controllerType = {
   async test() {
     let c;

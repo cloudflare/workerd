@@ -49,7 +49,7 @@ import {
   isWritableStream,
   handleKnownInternalErrors,
 } from 'node-internal:streams_util';
-import { finished, eos, nop } from 'node-internal:streams_end_of_stream';
+import { eos, nop } from 'node-internal:streams_end_of_stream';
 import { addAbortSignal } from 'node-internal:streams_add_abort_signal';
 import {
   getHighWaterMark,
@@ -1290,7 +1290,7 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
     if (backpressurePromise !== undefined) backpressurePromise.resolve();
   }
 
-  const cleanup = finished(streamWritable, (error) => {
+  const cleanup = eos(streamWritable, (error) => {
     error = handleKnownInternalErrors(error);
 
     cleanup();
@@ -1338,7 +1338,7 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
       },
 
       abort(reason) {
-        destroy(streamWritable, reason);
+        destroyImpl.destroyer(streamWritable, reason);
       },
 
       close() {
@@ -1400,22 +1400,23 @@ export function newStreamWritableFromWritableStream(
 
     writev(chunks, callback) {
       function done(error) {
-        error = error.filter((e) => e);
         try {
-          callback(error.length === 0 ? undefined : error);
+          callback(error);
         } catch (error) {
           // In a next tick because this is happening within
           // a promise context, and if there are any errors
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          nextTick(() => destroy(writable, error));
+          nextTick(() => destroyImpl.destroyer(writable, error));
         }
       }
 
+      // Promise.all rejects with the first failed write's error; its
+      // fulfillment value (the per-chunk results) is not one.
       writer.ready.then(() => {
-        return Promise.all(chunks.map((data) => writer.write(data))).then(
-          done,
+        return Promise.all(chunks.map((data) => writer.write(data.chunk))).then(
+          () => done(),
           done
         );
       }, done);
@@ -1441,7 +1442,7 @@ export function newStreamWritableFromWritableStream(
         try {
           callback(error);
         } catch (error) {
-          destroy(writable, error);
+          destroyImpl.destroyer(writable, error);
         }
       }
 
@@ -1488,7 +1489,7 @@ export function newStreamWritableFromWritableStream(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          nextTick(() => destroy(writable, error));
+          nextTick(() => destroyImpl.destroyer(writable, error));
         }
       }
 
@@ -1504,13 +1505,13 @@ export function newStreamWritableFromWritableStream(
       // ended, we signal an error on the stream.Writable.
       closed = true;
       if (!isWritableEnded(writable))
-        destroy(writable, new ERR_STREAM_PREMATURE_CLOSE());
+        destroyImpl.destroyer(writable, new ERR_STREAM_PREMATURE_CLOSE());
     },
     (error) => {
       // If the WritableStream errors before the stream.Writable has been
       // destroyed, signal an error on the stream.Writable.
       closed = true;
-      destroy(writable, error);
+      destroyImpl.destroyer(writable, error);
     }
   );
 

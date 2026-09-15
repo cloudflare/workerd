@@ -30,6 +30,10 @@ struct SocketAddress {
 };
 
 struct SocketInfo {
+  // The remote address — i.e. the address on the other side of the socket. For outbound sockets
+  // created via `connect()`, this is the "host:port" string that was passed to `connect()`. For
+  // inbound sockets delivered to a worker's `connect(socket)` handler, this is the address of the
+  // client on whose behalf the tunnel was established, when the peer supplied one.
   jsg::Optional<kj::String> remoteAddress;
 
   // The local address — i.e. the address on this side of the socket. For outbound sockets created
@@ -331,9 +335,19 @@ class SocketsModule final: public jsg::Object {
   // Returns the synthetic IP registered for a magic hostname, or undefined. Used by node:dns.
   jsg::Optional<kj::StringPtr> getCallerDnsOverride(jsg::Lock& js, kj::String hostname);
 
+  struct InboundListener {
+    kj::String protocol;
+    kj::String address;
+    uint16_t port;
+    JSG_STRUCT(protocol, address, port);
+  };
+  // The inbound socket listeners configured to deliver connections to this worker.
+  kj::Array<InboundListener> getInboundListeners(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(SocketsModule, CompatibilityFlags::Reader flags) {
     JSG_METHOD(connect);
     JSG_METHOD(getCallerDnsOverride);
+    JSG_METHOD(getInboundListeners);
 
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(internalNewHttpClient);
@@ -358,7 +372,7 @@ kj::Own<jsg::modules::ModuleBundle> getInternalSocketModuleBundle(auto featureFl
 
 #define EW_SOCKETS_ISOLATE_TYPES                                                                   \
   api::Socket, api::SocketOptions, api::SocketAddress, api::TlsOptions, api::SocketsModule,        \
-      api::SocketInfo
+      api::SocketInfo, api::SocketsModule::InboundListener
 
 // The list of sockets.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

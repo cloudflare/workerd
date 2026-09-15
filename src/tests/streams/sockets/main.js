@@ -16,4 +16,6 @@ export {
   pipeSocketToSocket,
   cancelReadableSettlesSocket,
   largeEchoVolume,
+  closeWithPipeCloseInFlight,
 } from 'socket-streams';
+export { default } from 'socket-streams';

@@ -22,6 +22,7 @@ import {
   ERR_OUT_OF_RANGE,
   ERR_OPTION_NOT_IMPLEMENTED,
   ERR_SERVER_ALREADY_LISTEN,
+  EADDRINUSE,
 } from 'node-internal:internal_errors';
 import { EventEmitter } from 'node-internal:events';
 import { getDefaultHighWaterMark } from 'node-internal:streams_state';
@@ -301,10 +302,14 @@ export class Server
       this.once('listening', callback as (...args: unknown[]) => unknown);
     }
 
-    this.#port = bindPort(
-      typeof options.host === 'string' ? options.host : '127.0.0.1',
-      port
-    );
+    const host = typeof options.host === 'string' ? options.host : '127.0.0.1';
+    // An http server is reached through httpServerHandler rather than an
+    // inbound connect listener, so port 0 never takes a declared port.
+    if (port === 0) {
+      port = tcpPorts.ephemeral();
+      if (port === 0) throw new EADDRINUSE(host, port);
+    }
+    this.#port = bindPort(host, port);
     tcpPorts.setHandler(this.#port, { fetch: this.#onRequest.bind(this) });
     queueMicrotask(() => {
       // If any of the listening handlers (here and in any of the other queueMicrotask(...) instances here,

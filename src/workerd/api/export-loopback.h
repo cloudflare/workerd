@@ -161,10 +161,12 @@ class LoopbackDurableObjectNamespace: public DurableObjectNamespace {
   // `persistent` bit.
   LoopbackDurableObjectNamespace(uint nsChannel,
       kj::Own<ActorIdFactory> idFactory,
+      ActorCallRetriesAllowed actorCallRetriesAllowed,
       jsg::Ref<LoopbackDurableObjectClass> loopbackClass,
       CompatibilityFlags::Reader featureFlags)
       : DurableObjectNamespace(nsChannel,
             kj::mv(idFactory),
+            actorCallRetriesAllowed,
             Persistent(featureFlags.getAllowIrrevocableStubStorage())),
         loopbackClass(kj::mv(loopbackClass)) {}
 
