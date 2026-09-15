@@ -376,7 +376,8 @@ kj_test(
         ":alarm-scheduler",
         "//src/workerd/util:sqlite",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
