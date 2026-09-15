@@ -8,6 +8,7 @@
 #include <workerd/api/system-streams.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::api {
 
@@ -260,12 +261,19 @@ jsg::Ref<WritableStream> WritableStream::constructor(jsg::Lock& js,
 namespace {
 
 // Wrapper around `WritableStreamSink` that makes it suitable for passing off to capnp RPC.
+//
+// The peer holds the capability wrapping this stream. Its clean close arrives as end(); anything
+// else -- the peer aborting its copy of the stream, dropping it, or its execution context ending
+// -- arrives only as the capability being released, which destroys this adapter. The byte-stream
+// protocol carries no abort reason, so that case is reported to the sink as a generic
+// disconnection.
 class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
  public:
   WritableStreamRpcAdapter(kj::Own<WritableStreamSink> inner): inner(kj::mv(inner)) {}
   ~WritableStreamRpcAdapter() noexcept(false) {
     weakRef->invalidate();
     doneFulfiller->fulfill();
+    abortIfNotEnded();
   }
 
   // Returns a promise that resolves when the stream is dropped. If the promise is canceled before
@@ -277,9 +285,7 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
     return paf.promise.attach(kj::defer([weakRef = weakRef->addRef()]() mutable {
       KJ_IF_SOME(obj, weakRef->tryGet()) {
         // Stream is still alive, revoke it.
-        if (!obj.canceler.isEmpty()) {
-          obj.canceler.cancel(cancellationException());
-        }
+        obj.abortIfNotEnded();
         obj.inner = kj::none;
       }
     }));
@@ -298,11 +304,14 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
   //   significant refactoring of streams.
 
   kj::Promise<void> whenWriteDisconnected() override {
-    // TODO(someday): WritableStreamSink doesn't give us a way to implement this.
+    // TODO(someday): This could forward WritableStreamSink::whenWriteDisconnected(), but the
+    //   returned promise would have to be severed when the revoke path drops `inner`, and no sink
+    //   reports anything there yet.
     return kj::NEVER_DONE;
   }
 
   kj::Promise<void> end() override {
+    ended = true;
     return canceler.wrap(getInner()->end());
   }
 
@@ -313,9 +322,25 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
   kj::Own<WeakRef<WritableStreamRpcAdapter>> weakRef =
       kj::refcounted<WeakRef<WritableStreamRpcAdapter>>(
           kj::Badge<WritableStreamRpcAdapter>(), *this);
+  bool ended = false;
 
   kj::Ptr<WritableStreamSink> getInner() {
     return KJ_UNWRAP_OR(inner, { kj::throwFatalException(cancellationException()); })->getPtr();
+  }
+
+  // Cancels any in-flight operation and, unless the peer ended the stream cleanly, aborts the sink
+  // so that whatever is connected to it (e.g. the readable half of an IdentityTransformStream)
+  // errors rather than waiting forever for data that will never arrive. The in-flight operation
+  // is canceled first because sinks require that abort() not race a pending write.
+  void abortIfNotEnded() {
+    if (!canceler.isEmpty()) {
+      canceler.cancel(cancellationException());
+    }
+    if (ended) return;
+    if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_WRITABLE_DROP_ABORTS_SINK)) return;
+    KJ_IF_SOME(i, inner) {
+      i->abort(cancellationException());
+    }
   }
 
   static kj::Exception cancellationException() {
