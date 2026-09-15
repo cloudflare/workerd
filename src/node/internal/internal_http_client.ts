@@ -32,6 +32,7 @@ import {
   validateNumber,
 } from 'node-internal:validators';
 import { getTimerDuration } from 'node-internal:internal_net';
+import { isUint8Array } from 'node-internal:internal_types';
 import { addAbortSignal } from 'node-internal:streams_add_abort_signal';
 import { Writable } from 'node-internal:streams_writable';
 import type {
@@ -506,9 +507,10 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   // request reports `err` — or, for a bare destroy() before any response
   // (and not through abort()), that the connection hung up — on a later
   // tick, as a socket error would arrive; a response in flight is aborted
-  // at once, with `err` or ECONNRESET 'aborted', which cancels its body so
-  // the server learns of it; a fetch still awaiting its response is
-  // aborted; 'close' follows.
+  // at once with ECONNRESET 'aborted', whatever `err` is — in Node the
+  // response learns only that its socket closed, `err` being the
+  // request's to report — which cancels its body so the server learns of
+  // it; a fetch still awaiting its response is aborted; 'close' follows.
   override destroy(err?: unknown, _cb?: (err?: unknown) => void): this {
     if (this.destroyed) return this;
     this.destroyed = true;
@@ -527,9 +529,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     if (incoming === undefined) {
       this.#abortController.abort();
     } else if (!incoming.complete) {
-      incoming.destroy(
-        (err as Error | undefined) ?? new ConnResetException('aborted')
-      );
+      incoming.destroy(new ConnResetException('aborted'));
     }
     queueMicrotask(() => {
       this.#emitClose();
@@ -549,7 +549,10 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   }
 
   // The quiet teardown: 'abort' on the next tick, then the destroy() of a
-  // bare request without its 'socket hang up'.
+  // bare request without its 'socket hang up'. Node's abort() reports the
+  // hang up once the request is on a socket; abort() is the common
+  // cancellation path and was always silent here, so it stays so — a
+  // deliberate divergence, recorded in src/tests/node/http-client/AGENTS.md.
   abort(): void {
     if (this.aborted) return;
     this.aborted = true;
@@ -611,7 +614,10 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     // write() returns: what the caller does to the buffer afterwards does
     // not change what is sent. (The copy also frees the Blob from views it
     // could not take as they are, such as one over a SharedArrayBuffer.)
-    // A write after end() is refused below, as a write after end.
+    // Only a string or a Uint8Array is captured: OutgoingMessage refuses
+    // anything else below, and a view of another element type must not
+    // leave its converted elements behind as body bytes. A write after
+    // end() is refused below too, as a write after end.
     if (
       this.method !== 'GET' &&
       this.method !== 'HEAD' &&
@@ -622,7 +628,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
         this.#body.push(
           Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8')
         );
-      } else if (chunk.byteLength > 0) {
+      } else if (isUint8Array(chunk) && chunk.byteLength > 0) {
         this.#body.push(new Uint8Array(chunk));
       }
     }

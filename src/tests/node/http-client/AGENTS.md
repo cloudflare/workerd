@@ -53,7 +53,11 @@ need an `internet` network service allowing `private`.
   the wire by then: mutating, detaching or shrinking the buffer afterwards
   does not change what is sent. Views over a `SharedArrayBuffer` or a
   `WebAssembly.Memory` are sent like any other; a zero-length view, a
-  detached one included, is accepted and sends nothing.
+  detached one included, is accepted and sends nothing. Anything but a
+  string or a `Uint8Array` is refused synchronously with
+  `ERR_INVALID_ARG_TYPE` before it is captured — a view of another element
+  type (`Float32Array`, `DataView`) included, whose bytes never reach the
+  body.
 - `end()` ends the body at once (`writableEnded`). A `write()` afterwards
   — one issued from inside 'finish' included — is a write after end, as in
   Node: it returns false, reports `ERR_STREAM_WRITE_AFTER_END` to its
@@ -97,6 +101,13 @@ need an `internet` network service allowing `private`.
   aborts the response the same way, with the runtime's error on both; so
   do a body cut short of its Content-Length and malformed chunked framing
   (the bytes before the fault are delivered, `complete` stays false).
+  Every failure of the response reaches the request this way: `fetch()`
+  surfaces one error for the exchange, so the client cannot tell a peer
+  that closed cleanly from one that reset the connection — where Node
+  forwards only a socket error to the request, and a clean FIN mid-body
+  aborts the response alone ('aborted', ECONNRESET 'aborted') with no
+  request 'error'. A listener on the response alone therefore leaves the
+  request's 'error' uncaught here. (See "Divergences from Node".)
   Bytes beyond the Content-Length are not the body: the response ends,
   complete, after the announced length. A reply the runtime cannot parse
   at all — the connection closing without a byte, a garbage status line —
@@ -109,10 +120,13 @@ need an `internet` network service allowing `private`.
   for a bare `destroy()` before any response, on the next tick. A pending
   fetch is aborted — a response arriving afterwards is dropped and its
   body cancelled — and `end()` after `destroy()` sends nothing (no
-  'finish'). A response in flight is aborted at once with `err` or
-  ECONNRESET 'aborted': 'aborted', then (request 'error',) request 'close',
-  response 'error' (for listeners), response 'close'; the server sees the
-  connection close.
+  'finish'). A response in flight is aborted at once with ECONNRESET
+  'aborted', whatever `err` is — as in Node, where the response learns
+  only that its socket closed and `err` is the request's alone to report:
+  'aborted', then (request 'error',) request 'close', response 'error'
+  (for listeners), response 'close'; the server sees the connection close.
+  The same holds for every teardown of the request — a timeout, the
+  `signal` option — the response's error is always ECONNRESET 'aborted'.
 - A fetch that fails before yielding a response (a connection that cannot
   be made) destroys the request with the failure: 'error', 'close'. So
   does the send itself failing synchronously — a `host` or `path` mutated
@@ -122,9 +136,11 @@ need an `internet` network service allowing `private`.
   being sent.
 - `req.abort()`: `aborted` and `destroyed` are set at once, 'abort' fires
   on the next tick, and the request is destroyed without the 'socket hang
-  up': 'abort', 'close' before any response; 'aborted', 'abort', 'close',
-  response 'error' (ECONNRESET 'aborted'), response 'close' mid-body. A
-  second `abort()` is inert.
+  up' — deliberately quieter than Node's, which reports it once the
+  request is on a socket (see "Divergences from Node"): 'abort', 'close'
+  before any response; 'aborted', 'abort', 'close', response 'error'
+  (ECONNRESET 'aborted'), response 'close' mid-body. A second `abort()` is
+  inert.
 - `setTimeout(ms)` (or the `timeout` option) arms one idle timer, running
   from the moment the request has been sent and the timeout set, whichever
   is later, and started over by the response's arrival and by every chunk
@@ -142,9 +158,10 @@ need an `internet` network service allowing `private`.
 - The `signal` option is armed for the whole exchange: aborted before the
   request is sent (already aborted, or before `end()`), the request errors
   with an `AbortError` (`ABORT_ERR`) and closes, nothing sent; aborted
-  while the response arrives, the response aborts as on a timeout, both
-  reporting an `AbortError` whose `cause` is the signal's reason; aborted
-  after the exchange, nothing happens.
+  while the response arrives, the response aborts as on a timeout, the
+  request reporting an `AbortError` whose `cause` is the signal's reason
+  and the response ECONNRESET 'aborted'; aborted after the exchange,
+  nothing happens.
 - `stream.finished(req)` reports the request's 'close' — the end of the
   exchange — not its 'finish' (the request sent), as in Node, where the
   request is a legacy stream that `finished()` waits on as a readable too;
@@ -157,7 +174,8 @@ need an `internet` network service allowing `private`.
   over (no 'socket hang up': the response exists). `req.abort()` from
   inside 'timeout' is the teardown that counts — the response is aborted at
   once, then hears its 'timeout', and the timer's own `destroy(AbortError)`
-  finds the request destroyed: ECONNRESET on the response, no `AbortError`.
+  finds the request destroyed: no `AbortError` anywhere (the response's
+  error is ECONNRESET 'aborted', as on any teardown of its request).
   `req.setTimeout()` from inside 'timeout' re-arms nothing that survives
   the teardown that follows the listeners. `res.destroy(err)` from inside
   'aborted' changes nothing: the response is already being destroyed with
@@ -204,13 +222,38 @@ nothing. The risk was accepted deliberately: the pattern is rare in
 practice (a request destroyed before it is even sent), the previous
 behavior was itself a defect rather than a contract, and the new one is
 what Node documents and what code written against Node already handles.
-`req.abort()` remains the quiet teardown.
 
 The same reasoning applies to a `write()` or `end(chunk)` after `end()`:
 historically accepted (`true`, callback called) and silently dropped — and
 a late `end(chunk)` even kept the request from ever being sent — it now
 reports `ERR_STREAM_WRITE_AFTER_END` through the callback and as 'error',
 as Node's does.
+
+### Divergences from Node
+
+Two behaviors are deliberately not Node's; both are pinned by the suite.
+
+- **`req.abort()` before a response is quiet.** Node's `abort()` is
+  `destroy()` with `aborted` set, and its 'socket hang up' is exempted only
+  while the request has no socket yet (`onSocketNT`); once the request is
+  on a socket — always, for a request that has been sent — `abort()`
+  reports `Error: socket hang up` (ECONNRESET), uncaught without an
+  'error' listener, exactly as a bare `destroy()` does. Here `abort()`
+  never reports it (`abortBeforeResponseIsQuiet`). `abort()` is the
+  cancellation path in most existing code — a request cancelled from a
+  timer or a superseding request — and it was silent here before; making
+  it report would turn a common, previously quiet call into an uncaught
+  exception, a far larger unflagged break than the bare-`destroy()` one
+  accepted above. `destroy()` is the path that reports.
+- **Every failure of the response reaches the request.** Node forwards
+  only a socket error to the request; a peer that closes cleanly mid-body
+  aborts the response alone (no request 'error'). `fetch()` surfaces one
+  error for the exchange, so the client cannot tell the two apart and
+  forwards the response's error in both cases
+  (`serverDroppingConnectionAbortsResponse`, `truncatedBodyAbortsResponse`):
+  a Worker listening on the response alone has an uncaught 'error' on the
+  request where Node has none. This is the client's long-standing
+  behavior, not a change of this suite's.
 
 ## Divergence ledger (C++ vs TypeScript)
 
@@ -222,10 +265,10 @@ unchanged under both implementations.
 | Module | Asserts |
 | --- | --- |
 | `response-body.js` | Buffer chunks and `complete`; `setEncoding`; incremental chunked delivery; a megabyte intact; pause/resume; bodiless statuses; HEAD; compression passthrough; waiting for a consumer |
-| `request-body.js` | string body echoed with the server-side Content-Type/Length; `end(Buffer)` sent once; chunk forms and encodings; nothing sent before `end()`; length and type as the server sees them; empty POST; chunk captured at `write()` (mutated, detached, shrunk afterwards); SAB/WebAssembly.Memory views sent, empty and detached views accepted; GET/HEAD ignore writes; `write()`/`end(chunk)` after `end()` (from 'finish' too) → `ERR_STREAM_WRITE_AFTER_END`, request still completes; bare `end(cb)` after `end()` and after the exchange; non-byte chunks → `ERR_INVALID_ARG_TYPE` synchronously |
+| `request-body.js` | string body echoed with the server-side Content-Type/Length; `end(Buffer)` sent once; chunk forms and encodings; nothing sent before `end()`; length and type as the server sees them; empty POST; chunk captured at `write()` (mutated, detached, shrunk afterwards); SAB/WebAssembly.Memory views sent, empty and detached views accepted; GET/HEAD ignore writes; `write()`/`end(chunk)` after `end()` (from 'finish' too) → `ERR_STREAM_WRITE_AFTER_END`, request still completes; bare `end(cb)` after `end()` and after the exchange; non-`Uint8Array` chunks (numbers, objects, arrays, a `Float32Array`, a `DataView`) → `ERR_INVALID_ARG_TYPE` synchronously, nothing of them captured (body and Content-Length exactly `end()`'s) |
 | `reentrancy.js` | destroy from 'response'; abort and `setTimeout()` from 'timeout'; `res.destroy()` from 'aborted' |
 | `data-volumes.js` | an 8 MiB response consumed with a pause after every megabyte (pattern exact); 500 chunked pieces; 10,000 one-byte writes forming one body with the right Content-Length; an 8 MiB request body |
-| `lifecycle.js` | `res.destroy()` closes; end then one close; `res.destroy(err)` mid-body reaching the server; server dropping the connection; completed response final; connection failure; truncated body (raw server) aborting the response; bytes beyond Content-Length ignored; malformed chunked framing aborting after the good chunk; empty and garbage replies failing the request with no 'response'; `req.res` and request close after the response; `req.destroy()` before the response (hang up), with an error, before `end()`, mid-body (bare and with an error), response after destroy dropped; `abort()` before the response, before `end()`, mid-body; timeout before headers (armed before/after `end()`), `timeout` option and callback, mid-body, idle not deadline (a 600 ms trickle passing a 250 ms timeout), disarmed by completion, cleared by `setTimeout(0)`; the response's `setTimeout` arming the timer (callback, teardown shape), replacing the request's, clearing with `0`; `ms` validation on both sides; `signal` already aborted / aborted before `end()` / mid-body (with cause) / after completion; `finished(req)` after 'close'; a synchronous send failure (invalid host) → 'error', 'close'; a response with no 'response' listener dumped (request closes, `finished(req)` resolves, `res.complete`) |
+| `lifecycle.js` | `res.destroy()` closes; end then one close; `res.destroy(err)` mid-body reaching the server; server dropping the connection; completed response final; connection failure; truncated body (raw server) aborting the response; bytes beyond Content-Length ignored; malformed chunked framing aborting after the good chunk; empty and garbage replies failing the request with no 'response'; `req.res` and request close after the response; `req.destroy()` before the response (hang up), with an error, before `end()`, mid-body (bare and with an error: the error the request's, ECONNRESET 'aborted' the response's), response after destroy dropped; `abort()` before the response (quiet — a divergence), before `end()`, mid-body; timeout before headers (armed before/after `end()`), `timeout` option and callback, mid-body, idle not deadline (a 600 ms trickle passing a 250 ms timeout), disarmed by completion, cleared by `setTimeout(0)`; the response's `setTimeout` arming the timer (callback, teardown shape), replacing the request's, clearing with `0`; `ms` validation on both sides; `signal` already aborted / aborted before `end()` / mid-body (`AbortError` with cause on the request, ECONNRESET 'aborted' on the response) / after completion; `finished(req)` after 'close'; a synchronous send failure (invalid host) → 'error', 'close'; a response with no 'response' listener dumped (request closes, `finished(req)` resolves, `res.complete`) |
 | `then-pollution.js` | transparent patched `then` (echo intact); hostile `then` during the send → request 'error', 'close', no 'response' |
 | `interop.js` | pipe into `Writable.fromWeb`; pipe into a 16 KiB slow sink (bounded buffer, pauses); `Readable.toWeb` body; pipeline through a `TransformStream`; `stream/consumers` and async iteration |
 | `harness.js`, `which-impl.js` | shared machinery |

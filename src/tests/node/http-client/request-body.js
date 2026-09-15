@@ -272,12 +272,22 @@ export const endAfterEndReportsAndStillSends = {
   },
 };
 
-// A chunk that is neither a string nor a byte view is refused synchronously
-// with ERR_INVALID_ARG_TYPE, before anything is captured.
+// A chunk that is neither a string nor a Uint8Array is refused synchronously
+// with ERR_INVALID_ARG_TYPE, before anything is captured — a view of
+// another element type (a Float32Array, a DataView) included, whose bytes
+// must not be captured by conversion before the refusal: the body sent is
+// exactly what end() was given.
 export const invalidChunkThrows = {
   async test(ctrl, env) {
     const req = request(env, '/echo', { method: 'POST' });
-    for (const chunk of [42, {}, [1, 2], true]) {
+    for (const chunk of [
+      42,
+      {},
+      [1, 2],
+      true,
+      new Float32Array([1.5, 2.5]),
+      new DataView(new ArrayBuffer(4)),
+    ]) {
       throws(() => req.write(chunk), {
         name: 'TypeError',
         code: 'ERR_INVALID_ARG_TYPE',
@@ -285,6 +295,8 @@ export const invalidChunkThrows = {
     }
     req.end('ok');
     const res = await response(req);
-    strictEqual((await collect(res)).toString(), 'ok');
+    const body = await collect(res);
+    strictEqual(body.toString(), 'ok');
+    strictEqual(res.headers['x-request-content-length'], '2');
   },
 };

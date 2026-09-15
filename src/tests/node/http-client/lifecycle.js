@@ -286,27 +286,24 @@ export const signalAbortBeforeSendFailsRequest = {
 };
 
 // The signal stays armed for the whole exchange: aborted while the
-// response body is arriving, the response aborts and both report an
-// AbortError whose cause is the signal's reason — the shape of a timeout.
+// response body is arriving, the response aborts — the shape of a timeout.
+// The request reports an AbortError whose cause is the signal's reason;
+// the response, as on any teardown of its request, ECONNRESET 'aborted'.
 export const signalAbortMidBodyAbortsResponse = {
   async test(ctrl, env) {
     const controller = new AbortController();
     const log = [];
-    const errors = [];
     const req = get(env, '/chunked?n=6&delay=30', {
       signal: controller.signal,
     });
+    let reqError;
     req.on('error', (err) => {
-      errors.push(err);
+      reqError = err;
       log.push('req:error');
     });
     record(log, 'req', req, ['close']);
     const res = await response(req);
-    res.on('error', (err) => {
-      errors.push(err);
-      log.push('res:error');
-    });
-    record(log, 'res', res, ['aborted', 'end', 'close']);
+    record(log, 'res', res, ['aborted', 'error', 'end', 'close']);
     res.on('data', () => log.push('data'));
     await once(res, 'data');
     const reason = new Error('enough');
@@ -317,14 +314,12 @@ export const signalAbortMidBodyAbortsResponse = {
       'res:aborted',
       'req:error',
       'req:close',
-      'res:error',
+      'res:error(Error/ECONNRESET/aborted)',
       'res:close',
     ]);
-    strictEqual(errors.length, 2);
-    strictEqual(errors[0], errors[1]);
-    strictEqual(errors[0].name, 'AbortError');
-    strictEqual(errors[0].code, 'ABORT_ERR');
-    strictEqual(errors[0].cause, reason);
+    strictEqual(reqError.name, 'AbortError');
+    strictEqual(reqError.code, 'ABORT_ERR');
+    strictEqual(reqError.cause, reason);
     strictEqual(res.complete, false);
     strictEqual(req.destroyed, true);
   },
@@ -480,8 +475,9 @@ export const destroyMidBodyAbortsResponse = {
 };
 
 // req.destroy(err) mid-body: the response is aborted at once; the request
-// reports err on the next tick and closes; the response errors with err
-// and closes.
+// reports err on the next tick and closes; the response errors with
+// ECONNRESET 'aborted' — not err, which is the request's alone, as in Node
+// where the response learns only that its socket closed — and closes.
 export const destroyWithErrorMidBody = {
   async test(ctrl, env) {
     const log = [];
@@ -496,7 +492,7 @@ export const destroyWithErrorMidBody = {
       'res:aborted',
       'req:error(Error/-/enough)',
       'req:close',
-      'res:error(Error/-/enough)',
+      'res:error(Error/ECONNRESET/aborted)',
       'res:close',
     ]);
   },
@@ -628,7 +624,8 @@ export const timeoutOptionAndCallback = {
 };
 
 // A timeout mid-body: 'timeout' on the request and the response, then the
-// response is aborted and both error with the AbortError and close.
+// response is aborted; the request errors with the AbortError, the response
+// with ECONNRESET 'aborted', and both close.
 export const timeoutMidBodyAbortsResponse = {
   async test(ctrl, env) {
     const log = [];
@@ -646,7 +643,7 @@ export const timeoutMidBodyAbortsResponse = {
       'res:aborted',
       'req:error(AbortError/ABORT_ERR/The operation was aborted)',
       'req:close',
-      'res:error(AbortError/ABORT_ERR/The operation was aborted)',
+      'res:error(Error/ECONNRESET/aborted)',
       'res:close',
     ]);
     strictEqual(res.complete, false);
@@ -754,7 +751,7 @@ export const responseSetTimeoutArmsTheTimer = {
       'res:aborted',
       'req:error(AbortError/ABORT_ERR/The operation was aborted)',
       'req:close',
-      'res:error(AbortError/ABORT_ERR/The operation was aborted)',
+      'res:error(Error/ECONNRESET/aborted)',
       'res:close',
     ]);
     strictEqual(res.complete, false);
