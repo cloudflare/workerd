@@ -2,6 +2,7 @@ load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("//:build/kj_test.bzl", "kj_test")
+load("//:build/rust_io_backend.bzl", "rust_io_backend_local_defines")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
@@ -77,8 +78,10 @@ wd_cc_binary(
         "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/util:autogate",
         "//src/workerd/util:perfetto",
+        "//src/workerd/util:setup-async-io",
         "@capnp-cpp//src/capnp:capnpc",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -257,9 +260,11 @@ wd_cc_library(
         "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
+        "//src/workerd/util:setup-async-io",
         "//src/workerd/util:websocket-error-handler",
         "@capnp-cpp//src/capnp:capnp-rpc",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-tls",
     ],
@@ -321,8 +326,9 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":workerd_capnp",
+        "//src/workerd/util:setup-async-io",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
@@ -432,9 +438,9 @@ kj_test(
     deps = [
         ":fallback-service",
         ":workerd_capnp",
+        "//src/workerd/util:setup-async-io",
         "@capnp-cpp//src/capnp/compat:json",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
@@ -444,6 +450,7 @@ kj_test(
     deps = [
         ":json-logger",
         "@capnp-cpp//src/capnp/compat:json",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )

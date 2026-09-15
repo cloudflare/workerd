@@ -635,7 +635,8 @@ kj_test(
         ":io",
         "//src/workerd/tests:test-fixture",
         "//src/workerd/util:autogate",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
