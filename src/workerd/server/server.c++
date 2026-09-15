@@ -6757,7 +6757,18 @@ class Server::UdpListener final: public kj::Refcounted {
         idleTimeout(idleTimeout),
         maxPendingBytes(maxPendingBytes) {}
 
-  kj::Promise<void> run() {
+  kj::Promise<void> run(kj::Promise<void> drainWhen) {
+    return receiveLoop().exclusiveJoin(kj::mv(drainWhen).then([this]() -> kj::Promise<void> {
+      draining = true;
+      if (flows.size() == 0) return kj::READY_NOW;
+      auto done = kj::newPromiseAndFulfiller<void>();
+      drainFulfiller = kj::mv(done.fulfiller);
+      return kj::mv(done.promise);
+    }));
+  }
+
+ private:
+  kj::Promise<void> receiveLoop() {
     TRACE_EVENT("workerd", "UdpListener::run");
     // Datagrams larger than this are truncated by the kernel with no way to recover the tail --
     // matching setupDatagramSocket()'s read-side buffer, and comfortably above the largest UDP
@@ -6782,9 +6793,11 @@ class Server::UdpListener final: public kj::Refcounted {
           flow = kj::mv(strong);
         } else {
           flows.erase(key);
+          maybeFinishDrain();
         }
       }
       if (flow == nullptr) {
+        if (draining) continue;
         auto newFlow = kj::rc<Flow>(
             *this, kj::str(key), receiver->getSource().clone(), idleTimeout, maxPendingBytes);
         flow = newFlow.addRef();
@@ -6795,7 +6808,6 @@ class Server::UdpListener final: public kj::Refcounted {
     }
   }
 
- private:
   // A single logical UDP flow (all datagrams to/from one peer address, until idle). Implements
   // DatagramChannel so it can be handed to a UdpConnectCustomEvent directly: receive() drains
   // `pending`, blocking on `waitingReceiver` if empty; send() writes back to the peer via the
@@ -6913,6 +6925,7 @@ class Server::UdpListener final: public kj::Refcounted {
           }
         }
         listener->flows.erase(key);
+        listener->maybeFinishDrain();
       }
     }
   };
@@ -6927,6 +6940,17 @@ class Server::UdpListener final: public kj::Refcounted {
   // Flows keyed by the peer's address (as text), used to route a later datagram from the same peer
   // to the Flow already dispatched for it. See Flow's class comment for the ownership model.
   kj::HashMap<kj::String, kj::WeakRc<Flow>> flows;
+  bool draining = false;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> drainFulfiller;
+
+  void maybeFinishDrain() {
+    if (flows.size() == 0) {
+      KJ_IF_SOME(fulfiller, drainFulfiller) {
+        fulfiller->fulfill();
+        drainFulfiller = kj::none;
+      }
+    }
+  }
 
   void dispatch(kj::Rc<Flow> flow) {
     IoChannelFactory::SubrequestMetadata metadata;
@@ -6947,10 +6971,11 @@ kj::Promise<void> Server::listenUdp(kj::Own<kj::DatagramPort> port,
     kj::Own<Service> service,
     kj::StringPtr addrStr,
     kj::Duration idleTimeout,
-    size_t maxPendingBytes) {
+    size_t maxPendingBytes,
+    kj::Promise<void> drainWhen) {
   auto obj = kj::refcounted<UdpListener>(
       *this, kj::mv(port), kj::mv(service), addrStr, idleTimeout, maxPendingBytes);
-  co_return co_await obj->run();
+  co_return co_await obj->run(kj::mv(drainWhen));
 }
 
 // =======================================================================================
@@ -7521,9 +7546,10 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       size_t maxPendingBytes = sock.getUdp().getMaxPendingBytes();
 
       // Server owns and cancels its listener tasks before teardown, so `this` cannot outlive it.
-      auto handle = kj::coCapture([this, service = kj::mv(service), name = kj::mv(name),
-                                      addrStr = kj::mv(addrStr), idleTimeout, maxPendingBytes](
-                                      kj::Own<kj::DatagramPort> port) mutable -> kj::Promise<void> {
+      auto handle = kj::coCapture(
+          [this, service = kj::mv(service), name = kj::mv(name), addrStr = kj::mv(addrStr),
+              idleTimeout, maxPendingBytes, drainWhen = forkedDrainWhen.addBranch()](
+              kj::Own<kj::DatagramPort> port) mutable -> kj::Promise<void> {
         TRACE_EVENT("workerd", "setup listenUdp");
         KJ_IF_SOME(stream, controlOverride) {
           auto message = kj::str(
@@ -7536,9 +7562,10 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
         }
 
         auto authority = kj::str(hostOfAddress(addrStr), ":", port->getPort());
-        co_await listenUdp(kj::mv(port), kj::mv(service), authority, idleTimeout, maxPendingBytes);
+        co_await listenUdp(kj::mv(port), kj::mv(service), authority, idleTimeout, maxPendingBytes,
+            kj::mv(drainWhen));
       });
-      tasks.add(handle(kj::mv(datagramPort)).exclusiveJoin(forkedDrainWhen.addBranch()));
+      tasks.add(handle(kj::mv(datagramPort)));
       continue;
     }
 
