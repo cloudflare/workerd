@@ -731,6 +731,17 @@ wd_cc_benchmark(
     ],
 )
 
+# Local JSRPC sender benchmark, including large payload and concurrent pending-call cases.
+wd_cc_benchmark(
+    name = "bench-jsrpc-sender",
+    srcs = ["bench-jsrpc-sender.c++"],
+    tags = ["manual"],
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
 kj_test(
     src = "sql-toarray-oom-test.c++",
     deps = [
@@ -814,6 +825,15 @@ kj_test(
 
 kj_test(
     src = "fetch-body-rewindable-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "jsrpc-call-plan-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",
