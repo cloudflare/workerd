@@ -7535,7 +7535,8 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
           }
         }
 
-        co_await listenUdp(kj::mv(port), kj::mv(service), addrStr, idleTimeout, maxPendingBytes);
+        auto authority = kj::str(hostOfAddress(addrStr), ":", port->getPort());
+        co_await listenUdp(kj::mv(port), kj::mv(service), authority, idleTimeout, maxPendingBytes);
       });
       tasks.add(handle(kj::mv(datagramPort)).exclusiveJoin(forkedDrainWhen.addBranch()));
       continue;
