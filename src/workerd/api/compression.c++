@@ -603,10 +603,26 @@ ZstdEncoderContext::ZstdEncoderContext(ZlibMode _mode)
     : ZstdContext(_mode),
       cctx_(kj::disposeWith<zstdFreeCCtx>(ZSTD_createCCtx())) {}
 
-kj::Maybe<CompressionError> ZstdEncoderContext::initialize(uint64_t pledgedSrcSize) {
+kj::Maybe<CompressionError> ZstdEncoderContext::initialize(
+    uint64_t pledgedSrcSize, kj::ArrayPtr<const kj::byte> dictionary) {
   if (cctx_.get() == nullptr) {
     return CompressionError(
         "Could not initialize Zstd instance"_kj, "ERR_ZLIB_INITIALIZATION_FAILED"_kj, -1);
+  }
+
+  if (dictionary.size() > 0) {
+    // ZSTD_CCtx_loadDictionary() copies the dictionary into the context, so `dictionary` does
+    // not need to outlive this call. The content type is auto-detected: a buffer starting with
+    // the zstd dictionary magic is read as a trained dictionary, anything else as raw content.
+    // Loading is deferred until the first frame begins, so the parameters set by setParams()
+    // afterwards still apply to the dictionary's tables.
+    size_t result = ZSTD_CCtx_loadDictionary(cctx_.get(), dictionary.begin(), dictionary.size());
+    if (ZSTD_isError(result)) {
+      error_ = ZSTD_getErrorCode(result);
+      return CompressionError(
+          kj::str("Failed to load zstd dictionary: ", ZSTD_getErrorName(result)),
+          "ERR_ZLIB_DICTIONARY_LOAD_FAILED"_kj, -1);
+    }
   }
 
   if (pledgedSrcSize != ZSTD_CONTENTSIZE_UNKNOWN) {
@@ -674,12 +690,28 @@ ZstdDecoderContext::ZstdDecoderContext(ZlibMode _mode)
     : ZstdContext(_mode),
       dctx_(kj::disposeWith<zstdFreeDCtx>(ZSTD_createDCtx())) {}
 
-kj::Maybe<CompressionError> ZstdDecoderContext::initialize() {
+kj::Maybe<CompressionError> ZstdDecoderContext::initialize(
+    kj::ArrayPtr<const kj::byte> dictionary) {
   // dctx_ is created in the constructor. It can only be nullptr if ZSTD_createDCtx()
   // failed due to memory allocation failure.
   if (dctx_.get() == nullptr) {
     return CompressionError(
         "Could not initialize Zstd instance"_kj, "ERR_ZLIB_INITIALIZATION_FAILED"_kj, -1);
+  }
+
+  if (dictionary.size() > 0) {
+    // As with the encoder, the bytes are copied into the context and the content type is
+    // auto-detected. Note that a raw-content dictionary carries no dictionary ID, so reading a
+    // frame written against a different one is not rejected as ZSTD_error_dictionary_wrong: it
+    // fails as corrupt, or decodes to different bytes if the frame carries no checksum. That is
+    // zstd's behaviour and matches what Node does with the same calls.
+    size_t result = ZSTD_DCtx_loadDictionary(dctx_.get(), dictionary.begin(), dictionary.size());
+    if (ZSTD_isError(result)) {
+      error_ = ZSTD_getErrorCode(result);
+      return CompressionError(
+          kj::str("Failed to load zstd dictionary: ", ZSTD_getErrorName(result)),
+          "ERR_ZLIB_DICTIONARY_LOAD_FAILED"_kj, -1);
+    }
   }
 
   return kj::none;
