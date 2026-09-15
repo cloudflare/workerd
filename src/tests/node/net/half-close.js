@@ -89,6 +89,35 @@ export const peerEofEndsBothSides = {
   },
 };
 
+// allowHalfOpen false: a write issued from inside the 'end' handler goes out
+// cleanly. The automatic end of the writable side runs a tick after 'end',
+// and the connect() socket underneath keeps its writable half open on EOF
+// (the Duplex owns the half-open policy), so the write completes with no
+// error and is counted before the socket finishes and closes.
+export const writeFromEndHandlerCompletes = {
+  async test(ctrl, env) {
+    const socket = endsImmediately(env);
+    socket.resume();
+    const errors = [];
+    socket.on('error', (err) => errors.push(err));
+    let accepted;
+    const written = new Promise((resolve) => {
+      socket.on('end', () => {
+        strictEqual(socket.writable, true);
+        strictEqual(socket.writableEnded, false);
+        accepted = socket.write('hello world', resolve);
+      });
+    });
+    strictEqual(await written, undefined);
+    strictEqual(accepted, true);
+    await once(socket, 'close');
+    strictEqual(socket.bytesWritten, 11);
+    strictEqual(socket.writableFinished, true);
+    strictEqual(socket.destroyed, true);
+    strictEqual(errors.length, 0);
+  },
+};
+
 // allowHalfOpen false: a write after the peer's EOF (once the writable side
 // has been ended) fails with EPIPE. By then the socket has auto-destroyed
 // (both sides done), so the EPIPE destroy is a no-op and no 'error' event

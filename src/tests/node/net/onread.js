@@ -60,8 +60,9 @@ export const fixedSubarrayKeepsItsRange = {
     new Uint8Array(backing).fill(0xaa);
     const view = new Uint8Array(backing, 64, 32);
     let received = '';
-    // Observed in the callback, asserted afterwards: an assertion thrown
-    // from inside the callback would only stop the read loop.
+    // Observed in the callback, asserted afterwards: a throw from inside the
+    // callback destroys the socket with it (callbackThrowDestroysSocket),
+    // which would report the failure through 'error' instead of here.
     const fills = [];
     const socket = echo(env, {
       onread: {
@@ -135,6 +136,86 @@ export const generatedBuffersReceiveFills = {
   },
 };
 
+// A generator handing out the same buffer every time (Node fills it in
+// place): the first read transfers and detaches it, and every later read is
+// continued over the store it moved to, so every fill arrives, in a Buffer
+// over a store of the caller's capacity.
+export const sharedGeneratorBufferReceivesEveryFill = {
+  async test(ctrl, env) {
+    const shared = new Uint8Array(1024);
+    let received = '';
+    const fills = [];
+    const socket = echo(env, {
+      onread: {
+        buffer: () => shared,
+        callback(nread, buf) {
+          fills.push({ nread, capacity: buf.buffer.byteLength });
+          received += buf.toString();
+        },
+      },
+    });
+    await once(socket, 'connect');
+    await echoSegments(
+      socket,
+      ['first', 'second', 'third'],
+      () => received.length
+    );
+    strictEqual(received, 'firstsecondthird');
+    ok(fills.length >= 3, `expected three fills or more, got ${fills.length}`);
+    for (const fill of fills) strictEqual(fill.capacity, 1024);
+    strictEqual(shared.byteLength, 0);
+    socket.end();
+    await once(socket, 'close');
+  },
+};
+
+// A generator rotating through a pool of buffers, so a fill can be held
+// while the next one lands: each buffer is continued over its own store, a
+// fill's Buffer stays readable until its buffer is handed out again, and is
+// detached by the read that reuses it.
+export const rotatingGeneratorBuffersReceiveEveryFill = {
+  async test(ctrl, env) {
+    const pool = [new Uint8Array(64), new Uint8Array(64)];
+    let handed = 0;
+    let received = '';
+    const fills = [];
+    const socket = echo(env, {
+      onread: {
+        buffer: () => pool[handed++ % pool.length],
+        callback(nread, buf) {
+          const text = buf.toString();
+          fills.push({
+            buf,
+            text,
+            // The previous fill's Buffer, over the other buffer's store, is
+            // still intact when this one is delivered.
+            previousIntact:
+              fills.length === 0 ||
+              fills.at(-1).buf.toString() === fills.at(-1).text,
+          });
+          received += text;
+        },
+      },
+    });
+    await once(socket, 'connect');
+    await echoSegments(
+      socket,
+      ['first', 'second', 'third'],
+      () => received.length
+    );
+    strictEqual(received, 'firstsecondthird');
+    ok(fills.length >= 3, `expected three fills or more, got ${fills.length}`);
+    for (const fill of fills) strictEqual(fill.previousIntact, true);
+    // The third read reused the first fill's buffer, transferring its store:
+    // that fill's Buffer is detached; the last fill's is still readable.
+    strictEqual(fills[0].buf.byteLength, 0);
+    strictEqual(fills.at(-1).buf.toString(), fills.at(-1).text);
+    for (const buffer of pool) strictEqual(buffer.byteLength, 0);
+    socket.end();
+    await once(socket, 'close');
+  },
+};
+
 // Returning false from the callback stops the read loop (nothing further is
 // delivered, over a fixed buffer too); resume() restarts it.
 export const callbackFalseStopsReading = {
@@ -195,6 +276,58 @@ export const generatorThrowDestroysSocket = {
     await closed;
     strictEqual(socket.destroyed, true);
     strictEqual(calls, 2);
+  },
+};
+
+// A callback that throws: the loop destroys the socket with its error, no
+// further fill is delivered. (Node lets the throw escape onStreamRead as an
+// uncaught exception instead.)
+export const callbackThrowDestroysSocket = {
+  async test(ctrl, env) {
+    const boom = new Error('callback refused the fill');
+    let calls = 0;
+    const socket = echo(env, {
+      onread: {
+        buffer: new Uint8Array(16),
+        callback() {
+          calls++;
+          throw boom;
+        },
+      },
+    });
+    await once(socket, 'connect');
+    const errored = once(socket, 'error');
+    const closed = once(socket, 'close');
+    socket.write('x');
+    strictEqual(await errored, boom);
+    await closed;
+    strictEqual(socket.destroyed, true);
+    strictEqual(socket.errored, boom);
+    strictEqual(calls, 1);
+  },
+};
+
+// The same through streaming mode: a 'data' listener runs inside the loop's
+// push() when the socket is flowing with nothing buffered, so its throw is
+// the loop's too and destroys the socket with it.
+export const dataListenerThrowDestroysSocket = {
+  async test(ctrl, env) {
+    const boom = new Error('listener refused the chunk');
+    let chunks = 0;
+    const socket = echo(env);
+    socket.on('data', () => {
+      chunks++;
+      throw boom;
+    });
+    await once(socket, 'connect');
+    const errored = once(socket, 'error');
+    const closed = once(socket, 'close');
+    socket.write('x');
+    strictEqual(await errored, boom);
+    await closed;
+    strictEqual(socket.destroyed, true);
+    strictEqual(socket.errored, boom);
+    strictEqual(chunks, 1);
   },
 };
 

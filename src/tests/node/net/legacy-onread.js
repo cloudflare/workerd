@@ -34,8 +34,10 @@ export const legacyFixedBufferIsFilledInPlace = {
     const buffer = Buffer.alloc(1024);
     let received = '';
     let lastFill = '';
-    // Observed in the callback, asserted afterwards: an assertion thrown
-    // from inside the callback would only stop the read loop.
+    // Observed in the callback, asserted afterwards: a throw from inside the
+    // callback destroys the socket with it (onread.js's
+    // callbackThrowDestroysSocket), which would report the failure through
+    // 'error' instead of here.
     const fills = [];
     const socket = net.connect({
       host: env.SIDECAR_HOSTNAME,
@@ -83,8 +85,10 @@ export const legacySubarrayIsFilledWithinItsRange = {
     const view = new Uint8Array(backing, 64, 32);
     let received = '';
     let lastFill = '';
-    // Observed in the callback, asserted afterwards: an assertion thrown
-    // from inside the callback would only stop the read loop.
+    // Observed in the callback, asserted afterwards: a throw from inside the
+    // callback destroys the socket with it (onread.js's
+    // callbackThrowDestroysSocket), which would report the failure through
+    // 'error' instead of here.
     const fills = [];
     const socket = net.connect({
       host: env.SIDECAR_HOSTNAME,

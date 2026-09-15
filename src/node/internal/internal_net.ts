@@ -104,6 +104,7 @@ const kTimeout = Symbol('kTimeout');
 const kBuffer = Symbol('kBuffer');
 const kBufferCb = Symbol('kBufferCb');
 const kBufferGen = Symbol('kBufferGen');
+const kBufferContinuations = Symbol('kBufferContinuations');
 const kBytesRead = Symbol('kBytesRead');
 const kBytesWritten = Symbol('kBytesWritten');
 const kUpdateTimer = Symbol('kUpdateTimer');
@@ -699,10 +700,14 @@ export declare class Socket extends _Socket {
   };
   [kLastWriteQueueSize]: number | null | undefined;
   [kTimeout]: Socket | null | undefined;
-  [kBuffer]: null | boolean | Uint8Array;
+  [kBuffer]: null | boolean;
   [kBufferCb]:
     null | undefined | ((len?: number, buf?: Buffer) => boolean | Uint8Array);
   [kBufferGen]: null | (() => undefined | Uint8Array);
+  // For an onread buffer: each view the caller has handed to the read loop,
+  // mapped to the loop's view over the backing store that view's BYOB read
+  // transferred it to (the same range of it). See startRead.
+  [kBufferContinuations]: null | WeakMap<Uint8Array, Uint8Array>;
   [kSocketInfo]: null | {
     address?: string;
     port?: number;
@@ -866,6 +871,7 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   this[kBuffer] = null;
   this[kBufferCb] = null;
   this[kBufferGen] = null;
+  this[kBufferContinuations] = null;
   this[kSocketInfo] = null;
   this[kBytesRead] = 0;
   this[kBytesWritten] = 0;
@@ -914,17 +920,16 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
     typeof onread.callback === 'function'
   ) {
     if (typeof onread.buffer === 'function') {
-      this[kBuffer] = true;
       this[kBufferGen] = onread.buffer;
     } else {
-      // A fixed buffer. Each BYOB read transfers the buffer it is handed, so
-      // the read loop replaces kBuffer with a view over the transferred
-      // backing store after every read (see startRead); the generator
-      // always hands out the current view.
-      this[kBuffer] = onread.buffer;
-      this[kBufferGen] = (): Uint8Array | undefined =>
-        this[kBuffer] as Uint8Array;
+      const { buffer } = onread;
+      this[kBufferGen] = (): Uint8Array => buffer;
     }
+    this[kBuffer] = true;
+    // The read loop's BYOB reads transfer the buffers they are handed, so a
+    // caller reusing one — a fixed buffer, or a generator handing out the
+    // same buffers again — is continued over the store it moved to.
+    this[kBufferContinuations] = new WeakMap();
     // eslint-disable-next-line @typescript-eslint/unbound-method
     this[kBufferCb] = onread.callback;
   } else {
@@ -1813,11 +1818,12 @@ function initializeConnection(
       socket[kBoundSource] = concreteLocal(socket[kBoundSource]);
 
       const handle = inner.connect(`${host}:${port}`, {
-        // The Duplex owns the half-open policy: with allowHalfOpen false it
-        // ends the writable side itself once the readable has ended (see
-        // onReadableStreamEnd), after flushing whatever was queued. The
-        // connect() socket must not race it by closing the writable half on
-        // EOF as well.
+        // The Duplex owns the half-open policy: with allowHalfOpen false,
+        // Readable's endReadableNT schedules endWritableNT, which calls end()
+        // a tick after 'end' and so flushes whatever was queued (the socket's
+        // own 'end' listener, onReadableStreamEnd, only installs writeAfterFIN
+        // to refuse later writes). The connect() socket must not race it by
+        // closing the writable half on EOF as well.
         allowHalfOpen: true,
         // A Node.js socket is always capable of being upgraded to the TLS socket.
         secureTransport: socket.encrypted ? 'on' : 'starttls',
@@ -1927,21 +1933,29 @@ export function onConnectionOpened(this: Socket): void {
 }
 
 export function onConnectionClosed(this: Socket): void {
-  if (this._handle?.socket.upgraded) {
+  const handle = this._handle;
+  if (handle?.socket.upgraded) {
     // The socket is being upgraded from insecure to TLS.
     // No need to handle this particular close event.
     return;
   }
   clearSocketTimers(this);
 
-  if (!this.destroyed) {
-    // The read loop may not observe EOF itself (it is idle while paused or
-    // waiting, and read errors are swallowed), so end the readable here;
-    // push(null) is a no-op if it already has. read(0) lets 'end' fire on a
-    // socket nobody is reading, as in Node.
-    this.push(null);
-    this.read(0);
+  if (this.destroyed || handle == null || handle.readLoopActive) {
+    // A pending read reports the connection's outcome itself: EOF as its
+    // done result, a failure (a peer's reset) as a rejection that destroys
+    // the socket with the error. Ending the readable here as well would
+    // announce EOF for a connection that failed, and with allowHalfOpen
+    // false go on to end the writable side before the failure is reported.
+    return;
   }
+
+  // Nobody is reading (the socket is paused or stopped on backpressure), so
+  // no read will observe the connection's end: end the readable here.
+  // push(null) is a no-op if it already has; read(0) lets 'end' fire on a
+  // socket nobody is reading, as in Node.
+  this.push(null);
+  this.read(0);
 }
 
 async function startRead(socket: Socket): Promise<void> {
@@ -1959,18 +1973,24 @@ async function startRead(socket: Socket): Promise<void> {
           generatedBuffer
         );
       }
-      if (generatedBuffer.byteLength === 0) {
+      // A view the loop has read into before was detached by that read's
+      // transfer of its buffer. Handed out again — a fixed onread buffer, or a
+      // generator reusing its buffers, as Node's in-place fills allow — it
+      // means the same range of the store the buffer moved to, which the
+      // loop kept as the view's continuation.
+      const view =
+        socket[kBufferContinuations]?.get(generatedBuffer) ?? generatedBuffer;
+      if (view.byteLength === 0) {
         throw new ENOBUFS();
       }
 
       // The view's range within its buffer, taken before the read: a BYOB
       // read transfers the buffer and detaches the view, which then reports
       // neither.
-      const { byteOffset: viewOffset, byteLength: viewLength } =
-        generatedBuffer;
+      const { byteOffset: viewOffset, byteLength: viewLength } = view;
 
       const { value, done } = await reader.read(
-        generatedBuffer as Uint8Array<ArrayBuffer>
+        view as Uint8Array<ArrayBuffer>
       );
 
       // Make sure the socket was not destroyed or reconnected while we were
@@ -1999,13 +2019,19 @@ async function startRead(socket: Socket): Promise<void> {
         break;
       }
 
-      // The BYOB read transferred the view's buffer. A fixed onread buffer
-      // continues over the transferred backing store as a view of the same
-      // range — the caller's offset and capacity, not the whole allocation —
-      // so the next read fills exactly the region the caller handed out.
-      if (isUint8Array(socket[kBuffer])) {
-        socket[kBuffer] = new Uint8Array(value.buffer, viewOffset, viewLength);
-      }
+      // The BYOB read transferred the view's buffer. Continue the caller's
+      // view over the transferred backing store as a view of the same range
+      // — the caller's offset and capacity, not the whole allocation — so a
+      // read into it again fills exactly the region the caller handed out. A
+      // store the read left too small for that range (detached or shrunk
+      // while the read was pending, which only a non-transferring read can
+      // see) is continued as an empty view, so reading into it is ENOBUFS.
+      socket[kBufferContinuations]?.set(
+        generatedBuffer,
+        viewOffset + viewLength <= value.buffer.byteLength
+          ? new Uint8Array(value.buffer, viewOffset, viewLength)
+          : new Uint8Array(0)
+      );
 
       // If the byteLength is zero, skip the push.
       if (value.byteLength === 0) {

@@ -185,19 +185,18 @@ export const destroyWithError = {
 };
 
 // The peer resets the connection (RST, no FIN) while the socket is
-// reading: the connection's failure surfaces as 'error' (a plain Error
-// without a code, where Node reports ECONNRESET), then 'close' with
-// hadError true, and the socket is destroyed with that error. The runtime
-// may report the readable's end before the failure, in which case 'end'
-// precedes the error (Node emits no 'end' on a reset); the order of the
-// two is not pinned.
+// reading: the pending read's rejection is the connection's failure, which
+// surfaces as 'error' (a plain Error without a code, where Node reports
+// ECONNRESET), then 'close' with hadError true, and the socket is destroyed
+// with that error. No 'end' is emitted, as in Node: the connection's close
+// resolving before the read's rejection does not end the readable while a
+// read is pending.
 export const peerResetMidReadErrors = {
   async test(ctrl, env) {
     const socket = resetter(env);
     const events = [];
     socket.on('data', (chunk) => events.push(`data(${chunk})`));
-    let ended = false;
-    socket.on('end', () => (ended = true));
+    socket.on('end', () => events.push('end'));
     socket.on('error', (err) => {
       events.push('error');
       strictEqual(err instanceof Error, true);
@@ -215,7 +214,8 @@ export const peerResetMidReadErrors = {
     await closed;
     deepStrictEqual(events, ['data(ready)', 'error', 'close(true)']);
     strictEqual(socket.destroyed, true);
-    strictEqual(typeof ended, 'boolean');
+    strictEqual(socket.readableEnded, false);
+    strictEqual(socket.writableEnded, false);
   },
 };
 
