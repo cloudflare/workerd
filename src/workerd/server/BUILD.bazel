@@ -396,6 +396,8 @@ kj_test(
         "//src/workerd/server/factory:worker-factory",
         "//src/workerd/server/server:workerd-server",
         "//src/workerd/util:test-util",
+        "@capnp-cpp//src/kj/compat:kj-brotli",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
     ],
 )
 
