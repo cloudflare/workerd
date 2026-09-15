@@ -28,3 +28,20 @@ Binary entry point + orchestration layer. `CliMain` (workerd.c++) dispatches sub
 `tests/server-harness.mjs`: Node.js harness spawning `workerd` child processes for E2E tests. Subdirectories: `compile-tests`, `container-client`, `extensions`, `inspector`, `python`, `structured-logging`, `unsafe-eval`, `unsafe-module`, `weakref`.
 
 Pattern: unit tests (`*-test.c++`) at directory level; integration/E2E tests in `tests/` using the harness.
+
+## I/O BACKEND SEAM (--//:io_backend)
+
+- The process event loop and every socket are tokio-backed by default (kj-rs-tokio + kj-rs-io).
+  `--//:io_backend=cxx` keeps the all-C++ stack selectable; CI only builds that arm.
+- Only two libraries may `#if WORKERD_RUST_IO_BACKEND_RUST`: `//src/workerd/util:setup-async-io`
+  (supplies `kj::setupAsyncIo()`) and `:cli-io-backend` (the --watch watcher and SIGTERM). Call
+  sites stay backend-agnostic; do not add the define to other targets.
+- Never depend on the `@capnp-cpp//src/kj:kj-async` umbrella: it drags in `kj-async-os`, whose
+  definitions collide with the shim's (an ODR violation). Use `:kj-async-core` / `:kj-async-io`.
+  `//src/workerd/server:rust-io-hermeticity` fails analysis on any such edge and is part of every
+  wildcard build (not `manual`); `:rust-io-link-check` inspects the linked binary on unix.
+- Ownership under rust: the returned `kj::AsyncIoContext` borrows a heap holder attached to its
+  `lowLevelProvider`; the holder owns the tokio context and the inert event port, so the context's
+  references are valid for its whole lifetime and torn down once. The inert `kj::UnixEventPort` is
+  never driven (`KJ_UNIMPLEMENTED` if anything tries). I/O objects are used on the loop thread that
+  created them (kj-rs-io checks and throws otherwise).
