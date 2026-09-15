@@ -166,6 +166,60 @@ export const openCloseTest = {
   },
 };
 
+export const openFlagsTest = {
+  test() {
+    const { O_WRONLY, O_RDWR, O_CREAT, O_TRUNC, O_APPEND, O_EXCL } = constants;
+
+    // O_TRUNC truncates an existing file, both as a string flag and numeric.
+    for (const flags of ['w', 'w+', O_WRONLY | O_CREAT | O_TRUNC]) {
+      writeFileSync('/tmp/test.txt', 'hello world long');
+      const fd = openSync('/tmp/test.txt', flags);
+      strictEqual(fstatSync(fd).size, 0);
+      writeSync(fd, Buffer.from('hi'));
+      closeSync(fd);
+      strictEqual(readFileSync('/tmp/test.txt', 'utf8'), 'hi');
+    }
+
+    // Without O_TRUNC, existing content is preserved.
+    writeFileSync('/tmp/test.txt', 'hello world long');
+    {
+      const fd = openSync('/tmp/test.txt', O_WRONLY | O_CREAT);
+      writeSync(fd, Buffer.from('hi'));
+      closeSync(fd);
+      strictEqual(readFileSync('/tmp/test.txt', 'utf8'), 'hillo world long');
+    }
+
+    // Numeric O_APPEND appends regardless of position.
+    writeFileSync('/tmp/test.txt', 'hello');
+    {
+      const fd = openSync('/tmp/test.txt', O_WRONLY | O_CREAT | O_APPEND);
+      writeSync(fd, Buffer.from(' world'), 0, 6, 0);
+      closeSync(fd);
+      strictEqual(readFileSync('/tmp/test.txt', 'utf8'), 'hello world');
+    }
+
+    // Numeric O_EXCL with O_CREAT fails on an existing file.
+    throws(
+      () => openSync('/tmp/test.txt', O_WRONLY | O_CREAT | O_EXCL),
+      kErrEExist
+    );
+    throws(
+      () => openSync('/tmp/test.txt', O_RDWR | O_CREAT | O_EXCL | O_TRUNC),
+      kErrEExist
+    );
+    strictEqual(readFileSync('/tmp/test.txt', 'utf8'), 'hello world');
+
+    // O_TRUNC on a read-only open is ignored.
+    {
+      const fd = openSync('/tmp/test.txt', O_TRUNC);
+      closeSync(fd);
+      strictEqual(readFileSync('/tmp/test.txt', 'utf8'), 'hello world');
+    }
+
+    unlinkSync('/tmp/test.txt');
+  },
+};
+
 export const ftruncateTest = {
   async test() {
     const fd = openSync('/tmp/test.txt', 'w+');

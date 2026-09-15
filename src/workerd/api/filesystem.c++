@@ -472,6 +472,7 @@ int FileSystemModule::open(jsg::Lock& js, FilePath path, OpenOptions options) {
                         .write = options.write,
                         .append = options.append,
                         .exclusive = options.exclusive,
+                        .truncate = options.truncate,
                         .followLinks = options.followSymlinks,
                       })) {
     KJ_CASE_ONEOF(opened, kj::Rc<workerd::VirtualFileSystem::OpenedFile>) {

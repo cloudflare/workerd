@@ -1004,6 +1004,11 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
           if (opts.write) {
             auto stat = file->stat(js);
             if (!stat.writable) return FsError::NOT_PERMITTED;
+            if (opts.truncate && stat.size > 0) {
+              KJ_IF_SOME(err, file->resize(js, 0)) {
+                return err;
+              }
+            }
           }
           KJ_DASSERT(openedFiles.find(nextFd) == kj::none);
           KJ_DEFER(observer->onOpen(openedFiles.size(), nextFd));

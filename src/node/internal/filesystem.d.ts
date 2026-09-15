@@ -40,6 +40,7 @@ export function open(
     write: boolean;
     append: boolean;
     exclusive: boolean;
+    truncate: boolean;
     followSymlinks: boolean;
   }
 ): number;

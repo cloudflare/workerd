@@ -90,9 +90,12 @@ class FileSystemModule final: public jsg::Object {
     bool append;
     // If the exclusive option is set, throw if the file already exists.
     bool exclusive;
+    // If the truncate option is set, an existing file is truncated to zero
+    // length on open. Ignored if write is false.
+    bool truncate;
     // If the followSymlinks option is set, follow symbolic links.
     bool followSymlinks = true;
-    JSG_STRUCT(read, write, append, exclusive, followSymlinks);
+    JSG_STRUCT(read, write, append, exclusive, truncate, followSymlinks);
   };
 
   int open(jsg::Lock& js, FilePath path, OpenOptions options);
