@@ -4,7 +4,6 @@
 import { env } from 'node:process';
 import { beforeEach, afterEach, test } from 'node:test';
 import { createSocket } from 'node:dgram';
-import { scheduler } from 'node:timers/promises';
 import assert from 'node:assert';
 import { WorkerdServerHarness } from '../server-harness.mjs';
 
@@ -57,6 +56,15 @@ function sendAndReceive(client, port, data, timeoutMs = 5000) {
   });
 }
 
+async function closeClient(client, port) {
+  try {
+    const reply = await sendAndReceive(client, port, Buffer.from([0]));
+    assert.deepStrictEqual(reply, Buffer.alloc(0));
+  } finally {
+    client.close();
+  }
+}
+
 test('UDP connect() handler reports protocol "udp"', async () => {
   const port = await workerd.getListenPort('udp');
   const client = createSocket('udp4');
@@ -64,7 +72,18 @@ test('UDP connect() handler reports protocol "udp"', async () => {
     const reply = await sendAndReceive(client, port, Buffer.from('hello'));
     assert.strictEqual(reply.toString(), 'first:udp:hello');
   } finally {
-    client.close();
+    await closeClient(client, port);
+  }
+});
+
+test('UDP connect() receives an empty datagram', async () => {
+  const port = await workerd.getListenPort('udp');
+  const client = createSocket('udp4');
+  try {
+    const reply = await sendAndReceive(client, port, Buffer.alloc(0));
+    assert.strictEqual(reply.toString(), 'first:udp:');
+  } finally {
+    await closeClient(client, port);
   }
 });
 
@@ -80,7 +99,7 @@ test('UDP connect() round-trips a large datagram', async () => {
     const reply = await sendAndReceive(client, port, big);
     assert.strictEqual(reply.toString(), 'echo:' + big.toString());
   } finally {
-    client.close();
+    await closeClient(client, port);
   }
 });
 
@@ -95,73 +114,6 @@ test('UDP connect() groups datagrams from one peer into a single flow', async ()
     const second = await sendAndReceive(client, port, Buffer.from('b'));
     assert.strictEqual(second.toString(), 'echo:b');
   } finally {
-    client.close();
-  }
-});
-
-test('UDP connect() starts a new flow after the idle timeout', async () => {
-  const port = await workerd.getListenPort('udp');
-  const client = createSocket('udp4');
-  try {
-    const before = await sendAndReceive(client, port, Buffer.from('x'));
-    assert.strictEqual(before.toString(), 'first:udp:x');
-
-    // The configured idleTimeoutMs is 200; wait well past it.
-    await scheduler.wait(300);
-
-    const after = await sendAndReceive(client, port, Buffer.from('y'));
-    // A new flow means a new connect() call, so this is a "first" reply again rather than "echo".
-    assert.strictEqual(after.toString(), 'first:udp:y');
-  } finally {
-    client.close();
-  }
-});
-
-test('timed-out Flow destructor does not unregister its replacement', async () => {
-  const port = await workerd.getListenPort('udp');
-  const client = createSocket('udp4');
-  const controlClient = createSocket('udp4');
-  try {
-    // This flow remains alive for one second after observing its idle-timeout EOF.
-    const original = await sendAndReceive(client, port, Buffer.from('linger'));
-    assert.strictEqual(original.toString(), 'first:udp:linger');
-
-    // Wait until the original flow is unregistered but its delayed handler is still running.
-    let timedOut = false;
-    for (let i = 0; i < 20; ++i) {
-      await scheduler.wait(50);
-      const status = await sendAndReceive(
-        controlClient,
-        port,
-        Buffer.from('status')
-      );
-      if (status.toString() === 'timed-out') {
-        timedOut = true;
-        break;
-      }
-      assert.strictEqual(status.toString(), 'waiting');
-    }
-    assert(timedOut, 'original flow did not time out');
-
-    const replacement = await sendAndReceive(
-      client,
-      port,
-      Buffer.from('replacement')
-    );
-    assert.strictEqual(replacement.toString(), 'first:udp:replacement');
-
-    // Keep the replacement active until the original Flow destructor runs.
-    for (let i = 0; i < 20; ++i) {
-      await scheduler.wait(100);
-      const reply = await sendAndReceive(
-        client,
-        port,
-        Buffer.from(`keepalive-${i}`)
-      );
-      assert.strictEqual(reply.toString(), `echo:keepalive-${i}`);
-    }
-  } finally {
-    client.close();
-    controlClient.close();
+    await closeClient(client, port);
   }
 });

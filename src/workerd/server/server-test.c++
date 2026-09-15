@@ -733,14 +733,122 @@ kj::String singleWorker(kj::StringPtr def) {
   ))"_kj);
 }
 
+enum class UdpStreamBackend { LEGACY, TYPESCRIPT };
+
 kj::String singleUdpWorker(kj::StringPtr script,
     kj::StringPtr udpOptions = "()"_kj,
-    kj::StringPtr address = "udp-address"_kj) {
-  return kj::str("(services = [(name = \"worker\", worker = ("
-                 "compatibilityDate = \"2024-01-01\", compatibilityFlags = [\"experimental\"], "
-                 "modules = [(name = \"worker.js\", esModule = \"",
+    kj::StringPtr address = "udp-address"_kj,
+    UdpStreamBackend backend = UdpStreamBackend::LEGACY) {
+  bool typescript = backend == UdpStreamBackend::TYPESCRIPT;
+  return kj::str("(autogates = [",
+      typescript ? "\"workerd-autogate-per-isolate-javascript-bootstrap\"" : "",
+      "], services = [(name = \"worker\", worker = ("
+      "compatibilityDate = \"2024-01-01\", compatibilityFlags = [\"experimental\"",
+      typescript ? ", \"typescript_implemented_streams\"" : "",
+      "], "
+      "modules = [(name = \"worker.js\", esModule = \"",
       kj::encodeCEscape(script), "\")]))], sockets = [(name = \"udp\", address = \"",
       kj::encodeCEscape(address), "\", udp = ", udpOptions, ", service = \"worker\")])");
+}
+
+void runUdpQueueLimitsTest(UdpStreamBackend backend) {
+  for (bool empty: {false, true}) {
+    auto budget = 3 * (sizeof(kj::Array<kj::byte>) + (empty ? 0 : 1));
+    TestServer test(singleUdpWorker(R"JS(
+      export default {
+        async connect(socket) {
+          const reader = socket.readable.getReader();
+          const writer = socket.writable.getWriter();
+          await writer.write((await reader.read()).value);
+          await scheduler.wait(1000);
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            await writer.write(value);
+          }
+        }
+      };
+    )JS"_kj,
+        kj::str("(maxPendingBytes = ", budget, ")"), "udp-address", backend));
+    test.server.allowExperimental();
+    test.start();
+    test.sendUdp("udp-address", "peer:1234", "p"_kjb);
+    KJ_EXPECT(test.receiveUdp("udp-address").asPtr() == "p"_kjb);
+    kj::yieldUntilQueueEmpty().wait(test.ws);
+
+    for (uint i = 0; i < 6; ++i) {
+      const kj::byte value = i;
+      test.sendUdp("udp-address", "peer:1234", empty ? ""_kjb : kj::arrayPtr(&value, 1));
+    }
+    KJ_EXPECT(!test.hasUdp("udp-address"));
+    test.timer.advanceTo(test.timer.now() + kj::SECONDS);
+    for (uint i = 0; i < 3; ++i) {
+      auto reply = test.receiveUdp("udp-address");
+      if (empty) {
+        KJ_EXPECT(reply.size() == 0);
+      } else {
+        KJ_ASSERT(reply.size() == 1);
+        KJ_EXPECT(reply[0] == i);
+      }
+    }
+    KJ_EXPECT(!test.hasUdp("udp-address"));
+  }
+}
+
+KJ_TEST("Server: UDP queue limits include payload and empty datagram handles") {
+  runUdpQueueLimitsTest(UdpStreamBackend::LEGACY);
+}
+
+KJ_TEST(
+    "Server: UDP queue limits include payload and empty datagram handles (TypeScript streams)") {
+  runUdpQueueLimitsTest(UdpStreamBackend::TYPESCRIPT);
+}
+
+void runUdpReplacementTest(UdpStreamBackend backend) {
+  TestServer test(singleUdpWorker(R"JS(
+    export default {
+      async connect(socket) {
+        const reader = socket.readable.getReader();
+        const writer = socket.writable.getWriter();
+        const first = (await reader.read()).value;
+        const text = new TextDecoder().decode(first.data);
+        await writer.write(new Datagram(new TextEncoder().encode("start:" + text)));
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          await writer.write(value);
+        }
+        if (text === "old") await scheduler.wait(1000);
+      }
+    };
+  )JS"_kj,
+      "(idleTimeoutMs = 1000)", "udp-address", backend));
+  test.server.allowExperimental();
+  test.start();
+  test.sendUdp("udp-address", "peer:1234", "old"_kjb);
+  KJ_EXPECT(test.receiveUdp("udp-address").asPtr() == "start:old"_kjb);
+  test.timer.advanceTo(test.timer.now() + kj::SECONDS);
+  kj::yieldUntilQueueEmpty().wait(test.ws);
+
+  test.sendUdp("udp-address", "peer:1234", "replacement"_kjb);
+  KJ_EXPECT(test.receiveUdp("udp-address").asPtr() == "start:replacement"_kjb);
+  test.timer.advanceTo(test.timer.now() + 500 * kj::MILLISECONDS);
+  test.sendUdp("udp-address", "peer:1234", "keepalive"_kjb);
+  KJ_EXPECT(test.receiveUdp("udp-address").asPtr() == "keepalive"_kjb);
+
+  // Finish the old handler while the replacement still has time remaining.
+  test.timer.advanceTo(test.timer.now() + 500 * kj::MILLISECONDS);
+  kj::yieldUntilQueueEmpty().wait(test.ws);
+  test.sendUdp("udp-address", "peer:1234", "after-old-destruction"_kjb);
+  KJ_EXPECT(test.receiveUdp("udp-address").asPtr() == "after-old-destruction"_kjb);
+}
+
+KJ_TEST("Server: expired UDP flow destruction preserves its replacement") {
+  runUdpReplacementTest(UdpStreamBackend::LEGACY);
+}
+
+KJ_TEST("Server: expired UDP flow destruction preserves its replacement (TypeScript streams)") {
+  runUdpReplacementTest(UdpStreamBackend::TYPESCRIPT);
 }
 
 KJ_TEST("Server: UDP opened reports the bound local port") {
