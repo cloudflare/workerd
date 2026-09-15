@@ -19,6 +19,13 @@ struct TagValue {
     bool @1 :Bool;
     int64 @2 :Int64;
     float64 @3 :Float64;
+
+    # Homogeneous primitive arrays, matching OpenTelemetry attribute arrays. A one-element array
+    # is distinct from the corresponding scalar, and an empty array is represented as an empty
+    # stringArray.
+    stringArray @4 :List(Text);
+    boolArray @5 :List(Bool);
+    float64Array @6 :List(Float64);
   }
 }
 
