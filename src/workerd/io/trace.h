@@ -1407,6 +1407,9 @@ class TraceContextParent {
   }
 
   [[nodiscard]] TraceContext newChild(kj::ConstString operationName);
+  [[nodiscard]] TraceContext newChildWithUserParent(
+      kj::ConstString operationName, SpanParent userParent);
+  [[nodiscard]] TraceContext newInternalChild(kj::ConstString operationName);
 
  private:
   SpanParent internalSpan;
@@ -1461,6 +1464,17 @@ inline TraceContext TraceContextParent::newChild(kj::ConstString operationName) 
   auto internalChild = internalSpan.newChild(operationName.clone());
   auto userChild = userSpan.newChild(kj::mv(operationName));
   return TraceContext(kj::mv(internalChild), kj::mv(userChild));
+}
+
+inline TraceContext TraceContextParent::newChildWithUserParent(
+    kj::ConstString operationName, SpanParent userParent) {
+  auto internalChild = internalSpan.newChild(operationName.clone());
+  auto userChild = userParent.newChild(kj::mv(operationName));
+  return TraceContext(kj::mv(internalChild), kj::mv(userChild));
+}
+
+inline TraceContext TraceContextParent::newInternalChild(kj::ConstString operationName) {
+  return TraceContext(internalSpan.newChild(kj::mv(operationName)), nullptr);
 }
 
 // RAII object that measures the time duration over its lifetime. It tags this duration onto a

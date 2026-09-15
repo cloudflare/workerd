@@ -1,8 +1,7 @@
 using Workerd = import "/workerd/workerd.capnp";
 
-# Test for JSRPC tracing: the callee invocation is parented to the caller's first per-call jsRpcCall
-# span, and every callee call links to its corresponding caller span. Multiple calls share one
-# session (and hence one callee invocation), so both forms of attribution are needed.
+# Test for JSRPC tracing: logical client/server calls are directly parented across the worker
+# boundary, pipelined calls retain their dependency, and the transport session is not a user span.
 # Asserted in the tail worker's test() handler.
 
 const unitTests :Workerd.Config = (

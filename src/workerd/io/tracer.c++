@@ -640,8 +640,12 @@ void WorkerTracer::addSpanAttributeInternal(const tracing::InvocationSpanContext
 
 SpanParent BaseTracer::makeUserRequestSpan(
     tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
+  return makeUserSpanParent(tracing::SpanContext(kj::mv(traceId), kj::none, traceFlags));
+}
+
+SpanParent BaseTracer::makeUserSpanParent(tracing::SpanContext context) {
   KJ_IF_SOME(func, makeUserRequestSpanFunc) {
-    return func(kj::mv(traceId), traceFlags);
+    return func(kj::mv(context));
   } else {
     return SpanParent(nullptr);
   }

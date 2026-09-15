@@ -186,18 +186,18 @@ export const test = {
       );
     }
 
-    // Caller transient dispatches must stay under the call that exported their capabilities.
-    // This verifies the TransientJsRpcTarget::originatingCall path.
+    // Each transient server dispatch is parented directly to its matching outbound stub call.
+    const calleeStubCallsByMethod = new Map(
+      calleeStubCalls.map((span) => [span.attrs['jsrpc.method'], span])
+    );
     for (const callbackSpan of callerTransientCalls) {
+      const method = callbackSpan.attrs['jsrpc.method'];
+      const clientSpan = calleeStubCallsByMethod.get(method);
+      assert.ok(clientSpan, `Missing callee stub call for ${method}`);
       assert.strictEqual(
         callbackSpan.parentId,
-        callerDispatch.spanId,
-        `Caller callback ${callbackSpan.attrs['jsrpc.method']} should nest under invokeCallbacks`
-      );
-      assert.notStrictEqual(
-        callbackSpan.parentId,
-        caller.rootSpanId,
-        `Caller callback ${callbackSpan.attrs['jsrpc.method']} must not nest under the onset`
+        clientSpan.spanId,
+        `Caller callback ${method} should nest under its matching client call`
       );
     }
   },

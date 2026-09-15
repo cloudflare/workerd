@@ -653,10 +653,10 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
           [weakRef = kj::atomicAddRef(*weakRef), jsRpcCallSpan = kj::mv(jsRpcCallSpan)](
               jsg::Lock& js,
               capnp::Response<rpc::JsRpcTarget::CallResults> response) mutable -> jsg::Value {
-        // Stubs in the response record this call as their originating call so that
-        // follow-up calls on those stubs nest under it (only when traced).
-        auto jsResult =
-            deserializeRpcReturnValue(js, response, jsRpcCallSpan.getSpanParentsIfObserved());
+        // Once the call has resolved, calls on returned stubs are new logical operations under
+        // the current async context. Only calls made through the unresolved promise are pipelined
+        // children of this call.
+        auto jsResult = deserializeRpcReturnValue(js, response, kj::none);
 
         if (weakRef->disposed) {
           // The promise was explicitly disposed before it even resolved. This means we must dispose
@@ -1369,9 +1369,20 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
     auto jsRpcTracingEnabled = util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING);
     TraceContext jsRpcCallSpan;
     if (jsRpcTracingEnabled) {
-      // Server-side jsRpcCall, nested under an exported capability's origin when available.
-      // It stays open through JS invocation and result serialization via the dispatch promise.
+      // Keep internal spans within this invocation, but parent the user span to the matching
+      // caller-side call. The session and capability ownership are transport details, not the
+      // customer-visible operation hierarchy.
       jsRpcCallSpan = [&]() -> TraceContext {
+        if (params.hasCallerSpanContext()) {
+          auto callerContext = tracing::SpanContext::fromCapnp(params.getCallerSpanContext());
+          KJ_IF_SOME(tracer, ctx.getWorkerTracer()) {
+            auto userParent = tracer.makeUserSpanParent(tracing::SpanContext::clone(callerContext));
+            KJ_IF_SOME(parent, tryGetOriginatingCall()) {
+              return parent.newChildWithUserParent("jsRpcCall"_kjc, kj::mv(userParent));
+            }
+            return ctx.makeUserTraceSpan("jsRpcCall"_kjc, kj::mv(userParent));
+          }
+        }
         KJ_IF_SOME(parent, tryGetOriginatingCall()) {
           return parent.newChild("jsRpcCall"_kjc);
         }
@@ -1382,9 +1393,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       jsRpcCallSpan.setTag("jsrpc.operation"_kjc,
           params.getOperation().isGetProperty() ? "getProperty"_kjc : "call"_kjc);
 
-      // Link this dispatch to the caller's per-call span. This span stays a child of its own
-      // invocation root, so that a consumer reading this invocation's tail stream can always
-      // resolve the parent.
       if (jsRpcCallSpan.isObserved() && params.hasCallerSpanContext()) {
         auto callerContext = tracing::SpanContext::fromCapnp(params.getCallerSpanContext());
         KJ_IF_SOME(callerSpanId, callerContext.getSpanId()) {
