@@ -10,7 +10,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <kj/async-unix.h>
 #include <kj/io.h>
 
 #include <cstdio>

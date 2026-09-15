@@ -2,6 +2,7 @@ load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("//:build/kj_test.bzl", "kj_test")
+load("//:build/rust_io_backend.bzl", "rust_io_backend_local_defines")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
@@ -77,8 +78,10 @@ wd_cc_binary(
         "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/util:autogate",
         "//src/workerd/util:perfetto",
+        "//src/workerd/util:setup-async-io",
         "@capnp-cpp//src/capnp:capnpc",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -229,6 +232,10 @@ wd_cc_library(
     ],
 )
 
+# Calls kj::setupAsyncIo() (Server::run's own loop) but does not supply it: the BINARY picks the I/O backend by linking
+# //src/workerd/util:setup-async-io (the tokio backend; kj_test and wd_cc_benchmark do this for
+# every test binary) or @capnp-cpp//src/kj:kj-async (kj's own event loop). A binary that links
+# neither fails to link with an undefined kj::setupAsyncIo -- by design, never a silent choice.
 wd_cc_library(
     name = "server",
     srcs = [
@@ -259,7 +266,8 @@ wd_cc_library(
         "//src/workerd/util:perfetto",
         "//src/workerd/util:websocket-error-handler",
         "@capnp-cpp//src/capnp:capnp-rpc",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-tls",
     ],
@@ -310,6 +318,7 @@ wd_cc_library(
     ],
 )
 
+# Calls kj::setupAsyncIo() but does not supply it; see :server.
 wd_cc_library(
     name = "fallback-service",
     srcs = [
@@ -322,7 +331,7 @@ wd_cc_library(
     deps = [
         ":workerd_capnp",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
@@ -434,7 +443,6 @@ kj_test(
         ":workerd_capnp",
         "@capnp-cpp//src/capnp/compat:json",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
@@ -444,6 +452,7 @@ kj_test(
     deps = [
         ":json-logger",
         "@capnp-cpp//src/capnp/compat:json",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
