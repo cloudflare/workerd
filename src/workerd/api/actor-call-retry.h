@@ -16,6 +16,7 @@
 namespace workerd::api {
 
 WD_STRONG_BOOL(ActorCallPayloadReplayable);
+WD_STRONG_BOOL(ActorCallRetriesAllowed);
 WD_STRONG_BOOL(IsFirstActorCallAttempt);
 
 class ActorCallRetryState final: public kj::Refcounted {

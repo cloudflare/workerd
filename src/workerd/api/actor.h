@@ -183,16 +183,21 @@ class DurableObjectNamespace: public jsg::Object {
   // storage. It is `Persistent::YES` only for `ctx.exports` self-bindings of a worker that has
   // `allow_irrevocable_stub_storage` enabled (see `LoopbackDurableObjectNamespace`); regular env
   // bindings leave it `Persistent::NO`.
-  DurableObjectNamespace(
-      uint channel, kj::Own<ActorIdFactory> idFactory, Persistent persistent = Persistent::NO)
+  DurableObjectNamespace(uint channel,
+      kj::Own<ActorIdFactory> idFactory,
+      ActorCallRetriesAllowed actorCallRetriesAllowed,
+      Persistent persistent = Persistent::NO)
       : channel(channel),
         idFactory(kj::mv(idFactory)),
+        actorCallRetriesAllowed(actorCallRetriesAllowed),
         persistent(persistent) {}
   DurableObjectNamespace(IoOwn<ActorChannelFactory> factory,
       kj::Own<ActorIdFactory> idFactory,
+      ActorCallRetriesAllowed actorCallRetriesAllowed,
       Persistent persistent = Persistent::NO)
       : channel(kj::mv(factory)),
         idFactory(kj::mv(idFactory)),
+        actorCallRetriesAllowed(actorCallRetriesAllowed),
         persistent(persistent) {}
 
   struct NewUniqueIdOptions {
@@ -315,6 +320,7 @@ class DurableObjectNamespace: public jsg::Object {
  private:
   kj::OneOf<uint, IoOwn<ActorChannelFactory>> channel;
   kj::Own<ActorIdFactory> idFactory;
+  ActorCallRetriesAllowed actorCallRetriesAllowed;
 
   // See doc comment on the constructor.
   Persistent persistent;
@@ -336,6 +342,7 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       bool enableReplicaRouting,
       ActorRoutingMode routingMode,
       kj::Maybe<ActorVersion> version,
+      ActorCallRetriesAllowed actorCallRetriesAllowed,
       Persistent persistent)
       : channelIdOrFactory(kj::mv(channelIdOrFactory)),
         id(kj::mv(id)),
@@ -344,12 +351,13 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
         enableReplicaRouting(enableReplicaRouting),
         routingMode(routingMode),
         version(kj::mv(version)),
+        actorCallRetriesAllowed(actorCallRetriesAllowed),
         persistent(persistent) {}
 
   Result newSingleUseClient(
       kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override;
   bool supportsActorCallRetries() const override {
-    return true;
+    return actorCallRetriesAllowed.toBool();
   }
   void onActorCallRetry() override;
   Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
@@ -368,6 +376,7 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   bool enableReplicaRouting;
   ActorRoutingMode routingMode;
   kj::Maybe<ActorVersion> version;
+  ActorCallRetriesAllowed actorCallRetriesAllowed;
 
   // Whether stubs minted from this namespace may be stored in long-term storage. See the
   // `persistent` field of `DurableObjectNamespace`.
