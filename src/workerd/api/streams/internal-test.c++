@@ -14,6 +14,11 @@
 
 #include <openssl/rand.h>
 
+// These tests exercise the legacy C++ streams implementation directly, so they allocate the
+// legacy ReadableStream / WritableStream rather than going through the JsReadableStream /
+// JsWritableStream implementation dispatch.
+// NOLINTBEGIN(workerd-legacy-stream-alloc)
+
 namespace workerd::api {
 namespace {
 
@@ -1248,3 +1253,5 @@ KJ_TEST("internal pipe force-cancel drops pending read before destroying source"
 
 }  // namespace
 }  // namespace workerd::api
+
+// NOLINTEND(workerd-legacy-stream-alloc)

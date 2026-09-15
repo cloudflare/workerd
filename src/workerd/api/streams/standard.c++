@@ -3061,6 +3061,11 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
 
   // This will leave this stream locked, disturbed, and closed.
 
+  // The branches of a legacy stream are legacy streams by construction: they are built directly
+  // over clones of this controller's state, not through the implementation dispatch in
+  // JsReadableStream::create().
+  // NOLINTBEGIN(workerd-legacy-stream-alloc)
+
   // Check for pending state first (deferred close/error during a prior read operation)
   if (state.pendingStateIs<StreamStates::Closed>()) {
     return Tee{
@@ -3129,6 +3134,7 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
       };
     }
   }
+  // NOLINTEND(workerd-legacy-stream-alloc)
   KJ_UNREACHABLE;
 }
 
