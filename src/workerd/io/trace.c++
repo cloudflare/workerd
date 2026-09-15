@@ -1919,6 +1919,15 @@ void SpanBuilder::setTag(kj::ConstString key, TagInitValue value, IsCustomTag is
         KJ_CASE_ONEOF(val, bool) {
           return val;
         }
+        KJ_CASE_ONEOF(arr, kj::Array<kj::ConstString>) {
+          return kj::mv(arr);
+        }
+        KJ_CASE_ONEOF(arr, kj::Array<bool>) {
+          return kj::mv(arr);
+        }
+        KJ_CASE_ONEOF(arr, kj::Array<double>) {
+          return kj::mv(arr);
+        }
       }
       KJ_UNREACHABLE;
     }(kj::mv(value));
@@ -2016,6 +2025,18 @@ void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) 
       span.setTag(key.clone(), i);
       userSpan.setTag(kj::mv(key), i);
     }
+    KJ_CASE_ONEOF(arr, kj::Array<kj::ConstString>) {
+      span.setTag(key.clone(), KJ_MAP(s, arr) { return s.clone(); });
+      userSpan.setTag(kj::mv(key), kj::mv(arr));
+    }
+    KJ_CASE_ONEOF(arr, kj::Array<bool>) {
+      span.setTag(key.clone(), kj::heapArray<bool>(arr.asPtr()));
+      userSpan.setTag(kj::mv(key), kj::mv(arr));
+    }
+    KJ_CASE_ONEOF(arr, kj::Array<double>) {
+      span.setTag(key.clone(), kj::heapArray<double>(arr.asPtr()));
+      userSpan.setTag(kj::mv(key), kj::mv(arr));
+    }
   }
 }
 
@@ -2032,6 +2053,15 @@ Span::TagValue spanTagClone(const Span::TagValue& tag) {
     }
     KJ_CASE_ONEOF(val, bool) {
       return val;
+    }
+    KJ_CASE_ONEOF(arr, kj::Array<kj::ConstString>) {
+      return KJ_MAP(s, arr) { return s.clone(); };
+    }
+    KJ_CASE_ONEOF(arr, kj::Array<bool>) {
+      return kj::heapArray<bool>(arr.asPtr());
+    }
+    KJ_CASE_ONEOF(arr, kj::Array<double>) {
+      return kj::heapArray<double>(arr.asPtr());
     }
   }
   KJ_UNREACHABLE;
@@ -2052,6 +2082,24 @@ void serializeTagValue(RpcValue::Builder builder, const Span::TagValue& value) {
     KJ_CASE_ONEOF(s, kj::ConstString) {
       builder.setString(s.asPtr());
     }
+    KJ_CASE_ONEOF(arr, kj::Array<kj::ConstString>) {
+      auto list = builder.initStringArray(arr.size());
+      for (auto i: kj::indices(arr)) {
+        list.set(i, arr[i].asPtr());
+      }
+    }
+    KJ_CASE_ONEOF(arr, kj::Array<bool>) {
+      auto list = builder.initBoolArray(arr.size());
+      for (auto i: kj::indices(arr)) {
+        list.set(i, arr[i]);
+      }
+    }
+    KJ_CASE_ONEOF(arr, kj::Array<double>) {
+      auto list = builder.initFloat64Array(arr.size());
+      for (auto i: kj::indices(arr)) {
+        list.set(i, arr[i]);
+      }
+    }
   }
 }
 
@@ -2065,9 +2113,26 @@ Span::TagValue deserializeTagValue(RpcValue::Reader value) {
       return value.getInt64();
     case RpcValue::STRING:
       return kj::ConstString(kj::heapString(value.getString()));
-    default:
-      KJ_UNREACHABLE;
+    case RpcValue::STRING_ARRAY:
+      return KJ_MAP(s, value.getStringArray()) { return kj::ConstString(kj::heapString(s)); };
+    case RpcValue::BOOL_ARRAY: {
+      auto list = value.getBoolArray();
+      auto arr = kj::heapArray<bool>(list.size());
+      for (auto i: kj::indices(arr)) {
+        arr[i] = list[i];
+      }
+      return kj::mv(arr);
+    }
+    case RpcValue::FLOAT64_ARRAY: {
+      auto list = value.getFloat64Array();
+      auto arr = kj::heapArray<double>(list.size());
+      for (auto i: kj::indices(arr)) {
+        arr[i] = list[i];
+      }
+      return kj::mv(arr);
+    }
   }
+  KJ_UNREACHABLE;
 }
 
 ScopedDurationTagger::ScopedDurationTagger(

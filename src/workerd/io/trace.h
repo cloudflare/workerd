@@ -726,7 +726,17 @@ concept AttributeValue = kj::isSameType<kj::ConstString, T>() || kj::isSameType<
 // properties for some other structs.
 // Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
 struct Attribute final {
-  using Value = kj::OneOf<kj::ConstString, bool, double, int64_t>;
+  // A single attribute value. The array alternatives represent OpenTelemetry's homogeneous
+  // primitive arrays as one value, so that a one-element array stays distinct from a scalar all
+  // the way through serialization (`Values` below flattens that distinction for legacy
+  // multi-value attributes).
+  using Value = kj::OneOf<kj::ConstString,
+      bool,
+      double,
+      int64_t,
+      kj::Array<kj::ConstString>,
+      kj::Array<bool>,
+      kj::Array<double>>;
   using Values = kj::Array<Value>;
 
   explicit Attribute(kj::ConstString name, Value&& value);
@@ -1245,7 +1255,10 @@ class SpanBuilder {
       kj::ConstString,
       bool,
       double,
-      int64_t>;
+      int64_t,
+      kj::Array<kj::ConstString>,
+      kj::Array<bool>,
+      kj::Array<double>>;
 
   void setTag(kj::ConstString key, TagInitValue value, IsCustomTag isCustom = IsCustomTag::NO);
 

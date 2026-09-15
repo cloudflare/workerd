@@ -4863,9 +4863,27 @@ export interface Tracing {
 }
 export declare abstract class Span {
   get isTraced(): boolean;
-  setAttribute(key: string, value: boolean | number | string): this;
+  setAttribute(
+    key: string,
+    value:
+      | boolean
+      | number
+      | string
+      | Array<boolean | null | undefined>
+      | Array<number | null | undefined>
+      | Array<string | null | undefined>,
+  ): this;
   setAttributes(
-    attributes: Record<string, boolean | number | string | undefined>,
+    attributes: Record<
+      string,
+      | boolean
+      | number
+      | string
+      | Array<boolean | null | undefined>
+      | Array<number | null | undefined>
+      | Array<string | null | undefined>
+      | undefined
+    >,
   ): this;
   recordException(
     exception:

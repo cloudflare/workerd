@@ -20,19 +20,31 @@ namespace {
 // streaming tail worker, this is the maximum size per tail event.
 static constexpr size_t MAX_TRACE_BYTES = 256 * 1024;
 
-tracing::Attribute::Value cloneAttributeValue(const tracing::Attribute::Value& value) {
+// Approximate serialized size of an attribute value, used for MAX_TRACE_BYTES accounting.
+size_t attributeValueSize(const tracing::Attribute::Value& value) {
   KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(boolean, bool) {
-      return tracing::Attribute::Value(boolean);
+    KJ_CASE_ONEOF(str, kj::ConstString) {
+      return str.size();
     }
-    KJ_CASE_ONEOF(number, double) {
-      return tracing::Attribute::Value(number);
+    KJ_CASE_ONEOF(val, bool) {
+      return 1;
     }
-    KJ_CASE_ONEOF(integer, int64_t) {
-      return tracing::Attribute::Value(integer);
+    KJ_CASE_ONEOF(arr, kj::Array<kj::ConstString>) {
+      size_t size = 0;
+      for (auto& str: arr) {
+        size += str.size();
+      }
+      return size;
     }
-    KJ_CASE_ONEOF(string, kj::ConstString) {
-      return tracing::Attribute::Value(string.clone());
+    KJ_CASE_ONEOF(arr, kj::Array<bool>) {
+      return arr.size();
+    }
+    KJ_CASE_ONEOF(arr, kj::Array<double>) {
+      return arr.size() * sizeof(double);
+    }
+    // int64_t and double
+    KJ_CASE_ONEOF_DEFAULT {
+      return sizeof(int64_t);
     }
   }
   KJ_UNREACHABLE;
@@ -99,7 +111,7 @@ WorkerTracer::WorkerTracer(kj::Maybe<kj::Rc<kj::Refcounted>> parentPipeline,
     } else {
       for (auto& tag: tags) {
         KJ_REQUIRE(tag.value.size() == 1, "tail attributes must contain exactly one value");
-        setWorkerAttribute(tag.name.clone(), cloneAttributeValue(tag.value[0]));
+        setWorkerAttribute(tag.name.clone(), spanTagClone(tag.value[0]));
       }
     }
   }
@@ -245,19 +257,7 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
 
   size_t spanTagsSize = 0;
   for (const Span::TagMap::Entry& tag: span.tags) {
-    spanTagsSize += tag.key.size();
-    KJ_SWITCH_ONEOF(tag.value) {
-      KJ_CASE_ONEOF(str, kj::ConstString) {
-        spanTagsSize += str.size();
-      }
-      KJ_CASE_ONEOF(val, bool) {
-        spanTagsSize++;
-      }
-      // int64_t and double
-      KJ_CASE_ONEOF_DEFAULT {
-        spanTagsSize += sizeof(int64_t);
-      }
-    }
+    spanTagsSize += tag.key.size() + attributeValueSize(tag.value);
   }
 
   // Compose Attributes and SpanClose, which are available at span completion time and transmitted
@@ -621,15 +621,7 @@ void WorkerTracer::addSpanAttributeInternal(const tracing::InvocationSpanContext
   }
 
   auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
-  size_t size = key.size();
-  KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(string, kj::ConstString) {
-      size += string.size();
-    }
-    KJ_CASE_ONEOF_DEFAULT {
-      size += sizeof(double);
-    }
-  }
+  size_t size = key.size() + attributeValueSize(value);
   if (size > MAX_TRACE_BYTES) {
     return;
   }

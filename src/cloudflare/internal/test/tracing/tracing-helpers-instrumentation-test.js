@@ -56,6 +56,19 @@ export const validateSpans = {
       },
       { test: 'helperStartActiveSpan', expectedSpan: 'helper-detached-op' },
       { test: 'startActiveSpanSyncThrow', expectedSpan: 'manual-throw-op' },
+      { test: 'arrayAttributes', expectedSpan: 'array-attrs-op' },
+      {
+        test: 'arrayAttributeByteLimit',
+        expectedSpan: 'array-limit-strings-op',
+      },
+      {
+        test: 'arrayAttributeByteLimit',
+        expectedSpan: 'array-limit-numbers-op',
+      },
+      {
+        test: 'arrayAttributeByteLimit',
+        expectedSpan: 'array-limit-booleans-op',
+      },
     ];
 
     for (const { test, expectedSpan } of testValidations) {
@@ -162,6 +175,137 @@ export const validateSpans = {
         !('skipped' in span),
         'setAttributes should ignore undefined values'
       );
+    }
+
+    // Array attributes on a user-created span: arrays arrive as arrays with scalar-vs-array
+    // identity preserved, nullish elements dropped, and invalid arrays omitted.
+    {
+      const span = (spansByTest.get('arrayAttributes') || []).find(
+        (s) => s.name === 'array-attrs-op'
+      );
+      assert(span, 'arrayAttributes: span present');
+
+      assert.deepStrictEqual(span.strings, ['a', 'b', 'c']);
+      assert.deepStrictEqual(span.numbers, [1, 2.5, -3, 0]);
+      assert.deepStrictEqual(span.booleans, [true, false, true]);
+
+      assert.deepStrictEqual(span['single.string'], ['stop']);
+      assert.deepStrictEqual(span['single.number'], [42]);
+      assert.deepStrictEqual(span['single.boolean'], [false]);
+
+      assert.deepStrictEqual(span.empty, []);
+
+      assert.deepStrictEqual(span['nullish.strings'], ['a', 'b']);
+      assert.deepStrictEqual(span['nullish.numbers'], [1, 2]);
+      assert.deepStrictEqual(span['nullish.booleans'], [true]);
+      assert.deepStrictEqual(span['nullish.only'], []);
+
+      for (const key of [
+        'invalid.mixed',
+        'invalid.mixedBoolNumber',
+        'invalid.mixedAfterNull',
+        'invalid.nested',
+        'invalid.objects',
+        'invalid.bigint',
+        'set.invalid',
+        'set.skipped',
+      ]) {
+        assert(
+          !(key in span),
+          `arrayAttributes: '${key}' should not be recorded`
+        );
+      }
+
+      assert.deepStrictEqual(span['set.strings'], ['x', 'y']);
+      assert.deepStrictEqual(span['set.numbers'], [7]);
+      assert.deepStrictEqual(span['set.booleans'], [true, false]);
+      assert.deepStrictEqual(span['set.empty'], []);
+
+      assert.deepStrictEqual(span['overwrite.toArray'], ['a', 'b']);
+      assert.strictEqual(span['overwrite.toScalar'], 'scalar');
+      assert.deepStrictEqual(span['overwrite.arrayType'], ['one', 'two']);
+
+      // Every array attribute above stayed within the span data limit.
+      assert(
+        !('cloudflare.warning.type' in span),
+        'arrayAttributes: no span data limit warning expected'
+      );
+    }
+
+    // Array attributes on the invocation span are delivered as attribute events on the root span.
+    {
+      const invocation = invocations.find((invocation) =>
+        invocation.attributes.some(
+          ({ name, value }) =>
+            name === 'invocation.test' &&
+            value === 'invocationSpanArrayAttributes'
+        )
+      );
+      assert(invocation, 'invocationSpanArrayAttributes: invocation present');
+      const attributes = new Map(
+        invocation.attributes.map(({ name, value }) => [name, value])
+      );
+      assert.deepStrictEqual(attributes.get('invocation.strings'), ['a', 'b']);
+      assert.deepStrictEqual(attributes.get('invocation.numbers'), [1.5, 2]);
+      assert.deepStrictEqual(attributes.get('invocation.booleans'), [false]);
+      assert.deepStrictEqual(attributes.get('invocation.single'), ['stop']);
+      assert.deepStrictEqual(attributes.get('invocation.empty'), []);
+      assert.deepStrictEqual(attributes.get('invocation.nullish'), ['a']);
+      assert.deepStrictEqual(attributes.get('invocation.set.numbers'), [3, 4]);
+      assert(
+        !attributes.has('invocation.invalid'),
+        'invocationSpanArrayAttributes: heterogeneous array should be omitted'
+      );
+      assert(
+        !attributes.has('invocation.set.invalid'),
+        'invocationSpanArrayAttributes: nested array should be omitted'
+      );
+    }
+
+    // Oversized arrays are dropped and degrade into a span data limit warning, while arrays
+    // within the limit are recorded in full.
+    {
+      const testSpans = spansByTest.get('arrayAttributeByteLimit') || [];
+      const expectations = [
+        {
+          name: 'array-limit-strings-op',
+          dropped: 'big.strings',
+          size: 70 * 1024,
+        },
+        {
+          name: 'array-limit-numbers-op',
+          dropped: 'big.numbers',
+          size: 9000 * 8,
+        },
+        {
+          name: 'array-limit-booleans-op',
+          dropped: 'big.booleans',
+          size: 9000 * 8,
+        },
+      ];
+      for (const { name, dropped, size } of expectations) {
+        const span = testSpans.find((s) => s.name === name);
+        assert(span, `arrayAttributeByteLimit: span '${name}' present`);
+        assert(
+          !(dropped in span),
+          `arrayAttributeByteLimit: '${dropped}' should have been dropped`
+        );
+        assert.strictEqual(
+          span['cloudflare.warning.type'],
+          'span_data_limit_exceeded'
+        );
+        assert.match(
+          span['cloudflare.warning.message'],
+          new RegExp(
+            `attribute "${dropped.replace('.', '\\.')}" of size ${size}$`
+          )
+        );
+      }
+
+      const stringsSpan = testSpans.find(
+        (s) => s.name === 'array-limit-strings-op'
+      );
+      assert.deepStrictEqual(stringsSpan.fits, new Array(1000).fill('abcd'));
     }
 
     // Nested spans: verify both outer and inner spans exist and both are closed.

@@ -224,6 +224,118 @@ export const setAttributes = {
   },
 };
 
+// Array attribute values follow OpenTelemetry semantics: homogeneous primitive arrays are
+// recorded as arrays (including one-element and empty arrays), null/undefined elements are
+// skipped, and heterogeneous or nested arrays are ignored. The received values are checked in
+// tracing-helpers-instrumentation-test.js.
+export const arrayAttributes = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+
+    withSpan('array-attrs-op', (span) => {
+      span.setAttribute('test', 'arrayAttributes');
+
+      // Attribute setters keep returning the span for chaining.
+      assert.strictEqual(span.setAttribute('strings', ['a', 'b', 'c']), span);
+      span.setAttribute('numbers', [1, 2.5, -3, 0]);
+      span.setAttribute('booleans', [true, false, true]);
+
+      // One-element arrays must stay arrays (e.g. gen_ai.response.finish_reasons: ["stop"]).
+      span.setAttribute('single.string', ['stop']);
+      span.setAttribute('single.number', [42]);
+      span.setAttribute('single.boolean', [false]);
+
+      // Empty arrays are recorded as empty arrays.
+      span.setAttribute('empty', []);
+
+      // null/undefined elements are skipped; other elements keep their order.
+      span.setAttribute('nullish.strings', [null, 'a', undefined, 'b', null]);
+      span.setAttribute('nullish.numbers', [undefined, 1, null, 2]);
+      span.setAttribute('nullish.booleans', [null, true]);
+      span.setAttribute('nullish.only', [null, undefined]);
+
+      // Invalid arrays are ignored entirely.
+      span.setAttribute('invalid.mixed', ['a', 1]);
+      span.setAttribute('invalid.mixedBoolNumber', [true, 1]);
+      span.setAttribute('invalid.mixedAfterNull', [null, 'a', null, false]);
+      span.setAttribute('invalid.nested', [['a']]);
+      span.setAttribute('invalid.objects', [{ a: 1 }]);
+      span.setAttribute('invalid.bigint', [1n]);
+
+      // setAttributes() applies the same rules per key.
+      assert.strictEqual(
+        span.setAttributes({
+          'set.strings': ['x', 'y'],
+          'set.numbers': [7],
+          'set.booleans': [true, null, false],
+          'set.empty': [],
+          'set.skipped': undefined,
+          'set.invalid': [1, 'a'],
+        }),
+        span
+      );
+
+      // Later writes replace earlier ones, in both directions between scalars and arrays.
+      span.setAttribute('overwrite.toArray', 'scalar');
+      span.setAttribute('overwrite.toArray', ['a', 'b']);
+      span.setAttribute('overwrite.toScalar', ['a']);
+      span.setAttribute('overwrite.toScalar', 'scalar');
+      span.setAttribute('overwrite.arrayType', [1, 2]);
+      span.setAttribute('overwrite.arrayType', ['one', 'two']);
+    });
+  },
+};
+
+// Array attributes on the invocation span take the BaseTracer::addSpanAttribute() path rather
+// than the SpanBuilder path used by user-created spans; verify both preserve arrays.
+export const invocationSpanArrayAttributes = {
+  async test(ctrl, env, ctx) {
+    const span = publicTracing.getActiveSpan();
+    assert.ok(span);
+    assert.strictEqual(span.isTraced, true);
+    span.setAttribute('invocation.test', 'invocationSpanArrayAttributes');
+    span.setAttribute('invocation.strings', ['a', 'b']);
+    span.setAttribute('invocation.numbers', [1.5, 2]);
+    span.setAttribute('invocation.booleans', [false]);
+    span.setAttribute('invocation.single', ['stop']);
+    span.setAttribute('invocation.empty', []);
+    span.setAttribute('invocation.nullish', [null, 'a', undefined]);
+    span.setAttribute('invocation.invalid', ['a', 1]);
+    span.setAttributes({
+      'invocation.set.numbers': [3, null, 4],
+      'invocation.set.invalid': [[1]],
+    });
+  },
+};
+
+// Array elements count toward the per-span data limit exactly like scalar values. Each span
+// gets a single oversized attribute because the first violation stops further recording.
+export const arrayAttributeByteLimit = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+
+    withSpan('array-limit-strings-op', (span) => {
+      span.setAttribute('test', 'arrayAttributeByteLimit');
+      // 1000 * 4 bytes fits comfortably under the 64 KiB limit.
+      span.setAttribute('fits', new Array(1000).fill('abcd'));
+      // 70 * 1024 one-byte strings exceed the limit and must be dropped with a warning.
+      span.setAttribute('big.strings', new Array(70 * 1024).fill('x'));
+    });
+
+    withSpan('array-limit-numbers-op', (span) => {
+      span.setAttribute('test', 'arrayAttributeByteLimit');
+      // Numbers are accounted at 8 bytes each: 9000 * 8 > 64 KiB.
+      span.setAttribute('big.numbers', new Array(9000).fill(1));
+    });
+
+    withSpan('array-limit-booleans-op', (span) => {
+      span.setAttribute('test', 'arrayAttributeByteLimit');
+      // Booleans are accounted at 8 bytes each as well: 9000 * 8 > 64 KiB.
+      span.setAttribute('big.booleans', new Array(9000).fill(true));
+    });
+  },
+};
+
 // Verify that nested withSpan calls produce correctly nested spans. This exercises the
 // AsyncContextFrame push path in enterSpan: the inner span should be parented on the
 // outer span.
