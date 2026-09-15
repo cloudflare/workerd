@@ -771,6 +771,69 @@ KJ_TEST("Server: UDP opened reports the bound local port") {
   }
 }
 
+KJ_TEST("Server: UDP drain finishes existing flows without admitting new peers") {
+  TestServer test(singleUdpWorker(R"JS(
+    export default {
+      async connect(socket) {
+        const reader = socket.readable.getReader();
+        const writer = socket.writable.getWriter();
+        for (let i = 0; i < 2; ++i) {
+          await writer.write((await reader.read()).value);
+        }
+      }
+    };
+  )JS"_kj));
+  test.server.allowExperimental();
+  auto drain = kj::newPromiseAndFulfiller<void>();
+  test.start(kj::mv(drain.promise));
+  test.sendUdp("udp-address", "peer:1234", "first"_kjb);
+  KJ_EXPECT(test.receiveUdp("udp-address").asPtr() == "first"_kjb);
+
+  drain.fulfiller->fulfill();
+  kj::yieldUntilQueueEmpty().wait(test.ws);
+  KJ_EXPECT(!KJ_ASSERT_NONNULL(test.runTask).poll(test.ws));
+  test.sendUdp("udp-address", "new-peer:4321", "new"_kjb);
+  KJ_EXPECT(!test.hasUdp("udp-address"));
+  test.sendUdp("udp-address", "peer:1234", "second"_kjb);
+  KJ_EXPECT(test.receiveUdp("udp-address").asPtr() == "second"_kjb);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(test.runTask).poll(test.ws));
+}
+
+KJ_TEST("Server: UDP drain completes without active flows") {
+  TestServer test(singleUdpWorker("export default {};"));
+  test.server.allowExperimental();
+  auto drain = kj::newPromiseAndFulfiller<void>();
+  test.start(kj::mv(drain.promise));
+  drain.fulfiller->fulfill();
+  KJ_EXPECT(KJ_ASSERT_NONNULL(test.runTask).poll(test.ws));
+}
+
+KJ_TEST("Server: UDP drain completes when an active flow expires") {
+  TestServer test(singleUdpWorker(R"JS(
+    export default {
+      async connect(socket) {
+        const reader = socket.readable.getReader();
+        const writer = socket.writable.getWriter();
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          await writer.write(value);
+        }
+      }
+    };
+  )JS"_kj,
+      "(idleTimeoutMs = 1000)"));
+  test.server.allowExperimental();
+  auto drain = kj::newPromiseAndFulfiller<void>();
+  test.start(kj::mv(drain.promise));
+  test.sendUdp("udp-address", "peer:1234", "first"_kjb);
+  KJ_EXPECT(test.receiveUdp("udp-address").asPtr() == "first"_kjb);
+  drain.fulfiller->fulfill();
+  KJ_EXPECT(!KJ_ASSERT_NONNULL(test.runTask).poll(test.ws));
+  test.timer.advanceTo(test.timer.now() + kj::SECONDS);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(test.runTask).poll(test.ws));
+}
+
 KJ_TEST("Server: UDP listener drops truncated datagrams") {
   TestServer test(R"((
     services = [(

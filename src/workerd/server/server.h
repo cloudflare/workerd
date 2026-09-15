@@ -326,7 +326,8 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::Own<Service> service,
       kj::StringPtr addrStr,
       kj::Duration idleTimeout,
-      size_t maxPendingBytes);
+      size_t maxPendingBytes,
+      kj::Promise<void> drainWhen);
 
   kj::Promise<void> listenDebugPort(kj::Own<kj::ConnectionReceiver> listener);
   rpc::WorkerdDebugPort::Client makeWorkerdDebugPortClient();
