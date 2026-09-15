@@ -395,18 +395,22 @@ export const writeAfterEndFails = {
   },
 };
 
-// A Content-Length the handler sets is taken at parseInt's word, and is
-// what the client receives: a non-numeric one leaves the body uncapped, a
-// zero or negative one drops every chunk, a fraction or padded number caps
-// at its integer part.
+// A Content-Length the handler sets caps the body at parseInt's reading of
+// it: a non-numeric one leaves the body uncapped, a zero or negative one
+// drops every chunk, a fraction or padded number caps at its integer part.
+// Only the capping is asserted. The header itself currently reaches the
+// client as the handler set it, as Node's server writes it to the wire —
+// but a real client fails such a response as malformed, so that echo is
+// not a commitment: validating the value at setHeader()/writeHead() time
+// remains open.
 export const contentLengthLies = {
   async test(ctrl, env) {
     const cases = {
-      '/abc': ['abc', 'abc', '0123456789'],
-      '/zero': ['0', '0', ''],
-      '/negative': ['-5', '-5', ''],
-      '/fraction': ['5.9', '5.9', '01234'],
-      '/padded': [' 4 ', '4', '0123'],
+      '/abc': ['abc', '0123456789'],
+      '/zero': ['0', ''],
+      '/negative': ['-5', ''],
+      '/fraction': ['5.9', '01234'],
+      '/padded': [' 4 ', '0123'],
     };
     await withServer(
       (req, res) => {
@@ -415,10 +419,9 @@ export const contentLengthLies = {
         res.end();
       },
       async () => {
-        for (const [path, [, header, body]] of Object.entries(cases)) {
+        for (const [path, [, body]] of Object.entries(cases)) {
           const res = await env.SERVICE.fetch(`http://x${path}`);
           strictEqual(res.status, 200);
-          strictEqual(res.headers.get('content-length'), header);
           strictEqual(await res.text(), body);
         }
       }

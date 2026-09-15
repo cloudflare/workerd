@@ -19,3 +19,5 @@ export {
   legacyBodilessResponsesWork,
   legacyRequestBodyIsPumped,
 } from 'legacy-constructor-gate';
+
+export { legacyPendingReadCancelMisfiresAsUnhandledRejection } from 'legacy-rejection-tracking';

@@ -9,6 +9,11 @@ using Workerd = import "/workerd/workerd.capnp";
 #   first body write throws the constructor-gate Error and a response can
 #   carry no body. Bodiless responses and the request body (a stream the
 #   runtime provides) keep working.
+# - unhandled_rejection_after_microtask_checkpoint OFF: the earlier tracker
+#   reports the rejected promise through which the C++ implementation
+#   settles a read pending at cancel() before its handler runs, so a
+#   req.destroy() with a read pending on the runtime's body stream surfaces
+#   a spurious 'unhandledrejection'.
 # The http module flags are pinned as in the flagged cells; nodejs_compat_v2
 # is again deliberately absent.
 #
@@ -25,6 +30,7 @@ const unitTests :Workerd.Config = (
           (name = "main", esModule = embed "legacy-main.js"),
           (name = "harness", esModule = embed "harness.js"),
           (name = "legacy-constructor-gate", esModule = embed "legacy-constructor-gate.js"),
+          (name = "legacy-rejection-tracking", esModule = embed "legacy-rejection-tracking.js"),
         ],
         compatibilityFlags = [
           "nodejs_compat",

@@ -34,6 +34,7 @@ export {
   destroyWithErrorAndNoListenerIsSwallowed,
   destroyMidBodyCancelsBodyStream,
   destroyWithoutReasonCancelsBodyStream,
+  destroyWithPendingReadAcrossBinding,
   destroyAfterCompleteLeavesStreamAlone,
 } from 'request-destroy';
 
@@ -59,11 +60,18 @@ export {
   destroyBeforeHeadersRejectsFetch,
   destroyWithErrorAfterHeadersErrorsBody,
   destroyAfterHeadersEndsBodyPrematurely,
+  destroyAfterEndAbortsNothing,
   clientCancelDestroysResponse,
   handlerThrowBeforeHeadersRejectsFetch,
   handlerThrowAfterPartialBodyRejectsFetch,
   asyncHandlerRejectionDestroysResponse,
 } from 'response-lifecycle';
+
+export {
+  otherListenerRejectionIsEmittedAsError,
+  otherListenerRejectionWithoutErrorListenerIsUncaught,
+  errorListenerRejectionIsUncaughtOnce,
+} from 'listener-rejections';
 
 export {
   writtenBufferIsReusableAfterCallback,

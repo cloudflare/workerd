@@ -28,6 +28,7 @@ import {
 import { EventEmitter } from 'node-internal:events';
 import { getDefaultHighWaterMark } from 'node-internal:streams_state';
 import {
+  kErrored,
   kUniqueHeaders,
   OutgoingMessage,
   parseUniqueHeadersOption,
@@ -223,8 +224,14 @@ export class Server
   // down with the error, as a listener throwing synchronously tears it down
   // (see #onRequest) — a Worker cannot die of an unhandled rejection as
   // Node's process would, and the client would otherwise wait for a
-  // response that never comes. Another event's listener rejecting is
-  // re-raised, uncaught, as it would have gone unhandled.
+  // response that never comes.
+  //
+  // Another event's listener rejecting is reported as EventEmitter's own
+  // capture fallback would report it: an 'error' event, so a server with
+  // an 'error' listener hears of it, and one without throws it uncaught.
+  // The fallback disables capture while it emits; since this handler
+  // replaces the fallback for every event, an 'error' listener that itself
+  // rejects is re-raised uncaught instead, rather than emitted again.
   override [EventEmitter.captureRejectionSymbol](
     err: unknown,
     event: string | symbol,
@@ -234,9 +241,13 @@ export class Server
       (args[1] as ServerResponse).destroy(err);
       return;
     }
-    queueMicrotask(() => {
-      throw err;
-    });
+    if (event === 'error') {
+      queueMicrotask(() => {
+        throw err;
+      });
+      return;
+    }
+    this.emit('error', err);
   }
 
   async #onRequest(
@@ -414,7 +425,9 @@ let getServerResponseFetchResponse: (
 // 4. Completion: 'finish' event closes the ReadableStream; 'close' follows
 // 5. Destruction (destroy(), or the body's cancel): before headers the
 //    Response promise rejects; after, the ReadableStream errors with the
-//    destroy reason (ERR_STREAM_PREMATURE_CLOSE without one); 'close' follows
+//    destroy reason (ERR_STREAM_PREMATURE_CLOSE without one); 'close' follows.
+//    Once end() has been called there is nothing left to abort: destroy()
+//    only marks the response destroyed, and the completion path (4) runs
 // @ts-expect-error TS2720 Trailers related methods/attributes are missing.
 export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
   extends OutgoingMessage
@@ -556,9 +569,25 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     this.emit('close');
   }
 
-  override destroy(err?: unknown, cb?: (err?: unknown) => void): this {
+  // Takes the error alone, as Node's OutgoingMessage.destroy(error) does:
+  // there is no socket whose teardown could report back to a callback.
+  //
+  // Once end() has been called the body has been handed off (every chunk
+  // reached the stream before end() returned) and 'finish' is on its way,
+  // so there is nothing left to abort. A destroy() from then on — from
+  // inside 'finish', or right after end() — marks the response destroyed
+  // and errored at once, as Node's does (a write that follows fails through
+  // its callback alone), but emits no 'error' (Node's tears its socket down
+  // instead, and emits none on the response either), leaves the body to
+  // reach the client whole, and lets 'close' follow 'finish' as usual.
+  override destroy(err?: unknown): this {
     if (this.destroyed) return this;
-    super.destroy(err, cb);
+    if (this.writableEnded) {
+      this.destroyed = true;
+      this[kErrored] = err as Error;
+      return this;
+    }
+    super.destroy(err);
     queueMicrotask(() => {
       this.#emitClose();
     });
@@ -583,8 +612,14 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
         type: 'bytes',
         start: (controller): void => {
           onStreamStart(controller);
+          // The controller settles once: 'finish' closes it, an 'error' or
+          // a 'close' before that errors it. A 'finish' that still arrives
+          // after the response was destroyed — end() after destroy()
+          // queues one when nothing is left to flush — finds it errored,
+          // and must not close it a second time.
           let settled = false;
           this.once('finish', () => {
+            if (settled) return;
             settled = true;
             controller.close();
           });

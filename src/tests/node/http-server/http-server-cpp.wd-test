@@ -18,6 +18,12 @@ using HttpServerModules = import "http-server-modules.capnp";
 #   streams to feed requests and pipelines.
 # - transformstream_enable_standard_constructor: pipeline stages built with
 #   `new TransformStream({ transform })`.
+# - unhandled_rejection_after_microtask_checkpoint: accurate unhandled-
+#   rejection reporting, which the suite's collectUncaught assertions rely
+#   on. The C++ implementation settles a read pending at cancel() through a
+#   rejected promise adopted a tick later; the earlier tracker reported that
+#   promise as unhandled before its handler ran (legacy-rejection-tracking.js
+#   pins that misfire).
 # The TypeScript implementation hard-codes these modern behaviors, so the
 # flags also keep the two cells comparable at the oldest compat date.
 
@@ -32,6 +38,7 @@ const unitTests :Workerd.Config = (
           "enable_nodejs_http_server_modules",
           "streams_enable_constructors",
           "transformstream_enable_standard_constructor",
+          "unhandled_rejection_after_microtask_checkpoint",
         ],
         bindings = [
           (name = "SERVICE", service = "node-http-server-cpp"),

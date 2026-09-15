@@ -7,7 +7,13 @@
 // is cancelled so the producer learns of it.
 
 import { strictEqual, deepStrictEqual } from 'node:assert';
-import { withServer, remember, dispatch, manualStream } from 'harness';
+import {
+  withServer,
+  remember,
+  dispatch,
+  manualStream,
+  collectUncaught,
+} from 'harness';
 
 const enc = new TextEncoder();
 
@@ -135,6 +141,51 @@ export const destroyWithoutReasonCancelsBodyStream = {
         deepStrictEqual(cancels, [undefined]);
       }
     );
+  },
+};
+
+// Across the service binding the body is the runtime's stream (kj-backed
+// under the C++ implementation). destroy() while the pump's read() is
+// pending underneath — the handler paused the message and primed a read —
+// aborts the message like any other: 'aborted', 'close' with `complete`
+// false, no 'error', the response still sent, nothing escaping the isolate.
+// The two implementations settle that pending read differently — the C++
+// one rejects it with the cancel reason, the TypeScript one resolves it
+// done, per spec (pinned in src/tests/streams/identity) — and the message
+// swallows either.
+export const destroyWithPendingReadAcrossBinding = {
+  async test(ctrl, env) {
+    const { stream, controller, cancels } = manualStream();
+    const events = [];
+    const leaked = await collectUncaught(() =>
+      withServer(
+        (req, res) => {
+          req.on('aborted', () => events.push('aborted'));
+          req.on('error', (err) => events.push(`error:${err.message}`));
+          req.on('end', () => events.push('end'));
+          req.on('close', () => events.push(`close:${req.complete}`));
+          req.pause();
+          req.read(0);
+          setTimeout(() => {
+            req.destroy();
+            res.end('ok');
+          }, 5);
+        },
+        async () => {
+          controller.enqueue(enc.encode('one'));
+          const res = await env.SERVICE.fetch('http://x/', {
+            method: 'POST',
+            body: stream,
+          });
+          strictEqual(await res.text(), 'ok');
+          // The upload stays open across the binding until the test ends it.
+          if (cancels.length === 0) controller.close();
+          await scheduler.wait(10);
+          deepStrictEqual(events, ['aborted', 'close:false']);
+        }
+      )
+    );
+    deepStrictEqual(leaked, []);
   },
 };
 

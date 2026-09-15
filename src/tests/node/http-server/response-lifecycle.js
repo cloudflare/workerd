@@ -102,6 +102,62 @@ export const destroyAfterHeadersEndsBodyPrematurely = {
   },
 };
 
+// destroy(err) once end() has been called aborts nothing: the body was
+// handed off by end() and 'finish' is on its way. The response is marked
+// destroyed and errored at once, as in Node — so a write that follows fails
+// through its callback alone, never as an 'error' — but no 'error' fires
+// for the destroy itself, the client receives the whole body, and 'close'
+// follows 'finish' once. Whether the last chunk went with end(), or end()
+// was bare after a write, or nothing was ever written. Nothing escapes the
+// isolate.
+export const destroyAfterEndAbortsNothing = {
+  async test(ctrl, env) {
+    const shapes = {
+      '/chunk-in-end': (res) => {
+        res.write('part');
+        res.end('done');
+      },
+      '/bare-end': (res) => {
+        res.write('partdone');
+        res.end();
+      },
+      '/empty': (res) => {
+        res.end();
+      },
+    };
+    for (const [path, finish] of Object.entries(shapes)) {
+      const events = [];
+      const boom = new Error('after end');
+      let lateWrite;
+      const leaked = await collectUncaught(() =>
+        withServer(
+          (req, res) => {
+            res.on('error', (err) => events.push(['error', err]));
+            res.on('finish', () => events.push(['finish']));
+            res.on('close', () => events.push(['close', res.destroyed]));
+            finish(res);
+            strictEqual(res.destroy(boom), res);
+            strictEqual(res.destroyed, true);
+            strictEqual(res.errored, boom);
+            res.write('late', (err) => {
+              lateWrite = err.code;
+            });
+          },
+          async () => {
+            const res = await env.SERVICE.fetch(`http://x${path}`);
+            strictEqual(res.status, 200);
+            strictEqual(await res.text(), path === '/empty' ? '' : 'partdone');
+            await scheduler.wait(10);
+            deepStrictEqual(events, [['finish'], ['close', true]]);
+            strictEqual(lateWrite, 'ERR_STREAM_WRITE_AFTER_END');
+          }
+        )
+      );
+      deepStrictEqual(leaked, []);
+    }
+  },
+};
+
 // The client cancelling the body destroys the response with the cancel
 // reason: 'error' and 'close' fire, and later writes fail with
 // ERR_STREAM_DESTROYED.

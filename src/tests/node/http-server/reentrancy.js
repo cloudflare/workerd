@@ -7,32 +7,38 @@
 // inside 'data'.
 
 import { strictEqual, deepStrictEqual } from 'node:assert';
-import { withServer } from 'harness';
+import { withServer, collectUncaught } from 'harness';
 
-// destroy() from inside 'finish': the body, already handed off and closed,
-// reaches the client whole; 'close' follows once, with the response
-// destroyed and no 'error'.
+// destroy() from inside 'finish', with or without an error: the body,
+// already handed off and closed, reaches the client whole; 'close' follows
+// once, with the response destroyed, no 'error' and nothing escaping the
+// isolate (the closed body stream is not touched again).
 export const destroyInsideFinish = {
   async test(ctrl, env) {
-    const events = [];
-    await withServer(
-      (req, res) => {
-        res.on('error', (err) => events.push(['error', err]));
-        res.on('close', () => events.push(['close', res.destroyed]));
-        res.on('finish', () => {
-          events.push(['finish']);
-          res.destroy();
-        });
-        res.end('done');
-      },
-      async () => {
-        const res = await env.SERVICE.fetch('http://x/');
-        strictEqual(res.status, 200);
-        strictEqual(await res.text(), 'done');
-        await scheduler.wait(10);
-        deepStrictEqual(events, [['finish'], ['close', true]]);
-      }
-    );
+    for (const reason of [undefined, new Error('destroyed from finish')]) {
+      const events = [];
+      const leaked = await collectUncaught(() =>
+        withServer(
+          (req, res) => {
+            res.on('error', (err) => events.push(['error', err]));
+            res.on('close', () => events.push(['close', res.destroyed]));
+            res.on('finish', () => {
+              events.push(['finish']);
+              res.destroy(reason);
+            });
+            res.end('done');
+          },
+          async () => {
+            const res = await env.SERVICE.fetch('http://x/');
+            strictEqual(res.status, 200);
+            strictEqual(await res.text(), 'done');
+            await scheduler.wait(10);
+            deepStrictEqual(events, [['finish'], ['close', true]]);
+          }
+        )
+      );
+      deepStrictEqual(leaked, []);
+    }
   },
 };
 
