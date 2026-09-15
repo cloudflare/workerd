@@ -2531,14 +2531,16 @@ bool Worker::Lock::isInspectorEnabled() {
   return worker.script->isolate->impl->inspector != kj::none;
 }
 
-void Worker::Lock::logWarning(kj::StringPtr description) {
+void Worker::Lock::logWarning(
+    kj::StringPtr description, CaptureInspectorStackTrace captureStackTrace) {
   // const_cast OK because we are a lock on this isolate.
-  const_cast<Isolate&>(worker.getIsolate()).logWarning(description, *this);
+  const_cast<Isolate&>(worker.getIsolate()).logWarning(description, *this, captureStackTrace);
 }
 
-void Worker::Lock::logWarningOnce(kj::StringPtr description) {
+void Worker::Lock::logWarningOnce(
+    kj::StringPtr description, CaptureInspectorStackTrace captureStackTrace) {
   // const_cast OK because we are a lock on this isolate.
-  const_cast<Isolate&>(worker.getIsolate()).logWarningOnce(description, *this);
+  const_cast<Isolate&>(worker.getIsolate()).logWarningOnce(description, *this, captureStackTrace);
 }
 
 void Worker::Lock::logErrorOnce(kj::StringPtr description) {
@@ -3571,10 +3573,11 @@ void Worker::Isolate::disconnectInspector() {
   impl->inspectorClient->resetChannel();
 }
 
-void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
+void Worker::Isolate::logWarning(
+    kj::StringPtr description, Lock& lock, CaptureInspectorStackTrace captureStackTrace) {
   if (impl->inspector != kj::none) {
     JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-      logMessage(js, static_cast<uint16_t>(cdp::LogType::WARNING), description);
+      logMessage(js, static_cast<uint16_t>(cdp::LogType::WARNING), description, captureStackTrace);
     });
   }
 
@@ -3607,9 +3610,10 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
   }
 }
 
-void Worker::Isolate::logWarningOnce(kj::StringPtr description, Lock& lock) {
+void Worker::Isolate::logWarningOnce(
+    kj::StringPtr description, Lock& lock, CaptureInspectorStackTrace captureStackTrace) {
   impl->warningOnceDescriptions.findOrCreate(description, [&] {
-    logWarning(description, lock);
+    logWarning(description, lock, captureStackTrace);
     return kj::str(description);
   });
 }
@@ -3621,7 +3625,10 @@ void Worker::Isolate::logErrorOnce(kj::StringPtr description) {
   });
 }
 
-void Worker::Isolate::logMessage(jsg::Lock& js, uint16_t type, kj::StringPtr description) {
+void Worker::Isolate::logMessage(jsg::Lock& js,
+    uint16_t type,
+    kj::StringPtr description,
+    CaptureInspectorStackTrace captureStackTrace) {
   if (impl->inspector != kj::none) {
     // We want to log a warning to the devtools console, as if `console.warn()` were called.
     // However, the only public interface to call the real `console.warn()` is via JavaScript,
@@ -3652,7 +3659,9 @@ void Worker::Isolate::logMessage(jsg::Lock& js, uint16_t type, kj::StringPtr des
       params.initArgs(1)[0].initString().setValue(description);
       params.setExecutionContextId(v8_inspector::V8ContextInfo::executionContextId(js.v8Context()));
       params.setTimestamp(impl->inspectorClient->currentTimeMS());
-      stackTraceToCDP(js, params.initStackTrace());
+      if (captureStackTrace) {
+        stackTraceToCDP(js, params.initStackTrace());
+      }
 
       auto notification = getCdpJsonCodec().encode(event);
       KJ_IF_SOME(i, currentInspectorSession) {
