@@ -1,6 +1,5 @@
-# Cross-implementation stream transfer with a TypeScript runner and legacy peer. The reverse
-# config swaps the implementations so streams originating on either implementation are tested.
-# See the header comment in the JS file.
+# Abandoned writable teardown with a legacy runner and TypeScript peer. The teardown runs after
+# the test body returns, covering the legacy writer adapter feeding a TypeScript received stream.
 using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
@@ -8,28 +7,30 @@ const unitTests :Workerd.Config = (
     ( name = "runner",
       worker = (
         modules = [
-          (name = "worker", esModule = embed "js-rpc-streams-crossflag-test.js")
+          (name = "worker", esModule = embed "js-rpc-writable-teardown-test.js")
         ],
         compatibilityFlags = [
           "nodejs_compat",
-          "experimental",
           "streams_enable_constructors",
-          "typescript_implemented_streams",
+          "rpc",
         ],
         bindings = [
           (name = "PEER", service = (name = "peer", entrypoint = "Peer")),
+          (name = "EXPECT_CROSS_IMPL", json = "true"),
         ],
       )
     ),
     ( name = "peer",
       worker = (
         modules = [
-          (name = "worker", esModule = embed "js-rpc-streams-crossflag-test.js")
+          (name = "worker", esModule = embed "js-rpc-writable-teardown-test.js")
         ],
         compatibilityFlags = [
           "nodejs_compat",
           "experimental",
           "streams_enable_constructors",
+          "rpc",
+          "typescript_implemented_streams",
         ],
       )
     ),

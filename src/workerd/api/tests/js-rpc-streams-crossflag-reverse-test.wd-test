@@ -1,5 +1,5 @@
-# Cross-implementation stream transfer with a TypeScript runner and legacy peer. The reverse
-# config swaps the implementations so streams originating on either implementation are tested.
+# Cross-implementation stream transfer with a legacy runner and TypeScript peer. This reverses
+# js-rpc-streams-crossflag-test.wd-test so streams originating on either implementation are tested.
 # See the header comment in the JS file.
 using Workerd = import "/workerd/workerd.capnp";
 
@@ -14,7 +14,6 @@ const unitTests :Workerd.Config = (
           "nodejs_compat",
           "experimental",
           "streams_enable_constructors",
-          "typescript_implemented_streams",
         ],
         bindings = [
           (name = "PEER", service = (name = "peer", entrypoint = "Peer")),
@@ -30,6 +29,7 @@ const unitTests :Workerd.Config = (
           "nodejs_compat",
           "experimental",
           "streams_enable_constructors",
+          "typescript_implemented_streams",
         ],
       )
     ),

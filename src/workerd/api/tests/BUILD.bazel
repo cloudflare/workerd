@@ -641,9 +641,27 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-streams-crossflag-reverse-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-streams-crossflag-test.js"],
+)
+
+wd_test(
     src = "js-rpc-streams-pollution-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-streams-pollution-test.js"],
+)
+
+wd_test(
+    src = "js-rpc-writable-teardown-crossflag-reverse-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-writable-teardown-test.js"],
+)
+
+wd_test(
+    src = "js-rpc-writable-teardown-crossflag-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-writable-teardown-test.js"],
 )
 
 wd_test(
