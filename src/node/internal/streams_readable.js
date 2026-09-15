@@ -2377,7 +2377,10 @@ export function newReadableStreamFromStreamReadable(
 
   streamReadable.pause();
 
-  const cleanup = eos(streamReadable, (error) => {
+  // The ReadableStream mirrors the readable side only: when the source is a
+  // Duplex, its EOF closes the stream without waiting for a half-open
+  // writable side to finish as well.
+  const cleanup = eos(streamReadable, { writable: false }, (error) => {
     error = handleKnownInternalErrors(error);
 
     cleanup();
@@ -2406,7 +2409,7 @@ export function newReadableStreamFromStreamReadable(
 
       cancel(reason) {
         wasCanceled = true;
-        destroy(streamReadable, reason);
+        destroyer(streamReadable, reason);
       },
       type: createTypeBytes ? 'bytes' : undefined,
     },
