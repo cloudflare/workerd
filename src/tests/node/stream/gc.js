@@ -39,6 +39,48 @@ export const toWebPendingReadSurvivesGc = {
   },
 };
 
+// A toWeb stream nobody holds — no reader, no reference — still exerts its
+// backpressure on the source after a forced GC: the stream's pull() has
+// resumed the source, and the one chunk its queue can take (a count
+// strategy with a high-water mark of 1) pauses it again. A stream that had
+// been collected would take nothing and pause nothing, leaving the source
+// flowing into the void.
+export const toWebUnheldStreamStillPausesSource = {
+  async test() {
+    const r = new Readable({ objectMode: true, highWaterMark: 1, read() {} });
+    Readable.toWeb(r);
+    collectSoon();
+    await scheduler.wait(20);
+    strictEqual(r.isPaused(), false);
+    r.push('a');
+    strictEqual(r.isPaused(), true);
+  },
+};
+
+// Readable.toWeb() twice on one source: both streams get every chunk, and
+// both stay alive through the source. The first, unheld, has a high-water
+// mark of 1, the second, held, one of 4. After a forced GC, the chunk both
+// receive fills the first stream's queue, which pauses the source — the
+// second stream's pull() resumes it again at once, so the 'pause' event
+// the first one emits is what shows it is still there.
+export const toWebTwiceKeepsBothStreamsAlive = {
+  async test() {
+    const r = new Readable({ objectMode: true, highWaterMark: 1, read() {} });
+    Readable.toWeb(r);
+    const second = Readable.toWeb(r, {
+      strategy: new CountQueuingStrategy({ highWaterMark: 4 }),
+    });
+    let pauses = 0;
+    r.on('pause', () => pauses++);
+    collectSoon();
+    await scheduler.wait(20);
+    strictEqual(r.isPaused(), false);
+    r.push('a');
+    strictEqual(pauses, 1);
+    strictEqual((await second.getReader().read()).value, 'a');
+  },
+};
+
 // writer.closed awaited by nothing but its own continuation, with the node
 // sink failing from a timer after a forced GC: the rejection arrives.
 export const toWebWriterClosedSurvivesGc = {
@@ -55,6 +97,28 @@ export const toWebWriterClosedSurvivesGc = {
     collectSoon();
     await rejects(writer.closed, (err) => err === boom);
     strictEqual(writable.destroyed, true);
+  },
+};
+
+// Writable.toWeb() twice on one writable: the first stream's writer.closed,
+// awaited by nothing but its own continuation, still hears the sink fail
+// after a forced GC once a second stream has been adapted over the same
+// writable — and so does the second.
+export const toWebTwiceKeepsBothWritableStreamsAlive = {
+  async test() {
+    const boom = new Error('late sink failure');
+    const writable = new Writable({
+      write(chunk, encoding, callback) {
+        setTimeout(() => callback(boom), 20);
+      },
+    });
+    writable.on('error', () => {});
+    const writer = Writable.toWeb(writable).getWriter();
+    const second = Writable.toWeb(writable);
+    await writer.write(enc.encode('a'));
+    collectSoon();
+    await rejects(writer.closed, (err) => err === boom);
+    await rejects(second.getWriter().closed, (err) => err === boom);
   },
 };
 

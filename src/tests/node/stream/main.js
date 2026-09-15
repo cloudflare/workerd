@@ -237,7 +237,10 @@ export {
 
 export {
   toWebPendingReadSurvivesGc,
+  toWebUnheldStreamStillPausesSource,
+  toWebTwiceKeepsBothStreamsAlive,
   toWebWriterClosedSurvivesGc,
+  toWebTwiceKeepsBothWritableStreamsAlive,
   duplexToWebPendingOperationsSurviveGc,
 } from 'gc';
 

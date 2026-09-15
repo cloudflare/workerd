@@ -1253,13 +1253,13 @@ Writable.prototype[Symbol.asyncDispose] = async function () {
  * @param {Writable} streamWritable
  * @returns {WritableStream}
  */
-// The web stream each node writable has been adapted to (Writable.toWeb),
-// kept alive by the node writable. The C++ streams implementation's
-// controller does not keep its stream alive; the node side — which its own
-// pending I/O keeps alive — holds only the controller, so a full GC could
-// collect the web stream, its writer and whatever awaits them (a
-// writer.closed or write() that then never settles). The entry lives
-// exactly as long as the node writable does.
+// The web streams each node writable has been adapted to (one per
+// Writable.toWeb() over it), kept alive by the node writable. The C++
+// streams implementation's controller does not keep its stream alive; the
+// node side — which its own pending I/O keeps alive — holds only the
+// controller, so a full GC could collect the web stream, its writer and
+// whatever awaits them (a writer.closed or write() that then never
+// settles). The entries live exactly as long as the node writable does.
 const adaptedWritableStreams = new WeakMap();
 
 export function newWritableStreamFromStreamWritable(streamWritable) {
@@ -1368,7 +1368,12 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
 
   streamWritable.on('drain', onDrain);
 
-  adaptedWritableStreams.set(streamWritable, stream);
+  let adapted = adaptedWritableStreams.get(streamWritable);
+  if (adapted === undefined) {
+    adapted = new Set();
+    adaptedWritableStreams.set(streamWritable, adapted);
+  }
+  adapted.add(stream);
   return stream;
 }
 

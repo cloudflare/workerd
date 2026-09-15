@@ -274,15 +274,20 @@ The implementation under test is `src/node/internal/streams_readable.js`
 
 ### Liveness
 
-- The node stream keeps the web stream it was adapted to alive (`toWeb`,
-  both directions, ephemerally: exactly as long as the node stream lives).
-  The C++ streams implementation's controller does not keep its stream
-  alive (readable ledger #19 in `src/tests/streams`), and the node side —
-  which its own pending I/O keeps alive — holds only the controller: a
-  full GC could otherwise collect a `toWeb` stream reachable only through
-  a pending `writer.closed`/`write()` continuation (which then never
+- The node stream keeps every web stream it has been adapted to alive
+  (`toWeb`, both directions, called once or several times over the same
+  stream; ephemerally: exactly as long as the node stream lives). The C++
+  streams implementation's controller does not keep its stream alive
+  (readable ledger #19 in `src/tests/streams`), and the node side — which
+  its own pending I/O keeps alive — holds only the controller: a full GC
+  could otherwise collect a `toWeb` stream reachable only through a
+  pending `writer.closed`/`write()` continuation (which then never
   settles), or leave a `Readable.toWeb` source pushing into a collected
-  stream, never paused. The gc.js module forces GCs in that window.
+  stream, never paused. The gc.js module forces GCs in that window. Two
+  `Readable.toWeb` streams over one source each get every chunk, and the
+  source's flow is whatever the last of their `pull()`s and pauses made
+  it: one stream's full queue pauses the source, the other's `pull()`
+  resumes it.
 
 ### Prototype pollution
 
@@ -343,7 +348,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `duplex-from-web.js` | a detached-view chunk destroying the duplex (`TypeError`; readable cancelled and writable aborted with it); pair round trip; objectMode strings; pair validation before locking; locked readable leaving the writer lock taken (ledger #1); corked writes; failed batch; errored readable / writable and later readable error destroying the duplex (and what is left untouched); `allowHalfOpen` default: readable EOF ending the writable side and closing the web writable; `for await` consumption aborting it instead; destroy → abort + cancel (reason, `null`); destroy from `'data'` with a write in flight; `end()` again from `'finish'` |
 | `duplex-from.js` | `Duplex.from()` over a lone web stream marks the missing side |
 | `data-volumes.js` | 10,000 one-byte pushes through `Readable.toWeb` as a Response body; alternating 1 B / 64 KiB chunks through `Writable.fromWeb` (continuous at the sink); an 8 MiB chunk each way (whole; by reference through `fromWeb`); 10,000 indexed objectMode chunks through `pipeline()` (none lost, none duplicated, in order) |
-| `gc.js` | forced GCs while only a pending read / `writer.closed` / Duplex.toWeb read+close continuation holds the web side and the node side has pending I/O: all settle |
+| `gc.js` | forced GCs while only a pending read / `writer.closed` / Duplex.toWeb read+close continuation holds the web side and the node side has pending I/O: all settle; a `Readable.toWeb` stream nobody holds still pausing its source; `toWeb` twice over one source (readable: the unheld first stream's pause observed through the `'pause'` event the second one's pull undoes; writable: the first stream's `writer.closed` and the second's both hearing the sink fail) |
 | `then-pollution.js` | transparent patched `then`: data intact through the three adapters, patch called; hostile `then` during construction: throw, streams unlocked and reusable (Readable, Writable, Duplex `fromWeb`), also when it registers the handlers before throwing (nothing escapes, under the uncaught guard); `Object.prototype.then` getter consulted, data intact |
 | `bodies.js` | Response/Request bodies through `Readable.toWeb` (incl. a megabyte); `Readable.fromWeb` over a Response body and a `TextDecoderStream` chain; `Writable.fromWeb` over `IdentityTransformStream` and `FixedLengthStream` (ledger #4); pipeThrough chains in both directions |
 | `consumers.js` | `text/json/buffer/arrayBuffer/blob` over web streams; multi-chunk and string decoding; lock release; error propagation; node Readables and async generators |
