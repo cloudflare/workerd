@@ -351,11 +351,8 @@ function getCountFuncParams(Module: Module): (funcPtr: number) => number {
 let countFuncParams: (funcPtr: number) => number;
 
 export function patched_PyEM_CountFuncParams(Module: Module, funcPtr: any) {
-  checkVersion(
-    Module,
-    'patched_PyEM_CountFuncParams',
-    PyodideVersion.V0_26_0a2
-  );
+  // This should only be called from 0.26.0a2. It's hot so we leave the version
+  // check to getCountFuncParams() which we only call once.
   countFuncParams ??= getCountFuncParams(Module);
   return countFuncParams(funcPtr);
 }

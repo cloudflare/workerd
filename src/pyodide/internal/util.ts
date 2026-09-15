@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import type { PyodideVersionType } from './const';
+import type { PyodideVersionType } from 'pyodide-internal:const';
 
 // Callback used to report PythonWorkersInternalError construction to C++ metrics (via the
 // WorkerFatalReporter module). Registered by `python.ts` at module init in the main workerd
