@@ -85,16 +85,30 @@ wd_cc_binary(
     ],
 )
 
-# The CLI main()'s two direct uses of the OS event loop -- the --watch file watcher and the SIGTERM
+# The CLI main()'s two backend-divergent I/O paths -- the --watch file watcher and the SIGTERM
 # graceful drain -- behind backend-agnostic entry points (workerd::server::makeFileWatcher /
-# captureSigterm / onSigterm), moved out of workerd.c++ so that the I/O backend can be selected in
-# one place.
+# captureSigterm / onSigterm), so workerd.c++ links them unchanged in both configs. The single
+# WORKERD_RUST_IO_BACKEND_RUST #if selecting the native kj loop vs the tokio loop lives entirely in
+# cli-io-backend.c++, mirroring //src/workerd/util:setup-async-io. Under --//:io_backend=rust this
+# supplies the tokio (kj-rs-io) backends; in the default cxx build it uses the native
+# kj::UnixEventPort watcher + signal handling.
 wd_cc_library(
     name = "cli-io-backend",
     srcs = ["cli-io-backend.c++"],
     hdrs = ["cli-io-backend.h"],
+    local_defines = rust_io_backend_local_defines(),
     visibility = ["//visibility:public"],
-    deps = ["@capnp-cpp//src/kj:kj-async"],
+    deps = select({
+        "//:io_backend_rust": [
+            "//deps:rust_runtime",
+            "//src/rust/cxx/kj-rs-io",
+            "//src/rust/cxx/kj-rs-io:bridge",
+            "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+            "@capnp-cpp//src/kj:kj-async-core",
+            "@capnp-cpp//src/kj:kj-async-io",
+        ],
+        "//conditions:default": ["@capnp-cpp//src/kj:kj-async"],
+    }),
 )
 
 wd_cc_library(

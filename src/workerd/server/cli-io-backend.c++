@@ -2,8 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// workerd's CLI --watch file watcher and SIGTERM graceful drain (see cli-io-backend.h), moved
-// here from workerd.c++ unchanged apart from the FileWatcher interface they now implement.
+// Backend-specific implementations of workerd's CLI --watch file watcher and SIGTERM graceful
+// drain (see cli-io-backend.h). The single WORKERD_RUST_IO_BACKEND_RUST #if that picks the native
+// kj loop vs the tokio loop is confined to this TU, so workerd.c++'s call sites stay
+// backend-agnostic -- exactly as //src/workerd/util:setup-async-io does for kj::setupAsyncIo().
 
 #include "cli-io-backend.h"
 
@@ -11,17 +13,26 @@
 #include <windows.h>
 #include <winsock2.h>
 
+#if !WORKERD_RUST_IO_BACKEND_RUST
+// --//:io_backend=rust ships kj-async-core only, which has no Win32EventPort and doesn't provide
+// this header. The native watcher sites that need it are all gated out below.
 #include <kj/async-win32.h>
+#endif
 #include <kj/win32-api-version.h>
 #include <kj/windows-sanity.h>
 #else
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <kj/async-unix.h>
-
 #include <csignal>
 #include <cstring>
+
+#if !WORKERD_RUST_IO_BACKEND_RUST
+// --//:io_backend=rust ships kj-async-core only, which has no UnixEventPort and doesn't provide
+// this header. The native watcher + captureSignal/onSignal sites that need it are all gated out
+// below; the tokio (kj-rs-io) loop covers those paths.
+#include <kj/async-unix.h>
+#endif
 #endif
 
 #if __linux__
@@ -33,11 +44,21 @@
 #include <sys/types.h>
 #endif
 
+#if WORKERD_RUST_IO_BACKEND_RUST
+#include <kj-rs-io/async-io.h>
+#include <kj-rs-io/ffi.rs.h>
+#endif
+
 #include <kj/debug.h>
 #include <kj/map.h>
 #include <kj/vector.h>
 
 namespace workerd::server {
+
+// The native (kj loop, kj::UnixEventPort::FdObserver) watcher is compiled only in the cxx config.
+// Under --//:io_backend=rust there is no UnixEventPort, so --watch always uses the tokio watcher
+// (below), kj-rs-io's watcher over the `notify` crate.
+#if !WORKERD_RUST_IO_BACKEND_RUST
 
 #if __linux__
 
@@ -242,8 +263,53 @@ class KjFileWatcher final: public FileWatcher {
 
 #endif  // #__linux__, #else
 
-kj::Own<FileWatcher> makeFileWatcher(kj::AsyncIoContext& io) {
+#endif  // !WORKERD_RUST_IO_BACKEND_RUST
+
+// FileWatcher for --//:io_backend=rust: kj-rs-io's watcher (src/rust/cxx/kj-rs-io/watcher.rs,
+// Rust over the `notify` crate -- inotify on Linux, FSEvents on macOS, ReadDirectoryChangesW on
+// Windows), held directly through its cxx bridge: it watches each file's directory and judges
+// changes by re-stamping the files. Its descriptors are CLOEXEC, so reloadFromConfigChange()'s
+// execve() doesn't leak them (the deliberately-inherited sockets get FIONCLEX'd there explicitly).
+#if WORKERD_RUST_IO_BACKEND_RUST
+class TokioFileWatcher final: public FileWatcher {
+ public:
+  TokioFileWatcher(): inner(kj_rs_io::new_file_watcher()) {}
+
+  bool isSupported() override {
 #if _WIN32
+    // The watcher itself works on Windows, but --watch's reload (reloadFromConfigChange(), a
+    // re-exec) is not implemented there yet, so the feature as a whole is not: report that
+    // here, where the CLI turns it into its "not yet implemented on your OS" error, rather
+    // than letting watch() proceed into an unimplemented reload.
+    return false;
+#else
+    return true;
+#endif
+  }
+
+  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&>) override {
+    // Paths cross as the bytes kj::Path::toNativeString produces: a unix path need not be UTF-8.
+    auto native = path.toNativeString(true);
+    auto bytes = native.asBytes();
+    kj_rs_io::file_watcher_watch(*inner, ::rust::Slice<const uint8_t>(bytes.begin(), bytes.size()));
+  }
+
+  kj::Promise<void> onChange() override {
+    // kj-rs-io's operation-start policy (async-io.h): the watch is armed inside the call, so a
+    // caller that merely retains the promise still has its files watched.
+    return kj_rs_io::file_watcher_on_change(*inner).eagerlyEvaluate(nullptr);
+  }
+
+ private:
+  ::rust::Box<kj_rs_io::TokioFileWatcher> inner;
+};
+#endif  // WORKERD_RUST_IO_BACKEND_RUST
+
+kj::Own<FileWatcher> makeFileWatcher([[maybe_unused]] kj::AsyncIoContext& io) {
+#if WORKERD_RUST_IO_BACKEND_RUST
+  // No UnixEventPort exists on the tokio loop; use the AsyncFd-backed watcher instead.
+  return kj::heap<TokioFileWatcher>();
+#elif _WIN32
   return kj::heap<KjFileWatcher>(io.win32EventPort);
 #else
   return kj::heap<KjFileWatcher>(io.unixEventPort);
@@ -252,11 +318,20 @@ kj::Own<FileWatcher> makeFileWatcher(kj::AsyncIoContext& io) {
 
 #if !_WIN32
 void captureSigterm() {
+#if !WORKERD_RUST_IO_BACKEND_RUST
   kj::UnixEventPort::captureSignal(SIGTERM);
+#endif
+  // Under --//:io_backend=rust this is a no-op: tokio's signal driver watches SIGTERM instead, and
+  // capturing it here would block the signal in the thread's mask and prevent the tokio handler
+  // from ever being invoked (there is no UnixEventPort under that backend anyway).
 }
 
-kj::Promise<void> onSigterm(kj::AsyncIoContext& io) {
+kj::Promise<void> onSigterm([[maybe_unused]] kj::AsyncIoContext& io) {
+#if WORKERD_RUST_IO_BACKEND_RUST
+  return kj_rs_io::onSignal(SIGTERM);
+#else
   return io.unixEventPort.onSignal(SIGTERM).ignoreResult();
+#endif
 }
 #endif  // !_WIN32
 
