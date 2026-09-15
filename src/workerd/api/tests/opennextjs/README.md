@@ -45,6 +45,7 @@ Key flags include:
 - `enable_nodejs_vm_module` - Required for `node:vm` module
 - `enable_nodejs_http_modules` - Required for `node:http` modules
 - `enable_nodejs_inspector_module` - Required for `node:inspector` modules
+- `enable_nodejs_tty_module` - Required for `node:tty` module (used by Next.js 16.3+)
 - `enable_nodejs_process_v2` - Required for the full `node:process` module (legacy variant lacks `process.versions`)
 
 ## Why JavaScript Instead of TypeScript?
