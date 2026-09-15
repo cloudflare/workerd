@@ -117,7 +117,7 @@ wd_test(
     data = ["delete-all-deletes-alarm-test.js"],
 )
 
-# For tests that listen on fixed TCP ports 8081-8083. The "socket" resource (see .bazelrc) keeps
+# For tests that listen on fixed TCP ports 8081-8084. The "socket" resource (see .bazelrc) keeps
 # them from running concurrently with each other while still allowing other tests to run alongside.
 # Bazel only accounts for local resources on local execution, so also keep these tests off remote
 # executors, where two of them can otherwise share a network namespace and collide on bind().
@@ -130,10 +130,11 @@ wd_test(
     src = "connect-handler-test.wd-test",
     args = ["--experimental"],
     data = [
+        "connect-handler-server.key",
+        "connect-handler-server.pem",
+        "connect-handler-starttls-test.js",
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
-        "starttls-server.key",
-        "starttls-server.pem",
     ],
     tags = SOCKET_TEST_TAGS,
 )

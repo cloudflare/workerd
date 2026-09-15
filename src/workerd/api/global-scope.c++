@@ -265,14 +265,25 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     auto& ioContext = IoContext::current();
     jsg::Lock& js = lock;
 
-    // Support startTls if a tlsStarter is available. Note that setupSocket() expects the domain
-    // parameter to be set to the expected host name using startTLS so that it can be provided to
-    // the TLS callback, so we'd need to change that or figure out a way to get the host domain.
+    // Support startTls if the transport that delivered this CONNECT offered a tlsStarter slot.
+    // Note that setupSocket() expects the domain parameter to be set to the expected host name
+    // using startTLS so that it can be provided to the TLS callback, so we'd need to change that
+    // or figure out a way to get the host domain.
     auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
     auto secureTransport = SecureTransportKind::OFF;
     KJ_IF_SOME(starter, settings.tlsStarter) {
       if (starter != kj::none) {
+        // The transport can run a real handshake on this connection -- a TCP listener holding a
+        // server-side TLS context, for instance. Take its callback over; only the application
+        // knows the point in the protocol where the upgrade belongs.
         *tlsStarter = kj::mv(KJ_ASSERT_NONNULL(starter));
+        // The callback is ours now, so leave nothing behind for the peer to invoke.
+        starter = kj::none;
+        secureTransport = SecureTransportKind::STARTTLS;
+      } else {
+        // The slot is here but empty: the peer is another Socket on one of our internal
+        // transports, waiting to hear when we upgrade and to tell us when it does.
+        tlsStarter = setupInternalTlsRendezvous(starter);
         secureTransport = SecureTransportKind::STARTTLS;
       }
     }

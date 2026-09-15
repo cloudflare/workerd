@@ -477,6 +477,25 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     AnySocketAddress address,
     jsg::Optional<SocketOptions> options);
 
+// Wires up startTls() for a tunnel whose transport cannot perform a TLS handshake itself, but
+// whose peer is another Socket reached over one of our internal transports -- that is, a
+// worker-to-worker connect(), whether the two workers share a process (the tunnel is a
+// kj::newTwoWayPipe()) or talk over http-over-capnp (the peer's startTls() arrives as a
+// ByteStream.startTls() call).
+//
+// `peerStarter` is the empty callback slot the peer handed us in kj::HttpConnectSettings; filling
+// it in is what makes the peer's startTls() work at all. The returned slot is for the local
+// (connect handler) side of the tunnel.
+//
+// Neither side encrypts anything: these bytes never leave Cloudflare's internal transport, so
+// there is nothing here for TLS to protect. What the two sides genuinely need from each other is
+// agreement on the point in the byte stream where the upgrade takes effect, because the protocol
+// being spoken negotiates the upgrade in-band (SMTP's STARTTLS, Postgres' SSLRequest, and so on)
+// and each side hands its stream to a fresh Socket at that point. So each side's startTls()
+// completes only once the other side has called startTls() too -- the same rule that holds when a
+// real handshake is involved -- and fails if the other side's socket goes away first.
+kj::Own<kj::TlsStarterCallback> setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter);
+
 // Materializes a socket received over RPC from its three external-table entries (socket
 // metadata, then the readable and writable stream halves, in Socket::serialize()'s order),
 // validating the entry types. Runs during RpcDeserializerExternalHandler::prepare() -- before

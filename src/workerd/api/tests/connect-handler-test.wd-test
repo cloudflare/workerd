@@ -23,6 +23,27 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = ["nodejs_compat_v2"],
       )
     ),
+    ( name = "connect-handler-starttls-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "connect-handler-starttls-test.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2"],
+        bindings = [
+          (name = "STARTTLS_TARGET", service = (
+            name = "connect-handler-test-starttls-endpoint",
+            entrypoint = "StartTlsEndpoint")),
+        ],
+      )
+    ),
+    ( name = "connect-handler-test-starttls-endpoint",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2"],
+      )
+    ),
     ( name = "connect-handler-test-proxy",
       worker = (
         modules = [
@@ -42,22 +63,25 @@ const unitTests :Workerd.Config = (
     ( name = "internet", network = ( allow = ["private"],
         tlsOptions = (
           trustedCertificates = [
-            embed "starttls-server.pem",
+            embed "connect-handler-server.pem",
           ],
         ),
       )
     )
   ],
   sockets = [
-    (name = "tcp", address = "*:8081", tcp = (
+    (name = "tcp", address = "*:8081", tcp = (), service = "connect-handler-test"),
+    (name = "tcp", address = "*:8082", tcp = (), service = (name = "connect-handler-test-proxy", entrypoint = "ConnectProxy")),
+    (name = "tcp", address = "*:8083", tcp = (), service = (name = "connect-handler-test-endpoint", entrypoint = "ConnectEndpoint")),
+    # A keypair here is what lets the handler on the other end of this socket accept a startTls()
+    # upgrade; the matching certificate is the one the `internet` service trusts above.
+    (name = "tcp", address = "*:8084", tcp = (
       tlsOptions = (
         keypair = (
-          privateKey = embed "starttls-server.key",
-          certificateChain = embed "starttls-server.pem",
+          privateKey = embed "connect-handler-server.key",
+          certificateChain = embed "connect-handler-server.pem",
         ),
       ),
-    ), service = "connect-handler-test"),
-    (name = "tcp", address = "*:8082", tcp = (), service = (name = "connect-handler-test-proxy", entrypoint = "ConnectProxy")),
-    (name = "tcp", address = "*:8083", tcp = (), service = (name = "connect-handler-test-endpoint", entrypoint = "ConnectEndpoint"))
+    ), service = "connect-handler-starttls-test")
   ]
 );

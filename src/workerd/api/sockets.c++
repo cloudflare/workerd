@@ -500,6 +500,85 @@ kj::Promise<void> pumpDatagramsToRpc(
   }
 }
 
+// Joins up the two ends of a startTls() upgrade on a tunnel where neither end can perform a TLS
+// handshake because the tunnel is one of our internal transports. See
+// setupInternalTlsRendezvous(), which is the only thing that creates one of these.
+class TlsRendezvous: public kj::Refcounted {
+ public:
+  enum class Side {
+    // The socket held by the worker that opened the tunnel by calling connect().
+    PEER,
+    // The socket handed to the connect() handler on the receiving end of that call.
+    HANDLER,
+  };
+
+  // One side's participation in the rendezvous, shaped the way kj::TlsStarterCallback wants it.
+  // Calling it is that side's startTls(); destroying it without having called it reports that the
+  // side is gone and no upgrade is coming.
+  class Claim {
+   public:
+    Claim(kj::Own<TlsRendezvous> rendezvous, Side side)
+        : rendezvous(kj::mv(rendezvous)),
+          side(side) {}
+    KJ_DISALLOW_COPY(Claim);
+    Claim(Claim&& other) = default;
+    Claim& operator=(Claim&& other) = default;
+    ~Claim() noexcept(false) {
+      // A moved-from Claim holds a null Own and no longer speaks for its side.
+      if (rendezvous.get() != nullptr) {
+        rendezvous->abandon(side);
+      }
+    }
+
+    kj::Promise<void> operator()(kj::StringPtr expectedServerHostname) {
+      // There is no handshake here to point at a hostname: the certificate check that the name
+      // exists for belongs to whatever real connection lies beyond the worker at either end.
+      return rendezvous->upgrade(side);
+    }
+
+   private:
+    kj::Own<TlsRendezvous> rendezvous;
+    Side side;
+  };
+
+  // Records that `side` called startTls(). The result resolves once the other side has called it
+  // too, and rejects if the other side is abandoned first.
+  kj::Promise<void> upgrade(Side side) {
+    halfFor(side).arrived->fulfill();
+    return halfFor(otherSide(side)).arrivedPromise.addBranch();
+  }
+
+  // Records that `side`'s socket went away without ever calling startTls(), so that the other side
+  // stops waiting for it. Harmless if that side already upgraded, since fulfillers ignore a second
+  // resolution.
+  void abandon(Side side) {
+    halfFor(side).arrived->reject(KJ_EXCEPTION(
+        DISCONNECTED, "jsg.Error: The peer disconnected before agreeing to start TLS."));
+  }
+
+ private:
+  struct Half {
+    kj::Own<kj::PromiseFulfiller<void>> arrived;
+    kj::ForkedPromise<void> arrivedPromise;
+  };
+
+  Half peer = makeHalf();
+  Half handler = makeHalf();
+
+  static Half makeHalf() {
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    return Half{.arrived = kj::mv(paf.fulfiller), .arrivedPromise = kj::mv(paf.promise).fork()};
+  }
+
+  static Side otherSide(Side side) {
+    return side == Side::PEER ? Side::HANDLER : Side::PEER;
+  }
+
+  Half& halfFor(Side side) {
+    return side == Side::PEER ? peer : handler;
+  }
+};
+
 }  // namespace
 
 // Forward declarations
@@ -690,6 +769,20 @@ tracing::EventInfo UdpConnectCustomEvent::getEventInfo() const {
   return tracing::ConnectEventInfo();
 }
 
+kj::Own<kj::TlsStarterCallback> setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter) {
+  auto rendezvous = kj::refcounted<TlsRendezvous>();
+
+  kj::Function<kj::Promise<void>(kj::StringPtr)> peerClaim =
+      TlsRendezvous::Claim(kj::addRef(*rendezvous), TlsRendezvous::Side::PEER);
+  peerStarter = kj::mv(peerClaim);
+
+  kj::Function<kj::Promise<void>(kj::StringPtr)> handlerClaim =
+      TlsRendezvous::Claim(kj::mv(rendezvous), TlsRendezvous::Side::HANDLER);
+  auto handlerStarter = kj::heap<kj::TlsStarterCallback>();
+  *handlerStarter = kj::mv(handlerClaim);
+  return handlerStarter;
+}
+
 jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,
     AnySocketAddress address,
@@ -779,7 +872,12 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     httpConnectSettings.useTls = secureTransport == SecureTransportKind::ON;
   }
   kj::Own<kj::TlsStarterCallback> tlsStarter = kj::heap<kj::TlsStarterCallback>();
-  httpConnectSettings.tlsStarter = tlsStarter;
+  if (secureTransport == SecureTransportKind::STARTTLS) {
+    // Offer the slot only on a socket that can actually act on it: startTls() insists on
+    // 'starttls'. Whoever serves the CONNECT reads the slot's presence as a promise that this
+    // socket is prepared to upgrade, and may wait to be told that it has.
+    httpConnectSettings.tlsStarter = tlsStarter;
+  }
 
   KJ_IF_SOME(promise, ioContext.waitForOutputLocksIfNecessary()) {
     // Wrap the real WorkerInterface in a promised interface that defers connect

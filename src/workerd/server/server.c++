@@ -6937,9 +6937,14 @@ class Server::TcpListener final: public kj::Refcounted {
       auto response = kj::heap<ResponseWrapper>();
 
       auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
-      kj::HttpConnectSettings settings{.useTls = false, .tlsStarter = *tlsStarter};
+      kj::HttpConnectSettings settings{.useTls = false, .tlsStarter = kj::none};
 
-      // TODO: Add comments for this.
+      // A socket configured with a keypair serves the tunnel in plaintext but stands ready to
+      // upgrade it, so that a worker speaking a protocol which negotiates TLS in-band can accept
+      // the upgrade when the protocol calls for it. The stream is handed over pausable so that the
+      // handshake can be slotted in between reads. Without a keypair there is no way to upgrade,
+      // and the settings carry no starter slot at all: an empty slot would tell the service that
+      // its peer is waiting to be told about an upgrade, which a raw TCP client is not.
       kj::Own<kj::AsyncIoStream> conn = kj::mv(stream.stream);
       KJ_IF_SOME(tls, tlsContext) {
         kj::Rc<kj::PausableReadAsyncIoStream> pausable(
@@ -6957,6 +6962,7 @@ class Server::TcpListener final: public kj::Refcounted {
           return kj::READY_NOW;
         };
         conn = pausable.addRef().toOwn();
+        settings.tlsStarter = *tlsStarter;
       }
 
       kj::HttpHeaders headers(headerTable);
