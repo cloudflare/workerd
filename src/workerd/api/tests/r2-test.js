@@ -95,6 +95,31 @@ const HeadObject = {
   version: 'objectVersion',
   key,
 };
+const object = {
+  key: 'key',
+  version: 'version',
+  size: 0,
+  etag: 'etag',
+  uploaded: new Date(0),
+  storageClass: 'Standard',
+  checksums: {},
+};
+const invalidMetadata = {
+  negativeSize: { size: -1 },
+  fractionalSize: { size: 0.5 },
+  infiniteSize: { size: Infinity },
+  nanSize: { size: NaN },
+  negativeOffset: { range: { offset: -1 } },
+  fractionalOffset: { range: { offset: 0.5 } },
+  negativeLength: { range: { length: -1 } },
+  fractionalLength: { range: { length: 0.5 } },
+  negativeSuffix: { range: { suffix: -1 } },
+  fractionalSuffix: { range: { suffix: 0.5 } },
+  suffixWithOffset: { range: { suffix: 1, offset: 0 } },
+  suffixWithLength: { range: { suffix: 1, length: 1 } },
+  invalidDate: { uploaded: new Date(NaN) },
+  invalidChecksum: { checksums: { md5: {} } },
+};
 
 function buildRpcHead(requestKey, multipartOptions) {
   const result = {
@@ -1569,14 +1594,13 @@ export const jsrpcTransportTests = {
       return true;
     });
     await assert.rejects(env.BUCKET.head('rpc-malformed-size'), {
-      message: 'Malformed R2 RPC result: size must be a non-negative integer.',
+      message: /^internal error; reference = \S+$/,
     });
     await assert.rejects(env.BUCKET.head('rpc-malformed-range'), {
-      message:
-        'Malformed R2 RPC result: range offset must be a non-negative integer.',
+      message: /^internal error; reference = \S+$/,
     });
     await assert.rejects(env.BUCKET.head('rpc-malformed-date'), {
-      message: 'The value cannot be converted because it is not a valid Date.',
+      message: /^internal error; reference = \S+$/,
     });
 
     await assert.rejects(env.BUCKET.delete('boom'), {
@@ -1660,10 +1684,10 @@ export const jsrpcTransportTests = {
     );
 
     await assert.rejects(env.BUCKET.get('rpc-malformed-kind'), {
-      message: 'Malformed R2 get RPC result: unknown result kind other.',
+      message: /^internal error; reference = \S+$/,
     });
     await assert.rejects(env.BUCKET.get('rpc-malformed-metadata-body'), {
-      message: 'Malformed R2 get RPC result: metadata result had a body.',
+      message: /^internal error; reference = \S+$/,
     });
     // The missing-body assertion logs the details and exposes only an internal error reference.
     await assert.rejects(env.BUCKET.get('rpc-malformed-missing-body'), {
@@ -1729,7 +1753,9 @@ export const jsrpcTransportTests = {
     await assert.rejects(env.BUCKET.list({ prefix: 'rpc-boom' }), {
       message: 'list: no such bucket (10006)',
     });
-    await assert.rejects(env.BUCKET.list({ prefix: 'rpc-malformed' }));
+    await assert.rejects(env.BUCKET.list({ prefix: 'rpc-malformed' }), {
+      message: /^internal error; reference = \S+$/,
+    });
 
     const nullPut = await env.BUCKET.put('rpc-null-value', null);
     assert.strictEqual(nullPut.key, key);
@@ -2565,12 +2591,10 @@ export const r2BodyLengthTests = {
       );
     }
     await assert.rejects(env.BUCKET.get('unsafe'), {
-      message:
-        'Malformed R2 get RPC result: body length must be a safe integer.',
+      message: /^internal error; reference = \S+$/,
     });
     await assert.rejects(env.BUCKET.get('unsafe-range'), {
-      message:
-        'Malformed R2 get RPC result: body length must be a safe integer.',
+      message: /^internal error; reference = \S+$/,
     });
 
     // Wrapping must preserve upstream errors and let consumer cancellation reach the gateway.
@@ -2586,7 +2610,7 @@ export const r2BodyLengthTests = {
 
     // A rejected metadata result must cancel its body rather than leave the gateway pumping.
     await assert.rejects(env.BUCKET.get('invalid-size'), {
-      message: 'Malformed R2 RPC result: size must be a non-negative integer.',
+      message: /^internal error; reference = \S+$/,
     });
     await env.SERVICE.waitForCancellation();
 
@@ -2601,5 +2625,84 @@ export const r2BodyLengthTests = {
     assert.strictEqual(await new Response(transformed).text(), 'data');
   },
 };
+
+export class R2JsrpcResponseEntrypoint extends WorkerEntrypoint {
+  head(key) {
+    if (key === 'rejected') throw new TypeError('gateway failure');
+    assert(Object.hasOwn(invalidMetadata, key));
+    return { ...object, ...invalidMetadata[key] };
+  }
+
+  get(key) {
+    switch (key) {
+      case 'unknownKind':
+        return { kind: 'other', object };
+      case 'metadataWithBody':
+        return { kind: 'metadata', object, body: new ReadableStream() };
+      case 'missingBody':
+        return { kind: 'body', object };
+      case 'invalidBody':
+        return { kind: 'body', object, body: 42 };
+      case 'unsafeLength':
+        return {
+          kind: 'body',
+          object: { ...object, size: 2 ** 53 },
+          body: new ReadableStream(),
+        };
+      default:
+        assert.fail('Invalid user input must not reach the gateway');
+    }
+  }
+
+  put() {
+    return { ...object, ...invalidMetadata.invalidDate };
+  }
+
+  list() {
+    return {
+      objects: [{ ...object, ...invalidMetadata.invalidDate }],
+      truncated: false,
+      delimitedPrefixes: [],
+    };
+  }
+
+  completeMultipartUpload() {
+    return { ...object, ...invalidMetadata.invalidDate };
+  }
+}
+
+export async function testInvalidR2Responses(_controller, env) {
+  const internalError = { message: /^internal error; reference = \S+$/ };
+  for (const key of Object.keys(invalidMetadata)) {
+    await assert.rejects(env.BUCKET.head(key), internalError, key);
+  }
+  for (const key of [
+    'unknownKind',
+    'metadataWithBody',
+    'missingBody',
+    'invalidBody',
+    'unsafeLength',
+  ]) {
+    await assert.rejects(env.BUCKET.get(key), internalError, key);
+  }
+  await assert.rejects(env.BUCKET.put('key', 'body'), internalError);
+  await assert.rejects(env.BUCKET.list(), internalError);
+  const upload = env.BUCKET.resumeMultipartUpload('key', 'uploadId');
+  await assert.rejects(upload.complete([]), internalError);
+
+  // A rejected gateway call and invalid user input retain their public error messages.
+  await assert.rejects(env.BUCKET.head('rejected'), {
+    name: 'TypeError',
+    message: 'gateway failure',
+  });
+  await assert.rejects(
+    env.BUCKET.get('invalidInput', { range: { offset: -1 } }),
+    {
+      name: 'RangeError',
+      message:
+        'Invalid range. Starting offset (-1) must be greater than or equal to 0.',
+    }
+  );
+}
 
 export default testWorker;
