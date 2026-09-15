@@ -1462,7 +1462,7 @@ class ExceptionWrapper {
           bool found = false;
           // If the error message starts with a platform error type that we tunnel,
           // prefix it with "jsg."
-          for (auto name: PREFIXES) {
+          for (const auto& name: PREFIXES) {
             if (reason.startsWith(name)) {
               reason = kj::str("jsg.", reason);
               found = true;

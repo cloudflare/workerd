@@ -40,7 +40,7 @@ class CompressionStreamImpl final: public kj::Refcounted,
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
     // We check state here so that we catch errors even if pieces is empty.
     requireActive("Write after close");
-    for (auto piece: pieces) {
+    for (const auto& piece: pieces) {
       co_await write(piece);
     }
     co_return;

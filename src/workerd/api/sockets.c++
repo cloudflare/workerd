@@ -236,7 +236,7 @@ kj::Maybe<kj::String> tryGetMappedIpv4(kj::ArrayPtr<const char> host) {
   };
   kj::ArrayPtr<const char> tail;
   bool matched = false;
-  for (auto prefix: prefixes) {
+  for (const auto& prefix: prefixes) {
     if (lower.startsWith(prefix)) {
       tail = lower.asArray().slice(prefix.size());
       matched = true;

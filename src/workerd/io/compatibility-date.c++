@@ -196,7 +196,7 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
               .other = schema.getFieldByName(s.getName()),
             });
           } else if (s.hasNames()) {
-            for (auto name: s.getNames()) {
+            for (const auto& name: s.getNames()) {
               impliedByVector.add(ImpliedBy{
                 .field = field,
                 .other = schema.getFieldByName(name),
