@@ -6,7 +6,7 @@
 // when neither the read loop delivers nor the writer flushes for the
 // duration; delivered data resets it; setTimeout(0) clears it.
 
-import { strictEqual } from 'node:assert';
+import { ok, strictEqual } from 'node:assert';
 import { echo, ticker, once, readAtLeast } from 'servers';
 
 // An idle socket times out; the socket stays open and usable.
@@ -49,17 +49,33 @@ export const zeroClearsTimeout = {
   },
 };
 
-// Data arriving from the peer keeps resetting the timer.
+// Data arriving from the peer keeps re-arming the timer: a 'timeout' can
+// only follow a stretch of at least the timeout without a delivery. The
+// peer ticks every 20 ms, so normally none fires within the 250 ms; a
+// machine stalled for 80 ms mid-test does make one fire (the expired timer
+// runs before the reads it delayed), and that one is correct — the test
+// asserts the gap rather than failing on the stall.
 export const incomingDataResetsTimeout = {
   async test(ctrl, env) {
+    const TIMEOUT = 80;
     const socket = ticker(env);
     await once(socket, 'connect');
-    let timeouts = 0;
-    socket.on('timeout', () => timeouts++);
-    socket.setTimeout(80);
+    let ticks = 0;
+    let lastDelivery = Date.now();
+    socket.on('data', () => {
+      ticks++;
+      lastDelivery = Date.now();
+    });
+    const gaps = [];
+    socket.on('timeout', () => gaps.push(Date.now() - lastDelivery));
+    socket.setTimeout(TIMEOUT);
     socket.resume();
     await scheduler.wait(250);
-    strictEqual(timeouts, 0);
+    ok(ticks >= 2, `only ${ticks} tick(s) arrived`);
+    for (const gap of gaps) {
+      // Integer-millisecond clock reads can shave 1 ms off the gap.
+      ok(gap >= TIMEOUT - 1, `'timeout' fired ${gap} ms after a delivery`);
+    }
     socket.end();
     await once(socket, 'close');
   },

@@ -160,4 +160,30 @@ export {
   pipelineWebSourceErrorUnderNodeBackpressure,
 } from 'pipeline-web';
 
+export {
+  interopHooksPresence,
+  finishedObservesReadableClose,
+  finishedObservesReadableError,
+  finishedObservesWritable,
+  finishedOnSettledStream,
+  finishedWithSignal,
+  promisesFinishedWebStreams,
+  finishedObservesTeedSourceClose,
+  finishedObservesTeedSourceClosedBeforeTee,
+  finishedObservesTeedSourceCancel,
+  finishedObservesTeedSourceError,
+  addAbortSignalErrorsReadable,
+  addAbortSignalErrorsWritable,
+  addAbortSignalAlreadyAborted,
+  addAbortSignalOnTeeBranchSparesSibling,
+  addAbortSignalOnTeedSourceErrorsBranches,
+  addAbortSignalOnTeeBranchThenSiblingCancel,
+  addAbortSignalOnTeedAwayBranchIsInert,
+  addAbortSignalOnTeedAwayByteBranchIsInert,
+  addAbortSignalOnTeeBranchSettlesWithSourceCleanup,
+  addAbortSignalOnByteTeeBranchSparesSibling,
+  addAbortSignalOnResponseBody,
+  finishedOnTeedAwayShellStaysPending,
+} from 'finished-and-abort';
+
 export { duplexFromWebStreamHalves } from 'duplex-from';

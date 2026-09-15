@@ -2,8 +2,8 @@
 
 An informal specification of the `node:stream` web-interop surface —
 `Readable.toWeb/fromWeb`, `Writable.toWeb/fromWeb`, `Duplex.toWeb/fromWeb`,
-`Duplex.from`, `Readable.from` over a web stream, `pipeline`,
-`node:stream/web`, `node:stream/consumers` —
+`Duplex.from`, `Readable.from` over a web stream, `pipeline`, `finished`,
+`addAbortSignal`, `node:stream/web`, `node:stream/consumers` —
 derived from and kept in lockstep with the test suite in this directory.
 **The tests are the normative artifact**; this document maps behaviors to
 the tests that assert them. Every test runs against the C++ streams
@@ -16,7 +16,8 @@ The implementation under test is `src/node/internal/streams_readable.js`
 `streams_writable.js` (`newWritableStreamFromStreamWritable`,
 `newStreamWritableFromWritableStream`), `streams_duplex.js`
 (`newReadableWritablePairFromDuplex`, `newStreamDuplexFromReadableWritablePair`,
-`duplexify`), `streams_pipeline.js`, and `src/node/stream/{web,consumers}.js`.
+`duplexify`), `streams_pipeline.js`, `streams_end_of_stream.ts`,
+`streams_add_abort_signal.ts`, and `src/node/stream/{web,consumers}.js`.
 
 ## Core semantics
 
@@ -158,6 +159,32 @@ The implementation under test is `src/node/internal/streams_readable.js`
   source locked, as Node does). A stage that cancels its reader on abort
   lets the pipeline settle with the failure and releases the source.
 
+### finished / addAbortSignal
+
+- `finished()` and `addAbortSignal()` need the Node.js interop hooks (see
+  ledger #5). `addAbortSignal()` errors byte streams too — a `Response`
+  body included — where Node's readable hook is deliberately a no-op for
+  byte stream controllers (Node's `Response` bodies are byte streams, so
+  it is inert on them there). On one branch of a tee it errors that branch
+  alone: the sibling keeps its buffered chunks and its reads, and the
+  source is cancelled only once every consumer is gone, with each one's
+  reason; on a branch that has itself been teed it does nothing (the
+  queued tee model's inert shell, see
+  `src/per_isolate/webstreams/AGENTS.md`); a branch's `cancel()` promise
+  settles with the source's cleanup in either order.
+- `finished()` on a teed source follows the source's own events, not the
+  branches' reading (the queued tee model): it calls back without error
+  when the source closes — at `close()`, before any branch has read, or at
+  the `tee()` if close was requested first — or when both branches'
+  cancels have cancelled the source, and with the error when the source
+  errors. In Node the source closes once the tee has drained it. Once it
+  has closed, the node layer treats the source as finished: an
+  `addAbortSignal()` on it stops listening, so a later abort leaves the
+  branches to drain what is buffered (the controller's own `error()` still
+  errors them). `finished()` on a branch that has itself been teed, and on
+  the source of a native-backed tee (a `Response` body), never settles —
+  open items, pinned in `finishedOnTeedAwayShellStaysPending`.
+
 ## Compatibility flags
 
 `stream-cpp.wd-test` pins `streams_enable_constructors` (the toWeb adapters
@@ -182,6 +209,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | 2 | Write to a pre-closed `Writable.toWeb` stream | `TypeError` `This WritableStream has been closed.` | `TypeError` `Cannot write to a stream that is closing or closed` | `toWebDuckTypedInputYieldsClosedStream` |
 | 3 | BYOB reader on a `toWeb` readable | `This ReadableStream does not support BYOB reads.` | `BYOB reader can only be used on a stream with a byte source` | `toWebReadableIsNotByteStream` |
 | 4 | `FixedLengthStream` enforcement through `Writable.fromWeb` (identity ledger #11) | readable errors with `TypeError`; the node write and end succeed | write/close reject `RangeError`; the node Writable errors; readable errors with the same `RangeError` | `fromWebFixedLengthOverwrite`, `fromWebFixedLengthUnderwrite` |
+| 5 | Node.js interop hooks (`Symbol.for('nodejs.webstream.isClosedPromise')`, `…controllerErrorFunction`) | absent; `finished()`, `promises.finished()` and `addAbortSignal()` throw `ERR_WEB_STREAM_INTEROP_UNSUPPORTED` up front | non-enumerable prototype getter and method; the APIs work as in Node, including on native-backed streams (a `Response` body), with one deliberate difference from Node: `addAbortSignal()` errors byte streams too, where Node's readable hook is a no-op | `finished-and-abort.js` |
 
 ## Assertion catalogue
 
@@ -198,6 +226,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `bodies.js` | Response/Request bodies through `Readable.toWeb` (incl. a megabyte); `Readable.fromWeb` over a Response body and a `TextDecoderStream` chain; `Writable.fromWeb` over `IdentityTransformStream` and `FixedLengthStream` (ledger #4); pipeThrough chains in both directions |
 | `consumers.js` | `text/json/buffer/arrayBuffer/blob` over web streams; multi-chunk and string decoding; lock release; error propagation; node Readables and async generators |
 | `readable-from.js` | `Readable.from(webStream)`: chunk types by objectMode, destroy → cancel + lock release, error propagation |
+| `finished-and-abort.js` | ledger #5: hook presence per implementation; `finished()` on readable close/error, writable close/error, settled streams, with a signal; `promises.finished`; `finished()` on a teed source (default and byte): settled by `close()` before any branch reads, by a `tee()` after `close()`, by both branches cancelling, by the source's error (also after `close()`, which errors the undrained branches); never settled on a teed-away branch or a native tee's source; `addAbortSignal` on readable/writable, already-aborted, a Response body (a byte stream, errored where Node is inert), the source of a tee (errors every branch; inert once the source has closed); on tee branches (default and byte): the sibling spared, the source cancelled once the sibling cancels too, a teed-away branch inert, a branch's `cancel()` settling with the source's cleanup |
 | `pipeline-web.js` | web source/destination/transform stages, generator stages (incl. a web source reaching a function stage as the stream itself, and a signal-honoring stage releasing it on a late node-sink failure), `TransformStream` head; sink/source/node-sink failures (incl. a node sink failing while the web source is idle, a web sink erroring or rejecting a write while the source is idle, and a web source erroring while a stuck node sink holds the pump); a detached-view chunk failing the pipeline (`TypeError`, source cancelled without a reason); promise-valued chunks by identity; a locked web destination (callback and promise forms, node and web sources); a `ReadableStream` in a destination slot (`ERR_INVALID_ARG_TYPE` thrown synchronously, callback and promise forms, middle slot too); `stream/promises` trailing web destination, `end: false`, signal abort of a node-headed and of an idle all-web pipeline, and during a pending web read |
 | `which-impl.js` | implementation detection |
 

@@ -141,6 +141,11 @@ network service allowing `private`.
   re-arms it without registering listeners; it fires 'timeout' without
   closing the socket; `setTimeout(0)` clears it, and activity afterwards
   arms nothing.
+- The re-arming is asserted as a gap, not as a count: a 'timeout' may only
+  follow at least `ms` without a delivery. A machine stalled for that long
+  mid-test makes one fire legitimately (an expired timer runs before the
+  reads the stall held up — as in Node, whose timers phase precedes poll),
+  so a fixed-wait "no timeout" assertion would be flaky under load.
 
 ### Re-entrancy
 
@@ -196,7 +201,7 @@ policy to the Duplex; see "The handle".)
 | `half-close.js` | enforcer registration and default; peer EOF ending both sides; a write from inside 'end' completing and counted (`allowHalfOpen` false); `EPIPE` after EOF; half-open writes after EOF; explicit end with half-open; EOF surfacing without a consumer |
 | `end-and-destroy.js` | end callback forms; `bufferSize`; destroy with/without error (events, `hadError`); writes after destroy, without handle, with invalid chunks; inert closed socket; all queued writes flushed before end; peer RST mid-read (codeless 'error', 'close' true, no 'end', neither side ended) and the writes after it (`ERR_STREAM_DESTROYED` callbacks, one 'error') |
 | `backpressure.js` | pause/resume against a ticking peer; paused-mode `read()` restarting the loop; `write()` false and 'drain'; cork cycles |
-| `timeouts.js` | idle timeout without closing; data resets; `setTimeout(0)` clears, also across later traffic |
+| `timeouts.js` | idle timeout without closing; data re-arms (a 'timeout' only ever ≥ the timeout after the last delivery, ticks kept arriving); `setTimeout(0)` clears, also across later traffic |
 | `data-volumes.js` | 2000 trickled bytes (order, pattern, many reads, `bytesRead`); split UTF-8 reassembled by `setEncoding('utf8')` without replacement characters, and concatenating cleanly without it; 20,000 one-byte writes (`bytesWritten`, callbacks, sink count); a 4 MiB echo round trip paused after every 256 KiB (pattern exact, pauses honored) |
 | `onread.js` | fixed buffer across several fills (and its detachment); a fixed view into a larger allocation keeping its range; generated buffers — fresh, one shared (every fill, caller's capacity, detached), a rotating pool (every fill, previous fill intact until its buffer is reused, then detached); callback `false` stopping and `resume()` restarting; a throwing generator (its error), a throwing callback and a throwing 'data' listener (their error, one delivery), garbage from the generator (`ERR_INVALID_ARG_TYPE`), an empty view and a callback-detached fixed buffer (`ENOBUFS`), a SAB view (`TypeError`) — each destroying the socket; a resizable buffer transferred resizable, its shrinking → `ENOBUFS` |
 | `reentrancy.js` | write and destroy from the `onread` callback; pause/resume storm inside `'data'` (one loop, no loss); `end()` from inside `'data'` and from a write callback flushing the queue |

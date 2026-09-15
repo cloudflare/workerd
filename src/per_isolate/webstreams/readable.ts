@@ -68,6 +68,7 @@ const {
   SafeWeakMap,
   Symbol,
   SymbolAsyncIterator,
+  SymbolFor,
   SymbolIterator,
   SymbolToStringTag,
   TextDecoder,
@@ -157,41 +158,18 @@ function normalizeExpectedLength(value: unknown): bigint | undefined {
 
 // --- Composite tee-cancel reasons ------------------------------------------
 // DELIBERATE SPEC DIVERGENCE (recorded in the design doc's divergence
-// table): when all tee branches have cancelled, the source's cancel
-// algorithm receives a single flattened AggregateError carrying every
-// branch's reason, rather than the spec's two-element array. Re-tee
-// composites are flattened into one level: the WeakMap below brands OUR
-// composite errors (unforgeably) and carries their flat reason list — a
-// user-supplied AggregateError used as a cancel reason is never unpacked.
-const teeCompositeReasons = new SafeWeakMap();
-
-function appendCancelReason(flat: unknown[], reason: unknown): void {
-  // WeakMap.get on a non-object key returns undefined (no throw).
-  const nested = teeCompositeReasons.get(reason) as unknown[] | undefined;
-  if (nested !== undefined) {
-    for (let i = 0; i < nested.length; i++) {
-      ArrayPrototypePush(flat, nested[i]);
-    }
-  } else {
-    ArrayPrototypePush(flat, reason);
-  }
-}
-
-function makeCompositeCancelReason(
-  reason1: unknown,
-  reason2: unknown
-): AggregateError {
-  const flat: unknown[] = [];
-  appendCancelReason(flat, reason1);
-  appendCancelReason(flat, reason2);
+// table): once the last consumer of a teed queue has left, the source's
+// cancel algorithm receives a single AggregateError carrying the reason of
+// every consumer that left (in the order they left), rather than the spec's
+// two-element array. Tees of tee branches add consumers to the same queue,
+// so the list is flat by construction.
+function makeCompositeCancelReason(reasons: unknown[]): AggregateError {
   // SafeArrayIterator: AggregateError's iterable conversion must not run
   // through the patchable %ArrayIteratorPrototype%.
-  const error = new AggregateError(
-    new SafeArrayIterator(flat),
+  return new AggregateError(
+    new SafeArrayIterator(reasons),
     'All readable stream tee branches were canceled'
   ) as AggregateError;
-  teeCompositeReasons.set(error, flat);
-  return error;
 }
 
 const kPrivateSymbol = Symbol('private');
@@ -279,6 +257,24 @@ let isByteStreamController: (value: unknown) => boolean;
 // proxies up front), matching the #-brand's no-tunneling behavior.
 const kReadableStreamBrand: symbol = utils.getApiSymbol('kReadableStreamBrand');
 
+// The Node.js stream-interop hooks, keyed by the well-known symbols Node's
+// own web streams carry. node:stream's finished()/eos() observes a web
+// stream's completion through `stream[kIsClosedPromise].promise` (which
+// settles with the stream: fulfilled on close, rejected with the stored
+// error), and addAbortSignal() errors a stream from outside through
+// `stream[kControllerErrorFunction](reason)`. Both are prototype members
+// (a getter and a method) so instances pay nothing until asked. The
+// symbols are deliberately the Symbol.for() ones rather than API-registry
+// symbols: userland ports of Node's streams look for exactly these.
+const kIsClosedPromise: symbol = SymbolFor('nodejs.webstream.isClosedPromise');
+const kControllerErrorFunction: symbol = SymbolFor(
+  'nodejs.webstream.controllerErrorFunction'
+);
+
+// Settles the stream's closed-promise hook (if one was ever requested) to
+// match a state transition; assigned in ReadableStream's static block.
+let settleReadableStreamClosedPromise: <R>(stream: ReadableStream<R>) => void;
+
 // BACKEND-DISPATCH: the byte-CAPABLE gate (one of the five sanctioned
 // dispatch points). True for any controller whose backend can satisfy
 // BYOB reads: the queued byte controller, or ANY native controller —
@@ -349,6 +345,30 @@ let controllerOnReaderRelease: (
     | ReadableByteStreamControllerType
     | NativeReadableStreamControllerType
 ) => void;
+// A consumer of the controller's queue leaves it — cancelled, or errored
+// through the Node.js interop hook. Only the last one to leave cancels the
+// underlying source, with the reasons of every consumer that left (see
+// makeCompositeCancelReason); the others receive a promise that settles
+// with that cancel, or with undefined once the source has closed or errored
+// on its own (spec ReadableStreamTee's shared cancel promise). A native
+// controller has one consumer, so the leaving is its cancel.
+let controllerConsumerLeaving: (
+  controller:
+    | ReadableStreamDefaultControllerType
+    | ReadableByteStreamControllerType
+    | NativeReadableStreamControllerType,
+  reason: unknown,
+  isLastConsumer: boolean
+) => Promise<void>;
+// The stream a QUEUED controller was created for — the source's own stream,
+// as opposed to the tee branches sharing the controller. undefined for a
+// native controller.
+let controllerStream: (
+  controller:
+    | ReadableStreamDefaultControllerType
+    | ReadableByteStreamControllerType
+    | NativeReadableStreamControllerType
+) => object | undefined;
 let getReaderStream: <R>(reader: object) => ReadableStream<R> | undefined;
 
 // BACKEND-DISPATCH point #4: the shared extractor function installed
@@ -407,18 +427,6 @@ let setReadableStreamReader: <R>(
 let getGenericReaderClosedPromise: (reader: object) => Promise<void>;
 let resolveGenericReaderPromise: (reader: object) => void;
 let rejectGenericReaderPromise: (reader: object, reason?: unknown) => void;
-// Tee-branch lifecycle: fire #onBranchSettled if set. Called from
-// readableStreamClose/readableStreamError so the shared cancel-promise
-// settles when the source closes/errors and at least one sibling was
-// already cancelled. Assigned in ReadableStream's static block.
-let notifyBranchSettled: <R>(stream: ReadableStream<R>) => void;
-// Set the #onBranchSettled callback for tee branches. Assigned in
-// ReadableStream's static block.
-let setOnBranchSettled: <R>(
-  stream: ReadableStream<R>,
-  cb: (() => void) | undefined
-) => void;
-
 interface ReadableStreamIteratorState<R> {
   done: boolean;
   current?: Promise<IteratorResult<R>> | undefined;
@@ -1129,7 +1137,7 @@ function readableStreamClose<R>(stream: ReadableStream<R>): void {
   if (reader !== undefined) {
     resolveGenericReaderPromise(reader);
   }
-  notifyBranchSettled(stream);
+  settleReadableStreamClosedPromise(stream);
 }
 
 function readableStreamError<R>(stream: ReadableStream<R>, e: unknown): void {
@@ -1140,7 +1148,7 @@ function readableStreamError<R>(stream: ReadableStream<R>, e: unknown): void {
   if (reader !== undefined) {
     rejectGenericReaderPromise(reader, e);
   }
-  notifyBranchSettled(stream);
+  settleReadableStreamClosedPromise(stream);
 }
 
 // Metadata snapshot of an ArrayBufferView, captured at a trust boundary.
@@ -1242,6 +1250,20 @@ class ReadableStreamDefaultController<
   #pullAgain: boolean = false;
   #closeRequested: boolean = false;
   #cancelPromise: Promise<void> | undefined;
+  // The source has reached its end: errored, cancelled, or closed with
+  // every consumer drained (the spec's "stream is no longer readable",
+  // which gates error()). Tracked here rather than read off #stream: once
+  // that stream is teed away its state follows the source's own events
+  // (see #maybeCloseStream), while what the branches have yet to drain
+  // after a close is this controller's business.
+  #done: boolean = false;
+  // Consumers that left the queue (see controllerConsumerLeaving) while
+  // others remained: their reasons, for the composite the last one to leave
+  // hands the source, and the promise their cancel() returned, settled with
+  // the source's cancel or with undefined once the source has closed or
+  // errored on its own.
+  #departedReasons: unknown[] = [];
+  #pendingCancel: PromiseWithResolversType<void> | undefined;
 
   static {
     assertIsReadableStreamDefaultController = function <R>(
@@ -1291,6 +1313,23 @@ class ReadableStreamDefaultController<
       if (#queue in controller) {
         (controller as ReadableStreamDefaultController).#maybeCloseStream();
       }
+    };
+
+    controllerConsumerLeaving = (controller, reason, isLastConsumer) => {
+      if (#queue in controller) {
+        return (controller as ReadableStreamDefaultController).#consumerLeaving(
+          reason,
+          isLastConsumer
+        );
+      }
+      return PromiseResolve() as Promise<void>;
+    };
+
+    controllerStream = (controller) => {
+      if (#queue in controller) {
+        return (controller as ReadableStreamDefaultController).#stream;
+      }
+      return undefined;
     };
 
     // Default controllers have no byobRequest to invalidate; the byte
@@ -1474,7 +1513,8 @@ class ReadableStreamDefaultController<
 
   error(reason: unknown = undefined): void {
     assertIsReadableStreamDefaultController(this);
-    if (getReadableStreamGetState(this.#stream) !== 'readable') return;
+    if (this.#done) return;
+    this.#done = true;
     // Propagate to every live consumer stream (tee branches) via the
     // cursors' weak owner refs — no strong retention of branches. The
     // primary stream is handled explicitly: a tee'd-away parent has no
@@ -1486,6 +1526,9 @@ class ReadableStreamDefaultController<
       readableStreamError(owners[i] as ReadableStream<R>, reason);
     }
     readableStreamError(this.#stream, reason);
+    // The source settled on its own: consumers that had left are owed
+    // undefined (spec ReadableStreamTee step 14.c.ii).
+    this.#pendingCancel?.resolve();
   }
 
   #canCloseOrEnqueue(): boolean {
@@ -1520,19 +1563,50 @@ class ReadableStreamDefaultController<
         anyOpen = true;
       }
     }
-    // Also check the parent stream itself (pre-tee path: only one consumer).
+    // The source's own stream. With a cursor it drains to the sentinel like
+    // any consumer; without one (teed away, or detached) it consumes
+    // nothing, so there is nothing to drain and it closes now. The source's
+    // own events close it — close requested here, cancelled in
+    // #cancelSteps, errored in error() — never the branches' progress (the
+    // queued tee model, AGENTS.md). Its closing does not end the source:
+    // that is #done, below, once every consumer has drained.
     const parentCursor = getReadableStreamConsumer(this.#stream) as
       QueueCursorType<R, R> | undefined;
-    if (parentCursor !== undefined) {
-      if (this.#queue.getEntry(parentCursor.position) === CLOSE_SENTINEL) {
-        readableStreamClose(this.#stream);
-      } else {
-        anyOpen = true;
-      }
+    if (
+      parentCursor === undefined ||
+      this.#queue.getEntry(parentCursor.position) === CLOSE_SENTINEL
+    ) {
+      readableStreamClose(this.#stream);
+    } else {
+      anyOpen = true;
     }
     if (!anyOpen) {
+      this.#done = true;
       this.#clearAlgorithms();
+      // Every remaining consumer has closed: the source will never be
+      // cancelled, and consumers that had left are owed undefined (spec
+      // ReadableStreamTee step 14.b.v).
+      this.#pendingCancel?.resolve();
     }
+  }
+
+  // A consumer leaves the queue; see controllerConsumerLeaving. Decided
+  // BEFORE the cursor's removal (QueueCursor.cancelStream): removing it
+  // first would make the leaving consumer look like it was not the last
+  // (parking the cancel in #pendingCancel with nobody left to settle it)
+  // and fire the all-cursors-gone hook, which clears the cancel algorithm
+  // before #cancelSteps could run it.
+  #consumerLeaving(reason: unknown, isLastConsumer: boolean): Promise<void> {
+    const reasons = this.#departedReasons;
+    ArrayPrototypePush(reasons, reason);
+    if (isLastConsumer) {
+      return this.#cancelSteps(
+        reasons.length > 1 ? makeCompositeCancelReason(reasons) : reason
+      );
+    }
+    this.#pendingCancel ??=
+      PromiseWithResolvers() as PromiseWithResolversType<void>;
+    return this.#pendingCancel.promise;
   }
 
   #shouldCallPull(): boolean {
@@ -1569,17 +1643,28 @@ class ReadableStreamDefaultController<
     );
   }
 
-  // Cancel the underlying source (spec CancelSteps). Idempotent and cached:
-  // this can be reached from both an explicit stream/branch cancel and the
-  // all-cursors-gone hook.
+  // Cancel the underlying source (spec CancelSteps). Idempotent and cached.
+  // Reached through #consumerLeaving once the last consumer has left the
+  // queue — an explicit stream/branch cancel, or a branch errored through
+  // the Node.js interop hook. The all-cursors-gone GC hook never comes
+  // here: it only clears the algorithms (see the constructor).
   #cancelSteps(reason: unknown): Promise<void> {
     if (this.#cancelPromise !== undefined) return this.#cancelPromise;
+    this.#done = true;
+    // The source's own stream, if teed away, closes with this cancel, as
+    // readableStreamCancel closes an un-teed stream before its cancel
+    // steps; being locked, nothing else can reach it.
+    if (getReadableStreamConsumer(this.#stream) === undefined) {
+      readableStreamClose(this.#stream);
+    }
     const cancelAlgorithm = this.#cancelAlgorithm;
     this.#clearAlgorithms();
     this.#cancelPromise =
       cancelAlgorithm === undefined
         ? (PromiseResolve() as Promise<void>)
         : cancelAlgorithm(reason);
+    // Consumers that left earlier were promised the source's cancel.
+    this.#pendingCancel?.resolve(this.#cancelPromise);
     return this.#cancelPromise;
   }
 
@@ -1717,6 +1802,10 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   #pullAgain: boolean = false;
   #closeRequested: boolean = false;
   #cancelPromise: Promise<void> | undefined;
+  // As the default controller's: see there.
+  #done: boolean = false;
+  #departedReasons: unknown[] = [];
+  #pendingCancel: PromiseWithResolversType<void> | undefined;
   #byobRequest: ReadableStreamBYOBRequest | null = null;
 
   static {
@@ -1760,6 +1849,22 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       } else {
         prevMaybeCloseStream(controller);
       }
+    };
+
+    const prevConsumerLeaving = controllerConsumerLeaving;
+    controllerConsumerLeaving = (controller, reason, isLastConsumer) => {
+      if (#queue in controller) {
+        return controller.#consumerLeaving(reason, isLastConsumer);
+      }
+      return prevConsumerLeaving(controller, reason, isLastConsumer);
+    };
+
+    const prevControllerStream = controllerStream;
+    controllerStream = (controller) => {
+      if (#queue in controller) {
+        return controller.#stream;
+      }
+      return prevControllerStream(controller);
     };
 
     byteControllerRespond = (controller, bytesWritten) => {
@@ -2035,7 +2140,8 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
   error(reason: unknown = undefined): void {
     assertIsReadableByteStreamController(this);
-    if (getReadableStreamGetState(this.#stream) !== 'readable') return;
+    if (this.#done) return;
+    this.#done = true;
     this.#invalidateByobRequest();
     // Branch propagation — see the default controller's error() for why.
     const owners = this.#queue.getLiveOwners();
@@ -2045,6 +2151,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       readableStreamError(owners[i] as ReadableStream<Uint8Array>, reason);
     }
     readableStreamError(this.#stream, reason);
+    this.#pendingCancel?.resolve();
   }
 
   // byobRequest.respond(bytesWritten) — the zero-copy path.
@@ -2219,16 +2326,33 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     }
     const parentCursor = getReadableStreamConsumer(this.#stream) as
       QueueCursorType<ByteQueueEntry, Uint8Array> | undefined;
-    if (parentCursor !== undefined) {
-      if (this.#queue.getEntry(parentCursor.position) === CLOSE_SENTINEL) {
-        readableStreamClose(this.#stream);
-      } else {
-        anyOpen = true;
-      }
+    if (
+      parentCursor === undefined ||
+      this.#queue.getEntry(parentCursor.position) === CLOSE_SENTINEL
+    ) {
+      readableStreamClose(this.#stream);
+    } else {
+      anyOpen = true;
     }
     if (!anyOpen) {
+      this.#done = true;
       this.#clearAlgorithms();
+      this.#pendingCancel?.resolve();
     }
+  }
+
+  // As the default controller's: see there.
+  #consumerLeaving(reason: unknown, isLastConsumer: boolean): Promise<void> {
+    const reasons = this.#departedReasons;
+    ArrayPrototypePush(reasons, reason);
+    if (isLastConsumer) {
+      return this.#cancelSteps(
+        reasons.length > 1 ? makeCompositeCancelReason(reasons) : reason
+      );
+    }
+    this.#pendingCancel ??=
+      PromiseWithResolvers() as PromiseWithResolversType<void>;
+    return this.#pendingCancel.promise;
   }
 
   #shouldCallPull(): boolean {
@@ -2264,6 +2388,10 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
   #cancelSteps(reason: unknown): Promise<void> {
     if (this.#cancelPromise !== undefined) return this.#cancelPromise;
+    this.#done = true;
+    if (getReadableStreamConsumer(this.#stream) === undefined) {
+      readableStreamClose(this.#stream);
+    }
     this.#invalidateByobRequest();
     const cancelAlgorithm = this.#cancelAlgorithm;
     this.#clearAlgorithms();
@@ -2271,6 +2399,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       cancelAlgorithm === undefined
         ? (PromiseResolve() as Promise<void>)
         : cancelAlgorithm(reason);
+    this.#pendingCancel?.resolve(this.#cancelPromise);
     return this.#cancelPromise;
   }
 
@@ -2949,21 +3078,20 @@ class ReadableStream<R> {
   // native-stream-integration.md §10). A QueueCursor/ByteStreamCursor for
   // queued (JS-backed) streams; a NativePullConduit for native streams.
   // The stream owns it (readers only borrow it while locked); created
-  // during controller setup, removed on cancel/tee.
+  // during controller setup, removed on cancel/tee. A queued stream that
+  // has been teed (the source's own stream, or a branch teed again) keeps
+  // none: its former consumer's place in the queue went to the two
+  // branches, and it is left a permanently locked, inert shell (see
+  // readableStreamTee).
   #consumer?: StreamConsumerType<R> | undefined;
-  // Tee branches get a composite-cancel hook (spec ReadableStreamTee): the
-  // source is cancelled with [reason1, reason2] only when ALL branches have
-  // cancelled, and every branch's cancel() promise settles together at that
-  // point. undefined for non-branch streams.
-  #onCancel?: ((reason: unknown) => Promise<void>) | undefined;
-  // Tee-branch lifecycle: called when this branch's stream closes or errors
-  // so the shared cancel-promise can settle if any sibling was already
-  // cancelled. Mirrors the spec's "resolve cancelPromise" in the done/error
-  // paths of ReadableStreamDefaultTee's pull loop.
-  #onBranchSettled?: (() => void) | undefined;
   #disturbed: boolean = false;
   #state: 'readable' | 'closed' | 'errored' = 'readable';
   #storedError?: unknown;
+  // The Node.js interop closed-promise (see kIsClosedPromise), created on
+  // first request and settled by readableStreamClose/readableStreamError.
+  // Terminal-state shells (tee and detach copies) never transition, so a
+  // request against one is settled immediately from its state.
+  #closedPromise?: PromiseWithResolversType<void> | undefined;
   // The pending-closure gate (JsReadableStream::setPendingClosure): set by
   // the stream's owning object (a Socket) the moment its closure begins, so
   // that new reads, pipes, and tees fail fast with a descriptive error
@@ -3052,33 +3180,24 @@ class ReadableStream<R> {
       // resolves the attached reader's closedPromise.
       readableStreamClose(stream);
       const consumer = stream.#consumer;
-      const onCancel = stream.#onCancel;
       const controller = stream.#controller;
       let cancelPromise: Promise<void> = PromiseResolve() as Promise<void>;
-      // BACKEND-BLIND: the STREAM layer owns the source-cancel POLICY
-      // (tee composite hook vs direct controller cancel) and hands it to
-      // the consumer, which owns the teardown MECHANICS (resolve reads as
-      // done, ordering vs removal, last-consumer determination). See
+      // BACKEND-BLIND: the STREAM layer owns the source-cancel POLICY (the
+      // controller's consumer-leaving rule: only the last consumer of a
+      // teed queue cancels the source, with every departed consumer's
+      // reason; the others wait for it) and hands it to the consumer, which
+      // owns the teardown MECHANICS (resolve reads as done, ordering vs
+      // removal, last-consumer determination). See
       // StreamConsumer.cancelStream in queue.ts.
       const decideSourceCancel = (isLastConsumer: boolean): Promise<void> => {
-        if (onCancel !== undefined) {
-          // Tee branch: the composite-cancel hook collects this branch's
-          // vote+reason; the source is cancelled only once every sibling
-          // has cancelled (spec ReadableStreamTee). The returned promise
-          // stays PENDING until then.
-          return onCancel(reason);
+        if (controller === undefined) {
+          return PromiseResolve() as Promise<void>;
         }
-        if (isLastConsumer && controller !== undefined) {
-          // Only the LAST consumer's cancel reaches the underlying source.
-          return controllerCancelSteps(controller, reason);
-        }
-        return PromiseResolve() as Promise<void>;
+        return controllerConsumerLeaving(controller, reason, isLastConsumer);
       };
       if (consumer !== undefined) {
         cancelPromise = consumer.cancelStream(reason, decideSourceCancel);
         stream.#consumer = undefined;
-      } else if (onCancel !== undefined) {
-        cancelPromise = onCancel(reason);
       }
       // Per spec the returned promise fulfills with undefined.
       return PromisePrototypeThen(
@@ -3362,88 +3481,17 @@ class ReadableStream<R> {
             );
         queue.removeCursor(cursor);
         stream.#consumer = undefined;
+        // With close already requested, the source's own stream — now
+        // consuming nothing — closes here rather than when a branch next
+        // reads (see #maybeCloseStream).
+        if (controller !== undefined) controllerMaybeCloseStream(controller);
       }
 
-      // Composite cancel (spec ReadableStreamTee): each branch's cancel()
-      // records its reason and returns a SHARED promise that settles only
-      // once both branches have cancelled — at which point the source is
-      // cancelled with [reason1, reason2]. Re-tees relay through the
-      // parent branch's own hook so nesting composes.
-      const parentOnCancel = stream.#onCancel;
-      let canceled1 = false;
-      let canceled2 = false;
-      let canceling1 = false;
-      let canceling2 = false;
-      let reason1: unknown;
-      let reason2: unknown;
-      const cancelHolder =
-        PromiseWithResolvers() as PromiseWithResolversType<void>;
-      const performSourceCancel = (composite: unknown): Promise<void> => {
-        if (parentOnCancel !== undefined) {
-          // Re-tee: relay through the parent branch's hook. The composite
-          // is branded, so the parent-level composition FLATTENS it — the
-          // final AggregateError carries every leaf reason at one level.
-          return parentOnCancel(composite);
-        }
-        if (controller === undefined) {
-          return PromiseResolve() as Promise<void>;
-        }
-        return controllerCancelSteps(controller, composite);
-      };
-      const makeBranchCancel = (which: 1 | 2) => {
-        return (reason: unknown): Promise<void> => {
-          if (which === 1) {
-            canceling1 = true;
-            canceled1 = true;
-            reason1 = reason;
-          } else {
-            canceling2 = true;
-            canceled2 = true;
-            reason2 = reason;
-          }
-          if (canceled1 && canceled2) {
-            // Resolving with the source-cancel promise adopts it: both
-            // branches' pending cancel() promises settle with its outcome.
-            cancelHolder.resolve(
-              performSourceCancel(makeCompositeCancelReason(reason1, reason2))
-            );
-          }
-          // Clear the canceling guard after the synchronous cancel path
-          // completes. The guard prevents onBranchSettled from resolving
-          // cancelHolder during the cancel itself (readableStreamCancel
-          // calls readableStreamClose before onCancel). After this point,
-          // if the sibling branch closes/errors from the source, the
-          // cancelHolder should resolve (spec step 14.b.v / 14.c.ii).
-          if (which === 1) {
-            canceling1 = false;
-          } else {
-            canceling2 = false;
-          }
-          return cancelHolder.promise;
-        };
-      };
-      branch1.#onCancel = makeBranchCancel(1);
-      branch2.#onCancel = makeBranchCancel(2);
-
-      // Spec ReadableStreamDefaultTee: when the underlying reader signals
-      // done (or error), the cancel promise is resolved if either branch
-      // was already cancelled (steps 14.b.v / 14.c.ii). In our shared-
-      // queue model the equivalent is: a branch stream transitions to
-      // closed/errored via readableStreamClose/readableStreamError while
-      // the other branch was already cancelled.
-      //
-      // Guard: only resolve when the SOURCE closes/errors a branch whose
-      // sibling was already cancelled. Do NOT resolve when a branch is
-      // being cancelled itself — readableStreamCancel calls
-      // readableStreamClose before onCancel runs, and onCancel handles
-      // cancelHolder via performSourceCancel.
-      const onBranchSettled = (): void => {
-        if ((canceled1 && !canceling1) || (canceled2 && !canceling2)) {
-          cancelHolder.resolve();
-        }
-      };
-      setOnBranchSettled(branch1, onBranchSettled);
-      setOnBranchSettled(branch2, onBranchSettled);
+      // Cancellation needs no wiring of its own: the branches are now two
+      // consumers of the shared queue like any others, and the controller's
+      // consumer-leaving rule (controllerConsumerLeaving) cancels the source
+      // once the last of them has left — tees of tee branches simply add
+      // consumers to the same queue.
 
       // Per spec, tee() locks the original permanently. Acquire a real
       // reader (never exposed, so it can never be released) — the original
@@ -3489,8 +3537,6 @@ class ReadableStream<R> {
       const neutralize = (): void => {
         stream.#consumer = undefined;
         stream.#disturbed = true;
-        stream.#onCancel = undefined;
-        stream.#onBranchSettled = undefined;
         if (!isReadableStreamLocked(stream)) {
           acquireReadableStreamDefaultReader(stream);
         }
@@ -3530,12 +3576,6 @@ class ReadableStream<R> {
       const shell = new ReadableStream<R>(kPrivateSymbol as never);
       shell.#controller = controller;
       shell.#pendingClosure = stream.#pendingClosure;
-      // Tee-branch relationships (composite cancel, settle notification)
-      // move to the detached stream. The hooks close over the tee wiring's
-      // own state, not over the branch stream, so moving the functions is
-      // sufficient.
-      shell.#onCancel = stream.#onCancel;
-      shell.#onBranchSettled = stream.#onBranchSettled;
 
       // QUEUED INVARIANT: this branch is queued-backend territory -- the
       // consumer is necessarily a QueueCursor (position/byteOffset/queue
@@ -3568,6 +3608,9 @@ class ReadableStream<R> {
         queue.removeCursor(cursor);
       }
       neutralize();
+      // As in tee: with close already requested, the husk closes now if it
+      // is the source's own stream (see #maybeCloseStream).
+      if (controller !== undefined) controllerMaybeCloseStream(controller);
       return shell;
     };
 
@@ -3588,6 +3631,16 @@ class ReadableStream<R> {
       state: 'readable' | 'closed' | 'errored'
     ) => {
       stream.#state = state;
+    };
+
+    settleReadableStreamClosedPromise = <R>(stream: ReadableStream<R>) => {
+      const closed = stream.#closedPromise;
+      if (closed === undefined) return;
+      if (stream.#state === 'closed') {
+        closed.resolve();
+      } else if (stream.#state === 'errored') {
+        closed.reject(stream.#storedError);
+      }
     };
 
     setReadableStreamDisturbed = <R>(stream: ReadableStream<R>) => {
@@ -3627,18 +3680,6 @@ class ReadableStream<R> {
       stream.#consumer = consumer;
     };
 
-    notifyBranchSettled = <R>(stream: ReadableStream<R>) => {
-      const cb = stream.#onBranchSettled;
-      if (cb !== undefined) cb();
-    };
-
-    setOnBranchSettled = <R>(
-      stream: ReadableStream<R>,
-      cb: (() => void) | undefined
-    ) => {
-      stream.#onBranchSettled = cb;
-    };
-
     // BACKEND-DISPATCH: the native side of the chained-controller-helpers
     // dispatch point (whose canonical marker sits at the default
     // controller's static block). The queued controllers wrap the chain
@@ -3666,6 +3707,15 @@ class ReadableStream<R> {
         return nativeControllerCancelSteps(controller, reason);
       }
       return prevCancelSteps(controller, reason);
+    };
+
+    // A native conduit has a single consumer: its leaving is its cancel.
+    const prevConsumerLeaving = controllerConsumerLeaving;
+    controllerConsumerLeaving = (controller, reason, isLastConsumer) => {
+      if (isNativeController(controller)) {
+        return nativeControllerCancelSteps(controller, reason);
+      }
+      return prevConsumerLeaving(controller, reason, isLastConsumer);
     };
 
     const prevMaybeCloseStream = controllerMaybeCloseStream;
@@ -4122,6 +4172,71 @@ class ReadableStream<R> {
     preventCancel?: boolean;
   }): AsyncIterableIterator<R> {
     return this.values(options);
+  }
+
+  // Node.js interop (see kIsClosedPromise): an object whose promise settles
+  // with the stream — fulfilled on close, rejected with the stored error.
+  // Nothing may ever look at the rejection, so it is marked handled.
+  get [kIsClosedPromise](): { promise: Promise<void> } {
+    assertIsReadableStream(this);
+    let closed = this.#closedPromise;
+    if (closed === undefined) {
+      closed = PromiseWithResolvers() as PromiseWithResolversType<void>;
+      markPromiseHandled(closed.promise);
+      this.#closedPromise = closed;
+      settleReadableStreamClosedPromise(this);
+    }
+    return { promise: closed.promise };
+  }
+
+  // Node.js interop (see kControllerErrorFunction): errors a readable stream
+  // from outside, as its controller's error() does — pending reads reject
+  // and the state becomes errored.
+  //
+  // The source's own stream errors through its controller, which errors
+  // every consumer of the queue (the tee branches, if any); a native-backed
+  // stream also cancels its C++ source, which has lost its consumer. A
+  // queued tee branch shares that controller, so it errors alone instead:
+  // its pending reads reject and it leaves the queue as a cancelled branch
+  // would — the source is cancelled once no consumer remains, with the
+  // reason of every consumer that left (controllerConsumerLeaving). A
+  // branch that has itself been teed consumes nothing and stays what tee()
+  // left it: a permanently locked, inert shell (the queued tee model's
+  // deliberate divergence from the spec's per-branch controllers).
+  [kControllerErrorFunction](reason: unknown): void {
+    assertIsReadableStream(this);
+    if (this.#state !== 'readable') return;
+    const controller = this.#controller;
+    if (controller === undefined) {
+      readableStreamError(this, reason);
+      return;
+    }
+    if (isNativeController(controller)) {
+      controller.error(reason);
+      markPromiseHandled(controllerCancelSteps(controller, reason));
+      return;
+    }
+    if (controllerStream(controller) === this) {
+      controller.error(reason);
+      return;
+    }
+    // QUEUED INVARIANT: a tee branch of a queued stream — its consumer is
+    // necessarily a QueueCursor (tee precedent); sanctioned cast.
+    const cursor = this.#consumer as QueueCursorType<R, R> | undefined;
+    if (cursor === undefined) return;
+    this.#consumer = undefined;
+    cursor.errorAllReads(reason);
+    readableStreamError(this, reason);
+    // Decided BEFORE the cursor's removal, for the reasons given at
+    // #consumerLeaving (as in QueueCursor.cancelStream).
+    markPromiseHandled(
+      controllerConsumerLeaving(
+        controller,
+        reason,
+        cursor.queue.cursorCount === 1
+      )
+    );
+    cursor.queue.removeCursor(cursor);
   }
 }
 

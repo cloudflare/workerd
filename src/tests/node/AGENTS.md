@@ -43,7 +43,7 @@ tests plus the divergence ledger. Read that file first.
 
 | Directory | Subject | Peer |
 | --- | --- | --- |
-| `stream/` | `Readable/Writable/Duplex.toWeb/fromWeb`, `pipeline`, `stream/web`, `stream/consumers` | none |
+| `stream/` | `Readable/Writable/Duplex.toWeb/fromWeb`, `pipeline`, `finished`, `addAbortSignal`, `stream/web`, `stream/consumers` | none |
 | `net/` | `net.Socket` over the `connect()` socket's BYOB reader and writer | node sidecar TCP servers |
 | `http-server/` | `http.Server`: the Request body pump and the `ServerResponse` body stream | the worker itself (service binding) |
 | `http-client/` | `http.request()`: the Blob request body, the Response body pump, the exchange's teardown | node sidecar HTTP server |

@@ -37,6 +37,7 @@ const {
   PromisePrototypeThen,
   RangeError,
   Symbol,
+  SymbolFor,
   SymbolToStringTag,
   TypeError,
   TypedArrayPrototypeGetByteLength,
@@ -196,6 +197,15 @@ let isWritableStream: (value: unknown) => boolean;
 // scope. Proxies deliberately do not convey it (the C++ check rejects
 // proxies up front), matching the #-brand's no-tunneling behavior.
 const kWritableStreamBrand: symbol = utils.getApiSymbol('kWritableStreamBrand');
+
+// The Node.js stream-interop hooks (see readable.ts for the full note):
+// node:stream observes completion through `stream[kIsClosedPromise].promise`
+// and errors a stream from outside through
+// `stream[kControllerErrorFunction](reason)`.
+const kIsClosedPromise: symbol = SymbolFor('nodejs.webstream.isClosedPromise');
+const kControllerErrorFunction: symbol = SymbolFor(
+  'nodejs.webstream.controllerErrorFunction'
+);
 let setWritableStreamPendingClosure: <W>(stream: WritableStream<W>) => void;
 let isWritableStreamPendingClosure: <W>(stream: WritableStream<W>) => boolean;
 // Permanently neutralizes a stream on behalf of the C++ bridge (e.g. a
@@ -301,6 +311,10 @@ class WritableStream<W = unknown> {
   #inFlightCloseRequest: PromiseWithResolversType<void> | undefined;
   #pendingAbortRequest: PendingAbortRequest | undefined;
   #backpressure: boolean = false;
+  // The Node.js interop closed-promise (see kIsClosedPromise), created on
+  // first request and settled when the stream reaches 'closed' or
+  // 'errored'.
+  #closedPromise?: PromiseWithResolversType<void> | undefined;
   // Back-reference to the native underlying sink (undefined for
   // JS-backed streams). Kept for extraction — C++ unwraps the backing
   // class from the returned object.
@@ -322,6 +336,18 @@ class WritableStream<W = unknown> {
 
     isWritableStream = (value: unknown) => {
       return isActualObject(value) && #state in value;
+    };
+
+    // Settles the interop closed-promise (if one was requested) to match the
+    // terminal state just entered.
+    const settleClosedPromise = <W>(stream: WritableStream<W>): void => {
+      const closed = stream.#closedPromise;
+      if (closed === undefined) return;
+      if (stream.#state === 'closed') {
+        closed.resolve();
+      } else if (stream.#state === 'errored') {
+        closed.reject(stream.#storedError);
+      }
     };
 
     setWritableStreamPendingClosure = <W>(stream: WritableStream<W>) => {
@@ -540,6 +566,7 @@ class WritableStream<W = unknown> {
     const writableStreamFinishErroring = <W>(stream: WritableStream<W>) => {
       // assert: state 'erroring', no operations in flight
       stream.#state = 'errored';
+      settleClosedPromise(stream);
       const controller = stream.#controller;
       if (controller !== undefined) {
         controllerErrorSteps(controller); // reset the controller queue
@@ -654,6 +681,7 @@ class WritableStream<W = unknown> {
         }
       }
       stream.#state = 'closed';
+      settleClosedPromise(stream);
       const writer = stream.#writer;
       if (writer !== undefined) {
         writerResolveClosedPromise(writer);
@@ -788,6 +816,33 @@ class WritableStream<W = unknown> {
   getWriter(): WritableStreamDefaultWriterType<W> {
     assertIsWritableStream(this);
     return new WritableStreamDefaultWriter<W>(this);
+  }
+
+  // Node.js interop (see kIsClosedPromise): an object whose promise settles
+  // with the stream — fulfilled on close, rejected with the stored error.
+  // Nothing may ever look at the rejection, so it is marked handled.
+  get [kIsClosedPromise](): { promise: Promise<void> } {
+    assertIsWritableStream(this);
+    let closed = this.#closedPromise;
+    if (closed === undefined) {
+      closed = PromiseWithResolvers() as PromiseWithResolversType<void>;
+      markPromiseHandled(closed.promise);
+      this.#closedPromise = closed;
+      if (this.#state === 'closed') {
+        closed.resolve();
+      } else if (this.#state === 'errored') {
+        closed.reject(this.#storedError);
+      }
+    }
+    return { promise: closed.promise };
+  }
+
+  // Node.js interop (see kControllerErrorFunction): errors a writable
+  // stream from outside, as its controller's error() does — a no-op unless
+  // the stream is still 'writable'.
+  [kControllerErrorFunction](reason: unknown): void {
+    assertIsWritableStream(this);
+    this.#controller?.error(reason);
   }
 }
 
