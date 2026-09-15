@@ -404,6 +404,12 @@ pub mod ffi {
         ) -> Result<Vec<Global>>;
 
         // Local<TypedArray>
+        pub unsafe fn uint8_array_from_buffer(
+            isolate: *mut Isolate,
+            buffer: &Local,
+            byte_offset: usize,
+            length: usize,
+        ) -> Local;
         pub unsafe fn local_typed_array_length(isolate: *mut Isolate, array: &Local) -> usize;
         pub unsafe fn local_typed_array_buffer_data(isolate: *mut Isolate, array: &Local) -> usize;
         pub unsafe fn local_typed_array_byte_offset(isolate: *mut Isolate, array: &Local) -> usize;
@@ -2327,6 +2333,47 @@ impl_typed_array!(BigUint64Array, u64, local_biguint64_array_get);
 // Uint8ClampedArray has the same element type as Uint8Array; clamping is a write-side JS concern.
 impl_typed_array!(Uint8ClampedArray, u8, local_uint8clamped_array_get);
 
+impl Uint8Array {
+    /// Creates a `Uint8Array` viewing `length` bytes of `buffer`, starting at
+    /// `byte_offset`.
+    ///
+    /// Zero-copy, unlike [`Vec<u8>::to_js`](crate::ToJS), which allocates a fresh
+    /// backing store and copies into it. Producing a `Uint8Array` from bytes computed
+    /// in Rust therefore does not require an intermediate `Vec`: allocate the buffer
+    /// with [`ArrayBuffer::new_with_mode`], fill it through
+    /// [`Local::<ArrayBuffer>::as_mut_slice`], and wrap the written prefix here.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `byte_offset + length` exceeds `buffer`'s byte length. The
+    /// check is repeated in C++, but failing it here keeps the failure a Rust
+    /// panic rather than a `kj::Exception` thrown across the bridge, which
+    /// this function's signature cannot carry.
+    pub fn from_buffer<'a>(
+        lock: &mut crate::Lock,
+        buffer: &Local<'_, ArrayBuffer>,
+        byte_offset: usize,
+        length: usize,
+    ) -> Local<'a, Self> {
+        let byte_length = buffer.byte_length();
+        assert!(
+            byte_offset <= byte_length && length <= byte_length - byte_offset,
+            "Uint8Array view [{byte_offset}, {byte_offset}+{length}) is out of bounds \
+             of its {byte_length}-byte ArrayBuffer"
+        );
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
+        // `buffer` is a live handle to an ArrayBuffer. The bounds precondition is
+        // checked on the C++ side.
+        unsafe {
+            Local::from_ffi(
+                isolate,
+                ffi::uint8_array_from_buffer(isolate.as_ffi(), &buffer.handle, byte_offset, length),
+            )
+        }
+    }
+}
+
 // =============================================================================
 // `String`-specific implementations
 // =============================================================================
@@ -2488,6 +2535,43 @@ impl<'a, T> From<Option<Local<'a, T>>> for MaybeLocal<'a, T> {
         Self {
             handle: ffi::MaybeLocal { ptr },
             _marker: PhantomData,
+        }
+    }
+}
+
+/// Runs a synchronous callback entered from C++ with a valid, locked V8 isolate.
+///
+/// The callback receives a safe [`Lock`] and returns a local handle. On success,
+/// the handle is transferred back across the CXX bridge as a [`ffi::MaybeLocal`].
+/// On failure, the error is scheduled as a JavaScript exception and an empty
+/// `MaybeLocal` is returned.
+///
+/// This centralizes the raw-isolate and local-handle ownership transitions for
+/// C++ entry points implemented in Rust. The callback itself contains no FFI
+/// safety obligations.
+///
+/// # Safety
+///
+/// `isolate` must point to a live V8 isolate locked by the current thread, and
+/// the C++ caller must keep its active `HandleScope` alive until it consumes the
+/// returned handle.
+pub unsafe fn run_ffi_callback<T, E, F>(isolate: *mut ffi::Isolate, callback: F) -> ffi::MaybeLocal
+where
+    E: Into<Error>,
+    F: for<'a> FnOnce(&'a mut Lock) -> Result<Local<'a, T>, E>,
+{
+    // SAFETY: forwarded from this function's safety contract.
+    let mut lock = unsafe { Lock::from_isolate_ptr(isolate) };
+    let result = callback(&mut lock).map(|local| {
+        // SAFETY: the callback's return lifetime is tied to `lock`, whose
+        // isolate is the one supplied by the active C++ HandleScope.
+        unsafe { local.into_ffi() }
+    });
+    match result {
+        Ok(local) => ffi::MaybeLocal { ptr: local.ptr },
+        Err(error) => {
+            lock.throw_exception(&error.into());
+            ffi::MaybeLocal { ptr: 0 }
         }
     }
 }

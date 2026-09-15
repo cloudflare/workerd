@@ -61,7 +61,17 @@ fn test_c_return() {
             b"2020\0",
             cast::c_char_to_unsigned(ffi::c_return_slice_char(&shared)),
         );
+        // c_char16 is an alias for u16, so a rust::Slice<const char16_t> from
+        // C++ arrives as a plain &[u16] with no cast.
+        assert_eq!(
+            String::from_utf16(ffi::c_return_slice_char16(&shared)).unwrap(),
+            "2020",
+        );
     }
+    assert_eq!(
+        String::from_utf16(&ffi::c_return_rust_vec_char16()).unwrap(),
+        "2020",
+    );
     assert_eq!("2020", ffi::c_return_rust_string());
     assert_eq!("Hello \u{fffd}World", ffi::c_return_rust_string_lossy());
     assert_eq!("2020", ffi::c_return_unique_ptr_string().to_str().unwrap());
@@ -350,6 +360,9 @@ fn test_c_take() {
     check!(cxx_test_suite::module::ffi::c_take_unique_ptr(unique_ptr));
     check!(ffi::c_take_str("2020"));
     check!(ffi::c_take_slice_char(cast::unsigned_to_c_char(b"2020")));
+    let utf16: Vec<u16> = "2020".encode_utf16().collect();
+    check!(ffi::c_take_slice_char16(&utf16));
+    check!(ffi::c_take_rust_vec_char16(utf16));
     check!(ffi::c_take_slice_shared(&[
         ffi::Shared { z: 2020 },
         ffi::Shared { z: 2021 },

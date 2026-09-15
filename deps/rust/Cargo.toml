@@ -51,6 +51,9 @@ nix = "0"
 pico-args = "0"
 ruff_python_ast = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
 ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
+# Use rust_icu's checked-in bindings for the Chromium ICU version linked by workerd. ICU itself is
+# supplied by Bazel, so bindgen, icu-config, and rust_icu's library-linking features stay disabled.
+rust_icu_sys = { version = "5.8", default-features = false, features = ["renaming", "icu_version_in_env"] }
 # param_extractor depends on unbounded_depth feature
 serde_json = { version = "1", features = ["unbounded_depth"] }
 serde = { version = "1", features = ["derive"] }

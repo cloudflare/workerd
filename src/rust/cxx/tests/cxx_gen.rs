@@ -88,6 +88,33 @@ const BRIDGE4: &str = r#"
     }
 "#;
 
+const BRIDGE5: &str = r#"
+    #[cxx::bridge]
+    mod ffi {
+        unsafe extern "C++" {
+            fn utf16_length(s: &[c_char16]) -> usize;
+            fn widen(input: &[u8], output: &mut [c_char16]) -> usize;
+            unsafe fn first(s: *const c_char16) -> c_char16;
+        }
+
+        extern "Rust" {
+            fn encode(s: &str) -> Vec<c_char16>;
+        }
+    }
+"#;
+
+const BRIDGE6: &str = r#"
+    #[cxx::bridge]
+    mod ffi {
+        unsafe extern "C++" {
+            #[cxx_name = "char32_t"]
+            type Char32 = crate::Char32;
+
+            fn count(s: &[Char32]) -> usize;
+        }
+    }
+"#;
+
 #[test]
 fn test_extern_c_function() {
     let opt = cxx_gen::Opt::default();
@@ -176,4 +203,31 @@ fn test_kj_arc_in_shared_struct() {
     assert!(!implementation.contains("cxxbridge1$kj_rs$arc$"));
     let expected = "::rust::ManuallyDrop<::Holder> holder$(::std::move(holder));";
     assert!(implementation.contains(expected));
+}
+
+#[test]
+fn test_c_char16_maps_to_cxx_char16_t() {
+    let opt = cxx_gen::Opt::default();
+    let source = BRIDGE5.parse().unwrap();
+    let generated = generate_header_and_cc(source, &opt).unwrap();
+    let implementation = str::from_utf8(&generated.implementation).unwrap();
+    assert!(implementation.contains("::rust::Slice<char16_t const>"));
+    assert!(implementation.contains("::rust::Slice<char16_t >"));
+    assert!(implementation.contains("char16_t const *"));
+    assert!(implementation.contains("::rust::Vec<char16_t>"));
+    // char16_t must not decay to uint16_t: keeping the two distinct is the
+    // whole reason c_char16 is a separate atom from u16.
+    assert!(!implementation.contains("uint16_t"));
+}
+
+#[test]
+fn test_fundamental_type_name_is_unqualified() {
+    let opt = cxx_gen::Opt::default();
+    let source = BRIDGE6.parse().unwrap();
+    let generated = generate_header_and_cc(source, &opt).unwrap();
+    let implementation = str::from_utf8(&generated.implementation).unwrap();
+    assert!(implementation.contains("::rust::Slice<char32_t const>"));
+    // `::char32_t` is ill-formed; a fundamental type's name is a keyword and
+    // cannot be qualified.
+    assert!(!implementation.contains("::char32_t"));
 }

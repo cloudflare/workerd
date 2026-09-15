@@ -8,7 +8,11 @@
 #include "simdutf.h"
 
 #include <workerd/jsg/exception.h>
+#include <workerd/rust/i18n/lib.rs.h>
+#include <workerd/rust/jsg/ffi-inl.h>
+#include <workerd/util/autogate.h>
 
+#include <kj-rs/convert.h>
 #include <unicode/ucnv.h>
 #include <unicode/uidna.h>
 #include <unicode/urename.h>
@@ -17,6 +21,40 @@
 #include <unicode/uversion.h>
 
 namespace workerd::api::node {
+
+namespace rust_i18n = ::workerd::rust::i18n;
+
+// Maps the C++ Encoding to the Rust bridge enum, following the kj-rs
+// convert.h idiom (see `NODEJS_EXCEPTIONS_RUST`'s equivalent in
+// exceptions.c++), so callers use `kj::from<rust_i18n::Encoding>(value)`. It
+// is `static` (rather than in an anonymous namespace) because Clang's ADL
+// does not consider unnamed-namespace functions, and ADL is how
+// `kj::from<Target>` locates this overload. The switch has no `default:` arm
+// so that enum drift between the two `Encoding` types is a compile error.
+//
+// `BASE64`, `BASE64URL`, and `HEX` are not transcodable (see
+// `i18n::canBeTranscoded`); rejecting them here, for both `fromEncoding` and
+// `toEncoding`, is a deliberate divergence from the C++ dispatch below, which
+// only checks `fromEncoding` and would reach `KJ_UNREACHABLE` for a
+// non-transcodable `toEncoding`. Neither is reachable from JavaScript because
+// `BufferUtil::transcode` validates both encodings first.
+static rust_i18n::Encoding fromImpl(rust_i18n::Encoding*, Encoding encoding) {
+  switch (encoding) {
+    case Encoding::ASCII:
+      return rust_i18n::Encoding::Ascii;
+    case Encoding::LATIN1:
+      return rust_i18n::Encoding::Latin1;
+    case Encoding::UTF8:
+      return rust_i18n::Encoding::Utf8;
+    case Encoding::UTF16LE:
+      return rust_i18n::Encoding::Utf16Le;
+    case Encoding::BASE64:
+    case Encoding::BASE64URL:
+    case Encoding::HEX:
+      JSG_FAIL_REQUIRE(Error, "Invalid encoding passed to transcode");
+  }
+  KJ_UNREACHABLE;
+}
 
 namespace i18n {
 
@@ -240,6 +278,16 @@ void Converter::setSubstituteChars(kj::StringPtr sub) {
 
 jsg::JsUint8Array transcode(
     jsg::Lock& js, kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
+  if (util::Autogate::isEnabled(util::AutogateKey::NODEJS_I18N_RUST)) {
+    auto rustFrom = kj::from<rust_i18n::Encoding>(fromEncoding);
+    auto rustTo = kj::from<rust_i18n::Encoding>(toEncoding);
+    auto maybeLocal =
+        rust_i18n::transcode(js.v8Isolate, source.as<kj_rs::Rust>(), rustFrom, rustTo);
+    auto local =
+        jsg::check(::workerd::rust::jsg::maybe_local_from_ffi<v8::Uint8Array>(kj::mv(maybeLocal)));
+    return jsg::JsUint8Array(local);
+  }
+
   TranscodeImpl transcode_function = &TranscodeDefault;
   switch (fromEncoding) {
     case Encoding::ASCII:
