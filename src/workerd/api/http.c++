@@ -2317,7 +2317,8 @@ kj::LiteralStringConst Fetcher::getRpcTargetKind() {
   return "fetcher"_kjc;
 }
 
-JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(jsg::Lock& js) {
+JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
+    jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) {
   auto& ioContext = IoContext::current();
 
   kj::Maybe<TraceContext> callSpan;
@@ -2327,17 +2328,28 @@ JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(jsg::Lock& js
     // The "jsRpcSession" trace context is attached to the customEvent task below so it covers the
     // whole session. The first jsRpcCall span is opened before the session client so its user span
     // can also become the callee invocation's parent.
-    clientWithTracing = buildClient(ioContext, kj::none, "jsRpcSession"_kjc,
-        [&](TraceContext& sessionSpan) -> kj::Maybe<SpanParent> {
+    auto makeUserSpanParent = [&](TraceContext& sessionSpan) -> kj::Maybe<SpanParent> {
       callSpan = sessionSpan.getSpanParents().newChild("jsRpcCall"_kjc);
       return KJ_ASSERT_NONNULL(callSpan).getUserSpanParent();
-    });
+    };
+    KJ_IF_SOME(attempt, actorCallAttempt) {
+      clientWithTracing = getClientForActorCallAttempt(ioContext, kj::none, "jsRpcSession"_kjc,
+          kj::mv(attempt), kj::mv(makeUserSpanParent));
+    } else {
+      clientWithTracing =
+          buildClient(ioContext, kj::none, "jsRpcSession"_kjc, kj::mv(makeUserSpanParent));
+    }
     callSpanParents = clientWithTracing.traceContext.map(
         [](TraceContext& tc) { return tc.getSpanParents(); });
   } else {
-    clientWithTracing = ClientWithTracing{
-      .client = getClient(ioContext, kj::none, "jsRpcSession"_kjc),
-    };
+    KJ_IF_SOME(attempt, actorCallAttempt) {
+      clientWithTracing = getClientForActorCallAttempt(
+          ioContext, kj::none, "jsRpcSession"_kjc, kj::mv(attempt));
+    } else {
+      clientWithTracing = ClientWithTracing{
+        .client = getClient(ioContext, kj::none, "jsRpcSession"_kjc),
+      };
+    }
   }
   auto worker = kj::mv(clientWithTracing.client);
   auto event = kj::heap<api::JsRpcSessionCustomEvent>(JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
@@ -2717,8 +2729,20 @@ Fetcher::ClientWithTracing Fetcher::getClientForActorCallAttempt(IoContext& ioCo
     kj::Maybe<kj::String> cfStr,
     kj::ConstString operationName,
     ActorCallRetryState::Attempt attempt) {
+  return getClientForActorCallAttempt(ioContext, kj::mv(cfStr), kj::mv(operationName),
+      kj::mv(attempt), [](TraceContext& traceContext) -> kj::Maybe<SpanParent> {
+    return traceContext.getUserSpanParent();
+  });
+}
+
+Fetcher::ClientWithTracing Fetcher::getClientForActorCallAttempt(IoContext& ioContext,
+    kj::Maybe<kj::String> cfStr,
+    kj::ConstString operationName,
+    ActorCallRetryState::Attempt attempt,
+    MakeUserSpanParent makeUserSpanParent) {
   if (!attempt.hasMetadata()) {
-    return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName));
+    return buildClient(
+        ioContext, kj::mv(cfStr), kj::mv(operationName), kj::mv(makeUserSpanParent));
   }
 
   auto& outgoingFactory = KJ_REQUIRE_NONNULL(
@@ -2736,7 +2760,7 @@ Fetcher::ClientWithTracing Fetcher::getClientForActorCallAttempt(IoContext& ioCo
       [&](TraceContext& outerTraceContext) -> kj::Maybe<SpanParent> {
     if (!outerTraceContext.isObserved()) return kj::none;
     traceContext = outerTraceContext.getSpanParents().newChild(operationName.clone());
-    return KJ_ASSERT_NONNULL(traceContext).getUserSpanParent();
+    return makeUserSpanParent(KJ_ASSERT_NONNULL(traceContext));
   });
   return ClientWithTracing{kj::mv(result.client), kj::mv(traceContext)};
 }
