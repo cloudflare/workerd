@@ -498,6 +498,88 @@ export const writeSyncTest4 = {
   },
 };
 
+export const writeReadOffsetBeyondLength = {
+  async test() {
+    const fd = openSync('/tmp/test.txt', 'w+');
+    const heap = new Uint8Array(64);
+    for (let i = 0; i < heap.length; i++) heap[i] = i;
+
+    // offset > length is valid as long as offset + length <= byteLength
+    strictEqual(writeSync(fd, heap, 10, 2), 2);
+    strictEqual(writeSync(fd, heap, 20, 3, 2), 3);
+    strictEqual(writeSync(fd, heap, { offset: 30, length: 1, position: 5 }), 1);
+    strictEqual(writeSync(fd, heap, { offset: 62, position: 6 }), 2);
+    strictEqual(writeSync(fd, heap, 63, undefined, 8), 1);
+    strictEqual(writeSync(fd, heap, 64, 0, 9), 0);
+    strictEqual(fstatSync(fd).size, 9);
+
+    // A view into a larger backing buffer: offset is relative to the view.
+    const view = new Uint8Array(heap.buffer, 8, 16);
+    strictEqual(writeSync(fd, view, 12, 4, 9), 4);
+    strictEqual(fstatSync(fd).size, 13);
+
+    throws(() => writeSync(fd, heap, 65, 0), {
+      code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+    });
+    throws(() => writeSync(fd, heap, 60, 5), {
+      code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+    });
+    throws(() => writeSync(fd, view, 12, 5), {
+      code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+    });
+    throws(() => writeSync(fd, view, 17), {
+      code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+    });
+
+    const dest = new Uint8Array(64);
+    strictEqual(readSync(fd, dest, 40, 13, 0), 13);
+    deepStrictEqual(
+      [...dest.subarray(40, 53)],
+      [10, 11, 20, 21, 22, 30, 62, 63, 63, 20, 21, 22, 23]
+    );
+    strictEqual(readSync(fd, dest, 50, 2, 0), 2);
+    strictEqual(readSync(fd, dest, { offset: 60, position: 0 }), 4);
+    deepStrictEqual([...dest.subarray(60)], [10, 11, 20, 21]);
+    strictEqual(readSync(fd, dest, 64, 0, 0), 0);
+
+    const destView = new Uint8Array(dest.buffer, 8, 16);
+    destView.fill(0);
+    strictEqual(readSync(fd, destView, 12, 4, 0), 4);
+    deepStrictEqual([...destView.subarray(12)], [10, 11, 20, 21]);
+    deepStrictEqual([...dest.subarray(24, 26)], [0, 0]);
+
+    throws(() => readSync(fd, dest, 65, 0, 0), kErrOutOfRange);
+    throws(() => readSync(fd, dest, 60, 5, 0), kErrOutOfRange);
+    throws(() => readSync(fd, destView, 12, 5, 0), kErrOutOfRange);
+    throws(() => readSync(fd, destView, 17, 0, 0), kErrOutOfRange);
+
+    // Callback and promise variants share the same validation.
+    await new Promise((resolve, reject) => {
+      write(fd, heap, 10, 2, 13, (err, written) => {
+        if (err) return reject(err);
+        strictEqual(written, 2);
+        resolve();
+      });
+    });
+    await new Promise((resolve, reject) => {
+      read(fd, dest, 40, 2, 13, (err, bytesRead) => {
+        if (err) return reject(err);
+        strictEqual(bytesRead, 2);
+        deepStrictEqual([...dest.subarray(40, 42)], [10, 11]);
+        resolve();
+      });
+    });
+    closeSync(fd);
+
+    const handle = await promises.open('/tmp/test.txt', 'r+');
+    strictEqual((await handle.write(heap, 10, 2, 15)).bytesWritten, 2);
+    strictEqual((await handle.read(dest, 40, 2, 15)).bytesRead, 2);
+    strictEqual((await handle.read(dest, 62)).bytesRead, 2);
+    strictEqual((await handle.read(destView, 12, 4, 15)).bytesRead, 2);
+    await handle.close();
+  },
+};
+
 export const writeSyncAppend = {
   test() {
     const fd = openSync('/tmp/test.txt', 'a');
