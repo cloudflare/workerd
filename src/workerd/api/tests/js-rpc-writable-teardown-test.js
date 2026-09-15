@@ -41,7 +41,7 @@ export default {
     // Both services embed this file; only the runner has the binding.
     if (env.PEER === undefined) return;
 
-    if (env.EXPECT_CROSS_IMPL !== undefined) {
+    if (env.EXPECT_CROSS_IMPL === true) {
       assert.notStrictEqual(
         usingTsImpl,
         await env.PEER.usesTypeScriptStreams()

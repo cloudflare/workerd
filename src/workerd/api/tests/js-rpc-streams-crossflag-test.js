@@ -62,12 +62,14 @@ export class Peer extends WorkerEntrypoint {
     await writer.close();
   }
 
+  // Aborting the received writable drops this side's reference to the RPC stream, but the call's
+  // parameter message holds the stream capability until the call completes, so the origin
+  // observes the disconnect only once this call returns. The abort reason is not carried on the
+  // wire.
   async abortWritable(stream) {
     assert.ok(stream instanceof WritableStream);
     const writer = stream.getWriter();
-    // Ending this execution context disconnects the RPC stream. The original abort reason is not
-    // currently propagated to the stream's origin.
-    writer.abort(new Error('aborted by the peer')).catch(() => {});
+    await writer.abort(new Error('aborted by the peer'));
   }
 
   roundTrip(value) {
@@ -209,8 +211,9 @@ export const writableAbortDisconnectsOrigin = {
   async test(controller, env) {
     if (!(await isCrossImplementationRunner(env))) return;
 
-    // Abort reasons are not carried by the byte-stream protocol, so the origin observes the
-    // peer execution context disconnecting instead.
+    // Abort reasons are not carried by the byte-stream protocol, so the origin's adapter reports
+    // its generic disconnect text when the peer's call releases the stream (see
+    // Peer.abortWritable).
     let abortCalls = 0;
     const { promise, resolve } = Promise.withResolvers();
     const writable = new WritableStream({
