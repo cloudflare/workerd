@@ -1669,13 +1669,15 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
         kj::mv(KJ_ASSERT_NONNULL(attemptOrException.tryGet<ActorCallRetryState::Attempt>()));
   }
 
-  // Stash whether this request's body can be rewound (and so the request re-sent), before we lose
-  // access to the JS-level request. This is currently consumed only when the target is an actor
-  // (Durable Object), to classify retry eligibility for disconnected calls; for other fetches the
-  // value is simply overwritten by the next call and never read. The set->getClientWithTracing->
-  // wrap*SubrequestClient sequence is synchronous, so there is no stale-attribution risk.
-  bool bodyRewindable = jsRequest->canRewindBody();
-  ioContext.getMetrics().setNextSubrequestBodyRewindable(SubrequestBodyRewindable(bodyRewindable));
+  // Stash whether this request's body can be rewound (and so the request re-sent) and whether the
+  // target supports retries, before we lose access to the JS-level request. This is currently
+  // consumed only when the target is an actor (Durable Object), to classify retry eligibility for
+  // disconnected calls; for other fetches the values are simply overwritten by the next call and
+  // never read. The set->getClientWithTracing->wrap*SubrequestClient sequence is synchronous, so
+  // there is no stale-attribution risk.
+  ioContext.getMetrics().setNextSubrequestRetryEligibility(
+      SubrequestBodyRewindable(jsRequest->canRewindBody()),
+      ActorCallTargetRetryable(fetcher->supportsActorCallRetries()));
 
   // Get client and trace context (if needed) in one clean call.
   auto cfBlobJson = jsRequest->serializeCfBlobJson(js);
