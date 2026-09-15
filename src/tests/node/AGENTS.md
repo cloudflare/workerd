@@ -2,8 +2,9 @@
 
 Test suites for the parts of the Node.js compatibility layer (`src/node/`)
 that sit on top of the Web Streams implementation: the `node:stream`
-web-interop adapters and `node:net` sockets over `connect()` stream
-halves. One subdirectory per area. Every test
+web-interop adapters, `node:net` sockets over `connect()` stream halves,
+and the `node:http` server over `fetch()` bodies. One subdirectory per
+area. Every test
 here runs against **both** streams implementations — the legacy C++ one
 (`src/workerd/api/streams/`) and the TypeScript one
 (`src/per_isolate/webstreams/`) — to prove the node layer behaves
@@ -29,11 +30,11 @@ tests plus the divergence ledger. Read that file first.
   `src/tests/streams/`; pure node-API behavior with no stream underneath
   (header parsing, `BlockList`, option validation) stays in
   `src/workerd/api/node/tests/`.
-- Under the C++ implementation the adapters construct streams with
-  `new ReadableStream()`/`new WritableStream()`, which require
-  `streams_enable_constructors`; the C++ cells pin it and the legacy cells
-  pin the constructor-gate `Error` that older compat dates still produce.
-  The TypeScript implementation does not consult the flag.
+- Under the C++ implementation the adapters and `http.ServerResponse`
+  construct streams with `new ReadableStream()`/`new WritableStream()`,
+  which require `streams_enable_constructors`; the C++ cells pin it and the
+  legacy cells pin the constructor-gate `Error` that older compat dates
+  still produce. The TypeScript implementation does not consult the flag.
 - `nodejs_compat` is date-enabled (2026-08-04) and is pinned explicitly so
   the `@` variant (2000-01-01) still loads `node:*`.
 - Suites that talk to a peer use a node sidecar (`js_binary` +
@@ -45,6 +46,7 @@ tests plus the divergence ledger. Read that file first.
 | --- | --- | --- |
 | `stream/` | `Readable/Writable/Duplex.toWeb/fromWeb`, `pipeline`, `stream/web`, `stream/consumers` | none |
 | `net/` | `net.Socket` over the `connect()` socket's BYOB reader and writer | node sidecar TCP servers |
+| `http-server/` | `http.Server`: the Request body pump and the `ServerResponse` body stream | the worker itself (service binding) |
 
 ## Running
 

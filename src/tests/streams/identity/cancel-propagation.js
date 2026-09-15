@@ -17,7 +17,7 @@
 //   when the cancel landed, later writes reject with a generic TypeError
 //   ("This WritableStream has been closed.") instead.
 
-import { ok, strictEqual } from 'node:assert';
+import { ok, strictEqual, deepStrictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 import { captureRejection, assertRejectsWithReason } from 'propagation-helpers';
 
@@ -107,5 +107,37 @@ export const cancelledReaderReadsResolveDone = {
     await reader.cancel(new Error('cancel reason'));
     const { done } = await reader.read();
     strictEqual(done, true);
+  },
+};
+
+// A read still pending when the canceling reader cancels (ledger #20): the
+// TypeScript implementation resolves it done, per spec; the C++
+// implementation settles it by rejecting it — with the re-created cancel
+// reason, or with "Stream was cancelled." for a bare cancel(). The reader's
+// closed promise resolves in both.
+export const cancelSettlesPendingRead = {
+  async test() {
+    for (const reason of [new Error('cancel reason'), undefined]) {
+      const { readable } = new IdentityTransformStream();
+      const reader = readable.getReader();
+      const pending = reader.read();
+      const outcome = pending.then(
+        (result) => ({ result }),
+        (error) => ({ error })
+      );
+      await reader.cancel(reason);
+      if (usingTsImpl) {
+        deepStrictEqual(await outcome, {
+          result: { value: undefined, done: true },
+        });
+      } else if (reason === undefined) {
+        const { error } = await outcome;
+        ok(error instanceof Error);
+        strictEqual(error.message, 'Stream was cancelled.');
+      } else {
+        await assertRejectsWithReason(pending, reason);
+      }
+      strictEqual(await reader.closed, undefined);
+    }
   },
 };

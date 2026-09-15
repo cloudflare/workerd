@@ -7,6 +7,7 @@
 /* eslint-disable @typescript-eslint/no-deprecated */
 
 import { validateString } from 'node-internal:validators';
+import { Buffer } from 'node-internal:internal_buffer';
 import { Writable } from 'node-internal:streams_writable';
 import { getDefaultHighWaterMark } from 'node-internal:streams_state';
 import type { DataWrittenEvent } from 'node-internal:internal_http_server';
@@ -809,7 +810,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     callback?: WriteCallback
   ): this {
     if (typeof chunk === 'function') {
-      callback = chunk;
+      callback = chunk as WriteCallback;
       chunk = null;
       encoding = null;
     } else if (typeof encoding === 'function') {

@@ -104,6 +104,7 @@ export {
   pipeCancellationWinsOverLaterReadableCancel,
   cancelResolvesReaderClosedPromise,
   cancelledReaderReadsResolveDone,
+  cancelSettlesPendingRead,
 } from 'cancel-propagation';
 
 export {
