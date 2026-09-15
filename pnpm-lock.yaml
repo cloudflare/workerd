@@ -20,9 +20,18 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.8.1)
+      '@types/estree':
+        specifier: ^1.0.9
+        version: 1.0.9
       '@types/node':
         specifier: ^25.9.5
         version: 25.9.5
+      acorn:
+        specifier: ^8.18.0
+        version: 8.18.0
+      astring:
+        specifier: ^1.9.0
+        version: 1.9.0
       capnp-es:
         specifier: 0.0.16
         version: 0.0.16(typescript@6.0.3)
@@ -1614,6 +1623,10 @@ packages:
 
   array-timsort@1.0.3:
     resolution: {integrity: sha512-/+3GRL7dDAGEfM6TseQk/U+mi18TU2Ms9I3UlLdUMhz2hbvGNTKdj9xniwXfUqgYhHxRx0+8UnKkvlNwVU+cWQ==}
+
+  astring@1.9.0:
+    resolution: {integrity: sha512-LElXdjswlqjWrPpJFg1Fx4wpkOCxj1TDHlSV4PlaRxHGWko024xICaa97ZkMfs6DRKlCguiAI+rbXv5GWwXIkg==}
+    hasBin: true
 
   asynckit@0.4.0:
     resolution: {integrity: sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q==}
@@ -4233,6 +4246,8 @@ snapshots:
   ansi-styles@6.2.3: {}
 
   array-timsort@1.0.3: {}
+
+  astring@1.9.0: {}
 
   asynckit@0.4.0: {}
 

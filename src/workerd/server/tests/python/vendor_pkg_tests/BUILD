@@ -28,19 +28,36 @@ vendored_py_wd_test(
 vendored_py_wd_test(
     "numpy",
     make_snapshot = True,
-    python_flags = [
-        "0.28.2",
-        "314.0.6",
+    skip_python_flags = [
+        "0.26.0a2",
     ],
     use_snapshot = "baseline",
 )
 
-# vendored_py_wd_test("scipy")
-
 vendored_py_wd_test(
     "shapely",
     make_snapshot = True,
-    python_flags = ["0.28.2"],
+    skip_python_flags = [
+        "0.26.0a2",
+    ],
+    use_snapshot = "baseline",
+)
+
+vendored_py_wd_test(
+    "Pillow",
+    make_snapshot = True,
+    skip_python_flags = [
+        "0.26.0a2",
+    ],
+    use_snapshot = "baseline",
+)
+
+vendored_py_wd_test(
+    "pywavelets",
+    make_snapshot = True,
+    skip_python_flags = [
+        "0.26.0a2",
+    ],
     use_snapshot = "baseline",
 )
 

@@ -1058,17 +1058,6 @@ jsg::Optional<kj::StringPtr> SocketsModule::getCallerDnsOverride(
   return ioContext.getCurrentLock().getGlobalScope().getDnsOverride(hostname);
 }
 
-jsg::Optional<jsg::JsObject> SocketsModule::getPortScopeKey(jsg::Lock& js) {
-  // A Durable Object instance is its own host for port binding; a stateless worker's host is
-  // the isolate, since a server it listens on must be reachable from every request.
-  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-    if (ioContext.getActor() != kj::none) {
-      return ioContext.getPortScopeKey(js);
-    }
-  }
-  return kj::none;
-}
-
 kj::Array<SocketsModule::InboundListener> SocketsModule::getInboundListeners(jsg::Lock& js) {
   auto listeners = Worker::Api::current().getInboundListeners();
   return KJ_MAP(l, listeners) {

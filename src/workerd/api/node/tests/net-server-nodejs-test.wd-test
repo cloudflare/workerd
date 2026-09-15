@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "net-server-nodejs-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental", "enable_nodejs_http_modules", "enable_nodejs_http_server_modules"],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental", "enable_nodejs_http_modules", "enable_nodejs_http_server_modules", "streams_enable_constructors"],
         durableObjectNamespaces = [
           (className = "PortHost", uniqueKey = "e6b1f7d6a2c04f0e9a3b5c7d8e9f0a1b"),
         ],

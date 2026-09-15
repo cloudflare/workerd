@@ -102,7 +102,7 @@ wd_cc_library(
     deps = [
         ":duration-exceeded-logger",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
         # TODO(cleanup): Only for abortable.h, factor out
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
@@ -150,7 +150,7 @@ wd_cc_library(
         ":strings",
         "//src/workerd/jsg:memory-tracker",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
     ],
 )
 
@@ -236,7 +236,7 @@ wd_cc_library(
         ":account-limits",
         ":sentry",
         ":sqlite-metering",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
     ],
 )
 
