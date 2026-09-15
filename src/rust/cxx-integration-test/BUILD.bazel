@@ -22,6 +22,7 @@ kj_test(
         ":cxx-integration-test",
         "//src/rust/cxx-integration",
         "//src/rust/cxx/kj-rs",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )

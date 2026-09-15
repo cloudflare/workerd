@@ -79,7 +79,8 @@ wd_cc_benchmark(
     name = "bench-try-sync",
     srcs = ["bench-try-sync.c++"],
     deps = [
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-gzip",
     ],
 )
