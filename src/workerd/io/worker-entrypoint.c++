@@ -70,7 +70,8 @@ class WorkerEntrypoint final: public WorkerInterface {
       bool isDynamicDispatch,
       kj::Maybe<kj::Own<AccessInfo>> accessInfo,
       kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
-      Persistent fromPersistentStub);
+      Persistent fromPersistentStub,
+      kj::Maybe<kj::String> clientAddress);
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
@@ -104,6 +105,7 @@ class WorkerEntrypoint final: public WorkerInterface {
   Frankenvalue props;
   kj::Maybe<kj::String> cfBlobJson;
   kj::Maybe<Worker::VersionInfo> versionInfo;
+  kj::Maybe<kj::String> clientAddress;
 
   // Hacky members used to hold some temporary state while processing a request.
   // See gory details in WorkerEntrypoint::request().
@@ -154,7 +156,8 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Maybe<kj::String> entrypointName,
       Frankenvalue props,
       kj::Maybe<kj::String> cfBlobJson,
-      kj::Maybe<Worker::VersionInfo> versionInfo);
+      kj::Maybe<Worker::VersionInfo> versionInfo,
+      kj::Maybe<kj::String> clientAddress);
 };
 
 // Simple wrapper around `HttpService::Response` to let us know if the response was sent
@@ -212,7 +215,8 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     bool isDynamicDispatch,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
     kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
-    Persistent fromPersistentStub) {
+    Persistent fromPersistentStub,
+    kj::Maybe<kj::String> clientAddress) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
 
   // If this request came from a stored ("persistent") stub, re-verify that the target worker still
@@ -235,7 +239,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
 
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
       waitUntilTasks, canceler, tunnelExceptions, isDynamicDispatch, kj::mv(entrypointName),
-      kj::mv(props), kj::mv(cfBlobJson), kj::mv(versionInfo));
+      kj::mv(props), kj::mv(cfBlobJson), kj::mv(versionInfo), kj::mv(clientAddress));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
       kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo), kj::mv(selfTokenFactory));
@@ -252,7 +256,8 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
     kj::Maybe<kj::String> entrypointName,
     Frankenvalue props,
     kj::Maybe<kj::String> cfBlobJson,
-    kj::Maybe<Worker::VersionInfo> versionInfo)
+    kj::Maybe<Worker::VersionInfo> versionInfo,
+    kj::Maybe<kj::String> clientAddress)
     : threadContext(threadContext),
       waitUntilTasks(waitUntilTasks),
       canceler(canceler),
@@ -261,7 +266,8 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
       entrypointName(kj::mv(entrypointName)),
       props(kj::mv(props)),
       cfBlobJson(kj::mv(cfBlobJson)),
-      versionInfo(kj::mv(versionInfo)) {}
+      versionInfo(kj::mv(versionInfo)),
+      clientAddress(kj::mv(clientAddress)) {}
 
 void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Maybe<kj::Own<Worker::Actor>> actor,
@@ -613,10 +619,19 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       // `delivered()` in Stage 1), so user code may have run. Annotate DISCONNECTED failures so the
       // caller-side actor-call classifier knows this failure must not be retried as a fresh
       // delivery. Only DISCONNECTED failures participate in the delivery-position metric, so other
-      // exception types need no annotation. Set before exceptionToPropagate() so it survives the
-      // internal-exception description rewrite; the detail serializes back across the RPC boundary.
+      // exception types need no annotation. Preserve not-delivered only for a predecessor rejection,
+      // which occurs before user code despite crossing this entrypoint. Set before
+      // exceptionToPropagate() so the detail survives the internal-exception description rewrite
+      // and serializes back across the RPC boundary.
       if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-        exception.setDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+        bool predecessorRejected =
+            exception.getDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID) != kj::none &&
+            exception.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none;
+        if (!predecessorRejected) {
+          exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
+          exception.setDetail(
+              jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+        }
       }
       // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
       // worker, not just for actors (and W2W below), but getting that right will require cleaning
@@ -723,12 +738,14 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   return wrapWithCanceler(
       context
           .run([this, &headers, &connection, &response, entrypointName = entrypointName.clone(),
-                   versionInfo = kj::mv(versionInfo),
-                   host = kj::str(host)](Worker::Lock& lock, IoContext& context) mutable {
+                   versionInfo = kj::mv(versionInfo), host = kj::str(host),
+                   clientAddress = kj::mv(clientAddress)](
+                   Worker::Lock& lock, IoContext& context) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
-    return lock.getGlobalScope().connect(kj::mv(host), headers, connection, response, lock,
+    return lock.getGlobalScope().connect(kj::mv(host), kj::mv(clientAddress), headers, connection,
+        response, lock,
         lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props),
             context.getActor(), isDynamicDispatch));
   })
@@ -1115,13 +1132,14 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     bool isDynamicDispatch,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
     kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
-    Persistent fromPersistentStub) {
+    Persistent fromPersistentStub,
+    kj::Maybe<kj::String> clientAddress) {
   return WorkerEntrypoint::construct(threadContext, kj::mv(worker), kj::mv(entrypointName),
       kj::mv(props), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::mv(metrics), waitUntilTasks, tunnelExceptions,
       kj::mv(workerTracer), kj::mv(cfBlobJson), kj::mv(versionInfo),
       kj::mv(maybeTriggerInvocationSpan), isDynamicDispatch, kj::mv(accessInfo),
-      kj::mv(selfTokenFactory), fromPersistentStub);
+      kj::mv(selfTokenFactory), fromPersistentStub, kj::mv(clientAddress));
 }
 
 }  // namespace workerd

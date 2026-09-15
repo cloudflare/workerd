@@ -6,6 +6,13 @@ from contextlib import contextmanager
 ALLOWED_ENTROPY_CALLS = array("b", [0])
 IN_REQUEST_CONTEXT = False
 
+TOP_LEVEL_ENTROPY_ERROR = (
+    "Randomness is not allowed while a Worker is starting because startup "
+    "values will be repeated across Worker instances, making them predictable. "
+    "If this error occurs from importing a package, import the package from a "
+    "function to load it after the Worker starts."
+)
+
 
 def in_request_context():
     return IN_REQUEST_CONTEXT
@@ -31,7 +38,7 @@ def should_allow_entropy_call():
 def raise_unless_entropy_allowed():
     if not should_allow_entropy_call():
         EIO = 29
-        raise OSError(EIO, "Cannot get entropy outside of request context")
+        raise OSError(EIO, TOP_LEVEL_ENTROPY_ERROR)
 
 
 def get_bad_entropy_flag():

@@ -33,9 +33,9 @@ ada-url = { version = "4", default-features = false, features = ["std"] }
 anyhow = "1"
 async-trait = { version = "0", default-features = false }
 bytes = { version = "1", default-features = false }
-capnp = "0"
-capnpc = "0"
-capnp-rpc = "0"
+capnp = "0.27"
+capnpc = "0.27"
+capnp-rpc = "0.27"
 clang-ast = "0"
 encoding_rs = "0"
 flate2 = "1"

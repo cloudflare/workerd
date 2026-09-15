@@ -1,6 +1,7 @@
 """wd_cc_benchmark definition"""
 
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
 
 def wd_cc_benchmark(
         name,
@@ -13,13 +14,7 @@ def wd_cc_benchmark(
     cc_test(
         name = name,
         defines = ["WD_IS_BENCHMARK"],
-        # Use shared linkage for benchmarks, matching the approach used for tests. Unfortunately,
-        # bazel does not support shared linkage on macOS and it is broken on Windows, so only
-        # enable this on Linux.
-        linkstatic = select({
-            "@platforms//os:linux": 0,
-            "//conditions:default": 1,
-        }),
+        linkstatic = CC_TEST_LINKSTATIC,
         visibility = visibility,
         deps = deps + [
             "@google_benchmark//:benchmark_main",

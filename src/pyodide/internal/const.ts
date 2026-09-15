@@ -8,3 +8,6 @@ export const PyodideVersion = {
   V314_0_4: '314.0.4',
   V314_0_6: '314.0.6',
 } as const;
+
+export type PyodideVersionType =
+  (typeof PyodideVersion)[keyof typeof PyodideVersion];

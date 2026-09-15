@@ -30,9 +30,10 @@ private-brand dispatch, no `instanceof`) apply here — see
   lists (`queue.ts` and `native.ts` headers).
 - The native source contract (marker symbol, standard pull/cancel hooks,
   byobRequest discrimination, once-per-pull delivery, per-pull abort
-  signal for cancellation, under-delivery = fused
-  `{done: true, value: partial}` EOF, tee hook, `expectedLength`
-  exact-total byte contract) is specified in the `native.ts` header.
+  signal for cancellation, under-delivery = EOF signal delivering the
+  partial as `{done: false, value: partial}` with the next read
+  observing EOF, tee hook, `expectedLength` exact-total byte contract)
+  is specified in the `native.ts` header.
   The C++ implementation (`ReadableStreamNativeSource` in
   `src/workerd/api/js-readable-stream.{h,c++}`) MUST conform to it; JS
   mocks in tests exercise the conduit independently. Key addition:

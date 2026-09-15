@@ -84,26 +84,6 @@ KJ_TEST("getPythonSnapshotRelease") {
   }
 }
 
-template <typename... Params>
-kj::Array<kj::String> strArray(Params&&... params) {
-  return kj::arr(kj::str(params)...);
-}
-
-template <typename... Params>
-kj::Array<kj::Array<kj::byte>> bytesArray(Params&&... params) {
-  return kj::arr(kj::heapArray<kj::byte>(kj::str(params).asBytes())...);
-}
-
-template <typename... Params>
-kj::HashSet<kj::String> strSet(Params&&... params) {
-  auto array = strArray(params...);
-  kj::HashSet<kj::String> set;
-  for (auto& str: array) {
-    set.insert(kj::mv(str));
-  }
-  return set;
-}
-
 KJ_TEST("computePyodideBundleIntegrity produces sha256 subresource-integrity strings") {
   // Known-answer test: SHA-256 of the empty input.
   KJ_EXPECT(pyodide::computePyodideBundleIntegrity(kj::ArrayPtr<const kj::byte>()) ==

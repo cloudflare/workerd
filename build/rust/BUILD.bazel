@@ -1,0 +1,39 @@
+load(":tsan_toolchain.bzl", "tsan_rust_toolchain")
+
+exports_files(["build_std.sh"])
+
+# One TSan toolchain per supported host. `--config=tsan` / `--config=tsan-macos` (.bazelrc) list
+# all of them in --extra_toolchains; toolchain resolution picks the one matching the host.
+# stdlib_linkflags mirror rules_rust's own generated toolchain for each triple.
+tsan_rust_toolchain(
+    name = "tsan_toolchain_linux_x86_64",
+    cpu = "@platforms//cpu:x86_64",
+    dylib_ext = ".so",
+    extra_rustc_flags = ["-Ctarget-feature=+sse4.2,+pclmulqdq"],
+    os = "@platforms//os:linux",
+    rust_tools = "@rust_nightly_linux_x86_64",
+    stdlib_linkflags = [
+        "-ldl",
+        "-lpthread",
+    ],
+    target_triple = "x86_64-unknown-linux-gnu",
+)
+
+tsan_rust_toolchain(
+    name = "tsan_toolchain_macos_aarch64",
+    cpu = "@platforms//cpu:aarch64",
+    dylib_ext = ".dylib",
+    # rustc passes -nodefaultlibs to the linker driver, and unlike Linux, Darwin's clang then also
+    # omits the sanitizer runtime that -Zexternal-clangrt (.bazelrc) relies on it to provide.
+    # Letting clang add its default libraries restores libclang_rt.tsan_osx_dynamic.dylib (and
+    # its rpath) at every Rust-driven link, so rust_binary/rust_test targets share Clang's
+    # runtime with the C++ they link, exactly as on Linux.
+    extra_rustc_flags = ["-Cdefault-linker-libraries=yes"],
+    os = "@platforms//os:macos",
+    rust_tools = "@rust_nightly_macos_aarch64",
+    stdlib_linkflags = [
+        "-lSystem",
+        "-lresolv",
+    ],
+    target_triple = "aarch64-apple-darwin",
+)

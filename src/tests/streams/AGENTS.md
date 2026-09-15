@@ -2,7 +2,9 @@
 
 Streams test suite, organized WPT-style: one subdirectory per functional area
 (`identity/`, `encoding/`, `compression/`, `digest/`, `strategies/`,
-eventually `readable/`, `writable/`, `piping/`, ...). Every
+`readable/`, `readable-byte/`, `writable/`, `transform/`, `piping/`,
+`inspect/`, `r2-patterns/`, `iocontext/`, `cache/`, `htmlrewriter/`,
+`formdata/`, `sockets/`). Every
 test here runs against **both** streams implementations — the legacy C++ one
 (`src/workerd/api/streams/`) and the TypeScript one
 (`src/per_isolate/webstreams/`) — to prove parity. A test that only makes
@@ -129,3 +131,35 @@ and `@all-autogates` variants, plus `@gc-stress` (off-by-default; run with
 `--test_tag_filters=`). `workerd test` requires an exported `test()` handler
 per case; assertions come from `node:assert` (`nodejs_compat` is in both
 configs' flag lists).
+
+## Streams tests that live elsewhere (by design)
+
+- `src/tests/node/` — the Node.js compatibility layer's USE of web
+  streams (`node:stream` adapters, `node:net` sockets, the `node:http`
+  client and server), under the same suite rules and the same cpp/ts
+  cells; each suite's `AGENTS.md` there carries its own ledger. A pure
+  web-streams behavior found through the node layer is pinned here, not
+  there (e.g. `readable` ledger #18).
+- `src/workerd/api/tests/js-rpc-streams-*` — stream serialization over
+  JS RPC (including ts-impl cells); owned by the worker-rpc domain.
+- `src/workerd/api/tests/ts-webstreams-test.js` — TypeScript-impl
+  internals (native/buffer/iterable bodies ARE ts streams, pumpTo);
+  single-implementation by nature.
+- Security regression singles in `src/workerd/api/tests/`
+  (streams-byob-close-reentry, streams-byob-concurrent-readatleast,
+  streams-byte-cancel-uaf, streams-byte-handlePush-uaf,
+  streams-circ-ref-regression, streams-consumer-reentry-gc,
+  streams-internal-read-buffer-gc, autovuln-*) — authoritative
+  crash/UAF repros, deliberately not merged into suites.
+- `src/workerd/api/streams/streams-test.js` — `partiallyReadStream`
+  (needs a KV binding).
+
+## IDL shape (deliberately not pinned here)
+
+WebIDL function metadata — operation `.length` values (optional
+arguments do not count), and promise-typed attributes/operations
+REJECTING rather than throwing on a broken `this` — is enumerated
+per-implementation by WPT's `idlharness.any.js`: the C++ implementation
+carries the known deviations as expectedFailures in
+`src/wpt/streams-test.ts`; the TypeScript implementation matches spec.
+The suites do not duplicate that enumeration.

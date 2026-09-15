@@ -660,14 +660,16 @@ struct Worker {
 
     container @5 :ContainerOptions;
     # If present, Durable Objects in this namespace have attached containers.
-    # workerd will talk to the configured container engine to start containers for each
-    # Durable Object based on the given image. The Durable Object can access the container via the
-    # ctx.container API. TODO(CloudChamber): add link to docs.
+    # workerd will talk to the configured container engine to start containers for each Durable
+    # Object from a configured default, a runtime-selected image, or a full container snapshot. The
+    # Durable Object can access the container via the ctx.container API.
+    # TODO(CloudChamber): add link to docs.
 
     struct ContainerOptions {
       imageName @0 :Text;
-      # Image name to be used to create the container using supported provider.
-      # By default, we pull the "latest" tag of this image.
+      # Optional default image used when start() does not specify an image or full container
+      # snapshot. An empty value means that no default image is configured.
+      # When imageName omits a tag, Docker uses the "latest" tag.
 
       privileges @1 :ContainerPrivileges;
       # Extra Docker HostConfig privileges applied when creating the container.
@@ -675,6 +677,17 @@ struct Worker {
       # They are not validated or allow-listed. Depending on the values and Docker daemon mode,
       # they can expose arbitrary host devices, disable security profiles, or grant capabilities
       # such as CAP_SYS_ADMIN that may provide host-level access. Only use trusted configuration.
+
+      images @2 :List(NamedImage);
+      # Named image references exposed to the Durable Object through ctx.container.images.
+      # These are optional; Worker code can instead supply an image reference from another source.
+      # When imageName is empty, the local container backend requires start() to specify an image or
+      # full container snapshot.
+
+      struct NamedImage {
+        name @0 :Text;
+        image @1 :Text;
+      }
 
       struct ContainerPrivileges {
         capabilities @0 :List(Text);

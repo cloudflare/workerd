@@ -4070,6 +4070,7 @@ interface ExecProcess {
 }
 interface Container {
   get running(): boolean;
+  get images(): Record<string, string>;
   start(options?: ContainerStartupOptions): void;
   monitor(): Promise<void>;
   destroy(error?: any): Promise<void>;
@@ -4848,6 +4849,7 @@ interface Tracing {
     ...args: A
   ): T;
   startSpan(name: string): Span;
+  getActiveSpan(): Span | undefined;
   Span: typeof Span;
 }
 declare abstract class Span {
@@ -13391,6 +13393,14 @@ interface RequestInitCfProperties extends Record<string, unknown> {
    * (e.g. { '200-299': 86400, '404': 1, '500-599': 0 })
    */
   cacheTtlByStatus?: Record<string, number>;
+  /**
+   * Controls whether Cloudflare uses range requests when fetching the response
+   * from the origin.
+   *
+   * - `"on"`: enable origin range requests for this request.
+   * - `"off"`: disable origin range requests for this request.
+   */
+  originRangeRequests?: "on" | "off";
   /** Controls how responses with a `Vary` header are cached for this request. */
   vary?: RequestInitCfPropertiesVary;
   /**
@@ -15545,11 +15555,41 @@ declare module "cloudflare:node" {
     listen(...args: unknown[]): this;
     address(): {
       port?: number | null | undefined;
-    };
+    } | null;
   }
   export function httpServerHandler(port: number): ExportedHandler;
   export function httpServerHandler(options: { port: number }): ExportedHandler;
   export function httpServerHandler(server: NodeStyleServer): ExportedHandler;
+  /**
+   * Dispatches a request to the `http.Server` listening on the given port and
+   * resolves with its response. The direct form of `httpServerHandler()`.
+   */
+  export function handleAsNodeRequest(
+    port:
+      | number
+      | {
+          port: number;
+        },
+    request: Request,
+    env?: unknown,
+    ctx?: ExecutionContext,
+  ): Promise<Response>;
+  /**
+   * Routes inbound sockets to the `net.Server` listening on the port each
+   * socket arrived on.
+   */
+  export function connectHandler(): ExportedHandler;
+  /**
+   * Dispatches an inbound socket to the `net.Server` listening on the port it
+   * arrived on, resolving when the connection has closed. The direct form of
+   * `connectHandler()`, for use inside a `connect()` handler, such as a
+   * Durable Object's.
+   */
+  export function handleAsNodeConnection(
+    socket: Socket,
+    env?: unknown,
+    ctx?: ExecutionContext,
+  ): Promise<void>;
 }
 type Params<P extends string = any> = Record<P, string | string[]>;
 type EventContext<Env, P extends string, Data> = {
@@ -17742,6 +17782,7 @@ type InstanceStatus = {
     | "complete"
     | "waiting" // instance is hibernating and waiting for sleep or event to finish
     | "waitingForPause" // instance is finishing the current work to pause
+    | "rollingBack"
     | "unknown";
   error?: {
     name: string;
@@ -17780,6 +17821,176 @@ interface WorkflowInstanceRestartOptions {
      */
     type?: "do" | "sleep" | "waitForEvent";
   };
+}
+/** An event emitted by a Workflow instance. */
+type WorkflowInstanceEvent = {
+  instanceId: string;
+  eventId: number;
+  timestamp: number;
+} & (
+  | {
+      type: "workflow_queued";
+    }
+  | {
+      type: "workflow_started";
+      params?: unknown;
+    }
+  | {
+      type: "workflow_running";
+    }
+  | {
+      type: "workflow_paused";
+    }
+  | {
+      type: "workflow_waiting_for_pause";
+    }
+  | {
+      type: "workflow_waiting";
+    }
+  | {
+      type: "workflow_completed";
+      output?: unknown;
+    }
+  | {
+      type: "workflow_errored";
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "workflow_terminated";
+    }
+  | {
+      type: "step_started";
+      stepName: string;
+      config?: {
+        retries: {
+          limit: number;
+          delay: WorkflowSleepDuration | "[dynamic]";
+          backoff?: "constant" | "linear" | "exponential";
+        };
+        timeout: WorkflowSleepDuration;
+        sensitive?: "output";
+      };
+    }
+  | {
+      type: "step_completed";
+      stepName: string;
+      output?: unknown;
+    }
+  | {
+      type: "step_errored";
+      stepName: string;
+    }
+  | {
+      type: "attempt_started";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "attempt_completed";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "attempt_errored";
+      stepName: string;
+      attempt: number;
+      retryDelayMs?: number;
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "sleep_started";
+      stepName: string;
+      durationMs: number;
+    }
+  | {
+      type: "sleep_completed";
+      stepName: string;
+    }
+  | {
+      type: "wait_started";
+      stepName: string;
+      eventType: string;
+    }
+  | {
+      type: "wait_completed";
+      stepName: string;
+    }
+  | {
+      type: "wait_timed_out";
+      stepName: string;
+    }
+  | {
+      type: "rollback_started";
+    }
+  | {
+      type: "rollback_step_started";
+      stepName: string;
+      config?: {
+        retries: {
+          limit: number;
+          delay: WorkflowSleepDuration | "[dynamic]";
+          backoff?: "constant" | "linear" | "exponential";
+        };
+        timeout: WorkflowSleepDuration;
+        sensitive?: "output";
+      };
+    }
+  | {
+      type: "rollback_step_completed";
+      stepName: string;
+    }
+  | {
+      type: "rollback_step_errored";
+      stepName: string;
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "rollback_attempt_started";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "rollback_attempt_completed";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "rollback_attempt_errored";
+      stepName: string;
+      attempt: number;
+      retryDelayMs?: number;
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "rollback_completed";
+    }
+  | {
+      type: "rollback_errored";
+    }
+);
+type WorkflowInstanceEventType = WorkflowInstanceEvent["type"];
+/** Options available for a Workflow instance subscription. */
+type WorkflowInstanceSubscribeOptions = {
+  /** The value from which to start the subscription. */
+  cursor?: number;
+  /** The event types to include in the subscription. */
+  filter?: WorkflowInstanceEventType[];
+};
+/** A disposable subscription to a Workflow instance's events. */
+interface WorkflowInstanceSubscription extends Disposable {
+  next(): Promise<IteratorResult<WorkflowInstanceEvent, void>>;
 }
 declare abstract class WorkflowInstance {
   public id: string;
@@ -17820,4 +18031,10 @@ declare abstract class WorkflowInstance {
     type: string;
     payload: unknown;
   }): Promise<void>;
+  /**
+   * Subscribe to events emitted by this instance.
+   */
+  public subscribe(
+    options?: WorkflowInstanceSubscribeOptions,
+  ): Promise<WorkflowInstanceSubscription>;
 }

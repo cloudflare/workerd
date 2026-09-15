@@ -35,4 +35,5 @@ def wd_cc_binary(
             "//conditions:default": name,
         }),
         testonly = kwargs.get("testonly", False),
+        target_compatible_with = target_compatible_with,
     )

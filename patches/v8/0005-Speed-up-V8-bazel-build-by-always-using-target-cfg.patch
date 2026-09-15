@@ -10,7 +10,7 @@ both target and exec configurations as generator tools depend on them.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 6be6167f027a77ffc28c59827eb261eeaf31ef77..37a39771739b475e2a367d4f4b3b0b68aacfe6ec 100644
+index 30dca7b0fa2f558a302a8e43e238834be93bf08f..6851d7182f7644fd03e4cd3ef4a4185e116ae100 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -19,6 +19,7 @@ load(
@@ -21,7 +21,7 @@ index 6be6167f027a77ffc28c59827eb261eeaf31ef77..37a39771739b475e2a367d4f4b3b0b68
  )
  load(":bazel/v8-non-pointer-compression.bzl", "v8_binary_non_pointer_compression")
  
-@@ -4548,22 +4549,20 @@ filegroup(
+@@ -4555,22 +4556,20 @@ filegroup(
      ],
  )
  
@@ -50,7 +50,7 @@ index 6be6167f027a77ffc28c59827eb261eeaf31ef77..37a39771739b475e2a367d4f4b3b0b68
  )
  
  v8_mksnapshot(
-@@ -4794,7 +4793,6 @@ v8_binary(
+@@ -4801,7 +4800,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
@@ -59,7 +59,7 @@ index 6be6167f027a77ffc28c59827eb261eeaf31ef77..37a39771739b475e2a367d4f4b3b0b68
      copts = ["-Wno-implicit-fallthrough"],
      defines = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index c56c0c2c3fbf3529b5dcf5d54921d4fd0b1f1b2a..c395faec16e9264a066355c17daf46003937b182 100644
+index 76bb755646c357f569d6d501dfc685bf27636799..709de3b6ca44124e0de5eeec57a371b2e8943866 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -356,6 +356,15 @@ def v8_library(
@@ -106,7 +106,7 @@ index c56c0c2c3fbf3529b5dcf5d54921d4fd0b1f1b2a..c395faec16e9264a066355c17daf4600
  )
  
  def v8_mksnapshot(name, args, suffix = ""):
-@@ -661,3 +673,34 @@ def v8_build_config(name, arch):
+@@ -663,3 +675,34 @@ def v8_build_config(name, arch):
          outs = ["icu/" + name + ".json"],
          cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
      )

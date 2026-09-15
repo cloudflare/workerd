@@ -55,6 +55,9 @@ class BaseTracer: public kj::Refcounted {
       kj::Date startTime) = 0;
   // Add a span close event.
   virtual void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) = 0;
+  virtual void addSpanAttribute(const tracing::InvocationSpanContext& context,
+      kj::ConstString key,
+      tracing::Attribute::Value value) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -110,9 +113,7 @@ class BaseTracer: public kj::Refcounted {
 
   // Mark this tracer as intentionally unused (e.g., for duplicate alarm requests).
   // When set, the destructor will not log a warning about missing Onset event.
-  void markUnused() {
-    markedUnused = true;
-  }
+  virtual void markUnused() = 0;
 
  protected:
   // Retrieves the current timestamp. If the IoContext is no longer available, we assume that the
@@ -132,10 +133,6 @@ class BaseTracer: public kj::Refcounted {
 
   // Weak reference to the IoContext, used to report span end time if available.
   kj::Maybe<kj::Own<IoContext::WeakRef>> weakIoContext;
-
-  // When true, the destructor will not log a warning about missing Onset event.
-  // Set via markUnused() when a tracer is intentionally not used (e.g., duplicate alarm requests).
-  bool markedUnused = false;
 
  private:
   friend class workerd::WeakRef<BaseTracer>;
@@ -168,6 +165,14 @@ class WorkerTracer final: public BaseTracer {
       kj::ConstString operationName,
       kj::Date startTime) override;
   void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
+  void addSpanAttribute(const tracing::InvocationSpanContext& context,
+      kj::ConstString key,
+      tracing::Attribute::Value value) override;
+  // Variant for RPC-based tracing, where the caller supplies the timestamp from its IoContext.
+  void addSpanAttributeInternal(const tracing::InvocationSpanContext& context,
+      kj::ConstString key,
+      tracing::Attribute::Value value,
+      kj::Date timestamp);
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String name,
@@ -207,6 +212,8 @@ class WorkerTracer final: public BaseTracer {
       kj::Date timestamp,
       const kj::ConstString& methodName) override;
 
+  void markUnused() override;
+
  private:
   PipelineLogLevel pipelineLogLevel;
   kj::Own<Trace> trace;
@@ -217,6 +224,10 @@ class WorkerTracer final: public BaseTracer {
   // for trace events. This should no longer be needed after merging the existing span ID and
   // InvocationSpanContext interfaces.
   kj::Maybe<tracing::InvocationSpanContext> topLevelInvocationSpanContext;
+
+  // When true, the destructor will not log a warning about missing Onset event.
+  // Set via markUnused() when a tracer is intentionally not used (e.g., duplicate alarm requests).
+  bool markedUnused = false;
 
   // own an instance of the pipeline to make sure it doesn't get destroyed
   // before we're finished tracing. kj::Refcounted serves as a fill-in here since the pipeline

@@ -16,8 +16,7 @@
 namespace workerd::api {
 
 ReaderImpl::ReaderImpl(kj::Ptr<ReadableStreamController::Reader> reader)
-    : ioContext(tryGetIoContextId()),
-      reader(kj::mv(reader)),
+    : reader(kj::mv(reader)),
       state(ReaderState::create<Initial>()) {}
 
 ReaderImpl::~ReaderImpl() noexcept(false) {
@@ -279,7 +278,7 @@ void ReadableStreamBYOBReader::visitForGc(jsg::GcVisitor& visitor) {
 // ======================================================================================
 // DrainingReader implementation
 
-DrainingReader::DrainingReader(): ioContext(tryGetIoContextId()) {}
+DrainingReader::DrainingReader() {}
 
 DrainingReader::~DrainingReader() noexcept(false) {
   KJ_IF_SOME(stream, state.tryGet<Attached>()) {
@@ -408,8 +407,7 @@ ReadableStream::ReadableStream(IoContext& ioContext, kj::Own<ReadableStreamSourc
     : ReadableStream(newReadableStreamInternalController(ioContext, kj::mv(source))) {}
 
 ReadableStream::ReadableStream(kj::Own<ReadableStreamController> controller)
-    : ioContext(tryGetIoContextId()),
-      controller(kj::mv(controller)) {
+    : controller(kj::mv(controller)) {
   getController().setOwnerRef(PtrTarget::addWeakToThis());
 }
 
@@ -481,9 +479,9 @@ ReadableStream::Reader ReadableStream::getReader(
 jsg::Ref<ReadableStream::ReadableStreamAsyncIterator> ReadableStream::values(
     jsg::Lock& js, jsg::Optional<ValuesOptions> options) {
   static const auto defaultOptions = ValuesOptions{};
-  return js.alloc<ReadableStreamAsyncIterator>(AsyncIteratorState{.ioContext = ioContext,
-    .reader = ReadableStreamDefaultReader::constructor(js, JSG_THIS),
-    .preventCancel = options.orDefault(defaultOptions).preventCancel.orDefault(false)});
+  return js.alloc<ReadableStreamAsyncIterator>(
+      AsyncIteratorState{.reader = ReadableStreamDefaultReader::constructor(js, JSG_THIS),
+        .preventCancel = options.orDefault(defaultOptions).preventCancel.orDefault(false)});
 }
 
 jsg::Ref<ReadableStream> ReadableStream::pipeThrough(

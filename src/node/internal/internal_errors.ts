@@ -679,6 +679,30 @@ export class ERR_SOCKET_BAD_PORT extends NodeError {
   }
 }
 
+export class EADDRINUSE extends NodeError {
+  syscall = 'bind';
+  address: string;
+  port: number;
+
+  constructor(address: string, port: number) {
+    super('EADDRINUSE', `bind EADDRINUSE ${address}:${port}`);
+    this.address = address;
+    this.port = port;
+  }
+}
+
+export class EADDRNOTAVAIL extends NodeError {
+  syscall = 'bind';
+  address: string;
+  port: number;
+
+  constructor(address: string, port: number) {
+    super('EADDRNOTAVAIL', `bind EADDRNOTAVAIL ${address}:${port}`);
+    this.address = address;
+    this.port = port;
+  }
+}
+
 export class EPIPE extends NodeError {
   constructor() {
     super('EPIPE', 'This socket has been ended by the other party');
@@ -703,6 +727,15 @@ export class ERR_SOCKET_CLOSED extends NodeError {
 export class ERR_SOCKET_CONNECTING extends NodeError {
   constructor() {
     super('ERR_SOCKET_CONNECTING', 'Socket is already connecting');
+  }
+}
+
+export class ERR_SOCKET_HANDLE_ADOPTED extends NodeError {
+  constructor() {
+    super(
+      'ERR_SOCKET_HANDLE_ADOPTED',
+      'The bound socket has already been adopted by a server or socket'
+    );
   }
 }
 
@@ -1002,6 +1035,12 @@ export class ERR_SERVER_ALREADY_LISTEN extends NodeError {
       'ERR_SERVER_ALREADY_LISTEN',
       'Listen method has been called more than once without closing.'
     );
+  }
+}
+
+export class ERR_SERVER_NOT_RUNNING extends NodeError {
+  constructor() {
+    super('ERR_SERVER_NOT_RUNNING', 'Server is not running.');
   }
 }
 

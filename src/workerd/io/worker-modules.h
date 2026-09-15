@@ -83,7 +83,7 @@ jsg::ModuleRegistry::ModuleInfo addCapnpModule(
 // the codebase, one for workerd and one for the internal project. It depends
 // on the TypeWrapper specific to each project.
 template <typename TypeWrapper>
-static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
+kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
     kj::Maybe<const Worker::Script::ModulesSource&> maybeSource,
     const CompatibilityFlags::Reader& featureFlags,
     const jsg::Url& bundleBase,
@@ -280,19 +280,19 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
 namespace modules::legacy {
 
 template <typename JsgIsolate>
-static v8::Local<v8::String> compileTextGlobal(
+v8::Local<v8::String> compileTextGlobal(
     typename JsgIsolate::Lock& lock, ::capnp::Text::Reader reader) {
   return lock.wrapNoContext(reader);
 };
 
 template <typename JsgIsolate>
-static v8::Local<v8::ArrayBuffer> compileDataGlobal(
+v8::Local<v8::ArrayBuffer> compileDataGlobal(
     typename JsgIsolate::Lock& lock, ::capnp::Data::Reader reader) {
   return lock.wrapNoContext(kj::heapArray(reader));
 };
 
 template <typename JsgIsolate>
-static v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lock& lock,
+v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lock& lock,
     ::capnp::Data::Reader reader,
     const jsg::CompilationObserver& observer) {
   // Wasm compilation requires code-generation permission. The scope restores
@@ -311,7 +311,7 @@ static v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lo
 };
 
 template <typename JsgIsolate>
-static v8::Local<v8::Value> compileJsonGlobal(
+v8::Local<v8::Value> compileJsonGlobal(
     typename JsgIsolate::Lock& lock, ::capnp::Text::Reader reader) {
   return jsg::check(v8::JSON::Parse(lock.v8Context(), lock.wrapNoContext(reader)));
 };

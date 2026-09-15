@@ -74,10 +74,10 @@ wd_cc_binary(
         ":workerd-capnp-schema",
         ":workerd_capnp",
         "//src/pyodide:pyodide_extra_capnp",
-        "//src/rust/cxx-integration",
         "//src/workerd/util:autogate",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/capnp:capnpc",
+        "@capnp-cpp//src/kj:kj-async",
     ],
 )
 
@@ -94,7 +94,7 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/util:sqlite",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
     ],
 )
 
@@ -132,7 +132,7 @@ wd_cc_library(
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-tls",
     ],
@@ -149,6 +149,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
+        "@capnp-cpp//src/capnp:capnp-rpc",
     ],
 )
 
@@ -174,8 +175,6 @@ wd_cc_library(
         ":set_use_transpiler": ["WORKERD_USE_TRANSPILER"],
         "//conditions:default": [],
     }),
-    # TODO(soon): This is temporarily disabled because it takes a lifetime to complete.
-    tags = ["no-clang-tidy"],
     visibility = ["//visibility:public"],
     deps = [
         ":actor-id-impl",
@@ -246,6 +245,8 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:websocket-error-handler",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj:kj-async",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-tls",
     ],
@@ -291,7 +292,7 @@ wd_cc_library(
         "@ada-url",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )

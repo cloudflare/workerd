@@ -19,11 +19,10 @@ export class EventSourceGcDo extends DurableObject {
 
       const sourceRef = new WeakRef(source);
       source = null;
+      // Queue stackless GC before yielding so its task runs before this request resumes.
+      const gcPromise = gc({ type: 'major', execution: 'async' });
       await scheduler.wait(0);
-      gc();
-      await scheduler.wait(0);
-      gc();
-      await scheduler.wait(0);
+      await gcPromise;
       assert.strictEqual(sourceRef.deref(), undefined);
     });
 

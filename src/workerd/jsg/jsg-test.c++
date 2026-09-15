@@ -4,8 +4,6 @@
 
 #include "jsg-test.h"
 
-#include <signal.h>
-
 namespace workerd::jsg::test {
 namespace {
 
@@ -62,29 +60,6 @@ KJ_TEST("context type is exposed in the global scope") {
 // ========================================================================================
 
 struct InheritContext: public ContextGlobalObject {
-  struct OffsetBase {
-    virtual void anchor() {}
-    uint64_t padding = 0;
-  };
-
-  struct OffsetObject: public OffsetBase, public Object {
-    static Ref<OffsetObject> constructor(jsg::Lock& js, double value) {
-      auto result = js.alloc<OffsetObject>();
-      result->value = value;
-      return result;
-    }
-
-    double getValue() {
-      return value;
-    }
-
-    JSG_RESOURCE_TYPE(OffsetObject) {
-      JSG_METHOD(getValue);
-    }
-
-    double value = 0;
-  };
-
   struct Other: public Object {
     static jsg::Ref<Other> constructor(jsg::Lock& js) {
       return js.alloc<Other>();
@@ -96,43 +71,16 @@ struct InheritContext: public ContextGlobalObject {
     return ExtendedNumberBox::constructor(js, value, kj::mv(text));
   }
 
-  void substituteCppgcShim(
-      jsg::Lock& js, v8::Local<v8::Object> target, v8::Local<v8::Object> source) {
-    substituteCppgcShimForTest(js.v8Isolate, target, source);
-  }
-
-  void detachWrapper(jsg::Lock& js, v8::Local<v8::Object> object) {
-    detachWrapperForTest(js.v8Isolate, object);
-  }
-
-  void resetRoot(jsg::Lock& js, v8::Local<v8::Object> object) {
-    resetRootForTest(js.v8Isolate, object);
-  }
-
-  bool sharesCppgcShim(jsg::Lock& js, v8::Local<v8::Object> first, v8::Local<v8::Object> second) {
-    return sharesCppgcShimForTest(js.v8Isolate, first, second);
-  }
-
   JSG_RESOURCE_TYPE(InheritContext) {
     JSG_NESTED_TYPE(NumberBox);
     JSG_NESTED_TYPE(Other);
-    JSG_NESTED_TYPE(OffsetObject);
     JSG_NESTED_TYPE(ExtendedNumberBox);
 
     JSG_METHOD(newExtendedAsBase);
-    JSG_METHOD(substituteCppgcShim);
-    JSG_METHOD(detachWrapper);
-    JSG_METHOD(resetRoot);
-    JSG_METHOD(sharesCppgcShim);
   }
 };
-JSG_DECLARE_ISOLATE_TYPE(InheritIsolate,
-    InheritContext,
-    NumberBox,
-    InheritContext::Other,
-    InheritContext::OffsetObject,
-    ExtendedNumberBox);
-using InheritEvaluator = Evaluator<InheritContext, InheritIsolate>;
+JSG_DECLARE_ISOLATE_TYPE(
+    InheritIsolate, InheritContext, NumberBox, InheritContext::Other, ExtendedNumberBox);
 
 KJ_TEST("inheritance") {
   Evaluator<InheritContext, InheritIsolate> e(v8System);
@@ -167,61 +115,6 @@ KJ_TEST("inheritance") {
   e.expectEval("newExtendedAsBase(123, 'foo') instanceof NumberBox", "boolean", "true");
 
   e.expectEval("newExtendedAsBase(123, 'foo') instanceof ExtendedNumberBox", "boolean", "true");
-
-  e.expectEval("new OffsetObject(123).getValue()", "number", "123");
-}
-
-KJ_TEST("native dispatch rejects same-type shim substitution") {
-  KJ_EXPECT_SIGNAL(SIGABRT, {
-    InheritEvaluator e(v8System);
-    e.expectEval("let target = new NumberBox(123);"
-                 "let source = new NumberBox(456);"
-                 "substituteCppgcShim(target, source);"
-                 "target.getValue()",
-        "number", "456");
-  });
-}
-
-KJ_TEST("native dispatch rejects inheritance-compatible shim substitution") {
-  KJ_EXPECT_SIGNAL(SIGABRT, {
-    InheritEvaluator e(v8System);
-    e.expectEval("let target = new NumberBox(123);"
-                 "let source = new ExtendedNumberBox(456, 'source');"
-                 "substituteCppgcShim(target, source);"
-                 "target.getValue()",
-        "number", "456");
-  });
-}
-
-KJ_TEST("ResetRoot rejects substituted shim ownership") {
-  KJ_EXPECT_SIGNAL(SIGABRT, {
-    InheritEvaluator e(v8System);
-    e.expectEval(R"(
-      let target = new NumberBox(123);
-      const source = new NumberBox(456);
-      substituteCppgcShim(target, source);
-      resetRoot(target);
-    )",
-        "undefined", "undefined");
-  });
-}
-
-KJ_TEST("native dispatch rejects stale handle after same-tag shim reuse") {
-  KJ_EXPECT_SIGNAL(SIGABRT, {
-    InheritEvaluator e(v8System);
-    e.expectEval(R"(
-      const target = new NumberBox(123);
-      const source = new NumberBox(456);
-      substituteCppgcShim(target, source);
-      detachWrapper(source);
-      const replacement = new NumberBox(789);
-      if (!sharesCppgcShim(target, replacement)) {
-        throw new Error("expected the shim to be reused");
-      }
-      target.getValue();
-    )",
-        "number", "789");
-  });
 }
 
 // ========================================================================================

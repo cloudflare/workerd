@@ -101,6 +101,7 @@ export {
 export {
   cancelRejectsPendingWriteAndClose,
   cancelRejectsSubsequentWrites,
+  pipeCancellationWinsOverLaterReadableCancel,
   cancelResolvesReaderClosedPromise,
   cancelledReaderReadsResolveDone,
 } from 'cancel-propagation';
@@ -196,3 +197,5 @@ export {
   writeFromReadContinuation,
   cancelSiblingFromReadContinuation,
 } from 'reentrancy';
+
+export { structuredCloneIdentity } from 'transfer';

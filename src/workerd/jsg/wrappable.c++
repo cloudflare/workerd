@@ -17,6 +17,9 @@
 #include <kj/debug.h>
 
 #include <cstdlib>
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/asan_interface.h>
+#endif
 
 namespace workerd::jsg {
 
@@ -49,15 +52,7 @@ void HeapTracer::clearWrappers() {
     // V8 operations. Without this, objects that outlive their isolate (like WebSockets
     // stored in a HibernationManager) would have a dangling isolate pointer and crash
     // when trying to check v8::Locker::IsLocked() or create V8 handles.
-    if (ownWrappable.get() == nullptr) {
-      // cppgc has cleared the weak shim but has not run its deferred destructor yet. The shim
-      // will release the Wrappable later, after isolate teardown has unlinked it here.
-      KJ_DASSERT(wrappable.isCondemned());
-      wrappers.remove(wrappable);
-      wrappable.isolate = nullptr;
-    } else {
-      ownWrappable->isolate = nullptr;
-    }
+    ownWrappable->isolate = nullptr;
   }
   clearFreelistedShims();
 }
@@ -92,11 +87,9 @@ using JSGWrappable = workerd::jsg::Wrappable;
 // condemned after that point and will be deleted shortly thereafter.
 class Wrappable::CppgcShim final: public v8::Object::Wrappable {
  public:
-  CppgcShim(JSGWrappable& wrappable, v8::CppHeapPointerTag tag)
-      : tag(tag),
-        state(Active{kj::addRef(wrappable)}) {
-    KJ_DASSERT(!wrappable.hasWrapper());
-    wrappable.weakShim = this;
+  CppgcShim(JSGWrappable& wrappable): state(Active{kj::addRef(wrappable)}) {
+    KJ_DASSERT(wrappable.cppgcShim == kj::none);
+    wrappable.cppgcShim = *this;
   }
 
   ~CppgcShim() {
@@ -109,13 +102,9 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
 
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(active, Active) {
-        // A collected wrapper implies nothing was pinning it, i.e. strongRefcount == 0. This is
-        // what makes it safe for cppgc to clear `weakShim` without a GC visitation; see the
-        // comment on Wrappable::strongRefcount.
+        KJ_DASSERT(&KJ_ASSERT_NONNULL(active.wrappable->cppgcShim) == this);
         KJ_DASSERT(active.wrappable->strongWrapper.IsEmpty());
-        // Can't go through detachWrapper(): on the major-GC path cppgc already cleared the
-        // Wrappable's `weakShim`, so it can no longer find us. Hand it the shim directly.
-        active.wrappable->detachFromShim(*this, false);
+        active.wrappable->detachWrapper(false);
       }
       KJ_CASE_ONEOF(freelisted, Freelisted) {
         KJ_DASSERT(&KJ_ASSERT_NONNULL(*freelisted.prev) == this);
@@ -132,8 +121,6 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
   void Trace(cppgc::Visitor* visitor) const override {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(active, Active) {
-        // Trace the handle this shim owns, which is what cppgc expects of a GC-managed object.
-        visitor->Trace(KJ_ASSERT_NONNULL(wrapper));
         active.wrappable->traceFromV8(*visitor);
       }
       KJ_CASE_ONEOF(freelisted, Freelisted) {
@@ -179,124 +166,50 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
     return false;
   }
 
-  JSGWrappable& resolve(v8::Local<v8::Object> object) {
-    KJ_IF_SOME(active, state.tryGet<Active>()) {
-      // An Active shim always holds its wrapper; see the invariant on `wrapper` below.
-      if (KJ_ASSERT_NONNULL(wrapper) == object) {
-        return *active.wrappable;
-      }
-    }
-    reportWrapperIdentityMismatch();
-  }
-
-  // The per-type CppHeapPointerTag this shim was Wrapped with. A shim is only ever reused for the
-  // same tag (see HeapTracer::freelistedShimsByTag), so this value is fixed for the shim's whole
-  // lifetime and identifies which freelist bucket it belongs to.
-  v8::CppHeapPointerTag tag;
-
-  // Handle to the JS wrapper this shim was Wrapped into. Non-empty exactly while `state` is
-  // Active; addToFreelist() asserts it was cleared, and Trace() ignores it in the other states.
-  //
-  // This lives here rather than in the Wrappable so that the handle and the shim cppgc collects
-  // are one and the same: once the shim dies, nothing can observe the handle, which is the
-  // arrangement cppgc's contract assumes. It is cleared by dropping the kj::Maybe rather than by
-  // Reset(), because a full GC may already have freed the underlying traced node --
-  // ~TracedReference is trivial and writes nothing, whereas Reset() would touch freed memory. The
-  // minor-GC path is the exception and must Reset() explicitly; see HeapTracer::ResetRoot().
-  kj::Maybe<v8::TracedReference<v8::Object>> wrapper;
-
   mutable kj::OneOf<Active, Freelisted, Dead> state;
   // This is `mutable` because `Trace()` is const. We configure V8 to perform traces atomically in
   // the main thread so concurrency is not a concern.
 };
 
-kj::Maybe<JSGWrappable::CppgcShim&>& HeapTracer::freelistHeadFor(v8::CppHeapPointerTag tag) {
-  auto index = wrappableTagBucketIndex(static_cast<uint16_t>(tag));
-  // Guaranteed in range by the static_assert in TypeWrapper::wrappableTag<T>() at every wrap site;
-  // this is a defensive backstop for the non-resource catch-all and any future direct callers.
-  KJ_ASSERT(index < kMaxWrappableTags);
-  return freelistedShimsByTag[index];
-}
-
 void HeapTracer::addToFreelist(JSGWrappable::CppgcShim& shim) {
-  // Trace() deliberately ignores the handle once a shim is no longer Active, so a freelisted shim
-  // holding one would silently drop a live edge. detachFromShim() clears it before we get here.
-  KJ_DASSERT(shim.wrapper == kj::none);
-  auto& head = freelistHeadFor(shim.tag);
   auto& freelisted = shim.state.init<JSGWrappable::CppgcShim::Freelisted>();
-  freelisted.next = head;
+  freelisted.next = freelistedShims;
   KJ_IF_SOME(next, freelisted.next) {
     next.state.get<JSGWrappable::CppgcShim::Freelisted>().prev = &freelisted.next;
   }
-  freelisted.prev = &head;
-  head = shim;
+  freelisted.prev = &freelistedShims;
+  freelistedShims = shim;
 }
 
-JSGWrappable::CppgcShim* HeapTracer::allocateShim(
-    JSGWrappable& wrappable, v8::CppHeapPointerTag tag) {
+JSGWrappable::CppgcShim* HeapTracer::allocateShim(JSGWrappable& wrappable) {
   // Under gc-stress (either turn-boundary or alloc mode), skip freelist reuse so each freed shim
   // keeps a unique address and ASAN poisoning sticks, giving cleaner use-after-free reports.
   if (!isGcStressModeForTest() && !isAllocGcStressModeForTest()) {
-    // Only reuse a shim from the bucket for this exact tag, so a recycled shim's table-entry tag
-    // never changes and a stale wrapper handle can't be confused across types.
-    auto& head = freelistHeadFor(tag);
-    KJ_IF_SOME(shim, head) {
-      head = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
-      KJ_IF_SOME(next, head) {
-        next.state.get<JSGWrappable::CppgcShim::Freelisted>().prev = &head;
+    KJ_IF_SOME(shim, freelistedShims) {
+      freelistedShims = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
+      KJ_IF_SOME(next, freelistedShims) {
+        next.state.get<JSGWrappable::CppgcShim::Freelisted>().prev = &freelistedShims;
       }
-      KJ_DASSERT(shim.tag == tag);
       shim.state = JSGWrappable::CppgcShim::Active{kj::addRef(wrappable)};
-      KJ_DASSERT(!wrappable.hasWrapper());
-      wrappable.weakShim = &shim;
+      KJ_DASSERT(wrappable.cppgcShim == kj::none);
+      wrappable.cppgcShim = shim;
       return &shim;
     }
   }
   auto& cppgcAllocHandle = isolate->GetCppHeap()->GetAllocationHandle();
-  auto* shim =
-      cppgc::MakeGarbageCollected<JSGWrappable::CppgcShim>(cppgcAllocHandle, wrappable, tag);
+  auto* shim = cppgc::MakeGarbageCollected<JSGWrappable::CppgcShim>(cppgcAllocHandle, wrappable);
   return shim;
 }
 
 void HeapTracer::clearFreelistedShims() {
-  for (auto& head: freelistedShimsByTag) {
-    for (;;) {
-      KJ_IF_SOME(shim, head) {
-        head = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
-        shim.state = JSGWrappable::CppgcShim::Dead{};
-      } else {
-        break;
-      }
+  for (;;) {
+    KJ_IF_SOME(shim, freelistedShims) {
+      freelistedShims = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
+      shim.state = JSGWrappable::CppgcShim::Dead{};
+    } else {
+      break;
     }
   }
-}
-
-void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
-  // V8 calls this to tell us when our wrapper can be dropped. See comment about droppable
-  // references in Wrappable::attachWrapper() for details.
-  v8::HandleScope scope(isolate);
-
-  // V8 can only hand this polymorphic callback a wrapper that is in one of the sandbox-external
-  // tables, so it is genuinely one of ours. Sandbox-internal corruption can still substitute
-  // another shim, so resolve through the exact wrapper identity check.
-  auto object = handle.As<v8::Object>().Get(isolate);
-  auto& wrappable =
-      *JSGWrappable::unwrapFromShimInRangeOrAbort(isolate, object, kJsgWrappableTagRange);
-  auto& shim = KJ_ASSERT_NONNULL(wrappable.getShim());
-
-  // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
-  // (which is what `detachWrapper()` will do) it is not satisfied, and will come back and try to
-  // visit the reference again, but it will DCHECK-fail on that second attempt because the
-  // reference is in an inconsistent state at that point.
-  //
-  // Unlike the major-GC path, the node is definitely still live here: V8 is telling us it is
-  // dropping a droppable root it has decided to reclaim, not reporting one it already zapped.
-  KJ_ASSERT_NONNULL(shim.wrapper).Reset();
-
-  // We don't want to call `detachWrapper()` now because it may create new handles (specifically,
-  // if the wrappable has strong references, which means that its outgoing references need to be
-  // upgraded to strong).
-  detachLater.add(&wrappable);
 }
 
 void HeapTracer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -306,133 +219,58 @@ void HeapTracer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
   // TODO(soon): Track the other fields here?
 }
 
-void HeapTracer::substituteCppgcShimForTest(
-    v8::Isolate* isolate, v8::Local<v8::Object> target, v8::Local<v8::Object> source) {
-  auto* shim = v8::Object::Unwrap<v8::Object::Wrappable>(isolate, source, kJsgWrappableTagRange);
-  KJ_REQUIRE(shim != nullptr);
-  v8::Object::Wrap(isolate, target, shim, static_cast<Wrappable::CppgcShim*>(shim)->tag);
-}
-
-void substituteCppgcShimForTest(
-    v8::Isolate* isolate, v8::Local<v8::Object> target, v8::Local<v8::Object> source) {
-  HeapTracer::substituteCppgcShimForTest(isolate, target, source);
-}
-
-void detachWrapperForTest(v8::Isolate* isolate, v8::Local<v8::Object> object) {
-  auto& wrappable = *Wrappable::unwrapFromShimAnyType(isolate, object);
-  auto drop = wrappable.detachWrapper(true);
-}
-
-void resetRootForTest(v8::Isolate* isolate, v8::Local<v8::Object> object) {
-  v8::TracedReference<v8::Value> handle(isolate, object);
-  HeapTracer::getTracer(isolate).ResetRoot(handle);
-}
-
-bool sharesCppgcShimForTest(
-    v8::Isolate* isolate, v8::Local<v8::Object> first, v8::Local<v8::Object> second) {
-  auto* firstShim =
-      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, first, kJsgWrappableTagRange);
-  auto* secondShim =
-      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, second, kJsgWrappableTagRange);
-  return firstShim != nullptr && secondShim != nullptr && firstShim == secondShim;
-}
-
-Wrappable* Wrappable::unwrapFromShim(
-    v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange) {
-  // Read the CppgcShim out of V8's CppHeap pointer table, requiring the stored tag to fall within
-  // `tagRange`. If the object was never wrapped, or its tag is outside the range (a type-confused
-  // or forged handle), Unwrap returns nullptr.
-  auto* shim =
-      static_cast<CppgcShim*>(v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, tagRange));
-  if (shim == nullptr) {
-    return nullptr;
-  }
-
-  return &shim->resolve(object);
-}
-
-Wrappable* Wrappable::unwrapFromShimAnyType(v8::Isolate* isolate, v8::Local<v8::Object> object) {
-  return unwrapFromShim(isolate, object, kJsgWrappableTagRange);
-}
-
-Wrappable* Wrappable::unwrapFromShimInRangeOrAbort(
-    v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange) {
-  // Unwrap with the full JSG range so Object::Unwrap never faults, then range-check the shim's own
-  // tag ourselves. See the header for why the check can't be delegated to Object::Unwrap, and why
-  // an out-of-range tag here is a memory-safety violation that must abort.
-  auto* shim = static_cast<CppgcShim*>(
-      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, kJsgWrappableTagRange));
-  if (shim != nullptr) {
-    auto tag = static_cast<uint16_t>(shim->tag);
-    if (tag >= static_cast<uint16_t>(tagRange.first) &&
-        tag <= static_cast<uint16_t>(tagRange.last)) {
-      return &shim->resolve(object);
-    }
-  }
-
-  KJ_LOG(FATAL, "wrapper type mismatch: object's tag is outside the expected range");
-  abort();
-}
-
-kj::Maybe<JSGWrappable::CppgcShim&> JSGWrappable::getShim() const {
-  auto* shim = weakShim.Get();
-  if (shim == nullptr) return kj::none;
-  // Only CppgcShim instances are ever stored in `weakShim`.
-  return *static_cast<CppgcShim*>(shim);
-}
-
-kj::Maybe<v8::Local<v8::Object>> JSGWrappable::tryGetHandle(v8::Isolate* isolate) {
-  KJ_IF_SOME(shim, getShim()) {
-    return KJ_ASSERT_NONNULL(shim.wrapper).Get(isolate);
-  }
-  return kj::none;
-}
-
 kj::Own<JSGWrappable> JSGWrappable::detachWrapper(bool shouldFreelistShim) {
-  KJ_IF_SOME(shim, getShim()) {
-    return detachFromShim(shim, shouldFreelistShim);
-  } else {
-    return {};
-  }
-}
+  KJ_IF_SOME(shim, cppgcShim) {
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+    // There's a possibility that the CppgcShim has already been found to be unreachable by a GC
+    // pass, but has not actually been destroyed yet. For some reason, cppgc likes to delay the
+    // calling of actual destructors. However, in ASAN builds, cppgc will poison the memory in the
+    // meantime, because it figures that we "shouldn't" be accessing unreachable memory. This
+    // assumption makes sense in the abstract, but not for our specific use case, where we are
+    // essentially maintaining a weak pointer to the CppgcShim. If the destructor had been called,
+    // then `cppgcShim` here would have been nulled out at that time. We're expecting that until
+    // the destructor is called, we can still safely access the object to detach the wrapper.
+    //
+    // So to work around cppgc's incorrect assumption, we manually unpoison the memory.
+    //
+    // Note: An alternative strategy could have been for CppgcShim itself to allocate a separate
+    // C++ heap object to store its own state in, so that that state could be modified even while
+    // the CppgcShim object itself is poisoned. In this case `Wrappable::cppgcShim` would change to
+    // point at this state object, not to the `CppgcShim` itself. However, this approach would
+    // require extra heap allocation for everyone, just to satisfy ASAN, which seems undesirable.
+    ASAN_UNPOISON_MEMORY_REGION(&shim, sizeof(shim));
+#endif
 
-kj::Own<JSGWrappable> JSGWrappable::detachFromShim(
-    JSGWrappable::CppgcShim& shim, bool shouldFreelistShim) {
-  auto result =
-      kj::mv(KJ_ASSERT_NONNULL(shim.state.tryGet<JSGWrappable::CppgcShim::Active>()).wrappable);
-  // Drop the handle without Reset()ing it: the traced node may already have been freed by a
-  // full GC. See the comment on CppgcShim::wrapper.
-  shim.wrapper = kj::none;
-  if (shouldFreelistShim) {
-    KJ_ASSERT(isolate != nullptr);
-    HeapTracer::getTracer(isolate).addToFreelist(shim);
-  } else {
-    shim.state = JSGWrappable::CppgcShim::Dead{};
-  }
-  // Already null when cppgc cleared it for us on the major-GC path; a no-op then.
-  weakShim.Clear();
-  strongWrapper.Reset();
-  // Note: weak refs are deliberately NOT invalidated here. Detaching the wrapper does not
-  // imply the Wrappable is dying: this method also runs when V8 drops an unmodified droppable
-  // wrapper via ResetRoot() (the Wrappable stays alive through C++ refs and the wrapper is
-  // recreated on demand the next time it is passed to JS) and at isolate shutdown via
-  // clearWrappers() (Wrappables like hibernatable WebSockets outlive the isolate). A
-  // jsg::WeakRef tracks the Wrappable's lifetime, not the wrapper's; invalidation happens in
-  // ~Wrappable(), or eagerly in WeakRef::tryAddRef() when isCondemned() proves the Wrappable
-  // is doomed.
-  if (isolate != nullptr) {
-    HeapTracer::getTracer(isolate).removeWrapper({}, *this);
+    auto& tracer = HeapTracer::getTracer(isolate);
+    auto result =
+        kj::mv(KJ_ASSERT_NONNULL(shim.state.tryGet<JSGWrappable::CppgcShim::Active>()).wrappable);
+    if (shouldFreelistShim) {
+      tracer.addToFreelist(shim);
+    } else {
+      shim.state = JSGWrappable::CppgcShim::Dead{};
+    }
+    wrapper = kj::none;
+    cppgcShim = kj::none;
+    strongWrapper.Reset();
+    // Note: weak refs are deliberately NOT invalidated here. Detaching the wrapper does not
+    // imply the object is dying: this method also runs when V8 drops an unmodified droppable
+    // wrapper via ResetRoot() (the object stays alive through C++ refs and the wrapper is
+    // recreated on demand the next time it is passed to JS) and at isolate shutdown via
+    // clearWrappers() (objects like hibernatable WebSockets outlive the isolate). A
+    // jsg::WeakRef tracks the object's lifetime, not the wrapper's; invalidation happens in
+    // ~Wrappable(), or eagerly in WeakRef::tryAddRef() when a zapped wrapper proves the
+    // object is condemned.
+    tracer.removeWrapper({}, *this);
     if (strongRefcount > 0) {
       // Need to visit child references in order to convert them to strong references, since we
       // no longer have an intervening wrapper.
       GcVisitor visitor(*this, kj::none);
       jsgVisitForGc(visitor);
     }
+    return result;
   } else {
-    KJ_DASSERT(!link.isLinked());
-    KJ_DASSERT(strongRefcount == 0);
+    return {};
   }
-  return result;
 }
 
 v8::Local<v8::Object> Wrappable::getHandle(v8::Isolate* isolate) {
@@ -446,10 +284,10 @@ void Wrappable::addStrongRef() {
       "referencing wrapper without isolate lock");
   if (strongRefcount++ == 0) {
     // This object previously had no strong references, but now it has one.
-    KJ_IF_SOME(shim, getShim()) {
+    KJ_IF_SOME(w, wrapper) {
       // Copy the traced reference into the strong reference.
       v8::HandleScope scope(isolate);
-      strongWrapper.Reset(isolate, KJ_ASSERT_NONNULL(shim.wrapper).Get(isolate));
+      strongWrapper.Reset(isolate, w.Get(isolate));
     } else {
       // Since we have no JS wrapper, we're forced to recursively mark all references reachable
       // through this wrapper as strong.
@@ -463,7 +301,7 @@ void Wrappable::removeStrongRef() {
       "destroying wrapper without isolate lock");
   if (--strongRefcount == 0) {
     // This was the last strong reference.
-    if (!hasWrapper()) {
+    if (wrapper == kj::none) {
       // We have no wrapper. We need to mark all references held by this object as weak.
       if (isolate != nullptr) {
         // But only if the current isolate isn't null. If strong ref count is zero,
@@ -497,18 +335,17 @@ void Wrappable::maybeDeferDestruction(bool strong, kj::Own<void> ownSelf, Wrappa
 }
 
 void Wrappable::traceFromV8(cppgc::Visitor& cppgcVisitor) {
-  // The wrapper handle is traced by our CppgcShim, which owns it.
+  tracedEpoch.store(HeapTracer::getTracer(isolate).getActiveGcEpoch(), std::memory_order_relaxed);
+  cppgcVisitor.Trace(KJ_ASSERT_NONNULL(wrapper));
   GcVisitor visitor(*this, cppgcVisitor);
   jsgVisitForGc(visitor);
 }
 
-void Wrappable::attachWrapper(v8::Isolate* isolate,
-    v8::Local<v8::Object> object,
-    bool needsGcTracing,
-    v8::CppHeapPointerTag tag) {
+void Wrappable::attachWrapper(
+    v8::Isolate* isolate, v8::Local<v8::Object> object, bool needsGcTracing) {
   auto& tracer = HeapTracer::getTracer(isolate);
 
-  KJ_REQUIRE(!hasWrapper());
+  KJ_REQUIRE(wrapper == kj::none);
   KJ_REQUIRE(strongWrapper.IsEmpty());
 
   // The C++ Wrappable object must hold a TracedReference to its own JavaScript wrapper, while
@@ -538,29 +375,33 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   // our wrapper and recreated it, the property would be gone. Luckily, V8 already handles this
   // for us! V8 knows not to drop our wrapper if the application has done anything with it such
   // that a recreated wrapper would no longer be equivalent.
+  wrapper.emplace(isolate, object, v8::TracedReference<v8::Object>::IsDroppable());
   this->isolate = isolate;
+  // Stamp the last *completed* GC epoch so that wasTracedInLastGc() returns true for newly
+  // attached wrappers (otherwise a wrapper attached after any completed major GC would read as
+  // dead). Deliberately NOT the active epoch: creating a TracedReference is an initializing
+  // store, which V8 does not black-allocate, so a wrapper attached during an in-flight marking
+  // cycle whose JS object dies before the atomic pause is zapped by that same cycle. Stamping
+  // the completed epoch keeps such wrappers detectable as dead; if the wrapper instead survives
+  // the in-flight cycle, traceFromV8() re-stamps it with the active epoch during the pause.
+  tracedEpoch.store(tracer.getCompletedGcEpoch(), std::memory_order_relaxed);
+
+  // Add to list of objects to force-clean at isolate shutdown.
+  tracer.addWrapper({}, *this);
 
   // Set up internal fields for a newly-allocated object.
   KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-  // Internal field 0 holds a marker identifying this as a workerd API object; see
-  // isWorkerdApiObject(). The marker's address is a small integer type-tagged by slot index.
+  // The third argument is the type tag, a small integer that should be
+  // different for every pointer type to avoid type confusion attacks.  We just
+  // use the slot index for now, since we have a different pointer type for
+  // each slot.
   auto tagAddress = const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG);
   object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX, tagAddress,
       static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX));
+  object->SetAlignedPointerInInternalField(WRAPPED_OBJECT_FIELD_INDEX, this,
+      static_cast<v8::EmbedderDataTypeTag>(WRAPPED_OBJECT_FIELD_INDEX));
 
-  // The C++ object is reached only through the CppgcShim, stored in V8's CppHeap pointer table
-  // with a per-type tag. There is deliberately no second, independently-corruptible pointer to
-  // the object in an internal field: a single tagged handle means dispatch and GC lifetime can
-  // never be driven by different pointers, closing the wrapper type-confusion / use-after-free
-  // class of bugs. The shim carries the same tag so it lands in the matching freelist bucket.
-  auto* shim = tracer.allocateShim(*this, tag);
-  shim->wrapper.emplace(isolate, object, v8::TracedReference<v8::Object>::IsDroppable());
-  v8::Object::Wrap(isolate, object, shim, tag);
-
-  // Add to the list of Wrappables to force-clean at isolate shutdown. Done after the shim
-  // exists, so this Wrappable is never briefly linked-but-wrapperless, which is the state
-  // isCondemned() looks for.
-  tracer.addWrapper({}, *this);
+  v8::Object::Wrap<WRAPPABLE_TAG>(isolate, object, tracer.allocateShim(*this));
 
   if (strongRefcount > 0) {
     strongWrapper.Reset(isolate, object);
@@ -575,7 +416,7 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
 }
 
 void Wrappable::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  tracker.trackField("cppgcshim", getShim());
+  tracker.trackField("cppgcshim", cppgcShim);
 }
 
 v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(
@@ -586,8 +427,7 @@ v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(
   // Null prototype: opaque wrappers flow through v8::Promise::Resolver::Resolve(), whose thenable
   // check does Get(value, "then"). A null prototype keeps that lookup off Object.prototype.
   jsg::check(object->SetPrototype(context, v8::Null(isolate)));
-  attachWrapper(isolate, object, needsGcTracing,
-      static_cast<v8::CppHeapPointerTag>(kNonResourceWrappableTag));
+  attachWrapper(isolate, object, needsGcTracing);
   return object;
 }
 
@@ -598,12 +438,9 @@ kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
         v8::Local<v8::Object>::Cast(handle)->FindInstanceInPrototypeChain(
             IsolateBase::getOpaqueTemplate(isolate));
     if (!instance.IsEmpty()) {
-      // The prototype-chain check above accepts exactly our opaque wrappers, which all carry
-      // kNonResourceWrappableTag. A tag outside that range therefore means the object's CppHeap
-      // handle was redirected to an unrelated type while its prototype chain was left intact -- an
-      // in-sandbox memory-safety violation, which aborts (matching the resource unwrap sites)
-      // rather than returning a mistyped pointer for a downstream dynamic_cast to catch.
-      return *unwrapFromShimInRangeOrAbort(isolate, instance, kNonResourceWrappableTagRange);
+      return *reinterpret_cast<Wrappable*>(
+          instance->GetAlignedPointerFromInternalField(WRAPPED_OBJECT_FIELD_INDEX,
+              static_cast<v8::EmbedderDataTypeTag>(WRAPPED_OBJECT_FIELD_INDEX)));
     }
   }
 
@@ -616,11 +453,6 @@ void reportWrapperTypeMismatch(const std::type_info& expected, const std::type_i
   // Abort: edgeworker's crash handler turns this into an abrupt shutdown of the isolate.
   KJ_LOG(FATAL, "JS wrapper's C++ object is not of the expected type", typeName(expected),
       typeName(actual));
-  abort();
-}
-
-void reportWrapperIdentityMismatch() {
-  KJ_LOG(FATAL, "JS wrapper's CppHeap shim does not own the dispatch receiver");
   abort();
 }
 
@@ -640,7 +472,7 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
   }
 
   // Make ref strength match the parent.
-  if (visitor.parent.strongRefcount > 0 && !visitor.parent.hasWrapper()) {
+  if (visitor.parent.strongRefcount > 0 && visitor.parent.wrapper == kj::none) {
     // This reference should be strong, because the parent has strong refs and does not have its
     // own wrapper that will be traced.
 
@@ -668,13 +500,8 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
 
   KJ_IF_SOME(cgv, visitor.cppgcVisitor) {
     // We're visiting for the purpose of a GC trace.
-    KJ_IF_SOME(shim, getShim()) {
-      // Reaching the handle through the weak persistent is safe inside a trace: cppgc clears
-      // weak persistents only in MarkerBase::ProcessWeakness(), at the end of the atomic pause
-      // and after every Trace() callback has run. So a live wrapper is always visible here, and
-      // a null shim means this Wrappable was condemned by an earlier GC -- handled below, since
-      // a condemned Wrappable must be traced through transitively just like an unwrapped one.
-      cgv.Trace(KJ_ASSERT_NONNULL(shim.wrapper));
+    KJ_IF_SOME(w, wrapper) {
+      cgv.Trace(w);
     } else {
       // This object doesn't currently have a wrapper, so traces must transitively trace through
       // it. However, as an optimization, we can skip the trace if we've already been traced in
@@ -688,7 +515,7 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
 void GcVisitor::visit(Data& value) {
   if (!value.handle.IsEmpty()) {
     // Make ref strength match the parent.
-    if (parent.strongRefcount > 0 && !parent.hasWrapper()) {
+    if (parent.strongRefcount > 0 && parent.wrapper == kj::none) {
       // This is directly reachable by a strong ref, so mark the handle strong.
       if (value.tracedHandle != kj::none) {
         // Convert the handle back to strong and discard the traced reference.
@@ -729,7 +556,7 @@ void GcVisitor::visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Dat
   // exists we must keep the handle in traced mode so cppgc can follow edges
   // from it.  Only when there is no wrapper yet (object not yet exported to JS)
   // does a positive strongRefcount alone justify keeping the handle strong.
-  if (parent.strongRefcount > 0 && !parent.hasWrapper()) {
+  if (parent.strongRefcount > 0 && parent.wrapper == kj::none) {
     // Parent has strong Rust refs and no JS wrapper — keep handle strong,
     // discard any traced ref.
     if (!traced.IsEmpty()) {

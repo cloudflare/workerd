@@ -14,15 +14,6 @@
 
 import { strictEqual, ok, rejects, deepStrictEqual } from 'node:assert';
 
-// Custom error class for testing error type preservation
-class CustomStreamError extends Error {
-  constructor(message, code) {
-    super(message);
-    this.name = 'CustomStreamError';
-    this.code = code;
-  }
-}
-
 // Test error thrown after partial consumption of stream
 // Inspired by: Bun test/js/bun/spawn/spawn-stdin-readable-stream-edge-cases.test.ts (exception in pull)
 export const errorDuringPartialConsumption = {
@@ -57,57 +48,6 @@ export const errorDuringPartialConsumption = {
   },
 };
 
-// Test that custom error types are preserved through pipeTo
-// Inspired by: Deno tests/unit/streams_test.ts (cancel propagation with "resource closed" reason)
-export const errorTypePreservationPipeTo = {
-  async test() {
-    const customError = new CustomStreamError('Custom error', 'ERR_CUSTOM');
-
-    const rs = new ReadableStream({
-      start(controller) {
-        controller.error(customError);
-      },
-    });
-
-    const ws = new WritableStream({
-      write() {},
-    });
-
-    await rejects(
-      async () => {
-        await rs.pipeTo(ws);
-      },
-      { message: 'Custom error' }
-    );
-  },
-};
-
-// Test that custom error types are preserved through pipeThrough
-// Inspired by: Deno tests/unit/streams_test.ts (error propagation tests)
-export const errorTypePreservationPipeThrough = {
-  async test() {
-    const customError = new CustomStreamError('Pipe through error', 'ERR_PIPE');
-
-    const rs = new ReadableStream({
-      pull(controller) {
-        controller.error(customError);
-      },
-    });
-
-    const transform = new TransformStream();
-    const result = rs.pipeThrough(transform);
-
-    const reader = result.getReader();
-
-    await rejects(
-      async () => {
-        await reader.read();
-      },
-      { message: 'Pipe through error' }
-    );
-  },
-};
-
 // Test race between controller.error() and controller.close() on ReadableStream
 // Inspired by: Bun test/js/web/streams/streams.test.js (error handling edge cases)
 export const errorRaceWithCloseReadable = {
@@ -131,34 +71,6 @@ export const errorRaceWithCloseReadable = {
     }
 
     await rejects(readPromise, { message: 'Error wins' });
-  },
-};
-
-// Test error thrown in TransformStream transform() callback using controller.error()
-// Inspired by: Bun test/js/web/streams/streams.test.js (TransformStream error handling)
-export const errorInTransformFlush = {
-  async test() {
-    let transformController;
-
-    const ts = new TransformStream({
-      start(controller) {
-        transformController = controller;
-      },
-      transform(chunk, controller) {
-        controller.enqueue(chunk);
-      },
-    });
-
-    const reader = ts.readable.getReader();
-
-    transformController.error(new Error('Transform error'));
-
-    await rejects(
-      async () => {
-        await reader.read();
-      },
-      { message: 'Transform error' }
-    );
   },
 };
 

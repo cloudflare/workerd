@@ -51,6 +51,7 @@ export const stringChunkDiverges = {
     const cs = new CompressionStream('gzip');
     const writer = cs.writable.getWriter();
     if (usingTsImpl) {
+      // Rejected per spec; like any invalid chunk, it errors both sides.
       await rejects(writer.write('hi'), (err) => {
         strictEqual(err.constructor, TypeError);
         strictEqual(err.message, tsBadChunkMsg);
@@ -73,6 +74,11 @@ export const stringChunkDiverges = {
   },
 };
 
+// SharedArrayBuffer and SAB-backed views: the C++ pair copies the shared
+// bytes out (its write path is shared with the identity streams);
+// TypeScript rejects per Web IDL — BufferSource without [AllowShared] —
+// as WPT compression-bad-chunks requires. The shared buffer is untouched
+// either way.
 export const sharedArrayBufferChunkDiverges = {
   async test() {
     const sab = new SharedArrayBuffer(1);
@@ -98,10 +104,15 @@ export const sharedArrayBufferChunkDiverges = {
           'A'
         );
       }
+      strictEqual(new Uint8Array(sab)[0], 0x41);
     }
   },
 };
 
+// An invalid chunk rejects its write with a TypeError (message per impl).
+// Aftermath diverges: the C++ stream survives (later writes flow, close is
+// clean) while TypeScript errors BOTH sides, the spec's transform-time
+// error propagation (WPT compression-bad-chunks: the read rejects too).
 export const invalidChunkAftermathDiverges = {
   async test() {
     const cs = new CompressionStream('gzip');
@@ -113,12 +124,10 @@ export const invalidChunkAftermathDiverges = {
       return true;
     });
     if (usingTsImpl) {
-      // Both sides errored: later writes and the closed promise reject.
       await rejects(writer.write(enc.encode('x')), TypeError);
       await rejects(writer.closed, TypeError);
       await rejects(cs.readable.getReader().read(), TypeError);
     } else {
-      // The stream survives: later traffic flows and close is clean.
       await writer.write(enc.encode('ok'));
       await writer.close();
       const chunks = [];

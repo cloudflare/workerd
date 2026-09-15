@@ -3,6 +3,8 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_static_library")
 
+exports_files(["Cargo.toml"])
+
 # Adds missing symbols following Rust mangling change, plus missing system library on Windows.
 cc_library(
     name = "runtime",

@@ -318,6 +318,7 @@ class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
       kj::Own<Worker::Actor::Loopback> loopback,
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
       kj::Maybe<rpc::Container::Client> container,
+      jsg::Dict<kj::String> containerImages,
       kj::Maybe<Worker::Actor::FacetManager&> facetManager) = 0;
 
   // Start a request on the actor. (The actor must have been created using newActor().)
@@ -492,7 +493,7 @@ class Server::ActorNamespace final {
                    .orDefault(*this)),
           parent(parent),
           timer(timer),
-          lastAccess(timer.now()) {
+          lastAccess(makeLastAccess(parent, timer)) {
       KJ_SWITCH_ONEOF(classAndIdParam) {
         KJ_CASE_ONEOF(value, ClassAndId) {
           // `classAndId` is immediately available.
@@ -573,13 +574,10 @@ class Server::ActorNamespace final {
           [&](kj::Own<Worker::Actor::HibernationManager>& m) { return kj::addRef(*m); });
     }
     void updateAccessTime() {
-      lastAccess = timer.now();
-      KJ_IF_SOME(p, parent) {
-        p.updateAccessTime();
-      }
+      *lastAccess = timer.now();
     }
     kj::TimePoint getLastAccess() {
-      return lastAccess;
+      return *lastAccess;
     }
 
     bool hasClients() {
@@ -833,7 +831,8 @@ class Server::ActorNamespace final {
     ActorContainer& root;
     kj::Maybe<ActorContainer&> parent;
     kj::Timer& timer;
-    kj::TimePoint lastAccess;
+    // Namespace expiration is tracked at the root, so the whole facet tree shares this timestamp.
+    kj::Rc<kj::TimePoint> lastAccess;
     kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager;
     kj::Maybe<kj::Promise<void>> shutdownTask;
     kj::Maybe<kj::Promise<void>> onBrokenTask;
@@ -854,6 +853,14 @@ class Server::ActorNamespace final {
     kj::Maybe<uint> facetId;
 
     ActorMap facets;
+
+    static kj::Rc<kj::TimePoint> makeLastAccess(
+        kj::Maybe<ActorContainer&> parent, kj::Timer& timer) {
+      KJ_IF_SOME(p, parent) {
+        return p.lastAccess.addRef();
+      }
+      return kj::rc<kj::TimePoint>(timer.now());
+    }
 
     // Get the facet ID for this facet. The root facet always has ID zero, but all other facets
     // need to be looked up in the index to make sure they are assigned consistent IDs.
@@ -1320,9 +1327,18 @@ class Server::ActorNamespace final {
       auto loopback = kj::refcounted<Loopback>(*this);
 
       kj::Maybe<rpc::Container::Client> container = kj::none;
+      jsg::Dict<kj::String> containerImages;
       KJ_IF_SOME(config, containerOptions) {
-        KJ_ASSERT(config.hasImageName(), "Image name is required");
-        auto imageName = config.getImageName();
+        kj::Maybe<kj::StringPtr> imageName = kj::none;
+        if (config.hasImageName() && config.getImageName().size() > 0) {
+          imageName = config.getImageName();
+        }
+        containerImages.fields = KJ_MAP(image, config.getImages()) {
+          return jsg::Dict<kj::String>::Field{
+            .name = kj::str(image.getName()),
+            .value = kj::str(image.getImage()),
+          };
+        };
         auto privilegeConfig = config.getPrivileges();
         auto capabilities =
             kj::heapArrayBuilder<kj::String>(privilegeConfig.getCapabilities().size());
@@ -1363,9 +1379,9 @@ class Server::ActorNamespace final {
             kj::mv(privileges));
       }
 
-      auto actor =
-          actorClass->newActor(getTracker(), Worker::Actor::cloneId(id), kj::mv(makeActorCache),
-              kj::mv(makeStorage), kj::mv(loopback), tryGetManagerRef(), kj::mv(container), *this);
+      auto actor = actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
+          kj::mv(makeActorCache), kj::mv(makeStorage), kj::mv(loopback), tryGetManagerRef(),
+          kj::mv(container), kj::mv(containerImages), *this);
       onBrokenTask = monitorOnBroken(*actor);
       this->actor = kj::mv(actor);
     }
@@ -1415,8 +1431,9 @@ class Server::ActorNamespace final {
     })->addRef();
   }
 
-  kj::Own<ContainerClient> getContainerClient(
-      kj::StringPtr containerId, kj::StringPtr imageName, ContainerPrivileges privileges) {
+  kj::Own<ContainerClient> getContainerClient(kj::StringPtr containerId,
+      kj::Maybe<kj::StringPtr> imageName,
+      ContainerPrivileges privileges) {
     KJ_IF_SOME(existingClient, containerClients.find(containerId)) {
       return existingClient->addRef();
     }
@@ -1471,7 +1488,8 @@ class Server::ActorNamespace final {
     };
 
     auto client = kj::refcounted<ContainerClient>(byteStreamFactory, timer, dockerNetwork,
-        kj::str(dockerPathRef), kj::str(containerId), kj::str(imageName),
+        kj::str(dockerPathRef), kj::str(containerId),
+        imageName.map([](kj::StringPtr image) { return kj::str(image); }),
         kj::str(KJ_ASSERT_NONNULL(containerEgressInterceptorImage,
             "containerEgressInterceptorImage must be configured for containers.")),
         waitUntilTasks, kj::mv(previousCleanup), kj::mv(cleanupCallback), channelTokenHandler,
@@ -2023,6 +2041,7 @@ class Server::InvalidConfigActorClass final: public ActorClass {
       kj::Own<Worker::Actor::Loopback> loopback,
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
       kj::Maybe<rpc::Container::Client> container,
+      jsg::Dict<kj::String> containerImages,
       kj::Maybe<Worker::Actor::FacetManager&> facetManager) override {
     JSG_FAIL_REQUIRE(
         Error, "Cannot instantiate Durable Object class because its config is invalid.");
@@ -3956,7 +3975,8 @@ class Server::WorkerService final: public Service,
         kj::none,  // versionInfo
         kj::mv(triggerContext),
         false,  // isDynamicDispatch
-        kj::mv(accessInfo), kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub);
+        kj::mv(accessInfo), kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub,
+        kj::mv(metadata.clientAddress));
   }
 
  private:
@@ -4123,6 +4143,7 @@ class Server::WorkerService final: public Service,
         kj::Own<Worker::Actor::Loopback> loopback,
         kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
         kj::Maybe<rpc::Container::Client> container,
+        jsg::Dict<kj::String> containerImages,
         kj::Maybe<Worker::Actor::FacetManager&> facetManager) override {
       TimerChannel& timerChannel = *service;
 
@@ -4140,7 +4161,7 @@ class Server::WorkerService final: public Service,
       return kj::refcounted<Worker::Actor>(*service->worker, tracker, kj::mv(actorId), true,
           kj::mv(makeActorCache), className, kj::mv(props), kj::mv(makeStorage), kj::mv(loopback),
           timerChannel, kj::refcounted<ActorObserver>(), kj::mv(manager), hibernationEventTypeId,
-          kj::mv(container), facetManager);
+          kj::mv(container), kj::mv(containerImages), facetManager);
     }
 
     kj::Own<WorkerInterface> startRequest(
@@ -5486,10 +5507,11 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet:
           kj::Own<Worker::Actor::Loopback> loopback,
           kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
           kj::Maybe<rpc::Container::Client> container,
+          jsg::Dict<kj::String> containerImages,
           kj::Maybe<Worker::Actor::FacetManager&> facetManager) override {
         return getInner().newActor(tracker, kj::mv(actorId), kj::mv(makeActorCache),
             kj::mv(makeStorage), kj::mv(loopback), kj::mv(manager), kj::mv(container),
-            facetManager);
+            kj::mv(containerImages), facetManager);
       }
 
       kj::Own<WorkerInterface> startRequest(
@@ -5734,9 +5756,19 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();
+  kj::Array<Worker::Api::InboundListener> listeners;
+  KJ_IF_SOME(l, inboundListeners.find(name)) {
+    listeners = KJ_MAP(listener, l) {
+      return Worker::Api::InboundListener{
+        .protocol = kj::str(listener.protocol),
+        .address = kj::str(listener.address),
+        .port = listener.port,
+      };
+    };
+  }
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
       limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
-      pythonConfig);
+      pythonConfig, kj::mv(listeners));
 
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
@@ -6632,12 +6664,12 @@ class Server::TcpListener final: public kj::Refcounted {
       kj::Own<kj::ConnectionReceiver> listener,
       kj::Own<Service> service,
       kj::HttpHeaderTable& headerTable,
-      kj::StringPtr addrStr)
+      kj::String authority)
       : owner(owner),
         listener(kj::mv(listener)),
         service(kj::mv(service)),
         headerTable(headerTable),
-        addrStr(addrStr) {}
+        authority(kj::mv(authority)) {}
 
   kj::Promise<void> run() {
     TRACE_EVENT("workerd", "TcpListener::run");
@@ -6645,11 +6677,22 @@ class Server::TcpListener final: public kj::Refcounted {
       kj::AuthenticatedStream stream = co_await listener->acceptAuthenticated();
       TRACE_EVENT("workerd", "TcpListener handle connection");
 
+      kj::PeerIdentity* peerId;
+      KJ_IF_SOME(tlsId, kj::tryDowncast<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
+        peerId = &tlsId.getNetworkIdentity();
+      } else {
+        peerId = stream.peerIdentity;
+      }
+
       IoChannelFactory::SubrequestMetadata metadata;
+      KJ_IF_SOME(remote, kj::tryDowncast<kj::NetworkPeerIdentity>(*peerId)) {
+        metadata.clientAddress = remote.toString();
+      }
+
       auto req = service->startRequest(kj::mv(metadata));
       auto response = kj::heap<ResponseWrapper>();
       kj::HttpHeaders headers(headerTable);
-      owner.tasks.add(req->connect(addrStr, headers, *stream.stream, *response, {})
+      owner.tasks.add(req->connect(authority, headers, *stream.stream, *response, {})
                           .attach(kj::mv(stream.stream), kj::mv(response))
                           .attach(kj::mv(req)));
     }
@@ -6660,7 +6703,7 @@ class Server::TcpListener final: public kj::Refcounted {
   kj::Own<kj::ConnectionReceiver> listener;
   kj::Own<Service> service;
   kj::HttpHeaderTable& headerTable;
-  kj::StringPtr addrStr;
+  kj::String authority;
 
   struct ResponseWrapper final: public kj::HttpService::ConnectResponse {
     void accept(
@@ -6688,9 +6731,9 @@ kj::Promise<void> Server::listenHttp(kj::Own<kj::ConnectionReceiver> listener,
 }
 
 kj::Promise<void> Server::listenTcp(
-    kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::StringPtr addrStr) {
+    kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::String authority) {
   auto obj = kj::refcounted<TcpListener>(
-      *this, kj::mv(listener), kj::mv(service), globalContext->headerTable, addrStr);
+      *this, kj::mv(listener), kj::mv(service), globalContext->headerTable, kj::mv(authority));
   co_return co_await obj->run();
 }
 
@@ -6876,6 +6919,7 @@ kj::Promise<void> Server::run(
 
   auto forkedDrainWhen = handleDrain(kj::mv(drainWhen)).fork();
 
+  co_await bindSockets(config);
   co_await startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
 
   auto listenPromise = listenOnSockets(config, headerTableBuilder, forkedDrainWhen);
@@ -7083,12 +7127,41 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
   }
 }
 
+namespace {
+
+// The host part of a "host[:port]" listen address ("*", "127.0.0.1", "[::1]"). Unix socket
+// addresses have no host and are returned whole.
+kj::String hostOfAddress(kj::StringPtr addrStr) {
+  if (addrStr.startsWith("unix:")) return kj::str(addrStr);
+  KJ_IF_SOME(colon, addrStr.findLast(':')) {
+    // A bare IPv6 literal without brackets contains colons but no port.
+    if (addrStr.startsWith("[") || addrStr.findFirst(':') == colon) {
+      return kj::str(addrStr.first(colon));
+    }
+  }
+  return kj::str(addrStr);
+}
+
+uint defaultPortFor(config::Socket::Reader sock) {
+  switch (sock.which()) {
+    case config::Socket::HTTP:
+      return 80;
+    case config::Socket::HTTPS:
+      return 443;
+    case config::Socket::TCP:
+      return 0;
+  }
+  return 0;
+}
+
+}  // namespace
+
 kj::Maybe<Server::SocketTypeConfig> Server::parseSocketType(
     config::Socket::Reader sock, kj::StringPtr name) {
   switch (sock.which()) {
     case config::Socket::HTTP: {
       SocketTypeConfig result;
-      result.defaultPort = 80;
+      result.defaultPort = defaultPortFor(sock);
       result.httpOptions = sock.getHttp();
       result.physicalProtocol = "http";
       return kj::mv(result);
@@ -7096,7 +7169,7 @@ kj::Maybe<Server::SocketTypeConfig> Server::parseSocketType(
     case config::Socket::HTTPS: {
       auto https = sock.getHttps();
       SocketTypeConfig result;
-      result.defaultPort = 443;
+      result.defaultPort = defaultPortFor(sock);
       result.httpOptions = https.getOptions();
       result.tls = makeTlsContext(https.getTlsOptions());
       result.physicalProtocol = "https";
@@ -7116,19 +7189,12 @@ kj::Maybe<Server::SocketTypeConfig> Server::parseSocketType(
   return kj::none;
 }
 
-kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
-    kj::HttpHeaderTable::Builder& headerTableBuilder,
-    kj::ForkedPromise<void>& forkedDrainWhen,
-    bool forTest) {
-  // ---------------------------------------------------------------------------
-  // Start sockets
-  TRACE_EVENT("workerd", "listenOnSockets");
+kj::Promise<void> Server::bindSockets(config::Config::Reader config) {
+  TRACE_EVENT("workerd", "bindSockets");
   for (auto sock: config.getSockets()) {
     kj::String name = kj::str(sock.getName());
     kj::String addrStr;
     kj::Maybe<kj::Own<kj::ConnectionReceiver>> listenerOverride;
-
-    kj::Own<Service> service = lookupService(sock.getService(), kj::str("Socket \"", name, "\""));
 
     KJ_IF_SOME(override, socketOverrides.findEntry(name)) {
       KJ_SWITCH_ONEOF(override.value) {
@@ -7148,48 +7214,85 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       reportConfigError(kj::str("Socket \"", name,
           "\" has no address in the config, so must be specified on the "
           "command line with `--socket-addr`."));
+      boundSockets.add(kj::none);
       continue;
     }
+
+    kj::Own<kj::ConnectionReceiver> listener;
+    KJ_IF_SOME(l, listenerOverride) {
+      listener = kj::mv(l);
+    } else {
+      auto parsed = co_await network.parseAddress(addrStr, defaultPortFor(sock));
+      listener = parsed->listen();
+    }
+
+    if (sock.which() == config::Socket::TCP && sock.getService().hasName()) {
+      inboundListeners
+          .findOrCreate(sock.getService().getName(),
+              [&]() {
+        return decltype(inboundListeners)::Entry{
+          kj::str(sock.getService().getName()), kj::Vector<Worker::Api::InboundListener>()};
+      })
+          .add(Worker::Api::InboundListener{
+            .protocol = kj::str("tcp"),
+            .address = hostOfAddress(addrStr),
+            .port = static_cast<uint16_t>(listener->getPort()),
+          });
+    }
+
+    boundSockets.add(BoundSocket{kj::mv(listener), kj::mv(addrStr)});
+  }
+}
+
+kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
+    kj::HttpHeaderTable::Builder& headerTableBuilder,
+    kj::ForkedPromise<void>& forkedDrainWhen,
+    bool forTest) {
+  // ---------------------------------------------------------------------------
+  // Start sockets
+  TRACE_EVENT("workerd", "listenOnSockets");
+  auto sockets = config.getSockets();
+  KJ_ASSERT(boundSockets.size() == sockets.size());
+  for (auto i: kj::indices(sockets)) {
+    auto sock = sockets[i];
+    kj::String name = kj::str(sock.getName());
+
+    // Sockets that failed to bind have already reported a config error.
+    kj::Own<kj::ConnectionReceiver> listener;
+    kj::String addrStr;
+    KJ_IF_SOME(bound, boundSockets[i]) {
+      listener = kj::mv(bound.listener);
+      addrStr = kj::mv(bound.addrStr);
+      boundSockets[i] = kj::none;
+    } else {
+      continue;
+    }
+
+    kj::Own<Service> service = lookupService(sock.getService(), kj::str("Socket \"", name, "\""));
 
     auto maybeSocketConfig = parseSocketType(sock, name);
     if (maybeSocketConfig == kj::none) continue;
     auto& socketConfig = KJ_ASSERT_NONNULL(maybeSocketConfig);
 
-    using PromisedReceived = kj::Promise<kj::Own<kj::ConnectionReceiver>>;
-    PromisedReceived listener = nullptr;
-    KJ_IF_SOME(l, listenerOverride) {
-      listener = kj::mv(l);
-    } else {
-      listener = ([](kj::Promise<kj::Own<kj::NetworkAddress>> promise) -> PromisedReceived {
-        auto parsed = co_await promise;
-        co_return parsed->listen();
-      })(network.parseAddress(addrStr, socketConfig.defaultPort));
-    }
-
     KJ_IF_SOME(t, socketConfig.tls) {
-      listener = ([](kj::Promise<kj::Own<kj::ConnectionReceiver>> promise,
-                      kj::Own<kj::TlsContext> tls) -> PromisedReceived {
-        auto port = co_await promise;
-        co_return tls->wrapPort(kj::mv(port)).attach(kj::mv(tls));
-      })(kj::mv(listener), kj::mv(t));
+      listener = t->wrapPort(kj::mv(listener)).attach(kj::mv(t));
     }
 
     // Need to create rewriter before waiting on anything since `headerTableBuilder` will no longer
     // be available later.
     auto rewriter = kj::heap<HttpRewriter>(socketConfig.httpOptions, headerTableBuilder);
 
-    auto handle = kj::coCapture(
-        [this, service = kj::mv(service), rewriter = kj::mv(rewriter),
-            physicalProtocol = socketConfig.physicalProtocol, name = kj::mv(name),
-            isHttp = sock.which() != config::Socket::TCP, addrStr = kj::mv(addrStr)](
-            kj::Promise<kj::Own<kj::ConnectionReceiver>> promise) mutable -> kj::Promise<void> {
+    auto handle =
+        kj::coCapture([this, service = kj::mv(service), rewriter = kj::mv(rewriter),
+                          physicalProtocol = socketConfig.physicalProtocol, name = kj::mv(name),
+                          isHttp = sock.which() != config::Socket::TCP, addrStr = kj::mv(addrStr)](
+                          kj::Own<kj::ConnectionReceiver> listener) mutable -> kj::Promise<void> {
       if (isHttp) {
         TRACE_EVENT("workerd", "setup listenHttp");
       } else {
         TRACE_EVENT("workerd", "setup listenTcp");
       }
 
-      auto listener = co_await promise;
       KJ_IF_SOME(stream, controlOverride) {
         auto message = kj::str("{\"event\":\"listen\",\"socket\":\"", name,
             "\",\"port\":", listener->getPort(), "}\n");
@@ -7203,7 +7306,10 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       if (isHttp) {
         co_await listenHttp(kj::mv(listener), kj::mv(service), physicalProtocol, kj::mv(rewriter));
       } else {
-        co_await listenTcp(kj::mv(listener), kj::mv(service), addrStr);
+        // The authority handed to the connect() handler is the endpoint as bound, so it is
+        // truthful for a configured port of 0.
+        auto authority = kj::str(hostOfAddress(addrStr), ":", listener->getPort());
+        co_await listenTcp(kj::mv(listener), kj::mv(service), kj::mv(authority));
       }
     });
     tasks.add(handle(kj::mv(listener)).exclusiveJoin(forkedDrainWhen.addBranch()));
@@ -7302,6 +7408,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
 
   auto forkedDrainWhen = kj::Promise<void>(kj::NEVER_DONE).fork();
 
+  co_await bindSockets(config);
   co_await startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
 
   // Tests usually do not configure sockets, but they can, especially loopback sockets. Arrange

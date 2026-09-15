@@ -21,16 +21,12 @@ struct Idle {
 struct ReadRequest {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "read-request"_kj;
   kj::ArrayPtr<kj::byte> bytes;
-  // WARNING: `bytes` may be invalid if fulfiller->isWaiting() returns false! (This indicates the
-  //   read was canceled.)
   kj::Own<kj::PromiseFulfiller<size_t>> fulfiller;
 };
 
 struct WriteRequest {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "write-request"_kj;
   kj::ArrayPtr<const kj::byte> bytes;
-  // WARNING: `bytes` may be invalid if fulfiller->isWaiting() returns false! (This indicates the
-  //   write was canceled, e.g. via removeSink() destroying the Canceler.)
   kj::Own<kj::PromiseFulfiller<void>> fulfiller;
 };
 
@@ -168,12 +164,21 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     if (state.is<Closed>()) return;
 
     KJ_IF_SOME(request, state.tryGetUnsafe<ReadRequest>()) {
-      request.fulfiller->fulfill(static_cast<size_t>(0));
-    } else KJ_IF_SOME(request, state.tryGetUnsafe<WriteRequest>()) {
-      request.fulfiller->reject(reason.clone());
+      auto fulfiller = kj::mv(request.fulfiller);
+      state.forceTransitionTo<kj::Exception>(kj::mv(reason));
+      fulfiller->fulfill(static_cast<size_t>(0));
+      return;
     }
-    // Idle state is fine, just transition to error.
 
+    KJ_IF_SOME(request, state.tryGetUnsafe<WriteRequest>()) {
+      auto fulfiller = kj::mv(request.fulfiller);
+      auto writeReason = reason.clone();
+      state.forceTransitionTo<kj::Exception>(kj::mv(reason));
+      fulfiller->reject(kj::mv(writeReason));
+      return;
+    }
+
+    // Idle state is fine, just transition to error.
     state.forceTransitionTo<kj::Exception>(kj::mv(reason));
 
     // TODO(conform): Proactively put WritableStream into Errored state.
@@ -208,16 +213,21 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     if (state.isErrored()) return;
 
     KJ_IF_SOME(request, state.tryGetUnsafe<ReadRequest>()) {
-      request.fulfiller->reject(reason.clone());
-    } else KJ_IF_SOME(request, state.tryGetUnsafe<WriteRequest>()) {
+      auto fulfiller = kj::mv(request.fulfiller);
+      auto readReason = reason.clone();
+      state.forceTransitionTo<kj::Exception>(kj::mv(reason));
+      fulfiller->reject(kj::mv(readReason));
+      return;
+    }
+
+    KJ_IF_SOME(request, state.tryGetUnsafe<WriteRequest>()) {
       // If the fulfiller is not waiting, the write promise was already
       // canceled and no one is waiting on it.
       KJ_ASSERT(!request.fulfiller->isWaiting(),
           "abort() is supposed to wait for any pending write() to finish");
     }
-    // Idle and Closed states are fine, just transition to error.
-    // (Closed can transition to error via abort)
 
+    // Idle, WriteRequest, and Closed states can transition directly to error.
     state.forceTransitionTo<kj::Exception>(kj::mv(reason));
 
     // TODO(conform): Proactively put ReadableStream into Errored state.
@@ -255,10 +265,11 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
         // The write buffer will entirely fit into our read buffer; fulfill both requests.
         memmove(bytes.begin(), request.bytes.begin(), request.bytes.size());
         auto result = request.bytes.size();
-        request.fulfiller->fulfill();
+        auto fulfiller = kj::mv(request.fulfiller);
 
-        // Switch to idle state.
+        // Release the borrowed write buffer before settling the write promise.
         state.transitionTo<Idle>();
+        fulfiller->fulfill();
 
         return result;
       }
@@ -273,7 +284,14 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     KJ_ASSERT(state.is<Idle>());
     auto paf = kj::newPromiseAndFulfiller<size_t>();
     state.transitionTo<ReadRequest>(bytes, kj::mv(paf.fulfiller));
-    return kj::mv(paf.promise);
+    return kj::mv(paf.promise).attach(kj::defer([self = kj::addRef(*this)]() mutable {
+      KJ_IF_SOME(request, self->state.tryGetUnsafe<ReadRequest>()) {
+        if (!request.fulfiller->isWaiting()) {
+          self->state.forceTransitionTo<kj::Exception>(
+              KJ_EXCEPTION(DISCONNECTED, "reader canceled"));
+        }
+      }
+    }));
   }
 
   kj::Promise<void> writeHelper(kj::ArrayPtr<const kj::byte> bytes) {
@@ -310,8 +328,9 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
 
       if (bytes.size() == 0) {
         // This is a close operation.
-        request.fulfiller->fulfill(static_cast<size_t>(0));
+        auto fulfiller = kj::mv(request.fulfiller);
         state.transitionTo<Closed>();
+        fulfiller->fulfill(static_cast<size_t>(0));
         return kj::READY_NOW;
       }
 
@@ -320,19 +339,29 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
       if (request.bytes.size() >= bytes.size()) {
         // Our write buffer will entirely fit into the read buffer; fulfill both requests.
         memmove(request.bytes.begin(), bytes.begin(), bytes.size());
-        request.fulfiller->fulfill(bytes.size());
+        auto fulfiller = kj::mv(request.fulfiller);
         state.transitionTo<Idle>();
+        fulfiller->fulfill(bytes.size());
         return kj::READY_NOW;
       }
 
       // Our write buffer won't quite fit into the read buffer; fulfill only the read request.
       memmove(request.bytes.begin(), bytes.begin(), request.bytes.size());
-      bytes = bytes.slice(request.bytes.size(), bytes.size());
-      request.fulfiller->fulfill(request.bytes.size());
+      auto readSize = request.bytes.size();
+      bytes = bytes.slice(readSize, bytes.size());
+      auto readFulfiller = kj::mv(request.fulfiller);
 
       auto paf = kj::newPromiseAndFulfiller<void>();
       state.transitionTo<WriteRequest>(bytes, kj::mv(paf.fulfiller));
-      return kj::mv(paf.promise);
+      readFulfiller->fulfill(kj::mv(readSize));
+      return kj::mv(paf.promise).attach(kj::defer([self = kj::addRef(*this)]() mutable {
+        KJ_IF_SOME(request, self->state.tryGetUnsafe<WriteRequest>()) {
+          if (!request.fulfiller->isWaiting()) {
+            self->state.forceTransitionTo<kj::Exception>(
+                KJ_EXCEPTION(DISCONNECTED, "writer canceled"));
+          }
+        }
+      }));
     }
 
     // Must be idle.
@@ -345,7 +374,14 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
 
     auto paf = kj::newPromiseAndFulfiller<void>();
     state.transitionTo<WriteRequest>(bytes, kj::mv(paf.fulfiller));
-    return kj::mv(paf.promise);
+    return kj::mv(paf.promise).attach(kj::defer([self = kj::addRef(*this)]() mutable {
+      KJ_IF_SOME(request, self->state.tryGetUnsafe<WriteRequest>()) {
+        if (!request.fulfiller->isWaiting()) {
+          self->state.forceTransitionTo<kj::Exception>(
+              KJ_EXCEPTION(DISCONNECTED, "writer canceled"));
+        }
+      }
+    }));
   }
 
   kj::Maybe<uint64_t> limit;

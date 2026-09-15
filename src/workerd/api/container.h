@@ -196,7 +196,9 @@ class ExecProcess: public jsg::Object {
 // etc.
 class Container: public jsg::Object {
  public:
-  Container(rpc::Container::Client rpcClient, bool running);
+  Container(rpc::Container::Client rpcClient,
+      bool running,
+      jsg::Dict<kj::String> images = jsg::Dict<kj::String>{});
 
   struct DirectorySnapshot {
     kj::String id;
@@ -329,6 +331,7 @@ class Container: public jsg::Object {
   };
 
   bool getRunning();
+  jsg::Dict<kj::String> getImages() const;
 
   // Methods correspond closely to the RPC interface in `container.capnp`.
   void start(jsg::Lock& js, jsg::Optional<StartupOptions> options);
@@ -358,6 +361,7 @@ class Container: public jsg::Object {
 
   JSG_RESOURCE_TYPE(Container, CompatibilityFlags::Reader flags) {
     JSG_READONLY_PROTOTYPE_PROPERTY(running, getRunning);
+    JSG_READONLY_PROTOTYPE_PROPERTY(images, getImages);
     JSG_METHOD(start);
     JSG_METHOD(monitor);
     JSG_METHOD(destroy);
@@ -380,10 +384,12 @@ class Container: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("destroyReason", destroyReason);
+    tracker.trackField("images", images);
   }
 
  private:
   IoOwn<rpc::Container::Client> rpcClient;
+  jsg::Dict<kj::String> images;
 
   struct Monitor final {
     Monitor(kj::ForkedPromise<int32_t> promise, uint64_t generation);

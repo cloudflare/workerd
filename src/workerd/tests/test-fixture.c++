@@ -117,13 +117,6 @@ class MockEntropySource final: public kj::EntropySource {
     }
   }
 
-  template <typename T>
-  T rand() {
-    T r;
-    this->generate(kj::arrayPtr(&r, 1).asBytes());
-    return r;
-  }
-
  private:
   kj::byte counter = 0;
 };
@@ -440,7 +433,8 @@ kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
       kj::refcounted<ActorObserver>(),
       savedHibernationManager.map(
           [](kj::Own<Worker::Actor::HibernationManager>& m) { return m->addRef(); }),
-      /*hibernationEventType=*/kj::none, /*container=*/kj::none, /*facetManager=*/kj::none,
+      /*hibernationEventType=*/kj::none, /*container=*/kj::none,
+      /*containerImages=*/jsg::Dict<kj::String>{}, /*facetManager=*/kj::none,
       /*version=*/kj::none, savedHolderToken);
 }
 

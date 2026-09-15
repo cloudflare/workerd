@@ -34,6 +34,7 @@
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uuid.h>
 #include <workerd/util/xthreadnotifier.h>
 
@@ -153,6 +154,7 @@ void maybePerIsolateBootstrap(CompatibilityFlags::Reader& featureFlags,
     v8::Local<v8::Context> context,
     kj::Maybe<ValidationErrorReporter&> errorReporter) {
   if (util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
+    TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
     JSG_WITHIN_CONTEXT_SCOPE(
         lock, context, [&](jsg::Lock& js) { runPerIsolateBootstrap(js, featureFlags); });
   } else if (featureFlags.getTypeScriptImplementedStreams()) {
@@ -1119,8 +1121,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     : metrics(kj::mv(metricsParam)),
       id(kj::str(id)),
       limitEnforcer(kj::mv(limitEnforcerParam)),
-      cpuLimitNearlyExceededCallback(
-          kj::MutexGuarded<kj::Maybe<kj::Function<void(void)>>>(kj::none)),
+      cpuLimitNearlyExceededCallback(kj::MutexGuarded<kj::Maybe<kj::Function<void()>>>(kj::none)),
       api(kj::mv(apiParam)),
       loggingOptions(loggingOptions),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
@@ -1658,7 +1659,7 @@ bool Worker::Isolate::Impl::Lock::checkInWithLimitEnforcer(Worker::Isolate& isol
   return limitEnforcer.exitJs(*lock);
 }
 
-kj::Maybe<kj::Function<void(void)>> Worker::Isolate::getCpuLimitNearlyExceededCallback() const {
+kj::Maybe<kj::Function<void()>> Worker::Isolate::getCpuLimitNearlyExceededCallback() const {
   auto lock = cpuLimitNearlyExceededCallback.lockExclusive();
   KJ_IF_SOME(cb, *lock) {
     return cb.reference();
@@ -1666,7 +1667,7 @@ kj::Maybe<kj::Function<void(void)>> Worker::Isolate::getCpuLimitNearlyExceededCa
   return kj::none;
 }
 
-void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) const {
+void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) const {
   auto lock = cpuLimitNearlyExceededCallback.lockExclusive();
   // Make sure we don't reassign the callback so we don't invalidate references we've passed out.
   if (*lock == kj::none) {
@@ -2686,24 +2687,36 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
       auto report = [&](kj::Maybe<kj::StringPtr> name, api::ExportedHandler& exported) {
         auto handle = exported.self.getHandle(js);
         if (handle->IsArray()) {
-          // HACK: toDict() will throw a TypeError if given an array, because jsg::DictWrapper is
-          //   designed to treat arrays as not matching when a dict is expected. However,
-          //   StructWrapper has no such restriction, and therefore an exported array will
-          //   successfully produce an ExportedHandler (presumably with no handler functions), and
-          //   hence we will see it here. Rather than try to correct this inconsistency between
-          //   struct and dict handling (which could have unintended consequences), let's just
-          //   work around by ignoring arrays here.
+          // HACK: jsg::DictWrapper is designed to treat arrays as not matching when a dict is
+          //   expected. However, StructWrapper has no such restriction, and therefore an exported
+          //   array will successfully produce an ExportedHandler (presumably with no handler
+          //   functions), and hence we will see it here. Rather than try to correct this
+          //   inconsistency between struct and dict handling (which could have unintended
+          //   consequences), let's just work around by ignoring arrays here -- otherwise we'd
+          //   report the array's indices as if they were handler names.
           errorReporter.addEntrypoint(name, kj::Array<kj::String>());
         } else {
           // Use a HashSet to avoid duplicates when methods exist both as own properties
           // and in the prototype chain
           kj::HashSet<kj::String> methodSet;
 
-          // First, check for own properties (like a plain object literal)
-          auto dict = js.toDict(handle);
-          for (auto& field: dict.fields) {
-            if (!ignoredHandlers.contains(field.name)) {
-              methodSet.upsert(kj::mv(field.name), [&](auto&, auto&&) {});
+          // First, check for own properties (like a plain object literal).
+          //
+          // We deliberately read only the property names here, never their values. Reading
+          // values (as `toDict()` does) invokes application-defined getters, which can throw
+          // arbitrary exceptions and end up reported as an internal error instead of a
+          // user-visible script error. The handler values themselves were already validated
+          // when the export was unwrapped into an ExportedHandler, so we don't need them here.
+          //
+          jsg::JsArray ownProperties =
+              jsg::JsObject(handle).getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
+                  static_cast<jsg::PropertyFilter>(
+                      jsg::PropertyFilter::ONLY_ENUMERABLE | jsg::PropertyFilter::SKIP_SYMBOLS),
+                  jsg::IndexFilter::INCLUDE_INDICES);
+          for (auto i: kj::zeroTo(ownProperties.size())) {
+            auto propName = ownProperties.get(js, i).toString(js);
+            if (!ignoredHandlers.contains(propName)) {
+              methodSet.upsert(kj::mv(propName), [&](auto&, auto&&) {});
             }
           }
 
@@ -3670,6 +3683,7 @@ struct Worker::Actor::Impl {
   kj::Maybe<jsg::JsRef<jsg::JsObject>> ctxObject;
 
   kj::Maybe<rpc::Container::Client> container;
+  jsg::Dict<kj::String> containerImages;
   kj::Maybe<FacetManager&> facetManager;
   kj::Maybe<ActorVersion> version;
 
@@ -3843,6 +3857,7 @@ struct Worker::Actor::Impl {
       kj::Maybe<kj::Own<HibernationManager>> manager,
       kj::Maybe<uint16_t>& hibernationEventType,
       kj::Maybe<rpc::Container::Client> container,
+      jsg::Dict<kj::String> containerImages,
       kj::Maybe<FacetManager&> facetManager,
       kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
       : actorId(kj::mv(actorId)),
@@ -3851,6 +3866,7 @@ struct Worker::Actor::Impl {
         metrics(kj::mv(metricsParam)),
         transient(hasTransient),
         container(kj::mv(container)),
+        containerImages(kj::mv(containerImages)),
         facetManager(facetManager),
         hooks(loopback->addRef(), timerChannel, *metrics),
         inputGate(hooks),
@@ -3901,6 +3917,7 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Maybe<kj::Own<HibernationManager>> manager,
     kj::Maybe<uint16_t> hibernationEventType,
     kj::Maybe<rpc::Container::Client> container,
+    jsg::Dict<kj::String> containerImages,
     kj::Maybe<FacetManager&> facetManager,
     kj::Maybe<ActorVersion> version,
     kj::Maybe<uint64_t> holderToken)
@@ -3908,7 +3925,7 @@ Worker::Actor::Actor(const Worker& worker,
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
   impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache), kj::mv(props),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
-      hibernationEventType, kj::mv(container), facetManager);
+      hibernationEventType, kj::mv(container), kj::mv(containerImages), facetManager);
   impl->version = kj::mv(version);
   impl->holderToken = holderToken;
 
@@ -3986,10 +4003,21 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
         storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
       }
 
+      auto containerImages = jsg::Dict<kj::String>{
+        .fields =
+            KJ_MAP(field, impl->containerImages.fields) {
+        return jsg::Dict<kj::String>::Field{
+          .name = kj::str(field.name),
+          .value = kj::str(field.value),
+        };
+      },
+      };
+
       auto ctx = js.alloc<api::DurableObjectState>(js, cloneId(),
           jsg::JsValue(KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).getHandle(js)),
           impl->props.toJs(js), kj::mv(storage), kj::mv(impl->container), containerRunning,
-          impl->facetManager, impl->version.map([](ActorVersion& v) { return v.clone(); }));
+          kj::mv(containerImages), impl->facetManager,
+          impl->version.map([](ActorVersion& v) { return v.clone(); }));
 
       auto handler =
           info.cls(lock, ctx.addRef(), KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));

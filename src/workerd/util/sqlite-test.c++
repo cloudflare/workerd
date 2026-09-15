@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "sentry.h"
 #include "sqlite.h"
 
 #include <fcntl.h>
@@ -336,6 +337,13 @@ void doLockTest(bool walMode) {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
 
+  auto expectBusy = [](const kj::Exception& e) {
+    KJ_EXPECT(e.getDescription().contains("database is locked"), e);
+    KJ_EXPECT(!e.getDescription().contains("NOSENTRY"), e);
+    auto sentryTag = KJ_ASSERT_NONNULL(e.getDetail(SENTRY_TAG_DETAIL_ID));
+    KJ_EXPECT(sentryTag.asChars() == "NOSENTRY"_kj, e);
+  };
+
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
   if (walMode) {
@@ -375,7 +383,7 @@ void doLockTest(bool walMode) {
   {
     // Arrange for two threads to increment in a loop simultaneously. Eventually one will fail with
     // a conflict.
-    kj::Thread thread([&vfs = vfs, &stop, &counter]() noexcept {
+    kj::Thread thread([&vfs = vfs, &stop, &counter, &expectBusy]() noexcept {
       KJ_DEFER(stop.store(true, std::memory_order_relaxed););
       SqliteDatabase db2(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
       while (!stop.load(std::memory_order_relaxed)) {
@@ -383,7 +391,7 @@ void doLockTest(bool walMode) {
           db2.run(INCREMENT);
           counter.fetch_add(1, std::memory_order_relaxed);
         })) {
-          KJ_EXPECT(e.getDescription().contains("database is locked"), e);
+          expectBusy(e);
           break;
         }
       }
@@ -397,7 +405,7 @@ void doLockTest(bool walMode) {
           db.run(INCREMENT);
           counter.fetch_add(1, std::memory_order_relaxed);
         })) {
-          KJ_EXPECT(e.getDescription().contains("database is locked"), e);
+          expectBusy(e);
           break;
         }
       }
@@ -1613,6 +1621,21 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
   }
 };
 
+void expectDoSentryDisposition(const kj::Exception& exception) {
+  auto disposition = KJ_ASSERT_NONNULL(exception.getDetail(SENTRY_TAG_DETAIL_ID));
+  KJ_EXPECT(disposition.asChars() == "SENTRY_DO"_kj, exception);
+}
+
+KJ_TEST("SQLite open errors are tagged for DO Sentry") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  auto exception = KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { SqliteDatabase(vfs, kj::Path({"missing"}), kj::none); }));
+  KJ_EXPECT(exception.getDescription().contains("unable to open database file: SQLITE_CANTOPEN"),
+      exception);
+  expectDoSentryDisposition(exception);
+}
+
 KJ_TEST("SQLite memory metering enforces SQLITE_NOMEM when limit is exceeded") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
@@ -1683,10 +1706,13 @@ KJ_TEST("I/O exceptions pass through SQLite") {
   KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "test-vfs-error");
 
   // It should pass through.
-  KJ_EXPECT_THROW_MESSAGE(
-      "test-vfs-error", db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str(R"(
+  auto exception = KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
+    db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str(R"(
     INSERT INTO things(value) VALUES (456);
-  )")));
+  )"));
+  }));
+  KJ_EXPECT(exception.getDescription() == "test-vfs-error", exception);
+  expectDoSentryDisposition(exception);
 }
 
 void testCriticalError(const char* expectedErrorMessage,

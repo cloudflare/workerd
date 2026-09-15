@@ -1,0 +1,24 @@
+using Workerd = import "/workerd/workerd.capnp";
+using StreamModules = import "stream-modules.capnp";
+
+# Runs the full suite against the C++ implementation with the dateless
+# opt-in pedantic_wpt flag added to stream-cpp.wd-test's pinned set. The
+# adapters drive JS-backed standard streams, where pedantic mode changes
+# finish-operation coordination and error types; every shared assertion
+# holds unchanged with the flag on, and this cell keeps it that way.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "node-stream-cpp-pedantic",
+      worker = (
+        modules = StreamModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "pedantic_wpt",
+        ],
+      )
+    ),
+  ],
+);

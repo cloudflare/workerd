@@ -125,7 +125,6 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
       Closed,
       Released>;
 
-  kj::Maybe<IoContext::Id> ioContext;
   WriterState state;
 
   inline void assertAttachedOrTerminal() const {
@@ -219,7 +218,6 @@ class WritableStream: public jsg::Object, public kj::PtrTarget {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  kj::Maybe<IoContext::Id> ioContext;
   kj::Own<WritableStreamController> controller;
 
   void visitForGc(jsg::GcVisitor& visitor);

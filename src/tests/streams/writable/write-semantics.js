@@ -150,3 +150,47 @@ export const writableStreamPromisesResolvedInOrder = {
     }
   },
 };
+
+// releaseLock() with a write QUEUED behind an in-flight one.
+// DIVERGENCE — C++ deviates from the spec: it cancels queued writes at
+// release (rejecting them with the released-writer error), which is why
+// its WPT config carries the piping/flow-control release-then-pipe
+// expectedFailures. TypeScript follows the spec: release rejects only
+// ready/closed; queued writes stay in [[writeRequests]] and drain on
+// the sink's schedule (a new writer — e.g. a pipe — can relock and the
+// writes still complete; WPT flow-control pins that). Here the sink's
+// in-flight write never settles, so the queued write legitimately waits
+// forever on backpressure (bounded observation). The release itself
+// succeeds and the stream is re-lockable in both (migrated from
+// streams-test.js).
+export const cancelWriteOnReleaseLock = {
+  async test() {
+    const ws = new WritableStream({
+      write() {
+        return new Promise(() => {});
+      },
+    });
+    const writer = ws.getWriter();
+    // The first write is in flight forever; the second is queued.
+    writer.write('ignored').catch(() => {});
+    const queued = writer.write('hello');
+    writer.releaseLock();
+    const outcome = await Promise.race([
+      queued.then(
+        () => ({ state: 'fulfilled' }),
+        (e) => ({ state: 'rejected', message: e.message })
+      ),
+      scheduler.wait(250).then(() => ({ state: 'pending' })),
+    ]);
+    if (usingTsImpl) {
+      strictEqual(outcome.state, 'pending');
+    } else {
+      strictEqual(outcome.state, 'rejected');
+      strictEqual(
+        outcome.message,
+        'This WritableStream writer has been released.'
+      );
+    }
+    ws.getWriter(); // re-lockable
+  },
+};

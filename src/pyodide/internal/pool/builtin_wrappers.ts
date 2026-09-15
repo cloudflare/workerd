@@ -1,6 +1,9 @@
 import type { getRandomValues as getRandomValuesType } from 'pyodide-internal:topLevelEntropy/lib';
 import { default as UnsafeEval } from 'internal:unsafe-eval';
-import { PythonWorkersInternalError } from 'pyodide-internal:util';
+import {
+  checkVersion,
+  PythonWorkersInternalError,
+} from 'pyodide-internal:util';
 import { PyodideVersion } from 'pyodide-internal:const';
 
 if (typeof FinalizationRegistry === 'undefined') {
@@ -38,13 +41,6 @@ export function setSetTimeout(
   globalThis.clearInterval = ci;
 }
 
-export function reportUndefinedSymbolsPatched(Module: Module): void {
-  if (Module.API.version === PyodideVersion.V0_26_0a2) {
-    return;
-  }
-  Module.reportUndefinedSymbols();
-}
-
 function dynlibLookup026Helper(
   Module: Module,
   path: string
@@ -59,9 +55,7 @@ function dynlibLookup026Helper(
 
 function dynlibLookup026(Module: Module, libName: string): string {
   // This function is for 0.26.0a2 only. In newer versions, we set LD_LIBRARY_PATH instead.
-  if (Module.API.version !== PyodideVersion.V0_26_0a2) {
-    throw new PythonWorkersInternalError('Should not happen');
-  }
+  checkVersion(Module, 'dynlibLookup026', PyodideVersion.V0_26_0a2);
   // Most libraries are loaded from /usr/lib. For scipy and similar libraries that depend on
   // Pyodide's dynamic library deps, we may need extra "system libraries". These we'll put in
   // python_modules/lib. So try loading system libraries from there too.
@@ -278,6 +272,7 @@ function prepareStackTrace(
  */
 // prettier-ignore
 function getCountFuncParams(Module: Module): (funcPtr: number) => number {
+  checkVersion(Module, "getCountFuncParams", PyodideVersion.V0_26_0a2);
   const code = new Uint8Array([
     0x00, 0x61, 0x73, 0x6d, // \0asm magic number
     0x01, 0x00, 0x00, 0x00, // version 1
@@ -356,6 +351,11 @@ function getCountFuncParams(Module: Module): (funcPtr: number) => number {
 let countFuncParams: (funcPtr: number) => number;
 
 export function patched_PyEM_CountFuncParams(Module: Module, funcPtr: any) {
+  checkVersion(
+    Module,
+    'patched_PyEM_CountFuncParams',
+    PyodideVersion.V0_26_0a2
+  );
   countFuncParams ??= getCountFuncParams(Module);
   return countFuncParams(funcPtr);
 }

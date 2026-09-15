@@ -8,7 +8,7 @@
 // eleven C++ expectedFailures ("nitpickiness about the type of error");
 // the scenarios here probe the same territory and pin what each
 // implementation actually does — most of it is parity, with the
-// signal-reason default the notable divergence.
+// signal-reason default and concurrent-abort identity as divergences.
 
 import { strictEqual, ok, rejects } from 'node:assert';
 import { usingTsImpl, pedanticWpt } from 'which-impl';
@@ -125,19 +125,72 @@ export const abortThenControllerErrorInFlight = {
   },
 };
 
-// controller.error() then writer.abort() while a write is in flight: the
-// stream is already erroring, so the abort rejects with the
-// controller's error while the in-flight write still finishes (parity).
-export const controllerErrorThenAbortInFlight = {
+// writer.abort() then controller.error() while a write is in flight,
+// with the write later rejecting. The abort request remains authoritative:
+// closed carries its reason, and the sink abort hook waits for the in-flight
+// write to settle on both implementations.
+export const abortThenControllerErrorInFlightRejects = {
   async test() {
-    let resolveWrite;
+    const events = [];
+    let rejectWrite;
     let controller;
     const ws = new WritableStream({
       start(c) {
         controller = c;
       },
       write() {
+        events.push('sink-write');
+        return new Promise((resolve, reject) => (rejectWrite = reject));
+      },
+      abort(reason) {
+        events.push(`sink-abort:${reason}`);
+      },
+    });
+    const writer = ws.getWriter();
+    const closedExpectation = rejects(
+      writer.closed,
+      (e) => e === 'abort-reason'
+    );
+    const write = writer.write('chunk');
+    const writeSettled = write.catch((e) =>
+      events.push(`write-rejected:${e.message}`)
+    );
+    await scheduler.wait(1);
+    const abortP = writer.abort('abort-reason');
+    const abortSettled = abortP.then(
+      () => events.push('abort-fulfilled'),
+      (e) => events.push(`abort-rejected:${e.message}`)
+    );
+    controller.error(new Error('controller-error'));
+    await scheduler.wait(1);
+    strictEqual(events.join(' | '), 'sink-write');
+    rejectWrite(new Error('write-failure'));
+    await Promise.all([writeSettled, abortSettled, closedExpectation]);
+    strictEqual(
+      events.join(' | '),
+      'sink-write | sink-abort:abort-reason | write-rejected:write-failure | abort-fulfilled'
+    );
+  },
+};
+
+// controller.error() then writer.abort() while a write is in flight: the
+// stream is already erroring, so the abort rejects with the
+// controller's error while the in-flight write still finishes and the
+// sink abort hook remains suppressed (parity).
+export const controllerErrorThenAbortInFlight = {
+  async test() {
+    let resolveWrite;
+    let controller;
+    let abortHookCalled = false;
+    const ws = new WritableStream({
+      start(c) {
+        controller = c;
+      },
+      write() {
         return new Promise((res) => (resolveWrite = res));
+      },
+      abort() {
+        abortHookCalled = true;
       },
     });
     const writer = ws.getWriter();
@@ -151,6 +204,7 @@ export const controllerErrorThenAbortInFlight = {
 
     strictEqual(await write, undefined);
     await rejects(abort, { message: 'ctrl-error' });
+    strictEqual(abortHookCalled, false);
   },
 };
 

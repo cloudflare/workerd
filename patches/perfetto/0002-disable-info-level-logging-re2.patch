@@ -5,24 +5,20 @@ Subject: disable info level logging, re2
 
 
 diff --git a/include/perfetto/base/build_configs/bazel/perfetto_build_flags.h b/include/perfetto/base/build_configs/bazel/perfetto_build_flags.h
-index 8fb2bc7cab11ccc7a669ba023bca62569c0b151c..149c2b18c4e8c553dea7f8ab90dd12ea661d3534 100644
+index a5519e4de613b99164450f1fd9f857e236b33537..9be7921eb078b1868d66d95c5c9f0e46460b45a2 100644
 --- a/include/perfetto/base/build_configs/bazel/perfetto_build_flags.h
 +++ b/include/perfetto/base/build_configs/bazel/perfetto_build_flags.h
-@@ -36,7 +36,7 @@
- #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_FORCE_DCHECK_ON() (0)
+@@ -37,5 +37,5 @@
  #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_FORCE_DCHECK_OFF() (1)
  #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_HTTP_ADDITIONAL_CORS_ORIGINS() ("")
 -#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_VERBOSE_LOGS() (1)
 +#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_VERBOSE_LOGS() (0)
  #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_VERSION_GEN() (1)
  #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_TP_PERCENTILE() (1)
- #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_TP_LINENOISE() (1)
-@@ -55,7 +55,7 @@
- #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_ENABLE_RT_MUTEX() (1)
+@@ -57,5 +57,5 @@
  #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_ENABLE_LOCKFREE_TASKRUNNER() (1)
  #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_ENABLE_SOCK_INOTIFY() (1)
 -#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_RE2() (1)
 +#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_RE2() (0)
  #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_PCRE2() (0)
- 
- struct PerfettoBuildFlag {
+ #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_AMALGAMATED_SDK() (0)

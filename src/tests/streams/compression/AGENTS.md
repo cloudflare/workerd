@@ -63,9 +63,12 @@ interface DecompressionStream {
 - **Chunks:** ArrayBuffer, any view (offsets honored), empty and detached
   inputs are accepted by both. Strings (#1) and SharedArrayBuffers incl.
   SAB-backed views (#2) are accepted and encoded/copied by C++ but rejected
-  by TypeScript per spec. Everything else rejects with TypeError (#3
-  message) — after which the C++ stream SURVIVES (later writes flow, clean
-  close) while TypeScript errors both sides (#4).
+  by TypeScript per spec (Web IDL BufferSource without [AllowShared]).
+  Everything else rejects with TypeError (#3 message) — after which the C++
+  stream SURVIVES (later writes flow, clean close) while TypeScript errors
+  both sides, the spec's transform-time error propagation (#4). The
+  TypeScript pair passes WPT's bad-chunks files; the C++ configuration
+  disables compression-bad-chunks.
 - **Corrupt input** (DecompressionStream): the WRITE rejects (TypeError
   "Decompression failed.") and both sides error, in both implementations;
   the failure propagates through downstream pipes to consumers.
@@ -131,10 +134,10 @@ pedantic branches shifting anything the suite pins.
 
 | # | Area | C++ | TypeScript | Pinned in |
 | --- | --- | --- | --- | --- |
-| 1 | String chunks | accepted, UTF-8 encoded (the WPT compression-bad-chunks expected failure) | rejected TypeError | `stringChunkDiverges` |
-| 2 | SharedArrayBuffer / SAB-backed view chunks | accepted (copied out) | rejected TypeError | `sharedArrayBufferChunkDiverges` |
+| 1 | String chunks | accepted, UTF-8 encoded (the reason WPT compression-bad-chunks is disabled there) | rejected TypeError | `stringChunkDiverges` |
+| 2 | SharedArrayBuffer / SAB-backed view chunks | accepted (copied out) | rejected TypeError (spec: BufferSource without [AllowShared]) | `sharedArrayBufferChunkDiverges` |
 | 3 | Invalid-chunk TypeError message | "This TransformStream is being used as a byte stream, but received an object of non-ArrayBuffer/ArrayBufferView type on its writable side." | "The provided value is not of type (ArrayBuffer or ArrayBufferView)" | `invalidChunkAftermathDiverges` |
-| 4 | Invalid-chunk aftermath | stream survives | both sides error | `invalidChunkAftermathDiverges` |
+| 4 | Invalid-chunk aftermath | stream survives | both sides error (spec) | `invalidChunkAftermathDiverges` |
 | 5 | `TransformStream` inheritance + accessor placement | subclass; readable/writable inherited | standalone; own accessors | `transformStreamInheritance` |
 | 6 | `constructor.length` | 0 | 1 | `constructorSurface` |
 | 7 | Missing/undefined format | jsg type-boundary TypeError ("not of type 'string'") | ToString-coerced into format validation | `nonStringFormatThrows` |

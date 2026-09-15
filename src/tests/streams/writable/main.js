@@ -18,6 +18,7 @@ export {
   argumentConversionOrder,
   readyFulfillTiming,
   nonCallableSizeThrows,
+  globalScopePipe,
 } from 'construction';
 
 export {
@@ -38,6 +39,7 @@ export {
   writableStreamWriteSubarray,
   writableStreamWriteAny,
   writableStreamPromisesResolvedInOrder,
+  cancelWriteOnReleaseLock,
 } from 'write-semantics';
 
 export {
@@ -71,6 +73,7 @@ export {
   writableStreamSinkAlgNoCallErrorBeforeAbort,
   writableStreamWriterWithPendingAbort,
   errorRaceWithCloseWritable,
+  abortRejectsOutstandingWriteWithReason,
 } from 'abort-semantics';
 
 export {
@@ -79,6 +82,7 @@ export {
   sinkAbortSkippedAfterBadStrategyError,
   inFlightWriteRejectionDuringAbort,
   abortThenControllerErrorInFlight,
+  abortThenControllerErrorInFlightRejects,
   controllerErrorThenAbortInFlight,
   abortSignalReason,
   concurrentAbortPromiseIdentity,
@@ -92,6 +96,7 @@ export {
   fractionalSizeTruncation,
   invalidSizeReturnRejects,
   desiredSizeWhileErroring,
+  writableFloatQueueTotal,
 } from 'backpressure';
 
 export {
@@ -104,4 +109,13 @@ export {
 
 export { thenGetterDoesNotFireOnWriterPromises } from 'then-interceptors';
 
-export { writableStreamGc } from 'gc';
+export { writableStreamGc, writableStreamGcTraceFinishes } from 'gc';
+
+export {
+  manySmallWrites,
+  largeSingleWrite,
+  largeChunkedWrites,
+  veryLargeChunkedWrites,
+} from 'data-volumes';
+
+export { structuredCloneWritable } from 'transfer';

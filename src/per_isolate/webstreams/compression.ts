@@ -108,9 +108,12 @@ function isActualObject(value: unknown): boolean {
 }
 
 // True for BufferSource chunks the codec accepts: ArrayBuffers and views,
-// excluding anything SharedArrayBuffer-backed (per Web IDL, [AllowShared] is
-// not granted here; WPT pins the rejection). Captured getters are used for
-// the view's buffer — prototype accessors are user-patchable.
+// excluding anything SharedArrayBuffer-backed. The Compression Streams
+// spec takes a Web IDL BufferSource without [AllowShared], so shared
+// memory is a TypeError (WPT compression-bad-chunks pins the rejection).
+// This is a standard API, so the spec shape wins over parity with the
+// identity streams, which accept shared views by copying. Captured getters
+// are used for the view's buffer — prototype accessors are user-patchable.
 function isValidChunk(chunk: unknown): boolean {
   if (isArrayBuffer(chunk)) return true;
   if (isSharedArrayBuffer(chunk)) return false;
@@ -251,10 +254,12 @@ function createCodecPair(
           );
         }
         if (!entry.ok) {
-          // An invalid chunk errors BOTH sides, matching the legacy
-          // implementation (any write failure errored the whole pair) —
-          // without this the readable side would hang on its pending
-          // pull.
+          // An invalid chunk errors BOTH sides — the spec's transform-time
+          // TypeError, which TransformStreamError propagates to the readable
+          // and the writable alike (WPT bad-chunks pins the read rejecting
+          // too). Without failBoth the readable would hang on its pending
+          // pull. This deliberately differs from the identity streams'
+          // per-write rejection: CompressionStream is a standard API.
           failBoth(entry.error);
           throw entry.error;
         }

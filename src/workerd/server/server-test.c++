@@ -2391,6 +2391,96 @@ KJ_TEST("Server: configuring a DO namespace with no class export is not an error
     Internal Server Error)"_blockquote);
 }
 
+KJ_TEST("Server: named images and directory snapshots are not startup sources") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2026-08-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  fetch(request, env) {
+                `    return env.ns.get(env.ns.idFromName("test")).fetch(request);
+                `  }
+                `}
+                `export class NamedImageContainer extends DurableObject {
+                `  async fetch() {
+                `    const before = Number(await (await this.env.dockerCheck.fetch(
+                `        "http://docker/check")).text());
+                `    this.ctx.container.start({
+                `      directorySnapshots: [{
+                `        snapshot: {id: "unused", size: 0, dir: "/data"},
+                `      }],
+                `    });
+                `    try {
+                `      await this.ctx.container.monitor();
+                `      return new Response("no error");
+                `    } catch (error) {
+                `      const response = await this.env.dockerCheck.fetch("http://docker/check");
+                `      const requests = Number(await response.text()) - before;
+                `      return new Response(`${error.message}; Docker requests: ${requests}`);
+                `    }
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            (name = "ns", durableObjectNamespace = "NamedImageContainer"),
+            (name = "dockerCheck", service = "docker"),
+          ],
+          durableObjectNamespaces = [
+            ( className = "NamedImageContainer",
+              uniqueKey = "named-image-container",
+              container = (
+                images = [(name = "app", image = "registry.example.com/app:latest")],
+              ),
+            ),
+          ],
+          durableObjectStorage = (inMemory = void),
+          containerEngine = (localDocker = (
+            socketPath = "docker-addr",
+            containerEgressInterceptorImage = "unused",
+          )),
+        )
+      ),
+      ( name = "docker",
+        worker = (
+          compatibilityDate = "2026-08-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `let requests = 0;
+                `export default {
+                `  fetch(request) {
+                `    const path = new URL(request.url).pathname;
+                `    if (path === "/check") {
+                `      return new Response(String(requests));
+                `    }
+                `    // The process-wide stale-volume scan is not part of container startup.
+                `    if (path !== "/volumes") ++requests;
+                `    return new Response(null, {status: 404});
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+      ( name = "docker", address = "docker-addr", service = "docker" ),
+    ],
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "Container failed to start; Docker requests: 0");
+}
+
 KJ_TEST("Server: call queue handler on service binding") {
   TestServer test(R"((
     services = [
@@ -3019,6 +3109,86 @@ KJ_TEST("Server: Durable Object alarm persistence (on disk)") {
 
     conn.httpGet200("/get", kj::str("alarm=", alarmTime));
   }
+}
+
+KJ_TEST("Server: alarm timeout with live facet channel") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2026-04-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let id = ctx.exports.Parent.idFromName("test");
+                `    let actor = ctx.exports.Parent.get(id);
+                `    if (new URL(request.url).pathname === "/start") {
+                `      await actor.start();
+                `      return new Response("started");
+                `    }
+                `    return new Response(await actor.status());
+                `  }
+                `}
+                `export class Parent extends DurableObject {
+                `  async start() {
+                `    await this.ctx.storage.setAlarm(1);
+                `  }
+                `  async status() {
+                `    return (await this.ctx.storage.get("alarmStarted")) || "not started";
+                `  }
+                `  async alarm() {
+                `    await this.ctx.storage.put("alarmStarted", "started");
+                `    let facet = this.ctx.facets.get("child",
+                `        () => ({class: this.ctx.exports.Child}));
+                `    await facet.ping();
+                `    await new Promise(() => {});
+                `  }
+                `}
+                `export class Child extends DurableObject {
+                `  ping() { return "pong"; }
+                `}
+            )
+          ],
+          durableObjectNamespaces = [
+            ( className = "Parent",
+              uniqueKey = "parentkey",
+              enableSql = true,
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+
+  {
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/start", "started");
+  }
+
+  test.wait(15 * 60 + 1);
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/status", "started");
 }
 
 KJ_TEST("Server: Ephemeral Objects") {
@@ -7866,6 +8036,29 @@ MF-Access-Blob: {"app_aud":"valid-aud","jwt_claims":"not-an-object"}
 
       Internal Server Error)"_blockquote);
   }
+}
+
+KJ_TEST("Server: handler validation does not evaluate unrelated getters") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2026-07-30",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `export default {
+          `  fetch() {
+          `    return new Response("ok");
+          `  },
+          `  get unrelated() {
+          `    return NOT_DEFINED_ANYWHERE;
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "ok");
 }
 
 }  // namespace

@@ -1570,8 +1570,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   autoGrpcConvert @178 :Bool
       $compatEnableFlag("auto_grpc_convert")
-      $neededByFl
-      $experimental;
+      $neededByFl;
   # When enabled, a Worker's outbound gRPC-web subrequest is converted to gRPC at
   # the edge.
 
@@ -1642,14 +1641,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   wasmMemoryDiscard @186 :Bool
       $compatEnableFlag("wasm_memory_discard")
       $experimental;
-  # Enables the experimental WebAssembly memory.discard proposal, exposing
-  # `WebAssembly.Memory.prototype.discard(byteOffset, byteLength)` and the
-  # `memory.discard` opcode. Both zero the given wasm-page-aligned region and
-  # release its physical pages back to the operating system. Shared memories
-  # are not supported, and unaligned or out-of-bounds ranges throw a
-  # RangeError (JS API) or trap (wasm opcode).
-  # WARNING: Do not remove the `$experimental` marker before
-  # the v8 change becomes part of chrome's default config.
+  # Obsolete flag. Has no effect. Still accepted so configs which set it keep validating.
 
   pythonWorkers314 @187 :Bool
       $compatEnableFlag("python_workers_314")

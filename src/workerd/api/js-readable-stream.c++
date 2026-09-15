@@ -578,51 +578,49 @@ JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::
   // legacy arm), close on completion, cancel forwarding to the generator's return().
   // Pull rejections (generator.next() failure or a rejected value promise) propagate to
   // the standard machinery, which errors the stream with the same reason.
-  //
-  // The generator is shared by the pull and cancel closures via an Rc. Like the legacy
-  // arm's closures, these capture it without GC visitation: the captured references are
-  // strong, keeping the (JS-unreachable) generator state alive as long as the stream's
-  // source object is.
-  auto rcGenerator = kj::rc<jsg::AsyncGenerator<jsg::Value>>(kj::mv(generator));
 
   auto pull = js.wrapPromiseReturningFunction(js.v8Context(),
-      [generator = rcGenerator.addRef()](
-          jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
-    auto controller =
-        jsg::JsRef(js, KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>()));
-    return generator->next(js).then(js,
-        [controller = kj::mv(controller)](
-            jsg::Lock& js, kj::Maybe<jsg::Value> value) mutable -> jsg::Promise<jsg::Value> {
-      KJ_IF_SOME(v, value) {
-        auto handle = v.getHandle(js);
-        if (handle->IsPromise()) {
-          return js.toPromise(handle.As<v8::Promise>())
-              .then(js, [controller = kj::mv(controller)](jsg::Lock& js, jsg::Value val) mutable {
-            webstreams::dispatchCall(js, "readableControllerEnqueue",
-                jsg::JsValue(controller.getHandle(js)), jsg::JsValue(val.getHandle(js)));
-            return js.v8Ref<v8::Value>(js.v8Undefined());
-          });
-        }
-        webstreams::dispatchCall(js, "readableControllerEnqueue",
-            jsg::JsValue(controller.getHandle(js)), jsg::JsValue(handle));
-      } else {
-        webstreams::dispatchCall(
-            js, "readableControllerClose", jsg::JsValue(controller.getHandle(js)));
-      }
-      return js.resolvedPromise(js.v8Ref<v8::Value>(js.v8Undefined()));
-    });
-  });
+      JSG_VISITABLE_LAMBDA((generator = generator.addRef(js)), (generator),
+          (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
+            auto controller =
+                jsg::JsRef(js, KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>()));
+            return generator.next(js).then(js,
+                JSG_VISITABLE_LAMBDA((controller = kj::mv(controller)), (controller),
+                    (jsg::Lock & js,
+                        kj::Maybe<jsg::Value> value) mutable->jsg::Promise<jsg::Value> {
+                      KJ_IF_SOME(v, value) {
+                      auto handle = v.getHandle(js);
+                      if (handle->IsPromise()) {
+                      return js.toPromise(handle.As<v8::Promise>())
+                          .then(js,
+                              JSG_VISITABLE_LAMBDA((controller = kj::mv(controller)), (controller),
+                                  (jsg::Lock & js, jsg::Value val) mutable {
+                                    webstreams::dispatchCall(js, "readableControllerEnqueue",
+                                        jsg::JsValue(controller.getHandle(js)),
+                                        jsg::JsValue(val.getHandle(js)));
+                                    return js.v8Ref<v8::Value>(js.v8Undefined());
+                                  }));
+                      }
+                      webstreams::dispatchCall(js, "readableControllerEnqueue",
+                          jsg::JsValue(controller.getHandle(js)), jsg::JsValue(handle));
+                      } else {
+                      webstreams::dispatchCall(
+                          js, "readableControllerClose", jsg::JsValue(controller.getHandle(js)));
+                      }
+                      return js.resolvedPromise(js.v8Ref<v8::Value>(js.v8Undefined()));
+                    }));
+          }));
 
   auto cancel = js.wrapPromiseReturningFunction(js.v8Context(),
-      [generator = rcGenerator.addRef()](
-          jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
-    return generator->return_(js, js.v8Ref<v8::Value>(v8::Local<v8::Value>(info[0])))
-        .then(js, [](jsg::Lock& js, kj::Maybe<jsg::Value>) {
-      // The generator might produce a value on return and might even want to continue,
-      // but the stream has been canceled at this point, so we stop here.
-      return js.v8Ref<v8::Value>(js.v8Undefined());
-    });
-  });
+      JSG_VISITABLE_LAMBDA((generator = generator.addRef(js)), (generator),
+          (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
+            return generator.return_(js, js.v8Ref<v8::Value>(v8::Local<v8::Value>(info[0])))
+                .then(js, [](jsg::Lock& js, kj::Maybe<jsg::Value>) {
+              // The generator might produce a value on return and might even want to continue,
+              // but the stream has been canceled at this point, so we stop here.
+              return js.v8Ref<v8::Value>(js.v8Undefined());
+            });
+          }));
 
   auto sourceObj = js.obj();
   sourceObj.set(js, "pull"_kj, jsg::JsValue(pull));
@@ -1432,7 +1430,8 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
   // source performs its own internal accumulation toward minBytes (KJ tryRead semantics),
   // so this single read is the source's complete answer for the read: delivering fewer
   // than the minimum in total implicitly signals EOF (the conduit commits the partial fill
-  // fused as {done: true, value: partialView} and closes the stream).
+  // as {done: false, value: partialView} and closes the stream; the next read observes
+  // EOF — the C++-parity readAtLeast tail shape).
   size_t stashed = stash.size();
   size_t minBytes = atLeast - stashed;
   ensureScratch(kj::max(kScratchSize, minBytes));
@@ -1547,10 +1546,10 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
     webstreams::invokeMethod(
         js, byobRequest.getHandle(js), "respond"_kj, js.num(static_cast<double>(total)));
     if (eof) {
-      // Fused close-commit: deliver the partial bytes, then explicitly signal EOF in the
-      // same pull turn. (The under-delivered respond() above already implies closure to
-      // the conduit, which tolerates this close as a no-op; the explicit close keeps the
-      // EOF signal unambiguous rather than relying on that inference.)
+      // Deliver the partial bytes, then explicitly signal EOF in the same pull turn.
+      // (The under-delivered respond() above already implies closure to the conduit,
+      // which tolerates this close as a no-op; the explicit close keeps the EOF signal
+      // unambiguous rather than relying on that inference.)
       webstreams::invokeMethod(js, controller.getHandle(js), "close"_kj);
     }
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {

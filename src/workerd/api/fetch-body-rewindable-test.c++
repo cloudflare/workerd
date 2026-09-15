@@ -14,12 +14,15 @@
 namespace workerd::api {
 namespace {
 
-// Records, in call order, every value passed to setNextSubrequestBodyRewindable().
+// Records, in call order, every body-rewindable value passed to setNextSubrequestRetryEligibility().
 class RecordingRequestObserver final: public RequestObserver {
  public:
   RecordingRequestObserver(kj::Vector<bool>& calls): calls(calls) {}
 
-  void setNextSubrequestBodyRewindable(SubrequestBodyRewindable bodyRewindable) override {
+  void setNextSubrequestRetryEligibility(
+      SubrequestBodyRewindable bodyRewindable, ActorCallTargetRetryable targetRetryable) override {
+    // A service binding is not a retryable actor target.
+    KJ_EXPECT(targetRetryable == ActorCallTargetRetryable::NO);
     calls.add(bodyRewindable.toBool());
   }
 
@@ -73,8 +76,9 @@ struct FetchTargetIoChannelFactory final: public TestFixture::DummyIoChannelFact
   }
 };
 
-// fetchImplNoOutputLock forwards Request::canRewindBody() to RequestObserver so that, downstream,
-// edgeworker can classify retry eligibility for disconnected outgoing actor calls. The subtle
+// fetchImplNoOutputLock forwards Request::canRewindBody() and the target's retry support to
+// RequestObserver so that, downstream, edgeworker can classify retry eligibility for disconnected
+// outgoing actor calls. The subtle
 // property here is that the stashed signal is per-call, not sticky: a single RequestObserver is
 // shared across every outgoing subrequest in an IoContext, so the value set for one call must not
 // carry over into the next. We issue two fetches in one invocation -- a rewindable (buffered) body
