@@ -615,6 +615,10 @@ class VirtualFileSystem {
     // If true, opening the path will fail if it already exists.
     bool exclusive = false;
 
+    // If true, an existing file is truncated to zero length on open.
+    // Ignored if write is false.
+    bool truncate = false;
+
     // If true, and the destination is a symbolic link, the link will be
     // followed such that the file descriptor is opened on the target
     // of the symbolic link. If false, the file descriptor will be opened
@@ -669,7 +673,8 @@ class VirtualFileSystem {
   // If the file cannot be opened or created, an exception will be thrown.
   virtual kj::OneOf<FsError, kj::Rc<OpenedFile>> openFd(jsg::Lock& js,
       const jsg::Url& url,
-      OpenOptions options = {true, false, false, false, true}) const KJ_WARN_UNUSED_RESULT = 0;
+      OpenOptions options = {
+        true, false, false, false, false, true}) const KJ_WARN_UNUSED_RESULT = 0;
 
   // Closes the given file descriptor. This is a no-op if the file descriptor is not open.
   // Using an int fd is not super nice but it is the most compatible with the node:fs
