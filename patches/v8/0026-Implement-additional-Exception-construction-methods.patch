@@ -25,10 +25,10 @@ index 74f57311a5257e8fdba3a060e9f6844a26a6dd69..88ba0737664800d8bcc1e091d9648ca7
    /**
     * Creates an error message for the given exception.
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 578765eca26b3432cee1ea36f5b2bead9cf24dbe..5c8016ba4b1be43f1075a12b457935305625b174 100644
+index 95c70ca28afcc8ffa73b42da1893dacc86aa9fca..31eed70d1335b67297de5a860720ea51c0b9698a 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -11542,6 +11542,10 @@ DEFINE_ERROR(WasmCompileError, wasm_compile_error)
+@@ -11456,6 +11456,10 @@ DEFINE_ERROR(WasmCompileError, wasm_compile_error)
  DEFINE_ERROR(WasmLinkError, wasm_link_error)
  DEFINE_ERROR(WasmRuntimeError, wasm_runtime_error)
  DEFINE_ERROR(WasmSuspendError, wasm_suspend_error)
