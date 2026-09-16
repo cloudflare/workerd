@@ -62,7 +62,6 @@ const {
   PromiseReject,
   PromiseWithResolvers,
   PromisePrototypeThen,
-  SafePromise,
   RangeError,
   SafeArrayIterator,
   SafeWeakMap,
@@ -84,10 +83,6 @@ const {
   Uint8Array,
   uncurryThis,
 } = primordials;
-
-// SafePromise.race is used by the pipe algorithm where species protection
-// is needed for the race's internal .then() calls on its arguments.
-const SafePromiseRace = SafePromise.race;
 
 const { isArrayBuffer, isArrayBufferView, isPromise, markPromiseHandled } =
   utils;
@@ -2672,12 +2667,14 @@ class ReadableStreamDrainingReader<R> {
 
 // The pipe (spec ReadableStreamPipeTo). Internal operations only on both
 // ends — locks are held for the duration. Chunks are read only while the
-// destination desires them: once the writer's ready promise resolves, the
-// pump reads a chunk (waiting if none is buffered), then keeps moving
-// buffered chunks until desiredSize runs out. Writes are not awaited
-// individually (the close path queues behind them, and write failures
-// surface through the destination's closed promise). A shutdown waits for
-// the writes already made before running its action.
+// destination desires them: the pump moves buffered chunks until
+// desiredSize runs out, and reads the next chunk when none is buffered. It
+// resumes from the destination's ready hook when a write completes, and
+// when a read delivers, so a buffered backlog moves without a promise per
+// wake-up. Writes are not awaited individually (the close path queues
+// behind them, and write failures surface through the destination's closed
+// promise). A shutdown waits for the writes already made before running
+// its action.
 function pipeToInternal<R>(
   source: ReadableStream<R>,
   destination: WritableStreamType<R>,
@@ -2719,6 +2716,7 @@ function pipeToInternal<R>(
   let abortAlgorithm: (() => void) | undefined;
 
   const finalize = (error?: { reason: unknown }): void => {
+    writableInternals.setReadyHook(destination, undefined);
     writableInternals.writerRelease(writer);
     readableStreamReaderGenericRelease(reader);
     if (signal !== undefined && abortAlgorithm !== undefined) {
@@ -2934,72 +2932,51 @@ function pipeToInternal<R>(
     }
   }
 
-  // ---- Synchronous pre-checks (spec conditions 1-4) ----
-  // The spec's "in parallel" conditions must be "applied in order":
+  // The spec's shutdown conditions, "applied in order":
   //   1. Source errored  →  abort dest
   //   2. Dest errored   →  cancel source
   //   3. Source closed   →  close dest
   //   4. Dest close-queued/closed  →  TypeError + cancel source
-  // When streams are already in terminal states at pipe start, we must
-  // honour this priority synchronously — the async pump loop and
-  // microtask-scheduled reactive handlers cannot guarantee spec ordering.
-  if (!shuttingDown) {
+  // Checked at pipe start (terminal states shut down synchronously in this
+  // priority) and before the pump reads. Returns whether the pipe is
+  // shutting down.
+  const checkConditions = (): boolean => {
+    if (shuttingDown) return true;
     const srcState = getReadableStreamGetState(source);
     if (srcState === 'errored') {
-      // Condition 1: source already errored → abort dest with source error
       onSourceErrored(getReadableStreamStoredError(source));
-    } else {
-      const destState = writableInternals.getState(destination);
-      if (destState === 'errored') {
-        // Condition 2: dest already errored → cancel source with dest error
-        onDestErrored(writableInternals.getStoredError(destination));
-      } else if (srcState === 'closed') {
-        // Condition 3: source already closed → close dest
-        onSourceDone();
-      } else if (
-        writableInternals.closeQueuedOrInFlight(destination) ||
-        destState === 'closed'
-      ) {
-        // Condition 4: dest already closing/closed → TypeError
-        onDestClosedEarly();
-      }
+      return true;
     }
-  }
+    const destState = writableInternals.getState(destination);
+    if (destState === 'errored') {
+      onDestErrored(writableInternals.getStoredError(destination));
+      return true;
+    }
+    if (srcState === 'closed') {
+      onSourceDone();
+      return true;
+    }
+    if (
+      writableInternals.closeQueuedOrInFlight(destination) ||
+      destState === 'closed'
+    ) {
+      onDestClosedEarly();
+      return true;
+    }
+    return false;
+  };
+  checkConditions();
 
   // ---- Reactive shutdown triggers (spec: "in parallel") ----
-  // The pump loop must not block indefinitely on backpressure or reads
-  // when the other end closes, errors, or the signal fires. We use a
-  // shared "poke" promise that is resolved whenever the pump should
-  // re-evaluate its state (source close/error, dest error).
-  let pokeResolve: (() => void) | undefined;
-  let pokePromise: Promise<unknown> | undefined;
-
-  const resetPoke = (): void => {
-    const pwr = PromiseWithResolvers() as PromiseWithResolversType<void>;
-    pokePromise = pwr.promise;
-    pokeResolve = pwr.resolve;
-  };
-  resetPoke();
-
-  const poke = (): void => {
-    const r = pokeResolve;
-    if (r !== undefined) {
-      pokeResolve = undefined;
-      r();
-    }
-  };
-
-  // Forward close/error propagation from the source.
+  // Forward close/error propagation from the source. A close reaches the
+  // pump, which propagates it once the chunk of a pending read is written.
   PromisePrototypeThen(
     getGenericReaderClosedPromise(reader),
     () => {
-      if (!shuttingDown) poke(); // source closed — wake the pump
+      pump();
     },
     (e: unknown) => {
-      if (!shuttingDown) {
-        onSourceErrored(e);
-        poke();
-      }
+      if (!shuttingDown) onSourceErrored(e);
     }
   );
 
@@ -3008,126 +2985,102 @@ function pipeToInternal<R>(
     writableInternals.getWriterClosedPromise(writer),
     undefined,
     (e: unknown) => {
-      if (!shuttingDown) {
-        onDestErrored(e);
-        poke();
-      }
+      if (!shuttingDown) onDestErrored(e);
     }
   );
 
   const writeChunk = (chunk: R): void => {
     const writePromise = writableInternals.writerWrite(writer, chunk);
-    markPromiseHandled(writePromise);
-    // A rejection that leaves the destination WRITABLE is the internal
-    // transforms' non-fatal invalid-chunk rejection — fail the pipe with
-    // it (see onWriteRejectedNonFatally). Fatal rejections error the
-    // destination and are handled by the closed-promise observer instead.
-    // When a clean shutdown is already waiting for acknowledgment, record
-    // the failure for runAction's upgrade path.
-    PromisePrototypeThen(writePromise, undefined, (e: unknown) => {
-      if (writableInternals.getState(destination) !== 'writable') return;
-      if (shuttingDown) {
-        pendingNonFatalWriteFailure ??= { reason: e };
-        return;
-      }
-      onWriteRejectedNonFatally(e);
-      poke();
-    });
-    // Track the last write so shutdownWithAction can wait for it. The
-    // writable serializes writes, so when this settles all preceding
-    // writes have already settled.
+    // One reaction per write. A rejection that leaves the destination
+    // WRITABLE is the internal transforms' non-fatal invalid-chunk
+    // rejection — fail the pipe with it (see onWriteRejectedNonFatally).
+    // Fatal rejections error the destination and are handled by the
+    // closed-promise observer instead. When a clean shutdown is already
+    // waiting for acknowledgment, record the failure for runAction's
+    // upgrade path. The reaction's promise settles once the write has,
+    // which is what shutdownWithAction waits for; the writable serializes
+    // writes, so every earlier write has settled by then too.
     lastWriteSettled = PromisePrototypeThen(
       writePromise,
-      () => {},
-      () => {}
+      undefined,
+      (e: unknown) => {
+        if (writableInternals.getState(destination) !== 'writable') return;
+        if (shuttingDown) {
+          pendingNonFatalWriteFailure ??= { reason: e };
+          return;
+        }
+        onWriteRejectedNonFatally(e);
+      }
     ) as Promise<void>;
   };
 
-  // Spec: no reads while the writer's desiredSize is <= 0 or null. A write
-  // ends the batch synchronously when a size() or sink callback errors the
-  // destination or aborts the pipe; an asynchronous write rejection stops
-  // the pipe before the next batch.
+  // Spec: no reads while the writer's desiredSize is <= 0 or null.
   const destinationDesiresChunks = (): boolean =>
-    !shuttingDown &&
     writableInternals.getState(destination) === 'writable' &&
     !writableInternals.closeQueuedOrInFlight(destination) &&
     !writableInternals.hasBackpressure(destination);
 
-  const pump = async (): Promise<void> => {
-    while (!shuttingDown) {
-      // Wait for backpressure to drop, but also react to shutdown triggers.
-      // SafePromise.race avoids prototype-then interception.
-      try {
-        await SafePromiseRace([
-          writableInternals.getWriterReadyPromise(writer),
-          pokePromise,
-        ]);
-      } catch (e) {
-        if (!shuttingDown) onDestErrored(e);
-        return;
-      }
-      if (shuttingDown) return;
-      resetPoke(); // arm the next poke for the next iteration
+  let pumping = false;
+  let readPending = false;
 
-      // Spec conditions must be checked in priority order (1-4):
-      // source error > dest error > source close > dest close-early.
-      const srcState = getReadableStreamGetState(source);
-      if (srcState === 'errored') {
-        // Condition 1: source errored → abort dest
-        if (!shuttingDown)
-          onSourceErrored(getReadableStreamStoredError(source));
-        return;
-      }
-      const destState = writableInternals.getState(destination);
-      if (destState === 'errored') {
-        // Condition 2: dest errored → cancel source
-        if (!shuttingDown)
-          onDestErrored(writableInternals.getStoredError(destination));
-        return;
-      }
-      if (srcState === 'closed') {
-        // Condition 3: source closed → close dest
-        onSourceDone();
-        return;
-      }
-      if (
-        writableInternals.closeQueuedOrInFlight(destination) ||
-        destState === 'closed'
-      ) {
-        // Condition 4: dest closing/closed → TypeError
-        onDestClosedEarly();
-        return;
-      }
-
-      // The first chunk of the batch: buffered, or the next to arrive.
-      let result = pipeReadBuffered<R>(reader, source);
-      if (result === undefined) {
-        try {
-          result = await defaultReaderReadInternal<R>(reader, source);
-        } catch (e) {
-          if (!shuttingDown) onSourceErrored(e);
+  // Moves buffered chunks while the destination desires them, then reads
+  // the next chunk if none is buffered. A write ends the batch
+  // synchronously when a size() or sink callback errors the destination or
+  // aborts the pipe; an asynchronous write rejection shuts the pipe down
+  // when it arrives. Write completions reach the pump through the ready
+  // hook, never while it runs.
+  const pump = (): void => {
+    if (pumping || readPending) return;
+    pumping = true;
+    try {
+      while (!checkConditions() && destinationDesiresChunks()) {
+        const result = pipeReadBuffered<R>(reader, source);
+        if (result === undefined) {
+          readNextChunk();
           return;
         }
-        if (shuttingDown) return;
-        resetPoke();
-      }
-
-      // Then buffered chunks, while the destination desires them. The
-      // destination FIFO preserves order and the close marker (if done)
-      // queues behind these writes.
-      for (;;) {
         if (result.done) {
           onSourceDone();
           return;
         }
         writeChunk(result.value as R);
-        if (!destinationDesiresChunks()) break;
-        result = pipeReadBuffered<R>(reader, source);
-        if (result === undefined) break;
       }
+    } finally {
+      pumping = false;
     }
   };
-  markPromiseHandled(pump());
+
+  const readNextChunk = (): void => {
+    readPending = true;
+    PromisePrototypeThen(
+      defaultReaderReadInternal<R>(reader, source),
+      (result: ReadableStreamReadResult<R>) => {
+        readPending = false;
+        if (shuttingDown) return;
+        if (result.done) {
+          onSourceDone();
+          return;
+        }
+        writeChunk(result.value as R);
+        pump();
+      },
+      (e: unknown) => {
+        readPending = false;
+        if (!shuttingDown) onSourceErrored(e);
+      }
+    );
+  };
+
+  // The first pump runs once the writer is ready; later ones from the
+  // ready hook and from reads.
+  if (!shuttingDown) {
+    writableInternals.setReadyHook(destination, pump);
+    PromisePrototypeThen(
+      writableInternals.getWriterReadyPromise(writer),
+      pump,
+      () => {}
+    );
+  }
 
   return promise;
 }

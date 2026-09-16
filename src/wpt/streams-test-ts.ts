@@ -6,13 +6,7 @@ import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'idlharness.any.js': {},
-  'piping/abort.any.js': {
-    comment:
-      'The pipe pump observes source-close through its read loop rather ' +
-      'than a [[closedPromise]] reaction, so an abort fired one microtask ' +
-      'after the close wins the shutdown race that the spec has it lose.',
-    expectedFailures: ['abort should do nothing after the readable is closed'],
-  },
+  'piping/abort.any.js': {},
   'piping/close-propagation-backward.any.js': {},
   'piping/close-propagation-forward.any.js': {},
   'piping/error-propagation-backward.any.js': {},

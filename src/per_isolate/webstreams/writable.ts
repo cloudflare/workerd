@@ -267,6 +267,11 @@ let getWriterStream: <W>(
   writer: WritableStreamDefaultWriter<W>
 ) => WritableStream<W> | undefined;
 let writableStreamBackpressureOf: <W>(stream: WritableStream<W>) => boolean;
+let setWritableStreamReadyHook: <W>(
+  stream: WritableStream<W>,
+  hook: (() => void) | undefined
+) => void;
+let writableStreamCallReadyHook: <W>(stream: WritableStream<W>) => void;
 // Internal writer operations: the pipe implementation must never dispatch
 // through the public prototype methods (user-interceptable once the classes
 // are installed on the global).
@@ -311,6 +316,8 @@ class WritableStream<W = unknown> {
   #inFlightCloseRequest: PromiseWithResolversType<void> | undefined;
   #pendingAbortRequest: PendingAbortRequest | undefined;
   #backpressure: boolean = false;
+  // A pipe's wake-up (internalsForPipe.setReadyHook).
+  #readyHook?: (() => void) | undefined;
   // The Node.js interop closed-promise (see kIsClosedPromise), created on
   // first request and settled when the stream reaches 'closed' or
   // 'errored'.
@@ -361,6 +368,13 @@ class WritableStream<W = unknown> {
     getWritableStreamStoredError = (stream) => stream.#storedError;
     isWritableStreamLocked = (stream) => stream.#writer !== undefined;
     writableStreamBackpressureOf = (stream) => stream.#backpressure;
+    setWritableStreamReadyHook = (stream, hook) => {
+      stream.#readyHook = hook;
+    };
+    writableStreamCallReadyHook = (stream) => {
+      const hook = stream.#readyHook;
+      if (hook !== undefined && !stream.#backpressure) hook();
+    };
     setWritableStreamWriter = (stream, writer) => {
       stream.#writer = writer;
     };
@@ -1194,6 +1208,7 @@ class WritableStreamDefaultController<
         this.#completeInFlightWrite(() => {
           writableStreamFinishInFlightWrite(stream);
         });
+        writableStreamCallReadyHook(stream);
       },
       (e: unknown) => {
         // Workerd-internal non-fatal rejection (identity-stream invalid
@@ -1842,6 +1857,14 @@ module.exports = {
     // while the stream is writable and no close is queued or in flight.
     hasBackpressure: <W>(stream: WritableStream<W>): boolean =>
       writableStreamBackpressureOf(stream),
+    // The pipe's wake-up: called synchronously once a successful write has
+    // completed and left the stream without backpressure, instead of
+    // through the ready promise's reactions. One hook per stream (the pipe
+    // holds the writer lock); undefined clears it.
+    setReadyHook: <W>(
+      stream: WritableStream<W>,
+      hook: (() => void) | undefined
+    ): void => setWritableStreamReadyHook(stream, hook),
     // Whether a writer.write() issued NOW would be accepted (enqueued for a
     // sink step) rather than rejected by the state checks. The writer
     // machinery runs the strategy size() callback BEFORE those checks, so
