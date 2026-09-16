@@ -1,0 +1,23 @@
+src/workerd/server/BUILD.bazel
+  s_ad98b07a2ebbe9::t_27010b75f136ae 88,90-94,99,101-111
+src/workerd/server/cli-io-backend.c++
+  s_ad98b07a2ebbe9::t_747e795ed0a8aa 5-8,16-18,20,29-35,47-51,58-62,266-278,280-312,321,323-326,329-332,334
+src/workerd/server/cli-io-backend.h
+  s_ad98b07a2ebbe9::t_c5a50336e082a0 7-13,23-34,51-53,57-60,63-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f2a77c93564c1c50eaf33c0ac0a9c820ce0fe222",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

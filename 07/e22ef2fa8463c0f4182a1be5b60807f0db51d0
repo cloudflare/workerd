@@ -1,0 +1,41 @@
+src/workerd/api/BUILD.bazel
+  s_29743b6b20a528::t_8de84c29a766db 824-832
+src/workerd/api/basics.c++
+  s_29743b6b20a528::t_52115a576cdef1 1118
+src/workerd/api/http.c++
+  s_29743b6b20a528::t_0c495e2e8287e9 2318
+src/workerd/api/http.h
+  s_29743b6b20a528::t_4cf765185dea98 339,433
+src/workerd/api/js-writable-stream.c++
+  s_29743b6b20a528::t_e99991f3209aca 522-525
+src/workerd/api/jsrpc-call-plan-test.c++
+  s_29743b6b20a528::t_e83a2f7206deec 1-517
+src/workerd/api/streams/writable.c++
+  s_29743b6b20a528::t_bfb86b344192a9 527-530
+src/workerd/api/tests/BUILD.bazel
+  s_29743b6b20a528::t_ebd89f312f58ba 667-672
+src/workerd/api/tests/js-rpc-params-transfer-ownership-test.js
+  s_29743b6b20a528::t_c634ae5ea55d3f 1-76
+src/workerd/api/tests/js-rpc-params-transfer-ownership-test.wd-test
+  s_29743b6b20a528::t_641dfde730f9b7 1-26
+src/workerd/api/worker-rpc.c++
+  s_29743b6b20a528::t_1202186caf0d74 65-137,241-247,268-269,271-272,453,512-513,515-518,619-622,625-645,647-648,650-651,654-656,659,662,665,674-675,692-703,707-720,1030,1113-1115,2103-2106,2239,2297-2298,2310,2336,2345,2391
+src/workerd/api/worker-rpc.h
+  s_29743b6b20a528::t_d8e2ad068ea862 27-28,45-56,61-73,83,101-110,148-149,153-183,302-309,311,348,440-444,556
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "07e22ef2fa8463c0f4182a1be5b60807f0db51d0",
+  "prompts": {},
+  "sessions": {
+    "s_29743b6b20a528": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f60d29d7affe9cTTo7zk9geRdo",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+src/workerd/io/legacy-hibernation-manager.c++
+  s_ea3b91cafb67a9::t_a7f545c86a22be 55-61,73,354-357,368-369
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "87d66307ebad4cd899c90af3746b9365dc90e05d",
+  "prompts": {},
+  "sessions": {
+    "s_ea3b91cafb67a9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe6b74983ffe3TTRPQnP5WRUxK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

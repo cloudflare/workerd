@@ -1,0 +1,85 @@
+src/rust/cxx/kj-rs-io/error.rs
+  s_ad98b07a2ebbe9::t_5661eed382a6df 1-360
+src/rust/cxx/kj-rs-io/stream.rs
+  s_ad98b07a2ebbe9::t_f355642d7fa355 1-805
+src/rust/cxx/kj-rs-io/runtime.rs
+  s_ad98b07a2ebbe9::t_6aae787ea2f770 1-62
+src/rust/cxx/kj-rs-io/readiness.rs
+  s_ad98b07a2ebbe9::t_ce59fc4793567e 1-76
+src/rust/cxx/kj-rs-io/file-watcher.c++
+  s_ad98b07a2ebbe9::t_8e2e43f547c3b4 1-228
+src/rust/cxx/kj-rs/tests/lib.rs
+  s_ad98b07a2ebbe9::t_7deaf50245d2dc 17,31,37,289-294
+src/rust/cxx/kj-rs-io/tests/http-test.c++
+  s_ad98b07a2ebbe9::t_46bae3b18cf56f 1-146
+src/rust/cxx/kj-rs-io/file-watcher.h
+  s_ad98b07a2ebbe9::t_4f504b337f5bd1 1-57
+src/rust/cxx/kj-rs-io/async-io.h
+  s_ad98b07a2ebbe9::t_c0945c1fa10564 1-299
+src/rust/cxx/kj-rs/tests/test_futures.rs
+  s_ad98b07a2ebbe9::t_f3554d0b9314ec 15-29
+src/rust/cxx/kj-rs-io/BUILD.bazel
+  s_ad98b07a2ebbe9::t_7638d84499d91c 1-95
+src/rust/cxx/kj-rs-io/tests/serve-test.c++
+  s_ad98b07a2ebbe9::t_3370aa216e549a 1-496
+deps/rust/Cargo.toml
+  s_ad98b07a2ebbe9::t_66c50ad052af0f 59-61
+src/rust/cxx/kj-rs-io/peer-filter.c++
+  s_ad98b07a2ebbe9::t_bb9adf9e5bf742 1-19
+src/rust/cxx/kj-rs-io/tests/lib.rs
+  s_ad98b07a2ebbe9::t_46c78480c4af5d 1-125
+src/rust/cxx/kj-rs-io/net.rs
+  s_ad98b07a2ebbe9::t_dfab9385513fd9 1-1112
+src/rust/cxx/kj-rs-io/tests/io-test-helpers.h
+  s_ad98b07a2ebbe9::t_dc2e19aa352658 1-108
+src/rust/cxx/kj-rs-io/unwrap.h
+  s_ad98b07a2ebbe9::t_9695edef353860 1-114
+src/rust/cxx/kj-rs-io/tests/capnp-rpc-test.c++
+  s_ad98b07a2ebbe9::t_3d5ad0bdb3411d 1-79
+src/rust/cxx/kj-rs-io/tests/peer-filter-test.c++
+  s_ad98b07a2ebbe9::t_02ee36725f2795 1-219
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_ad98b07a2ebbe9::t_d41deff57c1b19 1-1277
+src/rust/cxx/kj-rs-io/tests/async-io-test.c++
+  s_ad98b07a2ebbe9::t_ee600cd90f7338 1-1378
+src/rust/cxx/kj-rs-io/tests/test_helpers.rs
+  s_ad98b07a2ebbe9::t_8431e89c79f637 1-80
+src/rust/cxx/kj-rs-io/peer-filter.h
+  s_ad98b07a2ebbe9::t_daa9a25ca26b69 1-58
+src/rust/cxx/kj-rs-io/lib.rs
+  s_ad98b07a2ebbe9::t_ece1b8da3c1d24 1-127
+src/rust/cxx/kj-rs-io/serve.rs
+  s_ad98b07a2ebbe9::t_e1ddfe04e393a4 1-491
+deps/rust/Cargo.lock
+  s_ad98b07a2ebbe9::t_c6cc8d68bbe9f8 479,554-563,1615-1624,2129,2133,2135,2139-2149
+src/rust/cxx/kj-rs/tests/awaitables-cc-test.c++
+  s_ad98b07a2ebbe9::t_571b505fcbecc2 225-263
+src/rust/cxx/kj-rs-io/tests/file-watcher-test.c++
+  s_ad98b07a2ebbe9::t_d82f645669bc17 1-368
+src/rust/cxx/kj-rs-io/tests/BUILD.bazel
+  s_ad98b07a2ebbe9::t_340e35e80bb77f 1-170
+src/rust/cxx/kj-rs-io/tests/serve_helpers.rs
+  s_ad98b07a2ebbe9::t_5a04fe427646a7 1-239
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_ad98b07a2ebbe9::t_42a72742533b00 1-607
+src/rust/cxx/kj-rs-io/signal.rs
+  s_ad98b07a2ebbe9::t_a9552ee0ec43cd 1-77
+src/rust/cxx/AGENTS.md
+  s_ad98b07a2ebbe9::t_514ab621f38b3c 39-41,52-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5175523cb3ebfb3fe2c5ecd68f5e9bc88e5f670a",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
