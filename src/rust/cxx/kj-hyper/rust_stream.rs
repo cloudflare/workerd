@@ -4,26 +4,19 @@
 //! `SecureNetworkWrapper` (`tls.rs`) -- and is wrapped by the C++ `RustAsyncIoStream`
 //! (hyper-server-ffi.c++) for kj consumers: kj's `tryRead`/`write`/`shutdownWrite`/... come in
 //! over the bridge as the methods below. When a hyper connection or client is later built over
-//! that kj stream, `serve.rs` takes the tokio stream back out ([`RustStream::into_parts`]), so a
-//! TLS connection over a TCP socket reaches hyper as a plain tokio TLS stream, with neither a
-//! pump nor a bridge crossing per read.
+//! that kj stream, `serve.rs` takes the tokio stream back out ([`RustStream::into_io`]), so a TLS
+//! connection over a TCP socket reaches hyper as a plain tokio TLS stream, with no bridge
+//! crossing per read.
 //!
 //! **Taking it back.** The C++ wrapper hands the object over only when [`RustStream::can_release`]
 //! says so: no kj operation still holds `&self` (a pending read, write, shutdown flush or
 //! `whenWriteDisconnected`), and the caller is on the thread that owns the stream. Otherwise the
-//! stream stays wrapped and `serve.rs` pumps it like any foreign kj stream -- the same rule
+//! stream stays wrapped and `serve.rs` drives it like any foreign kj stream -- the same rule
 //! kj-rs-io's `TokioStream::into_socket` enforces with its shares.
-//!
-//! **The pump.** When the TLS layer sits over a foreign kj stream (an in-memory pipe, kj's
-//! promised stream), `serve.rs` bridged that stream with a [`StreamPump`], which must be polled
-//! on the KJ thread. The C++ wrapper drives it as its own kj promise ([`RustStream::drive`], like
-//! `HyperHttpClient`'s pump task); operations only poll the stream, whose channel wakes them as
-//! the pump makes progress. A consumer taking the parts gets the pump back and drives it itself.
 
 use std::cell::Cell;
 use std::cell::OnceCell;
 use std::cell::RefCell;
-use std::future::Future;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
@@ -31,11 +24,15 @@ use std::task::Waker;
 
 use cxx::KjError;
 use cxx::KjExceptionType;
+use futures::FutureExt;
+use futures::future::LocalBoxFuture;
+use futures::future::Shared;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::io::ReadBuf;
 
-use crate::serve::StreamPump;
+use crate::ffi::KjStreamWatchHalf;
+use crate::serve::KjIoError;
 
 /// How a stream reports that new writes are doomed ([`AsyncIo::write_disconnect`]).
 pub enum WriteDisconnect {
@@ -44,8 +41,8 @@ pub enum WriteDisconnect {
     /// A socket: watch a duplicate of its descriptor for a hangup, as kj-rs-io does.
     #[cfg(unix)]
     Fd(std::os::fd::OwnedFd),
-    /// A pumped foreign kj stream: forwarded to its own `whenWriteDisconnected` by the pump.
-    Pumped(Pin<Box<dyn Future<Output = ()> + Send>>),
+    /// A foreign kj stream: its own `whenWriteDisconnected`.
+    Kj(KjStreamWatchHalf),
 }
 
 /// A tokio byte stream a [`RustStream`] can carry.
@@ -54,12 +51,13 @@ pub enum WriteDisconnect {
 /// upgrade machinery requires its transport to be; it is only ever polled from the one KJ loop
 /// thread.
 pub trait AsyncIo: AsyncRead + AsyncWrite + Send {
-    /// The source of `whenWriteDisconnected`, for the transport underneath.
+    /// The source of `whenWriteDisconnected`, for the transport underneath. Called at most once
+    /// per stream.
     ///
     /// # Errors
     ///
-    /// Duplicating the transport's descriptor failed.
-    fn write_disconnect(&self) -> std::io::Result<WriteDisconnect>;
+    /// Duplicating the transport's descriptor failed, or the stream is off its owning thread.
+    fn write_disconnect(self: Pin<&mut Self>) -> std::io::Result<WriteDisconnect>;
 
     /// `TCP_NODELAY` on the transport underneath, where there is one.
     ///
@@ -72,23 +70,20 @@ pub trait AsyncIo: AsyncRead + AsyncWrite + Send {
 /// The stream type this handle carries.
 pub type BoxedIo = Pin<Box<dyn AsyncIo>>;
 
+type Disconnected = Shared<LocalBoxFuture<'static, Result<(), KjError>>>;
+
 /// See the module docs.
 pub struct RustStream {
     io: RefCell<BoxedIo>,
-    pump: RefCell<Option<StreamPump>>,
-    /// The pump settled with this error (the kj stream failed); reported in place of the
-    /// consumer-side failure it caused.
-    pump_error: RefCell<Option<KjError>>,
     /// kj operations currently holding `&self` (see [`OpGuard`]).
     in_flight: Cell<usize>,
     read_aborted: Cell<bool>,
     /// The waker of a read parked on the stream, woken by `abort_read()`.
     read_waker: RefCell<Option<Waker>>,
-    /// The thread owning the stream: the pump and the tokio registrations belong to its loop.
+    /// The thread owning the stream: its transport belongs to that thread's loop.
     owner: std::thread::ThreadId,
-    /// The hangup watch, registered by the first `when_write_disconnected()` on a socket.
-    #[cfg(unix)]
-    hangup: OnceCell<tokio::io::unix::AsyncFd<std::os::fd::OwnedFd>>,
+    /// The transport's `whenWriteDisconnected`, shared by every caller once the first asks.
+    disconnected: OnceCell<Disconnected>,
 }
 
 /// Counts a kj operation holding `&self`, so the stream is not taken out from under it.
@@ -101,40 +96,29 @@ impl Drop for OpGuard<'_> {
 }
 
 impl RustStream {
-    pub fn new(io: impl AsyncIo + 'static, pump: Option<StreamPump>) -> Self {
-        Self::from_parts(Box::pin(io), pump)
-    }
-
-    /// The inverse of [`RustStream::into_parts`].
-    #[must_use]
-    pub fn from_parts(io: BoxedIo, pump: Option<StreamPump>) -> Self {
+    pub fn new(io: impl AsyncIo + 'static) -> Self {
         Self {
-            io: RefCell::new(io),
-            pump: RefCell::new(pump),
-            pump_error: RefCell::new(None),
+            io: RefCell::new(Box::pin(io)),
             in_flight: Cell::new(0),
             read_aborted: Cell::new(false),
             read_waker: RefCell::new(None),
             owner: std::thread::current().id(),
-            #[cfg(unix)]
-            hangup: OnceCell::new(),
+            disconnected: OnceCell::new(),
         }
     }
 
-    /// Whether the stream may be taken out ([`RustStream::into_parts`]): no kj operation holds
-    /// it and the caller is on the owning thread. The C++ wrapper cancels its pump driver
-    /// before handing the stream over; the driver does not count.
+    /// Whether the stream may be taken out ([`RustStream::into_io`]): no kj operation holds it
+    /// and the caller is on the owning thread.
     #[must_use]
     pub fn can_release(&self) -> bool {
         self.in_flight.get() == 0 && std::thread::current().id() == self.owner
     }
 
-    /// Takes the stream and its pump (if any) out: the native path of `serve.rs`, taken only
-    /// after [`RustStream::can_release`]. The caller drives the pump on the KJ thread.
-    pub fn into_parts(self: Box<Self>) -> (BoxedIo, Option<StreamPump>) {
+    /// Takes the stream out: the native path of `serve.rs`, taken only after
+    /// [`RustStream::can_release`].
+    pub fn into_io(self) -> BoxedIo {
         debug_assert!(self.can_release(), "RustStream taken while in use");
-        let Self { io, pump, .. } = *self;
-        (io.into_inner(), pump.into_inner())
+        self.io.into_inner()
     }
 
     /// Enters a kj operation: fails off the owning thread, else counts it until the guard drops.
@@ -148,26 +132,6 @@ impl RustStream {
         }
         self.in_flight.set(self.in_flight.get() + 1);
         Ok(OpGuard(&self.in_flight))
-    }
-
-    /// Drives the pump (if any) until it settles; resolves at once when there is none. The C++
-    /// wrapper holds this as its own kj promise and cancels it before handing the stream over.
-    pub async fn drive(&self) {
-        std::future::poll_fn(|cx| {
-            let mut pump = self.pump.borrow_mut();
-            let Some(future) = pump.as_mut() else {
-                return Poll::Ready(());
-            };
-            let Poll::Ready(result) = future.as_mut().poll(cx) else {
-                return Poll::Pending;
-            };
-            *pump = None;
-            if let Err(error) = result {
-                *self.pump_error.borrow_mut() = Some(error);
-            }
-            Poll::Ready(())
-        })
-        .await;
     }
 
     /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, min_bytes, len)`: fills `buf` (kj's
@@ -249,54 +213,30 @@ impl RustStream {
     /// transport underneath, as kj's TLS stream forwards it.
     pub async fn when_write_disconnected(&self) -> Result<(), KjError> {
         let _op = self.enter()?;
-        #[cfg(unix)]
-        if let Some(watch) = self.hangup.get() {
-            return wait_for_hangup(watch).await;
-        }
-        let source = self
-            .io
-            .borrow()
-            .write_disconnect()
-            .map_err(|e| kj_error_for_stream_io("whenWriteDisconnected", &e))?;
-        match source {
-            WriteDisconnect::Never => std::future::pending().await,
-            #[cfg(unix)]
-            WriteDisconnect::Fd(fd) => {
-                let watch = match tokio::io::unix::AsyncFd::with_interest(
-                    fd,
-                    tokio::io::Interest::WRITABLE,
-                ) {
-                    Ok(watch) => watch,
-                    Err(e) => return Err(kj_error_for_stream_io("whenWriteDisconnected", &e)),
-                };
-                // A concurrent first caller may have registered its own meanwhile; then this one
-                // is dropped (closing its dup) and the stored one is shared.
-                let watch = self.hangup.get_or_init(|| watch);
-                wait_for_hangup(watch).await
-            }
-            WriteDisconnect::Pumped(disconnected) => {
-                disconnected.await;
-                Ok(())
-            }
-        }
+        let disconnected = if let Some(disconnected) = self.disconnected.get() {
+            disconnected.clone()
+        } else {
+            let source = self
+                .io
+                .borrow_mut()
+                .as_mut()
+                .write_disconnect()
+                .map_err(|e| kj_error_for_stream_io("whenWriteDisconnected", &e))?;
+            self.disconnected
+                .get_or_init(|| disconnect_future(source))
+                .clone()
+        };
+        disconnected.await
     }
 
-    /// Polls the stream for one operation, reporting a failure the pump caused in place of the
-    /// consumer-side error it produced.
+    /// Polls the stream for one operation, mapping its failure to kj.
     fn poll_io<T>(
         &self,
         cx: &mut Context<'_>,
         context: &str,
         poll: impl FnOnce(Pin<&mut dyn AsyncIo>, &mut Context<'_>) -> Poll<std::io::Result<T>>,
     ) -> Poll<Result<T, KjError>> {
-        match poll(self.io.borrow_mut().as_mut(), cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Ok(value)) => Poll::Ready(Ok(value)),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(match self.pump_error.borrow_mut().take() {
-                Some(pump_error) => pump_error,
-                None => kj_error_for_stream_io(context, &e),
-            })),
-        }
+        poll(self.io.borrow_mut().as_mut(), cx).map_err(|e| kj_error_for_stream_io(context, &e))
     }
 }
 
@@ -307,34 +247,52 @@ fn read_aborted() -> KjError {
     )
 }
 
-/// Resolves once the watched descriptor reports write-closed (see kj-rs-io's
-/// `when_write_disconnected`, whose rule this follows: plain writability is cleared so the wait
-/// sleeps until a state change; a half-close does not count).
-#[cfg(unix)]
-async fn wait_for_hangup(
-    watch: &tokio::io::unix::AsyncFd<std::os::fd::OwnedFd>,
-) -> Result<(), KjError> {
-    loop {
-        let mut guard = watch
-            .ready(tokio::io::Interest::WRITABLE)
-            .await
-            .map_err(|e| kj_error_for_stream_io("whenWriteDisconnected", &e))?;
-        if guard.ready().is_write_closed() {
-            return Ok(());
+/// The one `whenWriteDisconnected` future a stream shares among its callers.
+fn disconnect_future(source: WriteDisconnect) -> Disconnected {
+    match source {
+        WriteDisconnect::Never => std::future::pending().boxed_local().shared(),
+        #[cfg(unix)]
+        WriteDisconnect::Fd(fd) => async move {
+            // Plain writability is cleared so the wait sleeps until a state change; a half-close
+            // does not count (kj-rs-io's `when_write_disconnected` rule).
+            let watch = tokio::io::unix::AsyncFd::with_interest(fd, tokio::io::Interest::WRITABLE)
+                .map_err(|e| kj_error_for_stream_io("whenWriteDisconnected", &e))?;
+            loop {
+                let mut guard = watch
+                    .ready(tokio::io::Interest::WRITABLE)
+                    .await
+                    .map_err(|e| kj_error_for_stream_io("whenWriteDisconnected", &e))?;
+                if guard.ready().is_write_closed() {
+                    return Ok(());
+                }
+                guard.clear_ready();
+            }
         }
-        guard.clear_ready();
+        .boxed_local()
+        .shared(),
+        // Either outcome means writes are doomed or the stream cannot tell any more.
+        WriteDisconnect::Kj(mut watch) => async move {
+            let _ = watch.when_write_disconnected().await;
+            Ok(())
+        }
+        .boxed_local()
+        .shared(),
     }
 }
 
 /// Renders a stream I/O failure as a `kj::Exception`.
 ///
-/// tokio-rustls surfaces TLS failures as `io::Error`s wrapping a `rustls::Error`; those keep kj's
-/// certificate-verification wording (see `tls.rs`), everything else maps by error kind.
+/// A kj exception carried through the transport (a foreign kj stream underneath) comes back as
+/// itself. tokio-rustls surfaces TLS failures as `io::Error`s wrapping a `rustls::Error`; those
+/// keep kj's certificate-verification wording (see `tls.rs`). Everything else maps by kind.
 pub fn kj_error_for_stream_io(context: &str, e: &std::io::Error) -> KjError {
-    if let Some(inner) = e.get_ref()
-        && let Some(tls_error) = inner.downcast_ref::<rustls::Error>()
-    {
-        return crate::tls::kj_error_for_rustls_error(tls_error);
+    if let Some(inner) = e.get_ref() {
+        if let Some(KjIoError(error)) = inner.downcast_ref::<KjIoError>() {
+            return error.clone();
+        }
+        if let Some(tls_error) = inner.downcast_ref::<rustls::Error>() {
+            return crate::tls::kj_error_for_rustls_error(tls_error);
+        }
     }
     crate::client::kj_error_for_io(context, e)
 }

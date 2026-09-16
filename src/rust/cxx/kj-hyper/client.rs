@@ -46,6 +46,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
+use std::task::Waker;
 
 use bytes::Bytes;
 use cxx::KjError;
@@ -70,7 +71,7 @@ use tokio::sync::mpsc;
 use crate::ffi::HeaderTablePtr;
 use crate::ffi::HyperPeerFilter;
 use crate::ffi::SharedFilter;
-use crate::serve::ServedKjStream;
+use crate::serve::ServeIo;
 use crate::stall;
 use crate::stall::StallIo;
 use crate::stall::WriteStallTracker;
@@ -113,16 +114,27 @@ struct Inner {
     /// Idle keep-alive connections available for reuse. Connections are checked for liveness
     /// (`is_closed()` + `ready()`) on checkout and only returned after a fully-consumed response.
     pool: RefCell<Vec<http1::SendRequest<BridgeBody>>>,
-    /// The stream-tier byte pump (the transport for `Upstream::Stream` clients whose kj stream
-    /// has no native socket), taken by [`HyperClient::drive_stream_pump`]. It is NOT spawned as
-    /// a runtime task: the pump reads/writes the client's kj stream — which is only borrowed,
-    /// with a lifetime the C++ creator scopes to the client object — and it holds bridged kj
-    /// promises, so it must be owned and cancelled by the C++ client (a kj promise member),
-    /// synchronously at client destruction, while the KJ event loop still exists. A detached
-    /// task would be reaped only at port teardown: after the stream dies (use-after-free) and
-    /// after the `EventLoop`'s destructor (which then sees the pump's armed events still queued).
-    stream_pump: RefCell<Option<crate::serve::StreamPump>>,
+    /// The connection driver of an `Upstream::Stream` client, once its one connection exists;
+    /// driven by [`HyperClient::drive_stream_connection`]. It is NOT spawned as a runtime task:
+    /// it reads/writes the client's kj stream -- often only borrowed, with a lifetime the C++
+    /// creator scopes to the client object -- through bridged kj promises, so it must be owned
+    /// and cancelled by the C++ client (a kj promise member), synchronously at client
+    /// destruction, while the KJ event loop still exists. A detached task would be reaped only at
+    /// port teardown: after the stream dies (use-after-free) and after the `EventLoop`'s
+    /// destructor (which then sees its armed events still queued).
+    stream_driver: RefCell<StreamDriver>,
 }
+
+/// See `Inner::stream_driver`.
+enum StreamDriver {
+    /// The connection does not exist yet; the waker is the C++ driver task's.
+    Waiting(Option<Waker>),
+    Driving(ConnectionDriver),
+    Done,
+}
+
+/// A hyper client connection's driver future (see [`http1_handshake`]).
+type ConnectionDriver = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 /// The client's connection source.
 enum Upstream {
@@ -145,10 +157,9 @@ enum Upstream {
     /// One pre-connected kj stream (the `kj::newHttpClient(table, stream)` single-connection
     /// client shape): the first connection takes it; once that connection dies the client is
     /// spent — later requests fail with DISCONNECTED, like kj's client whose stream hit EOF.
-    /// The stream arrives pre-adapted by `crate::serve::serve_kj_stream` (native tokio socket, or
-    /// duplex + pump for streams without one); the pump, when present, is spawned onto this
-    /// thread's loop runtime when the connection is made.
-    Stream(RefCell<Option<ServedKjStream>>),
+    /// The stream arrives pre-adapted by `crate::serve::serve_kj_stream` (native tokio socket,
+    /// or the kj stream driven directly).
+    Stream(RefCell<Option<ServeIo>>),
 }
 
 impl Inner {
@@ -180,7 +191,7 @@ impl HyperClient {
                 },
                 jsgify_websocket_errors,
                 pool: RefCell::new(Vec::new()),
-                stream_pump: RefCell::new(None),
+                stream_driver: RefCell::new(StreamDriver::Done),
             }),
         }
     }
@@ -206,7 +217,7 @@ impl HyperClient {
                 },
                 jsgify_websocket_errors,
                 pool: RefCell::new(Vec::new()),
-                stream_pump: RefCell::new(None),
+                stream_driver: RefCell::new(StreamDriver::Done),
             }),
         }
     }
@@ -216,32 +227,44 @@ impl HyperClient {
     #[must_use]
     pub(crate) fn new_with_stream(
         table: HeaderTablePtr,
-        mut served: ServedKjStream,
+        io: ServeIo,
         jsgify_websocket_errors: bool,
     ) -> Self {
-        let pump = served.pump.take();
         Self {
             inner: Rc::new(Inner {
                 table,
-                upstream: Upstream::Stream(RefCell::new(Some(served))),
+                upstream: Upstream::Stream(RefCell::new(Some(io))),
                 jsgify_websocket_errors,
                 pool: RefCell::new(Vec::new()),
-                stream_pump: RefCell::new(pump),
+                stream_driver: RefCell::new(StreamDriver::Waiting(None)),
             }),
         }
     }
 
-    /// Drive the stream-tier byte pump, if this client has one (see `Inner::stream_pump`). The
-    /// C++ client wrapper owns the returned promise as a member, so the pump is cancelled —
-    /// and its bridged kj promises with it — exactly when the client is destroyed. Resolves
-    /// immediately for clients without a pump (dialing clients, native-socket streams).
-    pub(crate) async fn drive_stream_pump(&self) {
-        let pump = self.inner.stream_pump.borrow_mut().take();
-        if let Some(pump) = pump {
-            // Failures surface to hyper as EOF/errors on the duplex transport; the pump's own
-            // result needs no separate handling.
-            let _ = pump.await;
-        }
+    /// Drive the stream client's connection (see `Inner::stream_driver`) once the first request
+    /// has made it. The C++ client wrapper owns the returned promise as a member, so the
+    /// connection -- and the kj stream it drives -- is cancelled exactly when the client is
+    /// destroyed. Resolves immediately for dialing clients, whose connections own their sockets
+    /// and run as runtime tasks.
+    pub(crate) async fn drive_stream_connection(&self) {
+        std::future::poll_fn(|cx| {
+            let mut driver = self.inner.stream_driver.borrow_mut();
+            match &mut *driver {
+                StreamDriver::Waiting(waker) => {
+                    *waker = Some(cx.waker().clone());
+                    Poll::Pending
+                }
+                StreamDriver::Driving(connection) => {
+                    let done = connection.as_mut().poll(cx);
+                    if done.is_ready() {
+                        *driver = StreamDriver::Done;
+                    }
+                    done
+                }
+                StreamDriver::Done => Poll::Ready(()),
+            }
+        })
+        .await;
     }
 
     /// A new handle to the same client: the `Rc` inner (upstream, keep-alive pool, header
@@ -1502,7 +1525,7 @@ async fn new_connection(inner: &Inner) -> Result<http1::SendRequest<BridgeBody>>
             // peer filter (the creator connected the stream), no TLS (the stream carries
             // whatever the creator established). Consuming it twice means the one connection
             // died — fail like kj's client whose underlying stream disconnected.
-            let served = served.borrow_mut().take().ok_or_else(|| {
+            let io = served.borrow_mut().take().ok_or_else(|| {
                 KjError::new(
                     KjExceptionType::Disconnected,
                     "the HTTP client's underlying connection was closed (single-connection \
@@ -1510,51 +1533,37 @@ async fn new_connection(inner: &Inner) -> Result<http1::SendRequest<BridgeBody>>
                         .to_owned(),
                 )
             })?;
-            // The pump (for streams without a native socket) was split off at construction and
-            // is driven by the C++ client wrapper as an owned kj promise; see
-            // `Inner::stream_pump` / `drive_stream_pump`. `served.pump` is always None here.
-            debug_assert!(served.pump.is_none());
-            // The handshake runs as a loop-runtime task (like the dial below) so hyper can
-            // spawn the connection driver from runtime context.
-            let io = served.io;
-            let join = kj_rs_tokio::spawn(async move {
-                let _ = io.set_nodelay(true);
-                finish_http1_handshake(io).await
-            });
-            return match join.await {
-                Ok(Ok(sender)) => Ok(sender),
-                Ok(Err(DialError::Handshake(e))) => {
-                    Err(kj_error_for_hyper("HTTP/1.1 handshake", &e))
-                }
-                // finish_http1_handshake only produces Handshake errors.
-                Ok(Err(DialError::Connect(e) | DialError::Tls(e))) => {
-                    Err(kj_error_for_io("connect()", &e))
-                }
-                Ok(Err(DialError::Blocked)) => Err(KjError::new(
-                    KjExceptionType::Failed,
-                    "connect() blocked by restrictPeers()".to_owned(),
-                )),
-                Err(e) => Err(KjError::new(
-                    KjExceptionType::Failed,
-                    format!("hyper connection task failed: {e}"),
-                )),
-            };
+            let _ = io.set_nodelay(true);
+            // The handshake runs right here, on the KJ thread; the connection driver goes to the
+            // C++ client's own task (see `Inner::stream_driver`), never to the runtime.
+            let (sender, driver) = http1_handshake(io)
+                .await
+                .map_err(|e| kj_error_for_hyper("HTTP/1.1 handshake", &e))?;
+            let previous = inner.stream_driver.replace(StreamDriver::Driving(driver));
+            if let StreamDriver::Waiting(Some(waker)) = previous {
+                waker.wake();
+            }
+            return Ok(sender);
         }
     };
     let join = kj_rs_tokio::spawn(async move {
         let stream = dial_filtered(&host, port, &filter).await?;
         // Match kj-http's latency-oriented TCP behavior for request/response traffic.
         let _ = stream.set_nodelay(true);
-        match tls {
-            None => finish_http1_handshake(stream).await,
+        let (sender, driver) = match tls {
+            None => http1_handshake(stream).await,
             Some((connector, server_name)) => {
                 let tls_stream = connector
                     .connect(server_name, stream)
                     .await
                     .map_err(DialError::Tls)?;
-                finish_http1_handshake(tls_stream).await
+                http1_handshake(tls_stream).await
             }
         }
+        .map_err(DialError::Handshake)?;
+        // The connection owns its socket: it runs as a runtime task for its lifetime.
+        tokio::spawn(driver);
+        Ok(sender)
     });
     match join.await {
         Ok(Ok(sender)) => Ok(sender),
@@ -1574,11 +1583,11 @@ async fn new_connection(inner: &Inner) -> Result<http1::SendRequest<BridgeBody>>
     }
 }
 
-/// hyper HTTP/1.1 handshake over an established (possibly TLS-wrapped) byte stream; spawns the
-/// connection driver task.
-async fn finish_http1_handshake<S>(
+/// hyper HTTP/1.1 handshake over an established (possibly TLS-wrapped) byte stream; returns the
+/// request sender and the connection's driver future, for the caller to run.
+async fn http1_handshake<S>(
     stream: S,
-) -> std::result::Result<http1::SendRequest<BridgeBody>, DialError>
+) -> hyper::Result<(http1::SendRequest<BridgeBody>, ConnectionDriver)>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
 {
@@ -1598,21 +1607,20 @@ where
         // sends while keeping hyper's per-message parse scratch allocation modest.
         .max_headers(4096)
         .handshake::<_, BridgeBody>(TokioIo::new(StallIo::new(stream, stall_tracker.clone())))
-        .await
-        .map_err(DialError::Handshake)?;
-    // Drive socket I/O and keep-alive for the connection's whole lifetime; `with_upgrades`
+        .await?;
+    // Drives socket I/O and keep-alive for the connection's whole lifetime; `with_upgrades`
     // additionally performs the 101/CONNECT handoff. Errors surface through
     // `SendRequest`/`Incoming` on the request side, so the result is ignored here. If the
     // watchdog fires first the connection future is dropped, closing the socket; the pooled
     // `SendRequest` then reads as closed and is discarded. An upgraded connection is exempt:
     // `with_upgrades()` resolves at the handoff, ending this select and the watchdog with it.
-    tokio::spawn(async move {
+    let driver = Box::pin(async move {
         tokio::select! {
             _ = connection.with_upgrades() => {}
             () = stall::client_stall_watchdog(stall_tracker) => {}
         }
     });
-    Ok(sender)
+    Ok((sender, driver))
 }
 
 // =======================================================================================

@@ -204,13 +204,8 @@ pub struct HyperConnection {
     /// happen on the KJ event-loop thread that owns the service.
     service: ServicePtr,
     /// The connection's transport, moved into the connection future by `serve()`: the native
-    /// socket where one could be taken, else the consumer end of a duplex bridged by `pump`.
+    /// socket where one could be taken, else the kj stream driven directly.
     stream: RefCell<Option<crate::serve::ServeIo>>,
-    /// Present iff `stream` is the duplex tier: the pump that moves the bytes between the kj
-    /// stream (which it owns) and the duplex. Driven by `serve()`'s fixed-point driver; the
-    /// connection is only complete once it settles (the response tail has been flushed into
-    /// the kj stream).
-    pump: RefCell<Option<crate::serve::StreamPump>>,
     /// When present, the connection is TLS: the handshake runs before hyper takes over.
     tls: Option<tokio_rustls::TlsAcceptor>,
     /// Set to `true` by `shutdown()`; observed by the connection task (graceful shutdown).
@@ -229,7 +224,6 @@ impl HyperConnection {
         table: HeaderTablePtr,
         service: ServicePtr,
         io: crate::serve::ServeIo,
-        pump: Option<crate::serve::StreamPump>,
         jsgify_websocket_errors: bool,
         tls: Option<tokio_rustls::TlsAcceptor>,
     ) -> Self {
@@ -239,7 +233,6 @@ impl HyperConnection {
             table,
             service,
             stream: RefCell::new(Some(io)),
-            pump: RefCell::new(pump),
             tls,
             drain_tx: watch::channel(false).0,
             jsgify_websocket_errors,
@@ -275,7 +268,6 @@ impl HyperConnection {
             )
         })?;
 
-        let pump = self.pump.borrow_mut().take();
         let drain_rx = self.drain_tx.subscribe();
         let tls = self.tls.clone();
 
@@ -307,15 +299,6 @@ impl HyperConnection {
         let mut conn_future = pin!(conn_future);
         let mut conn_done = false;
 
-        // The duplex pump, when this is the pump tier: it IS the transport, so it is polled in
-        // the same fixed point (its progress is what unblocks hyper's reads/writes) and gates
-        // completion (the response tail must reach the kj stream). It ends when both directions
-        // close — the connection future drops its duplex end on exit, which drains and ends the
-        // pump. Pump failures surface to hyper as transport EOF/errors, so its own result is
-        // not an error of serve() itself.
-        let mut pump_future = pump.map(futures::FutureExt::fuse);
-        let mut pump_done = pump_future.is_none();
-
         // The fused driver: poll the connection future and the in-flight service calls to a fixed
         // point each turn. Polling the connection may run `service_fn`, which pushes a new call
         // onto `inflight` and then awaits its head; re-polling `inflight` runs that call until it
@@ -326,15 +309,7 @@ impl HyperConnection {
         std::future::poll_fn(|cx| {
             let _guard = handle.enter();
             loop {
-                let mut progressed = if let Some(pump) = &mut pump_future
-                    && !pump_done
-                    && pump.poll_unpin(cx).is_ready()
-                {
-                    pump_done = true;
-                    true
-                } else {
-                    false
-                };
+                let mut progressed = false;
 
                 // Drain any in-flight calls that are ready (a completed call is progress).
                 while inflight.borrow_mut().poll_next_unpin(cx) == Poll::Ready(Some(())) {
@@ -369,7 +344,7 @@ impl HyperConnection {
                 }
             }
 
-            if conn_done && pump_done && inflight.borrow().is_empty() {
+            if conn_done && inflight.borrow().is_empty() {
                 Poll::Ready(())
             } else {
                 Poll::Pending

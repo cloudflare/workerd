@@ -15,7 +15,7 @@
 //
 //  - kj::newHttpClient(table, stream&): the single-connection client. The stream is handed to
 //    one hyper HTTP/1.1 client connection (src/rust/cxx/kj-hyper's stream client, which
-//    adapts any kj stream -- native tokio socket or duplex pump), consumed natively in the
+//    adapts any kj stream -- native tokio socket, or the kj stream driven directly), consumed in the
 //    client shape (HyperHttpClient; no service adapter). Once that connection closes, further
 //    requests fail DISCONNECTED, matching kj's client whose stream hit EOF.
 //  - kj::newHttpClient(timer, table, addr&): the reconnecting client, with kj's per-address
@@ -30,8 +30,8 @@
 //  - kj::newWebSocketPipe(): the in-memory WebSocket pair (api's WebSocketPair,
 //    http-over-capnp), backed by the Rust pipe state machine in kj-hyper (ws_pipe.rs).
 //  - kj::HttpServer: every connection is served by the hyper inbound server
-//    (newHyperHttpConnection, which takes the socket natively or bridges in-memory streams
-//    through the duplex pump tier). drain() maps to per-connection graceful shutdown.
+//    (newHyperHttpConnection, which takes the socket natively or drives an in-memory stream
+//    directly). drain() maps to per-connection graceful shutdown.
 //
 //  - The HTTP/1.1 text codec: the HttpHeaders serialize*/toString/tryParse/parseHeaders
 //    members, tryParseHttpRangeHeader, and the HttpMethod stringify/parse utilities, defined
@@ -710,7 +710,7 @@ WebSocketPipe newWebSocketPipe() {
 kj::Own<HttpClient> newHttpClient(const HttpHeaderTable& responseHeaderTable,
     kj::AsyncIoStream& stream,
     HttpClientSettings settings) {
-  // Borrowed: the caller keeps its stream, so it is pumped rather than taken apart.
+  // Borrowed: the caller keeps its stream, so it is driven directly rather than taken apart.
   return workerd::rust::kj_hyper::newHyperStreamHttpClient(
       responseHeaderTable, stream, jsgifyFor(settings));
 }
@@ -1630,7 +1630,7 @@ kj::Promise<bool> HttpServer::listenHttpImpl(kj::AsyncIoStream& connection, bool
   // only once this promise settles, never touching it meanwhile: hyper may take its socket (or
   // TLS stream) natively, leaving their wrapper hollow until then. listenHttpCleanDrain() lends
   // the stream -- its caller keeps using it -- and a per-connection service factory has seen it
-  // and may still use it: those are pumped, never taken apart. (kj's http.h fixes this private
+  // and may still use it: those are driven directly, never taken apart. (kj's http.h fixes this private
   // member's signature, so ownership is encoded in wantCleanDrain rather than passed.)
   ErrorHandlingService errorHandling(*servicePtr, settings);
   bool jsgify = settings.webSocketErrorHandler != kj::none;

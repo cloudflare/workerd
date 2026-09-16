@@ -244,9 +244,9 @@ class HyperHttpClient final: public kj::HttpClient {
  public:
   explicit HyperHttpClient(::rust::Box<HyperClient> impl)
       : impl(kj::mv(impl)),
-        // Nothing ever awaits this member, so a cold pump would never move a byte. Pump
-        // failures surface through the transport (see drive_stream_pump()), never here.
-        pumpTask(hot(this->impl->drive_stream_pump())) {}
+        // Nothing ever awaits this member, so a cold driver would never move a byte. Connection
+        // failures surface through requests (see drive_stream_connection()), never here.
+        driveTask(hot(this->impl->drive_stream_connection())) {}
 
   Request request(kj::HttpMethod method,
       kj::StringPtr url,
@@ -274,12 +274,12 @@ class HyperHttpClient final: public kj::HttpClient {
 
  private:
   ::rust::Box<HyperClient> impl;
-  // The stream-tier byte pump for stream clients without a native socket (immediately-resolved
-  // otherwise). Owned here — and declared after `impl` — so destroying the client cancels the
-  // pump synchronously, before the borrowed underlying stream can die and while the KJ event
-  // loop still exists (a detached runtime task would be reaped only at port teardown, after
-  // both). See drive_stream_pump() in ffi.rs.
-  kj::Promise<void> pumpTask;
+  // A stream client's connection driver (immediately resolved for dialing clients). Owned here
+  // -- and declared after `impl` -- so destroying the client cancels the connection
+  // synchronously, before the borrowed underlying stream can die and while the KJ event loop
+  // still exists (a detached runtime task would be reaped only at port teardown, after both).
+  // See drive_stream_connection() in ffi.rs.
+  kj::Promise<void> driveTask;
 };
 
 // The client-shape twins of newHyperHttpService()/newHyperHttpsService()/
@@ -314,7 +314,7 @@ inline kj::Own<HyperHttpClient> newHyperStreamHttpClient(const kj::HttpHeaderTab
 }
 
 // Like the above over a stream the caller only lends (kj::newHttpClient(table, stream&)): the
-// stream is pumped, never taken apart, so the caller's stream stays intact for later use. It
+// stream is driven directly, never taken apart, so the caller's stream stays intact for later use. It
 // must outlive the client.
 inline kj::Own<HyperHttpClient> newHyperStreamHttpClient(const kj::HttpHeaderTable& table,
     kj::AsyncIoStream& stream,
@@ -380,9 +380,9 @@ class HyperHttpConnection final {
 // Creates a HyperHttpConnection serving `service` on the already-connected stream `stream`,
 // taking ownership of it. Where possible the socket is taken natively (serve.rs's
 // take_kj_socket): a kj-rs-io stream gives up its tokio socket outright and its wrapper is
-// consumed before this returns. Every other stream (in-memory transports,
-// tunnel streams, TLS and other wrappers) is bridged through serve.rs's duplex pump tier
-// instead, driven by serve(); the stream then lives until the pump settles. No I/O may be in
+// consumed before this returns. Every other stream (in-memory transports, tunnel streams,
+// byte-transforming wrappers) is driven directly by the connection (serve.rs's KjIo) and lives
+// until the connection ends. No I/O may be in
 // flight on the stream (for kj-rs-io streams that is detected and rejected; for foreign
 // streams it is KJ's own contract). The calling thread must own a kj_rs_tokio::TokioEventPort, `table` and `service`
 // must outlive the returned object, and it must be driven from the thread owning the KJ event
@@ -397,7 +397,7 @@ inline kj::Own<HyperHttpConnection> newHyperHttpConnection(const kj::HttpHeaderT
 }
 
 // Like the above over a stream the caller only lends (kj::HttpServer::listenHttpCleanDrain()):
-// the stream is pumped, never taken apart, so the caller's stream stays intact for later use.
+// the stream is driven directly, never taken apart, so the caller's stream stays intact.
 // It must outlive the connection.
 inline kj::Own<HyperHttpConnection> newHyperHttpConnection(const kj::HttpHeaderTable& table,
     kj::HttpService& service,

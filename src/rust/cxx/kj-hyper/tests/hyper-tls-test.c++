@@ -547,7 +547,7 @@ enum class InboundPath {
   // newHyperHttpConnection(stream) takes the Rust TLS stream back out of its kj wrapper.
   WrappedTcp,
   // The same over an in-memory pipe: the plaintext stream is foreign, so the Rust TLS stream
-  // carries the pump that bridges it.
+  // drives that stream directly.
   WrappedPipe,
 };
 
@@ -696,7 +696,7 @@ KJ_TEST("wrap_tls_server: the wrapper's TLS stream over a TCP socket is served n
   }
 }
 
-KJ_TEST("wrap_tls_server over an in-memory pipe: the pump rides inside the Rust TLS stream") {
+KJ_TEST("wrap_tls_server over an in-memory pipe: the Rust TLS stream drives the kj stream") {
   InboundTlsFixture f({.path = InboundPath::WrappedPipe});
 
   for (int i = 0; i < 2; i++) {
@@ -732,8 +732,7 @@ KJ_TEST("wrap_tls_client: an untrusted server certificate fails with kj's wordin
 // Rust TLS streams handed to kj consumers (RustAsyncIoStream): kj's stream contract beyond
 // plain reads and writes.
 
-// Two Rust TLS streams talking over an in-memory pipe: both sides are pumped foreign streams,
-// driven by their wrappers' own tasks.
+// Two Rust TLS streams talking over an in-memory pipe: both sides drive foreign kj streams.
 struct RustTlsPipe {
   RustTlsPipe()
       : serverConfig((ensureTokioInitialized(),
@@ -765,7 +764,7 @@ KJ_TEST("Rust TLS stream: a read and a write in flight at once both complete") {
   auto& ws = f.io.waitScope;
 
   // The client parks a read, then writes while it is parked; the server answers. Both client
-  // operations progress on the one pumped transport. (The server's read is started up front:
+  // operations progress on the one kj transport. (The server's read is started up front:
   // the handshake needs both ends in motion, as with any TLS stream.)
   kj::byte serverBuffer[16];
   auto serverRead =
@@ -797,7 +796,7 @@ KJ_TEST("Rust TLS stream: abortRead() fails a parked read") {
   KJ_EXPECT_THROW_MESSAGE("abortRead() has been called", f.client->tryRead(buffer, 1, 16).wait(ws));
 }
 
-KJ_TEST("Rust TLS stream: whenWriteDisconnected() forwards to a pumped transport") {
+KJ_TEST("Rust TLS stream: whenWriteDisconnected() forwards to a kj transport") {
   RustTlsPipe f;
   auto& ws = f.io.waitScope;
 
@@ -826,7 +825,7 @@ KJ_TEST(
 
   auto disconnected = tls->whenWriteDisconnected();
   KJ_EXPECT(!disconnected.poll(ws));
-  // An operation holds the stream: hyper must pump it rather than take it apart.
+  // An operation holds the stream: hyper must drive it through kj rather than take it apart.
   KJ_EXPECT(!workerd::rust::kj_hyper::isReleasableRustStream(*tls));
 
   // The peer resets the connection (SO_LINGER=0): new writes are doomed.

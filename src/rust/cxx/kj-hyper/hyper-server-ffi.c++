@@ -189,11 +189,7 @@ class RustTunnelStream final: public kj::AsyncIoStream {
 // stream back out of it instead of pumping bytes through the bridge.
 class RustAsyncIoStream final: public kj::AsyncIoStream {
  public:
-  explicit RustAsyncIoStream(::rust::Box<RustStream> innerParam)
-      : inner(kj::mv(innerParam)),
-        // The stream's pump (when it sits over a foreign kj stream) moves bytes only while
-        // polled; nothing else awaits it, so it runs as this wrapper's own task.
-        driveTask(hot(inner->drive())) {}
+  explicit RustAsyncIoStream(::rust::Box<RustStream> inner): inner(kj::mv(inner)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     return hot(rust_stream_read(*inner, static_cast<uint8_t*>(buffer), maxBytes, minBytes));
@@ -234,16 +230,12 @@ class RustAsyncIoStream final: public kj::AsyncIoStream {
 
   // Takes the Rust stream out, after canRelease(); the wrapper must be destroyed right after.
   ::rust::Box<RustStream> release() {
-    // The driver borrows the stream: cancel it before the stream leaves (its pump stays in the
-    // stream, for the new owner to drive).
-    driveTask = kj::READY_NOW;
     return kj::mv(inner);
   }
 
  private:
-  // Declared first, destroyed last: every task below borrows it.
+  // Declared first, destroyed last: the shutdown task borrows it.
   ::rust::Box<RustStream> inner;
-  kj::Promise<void> driveTask;
   kj::Maybe<kj::Promise<void>> shutdownTask;
 };
 

@@ -5,7 +5,6 @@ use std::cell::RefCell;
 
 use cxx::KjError;
 use kj_hyper::serve::ServeIo;
-use kj_hyper::serve::StreamPump;
 use kj_hyper::serve::TakeSocketError;
 use kj_hyper::serve::serve_kj_stream;
 use kj_hyper::serve::take_kj_socket;
@@ -83,13 +82,23 @@ impl NativeServeFailure {
     }
 }
 
-/// The echo task shared by every path: copy everything read back to the writer, then
-/// propagate the half-close. Reports completion through `done_tx`.
-async fn echo(io: ServeIo, done_tx: watch::Sender<bool>) -> std::io::Result<u64> {
-    let result = async {
+/// Signals the session's completion watch when the consumer ends -- normally, with an error, or
+/// by being aborted (dropping `drive()`).
+struct DoneGuard(watch::Sender<bool>);
+
+impl Drop for DoneGuard {
+    fn drop(&mut self) {
+        let _ = self.0.send(true);
+    }
+}
+
+/// The echo task shared by every path: copy everything read back to the writer, then propagate
+/// the half-close.
+async fn echo(io: ServeIo, _done: DoneGuard) -> std::io::Result<u64> {
+    async {
         let (mut rd, mut wr) = tokio::io::split(io);
-        // A peer that went away mid-echo is a normal end for an echo server: the pump surfaces
-        // the kj stream's DISCONNECTED as a broken pipe on the consumer's write.
+        // A peer that went away mid-echo is a normal end for an echo server: a kj stream's
+        // DISCONNECTED write surfaces as a broken pipe.
         let n = match tokio::io::copy(&mut rd, &mut wr).await {
             Ok(n) => n,
             Err(e) if is_disconnect(&e) => return Ok(0),
@@ -102,53 +111,26 @@ async fn echo(io: ServeIo, done_tx: watch::Sender<bool>) -> std::io::Result<u64>
         }
         Ok(n)
     }
-    .await;
-    let _ = done_tx.send(true);
-    result
+    .await
 }
 
 /// A consumer that reads one message and then drops the stream WITHOUT `shutdown()` (see
-/// `start_serve_drop_consumer` in lib.rs). Reports completion through `done_tx`.
-async fn read_then_drop(mut io: ServeIo, done_tx: watch::Sender<bool>) -> std::io::Result<u64> {
+/// `start_serve_drop_consumer` in lib.rs).
+async fn read_then_drop(mut io: ServeIo, _done: DoneGuard) -> std::io::Result<u64> {
     use tokio::io::AsyncReadExt;
-    let result = async {
-        let mut buf = [0u8; 64];
-        let n = io.read(&mut buf).await?;
-        drop(io);
-        Ok(n as u64)
-    }
-    .await;
-    let _ = done_tx.send(true);
-    result
-}
-
-/// One echo server over a served kj stream; see `start_serve_echo` in lib.rs.
-pub struct ServeEchoSession {
-    native: bool,
-    /// Present for the pumped path; taken by `drive()`.
-    pump: RefCell<Option<StreamPump>>,
-    /// The echo task's completion signal (fires even if the task failed).
-    done_rx: watch::Receiver<bool>,
-    /// Taken by `drive()`.
-    echo: RefCell<Option<tokio::task::JoinHandle<std::io::Result<u64>>>>,
-    /// For the foreign-thread variant: the OS thread running the echo consumer, joined by
-    /// `drive()`. `None` for the loop-runtime variant.
-    foreign: RefCell<Option<std::thread::JoinHandle<std::io::Result<u64>>>>,
-}
-
-pub fn start_serve_echo(stream: KjOwn<AsyncIoStream>) -> Result<Box<ServeEchoSession>> {
-    let served = serve_kj_stream(stream).map_err(KjError::from)?;
-    Ok(Box::new(ServeEchoSession::new(served.io, served.pump)))
+    let mut buf = [0u8; 64];
+    let n = io.read(&mut buf).await?;
+    drop(io);
+    Ok(n as u64)
 }
 
 /// A consumer that writes a large payload and then drops the stream without ever reading (see
 /// `start_serve_write_then_drop` in lib.rs).
-async fn write_then_drop(mut io: ServeIo, done_tx: watch::Sender<bool>) -> std::io::Result<u64> {
+async fn write_then_drop(mut io: ServeIo, _done: DoneGuard) -> std::io::Result<u64> {
     use tokio::io::AsyncWriteExt;
     let payload = vec![0x5au8; 1024 * 1024];
-    // With a peer that never reads, this write blocks in the rendezvous with the kj stream --
-    // which is the situation under test -- so give up on it after a moment and drop the stream
-    // mid-write.
+    // With a peer that never reads, this write blocks until the kj stream takes it -- which is
+    // the situation under test -- so give up on it after a moment and drop the stream mid-write.
     let written = match tokio::time::timeout(
         std::time::Duration::from_millis(200),
         io.write_all(&payload),
@@ -159,121 +141,115 @@ async fn write_then_drop(mut io: ServeIo, done_tx: watch::Sender<bool>) -> std::
         Ok(Err(_)) | Err(_) => 0,
     };
     drop(io);
-    let _ = done_tx.send(true);
     Ok(written)
 }
 
-pub fn start_serve_write_then_drop(stream: KjOwn<AsyncIoStream>) -> Result<Box<ServeEchoSession>> {
-    let served = serve_kj_stream(stream).map_err(KjError::from)?;
-    let native = served.pump.is_none();
-    let (done_tx, done_rx) = watch::channel(false);
-    let consumer = kj_rs_tokio::spawn(write_then_drop(served.io, done_tx));
-    Ok(Box::new(ServeEchoSession {
-        native,
-        pump: RefCell::new(served.pump),
-        done_rx,
-        echo: RefCell::new(Some(consumer)),
-        foreign: RefCell::new(None),
-    }))
+/// One consumer over a served kj stream, running as a loop-runtime task (or, for the
+/// foreign-thread variant, on its own OS thread); see `start_serve_echo` in lib.rs.
+pub struct ServeEchoSession {
+    native: bool,
+    /// The consumer's completion signal (fires however it ends).
+    done_rx: watch::Receiver<bool>,
+    /// Taken by `drive()`.
+    echo: RefCell<Option<tokio::task::JoinHandle<std::io::Result<u64>>>>,
+    /// For the foreign-thread variant: the OS thread running the consumer, joined by `drive()`.
+    foreign: RefCell<Option<std::thread::JoinHandle<std::io::Result<u64>>>>,
 }
 
-pub fn start_serve_drop_consumer(stream: KjOwn<AsyncIoStream>) -> Result<Box<ServeEchoSession>> {
-    let served = serve_kj_stream(stream).map_err(KjError::from)?;
-    let native = served.pump.is_none();
-    let (done_tx, done_rx) = watch::channel(false);
-    let consumer = kj_rs_tokio::spawn(read_then_drop(served.io, done_tx));
-    Ok(Box::new(ServeEchoSession {
-        native,
-        pump: RefCell::new(served.pump),
-        done_rx,
-        echo: RefCell::new(Some(consumer)),
-        foreign: RefCell::new(None),
-    }))
-}
-
-/// Like `start_serve_echo`, but the echo consumer runs on another OS thread with its own
-/// tokio runtime. For a pumped stream, this drives `ServeIo::Duplex` off the KJ loop thread;
-/// its notifications wake the pump through kj-rs's cross-thread wake sink. The pump and its
-/// owned KJ stream remain on the KJ loop thread.
-pub fn start_serve_echo_foreign_thread(
-    stream: KjOwn<AsyncIoStream>,
-) -> Result<Box<ServeEchoSession>> {
-    let served = serve_kj_stream(stream).map_err(KjError::from)?;
-    Ok(Box::new(ServeEchoSession::new_foreign_thread(
-        served.io,
-        served.pump,
-    )))
-}
-
-/// Like `start_serve_echo`, but through the native-only entry point (`take_kj_socket`,
-/// tiers 1 + 2): errors for streams that are neither kj-rs-io native nor fd-backed (the
-/// handed-back stream is dropped with the error).
-pub fn start_take_socket_echo(stream: KjOwn<AsyncIoStream>) -> Result<Box<ServeEchoSession>> {
-    let io = take_kj_socket(stream).map_err(KjError::from)?;
-    Ok(Box::new(ServeEchoSession::new(io, None)))
+/// Whether `serve_kj_stream` took a native socket (as opposed to driving the kj stream).
+fn is_native(io: &ServeIo) -> bool {
+    !matches!(io, ServeIo::Kj(_))
 }
 
 impl ServeEchoSession {
-    fn new(io: ServeIo, pump: Option<StreamPump>) -> Self {
-        let native = pump.is_none();
+    fn spawn<F>(io: ServeIo, consumer: impl FnOnce(ServeIo, DoneGuard) -> F) -> Box<Self>
+    where
+        F: std::future::Future<Output = std::io::Result<u64>> + 'static,
+    {
+        let native = is_native(&io);
         let (done_tx, done_rx) = watch::channel(false);
-        // The echo consumer runs on this thread's KJ-loop runtime: the one-runtime shape
-        // (native sockets are registered with this runtime's I/O driver anyway).
-        let echo = kj_rs_tokio::spawn(echo(io, done_tx));
-        Self {
+        // The consumer runs on this thread's KJ-loop runtime, where the kj stream lives.
+        let echo = kj_rs_tokio::spawn(consumer(io, DoneGuard(done_tx)));
+        Box::new(Self {
             native,
-            pump: RefCell::new(pump),
             done_rx,
             echo: RefCell::new(Some(echo)),
             foreign: RefCell::new(None),
-        }
+        })
     }
+}
 
-    fn new_foreign_thread(io: ServeIo, pump: Option<StreamPump>) -> Self {
-        let native = pump.is_none();
-        let (done_tx, done_rx) = watch::channel(false);
-        // Run the echo consumer on its own OS thread with a private current-thread runtime, so
-        // the Duplex end is driven entirely off the KJ event-loop thread.
-        let foreign = std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("build echo-consumer runtime");
-            rt.block_on(echo(io, done_tx))
-        });
-        Self {
-            native,
-            pump: RefCell::new(pump),
-            done_rx,
-            echo: RefCell::new(None),
-            foreign: RefCell::new(Some(foreign)),
-        }
+pub fn start_serve_echo(stream: KjOwn<AsyncIoStream>) -> Result<Box<ServeEchoSession>> {
+    let io = serve_kj_stream(stream).map_err(KjError::from)?;
+    Ok(ServeEchoSession::spawn(io, echo))
+}
+
+pub fn start_serve_write_then_drop(stream: KjOwn<AsyncIoStream>) -> Result<Box<ServeEchoSession>> {
+    let io = serve_kj_stream(stream).map_err(KjError::from)?;
+    Ok(ServeEchoSession::spawn(io, write_then_drop))
+}
+
+pub fn start_serve_drop_consumer(stream: KjOwn<AsyncIoStream>) -> Result<Box<ServeEchoSession>> {
+    let io = serve_kj_stream(stream).map_err(KjError::from)?;
+    Ok(ServeEchoSession::spawn(io, read_then_drop))
+}
+
+/// Like `start_serve_echo`, but the echo consumer runs on another OS thread with its own tokio
+/// runtime: a kj stream driven off the thread owning its event loop, which must fail rather than
+/// touch the stream.
+pub fn start_serve_echo_foreign_thread(
+    stream: KjOwn<AsyncIoStream>,
+) -> Result<Box<ServeEchoSession>> {
+    let io = serve_kj_stream(stream).map_err(KjError::from)?;
+    let native = is_native(&io);
+    let (done_tx, done_rx) = watch::channel(false);
+    let foreign = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build echo-consumer runtime");
+        rt.block_on(echo(io, DoneGuard(done_tx)))
+    });
+    Ok(Box::new(ServeEchoSession {
+        native,
+        done_rx,
+        echo: RefCell::new(None),
+        foreign: RefCell::new(Some(foreign)),
+    }))
+}
+
+/// Like `start_serve_echo`, but through the native-only entry point (`take_kj_socket`): errors
+/// for streams that are not kj-rs-io sockets (the handed-back stream is dropped with the error).
+pub fn start_take_socket_echo(stream: KjOwn<AsyncIoStream>) -> Result<Box<ServeEchoSession>> {
+    let io = take_kj_socket(stream).map_err(KjError::from)?;
+    Ok(ServeEchoSession::spawn(io, echo))
+}
+
+/// Aborts the consumer task when `drive()` is dropped mid-connection.
+struct AbortOnDrop(tokio::task::AbortHandle);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
     }
+}
 
+impl ServeEchoSession {
     pub fn is_native(&self) -> bool {
         self.native
     }
 
-    /// Runs the connection to completion: drives the pump (if any) and waits for the echo
-    /// task to finish. Dropping the returned promise mid-connection drops the pump —
-    /// the abort-on-drop path.
+    /// Runs the consumer to completion. Dropping the returned promise mid-connection aborts the
+    /// consumer, which drops its stream -- the abort-on-drop path.
     pub async fn drive(&self) -> Result<()> {
-        let pump = self.pump.borrow_mut().take();
         let echo = self.echo.borrow_mut().take();
-        // Await the pump but do NOT `?` yet: on the foreign-thread variant we must still join
-        // the consumer OS thread even if the pump errored, or we leak an unjoined thread.
-        let pump_result = match pump {
-            Some(pump) => pump.await,
-            None => Ok(()),
-        };
         if let Some(handle) = echo {
+            let _abort = AbortOnDrop(handle.abort_handle());
             handle
                 .await
                 .map_err(|e| kj_err(format!("echo task panicked: {e}")))?
                 .map_err(|e| kj_err(format!("echo failed: {e}")))?;
         }
-        // Foreign-thread variant: wait for the consumer to finish (dropping the pump above
-        // EOFs it), then join. Waiting on the done signal first keeps the join near-instant.
         let foreign = self.foreign.borrow_mut().take();
         if let Some(handle) = foreign {
             self.wait_echo_done().await;
@@ -282,17 +258,12 @@ impl ServeEchoSession {
                 .map_err(|_| kj_err("echo consumer thread panicked"))?
                 .map_err(|e| kj_err(format!("echo failed: {e}")))?;
         }
-        pump_result?;
         Ok(())
     }
 
-    /// Resolves once the echo task has finished (however `drive()` fared) — used by the
-    /// drop-abort test to observe that dropping the pump EOFs the consumer.
+    /// Resolves once the consumer has finished, however it ended.
     pub async fn wait_echo_done(&self) {
         let mut rx = self.done_rx.clone();
-        // Cannot fail: the sender is owned by the echo task, which always sends before exit;
-        // even if it panicked, the closed channel resolves wait_for with an error we ignore
-        // after checking the flag.
         let _ = rx.wait_for(|done| *done).await;
     }
 }

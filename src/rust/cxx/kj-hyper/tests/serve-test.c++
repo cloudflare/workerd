@@ -22,7 +22,7 @@ namespace {
 using kj_rs_io::setupTokioAsyncIo;
 
 // The client side of an echo round trip: write `data` (in chunks) and concurrently read the
-// echo back and verify it (concurrent, so bounded transports -- the pump duplex, socket
+// echo back and verify it (concurrent, so bounded transports -- kj pipes, socket
 // buffers -- never deadlock on payloads larger than their buffering); then half-close and
 // expect EOF.
 kj::Promise<void> echoRoundTrip(
@@ -104,9 +104,9 @@ KJ_TEST("serve_kj_stream preserves a native stream when extraction is blocked by
 }
 
 // =======================================================================================
-// Duplex pump fallback (foreign streams)
+// Foreign streams, driven directly
 
-KJ_TEST("serve_kj_stream pumps foreign streams: bidirectional echo + half-close") {
+KJ_TEST("serve_kj_stream drives foreign streams: bidirectional echo + half-close") {
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
 
@@ -119,11 +119,12 @@ KJ_TEST("serve_kj_stream pumps foreign streams: bidirectional echo + half-close"
   auto data = makePatternedData(512 * 1024, 3);
   auto drive = session->drive();
   auto client = echoRoundTrip(*pipe.ends[1], data);
-  // The pump owns `pipe.ends[0]` now; only the client end stays with the test.
+  // The served stream owns `pipe.ends[0]` now; only the client end stays with the test.
   kj::joinPromisesFailFast(kj::arr(kj::mv(drive), kj::mv(client))).wait(ws);
 }
 
-KJ_TEST("serve_kj_stream pump: dropping the pump aborts the bridge (drop-abort)") {
+KJ_TEST(
+    "serve_kj_stream: dropping the consumer mid-connection destroys the kj stream (drop-abort)") {
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   auto pipe = kj::newTwoWayPipe();
@@ -132,8 +133,8 @@ KJ_TEST("serve_kj_stream pump: dropping the pump aborts the bridge (drop-abort)"
   KJ_EXPECT(!session->is_native());
 
   {
-    // Prove the bridge is live: one small round trip, driving the pump only while the
-    // client operation runs, then *drop* the drive promise mid-connection.
+    // Prove the connection is live: one small round trip, then *drop* the drive promise
+    // mid-connection, aborting the consumer.
     auto drive = session->drive();
     auto oneRoundTrip = [](kj::AsyncIoStream &s) -> kj::Promise<void> {
       co_await s.write("ping"_kjb);
@@ -146,12 +147,11 @@ KJ_TEST("serve_kj_stream pump: dropping the pump aborts the bridge (drop-abort)"
     oneRoundTrip.exclusiveJoin(kj::mv(drive)).wait(ws);
   }
 
-  // Dropping the pump dropped the kj-side duplex end: the echo consumer reads EOF and
-  // finishes...
+  // The aborted consumer has finished...
   session->wait_echo_done().wait(ws);
 
-  // ...and the pump destroyed the kj stream it owned: the peer observes teardown (a rejected
-  // write), not a zombie half-open pipe.
+  // ...and dropped the stream it served, destroying the kj stream: the peer observes teardown
+  // (a rejected write), not a zombie half-open pipe.
   auto orphanWrite = kj::evalNow([&]() { return pipe.ends[1]->write("anyone there?"_kjb); });
   KJ_EXPECT(orphanWrite.poll(ws));
   orphanWrite
@@ -160,10 +160,10 @@ KJ_TEST("serve_kj_stream pump: dropping the pump aborts the bridge (drop-abort)"
   }).wait(ws);
 }
 
-KJ_TEST("serve_kj_stream pump: the Duplex consumer may be driven from another thread") {
-  // ServedKjStream::io permits a Duplex consumer on a different thread from its KJ pump.
-  // Here the echo consumer runs on its own thread and runtime. Notifications from its Duplex
-  // endpoint wake the pump through kj-rs's cross-thread wake sink.
+KJ_TEST("serve_kj_stream: a kj stream polled off its event loop's thread fails, untouched") {
+  // A served kj stream is Send (hyper's upgrade path requires it) but belongs to its loop's
+  // thread: a consumer on another thread and runtime gets an error on its first operation, and
+  // nothing kj runs off-thread.
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   auto pipe = kj::newTwoWayPipe();
@@ -171,10 +171,7 @@ KJ_TEST("serve_kj_stream pump: the Duplex consumer may be driven from another th
   auto session = start_serve_echo_foreign_thread(kj::mv(pipe.ends[0]));
   KJ_EXPECT(!session->is_native());
 
-  auto data = makePatternedData(512 * 1024, 5);
-  auto drive = session->drive();  // the join below drives the pump alongside the client
-  auto client = echoRoundTrip(*pipe.ends[1], data);
-  kj::joinPromisesFailFast(kj::arr(kj::mv(drive), kj::mv(client))).wait(ws);
+  KJ_EXPECT_THROW_MESSAGE("off the thread owning its event loop", session->drive().wait(ws));
 }
 
 // A foreign stream over one end of a kj two-way pipe whose read side reports a DISCONNECTED
@@ -227,7 +224,7 @@ class DisconnectingStream final: public kj::AsyncIoStream {
   kj::Exception::Type readFailure;
 };
 
-KJ_TEST("serve_kj_stream pump: a DISCONNECTED read is treated as EOF, not as an error") {
+KJ_TEST("serve_kj_stream: a DISCONNECTED read is treated as EOF, not as an error") {
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   auto pipe = kj::newTwoWayPipe();
@@ -236,21 +233,21 @@ KJ_TEST("serve_kj_stream pump: a DISCONNECTED read is treated as EOF, not as an 
   KJ_EXPECT(!session->is_native());
 
   auto drive = session->drive().eagerlyEvaluate(nullptr);
-  // One message goes through, then the client goes away abruptly: the pump's read fails
-  // DISCONNECTED. The echo consumer must see EOF (and echo back what it got), and the pump must
-  // settle Ok -- abrupt client disconnects are normal load, not failures.
+  // One message goes through, then the client goes away abruptly: the kj read fails
+  // DISCONNECTED. The echo consumer must see EOF (and echo back what it got), and finish Ok --
+  // abrupt client disconnects are normal load, not failures.
   pipe.ends[1]->write("ping"_kjb).wait(ws);
   kj::byte buffer[4];
   KJ_EXPECT(pipe.ends[1]->tryRead(buffer, 4, 4).wait(ws) == 4);
   pipe.ends[1]->shutdownWrite();  // the wrapper turns this EOF into DISCONNECTED
   KJ_EXPECT(pipe.ends[1]->tryRead(buffer, 1, 1).wait(ws) == 0);  // consumer shut down -> EOF back
-  boundedBy(io, kj::mv(drive), 10 * kj::SECONDS, "the pump to settle").wait(ws);
+  boundedBy(io, kj::mv(drive), 10 * kj::SECONDS, "the consumer to finish").wait(ws);
   session->wait_echo_done().wait(ws);
 }
 
-KJ_TEST("serve_kj_stream pump: a non-DISCONNECTED read failure fails the pump") {
-  // Only peer-teardown-shaped failures are EOF; a genuine stream error must surface from
-  // drive() (the pump's Err arm), not be swallowed as a clean end of input.
+KJ_TEST("serve_kj_stream: a non-DISCONNECTED read failure fails the consumer's read") {
+  // Only peer-teardown-shaped failures are EOF; a genuine stream error must reach the consumer
+  // (and so drive()), not be swallowed as a clean end of input.
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   auto pipe = kj::newTwoWayPipe();
@@ -263,28 +260,27 @@ KJ_TEST("serve_kj_stream pump: a non-DISCONNECTED read failure fails the pump") 
   KJ_EXPECT(pipe.ends[1]->tryRead(buffer, 4, 4).wait(ws) == 4);
   pipe.ends[1]->shutdownWrite();  // the wrapper turns this EOF into a FAILED exception
   auto failure = KJ_ASSERT_NONNULL(kj::runCatchingExceptions(
-      [&]() { boundedBy(io, kj::mv(drive), 10 * kj::SECONDS, "the pump to fail").wait(ws); }));
+      [&]() { boundedBy(io, kj::mv(drive), 10 * kj::SECONDS, "the consumer to fail").wait(ws); }));
   KJ_EXPECT(failure.getDescription().contains("read side broke"), failure.getDescription());
   session->wait_echo_done().wait(ws);
 }
 
-KJ_TEST("serve_kj_stream pump: a DISCONNECTED write ends the direction without an error") {
+KJ_TEST("serve_kj_stream: a DISCONNECTED write ends the direction without an error") {
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   auto pipe = kj::newTwoWayPipe();
 
   auto session = start_serve_echo(kj::heap<DisconnectingStream>(kj::mv(pipe.ends[0]), true));
   auto drive = session->drive().eagerlyEvaluate(nullptr);
-  // The consumer's echo of "ping" is written to a peer that already reset: the pump must not
-  // fail. Half-close so the read direction finishes normally too.
+  // The consumer's echo of "ping" is written to a peer that already reset: that is a broken
+  // pipe, not a failure. Half-close so the read direction finishes normally too.
   pipe.ends[1]->write("ping"_kjb).wait(ws);
   pipe.ends[1]->shutdownWrite();
-  boundedBy(io, kj::mv(drive), 10 * kj::SECONDS, "the pump to settle").wait(ws);
+  boundedBy(io, kj::mv(drive), 10 * kj::SECONDS, "the consumer to finish").wait(ws);
   session->wait_echo_done().wait(ws);
 }
 
-KJ_TEST("serve_kj_stream pump: the consumer dropping its end (no shutdown) half-closes the kj "
-        "side") {
+KJ_TEST("serve_kj_stream: the consumer dropping its end (no shutdown) closes the kj side") {
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   auto pipe = kj::newTwoWayPipe();
@@ -295,14 +291,14 @@ KJ_TEST("serve_kj_stream pump: the consumer dropping its end (no shutdown) half-
   auto drive = session->drive().eagerlyEvaluate(nullptr);
 
   pipe.ends[1]->write("ping"_kjb).wait(ws);
-  // The drop must surface as shutdownWrite() on the kj stream: the client reads EOF.
+  // The drop destroys the kj stream: the client reads EOF.
   kj::byte buffer[1];
   KJ_EXPECT(boundedBy(io, pipe.ends[1]->tryRead(buffer, 1, 1), 10 * kj::SECONDS,
-                "EOF from the pump's shutdownWrite")
+                "EOF from the destroyed stream")
                 .wait(ws) == 0);
-  // The peer stays idle and open. The pump must still settle: the consumer's drop signal ends
-  // the kj->consumer direction rather than leaving it (and the connection) waiting forever.
-  boundedBy(io, kj::mv(drive), 10 * kj::SECONDS, "the pump to settle with an idle peer").wait(ws);
+  // The peer stays idle and open; the consumer has finished regardless.
+  boundedBy(io, kj::mv(drive), 10 * kj::SECONDS, "the consumer to finish with an idle peer")
+      .wait(ws);
 }
 
 // A byte-transforming wrapper over a kj-rs-io TCP stream: XORs everything in both directions.
@@ -341,10 +337,10 @@ class XorStream final: public kj::AsyncIoStream {
   kj::Own<kj::AsyncIoStream> inner;
 };
 
-KJ_TEST("serve_kj_stream pumps a byte-transforming wrapper (TLS-shaped) correctly, never its "
+KJ_TEST("serve_kj_stream drives a byte-transforming wrapper (TLS-shaped) correctly, never its "
         "fd") {
   // The wrapper exposes its transport's fd, so an fd-tier shortcut would serve the transformed
-  // bytes. serve_kj_stream must take the pump path and echo the plaintext the client sees.
+  // bytes. serve_kj_stream must drive the wrapper and echo the plaintext the client sees.
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   auto pair = makeTcpPair(io);
@@ -353,7 +349,7 @@ KJ_TEST("serve_kj_stream pumps a byte-transforming wrapper (TLS-shaped) correctl
   KJ_EXPECT(!session->is_native());
 
   // The client speaks through its own XorStream, so plaintext round-trips only if the server
-  // side was pumped through the wrapper (and not read off the raw socket).
+  // side went through the wrapper (and not off the raw socket).
   XorStream client(kj::mv(pair.client));
   auto data = makePatternedData(128 * 1024, 13);
   auto drive = session->drive();
@@ -379,7 +375,7 @@ KJ_TEST("take_kj_socket unwraps kj-rs-io TCP streams (tier 1) and echoes") {
   kj::joinPromisesFailFast(kj::arr(kj::mv(drive), kj::mv(client))).wait(ws);
 }
 
-KJ_TEST("take_kj_socket refuses foreign streams (no pump path)") {
+KJ_TEST("take_kj_socket refuses foreign streams") {
   auto io = setupTokioAsyncIo();
   auto pipe = kj::newTwoWayPipe();
 
@@ -436,12 +432,12 @@ KJ_TEST("an outstanding whenWriteDisconnected() blocks the native serve path") {
   kj::joinPromisesFailFast(kj::arr(kj::mv(drive), kj::mv(client))).wait(ws);
 }
 
-KJ_TEST("serve_kj_stream pump: a consumer that drops while its outbound write is blocked "
-        "cancels the write, as destroying a kj stream does") {
-  // The kj peer never reads, so the consumer's write is stuck in the rendezvous with the kj
-  // stream, and the consumer drops its end mid-write without shutdown(). kj-pipe semantics:
-  // destroying a kj stream cancels its in-flight write, so the pump discards the offered bytes,
-  // settles at once, and destroys the stream -- the peer observes EOF, not the payload.
+KJ_TEST("serve_kj_stream: a consumer that drops while its write is blocked cancels the write, "
+        "as destroying a kj stream does") {
+  // The kj peer never reads, so the consumer's write is stuck in the kj stream, and the consumer
+  // drops its end mid-write without shutdown(). kj semantics: destroying a kj stream cancels its
+  // in-flight write, so the stream is destroyed with the payload never delivered -- the peer
+  // observes EOF, not the payload.
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   auto pipe = kj::newTwoWayPipe();
@@ -450,9 +446,8 @@ KJ_TEST("serve_kj_stream pump: a consumer that drops while its outbound write is
   KJ_EXPECT(!session->is_native());
   auto drive = session->drive().eagerlyEvaluate(nullptr);
   session->wait_echo_done().wait(ws);  // the consumer has dropped its end
-  boundedBy(io, kj::mv(drive), 10 * kj::SECONDS, "the pump to settle once the consumer dropped")
-      .wait(ws);
-  // The stream the pump owned is gone: the peer reads EOF, never the discarded payload.
+  boundedBy(io, kj::mv(drive), 10 * kj::SECONDS, "the consumer to finish once it dropped").wait(ws);
+  // The stream is gone: the peer reads EOF, never the discarded payload.
   kj::byte probe;
   KJ_EXPECT(boundedBy(io, pipe.ends[1]->tryRead(&probe, 1, 1), 10 * kj::SECONDS,
                 "EOF from the destroyed stream")

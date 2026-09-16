@@ -1,7 +1,7 @@
 #pragma once
 // The C++ side of serving a kj::AsyncIoStream natively (serve.rs): taking a kj-rs-io stream's
 // tokio socket (or a RustStream's Rust stream) out of its wrapper, and the bridged operations
-// on a *foreign* kj::AsyncIoStream that back the pump fallback. Included by kj-hyper's cxx
+// on a *foreign* kj::AsyncIoStream that serve.rs's KjIo drives. Included by kj-hyper's cxx
 // bridge (ffi.rs).
 #include "kj-rs-io/async-io.h"
 
@@ -12,8 +12,8 @@
 #include <kj/refcount.h>
 
 // The native path recognizes kj-rs-io streams by dynamic_cast. Without RTTI every stream would
-// silently be treated as foreign and take the pump path; make that a build error rather than a
-// performance mystery.
+// silently be treated as foreign and driven through the bridge; make that a build error rather
+// than a performance mystery.
 #if KJ_NO_RTTI
 #error "kj-hyper's native-serve path requires RTTI (dynamicDowncastIfAvailable); KJ_NO_RTTI is set"
 #endif
@@ -52,17 +52,16 @@ struct RustStream;
 // operation still holds it, on the owning thread (RustStream::can_release).
 bool isReleasableRustStream(const kj::AsyncIoStream &stream);
 
-// Takes the Rust stream out of the wrapper -- cancelling the wrapper's pump driver first -- and
-// destroys the wrapper. The caller must have checked isReleasableRustStream().
+// Takes the Rust stream out of the wrapper and destroys the wrapper. The caller must have checked isReleasableRustStream().
 ::rust::Box<RustStream> releaseRustStream(kj::Own<kj::AsyncIoStream> stream);
 
 // The inverse: a kj::AsyncIoStream over a Rust stream, for kj consumers.
 kj::Own<kj::AsyncIoStream> wrapRustStream(::rust::Box<RustStream> stream);
 
 // --- Bridged operations on a *foreign* kj::AsyncIoStream (one that did not originate in
-// kj-rs-io and therefore has no socket to take). These back the duplex-pump fallback of
-// serve_kj_stream() (serve.rs): the pump reads and writes the stream concurrently -- kj two-way
-// streams support one read and one write in flight at once.
+// kj-rs-io and therefore has no socket to take). These back serve.rs's KjIo, which reads and
+// writes the stream concurrently -- kj two-way streams support one read and one write in flight
+// at once.
 //
 // Ownership: the stream lives in a refcounted holder, and each direction is its own small
 // object owning a share of it. Rust holds the two ends by kj::Own and drives each through an
@@ -107,7 +106,7 @@ inline kj::Own<KjStreamWatchEnd> kjStreamWatchEnd(KjStreamReadEnd &read) {
 }
 
 // Corresponds to kj::AsyncIoStream::tryRead(buffer, minBytes, buffer.size()). The buffer is the
-// Rust pump's own initialized Vec, hence a plain Slice.
+// Rust side's own initialized Vec (KjIo's read chunk), hence a plain Slice.
 inline kj::Promise<size_t> kjReadEndTryRead(
     KjStreamReadEnd &end, ::rust::Slice<uint8_t> buffer, size_t minBytes) {
   return end.share->stream->tryRead(buffer.data(), minBytes, buffer.size());

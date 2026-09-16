@@ -621,7 +621,7 @@ pub fn kj_error_for_rustls_error(tls_error: &rustls::Error) -> KjError {
 // =======================================================================================
 // TLS over a served kj stream: the streams behind the rustls SecureNetworkWrapper
 // (workerd/server/tls-network.c++). `wrap_tls_server` / `wrap_tls_client` take the plaintext
-// kj stream through `serve.rs` (its tokio socket natively, else the pump), put tokio-rustls
+// kj stream through `serve.rs` (its tokio socket natively, else the kj stream directly), put tokio-rustls
 // over it and hand the result back to kj as a `RustStream`. The handshake runs on first use --
 // kj's SecureNetworkWrapper returns wrapped streams before any handshake bytes flow, and a TLS
 // listener's accept loop must not wait on it.
@@ -786,14 +786,31 @@ impl LazyTls {
             Self::Failed(..) => None,
         }
     }
+
+    fn transport_mut(&mut self) -> Option<&mut crate::serve::ServeIo> {
+        match self {
+            Self::Handshaking {
+                handshake: Handshake::Accept(accept),
+                ..
+            } => accept.get_mut(),
+            Self::Handshaking {
+                handshake: Handshake::Connect(connect),
+                ..
+            } => connect.get_mut(),
+            Self::Ready(stream) => Some(stream.get_mut().0),
+            Self::Failed(..) => None,
+        }
+    }
 }
 
 /// kj's TLS stream forwards `whenWriteDisconnected` (and socket options) to the transport; so
 /// does this one.
 impl crate::rust_stream::AsyncIo for LazyTls {
-    fn write_disconnect(&self) -> std::io::Result<crate::rust_stream::WriteDisconnect> {
-        match self.transport() {
-            Some(io) => io.write_disconnect(),
+    fn write_disconnect(
+        self: std::pin::Pin<&mut Self>,
+    ) -> std::io::Result<crate::rust_stream::WriteDisconnect> {
+        match self.get_mut().transport_mut() {
+            Some(io) => std::pin::Pin::new(io).write_disconnect(),
             None => Ok(crate::rust_stream::WriteDisconnect::Never),
         }
     }
@@ -815,10 +832,9 @@ pub fn wrap_tls_server(
     stream: kj_rs::KjOwn<crate::ffi::AsyncIoStream>,
     config: &HyperTlsServerConfig,
 ) -> Result<kj_rs::KjOwn<crate::ffi::AsyncIoStream>> {
-    let served = crate::serve::serve_kj_stream(stream)?;
-    let tls = LazyTls::server(&config.acceptor(), served.io);
+    let tls = LazyTls::server(&config.acceptor(), crate::serve::serve_kj_stream(stream)?);
     Ok(crate::ffi::wrap_rust_stream(Box::new(
-        crate::rust_stream::RustStream::new(tls, served.pump),
+        crate::rust_stream::RustStream::new(tls),
     )))
 }
 
@@ -835,9 +851,8 @@ pub fn wrap_tls_client(
     expected_server_hostname: &str,
 ) -> Result<kj_rs::KjOwn<crate::ffi::AsyncIoStream>> {
     let params = TlsParams::new(config, expected_server_hostname)?;
-    let served = crate::serve::serve_kj_stream(stream)?;
-    let tls = LazyTls::client(params, served.io);
+    let tls = LazyTls::client(params, crate::serve::serve_kj_stream(stream)?);
     Ok(crate::ffi::wrap_rust_stream(Box::new(
-        crate::rust_stream::RustStream::new(tls, served.pump),
+        crate::rust_stream::RustStream::new(tls),
     )))
 }

@@ -207,8 +207,7 @@ mod bridge {
         #[cxx_name = "isReleasableRustStream"]
         fn is_releasable_rust_stream(stream: &AsyncIoStream) -> bool;
 
-        /// Takes the Rust stream out of its wrapper -- cancelling the wrapper's pump driver --
-        /// and destroys the wrapper. Only valid after `is_releasable_rust_stream`.
+        /// Takes the Rust stream out of its wrapper and destroys the wrapper. Only valid after `is_releasable_rust_stream`.
         #[cxx_name = "releaseRustStream"]
         fn release_rust_stream(stream: KjOwn<AsyncIoStream>) -> Box<RustStream>;
 
@@ -216,8 +215,7 @@ mod bridge {
         #[cxx_name = "wrapRustStream"]
         fn wrap_rust_stream(stream: Box<RustStream>) -> KjOwn<AsyncIoStream>;
 
-        // The two directions of a pumped foreign `kj::AsyncIoStream` (serve_kj_stream's
-        // duplex-pump fallback, serve.rs), as two distinct C++ objects sharing ownership of the
+        // The directions of a foreign `kj::AsyncIoStream` that `serve::KjIo` drives, as two distinct C++ objects sharing ownership of the
         // stream. A kj two-way stream supports one read and one write in flight at once;
         // giving each direction its own object lets Rust hold a genuinely exclusive
         // `Pin<&mut _>` per direction with no const_cast and no aliasing `&mut` of the stream,
@@ -228,19 +226,19 @@ mod bridge {
         type KjStreamWriteEnd;
         type KjStreamWatchEnd;
 
-        /// Takes ownership of `stream`; the read direction. Fallible only in that `kj::heap`
-        /// may throw.
+        /// Takes ownership of `stream`; the read direction. (Infallible: `kj::heap` throws only
+        /// on allocation failure, which kj treats as fatal.)
         #[cxx_name = "kjStreamReadEnd"]
-        fn kj_stream_read_end(stream: KjOwn<AsyncIoStream>) -> Result<KjOwn<KjStreamReadEnd>>;
+        fn kj_stream_read_end(stream: KjOwn<AsyncIoStream>) -> KjOwn<KjStreamReadEnd>;
         /// The write direction of the stream `read` shares.
         #[cxx_name = "kjStreamWriteEnd"]
-        fn kj_stream_write_end(read: Pin<&mut KjStreamReadEnd>) -> Result<KjOwn<KjStreamWriteEnd>>;
+        fn kj_stream_write_end(read: Pin<&mut KjStreamReadEnd>) -> KjOwn<KjStreamWriteEnd>;
         /// A handle for `whenWriteDisconnected` on the stream `read` shares.
         #[cxx_name = "kjStreamWatchEnd"]
-        fn kj_stream_watch_end(read: Pin<&mut KjStreamReadEnd>) -> Result<KjOwn<KjStreamWatchEnd>>;
+        fn kj_stream_watch_end(read: Pin<&mut KjStreamReadEnd>) -> KjOwn<KjStreamWatchEnd>;
 
         /// `kj::AsyncIoStream::tryRead(buffer, min_bytes, buffer.len())`. The buffer is a
-        /// Rust-owned, initialized `Vec` here (the pump's), so `&mut [u8]` is the right type.
+        /// Rust-owned, initialized `Vec` here (`KjIo`'s), so `&mut [u8]` is the right type.
         #[cxx_name = "kjReadEndTryRead"]
         async unsafe fn kj_read_end_try_read<'a>(
             end: Pin<&'a mut KjStreamReadEnd>,
@@ -461,7 +459,7 @@ mod bridge {
         ) -> Result<Box<HyperClient>>;
 
         /// Like `new_hyper_stream_http_client`, over a stream the caller only lends (`stream` is
-        /// a non-owning `kj::Own`): always pumped, never taken apart, so the caller's stream
+        /// a non-owning `kj::Own`): driven directly, never taken apart, so the caller's stream
         /// stays intact. The stream must outlive the client.
         #[expect(clippy::unnecessary_box_returns)]
         unsafe fn new_hyper_borrowed_stream_http_client(
@@ -480,12 +478,12 @@ mod bridge {
             response: Pin<&'a mut HttpServiceResponse>,
         ) -> Result<()>;
 
-        /// Drives the stream-tier byte pump for a stream client without a native socket; the
-        /// C++ client wrapper owns the returned promise as a member so the pump — and its
-        /// bridged kj promises — are cancelled synchronously when the client is destroyed
-        /// (before its borrowed stream dies, and while the KJ event loop still exists).
-        /// Resolves immediately for clients without a pump.
-        async unsafe fn drive_stream_pump<'a>(self: &'a HyperClient);
+        /// Drives a stream client's one connection once a request has made it; the C++ client
+        /// wrapper owns the returned promise as a member so the connection -- and the kj stream
+        /// it drives -- is cancelled synchronously when the client is destroyed (before its
+        /// borrowed stream dies, and while the KJ event loop still exists). Resolves immediately
+        /// for dialing clients.
+        async unsafe fn drive_stream_connection<'a>(self: &'a HyperClient);
 
         /// Performs a WebSocket upgrade handshake (kj `openWebSocket()` semantics). The outcome
         /// is either an established WebSocket or a regular (non-101) response.
@@ -634,9 +632,6 @@ mod bridge {
         /// Corresponds to `kj::AsyncOutputStream::whenWriteDisconnected()`, forwarded to the
         /// transport underneath.
         async unsafe fn when_write_disconnected<'a>(self: &'a RustStream) -> Result<()>;
-
-        /// Drives the stream's pump, if it has one; the C++ wrapper holds it as a kj promise.
-        async unsafe fn drive<'a>(self: &'a RustStream);
 
         /// Whether the stream may be taken apart now (see `RustStream::can_release`).
         fn can_release(self: &RustStream) -> bool;
@@ -821,9 +816,8 @@ mod bridge {
         ) -> Result<Box<HyperConnection>>;
 
         /// Like `new_hyper_http_connection`, over a stream the caller only lends (`stream` is a
-        /// non-owning `kj::Own`): always pumped, never taken apart, so the caller's stream stays
+        /// non-owning `kj::Own`): driven directly, never taken apart, so the caller's stream stays
         /// intact. The stream must outlive the connection.
-        #[expect(clippy::unnecessary_box_returns)]
         unsafe fn new_hyper_borrowed_http_connection(
             table: &HttpHeaderTable,
             service: Pin<&mut HttpService>,
@@ -1000,15 +994,15 @@ unsafe fn new_hyper_stream_http_client(
     jsgify_websocket_errors: bool,
 ) -> kj::Result<Box<HyperClient>> {
     // serve_kj_stream, not take_kj_socket: the client accepts any stream shape (native tokio
-    // socket where one can be taken, duplex + pump otherwise). It only fails for a kj-rs-io
+    // socket where one can be taken, the kj stream driven directly otherwise). It only fails for a kj-rs-io
     // wrapper still borrowed by an in-flight I/O operation -- a caller contract violation kj
     // would also reject -- so the error (not the stream) is surfaced.
-    let served = crate::serve::serve_kj_stream(stream).map_err(|e| e.error)?;
+    let io = crate::serve::serve_kj_stream(stream).map_err(|e| e.error)?;
     // SAFETY: the caller guarantees `table` outlives the returned client.
     let table = unsafe { HeaderTablePtr::new(std::ptr::from_ref(table)) };
     Ok(Box::new(HyperClient::new_with_stream(
         table,
-        served,
+        io,
         jsgify_websocket_errors,
     )))
 }
@@ -1019,13 +1013,13 @@ unsafe fn new_hyper_borrowed_stream_http_client(
     stream: kj_rs::KjOwn<AsyncIoStream>,
     jsgify_websocket_errors: bool,
 ) -> Box<HyperClient> {
-    // Pumped, never taken apart: the caller keeps using its stream afterwards.
-    let served = crate::serve::pump_kj_stream(stream);
+    // Driven directly, never taken apart: the caller keeps using its stream afterwards.
+    let io = crate::serve::serve_lent_kj_stream(stream);
     // SAFETY: the caller guarantees `table` (and the lent stream) outlive the returned client.
     let table = unsafe { HeaderTablePtr::new(std::ptr::from_ref(table)) };
     Box::new(HyperClient::new_with_stream(
         table,
-        served,
+        io,
         jsgify_websocket_errors,
     ))
 }
@@ -1055,22 +1049,18 @@ fn start_request(
 }
 
 /// Shared front half of the two connection constructors: take ownership of the accepted stream
-/// and adapt it for hyper — its socket taken natively (the unwrap tier for kj-rs-io streams),
-/// or, for streams with no native socket (in-memory transports, tunnel streams, TLS and other
-/// wrappers), a duplex bridged by a pump that `HyperConnection::serve()` drives. The consumed
-/// stream is destroyed by the tier that took it (the pump destroys it when it settles or is
-/// dropped).
+/// and adapt it for hyper -- its socket (or Rust stream) taken natively where there is one, the
+/// kj stream driven directly otherwise (see serve.rs).
 fn take_connection_socket(
     stream: kj_rs::KjOwn<AsyncIoStream>,
-) -> kj::Result<(crate::serve::ServeIo, Option<crate::serve::StreamPump>)> {
+) -> kj::Result<crate::serve::ServeIo> {
     // Fails only for a kj-rs-io wrapper still borrowed by an in-flight I/O operation (a caller
     // contract violation); surface the error rather than serve a half-owned stream.
-    let served = crate::serve::serve_kj_stream(stream).map_err(|e| e.error)?;
-    Ok((served.io, served.pump))
+    crate::serve::serve_kj_stream(stream).map_err(|e| e.error)
 }
 
 // ======================================================================================
-// The two directions of a pumped foreign stream (serve.rs).
+// The directions of a foreign kj stream driven by `serve::KjIo`.
 //
 // kj's stream contract — at most one read and one write may be in flight at once — is prose in
 // kj; these halves make the borrow checker enforce it. Each half exclusively owns one C++ "end"
@@ -1080,37 +1070,72 @@ fn take_connection_socket(
 // is, so an end cannot outlive it. The bridged operations behind them are not re-exported: the
 // halves are the only way to drive a foreign stream.
 
-/// The read direction of a pumped stream. See the module comment above.
+/// A value bound to the thread that created it, made `Send` so it can live inside hyper's
+/// transports: hyper's upgrade path requires a `Send` transport, while a kj stream's ends and
+/// bridged promises belong to their event loop's thread. Every access and the drop happen only on
+/// the owning thread; elsewhere [`OwnerThread::get_mut`] returns `None`, and a drop leaks the
+/// value instead of running kj code off its thread.
+pub(crate) struct OwnerThread<T> {
+    value: std::mem::ManuallyDrop<T>,
+    owner: std::thread::ThreadId,
+}
+
+// SAFETY: moving the value's bytes to another thread runs none of its code. Its only uses --
+// `get_mut` and `Drop` -- first check that they run on the thread that created it (and a drop
+// elsewhere leaks). `Sync` is not implemented, so no shared access can happen across threads.
+unsafe impl<T> Send for OwnerThread<T> {}
+
+impl<T> OwnerThread<T> {
+    pub(crate) fn new(value: T) -> Self {
+        Self {
+            value: std::mem::ManuallyDrop::new(value),
+            owner: std::thread::current().id(),
+        }
+    }
+
+    /// The value, on the owning thread only.
+    pub(crate) fn get_mut(&mut self) -> Option<&mut T> {
+        (std::thread::current().id() == self.owner).then_some(&mut *self.value)
+    }
+}
+
+impl<T> Drop for OwnerThread<T> {
+    fn drop(&mut self) {
+        if std::thread::current().id() == self.owner {
+            // SAFETY: dropped exactly once, here, and never used afterwards.
+            unsafe { std::mem::ManuallyDrop::drop(&mut self.value) };
+        }
+    }
+}
+
+/// The read direction of a foreign kj stream. See the module comment above.
 pub(crate) struct KjStreamReadHalf {
     end: KjOwn<KjStreamReadEnd>,
 }
 
-/// The write direction of a pumped stream (writes and the write-side shutdown). See the module
+/// The write direction of a foreign kj stream (writes and the write-side shutdown). See the module
 /// comment above.
 pub(crate) struct KjStreamWriteHalf {
     end: KjOwn<KjStreamWriteEnd>,
 }
 
-/// Takes ownership of the stream and splits it into its two directions.
-///
-/// # Errors
-///
-/// Only if allocating an end object throws (`kj::heap`).
+/// Takes ownership of the stream and splits it into its read and write directions plus a
+/// disconnect watch.
 pub(crate) fn split_kj_stream(
     stream: KjOwn<AsyncIoStream>,
-) -> Result<(KjStreamReadHalf, KjStreamWriteHalf, KjStreamWatchHalf), KjException> {
-    let mut read = kj_stream_read_end(stream)?;
-    let write = kj_stream_write_end(read.as_mut())?;
-    let watch = kj_stream_watch_end(read.as_mut())?;
-    Ok((
+) -> (KjStreamReadHalf, KjStreamWriteHalf, KjStreamWatchHalf) {
+    let mut read = kj_stream_read_end(stream);
+    let write = kj_stream_write_end(read.as_mut());
+    let watch = kj_stream_watch_end(read.as_mut());
+    (
         KjStreamReadHalf { end: read },
         KjStreamWriteHalf { end: write },
         KjStreamWatchHalf { end: watch },
-    ))
+    )
 }
 
-/// `whenWriteDisconnected` on a pumped stream, alongside its read and write directions.
-pub(crate) struct KjStreamWatchHalf {
+/// `whenWriteDisconnected` on a foreign kj stream, alongside its read and write directions.
+pub struct KjStreamWatchHalf {
     end: KjOwn<KjStreamWatchEnd>,
 }
 
@@ -1149,15 +1174,14 @@ impl KjStreamWriteHalf {
     }
 }
 
-#[expect(clippy::unnecessary_box_returns)]
 unsafe fn new_hyper_borrowed_http_connection(
     table: &HttpHeaderTable,
     service: std::pin::Pin<&mut HttpService>,
     stream: kj_rs::KjOwn<AsyncIoStream>,
     jsgify_websocket_errors: bool,
 ) -> Box<HyperConnection> {
-    // Pumped, never taken apart: the caller keeps using its stream afterwards.
-    let served = crate::serve::pump_kj_stream(stream);
+    // Driven directly, never taken apart: the caller keeps using its stream afterwards.
+    let io = crate::serve::serve_lent_kj_stream(stream);
     // SAFETY: forwarded caller contract, as in `new_hyper_http_connection` (plus the lent stream
     // outliving the connection).
     let (table, service) = unsafe {
@@ -1170,8 +1194,7 @@ unsafe fn new_hyper_borrowed_http_connection(
     Box::new(HyperConnection::new(
         table,
         service,
-        served.io,
-        served.pump,
+        io,
         jsgify_websocket_errors,
         None,
     ))
@@ -1183,7 +1206,7 @@ unsafe fn new_hyper_http_connection(
     stream: kj_rs::KjOwn<AsyncIoStream>,
     jsgify_websocket_errors: bool,
 ) -> kj::Result<Box<HyperConnection>> {
-    let (io, pump) = take_connection_socket(stream)?;
+    let io = take_connection_socket(stream)?;
     // SAFETY: forwarded caller contract (see the bridge declaration); `table` and `service`
     // outlive the returned connection. The service is held as a *shared* `*const` (vended as
     // `&HttpService`): kj services are shared-reentrant, so the (non-const) call is made on the C++
@@ -1199,7 +1222,6 @@ unsafe fn new_hyper_http_connection(
         table,
         service,
         io,
-        pump,
         jsgify_websocket_errors,
         None,
     )))
@@ -1218,7 +1240,7 @@ unsafe fn new_hyper_http_connection_tls(
     jsgify_websocket_errors: bool,
     tls_config: &HyperTlsServerConfig,
 ) -> kj::Result<Box<HyperConnection>> {
-    let (io, pump) = take_connection_socket(stream)?;
+    let io = take_connection_socket(stream)?;
     // SAFETY: forwarded caller contract (see the bridge declaration); `table` and `service`
     // outlive the returned connection. The service is held as a *shared* `*const` (vended as
     // `&HttpService`): kj services are shared-reentrant, so the (non-const) call is made on the C++
@@ -1234,7 +1256,6 @@ unsafe fn new_hyper_http_connection_tls(
         table,
         service,
         io,
-        pump,
         jsgify_websocket_errors,
         Some(tls_config.acceptor()),
     )))

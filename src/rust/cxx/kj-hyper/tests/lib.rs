@@ -23,37 +23,37 @@ mod ffi {
         // --- kj_hyper::serve (serve_helpers.rs)
 
         /// One echo server over a served kj stream: `start_serve_echo` picks the transport
-        /// path (unwrap fast path or duplex pump) via `kj_hyper::serve::serve_kj_stream` --
-        /// taking ownership of the stream -- and spawns the echo consumer on the loop runtime;
-        /// `drive()` runs the connection (the pump, on the pumped path) to completion --
-        /// dropping the `drive()` promise mid-connection is the abort-on-drop path, which
-        /// also destroys the owned stream.
+        /// path (native unwrap, or the kj stream driven directly) via
+        /// `kj_hyper::serve::serve_kj_stream` -- taking ownership of the stream -- and spawns the
+        /// echo consumer on the loop runtime; `drive()` runs the consumer to completion --
+        /// dropping the `drive()` promise mid-connection aborts it, which also destroys the
+        /// owned stream.
         type ServeEchoSession;
 
         fn start_serve_echo(stream: KjOwn<AsyncIoStream>) -> Result<Box<ServeEchoSession>>;
 
         /// Like `start_serve_echo`, but the consumer reads one message and then DROPS its
-        /// `ServeIo` without calling `shutdown()`: the pump must turn the dropped duplex end into
-        /// `shutdownWrite()` on the kj stream.
+        /// `ServeIo` without calling `shutdown()`: dropping it destroys the kj stream, which the
+        /// peer sees as EOF.
         fn start_serve_drop_consumer(stream: KjOwn<AsyncIoStream>)
         -> Result<Box<ServeEchoSession>>;
 
         /// Like `start_serve_drop_consumer`, but the consumer WRITES a large payload and then
-        /// drops its `ServeIo` without reading: with a kj peer that never reads, the pump's
-        /// outbound write blocks, and the consumer's drop must still end the pump.
+        /// drops its `ServeIo` without reading: with a kj peer that never reads, the kj write
+        /// blocks, and the consumer's drop must cancel it.
         fn start_serve_write_then_drop(
             stream: KjOwn<AsyncIoStream>,
         ) -> Result<Box<ServeEchoSession>>;
 
         /// Like `start_serve_echo`, but the echo consumer runs on a separate OS thread with its
-        /// own tokio runtime, driving a pumped stream's `ServeIo::Duplex` end off the KJ
-        /// event-loop thread (cross-thread waker path; TSAN target).
+        /// own tokio runtime: a kj stream polled off its event loop's thread, which must fail
+        /// without touching the stream.
         fn start_serve_echo_foreign_thread(
             stream: KjOwn<AsyncIoStream>,
         ) -> Result<Box<ServeEchoSession>>;
 
         /// Like `start_serve_echo`, but through the native-only `take_kj_socket` entry point
-        /// (unwrap path only): errors -- instead of pumping -- for foreign streams. The consumed
+        /// (unwrap path only): errors -- instead of driving them -- for foreign streams. The consumed
         /// stream is destroyed before this returns.
         fn start_take_socket_echo(stream: KjOwn<AsyncIoStream>) -> Result<Box<ServeEchoSession>>;
 
@@ -81,8 +81,7 @@ mod ffi {
         /// Runs the connection to completion (see the type's docs). May only be called once.
         async unsafe fn drive<'a>(self: &'a ServeEchoSession) -> Result<()>;
 
-        /// Resolves once the echo task has exited -- observing that dropping `drive()` EOFs
-        /// the pumped consumer.
+        /// Resolves once the echo task has exited, however it ended.
         async unsafe fn wait_echo_done<'a>(self: &'a ServeEchoSession);
     }
 
