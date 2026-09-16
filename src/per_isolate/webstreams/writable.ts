@@ -1838,6 +1838,10 @@ module.exports = {
       getWritableStreamStoredError(stream),
     closeQueuedOrInFlight: <W>(stream: WritableStream<W>) =>
       writableStreamCloseQueuedOrInFlight(stream),
+    // desiredSize <= 0 (the writer's ready promise is pending). Current only
+    // while the stream is writable and no close is queued or in flight.
+    hasBackpressure: <W>(stream: WritableStream<W>): boolean =>
+      writableStreamBackpressureOf(stream),
     // Whether a writer.write() issued NOW would be accepted (enqueued for a
     // sink step) rather than rejected by the state checks. The writer
     // machinery runs the strategy size() callback BEFORE those checks, so

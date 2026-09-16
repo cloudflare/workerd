@@ -78,6 +78,13 @@ export {
 } from 'flow-control';
 
 export {
+  abortWithBacklogKeepsUnwrittenChunks,
+  abortWithBacklogHighWaterMark,
+  sourceErrorWithBacklogWritesNoMore,
+  invalidChunkWithBacklogEndsPipe,
+} from 'shutdown-backlog';
+
+export {
   cancelPropagationThroughIdentity,
   cancelPropagationThroughJsTransform,
   fixedLengthStreamPipeExact,

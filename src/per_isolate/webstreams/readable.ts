@@ -710,6 +710,55 @@ function pendingClosureError(): TypeError {
   );
 }
 
+// Spec PullSteps for a chunk (or the end of the stream) already at the
+// consumer: dequeue, pull trigger, then drain-then-close, all synchronous.
+// Undefined when the read would have to wait.
+function readBufferedSync<R>(
+  reader: object,
+  stream: ReadableStream<R>,
+  consumer: StreamConsumerType<R>,
+  controller:
+    | ReadableStreamDefaultControllerType
+    | ReadableByteStreamControllerType
+    | NativeReadableStreamControllerType
+    | undefined
+): ReadableStreamReadResult<R> | undefined {
+  const result = consumer.tryReadSync(reader) as
+    ReadableStreamReadResult<R> | undefined;
+  if (result === undefined) return undefined;
+  if (controller !== undefined) {
+    controllerPullIfNeeded(controller);
+    controllerMaybeCloseStream(controller);
+  }
+  if (result.done) {
+    readableStreamClose(stream);
+  }
+  return result;
+}
+
+// The pipe's synchronous read: the next buffered chunk, taken whole as a
+// drain takes it (no autoAllocateChunkSize copy). Undefined when the read
+// would wait or fail; defaultReaderReadInternal handles those.
+function pipeReadBuffered<R>(
+  reader: object,
+  stream: ReadableStream<R>
+): ReadableStreamReadResult<R> | undefined {
+  if (
+    isReadableStreamPendingClosure(stream) ||
+    getReadableStreamGetState(stream) !== 'readable'
+  ) {
+    return undefined;
+  }
+  const consumer = getReadableStreamConsumer(stream);
+  if (consumer === undefined) return undefined;
+  return readBufferedSync<R>(
+    reader,
+    stream,
+    consumer,
+    getReadableStreamController(stream)
+  );
+}
+
 // The default-read core, shared by ReadableStreamDefaultReader.read() and
 // the async-iterator read path. Internal callers MUST use this rather than
 // the public read() — reader prototypes end up user-reachable, so internal
@@ -767,16 +816,13 @@ function defaultReaderReadInternal<R>(
     }
   }
   if (!useAsyncPath) {
-    const syncResult = consumer.tryReadSync(reader) as
-      ReadableStreamReadResult<R> | undefined;
+    const syncResult = readBufferedSync<R>(
+      reader,
+      stream,
+      consumer,
+      controller
+    );
     if (syncResult !== undefined) {
-      // Spec PullSteps ordering: pull trigger, then drain-then-close,
-      // then fulfill the read request — all synchronous.
-      if (controller !== undefined) controllerPullIfNeeded(controller);
-      if (controller !== undefined) controllerMaybeCloseStream(controller);
-      if (syncResult.done) {
-        readableStreamClose(stream);
-      }
       return PromiseResolve(syncResult);
     }
   }
@@ -2625,15 +2671,13 @@ class ReadableStreamDrainingReader<R> {
 }
 
 // The pipe (spec ReadableStreamPipeTo). Internal operations only on both
-// ends — locks are held for the duration. Backpressure is honored by
-// awaiting the writer's ready promise before every read; individual writes
-// are intentionally not awaited (the close path queues behind them, and
-// write failures surface through the destination's closed promise).
-//
-// The shutdown actions (abort/cancel/close) are started immediately rather
-// than after explicitly waiting for in-flight sink operations: the
-// writable state machine already serializes abort/close against in-flight
-// writes via its pendingAbortRequest / close-marker machinery.
+// ends — locks are held for the duration. Chunks are read only while the
+// destination desires them: once the writer's ready promise resolves, the
+// pump reads a chunk (waiting if none is buffered), then keeps moving
+// buffered chunks until desiredSize runs out. Writes are not awaited
+// individually (the close path queues behind them, and write failures
+// surface through the destination's closed promise). A shutdown waits for
+// the writes already made before running its action.
 function pipeToInternal<R>(
   source: ReadableStream<R>,
   destination: WritableStreamType<R>,
@@ -2663,10 +2707,8 @@ function pipeToInternal<R>(
     }
   }
 
-  // Lock both ends. The pipe uses the draining reader: every pump
-  // iteration moves ALL buffered chunks to the destination in one step
-  // (per-chunk promise overhead only when the source is empty).
-  const reader = new ReadableStreamDrainingReader<R>(source);
+  // Lock both ends.
+  const reader = new ReadableStreamDefaultReader<R>(source);
   const writer = writableInternals.acquireWriter(destination);
   setReadableStreamDisturbed(source);
 
@@ -2689,8 +2731,8 @@ function pipeToInternal<R>(
     }
   };
 
-  // Shared "last write" promise: the pump updates this before each batch
-  // of writes so that shutdownWithAction can wait for them to be acknowledged.
+  // Settles with the pipe's latest write, so that shutdownWithAction can
+  // wait for every write to be acknowledged.
   let lastWriteSettled: Promise<void> = PromiseResolve(
     undefined
   ) as Promise<void>;
@@ -2973,6 +3015,44 @@ function pipeToInternal<R>(
     }
   );
 
+  const writeChunk = (chunk: R): void => {
+    const writePromise = writableInternals.writerWrite(writer, chunk);
+    markPromiseHandled(writePromise);
+    // A rejection that leaves the destination WRITABLE is the internal
+    // transforms' non-fatal invalid-chunk rejection — fail the pipe with
+    // it (see onWriteRejectedNonFatally). Fatal rejections error the
+    // destination and are handled by the closed-promise observer instead.
+    // When a clean shutdown is already waiting for acknowledgment, record
+    // the failure for runAction's upgrade path.
+    PromisePrototypeThen(writePromise, undefined, (e: unknown) => {
+      if (writableInternals.getState(destination) !== 'writable') return;
+      if (shuttingDown) {
+        pendingNonFatalWriteFailure ??= { reason: e };
+        return;
+      }
+      onWriteRejectedNonFatally(e);
+      poke();
+    });
+    // Track the last write so shutdownWithAction can wait for it. The
+    // writable serializes writes, so when this settles all preceding
+    // writes have already settled.
+    lastWriteSettled = PromisePrototypeThen(
+      writePromise,
+      () => {},
+      () => {}
+    ) as Promise<void>;
+  };
+
+  // Spec: no reads while the writer's desiredSize is <= 0 or null. A write
+  // ends the batch synchronously when a size() or sink callback errors the
+  // destination or aborts the pipe; an asynchronous write rejection stops
+  // the pipe before the next batch.
+  const destinationDesiresChunks = (): boolean =>
+    !shuttingDown &&
+    writableInternals.getState(destination) === 'writable' &&
+    !writableInternals.closeQueuedOrInFlight(destination) &&
+    !writableInternals.hasBackpressure(destination);
+
   const pump = async (): Promise<void> => {
     while (!shuttingDown) {
       // Wait for backpressure to drop, but also react to shutdown triggers.
@@ -3019,53 +3099,31 @@ function pipeToInternal<R>(
         return;
       }
 
-      let result: DrainingReadResult<R>;
-      try {
-        result = await drainingReaderReadInternal<R>(reader, source);
-      } catch (e) {
-        if (!shuttingDown) onSourceErrored(e);
-        return;
+      // The first chunk of the batch: buffered, or the next to arrive.
+      let result = pipeReadBuffered<R>(reader, source);
+      if (result === undefined) {
+        try {
+          result = await defaultReaderReadInternal<R>(reader, source);
+        } catch (e) {
+          if (!shuttingDown) onSourceErrored(e);
+          return;
+        }
+        if (shuttingDown) return;
+        resetPoke();
       }
-      if (shuttingDown) return;
-      resetPoke();
 
-      // Move the whole batch; the destination FIFO preserves order and the
-      // close marker (if done) queues behind these writes.
-      const chunks = result.chunks;
-      for (let i = 0; i < chunks.length; i++) {
-        const writePromise = writableInternals.writerWrite(
-          writer,
-          chunks[i] as R
-        );
-        markPromiseHandled(writePromise);
-        // A rejection that leaves the destination WRITABLE is the
-        // internal transforms' non-fatal invalid-chunk rejection — fail
-        // the pipe with it (see onWriteRejectedNonFatally). Fatal
-        // rejections error the destination and are handled by the
-        // closed-promise observer instead. When a clean shutdown is
-        // already waiting for acknowledgment, record the failure for
-        // runAction's upgrade path.
-        PromisePrototypeThen(writePromise, undefined, (e: unknown) => {
-          if (writableInternals.getState(destination) !== 'writable') return;
-          if (shuttingDown) {
-            pendingNonFatalWriteFailure ??= { reason: e };
-            return;
-          }
-          onWriteRejectedNonFatally(e);
-          poke();
-        });
-        // Track the last write so shutdownWithAction can wait for it.
-        // The writable serializes writes, so when this settles all
-        // preceding writes have already settled.
-        lastWriteSettled = PromisePrototypeThen(
-          writePromise,
-          () => {},
-          () => {}
-        ) as Promise<void>;
-      }
-      if (result.done) {
-        onSourceDone();
-        return;
+      // Then buffered chunks, while the destination desires them. The
+      // destination FIFO preserves order and the close marker (if done)
+      // queues behind these writes.
+      for (;;) {
+        if (result.done) {
+          onSourceDone();
+          return;
+        }
+        writeChunk(result.value as R);
+        if (!destinationDesiresChunks()) break;
+        result = pipeReadBuffered<R>(reader, source);
+        if (result === undefined) break;
       }
     }
   };
