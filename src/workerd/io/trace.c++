@@ -76,8 +76,6 @@ SpanStatus::SpanStatus(rpc::SpanStatus::Reader reader) {
       }
       break;
     }
-    default:
-      break;
   }
 }
 
