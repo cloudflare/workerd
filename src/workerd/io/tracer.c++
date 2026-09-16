@@ -272,8 +272,7 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
     };
     tailStreamWriter->report(spanComponentContext, kj::mv(attr), span.endTime, spanTagsSize);
   }
-  tailStreamWriter->report(
-      spanComponentContext, tracing::SpanClose(EventOutcome::OK), span.endTime, 0);
+  tailStreamWriter->report(spanComponentContext, tracing::SpanClose(), span.endTime, 0);
 }
 
 void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) {
