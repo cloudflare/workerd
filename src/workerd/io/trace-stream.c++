@@ -453,9 +453,6 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanStatus& status, StringCache& cache) {
     case SpanStatusCode::ERROR:
       obj.set(js, CODE_STR, cache.get(js, ERROR_STR));
       break;
-    default:
-      obj.set(js, CODE_STR, cache.get(js, UNSET_STR));
-      break;
   }
   KJ_IF_SOME(message, status.message) {
     obj.set(js, MESSAGE_STR, js.str(message));
