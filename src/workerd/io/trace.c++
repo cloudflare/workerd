@@ -92,8 +92,7 @@ SpanStatus SpanStatus::clone() const {
 }
 
 size_t SpanStatus::size() const {
-  return sizeof(code) +
-      message.map([](const kj::ConstString& value) { return value.size(); }).orDefault(0);
+  return message.map([](const kj::ConstString& value) { return value.size(); }).orDefault(0);
 }
 
 // Reference: https://github.com/jaegertracing/jaeger/blob/e46f8737/model/ids.go#L58
