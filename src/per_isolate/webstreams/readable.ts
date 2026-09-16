@@ -3368,10 +3368,14 @@ class ReadableStream<R> {
         // and usable after the pipe settles (e.g. the socket-concatenation
         // pattern: body1.pipeTo(sock.writable, {preventClose: true})
         // followed by body2.pipeTo(sock.writable)), which extraction
-        // cannot honor -- and (b) both endpoints in their normal flowing
+        // cannot honor -- (b) both endpoints in their normal flowing
         // states, so pipes involving closed/errored endpoints reject with
-        // the spec-mandated stored errors. The JS pump handles all of
-        // those cases (it releases both locks in its finalize).
+        // the spec-mandated stored errors, and (c) no write queued or in
+        // flight on the destination, since extraction would move the
+        // native sink out from under it (e.g. a header written without
+        // awaiting it, then the writer released). The JS pump handles all
+        // of those cases (its writes queue behind the destination's
+        // pending ones, and it releases both locks in its finalize).
         // TODO(streams-ts): revisit extending the fast path to the
         // prevent* options (e.g. reversible extraction) so those pipes can
         // also run entirely at the C++ layer.
@@ -3397,7 +3401,11 @@ class ReadableStream<R> {
           // Closing must be propagated backward (and extraction would move
           // the native sink out from under its in-flight end()): a
           // close-queued destination takes the JS pump, which rejects it.
-          !writableInternals.closeQueuedOrInFlight(destination)
+          !writableInternals.closeQueuedOrInFlight(destination) &&
+          // A write queued before the controller started would reach the
+          // extracted sink and be dropped, and pipeFrom() refuses a sink
+          // with a write in flight.
+          !writableInternals.writeQueuedOrInFlight(destination)
         ) {
           // Captured-call discipline: Function.prototype.call is patchable,
           // so re-bind both extractors and the hook through uncurryThis
