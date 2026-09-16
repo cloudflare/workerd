@@ -19,6 +19,32 @@ export const test = {
     // Recorded streaming tail worker events, in insertion order.
     let received = Array.from(spans.values());
 
+    // Calls using the must-not-call key produce spans even though validation rejects them before
+    // reaching the backend. These spans are validated here because they are not included in the
+    // `expected` array below.
+    const validationSpans = received.filter(
+      (span) => span['cloudflare.r2.request.key'] === 'must-not-call'
+    );
+    assert.deepStrictEqual(
+      validationSpans.map((span) => span.name),
+      [
+        ...Array(14).fill('r2_get'),
+        ...Array(4).fill('r2_put'),
+        'r2_createMultipartUpload',
+        'r2_uploadPart',
+        'r2_completeMultipartUpload',
+      ]
+    );
+    for (const span of validationSpans) {
+      assert.strictEqual(span['cloudflare.binding.type'], 'r2');
+      assert.strictEqual(span['cloudflare.binding.name'], 'BUCKET');
+      assert.strictEqual(span['cloudflare.r2.bucket'], 'r2-test');
+      assert.strictEqual(span.closed, true);
+    }
+    received = received.filter(
+      (span) => span['cloudflare.r2.request.key'] !== 'must-not-call'
+    );
+
     // spans emitted by r2-test.js in execution order
     let expected = [
       {
