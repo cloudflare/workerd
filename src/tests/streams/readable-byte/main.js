@@ -122,6 +122,9 @@ export {
   relockRespondWithNewView,
   relockAutoAllocateRespond,
   relockAutoAllocateEnqueue,
+  relockTwoPendingRespond,
+  relockAutoAllocateTwoPendingRespond,
+  relockPartialHeadThenEnqueue,
   relockRespondOverflowSecondView,
 } from 'release-relock';
 
@@ -142,6 +145,8 @@ export {
   teeByteStreamMixedReaders,
   teeCancelComposite,
   teeErrorPropagatesToBothBranches,
+  teeReleasedPendingRead,
+  teePipeAbortReleasesPendingRead,
 } from 'tee';
 
 export {

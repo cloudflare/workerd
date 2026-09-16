@@ -681,8 +681,8 @@ class ReadableStreamReaderBase<R> {
         consumer.cancelReadsForReader(reader, releaseError);
       }
       // Notify the controller that the reader was released. For byte
-      // controllers, the pull-into descriptors STAY (readerType → 'none');
-      // the byobRequest is NOT invalidated per spec.
+      // controllers, the head pull-into descriptor STAYS (readerType →
+      // 'none'); the byobRequest is NOT invalidated per spec.
       const controller = getReadableStreamController(stream);
       if (controller !== undefined) {
         controllerOnReaderRelease(controller);
@@ -1882,7 +1882,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     const prevOnReaderRelease = controllerOnReaderRelease;
     controllerOnReaderRelease = (controller) => {
       if (#queue in controller) {
-        // Spec: releaseLock does NOT invalidate the byobRequest. The
+        // Spec: releaseLock does NOT invalidate the byobRequest. The head
         // pull-into descriptor stays in pendingPullIntos with readerType
         // set to 'none'; a future respond() will enqueue the data into the
         // queue for the next reader instead of resolving a read promise.

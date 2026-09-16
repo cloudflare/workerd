@@ -1021,6 +1021,13 @@ class ByteStreamCursor
         break;
       }
       const head = this.#pendingPullIntos[0] as PullIntoDescriptor;
+      if (head.readerType === 'none') {
+        // A released reader's head never takes new data. Single-cursor
+        // enqueue()/respond() remove it before notifying; tee branches
+        // reach here.
+        ArrayPrototypeShift(this.#pendingPullIntos);
+        continue;
+      }
       this.#fillFromQueue(head);
       if (head.bytesFilled < head.minimumFill) break; // need more data
       ArrayPrototypeShift(this.#pendingPullIntos);
@@ -1321,18 +1328,21 @@ class ByteStreamCursor
 
   // Reject pull-intos submitted by a specific reader (lock release).
   override cancelReadsForReader(reader: object, reason: unknown): void {
-    // Spec: on releaseLock, the reader's readIntoRequests are rejected, but
-    // the controller's pendingPullIntos STAY. Descriptors whose reader is
-    // being released have their readerType set to 'none' — respond() will
-    // then enqueue the filled data instead of resolving a read promise.
-    // The byobRequest is NOT invalidated (it still points at the head
-    // descriptor's buffer).
-    for (let i = 0; i < this.#pendingPullIntos.length; i++) {
-      const desc = this.#pendingPullIntos[i] as PullIntoDescriptor;
+    // Spec ReleaseSteps: the reader's reads reject and pendingPullIntos
+    // shrinks to its head, marked 'none'; respond()/enqueue() then move the
+    // head's filled bytes to the queue. The byobRequest (over the head) is
+    // NOT invalidated.
+    const pending = this.#pendingPullIntos;
+    for (let i = 0; i < pending.length; i++) {
+      const desc = pending[i] as PullIntoDescriptor;
       if (desc.reader === reader) {
         desc.reject(reason);
-        desc.readerType = 'none';
       }
+    }
+    if (pending.length > 0) {
+      const head = pending[0] as PullIntoDescriptor;
+      head.readerType = 'none';
+      this.#pendingPullIntos = [head];
     }
     super.cancelReadsForReader(reader, reason);
   }

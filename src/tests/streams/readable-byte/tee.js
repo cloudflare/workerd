@@ -3,10 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // tee() on byte streams: per-branch chunk cloning, mixed reader types,
-// cancel composition, and error propagation.
+// cancel composition, error propagation, and released pending reads.
 
 import { strictEqual, ok, deepStrictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
+import { drainBytes, rejectionOf } from 'helpers';
 
 // Chunks are CLONED per branch: neither branch's chunk shares a buffer
 // with the other or with the (detached) original, and mutation does not
@@ -150,5 +151,80 @@ export const teeErrorPropagatesToBothBranches = {
     await p2.catch((e) => (e2 = e));
     strictEqual(e1, err);
     strictEqual(e2, err);
+  },
+};
+
+// A branch reader released with a pending read(view): the branch's next
+// reader gets every later byte, as does the sibling (parity).
+export const teeReleasedPendingRead = {
+  async test() {
+    let controller;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        controller = c;
+      },
+    });
+    const [a, b] = rs.tee();
+    const r1 = a.getReader({ mode: 'byob' });
+    const read1 = r1.read(new Uint8Array(4));
+    await scheduler.wait(5);
+    r1.releaseLock();
+    await rejectionOf(read1);
+    const r2 = a.getReader({ mode: 'byob' });
+    const read2 = r2.read(new Uint8Array(4));
+    controller.enqueue(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
+    controller.close();
+    deepStrictEqual([...(await read2).value], [1, 2, 3, 4]);
+    deepStrictEqual(
+      [...(await r2.read(new Uint8Array(8))).value],
+      [5, 6, 7, 8]
+    );
+    deepStrictEqual([...(await drainBytes(b))], [1, 2, 3, 4, 5, 6, 7, 8]);
+  },
+};
+
+// DIVERGENCE: pipeTo() from an autoAllocateChunkSize branch, aborted with
+// preventCancel while its read is pending. TypeScript settles the pipe,
+// and the branch's next reader receives the next chunk. C++ keeps the
+// pipe pending until a chunk arrives, which the aborted pipe's read then
+// consumes and drops; asserted up to the pending pipe (bounded).
+export const teePipeAbortReleasesPendingRead = {
+  async test() {
+    let controller;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      autoAllocateChunkSize: 8,
+      start(c) {
+        controller = c;
+      },
+    });
+    const [a, b] = rs.tee();
+    const ac = new AbortController();
+    const pipe = a.pipeTo(new WritableStream(), {
+      signal: ac.signal,
+      preventCancel: true,
+    });
+    await scheduler.wait(5);
+    ac.abort(new Error('stop'));
+    const outcome = await Promise.race([
+      pipe.then(
+        () => 'fulfilled',
+        () => 'rejected'
+      ),
+      scheduler.wait(50).then(() => 'pending'),
+    ]);
+    if (!usingTsImpl) {
+      strictEqual(outcome, 'pending');
+      controller.error(new Error('cleanup'));
+      await pipe.catch(() => {});
+      return;
+    }
+    strictEqual(outcome, 'rejected');
+    const read = a.getReader().read();
+    controller.enqueue(new Uint8Array([1, 2, 3]));
+    controller.close();
+    deepStrictEqual([...(await read).value], [1, 2, 3]);
+    deepStrictEqual([...(await drainBytes(b))], [1, 2, 3]);
   },
 };
