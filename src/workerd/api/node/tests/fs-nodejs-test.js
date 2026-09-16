@@ -17,6 +17,10 @@ import { Readable } from 'node:stream';
 import {
   existsSync,
   statSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  lstatSync,
   openSync,
   closeSync,
   fstatSync,
@@ -1206,6 +1210,76 @@ export const copyAndRenameSyncTest = {
     ok(!existsSync('/tmp/test.txt'));
     ok(existsSync('/tmp/test3.txt'));
     strictEqual(readFileSync('/tmp/test3.txt').toString(), 'Hello World 2');
+  },
+};
+
+export const renameReplaceTest = {
+  test() {
+    // Renaming onto an existing file replaces it.
+    writeFileSync('/tmp/src.txt', 'new');
+    writeFileSync('/tmp/dest.txt', 'old');
+    renameSync('/tmp/src.txt', '/tmp/dest.txt');
+    ok(!existsSync('/tmp/src.txt'));
+    strictEqual(readFileSync('/tmp/dest.txt', 'utf8'), 'new');
+
+    // copyFile without COPYFILE_EXCL overwrites too.
+    writeFileSync('/tmp/src.txt', 'newer');
+    copyFileSync('/tmp/src.txt', '/tmp/dest.txt');
+    strictEqual(readFileSync('/tmp/dest.txt', 'utf8'), 'newer');
+    strictEqual(readFileSync('/tmp/src.txt', 'utf8'), 'newer');
+
+    // Renaming onto itself is a no-op, including via URL aliases that differ
+    // only in search or fragment.
+    renameSync('/tmp/dest.txt', '/tmp/dest.txt');
+    strictEqual(readFileSync('/tmp/dest.txt', 'utf8'), 'newer');
+    renameSync(
+      new URL('file:///tmp/dest.txt#one'),
+      new URL('file:///tmp/dest.txt?two')
+    );
+    strictEqual(readFileSync('/tmp/dest.txt', 'utf8'), 'newer');
+
+    // Renaming onto an existing symlink replaces the link, not its target.
+    symlinkSync('/tmp/dest.txt', '/tmp/link');
+    renameSync('/tmp/src.txt', '/tmp/link');
+    ok(lstatSync('/tmp/link').isFile());
+    strictEqual(readFileSync('/tmp/dest.txt', 'utf8'), 'newer');
+    unlinkSync('/tmp/link');
+
+    // A file cannot replace a directory, and a directory cannot replace a file.
+    mkdirSync('/tmp/dir');
+    throws(() => renameSync('/tmp/dest.txt', '/tmp/dir'), { code: 'EISDIR' });
+    throws(() => renameSync('/tmp/dir', '/tmp/dest.txt'), { code: 'ENOTDIR' });
+    throws(() => copyFileSync('/tmp/dest.txt', '/tmp/dir'), { code: 'EISDIR' });
+    ok(existsSync('/tmp/dest.txt'));
+    ok(statSync('/tmp/dir').isDirectory());
+
+    // A directory replaces an empty directory but not a populated one.
+    mkdirSync('/tmp/dir2');
+    writeFileSync('/tmp/dir/a.txt', 'a');
+    renameSync('/tmp/dir', '/tmp/dir2');
+    ok(!existsSync('/tmp/dir'));
+    strictEqual(readFileSync('/tmp/dir2/a.txt', 'utf8'), 'a');
+    mkdirSync('/tmp/dir');
+    throws(() => renameSync('/tmp/dir', '/tmp/dir2'), { code: 'ENOTEMPTY' });
+    ok(existsSync('/tmp/dir'));
+
+    // A file over a populated directory is EISDIR, not ENOTEMPTY, and a
+    // missing source is ENOENT regardless of the destination.
+    throws(() => renameSync('/tmp/dest.txt', '/tmp/dir2'), { code: 'EISDIR' });
+    throws(() => renameSync('/tmp/missing', '/tmp/dir2'), { code: 'ENOENT' });
+    throws(() => copyFileSync('/tmp/missing', '/tmp/dir2'), { code: 'ENOENT' });
+
+    // A directory cannot be moved into itself or a descendant.
+    mkdirSync('/tmp/dir/sub');
+    throws(() => renameSync('/tmp/dir', '/tmp/dir/sub'), { code: 'EINVAL' });
+    throws(() => renameSync('/tmp/dir', '/tmp/dir/sub/x'), { code: 'EINVAL' });
+    throws(() => renameSync('/tmp/dir/', '/tmp/dir/x'), { code: 'EINVAL' });
+    ok(statSync('/tmp/dir/sub').isDirectory());
+    strictEqual(readdirSync('/tmp/dir').length, 1);
+
+    rmSync('/tmp/dir', { recursive: true });
+    rmSync('/tmp/dir2', { recursive: true });
+    unlinkSync('/tmp/dest.txt');
   },
 };
 
