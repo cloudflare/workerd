@@ -125,9 +125,6 @@ namespace workerd::util {
   V(COMPRESSION_RS)                                                                                \
   /* Enables per-call JSRPC tracing, trace-context propagation, and related Fetcher spans. */      \
   V(JSRPC_TRACING)                                                                                 \
-  /* Selects the redesigned memory cache implementation. The legacy implementation remains         \
-     available for rollback while this gate is rolled out. */                                      \
-  V(MEMORY_CACHE_V2)                                                                               \
   /* Enable the JS-observable synchronous tryReadSync/tryWriteSync fast paths: the stream          \
      controllers' read/write paths (reader.read() / writer.write() promises settle without an      \
      event-loop round trip) and readAll()'s read loop. The C++ pump loops stay ungated: pumpTo()   \
