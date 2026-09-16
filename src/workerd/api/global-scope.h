@@ -1034,7 +1034,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(FixedLengthStream);
     JSG_NESTED_TYPE(IdentityTransformStream);
     JSG_NESTED_TYPE(HTMLRewriter);
-    JSG_NESTED_TYPE(Datagram);
+    if (flags.getWorkerdExperimental()) {
+      JSG_NESTED_TYPE(Datagram);
+    }
 
     // Performance API
     if (flags.getEnableGlobalPerformanceClasses() || flags.getEnableNodeJsPerfHooksModule()) {

@@ -264,15 +264,17 @@ class Socket: public jsg::Object {
       jsg::Deserializer& deserializer,
       const jsg::TypeHandler<jsg::Ref<Socket>>& socketHandler);
 
-  JSG_RESOURCE_TYPE(Socket) {
+  JSG_RESOURCE_TYPE(Socket, CompatibilityFlags::Reader flags) {
     JSG_READONLY_PROTOTYPE_PROPERTY(readable, getReadable);
     JSG_READONLY_PROTOTYPE_PROPERTY(writable, getWritable);
     JSG_READONLY_PROTOTYPE_PROPERTY(closed, getClosed);
     JSG_READONLY_PROTOTYPE_PROPERTY(opened, getOpened);
     JSG_READONLY_PROTOTYPE_PROPERTY(upgraded, getUpgraded);
     JSG_READONLY_PROTOTYPE_PROPERTY(secureTransport, getSecureTransport);
-    // non-standard extension, not part of the proposed sockets spec
-    JSG_READONLY_PROTOTYPE_PROPERTY(protocol, getProtocol);
+    if (flags.getWorkerdExperimental()) {
+      // non-standard extension, not part of the proposed sockets spec
+      JSG_READONLY_PROTOTYPE_PROPERTY(protocol, getProtocol);
+    }
     JSG_METHOD(close);
     JSG_METHOD(startTls);
 

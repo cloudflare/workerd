@@ -113,6 +113,36 @@ class AsyncObservingDatagramChannel final: public DatagramChannel {
   AsyncSendState& state;
 };
 
+bool socketHasProtocolProperty(CompatibilityFlags::Reader flags) {
+  AsyncSendState state;
+  TestFixture fixture(TestFixture::SetupParams{.featureFlags = flags});
+  bool result = false;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto socket = setupDatagramSocket(
+        env.js, kj::heap<AsyncObservingDatagramChannel>(state), kj::none, kj::none);
+    auto& handler = KJ_ASSERT_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<Socket>>());
+    auto object = KJ_ASSERT_NONNULL(
+        jsg::JsValue(handler.wrap(env.js, kj::mv(socket))).tryCast<jsg::JsObject>());
+    result = object.has(env.js, "protocol"_kj);
+  });
+
+  return result;
+}
+
+KJ_TEST("Socket protocol property requires experimental flag") {
+  capnp::MallocMessageBuilder disabledFlagsMessage;
+  auto disabledFlags = disabledFlagsMessage.initRoot<CompatibilityFlags>();
+  disabledFlags.setStreamsJavaScriptControllers(true);
+  KJ_EXPECT(!socketHasProtocolProperty(disabledFlags.asReader()));
+
+  capnp::MallocMessageBuilder enabledFlagsMessage;
+  auto enabledFlags = enabledFlagsMessage.initRoot<CompatibilityFlags>();
+  enabledFlags.setStreamsJavaScriptControllers(true);
+  enabledFlags.setWorkerdExperimental(true);
+  KJ_EXPECT(socketHasProtocolProperty(enabledFlags.asReader()));
+}
+
 KJ_TEST("UDP writable stream snapshots bytes before asynchronous send") {
   capnp::MallocMessageBuilder flagsMessage;
   auto flags = flagsMessage.initRoot<CompatibilityFlags>();
