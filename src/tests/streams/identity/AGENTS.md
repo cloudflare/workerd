@@ -122,6 +122,10 @@ readable's queue, before any read occurs.)
   first, and settles both `closed` promises.
 - `writer.abort(reason)` rejects pending and subsequent reads and both
   `closed` promises. Reason identity across the boundary diverges (ledger).
+- `abort()` never waits for a read: a write parked for want of a reader
+  rejects with the reason, as do the writes and close queued behind it,
+  and the abort fulfills. What later reads reject with diverges (ledger
+  #21).
 - `readable.cancel(reason)` rejects a pending write and a pending close;
   subsequent writes reject. The canceling reader's own later reads resolve
   `done`, and its `closed` promise resolves; how a read still pending at
@@ -230,6 +234,7 @@ pattern; a change to either side fails its cell.
 | 18 | `readAtLeast` validation | `TypeError` always: negative minimums visibly sign-extend to 18446744073709551615 before the element-count check rejects them; values ≥ 2^31 rejected at the jsg int boundary; in-range minimums exceeding the buffer rejected on the element count | `TypeError` for a negative minimum, `RangeError` for any minimum exceeding the view | `readAtLeastValidation` |
 | 19 | Non-Error cancel reasons | always surfaces an Error: strings become the message, `undefined` becomes "Stream was cancelled.", standard error types preserved, custom subclass names preserved via the pinned `enhanced_error_serialization` | the original reason VALUE, untouched — same instance, same string, even `undefined` itself | `cancelReasonTypeSurfacing` |
 | 20 | Read pending at the reader's own `cancel()` | rejects with the re-created cancel reason ("Stream was cancelled." for a bare cancel); the rejection is delivered through a promise adopted a tick later, which the unhandled-rejection tracker predating `unhandled_rejection_after_microtask_checkpoint` reports as unhandled before the read's handler runs (pinned where it surfaces, in `src/tests/node/http-server`'s legacy cell) | resolves `{ value: undefined, done: true }` (spec) | `cancelSettlesPendingRead` |
+| 21 | Reads after an abort that cleared a parked write | reject `Error` "Network connection lost.": cancelling the parked sink write puts the transform into its disconnection error before the abort reason arrives | reject with the original abort reason, as after any abort | `abortParkedWriteErrorsReadable` |
 
 ## Assertion catalogue
 
@@ -245,7 +250,7 @@ pattern; a change to either side fails its cell.
 | `byob.js` | BYOB reader support; partial fills across reads with write completion on full consumption; lying destination extents (at call and after enqueue) with sentinel overwrite guards; read-call validation (zero-length view, non-view, missing argument); input buffer detached by read with non-detachable (SAB-backed) destinations rejected; repeated EOF zero-length views with preserved buffers |
 | `backpressure.js` | writes and close queue unboundedly with settlement on consumption; advisory overfill (negative `desiredSize`); default HWM 1 with divergent accounting (ledger #17); explicit HWM as initial `desiredSize` (negative-zero HWM normalized to +0); byte-level tracking incl. in-flight bytes; string accounting (ledger #7); `ready` replacement and recovery |
 | `close-propagation.js` | pending read resolves done; post-close reads done; buffered data drains before done; `closed` promises settle; writes after a queued close reject (message per impl) without disturbing the close or delivered bytes |
-| `abort-propagation.js` | pending/subsequent reads and both `closed` promises reject (identity per ledger #8); modern abort clears a pending write, rejecting it with the abort reason (undefined or original instance); later writes (ledger #9) |
+| `abort-propagation.js` | pending/subsequent reads and both `closed` promises reject (identity per ledger #8); modern abort clears a pending write, rejecting it with the abort reason (undefined or original instance); abort of a write parked in the sink settles without a read (ITS and FLS, after an earlier consumed write, through the stream with the writer released), rejecting the write, the writes and close queued behind it, and `writer.closed` with the original reason; reads afterwards (ledger #21); later writes (ledger #9) |
 | `cancel-propagation.js` | pending write/close reject (ledger #8, #10); canceling reader's later reads resolve done, its `closed` resolves; a read pending at the cancel settles per ledger #20; in C++, cancellation of a pending `pipeTo()` sink write establishes the disconnection error before a later readable cancel reason |
 | `fixed-length.js` | exact-length delivery (one and two chunks); `FLS(0)`; HWM capping incl. bigint; capped-HWM data flow |
 | `fixed-length-errors.js` | over/underwrite and close-without-write error the stream with the documented messages (types/surfacing per ledger #11); abort skips the underwrite check |

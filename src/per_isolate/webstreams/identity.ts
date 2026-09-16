@@ -35,7 +35,9 @@
 // reader.read() call), which clears backpressure. This means
 // writer.write() will NOT resolve until a corresponding reader.read()
 // is issued — callers must not `await writer.write()` before starting
-// a read, or the result is a deadlock.
+// a read, or the result is a deadlock. Aborting the writable or
+// cancelling the readable also wakes the blocked write, which then
+// rejects.
 //
 // Correct usage:
 //   const readPromise = reader.read();  // triggers pull → clears bp
@@ -279,14 +281,20 @@ class IdentityTransformStream {
     this.#backpressure = backpressure;
   }
 
+  // Wakes a write parked in the rendezvous. The write re-checks the
+  // writable's state and throws if the stream is erroring or errored.
+  #unblockWrite(): void {
+    if (this.#backpressure) {
+      this.#setBackpressure(false);
+    }
+  }
+
   #errorWritableAndUnblockWrite(reason: unknown): void {
     const wc = this.#writableController;
     if (wc !== undefined) {
       writableControllerError(wc, reason);
     }
-    if (this.#backpressure) {
-      this.#setBackpressure(false);
-    }
+    this.#unblockWrite();
   }
 
   constructor(writableStrategy?: QueuingStrategy<unknown>);
@@ -438,7 +446,9 @@ class IdentityTransformStream {
       }
 
       // RENDEZVOUS: block here until a reader.read() triggers pull,
-      // which sets #backpressure = false. See file-level comment.
+      // which sets #backpressure = false, or until the writable is
+      // aborted or the readable cancelled, which wake the write so that
+      // it throws. See file-level comment.
       while (this.#backpressure) {
         await this.#backpressureChange.promise;
         const state = writableInternals.getState(this.#writable);
@@ -488,6 +498,14 @@ class IdentityTransformStream {
       },
       writableStrategy
     );
+    // abort() runs the abort steps only after the in-flight write settles,
+    // but a write parked in the rendezvous waits for a read that may never
+    // come. The hook runs at the start of abort() and wakes the write; by
+    // the time it resumes, the stream is erroring, so the write rejects
+    // with the abort reason and the abort steps run.
+    writableInternals.setAbortHook(this.#writable, () => {
+      this.#unblockWrite();
+    });
 
     // --- Readable side (byte stream, BYOB capable) ---
     // RENDEZVOUS: pull is called when a reader.read() needs data.

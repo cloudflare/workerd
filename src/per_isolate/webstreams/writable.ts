@@ -275,6 +275,10 @@ let setWritableStreamReadyHook: <W>(
   hook: (() => void) | undefined
 ) => void;
 let writableStreamCallReadyHook: <W>(stream: WritableStream<W>) => void;
+let setWritableStreamAbortHook: <W>(
+  stream: WritableStream<W>,
+  hook: (() => void) | undefined
+) => void;
 // Internal writer operations: the pipe implementation must never dispatch
 // through the public prototype methods (user-interceptable once the classes
 // are installed on the global).
@@ -321,6 +325,8 @@ class WritableStream<W = unknown> {
   #backpressure: boolean = false;
   // A pipe's wake-up (internalsForPipe.setReadyHook).
   #readyHook: (() => void) | undefined;
+  // An internal sink's wake-up on abort (internalsForPipe.setAbortHook).
+  #abortHook?: (() => void) | undefined;
   // The Node.js interop closed-promise (see kIsClosedPromise), created on
   // first request and settled when the stream reaches 'closed' or
   // 'errored'.
@@ -377,6 +383,9 @@ class WritableStream<W = unknown> {
     writableStreamCallReadyHook = (stream) => {
       const hook = stream.#readyHook;
       if (hook !== undefined && !stream.#backpressure) hook();
+    };
+    setWritableStreamAbortHook = (stream, hook) => {
+      stream.#abortHook = hook;
     };
     setWritableStreamWriter = (stream, writer) => {
       stream.#writer = writer;
@@ -487,6 +496,14 @@ class WritableStream<W = unknown> {
         // The controller's AbortSignal fires as soon as an abort is
         // requested, letting in-flight sink writes cancel their work.
         controllerSignalAbort(controller, reason);
+      }
+      // An internal sink's counterpart to an 'abort' listener on the
+      // controller's signal, without an event listener's per-stream cost.
+      // Like the signal, it fires once.
+      const abortHook = stream.#abortHook;
+      if (abortHook !== undefined) {
+        stream.#abortHook = undefined;
+        abortHook();
       }
       // signalAbort dispatches 'abort' events SYNCHRONOUSLY — the sink may
       // have registered listeners on controller.signal, and that user code
@@ -1883,6 +1900,14 @@ module.exports = {
       stream: WritableStream<W>,
       hook: (() => void) | undefined
     ): void => setWritableStreamReadyHook(stream, hook),
+    // An internal sink's wake-up for abort: called synchronously, once, by
+    // the first abort requested on a stream that is not closed or errored,
+    // right after the controller's signal fires and before the abort moves
+    // the stream to erroring. undefined clears it.
+    setAbortHook: <W>(
+      stream: WritableStream<W>,
+      hook: (() => void) | undefined
+    ): void => setWritableStreamAbortHook(stream, hook),
     // Whether a writer.write() issued NOW would be accepted (enqueued for a
     // sink step) rather than rejected by the state checks. The writer
     // machinery runs the strategy size() callback BEFORE those checks, so

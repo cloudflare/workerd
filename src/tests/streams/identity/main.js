@@ -95,6 +95,9 @@ export {
   abortRejectsPendingRead,
   abortRejectsSubsequentReads,
   abortClearsPendingWrite,
+  abortClearsParkedWrite,
+  abortClearsParkedWriteAndQueue,
+  abortParkedWriteErrorsReadable,
   abortRejectsSubsequentWrites,
 } from 'abort-propagation';
 
