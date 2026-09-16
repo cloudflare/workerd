@@ -64,6 +64,7 @@ void addBigEndianBytes(kj::Vector<byte>& out, uint64_t v) {
 SpanStatus::SpanStatus(rpc::SpanStatus::Reader reader) {
   switch (reader.getCode()) {
     case SpanStatusCode::UNSET:
+      code = SpanStatusCode::UNSET;
       break;
     case SpanStatusCode::OK:
       code = SpanStatusCode::OK;
