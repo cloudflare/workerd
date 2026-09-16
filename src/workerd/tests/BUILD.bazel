@@ -40,7 +40,9 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/server:workerd-api",
         "//src/workerd/util:autogate",
-        "@capnp-cpp//src/kj:kj-async",
+        "//src/workerd/util:setup-async-io",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 

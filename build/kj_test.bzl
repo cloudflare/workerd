@@ -9,6 +9,7 @@ def kj_test(
         tags = [],
         size = "medium",
         target_compatible_with = [],
+        local_defines = [],
         **kwargs):
     test_name = src.removesuffix(".c++")
     binary_name = test_name + "_binary"
@@ -20,6 +21,7 @@ def kj_test(
             "@capnp-cpp//src/kj:kj-test",
             "//build/deps:linkopts_default",
         ] + deps,
+        local_defines = local_defines,
         linkstatic = CC_TEST_LINKSTATIC,
         data = data,
         # Tag with cpu:4 since this target depends on linkopts_default.

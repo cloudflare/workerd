@@ -41,3 +41,12 @@ Shared utility library: data structures, SQLite wrapper, feature gating, logging
 - **SQLite**: `SQLITE_MISUSE` always throws; virtual tables disallowed (except FTS5 and RTREE); `ATTACH`/`DETACH` forbidden; callbacks must not write
 - **ThreadScopes**: thread-local state crossing module boundaries — acknowledged hack, do not proliferate
 - **RingBuffer**: moves on grow invalidating references; iterators invalidated on push/pop; intentionally not thread-safe.
+
+## `setup-async-io` (the `kj::setupAsyncIo()` seam)
+
+`setup-async-io-tokio.c++` defines `kj::setupAsyncIo()` and an inert `kj::UnixEventPort` for
+`--//:io_backend=rust`; in the cxx config it compiles to an empty TU and the dependency falls
+through to kj's own. It is sound only while `kj-async-os` is absent from the rust link -- see the
+I/O backend section in `src/workerd/server/AGENTS.md` for the rule (no `:kj-async` umbrella deps)
+and the gates that enforce it. Only this library, `//src/workerd/server:cli-io-backend` and
+`setup-async-io-test` read `WORKERD_RUST_IO_BACKEND_RUST`.
