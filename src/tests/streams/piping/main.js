@@ -85,6 +85,12 @@ export {
 } from 'shutdown-backlog';
 
 export {
+  lateChunkDuringShutdownWait,
+  lateChunkInAbortTurnIsLost,
+  lateChunkAfterIdleAbort,
+} from 'shutdown-pending-read';
+
+export {
   cancelPropagationThroughIdentity,
   cancelPropagationThroughJsTransform,
   fixedLengthStreamPipeExact,

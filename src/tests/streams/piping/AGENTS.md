@@ -31,6 +31,8 @@ a deliberate defect pin, not a hole).
 | 11 | abort with a backlog, destination hwm 3 | reads and writes one chunk at a time: only the in-flight write completes | reads while desiredSize is positive; the abort waits for the three writes made (spec) | `abortWithBacklogHighWaterMark` |
 | 12 | source queue after a non-fatal write rejection (identity, preventCancel) | the chunk after the invalid one was already read and is dropped | every chunk after the invalid one stays readable | `invalidChunkWithBacklogEndsPipe` |
 | 13 | the source's pull aborts the pipe while the pipe reads a chunk | chunk dropped; the destination's pending read rejects | chunk written before the destination is aborted (spec: read chunks are written) | `pipeToJsToNativeCancel` |
+| 14 | a chunk reaches the source while an abort waits for an in-flight write (destination hwm 2, preventCancel) | not read while the write is in flight: the chunk stays in the source | the pipe's pending read takes it; it is written, and the pipe settles once that write has (spec) | `lateChunkDuringShutdownWait` |
+| 15 | abort with nothing to write while the pipe waits on a read (preventCancel) | the pipe and its read stay pending and the source stays locked; the next chunk completes the read, which drops it, and the pipe then rejects | the pipe settles and releases the source; a later chunk stays readable (spec) | `lateChunkAfterIdleAbort` |
 
 Parity worth noting (probed, pinned): the whole error-propagation-
 forward core matrix (starts-errored rejection/hook IDENTITY on both
@@ -48,7 +50,9 @@ hwm 1 (contrast ledger #6); a pipe shut down with chunks buffered (abort,
 source error, write failure, invalid identity chunk) writes nothing more
 at hwm 1, and preventCancel leaves the unread chunks readable;
 FixedLengthStream exact-length pipes; closed source → live dest closes
-the destination.
+the destination. Parity of nonconformance: a chunk enqueued in the
+abort's turn while the pipe waits on a read with no write in flight is
+lost from both ends (`lateChunkInAbortTurnIsLost`; the spec writes it).
 
 ## Hang discipline
 
@@ -76,6 +80,7 @@ the source FIRST, then releasing the write (`pipeStopsPullingWhenDestStalls`).
 | `close-propagation.js` | the WPT-disabled backward territory, bounded: external close/abort on piped dest, write-throw backward propagation, idle dest-controller error (ledger #7) |
 | `flow-control.js` | backpressure chain (migrated from streams-backpressure-test.js), stalled-dest read-ahead bound |
 | `shutdown-backlog.js` | shutdown with chunks buffered in the source: abort, source error, invalid identity chunk; what is written and what stays readable (ledger #11, #12) |
+| `shutdown-pending-read.js` | abort while the pipe waits on a read: a chunk arriving during the shutdown's wait, in the abort's turn, or after an idle abort (ledger #14, #15) |
 | `interop.js` | cancel propagation ×2 (migrated from api/streams/streams-test.js), FixedLengthStream (ledger #8), pre-settled pairings (ledger #9) |
 | `special-buffers.js` | SharedArrayBuffer-backed and resizable-buffer views through native and JS pipe endpoints (migrated from pipe-write-special-buffer-test.js, strengthened to content checks; ledger #10); the JS path delivers the very view uncopied, resizable buffers stay resizable |
 | `legacy-pipes.js` | the unflagged cell (flags table) |

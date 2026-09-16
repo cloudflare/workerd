@@ -317,7 +317,7 @@ class WritableStream<W = unknown> {
   #pendingAbortRequest: PendingAbortRequest | undefined;
   #backpressure: boolean = false;
   // A pipe's wake-up (internalsForPipe.setReadyHook).
-  #readyHook?: (() => void) | undefined;
+  #readyHook: (() => void) | undefined;
   // The Node.js interop closed-promise (see kIsClosedPromise), created on
   // first request and settled when the stream reaches 'closed' or
   // 'errored'.
@@ -1208,6 +1208,9 @@ class WritableStreamDefaultController<
         this.#completeInFlightWrite(() => {
           writableStreamFinishInFlightWrite(stream);
         });
+        // Not part of #completeInFlightWrite: a pipe woken after a
+        // non-fatal rejection would read and write the next chunk before
+        // its rejection reaction shuts the pipe down.
         writableStreamCallReadyHook(stream);
       },
       (e: unknown) => {

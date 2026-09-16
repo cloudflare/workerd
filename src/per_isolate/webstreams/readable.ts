@@ -732,18 +732,14 @@ function readBufferedSync<R>(
 }
 
 // The pipe's synchronous read: the next buffered chunk, taken whole as a
-// drain takes it (no autoAllocateChunkSize copy). Undefined when the read
-// would wait or fail; defaultReaderReadInternal handles those.
+// drain takes it (no autoAllocateChunkSize copy). Only for a readable
+// stream; the pump's shutdown checks establish that. Undefined when the
+// read would wait or fail; defaultReaderReadInternal handles those.
 function pipeReadBuffered<R>(
   reader: object,
   stream: ReadableStream<R>
 ): ReadableStreamReadResult<R> | undefined {
-  if (
-    isReadableStreamPendingClosure(stream) ||
-    getReadableStreamGetState(stream) !== 'readable'
-  ) {
-    return undefined;
-  }
+  if (isReadableStreamPendingClosure(stream)) return undefined;
   const consumer = getReadableStreamConsumer(stream);
   if (consumer === undefined) return undefined;
   return readBufferedSync<R>(
@@ -2673,8 +2669,9 @@ class ReadableStreamDrainingReader<R> {
 // when a read delivers, so a buffered backlog moves without a promise per
 // wake-up. Writes are not awaited individually (the close path queues
 // behind them, and write failures surface through the destination's closed
-// promise). A shutdown waits for the writes already made before running
-// its action.
+// promise). A shutdown waits for the writes made before running its
+// action, including the write of a chunk that a pending read delivers
+// during the wait.
 function pipeToInternal<R>(
   source: ReadableStream<R>,
   destination: WritableStreamType<R>,
@@ -2735,6 +2732,23 @@ function pipeToInternal<R>(
     undefined
   ) as Promise<void>;
 
+  // Whether a shutdown is waiting for the pipe's writes before its action.
+  let waitingForWrites = false;
+
+  // Calls `then` once the latest write has settled, waiting again if a
+  // write was made meanwhile.
+  const waitForWrites = (then: () => void): void => {
+    const settled = lastWriteSettled;
+    const check = (): void => {
+      if (settled === lastWriteSettled) {
+        then();
+      } else {
+        waitForWrites(then);
+      }
+    };
+    PromisePrototypeThen(settled, check, check);
+  };
+
   // Set when a write rejects NON-FATALLY (dest still writable — the
   // internal transforms' invalid-chunk contract) while a clean shutdown
   // is already waiting for write acknowledgment; runAction upgrades the
@@ -2750,6 +2764,7 @@ function pipeToInternal<R>(
     shuttingDown = true;
 
     const runAction = (): void => {
+      waitingForWrites = false;
       // A non-fatal tail-write rejection recorded during the
       // acknowledgment wait upgrades a CLEAN shutdown into a failure
       // (the C++ pipe, which awaits each write, can never reach its
@@ -2780,15 +2795,17 @@ function pipeToInternal<R>(
       );
     };
 
-    // Spec: "If dest.[[state]] is 'writable' and
-    // WritableStreamCloseQueuedOrInFlight(dest) is false, wait until
-    // every chunk that has been written has been acknowledged."
+    // Spec: if dest is writable with no close queued or in flight, write
+    // the chunks that have been read and wait until every chunk that has
+    // been read has been written. A read pending now can still deliver a
+    // chunk; readNextChunk writes it while the wait lasts.
     const destState = writableInternals.getState(destination);
     if (
       destState === 'writable' &&
       !writableInternals.closeQueuedOrInFlight(destination)
     ) {
-      PromisePrototypeThen(lastWriteSettled, runAction, runAction);
+      waitingForWrites = true;
+      waitForWrites(runAction);
     } else {
       runAction();
     }
@@ -2967,28 +2984,6 @@ function pipeToInternal<R>(
   };
   checkConditions();
 
-  // ---- Reactive shutdown triggers (spec: "in parallel") ----
-  // Forward close/error propagation from the source. A close reaches the
-  // pump, which propagates it once the chunk of a pending read is written.
-  PromisePrototypeThen(
-    getGenericReaderClosedPromise(reader),
-    () => {
-      pump();
-    },
-    (e: unknown) => {
-      if (!shuttingDown) onSourceErrored(e);
-    }
-  );
-
-  // Backward error propagation: destination errors cancel the source.
-  PromisePrototypeThen(
-    writableInternals.getWriterClosedPromise(writer),
-    undefined,
-    (e: unknown) => {
-      if (!shuttingDown) onDestErrored(e);
-    }
-  );
-
   const writeChunk = (chunk: R): void => {
     const writePromise = writableInternals.writerWrite(writer, chunk);
     // One reaction per write. A rejection that leaves the destination
@@ -3056,7 +3051,21 @@ function pipeToInternal<R>(
       defaultReaderReadInternal<R>(reader, source),
       (result: ReadableStreamReadResult<R>) => {
         readPending = false;
-        if (shuttingDown) return;
+        if (shuttingDown) {
+          // A chunk read while the shutdown waits for writes is written,
+          // and the wait extends to its write. Once the wait is over the
+          // chunk is dropped. The result arrives asynchronously, so when
+          // the shutdown has no write to wait for, even a chunk enqueued
+          // in the shutdown's turn arrives too late.
+          if (
+            waitingForWrites &&
+            !result.done &&
+            writableInternals.willAcceptWrite(destination)
+          ) {
+            writeChunk(result.value as R);
+          }
+          return;
+        }
         if (result.done) {
           onSourceDone();
           return;
@@ -3070,6 +3079,26 @@ function pipeToInternal<R>(
       }
     );
   };
+
+  // ---- Reactive shutdown triggers (spec: "in parallel") ----
+  // Forward close/error propagation from the source. A close reaches the
+  // pump, which propagates it once the chunk of a pending read is written.
+  PromisePrototypeThen(
+    getGenericReaderClosedPromise(reader),
+    pump,
+    (e: unknown) => {
+      if (!shuttingDown) onSourceErrored(e);
+    }
+  );
+
+  // Backward error propagation: destination errors cancel the source.
+  PromisePrototypeThen(
+    writableInternals.getWriterClosedPromise(writer),
+    undefined,
+    (e: unknown) => {
+      if (!shuttingDown) onDestErrored(e);
+    }
+  );
 
   // The first pump runs once the writer is ready; later ones from the
   // ready hook and from reads.
