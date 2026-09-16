@@ -835,7 +835,10 @@ void FileSystemModule::renameOrCopy(
 
   jsg::Url::Relative relative = destUrl.getRelative();
 
+  // Destination-specific failures are deferred until the source has been
+  // resolved so that a missing source reports ENOENT first.
   kj::Maybe<workerd::FsType> destType;
+  kj::Maybe<kj::Rc<workerd::Directory>> maybeDestDir;
   KJ_IF_SOME(maybeDestNode, vfs.resolve(js, destUrl, {.followLinks = false})) {
     KJ_SWITCH_ONEOF(maybeDestNode) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
@@ -845,22 +848,18 @@ void FileSystemModule::renameOrCopy(
         destType = workerd::FsType::FILE;
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-        if (options.copy) {
-          node::THROW_ERR_UV_EISDIR(js, opName);
-        }
-        if (dir->count(js) > 0) {
-          node::THROW_ERR_UV_ENOTEMPTY(js, opName);
-        }
         destType = workerd::FsType::DIRECTORY;
+        maybeDestDir = dir.addRef();
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
         destType = workerd::FsType::SYMLINK;
       }
     }
-    if (!options.copy && srcUrl == destUrl) return;
+    // Only the pathname identifies a node; search and fragment are ignored.
+    if (!options.copy && srcUrl.getPathname() == destUrl.getPathname()) return;
   }
 
-  // A directory can only replace an empty directory; anything else can only
+  // A directory can only replace a directory; anything else can only
   // replace a non-directory.
   auto checkReplace = [&](jsg::Lock& js, bool srcIsDir) {
     KJ_IF_SOME(type, destType) {
@@ -944,7 +943,19 @@ void FileSystemModule::renameOrCopy(
               if (options.copy) {
                 node::THROW_ERR_UV_EISDIR(js, opName);
               }
+              // A directory cannot be moved into itself or a descendant.
+              auto srcPath = srcUrl.getPathname();
+              auto destPath = destUrl.getPathname();
+              auto srcPrefix = srcPath.back() == '/' ? kj::str(srcPath) : kj::str(srcPath, "/");
+              if (destPath.size() > srcPrefix.size() && destPath.startsWith(srcPrefix.asArray())) {
+                node::THROW_ERR_UV_EINVAL(js, opName);
+              }
               checkReplace(js, true);
+              KJ_IF_SOME(destDir, maybeDestDir) {
+                if (destDir->count(js) > 0) {
+                  node::THROW_ERR_UV_ENOTEMPTY(js, opName);
+                }
+              }
               removeDest(js, dir);
               KJ_IF_SOME(err, dir->add(js, relative.name, srcDir.addRef())) {
                 throwFsError(js, err, opName);
