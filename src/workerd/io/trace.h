@@ -41,7 +41,6 @@ WD_STRONG_BOOL(LogTruncated);
 using SpanStatusCode = rpc::SpanStatusCode;
 
 struct SpanStatus {
-  SpanStatus() = default;
   explicit SpanStatus(SpanStatusCode code, kj::Maybe<kj::ConstString> message = kj::none)
       : code(code),
         message(kj::mv(message)) {}
