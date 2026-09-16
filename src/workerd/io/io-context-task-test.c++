@@ -20,6 +20,7 @@ class TestActorObserver final: public ActorObserver {
   explicit TestActorObserver(kj::Own<TaskState> state): state(kj::mv(state)) {}
 
   kj::Own<WaitUntilTaskHandle> addedWaitUntilTask() override {
+    ++state->attempts;
     class Handle final: public WaitUntilTaskHandle {
      public:
       explicit Handle(kj::Own<TaskState> state): state(kj::mv(state)) {
@@ -164,8 +165,9 @@ KJ_TEST("tracking failure does not affect actor wait-until task") {
   fixture.drainAndDestroy(kj::mv(request));
 }
 
-KJ_TEST("actor teardown releases pending task handle") {
+KJ_TEST("tasks added during actor teardown are cleaned up without tracking") {
   auto state = kj::refcounted<TaskState>();
+  bool taskAddedDuringTeardownCanceled = false;
   TestFixture fixture(TestFixture::SetupParams{
     .actorId = Worker::Actor::Id(kj::str("teardown-task-test")),
     .useRealTimers = false,
@@ -178,7 +180,18 @@ KJ_TEST("actor teardown releases pending task handle") {
     auto context = fixture.newIoContext();
     auto request = fixture.newIncomingRequest(*context);
     actor.setIoContext(kj::addRef(*context));
-    context->addWaitUntil(kj::Promise<void>(kj::NEVER_DONE));
+    context->addWaitUntil(kj::Promise<void>(kj::NEVER_DONE)
+                              .attach(kj::defer([&context = *context, state = kj::addRef(*state),
+                                                    &taskAddedDuringTeardownCanceled]() {
+      KJ_EXPECT(context.getActorOrThrow().tryGetMetrics() == kj::none);
+      auto activeTasks = state->activeTasks;
+      context.addTask(
+          kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&taskAddedDuringTeardownCanceled]() {
+        taskAddedDuringTeardownCanceled = true;
+      })));
+      KJ_EXPECT(state->activeTasks == activeTasks);
+      KJ_EXPECT(!taskAddedDuringTeardownCanceled);
+    })));
     KJ_EXPECT(state->activeTasks == 1);
 
     actor.shutdown(0);
@@ -188,8 +201,12 @@ KJ_TEST("actor teardown releases pending task handle") {
 
   // The actor is the context's sole owner after the request and local reference are released.
   KJ_EXPECT(state->activeTasks == 1);
+  KJ_EXPECT(state->attempts == 1);
+  KJ_EXPECT(!taskAddedDuringTeardownCanceled);
   fixture.resetActor();
+  KJ_EXPECT(state->attempts == 1);
   KJ_EXPECT(state->activeTasks == 0);
+  KJ_EXPECT(taskAddedDuringTeardownCanceled);
 }
 
 }  // namespace
