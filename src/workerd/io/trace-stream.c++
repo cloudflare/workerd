@@ -443,7 +443,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
 
 jsg::JsValue ToJs(jsg::Lock& js, const SpanStatus& status, StringCache& cache) {
   auto obj = js.obj();
-  switch (status.code) {
+  switch (status.getCode()) {
     case SpanStatusCode::UNSET:
       obj.set(js, CODE_STR, cache.get(js, UNSET_STR));
       break;
@@ -454,7 +454,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanStatus& status, StringCache& cache) {
       obj.set(js, CODE_STR, cache.get(js, ERROR_STR));
       break;
   }
-  KJ_IF_SOME(message, status.message) {
+  KJ_IF_SOME(message, status.getMessage()) {
     obj.set(js, MESSAGE_STR, js.str(message));
   }
   return obj;

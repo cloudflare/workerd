@@ -1463,7 +1463,7 @@ kj::String SpanUpdate::toString() const {
       return kj::str("SpanUpdate: name = ", operationName);
     }
     KJ_CASE_ONEOF(status, SpanStatus) {
-      return kj::str("SpanUpdate: status = ", static_cast<uint>(status.code));
+      return kj::str("SpanUpdate: status = ", static_cast<uint>(status.getCode()));
     }
   }
   KJ_UNREACHABLE;

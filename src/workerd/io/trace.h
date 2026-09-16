@@ -52,12 +52,24 @@ struct SpanStatus {
   SpanStatus& operator=(SpanStatus&&) = default;
   KJ_DISALLOW_COPY(SpanStatus);
 
-  SpanStatusCode code = SpanStatusCode::UNSET;
-  kj::Maybe<kj::ConstString> message;
+  SpanStatusCode getCode() const {
+    return code;
+  }
+
+  kj::Maybe<const kj::ConstString&> getMessage() const KJ_LIFETIMEBOUND {
+    KJ_IF_SOME(value, message) {
+      return value;
+    }
+    return kj::none;
+  }
 
   void copyTo(rpc::SpanStatus::Builder builder) const;
   SpanStatus clone() const;
   size_t size() const;
+
+ private:
+  SpanStatusCode code = SpanStatusCode::UNSET;
+  kj::Maybe<kj::ConstString> message;
 };
 
 // A 128-bit globally unique trace identifier. This will be used for both

@@ -597,21 +597,21 @@ KJ_TEST("Read/Write SpanUpdate status works") {
 
   SpanUpdate info2(infoBuilder.asReader());
   auto& status2 = info2.info.get<SpanStatus>();
-  KJ_ASSERT(status2.code == SpanStatusCode::ERROR);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(status2.message) == "failed");
+  KJ_ASSERT(status2.getCode() == SpanStatusCode::ERROR);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(status2.getMessage()) == "failed");
 
   SpanUpdate info3 = info.clone();
   auto& status3 = info3.info.get<SpanStatus>();
-  KJ_ASSERT(status3.code == SpanStatusCode::ERROR);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(status3.message) == "failed");
+  KJ_ASSERT(status3.getCode() == SpanStatusCode::ERROR);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(status3.getMessage()) == "failed");
 }
 
 KJ_TEST("SpanStatus ignores messages for non-error status codes") {
   SpanStatus unsetStatus(SpanStatusCode::UNSET, kj::ConstString("ignored"_kjc));
-  KJ_ASSERT(unsetStatus.message == kj::none);
+  KJ_ASSERT(unsetStatus.getMessage() == kj::none);
 
   SpanStatus okStatus(SpanStatusCode::OK, kj::ConstString("ignored"_kjc));
-  KJ_ASSERT(okStatus.message == kj::none);
+  KJ_ASSERT(okStatus.getMessage() == kj::none);
 
   capnp::MallocMessageBuilder builder;
   auto statusBuilder = builder.initRoot<rpc::SpanStatus>();
@@ -619,8 +619,8 @@ KJ_TEST("SpanStatus ignores messages for non-error status codes") {
   statusBuilder.initMessage().setText("ignored");
 
   SpanStatus wireStatus(statusBuilder.asReader());
-  KJ_ASSERT(wireStatus.code == SpanStatusCode::OK);
-  KJ_ASSERT(wireStatus.message == kj::none);
+  KJ_ASSERT(wireStatus.getCode() == SpanStatusCode::OK);
+  KJ_ASSERT(wireStatus.getMessage() == kj::none);
 }
 
 KJ_TEST("Read/Write Onset works") {
