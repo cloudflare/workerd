@@ -1,0 +1,179 @@
+src/rust/cxx/kj-rs-http/http.rs
+  s_b5100e8818a1d4::t_40a4fd17bb1b1e 1-26,29-30,34,111-113,122-128,133-136,141-143,145-247,313,315-328,330-338,341-349,352,354,358,363-364
+src/rust/cxx/kj-rs-http/io.rs
+  s_b5100e8818a1d4::t_cb698852881b16 1-64
+src/rust/cxx/kj-rs-http/streams.rs
+  s_b5100e8818a1d4::t_8a3fa79cfb1ba9 1-8,15,17-18,20-33,35-37
+src/rust/cxx/kj-hyper/lib.rs
+  s_b5100e8818a1d4::t_1077b7212d1b49 1-81
+src/rust/cxx/kj-hyper/tests/hyper-client-test.c++
+  s_b5100e8818a1d4::t_aa039e96470ac9 1-1055
+deps/rust/Cargo.toml
+  s_b5100e8818a1d4::t_268787ed821e41 35-37,44-48,54-61,69-70,73-91,98-104,121
+src/rust/cxx/kj-hyper/peer-filter.c++
+  s_b5100e8818a1d4::t_b5eb0755a83fba 1-61
+src/rust/cxx/kj-hyper/tests/test-harness.h
+  s_b5100e8818a1d4::t_28ab9c1b0361d8 1-216
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_b5100e8818a1d4::t_0133c5cf1ccd20 66,159-165
+  s_b5100e8818a1d4::t_fc0b4dacbff189 166
+  s_b5100e8818a1d4::t_989b440dd076c5 167-168
+src/workerd/server/server-test.c++
+  s_b5100e8818a1d4::t_7445f098f857ef 12-13,337-361,391,447-454,492-495,1287-1290,2174-2178,2194,2197,2220,2304-2307,2325,2328,2364,3940-3943,3988,3990-3992,4010,4035-4038,4075,4091,4094-4095,4110,4119,4140,4416-4419,5493-5496,5718-5720,5748-5749,5751-5752,5766,5792,5810-5811,5813-5814,5828
+src/rust/cxx/kj-hyper/hyper-server-ffi.c++
+  s_b5100e8818a1d4::t_ecb80f8aa7d5ce 1-512
+src/rust/cxx/kj-hyper/tests/io-test-helpers.h
+  s_b5100e8818a1d4::t_8c12ddc550bf5d 1-154
+src/workerd/io/BUILD.bazel
+  s_b5100e8818a1d4::t_6a5ac1587b73e1 285
+src/rust/cxx/kj-rs-http/tests/BUILD.bazel
+  s_b5100e8818a1d4::t_c620bfa87f3809 1-2,4-8,10-21,23-28,30-31,35-46,48,50-53
+src/rust/worker/BUILD
+  s_b5100e8818a1d4::t_0f4d6c5ea82acb 10,36
+src/rust/cxx/kj-hyper/upgraded_io.rs
+  s_b5100e8818a1d4::t_2edf8d03d995eb 1-366
+src/rust/cxx/kj-hyper/server.rs
+  s_b5100e8818a1d4::t_ed133cbbeabed8 1-1936
+src/workerd/server/server.c++
+  s_b5100e8818a1d4::t_f7dc8ae737b6e6 10,1772-1779,6432-6435,6629-6632,6902-6910,7064-7067
+src/rust/cxx/kj-hyper/ws-pipe-ffi.h
+  s_b5100e8818a1d4::t_3a99cf4587cea7 1-136
+src/rust/cxx/kj-hyper/client.rs
+  s_b5100e8818a1d4::t_581aad7e28941d 1-1954
+src/rust/cxx/kj-hyper/tests/hyper-tls-test.c++
+  s_b5100e8818a1d4::t_7f778ede40e7eb 1-681
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_b5100e8818a1d4::t_bb992ba880f23c 23-29,282-294
+  s_b5100e8818a1d4::t_098420e60ba865 295,344-348,354-356
+  s_b5100e8818a1d4::t_2bbc39e6fcb34f 3-4
+src/rust/cxx/kj-rs-http/ffi.c++
+  s_b5100e8818a1d4::t_5ac785b6baefa8 7,19-22,30,37-52
+src/workerd/server/pyodide.c++
+  s_b5100e8818a1d4::t_e1851d2444a81e 6-7,76,78-81
+src/workerd/server/BUILD.bazel
+  s_b5100e8818a1d4::t_314e3a236b45b4 80-83,120,197-224,235-238,336,342-345,351-358,400-404,412,420-424,435-439,443-445,449-454,502-507,568
+src/rust/cxx/kj-rs-http/codec.rs
+  s_b5100e8818a1d4::t_489978d2497265 1-759
+src/workerd/util/kj-http-tokio.c++
+  s_b5100e8818a1d4::t_d424a4f107422f 1-1890
+src/rust/cxx/kj-rs-http/tests/lib.rs
+  s_b5100e8818a1d4::t_d3cf675e447666 13,17-19,22-23,25-27,31-41,68-83
+src/rust/cxx/kj-hyper/hyper-server-ffi.h
+  s_b5100e8818a1d4::t_0681ea6e3def34 1-66
+deps/rust/Cargo.lock
+  s_b5100e8818a1d4::t_339ece7b9a0ee9 83-88,315-324,352-367,470,485-489,498,501-504,509,517,855-934,1102-1150,1395-1400,1652-1665,1743-1824,1846-1854,1873-1895,2007-2008,2010-2014,2079-2084,2511,2515-2535,2577-2582,2638-2643,2694-2702,2754-2762,2778-2786,2793,2805-2820,2828-2835,2838-2843,2850-2855,2862-2867,2874-2879,2886-2891,2898-2903,2910-2915,2922-2927,3013-3018
+src/rust/worker/ffi.h
+  s_b5100e8818a1d4::t_c65b0d50a06a2d 8-10
+src/rust/cxx/kj-rs-http/ffi.h
+  s_b5100e8818a1d4::t_5fcb6ad5306783 15,23-31,41-59,67-79,172-227,242-246,261-263
+src/workerd/tests/BUILD.bazel
+  s_b5100e8818a1d4::t_5a9fda6a5c36dd 76
+build/rust_io_backend.bzl
+  s_b5100e8818a1d4::t_4e6834e6be0b7f 18-26,45-50
+src/rust/cxx/third-party/BUILD.bazel
+  s_b5100e8818a1d4::t_927cba326823e1 13-23
+src/rust/cxx/kj-rs-http/own.rs
+  s_b5100e8818a1d4::t_06adb4fbb2be11 3-4
+patches/rust/httparse-kj-lenient-header-values.patch
+  s_b5100e8818a1d4::t_1935bbb1bd8ee2 1-29
+src/rust/cxx/kj-hyper/tests/hyper-server-test.c++
+  s_b5100e8818a1d4::t_37481a1949abbd 1-1633
+src/rust/cxx/kj-hyper/tls.rs
+  s_b5100e8818a1d4::t_f60974c933dcbb 1-632
+src/rust/cxx/kj-hyper/tests/BUILD.bazel
+  s_b5100e8818a1d4::t_93bb5fcb4f07ba 1-172
+BUILD.bazel
+  s_b5100e8818a1d4::t_8ba3f7991c77a7 134-142
+build/deps/rust.MODULE.bazel
+  s_b5100e8818a1d4::t_a4464f519db08f 60-87
+patches/rust/hyper-public-header-case-map.patch
+  s_b5100e8818a1d4::t_4d055ecb401267 1-44
+src/rust/cxx/kj-rs-http/tests/ffi-test.c++
+  s_b5100e8818a1d4::t_831f4a1a005436 220-222
+  s_b5100e8818a1d4::t_fe317c51c11684 5-6,218-219
+src/rust/cxx/kj-hyper/translate.rs
+  s_b5100e8818a1d4::t_0fe8cf83731ae4 1-950
+src/rust/cxx/kj-rs-io/stream.rs
+  s_b5100e8818a1d4::t_f4c870f5b9c1c2 78-81
+  s_b5100e8818a1d4::t_81da581da8acbf 76,403-468,471-500,511-514,523-526,535-538,544,551,563,577-580,586-589,597,619-623,627,635,676-679,734,779,781,783,839,882-925
+  s_b5100e8818a1d4::t_c4d92a15273cf7 72-75,77,402
+src/rust/cxx/kj-rs-io/lib.rs
+  s_b5100e8818a1d4::t_7c03b49d1e81ee 132
+src/rust/cxx/kj-hyper/ws_ext.rs
+  s_b5100e8818a1d4::t_9a19e78ce5425e 1-359
+src/rust/cxx/kj-hyper/hyper-http.h
+  s_b5100e8818a1d4::t_805485a3b59559 1-412
+patches/rust/http-kj-lenient-header-values.patch
+  s_b5100e8818a1d4::t_985ddb668a1fbf 1-17
+src/rust/cxx/kj-rs-http/lib.rs
+  s_b5100e8818a1d4::t_ee9b535a9cc369 6-42,51-61
+deps/rust/BUILD.bazel
+  s_b5100e8818a1d4::t_36fc2d1a98fc74 14-24
+src/rust/cxx/kj-hyper/client_tls.rs
+  s_b5100e8818a1d4::t_45ecd3f5ddd39f 1-205
+src/rust/cxx/kj-rs-http/BUILD.bazel
+  s_b5100e8818a1d4::t_045939494ec7ed 1-7,10,12-24,26-39,41-46,49-53,57-59,62-72,74-89,91-95,98-101,104-113
+src/rust/cxx/kj-rs-tokio/port.rs
+  s_b5100e8818a1d4::t_f9bbe02db8008a 167-174
+src/rust/cxx/kj-hyper/peer-filter.h
+  s_b5100e8818a1d4::t_ed1d7c1e82a492 1-63
+src/rust/cxx/kj-hyper/ws_pipe.rs
+  s_b5100e8818a1d4::t_693af2b1f7ed9d 1-835
+src/rust/cxx/kj-hyper/tests/serve-test.c++
+  s_b5100e8818a1d4::t_54ae7a70c5c4db 1-477
+src/rust/cxx/kj-rs-http/service.rs
+  s_b5100e8818a1d4::t_68386336a43524 1-204
+src/workerd/server/server.h
+  s_b5100e8818a1d4::t_b9048f0031c023 246-249,367
+src/rust/cxx/kj-hyper/serve.rs
+  s_b5100e8818a1d4::t_156fd789689eb0 1-446
+src/rust/cxx/kj-hyper/stall.rs
+  s_b5100e8818a1d4::t_ea298d5fe07e90 1-338
+src/workerd/server/tls-network.h
+  s_b5100e8818a1d4::t_d389ae68e19b4e 1-48
+src/rust/cxx/kj-hyper/tests/serve_helpers.rs
+  s_b5100e8818a1d4::t_7eeca14b120832 1-279
+src/workerd/server/tls-network.c++
+  s_b5100e8818a1d4::t_003e9644e4df1a 1-613
+src/rust/cxx/kj-rs-io/async-io.h
+  s_b5100e8818a1d4::t_d9e3704835bc92 83-91
+src/rust/cxx/kj-hyper/tests/lib.rs
+  s_b5100e8818a1d4::t_a7c3651157e28b 1-94
+src/rust/cxx/kj-hyper/ws.rs
+  s_b5100e8818a1d4::t_f472dccd6dd6ac 1-1017
+src/workerd/server/container-client.c++
+  s_b5100e8818a1d4::t_9d0ededd9922e3 28-31,100-103,669,721-728,732,743,754-769,779,2015-2016,2022
+src/rust/cxx/kj-rs-http/headers.rs
+  s_b5100e8818a1d4::t_bf4ccf9ee3f06d 1-174
+src/workerd/api/BUILD.bazel
+  s_b5100e8818a1d4::t_52dc502f31518a 461
+src/rust/cxx/kj-hyper/ffi.rs
+  s_b5100e8818a1d4::t_b4f05ecb94305e 1-410,418-419,1105-1116,1124-1327
+  s_b5100e8818a1d4::t_1ce95ad91ebf11 1102-1104,1117-1119
+  s_b5100e8818a1d4::t_5f9d09f201c8ff 415-417,420-422
+  s_b5100e8818a1d4::t_98ec5a37243e65 411-413
+  s_b5100e8818a1d4::t_dca73affeacdc5 1121-1123
+  s_b5100e8818a1d4::t_b9352dbbb79b79 414,423-1101,1120
+src/rust/cxx/kj-hyper/BUILD.bazel
+  s_b5100e8818a1d4::t_9b5f2af998a1a8 1-119
+src/workerd/util/BUILD.bazel
+  s_b5100e8818a1d4::t_1be49bc22d2581 108,190,295,370,526-556
+src/rust/cxx/kj-rs-io/unwrap.h
+  s_b5100e8818a1d4::t_059c8c88293756 1-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "377977bcafdbd5987a488bf55befa2a9ddd7661c",
+  "prompts": {},
+  "sessions": {
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
