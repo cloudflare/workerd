@@ -195,6 +195,9 @@ DecodedException decodeTunneledException(
   //
   // TODO(someday): Support arbitrary user-defined error types, not just Error?
   auto tunneledInfo = tunneledErrorType(exception.getDescription());
+  if (tunneledInfo.hasInternalDetails) {
+    KJ_LOG(WARNING, "Almost returned an exception with internal details to user", exception);
+  }
   DecodedException result;
   result.isDisconnection = false;
   result.isDoNotLogException = tunneledInfo.isDoNotLogException;
@@ -534,7 +537,7 @@ static kj::String typeErrorMessage(TypeErrorContext c, const char* expectedType)
       return kj::str("Failed to execute function: parameter ", c.argumentIndex + 1,
           " is not of type '", expectedType, "'.");
     case TypeErrorContext::CALLBACK_RETURN:
-      return kj::str("Callback returned incorrect type; expected '", expectedType, "'");
+      return kj::str("Callback returned incorrect type: expected '", expectedType, "'");
     case TypeErrorContext::DICT_KEY:
       return kj::str("Incorrect type for map entry '", c.memberName,
           "': the provided key is not of type '", expectedType, "'.");
@@ -591,7 +594,11 @@ static kj::String unimplementedErrorMessage(TypeErrorContext c) {
 }
 
 void throwTypeError(v8::Isolate* isolate, kj::StringPtr message) {
-  isolate->ThrowException(v8::Exception::TypeError(v8Str(isolate, message)));
+  if (hasInternalExceptionDetails(message)) {
+    isolate->ThrowException(makeInternalError(isolate, message));
+  } else {
+    isolate->ThrowException(v8::Exception::TypeError(v8Str(isolate, message)));
+  }
   throw JsExceptionThrown();
 }
 

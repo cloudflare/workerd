@@ -23,6 +23,15 @@ constexpr auto ERROR_TUNNELED_PREFIX_JSG = "jsg."_kj;
 constexpr auto ERROR_INTERNAL_SOURCE_PREFIX_JSG = "jsg-internal."_kj;
 }  // namespace
 
+bool hasInternalExceptionDetails(kj::StringPtr message) {
+  constexpr auto referenceMarker = "internal error; reference = "_kj;
+  KJ_IF_SOME(i, message.find(referenceMarker)) {
+    return message.first(i).contains(ERROR_PREFIX_DELIM) ||
+        message.slice(i + referenceMarker.size()).contains(ERROR_PREFIX_DELIM);
+  }
+  return message.contains(ERROR_PREFIX_DELIM);
+}
+
 TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
   // A tunneled error in an internal message is prefixed by one of the following patterns,
   // anchored at the beginning of the message:
@@ -66,24 +75,33 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
 
   auto tryExtractError = [](kj::StringPtr msg,
                              Properties properties) -> kj::Maybe<TunneledErrorType> {
+    // A remaining delimiter may introduce internal diagnostic fields. Fail closed, including
+    // disabling serialized-error restoration, rather than exposing any of this message to JS.
+    bool containsContext = msg.contains(ERROR_PREFIX_DELIM);
+    KJ_IF_SOME(i, msg.find(": "_kj)) {
+      containsContext = msg.first(i).contains(ERROR_PREFIX_DELIM) ||
+          hasInternalExceptionDetails(msg.slice(i + 2));
+    }
     if (msg.startsWith(ERROR_TUNNELED_PREFIX_JSG)) {
       return TunneledErrorType{
         .message = msg.slice(ERROR_TUNNELED_PREFIX_JSG.size()),
-        .isJsgError = true,
-        .isInternal = false,
+        .isJsgError = !containsContext,
+        .isInternal = containsContext,
         .isFromRemote = properties.isFromRemote,
         .isDurableObjectReset = properties.isDurableObjectReset,
         .isDoNotLogException = properties.isDoNotLogException,
+        .hasInternalDetails = containsContext,
       };
     }
     if (msg.startsWith(ERROR_INTERNAL_SOURCE_PREFIX_JSG)) {
       return TunneledErrorType{
         .message = msg.slice(ERROR_INTERNAL_SOURCE_PREFIX_JSG.size()),
-        .isJsgError = true,
+        .isJsgError = !containsContext,
         .isInternal = true,
         .isFromRemote = properties.isFromRemote,
         .isDurableObjectReset = properties.isDurableObjectReset,
         .isDoNotLogException = properties.isDoNotLogException,
+        .hasInternalDetails = containsContext,
       };
     }
 
