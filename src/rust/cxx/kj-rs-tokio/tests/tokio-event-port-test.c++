@@ -129,12 +129,18 @@ KJ_TEST("timer.afterDelay fires with real elapsed time") {
   auto &sysClock = kj::systemPreciseMonotonicClock();
   auto before = sysClock.now();
   auto timerBefore = timer.now();
+  // kj::Timer::now() is the loop's cached time, taken when the port last returned from a wait,
+  // so it lags the clock by however long has passed since -- microseconds normally, several
+  // milliseconds on a loaded sanitizer runner. afterDelay() measures from that cached time, so
+  // the wall-clock check below has to allow for the lag; the timer's own clock is exact.
+  KJ_ASSERT(before >= timerBefore);
+  auto lag = before - timerBefore;
 
   // If the port forgot timerImpl.advanceTo() after waits, this would never resolve (caught by
   // the test timeout).
   timer.afterDelay(30 * kj::MILLISECONDS).wait(ws);
 
-  KJ_EXPECT(sysClock.now() - before >= 30 * kj::MILLISECONDS);
+  KJ_EXPECT(sysClock.now() - before + lag >= 30 * kj::MILLISECONDS);
   // Timer time is synced to the monotonic clock at each wait return.
   KJ_EXPECT(timer.now() - timerBefore >= 30 * kj::MILLISECONDS);
 }
