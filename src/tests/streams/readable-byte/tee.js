@@ -386,8 +386,8 @@ const INVALIDATED = {
 
 // DIVERGENCE: a byobRequest held across tee(). TypeScript invalidates it
 // (branches share the queue and see no byobRequest); later chunks still
-// reach both branches. C++ keeps it working: the responded byte reaches
-// both branches.
+// reach both branches. C++ keeps it working, as the spec does: the
+// responded byte reaches both branches.
 export const teeInvalidatesHeldByobRequest = {
   async test() {
     const { a, b, controller, request } = await teeWithHeldByobRequest();
@@ -412,7 +412,7 @@ export const teeInvalidatesHeldByobRequest = {
 
 // DIVERGENCE: once the sibling cancels, the remaining branch's read gets a
 // fresh byobRequest under TypeScript, and the held one stays invalid.
-// C++ keeps exposing the held request, which fills the read.
+// C++ keeps exposing the held request, which fills the read (spec).
 export const teeSoleBranchMintsFreshByobRequest = {
   async test() {
     const { a, b, controller, request } = await teeWithHeldByobRequest();

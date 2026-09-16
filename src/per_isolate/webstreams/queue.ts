@@ -964,6 +964,15 @@ class ByteStreamCursor
   // Spec EnqueueDetachedPullIntoToQueue, into the prefix: see #prefix.
   #moveToPrefix(desc: PullIntoDescriptor): void {
     if (desc.bytesFilled === 0) return;
+    // A pull-into still pending has taken every available byte, the prefix
+    // first, so a released head holding bytes and a prefix never coexist.
+    // Were both present, their order would be unknown: fail loudly instead
+    // of losing or reordering bytes.
+    if (this.#prefix !== undefined) {
+      throw new TypeError(
+        'ReadableStream internal error: released bytes would replace undelivered bytes'
+      );
+    }
     this.#prefix = {
       buffer: ArrayBufferPrototypeSlice(
         desc.buffer,
