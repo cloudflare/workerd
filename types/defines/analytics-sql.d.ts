@@ -25,7 +25,7 @@ export interface AnalyticsSQLResult<
   statistics: AnalyticsSQLStatistics;
 }
 
-/** An account-scoped Analytics SQL binding. */
+/** An Analytics SQL binding. */
 export interface AnalyticsSQLBinding {
   query<T extends Record<string, unknown> = Record<string, unknown>>(
     request: AnalyticsSQLQuery,
