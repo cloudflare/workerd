@@ -186,6 +186,59 @@ class RustTunnelStream final: public kj::AsyncIoStream {
   ::rust::Box<HyperTunnel> tunnel;
 };
 
+// kj::AsyncIoStream over a RustStream (rust_stream.rs): a stream implemented in Rust -- today
+// the TLS streams of workerd's rustls SecureNetworkWrapper -- handed to kj consumers. The hyper
+// server/client recognize this wrapper (isRustStream, kj-stream.h) and take the Rust stream back
+// out of it instead of pumping bytes through the bridge.
+class RustAsyncIoStream final: public kj::AsyncIoStream {
+ public:
+  explicit RustAsyncIoStream(::rust::Box<RustStream> inner): inner(kj::mv(inner)) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return hot(
+        inner->read(::rust::Slice<uint8_t>(static_cast<uint8_t*>(buffer), maxBytes), minBytes));
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    return hot(inner->write(buffer.as<kj_rs::Rust>()));
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    for (auto piece: pieces) {
+      co_await inner->write(piece.as<kj_rs::Rust>());
+    }
+  }
+
+  void shutdownWrite() override {
+    // Best-effort, like kj's TLS shutdownWrite(): the flush (a TLS close_notify) runs detached
+    // and is abandoned if this stream is destroyed first.
+    shutdownTask = hot(inner->shutdown_write()).catch_([](kj::Exception&&) {});
+  }
+
+  void abortRead() override {
+    inner->abort_read();
+  }
+
+  kj::Promise<void> whenWriteDisconnected() override {
+    // The transport socket is inside the Rust stream (a TLS layer), where a hangup is only
+    // observed by a read or write; kj's own TLS stream has the same blind spot for a peer that
+    // vanishes between operations. Never resolves, like kj::AsyncOutputStream's default.
+    return kj::NEVER_DONE;
+  }
+
+  // Deliberately no getFd()/getWin32Handle(): this stream transforms bytes (TLS), so its
+  // transport handle carries ciphertext, not the stream's bytes.
+
+  // Takes the Rust stream out; the wrapper must be destroyed right after.
+  ::rust::Box<RustStream> release() {
+    return kj::mv(inner);
+  }
+
+ private:
+  ::rust::Box<RustStream> inner;
+  kj::Promise<void> shutdownTask = kj::READY_NOW;
+};
+
 // The kj::HttpService::ConnectResponse handed to the C++ service for inbound CONNECT requests.
 class HyperConnectResponseImpl final: public kj::HttpService::ConnectResponse {
  public:
@@ -346,6 +399,21 @@ kj::Own<kj::WebSocket> new_rust_websocket(::rust::Box<WsSession> session) {
 kj::Own<kj::AsyncIoStream> new_tunnel_stream(::rust::Box<HyperTunnel> tunnel) {
   return ::kj::rust::normalizeForRust(
       kj::Own<kj::AsyncIoStream>(kj::heap<RustTunnelStream>(kj::mv(tunnel))));
+}
+
+bool isRustStream(const kj::AsyncIoStream& stream) {
+  return kj::dynamicDowncastIfAvailable<const RustAsyncIoStream>(stream) != kj::none;
+}
+
+::rust::Box<RustStream> releaseRustStream(kj::Own<kj::AsyncIoStream> stream) {
+  auto& wrapper = KJ_REQUIRE_NONNULL(kj::dynamicDowncastIfAvailable<RustAsyncIoStream>(*stream),
+      "stream is not a RustAsyncIoStream; cannot take its Rust stream");
+  return wrapper.release();
+}
+
+kj::Own<kj::AsyncIoStream> wrapRustStream(::rust::Box<RustStream> stream) {
+  return ::kj::rust::normalizeForRust(
+      kj::Own<kj::AsyncIoStream>(kj::heap<RustAsyncIoStream>(kj::mv(stream))));
 }
 
 kj::Own<kj::HttpService::ConnectResponse> new_hyper_connect_response(

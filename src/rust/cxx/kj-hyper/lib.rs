@@ -59,11 +59,11 @@ pub mod ffi;
 // and channel-backed request body for the *client* direction, the mirror image of what
 // `translate` shares for the server direction.
 pub mod client;
-mod client_tls;
 mod server;
 // Serving a `kj::AsyncIoStream` natively (unwrap a kj-rs-io stream's tokio socket, or pump a
 // foreign stream through a duplex): the entry points the server and stream-tier client use.
 // Public for the crate's C++-driven tests.
+pub mod rust_stream;
 pub mod serve;
 mod stall;
 mod tls;

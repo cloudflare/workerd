@@ -185,13 +185,6 @@ impl HyperTlsClientConfig {
     pub(crate) fn connector(&self) -> tokio_rustls::TlsConnector {
         tokio_rustls::TlsConnector::from(self.config.clone())
     }
-
-    /// The shared rustls client configuration, for building a synchronous
-    /// `rustls::ClientConnection` (the raw-socket STARTTLS path in `client_tls.rs`).
-    #[must_use]
-    pub(crate) fn client_config(&self) -> Arc<rustls::ClientConfig> {
-        self.config.clone()
-    }
 }
 
 /// The parameters a `HyperClient` needs to dial TLS: the shared connector plus the name the
@@ -319,12 +312,6 @@ impl HyperTlsServerConfig {
     #[must_use]
     pub fn acceptor(&self) -> tokio_rustls::TlsAcceptor {
         tokio_rustls::TlsAcceptor::from(self.config.clone())
-    }
-
-    /// The shared rustls server config, for the synchronous server-side connection state
-    /// machine (client_tls.rs `new_rustls_server_conn`).
-    pub(crate) fn server_config(&self) -> Arc<rustls::ServerConfig> {
-        self.config.clone()
     }
 }
 
@@ -593,8 +580,8 @@ pub fn kj_error_for_tls(e: &std::io::Error) -> KjError {
 }
 
 /// Render a `rustls::Error` as a `kj::Exception`, matching kj's error surface for the
-/// certificate-verification cases (see the module docs). Shared by the tokio-rustls path
-/// (`kj_error_for_tls`) and the synchronous raw-socket STARTTLS path (`client_tls.rs`).
+/// certificate-verification cases (see the module docs). Shared by the handshake path
+/// (`kj_error_for_tls`) and the streams of `rust_stream.rs`.
 pub fn kj_error_for_rustls_error(tls_error: &rustls::Error) -> KjError {
     match tls_error {
         rustls::Error::InvalidCertificate(cert_error) => {
@@ -629,4 +616,189 @@ pub fn kj_error_for_rustls_error(tls_error: &rustls::Error) -> KjError {
             format!("TLS handshake failed: {tls_error}"),
         ),
     }
+}
+
+// =======================================================================================
+// TLS over a served kj stream: the streams behind the rustls SecureNetworkWrapper
+// (workerd/server/tls-network.c++). `wrap_tls_server` / `wrap_tls_client` take the plaintext
+// kj stream through `serve.rs` (its tokio socket natively, else the pump), put tokio-rustls
+// over it and hand the result back to kj as a `RustStream`. The handshake runs on first use --
+// kj's SecureNetworkWrapper returns wrapped streams before any handshake bytes flow, and a TLS
+// listener's accept loop must not wait on it.
+
+/// A TLS stream whose handshake is driven by the first read or write.
+///
+/// kj allows one read and one write in flight at once, and both arrive here as separate polls
+/// (two bridged promises, or a kj consumer's read and write) while the handshake is still
+/// running. Whichever poll completes the handshake wakes every other waiter, since the
+/// handshake future only ever holds the most recent poller's waker.
+pub enum LazyTls {
+    Handshaking {
+        handshake: Handshake,
+        waiters: Vec<std::task::Waker>,
+    },
+    Ready(tokio_rustls::TlsStream<crate::serve::ServeIo>),
+    /// The handshake failed; every later operation fails the same way.
+    Failed(std::io::ErrorKind, String),
+}
+
+pub enum Handshake {
+    Accept(std::pin::Pin<Box<tokio_rustls::Accept<crate::serve::ServeIo>>>),
+    Connect(std::pin::Pin<Box<tokio_rustls::Connect<crate::serve::ServeIo>>>),
+}
+
+impl LazyTls {
+    pub fn server(acceptor: &tokio_rustls::TlsAcceptor, io: crate::serve::ServeIo) -> Self {
+        Self::Handshaking {
+            handshake: Handshake::Accept(Box::pin(acceptor.accept(io))),
+            waiters: Vec::new(),
+        }
+    }
+
+    pub fn client(params: TlsParams, io: crate::serve::ServeIo) -> Self {
+        Self::Handshaking {
+            handshake: Handshake::Connect(Box::pin(
+                params.connector.connect(params.server_name, io),
+            )),
+            waiters: Vec::new(),
+        }
+    }
+
+    /// Drives the handshake if it is still running; yields the established stream.
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<&mut tokio_rustls::TlsStream<crate::serve::ServeIo>>> {
+        use std::task::Poll;
+        let (outcome, waiters) = match self {
+            Self::Handshaking { handshake, waiters } => {
+                let polled = match handshake {
+                    Handshake::Accept(accept) => accept
+                        .as_mut()
+                        .poll(cx)
+                        .map_ok(tokio_rustls::TlsStream::Server),
+                    Handshake::Connect(connect) => connect
+                        .as_mut()
+                        .poll(cx)
+                        .map_ok(tokio_rustls::TlsStream::Client),
+                };
+                match polled {
+                    Poll::Pending => {
+                        if !waiters.iter().any(|w| w.will_wake(cx.waker())) {
+                            waiters.push(cx.waker().clone());
+                        }
+                        return Poll::Pending;
+                    }
+                    Poll::Ready(outcome) => (outcome, std::mem::take(waiters)),
+                }
+            }
+            Self::Ready(stream) => return Poll::Ready(Ok(stream)),
+            Self::Failed(kind, message) => {
+                return Poll::Ready(Err(std::io::Error::new(*kind, message.clone())));
+            }
+        };
+        for waiter in waiters {
+            if !waiter.will_wake(cx.waker()) {
+                waiter.wake();
+            }
+        }
+        match outcome {
+            Ok(stream) => {
+                *self = Self::Ready(stream);
+                self.poll_ready(cx)
+            }
+            Err(e) => {
+                *self = Self::Failed(e.kind(), e.to_string());
+                Poll::Ready(Err(e))
+            }
+        }
+    }
+}
+
+impl tokio::io::AsyncRead for LazyTls {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut().poll_ready(cx) {
+            std::task::Poll::Ready(Ok(stream)) => std::pin::Pin::new(stream).poll_read(cx, buf),
+            std::task::Poll::Ready(Err(e)) => std::task::Poll::Ready(Err(e)),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+impl tokio::io::AsyncWrite for LazyTls {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        match self.get_mut().poll_ready(cx) {
+            std::task::Poll::Ready(Ok(stream)) => std::pin::Pin::new(stream).poll_write(cx, buf),
+            std::task::Poll::Ready(Err(e)) => std::task::Poll::Ready(Err(e)),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut().poll_ready(cx) {
+            std::task::Poll::Ready(Ok(stream)) => std::pin::Pin::new(stream).poll_flush(cx),
+            std::task::Poll::Ready(Err(e)) => std::task::Poll::Ready(Err(e)),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut().poll_ready(cx) {
+            std::task::Poll::Ready(Ok(stream)) => std::pin::Pin::new(stream).poll_shutdown(cx),
+            std::task::Poll::Ready(Err(e)) => std::task::Poll::Ready(Err(e)),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+/// `kj::SecureNetworkWrapper::wrapServer()`: server-side TLS over the owned plaintext stream,
+/// returned to kj as a `RustStream`. The handshake runs on the connection's first I/O.
+///
+/// # Errors
+///
+/// Fails only when the stream cannot be served (a kj-rs-io stream with an operation still in
+/// flight; see `serve.rs`).
+pub fn wrap_tls_server(
+    stream: kj_rs::KjOwn<crate::ffi::AsyncIoStream>,
+    config: &HyperTlsServerConfig,
+) -> Result<kj_rs::KjOwn<crate::ffi::AsyncIoStream>> {
+    let served = crate::serve::serve_kj_stream(stream)?;
+    let tls = LazyTls::server(&config.acceptor(), served.io);
+    Ok(crate::ffi::wrap_rust_stream(Box::new(
+        crate::rust_stream::RustStream::new(tls, served.pump),
+    )))
+}
+
+/// `kj::SecureNetworkWrapper::wrapClient()`: client-side TLS over the owned plaintext stream,
+/// verifying (and SNI-advertising) `expected_server_hostname`.
+///
+/// # Errors
+///
+/// Fails on an invalid server name, or when the stream cannot be served (see
+/// [`wrap_tls_server`]).
+pub fn wrap_tls_client(
+    stream: kj_rs::KjOwn<crate::ffi::AsyncIoStream>,
+    config: &HyperTlsClientConfig,
+    expected_server_hostname: &str,
+) -> Result<kj_rs::KjOwn<crate::ffi::AsyncIoStream>> {
+    let params = TlsParams::new(config, expected_server_hostname)?;
+    let served = crate::serve::serve_kj_stream(stream)?;
+    let tls = LazyTls::client(params, served.io);
+    Ok(crate::ffi::wrap_rust_stream(Box::new(
+        crate::rust_stream::RustStream::new(tls, served.pump),
+    )))
 }

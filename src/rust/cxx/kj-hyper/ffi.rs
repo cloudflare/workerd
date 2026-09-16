@@ -25,15 +25,15 @@ use crate::client::PendingHttpRequest;
 use crate::client::RequestBodySink;
 use crate::client::TunnelOutcome;
 use crate::client::WsUpgradeOutcome;
-use crate::client_tls::RustlsConn;
-use crate::client_tls::new_rustls_client_conn;
-use crate::client_tls::new_rustls_server_conn;
+use crate::rust_stream::RustStream;
 use crate::server::HyperConnectResponder;
 use crate::server::HyperConnection;
 use crate::server::HyperResponseSender;
 use crate::tls;
 use crate::tls::HyperTlsClientConfig;
 use crate::tls::HyperTlsServerConfig;
+use crate::tls::wrap_tls_client;
+use crate::tls::wrap_tls_server;
 use crate::translate::HyperRequestBody;
 use crate::translate::HyperResponseBodySink;
 use crate::translate::ServeRequestBody;
@@ -196,6 +196,20 @@ mod bridge {
         /// A fresh kj-rs-io wrapper over a native stream that could not be taken.
         #[cxx_name = "wrapTokioStream"]
         fn wrap_tokio_stream(stream: Box<TokioStream>) -> KjOwn<AsyncIoStream>;
+
+        /// Whether the stream is a `RustStream` wrapper (`RustAsyncIoStream`,
+        /// hyper-server-ffi.c++): Rust underneath, taken back out by `release_rust_stream`.
+        #[cxx_name = "isRustStream"]
+        fn is_rust_stream(stream: &AsyncIoStream) -> bool;
+
+        /// Takes the Rust stream out of its wrapper and destroys the wrapper. Only valid after
+        /// `is_rust_stream`.
+        #[cxx_name = "releaseRustStream"]
+        fn release_rust_stream(stream: KjOwn<AsyncIoStream>) -> Box<RustStream>;
+
+        /// Wraps a Rust stream as a `kj::AsyncIoStream` for kj consumers.
+        #[cxx_name = "wrapRustStream"]
+        fn wrap_rust_stream(stream: Box<RustStream>) -> KjOwn<AsyncIoStream>;
 
         // The two directions of a pumped foreign `kj::AsyncIoStream` (serve_kj_stream's
         // duplex-pump fallback, serve.rs), as two distinct C++ objects sharing ownership of the
@@ -560,55 +574,51 @@ mod bridge {
     }
 
     // =====================================================================================
-    // Raw-socket TLS: a synchronous rustls state machine driven by the C++ `RustlsStream`
-    // (workerd tls-network.c++) over an already-connected plaintext `kj::AsyncIoStream`.
-    // Client-side connections back the sockets API's startTls and TLS-from-the-start
-    // connects; server-side connections back the rustls SecureNetworkWrapper's
-    // wrapPort()/wrapServer() (TLS listeners). See client_tls.rs for the orchestration
-    // contract.
+    // Rust streams handed to kj, and raw-socket TLS built on them (tls.rs, rust_stream.rs).
+    // The rustls SecureNetworkWrapper (workerd tls-network.c++) wraps plaintext kj streams in
+    // both directions: client-side for the sockets API's startTls and TLS-from-the-start
+    // connects, server-side for TLS listeners. The wrapped stream comes back as a RustStream,
+    // which the hyper server/client later take natively (serve.rs).
 
     extern "Rust" {
-        /// A synchronous rustls connection (client- or server-side; see the constructors).
-        /// Holds no I/O handles; the C++ side performs all wire I/O on the underlying
-        /// plaintext stream and feeds this machine.
-        type RustlsConn;
+        /// The Rust side of a `kj::AsyncIoStream` implemented in Rust (wrapped by
+        /// `RustAsyncIoStream`, see hyper-server-ffi.c++). All methods take `&self`: kj allows
+        /// one read and one write in flight concurrently.
+        type RustStream;
 
-        /// Build a client TLS connection verifying (and SNI-advertising)
-        /// `expected_server_hostname`, using `config` (the same rustls client config the HTTPS
-        /// client uses). Errors on an invalid server name or unusable config.
-        fn new_rustls_client_conn(
+        /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, min_bytes, buffer.len())`.
+        async unsafe fn read<'a>(
+            self: &'a RustStream,
+            buffer: &'a mut [u8],
+            min_bytes: usize,
+        ) -> Result<usize>;
+
+        /// Corresponds to `kj::AsyncOutputStream::write()`.
+        async unsafe fn write<'a>(self: &'a RustStream, buffer: &'a [u8]) -> Result<()>;
+
+        /// Corresponds to `kj::AsyncIoStream::shutdownWrite()`: async because the stream may
+        /// have to flush (a TLS close_notify); the C++ wrapper runs it detached.
+        async unsafe fn shutdown_write<'a>(self: &'a RustStream) -> Result<()>;
+
+        /// Corresponds to `kj::AsyncIoStream::abortRead()`.
+        fn abort_read(self: &RustStream);
+
+        /// `kj::SecureNetworkWrapper::wrapServer()`: server-side TLS (per `config`) over the
+        /// owned plaintext stream; the handshake runs on first I/O. Errors when the stream
+        /// cannot be served (see serve.rs).
+        fn wrap_tls_server(
+            stream: KjOwn<AsyncIoStream>,
+            config: &HyperTlsServerConfig,
+        ) -> Result<KjOwn<AsyncIoStream>>;
+
+        /// `kj::SecureNetworkWrapper::wrapClient()`: client-side TLS over the owned plaintext
+        /// stream, verifying (and SNI-advertising) `expected_server_hostname`. Errors on an
+        /// invalid server name or when the stream cannot be served.
+        fn wrap_tls_client(
+            stream: KjOwn<AsyncIoStream>,
             config: &HyperTlsClientConfig,
             expected_server_hostname: &str,
-        ) -> Result<Box<RustlsConn>>;
-
-        /// Build a server-side TLS connection using `config` (the same rustls server config
-        /// the hyper https listener uses). The handshake is driven by the first reads: the
-        /// peer speaks first (ClientHello).
-        fn new_rustls_server_conn(config: &HyperTlsServerConfig) -> Result<Box<RustlsConn>>;
-
-        /// Whether the TLS handshake flight is still in progress.
-        fn is_handshaking(self: &RustlsConn) -> bool;
-
-        /// Whether rustls has ciphertext queued to send on the wire.
-        fn wants_tls_write(self: &RustlsConn) -> bool;
-
-        /// Drain all queued outgoing ciphertext (must be sent before the next call; the C++
-        /// side serializes this with the wire write so record order is preserved).
-        fn take_tls_out(self: &mut RustlsConn) -> Result<Vec<u8>>;
-
-        /// Feed ciphertext read from the wire; processes completed records (errors carry
-        /// kj-parity certificate-verification text).
-        fn feed_tls_in(self: &mut RustlsConn, data: &[u8]) -> Result<()>;
-
-        /// Drain decrypted application data into `buf`: returns bytes read, `0` for clean EOF,
-        /// `-1` when no plaintext is available yet (read more ciphertext and feed it).
-        fn read_plaintext(self: &mut RustlsConn, buf: &mut [u8]) -> Result<i64>;
-
-        /// Queue application data for encryption (emitted by the next `take_tls_out`).
-        fn write_plaintext(self: &mut RustlsConn, data: &[u8]) -> Result<()>;
-
-        /// Queue a `close_notify` alert (kj `shutdownWrite()`).
-        fn send_close_notify(self: &mut RustlsConn);
+        ) -> Result<KjOwn<AsyncIoStream>>;
     }
 
     // =====================================================================================
@@ -983,16 +993,10 @@ fn start_request(
 fn take_connection_socket(
     stream: kj_rs::KjOwn<AsyncIoStream>,
 ) -> kj::Result<(crate::serve::ServeIo, Option<crate::serve::StreamPump>)> {
-    match crate::serve::take_kj_socket(stream) {
-        Ok(io) => Ok((io, None)),
-        Err(e) => {
-            // No native socket: bridge through serve_kj_stream's duplex pump tier. That in turn
-            // fails only for a kj-rs-io wrapper still borrowed by an in-flight I/O operation (a
-            // caller contract violation); surface the error rather than serve a half-owned stream.
-            let served = crate::serve::serve_kj_stream(e.stream).map_err(|e| e.error)?;
-            Ok((served.io, served.pump))
-        }
-    }
+    // Fails only for a kj-rs-io wrapper still borrowed by an in-flight I/O operation (a caller
+    // contract violation); surface the error rather than serve a half-owned stream.
+    let served = crate::serve::serve_kj_stream(stream).map_err(|e| e.error)?;
+    Ok((served.io, served.pump))
 }
 
 // ======================================================================================

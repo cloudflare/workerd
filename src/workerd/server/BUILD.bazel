@@ -203,8 +203,8 @@ wd_cc_library(
         "tls-network.h",
     ],
     # One TLS-engine kj::SecureNetworkWrapper surface for both configs: kj::TlsContext (OpenSSL,
-    # kj-tls) in the default cxx config, the rustls-backed wrapper (kj-hyper's RustlsConn record
-    # state machine) under --//:io_backend=rust -- callers (server.c++'s TLS paths, both client
+    # kj-tls) in the default cxx config, the rustls-backed wrapper (kj-hyper's tokio-rustls
+    # streams, wrap_tls_client/wrap_tls_server) under --//:io_backend=rust -- callers (server.c++'s TLS paths, both client
     # and listener sides, and pyodide.c++'s bundle download) need no per-config #if; the single
     # WORKERD_RUST_IO_BACKEND_RUST #if selecting the arms lives in tls-network.c++, mirroring
     # :cli-io-backend. The header is gate-free, so `local_defines` suffices.
@@ -215,7 +215,7 @@ wd_cc_library(
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async-core",
     ] + select({
-        # The TLS engine: rustls (via kj-hyper's client_tls state machine) under
+        # The TLS engine: rustls (kj-hyper's tokio-rustls streams) under
         # --//:io_backend=rust, where kj-tls (OpenSSL) must not be linked; kj-tls otherwise.
         "//:io_backend_rust": ["//src/rust/cxx/kj-hyper"],
         "//conditions:default": ["@capnp-cpp//src/kj/compat:kj-tls"],

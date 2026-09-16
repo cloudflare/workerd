@@ -6,7 +6,9 @@
 //! - **Unwrap (native path).** A kj-rs-io stream gives up its tokio socket outright: the C++
 //!   wrapper is consumed (`releaseTokioStream`, kj-stream.h) and `TokioStream::into_socket`
 //!   takes the socket, or hands the stream back re-wrapped if an operation still holds a share
-//!   of it. Zero copies, zero FFI crossings per read.
+//!   of it. Zero copies, zero FFI crossings per read. A stream that is Rust underneath its kj
+//!   wrapper already -- a `RustStream` (rust_stream.rs), e.g. the TLS streams of
+//!   tls-network.c++ -- is taken back out the same way, its pump (if it had one) included.
 //! - **Pump (foreign streams).** Anything else -- in-memory pipes, promised streams, TLS and
 //!   other byte-transforming wrappers -- is bridged by a pump future that owns the stream and
 //!   moves bytes through bridged `kj::io` promises into a rendezvous channel with kj-pipe
@@ -17,9 +19,9 @@
 //!
 //! ```text
 //! serve_kj_stream(KjOwn<AsyncIoStream>) -> Result<ServedKjStream, TakeSocketError>
-//!     |-- native path: wrapper consumed -> ServeIo::Tcp/Unix
+//!     |-- native path: wrapper consumed -> ServeIo::Tcp/Unix, or ServeIo::Rust (+ the pump it carried)
 //!     `-- pump path:   ServeIo::Duplex (consumer end of the rendezvous) + StreamPump (!Send) owning the KjOwn
-//! take_kj_socket(KjOwn<AsyncIoStream>)  -> Result<ServeIo, TakeSocketError>   (native path only)
+//! take_kj_socket(KjOwn<AsyncIoStream>)  -> Result<ServeIo, TakeSocketError>   (native path only, no pump)
 //! ```
 //!
 //! **Where the result may be driven.** A native `ServeIo` is a tokio socket registered with the
@@ -59,10 +61,15 @@ use tokio::net::TcpStream;
 use tokio::net::UnixStream;
 
 use crate::ffi::AsyncIoStream;
+use crate::ffi::is_rust_stream;
 use crate::ffi::is_tokio_stream;
+use crate::ffi::release_rust_stream;
 use crate::ffi::release_tokio_stream;
 use crate::ffi::split_kj_stream;
+use crate::ffi::wrap_rust_stream;
 use crate::ffi::wrap_tokio_stream;
+use crate::rust_stream::BoxedIo;
+use crate::rust_stream::RustStream;
 
 /// Read chunk size for the pump fallback.
 const PUMP_BUF: usize = 8192;
@@ -76,6 +83,9 @@ pub enum ServeIo {
     Tcp(TcpStream),
     #[cfg(unix)]
     Unix(UnixStream),
+    /// A stream that was already Rust underneath its kj wrapper (a TLS stream, see
+    /// `rust_stream.rs`), taken back out of it.
+    Rust(BoxedIo),
     Duplex(PumpedStream),
 }
 
@@ -397,7 +407,7 @@ impl ServeIo {
             Self::Tcp(s) => s.set_nodelay(nodelay),
             #[cfg(unix)]
             Self::Unix(_) => Ok(()),
-            Self::Duplex(_) => Ok(()),
+            Self::Rust(_) | Self::Duplex(_) => Ok(()),
         }
     }
 }
@@ -422,6 +432,7 @@ impl AsyncRead for ServeIo {
             Self::Tcp(s) => Pin::new(s).poll_read(cx, buf),
             #[cfg(unix)]
             Self::Unix(s) => Pin::new(s).poll_read(cx, buf),
+            Self::Rust(s) => s.as_mut().poll_read(cx, buf),
             Self::Duplex(s) => Pin::new(s).poll_read(cx, buf),
         }
     }
@@ -437,6 +448,7 @@ impl AsyncWrite for ServeIo {
             Self::Tcp(s) => Pin::new(s).poll_write(cx, buf),
             #[cfg(unix)]
             Self::Unix(s) => Pin::new(s).poll_write(cx, buf),
+            Self::Rust(s) => s.as_mut().poll_write(cx, buf),
             Self::Duplex(s) => Pin::new(s).poll_write(cx, buf),
         }
     }
@@ -446,6 +458,7 @@ impl AsyncWrite for ServeIo {
             Self::Tcp(s) => Pin::new(s).poll_flush(cx),
             #[cfg(unix)]
             Self::Unix(s) => Pin::new(s).poll_flush(cx),
+            Self::Rust(s) => s.as_mut().poll_flush(cx),
             Self::Duplex(s) => Pin::new(s).poll_flush(cx),
         }
     }
@@ -455,6 +468,7 @@ impl AsyncWrite for ServeIo {
             Self::Tcp(s) => Pin::new(s).poll_shutdown(cx),
             #[cfg(unix)]
             Self::Unix(s) => Pin::new(s).poll_shutdown(cx),
+            Self::Rust(s) => s.as_mut().poll_shutdown(cx),
             Self::Duplex(s) => Pin::new(s).poll_shutdown(cx),
         }
     }
@@ -468,6 +482,7 @@ impl AsyncWrite for ServeIo {
             Self::Tcp(s) => Pin::new(s).poll_write_vectored(cx, bufs),
             #[cfg(unix)]
             Self::Unix(s) => Pin::new(s).poll_write_vectored(cx, bufs),
+            Self::Rust(s) => s.as_mut().poll_write_vectored(cx, bufs),
             Self::Duplex(s) => Pin::new(s).poll_write_vectored(cx, bufs),
         }
     }
@@ -477,6 +492,7 @@ impl AsyncWrite for ServeIo {
             Self::Tcp(s) => s.is_write_vectored(),
             #[cfg(unix)]
             Self::Unix(s) => s.is_write_vectored(),
+            Self::Rust(s) => s.is_write_vectored(),
             Self::Duplex(s) => s.is_write_vectored(),
         }
     }
@@ -546,15 +562,26 @@ enum NotTaken {
 }
 
 /// Tier-1 unwrap: if the owned stream is kj-rs-io-originated, consumes the wrapper and returns
-/// its native tokio socket; otherwise hands the stream back, saying why.
+/// its native tokio socket; if it is a `RustStream` wrapper, takes the Rust stream (and the
+/// pump it carried) back out; otherwise hands the stream back, saying why.
 fn unwrap_native(
     stream: KjOwn<AsyncIoStream>,
-) -> Result<ServeIo, (KjOwn<AsyncIoStream>, NotTaken)> {
+) -> Result<ServedKjStream, (KjOwn<AsyncIoStream>, NotTaken)> {
+    if is_rust_stream(stream.as_ref()) {
+        let (io, pump) = release_rust_stream(stream).into_parts();
+        return Ok(ServedKjStream {
+            io: ServeIo::Rust(io),
+            pump,
+        });
+    }
     if !is_tokio_stream(stream.as_ref()) {
         return Err((stream, NotTaken::Foreign));
     }
     match release_tokio_stream(stream).into_socket() {
-        Ok(socket) => Ok(ServeIo::from(socket)),
+        Ok(socket) => Ok(ServedKjStream {
+            io: ServeIo::from(socket),
+            pump: None,
+        }),
         Err((native, error)) => Err((wrap_tokio_stream(native), NotTaken::Refused(error))),
     }
 }
@@ -575,7 +602,26 @@ fn unwrap_native(
 /// a kj-rs-io stream that cannot be unwrapped right now.
 pub fn take_kj_socket(stream: KjOwn<AsyncIoStream>) -> Result<ServeIo, TakeSocketError> {
     match unwrap_native(stream) {
-        Ok(io) => Ok(io),
+        Ok(ServedKjStream { io, pump: None }) => Ok(io),
+        // A Rust stream over a pumped foreign stream: not socket-shaped. Re-wrapped, untouched.
+        Ok(ServedKjStream {
+            io,
+            pump: Some(pump),
+        }) => {
+            let io: BoxedIo = match io {
+                ServeIo::Rust(io) => io,
+                other => Box::pin(other),
+            };
+            Err(TakeSocketError {
+                stream: wrap_rust_stream(Box::new(RustStream::new(io, Some(pump)))),
+                error: KjError::new(
+                    KjExceptionType::Failed,
+                    "cannot take the stream's socket natively: a Rust stream over a pumped \
+                     foreign stream (serve it through serve_kj_stream instead)"
+                        .to_owned(),
+                ),
+            })
+        }
         Err((stream, NotTaken::Foreign)) => Err(TakeSocketError {
             stream,
             error: KjError::new(
@@ -606,7 +652,7 @@ pub fn take_kj_socket(stream: KjOwn<AsyncIoStream>) -> Result<ServeIo, TakeSocke
 /// I/O operation still owns a share of it), or when the pump's end objects cannot be allocated.
 pub fn serve_kj_stream(stream: KjOwn<AsyncIoStream>) -> Result<ServedKjStream, TakeSocketError> {
     let stream = match unwrap_native(stream) {
-        Ok(io) => return Ok(ServedKjStream { io, pump: None }),
+        Ok(served) => return Ok(served),
         Err((stream, NotTaken::Foreign)) => stream,
         Err((stream, NotTaken::Refused(error))) => return Err(TakeSocketError { stream, error }),
     };

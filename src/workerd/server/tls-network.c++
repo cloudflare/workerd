@@ -19,152 +19,14 @@ namespace {
 // that to populate the socket's kj::TlsStarterCallback), wrapServer()/wrapPort() serve TLS
 // listeners. There is no kj::TlsContext under this backend, so we provide a rustls-backed
 // kj::SecureNetworkWrapper instead; kj's connect() machinery (the TransitionaryAsyncIoStream /
-// tlsStarter wiring) and server.c++'s upstream listener shape are reused verbatim. The rustls
-// record processing is a synchronous, pointer-free state machine in
-// src/rust/cxx/kj-hyper/client_tls.rs (RustlsConn, client- or server-side); this stream owns
-// the plaintext kj::AsyncIoStream and drives that machine over it, so it works over native
-// kj-rs-io sockets and foreign (e.g. kj::newPromisedStream, in-memory pipe) plaintext streams
-// alike. Deliberately no getFd()/getWin32Handle() passthrough: this stream transforms bytes,
-// so exposing the raw transport handle would let consumers (e.g. the hyper server's native
-// socket takeover) bypass the TLS layer.
-class RustlsStream final: public kj::AsyncIoStream {
- public:
-  RustlsStream(kj::Own<kj::AsyncIoStream> inner, ::rust::Box<rust::kj_hyper::RustlsConn> conn)
-      : inner(kj::mv(inner)),
-        conn(kj::mv(conn)) {}
-
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    co_await ensureHandshake();
-    auto* out = reinterpret_cast<uint8_t*>(buffer);
-    size_t total = 0;
-    while (total < minBytes) {
-      int64_t n = conn->read_plaintext(::rust::Slice<uint8_t>(out + total, maxBytes - total));
-      if (n > 0) {
-        total += static_cast<size_t>(n);
-        continue;
-      }
-      if (n == 0) break;  // clean TLS EOF (peer close_notify / truncation)
-      // n < 0: no plaintext buffered; pull more ciphertext off the wire and feed rustls.
-      size_t r = co_await inner->tryRead(readBuf.begin(), 1, readBuf.size());
-      if (r == 0) break;  // underlying transport EOF
-      conn->feed_tls_in(
-          ::rust::Slice<const uint8_t>(reinterpret_cast<const uint8_t*>(readBuf.begin()), r));
-      co_await flushOut();  // records rustls produced in response (acks, key updates, alerts)
-    }
-    co_return total;
-  }
-
-  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
-    co_await ensureHandshake();
-    conn->write_plaintext(::rust::Slice<const uint8_t>(
-        reinterpret_cast<const uint8_t*>(buffer.begin()), buffer.size()));
-    co_await flushOut();
-  }
-
-  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
-    co_await ensureHandshake();
-    for (auto& piece: pieces) {
-      conn->write_plaintext(::rust::Slice<const uint8_t>(
-          reinterpret_cast<const uint8_t*>(piece.begin()), piece.size()));
-    }
-    co_await flushOut();
-  }
-
-  kj::Promise<void> whenWriteDisconnected() override {
-    return inner->whenWriteDisconnected();
-  }
-
-  void shutdownWrite() override {
-    // Best-effort close_notify (kj's TLS shutdownWrite is likewise best-effort), then shut down
-    // the underlying write half. Detached and owned so it survives past this void call.
-    conn->send_close_notify();
-    shutdownTask = flushOut().then([this]() {
-      inner->shutdownWrite();
-    }).eagerlyEvaluate([](kj::Exception&&) {});
-  }
-
-  void abortRead() override {
-    inner->abortRead();
-  }
-
-  void getsockopt(int level, int option, void* value, uint* length) override {
-    inner->getsockopt(level, option, value, length);
-  }
-  void setsockopt(int level, int option, const void* value, uint length) override {
-    inner->setsockopt(level, option, value, length);
-  }
-  void getsockname(struct sockaddr* addr, uint* length) override {
-    inner->getsockname(addr, length);
-  }
-  void getpeername(struct sockaddr* addr, uint* length) override {
-    inner->getpeername(addr, length);
-  }
-  kj::Maybe<int> getFd() const override {
-    // Deliberately none; see the class comment.
-    return kj::none;
-  }
-
- private:
-  // Drives the TLS handshake to completion exactly once; every read/write awaits it first. Lazily
-  // started on first I/O: for a client connection the first flushOut sends the ClientHello rustls
-  // queued at construction; for a server connection the peer speaks first, so the handshake is
-  // driven by the read loop. (Laziness is also what keeps a TLS listener's accept loop live:
-  // accepted streams are returned immediately and each handshake runs inside its own
-  // connection's task, the same accept-liveness property kj's TlsConnectionReceiver gets from
-  // parallelizing handshakes.)
-  kj::Promise<void> ensureHandshake() {
-    KJ_IF_SOME(p, handshake) {
-      return p.addBranch();
-    }
-    return handshake.emplace(doHandshake().fork()).addBranch();
-  }
-
-  kj::Promise<void> doHandshake() {
-    co_await flushOut();  // ClientHello for a client conn (+ any subsequent flights); server no-op
-    while (conn->is_handshaking()) {
-      size_t r = co_await inner->tryRead(readBuf.begin(), 1, readBuf.size());
-      if (r == 0) {
-        kj::throwFatalException(
-            KJ_EXCEPTION(DISCONNECTED, "TLS handshake: peer closed the connection"));
-      }
-      conn->feed_tls_in(
-          ::rust::Slice<const uint8_t>(reinterpret_cast<const uint8_t*>(readBuf.begin()), r));
-      co_await flushOut();
-    }
-  }
-
-  // Serializes production of outgoing ciphertext with its wire write, so TLS records reach the
-  // wire in the sequence-number order rustls assigned them (concurrent read+write would otherwise
-  // interleave two inner->write()s -- a kj contract violation -- and reorder records). Held across
-  // the awaits; released on completion or on cancellation via the KJ_DEFER, which is armed BEFORE
-  // the first suspension so that a flush cancelled while still queued at `co_await prev` cannot
-  // strand the lock (destroying the fulfiller unfulfilled would poison `writeLock` -- every later
-  // I/O on the stream would fail with "PromiseFulfiller was destroyed"). The defer releases by
-  // *chaining* a branch of `prev` rather than fulfilling directly: if we are cancelled while
-  // still waiting our turn, our successor keeps waiting for our predecessors to finish instead of
-  // being woken early into their in-flight write.
-  kj::Promise<void> flushOut() {
-    auto release = kj::newPromiseAndFulfiller<kj::Promise<void>>();
-    auto prev = kj::mv(writeLock).fork();
-    writeLock = kj::mv(release.promise);
-    KJ_DEFER(release.fulfiller->fulfill(prev.addBranch()));
-    co_await prev.addBranch();
-    while (conn->wants_tls_write()) {
-      auto bytes = conn->take_tls_out();
-      if (bytes.size() == 0) break;
-      co_await inner->write(
-          kj::arrayPtr(reinterpret_cast<const kj::byte*>(bytes.data()), bytes.size()));
-    }
-  }
-
-  kj::Own<kj::AsyncIoStream> inner;
-  ::rust::Box<rust::kj_hyper::RustlsConn> conn;
-  // Max TLS record payload (16 KiB) plus header/MAC slack.
-  kj::Array<kj::byte> readBuf = kj::heapArray<kj::byte>(16384 + 2048);
-  kj::Maybe<kj::ForkedPromise<void>> handshake;
-  kj::Promise<void> writeLock = kj::READY_NOW;
-  kj::Promise<void> shutdownTask = kj::READY_NOW;
-};
+// tlsStarter wiring) and server.c++'s upstream listener shape are reused verbatim. The TLS
+// streams themselves are Rust (kj-hyper tls.rs / rust_stream.rs): wrap_tls_client() /
+// wrap_tls_server() take the plaintext stream's tokio socket natively (a kj-rs-io socket) or
+// pump a foreign stream (an in-memory pipe, a promised stream), put tokio-rustls over it, and
+// hand it back to kj as a RustStream -- which the hyper server and client then take natively
+// again, so an https connection reaches hyper as a plain tokio TLS stream. Deliberately no
+// getFd() passthrough on that stream: it transforms bytes, so exposing the raw transport handle
+// would let consumers bypass the TLS layer.
 
 // A kj::NetworkAddress that TLS-wraps every connection via a kj::SecureNetworkWrapper, verifying
 // the server against `hostname`. Mirrors kj's own TlsNetworkAddress (kj/compat/tls.c++) so
@@ -304,8 +166,8 @@ class RustlsConnectionReceiver final: public kj::ConnectionReceiver {
   kj::Own<kj::ConnectionReceiver> inner;
 };
 
-// rustls-backed kj::SecureNetworkWrapper: wrapClient() (the socket startTls path, see
-// RustlsStream), wrapAddress()/wrapNetwork() (TLS-from-the-start connects), and -- when the
+// rustls-backed kj::SecureNetworkWrapper: wrapClient() (the socket startTls path),
+// wrapAddress()/wrapNetwork() (TLS-from-the-start connects), and -- when the
 // configuration includes a keypair -- wrapServer()/wrapPort() (TLS listeners). The
 // AuthenticatedStream client direction is unused under this backend.
 class RustlsSecureNetworkWrapper final: public kj::SecureNetworkWrapper {
@@ -333,22 +195,19 @@ class RustlsSecureNetworkWrapper final: public kj::SecureNetworkWrapper {
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> wrapClient(
       kj::Own<kj::AsyncIoStream> stream, kj::StringPtr expectedServerHostname) override {
-    // new_rustls_client_conn throws (rejecting this coroutine) on an invalid server name.
-    auto conn = rust::kj_hyper::new_rustls_client_conn(
-        *clientConfig, expectedServerHostname.as<kj_rs::RustUncheckedUtf8>());
-    co_return kj::heap<RustlsStream>(kj::mv(stream), kj::mv(conn));
+    // wrap_tls_client throws (rejecting this coroutine) on an invalid server name.
+    co_return rust::kj_hyper::wrap_tls_client(
+        kj::mv(stream), *clientConfig, expectedServerHostname.as<kj_rs::RustUncheckedUtf8>());
   }
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> wrapServer(kj::Own<kj::AsyncIoStream> stream) override {
-    auto conn = rust::kj_hyper::new_rustls_server_conn(getServerConfig());
-    co_return kj::heap<RustlsStream>(kj::mv(stream), kj::mv(conn));
+    co_return rust::kj_hyper::wrap_tls_server(kj::mv(stream), getServerConfig());
   }
 
   kj::Promise<kj::AuthenticatedStream> wrapServer(kj::AuthenticatedStream stream) override {
     // The transport (network) peer identity is passed through untouched; server.c++ unwraps a
     // kj TlsPeerIdentity to exactly that under the default build (see unwrapTlsPeerIdentity).
-    auto conn = rust::kj_hyper::new_rustls_server_conn(getServerConfig());
-    stream.stream = kj::heap<RustlsStream>(kj::mv(stream.stream), kj::mv(conn));
+    stream.stream = rust::kj_hyper::wrap_tls_server(kj::mv(stream.stream), getServerConfig());
     co_return kj::mv(stream);
   }
 

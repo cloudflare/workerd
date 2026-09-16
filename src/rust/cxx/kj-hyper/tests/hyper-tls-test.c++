@@ -535,50 +535,98 @@ class NullEntropy: public kj::EntropySource {
   }
 };
 
+// How the accepted connection reaches hyper.
+enum class InboundPath {
+  // newHyperHttpConnection(stream, tlsConfig): hyper's own TLS accept over the taken socket.
+  HyperTls,
+  // The SecureNetworkWrapper shape (workerd tls-network.c++): wrap_tls_server() first, then
+  // newHyperHttpConnection(stream) takes the Rust TLS stream back out of its kj wrapper.
+  WrappedTcp,
+  // The same over an in-memory pipe: the plaintext stream is foreign, so the Rust TLS stream
+  // carries the pump that bridges it.
+  WrappedPipe,
+};
+
+struct InboundOptions {
+  bool requireClientCerts = false;
+  bool presentClientCert = false;
+  InboundPath path = InboundPath::HyperTls;
+  // Client side: kj's OpenSSL TlsContext (default), or wrap_tls_client() -- the Rust TLS
+  // stream driven by a kj HttpClient through the RustAsyncIoStream bridge, the shape of the
+  // sockets API's startTls() under the rust backend.
+  bool rustClient = false;
+  bool clientTrustsCa = true;
+};
+
 struct InboundTlsFixture {
-  explicit InboundTlsFixture(bool requireClientCerts = false, bool presentClientCert = false) {
+  explicit InboundTlsFixture(bool requireClientCerts = false, bool presentClientCert = false)
+      : InboundTlsFixture(InboundOptions{
+          .requireClientCerts = requireClientCerts, .presentClientCert = presentClientCert}) {}
+
+  explicit InboundTlsFixture(InboundOptions opts) {
     ensureTokioInitialized();
 
     table = kj::HttpHeaderTable::Builder().build();
     service = kj::heap<TestHttpService>(*table);
 
-    auto tlsConfig =
-        workerd::rust::kj_hyper::newHyperTlsServerConfig(makeTlsServerOptions(requireClientCerts));
+    auto tlsConfig = workerd::rust::kj_hyper::newHyperTlsServerConfig(
+        makeTlsServerOptions(opts.requireClientCerts));
 
-    // Loopback pair, mirroring workerd's HttpListener: the accept happens in "C++", the
-    // accepted stream's socket is taken natively by hyper together with the rustls config.
-    auto listener =
-        io.provider->getNetwork().parseAddress("127.0.0.1", 0).wait(io.waitScope)->listen();
-    auto connectPromise = io.provider->getNetwork()
-                              .parseAddress("127.0.0.1", listener->getPort())
-                              .wait(io.waitScope)
-                              ->connect();
-    auto serverStream = listener->accept().wait(io.waitScope);
-    auto clientStream = connectPromise.wait(io.waitScope);
+    kj::Own<kj::AsyncIoStream> serverStream;
+    kj::Own<kj::AsyncIoStream> clientStream;
+    if (opts.path == InboundPath::WrappedPipe) {
+      auto pipe = io.provider->newTwoWayPipe();
+      serverStream = kj::mv(pipe.ends[0]);
+      clientStream = kj::mv(pipe.ends[1]);
+    } else {
+      // Loopback pair, mirroring workerd's HttpListener: the accept happens in "C++", the
+      // accepted stream's socket is taken natively by hyper together with the rustls config.
+      auto listener =
+          io.provider->getNetwork().parseAddress("127.0.0.1", 0).wait(io.waitScope)->listen();
+      auto connectPromise = io.provider->getNetwork()
+                                .parseAddress("127.0.0.1", listener->getPort())
+                                .wait(io.waitScope)
+                                ->connect();
+      serverStream = listener->accept().wait(io.waitScope);
+      clientStream = connectPromise.wait(io.waitScope);
+    }
 
-    connection = workerd::rust::kj_hyper::newHyperHttpConnection(
-        *table, *service, kj::mv(serverStream), *tlsConfig);
+    if (opts.path == InboundPath::HyperTls) {
+      connection = workerd::rust::kj_hyper::newHyperHttpConnection(
+          *table, *service, kj::mv(serverStream), *tlsConfig);
+    } else {
+      connection = workerd::rust::kj_hyper::newHyperHttpConnection(*table, *service,
+          workerd::rust::kj_hyper::wrap_tls_server(kj::mv(serverStream), *tlsConfig));
+    }
 
     // serve() legitimately rejects in the failed-handshake tests (the client side observes
     // and asserts the failure); swallow it so no stray ERROR reaches the test log.
     serveTask =
         connection->serve().catch_([](kj::Exception&& e) {}).eagerlyEvaluate(nullptr).fork();
 
-    // The kj (OpenSSL) client side of the TLS session.
-    kj::TlsContext::Options clientOptions;
-    clientOptions.useSystemTrustStore = false;
-    kj::TlsCertificate caCert(CA_CERT);
-    clientOptions.trustedCertificates = kj::arrayPtr(&caCert, 1);
-    kj::TlsKeypair clientKeypair{
-      .privateKey = kj::TlsPrivateKey(CLIENT_KEY), .certificate = kj::TlsCertificate(CLIENT_CERT)};
-    if (presentClientCert) {
-      clientOptions.defaultKeypair = clientKeypair;
-    }
-    clientTls = kj::heap<kj::TlsContext>(kj::mv(clientOptions));
+    if (opts.rustClient) {
+      // The Rust TLS stream, handed to kj: its handshake runs on the first request.
+      auto clientConfig = workerd::rust::kj_hyper::newHyperTlsClientConfig(makeTlsClientOptions(
+          {.trustCa = opts.clientTrustsCa, .presentClientCert = opts.presentClientCert}));
+      tlsStream = workerd::rust::kj_hyper::wrap_tls_client(
+          kj::mv(clientStream), *clientConfig, "example.com");
+    } else {
+      // The kj (OpenSSL) client side of the TLS session.
+      kj::TlsContext::Options clientOptions;
+      clientOptions.useSystemTrustStore = false;
+      kj::TlsCertificate caCert(CA_CERT);
+      clientOptions.trustedCertificates = kj::arrayPtr(&caCert, 1);
+      kj::TlsKeypair clientKeypair{.privateKey = kj::TlsPrivateKey(CLIENT_KEY),
+        .certificate = kj::TlsCertificate(CLIENT_CERT)};
+      if (opts.presentClientCert) {
+        clientOptions.defaultKeypair = clientKeypair;
+      }
+      clientTls = kj::heap<kj::TlsContext>(kj::mv(clientOptions));
 
-    // Throws if the handshake fails (e.g. the server requires a certificate we didn't send);
-    // callers expecting failure catch it.
-    tlsStream = clientTls->wrapClient(kj::mv(clientStream), "example.com").wait(io.waitScope);
+      // Throws if the handshake fails (e.g. the server requires a certificate we didn't send);
+      // callers expecting failure catch it.
+      tlsStream = clientTls->wrapClient(kj::mv(clientStream), "example.com").wait(io.waitScope);
+    }
     client = kj::newHttpClient(*table, *tlsStream,
         {.entropySource = entropy,
           .webSocketCompressionMode = kj::HttpClientSettings::MANUAL_COMPRESSION});
@@ -627,6 +675,54 @@ KJ_TEST("hyper https server: kj TLS client round trip with keep-alive") {
     auto body = resp.body->readAllText().wait(f.io.waitScope);
     KJ_EXPECT(body == "Hello TLS!", body);
   }
+}
+
+// The rust backend's SecureNetworkWrapper (workerd tls-network.c++) shapes: wrap_tls_server()
+// / wrap_tls_client() hand kj a Rust TLS stream; hyper takes it back out natively.
+
+KJ_TEST("wrap_tls_server: the wrapper's TLS stream over a TCP socket is served natively by hyper") {
+  InboundTlsFixture f({.path = InboundPath::WrappedTcp});
+
+  for (int i = 0; i < 2; i++) {
+    auto req = f.client->request(kj::HttpMethod::GET, "/hello", f.makeHeaders(), uint64_t(0));
+    auto resp = req.response.wait(f.io.waitScope);
+    KJ_EXPECT(resp.statusCode == 200, resp.statusCode);
+    auto body = resp.body->readAllText().wait(f.io.waitScope);
+    KJ_EXPECT(body == "Hello TLS!", body);
+  }
+}
+
+KJ_TEST("wrap_tls_server over an in-memory pipe: the pump rides inside the Rust TLS stream") {
+  InboundTlsFixture f({.path = InboundPath::WrappedPipe});
+
+  for (int i = 0; i < 2; i++) {
+    auto req = f.client->request(kj::HttpMethod::GET, "/hello", f.makeHeaders(), uint64_t(0));
+    auto resp = req.response.wait(f.io.waitScope);
+    KJ_EXPECT(resp.statusCode == 200, resp.statusCode);
+    auto body = resp.body->readAllText().wait(f.io.waitScope);
+    KJ_EXPECT(body == "Hello TLS!", body);
+  }
+}
+
+KJ_TEST("wrap_tls_client: a kj HttpClient drives the Rust TLS stream through the bridge") {
+  InboundTlsFixture f({.path = InboundPath::WrappedTcp, .rustClient = true});
+
+  for (int i = 0; i < 2; i++) {
+    auto req = f.client->request(kj::HttpMethod::GET, "/hello", f.makeHeaders(), uint64_t(0));
+    auto resp = req.response.wait(f.io.waitScope);
+    KJ_EXPECT(resp.statusCode == 200, resp.statusCode);
+    auto body = resp.body->readAllText().wait(f.io.waitScope);
+    KJ_EXPECT(body == "Hello TLS!", body);
+  }
+}
+
+KJ_TEST("wrap_tls_client: an untrusted server certificate fails with kj's wording") {
+  InboundTlsFixture f(
+      {.path = InboundPath::WrappedTcp, .rustClient = true, .clientTrustsCa = false});
+
+  auto req = f.client->request(kj::HttpMethod::GET, "/hello", f.makeHeaders(), uint64_t(0));
+  KJ_EXPECT_THROW_MESSAGE(
+      "TLS peer's certificate is not trusted", req.response.wait(f.io.waitScope));
 }
 
 KJ_TEST("hyper https server: WebSocket echo over TLS") {

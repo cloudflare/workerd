@@ -1,7 +1,8 @@
 #pragma once
 // The C++ side of serving a kj::AsyncIoStream natively (serve.rs): taking a kj-rs-io stream's
-// tokio socket out of its wrapper, and the bridged operations on a *foreign* kj::AsyncIoStream
-// that back the duplex-pump fallback. Included by kj-hyper's cxx bridge (ffi.rs).
+// tokio socket (or a RustStream's Rust stream) out of its wrapper, and the bridged operations
+// on a *foreign* kj::AsyncIoStream that back the pump fallback. Included by kj-hyper's cxx
+// bridge (ffi.rs).
 #include "kj-rs-io/async-io.h"
 
 #include <rust/cxx.h>
@@ -41,6 +42,21 @@ inline ::rust::Box<kj_rs_io::TokioStream> releaseTokioStream(kj::Own<kj::AsyncIo
 inline kj::Own<kj::AsyncIoStream> wrapTokioStream(::rust::Box<kj_rs_io::TokioStream> stream) {
   return kj::heap<kj_rs_io::TokioAsyncIoStream>(kj::mv(stream));
 }
+
+// --- Streams that are Rust underneath: a RustStream (rust_stream.rs) wrapped as a
+// kj::AsyncIoStream by RustAsyncIoStream (hyper-server-ffi.c++, which defines these three; this
+// header is included by the generated bridge and cannot see the generated RustStream type).
+struct RustStream;
+
+// True if `stream` is a RustAsyncIoStream wrapper.
+bool isRustStream(const kj::AsyncIoStream &stream);
+
+// Takes the Rust stream out of the wrapper and destroys the wrapper. The caller must have
+// checked isRustStream().
+::rust::Box<RustStream> releaseRustStream(kj::Own<kj::AsyncIoStream> stream);
+
+// The inverse: a kj::AsyncIoStream over a Rust stream, for kj consumers.
+kj::Own<kj::AsyncIoStream> wrapRustStream(::rust::Box<RustStream> stream);
 
 // --- Bridged operations on a *foreign* kj::AsyncIoStream (one that did not originate in
 // kj-rs-io and therefore has no socket to take). These back the duplex-pump fallback of
