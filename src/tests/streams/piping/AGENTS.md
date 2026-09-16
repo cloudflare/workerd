@@ -24,11 +24,15 @@ a deliberate defect pin, not a hole).
 | 4 | ws.close() queued BEFORE pipeTo | pipe locks both ends, waits, cancels source with 'This destination writable stream is closed.', then RESOLVES (see the TODO(conform) in the test) | pipe REJECTS IMMEDIATELY 'Destination closed before the pipe completed', cancels source with the same error (preventCancel suppresses), locks never observed held | `pipeToJsToJsCloseQueuedDestination`(+`PreventCancel`) |
 | 5 | pipeTo brand check on a broken `this` | THROWS synchronously (before the capture_async_api_throws wrapper; the WPT general.any seed); a real stream with a bad destination REJECTS | both reject (spec) | `brandChecks` |
 | 6 | destination hwm 0 (never desires) | pipe writes an available chunk anyway — ignores desiredSize (the WPT 'dest never desires chunks' seed family) | never writes (spec) | `sourceErroredAfterChunkHwmZero` |
-| 7 | source queue after a preventCancel'd failing pipe | the not-yet-written chunk remains readable | read-ahead already consumed it; a fresh read PENDS (bounded) | `destWriteThrowsMidPipePreventCancel` |
-| 8 | dest controller error()s while the pipe waits on a read | HALF-PROPAGATES: cancels the source with the error but FULFILLS the pipe promise | rejects the pipe and cancels the source with the error (spec) | `destControllerErrorsMidPipe` |
-| 9 | FixedLengthStream length violations via pipe | overflow: pipe NEVER SETTLES (bounded); underflow: never settles | overflow: rejects RangeError; underflow: never settles (parity of nonconformance) | `fixedLengthStreamPipeOverflow`/`Underflow` |
-| 10 | already-closed source → already-closed dest | rejects TypeError (a C++ deviation: the spec's ordered shutdown conditions give closing-forward priority) | FULFILLS (spec; WPT multiple-propagation 'closed readable to closed writable' pins the fulfillment) | `closedSourceToClosedDest` |
-| 11 | SharedArrayBuffer-backed views into CompressionStream | copies the shared bytes; round-trips | write path REJECTS TypeError 'The provided value is not of type (ArrayBuffer or ArrayBufferView)' (spec: BufferSource without [AllowShared]) — while its identity stream ACCEPTS the same views | `sabViewThroughCompressionRoundTrip` |
+| 7 | dest controller error()s while the pipe waits on a read | HALF-PROPAGATES: cancels the source with the error but FULFILLS the pipe promise | rejects the pipe and cancels the source with the error (spec) | `destControllerErrorsMidPipe` |
+| 8 | FixedLengthStream length violations via pipe | overflow: pipe NEVER SETTLES (bounded); underflow: never settles | overflow: rejects RangeError; underflow: never settles (parity of nonconformance) | `fixedLengthStreamPipeOverflow`/`Underflow` |
+| 9 | already-closed source → already-closed dest | rejects TypeError (a C++ deviation: the spec's ordered shutdown conditions give closing-forward priority) | FULFILLS (spec; WPT multiple-propagation 'closed readable to closed writable' pins the fulfillment) | `closedSourceToClosedDest` |
+| 10 | SharedArrayBuffer-backed views into CompressionStream | copies the shared bytes; round-trips | write path REJECTS TypeError 'The provided value is not of type (ArrayBuffer or ArrayBufferView)' (spec: BufferSource without [AllowShared]) — while its identity stream ACCEPTS the same views | `sabViewThroughCompressionRoundTrip` |
+| 11 | abort with a backlog, destination hwm 3 | reads and writes one chunk at a time: only the in-flight write completes | reads while desiredSize is positive; the abort waits for the three writes made (spec) | `abortWithBacklogHighWaterMark` |
+| 12 | source queue after a non-fatal write rejection (identity, preventCancel) | the chunk after the invalid one was already read and is dropped | every chunk after the invalid one stays readable | `invalidChunkWithBacklogEndsPipe` |
+| 13 | the source's pull aborts the pipe while the pipe reads a chunk | chunk dropped; the destination's pending read rejects | chunk written before the destination is aborted (spec: read chunks are written) | `pipeToJsToNativeCancel` |
+| 14 | a chunk reaches the source while an abort waits for an in-flight write (destination hwm 2, preventCancel) | not read while the write is in flight: the chunk stays in the source | the pipe's pending read takes it; it is written, and the pipe settles once that write has (spec) | `lateChunkDuringShutdownWait` |
+| 15 | abort with nothing to write while the pipe waits on a read (preventCancel) | the pipe and its read stay pending and the source stays locked; the next chunk completes the read, which drops it, and the pipe then rejects | the pipe settles and releases the source; a later chunk stays readable (spec) | `lateChunkAfterIdleAbort` |
 
 Parity worth noting (probed, pinned): the whole error-propagation-
 forward core matrix (starts-errored rejection/hook IDENTITY on both
@@ -42,8 +46,13 @@ ends CLOSED, all locks release); external close()/abort() on a piped
 (locked) destination rejects while the pipe proceeds; backward write-
 error propagation with hook identity; backpressure through
 pipeThrough().pipeTo() chains; stalled-dest read-ahead ≤ 3 with source
-hwm 1 (contrast ledger #6); FixedLengthStream exact-length pipes;
-closed source → live dest closes the destination.
+hwm 1 (contrast ledger #6); a pipe shut down with chunks buffered (abort,
+source error, write failure, invalid identity chunk) writes nothing more
+at hwm 1, and preventCancel leaves the unread chunks readable;
+FixedLengthStream exact-length pipes; closed source → live dest closes
+the destination. Parity of nonconformance: a chunk enqueued in the
+abort's turn while the pipe waits on a read with no write in flight is
+lost from both ends (`lateChunkInAbortTurnIsLost`; the spec writes it).
 
 ## Hang discipline
 
@@ -65,13 +74,15 @@ the source FIRST, then releasing the write (`pipeStopsPullingWhenDestStalls`).
 
 | Module | Coverage |
 | --- | --- |
-| `pipe-matrix.js` | migrated pipe-streams-test.js wholesale (35): pipeThrough + pipeTo across JS↔native in all directions, prevent* combos, pre-aborted and mid-read AbortSignals, tee'd pipes, queued-destination close (ledger #1-#4) |
+| `pipe-matrix.js` | migrated pipe-streams-test.js wholesale (35): pipeThrough + pipeTo across JS↔native in all directions, prevent* combos, pre-aborted and mid-read AbortSignals, tee'd pipes, queued-destination close (ledger #1-#4, #13) |
 | `api-surface.js` | brand checks (ledger #5), option getter order, throwing getters, invalid signal, locked pipeThrough endpoints |
 | `error-propagation.js` | forward matrix (starts-errored × prevent* × truthy), hwm-0 dest (ledger #6), custom-error preservation (migrated from streams-error-edge-cases-test.js) |
-| `close-propagation.js` | the WPT-disabled backward territory, bounded: external close/abort on piped dest, write-throw backward propagation (ledger #7), idle dest-controller error (ledger #8) |
+| `close-propagation.js` | the WPT-disabled backward territory, bounded: external close/abort on piped dest, write-throw backward propagation, idle dest-controller error (ledger #7) |
 | `flow-control.js` | backpressure chain (migrated from streams-backpressure-test.js), stalled-dest read-ahead bound |
-| `interop.js` | cancel propagation ×2 (migrated from api/streams/streams-test.js), FixedLengthStream (ledger #9), pre-settled pairings (ledger #10) |
-| `special-buffers.js` | SharedArrayBuffer-backed and resizable-buffer views through native and JS pipe endpoints (migrated from pipe-write-special-buffer-test.js, strengthened to content checks; ledger #11); the JS path delivers the very view uncopied, resizable buffers stay resizable |
+| `shutdown-backlog.js` | shutdown with chunks buffered in the source: abort, source error, invalid identity chunk; what is written and what stays readable (ledger #11, #12) |
+| `shutdown-pending-read.js` | abort while the pipe waits on a read: a chunk arriving during the shutdown's wait, in the abort's turn, or after an idle abort (ledger #14, #15) |
+| `interop.js` | cancel propagation ×2 (migrated from api/streams/streams-test.js), FixedLengthStream (ledger #8), pre-settled pairings (ledger #9) |
+| `special-buffers.js` | SharedArrayBuffer-backed and resizable-buffer views through native and JS pipe endpoints (migrated from pipe-write-special-buffer-test.js, strengthened to content checks; ledger #10); the JS path delivers the very view uncopied, resizable buffers stay resizable |
 | `legacy-pipes.js` | the unflagged cell (flags table) |
 | `data-volumes.js` | end-to-end pipe volumes: 1 MiB pipeTo JS→JS, 8 MiB pipeThrough chain, 1 MiB JS→identity with body readback, 1 MiB identity→JS with a concurrent writer — all byte-exact |
 
