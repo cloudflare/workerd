@@ -272,6 +272,28 @@ export const openMissingTest = {
     ok(existsSync('/tmp/missing'));
     unlinkSync('/tmp/missing');
 
+    // O_CREAT does not create intermediate directories.
+    for (const flags of ['r', 'w', 'a', O_WRONLY | O_CREAT | O_EXCL]) {
+      throws(() => openSync('/tmp/missing/file', flags), {
+        code: 'ENOENT',
+        syscall: 'open',
+        path: '/tmp/missing/file',
+      });
+      ok(!existsSync('/tmp/missing'));
+    }
+
+    // A non-directory path component is ENOTDIR.
+    writeFileSync('/tmp/missing', '');
+    for (const flags of ['r', 'w']) {
+      throws(() => openSync('/tmp/missing/file', flags), {
+        code: 'ENOTDIR',
+        syscall: 'open',
+        path: '/tmp/missing/file',
+      });
+    }
+    strictEqual(readFileSync('/tmp/missing', 'utf8'), '');
+    unlinkSync('/tmp/missing');
+
     // Streams open with their own flags: WriteStream defaults to 'w' and
     // honours 'a'; ReadStream defaults to 'r' and fails on a missing path.
     const writeAll = (path, data, options) =>

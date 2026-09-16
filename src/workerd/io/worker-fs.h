@@ -678,10 +678,8 @@ class VirtualFileSystem {
   // file descriptor will fail.
   //
   // If the file cannot be opened or created, an exception will be thrown.
-  virtual kj::OneOf<FsError, kj::Rc<OpenedFile>> openFd(jsg::Lock& js,
-      const jsg::Url& url,
-      OpenOptions options = {
-        true, false, false, false, false, false, true}) const KJ_WARN_UNUSED_RESULT = 0;
+  virtual kj::OneOf<FsError, kj::Rc<OpenedFile>> openFd(
+      jsg::Lock& js, const jsg::Url& url, OpenOptions options) const KJ_WARN_UNUSED_RESULT = 0;
 
   // Closes the given file descriptor. This is a no-op if the file descriptor is not open.
   // Using an int fd is not super nice but it is the most compatible with the node:fs

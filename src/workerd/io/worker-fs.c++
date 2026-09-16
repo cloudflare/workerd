@@ -958,7 +958,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
   }
 
   kj::OneOf<FsError, kj::Rc<OpenedFile>> openFd(
-      jsg::Lock& js, const jsg::Url& url, OpenOptions opts = {}) const override {
+      jsg::Lock& js, const jsg::Url& url, OpenOptions opts) const override {
 
     kj::Path root{};
     auto str = kj::str(url.getPathname().slice(1));
@@ -976,6 +976,26 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
 
     auto rootDir = getRoot(js);
     auto path = root.eval(str);
+
+    // open(2) never creates intermediate directories.
+    if (path.size() > 0) {
+      KJ_IF_SOME(parent, rootDir->tryOpen(js, path.parent())) {
+        KJ_SWITCH_ONEOF(parent) {
+          KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {}
+          KJ_CASE_ONEOF(file, kj::Rc<File>) {
+            return FsError::NOT_DIRECTORY;
+          }
+          KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
+            return FsError::NOT_DIRECTORY;
+          }
+          KJ_CASE_ONEOF(err, FsError) {
+            return err;
+          }
+        }
+      } else {
+        return FsError::NOT_FOUND;
+      }
+    }
 
     if (opts.exclusive && opts.create) {
       // O_CREAT|O_EXCL fails if the path already exists.
