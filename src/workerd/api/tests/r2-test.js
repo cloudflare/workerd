@@ -276,6 +276,9 @@ const testWorker = {
         reader.releaseLock();
 
         const jsonRequest = JSON.parse(new TextDecoder().decode(value));
+        if (jsonRequest.object === 'must-not-call') {
+          assert.fail('R2 backend must not be called for invalid input');
+        }
 
         // Currently not using the body in these test so I'm going to just discard
         for await (const _ of request.body) {
@@ -528,6 +531,9 @@ const testWorker = {
       case 'GET': {
         const rawHeader = request.headers.get('cf-r2-request');
         const jsonRequest = JSON.parse(rawHeader);
+        if (jsonRequest.object === 'must-not-call') {
+          assert.fail('R2 backend must not be called for invalid input');
+        }
         assert((jsonRequest.version = 1));
         if (jsonRequest.method === 'list') {
           switch (jsonRequest.prefix) {
@@ -1160,7 +1166,7 @@ function assertMultipartIdentity(requestKey, uploadId, action) {
     return;
   }
   const expected = {
-    'rpc-must-not-call': 'invalidPartUploadId',
+    'must-not-call': 'invalidPartUploadId',
     rpcStream: 'streamedId',
     largeBuffer: 'largeUploadId',
     'rpc-wrong-part-number': 'wrongPartUploadId',
@@ -1281,7 +1287,7 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
         '"firstEtag", "secondEtag"'
       );
     }
-    if (requestKey === 'rpc-must-not-call') {
+    if (requestKey === 'must-not-call') {
       throw new Error('get RPC method must not be called');
     }
 
@@ -1336,7 +1342,7 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
   }
 
   async put(requestKey, value, options, valueSize) {
-    if (requestKey === 'rpc-must-not-call') {
+    if (requestKey === 'must-not-call') {
       throw new Error('put RPC method must not be called');
     }
     if (requestKey === 'rpc-null-value') {
@@ -1472,7 +1478,7 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
   }
 
   createMultipartUpload(requestKey, options) {
-    if (requestKey === 'rpc-must-not-call') {
+    if (requestKey === 'must-not-call') {
       throw new Error('createMultipartUpload RPC method must not be called');
     }
     if (requestKey === 'rpc-create-options') {
@@ -1497,7 +1503,7 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
   ) {
     assertMultipartIdentity(requestKey, uploadId, 'uploadPart');
     assert(partNumber >= 1 && partNumber <= 10000);
-    if (requestKey === 'rpc-must-not-call') {
+    if (requestKey === 'must-not-call') {
       throw new Error('uploadPart RPC method must not be called');
     }
     if (requestKey === 'largeBuffer') {
@@ -1538,6 +1544,9 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
 
   completeMultipartUpload(requestKey, uploadId, uploadedParts) {
     assertMultipartIdentity(requestKey, uploadId, 'completeMultipartUpload');
+    if (requestKey === 'must-not-call') {
+      throw new Error('completeMultipartUpload RPC method must not be called');
+    }
     for (const part of uploadedParts) {
       assert(part.partNumber >= 1 && part.partNumber <= 10000);
       assert.strictEqual(typeof part.etag, 'string');
@@ -1574,6 +1583,103 @@ function listRpcHead(requestKey, includes) {
   }
   return result;
 }
+
+export const r2ValidationTests = {
+  async test(ctrl, env) {
+    await assert.rejects(
+      env.BUCKET.get('must-not-call', { range: { offset: -1 } }),
+      {
+        message:
+          'Invalid range. Starting offset (-1) must be greater than or equal to 0.',
+      }
+    );
+    await assert.rejects(
+      env.BUCKET.get('must-not-call', { range: { suffix: 1, offset: 0 } }),
+      { name: 'TypeError', message: 'Suffix is incompatible with offset.' }
+    );
+    await assert.rejects(
+      env.BUCKET.get('must-not-call', { range: { suffix: 1, length: 1 } }),
+      { name: 'TypeError', message: 'Suffix is incompatible with length.' }
+    );
+    for (const field of ['offset', 'length', 'suffix']) {
+      for (const value of [-1, 0.5, NaN]) {
+        await assert.rejects(
+          env.BUCKET.get('must-not-call', { range: { [field]: value } }),
+          { name: 'RangeError' }
+        );
+      }
+    }
+    await assert.rejects(env.BUCKET.get('must-not-call', { ssecKey: 'bad' }), {
+      message: 'SSE-C Key must be 32 bytes in length',
+    });
+    await assert.rejects(
+      env.BUCKET.get('must-not-call', {
+        onlyIf: { etagMatches: '"quoted"' },
+      }),
+      {
+        message: 'Conditional ETag should not be wrapped in quotes ("quoted").',
+      }
+    );
+
+    await assert.rejects(
+      env.BUCKET.put('must-not-call', body, { md5: new Uint8Array(1) }),
+      { message: 'MD5 is 16 bytes, not 1' }
+    );
+    await assert.rejects(
+      env.BUCKET.put('must-not-call', body, {
+        md5: 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
+      }),
+      { message: "Provided MD5 wasn't a valid hex string" }
+    );
+    await assert.rejects(
+      env.BUCKET.put('must-not-call', body, {
+        md5: md5Buffer,
+        sha1: sha1Buffer,
+      }),
+      { message: 'You cannot specify multiple hashing algorithms.' }
+    );
+
+    const invalidOptionsStream = new FixedLengthStream(1);
+    const invalidOptionsWriter = invalidOptionsStream.writable.getWriter();
+    const invalidOptionsWriting = invalidOptionsWriter.write(
+      new Uint8Array([1])
+    );
+    await assert.rejects(
+      env.BUCKET.put('must-not-call', invalidOptionsStream.readable, {
+        onlyIf: { etagMatches: '"quoted"' },
+      }),
+      {
+        message: 'Conditional ETag should not be wrapped in quotes ("quoted").',
+      }
+    );
+    await assert.rejects(invalidOptionsWriting, {
+      message:
+        'Stream cancelled because the associated put operation encountered an error.',
+    });
+
+    await assert.rejects(
+      env.BUCKET.createMultipartUpload('must-not-call', {
+        ssecKey: 'bad',
+      }),
+      { message: 'SSE-C Key must be 32 bytes in length' }
+    );
+    const invalidPartUpload = env.BUCKET.resumeMultipartUpload(
+      'must-not-call',
+      'invalidPartUploadId'
+    );
+    await assert.rejects(
+      invalidPartUpload.uploadPart(1, body, { ssecKey: 'bad' }),
+      { message: 'SSE-C Key must be 32 bytes in length' }
+    );
+    await assert.rejects(
+      invalidPartUpload.complete([{ partNumber: 0, etag: 'invalid' }]),
+      {
+        message:
+          'Part number must be between 1 and 10000 (inclusive). Actual value was: 0',
+      }
+    );
+  },
+};
 
 // These cases cover RPC boundary behavior that the HTTP-oriented fake cannot observe directly.
 // The canonical API suite remains identical for both transport configurations.
@@ -1658,30 +1764,6 @@ export const jsrpcTransportTests = {
       }),
       range: new Headers({ range: 'bytes=1-3' }),
     });
-
-    await assert.rejects(
-      env.BUCKET.get('rpc-must-not-call', { range: { offset: -1 } }),
-      {
-        message:
-          'Invalid range. Starting offset (-1) must be greater than or equal to 0.',
-      }
-    );
-    await assert.rejects(
-      env.BUCKET.get('rpc-must-not-call', { range: { suffix: 1, length: 1 } }),
-      { message: 'Suffix is incompatible with length.' }
-    );
-    await assert.rejects(
-      env.BUCKET.get('rpc-must-not-call', { ssecKey: 'bad' }),
-      { message: 'SSE-C Key must be 32 bytes in length' }
-    );
-    await assert.rejects(
-      env.BUCKET.get('rpc-must-not-call', {
-        onlyIf: { etagMatches: '"quoted"' },
-      }),
-      {
-        message: 'Conditional ETag should not be wrapped in quotes ("quoted").',
-      }
-    );
 
     await assert.rejects(env.BUCKET.get('rpc-malformed-kind'), {
       message: /^internal error; reference = \S+$/,
@@ -1783,23 +1865,6 @@ export const jsrpcTransportTests = {
       }),
     });
 
-    await assert.rejects(
-      env.BUCKET.put('rpc-must-not-call', body, { md5: new Uint8Array(1) }),
-      { message: 'MD5 is 16 bytes, not 1' }
-    );
-    await assert.rejects(
-      env.BUCKET.put('rpc-must-not-call', body, {
-        md5: 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
-      }),
-      { message: "Provided MD5 wasn't a valid hex string" }
-    );
-    await assert.rejects(
-      env.BUCKET.put('rpc-must-not-call', body, {
-        md5: md5Buffer,
-        sha1: sha1Buffer,
-      }),
-      { message: 'You cannot specify multiple hashing algorithms.' }
-    );
     const encodedStreamBody = new TextEncoder().encode(rpcStreamBody);
     {
       const { readable, writable } = new FixedLengthStream(
@@ -1834,24 +1899,6 @@ export const jsrpcTransportTests = {
       'Stream cancelled because the associated put operation encountered an error.'
     );
 
-    const invalidOptionsStream = new FixedLengthStream(1);
-    const invalidOptionsWriter = invalidOptionsStream.writable.getWriter();
-    const invalidOptionsWriting = invalidOptionsWriter.write(
-      new Uint8Array([1])
-    );
-    await assert.rejects(
-      env.BUCKET.put('rpc-must-not-call', invalidOptionsStream.readable, {
-        onlyIf: { etagMatches: '"quoted"' },
-      }),
-      {
-        message: 'Conditional ETag should not be wrapped in quotes ("quoted").',
-      }
-    );
-    await assert.rejects(invalidOptionsWriting, {
-      message:
-        'Stream cancelled because the associated put operation encountered an error.',
-    });
-
     const largeBufferBacking = new Uint8Array(largeRpcBodySize + 2);
     largeBufferBacking.fill(0x41);
     const largeBuffer = largeBufferBacking.subarray(1, -1);
@@ -1873,21 +1920,6 @@ export const jsrpcMultipartTests = {
     if (env.R2_TRANSPORT !== 'jsrpc') {
       return;
     }
-
-    await assert.rejects(
-      env.BUCKET.createMultipartUpload('rpc-must-not-call', {
-        ssecKey: 'bad',
-      }),
-      { message: 'SSE-C Key must be 32 bytes in length' }
-    );
-    const invalidPartUpload = env.BUCKET.resumeMultipartUpload(
-      'rpc-must-not-call',
-      'invalidPartUploadId'
-    );
-    await assert.rejects(
-      invalidPartUpload.uploadPart(1, body, { ssecKey: 'bad' }),
-      { message: 'SSE-C Key must be 32 bytes in length' }
-    );
 
     const createOptionsUpload = await env.BUCKET.createMultipartUpload(
       'rpc-create-options',
@@ -2007,13 +2039,6 @@ export const jsrpcMultipartTests = {
       })
     );
 
-    await assert.rejects(
-      uploads[0].complete([{ partNumber: 0, etag: 'invalid' }]),
-      {
-        message:
-          'Part number must be between 1 and 10000 (inclusive). Actual value was: 0',
-      }
-    );
     for (let i = 0; i < uploads.length; i++) {
       const upload = uploads[i];
       const result = await upload.complete(uploadedParts[i]);
@@ -2095,23 +2120,6 @@ export const jsrpcRangeTests = {
       await env.BUCKET.get('rpc-range-no-range', { range: new Headers() }),
       null
     );
-
-    await assert.rejects(
-      env.BUCKET.get('rpc-range-invalid', { range: { suffix: 1, offset: 0 } }),
-      { name: 'TypeError', message: 'Suffix is incompatible with offset.' }
-    );
-    await assert.rejects(
-      env.BUCKET.get('rpc-range-invalid', { range: { suffix: 1, length: 1 } }),
-      { name: 'TypeError', message: 'Suffix is incompatible with length.' }
-    );
-    for (const field of ['offset', 'length', 'suffix']) {
-      for (const value of [-1, 0.5, NaN]) {
-        await assert.rejects(
-          env.BUCKET.get('rpc-range-invalid', { range: { [field]: value } }),
-          { name: 'RangeError' }
-        );
-      }
-    }
   },
 };
 
