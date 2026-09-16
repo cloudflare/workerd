@@ -48,6 +48,28 @@ kj::LiteralStringConst spanWarningTypeName(SpanWarningType type) {
   KJ_UNREACHABLE;
 }
 
+TracingSpanContext toTracingSpanContext(kj::Maybe<tracing::SpanContext> context) {
+  KJ_IF_SOME(value, context) {
+    KJ_IF_SOME(spanId, value.getSpanId()) {
+      uint traceFlags = 0;
+      KJ_IF_SOME(flags, value.getTraceFlags()) {
+        traceFlags = flags;
+      }
+      return TracingSpanContext{
+        .traceId = value.getTraceId().toW3C(),
+        .spanId = spanId.toGoString(),
+        .traceFlags = traceFlags,
+      };
+    }
+  }
+
+  return TracingSpanContext{
+    .traceId = tracing::TraceId::nullId.toW3C(),
+    .spanId = tracing::SpanId::nullId.toGoString(),
+    .traceFlags = 0,
+  };
+}
+
 }  // namespace
 
 // ======================================================================================
@@ -105,7 +127,8 @@ void SpanState::recordException(kj::Maybe<tracing::Exception::Code> code,
 class UserSpanState final: public SpanState {
  public:
   UserSpanState(kj::Rc<workerd::SpanObserver> observer, kj::ConstString operationName)
-      : builder(kj::mv(observer), kj::mv(operationName)) {}
+      : spanContext(observer->toSpanContext()),
+        builder(kj::mv(observer), kj::mv(operationName)) {}
 
   ~UserSpanState() noexcept(false) override {
     end();
@@ -119,6 +142,13 @@ class UserSpanState final: public SpanState {
 
   bool getIsTraced() override {
     return builder.isObserved();
+  }
+
+  kj::Maybe<tracing::SpanContext> getSpanContext() override {
+    KJ_IF_SOME(value, spanContext) {
+      return tracing::SpanContext::clone(value);
+    }
+    return kj::none;
   }
 
   workerd::SpanParent makeSpanParent() override {
@@ -170,6 +200,7 @@ class UserSpanState final: public SpanState {
   }
 
  private:
+  kj::Maybe<tracing::SpanContext> spanContext;
   workerd::SpanBuilder builder;
 };
 
@@ -193,6 +224,13 @@ class InvocationSpanState final: public SpanState {
       }
     }
     return false;
+  }
+
+  kj::Maybe<tracing::SpanContext> getSpanContext() override {
+    KJ_IF_SOME(value, context) {
+      return tracing::SpanContext(value.getTraceId(), value.getSpanId(), value.getTraceFlags());
+    }
+    return kj::none;
   }
 
   workerd::SpanParent makeSpanParent() override {
@@ -256,6 +294,10 @@ class NoopSpanState final: public SpanState {
     return false;
   }
 
+  kj::Maybe<tracing::SpanContext> getSpanContext() override {
+    return kj::none;
+  }
+
   workerd::SpanParent makeSpanParent() override {
     return workerd::SpanParent(nullptr);
   }
@@ -284,6 +326,18 @@ bool Span::getIsTraced() {
     }
     KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
       return s->getIsTraced();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+TracingSpanContext Span::spanContext() {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
+      return toTracingSpanContext(s->getSpanContext());
+    }
+    KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
+      return toTracingSpanContext(s->getSpanContext());
     }
   }
   KJ_UNREACHABLE;

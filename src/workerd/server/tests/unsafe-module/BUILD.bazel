@@ -1,6 +1,7 @@
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
+    size = "medium",
     src = "unsafe-module-test.wd-test",
     args = ["--experimental"],
     data = glob(["*.js"]),
