@@ -977,9 +977,8 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     auto rootDir = getRoot(js);
     auto path = root.eval(str);
 
-    if (opts.exclusive && opts.write) {
-      // If the exclusive flag is set with the witable flag, then we fail
-      // if the file already exists.
+    if (opts.exclusive && opts.create) {
+      // O_CREAT|O_EXCL fails if the path already exists.
       KJ_IF_SOME(maybeStat, rootDir->stat(js, path)) {
         KJ_SWITCH_ONEOF(maybeStat) {
           KJ_CASE_ONEOF(stat, Stat) {
@@ -996,7 +995,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     KJ_IF_SOME(node,
         rootDir->tryOpen(js, path,
             Directory::OpenOptions{
-              .createAs = FsType::FILE,
+              .createAs = opts.create ? kj::Maybe<FsType>(FsType::FILE) : kj::none,
               .followLinks = opts.followLinks,
             })) {
       KJ_SWITCH_ONEOF(node) {
@@ -1050,6 +1049,8 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
       }
       KJ_UNREACHABLE;
     }
+
+    if (!opts.create) return FsError::NOT_FOUND;
 
     // The file does not exist, and apparently was not created. Likely the
     // directory is not writable or does not exist.

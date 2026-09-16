@@ -129,6 +129,9 @@ struct NormalizedFilePath {
     case workerd::FsError::SYMLINK_DEPTH_EXCEEDED: {
       node::THROW_ERR_UV_ELOOP(js, syscall, "symlink depth exceeded"_kj, path);
     }
+    case workerd::FsError::NOT_FOUND: {
+      node::THROW_ERR_UV_ENOENT(js, syscall, nullptr, path);
+    }
     default: {
       node::THROW_ERR_UV_EPERM(js, syscall, nullptr, path);
     }
@@ -471,6 +474,7 @@ int FileSystemModule::open(jsg::Lock& js, FilePath path, OpenOptions options) {
                         .read = options.read,
                         .write = options.write,
                         .append = options.append,
+                        .create = options.create,
                         .exclusive = options.exclusive,
                         .truncate = options.truncate,
                         .followLinks = options.followSymlinks,
@@ -479,7 +483,7 @@ int FileSystemModule::open(jsg::Lock& js, FilePath path, OpenOptions options) {
       return opened->fd;
     }
     KJ_CASE_ONEOF(err, workerd::FsError) {
-      throwFsError(js, err, "open"_kj);
+      throwFsError(js, err, "open"_kj, kj::str(normalizedPath.url.getPathname()));
     }
   }
   KJ_UNREACHABLE;
