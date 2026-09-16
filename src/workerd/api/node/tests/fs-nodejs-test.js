@@ -311,13 +311,25 @@ export const openMissingTest = {
     strictEqual(readFileSync('/tmp/missing', 'utf8'), 'second third');
     unlinkSync('/tmp/missing');
 
-    await rejects(
+    const streamError = (make) =>
       new Promise((resolve, reject) => {
-        createReadStream('/tmp/missing')
-          .on('open', resolve)
-          .on('error', reject);
-      }),
+        make().on('open', resolve).on('error', reject);
+      });
+    await rejects(
+      streamError(() => createReadStream('/tmp/missing')),
       kErrENoEnt
+    );
+    ok(!existsSync('/tmp/missing'));
+
+    // Invalid flags are validated synchronously by fs.open and surface as
+    // the stream error rather than a hang.
+    await rejects(
+      streamError(() => createReadStream('/tmp/missing', { flags: 'zz' })),
+      { code: 'ERR_INVALID_ARG_VALUE' }
+    );
+    await rejects(
+      streamError(() => createWriteStream('/tmp/missing', { flags: 'zz' })),
+      { code: 'ERR_INVALID_ARG_VALUE' }
     );
     ok(!existsSync('/tmp/missing'));
   },

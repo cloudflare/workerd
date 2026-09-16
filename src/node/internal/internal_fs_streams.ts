@@ -126,38 +126,23 @@ const kDefaultFsOperations: RealizedFsOperations = {
     validateFunction(callback, 'fs.open callback');
     const openFlags = typeof flags === 'function' ? 'r' : flags;
     const openMode = typeof mode === 'function' ? 0o666 : mode;
-
-    getLazyFs().then(
-      (fs: RealizedFsOperations) => {
-        fs.open(
-          path,
-          openFlags,
-          openMode,
-          (err: unknown, fd: number | undefined) => {
-            if (err) {
-              try {
-                callback(err);
-              } catch (e: unknown) {
-                reportError(e);
-              }
-              return;
-            }
-            try {
-              callback(null, fd);
-            } catch (e: unknown) {
-              reportError(e);
-            }
-          }
-        );
-      },
-      (err: unknown) => {
-        try {
-          callback(err);
-        } catch (e: unknown) {
-          reportError(e);
-        }
+    const done = (err: unknown, fd?: number): void => {
+      try {
+        if (err) callback(err);
+        else callback(null, fd);
+      } catch (e: unknown) {
+        reportError(e);
       }
-    );
+    };
+
+    getLazyFs().then((fs: RealizedFsOperations) => {
+      // fs.open validates flags synchronously.
+      try {
+        fs.open(path, openFlags, openMode, done);
+      } catch (err: unknown) {
+        done(err);
+      }
+    }, done);
   },
   close(fd: number, cb: ErrorOnlyCallback = () => {}): void {
     getLazyFs().then(
