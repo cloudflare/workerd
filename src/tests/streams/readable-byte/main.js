@@ -153,6 +153,8 @@ export {
   teeReleasedPartialReadPiped,
   teeAfterReleasedPartialRead,
   teeOfBranchWithReleasedPartialRead,
+  teeInvalidatesHeldByobRequest,
+  teeSoleBranchMintsFreshByobRequest,
 } from 'tee';
 
 export {

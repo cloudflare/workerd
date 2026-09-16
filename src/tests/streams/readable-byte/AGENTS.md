@@ -39,6 +39,7 @@ behavior-parity (messages aside).
 | 22 | cancel() after a partial enqueue into a pending BYOB read | read resolves done with an empty view | read resolves done with value undefined (spec) | `cancelWithPartiallyFilledPull` |
 | 23 | error() while a close() is still pending (bytes queued) — readable #18 mirror | ignored: desiredSize already 0, the bytes drain to a clean close for default and BYOB readers | desiredSize is hwm minus the queued bytes (-2) until the error, then the stream errors: bytes discarded, default/BYOB reads and closed reject | `errorAfterCloseWithQueuedBytes` |
 | 24 | pipeTo() from an autoAllocate tee branch, aborted (preventCancel) with its read pending | pipe stays pending until a chunk arrives, which the aborted pipe's read consumes and drops (bounded) | pipe rejects at once; the branch's next reader receives the next chunk | `teePipeAbortReleasesPendingRead` |
+| 25 | byobRequest held by the source across tee() (reader released first) | stays exposed and working: the responded byte reaches both branches, and fills a sole remaining branch's read | invalidated at tee(): byobRequest null while two branches exist, respond() throws TypeError 'This BYOB request has been invalidated'; a sole remaining branch's read gets a fresh request | `teeInvalidatesHeldByobRequest`, `teeSoleBranchMintsFreshByobRequest` |
 
 Parity worth noting (probed, pinned): byte hwm defaults to 0 with NO
 automatic pull; pull-throw and error-then-throw identity; enqueue
@@ -116,7 +117,7 @@ named suite test pins directly, differing only in incidental asserts.
 | `respond.js` | ledger #6, #8, #15, #16; all 31 streams-respond-test tests (respond/respondWithNewView/pumps/cancel races/UAF shapes) + js-test respond family |
 | `release-relock.js` | ledger #9, #10; the WPT releaseLock→second-reader cluster; release with two pending reads or a partially filled head |
 | `read-min.js` | ledger #11-#13; byobMin/constraints/readAtLeast (migrated streams-test.js); /chunked SELF endpoint |
-| `tee.js` | ledger #14, #24; clone-per-branch; migrated byte-tee pair; error propagation; released branch reads, incl. partially filled ones and tee() after a release |
+| `tee.js` | ledger #14, #24, #25; clone-per-branch; migrated byte-tee pair; error propagation; released branch reads, incl. partially filled ones and tee() after a release; byobRequest held across tee() |
 | `buffer-lifecycle.js` | ledger #18; resizable ArrayBuffers; WASM Memory |
 | `gc.js` | pending BYOB read + byobRequest survive gc() |
 | `integration.js` | BYOB round-trips via SELF; readAtLeast on echoed body; bytes() |

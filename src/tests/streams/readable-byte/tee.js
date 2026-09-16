@@ -3,9 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // tee() on byte streams: per-branch chunk cloning, mixed reader types,
-// cancel composition, error propagation, and released pending reads.
+// cancel composition, error propagation, released pending reads, and a
+// byobRequest held across tee().
 
-import { strictEqual, ok, deepStrictEqual } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 import { drainBytes, rejectionOf } from 'helpers';
 
@@ -355,5 +356,83 @@ export const teeOfBranchWithReleasedPartialRead = {
     deepStrictEqual([...(await drainBytes(a1))], [1, 2, 3, 4]);
     deepStrictEqual([...(await drainBytes(a2))], [1, 2, 3, 4]);
     deepStrictEqual([...(await drainBytes(b))], [1, 2, 3, 4]);
+  },
+};
+
+// A byte stream whose source took byobRequest for a pending read(view),
+// whose reader then released, and which was teed.
+async function teeWithHeldByobRequest() {
+  let controller;
+  const rs = new ReadableStream({
+    type: 'bytes',
+    start(c) {
+      controller = c;
+    },
+  });
+  const reader = rs.getReader({ mode: 'byob' });
+  const read = reader.read(new Uint8Array(4));
+  await scheduler.wait(5);
+  const request = controller.byobRequest;
+  reader.releaseLock();
+  await rejectionOf(read);
+  const [a, b] = rs.tee();
+  return { a, b, controller, request };
+}
+
+const INVALIDATED = {
+  name: 'TypeError',
+  message: 'This BYOB request has been invalidated',
+};
+
+// DIVERGENCE: a byobRequest held across tee(). TypeScript invalidates it
+// (branches share the queue and see no byobRequest); later chunks still
+// reach both branches. C++ keeps it working: the responded byte reaches
+// both branches.
+export const teeInvalidatesHeldByobRequest = {
+  async test() {
+    const { a, b, controller, request } = await teeWithHeldByobRequest();
+    if (!usingTsImpl) {
+      strictEqual(controller.byobRequest, request);
+      request.view[0] = 7;
+      request.respond(1);
+      deepStrictEqual([...(await a.getReader().read()).value], [7]);
+      deepStrictEqual([...(await b.getReader().read()).value], [7]);
+      controller.error(new Error('cleanup'));
+      return;
+    }
+    strictEqual(controller.byobRequest, null);
+    strictEqual(request.view, null);
+    throws(() => request.respond(1), INVALIDATED);
+    controller.enqueue(new Uint8Array([8]));
+    controller.close();
+    deepStrictEqual([...(await drainBytes(a))], [8]);
+    deepStrictEqual([...(await drainBytes(b))], [8]);
+  },
+};
+
+// DIVERGENCE: once the sibling cancels, the remaining branch's read gets a
+// fresh byobRequest under TypeScript, and the held one stays invalid.
+// C++ keeps exposing the held request, which fills the read.
+export const teeSoleBranchMintsFreshByobRequest = {
+  async test() {
+    const { a, b, controller, request } = await teeWithHeldByobRequest();
+    b.cancel('bye');
+    await scheduler.wait(5);
+    const reader = a.getReader({ mode: 'byob' });
+    const read = reader.read(new Uint8Array(8));
+    const current = controller.byobRequest;
+    if (!usingTsImpl) {
+      strictEqual(current, request);
+      request.view[0] = 7;
+      request.respond(1);
+      deepStrictEqual([...(await read).value], [7]);
+      return;
+    }
+    ok(current !== request);
+    strictEqual(current.view.byteLength, 8);
+    throws(() => request.respond(1), INVALIDATED);
+    current.view[0] = 7;
+    current.respond(1);
+    deepStrictEqual([...(await read).value], [7]);
   },
 };

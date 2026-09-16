@@ -336,9 +336,8 @@ let controllerMaybeCloseStream: (
     | ReadableByteStreamControllerType
     | NativeReadableStreamControllerType
 ) => void;
-// Invalidate any cached byobRequest when a reader releases its lock (the
-// release rejects the pending pull-intos, so a cached request would point
-// at a dead descriptor). No-op for default controllers.
+// A reader released its lock. The native controller drops its cached
+// byobRequest; the queued byte controller keeps its own (spec).
 let controllerOnReaderRelease: (
   controller:
     | ReadableStreamDefaultControllerType
@@ -1697,6 +1696,10 @@ let byteControllerRespondWithNewView: (
 let getByteControllerAutoAllocateChunkSize: (
   controller: ReadableByteStreamController
 ) => number | undefined;
+// tee() and detach replace the cursor a cached byobRequest was minted for.
+let byteControllerInvalidateByobRequest: (
+  controller: ReadableByteStreamController
+) => void;
 
 let assertIsReadableStreamBYOBRequest: (
   self: ReadableStreamBYOBRequest
@@ -1877,6 +1880,10 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
     getByteControllerAutoAllocateChunkSize = (controller) => {
       return controller.#autoAllocateChunkSize;
+    };
+
+    byteControllerInvalidateByobRequest = (controller) => {
+      controller.#invalidateByobRequest();
     };
 
     const prevOnReaderRelease = controllerOnReaderRelease;
@@ -3490,6 +3497,9 @@ class ReadableStream<R> {
           const to2 = branch2.#consumer as unknown as ByteStreamCursorType;
           to1.adoptReleasedBytes(from);
           to2.adoptReleasedBytes(from);
+          byteControllerInvalidateByobRequest(
+            controller as ReadableByteStreamController
+          );
         }
         queue.removeCursor(cursor);
         stream.#consumer = undefined;
@@ -3621,6 +3631,9 @@ class ReadableStream<R> {
           const from = cursor as unknown as ByteStreamCursorType;
           const to = shell.#consumer as unknown as ByteStreamCursorType;
           to.adoptReleasedBytes(from);
+          byteControllerInvalidateByobRequest(
+            controller as ReadableByteStreamController
+          );
         }
         queue.removeCursor(cursor);
       }
