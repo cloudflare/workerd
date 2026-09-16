@@ -8,12 +8,21 @@ load("//:build/wd_test.bzl", "wd_test")
 
 http_server_suite_srcs = glob(["*.js"]) + ["http-server-modules.capnp"]
 
+# The suite's failure-path cases (handlers that throw or reject, destroyed
+# responses, cancelled bodies) each make workerd log the exception with a
+# symbolized stack trace, which costs about a second apiece in a debug
+# build; with the volume cases on top, under CI load the suite needs more
+# than the medium size's 15 s budget.
+http_server_size = "large"
+
 wd_test(
+    size = http_server_size,
     src = "http-server-cpp.wd-test",
     data = http_server_suite_srcs,
 )
 
 wd_test(
+    size = http_server_size,
     src = "http-server-ts.wd-test",
     args = ["--experimental"],
     data = http_server_suite_srcs,

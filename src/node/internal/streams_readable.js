@@ -2324,6 +2324,16 @@ Readable.prototype.find = find;
  * }} [options]
  * @returns {ReadableStream}
  */
+// The web streams each node readable has been adapted to (one per
+// Readable.toWeb() over it), kept alive by the node readable. The C++
+// streams implementation's controller does not keep its stream alive: once
+// the stream is collected, enqueue() drops the chunk and desiredSize stays
+// put, so a source holding only the controller (this adapter's 'data'
+// listener) would never be paused, and a reader awaiting a read could be
+// collected with the stream. The entries live exactly as long as the node
+// readable does.
+const adaptedReadableStreams = new WeakMap();
+
 export function newReadableStreamFromStreamReadable(
   streamReadable,
   options = {},
@@ -2371,9 +2381,44 @@ export function newReadableStreamFromStreamReadable(
   function onData(chunk) {
     // Copy the Buffer to detach it from the pool.
     if (Buffer.isBuffer(chunk) && !objectMode) chunk = new Uint8Array(chunk);
-    controller.enqueue(chunk);
+    // An enqueue that fails — the strategy's size() throwing or returning
+    // an invalid size, or the stream having just been cancelled from an
+    // earlier 'data' listener — has errored the stream (or found it
+    // closed); thrown from here it would escape the source's 'data'
+    // emission as an uncaught exception. The source has no consumer left:
+    // destroy it with the error (a no-op for a source the cancel already
+    // destroyed).
+    try {
+      controller.enqueue(chunk);
+    } catch (err) {
+      destroyer(streamReadable, err);
+      return;
+    }
     if (controller.desiredSize <= 0) streamReadable.pause();
   }
+
+  // The web stream is constructed before the source is touched: its
+  // constructor rejects an invalid high-water mark, and a throw there must
+  // leave the source as it was, not paused with this adapter's listeners
+  // on it. The first pull() comes no earlier than a later microtask.
+  const stream = new globalThis.ReadableStream(
+    {
+      start(c) {
+        controller = c;
+      },
+
+      pull() {
+        streamReadable.resume();
+      },
+
+      cancel(reason) {
+        wasCanceled = true;
+        destroyer(streamReadable, reason);
+      },
+      type: createTypeBytes ? 'bytes' : undefined,
+    },
+    strategy
+  );
 
   streamReadable.pause();
 
@@ -2397,24 +2442,13 @@ export function newReadableStreamFromStreamReadable(
 
   streamReadable.on('data', onData);
 
-  return new globalThis.ReadableStream(
-    {
-      start(c) {
-        controller = c;
-      },
-
-      pull() {
-        streamReadable.resume();
-      },
-
-      cancel(reason) {
-        wasCanceled = true;
-        destroyer(streamReadable, reason);
-      },
-      type: createTypeBytes ? 'bytes' : undefined,
-    },
-    strategy
-  );
+  let adapted = adaptedReadableStreams.get(streamReadable);
+  if (adapted === undefined) {
+    adapted = new Set();
+    adaptedReadableStreams.set(streamReadable, adapted);
+  }
+  adapted.add(stream);
+  return stream;
 }
 
 /**
@@ -2461,8 +2495,16 @@ export function newStreamReadableFromReadableStream(
           if (chunk.done) {
             // Value should always be undefined here.
             readable.push(null);
-          } else {
+            return;
+          }
+          // A chunk the Readable cannot take (a view over a detached
+          // ArrayBuffer cannot become a Buffer) fails it; the throw would
+          // otherwise be lost in this promise and the stream never read
+          // again.
+          try {
             readable.push(chunk.value);
+          } catch (error) {
+            destroy.call(readable, error);
           }
         },
         (error) => destroy.call(readable, error)
@@ -2493,15 +2535,28 @@ export function newStreamReadableFromReadableStream(
     },
   });
 
-  reader.closed.then(
-    () => {
-      closed = true;
-    },
-    (error) => {
-      closed = true;
-      destroy.call(readable, error);
-    }
-  );
+  try {
+    reader.closed.then(
+      () => {
+        closed = true;
+      },
+      (error) => {
+        closed = true;
+        destroy.call(readable, error);
+      }
+    );
+  } catch (err) {
+    // A Promise.prototype.then that throws (the adapter calls the live one):
+    // the caller gets the throw, not a stream left locked for a Readable
+    // nobody will have. That Readable is destroyed quietly first (the web
+    // stream, marked closed here, is not cancelled), so that the release —
+    // which rejects the reader's closed promise, possibly into a handler
+    // the throwing then did register — has nothing left to destroy.
+    closed = true;
+    readable.destroy();
+    reader.releaseLock();
+    throw err;
+  }
 
   return readable;
 }

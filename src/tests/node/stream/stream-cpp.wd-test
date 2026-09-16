@@ -37,4 +37,6 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
+  # For the forced-GC tests in gc.js.
+  v8Flags = ["--expose-gc"],
 );

@@ -7,6 +7,7 @@
 // three cell configs).
 
 import { strictEqual, ok } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 // A pending read with the stream and reader references dropped still
 // completes when the (still-referenced) controller enqueues (the value
@@ -111,5 +112,40 @@ export const readableStreamFromPendingPromiseCollects = {
       `expected pending ReadableStream.from cycles to be collected, ` +
         `${alive} of ${refs.length} objects still alive`
     );
+  },
+};
+
+// A controller held while its stream is dropped (ledger #19). Per spec the
+// controller's [[stream]] slot keeps the stream alive, so enqueues keep
+// counting against the high-water mark: TypeScript, where the controller
+// strongly references the stream. Under C++ the controller does not keep
+// its stream alive: once the stream is collected its consumer is gone from
+// the controller's queue, enqueue() drops the chunk without throwing and
+// desiredSize stays at the high-water mark — a producer holding only the
+// controller never sees backpressure.
+export const controllerOnlyHeldStreamLiveness = {
+  async test() {
+    let controller;
+    const make = () => {
+      new ReadableStream(
+        {
+          start(c) {
+            controller = c;
+          },
+        },
+        new ByteLengthQueuingStrategy({ highWaterMark: 4 })
+      );
+    };
+    make();
+    await scheduler.wait(10);
+    gc();
+    await scheduler.wait(10);
+    gc();
+    strictEqual(controller.desiredSize, 4);
+    controller.enqueue(new Uint8Array(2));
+    controller.enqueue(new Uint8Array(2));
+    gc();
+    await scheduler.wait(10);
+    strictEqual(controller.desiredSize, usingTsImpl ? 0 : 4);
   },
 };

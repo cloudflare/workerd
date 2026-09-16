@@ -10,6 +10,8 @@
 import { Readable, Writable, Duplex } from 'node:stream';
 import { Buffer } from 'node:buffer';
 import { strictEqual, deepStrictEqual, rejects, throws } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
+import { once, withUncaughtGuard } from 'helpers';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -39,10 +41,6 @@ export const toWebDeliversPushedChunk = {
     strictEqual(dec.decode(value), 'ok');
   },
 };
-
-function once(emitter, event) {
-  return new Promise((resolve) => emitter.once(event, resolve));
-}
 
 // Canceling the web reader destroys the node source with the cancel reason:
 // the reader's cancel() resolves, and the source reports destroyed and
@@ -324,5 +322,204 @@ export const toWebUnreadableSourceYieldsCancelledStream = {
       strictEqual(done, true);
       strictEqual(value, undefined);
     }
+  },
+};
+
+// A user strategy whose size() fails (throws, or returns an invalid size)
+// fails the enqueue, which errors the web stream with that error: reads
+// reject with it. Under TypeScript the failed enqueue also throws, inside
+// the 'data' delivery; the adapter catches it and destroys the source with
+// the error — in Node it escapes as an uncaught exception, once per chunk
+// the source keeps pushing. Under C++ the enqueue swallows the failure
+// (streams readable ledger #8/#9): the stream errors all the same but
+// nothing is thrown, and the source is left paused, alive (ledger #6).
+export const toWebLyingStrategyDestroysSource = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const boom = new Error('size boom');
+      const cases = [
+        [
+          () => {
+            throw boom;
+          },
+          (err) => strictEqual(err, boom),
+        ],
+        [
+          () => NaN,
+          (err) =>
+            strictEqual(err.name, usingTsImpl ? 'RangeError' : 'TypeError'),
+        ],
+      ];
+      for (const [size, check] of cases) {
+        const source = new Readable({
+          read() {
+            this.push(enc.encode('a'));
+            this.push(enc.encode('b'));
+            this.push(null);
+          },
+        });
+        const events = [];
+        source.on('error', (err) => events.push(['error', err]));
+        source.on('close', () => events.push(['close']));
+        const reader = Readable.toWeb(source, {
+          strategy: { highWaterMark: 4, size },
+        }).getReader();
+        let failure;
+        try {
+          for (;;) await reader.read();
+        } catch (err) {
+          failure = err;
+        }
+        check(failure);
+        await rejects(reader.closed, (err) => err === failure);
+        if (usingTsImpl) {
+          if (!source.closed) await once(source, 'close');
+          strictEqual(source.destroyed, true);
+          strictEqual(source.errored, failure);
+          deepStrictEqual(events, [['error', failure], ['close']]);
+        } else {
+          await scheduler.wait(10);
+          strictEqual(source.destroyed, false);
+          strictEqual(source.isPaused(), true);
+          deepStrictEqual(events, []);
+        }
+      }
+    });
+  },
+};
+
+// reader.cancel() from a user 'data' listener registered before the
+// adaptation: the adapter's own listener, next in line for the same chunk,
+// enqueues into a stream that has just been cancelled. The throw is caught
+// and — the source being destroyed by the cancel already — dropped: nothing
+// escapes, the read reports done, the source reports the cancel reason.
+export const toWebCancelFromDataListenerIsQuiet = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const reason = new Error('enough');
+      const source = new Readable({
+        read() {
+          this.push(enc.encode('a'));
+          this.push(enc.encode('b'));
+        },
+      });
+      let reader;
+      const seen = [];
+      source.on('data', (chunk) => {
+        seen.push(dec.decode(chunk));
+        if (seen.length === 1) reader.cancel(reason);
+      });
+      const events = [];
+      source.on('error', (err) => events.push(['error', err]));
+      source.on('close', () => events.push(['close']));
+      reader = Readable.toWeb(source).getReader();
+      const closed = once(source, 'close');
+      const { done, value } = await reader.read();
+      strictEqual(done, true);
+      strictEqual(value, undefined);
+      await closed;
+      strictEqual(source.errored, reason);
+      deepStrictEqual(events, [['error', reason], ['close']]);
+    });
+  },
+};
+
+// A source misreporting its readableHighWaterMark (NaN, negative) makes the
+// web stream's construction throw — a RangeError under TypeScript, the C++
+// implementation's TypeError (streams readable ledger #3; ∞ is valid under
+// TypeScript only). The web stream is constructed before the source is
+// touched, so the throw leaves the source as it was: not paused, no
+// listeners, still consumable. A getter that throws surfaces its own error
+// the same way.
+export const toWebInvalidHighWaterMarkLeavesSourceUntouched = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const boom = new Error('hwm boom');
+      const cases = [
+        [NaN, { name: usingTsImpl ? 'RangeError' : 'TypeError' }],
+        [-1, { name: usingTsImpl ? 'RangeError' : 'TypeError' }],
+        [
+          () => {
+            throw boom;
+          },
+          (err) => err === boom,
+        ],
+      ];
+      for (const [value, expected] of cases) {
+        const source = new Readable({ read() {} });
+        Object.defineProperty(source, 'readableHighWaterMark', {
+          get: typeof value === 'function' ? value : () => value,
+        });
+        throws(() => Readable.toWeb(source), expected);
+        strictEqual(source.isPaused(), false);
+        for (const event of ['data', 'end', 'error', 'close']) {
+          strictEqual(source.listenerCount(event), 0, event);
+        }
+        source.push(enc.encode('still fine'));
+        source.push(null);
+        const chunks = [];
+        for await (const chunk of source) chunks.push(dec.decode(chunk));
+        deepStrictEqual(chunks, ['still fine']);
+      }
+
+      const infinite = new Readable({ read() {} });
+      Object.defineProperty(infinite, 'readableHighWaterMark', {
+        get: () => Infinity,
+      });
+      if (usingTsImpl) {
+        strictEqual(Readable.toWeb(infinite) instanceof ReadableStream, true);
+      } else {
+        throws(() => Readable.toWeb(infinite), { name: 'TypeError' });
+      }
+    });
+  },
+};
+
+// A legacy-minded source that emits 'error' after it has ended: the
+// end-of-stream bridge, done with the source, leaves a no-op 'error'
+// listener behind, so the late error is swallowed — nothing escapes, and
+// the closed stream stays closed.
+export const toWebLateErrorAfterEndIsSwallowed = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const source = new Readable({ read() {} });
+      const reader = Readable.toWeb(source).getReader();
+      source.push(enc.encode('a'));
+      source.push(null);
+      strictEqual(dec.decode((await reader.read()).value), 'a');
+      strictEqual((await reader.read()).done, true);
+      await reader.closed;
+      strictEqual(source.listenerCount('error'), 1);
+      source.emit('error', new Error('late'));
+      await reader.closed;
+      strictEqual((await reader.read()).done, true);
+    });
+  },
+};
+
+// The source destroying itself from inside the read the adapter's pull()
+// triggers (its _read(), reached through resume()): the pending web read
+// rejects with the premature-close AbortError, once, and nothing escapes.
+export const toWebDestroyInsidePullBecomesAbortError = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const source = new Readable({
+        read() {
+          this.destroy();
+        },
+      });
+      const closed = once(source, 'close');
+      const reader = Readable.toWeb(source).getReader();
+      for (const p of [reader.read(), reader.closed]) {
+        await rejects(p, (err) => {
+          strictEqual(err.name, 'AbortError');
+          strictEqual(err.code, 'ABORT_ERR');
+          strictEqual(err.cause?.code, 'ERR_STREAM_PREMATURE_CLOSE');
+          return true;
+        });
+      }
+      await closed;
+      strictEqual(source.destroyed, true);
+    });
   },
 };
