@@ -579,7 +579,7 @@ KJ_TEST("Read/Write SpanClose works") {
 KJ_TEST("Read/Write SpanUpdate name works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::SpanUpdate>();
-  SpanUpdate info(kj::ConstString(kj::str("renamed")));
+  SpanUpdate info("renamed"_kjc);
   info.copyTo(infoBuilder);
 
   SpanUpdate info2(infoBuilder.asReader());
@@ -592,7 +592,7 @@ KJ_TEST("Read/Write SpanUpdate name works") {
 KJ_TEST("Read/Write SpanUpdate status works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::SpanUpdate>();
-  SpanUpdate info(SpanStatus(SpanStatusCode::ERROR, kj::ConstString(kj::str("failed"))));
+  SpanUpdate info(SpanStatus(SpanStatusCode::ERROR, kj::ConstString("failed"_kjc)));
   info.copyTo(infoBuilder);
 
   SpanUpdate info2(infoBuilder.asReader());
