@@ -2087,6 +2087,11 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         this.#callPullIfNeeded();
         return;
       }
+    } else {
+      // Step 8.5 on a shared queue: each cursor keeps its own released bytes.
+      this.#queue.forEachLiveCursor((cursor) => {
+        (cursor as unknown as ByteStreamCursorType).flushReleasedHead();
+      });
     }
     this.#queue.enqueue({ value: entry, size: entry.byteLength });
     // The cursors' notify() (run by queue.enqueue) services pending
@@ -3479,6 +3484,13 @@ class ReadableStream<R> {
               cursor.byteOffset,
               totalSize
             );
+        if (isBytes) {
+          const from = cursor as unknown as ByteStreamCursorType;
+          const to1 = branch1.#consumer as unknown as ByteStreamCursorType;
+          const to2 = branch2.#consumer as unknown as ByteStreamCursorType;
+          to1.adoptReleasedBytes(from);
+          to2.adoptReleasedBytes(from);
+        }
         queue.removeCursor(cursor);
         stream.#consumer = undefined;
         // With close already requested, the source's own stream — now
@@ -3605,6 +3617,11 @@ class ReadableStream<R> {
               cursor.byteOffset,
               totalSize
             );
+        if (isBytes) {
+          const from = cursor as unknown as ByteStreamCursorType;
+          const to = shell.#consumer as unknown as ByteStreamCursorType;
+          to.adoptReleasedBytes(from);
+        }
         queue.removeCursor(cursor);
       }
       neutralize();

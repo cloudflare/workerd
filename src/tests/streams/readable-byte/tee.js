@@ -228,3 +228,132 @@ export const teePipeAbortReleasesPendingRead = {
     deepStrictEqual([...(await drainBytes(b))], [1, 2, 3]);
   },
 };
+
+// A byte stream whose reader was released while read(view, { min: 4 })
+// held [1, 2].
+async function releasedPartialRead() {
+  let controller;
+  const rs = new ReadableStream({
+    type: 'bytes',
+    start(c) {
+      controller = c;
+    },
+  });
+  const reader = rs.getReader({ mode: 'byob' });
+  const read = reader.read(new Uint8Array(4), { min: 4 });
+  controller.enqueue(new Uint8Array([1, 2]));
+  await scheduler.wait(5);
+  reader.releaseLock();
+  await rejectionOf(read);
+  return { rs, controller };
+}
+
+// The same, on branch `a` of a tee.
+async function teeWithReleasedPartialRead() {
+  let controller;
+  const rs = new ReadableStream({
+    type: 'bytes',
+    start(c) {
+      controller = c;
+    },
+  });
+  const [a, b] = rs.tee();
+  const reader = a.getReader({ mode: 'byob' });
+  const read = reader.read(new Uint8Array(4), { min: 4 });
+  controller.enqueue(new Uint8Array([1, 2]));
+  await scheduler.wait(5);
+  reader.releaseLock();
+  await rejectionOf(read);
+  return { a, b, controller };
+}
+
+// The released bytes reach the branch's next pending read(view) ahead of
+// the next chunk; the sibling is unaffected (parity).
+export const teeReleasedPartialReadByob = {
+  async test() {
+    const { a, b, controller } = await teeWithReleasedPartialRead();
+    const reader = a.getReader({ mode: 'byob' });
+    const read = reader.read(new Uint8Array(4));
+    controller.enqueue(new Uint8Array([3, 4, 5, 6]));
+    controller.close();
+    deepStrictEqual([...(await read).value], [1, 2]);
+    deepStrictEqual(
+      [...(await reader.read(new Uint8Array(4))).value],
+      [3, 4, 5, 6]
+    );
+    deepStrictEqual([...(await drainBytes(b))], [1, 2, 3, 4, 5, 6]);
+  },
+};
+
+// ... and a pending default read (parity).
+export const teeReleasedPartialReadDefault = {
+  async test() {
+    const { a, controller } = await teeWithReleasedPartialRead();
+    const reader = a.getReader();
+    const read = reader.read();
+    controller.enqueue(new Uint8Array([3, 4]));
+    controller.close();
+    deepStrictEqual([...(await read).value], [1, 2]);
+    deepStrictEqual([...(await reader.read()).value], [3, 4]);
+  },
+};
+
+// Buffered before the next reader: one read(view) takes the released bytes
+// and the next chunk together (parity).
+export const teeReleasedPartialReadBuffered = {
+  async test() {
+    const { a, controller } = await teeWithReleasedPartialRead();
+    controller.enqueue(new Uint8Array([3, 4]));
+    controller.close();
+    const reader = a.getReader({ mode: 'byob' });
+    deepStrictEqual(
+      [...(await reader.read(new Uint8Array(8))).value],
+      [1, 2, 3, 4]
+    );
+  },
+};
+
+// Buffered, then piped: the destination receives them in order (parity).
+export const teeReleasedPartialReadPiped = {
+  async test() {
+    const { a, controller } = await teeWithReleasedPartialRead();
+    controller.enqueue(new Uint8Array([3, 4]));
+    controller.close();
+    const written = [];
+    await a.pipeTo(
+      new WritableStream({
+        write(chunk) {
+          written.push(...chunk);
+        },
+      })
+    );
+    deepStrictEqual(written, [1, 2, 3, 4]);
+  },
+};
+
+// tee() after the release: both branches receive the released bytes ahead
+// of the next chunk (parity).
+export const teeAfterReleasedPartialRead = {
+  async test() {
+    const { rs, controller } = await releasedPartialRead();
+    const [a, b] = rs.tee();
+    controller.enqueue(new Uint8Array([3, 4]));
+    controller.close();
+    deepStrictEqual([...(await drainBytes(a))], [1, 2, 3, 4]);
+    deepStrictEqual([...(await drainBytes(b))], [1, 2, 3, 4]);
+  },
+};
+
+// tee() of a branch holding released bytes: both new branches receive
+// them, and its sibling receives no extra bytes (parity).
+export const teeOfBranchWithReleasedPartialRead = {
+  async test() {
+    const { a, b, controller } = await teeWithReleasedPartialRead();
+    const [a1, a2] = a.tee();
+    controller.enqueue(new Uint8Array([3, 4]));
+    controller.close();
+    deepStrictEqual([...(await drainBytes(a1))], [1, 2, 3, 4]);
+    deepStrictEqual([...(await drainBytes(a2))], [1, 2, 3, 4]);
+    deepStrictEqual([...(await drainBytes(b))], [1, 2, 3, 4]);
+  },
+};

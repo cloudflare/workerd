@@ -147,6 +147,12 @@ export {
   teeErrorPropagatesToBothBranches,
   teeReleasedPendingRead,
   teePipeAbortReleasesPendingRead,
+  teeReleasedPartialReadByob,
+  teeReleasedPartialReadDefault,
+  teeReleasedPartialReadBuffered,
+  teeReleasedPartialReadPiped,
+  teeAfterReleasedPartialRead,
+  teeOfBranchWithReleasedPartialRead,
 } from 'tee';
 
 export {

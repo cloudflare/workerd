@@ -50,7 +50,9 @@ era (see flags below); the whole releaseLock→second-reader cluster
 (respond, respond(1)×2 Uint16 assembly, respondWithNewView,
 autoAllocate respond/enqueue, two pending reads released, a partially
 filled head released), and a released tee-branch read taking no later
-bytes; staged min-fulfillment and min-met
+bytes; a released partial read's bytes reaching the next reader on a tee
+branch (pending BYOB/default read, buffered, piped) and through a later
+tee(); staged min-fulfillment and min-met
 reads; {min}-shaped arg ignored by default readers; readAtLeast exists
 on BOTH implementations; tee CLONES chunks per branch (fresh buffers,
 original detached, no cross-branch mutation) and propagates the same
@@ -114,7 +116,7 @@ named suite test pins directly, differing only in incidental asserts.
 | `respond.js` | ledger #6, #8, #15, #16; all 31 streams-respond-test tests (respond/respondWithNewView/pumps/cancel races/UAF shapes) + js-test respond family |
 | `release-relock.js` | ledger #9, #10; the WPT releaseLock→second-reader cluster; release with two pending reads or a partially filled head |
 | `read-min.js` | ledger #11-#13; byobMin/constraints/readAtLeast (migrated streams-test.js); /chunked SELF endpoint |
-| `tee.js` | ledger #14, #24; clone-per-branch; migrated byte-tee pair; error propagation; released branch reads |
+| `tee.js` | ledger #14, #24; clone-per-branch; migrated byte-tee pair; error propagation; released branch reads, incl. partially filled ones and tee() after a release |
 | `buffer-lifecycle.js` | ledger #18; resizable ArrayBuffers; WASM Memory |
 | `gc.js` | pending BYOB read + byobRequest survive gc() |
 | `integration.js` | BYOB round-trips via SELF; readAtLeast on echoed body; bytes() |
