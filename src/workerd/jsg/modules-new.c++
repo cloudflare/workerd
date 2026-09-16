@@ -1076,10 +1076,13 @@ class IsolateModuleRegistry final {
         return finishOrThrow();
       }
 
-      // At depth 0 draining is safe, and we do it unconditionally: worker code depends on
-      // fire-and-forget microtasks scheduled during top-level evaluation having run before the
-      // first request (e.g. a bare `import(...).catch(...)` in the entrypoint).
-      js.runMicrotasks();
+      // A synchronous graph has already settled during Evaluate(). Only a pending top-level
+      // await needs the microtask queue drained, and at depth 0 that is safe. Draining for an
+      // already-settled graph would run unrelated pending microtasks as a side effect of a
+      // synchronous require()/getBuiltinModule() call.
+      if (promise->State() == v8::Promise::kPending) {
+        js.runMicrotasks();
+      }
       return finishOrThrow();
     };
 
