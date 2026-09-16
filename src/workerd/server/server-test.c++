@@ -831,8 +831,8 @@ KJ_TEST("Server: extension modules with non-URL names are config errors (new mod
   )"_blockquote);
 }
 
-KJ_TEST("Server: python modules without python_workers flag (new module registry)") {
-  // Python modules in a bundle without the python_workers compatibility flag
+KJ_TEST("Server: Python side modules without python_workers flag (new module registry)") {
+  // Python side modules in a bundle without the python_workers compatibility flag
   // are a config error. Under the new module registry this is detected while
   // building the registry; it must be reported like any other config error
   // (with the same message the legacy registry path reports).
@@ -840,6 +840,10 @@ KJ_TEST("Server: python modules without python_workers flag (new module registry
     compatibilityDate = "2024-10-01",
     compatibilityFlags = ["new_module_registry"],
     modules = [
+      ( name = "worker",
+        esModule =
+          `export default {}
+      ),
       ( name = "worker.py",
         pythonModule =
           `def x(): pass

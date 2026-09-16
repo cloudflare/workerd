@@ -8,7 +8,6 @@ const config :Workerd.Config = (
           (name = "worker.py", pythonModule = embed "worker.py"),
         ],
         compatibilityFlags = [
-          "python_workers",
           "python_workers_development",
         ],
       )
