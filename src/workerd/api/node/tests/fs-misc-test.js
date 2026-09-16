@@ -225,7 +225,7 @@ export const otherExportsTest = {
 export const oobWriteTest = {
   test() {
     const v3 = Buffer.from('Test data for write operations');
-    const fd = openSync('/tmp/write-test.bin');
+    const fd = openSync('/tmp/write-test.bin', 'w+');
     throws(
       () => {
         strictEqual(writeSync(fd, v3, 10, 10, 4294967295), 0);
