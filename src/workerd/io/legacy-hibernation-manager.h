@@ -35,6 +35,7 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
   // be woken up. If no tag is provided, we return all accepted websockets.
   kj::Vector<jsg::Ref<api::WebSocket>> getWebSockets(
       jsg::Lock& js, kj::Maybe<kj::StringPtr> tag) override;
+  uint64_t getWebSocketCount() const override;
 
   // Hibernates all the websockets held by the HibernationManager.
   // This converts our activeOrPackage from an api::WebSocket to a HibernationPackage.
