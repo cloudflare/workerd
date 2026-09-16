@@ -1,0 +1,19 @@
+src/rust/cxx/kj-rs-tokio/tests/tokio-event-port-test.c++
+  s_b5100e8818a1d4::t_5f87047f0741ea 132-137,143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cc507acfcf1fd06852c38b3968cbeef52f756e96",
+  "prompts": {},
+  "sessions": {
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
