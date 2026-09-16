@@ -81,6 +81,10 @@ export default {
   'digest/digest_test_data.js': {},
   'digest/xof_digest.js': {},
 
+  'encap_decap/hybrid_kem_vectors.js': {
+    comment: 'Hybrid ML-KEM (post-quantum key encapsulation) is not supported',
+    omittedTests: true,
+  },
   'encap_decap/ml_kem_vectors.js': {
     comment: 'ML-KEM (post-quantum key encapsulation) is not supported',
     omittedTests: true,
@@ -210,6 +214,10 @@ export default {
     ],
   },
 
+  'import_export/Hybrid-KEM_importKey_fixtures.js': {
+    comment: 'Hybrid ML-KEM (post-quantum key encapsulation) is not supported',
+    omittedTests: true,
+  },
   'import_export/ML-DSA_importKey_fixtures.js': {
     comment: 'ML-DSA (post-quantum signature algorithm) is not supported',
     omittedTests: true,

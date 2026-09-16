@@ -319,6 +319,11 @@ export default {
     comment: 'Local Network Access checks are browser-specific',
     omittedTests: true,
   },
+  'constructor/third-param-ignored.any.js': {
+    comment:
+      'The /protocol_array handler closes right after its single message, racing the client close() from onopen; workerd intermittently reports the torn-down connection as an error event',
+    disabledTests: ['a third parameter to the constructor should be ignored'],
+  },
   'cookies/support/websocket-cookies-helper.sub.js': {
     comment: 'Cookie support helper, not an actual test',
     omittedTests: true,
