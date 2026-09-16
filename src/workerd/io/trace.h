@@ -42,8 +42,11 @@ using SpanStatusCode = rpc::SpanStatusCode;
 
 struct SpanStatus {
   explicit SpanStatus(SpanStatusCode code, kj::Maybe<kj::ConstString> message = kj::none)
-      : code(code),
-        message(kj::mv(message)) {}
+      : code(code) {
+    if (code == SpanStatusCode::ERROR) {
+      this->message = kj::mv(message);
+    }
+  }
   SpanStatus(rpc::SpanStatus::Reader reader);
   SpanStatus(SpanStatus&&) noexcept = default;
   SpanStatus& operator=(SpanStatus&&) = default;

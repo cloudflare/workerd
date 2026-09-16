@@ -125,6 +125,7 @@ type SpanStatusCode = "unset" | "ok" | "error";
 
 interface SpanStatus {
   readonly code: SpanStatusCode;
+  /** A developer-facing error message, present only when code is "error". */
   readonly message?: string;
 }
 

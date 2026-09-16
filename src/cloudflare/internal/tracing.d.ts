@@ -37,6 +37,7 @@ type TracingSpanStatusCode = 'unset' | 'ok' | 'error';
 
 interface TracingSpanStatus {
   code: TracingSpanStatusCode;
+  /** A developer-facing error message. Ignored unless code is "error". */
   message?: string;
 }
 

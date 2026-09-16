@@ -47,6 +47,7 @@ struct TracingSpanStatus {
   JSG_STRUCT_TS_DEFINE(type TracingSpanStatusCode = "unset" | "ok" | "error");
   JSG_STRUCT_TS_OVERRIDE({
     code: TracingSpanStatusCode;
+    /** A developer-facing error message. Ignored unless code is "error". */
     message?: string;
   });
 };

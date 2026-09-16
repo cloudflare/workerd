@@ -606,6 +606,23 @@ KJ_TEST("Read/Write SpanUpdate status works") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(status3.message) == "failed");
 }
 
+KJ_TEST("SpanStatus ignores messages for non-error status codes") {
+  SpanStatus unsetStatus(SpanStatusCode::UNSET, kj::ConstString("ignored"_kjc));
+  KJ_ASSERT(unsetStatus.message == kj::none);
+
+  SpanStatus okStatus(SpanStatusCode::OK, kj::ConstString("ignored"_kjc));
+  KJ_ASSERT(okStatus.message == kj::none);
+
+  capnp::MallocMessageBuilder builder;
+  auto statusBuilder = builder.initRoot<rpc::SpanStatus>();
+  statusBuilder.setCode(SpanStatusCode::OK);
+  statusBuilder.initMessage().setText("ignored");
+
+  SpanStatus wireStatus(statusBuilder.asReader());
+  KJ_ASSERT(wireStatus.code == SpanStatusCode::OK);
+  KJ_ASSERT(wireStatus.message == kj::none);
+}
+
 KJ_TEST("Read/Write Onset works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Onset>();
