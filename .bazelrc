@@ -552,9 +552,10 @@ coverage --test_size_filters=-enormous
 coverage --test_timeout=240,240,240,240
 coverage --build_tests_only
 
-# This config is defined internally and enabled on many machines.
-# Defining it as empty just so these machines can run build commands from the workerd repo
+# These configs are defined internally and enabled on many machines.
+# Defining them as empty just so these machines can run build commands from the workerd repo
 build:rosetta-arm64 --define=rosetta_arm64_no_op=1
+build:native-arm64 --define=native_arm64_no_op=1
 
 # Local workstation overrides. /.local/ is gitgnored.
 try-import %workspace%/.local/bazelrc
