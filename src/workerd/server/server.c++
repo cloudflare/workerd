@@ -456,7 +456,7 @@ class Server::ActorNamespace final {
   }
 
   class ActorContainer;
-  using ActorMap = kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>;
+  using ActorMap = kj::HashMap<kj::String, kj::Own<ActorContainer>>;
 
   // ActorContainer mostly serves as a wrapper around Worker::Actor.
   // We use it to associate a HibernationManager with the Worker::Actor, since the
@@ -723,7 +723,7 @@ class Server::ActorNamespace final {
       auto& entry = facets.findOrCreateEntry(childKey, [&]() mutable {
         isNew = true;
         auto container = makeContainer();
-        return ActorMap::Entry{container->getKey(), kj::mv(container)};
+        return ActorMap::Entry{container->getKey().clone(), kj::mv(container)};
       });
 
       return entry.value->addRef();
@@ -1252,11 +1252,7 @@ class Server::ActorNamespace final {
             kj::Own<ActorSqlite::Hooks> sqliteHooks;
             if (parent == kj::none) {
               KJ_IF_SOME(a, ns.alarmScheduler) {
-                // clone() copies the id and name into storage owned by the returned ActorKey, so
-                // the temporary StringPtrs below only need to outlive this call.
-                auto actorKey = ActorKey{.actorId = key, .name = actorName.map([](kj::String& n) {
-                  return n.asPtr();
-                })}.clone();
+                auto actorKey = ActorKey(key.clone(), actorName.clone());
                 sqliteHooks = kj::heap<ActorSqliteHooks>(a, kj::mv(actorKey));
               } else {
                 // No alarm scheduler available, use default hooks instance.
@@ -1426,8 +1422,7 @@ class Server::ActorNamespace final {
       auto container = kj::refcounted<ActorContainer>(kj::mv(key), *this, kj::none,
           ActorContainer::ClassAndId(kj::addRef(*actorClass), kj::mv(id)), timer);
 
-      return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
-        container->getKey(), kj::mv(container)};
+      return ActorMap::Entry{container->getKey().clone(), kj::mv(container)};
     })->addRef();
   }
 
@@ -1732,7 +1727,7 @@ class Server::ActorNamespace final {
 
   class ActorSqliteHooks final: public ActorSqlite::Hooks {
    public:
-    ActorSqliteHooks(AlarmScheduler& alarmScheduler, kj::Own<ActorKey> actor)
+    ActorSqliteHooks(AlarmScheduler& alarmScheduler, ActorKey actor)
         : alarmScheduler(alarmScheduler),
           actor(kj::mv(actor)) {}
 
@@ -1740,16 +1735,16 @@ class Server::ActorNamespace final {
     kj::Promise<void> scheduleRun(
         kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
       KJ_IF_SOME(scheduledTime, newAlarmTime) {
-        alarmScheduler.setAlarm(*actor, scheduledTime);
+        alarmScheduler.setAlarm(actor, scheduledTime);
       } else {
-        alarmScheduler.deleteAlarm(*actor);
+        alarmScheduler.deleteAlarm(actor);
       }
       return kj::READY_NOW;
     }
 
    private:
     AlarmScheduler& alarmScheduler;
-    kj::Own<ActorKey> actor;
+    ActorKey actor;
   };
 
   // Hooks used by facets, which have their own storage but no way to schedule alarms: the alarm
