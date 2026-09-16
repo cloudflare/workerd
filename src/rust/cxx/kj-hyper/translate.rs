@@ -1,6 +1,8 @@
-//! http-crate ⇄ KJ translation for consumers that dispatch requests arriving as `http` types
-//! into a C++ `kj::HttpService` and stream the response back out as an `http_body::Body` — the
-//! hyper inbound server (server.rs) today; any transport delivering `http`-crate requests fits.
+//! http-crate ⇄ KJ translation between `http`-crate requests and a C++ `kj::HttpService`.
+//!
+//! For consumers that dispatch requests arriving as `http` types into a C++ `kj::HttpService`
+//! and stream the response back out as an `http_body::Body` — the hyper inbound server
+//! (server.rs) today; any transport delivering `http`-crate requests fits.
 //!
 //! The pieces here are transport-neutral:
 //!
@@ -33,6 +35,7 @@ use hyper::body::Incoming;
 use kj::Result;
 use kj::http::Method;
 use kj_rs::KjMaybe;
+use tokio::io::ReadBuf;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
@@ -52,11 +55,12 @@ impl std::fmt::Display for BodyError {
 
 impl std::error::Error for BodyError {}
 
-/// How many writes the response-body channel may buffer ahead of the transport (the mirror
-/// image of [`REQUEST_BODY_CHANNEL_FRAMES`]): a full channel costs the writer a waker round
-/// trip plus a KJ event-loop turn per write. Depth 16 benchmarked at parity with kj-http on
-/// the 1 MiB-upload-echo benchmark (depth 1 was ~6x slower); chunks are still handed to the
-/// transport as soon as it can take them, so streaming latency (e.g. SSE) is unaffected.
+/// How many writes the response-body channel may buffer ahead of the transport.
+///
+/// This is the mirror image of [`REQUEST_BODY_CHANNEL_FRAMES`]: a full channel costs the writer
+/// a waker round trip plus a KJ event-loop turn per write. Depth 16 benchmarked at parity with
+/// kj-http on the 1 MiB-upload-echo benchmark (depth 1 was ~6x slower); chunks are still handed
+/// to the transport as soon as it can take them, so streaming latency (e.g. SSE) is unaffected.
 ///
 /// On the hyper serve path (server.rs) this is also the depth of the same-task
 /// [`ResponseBodyShared`] ring, so backpressure behaves identically to the old mpsc.
@@ -108,7 +112,7 @@ pub(crate) struct ResponseBodyShared {
     producer_waker: Option<Waker>,
     /// The consumer's (hyper body poll's) waker, parked when `poll_next_chunk` returns Pending.
     /// The producer usually runs on its own KJ event OUTSIDE `serve()`'s poll tree (the C++
-    /// service writing while its request() promise is still pending), so a queued chunk or a
+    /// service writing while its `request()` promise is still pending), so a queued chunk or a
     /// terminal transition must wake the connection future — nothing else re-polls it when the
     /// socket is quiet. Same-thread (the serve future's KJ waker).
     consumer_waker: Option<Waker>,
@@ -197,7 +201,7 @@ impl ResponseBodyShared {
     /// the connection future through the waker.
     pub(crate) fn poll_next_chunk(
         shared: &Rc<RefCell<Self>>,
-        cx: &mut Context<'_>,
+        cx: &Context<'_>,
     ) -> Poll<Option<std::result::Result<Bytes, BodyError>>> {
         let mut b = shared.borrow_mut();
         if matches!(b.state, BodyState::Aborted(_))
@@ -232,11 +236,13 @@ impl ResponseBodyShared {
 }
 
 /// The response body as an `http_body::Body` for cross-task transports (which need it to be
-/// `Send`): known-empty, a complete buffer (error responses),
-/// or fed chunk-by-chunk from the service's `kj::AsyncOutputStream` writes through a bounded
-/// channel (backpressure: the writer suspends until the transport drains). `abort_rx` lets the
-/// KJ side turn an in-progress streaming body into a transport error, so consumers observe an
-/// aborted response rather than a clean end.
+/// `Send`).
+///
+/// It is known-empty, a complete buffer (error responses), or fed chunk-by-chunk from the
+/// service's `kj::AsyncOutputStream` writes through a bounded channel (backpressure: the writer
+/// suspends until the transport drains). `abort_rx` lets the KJ side turn an in-progress
+/// streaming body into a transport error, so consumers observe an aborted response rather than a
+/// clean end.
 ///
 /// The hyper serve path (server.rs) uses its own same-task `ServeBody` fed by a
 /// [`ResponseBodyShared`] buffer instead — see that type — because a same-task `Rc`-backed body
@@ -317,11 +323,13 @@ pub enum FramingHeaders {
 }
 
 /// Translate the service's `kj::HttpHeaders` entries into an `http::HeaderMap`, preserving
-/// multi-value order and non-UTF-8 value bytes — plus the original header-name spellings for
-/// hyper's encoder ([`hyper::ext::HeaderCaseMap`], constructible via workerd's hyper patch):
-/// kj-http writes names exactly as the application spelled them, and workerd's tests assert
-/// the raw bytes. Names absent from the map fall back to hyper's title-casing (correct for the
-/// framing/connection headers inserted with their canonical spellings).
+/// multi-value order and non-UTF-8 value bytes.
+///
+/// Also returns the original header-name spellings for hyper's encoder
+/// ([`hyper::ext::HeaderCaseMap`], constructible via workerd's hyper patch): kj-http writes names
+/// exactly as the application spelled them, and workerd's tests assert the raw bytes. Names
+/// absent from the map fall back to hyper's title-casing (correct for the framing/connection
+/// headers inserted with their canonical spellings).
 pub fn translate_response_headers(
     entries: &[kj::http::HeaderEntry],
     framing: FramingHeaders,
@@ -477,8 +485,9 @@ where
     }
 }
 
-/// The Rust side of the `kj::AsyncInputStream` handed to the C++ service as a request body —
-/// and, on the client side, the response-body pump (client.rs drains it into the caller's
+/// The Rust side of the `kj::AsyncInputStream` handed to the C++ service as a request body.
+///
+/// On the client side it is also the response-body pump (client.rs drains it into the caller's
 /// output stream) as well as non-101/rejection bodies. Wrapped by `HyperRequestBodyStream`
 /// in hyper-server-ffi.c++. Any `http_body::Body` with `Bytes` data works as the source
 /// ([`from_body`](Self::from_body)); hyper's `Incoming` is the original use.
@@ -531,19 +540,19 @@ impl HyperRequestBody {
 
     /// Override the reported remaining length (kj's HEAD-response rule: the body is empty by
     /// definition but `tryGetLength()` reports the advertised Content-Length, like kj's
-    /// HeadResponseStream).
+    /// `HeadResponseStream`).
     #[must_use]
     pub(crate) fn with_remaining(mut self, remaining: Option<u64>) -> Self {
         self.remaining = remaining;
         self
     }
 
-    /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, minBytes, buffer.len())`: reads
-    /// until at least `min_bytes` are available or EOF; returns the number of bytes read.
+    /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, minBytes, len)`: fills `buf` until
+    /// at least `min_bytes` are there or EOF; returns the number of bytes read.
     /// Once `min_bytes` is satisfied, frames the pump already delivered are coalesced toward
     /// `buffer.len()` without waiting, so large reads cross the FFI boundary once per channel
     /// drain rather than once per HTTP frame.
-    pub async fn read(&mut self, buffer: &mut [u8], min_bytes: usize) -> Result<usize> {
+    pub async fn read(&mut self, buf: &mut ReadBuf<'_>, min_bytes: usize) -> Result<usize> {
         use bytes::Buf;
         if self.buffered.is_empty()
             && let Some(e) = self.pending_error.take()
@@ -552,13 +561,13 @@ impl HyperRequestBody {
         }
         let mut filled = 0;
         loop {
-            if !self.buffered.is_empty() && filled < buffer.len() {
-                let n = std::cmp::min(buffer.len() - filled, self.buffered.len());
-                buffer[filled..filled + n].copy_from_slice(&self.buffered[..n]);
+            if !self.buffered.is_empty() && buf.remaining() > 0 {
+                let n = std::cmp::min(buf.remaining(), self.buffered.len());
+                buf.put_slice(&self.buffered[..n]);
                 self.buffered.advance(n);
                 filled += n;
             }
-            if self.done || filled == buffer.len() {
+            if self.done || buf.remaining() == 0 {
                 break;
             }
             if filled >= min_bytes {
@@ -612,18 +621,19 @@ enum TryFrame {
 }
 
 /// The Rust side of the `kj::AsyncInputStream` handed to the C++ service as a request body on the
-/// hyper **serve** path (server.rs) — Stage 4 of the kj↔tokio serve fusion. Unlike
-/// [`HyperRequestBody`] (which pumps its body on a spawned task feeding a cross-task channel, for
-/// genuinely cross-task transports and the client path), this reads hyper's `Incoming`
-/// *inline* within `serve()`'s single poll tree: [`Self::read`] polls the `Incoming` directly, so
-/// a `Pending` body read yields to the fixed-point driver, which re-polls the connection future —
-/// the producer that reads request frames off the socket — and hyper wakes this read when the
-/// frame lands. Mutual progress, no spawned pump, no `block_on`, and no cross-thread waker; this
-/// is exactly the original body-pump deadlock site, safe now only because the connection future is
-/// a KJ node (Stage 1). hyper's own `Incoming` buffer supplies the bounded read-ahead and
-/// end-to-end upload backpressure the pump's channel used to (polling `Incoming` is what makes
-/// hyper read request bytes off the socket, so a slow reader slows the socket read — not a busy
-/// spin, not unbounded).
+/// hyper **serve** path (server.rs) — Stage 4 of the kj↔tokio serve fusion.
+///
+/// Unlike [`HyperRequestBody`] (which pumps its body on a spawned task feeding a cross-task
+/// channel, for genuinely cross-task transports and the client path), this reads hyper's
+/// `Incoming` *inline* within `serve()`'s single poll tree: [`Self::read`] polls the `Incoming`
+/// directly, so a `Pending` body read yields to the fixed-point driver, which re-polls the
+/// connection future — the producer that reads request frames off the socket — and hyper wakes
+/// this read when the frame lands. Mutual progress, no spawned pump, no `block_on`, and no
+/// cross-thread waker; this is exactly the original body-pump deadlock site, safe now only
+/// because the connection future is a KJ node (Stage 1). hyper's own `Incoming` buffer supplies
+/// the bounded read-ahead and end-to-end upload backpressure the pump's channel used to (polling
+/// `Incoming` is what makes hyper read request bytes off the socket, so a slow reader slows the
+/// socket read — not a busy spin, not unbounded).
 ///
 /// This type is `!Send` (same-task only), like server.rs's `ServeBody`; the C++ side reads it on
 /// the one KJ event-loop thread that owns the connection. Dropping it (teardown / client abort)
@@ -708,10 +718,10 @@ impl ServeRequestBody {
         }
     }
 
-    /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, minBytes, buffer.len())`. Identical
+    /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, minBytes, len)`. Identical
     /// coalescing / `remaining` / `pending_error` semantics to [`HyperRequestBody::read`], reading
     /// hyper's `Incoming` inline instead of a pump channel.
-    pub async fn read(&mut self, buffer: &mut [u8], min_bytes: usize) -> Result<usize> {
+    pub async fn read(&mut self, buf: &mut ReadBuf<'_>, min_bytes: usize) -> Result<usize> {
         use bytes::Buf;
         if self.buffered.is_empty()
             && let Some(e) = self.pending_error.take()
@@ -720,13 +730,13 @@ impl ServeRequestBody {
         }
         let mut filled = 0;
         loop {
-            if !self.buffered.is_empty() && filled < buffer.len() {
-                let n = std::cmp::min(buffer.len() - filled, self.buffered.len());
-                buffer[filled..filled + n].copy_from_slice(&self.buffered[..n]);
+            if !self.buffered.is_empty() && buf.remaining() > 0 {
+                let n = std::cmp::min(buf.remaining(), self.buffered.len());
+                buf.put_slice(&self.buffered[..n]);
                 self.buffered.advance(n);
                 filled += n;
             }
-            if self.done || filled == buffer.len() {
+            if self.done || buf.remaining() == 0 {
                 break;
             }
             if filled >= min_bytes {

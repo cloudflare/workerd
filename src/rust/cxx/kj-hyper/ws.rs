@@ -36,6 +36,7 @@ use std::task::Poll;
 
 use cxx::KjError;
 use cxx::KjExceptionType;
+use tokio::io::ReadBuf;
 
 use crate::ffi;
 use crate::upgraded_io::PulseEvent;
@@ -890,7 +891,8 @@ impl WsSession {
                 recv.compact();
                 let end = recv.end;
                 let RecvState { buffer, .. } = &mut *recv;
-                self.io.poll_read_some(cx, &mut buffer[end..])
+                self.io
+                    .poll_read_some(cx, &mut ReadBuf::new(&mut buffer[end..]))
             })
             .await?;
             if n == 0 {
@@ -925,7 +927,8 @@ impl WsSession {
                 if self.read_aborted.get() {
                     return Poll::Ready(Err(disconnected("the WebSocket was aborted")));
                 }
-                self.io.poll_read_some(cx, &mut payload[filled..])
+                self.io
+                    .poll_read_some(cx, &mut ReadBuf::new(&mut payload[filled..]))
             })
             .await?;
             if n == 0 {

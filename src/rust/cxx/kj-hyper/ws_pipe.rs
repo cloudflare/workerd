@@ -12,9 +12,9 @@
 //! - close is NOT terminal at the pipe level (only disconnect/abort are sticky), but a
 //!   steady-state `pump_to` completes cleanly when it forwards a Close;
 //! - a parked `pump_to` is FULFILLED (clean) by the peer's abort, while parked
-//!   send/receive/pump_from are rejected DISCONNECTED "other end of WebSocketPipe was
+//!   `send/receive/pump_from` are rejected DISCONNECTED "other end of `WebSocketPipe` was
 //!   destroyed";
-//! - `receive()`'s max_size is stored but never enforced by the rendezvous (kj parity): it is
+//! - `receive()`'s `max_size` is stored but never enforced by the rendezvous (kj parity): it is
 //!   only forwarded to a real socket when a pump is adopted;
 //! - byte counting matches kj's (deliberately lossy) rules: sends/closes count on the sender's
 //!   direction after delivery; an adopted-source pump consumed by one-by-one `receive()` calls
@@ -104,7 +104,7 @@ impl PipeMessage {
 /// parked state, so a second same-way operation is a caller bug.
 enum State {
     Idle,
-    /// A send()/close() is parked awaiting a consumer. `done`: fulfilled/rejected by the
+    /// A `send()/close()` is parked awaiting a consumer. `done`: fulfilled/rejected by the
     /// consumer; dropped-without-send means the consumer never came (sender cancelled).
     BlockedSend {
         message: PipeMessage,
@@ -117,7 +117,7 @@ enum State {
         done: oneshot::Sender<Result<()>>,
         busy: bool,
     },
-    /// A receive() is parked awaiting a producer.
+    /// A `receive()` is parked awaiting a producer.
     BlockedReceive {
         max_size: usize,
         done: oneshot::Sender<Result<ffi::WsMessage>>,
@@ -129,28 +129,61 @@ enum State {
         done: oneshot::Sender<Result<()>>,
         busy: bool,
     },
-    /// The sender called disconnect(); sticky.
+    /// The sender called `disconnect()`; sticky.
     Disconnected,
     /// The peer end was aborted/destroyed; sticky.
     Aborted,
 }
 
 impl State {
-    fn is_sticky(&self) -> bool {
-        matches!(self, State::Disconnected | State::Aborted)
+    const fn is_sticky(&self) -> bool {
+        matches!(self, Self::Disconnected | Self::Aborted)
+    }
+
+    /// If a receive is still parked here, leaves `Idle` and hands over its fulfiller.
+    fn take_blocked_receive(&mut self) -> Option<oneshot::Sender<Result<ffi::WsMessage>>> {
+        match std::mem::replace(self, Self::Idle) {
+            Self::BlockedReceive { done, .. } => Some(done),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// If a pumpTo is still adopted here, leaves `Idle` and hands over its fulfiller.
+    fn take_blocked_pump_to(&mut self) -> Option<oneshot::Sender<Result<()>>> {
+        match std::mem::replace(self, Self::Idle) {
+            Self::BlockedPumpTo { done, .. } => Some(done),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// If a tryPumpFrom is still adopted here, leaves `Idle` and hands over its fulfiller.
+    fn take_blocked_pump_from(&mut self) -> Option<oneshot::Sender<Result<()>>> {
+        match std::mem::replace(self, Self::Idle) {
+            Self::BlockedPumpFrom { done, .. } => Some(done),
+            other => {
+                *self = other;
+                None
+            }
+        }
     }
 }
 
-/// One direction of the pipe (kj's WebSocketPipeImpl).
+/// One direction of the pipe (kj's `WebSocketPipeImpl`).
 struct Direction {
     state: State,
-    /// Bumped whenever a new parked state is installed; lets a cancelled operation's ParkGuard
+    /// Bumped whenever a new parked state is installed; lets a cancelled operation's `ParkGuard`
     /// recognize that a later state replaced its own (kj: endState clears only if still self).
     generation: u64,
     /// Bytes delivered through this direction (kj's transferredBytes; serves both the
     /// sender's sentByteCount and the receiver's receivedByteCount).
     transferred: u64,
-    /// Set once aborted; `abort_waiters` are the parked whenAborted() calls.
+    /// Set once aborted; `abort_waiters` are the parked `whenAborted()` calls.
     aborted: bool,
     abort_waiters: Vec<oneshot::Sender<()>>,
     /// The pump destinations the OWNING end (the end using this direction as `in`) currently
@@ -158,7 +191,7 @@ struct Direction {
     /// destinationPumpingFrom). Cleared when the pump promise settles or drops.
     dest_pumping_to: Option<WsPtr>,
     dest_pumping_from: Option<WsPtr>,
-    /// kj's "can only call pumpTo()/tryPumpFrom() once at a time" trackers for the owning end.
+    /// kj's "can only call `pumpTo()/tryPumpFrom()` once at a time" trackers for the owning end.
     /// They live here (not on `WsPipeEnd`) because the pump future must be self-contained: kj's
     /// pump promise holds the refcounted pipe, not the end object, so the promise may be
     /// dropped after the end itself is gone (e.g. event-loop teardown) and its drop-time
@@ -243,6 +276,25 @@ impl Drop for ParkGuard {
     }
 }
 
+/// Waits for the rendezvous a parked state was installed for (on `dir_idx`, just now, with no
+/// await in between), clearing the state if the wait is cancelled. A fulfiller dropped without
+/// answering means the other side went away: kj treats that as abort.
+async fn wait_parked<T>(
+    pipe: &Rc<Pipe>,
+    dir_idx: usize,
+    rx: oneshot::Receiver<Result<T>>,
+) -> Result<T> {
+    let mut guard = ParkGuard {
+        pipe: pipe.clone(),
+        dir: dir_idx,
+        generation: pipe.directions[dir_idx].borrow().generation,
+        armed: true,
+    };
+    let result = rx.await.unwrap_or_else(|_| Err(disconnected(ABORTED_MSG)));
+    guard.armed = false;
+    result
+}
+
 pub struct WsPipeEnd {
     pipe: Rc<Pipe>,
     /// Index of the direction this end receives from (`in`); it sends on the other one.
@@ -281,42 +333,47 @@ impl WsPipeEnd {
     // --- The sender-side rendezvous (this end's OUT direction; kj's Impl::send/close). ---
 
     async fn send_message(&self, message: PipeMessage) -> Result<()> {
+        enum Next {
+            /// Parked: wait for a consumer.
+            Wait(oneshot::Receiver<Result<()>>),
+            /// An adopted pump sink: forward the message into it.
+            Forward(WsPtr, PipeMessage),
+        }
         let counted = message.counted_size();
         let dir_idx = self.output();
-        // Fast path: a consumer is already parked (or the direction is sticky).
-        let rx = {
+        // Decide under the borrow; every await happens after it ends.
+        let next = {
             let mut dir = self.pipe.directions[dir_idx].borrow_mut();
-            match &mut dir.state {
-                State::Aborted => return Err(disconnected(ABORTED_MSG)),
-                State::Disconnected => {
+            match std::mem::replace(&mut dir.state, State::Idle) {
+                sticky @ State::Aborted => {
+                    dir.state = sticky;
+                    return Err(disconnected(ABORTED_MSG));
+                }
+                sticky @ State::Disconnected => {
+                    dir.state = sticky;
                     return Err(failed(match &message {
                         PipeMessage::Close(..) => "can't close() after disconnect()",
                         _ => "can't send() after disconnect()",
                     }));
                 }
-                State::BlockedReceive { busy, .. } => {
-                    assert!(!*busy, "already pumping");
-                    let State::BlockedReceive { done, .. } =
-                        std::mem::replace(&mut dir.state, State::Idle)
-                    else {
-                        unreachable!()
-                    };
+                // Fast path: a consumer is already parked.
+                State::BlockedReceive { done, busy, .. } => {
+                    assert!(!busy, "already pumping");
                     let _ = done.send(Ok(message.into_ws_message()));
                     dir.transferred += counted;
                     return Ok(());
                 }
-                State::BlockedPumpTo { output, busy, .. } => {
-                    assert!(!*busy, "{SEND_IN_PROGRESS_MSG}");
-                    *busy = true;
-                    let output = *output;
-                    drop(dir);
-                    let result = self.forward_into_pump_to(dir_idx, output, message).await;
-                    if result.is_ok() {
-                        self.pipe.directions[dir_idx].borrow_mut().transferred += counted;
-                    }
-                    return result;
+                State::BlockedPumpTo { output, done, busy } => {
+                    assert!(!busy, "{SEND_IN_PROGRESS_MSG}");
+                    dir.state = State::BlockedPumpTo {
+                        output,
+                        done,
+                        busy: true,
+                    };
+                    Next::Forward(output, message)
                 }
-                State::BlockedSend { .. } | State::BlockedPumpFrom { .. } => {
+                in_progress @ (State::BlockedSend { .. } | State::BlockedPumpFrom { .. }) => {
+                    dir.state = in_progress;
                     return Err(failed(SEND_IN_PROGRESS_MSG));
                 }
                 State::Idle => {
@@ -327,29 +384,28 @@ impl WsPipeEnd {
                         done: tx,
                         busy: false,
                     };
-                    rx
+                    Next::Wait(rx)
                 }
             }
         };
-        let mut guard = ParkGuard {
-            pipe: self.pipe.clone(),
-            dir: dir_idx,
-            generation: self.pipe.directions[dir_idx].borrow().generation,
-            armed: true,
+        let rx = match next {
+            Next::Forward(output, message) => {
+                let result = self.forward_into_pump_to(dir_idx, output, message).await;
+                if result.is_ok() {
+                    self.pipe.directions[dir_idx].borrow_mut().transferred += counted;
+                }
+                return result;
+            }
+            Next::Wait(rx) => rx,
         };
-        let result = match rx.await {
-            Ok(result) => result,
-            // The consuming side dropped the fulfiller without answering: treat as abort.
-            Err(_) => Err(disconnected(ABORTED_MSG)),
-        };
-        guard.armed = false;
+        let result = wait_parked(&self.pipe, dir_idx, rx).await;
         if result.is_ok() {
             self.pipe.directions[dir_idx].borrow_mut().transferred += counted;
         }
         result
     }
 
-    /// Forward one message into an adopted pump sink (kj's BlockedPumpTo::send/close). Close
+    /// Forward one message into an adopted pump sink (kj's `BlockedPumpTo::send/close`). Close
     /// completes the pump cleanly; errors reject it.
     async fn forward_into_pump_to(
         &self,
@@ -360,32 +416,19 @@ impl WsPipeEnd {
         let is_close = matches!(message, PipeMessage::Close(..));
         let result = message.deliver_to(output).await;
         let mut dir = self.pipe.directions[dir_idx].borrow_mut();
-        match &mut dir.state {
-            State::BlockedPumpTo { busy, .. } => {
-                *busy = false;
-                match (&result, is_close) {
-                    (Ok(()), false) => {}
-                    (Ok(()), true) => {
-                        // Close terminates the pump cleanly.
-                        let State::BlockedPumpTo { done, .. } =
-                            std::mem::replace(&mut dir.state, State::Idle)
-                        else {
-                            unreachable!()
-                        };
-                        let _ = done.send(Ok(()));
-                    }
-                    (Err(e), _) => {
-                        let State::BlockedPumpTo { done, .. } =
-                            std::mem::replace(&mut dir.state, State::Idle)
-                        else {
-                            unreachable!()
-                        };
-                        let _ = done.send(Err(e.clone()));
-                    }
-                }
+        // If the pump was cancelled/aborted while we were forwarding, there is nothing to update.
+        if let State::BlockedPumpTo { busy, .. } = &mut dir.state {
+            *busy = false;
+            let settled = match &result {
+                Ok(()) if is_close => Some(Ok(())), // Close terminates the pump cleanly.
+                Ok(()) => None,
+                Err(e) => Some(Err(e.clone())),
+            };
+            if let Some(outcome) = settled
+                && let Some(done) = dir.state.take_blocked_pump_to()
+            {
+                let _ = done.send(outcome);
             }
-            // The pump was cancelled/aborted while we were forwarding; nothing to update.
-            _ => {}
         }
         result
     }
@@ -403,7 +446,12 @@ impl WsPipeEnd {
             .await
     }
 
-    pub fn disconnect(&self) {
+    /// Corresponds to `kj::WebSocket::disconnect()`.
+    ///
+    /// # Errors
+    ///
+    /// A send or `tryPumpFrom` is in progress on this direction (kj's exception text).
+    pub fn disconnect(&self) -> Result<()> {
         let mut dir = self.pipe.directions[self.output()].borrow_mut();
         match std::mem::replace(&mut dir.state, State::Disconnected) {
             State::Idle => {}
@@ -418,10 +466,12 @@ impl WsPipeEnd {
                 // Redundant/after-abort disconnects are ignored; restore.
                 dir.state = sticky;
             }
-            State::BlockedSend { .. } | State::BlockedPumpFrom { .. } => {
-                panic!("{SEND_IN_PROGRESS_MSG}");
+            in_progress @ (State::BlockedSend { .. } | State::BlockedPumpFrom { .. }) => {
+                dir.state = in_progress;
+                return Err(failed(SEND_IN_PROGRESS_MSG));
             }
         }
+        Ok(())
     }
 
     pub fn abort(&self) {
@@ -445,31 +495,46 @@ impl WsPipeEnd {
     // --- The receiver side (this end's IN direction; kj's Impl::receive/pumpTo). ---
 
     pub async fn receive(&self, max_size: usize) -> Result<ffi::WsMessage> {
+        enum Next {
+            /// Parked: wait for a producer.
+            Wait(oneshot::Receiver<Result<ffi::WsMessage>>),
+            /// An adopted pump source: pull the message from it.
+            Pull(WsPtr),
+        }
         let dir_idx = self.input;
-        let rx = {
+        // Decide under the borrow; every await happens after it ends.
+        let next = {
             let mut dir = self.pipe.directions[dir_idx].borrow_mut();
-            match &mut dir.state {
-                State::Aborted => return Err(disconnected(ABORTED_MSG)),
-                State::Disconnected => return Err(disconnected(DISCONNECTED_MSG)),
-                State::BlockedSend { busy, .. } => {
-                    assert!(!*busy, "already pumping");
-                    let State::BlockedSend { message, done, .. } =
-                        std::mem::replace(&mut dir.state, State::Idle)
-                    else {
-                        unreachable!()
-                    };
+            match std::mem::replace(&mut dir.state, State::Idle) {
+                sticky @ State::Aborted => {
+                    dir.state = sticky;
+                    return Err(disconnected(ABORTED_MSG));
+                }
+                sticky @ State::Disconnected => {
+                    dir.state = sticky;
+                    return Err(disconnected(DISCONNECTED_MSG));
+                }
+                State::BlockedSend {
+                    message,
+                    done,
+                    busy,
+                } => {
+                    assert!(!busy, "already pumping");
                     // maxSize is deliberately NOT enforced by the rendezvous (kj parity).
                     let _ = done.send(Ok(()));
                     return Ok(message.into_ws_message());
                 }
-                State::BlockedPumpFrom { input, busy, .. } => {
-                    assert!(!*busy, "{RECEIVE_IN_PROGRESS_MSG}");
-                    *busy = true;
-                    let input = *input;
-                    drop(dir);
-                    return self.receive_from_pump_from(dir_idx, input, max_size).await;
+                State::BlockedPumpFrom { input, done, busy } => {
+                    assert!(!busy, "{RECEIVE_IN_PROGRESS_MSG}");
+                    dir.state = State::BlockedPumpFrom {
+                        input,
+                        done,
+                        busy: true,
+                    };
+                    Next::Pull(input)
                 }
-                State::BlockedReceive { .. } | State::BlockedPumpTo { .. } => {
+                in_progress @ (State::BlockedReceive { .. } | State::BlockedPumpTo { .. }) => {
+                    dir.state = in_progress;
                     return Err(failed(RECEIVE_IN_PROGRESS_MSG));
                 }
                 State::Idle => {
@@ -480,25 +545,20 @@ impl WsPipeEnd {
                         done: tx,
                         busy: false,
                     };
-                    rx
+                    Next::Wait(rx)
                 }
             }
         };
-        let mut guard = ParkGuard {
-            pipe: self.pipe.clone(),
-            dir: dir_idx,
-            generation: self.pipe.directions[dir_idx].borrow().generation,
-            armed: true,
+        let rx = match next {
+            Next::Pull(input) => {
+                return self.receive_from_pump_from(dir_idx, input, max_size).await;
+            }
+            Next::Wait(rx) => rx,
         };
-        let result = match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(disconnected(ABORTED_MSG)),
-        };
-        guard.armed = false;
-        result
+        wait_parked(&self.pipe, dir_idx, rx).await
     }
 
-    /// Pull one message from an adopted pump source (kj's BlockedPumpFrom::receive): a Close
+    /// Pull one message from an adopted pump source (kj's `BlockedPumpFrom::receive`): a Close
     /// completes the pump; errors reject it.
     async fn receive_from_pump_from(
         &self,
@@ -510,30 +570,21 @@ impl WsPipeEnd {
         let mut dir = self.pipe.directions[dir_idx].borrow_mut();
         if let State::BlockedPumpFrom { busy, .. } = &mut dir.state {
             *busy = false;
-            match &result {
-                Ok(message) if message.kind == ffi::WsMessageKind::CLOSE => {
-                    let State::BlockedPumpFrom { done, .. } =
-                        std::mem::replace(&mut dir.state, State::Idle)
-                    else {
-                        unreachable!()
-                    };
-                    let _ = done.send(Ok(()));
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    let State::BlockedPumpFrom { done, .. } =
-                        std::mem::replace(&mut dir.state, State::Idle)
-                    else {
-                        unreachable!()
-                    };
-                    let _ = done.send(Err(e.clone()));
-                }
+            let settled = match &result {
+                Ok(message) if message.kind == ffi::WsMessageKind::CLOSE => Some(Ok(())),
+                Ok(_) => None,
+                Err(e) => Some(Err(e.clone())),
+            };
+            if let Some(outcome) = settled
+                && let Some(done) = dir.state.take_blocked_pump_from()
+            {
+                let _ = done.send(outcome);
             }
         }
         result
     }
 
-    /// kj::WebSocket::pumpTo(): everything received on this end flows into `ws`.
+    /// `kj::WebSocket::pumpTo()`: everything received on this end flows into `ws`.
     ///
     /// Returns a self-contained (`'static`) future: kj's pump promise holds the refcounted
     /// pipe, not the end object, so the promise may outlive the end (and be dropped after it,
@@ -565,56 +616,47 @@ impl WsPipeEnd {
     }
 
     async fn pump_to_no_abort(pipe: &Rc<Pipe>, dir_idx: usize, output: WsPtr) -> Result<()> {
+        enum Next {
+            /// Parked: the pump is adopted as this direction's sink.
+            Wait(oneshot::Receiver<Result<()>>),
+            /// A parked send: deliver its message, then keep pumping.
+            Deliver(PipeMessage, oneshot::Sender<Result<()>>),
+            /// An adopted pump source: splice it straight into the destination.
+            Splice(WsPtr),
+        }
         loop {
-            let rx = {
+            // Decide under the borrow; every await happens after it ends.
+            let next = {
                 let mut dir = pipe.directions[dir_idx].borrow_mut();
-                match &mut dir.state {
-                    State::Aborted => return Err(disconnected(ABORTED_MSG)),
+                match std::mem::replace(&mut dir.state, State::Idle) {
+                    sticky @ State::Aborted => {
+                        dir.state = sticky;
+                        return Err(disconnected(ABORTED_MSG));
+                    }
                     // Disconnected source: clean end of pump.
-                    State::Disconnected => return Ok(()),
-                    State::BlockedSend { busy, .. } => {
-                        assert!(!*busy, "already pumping");
-                        let State::BlockedSend { message, done, .. } =
-                            std::mem::replace(&mut dir.state, State::Idle)
-                        else {
-                            unreachable!()
+                    sticky @ State::Disconnected => {
+                        dir.state = sticky;
+                        return Ok(());
+                    }
+                    State::BlockedSend {
+                        message,
+                        done,
+                        busy,
+                    } => {
+                        assert!(!busy, "already pumping");
+                        Next::Deliver(message, done)
+                    }
+                    State::BlockedPumpFrom { input, done, busy } => {
+                        assert!(!busy, "{RECEIVE_IN_PROGRESS_MSG}");
+                        dir.state = State::BlockedPumpFrom {
+                            input,
+                            done,
+                            busy: true,
                         };
-                        drop(dir);
-                        // Deliver the parked message and keep pumping (kj recurses even for a
-                        // parked Close -- preserve that quirk).
-                        match message.deliver_to(output).await {
-                            Ok(()) => {
-                                let _ = done.send(Ok(()));
-                                continue;
-                            }
-                            Err(e) => {
-                                let _ = done.send(Err(e.clone()));
-                                return Err(e);
-                            }
-                        }
+                        Next::Splice(input)
                     }
-                    State::BlockedPumpFrom { input, busy, .. } => {
-                        assert!(!*busy, "{RECEIVE_IN_PROGRESS_MSG}");
-                        *busy = true;
-                        let input = *input;
-                        drop(dir);
-                        // Splice: source socket pumps straight into the destination; credit
-                        // the destination's receivedByteCount delta (kj's rule 3).
-                        let before = output.received_byte_count();
-                        let result = input.pump_to(output).await;
-                        let mut dir = pipe.directions[dir_idx].borrow_mut();
-                        if let State::BlockedPumpFrom { .. } = dir.state {
-                            let State::BlockedPumpFrom { done, .. } =
-                                std::mem::replace(&mut dir.state, State::Idle)
-                            else {
-                                unreachable!()
-                            };
-                            let _ = done.send(result.clone().map(|()| ()));
-                        }
-                        dir.transferred += output.received_byte_count() - before;
-                        return result;
-                    }
-                    State::BlockedReceive { .. } | State::BlockedPumpTo { .. } => {
+                    in_progress @ (State::BlockedReceive { .. } | State::BlockedPumpTo { .. }) => {
+                        dir.state = in_progress;
                         return Err(failed(RECEIVE_IN_PROGRESS_MSG));
                     }
                     State::Idle => {
@@ -625,26 +667,40 @@ impl WsPipeEnd {
                             done: tx,
                             busy: false,
                         };
-                        rx
+                        Next::Wait(rx)
                     }
                 }
             };
-            let mut guard = ParkGuard {
-                pipe: pipe.clone(),
-                dir: dir_idx,
-                generation: pipe.directions[dir_idx].borrow().generation,
-                armed: true,
-            };
-            let result = match rx.await {
-                Ok(result) => result,
-                Err(_) => Err(disconnected(ABORTED_MSG)),
-            };
-            guard.armed = false;
-            return result;
+            match next {
+                // Deliver the parked message and keep pumping (kj recurses even for a parked
+                // Close -- preserve that quirk).
+                Next::Deliver(message, done) => match message.deliver_to(output).await {
+                    Ok(()) => {
+                        let _ = done.send(Ok(()));
+                    }
+                    Err(e) => {
+                        let _ = done.send(Err(e.clone()));
+                        return Err(e);
+                    }
+                },
+                // Splice: source socket pumps straight into the destination; credit the
+                // destination's receivedByteCount delta (kj's rule 3).
+                Next::Splice(input) => {
+                    let before = output.received_byte_count();
+                    let result = input.pump_to(output).await;
+                    let mut dir = pipe.directions[dir_idx].borrow_mut();
+                    if let Some(done) = dir.state.take_blocked_pump_from() {
+                        let _ = done.send(result.clone());
+                    }
+                    dir.transferred += output.received_byte_count() - before;
+                    return result;
+                }
+                Next::Wait(rx) => return wait_parked(pipe, dir_idx, rx).await,
+            }
         }
     }
 
-    /// kj::WebSocket::tryPumpFrom(): everything `ws` receives flows into this end.
+    /// `kj::WebSocket::tryPumpFrom()`: everything `ws` receives flows into this end.
     /// (Self-contained future; see `pump_to`.)
     pub(crate) fn pump_from(&self, ws: WsPtr) -> impl Future<Output = Result<()>> + 'static {
         Self::pump_from_impl(self.pipe.clone(), self.input, ws)
@@ -672,69 +728,52 @@ impl WsPipeEnd {
     }
 
     async fn pump_from_inner(pipe: Rc<Pipe>, input_idx: usize, input: WsPtr) -> Result<()> {
+        enum Next {
+            /// Parked: the source is adopted as this direction's producer.
+            Wait(oneshot::Receiver<Result<()>>),
+            /// A parked receive: satisfy it with the source's first message, then keep pumping.
+            First(usize),
+            /// An adopted pump sink: splice the source straight into it.
+            Splice(WsPtr),
+        }
         // This runs on the OUT direction (kj: End::tryPumpFrom -> out->tryPumpFrom).
         let dir_idx = 1 - input_idx;
-        let rx = {
+        // Decide under the borrow; every await happens after it ends.
+        let next = {
             let mut dir = pipe.directions[dir_idx].borrow_mut();
-            match &mut dir.state {
-                State::Aborted => return Err(disconnected(ABORTED_MSG)),
-                State::Disconnected => {
+            match std::mem::replace(&mut dir.state, State::Idle) {
+                sticky @ State::Aborted => {
+                    dir.state = sticky;
+                    return Err(disconnected(ABORTED_MSG));
+                }
+                sticky @ State::Disconnected => {
+                    dir.state = sticky;
                     return Err(failed("can't tryPumpFrom() after disconnect()"));
                 }
-                State::BlockedReceive { max_size, busy, .. } => {
-                    assert!(!*busy, "already pumping");
-                    let max_size = *max_size;
-                    *busy = true;
-                    drop(dir);
-                    // First message satisfies the parked receive; then keep pumping into the
-                    // pipe (kj's BlockedReceive::tryPumpFrom).
-                    let first = input.receive(max_size).await;
-                    let mut dir = pipe.directions[dir_idx].borrow_mut();
-                    match first {
-                        Ok(message) => {
-                            if let State::BlockedReceive { .. } = dir.state {
-                                let State::BlockedReceive { done, .. } =
-                                    std::mem::replace(&mut dir.state, State::Idle)
-                                else {
-                                    unreachable!()
-                                };
-                                let _ = done.send(Ok(message));
-                            }
-                            drop(dir);
-                            return Box::pin(Self::pump_from_inner(pipe, input_idx, input)).await;
-                        }
-                        Err(e) => {
-                            if let State::BlockedReceive { .. } = dir.state {
-                                let State::BlockedReceive { done, .. } =
-                                    std::mem::replace(&mut dir.state, State::Idle)
-                                else {
-                                    unreachable!()
-                                };
-                                let _ = done.send(Err(e.clone()));
-                            }
-                            return Err(e);
-                        }
-                    }
+                State::BlockedReceive {
+                    max_size,
+                    done,
+                    busy,
+                } => {
+                    assert!(!busy, "already pumping");
+                    dir.state = State::BlockedReceive {
+                        max_size,
+                        done,
+                        busy: true,
+                    };
+                    Next::First(max_size)
                 }
-                State::BlockedPumpTo { output, busy, .. } => {
-                    assert!(!*busy, "{SEND_IN_PROGRESS_MSG}");
-                    *busy = true;
-                    let output = *output;
-                    drop(dir);
-                    // Splice pump-to-pump: the source pumps straight into the sink.
-                    let result = input.pump_to(output).await;
-                    let mut dir = pipe.directions[dir_idx].borrow_mut();
-                    if let State::BlockedPumpTo { .. } = dir.state {
-                        let State::BlockedPumpTo { done, .. } =
-                            std::mem::replace(&mut dir.state, State::Idle)
-                        else {
-                            unreachable!()
-                        };
-                        let _ = done.send(result.clone());
-                    }
-                    return result;
+                State::BlockedPumpTo { output, done, busy } => {
+                    assert!(!busy, "{SEND_IN_PROGRESS_MSG}");
+                    dir.state = State::BlockedPumpTo {
+                        output,
+                        done,
+                        busy: true,
+                    };
+                    Next::Splice(output)
                 }
-                State::BlockedSend { .. } | State::BlockedPumpFrom { .. } => {
+                in_progress @ (State::BlockedSend { .. } | State::BlockedPumpFrom { .. }) => {
+                    dir.state = in_progress;
                     return Err(failed(SEND_IN_PROGRESS_MSG));
                 }
                 State::Idle => {
@@ -745,22 +784,48 @@ impl WsPipeEnd {
                         done: tx,
                         busy: false,
                     };
-                    rx
+                    Next::Wait(rx)
                 }
             }
         };
-        let mut guard = ParkGuard {
-            pipe: pipe.clone(),
-            dir: dir_idx,
-            generation: pipe.directions[dir_idx].borrow().generation,
-            armed: true,
-        };
-        let result = match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(disconnected(ABORTED_MSG)),
-        };
-        guard.armed = false;
-        result
+        match next {
+            // First message satisfies the parked receive; then keep pumping into the pipe (kj's
+            // BlockedReceive::tryPumpFrom).
+            Next::First(max_size) => {
+                let first = input.receive(max_size).await;
+                let done = pipe.directions[dir_idx]
+                    .borrow_mut()
+                    .state
+                    .take_blocked_receive();
+                match first {
+                    Ok(message) => {
+                        if let Some(done) = done {
+                            let _ = done.send(Ok(message));
+                        }
+                        Box::pin(Self::pump_from_inner(pipe, input_idx, input)).await
+                    }
+                    Err(e) => {
+                        if let Some(done) = done {
+                            let _ = done.send(Err(e.clone()));
+                        }
+                        Err(e)
+                    }
+                }
+            }
+            // Splice pump-to-pump: the source pumps straight into the sink.
+            Next::Splice(output) => {
+                let result = input.pump_to(output).await;
+                let done = pipe.directions[dir_idx]
+                    .borrow_mut()
+                    .state
+                    .take_blocked_pump_to();
+                if let Some(done) = done {
+                    let _ = done.send(result.clone());
+                }
+                result
+            }
+            Next::Wait(rx) => wait_parked(&pipe, dir_idx, rx).await,
+        }
     }
 
     pub fn sent_byte_count(&self) -> u64 {
@@ -809,7 +874,7 @@ const SUGGESTED_MAX_MESSAGE_SIZE: usize = 32 << 20;
 /// doesn't know whether the read or the write side threw, so on any error the destination is
 /// disconnect()ed (a redundant disconnect doesn't hurt) and the error propagates as the pump
 /// result.
-pub(crate) async fn default_pump(from: WsPtr, to: WsPtr) -> Result<()> {
+pub async fn default_pump(from: WsPtr, to: WsPtr) -> Result<()> {
     let result = async {
         loop {
             let message = from.receive(SUGGESTED_MAX_MESSAGE_SIZE).await?;

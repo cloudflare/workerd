@@ -632,6 +632,11 @@ pub fn kj_error_for_rustls_error(tls_error: &rustls::Error) -> KjError {
 /// (two bridged promises, or a kj consumer's read and write) while the handshake is still
 /// running. Whichever poll completes the handshake wakes every other waiter, since the
 /// handshake future only ever holds the most recent poller's waker.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "lives boxed inside its RustStream; boxing the established stream would add a \
+              pointer hop to every I/O poll"
+)]
 pub enum LazyTls {
     Handshaking {
         handshake: Handshake,
@@ -762,6 +767,40 @@ impl tokio::io::AsyncWrite for LazyTls {
             std::task::Poll::Ready(Err(e)) => std::task::Poll::Ready(Err(e)),
             std::task::Poll::Pending => std::task::Poll::Pending,
         }
+    }
+}
+
+impl LazyTls {
+    /// The transport underneath; none once the handshake has failed (the stream is dead).
+    fn transport(&self) -> Option<&crate::serve::ServeIo> {
+        match self {
+            Self::Handshaking {
+                handshake: Handshake::Accept(accept),
+                ..
+            } => accept.get_ref(),
+            Self::Handshaking {
+                handshake: Handshake::Connect(connect),
+                ..
+            } => connect.get_ref(),
+            Self::Ready(stream) => Some(stream.get_ref().0),
+            Self::Failed(..) => None,
+        }
+    }
+}
+
+/// kj's TLS stream forwards `whenWriteDisconnected` (and socket options) to the transport; so
+/// does this one.
+impl crate::rust_stream::AsyncIo for LazyTls {
+    fn write_disconnect(&self) -> std::io::Result<crate::rust_stream::WriteDisconnect> {
+        match self.transport() {
+            Some(io) => io.write_disconnect(),
+            None => Ok(crate::rust_stream::WriteDisconnect::Never),
+        }
+    }
+
+    fn set_nodelay(&self, nodelay: bool) -> std::io::Result<()> {
+        self.transport()
+            .map_or(Ok(()), |io| io.set_nodelay(nodelay))
     }
 }
 

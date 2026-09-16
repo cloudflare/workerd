@@ -115,7 +115,7 @@ type Inflight = Rc<RefCell<FuturesUnordered<LocalBoxFuture<'static, ()>>>>;
 ///
 /// A head set during a call poll is observed within the same `serve()` poll (the driver's
 /// fixed point); a head set OUTSIDE it — by the C++ service on its own KJ event while its
-/// request() promise is still pending — is delivered by waking the stored `waker`.
+/// `request()` promise is still pending — is delivered by waking the stored `waker`.
 #[derive(Default)]
 struct HeadSlot {
     /// The response head, once produced. Taken by the `service_fn` closure when it resolves.
@@ -129,8 +129,8 @@ struct HeadSlot {
     done: bool,
     /// Waker of the `service_fn` closure awaiting this head — the serve connection future's
     /// (same-thread KJ) waker. The head is often produced OUTSIDE `serve()`'s poll tree: the C++
-    /// service runs on its own KJ events and may call send()/acceptWebSocket() while its
-    /// request() promise is still pending (a WebSocket 101, a CONNECT accept, a streamed
+    /// service runs on its own KJ events and may call `send()`/`acceptWebSocket()` while its
+    /// `request()` promise is still pending (a WebSocket 101, a CONNECT accept, a streamed
     /// response head). Nothing else re-polls the connection future in that case — the service
     /// promise hasn't settled and there may be no socket activity — so delivery must wake it or
     /// the head never reaches the wire.
@@ -326,17 +326,18 @@ impl HyperConnection {
         std::future::poll_fn(|cx| {
             let _guard = handle.enter();
             loop {
-                let mut progressed = false;
-
-                if let Some(pump) = &mut pump_future {
-                    if !pump_done && pump.poll_unpin(cx).is_ready() {
-                        pump_done = true;
-                        progressed = true;
-                    }
-                }
+                let mut progressed = if let Some(pump) = &mut pump_future
+                    && !pump_done
+                    && pump.poll_unpin(cx).is_ready()
+                {
+                    pump_done = true;
+                    true
+                } else {
+                    false
+                };
 
                 // Drain any in-flight calls that are ready (a completed call is progress).
-                while let Poll::Ready(Some(())) = inflight.borrow_mut().poll_next_unpin(cx) {
+                while inflight.borrow_mut().poll_next_unpin(cx) == Poll::Ready(Some(())) {
                     progressed = true;
                 }
 
@@ -389,7 +390,10 @@ impl HyperConnection {
     /// Begin a graceful shutdown: an idle connection closes immediately, an in-flight request
     /// finishes (its response carries `Connection: close`), after which `serve()` resolves.
     pub fn shutdown(&self) {
-        let _ = self.drain_tx.send(true);
+        // send_replace, not send: with no receiver yet (shutdown() before serve() subscribes, as
+        // kj::HttpServer's drain does for a connection still being set up) `send` would drop
+        // the value; the stored value is what serve() reads when it starts.
+        self.drain_tx.send_replace(true);
     }
 }
 
@@ -760,6 +764,10 @@ impl std::error::Error for ConnectionAborted {}
 /// can outlive this closure's return, and so it is driven concurrently with the connection),
 /// while this closure awaits the head the call produces through a same-task [`HeadSlot`]. hyper
 /// drops this future if the connection dies before the head is produced.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is distinct per-connection state threaded into the service_fn closure; bundling them into a struct would only add a single-use wrapper"
+)]
 async fn dispatch_inline(
     mut req: http::Request<Incoming>,
     table: HeaderTablePtr,
@@ -942,7 +950,7 @@ struct ResponseShared {
     sent_websocket_error: bool,
     /// See `WsSession::jsgify_errors`.
     jsgify_websocket_errors: bool,
-    /// kj's draining closeAfterSend (see run_connection's drain rule): when set, `send()` adds
+    /// kj's draining closeAfterSend (see `run_connection`'s drain rule): when set, `send()` adds
     /// `Connection: close` to the response head, after which hyper closes the connection.
     close_next_response: Rc<Cell<bool>>,
 }
@@ -958,6 +966,10 @@ pub struct HyperResponseSender {
 impl HyperResponseSender {
     /// Corresponds to `kj::HttpService::Response::send()`. Applies kj-http's framing rules
     /// (Content-Length vs chunked, HEAD, 204/205/304) and returns the response body sink.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "a linear transcription of kj::HttpServer's send() framing rules; splitting it would scatter the status/header/framing decisions kj makes in one place"
+    )]
     pub fn send(
         &self,
         status_code: u32,
@@ -1137,6 +1149,10 @@ impl HyperResponseSender {
     #[expect(
         clippy::expect_used,
         reason = "documented handshake-state invariants: after the `head_slot.started` early-return above, `ws_info` is Some (set when the request was received); and base64 accept keys / generated permessage-deflate extension strings are always valid HTTP HeaderValues"
+    )]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "a linear transcription of kj::HttpServer's acceptWebSocket() handshake validation and extension negotiation; splitting it would make divergences from kj harder to audit"
     )]
     pub fn accept_websocket(&self, headers: &ffi::HttpHeaders) -> Result<Box<WsSession>> {
         let mut shared = self.shared.borrow_mut();
@@ -1452,7 +1468,7 @@ async fn handle_request(
     // kj-http rejects unrecognized methods while parsing, with a 501 protocol error.
     let Some(kj_method) = translate_method(&method) else {
         send_error_response(
-            &mut shared.borrow_mut(),
+            &shared.borrow_mut(),
             http::StatusCode::NOT_IMPLEMENTED,
             "ERROR: Unrecognized request method.",
         );
@@ -1481,7 +1497,7 @@ async fn handle_request(
         // Unreachable in practice: hyper already validated the wire bytes. kj would reject
         // such a request with a 400 protocol error.
         send_error_response(
-            &mut shared.borrow_mut(),
+            &shared.borrow_mut(),
             http::StatusCode::BAD_REQUEST,
             "ERROR: The headers sent by your client are not valid.",
         );
@@ -1529,11 +1545,11 @@ async fn handle_request(
         // function), which synchronously cancels the C++ service's kj::Promise.
         None => {}
         Some(Ok(())) => {
-            let mut shared = shared.borrow_mut();
+            let shared = shared.borrow_mut();
             if shared.head_slot.borrow().not_started() {
                 // kj::HttpServerErrorHandler::handleNoResponse().
                 send_error_response(
-                    &mut shared,
+                    &shared,
                     http::StatusCode::INTERNAL_SERVER_ERROR,
                     "ERROR: The HttpService did not generate a response.",
                 );
@@ -1593,7 +1609,7 @@ async fn handle_connect(
         .is_err()
     {
         send_connect_error_response(
-            &mut shared.borrow_mut(),
+            &shared.borrow_mut(),
             http::StatusCode::BAD_REQUEST,
             "ERROR: The headers sent by your client are not valid.",
         );
@@ -1773,7 +1789,7 @@ impl HyperConnectResponder {
 /// connection without a response; OVERLOADED/UNIMPLEMENTED/other map to 503/501/500 when the
 /// response has not started; a response already streaming is aborted.
 fn handle_application_error(shared: &Rc<RefCell<ResponseShared>>, error: &KjError) {
-    let mut shared = shared.borrow_mut();
+    let shared = shared.borrow_mut();
 
     if error.exception_type() == KjExceptionType::Disconnected {
         // Send no response; just close the connection (suppressing the head aborts the request).
@@ -1806,11 +1822,7 @@ fn handle_application_error(shared: &Rc<RefCell<ResponseShared>>, error: &KjErro
         };
         // Divergence from kj: the details are the exception description only, not kj's full
         // "file:line: type: description" rendering.
-        send_error_response(
-            &mut shared,
-            status,
-            &format!("{intro}{}", error.description()),
-        );
+        send_error_response(&shared, status, &format!("{intro}{}", error.description()));
     } else if let Some(body) = shared.body.as_ref() {
         // Too late to change the response; break the streaming body so the client observes an
         // aborted response instead of a clean end (kj drops the connection here too).
@@ -1827,7 +1839,7 @@ fn handle_application_error(shared: &Rc<RefCell<ResponseShared>>, error: &KjErro
 /// The CONNECT flavor of `handle_application_error` (kj funnels both through the same error
 /// handler; the states differ slightly because `accept()` has no body).
 fn handle_connect_application_error(shared: &Rc<RefCell<ConnectShared>>, error: &KjError) {
-    let mut shared = shared.borrow_mut();
+    let shared = shared.borrow_mut();
 
     if error.exception_type() == KjExceptionType::Disconnected {
         shared.head_slot.borrow_mut().suppress();
@@ -1855,11 +1867,7 @@ fn handle_connect_application_error(shared: &Rc<RefCell<ConnectShared>>, error: 
                 "ERROR: The server threw an exception. Details:\n\n",
             ),
         };
-        send_connect_error_response(
-            &mut shared,
-            status,
-            &format!("{intro}{}", error.description()),
-        );
+        send_connect_error_response(&shared, status, &format!("{intro}{}", error.description()));
     } else if let Some(body) = shared.body.as_ref() {
         ResponseBodyShared::abort(
             body,
@@ -1872,7 +1880,7 @@ fn handle_connect_application_error(shared: &Rc<RefCell<ConnectShared>>, error: 
 }
 
 /// Send a kj-style plain-text error response, if the response has not started yet.
-fn send_error_response(shared: &mut ResponseShared, status: http::StatusCode, message: &str) {
+fn send_error_response(shared: &ResponseShared, status: http::StatusCode, message: &str) {
     let mut slot = shared.head_slot.borrow_mut();
     if !slot.not_started() {
         return;
@@ -1900,11 +1908,7 @@ fn send_error_response(shared: &mut ResponseShared, status: http::StatusCode, me
     });
 }
 
-fn send_connect_error_response(
-    shared: &mut ConnectShared,
-    status: http::StatusCode,
-    message: &str,
-) {
+fn send_connect_error_response(shared: &ConnectShared, status: http::StatusCode, message: &str) {
     let mut slot = shared.head_slot.borrow_mut();
     if !slot.not_started() {
         return;

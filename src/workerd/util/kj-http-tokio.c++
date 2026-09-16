@@ -710,8 +710,9 @@ WebSocketPipe newWebSocketPipe() {
 kj::Own<HttpClient> newHttpClient(const HttpHeaderTable& responseHeaderTable,
     kj::AsyncIoStream& stream,
     HttpClientSettings settings) {
+  // Borrowed: the caller keeps its stream, so it is pumped rather than taken apart.
   return workerd::rust::kj_hyper::newHyperStreamHttpClient(
-      responseHeaderTable, fakeOwn(stream), jsgifyFor(settings));
+      responseHeaderTable, stream, jsgifyFor(settings));
 }
 
 kj::Own<HttpClient> newHttpClient(kj::Timer& timer,
@@ -1620,15 +1621,24 @@ kj::Promise<bool> HttpServer::listenHttpImpl(kj::AsyncIoStream& connection, bool
 
   // The hyper inbound server serves the connection; drain() triggers its graceful shutdown
   // (idle connections close immediately, an in-flight request finishes with
-  // "Connection: close"). The stream is handed over borrowed: the caller (or the enclosing
-  // task's attachments) owns it for the duration of this promise. Application errors route
-  // through the configured error handler, as in kj's Connection.
+  // "Connection: close"). Application errors route through the configured error handler, as in
+  // kj's Connection. Workerd only ever installs JsgifyWebSocketErrors, so handler presence
+  // selects the jsg.Error rendering of WebSocket protocol errors (same convention as
+  // jsgifyFor()).
+  //
+  // How the stream is handed over. listenHttp() and listenLoop() own the stream and destroy it
+  // only once this promise settles, never touching it meanwhile: hyper may take its socket (or
+  // TLS stream) natively, leaving their wrapper hollow until then. listenHttpCleanDrain() lends
+  // the stream -- its caller keeps using it -- and a per-connection service factory has seen it
+  // and may still use it: those are pumped, never taken apart. (kj's http.h fixes this private
+  // member's signature, so ownership is encoded in wantCleanDrain rather than passed.)
   ErrorHandlingService errorHandling(*servicePtr, settings);
-  auto conn = workerd::rust::kj_hyper::newHyperHttpConnection(requestHeaderTable, errorHandling,
-      fakeOwn(connection),
-      // Workerd only ever installs JsgifyWebSocketErrors, so handler presence selects the
-      // jsg.Error rendering of WebSocket protocol errors (same convention as jsgifyFor()).
-      settings.webSocketErrorHandler != kj::none);
+  bool jsgify = settings.webSocketErrorHandler != kj::none;
+  auto conn = !wantCleanDrain && ownService.get() == nullptr
+      ? workerd::rust::kj_hyper::newHyperHttpConnection(
+            requestHeaderTable, errorHandling, fakeOwn(connection), jsgify)
+      : workerd::rust::kj_hyper::newHyperHttpConnection(
+            requestHeaderTable, errorHandling, connection, jsgify);
   auto& connRef = *conn;
   auto drainListener =
       onDrain.addBranch().then([&connRef]() { connRef.shutdown(); }).eagerlyEvaluate(nullptr);

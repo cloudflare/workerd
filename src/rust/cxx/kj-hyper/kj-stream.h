@@ -48,11 +48,12 @@ inline kj::Own<kj::AsyncIoStream> wrapTokioStream(::rust::Box<kj_rs_io::TokioStr
 // header is included by the generated bridge and cannot see the generated RustStream type).
 struct RustStream;
 
-// True if `stream` is a RustAsyncIoStream wrapper.
-bool isRustStream(const kj::AsyncIoStream &stream);
+// True if `stream` is a RustAsyncIoStream wrapper whose Rust stream may be taken apart now: no kj
+// operation still holds it, on the owning thread (RustStream::can_release).
+bool isReleasableRustStream(const kj::AsyncIoStream &stream);
 
-// Takes the Rust stream out of the wrapper and destroys the wrapper. The caller must have
-// checked isRustStream().
+// Takes the Rust stream out of the wrapper -- cancelling the wrapper's pump driver first -- and
+// destroys the wrapper. The caller must have checked isReleasableRustStream().
 ::rust::Box<RustStream> releaseRustStream(kj::Own<kj::AsyncIoStream> stream);
 
 // The inverse: a kj::AsyncIoStream over a Rust stream, for kj consumers.
@@ -85,6 +86,12 @@ struct KjStreamWriteEnd {
   KJ_DISALLOW_COPY_AND_MOVE(KjStreamWriteEnd);
   kj::Rc<KjStreamShare> share;
 };
+// whenWriteDisconnected(), which kj allows alongside the in-flight read and write.
+struct KjStreamWatchEnd {
+  explicit KjStreamWatchEnd(kj::Rc<KjStreamShare> share): share(kj::mv(share)) {}
+  KJ_DISALLOW_COPY_AND_MOVE(KjStreamWatchEnd);
+  kj::Rc<KjStreamShare> share;
+};
 
 // Takes ownership of `stream` and returns its read direction; the write direction is derived
 // from it with kjStreamWriteEnd().
@@ -94,6 +101,9 @@ inline kj::Own<KjStreamReadEnd> kjStreamReadEnd(kj::Own<kj::AsyncIoStream> strea
 
 inline kj::Own<KjStreamWriteEnd> kjStreamWriteEnd(KjStreamReadEnd &read) {
   return kj::heap<KjStreamWriteEnd>(read.share.addRef());
+}
+inline kj::Own<KjStreamWatchEnd> kjStreamWatchEnd(KjStreamReadEnd &read) {
+  return kj::heap<KjStreamWatchEnd>(read.share.addRef());
 }
 
 // Corresponds to kj::AsyncIoStream::tryRead(buffer, minBytes, buffer.size()). The buffer is the
@@ -112,6 +122,10 @@ inline kj::Promise<void> kjWriteEndWrite(
 // Corresponds to kj::AsyncIoStream::shutdownWrite().
 inline void kjWriteEndShutdownWrite(KjStreamWriteEnd &end) {
   end.share->stream->shutdownWrite();
+}
+// Corresponds to kj::AsyncOutputStream::whenWriteDisconnected().
+inline kj::Promise<void> kjWatchEndWhenWriteDisconnected(KjStreamWatchEnd &end) {
+  return end.share->stream->whenWriteDisconnected();
 }
 
 }  // namespace workerd::rust::kj_hyper

@@ -7,8 +7,9 @@
 //!   wrapper is consumed (`releaseTokioStream`, kj-stream.h) and `TokioStream::into_socket`
 //!   takes the socket, or hands the stream back re-wrapped if an operation still holds a share
 //!   of it. Zero copies, zero FFI crossings per read. A stream that is Rust underneath its kj
-//!   wrapper already -- a `RustStream` (rust_stream.rs), e.g. the TLS streams of
-//!   tls-network.c++ -- is taken back out the same way, its pump (if it had one) included.
+//!   wrapper already -- a `RustStream` (`rust_stream.rs`), e.g. the TLS streams of
+//!   `tls-network.c++` -- is taken back out the same way, its pump (if it had one) included,
+//!   when nothing still holds it; otherwise it is pumped like a foreign stream.
 //! - **Pump (foreign streams).** Anything else -- in-memory pipes, promised streams, TLS and
 //!   other byte-transforming wrappers -- is bridged by a pump future that owns the stream and
 //!   moves bytes through bridged `kj::io` promises into a rendezvous channel with kj-pipe
@@ -39,7 +40,11 @@
 //! streams it remains KJ's own documented contract. Dropping the pump destroys the owned stream
 //! (abort-on-drop) and fails the consumer's outstanding operations; a consumer dropping its
 //! `ServeIo::Duplex` ends the pump and destroys the stream, discarding a write the kj peer had
-//! not taken -- destroying a kj::WebSocket over a kj pipe does the same.
+//! not taken -- destroying a `kj::WebSocket` over a kj pipe does the same.
+//!
+//! **Lent streams.** A caller that only lends a stream (a non-owning `kj::Own`) keeps using its
+//! wrapper afterwards, so such streams go through [`pump_kj_stream`], which never takes them
+//! apart.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -61,15 +66,17 @@ use tokio::net::TcpStream;
 use tokio::net::UnixStream;
 
 use crate::ffi::AsyncIoStream;
-use crate::ffi::is_rust_stream;
+use crate::ffi::is_releasable_rust_stream;
 use crate::ffi::is_tokio_stream;
 use crate::ffi::release_rust_stream;
 use crate::ffi::release_tokio_stream;
 use crate::ffi::split_kj_stream;
 use crate::ffi::wrap_rust_stream;
 use crate::ffi::wrap_tokio_stream;
+use crate::rust_stream::AsyncIo;
 use crate::rust_stream::BoxedIo;
 use crate::rust_stream::RustStream;
+use crate::rust_stream::WriteDisconnect;
 
 /// Read chunk size for the pump fallback.
 const PUMP_BUF: usize = 8192;
@@ -121,6 +128,10 @@ struct Inbound {
     taken: usize,
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent latches of two directions, not the states of one machine"
+)]
 struct ChannelState {
     outbound: Outbound,
     /// The consumer called `poll_shutdown`: once `outbound` drains, the pump shuts the kj
@@ -135,8 +146,14 @@ struct ChannelState {
     read_closed: bool,
     /// The pump is gone (settled or dropped).
     pump_gone: bool,
+    /// The consumer asked for the kj stream's `whenWriteDisconnected` (the pump starts watching).
+    disconnect_wanted: bool,
+    /// New writes are doomed: the kj stream's watch fired, a write hit DISCONNECTED, or the pump
+    /// is gone.
+    write_disconnected: bool,
     consumer_read_waker: Option<Waker>,
     consumer_write_waker: Option<Waker>,
+    disconnect_wakers: Vec<Waker>,
     pump_waker: Option<Waker>,
 }
 
@@ -155,8 +172,11 @@ impl Channel {
                 inbound: None,
                 read_closed: false,
                 pump_gone: false,
+                disconnect_wanted: false,
+                write_disconnected: false,
                 consumer_read_waker: None,
                 consumer_write_waker: None,
+                disconnect_wakers: Vec::new(),
                 pump_waker: None,
             }),
         })
@@ -228,18 +248,23 @@ impl Channel {
             if st.consumer_dropped {
                 return Poll::Ready(false);
             }
-            if let Some(chunk) = chunk.take() {
+            let reader = chunk.take().and_then(|chunk| {
                 st.inbound = Some(Inbound { chunk, taken: 0 });
-                if let Some(waker) = st.consumer_read_waker.take() {
-                    waker.wake();
-                }
-            }
+                st.consumer_read_waker.take()
+            });
             // The consumer clears `inbound` when it takes the last byte.
-            if st.inbound.is_some() {
+            let taken = st.inbound.is_none();
+            if !taken {
                 st.pump_waker = Some(cx.waker().clone());
-                Poll::Pending
-            } else {
+            }
+            drop(st);
+            if let Some(waker) = reader {
+                waker.wake();
+            }
+            if taken {
                 Poll::Ready(true)
+            } else {
+                Poll::Pending
             }
         })
     }
@@ -267,19 +292,71 @@ impl Channel {
         })
     }
 
+    /// Resolves once the consumer wants the kj stream's `whenWriteDisconnected`.
+    fn disconnect_wanted(self: &Arc<Self>) -> impl Future<Output = ()> + use<> {
+        let chan = Arc::clone(self);
+        std::future::poll_fn(move |cx| {
+            let mut st = chan.lock();
+            if st.disconnect_wanted {
+                Poll::Ready(())
+            } else {
+                st.pump_waker = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        })
+    }
+
+    /// New writes are doomed: the consumer's `whenWriteDisconnected` watchers resolve.
+    fn write_disconnected(&self) {
+        let wakers = {
+            let mut st = self.lock();
+            st.write_disconnected = true;
+            std::mem::take(&mut st.disconnect_wakers)
+        };
+        for waker in wakers {
+            waker.wake();
+        }
+    }
+
     /// The pump is gone: the consumer's outstanding operations fail and its reads return EOF.
     fn pump_gone(&self) {
         let mut st = self.lock();
         st.pump_gone = true;
         st.read_closed = true;
-        for waker in [
-            st.consumer_read_waker.take(),
-            st.consumer_write_waker.take(),
-        ] {
-            if let Some(waker) = waker {
-                waker.wake();
-            }
+        st.write_disconnected = true;
+        let wakers = std::mem::take(&mut st.disconnect_wakers);
+        let read = st.consumer_read_waker.take();
+        let write = st.consumer_write_waker.take();
+        drop(st);
+        for waker in wakers.into_iter().chain(read).chain(write) {
+            waker.wake();
         }
+    }
+
+    // --- consumer side ---
+
+    /// Resolves once new writes are doomed (see `ChannelState::write_disconnected`); asks the
+    /// pump to watch the kj stream.
+    fn when_write_disconnected(self: &Arc<Self>) -> impl Future<Output = ()> + Send + use<> {
+        let chan = Arc::clone(self);
+        std::future::poll_fn(move |cx| {
+            let mut st = chan.lock();
+            if st.write_disconnected {
+                return Poll::Ready(());
+            }
+            if !st.disconnect_wakers.iter().any(|w| w.will_wake(cx.waker())) {
+                st.disconnect_wakers.push(cx.waker().clone());
+            }
+            if !st.disconnect_wanted {
+                st.disconnect_wanted = true;
+                let pump = st.pump_waker.take();
+                drop(st);
+                if let Some(waker) = pump {
+                    waker.wake();
+                }
+            }
+            Poll::Pending
+        })
     }
 }
 
@@ -295,6 +372,13 @@ impl Drop for PumpGoneGuard {
 /// The consumer end of a pumped stream (see the module docs and the channel above).
 pub struct PumpedStream {
     chan: Arc<Channel>,
+}
+
+impl PumpedStream {
+    /// The pumped kj stream's `whenWriteDisconnected`, forwarded by the pump.
+    pub fn when_write_disconnected(&self) -> impl Future<Output = ()> + Send + use<> {
+        self.chan.when_write_disconnected()
+    }
 }
 
 impl Drop for PumpedStream {
@@ -386,9 +470,12 @@ impl AsyncWrite for PumpedStream {
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        let mut st = self.chan.lock();
-        st.consumer_shutdown = true;
-        if let Some(waker) = st.pump_waker.take() {
+        let pump = {
+            let mut st = self.chan.lock();
+            st.consumer_shutdown = true;
+            st.pump_waker.take()
+        };
+        if let Some(waker) = pump {
             waker.wake();
         }
         Poll::Ready(Ok(()))
@@ -407,8 +494,36 @@ impl ServeIo {
             Self::Tcp(s) => s.set_nodelay(nodelay),
             #[cfg(unix)]
             Self::Unix(_) => Ok(()),
-            Self::Rust(_) | Self::Duplex(_) => Ok(()),
+            Self::Rust(s) => s.set_nodelay(nodelay),
+            Self::Duplex(_) => Ok(()),
         }
+    }
+}
+
+impl AsyncIo for ServeIo {
+    fn write_disconnect(&self) -> std::io::Result<WriteDisconnect> {
+        match self {
+            #[cfg(unix)]
+            Self::Tcp(s) => {
+                use std::os::fd::AsFd;
+                Ok(WriteDisconnect::Fd(s.as_fd().try_clone_to_owned()?))
+            }
+            #[cfg(windows)]
+            Self::Tcp(_) => Ok(WriteDisconnect::Never),
+            #[cfg(unix)]
+            Self::Unix(s) => {
+                use std::os::fd::AsFd;
+                Ok(WriteDisconnect::Fd(s.as_fd().try_clone_to_owned()?))
+            }
+            Self::Rust(s) => s.write_disconnect(),
+            Self::Duplex(s) => Ok(WriteDisconnect::Pumped(Box::pin(
+                s.when_write_disconnected(),
+            ))),
+        }
+    }
+
+    fn set_nodelay(&self, nodelay: bool) -> std::io::Result<()> {
+        Self::set_nodelay(self, nodelay)
     }
 }
 
@@ -567,7 +682,9 @@ enum NotTaken {
 fn unwrap_native(
     stream: KjOwn<AsyncIoStream>,
 ) -> Result<ServedKjStream, (KjOwn<AsyncIoStream>, NotTaken)> {
-    if is_rust_stream(stream.as_ref()) {
+    // A Rust stream is taken only when nothing still holds it (see `RustStream::can_release`);
+    // otherwise it is pumped like any foreign stream.
+    if is_releasable_rust_stream(stream.as_ref()) {
         let (io, pump) = release_rust_stream(stream).into_parts();
         return Ok(ServedKjStream {
             io: ServeIo::Rust(io),
@@ -613,7 +730,7 @@ pub fn take_kj_socket(stream: KjOwn<AsyncIoStream>) -> Result<ServeIo, TakeSocke
                 other => Box::pin(other),
             };
             Err(TakeSocketError {
-                stream: wrap_rust_stream(Box::new(RustStream::new(io, Some(pump)))),
+                stream: wrap_rust_stream(Box::new(RustStream::from_parts(io, Some(pump)))),
                 error: KjError::new(
                     KjExceptionType::Failed,
                     "cannot take the stream's socket natively: a Rust stream over a pumped \
@@ -656,12 +773,22 @@ pub fn serve_kj_stream(stream: KjOwn<AsyncIoStream>) -> Result<ServedKjStream, T
         Err((stream, NotTaken::Foreign)) => stream,
         Err((stream, NotTaken::Refused(error))) => return Err(TakeSocketError { stream, error }),
     };
+    Ok(pump_kj_stream(stream))
+}
+
+/// Bridges the stream through the pump, never taking it natively.
+///
+/// For a stream the caller only lends (a non-owning `kj::Own`, e.g.
+/// `kj::newHttpClient(table, stream&)`), whose wrapper must stay intact for the caller; the
+/// pump's `KjOwn` then disposes of nothing.
+#[must_use]
+pub fn pump_kj_stream(stream: KjOwn<AsyncIoStream>) -> ServedKjStream {
     let chan = Channel::new();
-    let pump = Box::pin(pump_kj_stream(stream, Arc::clone(&chan)));
-    Ok(ServedKjStream {
+    let pump = Box::pin(run_pump(stream, Arc::clone(&chan)));
+    ServedKjStream {
         io: ServeIo::Duplex(PumpedStream { chan }),
         pump: Some(pump),
-    })
+    }
 }
 
 /// Whether a bridged kj exception is peer-teardown-shaped (treated as EOF by the pump).
@@ -673,13 +800,13 @@ fn is_disconnected(exception: &KjException) -> bool {
 /// thread) to the consumer end of `chan`. Owns the stream: it is destroyed when this future
 /// settles or is dropped.
 ///
-/// The stream is split into its read and write directions ([`split_kj_stream`]): two C++ end
-/// objects sharing ownership of the stream, each driven through an exclusive borrow, so the
-/// borrow checker enforces kj's stream contract -- at most one read and one write in flight --
-/// and C++ ownership keeps the stream alive as long as either end exists.
-async fn pump_kj_stream(stream: KjOwn<AsyncIoStream>, chan: Arc<Channel>) -> Result<(), KjError> {
+/// The stream is split into its read and write directions plus a disconnect watch
+/// ([`split_kj_stream`]): C++ end objects sharing ownership of the stream, each driven through
+/// an exclusive borrow, so the borrow checker enforces kj's stream contract -- at most one read
+/// and one write in flight -- and C++ ownership keeps the stream alive as long as any end exists.
+async fn run_pump(stream: KjOwn<AsyncIoStream>, chan: Arc<Channel>) -> Result<(), KjError> {
     let _gone = PumpGoneGuard(Arc::clone(&chan));
-    let (mut rd, mut wr) = split_kj_stream(stream).map_err(KjError::from)?;
+    let (mut rd, mut wr, mut watch) = split_kj_stream(stream).map_err(KjError::from)?;
 
     // kj -> consumer: read a chunk, hand it over, repeat. EOF (or a DISCONNECTED read, the
     // reset-peer shape) closes the consumer's read side; the consumer dropping its end ends
@@ -713,38 +840,51 @@ async fn pump_kj_stream(stream: KjOwn<AsyncIoStream>, chan: Arc<Channel>) -> Res
     // offered, as destroying a kj stream cancels its in-flight write.
     let consumer_to_kj = async {
         let chan = &chan;
-        loop {
-            match chan.next_write().await {
-                // The consumer dropping its end mid-write cancels the kj write (dropping the
-                // bridged promise), as destroying a kj stream cancels its in-flight write.
-                Some((bytes, _)) => match tokio::select! {
-                    () = chan.consumer_gone() => return Ok::<(), KjError>(()),
-                    written = wr.write(&bytes) => written,
-                } {
-                    Ok(()) => chan.complete_write(bytes.len()),
-                    Err(e) if is_disconnected(&e) => {
-                        chan.fail_writes(std::io::ErrorKind::BrokenPipe.into());
-                        return Ok::<(), KjError>(());
-                    }
-                    Err(e) => {
-                        let error = KjError::from(e);
-                        chan.fail_writes(std::io::Error::other(error.description().to_owned()));
-                        return Err(error);
-                    }
-                },
-                None => {
-                    if chan.consumer_shutdown() {
-                        match wr.shutdown_write() {
-                            Ok(()) => {}
-                            Err(e) if is_disconnected(&e) => {}
-                            Err(e) => return Err(KjError::from(e)),
-                        }
-                    }
-                    return Ok::<(), KjError>(());
+        while let Some((bytes, _)) = chan.next_write().await {
+            // The consumer dropping its end mid-write cancels the kj write (dropping the bridged
+            // promise), as destroying a kj stream cancels its in-flight write.
+            let written = tokio::select! {
+                () = chan.consumer_gone() => return Ok::<(), KjError>(()),
+                written = wr.write(&bytes) => written,
+            };
+            match written {
+                Ok(()) => chan.complete_write(bytes.len()),
+                Err(e) if is_disconnected(&e) => {
+                    chan.fail_writes(std::io::ErrorKind::BrokenPipe.into());
+                    chan.write_disconnected();
+                    return Ok(());
+                }
+                Err(e) => {
+                    let error = KjError::from(e);
+                    chan.fail_writes(std::io::Error::other(error.description().to_owned()));
+                    return Err(error);
                 }
             }
         }
+        if chan.consumer_shutdown() {
+            match wr.shutdown_write() {
+                Ok(()) => {}
+                Err(e) if is_disconnected(&e) => {}
+                Err(e) => return Err(KjError::from(e)),
+            }
+        }
+        Ok(())
     };
 
-    tokio::try_join!(kj_to_consumer, consumer_to_kj).map(|((), ())| ())
+    // The kj stream's whenWriteDisconnected, watched once the consumer asks for it (see
+    // `PumpedStream::when_write_disconnected`). Either outcome means the consumer's writes are
+    // doomed or the stream cannot tell any more; the watch then idles until the pump ends.
+    let watch_disconnect = async {
+        chan.disconnect_wanted().await;
+        let _ = watch.when_write_disconnected().await;
+        chan.write_disconnected();
+        std::future::pending::<std::convert::Infallible>().await
+    };
+
+    tokio::select! {
+        result = async { tokio::try_join!(kj_to_consumer, consumer_to_kj).map(|((), ())| ()) } => {
+            result
+        }
+        never = watch_disconnect => match never {},
+    }
 }

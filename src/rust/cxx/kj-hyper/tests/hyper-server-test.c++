@@ -1627,6 +1627,77 @@ KJ_TEST("hyper server: drain is not held hostage by I/O-stalled connections (reg
   connB = nullptr;
 }
 
+// An accepted connection pair, handed to a hyper connection directly (no TestServer).
+struct DirectConnection {
+  explicit DirectConnection(TokioTestIo& io) {
+    ensureTokioInitialized();
+    auto listener =
+        io.provider->getNetwork().parseAddress("127.0.0.1", 0).wait(io.waitScope)->listen();
+    auto connecting = io.provider->getNetwork()
+                          .parseAddress("127.0.0.1", listener->getPort())
+                          .wait(io.waitScope)
+                          ->connect();
+    server = listener->accept().wait(io.waitScope);
+    client = connecting.wait(io.waitScope);
+  }
+
+  kj::Own<kj::AsyncIoStream> server;
+  kj::Own<kj::AsyncIoStream> client;
+};
+
+KJ_TEST("hyper server: shutdown() before serve() starts is not lost") {
+  TokioTestIo io;
+  HeaderIds ids;
+  TestHttpService service(
+      *ids.table, ids.xEcho, ids.xBinary, ids.xEchoBack, ids.xBinaryResp, ids.xUrl);
+  DirectConnection pair(io);
+
+  // kj::HttpServer's drain() shuts a connection down as soon as it is set up, before its serve
+  // loop runs; the request must survive until serve() reads it.
+  auto conn =
+      workerd::rust::kj_hyper::newHyperHttpConnection(*ids.table, service, kj::mv(pair.server));
+  conn->shutdown();
+  auto served =
+      conn->serve().exclusiveJoin(io.provider->getTimer().afterDelay(5 * kj::SECONDS).then([]() {
+    KJ_FAIL_ASSERT("serve() did not observe the earlier shutdown()");
+  }));
+  served.wait(io.waitScope);
+
+  // The idle connection was closed: the client sees EOF.
+  kj::byte buffer[16];
+  KJ_EXPECT(pair.client->tryRead(buffer, 1, sizeof(buffer)).wait(io.waitScope) == 0);
+}
+
+KJ_TEST("hyper server: a lent stream is pumped and left intact for its owner") {
+  TokioTestIo io;
+  HeaderIds ids;
+  TestHttpService service(
+      *ids.table, ids.xEcho, ids.xBinary, ids.xEchoBack, ids.xBinaryResp, ids.xUrl);
+  DirectConnection pair(io);
+
+  {
+    // kj::HttpServer::listenHttpCleanDrain()'s shape: the caller keeps its stream.
+    auto conn = workerd::rust::kj_hyper::newHyperHttpConnection(*ids.table, service, *pair.server);
+    auto serveTask = conn->serve().eagerlyEvaluate([](kj::Exception&& e) { KJ_LOG(ERROR, e); });
+
+    auto client = kj::newHttpClient(*ids.table, *pair.client);
+    kj::HttpHeaders headers(*ids.table);
+    headers.set(kj::HttpHeaderId::HOST, kj::str("test-host"));
+    auto resp = client->request(kj::HttpMethod::GET, "/hello", headers, uint64_t(0))
+                    .response.wait(io.waitScope);
+    KJ_EXPECT(resp.statusCode == 200, resp.statusCode);
+    KJ_EXPECT(resp.body->readAllText().wait(io.waitScope) == "Hello from KJ service!");
+    resp.body = nullptr;
+    client = nullptr;
+
+    conn->shutdown();
+    serveTask.wait(io.waitScope);
+  }
+
+  // The server's stream was never taken apart: it is still the caller's working kj-rs-io stream.
+  KJ_EXPECT(pair.server->getFd() != kj::none);
+}
+
 }  // namespace
 
 #endif  // !_WIN32

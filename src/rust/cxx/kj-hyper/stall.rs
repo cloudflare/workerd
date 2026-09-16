@@ -32,7 +32,7 @@ use tokio::sync::watch;
 /// slow keeps completing writes as its receive window reopens; only a peer that accepts
 /// *nothing* for a full minute trips this. On the client this grace also bounds zero-progress
 /// reads (see [`client_stall_watchdog`]).
-pub(crate) const WRITE_STALL_GRACE: Duration = Duration::from_secs(60);
+pub const WRITE_STALL_GRACE: Duration = Duration::from_mins(1);
 
 /// The tighter bound the inbound server applies once a graceful shutdown (`drain()` /
 /// `shutdown()`) was requested, so a draining server is never held up more than ~10 s by
@@ -42,16 +42,16 @@ pub(crate) const WRITE_STALL_GRACE: Duration = Duration::from_secs(60);
 /// otherwise hold the drain forever. Outside of drain, read-idleness is normal on the server
 /// (keep-alive gaps, slow uploaders) and is never treated as a stall. The outbound client has
 /// no drain concept and never uses this bound.
-pub(crate) const WRITE_STALL_DRAIN_GRACE: Duration = Duration::from_secs(10);
+pub const WRITE_STALL_DRAIN_GRACE: Duration = Duration::from_secs(10);
 
 /// How often the watchdogs sample the tracker.
-pub(crate) const WRITE_STALL_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+pub const WRITE_STALL_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 /// The steady-state grace period: [`WRITE_STALL_GRACE`], overridable through the
 /// `WORKERD_HYPER_IO_STALL_GRACE_MS` environment variable (read once per process). The
 /// override exists as a test hook — the stall tests would otherwise have to wait out the full
 /// minute — but also serves as an operator escape hatch.
-pub(crate) fn steady_stall_grace() -> Duration {
+pub fn steady_stall_grace() -> Duration {
     static GRACE: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
     *GRACE.get_or_init(|| {
         std::env::var("WORKERD_HYPER_IO_STALL_GRACE_MS")
@@ -64,7 +64,7 @@ pub(crate) fn steady_stall_grace() -> Duration {
 /// Shared between the [`StallIo`] adapter (updated from the connection task's I/O polls) and
 /// the per-connection watchdog. `None` = no I/O outstanding on that side; `Some(t)` = a poll
 /// first returned `Pending` at `t` and nothing has completed since.
-pub(crate) struct WriteStallTracker {
+pub struct WriteStallTracker {
     pending_since: Mutex<Option<Instant>>,
     read_state: Mutex<ReadState>,
     /// Client-only read policy (see [`client_stall_watchdog`]): while the connection is
@@ -116,18 +116,21 @@ impl WriteStallTracker {
     /// written are (part of) a request, and until the response's first byte arrives a pending
     /// read means "waiting for the origin to respond", not a stalled transfer.
     fn note<T>(&self, poll: &std::task::Poll<T>) {
-        let mut pending = self
-            .pending_since
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
         match poll {
             std::task::Poll::Pending => {
+                let mut pending = self
+                    .pending_since
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
                 if pending.is_none() {
                     *pending = Some(Instant::now());
                 }
             }
             std::task::Poll::Ready(_) => {
-                *pending = None;
+                *self
+                    .pending_since
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = None;
                 if self.reads_exempt_awaiting_response {
                     let mut read = self
                         .read_state
@@ -200,7 +203,7 @@ impl WriteStallTracker {
 /// outcome, otherwise transparent. Sits under hyper's `TokioIo` (and, for TLS connections,
 /// under hyper but *over* the TLS stream, so "write pending" includes TLS records the socket
 /// will not take).
-pub(crate) struct StallIo<S> {
+pub struct StallIo<S> {
     inner: S,
     tracker: Arc<WriteStallTracker>,
 }
@@ -276,7 +279,7 @@ impl<S: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for StallIo<S> {
 /// progress for the applicable grace period — [`steady_stall_grace`] normally,
 /// [`WRITE_STALL_DRAIN_GRACE`] once draining (when zero-progress *reads* count too; see the
 /// constant docs and the server.rs module docs). The connection is then aborted.
-pub(crate) async fn write_stall_watchdog(
+pub async fn write_stall_watchdog(
     tracker: Arc<WriteStallTracker>,
     drain_rx: watch::Receiver<bool>,
 ) {
@@ -323,7 +326,7 @@ pub(crate) async fn write_stall_watchdog(
 /// divergence in hyper-http.h. Upgraded (WebSocket/CONNECT) streams are exempt: the
 /// connection future resolves at the upgrade handoff and takes this watchdog down with it
 /// (see `finish_http1_handshake` in client.rs).
-pub(crate) async fn client_stall_watchdog(tracker: Arc<WriteStallTracker>) {
+pub async fn client_stall_watchdog(tracker: Arc<WriteStallTracker>) {
     let grace = steady_stall_grace();
     loop {
         tokio::time::sleep(WRITE_STALL_CHECK_INTERVAL).await;

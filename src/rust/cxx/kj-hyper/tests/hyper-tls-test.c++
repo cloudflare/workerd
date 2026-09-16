@@ -21,6 +21,10 @@
 #include <kj/debug.h>
 #include <kj/test.h>
 
+#if !_WIN32
+#include <sys/socket.h>
+#endif
+
 namespace {
 
 using namespace kj_hyper_test;
@@ -723,6 +727,117 @@ KJ_TEST("wrap_tls_client: an untrusted server certificate fails with kj's wordin
   auto req = f.client->request(kj::HttpMethod::GET, "/hello", f.makeHeaders(), uint64_t(0));
   KJ_EXPECT_THROW_MESSAGE(
       "TLS peer's certificate is not trusted", req.response.wait(f.io.waitScope));
+}
+
+// Rust TLS streams handed to kj consumers (RustAsyncIoStream): kj's stream contract beyond
+// plain reads and writes.
+
+// Two Rust TLS streams talking over an in-memory pipe: both sides are pumped foreign streams,
+// driven by their wrappers' own tasks.
+struct RustTlsPipe {
+  RustTlsPipe()
+      : serverConfig((ensureTokioInitialized(),
+            workerd::rust::kj_hyper::newHyperTlsServerConfig(makeTlsServerOptions(false)))),
+        clientConfig(workerd::rust::kj_hyper::newHyperTlsClientConfig(makeTlsClientOptions({}))) {
+    auto pipe = io.provider->newTwoWayPipe();
+    rawPeer = kj::mv(pipe.ends[1]);
+    server = workerd::rust::kj_hyper::wrap_tls_server(kj::mv(pipe.ends[0]), *serverConfig);
+  }
+
+  // Wraps the pipe's other end in client-side TLS (tests of the server's transport alone keep
+  // the raw end instead).
+  void connectClient() {
+    client =
+        workerd::rust::kj_hyper::wrap_tls_client(kj::mv(rawPeer), *clientConfig, "example.com");
+  }
+
+  TokioTestIo io;
+  ::rust::Box<workerd::rust::kj_hyper::HyperTlsServerConfig> serverConfig;
+  ::rust::Box<workerd::rust::kj_hyper::HyperTlsClientConfig> clientConfig;
+  kj::Own<kj::AsyncIoStream> rawPeer;
+  kj::Own<kj::AsyncIoStream> server;
+  kj::Own<kj::AsyncIoStream> client;
+};
+
+KJ_TEST("Rust TLS stream: a read and a write in flight at once both complete") {
+  RustTlsPipe f;
+  f.connectClient();
+  auto& ws = f.io.waitScope;
+
+  // The client parks a read, then writes while it is parked; the server answers. Both client
+  // operations progress on the one pumped transport. (The server's read is started up front:
+  // the handshake needs both ends in motion, as with any TLS stream.)
+  kj::byte serverBuffer[16];
+  auto serverRead =
+      f.server->tryRead(serverBuffer, 4, sizeof(serverBuffer)).eagerlyEvaluate(nullptr);
+  kj::byte clientBuffer[16];  // deliberately uninitialized, as kj permits
+  auto clientRead =
+      f.client->tryRead(clientBuffer, 4, sizeof(clientBuffer)).eagerlyEvaluate(nullptr);
+  KJ_EXPECT(!clientRead.poll(ws));
+  f.client->write("ping"_kjb).wait(ws);
+
+  KJ_EXPECT(serverRead.wait(ws) == 4);
+  KJ_EXPECT(kj::arrayPtr(serverBuffer, 4) == "ping"_kjb);
+  f.server->write("pong"_kjb).wait(ws);
+
+  KJ_EXPECT(clientRead.wait(ws) == 4);
+  KJ_EXPECT(kj::arrayPtr(clientBuffer, 4) == "pong"_kjb);
+}
+
+KJ_TEST("Rust TLS stream: abortRead() fails a parked read") {
+  RustTlsPipe f;
+  f.connectClient();
+  auto& ws = f.io.waitScope;
+
+  kj::byte buffer[16];
+  auto read = f.client->tryRead(buffer, 1, sizeof(buffer));
+  KJ_EXPECT(!read.poll(ws));
+  f.client->abortRead();
+  KJ_EXPECT_THROW_MESSAGE("abortRead() has been called", read.wait(ws));
+  KJ_EXPECT_THROW_MESSAGE("abortRead() has been called", f.client->tryRead(buffer, 1, 16).wait(ws));
+}
+
+KJ_TEST("Rust TLS stream: whenWriteDisconnected() forwards to a pumped transport") {
+  RustTlsPipe f;
+  auto& ws = f.io.waitScope;
+
+  // The server's transport is a pipe end; destroying the other end disconnects it.
+  auto disconnected = f.server->whenWriteDisconnected();
+  KJ_EXPECT(!disconnected.poll(ws));
+  f.rawPeer = nullptr;
+  disconnected.wait(ws);
+}
+
+KJ_TEST(
+    "Rust TLS stream: whenWriteDisconnected() forwards to a socket, and blocks the native take") {
+  ensureTokioInitialized();
+  TokioTestIo io;
+  auto& ws = io.waitScope;
+  auto serverConfig = workerd::rust::kj_hyper::newHyperTlsServerConfig(makeTlsServerOptions(false));
+
+  auto listener = io.provider->getNetwork().parseAddress("127.0.0.1", 0).wait(ws)->listen();
+  auto connecting =
+      io.provider->getNetwork().parseAddress("127.0.0.1", listener->getPort()).wait(ws)->connect();
+  auto accepted = listener->accept().wait(ws);
+  auto peer = connecting.wait(ws);
+
+  auto tls = workerd::rust::kj_hyper::wrap_tls_server(kj::mv(accepted), *serverConfig);
+  KJ_EXPECT(workerd::rust::kj_hyper::isReleasableRustStream(*tls));
+
+  auto disconnected = tls->whenWriteDisconnected();
+  KJ_EXPECT(!disconnected.poll(ws));
+  // An operation holds the stream: hyper must pump it rather than take it apart.
+  KJ_EXPECT(!workerd::rust::kj_hyper::isReleasableRustStream(*tls));
+
+  // The peer resets the connection (SO_LINGER=0): new writes are doomed.
+  struct linger lin;
+  lin.l_onoff = 1;
+  lin.l_linger = 0;
+  KJ_ASSERT(
+      setsockopt(KJ_ASSERT_NONNULL(peer->getFd()), SOL_SOCKET, SO_LINGER, &lin, sizeof(lin)) == 0);
+  peer = nullptr;
+  disconnected.wait(ws);
+  KJ_EXPECT(workerd::rust::kj_hyper::isReleasableRustStream(*tls));
 }
 
 KJ_TEST("hyper https server: WebSocket echo over TLS") {

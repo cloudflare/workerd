@@ -120,7 +120,7 @@ struct Inner {
     /// promises, so it must be owned and cancelled by the C++ client (a kj promise member),
     /// synchronously at client destruction, while the KJ event loop still exists. A detached
     /// task would be reaped only at port teardown: after the stream dies (use-after-free) and
-    /// after the EventLoop's destructor (which then sees the pump's armed events still queued).
+    /// after the `EventLoop`'s destructor (which then sees the pump's armed events still queued).
     stream_pump: RefCell<Option<crate::serve::StreamPump>>,
 }
 
@@ -351,7 +351,7 @@ impl HyperClient {
                             http::HeaderValue::from_static("chunked"),
                         );
                     }
-                };
+                }
                 for (name, value) in &header_map {
                     ordered.append(name.clone(), value.clone());
                 }
@@ -577,7 +577,9 @@ impl HyperClient {
             async move {
                 let mut buffer = vec![0u8; RESPONSE_READ_CHUNK_SIZE];
                 loop {
-                    let n = body_in.read(&mut buffer, 1).await?;
+                    let n = body_in
+                        .read(&mut tokio::io::ReadBuf::new(&mut buffer), 1)
+                        .await?;
                     if n == 0 {
                         break Ok(());
                     }
@@ -1152,11 +1154,12 @@ impl TunnelOutcome {
 // channel and whose response() awaits the head.
 
 /// The request-body writer returned as `kj::HttpClient::Request::body` (wrapped by
-/// `RequestBodySinkStream` in hyper-server-ffi.c++). Writes feed the bounded request-body
-/// channel that hyper's connection task drains (end-to-end upload backpressure); dropping the
-/// writer ends the body — kj's drop-to-finish contract (the chunked terminator, or hyper's
-/// too-short-body error for an unfinished Content-Length body, follow from the channel
-/// closing).
+/// `RequestBodySinkStream` in hyper-server-ffi.c++).
+///
+/// Writes feed the bounded request-body channel that hyper's connection task drains (end-to-end
+/// upload backpressure); dropping the writer ends the body — kj's drop-to-finish contract (the
+/// chunked terminator, or hyper's too-short-body error for an unfinished Content-Length body,
+/// follow from the channel closing).
 pub struct RequestBodySink {
     kind: ClientSinkKind,
 }
@@ -1175,7 +1178,7 @@ enum ClientSinkKind {
 
 impl RequestBodySink {
     /// Corresponds to `kj::AsyncOutputStream::write()`. Error texts match kj's entity writers
-    /// (see translate.rs's HyperResponseBodySink, the response-direction twin).
+    /// (see translate.rs's `HyperResponseBodySink`, the response-direction twin).
     pub async fn write(&mut self, buffer: &[u8]) -> Result<()> {
         match &mut self.kind {
             // Matches kj's HttpNullEntityWriter error text.
@@ -1232,8 +1235,10 @@ impl RequestBodySink {
 }
 
 /// One in-flight `kj::HttpClient::request()`: holds the translated request (with its body
-/// channel) until [`response`](Self::response) sends it. Interior mutability because the
-/// bridge exposes only shared references; the C++ wrapper is the sole owner.
+/// channel) until [`response`](Self::response) sends it.
+///
+/// Interior mutability because the bridge exposes only shared references; the C++ wrapper is
+/// the sole owner.
 pub struct PendingHttpRequest {
     inner: Rc<Inner>,
     /// The request method, for HEAD's expected-body-size special case.
@@ -1243,7 +1248,7 @@ pub struct PendingHttpRequest {
 }
 
 impl PendingHttpRequest {
-    /// Take the request-body writer (kj::HttpClient::Request::body). May be taken once.
+    /// Take the request-body writer (`kj::HttpClient::Request::body`). May be taken once.
     pub fn take_body_sink(&self) -> Result<Box<RequestBodySink>> {
         self.sink.borrow_mut().take().map(Box::new).ok_or_else(|| {
             KjError::new(
@@ -1253,8 +1258,8 @@ impl PendingHttpRequest {
         })
     }
 
-    /// Send the request and await the response head (kj::HttpClient::Request::response). May be
-    /// called once. The request body streams concurrently: hyper's connection task drains the
+    /// Send the request and await the response head (`kj::HttpClient::Request::response`). May
+    /// be called once. The request body streams concurrently: hyper's connection task drains the
     /// sink's channel while this waits, and keeps draining while the caller reads the response
     /// body (HTTP/1.1 lets the server respond early).
     pub async fn response(&self) -> Result<Box<ClientResponseOutcome>> {
@@ -1304,8 +1309,9 @@ impl PendingHttpRequest {
 }
 
 /// Result of [`PendingHttpRequest::response`]: the translated response head plus the body.
+///
 /// Mirrors [`WsUpgradeOutcome`]'s accessor shape; the C++ wrapper keeps this alive alongside
-/// the body stream so the borrowed headers/status text satisfy kj::HttpClient::Response's
+/// the body stream so the borrowed headers/status text satisfy `kj::HttpClient::Response`'s
 /// "valid until `body` is dropped" contract.
 pub struct ClientResponseOutcome {
     status: u16,
@@ -1374,7 +1380,7 @@ async fn checkout_connection(inner: &Inner) -> Result<http1::SendRequest<BridgeB
                 found = Some(sender);
                 break;
             }
-            Some(Err(_)) => continue,  // Died while pooled; discard.
+            Some(Err(_)) => {}         // Died while pooled; discard.
             None => busy.push(sender), // Mid-exchange; keep for later reuse.
         }
     }
@@ -1557,7 +1563,7 @@ async fn new_connection(inner: &Inner) -> Result<http1::SendRequest<BridgeBody>>
         // kj's exact restrictPeers rejection (kj_rs_io::async-io.c++ / kj async-io-unix.c++).
         Ok(Err(DialError::Blocked)) => Err(KjError::new(
             KjExceptionType::Failed,
-            "connect() blocked by restrictPeers()".to_string(),
+            "connect() blocked by restrictPeers()".to_owned(),
         )),
         Ok(Err(DialError::Tls(e))) => Err(crate::tls::kj_error_for_tls(&e)),
         Ok(Err(DialError::Handshake(e))) => Err(kj_error_for_hyper("HTTP/1.1 handshake", &e)),
@@ -1784,9 +1790,11 @@ fn translate_header_entry(
 }
 
 /// Translate `kj::HttpHeaders` into a hyper `HeaderMap`, preserving multi-value headers and
-/// non-UTF-8 (obs-text) value bytes. Connection-level headers are removed because hyper manages
-/// message framing itself; a caller-supplied Content-Length is returned separately as a body
-/// length hint (matching kj-http, where expectedBodySize wins over the header).
+/// non-UTF-8 (obs-text) value bytes.
+///
+/// Connection-level headers are removed because hyper manages message framing itself; a
+/// caller-supplied Content-Length is returned separately as a body length hint (matching
+/// kj-http, where expectedBodySize wins over the header).
 pub fn translate_request_headers(
     headers: HeadersRef<'_>,
 ) -> Result<(http::HeaderMap, RequestFraming, hyper::ext::HeaderCaseMap)> {
@@ -1825,9 +1833,10 @@ pub fn translate_request_headers(
     Ok((map, framing, case))
 }
 
-/// The framing-relevant application headers `translate_request_headers` stripped: the parsed
-/// Content-Length value, and whether a Transfer-Encoding header was present (see kj's
-/// GET-with-body pass-through rule).
+/// The framing-relevant application headers `translate_request_headers` stripped.
+///
+/// Holds the parsed Content-Length value, and whether a Transfer-Encoding header was present
+/// (see kj's GET-with-body pass-through rule).
 pub struct RequestFraming {
     pub content_length: Option<u64>,
     pub has_transfer_encoding: bool,
@@ -1904,6 +1913,7 @@ fn send_response_head<'a>(
 }
 
 /// Translate a hyper response `HeaderMap` into `kj::HttpHeaders` allocated against `table`.
+///
 /// All headers are passed through verbatim (kj-http overrides connection-level headers during
 /// serialization, so keeping them is safe and maximizes fidelity). Multi-value headers produce
 /// one kj header entry per value, in received order.

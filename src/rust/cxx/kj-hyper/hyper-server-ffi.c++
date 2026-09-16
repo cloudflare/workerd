@@ -23,8 +23,7 @@ class HyperRequestBodyStream final: public kj::AsyncInputStream {
   explicit HyperRequestBodyStream(::rust::Box<HyperRequestBody> body): body(kj::mv(body)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return hot(
-        body->read(::rust::Slice<uint8_t>(static_cast<uint8_t*>(buffer), maxBytes), minBytes));
+    return hot(request_body_read(*body, static_cast<uint8_t*>(buffer), maxBytes, minBytes));
   }
 
   kj::Maybe<uint64_t> tryGetLength() override {
@@ -44,8 +43,7 @@ class ServeRequestBodyStream final: public kj::AsyncInputStream {
   explicit ServeRequestBodyStream(::rust::Box<ServeRequestBody> body): body(kj::mv(body)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return hot(
-        body->read(::rust::Slice<uint8_t>(static_cast<uint8_t*>(buffer), maxBytes), minBytes));
+    return hot(serve_request_body_read(*body, static_cast<uint8_t*>(buffer), maxBytes, minBytes));
   }
 
   kj::Maybe<uint64_t> tryGetLength() override {
@@ -156,8 +154,7 @@ class RustTunnelStream final: public kj::AsyncIoStream {
   explicit RustTunnelStream(::rust::Box<HyperTunnel> tunnel): tunnel(kj::mv(tunnel)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return hot(
-        tunnel->read(::rust::Slice<uint8_t>(static_cast<uint8_t*>(buffer), maxBytes), minBytes));
+    return hot(tunnel_read(*tunnel, static_cast<uint8_t*>(buffer), maxBytes, minBytes));
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
@@ -188,15 +185,18 @@ class RustTunnelStream final: public kj::AsyncIoStream {
 
 // kj::AsyncIoStream over a RustStream (rust_stream.rs): a stream implemented in Rust -- today
 // the TLS streams of workerd's rustls SecureNetworkWrapper -- handed to kj consumers. The hyper
-// server/client recognize this wrapper (isRustStream, kj-stream.h) and take the Rust stream back
-// out of it instead of pumping bytes through the bridge.
+// server/client recognize this wrapper (isReleasableRustStream, kj-stream.h) and take the Rust
+// stream back out of it instead of pumping bytes through the bridge.
 class RustAsyncIoStream final: public kj::AsyncIoStream {
  public:
-  explicit RustAsyncIoStream(::rust::Box<RustStream> inner): inner(kj::mv(inner)) {}
+  explicit RustAsyncIoStream(::rust::Box<RustStream> innerParam)
+      : inner(kj::mv(innerParam)),
+        // The stream's pump (when it sits over a foreign kj stream) moves bytes only while
+        // polled; nothing else awaits it, so it runs as this wrapper's own task.
+        driveTask(hot(inner->drive())) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return hot(
-        inner->read(::rust::Slice<uint8_t>(static_cast<uint8_t*>(buffer), maxBytes), minBytes));
+    return hot(rust_stream_read(*inner, static_cast<uint8_t*>(buffer), maxBytes, minBytes));
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
@@ -209,34 +209,42 @@ class RustAsyncIoStream final: public kj::AsyncIoStream {
     }
   }
 
+  kj::Promise<void> whenWriteDisconnected() override {
+    return hot(inner->when_write_disconnected());
+  }
+
   void shutdownWrite() override {
-    // Best-effort, like kj's TLS shutdownWrite(): the flush (a TLS close_notify) runs detached
-    // and is abandoned if this stream is destroyed first.
-    shutdownTask = hot(inner->shutdown_write()).catch_([](kj::Exception&&) {});
+    // Like kj's TLS stream: the flush (a TLS close_notify) runs detached, its failure is logged,
+    // and it is abandoned if this stream is destroyed first.
+    KJ_REQUIRE(shutdownTask == kj::none, "already called shutdownWrite()");
+    shutdownTask =
+        hot(inner->shutdown_write()).eagerlyEvaluate([](kj::Exception&& e) { KJ_LOG(ERROR, e); });
   }
 
   void abortRead() override {
     inner->abort_read();
   }
 
-  kj::Promise<void> whenWriteDisconnected() override {
-    // The transport socket is inside the Rust stream (a TLS layer), where a hangup is only
-    // observed by a read or write; kj's own TLS stream has the same blind spot for a peer that
-    // vanishes between operations. Never resolves, like kj::AsyncOutputStream's default.
-    return kj::NEVER_DONE;
-  }
-
   // Deliberately no getFd()/getWin32Handle(): this stream transforms bytes (TLS), so its
   // transport handle carries ciphertext, not the stream's bytes.
 
-  // Takes the Rust stream out; the wrapper must be destroyed right after.
+  bool canRelease() const {
+    return inner->can_release();
+  }
+
+  // Takes the Rust stream out, after canRelease(); the wrapper must be destroyed right after.
   ::rust::Box<RustStream> release() {
+    // The driver borrows the stream: cancel it before the stream leaves (its pump stays in the
+    // stream, for the new owner to drive).
+    driveTask = kj::READY_NOW;
     return kj::mv(inner);
   }
 
  private:
+  // Declared first, destroyed last: every task below borrows it.
   ::rust::Box<RustStream> inner;
-  kj::Promise<void> shutdownTask = kj::READY_NOW;
+  kj::Promise<void> driveTask;
+  kj::Maybe<kj::Promise<void>> shutdownTask;
 };
 
 // The kj::HttpService::ConnectResponse handed to the C++ service for inbound CONNECT requests.
@@ -401,13 +409,17 @@ kj::Own<kj::AsyncIoStream> new_tunnel_stream(::rust::Box<HyperTunnel> tunnel) {
       kj::Own<kj::AsyncIoStream>(kj::heap<RustTunnelStream>(kj::mv(tunnel))));
 }
 
-bool isRustStream(const kj::AsyncIoStream& stream) {
-  return kj::dynamicDowncastIfAvailable<const RustAsyncIoStream>(stream) != kj::none;
+bool isReleasableRustStream(const kj::AsyncIoStream& stream) {
+  KJ_IF_SOME(wrapper, kj::dynamicDowncastIfAvailable<const RustAsyncIoStream>(stream)) {
+    return wrapper.canRelease();
+  }
+  return false;
 }
 
 ::rust::Box<RustStream> releaseRustStream(kj::Own<kj::AsyncIoStream> stream) {
   auto& wrapper = KJ_REQUIRE_NONNULL(kj::dynamicDowncastIfAvailable<RustAsyncIoStream>(*stream),
       "stream is not a RustAsyncIoStream; cannot take its Rust stream");
+  KJ_REQUIRE(wrapper.canRelease(), "the Rust stream is still in use; cannot take it");
   return wrapper.release();
 }
 

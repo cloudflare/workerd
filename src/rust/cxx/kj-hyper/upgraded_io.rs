@@ -229,13 +229,13 @@ impl SharedIo {
     pub fn poll_read_some(
         &self,
         cx: &mut Context<'_>,
-        buffer: &mut [u8],
+        buf: &mut ReadBuf<'_>,
     ) -> Poll<Result<usize, KjError>> {
         self.poll_io(cx, "read()", |io, cx| {
-            let mut read_buf = ReadBuf::new(buffer);
-            match io.poll_read(cx, &mut read_buf) {
+            let before = buf.filled().len();
+            match io.poll_read(cx, buf) {
                 Poll::Pending => Poll::Pending,
-                Poll::Ready(Ok(())) => Poll::Ready(Ok(read_buf.filled().len())),
+                Poll::Ready(Ok(())) => Poll::Ready(Ok(buf.filled().len() - before)),
                 Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
             }
         })
@@ -250,13 +250,16 @@ impl SharedIo {
         self.poll_io(cx, "write()", |io, cx| io.poll_write(cx, buffer))
     }
 
-    /// KJ `tryRead` semantics: read until at least `min_bytes` (or EOF), up to `buffer.len()`.
-    pub async fn read_min(&self, buffer: &mut [u8], min_bytes: usize) -> Result<usize, KjError> {
-        let min_bytes = min_bytes.min(buffer.len());
+    /// KJ `tryRead` semantics: fill `buf` until at least `min_bytes` (or EOF), up to its capacity.
+    pub async fn read_min(
+        &self,
+        buf: &mut ReadBuf<'_>,
+        min_bytes: usize,
+    ) -> Result<usize, KjError> {
+        let min_bytes = min_bytes.min(buf.capacity());
         let mut total = 0;
         while total < min_bytes {
-            let n =
-                std::future::poll_fn(|cx| self.poll_read_some(cx, &mut buffer[total..])).await?;
+            let n = std::future::poll_fn(|cx| self.poll_read_some(cx, buf)).await?;
             if n == 0 {
                 break; // EOF: fewer than min_bytes signals EOF to KJ.
             }
@@ -332,14 +335,14 @@ impl HyperTunnel {
     }
 
     /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, min_bytes, buffer.len())`.
-    pub async fn read(&self, buffer: &mut [u8], min_bytes: usize) -> Result<usize, KjError> {
+    pub async fn read(&self, buf: &mut ReadBuf<'_>, min_bytes: usize) -> Result<usize, KjError> {
         if self.read_aborted.get() {
             return Err(KjError::new(
                 KjExceptionType::Disconnected,
                 "read end of the tunnel was aborted".to_owned(),
             ));
         }
-        self.io.read_min(buffer, min_bytes).await
+        self.io.read_min(buf, min_bytes).await
     }
 
     /// Corresponds to `kj::AsyncOutputStream::write()`.

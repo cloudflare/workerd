@@ -74,6 +74,11 @@ use crate::ws::WsSession;
 
 // needless_lifetimes: cxx requires explicit lifetimes on reference-returning bridge fns.
 #[expect(clippy::needless_lifetimes)]
+#[expect(
+    clippy::missing_safety_doc,
+    reason = "cxx-generated wrappers do not carry the declarations' docs; each unsafe declaration \
+              states its contract in the bridge"
+)]
 #[cxx::bridge(namespace = "workerd::rust::kj_hyper")]
 mod bridge {
     /// The kind of WebSocket message in a `WsMessage` (mirrors `kj::WebSocket::Message`'s
@@ -198,12 +203,12 @@ mod bridge {
         fn wrap_tokio_stream(stream: Box<TokioStream>) -> KjOwn<AsyncIoStream>;
 
         /// Whether the stream is a `RustStream` wrapper (`RustAsyncIoStream`,
-        /// hyper-server-ffi.c++): Rust underneath, taken back out by `release_rust_stream`.
-        #[cxx_name = "isRustStream"]
-        fn is_rust_stream(stream: &AsyncIoStream) -> bool;
+        /// hyper-server-ffi.c++) that may be taken apart now (`RustStream::can_release`).
+        #[cxx_name = "isReleasableRustStream"]
+        fn is_releasable_rust_stream(stream: &AsyncIoStream) -> bool;
 
-        /// Takes the Rust stream out of its wrapper and destroys the wrapper. Only valid after
-        /// `is_rust_stream`.
+        /// Takes the Rust stream out of its wrapper -- cancelling the wrapper's pump driver --
+        /// and destroys the wrapper. Only valid after `is_releasable_rust_stream`.
         #[cxx_name = "releaseRustStream"]
         fn release_rust_stream(stream: KjOwn<AsyncIoStream>) -> Box<RustStream>;
 
@@ -221,6 +226,7 @@ mod bridge {
 
         type KjStreamReadEnd;
         type KjStreamWriteEnd;
+        type KjStreamWatchEnd;
 
         /// Takes ownership of `stream`; the read direction. Fallible only in that `kj::heap`
         /// may throw.
@@ -229,6 +235,9 @@ mod bridge {
         /// The write direction of the stream `read` shares.
         #[cxx_name = "kjStreamWriteEnd"]
         fn kj_stream_write_end(read: Pin<&mut KjStreamReadEnd>) -> Result<KjOwn<KjStreamWriteEnd>>;
+        /// A handle for `whenWriteDisconnected` on the stream `read` shares.
+        #[cxx_name = "kjStreamWatchEnd"]
+        fn kj_stream_watch_end(read: Pin<&mut KjStreamReadEnd>) -> Result<KjOwn<KjStreamWatchEnd>>;
 
         /// `kj::AsyncIoStream::tryRead(buffer, min_bytes, buffer.len())`. The buffer is a
         /// Rust-owned, initialized `Vec` here (the pump's), so `&mut [u8]` is the right type.
@@ -251,6 +260,12 @@ mod bridge {
         /// convert that exception to a Rust panic.
         #[cxx_name = "kjWriteEndShutdownWrite"]
         fn kj_write_end_shutdown_write(end: Pin<&mut KjStreamWriteEnd>) -> Result<()>;
+
+        /// `kj::AsyncIoStream::whenWriteDisconnected()`.
+        #[cxx_name = "kjWatchEndWhenWriteDisconnected"]
+        async unsafe fn kj_watch_end_when_write_disconnected<'a>(
+            end: Pin<&'a mut KjStreamWatchEnd>,
+        ) -> Result<()>;
     }
 
     unsafe extern "C++" {
@@ -324,7 +339,7 @@ mod bridge {
         async unsafe fn send_text<'a>(self: &'a WsPipeEnd, text: &'a [u8]) -> Result<()>;
         async unsafe fn send_binary<'a>(self: &'a WsPipeEnd, data: &'a [u8]) -> Result<()>;
         async unsafe fn close<'a>(self: &'a WsPipeEnd, code: u16, reason: &'a [u8]) -> Result<()>;
-        fn disconnect(self: &WsPipeEnd);
+        fn disconnect(self: &WsPipeEnd) -> Result<()>;
         fn abort(self: &WsPipeEnd);
         async unsafe fn when_aborted<'a>(self: &'a WsPipeEnd);
         async unsafe fn receive<'a>(self: &'a WsPipeEnd, max_size: usize) -> Result<WsMessage>;
@@ -444,6 +459,16 @@ mod bridge {
             stream: KjOwn<AsyncIoStream>,
             jsgify_websocket_errors: bool,
         ) -> Result<Box<HyperClient>>;
+
+        /// Like `new_hyper_stream_http_client`, over a stream the caller only lends (`stream` is
+        /// a non-owning `kj::Own`): always pumped, never taken apart, so the caller's stream
+        /// stays intact. The stream must outlive the client.
+        #[expect(clippy::unnecessary_box_returns)]
+        unsafe fn new_hyper_borrowed_stream_http_client(
+            table: &HttpHeaderTable,
+            stream: KjOwn<AsyncIoStream>,
+            jsgify_websocket_errors: bool,
+        ) -> Box<HyperClient>;
 
         /// Corresponds to `kj::HttpService::request()` for plain (non-upgrade) requests.
         async unsafe fn request<'a>(
@@ -586,10 +611,12 @@ mod bridge {
         /// one read and one write in flight concurrently.
         type RustStream;
 
-        /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, min_bytes, buffer.len())`.
-        async unsafe fn read<'a>(
-            self: &'a RustStream,
-            buffer: &'a mut [u8],
+        /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, min_bytes, len)`. `buffer` is
+        /// kj's storage (uninitialized allowed), valid until the promise settles.
+        async unsafe fn rust_stream_read<'a>(
+            stream: &'a RustStream,
+            buffer: *mut u8,
+            len: usize,
             min_bytes: usize,
         ) -> Result<usize>;
 
@@ -597,11 +624,22 @@ mod bridge {
         async unsafe fn write<'a>(self: &'a RustStream, buffer: &'a [u8]) -> Result<()>;
 
         /// Corresponds to `kj::AsyncIoStream::shutdownWrite()`: async because the stream may
-        /// have to flush (a TLS close_notify); the C++ wrapper runs it detached.
+        /// have to flush (a TLS close_notify); the C++ wrapper runs it detached and logs its
+        /// failure.
         async unsafe fn shutdown_write<'a>(self: &'a RustStream) -> Result<()>;
 
-        /// Corresponds to `kj::AsyncIoStream::abortRead()`.
+        /// Corresponds to `kj::AsyncIoStream::abortRead()`: a pending read fails too.
         fn abort_read(self: &RustStream);
+
+        /// Corresponds to `kj::AsyncOutputStream::whenWriteDisconnected()`, forwarded to the
+        /// transport underneath.
+        async unsafe fn when_write_disconnected<'a>(self: &'a RustStream) -> Result<()>;
+
+        /// Drives the stream's pump, if it has one; the C++ wrapper holds it as a kj promise.
+        async unsafe fn drive<'a>(self: &'a RustStream);
+
+        /// Whether the stream may be taken apart now (see `RustStream::can_release`).
+        fn can_release(self: &RustStream) -> bool;
 
         /// `kj::SecureNetworkWrapper::wrapServer()`: server-side TLS (per `config`) over the
         /// owned plaintext stream; the handshake runs on first I/O. Errors when the stream
@@ -666,10 +704,12 @@ mod bridge {
         /// `RustTunnelStream`, see hyper-server-ffi.c++).
         type HyperTunnel;
 
-        /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, min_bytes, buffer.len())`.
-        async unsafe fn read<'a>(
-            self: &'a HyperTunnel,
-            buffer: &'a mut [u8],
+        /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, min_bytes, len)`. `buffer` is
+        /// kj's storage (uninitialized allowed), valid until the promise settles.
+        async unsafe fn tunnel_read<'a>(
+            tunnel: &'a HyperTunnel,
+            buffer: *mut u8,
+            len: usize,
             min_bytes: usize,
         ) -> Result<usize>;
 
@@ -780,6 +820,17 @@ mod bridge {
             jsgify_websocket_errors: bool,
         ) -> Result<Box<HyperConnection>>;
 
+        /// Like `new_hyper_http_connection`, over a stream the caller only lends (`stream` is a
+        /// non-owning `kj::Own`): always pumped, never taken apart, so the caller's stream stays
+        /// intact. The stream must outlive the connection.
+        #[expect(clippy::unnecessary_box_returns)]
+        unsafe fn new_hyper_borrowed_http_connection(
+            table: &HttpHeaderTable,
+            service: Pin<&mut HttpService>,
+            stream: KjOwn<AsyncIoStream>,
+            jsgify_websocket_errors: bool,
+        ) -> Box<HyperConnection>;
+
         /// A rustls *server* configuration built from workerd `TlsOptions` (see
         /// `TlsServerOptions`), shareable across the connections of an https socket. Fails
         /// with a clear `kj::Exception` for configurations rustls cannot honor (no/bad
@@ -817,12 +868,13 @@ mod bridge {
 
         type HyperRequestBody;
 
-        /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, min_bytes, buffer.len())`.
-        /// The buffer is only written through the returned future; dropping the future cancels
-        /// the read, after which the buffer is no longer accessed.
-        async unsafe fn read<'a>(
-            self: &'a mut HyperRequestBody,
-            buffer: &'a mut [u8],
+        /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, min_bytes, len)`. `buffer` is
+        /// kj's storage (uninitialized allowed), valid until the promise settles; it is only
+        /// written through the returned future, and dropping the future cancels the read.
+        async unsafe fn request_body_read<'a>(
+            body: &'a mut HyperRequestBody,
+            buffer: *mut u8,
+            len: usize,
             min_bytes: usize,
         ) -> Result<usize>;
 
@@ -831,11 +883,12 @@ mod bridge {
 
         type ServeRequestBody;
 
-        /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, min_bytes, buffer.len())` for the
-        /// hyper serve path's inline request body. Same buffer contract as `HyperRequestBody::read`.
-        async unsafe fn read<'a>(
-            self: &'a mut ServeRequestBody,
-            buffer: &'a mut [u8],
+        /// Corresponds to `kj::AsyncInputStream::tryRead(buffer, min_bytes, len)` for the hyper
+        /// serve path's inline request body. Same buffer contract as `request_body_read`.
+        async unsafe fn serve_request_body_read<'a>(
+            body: &'a mut ServeRequestBody,
+            buffer: *mut u8,
+            len: usize,
             min_bytes: usize,
         ) -> Result<usize>;
 
@@ -961,6 +1014,23 @@ unsafe fn new_hyper_stream_http_client(
 }
 
 #[expect(clippy::unnecessary_box_returns)]
+unsafe fn new_hyper_borrowed_stream_http_client(
+    table: &HttpHeaderTable,
+    stream: kj_rs::KjOwn<AsyncIoStream>,
+    jsgify_websocket_errors: bool,
+) -> Box<HyperClient> {
+    // Pumped, never taken apart: the caller keeps using its stream afterwards.
+    let served = crate::serve::pump_kj_stream(stream);
+    // SAFETY: the caller guarantees `table` (and the lent stream) outlive the returned client.
+    let table = unsafe { HeaderTablePtr::new(std::ptr::from_ref(table)) };
+    Box::new(HyperClient::new_with_stream(
+        table,
+        served,
+        jsgify_websocket_errors,
+    ))
+}
+
+#[expect(clippy::unnecessary_box_returns)]
 fn clone_client(client: &HyperClient) -> Box<HyperClient> {
     Box::new(client.clone_handle())
 }
@@ -1028,13 +1098,28 @@ pub(crate) struct KjStreamWriteHalf {
 /// Only if allocating an end object throws (`kj::heap`).
 pub(crate) fn split_kj_stream(
     stream: KjOwn<AsyncIoStream>,
-) -> Result<(KjStreamReadHalf, KjStreamWriteHalf), KjException> {
+) -> Result<(KjStreamReadHalf, KjStreamWriteHalf, KjStreamWatchHalf), KjException> {
     let mut read = kj_stream_read_end(stream)?;
     let write = kj_stream_write_end(read.as_mut())?;
+    let watch = kj_stream_watch_end(read.as_mut())?;
     Ok((
         KjStreamReadHalf { end: read },
         KjStreamWriteHalf { end: write },
+        KjStreamWatchHalf { end: watch },
     ))
+}
+
+/// `whenWriteDisconnected` on a pumped stream, alongside its read and write directions.
+pub(crate) struct KjStreamWatchHalf {
+    end: KjOwn<KjStreamWatchEnd>,
+}
+
+impl KjStreamWatchHalf {
+    /// `kj::AsyncIoStream::whenWriteDisconnected()`.
+    pub(crate) async fn when_write_disconnected(&mut self) -> Result<(), KjException> {
+        // SAFETY: as in `KjStreamReadHalf::try_read`.
+        unsafe { kj_watch_end_when_write_disconnected(self.end.as_mut()) }.await
+    }
 }
 
 impl KjStreamReadHalf {
@@ -1062,6 +1147,34 @@ impl KjStreamWriteHalf {
     pub(crate) fn shutdown_write(&mut self) -> Result<(), KjException> {
         kj_write_end_shutdown_write(self.end.as_mut())
     }
+}
+
+#[expect(clippy::unnecessary_box_returns)]
+unsafe fn new_hyper_borrowed_http_connection(
+    table: &HttpHeaderTable,
+    service: std::pin::Pin<&mut HttpService>,
+    stream: kj_rs::KjOwn<AsyncIoStream>,
+    jsgify_websocket_errors: bool,
+) -> Box<HyperConnection> {
+    // Pumped, never taken apart: the caller keeps using its stream afterwards.
+    let served = crate::serve::pump_kj_stream(stream);
+    // SAFETY: forwarded caller contract, as in `new_hyper_http_connection` (plus the lent stream
+    // outliving the connection).
+    let (table, service) = unsafe {
+        let table = HeaderTablePtr::new(std::ptr::from_ref(table));
+        let service = ServicePtr::new(
+            std::ptr::from_mut(std::pin::Pin::into_inner_unchecked(service)).cast_const(),
+        );
+        (table, service)
+    };
+    Box::new(HyperConnection::new(
+        table,
+        service,
+        served.io,
+        served.pump,
+        jsgify_websocket_errors,
+        None,
+    ))
 }
 
 unsafe fn new_hyper_http_connection(
@@ -1125,6 +1238,101 @@ unsafe fn new_hyper_http_connection_tls(
         jsgify_websocket_errors,
         Some(tls_config.acceptor()),
     )))
+}
+
+// =====================================================================================
+// kj read buffers. kj permits uninitialized storage for `tryRead` (`kj::byte buf[16];`), so the
+// bridge passes a raw pointer and length and they are viewed as `&mut [MaybeUninit<u8>]`,
+// filled through a `ReadBuf`: a `&mut [u8]` would assert contents the storage does not have.
+// Mirrors kj-rs-io's `stream_try_read`.
+
+/// Views `len` bytes of caller-owned storage at `ptr` as `&mut [MaybeUninit<u8>]`.
+///
+/// # Safety
+///
+/// `ptr` must be valid for reads and writes of `len` bytes for the whole lifetime `'a` the
+/// caller chooses, and nothing else may access that memory meanwhile. The read entry points
+/// below pick `'a` as the lifetime of the future they return, which is exactly the validity kj's
+/// `tryRead` contract grants a buffer: until the returned promise settles.
+unsafe fn uninit_slice<'a>(ptr: *mut u8, len: usize) -> &'a mut [std::mem::MaybeUninit<u8>] {
+    if len == 0 {
+        // A zero-length read passes whatever pointer the caller had; never dereference it.
+        return &mut [];
+    }
+    // SAFETY: per this function's contract, `ptr..ptr+len` is valid and exclusively ours for
+    // `'a`, and `MaybeUninit<u8>` has no validity requirement on its contents.
+    unsafe { std::slice::from_raw_parts_mut(ptr.cast::<std::mem::MaybeUninit<u8>>(), len) }
+}
+
+/// # Safety
+///
+/// `buffer` must be valid for reads and writes of `len` bytes, and untouched by anyone else,
+/// until the returned future settles or is dropped (kj's `tryRead` contract).
+unsafe fn rust_stream_read(
+    stream: &RustStream,
+    buffer: *mut u8,
+    len: usize,
+    min_bytes: usize,
+) -> impl std::future::Future<Output = kj::Result<usize>> + '_ {
+    // SAFETY: forwarded from this function's contract; the future is the buffer's lifetime.
+    let buffer = unsafe { uninit_slice(buffer, len) };
+    async move {
+        stream
+            .read(&mut tokio::io::ReadBuf::uninit(buffer), min_bytes)
+            .await
+    }
+}
+
+/// # Safety
+///
+/// As for [`rust_stream_read`].
+unsafe fn tunnel_read(
+    tunnel: &HyperTunnel,
+    buffer: *mut u8,
+    len: usize,
+    min_bytes: usize,
+) -> impl std::future::Future<Output = kj::Result<usize>> + '_ {
+    // SAFETY: forwarded from this function's contract; the future is the buffer's lifetime.
+    let buffer = unsafe { uninit_slice(buffer, len) };
+    async move {
+        tunnel
+            .read(&mut tokio::io::ReadBuf::uninit(buffer), min_bytes)
+            .await
+    }
+}
+
+/// # Safety
+///
+/// As for [`rust_stream_read`].
+unsafe fn request_body_read(
+    body: &mut HyperRequestBody,
+    buffer: *mut u8,
+    len: usize,
+    min_bytes: usize,
+) -> impl std::future::Future<Output = kj::Result<usize>> + '_ {
+    // SAFETY: forwarded from this function's contract; the future is the buffer's lifetime.
+    let buffer = unsafe { uninit_slice(buffer, len) };
+    async move {
+        body.read(&mut tokio::io::ReadBuf::uninit(buffer), min_bytes)
+            .await
+    }
+}
+
+/// # Safety
+///
+/// As for [`rust_stream_read`].
+unsafe fn serve_request_body_read(
+    body: &mut ServeRequestBody,
+    buffer: *mut u8,
+    len: usize,
+    min_bytes: usize,
+) -> impl std::future::Future<Output = kj::Result<usize>> + '_ {
+    // SAFETY: forwarded from this function's contract; the future is the buffer's lifetime.
+    let buffer = unsafe { uninit_slice(buffer, len) };
+    async move {
+        body.read(&mut tokio::io::ReadBuf::uninit(buffer), min_bytes)
+            .await
+    }
 }
 
 fn websocket_accept_key(key: &[u8]) -> String {
@@ -1205,9 +1413,9 @@ impl ServicePtr {
     }
 }
 
-/// A foreign `kj::WebSocket` held by the pipe's pump-adoption states (ws_pipe.rs), as a
-/// *shared* pointer — kj::WebSocket is legitimately used concurrently across directions (send
-/// while a receive is in flight, whenAborted while pumping), so no exclusive borrow may ever
+/// A foreign `kj::WebSocket` held by the pipe's pump-adoption states (`ws_pipe.rs`), as a
+/// *shared* pointer — `kj::WebSocket` is legitimately used concurrently across directions (send
+/// while a receive is in flight, `whenAborted` while pumping), so no exclusive borrow may ever
 /// exist (the same shared-receiver rule as [`ServicePtr`]). All operations go through the
 /// `websocket_*` shims in ws-pipe-ffi.h, which recover the non-const reference on the C++ side.
 #[derive(Clone, Copy)]
@@ -1259,7 +1467,7 @@ impl WsPtr {
         // SAFETY: `new` contract; shared receiver.
         let _ = unsafe { bridge::websocket_when_aborted(self.get()) }.await;
     }
-    pub(crate) async fn pump_to(self, to: WsPtr) -> kj::Result<()> {
+    pub(crate) async fn pump_to(self, to: Self) -> kj::Result<()> {
         // SAFETY: `new` contract on both; shared receivers.
         unsafe { bridge::websocket_pump_to(self.get(), to.get()) }
             .await

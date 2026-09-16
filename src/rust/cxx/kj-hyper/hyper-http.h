@@ -313,6 +313,16 @@ inline kj::Own<HyperHttpClient> newHyperStreamHttpClient(const kj::HttpHeaderTab
       new_hyper_stream_http_client(table, kj::mv(stream), jsgifyWebSocketErrors));
 }
 
+// Like the above over a stream the caller only lends (kj::newHttpClient(table, stream&)): the
+// stream is pumped, never taken apart, so the caller's stream stays intact for later use. It
+// must outlive the client.
+inline kj::Own<HyperHttpClient> newHyperStreamHttpClient(const kj::HttpHeaderTable& table,
+    kj::AsyncIoStream& stream,
+    bool jsgifyWebSocketErrors = false) {
+  return kj::heap<HyperHttpClient>(new_hyper_borrowed_stream_http_client(table,
+      kj::Own<kj::AsyncIoStream>(&stream, kj::NullDisposer::instance), jsgifyWebSocketErrors));
+}
+
 // kj::newWebSocketPipe()'s replacement under the rust I/O backend: an in-memory
 // kj::WebSocket pair backed by the Rust pipe state machine (ws_pipe.rs) -- rendezvous message
 // handoff, kj's exact close/disconnect/abort semantics, pump adoption of real sockets, and
@@ -384,6 +394,17 @@ inline kj::Own<HyperHttpConnection> newHyperHttpConnection(const kj::HttpHeaderT
     bool jsgifyWebSocketErrors = false) {
   return kj::heap<HyperHttpConnection>(
       new_hyper_http_connection(table, service, kj::mv(stream), jsgifyWebSocketErrors));
+}
+
+// Like the above over a stream the caller only lends (kj::HttpServer::listenHttpCleanDrain()):
+// the stream is pumped, never taken apart, so the caller's stream stays intact for later use.
+// It must outlive the connection.
+inline kj::Own<HyperHttpConnection> newHyperHttpConnection(const kj::HttpHeaderTable& table,
+    kj::HttpService& service,
+    kj::AsyncIoStream& stream,
+    bool jsgifyWebSocketErrors = false) {
+  return kj::heap<HyperHttpConnection>(new_hyper_borrowed_http_connection(table, service,
+      kj::Own<kj::AsyncIoStream>(&stream, kj::NullDisposer::instance), jsgifyWebSocketErrors));
 }
 
 // Builds the shared rustls *server* configuration for hyper-served https sockets from the
