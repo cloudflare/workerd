@@ -180,6 +180,12 @@ class RequestObserver: public kj::Refcounted {
     return kj::none;
   }
 
+  // Tracks serialized argument bytes retained while a replayable actor call's retry state is live.
+  // The returned handle releases the tracked bytes when destroyed.
+  virtual kj::Own<void> trackActorCallReplayMemory(size_t bytes) {
+    return kj::Own<void>();
+  }
+
   // Records an additional outgoing actor call started by a runtime retry loop.
   virtual void recordActorRetry(ActorRetryCallType callType) {}
 
