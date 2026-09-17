@@ -111,7 +111,6 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
     }
 
     auto requestJson = json.encode(requestBuilder);
-    auto bucket = this->bucket->adminBucket.map([](auto&& s) { return kj::str(s); });
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, this->bucket->adminBucket);

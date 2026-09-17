@@ -266,7 +266,6 @@ DecodedException decodeTunneledException(
       // that, otherwise, we'll fall back to constructing a new error object. If
       // the ignoreDetail optiom is set, we skip trying to deserialize.
       KJ_IF_SOME(serializedJsError, exception.getDetail(jsg::TUNNELED_EXCEPTION_DETAIL_ID)) {
-        kj::Maybe<jsg::JsValue> deserialized;
         v8::TryCatch tryCatch(isolate);
         try {
           auto& js = Lock::from(isolate);
