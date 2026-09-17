@@ -39,6 +39,9 @@
 //     (the native backend needs NEITHER — JSG owns its source lifetime).
 //   - desiredSize reflects the SLOWEST live cursor; a pending read on any
 //     cursor overrides backpressure at the controller.
+//   - A released reader's filled bytes precede later data: re-queued when
+//     one cursor holds the queue, kept in the byte cursor's own prefix when
+//     it is shared. Forks (tee, detach) copy them.
 //
 // Nothing in this module is ever exposed to user code: queues and cursors
 // are held in #private fields of the stream classes. Method calls on these
@@ -392,6 +395,10 @@ class StreamQueue<T, V = T> {
       }
     });
     return found;
+  }
+
+  forEachLiveCursor(fn: (cursor: QueueCursor<T, V>) => void): void {
+    this.#forEachLiveCursor(fn);
   }
 
   // True if any live cursor satisfies the predicate. Used by the byte
@@ -857,6 +864,12 @@ class ByteStreamCursor
   // autoAllocateChunkSize creates synthetic descriptors for default reads.
   #pendingPullIntos: PullIntoDescriptor[] = [];
 
+  // A released head's filled bytes when the queue is shared (tee branches),
+  // where they cannot go back into the queue. Read before the data at the
+  // cursor's position, and counted in remainingSize. Empty whenever a
+  // pull-into is pending (fills take it first).
+  #prefix: ByteQueueEntry | undefined;
+
   // One-shot latch for the deferred end-of-data settlement (see
   // #scheduleEndOfDataSettlement).
   #endOfDataSettlementScheduled: boolean = false;
@@ -940,6 +953,114 @@ class ByteStreamCursor
     return view;
   }
 
+  // The prefix is delivered whole, zero-copy (no other cursor holds it).
+  #takePrefix(): Uint8Array {
+    const prefix = this.#prefix as ByteQueueEntry;
+    this.#prefix = undefined;
+    this.addToTotalSize(-prefix.byteLength);
+    return new Uint8Array(prefix.buffer, prefix.byteOffset, prefix.byteLength);
+  }
+
+  // Spec EnqueueDetachedPullIntoToQueue, into the prefix: see #prefix.
+  #moveToPrefix(desc: PullIntoDescriptor): void {
+    if (desc.bytesFilled === 0) return;
+    // A pull-into still pending has taken every available byte, the prefix
+    // first, so a released head holding bytes and a prefix never coexist.
+    // Were both present, their order would be unknown: fail loudly instead
+    // of losing or reordering bytes.
+    if (this.#prefix !== undefined) {
+      throw new TypeError(
+        'ReadableStream internal error: released bytes would replace undelivered bytes'
+      );
+    }
+    this.#prefix = {
+      buffer: ArrayBufferPrototypeSlice(
+        desc.buffer,
+        desc.byteOffset,
+        desc.byteOffset + desc.bytesFilled
+      ),
+      byteOffset: 0,
+      byteLength: desc.bytesFilled,
+    };
+    this.addToTotalSize(desc.bytesFilled);
+  }
+
+  override tryReadSync(
+    reader: object
+  ): ReadableStreamReadResult<Uint8Array> | undefined {
+    if (this.#prefix !== undefined && !super.hasPendingRead) {
+      return createReadResult(this.#takePrefix(), false);
+    }
+    return super.tryReadSync(reader);
+  }
+
+  override drain(maxSize: number = Infinity): {
+    chunks: Uint8Array[];
+    done: boolean;
+  } {
+    if (this.#prefix === undefined) return super.drain(maxSize);
+    const first = this.#takePrefix();
+    const result = super.drain(maxSize - first.byteLength);
+    const chunks: Uint8Array[] = [first];
+    for (let i = 0; i < result.chunks.length; i++) {
+      ArrayPrototypePush(chunks, result.chunks[i] as Uint8Array);
+    }
+    result.chunks = chunks;
+    return result;
+  }
+
+  // enqueue() step 8.5 for a cursor on a shared queue: a released head's
+  // filled bytes move to the prefix, ahead of the chunk being enqueued.
+  flushReleasedHead(): void {
+    const head = this.#pendingPullIntos[0];
+    if (head === undefined || head.readerType !== 'none') return;
+    ArrayPrototypeShift(this.#pendingPullIntos);
+    if (head.bytesFilled === 0) return;
+    this.#moveToPrefix(head);
+    this.notify();
+  }
+
+  // A cursor forked from `from` (tee, detach) copies its undelivered
+  // released bytes: the prefix, and a released head holding bytes.
+  adoptReleasedBytes(from: ByteStreamCursor): void {
+    const prefix = from.#prefix;
+    if (prefix !== undefined) {
+      // Already counted in the remainingSize this cursor started with.
+      this.#prefix = {
+        buffer: ArrayBufferPrototypeSlice(
+          prefix.buffer,
+          prefix.byteOffset,
+          prefix.byteOffset + prefix.byteLength
+        ),
+        byteOffset: 0,
+        byteLength: prefix.byteLength,
+      };
+    }
+    const head = from.#pendingPullIntos[0];
+    if (
+      head !== undefined &&
+      head.readerType === 'none' &&
+      head.bytesFilled > 0
+    ) {
+      ArrayPrototypePush(this.#pendingPullIntos, {
+        buffer: ArrayBufferPrototypeSlice(head.buffer, 0),
+        bufferByteLength: head.bufferByteLength,
+        byteOffset: head.byteOffset,
+        byteLength: head.byteLength,
+        bytesFilled: head.bytesFilled,
+        minimumFill: head.minimumFill,
+        elementSize: head.elementSize,
+        viewCtor: head.viewCtor,
+        readerType: 'none',
+        settledAtEndOfData: head.settledAtEndOfData,
+        promise: head.promise,
+        resolve: head.resolve,
+        reject: head.reject,
+        reader: head.reader,
+      });
+    }
+  }
+
   // Called by the BYOB reader after validation, buffer transfer, and
   // descriptor construction. Same FIFO invariant as read(): the fast path
   // is taken only when nothing is already pending.
@@ -996,7 +1117,8 @@ class ByteStreamCursor
       Array<{ desc: PullIntoDescriptor; view: ArrayBufferView }> | undefined;
     while (this.#pendingPullIntos.length > 0) {
       const slot = this.queue.getEntry(this.position);
-      if (slot === undefined) break;
+      // A prefix precedes queued data, never the close sentinel.
+      if (slot === undefined && this.#prefix === undefined) break;
       if (slot === CLOSE_SENTINEL) {
         // End of DATA. Check for fractional-element fill: if any BYOB
         // descriptor has partially filled bytes that don't align to the
@@ -1021,6 +1143,13 @@ class ByteStreamCursor
         break;
       }
       const head = this.#pendingPullIntos[0] as PullIntoDescriptor;
+      if (head.readerType === 'none') {
+        // A released reader's head never takes new data. enqueue() and
+        // respond() remove it before notifying; this is a backstop.
+        ArrayPrototypeShift(this.#pendingPullIntos);
+        this.#moveToPrefix(head);
+        continue;
+      }
       this.#fillFromQueue(head);
       if (head.bytesFilled < head.minimumFill) break; // need more data
       ArrayPrototypeShift(this.#pendingPullIntos);
@@ -1037,6 +1166,9 @@ class ByteStreamCursor
         };
         filled.desc.resolve(createReadResult(filled.view, false));
       }
+    }
+    if (this.#prefix !== undefined && super.hasPendingRead) {
+      this.fulfillFirstPendingRead(this.#takePrefix());
     }
     super.notify();
   }
@@ -1297,6 +1429,7 @@ class ByteStreamCursor
 
   // Stream error: partial fills are lost.
   override errorAllReads(reason: unknown): void {
+    this.#prefix = undefined;
     const pending = this.#pendingPullIntos;
     this.#pendingPullIntos = [];
     for (let i = 0; i < pending.length; i++) {
@@ -1310,6 +1443,7 @@ class ByteStreamCursor
   // undefined } — partial data and buffers are dropped (spec,
   // WPT-verified).
   override resolveAllReadsAsDone(): void {
+    this.#prefix = undefined;
     const pending = this.#pendingPullIntos;
     this.#pendingPullIntos = [];
     for (let i = 0; i < pending.length; i++) {
@@ -1321,18 +1455,21 @@ class ByteStreamCursor
 
   // Reject pull-intos submitted by a specific reader (lock release).
   override cancelReadsForReader(reader: object, reason: unknown): void {
-    // Spec: on releaseLock, the reader's readIntoRequests are rejected, but
-    // the controller's pendingPullIntos STAY. Descriptors whose reader is
-    // being released have their readerType set to 'none' — respond() will
-    // then enqueue the filled data instead of resolving a read promise.
-    // The byobRequest is NOT invalidated (it still points at the head
-    // descriptor's buffer).
-    for (let i = 0; i < this.#pendingPullIntos.length; i++) {
-      const desc = this.#pendingPullIntos[i] as PullIntoDescriptor;
+    // Spec ReleaseSteps: the reader's reads reject and pendingPullIntos
+    // shrinks to its head, marked 'none'; respond()/enqueue() then move the
+    // head's filled bytes ahead of new data. The byobRequest (over the head)
+    // is NOT invalidated.
+    const pending = this.#pendingPullIntos;
+    for (let i = 0; i < pending.length; i++) {
+      const desc = pending[i] as PullIntoDescriptor;
       if (desc.reader === reader) {
         desc.reject(reason);
-        desc.readerType = 'none';
       }
+    }
+    if (pending.length > 0) {
+      const head = pending[0] as PullIntoDescriptor;
+      head.readerType = 'none';
+      this.#pendingPullIntos = [head];
     }
     super.cancelReadsForReader(reader, reason);
   }
@@ -1355,8 +1492,8 @@ class ByteStreamCursor
     ]);
   }
 
-  // Total bytes available to this cursor in the queue (up to the sentinel),
-  // accounting for the partially consumed current entry.
+  // Total bytes available to this cursor: the prefix, plus the queue up to
+  // the sentinel, accounting for the partially consumed current entry.
   #availableBytes(): number {
     let available = 0;
     for (let i = this.position; i < this.queue.length; i++) {
@@ -1364,7 +1501,12 @@ class ByteStreamCursor
       if (!isQueueEntry(slot)) break; // sentinel is always last
       available += slot.value.byteLength;
     }
-    return available - this.byteOffset;
+    const prefix = this.#prefix;
+    return (
+      available -
+      this.byteOffset +
+      (prefix === undefined ? 0 : prefix.byteLength)
+    );
   }
 
   // Fill `desc` from the queue starting at (position, byteOffset). Mirrors
@@ -1374,8 +1516,9 @@ class ByteStreamCursor
   //     for the next read) — descriptor is then ready;
   //   - otherwise copy everything available (the descriptor may temporarily
   //     end mid-element) and stay pending.
-  // Stops at the CLOSE_SENTINEL. Advances position/byteOffset for consumed
-  // bytes (which triggers GC + backpressure refresh via setConsumed).
+  // Takes the prefix first. Stops at the CLOSE_SENTINEL. Advances
+  // position/byteOffset for consumed bytes (which triggers GC + backpressure
+  // refresh via setConsumed).
   #fillFromQueue(desc: PullIntoDescriptor): void {
     const available = this.#availableBytes();
     if (available <= 0) return;
@@ -1391,6 +1534,24 @@ class ByteStreamCursor
       maxAlignedBytes >= desc.minimumFill
         ? maxAlignedBytes - desc.bytesFilled
         : maxBytesToCopy;
+
+    const prefix = this.#prefix;
+    if (prefix !== undefined) {
+      const n = MathMin(prefix.byteLength, remaining);
+      TypedArrayPrototypeSet(
+        new Uint8Array(desc.buffer, desc.byteOffset + desc.bytesFilled, n),
+        new Uint8Array(prefix.buffer, prefix.byteOffset, n)
+      );
+      desc.bytesFilled += n;
+      remaining -= n;
+      this.addToTotalSize(-n);
+      if (n === prefix.byteLength) {
+        this.#prefix = undefined;
+      } else {
+        prefix.byteOffset += n;
+        prefix.byteLength -= n;
+      }
+    }
 
     let pos = this.position;
     let off = this.byteOffset;

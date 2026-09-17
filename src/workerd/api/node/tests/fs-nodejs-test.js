@@ -17,6 +17,10 @@ import { Readable } from 'node:stream';
 import {
   existsSync,
   statSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  lstatSync,
   openSync,
   closeSync,
   fstatSync,
@@ -58,6 +62,7 @@ import {
   constants,
   promises,
   createWriteStream,
+  createReadStream,
 } from 'node:fs';
 
 import { join } from 'node:path';
@@ -92,7 +97,8 @@ export const openCloseTest = {
       'ax+',
     ];
     for (const mode of modes) {
-      // Open the file
+      // Modes without O_CREAT need an existing file.
+      if (!/[wa]/.test(mode)) writeFileSync('/tmp/test.txt', '');
       const fd = openSync('/tmp/test.txt', mode);
       ok(existsSync('/tmp/test.txt'));
       const stat = fstatSync(fd, { bigint: true });
@@ -217,6 +223,119 @@ export const openFlagsTest = {
     }
 
     unlinkSync('/tmp/test.txt');
+  },
+};
+
+export const openMissingTest = {
+  async test() {
+    const { O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC } = constants;
+    const kErrENoEnt = {
+      code: 'ENOENT',
+      syscall: 'open',
+      path: '/tmp/missing',
+    };
+
+    // Without O_CREAT, opening a missing path is ENOENT and creates nothing.
+    for (const flags of [
+      'r',
+      'r+',
+      'rs+',
+      O_RDONLY,
+      O_WRONLY,
+      O_RDWR,
+      O_RDWR | O_TRUNC,
+    ]) {
+      throws(() => openSync('/tmp/missing', flags), kErrENoEnt);
+      ok(!existsSync('/tmp/missing'));
+    }
+
+    // With O_CREAT, the file is created.
+    for (const flags of [
+      'w',
+      'a',
+      'w+',
+      O_WRONLY | O_CREAT,
+      O_RDONLY | O_CREAT,
+    ]) {
+      const fd = openSync('/tmp/missing', flags);
+      closeSync(fd);
+      ok(existsSync('/tmp/missing'));
+      strictEqual(readFileSync('/tmp/missing', 'utf8'), '');
+
+      // O_CREAT|O_EXCL fails once it exists, regardless of access mode.
+      throws(
+        () => openSync('/tmp/missing', O_RDONLY | O_CREAT | O_EXCL),
+        kErrEExist
+      );
+      throws(() => openSync('/tmp/missing', 'wx'), kErrEExist);
+      unlinkSync('/tmp/missing');
+    }
+
+    // O_CREAT|O_EXCL on a missing path creates it.
+    closeSync(openSync('/tmp/missing', O_WRONLY | O_CREAT | O_EXCL));
+    ok(existsSync('/tmp/missing'));
+    unlinkSync('/tmp/missing');
+
+    // O_CREAT does not create intermediate directories.
+    for (const flags of ['r', 'w', 'a', O_WRONLY | O_CREAT | O_EXCL]) {
+      throws(() => openSync('/tmp/missing/file', flags), {
+        code: 'ENOENT',
+        syscall: 'open',
+        path: '/tmp/missing/file',
+      });
+      ok(!existsSync('/tmp/missing'));
+    }
+
+    // A non-directory path component is ENOTDIR.
+    writeFileSync('/tmp/missing', '');
+    for (const flags of ['r', 'w']) {
+      throws(() => openSync('/tmp/missing/file', flags), {
+        code: 'ENOTDIR',
+        syscall: 'open',
+        path: '/tmp/missing/file',
+      });
+    }
+    strictEqual(readFileSync('/tmp/missing', 'utf8'), '');
+    unlinkSync('/tmp/missing');
+
+    // Streams open with their own flags: WriteStream defaults to 'w' and
+    // honours 'a'; ReadStream defaults to 'r' and fails on a missing path.
+    const writeAll = (path, data, options) =>
+      new Promise((resolve, reject) => {
+        createWriteStream(path, options)
+          .on('close', resolve)
+          .on('error', reject)
+          .end(data);
+      });
+    await writeAll('/tmp/missing', 'first');
+    strictEqual(readFileSync('/tmp/missing', 'utf8'), 'first');
+    await writeAll('/tmp/missing', 'second');
+    strictEqual(readFileSync('/tmp/missing', 'utf8'), 'second');
+    await writeAll('/tmp/missing', ' third', { flags: 'a' });
+    strictEqual(readFileSync('/tmp/missing', 'utf8'), 'second third');
+    unlinkSync('/tmp/missing');
+
+    const streamError = (make) =>
+      new Promise((resolve, reject) => {
+        make().on('open', resolve).on('error', reject);
+      });
+    await rejects(
+      streamError(() => createReadStream('/tmp/missing')),
+      kErrENoEnt
+    );
+    ok(!existsSync('/tmp/missing'));
+
+    // Invalid flags are validated synchronously by fs.open and surface as
+    // the stream error rather than a hang.
+    await rejects(
+      streamError(() => createReadStream('/tmp/missing', { flags: 'zz' })),
+      { code: 'ERR_INVALID_ARG_VALUE' }
+    );
+    await rejects(
+      streamError(() => createWriteStream('/tmp/missing', { flags: 'zz' })),
+      { code: 'ERR_INVALID_ARG_VALUE' }
+    );
+    ok(!existsSync('/tmp/missing'));
   },
 };
 
@@ -1091,6 +1210,76 @@ export const copyAndRenameSyncTest = {
     ok(!existsSync('/tmp/test.txt'));
     ok(existsSync('/tmp/test3.txt'));
     strictEqual(readFileSync('/tmp/test3.txt').toString(), 'Hello World 2');
+  },
+};
+
+export const renameReplaceTest = {
+  test() {
+    // Renaming onto an existing file replaces it.
+    writeFileSync('/tmp/src.txt', 'new');
+    writeFileSync('/tmp/dest.txt', 'old');
+    renameSync('/tmp/src.txt', '/tmp/dest.txt');
+    ok(!existsSync('/tmp/src.txt'));
+    strictEqual(readFileSync('/tmp/dest.txt', 'utf8'), 'new');
+
+    // copyFile without COPYFILE_EXCL overwrites too.
+    writeFileSync('/tmp/src.txt', 'newer');
+    copyFileSync('/tmp/src.txt', '/tmp/dest.txt');
+    strictEqual(readFileSync('/tmp/dest.txt', 'utf8'), 'newer');
+    strictEqual(readFileSync('/tmp/src.txt', 'utf8'), 'newer');
+
+    // Renaming onto itself is a no-op, including via URL aliases that differ
+    // only in search or fragment.
+    renameSync('/tmp/dest.txt', '/tmp/dest.txt');
+    strictEqual(readFileSync('/tmp/dest.txt', 'utf8'), 'newer');
+    renameSync(
+      new URL('file:///tmp/dest.txt#one'),
+      new URL('file:///tmp/dest.txt?two')
+    );
+    strictEqual(readFileSync('/tmp/dest.txt', 'utf8'), 'newer');
+
+    // Renaming onto an existing symlink replaces the link, not its target.
+    symlinkSync('/tmp/dest.txt', '/tmp/link');
+    renameSync('/tmp/src.txt', '/tmp/link');
+    ok(lstatSync('/tmp/link').isFile());
+    strictEqual(readFileSync('/tmp/dest.txt', 'utf8'), 'newer');
+    unlinkSync('/tmp/link');
+
+    // A file cannot replace a directory, and a directory cannot replace a file.
+    mkdirSync('/tmp/dir');
+    throws(() => renameSync('/tmp/dest.txt', '/tmp/dir'), { code: 'EISDIR' });
+    throws(() => renameSync('/tmp/dir', '/tmp/dest.txt'), { code: 'ENOTDIR' });
+    throws(() => copyFileSync('/tmp/dest.txt', '/tmp/dir'), { code: 'EISDIR' });
+    ok(existsSync('/tmp/dest.txt'));
+    ok(statSync('/tmp/dir').isDirectory());
+
+    // A directory replaces an empty directory but not a populated one.
+    mkdirSync('/tmp/dir2');
+    writeFileSync('/tmp/dir/a.txt', 'a');
+    renameSync('/tmp/dir', '/tmp/dir2');
+    ok(!existsSync('/tmp/dir'));
+    strictEqual(readFileSync('/tmp/dir2/a.txt', 'utf8'), 'a');
+    mkdirSync('/tmp/dir');
+    throws(() => renameSync('/tmp/dir', '/tmp/dir2'), { code: 'ENOTEMPTY' });
+    ok(existsSync('/tmp/dir'));
+
+    // A file over a populated directory is EISDIR, not ENOTEMPTY, and a
+    // missing source is ENOENT regardless of the destination.
+    throws(() => renameSync('/tmp/dest.txt', '/tmp/dir2'), { code: 'EISDIR' });
+    throws(() => renameSync('/tmp/missing', '/tmp/dir2'), { code: 'ENOENT' });
+    throws(() => copyFileSync('/tmp/missing', '/tmp/dir2'), { code: 'ENOENT' });
+
+    // A directory cannot be moved into itself or a descendant.
+    mkdirSync('/tmp/dir/sub');
+    throws(() => renameSync('/tmp/dir', '/tmp/dir/sub'), { code: 'EINVAL' });
+    throws(() => renameSync('/tmp/dir', '/tmp/dir/sub/x'), { code: 'EINVAL' });
+    throws(() => renameSync('/tmp/dir/', '/tmp/dir/x'), { code: 'EINVAL' });
+    ok(statSync('/tmp/dir/sub').isDirectory());
+    strictEqual(readdirSync('/tmp/dir').length, 1);
+
+    rmSync('/tmp/dir', { recursive: true });
+    rmSync('/tmp/dir2', { recursive: true });
+    unlinkSync('/tmp/dest.txt');
   },
 };
 

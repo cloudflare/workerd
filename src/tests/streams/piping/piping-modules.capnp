@@ -11,6 +11,8 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "error-propagation", esModule = embed "error-propagation.js"),
   (name = "close-propagation", esModule = embed "close-propagation.js"),
   (name = "flow-control", esModule = embed "flow-control.js"),
+  (name = "shutdown-backlog", esModule = embed "shutdown-backlog.js"),
+  (name = "shutdown-pending-read", esModule = embed "shutdown-pending-read.js"),
   (name = "interop", esModule = embed "interop.js"),
   (name = "data-volumes", esModule = embed "data-volumes.js"),
   (name = "special-buffers", esModule = embed "special-buffers.js"),

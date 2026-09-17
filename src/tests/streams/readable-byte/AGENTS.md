@@ -38,6 +38,8 @@ behavior-parity (messages aside).
 | 21 | byobRequest after a PARTIAL enqueue into a pending BYOB read | original request invalidated; no replacement exposed (null) | original request invalidated; a fresh request exposes a view shrunk to the remaining byte count (spec) | `cancelWithPartiallyFilledPull` |
 | 22 | cancel() after a partial enqueue into a pending BYOB read | read resolves done with an empty view | read resolves done with value undefined (spec) | `cancelWithPartiallyFilledPull` |
 | 23 | error() while a close() is still pending (bytes queued) — readable #18 mirror | ignored: desiredSize already 0, the bytes drain to a clean close for default and BYOB readers | desiredSize is hwm minus the queued bytes (-2) until the error, then the stream errors: bytes discarded, default/BYOB reads and closed reject | `errorAfterCloseWithQueuedBytes` |
+| 24 | pipeTo() from an autoAllocate tee branch, aborted (preventCancel) with its read pending | pipe stays pending until a chunk arrives, which the aborted pipe's read consumes and drops (bounded) | pipe rejects at once; the branch's next reader receives the next chunk | `teePipeAbortReleasesPendingRead` |
+| 25 | byobRequest held by the source across tee() (reader released first) | stays exposed and working (spec): the responded byte reaches both branches, and fills a sole remaining branch's read | invalidated at tee(): byobRequest null while two branches exist, respond() throws TypeError 'This BYOB request has been invalidated'; a sole remaining branch's read gets a fresh request | `teeInvalidatesHeldByobRequest`, `teeSoleBranchMintsFreshByobRequest` |
 
 Parity worth noting (probed, pinned): byte hwm defaults to 0 with NO
 automatic pull; pull-throw and error-then-throw identity; enqueue
@@ -47,7 +49,11 @@ buffer (main cells); read(view)
 detaches the caller's buffer at call time on JS-BACKED streams in every
 era (see flags below); the whole releaseLock→second-reader cluster
 (respond, respond(1)×2 Uint16 assembly, respondWithNewView,
-autoAllocate respond/enqueue); staged min-fulfillment and min-met
+autoAllocate respond/enqueue, two pending reads released, a partially
+filled head released), and a released tee-branch read taking no later
+bytes; a released partial read's bytes reaching the next reader on a tee
+branch (pending BYOB/default read, buffered, piped) and through a later
+tee(); staged min-fulfillment and min-met
 reads; {min}-shaped arg ignored by default readers; readAtLeast exists
 on BOTH implementations; tee CLONES chunks per branch (fresh buffers,
 original detached, no cross-branch mutation) and propagates the same
@@ -109,9 +115,9 @@ named suite test pins directly, differing only in incidental asserts.
 | `controller.js` | ledger #5, #7, #21, #22, #23; enqueue-discards-request; read-after-close; detach-at-call |
 | `byob-reader.js` | ledger #20; view-type matrix + offsets + auto-allocate sizing (migrated streams-byob-edge-cases) + mismatched sizes/types, subarray, multi-pending-reads, byobreaderRegression (migrated streams-js-test) |
 | `respond.js` | ledger #6, #8, #15, #16; all 31 streams-respond-test tests (respond/respondWithNewView/pumps/cancel races/UAF shapes) + js-test respond family |
-| `release-relock.js` | ledger #9, #10; the WPT releaseLock→second-reader cluster |
+| `release-relock.js` | ledger #9, #10; the WPT releaseLock→second-reader cluster; release with two pending reads or a partially filled head |
 | `read-min.js` | ledger #11-#13; byobMin/constraints/readAtLeast (migrated streams-test.js); /chunked SELF endpoint |
-| `tee.js` | ledger #14; clone-per-branch; migrated byte-tee pair; error propagation |
+| `tee.js` | ledger #14, #24, #25; clone-per-branch; migrated byte-tee pair; error propagation; released branch reads, incl. partially filled ones and tee() after a release; byobRequest held across tee() |
 | `buffer-lifecycle.js` | ledger #18; resizable ArrayBuffers; WASM Memory |
 | `gc.js` | pending BYOB read + byobRequest survive gc() |
 | `integration.js` | BYOB round-trips via SELF; readAtLeast on echoed body; bytes() |

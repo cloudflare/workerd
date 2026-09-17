@@ -124,33 +124,25 @@ const kDefaultFsOperations: RealizedFsOperations = {
       throw new ERR_MISSING_ARGS('fs.open callback');
     }
     validateFunction(callback, 'fs.open callback');
-
-    getLazyFs().then(
-      (fs: RealizedFsOperations) => {
-        fs.open(path, (err: unknown, fd: number | undefined) => {
-          if (err) {
-            try {
-              callback(err);
-            } catch (e: unknown) {
-              reportError(e);
-            }
-            return;
-          }
-          try {
-            callback(null, fd);
-          } catch (e: unknown) {
-            reportError(e);
-          }
-        });
-      },
-      (err: unknown) => {
-        try {
-          callback(err);
-        } catch (e: unknown) {
-          reportError(e);
-        }
+    const openFlags = typeof flags === 'function' ? 'r' : flags;
+    const openMode = typeof mode === 'function' ? 0o666 : mode;
+    const done = (err: unknown, fd?: number): void => {
+      try {
+        if (err) callback(err);
+        else callback(null, fd);
+      } catch (e: unknown) {
+        reportError(e);
       }
-    );
+    };
+
+    getLazyFs().then((fs: RealizedFsOperations) => {
+      // fs.open validates flags synchronously.
+      try {
+        fs.open(path, openFlags, openMode, done);
+      } catch (err: unknown) {
+        done(err);
+      }
+    }, done);
   },
   close(fd: number, cb: ErrorOnlyCallback = () => {}): void {
     getLazyFs().then(
@@ -410,20 +402,25 @@ function construct(
     (stream as any).open();
     return;
   }
-  stream[kFs].open(stream.path, (er: unknown, fd: number | undefined) => {
-    if (er) {
-      callback(er);
-      return;
+  stream[kFs].open(
+    stream.path,
+    stream.flags,
+    stream.mode,
+    (er: unknown, fd: number | undefined) => {
+      if (er) {
+        callback(er);
+        return;
+      }
+      if (fd === undefined) {
+        callback(new ERR_INVALID_ARG_VALUE('fd', 'undefined'));
+        return;
+      }
+      stream.fd = fd;
+      callback(null);
+      ee.emit('open', stream.fd);
+      ee.emit('ready');
     }
-    if (fd === undefined) {
-      callback(new ERR_INVALID_ARG_VALUE('fd', 'undefined'));
-      return;
-    }
-    stream.fd = fd;
-    callback(null);
-    ee.emit('open', stream.fd);
-    ee.emit('ready');
-  });
+  );
 }
 
 function getValidatedFsOptions(fs: FsOperations): RealizedFsOperations {
@@ -1025,7 +1022,7 @@ export function WriteStream(
     start = 0,
     highWaterMark = 64 * 1024,
     signal = null,
-    flags = 'r',
+    flags = 'w',
     fd = null,
     mode = 0o666,
     fs = kDefaultFsOperations,
@@ -1063,7 +1060,7 @@ export function WriteStream(
     this.fd = null;
     // Path will be ignored when fd is specified, so it can be falsy
     this.path = toPathIfFileURL(normalizePath(path));
-    this.flags = options.flags === undefined ? 'r' : options.flags;
+    this.flags = options.flags === undefined ? 'w' : options.flags;
     this.mode = options.mode === undefined ? 0o666 : options.mode;
   } else {
     if (isFileHandle(fd)) {
