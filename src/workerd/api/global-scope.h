@@ -695,6 +695,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       const kj::HttpHeaders& headers,
       kj::AsyncIoStream& connection,
       kj::HttpService::ConnectResponse& response,
+      kj::HttpConnectSettings settings,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 

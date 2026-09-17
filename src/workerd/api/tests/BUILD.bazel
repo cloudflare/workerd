@@ -116,6 +116,8 @@ wd_test(
     data = [
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
+        "starttls-server.key",
+        "starttls-server.pem",
     ],
     # Test uses TCP sockets for ports 8081-8083 and may fail when running concurrently with other
     # tests that do so. Use the "socket" resource to model this behavior – this prevents other tests
