@@ -470,7 +470,7 @@ KJ_TEST("AWS JSON MIME types are classified as text") {
     "application/x-amz-json-1.1"_kj,
   };
 
-  for (auto input: supportedTypes) {
+  for (const auto& input: supportedTypes) {
     auto mimeType = KJ_ASSERT_NONNULL(MimeType::tryParse(input));
     KJ_ASSERT(MimeType::isText(mimeType));
     KJ_ASSERT(!MimeType::isJson(mimeType));
