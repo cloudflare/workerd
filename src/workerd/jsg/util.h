@@ -618,7 +618,7 @@ struct CallCounter {
     fast = 0;
   }
 
-  bool operator==(const CallCounter& rhs) {
+  bool operator==(const CallCounter& rhs) const {
     return slow == rhs.slow && fast == rhs.fast;
   }
 };
