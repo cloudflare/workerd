@@ -92,8 +92,8 @@ export const destWriteThrowsMidPipe = {
 };
 
 // Same with preventCancel: the pipe rejects, the source is NOT
-// canceled, and its lock is released so the remaining chunk is
-// readable.
+// canceled, and its lock is released so the chunk the pipe never read
+// is readable.
 export const destWriteThrowsMidPipePreventCancel = {
   async test() {
     const werr = new Error('write-err');
@@ -121,17 +121,9 @@ export const destWriteThrowsMidPipePreventCancel = {
     strictEqual(outcome.reason, werr);
     strictEqual(cancelCalled, false);
     strictEqual(rs.locked, false);
-    // DIVERGENCE: C++ leaves the not-yet-written chunk in the source's
-    // queue, readable after the pipe. TypeScript's read-ahead already
-    // consumed it before the failing write settled, so a fresh read
-    // pends (bounded observation).
     const read = await outcomeOf(rs.getReader().read());
-    if (usingTsImpl) {
-      strictEqual(read.state, 'pending');
-    } else {
-      strictEqual(read.state, 'fulfilled');
-      strictEqual(read.value.value, 'after');
-    }
+    strictEqual(read.state, 'fulfilled');
+    strictEqual(read.value.value, 'after');
   },
 };
 

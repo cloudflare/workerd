@@ -456,7 +456,7 @@ class Server::ActorNamespace final {
   }
 
   class ActorContainer;
-  using ActorMap = kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>;
+  using ActorMap = kj::HashMap<kj::String, kj::Own<ActorContainer>>;
 
   // ActorContainer mostly serves as a wrapper around Worker::Actor.
   // We use it to associate a HibernationManager with the Worker::Actor, since the
@@ -723,7 +723,7 @@ class Server::ActorNamespace final {
       auto& entry = facets.findOrCreateEntry(childKey, [&]() mutable {
         isNew = true;
         auto container = makeContainer();
-        return ActorMap::Entry{container->getKey(), kj::mv(container)};
+        return ActorMap::Entry{container->getKey().clone(), kj::mv(container)};
       });
 
       return entry.value->addRef();
@@ -1252,11 +1252,7 @@ class Server::ActorNamespace final {
             kj::Own<ActorSqlite::Hooks> sqliteHooks;
             if (parent == kj::none) {
               KJ_IF_SOME(a, ns.alarmScheduler) {
-                // clone() copies the id and name into storage owned by the returned ActorKey, so
-                // the temporary StringPtrs below only need to outlive this call.
-                auto actorKey = ActorKey{.actorId = key, .name = actorName.map([](kj::String& n) {
-                  return n.asPtr();
-                })}.clone();
+                auto actorKey = ActorKey(key.clone(), actorName.clone());
                 sqliteHooks = kj::heap<ActorSqliteHooks>(a, kj::mv(actorKey));
               } else {
                 // No alarm scheduler available, use default hooks instance.
@@ -1426,14 +1422,16 @@ class Server::ActorNamespace final {
       auto container = kj::refcounted<ActorContainer>(kj::mv(key), *this, kj::none,
           ActorContainer::ClassAndId(kj::addRef(*actorClass), kj::mv(id)), timer);
 
-      return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
-        container->getKey(), kj::mv(container)};
+      return ActorMap::Entry{container->getKey().clone(), kj::mv(container)};
     })->addRef();
   }
 
   kj::Own<ContainerClient> getContainerClient(kj::StringPtr containerId,
       kj::Maybe<kj::StringPtr> imageName,
       ContainerPrivileges privileges) {
+    KJ_REQUIRE(!containerShutdownStarted,
+        "cannot acquire a container client after graceful shutdown has begun");
+
     KJ_IF_SOME(existingClient, containerClients.find(containerId)) {
       return existingClient->addRef();
     }
@@ -1463,15 +1461,13 @@ class Server::ActorNamespace final {
       capturedGeneration = ++existing.generation;
     });
 
-    // Cleanup callback: invoked from the ContainerClient destructor with the joined
-    // with a cleanup promise
+    // Cleanup callback: invoked when ContainerClient shutdown begins with a cleanup promise.
     kj::Function<void(kj::Promise<void>)> cleanupCallback =
         [this, containerId = kj::str(containerId), capturedGeneration](
             kj::Promise<void> cleanupPromise) mutable {
       KJ_IF_SOME(state, containerCleanupState.find(containerId)) {
         if (state.generation != capturedGeneration) {
-          // A newer ContainerClient has replaced us already with another destructor.
-          // drop the promise.
+          // A newer ContainerClient has already taken ownership of cleanup for this ID.
           return;
         }
 
@@ -1506,6 +1502,33 @@ class Server::ActorNamespace final {
       actor.value->abort(reason);
     }
     actors.clear();
+  }
+
+  void beginContainerCleanup() {
+    bool hasContainer = false;
+    KJ_IF_SOME(durable, config.tryGet<Durable>()) {
+      hasContainer = durable.containerOptions != kj::none;
+    }
+    if (!hasContainer || containerShutdownStarted) return;
+
+    containerShutdownStarted = true;
+    abortAll(KJ_EXCEPTION(DISCONNECTED, "Server shutting down."));
+
+    auto clients = kj::heapArrayBuilder<ContainerClient*>(containerClients.size());
+    for (auto& entry: containerClients) {
+      clients.add(entry.value);
+    }
+    for (auto* client: clients.finish()) {
+      client->shutdown();
+    }
+  }
+
+  kj::Promise<void> waitForContainerCleanup() {
+    auto cleanups = kj::heapArrayBuilder<kj::Promise<void>>(containerCleanupState.size());
+    for (auto& entry: containerCleanupState) {
+      cleanups.add(entry.value.promise.addBranch());
+    }
+    return kj::joinPromises(cleanups.finish());
   }
 
   // Test-only: gracefully evict every currently-running actor in this namespace. Depending on
@@ -1588,6 +1611,7 @@ class Server::ActorNamespace final {
   // The map holds raw pointers (not ownership) - ContainerClients are owned by actors and timers.
   // When the last reference is dropped, the destructor removes the entry from this map.
   kj::HashMap<kj::String, ContainerClient*> containerClients;
+  bool containerShutdownStarted = false;
 
   // If the actor is broken, we remove it from the map. However, if it's just evicted due to
   // inactivity, we keep the ActorContainer in the map but drop the Own<Worker::Actor>. When a new
@@ -1732,7 +1756,7 @@ class Server::ActorNamespace final {
 
   class ActorSqliteHooks final: public ActorSqlite::Hooks {
    public:
-    ActorSqliteHooks(AlarmScheduler& alarmScheduler, kj::Own<ActorKey> actor)
+    ActorSqliteHooks(AlarmScheduler& alarmScheduler, ActorKey actor)
         : alarmScheduler(alarmScheduler),
           actor(kj::mv(actor)) {}
 
@@ -1740,16 +1764,16 @@ class Server::ActorNamespace final {
     kj::Promise<void> scheduleRun(
         kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
       KJ_IF_SOME(scheduledTime, newAlarmTime) {
-        alarmScheduler.setAlarm(*actor, scheduledTime);
+        alarmScheduler.setAlarm(actor, scheduledTime);
       } else {
-        alarmScheduler.deleteAlarm(*actor);
+        alarmScheduler.deleteAlarm(actor);
       }
       return kj::READY_NOW;
     }
 
    private:
     AlarmScheduler& alarmScheduler;
-    kj::Own<ActorKey> actor;
+    ActorKey actor;
   };
 
   // Hooks used by facets, which have their own storage but no way to schedule alarms: the alarm
@@ -3664,6 +3688,12 @@ class Server::WorkerService final: public Service,
 
   kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>>& getActorNamespaces() {
     return actorNamespaces;
+  }
+
+  void beginContainerCleanup() {
+    for (auto& [className, ns]: actorNamespaces) {
+      ns->beginContainerCleanup();
+    }
   }
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
@@ -6929,7 +6959,22 @@ kj::Promise<void> Server::run(
   // services take longer to get ready.
   auto ownHeaderTable = headerTableBuilder.build();
 
-  co_return co_await listenPromise.exclusiveJoin(kj::mv(fatalPromise));
+  co_await listenPromise.exclusiveJoin(kj::mv(fatalPromise));
+
+  // All incoming requests have drained. Stop container-enabled actors so they cannot race their
+  // terminal Docker cleanup, then wait while their namespaces and Docker I/O remain available.
+  for (auto& service: services) {
+    KJ_IF_SOME(worker, kj::tryDowncast<WorkerService>(*service.value)) {
+      worker.beginContainerCleanup();
+    }
+  }
+  for (auto& service: services) {
+    KJ_IF_SOME(worker, kj::tryDowncast<WorkerService>(*service.value)) {
+      for (auto& [className, ns]: worker.getActorNamespaces()) {
+        co_await ns->waitForContainerCleanup();
+      }
+    }
+  }
 }
 
 // Configure and start the inspector socket, returning the port the socket started on.

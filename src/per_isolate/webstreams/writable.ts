@@ -18,14 +18,16 @@ import type {
   WritableStreamDefaultController as WritableStreamDefaultControllerType,
   WritableStreamDefaultWriter as WritableStreamDefaultWriterType,
 } from './types';
+import type {
+  RingBuffer as RingBufferType,
+  RingBufferConstructor,
+} from './ring-buffer';
 
 const {
   AbortController,
   AbortControllerAbort,
   AbortControllerSignalGet,
   ArrayBufferPrototypeByteLengthGet,
-  ArrayPrototypePush,
-  ArrayPrototypeShift,
   DataViewPrototypeGetByteLength,
   NumberIsNaN,
   ObjectDefineProperties,
@@ -52,15 +54,23 @@ const {
   markPromiseHandled,
 } = utils;
 
-// The native backend (leaf module — see the fence conventions in
-// native.ts). The cast restores the real shape.
+// The native backend (see the fence conventions in native.ts). The cast
+// restores the real shape.
 import type { NativeStreamInternals } from './native';
 const { nativeStreamInternals } = require('webstreams/native') as {
   nativeStreamInternals: NativeStreamInternals;
 };
 const { kExtractNativeSink, isNativeUnderlyingSink } = nativeStreamInternals;
 
+const { RingBuffer } = require('webstreams/ring-buffer') as {
+  RingBuffer: RingBufferConstructor;
+};
+
 const kPrivateSymbol: symbol = Symbol('private');
+
+// What an omitted dictionary argument stands for. Null-prototype: WebIDL
+// reads nothing for an omitted dictionary, so neither may we.
+const kEmptyDictionary: object = ObjectFreeze({ __proto__: null });
 // Marker for a queued close request in the controller's FIFO.
 const kCloseMarker: symbol = Symbol('close');
 // Marker for a queued flush request in the controller's FIFO. flush() is a
@@ -175,6 +185,9 @@ let writableStreamFinishInFlightCloseWithError: <W>(
 let writableStreamCloseQueuedOrInFlight: <W>(
   stream: WritableStream<W>
 ) => boolean;
+let writableStreamWriteQueuedOrInFlight: <W>(
+  stream: WritableStream<W>
+) => boolean;
 let writableStreamUpdateBackpressure: <W>(
   stream: WritableStream<W>,
   backpressure: boolean
@@ -231,6 +244,12 @@ let controllerGetDesiredSize: <W>(
 let controllerErrorSteps: <W>(
   controller: WritableStreamDefaultController<W>
 ) => void;
+// The controller's error() for internal callers, which must not dispatch
+// through the user-patchable prototype method.
+let controllerErrorIfNeeded: <W>(
+  controller: WritableStreamDefaultController<W>,
+  reason: unknown
+) => void;
 let controllerAbortSteps: <W>(
   controller: WritableStreamDefaultController<W>,
   reason: unknown
@@ -267,6 +286,15 @@ let getWriterStream: <W>(
   writer: WritableStreamDefaultWriter<W>
 ) => WritableStream<W> | undefined;
 let writableStreamBackpressureOf: <W>(stream: WritableStream<W>) => boolean;
+let setWritableStreamReadyHook: <W>(
+  stream: WritableStream<W>,
+  hook: (() => void) | undefined
+) => void;
+let writableStreamCallReadyHook: <W>(stream: WritableStream<W>) => void;
+let setWritableStreamAbortHook: <W>(
+  stream: WritableStream<W>,
+  hook: (() => void) | undefined
+) => void;
 // Internal writer operations: the pipe implementation must never dispatch
 // through the public prototype methods (user-interceptable once the classes
 // are installed on the global).
@@ -305,12 +333,17 @@ class WritableStream<W = unknown> {
   #writer?: WritableStreamDefaultWriter<W> | undefined;
   #state: WritableState = 'writable';
   #storedError: unknown = undefined;
-  #writeRequests: PromiseWithResolversType<void>[] = [];
+  #writeRequests: RingBufferType<PromiseWithResolversType<void>> =
+    new RingBuffer();
   #inFlightWriteRequest: PromiseWithResolversType<void> | undefined;
   #closeRequest: PromiseWithResolversType<void> | undefined;
   #inFlightCloseRequest: PromiseWithResolversType<void> | undefined;
   #pendingAbortRequest: PendingAbortRequest | undefined;
   #backpressure: boolean = false;
+  // A pipe's wake-up (internalsForPipe.setReadyHook).
+  #readyHook: (() => void) | undefined;
+  // An internal sink's wake-up on abort (internalsForPipe.setAbortHook).
+  #abortHook?: (() => void) | undefined;
   // The Node.js interop closed-promise (see kIsClosedPromise), created on
   // first request and settled when the stream reaches 'closed' or
   // 'errored'.
@@ -361,6 +394,16 @@ class WritableStream<W = unknown> {
     getWritableStreamStoredError = (stream) => stream.#storedError;
     isWritableStreamLocked = (stream) => stream.#writer !== undefined;
     writableStreamBackpressureOf = (stream) => stream.#backpressure;
+    setWritableStreamReadyHook = (stream, hook) => {
+      stream.#readyHook = hook;
+    };
+    writableStreamCallReadyHook = (stream) => {
+      const hook = stream.#readyHook;
+      if (hook !== undefined && !stream.#backpressure) hook();
+    };
+    setWritableStreamAbortHook = (stream, hook) => {
+      stream.#abortHook = hook;
+    };
     setWritableStreamWriter = (stream, writer) => {
       stream.#writer = writer;
     };
@@ -436,6 +479,16 @@ class WritableStream<W = unknown> {
       );
     };
 
+    // Includes writes queued before the controller has started. A flush
+    // marker is only ever queued behind a write, so when this is false no
+    // flush is pending either.
+    writableStreamWriteQueuedOrInFlight = (stream) => {
+      return (
+        stream.#writeRequests.length > 0 ||
+        stream.#inFlightWriteRequest !== undefined
+      );
+    };
+
     writableStreamHasOperationMarkedInFlight = (stream) => {
       return (
         stream.#inFlightWriteRequest !== undefined ||
@@ -446,7 +499,7 @@ class WritableStream<W = unknown> {
     writableStreamAddWriteRequest = (stream) => {
       // Caller guarantees: locked and state 'writable'.
       const request = PromiseWithResolvers() as PromiseWithResolversType<void>;
-      ArrayPrototypePush(stream.#writeRequests, request);
+      stream.#writeRequests.push(request);
       return request.promise;
     };
 
@@ -460,6 +513,14 @@ class WritableStream<W = unknown> {
         // The controller's AbortSignal fires as soon as an abort is
         // requested, letting in-flight sink writes cancel their work.
         controllerSignalAbort(controller, reason);
+      }
+      // An internal sink's counterpart to an 'abort' listener on the
+      // controller's signal, without an event listener's per-stream cost.
+      // Like the signal, it fires once.
+      const abortHook = stream.#abortHook;
+      if (abortHook !== undefined) {
+        stream.#abortHook = undefined;
+        abortHook();
       }
       // signalAbort dispatches 'abort' events SYNCHRONOUSLY — the sink may
       // have registered listeners on controller.signal, and that user code
@@ -573,9 +634,9 @@ class WritableStream<W = unknown> {
       }
       const storedError = stream.#storedError;
       const writeRequests = stream.#writeRequests;
-      stream.#writeRequests = [];
+      stream.#writeRequests = new RingBuffer();
       for (let i = 0; i < writeRequests.length; i++) {
-        const request = writeRequests[i] as PromiseWithResolversType<void>;
+        const request = writeRequests.get(i) as PromiseWithResolversType<void>;
         request.reject(storedError);
       }
       const abortRequest = stream.#pendingAbortRequest;
@@ -625,9 +686,8 @@ class WritableStream<W = unknown> {
 
     writableStreamMarkFirstWriteRequestInFlight = (stream) => {
       // assert: no in-flight write; writeRequests non-empty
-      stream.#inFlightWriteRequest = ArrayPrototypeShift(
-        stream.#writeRequests
-      ) as PromiseWithResolversType<void>;
+      stream.#inFlightWriteRequest =
+        stream.#writeRequests.shift() as PromiseWithResolversType<void>;
     };
 
     writableStreamFinishInFlightWrite = (stream) => {
@@ -718,8 +778,8 @@ class WritableStream<W = unknown> {
   }
 
   constructor(
-    underlyingSink: UnderlyingSink<W> = {},
-    strategy: QueuingStrategy<W> = {}
+    underlyingSink: UnderlyingSink<W> = kEmptyDictionary as UnderlyingSink<W>,
+    strategy: QueuingStrategy<W> = kEmptyDictionary as QueuingStrategy<W>
   ) {
     // The C++-recognition brand (see kWritableStreamBrand). Stamped first
     // so every instance carries it regardless of construction path.
@@ -842,7 +902,8 @@ class WritableStream<W = unknown> {
   // the stream is still 'writable'.
   [kControllerErrorFunction](reason: unknown): void {
     assertIsWritableStream(this);
-    this.#controller?.error(reason);
+    const controller = this.#controller;
+    if (controller !== undefined) controllerErrorIfNeeded(controller, reason);
   }
 }
 
@@ -871,7 +932,7 @@ class WritableStreamDefaultController<
   W = unknown,
 > implements WritableStreamDefaultControllerType {
   #stream: WritableStream<W>;
-  #queue: QueuedWrite<W>[] = [];
+  #queue: RingBufferType<QueuedWrite<W>> = new RingBuffer();
   #queueTotalSize: number = 0;
   #started: boolean = false;
   #strategyHWM: number;
@@ -902,18 +963,22 @@ class WritableStreamDefaultController<
       controller: WritableStreamDefaultController<W>
     ) => {
       const queue = controller.#queue;
-      controller.#queue = [];
+      controller.#queue = new RingBuffer();
       controller.#queueTotalSize = 0;
       // Reject any queued flush requests: the writes ahead of them can no
       // longer complete. The stored error is already set — the erroring
       // machinery assigns it before invoking the error steps.
       const error = getWritableStreamStoredError(controller.#stream);
       for (let i = 0; i < queue.length; i++) {
-        const entry = queue[i] as QueuedWrite<W>;
+        const entry = queue.get(i) as QueuedWrite<W>;
         if (entry.value === kFlushMarker) {
           (entry.flushRequest as PromiseWithResolversType<void>).reject(error);
         }
       }
+    };
+
+    controllerErrorIfNeeded = (controller, reason) => {
+      controller.#errorIfNeeded(reason);
     };
 
     controllerAbortSteps = (controller, reason) => {
@@ -926,10 +991,7 @@ class WritableStreamDefaultController<
 
     controllerClose = (controller) => {
       // Enqueue the close marker (size 0) and advance.
-      ArrayPrototypePush(controller.#queue, {
-        value: kCloseMarker,
-        size: 0,
-      });
+      controller.#queue.push({ value: kCloseMarker, size: 0 });
       controller.#advanceQueueIfNeeded();
     };
 
@@ -948,7 +1010,7 @@ class WritableStreamDefaultController<
         return PromiseResolve() as Promise<void>;
       }
       const request = PromiseWithResolvers() as PromiseWithResolversType<void>;
-      ArrayPrototypePush(controller.#queue, {
+      controller.#queue.push({
         value: kFlushMarker,
         size: 0,
         flushRequest: request,
@@ -987,7 +1049,7 @@ class WritableStreamDefaultController<
       chunk: W,
       chunkSize: number
     ) => {
-      ArrayPrototypePush(controller.#queue, { value: chunk, size: chunkSize });
+      controller.#queue.push({ value: chunk, size: chunkSize });
       controller.#queueTotalSize += chunkSize;
       const stream = controller.#stream;
       if (
@@ -1136,7 +1198,7 @@ class WritableStreamDefaultController<
       writableStreamFinishErroringIfNeeded(stream);
       return;
     }
-    const head = this.#queue[0];
+    const head = this.#queue.peek();
     if (head === undefined) return;
     if (head.value === kCloseMarker) {
       this.#processClose();
@@ -1150,7 +1212,7 @@ class WritableStreamDefaultController<
   #processFlush(): void {
     // Every write ahead of the marker has completed (queue processing is
     // strictly serial); the marker itself involves no sink operation.
-    const entry = ArrayPrototypeShift(this.#queue) as QueuedWrite<W>;
+    const entry = this.#queue.shift() as QueuedWrite<W>;
     (entry.flushRequest as PromiseWithResolversType<void>).resolve();
     // Consecutive markers (or a close queued behind the flush) continue
     // processing in the same turn.
@@ -1161,7 +1223,7 @@ class WritableStreamDefaultController<
     const stream = this.#stream;
     writableStreamMarkCloseRequestInFlight(stream);
     // Dequeue the close marker; the queue must then be empty.
-    ArrayPrototypeShift(this.#queue);
+    this.#queue.shift();
     this.#queueTotalSize = 0;
     const closeAlgorithm = this.#closeAlgorithm;
     this.#clearAlgorithms();
@@ -1194,6 +1256,10 @@ class WritableStreamDefaultController<
         this.#completeInFlightWrite(() => {
           writableStreamFinishInFlightWrite(stream);
         });
+        // Not part of #completeInFlightWrite: a pipe woken after a
+        // non-fatal rejection would read and write the next chunk before
+        // its rejection reaction shuts the pipe down.
+        writableStreamCallReadyHook(stream);
       },
       (e: unknown) => {
         // Workerd-internal non-fatal rejection (identity-stream invalid
@@ -1222,7 +1288,7 @@ class WritableStreamDefaultController<
     const stream = this.#stream;
     finish();
     const state = getWritableStreamState(stream);
-    const entry = ArrayPrototypeShift(this.#queue) as QueuedWrite<W>;
+    const entry = this.#queue.shift() as QueuedWrite<W>;
     this.#queueTotalSize -= entry.size;
     if (this.#queueTotalSize < 0) this.#queueTotalSize = 0;
     if (!writableStreamCloseQueuedOrInFlight(stream) && state === 'writable') {
@@ -1378,9 +1444,13 @@ class WritableStreamDefaultWriter<
       writer.#stream = undefined;
     };
 
+    // #readyPromise and #closedPromise hold either a settled Promise or a
+    // still-pending resolvers record, told apart with the native isPromise:
+    // a duck-typed `typeof x.resolve` would read Object.prototype on the
+    // Promise.
     writerResolveReadyPromise = (writer) => {
-      const ready = writer.#readyPromise as PromiseWithResolversType<void>;
-      if (typeof ready.resolve === 'function') {
+      const ready = writer.#readyPromise;
+      if (!isPromise(ready)) {
         ready.resolve();
         writer.#readyPromise = ready.promise;
       }
@@ -1394,8 +1464,8 @@ class WritableStreamDefaultWriter<
     };
 
     writerEnsureReadyPromiseRejected = (writer, error) => {
-      const ready = writer.#readyPromise as PromiseWithResolversType<void>;
-      if (typeof ready.reject === 'function') {
+      const ready = writer.#readyPromise;
+      if (!isPromise(ready)) {
         ready.reject(error);
         writer.#readyPromise = ready.promise;
       } else {
@@ -1408,16 +1478,16 @@ class WritableStreamDefaultWriter<
     };
 
     writerResolveClosedPromise = (writer) => {
-      const closed = writer.#closedPromise as PromiseWithResolversType<void>;
-      if (typeof closed.resolve === 'function') {
+      const closed = writer.#closedPromise;
+      if (!isPromise(closed)) {
         closed.resolve();
         writer.#closedPromise = closed.promise;
       }
     };
 
     writerEnsureClosedPromiseRejected = (writer, error) => {
-      const closed = writer.#closedPromise as PromiseWithResolversType<void>;
-      if (typeof closed.reject === 'function') {
+      const closed = writer.#closedPromise;
+      if (!isPromise(closed)) {
         closed.reject(error);
         writer.#closedPromise = closed.promise;
       } else {
@@ -1838,6 +1908,28 @@ module.exports = {
       getWritableStreamStoredError(stream),
     closeQueuedOrInFlight: <W>(stream: WritableStream<W>) =>
       writableStreamCloseQueuedOrInFlight(stream),
+    writeQueuedOrInFlight: <W>(stream: WritableStream<W>) =>
+      writableStreamWriteQueuedOrInFlight(stream),
+    // desiredSize <= 0 (the writer's ready promise is pending). Current only
+    // while the stream is writable and no close is queued or in flight.
+    hasBackpressure: <W>(stream: WritableStream<W>): boolean =>
+      writableStreamBackpressureOf(stream),
+    // The pipe's wake-up: called synchronously once a successful write has
+    // completed and left the stream without backpressure, instead of
+    // through the ready promise's reactions. One hook per stream (the pipe
+    // holds the writer lock); undefined clears it.
+    setReadyHook: <W>(
+      stream: WritableStream<W>,
+      hook: (() => void) | undefined
+    ): void => setWritableStreamReadyHook(stream, hook),
+    // An internal sink's wake-up for abort: called synchronously, once, by
+    // the first abort requested on a stream that is not closed or errored,
+    // right after the controller's signal fires and before the abort moves
+    // the stream to erroring. undefined clears it.
+    setAbortHook: <W>(
+      stream: WritableStream<W>,
+      hook: (() => void) | undefined
+    ): void => setWritableStreamAbortHook(stream, hook),
     // Whether a writer.write() issued NOW would be accepted (enqueued for a
     // sink step) rather than rejected by the state checks. The writer
     // machinery runs the strategy size() callback BEFORE those checks, so

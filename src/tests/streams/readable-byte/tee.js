@@ -3,10 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // tee() on byte streams: per-branch chunk cloning, mixed reader types,
-// cancel composition, and error propagation.
+// cancel composition, error propagation, released pending reads, and a
+// byobRequest held across tee().
 
-import { strictEqual, ok, deepStrictEqual } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
+import { drainBytes, rejectionOf } from 'helpers';
 
 // Chunks are CLONED per branch: neither branch's chunk shares a buffer
 // with the other or with the (detached) original, and mutation does not
@@ -150,5 +152,287 @@ export const teeErrorPropagatesToBothBranches = {
     await p2.catch((e) => (e2 = e));
     strictEqual(e1, err);
     strictEqual(e2, err);
+  },
+};
+
+// A branch reader released with a pending read(view): the branch's next
+// reader gets every later byte, as does the sibling (parity).
+export const teeReleasedPendingRead = {
+  async test() {
+    let controller;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        controller = c;
+      },
+    });
+    const [a, b] = rs.tee();
+    const r1 = a.getReader({ mode: 'byob' });
+    const read1 = r1.read(new Uint8Array(4));
+    await scheduler.wait(5);
+    r1.releaseLock();
+    await rejectionOf(read1);
+    const r2 = a.getReader({ mode: 'byob' });
+    const read2 = r2.read(new Uint8Array(4));
+    controller.enqueue(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
+    controller.close();
+    deepStrictEqual([...(await read2).value], [1, 2, 3, 4]);
+    deepStrictEqual(
+      [...(await r2.read(new Uint8Array(8))).value],
+      [5, 6, 7, 8]
+    );
+    deepStrictEqual([...(await drainBytes(b))], [1, 2, 3, 4, 5, 6, 7, 8]);
+  },
+};
+
+// DIVERGENCE: pipeTo() from an autoAllocateChunkSize branch, aborted with
+// preventCancel while its read is pending. TypeScript settles the pipe,
+// and the branch's next reader receives the next chunk. C++ keeps the
+// pipe pending until a chunk arrives, which the aborted pipe's read then
+// consumes and drops; asserted up to the pending pipe (bounded).
+export const teePipeAbortReleasesPendingRead = {
+  async test() {
+    let controller;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      autoAllocateChunkSize: 8,
+      start(c) {
+        controller = c;
+      },
+    });
+    const [a, b] = rs.tee();
+    const ac = new AbortController();
+    const pipe = a.pipeTo(new WritableStream(), {
+      signal: ac.signal,
+      preventCancel: true,
+    });
+    await scheduler.wait(5);
+    ac.abort(new Error('stop'));
+    const outcome = await Promise.race([
+      pipe.then(
+        () => 'fulfilled',
+        () => 'rejected'
+      ),
+      scheduler.wait(50).then(() => 'pending'),
+    ]);
+    if (!usingTsImpl) {
+      strictEqual(outcome, 'pending');
+      controller.error(new Error('cleanup'));
+      await pipe.catch(() => {});
+      return;
+    }
+    strictEqual(outcome, 'rejected');
+    const read = a.getReader().read();
+    controller.enqueue(new Uint8Array([1, 2, 3]));
+    controller.close();
+    deepStrictEqual([...(await read).value], [1, 2, 3]);
+    deepStrictEqual([...(await drainBytes(b))], [1, 2, 3]);
+  },
+};
+
+// A byte stream whose reader was released while read(view, { min: 4 })
+// held [1, 2].
+async function releasedPartialRead() {
+  let controller;
+  const rs = new ReadableStream({
+    type: 'bytes',
+    start(c) {
+      controller = c;
+    },
+  });
+  const reader = rs.getReader({ mode: 'byob' });
+  const read = reader.read(new Uint8Array(4), { min: 4 });
+  controller.enqueue(new Uint8Array([1, 2]));
+  await scheduler.wait(5);
+  reader.releaseLock();
+  await rejectionOf(read);
+  return { rs, controller };
+}
+
+// The same, on branch `a` of a tee.
+async function teeWithReleasedPartialRead() {
+  let controller;
+  const rs = new ReadableStream({
+    type: 'bytes',
+    start(c) {
+      controller = c;
+    },
+  });
+  const [a, b] = rs.tee();
+  const reader = a.getReader({ mode: 'byob' });
+  const read = reader.read(new Uint8Array(4), { min: 4 });
+  controller.enqueue(new Uint8Array([1, 2]));
+  await scheduler.wait(5);
+  reader.releaseLock();
+  await rejectionOf(read);
+  return { a, b, controller };
+}
+
+// The released bytes reach the branch's next pending read(view) ahead of
+// the next chunk; the sibling is unaffected (parity).
+export const teeReleasedPartialReadByob = {
+  async test() {
+    const { a, b, controller } = await teeWithReleasedPartialRead();
+    const reader = a.getReader({ mode: 'byob' });
+    const read = reader.read(new Uint8Array(4));
+    controller.enqueue(new Uint8Array([3, 4, 5, 6]));
+    controller.close();
+    deepStrictEqual([...(await read).value], [1, 2]);
+    deepStrictEqual(
+      [...(await reader.read(new Uint8Array(4))).value],
+      [3, 4, 5, 6]
+    );
+    deepStrictEqual([...(await drainBytes(b))], [1, 2, 3, 4, 5, 6]);
+  },
+};
+
+// ... and a pending default read (parity).
+export const teeReleasedPartialReadDefault = {
+  async test() {
+    const { a, controller } = await teeWithReleasedPartialRead();
+    const reader = a.getReader();
+    const read = reader.read();
+    controller.enqueue(new Uint8Array([3, 4]));
+    controller.close();
+    deepStrictEqual([...(await read).value], [1, 2]);
+    deepStrictEqual([...(await reader.read()).value], [3, 4]);
+  },
+};
+
+// Buffered before the next reader: one read(view) takes the released bytes
+// and the next chunk together (parity).
+export const teeReleasedPartialReadBuffered = {
+  async test() {
+    const { a, controller } = await teeWithReleasedPartialRead();
+    controller.enqueue(new Uint8Array([3, 4]));
+    controller.close();
+    const reader = a.getReader({ mode: 'byob' });
+    deepStrictEqual(
+      [...(await reader.read(new Uint8Array(8))).value],
+      [1, 2, 3, 4]
+    );
+  },
+};
+
+// Buffered, then piped: the destination receives them in order (parity).
+export const teeReleasedPartialReadPiped = {
+  async test() {
+    const { a, controller } = await teeWithReleasedPartialRead();
+    controller.enqueue(new Uint8Array([3, 4]));
+    controller.close();
+    const written = [];
+    await a.pipeTo(
+      new WritableStream({
+        write(chunk) {
+          written.push(...chunk);
+        },
+      })
+    );
+    deepStrictEqual(written, [1, 2, 3, 4]);
+  },
+};
+
+// tee() after the release: both branches receive the released bytes ahead
+// of the next chunk (parity).
+export const teeAfterReleasedPartialRead = {
+  async test() {
+    const { rs, controller } = await releasedPartialRead();
+    const [a, b] = rs.tee();
+    controller.enqueue(new Uint8Array([3, 4]));
+    controller.close();
+    deepStrictEqual([...(await drainBytes(a))], [1, 2, 3, 4]);
+    deepStrictEqual([...(await drainBytes(b))], [1, 2, 3, 4]);
+  },
+};
+
+// tee() of a branch holding released bytes: both new branches receive
+// them, and its sibling receives no extra bytes (parity).
+export const teeOfBranchWithReleasedPartialRead = {
+  async test() {
+    const { a, b, controller } = await teeWithReleasedPartialRead();
+    const [a1, a2] = a.tee();
+    controller.enqueue(new Uint8Array([3, 4]));
+    controller.close();
+    deepStrictEqual([...(await drainBytes(a1))], [1, 2, 3, 4]);
+    deepStrictEqual([...(await drainBytes(a2))], [1, 2, 3, 4]);
+    deepStrictEqual([...(await drainBytes(b))], [1, 2, 3, 4]);
+  },
+};
+
+// A byte stream whose source took byobRequest for a pending read(view),
+// whose reader then released, and which was teed.
+async function teeWithHeldByobRequest() {
+  let controller;
+  const rs = new ReadableStream({
+    type: 'bytes',
+    start(c) {
+      controller = c;
+    },
+  });
+  const reader = rs.getReader({ mode: 'byob' });
+  const read = reader.read(new Uint8Array(4));
+  await scheduler.wait(5);
+  const request = controller.byobRequest;
+  reader.releaseLock();
+  await rejectionOf(read);
+  const [a, b] = rs.tee();
+  return { a, b, controller, request };
+}
+
+const INVALIDATED = {
+  name: 'TypeError',
+  message: 'This BYOB request has been invalidated',
+};
+
+// DIVERGENCE: a byobRequest held across tee(). TypeScript invalidates it
+// (branches share the queue and see no byobRequest); later chunks still
+// reach both branches. C++ keeps it working, as the spec does: the
+// responded byte reaches both branches.
+export const teeInvalidatesHeldByobRequest = {
+  async test() {
+    const { a, b, controller, request } = await teeWithHeldByobRequest();
+    if (!usingTsImpl) {
+      strictEqual(controller.byobRequest, request);
+      request.view[0] = 7;
+      request.respond(1);
+      deepStrictEqual([...(await a.getReader().read()).value], [7]);
+      deepStrictEqual([...(await b.getReader().read()).value], [7]);
+      controller.error(new Error('cleanup'));
+      return;
+    }
+    strictEqual(controller.byobRequest, null);
+    strictEqual(request.view, null);
+    throws(() => request.respond(1), INVALIDATED);
+    controller.enqueue(new Uint8Array([8]));
+    controller.close();
+    deepStrictEqual([...(await drainBytes(a))], [8]);
+    deepStrictEqual([...(await drainBytes(b))], [8]);
+  },
+};
+
+// DIVERGENCE: once the sibling cancels, the remaining branch's read gets a
+// fresh byobRequest under TypeScript, and the held one stays invalid.
+// C++ keeps exposing the held request, which fills the read (spec).
+export const teeSoleBranchMintsFreshByobRequest = {
+  async test() {
+    const { a, b, controller, request } = await teeWithHeldByobRequest();
+    b.cancel('bye');
+    await scheduler.wait(5);
+    const reader = a.getReader({ mode: 'byob' });
+    const read = reader.read(new Uint8Array(8));
+    const current = controller.byobRequest;
+    if (!usingTsImpl) {
+      strictEqual(current, request);
+      request.view[0] = 7;
+      request.respond(1);
+      deepStrictEqual([...(await read).value], [7]);
+      return;
+    }
+    ok(current !== request);
+    strictEqual(current.view.byteLength, 8);
+    throws(() => request.respond(1), INVALIDATED);
+    current.view[0] = 7;
+    current.respond(1);
+    deepStrictEqual([...(await read).value], [7]);
   },
 };

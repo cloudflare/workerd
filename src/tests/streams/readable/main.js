@@ -200,3 +200,11 @@ export {
 } from 'backpressure';
 
 export { structuredCloneReadable } from 'transfer';
+
+export {
+  patchedArrayIteratorKeepsBody,
+  replacedNumberKeepsBody,
+  patchedControllerErrorStillErrors,
+  omittedDictionariesReadNothing,
+  asyncIteratorShape,
+} from 'pollution';

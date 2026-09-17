@@ -78,6 +78,19 @@ export {
 } from 'flow-control';
 
 export {
+  abortWithBacklogKeepsUnwrittenChunks,
+  abortWithBacklogHighWaterMark,
+  sourceErrorWithBacklogWritesNoMore,
+  invalidChunkWithBacklogEndsPipe,
+} from 'shutdown-backlog';
+
+export {
+  lateChunkDuringShutdownWait,
+  lateChunkInAbortTurnIsLost,
+  lateChunkAfterIdleAbort,
+} from 'shutdown-pending-read';
+
+export {
   cancelPropagationThroughIdentity,
   cancelPropagationThroughJsTransform,
   fixedLengthStreamPipeExact,

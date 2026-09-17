@@ -754,6 +754,11 @@ export const pipeToJsToJsCancel = {
 };
 
 // Test pipeTo cancelable during operation (JS to native)
+//
+// DIVERGENCE: the abort comes from the pull that the pipe's read of
+// 'hello' triggers. TypeScript writes that already-read chunk before
+// aborting the destination (spec), so the pending read receives it and
+// the next read rejects; C++ drops it and the pending read rejects.
 export const pipeToJsToNativeCancel = {
   async test() {
     const controller = new AbortController();
@@ -784,10 +789,16 @@ export const pipeToJsToNativeCancel = {
     ]);
 
     strictEqual(promises[0].status, 'rejected');
-    strictEqual(promises[1].status, 'rejected');
-
     strictEqual(promises[0].reason.message, 'boom');
-    strictEqual(promises[1].reason.message, 'boom');
+
+    if (usingTsImpl) {
+      strictEqual(promises[1].status, 'fulfilled');
+      strictEqual(new TextDecoder().decode(promises[1].value.value), 'hello');
+      await rejects(reader.read(), { message: 'boom' });
+    } else {
+      strictEqual(promises[1].status, 'rejected');
+      strictEqual(promises[1].reason.message, 'boom');
+    }
   },
 };
 

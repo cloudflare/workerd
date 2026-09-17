@@ -14,6 +14,8 @@ export {
   pipeJsSourceToSocketWritable,
   pipeSocketThroughJsTransform,
   pipeSocketToSocket,
+  pipeBehindUnawaitedWrite,
+  pipeBehindWriteBeforeStart,
   cancelReadableSettlesSocket,
   largeEchoVolume,
   closeWithPipeCloseInFlight,

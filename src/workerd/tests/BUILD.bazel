@@ -29,6 +29,14 @@ wd_cc_library(
     }),
 )
 
+# Calls kj::setupAsyncIo(). The I/O backend is meant to be the BINARY's choice (kj_test and
+# wd_cc_benchmark link //src/workerd/util:setup-async-io into every test binary; libraries do not
+# carry it), but this one still does, so that binaries outside this repo which link the fixture
+# without naming a backend keep linking.
+# TODO(cleanup): drop the :setup-async-io dep here once every downstream binary that links
+# :test-fixture depends on //src/workerd/util:setup-async-io (or @capnp-cpp//src/kj:kj-async)
+# itself. Until then a downstream binary that also links kj-async-os gets two definitions of
+# kj::setupAsyncIo / kj::UnixEventPort and the linker keeps whichever archive it meets first.
 wd_cc_library(
     name = "test-fixture",
     srcs = ["test-fixture.c++"],
@@ -40,7 +48,9 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/server:workerd-api",
         "//src/workerd/util:autogate",
-        "@capnp-cpp//src/kj:kj-async",
+        "//src/workerd/util:setup-async-io",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 

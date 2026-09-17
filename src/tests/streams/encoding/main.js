@@ -110,3 +110,8 @@ export {
 export { big5StreamingDecode } from 'decode-non-utf8';
 
 export { encoderDecoderPipeline } from 'pipe-integration';
+
+export {
+  patchedControllerEnqueueDoesNotRewriteOutput,
+  internalDictionariesIgnorePollution,
+} from 'pollution';

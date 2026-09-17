@@ -129,6 +129,9 @@ struct NormalizedFilePath {
     case workerd::FsError::SYMLINK_DEPTH_EXCEEDED: {
       node::THROW_ERR_UV_ELOOP(js, syscall, "symlink depth exceeded"_kj, path);
     }
+    case workerd::FsError::NOT_FOUND: {
+      node::THROW_ERR_UV_ENOENT(js, syscall, nullptr, path);
+    }
     default: {
       node::THROW_ERR_UV_EPERM(js, syscall, nullptr, path);
     }
@@ -471,6 +474,7 @@ int FileSystemModule::open(jsg::Lock& js, FilePath path, OpenOptions options) {
                         .read = options.read,
                         .write = options.write,
                         .append = options.append,
+                        .create = options.create,
                         .exclusive = options.exclusive,
                         .truncate = options.truncate,
                         .followLinks = options.followSymlinks,
@@ -479,7 +483,7 @@ int FileSystemModule::open(jsg::Lock& js, FilePath path, OpenOptions options) {
       return opened->fd;
     }
     KJ_CASE_ONEOF(err, workerd::FsError) {
-      throwFsError(js, err, "open"_kj);
+      throwFsError(js, err, "open"_kj, kj::str(normalizedPath.url.getPathname()));
     }
   }
   KJ_UNREACHABLE;
@@ -822,7 +826,8 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
 
 void FileSystemModule::renameOrCopy(
     jsg::Lock& js, FilePath src, FilePath dest, RenameOrCopyOptions options) {
-  // The source must exist, the destination must not.
+  // The source must exist. An existing destination is replaced, as with
+  // rename(2) and Node's fs.rename/fs.copyFile.
   auto& vfs = workerd::VirtualFileSystem::current(js);
   NormalizedFilePath normalizedSrc(kj::mv(src));
   NormalizedFilePath normalizedDest(kj::mv(dest));
@@ -832,14 +837,53 @@ void FileSystemModule::renameOrCopy(
 
   auto opName = options.copy ? "copy"_kj : "rename"_kj;
 
-  KJ_IF_SOME(maybeDestNode, vfs.resolve(js, destUrl)) {
-    KJ_IF_SOME(err, maybeDestNode.tryGet<workerd::FsError>()) {
-      throwFsError(js, err, "rename"_kj);
+  jsg::Url::Relative relative = destUrl.getRelative();
+
+  // Destination-specific failures are deferred until the source has been
+  // resolved so that a missing source reports ENOENT first.
+  kj::Maybe<workerd::FsType> destType;
+  kj::Maybe<kj::Rc<workerd::Directory>> maybeDestDir;
+  KJ_IF_SOME(maybeDestNode, vfs.resolve(js, destUrl, {.followLinks = false})) {
+    KJ_SWITCH_ONEOF(maybeDestNode) {
+      KJ_CASE_ONEOF(err, workerd::FsError) {
+        throwFsError(js, err, opName);
+      }
+      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+        destType = workerd::FsType::FILE;
+      }
+      KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+        destType = workerd::FsType::DIRECTORY;
+        maybeDestDir = dir.addRef();
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        destType = workerd::FsType::SYMLINK;
+      }
     }
-    node::THROW_ERR_UV_EEXIST(js, opName);
+    // Only the pathname identifies a node; search and fragment are ignored.
+    if (!options.copy && srcUrl.getPathname() == destUrl.getPathname()) return;
   }
 
-  jsg::Url::Relative relative = destUrl.getRelative();
+  // A directory can only replace a directory; anything else can only
+  // replace a non-directory.
+  auto checkReplace = [&](jsg::Lock& js, bool srcIsDir) {
+    KJ_IF_SOME(type, destType) {
+      if (srcIsDir && type != workerd::FsType::DIRECTORY) {
+        node::THROW_ERR_UV_ENOTDIR(js, opName);
+      }
+      if (!srcIsDir && type == workerd::FsType::DIRECTORY) {
+        node::THROW_ERR_UV_EISDIR(js, opName);
+      }
+    }
+  };
+  auto removeDest = [&](jsg::Lock& js, kj::Rc<workerd::Directory>& parent) {
+    if (destType == kj::none) return;
+    KJ_SWITCH_ONEOF(parent->remove(js, kj::Path({relative.name}), {})) {
+      KJ_CASE_ONEOF(_, bool) {}
+      KJ_CASE_ONEOF(err, workerd::FsError) {
+        throwFsError(js, err, opName);
+      }
+    }
+  };
   // The destination parent must exist.
   KJ_IF_SOME(parent, vfs.resolve(js, relative.base)) {
     KJ_SWITCH_ONEOF(parent) {
@@ -884,6 +928,7 @@ void FileSystemModule::renameOrCopy(
           // destination directory.
           KJ_SWITCH_ONEOF(srcNode) {
             KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+              checkReplace(js, false);
               kj::OneOf<workerd::FsError, kj::Rc<workerd::File>> errOrFile =
                   options.copy ? file->clone(js) : file.addRef();
               KJ_SWITCH_ONEOF(errOrFile) {
@@ -891,21 +936,38 @@ void FileSystemModule::renameOrCopy(
                   throwFsError(js, err, "cp"_kj);
                 }
                 KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+                  removeDest(js, dir);
                   KJ_IF_SOME(err, dir->add(js, relative.name, kj::mv(file))) {
                     throwFsError(js, err, opName);
                   }
                 }
               }
             }
-            KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+            KJ_CASE_ONEOF(srcDir, kj::Rc<workerd::Directory>) {
               if (options.copy) {
                 node::THROW_ERR_UV_EISDIR(js, opName);
               }
-              KJ_IF_SOME(err, dir->add(js, relative.name, dir.addRef())) {
+              // A directory cannot be moved into itself or a descendant.
+              auto srcPath = srcUrl.getPathname();
+              auto destPath = destUrl.getPathname();
+              auto srcPrefix = srcPath.back() == '/' ? kj::str(srcPath) : kj::str(srcPath, "/");
+              if (destPath.size() > srcPrefix.size() && destPath.startsWith(srcPrefix.asArray())) {
+                node::THROW_ERR_UV_EINVAL(js, opName);
+              }
+              checkReplace(js, true);
+              KJ_IF_SOME(destDir, maybeDestDir) {
+                if (destDir->count(js) > 0) {
+                  node::THROW_ERR_UV_ENOTEMPTY(js, opName);
+                }
+              }
+              removeDest(js, dir);
+              KJ_IF_SOME(err, dir->add(js, relative.name, srcDir.addRef())) {
                 throwFsError(js, err, opName);
               }
             }
             KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+              checkReplace(js, false);
+              removeDest(js, dir);
               KJ_IF_SOME(err, dir->add(js, relative.name, link.addRef())) {
                 throwFsError(js, err, opName);
               }

@@ -23,4 +23,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "gc", esModule = embed "gc.js"),
   (name = "data-volumes", esModule = embed "data-volumes.js"),
   (name = "transfer", esModule = embed "transfer.js"),
+  (name = "pollution", esModule = embed "pollution.js"),
 ];

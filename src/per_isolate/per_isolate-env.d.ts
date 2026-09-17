@@ -76,11 +76,11 @@ declare const utils: {
   isArrayBuffer(value: unknown): value is ArrayBuffer;
   isArrayBufferView(value: unknown): value is ArrayBufferView;
   isDataView(value: unknown): value is DataView;
-  isPromise(value: unknown): value is Promise;
+  isPromise(value: unknown): value is Promise<unknown>;
   isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer;
   isUint8Array(value: unknown): value is Uint8Array;
   isAnyArrayBuffer(value: unknown): value is ArrayBuffer | SharedArrayBuffer;
-  markPromiseHandled(promise: Promise): void;
+  markPromiseHandled(promise: Promise<unknown>): void;
   getApiSymbol(name: string): symbol;
   // The C++ compression codec factory (api/compression.h:
   // newCompressionCodecCallback), consumed by webstreams/compression.

@@ -1092,27 +1092,35 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
 }
 
 ContainerClient::~ContainerClient() noexcept(false) {
+  shutdown();
+}
+
+void ContainerClient::shutdown() {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+
   stopEgressListener();
 
-  // Best-effort cleanup for both containers.
-  auto sidecarCleanup =
-      removeContainer(network, kj::str(dockerPath), kj::str(sidecarContainerName), false)
-          .catch_([](kj::Exception&&) {});
-
-  // Also try to delete any cloned snapshot volumes.
+  // Remove the application before deleting its cloned volumes and network-namespace sidecar.
+  // Waiting for each removal ensures shutdown does not report completion while Docker is still
+  // tearing down the sidecar.
   auto volumes = snapshotClones.releaseAsArray();
-  auto mainCleanup = removeContainer(network, kj::str(dockerPath), kj::str(containerName))
-                         .catch_([](kj::Exception&&) {})
-                         .then([&network = network, dockerPath = kj::str(dockerPath),
-                                   volumes = kj::mv(volumes)]() mutable {
+  auto cleanup = removeContainer(network, kj::str(dockerPath), kj::str(containerName))
+                     .catch_([](kj::Exception&&) {})
+                     .then([&network = network, dockerPath = kj::str(dockerPath),
+                               volumes = kj::mv(volumes)]() mutable {
     return deleteVolumes(network, kj::mv(dockerPath), kj::mv(volumes));
+  })
+                     .catch_([](kj::Exception&&) {})
+                     .then([&network = network, dockerPath = kj::str(dockerPath),
+                               sidecarContainerName = kj::str(sidecarContainerName)]() mutable {
+    return removeContainer(network, kj::mv(dockerPath), kj::mv(sidecarContainerName));
   }).catch_([](kj::Exception&&) {});
 
-  // Pass the joined cleanup promise to the callback. The callback wraps it with the
-  // canceler (so a future client creation can cancel it), stores it so the next
-  // ContainerClient can await it, and adds a branch to waitUntilTasks to keep the
-  // underlying I/O alive.
-  cleanupCallback(kj::joinPromises(kj::arr(kj::mv(sidecarCleanup), kj::mv(mainCleanup))));
+  // Pass the cleanup promise to the callback. The callback wraps it with the canceler (so a
+  // future client creation can cancel it), stores it so the next ContainerClient can await it,
+  // and adds a branch to waitUntilTasks to keep the underlying I/O alive.
+  cleanupCallback(kj::mv(cleanup));
 }
 
 // Docker-specific Port implementation that implements rpc::Container::Port::Server
@@ -2964,11 +2972,15 @@ kj::Promise<void> ContainerClient::ensureSidecarStarted() {
     co_return;
   }
 
+  bool succeeded = false;
+  KJ_DEFER(if (!succeeded) {
+    containerSidecarStarted.store(false, std::memory_order_release);
+    sidecarIngressHostPort = kj::none;
+  });
+
   // We need to call destroy here, it's mandatory that this is a fresh sidecar
   // start. Maybe we lost track of it on a previous workerd restart.
   co_await destroySidecarContainer();
-
-  KJ_ON_SCOPE_FAILURE(containerSidecarStarted.store(false, std::memory_order_release));
 
   auto ipamConfig = co_await getDockerBridgeIPAMConfig();
   co_await createSidecarContainer(egressListenerPort, kj::mv(ipamConfig.subnet));
@@ -2998,6 +3010,7 @@ kj::Promise<void> ContainerClient::ensureSidecarStarted() {
   }
 
   co_await readCACert();
+  succeeded = true;
 }
 
 kj::Promise<void> ContainerClient::ensureEgressListenerStarted(uint16_t port) {
@@ -3005,7 +3018,8 @@ kj::Promise<void> ContainerClient::ensureEgressListenerStarted(uint16_t port) {
     co_return;
   }
 
-  KJ_ON_SCOPE_FAILURE(egressListenerStarted.store(false, std::memory_order_release));
+  bool succeeded = false;
+  KJ_DEFER(if (!succeeded) stopEgressListener());
 
   // Determine the listen address: on Linux, use the Docker bridge gateway IP
   // and fall back to loopback (Docker Desktop
@@ -3013,6 +3027,7 @@ kj::Promise<void> ContainerClient::ensureEgressListenerStarted(uint16_t port) {
   auto ipamConfig = co_await getDockerBridgeIPAMConfig();
   egressListenerPort = co_await startEgressListener(
       gatewayForPlatform(kj::mv(ipamConfig.gateway)).orDefault(kj::str("127.0.0.1")), port);
+  succeeded = true;
 }
 
 kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {

@@ -83,7 +83,8 @@ class FileSystemWritableFileStream extends WritableStream<unknown> {
     // The sink closures capture the context rather than `this`, which is in its
     // temporal dead zone until super() returns.
     const ctx = context as FileSystemWriteContext;
-    const sink: UnderlyingSink<unknown> = {
+    const sink = {
+      __proto__: null,
       write(chunk: unknown): Promise<void> {
         return ctx.write(chunk as ArrayBuffer);
       },
@@ -93,7 +94,7 @@ class FileSystemWritableFileStream extends WritableStream<unknown> {
       abort(): void {
         ctx.discard();
       },
-    };
+    } as UnderlyingSink<unknown>;
     super(sink);
     this.#context = ctx;
   }

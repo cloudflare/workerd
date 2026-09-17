@@ -95,6 +95,9 @@ export {
   abortRejectsPendingRead,
   abortRejectsSubsequentReads,
   abortClearsPendingWrite,
+  abortClearsParkedWrite,
+  abortClearsParkedWriteAndQueue,
+  abortParkedWriteErrorsReadable,
   abortRejectsSubsequentWrites,
 } from 'abort-propagation';
 
@@ -200,3 +203,5 @@ export {
 } from 'reentrancy';
 
 export { structuredCloneIdentity } from 'transfer';
+
+export { internalDictionariesIgnorePollution } from 'pollution';

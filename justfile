@@ -37,6 +37,38 @@ clean:
 build *args="//...":
   bazel build {{args}}
 
+# Verify that clangd can resolve all symbols using compile_flags.txt.
+test-compile-flags:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if ! command -v {{CLANGD}} >/dev/null 2>&1; then
+    echo "clangd executable not found: {{CLANGD}}" >&2
+    exit 1
+  fi
+
+  just _clangd-check "src/workerd/server/server.c++"
+  just _clangd-check "src/workerd/server/workerd-api.c++"
+
+CLANGD := "clangd"
+
+_clangd-check FILE:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Checking {{FILE}} with {{CLANGD}}"
+  set +e
+  output=$({{CLANGD}} --log=error --check={{FILE}} --check-lines=1 2>&1)
+  status=$?
+  set -e
+  missing=$(grep -e "file not found" -e "No such file or directory" <<<"$output" || true)
+  if [[ -n "$missing" ]]; then
+    echo "$missing" >&2
+    exit 1
+  fi
+  if (( status != 0 )); then
+    echo "$output" >&2
+    exit "$status"
+  fi
+
 # example: just watch run -- serve $(pwd)/samples/helloworld/config.capnp
 run *args="-- --help":
   bazel run //src/workerd/server:workerd -- {{args}} --watch --verbose --experimental
@@ -49,6 +81,10 @@ test *args="//...":
 
 test-asan *args="//...":
   just test {{args}} --config=asan
+
+# The workerd binary must not reach kj's own event loop (kj-async-os) under --//:io_backend=rust
+check-io-backend-graph *args:
+  bash build/rust_io_graph_check.sh {{args}}
 
 # e.g. just stream-test //src/cloudflare:cloudflare.capnp@eslint
 stream-test *args:
@@ -84,8 +120,11 @@ new-wpt-test test_name:
 new-test test_name:
   ./tools/unix/new-test.sh {{test_name}}
 
-format:
-  python3 tools/cross/format.py
+format *files:
+  {{ if files == "" { "python3 tools/cross/format.py" } else { "python3 tools/cross/format.py files -- " + files } }}
+
+format-head:
+  python3 tools/cross/format.py git --target HEAD~
 
 internal-pr:
   ./tools/unix/create-internal-pr.sh

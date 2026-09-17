@@ -35,7 +35,9 @@
 // reader.read() call), which clears backpressure. This means
 // writer.write() will NOT resolve until a corresponding reader.read()
 // is issued — callers must not `await writer.write()` before starting
-// a read, or the result is a deadlock.
+// a read, or the result is a deadlock. Aborting the writable or
+// cancelling the readable also wakes the blocked write, which then
+// rejects.
 //
 // Correct usage:
 //   const readPromise = reader.read();  // triggers pull → clears bp
@@ -61,17 +63,21 @@ import type {
   ReadableStream as ReadableStreamType,
   WritableStream as WritableStreamType,
 } from './types';
+import type {
+  RingBuffer as RingBufferType,
+  RingBufferConstructor,
+} from './ring-buffer';
 
 const {
   ArrayBuffer,
   ArrayBufferPrototypeByteLengthGet,
-  ArrayPrototypePush,
-  ArrayPrototypeShift,
   BigInt,
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
   DataViewPrototypeGetByteOffset,
+  Number,
   ObjectDefineProperties,
+  ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
   PromiseWithResolvers,
   RangeError,
@@ -105,6 +111,9 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
+const { RingBuffer } = require('webstreams/ring-buffer') as {
+  RingBuffer: RingBufferConstructor;
+};
 
 const writableControllerError = uncurryThis(
   WritableStreamDefaultController.prototype.error
@@ -247,6 +256,10 @@ let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;
 
 const kPrivateSymbol: symbol = Symbol('private');
 
+const kEmptyStrategy = ObjectFreeze({
+  __proto__: null,
+}) as QueuingStrategy<unknown>;
+
 class IdentityTransformStream {
   #readable: ReadableStreamType<Uint8Array>;
   #writable: WritableStreamType<unknown>;
@@ -279,14 +292,20 @@ class IdentityTransformStream {
     this.#backpressure = backpressure;
   }
 
+  // Wakes a write parked in the rendezvous. The write re-checks the
+  // writable's state and throws if the stream is erroring or errored.
+  #unblockWrite(): void {
+    if (this.#backpressure) {
+      this.#setBackpressure(false);
+    }
+  }
+
   #errorWritableAndUnblockWrite(reason: unknown): void {
     const wc = this.#writableController;
     if (wc !== undefined) {
       writableControllerError(wc, reason);
     }
-    if (this.#backpressure) {
-      this.#setBackpressure(false);
-    }
+    this.#unblockWrite();
   }
 
   constructor(writableStrategy?: QueuingStrategy<unknown>);
@@ -313,7 +332,7 @@ class IdentityTransformStream {
       writableStrategy = writableStrategyOrInternal as
         QueuingStrategy<unknown> | undefined;
     }
-    writableStrategy ??= {} as QueuingStrategy<unknown>;
+    writableStrategy ??= kEmptyStrategy;
 
     // Initialize byte budget for FixedLengthStream enforcement.
     // Stored as bigint to cover the full uint64_t range without
@@ -359,7 +378,7 @@ class IdentityTransformStream {
     type SnapshotEntry =
       | { ok: true; copied: Uint8Array | undefined }
       | { ok: false; error: unknown };
-    const snapshots: SnapshotEntry[] = [];
+    const snapshots: RingBufferType<SnapshotEntry> = new RingBuffer();
     // A user-supplied highWaterMark of -0 is normalized to +0 so it cannot
     // surface as a negative-zero desiredSize; the C++ implementation's
     // uint64 coercion normalizes it the same way. For a number, adding 0
@@ -382,17 +401,21 @@ class IdentityTransformStream {
         // Size is computed before the push: if it ever threw, nothing
         // would have been queued and the FIFO could not desync.
         const size = explicitHighWaterMark !== undefined ? byteSize(chunk) : 1;
-        ArrayPrototypePush(snapshots, { ok: true, copied });
+        snapshots.push({ ok: true, copied });
         return size;
       } catch (error) {
-        ArrayPrototypePush(snapshots, { ok: false, error });
+        snapshots.push({ ok: false, error });
         return 1;
       }
     };
-    writableStrategy =
+    const sinkStrategy: Record<string, unknown> =
       explicitHighWaterMark !== undefined
-        ? { highWaterMark: explicitHighWaterMark, size: sizeAndSnapshot }
-        : { size: sizeAndSnapshot };
+        ? {
+            __proto__: null,
+            highWaterMark: explicitHighWaterMark,
+            size: sizeAndSnapshot,
+          }
+        : { __proto__: null, size: sizeAndSnapshot };
 
     const initialBackpressureChange =
       PromiseWithResolvers() as PromiseWithResolversType<void>;
@@ -409,7 +432,7 @@ class IdentityTransformStream {
           'IdentityTransformStream internal error: snapshot queue desync'
         );
       }
-      const entry = ArrayPrototypeShift(snapshots) as SnapshotEntry;
+      const entry = snapshots.shift() as SnapshotEntry;
       // A recorded validation error surfaces here, at its FIFO turn, as a
       // NON-FATAL write rejection: this write's promise rejects while the
       // stream stays usable and queued writes behind it still deliver —
@@ -429,7 +452,7 @@ class IdentityTransformStream {
           const err = new RangeError(
             'Attempt to write too many bytes through a FixedLengthStream.'
           );
-          snapshots.length = 0;
+          snapshots.clear();
           const rc = this.#readableController;
           if (rc !== undefined) byteControllerError(rc, err);
           throw err;
@@ -438,7 +461,9 @@ class IdentityTransformStream {
       }
 
       // RENDEZVOUS: block here until a reader.read() triggers pull,
-      // which sets #backpressure = false. See file-level comment.
+      // which sets #backpressure = false, or until the writable is
+      // aborted or the readable cancelled, which wake the write so that
+      // it throws. See file-level comment.
       while (this.#backpressure) {
         await this.#backpressureChange.promise;
         const state = writableInternals.getState(this.#writable);
@@ -463,7 +488,7 @@ class IdentityTransformStream {
         const err = new RangeError(
           'FixedLengthStream did not see all expected bytes before close().'
         );
-        snapshots.length = 0;
+        snapshots.clear();
         const rc = this.#readableController;
         if (rc !== undefined) byteControllerError(rc, err);
         throw err;
@@ -472,13 +497,14 @@ class IdentityTransformStream {
       if (rc !== undefined) byteControllerClose(rc);
     };
     const sinkAbort = (reason: unknown): void => {
-      snapshots.length = 0;
+      snapshots.clear();
       const rc = this.#readableController;
       if (rc !== undefined) byteControllerError(rc, reason);
     };
 
     this.#writable = new WritableStream(
       {
+        __proto__: null,
         start: (c: object) => {
           this.#writableController = c;
         },
@@ -486,8 +512,16 @@ class IdentityTransformStream {
         close: sinkClose,
         abort: sinkAbort,
       },
-      writableStrategy
+      sinkStrategy
     );
+    // abort() runs the abort steps only after the in-flight write settles,
+    // but a write parked in the rendezvous waits for a read that may never
+    // come. The hook runs at the start of abort() and wakes the write; by
+    // the time it resumes, the stream is erroring, so the write rejects
+    // with the abort reason and the abort steps run.
+    writableInternals.setAbortHook(this.#writable, () => {
+      this.#unblockWrite();
+    });
 
     // --- Readable side (byte stream, BYOB capable) ---
     // RENDEZVOUS: pull is called when a reader.read() needs data.
@@ -497,11 +531,12 @@ class IdentityTransformStream {
       return this.#backpressureChange.promise;
     };
     const sourceCancel = (reason: unknown): void => {
-      snapshots.length = 0;
+      snapshots.clear();
       this.#errorWritableAndUnblockWrite(reason);
     };
 
     const byteSource: Record<string, unknown> = {
+      __proto__: null,
       type: 'bytes',
       start: (c: object) => {
         this.#readableController = c;
@@ -516,6 +551,7 @@ class IdentityTransformStream {
     // highWaterMark: 0 ensures pull is not called eagerly — it fires
     // only when a reader.read() is pending, enforcing the rendezvous.
     this.#readable = new ReadableStream(byteSource, {
+      __proto__: null,
       highWaterMark: 0,
     });
   }

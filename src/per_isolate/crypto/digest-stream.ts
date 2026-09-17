@@ -246,7 +246,8 @@ class DigestStream extends WritableStream<ArrayBuffer | ArrayBufferView> {
     // until super() returns. An unrecognized algorithm therefore also throws
     // before any stream exists, as in C++.
     const state = createDigestState(algorithm, options);
-    const sink: UnderlyingSink<ArrayBuffer | ArrayBufferView> = {
+    const sink = {
+      __proto__: null,
       write(chunk: ArrayBuffer | ArrayBufferView): void {
         digestWrite(state, chunk);
       },
@@ -256,7 +257,7 @@ class DigestStream extends WritableStream<ArrayBuffer | ArrayBufferView> {
       abort(reason?: unknown): void {
         digestError(state, reason);
       },
-    };
+    } as UnderlyingSink<ArrayBuffer | ArrayBufferView>;
     super(sink);
     this.#state = state;
   }

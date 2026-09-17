@@ -32,11 +32,13 @@ import type {
   ReadableStream as ReadableStreamType,
   WritableStream as WritableStreamType,
 } from './types';
+import type {
+  RingBuffer as RingBufferType,
+  RingBufferConstructor,
+} from './ring-buffer';
 
 const {
   ArrayBufferPrototypeByteLengthGet,
-  ArrayPrototypePush,
-  ArrayPrototypeShift,
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
   DataViewPrototypeGetByteOffset,
@@ -66,6 +68,9 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
+const { RingBuffer } = require('webstreams/ring-buffer') as {
+  RingBuffer: RingBufferConstructor;
+};
 
 // --- Bootstrap captures ---------------------------------------------------
 
@@ -194,7 +199,7 @@ function createCodecPair(
   const failBoth = (reason: unknown): void => {
     // Queued writes are discarded by the erroring writable without sink
     // steps; drop their snapshots with them.
-    snapshots.length = 0;
+    snapshots.clear();
     byteControllerError(readableController, reason);
   };
 
@@ -223,7 +228,7 @@ function createCodecPair(
   // copying (see willAcceptWrite in writable.ts for the coupling
   // invariant); terminal transitions clear any entries whose queued
   // writes the machinery discards.
-  const snapshots: SnapshotEntry[] = [];
+  const snapshots: RingBufferType<SnapshotEntry> = new RingBuffer();
   let writableRef: object | undefined;
   const sizeAndSnapshot = (chunk: unknown): number => {
     if (
@@ -233,21 +238,21 @@ function createCodecPair(
       return 1;
     }
     try {
-      ArrayPrototypePush(snapshots, { ok: true, copied: snapshotChunk(chunk) });
+      snapshots.push({ ok: true, copied: snapshotChunk(chunk) });
     } catch (error) {
-      ArrayPrototypePush(snapshots, { ok: false, error });
+      snapshots.push({ ok: false, error });
     }
     return 1;
   };
 
   const writable = new WritableStream(
     {
+      __proto__: null,
       start: (c: object): void => {
         writableController = c;
       },
       write: (): void => {
-        const entry = ArrayPrototypeShift(snapshots) as
-          SnapshotEntry | undefined;
+        const entry = snapshots.shift();
         if (entry === undefined) {
           throw new TypeError(
             'Compression streams internal error: snapshot queue desync'
@@ -302,11 +307,11 @@ function createCodecPair(
         byteControllerClose(readableController);
       },
       abort: (reason: unknown): void => {
-        snapshots.length = 0;
+        snapshots.clear();
         byteControllerError(readableController, reason);
       },
     },
-    { size: sizeAndSnapshot }
+    { __proto__: null, size: sizeAndSnapshot }
   );
   writableRef = writable;
 
@@ -316,6 +321,7 @@ function createCodecPair(
   // (unbounded buffering, exactly like the legacy pair).
   const readable = new ReadableStream(
     {
+      __proto__: null,
       type: 'bytes',
       start: (c: object): void => {
         readableController = c;
@@ -325,13 +331,13 @@ function createCodecPair(
         // legacy adapter's cancel → abortWrite path. Erroring a
         // closed/errored writable is a spec no-op, so no state check is
         // needed.
-        snapshots.length = 0;
+        snapshots.clear();
         if (writableController !== undefined) {
           writableControllerError(writableController, reason);
         }
       },
     },
-    { highWaterMark: 0 }
+    { __proto__: null, highWaterMark: 0 }
   );
 
   return {
