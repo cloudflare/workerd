@@ -707,8 +707,8 @@ jsg::Promise<void> WritableStreamNativeSink::write(
       // controller, which stores an output lock with every queued write event and awaits
       // it before touching the sink. The sink reference taken here stays valid for the
       // whole wait+write window: writeInFlight defers any abort()/detach() release to the
-      // write's settlement. The write's I/O runs outside the isolate lock; the copied
-      // bytes ride the promise.
+      // write's settlement, and pipeFrom() refuses to move the sink while it is set. The
+      // write's I/O runs outside the isolate lock; the copied bytes ride the promise.
       kj::Promise<void> promise = nullptr;
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
         promise = lock.then([&sink = *active.sink, data = kj::mv(data)]() mutable {
@@ -847,10 +847,11 @@ jsg::Promise<void> WritableStreamNativeSink::pipeFrom(
   // checks the lock), so a released sink here means the stream was already closed or
   // aborted out from under the pipe.
   auto& active = JSG_REQUIRE_NONNULL(state, TypeError, "This WritableStream has been closed.");
+  // The TS pipe dispatch routes destinations with a write or close queued or in flight to
+  // the JS pump before extracting, so these are unreachable through pipeTo; they keep the
+  // sink's lifetime preconditions self-contained (the in-flight write or end() references
+  // the sink this call would move into the pump).
   JSG_REQUIRE(!writeInFlight, TypeError, "pipeFrom() while a write is in flight.");
-  // The TS pipe dispatch rejects close-queued destinations before extracting, so this is
-  // unreachable through pipeTo; it keeps the sink's lifetime preconditions self-contained
-  // (the in-flight end() references the sink this call would move into the pump).
   JSG_REQUIRE(!closeInFlight, TypeError, "pipeFrom() while a close() is in flight.");
 
   // The TS dispatch converted and validated the options BEFORE extraction (spec getter

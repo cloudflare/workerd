@@ -214,6 +214,46 @@ export const pipeSocketToSocket = {
   },
 };
 
+// A header written without awaiting it, the writer released, then a body
+// piped into the socket (a native-to-native pipe): the body follows the
+// header, and the pipe leaves both endpoints unlocked.
+export const pipeBehindUnawaitedWrite = {
+  async test(ctrl, env) {
+    const socket = connect(echoAddress(env));
+    await socket.opened;
+    const writer = socket.writable.getWriter();
+    const headerWritten = writer.write(enc.encode('HEADER|'));
+    writer.releaseLock();
+    const body = new Response('BODY').body;
+    const piped = body.pipeTo(socket.writable);
+    const echoed = drainToBytes(socket.readable);
+    await Promise.all([headerWritten, piped]);
+    strictEqual(body.locked, false);
+    strictEqual(socket.writable.locked, false);
+    strictEqual(dec.decode(await echoed), 'HEADER|BODY');
+    await socket.close();
+  },
+};
+
+// The same shape within connect()'s turn, before the socket writable has
+// started: the header is still queued when the pipe begins.
+export const pipeBehindWriteBeforeStart = {
+  async test(ctrl, env) {
+    const socket = connect(echoAddress(env));
+    const writer = socket.writable.getWriter();
+    const headerWritten = writer.write(enc.encode('HEADER|'));
+    writer.releaseLock();
+    const body = new Response('BODY').body;
+    const piped = body.pipeTo(socket.writable);
+    const echoed = drainToBytes(socket.readable);
+    await Promise.all([headerWritten, piped]);
+    strictEqual(body.locked, false);
+    strictEqual(socket.writable.locked, false);
+    strictEqual(dec.decode(await echoed), 'HEADER|BODY');
+    await socket.close();
+  },
+};
+
 // Cancel a pending socket read while the peer remains open, then close
 // the socket and observe its public closed promise.
 export const cancelReadableSettlesSocket = {

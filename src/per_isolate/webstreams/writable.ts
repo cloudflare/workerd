@@ -175,6 +175,9 @@ let writableStreamFinishInFlightCloseWithError: <W>(
 let writableStreamCloseQueuedOrInFlight: <W>(
   stream: WritableStream<W>
 ) => boolean;
+let writableStreamWriteQueuedOrInFlight: <W>(
+  stream: WritableStream<W>
+) => boolean;
 let writableStreamUpdateBackpressure: <W>(
   stream: WritableStream<W>,
   backpressure: boolean
@@ -447,6 +450,16 @@ class WritableStream<W = unknown> {
       return (
         stream.#closeRequest !== undefined ||
         stream.#inFlightCloseRequest !== undefined
+      );
+    };
+
+    // Includes writes queued before the controller has started. A flush
+    // marker is only ever queued behind a write, so when this is false no
+    // flush is pending either.
+    writableStreamWriteQueuedOrInFlight = (stream) => {
+      return (
+        stream.#writeRequests.length > 0 ||
+        stream.#inFlightWriteRequest !== undefined
       );
     };
 
@@ -1856,6 +1869,8 @@ module.exports = {
       getWritableStreamStoredError(stream),
     closeQueuedOrInFlight: <W>(stream: WritableStream<W>) =>
       writableStreamCloseQueuedOrInFlight(stream),
+    writeQueuedOrInFlight: <W>(stream: WritableStream<W>) =>
+      writableStreamWriteQueuedOrInFlight(stream),
     // desiredSize <= 0 (the writer's ready promise is pending). Current only
     // while the stream is writable and no close is queued or in flight.
     hasBackpressure: <W>(stream: WritableStream<W>): boolean =>

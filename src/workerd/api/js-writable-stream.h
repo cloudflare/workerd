@@ -347,10 +347,11 @@ class WritableStreamNativeSink final: public jsg::Object {
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
 
   // The native+native pipe fast path, called by the TS pipeTo dispatch when both ends
-  // carry extraction markers, no prevent* option is set, and both endpoints are in their
-  // normal flowing states (the dispatch routes everything else to the JS pump, which can
-  // honor post-pipe endpoint usability and stored-error rejections; `this` is the
-  // extracted sink and `source` the extracted ReadableStreamNativeSource). Consumes both
+  // carry extraction markers, no prevent* option is set, both endpoints are in their
+  // normal flowing states, and no write or close is queued or in flight on the destination
+  // (the dispatch routes everything else to the JS pump, which can honor post-pipe
+  // endpoint usability, stored-error rejections, and writes made before the pipe; `this`
+  // is the extracted sink and `source` the extracted ReadableStreamNativeSource). Consumes both
   // endpoints and runs the pump entirely at the C++ layer. The options arrive
   // pre-converted and pre-validated by the dispatch as plain data properties; the
   // prevent* handling here implements the intended fast-path semantics but only sees
@@ -402,16 +403,20 @@ class WritableStreamNativeSink final: public jsg::Object {
   // closure on connection establishment). Consumed by the first close().
   kj::Maybe<jsg::Promise<void>> maybeClosureWaitable;
 
-  // Defensive only: the TS machinery serializes sink operations (at most one write or
-  // close in flight).
+  // True while a write's I/O is outstanding (including while parked on the actor output
+  // gate). The TS machinery serializes sink operations, so a write or close arriving
+  // meanwhile is a contract violation, and abort() and detach() defer the sink's release
+  // to the write's settlement. pipeFrom() extraction bypasses the sink-hook serialization
+  // (the TS pipe dispatch routes destinations with a write queued or in flight to the JS
+  // pump, but the sink's preconditions must not depend on that gate), and the in-flight
+  // write references the sink, so moving it into a pump would be a use-after-free.
   bool writeInFlight = false;
 
   // True while closeImpl()'s end() is outstanding (including while parked on the actor
-  // output gate). Unlike writeInFlight this is not merely defensive: pipeFrom() extraction
-  // bypasses the sink-hook serialization (the TS pipe dispatch rejects close-queued
-  // destinations, but the sink's preconditions must not depend on that gate), and the
-  // in-flight end() references the sink, so moving it into a pump would be a
-  // use-after-free.
+  // output gate). Like writeInFlight, it keeps pipeFrom() from moving the sink out from
+  // under the in-flight operation (the TS pipe dispatch rejects close-queued destinations,
+  // but the sink's preconditions must not depend on that gate): the in-flight end()
+  // references the sink, so moving it into a pump would be a use-after-free.
   bool closeInFlight = false;
 
   // Set when abort() arrives while a write's I/O is in flight: the sink's release is
