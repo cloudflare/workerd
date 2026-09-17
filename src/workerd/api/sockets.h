@@ -274,14 +274,17 @@ class Socket: public jsg::Object {
     if (flags.getWorkerdExperimental()) {
       // non-standard extension, not part of the proposed sockets spec
       JSG_READONLY_PROTOTYPE_PROPERTY(protocol, getProtocol);
+      JSG_TS_OVERRIDE({
+        get secureTransport(): 'on' | 'off' | 'starttls';
+        get protocol(): 'tcp' | 'udp';
+      });
+    } else {
+      JSG_TS_OVERRIDE({
+        get secureTransport(): 'on' | 'off' | 'starttls';
+      });
     }
     JSG_METHOD(close);
     JSG_METHOD(startTls);
-
-    JSG_TS_OVERRIDE({
-      get secureTransport(): 'on' | 'off' | 'starttls';
-      get protocol(): 'tcp' | 'udp';
-    });
   }
 
   JSG_SERIALIZABLE(rpc::SerializationTag::SOCKET);
