@@ -62,6 +62,7 @@ use std::task::Poll;
 use tokio::net::TcpListener;
 use tokio::net::TcpSocket;
 use tokio::net::TcpStream;
+use tokio::net::UdpSocket;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 #[cfg(unix)]
@@ -255,6 +256,15 @@ impl UnixName {
 /// A parsed network address: one or more socket addresses to try in order.
 pub struct TokioAddress {
     spec: Spec,
+}
+
+pub struct TokioDatagram {
+    shared: Arc<DatagramShared>,
+}
+
+struct DatagramShared {
+    socket: UdpSocket,
+    owner: tokio::runtime::Id,
 }
 
 #[derive(Clone)]
@@ -532,6 +542,50 @@ impl TokioAddress {
             )],
         };
         Ok(Box::new(TokioListener::new(inners)?))
+    }
+
+    fn bind_datagram(&self) -> Result<Box<TokioDatagram>> {
+        ensure_loop_thread()?;
+        let (addr, wildcard) = match &self.spec {
+            Spec::Ip { addrs, wildcard } => (
+                *addrs
+                    .first()
+                    .ok_or_else(|| KjIoError::other("bind()", "no addresses to bind"))?,
+                *wildcard,
+            ),
+            #[cfg(unix)]
+            Spec::Unix(_) => {
+                return Err(KjIoError::other(
+                    "bind()",
+                    "Unix datagram sockets are not supported",
+                ));
+            }
+        };
+        let domain = if addr.is_ipv4() {
+            socket2::Domain::IPV4
+        } else {
+            socket2::Domain::IPV6
+        };
+        let socket =
+            socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))
+                .map_err(op("socket()"))?;
+        socket
+            .set_reuse_address(true)
+            .map_err(op("setsockopt(SO_REUSEADDR)"))?;
+        if wildcard && addr.is_ipv6() {
+            socket
+                .set_only_v6(false)
+                .map_err(op("setsockopt(IPV6_V6ONLY)"))?;
+        }
+        socket.bind(&addr.into()).map_err(op("bind()"))?;
+        socket.set_nonblocking(true).map_err(op("fcntl()"))?;
+        let socket = UdpSocket::from_std(socket.into()).map_err(op("bindDatagramPort()"))?;
+        Ok(Box::new(TokioDatagram {
+            shared: Arc::new(DatagramShared {
+                socket,
+                owner: crate::current_loop_runtime_id()?,
+            }),
+        }))
     }
 
     /// `kj::NetworkAddress::toString`, byte for byte like KJ's: `"ip:port"`, `"[v6]:port"`,
@@ -892,6 +946,62 @@ pub fn address_listen(addr: &TokioAddress) -> Result<Box<TokioListener>> {
     addr.listen()
 }
 
+pub fn address_bind_datagram(addr: &TokioAddress) -> Result<Box<TokioDatagram>> {
+    addr.bind_datagram()
+}
+
+pub fn datagram_send(
+    datagram: &TokioDatagram,
+    data: &[u8],
+    destination: SocketAddress,
+) -> impl Future<Output = Result<usize>> + use<> {
+    let shared = Arc::clone(&datagram.shared);
+    let data = data.to_vec();
+    async move {
+        crate::ensure_owner_loop(shared.owner)?;
+        shared
+            .socket
+            .send_to(&data, ip_socket_addr(&destination)?)
+            .await
+            .map_err(op("sendto()"))
+    }
+}
+
+pub fn datagram_receive(
+    datagram: &TokioDatagram,
+    capacity: usize,
+) -> impl Future<Output = Result<crate::ffi::ReceivedDatagram>> + use<> {
+    let shared = Arc::clone(&datagram.shared);
+    async move {
+        crate::ensure_owner_loop(shared.owner)?;
+        let receive_capacity = capacity
+            .checked_add(1)
+            .ok_or_else(|| KjIoError::other("recvfrom()", "datagram capacity is too large"))?;
+        let mut data = vec![0; receive_capacity];
+        let (size, source) = shared
+            .socket
+            .recv_from(&mut data)
+            .await
+            .map_err(op("recvfrom()"))?;
+        let truncated = size > capacity;
+        data.truncate(size.min(capacity));
+        Ok(crate::ffi::ReceivedDatagram {
+            data,
+            source: SocketAddress::from(source),
+            truncated,
+        })
+    }
+}
+
+pub fn datagram_port(datagram: &TokioDatagram) -> Result<u16> {
+    Ok(datagram
+        .shared
+        .socket
+        .local_addr()
+        .map_err(op("getsockname()"))?
+        .port())
+}
+
 #[expect(clippy::unnecessary_box_returns)]
 pub fn address_clone(addr: &TokioAddress) -> Box<TokioAddress> {
     Box::new(TokioAddress {
@@ -988,6 +1098,7 @@ mod tests {
 
     assert_impl_all!(TokioListener: Send, Sync);
     assert_impl_all!(TokioAddress: Send, Sync);
+    assert_impl_all!(TokioDatagram: Send, Sync);
 
     fn parse_once(text: &[u8], port_hint: u16) -> Option<Result<TokioAddress>> {
         let mut fut = std::pin::pin!(TokioAddress::parse(text, port_hint));

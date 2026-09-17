@@ -358,6 +358,58 @@ KJ_TEST("wildcard listen binds dual-stack and reports its port; port 0 picks a "
   }
 }
 
+KJ_TEST("datagram ports send and receive") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+
+  auto sender = parseNow(io, "127.0.0.1:0")->bindDatagramPort();
+  auto receiver = parseNow(io, "127.0.0.1:0")->bindDatagramPort();
+  auto destination = parseNow(io, kj::str("127.0.0.1:", receiver->getPort()));
+  auto source = kj::str("127.0.0.1:", sender->getPort());
+  auto incoming = receiver->makeReceiver({.content = 5});
+
+  auto receive = incoming->receive();
+  KJ_EXPECT(sender->send("hello"_kjb, *destination).wait(ws) == 5);
+  receive.wait(ws);
+  auto content = incoming->getContent();
+  KJ_EXPECT(content.value == "hello"_kjb);
+  KJ_EXPECT(!content.isTruncated);
+  KJ_EXPECT(incoming->getSource().toString() == source);
+
+  receive = incoming->receive();
+  KJ_EXPECT(sender->send(kj::ArrayPtr<const kj::byte>(nullptr), *destination).wait(ws) == 0);
+  receive.wait(ws);
+  content = incoming->getContent();
+  KJ_EXPECT(content.value.size() == 0);
+  KJ_EXPECT(!content.isTruncated);
+
+  auto fullIncoming = receiver->makeReceiver({.content = 4});
+  receive = fullIncoming->receive();
+  const kj::ArrayPtr<const kj::byte> pieces[] = {"ab"_kjb, "cd"_kjb};
+  KJ_EXPECT(sender->send(kj::arrayPtr(pieces), *destination).wait(ws) == 4);
+  receive.wait(ws);
+  KJ_EXPECT(fullIncoming->getContent().value == "abcd"_kjb);
+}
+
+#if !_WIN32
+KJ_TEST("datagram ports report truncation") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+
+  auto sender = parseNow(io, "127.0.0.1:0")->bindDatagramPort();
+  auto receiver = parseNow(io, "127.0.0.1:0")->bindDatagramPort();
+  auto destination = parseNow(io, kj::str("127.0.0.1:", receiver->getPort()));
+  auto incoming = receiver->makeReceiver({.content = 3});
+
+  auto receive = incoming->receive();
+  KJ_EXPECT(sender->send("hello"_kjb, *destination).wait(ws) == 5);
+  receive.wait(ws);
+  auto content = incoming->getContent();
+  KJ_EXPECT(content.value == "hel"_kjb);
+  KJ_EXPECT(content.isTruncated);
+}
+#endif
+
 KJ_TEST("parseAddress resolves hostnames via DNS") {
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
