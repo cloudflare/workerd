@@ -267,6 +267,7 @@ pattern; a change to either side fails its cell.
 | `reader-writer-acquisition.js` | `WritableStreamDefaultWriter`/`ReadableStreamDefaultReader`/`ReadableStreamBYOBReader` are directly constructible (no streams_enable_constructors needed) and lock the stream; `getReader({mode})` validates and a failed acquisition leaves the stream unlocked |
 | `cancel-reason-types.js` | the cancel-reason type matrix of ledger #19, asserted on both the pending write and the pending close |
 | `gc-interplay.js` | a writer keeps its collected stream wrapper's underlying stream alive and operable (`--expose-gc`) |
+| `pollution.js` | Object.prototype members (`type`, `autoAllocateChunkSize`, `expectedLength`, `start`, `size`, `highWaterMark`) reach neither the internal dictionaries nor an omitted strategy: ITS and FLS round-trip under pollution (neither implementation reads them) |
 | `propagation-helpers.js`, `which-impl.js` | shared machinery: reason-identity policy, implementation detection |
 
 ## Legacy (unflagged) behaviors

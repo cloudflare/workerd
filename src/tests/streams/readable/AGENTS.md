@@ -95,6 +95,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `legacy-constructors.js` | the unflagged cell (see flags table) |
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): a queued backlog plus the close sentinel swept in ONE batched read; value chunks pass through UNTOUCHED (object identity); pull-driven yields per read with EOF as a separate empty batch; expectedLength undefined; error/cancel propagation; lock exclusivity and release |
 | `data-volumes.js` | value-stream volume axes: 4096-chunk counts, a 1 MiB single string chunk, 8 MiB aggregate (128 × 64 KiB), and 1 MiB through tee on both branches — every chunk index-encoded |
+| `pollution.js` | prototype pollution neither implementation observes: a patched array iterator or replaced Number global leaves bodies intact; a patched controller error() still errors the stream; omitted dictionaries read nothing from Object.prototype; @@asyncIterator shape (TS: the values() function object, per WebIDL; C++: a separate function) and for-await ignoring a patched values() |
 
 Consumed sources: streams-async-iterator-test.js (deleted),
 streams-tee-edge-cases-test.js (value half), streams-test.js (from/

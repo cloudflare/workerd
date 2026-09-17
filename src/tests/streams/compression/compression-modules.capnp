@@ -29,4 +29,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "tee", esModule = embed "tee.js"),
   (name = "draining-reader", esModule = embed "draining-reader.js"),
   (name = "gc-interplay", esModule = embed "gc-interplay.js"),
+  (name = "pollution", esModule = embed "pollution.js"),
 ];

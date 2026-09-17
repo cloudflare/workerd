@@ -86,10 +86,11 @@ const { RingBuffer } = require('webstreams/ring-buffer') as {
 };
 
 // Read-result objects are plain { value, done } objects with the default
-// Object.prototype, matching spec behavior. Internal machinery is protected
-// by captured primordials (PromisePrototypeThen, etc.), not by the result
-// object's prototype chain. If the user patches Object.prototype.then, that
-// only affects their own promise resolution — same trade-off as Node.js.
+// Object.prototype, as the spec requires. Resolving a read promise with one
+// looks up `then` on it, so a patched Object.prototype.then can intercept
+// the user's read and the internal code that consumes the same promise
+// (the pipe, the draining fallback, drain-then-close). Accepted: the
+// spec's own resolution has the same lookup.
 export function createReadResult<T>(
   value: T,
   done: false

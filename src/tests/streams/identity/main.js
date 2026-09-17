@@ -203,3 +203,5 @@ export {
 } from 'reentrancy';
 
 export { structuredCloneIdentity } from 'transfer';
+
+export { internalDictionariesIgnorePollution } from 'pollution';

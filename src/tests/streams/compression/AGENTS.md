@@ -171,6 +171,7 @@ pedantic branches shifting anything the suite pins.
 | `tee.js` | branches byte-identical; single-branch cancel (identity ledger #13 semantics) with survivor draining |
 | `draining-reader.js` | TS only (C++ asserts absence): expectedLength undefined; a closed stream's buffered backlog swept in ONE read with done; lock/release |
 | `gc-interplay.js` | writer abort after wrapper GC; decompression through collected wrapper (codec handle liveness) |
+| `pollution.js` | Object.prototype members (`type`, `autoAllocateChunkSize`, `expectedLength`, `start`, `size`, `highWaterMark`) reach neither the internal dictionaries nor a native body: a gzip round trip under pollution (neither implementation reads them) |
 | `pipe-integration.js` | compress→decompress chains from user and TransformStream sources; through IdentityTransformStream; bad-data propagation through both transform kinds |
 | `body-integration.js` | direct `Response(cs.readable)` body (same object, unlocked; byte-exact local arrayBuffer round trip); SELF-loopback HTTP: response-body decompression, multi-transform chain with completing pipeTo, compression/decompression pipelines into internal response bodies |
 | `unhandled-rejection.js` | #6061: no spurious unhandledrejection with Array.fromAsync |
