@@ -101,9 +101,9 @@ const {
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
 
-// The native backend (leaf module — see the fence conventions in native.ts
-// and queue.ts). The cast restores the real shape the untyped loader
-// erases, so the brand predicates keep their type-guard narrowing.
+// The native backend (see the fence conventions in native.ts and
+// queue.ts). The cast restores the real shape the untyped loader erases,
+// so the brand predicates keep their type-guard narrowing.
 const { nativeStreamInternals } = require('webstreams/native') as {
   nativeStreamInternals: NativeStreamInternals;
 };

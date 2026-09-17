@@ -109,15 +109,16 @@ import type {
   PromiseWithResolvers as PromiseWithResolversType,
   ReadableStreamReadResult,
 } from './types';
+import type {
+  RingBuffer as RingBufferType,
+  RingBufferConstructor,
+} from './ring-buffer';
 
 const {
   AbortController,
   AbortControllerAbort,
   AbortControllerSignalGet,
   AbortSignalAbortedGet,
-  ArrayPrototypePush,
-  ArrayPrototypeShift,
-  ArrayPrototypeSplice,
   BigInt,
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
@@ -138,6 +139,10 @@ const {
 } = primordials;
 
 const { isArrayBufferView, isUint8Array, markPromiseHandled } = utils;
+
+const { RingBuffer } = require('webstreams/ring-buffer') as {
+  RingBuffer: RingBufferConstructor;
+};
 
 // ---------------------------------------------------------------------------
 // The construction-time handshake
@@ -439,7 +444,7 @@ interface NativeAlgorithms {
 }
 
 class NativePullConduit implements ByteStreamConsumerType {
-  #requests: NativeRequest[] = [];
+  #requests: RingBufferType<NativeRequest> = new RingBuffer();
   // 'closed' covers source-close, stream cancel, and tee (the contract
   // leaves a teed-away original source closed).
   #status: 'active' | 'closed' | 'errored' = 'active';
@@ -523,7 +528,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     const withResolvers = PromiseWithResolvers() as PromiseWithResolversType<
       ReadableStreamReadResult<Uint8Array>
     >;
-    ArrayPrototypePush(this.#requests, {
+    this.#requests.push({
       kind: 'default',
       read: {
         resolve: withResolvers.resolve,
@@ -543,10 +548,10 @@ class NativePullConduit implements ByteStreamConsumerType {
   }
 
   cancelReadsForReader(reader: object, reason: unknown): void {
-    const kept: NativeRequest[] = [];
+    const kept: RingBufferType<NativeRequest> = new RingBuffer();
     const requests = this.#requests;
     for (let i = 0; i < requests.length; i++) {
-      const request = requests[i] as NativeRequest;
+      const request = requests.get(i) as NativeRequest;
       const owner =
         request.kind === 'default' ? request.read.reader : request.desc.reader;
       if (owner === reader) {
@@ -556,7 +561,7 @@ class NativePullConduit implements ByteStreamConsumerType {
           request.desc.reject(reason);
         }
       } else {
-        ArrayPrototypePush(kept, request);
+        kept.push(request);
       }
     }
     this.#requests = kept;
@@ -574,10 +579,10 @@ class NativePullConduit implements ByteStreamConsumerType {
 
   errorAllReads(reason: unknown): void {
     const requests = this.#requests;
-    this.#requests = [];
+    this.#requests = new RingBuffer();
     this.#byobRequestCache = null;
     for (let i = 0; i < requests.length; i++) {
-      const request = requests[i] as NativeRequest;
+      const request = requests.get(i) as NativeRequest;
       if (request.kind === 'default') {
         request.read.reject(reason);
       } else {
@@ -588,10 +593,10 @@ class NativePullConduit implements ByteStreamConsumerType {
 
   resolveAllReadsAsDone(): void {
     const requests = this.#requests;
-    this.#requests = [];
+    this.#requests = new RingBuffer();
     this.#byobRequestCache = null;
     for (let i = 0; i < requests.length; i++) {
-      const request = requests[i] as NativeRequest;
+      const request = requests.get(i) as NativeRequest;
       if (request.kind === 'default') {
         request.read.resolve({ done: true, value: undefined });
       } else {
@@ -605,7 +610,7 @@ class NativePullConduit implements ByteStreamConsumerType {
   }
 
   fulfillFirstPendingRead(value: Uint8Array): void {
-    const pending = ArrayPrototypeShift(this.#requests) as NativeDefaultRequest;
+    const pending = this.#requests.shift() as NativeDefaultRequest;
     pending.read.resolve({ value, done: false });
   }
 
@@ -644,7 +649,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       });
       return desc.promise;
     }
-    ArrayPrototypePush(this.#requests, {
+    this.#requests.push({
       kind: 'byob',
       desc,
     } satisfies NativeByobRequestEntry);
@@ -654,25 +659,25 @@ class NativePullConduit implements ByteStreamConsumerType {
   get hasPendingPullInto(): boolean {
     const requests = this.#requests;
     for (let i = 0; i < requests.length; i++) {
-      if ((requests[i] as NativeRequest).kind === 'byob') return true;
+      if ((requests.get(i) as NativeRequest).kind === 'byob') return true;
     }
     return false;
   }
 
   get hasPartiallyFulfilledRead(): boolean {
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     return (
       head !== undefined && head.kind === 'byob' && head.desc.bytesFilled > 0
     );
   }
 
   get headPullInto(): PullIntoDescriptor | undefined {
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     return head !== undefined && head.kind === 'byob' ? head.desc : undefined;
   }
 
   get pendingPullIntoView(): Uint8Array | undefined {
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     if (head === undefined || head.kind !== 'byob') return undefined;
     const desc = head.desc;
     return new Uint8Array(
@@ -683,7 +688,7 @@ class NativePullConduit implements ByteStreamConsumerType {
   }
 
   respondBYOB(bytesWritten: number): void {
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     if (head === undefined || head.kind !== 'byob') {
       throw new TypeError('No pending BYOB read to respond to');
     }
@@ -817,7 +822,7 @@ class NativePullConduit implements ByteStreamConsumerType {
   // --- The source-facing operations (via the controller façade) -------------
 
   isHeadDesc(desc: PullIntoDescriptor): boolean {
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     return (
       this.#status === 'active' &&
       head !== undefined &&
@@ -827,7 +832,7 @@ class NativePullConduit implements ByteStreamConsumerType {
   }
 
   getByobRequest(): NativeReadableStreamBYOBRequest | null {
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     if (
       this.#status !== 'active' ||
       head === undefined ||
@@ -866,7 +871,7 @@ class NativePullConduit implements ByteStreamConsumerType {
         'the native source must deliver at most once per pull invocation'
       );
     }
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     if (head === undefined) {
       // REFUSAL BACKSTOP: the demand was withdrawn (reader released /
       // stream cancelled) and the pull's signal was aborted. A
@@ -906,7 +911,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       }
       // EXPECTED-LENGTH CONTRACT: overflow check before commit.
       this.#accountDelivery(TypedArrayPrototypeGetByteLength(view) as number);
-      ArrayPrototypeSplice(this.#requests, 0, 1);
+      this.#requests.shift();
       this.#deliveredThisPull = true;
       head.read.resolve({ done: false, value: view });
       return;
@@ -928,7 +933,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       );
     }
     if (!this.isHeadDesc(desc)) {
-      if (this.#requests[0] === undefined) {
+      if (this.#requests.length === 0) {
         // REFUSAL BACKSTOP: same as the enqueue case — the pull was
         // aborted, the source should have checked signal.aborted.
         throw new TypeError(
@@ -966,7 +971,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     desc.bytesFilled = filled;
     this.#byobRequestCache = null;
     this.#deliveredThisPull = true;
-    ArrayPrototypeSplice(this.#requests, 0, 1);
+    this.#requests.shift();
     const value = new desc.viewCtor(
       desc.buffer,
       desc.byteOffset,
@@ -1038,10 +1043,10 @@ class NativePullConduit implements ByteStreamConsumerType {
   // view). Shared by the close paths.
   #settleRemainingAsEof(): void {
     const requests = this.#requests;
-    this.#requests = [];
+    this.#requests = new RingBuffer();
     this.#byobRequestCache = null;
     for (let i = 0; i < requests.length; i++) {
-      const request = requests[i] as NativeRequest;
+      const request = requests.get(i) as NativeRequest;
       if (request.kind === 'default') {
         request.read.resolve({ done: true, value: undefined });
       } else {
@@ -1080,7 +1085,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     // cannot persist to close(). Retained should a future revision
     // reintroduce partial responds; the shape mirrors the under-delivery
     // tail (partial done: false, then #settleRemainingAsEof).
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     if (
       head !== undefined &&
       head.kind === 'byob' &&
@@ -1099,7 +1104,7 @@ class NativePullConduit implements ByteStreamConsumerType {
         this.#hooks.errorStream(error);
         return;
       }
-      ArrayPrototypeSplice(this.#requests, 0, 1);
+      this.#requests.shift();
       desc.resolve({
         done: false,
         value: new desc.viewCtor(

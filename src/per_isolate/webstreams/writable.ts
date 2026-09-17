@@ -54,8 +54,8 @@ const {
   markPromiseHandled,
 } = utils;
 
-// The native backend (leaf module — see the fence conventions in
-// native.ts). The cast restores the real shape.
+// The native backend (see the fence conventions in native.ts). The cast
+// restores the real shape.
 import type { NativeStreamInternals } from './native';
 const { nativeStreamInternals } = require('webstreams/native') as {
   nativeStreamInternals: NativeStreamInternals;

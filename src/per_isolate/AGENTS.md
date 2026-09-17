@@ -15,7 +15,8 @@ at context creation, before any user code. Gated by the
 - Module system is bootstrap CommonJS: `require('webstreams/queue')` +
   `module.exports = {...}`. The `src/node/` ESM-only rule does NOT apply
   here. Circular requires are a FATAL startup error — keep modules
-  acyclic (e.g., `webstreams/native` is a deliberate leaf).
+  acyclic (e.g., `webstreams/ring-buffer` is a leaf, and
+  `webstreams/native` requires nothing else).
 - TypeScript `import type` / `export type` are used freely for type
   plumbing (fully erased; the loader only sees `module.exports`).
 - `main.ts` installs the real stream globals (ReadableStream et al.) when
