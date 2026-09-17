@@ -1488,10 +1488,12 @@ class ReadableStreamDefaultController<
       this.#pullAlgorithm = undefined;
       this.#cancelAlgorithm = undefined;
     }) as StreamQueueType<R, R>;
-    setReadableStreamConsumer(
-      stream,
-      new QueueCursor(this.#queue, stream) as QueueCursorType<R, R>
-    );
+    const cursor = new QueueCursor(this.#queue, stream) as QueueCursorType<
+      R,
+      R
+    >;
+    this.#queue.anchorCursor(cursor);
+    setReadableStreamConsumer(stream, cursor);
 
     // --- Start ---
     // Per spec, start is invoked synchronously and a sync throw propagates
@@ -1632,48 +1634,49 @@ class ReadableStreamDefaultController<
 
   #maybeCloseStream(): void {
     if (!this.#closeRequested) return;
-    // Check ALL live consumer streams (tee branches + the parent).
-    // A stream whose cursor has reached the close sentinel transitions
-    // to 'closed'; streams with buffered data before the sentinel stay
-    // 'readable' until drained (drain-then-close on subsequent reads).
-    let anyOpen = false;
-    const owners = this.#queue.getLiveOwners();
-    for (let i = 0; i < owners.length; i++) {
-      const owner = owners[i] as ReadableStream<R>;
-      const cursor = getReadableStreamConsumer(owner) as
-        QueueCursorType<R, R> | undefined;
-      if (cursor === undefined) continue;
-      if (this.#queue.getEntry(cursor.position) === CLOSE_SENTINEL) {
-        readableStreamClose(owner);
-      } else {
-        anyOpen = true;
-      }
-    }
-    // The source's own stream. With a cursor it drains to the sentinel like
-    // any consumer; without one (teed away, or detached) it consumes
-    // nothing, so there is nothing to drain and it closes now. The source's
-    // own events close it — close requested here, cancelled in
-    // #cancelSteps, errored in error() — never the branches' progress (the
-    // queued tee model, AGENTS.md). Its closing does not end the source:
-    // that is #done, below, once every consumer has drained.
+    // A stream whose cursor has reached the close sentinel transitions to
+    // 'closed'; one with buffered data before the sentinel stays 'readable'
+    // until drained (drain-then-close on subsequent reads).
+    //
+    // The source's own stream. With a cursor it is the queue's only
+    // consumer (tee and detach take its cursor away) and drains to the
+    // sentinel like any; without one it consumes nothing, so there is
+    // nothing to drain and it closes now. The source's own events close it
+    // — close requested here, cancelled in #cancelSteps, errored in
+    // error() — never the branches' progress (the queued tee model,
+    // AGENTS.md). Its closing does not end the source: that is #done,
+    // below, once every consumer has drained.
     const parentCursor = getReadableStreamConsumer(this.#stream) as
       QueueCursorType<R, R> | undefined;
-    if (
-      parentCursor === undefined ||
-      this.#queue.getEntry(parentCursor.position) === CLOSE_SENTINEL
-    ) {
+    if (parentCursor !== undefined) {
+      if (this.#queue.getEntry(parentCursor.position) !== CLOSE_SENTINEL) {
+        return;
+      }
       readableStreamClose(this.#stream);
     } else {
-      anyOpen = true;
+      // Check every live consumer stream (the tee branches).
+      let anyOpen = false;
+      const owners = this.#queue.getLiveOwners();
+      for (let i = 0; i < owners.length; i++) {
+        const owner = owners[i] as ReadableStream<R>;
+        const cursor = getReadableStreamConsumer(owner) as
+          QueueCursorType<R, R> | undefined;
+        if (cursor === undefined) continue;
+        if (this.#queue.getEntry(cursor.position) === CLOSE_SENTINEL) {
+          readableStreamClose(owner);
+        } else {
+          anyOpen = true;
+        }
+      }
+      readableStreamClose(this.#stream);
+      if (anyOpen) return;
     }
-    if (!anyOpen) {
-      this.#done = true;
-      this.#clearAlgorithms();
-      // Every remaining consumer has closed: the source will never be
-      // cancelled, and consumers that had left are owed undefined (spec
-      // ReadableStreamTee step 14.b.v).
-      this.#pendingCancel?.resolve();
-    }
+    this.#done = true;
+    this.#clearAlgorithms();
+    // Every remaining consumer has closed: the source will never be
+    // cancelled, and consumers that had left are owed undefined (spec
+    // ReadableStreamTee step 14.b.v).
+    this.#pendingCancel?.resolve();
   }
 
   // A consumer leaves the queue; see controllerConsumerLeaving. Decided
@@ -1700,12 +1703,9 @@ class ReadableStreamDefaultController<
     if (!this.#canCloseOrEnqueue()) return false;
     // The pending-read clause is what keeps a fast consumer from starving
     // when the queue is at the high water mark: a consumer that reads
-    // faster than the HWM drains must still trigger pulls.
-    if (this.#queue.desiredSize <= 0 && !this.#queue.anyCursorHasPendingRead())
-      return false;
-    // desiredSize has just pruned collected cursors; with none left there is
-    // nobody to pull for.
-    return this.#queue.hasConsumers;
+    // faster than the HWM drains must still trigger pulls. With every
+    // consumer collected there is nobody to pull for.
+    return this.#queue.wantsPull();
   }
 
   #callPullIfNeeded(): void {
@@ -2082,6 +2082,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       this.#invalidateByobRequest();
     }) as StreamQueueType<ByteQueueEntry, Uint8Array>;
     const cursor = new ByteStreamCursor(this.#queue, stream);
+    this.#queue.anchorCursor(cursor);
     // Wire up the fractional-element-at-close error callback so the
     // cursor can error the stream when a BYOB read lands at the close
     // sentinel with a non-element-aligned partial fill.
@@ -2427,36 +2428,34 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
   #maybeCloseStream(): void {
     if (!this.#closeRequested) return;
-    // Check ALL live consumer streams (tee branches + the parent).
     // Mirror of the default controller's logic — see that for comments.
-    let anyOpen = false;
-    const owners = this.#queue.getLiveOwners();
-    for (let i = 0; i < owners.length; i++) {
-      const owner = owners[i] as ReadableStream<unknown>;
-      const cursor = getReadableStreamConsumer(owner) as
-        QueueCursorType<ByteQueueEntry, Uint8Array> | undefined;
-      if (cursor === undefined) continue;
-      if (this.#queue.getEntry(cursor.position) === CLOSE_SENTINEL) {
-        readableStreamClose(owner);
-      } else {
-        anyOpen = true;
-      }
-    }
     const parentCursor = getReadableStreamConsumer(this.#stream) as
       QueueCursorType<ByteQueueEntry, Uint8Array> | undefined;
-    if (
-      parentCursor === undefined ||
-      this.#queue.getEntry(parentCursor.position) === CLOSE_SENTINEL
-    ) {
+    if (parentCursor !== undefined) {
+      if (this.#queue.getEntry(parentCursor.position) !== CLOSE_SENTINEL) {
+        return;
+      }
       readableStreamClose(this.#stream);
     } else {
-      anyOpen = true;
+      let anyOpen = false;
+      const owners = this.#queue.getLiveOwners();
+      for (let i = 0; i < owners.length; i++) {
+        const owner = owners[i] as ReadableStream<unknown>;
+        const cursor = getReadableStreamConsumer(owner) as
+          QueueCursorType<ByteQueueEntry, Uint8Array> | undefined;
+        if (cursor === undefined) continue;
+        if (this.#queue.getEntry(cursor.position) === CLOSE_SENTINEL) {
+          readableStreamClose(owner);
+        } else {
+          anyOpen = true;
+        }
+      }
+      readableStreamClose(this.#stream);
+      if (anyOpen) return;
     }
-    if (!anyOpen) {
-      this.#done = true;
-      this.#clearAlgorithms();
-      this.#pendingCancel?.resolve();
-    }
+    this.#done = true;
+    this.#clearAlgorithms();
+    this.#pendingCancel?.resolve();
   }
 
   // As the default controller's: see there.
@@ -2476,9 +2475,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   #shouldCallPull(): boolean {
     if (!this.#started) return false;
     if (!this.#canCloseOrEnqueue()) return false;
-    if (this.#queue.desiredSize <= 0 && !this.#queue.anyCursorHasPendingRead())
-      return false;
-    return this.#queue.hasConsumers;
+    return this.#queue.wantsPull();
   }
 
   #callPullIfNeeded(): void {
