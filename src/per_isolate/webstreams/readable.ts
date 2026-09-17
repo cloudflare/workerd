@@ -51,6 +51,8 @@ const {
   EventTargetAddEventListener,
   EventTargetRemoveEventListener,
   JSONParse,
+  MathMax,
+  MathMin,
   Number,
   NumberIsNaN,
   ObjectCreate,
@@ -4418,22 +4420,11 @@ class ReadableStream<R> {
   }
 }
 
-const kMaximumAllowedLimit = 128n * 1024n * 1024n; // 128 MB
-
-function bigIntMin(a: bigint, b: bigint): bigint {
-  return a < b ? a : b;
-}
-
-function adjustLimit(
-  limit: bigint,
-  maybeExpectedLength: bigint | undefined
-): bigint {
-  let result = bigIntMin(kMaximumAllowedLimit, limit);
-  if (maybeExpectedLength !== undefined) {
-    result = bigIntMin(result, maybeExpectedLength);
-  }
-  return result;
-}
+// Body consumption for the C++ bridge (arrayBuffer/bytes/text/json). Two
+// byte bounds apply: the caller's memory limit, capped at 128 MB, and the
+// stream's declared expectedLength. A breach names its cause and cancels
+// the stream with it, as the C++ AllReader does.
+const kMaximumAllowedLimit = 128n * 1024n * 1024n;
 
 function acquireReadableStreamDrainingReader<R>(
   stream: ReadableStream<R>
@@ -4441,87 +4432,189 @@ function acquireReadableStreamDrainingReader<R>(
   return new ReadableStreamDrainingReader<R>(stream);
 }
 
-type CollectChunksResult = {
-  amountRead: bigint;
-  chunks: Uint8Array[];
-};
+// The collected bytes, copied out of the drained chunks as they arrive so
+// nothing is retained per chunk. Blocks grow geometrically from the first
+// chunk's size to kCollectBlockSize; a declared length that fits one block
+// is allocated whole up front, so a body that meets it fills exactly one
+// block and is handed over without a further copy.
+const kCollectBlockSize = 1024 * 1024;
+const kStreamingDecode = ObjectFreeze({ __proto__: null, stream: true });
+
+class CollectedBytes {
+  #blocks: Uint8Array[] = []; // full
+  #block: Uint8Array | undefined = undefined; // being filled
+  #blockSize = 0; // of the most recent block
+  #filled = 0; // of #block
+  #length = 0;
+  readonly #firstBlockSize: number; // 0: size to the first chunk
+
+  constructor(firstBlockSize: number) {
+    this.#firstBlockSize = firstBlockSize;
+  }
+
+  get length(): number {
+    return this.#length;
+  }
+
+  append(buffer: ArrayBuffer, byteOffset: number, byteLength: number): void {
+    while (byteLength > 0) {
+      const block = this.#block ?? this.#addBlock(byteLength);
+      const take = MathMin(byteLength, this.#blockSize - this.#filled);
+      TypedArrayPrototypeSet(
+        block,
+        new Uint8Array(buffer, byteOffset, take),
+        this.#filled
+      );
+      this.#filled += take;
+      this.#length += take;
+      byteOffset += take;
+      byteLength -= take;
+      if (this.#filled === this.#blockSize) {
+        ArrayPrototypePush(this.#blocks, block);
+        this.#block = undefined;
+      }
+    }
+  }
+
+  #addBlock(needed: number): Uint8Array {
+    let size: number;
+    if (this.#length === 0 && this.#firstBlockSize !== 0) {
+      size = this.#firstBlockSize;
+    } else {
+      size = MathMin(kCollectBlockSize, MathMax(this.#blockSize * 2, needed));
+    }
+    const block = new Uint8Array(size);
+    this.#block = block;
+    this.#blockSize = size;
+    this.#filled = 0;
+    return block;
+  }
+
+  // Every block as a view of its bytes, the partial one trimmed.
+  #views(): Uint8Array[] {
+    const blocks = this.#blocks;
+    const views: Uint8Array[] = [];
+    for (let i = 0; i < blocks.length; i++) {
+      ArrayPrototypePush(views, blocks[i] as Uint8Array);
+    }
+    const block = this.#block;
+    if (block !== undefined && this.#filled > 0) {
+      ArrayPrototypePush(
+        views,
+        new Uint8Array(TypedArrayPrototypeGetBuffer(block), 0, this.#filled)
+      );
+    }
+    return views;
+  }
+
+  toArrayBuffer(): ArrayBuffer {
+    const blocks = this.#blocks;
+    if (this.#block === undefined && blocks.length === 1) {
+      return TypedArrayPrototypeGetBuffer(blocks[0] as Uint8Array);
+    }
+    const result = new ArrayBuffer(this.#length);
+    const out = new Uint8Array(result);
+    const views = this.#views();
+    let offset = 0;
+    for (let i = 0; i < views.length; i++) {
+      const view = views[i] as Uint8Array;
+      TypedArrayPrototypeSet(out, view, offset);
+      offset += TypedArrayPrototypeGetByteLength(view);
+    }
+    return result;
+  }
+
+  toText(): string {
+    if (this.#length === 0) return '';
+    const decoder = new TextDecoder();
+    const views = this.#views();
+    if (views.length === 1) return TextDecoderDecode(decoder, views[0]);
+    let result = '';
+    for (let i = 0; i < views.length; i++) {
+      result += TextDecoderDecode(decoder, views[i], kStreamingDecode);
+    }
+    return result + TextDecoderDecode(decoder);
+  }
+}
+
+// Cancels the stream with a consumption failure and rethrows it. A cancel
+// that rejects replaces it, as in the C++ AllReader.
+async function failCollect(reader: object, error: Error): Promise<never> {
+  await cancelReadableStreamGenericReader(reader, error);
+  throw error;
+}
 
 async function collectChunks<R>(
   stream: ReadableStream<R>,
   limit: bigint
-): Promise<CollectChunksResult> {
+): Promise<CollectedBytes> {
   if (isReadableStreamUnusable(stream)) {
     throw new TypeError('Cannot consume a stream that is locked or disturbed');
   }
   const reader = acquireReadableStreamDrainingReader(stream);
-  limit = adjustLimit(limit, getReadableStreamExpectedLength(stream));
-  let amountRead = 0n;
-  const chunks: Uint8Array[] = [];
+  if (limit > kMaximumAllowedLimit) limit = kMaximumAllowedLimit;
+  const declared = getReadableStreamExpectedLength(stream);
+  const declaredBinds = declared !== undefined && declared < limit;
+  const bound = Number(declaredBinds ? declared : limit);
+  const collected = new CollectedBytes(
+    declaredBinds && bound <= kCollectBlockSize ? bound : 0
+  );
   while (true) {
-    const result = await reader.read();
+    const result = await drainingReaderReadInternal<R>(reader, stream);
     const drained = result.chunks as unknown[];
     for (let i = 0; i < drained.length; i++) {
       const chunk = drained[i];
-      // Drained chunks are untrusted values: accept any BufferSource,
-      // normalized to a Uint8Array over its region with the extent pinned
-      // at drain time; anything else fails with the same TypeError the
-      // C++ bridge pump uses. Detached inputs are skipped with the other
-      // empties.
-      let view: Uint8Array;
+      // Drained chunks are untrusted values: any BufferSource contributes
+      // its bytes, with the extent pinned at drain time; anything else
+      // fails with the same TypeError the C++ bridge pump uses. Detached
+      // inputs are skipped with the other empties.
+      let buffer: ArrayBuffer;
+      let byteOffset: number;
       let byteLength: number;
       if (isArrayBufferView(chunk)) {
         // Probe detachment through the buffer before getViewInfo: a
         // detached DataView's byteLength getter throws (typed arrays and
         // raw buffers just report 0).
-        const buffer =
+        buffer =
           TypedArrayPrototypeGetSymbolToStringTag(chunk) !== undefined
             ? TypedArrayPrototypeGetBuffer(chunk)
             : DataViewPrototypeGetBuffer(chunk as DataView);
         if (ArrayBufferPrototypeDetachedGet(buffer)) continue;
         const info = getViewInfo(chunk);
+        byteOffset = info.byteOffset;
         byteLength = info.byteLength;
-        if (byteLength === 0) continue;
-        view = new Uint8Array(buffer, info.byteOffset, byteLength);
       } else if (isArrayBuffer(chunk)) {
+        buffer = chunk;
+        byteOffset = 0;
         byteLength = ArrayBufferPrototypeByteLengthGet(chunk);
-        if (byteLength === 0) continue;
-        // The explicit extent matters: on a resizable buffer a bare
-        // `new Uint8Array(chunk)` would be length-tracking, and a resize
-        // from user code at a later await would desync it from amountRead.
-        view = new Uint8Array(chunk, 0, byteLength);
       } else {
-        throw new TypeError('This ReadableStream did not return bytes.');
-      }
-      amountRead += BigInt(byteLength);
-      if (amountRead > limit) {
-        throw new RangeError(
-          `Stream exceeded the maximum allowed limit of ${Number(limit)} bytes`
+        return failCollect(
+          reader,
+          new TypeError('This ReadableStream did not return bytes.')
         );
       }
-      ArrayPrototypePush(chunks, view);
+      if (byteLength === 0) continue;
+      if (collected.length + byteLength > bound) {
+        return failCollect(
+          reader,
+          declaredBinds
+            ? new RangeError(
+                'stream delivered more bytes than its declared expectedLength'
+              )
+            : new TypeError('Memory limit exceeded before EOF.')
+        );
+      }
+      collected.append(buffer, byteOffset, byteLength);
     }
-    if (result.done) break;
+    if (result.done) return collected;
   }
-
-  return { amountRead, chunks };
 }
 
 async function consumeReadableStreamAsArrayBuffer<R>(
   stream: ReadableStream<R>,
   limit: bigint
 ): Promise<ArrayBuffer> {
-  const { amountRead, chunks } = await collectChunks(stream, limit);
-
-  const res = new ArrayBuffer(Number(amountRead));
-  const u8 = new Uint8Array(res);
-  let offset = 0;
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i] as Uint8Array;
-    TypedArrayPrototypeSet(u8, chunk, offset);
-    offset += TypedArrayPrototypeGetByteLength(chunk);
-  }
-
-  return res;
+  return (await collectChunks(stream, limit)).toArrayBuffer();
 }
 
 async function consumeReadableStreamAsUint8Array<R>(
@@ -4537,21 +4630,7 @@ async function consumeReadableStreamAsText<R>(
   stream: ReadableStream<R>,
   limit: bigint
 ): Promise<string> {
-  const { amountRead, chunks } = await collectChunks(stream, limit);
-
-  let res = '';
-  if (amountRead === 0n) return res;
-
-  const decoder = new TextDecoder();
-  for (let i = 0; i < chunks.length; i++) {
-    res += TextDecoderDecode(decoder, chunks[i], {
-      __proto__: null,
-      stream: true,
-    });
-  }
-  res += TextDecoderDecode(decoder); // flush
-
-  return res;
+  return (await collectChunks(stream, limit)).toText();
 }
 
 async function consumeReadableStreamAsJSON<R>(
