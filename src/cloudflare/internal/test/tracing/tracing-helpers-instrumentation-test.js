@@ -39,6 +39,7 @@ export const validateSpans = {
         expectedSpan: 'undefined-attr-op',
       },
       { test: 'setAttributes', expectedSpan: 'set-attributes-op' },
+      { test: 'addEvent', expectedSpan: 'add-event-receiver' },
       { test: 'publicImportTracing', expectedSpan: 'public-import-op' },
       {
         test: 'publicImportStartActiveSpan',
@@ -64,6 +65,71 @@ export const validateSpans = {
 
       assert(span, `${test}: Should have created span '${expectedSpan}'`);
       assert(span.closed, `${test}: Span '${expectedSpan}' should be closed`);
+    }
+
+    // addEvent: one spanEvent per call, attributed to the receiver span (not the active one),
+    // undefined attribute values skipped, long names truncated, and nothing after end().
+    {
+      const spanEntries = [...collector.spans.entries()];
+      const spanKeyFor = (test, name) =>
+        spanEntries.find(
+          ([, span]) => span.test === test && span.name === name
+        )[0];
+      const spanEventsFor = (spanKey) =>
+        collector.spanEvents
+          .filter(
+            (event) =>
+              `${event.invocationId}#${event.spanContext.spanId}` === spanKey
+          )
+          .map(({ event }) => ({
+            name: event.name,
+            attributes: event.attributes,
+          }));
+
+      assert.deepStrictEqual(
+        spanEventsFor(spanKeyFor('addEvent', 'add-event-receiver')),
+        [
+          { name: 'bare', attributes: [] },
+          {
+            name: 'with-attributes',
+            attributes: [
+              { name: 'stringValue', value: 'value' },
+              { name: 'numberValue', value: 42 },
+              { name: 'booleanValue', value: true },
+            ],
+          },
+          { name: `long-${'x'.repeat(59)}`, attributes: [] },
+        ]
+      );
+      assert.deepStrictEqual(
+        spanEventsFor(spanKeyFor('addEvent', 'add-event-active')),
+        [],
+        'events must not be attributed to the active span'
+      );
+
+      const invocation = invocations.find((candidate) =>
+        candidate.attributes.some(
+          ({ name, value }) =>
+            name === 'case' && value === 'addEventOnInvocationSpan'
+        )
+      );
+      assert(invocation, 'addEventOnInvocationSpan: invocation present');
+      assert.deepStrictEqual(
+        spanEventsFor(`${invocation.invocationId}#${invocation.rootSpanId}`),
+        [
+          {
+            name: 'invocation-event',
+            attributes: [{ name: 'source', value: 'root' }],
+          },
+        ]
+      );
+
+      for (const event of collector.spanEvents) {
+        assert(
+          event.timestamp instanceof Date,
+          'spanEvent tail events carry a Date timestamp'
+        );
+      }
     }
 
     // setAttributeUndefined should NOT have a 'skipped' attribute recorded.

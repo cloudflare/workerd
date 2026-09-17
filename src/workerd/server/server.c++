@@ -3239,6 +3239,16 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
     });
   }
 
+  void submitSpanEvent(
+      tracing::SpanId spanId, kj::Date timestamp, tracing::SpanEvent&& event) override {
+    weakTracer->runIfAlive([&](BaseTracer& tracer) {
+      if (isPredictableModeForTest()) {
+        timestamp = kj::UNIX_EPOCH;
+      }
+      tracer.addSpanEvent(spanId, timestamp, kj::mv(event));
+    });
+  }
+
   bool submitSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,

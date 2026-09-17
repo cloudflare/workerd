@@ -23,6 +23,9 @@ export function createInstrumentationState() {
     invocationPromises: [],
     invocations: new Map(),
     spans: new Map(),
+    // Raw spanEvent tail events, in arrival order. Keyed back to `spans` via
+    // `${invocationId}#${spanContext.spanId}`.
+    spanEvents: [],
   };
 }
 
@@ -83,6 +86,10 @@ export function createTailStreamHandler(state) {
           let span = state.spans.get(spanKey);
           span['closed'] = true;
           state.spans.set(spanKey, span);
+          break;
+        }
+        case 'spanEvent': {
+          state.spanEvents.push(event);
           break;
         }
         case 'outcome':
@@ -259,6 +266,7 @@ export function createTailStreamCollector() {
   const tailStream = createTailStreamHandler(state);
 
   const spans = state.spans;
+  const spanEvents = state.spanEvents;
   const invocations = state.invocations;
   const invocationPromises = state.invocationPromises;
   const waitForCompletion = () => {
@@ -270,6 +278,7 @@ export function createTailStreamCollector() {
     waitForCompletion,
     invocations,
     spans,
+    spanEvents,
   };
 }
 

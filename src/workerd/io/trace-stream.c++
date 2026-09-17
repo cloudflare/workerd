@@ -83,6 +83,7 @@ namespace {
   V(SEQUENCE, "sequence")                                                                          \
   V(SPANCLOSE, "spanClose")                                                                        \
   V(SPANCONTEXT, "spanContext")                                                                    \
+  V(SPANEVENT, "spanEvent")                                                                        \
   V(SPANID, "spanId")                                                                              \
   V(TRACEFLAGS, "traceFlags")                                                                      \
   V(SPANOPEN, "spanOpen")                                                                          \
@@ -482,6 +483,16 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanClose& spanClose, StringCache& cache)
   return obj;
 }
 
+jsg::JsValue ToJs(jsg::Lock& js, const SpanEvent& spanEvent, StringCache& cache) {
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, SPANEVENT_STR));
+  obj.set(js, NAME_STR, js.str(spanEvent.name));
+  obj.set(js, ATTRIBUTES_STR,
+      js.arr(spanEvent.attributes.asPtr(),
+          [&cache](jsg::Lock& js, const auto& attr) { return ToJs(js, attr, cache); }));
+  return obj;
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const DiagnosticChannelEvent& dce, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, DIAGNOSTICCHANNEL_STR));
@@ -620,6 +631,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
     KJ_CASE_ONEOF(spanClose, SpanClose) {
       obj.set(js, EVENT_STR, ToJs(js, spanClose, cache));
     }
+    KJ_CASE_ONEOF(spanEvent, SpanEvent) {
+      obj.set(js, EVENT_STR, ToJs(js, spanEvent, cache));
+    }
     KJ_CASE_ONEOF(de, DiagnosticChannelEvent) {
       obj.set(js, EVENT_STR, ToJs(js, de, cache));
     }
@@ -658,6 +672,9 @@ kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
     }
     KJ_CASE_ONEOF(_, SpanClose) {
       return SPANCLOSE_STR;
+    }
+    KJ_CASE_ONEOF(_, SpanEvent) {
+      return SPANEVENT_STR;
     }
     KJ_CASE_ONEOF(_, DiagnosticChannelEvent) {
       return DIAGNOSTICCHANNEL_STR;

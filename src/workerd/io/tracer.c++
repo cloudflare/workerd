@@ -336,6 +336,26 @@ void WorkerTracer::addSpanException(tracing::SpanId spanId,
   reportExceptionToTailStream(*writer, context, timestamp, kj::mv(code), name, message, stackPtr);
 }
 
+void WorkerTracer::addSpanEvent(
+    tracing::SpanId spanId, kj::Date timestamp, tracing::SpanEvent&& event) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+
+  auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+  auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
+      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+
+  auto size = event.size();
+  if (size > MAX_TRACE_BYTES) {
+    // Oversized events are dropped rather than truncated: an event with a partial attribute set
+    // would be misleading. The JS API bounds event size well below this limit.
+    return;
+  }
+  writer->report(context, kj::mv(event), timestamp, size);
+}
+
 void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     kj::String channel,
@@ -717,6 +737,12 @@ void UserSpanObserver::onException(kj::Date timestamp,
   if (wasAccepted) {
     submitter->submitSpanException(
         spanId, timestamp, kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+  }
+}
+
+void UserSpanObserver::onEvent(kj::Date timestamp, tracing::SpanEvent&& event) {
+  if (wasAccepted) {
+    submitter->submitSpanEvent(spanId, timestamp, kj::mv(event));
   }
 }
 

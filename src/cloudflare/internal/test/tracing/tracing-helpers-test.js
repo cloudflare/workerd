@@ -224,6 +224,49 @@ export const setAttributes = {
   },
 };
 
+// Verify addEvent emits one spanEvent tail event per call, attributed to the receiver span even
+// when a different span is active, and that it handles every supported attribute value type.
+export const addEvent = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+
+    withSpan('add-event-active', (active) => {
+      active.setAttribute('test', 'addEvent');
+      active.setAttribute('role', 'active');
+      const receiver = publicTracing.startSpan('add-event-receiver');
+      receiver.setAttribute('test', 'addEvent');
+      receiver.setAttribute('role', 'receiver');
+      assert.strictEqual(receiver.addEvent('bare'), receiver);
+      assert.strictEqual(
+        receiver.addEvent('with-attributes', {
+          stringValue: 'value',
+          numberValue: 42,
+          booleanValue: true,
+          skipped: undefined,
+        }),
+        receiver
+      );
+      receiver.addEvent(`long-${'x'.repeat(100)}`, {});
+      receiver.end();
+      // All span mutations are no-ops after end().
+      receiver.addEvent('after-end');
+    });
+  },
+};
+
+export const addEventOnInvocationSpan = {
+  async test() {
+    const span = publicTracing.getActiveSpan();
+    assert(span);
+    // Not `test`: the validator asserts on the first root `test` attribute across invocations.
+    span.setAttribute('case', 'addEventOnInvocationSpan');
+    assert.strictEqual(
+      span.addEvent('invocation-event', { source: 'root' }),
+      span
+    );
+  },
+};
+
 // Verify that nested withSpan calls produce correctly nested spans. This exercises the
 // AsyncContextFrame push path in enterSpan: the inner span should be parented on the
 // outer span.

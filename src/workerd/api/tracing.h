@@ -19,14 +19,17 @@ class Tracing;  // Forward decl; defined further down after user_tracing::Span.
 // the surrounding workerd::api namespace.
 namespace workerd::api::user_tracing {
 
-// Max length of a user-supplied operation name in `ctx.tracing.enterSpan(name, ...)`.
+// Max length of a user-supplied span operation name or span event name.
 // Longer names are truncated at the API surface so the limit holds for every downstream
-// SpanSubmitter. Span names identify operations, not carry data; the bound is tight on
-// purpose.
+// SpanSubmitter. These names identify operations and occurrences, not carry data; the bound is
+// tight on purpose.
 constexpr size_t MAX_USER_OPERATION_NAME_BYTES = 64;
 
 // The types allowed for tag and log values from JavaScript.
 using TagValue = kj::OneOf<bool, double, kj::String>;
+
+// Attributes as supplied from JavaScript. Entries whose value is undefined are skipped.
+using Attributes = jsg::Dict<jsg::Optional<TagValue>>;
 
 struct ExceptionData {
   // JSG dictionaries cannot express "at least one field is required". recordException()
@@ -64,6 +67,9 @@ class SpanState: public kj::Refcounted {
       kj::String message,
       kj::Maybe<kj::String> stack);
 
+  // Records a named event on the span, subject to the span's data limit.
+  void addEvent(tracing::SpanEvent event);
+
  protected:
   SpanState() = default;
   virtual bool canRecordAttributes() = 0;
@@ -72,6 +78,7 @@ class SpanState: public kj::Refcounted {
       kj::String name,
       kj::String message,
       kj::Maybe<kj::String> stack) = 0;
+  virtual void addEventImpl(tracing::SpanEvent event) = 0;
   virtual void recordSpanDataLimitError(
       kj::StringPtr itemKind, kj::StringPtr name, size_t valueSize) {}
 
@@ -101,10 +108,14 @@ class Span: public jsg::Object {
   jsg::Ref<Span> setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<TagValue> value);
 
   // Sets each attribute in `attributes` as if by calling setAttribute().
-  jsg::Ref<Span> setAttributes(jsg::Lock& js, jsg::Dict<jsg::Optional<TagValue>> attributes);
+  jsg::Ref<Span> setAttributes(jsg::Lock& js, Attributes attributes);
 
   void recordException(
       jsg::Lock& js, jsg::Value exception, const jsg::TypeHandler<ExceptionData>& exceptionHandler);
+
+  // Records a named event on the span, timestamped with the current time. Attributes with an
+  // undefined value are skipped. Calls after the span has ended are ignored.
+  jsg::Ref<Span> addEvent(jsg::Lock& js, kj::String name, jsg::Optional<Attributes> attributes);
 
   // Ends the span and submits its content to the tracing system. Idempotent.
   void end();
@@ -115,6 +126,7 @@ class Span: public jsg::Object {
     JSG_METHOD(setAttribute);
     JSG_METHOD(setAttributes);
     JSG_METHOD(recordException);
+    JSG_METHOD(addEvent);
     JSG_METHOD(end);
 
     JSG_TS_OVERRIDE({
@@ -126,6 +138,10 @@ class Span: public jsg::Object {
         | { code: string | number; name?: string; message?: string; stack?: string }
         | { code?: string | number; name: string; message?: string; stack?: string }
         | { code?: string | number; name?: string; message: string; stack?: string }): void;
+      addEvent(
+        name: string,
+        attributes?: Record<string, boolean | number | string | undefined>
+      ): this;
     });
   }
 

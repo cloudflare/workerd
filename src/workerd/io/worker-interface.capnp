@@ -312,6 +312,14 @@ struct Trace @0x8e8d911203762d34 {
     outcome @0 :EventOutcome;
   }
 
+  struct SpanEvent {
+    # A named, timestamped occurrence recorded on an open span, with optional
+    # attributes. The timestamp is carried by the enclosing TailEvent.
+    # Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#span-events
+    name @0 :Text;
+    attributes @1 :List(Attribute);
+  }
+
   struct Onset {
     # The Onset and Outcome event types are special forms of SpanOpen and
     # SpanClose that explicitly mark the start and end of the root span.
@@ -356,8 +364,8 @@ struct Trace @0x8e8d911203762d34 {
     # A streaming tail worker receives a series of Tail Events. Tail events always occur within an
     # InvocationSpanContext. The first TailEvent delivered to a streaming tail session is always an
     # Onset. The final TailEvent delivered is always an Outcome. Between those can be any number of
-    # SpanOpen, SpanClose, and Mark events. Every SpanOpen *must* be associated with a SpanClose
-    # unless the stream was abruptly terminated.
+    # SpanOpen, SpanEvent, SpanClose, and Mark events. Every SpanOpen *must* be associated with a
+    # SpanClose unless the stream was abruptly terminated.
     # Inherited spanContext for this event.
     spanContext @0: SpanContext;
     # invocation id of the currently invoked worker stage.
@@ -378,6 +386,7 @@ struct Trace @0x8e8d911203762d34 {
       exception @11 :Exception;
       log @12 :Log;
       streamDiagnostics @13 :StreamDiagnosticsEvent;
+      spanEvent @14 :SpanEvent;
     }
   }
 }
