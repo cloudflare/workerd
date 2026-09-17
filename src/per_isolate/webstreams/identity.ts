@@ -75,6 +75,7 @@ const {
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
   DataViewPrototypeGetByteOffset,
+  Number,
   ObjectDefineProperties,
   ObjectGetOwnPropertyDescriptor,
   PromiseWithResolvers,

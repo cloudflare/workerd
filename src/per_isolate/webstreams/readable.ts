@@ -51,6 +51,7 @@ const {
   EventTargetAddEventListener,
   EventTargetRemoveEventListener,
   JSONParse,
+  Number,
   NumberIsNaN,
   ObjectCreate,
   ObjectDefineProperty,

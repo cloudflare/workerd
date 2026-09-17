@@ -58,6 +58,7 @@ const ErrorCtor = Error;
 const FinalizationRegistryCtor = FinalizationRegistry;
 const FunctionCtor = Function;
 const MapCtor = Map;
+const NumberCtor = Number;
 const ObjectCtor = Object;
 const PromiseCtor = Promise;
 const RangeErrorCtor = RangeError;
@@ -679,6 +680,7 @@ module.exports = ObjectFreeze({
   FinalizationRegistry: FinalizationRegistryCtor,
   Function: FunctionCtor,
   Map: MapCtor,
+  Number: NumberCtor,
   Object: ObjectCtor,
   Promise: PromiseCtor,
   RangeError: RangeErrorCtor,
