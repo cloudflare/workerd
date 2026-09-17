@@ -1139,7 +1139,6 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
       // If a channel is present, send a channel token for it.
       kj::Maybe<kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>>> channelToken;
-      kj::Own<IoChannelFactory::RpcChannel> ownChannel;
       KJ_IF_SOME(channel, getRpcChannel(ioctx)) {
         // Note: RpcChannels are always transferrable (there wouldn't be any reason to create one
         //   that isn't), but we still call requireAllowsTransfer() for good measure.

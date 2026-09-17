@@ -806,8 +806,6 @@ class Server::ActorNamespace final {
         IoChannelFactory::ChannelTokenUsage usage, Persistent persistent) {
       requireTransferrableStub();
 
-      kj::StringPtr uniqueKey = ns.getConfig().get<Durable>().uniqueKey;
-
       KJ_SWITCH_ONEOF(classAndId) {
         KJ_CASE_ONEOF(c, ClassAndId) {
           return getChannelTokenImpl(usage, c.id, persistent);

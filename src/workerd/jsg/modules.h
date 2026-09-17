@@ -316,7 +316,6 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   void addBuiltinModule(Module::Reader module) {
     if (module.which() != Module::SRC) {
       auto specifier = module.getName();
-      auto path = kj::Path::parse(specifier);
       switch (module.which()) {
         case Module::WASM:
           // The body of this callback is copied from `compileWasmGlobal` in
