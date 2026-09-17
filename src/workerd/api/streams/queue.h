@@ -357,17 +357,14 @@ class ConsumerImpl final: public kj::PtrTarget {
   using QueueEntry = Self::QueueEntry;
 
   ConsumerImpl(
-      kj::Ptr<QueueImpl> queue, kj::Weak<ConsumerImpl::StateListener> stateListener = kj::none)
-      : queue(queue),
+      kj::Weak<QueueImpl> queue, kj::Weak<ConsumerImpl::StateListener> stateListener = kj::none)
+      : queue(kj::mv(queue)),
         state(ConsumerState::template create<Ready>()),
-        stateListener(stateListener) {
-    queue->addConsumer(addWeakToThis());
+        stateListener(kj::mv(stateListener)) {
+    KJ_IF_SOME(q, this->queue) {
+      q->addConsumer(addWeakToThis());
+    }
   }
-
-  explicit ConsumerImpl(kj::Weak<ConsumerImpl::StateListener> stateListener)
-      : queue(nullptr),
-        state(ConsumerState::template create<Ready>()),
-        stateListener(stateListener) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ConsumerImpl);
 
@@ -774,9 +771,7 @@ class ValueQueue final {
    public:
     Consumer(ValueQueue& queue, kj::Weak<ConsumerImpl::StateListener> stateListener = nullptr);
     Consumer(
-        kj::Ptr<QueueImpl> queue, kj::Weak<ConsumerImpl::StateListener> stateListener = nullptr);
-    // Used when cloning a consumer whose queue has been destroyed.
-    explicit Consumer(kj::Weak<ConsumerImpl::StateListener> stateListener);
+        kj::Weak<QueueImpl> queue, kj::Weak<ConsumerImpl::StateListener> stateListener = nullptr);
     Consumer(Consumer&&) = delete;
     Consumer(Consumer&) = delete;
     Consumer& operator=(Consumer&&) = delete;
@@ -908,7 +903,7 @@ class ByteQueue final {
     void reject(jsg::Lock& js, jsg::JsValue value);
 
     kj::Own<ByobRequest> makeByobReadRequest(
-        kj::Weak<ConsumerImpl> consumer, kj::Ptr<QueueImpl> queue);
+        kj::Weak<ConsumerImpl> consumer, kj::Weak<QueueImpl> queue);
 
     JSG_MEMORY_INFO(ByteQueue::ReadRequest) {
       tracker.trackField("resolver", resolver);
@@ -925,10 +920,10 @@ class ByteQueue final {
   class ByobRequest final: public kj::PtrTarget {
    public:
     ByobRequest(
-        kj::Weak<ReadRequest> request, kj::Weak<ConsumerImpl> consumer, kj::Ptr<QueueImpl> queue)
-        : request(request),
-          consumer(consumer),
-          queue(queue) {}
+        kj::Weak<ReadRequest> request, kj::Weak<ConsumerImpl> consumer, kj::Weak<QueueImpl> queue)
+        : request(kj::mv(request)),
+          consumer(kj::mv(consumer)),
+          queue(kj::mv(queue)) {}
 
     KJ_DISALLOW_COPY_AND_MOVE(ByobRequest);
 
@@ -1031,9 +1026,7 @@ class ByteQueue final {
    public:
     Consumer(ByteQueue& queue, kj::Weak<ConsumerImpl::StateListener> stateListener = nullptr);
     Consumer(
-        kj::Ptr<QueueImpl> queue, kj::Weak<ConsumerImpl::StateListener> stateListener = nullptr);
-    // Used when cloning a consumer whose queue has been destroyed.
-    explicit Consumer(kj::Weak<ConsumerImpl::StateListener> stateListener);
+        kj::Weak<QueueImpl> queue, kj::Weak<ConsumerImpl::StateListener> stateListener = nullptr);
     Consumer(Consumer&&) = delete;
     Consumer(Consumer&) = delete;
     Consumer& operator=(Consumer&&) = delete;
