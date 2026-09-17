@@ -49,7 +49,7 @@ test-compile-flags:
   just _clangd-check "src/workerd/server/server.c++"
   just _clangd-check "src/workerd/server/workerd-api.c++"
 
-CLANGD := "clangd-22"
+CLANGD := "clangd"
 
 _clangd-check FILE:
   #!/usr/bin/env bash
