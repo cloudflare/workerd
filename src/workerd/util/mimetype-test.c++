@@ -464,6 +464,23 @@ KJ_TEST("Quoted-string escape handling") {
   }
 }
 
+KJ_TEST("AWS JSON MIME types are classified as text") {
+  static constexpr kj::StringPtr supportedTypes[] = {
+    "application/x-amz-json-1.0"_kj,
+    "application/x-amz-json-1.1"_kj,
+  };
+
+  for (auto input: supportedTypes) {
+    auto mimeType = KJ_ASSERT_NONNULL(MimeType::tryParse(input));
+    KJ_ASSERT(MimeType::isText(mimeType));
+    KJ_ASSERT(!MimeType::isJson(mimeType));
+  }
+
+  auto unsupportedType = KJ_ASSERT_NONNULL(MimeType::tryParse("application/x-amz-json-1.2"_kj));
+  KJ_ASSERT(!MimeType::isText(unsupportedType));
+  KJ_ASSERT(!MimeType::isJson(unsupportedType));
+}
+
 KJ_TEST("Backslash escaping in serialization round-trips") {
   // A value containing both backslash and non-token chars must be quoted
   // with the backslash escaped, and the result must round-trip.
