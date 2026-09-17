@@ -37,6 +37,38 @@ clean:
 build *args="//...":
   bazel build {{args}}
 
+# Verify that clangd can resolve all symbols using compile_flags.txt.
+test-compile-flags:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if ! command -v {{CLANGD}} >/dev/null 2>&1; then
+    echo "clangd executable not found: {{CLANGD}}" >&2
+    exit 1
+  fi
+
+  just _clangd-check "src/workerd/server/server.c++"
+  just _clangd-check "src/workerd/server/workerd-api.c++"
+
+CLANGD := "clangd-22"
+
+_clangd-check FILE:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Checking {{FILE}} with {{CLANGD}}"
+  set +e
+  output=$({{CLANGD}} --log=error --check={{FILE}} --check-lines=1 2>&1)
+  status=$?
+  set -e
+  missing=$(grep -e "file not found" -e "No such file or directory" <<<"$output" || true)
+  if [[ -n "$missing" ]]; then
+    echo "$missing" >&2
+    exit 1
+  fi
+  if (( status != 0 )); then
+    echo "$output" >&2
+    exit "$status"
+  fi
+
 # example: just watch run -- serve $(pwd)/samples/helloworld/config.capnp
 run *args="-- --help":
   bazel run //src/workerd/server:workerd -- {{args}} --watch --verbose --experimental
