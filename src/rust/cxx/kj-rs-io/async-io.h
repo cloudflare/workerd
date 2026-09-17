@@ -29,7 +29,7 @@
 // Scope: this is workerd's provider, not a drop-in for every KJ program (lib.rs, "Scope:
 // workerd's provider"). Throws UNIMPLEMENTED: newPipeThread(), wrapConnectingSocketFd(),
 // wrapListenSocketFd() with a caller-owned filter, capability streams (SCM_RIGHTS fd passing),
-// datagram sockets, and the raw getsockopt()/setsockopt() passthroughs. wrap*Fd take sockets
+// the raw getsockopt()/setsockopt() passthroughs. wrap*Fd take sockets
 // only, and the provider's pipes are socket pairs.
 
 #include "kj-rs-io/ffi.rs.h"
@@ -128,11 +128,36 @@ class TokioNetworkAddress final: public kj::NetworkAddress {
   kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override;
   kj::Promise<kj::AuthenticatedStream> connectAuthenticated() override;
   kj::Own<kj::ConnectionReceiver> listen() override;
+  kj::Own<kj::DatagramPort> bindDatagramPort() override;
   kj::Own<kj::NetworkAddress> clone() override;
   kj::String toString() override;
 
+  const TokioAddress &getInner() const {
+    return *inner;
+  }
+
  private:
   ::rust::Box<TokioAddress> inner;
+  kj::Arc<PeerFilter> filter;
+};
+
+class TokioDatagramPort final: public kj::DatagramPort {
+ public:
+  TokioDatagramPort(::rust::Box<TokioDatagram> inner, kj::Arc<PeerFilter> filter)
+      : inner(kj::mv(inner)),
+        filter(kj::mv(filter)) {}
+
+  kj::Promise<size_t> send(
+      kj::ArrayPtr<const kj::byte> buffer, kj::NetworkAddress &destination) override;
+  kj::Promise<size_t> send(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces,
+      kj::NetworkAddress &destination) override;
+  kj::Own<kj::DatagramReceiver> makeReceiver(kj::DatagramReceiver::Capacity capacity) override;
+  kj::uint getPort() override;
+
+ private:
+  class Receiver;
+
+  ::rust::Box<TokioDatagram> inner;
   kj::Arc<PeerFilter> filter;
 };
 

@@ -71,11 +71,13 @@
 //!     └── TokioAsyncIoProvider
 //!             └── TokioNetwork               kj::Arc<PeerFilter>, shared down the chain:
 //!                     ├── TokioNetworkAddress    Box<TokioAddress> + filter share
-//!                     │       └── TokioConnectionReceiver  Box<TokioListener> + filter share
+//!                     │       ├── TokioConnectionReceiver  Box<TokioListener> + filter share
+//!                     │       └── TokioDatagramPort        Box<TokioDatagram> + filter share
 //!                     └── TokioAsyncIoStream     Box<TokioStream>
 //!
 //! TokioStream    (stream.rs)   Arc<Inner>: the socket, plus a lazily dup'd hangup watch
 //! TokioListener  (net.rs)      Arc<..>: one listening socket per resolved address
+//! TokioDatagram  (net.rs)      Arc<..>: one datagram socket
 //! TokioAddress   (net.rs)      the parsed address: SocketAddr list, or a unix name
 //! TokioFileWatcher (watcher.rs) Arc<..>: notify watcher + metadata stamps; workerd's
 //!                              TokioFileWatcher (server/cli-io-backend.c++) holds it directly
@@ -188,6 +190,7 @@ const _: () = {
     const fn send_sync<T: Send + Sync>() {}
     send_sync::<TokioStream>();
     send_sync::<TokioAddress>();
+    send_sync::<net::TokioDatagram>();
     send_sync::<net::TokioListener>();
     send_sync::<watcher::TokioFileWatcher>();
 };
