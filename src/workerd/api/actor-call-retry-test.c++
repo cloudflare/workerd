@@ -56,14 +56,18 @@ class RecordingObserver final: public RequestObserver {
   kj::Vector<ActorRetryOutcome> outcomes;
 };
 
-kj::Rc<ActorCallRetryState> newRetryState(TestTimerChannel& timer, RecordingObserver& observer) {
+// A retry state with every gate enabled and a replayable payload.
+kj::Rc<ActorCallRetryState> newRetryState(TestTimerChannel& timer,
+    RecordingObserver& observer,
+    ActorRetryPolicy policy = ActorRetryPolicy::systemDefault()) {
   return kj::rc<ActorCallRetryState>(timer, observer,
       ActorCallRetryState::Config{
         .callType = ActorRetryCallType::JSRPC,
         .observationEnabled = ActorRetryGateEnabled::YES,
         .enforcementEnabled = ActorRetryGateEnabled::YES,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
-      });
+      },
+      policy);
 }
 
 ActorCallRetryState::Attempt startAttempt(ActorCallRetryState& state) {
@@ -172,7 +176,7 @@ KJ_TEST("actor retries return the original disconnect after claim rejection") {
   KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::CLAIM_REJECTED);
 }
 
-KJ_TEST("actor retries stop after five total attempts") {
+KJ_TEST("system retry policy allows five total attempts") {
   TestTimerChannel timer;
   auto observer = kj::refcounted<RecordingObserver>();
   auto state = newRetryState(timer, *observer);
@@ -184,7 +188,8 @@ KJ_TEST("actor retries stop after five total attempts") {
     if (attempt < 4) {
       KJ_EXPECT(result.is<kj::Duration>());
     } else {
-      KJ_EXPECT(result.is<kj::Exception>());
+      auto& failure = KJ_ASSERT_NONNULL(result.tryGet<kj::Exception>());
+      KJ_EXPECT(failure.getDescription().contains("disconnected"));
     }
   }
 
@@ -226,6 +231,37 @@ KJ_TEST("actor retries report retry budget exhaustion when the next attempt cann
   KJ_EXPECT(failure.getDescription().contains("original disconnect"));
   KJ_ASSERT(observer->outcomes.size() == 1);
   KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
+}
+
+KJ_TEST("user-defined retry count excludes the initial attempt") {
+  auto checkAttemptCount = [](UserDefinedRetryPolicy policy, uint expectedAttempts) {
+    TestTimerChannel timer;
+    auto observer = kj::refcounted<RecordingObserver>();
+    auto state = newRetryState(timer, *observer, ActorRetryPolicy::userDefined(policy));
+
+    uint attemptCount = 1;
+    startAttempt(*state);
+    if (policy.maxRetryAttempts == 0) {
+      KJ_EXPECT(!state->isRetryEnabled());
+      KJ_EXPECT(attemptCount == expectedAttempts);
+      KJ_EXPECT(observer->retryCallTypes.size() == 0);
+      return;
+    }
+
+    for (uint retry = 0; retry < policy.maxRetryAttempts; ++retry) {
+      KJ_EXPECT(handleFailure(*state, makeDisconnect("disconnected"_kj)).is<kj::Duration>());
+      startAttempt(*state);
+      ++attemptCount;
+    }
+
+    KJ_EXPECT(handleFailure(*state, makeDisconnect("disconnected"_kj)).is<kj::Exception>());
+    KJ_EXPECT(attemptCount == expectedAttempts);
+    KJ_EXPECT(observer->retryCallTypes.size() == policy.maxRetryAttempts);
+  };
+
+  checkAttemptCount(UserDefinedRetryPolicy{.maxRetryAttempts = 0}, 1);
+  checkAttemptCount(UserDefinedRetryPolicy{.maxRetryAttempts = 1}, 2);
+  checkAttemptCount(UserDefinedRetryPolicy{}, ActorRetryPolicy::systemDefault().maxAttempts());
 }
 
 KJ_TEST("actor retries return the original disconnect when the deadline expires before retry") {
@@ -272,7 +308,8 @@ KJ_TEST("actor calls do not retry when retry requests are disabled") {
         .observationEnabled = ActorRetryGateEnabled::YES,
         .enforcementEnabled = ActorRetryGateEnabled::NO,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
-      });
+      },
+      ActorRetryPolicy::systemDefault());
 
   auto first = startAttempt(*state);
   KJ_EXPECT(KJ_ASSERT_NONNULL(first.getMetadata()).retryGateEnabled == ActorRetryGateEnabled::NO);

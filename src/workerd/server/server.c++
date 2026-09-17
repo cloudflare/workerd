@@ -4858,6 +4858,21 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
 
     case config::Worker::Binding::DURABLE_OBJECT_NAMESPACE: {
       auto actorBinding = binding.getDurableObjectNamespace();
+      kj::Maybe<api::UserDefinedRetryPolicy> userDefinedRetryPolicy;
+      if (actorBinding.hasRetryPolicy()) {
+        auto retryPolicy = actorBinding.getRetryPolicy();
+        if (retryPolicy.getMaxAttempts() >
+            api::UserDefinedRetryPolicy::MAX_CONFIGURABLE_RETRY_ATTEMPTS) {
+          errorReporter.addError(kj::str(errorContext,
+              " has a Durable Object retry policy above "
+              "the system limit."));
+          return kj::none;
+        }
+        userDefinedRetryPolicy = api::UserDefinedRetryPolicy{
+          .maxRetryAttempts = retryPolicy.getMaxAttempts(),
+        };
+      }
+
       const Server::ActorConfig* actorConfig;
       if (actorBinding.hasServiceName()) {
         auto& svcMap = KJ_UNWRAP_OR(actorConfigs.find(actorBinding.getServiceName()), {
@@ -4890,7 +4905,10 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       KJ_SWITCH_ONEOF(*actorConfig) {
         KJ_CASE_ONEOF(durable, Server::Durable) {
           return makeGlobal(Global::DurableActorNamespace{
-            .actorChannel = channel, .uniqueKey = durable.uniqueKey});
+            .actorChannel = channel,
+            .uniqueKey = durable.uniqueKey,
+            .userDefinedRetryPolicy = userDefinedRetryPolicy,
+          });
         }
         KJ_CASE_ONEOF(_, Server::Ephemeral) {
           return makeGlobal(Global::EphemeralActorNamespace{.actorChannel = channel});

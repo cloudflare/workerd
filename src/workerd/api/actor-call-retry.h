@@ -19,6 +19,42 @@ WD_STRONG_BOOL(ActorCallPayloadReplayable);
 WD_STRONG_BOOL(ActorCallRetriesAllowed);
 WD_STRONG_BOOL(IsFirstActorCallAttempt);
 
+// Retry behavior carried from a Durable Object namespace binding that configures one. Applied when
+// DURABLE_OBJECT_RETRIES_USERLAND is enabled. A binding without a retry policy runs under
+// ActorRetryPolicy::systemDefault() instead.
+struct UserDefinedRetryPolicy {
+  // Matches the runtime's default of five attempts in total.
+  static constexpr uint DEFAULT_MAX_RETRY_ATTEMPTS = 4;
+  static constexpr uint MAX_CONFIGURABLE_RETRY_ATTEMPTS = 10;
+
+  // Retries after the initial attempt, so the total attempt count is one more than this.
+  uint maxRetryAttempts = DEFAULT_MAX_RETRY_ATTEMPTS;
+};
+
+// The retry limits a single actor call runs under, resolved from either the runtime's defaults or
+// a binding's UserDefinedRetryPolicy. Everything downstream reads this and never asks which.
+class ActorRetryPolicy {
+ public:
+  static ActorRetryPolicy systemDefault() {
+    return ActorRetryPolicy(SYSTEM_DEFAULT_MAX_ATTEMPTS);
+  }
+  static ActorRetryPolicy userDefined(const UserDefinedRetryPolicy& policy) {
+    return ActorRetryPolicy(1 + policy.maxRetryAttempts);
+  }
+
+  // Total attempts, including the initial one.
+  uint maxAttempts() const {
+    return attempts;
+  }
+
+ private:
+  static constexpr uint SYSTEM_DEFAULT_MAX_ATTEMPTS = 5;
+
+  explicit ActorRetryPolicy(uint attempts): attempts(attempts) {}
+
+  uint attempts;
+};
+
 class ActorCallRetryState final: public kj::Refcounted {
  public:
   struct Config {
@@ -59,7 +95,8 @@ class ActorCallRetryState final: public kj::Refcounted {
     IsFirstActorCallAttempt isFirstAttempt;
   };
 
-  ActorCallRetryState(TimerChannel& timer, RequestObserver& observer, Config config);
+  ActorCallRetryState(
+      TimerChannel& timer, RequestObserver& observer, Config config, ActorRetryPolicy policy);
   ~ActorCallRetryState() noexcept(false);
 
   kj::OneOf<Attempt, kj::Exception> startAttempt();
@@ -73,11 +110,11 @@ class ActorCallRetryState final: public kj::Refcounted {
   void recordCanceled();
 
  private:
-  static constexpr uint MAX_ATTEMPTS = 5;
   static constexpr auto RETRY_BUDGET = 10 * kj::SECONDS;
   static constexpr auto INITIAL_BACKOFF = 500 * kj::MILLISECONDS;
   static constexpr auto MAX_BACKOFF = 2 * kj::SECONDS;
 
+  IoChannelFactory::ActorRetryRequestMetadata freshMetadata() const;
   kj::Maybe<kj::Exception> handleClaimRejection(const kj::Exception& exception);
   kj::OneOf<kj::Duration, kj::Exception> checkCanRetry(kj::Exception exception);
   kj::Duration retryDelay();
@@ -86,6 +123,7 @@ class ActorCallRetryState final: public kj::Refcounted {
   TimerChannel& timer;
   kj::Own<RequestObserver> observer;
   Config config;
+  ActorRetryPolicy policy;
   bool retriesEnabled;
   kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> metadata;
   kj::Maybe<kj::TimePoint> deadline;
