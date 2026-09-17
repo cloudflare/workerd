@@ -52,13 +52,15 @@ import type {
   PromiseWithResolvers as PromiseWithResolversType,
   ReadableStreamReadResult,
 } from './types';
+import type {
+  RingBuffer as RingBufferType,
+  RingBufferConstructor,
+} from './ring-buffer';
 
 const {
   ArrayBufferPrototypeSlice,
   ArrayBufferPrototypeTransfer,
   ArrayPrototypePush,
-  ArrayPrototypeShift,
-  ArrayPrototypeSplice,
   FinalizationRegistry,
   FinalizationRegistryPrototypeRegister,
   FinalizationRegistryPrototypeUnregister,
@@ -78,6 +80,10 @@ const {
   WeakRef,
   WeakRefPrototypeDeref,
 } = primordials;
+
+const { RingBuffer } = require('webstreams/ring-buffer') as {
+  RingBuffer: RingBufferConstructor;
+};
 
 // Read-result objects are plain { value, done } objects with the default
 // Object.prototype, matching spec behavior. Internal machinery is protected
@@ -291,8 +297,8 @@ const cursorCleanupRegistry = new FinalizationRegistry((cursorRef: unknown) => {
 // T is the entry value type (ByteQueueEntry for byte streams); V is the type
 // delivered to read results (Uint8Array remainder views for byte streams).
 class StreamQueue<T, V = T> {
-  #entries: QueueSlot<T>[] = [];
-  #headOffset: number = 0; // logical index of #entries[0]
+  #entries: RingBufferType<QueueSlot<T>> = new RingBuffer();
+  #headOffset: number = 0; // logical index of the entries' head
   #cursors: Set<QueueCursor<T, V>>;
   #highWaterMark: number;
   #state: 'readable' | 'closed' | 'errored' = 'readable';
@@ -429,9 +435,7 @@ class StreamQueue<T, V = T> {
   // Access a slot by logical position. May return the CLOSE_SENTINEL —
   // callers must check (isQueueEntry) before touching value/size.
   getEntry(logicalIndex: number): QueueSlot<T> | undefined {
-    const actual = logicalIndex - this.#headOffset;
-    if (actual < 0 || actual >= this.#entries.length) return undefined;
-    return this.#entries[actual];
+    return this.#entries.get(logicalIndex - this.#headOffset);
   }
 
   enqueue(entry: QueueEntry<T>, notify: boolean = true): void {
@@ -448,9 +452,9 @@ class StreamQueue<T, V = T> {
       // Sentinel position BEFORE insertion — cursors at or past this
       // point already resolved {done: true} and must not be touched.
       const sentinelPos = this.#headOffset + entries.length - 1;
-      const sentinel = entries[entries.length - 1];
-      entries[entries.length - 1] = entry;
-      ArrayPrototypePush(entries, sentinel as QueueSlot<T>);
+      const sentinel = entries.pop() as QueueSlot<T>;
+      entries.push(entry);
+      entries.push(sentinel);
       // Only update cursors that haven't yet reached the sentinel.
       // A cursor at sentinelPos already drained and resolved done —
       // inflating its remainingSize or notifying it would corrupt
@@ -462,7 +466,7 @@ class StreamQueue<T, V = T> {
         }
       });
     } else {
-      ArrayPrototypePush(this.#entries, entry);
+      this.#entries.push(entry);
       if (this.#state === 'readable') {
         this.#forEachLiveCursor((cursor) => {
           // Increment the cursor's running total BEFORE notify(), which may
@@ -484,7 +488,7 @@ class StreamQueue<T, V = T> {
       throw new TypeError('Cannot close a closed or errored queue');
     }
     this.#state = 'closed';
-    ArrayPrototypePush(this.#entries, CLOSE_SENTINEL);
+    this.#entries.push(CLOSE_SENTINEL);
     this.#forEachLiveCursor((cursor) => {
       cursor.notify();
     });
@@ -499,7 +503,7 @@ class StreamQueue<T, V = T> {
     // Capture the logical end BEFORE dropping entries so cursor positions
     // remain meaningful (they all now point at/past the end).
     const end = this.length;
-    ArrayPrototypeSplice(this.#entries, 0, this.#entries.length);
+    this.#entries.clear();
     this.#headOffset = end;
     this.#forEachLiveCursor((cursor) => {
       cursor.errorAllReads(reason);
@@ -541,7 +545,7 @@ class StreamQueue<T, V = T> {
     if (minPos === Infinity) return; // all cursors were orphaned
     const freedCount = minPos - this.#headOffset;
     if (freedCount > 0) {
-      ArrayPrototypeSplice(this.#entries, 0, freedCount);
+      this.#entries.trimFront(freedCount);
       this.#headOffset = minPos;
     }
   }
@@ -574,7 +578,7 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   #owner: unknown;
   #position: number;
   #byteOffset: number; // partial consumption of the entry at #position
-  #pendingReads: PendingRead<V>[] = [];
+  #pendingReads: RingBufferType<PendingRead<V>> = new RingBuffer();
   // Running total mirroring the spec's [[queueTotalSize]]. Incremented on
   // enqueue, decremented on consume. Must use +=/-= (not recomputation) to
   // preserve IEEE 754 double-precision drift that WPTs verify.
@@ -612,7 +616,7 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   }
 
   fulfillFirstPendingRead(value: V): void {
-    const pending = ArrayPrototypeShift(this.#pendingReads) as PendingRead<V>;
+    const pending = this.#pendingReads.shift() as PendingRead<V>;
     pending.resolve(createReadResult(value, false));
   }
 
@@ -729,7 +733,7 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
       PromiseWithResolvers() as PromiseWithResolversType<
         ReadableStreamReadResult<V>
       >;
-    ArrayPrototypePush(this.#pendingReads, { resolve, reject, reader });
+    this.#pendingReads.push({ resolve, reject, reader });
     return promise;
   }
 
@@ -750,7 +754,7 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
       const value = this.readEntryValue(entry);
       this.advancePastEntry();
       // assert: pendingReads is non-empty (the while condition guarantees it)
-      const pending = ArrayPrototypeShift(this.#pendingReads) as PendingRead<V>;
+      const pending = this.#pendingReads.shift() as PendingRead<V>;
       pending.resolve(createReadResult(value, false));
     }
     this.#queue.onCursorAdvanced();
@@ -758,15 +762,15 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
 
   // Reject pending reads submitted by a specific reader (lock release).
   cancelReadsForReader(reader: object, reason: unknown): void {
-    const remaining: PendingRead<V>[] = [];
+    const remaining: RingBufferType<PendingRead<V>> = new RingBuffer();
     const pending = this.#pendingReads;
     this.#pendingReads = remaining;
     for (let i = 0; i < pending.length; i++) {
-      const read = pending[i] as PendingRead<V>;
+      const read = pending.get(i) as PendingRead<V>;
       if (read.reader === reader) {
         read.reject(reason);
       } else {
-        ArrayPrototypePush(remaining, read);
+        remaining.push(read);
       }
     }
   }
@@ -775,9 +779,9 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   errorAllReads(reason: unknown): void {
     this.#queueTotalSize = 0;
     const pending = this.#pendingReads;
-    this.#pendingReads = [];
+    this.#pendingReads = new RingBuffer();
     for (let i = 0; i < pending.length; i++) {
-      const read = pending[i] as PendingRead<V>;
+      const read = pending.get(i) as PendingRead<V>;
       read.reject(reason);
     }
   }
@@ -810,9 +814,9 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
 
   #resolvePendingReadsAsDone(): void {
     const pending = this.#pendingReads;
-    this.#pendingReads = [];
+    this.#pendingReads = new RingBuffer();
     for (let i = 0; i < pending.length; i++) {
-      const read = pending[i] as PendingRead<V>;
+      const read = pending.get(i) as PendingRead<V>;
       read.resolve(createReadResult(undefined, true));
     }
   }
@@ -862,7 +866,7 @@ class ByteStreamCursor
 {
   // Spec [[pendingPullIntos]] — a LIST. Multiple reads can be queued, and
   // autoAllocateChunkSize creates synthetic descriptors for default reads.
-  #pendingPullIntos: PullIntoDescriptor[] = [];
+  #pendingPullIntos: RingBufferType<PullIntoDescriptor> = new RingBuffer();
 
   // A released head's filled bytes when the queue is shared (tee branches),
   // where they cannot go back into the queue. Read before the data at the
@@ -888,10 +892,9 @@ class ByteStreamCursor
     // Descriptors with readerType 'none' are leftovers from releaseLock or
     // end-of-data settlement. They don't represent active reads and should
     // NOT trigger pull().
-    for (let i = 0; i < this.#pendingPullIntos.length; i++) {
-      if (
-        (this.#pendingPullIntos[i] as PullIntoDescriptor).readerType !== 'none'
-      ) {
+    const pending = this.#pendingPullIntos;
+    for (let i = 0; i < pending.length; i++) {
+      if ((pending.get(i) as PullIntoDescriptor).readerType !== 'none') {
         return true;
       }
     }
@@ -899,7 +902,7 @@ class ByteStreamCursor
   }
 
   get hasPartiallyFulfilledRead(): boolean {
-    const head = this.#pendingPullIntos[0];
+    const head = this.#pendingPullIntos.peek();
     return head !== undefined && head.bytesFilled > 0;
   }
 
@@ -907,13 +910,13 @@ class ByteStreamCursor
   // respondWithNewView() paths (validation, buffer re-transfer and
   // re-pointing happen there, at the trust boundary).
   get headPullInto(): PullIntoDescriptor | undefined {
-    return this.#pendingPullIntos[0];
+    return this.#pendingPullIntos.peek();
   }
 
   // View over the unfilled remainder of the head descriptor — what
   // byobRequest.view exposes to the underlying source.
   get pendingPullIntoView(): Uint8Array | undefined {
-    const head = this.#pendingPullIntos[0];
+    const head = this.#pendingPullIntos.peek();
     if (head === undefined) return undefined;
     return new Uint8Array(
       head.buffer,
@@ -1012,9 +1015,9 @@ class ByteStreamCursor
   // enqueue() step 8.5 for a cursor on a shared queue: a released head's
   // filled bytes move to the prefix, ahead of the chunk being enqueued.
   flushReleasedHead(): void {
-    const head = this.#pendingPullIntos[0];
+    const head = this.#pendingPullIntos.peek();
     if (head === undefined || head.readerType !== 'none') return;
-    ArrayPrototypeShift(this.#pendingPullIntos);
+    this.#pendingPullIntos.shift();
     if (head.bytesFilled === 0) return;
     this.#moveToPrefix(head);
     this.notify();
@@ -1036,13 +1039,13 @@ class ByteStreamCursor
         byteLength: prefix.byteLength,
       };
     }
-    const head = from.#pendingPullIntos[0];
+    const head = from.#pendingPullIntos.peek();
     if (
       head !== undefined &&
       head.readerType === 'none' &&
       head.bytesFilled > 0
     ) {
-      ArrayPrototypePush(this.#pendingPullIntos, {
+      this.#pendingPullIntos.push({
         buffer: ArrayBufferPrototypeSlice(head.buffer, 0),
         bufferByteLength: head.bufferByteLength,
         byteOffset: head.byteOffset,
@@ -1100,7 +1103,7 @@ class ByteStreamCursor
         this.#scheduleEndOfDataSettlement();
       }
     }
-    ArrayPrototypePush(this.#pendingPullIntos, desc);
+    this.#pendingPullIntos.push(desc);
     return desc.promise;
   }
 
@@ -1142,17 +1145,17 @@ class ByteStreamCursor
         this.#scheduleEndOfDataSettlement();
         break;
       }
-      const head = this.#pendingPullIntos[0] as PullIntoDescriptor;
+      const head = this.#pendingPullIntos.peek() as PullIntoDescriptor;
       if (head.readerType === 'none') {
         // A released reader's head never takes new data. enqueue() and
         // respond() remove it before notifying; this is a backstop.
-        ArrayPrototypeShift(this.#pendingPullIntos);
+        this.#pendingPullIntos.shift();
         this.#moveToPrefix(head);
         continue;
       }
       this.#fillFromQueue(head);
       if (head.bytesFilled < head.minimumFill) break; // need more data
-      ArrayPrototypeShift(this.#pendingPullIntos);
+      this.#pendingPullIntos.shift();
       const view = this.#convert(head);
       if (filledPullIntos === undefined) filledPullIntos = [];
       ArrayPrototypePush(filledPullIntos, { desc: head, view });
@@ -1179,8 +1182,9 @@ class ByteStreamCursor
   // — error the stream with TypeError and reject all pending reads. Returns
   // true if the stream was errored (caller should bail out of notify).
   #checkFractionalFillAtClose(): boolean {
-    for (let i = 0; i < this.#pendingPullIntos.length; i++) {
-      const desc = this.#pendingPullIntos[i] as PullIntoDescriptor;
+    const pending = this.#pendingPullIntos;
+    for (let i = 0; i < pending.length; i++) {
+      const desc = pending.get(i) as PullIntoDescriptor;
       if (desc.bytesFilled > 0 && desc.bytesFilled % desc.elementSize !== 0) {
         const e = new TypeError(
           'Insufficient bytes to fill elements in the given view'
@@ -1243,7 +1247,7 @@ class ByteStreamCursor
     if (this.queue.getEntry(this.position) !== CLOSE_SENTINEL) return;
     const pending = this.#pendingPullIntos;
     for (let i = 0; i < pending.length; i++) {
-      const desc = pending[i] as PullIntoDescriptor;
+      const desc = pending.get(i) as PullIntoDescriptor;
       // 'none': released reader (or an auto-allocate read already
       // resolved by #resolveDefaultPullIntosAsDone, or a BYOB read settled
       // by an earlier invocation) — nothing to settle.
@@ -1280,8 +1284,9 @@ class ByteStreamCursor
   // respond(0) finds it and doesn't throw. commitPullIntosOnClose skips
   // already-resolved descriptors.
   #resolveDefaultPullIntosAsDone(): void {
-    for (let i = 0; i < this.#pendingPullIntos.length; i++) {
-      const desc = this.#pendingPullIntos[i] as PullIntoDescriptor;
+    const pending = this.#pendingPullIntos;
+    for (let i = 0; i < pending.length; i++) {
+      const desc = pending.get(i) as PullIntoDescriptor;
       if (desc.readerType === 'default') {
         desc.resolve(createReadResult(undefined, true));
         desc.readerType = 'none'; // mark as consumed
@@ -1293,7 +1298,7 @@ class ByteStreamCursor
   // already validated bytesWritten, re-transferred the buffer, and
   // re-pointed head.buffer at the transferred copy.
   respondBYOB(bytesWritten: number): void {
-    const head = this.#pendingPullIntos[0];
+    const head = this.#pendingPullIntos.peek();
     if (head === undefined) {
       throw new TypeError('No pending BYOB request to respond to');
     }
@@ -1305,7 +1310,7 @@ class ByteStreamCursor
     // promise. Subsequent descriptors are then filled from the queue.
     // Shift BEFORE enqueue to avoid re-entrant notify filling the same head.
     if (head.readerType === 'none') {
-      ArrayPrototypeShift(this.#pendingPullIntos);
+      this.#pendingPullIntos.shift();
       if (head.bytesFilled > 0) {
         // Clone (not transfer) the filled portion into a new queue entry.
         // enqueue triggers notify() which fills subsequent descriptors.
@@ -1335,7 +1340,7 @@ class ByteStreamCursor
     // Remove from pending FIRST, then split remainder and enqueue.
     // Order matters: enqueue triggers notify() on live cursors, and the
     // head must already be gone to avoid re-entrant filling.
-    ArrayPrototypeShift(this.#pendingPullIntos);
+    this.#pendingPullIntos.shift();
     const remainderSize = head.bytesFilled % head.elementSize;
     if (remainderSize > 0) {
       // The remainder bytes live at the END of the filled region.
@@ -1377,9 +1382,9 @@ class ByteStreamCursor
   // controller.close() throws for it.
   commitPullIntosOnClose(): void {
     const pending = this.#pendingPullIntos;
-    this.#pendingPullIntos = [];
+    this.#pendingPullIntos = new RingBuffer();
     for (let i = 0; i < pending.length; i++) {
-      const desc = pending[i] as PullIntoDescriptor;
+      const desc = pending.get(i) as PullIntoDescriptor;
       // Skip already-resolved descriptors (auto-allocate close and deferred
       // end-of-data paths set readerType to 'none').
       if (desc.readerType === 'none') continue;
@@ -1394,9 +1399,9 @@ class ByteStreamCursor
   // is added. This ensures the released descriptor is processed eagerly.
   drainNoneDescriptors(): void {
     while (this.#pendingPullIntos.length > 0) {
-      const head = this.#pendingPullIntos[0] as PullIntoDescriptor;
+      const head = this.#pendingPullIntos.peek() as PullIntoDescriptor;
       if (head.readerType !== 'none') break;
-      ArrayPrototypeShift(this.#pendingPullIntos);
+      this.#pendingPullIntos.shift();
       if (head.bytesFilled > 0) {
         // Clone the filled portion into a new queue entry.
         this.queue.enqueue({
@@ -1420,10 +1425,9 @@ class ByteStreamCursor
   // so the controller can fulfill the read directly from the enqueued
   // chunk (bypassing the queue and the auto-allocate buffer).
   shiftAutoAllocateDescriptor(): PullIntoDescriptor | undefined {
-    if (this.#pendingPullIntos.length === 0) return undefined;
-    const head = this.#pendingPullIntos[0] as PullIntoDescriptor;
-    if (head.readerType !== 'default') return undefined;
-    ArrayPrototypeShift(this.#pendingPullIntos);
+    const head = this.#pendingPullIntos.peek();
+    if (head === undefined || head.readerType !== 'default') return undefined;
+    this.#pendingPullIntos.shift();
     return head;
   }
 
@@ -1431,9 +1435,9 @@ class ByteStreamCursor
   override errorAllReads(reason: unknown): void {
     this.#prefix = undefined;
     const pending = this.#pendingPullIntos;
-    this.#pendingPullIntos = [];
+    this.#pendingPullIntos = new RingBuffer();
     for (let i = 0; i < pending.length; i++) {
-      const desc = pending[i] as PullIntoDescriptor;
+      const desc = pending.get(i) as PullIntoDescriptor;
       desc.reject(reason);
     }
     super.errorAllReads(reason);
@@ -1445,9 +1449,9 @@ class ByteStreamCursor
   override resolveAllReadsAsDone(): void {
     this.#prefix = undefined;
     const pending = this.#pendingPullIntos;
-    this.#pendingPullIntos = [];
+    this.#pendingPullIntos = new RingBuffer();
     for (let i = 0; i < pending.length; i++) {
-      const desc = pending[i] as PullIntoDescriptor;
+      const desc = pending.get(i) as PullIntoDescriptor;
       desc.resolve(createReadResult(undefined, true));
     }
     super.resolveAllReadsAsDone();
@@ -1461,15 +1465,17 @@ class ByteStreamCursor
     // is NOT invalidated.
     const pending = this.#pendingPullIntos;
     for (let i = 0; i < pending.length; i++) {
-      const desc = pending[i] as PullIntoDescriptor;
+      const desc = pending.get(i) as PullIntoDescriptor;
       if (desc.reader === reader) {
         desc.reject(reason);
       }
     }
-    if (pending.length > 0) {
-      const head = pending[0] as PullIntoDescriptor;
+    const head = pending.peek();
+    if (head !== undefined) {
       head.readerType = 'none';
-      this.#pendingPullIntos = [head];
+      const kept: RingBufferType<PullIntoDescriptor> = new RingBuffer();
+      kept.push(head);
+      this.#pendingPullIntos = kept;
     }
     super.cancelReadsForReader(reader, reason);
   }
@@ -1492,23 +1498,6 @@ class ByteStreamCursor
     ]);
   }
 
-  // Total bytes available to this cursor: the prefix, plus the queue up to
-  // the sentinel, accounting for the partially consumed current entry.
-  #availableBytes(): number {
-    let available = 0;
-    for (let i = this.position; i < this.queue.length; i++) {
-      const slot = this.queue.getEntry(i);
-      if (!isQueueEntry(slot)) break; // sentinel is always last
-      available += slot.value.byteLength;
-    }
-    const prefix = this.#prefix;
-    return (
-      available -
-      this.byteOffset +
-      (prefix === undefined ? 0 : prefix.byteLength)
-    );
-  }
-
   // Fill `desc` from the queue starting at (position, byteOffset). Mirrors
   // ReadableByteStreamControllerFillPullIntoDescriptorFromQueue:
   //   - if queued data reaches an element-aligned boundary >= minimumFill,
@@ -1520,7 +1509,10 @@ class ByteStreamCursor
   // position/byteOffset for consumed bytes (which triggers GC + backpressure
   // refresh via setConsumed).
   #fillFromQueue(desc: PullIntoDescriptor): void {
-    const available = this.#availableBytes();
+    // Byte entries are sized by byteLength, so the running total is exactly
+    // the bytes ahead of this cursor: the prefix, plus the queue up to the
+    // sentinel, less the consumed part of the current entry.
+    const available = this.remainingSize;
     if (available <= 0) return;
 
     const maxBytesToCopy = MathMin(
@@ -1556,9 +1548,11 @@ class ByteStreamCursor
     let pos = this.position;
     let off = this.byteOffset;
     while (remaining > 0) {
-      // Guaranteed to be a data entry by the #availableBytes computation.
-      const entry = (this.queue.getEntry(pos) as QueueEntry<ByteQueueEntry>)
-        .value;
+      const slot = this.queue.getEntry(pos);
+      // The running total guarantees a data entry here; running out means
+      // the accounting is off, and stopping loses less than reading on.
+      if (!isQueueEntry(slot)) break;
+      const entry = slot.value;
       const n = MathMin(entry.byteLength - off, remaining);
       const dest = new Uint8Array(
         desc.buffer,

@@ -18,14 +18,16 @@ import type {
   WritableStreamDefaultController as WritableStreamDefaultControllerType,
   WritableStreamDefaultWriter as WritableStreamDefaultWriterType,
 } from './types';
+import type {
+  RingBuffer as RingBufferType,
+  RingBufferConstructor,
+} from './ring-buffer';
 
 const {
   AbortController,
   AbortControllerAbort,
   AbortControllerSignalGet,
   ArrayBufferPrototypeByteLengthGet,
-  ArrayPrototypePush,
-  ArrayPrototypeShift,
   DataViewPrototypeGetByteLength,
   NumberIsNaN,
   ObjectDefineProperties,
@@ -52,13 +54,17 @@ const {
   markPromiseHandled,
 } = utils;
 
-// The native backend (leaf module — see the fence conventions in
-// native.ts). The cast restores the real shape.
+// The native backend (see the fence conventions in native.ts). The cast
+// restores the real shape.
 import type { NativeStreamInternals } from './native';
 const { nativeStreamInternals } = require('webstreams/native') as {
   nativeStreamInternals: NativeStreamInternals;
 };
 const { kExtractNativeSink, isNativeUnderlyingSink } = nativeStreamInternals;
+
+const { RingBuffer } = require('webstreams/ring-buffer') as {
+  RingBuffer: RingBufferConstructor;
+};
 
 const kPrivateSymbol: symbol = Symbol('private');
 // Marker for a queued close request in the controller's FIFO.
@@ -317,7 +323,8 @@ class WritableStream<W = unknown> {
   #writer?: WritableStreamDefaultWriter<W> | undefined;
   #state: WritableState = 'writable';
   #storedError: unknown = undefined;
-  #writeRequests: PromiseWithResolversType<void>[] = [];
+  #writeRequests: RingBufferType<PromiseWithResolversType<void>> =
+    new RingBuffer();
   #inFlightWriteRequest: PromiseWithResolversType<void> | undefined;
   #closeRequest: PromiseWithResolversType<void> | undefined;
   #inFlightCloseRequest: PromiseWithResolversType<void> | undefined;
@@ -482,7 +489,7 @@ class WritableStream<W = unknown> {
     writableStreamAddWriteRequest = (stream) => {
       // Caller guarantees: locked and state 'writable'.
       const request = PromiseWithResolvers() as PromiseWithResolversType<void>;
-      ArrayPrototypePush(stream.#writeRequests, request);
+      stream.#writeRequests.push(request);
       return request.promise;
     };
 
@@ -617,9 +624,9 @@ class WritableStream<W = unknown> {
       }
       const storedError = stream.#storedError;
       const writeRequests = stream.#writeRequests;
-      stream.#writeRequests = [];
+      stream.#writeRequests = new RingBuffer();
       for (let i = 0; i < writeRequests.length; i++) {
-        const request = writeRequests[i] as PromiseWithResolversType<void>;
+        const request = writeRequests.get(i) as PromiseWithResolversType<void>;
         request.reject(storedError);
       }
       const abortRequest = stream.#pendingAbortRequest;
@@ -669,9 +676,8 @@ class WritableStream<W = unknown> {
 
     writableStreamMarkFirstWriteRequestInFlight = (stream) => {
       // assert: no in-flight write; writeRequests non-empty
-      stream.#inFlightWriteRequest = ArrayPrototypeShift(
-        stream.#writeRequests
-      ) as PromiseWithResolversType<void>;
+      stream.#inFlightWriteRequest =
+        stream.#writeRequests.shift() as PromiseWithResolversType<void>;
     };
 
     writableStreamFinishInFlightWrite = (stream) => {
@@ -915,7 +921,7 @@ class WritableStreamDefaultController<
   W = unknown,
 > implements WritableStreamDefaultControllerType {
   #stream: WritableStream<W>;
-  #queue: QueuedWrite<W>[] = [];
+  #queue: RingBufferType<QueuedWrite<W>> = new RingBuffer();
   #queueTotalSize: number = 0;
   #started: boolean = false;
   #strategyHWM: number;
@@ -946,14 +952,14 @@ class WritableStreamDefaultController<
       controller: WritableStreamDefaultController<W>
     ) => {
       const queue = controller.#queue;
-      controller.#queue = [];
+      controller.#queue = new RingBuffer();
       controller.#queueTotalSize = 0;
       // Reject any queued flush requests: the writes ahead of them can no
       // longer complete. The stored error is already set — the erroring
       // machinery assigns it before invoking the error steps.
       const error = getWritableStreamStoredError(controller.#stream);
       for (let i = 0; i < queue.length; i++) {
-        const entry = queue[i] as QueuedWrite<W>;
+        const entry = queue.get(i) as QueuedWrite<W>;
         if (entry.value === kFlushMarker) {
           (entry.flushRequest as PromiseWithResolversType<void>).reject(error);
         }
@@ -970,10 +976,7 @@ class WritableStreamDefaultController<
 
     controllerClose = (controller) => {
       // Enqueue the close marker (size 0) and advance.
-      ArrayPrototypePush(controller.#queue, {
-        value: kCloseMarker,
-        size: 0,
-      });
+      controller.#queue.push({ value: kCloseMarker, size: 0 });
       controller.#advanceQueueIfNeeded();
     };
 
@@ -992,7 +995,7 @@ class WritableStreamDefaultController<
         return PromiseResolve() as Promise<void>;
       }
       const request = PromiseWithResolvers() as PromiseWithResolversType<void>;
-      ArrayPrototypePush(controller.#queue, {
+      controller.#queue.push({
         value: kFlushMarker,
         size: 0,
         flushRequest: request,
@@ -1031,7 +1034,7 @@ class WritableStreamDefaultController<
       chunk: W,
       chunkSize: number
     ) => {
-      ArrayPrototypePush(controller.#queue, { value: chunk, size: chunkSize });
+      controller.#queue.push({ value: chunk, size: chunkSize });
       controller.#queueTotalSize += chunkSize;
       const stream = controller.#stream;
       if (
@@ -1180,7 +1183,7 @@ class WritableStreamDefaultController<
       writableStreamFinishErroringIfNeeded(stream);
       return;
     }
-    const head = this.#queue[0];
+    const head = this.#queue.peek();
     if (head === undefined) return;
     if (head.value === kCloseMarker) {
       this.#processClose();
@@ -1194,7 +1197,7 @@ class WritableStreamDefaultController<
   #processFlush(): void {
     // Every write ahead of the marker has completed (queue processing is
     // strictly serial); the marker itself involves no sink operation.
-    const entry = ArrayPrototypeShift(this.#queue) as QueuedWrite<W>;
+    const entry = this.#queue.shift() as QueuedWrite<W>;
     (entry.flushRequest as PromiseWithResolversType<void>).resolve();
     // Consecutive markers (or a close queued behind the flush) continue
     // processing in the same turn.
@@ -1205,7 +1208,7 @@ class WritableStreamDefaultController<
     const stream = this.#stream;
     writableStreamMarkCloseRequestInFlight(stream);
     // Dequeue the close marker; the queue must then be empty.
-    ArrayPrototypeShift(this.#queue);
+    this.#queue.shift();
     this.#queueTotalSize = 0;
     const closeAlgorithm = this.#closeAlgorithm;
     this.#clearAlgorithms();
@@ -1270,7 +1273,7 @@ class WritableStreamDefaultController<
     const stream = this.#stream;
     finish();
     const state = getWritableStreamState(stream);
-    const entry = ArrayPrototypeShift(this.#queue) as QueuedWrite<W>;
+    const entry = this.#queue.shift() as QueuedWrite<W>;
     this.#queueTotalSize -= entry.size;
     if (this.#queueTotalSize < 0) this.#queueTotalSize = 0;
     if (!writableStreamCloseQueuedOrInFlight(stream) && state === 'writable') {

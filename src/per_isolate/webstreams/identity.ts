@@ -63,12 +63,14 @@ import type {
   ReadableStream as ReadableStreamType,
   WritableStream as WritableStreamType,
 } from './types';
+import type {
+  RingBuffer as RingBufferType,
+  RingBufferConstructor,
+} from './ring-buffer';
 
 const {
   ArrayBuffer,
   ArrayBufferPrototypeByteLengthGet,
-  ArrayPrototypePush,
-  ArrayPrototypeShift,
   BigInt,
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
@@ -107,6 +109,9 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
+const { RingBuffer } = require('webstreams/ring-buffer') as {
+  RingBuffer: RingBufferConstructor;
+};
 
 const writableControllerError = uncurryThis(
   WritableStreamDefaultController.prototype.error
@@ -367,7 +372,7 @@ class IdentityTransformStream {
     type SnapshotEntry =
       | { ok: true; copied: Uint8Array | undefined }
       | { ok: false; error: unknown };
-    const snapshots: SnapshotEntry[] = [];
+    const snapshots: RingBufferType<SnapshotEntry> = new RingBuffer();
     // A user-supplied highWaterMark of -0 is normalized to +0 so it cannot
     // surface as a negative-zero desiredSize; the C++ implementation's
     // uint64 coercion normalizes it the same way. For a number, adding 0
@@ -390,10 +395,10 @@ class IdentityTransformStream {
         // Size is computed before the push: if it ever threw, nothing
         // would have been queued and the FIFO could not desync.
         const size = explicitHighWaterMark !== undefined ? byteSize(chunk) : 1;
-        ArrayPrototypePush(snapshots, { ok: true, copied });
+        snapshots.push({ ok: true, copied });
         return size;
       } catch (error) {
-        ArrayPrototypePush(snapshots, { ok: false, error });
+        snapshots.push({ ok: false, error });
         return 1;
       }
     };
@@ -417,7 +422,7 @@ class IdentityTransformStream {
           'IdentityTransformStream internal error: snapshot queue desync'
         );
       }
-      const entry = ArrayPrototypeShift(snapshots) as SnapshotEntry;
+      const entry = snapshots.shift() as SnapshotEntry;
       // A recorded validation error surfaces here, at its FIFO turn, as a
       // NON-FATAL write rejection: this write's promise rejects while the
       // stream stays usable and queued writes behind it still deliver —
@@ -437,7 +442,7 @@ class IdentityTransformStream {
           const err = new RangeError(
             'Attempt to write too many bytes through a FixedLengthStream.'
           );
-          snapshots.length = 0;
+          snapshots.clear();
           const rc = this.#readableController;
           if (rc !== undefined) byteControllerError(rc, err);
           throw err;
@@ -473,7 +478,7 @@ class IdentityTransformStream {
         const err = new RangeError(
           'FixedLengthStream did not see all expected bytes before close().'
         );
-        snapshots.length = 0;
+        snapshots.clear();
         const rc = this.#readableController;
         if (rc !== undefined) byteControllerError(rc, err);
         throw err;
@@ -482,7 +487,7 @@ class IdentityTransformStream {
       if (rc !== undefined) byteControllerClose(rc);
     };
     const sinkAbort = (reason: unknown): void => {
-      snapshots.length = 0;
+      snapshots.clear();
       const rc = this.#readableController;
       if (rc !== undefined) byteControllerError(rc, reason);
     };
@@ -515,7 +520,7 @@ class IdentityTransformStream {
       return this.#backpressureChange.promise;
     };
     const sourceCancel = (reason: unknown): void => {
-      snapshots.length = 0;
+      snapshots.clear();
       this.#errorWritableAndUnblockWrite(reason);
     };
 
