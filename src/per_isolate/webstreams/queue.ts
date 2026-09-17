@@ -58,7 +58,8 @@ import type {
 } from './ring-buffer';
 
 const {
-  ArrayBufferPrototypeSlice,
+  ArrayBuffer,
+  ArrayBufferPrototypeByteLengthGet,
   ArrayBufferPrototypeTransfer,
   ArrayPrototypePush,
   FinalizationRegistry,
@@ -75,7 +76,6 @@ const {
   Symbol,
   TypeError,
   TypedArrayPrototypeSet,
-  TypedArrayPrototypeSlice,
   Uint8Array,
   WeakRef,
   WeakRefPrototypeDeref,
@@ -103,6 +103,22 @@ export function createReadResult<T>(
   done: boolean
 ): { value: T | undefined; done: boolean } {
   return { value, done };
+}
+
+// Spec CloneArrayBuffer: a fresh %ArrayBuffer% holding the given bytes.
+// ArrayBuffer.prototype.slice would consult the (user-patchable) species
+// constructor instead.
+function cloneArrayBuffer(
+  buffer: ArrayBuffer,
+  byteOffset: number,
+  byteLength: number
+): ArrayBuffer {
+  const copy = new ArrayBuffer(byteLength);
+  TypedArrayPrototypeSet(
+    new Uint8Array(copy),
+    new Uint8Array(buffer, byteOffset, byteLength)
+  );
+  return copy;
 }
 
 // ---------------------------------------------------------------------------
@@ -945,15 +961,12 @@ class ByteStreamCursor
     entry: QueueEntry<ByteQueueEntry>
   ): Uint8Array {
     const v = entry.value;
-    const view = new Uint8Array(
-      v.buffer,
-      v.byteOffset + this.byteOffset,
-      v.byteLength - this.byteOffset
-    );
+    const byteOffset = v.byteOffset + this.byteOffset;
+    const byteLength = v.byteLength - this.byteOffset;
     if (this.queue.hasOtherLiveCursorAtOrBefore(this, this.position)) {
-      return TypedArrayPrototypeSlice(view) as Uint8Array;
+      return new Uint8Array(cloneArrayBuffer(v.buffer, byteOffset, byteLength));
     }
-    return view;
+    return new Uint8Array(v.buffer, byteOffset, byteLength);
   }
 
   // The prefix is delivered whole, zero-copy (no other cursor holds it).
@@ -977,11 +990,7 @@ class ByteStreamCursor
       );
     }
     this.#prefix = {
-      buffer: ArrayBufferPrototypeSlice(
-        desc.buffer,
-        desc.byteOffset,
-        desc.byteOffset + desc.bytesFilled
-      ),
+      buffer: cloneArrayBuffer(desc.buffer, desc.byteOffset, desc.bytesFilled),
       byteOffset: 0,
       byteLength: desc.bytesFilled,
     };
@@ -1030,10 +1039,10 @@ class ByteStreamCursor
     if (prefix !== undefined) {
       // Already counted in the remainingSize this cursor started with.
       this.#prefix = {
-        buffer: ArrayBufferPrototypeSlice(
+        buffer: cloneArrayBuffer(
           prefix.buffer,
           prefix.byteOffset,
-          prefix.byteOffset + prefix.byteLength
+          prefix.byteLength
         ),
         byteOffset: 0,
         byteLength: prefix.byteLength,
@@ -1046,7 +1055,11 @@ class ByteStreamCursor
       head.bytesFilled > 0
     ) {
       this.#pendingPullIntos.push({
-        buffer: ArrayBufferPrototypeSlice(head.buffer, 0),
+        buffer: cloneArrayBuffer(
+          head.buffer,
+          0,
+          ArrayBufferPrototypeByteLengthGet(head.buffer)
+        ),
         bufferByteLength: head.bufferByteLength,
         byteOffset: head.byteOffset,
         byteLength: head.byteLength,
@@ -1316,10 +1329,10 @@ class ByteStreamCursor
         // enqueue triggers notify() which fills subsequent descriptors.
         this.queue.enqueue({
           value: {
-            buffer: ArrayBufferPrototypeSlice(
+            buffer: cloneArrayBuffer(
               head.buffer,
               head.byteOffset,
-              head.byteOffset + head.bytesFilled
+              head.bytesFilled
             ),
             byteOffset: 0,
             byteLength: head.bytesFilled,
@@ -1345,15 +1358,14 @@ class ByteStreamCursor
     if (remainderSize > 0) {
       // The remainder bytes live at the END of the filled region.
       const end = head.byteOffset + head.bytesFilled;
-      // Enqueue the remainder as a new queue entry (a slice of the
-      // transferred buffer). The spec uses CloneArrayBuffer here; we use
-      // slice since the buffer is already the transferred copy.
+      // Enqueue the remainder as a new queue entry (spec CloneArrayBuffer of
+      // the transferred buffer's tail).
       this.queue.enqueue({
         value: {
-          buffer: ArrayBufferPrototypeSlice(
+          buffer: cloneArrayBuffer(
             head.buffer,
             end - remainderSize,
-            end
+            remainderSize
           ),
           byteOffset: 0,
           byteLength: remainderSize,
@@ -1406,10 +1418,10 @@ class ByteStreamCursor
         // Clone the filled portion into a new queue entry.
         this.queue.enqueue({
           value: {
-            buffer: ArrayBufferPrototypeSlice(
+            buffer: cloneArrayBuffer(
               head.buffer,
               head.byteOffset,
-              head.byteOffset + head.bytesFilled
+              head.bytesFilled
             ),
             byteOffset: 0,
             byteLength: head.bytesFilled,
