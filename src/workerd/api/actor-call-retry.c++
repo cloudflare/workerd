@@ -142,7 +142,7 @@ kj::Duration ActorCallRetryState::retryDelay() {
     getEntropy(kj::asBytes(seed));
     return std::mt19937_64(seed);
   }();
-  auto maximum = INITIAL_BACKOFF * (1u << (attemptCount - 1));
+  auto maximum = kj::min(INITIAL_BACKOFF * (1u << (attemptCount - 1)), MAX_BACKOFF);
   std::uniform_int_distribution<uint64_t> distribution(0, maximum / kj::NANOSECONDS);
   return distribution(generator) * kj::NANOSECONDS;
 }
