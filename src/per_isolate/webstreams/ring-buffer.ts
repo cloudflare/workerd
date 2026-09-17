@@ -7,12 +7,11 @@
 // backing store, which made every backlog quadratic past ~20k entries.
 //
 // The backing store has a power-of-two capacity (index math is a mask),
-// is allocated on the first push, and doubles when full. Every read is
+// is allocated on the first push, doubles when full, and shrinks to fit
+// once occupancy falls to a quarter (see #shrinkIfSparse). Every read is
 // bounds-checked against #size and consumed slots are overwritten with
 // undefined, so no access ever reads a hole: the buffer is immune to
 // Array.prototype[N] pollution. Leaf module: requires nothing.
-
-const { ArrayPrototypePush } = primordials;
 
 const kInitialCapacity = 16;
 
@@ -28,7 +27,10 @@ class RingBuffer<T> {
 
   // Append at the tail. Amortized O(1).
   push(item: T): void {
-    if (this.#size > this.#mask) this.#grow();
+    if (this.#size > this.#mask) {
+      const capacity = this.#mask + 1;
+      this.#resize(capacity === 0 ? kInitialCapacity : capacity * 2);
+    }
     this.#backing[(this.#head + this.#size) & this.#mask] = item;
     this.#size++;
   }
@@ -40,6 +42,7 @@ class RingBuffer<T> {
     const item = this.#backing[index];
     this.#backing[index] = undefined;
     this.#size--;
+    this.#shrinkIfSparse();
     return item;
   }
 
@@ -50,6 +53,7 @@ class RingBuffer<T> {
     this.#backing[this.#head] = undefined;
     this.#head = (this.#head + 1) & this.#mask;
     this.#size--;
+    this.#shrinkIfSparse();
     return item;
   }
 
@@ -65,15 +69,24 @@ class RingBuffer<T> {
     return this.#backing[(this.#head + index) & this.#mask];
   }
 
-  // Drop `count` items from the head. O(count). The backing store is kept.
+  // Drop `count` items from the head. O(count).
   trimFront(count: number): void {
     if (count <= 0) return;
     if (count > this.#size) count = this.#size;
+    const size = this.#size - count;
+    if (this.#isSparse(size)) {
+      // The store is about to be replaced or released; the dropped slots
+      // go with it, so there is no need to null them out.
+      this.#size = size;
+      this.#head = (this.#head + count) & this.#mask;
+      this.#shrinkIfSparse();
+      return;
+    }
     for (let i = 0; i < count; i++) {
       this.#backing[(this.#head + i) & this.#mask] = undefined;
     }
-    this.#size -= count;
-    this.#head = this.#size === 0 ? 0 : (this.#head + count) & this.#mask;
+    this.#size = size;
+    this.#head = size === 0 ? 0 : (this.#head + count) & this.#mask;
   }
 
   // Drop everything, including the backing store. O(1); for terminal
@@ -86,23 +99,49 @@ class RingBuffer<T> {
     this.#mask = -1;
   }
 
-  // Double the capacity, linearizing the items from the head. The new
-  // store is filled by push: new Array(n) above ~32k elements would start
-  // in V8's dictionary mode, whereas a pushed array stays fast and packed.
-  #grow(): void {
+  // Whether a store above the initial capacity would be at most a quarter
+  // full at `size` items.
+  #isSparse(size: number): boolean {
+    const capacity = this.#mask + 1;
+    return capacity > kInitialCapacity && size <= capacity >> 2;
+  }
+
+  // Shrink a sparse store to the smallest power of two holding twice the
+  // occupancy, or release it when empty. Growth leaves a store half full
+  // and shrinking leaves it between a quarter and half full, so the next
+  // resize in either direction is at least a quarter of the capacity's
+  // worth of operations away: each resize is paid for by the operations
+  // since the previous one (amortized O(1)), and a buffer oscillating
+  // across a threshold cannot resize on every operation. Stores at the
+  // initial capacity are never shrunk, so small steady-state buffers keep
+  // their slots.
+  #shrinkIfSparse(): void {
+    if (!this.#isSparse(this.#size)) return;
+    if (this.#size === 0) {
+      this.clear();
+      return;
+    }
+    let capacity = kInitialCapacity;
+    while (capacity < this.#size * 2) capacity *= 2;
+    this.#resize(capacity);
+  }
+
+  // Replace the store with one of `capacity` slots holding the items from
+  // index 0. Setting an empty array's length pre-sizes its store in one
+  // allocation and keeps fast elements (new Array(n) above ~32k elements
+  // would start in V8's dictionary mode); the items are then copied within
+  // bounds. The unwritten slots are holes, which no read ever reaches.
+  #resize(capacity: number): void {
     const backing = this.#backing;
     const head = this.#head;
     const size = this.#size;
     const mask = this.#mask;
-    const capacity = mask + 1 === 0 ? kInitialCapacity : (mask + 1) * 2;
-    const grown: (T | undefined)[] = [];
+    const resized: (T | undefined)[] = [];
+    resized.length = capacity;
     for (let i = 0; i < size; i++) {
-      ArrayPrototypePush(grown, backing[(head + i) & mask]);
+      resized[i] = backing[(head + i) & mask];
     }
-    for (let i = size; i < capacity; i++) {
-      ArrayPrototypePush(grown, undefined);
-    }
-    this.#backing = grown;
+    this.#backing = resized;
     this.#head = 0;
     this.#mask = capacity - 1;
   }
