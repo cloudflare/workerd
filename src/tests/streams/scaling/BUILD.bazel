@@ -1,0 +1,27 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The queue scaling suite runs the same test modules under two configs:
+# scaling-cpp against the C++ implementation, scaling-ts against the
+# TypeScript implementation. Each test times a shape at n and at a
+# multiple of n, so the cells run with a longer timeout, skip the sanitizer
+# builds, and have no @gc-stress variant (a GC per continuation would drown
+# the timing).
+
+scaling_suite_srcs = glob(["*.js"]) + ["scaling-modules.capnp"]
+
+wd_test(
+    timeout = "long",
+    src = "scaling-cpp.wd-test",
+    data = scaling_suite_srcs,
+    generate_gc_stress_variant = False,
+    tags = ["no-asan"],
+)
+
+wd_test(
+    timeout = "long",
+    src = "scaling-ts.wd-test",
+    args = ["--experimental"],
+    data = scaling_suite_srcs,
+    generate_gc_stress_variant = False,
+    tags = ["no-asan"],
+)
