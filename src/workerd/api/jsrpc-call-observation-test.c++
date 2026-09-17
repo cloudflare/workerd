@@ -41,6 +41,8 @@ struct Observation {
 
 struct ObservationState {
   kj::Vector<kj::Own<Observation>> observations;
+  size_t replayMemoryBytes = 0;
+  size_t peakReplayMemoryBytes = 0;
 };
 
 class RecordingCallObserver final: public OutgoingActorCallObserver {
@@ -76,6 +78,12 @@ class RecordingObserver final: public RequestObserver {
     auto& observation =
         *state.observations.add(kj::heap<Observation>(payloadReplayable, targetRetryable));
     return kj::heap<RecordingCallObserver>(observation);
+  }
+
+  kj::Own<void> trackActorCallReplayMemory(size_t bytes) override {
+    state.replayMemoryBytes += bytes;
+    state.peakReplayMemoryBytes = kj::max(state.peakReplayMemoryBytes, state.replayMemoryBytes);
+    return kj::heap(kj::defer([&state = state, bytes]() { state.replayMemoryBytes -= bytes; }));
   }
 
  private:
@@ -142,6 +150,7 @@ class Harness {
       .waitScope = io.waitScope,
       .featureFlags = flags.asReader(),
       .useRealTimers = false,
+      .autogates = kj::arr("durable-object-retries-fetch"_kj, "durable-object-retries-jsrpc"_kj),
       .requestObserverFactory =
           kj::Function<kj::Own<RequestObserver>()>([this]() -> kj::Own<RequestObserver> {
       return kj::refcounted<RecordingObserver>(state);
@@ -228,7 +237,9 @@ KJ_TEST("concurrent RPC calls settling out of order keep their own observations"
     auto [fetcher, factory] = harness.makeFetcher(env);
     auto release = factory.holdNextSession();
     auto held = Harness::call(env, *fetcher, "echo"_kj, env.js.num(1));
+    auto heldBytes = harness.state.replayMemoryBytes;
     auto immediate = Harness::call(env, *fetcher, "echo"_kj, Harness::makeStub(env));
+    KJ_EXPECT(harness.state.replayMemoryBytes == heldBytes);
     return kj::mv(immediate)
         .then([&harness, release = kj::mv(release)]() mutable {
       auto& observations = harness.state.observations;
@@ -249,13 +260,18 @@ KJ_TEST("concurrent RPC calls settling out of order keep their own observations"
   KJ_EXPECT(observations[1]->payloadReplayable == ActorCallPayloadReplayable::NO);
   KJ_EXPECT(observations[1]->targetRetryable == ActorCallTargetRetryable::YES);
   KJ_EXPECT(observations[1]->settlement == Settlement::SUCCESS);
+  KJ_EXPECT(harness.state.replayMemoryBytes == 0);
 }
 
 KJ_TEST("an RPC call to an actor that cannot retry is observed as such") {
   Harness harness;
   harness.sender->runInIoContext([&](const TestFixture::Environment& env) {
-    auto fetcher = harness.makeFetcher(env, ActorCallTargetRetryable::NO).fetcher;
-    return Harness::call(env, *fetcher, "echo"_kj, env.js.num(1)).attach(kj::mv(fetcher));
+    auto [fetcher, factory] = harness.makeFetcher(env, ActorCallTargetRetryable::NO);
+    auto release = factory.holdNextSession();
+    auto call = Harness::call(env, *fetcher, "echo"_kj, env.js.num(1));
+    KJ_EXPECT(harness.state.replayMemoryBytes == 0);
+    release->fulfill();
+    return kj::mv(call).attach(kj::mv(fetcher));
   });
 
   auto& observations = harness.state.observations;
@@ -263,6 +279,35 @@ KJ_TEST("an RPC call to an actor that cannot retry is observed as such") {
   KJ_EXPECT(observations[0]->payloadReplayable == ActorCallPayloadReplayable::YES);
   KJ_EXPECT(observations[0]->targetRetryable == ActorCallTargetRetryable::NO);
   KJ_EXPECT(observations[0]->settlement == Settlement::SUCCESS);
+}
+
+KJ_TEST("concurrent replayable RPC calls track projected replay memory independently") {
+  Harness harness;
+  harness.sender->runInIoContext([&](const TestFixture::Environment& env) {
+    auto [fetcher, factory] = harness.makeFetcher(env);
+    auto releaseFirst = factory.holdNextSession();
+    auto first = Harness::call(env, *fetcher, "echo"_kj, env.js.str("first"_kj));
+    auto firstBytes = harness.state.replayMemoryBytes;
+    auto releaseSecond = factory.holdNextSession();
+    auto second = Harness::call(env, *fetcher, "echo"_kj,
+        env.js.str("a payload large enough to produce a different serialized size"_kj));
+    auto secondBytes = harness.state.replayMemoryBytes - firstBytes;
+
+    KJ_EXPECT(firstBytes > JsRpcCallPlan::REPLAY_MEMORY_OVERHEAD);
+    KJ_EXPECT(secondBytes > firstBytes);
+    KJ_EXPECT(harness.state.peakReplayMemoryBytes == firstBytes + secondBytes);
+
+    releaseFirst->fulfill();
+    return kj::mv(first)
+        .then([&harness, secondBytes, releaseSecond = kj::mv(releaseSecond)]() mutable {
+      KJ_EXPECT(harness.state.replayMemoryBytes == secondBytes);
+      releaseSecond->fulfill();
+    }).then([second = kj::mv(second)]() mutable {
+      return kj::mv(second);
+    }).attach(kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(harness.state.replayMemoryBytes == 0);
 }
 
 KJ_TEST("an RPC call through an actor result pipeline is observed as non-retryable") {
@@ -282,6 +327,43 @@ KJ_TEST("an RPC call through an actor result pipeline is observed as non-retryab
   KJ_EXPECT(observations[1]->payloadReplayable == ActorCallPayloadReplayable::YES);
   KJ_EXPECT(observations[1]->targetRetryable == ActorCallTargetRetryable::NO);
   KJ_EXPECT(observations[1]->settlement == Settlement::SUCCESS);
+}
+
+KJ_TEST("using an RPC result pipeline releases projected replay memory") {
+  Harness harness;
+  harness.sender->runInIoContext([&](const TestFixture::Environment& env) {
+    auto [fetcher, factory] = harness.makeFetcher(env);
+    auto release = factory.holdNextSession();
+    auto child = Harness::startCall(env, *fetcher, "makeChild"_kj);
+    KJ_EXPECT(harness.state.replayMemoryBytes >= JsRpcCallPlan::REPLAY_MEMORY_OVERHEAD);
+
+    auto echo = KJ_REQUIRE_NONNULL(child->getProperty(env.js, kj::str("echo")));
+    auto pipelined = Harness::call(env, kj::mv(echo), env.js.num(1));
+    KJ_EXPECT(harness.state.replayMemoryBytes == 0);
+
+    release->fulfill();
+    return kj::mv(pipelined).attach(kj::mv(child), kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(harness.state.replayMemoryBytes == 0);
+}
+
+KJ_TEST("disposing an RPC promise does not release projected replay memory early") {
+  Harness harness;
+  harness.sender->runInIoContext([&](const TestFixture::Environment& env) {
+    auto [fetcher, factory] = harness.makeFetcher(env);
+    auto release = factory.holdNextSession();
+    auto call = Harness::startCall(env, *fetcher, "echo"_kj);
+    auto trackedBytes = harness.state.replayMemoryBytes;
+    KJ_EXPECT(trackedBytes >= JsRpcCallPlan::REPLAY_MEMORY_OVERHEAD);
+
+    call->dispose(env.js);
+    KJ_EXPECT(harness.state.replayMemoryBytes == trackedBytes);
+
+    return kj::Promise<void>(kj::READY_NOW).attach(kj::mv(call), kj::mv(fetcher), kj::mv(release));
+  });
+
+  KJ_EXPECT(harness.state.replayMemoryBytes == 0);
 }
 
 KJ_TEST("an RPC property get is observed with a non-replayable payload") {
@@ -364,6 +446,7 @@ KJ_TEST("tearing down the caller records cancellation rather than a disconnect")
 
   KJ_ASSERT(harness.state.observations.size() == 1);
   KJ_EXPECT(harness.state.observations[0]->settlement == Settlement::CANCELED);
+  KJ_EXPECT(harness.state.replayMemoryBytes == 0);
 }
 
 }  // namespace
