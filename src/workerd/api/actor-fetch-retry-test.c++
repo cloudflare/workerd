@@ -113,6 +113,7 @@ enum class ReplayAction {
   NON_RETRYABLE_FAILURE,
   SLOW_RESPONSE,
   PAUSE_RESPONSE,
+  REDIRECT,
   PAUSE_NEXT_RETRY,
   RETRY_DELAY_EXCEEDS_BUDGET,
   CLIENT_CREATION_FAILURE,
@@ -267,6 +268,13 @@ class ReplayFetchTarget final: public WorkerInterface {
         case ReplayAction::SLOW_RESPONSE:
           co_await kj::mv(KJ_ASSERT_NONNULL(slowResponseDelay));
           break;
+        case ReplayAction::REDIRECT: {
+          auto responseHeaders = headers.cloneShallow();
+          responseHeaders.clear();
+          responseHeaders.setPtr(kj::HttpHeaderId::LOCATION, "/redirected"_kj);
+          response.send(303, "See Other"_kj, responseHeaders, static_cast<uint64_t>(0));
+          co_return;
+        }
         case ReplayAction::PAUSE_RESPONSE:
           KJ_REQUIRE_NONNULL(state.pauseStartedFulfiller)->fulfill();
           co_await kj::Promise<void>(kj::NEVER_DONE);
@@ -1014,6 +1022,63 @@ KJ_TEST("dropping actor fetch during a later backoff reports other") {
   KJ_EXPECT(state.observedRetryCount == 1);
   KJ_ASSERT(state.outcomes.size() == 1);
   KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::OTHER);
+}
+
+KJ_TEST("actor fetch starts a new actor call after a redirect") {
+  ReplayState state{
+    .actions = kj::arr(ReplayAction::AMBIGUOUS, ReplayAction::REDIRECT),
+  };
+
+  KJ_EXPECT(
+      runActorFetch(state, ActorRetryGateEnabled::YES, kj::none, ActorFetchKind::HTTP) == kj::none);
+  KJ_EXPECT(state.requestCount == 3);
+  KJ_EXPECT(state.retryCount == 1);
+  KJ_ASSERT(state.metadata.size() == 3);
+  KJ_EXPECT(state.metadata[0].isRetry == IsActorRetry::NO);
+  KJ_EXPECT(state.metadata[1].isRetry == IsActorRetry::YES);
+  KJ_EXPECT(state.metadata[0].nonce == state.metadata[1].nonce);
+  KJ_EXPECT(state.metadata[2].isRetry == IsActorRetry::NO);
+  KJ_EXPECT(state.metadata[1].nonce != state.metadata[2].nonce);
+  KJ_ASSERT(state.countSubrequests.size() == 3);
+  KJ_EXPECT(state.countSubrequests[0] == CountSubrequest::YES);
+  KJ_EXPECT(state.countSubrequests[1] == CountSubrequest::NO);
+  KJ_EXPECT(state.countSubrequests[2] == CountSubrequest::YES);
+  KJ_ASSERT(state.outcomes.size() == 1);
+  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RECOVERED);
+}
+
+KJ_TEST("actor fetch retry count resets after a redirect") {
+  ReplayState state{
+    .actions = kj::arr(ReplayAction::AMBIGUOUS, ReplayAction::AMBIGUOUS, ReplayAction::AMBIGUOUS,
+        ReplayAction::AMBIGUOUS, ReplayAction::REDIRECT, ReplayAction::AMBIGUOUS),
+  };
+
+  KJ_EXPECT(
+      runActorFetch(state, ActorRetryGateEnabled::YES, kj::none, ActorFetchKind::HTTP) == kj::none);
+  KJ_EXPECT(state.requestCount == 7);
+  KJ_EXPECT(state.retryCount == 5);
+  KJ_ASSERT(state.metadata.size() == 7);
+  KJ_EXPECT(state.metadata[4].nonce != state.metadata[5].nonce);
+  KJ_EXPECT(state.metadata[5].isRetry == IsActorRetry::NO);
+  KJ_ASSERT(state.countSubrequests.size() == 7);
+  KJ_EXPECT(state.countSubrequests[5] == CountSubrequest::YES);
+  KJ_ASSERT(state.outcomes.size() == 2);
+  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RECOVERED);
+  KJ_EXPECT(state.outcomes[1] == ActorRetryOutcome::RECOVERED);
+}
+
+KJ_TEST("actor fetch makes a redirected streaming request retryable") {
+  ReplayState state{
+    .actions = kj::arr(ReplayAction::REDIRECT, ReplayAction::AMBIGUOUS),
+  };
+
+  KJ_EXPECT(runActorFetch(state, ActorRetryGateEnabled::YES, kj::none, ActorFetchKind::HTTP,
+                ActorFetchBodyKind::STREAMING) == kj::none);
+  KJ_EXPECT(state.requestCount == 3);
+  KJ_EXPECT(state.retryCount == 1);
+  KJ_ASSERT(state.metadata.size() == 2);
+  KJ_EXPECT(state.metadata[0].isRetry == IsActorRetry::NO);
+  KJ_EXPECT(state.metadata[1].isRetry == IsActorRetry::YES);
 }
 
 KJ_TEST("actor fetch stops after five attempts") {
