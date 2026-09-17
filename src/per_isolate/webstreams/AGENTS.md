@@ -67,6 +67,15 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
   source is swapped out at tee time while its data keeps flowing into the
   branch sources. Both are open items, to be looked at separately; pinned
   in `src/tests/node/stream/finished-and-abort.js`.
+- Consumers that are collected rather than cancelled (every branch dropped
+  while the source still holds its controller) leave the queue with no
+  consumer for good: it drops what it holds and what is enqueued later,
+  `desiredSize` reads as the high-water mark, and the controller releases
+  the source — no more pulls, and its cancel never runs, since GC timing
+  runs no user callback — while keeping its own state machine (`close()`
+  closes the source's stream; `enqueue()` after it throws as ever). C++
+  does the same but keeps pulling (readable ledger #20). Suite:
+  `gc.js` in the readable and readable-byte suites.
 - Nothing walks a tree of streams: closing, cancelling and erroring act on
   cursors and their owners, and no stream retains another.
 

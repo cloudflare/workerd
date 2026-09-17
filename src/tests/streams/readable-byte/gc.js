@@ -7,7 +7,43 @@
 // and the autovuln suites; these are the suite-local liveness pins.
 // Requires --expose-gc (set in all cell configs).
 
-import { strictEqual, ok } from 'node:assert';
+import { strictEqual, ok, throws } from 'node:assert';
+
+// Both tee branches collected while the source still holds the controller
+// (parity; the value-stream shape, with the retention checks, is in the
+// readable suite's gc.js). enqueue() accepts and drops each chunk,
+// desiredSize stays at the high-water mark, no byobRequest is minted, and
+// close() then a late enqueue() behave as ever.
+export const teeBranchesCollected = {
+  async test() {
+    let controller;
+    const rs = new ReadableStream(
+      {
+        type: 'bytes',
+        start(c) {
+          controller = c;
+        },
+      },
+      { highWaterMark: 4 }
+    );
+    (() => {
+      rs.tee();
+    })();
+    for (let i = 0; i < 3; i++) {
+      gc();
+      await scheduler.wait(5);
+    }
+    strictEqual(controller.desiredSize, 4);
+    for (let i = 0; i < 16; i++) {
+      controller.enqueue(new Uint8Array(1024));
+    }
+    strictEqual(controller.desiredSize, 4);
+    strictEqual(controller.byobRequest, null);
+    controller.close();
+    strictEqual(controller.desiredSize, 0);
+    throws(() => controller.enqueue(new Uint8Array(1)), TypeError);
+  },
+};
 
 // A pending BYOB read whose stream and reader references are dropped
 // still completes when the controller responds.
