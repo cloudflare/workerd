@@ -105,6 +105,7 @@ const {
 const {
   ReadableStream,
   ReadableByteStreamController,
+  internalsForTransform: readableInternals,
 } = require('webstreams/readable');
 const {
   WritableStream,
@@ -554,6 +555,17 @@ class IdentityTransformStream {
       __proto__: null,
       highWaterMark: 0,
     });
+
+    // The Node.js interop hook errors one half without running sinkAbort
+    // or sourceCancel; error the other half too, and wake a parked write.
+    const errorPair = (reason: unknown): void => {
+      snapshots.clear();
+      const rc = this.#readableController;
+      if (rc !== undefined) byteControllerError(rc, reason);
+      this.#errorWritableAndUnblockWrite(reason);
+    };
+    writableInternals.setInteropErrorHook(this.#writable, errorPair);
+    readableInternals.setInteropErrorHook(this.#readable, errorPair);
   }
 
   get readable(): ReadableStreamType<Uint8Array> {

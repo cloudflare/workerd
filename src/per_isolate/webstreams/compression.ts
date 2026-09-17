@@ -62,6 +62,7 @@ const StringCoerce = String;
 const {
   ReadableStream,
   ReadableByteStreamController,
+  internalsForTransform: readableInternals,
 } = require('webstreams/readable');
 const {
   WritableStream,
@@ -339,6 +340,17 @@ function createCodecPair(
     },
     { __proto__: null, highWaterMark: 0 }
   );
+
+  // The Node.js interop hook errors one half without running the sink's
+  // abort or the source's cancel; error the other half too.
+  const errorPair = (reason: unknown): void => {
+    failBoth(reason);
+    if (writableController !== undefined) {
+      writableControllerError(writableController, reason);
+    }
+  };
+  writableInternals.setInteropErrorHook(writable, errorPair);
+  readableInternals.setInteropErrorHook(readable, errorPair);
 
   return {
     readable: readable as ReadableStreamType<Uint8Array>,

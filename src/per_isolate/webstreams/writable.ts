@@ -295,6 +295,10 @@ let setWritableStreamAbortHook: <W>(
   stream: WritableStream<W>,
   hook: (() => void) | undefined
 ) => void;
+let setWritableStreamInteropErrorHook: <W>(
+  stream: WritableStream<W>,
+  hook: ((reason: unknown) => void) | undefined
+) => void;
 // Internal writer operations: the pipe implementation must never dispatch
 // through the public prototype methods (user-interceptable once the classes
 // are installed on the global).
@@ -344,6 +348,9 @@ class WritableStream<W = unknown> {
   #readyHook: (() => void) | undefined;
   // An internal sink's wake-up on abort (internalsForPipe.setAbortHook).
   #abortHook?: (() => void) | undefined;
+  // A transform pair's notification when the Node.js interop hook errors
+  // this half (internalsForPipe.setInteropErrorHook).
+  #interopErrorHook?: ((reason: unknown) => void) | undefined;
   // The Node.js interop closed-promise (see kIsClosedPromise), created on
   // first request and settled when the stream reaches 'closed' or
   // 'errored'.
@@ -403,6 +410,9 @@ class WritableStream<W = unknown> {
     };
     setWritableStreamAbortHook = (stream, hook) => {
       stream.#abortHook = hook;
+    };
+    setWritableStreamInteropErrorHook = (stream, hook) => {
+      stream.#interopErrorHook = hook;
     };
     setWritableStreamWriter = (stream, writer) => {
       stream.#writer = writer;
@@ -899,11 +909,15 @@ class WritableStream<W = unknown> {
 
   // Node.js interop (see kControllerErrorFunction): errors a writable
   // stream from outside, as its controller's error() does — a no-op unless
-  // the stream is still 'writable'.
+  // the stream is still 'writable'. The sink's abort algorithm does not
+  // run, so a transform pair learns of it through its interop error hook.
   [kControllerErrorFunction](reason: unknown): void {
     assertIsWritableStream(this);
+    if (this.#state !== 'writable') return;
     const controller = this.#controller;
     if (controller !== undefined) controllerErrorIfNeeded(controller, reason);
+    const hook = this.#interopErrorHook;
+    if (hook !== undefined) hook(reason);
   }
 }
 
@@ -1930,6 +1944,14 @@ module.exports = {
       stream: WritableStream<W>,
       hook: (() => void) | undefined
     ): void => setWritableStreamAbortHook(stream, hook),
+    // A transform pair's notification, called synchronously with the
+    // reason after the Node.js interop hook has errored this stream (the
+    // only external error path that bypasses the sink). undefined clears
+    // it.
+    setInteropErrorHook: <W>(
+      stream: WritableStream<W>,
+      hook: ((reason: unknown) => void) | undefined
+    ): void => setWritableStreamInteropErrorHook(stream, hook),
     // Whether a writer.write() issued NOW would be accepted (enqueued for a
     // sink step) rather than rejected by the state checks. The writer
     // machinery runs the strategy size() callback BEFORE those checks, so
