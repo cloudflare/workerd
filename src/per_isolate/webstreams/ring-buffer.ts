@@ -127,10 +127,7 @@ class RingBuffer<T> {
   }
 
   // Replace the store with one of `capacity` slots holding the items from
-  // index 0. Setting an empty array's length pre-sizes its store in one
-  // allocation and keeps fast elements (new Array(n) above ~32k elements
-  // would start in V8's dictionary mode); the items are then copied within
-  // bounds. The unwritten slots are holes, which no read ever reaches.
+  // index 0.
   #resize(capacity: number): void {
     const backing = this.#backing;
     const head = this.#head;
