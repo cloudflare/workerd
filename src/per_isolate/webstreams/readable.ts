@@ -3467,9 +3467,13 @@ class ReadableStream<R> {
         }
         // Sources from the tee hook are full native sources; ordinary
         // construction validates and wires each branch.
-        const [source1, source2] = nativeControllerTeeSource(controller);
-        const branch1 = new ReadableStream<R>(source1 as UnderlyingSource<R>);
-        const branch2 = new ReadableStream<R>(source2 as UnderlyingSource<R>);
+        const sources = nativeControllerTeeSource(controller);
+        const branch1 = new ReadableStream<R>(
+          sources[0] as UnderlyingSource<R>
+        );
+        const branch2 = new ReadableStream<R>(
+          sources[1] as UnderlyingSource<R>
+        );
         stream.#consumer = undefined;
         if (!isReadableStreamLocked(stream)) {
           acquireReadableStreamDefaultReader(stream);
@@ -4360,7 +4364,9 @@ async function collectChunks<R>(
   const chunks: Uint8Array[] = [];
   while (true) {
     const result = await reader.read();
-    for (const chunk of result.chunks as unknown[]) {
+    const drained = result.chunks as unknown[];
+    for (let i = 0; i < drained.length; i++) {
+      const chunk = drained[i];
       // Drained chunks are untrusted values: accept any BufferSource,
       // normalized to a Uint8Array over its region with the extent pinned
       // at drain time; anything else fails with the same TypeError the
@@ -4414,7 +4420,8 @@ async function consumeReadableStreamAsArrayBuffer<R>(
   const res = new ArrayBuffer(Number(amountRead));
   const u8 = new Uint8Array(res);
   let offset = 0;
-  for (const chunk of chunks) {
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i] as Uint8Array;
     TypedArrayPrototypeSet(u8, chunk, offset);
     offset += TypedArrayPrototypeGetByteLength(chunk);
   }
@@ -4441,8 +4448,11 @@ async function consumeReadableStreamAsText<R>(
   if (amountRead === 0n) return res;
 
   const decoder = new TextDecoder();
-  for (const chunk of chunks) {
-    res += TextDecoderDecode(decoder, chunk, { __proto__: null, stream: true });
+  for (let i = 0; i < chunks.length; i++) {
+    res += TextDecoderDecode(decoder, chunks[i], {
+      __proto__: null,
+      stream: true,
+    });
   }
   res += TextDecoderDecode(decoder); // flush
 
