@@ -84,8 +84,11 @@ new-wpt-test test_name:
 new-test test_name:
   ./tools/unix/new-test.sh {{test_name}}
 
-format:
-  python3 tools/cross/format.py
+format *files:
+  {{ if files == "" { "python3 tools/cross/format.py" } else { "python3 tools/cross/format.py files -- " + files } }}
+
+format-head:
+  python3 tools/cross/format.py git --target HEAD~
 
 internal-pr:
   ./tools/unix/create-internal-pr.sh

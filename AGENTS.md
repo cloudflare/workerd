@@ -28,7 +28,9 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 
 - `just build` or `just b` - Build the project
 - `just test` or `just t` - Run all tests
-- `just format` or `just f` - Format code (uses clang-format + Python formatter)
+- `just format` or `just f` - Format all code (uses clang-format + Python formatter)
+- `just format <path>...` - Format specific files
+- `just format-head` - Format files changed since `HEAD~`
 - `just clippy <package>` - Run Rust clippy linter (e.g., `just clippy jsg-macros`)
 - `just clang-tidy <target>` - Run clang-tidy on C++ code (e.g., `just clang-tidy //src/rust/jsg:ffi`)
 - `just stream-test <target>` - Stream test output for debugging
@@ -201,7 +203,9 @@ This project generally follows the [KJ Style Guide](https://github.com/capnproto
 
 - **C++ standard**: C++23 (`-std=c++23`)
 - **C++ file extensions**: `.c++` / `.h` (not `.cpp`); test suffix `-test` (hyphenated)
-- **Formatting**: `just format` runs clang-format + prettier + ruff + buildifier + rustfmt
+- **Formatting**: `just format` runs clang-format + prettier + ruff + buildifier + rustfmt;
+  use `just format <path>...` for specific files or `just format-head` for files changed since
+  `HEAD~`
 - **Pre-commit hook**: Blocks `KJ_DBG` in staged code; runs format check
 - **Commit discipline**: Split PRs into small commits; each must compile + pass tests; no fixup commits
 - **TypeScript**: Strict mode, `exactOptionalPropertyTypes`, private `#` syntax enforced, explicit return types
