@@ -110,8 +110,17 @@ export { teeBothBranchesIdentical, cancelOneBranchSurvivorDrains } from 'tee';
 
 export {
   drainingReaderSweepsBufferedBacklog,
+  drainingReaderTakesBoundedPieces,
   drainingReaderLocksReadable,
 } from 'draining-reader';
+
+export {
+  largeOutputDeliveredInBoundedPieces,
+  byobReadsFillTheView,
+  concurrentReadsTakeConsecutivePieces,
+  teeBranchesReceiveBoundedPieces,
+  trailingJunkAfterLargeOutput,
+} from 'delivery-shape';
 
 export {
   abortCompressionWriterAfterGc,
