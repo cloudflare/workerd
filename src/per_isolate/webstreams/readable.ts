@@ -1487,13 +1487,12 @@ class ReadableStreamDefaultController<
 
     // --- Queue + the stream's own cursor ---
     this.#queue = new StreamQueue(highWaterMark, () => {
-      // Last consumer went away (GC-driven cursor cleanup after all
-      // branch streams became unreachable). Silently stop the source
-      // by clearing algorithms — do NOT invoke the user's cancel
-      // callback, because GC timing is nondeterministic and must not
-      // produce user-observable side effects (the cancel callback
-      // could push to event arrays, resolve promises, etc.).
-      this.#clearAlgorithms();
+      // Every consumer has been collected (see StreamQueue#noConsumers).
+      // Release the source rather than cancel it: GC timing must not run
+      // the user's cancel callback. The size algorithm stays, so enqueue()
+      // sizes chunks as before; the queue drops them.
+      this.#pullAlgorithm = undefined;
+      this.#cancelAlgorithm = undefined;
     }) as StreamQueueType<R, R>;
     setReadableStreamConsumer(
       stream,
@@ -1628,11 +1627,8 @@ class ReadableStreamDefaultController<
   }
 
   #canCloseOrEnqueue(): boolean {
-    // #cancelPromise doubles as the "source cancelled" flag: after
-    // CancelSteps (explicit cancel or the all-cursors-gone hook) the
-    // algorithms are cleared and enqueue/close must be rejected even thoughs
-    // the original stream object may still report state 'readable' (the
-    // GC-driven path has no stream left to transition).
+    // #cancelPromise marks a cancelled source: CancelSteps cleared its
+    // algorithms, whatever state its stream reports.
     return (
       !this.#closeRequested &&
       this.#cancelPromise === undefined &&
@@ -1711,7 +1707,11 @@ class ReadableStreamDefaultController<
     // The pending-read clause is what keeps a fast consumer from starving
     // when the queue is at the high water mark: a consumer that reads
     // faster than the HWM drains must still trigger pulls.
-    return this.#queue.desiredSize > 0 || this.#queue.anyCursorHasPendingRead();
+    if (this.#queue.desiredSize <= 0 && !this.#queue.anyCursorHasPendingRead())
+      return false;
+    // desiredSize has just pruned collected cursors; with none left there is
+    // nobody to pull for.
+    return this.#queue.hasConsumers;
   }
 
   #callPullIfNeeded(): void {
@@ -1743,7 +1743,7 @@ class ReadableStreamDefaultController<
   // Reached through #consumerLeaving once the last consumer has left the
   // queue — an explicit stream/branch cancel, or a branch errored through
   // the Node.js interop hook. The all-cursors-gone GC hook never comes
-  // here: it only clears the algorithms (see the constructor).
+  // here: it only releases the source (see the constructor).
   #cancelSteps(reason: unknown): Promise<void> {
     if (this.#cancelPromise !== undefined) return this.#cancelPromise;
     this.#done = true;
@@ -2082,10 +2082,10 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
     // --- Queue + the stream's own (byte) cursor ---
     this.#queue = new StreamQueue(highWaterMark, () => {
-      // Last consumer went away (GC-driven cursor cleanup). Silently
-      // stop the source — see the default controller's hook for the
-      // rationale (GC must not produce user-observable side effects).
+      // Every consumer has been collected: release the source, as the
+      // default controller's hook does.
       this.#clearAlgorithms();
+      this.#invalidateByobRequest();
     }) as StreamQueueType<ByteQueueEntry, Uint8Array>;
     const cursor = new ByteStreamCursor(this.#queue, stream);
     // Wire up the fractional-element-at-close error callback so the
@@ -2482,7 +2482,9 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   #shouldCallPull(): boolean {
     if (!this.#started) return false;
     if (!this.#canCloseOrEnqueue()) return false;
-    return this.#queue.desiredSize > 0 || this.#queue.anyCursorHasPendingRead();
+    if (this.#queue.desiredSize <= 0 && !this.#queue.anyCursorHasPendingRead())
+      return false;
+    return this.#queue.hasConsumers;
   }
 
   #callPullIfNeeded(): void {
@@ -3591,7 +3593,8 @@ class ReadableStream<R> {
         //
         // ORDER MATTERS: add the branch cursors BEFORE removing the
         // original — removing the sole cursor first would fire the
-        // all-cursors-gone hook and cancel the underlying source mid-tee.
+        // all-cursors-gone hook mid-tee, dropping the buffered entries and
+        // releasing the source.
         const totalSize = cursor.remainingSize;
         branch1.#consumer = isBytes
           ? new ByteStreamCursor(
@@ -3742,8 +3745,8 @@ class ReadableStream<R> {
         const totalSize = cursor.remainingSize;
         // ORDER MATTERS: attach the shell's cursor BEFORE removing the
         // original -- removing the sole cursor first would fire the
-        // all-cursors-gone hook and cancel the underlying source
-        // mid-detach (tee precedent).
+        // all-cursors-gone hook mid-detach, dropping the buffered entries
+        // and releasing the source (tee precedent).
         shell.#consumer = isBytes
           ? new ByteStreamCursor(
               queue,
