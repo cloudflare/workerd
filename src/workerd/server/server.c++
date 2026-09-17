@@ -1231,7 +1231,7 @@ class Server::ActorNamespace final {
     }
 
     void start(kj::Own<ActorClass>& actorClass, Worker::Actor::Id& id) {
-      KJ_REQUIRE(actor == nullptr);
+      KJ_REQUIRE(actor == kj::none);
 
       // Capture the actor's name (if it was created via `idFromName()`/`getByName()`) so the alarm
       // scheduler can persist it and restore `ctx.id.name` when the alarm later fires, even if this
