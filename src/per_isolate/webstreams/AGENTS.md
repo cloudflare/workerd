@@ -139,12 +139,22 @@ cancelled branch's would; a branch that has itself been teed is inert, see
 the tee model above). The readable method errors byte streams too, native
 ones included; Node's is deliberately a no-op for byte stream controllers,
 so `addAbortSignal()` on a `Response` body (a byte stream in Node) is
-inert there and errors the body here. `src/node`'s `finished()`/`eos()`
-(also behind `stream/promises`) and `addAbortSignal()` rely on the hooks
-to observe or error a web stream without taking its lock; nothing else in
-the node layer touches them. The C++ implementation has no equivalent,
-and the node layer raises `ERR_WEB_STREAM_INTEROP_UNSUPPORTED` there.
-Suite: `src/tests/node/stream/finished-and-abort.js`.
+inert there and errors the body here. The method runs neither the sink's
+abort nor the source's cancel, so on a half of a transform pair
+(`transform.ts`, `identity.ts`, `compression.ts`; the encoding streams
+are TransformStreams) the other half would never learn of it: each pair
+registers an interop error hook on both halves (`setInteropErrorHook` in
+`internalsForPipe` and `internalsForTransform`), called synchronously
+after the hook has errored a half, and errors the pair as
+`TransformStreamDefaultController.error()` would (`TransformStreamError`).
+Node errors the one half only and the other's pending operations stay
+pending. `src/node`'s `finished()`/`eos()` (also behind
+`stream/promises`) and `addAbortSignal()` rely on the hooks to observe or
+error a web stream without taking its lock; nothing else in the node layer
+touches them. The C++ implementation has no equivalent, and the node layer
+raises `ERR_WEB_STREAM_INTEROP_UNSUPPORTED` there. Suite:
+`src/tests/node/stream/finished-and-abort.js` and
+`abort-transform-pairs.js`.
 
 ## ANTI-PATTERNS
 
