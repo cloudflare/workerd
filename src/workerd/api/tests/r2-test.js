@@ -1147,6 +1147,42 @@ const testWorker = {
 
 const finishedRpcUploads = new Set();
 
+function rpcSuccess(results, httpStatus = 200, error) {
+  return {
+    success: true,
+    response: {
+      httpStatus,
+      ...(error === undefined ? {} : { error }),
+    },
+    results,
+  };
+}
+
+function rpcFailure(error, httpStatus, responseError) {
+  return {
+    success: false,
+    response: {
+      httpStatus,
+      ...(responseError === undefined ? {} : { error: responseError }),
+    },
+    error,
+  };
+}
+
+function rpcObjectMiss() {
+  return rpcSuccess(null, 404, {
+    v4code: 10007,
+    message: 'The specified key does not exist.',
+  });
+}
+
+function rpcUploadFailure(action) {
+  return rpcFailure(new Error(`${action}: Upload not found (10024)`), 404, {
+    v4code: 10024,
+    message: 'Upload not found',
+  });
+}
+
 // Checks that the key and upload ids match test expectations
 function assertMultipartIdentity(requestKey, uploadId, action) {
   assert.strictEqual(typeof requestKey, 'string');
@@ -1161,9 +1197,9 @@ function assertMultipartIdentity(requestKey, uploadId, action) {
       uploadId === 'missing' ||
       finishedRpcUploads.has(JSON.stringify([requestKey, uploadId]));
     if (missing && action !== 'abortMultipartUpload') {
-      throw new Error(`${action}: Upload not found (10024)`);
+      return true;
     }
-    return;
+    return false;
   }
   const expected = {
     'must-not-call': 'invalidPartUploadId',
@@ -1179,6 +1215,7 @@ function assertMultipartIdentity(requestKey, uploadId, action) {
         (requestKey === key && uploadId === 'resumedId')
     );
   }
+  return false;
 }
 
 // This entrypoint rejects HTTP requests so the JSRPC tests detect any transport fallback.
@@ -1190,10 +1227,13 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
 
   head(requestKey) {
     if (requestKey === 'missing') {
-      return null;
+      return rpcObjectMiss();
     }
     if (requestKey === 'boom') {
-      throw new Error('head: no such bucket (10006)');
+      return rpcFailure(new Error('head: no such bucket (10006)'), 404, {
+        v4code: 10006,
+        message: 'no such bucket',
+      });
     }
 
     const result = buildRpcHead(requestKey);
@@ -1206,7 +1246,7 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
     if (requestKey === 'rpc-malformed-date') {
       result.uploaded = new Date(NaN);
     }
-    return result;
+    return rpcSuccess(result);
   }
 
   get(requestKey, options) {
@@ -1227,26 +1267,29 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
           'Invalid ranges must be rejected before calling the gateway'
         );
       }
-      return null;
+      return rpcObjectMiss();
     }
     if (requestKey === 'missing') {
-      return null;
+      return rpcObjectMiss();
     }
     if (requestKey === 'rpc-get-boom') {
-      throw new Error('get: no such bucket (10006)');
+      return rpcFailure(new Error('get: no such bucket (10006)'), 404, {
+        v4code: 10006,
+        message: 'no such bucket',
+      });
     }
     if (requestKey === 'rpc-malformed-kind') {
-      return { kind: 'other', object: buildRpcHead(requestKey) };
+      return rpcSuccess({ kind: 'other', object: buildRpcHead(requestKey) });
     }
     if (requestKey === 'rpc-malformed-metadata-body') {
-      return {
+      return rpcSuccess({
         kind: 'metadata',
         object: buildRpcHead(requestKey),
         body: new ReadableStream(),
-      };
+      });
     }
     if (requestKey === 'rpc-malformed-missing-body') {
-      return { kind: 'body', object: buildRpcHead(requestKey) };
+      return rpcSuccess({ kind: 'body', object: buildRpcHead(requestKey) });
     }
     if (requestKey === 'rpc-options') {
       assert.deepStrictEqual(options, {
@@ -1301,7 +1344,10 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
     }
 
     if (requestKey === 'rpc-conditional-metadata') {
-      return { kind: 'metadata', object };
+      return rpcSuccess({ kind: 'metadata', object }, 412, {
+        v4code: 10031,
+        message: 'Precondition failed',
+      });
     }
 
     const responseBody =
@@ -1316,7 +1362,7 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
       object.size = new TextEncoder().encode(responseBody).byteLength;
     }
     let sent = false;
-    return {
+    return rpcSuccess({
       kind: 'body',
       object,
       body: new ReadableStream({
@@ -1327,13 +1373,17 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
           controller.close();
         },
       }),
-    };
+    });
   }
 
   delete(keys) {
     if (keys === 'boom') {
-      throw new Error('delete: bad keys (10021)');
+      return rpcFailure(new Error('delete: bad keys (10021)'), 400, {
+        v4code: 10021,
+        message: 'bad keys',
+      });
     }
+    return rpcSuccess(null);
     if (Array.isArray(keys)) {
       assert.deepEqual(keys, [key, key + '2']);
     } else {
@@ -1348,14 +1398,17 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
     if (requestKey === 'rpc-null-value') {
       assert.strictEqual(value, null);
       assert.strictEqual(valueSize, 0);
-      return buildRpcHead(requestKey);
+      return rpcSuccess(buildRpcHead(requestKey));
     }
     if (requestKey === 'rpc-conditional-null') {
       assert.deepStrictEqual(options.onlyIf, {
         etagMatches: 'strongEtag',
         secondsGranularity: false,
       });
-      return null;
+      return rpcSuccess(null, 412, {
+        v4code: 10031,
+        message: 'Precondition failed',
+      });
     }
     if (requestKey === 'rpc-put-options') {
       assert.deepStrictEqual(options.onlyIf, {
@@ -1393,7 +1446,7 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
     }
     if (requestKey.startsWith('large')) {
       await assertLargeRpcBody(requestKey, value, valueSize);
-      return buildRpcHead(requestKey, options);
+      return rpcSuccess(buildRpcHead(requestKey, options));
     }
     const uploaded = await new Response(value).text();
     const expected = requestKey === 'rpcStream' ? rpcStreamBody : body;
@@ -1402,7 +1455,7 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
       valueSize,
       new TextEncoder().encode(expected).byteLength
     );
-    return buildRpcHead(requestKey, options);
+    return rpcSuccess(buildRpcHead(requestKey, options));
   }
 
   list(options) {
@@ -1412,10 +1465,13 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
       : ['httpMetadata', 'customMetadata'];
 
     if (options?.prefix === 'rpc-boom') {
-      throw new Error('list: no such bucket (10006)');
+      return rpcFailure(new Error('list: no such bucket (10006)'), 404, {
+        v4code: 10006,
+        message: 'no such bucket',
+      });
     }
     if (options?.prefix === 'rpc-malformed') {
-      return { objects: [{}], truncated: false };
+      return rpcSuccess({ objects: [{}], truncated: false });
     }
     if (options?.prefix === 'rpc-options') {
       assert.deepStrictEqual(options, {
@@ -1426,12 +1482,12 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
         startAfter: 'after',
         include: effectiveIncludes,
       });
-      return {
+      return rpcSuccess({
         objects: [],
         truncated: true,
         cursor: 'cursor-out',
         delimitedPrefixes: ['rpc-options/'],
-      };
+      });
     }
 
     if (options?.prefix === 'basic') {
@@ -1442,29 +1498,29 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
         delimiter: '/',
         include: effectiveIncludes,
       });
-      return {
+      return rpcSuccess({
         objects: [listRpcHead('basic', effectiveIncludes)],
         truncated: true,
         cursor: 'ai',
-      };
+      });
     }
     if (options?.prefix === 'httpMeta') {
-      return {
+      return rpcSuccess({
         objects: [listRpcHead('httpMetadata', effectiveIncludes)],
         truncated: false,
-      };
+      });
     }
     if (options?.prefix === 'customMeta') {
-      return {
+      return rpcSuccess({
         objects: [listRpcHead('customMetadata', effectiveIncludes)],
         truncated: false,
-      };
+      });
     }
     if (options?.prefix === 'rpc-metadata') {
-      return {
+      return rpcSuccess({
         objects: [listRpcHead('basic', effectiveIncludes)],
         truncated: false,
-      };
+      });
     }
 
     if (honorsIncludes) {
@@ -1474,7 +1530,7 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
         include: ['httpMetadata', 'customMetadata'],
       });
     }
-    return { objects: [], truncated: false };
+    return rpcSuccess({ objects: [], truncated: false });
   }
 
   createMultipartUpload(requestKey, options) {
@@ -1488,9 +1544,11 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
       assert.strictEqual(options.ssecKey, hexKey);
     }
     assert.strictEqual(typeof requestKey, 'string');
-    return requestKey.startsWith('rpc-multipart-')
-      ? `${requestKey}-id`
-      : 'multipartId';
+    return rpcSuccess(
+      requestKey.startsWith('rpc-multipart-')
+        ? `${requestKey}-id`
+        : 'multipartId'
+    );
   }
 
   async uploadPart(
@@ -1501,14 +1559,16 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
     options,
     valueSize
   ) {
-    assertMultipartIdentity(requestKey, uploadId, 'uploadPart');
+    if (assertMultipartIdentity(requestKey, uploadId, 'uploadPart')) {
+      return rpcUploadFailure('uploadPart');
+    }
     assert(partNumber >= 1 && partNumber <= 10000);
     if (requestKey === 'must-not-call') {
       throw new Error('uploadPart RPC method must not be called');
     }
     if (requestKey === 'largeBuffer') {
       await assertLargeRpcBody(requestKey, value, valueSize);
-      return { partNumber, etag: 'partEtag' };
+      return rpcSuccess({ partNumber, etag: 'partEtag' });
     }
     const uploaded = await new Response(value).text();
     const expected =
@@ -1525,14 +1585,14 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
     if (requestKey === 'ssecMultipart') {
       assert.strictEqual(options?.ssecKey, hexKey);
     }
-    return {
+    return rpcSuccess({
       partNumber: requestKey === 'rpc-wrong-part-number' ? 9999 : partNumber,
       etag: requestKey.startsWith('rpc-multipart-')
         ? `${requestKey}/${uploadId}/${partNumber}`
         : uploadId === 'resumedId'
           ? 'resumedRpcPartEtag'
           : 'partEtag',
-    };
+    });
   }
 
   abortMultipartUpload(requestKey, uploadId) {
@@ -1540,12 +1600,18 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
     if (requestKey.startsWith('rpc-multipart-')) {
       finishedRpcUploads.add(JSON.stringify([requestKey, uploadId]));
     }
+    return rpcSuccess(null);
   }
 
   completeMultipartUpload(requestKey, uploadId, uploadedParts) {
-    assertMultipartIdentity(requestKey, uploadId, 'completeMultipartUpload');
     if (requestKey === 'must-not-call') {
       throw new Error('completeMultipartUpload RPC method must not be called');
+    }
+    assertMultipartIdentity(requestKey, uploadId, 'completeMultipartUpload');
+    if (
+      assertMultipartIdentity(requestKey, uploadId, 'completeMultipartUpload')
+    ) {
+      return rpcUploadFailure('completeMultipartUpload');
     }
     for (const part of uploadedParts) {
       assert(part.partNumber >= 1 && part.partNumber <= 10000);
@@ -1569,7 +1635,7 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
     if (uploadId === 'resumedId') {
       result.version = 'resumedRpcObjectVersion';
     }
-    return result;
+    return rpcSuccess(result);
   }
 }
 
@@ -2284,14 +2350,17 @@ export class R2BodyLengthEntrypoint extends WorkerEntrypoint {
   async get(mode, options) {
     const object = { ...buildRpcHead(mode), size: bodyLengthBytes.byteLength };
     if (mode === 'missing') {
-      return null;
+      return rpcObjectMiss();
     }
     if (mode === 'metadata') {
-      return { kind: 'metadata', object };
+      return rpcSuccess({ kind: 'metadata', object }, 412, {
+        v4code: 10031,
+        message: 'Precondition failed',
+      });
     }
     if (mode === 'deferred') {
       bodyLengthReleased = false;
-      return {
+      return rpcSuccess({
         kind: 'body',
         object,
         body: new ReadableStream({
@@ -2305,7 +2374,7 @@ export class R2BodyLengthEntrypoint extends WorkerEntrypoint {
             controller.close();
           },
         }),
-      };
+      });
     }
     if (mode === 'cancel' || mode === 'invalid-size') {
       if (mode === 'invalid-size') {
@@ -2315,7 +2384,7 @@ export class R2BodyLengthEntrypoint extends WorkerEntrypoint {
       bodyLengthCancellation = new Promise((resolve) => {
         cancelled = resolve;
       });
-      return {
+      return rpcSuccess({
         kind: 'body',
         object,
         body: new ReadableStream({
@@ -2326,10 +2395,10 @@ export class R2BodyLengthEntrypoint extends WorkerEntrypoint {
             cancelled();
           },
         }),
-      };
+      });
     }
     if (mode === 'upstream-error') {
-      return {
+      return rpcSuccess({
         kind: 'body',
         object,
         body: new ReadableStream({
@@ -2337,16 +2406,24 @@ export class R2BodyLengthEntrypoint extends WorkerEntrypoint {
             controller.error(new Error('body source failed'));
           },
         }),
-      };
+      });
     }
     const invalidSizes = { short: 5, long: 3, 'zero-long': 0, unsafe: 2 ** 53 };
     if (Object.hasOwn(invalidSizes, mode)) {
       object.size = invalidSizes[mode];
-      return { kind: 'body', object, body: new Response(bodyLengthBytes).body };
+      return rpcSuccess({
+        kind: 'body',
+        object,
+        body: new Response(bodyLengthBytes).body,
+      });
     }
     if (mode === 'unsafe-range') {
       object.range = { offset: 0, length: 2 ** 53 };
-      return { kind: 'body', object, body: new Response(bodyLengthBytes).body };
+      return rpcSuccess({
+        kind: 'body',
+        object,
+        body: new Response(bodyLengthBytes).body,
+      });
     }
     if (Object.hasOwn(bodyLengthCopyCases, mode)) {
       const fixture = bodyLengthCopyCases[mode];
@@ -2357,7 +2434,7 @@ export class R2BodyLengthEntrypoint extends WorkerEntrypoint {
       }
       const bytes = new TextEncoder().encode(fixture.content);
       let offset = 0;
-      return {
+      return rpcSuccess({
         kind: 'body',
         object,
         body: new ReadableStream({
@@ -2370,13 +2447,13 @@ export class R2BodyLengthEntrypoint extends WorkerEntrypoint {
             }
           },
         }),
-      };
+      });
     }
-    return {
+    return rpcSuccess({
       kind: 'body',
       object,
       body: await createBodyLengthStream(mode, this.ctx),
-    };
+    });
   }
 
   async put(requestKey, value, options, valueSize) {
@@ -2387,11 +2464,11 @@ export class R2BodyLengthEntrypoint extends WorkerEntrypoint {
       new Uint8Array(await new Response(value).arrayBuffer()),
       expected
     );
-    return {
+    return rpcSuccess({
       ...buildRpcHead(requestKey),
       key: requestKey,
       size: expected.byteLength,
-    };
+    });
   }
 
   async uploadPart(
@@ -2409,7 +2486,7 @@ export class R2BodyLengthEntrypoint extends WorkerEntrypoint {
       new Uint8Array(await new Response(value).arrayBuffer()),
       expected
     );
-    return { partNumber, etag: 'body-length-etag' };
+    return rpcSuccess({ partNumber, etag: 'body-length-etag' });
   }
 }
 
@@ -2504,10 +2581,14 @@ export const r2BodyLengthTests = {
         for (const timing of ['immediate', 'after-event-loop-turn']) {
           // Fetch again for every attempt: a stream consumed or cancelled by one PUT must
           // not be reused by the next. Awaiting get() alone need not finish RPC stream setup.
-          const result = await env[transport].get(mode);
+          const received = await env[transport].get(mode);
+          const result =
+            transport === 'BUCKET'
+              ? received
+              : (assert.strictEqual(received.success, true), received.results);
           // Metadata is correct in every case, including cases whose stream is still unsized.
           assert.strictEqual(
-            transport === 'BUCKET' ? result.size : result.object.size,
+            result.size ?? result.object.size,
             bodyLengthBytes.byteLength
           );
           if (timing === 'after-event-loop-turn') {
@@ -2634,54 +2715,168 @@ export const r2BodyLengthTests = {
   },
 };
 
+let invalidEnvelopeCancellation;
+
+const malformedEnvelopeKeys = [
+  'missingResults',
+  'undefinedResults',
+  'invalidSuccess',
+  'missingResponse',
+  'invalidStatus',
+  'missingBackendError',
+  'invalidBackendErrorCode',
+  'invalidBackendErrorMessage',
+  'unexpectedBackendError',
+  'successWithError',
+  'failureWithResults',
+  'failureWithoutNativeError',
+];
+
+function malformedEnvelope(key) {
+  const success = rpcSuccess(object);
+  switch (key) {
+    case 'missingResults':
+      delete success.results;
+      return success;
+    case 'undefinedResults':
+      return { ...success, results: undefined };
+    case 'invalidSuccess':
+      return { ...success, success: 'true' };
+    case 'missingResponse':
+      delete success.response;
+      return success;
+    case 'invalidStatus':
+      return { ...success, response: { httpStatus: 199 } };
+    case 'missingBackendError':
+      return { ...success, response: { httpStatus: 500 } };
+    case 'invalidBackendErrorCode':
+      return {
+        ...success,
+        response: {
+          httpStatus: 500,
+          error: { v4code: '10001', message: 'Internal error' },
+        },
+      };
+    case 'invalidBackendErrorMessage':
+      return {
+        ...success,
+        response: {
+          httpStatus: 500,
+          error: { v4code: 10001, message: null },
+        },
+      };
+    case 'unexpectedBackendError':
+      return {
+        ...success,
+        response: {
+          httpStatus: 200,
+          error: { v4code: 0, message: 'unexpected' },
+        },
+      };
+    case 'successWithError':
+      return { ...success, error: new Error('unexpected') };
+    case 'failureWithResults':
+      return {
+        ...rpcFailure(new Error('gateway failure'), 500, {
+          v4code: 10001,
+          message: 'Internal error',
+        }),
+        results: object,
+      };
+    case 'failureWithoutNativeError':
+      return {
+        ...rpcFailure(new Error('gateway failure'), 500, {
+          v4code: 10001,
+          message: 'Internal error',
+        }),
+        error: { message: 'gateway failure' },
+      };
+    default:
+      assert.fail(`Unknown malformed envelope case: ${key}`);
+  }
+}
+
 export class R2JsrpcResponseEntrypoint extends WorkerEntrypoint {
+  waitForInvalidEnvelopeCancellation() {
+    return invalidEnvelopeCancellation;
+  }
+
   head(key) {
     if (key === 'rejected') throw new TypeError('gateway failure');
+    if (malformedEnvelopeKeys.includes(key)) return malformedEnvelope(key);
     assert(Object.hasOwn(invalidMetadata, key));
-    return { ...object, ...invalidMetadata[key] };
+    return rpcSuccess({ ...object, ...invalidMetadata[key] });
   }
 
   get(key) {
     switch (key) {
       case 'unknownKind':
-        return { kind: 'other', object };
+        return rpcSuccess({ kind: 'other', object });
       case 'metadataWithBody':
-        return { kind: 'metadata', object, body: new ReadableStream() };
+        return rpcSuccess({
+          kind: 'metadata',
+          object,
+          body: new ReadableStream(),
+        });
       case 'missingBody':
-        return { kind: 'body', object };
+        return rpcSuccess({ kind: 'body', object });
       case 'invalidBody':
-        return { kind: 'body', object, body: 42 };
+        return rpcSuccess({ kind: 'body', object, body: 42 });
       case 'unsafeLength':
-        return {
+        return rpcSuccess({
           kind: 'body',
           object: { ...object, size: 2 ** 53 },
           body: new ReadableStream(),
+        });
+      case 'invalidEnvelopeStream': {
+        let cancelled;
+        invalidEnvelopeCancellation = new Promise((resolve) => {
+          cancelled = resolve;
+        });
+        return {
+          ...rpcSuccess({
+            kind: 'body',
+            object,
+            body: new ReadableStream({
+              pull(controller) {
+                controller.enqueue(new Uint8Array([1]));
+              },
+              cancel() {
+                cancelled();
+              },
+            }),
+          }),
+          success: 'true',
         };
+      }
       default:
         assert.fail('Invalid user input must not reach the gateway');
     }
   }
 
   put() {
-    return { ...object, ...invalidMetadata.invalidDate };
+    return rpcSuccess({ ...object, ...invalidMetadata.invalidDate });
   }
 
   list() {
-    return {
+    return rpcSuccess({
       objects: [{ ...object, ...invalidMetadata.invalidDate }],
       truncated: false,
       delimitedPrefixes: [],
-    };
+    });
   }
 
   completeMultipartUpload() {
-    return { ...object, ...invalidMetadata.invalidDate };
+    return rpcSuccess({ ...object, ...invalidMetadata.invalidDate });
   }
 }
 
 export async function testInvalidR2Responses(_controller, env) {
   const internalError = { message: /^internal error; reference = \S+$/ };
   for (const key of Object.keys(invalidMetadata)) {
+    await assert.rejects(env.BUCKET.head(key), internalError, key);
+  }
+  for (const key of malformedEnvelopeKeys) {
     await assert.rejects(env.BUCKET.head(key), internalError, key);
   }
   for (const key of [
@@ -2697,6 +2892,14 @@ export async function testInvalidR2Responses(_controller, env) {
   await assert.rejects(env.BUCKET.list(), internalError);
   const upload = env.BUCKET.resumeMultipartUpload('key', 'uploadId');
   await assert.rejects(upload.complete([]), internalError);
+
+  await assert.rejects(env.BUCKET.get('invalidEnvelopeStream'), internalError);
+  await Promise.race([
+    env.SERVICE.waitForInvalidEnvelopeCancellation(),
+    scheduler.wait(1000).then(() => {
+      assert.fail('Malformed outer envelope did not cancel its nested body');
+    }),
+  ]);
 
   // A rejected gateway call and invalid user input retain their public error messages.
   await assert.rejects(env.BUCKET.head('rejected'), {
