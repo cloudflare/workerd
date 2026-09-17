@@ -11,6 +11,7 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           (name = "BUCKET", r2Bucket = (name = "fast-structs", entrypoint = "R2JsrpcResponseEntrypoint")),
+          (name = "SERVICE", service = (name = "fast-structs", entrypoint = "R2JsrpcResponseEntrypoint")),
         ],
         compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
                               "streams_enable_constructors", "r2_binding_jsrpc", "enable_fast_jsg_struct"],
@@ -24,6 +25,7 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           (name = "BUCKET", r2Bucket = (name = "slow-structs", entrypoint = "R2JsrpcResponseEntrypoint")),
+          (name = "SERVICE", service = (name = "slow-structs", entrypoint = "R2JsrpcResponseEntrypoint")),
         ],
         compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
                               "streams_enable_constructors", "r2_binding_jsrpc", "disable_fast_jsg_struct"],
