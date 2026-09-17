@@ -617,22 +617,23 @@ class ReadableStreamReaderBase<R> {
       return (promise as PromiseWithResolversType<void>).promise;
     };
 
+    // #closedPromise holds either a settled Promise or a still-pending
+    // resolvers record, told apart with the native isPromise: a duck-typed
+    // `typeof x.resolve` would read Object.prototype on the Promise.
     resolveGenericReaderPromise = (reader: object) => {
       const base = getReaderBase(reader);
-      const promise = base.#closedPromise as PromiseWithResolversType<void>;
-      const maybeResolve = promise.resolve;
-      if (typeof maybeResolve === 'function') {
-        maybeResolve();
+      const promise = base.#closedPromise;
+      if (!isPromise(promise)) {
+        promise.resolve();
         base.#closedPromise = promise.promise;
       }
     };
 
     rejectGenericReaderPromise = (reader: object, reason?: unknown) => {
       const base = getReaderBase(reader);
-      const promise = base.#closedPromise as PromiseWithResolversType<void>;
-      const maybeReject = promise.reject;
-      if (typeof maybeReject === 'function') {
-        maybeReject(reason);
+      const promise = base.#closedPromise;
+      if (!isPromise(promise)) {
+        promise.reject(reason);
         base.#closedPromise = promise.promise;
       }
     };

@@ -1429,9 +1429,13 @@ class WritableStreamDefaultWriter<
       writer.#stream = undefined;
     };
 
+    // #readyPromise and #closedPromise hold either a settled Promise or a
+    // still-pending resolvers record, told apart with the native isPromise:
+    // a duck-typed `typeof x.resolve` would read Object.prototype on the
+    // Promise.
     writerResolveReadyPromise = (writer) => {
-      const ready = writer.#readyPromise as PromiseWithResolversType<void>;
-      if (typeof ready.resolve === 'function') {
+      const ready = writer.#readyPromise;
+      if (!isPromise(ready)) {
         ready.resolve();
         writer.#readyPromise = ready.promise;
       }
@@ -1445,8 +1449,8 @@ class WritableStreamDefaultWriter<
     };
 
     writerEnsureReadyPromiseRejected = (writer, error) => {
-      const ready = writer.#readyPromise as PromiseWithResolversType<void>;
-      if (typeof ready.reject === 'function') {
+      const ready = writer.#readyPromise;
+      if (!isPromise(ready)) {
         ready.reject(error);
         writer.#readyPromise = ready.promise;
       } else {
@@ -1459,16 +1463,16 @@ class WritableStreamDefaultWriter<
     };
 
     writerResolveClosedPromise = (writer) => {
-      const closed = writer.#closedPromise as PromiseWithResolversType<void>;
-      if (typeof closed.resolve === 'function') {
+      const closed = writer.#closedPromise;
+      if (!isPromise(closed)) {
         closed.resolve();
         writer.#closedPromise = closed.promise;
       }
     };
 
     writerEnsureClosedPromiseRejected = (writer, error) => {
-      const closed = writer.#closedPromise as PromiseWithResolversType<void>;
-      if (typeof closed.reject === 'function') {
+      const closed = writer.#closedPromise;
+      if (!isPromise(closed)) {
         closed.reject(error);
         writer.#closedPromise = closed.promise;
       } else {
