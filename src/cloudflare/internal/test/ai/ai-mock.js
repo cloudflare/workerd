@@ -34,6 +34,13 @@ export default {
       });
     }
 
+    if (url.pathname === '/ai-gateway/gateways/my-gateway/websearch') {
+      return Response.json({
+        requestUrl: request.url,
+        body: await request.json(),
+      });
+    }
+
     const reqContentType = request.headers.get('content-type');
 
     let data = {};

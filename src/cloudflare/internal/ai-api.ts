@@ -51,6 +51,14 @@ export type AiOptions = {
   signal?: AbortSignal;
 };
 
+export type AiWebSearchRequest = {
+  gatewayId: string;
+  query: string;
+  limit?: number;
+  provider: 'exa' | 'parallel' | 'perplexity';
+  byokAlias?: string;
+};
+
 type CleanedAiOptions = Omit<
   AiOptions,
   'prefix' | 'extraHeaders' | 'sessionOptions' | 'signal'
@@ -354,6 +362,26 @@ export class Ai extends wrappedBinding.WrappedBinding {
     }
 
     return res.body;
+  }
+
+  async webSearch(request: AiWebSearchRequest): Promise<Response> {
+    if (
+      !request ||
+      typeof request.gatewayId !== 'string' ||
+      request.gatewayId.trim().length === 0
+    ) {
+      throw new AiInternalError('Invalid gateway ID');
+    }
+
+    const { gatewayId, ...body } = request;
+    return this.#fetcher.fetch(
+      `${this.#endpointURL}/ai-gateway/gateways/${encodeURIComponent(gatewayId)}/websearch`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }
+    );
   }
 
   /*
