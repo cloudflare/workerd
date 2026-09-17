@@ -115,6 +115,7 @@ const {
   createNativeReadableStreamParts,
   nativeControllerPullIfNeeded,
   nativeControllerCancelSteps,
+  nativeControllerError,
   nativeControllerMaybeCloseStream,
   nativeControllerOnReaderRelease,
   nativeControllerTeeSource,
@@ -364,6 +365,15 @@ let controllerStream: (
     | ReadableByteStreamControllerType
     | NativeReadableStreamControllerType
 ) => object | undefined;
+// The controller's error() for internal callers, which must not dispatch
+// through the user-patchable prototype method.
+let controllerError: (
+  controller:
+    | ReadableStreamDefaultControllerType
+    | ReadableByteStreamControllerType
+    | NativeReadableStreamControllerType,
+  reason: unknown
+) => void;
 let getReaderStream: <R>(reader: object) => ReadableStream<R> | undefined;
 
 // BACKEND-DISPATCH point #4: the shared extractor function installed
@@ -1049,9 +1059,25 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     }
   }
 
-  async read<T extends ArrayBufferView>(
+  read<T extends ArrayBufferView>(
     view: T,
     options: ReadableStreamBYOBReaderReadOptions = {}
+  ): Promise<ReadableStreamReadResult<T>> {
+    try {
+      return this.#read(view, options);
+    } catch (e) {
+      // A foreign `this`: the brand check throws, and promise-returning
+      // operations reject (WebIDL).
+      return PromiseReject(e) as Promise<ReadableStreamReadResult<T>>;
+    }
+  }
+
+  // The read body; readAtLeast() must not dispatch through the
+  // user-patchable prototype's read(). Not returned from an async read():
+  // that would add two microtasks to every result.
+  async #read<T extends ArrayBufferView>(
+    view: T,
+    options: ReadableStreamBYOBReaderReadOptions
   ): Promise<ReadableStreamReadResult<T>> {
     // --- View validation (spec read(view, options) steps 1-3) ---
     if (!isArrayBufferView(view)) {
@@ -1151,11 +1177,15 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     return result as unknown as ReadableStreamReadResult<T>;
   }
 
-  async readAtLeast<T extends ArrayBufferView>(
+  readAtLeast<T extends ArrayBufferView>(
     minElements: number,
     view: T
   ): Promise<ReadableStreamReadResult<T>> {
-    return this.read(view, { min: minElements });
+    try {
+      return this.#read(view, { min: minElements });
+    } catch (e) {
+      return PromiseReject(e) as Promise<ReadableStreamReadResult<T>>;
+    }
   }
 
   releaseLock(): void {
@@ -1370,6 +1400,12 @@ class ReadableStreamDefaultController<
       return undefined;
     };
 
+    controllerError = (controller, reason) => {
+      if (#queue in controller) {
+        (controller as ReadableStreamDefaultController).#error(reason);
+      }
+    };
+
     // Default controllers have no byobRequest to invalidate; the byte
     // controller's static block wraps this with the real implementation.
     controllerOnReaderRelease = (_controller) => {};
@@ -1462,7 +1498,7 @@ class ReadableStreamDefaultController<
         this.#callPullIfNeeded();
       },
       (e: unknown) => {
-        this.error(e);
+        this.#error(e);
       }
     );
   }
@@ -1522,7 +1558,7 @@ class ReadableStreamDefaultController<
     } catch (e) {
       // A throwing size() (or invalid size) errors the stream AND
       // propagates to the caller (spec enqueue error steps).
-      this.error(e);
+      this.#error(e);
       throw e;
     }
     // Suppress cursor notification when reads were added reentrantly
@@ -1551,6 +1587,12 @@ class ReadableStreamDefaultController<
 
   error(reason: unknown = undefined): void {
     assertIsReadableStreamDefaultController(this);
+    this.#error(reason);
+  }
+
+  // Internal callers error through here: the prototype's error() is
+  // user-patchable.
+  #error(reason: unknown): void {
     if (this.#done) return;
     this.#done = true;
     // Propagate to every live consumer stream (tee branches) via the
@@ -1676,7 +1718,7 @@ class ReadableStreamDefaultController<
         }
       },
       (e: unknown) => {
-        this.error(e);
+        this.#error(e);
       }
     );
   }
@@ -1909,6 +1951,15 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       return prevControllerStream(controller);
     };
 
+    const prevControllerError = controllerError;
+    controllerError = (controller, reason) => {
+      if (#queue in controller) {
+        controller.#error(reason);
+      } else {
+        prevControllerError(controller, reason);
+      }
+    };
+
     byteControllerRespond = (controller, bytesWritten) => {
       controller.#respond(bytesWritten);
     };
@@ -2025,7 +2076,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     // cursor can error the stream when a BYOB read lands at the close
     // sentinel with a non-element-aligned partial fill.
     cursor.errorStreamCallback = (e: unknown) => {
-      this.error(e);
+      this.#error(e);
     };
     setReadableStreamConsumer(stream, cursor);
 
@@ -2041,7 +2092,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         this.#callPullIfNeeded();
       },
       (e: unknown) => {
-        this.error(e);
+        this.#error(e);
       }
     );
   }
@@ -2167,7 +2218,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       const e = new TypeError(
         'Insufficient bytes to fill elements in the given view'
       );
-      this.error(e);
+      this.#error(e);
       throw e;
     }
     // EXPECTED-LENGTH CONTRACT: closing before delivering the declared
@@ -2181,7 +2232,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       const e = new RangeError(
         'byte source closed before producing its declared expectedLength'
       );
-      this.error(e);
+      this.#error(e);
       throw e;
     }
     this.#closeRequested = true;
@@ -2191,6 +2242,12 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
   error(reason: unknown = undefined): void {
     assertIsReadableByteStreamController(this);
+    this.#error(reason);
+  }
+
+  // Internal callers error through here: the prototype's error() is
+  // user-patchable.
+  #error(reason: unknown): void {
     if (this.#done) return;
     this.#done = true;
     this.#invalidateByobRequest();
@@ -2268,7 +2325,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   // propagates to the enqueue/respond caller. The readable must be
   // errored explicitly here because when the caller is an external sink
   // (e.g. IdentityTransformStream.sinkWrite), the throw only errors the
-  // writable side; without this.error() the readable would hang forever.
+  // writable side; without erroring here the readable would hang forever.
   #accountDelivery(byteLength: number): void {
     if (this.#expectedLength === undefined) {
       // When there is no expectedLength, we don't need to perform any accounting.
@@ -2279,7 +2336,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       const e = new RangeError(
         'byte source delivered more bytes than its declared expectedLength'
       );
-      this.error(e);
+      this.#error(e);
       throw e;
     }
     this.#bytesDelivered = delivered;
@@ -2432,7 +2489,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         }
       },
       (e: unknown) => {
-        this.error(e);
+        this.#error(e);
       }
     );
   }
@@ -3820,6 +3877,15 @@ class ReadableStream<R> {
       }
     };
 
+    const prevControllerError = controllerError;
+    controllerError = (controller, reason) => {
+      if (isNativeController(controller)) {
+        nativeControllerError(controller, reason);
+      } else {
+        prevControllerError(controller, reason);
+      }
+    };
+
     const prevGetExpectedLength = getControllerExpectedLength;
     getControllerExpectedLength = (controller) => {
       if (isNativeController(controller)) {
@@ -4252,12 +4318,6 @@ class ReadableStream<R> {
     return iter;
   }
 
-  [SymbolAsyncIterator](options?: {
-    preventCancel?: boolean;
-  }): AsyncIterableIterator<R> {
-    return this.values(options);
-  }
-
   // Node.js interop (see kIsClosedPromise): an object whose promise settles
   // with the stream — fulfilled on close, rejected with the stored error.
   // Nothing may ever look at the rejection, so it is marked handled.
@@ -4296,12 +4356,12 @@ class ReadableStream<R> {
       return;
     }
     if (isNativeController(controller)) {
-      controller.error(reason);
+      controllerError(controller, reason);
       markPromiseHandled(controllerCancelSteps(controller, reason));
       return;
     }
     if (controllerStream(controller) === this) {
-      controller.error(reason);
+      controllerError(controller, reason);
       return;
     }
     // QUEUED INVARIANT: a tee branch of a queued stream — its consumer is
@@ -4510,7 +4570,14 @@ ObjectDefineProperties(ReadableStream.prototype, {
   pipeTo: kEnumerable,
   tee: kEnumerable,
   values: kEnumerable,
-  [SymbolAsyncIterator]: kEnumerable,
+  // WebIDL: the same function object as values(), not enumerable.
+  [SymbolAsyncIterator]: {
+    __proto__: null,
+    value: ReadableStream.prototype.values,
+    writable: true,
+    enumerable: false,
+    configurable: true,
+  },
   [SymbolToStringTag]: {
     __proto__: null,
     value: 'ReadableStream',

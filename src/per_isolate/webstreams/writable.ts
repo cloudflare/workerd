@@ -240,6 +240,12 @@ let controllerGetDesiredSize: <W>(
 let controllerErrorSteps: <W>(
   controller: WritableStreamDefaultController<W>
 ) => void;
+// The controller's error() for internal callers, which must not dispatch
+// through the user-patchable prototype method.
+let controllerErrorIfNeeded: <W>(
+  controller: WritableStreamDefaultController<W>,
+  reason: unknown
+) => void;
 let controllerAbortSteps: <W>(
   controller: WritableStreamDefaultController<W>,
   reason: unknown
@@ -892,7 +898,8 @@ class WritableStream<W = unknown> {
   // the stream is still 'writable'.
   [kControllerErrorFunction](reason: unknown): void {
     assertIsWritableStream(this);
-    this.#controller?.error(reason);
+    const controller = this.#controller;
+    if (controller !== undefined) controllerErrorIfNeeded(controller, reason);
   }
 }
 
@@ -964,6 +971,10 @@ class WritableStreamDefaultController<
           (entry.flushRequest as PromiseWithResolversType<void>).reject(error);
         }
       }
+    };
+
+    controllerErrorIfNeeded = (controller, reason) => {
+      controller.#errorIfNeeded(reason);
     };
 
     controllerAbortSteps = (controller, reason) => {

@@ -1330,6 +1330,15 @@ function nativeControllerCancelSteps(
   return getControllerConduit(controller).cancelSource(reason);
 }
 
+// The controller's error() for internal callers (the prototype method is
+// user-patchable).
+function nativeControllerError(
+  controller: NativeReadableStreamController,
+  reason: unknown
+): void {
+  getControllerConduit(controller).errorFromSource(reason);
+}
+
 function nativeControllerMaybeCloseStream(
   _controller: NativeReadableStreamController
 ): void {
@@ -1379,6 +1388,7 @@ const nativeStreamInternals = {
   createNativeReadableStreamParts,
   nativeControllerPullIfNeeded,
   nativeControllerCancelSteps,
+  nativeControllerError,
   nativeControllerMaybeCloseStream,
   nativeControllerOnReaderRelease,
   nativeControllerTeeSource,
