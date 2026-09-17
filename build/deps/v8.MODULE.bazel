@@ -18,9 +18,9 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-VERSION = "15.3.76.11"
+VERSION = "15.4.80.5"
 
-INTEGRITY = "sha256-zhD6KsBTOQwTXzj1uuZ5gVbYJENz9+R38eAGOF0OCk0="
+INTEGRITY = "sha256-0Vpl4cAuTVSALO+FrE3XtJ96IydSNAL+basIQScPXhs="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -63,7 +63,7 @@ PATCHES = [
     "0038-Properly-depend-on-llvm-libc.patch",
     "0039-Fix-TSan-build-without-the-V8-sandbox.patch",
     "0040-Enable-Perfetto-support-in-the-V8-Bazel-build.patch",
-    "0041-Disable-preserve-most-on-Windows-x64-before-Clang-22.patch",
+    "0041-Disable-preserve_most-on-Windows-x64-before-Clang-22.patch",
 ]
 
 http_archive(
