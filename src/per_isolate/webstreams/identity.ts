@@ -256,9 +256,6 @@ let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;
 
 const kPrivateSymbol: symbol = Symbol('private');
 
-// The strategy an omitted argument stands for. Null-prototype, as its reads
-// must not reach Object.prototype (WebIDL reads nothing for an omitted
-// dictionary).
 const kEmptyStrategy = ObjectFreeze({
   __proto__: null,
 }) as QueuingStrategy<unknown>;
@@ -505,8 +502,6 @@ class IdentityTransformStream {
       if (rc !== undefined) byteControllerError(rc, reason);
     };
 
-    // Internal dictionaries are null-prototype: the constructors read
-    // members a polluted Object.prototype could otherwise supply.
     this.#writable = new WritableStream(
       {
         __proto__: null,

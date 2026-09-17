@@ -83,8 +83,6 @@ class FileSystemWritableFileStream extends WritableStream<unknown> {
     // The sink closures capture the context rather than `this`, which is in its
     // temporal dead zone until super() returns.
     const ctx = context as FileSystemWriteContext;
-    // Null-prototype: the constructor reads members a polluted
-    // Object.prototype could otherwise supply.
     const sink = {
       __proto__: null,
       write(chunk: unknown): Promise<void> {

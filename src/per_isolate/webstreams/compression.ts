@@ -245,8 +245,6 @@ function createCodecPair(
     return 1;
   };
 
-  // Internal dictionaries are null-prototype: the constructors read
-  // members a polluted Object.prototype could otherwise supply.
   const writable = new WritableStream(
     {
       __proto__: null,

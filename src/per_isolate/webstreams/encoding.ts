@@ -44,8 +44,6 @@ function isActualObject(value: unknown) {
   return value != null && typeof value === 'object';
 }
 
-// The transformers below enqueue through this capture: the controller's
-// prototype is user-patchable.
 const transformControllerEnqueue = uncurryThis(
   TransformStreamDefaultController.prototype.enqueue
 ) as (controller: object, chunk: unknown) => void;
@@ -95,8 +93,6 @@ class TextEncoderStream {
   constructor() {
     const self = this;
     const encoder = new TextEncoder();
-    // Null-prototype: the constructor reads members a polluted
-    // Object.prototype could otherwise supply.
     this.#transform = new TransformStream({
       __proto__: null,
       transform(chunk: unknown, controller: object) {

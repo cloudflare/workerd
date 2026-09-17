@@ -2554,11 +2554,6 @@ export interface DrainingReadResult<R> {
   done: boolean; // true if the close sentinel was reached
 }
 
-// Null-prototype factory for DrainingReadResult. Unlike a read result (see
-// createReadResult in queue.ts), a drain result is internal only, so it
-// need not inherit from Object.prototype, and a patched
-// Object.prototype.then cannot intercept the promise resolutions carrying
-// it.
 function createDrainResult<R>(
   chunks: R[],
   done: boolean

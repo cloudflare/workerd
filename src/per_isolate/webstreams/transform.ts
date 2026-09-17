@@ -389,8 +389,6 @@ class TransformStream<I = unknown, O = unknown> {
         readableControllerError(this.#readableController as object, reason);
       };
 
-      // Internal dictionaries are null-prototype: the constructors read
-      // members a polluted Object.prototype could otherwise supply.
       this.#writable = new WritableStream(
         {
           __proto__: null,
