@@ -25,6 +25,7 @@
 #include <workerd/util/weak-refs.h>
 
 #include <capnp/dynamic.h>
+#include <kj/async-event.h>
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
 #include <kj/function.h>
@@ -416,7 +417,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // aborted, e.g. because its CPU time expired. This should be joined with any promises for
   // incoming tasks.
   kj::Promise<void> onAbort() {
-    return abortPromise.addBranch();
+    return abortEvent.whenSignaled();
   }
 
   // If this IoContext has been aborted already, return the abort reason.
@@ -1200,8 +1201,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Arc<ReverseIoOwnValidity> reverseIoOwnValidity;
 
   kj::Maybe<kj::Exception> abortException;
-  kj::Own<kj::PromiseFulfiller<void>> abortFulfiller;
-  kj::ForkedPromise<void> abortPromise = nullptr;
+  kj::AsyncEvent abortEvent;
 
   class PendingEvent;
 

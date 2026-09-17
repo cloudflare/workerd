@@ -166,10 +166,6 @@ IoContext::IoContext(ThreadContext& thread,
       waitUntilTasks(*this),
       tasks(*this),
       deleteQueueSignalTask(startDeleteQueueSignalTask(this)) {
-  kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
-  abortFulfiller = kj::mv(paf.fulfiller);
-  abortPromise = paf.promise.fork();
-
   // Arrange to complain if execution resource limits (CPU/memory) are exceeded.
   auto makeLimitsPromise = [this]() {
     auto promise = limitEnforcer->onLimitsExceeded();
@@ -537,7 +533,7 @@ void IoContext::abort(kj::Exception&& e) {
     // or unintentional async work
     a.shutdownActorCache(e.clone());
   }
-  abortFulfiller->reject(kj::mv(e));
+  abortEvent.reject(kj::mv(e));
 }
 
 void IoContext::abortIsolate(kj::StringPtr reason) {
@@ -722,7 +718,7 @@ kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finish
                      .then([this]() { return context->waitUntilStatus(); })
                      .exclusiveJoin(kj::mv(timeoutPromise))
                      .exclusiveJoin(context->onAbort().then([] {
-    // abortFulfiller should only ever be rejected instead of being fulfilled, return an
+    // The abort event should only ever be rejected instead of being fulfilled, return an
     // internalError outcome if it does happen
     return EventOutcome::INTERNAL_ERROR;
   }, [](kj::Exception&& e) {
