@@ -161,6 +161,7 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 class JsRpcCallPlan {
  public:
   static constexpr uint METADATA_SEGMENT_WORDS = 64;
+  static constexpr size_t REPLAY_MEMORY_OVERHEAD = 1024;
 
   JsRpcCallPlan(kj::Own<capnp::MallocMessageBuilder> message,
       kj::Array<const byte> serializedData,
@@ -170,6 +171,10 @@ class JsRpcCallPlan {
   // serializer-handled ineligible values. Property reads are not replayable.
   bool getReplayable() const {
     return replayable;
+  }
+
+  size_t getReplayMemoryEstimate() const {
+    return serializedData.size() + REPLAY_MEMORY_OVERHEAD;
   }
 
   void copyTo(rpc::JsRpcTarget::CallParams::Builder builder);
@@ -325,6 +330,19 @@ class JsRpcClientProvider: public jsg::Object {
 
 class JsRpcProperty;
 
+class JsRpcReplayMemoryTracker final: public kj::Refcounted {
+ public:
+  explicit JsRpcReplayMemoryTracker(kj::Own<void> trackedMemory)
+      : trackedMemory(kj::mv(trackedMemory)) {}
+
+  void release() {
+    trackedMemory = kj::Own<void>();
+  }
+
+ private:
+  kj::Own<void> trackedMemory;
+};
+
 // Represents the promise returned by calling an RPC method. We don't use a regular Promise object,
 // but rather our own custom thenable, so that we can support pipelining on it.
 class JsRpcPromise: public JsRpcClientProvider {
@@ -348,7 +366,8 @@ class JsRpcPromise: public JsRpcClientProvider {
       kj::Own<WeakRef> weakRef,
       IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline,
       kj::Maybe<TraceContextParent> originatingCall,
-      kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability);
+      kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability,
+      kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker);
   ~JsRpcPromise() noexcept(false);
 
   void resolve(jsg::Lock& js, jsg::JsValue result);
@@ -404,6 +423,7 @@ class JsRpcPromise: public JsRpcClientProvider {
   // pipelined on the promise under it (mirrors JsRpcStub::originatingCall). Only set when traced.
   kj::Maybe<IoOwn<TraceContextParent>> originatingCall;
   kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability;
+  kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker;
 
   struct Pending {
     IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline;
