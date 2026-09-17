@@ -11,19 +11,24 @@
 
 namespace workerd::api {
 
-ActorCallRetryState::ActorCallRetryState(
-    TimerChannel& timer, RequestObserver& observer, Config config, ActorRetryPolicy policy)
+ActorCallRetryState::ActorCallRetryState(TimerChannel& timer,
+    RequestObserver& observer,
+    Config config,
+    ActorRetryPolicy policy,
+    kj::TimePoint callStart)
     : timer(timer),
       observer(kj::addRef(observer)),
       config(config),
       policy(policy),
+      callStart(callStart),
       retriesEnabled(config.payloadReplayable.toBool() && config.observationEnabled.toBool() &&
-          config.enforcementEnabled.toBool() && policy.maxAttempts() > 1) {
+          config.enforcementEnabled.toBool() && policy.maxAttempts() > 1),
+      // A call that cannot retry has no retry policy to enforce, so it runs under the default
+      // window regardless of what the policy says.
+      timeLimit(retriesEnabled ? policy.makeTimeLimit(timer, callStart)
+                               : ActorCallTimeLimit::retryWindow(timer)) {
   if (config.payloadReplayable.toBool()) {
     metadata = freshMetadata();
-  }
-  if (retriesEnabled) {
-    deadline = timer.nowForLimitTimeout() + RETRY_BUDGET;
   }
 }
 
@@ -33,6 +38,10 @@ ActorCallRetryState::~ActorCallRetryState() noexcept(false) {
   }
 }
 
+kj::Exception ActorCallTimeLimit::deadlineExceeded() {
+  return JSG_KJ_EXCEPTION(OVERLOADED, Error, "Durable Object request exceeded max_duration_ms");
+}
+
 IoChannelFactory::ActorRetryRequestMetadata ActorCallRetryState::freshMetadata() const {
   return generateActorRetryRequestMetadata(
       kj::systemCoarseCalendarClock().now(), config.enforcementEnabled);
@@ -40,17 +49,26 @@ IoChannelFactory::ActorRetryRequestMetadata ActorCallRetryState::freshMetadata()
 
 kj::OneOf<ActorCallRetryState::Attempt, kj::Exception> ActorCallRetryState::startAttempt() {
   auto isFirstAttempt = IsFirstActorCallAttempt(attemptCount == 1);
+  // A RETRY_WINDOW only bounds retries; a CALL_DEADLINE bounds every attempt.
+  if ((!isFirstAttempt.toBool() || timeLimit.isDeadline()) &&
+      timer.nowForLimitTimeout() >= timeLimit.cutoff) {
+    return timeLimitExceeded();
+  }
   if (!isFirstAttempt.toBool()) {
-    KJ_IF_SOME(deadlineValue, deadline) {
-      if (timer.nowForLimitTimeout() >= deadlineValue) {
-        recordOutcome(ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
-        return KJ_ASSERT_NONNULL(originalDisconnect).clone();
-      }
-    }
     ++retryAttemptsStarted;
     observer->recordActorRetry(config.callType);
   }
   return Attempt(metadata, isFirstAttempt);
+}
+
+kj::Exception ActorCallRetryState::timeLimitExceeded() {
+  recordOutcome(ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
+  KJ_IF_SOME(disconnect, originalDisconnect) {
+    return disconnect.clone();
+  }
+  // Only a CALL_DEADLINE can run out before anything has disconnected.
+  KJ_ASSERT(timeLimit.isDeadline());
+  return ActorCallTimeLimit::deadlineExceeded();
 }
 
 kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::handleAttemptFailure(
@@ -98,10 +116,8 @@ kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::checkCanRetry(kj::Ex
   }
 
   auto delay = retryDelay();
-  auto deadline = KJ_ASSERT_NONNULL(this->deadline);
-  if (timer.nowForLimitTimeout() + delay >= deadline) {
-    recordOutcome(ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
-    return KJ_ASSERT_NONNULL(originalDisconnect).clone();
+  if (timer.nowForLimitTimeout() + delay >= timeLimit.cutoff) {
+    return timeLimitExceeded();
   }
   if (exception.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none) {
     KJ_ASSERT_NONNULL(metadata).isRetry = IsActorRetry::YES;

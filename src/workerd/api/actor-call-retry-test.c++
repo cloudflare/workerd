@@ -67,7 +67,7 @@ kj::Rc<ActorCallRetryState> newRetryState(TestTimerChannel& timer,
         .enforcementEnabled = ActorRetryGateEnabled::YES,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
       },
-      policy);
+      policy, timer.nowForLimitTimeout());
 }
 
 ActorCallRetryState::Attempt startAttempt(ActorCallRetryState& state) {
@@ -281,6 +281,49 @@ KJ_TEST("actor retries return the original disconnect when the deadline expires 
   KJ_EXPECT(observer->outcomes.size() == 0);
 }
 
+KJ_TEST("exhausting the retry duration returns the original disconnect") {
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto state = newRetryState(timer, *observer,
+      ActorRetryPolicy::userDefined(
+          UserDefinedRetryPolicy{.maxDuration = kj::Maybe(500 * kj::MILLISECONDS)}));
+
+  startAttempt(*state);
+  KJ_EXPECT(handleFailure(*state, makeDisconnect("original disconnect"_kj)).is<kj::Duration>());
+  startAttempt(*state);
+  timer.advance(500 * kj::MILLISECONDS);
+
+  auto result = handleFailure(*state, makeDisconnect("second disconnect"_kj));
+  auto& failure = KJ_ASSERT_NONNULL(result.tryGet<kj::Exception>());
+  KJ_EXPECT(failure.getDescription().contains("original disconnect"));
+  KJ_ASSERT(observer->outcomes.size() == 1);
+  KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
+}
+
+KJ_TEST("exhausting the retry duration before any disconnect returns the duration error") {
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto state = newRetryState(timer, *observer,
+      ActorRetryPolicy::userDefined(
+          UserDefinedRetryPolicy{.maxDuration = kj::Maybe(500 * kj::MILLISECONDS)}));
+
+  timer.advance(500 * kj::MILLISECONDS);
+
+  auto result = state->startAttempt();
+  auto& failure = KJ_ASSERT_NONNULL(result.tryGet<kj::Exception>());
+  KJ_EXPECT(failure.getDescription().contains("exceeded max_duration_ms"));
+}
+
+KJ_TEST("a retry duration has no effect when the policy allows no retries") {
+  auto policy = ActorRetryPolicy::userDefined(UserDefinedRetryPolicy{
+    .maxRetryAttempts = 0,
+    .maxDuration = kj::Maybe(500 * kj::MILLISECONDS),
+  });
+  auto callStart = kj::origin<kj::TimePoint>();
+  TestTimerChannel timer;
+  KJ_EXPECT(!policy.makeTimeLimit(timer, callStart).isDeadline());
+}
+
 KJ_TEST("actor calls do not retry a failure after the deadline") {
   TestTimerChannel timer;
   auto observer = kj::refcounted<RecordingObserver>();
@@ -309,7 +352,7 @@ KJ_TEST("actor calls do not retry when retry requests are disabled") {
         .enforcementEnabled = ActorRetryGateEnabled::NO,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
       },
-      ActorRetryPolicy::systemDefault());
+      ActorRetryPolicy::systemDefault(), timer.nowForLimitTimeout());
 
   auto first = startAttempt(*state);
   KJ_EXPECT(KJ_ASSERT_NONNULL(first.getMetadata()).retryGateEnabled == ActorRetryGateEnabled::NO);
