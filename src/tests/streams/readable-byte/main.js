@@ -199,3 +199,10 @@ export {
   veryLargeByteTransfer,
   veryLargeByteTransferMismatchedViews,
 } from 'data-volumes';
+
+export {
+  patchedByteControllerErrorStillErrors,
+  readAtLeastIgnoresPatchedRead,
+  speciesNotConsultedByInternalCopies,
+  nativeSourceIgnoresPollutedMembers,
+} from 'pollution';

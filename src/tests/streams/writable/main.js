@@ -119,3 +119,8 @@ export {
 } from 'data-volumes';
 
 export { structuredCloneWritable } from 'transfer';
+
+export {
+  pollutedResolversDoNotReachWriterPromises,
+  omittedDictionariesReadNothing,
+} from 'pollution';

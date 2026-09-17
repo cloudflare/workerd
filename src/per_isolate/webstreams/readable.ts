@@ -51,6 +51,7 @@ const {
   EventTargetAddEventListener,
   EventTargetRemoveEventListener,
   JSONParse,
+  Number,
   NumberIsNaN,
   ObjectCreate,
   ObjectDefineProperty,
@@ -114,6 +115,7 @@ const {
   createNativeReadableStreamParts,
   nativeControllerPullIfNeeded,
   nativeControllerCancelSteps,
+  nativeControllerError,
   nativeControllerMaybeCloseStream,
   nativeControllerOnReaderRelease,
   nativeControllerTeeSource,
@@ -168,6 +170,10 @@ function makeCompositeCancelReason(reasons: unknown[]): AggregateError {
 }
 
 const kPrivateSymbol = Symbol('private');
+
+// What an omitted (or null) dictionary argument stands for. Null-prototype:
+// WebIDL reads nothing for an omitted dictionary, so neither may we.
+const kEmptyDictionary: object = ObjectFreeze({ __proto__: null });
 
 function isActualObject(value: unknown) {
   return value != null && typeof value === 'object';
@@ -363,6 +369,15 @@ let controllerStream: (
     | ReadableByteStreamControllerType
     | NativeReadableStreamControllerType
 ) => object | undefined;
+// The controller's error() for internal callers, which must not dispatch
+// through the user-patchable prototype method.
+let controllerError: (
+  controller:
+    | ReadableStreamDefaultControllerType
+    | ReadableByteStreamControllerType
+    | NativeReadableStreamControllerType,
+  reason: unknown
+) => void;
 let getReaderStream: <R>(reader: object) => ReadableStream<R> | undefined;
 
 // BACKEND-DISPATCH point #4: the shared extractor function installed
@@ -616,22 +631,23 @@ class ReadableStreamReaderBase<R> {
       return (promise as PromiseWithResolversType<void>).promise;
     };
 
+    // #closedPromise holds either a settled Promise or a still-pending
+    // resolvers record, told apart with the native isPromise: a duck-typed
+    // `typeof x.resolve` would read Object.prototype on the Promise.
     resolveGenericReaderPromise = (reader: object) => {
       const base = getReaderBase(reader);
-      const promise = base.#closedPromise as PromiseWithResolversType<void>;
-      const maybeResolve = promise.resolve;
-      if (typeof maybeResolve === 'function') {
-        maybeResolve();
+      const promise = base.#closedPromise;
+      if (!isPromise(promise)) {
+        promise.resolve();
         base.#closedPromise = promise.promise;
       }
     };
 
     rejectGenericReaderPromise = (reader: object, reason?: unknown) => {
       const base = getReaderBase(reader);
-      const promise = base.#closedPromise as PromiseWithResolversType<void>;
-      const maybeReject = promise.reject;
-      if (typeof maybeReject === 'function') {
-        maybeReject(reason);
+      const promise = base.#closedPromise;
+      if (!isPromise(promise)) {
+        promise.reject(reason);
         base.#closedPromise = promise.promise;
       }
     };
@@ -1047,9 +1063,25 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     }
   }
 
-  async read<T extends ArrayBufferView>(
+  read<T extends ArrayBufferView>(
     view: T,
-    options: ReadableStreamBYOBReaderReadOptions = {}
+    options: ReadableStreamBYOBReaderReadOptions = kEmptyDictionary as ReadableStreamBYOBReaderReadOptions
+  ): Promise<ReadableStreamReadResult<T>> {
+    try {
+      return this.#read(view, options);
+    } catch (e) {
+      // A foreign `this`: the brand check throws, and promise-returning
+      // operations reject (WebIDL).
+      return PromiseReject(e) as Promise<ReadableStreamReadResult<T>>;
+    }
+  }
+
+  // The read body; readAtLeast() must not dispatch through the
+  // user-patchable prototype's read(). Not returned from an async read():
+  // that would add two microtasks to every result.
+  async #read<T extends ArrayBufferView>(
+    view: T,
+    options: ReadableStreamBYOBReaderReadOptions
   ): Promise<ReadableStreamReadResult<T>> {
     // --- View validation (spec read(view, options) steps 1-3) ---
     if (!isArrayBufferView(view)) {
@@ -1149,11 +1181,15 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     return result as unknown as ReadableStreamReadResult<T>;
   }
 
-  async readAtLeast<T extends ArrayBufferView>(
+  readAtLeast<T extends ArrayBufferView>(
     minElements: number,
     view: T
   ): Promise<ReadableStreamReadResult<T>> {
-    return this.read(view, { min: minElements });
+    try {
+      return this.#read(view, { min: minElements });
+    } catch (e) {
+      return PromiseReject(e) as Promise<ReadableStreamReadResult<T>>;
+    }
   }
 
   releaseLock(): void {
@@ -1368,6 +1404,12 @@ class ReadableStreamDefaultController<
       return undefined;
     };
 
+    controllerError = (controller, reason) => {
+      if (#queue in controller) {
+        (controller as ReadableStreamDefaultController).#error(reason);
+      }
+    };
+
     // Default controllers have no byobRequest to invalidate; the byte
     // controller's static block wraps this with the real implementation.
     controllerOnReaderRelease = (_controller) => {};
@@ -1460,7 +1502,7 @@ class ReadableStreamDefaultController<
         this.#callPullIfNeeded();
       },
       (e: unknown) => {
-        this.error(e);
+        this.#error(e);
       }
     );
   }
@@ -1520,7 +1562,7 @@ class ReadableStreamDefaultController<
     } catch (e) {
       // A throwing size() (or invalid size) errors the stream AND
       // propagates to the caller (spec enqueue error steps).
-      this.error(e);
+      this.#error(e);
       throw e;
     }
     // Suppress cursor notification when reads were added reentrantly
@@ -1549,6 +1591,12 @@ class ReadableStreamDefaultController<
 
   error(reason: unknown = undefined): void {
     assertIsReadableStreamDefaultController(this);
+    this.#error(reason);
+  }
+
+  // Internal callers error through here: the prototype's error() is
+  // user-patchable.
+  #error(reason: unknown): void {
     if (this.#done) return;
     this.#done = true;
     // Propagate to every live consumer stream (tee branches) via the
@@ -1674,7 +1722,7 @@ class ReadableStreamDefaultController<
         }
       },
       (e: unknown) => {
-        this.error(e);
+        this.#error(e);
       }
     );
   }
@@ -1907,6 +1955,15 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       return prevControllerStream(controller);
     };
 
+    const prevControllerError = controllerError;
+    controllerError = (controller, reason) => {
+      if (#queue in controller) {
+        controller.#error(reason);
+      } else {
+        prevControllerError(controller, reason);
+      }
+    };
+
     byteControllerRespond = (controller, bytesWritten) => {
       controller.#respond(bytesWritten);
     };
@@ -2023,7 +2080,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     // cursor can error the stream when a BYOB read lands at the close
     // sentinel with a non-element-aligned partial fill.
     cursor.errorStreamCallback = (e: unknown) => {
-      this.error(e);
+      this.#error(e);
     };
     setReadableStreamConsumer(stream, cursor);
 
@@ -2039,7 +2096,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         this.#callPullIfNeeded();
       },
       (e: unknown) => {
-        this.error(e);
+        this.#error(e);
       }
     );
   }
@@ -2165,7 +2222,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       const e = new TypeError(
         'Insufficient bytes to fill elements in the given view'
       );
-      this.error(e);
+      this.#error(e);
       throw e;
     }
     // EXPECTED-LENGTH CONTRACT: closing before delivering the declared
@@ -2179,7 +2236,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       const e = new RangeError(
         'byte source closed before producing its declared expectedLength'
       );
-      this.error(e);
+      this.#error(e);
       throw e;
     }
     this.#closeRequested = true;
@@ -2189,6 +2246,12 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
   error(reason: unknown = undefined): void {
     assertIsReadableByteStreamController(this);
+    this.#error(reason);
+  }
+
+  // Internal callers error through here: the prototype's error() is
+  // user-patchable.
+  #error(reason: unknown): void {
     if (this.#done) return;
     this.#done = true;
     this.#invalidateByobRequest();
@@ -2266,7 +2329,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   // propagates to the enqueue/respond caller. The readable must be
   // errored explicitly here because when the caller is an external sink
   // (e.g. IdentityTransformStream.sinkWrite), the throw only errors the
-  // writable side; without this.error() the readable would hang forever.
+  // writable side; without erroring here the readable would hang forever.
   #accountDelivery(byteLength: number): void {
     if (this.#expectedLength === undefined) {
       // When there is no expectedLength, we don't need to perform any accounting.
@@ -2277,7 +2340,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       const e = new RangeError(
         'byte source delivered more bytes than its declared expectedLength'
       );
-      this.error(e);
+      this.#error(e);
       throw e;
     }
     this.#bytesDelivered = delivered;
@@ -2430,7 +2493,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         }
       },
       (e: unknown) => {
-        this.error(e);
+        this.#error(e);
       }
     );
   }
@@ -2491,9 +2554,6 @@ export interface DrainingReadResult<R> {
   done: boolean; // true if the close sentinel was reached
 }
 
-// Null-prototype factory for DrainingReadResult — same rationale as
-// createReadResult (see queue.ts): prevents Object.prototype.then
-// interception when the result flows through promise resolution.
 function createDrainResult<R>(
   chunks: R[],
   done: boolean
@@ -2639,7 +2699,7 @@ class ReadableStreamDrainingReader<R> {
   // strategy size units — bytes for byte streams). Always makes progress:
   // waits for at least one chunk when nothing is buffered.
   async read(
-    options: { maxSize?: number } = {}
+    options: { maxSize?: number } = kEmptyDictionary
   ): Promise<DrainingReadResult<R>> {
     const stream = getReaderStream<R>(this);
     if (stream === undefined) {
@@ -2675,7 +2735,7 @@ class ReadableStreamDrainingReader<R> {
 function pipeToInternal<R>(
   source: ReadableStream<R>,
   destination: WritableStreamType<R>,
-  options: StreamPipeOptions = {}
+  options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
 ): Promise<void> {
   // Spec-mandated read order (§4.9.1): preventAbort, preventCancel,
   // preventClose, signal. WPT piping/throwing-options.any.js verifies
@@ -3300,7 +3360,7 @@ class ReadableStream<R> {
     readableStreamPipeTo = <R>(
       source: ReadableStream<R>,
       destination: WritableStreamType<R>,
-      options: StreamPipeOptions = {}
+      options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
     ): Promise<void> => {
       try {
         if (isReadableStreamLocked(source)) {
@@ -3313,7 +3373,7 @@ class ReadableStream<R> {
           throw pendingClosureError();
         }
         // WebIDL: null coerces to {} for optional dictionaries.
-        if (options === null) options = {} as StreamPipeOptions;
+        if (options === null) options = kEmptyDictionary as StreamPipeOptions;
         if (!isActualObject(options)) {
           throw new TypeError('Pipe options must be an object');
         }
@@ -3466,9 +3526,13 @@ class ReadableStream<R> {
         }
         // Sources from the tee hook are full native sources; ordinary
         // construction validates and wires each branch.
-        const [source1, source2] = nativeControllerTeeSource(controller);
-        const branch1 = new ReadableStream<R>(source1 as UnderlyingSource<R>);
-        const branch2 = new ReadableStream<R>(source2 as UnderlyingSource<R>);
+        const sources = nativeControllerTeeSource(controller);
+        const branch1 = new ReadableStream<R>(
+          sources[0] as UnderlyingSource<R>
+        );
+        const branch2 = new ReadableStream<R>(
+          sources[1] as UnderlyingSource<R>
+        );
         stream.#consumer = undefined;
         if (!isReadableStreamLocked(stream)) {
           acquireReadableStreamDefaultReader(stream);
@@ -3814,6 +3878,15 @@ class ReadableStream<R> {
       }
     };
 
+    const prevControllerError = controllerError;
+    controllerError = (controller, reason) => {
+      if (isNativeController(controller)) {
+        nativeControllerError(controller, reason);
+      } else {
+        prevControllerError(controller, reason);
+      }
+    };
+
     const prevGetExpectedLength = getControllerExpectedLength;
     getControllerExpectedLength = (controller) => {
       if (isNativeController(controller)) {
@@ -3857,8 +3930,8 @@ class ReadableStream<R> {
   }
 
   constructor(
-    underlyingSource: UnderlyingSource<R> = {},
-    strategy: QueuingStrategy<R> = {}
+    underlyingSource: UnderlyingSource<R> = kEmptyDictionary as UnderlyingSource<R>,
+    strategy: QueuingStrategy<R> = kEmptyDictionary as QueuingStrategy<R>
   ) {
     // The C++-recognition brand (see kReadableStreamBrand). Stamped before
     // the early returns below so every instance carries it: internal
@@ -4015,7 +4088,7 @@ class ReadableStream<R> {
   }
 
   getReader(
-    options: { mode?: 'byob' } | null = {}
+    options: { mode?: 'byob' } | null = kEmptyDictionary
   ): ReadableStreamReaderType<R> {
     assertIsReadableStream(this);
     // WebIDL dictionary conversion: null and undefined become {},
@@ -4040,8 +4113,8 @@ class ReadableStream<R> {
   pipeThrough<T>(
     transform: TransformStreamType<R, T>,
     // WebIDL: optional dictionary — null/undefined both become {}.
-    // Default = {} preserves Function.length = 1 (IDL harness check).
-    options: StreamPipeOptions = {}
+    // The default keeps Function.length at 1 (IDL harness check).
+    options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
   ): ReadableStreamType<T> {
     assertIsReadableStream(this);
     if (isReadableStreamLocked(this)) {
@@ -4062,7 +4135,7 @@ class ReadableStream<R> {
       throw new TypeError('Cannot pipe to a locked writable stream');
     }
     // WebIDL: null coerces to {} for optional dictionaries.
-    if (options === null) options = {} as StreamPipeOptions;
+    if (options === null) options = kEmptyDictionary as StreamPipeOptions;
     if (!isActualObject(options)) {
       throw new TypeError('Pipe options must be an object');
     }
@@ -4074,8 +4147,8 @@ class ReadableStream<R> {
   pipeTo(
     destination: WritableStream<R>,
     // WebIDL: optional dictionary — null/undefined both become {}.
-    // Default = {} preserves Function.length = 1 (IDL harness check).
-    options: StreamPipeOptions = {}
+    // The default keeps Function.length at 1 (IDL harness check).
+    options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
   ): Promise<void> {
     try {
       assertIsReadableStream(this);
@@ -4224,7 +4297,9 @@ class ReadableStream<R> {
     throw new TypeError('The argument must be sync or async iterable');
   }
 
-  values(options: { preventCancel?: boolean } = {}): AsyncIterableIterator<R> {
+  values(
+    options: { preventCancel?: boolean } = kEmptyDictionary
+  ): AsyncIterableIterator<R> {
     assertIsReadableStream(this);
     if (!isActualObject(options)) {
       throw new TypeError('Options must be an object');
@@ -4244,12 +4319,6 @@ class ReadableStream<R> {
       started: false,
     });
     return iter;
-  }
-
-  [SymbolAsyncIterator](options?: {
-    preventCancel?: boolean;
-  }): AsyncIterableIterator<R> {
-    return this.values(options);
   }
 
   // Node.js interop (see kIsClosedPromise): an object whose promise settles
@@ -4290,12 +4359,12 @@ class ReadableStream<R> {
       return;
     }
     if (isNativeController(controller)) {
-      controller.error(reason);
+      controllerError(controller, reason);
       markPromiseHandled(controllerCancelSteps(controller, reason));
       return;
     }
     if (controllerStream(controller) === this) {
-      controller.error(reason);
+      controllerError(controller, reason);
       return;
     }
     // QUEUED INVARIANT: a tee branch of a queued stream — its consumer is
@@ -4359,7 +4428,9 @@ async function collectChunks<R>(
   const chunks: Uint8Array[] = [];
   while (true) {
     const result = await reader.read();
-    for (const chunk of result.chunks as unknown[]) {
+    const drained = result.chunks as unknown[];
+    for (let i = 0; i < drained.length; i++) {
+      const chunk = drained[i];
       // Drained chunks are untrusted values: accept any BufferSource,
       // normalized to a Uint8Array over its region with the extent pinned
       // at drain time; anything else fails with the same TypeError the
@@ -4413,7 +4484,8 @@ async function consumeReadableStreamAsArrayBuffer<R>(
   const res = new ArrayBuffer(Number(amountRead));
   const u8 = new Uint8Array(res);
   let offset = 0;
-  for (const chunk of chunks) {
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i] as Uint8Array;
     TypedArrayPrototypeSet(u8, chunk, offset);
     offset += TypedArrayPrototypeGetByteLength(chunk);
   }
@@ -4440,8 +4512,11 @@ async function consumeReadableStreamAsText<R>(
   if (amountRead === 0n) return res;
 
   const decoder = new TextDecoder();
-  for (const chunk of chunks) {
-    res += TextDecoderDecode(decoder, chunk, { __proto__: null, stream: true });
+  for (let i = 0; i < chunks.length; i++) {
+    res += TextDecoderDecode(decoder, chunks[i], {
+      __proto__: null,
+      stream: true,
+    });
   }
   res += TextDecoderDecode(decoder); // flush
 
@@ -4498,7 +4573,14 @@ ObjectDefineProperties(ReadableStream.prototype, {
   pipeTo: kEnumerable,
   tee: kEnumerable,
   values: kEnumerable,
-  [SymbolAsyncIterator]: kEnumerable,
+  // WebIDL: the same function object as values(), not enumerable.
+  [SymbolAsyncIterator]: {
+    __proto__: null,
+    value: ReadableStream.prototype.values,
+    writable: true,
+    enumerable: false,
+    configurable: true,
+  },
   [SymbolToStringTag]: {
     __proto__: null,
     value: 'ReadableStream',

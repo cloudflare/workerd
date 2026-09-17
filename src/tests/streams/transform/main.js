@@ -119,3 +119,5 @@ export default {
 };
 
 export { structuredCloneTransform } from 'transfer';
+
+export { omittedDictionariesReadNothing } from 'pollution';

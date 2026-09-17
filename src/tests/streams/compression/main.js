@@ -117,3 +117,5 @@ export {
   abortCompressionWriterAfterGc,
   decompressAfterStreamWrapperGc,
 } from 'gc-interplay';
+
+export { internalDictionariesIgnorePollution } from 'pollution';
