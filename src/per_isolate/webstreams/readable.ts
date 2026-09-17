@@ -171,6 +171,10 @@ function makeCompositeCancelReason(reasons: unknown[]): AggregateError {
 
 const kPrivateSymbol = Symbol('private');
 
+// What an omitted (or null) dictionary argument stands for. Null-prototype:
+// WebIDL reads nothing for an omitted dictionary, so neither may we.
+const kEmptyDictionary: object = ObjectFreeze({ __proto__: null });
+
 function isActualObject(value: unknown) {
   return value != null && typeof value === 'object';
 }
@@ -1061,7 +1065,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
 
   read<T extends ArrayBufferView>(
     view: T,
-    options: ReadableStreamBYOBReaderReadOptions = {}
+    options: ReadableStreamBYOBReaderReadOptions = kEmptyDictionary as ReadableStreamBYOBReaderReadOptions
   ): Promise<ReadableStreamReadResult<T>> {
     try {
       return this.#read(view, options);
@@ -2698,7 +2702,7 @@ class ReadableStreamDrainingReader<R> {
   // strategy size units — bytes for byte streams). Always makes progress:
   // waits for at least one chunk when nothing is buffered.
   async read(
-    options: { maxSize?: number } = {}
+    options: { maxSize?: number } = kEmptyDictionary
   ): Promise<DrainingReadResult<R>> {
     const stream = getReaderStream<R>(this);
     if (stream === undefined) {
@@ -2734,7 +2738,7 @@ class ReadableStreamDrainingReader<R> {
 function pipeToInternal<R>(
   source: ReadableStream<R>,
   destination: WritableStreamType<R>,
-  options: StreamPipeOptions = {}
+  options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
 ): Promise<void> {
   // Spec-mandated read order (§4.9.1): preventAbort, preventCancel,
   // preventClose, signal. WPT piping/throwing-options.any.js verifies
@@ -3359,7 +3363,7 @@ class ReadableStream<R> {
     readableStreamPipeTo = <R>(
       source: ReadableStream<R>,
       destination: WritableStreamType<R>,
-      options: StreamPipeOptions = {}
+      options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
     ): Promise<void> => {
       try {
         if (isReadableStreamLocked(source)) {
@@ -3372,7 +3376,7 @@ class ReadableStream<R> {
           throw pendingClosureError();
         }
         // WebIDL: null coerces to {} for optional dictionaries.
-        if (options === null) options = {} as StreamPipeOptions;
+        if (options === null) options = kEmptyDictionary as StreamPipeOptions;
         if (!isActualObject(options)) {
           throw new TypeError('Pipe options must be an object');
         }
@@ -3929,8 +3933,8 @@ class ReadableStream<R> {
   }
 
   constructor(
-    underlyingSource: UnderlyingSource<R> = {},
-    strategy: QueuingStrategy<R> = {}
+    underlyingSource: UnderlyingSource<R> = kEmptyDictionary as UnderlyingSource<R>,
+    strategy: QueuingStrategy<R> = kEmptyDictionary as QueuingStrategy<R>
   ) {
     // The C++-recognition brand (see kReadableStreamBrand). Stamped before
     // the early returns below so every instance carries it: internal
@@ -4087,7 +4091,7 @@ class ReadableStream<R> {
   }
 
   getReader(
-    options: { mode?: 'byob' } | null = {}
+    options: { mode?: 'byob' } | null = kEmptyDictionary
   ): ReadableStreamReaderType<R> {
     assertIsReadableStream(this);
     // WebIDL dictionary conversion: null and undefined become {},
@@ -4112,8 +4116,8 @@ class ReadableStream<R> {
   pipeThrough<T>(
     transform: TransformStreamType<R, T>,
     // WebIDL: optional dictionary — null/undefined both become {}.
-    // Default = {} preserves Function.length = 1 (IDL harness check).
-    options: StreamPipeOptions = {}
+    // The default keeps Function.length at 1 (IDL harness check).
+    options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
   ): ReadableStreamType<T> {
     assertIsReadableStream(this);
     if (isReadableStreamLocked(this)) {
@@ -4134,7 +4138,7 @@ class ReadableStream<R> {
       throw new TypeError('Cannot pipe to a locked writable stream');
     }
     // WebIDL: null coerces to {} for optional dictionaries.
-    if (options === null) options = {} as StreamPipeOptions;
+    if (options === null) options = kEmptyDictionary as StreamPipeOptions;
     if (!isActualObject(options)) {
       throw new TypeError('Pipe options must be an object');
     }
@@ -4146,8 +4150,8 @@ class ReadableStream<R> {
   pipeTo(
     destination: WritableStream<R>,
     // WebIDL: optional dictionary — null/undefined both become {}.
-    // Default = {} preserves Function.length = 1 (IDL harness check).
-    options: StreamPipeOptions = {}
+    // The default keeps Function.length at 1 (IDL harness check).
+    options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
   ): Promise<void> {
     try {
       assertIsReadableStream(this);
@@ -4296,7 +4300,9 @@ class ReadableStream<R> {
     throw new TypeError('The argument must be sync or async iterable');
   }
 
-  values(options: { preventCancel?: boolean } = {}): AsyncIterableIterator<R> {
+  values(
+    options: { preventCancel?: boolean } = kEmptyDictionary
+  ): AsyncIterableIterator<R> {
     assertIsReadableStream(this);
     if (!isActualObject(options)) {
       throw new TypeError('Options must be an object');

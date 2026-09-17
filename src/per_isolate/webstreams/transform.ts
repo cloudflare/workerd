@@ -23,6 +23,7 @@ import type {
 
 const {
   ObjectDefineProperties,
+  ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
   PromiseResolve,
   PromiseReject,
@@ -38,6 +39,10 @@ const {
 const { markPromiseHandled } = utils;
 
 const kPrivateSymbol: symbol = Symbol('private');
+
+// What an omitted dictionary argument stands for. Null-prototype: WebIDL
+// reads nothing for an omitted dictionary, so neither may we.
+const kEmptyDictionary: object = ObjectFreeze({ __proto__: null });
 
 function isActualObject(value: unknown): boolean {
   return value != null && typeof value === 'object';
@@ -299,9 +304,9 @@ class TransformStream<I = unknown, O = unknown> {
     writableStrategy?: QueuingStrategy<I>,
     readableStrategy?: QueuingStrategy<O>
   ) {
-    transformer ??= {} as Transformer<I, O>;
-    writableStrategy ??= {} as QueuingStrategy<I>;
-    readableStrategy ??= {} as QueuingStrategy<O>;
+    transformer ??= kEmptyDictionary as Transformer<I, O>;
+    writableStrategy ??= kEmptyDictionary as QueuingStrategy<I>;
+    readableStrategy ??= kEmptyDictionary as QueuingStrategy<O>;
 
     if (!isActualObject(transformer)) {
       throw new TypeError('transformer must be an object');
@@ -384,8 +389,11 @@ class TransformStream<I = unknown, O = unknown> {
         readableControllerError(this.#readableController as object, reason);
       };
 
+      // Internal dictionaries are null-prototype: the constructors read
+      // members a polluted Object.prototype could otherwise supply.
       this.#writable = new WritableStream(
         {
+          __proto__: null,
           start: (c: object) => {
             this.#writableController = c;
           },
@@ -410,13 +418,18 @@ class TransformStream<I = unknown, O = unknown> {
           : readableStrategy.highWaterMark;
       this.#readable = new ReadableStream(
         {
+          __proto__: null,
           start: (c: object) => {
             this.#readableController = c;
           },
           pull: sourcePull,
           cancel: sourceCancel,
         },
-        { highWaterMark: readableHWM, size: readableStrategy.size }
+        {
+          __proto__: null,
+          highWaterMark: readableHWM,
+          size: readableStrategy.size,
+        }
       );
       if (expectedLength !== undefined) {
         readableInternals.setControllerExpectedLength(
@@ -611,6 +624,7 @@ class TransformStream<I = unknown, O = unknown> {
 
       this.#writable = new WritableStream(
         {
+          __proto__: null,
           start: (c: object) => {
             this.#writableController = c;
             return startHolder.promise;
@@ -679,6 +693,7 @@ class TransformStream<I = unknown, O = unknown> {
           : readableStrategy.highWaterMark;
       this.#readable = new ReadableStream(
         {
+          __proto__: null,
           start: (c: object) => {
             this.#readableController = c;
             return startHolder.promise;
@@ -686,7 +701,11 @@ class TransformStream<I = unknown, O = unknown> {
           pull: sourcePull,
           cancel: sourceCancel,
         },
-        { highWaterMark: readableHWM, size: readableStrategy.size }
+        {
+          __proto__: null,
+          highWaterMark: readableHWM,
+          size: readableStrategy.size,
+        }
       );
       if (expectedLength !== undefined) {
         readableInternals.setControllerExpectedLength(

@@ -77,6 +77,7 @@ const {
   DataViewPrototypeGetByteOffset,
   Number,
   ObjectDefineProperties,
+  ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
   PromiseWithResolvers,
   RangeError,
@@ -255,6 +256,13 @@ let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;
 
 const kPrivateSymbol: symbol = Symbol('private');
 
+// The strategy an omitted argument stands for. Null-prototype, as its reads
+// must not reach Object.prototype (WebIDL reads nothing for an omitted
+// dictionary).
+const kEmptyStrategy = ObjectFreeze({
+  __proto__: null,
+}) as QueuingStrategy<unknown>;
+
 class IdentityTransformStream {
   #readable: ReadableStreamType<Uint8Array>;
   #writable: WritableStreamType<unknown>;
@@ -327,7 +335,7 @@ class IdentityTransformStream {
       writableStrategy = writableStrategyOrInternal as
         QueuingStrategy<unknown> | undefined;
     }
-    writableStrategy ??= {} as QueuingStrategy<unknown>;
+    writableStrategy ??= kEmptyStrategy;
 
     // Initialize byte budget for FixedLengthStream enforcement.
     // Stored as bigint to cover the full uint64_t range without
@@ -403,10 +411,14 @@ class IdentityTransformStream {
         return 1;
       }
     };
-    writableStrategy =
+    const sinkStrategy: Record<string, unknown> =
       explicitHighWaterMark !== undefined
-        ? { highWaterMark: explicitHighWaterMark, size: sizeAndSnapshot }
-        : { size: sizeAndSnapshot };
+        ? {
+            __proto__: null,
+            highWaterMark: explicitHighWaterMark,
+            size: sizeAndSnapshot,
+          }
+        : { __proto__: null, size: sizeAndSnapshot };
 
     const initialBackpressureChange =
       PromiseWithResolvers() as PromiseWithResolversType<void>;
@@ -493,8 +505,11 @@ class IdentityTransformStream {
       if (rc !== undefined) byteControllerError(rc, reason);
     };
 
+    // Internal dictionaries are null-prototype: the constructors read
+    // members a polluted Object.prototype could otherwise supply.
     this.#writable = new WritableStream(
       {
+        __proto__: null,
         start: (c: object) => {
           this.#writableController = c;
         },
@@ -502,7 +517,7 @@ class IdentityTransformStream {
         close: sinkClose,
         abort: sinkAbort,
       },
-      writableStrategy
+      sinkStrategy
     );
     // abort() runs the abort steps only after the in-flight write settles,
     // but a write parked in the rendezvous waits for a read that may never
@@ -526,6 +541,7 @@ class IdentityTransformStream {
     };
 
     const byteSource: Record<string, unknown> = {
+      __proto__: null,
       type: 'bytes',
       start: (c: object) => {
         this.#readableController = c;
@@ -540,6 +556,7 @@ class IdentityTransformStream {
     // highWaterMark: 0 ensures pull is not called eagerly — it fires
     // only when a reader.read() is pending, enforcing the rendezvous.
     this.#readable = new ReadableStream(byteSource, {
+      __proto__: null,
       highWaterMark: 0,
     });
   }

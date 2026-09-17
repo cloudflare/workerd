@@ -245,8 +245,11 @@ function createCodecPair(
     return 1;
   };
 
+  // Internal dictionaries are null-prototype: the constructors read
+  // members a polluted Object.prototype could otherwise supply.
   const writable = new WritableStream(
     {
+      __proto__: null,
       start: (c: object): void => {
         writableController = c;
       },
@@ -310,7 +313,7 @@ function createCodecPair(
         byteControllerError(readableController, reason);
       },
     },
-    { size: sizeAndSnapshot }
+    { __proto__: null, size: sizeAndSnapshot }
   );
   writableRef = writable;
 
@@ -320,6 +323,7 @@ function createCodecPair(
   // (unbounded buffering, exactly like the legacy pair).
   const readable = new ReadableStream(
     {
+      __proto__: null,
       type: 'bytes',
       start: (c: object): void => {
         readableController = c;
@@ -335,7 +339,7 @@ function createCodecPair(
         }
       },
     },
-    { highWaterMark: 0 }
+    { __proto__: null, highWaterMark: 0 }
   );
 
   return {

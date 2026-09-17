@@ -67,6 +67,10 @@ const { RingBuffer } = require('webstreams/ring-buffer') as {
 };
 
 const kPrivateSymbol: symbol = Symbol('private');
+
+// What an omitted dictionary argument stands for. Null-prototype: WebIDL
+// reads nothing for an omitted dictionary, so neither may we.
+const kEmptyDictionary: object = ObjectFreeze({ __proto__: null });
 // Marker for a queued close request in the controller's FIFO.
 const kCloseMarker: symbol = Symbol('close');
 // Marker for a queued flush request in the controller's FIFO. flush() is a
@@ -774,8 +778,8 @@ class WritableStream<W = unknown> {
   }
 
   constructor(
-    underlyingSink: UnderlyingSink<W> = {},
-    strategy: QueuingStrategy<W> = {}
+    underlyingSink: UnderlyingSink<W> = kEmptyDictionary as UnderlyingSink<W>,
+    strategy: QueuingStrategy<W> = kEmptyDictionary as QueuingStrategy<W>
   ) {
     // The C++-recognition brand (see kWritableStreamBrand). Stamped first
     // so every instance carries it regardless of construction path.
