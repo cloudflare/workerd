@@ -10,6 +10,7 @@ const body = 'content';
 const rpcStreamBody = 'café';
 const rpcInlineBodyLimit = 16 << 20;
 const largeRpcBodySize = rpcInlineBodyLimit + 2;
+const perKeyErrorDeleteKeys = ['existing', 'missing'];
 const rpcRanges = {
   offset: { offset: 1 },
   length: { length: 3 },
@@ -290,6 +291,25 @@ const testWorker = {
 
         if (jsonRequest.method === 'delete') {
           if (jsonRequest.objects) {
+            // A batch delete can report individual key failures in a successful HTTP response.
+            // R2Bucket::delete_() reads this body from the legacy transport but does not expose it.
+            if (jsonRequest.objects[0] === perKeyErrorDeleteKeys[0]) {
+              assert.deepEqual(jsonRequest.objects, perKeyErrorDeleteKeys);
+              return Response.json(
+                [
+                  { name: 'existing' },
+                  {
+                    name: 'missing',
+                    error: {
+                      version: 1,
+                      v4code: 10007,
+                      message: 'The specified key does not exist.',
+                    },
+                  },
+                ],
+                { status: 200 }
+              );
+            }
             assert.deepEqual(jsonRequest.objects, [key, key + '2']);
           } else {
             assert.deepEqual(jsonRequest.object, key);
@@ -1383,12 +1403,18 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
         message: 'bad keys',
       });
     }
-    return rpcSuccess(null);
     if (Array.isArray(keys)) {
-      assert.deepEqual(keys, [key, key + '2']);
+      if (keys[0] === perKeyErrorDeleteKeys[0]) {
+        // R2BindingEntrypoint has already discarded the successful HTTP batch response body before
+        // deleteRpc() receives this void RPC result.
+        assert.deepEqual(keys, perKeyErrorDeleteKeys);
+      } else {
+        assert.deepEqual(keys, [key, key + '2']);
+      }
     } else {
       assert.strictEqual(keys, key);
     }
+    return rpcSuccess(null);
   }
 
   async put(requestKey, value, options, valueSize) {
@@ -1649,6 +1675,21 @@ function listRpcHead(requestKey, includes) {
   }
   return result;
 }
+
+// Test that documents the behaviour of multi-key deletion where one fails and the other succeeds
+export const deletePerKeyErrorParityTests = {
+  async test(_ctrl, env) {
+    if (env.R2_TRANSPORT !== 'http' && env.R2_TRANSPORT !== 'jsrpc') {
+      return;
+    }
+
+    // Both transports implement Promise<void>: the legacy path discards the successful HTTP body,
+    // while the RPC path receives the corresponding void result from R2BindingEntrypoint.
+    const deletion = env.BUCKET.delete(perKeyErrorDeleteKeys);
+    assert(deletion instanceof Promise);
+    assert.strictEqual(await deletion, undefined);
+  },
+};
 
 export const r2ValidationTests = {
   async test(ctrl, env) {
@@ -1999,6 +2040,8 @@ export const jsrpcMultipartTests = {
     assert.strictEqual(createOptionsUpload.uploadId, 'multipartId');
 
     const encodedStreamBody = new TextEncoder().encode(rpcStreamBody);
+    // Use a view with a non-zero byte offset to verify that the RPC upload streams only the view's
+    // bytes, rather than the entire underlying ArrayBuffer.
     const largeBufferBacking = new Uint8Array(largeRpcBodySize + 2);
     largeBufferBacking.fill(0x41);
     const largeBuffer = largeBufferBacking.subarray(1, -1);

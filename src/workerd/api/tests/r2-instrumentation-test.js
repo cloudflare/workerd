@@ -1166,6 +1166,16 @@ export const test = {
         'cloudflare.r2.response.custom_metadata': true,
         closed: true,
       },
+      {
+        name: 'r2_delete',
+        'cloudflare.binding.type': 'r2',
+        'cloudflare.binding.name': 'BUCKET',
+        'cloudflare.r2.operation': 'DeleteObject',
+        'cloudflare.r2.bucket': 'r2-test',
+        'cloudflare.r2.request.keys': 'existing, missing',
+        'cloudflare.r2.response.success': true,
+        closed: true,
+      },
     ];
 
     const sharedReceived = received

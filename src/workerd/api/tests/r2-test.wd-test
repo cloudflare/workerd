@@ -10,6 +10,7 @@ const unitTests :Workerd.Config = (
         bindings = [
           ( name = "BUCKET", r2Bucket = "r2-test" ),
           ( name = "SERVICE", service = "r2-test" ),
+          ( name = "R2_TRANSPORT", text = "http" ),
         ],
         compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "streams_enable_constructors", "r2_list_honor_include", "disable_fast_jsg_struct"],
         streamingTails = ["tail"],
