@@ -132,7 +132,8 @@ and `@all-autogates` variants, plus `@gc-stress` (off-by-default; run with
 per case; assertions come from `node:assert` (`nodejs_compat` is in both
 configs' flag lists). The `scaling/` suite is the exception to the
 variant set: it times shapes at 80k-160k entries, so it has no
-`@gc-stress` variant and skips the sanitizer builds (see its `AGENTS.md`).
+`@gc-stress` variant, skips the sanitizer builds, and its C++ cell is
+`off-by-default` (see its `AGENTS.md`).
 
 ## Streams tests that live elsewhere (by design)
 

@@ -3,22 +3,31 @@ load("//:build/wd_test.bzl", "wd_test")
 # The queue scaling suite runs the same test modules under two configs:
 # scaling-cpp against the C++ implementation, scaling-ts against the
 # TypeScript implementation. Each test times a shape at n and at a
-# multiple of n, so the cells run with a longer timeout, skip the sanitizer
-# builds, and have no @gc-stress variant (a GC per continuation would drown
-# the timing).
+# multiple of n. The assertion is a ratio, so it holds on slow machines,
+# but the runs themselves are long: the cells get the longest timeout,
+# skip the sanitizer builds, and have no @gc-stress variant (a GC per
+# continuation would drown the timing).
+#
+# The C++ cell is off by default: it is the control, not the subject (the
+# suite guards the TypeScript queues), and it costs 35-60 s per variant on
+# CI (an identity write is ~375 us there). Run it explicitly with
+# `bazel test //src/tests/streams/scaling:scaling-cpp@ --test_tag_filters=`.
 
 scaling_suite_srcs = glob(["*.js"]) + ["scaling-modules.capnp"]
 
 wd_test(
-    timeout = "long",
+    timeout = "eternal",
     src = "scaling-cpp.wd-test",
     data = scaling_suite_srcs,
     generate_gc_stress_variant = False,
-    tags = ["no-asan"],
+    tags = [
+        "no-asan",
+        "off-by-default",
+    ],
 )
 
 wd_test(
-    timeout = "long",
+    timeout = "eternal",
     src = "scaling-ts.wd-test",
     args = ["--experimental"],
     data = scaling_suite_srcs,

@@ -16,10 +16,17 @@ reorder data as they grow and wrap.
 ## Cells
 
 `scaling-cpp.wd-test` and `scaling-ts.wd-test` share `scaling-modules.capnp`.
-Both run with `timeout = "long"` (the C++ cell takes about 16 s, the TS
-cell about 4 s), are tagged `no-asan`, and have no `@gc-stress` variant:
-a GC per continuation would drown the timing. There is no legacy cell;
-nothing here depends on a flag's unflagged side.
+Both run with `timeout = "eternal"`, are tagged `no-asan`, and have no
+`@gc-stress` variant: a GC per continuation would drown the timing. The
+assertion is a ratio and holds on slow machines, but the runs are long:
+on CI the TS cell takes up to ~30 s and the C++ cell 35-60 s per variant
+(an identity write costs ~375 µs there; locally 4 s and 16 s).
+
+The C++ cell is `off-by-default`: it is the control, not the subject
+(the suite guards the TypeScript queues), so it does not run in CI. Run
+it with `bazel test //src/tests/streams/scaling:scaling-cpp@
+--test_tag_filters=`. There is no legacy cell; nothing here depends on
+a flag's unflagged side.
 
 ## Module map
 
