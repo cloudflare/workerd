@@ -167,7 +167,8 @@ class LoopbackDurableObjectNamespace: public DurableObjectNamespace {
       : DurableObjectNamespace(nsChannel,
             kj::mv(idFactory),
             actorCallRetriesAllowed,
-            Persistent(featureFlags.getAllowIrrevocableStubStorage())),
+            Persistent(featureFlags.getAllowIrrevocableStubStorage()),
+            kj::none),
         loopbackClass(kj::mv(loopbackClass)) {}
 
   // getClass() accessor for use from C++ only.

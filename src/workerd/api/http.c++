@@ -1478,6 +1478,47 @@ struct ActorFetchFailure {
 template <typename T>
 using ActorFetchAttemptResult = kj::OneOf<T, ActorFetchFailure>;
 
+ActorRetryGateEnabled fetchRetryObservationEnabled() {
+  return ActorRetryGateEnabled(
+      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH));
+}
+
+ActorRetryGateEnabled fetchRetryEnforcementEnabled() {
+  return ActorRetryGateEnabled(
+      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS));
+}
+
+// The retry policy a fetch through `fetcher` runs under, or none if the target does not support
+// actor call retries. A binding's own policy applies only when it configured one and every retry
+// gate is on: the fetch gates are prerequisites for all retry behavior, and the userland gate for
+// reading the binding's configuration. Otherwise the runtime's default applies. The gates are
+// checked before touching the stub. Its I/O objects belong to the context that created it, so
+// reaching them can throw, and a disabled rollout must never get that far.
+kj::Maybe<ActorRetryPolicy> tryGetActorRetryPolicy(Fetcher& fetcher) {
+  if (!fetcher.supportsActorCallRetries()) return kj::none;
+  if (fetchRetryObservationEnabled().toBool() && fetchRetryEnforcementEnabled().toBool() &&
+      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
+    KJ_IF_SOME(userPolicy, fetcher.getUserDefinedRetryPolicy()) {
+      return ActorRetryPolicy::userDefined(userPolicy);
+    }
+  }
+  return ActorRetryPolicy::systemDefault();
+}
+
+kj::Maybe<kj::Rc<ActorCallRetryState>> makeActorCallRetryState(
+    Fetcher& fetcher, Request& request) {
+  auto policy = KJ_UNWRAP_OR_RETURN(tryGetActorRetryPolicy(fetcher), kj::none);
+  auto& context = IoContext::current();
+  auto config = ActorCallRetryState::Config{
+    .callType = ActorRetryCallType::FETCH,
+    .observationEnabled = fetchRetryObservationEnabled(),
+    .enforcementEnabled = fetchRetryEnforcementEnabled(),
+    .payloadReplayable = ActorCallPayloadReplayable(request.canRewindBody()),
+  };
+  return kj::rc<ActorCallRetryState>(
+      context.getIoChannelFactory().getTimer(), context.getMetrics(), config, policy);
+}
+
 template <typename T>
 kj::Promise<ActorFetchAttemptResult<T>> captureActorFetchAttempt(jsg::Lock& js,
     kj::Maybe<jsg::Ref<AbortSignal>>& signal,
@@ -1621,24 +1662,8 @@ jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
 jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
-  kj::Vector<kj::Url> urlList) {
-  kj::Maybe<kj::Rc<ActorCallRetryState>> retryState;
-  if (fetcher->supportsActorCallRetries()) {
-    auto& context = IoContext::current();
-    auto observationEnabled = ActorRetryGateEnabled(
-        util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH));
-    auto enforcementEnabled = ActorRetryGateEnabled(util::Autogate::isEnabled(
-        util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS));
-    retryState = kj::rc<ActorCallRetryState>(context.getIoChannelFactory().getTimer(),
-        context.getMetrics(),
-        ActorCallRetryState::Config{
-          .callType = ActorRetryCallType::FETCH,
-          .observationEnabled = observationEnabled,
-          .enforcementEnabled = enforcementEnabled,
-          .payloadReplayable = ActorCallPayloadReplayable(jsRequest->canRewindBody()),
-        });
-  }
-
+    kj::Vector<kj::Url> urlList) {
+  auto retryState = makeActorCallRetryState(*fetcher, *jsRequest);
   return fetchImplNoOutputLockAttempt(
       js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(retryState));
 }
@@ -2824,6 +2849,15 @@ kj::Maybe<ActorCallTargetRetryable> Fetcher::getActorTargetRetryability() {
     return outgoingFactory->getActorTargetRetryability();
   }
   return kj::none;
+}
+
+kj::Maybe<UserDefinedRetryPolicy> Fetcher::getUserDefinedRetryPolicy() {
+  auto& outgoingFactory = KJ_REQUIRE_NONNULL(
+      channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>(),
+      "actor retry policy requested from an unsupported Fetcher");
+  KJ_REQUIRE(outgoingFactory->supportsActorCallRetries(),
+      "actor retry policy requested from an unsupported Fetcher");
+  return outgoingFactory->getUserDefinedRetryPolicy();
 }
 
 void Fetcher::onActorCallRetry() {

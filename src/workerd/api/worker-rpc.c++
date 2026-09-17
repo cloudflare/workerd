@@ -953,7 +953,8 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
         .observationEnabled = ActorRetryGateEnabled::YES,
         .enforcementEnabled = enforcementEnabled,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
-      });
+      },
+      ActorRetryPolicy::systemDefault());
   auto attemptOrException = KJ_ASSERT_NONNULL(result.state)->startAttempt();
   result.attempt =
       kj::mv(KJ_ASSERT_NONNULL(attemptOrException.tryGet<ActorCallRetryState::Attempt>()));
