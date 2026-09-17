@@ -1,0 +1,37 @@
+src/rust/cxx/kj-hyper/ffi.rs
+  s_b5100e8818a1d4::t_29b88e827deb75 28,35-36,200-213,577-581,584-587,589-594,596-597,599-601,603-604,606-612,614-621,996-999
+src/rust/cxx/kj-hyper/hyper-server-ffi.c++
+  s_b5100e8818a1d4::t_9e9baa008fbc7f 189-241,404-418
+src/rust/cxx/kj-hyper/kj-stream.h
+  s_b5100e8818a1d4::t_a4e365be3abee7 3-5,46-60
+src/rust/cxx/kj-hyper/lib.rs
+  s_b5100e8818a1d4::t_558edcb11472d3 66
+src/rust/cxx/kj-hyper/rust_stream.rs
+  s_b5100e8818a1d4::t_149df7e72d0954 1,3-9,11-16,18-22,26-28,30,32-35,37-38,40-47,50-57,60-64,67-73,75-90,93-102,104-107,109,114-145,149-158,160,162-169,171
+src/rust/cxx/kj-hyper/serve.rs
+  s_b5100e8818a1d4::t_a8f747e23c8573 9-11,22,24,64,66,69,71-72,86-88,410,435,451,461,471,485,495,565-566,569-576,581-584,605-624,655
+src/rust/cxx/kj-hyper/tests/hyper-tls-test.c++
+  s_b5100e8818a1d4::t_789f33b62be0b7 538-560,562-566,572-592,594-600,607-624,626-629,680-727
+src/rust/cxx/kj-hyper/tls.rs
+  s_b5100e8818a1d4::t_90299aba1240ee 583-584,620-804
+src/workerd/server/BUILD.bazel
+  s_b5100e8818a1d4::t_6aab3fe0f989d3 206-207,218
+src/workerd/server/tls-network.c++
+  s_b5100e8818a1d4::t_3a712c84936940 22-29,169-170,198-200,204,210
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "edb2c223c380abbf6b6aea5dfef0693d5377ef57",
+  "prompts": {},
+  "sessions": {
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
