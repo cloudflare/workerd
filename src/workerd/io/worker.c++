@@ -1787,6 +1787,12 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
 
 void Worker::setupContext(
     jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions) {
+  // Each decorator below captures a v8::Global to the original console method, and
+  // v8::SnapshotCreator::CreateBlob() refuses to serialize an isolate with live global handles.
+  // A zygote keeps V8's default console; the context restored from its snapshot gets the
+  // decorators when this runs again for the real Worker.
+  if (lock.isPreparingSnapshot()) return;
+
   // We replace the default V8 console.log(), etc. methods, to give the worker access to
   // logged content, and log formatted values to stdout/stderr locally.
   auto global = context->Global();
