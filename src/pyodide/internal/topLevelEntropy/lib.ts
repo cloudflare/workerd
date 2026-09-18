@@ -73,7 +73,10 @@ export function getRandomValues(
     console.log('Python stack:');
     Module._dump_traceback();
     throw new PythonUserError(
-      'Disallowed operation called within global scope'
+      'Randomness is not allowed while a Python Worker is starting because startup ' +
+        'values will be repeated across Worker instances, making them predictable. ' +
+        'If this error occurs from ' +
+        'importing a package, import the package from a function to load it after the Worker starts. '
     );
   }
   // "entropy" in the test suite is a bunch of 42's. Good to use a readily identifiable pattern
