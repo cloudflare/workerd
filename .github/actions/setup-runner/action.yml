@@ -20,9 +20,7 @@ runs:
         sudo apt-get install -y -qq --no-install-recommends \
           clang-22 \
           lld-22 \
-          libunwind-22 \
-          libc++abi1-22 \
-          libc++1-22 \
+          libunwind-22-dev \
           libc++-22-dev \
           libclang-rt-22-dev \
           llvm-22

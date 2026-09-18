@@ -58,7 +58,7 @@ To build `workerd`, you need:
   * We use the clang/LLVM toolchain to build workerd and support version 22 and higher. Earlier versions of clang may still work, but are not officially supported.
   * Clang 22+ (e.g. package `clang-22` on Debian Trixie). If clang is installed as `clang-<version>` please create a symlink to it in your PATH named `clang`, or use `--repo_env=CC=clang-<version>` on `bazel` command lines to specify the compiler name.
 
-  * libc++ 22+ (e.g. packages `libc++-22-dev` and `libc++abi-22-dev`)
+  * libc++ 22+ (e.g. package `libc++-22-dev`)
   * LLD 22+ (e.g. package `lld-22`).
   * `python3`, `python3-distutils`, and `tcl8.6`
 * On macOS:
