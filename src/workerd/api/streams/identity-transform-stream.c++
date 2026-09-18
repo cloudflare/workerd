@@ -114,16 +114,18 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     auto promise = readHelper(kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes));
 
     KJ_IF_SOME(l, limit) {
-      promise = promise.then([this, &l = l](size_t amount) -> kj::Promise<size_t> {
+      promise =
+          promise.then([self = addWeakToThis(), &l = l](size_t amount) -> kj::Promise<size_t> {
+        auto& stream = self.assertLive();
         if (amount > l) {
           auto exception = JSG_KJ_EXCEPTION(
               FAILED, TypeError, "Attempt to write too many bytes through a FixedLengthStream.");
-          cancel(exception.clone());
+          stream.cancel(exception.clone());
           return kj::mv(exception);
         } else if (amount == 0 && l != 0) {
           auto exception = JSG_KJ_EXCEPTION(FAILED, TypeError,
               "FixedLengthStream did not see all expected bytes before close().");
-          cancel(exception.clone());
+          stream.cancel(exception.clone());
           return kj::mv(exception);
         }
         l -= amount;
