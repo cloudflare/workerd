@@ -61,6 +61,10 @@ export const validateSpans = {
         test: 'arrayAttributeByteLimit',
         expectedSpan: 'array-limit-strings-op',
       },
+      {
+        test: 'arrayAttributeByteLimit',
+        expectedSpan: 'array-limit-nullish-op',
+      },
     ];
 
     for (const { test, expectedSpan } of testValidations) {
@@ -170,7 +174,7 @@ export const validateSpans = {
     }
 
     // Array attributes on a user-created span: arrays arrive as arrays with scalar-vs-array
-    // identity preserved, nullish elements dropped, and invalid arrays omitted.
+    // identity preserved, nullish positions retained, and invalid arrays omitted.
     {
       const span = (spansByTest.get('arrayAttributes') || []).find(
         (s) => s.name === 'array-attrs-op'
@@ -187,10 +191,16 @@ export const validateSpans = {
 
       assert.deepStrictEqual(span.empty, []);
 
-      assert.deepStrictEqual(span['nullish.strings'], ['a', 'b']);
-      assert.deepStrictEqual(span['nullish.numbers'], [1, 2]);
-      assert.deepStrictEqual(span['nullish.booleans'], [true]);
-      assert.deepStrictEqual(span['nullish.only'], []);
+      assert.deepStrictEqual(span['nullish.strings'], [
+        null,
+        'a',
+        null,
+        'b',
+        null,
+      ]);
+      assert.deepStrictEqual(span['nullish.numbers'], [null, 1, null, 2]);
+      assert.deepStrictEqual(span['nullish.booleans'], [null, true]);
+      assert.deepStrictEqual(span['nullish.only'], [null, null]);
 
       for (const key of [
         'invalid.mixed',
@@ -212,7 +222,7 @@ export const validateSpans = {
 
       assert.deepStrictEqual(span['set.strings'], ['x', 'y']);
       assert.deepStrictEqual(span['set.numbers'], [7]);
-      assert.deepStrictEqual(span['set.booleans'], [true, false]);
+      assert.deepStrictEqual(span['set.booleans'], [true, null, false]);
       assert.deepStrictEqual(span['set.empty'], []);
 
       assert.deepStrictEqual(span['overwrite.toArray'], ['a', 'b']);
@@ -244,8 +254,16 @@ export const validateSpans = {
       assert.deepStrictEqual(attributes.get('invocation.booleans'), [false]);
       assert.deepStrictEqual(attributes.get('invocation.single'), ['stop']);
       assert.deepStrictEqual(attributes.get('invocation.empty'), []);
-      assert.deepStrictEqual(attributes.get('invocation.nullish'), ['a']);
-      assert.deepStrictEqual(attributes.get('invocation.set.numbers'), [3, 4]);
+      assert.deepStrictEqual(attributes.get('invocation.nullish'), [
+        null,
+        'a',
+        null,
+      ]);
+      assert.deepStrictEqual(attributes.get('invocation.set.numbers'), [
+        3,
+        null,
+        4,
+      ]);
       assert(
         !attributes.has('invocation.invalid'),
         'invocationSpanArrayAttributes: heterogeneous array should be omitted'
@@ -272,9 +290,27 @@ export const validateSpans = {
       );
       assert.match(
         span['cloudflare.warning.message'],
-        /attribute "big\.strings" of size 71680$/
+        /attribute "big\.strings" of size 75776$/
       );
       assert.deepStrictEqual(span.fits, new Array(512).fill('abcd'));
+
+      const nullishSpan = testSpans.find(
+        (s) => s.name === 'array-limit-nullish-op'
+      );
+      assert(nullishSpan, 'arrayAttributeByteLimit: nullish span present');
+      assert(!('nulls.15' in nullishSpan));
+      assert.deepStrictEqual(
+        nullishSpan['nulls.14'],
+        new Array(512).fill(null)
+      );
+      assert.strictEqual(
+        nullishSpan['cloudflare.warning.type'],
+        'span_data_limit_exceeded'
+      );
+      assert.match(
+        nullishSpan['cloudflare.warning.message'],
+        /attribute "nulls\.15" of size 4096$/
+      );
     }
 
     // Nested spans: verify both outer and inner spans exist and both are closed.

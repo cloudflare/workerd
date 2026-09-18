@@ -8,7 +8,8 @@
 // Array semantics:
 //   - A one-element array stays an array (it is not collapsed to its element).
 //   - An empty array is recorded as an empty array.
-//   - null and undefined elements are skipped; the remaining elements keep their order.
+//   - null and undefined elements preserve their position as empty values. Both are represented
+//     as null in downstream tracing output.
 //   - Arrays mixing primitive types, or containing objects or nested arrays, are ignored.
 //
 // Keep in sync with the JSG_TS_OVERRIDE in src/workerd/api/tracing.h.

@@ -107,8 +107,8 @@ class Span: public jsg::Object {
   //   - If `value` is undefined, the attribute is not set.
   //   - A one-element array is recorded as an array, not as its element.
   //   - An empty array is recorded as an empty array.
-  //   - null and undefined array elements are skipped, since the tracing pipeline has no null
-  //     value; the remaining elements keep their relative order.
+  //   - null and undefined array elements preserve their position as empty values. Downstream
+  //     JavaScript receives both as null, matching their representation as empty OTLP AnyValues.
   //   - Arrays mixing primitive types or containing objects/nested arrays are ignored (with a
   //     warning logged), matching the OpenTelemetry SDK's sanitizeAttributes() behavior.
   jsg::Ref<Span> setAttribute(jsg::Lock& js,

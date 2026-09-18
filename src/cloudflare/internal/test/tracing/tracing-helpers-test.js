@@ -225,8 +225,8 @@ export const setAttributes = {
 };
 
 // Array attribute values follow OpenTelemetry semantics: homogeneous primitive arrays are
-// recorded as arrays (including one-element and empty arrays), null/undefined elements are
-// skipped, and heterogeneous or nested arrays are ignored. The received values are checked in
+// recorded as arrays (including one-element and empty arrays), null/undefined positions are
+// retained, and heterogeneous or nested arrays are ignored. The received values are checked in
 // tracing-helpers-instrumentation-test.js.
 export const arrayAttributes = {
   async test(ctrl, env, ctx) {
@@ -248,7 +248,7 @@ export const arrayAttributes = {
       // Empty arrays are recorded as empty arrays.
       span.setAttribute('empty', []);
 
-      // null/undefined elements are skipped; other elements keep their order.
+      // null/undefined elements retain their positions and are normalized to null downstream.
       span.setAttribute('nullish.strings', [null, 'a', undefined, 'b', null]);
       span.setAttribute('nullish.numbers', [undefined, 1, null, 2]);
       span.setAttribute('nullish.booleans', [null, true]);
@@ -330,6 +330,13 @@ export const arrayAttributeByteLimit = {
       span.setAttribute('fits', new Array(512).fill('abcd'));
       // 512 * 140 bytes exceed the limit and must be dropped with a warning.
       span.setAttribute('big.strings', new Array(512).fill('x'.repeat(140)));
+    });
+
+    withSpan('array-limit-nullish-op', (span) => {
+      span.setAttribute('test', 'arrayAttributeByteLimit');
+      for (let i = 0; i < 16; i++) {
+        span.setAttribute(`nulls.${i}`, new Array(512).fill(null));
+      }
     });
   },
 };

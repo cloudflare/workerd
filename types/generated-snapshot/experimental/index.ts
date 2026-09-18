@@ -17151,11 +17151,11 @@ export declare namespace TailStream {
     readonly name: string;
     readonly value:
       | string
-      | string[]
+      | (string | null)[]
       | boolean
-      | boolean[]
+      | (boolean | null)[]
       | number
-      | number[]
+      | (number | null)[]
       | bigint
       | bigint[];
   }

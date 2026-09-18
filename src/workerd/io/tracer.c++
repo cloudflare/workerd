@@ -29,17 +29,19 @@ size_t attributeValueSize(const tracing::Attribute::Value& value) {
     KJ_CASE_ONEOF(val, bool) {
       return 1;
     }
-    KJ_CASE_ONEOF(arr, kj::Array<kj::ConstString>) {
-      size_t size = 0;
+    KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
+      size_t size = arr.size() * sizeof(uint64_t);
       for (auto& str: arr) {
-        size += str.size();
+        KJ_IF_SOME(value, str) {
+          size += value.size();
+        }
       }
       return size;
     }
-    KJ_CASE_ONEOF(arr, kj::Array<bool>) {
-      return arr.size();
+    KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
+      return arr.size() * sizeof(uint64_t);
     }
-    KJ_CASE_ONEOF(arr, kj::Array<double>) {
+    KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
       return arr.size() * sizeof(double);
     }
     // int64_t and double

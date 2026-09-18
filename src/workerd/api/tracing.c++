@@ -35,17 +35,19 @@ size_t estimateAttributeValueSize(const AttributeValue& value) {
     KJ_CASE_ONEOF(s, kj::ConstString) {
       return s.size();
     }
-    KJ_CASE_ONEOF(arr, kj::Array<kj::ConstString>) {
-      size_t size = 0;
+    KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
+      size_t size = arr.size() * sizeof(uint64_t);
       for (auto& s: arr) {
-        size += s.size();
+        KJ_IF_SOME(value, s) {
+          size += value.size();
+        }
       }
       return size;
     }
-    KJ_CASE_ONEOF(arr, kj::Array<bool>) {
+    KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
       return arr.size() * 8;
     }
-    KJ_CASE_ONEOF(arr, kj::Array<double>) {
+    KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
       return arr.size() * 8;
     }
   }
@@ -57,18 +59,21 @@ enum class ArrayElementType { UNKNOWN, STRING, NUMBER, BOOLEAN };
 
 // Converts a JS array to a homogeneous native array following OpenTelemetry's attribute rules:
 // elements must all be strings, all numbers, or all booleans; null and undefined elements are
-// permitted and skipped. Returns kj::none for arrays that mix primitive types or contain
+// preserved as empty values. Returns kj::none for arrays that mix primitive types or contain
 // non-primitive elements (objects, nested arrays, bigints, symbols, functions).
 kj::Maybe<AttributeValue> arrayToAttributeValue(jsg::Lock& js, jsg::JsArray array) {
   auto type = ArrayElementType::UNKNOWN;
-  kj::Vector<kj::ConstString> strings;
-  kj::Vector<double> numbers;
-  kj::Vector<bool> booleans;
+  kj::Vector<kj::Maybe<kj::ConstString>> strings;
+  kj::Vector<kj::Maybe<double>> numbers;
+  kj::Vector<kj::Maybe<bool>> booleans;
 
   auto length = array.size();
   for (uint32_t i = 0; i < length; i++) {
     jsg::JsValue element = array.get(js, i);
     if (element.isNullOrUndefined()) {
+      strings.add(kj::none);
+      numbers.add(kj::none);
+      booleans.add(kj::none);
       continue;
     }
     ArrayElementType elementType;
@@ -110,9 +115,9 @@ kj::Maybe<AttributeValue> arrayToAttributeValue(jsg::Lock& js, jsg::JsArray arra
     case ArrayElementType::BOOLEAN:
       return AttributeValue(booleans.releaseAsArray());
     case ArrayElementType::UNKNOWN:
-      // Empty, or only null/undefined elements. The element type is unobservable in either case,
-      // so record an empty array; the wire format uses the string variant for that.
-      return AttributeValue(kj::Array<kj::ConstString>());
+      // Empty arrays and arrays containing only empty elements have no observable element type,
+      // so the wire format uses the string variant for them.
+      return AttributeValue(strings.releaseAsArray());
   }
   KJ_UNREACHABLE;
 }
@@ -271,13 +276,13 @@ class UserSpanState final: public SpanState {
       KJ_CASE_ONEOF(s, kj::ConstString) {
         builder.setTag(kj::ConstString(kj::mv(key)), kj::mv(s), IsCustomTag::YES);
       }
-      KJ_CASE_ONEOF(arr, kj::Array<kj::ConstString>) {
+      KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
         builder.setTag(kj::ConstString(kj::mv(key)), kj::mv(arr), IsCustomTag::YES);
       }
-      KJ_CASE_ONEOF(arr, kj::Array<bool>) {
+      KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
         builder.setTag(kj::ConstString(kj::mv(key)), kj::mv(arr), IsCustomTag::YES);
       }
-      KJ_CASE_ONEOF(arr, kj::Array<double>) {
+      KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
         builder.setTag(kj::ConstString(kj::mv(key)), kj::mv(arr), IsCustomTag::YES);
       }
     }
