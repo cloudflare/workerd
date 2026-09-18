@@ -12053,6 +12053,35 @@ declare abstract class AiGateway {
   ): Promise<Response>;
   getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
 }
+/** A parameter accepted by an Analytics SQL query. */
+type AnalyticsSQLParameter = string | number | boolean | null;
+/** An Analytics SQL query and its optional positional or named parameters. */
+interface AnalyticsSQLQuery {
+  query: string;
+  params?:
+    | readonly AnalyticsSQLParameter[]
+    | Readonly<Record<string, AnalyticsSQLParameter>>;
+}
+/** Execution statistics returned by Analytics SQL. */
+interface AnalyticsSQLStatistics {
+  elapsed_ms: number;
+  rows_read: number;
+  bytes_read: number;
+}
+/** The rows and execution statistics returned by an Analytics SQL query. */
+interface AnalyticsSQLResult<
+  T extends Record<string, unknown> = Record<string, unknown>,
+> {
+  data: T[];
+  rows: number;
+  statistics: AnalyticsSQLStatistics;
+}
+/** An Analytics SQL binding. */
+interface AnalyticsSQLBinding {
+  query<T extends Record<string, unknown> = Record<string, unknown>>(
+    request: AnalyticsSQLQuery,
+  ): Promise<AnalyticsSQLResult<T>>;
+}
 // Copyright (c) 2022-2025 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
