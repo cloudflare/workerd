@@ -22,7 +22,7 @@ prepare-rust:
   rustup component add rust-analyzer --toolchain 1.91.0
 
 prepare-ubuntu:
-  sudo apt-get install -y --no-install-recommends libc++abi1-22 libc++1-22 libc++-22-dev lld-22 bazelisk python3 lcov fd-find
+  sudo apt-get install -y --no-install-recommends clang-22 lld-22 libunwind-22-dev libc++-22-dev libclang-rt-22-dev bazelisk python3 lcov fd-find
 
 prepare-macos:
   brew install --quiet bazelisk python3 lcov fd
