@@ -1140,10 +1140,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     KJ_DASSERT(lock->v8Isolate->GetData(jsg::SET_DATA_ISOLATE) == nullptr);
     lock->v8Isolate->SetData(jsg::SET_DATA_ISOLATE, this);
 
-    for (auto& m: kConsoleMethods) {
-      jsg::isolateRegisterExternalReference(
-          lock->v8Isolate, reinterpret_cast<intptr_t>(m.callback));
-    }
+    // The console decorators installed by setupContext() are jsg::Functions; their shared
+    // trampoline is registered where they are wrapped (jsg/function.h).
     jsg::isolateRegisterExternalReference(lock->v8Isolate, jsg::getSyntheticModuleEvalRef());
 
     lock->setCaptureThrowsAsRejections(features.getCaptureThrowsAsRejections());

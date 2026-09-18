@@ -423,6 +423,12 @@ class IsolateBase {
     auto& artifact = mutableSnapshotArtifact();
     auto& refs = artifact.externalReferences;
     // The final slot must remain 0: V8 reads the table up to the 0 terminator.
+    // Callbacks reached through generic wrap paths (e.g. every jsg::Function of one signature
+    // shares one trampoline) register the same address many times; keep the table unique.
+    auto used = refs.first(artifact.externalReferenceCursor);
+    for (auto existing: used) {
+      if (existing == addr) return;
+    }
     KJ_REQUIRE(artifact.externalReferenceCursor < refs.size() - 1,
         "external_references table is full; bump kExternalReferencesCapacity");
     refs[artifact.externalReferenceCursor++] = addr;

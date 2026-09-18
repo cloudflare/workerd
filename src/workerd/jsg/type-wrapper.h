@@ -693,7 +693,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictionaryTemplate) {
     ([&] {
       if constexpr (T::JSG_KIND == JsgKind::STRUCT) {
-        using SW = StructWrapper<Self, T, typename T::template JsgFieldWrappers<Self, T>>;
+        using SW = StructWrapper<T, typename T::template _JSG_STRUCT_FIELDS_DO_NOT_USE_DIRECTLY<T>>;
         static_cast<SW*>(this)->visitPersistentHandles(visitName, visitDictionaryTemplate);
       }
     }(), ...);

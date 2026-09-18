@@ -20,6 +20,8 @@
 
 namespace workerd::jsg {
 
+void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr);
+
 template <typename Signature>
 class WrappableFunction;
 
@@ -379,6 +381,10 @@ class FunctionWrapper {
       //   but I'd like to do it as a separate commit which can be reverted. We also currently fail
       //   to set this on constructors and methods (see resource.h). Remember not to count
       //   injected parameters!
+      // The trampoline ends up in the heap as the function's C++ callback; a startup snapshot
+      // can only serialize it if it is in the isolate's external-reference table.
+      isolateRegisterExternalReference(isolate,
+          reinterpret_cast<intptr_t>(&FunctorCallback<TypeWrapper, Signature>::callback));
       return check(
           v8::Function::New(context, &FunctorCallback<TypeWrapper, Signature>::callback, data));
     });
