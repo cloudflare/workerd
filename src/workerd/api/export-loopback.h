@@ -163,12 +163,13 @@ class LoopbackDurableObjectNamespace: public DurableObjectNamespace {
       kj::Own<ActorIdFactory> idFactory,
       ActorCallRetriesAllowed actorCallRetriesAllowed,
       jsg::Ref<LoopbackDurableObjectClass> loopbackClass,
-      CompatibilityFlags::Reader featureFlags)
+      CompatibilityFlags::Reader featureFlags,
+      kj::Maybe<UserDefinedRetryPolicy> userDefinedRetryPolicy)
       : DurableObjectNamespace(nsChannel,
             kj::mv(idFactory),
             actorCallRetriesAllowed,
             Persistent(featureFlags.getAllowIrrevocableStubStorage()),
-            kj::none),
+            userDefinedRetryPolicy),
         loopbackClass(kj::mv(loopbackClass)) {}
 
   // getClass() accessor for use from C++ only.

@@ -675,7 +675,8 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
       value = lock.wrap(context,
           lock.alloc<api::LoopbackDurableObjectNamespace>(ns.actorChannel,
               kj::heap<ActorIdFactoryImpl>(ns.uniqueKey), api::ActorCallRetriesAllowed::YES,
-              lock.alloc<api::LoopbackDurableObjectClass>(ns.classChannel), featureFlags));
+              lock.alloc<api::LoopbackDurableObjectClass>(ns.classChannel), featureFlags,
+              /*userDefinedRetryPolicy=*/kj::none));
     }
 
     KJ_CASE_ONEOF(ae, Global::AnalyticsEngine) {
