@@ -1972,8 +1972,21 @@ class ResourceWrapper {
     // instantiate the `isContext = true` branch.
 
     auto isolate = js.v8Isolate;
-    auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
-    v8::Local<v8::Context> context = v8::Context::New(isolate, nullptr, tmpl);
+    v8::Local<v8::Context> context;
+    if (js.isStartingFromSnapshot()) {
+      // The snapshot's default context is the zygote's context: built from this same template,
+      // every member installed, the worker's top-level code already run. Creating the context
+      // without a global template makes V8 hook the deserialized global object up to a fresh
+      // global proxy and stop there. Passing the template would make it build a new global object
+      // from the template (Genesis::ConfigureGlobalObject instantiating every member) and copy
+      // the snapshot's properties onto it, which was a third of an ephemeral isolate's spawn
+      // cost. What is C++ state on this side (the wrapper, the embedder data slots, the module
+      // registry) is re-attached below exactly as for a fresh context.
+      context = v8::Context::New(isolate, nullptr, v8::MaybeLocal<v8::ObjectTemplate>());
+    } else {
+      auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
+      context = v8::Context::New(isolate, nullptr, tmpl);
+    }
     auto global = context->Global();
 
     auto ptr = js.alloc<T>(kj::fwd<Args>(args)...);

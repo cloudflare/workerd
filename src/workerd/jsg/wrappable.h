@@ -70,6 +70,13 @@ enum class ContextPointerSlot : int {
 constexpr int SNAPSHOT_MAIN_MODULE_NAMESPACE_SLOT =
     static_cast<int>(ContextPointerSlot::MAX_POINTER_SLOT) + 1;
 
+// Tagged embedder-data slot in which the zygote records the WebAssembly.instantiate shim's
+// factory function (io/worker.c++, setupContextInternalScripts). The shim source evaluates to a
+// factory that only touches `WebAssembly` when called, so the zygote can compile it although its
+// isolate has no WebAssembly object; a restored isolate calls the recorded factory instead of
+// compiling the script again.
+constexpr int SNAPSHOT_WASM_SHIM_FACTORY_SLOT = SNAPSHOT_MAIN_MODULE_NAMESPACE_SLOT + 1;
+
 inline void setAlignedPointerInEmbedderData(
     v8::Local<v8::Context> context, ContextPointerSlot slot, void* ptr) {
   // The type tag is a small integer that should be different for every pointer

@@ -1729,6 +1729,14 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
   });
 }
 
+// Compiles and evaluates the shim source, which yields its factory function. Only calling the
+// factory touches `WebAssembly`, so this also works in a zygote isolate that has none.
+jsg::JsFunction compileWasmInstantiateShim(jsg::Lock& lock) {
+  auto shimScript =
+      jsg::NonModuleScript::compile(lock, WASM_INSTANTIATE_SHIM, "wasm-instantiate-shim.js"_kj);
+  return KJ_ASSERT_NONNULL(shimScript.runAndReturn(lock).tryCast<jsg::JsFunction>());
+}
+
 // Installs a shim around WebAssembly.instantiate and WebAssembly.Instance that hooks into the
 // shutdown signal if it exists
 void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context) {
@@ -1782,10 +1790,18 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
   auto registerFn = jsg::check(v8::Function::New(context, registerCb));
 
   // Build the shim in JavaScript. It wraps both WebAssembly.instantiate (async) and
-  // WebAssembly.Instance (sync constructor).
-  auto shimScript =
-      jsg::NonModuleScript::compile(lock, WASM_INSTANTIATE_SHIM, "wasm-instantiate-shim.js"_kj);
-  auto shimFn = KJ_ASSERT_NONNULL(shimScript.runAndReturn(lock).tryCast<jsg::JsFunction>());
+  // WebAssembly.Instance (sync constructor). An isolate restored from a startup snapshot finds
+  // the factory its zygote compiled (setupContextInternalScripts) and skips the compile, which
+  // was a tenth of an ephemeral isolate's spawn cost.
+  jsg::JsFunction shimFn = [&]() {
+    if (lock.isStartingFromSnapshot()) {
+      auto data = context->GetEmbedderData(jsg::SNAPSHOT_WASM_SHIM_FACTORY_SLOT);
+      if (!data.IsEmpty() && data->IsFunction()) {
+        return jsg::JsFunction(data.As<v8::Function>());
+      }
+    }
+    return compileWasmInstantiateShim(lock);
+  }();
 
   // Call the factory — it mutates `WebAssembly` in place.
   shimFn.call(lock, lock.global(), jsg::JsFunction(registerFn));
@@ -1830,13 +1846,21 @@ void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context>
   // so the `WebAssembly` global does not exist and these shims would fail.
   // That's fine: wasm modules aren't captured in the snapshot anyway, and this runs again
   // in normal mode on the context restored from the snapshot, installing the shims then.
-  if (!lock.isPreparingSnapshot()) {
-    // Set WebAssembly.Module @@HasInstance
-    setWebAssemblyModuleHasInstance(lock, context);
-
-    // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
-    shimWebAssemblyInstantiate(lock, context);
+  if (lock.isPreparingSnapshot()) {
+    // What the zygote can do is pay for compiling the shim: its source evaluates to a factory
+    // that only touches WebAssembly when called. Record the factory in the context so that every
+    // isolate restored from this snapshot calls it instead of compiling the script again.
+    v8::Context::Scope contextScope(context);
+    context->SetEmbedderData(jsg::SNAPSHOT_WASM_SHIM_FACTORY_SLOT,
+        v8::Local<v8::Function>(compileWasmInstantiateShim(lock)));
+    return;
   }
+
+  // Set WebAssembly.Module @@HasInstance
+  setWebAssemblyModuleHasInstance(lock, context);
+
+  // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
+  shimWebAssemblyInstantiate(lock, context);
 }
 // =======================================================================================
 

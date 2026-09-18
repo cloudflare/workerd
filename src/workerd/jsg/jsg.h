@@ -67,6 +67,18 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
   kj::Array<intptr_t> externalReferences;
   size_t externalReferenceCursor = 0;
 
+  // The zygote's resource-type function templates, stored in the blob with
+  // v8::SnapshotCreator::AddData(): one index per slot visited by
+  // IsolateBase::iterateResourceTypeTemplates(), kNoTemplateData for a template the zygote never
+  // created, plus the opaque-object template. Every JS object in the snapshot was instantiated
+  // from these templates, and JSG unwraps by template identity (FindInstanceInPrototypeChain),
+  // so an isolate restored from the blob must adopt them (IsolateBase::adoptTemplatesFromSnapshot)
+  // rather than create fresh ones: otherwise `new Response()` from the snapshot's global fails to
+  // unwrap, snapshotted binding objects reject their own methods and `instanceof` breaks.
+  static constexpr size_t kNoTemplateData = SIZE_MAX;
+  kj::Array<size_t> templateDataIndices;
+  size_t opaqueTemplateDataIndex = kNoTemplateData;
+
   ~SnapshotArtifact() noexcept(false) {
     // v8::SnapshotCreator::CreateBlob() allocates the data with `new[]` and hands over ownership.
     delete[] blob.data;

@@ -418,6 +418,12 @@ class IsolateBase {
   // context and fill the SnapshotArtifact slot passed at isolate creation. No-op otherwise.
   void prepareSnapshot(v8::Global<v8::Context> defaultContextHandle);
 
+  // When starting from a snapshot: replace the (not yet created) resource-type templates and the
+  // opaque template with the ones the zygote recorded in the artifact (see
+  // SnapshotArtifact::templateDataIndices). Must run as soon as the type wrapper exists, before
+  // anything asks for a template. No-op otherwise.
+  void adoptTemplatesFromSnapshot();
+
   void registerExternalReference(intptr_t addr) {
     if (!isPreparingSnapshot()) return;
     auto& artifact = mutableSnapshotArtifact();
@@ -845,6 +851,7 @@ class Isolate: public IsolateBase {
     auto wrapper = wrapperSpace.construct(ptr, kj::fwd<MetaConfiguration>(configuration));
     wrapper->initTypeWrapper();
     wrappers[0] = kj::mv(wrapper);
+    adoptTemplatesFromSnapshot();
   }
 
   // Populates the IsolateBase type handler registry (see Lock::tryGetTypeHandler()) with

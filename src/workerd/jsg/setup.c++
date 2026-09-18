@@ -555,6 +555,21 @@ void IsolateBase::prepareSnapshot(v8::Global<v8::Context> defaultContextHandle) 
   creator->SetDefaultContext(defaultContext);
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
 
+  // Record the templates every snapshotted JSG object was instantiated from, so that restored
+  // isolates adopt them instead of creating new ones (see SnapshotArtifact::templateDataIndices).
+  // Done before the handles are reset below; AddData keeps the templates alive in the blob.
+  {
+    v8::HandleScope scope(ptr);
+    kj::Vector<size_t> indices;
+    iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& h) {
+      indices.add(h.IsEmpty() ? SnapshotArtifact::kNoTemplateData : creator->AddData(h.Get(ptr)));
+    });
+    artifact.templateDataIndices = indices.releaseAsArray();
+    artifact.opaqueTemplateDataIndex = opaqueTemplate.IsEmpty()
+        ? SnapshotArtifact::kNoTemplateData
+        : creator->AddData(opaqueTemplate.Get(ptr));
+  }
+
   // We need to reset all C++ handles that point to JavaScript objects before creating
   // the snapshot blob, because V8 does not know how to serialize them.
 
@@ -586,6 +601,44 @@ void IsolateBase::prepareSnapshot(v8::Global<v8::Context> defaultContextHandle) 
   // Keep compiled code: with --no-lazy the zygote compiled every function eagerly, so isolates
   // restored from the blob never parse or compile the worker at all.
   artifact.blob = creator->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kKeep);
+}
+
+void IsolateBase::adoptTemplatesFromSnapshot() {
+  if (!isStartingFromSnapshot()) return;
+  const SnapshotArtifact& artifact = readonlySnapshotArtifact();
+  if (artifact.templateDataIndices.size() == 0 &&
+      artifact.opaqueTemplateDataIndex == SnapshotArtifact::kNoTemplateData) {
+    return;
+  }
+
+  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    // As in the constructor: no other thread can touch a brand-new isolate, so no v8::Locker.
+    v8::Isolate::Scope isolateScope(ptr);
+    v8::HandleScope scope(ptr);
+
+    auto take = [&](size_t index) -> v8::Local<v8::FunctionTemplate> {
+      v8::Local<v8::FunctionTemplate> tmpl;
+      KJ_REQUIRE(ptr->GetDataFromSnapshotOnce<v8::FunctionTemplate>(index).ToLocal(&tmpl),
+          "snapshot does not hold the template it was recorded to hold", index);
+      return tmpl;
+    };
+
+    size_t i = 0;
+    iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& h) {
+      KJ_REQUIRE(i < artifact.templateDataIndices.size(),
+          "snapshot was produced by a type wrapper with fewer resource types");
+      size_t index = artifact.templateDataIndices[i++];
+      if (index != SnapshotArtifact::kNoTemplateData) {
+        h.Reset(ptr, take(index));
+      }
+    });
+    KJ_REQUIRE(i == artifact.templateDataIndices.size(),
+        "snapshot was produced by a type wrapper with more resource types");
+
+    if (artifact.opaqueTemplateDataIndex != SnapshotArtifact::kNoTemplateData) {
+      opaqueTemplate.Reset(ptr, take(artifact.opaqueTemplateDataIndex));
+    }
+  });
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {
