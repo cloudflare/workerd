@@ -81,8 +81,10 @@ namespace workerd::jsg {
     ::workerd::jsg::visitSubclassForGc<Type>(this, visitor);                                       \
   }                                                                                                \
   static void jsgConfiguration(__VA_ARGS__);                                                       \
+  /* This declaration is part of JSG's registration protocol but is not instantiated for every */  \
+  /* resource type, so retaining it and allowing it to be unused is intentional. */                \
   template <typename Registry, typename Self>                                                      \
-  static void registerMembers(Registry& registry, ##__VA_ARGS__)
+  [[maybe_unused]] static void registerMembers(Registry& registry, ##__VA_ARGS__)
 // Begins a block nested inside a C++ class to declare how that class should be accessible in
 // JavaScript. JSG_RESOURCE_TYPE declares that the class is a "resource type" in KJ parlance.
 //
@@ -749,8 +751,11 @@ concept HasStructTypeScriptDefine = requires { T::_JSG_STRUCT_TS_DEFINE_DO_NOT_U
   template <typename Self>                                                                         \
   using _JSG_STRUCT_FIELDS_DO_NOT_USE_DIRECTLY =                                                   \
       ::workerd::jsg::StructFields<JSG_FOR_EACH(JSG_STRUCT_FIELD, , __VA_ARGS__)>;                 \
+  /* These functions form JSG's registration protocol but are not instantiated for every */        \
+  /* struct/configuration combination, so retaining them and allowing them to be unused is */      \
+  /* intentional. */                                                                               \
   template <typename Registry, typename Self, typename Config>                                     \
-  static void registerMembersInternal(Registry& registry, Config arg) {                            \
+  [[maybe_unused]] static void registerMembersInternal(Registry& registry, Config arg) {           \
     JSG_FOR_EACH(JSG_STRUCT_REGISTER_MEMBER, , __VA_ARGS__);                                       \
     if constexpr (::workerd::jsg::HasStructTypeScriptRoot<Self>) {                                 \
       registry.registerTypeScriptRoot();                                                           \
@@ -769,13 +774,14 @@ concept HasStructTypeScriptDefine = requires { T::_JSG_STRUCT_TS_DEFINE_DO_NOT_U
     }                                                                                              \
   }                                                                                                \
   template <typename Registry, typename Self>                                                      \
-  static void registerMembers(Registry& registry)                                                  \
+  [[maybe_unused]] static void registerMembers(Registry& registry)                                 \
     requires(!jsg::HasConfiguration<Self>)                                                         \
   {                                                                                                \
     registerMembersInternal<Registry, Self, void*>(registry, nullptr);                             \
   }                                                                                                \
   template <typename Registry, typename Self>                                                      \
-  static void registerMembers(Registry& registry, jsg::GetConfiguration<Self> arg)                 \
+  [[maybe_unused]] static void registerMembers(                                                    \
+      Registry& registry, jsg::GetConfiguration<Self> arg)                                         \
     requires jsg::HasConfiguration<Self>                                                           \
   {                                                                                                \
     registerMembersInternal<Registry, Self, jsg::GetConfiguration<Self>>(registry, arg);           \
