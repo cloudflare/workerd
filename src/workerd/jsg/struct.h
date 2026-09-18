@@ -310,8 +310,8 @@ class StructWrapper<T, StructFields<fields...>, kj::_::Indexes<indices...>> {
   void visitPersistentHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
       kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitTmpl) {
     if (!templateHandle.IsEmpty()) visitTmpl(templateHandle);
-    KJ_IF_SOME(fields, lazyFields) {
-      (kj::get<indices>(fields).visitHandle(visitName), ...);
+    KJ_IF_SOME(wrappers, lazyFields) {
+      (wrappers[indices].visitHandle(visitName), ...);
     }
   }
 
