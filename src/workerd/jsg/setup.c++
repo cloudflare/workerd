@@ -583,7 +583,9 @@ void IsolateBase::prepareSnapshot(v8::Global<v8::Context> defaultContextHandle) 
   // context. The Local above keeps the context reachable for CreateBlob.
   defaultContextHandle.Reset();
 
-  artifact.blob = creator->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+  // Keep compiled code: with --no-lazy the zygote compiled every function eagerly, so isolates
+  // restored from the blob never parse or compile the worker at all.
+  artifact.blob = creator->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kKeep);
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {

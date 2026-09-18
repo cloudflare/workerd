@@ -1546,7 +1546,13 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   }
                 }
 
-                if (!isNewModuleRegistryEnabled(isolate->getApi().getFeatureFlags())) {
+                if (lock.isStartingFromSnapshot()) {
+                  // The context restored from the snapshot already holds the evaluated module
+                  // graph; the Worker constructor picks the main module's namespace out of it.
+                  // Nothing is compiled here, so the module registry stays empty and dynamic
+                  // import() of bundle modules is not available in such an isolate yet.
+                  impl->configureDynamicImports(lock, *jsg::ModuleRegistry::from(lock));
+                } else if (!isNewModuleRegistryEnabled(isolate->getApi().getFeatureFlags())) {
                   kj::Own<void> limitScope;
                   if (modulesSource.isPython) {
                     limitScope =
@@ -2044,8 +2050,19 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                 lock.runMicrotasks();
               }
               KJ_CASE_ONEOF(mainModule, kj::Path) {
-                KJ_IF_SOME(ns,
-                    tryResolveMainModule(lock, mainModule, *jsContext, *script, limitErrorOrTime)) {
+                kj::Maybe<jsg::JsObject> maybeNs;
+                if (lock.isStartingFromSnapshot()) {
+                  // The zygote evaluated the main module and left its namespace in the context.
+                  auto data =
+                      context->GetEmbedderData(jsg::SNAPSHOT_MAIN_MODULE_NAMESPACE_SLOT);
+                  KJ_REQUIRE(!data.IsEmpty() && data->IsObject(),
+                      "snapshot does not record the main module namespace");
+                  maybeNs = jsg::JsObject(data.As<v8::Object>());
+                } else {
+                  maybeNs =
+                      tryResolveMainModule(lock, mainModule, *jsContext, *script, limitErrorOrTime);
+                }
+                KJ_IF_SOME(ns, maybeNs) {
                   // To avoid resetting Worker-level C++ handles before snapshotting, we simply do not
                   // create them eagerly. This is safe because the top-level code has already executed,
                   // and the zygote worker will not handle any requests.
@@ -2055,6 +2072,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                   //     impl->ctxExports == IsolateBase::workerExportsObj.
                   // A real Worker repopulates these handles in START_FROM_SNAPSHOT mode.
                   if (lock.isPreparingSnapshot()) {
+                    // Record the namespace so a restored isolate can skip evaluation entirely.
+                    context->SetEmbedderData(
+                        jsg::SNAPSHOT_MAIN_MODULE_NAMESPACE_SLOT, v8::Local<v8::Object>(ns));
                     break;
                   }
                   impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
