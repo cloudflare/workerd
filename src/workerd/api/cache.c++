@@ -594,6 +594,7 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
     .cfBlobJson = kj::mv(cfBlobJson),
     .parentSpan = traceContext.getInternalSpanParent(),
     .featureFlagsForFl = kj::none,
+    .userSpanParent = traceContext.getUserSpanParent(),
   };
   if (enableCompatFlags) {
     metadata.featureFlagsForFl =
