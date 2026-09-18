@@ -95,7 +95,7 @@ jobs:
   bazel:
     runs-on: ${{ inputs.image }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           show-progress: false
           fetch-depth: ${{ inputs.fetch_depth }}

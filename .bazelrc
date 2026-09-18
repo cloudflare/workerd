@@ -514,7 +514,7 @@ build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 
 # Coverage configuration using LLVM tools. These environment variables are used by rules_cc
 # to locate LLVM coverage tools. Users should ensure llvm-profdata and llvm-cov are available
-# in PATH (create symlinks to version-specific binaries if needed, e.g., ln -s llvm-cov-19 llvm-cov).
+# in PATH (create symlinks to version-specific binaries if needed, e.g., ln -s llvm-cov-22 llvm-cov).
 build:coverage --repo_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
 # GCOV is used by rules_cc to merge raw profile data (.profraw) into indexed profile data (.profdata)
 build:coverage --repo_env=GCOV=llvm-profdata

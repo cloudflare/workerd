@@ -10,11 +10,11 @@ RUN wget https://apt.llvm.org/llvm.sh
 # Drop the install step here so we can install just the packages we need.
 RUN sed -i '/apt-get install/d' llvm.sh
 RUN chmod +x llvm.sh
-RUN ./llvm.sh 19
-RUN apt-get install -y --no-install-recommends clang-19 lld-19 libunwind-19 libc++abi1-19 libc++1-19 libc++-19-dev libclang-rt-19-dev
+RUN ./llvm.sh 22
+RUN apt-get install -y --no-install-recommends clang-22 lld-22 libunwind-22 libc++abi1-22 libc++1-22 libc++-22-dev libclang-rt-22-dev
 COPY . .
 
-RUN echo "build:linux --repo_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
+RUN echo "build:linux --repo_env=CC=/usr/lib/llvm-22/bin/clang" >> .bazelrc
 COPY .bazel-cache /bazel-disk-cache
 # pnpm version will be different depending on the value of `packageManager` field in package.json
 RUN npm install -g pnpm@latest
