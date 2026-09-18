@@ -261,6 +261,16 @@ export const arrayAttributes = {
       span.setAttribute('invalid.nested', [['a']]);
       span.setAttribute('invalid.objects', [{ a: 1 }]);
       span.setAttribute('invalid.bigint', [1n]);
+      span.setAttribute('invalid.tooLong', new Array(513).fill('x'));
+      const sparse = new Array(0xffffffff);
+      Object.defineProperty(sparse, 0, {
+        get() {
+          throw new Error(
+            'oversized arrays must be rejected before reading elements'
+          );
+        },
+      });
+      span.setAttribute('invalid.sparse', sparse);
 
       // setAttributes() applies the same rules per key.
       assert.strictEqual(
@@ -316,22 +326,10 @@ export const arrayAttributeByteLimit = {
 
     withSpan('array-limit-strings-op', (span) => {
       span.setAttribute('test', 'arrayAttributeByteLimit');
-      // 1000 * 4 bytes fits comfortably under the 64 KiB limit.
-      span.setAttribute('fits', new Array(1000).fill('abcd'));
-      // 70 * 1024 one-byte strings exceed the limit and must be dropped with a warning.
-      span.setAttribute('big.strings', new Array(70 * 1024).fill('x'));
-    });
-
-    withSpan('array-limit-numbers-op', (span) => {
-      span.setAttribute('test', 'arrayAttributeByteLimit');
-      // Numbers are accounted at 8 bytes each: 9000 * 8 > 64 KiB.
-      span.setAttribute('big.numbers', new Array(9000).fill(1));
-    });
-
-    withSpan('array-limit-booleans-op', (span) => {
-      span.setAttribute('test', 'arrayAttributeByteLimit');
-      // Booleans are accounted at 8 bytes each as well: 9000 * 8 > 64 KiB.
-      span.setAttribute('big.booleans', new Array(9000).fill(true));
+      // 512 * 4 bytes fits comfortably under the 64 KiB limit.
+      span.setAttribute('fits', new Array(512).fill('abcd'));
+      // 512 * 140 bytes exceed the limit and must be dropped with a warning.
+      span.setAttribute('big.strings', new Array(512).fill('x'.repeat(140)));
     });
   },
 };

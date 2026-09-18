@@ -61,14 +61,6 @@ export const validateSpans = {
         test: 'arrayAttributeByteLimit',
         expectedSpan: 'array-limit-strings-op',
       },
-      {
-        test: 'arrayAttributeByteLimit',
-        expectedSpan: 'array-limit-numbers-op',
-      },
-      {
-        test: 'arrayAttributeByteLimit',
-        expectedSpan: 'array-limit-booleans-op',
-      },
     ];
 
     for (const { test, expectedSpan } of testValidations) {
@@ -207,6 +199,8 @@ export const validateSpans = {
         'invalid.nested',
         'invalid.objects',
         'invalid.bigint',
+        'invalid.tooLong',
+        'invalid.sparse',
         'set.invalid',
         'set.skipped',
       ]) {
@@ -266,46 +260,21 @@ export const validateSpans = {
     // within the limit are recorded in full.
     {
       const testSpans = spansByTest.get('arrayAttributeByteLimit') || [];
-      const expectations = [
-        {
-          name: 'array-limit-strings-op',
-          dropped: 'big.strings',
-          size: 70 * 1024,
-        },
-        {
-          name: 'array-limit-numbers-op',
-          dropped: 'big.numbers',
-          size: 9000 * 8,
-        },
-        {
-          name: 'array-limit-booleans-op',
-          dropped: 'big.booleans',
-          size: 9000 * 8,
-        },
-      ];
-      for (const { name, dropped, size } of expectations) {
-        const span = testSpans.find((s) => s.name === name);
-        assert(span, `arrayAttributeByteLimit: span '${name}' present`);
-        assert(
-          !(dropped in span),
-          `arrayAttributeByteLimit: '${dropped}' should have been dropped`
-        );
-        assert.strictEqual(
-          span['cloudflare.warning.type'],
-          'span_data_limit_exceeded'
-        );
-        assert.match(
-          span['cloudflare.warning.message'],
-          new RegExp(
-            `attribute "${dropped.replace('.', '\\.')}" of size ${size}$`
-          )
-        );
-      }
-
-      const stringsSpan = testSpans.find(
-        (s) => s.name === 'array-limit-strings-op'
+      const span = testSpans.find((s) => s.name === 'array-limit-strings-op');
+      assert(
+        span,
+        "arrayAttributeByteLimit: span 'array-limit-strings-op' present"
       );
-      assert.deepStrictEqual(stringsSpan.fits, new Array(1000).fill('abcd'));
+      assert(!('big.strings' in span));
+      assert.strictEqual(
+        span['cloudflare.warning.type'],
+        'span_data_limit_exceeded'
+      );
+      assert.match(
+        span['cloudflare.warning.message'],
+        /attribute "big\.strings" of size 71680$/
+      );
+      assert.deepStrictEqual(span.fits, new Array(512).fill('abcd'));
     }
 
     // Nested spans: verify both outer and inner spans exist and both are closed.
