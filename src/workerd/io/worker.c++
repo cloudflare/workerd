@@ -1216,6 +1216,13 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     // In our production environment, however, we can safely assume that there is always memory
     // pressure, because every machine is handling thousands of tenants all the time. So we might
     // as well just throw the switch to "moderate" right away.
+    //
+    // Note for ephemeral isolates (restored from a startup snapshot): the transition to "moderate"
+    // also makes V8 drop every pooled page of the isolate group (Heap::CheckMemoryPressure ->
+    // MemoryPool::ReleaseAllImmediately), about 2% of such an isolate's spawn cost plus the
+    // munmaps. Skipping it for them was tried and is a net loss today: the pool then grows to
+    // ~1 GB per process because restored pages rarely land at their previous address (V8's page
+    // reuse never triggers) and IsolateGroup::Scrub sorts the whole pool on every teardown.
     lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
 
     // Register GC prologue and epilogue callbacks so that we can report GC CPU time via the
@@ -1719,6 +1726,9 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
       });
     };
     v8::Local<v8::Function> function = jsg::check(v8::Function::New(context, instanceof));
+    // The function may end up in a startup snapshot (see setupContextInternalScripts).
+    jsg::isolateRegisterExternalReference(lock.v8Isolate,
+        reinterpret_cast<intptr_t>(static_cast<v8::FunctionCallback>(instanceof)));
 
     auto webAssembly =
         KJ_ASSERT_NONNULL(lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>());
@@ -1788,6 +1798,9 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
     });
   };
   auto registerFn = jsg::check(v8::Function::New(context, registerCb));
+  // The function may end up in a startup snapshot (see setupContextInternalScripts).
+  jsg::isolateRegisterExternalReference(lock.v8Isolate,
+      reinterpret_cast<intptr_t>(static_cast<v8::FunctionCallback>(registerCb)));
 
   // Build the shim in JavaScript. It wraps both WebAssembly.instantiate (async) and
   // WebAssembly.Instance (sync constructor). An isolate restored from a startup snapshot finds
@@ -1842,18 +1855,30 @@ void Worker::setupContext(
 }
 
 void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context> context) {
-  // For isolates created by SnapshotCreator V8's bootstrapper skips InstallSpecialObjects,
-  // so the `WebAssembly` global does not exist and these shims would fail.
-  // That's fine: wasm modules aren't captured in the snapshot anyway, and this runs again
-  // in normal mode on the context restored from the snapshot, installing the shims then.
   if (lock.isPreparingSnapshot()) {
-    // What the zygote can do is pay for compiling the shim: its source evaluates to a factory
-    // that only touches WebAssembly when called. Record the factory in the context so that every
-    // isolate restored from this snapshot calls it instead of compiling the script again.
     v8::Context::Scope contextScope(context);
-    context->SetEmbedderData(jsg::SNAPSHOT_WASM_SHIM_FACTORY_SLOT,
-        v8::Local<v8::Function>(compileWasmInstantiateShim(lock)));
+    // Whether a zygote context has a `WebAssembly` global depends on V8: with
+    // --experimental-natives-in-snapshot the bootstrapper installs the special objects while
+    // serializing and contexts restored from the blob keep them; without it they are created on
+    // every context creation and a zygote has none. In the first case the shims are installed
+    // here, once, and travel in the snapshot (their callbacks are capture-less functions
+    // registered as external references); the slot then holds `true` and a restored isolate
+    // skips this function. In the second case the zygote only pays for compiling the shim script
+    // and records its factory, which every restored isolate calls instead of compiling again.
+    if (lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>() != kj::none) {
+      setWebAssemblyModuleHasInstance(lock, context);
+      shimWebAssemblyInstantiate(lock, context);
+      context->SetEmbedderData(jsg::SNAPSHOT_WASM_SHIM_FACTORY_SLOT, v8::True(lock.v8Isolate));
+    } else {
+      context->SetEmbedderData(jsg::SNAPSHOT_WASM_SHIM_FACTORY_SLOT,
+          v8::Local<v8::Function>(compileWasmInstantiateShim(lock)));
+    }
     return;
+  }
+
+  if (lock.isStartingFromSnapshot()) {
+    auto data = context->GetEmbedderData(jsg::SNAPSHOT_WASM_SHIM_FACTORY_SLOT);
+    if (!data.IsEmpty() && data->IsTrue()) return;  // installed by the zygote, see above
   }
 
   // Set WebAssembly.Module @@HasInstance
