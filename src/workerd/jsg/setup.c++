@@ -599,8 +599,10 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // consumes it.
   defaultContextHandle.Reset();
 
+  // Keep compiled code: with --no-lazy the zygote compiled every function eagerly, so isolates
+  // restored from the blob never parse or compile the worker at all.
   artifact.blob = KJ_ASSERT_NONNULL(snapshotCreator)
-                      ->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+                      ->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kKeep);
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {

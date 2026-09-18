@@ -98,6 +98,13 @@ inline v8::Local<v8::Data> getContextDataSlot(
   return context->GetEmbedderDataV2(static_cast<int>(slot));
 }
 
+// Embedder-data slot (a tagged value, not an aligned pointer) in which a startup-snapshot zygote
+// records the evaluated main module's namespace object. Tagged slots are serialized with the
+// context, so an isolate restored from the snapshot can pick the namespace up instead of parsing
+// and evaluating the worker again. Placed after the ContextDataSlots above.
+constexpr int SNAPSHOT_MAIN_MODULE_NAMESPACE_SLOT =
+    static_cast<int>(ContextDataSlot::CONSOLE_ORIGINAL_WARN) + 1;
+
 inline void setAlignedPointerInEmbedderData(
     v8::Local<v8::Context> context, ContextPointerSlot slot, void* ptr) {
   // The type tag is a small integer that should be different for every pointer
