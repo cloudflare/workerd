@@ -16,6 +16,7 @@ namespace {
 // modification requests. This is a soft cap to prevent accidental misuse from unbounded
 // memory growth; downstream tail-stream submission may apply additional limits.
 constexpr size_t MAX_SPAN_BYTES = 64 * 1024;
+constexpr size_t MAX_ATTRIBUTE_ARRAY_ELEMENTS = 512;
 
 size_t estimateAttributeValueSize(const AttributeValue& value) {
   // Approximate size; different encodings will produce different sizes. The goal is to bound
@@ -128,7 +129,13 @@ kj::Maybe<AttributeValue> toAttributeValue(jsg::Lock& js,
   }
 
   if (handle->IsArray()) {
-    KJ_IF_SOME(value, arrayToAttributeValue(js, jsg::JsArray(handle.As<v8::Array>()))) {
+    auto array = jsg::JsArray(handle.As<v8::Array>());
+    if (array.size() > MAX_ATTRIBUTE_ARRAY_ELEMENTS) {
+      js.logWarning(kj::str("Ignoring span attribute \"", key, "\": array values may contain at ",
+          "most ", MAX_ATTRIBUTE_ARRAY_ELEMENTS, " elements."));
+      return kj::none;
+    }
+    KJ_IF_SOME(value, arrayToAttributeValue(js, array)) {
       return kj::mv(value);
     }
     js.logWarning(kj::str("Ignoring span attribute \"", key,
