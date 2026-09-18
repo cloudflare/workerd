@@ -841,6 +841,14 @@ kj_test(
     ],
 )
 
+kj_test(
+    src = "jsrpc-call-observation-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
 wd_test(
     src = "streams/streams-test.wd-test",
     args = ["--experimental"],
