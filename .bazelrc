@@ -61,12 +61,11 @@ common --incompatible_default_to_explicit_init_py
 build --per_file_copt='external@-Wno-error'
 build --per_file_copt='external@-Wno-suggest-override'
 build --per_file_copt='external/.*v8@-Wno-unused-function'
+build --per_file_copt='external/.*com_googlesource_chromium_icu@-Wno-thread-safety-analysis'
 build --per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
 build --host_per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
-build --per_file_copt=external/protobuf@-Wno-deprecated-declarations
-build --host_per_file_copt=external/protobuf@-Wno-deprecated-declarations
-build --per_file_copt=external/protobuf@-Wno-deprecated-this-capture
-build --host_per_file_copt=external/protobuf@-Wno-deprecated-this-capture
+build --per_file_copt=external/protobuf@-Wno-deprecated-declarations,-Wno-deprecated-this-capture
+build --host_per_file_copt=external/protobuf@-Wno-deprecated-declarations,-Wno-deprecated-this-capture
 
 # opt in to capnp deprecation warnings about trying to attach to a refcounted object
 build --cxxopt=-DKJ_WARN_REFCOUNTED_ATTACH=1
@@ -365,11 +364,8 @@ build:linux --features=-default_link_libs --host_features=-default_link_libs
 build:linux --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
 build:linux --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'
 build:linux --linkopt='-l:libc++.a' --linkopt='-lm' --linkopt='-static-libgcc'
-# We don't expect to distribute host tools, no need to statically link libgcc.
-# TODO(cleanup): Ideally we'd also use shared libc++ here, we'd just need to install the
-# libunwind-<version>-dev and libc++abi-<version>-dev packages on CI to have all of shared libc++
-# available.
-build:linux --host_linkopt='-l:libc++.a' --host_linkopt='-lm'
+# We don't expect to distribute host tools, no need to statically link libgcc or libc++
+build:linux --host_linkopt='-lc++' --host_linkopt='-lm'
 
 # On Linux, enable PIC. In macos pic is the default, and the objc_library rule does not work
 # correctly if we use this flag since it will not find the object files to include
@@ -511,7 +507,7 @@ build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 
 # Coverage configuration using LLVM tools. These environment variables are used by rules_cc
 # to locate LLVM coverage tools. Users should ensure llvm-profdata and llvm-cov are available
-# in PATH (create symlinks to version-specific binaries if needed, e.g., ln -s llvm-cov-19 llvm-cov).
+# in PATH (create symlinks to version-specific binaries if needed, e.g., ln -s llvm-cov-22 llvm-cov).
 build:coverage --repo_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
 # GCOV is used by rules_cc to merge raw profile data (.profraw) into indexed profile data (.profdata)
 build:coverage --repo_env=GCOV=llvm-profdata
