@@ -75,7 +75,7 @@ class ActorCallRetryState final: public kj::Refcounted {
  private:
   static constexpr uint MAX_ATTEMPTS = 5;
   static constexpr auto RETRY_BUDGET = 10 * kj::SECONDS;
-  static constexpr auto INITIAL_BACKOFF = 50 * kj::MILLISECONDS;
+  static constexpr auto INITIAL_BACKOFF = 500 * kj::MILLISECONDS;
 
   kj::Maybe<kj::Exception> handleClaimRejection(const kj::Exception& exception);
   kj::OneOf<kj::Duration, kj::Exception> checkCanRetry(kj::Exception exception);

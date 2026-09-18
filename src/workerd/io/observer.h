@@ -36,7 +36,8 @@ enum class ActorRetryCallType : uint8_t {
 
 enum class ActorRetryOutcome : uint8_t {
   RECOVERED,
-  RETRIES_EXHAUSTED,
+  ATTEMPTS_EXHAUSTED,
+  RETRY_BUDGET_EXHAUSTED,
   UNABLE_TO_RETRY,
   CLAIM_REJECTED,
   CANCELED,

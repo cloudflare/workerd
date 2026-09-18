@@ -190,7 +190,42 @@ KJ_TEST("actor retries stop after five total attempts") {
 
   KJ_ASSERT(observer->retryCallTypes.size() == 4);
   KJ_ASSERT(observer->outcomes.size() == 1);
-  KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::RETRIES_EXHAUSTED);
+  KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::ATTEMPTS_EXHAUSTED);
+}
+
+KJ_TEST("actor retries report retry budget exhaustion when budget expires during an attempt") {
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto state = newRetryState(timer, *observer);
+
+  startAttempt(*state);
+  KJ_EXPECT(handleFailure(*state, makeDisconnect("original disconnect"_kj)).is<kj::Duration>());
+  startAttempt(*state);
+  timer.advance(11 * kj::SECONDS);
+
+  auto result = handleFailure(*state, makeDisconnect("retry disconnect"_kj));
+  auto& failure = KJ_ASSERT_NONNULL(result.tryGet<kj::Exception>());
+  KJ_EXPECT(failure.getDescription().contains("original disconnect"));
+  KJ_ASSERT(observer->outcomes.size() == 1);
+  KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
+}
+
+KJ_TEST("actor retries report retry budget exhaustion when the next attempt cannot start") {
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto state = newRetryState(timer, *observer);
+
+  startAttempt(*state);
+  KJ_EXPECT(handleFailure(*state, makeDisconnect("original disconnect"_kj)).is<kj::Duration>());
+  startAttempt(*state);
+  KJ_EXPECT(handleFailure(*state, makeDisconnect("retry disconnect"_kj)).is<kj::Duration>());
+  timer.advance(11 * kj::SECONDS);
+
+  auto result = state->startAttempt();
+  auto& failure = KJ_ASSERT_NONNULL(result.tryGet<kj::Exception>());
+  KJ_EXPECT(failure.getDescription().contains("original disconnect"));
+  KJ_ASSERT(observer->outcomes.size() == 1);
+  KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
 }
 
 KJ_TEST("actor retries return the original disconnect when the deadline expires before retry") {
