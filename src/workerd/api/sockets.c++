@@ -21,6 +21,7 @@
 #include <workerd/util/uncaught-exception-source.h>
 
 #include <capnp/compat/byte-stream.h>
+#include <kj/async-queue.h>
 
 namespace workerd::api {
 
@@ -351,6 +352,154 @@ JsWritableStream newDatagramWritableStream(jsg::Lock& js, IoOwn<DatagramChannel>
   });
 }
 
+class RpcDatagramChannel final: public DatagramChannel, public kj::Refcounted {
+ public:
+  // Creates a channel that sends datagrams through an RPC stream.
+  RpcDatagramChannel(rpc::DatagramStream::Client down): down(kj::mv(down)) {}
+
+  // Disconnects any outstanding channel operations.
+  ~RpcDatagramChannel() noexcept(false) {
+    disconnect(KJ_EXCEPTION(DISCONNECTED, "UDP RPC channel was destroyed"));
+  }
+
+  // Receives the next datagram or end-of-stream.
+  kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receive() override {
+    KJ_IF_SOME(exception, failure) {
+      return exception.clone();
+    }
+    KJ_IF_SOME(item, pending) {
+      auto datagram = kj::mv(item.datagram);
+      item.consumed->fulfill();
+      pending = kj::none;
+      return kj::Maybe<kj::Array<kj::byte>>(kj::mv(datagram));
+    }
+    if (ended) {
+      return kj::Maybe<kj::Array<kj::byte>>(kj::none);
+    }
+    KJ_REQUIRE(receivers.empty(), "DatagramChannel::receive() already has a pending call");
+    return receivers.wait();
+  }
+
+  // Sends one datagram to the remote endpoint.
+  kj::Promise<void> send(kj::ArrayPtr<const kj::byte> datagram) override {
+    KJ_IF_SOME(exception, failure) {
+      return exception.clone();
+    }
+    auto req = down.sendRequest(capnp::MessageSize{8 + datagram.size() / sizeof(capnp::word), 0});
+    req.setDatagram(datagram);
+    return req.send();
+  }
+
+  // Delivers one incoming RPC datagram with consumption backpressure.
+  kj::Promise<void> deliver(kj::Array<kj::byte> datagram) {
+    KJ_IF_SOME(exception, failure) {
+      return exception.clone();
+    }
+    KJ_REQUIRE(!ended, "datagram received after UDP RPC stream ended");
+    if (!receivers.empty()) {
+      receivers.fulfill(kj::Maybe<kj::Array<kj::byte>>(kj::mv(datagram)));
+      return kj::READY_NOW;
+    }
+
+    KJ_REQUIRE(pending == kj::none, "UDP RPC stream delivered concurrent datagrams");
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    pending = Pending{kj::mv(datagram), kj::mv(paf.fulfiller)};
+    return kj::mv(paf.promise);
+  }
+
+  // Marks the incoming datagram stream complete.
+  void endIncoming() {
+    KJ_REQUIRE(pending == kj::none, "UDP RPC stream ended with an undelivered datagram");
+    ended = true;
+    if (!receivers.empty()) {
+      receivers.fulfill(kj::Maybe<kj::Array<kj::byte>>(kj::none));
+    }
+  }
+
+  // Signals completion of the outgoing datagram stream.
+  kj::Promise<void> endOutgoing() {
+    return down.endRequest().sendIgnoringResult();
+  }
+
+  // Fails outstanding operations and closes the RPC stream.
+  void disconnect(kj::Exception exception) {
+    if (failure != kj::none) return;
+    failure = exception.clone();
+    if (!receivers.empty()) {
+      receivers.reject(exception.clone());
+    }
+    KJ_IF_SOME(item, pending) {
+      item.consumed->reject(exception.clone());
+      pending = kj::none;
+    }
+    down = nullptr;
+  }
+
+ private:
+  struct Pending {
+    kj::Array<kj::byte> datagram;
+    kj::Own<kj::PromiseFulfiller<void>> consumed;
+  };
+
+  rpc::DatagramStream::Client down;
+  kj::WaiterQueue<kj::Maybe<kj::Array<kj::byte>>> receivers;
+  kj::Maybe<Pending> pending;
+  kj::Maybe<kj::Exception> failure;
+  bool ended = false;
+};
+
+class IncomingRpcDatagramStream final: public rpc::DatagramStream::Server {
+ public:
+  IncomingRpcDatagramStream(kj::Rc<RpcDatagramChannel> channel): channel(kj::mv(channel)) {}
+
+ private:
+  kj::Promise<void> send(SendContext context) override {
+    auto datagram = context.getParams().getDatagram();
+    return channel->deliver(kj::heapArray<kj::byte>(datagram));
+  }
+
+  kj::Promise<void> end(EndContext) override {
+    channel->endIncoming();
+    return kj::READY_NOW;
+  }
+
+  kj::Rc<RpcDatagramChannel> channel;
+};
+
+class OutgoingRpcDatagramStream final: public rpc::DatagramStream::Server {
+ public:
+  OutgoingRpcDatagramStream(kj::Rc<NeuterableDatagramChannel> channel): channel(kj::mv(channel)) {}
+
+ private:
+  kj::Promise<void> send(SendContext context) override {
+    KJ_REQUIRE(!ended, "datagram received after UDP RPC stream ended");
+    return channel->send(context.getParams().getDatagram());
+  }
+
+  kj::Promise<void> end(EndContext) override {
+    ended = true;
+    return kj::READY_NOW;
+  }
+
+  kj::Rc<NeuterableDatagramChannel> channel;
+  bool ended = false;
+};
+
+kj::Promise<void> pumpDatagramsToRpc(
+    kj::Rc<NeuterableDatagramChannel> channel, rpc::DatagramStream::Client stream) {
+  for (;;) {
+    KJ_IF_SOME(datagram, co_await channel->receive()) {
+      auto req =
+          stream.sendRequest(capnp::MessageSize{8 + datagram.size() / sizeof(capnp::word), 0});
+      req.setDatagram(datagram);
+      co_await req.send();
+    } else {
+      co_await stream.endRequest().sendIgnoringResult();
+      co_return;
+    }
+  }
+}
+
 }  // namespace
 
 // Forward declarations
@@ -496,6 +645,48 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
   // background.
   incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   co_return Result{.outcome = outcome};
+}
+
+kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::sendRpc(
+    capnp::HttpOverCapnpFactory&,
+    capnp::ByteStreamFactory&,
+    FrankenvalueHandler&,
+    rpc::EventDispatcher::Client dispatcher) {
+  auto rpcChannel = newNeuterableDatagramChannel(channel);
+  KJ_DEFER(rpcChannel->neuter(KJ_EXCEPTION(DISCONNECTED, "UDP RPC event ended")));
+
+  auto req = dispatcher.udpConnectRequest();
+  req.setHost(host);
+  req.setDown(kj::heap<OutgoingRpcDatagramStream>(rpcChannel.addRef()));
+  auto sent = req.send();
+  auto up = sent.getUp();
+
+  EventOutcome outcome = EventOutcome::UNKNOWN;
+  auto responseTask = sent.then([&outcome](auto response) { outcome = response.getResult(); });
+  auto pumpTask =
+      pumpDatagramsToRpc(rpcChannel.addRef(), kj::mv(up)).then([]() -> kj::Promise<void> {
+    return kj::NEVER_DONE;
+  });
+  co_await responseTask.exclusiveJoin(kj::mv(pumpTask));
+  co_return Result{.outcome = outcome};
+}
+
+kj::Promise<void> UdpConnectCustomEvent::receiveRpc(
+    UdpConnectContext context, WorkerInterface& worker) {
+  auto params = context.getParams();
+  auto channel = kj::rc<RpcDatagramChannel>(params.getDown());
+  KJ_DEFER(channel->disconnect(KJ_EXCEPTION(DISCONNECTED, "UDP RPC event ended")));
+
+  rpc::DatagramStream::Client up = kj::heap<IncomingRpcDatagramStream>(channel.addRef());
+  capnp::PipelineBuilder<rpc::EventDispatcher::UdpConnectResults> pipelineBuilder;
+  pipelineBuilder.setUp(kj::cp(up));
+  context.setPipeline(pipelineBuilder.build());
+  context.getResults(capnp::MessageSize{4, 1}).setUp(kj::mv(up));
+
+  auto event = kj::heap<UdpConnectCustomEvent>(kj::str(params.getHost()), *channel);
+  auto result = co_await worker.customEvent(kj::mv(event));
+  co_await channel->endOutgoing();
+  context.getResults().setResult(result.outcome);
 }
 
 tracing::EventInfo UdpConnectCustomEvent::getEventInfo() const {

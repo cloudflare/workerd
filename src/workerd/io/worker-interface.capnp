@@ -878,6 +878,14 @@ interface TailStreamTarget $Cxx.allowCancellation {
   # Report one or more streaming tail events to a tail worker.
 }
 
+interface DatagramStream $Cxx.allowCancellation {
+  send @0 (datagram :Data) -> stream;
+  # Sends one datagram. Each call preserves a message boundary.
+
+  end @1 ();
+  # Signals that no more datagrams will be sent and reports errors from previous send() calls.
+}
+
 interface EventDispatcher @0xf20697475ec1752d {
   # Interface used to deliver events to a Worker's global event handlers.
 
@@ -967,6 +975,12 @@ interface EventDispatcher @0xf20697475ec1752d {
   # a way for dynamic workers to actually send their code back to the requesting machine, to be
   # instantiated there -- or maybe some mechanism for running "remote facets". For now, though,
   # we punt and simply don't support it.)
+
+  udpConnect @14 (host :Text, down :DatagramStream)
+      -> (up :DatagramStream, result :EventOutcome) $Cxx.allowCancellation;
+  # Opens a UDP flow. `up` carries datagrams received from the peer toward the Worker, while `down`
+  # carries datagrams sent by the Worker back toward the peer. The call remains pending until the
+  # Worker's connect() handler completes.
 
   # Other methods might be added to handle other kinds of events, e.g. TCP connections, or maybe
   # even native Cap'n Proto RPC eventually.
