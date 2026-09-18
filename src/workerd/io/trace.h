@@ -773,6 +773,10 @@ template <typename T>
 concept AttributeValue = kj::isSameType<kj::ConstString, T>() || kj::isSameType<bool, T>() ||
     kj::isSameType<double, T>() || kj::isSameType<int64_t, T>();
 
+using AttributeStringArray = kj::Array<kj::Maybe<kj::ConstString>>;
+using AttributeBoolArray = kj::Array<kj::Maybe<bool>>;
+using AttributeDoubleArray = kj::Array<kj::Maybe<double>>;
+
 // An Attribute mark is used to add detail to a span over its lifetime.
 // The Attribute struct can also be used to provide arbitrary additional
 // properties for some other structs.
@@ -786,9 +790,9 @@ struct Attribute final {
       bool,
       double,
       int64_t,
-      kj::Array<kj::ConstString>,
-      kj::Array<bool>,
-      kj::Array<double>>;
+      AttributeStringArray,
+      AttributeBoolArray,
+      AttributeDoubleArray>;
   using Values = kj::Array<Value>;
 
   explicit Attribute(kj::ConstString name, Value&& value);
@@ -1333,9 +1337,9 @@ class SpanBuilder {
       bool,
       double,
       int64_t,
-      kj::Array<kj::ConstString>,
-      kj::Array<bool>,
-      kj::Array<double>>;
+      tracing::AttributeStringArray,
+      tracing::AttributeBoolArray,
+      tracing::AttributeDoubleArray>;
 
   void setTag(kj::ConstString key, TagInitValue value, IsCustomTag isCustom = IsCustomTag::NO);
 
