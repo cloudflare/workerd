@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-22.04
     name: Build and upload Python memory snapshots
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           show-progress: false
       - uses: actions/setup-python@v6

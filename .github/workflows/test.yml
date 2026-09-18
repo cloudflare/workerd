@@ -152,7 +152,7 @@ jobs:
   check-snapshot:
     runs-on: ubuntu-22.04-16core
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           show-progress: false
       - name: Cache
@@ -217,7 +217,7 @@ jobs:
     runs-on: ubuntu-22.04-16core
     steps:
       - name: Checkout workers-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: cloudflare/workers-sdk
 
