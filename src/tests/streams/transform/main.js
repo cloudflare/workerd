@@ -57,6 +57,9 @@ export {
   backpressureTransformBothStrategies,
   defaultReadableHwmZero,
   backpressureAppliedAtReadableHwm,
+  writeReleasedByReadSurvivesSameTurnEnqueue,
+  writeReleasedByDequeueSurvivesSameTurnEnqueue,
+  writeReleasedByReadThenErroredSameTurn,
 } from 'backpressure';
 
 export {
