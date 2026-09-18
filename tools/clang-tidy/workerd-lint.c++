@@ -9,6 +9,7 @@
 // files:
 //   - angled-includes.c++: workerd-angled-includes check
 //   - consume.c++: workerd-consume check
+//   - coroutine-hostile-raii.c++: workerd-coroutine-hostile-raii check
 //   - legacy-stream-alloc.c++: workerd-legacy-stream-alloc check
 //   - promise-ignore-result.c++: workerd-promise-ignore-result check
 //   - visit-for-gc.c++: jsg-visit-for-gc check
@@ -18,6 +19,7 @@
 
 #include "angled-includes.h"
 #include "consume.h"
+#include "coroutine-hostile-raii.h"
 #include "legacy-stream-alloc.h"
 #include "promise-ignore-result.h"
 #include "unsafe-continuation-capture.h"
@@ -32,6 +34,8 @@ class WorkerdLintModule : public clang::tidy::ClangTidyModule {
     CheckFactories.registerCheck<AngledIncludesCheck>("workerd-angled-includes");
     CheckFactories.registerCheck<VisitForGcCheck>("jsg-visit-for-gc");
     CheckFactories.registerCheck<ConsumeCheck>("workerd-consume");
+    CheckFactories.registerCheck<CoroutineHostileRAIICheck>(
+        "workerd-coroutine-hostile-raii");
     CheckFactories.registerCheck<LegacyStreamAllocCheck>("workerd-legacy-stream-alloc");
     CheckFactories.registerCheck<PromiseIgnoreResultCheck>("workerd-promise-ignore-result");
     CheckFactories.registerCheck<UnsafeContinuationCaptureCheck>(
