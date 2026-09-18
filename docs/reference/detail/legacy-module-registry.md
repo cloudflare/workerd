@@ -558,11 +558,14 @@ from the source text).
    checks the promise state, and whether it may first run microtasks depends on the
    evaluation depth tracked by `Lock::ModuleEvaluationScope`:
 
-   - At depth 0 microtasks are drained unconditionally, so promises scheduled during
-     top-level evaluation settle even if nothing awaited them (worker code relies on
-     this, e.g. a bare `import(...).catch(...)` in the entrypoint). A still-pending
-     promise then throws — workerd does not support long-lived TLA during module
-     loading (the worker must be fully initialized before serving requests).
+   - At depth 0, if the promise is still pending, microtasks are drained to settle
+     it. If it is still pending afterwards, it throws — workerd does not support
+     long-lived TLA during module loading (the worker must be fully initialized
+     before serving requests). A synchronous graph is already settled and is not
+     drained, so a synchronous `require()`/`getBuiltinModule()` never runs
+     unrelated pending microtasks. Fire-and-forget microtasks scheduled by the
+     entrypoint's top-level evaluation are flushed separately by the worker
+     startup path once the main module has been resolved.
    - When nested inside another module's evaluation, microtasks are **not** drained:
      doing so can run an async module's fulfillment callback while an ancestor is
      still `kEvaluating` and trip a fatal V8 CHECK (`status() >= kEvaluatingAsync`).
