@@ -35,7 +35,7 @@ use_repo(
     "pyodide_0.26.0a2_2024-03-01_87.capnp.bin",
     "pyodide_0.28.2_2025-01-16_18.capnp.bin",
     "pyodide_314.0.4_2026-06-10_18.capnp.bin",
-    "pyodide_314.0.6_2026-08-17_5.capnp.bin",
+    "pyodide_314.0.6_2026-08-17_6.capnp.bin",
     "pyodide_dev.capnp.bin",
     "pytest-asyncio_src_0.26.0a2",
     "pytest-asyncio_src_0.28.2",
