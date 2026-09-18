@@ -460,7 +460,7 @@ class UdpConnectCustomEvent final: public WorkerInterface::CustomEvent {
     KJ_UNIMPLEMENTED("udp connect event not supported");
   }
 
-  static constexpr uint16_t EVENT_TYPE = 11;
+  static constexpr uint16_t EVENT_TYPE = 14;
   uint16_t getType() override {
     return EVENT_TYPE;
   }
