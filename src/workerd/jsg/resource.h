@@ -1373,6 +1373,8 @@ struct ResourceTypeBuilder {
         registerExternalReference(&Mcb::callback);
         registerExternalReference(Mcb::template fastCallback<>);
         registerExternalReference(cFunction.GetTypeInfo());
+        // V8 stores the overload as a Foreign pointing at the CFunction object itself.
+        registerExternalReference(&cFunction);
         return;
       }
     }
@@ -1408,6 +1410,7 @@ struct ResourceTypeBuilder {
         registerExternalReference(&Smcb::callback);
         registerExternalReference(Smcb::template fastCallback<>);
         registerExternalReference(cFunction.GetTypeInfo());
+        registerExternalReference(&cFunction);
         return;
       }
     }
@@ -1469,8 +1472,14 @@ struct ResourceTypeBuilder {
             v8::ConstructorBehavior::kThrow, v8::SideEffectType::kHasSideEffect,
             {&setterCFunction, 1});
 
+        // Like registerMethod(): the fast callbacks are referenced from the templates' CFunction
+        // overload lists and must be resolvable when deserializing a snapshot.
+        registerExternalReference(Gcb::template fastCallback<>);
+        registerExternalReference(Scb::template fastCallback<>);
         registerExternalReference(getterCFunction.GetTypeInfo());
         registerExternalReference(setterCFunction.GetTypeInfo());
+        registerExternalReference(&getterCFunction);
+        registerExternalReference(&setterCFunction);
 
         useSlowApi = false;
       }
