@@ -167,15 +167,14 @@ class JsRpcCallPlan {
       kj::Array<const byte> serializedData,
       RpcSerializerExternalHandler::Replayability serializerReplayability);
 
-  // True only for method calls whose arguments are absent or contain no externals and no
-  // serializer-handled ineligible values. Property reads are not replayable.
+  // True only for property reads and method calls whose arguments are absent or contain no
+  // externals and no serializer-handled ineligible values.
   bool getReplayable() const {
     return replayable;
   }
 
-  size_t getReplayMemoryEstimate() const {
-    return serializedData.size() + REPLAY_MEMORY_OVERHEAD;
-  }
+  size_t getReplayMemoryEstimate();
+  void makeSerializedDataExactSizedForReplay();
 
   void copyTo(rpc::JsRpcTarget::CallParams::Builder builder);
 
@@ -319,6 +318,10 @@ class JsRpcClientProvider: public jsg::Object {
     return getActorTargetRetryability().orDefault(ActorCallTargetRetryable::NO).toBool();
   }
 
+  virtual void onActorCallRetry() {
+    KJ_FAIL_REQUIRE("actor call retry requested from an unsupported RPC target");
+  }
+
   // Get a capnp client that can be used to dispatch one call.
   virtual ClientForOneCall getClientForOneCall(
       jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) = 0;
@@ -329,6 +332,8 @@ class JsRpcClientProvider: public jsg::Object {
 };
 
 class JsRpcProperty;
+class JsRpcCallRetryState;
+class JsRpcCallAttemptObserver;
 
 class JsRpcReplayMemoryTracker final: public kj::Refcounted {
  public:
@@ -347,6 +352,9 @@ class JsRpcReplayMemoryTracker final: public kj::Refcounted {
 // but rather our own custom thenable, so that we can support pipelining on it.
 class JsRpcPromise: public JsRpcClientProvider {
  public:
+  using PendingPipeline =
+      kj::OneOf<IoOwn<rpc::JsRpcTarget::CallResults::Pipeline>, IoOwn<JsRpcCallRetryState>>;
+
   // A weak reference to this JsRpcPromise. Unlike the usual WeakRef pattern, though, this ref is
   // allocated before the promise itself is actually created, and filled in later. This is needed
   // to solve cyclic initialization challenges in `callImpl()`.
@@ -364,13 +372,15 @@ class JsRpcPromise: public JsRpcClientProvider {
 
   JsRpcPromise(jsg::JsRef<jsg::JsPromise> inner,
       kj::Own<WeakRef> weakRef,
-      IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline,
+      PendingPipeline pipeline,
       kj::Maybe<TraceContextParent> originatingCall,
       kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability,
-      kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker);
+      kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker,
+      kj::Maybe<IoOwn<JsRpcCallAttemptObserver>> attemptObserver);
   ~JsRpcPromise() noexcept(false);
 
   void resolve(jsg::Lock& js, jsg::JsValue result);
+  void setOriginatingCall(kj::Maybe<TraceContextParent> value);
   void dispose(jsg::Lock& js);
 
   ClientForOneCall getClientForOneCall(
@@ -424,9 +434,10 @@ class JsRpcPromise: public JsRpcClientProvider {
   kj::Maybe<IoOwn<TraceContextParent>> originatingCall;
   kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability;
   kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker;
+  kj::Maybe<IoOwn<JsRpcCallAttemptObserver>> attemptObserver;
 
   struct Pending {
-    IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline;
+    PendingPipeline pipeline;
   };
   struct Resolved {
     jsg::Value result;
@@ -472,6 +483,9 @@ class JsRpcProperty: public JsRpcClientProvider {
   void appendPath(kj::Vector<kj::StringPtr>& path) override;
   kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() override {
     return parent->getActorTargetRetryability();
+  }
+  void onActorCallRetry() override {
+    parent->onActorCallRetry();
   }
   ClientForOneCall getClientForOneCall(
       jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;

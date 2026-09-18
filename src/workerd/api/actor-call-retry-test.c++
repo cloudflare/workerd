@@ -172,6 +172,52 @@ KJ_TEST("actor retries return the original disconnect after claim rejection") {
   KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::CLAIM_REJECTED);
 }
 
+KJ_TEST("actor retries preserve ambiguity through later not-delivered and rejected attempts") {
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto state = newRetryState(timer, *observer);
+
+  auto first = startAttempt(*state);
+  auto nonce = KJ_ASSERT_NONNULL(first.getMetadata()).nonce;
+  KJ_EXPECT(
+      handleFailure(*state, makeDisconnect("original ambiguous disconnect"_kj)).is<kj::Duration>());
+
+  auto second = startAttempt(*state);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(second.getMetadata()).nonce == nonce);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(second.getMetadata()).isRetry == IsActorRetry::YES);
+  auto notDelivered = makeDisconnect("later not-delivered disconnect"_kj);
+  jsg::markActorRequestNotDelivered(notDelivered);
+  KJ_EXPECT(handleFailure(*state, kj::mv(notDelivered)).is<kj::Duration>());
+
+  auto third = startAttempt(*state);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(third.getMetadata()).nonce == nonce);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(third.getMetadata()).isRetry == IsActorRetry::YES);
+  auto rejected = KJ_EXCEPTION(FAILED, "claim rejected");
+  rejected.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  auto result = handleFailure(*state, kj::mv(rejected));
+  auto& failure = KJ_ASSERT_NONNULL(result.tryGet<kj::Exception>());
+  KJ_EXPECT(failure.getDescription().contains("original ambiguous disconnect"));
+  KJ_ASSERT(observer->outcomes.size() == 1);
+  KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::CLAIM_REJECTED);
+}
+
+KJ_TEST("a committed retry preserves the original disconnect after claim rejection") {
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto state = newRetryState(timer, *observer);
+
+  startAttempt(*state);
+  KJ_EXPECT(handleFailure(*state, makeDisconnect("original disconnect"_kj)).is<kj::Duration>());
+  startAttempt(*state);
+  auto rejected = KJ_EXCEPTION(FAILED, "claim rejected");
+  rejected.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  auto failure = state->handleCommittedAttemptFailure(kj::mv(rejected));
+
+  KJ_EXPECT(failure.getDescription().contains("original disconnect"));
+  KJ_ASSERT(observer->outcomes.size() == 1);
+  KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::CLAIM_REJECTED);
+}
+
 KJ_TEST("actor retries stop after five total attempts") {
   TestTimerChannel timer;
   auto observer = kj::refcounted<RecordingObserver>();
@@ -243,6 +289,41 @@ KJ_TEST("actor calls do not retry when retry requests are disabled") {
   KJ_EXPECT(KJ_ASSERT_NONNULL(first.getMetadata()).retryGateEnabled == ActorRetryGateEnabled::NO);
   KJ_EXPECT(!state->isRetryEnabled());
   KJ_EXPECT(observer->outcomes.size() == 0);
+}
+
+KJ_TEST("disabled actor retries return failures unchanged") {
+  auto expectDisabled = [](ActorCallRetryState::Config config) {
+    TestTimerChannel timer;
+    auto observer = kj::refcounted<RecordingObserver>();
+    auto state = kj::rc<ActorCallRetryState>(timer, *observer, config);
+
+    startAttempt(*state);
+    auto result = handleFailure(*state, makeDisconnect("original disconnect"_kj));
+    auto& failure = KJ_ASSERT_NONNULL(result.tryGet<kj::Exception>());
+    KJ_EXPECT(failure.getType() == kj::Exception::Type::DISCONNECTED);
+    KJ_EXPECT(failure.getDescription().contains("original disconnect"));
+    KJ_EXPECT(observer->retryCallTypes.empty());
+    KJ_EXPECT(observer->outcomes.empty());
+  };
+
+  expectDisabled({
+    .callType = ActorRetryCallType::JSRPC,
+    .observationEnabled = ActorRetryGateEnabled::YES,
+    .enforcementEnabled = ActorRetryGateEnabled::NO,
+    .payloadReplayable = ActorCallPayloadReplayable::YES,
+  });
+  expectDisabled({
+    .callType = ActorRetryCallType::JSRPC,
+    .observationEnabled = ActorRetryGateEnabled::NO,
+    .enforcementEnabled = ActorRetryGateEnabled::YES,
+    .payloadReplayable = ActorCallPayloadReplayable::YES,
+  });
+  expectDisabled({
+    .callType = ActorRetryCallType::JSRPC,
+    .observationEnabled = ActorRetryGateEnabled::YES,
+    .enforcementEnabled = ActorRetryGateEnabled::YES,
+    .payloadReplayable = ActorCallPayloadReplayable::NO,
+  });
 }
 
 }  // namespace

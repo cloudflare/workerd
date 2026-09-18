@@ -349,7 +349,7 @@ class Fetcher: public JsRpcClientProvider {
       MakeUserSpanParent makeUserSpanParent);
 
   kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() override;
-  void onActorCallRetry();
+  void onActorCallRetry() override;
 
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);

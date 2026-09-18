@@ -51,12 +51,25 @@ kj::OneOf<ActorCallRetryState::Attempt, kj::Exception> ActorCallRetryState::star
 
 kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::handleAttemptFailure(
     kj::Exception exception) {
+  if (!retriesEnabled) return kj::mv(exception);
+
   maybeStartRetryLatencyTimer(exception);
   KJ_IF_SOME(claimRejection, handleClaimRejection(exception)) {
     return kj::mv(claimRejection);
   }
 
   return checkCanRetry(kj::mv(exception));
+}
+
+kj::Exception ActorCallRetryState::handleCommittedAttemptFailure(kj::Exception exception) {
+  if (!retriesEnabled) return kj::mv(exception);
+
+  maybeStartRetryLatencyTimer(exception);
+  KJ_IF_SOME(claimRejection, handleClaimRejection(exception)) {
+    return kj::mv(claimRejection);
+  }
+  recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY);
+  return kj::mv(exception);
 }
 
 void ActorCallRetryState::maybeStartRetryLatencyTimer(const kj::Exception& exception) {
