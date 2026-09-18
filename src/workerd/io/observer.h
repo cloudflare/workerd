@@ -82,6 +82,7 @@ class ByteStreamObserver {
 class OutgoingActorCallObserver {
  public:
   virtual ~OutgoingActorCallObserver() noexcept(false) = default;
+  virtual void markPipelineCommitted() {}
   virtual void recordSuccess() {}
   virtual void recordFailure(kj::Exception& e) {}
 };
@@ -183,6 +184,13 @@ class RequestObserver: public kj::Refcounted {
   // The returned handle releases the tracked bytes when destroyed.
   virtual kj::Own<void> trackActorCallReplayMemory(size_t bytes) {
     return kj::Own<void>();
+  }
+
+  // Attempts to reserve platform memory for retained actor-call replay state. Returning none keeps
+  // the call observe-only. Production observers must enforce an aggregate bound before returning a
+  // reservation handle.
+  virtual kj::Maybe<kj::Own<void>> tryReserveActorCallReplayMemory(size_t bytes) {
+    return kj::none;
   }
 
   // Records an additional outgoing actor call started by a runtime retry loop.
