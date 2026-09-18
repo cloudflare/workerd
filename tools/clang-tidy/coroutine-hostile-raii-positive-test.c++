@@ -15,6 +15,7 @@ struct Task {
     std::suspend_never final_suspend() noexcept;
     void return_void();
     void unhandled_exception();
+    std::suspend_never yield_value(int);
   };
 };
 
@@ -28,4 +29,9 @@ Task declarationInitializer(Awaitable awaitable) {
   kj::UnwindDetector detector;
   auto result = co_await awaitable;
   (void)result;
+}
+
+Task disallowedYield() {
+  kj::UnwindDetector yieldDetector;
+  co_yield 0;
 }

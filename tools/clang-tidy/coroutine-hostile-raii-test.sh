@@ -12,7 +12,7 @@ readonly PLUGIN="${ROOT}/tools/clang-tidy/libworkerd-lint.so"
 readonly POSITIVE="${ROOT}/tools/clang-tidy/coroutine-hostile-raii-positive-test.c++"
 readonly NEGATIVE="${ROOT}/tools/clang-tidy/coroutine-hostile-raii-negative-test.c++"
 readonly CHECKS="-*,workerd-coroutine-hostile-raii"
-readonly CONFIG="{CheckOptions: [{key: workerd-coroutine-hostile-raii.RAIITypesList, value: 'kj::UnwindDetector'}]}"
+readonly CONFIG="{CheckOptions: [{key: workerd-coroutine-hostile-raii.RAIITypesList, value: 'kj::UnwindDetector'}, {key: workerd-coroutine-hostile-raii.AllowedAwaitablesList, value: 'AllowedYieldable'}]}"
 
 set +e
 positive_output=$("${CLANG_TIDY}" "--load=${PLUGIN}" --checks="${CHECKS}" \
@@ -28,6 +28,12 @@ fi
 
 if [[ "${positive_output}" != *"'detector' persists across a suspension point"* ]]; then
   printf '%s\n' "Expected the hostile RAII diagnostic for detector." >&2
+  printf '%s\n' "${positive_output}" >&2
+  exit 1
+fi
+
+if [[ "${positive_output}" != *"'yieldDetector' persists across a suspension point"* ]]; then
+  printf '%s\n' "Expected the hostile RAII diagnostic for a disallowed co_yield operand." >&2
   printf '%s\n' "${positive_output}" >&2
   exit 1
 fi

@@ -74,6 +74,16 @@ AST_MATCHER_P(CoawaitExpr, awaitable,
   return false;
 }
 
+AST_MATCHER_P(CoyieldExpr, yieldable,
+    clang::ast_matchers::internal::Matcher<Expr>, InnerMatcher) {
+  // Clang stores promise.yield_value(source) as the operand rather than source itself.
+  if (const auto *Call = dyn_cast<CallExpr>(Node.getOperand());
+      Call != nullptr && Call->getNumArgs() == 1) {
+    return InnerMatcher.matches(*Call->getArg(0), Finder, Builder);
+  }
+  return false;
+}
+
 auto typeWithNameIn(const std::vector<StringRef> &Names) {
   return hasType(hasCanonicalType(hasDeclaration(namedDecl(hasAnyName(Names)))));
 }
@@ -101,10 +111,11 @@ void CoroutineHostileRAIICheck::registerMatchers(MatchFinder *Finder) {
                   hasDeclaration(hasAttr(attr::Kind::ScopedLockable)))))
           .bind("scoped-lockable");
   auto OtherRAII = varDecl(typeWithNameIn(RAIITypesList)).bind("raii");
-  auto AllowedSuspend = awaitable(anyOf(typeWithNameIn(AllowedAwaitablesList),
+  auto AllowedAwait = awaitable(anyOf(typeWithNameIn(AllowedAwaitablesList),
       functionWithNameIn(AllowedCallees)));
+  auto AllowedYield = yieldable(typeWithNameIn(AllowedAwaitablesList));
   Finder->addMatcher(
-      expr(anyOf(coawaitExpr(unless(AllowedSuspend)), coyieldExpr()),
+      expr(anyOf(coawaitExpr(unless(AllowedAwait)), coyieldExpr(unless(AllowedYield))),
           forEachPrevStmt(
               declStmt(forEach(varDecl(anyOf(ScopedLockable, OtherRAII))))))
           .bind("suspension"),
