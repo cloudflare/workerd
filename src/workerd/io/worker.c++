@@ -45,6 +45,7 @@
 
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
+#include <kj/async-event.h>
 #include <kj/compat/brotli.h>
 #include <kj/compat/gzip.h>
 #include <kj/encoding.h>
@@ -3800,8 +3801,7 @@ struct Worker::Actor::Impl {
 
   TimerChannel& timerChannel;
 
-  kj::ForkedPromise<void> shutdownPromise;
-  kj::Own<kj::PromiseFulfiller<void>> shutdownFulfiller;
+  kj::AsyncEvent shutdownEvent;
 
   // If this Actor has a HibernationManager, it means the Actor has recently accepted a Hibernatable
   // websocket. We eventually move the HibernationManager into the DeferredProxy task
@@ -3858,8 +3858,7 @@ struct Worker::Actor::Impl {
       kj::Maybe<uint16_t>& hibernationEventType,
       kj::Maybe<rpc::Container::Client> container,
       jsg::Dict<kj::String> containerImages,
-      kj::Maybe<FacetManager&> facetManager,
-      kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
+      kj::Maybe<FacetManager&> facetManager)
       : actorId(kj::mv(actorId)),
         props(kj::mv(props)),
         makeStorage(kj::mv(makeStorage)),
@@ -3873,8 +3872,6 @@ struct Worker::Actor::Impl {
         outputGate(hooks),
         loopback(kj::mv(loopback)),
         timerChannel(timerChannel),
-        shutdownPromise(paf.promise.fork()),
-        shutdownFulfiller(kj::mv(paf.fulfiller)),
         hibernationManager(kj::mv(manager)),
         hibernationEventType(kj::mv(hibernationEventType)) {
     actorCache =
@@ -4083,7 +4080,7 @@ void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&
 
   shutdownActorCache(error);
 
-  impl->shutdownFulfiller->fulfill();
+  impl->shutdownEvent.signal();
 }
 
 void Worker::Actor::shutdownActorCache(kj::Maybe<const kj::Exception&> error) {
@@ -4101,7 +4098,7 @@ void Worker::Actor::abort(const kj::Exception& error) {
   } else {
     shutdownActorCache(error);
   }
-  impl->shutdownFulfiller->fulfill();
+  impl->shutdownEvent.signal();
 
   // Now hard-cancel everything that might be using the actor.
   //
@@ -4126,7 +4123,7 @@ void Worker::Actor::abort(const kj::Exception& error) {
 }
 
 kj::Promise<void> Worker::Actor::onShutdown() {
-  return impl->shutdownPromise.addBranch();
+  return impl->shutdownEvent.whenSignaled();
 }
 
 kj::Promise<void> Worker::Actor::onBroken() {
