@@ -167,7 +167,12 @@ export {
   nonDetachableBuffersRejected,
 } from 'buffer-lifecycle';
 
-export { pendingByobReadSurvivesGc, byobRequestSurvivesGc } from 'gc';
+export {
+  teeBranchesCollected,
+  teeBranchesCollectedPullStops,
+  pendingByobReadSurvivesGc,
+  byobRequestSurvivesGc,
+} from 'gc';
 
 export {
   byobRoundtrip,
