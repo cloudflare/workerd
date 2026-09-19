@@ -18,6 +18,7 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "readable-from", esModule = embed "readable-from.js"),
   (name = "pipeline-web", esModule = embed "pipeline-web.js"),
   (name = "finished-and-abort", esModule = embed "finished-and-abort.js"),
+  (name = "abort-transform-pairs", esModule = embed "abort-transform-pairs.js"),
   (name = "compose-web", esModule = embed "compose-web.js"),
   (name = "duplex-from", esModule = embed "duplex-from.js"),
   (name = "then-pollution", esModule = embed "then-pollution.js"),

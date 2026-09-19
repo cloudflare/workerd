@@ -207,6 +207,13 @@ export {
 } from 'finished-and-abort';
 
 export {
+  addAbortSignalOnPairReadableErrorsWritable,
+  addAbortSignalOnPairWritableErrorsReadable,
+  addAbortSignalOnPipedPairReadableCancelsSource,
+  addAbortSignalOnPairHalfAlreadyErroredIsInert,
+} from 'abort-transform-pairs';
+
+export {
   composeValidatesWebStreamPositions,
   composeSingleWebStream,
   composeWebHeadNodeTail,
