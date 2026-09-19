@@ -1054,6 +1054,9 @@ class Worker::Actor final: public kj::Refcounted {
 
   ActorObserver& getMetrics();
 
+  // Returns none once the actor's impl pointer has been cleared during destruction.
+  kj::Maybe<ActorObserver&> tryGetMetrics();
+
   InputGate& getInputGate();
   OutputGate& getOutputGate();
 

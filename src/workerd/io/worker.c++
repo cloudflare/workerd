@@ -4407,6 +4407,11 @@ ActorObserver& Worker::Actor::getMetrics() {
   return *impl->metrics;
 }
 
+kj::Maybe<ActorObserver&> Worker::Actor::tryGetMetrics() {
+  if (impl.get() == nullptr) return kj::none;
+  return *impl->metrics;
+}
+
 InputGate& Worker::Actor::getInputGate() {
   return impl->inputGate;
 }

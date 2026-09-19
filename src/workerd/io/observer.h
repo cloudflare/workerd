@@ -332,6 +332,11 @@ class WorkerObserver: public kj::AtomicRefcounted {
 
 class ActorObserver: public kj::Refcounted, public SqliteObserver {
  public:
+  class WaitUntilTaskHandle {
+   public:
+    virtual ~WaitUntilTaskHandle() noexcept = default;
+  };
+
   // Allows the observer to run in the background, periodically making observations. Owner must
   // call this and store the promise. `limitEnforcer` is used to collect CPU usage metrics, it
   // must remain valid as long as the loop is running.
@@ -370,6 +375,20 @@ class ActorObserver: public kj::Refcounted, public SqliteObserver {
   virtual void outputGateWaiterRemoved() {}
 
   virtual void blockConcurrencyWhileDepth(uint32_t depth) {}
+
+  // Called before an actor promise is added to IoContext's wait-until task set. A non-null returned
+  // handle is attached to the promise and destroyed when the task settles or is canceled.
+  //
+  // Tracking is best-effort. Implementations must undo partial tracking state before propagating
+  // setup failures. IoContext catches those failures so they do not reject or cancel the
+  // application task. Handle destruction must not throw.
+  //
+  // Implementations must not call IoContext::awaitIo(), addTask(), or addWaitUntil(), or schedule
+  // JavaScript/actor timers. Those paths add another wait-until task and recursively invoke this
+  // hook. Direct kj::Timer operations that are not registered with IoContext are safe.
+  virtual kj::Own<WaitUntilTaskHandle> addedWaitUntilTask() {
+    return kj::Own<WaitUntilTaskHandle>();
+  }
 
   virtual void shutdown(uint16_t reasonCode, LimitEnforcer& limitEnforcer) {}
 };

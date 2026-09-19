@@ -587,9 +587,23 @@ void IoContext::addTask(kj::Promise<void> promise) {
 }
 
 void IoContext::addWaitUntil(kj::Promise<void> promise) {
-  // The empty check comes first: getMetrics() requires a current IncomingRequest, so consulting
-  // it before checking would turn the recoverable no-request case into a fatal one. See addTask().
-  if (incomingRequests.empty()) {
+  kj::Own<ActorObserver::WaitUntilTaskHandle> handle;
+  KJ_IF_SOME(a, actor) {
+    KJ_IF_SOME(observer, a.tryGetMetrics()) {
+      KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { handle = observer.addedWaitUntilTask(); })) {
+        KJ_LOG(ERROR, "ActorObserver::addedWaitUntilTask() threw an exception", e);
+      }
+    }
+  }
+  if (handle.get() != nullptr) {
+    promise = promise.attach(kj::mv(handle));
+  }
+
+  // Actor task destructors can enqueue tasks after the final request is released during teardown.
+  // The destructor invalidates selfRef before destroying the task sets, which also cancel any
+  // tasks added during their destruction.
+  bool actorTaskTeardown = actor != kj::none && !selfRef->isValid();
+  if (incomingRequests.empty() && !actorTaskTeardown) {
     DEBUG_FATAL_RELEASE_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
         lastDeliveredLocation, kj::getStackTrace());
   } else if (actor == kj::none) {
