@@ -6214,14 +6214,17 @@ type WebSearchOptions = {
   search_context_size?: "low" | "medium" | "high";
   user_location?: WebSearchUserLocation;
 };
-type ChatTemplateKwargs = {
-  /** Whether to enable reasoning, enabled by default. */
-  enable_thinking?: boolean;
+type ChatTemplateKwargs<ThinkingEnabled extends boolean = boolean> = {
+  /** Whether to enable reasoning. Support and defaults depend on the model. */
+  enable_thinking?: ThinkingEnabled;
   /** If false, preserves reasoning context between turns. */
   clear_thinking?: boolean;
 };
 /** Shared optional properties used by both Prompt and Messages input branches. */
-type ChatCompletionsCommonOptions = {
+type ChatCompletionsCommonOptions<
+  Effort extends string = "low" | "medium" | "high",
+  ThinkingEnabled extends boolean = boolean,
+> = {
   model?: string;
   audio?: AudioParams;
   frequency_penalty?: number | null;
@@ -6236,8 +6239,8 @@ type ChatCompletionsCommonOptions = {
   parallel_tool_calls?: boolean;
   prediction?: PredictionContent;
   presence_penalty?: number | null;
-  reasoning_effort?: "low" | "medium" | "high" | null;
-  chat_template_kwargs?: ChatTemplateKwargs;
+  reasoning_effort?: Effort | null;
+  chat_template_kwargs?: ChatTemplateKwargs<ThinkingEnabled>;
   response_format?: ResponseFormat;
   seed?: number | null;
   service_tier?: "auto" | "default" | "flex" | "scale" | "priority" | null;
@@ -6326,9 +6329,12 @@ type ChatCompletionChoice = {
     "stop" | "length" | "tool_calls" | "content_filter" | "function_call";
   logprobs: ChatCompletionLogprobs | null;
 };
-type ChatCompletionsMessagesInput = {
+type ChatCompletionsMessagesInput<
+  Effort extends string = "low" | "medium" | "high",
+  ThinkingEnabled extends boolean = boolean,
+> = {
   messages: Array<ChatCompletionMessageParam>;
-} & ChatCompletionsCommonOptions;
+} & ChatCompletionsCommonOptions<Effort, ThinkingEnabled>;
 type ChatCompletionsOutput = {
   id: string;
   object: string;
@@ -6349,7 +6355,7 @@ type ChatCompletionsOutput = {
  * It does not include types for WebSearch, CodeInterpreter, FileInputs, MCP, CustomTools.
  * We plan to add those incrementally as model + platform capabilities evolve.
  */
-type ResponsesInput = {
+type ResponsesInput<Effort extends string | null = ReasoningEffort> = {
   background?: boolean | null;
   conversation?: string | ResponseConversationParam | null;
   include?: Array<ResponseIncludable> | null;
@@ -6359,7 +6365,7 @@ type ResponsesInput = {
   parallel_tool_calls?: boolean | null;
   previous_response_id?: string | null;
   prompt_cache_key?: string;
-  reasoning?: Reasoning | null;
+  reasoning?: Reasoning<Effort> | null;
   safety_identifier?: string;
   service_tier?: "auto" | "default" | "flex" | "scale" | "priority" | null;
   stream?: boolean | null;
@@ -6420,8 +6426,8 @@ type ResponsePrompt = {
   } | null;
   version?: string | null;
 };
-type Reasoning = {
-  effort?: ReasoningEffort | null;
+type Reasoning<Effort extends string | null = ReasoningEffort> = {
+  effort?: Effort | null;
   generate_summary?: "auto" | "concise" | "detailed" | null;
   summary?: "auto" | "concise" | "detailed" | null;
 };
@@ -10444,11 +10450,17 @@ declare abstract class Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2 {
   postProcessedOutputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output;
 }
 declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
-  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
+  inputs: XOR<
+    ResponsesInput<"low" | "medium" | "high">,
+    ChatCompletionsInput<"low" | "medium" | "high", true>
+  >;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
-  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
+  inputs: XOR<
+    ResponsesInput<"low" | "medium" | "high">,
+    ChatCompletionsInput<"low" | "medium" | "high", true>
+  >;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 interface Ai_Cf_Leonardo_Phoenix_1_0_Input {
@@ -11539,7 +11551,10 @@ declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_5 {
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_6 {
-  inputs: ChatCompletionsInput;
+  inputs: ChatCompletionsInput<
+    "high" | "none" | "low" | "medium" | "max",
+    boolean
+  >;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
@@ -11547,15 +11562,24 @@ declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
-  inputs: ChatCompletionsInput;
+  inputs: ChatCompletionsInput<
+    "high" | "none" | "minimal" | "low" | "medium" | "max" | "auto",
+    boolean
+  >;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code {
-  inputs: ChatCompletionsInput;
+  inputs: ChatCompletionsInput<
+    "high" | "none" | "low" | "medium" | "max",
+    true
+  >;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_2 {
-  inputs: ChatCompletionsInput;
+  inputs: ChatCompletionsInput<
+    "max" | "high" | "none" | "low" | "medium" | "xhigh" | "minimal",
+    boolean
+  >;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 interface Ai_Cf_Moondream_Moondream3_1_9B_A2B_Input {
@@ -11692,19 +11716,35 @@ declare abstract class Base_Ai_Cf_Moondream_Moondream3_1_9B_A2B {
   postProcessedOutputs: Ai_Cf_Moondream_Moondream3_1_9B_A2B_Output;
 }
 declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Flash_0731 {
-  inputs: ChatCompletionsInput;
+  inputs: ChatCompletionsInput<
+    "max" | "high" | "low" | "none" | "minimal" | "medium" | "xhigh",
+    boolean
+  >;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813 {
-  inputs: ChatCompletionsInput;
+  inputs: ChatCompletionsInput<
+    "max" | "high" | "low" | "none" | "minimal" | "medium" | "xhigh",
+    boolean
+  >;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Qwen_Qwen3_8_27B {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
+declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_3 {
+  inputs: ChatCompletionsInput<
+    "max" | "high" | "low" | "none" | "medium",
+    true
+  >;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
 declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_3_Flash {
-  inputs: ChatCompletionsInput;
+  inputs: ChatCompletionsInput<
+    "max" | "high" | "low" | "none" | "minimal" | "medium" | "xhigh",
+    true
+  >;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 interface AiModels {
@@ -11805,6 +11845,7 @@ interface AiModels {
   "@cf/deepseek-ai/deepseek-v4-flash-0731": Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Flash_0731;
   "@cf/deepseek-ai/deepseek-v4-pro-0813": Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813;
   "@cf/qwen/qwen3.8-27b": Base_Ai_Cf_Qwen_Qwen3_8_27B;
+  "@cf/zai-org/glm-5.3": Base_Ai_Cf_Zai_Org_Glm_5_3;
   "@cf/zai-org/glm-5.3-flash": Base_Ai_Cf_Zai_Org_Glm_5_3_Flash;
 }
 type AiOptions = {
@@ -11859,7 +11900,10 @@ type AiModelsSearchObject = {
   }[];
 };
 type ChatCompletionsBase = ChatCompletionsMessagesInput;
-type ChatCompletionsInput = ChatCompletionsMessagesInput;
+type ChatCompletionsInput<
+  Effort extends string = "low" | "medium" | "high",
+  ThinkingEnabled extends boolean = boolean,
+> = ChatCompletionsMessagesInput<Effort, ThinkingEnabled>;
 interface InferenceUpstreamError extends Error {}
 interface AiInternalError extends Error {}
 type AiModelListType = Record<string, any>;
