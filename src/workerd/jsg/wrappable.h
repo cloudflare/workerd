@@ -112,6 +112,13 @@ constexpr int SNAPSHOT_MAIN_MODULE_NAMESPACE_SLOT =
 // compiling the script again.
 constexpr int SNAPSHOT_WASM_SHIM_FACTORY_SLOT = SNAPSHOT_MAIN_MODULE_NAMESPACE_SLOT + 1;
 
+// Tagged embedder-data slot in which the zygote parks the per-isolate JavaScript bootstrap's
+// state (io/per-isolate-bootstrap.c++) as plain JS values before the blob is created; the C++
+// BootstrapState in the BOOTSTRAP_STATE pointer slot holds V8 handles, which a snapshot cannot
+// contain. A restored isolate rebuilds the BootstrapState from it instead of running the
+// bootstrap scripts again.
+constexpr int SNAPSHOT_BOOTSTRAP_STATE_SLOT = SNAPSHOT_WASM_SHIM_FACTORY_SLOT + 1;
+
 inline void setAlignedPointerInEmbedderData(
     v8::Local<v8::Context> context, ContextPointerSlot slot, void* ptr) {
   // The type tag is a small integer that should be different for every pointer
@@ -507,6 +514,11 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   // zygote never runs again, and the destructors reset every member handle (jsg::Data, V8Ref,
   // jsg::Function, raw v8::Global) that CreateBlob's global-handle check would otherwise reject.
   void destroyLiveWrappableInstances();
+
+  // Every Wrappable that currently has a JavaScript wrapper.
+  kj::List<Wrappable, &Wrappable::link>& liveWrappables() {
+    return wrappers;
+  }
 
   void addToFreelist(Wrappable::CppgcShim& shim);
   Wrappable::CppgcShim* allocateShim(Wrappable& wrappable, v8::CppHeapPointerTag tag);
