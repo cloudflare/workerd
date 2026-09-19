@@ -80,6 +80,15 @@ class TokioAsyncIoStream final: public kj::AsyncIoStream {
   kj::Maybe<void *> getWin32Handle() const override;
 #endif
 
+  // Gives up the native stream to a caller that will drive the socket itself (kj-hyper's
+  // native-serve path). Consuming in spirit: the wrapper holds nothing afterwards and must be
+  // destroyed right away -- callers hold it by kj::Own, release, then drop the Own. Whether the
+  // socket can actually be taken (no I/O in flight) is decided on the Rust side
+  // (TokioStream::into_socket), which hands the stream back if not; kj-hyper re-wraps it.
+  ::rust::Box<TokioStream> release() {
+    return kj::mv(inner);
+  }
+
  private:
   kj::Promise<void> writePieces(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces);
 

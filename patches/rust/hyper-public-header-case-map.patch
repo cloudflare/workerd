@@ -1,0 +1,44 @@
+--- a/src/ext/mod.rs
++++ b/src/ext/mod.rs
+@@ -155,10 +155,15 @@
+ /// })
+ /// ```
+ #[cfg(all(any(feature = "client", feature = "server"), feature = "http1"))]
+ #[derive(Clone, Debug)]
+-pub(crate) struct HeaderCaseMap(HeaderMap<Bytes>);
++// workerd: public so locally-built messages can carry original header-name spellings. The
++// http crate's HeaderName lowercases names; kj-http preserves the case the application wrote
++// (and workerd's tests assert the exact raw bytes). hyper's encoder already consults this
++// extension unconditionally when writing (falling back to title-casing), but upstream only
++// populates it for *forwarded* messages parsed with preserve_header_case; making the type and
++// its append() public lets workerd's kj<->hyper translation layer populate it directly.
++pub struct HeaderCaseMap(HeaderMap<Bytes>);
+ 
+ #[cfg(all(any(feature = "client", feature = "server"), feature = "http1"))]
+ impl HeaderCaseMap {
+     /// Returns a view of all spellings associated with that header name,
+@@ -180,20 +185,22 @@
+     pub(crate) fn get_all_internal(&self, name: &HeaderName) -> ValueIter<'_, Bytes> {
+         self.0.get_all(name).into_iter()
+     }
+ 
+     #[cfg(any(feature = "client", feature = "server"))]
+-    pub(crate) fn default() -> Self {
++    // workerd: public (see the type comment).
++    pub fn default() -> Self {
+         Self(HeaderMap::default())
+     }
+ 
+     #[cfg(any(test, feature = "ffi"))]
+     pub(crate) fn insert(&mut self, name: HeaderName, orig: Bytes) {
+         self.0.insert(name, orig);
+     }
+ 
+     #[cfg(any(feature = "client", feature = "server"))]
+-    pub(crate) fn append<N>(&mut self, name: N, orig: Bytes)
++    // workerd: public (see the type comment).
++    pub fn append<N>(&mut self, name: N, orig: Bytes)
+     where
+         N: IntoHeaderName,
+     {
+         self.0.append(name, orig);

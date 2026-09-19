@@ -10,6 +10,17 @@ wd_cc_library(
     linkopts = select({
         "@platforms//os:windows": [
             "ntdll.lib",
+            # crypt32 backs the schannel/Windows cert-store APIs rustls-native-certs uses
+            # (kj-hyper TLS; TlsOptions.trustBrowserCas).
+            "crypt32.lib",
+        ],
+        # Security.framework backs the keychain trust-store APIs rustls-native-certs uses
+        # (kj-hyper TLS; TlsOptions.trustBrowserCas).
+        "@platforms//os:macos": [
+            "-framework",
+            "Security",
+            "-framework",
+            "CoreFoundation",
         ],
         "//conditions:default": [],
     }),

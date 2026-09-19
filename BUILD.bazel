@@ -131,16 +131,18 @@ bool_flag(
 # =============================================================================
 # I/O backend selection: a build/compile/link-time hermeticity guarantee.
 #
-#   --//:io_backend=rust  (default) -- the rust I/O layer: the process event loop is tokio
-#                         (kj-rs-tokio) and every socket/stream is tokio-backed (kj-rs-io); the
-#                         C++ layers above the streams (kj-http, kj-tls, capnp-rpc) are unchanged
-#                         and run over those tokio streams. In this config kj's own OS-I/O
-#                         layer (kj-async-os) must be ABSENT from the link: checked on the
-#                         dependency graph by build/rust_io_graph_check.sh and on the linked
+#   --//:io_backend=rust  (default) -- the rust I/O and HTTP/TLS layer: the process event loop is
+#                         tokio (kj-rs-tokio), every socket/stream is tokio-backed (kj-rs-io),
+#                         and kj's HTTP and TLS interfaces are implemented on hyper and rustls
+#                         (kj-hyper). capnp-rpc remains the unchanged C++ implementation, running
+#                         over tokio-backed streams. In this config kj's own OS-I/O layer
+#                         (kj-async-os), kj's HTTP implementation (kj-http-impl) and kj-tls must
+#                         be ABSENT from the link: checked on the dependency graph by
+#                         build/rust_io_graph_check.sh, and for kj-async-os also on the linked
 #                         binary by //src/workerd/server:rust-io-link-check.
-#   --//:io_backend=cxx   -- workerd's I/O is the concrete C++ stack end to end, including the
-#                         kj OS event loop and sockets. Byte-identical to the pre-migration
-#                         build.
+#   --//:io_backend=cxx   -- workerd's I/O is the concrete C++ stack end to end: kj-http, kj-tls
+#                         and the kj OS event loop and sockets. Byte-identical to the
+#                         pre-migration build.
 #
 # Code that must differ per backend keys off the WORKERD_RUST_IO_BACKEND_RUST define (see
 # //src/workerd/util:setup-async-io) or off the config_settings below in a select().

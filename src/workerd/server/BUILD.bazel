@@ -77,9 +77,12 @@ wd_cc_binary(
         ":workerd-capnp-schema",
         ":workerd_capnp",
         "//src/pyodide:pyodide_extra_capnp",
+        # The kj::setupAsyncIo() seam: native kj loop under the default cxx build, tokio-backed
+        # under --//:io_backend=rust (CliMain / inspector / fallback threads call setupAsyncIo()
+        # unchanged in both configs).
+        "//src/workerd/util:setup-async-io",
         "//src/workerd/util:autogate",
         "//src/workerd/util:perfetto",
-        "//src/workerd/util:setup-async-io",
         "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj:kj-async-io",
@@ -167,6 +170,34 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "tls-network",
+    srcs = [
+        "tls-network.c++",
+    ],
+    hdrs = [
+        "tls-network.h",
+    ],
+    # One TLS-engine kj::SecureNetworkWrapper surface for both configs: kj::TlsContext (OpenSSL,
+    # kj-tls) in the default cxx config, the rustls-backed wrapper (kj-hyper's tokio-rustls
+    # streams, wrap_tls_client/wrap_tls_server) under --//:io_backend=rust -- callers (server.c++'s TLS paths, both client
+    # and listener sides, and pyodide.c++'s bundle download) need no per-config #if; the single
+    # WORKERD_RUST_IO_BACKEND_RUST #if selecting the arms lives in tls-network.c++, mirroring
+    # :cli-io-backend. The header is gate-free, so `local_defines` suffices.
+    local_defines = rust_io_backend_local_defines(),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":workerd_capnp",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async-core",
+    ] + select({
+        # The TLS engine: rustls (kj-hyper's tokio-rustls streams) under
+        # --//:io_backend=rust, where kj-tls (OpenSSL) must not be linked; kj-tls otherwise.
+        "//:io_backend_rust": ["//src/rust/cxx/kj-hyper"],
+        "//conditions:default": ["@capnp-cpp//src/kj/compat:kj-tls"],
+    }),
+)
+
+wd_cc_library(
     name = "pyodide",
     srcs = [
         "pyodide.c++",
@@ -176,13 +207,16 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        # fetchPyodideBundle's HTTPS bundle download: TLS comes from :tls-network (kj::TlsContext
+        # in the default cxx config, rustls under --//:io_backend=rust); the kj HTTP client is
+        # identical in both configs.
+        ":tls-network",
         "//src/workerd/api:pyodide",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@capnp-cpp//src/kj/compat:kj-tls",
     ],
 )
 
@@ -246,7 +280,6 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@capnp-cpp//src/kj/compat:kj-tls",
     ] + select({
         ":set_use_transpiler": ["//src/rust/transpiler"],
         "//conditions:default": [],
@@ -279,16 +312,29 @@ wd_cc_library(
     deps = [
         ":actor-id-impl",
         ":alarm-scheduler",
+        "@capnp-cpp//src/capnp:capnp-rpc",
         ":channel-token",
         ":channel-token_capnp",
         ":container-client",
         ":facet-tree-index",
         ":fallback-service",
+        # The per-config TLS engine (kj::TlsContext under cxx, rustls under
+        # --//:io_backend=rust) behind a backend-agnostic kj::SecureNetworkWrapper factory; the
+        # TLS call sites in server.c++ keep upstream's shape with no per-config #if.
+        ":tls-network",
         ":workerd-api",
         ":workerd_capnp",
         "//src/cloudflare",
         "//src/node",
         "//src/pyodide:pyodide_static",
+        # The kj::setupAsyncIo() seam: the inspector side thread (startInspector) calls
+        # setupAsyncIo() unchanged in both configs -- native kj loop under the default cxx build,
+        # tokio-backed under --//:io_backend=rust.
+        "//src/workerd/util:setup-async-io",
+        # The kj-http seam: server.c++'s kj::newHttpClient()/kj::HttpServer call sites link
+        # against the native kj-http implementation under the default cxx build and the
+        # hyper-backed shim under --//:io_backend=rust.
+        "//src/workerd/util:kj-http",
         "//src/workerd/api:memory-cache",
         "//src/workerd/api:pyodide",
         "//src/workerd/io",
@@ -297,11 +343,9 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:websocket-error-handler",
-        "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@capnp-cpp//src/kj/compat:kj-tls",
     ],
 )
 
@@ -339,6 +383,7 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/io:container_capnp",
         "//src/workerd/jsg",
+        "//src/workerd/util:kj-http",
         "//src/workerd/util:sentry",
         "//src/workerd/util:strings",
         "//src/workerd/util:uuid",
@@ -346,7 +391,6 @@ wd_cc_library(
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async-core",
-        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
@@ -362,9 +406,9 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":workerd_capnp",
+        "//src/workerd/util:kj-http",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async-core",
-        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
@@ -413,7 +457,22 @@ kj_test(
     src = "server-test.c++",
     deps = [
         ":server",
+        # TestServer drives every test loop with a kj-rs-tokio TokioEventPort (in both configs;
+        # under the default cxx config it just drives a plain KJ loop), so the test binary needs
+        # the kj-rs-tokio Rust crate for the bridge symbols even when :server itself doesn't
+        # pull the rust layer in.
+        "//src/rust/cxx/kj-rs-tokio",
+        "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
         "//src/workerd/util:test-util",
+    ],
+)
+
+# The TLS policy of config::TlsOptions, held to the same behavior in both configs.
+kj_test(
+    src = "tls-network-test.c++",
+    deps = [
+        ":tls-network",
+        "//src/workerd/util:kj-http",
     ],
 )
 
@@ -473,9 +532,9 @@ kj_test(
     deps = [
         ":fallback-service",
         ":workerd_capnp",
+        "//src/workerd/util:kj-http",
         "@capnp-cpp//src/capnp/compat:json",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 

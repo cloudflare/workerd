@@ -72,7 +72,6 @@
 
 #include <kj/compat/gzip.h>
 #include <kj/compat/http.h>
-#include <kj/compat/tls.h>
 #include <kj/compat/url.h>
 
 using namespace kj_rs;
