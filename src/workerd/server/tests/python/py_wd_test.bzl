@@ -4,9 +4,11 @@ load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "DEFAULT_PYTHON_TEST
 load("//:build/wd_test.bzl", "wd_test")
 
 def _get_enable_flags(python_flag):
-    flags = [BUNDLE_VERSION_INFO[python_flag]["enable_flag_name"]]
-    if "python_workers" not in flags:
-        flags.append("python_workers")
+    enable_flag_name = BUNDLE_VERSION_INFO[python_flag]["enable_flag_name"]
+
+    # Strip out python_workers flag. We intentionally remove python_workers flag for testing purpose
+    # to make sure python workers are properly identified by workerd looking at the entrypoint
+    flags = [] if enable_flag_name == "python_workers" else [enable_flag_name]
     for key, value in BUNDLE_VERSION_INFO.items():
         # With all-compat-flags variant we might end up accidently using a newer python bundle than
         # intended. To make sure we get the speicific intended version we also need to disable newer
