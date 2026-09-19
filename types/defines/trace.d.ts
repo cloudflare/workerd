@@ -185,7 +185,15 @@ interface Return {
 
 interface Attribute {
   readonly name: string;
-  readonly value: string | string[] | boolean | boolean[] | number | number[] | bigint | bigint[];
+  readonly value:
+    | string
+    | (string | null)[]
+    | boolean
+    | (boolean | null)[]
+    | number
+    | (number | null)[]
+    | bigint
+    | bigint[];
 }
 
 interface Attributes {
