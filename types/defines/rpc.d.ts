@@ -36,23 +36,28 @@ declare namespace Rpc {
   //   cloneable composite types. This allows types defined with the "interface" keyword to pass the
   //   serializable check as well. Otherwise, only types defined with the "type" keyword would pass.
   type Serializable<T> =
-    | (unknown extends T ? unknown : never)
     // Structured cloneables
     | BaseType
     // Structured cloneable composites
     | Map<
-        T extends Map<infer U, unknown> ? Serializable<U> : never,
-        T extends Map<unknown, infer U> ? Serializable<U> : never
+        T extends Map<infer U, unknown> ? SerializableOrUnknown<U> : never,
+        T extends Map<unknown, infer U> ? SerializableOrUnknown<U> : never
       >
-    | Set<T extends Set<infer U> ? Serializable<U> : never>
-    | ReadonlyArray<T extends ReadonlyArray<infer U> ? Serializable<U> : never>
+    | Set<T extends Set<infer U> ? SerializableOrUnknown<U> : never>
+    | ReadonlyArray<
+        T extends ReadonlyArray<infer U> ? SerializableOrUnknown<U> : never
+      >
     | {
-        [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
+        [K in keyof T]: K extends number | string
+          ? SerializableOrUnknown<T[K]>
+          : never;
       }
     // Special types
     | Stub<Stubable>
     // Serialized as stubs, see `Stubify`
     | Stubable;
+
+  type SerializableOrUnknown<T> = unknown extends T ? unknown : Serializable<T>;
 
   // Base type for all RPC stubs, including common memory management methods.
   // `T` is used as a marker type for unwrapping `Stub`s later.
@@ -125,7 +130,7 @@ declare namespace Rpc {
   // prettier-ignore
   type Result<R> =
     R extends Stubable ? Promise<Stub<R>> & Provider<R>
-    : R extends Serializable<R> ? Promise<Stubify<R> & MaybeDisposable<R>> & MaybeProvider<R>
+    : R extends SerializableOrUnknown<R> ? Promise<Stubify<R> & MaybeDisposable<R>> & MaybeProvider<R>
     : never;
 
   // Type for method or property on an RPC interface.
