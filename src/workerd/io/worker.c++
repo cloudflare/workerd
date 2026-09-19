@@ -1217,13 +1217,16 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     // pressure, because every machine is handling thousands of tenants all the time. So we might
     // as well just throw the switch to "moderate" right away.
     //
-    // Note for ephemeral isolates (restored from a startup snapshot): the transition to "moderate"
-    // also makes V8 drop every pooled page of the isolate group (Heap::CheckMemoryPressure ->
-    // MemoryPool::ReleaseAllImmediately), about 2% of such an isolate's spawn cost plus the
-    // munmaps. Skipping it for them was tried and is a net loss today: the pool then grows to
-    // ~1 GB per process because restored pages rarely land at their previous address (V8's page
-    // reuse never triggers) and IsolateGroup::Scrub sorts the whole pool on every teardown.
-    lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
+    // Not for isolates restored from a startup snapshot: the transition to "moderate" also makes
+    // V8 drop every pooled page of the isolate group (Heap::CheckMemoryPressure ->
+    // MemoryPool::ReleaseAllImmediately). Such an isolate lives for one request and the group's
+    // pool is exactly what lets the next request's isolate reuse this one's pages (mapped, and
+    // for remapped snapshot pages even with their contents) instead of unmapping and faulting
+    // them in again; the GC heuristics the pressure level tunes never come into play in a
+    // one-request heap.
+    if (!lock->isStartingFromSnapshot()) {
+      lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
+    }
 
     // Register GC prologue and epilogue callbacks so that we can report GC CPU time via the
     // "request_context" Jaeger span.
