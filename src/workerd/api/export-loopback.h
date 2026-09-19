@@ -100,6 +100,7 @@ class LoopbackServiceStub: public Fetcher {
           | undefined = undefined
       > = T extends new (...args: any[]) => Rpc.WorkerEntrypointBranded ? LoopbackServiceStub<InstanceType<T>>
         : T extends new (...args: any[]) => Rpc.DurableObjectBranded ? LoopbackDurableObjectClass<InstanceType<T>>
+        : T extends new (...args: any[]) => CloudflareWorkersModule.WorkflowEntrypoint<any, infer Params> ? Workflow<Params>
         : T extends ExportedHandler<any, any, any> ? LoopbackServiceStub<undefined>
         : undefined;
     );
