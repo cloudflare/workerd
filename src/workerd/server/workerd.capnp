@@ -536,6 +536,23 @@ struct Worker {
       #
       # (This is intentionally not a ServiceDesignator because you cannot choose an alternate
       # entrypoint here; the class name IS the entrypoint.)
+
+      retryPolicy @2 :RetryPolicy;
+      # Limits on how the runtime retries calls through stubs minted from this binding. When
+      # absent, the runtime's default retry behavior applies.
+
+      struct RetryPolicy {
+        maxAttempts @0 :UInt32 = 4;
+        # Maximum number of retries after the initial attempt. Zero disables retries. The default
+        # matches the runtime's default of five attempts in total.
+
+        maxDurationMs @1 :UInt32 = 0;
+        # Maximum duration in milliseconds for the logical call, including the initial attempt,
+        # redirects, backoff, and retries. Measured from when the request is sent, after any
+        # output-gate wait. Zero leaves the logical call unbounded and applies the runtime's
+        # default duration to retries only. Has no effect on a call that cannot retry, whether
+        # because maxAttempts is zero or because the request body is not replayable.
+      }
     }
 
     struct CryptoKey {

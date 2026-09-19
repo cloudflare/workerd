@@ -2611,6 +2611,99 @@ KJ_TEST("Server: named images and directory snapshots are not startup sources") 
   conn.httpGet200("/", "Container failed to start; Docker requests: 0");
 }
 
+KJ_TEST("Server: rejects Durable Object retry policy values above the system limits") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    modules = [
+      ( name = "worker",
+        esModule = `export default { fetch() { return new Response("ok"); } }
+      )
+    ],
+    bindings = [
+      ( name = "attempts",
+        durableObjectNamespace = (
+          className = "MyActorClass",
+          retryPolicy = (maxAttempts = 11),
+        )
+      ),
+      ( name = "duration",
+        durableObjectNamespace = (
+          className = "MyActorClass",
+          retryPolicy = (maxDurationMs = 60001),
+        )
+      ),
+    ],
+  ))"_kj));
+
+  test.expectErrors(R"(
+    service hello: Worker "hello"'s binding "attempts" has a Durable Object retry policy above the system limit.
+    service hello: Worker "hello"'s binding "duration" has a Durable Object retry policy above the system limit.
+  )"_blockquote);
+}
+
+KJ_TEST("Server: applies Durable Object retry max duration to namespace stubs") {
+  TestServer test(R"((
+    autogates = [
+      "workerd-autogate-durable-object-retries-fetch",
+      "workerd-autogate-durable-object-retries-fetch-retry-requests",
+      "workerd-autogate-durable-object-retries-userland",
+    ],
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-10-01",
+          modules = [
+            ( name = "worker",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    try {
+                `      return await env.ns.getByName("slow").fetch(request);
+                `    } catch (error) {
+                `      return new Response(error.message);
+                `    }
+                `  }
+                `}
+                `export class Slow {
+                `  async fetch() {
+                `    await scheduler.wait(1000);
+                `    return new Response("late");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "ns",
+              durableObjectNamespace = (
+                 className = "Slow",
+                 retryPolicy = (maxDurationMs = 500),
+              )
+            )
+          ],
+          durableObjectNamespaces = [
+            ( className = "Slow",
+              uniqueKey = "slow",
+            )
+          ],
+          durableObjectStorage = (inMemory = void),
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello",
+      )
+    ],
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+  test.wait(1);
+  conn.recvHttp200("Durable Object request exceeded max_duration_ms");
+}
+
 KJ_TEST("Server: call queue handler on service binding") {
   TestServer test(R"((
     services = [

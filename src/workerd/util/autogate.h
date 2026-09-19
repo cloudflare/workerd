@@ -93,6 +93,8 @@ namespace workerd::util {
      enforcement on each request. The observe-only DURABLE_OBJECT_RETRIES_FETCH gate is a         \
      prerequisite. */                                                                              \
   V(DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS)                                                   \
+  /* Enables user-configured Durable Object retry policy and @retryable dispatch behavior. */      \
+  V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
   /* When enabled, the native `node-internal:url` module is provided by the Rust                   \
      implementation (api::node UrlUtil ported to src/rust/api) instead of the                      \
      C++ implementation. The C++ implementation is retained for rollback.*/                        \
