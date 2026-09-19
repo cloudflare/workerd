@@ -123,7 +123,10 @@ struct DockerBinaryResponse {
 struct DockerStreamedResponse {
   kj::uint statusCode;
   kj::String statusText;
-  kj::Own<kj::AsyncIoStream> connection;
+  // Present iff statusCode == 101: the hijacked raw byte stream.
+  kj::Maybe<kj::Own<kj::AsyncIoStream>> connection;
+  // Present otherwise: the response body (error details).
+  kj::Maybe<kj::Own<kj::AsyncInputStream>> errorBody;
 };
 
 // Validates an absolute path for snapshot use and returns the parsed component path.
@@ -740,10 +743,18 @@ kj::Promise<DockerStreamedResponse> readDockerStreamedResponse(
         prefixedConnection =
             kj::heap<BufferedAsyncIoStream>(kj::mv(prefixedConnection), kj::mv(prefetchedBytes));
       }
+      if (statusCode == 101) {
+        co_return DockerStreamedResponse{
+          .statusCode = statusCode,
+          .statusText = kj::mv(statusText),
+          .connection = kj::mv(prefixedConnection),
+        };
+      }
+      // Not hijacked: what follows on the wire is the response body (error details).
       co_return DockerStreamedResponse{
         .statusCode = statusCode,
         .statusText = kj::mv(statusText),
-        .connection = kj::mv(prefixedConnection),
+        .errorBody = kj::Own<kj::AsyncInputStream>(kj::mv(prefixedConnection)),
       };
     }
 
@@ -2016,13 +2027,14 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> ContainerClient::startExec(
   auto response = co_await dockerApiStreamedRequest(network, kj::str(dockerPath),
       kj::HttpMethod::POST, kj::str("/exec/", execId, "/start"), headers, encodedBodyBytes);
   if (response.statusCode != 101) {
-    auto errorBodyBytes = co_await response.connection->readAllBytes(MAX_JSON_RESPONSE_SIZE);
+    auto errorBodyBytes =
+        co_await KJ_ASSERT_NONNULL(response.errorBody)->readAllBytes(MAX_JSON_RESPONSE_SIZE);
     auto errorBody = kj::str(errorBodyBytes.asChars());
     JSG_FAIL_REQUIRE(Error, "Starting Docker exec failed with [", response.statusCode, "] ",
         response.statusText, " ", errorBody);
   }
 
-  co_return kj::mv(response.connection);
+  co_return KJ_ASSERT_NONNULL(kj::mv(response.connection));
 }
 
 kj::Promise<void> ContainerClient::resizeExec(kj::StringPtr execId, uint16_t cols, uint16_t rows) {

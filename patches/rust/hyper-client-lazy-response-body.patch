@@ -1,0 +1,16 @@
+--- a/src/proto/h1/dispatch.rs
++++ b/src/proto/h1/dispatch.rs
+@@ -313,8 +313,11 @@
+                 let body = match body_len {
+                     DecodedLength::ZERO => IncomingBody::empty(),
+                     other => {
+-                        let (tx, rx) =
+-                            IncomingBody::new_channel(other, wants.contains(Wants::EXPECT));
++                        // workerd: a client reads a response body only once it is wanted, so the
++                        // connection stays checked out of the pool until the body is consumed
++                        // (as kj's HttpClient does) rather than being reused while it is unread.
++                        let wanter = wants.contains(Wants::EXPECT) || !T::should_read_first();
++                        let (tx, rx) = IncomingBody::new_channel(other, wanter);
+                         self.body_tx.set(tx);
+                         rx
+                     }
