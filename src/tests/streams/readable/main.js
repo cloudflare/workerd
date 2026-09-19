@@ -191,6 +191,7 @@ export {
   controllerOnlyHeldStreamLiveness,
   teeBranchesCollected,
   teeBranchesCollectedReleaseBacklog,
+  teeSurvivorBranchCollected,
   teeBranchesCollectedPullStops,
 } from 'gc';
 
