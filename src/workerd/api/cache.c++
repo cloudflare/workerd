@@ -78,14 +78,18 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
 
   // This use of evalNow() is obsoleted by the capture_async_api_throws compatibility flag, but
   // we need to keep it here for people who don't have that flag set.
+// This use of evalNow() is obsoleted by the capture_async_api_throws compatibility flag, but
+  // we need to keep it here for people who don't have that flag set.
   return js.evalNow([&]() -> jsg::Promise<jsg::Optional<jsg::Ref<Response>>> {
     auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), kj::none);
 
     traceContext.setTag("cache.request.url"_kjc, jsRequest->getUrl());
     traceContext.setTag("cache.request.method"_kjc, kj::str(jsRequest->getMethodEnum()));
 
+    auto method = jsRequest->getMethodEnum();
     if (!options.orDefault({}).ignoreMethod.orDefault(false) &&
-        jsRequest->getMethodEnum() != kj::HttpMethod::GET) {
+        method != kj::HttpMethod::GET &&
+        method != kj::HttpMethod::QUERY) {
       return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>());
     }
 
@@ -107,8 +111,17 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
     }
 
     requestHeaders.setPtr(context.getHeaderIds().cacheControl, "only-if-cached");
-    auto nativeRequest = httpClient->request(kj::HttpMethod::GET, validateUrl(jsRequest->getUrl()),
-        requestHeaders, static_cast<uint64_t>(0));
+    kj::Maybe<uint64_t> expectedBodySize = kj::none;
+    if (method == kj::HttpMethod::GET) {
+      expectedBodySize = static_cast<uint64_t>(0);
+    } else if (method == kj::HttpMethod::QUERY) {
+      KJ_IF_SOME(contentLengthStr, requestHeaders.get(context.getHeaderIds().contentLength)) {
+        expectedBodySize = kj::str(contentLengthStr).parseAs<uint64_t>();
+      }
+    }
+
+    auto nativeRequest = httpClient->request(method, validateUrl(jsRequest->getUrl()),
+        requestHeaders, expectedBodySize);
 
     return context.awaitIo(js, kj::mv(nativeRequest.response),
         [httpClient = kj::mv(httpClient), &context, traceContext = kj::mv(traceContext)](
@@ -278,9 +291,9 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
     // TODO(conform): Require that jsRequest's url has an http or https scheme. This is only
     //   important if api::Request is changed to parse its URL eagerly (as required by spec), rather
     //   than at fetch()-time.
-
-    JSG_REQUIRE(jsRequest->getMethodEnum() == kj::HttpMethod::GET, TypeError,
-        "Cannot cache response to non-GET request.");
+    auto method = jsRequest->getMethodEnum();
+    JSG_REQUIRE(method == kj::HttpMethod::GET || method == kj::HttpMethod::QUERY, TypeError,
+        "Cannot cache response to non-GET or non-QUERY request.");
 
     JSG_REQUIRE(jsResponse->getStatus() != 206, TypeError,
         "Cannot cache response to a range request (206 Partial Content).");
