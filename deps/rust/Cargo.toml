@@ -38,12 +38,17 @@ capnpc = "0.27"
 capnp-rpc = "0.27"
 clang-ast = "0"
 encoding_rs = "0"
-flate2 = "1"
+# zlib-rs: permessage-deflate needs custom window bits, which the default miniz_oxide lacks.
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 # Memory-safe Rust implementation of the zlib C API, exposed to C++ under
 # zlib_rs_-prefixed symbols by src/rust/zlib-rs. rust-allocator only:
 # zalloc/zfree left NULL use Rust's global allocator.
 libz-rs-sys = { version = "0.6", default-features = false, features = ["std", "rust-allocator"] }
 futures = "0"
+http = "1"
+http-body = "1"
+hyper = { version = "1", default-features = false, features = ["client", "http1", "server"] }
+hyper-util = { version = "0", default-features = false, features = ["tokio"] }
 libc = "0"
 lol_html_c_api = { git = "https://github.com/cloudflare/lol-html" }
 hashlink = "0"
@@ -51,8 +56,15 @@ hashlink = "0"
 # kj::UnixEventPort does.
 nix = { version = "0", features = ["fs", "signal"] }
 pico-args = "0"
+rand = "0.10"
 ruff_python_ast = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
 ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
+# ring rather than aws-lc-rs: its crates.io package builds with plain cc (no cmake/NASM).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-platform-verifier = "0.7"
+# kj-hyper's TLS direct trust recognizes webpki's chain-building errors, and checks a directly
+# trusted certificate's validity and key usage itself.
+rustls-webpki = { version = "0.103", default-features = false }
 # param_extractor depends on unbounded_depth feature
 serde_json = { version = "1", features = ["unbounded_depth"] }
 serde = { version = "1", features = ["derive"] }
@@ -61,6 +73,10 @@ thiserror = "2"
 # kj-rs-io: net (sockets), io-util (`try_read_buf` into uninitialized buffers is gated on it),
 # signal, sync (Notify), time; rt/rt-multi-thread are kj-rs-tokio's.
 tokio = { version = "1", default-features = false, features = ["io-util", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
+x509-cert = { version = "0.2", default-features = false }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+# WebSocket frame codec and handshake helpers only; kj-hyper runs the protocol itself.
+tungstenite = { version = "0", default-features = false, features = ["handshake"] }
 # socket2 provides sockaddr handling for the tokio-backed kj-rs-io networking layer.
 socket2 = "0.6"
 # dns-lookup is a thin safe wrapper over getaddrinfo(3); kj-rs-io resolves hostnames and service

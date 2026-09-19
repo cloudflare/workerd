@@ -9,6 +9,10 @@
 #include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
 
+#if WORKERD_RUST_IO_BACKEND_RUST
+#include <kj-rs-tokio/tokio-event-port.h>
+#endif
+
 #include <capnp/compat/http-over-capnp.h>
 #include <capnp/rpc-twoparty.h>
 #include <kj/async-queue.h>
@@ -466,13 +470,22 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
       timer.advanceTo(KJ_ASSERT_NONNULL(timer.nextEvent()));
     }
     delayPromise.wait(ws);
+    // poll() returns as soon as the delay resolves; let everything else due at this instant (e.g.
+    // an eviction timer set for the same time, which takes a few turns to settle) finish too.
+    ws.poll();
   }
 
   kj::WaitScope& getWaitScope() {
     return ws;
   }
 
+#if WORKERD_RUST_IO_BACKEND_RUST
+  // kj-hyper needs this thread's tokio runtime, which the port provides.
+  kj_rs_tokio::TokioEventPort tokioPort;
+  kj::EventLoop loop{tokioPort};
+#else
   kj::EventLoop loop;
+#endif
   kj::WaitScope ws;
 
   kj::Own<config::Config::Reader> config;
@@ -6014,6 +6027,52 @@ KJ_TEST("Server: Catch websocket server errors") {
     KJ_EXPECT(responseString.find("Message is too large"_kjc) != kj::none, responseString);
     ws->close(1000, "").wait(waitScope);
   }
+}
+
+KJ_TEST("Server: WebSocket compression is negotiated and used") {
+  // With web_socket_compression (on by default since 2023-08-15), a client's permessage-deflate
+  // offer is agreed in the 101 response, and messages cross compressed (RFC 7692) both ways.
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2023-08-17",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `export default {
+          `  async fetch(request) {
+          `    let [client, server] = Object.values(new WebSocketPair());
+          `    server.accept();
+          `    server.addEventListener("message", (m) => server.send(m.data));
+          `    return new Response(null, { status: 101, webSocket: client });
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.start();
+  auto wsConn = test.connect("test-addr");
+  wsConn.send(R"(
+    GET / HTTP/1.1
+    Host: foo
+    Upgrade: websocket
+    Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==
+    Sec-WebSocket-Version: 13
+    Sec-WebSocket-Extensions: permessage-deflate
+
+  )"_blockquote);
+  wsConn.recvRegex("HTTP/1.1 101 Switching Protocols\n"
+                   "Connection: Upgrade\n"
+                   "Upgrade: websocket\n"
+                   "Sec-WebSocket-Accept: ICX\\+Yqv66kxgM0FcWaLWlFLwTAI=\n"
+                   "Sec-WebSocket-Extensions: permessage-deflate[^\n]*\n\n");
+
+  // "Hello" deflated (RFC 7692 section 7.2.3.1), in a text frame with RSV1 set.
+  static constexpr kj::byte HELLO_DEFLATED[] = {0xf2, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00};
+  auto deflated = kj::heapString(kj::arrayPtr(HELLO_DEFLATED).asChars());
+  wsConn.send(kj::str("\xc1\x07", deflated));
+
+  // The echo comes back compressed too: the payload is the deflated bytes, not "Hello".
+  wsConn.recvWebSocket(deflated);
 }
 
 KJ_TEST("Server: Durable Object facets") {

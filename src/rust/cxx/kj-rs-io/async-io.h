@@ -37,6 +37,7 @@
 #include "kj-rs-tokio/tokio-event-port.h"
 
 #include <kj/async-io.h>
+#include <kj/debug.h>
 #include <kj/exception.h>
 #include <kj/timer.h>
 
@@ -80,10 +81,24 @@ class TokioAsyncIoStream final: public kj::AsyncIoStream {
   kj::Maybe<void *> getWin32Handle() const override;
 #endif
 
+  // Gives up the native stream to a caller that will drive the socket itself (kj-hyper's
+  // native-serve path). The wrapper holds nothing afterwards, and any further call on it throws.
+  // Whether the socket can actually be taken (no I/O in flight) is decided on the Rust side
+  // (TokioStream::into_socket), which hands the stream back if not; kj-hyper re-wraps it.
+  ::rust::Box<TokioStream> release() {
+    auto released = KJ_REQUIRE_NONNULL(kj::mv(inner), "stream already released");
+    inner = kj::none;
+    return released;
+  }
+
  private:
   kj::Promise<void> writePieces(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces);
 
-  ::rust::Box<TokioStream> inner;
+  const TokioStream &stream() const {
+    return *KJ_REQUIRE_NONNULL(inner, "the stream was released");
+  }
+
+  kj::Maybe<::rust::Box<TokioStream>> inner;
 };
 
 // A kj::ConnectionReceiver backed by one or more native tokio listeners (one per socket address

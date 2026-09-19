@@ -1,6 +1,7 @@
 #!/bin/bash
 # Link-truth check for the Rust I/O backend: inspects the symbol names of the linked workerd
-# binary and fails if kj's own C++ event-loop setup made it into the link.
+# binary and fails if kj's own C++ event-loop setup, HTTP implementation or TLS made it into the
+# link.
 #
 # Under --//:io_backend=rust, kj::setupAsyncIo() is supplied by //src/workerd/util:setup-async-io
 # (tokio-backed) by symbol override, and the concrete kj OS I/O layer (kj-async-os) must not be
@@ -12,6 +13,10 @@
 #   * kj's setupAsyncIo() has a local class `BasicContext`, and kj's async-io-unix.c++ has
 #     `LowLevelAsyncIoProviderImpl`; neither may be present.
 #   * the shim's TU references kj_rs_io::TokioAsyncIoContext; it must be present.
+#   * kj's HTTP/1.1 implementation (kj-http-impl) has `kj::HttpServer::Connection`, and kj-tls
+#     has `kj::TlsContext`; neither may be present. kj-hyper's namespace must be: the kj::
+#     HTTP entry points are defined over it (//src/workerd/util:kj-http), and with static archives
+#     a stray kj-http-impl could otherwise win the link silently.
 # The kj::UnixEventPort::* symbols ARE expected: the shim defines an inert UnixEventPort because
 # kj::AsyncIoContext names the type (see setup-async-io-tokio.c++).
 #
@@ -38,13 +43,16 @@ BIN="${TEST_SRCDIR:-.}/$1"
 PAT_KJ_SETUP='12setupAsyncIoEvEN?12BasicContext'      # kj::setupAsyncIo()::BasicContext (+ members)
 PAT_KJ_LOWLEVEL='28LowLevelAsyncIoProviderImpl'       # kj::(anon)::LowLevelAsyncIoProviderImpl
 PAT_SHIM='8kj_rs_io19TokioAsyncIoContext'             # kj_rs_io::TokioAsyncIoContext
+PAT_KJ_HTTP='N2kj10HttpServer10Connection'            # kj::HttpServer::Connection
+PAT_KJ_TLS='N2kj10TlsContext'                         # kj::TlsContext
+PAT_HYPER='8kj_hyper'                                 # workerd::rust::kj_hyper
 PAT_UNIXPORT='N2kj13UnixEventPort'                    # kj::UnixEventPort
 PAT_ANY_KJ='N2kj'                                     # any kj:: symbol at all
 
 # One pass over the (large, debug-build) binary, extracting just the matching names; count
 # from that small file. LC_ALL=C: byte-wise matching, no multibyte decoding of binary data.
 SYMS="${TEST_TMPDIR:-/tmp}/rust-io-link-check.syms"
-{ LC_ALL=C grep -a -o -E "$PAT_KJ_SETUP|$PAT_KJ_LOWLEVEL|$PAT_SHIM|$PAT_UNIXPORT|$PAT_ANY_KJ" "$BIN" || true; } > "$SYMS"
+{ LC_ALL=C grep -a -o -E "$PAT_KJ_SETUP|$PAT_KJ_LOWLEVEL|$PAT_SHIM|$PAT_KJ_HTTP|$PAT_KJ_TLS|$PAT_HYPER|$PAT_UNIXPORT|$PAT_ANY_KJ" "$BIN" || true; } > "$SYMS"
 count() { { grep -c -E "$1" "$SYMS" || true; } | tr -d ' '; }
 
 kj_total=$(count "$PAT_ANY_KJ")
@@ -59,12 +67,18 @@ fi
 kj_setup=$(count "$PAT_KJ_SETUP")
 kj_lowlevel=$(count "$PAT_KJ_LOWLEVEL")
 shim=$(count "$PAT_SHIM")
+kj_http=$(count "$PAT_KJ_HTTP")
+kj_tls=$(count "$PAT_KJ_TLS")
+hyper=$(count "$PAT_HYPER")
 unixport=$(count "$PAT_UNIXPORT")
 
 echo "rust-io-link-check: $BIN"
 echo "  kj setupAsyncIo()::BasicContext names : $kj_setup   (must be 0)"
 echo "  kj LowLevelAsyncIoProviderImpl names  : $kj_lowlevel   (must be 0)"
 echo "  shim kj_rs_io::TokioAsyncIoContext    : $shim   (must be > 0)"
+echo "  kj HttpServer::Connection names       : $kj_http   (must be 0)"
+echo "  kj TlsContext names                   : $kj_tls   (must be 0)"
+echo "  kj-hyper names                        : $hyper   (must be > 0)"
 echo "  kj::UnixEventPort::* names            : $unixport   (informational; the shim's inert port)"
 
 status=0
@@ -74,6 +88,15 @@ if [ "$kj_setup" -ne 0 ] || [ "$kj_lowlevel" -ne 0 ]; then
   echo "      umbrella). Find every offending edge with:"
   echo "        bazel cquery --//:io_backend=rust 'rdeps(deps(//src/workerd/server:workerd), @capnp-cpp//src/kj:kj-async, 1)'"
   echo "      and retarget it to :kj-async-core / :kj-async-io."
+  status=1
+fi
+if [ "$kj_http" -ne 0 ] || [ "$kj_tls" -ne 0 ]; then
+  echo "FAIL: kj's HTTP implementation or kj-tls is linked into the rust-backend binary. Find the"
+  echo "      offending edge with: just check-io-backend-graph"
+  status=1
+fi
+if [ "$hyper" -eq 0 ]; then
+  echo "FAIL: kj-hyper (//src/workerd/util:kj-http's implementation) is not in the link."
   status=1
 fi
 if [ "$shim" -eq 0 ]; then

@@ -167,6 +167,26 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "tls-network",
+    srcs = select({
+        "//:io_backend_rust": ["tls-network-rustls.c++"],
+        "//conditions:default": ["tls-network-openssl.c++"],
+    }),
+    hdrs = [
+        "tls-network.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":workerd_capnp",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async-core",
+    ] + select({
+        "//:io_backend_rust": ["//src/rust/cxx/kj-hyper"],
+        "//conditions:default": ["@capnp-cpp//src/kj/compat:kj-tls"],
+    }),
+)
+
+wd_cc_library(
     name = "pyodide",
     srcs = [
         "pyodide.c++",
@@ -176,13 +196,13 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":tls-network",
         "//src/workerd/api:pyodide",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@capnp-cpp//src/kj/compat:kj-tls",
     ],
 )
 
@@ -246,7 +266,6 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@capnp-cpp//src/kj/compat:kj-tls",
     ] + select({
         ":set_use_transpiler": ["//src/rust/transpiler"],
         "//conditions:default": [],
@@ -284,6 +303,7 @@ wd_cc_library(
         ":container-client",
         ":facet-tree-index",
         ":fallback-service",
+        ":tls-network",
         ":workerd-api",
         ":workerd_capnp",
         "//src/cloudflare",
@@ -295,13 +315,13 @@ wd_cc_library(
         "//src/workerd/io:bundle-fs",
         "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
+        "//src/workerd/util:kj-http",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:websocket-error-handler",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@capnp-cpp//src/kj/compat:kj-tls",
     ],
 )
 
@@ -339,6 +359,7 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/io:container_capnp",
         "//src/workerd/jsg",
+        "//src/workerd/util:kj-http",
         "//src/workerd/util:sentry",
         "//src/workerd/util:strings",
         "//src/workerd/util:uuid",
@@ -346,7 +367,6 @@ wd_cc_library(
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async-core",
-        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
@@ -362,9 +382,9 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":workerd_capnp",
+        "//src/workerd/util:kj-http",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async-core",
-        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
@@ -411,9 +431,24 @@ wd_capnp_library(
 kj_test(
     size = "large",
     src = "server-test.c++",
+    local_defines = rust_io_backend_local_defines(),
     deps = [
         ":server",
         "//src/workerd/util:test-util",
+    ] + select({
+        "//:io_backend_rust": [
+            "//src/rust/cxx/kj-rs-tokio",
+            "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
+        ],
+        "//conditions:default": [],
+    }),
+)
+
+kj_test(
+    src = "tls-network-test.c++",
+    deps = [
+        ":tls-network",
+        "//src/workerd/util:kj-http",
     ],
 )
 
@@ -473,9 +508,9 @@ kj_test(
     deps = [
         ":fallback-service",
         ":workerd_capnp",
+        "//src/workerd/util:kj-http",
         "@capnp-cpp//src/capnp/compat:json",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 

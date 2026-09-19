@@ -7,6 +7,7 @@
 #include "alarm-scheduler.h"
 #include "container-client.h"
 #include "pyodide.h"
+#include "tls-network.h"
 #include "workerd-api.h"
 
 #include <workerd/api/actor-state.h>
@@ -52,7 +53,6 @@
 #include <capnp/message.h>
 #include <capnp/rpc-twoparty.h>
 #include <kj/compat/http.h>
-#include <kj/compat/tls.h>
 #include <kj/compat/url.h>
 #include <kj/debug.h>
 #include <kj/encoding.h>
@@ -1793,60 +1793,9 @@ class Server::ActorNamespace final {
 
 // =======================================================================================
 
-kj::Own<kj::TlsContext> Server::makeTlsContext(config::TlsOptions::Reader conf) {
-  kj::TlsContext::Options options;
-
-  struct Attachments {
-    kj::Maybe<kj::TlsKeypair> keypair;
-    kj::Array<kj::TlsCertificate> trustedCerts;
-  };
-  auto attachments = kj::heap<Attachments>();
-
-  if (conf.hasKeypair()) {
-    auto pairConf = conf.getKeypair();
-    options.defaultKeypair = attachments->keypair.emplace(
-        kj::TlsKeypair{.privateKey = kj::TlsPrivateKey(pairConf.getPrivateKey()),
-          .certificate = kj::TlsCertificate(pairConf.getCertificateChain())});
-  }
-
-  options.verifyClients = conf.getRequireClientCerts();
-  options.useSystemTrustStore = conf.getTrustBrowserCas();
-
-  auto trustList = conf.getTrustedCertificates();
-  if (trustList.size() > 0) {
-    attachments->trustedCerts = KJ_MAP(cert, trustList) { return kj::TlsCertificate(cert); };
-    options.trustedCertificates = attachments->trustedCerts;
-  }
-
-  switch (conf.getMinVersion()) {
-    case config::TlsOptions::Version::GOOD_DEFAULT:
-      // Don't change.
-      goto validVersion;
-    case config::TlsOptions::Version::SSL3:
-      options.minVersion = kj::TlsVersion::SSL_3;
-      goto validVersion;
-    case config::TlsOptions::Version::TLS1_DOT0:
-      options.minVersion = kj::TlsVersion::TLS_1_0;
-      goto validVersion;
-    case config::TlsOptions::Version::TLS1_DOT1:
-      options.minVersion = kj::TlsVersion::TLS_1_1;
-      goto validVersion;
-    case config::TlsOptions::Version::TLS1_DOT2:
-      options.minVersion = kj::TlsVersion::TLS_1_2;
-      goto validVersion;
-    case config::TlsOptions::Version::TLS1_DOT3:
-      options.minVersion = kj::TlsVersion::TLS_1_3;
-      goto validVersion;
-  }
-  reportConfigError(kj::str("Encountered unknown TlsOptions::minVersion setting. Was the "
-                            "config compiled with a newer version of the schema?"));
-
-validVersion:
-  if (conf.hasCipherList()) {
-    options.cipherList = conf.getCipherList();
-  }
-
-  return kj::heap<kj::TlsContext>(kj::mv(options)).attach(kj::mv(attachments));
+kj::Own<kj::SecureNetworkWrapper> Server::makeTlsContext(config::TlsOptions::Reader conf) {
+  return workerd::server::makeTlsContext(
+      conf, [this](kj::String error) { reportConfigError(kj::mv(error)); });
 }
 
 kj::Promise<kj::Own<kj::NetworkAddress>> Server::makeTlsNetworkAddress(
@@ -6505,15 +6454,10 @@ class Server::HttpListener final: public kj::Refcounted {
 
         kj::PeerIdentity* peerId;
 
-        KJ_IF_SOME(tlsId, kj::tryDowncast<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
-          peerId = &tlsId.getNetworkIdentity();
-
-          // TODO(someday): Add client certificate info to the cf blob? At present, KJ only
-          //   supplies the common name, but that doesn't even seem to be one of the fields that
-          //   Cloudflare-hosted Workers receive. We should probably try to match those.
-        } else {
-          peerId = stream.peerIdentity;
-        }
+        // TODO(someday): Add client certificate info to the cf blob? At present, KJ only
+        //   supplies the common name, but that doesn't even seem to be one of the fields that
+        //   Cloudflare-hosted Workers receive. We should probably try to match those.
+        peerId = &unwrapTlsPeerIdentity(*stream.peerIdentity);
 
         KJ_IF_SOME(remote, kj::tryDowncast<kj::NetworkPeerIdentity>(*peerId)) {
           cfBlobJson = kj::str("{\"clientIp\": ", escapeJsonString(remote.toString()), "}");
@@ -6707,12 +6651,7 @@ class Server::TcpListener final: public kj::Refcounted {
       kj::AuthenticatedStream stream = co_await listener->acceptAuthenticated();
       TRACE_EVENT("workerd", "TcpListener handle connection");
 
-      kj::PeerIdentity* peerId;
-      KJ_IF_SOME(tlsId, kj::tryDowncast<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
-        peerId = &tlsId.getNetworkIdentity();
-      } else {
-        peerId = stream.peerIdentity;
-      }
+      kj::PeerIdentity* peerId = &unwrapTlsPeerIdentity(*stream.peerIdentity);
 
       IoChannelFactory::SubrequestMetadata metadata;
       KJ_IF_SOME(remote, kj::tryDowncast<kj::NetworkPeerIdentity>(*peerId)) {
@@ -7365,10 +7304,7 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
   services.findOrCreate("internet"_kj, [&]() {
     auto publicNetwork = network.restrictPeers({"public"_kj});
 
-    kj::TlsContext::Options options;
-    options.useSystemTrustStore = true;
-
-    kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
+    kj::Own<kj::SecureNetworkWrapper> tls = newSystemTrustTlsNetworkWrapper();
     auto tlsNetwork = tls->wrapNetwork(*publicNetwork);
 
     // Attaching to refcounted NetworkService is safe since services map is long-lived

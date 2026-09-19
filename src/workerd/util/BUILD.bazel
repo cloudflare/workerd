@@ -122,7 +122,7 @@ wd_cc_library(
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async-core",
         # TODO(cleanup): Only for abortable.h, factor out
-        "@capnp-cpp//src/kj/compat:kj-http",
+        "//src/workerd/util:kj-http",
     ],
 )
 
@@ -204,7 +204,7 @@ wd_cc_library(
     hdrs = ["uuid.h"],
     implementation_deps = [
         ":entropy",
-        "@capnp-cpp//src/kj/compat:kj-http",
+        "//src/workerd/util:kj-http",
         "@ssl",
     ],
     visibility = ["//visibility:public"],
@@ -309,7 +309,7 @@ wd_cc_library(
     hdrs = ["thread-scopes.h"],
     visibility = ["//visibility:public"],
     deps = [
-        "@capnp-cpp//src/kj/compat:kj-http",
+        "//src/workerd/util:kj-http",
     ],
 )
 
@@ -384,7 +384,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg:exception",
-        "@capnp-cpp//src/kj/compat:kj-http",
+        "//src/workerd/util:kj-http",
     ],
 )
 
@@ -549,6 +549,29 @@ wd_cc_library(
     local_defines = rust_io_backend_local_defines(),
     visibility = ["//visibility:public"],
     deps = ["//src/rust/cxx/kj-rs-io:active-backend"],
+)
+
+# kj's HTTP implementation for the configured backend: kj-hyper's over hyper under
+# --//:io_backend=rust, which links only kj-http-types, or kj's own (the kj-http umbrella) under cxx.
+wd_cc_library(
+    name = "kj-http",
+    srcs = select({
+        "//:io_backend_rust": ["kj-http-tokio.c++"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    deps = select({
+        "//:io_backend_rust": [
+            "//src/rust/cxx/kj-hyper",
+            "@capnp-cpp//src/kj/compat:kj-http-types",
+        ],
+        "//conditions:default": ["@capnp-cpp//src/kj/compat:kj-http"],
+    }),
+)
+
+kj_test(
+    src = "kj-http-test.c++",
+    deps = [":kj-http"],
 )
 
 # Runtime check of the seam through its public entry point: kj::setupAsyncIo() must hand back the
