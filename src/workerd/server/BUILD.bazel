@@ -414,6 +414,8 @@ kj_test(
     deps = [
         ":server",
         "//src/workerd/util:test-util",
+        "@capnp-cpp//src/kj/compat:kj-brotli",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
     ],
 )
 
