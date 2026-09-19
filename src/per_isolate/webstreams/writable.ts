@@ -349,7 +349,9 @@ class WritableStream<W = unknown> {
   // An internal sink's wake-up on abort (internalsForPipe.setAbortHook).
   #abortHook?: (() => void) | undefined;
   // A transform pair's notification when the Node.js interop hook errors
-  // this half (internalsForPipe.setInteropErrorHook).
+  // this half (internalsForPipe.setInteropErrorHook). Dropped when the
+  // stream reaches 'closed' or 'errored', so a settled half does not retain
+  // the pair.
   #interopErrorHook?: ((reason: unknown) => void) | undefined;
   // The Node.js interop closed-promise (see kIsClosedPromise), created on
   // first request and settled when the stream reaches 'closed' or
@@ -638,6 +640,7 @@ class WritableStream<W = unknown> {
       // assert: state 'erroring', no operations in flight
       stream.#state = 'errored';
       settleClosedPromise(stream);
+      stream.#interopErrorHook = undefined;
       const controller = stream.#controller;
       if (controller !== undefined) {
         controllerErrorSteps(controller); // reset the controller queue
@@ -752,6 +755,7 @@ class WritableStream<W = unknown> {
       }
       stream.#state = 'closed';
       settleClosedPromise(stream);
+      stream.#interopErrorHook = undefined;
       const writer = stream.#writer;
       if (writer !== undefined) {
         writerResolveClosedPromise(writer);
@@ -908,15 +912,24 @@ class WritableStream<W = unknown> {
   }
 
   // Node.js interop (see kControllerErrorFunction): errors a writable
-  // stream from outside, as its controller's error() does — a no-op unless
-  // the stream is still 'writable'. The sink's abort algorithm does not
-  // run, so a transform pair learns of it through its interop error hook.
+  // stream from outside, as its controller's error() does. The sink's abort
+  // algorithm does not run, so a transform pair learns of it through its
+  // interop error hook, once this half is erroring: the entry half always
+  // goes first, so the pair's rejections land writable-then-readable here
+  // (TransformStreamError's land readable-then-writable; nothing depends on
+  // the order). The 'writable' check is what gates the hook — the
+  // controller's errorIfNeeded is already a no-op past 'writable' — so that
+  // an 'erroring' writable, whose pair is already being torn down, does not
+  // fire it again with a second reason.
   [kControllerErrorFunction](reason: unknown): void {
     assertIsWritableStream(this);
     if (this.#state !== 'writable') return;
+    // Taken before the error, which may reach 'errored' synchronously and
+    // drop the slot; like the abort hook, it fires once.
+    const hook = this.#interopErrorHook;
+    this.#interopErrorHook = undefined;
     const controller = this.#controller;
     if (controller !== undefined) controllerErrorIfNeeded(controller, reason);
-    const hook = this.#interopErrorHook;
     if (hook !== undefined) hook(reason);
   }
 }
@@ -1946,8 +1959,9 @@ module.exports = {
     ): void => setWritableStreamAbortHook(stream, hook),
     // A transform pair's notification, called synchronously with the
     // reason after the Node.js interop hook has errored this stream (the
-    // only external error path that bypasses the sink). undefined clears
-    // it.
+    // only external error path that bypasses the sink). Fires at most once;
+    // the stream drops it on reaching 'closed' or 'errored'. undefined
+    // clears it.
     setInteropErrorHook: <W>(
       stream: WritableStream<W>,
       hook: ((reason: unknown) => void) | undefined

@@ -1206,6 +1206,12 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
 // phases) the read paths. Defined as plain functions — they only use the
 // static-block-exported accessors, which are assigned at class-definition
 // time, strictly before any of this can run.
+//
+// Both settle the Node.js interop closed-promise and drop the interop error
+// hook: the hook fires only from 'readable', so once the state is terminal
+// it can never run, and keeping it would retain the transform pair for as
+// long as this half lives (the ClearAlgorithms discipline of the
+// controllers, applied to the stream's own slot).
 function readableStreamClose<R>(stream: ReadableStream<R>): void {
   if (getReadableStreamGetState(stream) !== 'readable') return;
   setReadableStreamState(stream, 'closed');
@@ -1214,6 +1220,7 @@ function readableStreamClose<R>(stream: ReadableStream<R>): void {
     resolveGenericReaderPromise(reader);
   }
   settleReadableStreamClosedPromise(stream);
+  setReadableStreamInteropErrorHook(stream, undefined);
 }
 
 function readableStreamError<R>(stream: ReadableStream<R>, e: unknown): void {
@@ -1225,6 +1232,7 @@ function readableStreamError<R>(stream: ReadableStream<R>, e: unknown): void {
     rejectGenericReaderPromise(reader, e);
   }
   settleReadableStreamClosedPromise(stream);
+  setReadableStreamInteropErrorHook(stream, undefined);
 }
 
 // Metadata snapshot of an ArrayBufferView, captured at a trust boundary.
@@ -3209,7 +3217,8 @@ class ReadableStream<R> {
   // request against one is settled immediately from its state.
   #closedPromise?: PromiseWithResolversType<void> | undefined;
   // A transform pair's notification when the Node.js interop hook errors
-  // this half (internalsForTransform.setInteropErrorHook).
+  // this half (internalsForTransform.setInteropErrorHook). Dropped when the
+  // stream leaves 'readable', so a settled half does not retain the pair.
   #interopErrorHook?: ((reason: unknown) => void) | undefined;
   // The pending-closure gate (JsReadableStream::setPendingClosure): set by
   // the stream's owning object (a Socket) the moment its closure begins, so
@@ -4355,10 +4364,11 @@ class ReadableStream<R> {
   // every consumer of the queue (the tee branches, if any); a native-backed
   // stream also cancels its C++ source, which has lost its consumer. A
   // queued source's cancel steps do not run, so a transform pair learns of
-  // it through its interop error hook instead. A queued tee branch shares
-  // that controller, so it errors alone: its pending reads reject and it
-  // leaves the queue as a cancelled branch would — the source is cancelled
-  // once no consumer remains, with the reason of every consumer that left
+  // it through its interop error hook instead, once this half has errored:
+  // the entry half always goes first. A queued tee branch shares that
+  // controller, so it errors alone: its pending reads reject and it leaves
+  // the queue as a cancelled branch would — the source is cancelled once
+  // no consumer remains, with the reason of every consumer that left
   // (controllerConsumerLeaving). A branch that has itself been teed
   // consumes nothing and stays what tee() left it: a permanently locked,
   // inert shell (the queued tee model's deliberate divergence from the
@@ -4377,8 +4387,11 @@ class ReadableStream<R> {
       return;
     }
     if (controllerStream(controller) === this) {
-      controllerError(controller, reason);
+      // Taken before the error, which drops the slot (readableStreamError);
+      // like the writable's abort hook, it fires once.
       const hook = this.#interopErrorHook;
+      this.#interopErrorHook = undefined;
+      controllerError(controller, reason);
       if (hook !== undefined) hook(reason);
       return;
     }
@@ -4741,6 +4754,7 @@ module.exports = {
     // A transform pair's notification, called synchronously with the
     // reason after the Node.js interop hook has errored this stream (the
     // only external error path that bypasses the source's cancel steps).
+    // Fires at most once; the stream drops it on leaving 'readable'.
     // undefined clears it.
     setInteropErrorHook: <R>(
       stream: ReadableStream<R>,
