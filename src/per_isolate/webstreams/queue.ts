@@ -548,7 +548,6 @@ class StreamQueue<T, V = T> {
   // so the branch resumes exactly where the original left off.
   addCursor(cursor: QueueCursor<T, V>, owner: object): void {
     this.#hadCursors = true;
-    this.#noConsumers = false;
     this.#cursors.add(cursor);
     registerCursorCleanup(owner, cursor);
   }

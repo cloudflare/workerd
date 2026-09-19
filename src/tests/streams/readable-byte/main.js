@@ -169,6 +169,7 @@ export {
 
 export {
   teeBranchesCollected,
+  teeBranchesCollectedPullStops,
   pendingByobReadSurvivesGc,
   byobRequestSurvivesGc,
 } from 'gc';
