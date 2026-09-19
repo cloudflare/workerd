@@ -5,8 +5,11 @@
 #include "r2-rpc.h"
 
 #include <workerd/api/r2-api.capnp.h>
+#include <workerd/api/streams/common.h>
+#include <workerd/api/streams/readable.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/util.h>
+#include <workerd/io/trace.h>
 #include <workerd/util/http-util.h>
 // This is imported for the error type and that's shared between internal and public beta.
 
@@ -14,7 +17,203 @@
 #include <capnp/message.h>
 #include <kj/compat/http.h>
 
+#include <cmath>
+#include <limits>
+
 namespace workerd::api {
+
+namespace {
+
+constexpr size_t R2_RPC_INLINE_BODY_LIMIT = 16u << 20;
+
+JsReadableStream makeR2RpcMemoryStream(
+    jsg::Lock& js, kj::ArrayPtr<const byte> bytes, kj::Maybe<kj::Own<void>> backing = kj::none) {
+  return JsReadableStream::create(
+      js, IoContext::current(), newMemorySource(bytes, kj::mv(backing)));
+}
+
+v8::Local<v8::Value> getEnvelopeProperty(
+    jsg::Lock& js, v8::Local<v8::Object> object, kj::StringPtr name) {
+  return jsg::check(object->Get(js.v8Context(), jsg::v8StrIntern(js.v8Isolate, name)));
+}
+
+uint requireEnvelopeInteger(
+    v8::Local<v8::Value> value, uint minimum, uint maximum, kj::StringPtr message) {
+  KJ_REQUIRE(value->IsNumber(), message);
+  auto number = value.As<v8::Number>()->Value();
+  KJ_REQUIRE(std::isfinite(number) && std::floor(number) == number && number >= minimum &&
+          number <= maximum,
+      message);
+  return static_cast<uint>(number);
+}
+
+R2RpcBackendError parseEnvelopeBackendError(jsg::Lock& js, v8::Local<v8::Value> value) {
+  KJ_REQUIRE(value->IsObject() && !value->IsArray(), "Malformed R2 RPC response error.");
+  auto object = value.As<v8::Object>();
+  auto code = requireEnvelopeInteger(getEnvelopeProperty(js, object, "v4code"_kj), 0,
+      std::numeric_limits<uint>::max(), "Malformed R2 RPC response error code."_kj);
+  auto message = getEnvelopeProperty(js, object, "message"_kj);
+  KJ_REQUIRE(message->IsString(), "Malformed R2 RPC response error message.");
+  return {.v4Code = code, .message = jsg::JsValue(message).toString(js)};
+}
+
+R2RpcEnvelope parseR2RpcEnvelope(jsg::Lock& js, jsg::Value raw) {
+  auto value = raw.getHandle(js);
+  KJ_REQUIRE(
+      value->IsObject() && !value->IsArray() && !value->IsFunction(), "Malformed R2 RPC envelope.");
+  auto object = value.As<v8::Object>();
+
+  auto successValue = getEnvelopeProperty(js, object, "success"_kj);
+  KJ_REQUIRE(successValue->IsBoolean(), "Malformed R2 RPC envelope success flag.");
+  bool success = successValue->IsTrue();
+
+  auto responseValue = getEnvelopeProperty(js, object, "response"_kj);
+  KJ_REQUIRE(responseValue->IsObject() && !responseValue->IsArray(),
+      "Malformed R2 RPC response information.");
+  auto responseObject = responseValue.As<v8::Object>();
+  auto httpStatus = requireEnvelopeInteger(getEnvelopeProperty(js, responseObject, "httpStatus"_kj),
+      200, 599, "Malformed R2 RPC response status."_kj);
+  auto responseErrorValue = getEnvelopeProperty(js, responseObject, "error"_kj);
+  kj::Maybe<R2RpcBackendError> responseError;
+  if (httpStatus >= 400) {
+    responseError = parseEnvelopeBackendError(js, responseErrorValue);
+  } else {
+    KJ_REQUIRE(responseErrorValue->IsUndefined(), "Malformed R2 RPC response information.");
+  }
+
+  R2RpcResponseInfo response{.httpStatus = httpStatus, .error = kj::mv(responseError)};
+  auto resultsValue = getEnvelopeProperty(js, object, "results"_kj);
+  auto errorValue = getEnvelopeProperty(js, object, "error"_kj);
+  if (success) {
+    KJ_REQUIRE(!resultsValue->IsUndefined() && errorValue->IsUndefined(),
+        "Malformed successful R2 RPC envelope.");
+    return {.success = true,
+      .response = kj::mv(response),
+      .results = jsg::Value(js.v8Isolate, resultsValue),
+      .error = kj::none};
+  }
+
+  KJ_REQUIRE(errorValue->IsNativeError() && resultsValue->IsUndefined(),
+      "Malformed failed R2 RPC envelope.");
+  return {.success = false,
+    .response = kj::mv(response),
+    .results = kj::none,
+    .error = jsg::Value(js.v8Isolate, errorValue)};
+}
+
+void addResponseSpanTags(TraceContext& traceContext,
+    uint httpStatus,
+    kj::Maybe<uint> code,
+    kj::Maybe<kj::StringPtr> message) {
+  traceContext.setTag("cloudflare.r2.response.success"_kjc, httpStatus >= 200 && httpStatus < 400);
+  KJ_IF_SOME(value, message) {
+    traceContext.setTag("error.type"_kjc, value);
+    traceContext.setTag("cloudflare.r2.error.message"_kjc, value);
+  }
+  KJ_IF_SOME(value, code) {
+    traceContext.setTag("cloudflare.r2.error.code"_kjc, static_cast<int64_t>(value));
+  }
+}
+
+}  // namespace
+
+jsg::Promise<jsg::Value> normalizeR2RpcPromise(jsg::Lock& js, jsg::Value rpcPromise) {
+  auto paf = js.newPromiseAndResolver<jsg::Value>();
+  paf.resolver.resolve(js, kj::mv(rpcPromise));
+  return kj::mv(paf.promise);
+}
+
+jsg::Promise<R2RpcEnvelope> unwrapR2RpcEnvelopePromise(jsg::Lock& js, jsg::Value rpcPromise) {
+  return normalizeR2RpcPromise(js, kj::mv(rpcPromise)).then(js, [](jsg::Lock& js, jsg::Value raw) {
+    return parseR2RpcEnvelope(js, kj::mv(raw));
+  });
+}
+
+jsg::Promise<R2RpcEnvelope> unwrapR2RpcEnvelopePromise(jsg::Lock& js,
+    jsg::Value rpcPromise,
+    kj::Function<jsg::Promise<void>(jsg::Lock&, jsg::Value)> cleanup) {
+  return normalizeR2RpcPromise(js, kj::mv(rpcPromise))
+      .then(js,
+          [cleanup = kj::mv(cleanup)](
+              jsg::Lock& js, jsg::Value raw) mutable -> jsg::Promise<R2RpcEnvelope> {
+    auto rawHandle = raw.getHandle(js);
+    KJ_TRY {
+      return js.resolvedPromise(parseR2RpcEnvelope(js, kj::mv(raw)));
+    }
+    KJ_CATCH(exception) {
+      kj::Maybe<jsg::Promise<void>> cleanupPromise;
+      KJ_TRY {
+        cleanupPromise = cleanup(js, jsg::Value(js.v8Isolate, rawHandle));
+      }
+      KJ_CATCH(_) {
+        cleanupPromise = js.resolvedPromise();
+      }
+      auto cleaned = kj::mv(cleanupPromise).orDefault(js.resolvedPromise());
+      return cleaned.catch_(js, [](jsg::Lock&, jsg::Value) {
+      }).then(js, [exception = kj::mv(exception)](jsg::Lock&) mutable -> R2RpcEnvelope {
+        kj::throwRecoverableException(kj::mv(exception));
+        KJ_UNREACHABLE;
+      });
+    }
+  });
+}
+
+void addR2ResponseSpanTags(TraceContext& traceContext, const R2RpcResponseInfo& response) {
+  kj::Maybe<uint> code;
+  kj::Maybe<kj::StringPtr> message;
+  KJ_IF_SOME(error, response.error) {
+    code = error.v4Code;
+    message = error.message.asPtr();
+  }
+  addResponseSpanTags(traceContext, response.httpStatus, code, message);
+}
+
+PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(stream, JsReadableStream) {
+      auto size = stream.tryGetLength(js, StreamEncoding::IDENTITY);
+
+      JSG_REQUIRE(size != kj::none, TypeError,
+          "Provided readable stream must have a known length (request/response body or readable "
+          "half of FixedLengthStream)");
+      auto exactSize = KJ_ASSERT_NONNULL(size);
+      JSG_REQUIRE(exactSize <= 9007199254740991ull, RangeError,
+          "Provided readable stream is too large to represent its length exactly");
+      return {.value = kj::mv(stream), .size = static_cast<double>(exactSize)};
+    }
+    KJ_CASE_ONEOF(data, kj::Array<byte>) {
+      auto size = data.size();
+      if (size > R2_RPC_INLINE_BODY_LIMIT) {
+        // Type-wrapper arrays may alias V8 memory, which cannot be pumped without the isolate lock.
+        auto owned = kj::heapArray<byte>(data.asPtr());
+        auto view = owned.asPtr();
+        return {.value = makeR2RpcMemoryStream(js, view, kj::heap(kj::mv(owned))),
+          .size = static_cast<double>(size)};
+      }
+      return {.value = kj::mv(data), .size = static_cast<double>(size)};
+    }
+    KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
+      auto size = text.value.size();
+      if (size > R2_RPC_INLINE_BODY_LIMIT) {
+        auto bytes = text.value.asBytes();
+        return {.value = makeR2RpcMemoryStream(js, bytes, kj::heap(kj::mv(text.value))),
+          .size = static_cast<double>(size)};
+      }
+      return {.value = kj::mv(text.value), .size = static_cast<double>(size)};
+    }
+    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+      auto size = blob->getSize();
+      if (size > R2_RPC_INLINE_BODY_LIMIT) {
+        // Blob bytes are V8-backed, so newMemorySource() must copy them into native memory.
+        return {
+          .value = makeR2RpcMemoryStream(js, blob->getData()), .size = static_cast<double>(size)};
+      }
+      return {.value = kj::mv(blob), .size = static_cast<double>(size)};
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 static kj::Own<R2Error> toError(uint statusCode, kj::StringPtr responseBody) {
   capnp::JsonCodec json;
   json.handleByAnnotation<public_beta::R2ErrorResponse>();
@@ -41,6 +240,12 @@ kj::Maybe<kj::String> R2Result::getR2ErrorMessage() {
     return kj::str(e->getMessage());
   }
   return kj::none;
+}
+
+void addR2ResponseSpanTags(TraceContext& traceContext, R2Result& r2Result) {
+  auto message = r2Result.getR2ErrorMessage();
+  addResponseSpanTags(traceContext, r2Result.httpStatus, r2Result.v4ErrorCode(),
+      message.map([](const kj::String& value) { return value.asPtr(); }));
 }
 
 void R2Result::throwIfError(

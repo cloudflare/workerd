@@ -6,15 +6,123 @@
 
 #include <workerd/api/blob.h>
 #include <workerd/api/js-readable-stream.h>
+#include <workerd/api/worker-rpc.h>
 #include <workerd/jsg/jsg.h>
 
 namespace kj {
 class HttpClient;
 }
 
+namespace workerd {
+class TraceContext;
+}
+
 namespace workerd::api {
 
 class ReadableStreamSource;
+
+// JsRpcPromise is a custom thenable. Resolving a fresh promise with it makes V8 adopt it even when
+// the unwrap_custom_thenables compatibility flag is disabled.
+jsg::Promise<jsg::Value> normalizeR2RpcPromise(jsg::Lock& js, jsg::Value rpcPromise);
+
+struct R2RpcBackendError {
+  uint v4Code;
+  kj::String message;
+};
+
+struct R2RpcResponseInfo {
+  uint httpStatus;
+  kj::Maybe<R2RpcBackendError> error;
+};
+
+struct R2RpcEnvelope {
+  bool success;
+  R2RpcResponseInfo response;
+  kj::Maybe<jsg::Value> results;
+  kj::Maybe<jsg::Value> error;
+};
+
+// Use when a malformed envelope cannot leave resources in the raw result that require cleanup.
+jsg::Promise<R2RpcEnvelope> unwrapR2RpcEnvelopePromise(jsg::Lock& js, jsg::Value rpcPromise);
+
+// Use when a malformed envelope may contain resources that must be cleaned up before propagating
+// the parsing error, such as the live body stream in an R2 GET result.
+jsg::Promise<R2RpcEnvelope> unwrapR2RpcEnvelopePromise(jsg::Lock& js,
+    jsg::Value rpcPromise,
+    kj::Function<jsg::Promise<void>(jsg::Lock&, jsg::Value)> cleanup);
+
+void addR2ResponseSpanTags(TraceContext& traceContext, const R2RpcResponseInfo& response);
+
+template <typename Result>
+jsg::Promise<Result> decodeR2RpcResult(jsg::Lock& js,
+    R2RpcEnvelope envelope,
+    TraceContext& traceContext,
+    const jsg::TypeHandler<jsg::Promise<Result>>& resultPromiseHandler) {
+  addR2ResponseSpanTags(traceContext, envelope.response);
+  if (!envelope.success) {
+    js.throwException(kj::mv(KJ_ASSERT_NONNULL(envelope.error)));
+  }
+
+  auto value = kj::mv(KJ_ASSERT_NONNULL(envelope.results));
+  if constexpr (kj::isSameType<Result, void>()) {
+    KJ_REQUIRE(value.getHandle(js)->IsNull(), "Malformed R2 void RPC result.");
+    return js.resolvedPromise();
+  } else {
+    auto fulfilled = js.resolvedPromise(kj::mv(value));
+    auto parsed =
+        KJ_ASSERT_NONNULL(resultPromiseHandler.tryUnwrap(js, fulfilled.consumeHandle(js)));
+    return parsed.catch_(js, [](jsg::Lock& js, jsg::Value error) -> Result {
+      auto exception = js.exceptionToKj(kj::mv(error));
+      KJ_FAIL_ASSERT("Malformed R2 RPC result.", exception);
+    });
+  }
+}
+
+template <typename... Args>
+jsg::Value callR2RpcMethod(jsg::Lock& js,
+    jsg::Ref<JsRpcProperty> rpcProp,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(Args...)>>& fnHandler,
+    Args... args) {
+  auto wrappedProp = rpcPropHandler.wrap(js, kj::mv(rpcProp));
+  auto fn = KJ_ASSERT_NONNULL(fnHandler.tryUnwrap(js, wrappedProp));
+  return fn(js, kj::mv(args)...);
+}
+
+template <typename Result>
+jsg::Promise<Result> unwrapR2RpcPromise(jsg::Lock& js,
+    jsg::Value rpcPromise,
+    const jsg::TypeHandler<jsg::Promise<Result>>& resultPromiseHandler) {
+  auto normalizedPromise = normalizeR2RpcPromise(js, kj::mv(rpcPromise));
+  if constexpr (kj::isSameType<Result, void>()) {
+    return KJ_ASSERT_NONNULL(
+        resultPromiseHandler.tryUnwrap(js, normalizedPromise.consumeHandle(js)));
+  } else {
+    // Decode only fulfilled responses so gateway rejections retain their public API errors.
+    // Failures converting a response into the internal wire types are gateway contract violations.
+    return normalizedPromise.then(js, [&resultPromiseHandler](jsg::Lock& js, jsg::Value value) {
+      auto fulfilled = js.resolvedPromise(kj::mv(value));
+      auto parsed =
+          KJ_ASSERT_NONNULL(resultPromiseHandler.tryUnwrap(js, fulfilled.consumeHandle(js)));
+      return parsed.catch_(js, [](jsg::Lock& js, jsg::Value error) -> Result {
+        auto exception = js.exceptionToKj(kj::mv(error));
+        KJ_FAIL_ASSERT("Malformed R2 RPC result.", exception);
+      });
+    });
+  }
+}
+
+template <typename Result, typename... Args>
+jsg::Promise<Result> callR2RpcMethod(jsg::Lock& js,
+    jsg::Ref<JsRpcProperty> rpcProp,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(Args...)>>& fnHandler,
+    const jsg::TypeHandler<jsg::Promise<Result>>& resultPromiseHandler,
+    Args... args) {
+  auto rpcPromise =
+      callR2RpcMethod(js, kj::mv(rpcProp), rpcPropHandler, fnHandler, kj::mv(args)...);
+  return unwrapR2RpcPromise<Result>(js, kj::mv(rpcPromise), resultPromiseHandler);
+}
 
 // NOTE: We don't currently actually use this as a structured object (hence the `kj::Own<R2Error>`
 // that we see pop up).
@@ -66,6 +174,16 @@ class R2Error: public jsg::Object {
 
 using R2PutValue =
     kj::OneOf<JsReadableStream, kj::Array<kj::byte>, jsg::NonCoercible<kj::String>, jsg::Ref<Blob>>;
+using R2PutValueRpc = kj::OneOf<JsReadableStream, kj::Array<kj::byte>, kj::String, jsg::Ref<Blob>>;
+
+struct PreparedR2RpcBody {
+  R2PutValueRpc value;
+  double size;
+};
+
+// Prepares the transport value and the exact byte length passed alongside it. The length is an
+// internal argument to the gateway's named RPC method, not part of the public R2 API.
+PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value);
 
 struct R2Result {
   uint httpStatus;
@@ -93,6 +211,8 @@ struct R2Result {
   kj::Maybe<kj::String> getR2ErrorMessage();
   void throwIfError(kj::StringPtr action, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 };
+
+void addR2ResponseSpanTags(TraceContext& traceContext, R2Result& r2Result);
 
 kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
     kj::String metadataPayload,
