@@ -74,13 +74,6 @@ build --cxxopt=-DKJ_WARN_REFCOUNTED_ATTACH=1
 # TODO(cleanup): Causes warnings with LLVM20, fix and enable again
 build --copt=-Wno-nontrivial-memaccess
 
-# Unconditionally optimize V8 heap.cc on macOS – when optimization or inlining are disabled, this
-# file appears to cause segfaults at workerd startup on macOS.
-# TODO(cleanup): Investigate why this happens, our patches do not modify heap.cc itself so the bug
-# might be introduced through a header included in heap.cc, through the Bazel build configuration or
-# a bug in Apple LLVM.
-build:macos --per_file_copt=v8/src/heap/heap.cc@-O3
-
 # The macOS apple_support toolchain sets -DDEBUG for fastbuild, unlike the Linux toolchain. This is
 # unhelpful for compile speeds and test performance, and may cause compile errors based on V8 DCHECK
 # macros that reference symbols only available with V8_VERIFY_WRITE_BARRIERS (a debug-only define),
