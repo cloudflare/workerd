@@ -48,6 +48,10 @@ declare class Span {
   // Records an exception event on the span. Calls after the span has ended are ignored.
   recordException(exception: Exception): void;
 
+  // Records a named event on the span, timestamped with the current time. Attributes with
+  // undefined values are ignored. Calls after the span has ended are ignored.
+  addEvent(name: string, attributes?: SpanAttributes): this;
+
   // Ends the span and submits its attributes to the tracing system. Idempotent.
   end(): void;
 }

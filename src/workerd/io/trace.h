@@ -853,6 +853,25 @@ struct SpanClose final {
   kj::String toString() const;
 };
 
+// A named occurrence recorded on an open span, with optional attributes. The event's timestamp
+// is carried by the enclosing TailEvent. Modeled after OpenTelemetry span events.
+struct SpanEvent final {
+  explicit SpanEvent(kj::ConstString name, kj::Array<Attribute> attributes);
+  SpanEvent(rpc::Trace::SpanEvent::Reader reader);
+  SpanEvent(SpanEvent&&) noexcept = default;
+  SpanEvent& operator=(SpanEvent&&) = default;
+  KJ_DISALLOW_COPY(SpanEvent);
+
+  kj::ConstString name;
+  kj::Array<Attribute> attributes;
+
+  void copyTo(rpc::Trace::SpanEvent::Builder builder) const;
+  SpanEvent clone() const;
+  kj::String toString() const;
+  // Approximate serialized size, used for tail stream accounting.
+  size_t size() const;
+};
+
 // The Onset and Outcome event types are special forms of SpanOpen and
 // SpanClose that explicitly mark the start and end of the root span.
 // A streaming tail session will always begin with an Onset event, and
@@ -915,15 +934,16 @@ struct Outcome final {
 // A streaming tail worker receives a series of Tail Events. Tail events always
 // occur within an InvocationSpanContext. The first TailEvent delivered to a
 // streaming tail session is always an Onset. The final TailEvent delivered is
-// always an Outcome. Between those can be any number of SpanOpen, SpanClose,
-// and Mark events. Every SpanOpen *must* be associated with a SpanClose unless
-// the stream was abruptly terminated.
+// always an Outcome. Between those can be any number of SpanOpen, SpanEvent,
+// SpanClose, and Mark events. Every SpanOpen *must* be associated with a
+// SpanClose unless the stream was abruptly terminated.
 // A future version may add support for Link events again.
 struct TailEvent final {
   using Event = kj::OneOf<Onset,
       Outcome,
       SpanOpen,
       SpanClose,
+      SpanEvent,
       DiagnosticChannelEvent,
       Exception,
       Log,
@@ -1262,6 +1282,10 @@ class SpanBuilder {
       kj::String message,
       kj::Maybe<kj::String> stack);
 
+  // Records a named event on this span, timestamped with the observer's current time. Calls after
+  // end() are ignored.
+  void addEvent(tracing::SpanEvent event);
+
  private:
   kj::Rc<SpanObserver> observer;
   // The under-construction span, or null if the span has ended.
@@ -1305,6 +1329,10 @@ class SpanObserver: public kj::Refcounted {
       kj::String name,
       kj::String message,
       kj::Maybe<kj::String> stack) {}
+
+  // Called when an event is recorded on the span (via SpanBuilder::addEvent()). Default
+  // implementation is a no-op.
+  virtual void onEvent(kj::Date timestamp, tracing::SpanEvent&& event) {}
 
   // Called when the operation name is changed after the span was opened (via
   // SpanBuilder::setOperationName()). Observers that eagerly stream the open event should handle

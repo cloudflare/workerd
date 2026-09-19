@@ -4603,6 +4603,10 @@ declare abstract class Span {
           stack?: string;
         },
   ): void;
+  addEvent(
+    name: string,
+    attributes?: Record<string, boolean | number | string | undefined>,
+  ): this;
   end(): void;
 }
 /**
@@ -17105,6 +17109,13 @@ declare namespace TailStream {
     readonly type: "spanClose";
     readonly outcome: EventOutcome;
   }
+  // A named occurrence recorded on an open span via `span.addEvent()`. The event time is the
+  // enclosing TailEvent's timestamp; spanContext.spanId identifies the span it belongs to.
+  interface SpanEvent {
+    readonly type: "spanEvent";
+    readonly name: string;
+    readonly attributes: Attribute[];
+  }
   interface DiagnosticChannelEvent {
     readonly type: "diagnosticChannel";
     readonly channel: string;
@@ -17174,6 +17185,7 @@ declare namespace TailStream {
     | Outcome
     | SpanOpen
     | SpanClose
+    | SpanEvent
     | DiagnosticChannelEvent
     | Exception
     | Log
@@ -17216,6 +17228,7 @@ declare namespace TailStream {
     outcome?: TailEventHandler<Outcome>;
     spanOpen?: TailEventHandler<SpanOpen>;
     spanClose?: TailEventHandler<SpanClose>;
+    spanEvent?: TailEventHandler<SpanEvent>;
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;

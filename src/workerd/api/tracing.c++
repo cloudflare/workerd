@@ -34,6 +34,21 @@ size_t estimateTagValueSize(TagValue& value) {
   KJ_UNREACHABLE;
 }
 
+tracing::Attribute::Value toAttributeValue(TagValue&& value) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(b, bool) {
+      return b;
+    }
+    KJ_CASE_ONEOF(d, double) {
+      return d;
+    }
+    KJ_CASE_ONEOF(s, kj::String) {
+      return kj::ConstString(kj::mv(s));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 // This is a CF semantic for warning conditions surfaced on spans, modeled on OpenTelemetry's exception
 // semantic conventions (`exception.type` / `exception.message`).
 enum class SpanWarningType {
@@ -102,6 +117,20 @@ void SpanState::recordException(kj::Maybe<tracing::Exception::Code> code,
   recordExceptionImpl(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
 }
 
+void SpanState::addEvent(tracing::SpanEvent event) {
+  if (!canRecordAttributes()) {
+    return;
+  }
+
+  size_t valueSize = event.size();
+  bytesUsed += valueSize;
+  if (bytesUsed > MAX_SPAN_BYTES) {
+    recordSpanDataLimitError("event", event.name, valueSize);
+    return;
+  }
+  addEventImpl(kj::mv(event));
+}
+
 class UserSpanState final: public SpanState {
  public:
   UserSpanState(kj::Rc<workerd::SpanObserver> observer, kj::ConstString operationName)
@@ -149,6 +178,10 @@ class UserSpanState final: public SpanState {
       kj::String message,
       kj::Maybe<kj::String> stack) override {
     builder.recordException(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+  }
+
+  void addEventImpl(tracing::SpanEvent event) override {
+    builder.addEvent(kj::mv(event));
   }
 
   void recordSpanDataLimitError(
@@ -242,6 +275,19 @@ class InvocationSpanState final: public SpanState {
     }
   }
 
+  void addEventImpl(tracing::SpanEvent event) override {
+    KJ_IF_SOME(valueContext, context) {
+      KJ_IF_SOME(observer, parent.getObserver()) {
+        auto timestamp = observer.getTime();
+        KJ_IF_SOME(valueTracer, tracer) {
+          valueTracer->runIfAlive([&](BaseTracer& tracer) {
+            tracer.addSpanEvent(valueContext.getSpanId(), timestamp, kj::mv(event));
+          });
+        }
+      }
+    }
+  }
+
  private:
   workerd::SpanParent parent;
   kj::Maybe<kj::Own<BaseTracer::WeakRef>> tracer;
@@ -270,6 +316,8 @@ class NoopSpanState final: public SpanState {
   void recordExceptionImpl(
       kj::Maybe<tracing::Exception::Code>, kj::String, kj::String, kj::Maybe<kj::String>) override {
   }
+
+  void addEventImpl(tracing::SpanEvent) override {}
 };
 
 // ======================================================================================
@@ -305,7 +353,7 @@ jsg::Ref<Span> Span::setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<T
   return JSG_THIS;
 }
 
-jsg::Ref<Span> Span::setAttributes(jsg::Lock& js, jsg::Dict<jsg::Optional<TagValue>> attributes) {
+jsg::Ref<Span> Span::setAttributes(jsg::Lock& js, Attributes attributes) {
   for (auto& field: attributes.fields) {
     setAttribute(js, kj::mv(field.name), kj::mv(field.value));
   }
@@ -363,6 +411,41 @@ void Span::recordException(
       s->recordException(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
     }
   }
+}
+
+jsg::Ref<Span> Span::addEvent(
+    jsg::Lock& js, kj::String name, jsg::Optional<Attributes> maybeAttributes) {
+  if (!getIsTraced()) {
+    return JSG_THIS;
+  }
+
+  // Cap the name like span operation names, so every downstream submitter sees the same value.
+  if (name.size() > MAX_USER_OPERATION_NAME_BYTES) {
+    name = kj::str(name.first(MAX_USER_OPERATION_NAME_BYTES));
+  }
+
+  kj::Vector<tracing::Attribute> attributes;
+  KJ_IF_SOME(dict, maybeAttributes) {
+    attributes.reserve(dict.fields.size());
+    for (auto& field: dict.fields) {
+      // Undefined values leave the attribute unset, matching setAttribute().
+      KJ_IF_SOME(value, field.value) {
+        attributes.add(tracing::Attribute(
+            kj::ConstString(kj::mv(field.name)), toAttributeValue(kj::mv(value))));
+      }
+    }
+  }
+
+  tracing::SpanEvent event(kj::ConstString(kj::mv(name)), attributes.releaseAsArray());
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
+      s->addEvent(kj::mv(event));
+    }
+    KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
+      s->addEvent(kj::mv(event));
+    }
+  }
+  return JSG_THIS;
 }
 
 void Span::end() {

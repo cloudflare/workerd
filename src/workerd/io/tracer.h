@@ -73,6 +73,10 @@ class BaseTracer: public kj::Refcounted {
       kj::String message,
       kj::Maybe<kj::String> stack) = 0;
 
+  // Records a named event with attributes on a span.
+  virtual void addSpanEvent(
+      tracing::SpanId spanId, kj::Date timestamp, tracing::SpanEvent&& event) = 0;
+
   virtual void addDiagnosticChannelEvent(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String channel,
@@ -184,6 +188,8 @@ class WorkerTracer final: public BaseTracer {
       kj::String name,
       kj::String message,
       kj::Maybe<kj::String> stack) override;
+  void addSpanEvent(
+      tracing::SpanId spanId, kj::Date timestamp, tracing::SpanEvent&& event) override;
   void addDiagnosticChannelEvent(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String channel,
@@ -267,6 +273,9 @@ class SpanSubmitter: public kj::Refcounted {
       kj::String message,
       kj::Maybe<kj::String> stack) = 0;
 
+  virtual void submitSpanEvent(
+      tracing::SpanId spanId, kj::Date timestamp, tracing::SpanEvent&& event) = 0;
+
   virtual tracing::SpanId makeSpanId() = 0;
 };
 
@@ -313,6 +322,7 @@ class UserSpanObserver final: public SpanObserver {
       kj::String name,
       kj::String message,
       kj::Maybe<kj::String> stack) override;
+  void onEvent(kj::Date timestamp, tracing::SpanEvent&& event) override;
   kj::Date getTime() override;
   kj::Maybe<tracing::SpanContext> toSpanContext() override;
   tracing::SpanId getSpanId() override;

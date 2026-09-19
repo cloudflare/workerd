@@ -287,6 +287,9 @@ kj::String KJ_STRINGIFY(const TailEvent::Event& event) {
     KJ_CASE_ONEOF(spanClose, SpanClose) {
       return spanClose.toString();
     }
+    KJ_CASE_ONEOF(spanEvent, SpanEvent) {
+      return spanEvent.toString();
+    }
     KJ_CASE_ONEOF(diagnosticChannelEvent, DiagnosticChannelEvent) {
       return kj::str("diagnosticChannelEvent");
     }
@@ -1379,6 +1382,48 @@ kj::String SpanClose::toString() const {
   return kj::str("SpanClose: ", outcome);
 }
 
+SpanEvent::SpanEvent(kj::ConstString name, kj::Array<Attribute> attributes)
+    : name(kj::mv(name)),
+      attributes(kj::mv(attributes)) {}
+
+SpanEvent::SpanEvent(rpc::Trace::SpanEvent::Reader reader)
+    : name(kj::str(reader.getName())),
+      attributes(KJ_MAP(attr, reader.getAttributes()) { return Attribute(attr); }) {}
+
+void SpanEvent::copyTo(rpc::Trace::SpanEvent::Builder builder) const {
+  builder.setName(name.asPtr());
+  auto list = builder.initAttributes(attributes.size());
+  for (size_t n = 0; n < attributes.size(); n++) {
+    attributes[n].copyTo(list[n]);
+  }
+}
+
+SpanEvent SpanEvent::clone() const {
+  return SpanEvent(name.clone(), KJ_MAP(attr, attributes) { return attr.clone(); });
+}
+
+kj::String SpanEvent::toString() const {
+  return kj::str("SpanEvent: ", name, ", ", attributes);
+}
+
+size_t SpanEvent::size() const {
+  size_t total = name.size();
+  for (auto& attr: attributes) {
+    total += attr.name.size();
+    for (auto& value: attr.value) {
+      KJ_SWITCH_ONEOF(value) {
+        KJ_CASE_ONEOF(str, kj::ConstString) {
+          total += str.size();
+        }
+        KJ_CASE_ONEOF_DEFAULT {
+          total += sizeof(int64_t);
+        }
+      }
+    }
+  }
+  return total;
+}
+
 Onset::Info readOnsetInfo(const rpc::Trace::Onset::Info::Reader& info) {
   switch (info.which()) {
     case rpc::Trace::Onset::Info::FETCH: {
@@ -1688,6 +1733,9 @@ TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Reader& rea
     case rpc::Trace::TailEvent::Event::SPAN_CLOSE: {
       return SpanClose(event.getSpanClose());
     }
+    case rpc::Trace::TailEvent::Event::SPAN_EVENT: {
+      return SpanEvent(event.getSpanEvent());
+    }
     case rpc::Trace::TailEvent::Event::ATTRIBUTE: {
       auto listReader = event.getAttribute();
       kj::Vector<Attribute> attrs(listReader.size());
@@ -1742,6 +1790,9 @@ void TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
     KJ_CASE_ONEOF(close, SpanClose) {
       close.copyTo(eventBuilder.initSpanClose());
     }
+    KJ_CASE_ONEOF(spanEvent, SpanEvent) {
+      spanEvent.copyTo(eventBuilder.initSpanEvent());
+    }
     KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
       diag.copyTo(eventBuilder.initDiagnosticChannelEvent());
     }
@@ -1781,6 +1832,9 @@ TailEvent TailEvent::clone() const {
       }
       KJ_CASE_ONEOF(close, SpanClose) {
         return close.clone();
+      }
+      KJ_CASE_ONEOF(spanEvent, SpanEvent) {
+        return spanEvent.clone();
       }
       KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
         return diag.clone();
@@ -1969,6 +2023,13 @@ void SpanBuilder::recordException(kj::Maybe<tracing::Exception::Code> code,
   }
   observer->onException(
       observer->getTime(), kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+}
+
+void SpanBuilder::addEvent(tracing::SpanEvent event) {
+  if (span == kj::none) {
+    return;
+  }
+  observer->onEvent(observer->getTime(), kj::mv(event));
 }
 
 void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) {

@@ -576,6 +576,48 @@ KJ_TEST("Read/Write SpanClose works") {
   KJ_ASSERT(info3.outcome == EventOutcome::EXCEPTION);
 }
 
+KJ_TEST("Read/Write SpanEvent works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::SpanEvent>();
+
+  auto makeAttributes = []() {
+    return kj::arr(Attribute("str"_kjc, kj::ConstString("value"_kjc)), Attribute("flag"_kjc, true),
+        Attribute("count"_kjc, 3.5));
+  };
+  SpanEvent info("cache.miss"_kjc, makeAttributes());
+  KJ_ASSERT(info.size() ==
+      "cache.miss"_kj.size() + "str"_kj.size() + "value"_kj.size() + "flag"_kj.size() +
+          sizeof(int64_t) + "count"_kj.size() + sizeof(int64_t));
+  info.copyTo(infoBuilder);
+
+  auto check = [](const SpanEvent& event) {
+    KJ_ASSERT(event.name == "cache.miss");
+    KJ_ASSERT(event.attributes.size() == 3);
+    KJ_ASSERT(event.attributes[0].name == "str");
+    KJ_ASSERT(event.attributes[0].value.size() == 1);
+    KJ_ASSERT(event.attributes[0].value[0].get<kj::ConstString>() == "value");
+    KJ_ASSERT(event.attributes[1].name == "flag");
+    KJ_ASSERT(event.attributes[1].value[0].get<bool>() == true);
+    KJ_ASSERT(event.attributes[2].name == "count");
+    KJ_ASSERT(event.attributes[2].value[0].get<double>() == 3.5);
+  };
+
+  SpanEvent info2(infoBuilder.asReader());
+  check(info2);
+
+  SpanEvent info3 = info.clone();
+  check(info3);
+
+  // Events without attributes round-trip to an empty list.
+  capnp::MallocMessageBuilder bareBuilder;
+  auto bareInfoBuilder = bareBuilder.initRoot<rpc::Trace::SpanEvent>();
+  SpanEvent bare("retry"_kjc, kj::Array<Attribute>());
+  bare.copyTo(bareInfoBuilder);
+  SpanEvent bare2(bareInfoBuilder.asReader());
+  KJ_ASSERT(bare2.name == "retry");
+  KJ_ASSERT(bare2.attributes.size() == 0);
+}
+
 KJ_TEST("Read/Write Onset works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Onset>();
