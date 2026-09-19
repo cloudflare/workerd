@@ -27,6 +27,14 @@ namespace workerd {
 // This is fatal for isolate creation since these are runtime-owned scripts.
 void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags);
 
+// Moves the bootstrap state of `context` into the heap, as plain JS values in the context's
+// SNAPSHOT_BOOTSTRAP_STATE_SLOT, and destroys the C++ BootstrapState. For a zygote about to
+// serialize its heap (see jsg::IsolateBase::prepareSnapshot): the BootstrapState's V8 handles
+// would otherwise keep v8::SnapshotCreator::CreateBlob from running. An isolate restored from the
+// snapshot has runPerIsolateBootstrap() rebuild the state from that slot. No-op when the bootstrap
+// never ran in this context.
+void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> context);
+
 // Cleans up the per-isolate bootstrap state stored in the context's embedder data.
 // Must be called before the context is destroyed (e.g., from disposeContext()).
 void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context);

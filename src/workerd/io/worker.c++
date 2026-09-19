@@ -1730,8 +1730,8 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
     };
     v8::Local<v8::Function> function = jsg::check(v8::Function::New(context, instanceof));
     // The function may end up in a startup snapshot (see setupContextInternalScripts).
-    jsg::isolateRegisterExternalReference(lock.v8Isolate,
-        reinterpret_cast<intptr_t>(static_cast<v8::FunctionCallback>(instanceof)));
+    jsg::isolateRegisterExternalReference(
+        lock.v8Isolate, reinterpret_cast<intptr_t>(static_cast<v8::FunctionCallback>(instanceof)));
 
     auto webAssembly =
         KJ_ASSERT_NONNULL(lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>());
@@ -1802,8 +1802,8 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
   };
   auto registerFn = jsg::check(v8::Function::New(context, registerCb));
   // The function may end up in a startup snapshot (see setupContextInternalScripts).
-  jsg::isolateRegisterExternalReference(lock.v8Isolate,
-      reinterpret_cast<intptr_t>(static_cast<v8::FunctionCallback>(registerCb)));
+  jsg::isolateRegisterExternalReference(
+      lock.v8Isolate, reinterpret_cast<intptr_t>(static_cast<v8::FunctionCallback>(registerCb)));
 
   // Build the shim in JavaScript. It wraps both WebAssembly.instantiate (async) and
   // WebAssembly.Instance (sync constructor). An isolate restored from a startup snapshot finds
@@ -2105,8 +2105,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                 kj::Maybe<jsg::JsObject> maybeNs;
                 if (lock.isStartingFromSnapshot()) {
                   // The zygote evaluated the main module and left its namespace in the context.
-                  auto data =
-                      context->GetEmbedderData(jsg::SNAPSHOT_MAIN_MODULE_NAMESPACE_SLOT);
+                  auto data = context->GetEmbedderData(jsg::SNAPSHOT_MAIN_MODULE_NAMESPACE_SLOT);
                   KJ_REQUIRE(!data.IsEmpty() && data->IsObject(),
                       "snapshot does not record the main module namespace");
                   maybeNs = jsg::JsObject(data.As<v8::Object>());
@@ -2211,20 +2210,34 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       if (script->isolate->impl->inspector == kj::none) {
         lock.v8Isolate->SetCaptureStackTraceForUncaughtExceptions(false);
       }
+    });
 
-      if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
-          isolateBase.isPreparingSnapshot()) {
+    if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
+        isolateBase.isPreparingSnapshot()) {
+      // In a handle scope of its own: the one above held the bindings and ctx.exports objects
+      // as stack roots, and prepareSnapshot() collects garbage to tell wrappers only the
+      // zygote's setup reached from wrappers the worker retained.
+      lock.withinHandleScope([&] {
+        auto& jsContext = [&]() -> jsg::JsContext<api::ServiceWorkerGlobalScope>& {
+          KJ_IF_SOME(c, impl->context) return c;
+          // const_cast OK because guarded by `lock`.
+          return const_cast<jsg::JsContext<api::ServiceWorkerGlobalScope>&>(
+              KJ_ASSERT_NONNULL(script->impl->moduleContext));
+        }();
         // Context Global is consumed by prepareSnapshot() even when it throws,
         // so we clean it here to prevent double free.
         KJ_DEFER({
           const_cast<Script&>(*script).impl->moduleContext = kj::none;
           impl->context = kj::none;
         });
-        isolateBase.prepareSnapshot(jsContext->extractContextGlobalForSnapshot());
-        KJ_DASSERT(jsContext->getHandle(lock).IsEmpty(),
+        // The bootstrap's C++ state holds V8 handles; park it in the heap so CreateBlob can run
+        // and a restored isolate can pick it up (per-isolate-bootstrap.h).
+        stashPerIsolateBootstrapForSnapshot(lock, jsContext.getHandle(lock));
+        isolateBase.prepareSnapshot(jsContext.extractContextGlobalForSnapshot());
+        KJ_DASSERT(jsContext.getHandle(lock).IsEmpty(),
             "zygote context handle must be consumed by prepareSnapshot");
-      }
-    });
+      });
+    }
   });
 }
 

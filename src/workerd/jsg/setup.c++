@@ -445,9 +445,12 @@ v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params,
           artifact.externalReferences.asPtr().fill(0);
           params.external_references = artifact.externalReferences.begin();
 
-          auto creator = kj::heap<v8::SnapshotCreator>(params);
-          v8::Isolate* isolate = creator->GetIsolate();
-          *snapshotCreator = kj::mv(creator);
+          // v8::SnapshotCreator(params) would allocate the isolate in the default isolate
+          // group; allocate it in `group` ourselves so that its heap, sandbox and in-sandbox
+          // allocator (which the embedder ties to the group) agree. The creator then does not
+          // own the isolate: ~IsolateBase disposes it after destroying the creator.
+          v8::Isolate* isolate = v8::Isolate::Allocate(group);
+          *snapshotCreator = kj::heap<v8::SnapshotCreator>(isolate, params);
           return isolate;
         }
         KJ_CASE_ONEOF(roSnapshot, ReadonlySharedSnapshot) {
@@ -540,10 +543,40 @@ IsolateBase::IsolateBase(V8System& system,
   });
 }
 
+void IsolateBase::rejectSnapshotWithUnrestorableWrappers(v8::Local<v8::Context> defaultContext) {
+  // A JSG object's JavaScript wrapper is serialized like any other object, but its C++ half
+  // dies with the zygote and nothing re-creates it in an isolate restored from the blob: calling
+  // a method on such a "zombie" would dereference a null internal field. The global object is the
+  // one exception, since newContext() attaches a fresh C++ global scope to the deserialized
+  // global. Any other wrapper still reachable after a full GC was retained by the worker's
+  // top-level code (`const enc = new TextEncoder()` at module scope, a `crypto` access cached on
+  // the global, ...), so such a worker cannot be snapshotted until JSG objects can be re-created
+  // from the heap. Collect first: the zygote's own setup leaves wrappers behind (bindings, the
+  // ctx.exports object) that only its C++ locals referenced.
+  ptr->LowMemoryNotification();
+
+  v8::HandleScope scope(ptr);
+  auto global = defaultContext->Global();
+  kj::Vector<kj::String> leftovers;
+  for (auto& wrappable: heapTracer.liveWrappables()) {
+    KJ_IF_SOME(handle, wrappable.tryGetHandle(ptr)) {
+      if (handle->StrictEquals(global)) continue;
+    }
+    leftovers.add(typeName(typeid(wrappable)));
+  }
+  KJ_REQUIRE(leftovers.size() == 0,
+      "worker retains JSG objects from its top-level evaluation; they cannot be restored from a "
+      "snapshot yet",
+      leftovers);
+}
+
 void IsolateBase::prepareSnapshot(v8::Global<v8::Context> defaultContextHandle) {
   KJ_REQUIRE(isPreparingSnapshot());
   auto& artifact = mutableSnapshotArtifact();
   auto& creator = KJ_ASSERT_NONNULL(snapshotCreator);
+
+  auto defaultContext = defaultContextHandle.Get(ptr);
+  rejectSnapshotWithUnrestorableWrappers(defaultContext);
 
   // Detach the strongWrapper / traced wrapper of every live Wrappable.
   // The returned keepalives are held in this scope so they
@@ -551,7 +584,6 @@ void IsolateBase::prepareSnapshot(v8::Global<v8::Context> defaultContextHandle) 
   // fields while serializing.
   auto snapshotKeepalives = heapTracer.resetLiveWrappableInstances();
 
-  auto defaultContext = defaultContextHandle.Get(ptr);
   creator->SetDefaultContext(defaultContext);
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
 
@@ -649,16 +681,12 @@ IsolateBase::~IsolateBase() noexcept(false) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     // Terminate the v8::platform's task queue associated with this isolate
     v8System.shutdownIsolate(ptr);
-    // When preparing a snapshot the v8::SnapshotCreator owns the isolate and keeps it "entered" by
-    // the current thread; v8::Isolate::Dispose() refuses to run on an entered isolate. Destroy the
-    // SnapshotCreator first — its destructor exits and disposes the isolate — and skip
-    // ptr->Dispose() in that case.
-    if (isPreparingSnapshot()) {
-      // Destroying the SnapshotCreator exits and disposes its isolate.
-      snapshotCreator = kj::none;
-    } else {
-      ptr->Dispose();
-    }
+    // When preparing a snapshot the v8::SnapshotCreator keeps the isolate "entered" by the
+    // current thread, and v8::Isolate::Dispose() refuses to run on an entered isolate. Destroy
+    // the creator first: its destructor exits the isolate, which it does not own (see
+    // newIsolate()), so the isolate is then disposed like any other.
+    snapshotCreator = kj::none;
+    ptr->Dispose();
     ptr = nullptr;
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();

@@ -418,6 +418,10 @@ class IsolateBase {
   // context and fill the SnapshotArtifact slot passed at isolate creation. No-op otherwise.
   void prepareSnapshot(v8::Global<v8::Context> defaultContextHandle);
 
+  // Throws if any JSG wrapper other than the global object is still reachable in the zygote's
+  // heap; see the definition for why such a snapshot could not be used.
+  void rejectSnapshotWithUnrestorableWrappers(v8::Local<v8::Context> defaultContext);
+
   // When starting from a snapshot: replace the (not yet created) resource-type templates and the
   // opaque template with the ones the zygote recorded in the artifact (see
   // SnapshotArtifact::templateDataIndices). Must run as soon as the type wrapper exists, before

@@ -1973,7 +1973,14 @@ class ResourceWrapper {
 
     auto isolate = js.v8Isolate;
     v8::Local<v8::Context> context;
-    if (js.isStartingFromSnapshot()) {
+#ifdef V8_SNAPSHOT_RECORDS_ALL_GLOBAL_PROXY_SIZES
+    // Only a V8 that records the default context's global proxy size can rebuild the proxy for a
+    // global object created from a template with embedder fields; older V8s hit a size check.
+    constexpr bool canAdoptSnapshotContext = true;
+#else
+    constexpr bool canAdoptSnapshotContext = false;
+#endif
+    if (canAdoptSnapshotContext && js.isStartingFromSnapshot()) {
       // The snapshot's default context is the zygote's context: built from this same template,
       // every member installed, the worker's top-level code already run. Creating the context
       // without a global template makes V8 hook the deserialized global object up to a fresh

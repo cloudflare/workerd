@@ -460,10 +460,91 @@ jsg::JsRef<jsg::JsObject> buildAutogatesObject(jsg::Lock& js) {
   return obj.addRef(js);
 }
 
+// The bootstrap functions above are plain V8 functions whose C++ callbacks end up in the heap;
+// a startup snapshot can only serialize them if they are in the isolate's external-reference
+// table (jsg::IsolateBase::registerExternalReference). Registration is idempotent and cheap, so
+// every isolate does it rather than only zygotes.
+void registerBootstrapExternalReferences(jsg::Lock& js) {
+  auto* isolate = js.v8Isolate;
+  auto reg = [&](auto* ptr) {
+    jsg::isolateRegisterExternalReference(isolate, reinterpret_cast<intptr_t>(ptr));
+  };
+  auto regFast = [&](v8::FunctionCallback callback, const v8::CFunction& cFunction) {
+    reg(callback);
+    reg(cFunction.GetAddress());
+    reg(cFunction.GetTypeInfo());
+    reg(&cFunction);
+  };
+#define V(Name) regFast(Is##Name, fast_is_##Name##_);
+  VALUE_METHOD_MAP(V)
+#undef V
+  regFast(IsAnyArrayBuffer, fast_is_any_array_buffer_);
+  regFast(MarkPromiseHandled, fast_mark_promise_handled_);
+  reg(GetApiSymbol);
+  reg(api::newCompressionCodecCallback);
+  reg(CreateDigestContext);
+  reg(CreateFileSystemWriteContext);
+  reg(requireCallback);
+}
+
+// Layout of the array parked in SNAPSHOT_BOOTSTRAP_STATE_SLOT by
+// stashPerIsolateBootstrapForSnapshot() and read back by restoreBootstrapStateFromSnapshot().
+enum SnapshotField : uint32_t {
+  SNAPSHOT_COMPAT_FLAGS,
+  SNAPSHOT_AUTOGATES,
+  SNAPSHOT_UTILS,
+  SNAPSHOT_REQUIRE,
+  SNAPSHOT_PRIMORDIALS,  // undefined if primordials were never loaded
+  SNAPSHOT_CACHE,        // plain object: normalized specifier -> module value
+  SNAPSHOT_FIELD_COUNT,
+};
+
+// Rebuilds a BootstrapState from the values the zygote parked in the context. Returns false if the
+// context carries none (the snapshot was taken before the bootstrap ran, or without it).
+bool restoreBootstrapStateFromSnapshot(
+    jsg::Lock& js, v8::Local<v8::Context> context, BootstrapState& state) {
+  auto data = context->GetEmbedderData(jsg::SNAPSHOT_BOOTSTRAP_STATE_SLOT);
+  if (data.IsEmpty() || !data->IsArray()) return false;
+  auto array = data.As<v8::Array>();
+  KJ_REQUIRE(array->Length() == SNAPSHOT_FIELD_COUNT,
+      "snapshot bootstrap state has an unexpected layout", array->Length());
+
+  auto get = [&](SnapshotField field) {
+    return jsg::JsValue(jsg::check(array->Get(context, field)));
+  };
+  auto getObject = [&](SnapshotField field) {
+    return KJ_REQUIRE_NONNULL(get(field).tryCast<jsg::JsObject>(),
+        "snapshot bootstrap state field is not an object", static_cast<uint32_t>(field));
+  };
+
+  state.compatFlagsObj = getObject(SNAPSHOT_COMPAT_FLAGS).addRef(js);
+  state.autogatesObj = getObject(SNAPSHOT_AUTOGATES).addRef(js);
+  state.utilsObj = getObject(SNAPSHOT_UTILS).addRef(js);
+  state.requireFn = KJ_REQUIRE_NONNULL(get(SNAPSHOT_REQUIRE).tryCast<jsg::JsFunction>(),
+      "snapshot bootstrap state does not hold require()")
+                        .addRef(js);
+  auto primordials = get(SNAPSHOT_PRIMORDIALS);
+  if (!primordials.isUndefined()) {
+    state.primordials = primordials.addRef(js);
+  }
+
+  auto cache = getObject(SNAPSHOT_CACHE);
+  auto names = cache.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
+      jsg::PropertyFilter::ALL_PROPERTIES, jsg::IndexFilter::SKIP_INDICES);
+  for (uint32_t i = 0; i < names.size(); i++) {
+    auto name = names.get(js, i);
+    state.cache.insert(name.toString(js), cache.get(js, name).addRef(js));
+  }
+  // The dictionary template for context extensions is rebuilt lazily by createContextExtension().
+  return true;
+}
+
 }  // namespace
 
 void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
   auto context = js.v8Context();
+
+  registerBootstrapExternalReferences(js);
 
   // Get (or lazily build) the process-wide script lookup table.
   auto& scripts = getScriptTable();
@@ -492,6 +573,13 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
   __lsan_ignore_object(state);
 #endif
   jsg::setAlignedPointerInEmbedderData(context, jsg::ContextPointerSlot::BOOTSTRAP_STATE, state);
+
+  // A context restored from a startup snapshot already ran the bootstrap in its zygote, whose
+  // results (including everything the scripts installed on globalThis) are in the heap; only the
+  // C++ side needs rebuilding. See stashPerIsolateBootstrapForSnapshot().
+  if (js.isStartingFromSnapshot() && restoreBootstrapStateFromSnapshot(js, context, *state)) {
+    return;
+  }
 
   // Build the compat flags and autogates objects.
   state->compatFlagsObj = buildCompatFlagsObject(js, flags);
@@ -529,6 +617,37 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
   JSG_CATCH(exception) {
     kj::throwFatalException(js.exceptionToKj(kj::mv(exception)));
   }
+}
+
+void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> context) {
+  auto& state = KJ_UNWRAP_OR(jsg::getAlignedPointerFromEmbedderData<BootstrapState>(
+                                 context, jsg::ContextPointerSlot::BOOTSTRAP_STATE),
+      return);
+  KJ_REQUIRE(state.loading.size() == 0, "cannot snapshot while bootstrap scripts are loading");
+
+  // The zygote's top-level evaluation has finished and no context is entered any more.
+  v8::Context::Scope contextScope(context);
+  auto array = v8::Array::New(js.v8Isolate, SNAPSHOT_FIELD_COUNT);
+  auto set = [&](SnapshotField field, v8::Local<v8::Value> value) {
+    KJ_ASSERT(jsg::check(array->Set(context, field, value)));
+  };
+  set(SNAPSHOT_COMPAT_FLAGS, state.compatFlagsObj.getHandle(js));
+  set(SNAPSHOT_AUTOGATES, state.autogatesObj.getHandle(js));
+  set(SNAPSHOT_UTILS, state.utilsObj.getHandle(js));
+  set(SNAPSHOT_REQUIRE, state.requireFn.getHandle(js));
+  set(SNAPSHOT_PRIMORDIALS,
+      state.primordials.map([&](auto& p) {
+    return v8::Local<v8::Value>(p.getHandle(js));
+  }).orDefault(js.v8Undefined()));
+  auto cache = js.obj();
+  for (auto& entry: state.cache) {
+    cache.set(js, entry.key, entry.value.getHandle(js));
+  }
+  set(SNAPSHOT_CACHE, cache);
+  context->SetEmbedderData(jsg::SNAPSHOT_BOOTSTRAP_STATE_SLOT, array);
+
+  // The handles now have heap-side copies; drop the C++ state that held them.
+  cleanupPerIsolateBootstrap(js, context);
 }
 
 void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context) {
