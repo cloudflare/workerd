@@ -275,6 +275,10 @@ const kControllerErrorFunction: symbol = SymbolFor(
 // Settles the stream's closed-promise hook (if one was ever requested) to
 // match a state transition; assigned in ReadableStream's static block.
 let settleReadableStreamClosedPromise: <R>(stream: ReadableStream<R>) => void;
+let setReadableStreamInteropErrorHook: <R>(
+  stream: ReadableStream<R>,
+  hook: ((reason: unknown) => void) | undefined
+) => void;
 
 // BACKEND-DISPATCH: the byte-CAPABLE gate (one of the five sanctioned
 // dispatch points). True for any controller whose backend can satisfy
@@ -3204,6 +3208,9 @@ class ReadableStream<R> {
   // Terminal-state shells (tee and detach copies) never transition, so a
   // request against one is settled immediately from its state.
   #closedPromise?: PromiseWithResolversType<void> | undefined;
+  // A transform pair's notification when the Node.js interop hook errors
+  // this half (internalsForTransform.setInteropErrorHook).
+  #interopErrorHook?: ((reason: unknown) => void) | undefined;
   // The pending-closure gate (JsReadableStream::setPendingClosure): set by
   // the stream's owning object (a Socket) the moment its closure begins, so
   // that new reads, pipes, and tees fail fast with a descriptive error
@@ -3231,6 +3238,10 @@ class ReadableStream<R> {
 
     setReadableStreamPendingClosure = <R>(stream: ReadableStream<R>) => {
       stream.#pendingClosure = true;
+    };
+
+    setReadableStreamInteropErrorHook = (stream, hook) => {
+      stream.#interopErrorHook = hook;
     };
 
     isReadableStreamPendingClosure = <R>(stream: ReadableStream<R>) => {
@@ -4343,13 +4354,15 @@ class ReadableStream<R> {
   // The source's own stream errors through its controller, which errors
   // every consumer of the queue (the tee branches, if any); a native-backed
   // stream also cancels its C++ source, which has lost its consumer. A
-  // queued tee branch shares that controller, so it errors alone instead:
-  // its pending reads reject and it leaves the queue as a cancelled branch
-  // would — the source is cancelled once no consumer remains, with the
-  // reason of every consumer that left (controllerConsumerLeaving). A
-  // branch that has itself been teed consumes nothing and stays what tee()
-  // left it: a permanently locked, inert shell (the queued tee model's
-  // deliberate divergence from the spec's per-branch controllers).
+  // queued source's cancel steps do not run, so a transform pair learns of
+  // it through its interop error hook instead. A queued tee branch shares
+  // that controller, so it errors alone: its pending reads reject and it
+  // leaves the queue as a cancelled branch would — the source is cancelled
+  // once no consumer remains, with the reason of every consumer that left
+  // (controllerConsumerLeaving). A branch that has itself been teed
+  // consumes nothing and stays what tee() left it: a permanently locked,
+  // inert shell (the queued tee model's deliberate divergence from the
+  // spec's per-branch controllers).
   [kControllerErrorFunction](reason: unknown): void {
     assertIsReadableStream(this);
     if (this.#state !== 'readable') return;
@@ -4365,6 +4378,8 @@ class ReadableStream<R> {
     }
     if (controllerStream(controller) === this) {
       controllerError(controller, reason);
+      const hook = this.#interopErrorHook;
+      if (hook !== undefined) hook(reason);
       return;
     }
     // QUEUED INVARIANT: a tee branch of a queued stream — its consumer is
@@ -4705,9 +4720,10 @@ module.exports = {
   // pipeTo and the C++ bridge. See Open Question 3 in the design doc for
   // possible future public exposure.
   ReadableStreamDrainingReader,
-  // Internal operations consumed by the TransformStream cancel/flush
-  // coordination (finishPromise guard) and the workerd expectedLength
-  // extension. Unreachable from user code.
+  // Internal operations consumed by the transform pairs (transform.ts,
+  // identity.ts, compression.ts): the TransformStream cancel/flush
+  // coordination (finishPromise guard), the workerd expectedLength
+  // extension, and the interop error hook. Unreachable from user code.
   internalsForTransform: ObjectFreeze({
     getState: <R>(stream: ReadableStream<R>) =>
       getReadableStreamGetState(stream),
@@ -4722,6 +4738,14 @@ module.exports = {
         controller as ReadableStreamDefaultController<R>,
         length
       ),
+    // A transform pair's notification, called synchronously with the
+    // reason after the Node.js interop hook has errored this stream (the
+    // only external error path that bypasses the source's cancel steps).
+    // undefined clears it.
+    setInteropErrorHook: <R>(
+      stream: ReadableStream<R>,
+      hook: ((reason: unknown) => void) | undefined
+    ): void => setReadableStreamInteropErrorHook(stream, hook),
   }),
 
   // Part of the internal implementation. Do not re-export to user code
