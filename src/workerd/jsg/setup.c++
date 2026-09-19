@@ -541,6 +541,33 @@ IsolateBase::IsolateBase(V8System& system,
   });
 }
 
+void IsolateBase::rejectSnapshotWithUnrestorableWrappers(v8::Local<v8::Context> defaultContext) {
+  // A JSG object's JavaScript wrapper is serialized like any other object, but its C++ half
+  // dies with the zygote and nothing re-creates it in an isolate restored from the blob: calling
+  // a method on such a "zombie" would dereference a null internal field. The global object is the
+  // one exception, since newContext() attaches a fresh C++ global scope to the deserialized
+  // global. Any other wrapper still reachable after a full GC was retained by the worker's
+  // top-level code (`const enc = new TextEncoder()` at module scope, a `crypto` access cached on
+  // the global, ...), so such a worker cannot be snapshotted until JSG objects can be re-created
+  // from the heap. Collect first: the zygote's own setup leaves wrappers behind (bindings, the
+  // ctx.exports object) that only its C++ locals referenced.
+  ptr->LowMemoryNotification();
+
+  v8::HandleScope scope(ptr);
+  auto global = defaultContext->Global();
+  kj::Vector<kj::String> leftovers;
+  for (auto& wrappable: heapTracer.liveWrappables()) {
+    KJ_IF_SOME(handle, wrappable.tryGetHandle(ptr)) {
+      if (handle->StrictEquals(global)) continue;
+    }
+    leftovers.add(typeName(typeid(wrappable)));
+  }
+  KJ_REQUIRE(leftovers.size() == 0,
+      "worker retains JSG objects from its top-level evaluation; they cannot be restored from a "
+      "snapshot yet",
+      leftovers);
+}
+
 void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext) {
   KJ_REQUIRE(isPreparingSnapshot());
   KJ_ASSERT_NONNULL(snapshotCreator)->SetDefaultContext(defaultContext);
@@ -550,6 +577,12 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
     kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles) {
   KJ_REQUIRE(isPreparingSnapshot());
   auto& artifact = mutableSnapshotArtifact();
+  auto& creator = KJ_ASSERT_NONNULL(snapshotCreator);
+
+  {
+    v8::HandleScope scope(ptr);
+    rejectSnapshotWithUnrestorableWrappers(defaultContextHandle.Get(ptr));
+  }
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
 
   // Record the templates every snapshotted JSG object was instantiated from, so that restored
@@ -624,7 +657,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
 
 void IsolateBase::adoptTemplatesFromSnapshot() {
   if (!isStartingFromSnapshot()) return;
-  const SnapshotArtifact& artifact = readonlySnapshotArtifact();
+  const SnapshotArtifact& artifact = finalizedSnapshotArtifact();
   if (artifact.templateDataIndices.size() == 0 &&
       artifact.opaqueTemplateDataIndex == SnapshotArtifact::kNoTemplateData) {
     return;
