@@ -245,8 +245,13 @@ build:sanitizer-common --copt="-fno-optimize-sibling-calls"
 build:sanitizer-common --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-frame-pointer"
 # Rust's sanitizer support requires nightly
 build:sanitizer-common --@rules_rust//rust/toolchain/channel:channel=nightly
+# Rust and C++ share Clang's sanitizer runtime, linked by the C++ driver.
+build:sanitizer-common --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
 
 # address sanitizer (https://github.com/google/sanitizers/wiki/AddressSanitizer)
+#
+# Instruments both C++ and Rust (nightly rustc with -Zsanitizer=address plus an ASan-built standard
+# library, see //build/rust). Supported hosts: Linux x86_64 and aarch64, macOS arm64.
 build:asan --config=sanitizer-common
 build:asan --platforms=//build/platforms:sanitizer_address_platform
 build:asan --copt="-fsanitize=address" --linkopt="-fsanitize=address"
@@ -255,6 +260,9 @@ build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
 build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
 build:asan --per_file_copt='external/.*v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
+# One toolchain per host; resolution picks the one matching the (host-parented) asan platform.
+build:asan --extra_toolchains=//build/rust:asan_toolchain_linux_x86_64,//build/rust:asan_toolchain_linux_aarch64,//build/rust:asan_toolchain_macos_aarch64
+build:asan --@rules_rust//:extra_rustc_flag=-Zsanitizer=address
 
 # thread sanitizer (https://github.com/google/sanitizers/wiki/ThreadSanitizerCppManual)
 #
@@ -280,7 +288,6 @@ build:tsan-common --per_file_copt='external/.*v8@-DTHREAD_SANITIZER'
 # One toolchain per host; resolution picks the one matching the (host-parented) tsan platform.
 build:tsan-common --extra_toolchains=//build/rust:tsan_toolchain_linux_x86_64,//build/rust:tsan_toolchain_macos_aarch64
 build:tsan-common --@rules_rust//:extra_rustc_flag=-Zsanitizer=thread
-build:tsan-common --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
 
 # Linux x86_64.
 build:tsan --config=tsan-common
