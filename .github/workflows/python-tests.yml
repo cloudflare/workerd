@@ -1,0 +1,49 @@
+name: Python Runtime Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: python-tests-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  python-unit-tests:
+    name: Python Unit Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run Python internal unit tests
+        run: |
+          python3 -m unittest discover -s src/pyodide/internal -p "test_*.py"
+
+      - name: Check git diff and whitespace hygiene
+        run: |
+          git diff --check
+
+  docker-tests:
+    name: Containerized Test Suite (Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run tests inside Docker container
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE":/workerd -w /workerd python:3.12-slim \
+            python3 -m unittest discover -s src/pyodide/internal -p "test_*.py"
