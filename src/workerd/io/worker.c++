@@ -3769,7 +3769,9 @@ struct Worker::Actor::Impl {
     TimerChannel& timerChannel;  // only for afterLimitTimeout() and updateAlarmInMemory()
     ActorObserver& metrics;
 
+    kj::Maybe<kj::Date> scheduledAlarmTime;
     kj::Maybe<kj::Promise<void>> maybeAlarmPreviewTask;
+    bool isRunningAlarm = false;
   };
 
   HooksImpl hooks;
@@ -4261,31 +4263,65 @@ void Worker::Actor::assertCanSetAlarm() {
 }
 
 void Worker::Actor::Impl::HooksImpl::updateAlarmInMemory(kj::Maybe<kj::Date> newTime) {
+  scheduledAlarmTime = newTime;
+
+  if (isRunningAlarm) {
+    // An alarm is currently executing in runAlarm(). Updating maybeAlarmPreviewTask
+    // now would destroy the coroutine that is awaiting runAlarm(), triggering
+    // a panic where a promise callback destroyed itself. The running task checks
+    // scheduledAlarmTime after runAlarm() completes to decide whether to schedule
+    // another alarm or terminate.
+    return;
+  }
+
   if (newTime == kj::none) {
     maybeAlarmPreviewTask = kj::none;
     return;
   }
 
-  auto scheduledTime = KJ_ASSERT_NONNULL(newTime);
-
-  auto retry = kj::coCapture([this, originalTime = scheduledTime]() -> kj::Promise<void> {
-    kj::Date scheduledTime = originalTime;
-
-    for (auto i: kj::zeroTo(WorkerInterface::ALARM_RETRY_MAX_TRIES)) {
+  auto runTask = kj::coCapture([this]() -> kj::Promise<void> {
+    while (scheduledAlarmTime != kj::none) {
+      auto scheduledTime = KJ_ASSERT_NONNULL(scheduledAlarmTime);
       co_await timerChannel.atTime(scheduledTime);
-      auto result = co_await loopback->getWorker(IoChannelFactory::SubrequestMetadata{})
-                        ->runAlarm(originalTime, i);
 
-      if (result.outcome == EventOutcome::OK || !result.retry) {
+      if (scheduledAlarmTime == kj::none) {
         break;
       }
+      if (scheduledAlarmTime != scheduledTime) {
+        continue;
+      }
 
-      auto delay = (WorkerInterface::ALARM_RETRY_START_SECONDS << i++) * kj::SECONDS;
-      scheduledTime = timerChannel.now() + delay;
+      auto originalTime = scheduledTime;
+
+      for (auto i: kj::zeroTo(WorkerInterface::ALARM_RETRY_MAX_TRIES)) {
+        WorkerInterface::AlarmResult result;
+        {
+          isRunningAlarm = true;
+          KJ_DEFER(isRunningAlarm = false);
+          result = co_await loopback->getWorker(IoChannelFactory::SubrequestMetadata{})
+                       ->runAlarm(originalTime, i);
+        }
+
+        if (result.outcome == EventOutcome::OK || !result.retry) {
+          break;
+        }
+
+        auto delay = (WorkerInterface::ALARM_RETRY_START_SECONDS << i) * kj::SECONDS;
+        auto retryTime = timerChannel.now() + delay;
+        co_await timerChannel.atTime(retryTime);
+
+        if (scheduledAlarmTime != originalTime) {
+          break;
+        }
+      }
+
+      if (scheduledAlarmTime == originalTime) {
+        scheduledAlarmTime = kj::none;
+      }
     }
   });
 
-  maybeAlarmPreviewTask = retry();
+  maybeAlarmPreviewTask = runTask();
 }
 
 kj::Maybe<kj::Promise<WorkerInterface::AlarmOutcome>> Worker::Actor::getAlarm(
