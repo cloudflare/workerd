@@ -91,3 +91,17 @@ py_test(
     main = "internal/test_frozen_sdk.py",
     target_compatible_with = ["@platforms//os:linux"],
 )
+
+py_test(
+    name = "unit-test-entropy-patches",
+    srcs = [
+        "internal/test_entropy_patches.py",
+        "internal/topLevelEntropy/__init__.py",
+        "internal/topLevelEntropy/allow_entropy.py",
+        "internal/topLevelEntropy/entropy_import_context.py",
+        "internal/topLevelEntropy/entropy_import_context_packages.py",
+        "internal/topLevelEntropy/entropy_patches.py",
+        "internal/topLevelEntropy/import_patch_manager.py",
+    ],
+    main = "internal/test_entropy_patches.py",
+)

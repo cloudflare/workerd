@@ -190,3 +190,21 @@ def langchain_openai_chat_models_base_context(module):
             yield
     else:
         yield
+
+
+@register_exec_patch("httpx._transports.emscripten")
+@contextmanager
+def httpx_emscripten_context(module):
+    yield
+    # In browser environments, User-Agent is a forbidden request header and causes console warnings.
+    # In workerd, fetch() natively supports custom User-Agent headers without restriction.
+    module.HEADERS_TO_IGNORE = ()
+
+
+@register_exec_patch("httpx2_jsfetch")
+@contextmanager
+def httpx2_jsfetch_context(module):
+    yield
+    # In browser environments, User-Agent is a forbidden request header and causes console warnings.
+    # In workerd, fetch() natively supports custom User-Agent headers without restriction.
+    module.HEADERS_TO_IGNORE = ()
