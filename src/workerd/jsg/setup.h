@@ -418,9 +418,47 @@ class IsolateBase {
   // context and fill the SnapshotArtifact slot passed at isolate creation. No-op otherwise.
   void prepareSnapshot(v8::Global<v8::Context> defaultContextHandle);
 
+  // The re-creation payloads of the zygote's live JSG wrappers, keyed by the object each wrapper
+  // points at (see JSG_SNAPSHOT_RESTORE in jsg.h). Built by prepareSnapshot() and read by the
+  // internal-field serializer it installs.
+  using SnapshotWrapperPayloads = kj::HashMap<const Wrappable*, kj::Array<kj::byte>>;
+
   // Throws if any JSG wrapper other than the global object is still reachable in the zygote's
-  // heap; see the definition for why such a snapshot could not be used.
-  void rejectSnapshotWithUnrestorableWrappers(v8::Local<v8::Context> defaultContext);
+  // heap without a payload in `payloads`; see the definition for why such a snapshot could not
+  // be used.
+  void rejectSnapshotWithUnrestorableWrappers(
+      v8::Local<v8::Context> defaultContext, const SnapshotWrapperPayloads& payloads);
+
+  // The re-creation payload of every live JSG wrapper whose type opts in, or that
+  // recordSnapshotBindings() recorded as a binding; see the definition.
+  SnapshotWrapperPayloads collectSnapshotWrapperPayloads(v8::Local<v8::Context> defaultContext);
+
+  // Bindings retained by the worker's top-level code (a `Fetcher` kept in module scope) are
+  // handles to I/O state that no recipe can re-create; what a restored isolate can do is re-bind
+  // the retained wrapper to the binding it compiles itself under the same name. The zygote's
+  // Worker calls recordSnapshotBindings() once its bindings are installed on `scope` (the `env`
+  // object, or the global object for a service worker), with `before` mapping the names `scope`
+  // had to their values beforehand, so that only what the bindings added or replaced counts. The
+  // JSG wrappers among those get a payload of SNAPSHOT_BINDING_PAYLOAD_INDEX followed by the
+  // binding's name, unless their type has a recipe of its own; the restored isolate's
+  // newContext() hands such wrappers to addPendingSnapshotBindingRestore(), and its Worker,
+  // once it has compiled its bindings, takes them with takePendingSnapshotBindingRestores() and
+  // transplants each fresh binding onto the retained wrapper (Wrappable::
+  // transplantWrapperForSnapshot).
+  void recordSnapshotBindings(
+      v8::Local<v8::Context> context, v8::Local<v8::Object> scope, v8::Local<v8::Map> before);
+  static constexpr uint32_t SNAPSHOT_BINDING_PAYLOAD_INDEX = kj::maxValue;
+  struct PendingSnapshotBindingRestore {
+    v8::Global<v8::Object> holder;
+    kj::String name;
+  };
+  void addPendingSnapshotBindingRestore(v8::Global<v8::Object> holder, kj::StringPtr name) {
+    pendingSnapshotBindingRestores.add(
+        PendingSnapshotBindingRestore{.holder = kj::mv(holder), .name = kj::str(name)});
+  }
+  kj::Vector<PendingSnapshotBindingRestore> takePendingSnapshotBindingRestores() {
+    return kj::mv(pendingSnapshotBindingRestores);
+  }
 
   // When starting from a snapshot: replace the (not yet created) resource-type templates and the
   // opaque template with the ones the zygote recorded in the artifact (see
@@ -455,6 +493,13 @@ class IsolateBase {
   // Visits every struct type's persistent handles (dictionary template + field-name handles).
   virtual void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
       kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) {}
+
+  // The startup-snapshot re-creation payload for `instance`, or kj::none if its type does not
+  // opt in or this instance cannot be re-created (DynamicResourceTypeMap::
+  // trySnapshotWrapperPayload). Overridden by Isolate<TypeWrapper>; the base has no types.
+  virtual kj::Maybe<kj::Array<kj::byte>> trySnapshotWrapperPayload(Lock& js, Object& instance) {
+    return kj::none;
+  }
 
  private:
   template <typename TypeWrapper>
@@ -575,6 +620,11 @@ class IsolateBase {
 
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;
+
+  // See recordSnapshotBindings(). Keys are only ever compared against live wrappers' addresses,
+  // never dereferenced: a binding that died in the pre-capture GC is simply never looked up.
+  kj::HashMap<const Wrappable*, kj::String> snapshotBindingNames;
+  kj::Vector<PendingSnapshotBindingRestore> pendingSnapshotBindingRestores;
 
   // Object used as the underlying storage for a workers exports.
   v8::Global<v8::Object> workerExportsObj;
@@ -890,6 +940,14 @@ class Isolate: public IsolateBase {
     }
   }
 
+  kj::Maybe<kj::Array<kj::byte>> trySnapshotWrapperPayload(Lock& js, Object& instance) override {
+    if (!hasExtraWrappers) {
+      return wrappers[0]->trySnapshotWrapperPayload(js, instance);
+    } else {
+      KJ_FAIL_ASSERT("Not yet implemented");
+    }
+  }
+
   kj::Exception unwrapException(
       Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Value> exception) override {
     return getWrapperByContext(context)->template unwrap<kj::Exception>(
@@ -1114,6 +1172,11 @@ class Isolate: public IsolateBase {
         jsgIsolate.reportError(
             *this, value.toString(*this), value, JsMessage::create(*this, value));
       }
+    }
+
+    void addPendingSnapshotBindingRestore(
+        v8::Global<v8::Object> holder, kj::StringPtr name) override {
+      jsgIsolate.addPendingSnapshotBindingRestore(kj::mv(holder), name);
     }
 
     void setWorkerEnv(V8Ref<v8::Object> value) override {

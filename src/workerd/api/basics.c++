@@ -226,6 +226,44 @@ void EventTarget::removeEventListener(jsg::Lock& js,
   }
 }
 
+jsg::JsArray EventTarget::stashEventHandlersForSnapshot(jsg::Lock& js) {
+  for (auto& entry: eventHandlerAttributes) {
+    KJ_REQUIRE(entry.value.handler == kj::none,
+        "an on<type> event handler attribute cannot be restored from a snapshot", entry.key);
+  }
+  kj::Vector<jsg::JsValue> entries;
+  for (auto& entry: typeMap) {
+    for (auto& handler: entry.value.handlers.ordered<kj::InsertionOrderIndex>()) {
+      KJ_REQUIRE(handler->abortHandler == kj::none,
+          "a listener registered with an AbortSignal cannot be restored from a snapshot",
+          entry.key);
+      KJ_REQUIRE(handler->callback.tryGetHandle(js.v8Isolate) != kj::none,
+          "a C++ listener cannot be restored from a snapshot", entry.key);
+      entries.add(js.arr(js.str(entry.key), jsg::JsValue(handler->identity.getHandle(js)),
+          js.boolean(handler->once)));
+    }
+  }
+  removeAllHandlers();
+  return js.arr(entries.asPtr());
+}
+
+void EventTarget::restoreEventHandlersFromSnapshot(jsg::Lock& js, const jsg::JsArray& stashed) {
+  jsg::JsObject self(KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js)));
+  auto addEventListener =
+      KJ_ASSERT_NONNULL(self.get(js, "addEventListener"_kj).tryCast<jsg::JsFunction>(),
+          "the restored global scope has no addEventListener");
+  // The zygote already warned about special event types, once, if it was going to.
+  bool warn = flags.warnOnSpecialEvents;
+  flags.warnOnSpecialEvents = false;
+  KJ_DEFER(flags.warnOnSpecialEvents = warn);
+  for (uint32_t i = 0; i < stashed.size(); i++) {
+    auto entry = KJ_ASSERT_NONNULL(stashed.get(js, i).tryCast<jsg::JsArray>());
+    auto options = js.obj();
+    options.set(js, "once"_kj, entry.get(js, 2));
+    addEventListener.call(js, self, entry.get(js, 0), entry.get(js, 1), jsg::JsValue(options));
+  }
+}
+
 EventTarget::EventHandlerSet& EventTarget::getOrCreate(kj::StringPtr type) {
   return typeMap.upsert(kj::str(type), EventHandlerSet(), [&](auto&&...) {}).value;
 }

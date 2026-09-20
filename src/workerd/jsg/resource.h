@@ -1114,10 +1114,51 @@ class NullConfiguration {
   NullConfiguration(T&&) {}
 };
 
+// Whether a resource type opts into re-creation from a startup snapshot; see
+// JSG_SNAPSHOT_RESTORE in jsg.h for the contract.
+template <typename T>
+concept RestorableFromSnapshot = requires(Lock& js, kj::ArrayPtr<const kj::byte> recipe) {
+  { T::restoreFromSnapshot(js, recipe) } -> std::same_as<Ref<T>>;
+};
+template <typename T>
+concept HasSnapshotRecipe = requires(T& instance, Lock& js) {
+  { instance.snapshotRecipe(js) } -> std::same_as<kj::Maybe<kj::Array<kj::byte>>>;
+};
+
 // TypeWrapper must list this type as its first superclass. The ResourceWrappers that it
 // subclasses will then be able to register themselves in the map.
 template <typename TypeWrapper>
 class DynamicResourceTypeMap {
+ public:
+  // For a startup-snapshot zygote: the bytes to store in `instance`'s wrapper so that a restored
+  // isolate can re-create its C++ half, or kj::none if `instance` cannot be re-created. The
+  // payload names the type by its position among the restorable types (fixed at compile time, so
+  // it means the same thing in the restored isolate) followed by the type's own recipe.
+  kj::Maybe<kj::Array<kj::byte>> trySnapshotWrapperPayload(Lock& js, jsg::Object& instance) {
+    auto& restorer = KJ_UNWRAP_OR(
+        snapshotRestorersByType.find(std::type_index(typeid(instance))), return kj::none);
+    auto recipe = KJ_UNWRAP_OR((*restorer.recipe)(js, instance), return kj::none);
+    auto payload = kj::heapArray<kj::byte>(sizeof(uint32_t) + recipe.size());
+    uint32_t index = restorer.index;
+    memcpy(payload.begin(), &index, sizeof(index));
+    memcpy(payload.begin() + sizeof(index), recipe.begin(), recipe.size());
+    return kj::mv(payload);
+  }
+
+  // For an isolate restored from a startup snapshot: re-create the C++ half of `holder`, a
+  // deserialized wrapper whose payload trySnapshotWrapperPayload() produced in the zygote, and
+  // attach it.
+  void restoreWrapperFromSnapshot(
+      Lock& js, v8::Local<v8::Object> holder, kj::ArrayPtr<const kj::byte> payload) {
+    KJ_REQUIRE(payload.size() >= sizeof(uint32_t), "malformed snapshot wrapper payload");
+    uint32_t index;
+    memcpy(&index, payload.begin(), sizeof(index));
+    KJ_REQUIRE(index < snapshotRestorers.size(),
+        "snapshot wrapper payload names a type this type wrapper does not know");
+    (*snapshotRestorers[index])(
+        static_cast<TypeWrapper&>(*this), js, holder, payload.slice(sizeof(index)));
+  }
+
  private:
   using ReflectionInitializer = void(jsg::Object& object, TypeWrapper& wrapper);
   struct DynamicTypeInfo {
@@ -1134,6 +1175,20 @@ class DynamicResourceTypeMap {
           typeName(type));
     }
   }
+
+  // Startup-snapshot re-creation of JSG objects (see JSG_SNAPSHOT_RESTORE). Each restorable
+  // resource type gets a slot in `snapshotRestorers`, in the TypeWrapper's compile-time type
+  // order, and `snapshotRestorersByType` finds that slot and the type's recipe function from the
+  // dynamic type of an instance. Registered by ResourceWrapper::initTypeWrapper.
+  using SnapshotRecipeFunc = kj::Maybe<kj::Array<kj::byte>>(Lock& js, jsg::Object& instance);
+  using SnapshotRestoreFunc = void(
+      TypeWrapper&, Lock& js, v8::Local<v8::Object> holder, kj::ArrayPtr<const kj::byte> recipe);
+  struct SnapshotRestorer {
+    uint32_t index;
+    SnapshotRecipeFunc* recipe;
+  };
+  kj::HashMap<std::type_index, SnapshotRestorer> snapshotRestorersByType;
+  kj::Vector<SnapshotRestoreFunc*> snapshotRestorers;
 
   using GetTypeInfoFunc = DynamicTypeInfo(TypeWrapper&, v8::Isolate*);
 
@@ -1871,6 +1926,27 @@ class ResourceWrapper {
       return {wrapper.getTemplate(isolate, static_cast<T*>(nullptr)), rinit};
     });
 
+    if constexpr (RestorableFromSnapshot<T>) {
+      using Map = DynamicResourceTypeMap<TypeWrapper>;
+      typename Map::SnapshotRecipeFunc* recipe =
+          [](Lock& js, jsg::Object& instance) -> kj::Maybe<kj::Array<kj::byte>> {
+        if constexpr (HasSnapshotRecipe<T>) {
+          return static_cast<T&>(instance).snapshotRecipe(js);
+        } else {
+          return kj::Array<kj::byte>();
+        }
+      };
+      wrapper.snapshotRestorersByType.insert(typeid(T),
+          typename Map::SnapshotRestorer{
+            .index = static_cast<uint32_t>(wrapper.snapshotRestorers.size()),
+            .recipe = recipe,
+          });
+      wrapper.snapshotRestorers.add([](TypeWrapper& wrapper, Lock& js, v8::Local<v8::Object> holder,
+                                        kj::ArrayPtr<const kj::byte> recipe) {
+        static_cast<ResourceWrapper&>(wrapper).restoreFromSnapshot(js, holder, recipe);
+      });
+    }
+
     if constexpr (static_cast<uint>(T::jsgSerializeLevel) !=
         static_cast<uint>(T::jsgSuper::jsgSerializeLevel)) {
       // This type is declared JSG_SERIALIZABLE.
@@ -1916,6 +1992,21 @@ class ResourceWrapper {
   // implementation.
   static constexpr const std::type_info& getName(Ref<T>*) {
     return typeid(T);
+  }
+
+  // Re-create the C++ half of `holder`, a wrapper of T deserialized from a startup snapshot, from
+  // the recipe the zygote's instance produced, and attach it (see JSG_SNAPSHOT_RESTORE). The
+  // deserialized wrapper was instantiated from this type's template in the zygote, which the
+  // restored isolate adopted (IsolateBase::adoptTemplatesFromSnapshot), so unwrapping finds it.
+  void restoreFromSnapshot(
+      Lock& js, v8::Local<v8::Object> holder, kj::ArrayPtr<const kj::byte> recipe)
+    requires RestorableFromSnapshot<T>
+  {
+    Ref<T> value = T::restoreFromSnapshot(js, recipe);
+    if constexpr (T::jsgHasReflection) {
+      value->jsgInitReflection(static_cast<TypeWrapper&>(*this));
+    }
+    value.attachWrapper(js.v8Isolate, holder);
   }
 
   v8::Local<v8::Object> wrap(Lock& js,
@@ -1980,6 +2071,27 @@ class ResourceWrapper {
 #else
     constexpr bool canAdoptSnapshotContext = false;
 #endif
+    // JSG wrappers the zygote's worker retained arrive from the snapshot with a re-creation
+    // payload in their internal field (IsolateBase::prepareSnapshot). V8 hands those out while it
+    // deserializes the context, with garbage collection disallowed, so they are only recorded
+    // here and re-created below, once the context is set up.
+    struct PendingWrapperRestore {
+      v8::Global<v8::Object> holder;
+      kj::Array<kj::byte> payload;
+    };
+    kj::Vector<PendingWrapperRestore> pendingRestores;
+    auto recordRestore = [](v8::Local<v8::Object> holder, int index, v8::StartupData payload,
+                             void* data) {
+      KJ_ASSERT(index == Wrappable::WRAPPED_OBJECT_FIELD_INDEX);
+      auto& pending = *reinterpret_cast<kj::Vector<PendingWrapperRestore>*>(data);
+      auto bytes = kj::arrayPtr(
+          reinterpret_cast<const kj::byte*>(payload.data), static_cast<size_t>(payload.raw_size));
+      pending.add(PendingWrapperRestore{
+        .holder = v8::Global<v8::Object>(v8::Isolate::GetCurrent(), holder),
+        .payload = kj::heapArray<kj::byte>(bytes),
+      });
+    };
+    v8::DeserializeInternalFieldsCallback restoreCallback(recordRestore, &pendingRestores);
     if (canAdoptSnapshotContext && js.isStartingFromSnapshot()) {
       // The snapshot's default context is the zygote's context: built from this same template,
       // every member installed, the worker's top-level code already run. Creating the context
@@ -1989,10 +2101,15 @@ class ResourceWrapper {
       // the snapshot's properties onto it, which was a third of an ephemeral isolate's spawn
       // cost. What is C++ state on this side (the wrapper, the embedder data slots, the module
       // registry) is re-attached below exactly as for a fresh context.
-      context = v8::Context::New(isolate, nullptr, v8::MaybeLocal<v8::ObjectTemplate>());
+      context = v8::Context::New(isolate, nullptr, v8::MaybeLocal<v8::ObjectTemplate>(),
+          v8::MaybeLocal<v8::Value>(), restoreCallback);
     } else {
+      // Either not starting from a snapshot (V8 never invokes the callback) or rebuilding the
+      // global from the template on a V8 that cannot adopt the snapshot's context; the snapshot's
+      // other objects, wrappers included, are deserialized in both cases.
       auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
-      context = v8::Context::New(isolate, nullptr, tmpl);
+      context =
+          v8::Context::New(isolate, nullptr, tmpl, v8::MaybeLocal<v8::Value>(), restoreCallback);
     }
     auto global = context->Global();
 
@@ -2059,6 +2176,15 @@ class ResourceWrapper {
     }
 
     return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
+      auto& wrapper = static_cast<TypeWrapper&>(*this);
+      for (auto& pending: pendingRestores) {
+        KJ_IF_SOME(name, tryGetSnapshotBindingName(pending.payload)) {
+          // A retained binding: re-bound by the Worker once it has compiled its own bindings.
+          js.addPendingSnapshotBindingRestore(kj::mv(pending.holder), name);
+        } else {
+          wrapper.restoreWrapperFromSnapshot(js, pending.holder.Get(isolate), pending.payload);
+        }
+      }
       setupJavascript(js);
       return JsContext<T>(context, kj::mv(ptr));
     });

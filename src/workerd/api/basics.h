@@ -372,6 +372,21 @@ class EventTarget: public jsg::Object {
     flags.warnOnSpecialEvents = true;
   }
 
+  // Startup snapshots (jsg::IsolateBase::prepareSnapshot). The listener list lives in this C++
+  // object, which dies with the zygote isolate, and its entries hold v8::Globals, which
+  // CreateBlob refuses. Moves the list into the heap as an array of [type, listener, once]
+  // triples and leaves this target without listeners. Throws if an entry cannot be
+  // re-registered from those three values: a listener registered with an AbortSignal, a C++
+  // listener, or an on<type> attribute assignment.
+  jsg::JsArray stashEventHandlersForSnapshot(jsg::Lock& js);
+
+  // Re-registers, in an isolate restored from the snapshot, the listeners
+  // stashEventHandlersForSnapshot() stashed in the zygote, through this target's own
+  // addEventListener() so that identities, receivers and the listener-count hooks come out as
+  // they would have from the worker's own calls. The stash comes from the same code, so it is
+  // trusted.
+  void restoreEventHandlersFromSnapshot(jsg::Lock& js, const jsg::JsArray& stashed);
+
   // ---------------------------------------------------------------------------
   // JS API
 
@@ -970,6 +985,10 @@ class AbortController final: public jsg::Object {
 // a subset of the API that is being defined.
 class Scheduler final: public jsg::Object {
  public:
+  // Stateless; the `scheduler` global is a lazy instance property that a worker's top-level
+  // code may retain on the global object.
+  JSG_SNAPSHOT_RESTORE(Scheduler);
+
   struct WaitOptions {
     jsg::Optional<jsg::Ref<AbortSignal>> signal;
     JSG_STRUCT(signal);

@@ -161,6 +161,16 @@ public:
   URL(kj::StringPtr url, kj::Maybe<kj::StringPtr> base = kj::none);
   ~URL() noexcept(false) override;
 
+  // Startup-snapshot re-creation (JSG_SNAPSHOT_RESTORE in jsg.h): a URL kept in module scope is
+  // re-parsed from its href. Its `searchParams` object, if the worker retained that too, is a
+  // separate wrapper that stays unrestorable.
+  kj::Maybe<kj::Array<kj::byte>> snapshotRecipe(jsg::Lock& js) {
+    return kj::heapArray<kj::byte>(getHref().asBytes());
+  }
+  static jsg::Ref<URL> restoreFromSnapshot(jsg::Lock& js, kj::ArrayPtr<const kj::byte> recipe) {
+    return js.alloc<URL>(kj::str(recipe.asChars()));
+  }
+
   static jsg::Ref<URL> constructor(jsg::Lock& js, jsg::USVString url, jsg::Optional<jsg::USVString> base);
 
   static kj::Maybe<jsg::Ref<URL>> parse(jsg::Lock& js, jsg::USVString url, jsg::Optional<jsg::USVString> base) {

@@ -343,8 +343,11 @@ class EsModule final: public Module {
     // either case, we try generating it and store it. Multiple threads can end up
     // lining up here to acquire the lock and generate the cache. We'll test to see
     // if the cached data is still empty once the lock is acquired, and if it is
-    // not, we'll skip generation.
-    if (options == v8::ScriptCompiler::CompileOptions::kNoCompileOptions) {
+    // not, we'll skip generation. A startup-snapshot zygote never generates one: V8 forbids
+    // creating a code cache while a snapshot is being created, and the compiled code goes into
+    // the blob itself.
+    if (options == v8::ScriptCompiler::CompileOptions::kNoCompileOptions &&
+        !js.isPreparingSnapshot()) {
       auto lock = cachedData.lockExclusive();
       if (*lock == kj::none) {
         if (auto ptr = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript())) {
@@ -441,6 +444,11 @@ class SyntheticModule final: public Module {
     }
     return v8::Module::CreateSyntheticModule(js.v8Isolate, js.str(id().getHref()),
         std::span<const v8::Local<v8::String>>(exports.data(), exports.size()), evaluationSteps);
+  }
+
+  // See getSyntheticModuleEvaluationStepsRef().
+  static intptr_t evaluationStepsRef() {
+    return reinterpret_cast<intptr_t>(&evaluationSteps);
   }
 
  private:
@@ -1140,6 +1148,14 @@ class IsolateModuleRegistry final {
 
   const jsg::Url& getBundleBase() const {
     return inner.getBundleBase();
+  }
+
+  // See visitIsolateModuleRegistryHandlesForSnapshot(). Resetting the keys leaves the table
+  // unusable for lookups, which is fine: nothing resolves in the zygote after this.
+  void visitHandlesForSnapshot(kj::FunctionParam<void(v8::Global<v8::Data>&)> fn) {
+    for (auto& entry: instantiations) {
+      entry.key.visitHandle(fn);
+    }
   }
 
  private:
@@ -2208,6 +2224,17 @@ kj::Maybe<jsg::JsPromise> ModuleRegistry::evaluateImpl(jsg::Lock& js,
     return callback(js, module, v8Module, observer);
   }
   return kj::none;
+}
+
+intptr_t getSyntheticModuleEvaluationStepsRef() {
+  return SyntheticModule::evaluationStepsRef();
+}
+
+void visitIsolateModuleRegistryHandlesForSnapshot(
+    v8::Local<v8::Context> context, kj::FunctionParam<void(v8::Global<v8::Data>&)> fn) {
+  KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<IsolateModuleRegistry>(
+                        context, jsg::ContextPointerSlot::MODULE_REGISTRY))
+      .visitHandlesForSnapshot(fn);
 }
 
 kj::Own<void> ModuleRegistry::attachToIsolate(Lock& js, const CompilationObserver& observer) const {

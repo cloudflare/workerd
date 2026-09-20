@@ -105,6 +105,37 @@ using SnapshotConfig = kj::OneOf<MutableSnapshot, ReadonlySharedSnapshot>;
 // =======================================================================================
 // Macros for declaring type glue.
 
+// Startup snapshots serialize a JSG object's JavaScript wrapper like any other object, but the
+// C++ half dies with the zygote isolate that produced the blob. A resource type whose C++ state is
+// nothing more than what its constructor computes can opt into being re-created in an isolate
+// restored from the snapshot by defining
+//
+//     static jsg::Ref<T> restoreFromSnapshot(jsg::Lock& js, kj::ArrayPtr<const kj::byte> recipe);
+//
+// and, when re-creation needs data from the zygote's instance,
+//
+//     kj::Maybe<kj::Array<kj::byte>> snapshotRecipe(jsg::Lock& js);
+//
+// The recipe is computed in the zygote before the blob is created and handed back verbatim to
+// restoreFromSnapshot() in the restored isolate; returning kj::none declares this particular
+// instance unrestorable, which makes the whole snapshot fail (the worker then keeps a shared
+// isolate). Without snapshotRecipe() the recipe is empty and every instance is restorable. The
+// re-created object is attached to the deserialized wrapper, so JavaScript keeps its identity and
+// any properties the worker set on it. See ResourceWrapper::restoreFromSnapshot and
+// IsolateBase::prepareSnapshot.
+//
+// JSG_SNAPSHOT_RESTORE declares the common case: an object that is fully re-created by its
+// default constructor.
+#define JSG_SNAPSHOT_RESTORE(Type)                                                                 \
+  static ::workerd::jsg::Ref<Type> restoreFromSnapshot(                                            \
+      ::workerd::jsg::Lock& js, kj::ArrayPtr<const kj::byte>) {                                    \
+    return js.alloc<Type>();                                                                       \
+  }
+
+// The binding name carried by a snapshot wrapper payload of the binding kind, or kj::none for a
+// payload of a type recipe. See IsolateBase::recordSnapshotBindings() in setup.h.
+kj::Maybe<kj::StringPtr> tryGetSnapshotBindingName(kj::ArrayPtr<const kj::byte> payload);
+
 #define JSG_RESOURCE_TYPE(Type, ...)                                                               \
   static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = ::workerd::jsg::JsgKind::RESOURCE; \
   using jsgSuper = jsgThis;                                                                        \
@@ -3335,6 +3366,12 @@ class Lock {
   // Logs and reports the error to tail workers (if called within an request),
   // the inspector (if attached), or to KJ_LOG(Info).
   virtual void reportError(const JsValue& value) = 0;
+
+  // Startup snapshots: records a deserialized wrapper that is a binding the zygote's worker
+  // retained, for the Worker to re-bind once it has compiled its bindings. See
+  // IsolateBase::recordSnapshotBindings() in setup.h.
+  virtual void addPendingSnapshotBindingRestore(
+      v8::Global<v8::Object> holder, kj::StringPtr name) = 0;
 
   // Store the worker environment.
   virtual void setWorkerEnv(V8Ref<v8::Object> value) = 0;

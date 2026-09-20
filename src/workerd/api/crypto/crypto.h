@@ -334,6 +334,9 @@ struct CryptoKeyPair {
 
 class SubtleCrypto: public jsg::Object {
  public:
+  // Stateless; retained through `crypto.subtle` (see Crypto::restoreFromSnapshot).
+  JSG_SNAPSHOT_RESTORE(SubtleCrypto);
+
   // Algorithm dictionaries
   //
   // Every method of SubtleCrypto except `exportKey()` takes an `algorithm` parameter, usually as the
@@ -848,6 +851,12 @@ class DigestStream: public WritableStream {
 class Crypto: public jsg::Object {
  public:
   Crypto(jsg::Lock& js): subtle(js.alloc<SubtleCrypto>()) {}
+
+  // Stateless; the `crypto` global is a lazy instance property, so a worker that touches it at
+  // top level retains this instance on the global object.
+  static jsg::Ref<Crypto> restoreFromSnapshot(jsg::Lock& js, kj::ArrayPtr<const kj::byte>) {
+    return js.alloc<Crypto>(js);
+  }
 
   jsg::JsArrayBufferView getRandomValues(jsg::JsArrayBufferView buffer);
 

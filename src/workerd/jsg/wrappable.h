@@ -84,6 +84,13 @@ constexpr int SNAPSHOT_WASM_SHIM_FACTORY_SLOT = SNAPSHOT_MAIN_MODULE_NAMESPACE_S
 // bootstrap scripts again.
 constexpr int SNAPSHOT_BOOTSTRAP_STATE_SLOT = SNAPSHOT_WASM_SHIM_FACTORY_SLOT + 1;
 
+// Tagged embedder-data slot in which the zygote parks the global scope's event listener list
+// (api::EventTarget::stashEventHandlersForSnapshot) as plain JS values before the blob is created.
+// The list itself lives in the C++ EventTarget, which dies with the zygote, and its entries hold
+// v8::Globals, which CreateBlob refuses; a restored isolate re-registers the listeners from the
+// slot (io/worker.c++).
+constexpr int SNAPSHOT_GLOBAL_EVENT_HANDLERS_SLOT = SNAPSHOT_BOOTSTRAP_STATE_SLOT + 1;
+
 inline void setAlignedPointerInEmbedderData(
     v8::Local<v8::Context> context, ContextPointerSlot slot, void* ptr) {
   // The type tag is a small integer that should be different for every pointer
@@ -308,6 +315,15 @@ class Wrappable: public kj::Refcounted {
   // Detaches the wrapper from V8 and returns the reference that V8 had previously held.
   // (Typically, the caller will ignore the return value, thus dropping the reference.)
   kj::Own<Wrappable> detachWrapper(bool shouldFreelistShim);
+
+  // For isolates restored from a startup snapshot: moves the object behind `from`, a wrapper
+  // created in this isolate, onto `to`, a wrapper deserialized from the snapshot whose C++ half
+  // died with the zygote, so that JavaScript's references to `to` reach a live object. `from` is
+  // left as an inert object with empty internal fields. Used to re-bind a binding the worker's
+  // top-level code retained (a `Fetcher` kept in module scope) to the binding the restored
+  // isolate compiled under the same name; see IsolateBase::SNAPSHOT_BINDING_PAYLOAD_INDEX.
+  static void transplantWrapperForSnapshot(
+      v8::Isolate* isolate, v8::Local<v8::Object> from, v8::Local<v8::Object> to);
 
   // Called by HeapTracer when V8 tells us that it found a reference to this object.
   void traceFromV8(cppgc::Visitor& cppgcVisitor);

@@ -10,6 +10,7 @@
 #include "setup.h"
 
 #include "libplatform/libplatform.h"
+#include "modules-new.h"
 
 #include <v8-cppgc.h>
 #include <v8-initialization.h>
@@ -543,18 +544,17 @@ IsolateBase::IsolateBase(V8System& system,
   });
 }
 
-void IsolateBase::rejectSnapshotWithUnrestorableWrappers(v8::Local<v8::Context> defaultContext) {
+void IsolateBase::rejectSnapshotWithUnrestorableWrappers(
+    v8::Local<v8::Context> defaultContext, const SnapshotWrapperPayloads& payloads) {
   // A JSG object's JavaScript wrapper is serialized like any other object, but its C++ half
-  // dies with the zygote and nothing re-creates it in an isolate restored from the blob: calling
-  // a method on such a "zombie" would dereference a null internal field. The global object is the
-  // one exception, since newContext() attaches a fresh C++ global scope to the deserialized
-  // global. Any other wrapper still reachable after a full GC was retained by the worker's
-  // top-level code (`const enc = new TextEncoder()` at module scope, a `crypto` access cached on
-  // the global, ...), so such a worker cannot be snapshotted until JSG objects can be re-created
-  // from the heap. Collect first: the zygote's own setup leaves wrappers behind (bindings, the
-  // ctx.exports object) that only its C++ locals referenced.
-  ptr->LowMemoryNotification();
-
+  // dies with the zygote. Types that opt in (JSG_SNAPSHOT_RESTORE) have a payload in `payloads`
+  // from which the restored isolate re-creates the C++ half; the global object is re-created by
+  // newContext() regardless. Any other wrapper still reachable after a full GC was retained by
+  // the worker's top-level code (a `Fetcher` binding cached in module scope, a `caches` access
+  // cached on the global, ...); calling a method on such a "zombie" in a restored isolate would
+  // dereference a null internal field, so such a worker cannot be snapshotted. The caller has
+  // collected garbage: the zygote's own setup leaves wrappers behind (bindings, the ctx.exports
+  // object) that only its C++ locals referenced.
   v8::HandleScope scope(ptr);
   auto global = defaultContext->Global();
   kj::Vector<kj::String> leftovers;
@@ -562,12 +562,121 @@ void IsolateBase::rejectSnapshotWithUnrestorableWrappers(v8::Local<v8::Context> 
     KJ_IF_SOME(handle, wrappable.tryGetHandle(ptr)) {
       if (handle->StrictEquals(global)) continue;
     }
-    leftovers.add(typeName(typeid(wrappable)));
+    if (payloads.find(&wrappable) != kj::none) continue;
+    // The JSG type name where there is one (every resource type defines it); typeid() of the
+    // Wrappable& only sees the base class.
+    leftovers.add(wrappable.jsgTryGetObject() == nullptr ? typeName(typeid(wrappable))
+                                                         : kj::str(wrappable.jsgGetMemoryName()));
   }
   KJ_REQUIRE(leftovers.size() == 0,
-      "worker retains JSG objects from its top-level evaluation; they cannot be restored from a "
-      "snapshot yet",
+      "worker retains JSG objects from its top-level evaluation that cannot be restored from a "
+      "snapshot",
       leftovers);
+}
+
+namespace {
+
+// v8::SerializeInternalFieldsCallback for the zygote's default context: writes each live JSG
+// wrapper's re-creation payload (IsolateBase::SnapshotWrapperPayloads, passed as `data`) into
+// the wrapper's object-pointer field. Wrappers without a payload, the global object among them,
+// get an empty field, as does the tag field of every wrapper. V8 runs this with garbage
+// collection and JavaScript disallowed, which is why the payloads are computed beforehand. V8
+// takes ownership of the returned bytes and `delete[]`s them.
+v8::StartupData serializeWrapperInternalField(v8::Local<v8::Object> holder, int index, void* data) {
+  if (index != Wrappable::WRAPPED_OBJECT_FIELD_INDEX) return {nullptr, 0};
+  auto* wrappable = holder->GetAlignedPointerFromInternalField(
+      index, static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+  if (wrappable == nullptr) return {nullptr, 0};
+  auto& payloads = *reinterpret_cast<const IsolateBase::SnapshotWrapperPayloads*>(data);
+  KJ_IF_SOME(payload, payloads.find(reinterpret_cast<const Wrappable*>(wrappable))) {
+    auto copy = new char[payload.size()];
+    memcpy(copy, payload.begin(), payload.size());
+    return {copy, static_cast<int>(payload.size())};
+  }
+  return {nullptr, 0};
+}
+
+}  // namespace
+
+namespace {
+
+// The JSG object behind `value`, if it is a JSG wrapper.
+kj::Maybe<Wrappable&> tryGetWrappable(v8::Local<v8::Value> value) {
+  if (!value->IsObject()) return kj::none;
+  auto object = value.As<v8::Object>();
+  if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
+      !Wrappable::isWorkerdApiObject(object)) {
+    return kj::none;
+  }
+  auto* ptr = object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+      static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+  if (ptr == nullptr) return kj::none;
+  return *reinterpret_cast<Wrappable*>(ptr);
+}
+
+}  // namespace
+
+void IsolateBase::recordSnapshotBindings(
+    v8::Local<v8::Context> context, v8::Local<v8::Object> scope, v8::Local<v8::Map> before) {
+  KJ_REQUIRE(isPreparingSnapshot());
+  v8::HandleScope handleScope(ptr);
+  auto& js = Lock::from(ptr);
+  auto names = check(scope->GetOwnPropertyNames(context,
+      static_cast<v8::PropertyFilter>(v8::PropertyFilter::ALL_PROPERTIES | v8::SKIP_SYMBOLS),
+      v8::KeyConversionMode::kConvertToString));
+  for (uint32_t i = 0; i < names->Length(); i++) {
+    auto name = check(names->Get(context, i));
+    auto value = check(scope->Get(context, name));
+    if (check(before->Has(context, name)) &&
+        check(before->Get(context, name))->StrictEquals(value)) {
+      continue;  // was there before the bindings were installed
+    }
+    KJ_IF_SOME(wrappable, tryGetWrappable(value)) {
+      if (value->StrictEquals(scope)) continue;  // `self` on a service worker's global
+      snapshotBindingNames.upsert(
+          &wrappable, JsValue(name).toString(js), [](kj::String&, kj::String&&) {});
+    }
+  }
+}
+
+kj::Maybe<kj::StringPtr> tryGetSnapshotBindingName(kj::ArrayPtr<const kj::byte> payload) {
+  if (payload.size() < sizeof(uint32_t)) return kj::none;
+  uint32_t index;
+  memcpy(&index, payload.begin(), sizeof(index));
+  if (index != IsolateBase::SNAPSHOT_BINDING_PAYLOAD_INDEX) return kj::none;
+  auto name = payload.slice(sizeof(index)).asChars();
+  KJ_REQUIRE(name.size() >= 1 && name.back() == '\0', "malformed snapshot binding payload");
+  return kj::StringPtr(name.begin(), name.size() - 1);
+}
+
+// Computes the re-creation payload of every live JSG wrapper whose type opts in, or that was
+// recorded as a binding, with the default context entered so that a type's snapshotRecipe() may
+// read JavaScript state. A type's own recipe wins over the binding payload: it re-creates the
+// object without a lookup, and a binding of such a type is not a handle to I/O state.
+IsolateBase::SnapshotWrapperPayloads IsolateBase::collectSnapshotWrapperPayloads(
+    v8::Local<v8::Context> defaultContext) {
+  SnapshotWrapperPayloads payloads;
+  v8::HandleScope scope(ptr);
+  v8::Context::Scope contextScope(defaultContext);
+  auto& js = Lock::from(ptr);
+  for (auto& wrappable: heapTracer.liveWrappables()) {
+    Object* object = wrappable.jsgTryGetObject();
+    if (object == nullptr) continue;
+    KJ_IF_SOME(payload, trySnapshotWrapperPayload(js, *object)) {
+      payloads.insert(&wrappable, kj::mv(payload));
+      continue;
+    }
+    KJ_IF_SOME(name, snapshotBindingNames.find(&wrappable)) {
+      // The name is stored NUL-terminated so that tryGetSnapshotBindingName() can hand out a
+      // StringPtr into the payload.
+      auto payload = kj::heapArray<kj::byte>(sizeof(uint32_t) + name.size() + 1);
+      uint32_t index = SNAPSHOT_BINDING_PAYLOAD_INDEX;
+      memcpy(payload.begin(), &index, sizeof(index));
+      memcpy(payload.begin() + sizeof(index), name.cStr(), name.size() + 1);
+      payloads.insert(&wrappable, kj::mv(payload));
+    }
+  }
+  return payloads;
 }
 
 void IsolateBase::prepareSnapshot(v8::Global<v8::Context> defaultContextHandle) {
@@ -576,15 +685,30 @@ void IsolateBase::prepareSnapshot(v8::Global<v8::Context> defaultContextHandle) 
   auto& creator = KJ_ASSERT_NONNULL(snapshotCreator);
 
   auto defaultContext = defaultContextHandle.Get(ptr);
-  rejectSnapshotWithUnrestorableWrappers(defaultContext);
+  // A full GC first, so that only wrappers the worker actually retained are considered, both
+  // for re-creation payloads and for the rejection check.
+  ptr->LowMemoryNotification();
+  auto payloads = collectSnapshotWrapperPayloads(defaultContext);
+  rejectSnapshotWithUnrestorableWrappers(defaultContext, payloads);
 
   // Detach the strongWrapper / traced wrapper of every live Wrappable.
   // The returned keepalives are held in this scope so they
   // outlive CreateBlob() below, which dereferences the Wrappable* stored in internal
-  // fields while serializing.
+  // fields while serializing, and so serializeWrapperInternalField() can look them up.
   auto snapshotKeepalives = heapTracer.resetLiveWrappableInstances();
 
-  creator->SetDefaultContext(defaultContext);
+  // A binding wrapper is re-bound to a freshly compiled binding in the restored isolate, so its
+  // C++ half is not needed past this point, and it may hold V8 handles that CreateBlob refuses (a
+  // CryptoKey binding's public exponent). Drop the ones nothing else references. Their addresses
+  // remain valid as keys of `payloads`: nothing is allocated before the blob is created.
+  for (auto& keepalive: snapshotKeepalives) {
+    KJ_IF_SOME(payload, payloads.find(keepalive.get())) {
+      if (tryGetSnapshotBindingName(payload) != kj::none) keepalive = nullptr;
+    }
+  }
+
+  creator->SetDefaultContext(defaultContext,
+      v8::SerializeInternalFieldsCallback(&serializeWrapperInternalField, &payloads));
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
 
   // Record the templates every snapshotted JSG object was instantiated from, so that restored
@@ -618,13 +742,19 @@ void IsolateBase::prepareSnapshot(v8::Global<v8::Context> defaultContextHandle) 
   visitStructTypeHandles([](v8::Global<v8::Name>& h) { h.Reset(); },
       [](v8::Global<v8::DictionaryTemplate>& h) { h.Reset(); });
 
-  // 4. Reset module registry: per-entry module / source-object / mutable-exports / synthetic
-  // handles (incl. CommonJS evalFunc); the jsg::Data visitors also drop the paired
-  // TracedReference.
-  KJ_REQUIRE(!usingNewModuleRegistry, "snapshot not yet supported with the new module registry");
-  auto& moduleRegistry = KJ_ASSERT_NONNULL(getAlignedPointerFromEmbedderData<ModuleRegistry>(
-      defaultContext, ContextPointerSlot::MODULE_REGISTRY));
-  moduleRegistry.visitHandlesForSnapshot([](v8::Global<v8::Data>& h) { h.Reset(); });
+  // 4. Reset the module registry's per-isolate handles; the jsg::Data visitors also drop the
+  // paired TracedReference. Legacy registry: per-entry module / source-object / mutable-exports /
+  // synthetic handles (incl. CommonJS evalFunc). New registry: the v8::Module of every
+  // instantiated module. Either way the restored isolate starts with an empty registry and takes
+  // the evaluated main module out of the heap (io/worker.c++).
+  auto resetHandle = [](v8::Global<v8::Data>& h) { h.Reset(); };
+  if (usingNewModuleRegistry) {
+    modules::visitIsolateModuleRegistryHandlesForSnapshot(defaultContext, resetHandle);
+  } else {
+    auto& moduleRegistry = KJ_ASSERT_NONNULL(getAlignedPointerFromEmbedderData<ModuleRegistry>(
+        defaultContext, ContextPointerSlot::MODULE_REGISTRY));
+    moduleRegistry.visitHandlesForSnapshot(resetHandle);
+  }
 
   // 5. Reset the Global holding the default context, extracted from the script's module
   // context. The Local above keeps the context reachable for CreateBlob.

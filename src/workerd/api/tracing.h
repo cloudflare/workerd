@@ -219,6 +219,9 @@ class Tracing: public jsg::Object {
       getActiveSpan(): Span | undefined;
     });
   }
+
+  // Stateless: a worker that imports `cloudflare:workers` at top level retains this instance.
+  JSG_SNAPSHOT_RESTORE(Tracing);
 };
 
 // Registers `cloudflare-internal:tracing` as a builtin module. The `Module` suffix on the

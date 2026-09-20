@@ -840,6 +840,18 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
   friend class Module::Evaluator;
 };
 
+// The address of the evaluation-steps callback every synthetic module of the new registry is
+// created with. V8 stores it as a Foreign on the module, so a startup snapshot needs it in the
+// external-reference table (jsg::isolateRegisterExternalReference), like the legacy registry's
+// getSyntheticModuleEvalRef().
+intptr_t getSyntheticModuleEvaluationStepsRef();
+
+// For jsg::IsolateBase::prepareSnapshot: visits the v8::Global of every module the registry
+// bound to `context` has instantiated, so they can be reset before the heap is serialized. The
+// registry is unusable afterwards; the zygote isolate is discarded right after the blob is made.
+void visitIsolateModuleRegistryHandlesForSnapshot(
+    v8::Local<v8::Context> context, kj::FunctionParam<void(v8::Global<v8::Data>&)> fn);
+
 constexpr ModuleRegistry::Builder::Options operator|(
     const ModuleRegistry::Builder::Options& a, const ModuleRegistry::Builder::Options& b) {
   return static_cast<ModuleRegistry::Builder::Options>(

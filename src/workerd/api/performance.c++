@@ -6,6 +6,7 @@
 
 #include <workerd/io/io-util.h>
 #include <workerd/io/limit-enforcer.h>
+#include <workerd/io/worker.h>
 
 #include <kj/encoding.h>
 
@@ -391,6 +392,11 @@ void EventCounts::forEach(jsg::Lock& js,
 jsg::Ref<EventCounts> Performance::getEventCounts(jsg::Lock& js) {
   // Return a new EventCounts instance (currently empty as we don't track events)
   return js.alloc<EventCounts>();
+}
+
+jsg::Ref<Performance> Performance::restoreFromSnapshot(
+    jsg::Lock& js, kj::ArrayPtr<const kj::byte> recipe) {
+  return js.alloc<Performance>(Worker::Isolate::from(js).getLimitEnforcer());
 }
 
 }  // namespace workerd::api

@@ -503,9 +503,9 @@ enum SnapshotField : uint32_t {
 // context carries none (the snapshot was taken before the bootstrap ran, or without it).
 bool restoreBootstrapStateFromSnapshot(
     jsg::Lock& js, v8::Local<v8::Context> context, BootstrapState& state) {
-  auto data = context->GetEmbedderData(jsg::SNAPSHOT_BOOTSTRAP_STATE_SLOT);
-  if (data.IsEmpty() || !data->IsArray()) return false;
-  auto array = data.As<v8::Array>();
+  auto data = context->GetEmbedderDataV2(jsg::SNAPSHOT_BOOTSTRAP_STATE_SLOT);
+  if (data.IsEmpty() || !data->IsValue() || !data.As<v8::Value>()->IsArray()) return false;
+  auto array = data.As<v8::Value>().As<v8::Array>();
   KJ_REQUIRE(array->Length() == SNAPSHOT_FIELD_COUNT,
       "snapshot bootstrap state has an unexpected layout", array->Length());
 
@@ -644,7 +644,7 @@ void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> c
     cache.set(js, entry.key, entry.value.getHandle(js));
   }
   set(SNAPSHOT_CACHE, cache);
-  context->SetEmbedderData(jsg::SNAPSHOT_BOOTSTRAP_STATE_SLOT, array);
+  context->SetEmbedderDataV2(jsg::SNAPSHOT_BOOTSTRAP_STATE_SLOT, array);
 
   // The handles now have heap-side copies; drop the C++ state that held them.
   cleanupPerIsolateBootstrap(js, context);

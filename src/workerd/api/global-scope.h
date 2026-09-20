@@ -90,6 +90,10 @@ using DOMException = jsg::DOMException;
 // A subset of the standard Navigator API.
 class Navigator: public jsg::Object {
  public:
+  // Stateless; the `navigator` global is a lazy instance property that a worker's top-level
+  // code may retain on the global object.
+  JSG_SNAPSHOT_RESTORE(Navigator);
+
   kj::StringPtr getUserAgent() {
     return "Cloudflare-Workers"_kj;
   }
@@ -145,6 +149,10 @@ class Navigator: public jsg::Object {
 // be taken when deciding to expose new properties or methods here.
 class Cloudflare: public jsg::Object {
  public:
+  // Stateless; the `Cloudflare` global is a lazy instance property that a worker's top-level
+  // code may retain on the global object.
+  JSG_SNAPSHOT_RESTORE(Cloudflare);
+
   // Return an object containing the state of all compatibility flags known to the runtime.
   jsg::JsObject getCompatibilityFlags(jsg::Lock& js);
 

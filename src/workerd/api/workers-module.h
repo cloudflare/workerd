@@ -107,6 +107,9 @@ class EntrypointsModule: public jsg::Object {
     JSG_LAZY_INSTANCE_PROPERTY(restore, getRestoreSymbol);
     JSG_METHOD(abortIsolate);
   }
+
+  // Stateless: a worker that imports `cloudflare:workers` at top level retains this instance.
+  JSG_SNAPSHOT_RESTORE(EntrypointsModule);
 };
 
 #define EW_WORKERS_MODULE_ISOLATE_TYPES                                                            \
