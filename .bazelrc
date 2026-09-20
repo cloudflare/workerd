@@ -252,10 +252,16 @@ build:sanitizer-common --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
 #
 # Instruments both C++ and Rust (nightly rustc with -Zsanitizer=address plus an ASan-built standard
 # library, see //build/rust). Supported hosts: Linux x86_64 and aarch64, macOS arm64.
+#
+# Also enables UndefinedBehaviorSanitizer for C++ (https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html).
+# Unlike ASan and TSan, UBSan can share a build with either, so it rides along here instead of
+# needing its own CI lane. It instruments C++ only: rustc has no UBSan, and safe Rust already checks
+# bounds and (in debug builds) integer overflow.
 build:asan --config=sanitizer-common
 build:asan --platforms=//build/platforms:sanitizer_address_platform
-build:asan --copt="-fsanitize=address" --linkopt="-fsanitize=address"
+build:asan --copt="-fsanitize=address,undefined" --linkopt="-fsanitize=address,undefined"
 build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
+build:asan --test_env=UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
 build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
 build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
