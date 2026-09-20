@@ -19,6 +19,16 @@ class URL: public jsg::Object {
 public:
   static jsg::Ref<URL> constructor(jsg::Lock& js, kj::String url, jsg::Optional<kj::String> base);
 
+  // Startup-snapshot re-creation (JSG_SNAPSHOT_RESTORE in jsg.h): a URL kept in module scope is
+  // re-parsed from its href. Its `searchParams` object, if the worker retained that too, is a
+  // separate wrapper that stays unrestorable.
+  kj::Maybe<kj::Array<kj::byte>> snapshotRecipe(jsg::Lock& js) {
+    return kj::heapArray<kj::byte>(getHref().asBytes());
+  }
+  static jsg::Ref<URL> restoreFromSnapshot(jsg::Lock& js, kj::ArrayPtr<const kj::byte> recipe) {
+    return constructor(js, kj::str(recipe.asChars()), kj::none);
+  }
+
   // Href is the only setter that throws. All others ignore errors, leaving their values
   // unchanged.
   kj::String getHref();

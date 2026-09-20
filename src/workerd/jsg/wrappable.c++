@@ -645,6 +645,25 @@ kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
   return kj::none;
 }
 
+void Wrappable::transplantWrapperForSnapshot(
+    v8::Isolate* isolate, v8::Local<v8::Object> from, v8::Local<v8::Object> to) {
+  KJ_REQUIRE(from->InternalFieldCount() == INTERNAL_FIELD_COUNT && isWorkerdApiObject(from),
+      "the value compiled for a retained binding is not a JSG object");
+  auto* shim = static_cast<CppgcShim*>(
+      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, from, kJsgWrappableTagRange));
+  KJ_REQUIRE(shim != nullptr, "the value compiled for a retained binding has no JSG object");
+  auto tag = shim->tag;
+  auto& wrappable = shim->resolve(from);
+
+  // Keep the object alive between the detach and the attach; the new shim takes its own ref.
+  auto keepalive = wrappable.detachWrapper(false);
+  v8::Object::Wrap<WRAPPABLE_TAG>(isolate, from, nullptr);
+  from->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX, nullptr,
+      static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX));
+  // attachWrapper() does not consult the tracing flag; the object's own jsgVisitForGc() does.
+  wrappable.attachWrapper(isolate, to, /*needsGcTracing=*/true, tag);
+}
+
 void reportWrapperTypeMismatch(const std::type_info& expected, const std::type_info& actual) {
   // Only reachable if the wrapper's internal field has been made to point at an object of the
   // wrong type, which means memory outside this process's control has already been corrupted.

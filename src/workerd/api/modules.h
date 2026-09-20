@@ -48,6 +48,9 @@ class EnvModule final: public jsg::Object {
     JSG_METHOD(withExports);
     JSG_METHOD(withEnvAndExports);
   }
+
+  // Stateless: a worker that imports `cloudflare:workers` at top level retains this instance.
+  JSG_SNAPSHOT_RESTORE(EnvModule);
 };
 
 template <class Registry>
