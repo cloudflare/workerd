@@ -105,6 +105,31 @@ class AsyncLocalStorage final: public jsg::Object {
 
   kj::Arc<jsg::AsyncContextFrame::StorageKey> getKey();
 
+  // Startup-snapshot re-creation (JSG_SNAPSHOT_RESTORE in jsg.h). An instance kept in module
+  // scope is the usual way to use this API. Its only state is the key, which no frame refers to
+  // in a freshly restored isolate, so a new key is as good as the old one; the name travels in
+  // the recipe (one presence byte, then the name). A JavaScript default value cannot be carried,
+  // so an instance that has one stays unrestorable.
+  kj::Maybe<kj::Array<kj::byte>> snapshotRecipe(jsg::Lock& js) {
+    if (defaultValue != kj::none) return kj::none;
+    KJ_IF_SOME(n, name) {
+      auto recipe = kj::heapArray<kj::byte>(1 + n.size());
+      recipe[0] = 1;
+      memcpy(recipe.begin() + 1, n.begin(), n.size());
+      return kj::mv(recipe);
+    }
+    return kj::heapArray<kj::byte>({kj::byte(0)});
+  }
+  static jsg::Ref<AsyncLocalStorage> restoreFromSnapshot(
+      jsg::Lock& js, kj::ArrayPtr<const kj::byte> recipe) {
+    KJ_REQUIRE(recipe.size() >= 1, "malformed AsyncLocalStorage snapshot recipe");
+    if (recipe[0] == 0) return js.alloc<AsyncLocalStorage>();
+    return js.alloc<AsyncLocalStorage>(AsyncLocalStorageOptions{
+      .defaultValue = kj::none,
+      .name = kj::str(recipe.slice(1).asChars()),
+    });
+  }
+
  private:
   kj::Arc<jsg::AsyncContextFrame::StorageKey> key;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> defaultValue;
@@ -257,6 +282,9 @@ class AsyncHooksModule final: public jsg::Object {
     JSG_NESTED_TYPE(AsyncLocalStorage);
     JSG_NESTED_TYPE(AsyncResource);
   }
+
+  // Stateless: a worker that imports `node:async_hooks` at top level retains this instance.
+  JSG_SNAPSHOT_RESTORE(AsyncHooksModule);
 };
 
 #define EW_NODE_ASYNCHOOKS_ISOLATE_TYPES                                                           \

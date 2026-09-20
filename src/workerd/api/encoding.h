@@ -76,6 +76,24 @@ class TextDecoder final: public jsg::Object {
   static jsg::Ref<TextDecoder> constructor(
       jsg::Lock& js, jsg::Optional<kj::String> label, jsg::Optional<ConstructorOptions> options);
 
+  // Startup-snapshot re-creation (JSG_SNAPSHOT_RESTORE in jsg.h): a decoder kept in module scope
+  // is re-created from its constructor arguments (recipe: fatal byte, ignoreBOM byte, encoding
+  // label). Any partial decode in progress at capture is not carried over.
+  kj::Maybe<kj::Array<kj::byte>> snapshotRecipe(jsg::Lock& js) {
+    auto label = getEncoding();
+    auto recipe = kj::heapArray<kj::byte>(2 + label.size());
+    recipe[0] = ctorOptions.fatal;
+    recipe[1] = ctorOptions.ignoreBOM;
+    memcpy(recipe.begin() + 2, label.begin(), label.size());
+    return kj::mv(recipe);
+  }
+  static jsg::Ref<TextDecoder> restoreFromSnapshot(
+      jsg::Lock& js, kj::ArrayPtr<const kj::byte> recipe) {
+    KJ_REQUIRE(recipe.size() >= 2, "malformed TextDecoder snapshot recipe");
+    return constructor(js, kj::str(recipe.slice(2).asChars()),
+        ConstructorOptions{.fatal = recipe[0] != 0, .ignoreBOM = recipe[1] != 0});
+  }
+
   jsg::JsString decode(jsg::Lock& js,
       jsg::Optional<kj::Array<const kj::byte>> input,
       jsg::Optional<DecodeOptions> options);
@@ -150,6 +168,9 @@ class TextEncoder final: public jsg::Object {
   kj::StringPtr getEncoding() {
     return "utf-8";
   }
+
+  // Stateless, and commonly kept in module scope (`const encoder = new TextEncoder()`).
+  JSG_SNAPSHOT_RESTORE(TextEncoder);
 
   JSG_RESOURCE_TYPE(TextEncoder, CompatibilityFlags::Reader flags) {
     JSG_METHOD(encode);

@@ -38,6 +38,23 @@ class Cache: public jsg::Object {
  public:
   explicit Cache(kj::Maybe<kj::String> cacheName);
 
+  // Startup-snapshot re-creation (JSG_SNAPSHOT_RESTORE in jsg.h): the only state is the name,
+  // carried in the recipe as one presence byte followed by the name.
+  kj::Maybe<kj::Array<kj::byte>> snapshotRecipe(jsg::Lock& js) {
+    KJ_IF_SOME(n, cacheName) {
+      auto recipe = kj::heapArray<kj::byte>(1 + n.size());
+      recipe[0] = 1;
+      memcpy(recipe.begin() + 1, n.begin(), n.size());
+      return kj::mv(recipe);
+    }
+    return kj::heapArray<kj::byte>({kj::byte(0)});
+  }
+  static jsg::Ref<Cache> restoreFromSnapshot(jsg::Lock& js, kj::ArrayPtr<const kj::byte> recipe) {
+    KJ_REQUIRE(recipe.size() >= 1, "malformed Cache snapshot recipe");
+    if (recipe[0] == 0) return js.alloc<Cache>(kj::none);
+    return js.alloc<Cache>(kj::str(recipe.slice(1).asChars()));
+  }
+
   jsg::Unimplemented add(Request::Info request);
   jsg::Unimplemented addAll(kj::Array<Request::Info> requests);
 
@@ -101,6 +118,12 @@ class Cache: public jsg::Object {
 class CacheStorage: public jsg::Object {
  public:
   CacheStorage(jsg::Lock& js);
+
+  // Stateless; the `caches` global is a lazy instance property, so a worker that touches it at
+  // top level retains this instance on the global object.
+  static jsg::Ref<CacheStorage> restoreFromSnapshot(jsg::Lock& js, kj::ArrayPtr<const kj::byte>) {
+    return js.alloc<CacheStorage>(js);
+  }
 
   jsg::Promise<jsg::Ref<Cache>> open(jsg::Lock& js, kj::String cacheName);
 
