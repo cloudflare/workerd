@@ -9,6 +9,7 @@
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/worker.h>
+#include <workerd/jsg/snapshot.h>
 #include <workerd/server/workerd.capnp.h>
 
 #include <kj/async-io.h>
@@ -352,6 +353,20 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   struct WorkerDef;
   kj::Promise<kj::Own<WorkerService>> makeWorkerImpl(kj::StringPtr name,
       WorkerDef def,
+      capnp::List<config::Extension>::Reader extensions,
+      ErrorReporter& errorReporter);
+
+  kj::Own<Worker::Isolate> makeWorkerIsolate(kj::StringPtr name,
+      kj::StringPtr inboundListenersKey,
+      const WorkerDef& def,
+      capnp::List<config::Extension>::Reader extensions,
+      Worker::Isolate::InspectorPolicy inspectorPolicy,
+      kj::Maybe<jsg::SnapshotConfig> snapshotConfig);
+
+  // Creates a throwaway zygote Worker in PREPARE_SNAPSHOT mode and return the
+  // filled snapshot artifact.
+  kj::Own<jsg::SnapshotArtifact> makeSnapshot(kj::StringPtr name,
+      WorkerDef& def,
       capnp::List<config::Extension>::Reader extensions,
       ErrorReporter& errorReporter);
 
