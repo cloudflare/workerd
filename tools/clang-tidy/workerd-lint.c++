@@ -13,20 +13,21 @@
 //   - promise-ignore-result.c++: workerd-promise-ignore-result check
 //   - visit-for-gc.c++: jsg-visit-for-gc check
 //   - unsafe-continuation-capture.c++: workerd-unsafe-continuation-capture check
-
-#include "clang-tidy/ClangTidyModule.h"
+//   - use-after-move.c++: workerd-use-after-move check
 
 #include "angled-includes.h"
+#include "clang-tidy/ClangTidyModule.h"
 #include "consume.h"
 #include "legacy-stream-alloc.h"
 #include "promise-ignore-result.h"
 #include "unsafe-continuation-capture.h"
+#include "use-after-move.h"
 #include "visit-for-gc.h"
 
 namespace workerd {
 namespace clang_tidy {
 
-class WorkerdLintModule : public clang::tidy::ClangTidyModule {
+class WorkerdLintModule: public clang::tidy::ClangTidyModule {
  public:
   void addCheckFactories(clang::tidy::ClangTidyCheckFactories &CheckFactories) override {
     CheckFactories.registerCheck<AngledIncludesCheck>("workerd-angled-includes");
@@ -36,11 +37,12 @@ class WorkerdLintModule : public clang::tidy::ClangTidyModule {
     CheckFactories.registerCheck<PromiseIgnoreResultCheck>("workerd-promise-ignore-result");
     CheckFactories.registerCheck<UnsafeContinuationCaptureCheck>(
         "workerd-unsafe-continuation-capture");
+    CheckFactories.registerCheck<UseAfterMoveCheck>("workerd-use-after-move");
   }
 };
 
-static clang::tidy::ClangTidyModuleRegistry::Add<WorkerdLintModule>
-    X("workerd-lint", "Workerd static checks.");
+static clang::tidy::ClangTidyModuleRegistry::Add<WorkerdLintModule> X(
+    "workerd-lint", "Workerd static checks.");
 
 }  // namespace clang_tidy
 }  // namespace workerd
