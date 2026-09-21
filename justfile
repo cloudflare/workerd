@@ -82,7 +82,7 @@ test *args="//...":
 test-asan *args="//...":
   just test {{args}} --config=asan
 
-# The workerd binary must not reach kj's own event loop (kj-async-os) under --//:io_backend=rust
+# The workerd binary must not reach kj's own event loop (kj-async-os)
 check-io-backend-graph *args:
   bash build/rust_io_graph_check.sh {{args}}
 

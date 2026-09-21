@@ -610,4 +610,18 @@ kj::Promise<void> onSignal(int signum) {
   return started(wait_for_signal(signum));
 }
 
+// =======================================================================================
+// FileWatcher
+
+void FileWatcher::watch(kj::PathPtr path) {
+  auto native = path.toNativeString(true);
+  file_watcher_watch(*inner,
+      ::rust::Slice<const uint8_t>(
+          reinterpret_cast<const uint8_t *>(native.begin()), native.size()));
+}
+
+kj::Promise<void> FileWatcher::onChange() {
+  return started(file_watcher_on_change(*inner));
+}
+
 }  // namespace kj_rs_io
