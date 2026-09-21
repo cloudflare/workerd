@@ -28,6 +28,12 @@ alias(
 
 npm_link_all_packages(name = "node_modules")
 
+# Rust formatting and lint configuration for every crate in the repository, wherever it lives.
+exports_files([
+    "clippy.toml",
+    "rustfmt.toml",
+])
+
 npm_link_package(
     name = "node_modules/@workerd/jsg",
     src = "//src/workerd/jsg:jsg_js",

@@ -142,8 +142,9 @@ bench path:
   bazel run //src/workerd/tests:bench-{{path}} --config=benchmark
 
 # example: just clippy dns
+# example: just clippy //src/workerd/server:workerd-cli
 clippy package="...":
-  bazel build //src/rust/{{package}} --config=lint
+  bazel build {{ if package =~ '^//' { package } else { "//src/rust/" + package } }} --config=lint
 
 # example: just clang-tidy //src/rust/jsg:ffi
 clang-tidy target="//...":
