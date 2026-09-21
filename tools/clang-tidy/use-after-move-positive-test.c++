@@ -67,3 +67,22 @@ void movedInsideKjSwitchOneof(Value value) {
       break;
   }
 }
+
+struct Base {
+  Base();
+  Base(Base&& other);
+  void method();
+  Value baseField;
+};
+
+struct UsesBaseField: Base {
+  UsesBaseField(UsesBaseField&& other): Base(kj::mv(other)) {
+    use(other.baseField);
+  }
+};
+
+struct CallsMethod: Base {
+  CallsMethod(CallsMethod&& other): Base(kj::mv(other)) {
+    other.method();
+  }
+};

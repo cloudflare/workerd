@@ -46,6 +46,21 @@ void unevaluated(Value value) {
   use(value);
 }
 
+struct Base {
+  Base();
+  Base(Base&& other);
+};
+
+struct Derived: Base {
+  Derived(Derived&& other)
+      : Base(kj::mv(other)),
+        first(kj::mv(other.first)),
+        second(kj::mv(other.second)) {}
+
+  Value first;
+  Value second;
+};
+
 #define KJ_CASE_ONEOF(name, value)                                                                 \
   for (auto &name = value, *name##Done = &name; name##Done; name##Done = nullptr)
 

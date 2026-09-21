@@ -55,6 +55,68 @@ bool isInsideKjOneOfCase(const clang::Expr& expression, clang::ASTContext& conte
   }
 }
 
+// Moving a derived object into its base move constructor leaves fields declared by the derived
+// class untouched. Clang 22's analysis does not make this distinction.
+bool isDirectDerivedFieldUse(const clang::DeclRefExpr& expression,
+    const clang::CXXRecordDecl& derived,
+    clang::ASTContext& context) {
+  clang::DynTypedNode node = clang::DynTypedNode::create(expression);
+  while (true) {
+    auto parents = context.getParents(node);
+    if (parents.size() != 1) return false;
+    if (const auto* member = parents[0].get<clang::MemberExpr>()) {
+      const auto* field = clang::dyn_cast<clang::FieldDecl>(member->getMemberDecl());
+      return field != nullptr && field->getParent() == &derived;
+    }
+    const auto* parent = parents[0].get<clang::Expr>();
+    if (parent == nullptr || !clang::isa<clang::ImplicitCastExpr, clang::ParenExpr>(parent)) {
+      return false;
+    }
+    node = parents[0];
+  }
+}
+
+bool hasNonDerivedFieldUse(const clang::Stmt& statement,
+    const clang::ValueDecl& moved,
+    const clang::CXXRecordDecl& derived,
+    clang::ASTContext& context) {
+  if (const auto* reference = clang::dyn_cast<clang::DeclRefExpr>(&statement)) {
+    return reference->getDecl() == &moved && !isDirectDerivedFieldUse(*reference, derived, context);
+  }
+  for (const auto* child: statement.children()) {
+    if (child != nullptr && hasNonDerivedFieldUse(*child, moved, derived, context)) return true;
+  }
+  return false;
+}
+
+bool onlyUsesDirectDerivedFieldsAfterBaseMove(
+    const clang::ast_matchers::MatchFinder::MatchResult& result,
+    const clang::DeclRefExpr& argument) {
+  const auto* parentCast = result.Nodes.getNodeAs<clang::ImplicitCastExpr>("optional-cast");
+  const auto* constructor = result.Nodes.getNodeAs<clang::CXXConstructorDecl>("containing-ctor");
+  const auto* movingInitializer = result.Nodes.getNodeAs<clang::Expr>("containing-ctor-init");
+  if (parentCast == nullptr || constructor == nullptr || movingInitializer == nullptr ||
+      result.Context == nullptr) {
+    return false;
+  }
+
+  bool afterMove = false;
+  for (const auto* initializer: constructor->inits()) {
+    if (!afterMove &&
+        initializer->getInit()->IgnoreImplicit() == movingInitializer->IgnoreImplicit()) {
+      afterMove = true;
+      continue;
+    }
+    if (afterMove &&
+        hasNonDerivedFieldUse(*initializer->getInit(), *argument.getDecl(),
+            *constructor->getParent(), *result.Context)) {
+      return false;
+    }
+  }
+  return !hasNonDerivedFieldUse(
+      *constructor->getBody(), *argument.getDecl(), *constructor->getParent(), *result.Context);
+}
+
 }  // namespace
 
 void UseAfterMoveCheck::registerMatchers(clang::ast_matchers::MatchFinder* finder) {
@@ -100,6 +162,7 @@ void UseAfterMoveCheck::check(const clang::ast_matchers::MatchFinder::MatchResul
   if (isInsideKjOneOfCase(*move, *result.Context)) {
     return;
   }
+  if (onlyUsesDirectDerivedFieldsAfterBaseMove(result, *argument)) return;
 
   // All other kj::mv() calls use Clang's normal use-after-move dataflow,
   // including its reinitialization and sequencing rules.
