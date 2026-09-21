@@ -3,25 +3,20 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/io/worker-source.h>
-
-#include <rust/cxx.h>
+#include <workerd/util/arc-view.h>
 
 #include <kj/test.h>
 
 namespace workerd {
 namespace {
 
-KJ_TEST("WorkerSource::Module::clone() deep-copies an owned EsModule body") {
+KJ_TEST("WorkerSource::Module::clone() shares the EsModule body") {
   static constexpr kj::StringPtr kBody = "export default 1;"_kj;
 
-  // An EsModule that owns its body, as produced by the TypeScript transpile
-  // path (see readModuleConf in workerd-api.c++): `body` is a view over
-  // exactly the owned buffer.
-  ::rust::String ownBody(kBody.begin(), kBody.size());
-  kj::ArrayPtr<const char> bodyView(ownBody.data(), ownBody.size());
+  auto body = arcCharView(kj::str(kBody));
   WorkerSource::Module original{
-    .name = "main.js"_kj,
-    .content = WorkerSource::EsModule{.body = bodyView, .ownBody = kj::mv(ownBody)},
+    .name = arcView(kj::str("main.js")),
+    .content = WorkerSource::EsModule{.body = body.addRef()},
   };
 
   auto clone = original.clone();
@@ -29,34 +24,31 @@ KJ_TEST("WorkerSource::Module::clone() deep-copies an owned EsModule body") {
   auto& originalContent = original.content.get<WorkerSource::EsModule>();
   auto& cloneContent = clone.content.get<WorkerSource::EsModule>();
 
-  // The clone carries the same text...
-  KJ_ASSERT(kj::str(cloneContent.body) == kBody);
-
-  // ...and its view points into its own copy of the buffer, not into the
-  // original's buffer: the clone may outlive the original.
-  auto& cloneOwn = KJ_ASSERT_NONNULL(cloneContent.ownBody);
-  KJ_ASSERT(cloneContent.body.begin() == cloneOwn.data());
-  KJ_ASSERT(cloneContent.body.size() == cloneOwn.size());
-  KJ_ASSERT(cloneContent.body.begin() != originalContent.body.begin());
+  // Same bytes, no copy: the clone's view points at the very same storage.
+  KJ_ASSERT(kj::str(*cloneContent.body) == kBody);
+  KJ_ASSERT(cloneContent.body->begin() == originalContent.body->begin());
 }
 
-KJ_TEST("WorkerSource::Module::clone() keeps borrowed EsModule bodies as external pointers") {
-  static constexpr kj::StringPtr kBody = "export default 2;"_kj;
+KJ_TEST("WorkerSource bodies outlive the object they were extracted from") {
+  // A module body is a view whose Arc shares the owner's refcount, so the module (and any clone
+  // of it) keeps the bytes alive after every other reference to the owner is gone.
+  kj::Maybe<WorkerSource::Module> maybeClone;
+  const char* storage;
+  {
+    auto owner = kj::arc<kj::String>(kj::str("hello, world"));
+    storage = owner->begin();
+    WorkerSource::Module module{
+      .name = arcView(kj::str("text.txt")),
+      .content = WorkerSource::TextModule{.body = owner.addRef().project(
+                                              [](const kj::String& s) { return s.asPtr(); })},
+    };
+    maybeClone = module.clone();
+    // `owner` and `module` are destroyed here.
+  }
 
-  // An EsModule that borrows its body from external memory (the common case:
-  // the body points into a long-lived capnp config buffer). Per the
-  // WorkerSource::clone() contract, external pointers are kept as-is.
-  WorkerSource::Module borrowed{
-    .name = "borrowed.js"_kj,
-    .content = WorkerSource::EsModule{.body = kBody.asArray()},
-  };
-
-  auto clone = borrowed.clone();
-
-  auto& cloneContent = clone.content.get<WorkerSource::EsModule>();
-  KJ_ASSERT(cloneContent.body.begin() == kBody.begin());
-  KJ_ASSERT(cloneContent.body.size() == kBody.size());
-  KJ_ASSERT(cloneContent.ownBody == kj::none);
+  auto& body = *KJ_ASSERT_NONNULL(maybeClone).content.get<WorkerSource::TextModule>().body;
+  KJ_ASSERT(body.begin() == storage);
+  KJ_ASSERT(body == "hello, world"_kj);
 }
 
 }  // namespace

@@ -8,6 +8,7 @@
 #include <workerd/jsg/setup.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
+#include <workerd/util/capnp-util.h>
 
 #include <capnp/compat/http-over-capnp.h>
 #include <capnp/rpc-twoparty.h>
@@ -49,16 +50,14 @@ const bool verboseLog = ([]() {
   return true;
 })();
 
-kj::Own<config::Config::Reader> parseConfig(kj::StringPtr text, kj::SourceLocation loc) {
-  capnp::MallocMessageBuilder builder;
-  auto root = builder.initRoot<config::Config>();
-  KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { TEXT_CODEC.decode(text, root); })) {
-    KJ_FAIL_REQUIRE_AT(loc, exception);
-  }
-
-  util::Autogate::initAutogate(root.asReader().getAutogates());
-
-  return capnp::clone(root.asReader());
+kj::Arc<config::Config::Reader> parseConfig(kj::StringPtr text, kj::SourceLocation loc) {
+  auto config = buildArcMessage<config::Config>([&](config::Config::Builder builder) {
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { TEXT_CODEC.decode(text, builder); })) {
+      KJ_FAIL_REQUIRE_AT(loc, exception);
+    }
+  });
+  util::Autogate::initAutogate(config->getAutogates());
+  return config;
 }
 
 // Accept an indented block of text and remove the indentation. From each line of text, this will
@@ -401,10 +400,8 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
   // Start the server. Call before connect().
   void start(kj::Promise<void> drainWhen = kj::NEVER_DONE) {
     KJ_REQUIRE(runTask == kj::none);
-    auto task =
-        server.run(v8System, *config, kj::mv(drainWhen)).eagerlyEvaluate([](kj::Exception&& e) {
-      KJ_FAIL_EXPECT(e);
-    });
+    auto task = server.run(v8System, config.addRef(), kj::mv(drainWhen))
+                    .eagerlyEvaluate([](kj::Exception&& e) { KJ_FAIL_EXPECT(e); });
     KJ_EXPECT(!task.poll(ws));
     KJ_EXPECT(expectedWarnings == nullptr, "some expected warnings weren't seen");
     runTask = kj::mv(task);
@@ -414,7 +411,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
   // the expected list of errors messages, one per line.
   void expectErrors(kj::StringPtr expected) {
     expectedErrors = expected;
-    server.run(v8System, *config).poll(ws);
+    server.run(v8System, config.addRef()).poll(ws);
     KJ_EXPECT(expectedErrors == nullptr, "some expected errors weren't seen");
     KJ_EXPECT(expectedWarnings == nullptr, "some expected warnings weren't seen");
   }
@@ -482,7 +479,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
   kj::EventLoop loop;
   kj::WaitScope ws;
 
-  kj::Own<config::Config::Reader> config;
+  kj::Arc<config::Config::Reader> config;
   kj::Own<const kj::Directory> root;
   kj::Path pwd;
   kj::Own<const kj::Directory> cwd;
@@ -5507,7 +5504,7 @@ KJ_TEST("Server: cache name is passed through to service") {
     TestServer test(config);
     KJ_EXPECT_LOG(DBG, "[ TEST ] hello");
     KJ_EXPECT_LOG(DBG, "[ PASS ] hello");
-    KJ_EXPECT(test.server.test(v8System, *test.config, "hello", "default").wait(test.ws));
+    KJ_EXPECT(test.server.test(v8System, test.config.addRef(), "hello", "default").wait(test.ws));
   }
 
   {
@@ -5515,7 +5512,7 @@ KJ_TEST("Server: cache name is passed through to service") {
     KJ_EXPECT_LOG(DBG, "[ TEST ] hello:fail");
     KJ_EXPECT_LOG(INFO, "Error: ded");
     KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:fail");
-    KJ_EXPECT(!test.server.test(v8System, *test.config, "hello", "fail").wait(test.ws));
+    KJ_EXPECT(!test.server.test(v8System, test.config.addRef(), "hello", "fail").wait(test.ws));
   }
 
   {
@@ -5525,7 +5522,7 @@ KJ_TEST("Server: cache name is passed through to service") {
     KJ_EXPECT_LOG(DBG, "[ TEST ] hello:fail");
     KJ_EXPECT_LOG(INFO, "Error: ded");
     KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:fail");
-    KJ_EXPECT(!test.server.test(v8System, *test.config, "hello", "*").wait(test.ws));
+    KJ_EXPECT(!test.server.test(v8System, test.config.addRef(), "hello", "*").wait(test.ws));
   }
 
   {
@@ -5535,7 +5532,7 @@ KJ_TEST("Server: cache name is passed through to service") {
     KJ_EXPECT_LOG(DBG, "[ TEST ] another");
     KJ_EXPECT_LOG(INFO, "other test");
     KJ_EXPECT_LOG(DBG, "[ PASS ] another");
-    KJ_EXPECT(test.server.test(v8System, *test.config, "*", "default").wait(test.ws));
+    KJ_EXPECT(test.server.test(v8System, test.config.addRef(), "*", "default").wait(test.ws));
   }
 
   {
@@ -5548,7 +5545,7 @@ KJ_TEST("Server: cache name is passed through to service") {
     KJ_EXPECT_LOG(DBG, "[ TEST ] another");
     KJ_EXPECT_LOG(INFO, "other test");
     KJ_EXPECT_LOG(DBG, "[ PASS ] another");
-    KJ_EXPECT(!test.server.test(v8System, *test.config, "*", "*").wait(test.ws));
+    KJ_EXPECT(!test.server.test(v8System, test.config.addRef(), "*", "*").wait(test.ws));
   }
 }
 

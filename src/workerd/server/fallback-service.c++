@@ -1,5 +1,7 @@
 #include "fallback-service.h"
 
+#include <workerd/util/capnp-util.h>
+
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
 #include <kj/async-io.h>
@@ -41,28 +43,27 @@ ModuleOrRedirect handleReturnPayload(
     // of the workerd module configuration. If it is not, or if there is any other
     // error when processing here, we'll log the exception and return nothing.
     KJ_TRY {
-      capnp::MallocMessageBuilder moduleMessage;
       capnp::JsonCodec json;
       json.handleByAnnotation<server::config::Worker::Module>();
-      auto moduleBuilder = moduleMessage.initRoot<server::config::Worker::Module>();
-      json.decode(payload, moduleBuilder);
+      auto module = buildArcMessage<server::config::Worker::Module>(
+          [&](server::config::Worker::Module::Builder builder) {
+        json.decode(payload, builder);
+        if (!builder.hasName()) {
+          builder.setName(kj::str(specifier));
+        }
+      });
 
       // If the module fallback service returns a name in the module then it has to
       // match the specifier we passed in. This is an optional sanity check.
-      if (moduleBuilder.hasName()) {
-        if (moduleBuilder.getName() != specifier) {
-          KJ_LOG(ERROR,
-              "Fallback service failed to fetch module: returned module "
-              "name does not match specifier",
-              moduleBuilder.getName(), specifier);
-          return kj::none;
-        }
-      } else {
-        moduleBuilder.setName(kj::str(specifier));
+      if (module->getName() != specifier) {
+        KJ_LOG(ERROR,
+            "Fallback service failed to fetch module: returned module "
+            "name does not match specifier",
+            module->getName(), specifier);
+        return kj::none;
       }
 
-      kj::Own<server::config::Worker::Module::Reader> ret = capnp::clone(moduleBuilder.asReader());
-      return ModuleOrRedirect(kj::mv(ret));
+      return ModuleOrRedirect(kj::mv(module));
     }
     KJ_CATCH(exception) {
       KJ_LOG(ERROR, "Fallback service failed to fetch module", exception, specifier);

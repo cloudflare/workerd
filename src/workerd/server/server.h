@@ -100,7 +100,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
 
   // Runs the server using the given config.
   kj::Promise<void> run(jsg::V8System& v8System,
-      config::Config::Reader conf,
+      kj::Arc<config::Config::Reader> conf,
       kj::Promise<void> drainWhen = kj::NEVER_DONE);
 
   // Executes one or more tests. By default, all exported test handlers from all entrypoints to
@@ -109,7 +109,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   //
   // The returned promise resolves true if at least one test ran and no tests failed.
   kj::Promise<bool> test(jsg::V8System& v8System,
-      config::Config::Reader conf,
+      kj::Arc<config::Config::Reader> conf,
       kj::StringPtr servicePattern = "*"_kj,
       kj::StringPtr entrypointPattern = "*"_kj);
 
@@ -264,9 +264,9 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       config::DiskDirectory::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
   kj::Promise<kj::Own<Service>> makeWorker(kj::StringPtr name,
-      config::Worker::Reader conf,
+      kj::Arc<config::Worker::Reader> conf,
       capnp::List<config::Extension>::Reader extensions);
-  kj::Promise<kj::Own<Service>> makeService(config::Service::Reader conf,
+  kj::Promise<kj::Own<Service>> makeService(kj::Arc<config::Service::Reader> conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       capnp::List<config::Extension>::Reader extensions);
 
@@ -356,7 +356,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       ErrorReporter& errorReporter);
 
   kj::Promise<void> startServices(jsg::V8System& v8System,
-      config::Config::Reader config,
+      kj::Arc<config::Config::Reader> config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       kj::ForkedPromise<void>& forkedDrainWhen);
 

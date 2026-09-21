@@ -258,8 +258,7 @@ struct TestFixture {
 
  private:
   kj::Maybe<kj::WaitScope&> waitScope;
-  capnp::MallocMessageBuilder configArena;
-  workerd::server::config::Worker::Reader config;
+  kj::Arc<workerd::server::config::Worker::Reader> config;
   kj::Maybe<kj::AsyncIoContext> io;
   capnp::MallocMessageBuilder workerBundleArena;
   kj::Own<kj::Timer> timer;
@@ -283,6 +282,7 @@ struct TestFixture {
   kj::Own<Worker::ValidationErrorReporter> errorReporter;
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
   v8::IsolateGroup isolateGroup;
+  kj::Arc<CompatibilityFlags::Reader> featureFlags;
   kj::Own<Worker::Api> api;
   // Drives the isolate's MockIsolateLimitEnforcer::hasExcessivelyExceededHeapLimit(). Shared
   // (refcounted) with the enforcer.

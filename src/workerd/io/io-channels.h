@@ -571,7 +571,7 @@ class WorkerStubChannel: public kj::Refcounted {
 // Source code needed to dynamically load a Worker.
 struct DynamicWorkerSource {
   WorkerSource source;
-  CompatibilityFlags::Reader compatibilityFlags;
+  kj::Arc<CompatibilityFlags::Reader> compatibilityFlags;
 
   kj::Maybe<ResourceLimits> limits;
 
@@ -586,32 +586,15 @@ struct DynamicWorkerSource {
   kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
   kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
 
-  // Owns any data structures pointed into by the other members. (E.g. `source` contains a lot of
-  // `StringPtr`s; `ownContent` owns the backing buffer for them.)
-  kj::Own<void> ownContent;
-
-  // Indicates whether ownContent is holding onto a Cap'n Proto RPC response. This is important
-  // to know because such an RPC response must be destroyed on the same thread where it was
-  //  created, and generally should be destroyed "relatively soon", not kept around forever. If
-  //  this is false, then it is perfectly safe to transfer ownership of ownContent between threads
-  //  and keep it alive indefinitely long.
-  bool ownContentIsRpcResponse = true;
-
-  // Clone the DynamicWorkerSource. Caller must provide a new reference to use as `ownContent`,
-  // which must be a refcount on the same content since the pointers will not be updated. Note
-  // that if `ownContentIsRpcResponse` is false, then `ownContent` could be passed off to other
-  // threads and as such the refcount had better be atomic.
-  DynamicWorkerSource clone(kj::Own<void> newOwnContent) {
+  DynamicWorkerSource clone() {
     return {
       .source = source.clone(),
-      .compatibilityFlags = compatibilityFlags,
+      .compatibilityFlags = compatibilityFlags.addRef(),
       .limits = limits.map([](auto& limits) { return limits.clone(); }),
       .env = env.clone(),
       .globalOutbound = mapAddRef(globalOutbound),
       .tails = KJ_MAP(t, tails) { return kj::addRef(*t); },
       .streamingTails = KJ_MAP(t, streamingTails) { return kj::addRef(*t); },
-      .ownContent = kj::mv(newOwnContent),
-      .ownContentIsRpcResponse = ownContentIsRpcResponse,
     };
   }
 

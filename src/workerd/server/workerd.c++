@@ -15,6 +15,7 @@
 #include <workerd/server/workerd-capnp-schema.embed.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/capnp-util.h>
 #include <workerd/util/entropy.h>
 
 #include <errno.h>
@@ -506,19 +507,15 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
         KJ_ASSERT(reinterpret_cast<uintptr_t>(mapping.begin()) % sizeof(capnp::word) == 0,
             "compiled-in config is not aligned correctly?");
 
-        config = capnp::readMessageUnchecked<config::Config>(
+        auto configReader = capnp::readMessageUnchecked<config::Config>(
             reinterpret_cast<const capnp::word*>(mapping.begin()));
-        configOwner = kj::heap(kj::mv(mapping));
+        config = attachReader(configReader, kj::heap(kj::mv(mapping)));
       }
     } else {
       context.warning(
           "Unable to find and open the program executable, so unable to determine if there is a "
           "compiled-in config file. Proceeding on the assumption that there is not.");
     }
-
-    // We don't want to force people to specify top-level file IDs in `workerd` config files, as
-    // those IDs would be totally irrelevant.
-    schemaParser.setFileIdsRequired(false);
   }
 
   kj::MainFunc getMain() {
@@ -925,21 +922,19 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   }
 
   void parsePythonCompatFlag(kj::StringPtr compatFlagStr) {
-    auto builder = kj::heap<capnp::MallocMessageBuilder>();
-    auto configBuilder = builder->initRoot<config::Config>();
-    auto service = configBuilder.initServices(1)[0];
-    service.setName("main");
-    auto worker = service.initWorker();
-    worker.setCompatibilityDate("2023-12-18");
-    auto flags = worker.initCompatibilityFlags(2);
-    flags.set(0, compatFlagStr);
-    flags.set(1, "python_workers");
-    auto mod = worker.initModules(1)[0];
-    mod.setName("main.py");
-    mod.setPythonModule("def test():\n pass");
-    config = configBuilder.asReader();
-    configOwner = kj::mv(builder);
-    util::Autogate::initAutogate(getConfig().getAutogates());
+    config = buildArcMessage<config::Config>([&](config::Config::Builder config) {
+      auto service = config.initServices(1)[0];
+      service.setName("main");
+      auto worker = service.initWorker();
+      worker.setCompatibilityDate("2023-12-18");
+      auto flags = worker.initCompatibilityFlags(2);
+      flags.set(0, compatFlagStr);
+      flags.set(1, "python_workers");
+      auto mod = worker.initModules(1)[0];
+      mod.setName("main.py");
+      mod.setPythonModule("def test():\n pass");
+    });
+    util::Autogate::initAutogate(getConfig()->getAutogates());
   }
 
   void watch() {
@@ -973,8 +968,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 #else
       auto reader = kj::heap<capnp::StreamFdMessageReader>(STDIN_FILENO, CONFIG_READER_OPTIONS);
 #endif
-      config = reader->getRoot<config::Config>();
-      configOwner = kj::mv(reader);
+      config = attachReader(reader->getRoot<config::Config>(), kj::mv(reader));
     } else {
       // Read file from disk.
       auto path = fs->getCurrentPath().evalNative(pathStr);
@@ -993,13 +987,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             mapping.size() / sizeof(capnp::word));
         auto reader = kj::heap<capnp::FlatArrayMessageReader>(words, CONFIG_READER_OPTIONS)
                           .attach(kj::mv(mapping));
-        config = reader->getRoot<config::Config>();
-        configOwner = kj::mv(reader);
+        config = attachReader(reader->getRoot<config::Config>(), kj::mv(reader));
       } else {
         // Interpret as schema file.
-        schemaParser.loadCompiledTypeAndDependencies<config::Config>();
-
-        parsedSchema = schemaParser.parseFile(kj::heap<SchemaFileImpl>(fs->getRoot(),
+        parsedSchema = schemaParser->parseFile(kj::heap<SchemaFileImpl>(fs->getRoot(),
             fs->getCurrentPath(), kj::mv(path), nullptr, importPath, kj::mv(file),
             watcher.map(
                 [](kj::Own<kj_rs_io::FileWatcher>& w) -> kj_rs_io::FileWatcher& { return *w; }),
@@ -1023,7 +1014,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     // We'll fail at getConfig() if there are multiple top level Config objects.
     // The error message says that you have to specify which config to use, but
     // it's not clear that there is any mechanism to do that.
-    util::Autogate::initAutogate(getConfig().getAutogates());
+    util::Autogate::initAutogate(getConfig()->getAutogates());
   }
 
   void setConstName(kj::StringPtr name) {
@@ -1051,7 +1042,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       CLI_ERROR("Constant is not of type 'Config'.");
     }
 
-    config = constSchema.as<config::Config>();
+    config = schemaConfig(constSchema.as<config::Config>());
   }
 
   void setTestFilter(kj::StringPtr filter) {
@@ -1098,7 +1089,8 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       context.exit();
     }
 
-    config::Config::Reader config = getConfig();
+    auto ownedConfig = getConfig();
+    auto config = *ownedConfig;
 
 #if _WIN32
     if (_isatty(_fileno(stdout))) {
@@ -1211,7 +1203,8 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       }
 #endif
       TRACE_EVENT("workerd", "serveImpl()");
-      auto config = getConfig();
+      auto ownedConfig = getConfig();
+      auto config = *ownedConfig;
 
       // Configure structured logging in the process context
       if (config.hasLogging() ? config.getLogging().getStructuredLogging()
@@ -1223,7 +1216,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       WorkerdPlatform v8Platform(*platform);
       jsg::V8System v8System(v8Platform,
           KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; }, platform.get());
-      auto promise = func(v8System, config);
+      auto promise = func(v8System, kj::mv(ownedConfig));
       KJ_IF_SOME(w, watcher) {
         promise = promise.exclusiveJoin(waitForChanges(*w).then([this]() {
           // Watch succeeded.
@@ -1248,11 +1241,11 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   }
 
   void serve() noexcept {
-    serveImpl([&](jsg::V8System& v8System, config::Config::Reader config) {
+    serveImpl([&](jsg::V8System& v8System, kj::Arc<config::Config::Reader> config) {
 #if _WIN32
-      return server->run(v8System, config);
+      return server->run(v8System, kj::mv(config));
 #else
-      return server->run(v8System, config,
+      return server->run(v8System, kj::mv(config),
           // Gracefully drain when SIGTERM is received.
           kj_rs_io::onSignal(SIGTERM));
 #endif
@@ -1282,9 +1275,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     // Enable loopback sockets in tests only.
     network.enableLoopback();
 
-    serveImpl([&](jsg::V8System& v8System, config::Config::Reader config) {
+    serveImpl([&](jsg::V8System& v8System, kj::Arc<config::Config::Reader> config) {
       return server
-          ->test(v8System, config,
+          ->test(v8System, kj::mv(config),
               testServicePattern.map([](auto& s) -> kj::StringPtr { return s; }).orDefault("*"_kj),
               testEntrypointPattern.map([](auto& s) -> kj::StringPtr {
         return s;
@@ -1357,12 +1350,28 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   EntropySourceImpl entropySource;
 
   kj::Vector<kj::Path> importPath;
-  capnp::SchemaParser schemaParser;
+  kj::Arc<capnp::SchemaParser> schemaParser = newSchemaParser();
   capnp::ParsedSchema parsedSchema;
   kj::Vector<capnp::ConstSchema> topLevelConfigConstants;
 
-  kj::Own<void> configOwner;  // backing object for `config`, if it's not `schemaParser`.
-  kj::Maybe<config::Config::Reader> config;
+  // The selected config, sharing ownership of whatever holds its bytes (a message reader, an
+  // mmap of the executable, or `schemaParser`). Absent until a config has been chosen; see
+  // getConfig() for the case where it is inferred from the parsed schema.
+  kj::Maybe<kj::Arc<config::Config::Reader>> config;
+
+  static kj::Arc<capnp::SchemaParser> newSchemaParser() {
+    auto parser = kj::uniqueArc<capnp::SchemaParser>();
+    // We don't want to force people to specify top-level file IDs in `workerd` config files, as
+    // those IDs would be totally irrelevant.
+    parser->setFileIdsRequired(false);
+    parser->loadCompiledTypeAndDependencies<config::Config>();
+    return kj::mv(parser).toArc();
+  }
+
+  // Returns a shared view of a Config constant found in the parsed schema.
+  kj::Arc<config::Config::Reader> schemaConfig(config::Config::Reader reader) {
+    return schemaParser.addRef().project([reader](const capnp::SchemaParser&) { return reader; });
+  }
 
   kj::Vector<int> inheritedFds;
 
@@ -1452,9 +1461,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     return kj::none;
   }
 
-  config::Config::Reader getConfig() {
+  kj::Arc<config::Config::Reader> getConfig() {
     KJ_IF_SOME(c, config) {
-      return c;
+      return c.addRef();
     } else {
       // The optional `<const-name>` parameter must not have been given -- otherwise we would have
       // a non-null `config` by this point. See if we can infer the correct constant...
@@ -1462,7 +1471,8 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
         context.exitError(
             "The config file does not define any top-level constants of type 'Config'.");
       } else if (topLevelConfigConstants.size() == 1) {
-        return config.emplace(topLevelConfigConstants[0].as<config::Config>());
+        return config.emplace(schemaConfig(topLevelConfigConstants[0].as<config::Config>()))
+            .addRef();
       } else {
         auto names = KJ_MAP(cnst, topLevelConfigConstants) { return cnst.getShortDisplayName(); };
         // TODO: this error message says "you must specify which one to use".

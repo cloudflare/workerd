@@ -1506,10 +1506,10 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
               KJ_CASE_ONEOF(script, ScriptSource) {
                 // This path is used for the older, service worker syntax workers.
 
-                if (script.capnpSchemas.size() > 0) {
+                if (script.capnpSchemas != nullptr && script.capnpSchemas->size() > 0) {
                   // const_cast OK because we hold the isolate lock.
                   auto& schemaLoader = const_cast<capnp::SchemaLoader&>(getSchemaLoader());
-                  for (auto node: script.capnpSchemas) {
+                  for (auto node: *script.capnpSchemas) {
                     schemaLoader.load(node);
                   }
                 }
@@ -1524,18 +1524,19 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   // add it to the rollover bank, though.
                   auto limitScope =
                       isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
-                  impl->unboundScriptOrMainModule =
-                      jsg::NonModuleScript::compile(lock, script.mainScript, script.mainScriptName);
+                  impl->unboundScriptOrMainModule = jsg::NonModuleScript::compile(
+                      lock, *script.mainScript, *script.mainScriptName);
                 }
               }
 
               KJ_CASE_ONEOF(modulesSource, ModulesSource) {
                 // This path is used for the new ESM worker syntax.
 
-                if (modulesSource.capnpSchemas.size() > 0) {
+                if (modulesSource.capnpSchemas != nullptr &&
+                    modulesSource.capnpSchemas->size() > 0) {
                   // const_cast OK because we hold the isolate lock.
                   auto& schemaLoader = const_cast<capnp::SchemaLoader&>(getSchemaLoader());
-                  for (auto node: modulesSource.capnpSchemas) {
+                  for (auto node: *modulesSource.capnpSchemas) {
                     schemaLoader.load(node);
                   }
                 }
@@ -1552,7 +1553,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   isolate->getApi().compileModules(
                       lock, modulesSource, *isolate, kj::mv(artifacts), parentSpan.addRef());
                 }
-                impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
+                impl->unboundScriptOrMainModule = kj::Path::parse(*modulesSource.mainModule);
               }
             }
 

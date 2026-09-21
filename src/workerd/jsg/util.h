@@ -530,6 +530,24 @@ kj::Own<ExternalStringAllocator> defaultExternalStringAllocator();
 
 using OwnedAscii = kj::Array<const char>;
 using OwnedUtf16 = kj::Array<const uint16_t>;
+// Shared read-only views of one-byte / two-byte text. The Arc keeps whatever owns the bytes
+// alive (a heap array, a capnp message, ...), so V8 external strings can hold a reference.
+using SharedAscii = kj::Arc<kj::ArrayPtr<const char>>;
+using SharedUtf16 = kj::Arc<kj::ArrayPtr<const uint16_t>>;
+
+// Returns a shared view of an owned buffer.
+inline SharedAscii shareAscii(kj::Arc<OwnedAscii> buf) {
+  return kj::mv(buf).project([](const OwnedAscii& a) { return a.asPtr(); });
+}
+inline SharedAscii shareAscii(OwnedAscii buf) {
+  return shareAscii(kj::arc<OwnedAscii>(kj::mv(buf)));
+}
+inline SharedUtf16 shareUtf16(kj::Arc<OwnedUtf16> buf) {
+  return kj::mv(buf).project([](const OwnedUtf16& a) { return a.asPtr(); });
+}
+inline SharedUtf16 shareUtf16(OwnedUtf16 buf) {
+  return shareUtf16(kj::arc<OwnedUtf16>(kj::mv(buf)));
+}
 using StaticExternalStringSource =
     kj::OneOf<kj::ArrayPtr<const char>, kj::ArrayPtr<const uint16_t>>;
 
@@ -549,7 +567,10 @@ v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char
 
 // Creates a V8 external string whose resource shares ownership of `buf`. The backing
 // allocation remains alive until both the caller and all V8 strings release their Arcs.
-v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::Arc<OwnedAscii> buf);
+v8::Local<v8::String> newExternalOneByteString(Lock& js, SharedAscii buf);
+inline v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::Arc<OwnedAscii> buf) {
+  return newExternalOneByteString(js, shareAscii(kj::mv(buf)));
+}
 
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite
@@ -565,8 +586,11 @@ v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::Arc<OwnedAscii> buf
 // that are not owned by the v8 heap.
 v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
 
-// Two-byte counterpart to the owning one-byte overload above.
-v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::Arc<OwnedUtf16> buf);
+// Two-byte counterparts to the owning one-byte overloads above.
+v8::Local<v8::String> newExternalTwoByteString(Lock& js, SharedUtf16 buf);
+inline v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::Arc<OwnedUtf16> buf) {
+  return newExternalTwoByteString(js, shareUtf16(kj::mv(buf)));
+}
 
 // Use this type to mark APIs that are not implemented. Attempts to use the API will throw an
 // exception.

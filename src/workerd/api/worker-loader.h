@@ -79,10 +79,6 @@ class WorkerLoader: public jsg::Object {
     JSG_STRUCT_TS_OVERRIDE(WorkerLoaderModule {
       wasm?: ArrayBuffer | ArrayBufferView | WebAssembly.Module;
     });
-
-    // HACK: When we serialize the JSON in extractSource() we need to place the owned kj::String
-    //   somewhere since Worker::Script::Source only gets a kj::StringPtr.
-    kj::Maybe<kj::String> serializedJson;
   };
 
   struct WorkerCode {
@@ -158,7 +154,7 @@ class WorkerLoader: public jsg::Object {
       WorkerCode code);
 
   static Worker::Script::Source extractSource(jsg::Lock& js, WorkerCode& code);
-  static kj::Own<CompatibilityFlags::Reader> extractCompatFlags(
+  static kj::Arc<CompatibilityFlags::Reader> extractCompatFlags(
       jsg::Lock& js, WorkerCode& code, CompatibilityDateValidation compatDateValidation);
 
   kj::Promise<kj::Own<const Worker>> startWorker(

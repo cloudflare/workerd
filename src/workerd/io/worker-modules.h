@@ -5,6 +5,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
+#include <workerd/util/arc-view.h>
 #include <workerd/util/strong-bool.h>
 
 #include <pyodide/python-entrypoint.embed.h>
@@ -124,14 +125,16 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
   KJ_IF_SOME(source, maybeSource) {
     // Register any capnp schemas contained in the source bundle
     auto& schemaLoader = builder.getSchemaLoader();
-    for (auto schema: source.capnpSchemas) {
-      schemaLoader.load(schema);
+    if (source.capnpSchemas != nullptr) {
+      for (auto schema: *source.capnpSchemas) {
+        schemaLoader.load(schema);
+      }
     }
 
     jsg::modules::ModuleBundle::BundleBuilder bundleBuilder(bundleBase);
     using namespace workerd::api::pyodide;
 
-    for (auto& def: source.modules) {
+    for (auto& def: *source.modules) {
       KJ_SWITCH_ONEOF(def.content) {
         KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
           jsg::modules::Module::Flags flags = jsg::modules::Module::Flags::ESM;
@@ -139,61 +142,44 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // Entry points are required to be ESM (enforced at resolution via
           // RequireOption::REQUIRE_ESM), so a non-ESM main module never receives
           // the flag here; the worker fails at startup instead.
-          if (def.name == source.mainModule) {
+          if (*def.name == *source.mainModule) {
             flags = flags | jsg::modules::Module::Flags::MAIN;
           }
-          // Worker bundle storage is not necessarily static: transpiled source
-          // can be backed by a temporary rust::String, and edgeworker source is
-          // backed by a script-fetcher response. Copy it once into shared storage
-          // so V8 external strings can safely outlive the registry.
-          bundleBuilder.addEsmModule(
-              def.name, kj::arc<jsg::OwnedAscii>(kj::heapArray<const char>(content.body)), flags);
+          bundleBuilder.addEsmModule(*def.name, content.body.addRef(), flags);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
-          // The content.body resides in memory that outlives the module registry
-          // (see the ESM comment above for the ownership details). It will not be
-          // copied into a JS string until the module is actually evaluated.
-          bundleBuilder.addSyntheticModule(def.name,
-              jsg::modules::Module::newTextModuleHandler(content.body), nullptr,
-              jsg::modules::Module::ContentType::TEXT);
+          bundleBuilder.addSyntheticModule(*def.name,
+              jsg::modules::Module::newOwnedTextModuleHandler(asCharView(content.body.addRef())),
+              nullptr, jsg::modules::Module::ContentType::TEXT);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
-          // The content.body resides in memory that outlives the module registry
-          // (see the ESM comment above for the ownership details). It will not be
-          // copied into a JS array buffer until the module is actually evaluated.
-          bundleBuilder.addSyntheticModule(def.name,
-              jsg::modules::Module::newDataModuleHandler(content.body), nullptr,
+          bundleBuilder.addSyntheticModule(*def.name,
+              jsg::modules::Module::newOwnedDataModuleHandler(content.body.addRef()), nullptr,
               jsg::modules::Module::ContentType::DATA);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
-          // The content.body resides in memory that outlives the module registry
-          // (see the ESM comment above for the ownership details). If the module was
-          // already compiled in another isolate, the compiled code is passed along to
-          // avoid recompilation.
-          bundleBuilder.addWasmModule(def.name, content.body, content.compiledModule);
+          bundleBuilder.addOwnedWasmModule(
+              *def.name, content.body.addRef(), content.compiledModule);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
-          // The content.body resides in memory that outlives the module registry
-          // (see the ESM comment above for the ownership details). It will not be
-          // parsed into a JS value until the module is actually evaluated.
-          bundleBuilder.addSyntheticModule(def.name,
-              jsg::modules::Module::newJsonModuleHandler(content.body), nullptr,
-              jsg::modules::Module::ContentType::JSON);
+          bundleBuilder.addSyntheticModule(*def.name,
+              jsg::modules::Module::newOwnedJsonModuleHandler(asCharView(content.body.addRef())),
+              nullptr, jsg::modules::Module::ContentType::JSON);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
-          kj::ArrayPtr<const kj::StringPtr> named;
+          kj::Array<kj::String> named;
           KJ_IF_SOME(n, content.namedExports) {
-            named = n;
+            named = KJ_MAP(name, *n) { return kj::str(name); };
           }
-          bundleBuilder.addSyntheticModule(def.name,
-              jsg::modules::Module::newCjsStyleModuleHandler<api::CommonJsModuleContext,
-                  TypeWrapper>(content.body),
-              KJ_MAP(name, named) { return kj::str(name); });
+          bundleBuilder.addSyntheticModule(*def.name,
+              jsg::modules::Module::newOwnedCjsStyleModuleHandler<api::CommonJsModuleContext,
+                  TypeWrapper>(content.body.addRef()),
+              kj::mv(named));
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
@@ -228,7 +214,7 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           modules::capnp::filterNestedNodes(schemaLoader, schema,
               [&](auto name, const capnp::Schema& child) { exports.add(kj::str(name)); });
 
-          bundleBuilder.addSyntheticModule(def.name,
+          bundleBuilder.addSyntheticModule(*def.name,
               [typeId = content.typeId, &schemaLoader](jsg::Lock& js, const jsg::Url&,
                   const jsg::modules::Module::ModuleNamespace& ns,
                   const jsg::CompilationObserver& observer) {
@@ -280,20 +266,19 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
 namespace modules::legacy {
 
 template <typename JsgIsolate>
-v8::Local<v8::String> compileTextGlobal(
-    typename JsgIsolate::Lock& lock, ::capnp::Text::Reader reader) {
-  return lock.wrapNoContext(reader);
+v8::Local<v8::String> compileTextGlobal(typename JsgIsolate::Lock& lock, kj::StringPtr text) {
+  return lock.wrapNoContext(text);
 };
 
 template <typename JsgIsolate>
 v8::Local<v8::ArrayBuffer> compileDataGlobal(
-    typename JsgIsolate::Lock& lock, ::capnp::Data::Reader reader) {
-  return lock.wrapNoContext(kj::heapArray(reader));
+    typename JsgIsolate::Lock& lock, kj::ArrayPtr<const kj::byte> data) {
+  return lock.wrapNoContext(kj::heapArray(data));
 };
 
 template <typename JsgIsolate>
 v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lock& lock,
-    ::capnp::Data::Reader reader,
+    kj::ArrayPtr<const kj::byte> data,
     const jsg::CompilationObserver& observer) {
   // Wasm compilation requires code-generation permission. The scope restores
   // the prior setting on exit: this helper also runs lazily (e.g. for modules
@@ -307,13 +292,12 @@ v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lock& loc
   // compiles fast but runs slower.
   AllowV8BackgroundThreadsScope scope;
 
-  return jsg::compileWasmModule(lock, reader, observer);
+  return jsg::compileWasmModule(lock, data, observer);
 };
 
 template <typename JsgIsolate>
-v8::Local<v8::Value> compileJsonGlobal(
-    typename JsgIsolate::Lock& lock, ::capnp::Text::Reader reader) {
-  return jsg::check(v8::JSON::Parse(lock.v8Context(), lock.wrapNoContext(reader)));
+v8::Local<v8::Value> compileJsonGlobal(typename JsgIsolate::Lock& lock, kj::StringPtr json) {
+  return jsg::check(v8::JSON::Parse(lock.v8Context(), lock.wrapNoContext(json)));
 };
 
 // Compiles a module for the legacy module registry, returning kj::none if the module
@@ -329,12 +313,12 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
     KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
       return jsg::ModuleRegistry::ModuleInfo(js, name, kj::none,
           jsg::ModuleRegistry::TextModuleInfo(
-              js, modules::legacy::compileTextGlobal<JsgIsolate>(lock, content.body)));
+              js, modules::legacy::compileTextGlobal<JsgIsolate>(lock, *content.body)));
     }
     KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
       return jsg::ModuleRegistry::ModuleInfo(js, name, kj::none,
           jsg::ModuleRegistry::DataModuleInfo(
-              js, modules::legacy::compileDataGlobal<JsgIsolate>(lock, content.body)));
+              js, modules::legacy::compileDataGlobal<JsgIsolate>(lock, *content.body)));
     }
     KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
       v8::Local<v8::WasmModuleObject> wasmModule;
@@ -344,7 +328,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
         auto metrics = observer.onWasmCompilationFromCacheStart(js.v8Isolate);
         wasmModule = jsg::check(v8::WasmModuleObject::FromCompiledModule(js.v8Isolate, compiled));
       } else {
-        wasmModule = modules::legacy::compileWasmGlobal<JsgIsolate>(lock, content.body, observer);
+        wasmModule = modules::legacy::compileWasmGlobal<JsgIsolate>(lock, *content.body, observer);
       }
       auto moduleInfo = jsg::ModuleRegistry::ModuleInfo(
           js, name, kj::none, jsg::ModuleRegistry::WasmModuleInfo(js, wasmModule));
@@ -354,16 +338,22 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
     KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
       return jsg::ModuleRegistry::ModuleInfo(js, name, kj::none,
           jsg::ModuleRegistry::JsonModuleInfo(
-              js, modules::legacy::compileJsonGlobal<JsgIsolate>(lock, content.body)));
+              js, modules::legacy::compileJsonGlobal<JsgIsolate>(lock, *content.body)));
     }
     KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
       // TODO(soon): Make sure passing nullptr to compile cache is desired.
-      return jsg::ModuleRegistry::ModuleInfo(js, name, content.body, nullptr /* compile cache */,
+      return jsg::ModuleRegistry::ModuleInfo(js, name, *content.body, nullptr /* compile cache */,
           jsg::ModuleInfoCompileOption::BUNDLE, observer);
     }
     KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
-      return jsg::ModuleRegistry::ModuleInfo(js, name, content.namedExports,
-          jsg::ModuleRegistry::CommonJsModuleInfo(lock, name, content.body,
+      kj::Array<kj::StringPtr> namedExports;
+      kj::Maybe<kj::ArrayPtr<const kj::StringPtr>> maybeNamedExports;
+      KJ_IF_SOME(names, content.namedExports) {
+        namedExports = KJ_MAP(exportName, *names) -> kj::StringPtr { return exportName; };
+        maybeNamedExports = namedExports.asPtr();
+      }
+      return jsg::ModuleRegistry::ModuleInfo(js, name, maybeNamedExports,
+          jsg::ModuleRegistry::CommonJsModuleInfo(lock, name, *content.body,
               kj::heap<api::CommonJsImpl<typename JsgIsolate::Lock>>(js, kj::Path::parse(name))));
     }
     KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
@@ -388,32 +378,32 @@ kj::Array<Worker::Script::CompiledGlobal> compileServiceWorkerGlobals(jsg::Lock&
     const jsg::CompilationObserver& observer) {
   auto& lock = kj::downcast<typename JsgIsolate::Lock>(js);
 
-  auto globals = source.globals.asPtr();
+  auto globals = source.globals->asPtr();
   auto compiledGlobals = kj::heapArrayBuilder<Worker::Script::CompiledGlobal>(globals.size());
 
   for (auto& global: globals) {
     js.withinHandleScope([&] {
       // Don't use String's usual TypeHandler here because we want to intern the string.
-      auto name = jsg::v8StrIntern(js.v8Isolate, global.name);
+      auto name = jsg::v8StrIntern(js.v8Isolate, *global.name);
 
       v8::Local<v8::Value> value;
 
       KJ_SWITCH_ONEOF(global.content) {
         KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
           value =
-              workerd::modules::legacy::template compileTextGlobal<JsgIsolate>(lock, content.body);
+              workerd::modules::legacy::template compileTextGlobal<JsgIsolate>(lock, *content.body);
         }
         KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
           value =
-              workerd::modules::legacy::template compileDataGlobal<JsgIsolate>(lock, content.body);
+              workerd::modules::legacy::template compileDataGlobal<JsgIsolate>(lock, *content.body);
         }
         KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
           value = workerd::modules::legacy::template compileWasmGlobal<JsgIsolate>(
-              lock, content.body, observer);
+              lock, *content.body, observer);
         }
         KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
           value =
-              workerd::modules::legacy::template compileJsonGlobal<JsgIsolate>(lock, content.body);
+              workerd::modules::legacy::template compileJsonGlobal<JsgIsolate>(lock, *content.body);
         }
         KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
           KJ_FAIL_REQUIRE("modules not supported with mainScript");
@@ -558,13 +548,13 @@ void registerPythonWorkerdModules(jsg::Lock& lockParam,
 
   // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
   {
-    Worker::Script::Module module{
-      .name = source.mainModule, .content = Worker::Script::EsModule{PYTHON_ENTRYPOINT}};
+    Worker::Script::Module module{.name = source.mainModule.addRef(),
+      .content = Worker::Script::EsModule{arcCharView(kj::str(PYTHON_ENTRYPOINT))}};
 
     auto info = modules::legacy::tryCompileLegacyModule<JsgIsolate>(
-        lockParam, module.name, module.content, modules.getObserver(), featureFlags);
+        lockParam, *module.name, module.content, modules.getObserver(), featureFlags);
 
-    auto path = kj::Path::parse(source.mainModule);
+    auto path = kj::Path::parse(*source.mainModule);
     modules.add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
   }
 

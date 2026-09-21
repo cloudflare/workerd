@@ -188,7 +188,7 @@ KJ_TEST("Fallback service client implements the V1 and V2 protocols") {
       KJ_CASE_ONEOF(redirect, kj::String) {
         KJ_FAIL_ASSERT("expected a module", redirect);
       }
-      KJ_CASE_ONEOF(module, kj::Own<server::config::Worker::Module::Reader>) {
+      KJ_CASE_ONEOF(module, kj::Arc<server::config::Worker::Module::Reader>) {
         KJ_EXPECT(module->getName() == "module.js"_kj);
         KJ_EXPECT(module->getEsModule() == "export default 1;"_kj);
       }
@@ -201,7 +201,7 @@ KJ_TEST("Fallback service client implements the V1 and V2 protocols") {
       KJ_CASE_ONEOF(redirect, kj::String) {
         KJ_FAIL_ASSERT("expected a module", redirect);
       }
-      KJ_CASE_ONEOF(module, kj::Own<server::config::Worker::Module::Reader>) {
+      KJ_CASE_ONEOF(module, kj::Arc<server::config::Worker::Module::Reader>) {
         KJ_EXPECT(module->getName() == "file:///bundle/text.txt"_kj);
         KJ_EXPECT(module->getText() == "fallback text"_kj);
       }
@@ -214,7 +214,7 @@ KJ_TEST("Fallback service client implements the V1 and V2 protocols") {
       KJ_CASE_ONEOF(redirect, kj::String) {
         KJ_EXPECT(redirect == "file:///bundle/redirected.js"_kj);
       }
-      KJ_CASE_ONEOF(module, kj::Own<server::config::Worker::Module::Reader>) {
+      KJ_CASE_ONEOF(module, kj::Arc<server::config::Worker::Module::Reader>) {
         KJ_FAIL_ASSERT("expected a redirect", module->getName());
       }
     }
@@ -231,7 +231,7 @@ KJ_TEST("Fallback service client implements the V1 and V2 protocols") {
     KJ_CASE_ONEOF(redirect, kj::String) {
       KJ_FAIL_ASSERT("expected a module", redirect);
     }
-    KJ_CASE_ONEOF(module, kj::Own<server::config::Worker::Module::Reader>) {
+    KJ_CASE_ONEOF(module, kj::Arc<server::config::Worker::Module::Reader>) {
       KJ_EXPECT(module->getName() == "file:///bundle/data.bin"_kj);
       KJ_EXPECT(module->getData() == kj::ArrayPtr<const kj::byte>({1, 2, 3}));
     }

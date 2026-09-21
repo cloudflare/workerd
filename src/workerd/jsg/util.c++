@@ -843,7 +843,7 @@ class ExternString: public Type {
   // IN THE SOFTWARE.
 
  public:
-  using Backing = kj::OneOf<kj::ArrayPtr<const Data>, kj::Arc<kj::Array<const Data>>>;
+  using Backing = kj::OneOf<kj::ArrayPtr<const Data>, kj::Arc<kj::ArrayPtr<const Data>>>;
 
   inline const Data* data() const override {
     return getBuffer().begin();
@@ -899,7 +899,7 @@ class ExternString: public Type {
     if (backing.template is<kj::ArrayPtr<const Data>>()) {
       return backing.template get<kj::ArrayPtr<const Data>>();
     }
-    return backing.template get<kj::Arc<kj::Array<const Data>>>()->asPtr();
+    return *backing.template get<kj::Arc<kj::ArrayPtr<const Data>>>();
   }
 
   kj::ArrayPtr<const Data> getBuffer() const {
@@ -916,7 +916,7 @@ v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char
   return check(ExternOneByteString::createExtern(js.v8Isolate, buf));
 }
 
-v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::Arc<OwnedAscii> buf) {
+v8::Local<v8::String> newExternalOneByteString(Lock& js, SharedAscii buf) {
   return check(ExternOneByteString::createExtern(js.v8Isolate, kj::mv(buf)));
 }
 
@@ -924,7 +924,7 @@ v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint
   return check(ExternTwoByteString::createExtern(js.v8Isolate, buf));
 }
 
-v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::Arc<OwnedUtf16> buf) {
+v8::Local<v8::String> newExternalTwoByteString(Lock& js, SharedUtf16 buf) {
   return check(ExternTwoByteString::createExtern(js.v8Isolate, kj::mv(buf)));
 }
 
