@@ -21,6 +21,8 @@
   - `workerd-unsafe-continuation-capture`: flags lambdas passed to async
     sinks (e.g. kj::Promise::then) that capture bare references, raw
     pointers, or non-owning views.
+  - `workerd-use-after-move`: flags high-confidence uses of local variables
+    after they are passed to `kj::mv()`.
 
 The plugin is loaded into clang-tidy via `--load=<path>`. Symbols defined
 in the host clang-tidy binary (ClangTidyCheck vtable, ClangTidyModuleRegistry,
@@ -43,6 +45,7 @@ filegroup(
         "legacy-stream-alloc.c++",
         "promise-ignore-result.c++",
         "unsafe-continuation-capture.c++",
+        "use-after-move.c++",
         "visit-for-gc.c++",
         "workerd-lint.c++",
     ],
@@ -58,6 +61,7 @@ filegroup(
         "legacy-stream-alloc.h",
         "promise-ignore-result.h",
         "unsafe-continuation-capture.h",
+        "use-after-move.h",
         "visit-for-gc.h",
     ],
     visibility = ["//visibility:public"],
@@ -145,6 +149,22 @@ sh_test(
     data = [
         ":legacy-stream-alloc-negative-test.c++",
         ":legacy-stream-alloc-positive-test.c++",
+        ":workerd-lint",
+        "//tools:clang-tidy",
+    ],
+    tags = ["no-asan"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+sh_test(
+    name = "use-after-move-test",
+    srcs = ["use-after-move-test.sh"],
+    data = [
+        ":use-after-move-negative-test.c++",
+        ":use-after-move-positive-test.c++",
         ":workerd-lint",
         "//tools:clang-tidy",
     ],

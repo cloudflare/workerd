@@ -14,6 +14,7 @@
 //   - promise-ignore-result.c++: workerd-promise-ignore-result check
 //   - visit-for-gc.c++: jsg-visit-for-gc check
 //   - unsafe-continuation-capture.c++: workerd-unsafe-continuation-capture check
+//   - use-after-move.c++: workerd-use-after-move check
 
 #include "angled-includes.h"
 #include "clang-tidy/ClangTidyModule.h"
@@ -22,6 +23,7 @@
 #include "legacy-stream-alloc.h"
 #include "promise-ignore-result.h"
 #include "unsafe-continuation-capture.h"
+#include "use-after-move.h"
 #include "visit-for-gc.h"
 
 namespace workerd {
@@ -38,6 +40,7 @@ class WorkerdLintModule: public clang::tidy::ClangTidyModule {
     CheckFactories.registerCheck<PromiseIgnoreResultCheck>("workerd-promise-ignore-result");
     CheckFactories.registerCheck<UnsafeContinuationCaptureCheck>(
         "workerd-unsafe-continuation-capture");
+    CheckFactories.registerCheck<UseAfterMoveCheck>("workerd-use-after-move");
   }
 };
 
