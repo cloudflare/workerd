@@ -1,0 +1,23 @@
+src/rust/jsg/ffi.c++
+  s_07f6c4065e26a8::t_a588f7b24a60d6 36-39
+src/workerd/api/node/buffer.c++
+  s_07f6c4065e26a8::t_5539652d73d5f7 101-102,105-106,451-455
+.bazelrc
+  s_07f6c4065e26a8::t_cdfd90e55b1be2 263-268
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "26ab43b42195596af5736e9bd07485e557e69269",
+  "prompts": {},
+  "sessions": {
+    "s_07f6c4065e26a8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "193ec7a4-1865-4fd0-80f4-7b8d99ac5117",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
