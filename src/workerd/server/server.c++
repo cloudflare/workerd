@@ -35,6 +35,7 @@
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/facet-tree-index.h>
 #include <workerd/server/fallback-service.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/exception.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
@@ -5717,16 +5718,90 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   co_return co_await makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);
 }
 
+kj::Own<Worker::Isolate> Server::makeWorkerIsolate(kj::StringPtr name,
+    kj::StringPtr inboundListenersKey,
+    const WorkerDef& def,
+    capnp::List<config::Extension>::Reader extensions,
+    Worker::Isolate::InspectorPolicy inspectorPolicy,
+    kj::Maybe<jsg::SnapshotConfig> snapshotConfig) {
+  auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
+  auto observer = kj::atomicRefcounted<IsolateObserver>();
+  auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
+  auto isolateGroup = v8::IsolateGroup::GetDefault();
+
+  kj::Array<Worker::Api::InboundListener> listeners;
+  KJ_IF_SOME(l, inboundListeners.find(inboundListenersKey)) {
+    listeners = KJ_MAP(listener, l) {
+      return Worker::Api::InboundListener{
+        .protocol = kj::str(listener.protocol),
+        .address = kj::str(listener.address),
+        .port = listener.port,
+      };
+    };
+  }
+
+  auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
+      limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
+      pythonConfig, kj::mv(listeners), kj::mv(snapshotConfig));
+
+  Worker::LoggingOptions isolateLoggingOptions = loggingOptions;
+  isolateLoggingOptions.consoleMode = def.source.variant.is<WorkerSource::ScriptSource>() &&
+          !isNewModuleRegistryEnabled(def.featureFlags)
+      ? Worker::ConsoleMode::INSPECTOR_ONLY
+      : loggingOptions.consoleMode;
+
+  return kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), kj::mv(observer), name,
+      kj::mv(limitEnforcer), inspectorPolicy, kj::mv(isolateLoggingOptions));
+}
+
+kj::Own<jsg::SnapshotArtifact> Server::makeSnapshot(kj::StringPtr name,
+    WorkerDef& def,
+    capnp::List<config::Extension>::Reader extensions,
+    ErrorReporter& errorReporter) {
+  // Build a throwaway zygote Worker in PREPARE_SNAPSHOT mode just to extract a V8 startup
+  // snapshot; the caller then builds the real Worker in START_FROM_SNAPSHOT mode using it.
+  KJ_REQUIRE(!def.featureFlags.getPythonWorkers(), "snapshot PoC: no Python workers");
+  KJ_REQUIRE(!def.featureFlags.getNewModuleRegistry(), "snapshot PoC: no new module registry");
+  KJ_REQUIRE(!def.source.variant.is<WorkerSource::ScriptSource>(), "snapshot PoC: ESM only");
+
+  auto snapshotArtifact = kj::atomicRefcounted<jsg::SnapshotArtifact>();
+  auto zygoteName = kj::str(name, "-snapshot");
+  auto zygoteIsolate = makeWorkerIsolate(zygoteName, name, def, extensions,
+      Worker::Isolate::InspectorPolicy::DISALLOW,
+      jsg::SnapshotConfig(jsg::MutableSnapshot{.artifact = kj::mv(snapshotArtifact)}));
+
+  auto zygoteWorkerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(def.source));
+  auto zygoteArtifactBundler = workerd::api::pyodide::ArtifactBundler::makeDisabledBundler();
+
+  auto zygoteScript = zygoteIsolate->newScript(name, def.source, IsolateObserver::StartType::COLD,
+      SpanParent(nullptr), kj::mv(zygoteWorkerFs), false, errorReporter,
+      kj::mv(zygoteArtifactBundler),
+      /*newModuleRegistry=*/kj::none);
+
+  // Same as for a regular worker, except we ignore ctxExports: pinning it would create a
+  // v8::Global that outlives the zygote isolate and breaks snapshot creation.
+  auto zygoteCompileBindings =
+      [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
+          v8::Local<v8::Object> /*ctxExports*/) { def.compileBindings(lock, api, target); };
+
+  auto zygoteWorker =
+      kj::atomicRefcounted<Worker>(kj::mv(zygoteScript), kj::atomicRefcounted<WorkerObserver>(),
+          kj::mv(zygoteCompileBindings), IsolateObserver::StartType::COLD, SpanParent(nullptr),
+          Worker::Lock::TakeSynchronously(kj::none), errorReporter);
+
+  kj::Own<jsg::SnapshotArtifact> extractedArtifact;
+  zygoteIsolate->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](jsg::Lock& lock) {
+    extractedArtifact = jsg::IsolateBase::from(lock.v8Isolate).extractSnapshotArtifact();
+  });
+  return kj::mv(extractedArtifact);
+}
+
 kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr name,
     WorkerDef def,
     capnp::List<config::Extension>::Reader extensions,
     ErrorReporter& errorReporter) {
   // Load Python artifacts if this is a Python worker.
   co_await preloadPython(name, def, errorReporter);
-
-  auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
-  auto observer = kj::atomicRefcounted<IsolateObserver>();
-  auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
 
   // Create the FsMap that will be used to map known file system
   // roots to configurable locations.
@@ -5785,33 +5860,20 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     }
   }
 
-  auto isolateGroup = v8::IsolateGroup::GetDefault();
-  kj::Array<Worker::Api::InboundListener> listeners;
-  KJ_IF_SOME(l, inboundListeners.find(name)) {
-    listeners = KJ_MAP(listener, l) {
-      return Worker::Api::InboundListener{
-        .protocol = kj::str(listener.protocol),
-        .address = kj::str(listener.address),
-        .port = listener.port,
-      };
-    };
+  kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
+  if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT)) {
+    auto snapshotArtifact = makeSnapshot(name, def, extensions, errorReporter);
+    snapshotConfig =
+        jsg::SnapshotConfig(jsg::FinalizedSnapshot{.artifact = snapshotArtifact->addRef()});
   }
-  auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
-      limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
-      pythonConfig, kj::mv(listeners));
 
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
     // For workerd, if the inspector is enabled, it is always fully trusted.
     inspectorPolicy = Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
   }
-  Worker::LoggingOptions isolateLoggingOptions = loggingOptions;
-  isolateLoggingOptions.consoleMode =
-      def.source.variant.is<WorkerSource::ScriptSource>() && !usingNewModuleRegistry
-      ? Worker::ConsoleMode::INSPECTOR_ONLY
-      : loggingOptions.consoleMode;
-  auto isolate = kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), kj::mv(observer), name,
-      kj::mv(limitEnforcer), inspectorPolicy, kj::mv(isolateLoggingOptions));
+  auto isolate =
+      makeWorkerIsolate(name, name, def, extensions, inspectorPolicy, kj::mv(snapshotConfig));
 
   // If we are using the inspector, we need to register the Worker::Isolate
   // with the inspector service.
