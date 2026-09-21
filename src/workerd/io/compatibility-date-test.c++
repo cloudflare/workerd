@@ -360,42 +360,38 @@ KJ_TEST("compatibility flag parsing") {
       {}, CompatibilityDateValidation::FUTURE_FOR_TEST, false, false);
 }
 
-KJ_TEST("auto-injected pythonWorkers compat flags in flag implication") {
+KJ_TEST("Python main modules inject Python compatibility flags") {
   capnp::MallocMessageBuilder message;
   auto orphanage = message.getOrphanage();
 
-  auto flagListOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(1);
-  auto flagList = flagListOrphan.get();
-  flagList.set(0, "auto_inject_python_workers"_kj);
-
-  auto outputOrphan = orphanage.newOrphan<CompatibilityFlags>();
-  auto output = outputOrphan.get();
-
-  // When python is a main module, the auto-injected flags should be set
-  SimpleWorkerErrorReporter errorReporter;
-  compileCompatibilityFlags("2025-10-16", flagList.asReader(), output, errorReporter, true,
-      CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr, MainModuleIsPython::YES);
-  KJ_EXPECT(errorReporter.errors.size() == 0, kj::strArray(errorReporter.errors, "; "));
-
-  auto flags = output.asReader();
-  KJ_EXPECT(flags.getAutoInjectPythonWorkers());
-  KJ_EXPECT(flags.getPythonWorkers());
-  KJ_EXPECT(flags.getPythonWorkflows());
-  KJ_EXPECT(flags.getPythonWorkers20250116());
-  KJ_EXPECT(flags.getPythonDedicatedSnapshot());
-
-  // Without the gate, a Python main module alone injects nothing.
   auto emptyFlagsOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(0);
-  auto gateOffOrphan = orphanage.newOrphan<CompatibilityFlags>();
-  auto gateOffOutput = gateOffOrphan.get();
-  compileCompatibilityFlags("2025-10-16", emptyFlagsOrphan.get().asReader(), gateOffOutput,
-      errorReporter, true, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr,
-      MainModuleIsPython::YES);
-  KJ_EXPECT(errorReporter.errors.size() == 0, kj::strArray(errorReporter.errors, "; "));
 
-  auto gateOffFlags = gateOffOutput.asReader();
-  KJ_EXPECT(!gateOffFlags.getAutoInjectPythonWorkers());
-  KJ_EXPECT(!gateOffFlags.getPythonWorkers());
+  auto pythonOutputOrphan = orphanage.newOrphan<CompatibilityFlags>();
+  auto pythonOutput = pythonOutputOrphan.get();
+
+  SimpleWorkerErrorReporter pythonErrorReporter;
+  compileCompatibilityFlags("2025-10-16", emptyFlagsOrphan.get().asReader(), pythonOutput,
+      pythonErrorReporter, false, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr,
+      MainModuleIsPython::YES);
+  KJ_EXPECT(pythonErrorReporter.errors.size() == 0, kj::strArray(pythonErrorReporter.errors, "; "));
+
+  auto pythonFlags = pythonOutput.asReader();
+  KJ_EXPECT(pythonFlags.getPythonWorkers());
+  KJ_EXPECT(pythonFlags.getPythonWorkflows());
+  KJ_EXPECT(pythonFlags.getPythonWorkers20250116());
+  KJ_EXPECT(pythonFlags.getPythonDedicatedSnapshot());
+
+  auto nonPythonOutputOrphan = orphanage.newOrphan<CompatibilityFlags>();
+  auto nonPythonOutput = nonPythonOutputOrphan.get();
+  SimpleWorkerErrorReporter nonPythonErrorReporter;
+  compileCompatibilityFlags("2025-10-16", emptyFlagsOrphan.get().asReader(), nonPythonOutput,
+      nonPythonErrorReporter, false, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr,
+      MainModuleIsPython::NO);
+  KJ_EXPECT(
+      nonPythonErrorReporter.errors.size() == 0, kj::strArray(nonPythonErrorReporter.errors, "; "));
+
+  auto nonPythonFlags = nonPythonOutput.asReader();
+  KJ_EXPECT(!nonPythonFlags.getPythonWorkers());
 }
 
 KJ_TEST("a reporter that ignores warnings accepts a redundant compatibility flag") {

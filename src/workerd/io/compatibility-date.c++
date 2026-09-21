@@ -265,7 +265,7 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
   // Inject python_workers compat flag if the main entrypoint is Python.
   // The order is important, as there are other compat flags derived from python_workers compat flag.
   // So python_workers compat flag should be set before implying other compat flags.
-  if (mainModuleIsPython.toBool() && output.getAutoInjectPythonWorkers()) {
+  if (mainModuleIsPython.toBool()) {
     output.setPythonWorkers(true);
   }
 

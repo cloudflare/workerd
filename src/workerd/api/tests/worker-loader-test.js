@@ -114,7 +114,7 @@ export let pythonBasics = {
       return {
         compatibilityDate: '2025-01-01',
         mainModule: 'foo.py',
-        compatibilityFlags: ['python_workers', 'python_no_global_handlers'],
+        compatibilityFlags: ['python_no_global_handlers'],
         modules: {
           'foo.py': `
 from workers import WorkerEntrypoint
@@ -147,7 +147,6 @@ export let pythonArbitraryModuleExtensions = {
       return {
         compatibilityDate: '2026-05-15',
         mainModule: 'foo.py',
-        compatibilityFlags: ['python_workers'],
         modules: {
           'foo.py': `
 from workers import WorkerEntrypoint
@@ -1420,7 +1419,6 @@ export let minimalPythonPackage = {
       return {
         compatibilityDate: '2026-05-15',
         mainModule: 'main.py',
-        compatibilityFlags: ['python_workers'],
         modules: {
           'main.py': `
 from workers import WorkerEntrypoint
