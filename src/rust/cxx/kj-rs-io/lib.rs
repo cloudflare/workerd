@@ -46,8 +46,8 @@
 //!
 //! # Scope: workerd's provider
 //!
-//! This crate implements KJ's I/O interfaces for **workerd**, which (with the Rust I/O backend
-//! on) is their only consumer. It is not a drop-in for every KJ program, on purpose. The rule for
+//! This crate implements KJ's I/O interfaces for **workerd**, which is their only consumer. It is not a drop-in for every KJ program, on purpose. The rule for
+//! leaving a KJ feature out: no consumer in workerd's production code *or its configuration
 //! leaving a KJ feature out: no consumer in workerd's production code *or its configuration
 //! surface* (`workerd.capnp` documents what `Socket.address` and the like accept -- grepping
 //! `src/workerd` for a literal is not enough, and a review caught exactly that for
@@ -80,7 +80,7 @@
 //! TokioDatagram  (net.rs)      Arc<..>: one datagram socket
 //! TokioAddress   (net.rs)      the parsed address: SocketAddr list, or a unix name
 //! TokioFileWatcher (watcher.rs) Arc<..>: notify watcher + metadata stamps; workerd's
-//!                              TokioFileWatcher (server/cli-io-backend.c++) holds it directly
+//!                              FileWatcher (async-io.h) wraps it for C++
 //! ```
 //!
 //! Addresses cross the bridge as the typed `SocketAddress` struct (ffi.rs); the filter never

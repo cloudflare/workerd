@@ -38,6 +38,7 @@
 
 #include <kj/async-io.h>
 #include <kj/exception.h>
+#include <kj/filesystem.h>
 #include <kj/timer.h>
 
 namespace kj_rs_io {
@@ -292,5 +293,28 @@ TokioAsyncIoContext setupTokioAsyncIo();
 // disposition (see signal.rs). On Windows, SIGTERM/SIGINT are mapped to the ctrl_break/ctrl_c
 // console control events; the promise rejects for other signums.
 kj::Promise<void> onSignal(int signum);
+
+// Watches files for changes: kj-rs-io's watcher (watcher.rs, Rust over the `notify` crate --
+// inotify on Linux, FSEvents on macOS, ReadDirectoryChangesW on Windows) behind a C++ interface.
+// It watches each file's directory and judges changes by re-stamping the files, so replaced,
+// recreated and symlinked files keep firing; a file need not exist yet, but its directory must.
+// Its descriptors are CLOEXEC. Runtime-independent: it may be created before the loop is.
+class FileWatcher {
+ public:
+  FileWatcher(): inner(new_file_watcher()) {}
+  KJ_DISALLOW_COPY_AND_MOVE(FileWatcher);
+
+  // Adds `path` to the watched set. Paths cross to Rust as the bytes kj::Path::toNativeString
+  // produces (a unix path need not be UTF-8).
+  void watch(kj::PathPtr path);
+
+  // Resolves the next time any watched file changes (at once if one already has). The watch is
+  // armed inside the call (operation-start policy above), so a caller that merely retains the
+  // promise still has its files watched. Call again after resolution for the next change.
+  kj::Promise<void> onChange();
+
+ private:
+  ::rust::Box<TokioFileWatcher> inner;
+};
 
 }  // namespace kj_rs_io
