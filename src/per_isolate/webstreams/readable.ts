@@ -87,8 +87,13 @@ const {
   uncurryThis,
 } = primordials;
 
-const { isArrayBuffer, isArrayBufferView, isPromise, markPromiseHandled } =
-  utils;
+const {
+  isArrayBuffer,
+  isArrayBufferView,
+  isPromise,
+  isSharedArrayBuffer,
+  markPromiseHandled,
+} = utils;
 
 const {
   StreamQueue,
@@ -4458,7 +4463,11 @@ class CollectedBytes {
     return this.#length;
   }
 
-  append(buffer: ArrayBuffer, byteOffset: number, byteLength: number): void {
+  append(
+    buffer: ArrayBufferLike,
+    byteOffset: number,
+    byteLength: number
+  ): void {
     while (byteLength > 0) {
       const block = this.#block ?? this.#addBlock(byteLength);
       const take = MathMin(byteLength, this.#blockSize - this.#filled);
@@ -4578,18 +4587,23 @@ async function collectChunks<R>(
       // its bytes, with the extent pinned at drain time; anything else
       // fails with the same TypeError the C++ bridge pump uses. Detached
       // inputs are skipped with the other empties.
-      let buffer: ArrayBuffer;
+      let buffer: ArrayBufferLike;
       let byteOffset: number;
       let byteLength: number;
       if (isArrayBufferView(chunk)) {
         // Probe detachment through the buffer before getViewInfo: a
         // detached DataView's byteLength getter throws (typed arrays and
-        // raw buffers just report 0).
+        // raw buffers just report 0). A SharedArrayBuffer cannot be
+        // detached, and the probe rejects it as a receiver.
         buffer =
           TypedArrayPrototypeGetSymbolToStringTag(chunk) !== undefined
             ? TypedArrayPrototypeGetBuffer(chunk)
             : DataViewPrototypeGetBuffer(chunk as DataView);
-        if (ArrayBufferPrototypeDetachedGet(buffer)) continue;
+        if (
+          !isSharedArrayBuffer(buffer) &&
+          ArrayBufferPrototypeDetachedGet(buffer)
+        )
+          continue;
         const info = getViewInfo(chunk);
         byteOffset = info.byteOffset;
         byteLength = info.byteLength;

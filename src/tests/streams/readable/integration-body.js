@@ -171,10 +171,12 @@ export const readAllTextLargeBody = {
 // non-zero-offset DataViews, and typed arrays all contribute their
 // bytes; detached buffers AND detached views contribute nothing (the
 // DataView case matters: its byteLength getter throws for a detached
-// buffer, so detachment must be probed through the buffer); a
-// non-BufferSource chunk rejects with the SAME TypeError message on
-// both sides (parity; the parity-parked ts-webstreams test, now
-// shared).
+// buffer, so detachment must be probed through the buffer); a view over
+// a SharedArrayBuffer contributes its bytes (a buffer that cannot be
+// detached, and one the detached probe rejects as a receiver); a
+// non-BufferSource chunk, a bare SharedArrayBuffer included, rejects
+// with the SAME TypeError message on both sides (parity; the
+// parity-parked ts-webstreams test, now shared).
 export const bodyConsumptionNormalizesBufferSourceChunks = {
   async test() {
     const bodyOf = (chunks) =>
@@ -212,7 +214,17 @@ export const bodyConsumptionNormalizesBufferSourceChunks = {
       await new Response(bodyOf([detachedView, enc.encode('y')])).text(),
       'y'
     );
+    const shared = new Uint8Array(new SharedArrayBuffer(3), 1, 2);
+    shared.set(enc.encode('zw'));
+    strictEqual(
+      await new Response(bodyOf([shared, enc.encode('v')])).text(),
+      'zwv'
+    );
     await rejects(new Response(bodyOf(['not bytes'])).text(), {
+      name: 'TypeError',
+      message: 'This ReadableStream did not return bytes.',
+    });
+    await rejects(new Response(bodyOf([new SharedArrayBuffer(2)])).text(), {
       name: 'TypeError',
       message: 'This ReadableStream did not return bytes.',
     });
