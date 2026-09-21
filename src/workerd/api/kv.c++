@@ -497,32 +497,33 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
     jsg::Lock& js, jsg::Optional<ListOptions> options) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("kv_list"_kjc);
+    auto traceContext =
+        context.addObject(kj::heap<TraceContext>(context.makeUserTraceSpan("kv_list"_kjc)));
 
-    traceContext.setTag("db.system.name"_kjc, "cloudflare-kv"_kjc);
-    traceContext.setTag("db.operation.name"_kjc, "list"_kjc);
-    traceContext.setTag("cloudflare.binding.name"_kjc, bindingName.asPtr());
-    traceContext.setTag("cloudflare.binding.type"_kjc, "KV"_kjc);
+    traceContext->setTag("db.system.name"_kjc, "cloudflare-kv"_kjc);
+    traceContext->setTag("db.operation.name"_kjc, "list"_kjc);
+    traceContext->setTag("cloudflare.binding.name"_kjc, bindingName.asPtr());
+    traceContext->setTag("cloudflare.binding.type"_kjc, "KV"_kjc);
 
     kj::Url url;
     url.scheme = kj::str("https");
     url.host = kj::str("fake-host");
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(limit, o.limit) {
-        traceContext.setTag("cloudflare.kv.query.limit"_kjc, static_cast<int64_t>(limit));
+        traceContext->setTag("cloudflare.kv.query.limit"_kjc, static_cast<int64_t>(limit));
         if (limit > 0) {
           url.query.add(kj::Url::QueryParam{kj::str("key_count_limit"), kj::str(limit)});
         }
       }
       KJ_IF_SOME(maybePrefix, o.prefix) {
         KJ_IF_SOME(prefix, maybePrefix) {
-          traceContext.setTag("cloudflare.kv.query.prefix"_kjc, prefix.asPtr());
+          traceContext->setTag("cloudflare.kv.query.prefix"_kjc, prefix.asPtr());
           url.query.add(kj::Url::QueryParam{kj::str("prefix"), kj::str(prefix)});
         }
       }
       KJ_IF_SOME(maybeCursor, o.cursor) {
         KJ_IF_SOME(cursor, maybeCursor) {
-          traceContext.setTag("cloudflare.kv.query.cursor"_kjc, cursor.asPtr());
+          traceContext->setTag("cloudflare.kv.query.cursor"_kjc, cursor.asPtr());
           url.query.add(kj::Url::QueryParam{kj::str("cursor"), kj::str(cursor)});
         }
       }
@@ -532,20 +533,18 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
 
     auto headers = kj::HttpHeaders(context.getHeaderTable());
     auto client =
-        getHttpClient(context, headers, LimitEnforcer::KvOpType::LIST, urlStr, traceContext);
+        getHttpClient(context, headers, LimitEnforcer::KvOpType::LIST, urlStr, *traceContext);
 
     auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
-    return context.attachSpans(js,
-        context.awaitIo(js, kj::mv(request.response),
-            [&context, client = kj::mv(client), traceContext = kj::mv(traceContext)](
-                jsg::Lock& js, kj::HttpClient::Response&& response) mutable
-            -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
+    return context.awaitIo(js, kj::mv(request.response),
+        [&context, client = kj::mv(client), traceContext = kj::mv(traceContext)](jsg::Lock& js,
+            kj::HttpClient::Response&& response) mutable -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
       checkForErrorStatus("GET", response);
 
       kj::Maybe<jsg::JsRef<jsg::JsValue>> cacheStatus =
           [&]() -> kj::Maybe<jsg::JsRef<jsg::JsValue>> {
         KJ_IF_SOME(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
-          traceContext.setTag("cloudflare.kv.response.cache_status"_kjc, cs);
+          traceContext->setTag("cloudflare.kv.response.cache_status"_kjc, cs);
           return jsg::JsRef<jsg::JsValue>(js, js.strIntern(cs));
         }
         return kj::none;
@@ -556,7 +555,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
               context, *response.headers, Response::BodyEncoding::AUTO, FeatureFlags::get(js)));
 
       KJ_IF_SOME(size, stream->tryGetLength(StreamEncoding::IDENTITY)) {
-        traceContext.setTag("cloudflare.kv.response.size"_kjc, static_cast<int64_t>(size));
+        traceContext->setTag("cloudflare.kv.response.size"_kjc, static_cast<int64_t>(size));
       }
 
       return context.awaitIo(js,
@@ -565,13 +564,12 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
           [cacheStatus = kj::mv(cacheStatus), traceContext = kj::mv(traceContext)](
               jsg::Lock& js, kj::String text) mutable {
         auto result = jsg::JsValue::fromJson(js, text);
-        parseListMetadata(traceContext, js, result,
+        parseListMetadata(*traceContext, js, result,
             cacheStatus.map(
                 [&](jsg::JsRef<jsg::JsValue>& cs) -> jsg::JsValue { return cs.getHandle(js); }));
         return jsg::JsRef(js, result);
       });
-    }),
-        kj::mv(traceContext));
+    });
   });
 }
 
