@@ -15,6 +15,20 @@ def _get_enable_flags(python_flag):
             flags.append("no_" + value["enable_flag_name"])
     return flags
 
+def _feature_flags_txt(python_flag, feature_flags):
+    flags = _get_enable_flags(python_flag) + feature_flags
+
+    # Deduplicate flag list because passing the same flag multiple times fails with "Compatibility
+    # flag specified multiple times".
+    flags = list({flag: 1 for flag in flags})
+    return ",".join(['"{}"'.format(flag) for flag in flags])
+
+def _select_snapshots_disabled(value, fallback):
+    return select({
+        "//build/config:python_snapshots_disabled": fallback,
+        "//conditions:default": value,
+    })
+
 def _py_wd_test_helper(
         name,
         src,
@@ -33,13 +47,16 @@ def _py_wd_test_helper(
     pyodide_version = BUNDLE_VERSION_INFO[python_flag]["real_pyodide_version"]
 
     load_snapshot = None
+    snapshot_data = []
+    snapshot_args = []
+    snapshot_feature_flags = []
     if use_snapshot == "stacked":
         if pyodide_version == "0.26.0a2":
             use_snapshot = None
         else:
             use_snapshot = "baseline"
             if make_snapshot:
-                feature_flags = feature_flags + ["python_dedicated_snapshot"]
+                snapshot_feature_flags.append("python_dedicated_snapshot")
     elif use_snapshot and not make_snapshot:
         # The test exists only to load this specific pre-existing snapshot, so it is meaningless
         # without one.
@@ -49,25 +66,29 @@ def _py_wd_test_helper(
         version_info = BUNDLE_VERSION_INFO[python_flag]
 
         snapshot = version_info[use_snapshot + "_snapshot"]
-        data = data + [":python_snapshots"]
+        snapshot_data = [":python_snapshots"]
         load_snapshot = snapshot or None
     if make_snapshot and pyodide_version != "0.26.0a2":
-        feature_flags = feature_flags + ["python_dedicated_snapshot"]
+        snapshot_feature_flags.append("python_dedicated_snapshot")
 
     if load_snapshot and not make_snapshot:
-        args += ["--python-load-snapshot", "load_snapshot.bin"]
+        snapshot_args = ["--python-load-snapshot", "load_snapshot.bin"]
 
-    flags = _get_enable_flags(python_flag) + feature_flags
-
-    # deduplicate flag list because passing the same flag multiple times fails with "Compatibility flag specified multiple times"
-    flags = list({flag: 1 for flag in flags})
-    feature_flags_txt = ",".join(['"{}"'.format(flag) for flag in flags])
+    feature_flags_txt = _feature_flags_txt(python_flag, feature_flags + snapshot_feature_flags)
+    no_snapshot_feature_flags_txt = _feature_flags_txt(python_flag, feature_flags)
 
     expand_template(
         name = name_flag + "@rule",
         out = templated_src,
         template = src,
-        substitutions = {"%PYTHON_FEATURE_FLAGS": feature_flags_txt},
+        substitutions = _select_snapshots_disabled(
+            {
+                "%PYTHON_FEATURE_FLAGS": feature_flags_txt,
+            },
+            {
+                "%PYTHON_FEATURE_FLAGS": no_snapshot_feature_flags_txt,
+            },
+        ),
     )
 
     # Since we bumped the development flag to point to 0.28.2, it doesn't work on windows CI.
@@ -81,10 +102,11 @@ def _py_wd_test_helper(
     wd_test(
         src = templated_src,
         name = name_flag,
-        args = args,
-        python_snapshot_test = make_snapshot,
+        args = args + _select_snapshots_disabled(snapshot_args, []),
+        python_snapshot_test = _select_snapshots_disabled(make_snapshot, False),
         data = data,
-        load_snapshot = load_snapshot,
+        _configurable_data = _select_snapshots_disabled(snapshot_data, []),
+        load_snapshot = _select_snapshots_disabled(load_snapshot, None),
         # TODO(soon): at the time of disabling these they all passed but because of how slow python
         #             tests are we disabled them for now. We should re-enable them when we have
         #             a better way to run them.
