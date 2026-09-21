@@ -153,7 +153,8 @@ class FastMethodContext: public jsg::Object, public jsg::ContextGlobal {
 JSG_DECLARE_DEBUG_ISOLATE_TYPE(
     FastMethodIsolate, FastMethodContext, WrappedInt, StaticMethodContainer);
 
-jsg::V8System v8System({"--allow-natives-syntax"});
+// Turbolev cannot yet emit Fast API calls, so use TurboFan to exercise the API under test.
+jsg::V8System v8System({"--allow-natives-syntax", "--no-turbolev"});
 
 struct Test {
   kj::LiteralStringConst expr;

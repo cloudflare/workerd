@@ -444,7 +444,7 @@ class SyntheticModule final: public Module {
   }
 
  private:
-  static v8::MaybeLocal<v8::Value> evaluationSteps(
+  static v8::MaybeLocal<v8::Promise> evaluationSteps(
       v8::Local<v8::Context> context, v8::Local<v8::Module> module);
 
   v8::MaybeLocal<v8::Value> actuallyEvaluate(
@@ -1290,13 +1290,16 @@ class IsolateModuleRegistry final {
   friend class SyntheticModule;
 };
 
-v8::MaybeLocal<v8::Value> SyntheticModule::evaluationSteps(
+v8::MaybeLocal<v8::Promise> SyntheticModule::evaluationSteps(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module) {
   auto& js = Lock::current();
   KJ_TRY {
     auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
     KJ_IF_SOME(found, registry.lookup(js, module)) {
-      return found.module.actuallyEvaluate(js, module, registry.getObserver());
+      auto result = found.module.actuallyEvaluate(js, module, registry.getObserver());
+      v8::Local<v8::Value> value;
+      if (!result.ToLocal(&value)) return {};
+      return value.As<v8::Promise>();
     }
     KJ_LOG(ERROR, "Synthetic module not found in registry for evaluation");
     js.v8Isolate->ThrowError(js.str("Requested module does not exist"_kj));
