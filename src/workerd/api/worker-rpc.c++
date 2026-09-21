@@ -728,6 +728,13 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
 
       auto callResult = builder.send();
 
+      // TODO(soon): switch to https://github.com/capnproto/capnproto/pull/2833/ approach
+      // once merged.
+      using CallResults = rpc::JsRpcTarget::CallResults;
+      using ResponsePromise = kj::Promise<capnp::Response<CallResults>>;
+      auto& promisePart = static_cast<ResponsePromise&>(callResult);
+      auto& pipelinePart = static_cast<CallResults::Pipeline&>(callResult);
+
       // We need to arrange that our JsRpcPromise will updated in-place with the final settlement
       // of this RPC promise. However, we can't actually construct the JsRpcPromise until we have
       // the final promise to give it. To resolve the cycle, we only create a JsRpcPromise::WeakRef
@@ -739,9 +746,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       // retained when traced, so the untraced path holds no span state.
       auto originatingCall = jsRpcCallSpan.getSpanParentsIfObserved();
 
-      // RemotePromise lets us consume its pipeline and promise portions independently; we consume
-      // the promise here and we consume the pipeline below, both via kj::mv().
-      auto jsPromise = ioContext.awaitIo(js, kj::mv(callResult),
+      auto jsPromise = ioContext.awaitIo(js, kj::mv(promisePart),
           [weakRef = kj::atomicAddRef(*weakRef), jsRpcCallSpan = kj::mv(jsRpcCallSpan)](
               jsg::Lock& js,
               capnp::Response<rpc::JsRpcTarget::CallResults> response) mutable -> jsg::Value {
@@ -766,7 +771,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       return {
         .promise = jsg::JsPromise(js.wrapSimplePromise(kj::mv(jsPromise))),
         .weakRef = kj::mv(weakRef),
-        .pipeline = kj::mv(callResult),
+        .pipeline = kj::mv(pipelinePart),
         .originatingCall = kj::mv(originatingCall),
       };
     }, [&](jsg::Value error) -> JsRpcPromiseAndPipeline {

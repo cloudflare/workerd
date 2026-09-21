@@ -674,6 +674,12 @@ v8::Local<v8::Value> CapnpCapability::call(jsg::Lock& js,
     // The RPC promise is actually both a promise and a pipeline.
     auto rpcPromise = req.send();
 
+    // TODO(soon): switch to https://github.com/capnproto/capnproto/pull/2833/ approach
+    // once merged.
+    using ResponsePromise = kj::Promise<capnp::Response<capnp::DynamicStruct>>;
+    auto& promisePart = static_cast<ResponsePromise&>(rpcPromise);
+    auto& pipelinePart = static_cast<capnp::DynamicStruct::Pipeline&>(rpcPromise);
+
     auto pipelinedCapHolder = kj::heap<JsCapnpConverter::PipelinedCap>();
     auto& pipelinedCapRef = *pipelinedCapHolder;
 
@@ -681,8 +687,7 @@ v8::Local<v8::Value> CapnpCapability::call(jsg::Lock& js,
     // Note: We know the JS wrapper exists for JSG_THIS because CapnpCapability objects are always
     //   created by CapnpTypeWrapper::wrap() and immediately have a wrapper added.
     auto responsePromise =
-        kj::Promise<capnp::Response<capnp::DynamicStruct>>(kj::mv(rpcPromise))
-            .catch_([](kj::Exception&& ex) -> kj::Promise<capnp::Response<capnp::DynamicStruct>> {
+        ResponsePromise(kj::mv(promisePart)).catch_([](kj::Exception&& ex) -> ResponsePromise {
       auto errorType = jsg::tunneledErrorType(ex.getDescription());
       if (!errorType.isJsgError) {
         // Wrap any non-JS exceptions as JS errors
@@ -705,7 +710,7 @@ v8::Local<v8::Value> CapnpCapability::call(jsg::Lock& js,
     // adding fields representing the pipelined struct.
     KJ_ASSERT(result->IsPromise());
     pipelinedCapRef.content =
-        converter.pipelineToJs(js, kj::mv(rpcPromise), result.As<v8::Promise>());
+        converter.pipelineToJs(js, kj::mv(pipelinePart), result.As<v8::Promise>());
 
     return result;
   }
