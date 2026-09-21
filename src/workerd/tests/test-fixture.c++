@@ -348,7 +348,7 @@ TestFixture::TestFixture(SetupParams&& params)
           byteStreamFactory),
       errorReporter(kj::heap<MockErrorReporter>()),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(*timer)),
-      isolateGroup(v8::IsolateGroup::GetDefault()),
+      isolateGroup(jsg::newIsolateGroup()),
       api(kj::heap<server::WorkerdApi>(testV8System,
           params.featureFlags.orDefault(CompatibilityFlags::Reader()),
           capnp::List<server::config::Extension>::Reader{},
