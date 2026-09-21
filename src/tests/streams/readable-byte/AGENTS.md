@@ -40,6 +40,7 @@ behavior-parity (messages aside).
 | 23 | error() while a close() is still pending (bytes queued) — readable #18 mirror | ignored: desiredSize already 0, the bytes drain to a clean close for default and BYOB readers | desiredSize is hwm minus the queued bytes (-2) until the error, then the stream errors: bytes discarded, default/BYOB reads and closed reject | `errorAfterCloseWithQueuedBytes` |
 | 24 | pipeTo() from an autoAllocate tee branch, aborted (preventCancel) with its read pending | pipe stays pending until a chunk arrives, which the aborted pipe's read consumes and drops (bounded) | pipe rejects at once; the branch's next reader receives the next chunk | `teePipeAbortReleasesPendingRead` |
 | 25 | byobRequest held by the source across tee() (reader released first) | stays exposed and working (spec): the responded byte reaches both branches, and fills a sole remaining branch's read | invalidated at tee(): byobRequest null while two branches exist, respond() throws TypeError 'This BYOB request has been invalidated'; a sole remaining branch's read gets a fresh request | `teeInvalidatesHeldByobRequest`, `teeSoleBranchMintsFreshByobRequest` |
+| 26 | pull() after both tee branches are collected (controller held) — readable #20 mirror | keeps pulling for consumers that no longer exist; DEFECT: a source that enqueues on every pull runs until the stream closes | the source is released: pull() is never called again (the parity half — enqueue accepted, desiredSize at the high-water mark, byobRequest null, close() as ever — is `teeBranchesCollected`) | `teeBranchesCollectedPullStops` |
 
 Parity worth noting (probed, pinned): byte hwm defaults to 0 with NO
 automatic pull; pull-throw and error-then-throw identity; enqueue
@@ -119,7 +120,7 @@ named suite test pins directly, differing only in incidental asserts.
 | `read-min.js` | ledger #11-#13; byobMin/constraints/readAtLeast (migrated streams-test.js); /chunked SELF endpoint |
 | `tee.js` | ledger #14, #24, #25; clone-per-branch; migrated byte-tee pair; error propagation; released branch reads, incl. partially filled ones and tee() after a release; byobRequest held across tee() |
 | `buffer-lifecycle.js` | ledger #18; resizable ArrayBuffers; WASM Memory |
-| `gc.js` | pending BYOB read + byobRequest survive gc() |
+| `gc.js` | pending BYOB read + byobRequest survive gc(); both tee branches collected while the controller is held: enqueue() accepted, desiredSize at the high-water mark, byobRequest null, close() then enqueue() as ever (a parity pin of the observable surface — the retention checks are the readable suite's, a transferred buffer leaving nothing to WeakRef), and pull() stops (ledger #26) |
 | `integration.js` | BYOB round-trips via SELF; readAtLeast on echoed body; bytes() |
 | `js-compat.js` | ledger #17; byte halves of the mixed streams-js-test tests (closed promise, cancel reads, locked ops, globals) |
 | `flag-no-auto-allocate.js` | the flag cell (migrated streams-no-auto-allocate-test) |

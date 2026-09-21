@@ -34,6 +34,7 @@ pub use bridge::AddressKind;
 pub use bridge::KjPieces;
 pub use bridge::PeerCredentials;
 pub use bridge::PeerStream;
+pub use bridge::ReceivedDatagram;
 pub use bridge::SocketAddress;
 pub use bridge::kj_piece;
 pub use bridge::kj_pieces_count;
@@ -42,12 +43,17 @@ use crate::error::KjIoError;
 use crate::error::Result;
 use crate::error::op;
 use crate::net::TokioAddress;
+use crate::net::TokioDatagram;
 use crate::net::TokioListener;
+use crate::net::address_bind_datagram;
 use crate::net::address_clone;
 use crate::net::address_listen;
 use crate::net::address_targets;
 use crate::net::address_to_string;
 use crate::net::connect_target;
+use crate::net::datagram_port;
+use crate::net::datagram_receive;
+use crate::net::datagram_send;
 use crate::net::listener_accept;
 use crate::net::listener_clone;
 use crate::net::listener_local_addr;
@@ -116,6 +122,12 @@ mod bridge {
         peer: SocketAddress,
     }
 
+    struct ReceivedDatagram {
+        data: Vec<u8>,
+        source: SocketAddress,
+        truncated: bool,
+    }
+
     /// `kj::LocalPeerIdentity::Credentials`: `pid` / `uid` of a unix-socket peer, each with a
     /// validity flag (kj::Maybe has no cxx mapping).
     struct PeerCredentials {
@@ -134,6 +146,7 @@ mod bridge {
         type TokioStream;
         type TokioListener;
         type TokioAddress;
+        type TokioDatagram;
 
         // --- kj::AsyncIoStream (stream.rs). `buf` is the caller's, uninitialized storage
         // allowed, valid until the promise settles (KJ's contract): hence `unsafe`.
@@ -165,12 +178,23 @@ mod bridge {
         fn address_targets(addr: &TokioAddress) -> Result<Vec<SocketAddress>>;
         async fn connect_target(target: SocketAddress) -> Result<Box<TokioStream>>;
         fn address_listen(addr: &TokioAddress) -> Result<Box<TokioListener>>;
+        fn address_bind_datagram(addr: &TokioAddress) -> Result<Box<TokioDatagram>>;
         fn address_clone(addr: &TokioAddress) -> Box<TokioAddress>;
         fn address_to_string(addr: &TokioAddress) -> Vec<u8>;
         async fn listener_accept(listener: &TokioListener) -> Result<PeerStream>;
         fn listener_clone(listener: &TokioListener) -> Box<TokioListener>;
         fn listener_port(listener: &TokioListener) -> Result<u16>;
         fn listener_local_addr(listener: &TokioListener) -> Result<SocketAddress>;
+        async fn datagram_send(
+            datagram: &TokioDatagram,
+            data: &[u8],
+            destination: SocketAddress,
+        ) -> Result<usize>;
+        async fn datagram_receive(
+            datagram: &TokioDatagram,
+            capacity: usize,
+        ) -> Result<ReceivedDatagram>;
+        fn datagram_port(datagram: &TokioDatagram) -> Result<u16>;
 
         // --- kj::LowLevelAsyncIoProvider. `handle` is an open fd / SOCKET, owned by the callee
         // under TAKE_OWNERSHIP (KJ's contract): hence `unsafe`.

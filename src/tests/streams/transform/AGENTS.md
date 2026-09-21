@@ -30,6 +30,8 @@ basics) are parity under direct observation and are pinned as such.
 | 11 | writable.abort() inside size() (enqueue-triggered, hwm 1) | reentrant abort wins: first read rejects the reason | chunk delivered, then reads reject (spec) | `writableAbortInsideSize` |
 | 12 | read() inside size() at hwm 0 — total size() calls | 2 (size consulted again when the enqueued chunk is pulled) | 1 (spec) — the handoff/read-value shape is parity | `readInsideSize` |
 | 13 | terminate() immediately after readable.cancel() | cancel reason wins: closed/write reject the reason object | terminate wins: closed/write reject the terminate TypeError | `terminateAfterReadableCancel` |
+| 14 | write parked at readable hwm 1, a read dequeues and a same-turn enqueue refills | no pull on a dequeue that leaves room (readable ledger #5): the write stays parked until a read finds the queue empty | the dequeue pulls and the write transforms, although the enqueue re-asserted backpressure first (spec: one wait) | `writeReleasedByDequeueSurvivesSameTurnEnqueue` |
+| 15 | controller.error() in the turn whose read released a parked write | writable reference dropped and algorithms cleared before the write wakes: it takes the identity path into the errored readable and rejects with that enqueue's TypeError | rejects with the writable's stored error, the error() reason (spec) | `writeReleasedByReadThenErroredSameTurn` |
 
 Parity worth noting (probed, pinned): cancel hook runs (not flush) with
 the reason for both readable.cancel() and writable.abort(), exactly once
@@ -75,7 +77,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `construction.js` | ledger #5, #6, #9 |
 | `transformer-algorithms.js` | start/transform/flush ordering, async hooks, chunk-type freedom; hook shape + prototype-chain (parity) |
 | `error-propagation.js` | sync/async start/transform/flush error fan-out across writes/close/readable (#1); controller.error() rejects reads; error() no-op after hook throw (parity, identity) |
-| `backpressure.js` | writable desiredSize through the transform; dual strategies; default readable hwm 0; latch + racy release (#8) |
+| `backpressure.js` | writable desiredSize through the transform; dual strategies; default readable hwm 0; latch + racy release (#8); a parked write released by a read transforms even when a same-turn enqueue re-asserts backpressure (parity at hwm 0; #14 at hwm 1) or rejects when the turn also errors the controller (#15) |
 | `cancel-matrix.js` | cancel-hook reason/identity/once (parity) + fan-out (#3) |
 | `terminate.js` | terminate fates (parity) + late error (#4) + terminate-after-cancel (#13) |
 | `reentrancy.js` | size()-error UAF regressions (#2) + sequential/identity shapes; all 9 WPT reentrant-in-size() ops: 6 parity at finite hwm, #10-#12 divergences |

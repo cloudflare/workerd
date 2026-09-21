@@ -367,7 +367,7 @@ class TransformStream<I = unknown, O = unknown> {
       // No controller, no start gating, no algorithm wrappers.
 
       const sinkWrite = async (chunk: I): Promise<void> => {
-        while (this.#backpressure) {
+        if (this.#backpressure) {
           await this.#backpressureChange.promise;
           const state = writableInternals.getState(this.#writable);
           if (state === 'erroring' || state === 'errored') {
@@ -516,7 +516,7 @@ class TransformStream<I = unknown, O = unknown> {
         PromiseWithResolvers() as PromiseWithResolversType<void>;
 
       const sinkWrite = async (chunk: I): Promise<void> => {
-        while (this.#backpressure) {
+        if (this.#backpressure) {
           await this.#backpressureChange.promise;
           const state = writableInternals.getState(this.#writable);
           if (state === 'erroring' || state === 'errored') {
@@ -719,6 +719,15 @@ class TransformStream<I = unknown, O = unknown> {
           : uncurryThis(startFn)(transformer, controller);
       startHolder.resolve(startResult as void | PromiseLike<void>);
     }
+
+    // The Node.js interop hook errors one half without running the sink's
+    // abort or the source's cancel; error the pair as controller.error()
+    // would (TransformStreamError).
+    const errorPair = (reason: unknown): void => {
+      transformStreamError(this, reason);
+    };
+    writableInternals.setInteropErrorHook(this.#writable, errorPair);
+    readableInternals.setInteropErrorHook(this.#readable, errorPair);
   }
 
   get readable(): ReadableStreamType<O> {

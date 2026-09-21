@@ -386,6 +386,10 @@ kj::Own<kj::ConnectionReceiver> TokioNetworkAddress::listen() {
   return kj::heap<TokioConnectionReceiver>(address_listen(*inner), filter.addRef());
 }
 
+kj::Own<kj::DatagramPort> TokioNetworkAddress::bindDatagramPort() {
+  return kj::heap<TokioDatagramPort>(address_bind_datagram(*inner), filter.addRef());
+}
+
 kj::Own<kj::NetworkAddress> TokioNetworkAddress::clone() {
   return kj::heap<TokioNetworkAddress>(address_clone(*inner), filter.addRef());
 }
@@ -393,6 +397,81 @@ kj::Own<kj::NetworkAddress> TokioNetworkAddress::clone() {
 kj::String TokioNetworkAddress::toString() {
   auto text = address_to_string(*inner);
   return kj::heapString(reinterpret_cast<const char *>(text.data()), text.size());
+}
+
+// =======================================================================================
+// TokioDatagramPort
+
+class TokioDatagramPort::Receiver final: public kj::DatagramReceiver {
+ public:
+  Receiver(TokioDatagramPort &port, Capacity capacity): port(port), capacity(capacity) {}
+
+  kj::Promise<void> receive() override {
+    for (;;) {
+      auto received = co_await datagram_receive(*port.inner, capacity.content);
+      if (!allowed(*port.filter, received.source)) continue;
+
+      source = kj::heap<TokioNetworkAddress>(
+          network_address_from(received.source), port.filter.addRef());
+      current = kj::mv(received);
+      co_return;
+    }
+  }
+
+  MaybeTruncated<kj::ArrayPtr<const kj::byte>> getContent() override {
+    auto &received = KJ_REQUIRE_NONNULL(current, "Haven't received a datagram yet.");
+    return {
+      kj::arrayPtr(reinterpret_cast<const kj::byte *>(received.data.data()), received.data.size()),
+      received.truncated};
+  }
+
+  MaybeTruncated<kj::ArrayPtr<const kj::AncillaryMessage>> getAncillary() override {
+    return {nullptr, false};
+  }
+
+  kj::NetworkAddress &getSource() override {
+    return *KJ_REQUIRE_NONNULL(source, "Haven't received a datagram yet.");
+  }
+
+ private:
+  TokioDatagramPort &port;
+  Capacity capacity;
+  kj::Maybe<ReceivedDatagram> current;
+  kj::Maybe<kj::Own<TokioNetworkAddress>> source;
+};
+
+kj::Promise<size_t> TokioDatagramPort::send(
+    kj::ArrayPtr<const kj::byte> buffer, kj::NetworkAddress &destination) {
+  auto targets = address_targets(kj::downcast<TokioNetworkAddress>(destination).getInner());
+  KJ_REQUIRE(targets.size() > 0, "send() destination has no addresses");
+  KJ_REQUIRE(allowed(*filter, targets[0]), "send() blocked by restrictPeers()");
+  return started(datagram_send(*inner,
+      ::rust::Slice<const uint8_t>(
+          reinterpret_cast<const uint8_t *>(buffer.begin()), buffer.size()),
+      kj::mv(targets[0])));
+}
+
+kj::Promise<size_t> TokioDatagramPort::send(
+    kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces, kj::NetworkAddress &destination) {
+  size_t size = 0;
+  for (const auto &piece: pieces) size += piece.size();
+  auto buffer = kj::heapArray<kj::byte>(size);
+  auto pos = buffer.begin();
+  for (auto piece: pieces) {
+    memcpy(pos, piece.begin(), piece.size());
+    pos += piece.size();
+  }
+  return send(buffer, destination).attach(kj::mv(buffer));
+}
+
+kj::Own<kj::DatagramReceiver> TokioDatagramPort::makeReceiver(
+    kj::DatagramReceiver::Capacity capacity) {
+  KJ_REQUIRE(capacity.ancillary == 0, "Ancillary datagram messages are not implemented");
+  return kj::heap<Receiver>(*this, capacity);
+}
+
+kj::uint TokioDatagramPort::getPort() {
+  return datagram_port(*inner);
 }
 
 // =======================================================================================

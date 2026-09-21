@@ -34,6 +34,28 @@ Use `kj::TaskSet` to manage many background tasks with a shared error handler.
 run, only destructors. Use `.attach(kj::defer(...))` for cleanup that must happen
 on both completion and cancellation.
 
+**Outcome-aware coroutine cleanup** — use ordinary RAII or `KJ_DEFER` when cleanup is the
+same for every outcome. `try`/`catch` and `KJ_ON_SCOPE_FAILURE` handle exceptions, not
+cancellation caused by destroying a suspended coroutine. When cancellation needs different
+handling, inspect the current invocation:
+
+```cpp
+kj::Promise<void> run() {
+  auto invocation = KJ_CO_MAGIC kj::CURRENT_INVOCATION;
+  KJ_DEFER(if (invocation.isCanceling()) { recordCancellation(); });
+  co_await doWork();
+}
+```
+
+Obtaining `CURRENT_INVOCATION` through the `KJ_CO_MAGIC` coroutine adapter does not suspend,
+and `isCanceling()` does not require an unwind-aware coroutine. To distinguish cancellation,
+exception failure, and success, add a defaulted `kj::CoUnwindAware` coroutine parameter and
+use `scopeOutcome()`.
+
+For non-coroutine chains, cleanup in `.then()` or `.catch_()` alone is insufficient because
+neither continuation runs when the chain is canceled. Attach cancellation-safe cleanup to
+the chain itself.
+
 **`kj::evalNow()`** — wraps synchronous code to catch exceptions as rejected promises:
 
 ```cpp

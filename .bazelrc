@@ -7,6 +7,9 @@ test --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-e
 test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli,-requires-container-engine
 # exclude enormous tests by default
 build --test_size_filters=-enormous
+# Run Python tests without snapshots while snapshot artifacts are being regenerated.
+build:regenerate-snapshots --test_size_filters=small,medium,large,enormous
+build:regenerate-snapshots --//build/config:python_snapshots=false
 # Don't run tests that set up TCP sockets in parallel since they may try to use the same ports. This
 # is less restrictive than marking such tests as "exclusive" since we can still run unrelated tests
 # at the same time.

@@ -327,9 +327,9 @@ KJ_TEST("check put multiple wraps operations in a transaction and rollback on er
       KJ_ASSERT(
           e.getDescription() == "expected false; jsg.Error: string or blob too big: SQLITE_TOOBIG");
     }
-    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == nullptr);
-    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == nullptr);
-    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == kj::none);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == kj::none);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == kj::none);
   }
 
   // Reset the transaction state by going async, which will cause the ImplicitTxn to commit.
@@ -345,9 +345,9 @@ KJ_TEST("check put multiple wraps operations in a transaction and rollback on er
     test.putMultipleExplicitTxn(putKVs.releaseAsArray());
     auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
     commitFulfiller->fulfill();
-    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == nullptr);
-    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == nullptr);
-    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == kj::none);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == kj::none);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == kj::none);
   }
 
   // ImplicitTxn test
@@ -363,9 +363,9 @@ KJ_TEST("check put multiple wraps operations in a transaction and rollback on er
     auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
     // The single put succeeded, but the putMultiple did not.
     KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == "bat"_kj.asBytes());
-    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == nullptr);
-    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == nullptr);
-    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == kj::none);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == kj::none);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == kj::none);
     commitFulfiller->fulfill();
   }
 }

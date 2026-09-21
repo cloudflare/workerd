@@ -3538,7 +3538,8 @@ kj::Promise<void> forwardToFulfiller(
 kj::Promise<void> pumpToImpl(IoContext& ioContext,
     kj::Own<DrainingReader> reader,
     kj::Own<WritableStreamSink> sink,
-    bool end) {
+    bool end,
+    kj::CoUnwindAware = {}) {
 
   bool writeFailed = false;
 
@@ -3567,7 +3568,8 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
       // Fast path: hand chunks to the sink synchronously via tryWriteSync() when it can
       // accept data immediately, avoiding a round-trip through the KJ event loop.
       if (result.chunks.size() > 0) {
-        KJ_ON_SCOPE_FAILURE(writeFailed = true);
+        auto invocation = KJ_CO_MAGIC kj::CURRENT_INVOCATION;
+        KJ_DEFER(if (invocation.isUnwinding()) { writeFailed = true; });
         auto pieces =
             KJ_MAP(chunk, result.chunks) -> kj::ArrayPtr<const kj::byte> { return chunk.asPtr(); };
         if (!sink->tryWriteSync(pieces)) {
@@ -3577,7 +3579,8 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
 
       // If the stream is done, end the output if needed and exit.
       if (result.done) {
-        KJ_ON_SCOPE_FAILURE(writeFailed = true);
+        auto invocation = KJ_CO_MAGIC kj::CURRENT_INVOCATION;
+        KJ_DEFER(if (invocation.isUnwinding()) { writeFailed = true; });
         if (end) {
           co_await sink->end();
         }

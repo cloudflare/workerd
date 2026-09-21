@@ -89,7 +89,7 @@ class CryptoKeyUsageSet {
     return (superset & *this) == *this;
   }
 
-  inline bool operator==(CryptoKeyUsageSet other) const {
+  inline bool operator==(const CryptoKeyUsageSet other) const {
     return set == other.set;
   }
 

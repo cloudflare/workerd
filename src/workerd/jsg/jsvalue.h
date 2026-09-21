@@ -1039,7 +1039,7 @@ class JsRef final {
     return JsRef<T>(js, getHandle(js));
   }
 
-  bool operator==(const JsRef<T>& other) {
+  bool operator==(const JsRef<T>& other) const {
     return value == other.value;
   }
 

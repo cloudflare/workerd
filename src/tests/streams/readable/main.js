@@ -174,6 +174,9 @@ export {
   asyncIterationSurvivesGc,
   readableStreamFromPendingPromiseCollects,
   controllerOnlyHeldStreamLiveness,
+  teeBranchesCollected,
+  teeBranchesCollectedReleaseBacklog,
+  teeBranchesCollectedPullStops,
 } from 'gc';
 
 export { thenGetterFireCountOnRead } from 'then-interceptors';

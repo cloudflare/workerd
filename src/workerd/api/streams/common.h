@@ -502,7 +502,7 @@ class ReadableStreamController {
       inline uint hashCode() {
         return kj::hashCode(inner);
       }
-      inline bool operator==(BranchPtr& other) const {
+      inline bool operator==(const BranchPtr& other) const {
         return inner == other.inner;
       }
 

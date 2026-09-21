@@ -197,6 +197,13 @@ function call(
   });
 }
 
+function renameFunction(
+  node: FunctionDeclaration,
+  name: string
+): FunctionDeclaration {
+  return { ...node, id: identifier(name) };
+}
+
 /** Build `export <declaration>` or, without a declaration, `export { ...names };`. */
 function exportNamed({
   declaration = null,
@@ -424,6 +431,45 @@ const PATCHES_0_26_0A2: Patch[] = [
   }),
 ];
 
+// Hot fix for https://github.com/pyodide/pyodide/pull/6466
+const STACK_SWITCH_GC_HOTFIX_314_0_6: Patch[] = [
+  patch({
+    name: 'clear and record PyThreadState.current_frame',
+    expected: 1,
+    match: (node, parent): node is FunctionDeclaration =>
+      Array.isArray(parent) && isFunctionDeclarationNamed(node, 'saveState'),
+    replace: (node) => [
+      stmt(`
+        function saveState() {
+          const state = origSaveState();
+          if (state === Module.error) {
+            return state;
+          }
+          state.currentFrame = HEAP32[(state.threadState + 52) / 4];
+          HEAP32[(state.threadState + 52) / 4] = 0;
+          return state;
+        }
+      `),
+      renameFunction(node, 'origSaveState'),
+    ],
+  }),
+  patch({
+    name: 'restore PyThreadState.current_frame',
+    expected: 1,
+    match: (node, parent): node is FunctionDeclaration =>
+      Array.isArray(parent) && isFunctionDeclarationNamed(node, 'restoreState'),
+    replace: (node) => [
+      stmt(`
+        function restoreState(state) {
+          origRestoreState(state);
+          HEAP32[(state.threadState + 52) / 4] = state.currentFrame;
+        }
+      `),
+      renameFunction(node, 'origRestoreState'),
+    ],
+  }),
+];
+
 // pyodide.asm.js in these versions is a CommonJS/UMD-style script; convert it to an ES module.
 // When we link our own Pyodide we can pass `-sES6_MODULE` to the linker and it will do this for us
 // automatically.
@@ -471,6 +517,8 @@ function patchesForVersion(version: string): Patch[] {
   const patches = [...COMMON_PATCHES];
   if (version === '0.26.0a2') {
     patches.push(...PATCHES_0_26_0A2);
+  } else if (version === '314.0.6') {
+    patches.push(...STACK_SWITCH_GC_HOTFIX_314_0_6);
   }
   patches.push(
     ...(COMMONJS_VERSIONS.includes(version)

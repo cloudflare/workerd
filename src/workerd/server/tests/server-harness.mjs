@@ -13,6 +13,7 @@ export class WorkerdServerHarness {
   #workerdBinary = null;
   #workerdConfig = null;
   #listenPortNames = null;
+  #extraArgs = null;
 
   // Properties set by `start()` and cleared by `stop()`.
   #child = null;
@@ -20,10 +21,16 @@ export class WorkerdServerHarness {
   #listenInspectorPort = null;
   #closed = null;
 
-  constructor({ workerdBinary, workerdConfig, listenPortNames }) {
+  constructor({
+    workerdBinary,
+    workerdConfig,
+    listenPortNames,
+    extraArgs = [],
+  }) {
     this.#workerdBinary = workerdBinary;
     this.#workerdConfig = workerdConfig;
     this.#listenPortNames = listenPortNames;
+    this.#extraArgs = extraArgs;
   }
 
   // Spawn our workerd process and wait for it to start.
@@ -39,6 +46,7 @@ export class WorkerdServerHarness {
       '--verbose',
       '--inspector-addr=127.0.0.1:0',
       `--control-fd=${CONTROL_FD}`,
+      ...this.#extraArgs,
     ];
 
     const options = {

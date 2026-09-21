@@ -39,7 +39,7 @@ kj::OneOf<ActorCallRetryState::Attempt, kj::Exception> ActorCallRetryState::star
   if (!isFirstAttempt.toBool()) {
     KJ_IF_SOME(deadlineValue, deadline) {
       if (timer.nowForLimitTimeout() >= deadlineValue) {
-        recordOutcome(ActorRetryOutcome::RETRIES_EXHAUSTED);
+        recordOutcome(ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
         return KJ_ASSERT_NONNULL(originalDisconnect).clone();
       }
     }
@@ -86,14 +86,14 @@ kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::checkCanRetry(kj::Ex
     return kj::mv(exception);
   }
   if (attemptCount >= MAX_ATTEMPTS) {
-    recordOutcome(ActorRetryOutcome::RETRIES_EXHAUSTED);
+    recordOutcome(ActorRetryOutcome::ATTEMPTS_EXHAUSTED);
     return KJ_ASSERT_NONNULL(originalDisconnect).clone();
   }
 
   auto delay = retryDelay();
   auto deadline = KJ_ASSERT_NONNULL(this->deadline);
   if (timer.nowForLimitTimeout() + delay >= deadline) {
-    recordOutcome(ActorRetryOutcome::RETRIES_EXHAUSTED);
+    recordOutcome(ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
     KJ_IF_SOME(original, originalDisconnect) {
       return original.clone();
     }

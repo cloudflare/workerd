@@ -1028,7 +1028,7 @@ KJ_TEST("actor fetch stops after five attempts") {
   KJ_EXPECT(state.retryCount == 4);
   KJ_EXPECT(state.observedRetryCount == 4);
   KJ_ASSERT(state.outcomes.size() == 1);
-  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RETRIES_EXHAUSTED);
+  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::ATTEMPTS_EXHAUSTED);
 }
 
 KJ_TEST("actor fetch allows an in-flight retry to finish after the start budget") {

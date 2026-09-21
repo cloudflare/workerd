@@ -382,6 +382,7 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   FixedLengthStream: typeof FixedLengthStream;
   IdentityTransformStream: typeof IdentityTransformStream;
   HTMLRewriter: typeof HTMLRewriter;
+  Datagram: typeof Datagram;
   Performance: typeof Performance;
   PerformanceEntry: typeof PerformanceEntry;
   PerformanceMark: typeof PerformanceMark;
@@ -3976,6 +3977,7 @@ export interface Socket {
   get opened(): Promise<SocketInfo>;
   get upgraded(): boolean;
   get secureTransport(): "on" | "off" | "starttls";
+  get protocol(): "tcp" | "udp";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
 }
@@ -3994,6 +3996,10 @@ export interface TlsOptions {
 export interface SocketInfo {
   remoteAddress?: string;
   localAddress?: string;
+}
+export declare class Datagram {
+  constructor(data: Uint8Array);
+  get data(): Uint8Array;
 }
 /**
  * The **`EventSource`** interface is web content's interface to server-sent events.
@@ -12343,6 +12349,35 @@ export declare abstract class AiGateway {
     },
   ): Promise<Response>;
   getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
+}
+/** A parameter accepted by an Analytics SQL query. */
+export type AnalyticsSQLParameter = string | number | boolean | null;
+/** An Analytics SQL query and its optional positional or named parameters. */
+export interface AnalyticsSQLQuery {
+  query: string;
+  params?:
+    | readonly AnalyticsSQLParameter[]
+    | Readonly<Record<string, AnalyticsSQLParameter>>;
+}
+/** Execution statistics returned by Analytics SQL. */
+export interface AnalyticsSQLStatistics {
+  elapsed_ms: number;
+  rows_read: number;
+  bytes_read: number;
+}
+/** The rows and execution statistics returned by an Analytics SQL query. */
+export interface AnalyticsSQLResult<
+  T extends Record<string, unknown> = Record<string, unknown>,
+> {
+  data: T[];
+  rows: number;
+  statistics: AnalyticsSQLStatistics;
+}
+/** An Analytics SQL binding. */
+export interface AnalyticsSQLBinding {
+  query<T extends Record<string, unknown> = Record<string, unknown>>(
+    request: AnalyticsSQLQuery,
+  ): Promise<AnalyticsSQLResult<T>>;
 }
 // Copyright (c) 2022-2025 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:

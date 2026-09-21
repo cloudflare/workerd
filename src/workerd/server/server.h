@@ -172,7 +172,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   // the config's socket list (names may repeat); none for a socket that failed to bind. Consumed
   // by listenOnSockets().
   struct BoundSocket {
-    kj::Own<kj::ConnectionReceiver> listener;
+    kj::OneOf<kj::Own<kj::ConnectionReceiver>, kj::Own<kj::DatagramPort>> port;
     kj::String addrStr;
   };
   kj::Vector<kj::Maybe<BoundSocket>> boundSockets;
@@ -322,6 +322,12 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::Promise<void> listenTcp(
       kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::String authority);
 
+  kj::Promise<void> listenUdp(kj::Own<kj::DatagramPort> port,
+      kj::Own<Service> service,
+      kj::StringPtr addrStr,
+      kj::Duration idleTimeout,
+      size_t maxPendingBytes);
+
   kj::Promise<void> listenDebugPort(kj::Own<kj::ConnectionReceiver> listener);
   rpc::WorkerdDebugPort::Client makeWorkerdDebugPortClient();
 
@@ -336,6 +342,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   class WorkerdBootstrapImpl;
   class HttpListener;
   class TcpListener;
+  class UdpListener;
   class DebugPortListener;
   class WorkerdDebugPortImpl;
 

@@ -85,7 +85,7 @@ build:ci-macOS --config=ci-disable-benchmarks
 build:ci-macOS-debug --config=debug
 
 # Unfortunately on macOS, we need to be able to invoke sudo to configure the network for sidecar tests
-test:ci-macOS --spawn_strategy=local
+test:ci-macOS --strategy=TestRunner=local
 
 # Windows CI always runs in the release configuration to prevent breaking the release build.
 # build:ci-windows --config=windows_no_dbg

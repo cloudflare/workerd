@@ -450,7 +450,9 @@ void JsRpcPromise::dispose(jsg::Lock& js) {
 static rpc::JsRpcTarget::Client makeJsRpcTargetForSingleLoopbackCall(
     jsg::Lock& js, jsg::JsObject obj);
 
-JsRpcClientProvider::ClientForOneCall JsRpcPromise::getClientForOneCall(jsg::Lock& js) {
+JsRpcClientProvider::ClientForOneCall JsRpcPromise::getClientForOneCall(
+    jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) {
+  KJ_REQUIRE(actorCallAttempt == kj::none, "actor call attempt supplied to a transient RPC target");
   auto callSpanParents =
       originatingCall.map([](IoOwn<TraceContextParent>& p) { return p->addRef(); });
   KJ_SWITCH_ONEOF(state) {
@@ -514,8 +516,9 @@ void JsRpcProperty::appendPath(kj::Vector<kj::StringPtr>& path) {
   path.add(name);
 }
 
-JsRpcClientProvider::ClientForOneCall JsRpcProperty::getClientForOneCall(jsg::Lock& js) {
-  return parent->getClientForOneCall(js);
+JsRpcClientProvider::ClientForOneCall JsRpcProperty::getClientForOneCall(
+    jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) {
+  return parent->getClientForOneCall(js, kj::mv(actorCallAttempt));
 }
 
 namespace {
@@ -623,9 +626,10 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
 
       TraceContext jsRpcCallSpan;
       kj::Maybe<JsRpcClientProvider::ClientForOneCall> oneCall;
+      kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt;
       auto resolveOneCall = [&]() -> JsRpcClientProvider::ClientForOneCall& {
         if (oneCall == kj::none) {
-          oneCall = parent.getClientForOneCall(js);
+          oneCall = parent.getClientForOneCall(js, kj::mv(actorCallAttempt));
           auto& result = KJ_ASSERT_NONNULL(oneCall);
           if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
             // Per-call dispatch span, captured into the awaitIo callback below so it stays open
@@ -708,6 +712,17 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       }
 
       JsRpcCallPlan callPlan(kj::mv(planMessage), kj::mv(serializedData), serializerReplayability);
+
+      // JSRPC retries build on the fetch retry machinery, so the fetch gate remains a shared
+      // prerequisite while the JSRPC gate controls this event type's separate rollout.
+      if (destinationSupportsRetries && callPlan.getReplayable() &&
+          util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH) &&
+          util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_JSRPC)) {
+        actorCallAttempt.emplace(
+            generateActorRetryRequestMetadata(
+                kj::systemCoarseCalendarClock().now(), ActorRetryGateEnabled::NO),
+            IsFirstActorCallAttempt::YES);
+      }
 
       auto client = kj::mv(resolveOneCall().client);
       auto builder = client.callRequest();
@@ -1027,7 +1042,9 @@ kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> JsRpcStub::getRpcChannel(IoCont
   }
 }
 
-JsRpcClientProvider::ClientForOneCall JsRpcStub::getClientForOneCall(jsg::Lock& js) {
+JsRpcClientProvider::ClientForOneCall JsRpcStub::getClientForOneCall(
+    jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) {
+  KJ_REQUIRE(actorCallAttempt == kj::none, "actor call attempt supplied to a transient RPC target");
   return {
     .client = getClient(),
     .callSpanParents =
@@ -1139,7 +1156,6 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
       // If a channel is present, send a channel token for it.
       kj::Maybe<kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>>> channelToken;
-      kj::Own<IoChannelFactory::RpcChannel> ownChannel;
       KJ_IF_SOME(channel, getRpcChannel(ioctx)) {
         // Note: RpcChannels are always transferrable (there wouldn't be any reason to create one
         //   that isn't), but we still call requireAllowsTransfer() for good measure.
@@ -2414,6 +2430,14 @@ bool RpcSerializerExternalHandler::trySerializeClassInstance(
   return false;
 }
 
+static void markJsRpcExceptionAsDelivered(IoContext& ioctx, kj::Exception& exception) {
+  markExceptionAsDelivered(exception);
+  if (ioctx.getActor() != kj::none) {
+    exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
+    exception.setDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  }
+}
+
 // JsRpcTarget implementation specific to entrypoints. This is used to deliver the first, top-level
 // call of an RPC session.
 class EntrypointJsRpcTarget final: public JsRpcTargetBase {
@@ -2440,10 +2464,14 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   // This marks when the handler returned a value, NOT when all data has been streamed or all
   // capabilities released.
   kj::Promise<void> call(CallContext callContext) override {
-    return JsRpcTargetBase::call(kj::mv(callContext)).then([this]() {
+    return JsRpcTargetBase::call(kj::mv(callContext))
+        .then([this]() {
       KJ_IF_SOME(t, ioCtx.getWorkerTracer()) {
         t.setReturn(ioCtx.now());
       }
+    }).catch_([this](kj::Exception&& exception) {
+      markJsRpcExceptionAsDelivered(ioCtx, exception);
+      kj::throwFatalException(kj::mv(exception));
     });
   }
 
@@ -2566,6 +2594,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     bool isDynamicDispatch) {
   IoContext& ioctx = incomingRequest->getContext();
 
+  try {
+    incomingRequest->getMetrics().claimRetryTokenBeforeUserCode();
+  } catch (...) {
+    auto exception = kj::getCaughtExceptionAsKj();
+    failed(exception);
+    kj::throwFatalException(kj::mv(exception));
+  }
   incomingRequest->delivered();
 
   KJ_DEFER({
@@ -2591,6 +2626,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // If the cancellation occurred because the Actor or IoContext was aborted, we'd rather
     // propagate the abort error. So check for one, and revoke with that if present.
     KJ_IF_SOME(r, incomingRequest->getContext().getAbortReason()) {
+      markJsRpcExceptionAsDelivered(ioctx, r);
       revocableTarget.revoke(kj::mv(r));
     } else {
       // silence bogus clang warning about dangling else
@@ -2612,7 +2648,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // Make sure the top-level capability is revoked with the same exception that `run()` is
     // throwing, rather than some generic revocation exception.
     auto e = kj::getCaughtExceptionAsKj();
-    markExceptionAsDelivered(e);
+    markJsRpcExceptionAsDelivered(ioctx, e);
     // These are exceptions for a top-level jsRpc call and will cause the jsRpc customEvent to have
     // an exception outcome – log the exception to avoid reporting an exception outcome without the
     // actual exception.
