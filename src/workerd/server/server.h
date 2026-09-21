@@ -118,6 +118,11 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
     bool isEvictable;
     bool enableSql;
     kj::Maybe<config::Worker::DurableObjectNamespace::ContainerOptions::Reader> containerOptions;
+    // True when this config was synthesized to back a Workflow (from `workflowsEngine`) rather
+    // than declared as a normal Durable Object namespace. Workflow-backing namespaces are created
+    // and linked through a separate code path (see `initWorkflowActorNamespace`) because they use
+    // an external engine's actor class and take their storage from a different Worker; this flag
+    // makes the normal Durable Object init/link paths skip them.
     bool isWorkflow = false;
   };
   struct Ephemeral {

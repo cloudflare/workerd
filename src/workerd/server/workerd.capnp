@@ -258,13 +258,35 @@ struct ServiceDesignator {
 }
 
 struct WorkflowsEngine {
+  # Defines an engine that allows running Workflows defined on this worker.
+  # These workflows are exposed through the `ctx.exports.*` mechanism
+  #
+  # Each Workflow gets assigned its own ActorNamespace, but all of them use the same underlying ActorClass
+  # to run the Workflows code.
+  #
+  # Additionally, a list of workflows can be given to specify which workflows can run or not,
+  # i.e., which workflows get a binding built for them.
+
   actorClass @0 :ServiceDesignator;
+  # The actor class implementing the Workflows engine which all local Workflow-related ActorNamespaces
+  # use to instantiate actors
+
   workflows @1 :List(Workflow);
+  # List of local workflows that can run for this worker. This controls which workflows get a binding built
+  # and placed on the `ctx.exports` object
 
   struct Workflow {
+    # Minimal definition of a Workflow in the context of building a binding for it in `ctx.exports.*`
+
     className @0 :Text;
+    # The name of the class extending `WorkflowEntrypoint`
+
     name @1 :Text;
+    # The name of the workflow
+
     bindingService @2 :ServiceDesignator;
+    # Reference to the service implementing the Workflows public API.
+    # This is used as the inner fetcher when building the Workflows binding
   }
 }
 
@@ -834,6 +856,7 @@ struct Worker {
   # is configured and `ctx.access.aud` is available).
 
   workflowsEngine @20 :WorkflowsEngine;
+  # the externally-supplied service responsible for running Workflows defined in this worker
 }
 
 struct ExternalServer {
