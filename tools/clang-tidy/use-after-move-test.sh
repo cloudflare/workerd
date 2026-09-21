@@ -26,13 +26,13 @@ if [[ ${positive_status} -eq 0 ]]; then
   exit 1
 fi
 
-if [[ $(printf '%s\n' "${positive_output}" | grep -c '\[workerd-use-after-move') -ne 5 ]]; then
-  printf '%s\n' "Expected five workerd-use-after-move diagnostics." >&2
+if [[ $(printf '%s\n' "${positive_output}" | grep -c '\[workerd-use-after-move') -ne 7 ]]; then
+  printf '%s\n' "Expected seven workerd-use-after-move diagnostics." >&2
   printf '%s\n' "${positive_output}" >&2
   exit 1
 fi
 
-for line in 28 32 37 42; do
+for line in 36 40 45 50 56 64; do
   if [[ "${positive_output}" != *"use-after-move-positive-test.c++:${line}:"* ]]; then
     printf '%s\n' "Expected a workerd-use-after-move diagnostic on line ${line}." >&2
     printf '%s\n' "${positive_output}" >&2

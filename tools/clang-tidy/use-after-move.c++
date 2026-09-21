@@ -36,23 +36,9 @@ StatementMatcher inUnevaluatedOrTemplateArgument() {
       hasAncestor(expr(hasUnevaluatedContext())));
 }
 
-bool supportsIntentionalPartialMove(const clang::ValueDecl& variable) {
-  const auto* record = variable.getType().getNonReferenceType()->getAsCXXRecordDecl();
-  if (record == nullptr) return false;
-  auto name = record->getQualifiedNameAsString();
-
-  // RemotePromise combines Promise and Pipeline base classes. Workerd passes
-  // kj::mv(remotePromise) where a Promise&& is expected, consuming that base
-  // while continuing to use the Pipeline base for pipelined calls. The generic
-  // analysis cannot reliably distinguish this from moving the whole object.
-  return name == "capnp::RemotePromise";
-}
-
-// KJ_IF_SOME and KJ_SWITCH_ONEOF expand to loops and switches whose synthetic
-// CFG paths do not match their source-level semantics. The generic analysis can
-// connect mutually-exclusive cases or infer another loop iteration even though
-// these macros select a binding only once.
-bool isInsideKjControlFlow(const clang::Expr& expression, clang::ASTContext& context) {
+// KJ_CASE_ONEOF expands to a for loop that executes at most once. The generic
+// analysis does not infer that the loop increment prevents another iteration.
+bool isInsideKjOneOfCase(const clang::Expr& expression, clang::ASTContext& context) {
   clang::DynTypedNode node = clang::DynTypedNode::create(expression);
   while (true) {
     auto parents = context.getParents(node);
@@ -62,9 +48,7 @@ bool isInsideKjControlFlow(const clang::Expr& expression, clang::ASTContext& con
       if (location.isMacroID()) {
         auto macro = clang::Lexer::getImmediateMacroName(
             location, context.getSourceManager(), context.getLangOpts());
-        if (macro == "KJ_IF_SOME" || macro == "KJ_SWITCH_ONEOF" || macro == "KJ_CASE_ONEOF") {
-          return true;
-        }
+        if (macro == "KJ_CASE_ONEOF") return true;
       }
     }
     node = parents[0];
@@ -113,8 +97,7 @@ void UseAfterMoveCheck::check(const clang::ast_matchers::MatchFinder::MatchResul
   const auto* move = result.Nodes.getNodeAs<clang::CallExpr>("call-move");
   const auto* argument = result.Nodes.getNodeAs<clang::DeclRefExpr>("arg");
   if (move == nullptr || argument == nullptr || result.Context == nullptr) return;
-  if (supportsIntentionalPartialMove(*argument->getDecl()) ||
-      isInsideKjControlFlow(*move, *result.Context)) {
+  if (isInsideKjOneOfCase(*move, *result.Context)) {
     return;
   }
 
