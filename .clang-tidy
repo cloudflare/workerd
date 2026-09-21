@@ -91,6 +91,8 @@ Checks: >
 
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*src/workerd/.*'
+# Headers cxx generates from Rust bridges are not ours to style-check.
+ExcludeHeaderFilterRegex: '.*\.rs\.h$'
 
 CheckOptions:
   - key: misc-coroutine-hostile-raii.RAIITypesList
