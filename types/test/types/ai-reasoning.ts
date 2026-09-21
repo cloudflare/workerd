@@ -20,6 +20,14 @@ void ai.run('@cf/moonshotai/kimi-k2.6', {
 });
 void ai.run('@cf/zai-org/glm-5.3', { messages, reasoning_effort: 'max' });
 void ai.run('@cf/zai-org/glm-5.3-flash', { messages, reasoning_effort: 'max' });
+void ai.run('@cf/nvidia/nemotron-3-120b-a12b', {
+  messages,
+  reasoning_effort: 'none',
+});
+void ai.run('@cf/qwen/qwen3.8-27b', {
+  messages,
+  reasoning_effort: 'xhigh',
+});
 void ai.run('@cf/deepseek-ai/deepseek-v4-pro-0813', {
   messages,
   reasoning_effort: 'low',
@@ -54,6 +62,16 @@ void ai.run('@cf/openai/gpt-oss-20b', {
 void ai.run('@cf/moonshotai/kimi-k2.7-code', {
   messages,
   chat_template_kwargs: { enable_thinking: false },
+});
+// @ts-expect-error: Nemotron does not accept high reasoning effort
+void ai.run('@cf/nvidia/nemotron-3-120b-a12b', {
+  messages,
+  reasoning_effort: 'high',
+});
+// @ts-expect-error: Qwen 3.8 does not accept none reasoning effort
+void ai.run('@cf/qwen/qwen3.8-27b', {
+  messages,
+  reasoning_effort: 'none',
 });
 
 // Unrelated options remain available on both input formats.
