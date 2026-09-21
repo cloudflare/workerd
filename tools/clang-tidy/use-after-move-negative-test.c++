@@ -10,15 +10,9 @@ T&& mv(T& value) {
 
 }  // namespace kj
 
-namespace capnp {
-template <typename T>
-struct RemotePromise {};
-}  // namespace capnp
-
 struct Value {};
 
 void consume(Value&&);
-void consumeRemote(capnp::RemotePromise<Value>&&);
 void use(const Value&);
 bool choose();
 
@@ -52,17 +46,11 @@ void unevaluated(Value value) {
   use(value);
 }
 
-#define KJ_IF_SOME(body)                                                                           \
-  do {                                                                                             \
-    body                                                                                           \
-  } while (false)
+#define KJ_CASE_ONEOF(name, value)                                                                 \
+  for (auto &name = value, *name##Done = &name; name##Done; name##Done = nullptr)
 
 void kjControlFlow(Value value) {
-  KJ_IF_SOME(consume(kj::mv(value)); use(value);)
-    ;
-}
-
-void splitMovedFromState(capnp::RemotePromise<Value> promise) {
-  consumeRemote(kj::mv(promise));
-  (void)promise;
+  KJ_CASE_ONEOF(selected, value) {
+    consume(kj::mv(selected));
+  }
 }

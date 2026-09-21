@@ -23,6 +23,14 @@ void consumeOwn(kj::Own<Value>&&);
 Value convert(Value&&);
 void consumePair(Value, Value);
 void use(const Value&);
+bool choose();
+
+#define KJ_IF_SOME(name, exp)                                                                      \
+  if (auto _##name = exp)                                                                          \
+    if (auto& name = *_##name; false) {                                                            \
+    } else
+
+#define KJ_SWITCH_ONEOF(value) switch (value)
 
 void abortSignalOrdering(Value value) {
   consumePair(value.clone(), convert(kj::mv(value)));
@@ -40,4 +48,22 @@ void straightLine(Value value) {
 void dereferenceMovedOwner(kj::Own<Value> own) {
   consumeOwn(kj::mv(own));
   use(*own);
+}
+
+void movedInsideKjIfSome(Value* maybeValue) {
+  KJ_IF_SOME(value, maybeValue) {
+    consume(kj::mv(value));
+    use(value);
+  }
+}
+
+void movedInsideKjSwitchOneof(Value value) {
+  KJ_SWITCH_ONEOF(choose()) {
+    case true:
+      consume(kj::mv(value));
+      use(value);
+      break;
+    case false:
+      break;
+  }
 }
