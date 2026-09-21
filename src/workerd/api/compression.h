@@ -285,11 +285,16 @@ class CompressionCodec final: public jsg::Object {
   // the full size exactly.
   double available();
 
+  // Drops the buffered output: the TS pair's teardown paths, for output a drain cut short by
+  // a reader cancel or an error has left in the stage.
+  void clear();
+
   JSG_RESOURCE_TYPE(CompressionCodec) {
     JSG_METHOD(push);
     JSG_METHOD(end);
     JSG_METHOD(pullInto);
     JSG_METHOD(available);
+    JSG_METHOD(clear);
 
     // Internal plumbing type: keep it out of the generated TypeScript types.
     JSG_TS_OVERRIDE(type CompressionCodec = never);

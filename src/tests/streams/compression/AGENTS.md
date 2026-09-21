@@ -104,7 +104,10 @@ interface DecompressionStream {
   under TS; C++ leaves it untouched — `writer.closed` stays pending (#13).
 - **Reads:** a second concurrent default read rejects under C++ ("single
   pending read request") and parks under TS (#14); the thenable check runs
-  once per read under C++, twice under TS (#15).
+  once per read under C++, twice under TS (#15). Under TS the first check
+  runs inside the write delivering the chunk; a reader cancel from there
+  stops the delivery and fails that write with the cancel reason (the
+  writable errors per #13), where C++ has already settled the write.
 - **tee():** both branches observe identical bytes; the single-branch
   cancel promise carries the identity suite's ledger #13 semantics (C++
   immediate, TS shared composite).
@@ -179,7 +182,7 @@ pedantic branches shifting anything the suite pins.
 | `byob.js` | BYOB reader fills a 2-byte destination with the gzip magic |
 | `backpressure.js` | eager write settlement without reads; desiredSize accounting (#8) |
 | `propagation.js` | abort rejects pending read (reason per #9), errors both sides; cancel settles parked read (#12); write-after-abort (#10); non-Error reasons (#11); writes after a queued close reject (message per impl) without disturbing the close or output; cancel→writable aftermath (#13) |
-| `reentrancy.js` | thenable-check counts (#15); second concurrent read (#14); close from a read continuation with round-trip integrity; sibling tee cancel from a continuation |
+| `reentrancy.js` | thenable-check counts (#15); a reader cancel from a read result's `then` getter while the write is still delivering (TS: the write rejects with the reason, the writable errors per #13; C++: the write resolves, the writable is untouched per #13); second concurrent read (#14); close from a read continuation with round-trip integrity; sibling tee cancel from a continuation |
 | `tee.js` | branches byte-identical; single-branch cancel (identity ledger #13 semantics) with survivor draining |
 | `draining-reader.js` | TS only (C++ asserts absence): expectedLength undefined; a closed stream's backlog swept in ONE read with done — a small one, and a 1 MiB one as its sixteen 64 KiB pieces; lock/release |
 | `delivery-shape.js` | a 4 MiB single-write output read in bounded pieces (#16), byte-exact; BYOB views filled to their size; two pending reads take consecutive pieces (C++: #14); tee branches get bounded pieces; trailing junk after a large output with two reads waiting (#17) |

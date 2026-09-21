@@ -102,6 +102,7 @@ interface CodecHandle {
   end(): void;
   pullInto(view: ArrayBufferView): number;
   available(): number;
+  clear(): void;
 }
 
 // The largest chunk the sink enqueues: the size of the pieces a write's
@@ -197,6 +198,25 @@ function createCodecPair(
 
   let writableController: object | undefined;
   let readableController: object;
+  // Set, with the reason, once the readable takes no more chunks: its
+  // reader cancelled it, or the pair errored. Enqueuing runs user code —
+  // resolving a read looks up `then` on the result (createReadResult in
+  // queue.ts), and a getter there can cancel the reader or error the pair
+  // through the Node.js interop hook — so a drain checks this between
+  // pieces rather than enqueue into a stream that would throw.
+  let finished = false;
+  let finishReason: unknown;
+
+  // The teardown every path that ends the pair shares: queued writes are
+  // discarded by the erroring writable without sink steps, so their
+  // snapshots go too, as does any output a cut-short drain left in the
+  // stage.
+  const finish = (reason: unknown): void => {
+    finished = true;
+    finishReason = reason;
+    snapshots.clear();
+    handle.clear();
+  };
 
   // Codec failure (corrupt input on write; strict end checks on close):
   // error the readable side — the writable errors via the sink throw
@@ -204,23 +224,23 @@ function createCodecPair(
   // rejected pending reads and errored the state machine on any codec
   // exception.
   const failBoth = (reason: unknown): void => {
-    // Queued writes are discarded by the erroring writable without sink
-    // steps; drop their snapshots with them.
-    snapshots.clear();
+    finish(reason);
     byteControllerError(readableController, reason);
   };
 
   // Moves all buffered stage output into the readable's queue, as chunks
   // of at most kPieceSize; each chunk goes straight to a waiting read if
-  // there is one. The enqueue is unconditional: every call site runs
-  // either right after a codec step (stream readable) or is unreachable
-  // once the pair has failed or been canceled (the errored/canceled
-  // writable rejects writes before the sink hooks run).
+  // there is one. Stops as soon as the pair is finished (an enqueue can
+  // tear it down, see `finished`); otherwise the enqueue is unconditional:
+  // every call site runs either right after a codec step (stream readable)
+  // or is unreachable once the pair has failed or been canceled (the
+  // errored/canceled writable rejects writes before the sink hooks run).
   const drainStage = (): void => {
-    let available = handle.available();
-    while (available > 0) {
+    while (!finished) {
+      const available = handle.available();
+      if (available <= 0) return;
       const out = new Uint8Array(MathMin(available, kPieceSize));
-      available -= handle.pullInto(out);
+      handle.pullInto(out);
       byteControllerEnqueue(readableController, out);
     }
   };
@@ -300,8 +320,10 @@ function createCodecPair(
         }
         // Writes never wait for reads (legacy-parity settlement): the
         // output moves into the readable's queue, which buffers it without
-        // bound.
+        // bound. A pair torn down during the drain fails the write with
+        // the teardown's reason, as it does a write queued behind it.
         drainStage();
+        if (finished) throw finishReason;
       },
       close: (): void => {
         // Z_FINISH plus the strict-mode end checks; a throw rejects the
@@ -314,10 +336,12 @@ function createCodecPair(
         }
         // Deliver the flush tail, then close: queued bytes are served to
         // later reads before the close lands (queued byte-stream
-        // semantics). When a BYOB read's view is left holding a partial
-        // element, close() errors the readable and throws, and the throw
-        // rejects writer.close() in turn.
+        // semantics). A pair torn down during the drain fails the close
+        // with the teardown's reason instead. When a BYOB read's view is
+        // left holding a partial element, close() errors the readable and
+        // throws, and the throw rejects writer.close() in turn.
         drainStage();
+        if (finished) throw finishReason;
         byteControllerClose(readableController);
       },
       abort: (reason: unknown): void => {
@@ -343,9 +367,8 @@ function createCodecPair(
         // Reader-side cancel tears down the write side, mirroring the
         // legacy adapter's cancel → abortWrite path. Erroring a
         // closed/errored writable is a spec no-op, so no state check is
-        // needed. The stage holds nothing between sink steps, and the
-        // cancel itself drops the queued output.
-        snapshots.clear();
+        // needed. The cancel itself drops the queued output.
+        finish(reason);
         if (writableController !== undefined) {
           writableControllerError(writableController, reason);
         }

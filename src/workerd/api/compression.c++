@@ -344,6 +344,10 @@ double CompressionCodec::available() {
   return static_cast<double>(stage.available());
 }
 
+void CompressionCodec::clear() {
+  stage.clear();
+}
+
 void newCompressionCodecCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
   // liftKj converts thrown kj/jsg exceptions (e.g. the validation TypeErrors below) into JS
   // exceptions (without it they would escape the raw callback and take down the process) and
