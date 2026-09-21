@@ -2693,8 +2693,9 @@ class ReadableStreamDrainingReader<R> {
   // TOTAL bytes the underlying source declared it will produce
   // (undefined = unknown → chunked encoding). A construction-time value,
   // cached on the controller; backend-blind via the chained helper
-  // (byte/native report their cached value; default streams report
-  // undefined). Returns undefined after release.
+  // (byte/native report their cached value; a default controller the
+  // value the TransformStream expectedLength extension installed, if
+  // any). Returns undefined after release.
   get expectedLength(): bigint | undefined {
     const stream = getReaderStream<R>(this);
     if (stream === undefined) return undefined;
@@ -4423,7 +4424,8 @@ class ReadableStream<R> {
 // Body consumption for the C++ bridge (arrayBuffer/bytes/text/json). Two
 // byte bounds apply: the caller's memory limit, capped at 128 MB, and the
 // stream's declared expectedLength. A breach names its cause and cancels
-// the stream with it, as the C++ AllReader does.
+// the stream with it, as the C++ AllReader does; a declaration the limit
+// cannot hold is refused before a byte is read.
 const kMaximumAllowedLimit = 128n * 1024n * 1024n;
 
 function acquireReadableStreamDrainingReader<R>(
@@ -4553,8 +4555,16 @@ async function collectChunks<R>(
   }
   const reader = acquireReadableStreamDrainingReader(stream);
   if (limit > kMaximumAllowedLimit) limit = kMaximumAllowedLimit;
+  // The declaration is the exact total the stream will deliver, so one
+  // beyond the limit settles the outcome before a byte is read.
   const declared = getReadableStreamExpectedLength(stream);
-  const declaredBinds = declared !== undefined && declared < limit;
+  if (declared !== undefined && declared > limit) {
+    return failCollect(
+      reader,
+      new TypeError('Memory limit would be exceeded before EOF.')
+    );
+  }
+  const declaredBinds = declared !== undefined;
   const bound = Number(declaredBinds ? declared : limit);
   const collected = new CollectedBytes(
     declaredBinds && bound <= kCollectBlockSize ? bound : 0
