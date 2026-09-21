@@ -11558,7 +11558,7 @@ declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_6 {
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
-  inputs: ChatCompletionsInput;
+  inputs: ChatCompletionsInput<"medium" | "low" | "none", boolean>;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
@@ -11730,7 +11730,7 @@ declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813 {
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Qwen_Qwen3_8_27B {
-  inputs: ChatCompletionsInput;
+  inputs: ChatCompletionsInput<"xhigh" | "medium" | "low", boolean>;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_3 {
