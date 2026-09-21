@@ -14,9 +14,8 @@
 //   - visit-for-gc.c++: jsg-visit-for-gc check
 //   - unsafe-continuation-capture.c++: workerd-unsafe-continuation-capture check
 
-#include "clang-tidy/ClangTidyModule.h"
-
 #include "angled-includes.h"
+#include "clang-tidy/ClangTidyModule.h"
 #include "consume.h"
 #include "legacy-stream-alloc.h"
 #include "promise-ignore-result.h"
@@ -26,7 +25,7 @@
 namespace workerd {
 namespace clang_tidy {
 
-class WorkerdLintModule : public clang::tidy::ClangTidyModule {
+class WorkerdLintModule: public clang::tidy::ClangTidyModule {
  public:
   void addCheckFactories(clang::tidy::ClangTidyCheckFactories &CheckFactories) override {
     CheckFactories.registerCheck<AngledIncludesCheck>("workerd-angled-includes");
@@ -39,8 +38,8 @@ class WorkerdLintModule : public clang::tidy::ClangTidyModule {
   }
 };
 
-static clang::tidy::ClangTidyModuleRegistry::Add<WorkerdLintModule>
-    X("workerd-lint", "Workerd static checks.");
+static clang::tidy::ClangTidyModuleRegistry::Add<WorkerdLintModule> X(
+    "workerd-lint", "Workerd static checks.");
 
 }  // namespace clang_tidy
 }  // namespace workerd
