@@ -3920,9 +3920,11 @@ Worker::Actor::Actor(const Worker& worker,
     jsg::Dict<kj::String> containerImages,
     kj::Maybe<FacetManager&> facetManager,
     kj::Maybe<ActorVersion> version,
-    kj::Maybe<uint64_t> holderToken)
+    kj::Maybe<uint64_t> holderToken,
+    kj::Maybe<kj::Own<WaitUntilTaskTracker>> waitUntilTaskTracker)
     : worker(kj::atomicAddRef(worker)),
-      tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
+      tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })),
+      waitUntilTaskTracker(kj::mv(waitUntilTaskTracker)) {
   impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache), kj::mv(props),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
       hibernationEventType, kj::mv(container), kj::mv(containerImages), facetManager);
@@ -4405,6 +4407,13 @@ kj::Maybe<api::ExportedHandler&> Worker::Actor::getHandler() {
 
 ActorObserver& Worker::Actor::getMetrics() {
   return *impl->metrics;
+}
+
+kj::Own<Worker::Actor::WaitUntilTaskHandle> Worker::Actor::addedWaitUntilTask() {
+  KJ_IF_SOME(tracker, waitUntilTaskTracker) {
+    return tracker->registerTask();
+  }
+  return kj::Own<WaitUntilTaskHandle>();
 }
 
 InputGate& Worker::Actor::getInputGate() {

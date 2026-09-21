@@ -587,8 +587,16 @@ void IoContext::addTask(kj::Promise<void> promise) {
 }
 
 void IoContext::addWaitUntil(kj::Promise<void> promise) {
-  // The empty check comes first: getMetrics() requires a current IncomingRequest, so consulting
-  // it before checking would turn the recoverable no-request case into a fatal one. See addTask().
+  kj::Own<Worker::Actor::WaitUntilTaskHandle> handle;
+  KJ_IF_SOME(a, actor) {
+    KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { handle = a.addedWaitUntilTask(); })) {
+      KJ_LOG(ERROR, "Actor::addedWaitUntilTask() threw an exception", e);
+    }
+  }
+  if (handle.get() != nullptr) {
+    promise = promise.attach(kj::mv(handle));
+  }
+
   if (incomingRequests.empty()) {
     DEBUG_FATAL_RELEASE_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
         lastDeliveredLocation, kj::getStackTrace());
