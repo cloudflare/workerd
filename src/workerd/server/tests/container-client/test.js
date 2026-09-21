@@ -2466,7 +2466,7 @@ export class DurableObjectExample extends DurableObject {
       });
     assert.equal(tmpWriteResp.status, 200);
 
-    const snapshot = await container.snapshotContainer({});
+    const snapshot = await container.snapshotContainer();
     assert.strictEqual(typeof snapshot.id, 'string');
     assert.ok(snapshot.id.length > 0, 'snapshot id should be non-empty');
     assert.ok(snapshot.size > 0, 'snapshot size should be > 0');
