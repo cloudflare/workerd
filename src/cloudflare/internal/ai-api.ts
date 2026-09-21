@@ -364,7 +364,7 @@ export class Ai extends wrappedBinding.WrappedBinding {
     return res.body;
   }
 
-  async websearch(request: AiWebSearchRequest): Promise<Response> {
+  async websearch(request: AiWebSearchRequest | null): Promise<Response> {
     if (
       !request ||
       typeof request.gatewayId !== 'string' ||
