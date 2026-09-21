@@ -97,3 +97,48 @@ guarantee by type, and what the **C++ adapters** guarantee by construction.
   that config (only the `tsan` configs instrument Rust), so a passing `--config=asan` run says
   nothing about Rust memory safety; add `--@rules_rust//:extra_rustc_flag=-Zsanitizer=address`
   to instrument it.
+
+## kj-hyper lifetime, cancellation and threading rules
+
+kj-hyper implements kj's HTTP interfaces over hyper; kj-hyper.c++ adapts the interfaces, and all
+of its Rust `unsafe` is in ffi.rs.
+
+- **Operations own their state.** Rust handles (`RustIo`, `RustBody`, `BodySink`,
+  `RustWebSocket`, `HyperClient`) are `Rc`s of their state, and every bridged operation captures a
+  share of it (`fn -> impl Future + use<..>`), so a C++ wrapper destroyed with a promise pending
+  leaves nothing dangling. What a call borrows from C++ -- a `tryRead` buffer, header slices, the
+  connection's `HttpDispatcher` for `serve()` -- is tied to the future's lifetime on the bridge.
+  Do not add raw pointers that stand in for a lifetime.
+- **Streams handed over or lent, by entry point.** `new_connection` / `new_single_client` take a
+  stream the caller hands over, and may take its socket apart (`kj_to_tokio`); the
+  `..._over_lent_stream` variants drive a stream the caller keeps (a non-owning `kj::Own`) and never
+  take it apart. A released kj-rs-io or `RustIoStream` wrapper throws if used again.
+- **Headers are copied at the crossing.** kj headers reach hyper through `forEachHeader` ->
+  `Head::append`; hyper's come back packed (`HeaderBlock`), and C++ checks the block's bounds before
+  building `kj::HttpHeaders`.
+- **One thread, unchecked -- unlike kj-rs-io.** kj-hyper's objects are kj HTTP objects, bound to
+  their event loop's thread as kj's own are: state is `Rc`/`RefCell`/`Cell`, borrowed only inside a
+  poll, and nothing is `Send` or checked for the thread. Moving a `kj::HttpClient`, `WebSocket` or
+  stream from kj-hyper to another thread is a kj contract violation, as it is for kj's
+  implementation. Nothing spawns onto another runtime or thread. hyper's upgrades are taken over by
+  hand (`poll_without_shutdown` / `without_shutdown` + `into_parts`), which is what keeps hyper
+  from requiring `Send` transports.
+- **Cancellation.** Dropping a promise drops its future. A cancelled client request closes its
+  connection (hyper's rule); a WebSocket send cancelled mid-frame ends sending, while a cancelled
+  receive keeps the reader intact; `abort()` fails the operations in flight, the protocol-error
+  Close a receive is writing included, and lets go of the connection. A server connection's service
+  calls are cancelled when its peer hangs up.
+- **One WebSocket writer.** The writer is lent to one operation at a time; a control frame owed
+  meanwhile, and `disconnect()`'s shutdown, are written by the holder before it gives the writer
+  back (`WsState::write_owed`). Keep every write path going through it.
+- **tokio's I/O contracts at the seams.** `KjIo` (a kj stream as a tokio stream) is a buffered
+  writer: a write is accepted once its kj write starts and `poll_flush` waits for it. `RustIo` and
+  WebSocket writes resolve only once flushed, since a TLS stream may hold written bytes. A TLS
+  stream is wrapped in `SharedWakers`, since rustls' reads write and its writes read while two
+  tasks each own a direction.
+- **Hangups belong to the connection.** A connection's `HangupWatch` (a descriptor `dup`, or a kj
+  `whenWriteDisconnected()` promise) lives in its I/O object; `Hangup` clones hold none of it. Once
+  the connection is gone they never resolve (resolving would cancel service calls whose transport
+  was merely released). A failed observation fails the hangup, and with it the serve.
+- **tokio's clock.** hyper's header timeout and the pool's idle eviction are tokio timers, so they
+  need the thread's tokio runtime.

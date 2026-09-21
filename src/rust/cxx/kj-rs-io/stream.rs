@@ -56,6 +56,7 @@ use std::io::IoSlice;
 use std::mem::MaybeUninit;
 use std::sync::Arc;
 
+use cxx::KjError;
 use tokio::io::Interest;
 use tokio::net::TcpStream;
 #[cfg(unix)]
@@ -93,6 +94,22 @@ struct Inner {
     read_abort: tokio::sync::Notify,
 }
 
+/// Resolves once a hangup watch (a `dup(2)` registered for WRITABLE) sees the peer gone.
+#[cfg(unix)]
+async fn write_closed(
+    watch: &tokio::io::unix::AsyncFd<std::os::fd::OwnedFd>,
+) -> std::io::Result<()> {
+    loop {
+        let mut guard = watch.ready(Interest::WRITABLE).await?;
+        if guard.ready().is_write_closed() {
+            return Ok(());
+        }
+        // Plain "writable": clear it so the next wait sleeps until an actual state-change event
+        // (edge-triggered), rather than spinning on an always-writable socket.
+        guard.clear_ready();
+    }
+}
+
 /// A registered tokio socket of either family. Constructed only by net.rs, from sockets it
 /// registered on the loop thread (lib.rs, "The tokio runtime").
 pub enum Socket {
@@ -102,6 +119,26 @@ pub enum Socket {
 }
 
 impl Socket {
+    /// `kj::AsyncIoStream::whenWriteDisconnected` for a socket taken out of its stream: resolves
+    /// once the peer can no longer receive. It watches its own `dup(2)` (module docs), so the
+    /// socket's reads and writes are undisturbed; the dup is closed when the future is dropped.
+    #[cfg(unix)]
+    pub fn hangup(
+        &self,
+    ) -> std::io::Result<impl Future<Output = std::io::Result<()>> + Send + 'static> {
+        let owned = self.as_borrowed_fd().try_clone_to_owned()?;
+        let watch = tokio::io::unix::AsyncFd::with_interest(owned, Interest::WRITABLE)?;
+        Ok(async move { write_closed(&watch).await })
+    }
+
+    /// Never resolves, as capnproto's win32 `whenWriteDisconnected`.
+    #[cfg(windows)]
+    pub fn hangup(
+        &self,
+    ) -> std::io::Result<impl Future<Output = std::io::Result<()>> + Send + 'static> {
+        Ok(std::future::pending())
+    }
+
     /// Borrows the live tokio socket's fd (tokio streams implement `AsFd`), for dup-based
     /// operations that must not conjure a raw fd out of an integer.
     #[cfg(unix)]
@@ -364,18 +401,9 @@ impl Inner {
             // this one is dropped (closing its dup) and the stored one is shared.
             self.hangup_watch.get_or_init(|| async_fd)
         };
-        loop {
-            let mut guard = async_fd
-                .ready(Interest::WRITABLE)
-                .await
-                .map_err(op("whenWriteDisconnected"))?;
-            if guard.ready().is_write_closed() {
-                return Ok(());
-            }
-            // Plain "writable": clear it so the next wait sleeps until an actual state-change
-            // event (edge-triggered), rather than spinning on an always-writable socket.
-            guard.clear_ready();
-        }
+        write_closed(async_fd)
+            .await
+            .map_err(op("whenWriteDisconnected"))
     }
 
     /// Never resolves: KJ parity, not a gap (see the unix arm's docs).
@@ -405,6 +433,36 @@ impl TokioStream {
     /// A share of the state, for an operation's future to own (see the module docs).
     fn shared(&self) -> Arc<Inner> {
         Arc::clone(&self.inner)
+    }
+
+    /// Recovers the native tokio socket, consuming the wrapper: the unwrap fast path a Rust
+    /// server (kj-hyper) uses to serve a connection natively instead of crossing the bridge per
+    /// read. The socket stays registered with the loop runtime that created it.
+    ///
+    /// Refuses -- handing the wrapper back untouched -- while any operation still holds a share
+    /// of the state (an I/O future in flight, an outstanding `whenWriteDisconnected()`), or off
+    /// the owning loop: that is the checked half of KJ's "no I/O in flight when handing over a
+    /// stream" contract, detected here rather than assumed.
+    ///
+    /// # Errors
+    ///
+    /// The wrapper plus the reason, so the caller can keep using (or re-wrap) the stream.
+    pub fn into_socket(self: Box<Self>) -> std::result::Result<Socket, (Box<Self>, KjError)> {
+        if let Err(error) = crate::ensure_owner_loop(self.inner.owner) {
+            return Err((self, error.into()));
+        }
+        let Self { inner } = *self;
+        match Arc::try_unwrap(inner) {
+            Ok(inner) => Ok(inner.socket),
+            Err(inner) => Err((
+                Box::new(Self { inner }),
+                KjIoError::other(
+                    "kj_rs_io",
+                    "cannot take the stream's socket: an I/O operation is still in flight on it",
+                )
+                .into(),
+            )),
+        }
     }
 
     /// `kj::AsyncIoStream::tryRead` as a future owning its share of the stream. `buf` may be
@@ -768,5 +826,31 @@ mod tests {
                 .description()
                 .contains("other than this thread's TokioEventPort runtime")
         );
+    }
+    #[test]
+    fn into_socket_takes_the_socket_when_nothing_is_in_flight() {
+        let port = kj_rs_tokio::TokioPort::new();
+        let (stream, _client) = connected_pair(&port);
+        assert!(Box::new(stream).into_socket().is_ok());
+        drop(port);
+    }
+
+    #[test]
+    fn into_socket_while_an_operation_is_in_flight_hands_the_stream_back() {
+        let port = kj_rs_tokio::TokioPort::new();
+        let (stream, _client) = connected_pair(&port);
+        let mut buf = [MaybeUninit::<u8>::uninit(); 8];
+        // The read borrows only the shared state, not the handle, so the handle can be moved.
+        let mut read = Box::pin(stream.try_read_min(&mut buf, 1));
+        assert!(poll_once(&mut read).is_pending());
+        let Err((stream, error)) = Box::new(stream).into_socket() else {
+            panic!("into_socket() succeeded with a read in flight")
+        };
+        assert!(error.description().contains("in flight"), "{error:?}");
+        // The handed-back wrapper is the same stream: still sharing with the read.
+        assert_eq!(Arc::strong_count(&stream.inner), 2);
+        drop(read);
+        assert!(stream.into_socket().is_ok());
+        drop(port);
     }
 }

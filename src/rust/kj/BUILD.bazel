@@ -5,7 +5,7 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 wd_rust_crate(
     name = "kj",
     cxx_bridge_deps = [
-        "@capnp-cpp//src/kj/compat:kj-http",
+        "@capnp-cpp//src/kj/compat:kj-http-types",
     ],
     cxx_bridge_srcs = [
         "http.rs",
@@ -38,6 +38,6 @@ wd_cc_library(
         ":http.rs@cxx",
         "//src/rust/cxx-integration",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj/compat:kj-http",
+        "@capnp-cpp//src/kj/compat:kj-http-types",
     ],
 )

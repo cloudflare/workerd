@@ -17,10 +17,6 @@
 #include <kj/map.h>
 #include <kj/one-of.h>
 
-namespace kj {
-class TlsContext;
-}
-
 namespace workerd::jsg {
 class V8System;
 }
@@ -247,7 +243,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   // request in flight.
   kj::Promise<void> handleDrain(kj::Promise<void> drainWhen);
 
-  kj::Own<kj::TlsContext> makeTlsContext(config::TlsOptions::Reader conf);
+  kj::Own<kj::SecureNetworkWrapper> makeTlsContext(config::TlsOptions::Reader conf);
   kj::Promise<kj::Own<kj::NetworkAddress>> makeTlsNetworkAddress(config::TlsOptions::Reader conf,
       kj::StringPtr addrStr,
       kj::Maybe<kj::StringPtr> certificateHost,
@@ -372,7 +368,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   struct SocketTypeConfig {
     uint defaultPort = 0;
     config::HttpOptions::Reader httpOptions;
-    kj::Maybe<kj::Own<kj::TlsContext>> tls;
+    kj::Maybe<kj::Own<kj::SecureNetworkWrapper>> tls;
     kj::StringPtr physicalProtocol;
   };
   kj::Maybe<SocketTypeConfig> parseSocketType(config::Socket::Reader sock, kj::StringPtr name);

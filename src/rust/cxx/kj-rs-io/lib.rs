@@ -131,6 +131,7 @@
 compile_error!("kj-rs-io supports Unix and Windows targets only");
 
 pub use net::TokioAddress;
+pub use stream::Socket;
 pub use stream::TokioStream;
 
 mod error;
