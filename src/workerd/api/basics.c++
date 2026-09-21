@@ -651,7 +651,9 @@ jsg::Ref<AbortSignal> AbortSignal::abort(jsg::Lock& js, jsg::Optional<jsg::JsVal
   KJ_IF_SOME(reason, maybeReason) {
     return js.alloc<AbortSignal>(kj::mv(exception), reason.addRef(js));
   }
-  return js.alloc<AbortSignal>(exception.clone(), js.exceptionToJsValue(kj::mv(exception)));
+  auto signalException = exception.clone();
+  auto reason = js.exceptionToJsValue(kj::mv(exception));
+  return js.alloc<AbortSignal>(kj::mv(signalException), kj::mv(reason));
 }
 
 void AbortSignal::throwIfAborted(jsg::Lock& js) {
