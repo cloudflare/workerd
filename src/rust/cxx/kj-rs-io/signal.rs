@@ -55,7 +55,7 @@ pub async fn wait_for_signal(signum: i32) -> Result<()> {
     #[cfg(windows)]
     {
         // `<csignal>` values as the C++ callers pass them (MSVC defines SIGINT=2, SIGTERM=15).
-        // workerd's only caller passes SIGTERM (graceful drain; server/workerd.c++);
+        // workerd's only caller passes SIGTERM (graceful drain; server/cli-main.c++);
         // SIGINT is mapped for completeness. See the module docs for why SIGTERM is
         // CTRL_BREAK_EVENT.
         const SIGINT: i32 = 2;

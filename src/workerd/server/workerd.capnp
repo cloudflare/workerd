@@ -36,7 +36,7 @@
 
 # Any capnp files imported here must be:
 # 1. embedded using wd_cc_embed
-# 2. added to `tryImportBulitin` in workerd.c++ (grep for '"/workerd/workerd.capnp"').
+# 2. added to `tryImportBulitin` in schema-file.c++ (grep for '"/workerd/workerd.capnp"').
 using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd::server::config");
 $Cxx.allowCancellation;
