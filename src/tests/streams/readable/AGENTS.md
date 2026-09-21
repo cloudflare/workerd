@@ -96,7 +96,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `buffer-lifecycle.js` | chunk by reference, detach observed |
 | `integration-body.js` | readAll family, normalization (incl. detached views, SharedArrayBuffer-backed views, resizable-extent pinning), clone, cancel-then-consume, SELF round-trips |
 | `integration-body-failures.js` | consumer-side failures cancel the source with the error (every consumer; the cancel's rejection replaces it; nothing to cancel once the closing batch is in), leave the stream locked and stop pulls; TransformStream `expectedLength` overflow (#21) and exact delivery |
-| `integration-body-memory.js` | body consumption copies bytes out as they arrive: chunk buffers are collectible mid-consumption (WeakRef + gc()), ~2.5 MiB of pseudo-random chunk sizes assembles exactly as bytes and as text, a declared-length byte body is exact |
+| `integration-body-memory.js` | body consumption copies bytes out as they arrive: chunk buffers are collectible mid-consumption (WeakRef + gc()), ~2.5 MiB of pseudo-random chunk sizes assembles exactly as bytes and as text, one chunk wider than a 1 MiB collection block assembles exactly, a declared-length byte body is exact |
 | `integration-locked-disturbed.js` | disturbed rejected, locked accepted, body identity + lock coupling (#15) |
 | `gc.js` | pending read + async iteration survive gc(); a controller held with its stream collected (ledger #19); both tee branches collected while the controller is held: enqueue() drops without retaining (WeakRef-checked, backlog included), desiredSize at the high-water mark, close() then enqueue() as ever, and pull() stops (ledger #20) |
 | `then-interceptors.js` | ledger #16 |

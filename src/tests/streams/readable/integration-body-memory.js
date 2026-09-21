@@ -5,7 +5,8 @@
 // Body consumption copies bytes out of the chunks as they arrive: a chunk
 // is collectible before consumption ends (so a body of many tiny chunks
 // costs its bytes, not an object per chunk), and the assembled result is
-// exact whatever the chunk sizes. Requires --expose-gc and WeakRef (both
+// exact whatever the chunk sizes, including one chunk wider than the
+// blocks the bytes are copied into. Requires --expose-gc and WeakRef (both
 // cell configs). PARITY throughout.
 
 import { strictEqual, ok } from 'node:assert';
@@ -84,6 +85,37 @@ export const oddChunkSizesAssembleIntact = {
       strictEqual(text.charCodeAt(i), 97 + (i % 26));
     }
     strictEqual(text.charCodeAt(total - 1), 97 + ((total - 1) % 26));
+  },
+};
+
+// One chunk wider than the TypeScript implementation's largest collection
+// block (1 MiB), arriving after a one-byte chunk so the block in progress
+// is small: the chunk is copied out across several blocks, and the small
+// chunk after it lands in the last, partial one.
+export const chunkWiderThanABlockAssemblesIntact = {
+  async test() {
+    const wide = 2 * 1024 * 1024 + 5;
+    const sizes = [1, wide, 7];
+    const total = 1 + wide + 7;
+    let offset = 0;
+    const rs = new ReadableStream({
+      pull(c) {
+        if (sizes.length === 0) {
+          c.close();
+          return;
+        }
+        const size = sizes.shift();
+        const chunk = new Uint8Array(size);
+        for (let i = 0; i < size; i++) chunk[i] = (offset + i) & 0xff;
+        offset += size;
+        c.enqueue(chunk);
+      },
+    });
+    const bytes = new Uint8Array(await new Response(rs).arrayBuffer());
+    strictEqual(bytes.byteLength, total);
+    for (let i = 0; i < total; i++) {
+      if (bytes[i] !== (i & 0xff)) throw new Error(`byte ${i} is ${bytes[i]}`);
+    }
   },
 };
 

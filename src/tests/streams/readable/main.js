@@ -175,6 +175,7 @@ export {
 export {
   chunksCollectibleDuringConsumption,
   oddChunkSizesAssembleIntact,
+  chunkWiderThanABlockAssemblesIntact,
   declaredLengthBodyIsExact,
 } from 'integration-body-memory';
 
