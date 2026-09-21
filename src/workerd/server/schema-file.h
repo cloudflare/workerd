@@ -8,9 +8,8 @@
 // Proto schema file: files on disk (with import resolution and --watch registration) and the
 // schemas built into the binary.
 
-#include <kj-rs-io/async-io.h>
-
 #include <capnp/schema-parser.h>
+#include <kj/debug.h>
 #include <kj/filesystem.h>
 
 namespace workerd::server {
@@ -20,16 +19,19 @@ namespace workerd::server {
 kj::Maybe<kj::Own<capnp::SchemaFile>> tryImportBulitin(kj::StringPtr name);
 
 // Callbacks for capnp::SchemaFileLoader. Implementing this interface lets us control import
-// resolution, which we want to do mainly so that we can set watches on all imported files.
+// resolution, which we want to do mainly so that we can report all imported files (for --watch).
 //
 // These callbacks also give us more control over error reporting, in particular the ability
 // to not throw an exception on the first error seen.
 class SchemaFileImpl final: public capnp::SchemaFile {
  public:
+  // Receives parse errors (instead of the parser throwing on the first one) and the path of
+  // every file about to be read, so --watch can watch it before its contents are used.
   class ErrorReporter {
    public:
     virtual void reportParsingError(
         kj::StringPtr file, SourcePos start, SourcePos end, kj::StringPtr message) = 0;
+    virtual void reportFileRead(kj::PathPtr path) = 0;
   };
 
   SchemaFileImpl(const kj::Directory& root,
@@ -38,7 +40,6 @@ class SchemaFileImpl final: public capnp::SchemaFile {
       kj::PathPtr basePath,
       kj::ArrayPtr<const kj::Path> importPath,
       kj::Own<const kj::ReadableFile> fileParam,
-      kj::Maybe<kj_rs_io::FileWatcher&> watcher,
       ErrorReporter& errorReporter)
       : root(root),
         current(current),
@@ -46,7 +47,6 @@ class SchemaFileImpl final: public capnp::SchemaFile {
         basePath(basePath),
         importPath(importPath),
         file(kj::mv(fileParam)),
-        watcher(watcher),
         errorReporter(errorReporter) {
     if (fullPath.startsWith(current)) {
       // Simplify display name by removing current directory prefix.
@@ -56,9 +56,7 @@ class SchemaFileImpl final: public capnp::SchemaFile {
       displayName = fullPath.toNativeString(true);
     }
 
-    KJ_IF_SOME(w, watcher) {
-      w.watch(fullPath);
-    }
+    errorReporter.reportFileRead(fullPath);
   }
 
   kj::StringPtr getDisplayName() const override {
@@ -81,7 +79,7 @@ class SchemaFileImpl final: public capnp::SchemaFile {
 
         KJ_IF_SOME(newFile, root.tryOpenFile(newFullPath)) {
           return kj::implicitCast<kj::Own<SchemaFile>>(kj::heap<SchemaFileImpl>(root, current,
-              kj::mv(newFullPath), candidate, importPath, kj::mv(newFile), watcher, errorReporter));
+              kj::mv(newFullPath), candidate, importPath, kj::mv(newFile), errorReporter));
         }
       }
       // No matching file found. Check if we have a builtin.
@@ -93,7 +91,7 @@ class SchemaFileImpl final: public capnp::SchemaFile {
 
       KJ_IF_SOME(newFile, root.tryOpenFile(newFullPath)) {
         return kj::implicitCast<kj::Own<SchemaFile>>(kj::heap<SchemaFileImpl>(root, current,
-            kj::mv(newFullPath), basePath, importPath, kj::mv(newFile), watcher, errorReporter));
+            kj::mv(newFullPath), basePath, importPath, kj::mv(newFile), errorReporter));
       } else {
         return kj::none;
       }
@@ -132,11 +130,6 @@ class SchemaFileImpl final: public capnp::SchemaFile {
 
   kj::Own<const kj::ReadableFile> file;
   kj::String displayName;
-
-  // Mutable because the SchemaParser interface forces us to make all our methods `const` so that
-  // parsing can happen on multiple threads, but we do not actually use multiple threads for
-  // parsing, so we're good.
-  mutable kj::Maybe<kj_rs_io::FileWatcher&> watcher;
 
   ErrorReporter& errorReporter;
 };
