@@ -225,8 +225,7 @@ class TokioLowLevelAsyncIoProvider final: public kj::LowLevelAsyncIoProvider {
 };
 
 // The tokio-backed kj::AsyncIoProvider. Its pipes are socket pairs, not in-memory kj pipes: a
-// write into an empty pipe completes without a reader waiting, and workerd's loopback transport
-// (server/workerd.c++) gets the real sockets it asks the provider for. newPipeThread throws
+// write into an empty pipe completes without a reader waiting. newPipeThread throws
 // UNIMPLEMENTED (workerd does not use it); newCapabilityPipe keeps its default-throwing
 // implementation.
 class TokioAsyncIoProvider final: public kj::AsyncIoProvider {

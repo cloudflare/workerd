@@ -82,8 +82,9 @@
 //! TokioDatagram  (net.rs)      Arc<..>: one datagram socket
 //! TokioAddress   (net.rs)      the parsed address: SocketAddr list, a unix name, or a loopback
 //!                              queue (loopback.rs; `loopback:` addresses, workerd test only)
-//! TokioFileWatcher (watcher.rs) Arc<..>: notify watcher + metadata stamps; workerd's
-//!                              FileWatcher (async-io.h) wraps it for C++
+//! TokioFileWatcher (watcher.rs) Arc<..>: notify watcher + metadata stamps; workerd's --watch
+//!                              (server/cli/watch.rs) uses it from Rust, FileWatcher (async-io.h)
+//!                              wraps it for C++
 //! ```
 //!
 //! Addresses cross the bridge as the typed `SocketAddress` struct (ffi.rs); the filter never

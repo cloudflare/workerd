@@ -32,7 +32,7 @@ using api::pyodide::PythonConfig;
 // Implements the single-tenant Workers Runtime server / CLI.
 //
 // The purpose of this class is to implement the core logic independently of the CLI itself,
-// in such a way that it can be unit-tested. workerd.c++ implements the CLI wrapper around this.
+// in such a way that it can be unit-tested. cli-main.c++ implements the CLI wrapper around this.
 class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandler::Resolver {
  public:
   Server(kj::Filesystem& fs,

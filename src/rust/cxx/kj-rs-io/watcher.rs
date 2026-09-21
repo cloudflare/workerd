@@ -1,8 +1,8 @@
 //! The `--watch` file watcher, over the `notify` crate (inotify on Linux, `FSEvents` on macOS,
 //! `ReadDirectoryChangesW` on Windows).
 //!
-//! `kj_rs_io::FileWatcher` (async-io.h) wraps this for C++ through the three bridged calls in
-//! ffi.rs; workerd's `--watch` uses it. The design in one sentence: **the backend says "look again"; the files say
+//! workerd's `--watch` (`server/cli/watch.rs`) uses this from Rust; `kj_rs_io::FileWatcher`
+//! (async-io.h) wraps the three bridged calls in ffi.rs for C++. The design in one sentence: **the backend says "look again"; the files say
 //! what changed.**
 //!
 //! - Each watched file's *parent directory* is watched (non-recursively), and, when the path is a

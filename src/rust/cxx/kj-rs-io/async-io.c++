@@ -560,7 +560,7 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> TokioLowLevelAsyncIoProvider::wrapConnec
 kj::Own<kj::ConnectionReceiver> TokioLowLevelAsyncIoProvider::wrapListenSocketFd(
     Fd fd, NetworkFilter &filter, kj::uint flags) {
   // KJ's interface lends the filter by reference for the receiver's lifetime. workerd's only
-  // call (inherited listen sockets, server/workerd.c++) uses the two-argument overload, whose
+  // call (inherited listen sockets, server/cli-main.c++) uses the two-argument overload, whose
   // filter is KJ's static allow-all; that one is recognised by identity and given an owned
   // allow-all filter. Anything else would need a borrowed reference to outlive its owner by
   // contract alone, which this backend does not do.
