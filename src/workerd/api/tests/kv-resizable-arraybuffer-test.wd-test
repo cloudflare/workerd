@@ -1,15 +1,18 @@
 using Workerd = import "/workerd/workerd.capnp";
 
+# The worker is instantiated twice so that the bindings below cross an isolate boundary.
+# Only the first service's test() runs; see the filter argument in BUILD.bazel.
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "kv-resizable-arraybuffer-test",
-      worker = (
-        modules = [
-          (name = "worker", esModule = embed "kv-resizable-arraybuffer-test.js")
-        ],
-        bindings = [ ( name = "KV", kvNamespace = "kv-resizable-arraybuffer-test" ), ],
-        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers"],
-      )
-    ),
+    ( name = "kv-resizable-arraybuffer-test", worker = .worker ),
+    ( name = "kv-resizable-arraybuffer-test-target", worker = .worker ),
   ],
+);
+
+const worker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "kv-resizable-arraybuffer-test.js")
+  ],
+  bindings = [ ( name = "KV", kvNamespace = "kv-resizable-arraybuffer-test-target" ), ],
+  compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers"],
 );
