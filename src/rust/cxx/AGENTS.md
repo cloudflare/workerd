@@ -93,7 +93,6 @@ guarantee by type, and what the **C++ adapters** guarantee by construction.
   provider", lists what is left out and the rule: no consumer in workerd's production code *or
   its configuration surface* (workerd.capnp's documented address grammar counts -- check it
   before declaring a feature unused), and hand-written libc/sockaddr/fd code to keep.
-- **`--config=asan` instruments C++ only.** Rust is compiled without `-Zsanitizer=address` under
-  that config (only the `tsan` configs instrument Rust), so a passing `--config=asan` run says
-  nothing about Rust memory safety; add `--@rules_rust//:extra_rustc_flag=-Zsanitizer=address`
-  to instrument it.
+- **`--config=asan` and the `tsan` configs instrument both C++ and Rust.** Rust is built with
+  nightly rustc, `-Zsanitizer=<address|thread>`, and a standard library instrumented the same way
+  (//build/rust); `//src/rust/asan` and `//src/rust/tsan` verify the instrumentation is active.

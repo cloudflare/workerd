@@ -35,6 +35,7 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 | 18 | error() while a close() is still pending (chunks queued) | ignored: the requested close is final, desiredSize is already 0 and the chunks drain to a clean close | desiredSize is hwm minus the queued chunks (-1) until the error, then the stream errors (spec: close() only requested the close, the state is still "readable"): chunks discarded, reads/closed reject, desiredSize null | `errorAfterCloseWithQueuedChunk` |
 | 19 | controller held, stream dropped and collected | the controller does not keep its stream alive: its consumer leaves the queue, enqueue() drops the chunk silently, desiredSize stays at the high-water mark (no backpressure for a producer holding only the controller) | the controller references the stream (spec [[stream]]): enqueues count, desiredSize 4 → 0 | `controllerOnlyHeldStreamLiveness` |
 | 20 | pull() after both tee branches are collected (controller held) | keeps pulling for consumers that no longer exist; DEFECT: a source that enqueues on every pull runs until the stream closes | the source is released: pull() is never called again (the parity half — enqueue drops, desiredSize at the high-water mark, close() as ever — is `teeBranchesCollected`) | `teeBranchesCollectedPullStops` |
+| 21 | body consumption of a TransformStream readable that delivers more than its declared `expectedLength` | returns everything (consumption ignores the declaration) | rejects with RangeError 'stream delivered more bytes than its declared expectedLength' and cancels the readable with it, which errors the writable (the declaration is the exact-total contract the byte and native sources already enforce) | `transformExpectedLengthOverflow` |
 
 Parity worth noting (probed, pinned): pull serialization (never
 re-entered); pull/async-start rejection identity; error-undefined
@@ -48,8 +49,12 @@ shape, tee after partial read; the tee-reentrancy crash regressions;
 from() cancel plumbing identity through return(); async-iterator
 protocol interleavings (return/next no-await); chunks held BY REFERENCE
 (mutation visible, identity) + detach-while-queued observed; and the
-ENTIRE integration surface except #15: body chunk normalization
-(messages included: 'This ReadableStream did not return bytes.'),
+ENTIRE integration surface except #15 and #21: body chunk normalization
+(messages included: 'This ReadableStream did not return bytes.'), a
+failing consumer cancelling the source with its error (the cancel's own
+rejection then wins) and leaving the stream locked, chunks collectible
+while consumption runs (the bytes are copied out), exact assembly across
+odd chunk sizes,
 disturbed-into-Response TypeError, locked-into-Response ACCEPTED,
 clone-both-read, cancel-body-then-consume 'Body has already been used',
 readAll small/big/failed paths, SELF fetch round-trips (fetch body +
@@ -89,7 +94,9 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `async-iteration.js` | 7 migrated + no-await interleavings + proto shape (#13) |
 | `reentrancy.js` | enqueue/close/cancel-in-size (parity) + read-in-size (#14; guard the size() or C++ captures every later chunk) |
 | `buffer-lifecycle.js` | chunk by reference, detach observed |
-| `integration-body.js` | readAll family, normalization (incl. detached views, resizable-extent pinning), clone, cancel-then-consume, SELF round-trips |
+| `integration-body.js` | readAll family, normalization (incl. detached views, SharedArrayBuffer-backed views, resizable-extent pinning), clone, cancel-then-consume, SELF round-trips |
+| `integration-body-failures.js` | consumer-side failures cancel the source with the error (every consumer; the cancel's rejection replaces it; nothing to cancel once the closing batch is in), leave the stream locked and stop pulls; TransformStream `expectedLength` overflow (#21) and exact delivery |
+| `integration-body-memory.js` | body consumption copies bytes out as they arrive: chunk buffers are collectible mid-consumption (WeakRef + gc()), ~2.5 MiB of pseudo-random chunk sizes assembles exactly as bytes and as text, one chunk wider than a 1 MiB collection block assembles exactly, a declared-length byte body is exact |
 | `integration-locked-disturbed.js` | disturbed rejected, locked accepted, body identity + lock coupling (#15) |
 | `gc.js` | pending read + async iteration survive gc(); a controller held with its stream collected (ledger #19); both tee branches collected while the controller is held: enqueue() drops without retaining (WeakRef-checked, backlog included), desiredSize at the high-water mark, close() then enqueue() as ever, and pull() stops (ledger #20) |
 | `then-interceptors.js` | ledger #16 |

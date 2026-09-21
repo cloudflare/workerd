@@ -19,7 +19,7 @@
 			"settings": {
 				// The Microsoft C/C++ extension has IntelliSense support that is not compatible with the clangd extension.
 				"C_Cpp.intelliSenseEngine": "disabled",
-				"C_Cpp.default.cppStandard": "c++20"
+				"C_Cpp.default.cppStandard": "c++23"
 			}
 		}
 	}
