@@ -6161,7 +6161,7 @@ export type AiWebSearchRequest = {
   /** Maximum number of results. Defaults to 10 and is capped at 20. */
   limit?: number;
   /** BYOK web-search provider configured on the gateway. */
-  provider: 'exa' | 'parallel' | 'perplexity';
+  provider: string;
   /** Optional BYOK key alias. Defaults to `default`. */
   byokAlias?: string;
 };
@@ -6171,7 +6171,7 @@ export declare abstract class Ai<
 > {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
-  webSearch(request: AiWebSearchRequest): Promise<Response>;
+  websearch(request: AiWebSearchRequest): Promise<Response>;
 
   /**
    * @deprecated Use the standalone `ai_search_namespaces` or `ai_search` Workers bindings instead.

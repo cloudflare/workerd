@@ -44,4 +44,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "cancel-reason-types", esModule = embed "cancel-reason-types.js"),
   (name = "gc-interplay", esModule = embed "gc-interplay.js"),
   (name = "transfer", esModule = embed "transfer.js"),
+  (name = "pollution", esModule = embed "pollution.js"),
 ];

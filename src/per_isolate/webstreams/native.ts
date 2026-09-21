@@ -125,6 +125,8 @@ const {
   DataViewPrototypeGetByteOffset,
   NumberIsNaN,
   ObjectGetOwnPropertyDescriptor,
+  ObjectGetPrototypeOf,
+  ObjectPrototype,
   PromiseResolve,
   PromiseReject,
   PromiseWithResolvers,
@@ -1213,9 +1215,22 @@ class NativePullConduit implements ByteStreamConsumerType {
 // ---------------------------------------------------------------------------
 // Construction glue
 
+// Whether the source declares `key` itself or on its own prototype. The
+// C++ source's members live on its prototype, so a plain read of a member
+// it lacks would reach Object.prototype.
+function declaresMember(source: object, key: string): boolean {
+  if (ObjectGetOwnPropertyDescriptor(source, key) !== undefined) return true;
+  const proto = ObjectGetPrototypeOf(source) as object | null;
+  return (
+    proto !== null &&
+    proto !== ObjectPrototype &&
+    ObjectGetOwnPropertyDescriptor(proto, key) !== undefined
+  );
+}
+
 // Extraction follows the queued controllers' conventions: properties are
-// read ONCE, alphabetically, validated, and invoked thereafter only via
-// captured uncurryThis wrappers with the source as `this` (spec
+// read ONCE, validated, and invoked thereafter only via captured
+// uncurryThis wrappers with the source as `this` (spec
 // CreateAlgorithmFromUnderlyingMethod / PromiseCall). `start` is
 // deliberately NOT read: native sources have no start algorithm (assumed
 // no-op per the contract; its presence is simply ignored).
@@ -1226,34 +1241,29 @@ function createNativeReadableStreamParts(
   controller: NativeReadableStreamController;
   conduit: NativePullConduit;
 } {
-  const {
-    autoAllocateChunkSize,
-    cancel: cancelFn,
-    expectedLength: rawExpectedLength,
-    pull: pullFn,
-    tee: teeFn,
-    type,
-  } = source as {
-    autoAllocateChunkSize?: unknown;
-    cancel?: unknown;
-    expectedLength?: unknown;
-    pull?: unknown;
-    tee?: unknown;
-    type?: unknown;
-  };
-
   // Native sources must not look like queued sources: the reader layer's
   // autoAllocate synthesis is queued-only and relies on this prohibition,
   // and a declared type would suggest the object was built for the queued
-  // byte path.
-  if (autoAllocateChunkSize !== undefined) {
+  // byte path. Checked as declarations, since the C++ source has neither.
+  if (declaresMember(source, 'autoAllocateChunkSize')) {
     throw new TypeError(
       'Native stream sources must not declare autoAllocateChunkSize'
     );
   }
-  if (type !== undefined) {
+  if (declaresMember(source, 'type')) {
     throw new TypeError('Native stream sources must not declare type');
   }
+  const {
+    cancel: cancelFn,
+    expectedLength: rawExpectedLength,
+    pull: pullFn,
+    tee: teeFn,
+  } = source as {
+    cancel?: unknown;
+    expectedLength?: unknown;
+    pull?: unknown;
+    tee?: unknown;
+  };
   if (cancelFn !== undefined && typeof cancelFn !== 'function') {
     throw new TypeError('underlyingSource.cancel must be a function');
   }
@@ -1330,6 +1340,15 @@ function nativeControllerCancelSteps(
   return getControllerConduit(controller).cancelSource(reason);
 }
 
+// The controller's error() for internal callers (the prototype method is
+// user-patchable).
+function nativeControllerError(
+  controller: NativeReadableStreamController,
+  reason: unknown
+): void {
+  getControllerConduit(controller).errorFromSource(reason);
+}
+
 function nativeControllerMaybeCloseStream(
   _controller: NativeReadableStreamController
 ): void {
@@ -1379,6 +1398,7 @@ const nativeStreamInternals = {
   createNativeReadableStreamParts,
   nativeControllerPullIfNeeded,
   nativeControllerCancelSteps,
+  nativeControllerError,
   nativeControllerMaybeCloseStream,
   nativeControllerOnReaderRelease,
   nativeControllerTeeSource,

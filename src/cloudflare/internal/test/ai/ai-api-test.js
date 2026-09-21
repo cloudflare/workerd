@@ -251,7 +251,7 @@ export const tests = {
 
     {
       // Test web search
-      const resp = await env.ai.webSearch({
+      const resp = await env.ai.websearch({
         gatewayId: 'my-gateway',
         provider: 'exa',
         query: 'Cloudflare Workers',
@@ -275,7 +275,7 @@ export const tests = {
       // Test invalid web search gateway IDs
       for (const gatewayId of ['', '   ', null]) {
         await assert.rejects(
-          env.ai.webSearch({
+          env.ai.websearch({
             gatewayId,
             provider: 'exa',
             query: 'Cloudflare Workers',

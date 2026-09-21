@@ -86,4 +86,5 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `legacy-identity-fallback.js` / `legacy-backpressure.js` | see Compatibility flags |
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): writes flow through the transformer into conduit reads; a readable-side backlog plus close sentinel swept in one batch; flush() output rides the final batch; expectedLength undefined; transformer errors propagate |
 | `data-volumes.js` | volumes through JS transformers with concurrent producer/consumer: 1 MiB passthrough, 8 MiB XOR (proves every byte passed through the transformer), 4096-chunk value mapping |
+| `pollution.js` | Object.prototype members stand in for neither an omitted transformer or strategy nor the internal source/sink dictionaries (neither implementation reads them) |
 | `which-impl.js` / `helpers.js` | implementation detection; consume helpers |

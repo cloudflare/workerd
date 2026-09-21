@@ -65,7 +65,7 @@ export const handler: ExportedHandler<{ AI: Ai }> = {
 
     // AI Gateway web search
     {
-      const result = await env.AI.webSearch({
+      const result = await env.AI.websearch({
         gatewayId: 'my-gateway',
         provider: 'exa',
         query: 'Cloudflare Workers',

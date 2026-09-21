@@ -67,6 +67,10 @@ const { RingBuffer } = require('webstreams/ring-buffer') as {
 };
 
 const kPrivateSymbol: symbol = Symbol('private');
+
+// What an omitted dictionary argument stands for. Null-prototype: WebIDL
+// reads nothing for an omitted dictionary, so neither may we.
+const kEmptyDictionary: object = ObjectFreeze({ __proto__: null });
 // Marker for a queued close request in the controller's FIFO.
 const kCloseMarker: symbol = Symbol('close');
 // Marker for a queued flush request in the controller's FIFO. flush() is a
@@ -239,6 +243,12 @@ let controllerGetDesiredSize: <W>(
 ) => number;
 let controllerErrorSteps: <W>(
   controller: WritableStreamDefaultController<W>
+) => void;
+// The controller's error() for internal callers, which must not dispatch
+// through the user-patchable prototype method.
+let controllerErrorIfNeeded: <W>(
+  controller: WritableStreamDefaultController<W>,
+  reason: unknown
 ) => void;
 let controllerAbortSteps: <W>(
   controller: WritableStreamDefaultController<W>,
@@ -768,8 +778,8 @@ class WritableStream<W = unknown> {
   }
 
   constructor(
-    underlyingSink: UnderlyingSink<W> = {},
-    strategy: QueuingStrategy<W> = {}
+    underlyingSink: UnderlyingSink<W> = kEmptyDictionary as UnderlyingSink<W>,
+    strategy: QueuingStrategy<W> = kEmptyDictionary as QueuingStrategy<W>
   ) {
     // The C++-recognition brand (see kWritableStreamBrand). Stamped first
     // so every instance carries it regardless of construction path.
@@ -892,7 +902,8 @@ class WritableStream<W = unknown> {
   // the stream is still 'writable'.
   [kControllerErrorFunction](reason: unknown): void {
     assertIsWritableStream(this);
-    this.#controller?.error(reason);
+    const controller = this.#controller;
+    if (controller !== undefined) controllerErrorIfNeeded(controller, reason);
   }
 }
 
@@ -964,6 +975,10 @@ class WritableStreamDefaultController<
           (entry.flushRequest as PromiseWithResolversType<void>).reject(error);
         }
       }
+    };
+
+    controllerErrorIfNeeded = (controller, reason) => {
+      controller.#errorIfNeeded(reason);
     };
 
     controllerAbortSteps = (controller, reason) => {
@@ -1429,9 +1444,13 @@ class WritableStreamDefaultWriter<
       writer.#stream = undefined;
     };
 
+    // #readyPromise and #closedPromise hold either a settled Promise or a
+    // still-pending resolvers record, told apart with the native isPromise:
+    // a duck-typed `typeof x.resolve` would read Object.prototype on the
+    // Promise.
     writerResolveReadyPromise = (writer) => {
-      const ready = writer.#readyPromise as PromiseWithResolversType<void>;
-      if (typeof ready.resolve === 'function') {
+      const ready = writer.#readyPromise;
+      if (!isPromise(ready)) {
         ready.resolve();
         writer.#readyPromise = ready.promise;
       }
@@ -1445,8 +1464,8 @@ class WritableStreamDefaultWriter<
     };
 
     writerEnsureReadyPromiseRejected = (writer, error) => {
-      const ready = writer.#readyPromise as PromiseWithResolversType<void>;
-      if (typeof ready.reject === 'function') {
+      const ready = writer.#readyPromise;
+      if (!isPromise(ready)) {
         ready.reject(error);
         writer.#readyPromise = ready.promise;
       } else {
@@ -1459,16 +1478,16 @@ class WritableStreamDefaultWriter<
     };
 
     writerResolveClosedPromise = (writer) => {
-      const closed = writer.#closedPromise as PromiseWithResolversType<void>;
-      if (typeof closed.resolve === 'function') {
+      const closed = writer.#closedPromise;
+      if (!isPromise(closed)) {
         closed.resolve();
         writer.#closedPromise = closed.promise;
       }
     };
 
     writerEnsureClosedPromiseRejected = (writer, error) => {
-      const closed = writer.#closedPromise as PromiseWithResolversType<void>;
-      if (typeof closed.reject === 'function') {
+      const closed = writer.#closedPromise;
+      if (!isPromise(closed)) {
         closed.reject(error);
         writer.#closedPromise = closed.promise;
       } else {

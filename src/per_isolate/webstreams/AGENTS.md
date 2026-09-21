@@ -74,6 +74,19 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
 
 - The reader layer must stay backend-blind; backend divergence is
   confined to the fence interface and the marked BACKEND-DISPATCH points.
+- Internal code never dispatches through a user-reachable prototype
+  method: call the private method (`#error`, `#read`), a module slot
+  (`controllerError`), or an `uncurryThis` capture taken at load time
+  (`transform.ts`, `encoding.ts`). The public method is the brand check
+  plus that internal entry.
+- Every dictionary the implementation builds itself — the sources, sinks,
+  strategies and transformers of the internal pairs, and the stand-in for
+  an omitted argument (`kEmptyDictionary`) — is null-prototype, so a
+  polluted `Object.prototype` cannot supply members. Members of the C++
+  native source are read with `declaresMember`, which stops before
+  `Object.prototype`. Copies of internal bytes use `cloneArrayBuffer`
+  (spec CloneArrayBuffer), never the species-consulting `slice`.
+  Suite guard: each suite's `pollution.js`.
 - Do not port logic across the fence without checking BOTH invariant
   lists (`queue.ts` and `native.ts` headers).
 - The native source contract (marker symbol, standard pull/cancel hooks,
