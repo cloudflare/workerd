@@ -110,6 +110,15 @@ wd_test(
     data = ["delete-all-deletes-alarm-test.js"],
 )
 
+# For tests that listen on fixed TCP ports 8081-8083. The "socket" resource (see .bazelrc) keeps
+# them from running concurrently with each other while still allowing other tests to run alongside.
+# Bazel only accounts for local resources on local execution, so also keep these tests off remote
+# executors, where two of them can otherwise share a network namespace and collide on bind().
+SOCKET_TEST_TAGS = [
+    "no-remote-exec",
+    "resources:socket:1",
+]
+
 wd_test(
     src = "connect-handler-test.wd-test",
     args = ["--experimental"],
@@ -117,11 +126,7 @@ wd_test(
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
     ],
-    # Test uses TCP sockets for ports 8081-8083 and may fail when running concurrently with other
-    # tests that do so. Use the "socket" resource to model this behavior – this prevents other tests
-    # with this tag from running at the same time, but still allows for running at the same time as
-    # tests without the tag.
-    tags = ["resources:socket:1"],
+    tags = SOCKET_TEST_TAGS,
 )
 
 # Regression test for AUTOVULN-CLOUDFLARE-WORKERD-334: connect() handler must neuter the
@@ -180,7 +185,7 @@ wd_test(
         "connect-handler-test-proxy.js",
         "stw-large-log-subject.js",
     ],
-    tags = ["resources:socket:1"],
+    tags = SOCKET_TEST_TAGS,
 )
 
 wd_test(
@@ -624,14 +629,14 @@ wd_test(
     src = "js-rpc-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-test.js"],
-    tags = ["resources:socket:1"],
+    tags = SOCKET_TEST_TAGS,
 )
 
 wd_test(
     src = "js-rpc-streams-ts-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-test.js"],
-    tags = ["resources:socket:1"],
+    tags = SOCKET_TEST_TAGS,
 )
 
 wd_test(
@@ -974,7 +979,7 @@ wd_test(
         "--no-verbose",
     ],
     data = ["js-rpc-test.js"],
-    tags = ["resources:socket:1"],
+    tags = SOCKET_TEST_TAGS,
 )
 
 wd_test(
@@ -984,7 +989,7 @@ wd_test(
         "--no-verbose",
     ],
     data = ["js-rpc-test.js"],
-    tags = ["resources:socket:1"],
+    tags = SOCKET_TEST_TAGS,
 )
 
 wd_test(
