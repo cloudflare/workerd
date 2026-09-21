@@ -237,7 +237,6 @@ void CodecStage::OutputBuffer::write(kj::ArrayPtr<const kj::byte> chunk) {
   if (chunk.size() == 0) return;
   blocks.push_back(kj::heapArray(chunk));
   total += chunk.size();
-  if (blocks.size() > kInitialBlocks) grown = true;
 }
 
 size_t CodecStage::OutputBuffer::pull(kj::ArrayPtr<kj::byte> dest) {
@@ -254,18 +253,15 @@ size_t CodecStage::OutputBuffer::pull(kj::ArrayPtr<kj::byte> dest) {
     }
   }
   total -= copied;
-  if (blocks.empty() && grown) {
-    blocks = RingBuffer<kj::Array<const kj::byte>, kInitialBlocks>();
-    grown = false;
-  }
+  if (blocks.empty()) blocks.shrinkToInitial();
   return copied;
 }
 
 void CodecStage::OutputBuffer::clear() {
-  blocks = RingBuffer<kj::Array<const kj::byte>, kInitialBlocks>();
+  blocks.clear();
+  blocks.shrinkToInitial();
   headOffset = 0;
   total = 0;
-  grown = false;
 }
 
 CodecStage::CodecStage(Mode mode,
@@ -346,10 +342,6 @@ uint32_t CompressionCodec::pullInto(jsg::JsBufferSource view) {
 
 double CompressionCodec::available() {
   return static_cast<double>(stage.available());
-}
-
-void CompressionCodec::clear() {
-  stage.clear();
 }
 
 void newCompressionCodecCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {

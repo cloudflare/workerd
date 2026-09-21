@@ -237,14 +237,11 @@ class CodecStage final {
     }
 
    private:
-    static constexpr size_t kInitialBlocks = 16;
-
-    RingBuffer<kj::Array<const kj::byte>, kInitialBlocks> blocks;
+    // The block ring gives back any storage it grew into once it is empty.
+    RingBuffer<kj::Array<const kj::byte>, 16> blocks;
     // Bytes of blocks.front() already pulled.
     size_t headOffset = 0;
     size_t total = 0;
-    // Whether the block ring has outgrown its initial slots; it is replaced once empty.
-    bool grown = false;
   };
 
   void pump(int flush);
@@ -288,15 +285,11 @@ class CompressionCodec final: public jsg::Object {
   // the full size exactly.
   double available();
 
-  // Drops the buffered output (the TS pair's cancel/abort/error paths).
-  void clear();
-
   JSG_RESOURCE_TYPE(CompressionCodec) {
     JSG_METHOD(push);
     JSG_METHOD(end);
     JSG_METHOD(pullInto);
     JSG_METHOD(available);
-    JSG_METHOD(clear);
 
     // Internal plumbing type: keep it out of the generated TypeScript types.
     JSG_TS_OVERRIDE(type CompressionCodec = never);

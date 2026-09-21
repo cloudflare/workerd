@@ -3,12 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // How a write's output reaches the readable. The codec runs eagerly, so one
-// write can produce megabytes; that output waits in the codec's buffer and
-// is delivered per read: a default read gets a bounded piece — 64 KiB under
-// TypeScript; under C++ its internal-stream read buffer, 4 KiB or 16 KiB
-// under the updated-auto-allocate-chunk-size autogate (ledger #16) — and a
-// BYOB read fills its view. Peak memory is the output itself, never the
-// output plus a JS copy of it.
+// write can produce megabytes, and a default read gets a bounded piece of it
+// (ledger #16): under TypeScript the sink moves the output into the
+// readable's queue as 64 KiB chunks before the write settles; under C++ it
+// waits in the codec's buffer and each read takes the internal-stream read
+// buffer's worth, 4 KiB or 16 KiB under the updated-auto-allocate-chunk-size
+// autogate. A BYOB read fills its view in both. A write's output is never
+// held whole in JS beside the codec's copy of it.
 
 import { strictEqual, ok, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -67,7 +68,9 @@ export const largeOutputDeliveredInBoundedPieces = {
     await writer.close();
     const sizes = await readPatternPieces(ds.readable, size);
     for (const n of sizes) checkPieceSize(n);
-    strictEqual(sizes.length, size / sizes[0]);
+    // Every piece is a full one: the output is an exact multiple of each
+    // implementation's piece size.
+    strictEqual(sizes.length * sizes[0], size);
   },
 };
 
@@ -145,9 +148,9 @@ export const teeBranchesReceiveBoundedPieces = {
 
 export const trailingJunkAfterLargeOutput = {
   async test() {
-    // Ledger #17: output produced before a trailing-junk error reaches a
-    // waiting read under TypeScript, one piece of it, before the error;
-    // C++ rejects the waiting read.
+    // Ledger #17: output produced before a trailing-junk error reaches the
+    // waiting reads under TypeScript, one piece each, before the error;
+    // C++ rejects the waiting read (and the second concurrent read, #14).
     const size = 1024 * 1024;
     const compressed = await pump(new CompressionStream('gzip'), [
       pattern(size),
@@ -157,18 +160,24 @@ export const trailingJunkAfterLargeOutput = {
     padded[compressed.byteLength] = 0xff;
     const ds = new DecompressionStream('gzip');
     const reader = ds.readable.getReader();
-    const pending = reader.read();
+    const first = reader.read();
+    const second = reader.read();
+    second.catch(() => {});
     const writer = ds.writable.getWriter();
     await rejects(writer.write(padded), {
       name: 'TypeError',
       message: 'Trailing bytes after end of compressed data',
     });
     if (usingTsImpl) {
-      const first = await pending;
-      strictEqual(first.value.byteLength, kTsPiece);
-      checkPattern(first.value, 0);
+      const a = await first;
+      strictEqual(a.value.byteLength, kTsPiece);
+      checkPattern(a.value, 0);
+      const b = await second;
+      strictEqual(b.value.byteLength, kTsPiece);
+      checkPattern(b.value, kTsPiece);
     } else {
-      await rejects(pending, TypeError);
+      await rejects(first, TypeError);
+      await rejects(second, TypeError);
     }
     await rejects(reader.read(), TypeError);
   },

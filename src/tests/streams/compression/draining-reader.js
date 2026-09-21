@@ -7,12 +7,12 @@
 // under the TS implementation (compression-ts.wd-test sets
 // expose_draining_reader); the C++ cell asserts the global's absence.
 //
-// Compression-specific facts: no declared expectedLength, and the eager
-// codec's output waits in its own buffer, delivered one 64 KiB piece per
-// read. A closed stream whose remaining output fits one piece is swept by a
-// SINGLE read reporting done (the piece and the close sentinel together);
-// a larger backlog takes one piece per read, the last of them reporting
-// done.
+// Compression-specific facts: no declared expectedLength, and — because the
+// eager codec's output is queued ahead of demand, in pieces of at most
+// 64 KiB — a closed stream's entire backlog (all queued pieces plus the
+// close sentinel) is swept by a SINGLE read reporting done, no tee sibling
+// needed (contrast the encoding suite, where HWM-0 production means nothing
+// is ever synchronously buffered).
 
 /* global ReadableStreamDrainingReader */
 
@@ -51,6 +51,7 @@ export const drainingReaderTakesBoundedPieces = {
       strictEqual(typeof ReadableStreamDrainingReader, 'undefined');
       return;
     }
+    const kPiece = 64 * 1024;
     const size = 1024 * 1024;
     const compressed = await pump(new CompressionStream('gzip'), [
       new Uint8Array(size),
@@ -60,19 +61,16 @@ export const drainingReaderTakesBoundedPieces = {
     await writer.write(compressed);
     await writer.close();
     const reader = new ReadableStreamDrainingReader(ds.readable);
+    // One sweep takes the whole backlog, as the pieces it was queued in.
+    const { chunks, done } = await reader.read();
+    strictEqual(done, true);
+    strictEqual(chunks.length, size / kPiece);
     let total = 0;
-    let reads = 0;
-    for (;;) {
-      const { chunks, done } = await reader.read();
-      reads++;
-      for (const chunk of chunks) {
-        ok(chunk.byteLength <= 64 * 1024);
-        total += chunk.byteLength;
-      }
-      if (done) break;
+    for (const chunk of chunks) {
+      strictEqual(chunk.byteLength, kPiece);
+      total += chunk.byteLength;
     }
     strictEqual(total, size);
-    strictEqual(reads, size / (64 * 1024));
   },
 };
 

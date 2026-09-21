@@ -6,8 +6,8 @@
 //
 // ARCHITECTURE: the codec core is the C++ CodecStage — eager on push,
 // buffering its own output. The pair is a JS writable sink feeding the
-// handle plus a QUEUED byte-capable readable that takes the buffered
-// output in bounded pieces (see DELIVERY below).
+// handle plus a QUEUED byte-capable readable whose queue the sink drains
+// the output into, in bounded pieces (see DELIVERY below).
 //
 // SEMANTICS:
 //   - EAGER PUSH: write(chunk) runs the codec synchronously; corrupt
@@ -18,15 +18,16 @@
 //     implementation this replaces (which had no write backpressure),
 //     not the standard TransformStream's one-chunk lookahead. The
 //     divergence is deliberate and carried forward.
-//   - DELIVERY: output waits in the stage buffer (C++ memory) and moves
-//     into the readable one read at a time: a BYOB read's view is filled
-//     in place, a default read gets a piece of at most kPieceSize. A
-//     write's output is never materialized in JS all at once, so peak
-//     memory is the output itself, not twice it, and no chunk exceeds
-//     kPieceSize.
+//   - DELIVERY: the sink moves each write's output out of the stage
+//     buffer and into the readable's queue before the write settles, as
+//     chunks of at most kPieceSize. The backlog therefore waits in
+//     ArrayBuffers, which V8 accounts against the isolate, and the stage
+//     holds output only within a single push/end; peak memory is the
+//     output plus one piece, and no chunk exceeds kPieceSize.
 //   - BYTE-CAPABLE READABLE: legacy parity — the C++ pair's readable
 //     accepts BYOB readers, so this one does too (WHATWG describes a
-//     default stream here).
+//     default stream here). A BYOB read is filled from the queued pieces
+//     by the controller.
 
 import type {
   ReadableStream as ReadableStreamType,
@@ -44,7 +45,6 @@ const {
   DataViewPrototypeGetByteOffset,
   MathMin,
   ObjectDefineProperties,
-  ObjectGetOwnPropertyDescriptor,
   SymbolToStringTag,
   TypeError,
   TypedArrayPrototypeGetBuffer,
@@ -64,7 +64,6 @@ const StringCoerce = String;
 const {
   ReadableStream,
   ReadableByteStreamController,
-  ReadableStreamBYOBRequest,
   internalsForTransform: readableInternals,
 } = require('webstreams/readable');
 const {
@@ -92,28 +91,6 @@ const byteControllerError = uncurryThis(
   ReadableByteStreamController.prototype.error
 ) as (controller: object, reason: unknown) => void;
 
-function captureGetter(
-  prototype: object,
-  name: string
-): (self: object) => unknown {
-  const desc = ObjectGetOwnPropertyDescriptor(prototype, name);
-  if (desc === undefined || desc.get === undefined) {
-    throw new TypeError(`Expected accessor property '${name}' on prototype`);
-  }
-  return uncurryThis(desc.get) as (self: object) => unknown;
-}
-const byteControllerByobRequestGet = captureGetter(
-  ReadableByteStreamController.prototype,
-  'byobRequest'
-) as (controller: object) => object | null;
-const byobRequestViewGet = captureGetter(
-  ReadableStreamBYOBRequest.prototype,
-  'view'
-) as (request: object) => Uint8Array | null;
-const byobRequestRespond = uncurryThis(
-  ReadableStreamBYOBRequest.prototype.respond
-) as (request: object, bytesWritten: number) => void;
-
 // The synchronous codec handle produced by utils.newCompressionCodec: an
 // internal JSG resource (CompressionCodec in api/compression.h). Its methods
 // live on a per-isolate JSG prototype that user code can never reach — the
@@ -125,10 +102,10 @@ interface CodecHandle {
   end(): void;
   pullInto(view: ArrayBufferView): number;
   available(): number;
-  clear(): void;
 }
 
-// The largest chunk a default read receives.
+// The largest chunk the sink enqueues: the size of the pieces a write's
+// output is moved into the readable's queue in.
 const kPieceSize = 64 * 1024;
 
 // The C++ codec factory, injected through the bootstrap's utils pseudo-global
@@ -220,14 +197,6 @@ function createCodecPair(
 
   let writableController: object | undefined;
   let readableController: object;
-  // handle.end() has run: the readable closes once its output is delivered.
-  let ended = false;
-  // The readable is closed or errored, or its reader cancelled: nothing
-  // more is delivered.
-  let finished = false;
-  // A pull ran and no piece has been delivered since: a read is waiting,
-  // and the sink delivers to it as soon as the codec produces output.
-  let demandUnmet = false;
 
   // Codec failure (corrupt input on write; strict end checks on close):
   // error the readable side — the writable errors via the sink throw
@@ -235,61 +204,34 @@ function createCodecPair(
   // rejected pending reads and errored the state machine on any codec
   // exception.
   const failBoth = (reason: unknown): void => {
-    finished = true;
     // Queued writes are discarded by the erroring writable without sink
     // steps; drop their snapshots with them.
     snapshots.clear();
-    handle.clear();
     byteControllerError(readableController, reason);
   };
 
-  // Moves one piece of buffered output into the readable: into the BYOB
-  // request's view when a BYOB read is waiting, else as a chunk of at most
-  // kPieceSize. Precondition: output is available.
-  const deliverPiece = (available: number): void => {
-    const request = byteControllerByobRequestGet(readableController);
-    if (request !== null) {
-      const view = byobRequestViewGet(request) as Uint8Array;
-      byobRequestRespond(request, handle.pullInto(view));
-      return;
-    }
-    const out = new Uint8Array(MathMin(available, kPieceSize));
-    handle.pullInto(out);
-    byteControllerEnqueue(readableController, out);
-  };
-
-  // Delivers one piece if a read is waiting for one and output is
-  // available, then closes the readable once the codec has ended and its
-  // output is all delivered. Each enqueue/respond re-enters pull() while
-  // reads are still waiting, so the controller drives the loop for as long
-  // as there is demand.
-  const deliver = (): void => {
-    if (finished) return;
-    if (demandUnmet) {
-      const available = handle.available();
-      if (available > 0) {
-        demandUnmet = false;
-        deliverPiece(available);
-      }
-    }
-    if (!finished && ended && handle.available() <= 0) {
-      finished = true;
-      byteControllerClose(readableController);
+  // Moves all buffered stage output into the readable's queue, as chunks
+  // of at most kPieceSize; each chunk goes straight to a waiting read if
+  // there is one. The enqueue is unconditional: every call site runs
+  // either right after a codec step (stream readable) or is unreachable
+  // once the pair has failed or been canceled (the errored/canceled
+  // writable rejects writes before the sink hooks run).
+  const drainStage = (): void => {
+    let available = handle.available();
+    while (available > 0) {
+      const out = new Uint8Array(MathMin(available, kPieceSize));
+      available -= handle.pullInto(out);
+      byteControllerEnqueue(readableController, out);
     }
   };
 
-  // A codec error rejects the write or close. A piece of the output the
-  // codec produced before the error point (e.g. the final valid bytes
-  // preceding trailing junk) is delivered first: a waiting read receives it
-  // (whether or not the readable has started pulling), and erroring drops
-  // it otherwise — the WPT-pinned order: output first, error on later
-  // reads.
+  // A codec error rejects the write or close. The output the codec
+  // produced before the error point (e.g. the final valid bytes preceding
+  // trailing junk) is moved into the readable first, so each waiting read
+  // receives a piece of it, and erroring then drops what remains queued —
+  // the WPT-pinned order: output first, error on later reads.
   const failCodec = (e: unknown): never => {
-    const available = handle.available();
-    if (available > 0) {
-      demandUnmet = false;
-      deliverPiece(available);
-    }
+    drainStage();
     failBoth(e);
     throw e;
   };
@@ -340,8 +282,8 @@ function createCodecPair(
           // An invalid chunk errors BOTH sides — the spec's transform-time
           // TypeError, which TransformStreamError propagates to the readable
           // and the writable alike (WPT bad-chunks pins the read rejecting
-          // too). Without failBoth the readable would hang on its pending
-          // pull. This deliberately differs from the identity streams'
+          // too). Without failBoth a pending read on the readable would
+          // hang. This deliberately differs from the identity streams'
           // per-write rejection: CompressionStream is a standard API.
           failBoth(entry.error);
           throw entry.error;
@@ -357,8 +299,9 @@ function createCodecPair(
           failCodec(e);
         }
         // Writes never wait for reads (legacy-parity settlement): the
-        // output stays in the stage until the readable takes it.
-        deliver();
+        // output moves into the readable's queue, which buffers it without
+        // bound.
+        drainStage();
       },
       close: (): void => {
         // Z_FINISH plus the strict-mode end checks; a throw rejects the
@@ -369,8 +312,13 @@ function createCodecPair(
         } catch (e) {
           failCodec(e);
         }
-        ended = true;
-        deliver();
+        // Deliver the flush tail, then close: queued bytes are served to
+        // later reads before the close lands (queued byte-stream
+        // semantics). When a BYOB read's view is left holding a partial
+        // element, close() errors the readable and throws, and the throw
+        // rejects writer.close() in turn.
+        drainStage();
+        byteControllerClose(readableController);
       },
       abort: (reason: unknown): void => {
         failBoth(reason);
@@ -380,10 +328,10 @@ function createCodecPair(
   );
   writableRef = writable;
 
-  // The readable half: a queued byte stream (BYOB-capable) fed from the
-  // stage buffer. Nothing is queued ahead of demand (highWaterMark 0):
-  // pull() runs only for a waiting read, which takes its piece straight
-  // from the stage.
+  // The readable half: a queued byte stream (BYOB-capable) whose queue
+  // the sink drains into. highWaterMark 0 documents that production is
+  // write-driven; the drains enqueue regardless of desiredSize (unbounded
+  // buffering, exactly like the legacy pair).
   const readable = new ReadableStream(
     {
       __proto__: null,
@@ -391,18 +339,13 @@ function createCodecPair(
       start: (c: object): void => {
         readableController = c;
       },
-      pull: (): void => {
-        demandUnmet = true;
-        deliver();
-      },
       cancel: (reason: unknown): void => {
         // Reader-side cancel tears down the write side, mirroring the
         // legacy adapter's cancel → abortWrite path. Erroring a
         // closed/errored writable is a spec no-op, so no state check is
-        // needed.
-        finished = true;
+        // needed. The stage holds nothing between sink steps, and the
+        // cancel itself drops the queued output.
         snapshots.clear();
-        handle.clear();
         if (writableController !== undefined) {
           writableControllerError(writableController, reason);
         }
