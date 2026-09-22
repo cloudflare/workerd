@@ -57,7 +57,7 @@ export type AiWebSearchRequest = {
   gatewayId: string;
   query: string;
   limit?: number;
-  provider: string;
+  provider?: string;
   byokAlias?: string;
 };
 
