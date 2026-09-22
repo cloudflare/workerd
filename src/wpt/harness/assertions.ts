@@ -241,7 +241,10 @@ globalThis.assert_array_equals = (actual, expected, description): void => {
 // Upstream testharness semantics: a recursive comparison of enumerable
 // properties (for-in on both sides), with SameValue at the leaves. It
 // ignores prototypes and types, so e.g. an empty typed array equals
-// undefined, and WPT expectations are written against that.
+// undefined, and WPT expectations are written against that. Own-property
+// checks use Object.hasOwn rather than upstream's hasOwnProperty method, so
+// null-prototype objects (such as the TypeScript streams' read results)
+// compare too.
 globalThis.assert_object_equals = (actual, expected, message): void => {
   ok(
     typeof actual === 'object' && actual !== null,
@@ -252,7 +255,7 @@ globalThis.assert_object_equals = (actual, expected, message): void => {
     const actualRecord = a as Record<string, unknown>;
     for (const p in actualRecord) {
       ok(
-        typeof e === 'object' && e !== null && Object.hasOwn(e, p),
+        e !== null && e !== undefined && Object.hasOwn(e, p),
         `${message ?? 'assert_object_equals'}: unexpected property ${p}`
       );
       const av = actualRecord[p];
@@ -263,8 +266,8 @@ globalThis.assert_object_equals = (actual, expected, message): void => {
         strictEqual(av, ev, message);
       }
     }
-    if (typeof e === 'object' && e !== null) {
-      for (const p in e) {
+    if (e !== null && e !== undefined) {
+      for (const p in Object(e)) {
         ok(
           Object.hasOwn(a, p),
           `${message ?? 'assert_object_equals'}: expected property ${p} missing`
