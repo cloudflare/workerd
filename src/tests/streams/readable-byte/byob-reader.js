@@ -270,6 +270,52 @@ export const byobAutoAllocateSizes = {
   },
 };
 
+// A default read with autoAllocateChunkSize set takes queued bytes as the
+// head chunk, uncopied (spec PullSteps); only an empty queue allocates a
+// buffer for the source's byobRequest. The read settles before closed
+// when it drains the queue (parity). DIVERGENCE (ledger #31): C++ copies
+// every queued chunk into one autoAllocateChunkSize buffer.
+export const autoAllocateDefaultReadTakesQueuedChunk = {
+  async test() {
+    let controller;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      autoAllocateChunkSize: 64,
+      start(c) {
+        controller = c;
+      },
+    });
+    controller.enqueue(new Uint8Array([1, 2, 3]));
+    controller.enqueue(new Uint8Array([4, 5]));
+    const reader = rs.getReader();
+    const r1 = (await reader.read()).value;
+    if (usingTsImpl) {
+      deepStrictEqual([...r1], [1, 2, 3]);
+      strictEqual(r1.buffer.byteLength, 3);
+      const r2 = (await reader.read()).value;
+      deepStrictEqual([...r2], [4, 5]);
+      strictEqual(r2.buffer.byteLength, 2);
+    } else {
+      deepStrictEqual([...r1], [1, 2, 3, 4, 5]);
+      strictEqual(r1.buffer.byteLength, 64);
+    }
+
+    const waiting = reader.read();
+    await scheduler.wait(5);
+    strictEqual(controller.byobRequest.view.byteLength, 64);
+    controller.enqueue(new Uint8Array([6]));
+    deepStrictEqual([...(await waiting).value], [6]);
+
+    controller.enqueue(new Uint8Array([7]));
+    controller.close();
+    const order = [];
+    const last = reader.read().then(() => order.push('read'));
+    const closed = reader.closed.then(() => order.push('closed'));
+    await Promise.all([last, closed]);
+    deepStrictEqual(order, ['read', 'closed']);
+  },
+};
+
 // A partial BYOB response that does not yet satisfy `atLeast` leaves the read request's
 // fill offset at a byte count that is not a multiple of the view's element size, and the
 // byobRequest view is rebuilt from that offset. Reading one byte at a time into a

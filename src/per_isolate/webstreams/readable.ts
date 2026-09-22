@@ -788,7 +788,7 @@ function readBufferedSync<R>(
 }
 
 // The pipe's synchronous read: the next buffered chunk, taken whole as a
-// drain takes it (no autoAllocateChunkSize copy). Only for a readable
+// default read takes it. Only for a readable
 // stream; the pump's shutdown checks establish that. Undefined when the
 // read would wait or fail; defaultReaderReadInternal handles those.
 function pipeReadBuffered<R>(
@@ -842,17 +842,20 @@ function defaultReaderReadInternal<R>(
   }
   const controller = getReadableStreamController(stream);
 
-  // --- Synchronous fast path (spec PullSteps) ---
+  // --- Synchronous fast path (spec PullSteps step 3) ---
   // When data is immediately available the spec dequeues, performs the
   // drain-then-close check, and fulfills the read request all in one
   // synchronous call. An async/await on an already-resolved promise
   // would insert a microtask gap between the dequeue and the close,
   // causing reader.closed to resolve one tick too late. tryReadSync
   // returns the result directly (no promise wrapping) so the close
-  // check runs in the same synchronous call.
-  //
-  // The autoAllocateChunkSize path is always async (BYOB machinery),
-  // so it skips this fast path.
+  // check runs in the same synchronous call. This includes byte streams
+  // with autoAllocateChunkSize: queued bytes are handed over as the head
+  // chunk, uncopied; only an empty queue allocates.
+  const syncResult = readBufferedSync<R>(reader, stream, consumer, controller);
+  if (syncResult !== undefined) {
+    return PromiseResolve(syncResult);
+  }
   let useAsyncPath = false;
   if (controller !== undefined && isByteStreamController(controller)) {
     const autoAllocateChunkSize = getByteControllerAutoAllocateChunkSize(
@@ -862,22 +865,12 @@ function defaultReaderReadInternal<R>(
       useAsyncPath = true;
     }
   }
-  if (!useAsyncPath) {
-    const syncResult = readBufferedSync<R>(
-      reader,
-      stream,
-      consumer,
-      controller
-    );
-    if (syncResult !== undefined) {
-      return PromiseResolve(syncResult);
-    }
-  }
 
   // --- Async fallback ---
   // Data is not immediately available (pending reads queued, or native
-  // source, or autoAllocateChunkSize BYOB path). Fall through to the
-  // promise-based read and handle completion asynchronously.
+  // source); with autoAllocateChunkSize the read waits on an allocated
+  // pull-into descriptor (spec PullSteps step 4). Handle completion
+  // asynchronously.
   return defaultReaderReadInternalAsync<R>(
     reader,
     stream,
@@ -889,7 +882,7 @@ function defaultReaderReadInternal<R>(
 
 // Submit a default-style read through the BYOB machinery via a synthetic
 // auto-allocate pull-into descriptor (spec ReadableByteStreamController
-// PullSteps step 3, [[autoAllocateChunkSize]] present): the source's pull
+// PullSteps step 4, [[autoAllocateChunkSize]] present): the source's pull
 // then observes a byobRequest over the auto-allocated buffer. Shared by
 // the default reader's read path and the draining reader's
 // empty-fallback wait-read (the body/pipe pump).
