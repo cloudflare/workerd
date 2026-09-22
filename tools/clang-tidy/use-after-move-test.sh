@@ -57,3 +57,32 @@ if [[ "${negative_output}" == *"workerd-use-after-move"* ]]; then
   printf '%s\n' "${negative_output}" >&2
   exit 1
 fi
+
+# Use the actual dependency macros, including their switch labels and implicit breaks.
+readonly ONEOF="${ROOT}/tools/clang-tidy/use-after-move-oneof-test.c++"
+kj_headers=("${TEST_SRCDIR}"/*/src/kj/_virtual_includes/kj/kj/one-of.h)
+[[ ${#kj_headers[@]} -eq 1 && -f "${kj_headers[0]}" ]]
+resource_dir=$(clang -print-resource-dir)
+if ! oneof_output=$("${CLANG_TIDY}" "--load=${PLUGIN}" --checks="${CHECKS}" --config="${CONFIG}" \
+  "${ONEOF}" -- -std=c++23 -resource-dir="${resource_dir}" \
+  -I"${kj_headers[0]%/kj/one-of.h}" 2>&1); then
+  printf '%s\n' "${oneof_output}" >&2
+  exit 1
+fi
+expected_lines=$(awk '/\/\/ expect-(loop-)?warning/ { print NR }' "${ONEOF}")
+[[ -n "${expected_lines}" ]]
+actual_lines=$(printf '%s\n' "${oneof_output}" | \
+  sed -n 's/.*use-after-move-oneof-test.c++:\([0-9]*\):[0-9]*: warning:.*\[workerd-use-after-move\].*/\1/p')
+if [[ "${actual_lines}" != "${expected_lines}" ]]; then
+  printf '%s\n' "Unexpected KJ_CASE_ONEOF diagnostics." "${oneof_output}" >&2
+  diff -u <(printf '%s\n' "${expected_lines}") <(printf '%s\n' "${actual_lines}") >&2
+  exit 1
+fi
+expected_loops=$(awk '/\/\/ expect-loop-warning/ { print NR }' "${ONEOF}")
+actual_loops=$(printf '%s\n' "${oneof_output}" | \
+  sed -n 's/.*use-after-move-oneof-test.c++:\([0-9]*\):[0-9]*: note: the use happens in a later loop iteration.*/\1/p')
+if [[ "${actual_loops}" != "${expected_loops}" ]]; then
+  printf '%s\n' "Unexpected later-iteration notes." "${oneof_output}" >&2
+  diff -u <(printf '%s\n' "${expected_loops}") <(printf '%s\n' "${actual_loops}") >&2
+  exit 1
+fi

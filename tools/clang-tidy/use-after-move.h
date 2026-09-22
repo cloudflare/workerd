@@ -8,8 +8,8 @@
 
 namespace workerd::clang_tidy {
 
-// Extends bugprone-use-after-move to recognize kj::mv() while excluding
-// KJ_CASE_ONEOF's generated one-iteration loop.
+// Extends bugprone-use-after-move to recognize kj::mv() and model KJ_CASE_ONEOF's
+// generated loop as executing at most once.
 class UseAfterMoveCheck final: public clang::tidy::bugprone::UseAfterMoveCheck {
  public:
   UseAfterMoveCheck(clang::StringRef name, clang::tidy::ClangTidyContext* context)

@@ -6,7 +6,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "UseAfterMoveCheck.h"
+// Analysis adapted from llvmorg-22.1.5:
+// https://github.com/llvm/llvm-project/blob/llvmorg-22.1.5/clang-tools-extra/clang-tidy/bugprone/UseAfterMoveCheck.cpp
+// The CFG adjustment callback runs before LLVM's sequencing and reachability analysis.
+// Keep the upstream analysis and diagnostic rules in sync when updating clang-tidy.
+// See llvm-LICENSE.txt for the upstream license.
+
+// clang-format off
+
+#include "use-after-move-analysis.h"
 
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
@@ -17,15 +25,19 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 
-#include "../utils/ExprSequence.h"
-#include "../utils/Matchers.h"
-#include "../utils/OptionsUtils.h"
+#include "clang-tidy/utils/ExprSequence.h"
+#include "clang-tidy/utils/Matchers.h"
+#include "clang-tidy/utils/OptionsUtils.h"
 #include <optional>
 
 using namespace clang::ast_matchers;
 using namespace clang::tidy::utils;
 
-namespace clang::tidy::bugprone {
+namespace workerd::clang_tidy::detail {
+
+using namespace clang;
+using clang::tidy::ClangTidyCheck;
+namespace matchers = clang::tidy::matchers;
 
 using matchers::hasUnevaluatedContext;
 
@@ -51,7 +63,8 @@ class UseAfterMoveFinder {
 public:
   UseAfterMoveFinder(ASTContext *TheContext,
                      llvm::ArrayRef<StringRef> InvalidationFunctions,
-                     llvm::ArrayRef<StringRef> ReinitializationFunctions);
+                     llvm::ArrayRef<StringRef> ReinitializationFunctions,
+                     llvm::function_ref<void(CFG &)> AdjustCFG);
 
   // Within the given code block, finds the first use of 'MovedVariable' that
   // occurs after 'MovingCall' (the expression that performs the move). If a
@@ -76,6 +89,7 @@ private:
   ASTContext *Context;
   llvm::ArrayRef<StringRef> InvalidationFunctions;
   llvm::ArrayRef<StringRef> ReinitializationFunctions;
+  llvm::function_ref<void(CFG &)> AdjustCFG;
   std::unique_ptr<ExprSequence> Sequence;
   std::unique_ptr<StmtToBlockMap> BlockMap;
   llvm::SmallPtrSet<const CFGBlock *, 8> Visited;
@@ -177,9 +191,10 @@ static StatementMatcher inDecltypeOrTemplateArg() {
 
 UseAfterMoveFinder::UseAfterMoveFinder(
     ASTContext *TheContext, llvm::ArrayRef<StringRef> InvalidationFunctions,
-    llvm::ArrayRef<StringRef> ReinitializationFunctions)
+    llvm::ArrayRef<StringRef> ReinitializationFunctions,
+    llvm::function_ref<void(CFG &)> AdjustCFG)
     : Context(TheContext), InvalidationFunctions(InvalidationFunctions),
-      ReinitializationFunctions(ReinitializationFunctions) {}
+      ReinitializationFunctions(ReinitializationFunctions), AdjustCFG(AdjustCFG) {}
 
 std::optional<UseAfterMove>
 UseAfterMoveFinder::find(Stmt *CodeBlock, const Expr *MovingCall,
@@ -198,6 +213,8 @@ UseAfterMoveFinder::find(Stmt *CodeBlock, const Expr *MovingCall,
       CFG::buildCFG(nullptr, CodeBlock, Context, Options);
   if (!TheCFG)
     return std::nullopt;
+
+  AdjustCFG(*TheCFG);
 
   Sequence = std::make_unique<ExprSequence>(TheCFG.get(), CodeBlock, Context);
   BlockMap = std::make_unique<StmtToBlockMap>(TheCFG.get(), Context);
@@ -462,70 +479,10 @@ static void emitDiagnostic(const Expr *MovingCall, const DeclRefExpr *MoveArg,
   }
 }
 
-UseAfterMoveCheck::UseAfterMoveCheck(StringRef Name, ClangTidyContext *Context)
-    : ClangTidyCheck(Name, Context),
-      InvalidationFunctions(utils::options::parseStringList(
-          Options.get("InvalidationFunctions", ""))),
-      ReinitializationFunctions(utils::options::parseStringList(
-          Options.get("ReinitializationFunctions", ""))) {}
-
-void UseAfterMoveCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
-  Options.store(Opts, "InvalidationFunctions",
-                utils::options::serializeStringList(InvalidationFunctions));
-  Options.store(Opts, "ReinitializationFunctions",
-                utils::options::serializeStringList(ReinitializationFunctions));
-}
-
-void UseAfterMoveCheck::registerMatchers(MatchFinder *Finder) {
-  // try_emplace is a common maybe-moving function that returns a
-  // bool to tell callers whether it moved. Ignore std::move inside
-  // try_emplace to avoid false positives as we don't track uses of
-  // the bool.
-  auto TryEmplaceMatcher =
-      cxxMemberCallExpr(callee(cxxMethodDecl(hasName("try_emplace"))));
-  auto Arg = declRefExpr().bind("arg");
-  auto IsMemberCallee = callee(functionDecl(unless(isStaticStorageClass())));
-  auto CallMoveMatcher =
-      callExpr(callee(functionDecl(getNameMatcher(InvalidationFunctions))
-                          .bind("move-decl")),
-               anyOf(cxxMemberCallExpr(IsMemberCallee, on(Arg)),
-                     callExpr(unless(cxxMemberCallExpr(IsMemberCallee)),
-                              hasArgument(0, Arg))),
-               unless(inDecltypeOrTemplateArg()),
-               unless(hasParent(TryEmplaceMatcher)), expr().bind("call-move"),
-               anyOf(hasAncestor(compoundStmt(
-                         hasParent(lambdaExpr().bind("containing-lambda")))),
-                     hasAncestor(functionDecl(anyOf(
-                         cxxConstructorDecl(
-                             hasAnyConstructorInitializer(withInitializer(
-                                 expr(anyOf(equalsBoundNode("call-move"),
-                                            hasDescendant(expr(
-                                                equalsBoundNode("call-move")))))
-                                     .bind("containing-ctor-init"))))
-                             .bind("containing-ctor"),
-                         functionDecl().bind("containing-func"))))));
-
-  Finder->addMatcher(
-      traverse(
-          TK_AsIs,
-          // To find the Stmt that we assume performs the actual move, we look
-          // for the direct ancestor of the std::move() that isn't one of the
-          // node types ignored by ignoringParenImpCasts().
-          stmt(
-              forEach(expr(ignoringParenImpCasts(CallMoveMatcher))),
-              // Don't allow an InitListExpr to be the moving call. An
-              // InitListExpr has both a syntactic and a semantic form, and the
-              // parent-child relationships are different between the two. This
-              // could cause an InitListExpr to be analyzed as the moving call
-              // in addition to the Expr that we actually want, resulting in two
-              // diagnostics with different code locations for the same move.
-              unless(initListExpr()),
-              unless(expr(ignoringParenImpCasts(equalsBoundNode("call-move")))))
-              .bind("moving-call")),
-      this);
-}
-
-void UseAfterMoveCheck::check(const MatchFinder::MatchResult &Result) {
+void checkUseAfterMove(const MatchFinder::MatchResult &Result, ClangTidyCheck &Check,
+                      llvm::ArrayRef<StringRef> InvalidationFunctions,
+                      llvm::ArrayRef<StringRef> ReinitializationFunctions,
+                      llvm::function_ref<void(CFG &)> AdjustCFG) {
   const auto *ContainingCtor =
       Result.Nodes.getNodeAs<CXXConstructorDecl>("containing-ctor");
   const auto *ContainingCtorInit =
@@ -570,11 +527,13 @@ void UseAfterMoveCheck::check(const MatchFinder::MatchResult &Result) {
 
   for (Stmt *CodeBlock : CodeBlocks) {
     UseAfterMoveFinder Finder(Result.Context, InvalidationFunctions,
-                              ReinitializationFunctions);
+                              ReinitializationFunctions, AdjustCFG);
     if (auto Use = Finder.find(CodeBlock, MovingCall, Arg))
-      emitDiagnostic(MovingCall, Arg, *Use, this, Result.Context,
+      emitDiagnostic(MovingCall, Arg, *Use, &Check, Result.Context,
                      determineMoveType(MoveDecl));
   }
 }
 
-} // namespace clang::tidy::bugprone
+} // namespace workerd::clang_tidy::detail
+
+// clang-format on
