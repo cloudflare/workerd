@@ -8,6 +8,8 @@ namespace kj {
 struct UnwindDetector {};
 }  // namespace kj
 
+struct AllowedYieldable {};
+
 struct Task {
   struct promise_type {
     Task get_return_object();
@@ -15,6 +17,7 @@ struct Task {
     std::suspend_never final_suspend() noexcept;
     void return_void();
     void unhandled_exception();
+    std::suspend_never yield_value(AllowedYieldable);
   };
 };
 
@@ -37,4 +40,9 @@ void detectorOutsideCoroutine(Awaitable awaitable) {
     (void)result;
   };
   (void)coroutine;
+}
+
+Task allowedYield() {
+  kj::UnwindDetector detector;
+  co_yield AllowedYieldable{};
 }
