@@ -412,11 +412,13 @@ JsRpcPromise::JsRpcPromise(jsg::JsRef<jsg::JsPromise> inner,
     kj::Own<WeakRef> weakRefParam,
     IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline,
     kj::Maybe<TraceContextParent> originatingCall,
-    kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability)
+    kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability,
+    kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker)
     : inner(kj::mv(inner)),
       weakRef(kj::mv(weakRefParam)),
       originatingCall(ownOriginatingCall(kj::mv(originatingCall))),
       actorTargetRetryability(actorTargetRetryability),
+      replayMemoryTracker(kj::mv(replayMemoryTracker)),
       state(Pending{kj::mv(pipeline)}) {
   KJ_REQUIRE(weakRef->ref == kj::none);
   weakRef->ref = *this;
@@ -469,6 +471,9 @@ JsRpcClientProvider::ClientForOneCall JsRpcPromise::getClientForOneCall(
       originatingCall.map([](IoOwn<TraceContextParent>& p) { return p->addRef(); });
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(pending, Pending) {
+      KJ_IF_SOME(tracker, replayMemoryTracker) {
+        tracker->release();
+      }
       return {
         .client = pending.pipeline->getCallPipeline(),
         .callSpanParents = kj::mv(callSpanParents),
@@ -548,11 +553,12 @@ struct JsRpcPromiseAndPipeline {
   // nest under it. Absent when untraced, and on the error paths where no call span was opened.
   kj::Maybe<TraceContextParent> originatingCall;
   kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability;
+  kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker;
 
   jsg::Ref<JsRpcPromise> asJsRpcPromise(jsg::Lock& js) && {
     return js.alloc<JsRpcPromise>(jsg::JsRef<jsg::JsPromise>(js, promise), kj::mv(weakRef),
         IoContext::current().addObject(kj::heap(kj::mv(pipeline))), kj::mv(originatingCall),
-        actorTargetRetryability);
+        actorTargetRetryability, kj::mv(replayMemoryTracker));
   }
 };
 
@@ -751,9 +757,12 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
 
       // JSRPC retries build on the fetch retry machinery, so the fetch gate remains a shared
       // prerequisite while the JSRPC gate controls this event type's separate rollout.
+      kj::Maybe<kj::Own<JsRpcReplayMemoryTracker>> replayMemoryTracker;
       if (destinationSupportsRetries && callPlan.getReplayable() &&
           util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH) &&
           util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_JSRPC)) {
+        replayMemoryTracker = kj::refcounted<JsRpcReplayMemoryTracker>(
+            ioContext.getMetrics().trackActorCallReplayMemory(callPlan.getReplayMemoryBytes()));
         actorCallAttempt.emplace(
             generateActorRetryRequestMetadata(
                 kj::systemCoarseCalendarClock().now(), ActorRetryGateEnabled::NO),
@@ -783,6 +792,10 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       // the promise here and the pipeline below, both via kj::mv().
       kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> resultPromise =
           kj::mv(callResult);
+      KJ_IF_SOME(tracker, replayMemoryTracker) {
+        resultPromise = resultPromise.attach(
+            kj::defer([tracker = kj::addRef(*tracker)]() mutable { tracker->release(); }));
+      }
       KJ_IF_SOME(targetRetryable, actorTargetRetryability) {
         // Observe the individual call rather than its session, whose lifetime ends with capability
         // teardown rather than with this result.
@@ -810,6 +823,11 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       // pipelined on the returned promise nest under it, mirroring the stub handling below. Only
       // retained when traced, so the untraced path holds no span state.
       auto originatingCall = jsRpcCallSpan.getSpanParentsIfObserved();
+
+      kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> promiseReplayMemoryTracker;
+      KJ_IF_SOME(tracker, replayMemoryTracker) {
+        promiseReplayMemoryTracker = ioContext.addObject(kj::mv(tracker));
+      }
 
       auto jsPromise = ioContext.awaitIo(js, kj::mv(resultPromise),
           [weakRef = kj::atomicAddRef(*weakRef), jsRpcCallSpan = kj::mv(jsRpcCallSpan)](
@@ -839,6 +857,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
         .pipeline = kj::mv(callResult),
         .originatingCall = kj::mv(originatingCall),
         .actorTargetRetryability = pipelineActorTargetRetryability,
+        .replayMemoryTracker = kj::mv(promiseReplayMemoryTracker),
       };
     }, [&](jsg::Value error) -> JsRpcPromiseAndPipeline {
       // Probably a serialization error. Need to convert to an async error since we never throw

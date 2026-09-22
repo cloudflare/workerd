@@ -172,6 +172,10 @@ class JsRpcCallPlan {
     return replayable;
   }
 
+  size_t getReplayMemoryBytes() const {
+    return serializedData.size();
+  }
+
   void copyTo(rpc::JsRpcTarget::CallParams::Builder builder);
 
  private:
@@ -325,6 +329,19 @@ class JsRpcClientProvider: public jsg::Object {
 
 class JsRpcProperty;
 
+class JsRpcReplayMemoryTracker final: public kj::Refcounted {
+ public:
+  explicit JsRpcReplayMemoryTracker(kj::Own<void> trackedMemory)
+      : trackedMemory(kj::mv(trackedMemory)) {}
+
+  void release() {
+    trackedMemory = kj::Own<void>();
+  }
+
+ private:
+  kj::Own<void> trackedMemory;
+};
+
 // Represents the promise returned by calling an RPC method. We don't use a regular Promise object,
 // but rather our own custom thenable, so that we can support pipelining on it.
 class JsRpcPromise: public JsRpcClientProvider {
@@ -348,7 +365,8 @@ class JsRpcPromise: public JsRpcClientProvider {
       kj::Own<WeakRef> weakRef,
       IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline,
       kj::Maybe<TraceContextParent> originatingCall,
-      kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability);
+      kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability,
+      kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker);
   ~JsRpcPromise() noexcept(false);
 
   void resolve(jsg::Lock& js, jsg::JsValue result);
@@ -404,6 +422,7 @@ class JsRpcPromise: public JsRpcClientProvider {
   // pipelined on the promise under it (mirrors JsRpcStub::originatingCall). Only set when traced.
   kj::Maybe<IoOwn<TraceContextParent>> originatingCall;
   kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability;
+  kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker;
 
   struct Pending {
     IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline;
