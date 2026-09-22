@@ -99,6 +99,7 @@ wd_cc_library(
         ":observer",
         ":release-version",
         ":trace",
+        ":tracked-wasm-instance",
         ":wasm-instantiate-shim",
         ":worker-interface",
         ":worker-source",
@@ -334,15 +335,28 @@ wd_cc_library(
 
 wd_cc_library(
     name = "limit-enforcer",
-    srcs = ["tracked-wasm-instance.c++"],
     hdrs = [
         "limit-enforcer.h",
-        "tracked-wasm-instance.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":outcome_capnp",
-        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "tracked-wasm-instance",
+    srcs = ["tracked-wasm-instance.c++"],
+    hdrs = [
+        "tracked-wasm-instance.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
     ],
 )
 
@@ -572,7 +586,7 @@ wd_test(
 kj_test(
     src = "tracked-wasm-instance-test.c++",
     deps = [
-        ":limit-enforcer",
+        ":tracked-wasm-instance",
     ],
 )
 

@@ -29,6 +29,37 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 - Variant generation controllable per-test via `generate_*_variant` booleans
 - `BUILD.*` files: overlay build files for third-party deps (sqlite3, zlib, simdutf, pyodide, wpt)
 
+## IWYU for C++ targets
+
+By convention, there should be one wd_cc_library target for each .c++/.h file pair in most cases and
+a given target should not have a dependency declared on targets it doesn't need. This improves Bazel
+caching as changes to a given header/source will usually require recompilation/re-testing of fewer
+targets than would be required with catchall targets. For standalone headers without a corresponding
+source file, the header file still gets its own target and should have the right set of dependencies
+so that it can be parsed independently. In rare cases, it is hard to avoid having more files in one
+target due to header interdependencies (e.g. with @workerd//src/workerd/io).
+Similarly, we should generally not be adding headers that are not being used in a given C++ file,
+this is often a precondition for removing Bazel dependencies that aren't actually necessary.
+Where possible, use the `implementation_deps` parameter for dependencies that are only used in
+source files and not in headers so that they are not propagated to dependent targets.
+One thing that should be avoided is having a header be available in two ways just to game target
+inclusion rules – being able to depend on a header but not the corresponding source file can obscure
+that a given target depends on the source file and can lead to functions being called without
+depending on the file that defines them, resulting in ODR violations (which usually surface as
+linker errors).
+There principles are derived from the "Include what you use" approach (see https://github.com/include-what-you-use/include-what-you-use/blob/master/docs/WhyIWYU.md
+for background). Note that IWYU also means that all dependencies/headers of a given target should be
+declared instead of relying on transitive dependencies/includes. This can make it easier to make
+include changes when removing an include – if there are no transitive dependencies, there will be no
+need to add transitive dependencies that were made available through the removed target to the
+affected target. However, we have not been consistent in doing this since it can result in having to
+declare dozens of dependencies/includes for a target/file.
+Overall, we try to follow IWYU principles but some nuance is required – split targets to have just
+one source file per target where possible but don't end up with headers being declared in two
+targets based on trying too hard to achieve this. Don't rely too much on transitive includes but
+also don't feel obligated to list all dependencies if it would result in a lengthy list and we
+already get the same dependencies/headers transitively.
+
 ## CLANG-TIDY PLUGIN
 
 `//tools/clang-tidy:workerd-lint` builds a shared-object clang-tidy plugin

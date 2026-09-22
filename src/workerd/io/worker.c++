@@ -16,6 +16,7 @@
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/per-isolate-bootstrap.h>
 #include <workerd/io/tracer.h>
+#include <workerd/io/tracked-wasm-instance.h>
 #include <workerd/io/validation.h>
 #include <workerd/io/wasm-instantiate-shim.embed.h>
 #include <workerd/io/worker.h>
