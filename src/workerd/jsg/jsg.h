@@ -79,6 +79,19 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
   kj::Array<size_t> templateDataIndices;
   size_t opaqueTemplateDataIndex = kNoTemplateData;
 
+  // The new module registry's resolution table (modules::IsolateModuleRegistry): one record per
+  // (context type, specifier) the zygote resolved, naming the v8::Module it resolved to by its
+  // v8::SnapshotCreator::AddData(context, ...) index. Several specifiers may name one module.
+  // A restored isolate rebuilds its registry from these (ModuleRegistry::attachToIsolate); without
+  // them the registry is empty, and V8's import.meta callback, which looks the module up in the
+  // registry, would leave import.meta.url and import.meta.main unset.
+  struct ModuleRecord {
+    uint8_t contextType;  // A modules::ResolveContext::Type.
+    kj::String specifier;  // The normalized specifier URL, query and fragment included.
+    size_t moduleDataIndex;
+  };
+  kj::Array<ModuleRecord> moduleRecords;
+
   ~SnapshotArtifact() noexcept(false) {
     // v8::SnapshotCreator::CreateBlob() allocates the data with `new[]` and hands over ownership.
     delete[] blob.data;

@@ -852,6 +852,13 @@ intptr_t getSyntheticModuleEvaluationStepsRef();
 void visitIsolateModuleRegistryHandlesForSnapshot(
     v8::Local<v8::Context> context, kj::FunctionParam<void(v8::Global<v8::Data>&)> fn);
 
+// For jsg::IsolateBase::prepareSnapshot, before the handles above are reset: stores the v8::Module
+// of every instantiated module in the snapshot with `creator.AddData(context, ...)` and returns the
+// records (see SnapshotArtifact::moduleRecords) from which ModuleRegistry::attachToIsolate rebuilds
+// the registry of an isolate restored from the blob.
+kj::Array<SnapshotArtifact::ModuleRecord> recordIsolateModuleRegistryForSnapshot(
+    v8::Local<v8::Context> context, v8::SnapshotCreator& creator);
+
 constexpr ModuleRegistry::Builder::Options operator|(
     const ModuleRegistry::Builder::Options& a, const ModuleRegistry::Builder::Options& b) {
   return static_cast<ModuleRegistry::Builder::Options>(

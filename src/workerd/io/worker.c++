@@ -1574,9 +1574,10 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                 if (lock.isStartingFromSnapshot()) {
                   // The context restored from the snapshot already holds the evaluated module
                   // graph; the Worker constructor picks the main module's namespace out of it.
-                  // Nothing is compiled here, so the module registry (either one) stays empty
-                  // and dynamic import() of bundle modules is not available in such an isolate
-                  // yet. The legacy registry still needs its dynamic-import hook installed.
+                  // Nothing is compiled here. The new module registry re-adopts the graph's
+                  // modules when it is attached (SnapshotArtifact::moduleRecords); the legacy
+                  // registry stays empty, so dynamic import() of bundle modules is not available
+                  // under it yet, and it still needs its dynamic-import hook installed.
                   if (!isNewModuleRegistryEnabled(isolate->getApi().getFeatureFlags())) {
                     impl->configureDynamicImports(lock, *jsg::ModuleRegistry::from(lock));
                   }
