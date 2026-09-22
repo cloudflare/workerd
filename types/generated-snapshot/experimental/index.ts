@@ -6508,6 +6508,8 @@ export type WebSearchOptions = {
   search_context_size?: "low" | "medium" | "high";
   user_location?: WebSearchUserLocation;
 };
+/** Default reasoning efforts for models without published reasoning metadata. */
+export type ChatCompletionsReasoningEffort = "low" | "medium" | "high";
 export type ChatTemplateKwargs<ThinkingEnabled extends boolean = boolean> = {
   /** Whether to enable reasoning. Support and defaults depend on the model. */
   enable_thinking?: ThinkingEnabled;
@@ -6516,7 +6518,7 @@ export type ChatTemplateKwargs<ThinkingEnabled extends boolean = boolean> = {
 };
 /** Shared optional properties used by both Prompt and Messages input branches. */
 export type ChatCompletionsCommonOptions<
-  Effort extends string = "low" | "medium" | "high",
+  Effort extends string = ChatCompletionsReasoningEffort,
   ThinkingEnabled extends boolean = boolean,
 > = {
   model?: string;
@@ -6624,7 +6626,7 @@ export type ChatCompletionChoice = {
   logprobs: ChatCompletionLogprobs | null;
 };
 export type ChatCompletionsMessagesInput<
-  Effort extends string = "low" | "medium" | "high",
+  Effort extends string = ChatCompletionsReasoningEffort,
   ThinkingEnabled extends boolean = boolean,
 > = {
   messages: Array<ChatCompletionMessageParam>;
@@ -11838,7 +11840,7 @@ export declare abstract class Base_Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B {
   postProcessedOutputs: Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B_Output;
 }
 export declare abstract class Base_Ai_Cf_Zai_Org_Glm_4_7_Flash {
-  inputs: ChatCompletionsInput;
+  inputs: ChatCompletionsInput<never, boolean>;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 export declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_5 {
@@ -11852,36 +11854,25 @@ export declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_6 {
   >;
   postProcessedOutputs: ChatCompletionsOutput;
 }
-export interface Ai_Cf_Nvidia_Nemotron_3_120B_A12B_ChatTemplateKwargs {
-  /** Whether to enable reasoning. Reasoning is enabled by default. */
-  enable_thinking?: boolean;
-  /** Use Nemotron low-effort reasoning, which consumes significantly fewer reasoning tokens. */
-  low_effort?: boolean;
-  /** For coding agents, force non-empty assistant content. */
-  force_nonempty_content?: boolean;
-}
-export type Ai_Cf_Nvidia_Nemotron_3_120B_A12B_Input = Omit<
-  ChatCompletionsMessagesInput,
-  "reasoning_effort" | "chat_template_kwargs"
-> & {
-  chat_template_kwargs?: Ai_Cf_Nvidia_Nemotron_3_120B_A12B_ChatTemplateKwargs;
-};
 export declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
-  inputs: Ai_Cf_Nvidia_Nemotron_3_120B_A12B_Input;
+  inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
+export type Ai_Cf_Google_Gemma_4_26B_A4B_IT_Input = ChatCompletionsInput<
+  "high" | "none" | "minimal" | "low" | "medium" | "max" | "auto",
+  boolean
+> & {
+  /**
+   * @default false
+   */
+  skip_special_tokens?: boolean;
+};
 export declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
-  inputs: ChatCompletionsInput<
-    "high" | "none" | "minimal" | "low" | "medium" | "max" | "auto",
-    boolean
-  >;
+  inputs: Ai_Cf_Google_Gemma_4_26B_A4B_IT_Input;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 export declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code {
-  inputs: ChatCompletionsInput<
-    "high" | "none" | "low" | "medium" | "max",
-    true
-  >;
+  inputs: ChatCompletionsInput<ChatCompletionsReasoningEffort, true>;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 export declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_2 {
@@ -12039,7 +12030,7 @@ export declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813 {
   postProcessedOutputs: ChatCompletionsOutput;
 }
 export declare abstract class Base_Ai_Cf_Qwen_Qwen3_8_27B {
-  inputs: ChatCompletionsInput<"xhigh" | "medium" | "low", boolean>;
+  inputs: ChatCompletionsInput<"low" | "medium" | "xhigh", boolean>;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 export declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_3 {
@@ -12210,7 +12201,7 @@ export type AiModelsSearchObject = {
 };
 export type ChatCompletionsBase = ChatCompletionsMessagesInput;
 export type ChatCompletionsInput<
-  Effort extends string = "low" | "medium" | "high",
+  Effort extends string = ChatCompletionsReasoningEffort,
   ThinkingEnabled extends boolean = boolean,
 > = ChatCompletionsMessagesInput<Effort, ThinkingEnabled>;
 export interface InferenceUpstreamError extends Error {}

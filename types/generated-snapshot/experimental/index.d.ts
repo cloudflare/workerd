@@ -6497,6 +6497,8 @@ type WebSearchOptions = {
   search_context_size?: "low" | "medium" | "high";
   user_location?: WebSearchUserLocation;
 };
+/** Default reasoning efforts for models without published reasoning metadata. */
+type ChatCompletionsReasoningEffort = "low" | "medium" | "high";
 type ChatTemplateKwargs<ThinkingEnabled extends boolean = boolean> = {
   /** Whether to enable reasoning. Support and defaults depend on the model. */
   enable_thinking?: ThinkingEnabled;
@@ -6505,7 +6507,7 @@ type ChatTemplateKwargs<ThinkingEnabled extends boolean = boolean> = {
 };
 /** Shared optional properties used by both Prompt and Messages input branches. */
 type ChatCompletionsCommonOptions<
-  Effort extends string = "low" | "medium" | "high",
+  Effort extends string = ChatCompletionsReasoningEffort,
   ThinkingEnabled extends boolean = boolean,
 > = {
   model?: string;
@@ -6613,7 +6615,7 @@ type ChatCompletionChoice = {
   logprobs: ChatCompletionLogprobs | null;
 };
 type ChatCompletionsMessagesInput<
-  Effort extends string = "low" | "medium" | "high",
+  Effort extends string = ChatCompletionsReasoningEffort,
   ThinkingEnabled extends boolean = boolean,
 > = {
   messages: Array<ChatCompletionMessageParam>;
@@ -11826,7 +11828,7 @@ declare abstract class Base_Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B {
   postProcessedOutputs: Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B_Output;
 }
 declare abstract class Base_Ai_Cf_Zai_Org_Glm_4_7_Flash {
-  inputs: ChatCompletionsInput;
+  inputs: ChatCompletionsInput<never, boolean>;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_5 {
@@ -11840,36 +11842,25 @@ declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_6 {
   >;
   postProcessedOutputs: ChatCompletionsOutput;
 }
-interface Ai_Cf_Nvidia_Nemotron_3_120B_A12B_ChatTemplateKwargs {
-  /** Whether to enable reasoning. Reasoning is enabled by default. */
-  enable_thinking?: boolean;
-  /** Use Nemotron low-effort reasoning, which consumes significantly fewer reasoning tokens. */
-  low_effort?: boolean;
-  /** For coding agents, force non-empty assistant content. */
-  force_nonempty_content?: boolean;
-}
-type Ai_Cf_Nvidia_Nemotron_3_120B_A12B_Input = Omit<
-  ChatCompletionsMessagesInput,
-  "reasoning_effort" | "chat_template_kwargs"
-> & {
-  chat_template_kwargs?: Ai_Cf_Nvidia_Nemotron_3_120B_A12B_ChatTemplateKwargs;
-};
 declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
-  inputs: Ai_Cf_Nvidia_Nemotron_3_120B_A12B_Input;
+  inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
+type Ai_Cf_Google_Gemma_4_26B_A4B_IT_Input = ChatCompletionsInput<
+  "high" | "none" | "minimal" | "low" | "medium" | "max" | "auto",
+  boolean
+> & {
+  /**
+   * @default false
+   */
+  skip_special_tokens?: boolean;
+};
 declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
-  inputs: ChatCompletionsInput<
-    "high" | "none" | "minimal" | "low" | "medium" | "max" | "auto",
-    boolean
-  >;
+  inputs: Ai_Cf_Google_Gemma_4_26B_A4B_IT_Input;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code {
-  inputs: ChatCompletionsInput<
-    "high" | "none" | "low" | "medium" | "max",
-    true
-  >;
+  inputs: ChatCompletionsInput<ChatCompletionsReasoningEffort, true>;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_2 {
@@ -12027,7 +12018,7 @@ declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813 {
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Qwen_Qwen3_8_27B {
-  inputs: ChatCompletionsInput<"xhigh" | "medium" | "low", boolean>;
+  inputs: ChatCompletionsInput<"low" | "medium" | "xhigh", boolean>;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_3 {
@@ -12198,7 +12189,7 @@ type AiModelsSearchObject = {
 };
 type ChatCompletionsBase = ChatCompletionsMessagesInput;
 type ChatCompletionsInput<
-  Effort extends string = "low" | "medium" | "high",
+  Effort extends string = ChatCompletionsReasoningEffort,
   ThinkingEnabled extends boolean = boolean,
 > = ChatCompletionsMessagesInput<Effort, ThinkingEnabled>;
 interface InferenceUpstreamError extends Error {}

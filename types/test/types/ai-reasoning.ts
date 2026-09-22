@@ -20,17 +20,9 @@ void ai.run('@cf/moonshotai/kimi-k2.6', {
 });
 void ai.run('@cf/zai-org/glm-5.3', { messages, reasoning_effort: 'max' });
 void ai.run('@cf/zai-org/glm-5.3-flash', { messages, reasoning_effort: 'max' });
-void ai.run('@cf/nvidia/nemotron-3-120b-a12b', {
+void ai.run('@cf/google/gemma-4-26b-a4b-it', {
   messages,
-  chat_template_kwargs: {
-    enable_thinking: true,
-    low_effort: true,
-    force_nonempty_content: true,
-  },
-});
-void ai.run('@cf/nvidia/nemotron-3-120b-a12b', {
-  messages,
-  chat_template_kwargs: { enable_thinking: false },
+  skip_special_tokens: true,
 });
 void ai.run('@cf/qwen/qwen3.8-27b', {
   messages,
@@ -50,10 +42,9 @@ void ai.run('@cf/openai/gpt-oss-20b', {
   reasoning: { effort: 'medium' },
 });
 void ai.run('@cf/openai/gpt-oss-120b', { messages, reasoning_effort: 'high' });
-// A legacy alias is an accepted input even when it does not disable reasoning.
 void ai.run('@cf/moonshotai/kimi-k2.7-code', {
   messages,
-  reasoning_effort: 'none',
+  reasoning_effort: 'high',
 });
 
 // @ts-expect-error: an unsupported effort must not reach the gateway fallback overload
@@ -71,15 +62,10 @@ void ai.run('@cf/moonshotai/kimi-k2.7-code', {
   messages,
   chat_template_kwargs: { enable_thinking: false },
 });
-// @ts-expect-error: Nemotron uses native chat-template controls, not reasoning_effort
-void ai.run('@cf/nvidia/nemotron-3-120b-a12b', {
+// @ts-expect-error: GLM 4.7 Flash only toggles reasoning; it has no effort levels
+void ai.run('@cf/zai-org/glm-4.7-flash', {
   messages,
   reasoning_effort: 'low',
-});
-// @ts-expect-error: Nemotron does not support the generic clear_thinking control
-void ai.run('@cf/nvidia/nemotron-3-120b-a12b', {
-  messages,
-  chat_template_kwargs: { enable_thinking: true, clear_thinking: false },
 });
 // @ts-expect-error: Qwen 3.8 does not accept none reasoning effort
 void ai.run('@cf/qwen/qwen3.8-27b', {
