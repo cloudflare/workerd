@@ -14805,12 +14805,39 @@ declare abstract class Flagship {
    * @param flagKey The key of the flag to evaluate.
    * @param defaultValue Optional default value returned when evaluation fails.
    * @param context Optional evaluation context for targeting rules.
+   * @deprecated Use getValue() instead.
    */
   get(
     flagKey: string,
     defaultValue?: unknown,
     context?: FlagshipEvaluationContext,
   ): Promise<unknown>;
+  /**
+   * Get a flag value, inferring its expected type from the default value.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Default value returned when evaluation fails or the flag type does not match.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  getValue<
+    T extends boolean | string | number | Record<string, unknown> | unknown[],
+  >(
+    flagKey: string,
+    defaultValue: T,
+    context?: FlagshipEvaluationContext,
+  ): Promise<T>;
+  /**
+   * Get a flag value with full evaluation details, inferring its expected type from the default value.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Default value returned when evaluation fails or the flag type does not match.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  getDetails<
+    T extends boolean | string | number | Record<string, unknown> | unknown[],
+  >(
+    flagKey: string,
+    defaultValue: T,
+    context?: FlagshipEvaluationContext,
+  ): Promise<FlagshipEvaluationDetails<T>>;
   /**
    * Get a boolean flag value.
    * @param flagKey The key of the flag to evaluate.
