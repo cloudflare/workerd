@@ -35,7 +35,8 @@
 //     still needs the entry (exact last-consumer test) — REQUIRED for
 //     soundness, not just spec parity.
 //   - Cursors hold weak owner refs; orphan pruning happens on every cursor
-//     iteration, with the FinalizationRegistry as the idle-queue backstop
+//     walk (the controller's own cursor excepted: the controller pins its
+//     owner), with the FinalizationRegistry as the idle-queue backstop
 //     (the native backend needs NEITHER — JSG owns its source lifetime).
 //   - A queue whose last cursor has left or been collected has no consumer
 //     for good: it drops what it holds and what is enqueued later, and
@@ -77,7 +78,6 @@ const {
   PromiseReject,
   PromiseWithResolvers,
   ReflectConstruct,
-  SafeSet,
   Symbol,
   TypeError,
   TypedArrayPrototypeSet,
@@ -295,7 +295,7 @@ export interface ByteStreamConsumer extends StreamConsumer<Uint8Array> {
 // ---------------------------------------------------------------------------
 // Orphan-detection backstop
 //
-// Lazy WeakRef pruning (see #forEachLiveCursor) only runs inside queue
+// Lazy WeakRef pruning (see StreamQueue#prune) only runs inside queue
 // operations. An idle queue whose consumers were all GC'd — but which is
 // pinned from the C++ side via the controller — would otherwise never
 // observe "all cursors gone" and never cancel the underlying source. The
@@ -321,7 +321,16 @@ const cursorCleanupRegistry = new FinalizationRegistry((cursorRef: unknown) => {
 class StreamQueue<T, V = T> {
   #entries: RingBufferType<QueueSlot<T>> = new RingBuffer();
   #headOffset: number = 0; // logical index of the entries' head
-  #cursors: Set<QueueCursor<T, V>>;
+  // Live cursors in join order, walked by index; almost always exactly one.
+  #cursors: QueueCursor<T, V>[] = [];
+  // The controller's own cursor. Its owner is the controller's stream,
+  // which the controller holds, so it cannot be orphaned while anything
+  // can reach this queue; #prune skips its deref. Tee and detach remove it,
+  // and every cursor they create can be orphaned: a detached shell adopts
+  // the controller, but the controller's stream stays the husk, so nothing
+  // strong holds the shell. Its cursor therefore keeps the per-walk deref
+  // (the C++ bridge's extraction path, e.g. a JS stream given to Response).
+  #anchor: QueueCursor<T, V> | undefined;
   #highWaterMark: number;
   #state: 'readable' | 'closed' | 'errored' = 'readable';
   // Idempotent hook, wired to the controller: releases the underlying source
@@ -335,30 +344,40 @@ class StreamQueue<T, V = T> {
   #noConsumers: boolean = false;
 
   constructor(highWaterMark: number, onAllCursorsGone: () => void) {
-    this.#cursors = new SafeSet();
     this.#highWaterMark = highWaterMark;
     this.#onAllCursorsGone = onAllCursorsGone;
   }
 
-  // Iterate live cursors, pruning any whose owning stream has been GC'd.
-  // This is the ONLY way cursor iteration happens — raw iteration would
-  // skip orphan detection. SafeSet#forEach dispatches through the captured
-  // SetPrototypeForEach (deleting during forEach is safe per spec; for...of
-  // over a SafeSet is NOT pollution-safe and must not be used).
-  #forEachLiveCursor(fn: (cursor: QueueCursor<T, V>) => void): void {
-    this.#cursors.forEach((cursor) => {
-      if (cursor.isOrphaned()) {
-        this.#cursors.delete(cursor);
+  // Drop cursors whose owning stream has been collected. Every walk starts
+  // here, so a stale position never blocks reclamation or holds
+  // backpressure. #cursors is stable for the rest of a walk whose callbacks
+  // run no user code (all but notify(), see #notifyAll): they never add or
+  // remove a cursor synchronously, and a re-entrant prune (notify → #gc)
+  // finds nothing new, since a deref'd owner stays alive to the end of the
+  // job.
+  #prune(): void {
+    const cursors = this.#cursors;
+    for (let i = cursors.length - 1; i >= 0; i--) {
+      const cursor = cursors[i] as QueueCursor<T, V>;
+      if (cursor !== this.#anchor && cursor.isOrphaned()) {
+        this.#removeAt(i);
         unregisterCursorCleanup(cursor);
-      } else {
-        fn(cursor);
       }
-    });
+    }
     this.#checkAllCursorsGone();
   }
 
+  #removeAt(index: number): void {
+    const cursors = this.#cursors;
+    const last = cursors.length - 1;
+    for (let j = index; j < last; j++) {
+      cursors[j] = cursors[j + 1] as QueueCursor<T, V>;
+    }
+    cursors.length = last;
+  }
+
   #checkAllCursorsGone(): void {
-    if (this.#hadCursors && !this.#noConsumers && this.#cursors.size === 0) {
+    if (this.#hadCursors && !this.#noConsumers && this.#cursors.length === 0) {
       this.#noConsumers = true;
       this.#headOffset += this.#entries.length;
       this.#entries.clear();
@@ -366,22 +385,37 @@ class StreamQueue<T, V = T> {
     }
   }
 
-  // False once every consumer is gone (see #noConsumers). desiredSize then
-  // reads as the high-water mark, as for consumers that keep up.
-  get hasConsumers(): boolean {
-    return !this.#noConsumers;
-  }
-
   // The slowest cursor's backlog determines backpressure. Note that a
   // pending read on any cursor overrides backpressure at the controller
-  // (shouldPull), so this is honest signaling, not a memory bound.
+  // (shouldPull), so this is honest signaling, not a memory bound. With
+  // every consumer gone it reads as the high-water mark, as for consumers
+  // that keep up.
   get desiredSize(): number {
+    this.#prune();
+    const cursors = this.#cursors;
     let max = 0;
-    this.#forEachLiveCursor((cursor) => {
+    for (let i = 0; i < cursors.length; i++) {
+      const remaining = (cursors[i] as QueueCursor<T, V>).remainingSize;
+      if (remaining > max) max = remaining;
+    }
+    return this.#highWaterMark - max;
+  }
+
+  // The controller's pull condition in one walk: a consumer remains, and
+  // either the slowest cursor is below the high-water mark or a read is
+  // waiting on some cursor (which overrides backpressure).
+  wantsPull(): boolean {
+    this.#prune();
+    if (this.#noConsumers) return false;
+    const cursors = this.#cursors;
+    let max = 0;
+    for (let i = 0; i < cursors.length; i++) {
+      const cursor = cursors[i] as QueueCursor<T, V>;
+      if (cursor.hasPendingRead) return true;
       const remaining = cursor.remainingSize;
       if (remaining > max) max = remaining;
-    });
-    return this.#highWaterMark - max;
+    }
+    return this.#highWaterMark - max > 0;
   }
 
   get length(): number {
@@ -390,29 +424,17 @@ class StreamQueue<T, V = T> {
   }
 
   get cursorCount(): number {
-    // Prune orphans, then report.
-    this.#forEachLiveCursor(() => {});
-    return this.#cursors.size;
+    this.#prune();
+    return this.#cursors.length;
   }
 
   // The single live cursor, if there is exactly one. Used by the byte
   // controller's byobRequest getter (zero-copy is only unambiguous with a
   // single consumer).
   get singleCursor(): QueueCursor<T, V> | undefined {
-    if (this.cursorCount !== 1) return undefined;
-    let found: QueueCursor<T, V> | undefined;
-    this.#forEachLiveCursor((cursor) => {
-      found = cursor;
-    });
-    return found;
-  }
-
-  anyCursorHasPendingRead(): boolean {
-    let any = false;
-    this.#forEachLiveCursor((cursor) => {
-      if (cursor.hasPendingRead) any = true;
-    });
-    return any;
+    this.#prune();
+    const cursors = this.#cursors;
+    return cursors.length === 1 ? cursors[0] : undefined;
   }
 
   // The exact "last consumer" test for copy-on-read: true if any OTHER
@@ -423,41 +445,46 @@ class StreamQueue<T, V = T> {
     cursor: QueueCursor<T, V>,
     logicalIndex: number
   ): boolean {
-    let found = false;
-    this.#forEachLiveCursor((other) => {
-      if (other !== cursor && other.position <= logicalIndex) {
-        found = true;
-      }
-    });
-    return found;
+    this.#prune();
+    const cursors = this.#cursors;
+    for (let i = 0; i < cursors.length; i++) {
+      const other = cursors[i] as QueueCursor<T, V>;
+      if (other !== cursor && other.position <= logicalIndex) return true;
+    }
+    return false;
   }
 
   forEachLiveCursor(fn: (cursor: QueueCursor<T, V>) => void): void {
-    this.#forEachLiveCursor(fn);
+    this.#prune();
+    const cursors = this.#cursors;
+    for (let i = 0; i < cursors.length; i++) {
+      fn(cursors[i] as QueueCursor<T, V>);
+    }
   }
 
   // True if any live cursor satisfies the predicate. Used by the byte
   // controller's close() validation across ALL consumers (tee branches
   // included), not just the single-cursor case.
   someLiveCursor(predicate: (cursor: QueueCursor<T, V>) => boolean): boolean {
-    let found = false;
-    this.#forEachLiveCursor((cursor) => {
-      if (predicate(cursor)) found = true;
-    });
-    return found;
+    this.#prune();
+    const cursors = this.#cursors;
+    for (let i = 0; i < cursors.length; i++) {
+      if (predicate(cursors[i] as QueueCursor<T, V>)) return true;
+    }
+    return false;
   }
 
   // Snapshot of the live owner streams (one per live cursor). Used for
   // error propagation across tee branches — the queue itself stays
   // policy-free; the controller decides what to do with the owners.
   getLiveOwners(): object[] {
+    this.#prune();
+    const cursors = this.#cursors;
     const owners: object[] = [];
-    this.#forEachLiveCursor((cursor) => {
-      const owner = cursor.ownerDeref();
-      if (owner !== undefined) {
-        ArrayPrototypePush(owners, owner);
-      }
-    });
+    for (let i = 0; i < cursors.length; i++) {
+      const owner = (cursors[i] as QueueCursor<T, V>).ownerDeref();
+      if (owner !== undefined) ArrayPrototypePush(owners, owner);
+    }
     return owners;
   }
 
@@ -489,22 +516,30 @@ class StreamQueue<T, V = T> {
       // A cursor at sentinelPos already drained and resolved done —
       // inflating its remainingSize or notifying it would corrupt
       // desiredSize and break the drain-then-close terminality guarantee.
-      this.#forEachLiveCursor((cursor) => {
+      this.#prune();
+      const cursors = this.#cursors;
+      const behind: QueueCursor<T, V>[] = [];
+      for (let i = 0; i < cursors.length; i++) {
+        const cursor = cursors[i] as QueueCursor<T, V>;
         if (cursor.position < sentinelPos) {
           cursor.addToTotalSize(entry.size);
-          if (notify) cursor.notify();
+          ArrayPrototypePush(behind, cursor);
         }
-      });
+      }
+      if (notify) this.#notifyEach(behind);
     } else {
       this.#entries.push(entry);
       if (this.#state === 'readable') {
-        this.#forEachLiveCursor((cursor) => {
-          // Increment the cursor's running total BEFORE notify(), which may
-          // immediately consume the entry (decrementing it back). The +=/-=
-          // order preserves spec-mandated IEEE 754 drift.
-          cursor.addToTotalSize(entry.size);
-          if (notify) cursor.notify();
-        });
+        this.#prune();
+        const cursors = this.#cursors;
+        // Increment every cursor's running total BEFORE any notify(), which
+        // may immediately consume the entry (decrementing it back). The
+        // +=/-= order preserves spec-mandated IEEE 754 drift, and a branch
+        // forked inside a notify() inherits a total that counts the entry.
+        for (let i = 0; i < cursors.length; i++) {
+          (cursors[i] as QueueCursor<T, V>).addToTotalSize(entry.size);
+        }
+        if (notify) this.#notifyAll();
       }
     }
   }
@@ -520,9 +555,35 @@ class StreamQueue<T, V = T> {
     this.#state = 'closed';
     if (this.#noConsumers) return;
     this.#entries.push(CLOSE_SENTINEL);
-    this.#forEachLiveCursor((cursor) => {
-      cursor.notify();
-    });
+    this.#prune();
+    this.#notifyAll();
+  }
+
+  // notify() is the one walk callback that runs user code: it resolves read
+  // promises with plain { value, done } objects, whose `then` lookup invokes
+  // a patched Object.prototype.then getter synchronously, and that getter
+  // can cancel or tee a branch, removing its cursor and shifting the tail of
+  // #cursors down. A lone cursor leaves nothing to skip; with more, notify a
+  // copy: a cursor that left meanwhile has no pending reads, so its notify()
+  // is a no-op, and one that joined is a fresh branch with none.
+  #notifyAll(): void {
+    const cursors = this.#cursors;
+    if (cursors.length === 1) {
+      (cursors[0] as QueueCursor<T, V>).notify();
+      return;
+    }
+    const snapshot: QueueCursor<T, V>[] = [];
+    for (let i = 0; i < cursors.length; i++) {
+      ArrayPrototypePush(snapshot, cursors[i] as QueueCursor<T, V>);
+    }
+    this.#notifyEach(snapshot);
+  }
+
+  // `cursors` must not alias #cursors (see #notifyAll).
+  #notifyEach(cursors: QueueCursor<T, V>[]): void {
+    for (let i = 0; i < cursors.length; i++) {
+      (cursors[i] as QueueCursor<T, V>).notify();
+    }
   }
 
   // Stream error: reject all pending reads on every cursor (byte cursors
@@ -536,9 +597,11 @@ class StreamQueue<T, V = T> {
     const end = this.length;
     this.#entries.clear();
     this.#headOffset = end;
-    this.#forEachLiveCursor((cursor) => {
-      cursor.errorAllReads(reason);
-    });
+    this.#prune();
+    const cursors = this.#cursors;
+    for (let i = 0; i < cursors.length; i++) {
+      (cursors[i] as QueueCursor<T, V>).errorAllReads(reason);
+    }
   }
 
   // Called by the QueueCursor constructor (cursors self-register). `owner`
@@ -546,33 +609,52 @@ class StreamQueue<T, V = T> {
   // target and also held weakly by the cursor. When forking (tee), the new
   // cursor's constructor receives the source cursor's position AND byteOffset
   // so the branch resumes exactly where the original left off.
+  //
+  // A cursor joins a queue that already has one only through tee or detach,
+  // which then remove the parent's. The controllers rely on that: while the
+  // source's own cursor is present it is the queue's sole consumer
+  // (#maybeCloseStream in readable.ts skips the owners walk). A new path
+  // that adds a cursor beside the source's own must revisit those checks.
   addCursor(cursor: QueueCursor<T, V>, owner: object): void {
     this.#hadCursors = true;
-    this.#cursors.add(cursor);
+    ArrayPrototypePush(this.#cursors, cursor);
     registerCursorCleanup(owner, cursor);
   }
 
+  // Marks the controller's own cursor (see #anchor).
+  anchorCursor(cursor: QueueCursor<T, V>): void {
+    this.#anchor = cursor;
+  }
+
   removeCursor(cursor: QueueCursor<T, V>): void {
-    this.#cursors.delete(cursor);
+    const cursors = this.#cursors;
+    for (let i = 0; i < cursors.length; i++) {
+      if (cursors[i] === cursor) {
+        this.#removeAt(i);
+        break;
+      }
+    }
+    if (cursor === this.#anchor) this.#anchor = undefined;
     unregisterCursorCleanup(cursor);
     this.#gc();
-    this.#checkAllCursorsGone();
   }
 
   // Called whenever any cursor advances: reclaim entries every live cursor
-  // has passed. Orphaned cursors are pruned during iteration, so their
-  // stale positions never block reclamation.
+  // has passed. Orphaned cursors are pruned first, so their stale positions
+  // never block reclamation.
   onCursorAdvanced(): void {
     this.#gc();
   }
 
   #gc(): void {
-    if (this.#cursors.size === 0) return;
-    let minPos = Infinity;
-    this.#forEachLiveCursor((cursor) => {
-      if (cursor.position < minPos) minPos = cursor.position;
-    });
-    if (minPos === Infinity) return; // all cursors were orphaned
+    this.#prune();
+    const cursors = this.#cursors;
+    if (cursors.length === 0) return;
+    let minPos = (cursors[0] as QueueCursor<T, V>).position;
+    for (let i = 1; i < cursors.length; i++) {
+      const position = (cursors[i] as QueueCursor<T, V>).position;
+      if (position < minPos) minPos = position;
+    }
     const freedCount = minPos - this.#headOffset;
     if (freedCount > 0) {
       this.#entries.trimFront(freedCount);

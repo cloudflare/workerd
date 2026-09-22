@@ -120,7 +120,7 @@ named suite test pins directly, differing only in incidental asserts.
 | `read-min.js` | ledger #11-#13; byobMin/constraints/readAtLeast (migrated streams-test.js); /chunked SELF endpoint |
 | `tee.js` | ledger #14, #24, #25; clone-per-branch; migrated byte-tee pair; error propagation; released branch reads, incl. partially filled ones and tee() after a release; byobRequest held across tee() |
 | `buffer-lifecycle.js` | ledger #18; resizable ArrayBuffers; WASM Memory |
-| `gc.js` | pending BYOB read + byobRequest survive gc(); both tee branches collected while the controller is held: enqueue() accepted, desiredSize at the high-water mark, byobRequest null, close() then enqueue() as ever (a parity pin of the observable surface — the retention checks are the readable suite's, a transferred buffer leaving nothing to WeakRef), and pull() stops (ledger #26) |
+| `gc.js` | pending BYOB read + byobRequest survive gc(); both tee branches collected while the controller is held: enqueue() accepted, desiredSize at the high-water mark, byobRequest null, close() then enqueue() as ever (a parity pin of the observable surface — the retention checks are the readable suite's, a transferred buffer leaving nothing to WeakRef), one branch cancelled and the other collected, observed in the gc()'s own job (the readable suite's teeSurvivorBranchCollected, plus byobRequest null), and pull() stops (ledger #26) |
 | `integration.js` | BYOB round-trips via SELF; readAtLeast on echoed body; bytes() |
 | `js-compat.js` | ledger #17; byte halves of the mixed streams-js-test tests (closed promise, cancel reads, locked ops, globals) |
 | `flag-no-auto-allocate.js` | the flag cell (migrated streams-no-auto-allocate-test) |
