@@ -22,8 +22,8 @@ import type {
 import type {
   ByteQueueEntry,
   ByteStreamConsumer as ByteStreamConsumerType,
-  ErrorStreamCallback,
   ByteStreamCursor as ByteStreamCursorType,
+  ErrorStreamCallback,
   PullIntoDescriptor,
   QueueCursor as QueueCursorType,
   StreamConsumer as StreamConsumerType,
@@ -254,6 +254,7 @@ let readableStreamDefaultReaderRead: <R>(
   reader: ReadableStreamDefaultReaderType<R>,
   readRequest: ReadableStreamAsyncIteratorReadRequest<R>
 ) => void;
+
 // Errors a queued tee branch alone (see [kControllerErrorFunction]).
 let readableStreamErrorBranch: <R>(
   stream: ReadableStream<R>,
@@ -3523,15 +3524,6 @@ class ReadableStream<R> {
       }
     };
 
-    // BACKEND-DISPATCH: tee is one of the five sanctioned dispatch points
-    // (native-stream-integration.md §10). The native branch runs first:
-    // the source's tee hook produces a PAIR of new native source objects
-    // (leaving the original source closed), each wrapped in a fresh
-    // ReadableStream via ordinary construction. Branches are fully
-    // independent — no shared consumer and no composite-cancel wiring
-    // (deliberate divergence from the queued model below: branch cancels
-    // go to each branch's OWN source). The parent becomes the same inert
-    // locked shell as in the queued model.
     readableStreamErrorBranch = <R>(
       stream: ReadableStream<R>,
       reason: unknown
@@ -3558,6 +3550,15 @@ class ReadableStream<R> {
       cursor.queue.removeCursor(cursor);
     };
 
+    // BACKEND-DISPATCH: tee is one of the five sanctioned dispatch points
+    // (native-stream-integration.md §10). The native branch runs first:
+    // the source's tee hook produces a PAIR of new native source objects
+    // (leaving the original source closed), each wrapped in a fresh
+    // ReadableStream via ordinary construction. Branches are fully
+    // independent — no shared consumer and no composite-cancel wiring
+    // (deliberate divergence from the queued model below: branch cancels
+    // go to each branch's OWN source). The parent becomes the same inert
+    // locked shell as in the queued model.
     readableStreamTee = <R>(stream: ReadableStream<R>) => {
       // The locked precondition lives HERE (not in the prototype method) so that every
       // entry point shares it -- the method after its brand assert, and the C++
