@@ -44,6 +44,7 @@ behavior-parity (messages aside).
 | 27 | where `closed` settles relative to the #12 tail read (close() below min with partial bytes) | read fulfills first, then closed | closed first — matching the order the spec gives a read that drains the last queued bytes after close(); that drain case is parity and is pinned alongside | `closedOrderAtEndOfData` |
 | 28 | read(view) with a multi-byte view (e.g. Uint16Array) on a native body | resolves Uint8Array views of whatever bytes arrive, partial elements included | views of the read's own type holding whole elements; a partial element is carried into the next read, and one left at EOF errors the stream with TypeError 'Insufficient bytes to fill elements in the given view' (as a JS byte source's close() mid-element does, spec) | `nativeByobMultiByteViews` |
 | 29 | a native body's reader released while its read is in flight, then tee() or clone() | releaseLock() throws TypeError (outstanding read promises) | the read rejects; both branches receive the whole body, including the in-flight read's bytes | `teeNativeBodyAfterReleaseMidRead` |
+| 30 | resizable ArrayBuffers handed in by read(view), enqueue() or respondWithNewView() | kept resizable except after enqueue(): the source can shrink byobRequest.view.buffer, and respond() then throws TypeError 'Cannot respond with a zero-length or detached view' (read left pending); respondWithNewView() and closed-stream read(view) results are resizable | transferred to fixed length (spec TransferArrayBuffer): byobRequest.view.buffer.resize() throws TypeError, and every result buffer is fixed-length | `resizableByobRequestCannotShrink`, `resizableBuffersDeliveredFixedLength`, `readResizableView` |
 
 Parity worth noting (probed, pinned): byte hwm defaults to 0 with NO
 automatic pull; pull-throw and error-then-throw identity; enqueue
@@ -62,7 +63,8 @@ reads; {min}-shaped arg ignored by default readers; readAtLeast exists
 on BOTH implementations; tee CLONES chunks per branch (fresh buffers,
 original detached, no cross-branch mutation) and propagates the same
 error object to both branches; resizable ArrayBuffers usable on both
-ends (enqueue detaches → resize throws); WebAssembly.Memory rejected
+ends (enqueue detaches → resize throws; results' resizability is ledger
+#30); WebAssembly.Memory and SharedArrayBuffer views rejected
 everywhere; the BYOB view-type matrix (byob-reader.js, migrated); GC
 liveness of pending BYOB reads and byobRequests; SELF round-trips with
 BYOB consumption, readAtLeast on echoed bodies, Response.bytes().
@@ -122,7 +124,7 @@ named suite test pins directly, differing only in incidental asserts.
 | `release-relock.js` | ledger #9, #10; the WPT releaseLock→second-reader cluster; release with two pending reads or a partially filled head |
 | `read-min.js` | ledger #11-#13, #27; byobMin/constraints/readAtLeast (migrated streams-test.js); /chunked SELF endpoint |
 | `tee.js` | ledger #7 (on a branch), #14, #24, #25, #29; clone-per-branch; migrated byte-tee pair; error propagation; released branch reads, incl. partially filled ones and tee() after a release; byobRequest held across tee() |
-| `buffer-lifecycle.js` | ledger #18; resizable ArrayBuffers; WASM Memory |
+| `buffer-lifecycle.js` | ledger #18, #30; resizable ArrayBuffers; WASM Memory; SharedArrayBuffer |
 | `gc.js` | pending BYOB read + byobRequest survive gc(); both tee branches collected while the controller is held: enqueue() accepted, desiredSize at the high-water mark, byobRequest null, close() then enqueue() as ever (a parity pin of the observable surface — the retention checks are the readable suite's, a transferred buffer leaving nothing to WeakRef), one branch cancelled and the other collected, observed in the gc()'s own job (the readable suite's teeSurvivorBranchCollected, plus byobRequest null), and pull() stops (ledger #26) |
 | `integration.js` | BYOB round-trips via SELF; readAtLeast on echoed body; bytes() |
 | `js-compat.js` | ledger #17, #22; byte halves of the mixed streams-js-test tests (closed promise, cancel reads, locked ops, globals) |

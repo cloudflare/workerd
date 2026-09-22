@@ -41,7 +41,7 @@ const {
   ArrayBuffer,
   ArrayBufferPrototypeByteLengthGet,
   ArrayBufferPrototypeDetachedGet,
-  ArrayBufferPrototypeTransfer,
+  ArrayBufferPrototypeTransferToFixedLength,
   ArrayPrototypePush,
   AsyncIteratorPrototype,
   BigInt,
@@ -1127,7 +1127,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     if (!isArrayBufferView(view)) {
       throw new TypeError('view must be an ArrayBufferView');
     }
-    const info = getViewInfo(view);
+    const info = getUnsharedViewInfo(view, 'view');
     if (info.byteLength === 0) {
       throw new TypeError('view must have a non-zero byteLength');
     }
@@ -1169,7 +1169,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
       throw getReadableStreamStoredError(stream);
     }
     // Transfer the buffer regardless of state (spec step).
-    const transferred = ArrayBufferPrototypeTransfer(info.buffer);
+    const transferred = ArrayBufferPrototypeTransferToFixedLength(info.buffer);
     if (getReadableStreamGetState(stream) === 'closed') {
       // Closed or cancelled alike: a zero-length view over the transferred
       // buffer (spec ReadableByteStreamControllerPullInto "closed" branch).
@@ -1311,16 +1311,29 @@ function getViewInfo(view: ArrayBufferView): ViewInfo {
   };
 }
 
+// getViewInfo() for the byte-stream trust boundaries, which reject
+// SharedArrayBuffer-backed views (WebIDL ArrayBufferView without
+// [AllowShared]).
+function getUnsharedViewInfo(view: ArrayBufferView, what: string): ViewInfo {
+  const info = getViewInfo(view);
+  if (isSharedArrayBuffer(info.buffer)) {
+    throw new TypeError(`${what} must not be backed by a SharedArrayBuffer`);
+  }
+  return info;
+}
+
 // Validate and normalize a user-provided chunk for a byte stream at the
 // enqueue()/respondWithNewView() trust boundary: snapshot metadata, reject
 // zero-length views and zero-length (or detached — detached buffers report
 // byteLength 0) buffers, and transfer the backing buffer. The returned
 // triple references the TRANSFERRED buffer; the caller's view is detached.
+// All byte-stream transfers are to fixed length (spec
+// TransferArrayBuffer), so a source cannot shrink a buffer we hold.
 function validateAndTransferView(view: ArrayBufferView): ByteQueueEntry {
   if (!isArrayBufferView(view)) {
     throw new TypeError('chunk must be an ArrayBufferView');
   }
-  const info = getViewInfo(view);
+  const info = getUnsharedViewInfo(view, 'chunk');
   if (info.byteLength === 0) {
     throw new TypeError('chunk must have a non-zero byteLength');
   }
@@ -1330,7 +1343,7 @@ function validateAndTransferView(view: ArrayBufferView): ByteQueueEntry {
     );
   }
   return {
-    buffer: ArrayBufferPrototypeTransfer(info.buffer),
+    buffer: ArrayBufferPrototypeTransferToFixedLength(info.buffer),
     byteOffset: info.byteOffset,
     byteLength: info.byteLength,
   };
@@ -1924,7 +1937,7 @@ class ReadableStreamBYOBRequest implements ReadableStreamBYOBRequestType {
       throw new TypeError('view must be an ArrayBufferView');
     }
     // Spec step 2: detached buffers are TypeError, not RangeError.
-    const info = getViewInfo(view);
+    const info = getUnsharedViewInfo(view, 'view');
     if (ArrayBufferPrototypeDetachedGet(info.buffer)) {
       throw new TypeError("The view's buffer has been detached");
     }
@@ -2241,7 +2254,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       if (head !== undefined) {
         // Spec step 8.4: transfer the head descriptor's buffer so that
         // old captured views are detached.
-        head.buffer = ArrayBufferPrototypeTransfer(head.buffer);
+        head.buffer = ArrayBufferPrototypeTransferToFixedLength(head.buffer);
       }
       // Spec step 8.5: if the head pending pull-into has readerType 'none'
       // (leftover from releaseLock), drain it before adding the new chunk.
@@ -2384,7 +2397,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     // the reader's result (see PullIntoDescriptor.settledAtEndOfData), so
     // it is left alone: the commit below has nothing left to resolve.
     if (!head.settledAtEndOfData) {
-      head.buffer = ArrayBufferPrototypeTransfer(head.buffer);
+      head.buffer = ArrayBufferPrototypeTransferToFixedLength(head.buffer);
     }
     this.#invalidateByobRequest();
     if (state === 'closed') {
@@ -2467,7 +2480,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     // owns the delivered buffer, so the replacement view's buffer is not
     // adopted in its place.
     if (!head.settledAtEndOfData) {
-      head.buffer = ArrayBufferPrototypeTransfer(info.buffer);
+      head.buffer = ArrayBufferPrototypeTransferToFixedLength(info.buffer);
     }
     this.#invalidateByobRequest();
     if (state === 'closed') {

@@ -66,7 +66,7 @@ import type {
 const {
   ArrayBuffer,
   ArrayBufferPrototypeByteLengthGet,
-  ArrayBufferPrototypeTransfer,
+  ArrayBufferPrototypeTransferToFixedLength,
   ArrayPrototypePush,
   FinalizationRegistry,
   FinalizationRegistryPrototypeRegister,
@@ -1398,7 +1398,7 @@ class ByteStreamCursor
       } else {
         // assert: desc.bytesFilled % desc.elementSize === 0 (fractional
         // fills errored the stream before settlement could be scheduled)
-        desc.buffer = ArrayBufferPrototypeTransfer(desc.buffer);
+        desc.buffer = ArrayBufferPrototypeTransferToFixedLength(desc.buffer);
         const view = this.#convert(desc);
         desc.readerType = 'none';
         desc.settledAtEndOfData = true;
