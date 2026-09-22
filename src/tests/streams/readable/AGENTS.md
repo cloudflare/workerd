@@ -46,7 +46,9 @@ desiredSize lifecycle (1 → 0 close, null error, 0 cancel) and
 enqueue-skips-queue-with-pending-read; cancel-with-pending-pull; cancel
 reason identity + once; locked-stream cancel rejects without running the
 hook; tee error propagation identity to both branches, tee pull-per-read
-shape, tee after partial read; the tee-reentrancy crash regressions;
+shape, tee backpressure following the slowest branch (a push source
+stalls both branches on an idle one; the spec's per-branch queues would
+not), tee after partial read; the tee-reentrancy crash regressions;
 from() cancel plumbing identity through return(); async-iterator
 protocol interleavings (return/next no-await; the WebIDL
 ongoing-promise shapes are #22); chunks held BY REFERENCE
@@ -90,7 +92,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `cancel.js` | reason identity, locked-cancel, hook rejection identity, queue discard |
 | `bad-strategies.js` | ledger #8, #9, size-not-function |
 | `queue-math.js` | ledger #10 (WPT float shapes; cpp bounded observables only) |
-| `tee.js` | migrated edge cases + error propagation + cancel composite (#11) + pull-per-read |
+| `tee.js` | migrated edge cases + error propagation + cancel composite (#11) + pull-per-read + slowest-branch backpressure |
 | `tee-reentrancy.js` | the three C++ push-loop crash regressions (from api/streams/streams-test.js) |
 | `from.js` | 11 migrated + fromString (#12) + return validation messages |
 | `async-iteration.js` | 7 migrated + no-await interleavings + proto shape (#13) + ongoing-promise interleavings (#22) |
