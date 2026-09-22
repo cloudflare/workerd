@@ -567,8 +567,8 @@ export const stringDecoderHacking = {
     );
 
     {
-      // The native decoder uses byte-sized counters. A forged UTF-16 state
-      // with no missing byte must wrap rather than panic while flushing.
+      // The decoder state uses byte-sized counters. Flushing a forged UTF-16
+      // state with no missing byte wraps the counter instead of failing.
       const sd = new StringDecoder('utf16le');
       const sym = Object.getOwnPropertySymbols(sd)[0];
       sd[sym][4] = 0;

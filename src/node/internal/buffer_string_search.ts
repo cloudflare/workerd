@@ -138,6 +138,11 @@ function findFirstCharacter(
   //             max_n - index)
   const regionStart = pattern.length() - 1;
   const regionEnd = regionStart + (maxN - index);
+  // Unlike memrchr, lastIndexOf treats a negative index as relative to the
+  // end, so an empty region needs an explicit check.
+  if (regionEnd <= regionStart) {
+    return subjLen;
+  }
   const rawPos = start.lastIndexOf(patternFirstChar, regionEnd - 1);
   if (rawPos === -1 || rawPos < regionStart) {
     return subjLen;

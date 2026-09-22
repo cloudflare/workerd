@@ -117,6 +117,22 @@ fn write_flags(flags: u8) -> jsg::Result<v8::WriteFlags> {
     })
 }
 
+/// Write flags for the primitives that pass V8 an exact element count. V8
+/// writes a null terminator after that count, which would run past `dest`, so
+/// null termination is only accepted by `write_utf8`.
+fn counted_write_flags(flags: u8) -> jsg::Result<v8::WriteFlags> {
+    let flags = write_flags(flags)?;
+    jsg_require!(
+        !matches!(
+            flags,
+            v8::WriteFlags::NullTerminate | v8::WriteFlags::NullTerminateAndReplaceInvalidUtf8
+        ),
+        TypeError,
+        "Null termination is only supported by writeUtf8"
+    );
+    Ok(flags)
+}
+
 fn string_length(string: &v8::Local<v8::String>) -> usize {
     usize::try_from(string.length()).unwrap_or_default()
 }
@@ -188,7 +204,7 @@ impl BufferNative {
         mut dest: v8::Local<v8::Uint8Array>,
         flags: u8,
     ) -> jsg::Result<jsg::Number> {
-        let flags = write_flags(flags)?;
+        let flags = counted_write_flags(flags)?;
         if dest.is_empty() {
             return Ok(usize_to_number(0));
         }
@@ -236,7 +252,7 @@ impl BufferNative {
         mut dest: v8::Local<v8::Uint8Array>,
         flags: u8,
     ) -> jsg::Result<jsg::Number> {
-        let flags = write_flags(flags)?;
+        let flags = counted_write_flags(flags)?;
         let capacity = dest.len() / 2;
         if capacity == 0 {
             return Ok(usize_to_number(0));
