@@ -5,13 +5,23 @@
     "formatter": "clang-format"
   },
   {
+    "directory": "tools",
+    "globs": ["*.c++", "*.h"],
+    "formatter": "clang-format"
+  },
+  {
     "directory": "src",
-    "globs": ["*.js", "*.ts", "*.cjs", "*.ejs", "*.mjs", "*.json"],
+    "globs": ["*.js", "*.ts", "*.cjs", "*.ejs", "*.mjs"],
     "formatter": "prettier"
   },
   {
     "directory": "fuzzilli",
     "globs": ["*.js"],
+    "formatter": "prettier"
+  },
+  {
+    "directory": "src",
+    "globs": ["*.json", "*.jsonc"],
     "formatter": "prettier"
   },
   {
