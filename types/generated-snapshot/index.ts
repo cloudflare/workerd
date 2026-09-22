@@ -11712,6 +11712,10 @@ export interface Ai_Cf_Moonshotai_Kimi_K2_7_Code_ChatTemplateKwargs extends Chat
   enable_thinking?: boolean;
 }
 export interface Ai_Cf_Moonshotai_Kimi_K2_7_Code_ChatInput extends ChatCompletionsInput {
+  /**
+   * This model has no reasoning effort levels. Reasoning is always enabled.
+   */
+  reasoning_effort?: AiReasoningEffortHint | null;
   chat_template_kwargs?: Ai_Cf_Moonshotai_Kimi_K2_7_Code_ChatTemplateKwargs;
 }
 export declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code {

@@ -46,12 +46,17 @@ const gptOss: Equal<
 // Toggle-only models suggest no effort levels.
 const glm47: Equal<ChatEffort<'@cf/zai-org/glm-4.7-flash'>, never> = true;
 const gemma: Equal<ChatEffort<'@cf/google/gemma-4-26b-a4b-it'>, never> = true;
+// So do models whose metadata lists no efforts, even if reasoning is always on.
+const kimiCode: Equal<
+  ChatEffort<'@cf/moonshotai/kimi-k2.7-code'>,
+  never
+> = true;
 // Models without metadata keep the shared suggestions.
 const shared: Equal<
   ChatEffort<'@cf/nvidia/nemotron-3-120b-a12b'>,
   'low' | 'medium' | 'high'
 > = true;
-void [glm52, qwen, gptOss, glm47, gemma, shared];
+void [glm52, qwen, gptOss, glm47, gemma, kimiCode, shared];
 
 // Values outside the suggestions still type-check.
 void ai.run('@cf/qwen/qwen3.8-27b', { messages, reasoning_effort: 'high' });
