@@ -76,16 +76,7 @@ export default {
       'ReadableStream teeing with byte source: respond() and close() while both branches are pulling',
     ],
   },
-  'readable-byte-streams/templated.any.js': {
-    comment:
-      'The read resolves done with an empty view (spec, Chromium, Node). ' +
-      "The test expects value undefined; upstream testharness's " +
-      'assert_object_equals passes an empty view vacuously, while ours ' +
-      'uses deepStrictEqual.',
-    expectedFailures: [
-      'ReadableStream with byte source (empty) BYOB reader: canceling via the reader should cause the reader to act closed',
-    ],
-  },
+  'readable-byte-streams/templated.any.js': {},
 
   'readable-streams/async-iterator.any.js': {},
   'readable-streams/bad-strategies.any.js': {},

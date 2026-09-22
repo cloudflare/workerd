@@ -275,7 +275,6 @@ export default {
       'ReadableStream teeing with byte source: failing to cancel the original stream should cause cancel() to reject on branches',
       'ReadableStream teeing with byte source: canceling branch1 should not impact branch2',
       'ReadableStream teeing with byte source: canceling branch2 should not impact branch1',
-      'ReadableStream teeing with byte source: canceling both branches in sequence with delay',
       'ReadableStream teeing with byte source: failing to cancel when canceling both branches in sequence with delay',
       'ReadableStream teeing with byte source: enqueue() and close() while both branches are pulling',
       'ReadableStream teeing with byte source: stops pulling when original stream errors while both branches are reading',
@@ -287,15 +286,7 @@ export default {
       'ReadableStream teeing with byte source: read from branch2 with default reader, then close while branch1 has pending BYOB read',
     ],
   },
-  'readable-byte-streams/templated.any.js': {
-    comment:
-      'The read resolves done with an empty view (spec). The test expects ' +
-      "value undefined; upstream testharness's assert_object_equals " +
-      'passes an empty view vacuously, while ours uses deepStrictEqual.',
-    expectedFailures: [
-      'ReadableStream with byte source (empty) BYOB reader: canceling via the reader should cause the reader to act closed',
-    ],
-  },
+  'readable-byte-streams/templated.any.js': {},
 
   'readable-streams/async-iterator.any.js': {
     comment: 'To be investigated',
