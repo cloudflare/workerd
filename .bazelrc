@@ -535,6 +535,11 @@ build:coverage --experimental_use_llvm_covmap
 # experimental_generate_llvm_lcov tells collect_cc_coverage to use llvm-cov export to generate LCOV
 # format instead of just outputting raw profdata. LLVM_COV specifies the llvm-cov binary to use.
 build:coverage --experimental_generate_llvm_lcov
+# C++ tests get these from the C++ toolchain. A test that only runs an instrumented binary (every
+# wd_test runs workerd) does not, and without them the collector skips the binary's profile.
+build:coverage --test_env=GENERATE_LLVM_LCOV=1
+build:coverage --test_env=LLVM_COV=llvm-cov
+build:coverage --test_env=LLVM_PROFDATA=llvm-profdata
 # Ensure that we fetch coverage data from remote cache
 build:coverage --experimental_fetch_all_coverage_outputs
 build:coverage --experimental_split_coverage_postprocessing

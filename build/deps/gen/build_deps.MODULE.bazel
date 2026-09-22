@@ -105,6 +105,13 @@ bazel_dep(name = "rules_python", version = "2.3.3")
 
 # rules_rust
 bazel_dep(name = "rules_rust", version = "0.74.0")
+single_version_override(
+    module_name = "rules_rust",
+    patch_strip = 1,
+    patches = [
+        "//:patches/rules_rust/0001-Propagate-coverage-info-through-link_deps.patch",
+    ],
+)
 
 # rules_shell
 bazel_dep(name = "rules_shell", version = "0.8.0")
