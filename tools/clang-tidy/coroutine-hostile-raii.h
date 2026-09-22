@@ -18,10 +18,9 @@
 namespace workerd::clang_tidy {
 
 // Detects hostile RAII objects that persist across coroutine suspension.
-class CoroutineHostileRAIICheck : public clang::tidy::ClangTidyCheck {
-public:
-  CoroutineHostileRAIICheck(clang::StringRef Name,
-                            clang::tidy::ClangTidyContext *Context);
+class CoroutineHostileRAIICheck: public clang::tidy::ClangTidyCheck {
+ public:
+  CoroutineHostileRAIICheck(clang::StringRef Name, clang::tidy::ClangTidyContext *Context);
 
   bool isLanguageVersionSupported(const clang::LangOptions &LangOpts) const override {
     return LangOpts.CPlusPlus20;
@@ -29,17 +28,16 @@ public:
 
   void registerMatchers(clang::ast_matchers::MatchFinder *Finder) override;
   void storeOptions(clang::tidy::ClangTidyOptions::OptionMap &Opts) override;
-  void
-  check(const clang::ast_matchers::MatchFinder::MatchResult &Result) override;
+  void check(const clang::ast_matchers::MatchFinder::MatchResult &Result) override;
 
   std::optional<clang::TraversalKind> getCheckTraversalKind() const override {
     return clang::TK_AsIs;
   }
 
-private:
+ private:
   std::vector<clang::StringRef> RAIITypesList;
   std::vector<clang::StringRef> AllowedAwaitablesList;
   std::vector<clang::StringRef> AllowedCallees;
 };
 
-} // namespace workerd::clang_tidy
+}  // namespace workerd::clang_tidy

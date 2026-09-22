@@ -29,8 +29,7 @@ namespace {
 
 using clang::ast_matchers::internal::BoundNodesTreeBuilder;
 
-AST_MATCHER_P(Stmt, forEachPrevStmt,
-    clang::ast_matchers::internal::Matcher<Stmt>, InnerMatcher) {
+AST_MATCHER_P(Stmt, forEachPrevStmt, clang::ast_matchers::internal::Matcher<Stmt>, InnerMatcher) {
   DynTypedNode P;
   bool IsHostile = false;
   for (const Stmt *Child = &Node; Child; Child = P.get<Stmt>()) {
@@ -43,7 +42,7 @@ AST_MATCHER_P(Stmt, forEachPrevStmt,
     if (PCS == nullptr) {
       continue;
     }
-    for (const Stmt *Sibling : PCS->children()) {
+    for (const Stmt *Sibling: PCS->children()) {
       if (Sibling == Child) {
         break;
       }
@@ -57,8 +56,7 @@ AST_MATCHER_P(Stmt, forEachPrevStmt,
   return IsHostile;
 }
 
-AST_MATCHER_P(CoawaitExpr, awaitable,
-    clang::ast_matchers::internal::Matcher<Expr>, InnerMatcher) {
+AST_MATCHER_P(CoawaitExpr, awaitable, clang::ast_matchers::internal::Matcher<Expr>, InnerMatcher) {
   if (const Expr *E = Node.getOperand()) {
     return InnerMatcher.matches(*E, Finder, Builder);
   }
@@ -74,36 +72,31 @@ auto functionWithNameIn(const std::vector<StringRef> &Names) {
   return anyOf(expr(cxxBindTemporaryExpr(has(Call))), expr(Call));
 }
 
-} // namespace
+}  // namespace
 
-CoroutineHostileRAIICheck::CoroutineHostileRAIICheck(
-    StringRef Name, ClangTidyContext *Context)
+CoroutineHostileRAIICheck::CoroutineHostileRAIICheck(StringRef Name, ClangTidyContext *Context)
     : ClangTidyCheck(Name, Context),
       RAIITypesList(utils::options::parseStringList(
           Options.get("RAIITypesList", "std::lock_guard;std::scoped_lock"))),
-      AllowedAwaitablesList(utils::options::parseStringList(
-          Options.get("AllowedAwaitablesList", ""))),
-      AllowedCallees(utils::options::parseStringList(
-          Options.get("AllowedCallees", ""))) {}
+      AllowedAwaitablesList(
+          utils::options::parseStringList(Options.get("AllowedAwaitablesList", ""))),
+      AllowedCallees(utils::options::parseStringList(Options.get("AllowedCallees", ""))) {}
 
 void CoroutineHostileRAIICheck::registerMatchers(MatchFinder *Finder) {
   auto ScopedLockable =
-      varDecl(hasType(hasCanonicalType(
-                  hasDeclaration(hasAttr(attr::Kind::ScopedLockable)))))
+      varDecl(hasType(hasCanonicalType(hasDeclaration(hasAttr(attr::Kind::ScopedLockable)))))
           .bind("scoped-lockable");
   auto OtherRAII = varDecl(typeWithNameIn(RAIITypesList)).bind("raii");
-  auto AllowedSuspend = awaitable(anyOf(typeWithNameIn(AllowedAwaitablesList),
-      functionWithNameIn(AllowedCallees)));
+  auto AllowedSuspend =
+      awaitable(anyOf(typeWithNameIn(AllowedAwaitablesList), functionWithNameIn(AllowedCallees)));
   Finder->addMatcher(
       expr(anyOf(coawaitExpr(unless(AllowedSuspend)), coyieldExpr()),
-          forEachPrevStmt(
-              declStmt(forEach(varDecl(anyOf(ScopedLockable, OtherRAII))))))
+          forEachPrevStmt(declStmt(forEach(varDecl(anyOf(ScopedLockable, OtherRAII))))))
           .bind("suspension"),
       this);
 }
 
-void CoroutineHostileRAIICheck::check(
-    const MatchFinder::MatchResult &Result) {
+void CoroutineHostileRAIICheck::check(const MatchFinder::MatchResult &Result) {
   if (const auto *VD = Result.Nodes.getNodeAs<VarDecl>("scoped-lockable")) {
     diag(VD->getLocation(),
         "%0 holds a lock across a suspension point of coroutine and could be "
@@ -111,23 +104,18 @@ void CoroutineHostileRAIICheck::check(
         << VD;
   }
   if (const auto *VD = Result.Nodes.getNodeAs<VarDecl>("raii")) {
-    diag(VD->getLocation(), "%0 persists across a suspension point of coroutine")
-        << VD;
+    diag(VD->getLocation(), "%0 persists across a suspension point of coroutine") << VD;
   }
   if (const auto *Suspension = Result.Nodes.getNodeAs<Expr>("suspension")) {
-    diag(Suspension->getBeginLoc(), "suspension point is here",
-        DiagnosticIDs::Note);
+    diag(Suspension->getBeginLoc(), "suspension point is here", DiagnosticIDs::Note);
   }
 }
 
-void CoroutineHostileRAIICheck::storeOptions(
-    ClangTidyOptions::OptionMap &Opts) {
-  Options.store(Opts, "RAIITypesList",
-      utils::options::serializeStringList(RAIITypesList));
-  Options.store(Opts, "AllowedAwaitablesList",
-      utils::options::serializeStringList(AllowedAwaitablesList));
-  Options.store(Opts, "AllowedCallees",
-      utils::options::serializeStringList(AllowedCallees));
+void CoroutineHostileRAIICheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
+  Options.store(Opts, "RAIITypesList", utils::options::serializeStringList(RAIITypesList));
+  Options.store(
+      Opts, "AllowedAwaitablesList", utils::options::serializeStringList(AllowedAwaitablesList));
+  Options.store(Opts, "AllowedCallees", utils::options::serializeStringList(AllowedCallees));
 }
 
-} // namespace workerd::clang_tidy
+}  // namespace workerd::clang_tidy
