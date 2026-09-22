@@ -28,7 +28,7 @@ Checks: >
   cppcoreguidelines-prefer-member-initializer,
   google-readability-casting,
   misc-confusable-identifiers,
-  misc-coroutine-hostile-raii,
+  workerd-coroutine-hostile-raii,
   misc-header-include-cycle,
   misc-redundant-expression,
   misc-throw-by-value-catch-by-reference,
@@ -93,7 +93,9 @@ WarningsAsErrors: '*'
 HeaderFilterRegex: '.*src/workerd/.*'
 
 CheckOptions:
-  - key: misc-coroutine-hostile-raii.RAIITypesList
+  - key: workerd-coroutine-hostile-raii.AllowedAwaitablesList
+    value: "kj::CurrentInvocationConstant;workerd::api::BeginDeferredProxyingConstant"
+  - key: workerd-coroutine-hostile-raii.RAIITypesList
     value: "kj::UnwindDetector"
   # JSG has very entrenched include cycles
   - key: misc-header-include-cycle.IgnoredFilesList

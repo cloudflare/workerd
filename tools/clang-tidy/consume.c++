@@ -23,8 +23,7 @@ bool hasConsumeAnnotation(const clang::Decl* decl) {
   return false;
 }
 
-bool methodRequiresConsumeImpl(
-    const clang::CXXMethodDecl* method,
+bool methodRequiresConsumeImpl(const clang::CXXMethodDecl* method,
     llvm::DenseSet<const clang::CXXMethodDecl*>& visited,
     llvm::DenseMap<const clang::CXXMethodDecl*, bool>& cache) {
   method = method->getCanonicalDecl();
@@ -56,10 +55,8 @@ bool methodRequiresConsumeImpl(
 void ConsumeCheck::registerMatchers(clang::ast_matchers::MatchFinder* Finder) {
   using namespace clang::ast_matchers;
 
-  auto kjPtrReceiver = expr(anyOf(
-      hasType(cxxRecordDecl(hasName("::kj::Ptr"))),
-      cxxOperatorCallExpr(
-          hasOverloadedOperatorName("->"),
+  auto kjPtrReceiver = expr(anyOf(hasType(cxxRecordDecl(hasName("::kj::Ptr"))),
+      cxxOperatorCallExpr(hasOverloadedOperatorName("->"),
           callee(cxxMethodDecl(ofClass(cxxRecordDecl(hasName("::kj::Ptr"))))))));
 
   Finder->addMatcher(
@@ -80,8 +77,7 @@ bool ConsumeCheck::methodRequiresConsume(const clang::CXXMethodDecl* method) {
   return methodRequiresConsumeImpl(method, visited, methodRequiresConsumeCache);
 }
 
-void ConsumeCheck::check(
-    const clang::ast_matchers::MatchFinder::MatchResult& Result) {
+void ConsumeCheck::check(const clang::ast_matchers::MatchFinder::MatchResult& Result) {
   const auto* call = Result.Nodes.getNodeAs<clang::CXXMemberCallExpr>("call");
   const auto* method = Result.Nodes.getNodeAs<clang::CXXMethodDecl>("method");
   if (call == nullptr || method == nullptr) return;
