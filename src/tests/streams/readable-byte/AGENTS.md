@@ -113,7 +113,7 @@ named suite test pins directly, differing only in incidental asserts.
 | --- | --- |
 | `construction.js` | ledger #1, #2, #4; byte hwm default 0 |
 | `pull-timing.js` | ledger #3; pull-throw seeds |
-| `controller.js` | ledger #5, #7, #21, #22, #23; enqueue-discards-request; read-after-close; detach-at-call |
+| `controller.js` | ledger #5, #7, #21, #22, #23; enqueue-discards-request; read-after-close and read-after-cancel; detach-at-call |
 | `byob-reader.js` | ledger #20; view-type matrix + offsets + auto-allocate sizing (migrated streams-byob-edge-cases) + mismatched sizes/types, subarray, multi-pending-reads, byobreaderRegression (migrated streams-js-test) |
 | `respond.js` | ledger #6, #8, #15, #16; all 31 streams-respond-test tests (respond/respondWithNewView/pumps/cancel races/UAF shapes) + js-test respond family |
 | `release-relock.js` | ledger #9, #10; the WPT releaseLock→second-reader cluster; release with two pending reads or a partially filled head |

@@ -288,7 +288,10 @@ export default {
     ],
   },
   'readable-byte-streams/templated.any.js': {
-    comment: 'To be investigated',
+    comment:
+      'The read resolves done with an empty view (spec). The test expects ' +
+      "value undefined; upstream testharness's assert_object_equals " +
+      'passes an empty view vacuously, while ours uses deepStrictEqual.',
     expectedFailures: [
       'ReadableStream with byte source (empty) BYOB reader: canceling via the reader should cause the reader to act closed',
     ],
