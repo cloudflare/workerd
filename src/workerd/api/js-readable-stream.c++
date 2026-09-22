@@ -1473,17 +1473,28 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
       atLeast = kj::max(static_cast<size_t>(1), static_cast<size_t>(value));
     }
   }
+  // The read view's element size: every respond must cover whole elements. atLeast and
+  // the view size are multiples of it.
+  size_t elementSize = 1;
+  KJ_IF_SOME(num, JSG_TRY_CAST(byobRequest.get(js, "elementSize"_kj), JsNumber)) {
+    KJ_IF_SOME(value, num.value(js)) {
+      elementSize = kj::max(static_cast<size_t>(1), static_cast<size_t>(value));
+    }
+  }
   auto dest = view.asArrayPtr();
   JSG_REQUIRE(dest.size() > 0, TypeError, "The BYOB request view is empty or detached.");
   JSG_REQUIRE(
       atLeast <= dest.size(), TypeError, "The BYOB request's minimum exceeds its view size.");
+  JSG_REQUIRE(atLeast % elementSize == 0 && dest.size() % elementSize == 0, TypeError,
+      "The BYOB request is not element-aligned.");
 
-  // Bytes retained from an abandoned pull are redelivered first. If they alone satisfy the
-  // read's minimum, no I/O is needed at all.
+  // Bytes retained from an abandoned pull, or a partial element left by the previous one,
+  // are redelivered first. If they alone satisfy the read's minimum, no I/O is needed.
   if (stash.size() >= atLeast) {
     // Contract: check the signal synchronously immediately before delivering.
     if (!signal->getAborted(js)) {
       size_t amount = kj::min(stash.size(), dest.size());
+      amount -= amount % elementSize;
       dest.write(stash.asPtr().first(amount));
       consumeStash(amount);
       webstreams::invokeMethod(js, byobRequest, "respond"_kj, js.num(static_cast<double>(amount)));
@@ -1522,36 +1533,9 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
     KJ_IF_SOME(amount, maybeSyncAmount) {
       // Mirrors the asynchronous continuation below, minus the in-flight-only concerns:
       // no cancel(), abandonment, or view detachment can have interleaved within this
-      // synchronous frame.
-      size_t total = stashed + amount;
-      if (total == 0) {
-        // EOF with nothing to deliver: respond(0) is forbidden; close() is the EOF
-        // signal.
-        state = kj::none;
-        webstreams::invokeMethod(js, controller, "close"_kj);
-        return js.resolvedPromise();
-      }
-      KJ_ASSERT(total <= dest.size());
-      if (stashed > 0) {
-        // write() advances dest past the copied prefix, so the fresh bytes below land
-        // immediately after the redelivered stash.
-        dest.write(stash.asPtr());
-        stash.clear();
-      }
-      if (amount > 0) {
-        dest.write(scratch.first(amount));
-      }
-      bool eof = amount < minBytes;
-      if (eof) {
-        // The source delivered fewer than minBytes: EOF (KJ semantics). Settle our own
-        // state before making the JS calls below.
-        state = kj::none;
-      }
-      webstreams::invokeMethod(js, byobRequest, "respond"_kj, js.num(static_cast<double>(total)));
-      if (eof) {
-        // Fused close-commit, as in the asynchronous continuation below.
-        webstreams::invokeMethod(js, controller, "close"_kj);
-      }
+      // synchronous frame. Fewer than minBytes is EOF (KJ semantics).
+      respondByob(js, controller, byobRequest, dest, scratch.first(amount), Eof(amount < minBytes),
+          elementSize);
       return js.resolvedPromise();
     }
   }
@@ -1562,7 +1546,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
       .awaitIo(js, active.source->tryRead(scratch.begin(), minBytes, maxBytes),
           [self = JSG_THIS, controller = controller.addRef(js),
               byobRequest = byobRequest.addRef(js), view = view.addRef(js), signal = kj::mv(signal),
-              minBytes](jsg::Lock& js, size_t amount) mutable {
+              minBytes, elementSize](jsg::Lock& js, size_t amount) mutable {
     self->pullInFlight = false;
     if (self->pendingCancel) {
       // cancel() arrived while the read was in flight: complete the deferred teardown and
@@ -1578,51 +1562,68 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
       self->stash.addAll(data);
       return;
     }
-    size_t stashed = self->stash.size();
-    size_t total = stashed + amount;
-    if (total == 0) {
-      // EOF with nothing to deliver: respond(0) is forbidden; close() is the EOF signal.
-      self->state = kj::none;
-      webstreams::invokeMethod(js, controller.getHandle(js), "close"_kj);
-      return;
-    }
+    size_t total = self->stash.size() + amount;
     auto dest = view.getHandle(js).asArrayPtr();
-    if (dest.size() < total) {
+    if (total > 0 && dest.size() < total) {
       // The view was detached while the read was in flight. Treat the read as abandoned:
       // retain the bytes for the next consumer.
       self->stash.addAll(data);
       return;
     }
-    if (stashed > 0) {
-      // write() advances dest past the copied prefix, so the fresh bytes below land
-      // immediately after the redelivered stash.
-      dest.write(self->stash.asPtr());
-      self->stash.clear();
-    }
-    if (amount > 0) {
-      dest.write(data);
-    }
-    bool eof = amount < minBytes;
-    if (eof) {
-      // The source delivered fewer than minBytes: EOF (KJ semantics). Settle our own
-      // state before making the JS calls below.
-      self->state = kj::none;
-    }
-    webstreams::invokeMethod(
-        js, byobRequest.getHandle(js), "respond"_kj, js.num(static_cast<double>(total)));
-    if (eof) {
-      // Deliver the partial bytes, then explicitly signal EOF in the same pull turn.
-      // (The under-delivered respond() above already implies closure to the conduit,
-      // which tolerates this close as a no-op; the explicit close keeps the EOF signal
-      // unambiguous rather than relying on that inference.)
-      webstreams::invokeMethod(js, controller.getHandle(js), "close"_kj);
-    }
+    // Fewer than minBytes is EOF (KJ semantics).
+    self->respondByob(js, controller.getHandle(js), byobRequest.getHandle(js), dest, data,
+        Eof(amount < minBytes), elementSize);
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
     self->pullInFlight = false;
     self->pendingCancel = false;
     self->state = kj::none;
     js.throwException(kj::mv(exception));
   });
+}
+
+void ReadableStreamNativeSource::respondByob(jsg::Lock& js,
+    jsg::JsObject controller,
+    jsg::JsObject byobRequest,
+    kj::ArrayPtr<kj::byte> dest,
+    kj::ArrayPtr<const kj::byte> data,
+    Eof eof,
+    size_t elementSize) {
+  size_t stashed = stash.size();
+  size_t total = stashed + data.size();
+  size_t deliver = total;
+  if (eof) {
+    // Settle our own state before making the JS calls below.
+    state = kj::none;
+    if (total == 0) {
+      // Nothing to deliver: respond(0) is forbidden; close() is the EOF signal.
+      webstreams::invokeMethod(js, controller, "close"_kj);
+      return;
+    }
+    if (total % elementSize != 0) {
+      stash.clear();
+      JSG_FAIL_REQUIRE(TypeError, "Insufficient bytes to fill elements in the given view");
+    }
+  } else {
+    // Not EOF, so total >= the read's minimum, a whole number of elements larger than the
+    // stash: the partial element lies within `data`.
+    deliver -= total % elementSize;
+  }
+  KJ_ASSERT(deliver <= dest.size() && deliver >= stashed);
+  auto fresh = data.first(deliver - stashed);
+  // write() advances dest past the copied prefix, so the fresh bytes land immediately
+  // after the redelivered stash.
+  dest.write(stash.asPtr());
+  dest.write(fresh);
+  stash.clear();
+  stash.addAll(data.slice(fresh.size()));
+  webstreams::invokeMethod(js, byobRequest, "respond"_kj, js.num(static_cast<double>(deliver)));
+  if (eof) {
+    // Deliver the partial bytes, then explicitly signal EOF in the same pull turn. (The
+    // under-delivered respond() above already implies closure to the conduit, which
+    // tolerates this close as a no-op; the explicit close keeps the EOF signal unambiguous
+    // rather than relying on that inference.)
+    webstreams::invokeMethod(js, controller, "close"_kj);
+  }
 }
 
 void ReadableStreamNativeSource::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) {
@@ -1772,9 +1773,10 @@ void ReadableStreamNativeSource::consumeStash(size_t bytes) {
   if (bytes >= stash.size()) {
     stash.clear();
   } else {
-    // Partial consumption (rare: a BYOB view smaller than the current stash). Rebuild
-    // from the remainder rather than shifting in place: ArrayPtr::copyFrom() forbids
-    // overlapping ranges.
+    // Partial consumption: a BYOB view smaller than the current stash, or a stash ending in
+    // a partial element that the read's whole-element delivery leaves behind. Rebuild from
+    // the remainder rather than shifting in place: ArrayPtr::copyFrom() forbids overlapping
+    // ranges.
     kj::Vector<kj::byte> remainder;
     remainder.addAll(stash.asPtr().slice(bytes, stash.size()));
     stash = kj::mv(remainder);

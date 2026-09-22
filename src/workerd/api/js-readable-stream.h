@@ -26,6 +26,7 @@ class URLSearchParams;
 
 WD_STRONG_BOOL(EndStream);
 WD_STRONG_BOOL(IgnoreDisturbed);
+WD_STRONG_BOOL(Eof);
 
 // An abstraction of a ReadableStream, backed by either a C++ implemented ReadableStream
 // (defined in src/workerd/api/streams/*) or a TypeScript implemented ReadableStream (defined
@@ -434,6 +435,18 @@ class ReadableStreamNativeSource final: public jsg::Object {
       jsg::Ref<AbortSignal> signal,
       Active& active);
 
+  // Completes a BYOB pull whose read produced `data` (following the stash): writes the
+  // whole elements into `dest` and responds, keeping a trailing partial element in the
+  // stash for the next pull. At EOF the partial element can never complete, so the pull
+  // throws a TypeError instead.
+  void respondByob(jsg::Lock& js,
+      jsg::JsObject controller,
+      jsg::JsObject byobRequest,
+      kj::ArrayPtr<kj::byte> dest,
+      kj::ArrayPtr<const kj::byte> data,
+      Eof eof,
+      size_t elementSize);
+
   // Releases the underlying source for a C++-driven pump. Any bytes already consumed from
   // the source but never delivered (the stash -- only reachable when a tee-seeded branch is
   // extracted before being read) are folded in ahead of it as a prefix, so the returned
@@ -462,9 +475,10 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // re-pulls an unsatisfied minimum, so a single read must be able to satisfy it).
   kj::Array<kj::byte> scratch;
 
-  // Bytes that were read by a pull whose consumer abandoned it (per-pull signal aborted)
-  // before delivery. Redelivered by the next pull, in order, before any new data, so no
-  // bytes are lost across a reader release. Multiple abandoned pulls may accumulate.
+  // Bytes read but not delivered: those of a pull whose consumer abandoned it (per-pull
+  // signal aborted), or the partial element trailing a BYOB read (see respondByob()).
+  // Redelivered by the next pull, in order, before any new data, so no bytes are lost
+  // across a reader release. Multiple abandoned pulls may accumulate.
   kj::Vector<kj::byte> stash;
 
   // Defensive only: the TypeScript conduit guarantees at most one pull in flight (standard
