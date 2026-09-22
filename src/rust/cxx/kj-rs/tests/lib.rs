@@ -124,6 +124,7 @@ pub mod ffi {
         fn return_maybe_rc_some() -> KjMaybe<KjRc<OpaqueRefcountedClass>>;
         fn return_maybe_rc_none() -> KjMaybe<KjRc<OpaqueRefcountedClass>>;
         fn take_maybe_rc(maybe: KjMaybe<KjRc<OpaqueRefcountedClass>>);
+        fn take_maybe_rc_none(maybe: KjMaybe<KjRc<OpaqueRefcountedClass>>);
         fn maybe_rc_rust_driver();
     }
 
@@ -143,6 +144,7 @@ pub mod ffi {
 
         fn return_maybe_arc_some() -> KjMaybe<KjArc<OpaqueAtomicRefcountedClass>>;
         fn return_maybe_arc_none() -> KjMaybe<KjArc<OpaqueAtomicRefcountedClass>>;
+        fn take_maybe_arc_none(maybe: KjMaybe<KjArc<OpaqueAtomicRefcountedClass>>);
     }
 
     extern "Rust" {
