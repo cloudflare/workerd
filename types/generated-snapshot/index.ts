@@ -11871,8 +11871,8 @@ export type AiWebSearchRequest = {
   query: string;
   /** Maximum number of results. Defaults to 10 and is capped at 20. */
   limit?: number;
-  /** BYOK web-search provider configured on the gateway. */
-  provider: string;
+  /** Optional BYOK web-search provider configured on the gateway. */
+  provider?: string;
   /** Optional BYOK key alias. Defaults to `default`. */
   byokAlias?: string;
 };
