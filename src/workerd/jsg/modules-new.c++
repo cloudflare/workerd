@@ -2329,7 +2329,7 @@ kj::Own<void> ModuleRegistry::attachToIsolate(Lock& js, const CompilationObserve
     // The context holds the zygote's evaluated module graph; the registry must know those modules
     // (see SnapshotArtifact::moduleRecords) rather than compile the bundle a second time.
     registry->restoreFromSnapshot(js, js.v8Context(),
-        IsolateBase::from(js.v8Isolate).readonlySnapshotArtifact().moduleRecords);
+        IsolateBase::from(js.v8Isolate).finalizedSnapshotArtifact().moduleRecords);
   }
   return kj::mv(registry);
 }
