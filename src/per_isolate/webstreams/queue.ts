@@ -326,7 +326,10 @@ class StreamQueue<T, V = T> {
   // The controller's own cursor. Its owner is the controller's stream,
   // which the controller holds, so it cannot be orphaned while anything
   // can reach this queue; #prune skips its deref. Tee and detach remove it,
-  // and every cursor they create can be orphaned.
+  // and every cursor they create can be orphaned: a detached shell adopts
+  // the controller, but the controller's stream stays the husk, so nothing
+  // strong holds the shell. Its cursor therefore keeps the per-walk deref
+  // (the C++ bridge's extraction path, e.g. a JS stream given to Response).
   #anchor: QueueCursor<T, V> | undefined;
   #highWaterMark: number;
   #state: 'readable' | 'closed' | 'errored' = 'readable';
@@ -347,10 +350,11 @@ class StreamQueue<T, V = T> {
 
   // Drop cursors whose owning stream has been collected. Every walk starts
   // here, so a stale position never blocks reclamation or holds
-  // backpressure. #cursors is stable for the rest of the walk: its
-  // callbacks never add or remove a cursor synchronously, and a re-entrant
-  // prune (notify → #gc) finds nothing new, since a deref'd owner stays
-  // alive to the end of the job.
+  // backpressure. #cursors is stable for the rest of a walk whose callbacks
+  // run no user code (all but notify(), see #notifyAll): they never add or
+  // remove a cursor synchronously, and a re-entrant prune (notify → #gc)
+  // finds nothing new, since a deref'd owner stays alive to the end of the
+  // job.
   #prune(): void {
     const cursors = this.#cursors;
     for (let i = cursors.length - 1; i >= 0; i--) {
@@ -514,26 +518,28 @@ class StreamQueue<T, V = T> {
       // desiredSize and break the drain-then-close terminality guarantee.
       this.#prune();
       const cursors = this.#cursors;
+      const behind: QueueCursor<T, V>[] = [];
       for (let i = 0; i < cursors.length; i++) {
         const cursor = cursors[i] as QueueCursor<T, V>;
         if (cursor.position < sentinelPos) {
           cursor.addToTotalSize(entry.size);
-          if (notify) cursor.notify();
+          ArrayPrototypePush(behind, cursor);
         }
       }
+      if (notify) this.#notifyEach(behind);
     } else {
       this.#entries.push(entry);
       if (this.#state === 'readable') {
         this.#prune();
         const cursors = this.#cursors;
+        // Increment every cursor's running total BEFORE any notify(), which
+        // may immediately consume the entry (decrementing it back). The
+        // +=/-= order preserves spec-mandated IEEE 754 drift, and a branch
+        // forked inside a notify() inherits a total that counts the entry.
         for (let i = 0; i < cursors.length; i++) {
-          const cursor = cursors[i] as QueueCursor<T, V>;
-          // Increment the cursor's running total BEFORE notify(), which may
-          // immediately consume the entry (decrementing it back). The +=/-=
-          // order preserves spec-mandated IEEE 754 drift.
-          cursor.addToTotalSize(entry.size);
-          if (notify) cursor.notify();
+          (cursors[i] as QueueCursor<T, V>).addToTotalSize(entry.size);
         }
+        if (notify) this.#notifyAll();
       }
     }
   }
@@ -550,7 +556,31 @@ class StreamQueue<T, V = T> {
     if (this.#noConsumers) return;
     this.#entries.push(CLOSE_SENTINEL);
     this.#prune();
+    this.#notifyAll();
+  }
+
+  // notify() is the one walk callback that runs user code: it resolves read
+  // promises with plain { value, done } objects, whose `then` lookup invokes
+  // a patched Object.prototype.then getter synchronously, and that getter
+  // can cancel or tee a branch, removing its cursor and shifting the tail of
+  // #cursors down. A lone cursor leaves nothing to skip; with more, notify a
+  // copy: a cursor that left meanwhile has no pending reads, so its notify()
+  // is a no-op, and one that joined is a fresh branch with none.
+  #notifyAll(): void {
     const cursors = this.#cursors;
+    if (cursors.length === 1) {
+      (cursors[0] as QueueCursor<T, V>).notify();
+      return;
+    }
+    const snapshot: QueueCursor<T, V>[] = [];
+    for (let i = 0; i < cursors.length; i++) {
+      ArrayPrototypePush(snapshot, cursors[i] as QueueCursor<T, V>);
+    }
+    this.#notifyEach(snapshot);
+  }
+
+  // `cursors` must not alias #cursors (see #notifyAll).
+  #notifyEach(cursors: QueueCursor<T, V>[]): void {
     for (let i = 0; i < cursors.length; i++) {
       (cursors[i] as QueueCursor<T, V>).notify();
     }
@@ -579,6 +609,12 @@ class StreamQueue<T, V = T> {
   // target and also held weakly by the cursor. When forking (tee), the new
   // cursor's constructor receives the source cursor's position AND byteOffset
   // so the branch resumes exactly where the original left off.
+  //
+  // A cursor joins a queue that already has one only through tee or detach,
+  // which then remove the parent's. The controllers rely on that: while the
+  // source's own cursor is present it is the queue's sole consumer
+  // (#maybeCloseStream in readable.ts skips the owners walk). A new path
+  // that adds a cursor beside the source's own must revisit those checks.
   addCursor(cursor: QueueCursor<T, V>, owner: object): void {
     this.#hadCursors = true;
     ArrayPrototypePush(this.#cursors, cursor);

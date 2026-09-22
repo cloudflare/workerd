@@ -196,7 +196,13 @@ export {
   teeBranchesCollectedPullStops,
 } from 'gc';
 
-export { thenGetterFireCountOnRead } from 'then-interceptors';
+export {
+  thenGetterFireCountOnRead,
+  thenGetterCancelsBranchDuringEnqueue,
+  thenGetterCancelsBranchDuringEnqueueBacklog,
+  thenGetterCancelsBranchDuringClose,
+  thenGetterCancelsTwoBranchesDuringEnqueue,
+} from 'then-interceptors';
 
 export {
   drainingReaderSweepsQueuedBacklog,
