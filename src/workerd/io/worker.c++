@@ -1984,6 +1984,22 @@ void restoreGlobalEventHandlersFromSnapshot(
   global.restoreEventHandlersFromSnapshot(js, jsg::JsArray(data.As<v8::Value>().As<v8::Array>()));
 }
 
+void stashLazyNodeGlobalsForSnapshot(
+    jsg::Lock& js, v8::Local<v8::Context> context, api::ServiceWorkerGlobalScope& global) {
+  JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
+    context->SetEmbedderDataV2(jsg::SNAPSHOT_LAZY_NODE_GLOBALS_SLOT,
+        v8::Local<v8::Array>(global.stashLazyNodeGlobalsForSnapshot(js)));
+  });
+}
+
+void restoreLazyNodeGlobalsFromSnapshot(
+    jsg::Lock& js, v8::Local<v8::Context> context, api::ServiceWorkerGlobalScope& global) {
+  auto data = context->GetEmbedderDataV2(jsg::SNAPSHOT_LAZY_NODE_GLOBALS_SLOT);
+  if (data.IsEmpty() || !data->IsValue() || !data.As<v8::Value>()->IsArray()) return;
+  global.restoreLazyNodeGlobalsFromSnapshot(
+      js, jsg::JsArray(data.As<v8::Value>().As<v8::Array>()));
+}
+
 // The own properties of `scope` and their values, for IsolateBase::recordSnapshotBindings() to
 // tell what installing the bindings added.
 v8::Local<v8::Map> snapshotOwnProperties(jsg::Lock& js, v8::Local<v8::Object> scope) {
@@ -2156,6 +2172,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             } else if (lock.isStartingFromSnapshot()) {
               rebindRetainedBindingsFromSnapshot(js, bindingsScope);
               restoreGlobalEventHandlersFromSnapshot(js, context, **jsContext);
+              restoreLazyNodeGlobalsFromSnapshot(js, context, **jsContext);
             }
 
             // Execute script.
@@ -2334,9 +2351,10 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         scriptImpl.globals = nullptr;
         // The bootstrap's C++ state holds V8 handles; park it in the heap so CreateBlob can run
         // and a restored isolate can pick it up (per-isolate-bootstrap.h). Same for the global
-        // scope's event listeners.
+        // scope's event listeners and its cached `process` / `Buffer` values.
         stashPerIsolateBootstrapForSnapshot(lock, jsContext.getHandle(lock));
         stashGlobalEventHandlersForSnapshot(lock, jsContext.getHandle(lock), *jsContext);
+        stashLazyNodeGlobalsForSnapshot(lock, jsContext.getHandle(lock), *jsContext);
         isolateBase.prepareSnapshot(jsContext.extractContextGlobalForSnapshot());
         KJ_DASSERT(jsContext.getHandle(lock).IsEmpty(),
             "zygote context handle must be consumed by prepareSnapshot");

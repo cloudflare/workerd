@@ -91,6 +91,13 @@ constexpr int SNAPSHOT_BOOTSTRAP_STATE_SLOT = SNAPSHOT_WASM_SHIM_FACTORY_SLOT + 
 // slot (io/worker.c++).
 constexpr int SNAPSHOT_GLOBAL_EVENT_HANDLERS_SLOT = SNAPSHOT_BOOTSTRAP_STATE_SLOT + 1;
 
+// Tagged embedder-data slot in which the zygote parks the global scope's lazily resolved
+// `process` and `Buffer` values (api::ServiceWorkerGlobalScope::stashLazyNodeGlobalsForSnapshot)
+// before the blob is created. The C++ global scope caches them in jsg::JsRefs, which CreateBlob
+// refuses; a restored isolate takes them back from the slot (io/worker.c++) so that the values
+// the worker's top-level code already captured keep their identity.
+constexpr int SNAPSHOT_LAZY_NODE_GLOBALS_SLOT = SNAPSHOT_GLOBAL_EVENT_HANDLERS_SLOT + 1;
+
 inline void setAlignedPointerInEmbedderData(
     v8::Local<v8::Context> context, ContextPointerSlot slot, void* ptr) {
   // The type tag is a small integer that should be different for every pointer

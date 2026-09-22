@@ -866,6 +866,15 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   void setBuffer(jsg::Lock& js, jsg::JsValue newBuffer);
   jsg::JsValue getProcess(jsg::Lock& js);
   void setProcess(jsg::Lock& js, jsg::JsValue newProcess);
+
+  // Startup snapshots (jsg::IsolateBase::prepareSnapshot). The `process` and `Buffer` values
+  // resolved so far are cached in this C++ object as jsg::JsRefs, which CreateBlob refuses.
+  // Moves them into the heap as a [process, Buffer] pair (an unresolved value is undefined) and
+  // leaves the cache empty; restoreLazyNodeGlobalsFromSnapshot() puts them back in a restored
+  // isolate, so a value the worker's top-level code captured stays the one `globalThis.process`
+  // returns there.
+  jsg::JsArray stashLazyNodeGlobalsForSnapshot(jsg::Lock& js);
+  void restoreLazyNodeGlobalsFromSnapshot(jsg::Lock& js, const jsg::JsArray& stashed);
   jsg::Ref<Immediate> setImmediate(jsg::Lock& js,
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Arguments<jsg::Value> args);
