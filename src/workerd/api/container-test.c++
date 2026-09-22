@@ -6,6 +6,7 @@
 
 #include <workerd/api/http.h>
 #include <workerd/io/observer.h>
+#include <workerd/jsg/script.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/stream-utils.h>
@@ -168,13 +169,15 @@ class MockExecProcessHandle final: public rpc::Container::ProcessHandle::Server 
  public:
   MockExecProcessHandle(capnp::ByteStreamFactory& byteStreamFactory,
       ExecObservations& observations,
-      kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> resizeFulfiller)
+      kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> resizeFulfiller,
+      int exitCode = 0)
       : byteStreamFactory(byteStreamFactory),
         observations(observations),
-        resizeFulfiller(kj::mv(resizeFulfiller)) {}
+        resizeFulfiller(kj::mv(resizeFulfiller)),
+        exitCode(exitCode) {}
 
   kj::Promise<void> wait(WaitContext context) override {
-    context.getResults().setExitCode(0);
+    context.getResults().setExitCode(exitCode);
     return kj::READY_NOW;
   }
 
@@ -197,16 +200,27 @@ class MockExecProcessHandle final: public rpc::Container::ProcessHandle::Server 
   capnp::ByteStreamFactory& byteStreamFactory;
   ExecObservations& observations;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> resizeFulfiller;
+  int exitCode;
 };
 
-class MockExecContainerServer final: public rpc::Container::Server {
+struct MockExecOutput {
+  kj::Array<kj::byte> stdoutBytes;
+  kj::Array<kj::byte> stderrBytes;
+  int exitCode;
+};
+
+class MockExecContainerServer final: public rpc::Container::Server,
+                                     private kj::TaskSet::ErrorHandler {
  public:
   MockExecContainerServer(capnp::ByteStreamFactory& byteStreamFactory,
       ExecObservations& observations,
-      kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> resizeFulfiller)
+      kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> resizeFulfiller,
+      kj::Maybe<MockExecOutput> output = kj::none)
       : byteStreamFactory(byteStreamFactory),
         observations(observations),
-        resizeFulfiller(kj::mv(resizeFulfiller)) {}
+        resizeFulfiller(kj::mv(resizeFulfiller)),
+        output(kj::mv(output)),
+        tasks(*this) {}
 
   kj::Promise<void> monitor(MonitorContext context) override {
     return kj::NEVER_DONE;
@@ -221,17 +235,42 @@ class MockExecContainerServer final: public rpc::Container::Server {
       observations.initialRows = params.getPty().getRows();
     }
 
+    int exitCode = 0;
+    KJ_IF_SOME(output, this->output) {
+      exitCode = output.exitCode;
+      KJ_REQUIRE(context.getParams().hasStdoutWriter() && context.getParams().hasStderrWriter());
+      // exec() must return before output() can consume the pipes and unblock these writes.
+      tasks.add(
+          writeOutput(byteStreamFactory.capnpToKjExplicitEnd(context.getParams().getStdoutWriter()),
+              kj::mv(output.stdoutBytes)));
+      tasks.add(
+          writeOutput(byteStreamFactory.capnpToKjExplicitEnd(context.getParams().getStderrWriter()),
+              kj::mv(output.stderrBytes)));
+    }
+
     auto process = context.getResults().initProcess();
     process.setPid(4321);
-    process.setHandle(
-        kj::heap<MockExecProcessHandle>(byteStreamFactory, observations, kj::mv(resizeFulfiller)));
+    process.setHandle(kj::heap<MockExecProcessHandle>(
+        byteStreamFactory, observations, kj::mv(resizeFulfiller), exitCode));
     return kj::READY_NOW;
   }
 
  private:
+  static kj::Promise<void> writeOutput(
+      kj::Own<capnp::ExplicitEndOutputStream> writer, kj::Array<kj::byte> bytes) {
+    co_await writer->write(bytes);
+    co_await writer->end();
+  }
+
+  void taskFailed(kj::Exception&& exception) override {
+    KJ_FAIL_EXPECT("Mock exec output failed", exception);
+  }
+
   capnp::ByteStreamFactory& byteStreamFactory;
   ExecObservations& observations;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> resizeFulfiller;
+  kj::Maybe<MockExecOutput> output;
+  kj::TaskSet tasks;
 };
 
 struct CapturedDirectorySnapshot {
@@ -969,6 +1008,125 @@ KJ_TEST("Container::start requires mountPoint when no snapshot is given") {
   });
 
   KJ_EXPECT(captured.size() == 0);
+}
+
+void checkExecOutputSerialization(jsg::Lock& js, jsg::Ref<ExecOutput> output) {
+  auto& handler = KJ_REQUIRE_NONNULL(js.tryGetTypeHandler<jsg::Ref<ExecOutput>>());
+  auto value = jsg::JsValue(handler.wrap(js, kj::mv(output)));
+  // Exercise the serializer version and class-instance policy used by JS RPC.
+  jsg::Serializer serializer(js, {.version = 15, .treatClassInstancesAsPlainObjects = false});
+  serializer.write(js, value);
+  auto serialized = serializer.release();
+  jsg::Deserializer deserializer(js, serialized);
+  auto roundTripped = deserializer.readValue(js);
+
+  auto check = KJ_REQUIRE_NONNULL(jsg::NonModuleScript::compile(js, R"JS(
+    (output, roundTripped) => {
+      const snapshot = (value) => JSON.stringify([
+        [...new Uint8Array(value.stdout)],
+        [...new Uint8Array(value.stderr)],
+        value.exitCode,
+      ]);
+      const check = (result) => {
+        if (snapshot(result) !== snapshot(output) || result === output ||
+            Object.getPrototypeOf(result) !== Object.getPrototypeOf(output)) {
+          throw new Error("ExecOutput round trip failed");
+        }
+        if (!(result.stdout instanceof ArrayBuffer) ||
+            !(result.stderr instanceof ArrayBuffer) || result.stdout !== result.stdout ||
+            result.stderr !== result.stderr) {
+          throw new Error("ExecOutput buffers must remain stable ArrayBuffers");
+        }
+      };
+      const checkDescriptors = (value) => {
+        for (const name of ['stdout', 'stderr']) {
+          const descriptor = Object.getOwnPropertyDescriptor(value, name);
+          if (descriptor.writable || !descriptor.enumerable || !descriptor.configurable) {
+            throw new Error(`ExecOutput ${name} property attributes changed`);
+          }
+        }
+        if (Object.hasOwn(value, 'exitCode')) {
+          throw new Error("ExecOutput exitCode must remain a prototype property");
+        }
+      };
+      checkDescriptors(output);
+      checkDescriptors(roundTripped);
+      check(roundTripped);
+      check(structuredClone(output));
+      check(structuredClone(roundTripped));
+
+      new Uint8Array(output.stdout).fill(10);
+      new Uint8Array(output.stderr).fill(20);
+      const copy = structuredClone({ output, stdout: output.stdout, stderr: output.stderr });
+      check(copy.output);
+      if (copy.stdout !== copy.output.stdout || copy.stderr !== copy.output.stderr) {
+        throw new Error("ExecOutput buffer identity was lost");
+      }
+
+      Object.defineProperties(roundTripped, {
+        stdout: { value: output.stdout },
+        stderr: { value: output.stderr },
+      });
+      const sharedCopies = structuredClone([output, roundTripped]);
+      check(sharedCopies[0]);
+      check(sharedCopies[1]);
+      if (sharedCopies[0] === sharedCopies[1] ||
+          sharedCopies[0].stdout !== sharedCopies[1].stdout ||
+          sharedCopies[0].stderr !== sharedCopies[1].stderr) {
+        throw new Error("Distinct ExecOutputs must preserve shared buffers");
+      }
+
+      const expected = snapshot(output);
+      const transferred = structuredClone(output, { transfer: [output.stdout, output.stderr] });
+      if (snapshot(transferred) !== expected) {
+        throw new Error("ExecOutput buffer transfer failed");
+      }
+      try {
+        structuredClone(output);
+        throw new Error("ExecOutput with detached buffers must not be cloneable");
+      } catch (error) {
+        if (error.name !== "DataCloneError") throw error;
+      }
+    }
+  )JS"_kj,
+      "container-test.js"_kj)
+                                      .runAndReturn(js)
+                                      .tryCast<jsg::JsFunction>());
+  check.callNoReceiver(js, value, roundTripped);
+}
+
+KJ_TEST("Container::exec output is serializable") {
+  auto fixture = makeFixture();
+  for (int exitCode:
+      {0, 42, -1, static_cast<int32_t>(kj::minValue), static_cast<int32_t>(kj::maxValue)}) {
+    for (auto bytes: {"\0\x7f\x80\xff"_kjb, ""_kjb}) {
+      ExecObservations observations;
+      fixture.runInIoContext([&](const TestFixture::Environment& env) {
+        auto stderrBytes = bytes.size() == 0 ? ""_kjb : "err\0"_kjb;
+        auto container = kj::rc<Container>(
+            rpc::Container::Client(kj::heap<MockExecContainerServer>(
+                env.context.getByteStreamFactory(), observations, kj::none,
+                MockExecOutput{kj::heapArray(bytes), kj::heapArray(stderrBytes), exitCode})),
+            true);
+        auto promise =
+            container->exec(env.js, kj::arr(kj::str("/bin/sh")), kj::none)
+                .then(env.js,
+                    [](jsg::Lock& js, jsg::Ref<ExecProcess> process) {
+          return process->output(js);
+        })
+                .then(env.js,
+                    [stdoutBytes = kj::heapArray(bytes), stderrBytes = kj::heapArray(stderrBytes),
+                        exitCode](jsg::Lock& js, jsg::Ref<ExecOutput> output) {
+          KJ_EXPECT(output->getStdout(js).asArrayPtr() == stdoutBytes.asPtr());
+          KJ_EXPECT(output->getStderr(js).asArrayPtr() == stderrBytes.asPtr());
+          KJ_EXPECT(output->getExitCode() == exitCode);
+          checkExecOutputSerialization(js, kj::mv(output));
+        });
+        return env.context.awaitJs(env.js, kj::mv(promise)).attach(kj::mv(container));
+      });
+      KJ_EXPECT(observations.execCalled);
+    }
+  }
 }
 
 KJ_TEST("Container::exec forwards pty options and resize() sends a resize RPC") {

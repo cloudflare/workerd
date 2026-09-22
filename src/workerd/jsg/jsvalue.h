@@ -956,7 +956,7 @@ class JsFunction final: public JsBase<v8::Function, JsFunction> {
   // Calls the function with a null receiver and arguments.
   template <IsJsValue... Args>
   JsValue callNoReceiver(Lock& js, Args... args) const {
-    return call(js, js.null(), kj::fwd<Args...>(args...));
+    return call(js, js.null(), kj::fwd<Args>(args)...);
   }
 
   // Calls the function with the given receiver and arguments.
