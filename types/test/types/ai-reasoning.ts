@@ -82,3 +82,12 @@ void ai.run('@cf/openai/gpt-oss-20b', {
   input: 'Hello',
   service_tier: 'priority',
 });
+
+// The original Gemma class name remains available for existing code.
+const legacyGemma: Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT['inputs'] = {
+  messages,
+  reasoning_effort: 'none',
+};
+const gemmaInputs: AiModels['@cf/google/gemma-4-26b-a4b-it']['inputs'] =
+  legacyGemma;
+void gemmaInputs;
