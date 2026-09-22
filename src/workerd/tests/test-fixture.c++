@@ -13,6 +13,7 @@
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/observer.h>
 #include <workerd/io/tracer.h>
+#include <workerd/io/tracked-wasm-instance.h>
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
