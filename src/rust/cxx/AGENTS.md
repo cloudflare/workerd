@@ -37,8 +37,9 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
   `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers) and
   `kj_rs_tokio::spawn()`
 - `kj-rs-io/` — tokio-backed `kj::AsyncIoStream` / `kj::Network` / `kj::LowLevelAsyncIoProvider`
-  (the I/O providers for the tokio loop, `kj_rs_io::setupTokioAsyncIo()`), the `--watch` file
-  watcher (Rust over `notify`), and signals. C++ there is interface adaptation only; the one policy
+  (the I/O providers for the tokio loop, `kj_rs_io::setupTokioAsyncIo()`), `loopback:` addresses
+  (in-process connections for `workerd test`), the `--watch` file watcher (Rust over `notify`),
+  and signals. C++ there is interface adaptation only; the one policy
   object that stays C++ is `PeerFilter`, a wrapper over KJ's own `kj::_::NetworkFilter`, which
   Rust consults through a bridged `should_allow`
 - `tests/` and `kj-rs/tests/` — Rust and C++ bridge integration tests

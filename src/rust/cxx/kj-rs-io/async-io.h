@@ -164,16 +164,25 @@ class TokioDatagramPort final: public kj::DatagramPort {
 
 // The tokio-backed kj::Network. The address grammar is KJ's SocketAddress::parse for everything
 // workerd's configs use (net.rs, "Address grammar"). restrictPeers() returns a network sharing
-// this one's filter chain, so derived networks, addresses and receivers remain valid regardless
-// of the order the networks are destroyed in.
+// this one's filter chain and loopback namespace, so derived networks, addresses and receivers
+// remain valid regardless of the order the networks are destroyed in.
 class TokioNetwork final: public kj::Network {
  public:
   // Allow-everything root network (matches KJ's root networks).
-  TokioNetwork(): filter(kj::arc<PeerFilter>()) {}
+  TokioNetwork(): filter(kj::arc<PeerFilter>()), loopback(new_loopback_registry()) {}
   TokioNetwork(TokioNetwork &parent,
       kj::ArrayPtr<const kj::StringPtr> allow,
       kj::ArrayPtr<const kj::StringPtr> deny)
-      : filter(kj::arc<PeerFilter>(allow, deny, parent.filter.addRef())) {}
+      : filter(kj::arc<PeerFilter>(allow, deny, parent.filter.addRef())),
+        loopback(loopback_registry_clone(*parent.loopback)) {}
+
+  // Makes parseAddress() accept "loopback:<name>" addresses -- connections serviced within this
+  // process (loopback.rs) -- on this network and every network derived from it by
+  // restrictPeers(). For `workerd test`, which uses them to exercise the network stack end to
+  // end without an external socket; production configs use direct service bindings instead.
+  void enableLoopback() {
+    loopback_registry_enable(*loopback);
+  }
 
   kj::Promise<kj::Own<kj::NetworkAddress>> parseAddress(
       kj::StringPtr addr, kj::uint portHint) override;
@@ -183,6 +192,7 @@ class TokioNetwork final: public kj::Network {
 
  private:
   kj::Arc<PeerFilter> filter;
+  ::rust::Box<LoopbackRegistry> loopback;
 };
 
 // The tokio-backed kj::LowLevelAsyncIoProvider. Each wrap*Fd hands the raw handle -- a Unix fd
