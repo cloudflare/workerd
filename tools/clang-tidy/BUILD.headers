@@ -7,9 +7,8 @@ package(default_visibility = ["//visibility:public"])
 # cloudflare/workerd-tools. workerd-lint.c++ uses the C++ API directly but
 # transitively pulls in llvm-c headers (e.g. llvm-c/DataTypes.h via
 # llvm/Support/DataTypes.h), so the C-API directories are kept.
-# clang-tools-extra is narrowed to the top-level clang-tidy plugin headers
-# plus the specific utilities and checks used by workerd-lint; the other
-# per-check headers are not needed.
+# clang-tools-extra includes the plugin API, analysis utilities, and the upstream
+# checker extended by workerd-lint; other per-check headers are not needed.
 #
 # `build/` holds tablegen-generated `.inc` files (Attrs.inc,
 # DiagnosticGroups.inc, OMP.inc, etc.) and the Config headers
@@ -34,8 +33,8 @@ cc_library(
             "build/tools/clang/include/**/*.def",
             "build/tools/clang/include/**/*.inc",
             "clang-tools-extra/clang-tidy/*.h",
-            "clang-tools-extra/clang-tidy/utils/OptionsUtils.h",
             "clang-tools-extra/clang-tidy/bugprone/UseAfterMoveCheck.h",
+            "clang-tools-extra/clang-tidy/utils/*.h",
         ],
         allow_empty = True,
     ),

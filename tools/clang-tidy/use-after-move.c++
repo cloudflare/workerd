@@ -4,12 +4,14 @@
 
 #include "use-after-move.h"
 
+#include "clang-tidy/utils/OptionsUtils.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ParentMapContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/Lex/Lexer.h"
+#include "use-after-move-analysis.h"
 
 namespace workerd::clang_tidy {
 namespace {
@@ -36,22 +38,53 @@ StatementMatcher inUnevaluatedOrTemplateArgument() {
       hasAncestor(expr(hasUnevaluatedContext())));
 }
 
-// KJ_CASE_ONEOF expands to a for loop that executes at most once. The generic
-// analysis does not infer that the loop increment prevents another iteration.
-bool isInsideKjOneOfCase(const clang::Expr& expression, clang::ASTContext& context) {
-  clang::DynTypedNode node = clang::DynTypedNode::create(expression);
-  while (true) {
-    auto parents = context.getParents(node);
-    if (parents.size() != 1) return false;
-    if (const auto* statement = parents[0].get<clang::Stmt>()) {
-      auto location = statement->getBeginLoc();
-      if (location.isMacroID()) {
-        auto macro = clang::Lexer::getImmediateMacroName(
-            location, context.getSourceManager(), context.getLangOpts());
-        if (macro == "KJ_CASE_ONEOF") return true;
+bool isOneShotKjCase(const clang::ForStmt& loop, clang::ASTContext& context) {
+  auto location = loop.getForLoc();
+  if (!location.isMacroID() ||
+      clang::Lexer::getImmediateMacroName(
+          location, context.getSourceManager(), context.getLangOpts()) != "KJ_CASE_ONEOF") {
+    return false;
+  }
+
+  // Recognize the generated sentinel test and unconditional sentinel reset. A user-written loop
+  // inside the case has a different for-keyword location and must retain its back edge.
+  if (loop.getCond() == nullptr || loop.getInc() == nullptr) return false;
+  const auto* condition =
+      clang::dyn_cast<clang::DeclRefExpr>(loop.getCond()->IgnoreParenImpCasts());
+  const auto* increment = clang::dyn_cast<clang::BinaryOperator>(loop.getInc());
+  if (condition == nullptr || increment == nullptr || increment->getOpcode() != clang::BO_Assign) {
+    return false;
+  }
+  const auto* assigned =
+      clang::dyn_cast<clang::DeclRefExpr>(increment->getLHS()->IgnoreParenImpCasts());
+  return assigned != nullptr && assigned->getDecl() == condition->getDecl() &&
+      condition->getType()->isPointerType() &&
+      increment->getRHS()->isNullPointerConstant(context, clang::Expr::NPC_ValueDependentIsNotNull);
+}
+
+void normalizeKjCaseLoops(clang::CFG& cfg, clang::ASTContext& context) {
+  for (auto* block: cfg) {
+    const auto* loop = clang::dyn_cast_or_null<clang::ForStmt>(block->getLoopTarget());
+    if (loop == nullptr || !isOneShotKjCase(*loop, context) || block->succ_size() != 1) continue;
+    auto* condition = block->succ_begin()->getReachableBlock();
+    if (condition == nullptr || condition->getTerminatorStmt() != loop ||
+        condition->succ_size() != 2) {
+      continue;
+    }
+
+    // CFGBuilder puts the true (body) successor first and the false (exit) successor second.
+    // After the increment clears the sentinel, only the exit is reachable. Redirect this edge
+    // instead of dropping it: code after the case and enclosing real loops still need analysis.
+    auto exit = *(condition->succ_begin() + 1);
+    if (exit.getReachableBlock() == nullptr) continue;
+    for (auto& predecessor: condition->preds()) {
+      if (predecessor.getReachableBlock() == block) {
+        predecessor = clang::CFGBlock::AdjacentBlock(nullptr, true);
       }
     }
-    node = parents[0];
+    *block->succ_begin() = clang::CFGBlock::AdjacentBlock(nullptr, true);
+    block->addSuccessor(exit, cfg.getBumpVectorContext());
+    block->setLoopTarget(nullptr);
   }
 }
 
@@ -120,7 +153,7 @@ bool onlyUsesDirectDerivedFieldsAfterBaseMove(
 }  // namespace
 
 void UseAfterMoveCheck::registerMatchers(clang::ast_matchers::MatchFinder* finder) {
-  // The inherited check() performs Clang's existing CFG and sequencing
+  // LLVM's check performs its existing CFG and sequencing
   // analysis. It expects the node names bound by its own registerMatchers(), so
   // this matcher preserves that binding contract while matching only kj::mv().
   auto argument = declRefExpr().bind("arg");
@@ -159,14 +192,14 @@ void UseAfterMoveCheck::check(const clang::ast_matchers::MatchFinder::MatchResul
   const auto* move = result.Nodes.getNodeAs<clang::CallExpr>("call-move");
   const auto* argument = result.Nodes.getNodeAs<clang::DeclRefExpr>("arg");
   if (move == nullptr || argument == nullptr || result.Context == nullptr) return;
-  if (isInsideKjOneOfCase(*move, *result.Context)) {
-    return;
-  }
   if (onlyUsesDirectDerivedFieldsAfterBaseMove(result, *argument)) return;
 
-  // All other kj::mv() calls use Clang's normal use-after-move dataflow,
-  // including its reinitialization and sequencing rules.
-  clang::tidy::bugprone::UseAfterMoveCheck::check(result);
+  auto invalidationFunctions =
+      clang::tidy::utils::options::parseStringList(Options.get("InvalidationFunctions", ""));
+  auto reinitializationFunctions =
+      clang::tidy::utils::options::parseStringList(Options.get("ReinitializationFunctions", ""));
+  detail::checkUseAfterMove(result, *this, invalidationFunctions, reinitializationFunctions,
+      [&](clang::CFG& cfg) { normalizeKjCaseLoops(cfg, *result.Context); });
 }
 
 }  // namespace workerd::clang_tidy

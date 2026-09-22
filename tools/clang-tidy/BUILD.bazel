@@ -35,6 +35,7 @@ LLVM_ENABLE_RTTI=ON; the binary published by cloudflare/workerd-tools
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load(":test-headers.bzl", "cc_test_headers")
 
 filegroup(
     name = "srcs",
@@ -46,6 +47,7 @@ filegroup(
         "promise-ignore-result.c++",
         "unsafe-continuation-capture.c++",
         "use-after-move.c++",
+        "use-after-move-analysis.c++",
         "visit-for-gc.c++",
         "workerd-lint.c++",
     ],
@@ -62,6 +64,7 @@ filegroup(
         "promise-ignore-result.h",
         "unsafe-continuation-capture.h",
         "use-after-move.h",
+        "use-after-move-analysis.h",
         "visit-for-gc.h",
     ],
     visibility = ["//visibility:public"],
@@ -163,7 +166,9 @@ sh_test(
     name = "use-after-move-test",
     srcs = ["use-after-move-test.sh"],
     data = [
+        ":use-after-move-kj-headers",
         ":use-after-move-negative-test.c++",
+        ":use-after-move-oneof-test.c++",
         ":use-after-move-positive-test.c++",
         ":workerd-lint",
         "//tools:clang-tidy",
@@ -173,6 +178,11 @@ sh_test(
         "@platforms//os:linux",
         "@platforms//cpu:x86_64",
     ],
+)
+
+cc_test_headers(
+    name = "use-after-move-kj-headers",
+    dep = "@capnp-cpp//src/kj:kj",
 )
 
 sh_test(
