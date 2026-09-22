@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "actor-call-retry.h"
 #include "basics.h"
 #include "blob.h"
 #include "form-data.h"
@@ -253,16 +254,26 @@ class Fetcher: public JsRpcClientProvider {
     virtual Result newSingleUseClient(
         kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) = 0;
 
-    virtual bool supportsActorRetryMetadata() const {
-      return false;
+    // Whether this factory dispatches to a Durable Object, and whether that target can create fresh
+    // retry attempts. Actor calls are observed whether or not the target supports retries.
+    virtual kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const {
+      return kj::none;
     }
 
-    // Factories that can carry actor retry metadata override this method. The default rejects the
-    // metadata rather than silently starting a new logical call.
-    virtual Result newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
-        kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata,
+    bool supportsActorCallRetries() const {
+      return getActorTargetRetryability().orDefault(ActorCallTargetRetryable::NO).toBool();
+    }
+
+    virtual void onActorCallRetry() {
+      KJ_FAIL_REQUIRE("actor call retry requested from an unsupported Fetcher");
+    }
+
+    // Factories that support actor call retries override this method. The default rejects the
+    // attempt rather than silently starting a new logical call.
+    virtual Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
+        ActorCallRetryState::Attempt attempt,
         MakeUserSpanParent makeUserSpanParent) {
-      KJ_FAIL_REQUIRE("actor retry metadata supplied to an unsupported Fetcher");
+      KJ_FAIL_REQUIRE("actor call attempt supplied to an unsupported Fetcher");
     }
 
     // Get a `SubrequestChannel` representing this Fetcher. This is used especially when the
@@ -323,12 +334,22 @@ class Fetcher: public JsRpcClientProvider {
 
   // Get client and optionally create trace context, all in one call.
   //
-  [[nodiscard]] ClientWithTracing getClientWithTracing(IoContext& ioContext,
+  [[nodiscard]] ClientWithTracing getClientWithTracing(
+      IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
+
+  [[nodiscard]] ClientWithTracing getClientForActorCallAttempt(IoContext& ioContext,
       kj::Maybe<kj::String> cfStr,
       kj::ConstString operationName,
-      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata);
+      ActorCallRetryState::Attempt attempt);
 
-  bool supportsActorRetryMetadata();
+  [[nodiscard]] ClientWithTracing getClientForActorCallAttempt(IoContext& ioContext,
+      kj::Maybe<kj::String> cfStr,
+      kj::ConstString operationName,
+      ActorCallRetryState::Attempt attempt,
+      MakeUserSpanParent makeUserSpanParent);
+
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() override;
+  void onActorCallRetry();
 
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);
@@ -421,7 +442,8 @@ class Fetcher: public JsRpcClientProvider {
     return getRpcMethod(js, kj::mv(name));
   }
 
-  ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+  ClientForOneCall getClientForOneCall(
+      jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;
 
   kj::LiteralStringConst getRpcTargetKind() override;
 

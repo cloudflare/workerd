@@ -28,7 +28,7 @@ py_wd_test("asgi")
 
 py_wd_test("asgi-sse")
 
-py_wd_test("random")
+py_wd_test("top-level-entropy")
 
 py_wd_test("subdirectory")
 
@@ -62,6 +62,17 @@ py_wd_test("python-rpc")
 py_wd_test(
     "stack-switching-state",
     # This is fixed in Pyodide 314.0.6
+    skip_python_flags = [
+        "0.26.0a2",
+        "0.28.2",
+        "314.0.4",
+    ],
+)
+
+py_wd_test(
+    "stack-switching-gc",
+    # Exercises the saveState/restoreState patch that patch_pyodide_asm.ts
+    # applies to 314.0.6. It also crashes Pyodide 0.28.2, reproduced upstream.
     skip_python_flags = [
         "0.26.0a2",
         "0.28.2",

@@ -298,8 +298,9 @@ void ExecProcess::resize(jsg::Lock& js, int cols, int rows) {
 // =======================================================================================
 // Basic lifecycle methods
 
-Container::Container(rpc::Container::Client rpcClient, bool running)
-    : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))) {
+Container::Container(rpc::Container::Client rpcClient, bool running, jsg::Dict<kj::String> images)
+    : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
+      images(kj::mv(images)) {
   if (running) startMonitor();
 }
 
@@ -322,6 +323,18 @@ bool Container::getRunning() {
   return false;
 }
 
+jsg::Dict<kj::String> Container::getImages() const {
+  return jsg::Dict<kj::String>{
+    .fields =
+        KJ_MAP(field, images.fields) {
+    return jsg::Dict<kj::String>::Field{
+      .name = kj::str(field.name),
+      .value = kj::str(field.value),
+    };
+  },
+  };
+}
+
 bool Container::isCurrentMonitor(uint64_t generation) {
   KJ_IF_SOME(monitor, currentMonitor) {
     return monitor->generation == generation;
@@ -333,9 +346,21 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   auto flags = FeatureFlags::get(js);
   JSG_REQUIRE(
       !getRunning(), Error, "start() cannot be called on a container that is already running.");
-  invalidateTcpPortStates();
 
   StartupOptions options = kj::mv(maybeOptions).orDefault({});
+
+  JSG_REQUIRE(options.image == kj::none || options.containerSnapshot == kj::none, TypeError,
+      "`image` and `containerSnapshot` are mutually exclusive.");
+
+  KJ_IF_SOME(image, options.image) {
+    JSG_REQUIRE(image.size() > 0, TypeError, "Container image reference cannot be empty.");
+  }
+  KJ_IF_SOME(containerSnapshot, options.containerSnapshot) {
+    JSG_REQUIRE(
+        containerSnapshot.id.size() > 0, TypeError, "Container snapshot ID cannot be empty.");
+  }
+
+  invalidateTcpPortStates();
 
   auto req = rpcClient->startRequest();
   KJ_IF_SOME(spanContext, IoContext::current().getCurrentTraceSpan().toSpanContext()) {
@@ -359,8 +384,6 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
     }
   }
 
-  JSG_REQUIRE(options.image == kj::none || options.containerSnapshot == kj::none, TypeError,
-      "`image` and `containerSnapshot` are mutually exclusive.");
   if (flags.getWorkerdExperimental()) {
     KJ_IF_SOME(hardTimeoutMs, options.hardTimeout) {
       JSG_REQUIRE(hardTimeoutMs > 0, RangeError, "Hard timeout must be greater than 0");
@@ -542,7 +565,7 @@ jsg::Promise<Container::DirectorySnapshot> Container::snapshotDirectory(
 }
 
 jsg::Promise<Container::Snapshot> Container::snapshotContainer(
-    jsg::Lock& js, SnapshotOptions options) {
+    jsg::Lock& js, jsg::Optional<SnapshotOptions> options) {
   JSG_REQUIRE(getRunning(), Error,
       "snapshotContainer() cannot be called on a container that is not running.");
 
@@ -551,8 +574,10 @@ jsg::Promise<Container::Snapshot> Container::snapshotContainer(
     spanContext.toCapnp(req.initSpanContext());
   }
 
-  KJ_IF_SOME(name, options.name) {
-    req.setName(name);
+  KJ_IF_SOME(snapshotOptions, options) {
+    KJ_IF_SOME(name, snapshotOptions.name) {
+      req.setName(name);
+    }
   }
 
   return IoContext::current()
@@ -1456,7 +1481,7 @@ class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
         [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
       makeUserSpanParent(tracing);
       return kj::heap<TcpPortWorkerInterface>(entropySource, headerTable, portState.addRef());
-    }, {.inHouse = false, .wrapMetrics = false});
+    }, {.inHouse = false, .wrapMetrics = false}, CountSubrequest::YES);
     return {.client = kj::mv(client), .spanParents = kj::none};
   }
 

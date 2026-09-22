@@ -1,0 +1,13 @@
+{
+  "extends": "../../../tools/base.tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "lib": ["ESNext"],
+    "types": ["@types/node"],
+    "sourceMap": true,
+    "rootDir": ".",
+    "verbatimModuleSyntax": false,
+    "noEmit": false
+  },
+  "include": ["*.ts"]
+}

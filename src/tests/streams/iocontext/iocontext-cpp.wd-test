@@ -1,0 +1,23 @@
+using Workerd = import "/workerd/workerd.capnp";
+using IocontextModules = import "iocontext-modules.capnp";
+
+# Global-scope stream construction and consumption against the C++
+# implementation. Flags as in the sibling suites.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-iocontext-cpp",
+      worker = (
+        modules = IocontextModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+        ],
+        bindings = [
+          ( name = "self", service = "streams-iocontext-cpp" ),
+        ],
+      )
+    ),
+  ],
+);

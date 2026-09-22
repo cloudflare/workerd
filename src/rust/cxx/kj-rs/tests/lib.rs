@@ -13,10 +13,14 @@ mod test_own;
 mod test_refcount;
 
 use kj_rs::KjOwn;
+use test_futures::clear_retained_waker;
+use test_futures::complete_joined_waker_future;
+use test_futures::join_retained_wake;
 use test_futures::new_drop_cancellable_promise_without_polling;
 use test_futures::new_error_handling_future_void_infallible;
 use test_futures::new_errored_future_void;
 use test_futures::new_future_awaiting_cancellable_promise;
+use test_futures::new_joined_waker_future_void;
 use test_futures::new_kj_errored_future_void;
 use test_futures::new_layered_ready_future_void;
 use test_futures::new_naive_select_future_void;
@@ -24,13 +28,19 @@ use test_futures::new_pending_future_void;
 use test_futures::new_promise_i32_awaiting_future_void;
 use test_futures::new_ready_future_i32;
 use test_futures::new_ready_future_void;
+use test_futures::new_retained_waker_future_void;
 use test_futures::new_select_with_cancellation;
 use test_futures::new_threaded_delay_future_void;
 use test_futures::new_two_step_cancellable_future;
 use test_futures::new_waking_future_void;
 use test_futures::new_wrapped_waker_future_void;
 use test_futures::poll_and_stash_promise_future;
+use test_futures::start_retained_wake;
+use test_futures::stash_waker_future;
+use test_futures::stashed_future_poll_count;
 use test_futures::unstash_and_await_promise_future;
+use test_futures::wake_retained_waker_from_background_thread;
+use test_futures::wake_stashed_waker;
 use test_maybe::take_maybe_own;
 use test_maybe::take_maybe_own_ret;
 use test_maybe::take_maybe_ref;
@@ -260,6 +270,21 @@ pub mod ffi {
         async fn new_ready_future_shared_type() -> Shared;
         async fn new_waking_future_void(cloning_action: CloningAction, waking_action: WakingAction);
         async fn new_threaded_delay_future_void();
+
+        /// A bridged future that stashes a clone of its waker on every Pending poll (as a channel
+        /// or oneshot would) and completes once `wake_stashed_waker()` has run; counts its polls.
+        async fn stash_waker_future() -> Result<()>;
+        /// Wakes the stashed waker on the calling (loop) thread.
+        fn wake_stashed_waker();
+        /// How many times `stash_waker_future`'s future has been polled.
+        fn stashed_future_poll_count() -> u64;
+        async fn new_retained_waker_future_void();
+        async fn new_joined_waker_future_void() -> Result<()>;
+        fn complete_joined_waker_future();
+        fn start_retained_wake();
+        fn join_retained_wake();
+        fn wake_retained_waker_from_background_thread();
+        fn clear_retained_waker();
         async fn new_layered_ready_future_void() -> Result<()>;
 
         async fn new_naive_select_future_void() -> Result<()>;

@@ -1,0 +1,37 @@
+using Workerd = import "/workerd/workerd.capnp";
+using WritableModules = import "writable-modules.capnp";
+
+# Runs the full suite against the C++ implementation with the dateless
+# opt-in pedantic_wpt flag added to writable-cpp.wd-test's pinned set.
+# pedantic_wpt aligns C++ writable behaviors with the spec at several
+# sites in standard.c++; on this suite's surface the observable deltas
+# are the underlying sink `type` validation (RangeError,
+# construction.js), the AbortError DOMException signal reason for a
+# reasonless abort (abort-matrix.js), and desiredSize reporting null
+# while the stream is erroring (backpressure.js) — the shared modules
+# branch on pedanticWpt at exactly those points. The pedantic write/close
+# algorithm scheduling changes do NOT flip the startedness-dependent
+# outcomes the suite pins on the C++ side (probed; a synchronous
+# write→abort sequence still runs the sink write), so everything else
+# must hold unchanged.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-writable-cpp-pedantic",
+      worker = (
+        modules = WritableModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "capture_async_api_throws",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+          "writable_stream_spec_compliant_writer",
+          "pedantic_wpt",
+        ],
+      )
+    ),
+  ],
+  # For gc.js.
+  v8Flags = ["--expose-gc"],
+);

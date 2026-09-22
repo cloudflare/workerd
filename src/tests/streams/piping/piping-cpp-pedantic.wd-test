@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+using PipingModules = import "piping-modules.capnp";
+
+# The main C++ cell plus the dateless opt-in pedantic_wpt flag. Probed
+# to produce no observable deltas on the sibling suites' surfaces; the
+# shared modules run unbranched (which-impl exports pedanticWpt should a
+# delta ever appear).
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-piping-cpp-pedantic",
+      worker = (
+        modules = PipingModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "capture_async_api_throws",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+          "fixup-transform-stream-backpressure",
+          "writable_stream_spec_compliant_writer",
+          "pedantic_wpt",
+        ],
+      )
+    ),
+  ],
+);

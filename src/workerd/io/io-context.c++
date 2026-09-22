@@ -10,6 +10,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/own-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
@@ -317,6 +318,42 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
     return;
   }
 
+  bool hadUndrainedWaitUntilTasks = !waitedForWaitUntil && !context->waitUntilTasks.isEmpty();
+  kj::Maybe<kj::Exception> cancellationException;
+
+  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING) && !context->isShared()) {
+    // Reentry callbacks may have spans attached to their pending promises. Cancel them while the
+    // request is still current so those spans close before the request outcome is reported.
+    while (!context->canceler.isEmpty()) {
+      KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+        KJ_IF_SOME(e, context->abortException) {
+          context->canceler.cancel(e);
+        } else {
+          context->canceler.cancel(JSG_KJ_EXCEPTION(
+              FAILED, Error, "The execution context responding to this call was canceled."));
+        }
+      })) {
+        // Canceler unlinks the callback before destroying its promise, so another attempt makes
+        // progress after a promise destructor throws.
+        if (cancellationException == kj::none) {
+          cancellationException = kj::mv(exception);
+        }
+      }
+    }
+
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { context->tasks.clear(); })) {
+      if (cancellationException == kj::none) {
+        cancellationException = kj::mv(exception);
+      }
+    }
+
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { context->waitUntilTasks.clear(); })) {
+      if (cancellationException == kj::none) {
+        cancellationException = kj::mv(exception);
+      }
+    }
+  }
+
   // Hack: We need to report an accurate time stamps for the STW outcome event, but the timer may
   // not be available when the outcome event gets reported. Define the outcome event time as the
   // time when the incoming request shuts down.
@@ -329,7 +366,7 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
     context->limitEnforcer->reportMetrics(*metrics);
     context->lastDeliveredLocation = deliveredLocation;
 
-    if (!waitedForWaitUntil && !context->waitUntilTasks.isEmpty()) {
+    if (hadUndrainedWaitUntilTasks) {
       KJ_LOG(WARNING, "failed to invoke drain() on IncomingRequest before destroying it",
           kj::getStackTrace());
     }
@@ -365,6 +402,11 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   // Remove incoming request after canceling waitUntil tasks, which may have spans attached that
   // require accessing a timer from the active request.
   context->incomingRequests.remove(*this);
+
+  KJ_IF_SOME(exception, cancellationException) {
+    unwindDetector.catchExceptionsIfUnwinding(
+        [&]() { kj::throwRecoverableException(kj::mv(exception)); });
+  }
 }
 
 InputGate::Lock IoContext::getInputLock() {
@@ -1036,7 +1078,8 @@ kj::Rc<ExternalPusherImpl> IoContext::getExternalPusher() {
 
 kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
-    SubrequestOptions options) {
+    SubrequestOptions options,
+    CountSubrequest countSubrequest) {
   TraceContext tracing;
   KJ_IF_SOME(n, options.operationName) {
     tracing = makeUserTraceSpan(n.clone());
@@ -1051,7 +1094,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
 
   if (options.wrapMetrics) {
     auto& metrics = getMetrics();
-    ret = metrics.wrapSubrequestClient(kj::mv(ret));
+    ret = metrics.wrapSubrequestClient(kj::mv(ret), countSubrequest);
     ret = worker->getIsolate().wrapSubrequestClient(
         kj::mv(ret), getHeaderIds().contentEncoding, metrics);
   }
@@ -1077,7 +1120,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequest(
     kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
     SubrequestOptions options) {
   limitEnforcer->newSubrequest(options.inHouse);
-  return getSubrequestNoChecks(kj::mv(func), kj::mv(options));
+  return getSubrequestNoChecks(kj::mv(func), kj::mv(options), CountSubrequest::YES);
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
@@ -1138,7 +1181,8 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
         .operationName = kj::mv(operationName),
-      });
+      },
+      CountSubrequest::YES);
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
@@ -1220,17 +1264,38 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(
 
 jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
     Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride) {
+  auto& ioContext = IoContext::current();
   jsg::Lock& js = lock;
-  kj::Own<SpanParent> userSpan;
+  SpanParent userSpan(nullptr);
   KJ_IF_SOME(sp, kj::mv(userSpanOverride)) {
-    userSpan = kj::heap(kj::mv(sp));
+    userSpan = kj::mv(sp);
   } else {
-    userSpan = kj::heap(getRootUserTraceSpan());
+    userSpan = getRootUserTraceSpan();
   }
-  auto ioOwnSpan = IoContext::current().addObject(kj::mv(userSpan));
-  auto spanHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnSpan));
+
+  kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
+  if (userSpan.isObserved()) {
+    auto& baseContext = getCurrentIncomingRequest().getInvocationSpanContext();
+    auto spanId = userSpan.getSpanId();
+    if (spanId != tracing::SpanId::nullId) {
+      invocationSpanContext = tracing::InvocationSpanContext(baseContext.getTraceId(),
+          baseContext.getInvocationId(), spanId, baseContext.getTraceFlags());
+    } else {
+      invocationSpanContext = baseContext.clone();
+    }
+  }
+
+  kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
+  KJ_IF_SOME(value, getWorkerTracer()) {
+    tracer = value.getWeakRef();
+  }
+
+  auto asyncContext = kj::heap<UserTraceAsyncContext>(
+      kj::mv(userSpan), kj::mv(tracer), kj::mv(invocationSpanContext));
+  auto ioOwnAsyncContext = ioContext.addObject(kj::mv(asyncContext));
+  auto contextHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnAsyncContext));
   return jsg::AsyncContextFrame::StorageScope(
-      js, lock.getUserTraceAsyncContextKey(), js.v8Ref(spanHandle));
+      js, lock.getUserTraceAsyncContextKey(), js.v8Ref(contextHandle));
 }
 
 SpanParent IoContext::getCurrentTraceSpan() {
@@ -1252,14 +1317,8 @@ SpanParent IoContext::getCurrentTraceSpan() {
 }
 
 SpanParent IoContext::getCurrentUserTraceSpan() {
-  // Skip the AsyncContextFrame probe when user tracing isn't wired up: an unobserved
-  // root means enterSpan can't have pushed anything (see Tracing::enterSpan).
   if (incomingRequests.empty()) {
     return SpanParent(nullptr);
-  }
-  SpanParent root = getCurrentIncomingRequest().getRootUserTraceSpan();
-  if (!root.isObserved()) {
-    return kj::mv(root);
   }
 
   // If called while lock is held, try to use the trace info stored in the async context.
@@ -1268,12 +1327,13 @@ SpanParent IoContext::getCurrentUserTraceSpan() {
       KJ_IF_SOME(value, frame.get(*lock.getUserTraceAsyncContextKey())) {
         auto handle = value.getHandle(lock);
         jsg::Lock& js = lock;
-        auto& userSpan = jsg::unwrapOpaqueRef<IoOwn<SpanParent>>(js.v8Isolate, handle);
-        return userSpan->addRef();
+        auto& asyncContext =
+            jsg::unwrapOpaqueRef<IoOwn<UserTraceAsyncContext>>(js.v8Isolate, handle);
+        return asyncContext->getSpan();
       }
     }
   }
-  return kj::mv(root);
+  return getCurrentIncomingRequest().getRootUserTraceSpan();
 }
 
 SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {

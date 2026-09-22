@@ -1,0 +1,38 @@
+using Workerd = import "/workerd/workerd.capnp";
+using TransformModules = import "transform-modules.capnp";
+
+# Runs the full suite against the C++ implementation with the dateless
+# opt-in pedantic_wpt flag added to transform-cpp.wd-test's pinned set.
+# pedantic_wpt's transform sites coordinate finish operations
+# (abort/close/cancel races in standard.c++); on this suite's probed
+# surface they produce NO observable deltas — the cancel-error fan-out,
+# error-after-terminate, validation types, and interceptor counts all
+# match the plain C++ cell (probed) — so the shared modules run
+# unbranched on pedanticWpt and must hold unchanged.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-transform-cpp-pedantic",
+      worker = (
+        modules = TransformModules.modules,
+        bindings = [
+          ( name = "SELF", service = "streams-transform-cpp-pedantic" ),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "fixup-transform-stream-backpressure",
+          "capture_async_api_throws",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+          "writable_stream_spec_compliant_writer",
+          "pedantic_wpt",
+          "enable_weak_ref",
+        ],
+      )
+    ),
+  ],
+  # For gc.js.
+  v8Flags = ["--expose-gc"],
+);

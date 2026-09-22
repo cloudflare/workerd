@@ -218,6 +218,7 @@ void ServiceWorkerGlobalScope::clear() {
 }
 
 kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
+    kj::Maybe<kj::String> clientAddress,
     const kj::HttpHeaders& headers,
     kj::AsyncIoStream& connection,
     kj::HttpService::ConnectResponse& response,
@@ -249,12 +250,50 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // We set isDefaultFetchPort to false here – sockets.c++ sets it for ports 443 and 8080 to
     // provide a more descriptive error message for HTTP, but this is not relevant on the TCP server
     // side.
+    // The handler is the server side of this connection: the peer half-closing means it has
+    // finished sending, not that the reply is over, so the write side stays open until the handler
+    // closes it or returns.
     jsg::Ref<Socket> jsSocket =
-        setupSocket(js, ownConnection.addRef().toOwn(), kj::none /* remoteAddress */, kj::mv(host),
-            kj::none, kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::none, false, kj::none);
+        setupSocket(js, ownConnection.addRef().toOwn(), kj::mv(clientAddress), kj::mv(host),
+            SocketOptions{.allowHalfOpen = true}, kj::mv(nullTlsStarter), SecureTransportKind::OFF,
+            SocketProtocol::TCP, kj::none, false, kj::none);
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
     // connection is already open at this point, exception handling is not required.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
+
+    kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
+    auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
+    return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span), kj::mv(deferredNeuter));
+  }
+  lock.logWarningOnce("Received a connect event but we lack a handler. "
+                      "Did you remember to export a connect() function?");
+  JSG_FAIL_REQUIRE(Error, "Handler does not export a connect() function.");
+}
+
+kj::Promise<void> ServiceWorkerGlobalScope::connectUdp(kj::String host,
+    DatagramChannel& channel,
+    Worker::Lock& lock,
+    kj::Maybe<ExportedHandler&> exportedHandler) {
+  ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
+      "Connect ingress is not currently supported with Service Workers syntax.");
+  KJ_REQUIRE(FeatureFlags::get(lock).getWorkerdExperimental(),
+      "UDP ingress requires the experimental flag.");
+
+  KJ_IF_SOME(handler, eh.connect) {
+    // Using a neuterable wrapper to manage lifetime, exactly like connect()'s NeuterableIoStream:
+    // we MUST neuter this when the promise returned to the caller resolves, since `channel` is
+    // only guaranteed valid for that long, while the JS Socket can outlive us via ctx.waitUntil().
+    auto ownChannel = newNeuterableDatagramChannel(channel);
+    auto deferredNeuter = kj::defer([ref = ownChannel.addRef()]() mutable {
+      ref->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
+    });
+    KJ_ON_SCOPE_FAILURE(ownChannel->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
+
+    auto& ioContext = IoContext::current();
+    jsg::Lock& js = lock;
+
+    jsg::Ref<Socket> jsSocket = setupDatagramSocket(
+        js, ownChannel.addRef().toOwn(), kj::none /* remoteAddress */, kj::mv(host));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
     auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
@@ -378,11 +417,6 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   bool useDefaultHandling;
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.fetch) {
-      // Immediately before dispatching into user code, give the observer a chance to claim the
-      // request's retry-token nonce. No-op unless the request is to an actor and the observer
-      // overrides the hook. Only the exported-handler path is hooked: Durable Objects are always
-      // class-based, so actor fetches never take the service-worker dispatchEventImpl() path below.
-      ioContext.getMetrics().claimRetryTokenBeforeUserCode();
       auto promise = f(lock, event->getRequest(), h.env.addRef(js), h.getCtx());
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
@@ -880,12 +914,12 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(IoContext& context
 
   // Even if no handler is exported, we need to claim the websocket so it's removed from the map.
   //
-  // We won't be dispatching any further events because we've received a close, so we return the
-  // owned websocket back to the api::WebSocket.
+  // We won't be dispatching any further events because we've received a close, so copy the
+  // websocket's tags before the manager drops them.
   auto releasePackage = event->prepareForRelease(lock, websocketId);
   auto websocket = kj::mv(releasePackage.webSocketRef);
-  websocket->initiateHibernatableRelease(lock, kj::mv(releasePackage.ownedWebSocket),
-      kj::mv(releasePackage.tags), api::WebSocket::HibernatableReleaseState::CLOSE);
+  websocket->initiateHibernatableRelease(
+      lock, kj::mv(releasePackage.tags), api::WebSocket::HibernatableReleaseState::CLOSE);
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketClose) {
       event->waitUntil(setHibernatableEventTimeout(
@@ -912,12 +946,12 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(IoContext& context
 
   // Even if no handler is exported, we need to claim the websocket so it's removed from the map.
   //
-  // We won't be dispatching any further events because we've encountered an error, so we return
-  // the owned websocket back to the api::WebSocket.
+  // We won't be dispatching any further events because we've encountered an error, so copy the
+  // websocket's tags before the manager drops them.
   auto releasePackage = event->prepareForRelease(lock, websocketId);
   auto& websocket = releasePackage.webSocketRef;
-  websocket->initiateHibernatableRelease(lock, kj::mv(releasePackage.ownedWebSocket),
-      kj::mv(releasePackage.tags), WebSocket::HibernatableReleaseState::ERROR);
+  websocket->initiateHibernatableRelease(
+      lock, kj::mv(releasePackage.tags), WebSocket::HibernatableReleaseState::ERROR);
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketError) {

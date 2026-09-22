@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
 
@@ -237,6 +238,7 @@ class AsyncResource final: public jsg::Object {
 
  private:
   kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> frame;
+  kj::Maybe<IoContext::Id> originIoContextId;
 
   inline void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(frame);

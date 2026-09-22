@@ -6,6 +6,9 @@
 
 namespace workerd::api {
 
+// See /src/tests/streams/identity/AGENTS.md for the IdentityTransformStream
+// and FixedLengthStream specification.
+
 // The IdentityTransformStream is a non-standard TransformStream implementation that passes
 // the exact bytes written to the writable side on to the readable side without modification.
 // Unlike standard the TransformStream, the readable side of an IdentityTransformStream

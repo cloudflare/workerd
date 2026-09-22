@@ -14,6 +14,7 @@
 //
 // See worker-interface.capnp for the underlying protocol.
 
+#include <workerd/api/actor-call-retry.h>
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/io/io-context.h>
@@ -23,6 +24,8 @@
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
+
+#include <capnp/message.h>
 
 namespace workerd::api {
 
@@ -40,12 +43,35 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
  public:
   enum StubOwnership { TRANSFER, DUPLICATE };
 
-  // `getExternalPusherFunc` will be called at most once, the first time a stream is encountered in
-  // serialization, to get the ExternalPusher that should be used.
-  RpcSerializerExternalHandler(
-      StubOwnership stubOwnership, rpc::JsValue::ExternalPusher::Client externalPusher)
+  // Whether the serialized value could be sent again unchanged. Serialization functions mark a
+  // value INELIGIBLE when it is consumed by the first send but leaves no external entry, such as a
+  // terminal AbortSignal. Externals are classified separately by JsRpcCallPlan from the built
+  // external table.
+  enum class Replayability {
+    REPLAYABLE,
+    INELIGIBLE,
+  };
+
+  using GetExternalPusher = kj::Function<rpc::JsValue::ExternalPusher::Client()>;
+  using ResolveDestinationAndGetSpanParents = kj::Function<kj::Maybe<TraceContextParent>()>;
+
+  RpcSerializerExternalHandler(StubOwnership stubOwnership,
+      rpc::JsValue::ExternalPusher::Client externalPusher,
+      kj::Maybe<TraceContextParent> originatingCall)
       : stubOwnership(stubOwnership),
-        externalPusher(kj::mv(externalPusher)) {}
+        getExternalPusherFunc(
+            [externalPusher = kj::mv(externalPusher)]() mutable { return externalPusher; }),
+        resolveDestinationAndGetSpanParentsFunc([originatingCall =
+                                                        kj::mv(originatingCall)]() mutable {
+          return originatingCall.map([](TraceContextParent& parent) { return parent.addRef(); });
+        }) {}
+
+  RpcSerializerExternalHandler(StubOwnership stubOwnership,
+      GetExternalPusher getExternalPusher,
+      ResolveDestinationAndGetSpanParents resolveDestinationAndGetSpanParents)
+      : stubOwnership(stubOwnership),
+        getExternalPusherFunc(kj::mv(getExternalPusher)),
+        resolveDestinationAndGetSpanParentsFunc(kj::mv(resolveDestinationAndGetSpanParents)) {}
 
   inline StubOwnership getStubOwnership() {
     return stubOwnership;
@@ -55,7 +81,7 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 
   // Returns the ExternalPusher for the remote side.
   rpc::JsValue::ExternalPusher::Client getExternalPusher() {
-    return externalPusher;
+    return getExternalPusherFunc();
   }
 
   // Add an external. The value is a callback which will be invoked later to fill in the
@@ -71,6 +97,18 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 
   size_t size() {
     return externals.size();
+  }
+
+  kj::Maybe<TraceContextParent> resolveDestinationAndGetSpanParents() {
+    return resolveDestinationAndGetSpanParentsFunc();
+  }
+
+  void markReplayIneligible() {
+    replayability = Replayability::INELIGIBLE;
+  }
+
+  Replayability getReplayability() {
+    return replayability;
   }
 
   // Add an object that will be released once the serialized value is no longer needed to handle
@@ -108,10 +146,46 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 
  private:
   StubOwnership stubOwnership;
-  rpc::JsValue::ExternalPusher::Client externalPusher;
+  GetExternalPusher getExternalPusherFunc;
+  ResolveDestinationAndGetSpanParents resolveDestinationAndGetSpanParentsFunc;
 
   kj::Vector<BuilderCallback> externals;
   kj::Vector<kj::Own<void>> stubDisposers;
+  Replayability replayability = Replayability::REPLAYABLE;
+};
+
+// Owns one serialized call independently of any destination request and can copy it into attempts.
+// `message` holds the method path, operation, and external metadata; the V8-serialized argument
+// bytes are kept separately so the buffer released by the serializer is never copied into the
+// metadata message.
+class JsRpcCallPlan {
+ public:
+  static constexpr uint METADATA_SEGMENT_WORDS = 64;
+
+  JsRpcCallPlan(kj::Own<capnp::MallocMessageBuilder> message,
+      kj::Array<const byte> serializedData,
+      RpcSerializerExternalHandler::Replayability serializerReplayability);
+
+  // True only for method calls whose arguments are absent or contain no externals and no
+  // serializer-handled ineligible values. Property reads are not replayable.
+  bool getReplayable() const {
+    return replayable;
+  }
+
+  size_t getReplayMemoryBytes() const {
+    return serializedData.size();
+  }
+
+  void copyTo(rpc::JsRpcTarget::CallParams::Builder builder);
+
+ private:
+  rpc::JsRpcTarget::CallParams::Reader getParams() {
+    return message->getRoot<rpc::JsRpcTarget::CallParams>().asReader();
+  }
+
+  kj::Own<capnp::MallocMessageBuilder> message;
+  kj::Array<const byte> serializedData;
+  bool replayable;
 };
 
 class RpcStubDisposalGroup;
@@ -230,11 +304,23 @@ class JsRpcClientProvider: public jsg::Object {
     kj::Maybe<TraceContext> callSpan;
   };
 
+  // Append this provider's property path, if any, without resolving the destination client.
+  virtual void appendPath(kj::Vector<kj::StringPtr>&) {}
+
+  // Whether this provider dispatches to a Durable Object, and whether that target can create fresh
+  // retry attempts. Calls through a pending result pipeline remain actor calls but cannot create a
+  // fresh attempt independently of the call that produced the pipeline.
+  virtual kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() {
+    return kj::none;
+  }
+
+  bool supportsActorCallRetries() {
+    return getActorTargetRetryability().orDefault(ActorCallTargetRetryable::NO).toBool();
+  }
+
   // Get a capnp client that can be used to dispatch one call.
-  //
-  // If this isn't the root object (i.e. this is a JsRpcProperty), the property path starting from
-  // the root object will be appended to `path`.
-  virtual ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) = 0;
+  virtual ClientForOneCall getClientForOneCall(
+      jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) = 0;
 
   // Tracing tag value for jsrpc.target_kind on the client-side per-call span
   // (see JsRpcTargetBase::getTargetKind for the server-side equivalent).
@@ -242,6 +328,19 @@ class JsRpcClientProvider: public jsg::Object {
 };
 
 class JsRpcProperty;
+
+class JsRpcReplayMemoryTracker final: public kj::Refcounted {
+ public:
+  explicit JsRpcReplayMemoryTracker(kj::Own<void> trackedMemory)
+      : trackedMemory(kj::mv(trackedMemory)) {}
+
+  void release() {
+    trackedMemory = kj::Own<void>();
+  }
+
+ private:
+  kj::Own<void> trackedMemory;
+};
 
 // Represents the promise returned by calling an RPC method. We don't use a regular Promise object,
 // but rather our own custom thenable, so that we can support pipelining on it.
@@ -265,13 +364,17 @@ class JsRpcPromise: public JsRpcClientProvider {
   JsRpcPromise(jsg::JsRef<jsg::JsPromise> inner,
       kj::Own<WeakRef> weakRef,
       IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline,
-      kj::Maybe<TraceContextParent> originatingCall);
+      kj::Maybe<TraceContextParent> originatingCall,
+      kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability,
+      kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker);
   ~JsRpcPromise() noexcept(false);
 
   void resolve(jsg::Lock& js, jsg::JsValue result);
   void dispose(jsg::Lock& js);
 
-  ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+  ClientForOneCall getClientForOneCall(
+      jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() override;
 
   kj::LiteralStringConst getRpcTargetKind() override {
     return "promise"_kjc;
@@ -318,6 +421,8 @@ class JsRpcPromise: public JsRpcClientProvider {
   // The jsRpcCall of the call that produced this promise, used to parent follow-up calls
   // pipelined on the promise under it (mirrors JsRpcStub::originatingCall). Only set when traced.
   kj::Maybe<IoOwn<TraceContextParent>> originatingCall;
+  kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability;
+  kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker;
 
   struct Pending {
     IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline;
@@ -363,7 +468,12 @@ class JsRpcProperty: public JsRpcClientProvider {
         name(kj::mv(name)),
         depth(depth) {}
 
-  ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+  void appendPath(kj::Vector<kj::StringPtr>& path) override;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() override {
+    return parent->getActorTargetRetryability();
+  }
+  ClientForOneCall getClientForOneCall(
+      jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;
 
   // Forward to parent: a property chain dispatches to the root's target, and
   // the property path itself is captured separately by jsrpc.method.
@@ -439,15 +549,25 @@ class JsRpcProperty: public JsRpcClientProvider {
 // `JsRpcStub::sendJsRpc()`.
 class JsRpcStub: public JsRpcClientProvider {
  public:
-  // Only deserialize() needs ExternalMemoryAdjustment — it extracts a new capability from an RPC
-  // response, creating MembraneHook + forked promise allocations. The other callers (dup() and
-  // constructor()) just refcount existing capabilities or create local loopbacks.
-  JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient): capnpClient(kj::mv(capnpClient)) {}
-  JsRpcStub(
-      IoOwn<rpc::JsRpcTarget::Client> capnpClient, IoOwn<IoChannelFactory::RpcChannel> rpcChannel)
+  // Only deserialize() needs ExternalMemoryAdjustment for allocations made while extracting a new
+  // capability from an RPC response; dup() and constructor() do not create those allocations.
+
+  // These overloads accept an already-owned originatingCall so dup() can retain the parent in the
+  // current IoContext.
+  JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
+      kj::Maybe<IoOwn<TraceContextParent>> originatingCall)
       : capnpClient(kj::mv(capnpClient)),
-        rpcChannel(kj::mv(rpcChannel)) {}
-  JsRpcStub(IoOwn<IoChannelFactory::RpcChannel> rpcChannel): rpcChannel(kj::mv(rpcChannel)) {}
+        originatingCall(kj::mv(originatingCall)) {}
+  JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
+      IoOwn<IoChannelFactory::RpcChannel> rpcChannel,
+      kj::Maybe<IoOwn<TraceContextParent>> originatingCall)
+      : capnpClient(kj::mv(capnpClient)),
+        rpcChannel(kj::mv(rpcChannel)),
+        originatingCall(kj::mv(originatingCall)) {}
+  JsRpcStub(IoOwn<IoChannelFactory::RpcChannel> rpcChannel,
+      kj::Maybe<IoOwn<TraceContextParent>> originatingCall)
+      : rpcChannel(kj::mv(rpcChannel)),
+        originatingCall(kj::mv(originatingCall)) {}
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
       RpcStubDisposalGroup& disposalGroup,
       jsg::ExternalMemoryAdjustment externalMemoryAdjustment,
@@ -465,7 +585,8 @@ class JsRpcStub: public JsRpcClientProvider {
   // If the stub is backed by a persistable RpcChannel, return it.
   kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> getRpcChannel(IoContext& ioctx);
 
-  ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+  ClientForOneCall getClientForOneCall(
+      jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;
 
   kj::LiteralStringConst getRpcTargetKind() override {
     return "stub"_kjc;

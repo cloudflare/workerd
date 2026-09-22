@@ -1,0 +1,26 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Legacy cell for the 2024-12-16..2026-03-24 window (C++ only): fixed
+# TransformStream backpressure but encoder_stream_spec_compliant_backpressure
+# off — the readable side has HWM 1, so the first write settles without
+# read demand and later writes park. @all-compat-flags disabled in the
+# BUILD rule.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-encoding-cpp-legacy-hwm",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-hwm-main.js"),
+          (name = "legacy-backpressure-hwm", esModule = embed "legacy-backpressure-hwm.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "fixup-transform-stream-backpressure",
+        ],
+      )
+    ),
+  ],
+);

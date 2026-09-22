@@ -14,6 +14,11 @@
 
 #include <openssl/rand.h>
 
+// These tests exercise the legacy C++ streams implementation directly, so they allocate the
+// legacy ReadableStream / WritableStream rather than going through the JsReadableStream /
+// JsWritableStream implementation dispatch.
+// NOLINTBEGIN(workerd-legacy-stream-alloc)
+
 namespace workerd::api {
 namespace {
 
@@ -42,6 +47,145 @@ class NoopSink final: public WritableStreamSink {
   }
   void abort(kj::Exception) override {}
 };
+
+KJ_TEST("IdentityTransformStream records cancellation before a later readable cancel") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto pipe = newIdentityPipe();
+  auto buffer = kj::heapArray<kj::byte>(64);
+  memset(buffer.begin(), 'x', buffer.size());
+
+  {
+    auto writePromise = pipe.out->write(buffer.asPtr());
+    KJ_EXPECT(!writePromise.poll(ws));
+  }
+
+  // Destroying the pending write promise cancels it. That cancellation must synchronously become
+  // the stream's terminal state rather than allowing a later readable-side cancellation to win.
+  pipe.in->cancel(KJ_EXCEPTION(FAILED, "later readable cancel"));
+  KJ_EXPECT_THROW(DISCONNECTED, pipe.out->write("y"_kjb).wait(ws));
+}
+
+KJ_TEST("IdentityTransformStream records read cancellation before a later writable abort") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto pipe = newIdentityPipe();
+  auto buffer = kj::heapArray<kj::byte>(64);
+
+  {
+    auto readPromise = pipe.in->tryRead(buffer.begin(), 1, buffer.size());
+    KJ_EXPECT(!readPromise.poll(ws));
+  }
+
+  // Destroying the pending read promise cancels it. A later writable-side abort must not replace
+  // that terminal disconnection state.
+  pipe.out->abort(KJ_EXCEPTION(FAILED, "later writable abort"));
+  KJ_EXPECT_THROW(DISCONNECTED, pipe.in->tryRead(buffer.begin(), 1, buffer.size()).wait(ws));
+}
+
+KJ_TEST("IdentityTransformStream releases a pending read buffer when its promise is canceled") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto pipe = newIdentityPipe();
+  auto buffer = kj::heapArray<kj::byte>(64);
+
+  {
+    auto readPromise = pipe.in->tryRead(buffer.begin(), 1, buffer.size());
+    KJ_EXPECT(!readPromise.poll(ws));
+  }
+
+  // The transform must leave ReadRequest synchronously when the promise is canceled, before the
+  // storage backing its borrowed destination is released.
+  buffer = nullptr;
+}
+
+KJ_TEST("IdentityTransformStream releases a pending write buffer when its promise is canceled") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto pipe = newIdentityPipe();
+  auto buffer = kj::heapArray<kj::byte>(64);
+  memset(buffer.begin(), 'x', buffer.size());
+
+  {
+    auto writePromise = pipe.out->write(buffer.asPtr());
+    KJ_EXPECT(!writePromise.poll(ws));
+  }
+
+  // Destroying the pending promise cancels the write. The transform must synchronously leave the
+  // WriteRequest state so that it no longer borrows buffer when the owner is destroyed.
+  buffer = nullptr;
+}
+
+KJ_TEST("IdentityTransformStream releases a partially-consumed write buffer on cancellation") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto pipe = newIdentityPipe();
+  kj::byte destination[2];
+  auto readPromise = pipe.in->tryRead(destination, 1, sizeof(destination));
+
+  auto buffer = kj::heapArray<kj::byte>(4);
+  memset(buffer.begin(), 'x', buffer.size());
+  {
+    auto writePromise = pipe.out->write(buffer.asPtr());
+    KJ_EXPECT(readPromise.wait(ws) == sizeof(destination));
+    KJ_EXPECT(!writePromise.poll(ws));
+  }
+
+  // The first two bytes completed the pending read, leaving the rest as a pending WriteRequest.
+  // Canceling that write must release the remaining view before its owner is destroyed.
+  buffer = nullptr;
+}
+
+KJ_TEST("IdentityTransformStream declines tryReadSync/tryWriteSync") {
+  // IdentityTransformStreamImpl deliberately does not implement the synchronous fast paths:
+  // serving the read/write rendezvous synchronously would make the result observable to
+  // JavaScript ahead of the counterpart's controller-level completion bookkeeping (write
+  // promise resolution and highWaterMark accounting), inverting the ordering guaranteed by
+  // the asynchronous path. See the note in identity-transform-stream.c++ and
+  // identitytransformstream-backpressure-test.js. This test guards against the fast path
+  // being added without preserving that ordering, and verifies that declining has no
+  // side effects.
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto pipe = newIdentityPipe();
+
+  kj::byte buf[16]{};
+
+  // Nothing pending: declined.
+  KJ_EXPECT(pipe.in->tryReadSync(kj::arrayPtr(buf), 1) == kj::none);
+  KJ_EXPECT(!pipe.out->tryWriteSync("abc"_kjb));
+
+  {
+    // A pending write is not served synchronously, and declining has no side effects: the
+    // async path then completes normally with the same arguments.
+    auto writePromise = pipe.out->write("foobar"_kjb);
+    KJ_EXPECT(pipe.in->tryReadSync(kj::arrayPtr(buf), 1) == kj::none);
+    KJ_EXPECT(!writePromise.poll(ws));
+    KJ_EXPECT(pipe.in->tryRead(buf, 1, sizeof(buf)).wait(ws) == 6);
+    KJ_EXPECT(kj::arrayPtr(buf).first(6) == "foobar"_kjb);
+    writePromise.wait(ws);
+  }
+
+  {
+    // A pending read is not served synchronously, and declining has no side effects.
+    auto readPromise = pipe.in->tryRead(buf, 1, sizeof(buf));
+    KJ_EXPECT(!pipe.out->tryWriteSync("abc"_kjb));
+    KJ_EXPECT(!readPromise.poll(ws));
+    pipe.out->write("abc"_kjb).wait(ws);
+    KJ_EXPECT(readPromise.wait(ws) == 3);
+    KJ_EXPECT(kj::arrayPtr(buf).first(3) == "abc"_kjb);
+  }
+
+  // EOF is likewise reported only via the async path.
+  pipe.out->end().wait(ws);
+  KJ_EXPECT(pipe.in->tryReadSync(kj::arrayPtr(buf), 1) == kj::none);
+}
 
 // Creates a TestFixture with common flags for stream tests
 TestFixture makeStreamTestFixture() {
@@ -327,7 +471,8 @@ KJ_TEST("WritableStreamInternalController operations reject when piped to") {
     auto expectReject = [&](jsg::Promise<void> promise, bool& flag) {
       promise.catch_(env.js, [&](jsg::Lock& js, jsg::Value value) {
         flag = true;
-        KJ_ASSERT(js.exceptionToKj(kj::mv(value)).getDescription() == expectedError);
+        auto exception = js.exceptionToKj(kj::mv(value));
+        KJ_ASSERT(exception.getDescription() == expectedError);
       });
     };
 
@@ -1041,5 +1186,72 @@ KJ_TEST("Writing SharedArrayBuffer works") {
   });
 }
 
+KJ_TEST("internal pipe force-cancel drops pending read before destroying source") {
+  class PendingReadSource final: public ReadableStreamSource {
+   public:
+    PendingReadSource(kj::Promise<size_t> readPromise, kj::Vector<kj::String>& events)
+        : readPromise(kj::mv(readPromise)),
+          events(events) {}
+
+    ~PendingReadSource() noexcept(false) {
+      events.add(kj::str("source destroyed"));
+    }
+
+    kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+      KJ_ASSERT(minBytes <= 1);
+      KJ_ASSERT(maxBytes >= 1);
+
+      static_cast<kj::byte*>(buffer)[0] = 1;
+      events.add(kj::str("read started"));
+
+      return kj::mv(readPromise).attach(kj::defer([&events = events] {
+        events.add(kj::str("read promise dropped"));
+      }));
+    }
+
+    void cancel(kj::Exception reason) override {
+      events.add(kj::str("source canceled"));
+    }
+
+   private:
+    kj::Promise<size_t> readPromise;
+    kj::Vector<kj::String>& events;
+  };
+
+  auto fixture = makeStreamTestFixture();
+  kj::Vector<kj::String> events;
+  bool pipeRejected = false;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto read = kj::newPromiseAndFulfiller<size_t>();
+
+    auto source = env.js.alloc<ReadableStream>(
+        env.context, kj::heap<PendingReadSource>(kj::mv(read.promise), events));
+    auto destination = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::none);
+
+    auto pipe = source->pipeTo(env.js, destination.addRef(), PipeToOptions{})
+                    .catch_(env.js, [&](jsg::Lock&, jsg::Value) { pipeRejected = true; });
+
+    KJ_ASSERT(events.size() == 1);
+    KJ_ASSERT(events[0] == "read started");
+
+    // Bypass the pipe lock like JsReadableStream::forceCancel().
+    source->getController().cancel(env.js, kj::none);
+
+    // The fix must synchronously cancel the pending read before freeing its source.
+    KJ_ASSERT(events.size() == 4);
+    KJ_ASSERT(events[1] == "read promise dropped");
+    KJ_ASSERT(events[2] == "source canceled");
+    KJ_ASSERT(events[3] == "source destroyed");
+
+    // Without the fix, this resumes pumpTo() with a dangling source pointer.
+    read.fulfiller->fulfill(1);
+
+    return env.context.awaitJs(env.js, kj::mv(pipe)).then([&] { KJ_ASSERT(pipeRejected); });
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api
+
+// NOLINTEND(workerd-legacy-stream-alloc)

@@ -1,0 +1,15 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+js_test(
+    name = "socket-close-test",
+    data = [
+        ":socket-close-pending-pipe.js",
+        ":socket-close-pending-pipe.wd-test",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "socket-close-test.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WD_TEST_CONFIG": "$(rootpath :socket-close-pending-pipe.wd-test)",
+    },
+)

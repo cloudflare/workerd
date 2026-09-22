@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mar Witek <mar@cloudflare.com>
+Date: Mon, 31 Aug 2026 16:37:34 +0200
+Subject: Disable preserve_most on Windows x64 before Clang 22
+
+Clang versions 17 through 21 can select a register that remains live
+under the preserve_most calling convention when restoring the stack in
+an x86 function epilogue. This violates the calling convention and can
+corrupt the caller's state.
+
+The issue is fixed in Clang 22. Disable preserve_most on Windows x64 for
+affected compiler versions while leaving other supported targets
+unchanged.
+
+See https://github.com/llvm/llvm-project/pull/156817.
+
+diff --git a/include/v8config.h b/include/v8config.h
+index b36169f1f77d85e46d2840d19f78f98fd0494749..3be703206ca1c241c0d63803c4b8242aaa63c9d0 100644
+--- a/include/v8config.h
++++ b/include/v8config.h
+@@ -396,8 +396,13 @@ path. Add it with -I<path> to the command line
+          && !defined(_WIN32)))                         /* not on windows */    \
+      && !defined(COMPONENT_BUILD)                      /* no component build */\
+      && __clang_major__ >= 17                          /* clang >= 17 */
++// Clang <= 21 can also overwrite a live preserved register in x86 function
++// epilogues (https://github.com/llvm/llvm-project/pull/156817). This manifests
++// under the Windows x64 ABI, so require clang >= 22 there.
++#if !defined(_WIN32) || __clang_major__ >= 22
+ # define V8_HAS_ATTRIBUTE_PRESERVE_MOST (__has_attribute(preserve_most))
+ #endif
++#endif
+ # define V8_HAS_ATTRIBUTE_VISIBILITY (__has_attribute(visibility))
+ # define V8_HAS_ATTRIBUTE_WARN_UNUSED_RESULT \
+     (__has_attribute(warn_unused_result))

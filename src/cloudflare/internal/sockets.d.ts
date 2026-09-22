@@ -10,6 +10,7 @@ export class Socket {
   readonly readable: unknown;
   readonly writable: unknown;
   readonly closed: Promise<void>;
+  readonly protocol: 'tcp' | 'udp';
   close(): Promise<void>;
   startTls(options: TlsOptions): Socket;
 }
@@ -34,3 +35,12 @@ export function connect(
 ): Socket;
 
 export function internalNewHttpClient(socket: Socket): Promise<ServiceStub>;
+
+export type InboundListener = {
+  protocol: 'tcp' | 'udp';
+  address: string;
+  port: number;
+};
+
+// The inbound socket listeners configured to deliver connections to this worker.
+export function getInboundListeners(): InboundListener[];

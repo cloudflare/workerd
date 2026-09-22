@@ -382,6 +382,7 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   FixedLengthStream: typeof FixedLengthStream;
   IdentityTransformStream: typeof IdentityTransformStream;
   HTMLRewriter: typeof HTMLRewriter;
+  Datagram: typeof Datagram;
   Performance: typeof Performance;
   PerformanceEntry: typeof PerformanceEntry;
   PerformanceMark: typeof PerformanceMark;
@@ -3967,6 +3968,7 @@ interface Socket {
   get opened(): Promise<SocketInfo>;
   get upgraded(): boolean;
   get secureTransport(): "on" | "off" | "starttls";
+  get protocol(): "tcp" | "udp";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
 }
@@ -3985,6 +3987,10 @@ interface TlsOptions {
 interface SocketInfo {
   remoteAddress?: string;
   localAddress?: string;
+}
+declare class Datagram {
+  constructor(data: Uint8Array);
+  get data(): Uint8Array;
 }
 /**
  * The **`EventSource`** interface is web content's interface to server-sent events.
@@ -4070,6 +4076,7 @@ interface ExecProcess {
 }
 interface Container {
   get running(): boolean;
+  get images(): Record<string, string>;
   start(options?: ContainerStartupOptions): void;
   monitor(): Promise<void>;
   destroy(error?: any): Promise<void>;
@@ -4078,16 +4085,16 @@ interface Container {
   setInactivityTimeout(durationMs: number | bigint): Promise<void>;
   interceptOutboundHttp(addr: string, binding: Fetcher): Promise<void>;
   interceptAllOutboundHttp(binding: Fetcher): Promise<void>;
-  snapshotDirectory(
-    options: ContainerDirectorySnapshotOptions,
-  ): Promise<ContainerDirectorySnapshot>;
   snapshotContainer(
-    options: ContainerSnapshotOptions,
+    options?: ContainerSnapshotOptions,
   ): Promise<ContainerSnapshot>;
   interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
   exec(cmd: string[], options?: ContainerExecOptions): Promise<ExecProcess>;
-  interceptOutboundTcp(addr: string, binding: Fetcher): Promise<void>;
   inspect(): Promise<ContainerInfo | null>;
+  interceptOutboundTcp(addr: string, binding: Fetcher): Promise<void>;
+  snapshotDirectory(
+    options: ContainerDirectorySnapshotOptions,
+  ): Promise<ContainerDirectorySnapshot>;
   setLabels(labels: Record<string, string>): Promise<void>;
 }
 interface ContainerDirectorySnapshot {
@@ -4848,6 +4855,7 @@ interface Tracing {
     ...args: A
   ): T;
   startSpan(name: string): Span;
+  getActiveSpan(): Span | undefined;
   Span: typeof Span;
 }
 declare abstract class Span {
@@ -4856,6 +4864,28 @@ declare abstract class Span {
   setAttributes(
     attributes: Record<string, boolean | number | string | undefined>,
   ): this;
+  recordException(
+    exception:
+      | string
+      | {
+          code: string | number;
+          name?: string;
+          message?: string;
+          stack?: string;
+        }
+      | {
+          code?: string | number;
+          name: string;
+          message?: string;
+          stack?: string;
+        }
+      | {
+          code?: string | number;
+          name?: string;
+          message: string;
+          stack?: string;
+        },
+  ): void;
   end(): void;
 }
 /**
@@ -11789,6 +11819,163 @@ declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
+declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_2 {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+interface Ai_Cf_Moondream_Moondream3_1_9B_A2B_Input {
+  /**
+   * Which Moondream skill to run.
+   */
+  task?: "query" | "caption" | "point" | "detect";
+  /**
+   * Input image as a public HTTPS URL or base64 data URI. Optional for `query`; required for `caption`, `point`, and `detect`.
+   */
+  image?: string;
+  /**
+   * Question for the `query` task.
+   */
+  question?: string;
+  /**
+   * Caption length for the `caption` task.
+   */
+  caption_length?: "short" | "normal" | "long";
+  /**
+   * Object phrase to locate for `point` and `detect` tasks (e.g. 'person wearing a red shirt').
+   */
+  target?: string;
+  /**
+   * Enable reasoning trace for the `query` task.
+   */
+  reasoning?: boolean;
+  /**
+   * Sampling temperature.
+   */
+  temperature?: number;
+  /**
+   * Top-p (nucleus) sampling.
+   */
+  top_p?: number;
+  /**
+   * Max tokens to generate for `query` and `caption`.
+   */
+  max_tokens?: number;
+  /**
+   * Max objects to return for `point` and `detect`.
+   */
+  max_objects?: number;
+  /**
+   * Return incremental tokens for `query` and `caption`. `point` and `detect` do not support streaming.
+   */
+  stream?: boolean;
+}
+interface Ai_Cf_Moondream_Moondream3_1_9B_A2B_Output {
+  /**
+   * Reason the generation finished.
+   */
+  finish_reason: string;
+  metrics: {
+    /**
+     * Number of input tokens consumed.
+     */
+    input_tokens: number;
+    /**
+     * Number of output tokens generated.
+     */
+    output_tokens: number;
+    /**
+     * Prefill time in milliseconds.
+     */
+    prefill_time_ms: number;
+    /**
+     * Decode time in milliseconds.
+     */
+    decode_time_ms: number;
+    /**
+     * Time to first token in milliseconds.
+     */
+    ttft_ms: number;
+  };
+  /**
+   * Answer text for the `query` task. Null for other tasks.
+   */
+  answer?: string;
+  /**
+   * Caption text for the `caption` task. Null for other tasks.
+   */
+  caption?: string;
+  /**
+   * Located points for the `point` task. Null for other tasks.
+   */
+  points?: {
+    /**
+     * X coordinate.
+     */
+    x: number;
+    /**
+     * Y coordinate.
+     */
+    y: number;
+  }[];
+  /**
+   * Detected bounding boxes for the `detect` task. Null for other tasks.
+   */
+  objects?: {
+    /**
+     * Minimum X coordinate.
+     */
+    x_min: number;
+    /**
+     * Minimum Y coordinate.
+     */
+    y_min: number;
+    /**
+     * Maximum X coordinate.
+     */
+    x_max: number;
+    /**
+     * Maximum Y coordinate.
+     */
+    y_max: number;
+  }[];
+  /**
+   * Reasoning trace for the `query` task when reasoning=true. Null otherwise.
+   */
+  reasoning?: {
+    /**
+     * Reasoning text.
+     */
+    text: string;
+    /**
+     * Grounding information.
+     */
+    grounding?: {}[];
+  };
+}
+declare abstract class Base_Ai_Cf_Moondream_Moondream3_1_9B_A2B {
+  inputs: Ai_Cf_Moondream_Moondream3_1_9B_A2B_Input;
+  postProcessedOutputs: Ai_Cf_Moondream_Moondream3_1_9B_A2B_Output;
+}
+declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Flash_0731 {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813 {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+declare abstract class Base_Ai_Cf_Qwen_Qwen3_8_27B {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_3_Flash {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
 interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -11881,6 +12068,13 @@ interface AiModels {
   "@cf/moonshotai/kimi-k2.6": Base_Ai_Cf_Moonshotai_Kimi_K2_6;
   "@cf/nvidia/nemotron-3-120b-a12b": Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B;
   "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT;
+  "@cf/moonshotai/kimi-k2.7-code": Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code;
+  "@cf/zai-org/glm-5.2": Base_Ai_Cf_Zai_Org_Glm_5_2;
+  "@cf/moondream/moondream3.1-9B-A2B": Base_Ai_Cf_Moondream_Moondream3_1_9B_A2B;
+  "@cf/deepseek-ai/deepseek-v4-flash-0731": Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Flash_0731;
+  "@cf/deepseek-ai/deepseek-v4-pro-0813": Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813;
+  "@cf/qwen/qwen3.8-27b": Base_Ai_Cf_Qwen_Qwen3_8_27B;
+  "@cf/zai-org/glm-5.3-flash": Base_Ai_Cf_Zai_Org_Glm_5_3_Flash;
 }
 type AiOptions = {
   /**
@@ -12141,6 +12335,35 @@ declare abstract class AiGateway {
     },
   ): Promise<Response>;
   getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
+}
+/** A parameter accepted by an Analytics SQL query. */
+type AnalyticsSQLParameter = string | number | boolean | null;
+/** An Analytics SQL query and its optional positional or named parameters. */
+interface AnalyticsSQLQuery {
+  query: string;
+  params?:
+    | readonly AnalyticsSQLParameter[]
+    | Readonly<Record<string, AnalyticsSQLParameter>>;
+}
+/** Execution statistics returned by Analytics SQL. */
+interface AnalyticsSQLStatistics {
+  elapsed_ms: number;
+  rows_read: number;
+  bytes_read: number;
+}
+/** The rows and execution statistics returned by an Analytics SQL query. */
+interface AnalyticsSQLResult<
+  T extends Record<string, unknown> = Record<string, unknown>,
+> {
+  data: T[];
+  rows: number;
+  statistics: AnalyticsSQLStatistics;
+}
+/** An Analytics SQL binding. */
+interface AnalyticsSQLBinding {
+  query<T extends Record<string, unknown> = Record<string, unknown>>(
+    request: AnalyticsSQLQuery,
+  ): Promise<AnalyticsSQLResult<T>>;
 }
 // Copyright (c) 2022-2025 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
@@ -12641,6 +12864,15 @@ interface BrowserRunBaseOptions {
    */
   cacheTTL?: number;
 }
+/**
+ * Backend selection, mixed into the options of the quick actions that support it.
+ * Deliberately not part of `BrowserRunBaseOptions`: `scrape`, `links` and `snapshot`
+ * reject an alternate backend, so they must not accept the field.
+ */
+interface BrowserRunAlternateBackendOptions {
+  /** Render with an alternate browser backend instead of the default one. */
+  browser?: "kitesurf";
+}
 /** Common options shared by all quick actions. Exactly one of `url` or `html` must be provided.*/
 type BrowserRunCommonOptions =
   | (BrowserRunBaseOptions & {
@@ -12677,7 +12909,7 @@ type BrowserRunScreenshotOptions = BrowserRunCommonOptions & {
   scrollPage?: boolean;
   /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
   screenshotOptions?: BrowserRunPuppeteerScreenshotOptions;
-};
+} & BrowserRunAlternateBackendOptions;
 type BrowserRunPDFOptions = BrowserRunCommonOptions & {
   /** @see https://pptr.dev/api/puppeteer.pdfoptions */
   pdfOptions?: {
@@ -12724,7 +12956,7 @@ type BrowserRunPDFOptions = BrowserRunCommonOptions & {
     /** @default 30000 */
     timeout?: number;
   };
-};
+} & BrowserRunAlternateBackendOptions;
 type BrowserRunScrapeOptions = BrowserRunCommonOptions & {
   /** CSS selectors to scrape. At least one element is required. */
   elements: Array<{
@@ -12760,7 +12992,7 @@ type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
    * HTTP 200; a malformed selector is an error.
    */
   root?: string;
-};
+} & BrowserRunAlternateBackendOptions;
 interface BrowserRunJsonBaseOptions {
   /** Custom AI models to try in order. Max 3. Falls back to next on error. */
   custom_ai?: Array<{
@@ -12775,6 +13007,7 @@ interface BrowserRunJsonBaseOptions {
  * At least one of `prompt` or `response_format` must be provided.
  */
 type BrowserRunJsonOptions = BrowserRunCommonOptions &
+  BrowserRunAlternateBackendOptions &
   BrowserRunJsonBaseOptions &
   (
     | {
@@ -12790,8 +13023,10 @@ type BrowserRunJsonOptions = BrowserRunCommonOptions &
         response_format: AiTextGenerationResponseFormat;
       }
   );
-type BrowserRunContentOptions = BrowserRunCommonOptions;
-type BrowserRunMarkdownOptions = BrowserRunCommonOptions;
+type BrowserRunContentOptions = BrowserRunCommonOptions &
+  BrowserRunAlternateBackendOptions;
+type BrowserRunMarkdownOptions = BrowserRunCommonOptions &
+  BrowserRunAlternateBackendOptions;
 type BrowserRunRedirectHop = {
   /** URL that returned the redirect. */
   url: string;
@@ -12965,6 +13200,178 @@ type BrowserRunErrorResponse = {
 type BrowserRunJsonErrorResponse = BrowserRunErrorResponse & {
   /** Raw AI response text for debugging */
   rawAiResponse?: string;
+};
+/** Session-scoped guardrails applied when acquiring a browser session. */
+type BrowserRunAcquireGuardrails = {
+  /** Domains that the browser may access. An empty list denies all domains. */
+  allowedDomains?: string[];
+  /** Named domain sets that the browser may access. */
+  allowedDomainSets?: string[];
+};
+/** Options for acquiring a new browser session. */
+type BrowserRunAcquireOptions = {
+  /** Idle session lifetime in milliseconds. */
+  keepAlive?: number;
+  /** Record the browser session. */
+  recording?: boolean;
+  /** Geoegress hint as an ISO-3166 alpha-2 country code. */
+  location?: string;
+  /** Map hostnames to caller-provided Workers that handle outbound requests. */
+  outboundByHost?: Record<string, Fetcher>;
+  /** Session-scoped network guardrails. */
+  guardrails?: BrowserRunAcquireGuardrails;
+  /** Include the session's DevTools targets in the result. */
+  targets?: boolean;
+  /** Lifetime of target live-view URLs in milliseconds. */
+  liveViewUrlExpiresInMs?: number;
+};
+/** Metadata returned when a browser session is acquired. */
+type BrowserRunAcquireResult = {
+  sessionId: string;
+  targets?: BrowserRunDevToolsTarget[];
+};
+/** Options for connecting to an already-acquired browser session. */
+type BrowserRunConnectOptions = {
+  /** Connect to a specific page target instead of the browser-level CDP endpoint. */
+  targetId?: string;
+};
+/** Connection capability returned by `connectSession()` and `launch()`. */
+type BrowserRunConnection = {
+  sessionId: string;
+  /** A session-pinned Fetcher. Use its `fetch()` method for a WebSocket upgrade. */
+  webSocket: Fetcher;
+  targets?: BrowserRunDevToolsTarget[];
+};
+/** The UI mode for a live-view link. */
+type BrowserRunLiveViewMode = "devtools" | "tab" | "full";
+/** Connection-scoped guardrails applied to a live-view link. */
+type BrowserRunConnectionGuardrails = {
+  mode: "readonly";
+};
+/** Options for minting a live-view link. */
+type BrowserRunLiveViewOptions = {
+  mode?: BrowserRunLiveViewMode;
+  targetId?: string;
+  expiresInMs?: number;
+  guardrails?: BrowserRunConnectionGuardrails;
+};
+/** Live-view link metadata. */
+type BrowserRunLiveView = {
+  webSocketDebuggerUrl: string;
+  devtoolsFrontendUrl: string;
+  id: string;
+  options: {
+    mode: BrowserRunLiveViewMode;
+    guardrails?: BrowserRunConnectionGuardrails;
+  };
+};
+/** Options for listing active browser sessions. */
+type BrowserRunListSessionsOptions = {
+  limit?: number;
+  offset?: number;
+};
+/** Options for listing session history. */
+type BrowserRunHistoryOptions = {
+  limit?: number;
+  offset?: number;
+};
+/** A browser session returned by the session-management methods. */
+type BrowserRunSession = {
+  sessionId: string;
+  startTime?: number;
+  endTime?: number;
+  closeReason?: number;
+  closeReasonText?: string;
+  connectionId?: string;
+  connectionStartTime?: number;
+  connectionEndTime?: number;
+  lastUpdated?: number;
+  webSocketDebuggerUrl?: string;
+  devtoolsFrontendUrl?: string;
+};
+/** Account browser-session and browser-time limits. */
+type BrowserRunLimits = {
+  activeSessions: Array<{
+    id: string;
+  }>;
+  maxConcurrentSessions: number;
+  allowedBrowserAcquisitions: number;
+  timeUntilNextAllowedBrowserAcquisition: number;
+  usedBrowserTimeSeconds?: number;
+};
+/** A browser target returned by the DevTools JSON methods. */
+type BrowserRunDevToolsTarget = {
+  id: string;
+  type: string;
+  url: string;
+  title?: string;
+  description?: string;
+  webSocketDebuggerUrl?: string;
+  devtoolsFrontendUrl?: string;
+};
+/** Browser and protocol version metadata. */
+type BrowserRunDevToolsVersion = {
+  Browser: string;
+  "Protocol-Version": string;
+  "User-Agent": string;
+  "V8-Version": string;
+  "WebKit-Version": string;
+  webSocketDebuggerUrl: string;
+};
+/** A DevTools protocol domain. Protocol definitions may gain additional fields over time. */
+interface BrowserRunDevToolsProtocolDomain extends Record<string, unknown> {
+  domain: string;
+  experimental?: boolean;
+  dependencies?: string[];
+  types?: Array<Record<string, any>>;
+  commands?: Array<Record<string, any>>;
+  events?: Array<Record<string, any>>;
+}
+/** The DevTools protocol definition. Additional protocol fields may be returned by Chrome. */
+interface BrowserRunDevToolsProtocol extends Record<string, any> {
+  domains: BrowserRunDevToolsProtocolDomain[];
+  version?: {
+    major: string;
+    minor: string;
+  };
+}
+/** Options shared by DevTools target-listing and target-creation methods. */
+type BrowserRunTargetOptions = {
+  liveViewUrlExpiresInMs?: number;
+};
+/** Result returned by DevTools target activation and close methods. */
+type BrowserRunTargetActionResult = {
+  message: string;
+};
+/** Methods exposed by the nested `devtools` binding target. */
+type BrowserRunDevtools = {
+  getVersion(sessionId: string): Promise<BrowserRunDevToolsVersion>;
+  getProtocol(sessionId: string): Promise<BrowserRunDevToolsProtocol>;
+  listTargets(
+    sessionId: string,
+    options?: BrowserRunTargetOptions,
+  ): Promise<BrowserRunDevToolsTarget[]>;
+  getTarget(
+    sessionId: string,
+    targetId: string,
+  ): Promise<BrowserRunDevToolsTarget>;
+  newTarget(
+    sessionId: string,
+    url?: string,
+    options?: BrowserRunTargetOptions,
+  ): Promise<BrowserRunDevToolsTarget>;
+  activateTarget(
+    sessionId: string,
+    targetId: string,
+  ): Promise<BrowserRunTargetActionResult>;
+  closeTarget(
+    sessionId: string,
+    targetId: string,
+  ): Promise<BrowserRunTargetActionResult>;
+};
+/** Result returned when closing a browser session. */
+type BrowserRunCloseSessionResult = {
+  status: "closing" | "closed";
 };
 /**
  * Browser Run API binding for automating headless browsers.
@@ -13154,6 +13561,34 @@ declare abstract class BrowserRun {
     action: "accessibilityTree",
     options: BrowserRunAccessibilityTreeOptions,
   ): Promise<Response>;
+  /** Acquire a new browser session and return its metadata. */
+  acquire(options?: BrowserRunAcquireOptions): Promise<BrowserRunAcquireResult>;
+  /** Acquire a browser session and return a session-pinned WebSocket capability. */
+  launch(options?: BrowserRunAcquireOptions): Promise<BrowserRunConnection>;
+  /** Return a session-pinned WebSocket capability for an existing session. */
+  connectSession(
+    sessionId: string,
+    options?: BrowserRunConnectOptions,
+  ): Promise<BrowserRunConnection>;
+  /** Mint an authenticated live-view link for a browser session. */
+  getLiveView(
+    sessionId: string,
+    options?: BrowserRunLiveViewOptions,
+  ): Promise<BrowserRunLiveView>;
+  /** List the caller's active browser sessions. */
+  listSessions(
+    options?: BrowserRunListSessionsOptions,
+  ): Promise<BrowserRunSession[]>;
+  /** List recent active and closed browser sessions. */
+  history(options?: BrowserRunHistoryOptions): Promise<BrowserRunSession[]>;
+  /** Return the caller's browser-session and browser-time limits. */
+  limits(): Promise<BrowserRunLimits>;
+  /** Return details for one browser session, or `null` when it does not exist. */
+  getSession(sessionId: string): Promise<BrowserRunSession | null>;
+  /** Close a browser session. */
+  closeSession(sessionId: string): Promise<BrowserRunCloseSessionResult>;
+  /** DevTools JSON methods exposed through one nested binding target. */
+  get devtools(): BrowserRunDevtools;
 }
 /**
  * In addition to the properties you can set in the RequestInit dict
@@ -13193,6 +13628,14 @@ interface RequestInitCfProperties extends Record<string, unknown> {
    * (e.g. { '200-299': 86400, '404': 1, '500-599': 0 })
    */
   cacheTtlByStatus?: Record<string, number>;
+  /**
+   * Controls whether Cloudflare uses range requests when fetching the response
+   * from the origin.
+   *
+   * - `"on"`: enable origin range requests for this request.
+   * - `"off"`: disable origin range requests for this request.
+   */
+  originRangeRequests?: "on" | "off";
   /** Controls how responses with a `Vary` header are cached for this request. */
   vary?: RequestInitCfPropertiesVary;
   /**
@@ -14812,6 +15255,78 @@ interface Hyperdrive {
    */
   readonly database: string;
 }
+/**
+ * A handle to a dynamically-provisioned Hyperdrive connection, returned by
+ * `HyperdriveApi.get()`.
+ */
+interface HyperdriveDynamic extends Disposable {
+  /**
+   * The database name to use when connecting through this Hyperdrive.
+   */
+  readonly database: Promise<string>;
+  /*
+   * The randomly generated user to use when authenticating to your
+   * database via Hyperdrive.
+   */
+  readonly user: Promise<string>;
+  /*
+   * The randomly generated password to use when authenticating to your
+   * database via Hyperdrive.
+   */
+  readonly password: Promise<string>;
+  /**
+   * Open a TCP socket to the target database through this Hyperdrive.
+   *
+   */
+  connect(): Promise<Socket>;
+}
+/**
+ * Binding that provisions Hyperdrive connections at request time, rather than
+ * from static configuration.
+ */
+interface HyperdriveDynamicApi {
+  /**
+   * Provision a connection for the database described by `args`.
+   *
+   */
+  get(args: HyperdriveDynamicConfig): Promise<HyperdriveDynamic>;
+  /**
+   * Get a pre-generated connection string used for connecting to dynamic Hyperdrive.
+   */
+  getHyperdriveConnectionString(connectionString: string): Promise<string>;
+}
+/**
+ * Parameters identifying the database that a dynamically-provisioned
+ * Hyperdrive connection should target.
+ */
+interface HyperdriveDynamicConfig {
+  /**
+   * Generated connection string to pass into the dynamic worker.
+   *
+   */
+  dynamicHyperdriveConnectionString: string;
+  /**
+   * Connection string for the origin database Hyperdrive should connect to.
+   * Contains credentials, so treat it as a secret.
+   *
+   * The scheme selects the database engine. PostgreSQL origins are supported.
+   */
+  connectionString: string;
+  /**
+   * Region in which to place the connection pool. See the Hyperdrive
+   * documentation for the set of supported regions.
+   */
+  targetRegion: string;
+  /**
+   * Whether Hyperdrive should cache query results for this connection.
+   */
+  cachingEnabled?: boolean;
+  /**
+   * Maximum number of connections the pool may open to the origin database.
+   * Defaults to 60.
+   */
+  maxConnections?: number;
+}
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
@@ -15275,11 +15790,41 @@ declare module "cloudflare:node" {
     listen(...args: unknown[]): this;
     address(): {
       port?: number | null | undefined;
-    };
+    } | null;
   }
   export function httpServerHandler(port: number): ExportedHandler;
   export function httpServerHandler(options: { port: number }): ExportedHandler;
   export function httpServerHandler(server: NodeStyleServer): ExportedHandler;
+  /**
+   * Dispatches a request to the `http.Server` listening on the given port and
+   * resolves with its response. The direct form of `httpServerHandler()`.
+   */
+  export function handleAsNodeRequest(
+    port:
+      | number
+      | {
+          port: number;
+        },
+    request: Request,
+    env?: unknown,
+    ctx?: ExecutionContext,
+  ): Promise<Response>;
+  /**
+   * Routes inbound sockets to the `net.Server` listening on the port each
+   * socket arrived on.
+   */
+  export function connectHandler(): ExportedHandler;
+  /**
+   * Dispatches an inbound socket to the `net.Server` listening on the port it
+   * arrived on, resolving when the connection has closed. The direct form of
+   * `connectHandler()`, for use inside a `connect()` handler, such as a
+   * Durable Object's.
+   */
+  export function handleAsNodeConnection(
+    socket: Socket,
+    env?: unknown,
+    ctx?: ExecutionContext,
+  ): Promise<void>;
 }
 type Params<P extends string = any> = Record<P, string | string[]>;
 type EventContext<Env, P extends string, Data> = {
@@ -16850,6 +17395,7 @@ declare namespace TailStream {
   }
   interface Exception {
     readonly type: "exception";
+    readonly code?: string | number;
     readonly name: string;
     readonly message: string;
     readonly stack?: string;
@@ -17471,6 +18017,7 @@ type InstanceStatus = {
     | "complete"
     | "waiting" // instance is hibernating and waiting for sleep or event to finish
     | "waitingForPause" // instance is finishing the current work to pause
+    | "rollingBack"
     | "unknown";
   error?: {
     name: string;
@@ -17509,6 +18056,176 @@ interface WorkflowInstanceRestartOptions {
      */
     type?: "do" | "sleep" | "waitForEvent";
   };
+}
+/** An event emitted by a Workflow instance. */
+type WorkflowInstanceEvent = {
+  instanceId: string;
+  eventId: number;
+  timestamp: number;
+} & (
+  | {
+      type: "workflow_queued";
+    }
+  | {
+      type: "workflow_started";
+      params?: unknown;
+    }
+  | {
+      type: "workflow_running";
+    }
+  | {
+      type: "workflow_paused";
+    }
+  | {
+      type: "workflow_waiting_for_pause";
+    }
+  | {
+      type: "workflow_waiting";
+    }
+  | {
+      type: "workflow_completed";
+      output?: unknown;
+    }
+  | {
+      type: "workflow_errored";
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "workflow_terminated";
+    }
+  | {
+      type: "step_started";
+      stepName: string;
+      config?: {
+        retries: {
+          limit: number;
+          delay: WorkflowSleepDuration | "[dynamic]";
+          backoff?: "constant" | "linear" | "exponential";
+        };
+        timeout: WorkflowSleepDuration;
+        sensitive?: "output";
+      };
+    }
+  | {
+      type: "step_completed";
+      stepName: string;
+      output?: unknown;
+    }
+  | {
+      type: "step_errored";
+      stepName: string;
+    }
+  | {
+      type: "attempt_started";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "attempt_completed";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "attempt_errored";
+      stepName: string;
+      attempt: number;
+      retryDelayMs?: number;
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "sleep_started";
+      stepName: string;
+      durationMs: number;
+    }
+  | {
+      type: "sleep_completed";
+      stepName: string;
+    }
+  | {
+      type: "wait_started";
+      stepName: string;
+      eventType: string;
+    }
+  | {
+      type: "wait_completed";
+      stepName: string;
+    }
+  | {
+      type: "wait_timed_out";
+      stepName: string;
+    }
+  | {
+      type: "rollback_started";
+    }
+  | {
+      type: "rollback_step_started";
+      stepName: string;
+      config?: {
+        retries: {
+          limit: number;
+          delay: WorkflowSleepDuration | "[dynamic]";
+          backoff?: "constant" | "linear" | "exponential";
+        };
+        timeout: WorkflowSleepDuration;
+        sensitive?: "output";
+      };
+    }
+  | {
+      type: "rollback_step_completed";
+      stepName: string;
+    }
+  | {
+      type: "rollback_step_errored";
+      stepName: string;
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "rollback_attempt_started";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "rollback_attempt_completed";
+      stepName: string;
+      attempt: number;
+    }
+  | {
+      type: "rollback_attempt_errored";
+      stepName: string;
+      attempt: number;
+      retryDelayMs?: number;
+      error: {
+        name: string;
+        message: string;
+      };
+    }
+  | {
+      type: "rollback_completed";
+    }
+  | {
+      type: "rollback_errored";
+    }
+);
+type WorkflowInstanceEventType = WorkflowInstanceEvent["type"];
+/** Options available for a Workflow instance subscription. */
+type WorkflowInstanceSubscribeOptions = {
+  /** The value from which to start the subscription. */
+  cursor?: number;
+  /** The event types to include in the subscription. */
+  filter?: WorkflowInstanceEventType[];
+};
+/** A disposable subscription to a Workflow instance's events. */
+interface WorkflowInstanceSubscription extends Disposable {
+  next(): Promise<IteratorResult<WorkflowInstanceEvent, void>>;
 }
 declare abstract class WorkflowInstance {
   public id: string;
@@ -17549,4 +18266,10 @@ declare abstract class WorkflowInstance {
     type: string;
     payload: unknown;
   }): Promise<void>;
+  /**
+   * Subscribe to events emitted by this instance.
+   */
+  public subscribe(
+    options?: WorkflowInstanceSubscribeOptions,
+  ): Promise<WorkflowInstanceSubscription>;
 }

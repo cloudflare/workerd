@@ -26,7 +26,7 @@
 // Ported from https://github.com/mafintosh/end-of-stream with
 // permission from the author, Mathias Buus (@mafintosh).
 
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-unsafe-member-access */
 
 import { Readable } from 'node-internal:streams_readable';
 import { Writable } from 'node-internal:streams_writable';
@@ -37,6 +37,7 @@ import {
   AbortError,
   ERR_INVALID_ARG_TYPE,
   ERR_STREAM_PREMATURE_CLOSE,
+  ERR_WEB_STREAM_INTEROP_UNSUPPORTED,
 } from 'node-internal:internal_errors';
 import { once } from 'node-internal:internal_http_util';
 import {
@@ -61,6 +62,7 @@ import {
   isNodeStream,
   willEmitClose as _willEmitClose,
   kIsClosedPromise,
+  isOutgoingMessage,
 } from 'node-internal:streams_util';
 import { addAbortListener } from 'node-internal:events';
 import type Stream from 'node:stream';
@@ -121,8 +123,16 @@ export function eos(
     );
   }
 
+  // An http OutgoingMessage (a ClientRequest, a ServerResponse) counts as
+  // readable as well as writable, as Node's does — Node's is a legacy
+  // Stream without a _writableState: 'finish' alone does not finish it,
+  // its 'close' (the end of the exchange) does — so finished() on a request
+  // reports the response's end, and addAbortSignal() stays armed for the
+  // whole exchange. Ours is a Writable, told apart by its own state fields,
+  // not by shape: a plain Writable carrying a setHeader() is a writable.
   const readable =
-    (options as EOSOptions).readable ?? isReadableNodeStream(stream);
+    (options as EOSOptions).readable ??
+    (isOutgoingMessage(stream) || isReadableNodeStream(stream));
   const writable =
     (options as EOSOptions).writable ?? isWritableNodeStream(stream);
 
@@ -239,7 +249,8 @@ export function eos(
     }
   } else if (writable && !wState) {
     // legacy streams
-    (stream as Stream).on('end', onlegacyfinish).on('close', onlegacyfinish);
+    (stream as Stream).on('end', onlegacyfinish);
+    (stream as Stream).on('close', onlegacyfinish);
   }
 
   // Not all streams will emit 'close' after 'aborted'.
@@ -331,6 +342,14 @@ function eosWeb(
   options: { signal?: AbortSignal },
   callback: (...args: unknown[]) => void
 ): () => void {
+  const closed = (
+    stream as ReadableStream & {
+      [kIsClosedPromise]?: { promise: Promise<unknown> };
+    }
+  )[kIsClosedPromise];
+  if (closed === undefined) {
+    throw new ERR_WEB_STREAM_INTEROP_UNSUPPORTED('finished()');
+  }
   let isAborted = false;
   let abort = nop;
   if (options.signal) {
@@ -359,8 +378,7 @@ function eosWeb(
       });
     }
   };
-  // @ts-expect-error TS7053 Symbols are not defined in types yet.
-  stream[kIsClosedPromise].promise.then(resolverFn, resolverFn);
+  closed.promise.then(resolverFn, resolverFn);
   return nop;
 }
 

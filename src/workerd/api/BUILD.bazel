@@ -10,6 +10,7 @@ filegroup(
     # their own targets, modularizing bazel targets makes incremental rebuilds faster.
     srcs = [
         "actor.c++",
+        "actor-call-retry.c++",
         "actor-state.c++",
         "basics.c++",
         "blob.c++",
@@ -19,6 +20,7 @@ filegroup(
         "eventsource.c++",
         "export-loopback.c++",
         "filesystem.c++",
+        "filesystem-bootstrap.c++",
         "form-data.c++",
         "global-scope.c++",
         "headers.c++",
@@ -63,6 +65,7 @@ filegroup(
     name = "hdrs",
     srcs = [
         "actor.h",
+        "actor-call-retry.h",
         "actor-state.h",
         "basics.h",
         "blob.h",
@@ -72,6 +75,7 @@ filegroup(
         "eventsource.h",
         "export-loopback.h",
         "filesystem.h",
+        "filesystem-bootstrap.h",
         "form-data.h",
         "global-scope.h",
         "headers.h",
@@ -285,10 +289,19 @@ wd_cc_library(
     deps = [
         "//src/workerd/io:features",
         "//src/workerd/jsg",
+        "//src/workerd/util:ring-buffer",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@nbytes",
         "@zstd",
+    ],
+)
+
+kj_test(
+    src = "compression-test.c++",
+    deps = [
+        ":compression",
+        "//src/workerd/io",
     ],
 )
 
@@ -454,7 +467,7 @@ wd_cc_library(
         "//src/pyodide:python_packages_capnp",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-http",
         "@ssl",
@@ -532,7 +545,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -727,6 +740,17 @@ wd_cc_benchmark(
     ],
 )
 
+# Local JSRPC sender benchmark, including large payload and concurrent pending-call cases.
+wd_cc_benchmark(
+    name = "bench-jsrpc-sender",
+    srcs = ["bench-jsrpc-sender.c++"],
+    tags = ["manual"],
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
 kj_test(
     src = "sql-toarray-oom-test.c++",
     deps = [
@@ -793,6 +817,22 @@ kj_test(
 )
 
 kj_test(
+    src = "actor-call-retry-test.c++",
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+kj_test(
+    src = "actor-fetch-retry-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "fetch-body-rewindable-test.c++",
     deps = [
         "//src/workerd/io",
@@ -802,23 +842,20 @@ kj_test(
 )
 
 kj_test(
-    src = "fetch-retry-claim-hook-test.c++",
+    src = "jsrpc-call-plan-test.c++",
     deps = [
         "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
         "//src/workerd/tests:test-fixture",
     ],
 )
 
-wd_test(
-    src = "streams/identitytransformstream-backpressure-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams/identitytransformstream-backpressure-test.js"],
-)
-
-wd_test(
-    src = "streams/identitytransformstream-byob-test.wd-test",
-    args = ["--experimental"],
-    data = ["streams/identitytransformstream-byob-test.js"],
+kj_test(
+    src = "jsrpc-call-observation-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
 
 wd_test(

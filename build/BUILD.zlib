@@ -195,6 +195,7 @@ filegroup(
     srcs = [
         "adler32.c",
         "chromeconf.h",
+        "compare256.h",
         "compress.c",
         "contrib/optimizations/insert_string.h",
         "cpu_features.c",

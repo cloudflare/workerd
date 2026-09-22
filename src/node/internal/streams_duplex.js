@@ -23,9 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
 import { Buffer } from 'node-internal:internal_buffer';
 import {
   Readable,
@@ -274,10 +271,10 @@ class Duplexify extends Duplex {
         ? undefined
         : options.writable) === false
     ) {
-      this['_readableState'].writable = false;
-      this['_readableState'].ending = true;
-      this['_readableState'].ended = true;
-      this['_readableState'].finished = true;
+      this['_writableState'].writable = false;
+      this['_writableState'].ending = true;
+      this['_writableState'].ended = true;
+      this['_writableState'].finished = true;
     }
   }
 }
@@ -785,25 +782,26 @@ export function newStreamDuplexFromReadableWritablePair(
 
     writev(chunks, callback) {
       function done(error) {
-        error = error.filter((e) => e);
         try {
-          callback(error.length === 0 ? undefined : error);
+          callback(error);
         } catch (error) {
           // In a next tick because this is happening within
           // a promise context, and if there are any errors
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          nextTick(() => destroy.call(duplex, error));
+          nextTick(() => destroyer(duplex, error));
         }
       }
 
+      // Promise.all rejects with the first failed write's error; its
+      // fulfillment value (the per-chunk results) is not one.
       writer.ready.then(() => {
         return Promise.all(
           chunks.map((data) => {
             return writer.write(data.chunk);
           })
-        ).then(done, done);
+        ).then(() => done(), done);
       }, done);
     },
 
@@ -827,7 +825,7 @@ export function newStreamDuplexFromReadableWritablePair(
         try {
           callback(error);
         } catch (error) {
-          destroy.call(duplex, error);
+          destroyer(duplex, error);
         }
       }
 
@@ -846,7 +844,7 @@ export function newStreamDuplexFromReadableWritablePair(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          nextTick(() => destroy.call(duplex, error));
+          nextTick(() => destroyer(duplex, error));
         }
       }
 
@@ -860,11 +858,17 @@ export function newStreamDuplexFromReadableWritablePair(
         (chunk) => {
           if (chunk.done) {
             duplex.push(null);
-          } else {
+            return;
+          }
+          // As in Readable.fromWeb: a chunk the duplex cannot take fails it
+          // rather than being lost in this promise.
+          try {
             duplex.push(chunk.value);
+          } catch (error) {
+            destroyer(duplex, error);
           }
         },
-        (error) => destroy.call(duplex, error)
+        (error) => destroyer(duplex, error)
       );
     },
 
@@ -901,29 +905,42 @@ export function newStreamDuplexFromReadableWritablePair(
     },
   });
 
-  writer.closed.then(
-    () => {
-      writableClosed = true;
-      if (!isWritableEnded(duplex))
-        destroy.call(duplex, new ERR_STREAM_PREMATURE_CLOSE());
-    },
-    (error) => {
-      writableClosed = true;
-      readableClosed = true;
-      destroy.call(duplex, error);
-    }
-  );
+  try {
+    writer.closed.then(
+      () => {
+        writableClosed = true;
+        if (!isWritableEnded(duplex))
+          destroyer(duplex, new ERR_STREAM_PREMATURE_CLOSE());
+      },
+      (error) => {
+        writableClosed = true;
+        readableClosed = true;
+        destroyer(duplex, error);
+      }
+    );
 
-  reader.closed.then(
-    () => {
-      readableClosed = true;
-    },
-    (error) => {
-      writableClosed = true;
-      readableClosed = true;
-      destroy.call(duplex, error);
-    }
-  );
+    reader.closed.then(
+      () => {
+        readableClosed = true;
+      },
+      (error) => {
+        writableClosed = true;
+        readableClosed = true;
+        destroyer(duplex, error);
+      }
+    );
+  } catch (err) {
+    // As in Readable.fromWeb: a throwing then must not leave either stream
+    // locked. The duplex, never handed out, is destroyed quietly first, so
+    // that the release (which rejects the writer's closed promise, possibly
+    // into the handler registered above) has nothing left to destroy.
+    writableClosed = true;
+    readableClosed = true;
+    duplex.destroy();
+    writer.releaseLock();
+    reader.releaseLock();
+    throw err;
+  }
 
   return duplex;
 }

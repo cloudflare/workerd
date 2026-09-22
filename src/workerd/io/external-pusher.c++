@@ -27,6 +27,21 @@ class ExplicitEndOutputPipeAdapter final: public capnp::ExplicitEndOutputStream 
     return KJ_REQUIRE_NONNULL(inner)->write(pieces);
   }
 
+  bool tryWriteSync(kj::ArrayPtr<const byte> buffer) override {
+    KJ_IF_SOME(i, inner) {
+      return i->tryWriteSync(buffer);
+    }
+    // end() has already been called; let the async path surface the failure.
+    return false;
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    KJ_IF_SOME(i, inner) {
+      return i->tryWriteSync(pieces);
+    }
+    // end() has already been called; let the async path surface the failure.
+    return false;
+  }
+
   kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
       kj::AsyncInputStream& input, uint64_t amount) override {
     return KJ_REQUIRE_NONNULL(inner)->tryPumpFrom(input, amount);
@@ -77,6 +92,29 @@ class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
       }
     }
     co_return result;
+  }
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    KJ_IF_SOME(result, inner->tryReadSync(buffer, minBytes)) {
+      // Mirror the bookkeeping in tryRead().
+      KJ_IF_SOME(l, expectedLength) {
+        KJ_ASSERT(result <= l);
+        l -= result;
+        if (l == 0) {
+          *ended = true;
+        }
+      }
+
+      if (result < minBytes) {
+        // Verify that end() was called. (A synchronous read was possible but the stream
+        // disconnected prematurely; throw exactly as the async path would.)
+        if (!*ended) {
+          JSG_FAIL_REQUIRE(Error, "ReadableStream received over RPC disconnected prematurely.");
+        }
+      }
+      return result;
+    }
+    return kj::none;
   }
 
   kj::Maybe<uint64_t> tryGetLength() override {

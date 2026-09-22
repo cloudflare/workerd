@@ -13,6 +13,7 @@ def wd_test(
         generate_gc_stress_variant = True,
         predictable = True,
         compat_date = "",
+        _configurable_data = [],
         **kwargs):
     """Rule to define tests that run `workerd test` with a particular config.
 
@@ -64,6 +65,10 @@ def wd_test(
                     "@workerd//tools:base.tsconfig.json",
                 ],
             )
+
+    # Keep configurable data separate until after inspecting the ordinary data above. Selectors
+    # cannot be inspected by macros because their values are resolved during rule analysis.
+    data = data + _configurable_data
 
     # Add initial arguments for `workerd test` command.
     base_args = [
@@ -241,6 +246,12 @@ def _wd_test_impl(ctx):
     )
 
     runfiles = ctx.runfiles(files = ctx.files.data)
+
+    # Add runfiles for the workerd binary, such as shared libraries (if any)
+    workerd_runfiles = ctx.attr.workerd[DefaultInfo].default_runfiles
+    if workerd_runfiles:
+        runfiles = runfiles.merge(workerd_runfiles)
+
     if ctx.file.sidecar:
         runfiles = runfiles.merge(ctx.runfiles(files = [ctx.file.sidecar]))
 

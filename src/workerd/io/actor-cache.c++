@@ -1684,7 +1684,7 @@ void ActorCache::markGapsEmpty(
     }
   }
 
-  kj::Vector<KeyPtr> keysToErase;
+  kj::Vector<Key> keysToErase;
   auto beginIter = map.seek(beginKey);
   auto mapEnd = map.ordered().end();
   for (auto iter = beginIter; iter != mapEnd; ++iter) {
@@ -1728,7 +1728,7 @@ void ActorCache::markGapsEmpty(
       if (prevGapIsEmpty) {
         // Unfortunately erasing from the map will invalidate our iterator, so we need to make
         // a second pass to erase, below.
-        keysToErase.add(entry.key);
+        keysToErase.add(cloneKey(entry.key));
       }
     }
 
@@ -2721,9 +2721,15 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
       // We were overriding any exception that came through here by ioGateBroken (now outputGateBroken).
       // without checking for previous brokenness reasons we would be unable to throw
       // exceededConcurrentStorageOps at all.
-      auto msg = jsg::stripRemoteExceptionPrefix(e.getDescription());
-      if (!(msg.startsWith("broken."))) {
-        e.setDescription(kj::str("broken.outputGateBroken; ", msg));
+      kj::Maybe<kj::String> newDescription;
+      {
+        auto msg = jsg::stripRemoteExceptionPrefix(e.getDescription());
+        if (!(msg.startsWith("broken."))) {
+          newDescription = kj::str("broken.outputGateBroken; ", msg);
+        }
+      }
+      KJ_IF_SOME(description, newDescription) {
+        e.setDescription(kj::mv(description));
       }
       return kj::mv(e);
     } else {
@@ -3121,8 +3127,12 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
     } else if (jsg::isTunneledException(e.getDescription()) ||
         jsg::isDoNotLogException(e.getDescription())) {
       // Before passing along the exception, give it the proper brokenness reason.
-      auto msg = jsg::stripRemoteExceptionPrefix(e.getDescription());
-      e.setDescription(kj::str("broken.outputGateBroken; ", msg));
+      kj::String newDescription;
+      {
+        auto msg = jsg::stripRemoteExceptionPrefix(e.getDescription());
+        newDescription = kj::str("broken.outputGateBroken; ", msg);
+      }
+      e.setDescription(kj::mv(newDescription));
       return kj::mv(e);
     } else {
       auto wdErrId = makeInternalErrorId();

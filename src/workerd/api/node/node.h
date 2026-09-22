@@ -3,6 +3,7 @@
 #include "crypto.h"
 #include "diagnostics-channel.h"
 #include "inspector.h"
+#include "module-source.h"
 #include "zlib-util.h"
 
 #include <workerd/api/node/async-hooks.h>
@@ -83,7 +84,27 @@ constexpr bool isNodeConsoleModule(kj::StringPtr name) {
 }
 
 template <class Registry>
-void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
+void addNodeJsCompatModule(
+    Registry& registry, jsg::Module::Reader module, const ModuleSource* moduleSource) {
+  if (moduleSource != nullptr) {
+    if constexpr (requires {
+                    registry.addBuiltinModule(module.getName(),
+                        moduleSource->get(module.getSrc().asChars()), module.getType(),
+                        module.getCompileCache().asBytes());
+                  }) {
+      if (module.which() == jsg::Module::SRC) {
+        registry.addBuiltinModule(module.getName(), moduleSource->get(module.getSrc().asChars()),
+            module.getType(), module.getCompileCache().asBytes());
+        return;
+      }
+    }
+  }
+  registry.addBuiltinModule(module);
+}
+
+template <class Registry>
+void registerNodeJsCompatModules(
+    Registry& registry, auto featureFlags, const ModuleSource* moduleSource = nullptr) {
 #define V(T, N)                                                                                    \
   registry.template addBuiltinModule<T>(N, workerd::jsg::ModuleRegistry::Type::INTERNAL);
 
@@ -213,7 +234,7 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
     }
 
     return true;
-  });
+  }, [&](jsg::Module::Reader module) { addNodeJsCompatModule(registry, module, moduleSource); });
 
   // If the `nodejs_compat` flag is off, but the `nodejs_als` flag is on, we
   // need to register the `node:async_hooks` module from the bundle.
@@ -223,7 +244,7 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       auto specifier = module.getName();
       if (specifier == "node:async_hooks") {
         KJ_DASSERT(module.getType() == jsg::ModuleType::BUILTIN);
-        registry.addBuiltinModule(module);
+        addNodeJsCompatModule(registry, module, moduleSource);
       }
     }
   }
@@ -236,7 +257,8 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
 }
 
 template <class TypeWrapper>
-kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(auto featureFlags) {
+kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
+    auto featureFlags, const ModuleSource* moduleSource = nullptr) {
   jsg::modules::ModuleBundle::BuiltinBuilder builder(
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
 #define V(M, N)                                                                                    \
@@ -256,7 +278,14 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(auto fea
     builder.addObject<UrlUtil, TypeWrapper>(kUrlUtilSpecifier);
   }
 
-  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE);
+  if (moduleSource == nullptr) {
+    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(
+        builder, NODE_BUNDLE, [](jsg::Module::Reader) { return true; });
+  } else {
+    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE,
+        [](jsg::Module::Reader) { return true; },
+        [&](jsg::Module::Reader module) { return moduleSource->get(module.getSrc().asChars()); });
+  }
 
   // Register Rust-implemented Node.js modules that declare Internal
   // visibility. The adapter registers only the modules whose declared type
@@ -274,12 +303,12 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(auto fea
   return builder.finish();
 }
 
-kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto featureFlags) {
+kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
+    auto featureFlags, const ModuleSource* moduleSource = nullptr) {
   jsg::modules::ModuleBundle::BuiltinBuilder builder(
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
   if (isNodeJsCompatEnabled(featureFlags)) {
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(
-        builder, NODE_BUNDLE, [&](jsg::Module::Reader module) -> bool {
+    auto filter = [&](jsg::Module::Reader module) -> bool {
       if (isNodeJsCompatFsModule(module.getName())) {
         return featureFlags.getEnableNodeJsFsModule();
       }
@@ -350,7 +379,13 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
         return featureFlags.getEnableNodeJsSqliteModule();
       }
       return true;
-    });
+    };
+    if (moduleSource == nullptr) {
+      jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE, kj::mv(filter));
+    } else {
+      jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE, kj::mv(filter),
+          [&](jsg::Module::Reader module) { return moduleSource->get(module.getSrc().asChars()); });
+    }
   } else if (featureFlags.getNodeJsAls()) {
     // The AsyncLocalStorage API can be enabled independently of the rest
     // of the nodejs_compat layer.
@@ -361,7 +396,11 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
         KJ_DASSERT(module.getType() == jsg::ModuleType::BUILTIN);
         KJ_DASSERT(module.which() == workerd::jsg::Module::SRC);
         auto specifier = KJ_ASSERT_NONNULL(jsg::Url::tryParse(module.getName()));
-        builder.addEsm(specifier, module.getSrc().asChars());
+        if (moduleSource == nullptr) {
+          builder.addEsm(specifier, module.getSrc().asChars());
+        } else {
+          builder.addEsm(specifier, moduleSource->get(module.getSrc().asChars()));
+        }
       }
     }
   }

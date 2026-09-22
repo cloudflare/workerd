@@ -329,6 +329,22 @@ class TestStream {
 
 class TestServer final: private kj::Filesystem, private kj::EntropySource, private kj::Clock {
  public:
+  struct QueuedDatagram {
+    kj::Array<kj::byte> content;
+    bool truncated;
+    kj::Own<kj::NetworkAddress> source;
+  };
+
+  struct SentDatagram {
+    kj::Array<kj::byte> content;
+    kj::String destination;
+  };
+
+  struct DatagramState final: public kj::Refcounted {
+    kj::ProducerConsumerQueue<QueuedDatagram> incoming;
+    kj::ProducerConsumerQueue<SentDatagram> outgoing;
+  };
+
   TestServer(kj::StringPtr configText,
       Worker::ConsoleMode consoleMode = Worker::ConsoleMode::INSPECTOR_ONLY,
       kj::SourceLocation loc = {})
@@ -408,6 +424,15 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
   TestStream connect(kj::StringPtr addr) {
     return TestStream(ws, KJ_REQUIRE_NONNULL(sockets.find(addr), addr)->connect().wait(ws));
   }
+
+  void sendUdp(kj::StringPtr addr,
+      kj::StringPtr peer,
+      kj::ArrayPtr<const kj::byte> content,
+      bool truncated = false);
+
+  bool hasUdp(kj::StringPtr addr);
+
+  SentDatagram receiveUdp(kj::StringPtr addr);
 
   // Try to connect to the address and return whether or not this connection attempt hangs,
   // i.e. a listener exists but connections are not being accepted.
@@ -494,6 +519,60 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
 
   class MockNetwork;
 
+  class MockDatagramReceiver final: public kj::DatagramReceiver {
+   public:
+    explicit MockDatagramReceiver(kj::Rc<DatagramState> state): state(kj::mv(state)) {}
+
+    kj::Promise<void> receive() override {
+      current = co_await state->incoming.pop();
+    }
+
+    MaybeTruncated<kj::ArrayPtr<const kj::byte>> getContent() override {
+      auto& datagram = KJ_REQUIRE_NONNULL(current);
+      return {datagram.content, datagram.truncated};
+    }
+
+    MaybeTruncated<kj::ArrayPtr<const kj::AncillaryMessage>> getAncillary() override {
+      return {nullptr, false};
+    }
+
+    kj::NetworkAddress& getSource() override {
+      return *KJ_REQUIRE_NONNULL(current).source;
+    }
+
+   private:
+    kj::Rc<DatagramState> state;
+    kj::Maybe<QueuedDatagram> current;
+  };
+
+  class MockDatagramPort final: public kj::DatagramPort {
+   public:
+    explicit MockDatagramPort(kj::Rc<DatagramState> state): state(kj::mv(state)) {}
+
+    kj::Promise<size_t> send(
+        kj::ArrayPtr<const kj::byte> buffer, kj::NetworkAddress& destination) override {
+      state->outgoing.push({kj::heapArray(buffer), destination.toString()});
+      return buffer.size();
+    }
+
+    kj::Promise<size_t> send(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces,
+        kj::NetworkAddress& destination) override {
+      KJ_UNIMPLEMENTED("unused");
+    }
+
+    kj::Own<kj::DatagramReceiver> makeReceiver(kj::DatagramReceiver::Capacity capacity) override {
+      KJ_EXPECT(capacity.content == 65535);
+      return kj::heap<MockDatagramReceiver>(state.addRef());
+    }
+
+    uint getPort() override {
+      return 0;
+    }
+
+   private:
+    kj::Rc<DatagramState> state;
+  };
+
   struct SubrequestInfo {
     kj::Own<kj::PromiseFulfiller<kj::Own<kj::AsyncIoStream>>> fulfiller;
     kj::StringPtr peerFilter;
@@ -548,11 +627,14 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
       test.sockets.insert(kj::str(address), kj::mv(sender));
       return receiver;
     }
+    kj::Own<kj::DatagramPort> bindDatagramPort() override {
+      return kj::heap<MockDatagramPort>(test.getDatagramState(address).addRef());
+    }
     kj::Own<kj::NetworkAddress> clone() override {
-      KJ_UNIMPLEMENTED("unused");
+      return kj::heap<MockAddress>(test, peerFilter, kj::str(address));
     }
     kj::String toString() override {
-      KJ_UNIMPLEMENTED("unused");
+      return kj::str(address);
     }
 
    private:
@@ -589,6 +671,15 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
 
   MockNetwork mockNetwork;
 
+  kj::HashMap<kj::String, kj::Rc<DatagramState>> datagramStates;
+
+  kj::Rc<DatagramState>& getDatagramState(kj::StringPtr addr) {
+    return datagramStates.findOrCreate(addr, [&]() -> decltype(datagramStates)::Entry {
+      auto state = kj::rc<DatagramState>();
+      return {kj::str(addr), kj::mv(state)};
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // implements EntropySource
 
@@ -605,6 +696,22 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
     return fakeDate;
   }
 };
+
+void TestServer::sendUdp(
+    kj::StringPtr addr, kj::StringPtr peer, kj::ArrayPtr<const kj::byte> content, bool truncated) {
+  getDatagramState(addr)->incoming.push(QueuedDatagram{
+    kj::heapArray(content), truncated, kj::heap<MockAddress>(*this, "(none)"_kj, kj::str(peer))});
+}
+
+bool TestServer::hasUdp(kj::StringPtr addr) {
+  return getDatagramState(addr)->outgoing.pop().poll(ws);
+}
+
+TestServer::SentDatagram TestServer::receiveUdp(kj::StringPtr addr) {
+  auto datagram = getDatagramState(addr)->outgoing.pop();
+  KJ_REQUIRE(datagram.poll(ws), "No UDP datagram available");
+  return datagram.wait(ws);
+}
 
 // =======================================================================================
 // Test Workers
@@ -624,6 +731,42 @@ kj::String singleWorker(kj::StringPtr def) {
       )
     ]
   ))"_kj);
+}
+
+KJ_TEST("Server: UDP listener drops truncated datagrams") {
+  TestServer test(R"((
+    services = [(
+      name = "worker",
+      worker = (
+        compatibilityDate = "2024-01-01",
+        compatibilityFlags = ["experimental"],
+        modules = [(
+          name = "worker.js",
+          esModule =
+            `export default {
+            `  async connect(socket) {
+            `    const reader = socket.readable.getReader();
+            `    const writer = socket.writable.getWriter();
+            `    const { value } = await reader.read();
+            `    await writer.write(value);
+            `  }
+            `}
+        )]
+      )
+    )],
+    sockets = [(
+      name = "udp",
+      address = "udp-address",
+      udp = (),
+      service = "worker"
+    )]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  test.sendUdp("udp-address", "peer:1234", "bad"_kjb, true);
+
+  KJ_EXPECT(!test.hasUdp("udp-address"));
 }
 
 KJ_TEST("Server: serve basic Service Worker") {
@@ -2391,6 +2534,96 @@ KJ_TEST("Server: configuring a DO namespace with no class export is not an error
     Internal Server Error)"_blockquote);
 }
 
+KJ_TEST("Server: named images and directory snapshots are not startup sources") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2026-08-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  fetch(request, env) {
+                `    return env.ns.get(env.ns.idFromName("test")).fetch(request);
+                `  }
+                `}
+                `export class NamedImageContainer extends DurableObject {
+                `  async fetch() {
+                `    const before = Number(await (await this.env.dockerCheck.fetch(
+                `        "http://docker/check")).text());
+                `    this.ctx.container.start({
+                `      directorySnapshots: [{
+                `        snapshot: {id: "unused", size: 0, dir: "/data"},
+                `      }],
+                `    });
+                `    try {
+                `      await this.ctx.container.monitor();
+                `      return new Response("no error");
+                `    } catch (error) {
+                `      const response = await this.env.dockerCheck.fetch("http://docker/check");
+                `      const requests = Number(await response.text()) - before;
+                `      return new Response(`${error.message}; Docker requests: ${requests}`);
+                `    }
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            (name = "ns", durableObjectNamespace = "NamedImageContainer"),
+            (name = "dockerCheck", service = "docker"),
+          ],
+          durableObjectNamespaces = [
+            ( className = "NamedImageContainer",
+              uniqueKey = "named-image-container",
+              container = (
+                images = [(name = "app", image = "registry.example.com/app:latest")],
+              ),
+            ),
+          ],
+          durableObjectStorage = (inMemory = void),
+          containerEngine = (localDocker = (
+            socketPath = "docker-addr",
+            containerEgressInterceptorImage = "unused",
+          )),
+        )
+      ),
+      ( name = "docker",
+        worker = (
+          compatibilityDate = "2026-08-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `let requests = 0;
+                `export default {
+                `  fetch(request) {
+                `    const path = new URL(request.url).pathname;
+                `    if (path === "/check") {
+                `      return new Response(String(requests));
+                `    }
+                `    // The process-wide stale-volume scan is not part of container startup.
+                `    if (path !== "/volumes") ++requests;
+                `    return new Response(null, {status: 404});
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+      ( name = "docker", address = "docker-addr", service = "docker" ),
+    ],
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "Container failed to start; Docker requests: 0");
+}
+
 KJ_TEST("Server: call queue handler on service binding") {
   TestServer test(R"((
     services = [
@@ -3019,6 +3252,86 @@ KJ_TEST("Server: Durable Object alarm persistence (on disk)") {
 
     conn.httpGet200("/get", kj::str("alarm=", alarmTime));
   }
+}
+
+KJ_TEST("Server: alarm timeout with live facet channel") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2026-04-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let id = ctx.exports.Parent.idFromName("test");
+                `    let actor = ctx.exports.Parent.get(id);
+                `    if (new URL(request.url).pathname === "/start") {
+                `      await actor.start();
+                `      return new Response("started");
+                `    }
+                `    return new Response(await actor.status());
+                `  }
+                `}
+                `export class Parent extends DurableObject {
+                `  async start() {
+                `    await this.ctx.storage.setAlarm(1);
+                `  }
+                `  async status() {
+                `    return (await this.ctx.storage.get("alarmStarted")) || "not started";
+                `  }
+                `  async alarm() {
+                `    await this.ctx.storage.put("alarmStarted", "started");
+                `    let facet = this.ctx.facets.get("child",
+                `        () => ({class: this.ctx.exports.Child}));
+                `    await facet.ping();
+                `    await new Promise(() => {});
+                `  }
+                `}
+                `export class Child extends DurableObject {
+                `  ping() { return "pong"; }
+                `}
+            )
+          ],
+          durableObjectNamespaces = [
+            ( className = "Parent",
+              uniqueKey = "parentkey",
+              enableSql = true,
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+
+  {
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/start", "started");
+  }
+
+  test.wait(15 * 60 + 1);
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/status", "started");
 }
 
 KJ_TEST("Server: Ephemeral Objects") {
@@ -5283,6 +5596,43 @@ KJ_TEST("Server: JS RPC over HTTP connections") {
 
   auto conn = test.connect("test-addr");
   conn.httpGet200("/", "got: 35");
+}
+
+KJ_TEST("Server: UDP RPC over HTTP connections") {
+  TestServer test(R"((
+    services = [
+      ( name = "worker",
+        worker = (
+          compatibilityDate = "2024-02-23",
+          compatibilityFlags = ["experimental"],
+          modules = [(
+            name = "main.js",
+            esModule =
+              `export default {
+              `  async connect(socket) {
+              `    const { value } = await socket.readable.getReader().read();
+              `    await socket.writable.getWriter().write(value);
+              `  }
+              `}
+          )]
+        )
+      ),
+      (name = "outbound", external = (address = "loopback", http = (capnpConnectHost = "cappy")))
+    ],
+    sockets = [
+      ( name = "rpc", address = "loopback", service = "worker",
+        http = (capnpConnectHost = "cappy")),
+      ( name = "udp", address = "udp-address", service = "outbound", udp = ()),
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  test.sendUdp("udp-address", "peer:1234", "hello"_kjb);
+  auto response = test.receiveUdp("udp-address");
+  KJ_EXPECT(response.content.asPtr() == "hello"_kjb);
+  KJ_EXPECT(response.destination == "peer:1234");
 }
 
 KJ_TEST("Server: Entrypoint binding with props") {
@@ -7866,6 +8216,29 @@ MF-Access-Blob: {"app_aud":"valid-aud","jwt_claims":"not-an-object"}
 
       Internal Server Error)"_blockquote);
   }
+}
+
+KJ_TEST("Server: handler validation does not evaluate unrelated getters") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2026-07-30",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `export default {
+          `  fetch() {
+          `    return new Response("ok");
+          `  },
+          `  get unrelated() {
+          `    return NOT_DEFINED_ANYWHERE;
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "ok");
 }
 
 }  // namespace

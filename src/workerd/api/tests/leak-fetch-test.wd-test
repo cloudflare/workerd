@@ -1,18 +1,21 @@
 using Workerd = import "/workerd/workerd.capnp";
 
+# The worker is instantiated twice so that the bindings below cross an isolate boundary.
+# Only the first service's test() runs; see the filter argument in BUILD.bazel.
 const unitTests :Workerd.Config = (
   v8Flags = ["--expose-gc"],
   services = [
-    ( name = "leak-fetch-test",
-      worker = (
-        modules = [
-          (name = "worker", esModule = embed "leak-fetch-test.js")
-        ],
-        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
-        bindings = [
-          (name = "subrequest", service = "leak-fetch-test")
-        ]
-      )
-    ),
+    ( name = "leak-fetch-test", worker = .worker ),
+    ( name = "leak-fetch-test-target", worker = .worker ),
   ],
+);
+
+const worker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "leak-fetch-test.js")
+  ],
+  compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+  bindings = [
+    (name = "subrequest", service = "leak-fetch-test-target")
+  ]
 );

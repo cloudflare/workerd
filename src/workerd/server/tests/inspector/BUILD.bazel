@@ -6,6 +6,7 @@ js_test(
     data = [
         ":config.capnp",
         ":index.mjs",
+        ":inspector-test-harness.mjs",
         "//:node_modules/chrome-remote-interface",
         "//src/workerd/server:workerd",
         "//src/workerd/server/tests:server-harness_js_lib",
@@ -16,4 +17,27 @@ js_test(
         "WORKERD_CONFIG": "$(rootpath :config.capnp)",
     },
     tags = ["js-test"],
+)
+
+js_test(
+    name = "inspector-profiler-test",
+    size = "large",
+    data = [
+        ":config.capnp",
+        ":index.mjs",
+        ":inspector-test-harness.mjs",
+        "//:node_modules/chrome-remote-interface",
+        "//src/workerd/server:workerd",
+        "//src/workerd/server/tests:server-harness_js_lib",
+    ],
+    entry_point = "profiler-driver.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_CONFIG": "$(rootpath :config.capnp)",
+    },
+    tags = ["js-test"],
+    target_compatible_with = select({
+        "//build/platforms:sanitizer_thread": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )

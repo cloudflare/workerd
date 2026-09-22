@@ -206,7 +206,7 @@ fn elapsed_ns(start: Instant) -> u64 {
 
 fn saturating_increment(counter: &AtomicUsize) -> usize {
     counter
-        .fetch_update(AtomicOrdering::Relaxed, AtomicOrdering::Relaxed, |value| {
+        .try_update(AtomicOrdering::Relaxed, AtomicOrdering::Relaxed, |value| {
             Some(value.saturating_add(1))
         })
         .unwrap_or(usize::MAX)

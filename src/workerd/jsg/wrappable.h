@@ -19,6 +19,7 @@
 #include <kj/vector.h>
 
 #include <atomic>
+#include <typeinfo>
 
 // Niche value optimization for v8::TracedReference<T>. This teaches kj::Maybe to use
 // TracedReference's built-in empty state (IsEmpty()) as the "none" representation, eliminating
@@ -88,6 +89,7 @@ using kj::uint;
 
 class GcVisitor;
 class HeapTracer;
+class Object;
 class Wrappable;  // Forward declaration for WeakRefAnchor.
 
 // Shared alive/dead flag for weak references to Wrappable objects. Allocated lazily in
@@ -246,6 +248,14 @@ class Wrappable: public kj::Refcounted {
   // If `handle` was originally returned by attachOpaqueWrapper(), return the Wrappable it wraps.
   // Otherwise, return nullptr.
   static kj::Maybe<Wrappable&> tryUnwrapOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle);
+
+  // If this is a `jsg::Object`, return it, otherwise null. `Object` inherits `Wrappable`
+  // privately, which makes it impossible to `dynamic_cast` from a `Wrappable` to an `Object` (or
+  // to any of its subclasses); this hands the caller a pointer it can cast from. Named with the
+  // `jsg` prefix because it pollutes the namespace of JSG_RESOURCE types.
+  virtual Object* jsgTryGetObject() {
+    return nullptr;
+  }
 
   // Perform GC visitation. This is named with the `jsg` prefix because it pollutes the
   // namespace of JSG_RESOURCE types.
@@ -497,6 +507,51 @@ inline bool Wrappable::wasTracedInLastGc() const {
 // TODO(soon):
 // - Track memory usage of native objects.
 
+// Log the types involved in a failed downcast and abort.  Out-of-line and not
+// templated, to keep the code that unwrappers inline as small as possible.
+[[noreturn]] void reportWrapperTypeMismatch(
+    const std::type_info& expected, const std::type_info& actual);
+
+// Cast an `Object` that came from a wrapper to the type the callsite expects,
+// aborting if the object is not of that type.
+//
+// In-sandbox corruption may allow an attacker to confuse types.  An object's
+// RTTI lives outside the V8 sandbox, out of reach of such a substitution, so
+// use that to confirm the type instead.
+//
+// Defined in jsg.h, where `Object` is complete.
+template <typename T>
+T& downcastObject(Object& object);
+
+// Cast a `Wrappable` taken from a wrapper's internal field to the type the
+// callsite expects, aborting if the object is not of that type.
+template <typename T>
+T& downcastWrappable(Wrappable& wrappable) {
+  if constexpr (kj::canConvert<T&, Object&>()) {
+    // A `dynamic_cast` cannot start from `Wrappable`: the runtime check is
+    // specified to succeed only through a public base, so a
+    // privately-inherited one fails regardless of what access the callsite
+    // has. Every resource type reaches `T` through the public `Object` base,
+    // so start from there. This also lands on the correct address for a `T`
+    // that inherits `Object` at a non-zero offset, which a `reinterpret_cast`
+    // would not.
+    Object* object = wrappable.jsgTryGetObject();
+    if (object == nullptr) {
+      reportWrapperTypeMismatch(typeid(T), typeid(wrappable));
+    }
+    return downcastObject<T>(*object);
+  } else {
+    // Wrappables that are not `Object`s -- `WrappableFunction` and
+    // `OpaqueWrappable` -- inherit `Wrappable` publicly, so they can be cast
+    // directly.
+    T* result = dynamic_cast<T*>(&wrappable);
+    if (result == nullptr) {
+      reportWrapperTypeMismatch(typeid(T), typeid(wrappable));
+    }
+    return *result;
+  }
+}
+
 // Given a handle to a resource type, extract the raw C++ object pointer.
 template <typename T, bool isContext>
 T& extractInternalPointer(
@@ -516,7 +571,7 @@ T& extractInternalPointer(
     auto* ptr = object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
         static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
     KJ_ASSERT(ptr != nullptr, "EPT type-tag mismatch: internal field returned nullptr");
-    return *reinterpret_cast<T*>(ptr);
+    return downcastWrappable<T>(*reinterpret_cast<Wrappable*>(ptr));
   }
 }
 

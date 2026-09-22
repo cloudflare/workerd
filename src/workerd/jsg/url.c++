@@ -155,10 +155,10 @@ bool Url::equal(const Url& other, EquivalenceOption option) const {
     return *this == other;
   }
 
-  auto otherPathname = other.getPathname();
-  auto thisPathname = getPathname();
   kj::Array<const char> otherPathnameStore = nullptr;
   kj::Array<const char> thisPathnameStore = nullptr;
+  auto otherPathname = other.getPathname();
+  auto thisPathname = getPathname();
 
   if ((option & EquivalenceOption::NORMALIZE_PATH) == EquivalenceOption::NORMALIZE_PATH) {
     otherPathnameStore = normalizePathEncoding(otherPathname);
@@ -1392,7 +1392,6 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
       KJ_IF_SOME(prefix, maybePrefix) {
         if (prefix.size() > 0) {
           KJ_IF_SOME(c, options.prefix) {
-            kj::String s;
             if (prefix[0] != c) {
               appendToPendingFixedValue(prefix);
               maybePrefix = kj::none;

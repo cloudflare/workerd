@@ -58,6 +58,7 @@ const ErrorCtor = Error;
 const FinalizationRegistryCtor = FinalizationRegistry;
 const FunctionCtor = Function;
 const MapCtor = Map;
+const NumberCtor = Number;
 const ObjectCtor = Object;
 const PromiseCtor = Promise;
 const RangeErrorCtor = RangeError;
@@ -250,6 +251,7 @@ const StringPrototypeStartsWith = uncurryThis(String.prototype.startsWith);
 const SymbolIterator = Symbol.iterator;
 const SymbolAsyncIterator = Symbol.asyncIterator;
 const SymbolToStringTag = Symbol.toStringTag;
+const SymbolFor = Symbol.for;
 // Only the sync disposer is captured: JSG's guidance (jsg.h, JSG_DISPOSE) is to
 // implement Symbol.dispose and avoid defining Symbol.asyncDispose alongside it,
 // and no bootstrap class defines the async form.
@@ -386,8 +388,7 @@ const DataViewPrototypeGetByteLength = getProtoGetter<
 // lookups can't be confused via Object.prototype pollution. DataView is not
 // in this map (the getter returns undefined for it) — detect it separately
 // and use the DataView capture above.
-// Float16Array is enabled unconditionally via --js-float16array (jsg
-// setup.c++), so a plain capture is safe.
+// Float16Array is enabled unconditionally, so a plain capture is safe.
 const TypedArrayCtorByName = ObjectFreeze(
   ObjectSetPrototypeOf(
     {
@@ -634,6 +635,7 @@ const EventTargetRemoveEventListener = uncurryThis(
 
 const TextDecoderCtor = globalThis.TextDecoder;
 const TextEncoderCtor = globalThis.TextEncoder;
+const DOMException = globalThis.DOMException;
 
 const TextEncoderEncode = uncurryThis(TextEncoderCtor.prototype.encode) as (
   encoder: TextEncoder,
@@ -678,6 +680,7 @@ module.exports = ObjectFreeze({
   FinalizationRegistry: FinalizationRegistryCtor,
   Function: FunctionCtor,
   Map: MapCtor,
+  Number: NumberCtor,
   Object: ObjectCtor,
   Promise: PromiseCtor,
   RangeError: RangeErrorCtor,
@@ -733,6 +736,9 @@ module.exports = ObjectFreeze({
   ArrayPrototypeShift,
   ArrayPrototypeSlice,
   ArrayPrototypeSplice,
+
+  // DOMException
+  DOMException,
 
   // Map
   MapPrototypeGet,
@@ -813,6 +819,7 @@ module.exports = ObjectFreeze({
   // Symbol
   SymbolAsyncIterator,
   SymbolDispose,
+  SymbolFor,
   SymbolIterator,
   SymbolToStringTag,
 
