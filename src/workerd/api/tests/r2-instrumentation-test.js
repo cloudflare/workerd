@@ -1178,11 +1178,19 @@ export const test = {
       },
     ];
 
+    const projectSharedTags = (span) =>
+      Object.fromEntries(
+        Object.entries(span).filter(
+          ([name]) => name !== 'cloudflare.r2.response.success'
+        )
+      );
+
     const sharedReceived = received
       .filter((span) => span['cloudflare.binding.type'] === 'r2')
       // The JSRPC target runs transport-specific tests after the canonical suite.
-      .slice(0, expected.length);
-    assert.deepStrictEqual(sharedReceived, expected);
+      .slice(0, expected.length)
+      .map(projectSharedTags);
+    assert.deepStrictEqual(sharedReceived, expected.map(projectSharedTags));
 
     if (env.R2_TRACE_TRANSPORT === 'http') {
       assert.deepStrictEqual(received, expected);

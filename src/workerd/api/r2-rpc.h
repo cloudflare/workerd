@@ -13,10 +13,6 @@ namespace kj {
 class HttpClient;
 }
 
-namespace workerd {
-class TraceContext;
-}
-
 namespace workerd::api {
 
 class ReadableStreamSource;
@@ -24,59 +20,6 @@ class ReadableStreamSource;
 // JsRpcPromise is a custom thenable. Resolving a fresh promise with it makes V8 adopt it even when
 // the unwrap_custom_thenables compatibility flag is disabled.
 jsg::Promise<jsg::Value> normalizeR2RpcPromise(jsg::Lock& js, jsg::Value rpcPromise);
-
-struct R2RpcBackendError {
-  uint v4Code;
-  kj::String message;
-};
-
-struct R2RpcResponseInfo {
-  uint httpStatus;
-  kj::Maybe<R2RpcBackendError> error;
-};
-
-struct R2RpcEnvelope {
-  bool success;
-  R2RpcResponseInfo response;
-  kj::Maybe<jsg::Value> results;
-  kj::Maybe<jsg::Value> error;
-};
-
-// Use when a malformed envelope cannot leave resources in the raw result that require cleanup.
-jsg::Promise<R2RpcEnvelope> unwrapR2RpcEnvelopePromise(jsg::Lock& js, jsg::Value rpcPromise);
-
-// Use when a malformed envelope may contain resources that must be cleaned up before propagating
-// the parsing error, such as the live body stream in an R2 GET result.
-jsg::Promise<R2RpcEnvelope> unwrapR2RpcEnvelopePromise(jsg::Lock& js,
-    jsg::Value rpcPromise,
-    kj::Function<jsg::Promise<void>(jsg::Lock&, jsg::Value)> cleanup);
-
-void addR2ResponseSpanTags(TraceContext& traceContext, const R2RpcResponseInfo& response);
-
-template <typename Result>
-jsg::Promise<Result> decodeR2RpcResult(jsg::Lock& js,
-    R2RpcEnvelope envelope,
-    TraceContext& traceContext,
-    const jsg::TypeHandler<jsg::Promise<Result>>& resultPromiseHandler) {
-  addR2ResponseSpanTags(traceContext, envelope.response);
-  if (!envelope.success) {
-    js.throwException(kj::mv(KJ_ASSERT_NONNULL(envelope.error)));
-  }
-
-  auto value = kj::mv(KJ_ASSERT_NONNULL(envelope.results));
-  if constexpr (kj::isSameType<Result, void>()) {
-    KJ_REQUIRE(value.getHandle(js)->IsNull(), "Malformed R2 void RPC result.");
-    return js.resolvedPromise();
-  } else {
-    auto fulfilled = js.resolvedPromise(kj::mv(value));
-    auto parsed =
-        KJ_ASSERT_NONNULL(resultPromiseHandler.tryUnwrap(js, fulfilled.consumeHandle(js)));
-    return parsed.catch_(js, [](jsg::Lock& js, jsg::Value error) -> Result {
-      auto exception = js.exceptionToKj(kj::mv(error));
-      KJ_FAIL_ASSERT("Malformed R2 RPC result.", exception);
-    });
-  }
-}
 
 template <typename... Args>
 jsg::Value callR2RpcMethod(jsg::Lock& js,
@@ -211,8 +154,6 @@ struct R2Result {
   kj::Maybe<kj::String> getR2ErrorMessage();
   void throwIfError(kj::StringPtr action, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 };
-
-void addR2ResponseSpanTags(TraceContext& traceContext, R2Result& r2Result);
 
 kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
     kj::String metadataPayload,

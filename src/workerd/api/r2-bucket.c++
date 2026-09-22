@@ -449,6 +449,17 @@ static void addHttpMetadataRequestSpanTags(
   }
 }
 
+static void addR2ResponseSpanTags(TraceContext& traceContext, R2Result& r2Result) {
+  traceContext.setTag("cloudflare.r2.response.success"_kjc, r2Result.success());
+  KJ_IF_SOME(e, r2Result.getR2ErrorMessage()) {
+    traceContext.setTag("error.type"_kjc, e.asPtr());
+    traceContext.setTag("cloudflare.r2.error.message"_kjc, e.asPtr());
+  }
+  KJ_IF_SOME(v4, r2Result.v4ErrorCode()) {
+    traceContext.setTag("cloudflare.r2.error.code"_kjc, static_cast<int64_t>(v4));
+  }
+}
+
 void addHeadResultSpanTags(
     jsg::Lock& js, TraceContext& traceContext, R2Bucket::HeadResult& headResult) {
   traceContext.setTag("cloudflare.r2.response.etag"_kjc, headResult.getEtag());
@@ -683,35 +694,6 @@ jsg::Ref<R2Bucket::HeadResult> headResultFromRpc(
       kj::mv(rpc.storageClass), kj::mv(rpc.ssecKeyMd5));
 }
 
-// A malformed RPC envelope can still contain a live GET result body. This helper decodes the
-// results field to ensure the body is canceled before propagating the envelope error.
-jsg::Promise<void> cancelMalformedR2RpcGetBody(jsg::Lock& js,
-    jsg::Value raw,
-    const jsg::TypeHandler<jsg::Promise<kj::Maybe<R2Bucket::GetResultRpc>>>& getResultHandler) {
-  auto value = raw.getHandle(js);
-  if (!value->IsObject() || value->IsArray() || value->IsFunction()) {
-    return js.resolvedPromise();
-  }
-  auto object = value.As<v8::Object>();
-  auto results =
-      jsg::check(object->Get(js.v8Context(), jsg::v8StrIntern(js.v8Isolate, "results"_kj)));
-  if (results->IsUndefined()) return js.resolvedPromise();
-
-  auto fulfilled = js.resolvedPromise(jsg::Value(js.v8Isolate, results));
-  auto parsed = KJ_ASSERT_NONNULL(getResultHandler.tryUnwrap(js, fulfilled.consumeHandle(js)));
-  return parsed.then(
-      js, [](jsg::Lock& js, kj::Maybe<R2Bucket::GetResultRpc> result) -> jsg::Promise<void> {
-    KJ_IF_SOME(rpc, result) {
-      KJ_IF_SOME(body, rpc.body) {
-        return body.forceCancel(js,
-            js.error("Stream cancelled because the R2 gateway returned a malformed response "
-                     "envelope."));
-      }
-    }
-    return js.resolvedPromise();
-  });
-}
-
 jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::headRpc(jsg::Lock& js,
     kj::String key,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
@@ -720,24 +702,19 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::headRpc(jsg::L
   return js.evalNow([&] {
     TraceContext traceContext = makeR2TraceContext("r2_head"_kjc, "HeadObject"_kjc, key.asPtr());
 
-    auto raw = callR2RpcMethod(
-        js, getRpcMethod(js, "head"_kj), rpcPropHandler, headFnHandler, kj::mv(key));
-    return unwrapR2RpcEnvelopePromise(js, kj::mv(raw))
+    return callR2RpcMethod<kj::Maybe<HeadResultRpc>>(js, getRpcMethod(js, "head"_kj),
+        rpcPropHandler, headFnHandler, headResultHandler, kj::mv(key))
         .then(js,
-            [&headResultHandler, traceContext = kj::mv(traceContext)](
-                jsg::Lock& js, R2RpcEnvelope envelope) mutable {
-      auto decoded = decodeR2RpcResult<kj::Maybe<HeadResultRpc>>(
-          js, kj::mv(envelope), traceContext, headResultHandler);
-      return decoded.then(js,
-          [traceContext = kj::mv(traceContext)](jsg::Lock& js,
-              kj::Maybe<HeadResultRpc> parsed) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
-        KJ_IF_SOME(rpc, parsed) {
-          auto result = headResultFromRpc(js, kj::mv(rpc));
-          addHeadResultSpanTags(js, traceContext, *result.get());
-          return kj::mv(result);
-        }
-        return kj::none;
-      });
+            [traceContext = kj::mv(traceContext)](jsg::Lock& js,
+                kj::Maybe<HeadResultRpc> parsed) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
+      // A missing object is null, not an error: the gateway maps the 404 that
+      // R2Result::objectNotFound() used to represent onto a null return.
+      KJ_IF_SOME(rpc, parsed) {
+        auto result = headResultFromRpc(js, kj::mv(rpc));
+        addHeadResultSpanTags(js, traceContext, *result.get());
+        return kj::mv(result);
+      }
+      return kj::none;
     });
   });
 }
@@ -835,68 +812,58 @@ R2Bucket::getRpc(jsg::Lock& js,
       rpcOptions = kj::mv(normalized);
     }
 
-    auto raw = callR2RpcMethod(js, getRpcMethod(js, "get"_kj), rpcPropHandler, getFnHandler,
-        kj::mv(key), kj::mv(rpcOptions));
-    return unwrapR2RpcEnvelopePromise(js, kj::mv(raw),
-        [&getResultHandler](jsg::Lock& js, jsg::Value raw) {
-      return cancelMalformedR2RpcGetBody(js, kj::mv(raw), getResultHandler);
-    })
+    return callR2RpcMethod<kj::Maybe<GetResultRpc>>(js, getRpcMethod(js, "get"_kj), rpcPropHandler,
+        getFnHandler, getResultHandler, kj::mv(key), kj::mv(rpcOptions))
         .then(js,
-            [&getResultHandler, traceContext = kj::mv(traceContext)](
-                jsg::Lock& js, R2RpcEnvelope envelope) mutable {
-      auto decoded = decodeR2RpcResult<kj::Maybe<GetResultRpc>>(
-          js, kj::mv(envelope), traceContext, getResultHandler);
-      return decoded.then(js,
-          [traceContext = kj::mv(traceContext)](
-              jsg::Lock& js, kj::Maybe<GetResultRpc> parsed) mutable
-          -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
-        KJ_IF_SOME(rpc, parsed) {
-          if (rpc.kind == "metadata") {
-            KJ_IF_SOME(body, rpc.body) {
-              body.forceCancel(
-                  js, js.error("Malformed R2 get RPC result: metadata result had a body."));
-              KJ_FAIL_ASSERT("Malformed R2 get RPC result: metadata result had a body.");
-            }
-            auto result = headResultFromRpc(js, kj::mv(rpc.object), MissingMetadataPolicy::EMPTY);
-            addHeadResultSpanTags(js, traceContext, *result.get());
-            return kj::mv(result);
-          }
-          if (rpc.kind == "body") {
-            auto body = KJ_ASSERT_NONNULL(
-                kj::mv(rpc.body), "Malformed R2 get RPC result: body result did not have a body.");
-            auto cancelReader = kj::defer([&] {
-              body.forceCancel(js, js.error("Malformed R2 get RPC result.")).markAsHandled(js);
-            });
-            auto object = headResultFromRpc(js, kj::mv(rpc.object), MissingMetadataPolicy::EMPTY);
-            // retrieve body length from range/size metadata to avoid depending on the stream to report its length
-            auto bodyLength = object->size;
-            KJ_IF_SOME(range, object->range) {
-              bodyLength = range.length.orDefault(bodyLength);
-            }
-            KJ_ASSERT(bodyLength <= 9007199254740991ull,
-                "Malformed R2 get RPC result: body length must be a safe integer.");
-            auto& context = IoContext::current();
-            auto pipe = newIdentityPipe(static_cast<uint64_t>(bodyLength));
-            auto pump =
-                context.waitForDeferredProxy(body.pumpTo(js, kj::mv(pipe.out), EndStream::YES));
-            body = JsReadableStream::create(
-                js, context, kj::heap<R2GetBodyStream>(kj::mv(pipe.in), kj::mv(pump)));
-            cancelReader.cancel();
-            auto result = js.alloc<GetResult>(kj::mv(object->name), kj::mv(object->version),
-                object->size, kj::mv(object->etag), kj::mv(object->checksums), object->uploaded,
-                kj::mv(object->httpMetadata), kj::mv(object->customMetadata), kj::mv(object->range),
-                kj::mv(object->storageClass), kj::mv(object->ssecKeyMd5), kj::mv(body));
-            addHeadResultSpanTags(js, traceContext, *result.get());
-            return kj::Maybe<jsg::Ref<GetResult>>(kj::mv(result));
-          }
-
+            [traceContext = kj::mv(traceContext)](
+                jsg::Lock& js, kj::Maybe<GetResultRpc> parsed) mutable
+            -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
+      KJ_IF_SOME(rpc, parsed) {
+        if (rpc.kind == "metadata") {
           KJ_IF_SOME(body, rpc.body) {
-            body.forceCancel(js, js.error("Malformed R2 get RPC result: unknown result kind."));
+            body.forceCancel(
+                js, js.error("Malformed R2 get RPC result: metadata result had a body."));
+            KJ_FAIL_ASSERT("Malformed R2 get RPC result: metadata result had a body.");
           }
-          KJ_FAIL_ASSERT("Malformed R2 get RPC result: unknown result kind ", rpc.kind, ".");
+          auto result = headResultFromRpc(js, kj::mv(rpc.object), MissingMetadataPolicy::EMPTY);
+          addHeadResultSpanTags(js, traceContext, *result.get());
+          return kj::mv(result);
         }
-        return kj::Maybe<jsg::Ref<GetResult>>(kj::none);
-      });
+        if (rpc.kind == "body") {
+          auto body = KJ_ASSERT_NONNULL(
+              kj::mv(rpc.body), "Malformed R2 get RPC result: body result did not have a body.");
+          auto cancelReader = kj::defer([&] {
+            body.forceCancel(js, js.error("Malformed R2 get RPC result.")).markAsHandled(js);
+          });
+          auto object = headResultFromRpc(js, kj::mv(rpc.object), MissingMetadataPolicy::EMPTY);
+          // retrieve body length from range/size metadata to avoid depending on the stream to report its length
+          auto bodyLength = object->size;
+          KJ_IF_SOME(range, object->range) {
+            bodyLength = range.length.orDefault(bodyLength);
+          }
+          KJ_ASSERT(bodyLength <= 9007199254740991ull,
+              "Malformed R2 get RPC result: body length must be a safe integer.");
+          auto& context = IoContext::current();
+          auto pipe = newIdentityPipe(static_cast<uint64_t>(bodyLength));
+          auto pump =
+              context.waitForDeferredProxy(body.pumpTo(js, kj::mv(pipe.out), EndStream::YES));
+          body = JsReadableStream::create(
+              js, context, kj::heap<R2GetBodyStream>(kj::mv(pipe.in), kj::mv(pump)));
+          cancelReader.cancel();
+          auto result = js.alloc<GetResult>(kj::mv(object->name), kj::mv(object->version),
+              object->size, kj::mv(object->etag), kj::mv(object->checksums), object->uploaded,
+              kj::mv(object->httpMetadata), kj::mv(object->customMetadata), kj::mv(object->range),
+              kj::mv(object->storageClass), kj::mv(object->ssecKeyMd5), kj::mv(body));
+          addHeadResultSpanTags(js, traceContext, *result.get());
+          return kj::Maybe<jsg::Ref<GetResult>>(kj::mv(result));
+        }
+
+        KJ_IF_SOME(body, rpc.body) {
+          body.forceCancel(js, js.error("Malformed R2 get RPC result: unknown result kind."));
+        }
+        KJ_FAIL_ASSERT("Malformed R2 get RPC result: unknown result kind ", rpc.kind, ".");
+      }
+      return kj::Maybe<jsg::Ref<GetResult>>(kj::none);
     });
   });
 }
@@ -908,21 +875,15 @@ jsg::Promise<void> R2Bucket::deleteRpc(jsg::Lock& js,
         deleteFnHandler,
     const jsg::TypeHandler<jsg::Promise<void>>& deleteResultHandler) {
   return js.evalNow([&] {
+    auto& context = IoContext::current();
     TraceContext traceContext = makeR2TraceContext("r2_delete"_kjc, "DeleteObject"_kjc);
     traceContext.setTag("cloudflare.r2.request.keys"_kjc, kj::str(keys));
 
     // The result is discarded, matching delete_: a missing key is success, and per-key failures in
     // a batch delete are reported in a body the binding has never read.
-    auto raw = callR2RpcMethod(
-        js, getRpcMethod(js, "delete"_kj), rpcPropHandler, deleteFnHandler, kj::mv(keys));
-    return unwrapR2RpcEnvelopePromise(js, kj::mv(raw))
-        .then(js,
-            [&deleteResultHandler, traceContext = kj::mv(traceContext)](
-                jsg::Lock& js, R2RpcEnvelope envelope) mutable {
-      auto decoded =
-          decodeR2RpcResult<void>(js, kj::mv(envelope), traceContext, deleteResultHandler);
-      return IoContext::current().attachSpans(js, kj::mv(decoded), kj::mv(traceContext));
-    });
+    auto promise = callR2RpcMethod<void>(js, getRpcMethod(js, "delete"_kj), rpcPropHandler,
+        deleteFnHandler, deleteResultHandler, kj::mv(keys));
+    return context.attachSpans(js, kj::mv(promise), kj::mv(traceContext));
   });
 }
 
@@ -1057,23 +1018,18 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lo
     traceContext.setTag("cloudflare.r2.request.size"_kjc, static_cast<int64_t>(valueSize));
     cancelReader.cancel();
 
-    auto raw = putFn(js, kj::mv(key), kj::mv(rpcValue), kj::mv(rpcOptions), valueSize);
-    return unwrapR2RpcEnvelopePromise(js, kj::mv(raw))
-        .then(js,
-            [&putResultHandler, traceContext = kj::mv(traceContext)](
-                jsg::Lock& js, R2RpcEnvelope envelope) mutable {
-      auto decoded = decodeR2RpcResult<kj::Maybe<HeadResultRpc>>(
-          js, kj::mv(envelope), traceContext, putResultHandler);
-      return decoded.then(js,
-          [traceContext = kj::mv(traceContext)](jsg::Lock& js,
-              kj::Maybe<HeadResultRpc> parsed) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
-        KJ_IF_SOME(rpc, parsed) {
-          auto result = headResultFromRpc(js, kj::mv(rpc));
-          addHeadResultSpanTags(js, traceContext, *result.get());
-          return kj::mv(result);
-        }
-        return kj::none;
-      });
+    auto rpcPromise = putFn(js, kj::mv(key), kj::mv(rpcValue), kj::mv(rpcOptions), valueSize);
+    auto promise =
+        unwrapR2RpcPromise<kj::Maybe<HeadResultRpc>>(js, kj::mv(rpcPromise), putResultHandler);
+    return promise.then(js,
+        [traceContext = kj::mv(traceContext)](jsg::Lock& js,
+            kj::Maybe<HeadResultRpc> parsed) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
+      KJ_IF_SOME(rpc, parsed) {
+        auto result = headResultFromRpc(js, kj::mv(rpc));
+        addHeadResultSpanTags(js, traceContext, *result.get());
+        return kj::mv(result);
+      }
+      return kj::none;
     });
   });
 }
@@ -1120,22 +1076,16 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUploadRpc(jsg
       }
     }
 
-    auto raw = callR2RpcMethod(js, getRpcMethod(js, "createMultipartUpload"_kj), rpcPropHandler,
-        createFnHandler, kj::str(key), kj::mv(options));
-    return unwrapR2RpcEnvelopePromise(js, kj::mv(raw))
-        .then(js,
-            [&uploadIdResultHandler, bucket = JSG_THIS, key = kj::mv(key),
-                metadata = kj::mv(metadata), traceContext = kj::mv(traceContext)](
-                jsg::Lock& js, R2RpcEnvelope envelope) mutable {
-      auto decoded =
-          decodeR2RpcResult<kj::String>(js, kj::mv(envelope), traceContext, uploadIdResultHandler);
-      return decoded.then(js,
-          [bucket = kj::mv(bucket), key = kj::mv(key), metadata = kj::mv(metadata),
-              traceContext = kj::mv(traceContext)](jsg::Lock& js, kj::String uploadId) mutable {
-        traceContext.setTag("cloudflare.r2.response.upload_id"_kjc, uploadId.asPtr());
-        return js.alloc<R2MultipartUpload>(
-            kj::mv(key), kj::mv(uploadId), kj::mv(bucket), kj::mv(metadata));
-      });
+    auto uploadIdPromise =
+        callR2RpcMethod<kj::String>(js, getRpcMethod(js, "createMultipartUpload"_kj),
+            rpcPropHandler, createFnHandler, uploadIdResultHandler, kj::str(key), kj::mv(options));
+
+    return uploadIdPromise.then(js,
+        [bucket = JSG_THIS, key = kj::mv(key), metadata = kj::mv(metadata),
+            traceContext = kj::mv(traceContext)](jsg::Lock& js, kj::String uploadId) mutable {
+      traceContext.setTag("cloudflare.r2.response.upload_id"_kjc, uploadId.asPtr());
+      return js.alloc<R2MultipartUpload>(
+          kj::mv(key), kj::mv(uploadId), kj::mv(bucket), kj::mv(metadata));
     });
   });
 }
@@ -1737,31 +1687,24 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::listRpc(jsg::Lock& js,
       rpcOptions = kj::mv(normalized);
     }
 
-    auto raw = callR2RpcMethod(
-        js, getRpcMethod(js, "list"_kj), rpcPropHandler, listFnHandler, kj::mv(rpcOptions));
-    return unwrapR2RpcEnvelopePromise(js, kj::mv(raw))
+    return callR2RpcMethod<ListResultRpc>(js, getRpcMethod(js, "list"_kj), rpcPropHandler,
+        listFnHandler, listResultHandler, kj::mv(rpcOptions))
         .then(js,
-            [&listResultHandler, traceContext = kj::mv(traceContext)](
-                jsg::Lock& js, R2RpcEnvelope envelope) mutable {
-      auto decoded =
-          decodeR2RpcResult<ListResultRpc>(js, kj::mv(envelope), traceContext, listResultHandler);
-      return decoded.then(js,
-          [traceContext = kj::mv(traceContext)](
-              jsg::Lock& js, ListResultRpc rpc) mutable -> ListResult {
-        ListResult result;
-        result.objects = KJ_MAP(object, rpc.objects) {
-          return headResultFromRpc(js, kj::mv(object), MissingMetadataPolicy::ABSENT);
-        };
-        result.truncated = rpc.truncated;
-        KJ_IF_SOME(cursor, rpc.cursor) {
-          result.cursor = kj::mv(cursor);
-        }
-        result.delimitedPrefixes =
-            kj::mv(rpc.delimitedPrefixes).orDefault(kj::heapArray<kj::String>(0));
+            [traceContext = kj::mv(traceContext)](
+                jsg::Lock& js, ListResultRpc rpc) mutable -> ListResult {
+      ListResult result;
+      result.objects = KJ_MAP(object, rpc.objects) {
+        return headResultFromRpc(js, kj::mv(object), MissingMetadataPolicy::ABSENT);
+      };
+      result.truncated = rpc.truncated;
+      KJ_IF_SOME(cursor, rpc.cursor) {
+        result.cursor = kj::mv(cursor);
+      }
+      result.delimitedPrefixes =
+          kj::mv(rpc.delimitedPrefixes).orDefault(kj::heapArray<kj::String>(0));
 
-        addListResultSpanTags(traceContext, result);
-        return kj::mv(result);
-      });
+      addListResultSpanTags(traceContext, result);
+      return kj::mv(result);
     });
   });
 }
