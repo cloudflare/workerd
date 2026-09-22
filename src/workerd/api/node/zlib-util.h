@@ -641,6 +641,9 @@ class ZlibUtil final: public jsg::Object {
     JSG_STATIC_CONSTANT_NAMED(
         CONST_ZSTD_error_noForwardProgress_inputEmpty, ZSTD_error_noForwardProgress_inputEmpty);
   }
+
+  // Stateless: a worker that imports `node:zlib` at top level retains this instance.
+  JSG_SNAPSHOT_RESTORE(ZlibUtil);
 };
 
 #define EW_NODE_ZLIB_ISOLATE_TYPES                                                                 \
