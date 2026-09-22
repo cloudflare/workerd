@@ -30,7 +30,6 @@ namespace workerd::api::node {
 
 #define NODEJS_MODULES(V)                                                                          \
   V(AsyncHooksModule, "node-internal:async_hooks")                                                 \
-  V(BufferUtil, "node-internal:buffer")                                                            \
   V(CryptoImpl, "node-internal:crypto")                                                            \
   V(ModuleUtil, "node-internal:module")                                                            \
   V(ProcessModule, "node-internal:process")                                                        \
@@ -83,6 +82,17 @@ constexpr bool isNodeConsoleModule(kj::StringPtr name) {
   return name == "node:console"_kj;
 }
 
+// `node-internal:buffer` has both a C++ (`BufferUtil`) and a TypeScript
+// implementation, the latter in the NODE_BUNDLE and backed by the Rust
+// `node-internal:buffer_native` module. The NODEJS_BUFFER_TS autogate selects the
+// TypeScript one; exactly one of the two registers the `node-internal:buffer`
+// specifier.
+constexpr kj::StringPtr kNodeBufferSpecifier = "node-internal:buffer"_kj;
+
+inline bool useTsBuffer() {
+  return util::Autogate::isEnabled(util::AutogateKey::NODEJS_BUFFER_TS);
+}
+
 template <class Registry>
 void addNodeJsCompatModule(
     Registry& registry, jsg::Module::Reader module, const ModuleSource* moduleSource) {
@@ -126,10 +136,19 @@ void registerNodeJsCompatModules(
     registry.template addBuiltinModule<UrlUtil>(
         "node-internal:url", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   }
+  bool tsBuffer = useTsBuffer();
+  if (!tsBuffer) {
+    registry.template addBuiltinModule<BufferUtil>(
+        kNodeBufferSpecifier, workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  }
 
   bool nodeJsCompatEnabled = isNodeJsCompatEnabled(featureFlags);
 
   registry.addBuiltinBundleFiltered(NODE_BUNDLE, [&](jsg::Module::Reader module) {
+    if (module.getName() == kNodeBufferSpecifier) {
+      return tsBuffer;
+    }
+
     if (!nodeJsCompatEnabled) {
       // If the `nodejs_compat` flag isn't enabled, only register internal modules.
       // We need these for `console.log()`ing when running `workerd` locally.
@@ -254,6 +273,9 @@ void registerNodeJsCompatModules(
   if (useRustUrl) {
     ::workerd::rust::api::register_nodejs_url_module(r);
   }
+  if (tsBuffer) {
+    ::workerd::rust::api::register_nodejs_buffer_native_module(r);
+  }
 }
 
 template <class TypeWrapper>
@@ -277,13 +299,21 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
     static const auto kUrlUtilSpecifier = "node-internal:url"_url;
     builder.addObject<UrlUtil, TypeWrapper>(kUrlUtilSpecifier);
   }
+  // See registerNodeJsCompatModules(): the NODEJS_BUFFER_TS autogate selects
+  // between the C++ and TypeScript implementations of `node-internal:buffer`.
+  bool tsBuffer = useTsBuffer();
+  if (!tsBuffer) {
+    static const auto kBufferUtilSpecifier = "node-internal:buffer"_url;
+    builder.addObject<BufferUtil, TypeWrapper>(kBufferUtilSpecifier);
+  }
+  auto filter = [tsBuffer](jsg::Module::Reader module) {
+    return tsBuffer || module.getName() != kNodeBufferSpecifier;
+  };
 
   if (moduleSource == nullptr) {
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(
-        builder, NODE_BUNDLE, [](jsg::Module::Reader) { return true; });
+    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE, kj::mv(filter));
   } else {
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE,
-        [](jsg::Module::Reader) { return true; },
+    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE, kj::mv(filter),
         [&](jsg::Module::Reader module) { return moduleSource->get(module.getSrc().asChars()); });
   }
 
@@ -297,6 +327,9 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
     ::workerd::rust::api::register_nodejs_modules(adapter);
     if (useRustUrl) {
       ::workerd::rust::api::register_nodejs_url_module(adapter);
+    }
+    if (tsBuffer) {
+      ::workerd::rust::api::register_nodejs_buffer_native_module(adapter);
     }
   }
 
@@ -419,6 +452,9 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
     ::workerd::rust::api::register_nodejs_modules(adapter);
     if (util::Autogate::isEnabled(util::AutogateKey::NODEJS_URL_RUST)) {
       ::workerd::rust::api::register_nodejs_url_module(adapter);
+    }
+    if (useTsBuffer()) {
+      ::workerd::rust::api::register_nodejs_buffer_native_module(adapter);
     }
   }
   return builder.finish();
