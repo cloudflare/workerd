@@ -9,7 +9,6 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/release-version.embed.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/server/cli-io-backend.h>
 #include <workerd/server/cpp-capnp-schema.embed.h>
 #include <workerd/server/json-logger.h>
 #include <workerd/server/v8-platform-impl.h>
@@ -20,6 +19,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <kj-rs-io/async-io.h>
 #ifdef __linux__
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -180,7 +180,7 @@ class SchemaFileImpl final: public capnp::SchemaFile {
       kj::PathPtr basePath,
       kj::ArrayPtr<const kj::Path> importPath,
       kj::Own<const kj::ReadableFile> fileParam,
-      kj::Maybe<FileWatcher&> watcher,
+      kj::Maybe<kj_rs_io::FileWatcher&> watcher,
       ErrorReporter& errorReporter)
       : root(root),
         current(current),
@@ -199,7 +199,7 @@ class SchemaFileImpl final: public capnp::SchemaFile {
     }
 
     KJ_IF_SOME(w, watcher) {
-      w.watch(fullPath, *file);
+      w.watch(fullPath);
     }
   }
 
@@ -278,7 +278,7 @@ class SchemaFileImpl final: public capnp::SchemaFile {
   // Mutable because the SchemaParser interface forces us to make all our methods `const` so that
   // parsing can happen on multiple threads, but we do not actually use multiple threads for
   // parsing, so we're good.
-  mutable kj::Maybe<FileWatcher&> watcher;
+  mutable kj::Maybe<kj_rs_io::FileWatcher&> watcher;
 
   ErrorReporter& errorReporter;
 };
@@ -943,16 +943,18 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   }
 
   void watch() {
-    FileWatcher& w = *watcher.emplace(makeFileWatcher(io));
-    if (!w.isSupported()) {
-      CLI_ERROR("File watching is not yet implemented on your OS. Sorry! Pull requests welcome!");
-    }
-
+#if _WIN32
+    // The watcher itself works on Windows, but --watch's reload (reloadFromConfigChange(), a
+    // re-exec) is not implemented there yet, so the feature as a whole is not.
+    CLI_ERROR("File watching is not yet implemented on your OS. Sorry! Pull requests welcome!");
+#else
+    auto& w = *watcher.emplace(kj::heap<kj_rs_io::FileWatcher>());
     KJ_IF_SOME(e, exeInfo) {
-      w.watch(fs->getCurrentPath().eval(e.path), kj::none);
+      w.watch(fs->getCurrentPath().eval(e.path));
     } else {
       CLI_ERROR("Can't use --watch when we're unable to find our own executable.");
     }
+#endif
   }
 
   void parseConfigFile(kj::StringPtr pathStr) {
@@ -999,7 +1001,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 
         parsedSchema = schemaParser.parseFile(kj::heap<SchemaFileImpl>(fs->getRoot(),
             fs->getCurrentPath(), kj::mv(path), nullptr, importPath, kj::mv(file),
-            watcher.map([](kj::Own<FileWatcher>& w) -> FileWatcher& { return *w; }), *this));
+            watcher.map(
+                [](kj::Own<kj_rs_io::FileWatcher>& w) -> kj_rs_io::FileWatcher& { return *w; }),
+            *this));
 
         // Construct a list of top-level constants of type `Config`. If there is exactly one,
         // we can use it by default.
@@ -1249,8 +1253,8 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       return server->run(v8System, config);
 #else
       return server->run(v8System, config,
-          // Gracefully drain when SIGTERM is received (backend-specific; see cli-io-backend.h).
-          onSigterm(io));
+          // Gracefully drain when SIGTERM is received.
+          kj_rs_io::onSignal(SIGTERM));
 #endif
     });
   }
@@ -1345,7 +1349,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   bool gcStress = false;
   bool allAutogates = false;
   kj::Maybe<kj::String> testCompatDate;
-  kj::Maybe<kj::Own<FileWatcher>> watcher;
+  kj::Maybe<kj::Own<kj_rs_io::FileWatcher>> watcher;
 
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();
   kj::AsyncIoContext io = kj::setupAsyncIo();
@@ -1492,13 +1496,13 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   }
 
 #if _WIN32
-  kj::Promise<void> waitForChanges(FileWatcher& watcher) {
+  kj::Promise<void> waitForChanges(kj_rs_io::FileWatcher& watcher) {
     KJ_UNIMPLEMENTED("Watching is not yet implemented on Windows");
   }
 #else
   // Wait for the FileWatcher to report a change, and then wait a moment for changes to settle
   // down, in case there's a bunch of changes all at once.
-  kj::Promise<void> waitForChanges(FileWatcher& watcher) {
+  kj::Promise<void> waitForChanges(kj_rs_io::FileWatcher& watcher) {
     co_await watcher.onChange();
 
     // Saw our first change!
@@ -1538,9 +1542,6 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 int main(int argc, char* argv[]) {
   workerd::server::StructuredLoggingProcessContext context(argv[0]);
 
-#if !_WIN32
-  workerd::server::captureSigterm();
-#endif
   workerd::server::CliMain mainObject(context, argv);
 
 #if defined(WORKERD_FUZZILLI) && defined(__linux__)

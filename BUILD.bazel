@@ -134,44 +134,6 @@ bool_flag(
     build_setting_default = True,
 )
 
-# =============================================================================
-# I/O backend selection: a build/compile/link-time hermeticity guarantee.
-#
-#   --//:io_backend=rust  (default) -- the rust I/O layer: the process event loop is tokio
-#                         (kj-rs-tokio) and every socket/stream is tokio-backed (kj-rs-io); the
-#                         C++ layers above the streams (kj-http, kj-tls, capnp-rpc) are unchanged
-#                         and run over those tokio streams. In this config kj's own OS-I/O
-#                         layer (kj-async-os) must be ABSENT from the link: checked on the
-#                         dependency graph by build/rust_io_graph_check.sh and on the linked
-#                         binary by //src/workerd/server:rust-io-link-check.
-#   --//:io_backend=cxx   -- workerd's I/O is the concrete C++ stack end to end, including the
-#                         kj OS event loop and sockets. Byte-identical to the pre-migration
-#                         build.
-#
-# Code that must differ per backend keys off the WORKERD_RUST_IO_BACKEND_RUST define (see
-# //src/workerd/util:setup-async-io) or off the config_settings below in a select().
-string_flag(
-    name = "io_backend",
-    build_setting_default = "rust",
-    values = [
-        "cxx",
-        "rust",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "io_backend_rust",
-    flag_values = {":io_backend": "rust"},
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "io_backend_cxx",
-    flag_values = {":io_backend": "cxx"},
-    visibility = ["//visibility:public"],
-)
-
 config_setting(
     name = "set_dead_strip",
     flag_values = {"dead_strip": "True"},

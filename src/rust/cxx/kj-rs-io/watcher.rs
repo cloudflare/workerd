@@ -1,8 +1,8 @@
 //! The `--watch` file watcher, over the `notify` crate (inotify on Linux, `FSEvents` on macOS,
 //! `ReadDirectoryChangesW` on Windows).
 //!
-//! workerd's `TokioFileWatcher` (server/cli-io-backend.c++) holds this directly through the three
-//! bridged calls in ffi.rs; it is the tokio-loop replacement for workerd's native watcher. The design in one sentence: **the backend says "look again"; the files say
+//! `kj_rs_io::FileWatcher` (async-io.h) wraps this for C++ through the three bridged calls in
+//! ffi.rs; workerd's `--watch` uses it. The design in one sentence: **the backend says "look again"; the files say
 //! what changed.**
 //!
 //! - Each watched file's *parent directory* is watched (non-recursively), and, when the path is a

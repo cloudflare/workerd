@@ -52,9 +52,19 @@ interface DecompressionStream {
 - **Eager push:** write() feeds the codec and settles when the codec has
   consumed the chunk — no read demand needed (not the identity rendezvous,
   not the encoding suite's HWM-0 demand-driven transform). Output buffers
-  unboundedly on the readable side; a parked read is served as soon as any
-  output exists (for deflate: the 2-byte zlib header from the first write,
-  the rest at close-time flush).
+  unboundedly on the readable side (TypeScript: the readable's queue, which
+  the sink drains the codec's output into before the write settles; C++:
+  the codec's buffer); a parked read is served as soon as any output exists
+  (for deflate: the 2-byte zlib header from the first write, the rest at
+  close-time flush).
+- **Delivery (#16):** a default read receives a bounded piece of a write's
+  output — at most 64 KiB under TypeScript (the size of the chunks the sink
+  queues), the internal-stream read buffer under C++ (4 KiB; 16 KiB under
+  the `updated-auto-allocate-chunk-size` autogate) — and a BYOB read fills
+  its view in both. A write's output is never a single JS chunk, however
+  large. Output produced before a trailing-junk error goes to the waiting
+  reads first under TypeScript (one piece each; WPT
+  decompression-extra-input); C++ rejects the waiting read (#17).
 - **Snapshot at write:** the codec consumes a copy taken synchronously
   inside write() (C++ adapter copy; TS strategy-size-callback snapshot).
   Post-write mutation/resize/detach cannot change what compresses; an
@@ -94,7 +104,10 @@ interface DecompressionStream {
   under TS; C++ leaves it untouched — `writer.closed` stays pending (#13).
 - **Reads:** a second concurrent default read rejects under C++ ("single
   pending read request") and parks under TS (#14); the thenable check runs
-  once per read under C++, twice under TS (#15).
+  once per read under C++, twice under TS (#15). Under TS the first check
+  runs inside the write delivering the chunk; a reader cancel from there
+  stops the delivery and fails that write with the cancel reason (the
+  writable errors per #13), where C++ has already settled the write.
 - **tee():** both branches observe identical bytes; the single-branch
   cancel promise carries the identity suite's ledger #13 semantics (C++
   immediate, TS shared composite).
@@ -149,6 +162,8 @@ pedantic branches shifting anything the suite pins.
 | 13 | `readable.cancel()` → writable side | untouched; `writer.closed` stays pending | errored; closed rejects with the reason | `cancelReadableWritableAftermath` |
 | 14 | Second concurrent default read | TypeError "single pending read request" | parked, served in order | `secondConcurrentRead` |
 | 15 | Thenable check per read resolution | once | twice | `thenInterceptionDuringReadResolution` |
+| 16 | Default-read piece of a large buffered output | internal-stream read buffer (4 KiB; 16 KiB under `updated-auto-allocate-chunk-size`) | 64 KiB | `largeOutputDeliveredInBoundedPieces` |
+| 17 | Output produced before a trailing-junk error, reads waiting | reads reject | each waiting read gets a piece, later reads error | `trailingJunkAfterLargeOutput` |
 
 ## Assertion catalogue
 
@@ -167,9 +182,10 @@ pedantic branches shifting anything the suite pins.
 | `byob.js` | BYOB reader fills a 2-byte destination with the gzip magic |
 | `backpressure.js` | eager write settlement without reads; desiredSize accounting (#8) |
 | `propagation.js` | abort rejects pending read (reason per #9), errors both sides; cancel settles parked read (#12); write-after-abort (#10); non-Error reasons (#11); writes after a queued close reject (message per impl) without disturbing the close or output; cancel→writable aftermath (#13) |
-| `reentrancy.js` | thenable-check counts (#15); second concurrent read (#14); close from a read continuation with round-trip integrity; sibling tee cancel from a continuation |
+| `reentrancy.js` | thenable-check counts (#15); a reader cancel from a read result's `then` getter while the write is still delivering (TS: the write rejects with the reason, the writable errors per #13; C++: the write resolves, the writable is untouched per #13); second concurrent read (#14); close from a read continuation with round-trip integrity; sibling tee cancel from a continuation |
 | `tee.js` | branches byte-identical; single-branch cancel (identity ledger #13 semantics) with survivor draining |
-| `draining-reader.js` | TS only (C++ asserts absence): expectedLength undefined; a closed stream's buffered backlog swept in ONE read with done; lock/release |
+| `draining-reader.js` | TS only (C++ asserts absence): expectedLength undefined; a closed stream's backlog swept in ONE read with done — a small one, and a 1 MiB one as its sixteen 64 KiB pieces; lock/release |
+| `delivery-shape.js` | a 4 MiB single-write output read in bounded pieces (#16), byte-exact; BYOB views filled to their size; two pending reads take consecutive pieces (C++: #14); tee branches get bounded pieces; trailing junk after a large output with two reads waiting (#17) |
 | `gc-interplay.js` | writer abort after wrapper GC; decompression through collected wrapper (codec handle liveness) |
 | `pollution.js` | Object.prototype members (`type`, `autoAllocateChunkSize`, `expectedLength`, `start`, `size`, `highWaterMark`) reach neither the internal dictionaries nor a native body: a gzip round trip under pollution (neither implementation reads them) |
 | `pipe-integration.js` | compress→decompress chains from user and TransformStream sources; through IdentityTransformStream; bad-data propagation through both transform kinds |
