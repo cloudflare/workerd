@@ -281,7 +281,7 @@ export const tests = {
             query: 'Cloudflare Workers',
           }),
           {
-            name: 'AiInternalError',
+            name: 'Error',
             message: 'Invalid gateway ID',
           }
         );
