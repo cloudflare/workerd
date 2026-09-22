@@ -16,6 +16,7 @@ namespace workerd::tracing {
 namespace {
 
 #define STRS(V)                                                                                    \
+  V(ABORTED, "aborted")                                                                            \
   V(ALARM, "alarm")                                                                                \
   V(ATTRIBUTES, "attributes")                                                                      \
   V(BATCHSIZE, "batchSize")                                                                        \
@@ -343,6 +344,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const EventOutcome& outcome, StringCache& cache
       return cache.get(js, INTERNALERROR_STR);
     case EventOutcome::EXCEEDED_WALL_TIME:
       return cache.get(js, EXCEEDEDWALLTIME_STR);
+    case EventOutcome::ABORTED:
+      return cache.get(js, ABORTED_STR);
     case EventOutcome::UNKNOWN:
       return cache.get(js, UNKNOWN_STR);
   }
@@ -494,6 +497,16 @@ jsg::JsValue ToJs(jsg::Lock& js, const DiagnosticChannelEvent& dce, StringCache&
 jsg::JsValue ToJs(jsg::Lock& js, const Exception& ex, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, EXCEPTION_STR));
+  KJ_IF_SOME(code, ex.code) {
+    KJ_SWITCH_ONEOF(code) {
+      KJ_CASE_ONEOF(text, kj::String) {
+        obj.set(js, CODE_STR, js.str(text));
+      }
+      KJ_CASE_ONEOF(number, double) {
+        obj.set(js, CODE_STR, js.num(number));
+      }
+    }
+  }
   obj.set(js, NAME_STR, cache.get(js, ex.name));
   obj.set(js, MESSAGE_STR, js.str(ex.message));
   KJ_IF_SOME(stack, ex.stack) {

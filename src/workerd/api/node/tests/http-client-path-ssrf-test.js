@@ -171,20 +171,17 @@ export const testRejectsPathMutationAfterConstruction = {
 export const testAllowsNormalPaths = {
   test() {
     // These should NOT throw — they are valid path-only request targets.
-    const req1 = http.request({ hostname: 'example.test', path: '/foo/bar' });
-    req1.destroy();
-
-    const req2 = http.request({ hostname: 'example.test', path: '/foo?q=1' });
-    req2.destroy();
-
-    const req3 = http.request({ hostname: 'example.test', path: '/' });
-    req3.destroy();
-
-    const req4 = http.request({ hostname: 'example.test', path: '/foo#hash' });
-    req4.destroy();
-
-    // Path with encoded characters should work.
-    const req5 = http.request({ hostname: 'example.test', path: '/foo%20bar' });
-    req5.destroy();
+    // Each request is destroyed unsent, which reports 'socket hang up'.
+    for (const path of [
+      '/foo/bar',
+      '/foo?q=1',
+      '/',
+      '/foo#hash',
+      '/foo%20bar',
+    ]) {
+      const req = http.request({ hostname: 'example.test', path });
+      req.on('error', () => {});
+      req.destroy();
+    }
   },
 };

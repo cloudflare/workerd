@@ -388,6 +388,10 @@ kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
       continue;
     }
 
+    if (field.pythonSnapshotRelease.getFlagName() == "pythonWorkersDevPyodide") {
+      return field.pythonSnapshotRelease;
+    }
+
     // We pick the flag with the highest ordinal value that is enabled and has a
     // pythonSnapshotRelease annotation.
     //

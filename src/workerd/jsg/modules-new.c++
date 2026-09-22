@@ -106,10 +106,9 @@ kj::Array<kj::String> normalizeNamedExports(kj::Array<kj::String> namedExports) 
 
 // The source text of an ES module in the representation handed to V8 for
 // compilation. V8 has no internal UTF-8 string representation — strings are
-// either one-byte (Latin-1) or two-byte (UTF-16), and external source strings
-// must be one of those two encodings. Worker bundle sources arrive as UTF-8
-// bytes, so each module's source is encoded once, lazily, on first compile,
-// and the result is shared by every isolate that compiles the module:
+// either one-byte (Latin-1) or two-byte (UTF-16). Worker bundle sources arrive
+// as UTF-8 bytes, so each module's source is encoded once, lazily, on first
+// compile, and the result is shared by every isolate that compiles the module:
 //
 //  * Pure-ASCII source (the overwhelmingly common case — bundlers typically
 //    escape non-ASCII): the original buffer directly backs a one-byte external
@@ -125,19 +124,17 @@ kj::Array<kj::String> normalizeNamedExports(kj::Array<kj::String> namedExports) 
 // every isolate replica sharing the registry agrees on it, keeping the shared
 // compile cache consistent.
 struct EncodedSource {
-  kj::OneOf<kj::ArrayPtr<const char>,  // pure-ASCII: borrows the original buffer
-      kj::Array<const char>,           // owned Latin-1 transcode
-      kj::Array<const uint16_t>>       // owned UTF-16 transcode
+  kj::OneOf<kj::ArrayPtr<const char>,  // borrowed process-lifetime ASCII
+      kj::ArrayPtr<const uint16_t>,    // borrowed process-lifetime UTF-16
+      kj::Arc<OwnedAscii>,             // owned ASCII or Latin-1
+      kj::Arc<OwnedUtf16>>             // owned UTF-16
       repr;
 };
 
-EncodedSource encodeSource(kj::ArrayPtr<const char> source) {
-  if (simdutf::validate_ascii(source.begin(), source.size())) {
-    // ASCII is a subset of Latin-1, so the raw bytes can back a one-byte
-    // external string directly.
-    return {.repr = source};
-  }
-
+// Transcodes non-ASCII UTF-8 source into the one-byte or two-byte representation
+// V8 requires. The returned EncodedSource owns its backing allocation, so it does
+// not retain or borrow `source`. Invalid UTF-8 is decoded leniently below.
+EncodedSource transcodeSource(kj::ArrayPtr<const char> source) {
   if (simdutf::validate_utf8(source.begin(), source.size())) {
     // Valid UTF-8. Prefer the half-size Latin-1 representation when every code
     // point permits it. The buffer is sized exactly, so with already-validated
@@ -145,17 +142,17 @@ EncodedSource encodeSource(kj::ArrayPtr<const char> source) {
     auto latin1 =
         kj::heapArray<char>(simdutf::latin1_length_from_utf8(source.begin(), source.size()));
     if (simdutf::convert_utf8_to_latin1(source.begin(), source.size(), latin1.begin()) != 0) {
-      return {.repr = kj::Array<const char>(kj::mv(latin1))};
+      return {.repr = kj::arc<OwnedAscii>(kj::mv(latin1))};
     }
 
     auto utf16 =
         kj::heapArray<uint16_t>(simdutf::utf16_length_from_utf8(source.begin(), source.size()));
     // simdutf writes char16_t; uint16_t is layout-identical and is the element
-    // type the external two-byte string API accepts.
+    // type the two-byte string API accepts.
     size_t written = simdutf::convert_utf8_to_utf16le(
         source.begin(), source.size(), reinterpret_cast<char16_t*>(utf16.begin()));
     KJ_ASSERT(written == utf16.size());
-    return {.repr = kj::Array<const uint16_t>(kj::mv(utf16))};
+    return {.repr = kj::arc<OwnedUtf16>(kj::mv(utf16))};
   }
 
   // Invalid UTF-8: take the (rare) lenient path, which substitutes U+FFFD for
@@ -164,30 +161,51 @@ EncodedSource encodeSource(kj::ArrayPtr<const char> source) {
   auto utf16 = kj::encodeUtf16(source);
   auto owned = kj::heapArray<uint16_t>(utf16.size());
   memcpy(owned.begin(), utf16.begin(), utf16.size() * sizeof(uint16_t));
-  return {.repr = kj::Array<const uint16_t>(kj::mv(owned))};
+  return {.repr = kj::arc<OwnedUtf16>(kj::mv(owned))};
 }
+
+EncodedSource encodeSource(kj::ArrayPtr<const char>&& source) {
+  if (simdutf::validate_ascii(source.begin(), source.size())) {
+    // Borrowed input is known to have process lifetime.
+    return {.repr = kj::mv(source)};
+  }
+  return transcodeSource(source);
+}
+
+EncodedSource encodeSource(kj::Arc<OwnedAscii>&& source) {
+  auto sourcePtr = source->asPtr();
+  if (simdutf::validate_ascii(sourcePtr.begin(), sourcePtr.size())) {
+    return {.repr = kj::mv(source)};
+  }
+  return transcodeSource(sourcePtr);
+}
+
+using UnencodedSource =
+    kj::OneOf<kj::ArrayPtr<const char>, StaticExternalStringSource, kj::Arc<OwnedAscii>>;
 
 // The implementation of Module for ESM.
 class EsModule final: public Module {
  public:
-  // Source borrowed from memory that outlives this module (e.g. the worker's
-  // capnp config buffer or compiled-in builtin source).
+  // Source borrowed from static process-lifetime storage, such as a
+  // compiled-in builtin source.
   explicit EsModule(Url id, Type type, Flags flags, kj::ArrayPtr<const char> source)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(source),
         cachedData(kj::none) {
     KJ_DASSERT(isEsm());
   }
+  explicit EsModule(Url id, Type type, Flags flags, StaticExternalStringSource source)
+      : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
+        source(kj::mv(source)),
+        cachedData(kj::none) {
+    KJ_DASSERT(isEsm());
+  }
   // Source owned by this module (e.g. transpiled TypeScript or fallback-service
   // responses, where the original buffer is transient).
-  explicit EsModule(Url id, Type type, Flags flags, kj::Array<const char> code)
+  explicit EsModule(Url id, Type type, Flags flags, kj::Arc<OwnedAscii> code)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
-        ownedSource(kj::mv(code)),
+        source(kj::mv(code)),
         cachedData(kj::none) {
-    // The view is taken from the owning member (after member initialization)
-    // rather than from the constructor parameter, so it cannot be mistaken for
-    // a borrow of the parameter's stack storage.
-    source = KJ_ASSERT_NONNULL(ownedSource).asPtr();
     KJ_DASSERT(isEsm());
   }
   KJ_DISALLOW_COPY_AND_MOVE(EsModule);
@@ -245,32 +263,39 @@ class EsModule final: public Module {
       // once, shared across all isolates compiling this module. See
       // EncodedSource for the tiering. kj::Lazy handles cross-thread once-init.
       const auto& encoded = encodedSource.get([this](kj::SpaceFor<EncodedSource>& space) {
-        auto result = space.construct(encodeSource(this->source));
-        if (!result->repr.is<kj::ArrayPtr<const char>>()) {
-          // The encoded representation is an owned transcode that does not
-          // borrow from the UTF-8 original, which now has no remaining readers:
-          // V8 re-reads source text (lazy compilation, toString) from the
-          // external string backed by the transcoded buffer, compile-cache
-          // generation reads the compiled script, and the /bundle virtual file
-          // system keeps its own copy of module bodies. If this module owns its
-          // source, release it. Mutating these members is safe here because
-          // this initializer runs exactly once, under kj::Lazy's internal lock,
-          // before the encoded result is published to any reader.
-          source = nullptr;
-          ownedSource = kj::none;
+        KJ_SWITCH_ONEOF(source) {
+          KJ_CASE_ONEOF(borrowed, kj::ArrayPtr<const char>) {
+            return space.construct(encodeSource(kj::mv(borrowed)));
+          }
+          KJ_CASE_ONEOF(encoded, StaticExternalStringSource) {
+            KJ_SWITCH_ONEOF(encoded) {
+              KJ_CASE_ONEOF(oneByte, kj::ArrayPtr<const char>) {
+                return space.construct(EncodedSource{.repr = kj::mv(oneByte)});
+              }
+              KJ_CASE_ONEOF(twoByte, kj::ArrayPtr<const uint16_t>) {
+                return space.construct(EncodedSource{.repr = kj::mv(twoByte)});
+              }
+            }
+          }
+          KJ_CASE_ONEOF(owned, kj::Arc<OwnedAscii>) {
+            return space.construct(encodeSource(kj::mv(owned)));
+          }
         }
-        return result;
+        KJ_UNREACHABLE;
       });
       v8::Local<v8::String> contentStr;
       KJ_SWITCH_ONEOF(encoded.repr) {
         KJ_CASE_ONEOF(ascii, kj::ArrayPtr<const char>) {
           contentStr = js.strExtern(ascii);
         }
-        KJ_CASE_ONEOF(latin1, kj::Array<const char>) {
-          contentStr = js.strExtern(latin1);
-        }
-        KJ_CASE_ONEOF(utf16, kj::Array<const uint16_t>) {
+        KJ_CASE_ONEOF(utf16, kj::ArrayPtr<const uint16_t>) {
           contentStr = js.strExtern(utf16);
+        }
+        KJ_CASE_ONEOF(oneByte, kj::Arc<OwnedAscii>) {
+          contentStr = js.strExtern(oneByte.addRef());
+        }
+        KJ_CASE_ONEOF(utf16, kj::Arc<OwnedUtf16>) {
+          contentStr = js.strExtern(utf16.addRef());
         }
       }
 
@@ -369,16 +394,14 @@ class EsModule final: public Module {
     return actuallyEvaluate(js, module, observer);
   }
 
-  // The UTF-8 source text, and — when this module owns its source — the owning
-  // buffer. Both are mutable so the encoding initializer can release the UTF-8
-  // original once an owned transcode replaces it (see getDescriptor()); after
-  // that point `source` is null and must not be read, which holds because its
-  // only reader is the encoding initializer itself.
-  mutable kj::ArrayPtr<const char> source;
-  mutable kj::Maybe<kj::Array<const char>> ownedSource;
+  // The UTF-8 source text, either borrowed from process-lifetime storage or
+  // held through shared ownership. The encoding initializer moves this into
+  // EncodedSource; its only reader is the initializer itself.
+  mutable UnencodedSource source;
 
   // The source encoded into a V8-compatible external-string representation
-  // (see EncodedSource). Computed on first compile, shared across isolates.
+  // (see EncodedSource). Computed on first compile and shared across isolates;
+  // each V8 string retains an Arc to owned backing storage.
   kj::Lazy<EncodedSource> encodedSource;
 
   // The cachedData holds the cached compilation data for this module, if any. It is
@@ -421,7 +444,7 @@ class SyntheticModule final: public Module {
   }
 
  private:
-  static v8::MaybeLocal<v8::Value> evaluationSteps(
+  static v8::MaybeLocal<v8::Promise> evaluationSteps(
       v8::Local<v8::Context> context, v8::Local<v8::Module> module);
 
   v8::MaybeLocal<v8::Value> actuallyEvaluate(
@@ -1267,13 +1290,16 @@ class IsolateModuleRegistry final {
   friend class SyntheticModule;
 };
 
-v8::MaybeLocal<v8::Value> SyntheticModule::evaluationSteps(
+v8::MaybeLocal<v8::Promise> SyntheticModule::evaluationSteps(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module) {
   auto& js = Lock::current();
   KJ_TRY {
     auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
     KJ_IF_SOME(found, registry.lookup(js, module)) {
-      return found.module.actuallyEvaluate(js, module, registry.getObserver());
+      auto result = found.module.actuallyEvaluate(js, module, registry.getObserver());
+      v8::Local<v8::Value> value;
+      if (!result.ToLocal(&value)) return {};
+      return value.As<v8::Promise>();
     }
     KJ_LOG(ERROR, "Synthetic module not found in registry for evaluation");
     js.v8Isolate->ThrowError(js.str("Requested module does not exist"_kj));
@@ -1821,6 +1847,49 @@ kj::HashSet<kj::StringPtr> toHashSet(kj::ArrayPtr<const kj::String> arr) {
 }  // namespace
 
 // ======================================================================================
+namespace {
+
+template <typename AddEsm>
+void addBuiltInBundleFromCapnp(ModuleBundle::BuiltinBuilder& builder,
+    Bundle::Reader bundle,
+    kj::Function<bool(workerd::jsg::Module::Reader)> filter,
+    AddEsm addEsm) {
+  auto typeFilter = ([&] {
+    switch (builder.type()) {
+      case Module::Type::BUILTIN:
+        return ModuleType::BUILTIN;
+      case Module::Type::BUILTIN_ONLY:
+        return ModuleType::INTERNAL;
+      case Module::Type::BUNDLE:
+      case Module::Type::FALLBACK:
+        break;
+    }
+    KJ_UNREACHABLE;
+  })();
+
+  for (auto module: bundle.getModules()) {
+    if (module.getType() != typeFilter || !filter(module)) continue;
+    auto id = KJ_ASSERT_NONNULL(Url::tryParse(module.getName()));
+    switch (module.which()) {
+      case workerd::jsg::Module::SRC:
+        addEsm(id, module);
+        continue;
+      case workerd::jsg::Module::WASM:
+        builder.addSynthetic(id, Module::newWasmModuleHandler(module.getWasm().asBytes()));
+        continue;
+      case workerd::jsg::Module::DATA:
+        builder.addSynthetic(id, Module::newDataModuleHandler(module.getData().asBytes()));
+        continue;
+      case workerd::jsg::Module::JSON:
+        builder.addSynthetic(id, Module::newJsonModuleHandler(module.getJson().asArray()));
+        continue;
+    }
+    KJ_UNREACHABLE;
+  }
+}
+
+}  // namespace
+
 kj::Own<ModuleBundle> ModuleBundle::newFallbackBundle(Builder::ResolveCallback callback) {
   return kj::heap<FallbackModuleBundle>(kj::mv(callback));
 }
@@ -1832,44 +1901,20 @@ void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder, Bundle::Re
 void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
     Bundle::Reader bundle,
     kj::Function<bool(workerd::jsg::Module::Reader)> filter) {
-  auto typeFilter = ([&] {
-    switch (builder.type()) {
-      case Module::Type::BUILTIN:
-        return ModuleType::BUILTIN;
-      case Module::Type::BUILTIN_ONLY:
-        return ModuleType::INTERNAL;
-      case Module::Type::BUNDLE:
-        break;
-      case Module::Type::FALLBACK:
-        break;
-    }
-    KJ_UNREACHABLE;
-  })();
+  addBuiltInBundleFromCapnp(
+      builder, bundle, kj::mv(filter), [&](const Url& id, workerd::jsg::Module::Reader module) {
+    builder.addEsm(id, module.getSrc().asChars());
+  });
+}
 
-  for (auto module: bundle.getModules()) {
-    if (module.getType() == typeFilter && filter(module)) {
-      auto id = KJ_ASSERT_NONNULL(Url::tryParse(module.getName()));
-      switch (module.which()) {
-        case workerd::jsg::Module::SRC: {
-          builder.addEsm(id, module.getSrc().asChars());
-          continue;
-        }
-        case workerd::jsg::Module::WASM: {
-          builder.addSynthetic(id, Module::newWasmModuleHandler(module.getWasm().asBytes()));
-          continue;
-        }
-        case workerd::jsg::Module::DATA: {
-          builder.addSynthetic(id, Module::newDataModuleHandler(module.getData().asBytes()));
-          continue;
-        }
-        case workerd::jsg::Module::JSON: {
-          builder.addSynthetic(id, Module::newJsonModuleHandler(module.getJson().asArray()));
-          continue;
-        }
-      }
-      KJ_UNREACHABLE;
-    }
-  }
+void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
+    Bundle::Reader bundle,
+    kj::Function<bool(workerd::jsg::Module::Reader)> filter,
+    kj::FunctionParam<StaticExternalStringSource(workerd::jsg::Module::Reader)> getSource) {
+  addBuiltInBundleFromCapnp(
+      builder, bundle, kj::mv(filter), [&](const Url& id, workerd::jsg::Module::Reader module) {
+    builder.addEsm(id, getSource(module));
+  });
 }
 
 ModuleBundle::ModuleBundle(Type type): type_(type) {}
@@ -2038,7 +2083,7 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
 }
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
-    kj::StringPtr name, kj::Array<const char> source, Module::Flags flags) {
+    kj::StringPtr name, kj::Arc<OwnedAscii> source, Module::Flags flags) {
   const auto url = processModuleName(name, bundleBase);
   add(url,
       [url = url.clone(), source = kj::mv(source), flags, type = type()](
@@ -2050,10 +2095,11 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
   return *this;
 }
 
-ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addWasmModule(
-    kj::StringPtr name, kj::ArrayPtr<const kj::byte> data) {
+ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addWasmModule(kj::StringPtr name,
+    kj::ArrayPtr<const kj::byte> data,
+    kj::Maybe<v8::CompiledWasmModule> maybeCompiled) {
   const auto url = processModuleName(name, bundleBase);
-  auto callback = jsg::modules::Module::newWasmModuleHandler(data);
+  auto callback = jsg::modules::Module::newWasmModuleHandler(data, kj::mv(maybeCompiled));
   add(url,
       [url = url.clone(), callback = kj::mv(callback), type = type()](
           const ResolveContext& context) mutable
@@ -2096,6 +2142,19 @@ ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
   ensureIsNotBundleSpecifier(id);
   Builder::add(id,
       [url = id.clone(), source, type = type()](const ResolveContext& context) mutable
+      -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source);
+    return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
+  });
+  return *this;
+}
+
+ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
+    const Url& id, StaticExternalStringSource source) {
+  ensureIsNotBundleSpecifier(id);
+  Builder::add(id,
+      [url = id.clone(), source = kj::mv(source), type = type()](
+          const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
     kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source);
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
@@ -2412,7 +2471,7 @@ kj::Own<Module> Module::newSynthetic(Url id,
       kj::mv(id), type, kj::mv(callback), kj::mv(namedExports), flags, contentType);
 }
 
-kj::Own<Module> Module::newEsm(Url id, Type type, kj::Array<const char> code, Flags flags) {
+kj::Own<Module> Module::newEsm(Url id, Type type, kj::Arc<OwnedAscii> code, Flags flags) {
   // The module owns the source buffer (rather than having it attached to the
   // kj::Own) so that it can release the UTF-8 original once an owned transcoded
   // representation replaces it on first compile.
@@ -2421,6 +2480,10 @@ kj::Own<Module> Module::newEsm(Url id, Type type, kj::Array<const char> code, Fl
 
 kj::Own<Module> Module::newEsm(Url id, Type type, kj::ArrayPtr<const char> code) {
   return kj::heap<EsModule>(kj::mv(id), type, Flags::ESM, code);
+}
+
+kj::Own<Module> Module::newEsm(Url id, Type type, StaticExternalStringSource code) {
+  return kj::heap<EsModule>(kj::mv(id), type, Flags::ESM, kj::mv(code));
 }
 
 Module::ModuleNamespace::ModuleNamespace(
@@ -2495,11 +2558,16 @@ Module::EvaluateCallback Module::newJsonModuleHandler(kj::ArrayPtr<const char> d
   };
 }
 
-Module::EvaluateCallback Module::newWasmModuleHandler(kj::ArrayPtr<const kj::byte> data) {
+Module::EvaluateCallback Module::newWasmModuleHandler(
+    kj::ArrayPtr<const kj::byte> data, kj::Maybe<v8::CompiledWasmModule> maybeCompiled) {
   struct Cache final {
     kj::MutexGuarded<kj::Maybe<v8::CompiledWasmModule>> mutex;
   };
-  return [data, cache = kj::heap<Cache>()](Lock& js, const Url& id, const ModuleNamespace& ns,
+  auto cache = kj::heap<Cache>();
+  KJ_IF_SOME(compiled, maybeCompiled) {
+    *cache->mutex.lockExclusive() = kj::mv(compiled);
+  }
+  return [data, cache = kj::mv(cache)](Lock& js, const Url& id, const ModuleNamespace& ns,
              const CompilationObserver& observer) mutable -> bool {
     return js.tryCatch([&]() -> bool {
       // Wasm compilation requires code-generation permission. The scope

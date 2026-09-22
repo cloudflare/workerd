@@ -39,6 +39,8 @@ class TracingRequestObserver final: public RequestObserver {
 struct CapturedInstance {
   bool isCustom = false;
   kj::String named;
+  kj::String image;
+  kj::String containerSnapshotId;
   double vcpu = 0;
   uint64_t memoryMib = 0;
   uint64_t diskMb = 0;
@@ -53,8 +55,15 @@ class MockContainerServer final: public rpc::Container::Server {
         containerCalled(containerCalled) {}
 
   kj::Promise<void> start(StartContext context) override {
-    auto instance = context.getParams().getInstance();
+    auto params = context.getParams();
+    auto instance = params.getInstance();
     CapturedInstance captured;
+    auto source = params.getSource();
+    if (source.which() == rpc::Container::StartParams::Source::IMAGE) {
+      captured.image = kj::str(source.getImage());
+    } else if (source.which() == rpc::Container::StartParams::Source::CONTAINER_SNAPSHOT_ID) {
+      captured.containerSnapshotId = kj::str(source.getContainerSnapshotId());
+    }
     switch (instance.which()) {
       case rpc::Container::StartInstance::NAMED:
         captured.named = kj::str(instance.getNamed());
@@ -224,6 +233,47 @@ class MockExecContainerServer final: public rpc::Container::Server {
   ExecObservations& observations;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> resizeFulfiller;
 };
+
+struct CapturedDirectorySnapshot {
+  bool hasSnapshotId = false;
+  kj::String snapshotId;
+  kj::String restorePath;
+};
+
+// Captures the directorySnapshots forwarded by Container::start() so tests can assert how each
+// DirectorySnapshotRestoreParams is translated into the RPC request.
+class DirectorySnapshotStartServer final: public rpc::Container::Server {
+ public:
+  explicit DirectorySnapshotStartServer(kj::Vector<CapturedDirectorySnapshot>& captured)
+      : captured(captured) {}
+
+  kj::Promise<void> start(StartContext context) override {
+    for (auto entry: context.getParams().getDirectorySnapshots()) {
+      captured.add(CapturedDirectorySnapshot{
+        .hasSnapshotId = entry.hasSnapshotId(),
+        .snapshotId = kj::str(entry.getSnapshotId()),
+        .restorePath = kj::str(entry.getRestorePath()),
+      });
+    }
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> monitor(MonitorContext context) override {
+    return kj::NEVER_DONE;
+  }
+
+ private:
+  kj::Vector<CapturedDirectorySnapshot>& captured;
+};
+
+Container::DirectorySnapshot makeDirectorySnapshot(kj::StringPtr id, kj::StringPtr dir) {
+  return Container::DirectorySnapshot{
+    .id = kj::str(id),
+    .size = 0,
+    .dir = kj::str(dir),
+    .name = kj::none,
+  };
+}
 
 enum class TunnelReuseGate { DISABLED, ENABLED };
 
@@ -612,6 +662,45 @@ KJ_TEST("Container::start monitors a container that exits immediately") {
   });
 }
 
+KJ_TEST("Container::images returns configured images without exposing mutable state") {
+  auto fixture = makeFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto images = kj::heapArrayBuilder<jsg::Dict<kj::String>::Field>(2);
+    images.add(jsg::Dict<kj::String>::Field{
+      .name = kj::str("api"),
+      .value = kj::str("registry.example.com/api@sha256:111"),
+    });
+    images.add(jsg::Dict<kj::String>::Field{
+      .name = kj::str("worker"),
+      .value = kj::str("registry.example.com/worker@sha256:222"),
+    });
+
+    auto container =
+        env.js.alloc<Container>(rpc::Container::Client(kj::heap<RestartContainerServer>()), false,
+            jsg::Dict<kj::String>{.fields = images.finish()});
+
+    auto first = container->getImages();
+    KJ_EXPECT(first.fields.size() == 2);
+    KJ_EXPECT(first.fields[0].name == "api");
+    KJ_EXPECT(first.fields[0].value == "registry.example.com/api@sha256:111");
+    KJ_EXPECT(first.fields[1].name == "worker");
+    KJ_EXPECT(first.fields[1].value == "registry.example.com/worker@sha256:222");
+
+    first.fields[0].value = kj::str("changed");
+    auto second = container->getImages();
+    KJ_EXPECT(second.fields[0].value == "registry.example.com/api@sha256:111");
+  });
+}
+
+KJ_TEST("Container::images is empty when no images are configured") {
+  auto fixture = makeFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto container =
+        env.js.alloc<Container>(rpc::Container::Client(kj::heap<RestartContainerServer>()), false);
+    KJ_EXPECT(container->getImages().fields.size() == 0);
+  });
+}
+
 KJ_TEST("Container::destroy updates running before restart and clears the old reason") {
   auto fixture = makeFixture();
   fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
@@ -633,10 +722,7 @@ KJ_TEST("Container::destroy updates running before restart and clears the old re
 }
 
 KJ_TEST("Container::start forwards a named instance type") {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setWorkerdExperimental(true);
-  auto fixture = TestFixture({.featureFlags = flags.asReader(), .useRealTimers = false});
+  auto fixture = makeFixture();
   auto paf = kj::newPromiseAndFulfiller<CapturedInstance>();
   auto promise = kj::mv(paf.promise);
 
@@ -657,10 +743,7 @@ KJ_TEST("Container::start forwards a named instance type") {
 }
 
 KJ_TEST("Container::start forwards custom instance resources") {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setWorkerdExperimental(true);
-  auto fixture = TestFixture({.featureFlags = flags.asReader(), .useRealTimers = false});
+  auto fixture = makeFixture();
   auto paf = kj::newPromiseAndFulfiller<CapturedInstance>();
   auto promise = kj::mv(paf.promise);
 
@@ -683,6 +766,46 @@ KJ_TEST("Container::start forwards custom instance resources") {
       KJ_EXPECT(captured.vcpu == 0.5);
       KJ_EXPECT(captured.memoryMib == 4096);
       KJ_EXPECT(captured.diskMb == 20000);
+    }).attach(kj::mv(container));
+  });
+}
+
+KJ_TEST("Container::start forwards an image") {
+  auto fixture = makeFixture();
+  auto paf = kj::newPromiseAndFulfiller<CapturedInstance>();
+  auto promise = kj::mv(paf.promise);
+
+  fixture.runInIoContext([promise = kj::mv(promise), fulfiller = kj::mv(paf.fulfiller)](
+                             const TestFixture::Environment& env) mutable {
+    auto container = kj::rc<Container>(
+        rpc::Container::Client(kj::heap<MockContainerServer>(kj::mv(fulfiller))), false);
+    container->start(env.js,
+        Container::StartupOptions{
+          .image = kj::str("registry.example.com/image:tag"),
+        });
+    return kj::mv(promise)
+        .then([](CapturedInstance captured) {
+      KJ_EXPECT(captured.image == "registry.example.com/image:tag");
+    }).attach(kj::mv(container));
+  });
+}
+
+KJ_TEST("Container::start forwards a container snapshot") {
+  auto fixture = makeFixture();
+  auto paf = kj::newPromiseAndFulfiller<CapturedInstance>();
+  auto promise = kj::mv(paf.promise);
+
+  fixture.runInIoContext([promise = kj::mv(promise), fulfiller = kj::mv(paf.fulfiller)](
+                             const TestFixture::Environment& env) mutable {
+    auto container = kj::rc<Container>(
+        rpc::Container::Client(kj::heap<MockContainerServer>(kj::mv(fulfiller))), false);
+    container->start(env.js,
+        Container::StartupOptions{
+          .containerSnapshot = Container::SnapshotRestoreParams{.id = kj::str("snapshot-id")},
+        });
+    return kj::mv(promise)
+        .then([](CapturedInstance captured) {
+      KJ_EXPECT(captured.containerSnapshotId == "snapshot-id");
     }).attach(kj::mv(container));
   });
 }
@@ -726,6 +849,126 @@ KJ_TEST("Container::snapshotContainer propagates the current span context") {
 
   KJ_EXPECT(!directoryCalled);
   KJ_EXPECT(containerCalled);
+}
+
+KJ_TEST("Container::start restores a directory snapshot using the snapshot's own dir") {
+  kj::Vector<CapturedDirectorySnapshot> captured;
+  auto fixture = makeFixture();
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto container = kj::rc<Container>(
+        rpc::Container::Client(kj::heap<DirectorySnapshotStartServer>(captured)), false);
+
+    auto snapshots = kj::heapArrayBuilder<Container::DirectorySnapshotRestoreParams>(1);
+    snapshots.add(Container::DirectorySnapshotRestoreParams{
+      .snapshot = makeDirectorySnapshot("snap-id"_kj, "/data"_kj),
+      .mountPoint = kj::none,
+    });
+    container->start(env.js,
+        Container::StartupOptions{
+          .directorySnapshots = snapshots.finish(),
+        });
+
+    // Give the queued start RPC bounded time to run.
+    for (auto i = 0; i < 10; ++i) {
+      co_await kj::yield();
+    }
+  });
+
+  KJ_ASSERT(captured.size() == 1);
+  KJ_EXPECT(captured[0].hasSnapshotId);
+  KJ_EXPECT(captured[0].snapshotId == "snap-id");
+  KJ_EXPECT(captured[0].restorePath == "/data");
+}
+
+KJ_TEST("Container::start lets mountPoint override the snapshot's dir as the restore path") {
+  kj::Vector<CapturedDirectorySnapshot> captured;
+  auto fixture = makeFixture();
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto container = kj::rc<Container>(
+        rpc::Container::Client(kj::heap<DirectorySnapshotStartServer>(captured)), false);
+
+    auto snapshots = kj::heapArrayBuilder<Container::DirectorySnapshotRestoreParams>(1);
+    snapshots.add(Container::DirectorySnapshotRestoreParams{
+      .snapshot = makeDirectorySnapshot("snap-id"_kj, "/data"_kj),
+      .mountPoint = kj::str("/mnt/elsewhere"),
+    });
+    container->start(env.js,
+        Container::StartupOptions{
+          .directorySnapshots = snapshots.finish(),
+        });
+
+    for (auto i = 0; i < 10; ++i) {
+      co_await kj::evalLater([]() {});
+    }
+  });
+
+  KJ_ASSERT(captured.size() == 1);
+  KJ_EXPECT(captured[0].hasSnapshotId);
+  KJ_EXPECT(captured[0].snapshotId == "snap-id");
+  KJ_EXPECT(captured[0].restorePath == "/mnt/elsewhere");
+}
+
+KJ_TEST("Container::start restores to mountPoint when no snapshot is given") {
+  kj::Vector<CapturedDirectorySnapshot> captured;
+  auto fixture = makeFixture();
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto container = kj::rc<Container>(
+        rpc::Container::Client(kj::heap<DirectorySnapshotStartServer>(captured)), false);
+
+    auto snapshots = kj::heapArrayBuilder<Container::DirectorySnapshotRestoreParams>(1);
+    snapshots.add(Container::DirectorySnapshotRestoreParams{
+      .snapshot = kj::none,
+      .mountPoint = kj::str("/mnt/data"),
+    });
+    container->start(env.js,
+        Container::StartupOptions{
+          .directorySnapshots = snapshots.finish(),
+        });
+
+    for (auto i = 0; i < 10; ++i) {
+      co_await kj::evalLater([]() {});
+    }
+  });
+
+  KJ_ASSERT(captured.size() == 1);
+  KJ_EXPECT(!captured[0].hasSnapshotId);
+  KJ_EXPECT(captured[0].snapshotId == "");
+  KJ_EXPECT(captured[0].restorePath == "/mnt/data");
+}
+
+KJ_TEST("Container::start requires mountPoint when no snapshot is given") {
+  kj::Vector<CapturedDirectorySnapshot> captured;
+  auto fixture = makeFixture();
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto container = kj::rc<Container>(
+        rpc::Container::Client(kj::heap<DirectorySnapshotStartServer>(captured)), false);
+
+    auto snapshots = kj::heapArrayBuilder<Container::DirectorySnapshotRestoreParams>(1);
+    snapshots.add(Container::DirectorySnapshotRestoreParams{
+      .snapshot = kj::none,
+      .mountPoint = kj::none,
+    });
+
+    bool threw = false;
+    JSG_TRY(env.js) {
+      container->start(env.js,
+          Container::StartupOptions{
+            .directorySnapshots = snapshots.finish(),
+          });
+    }
+    JSG_CATCH(exception KJ_UNUSED) {
+      threw = true;
+    }
+    KJ_EXPECT(threw, "start() should throw when neither snapshot nor mountPoint is given");
+
+    return kj::READY_NOW;
+  });
+
+  KJ_EXPECT(captured.size() == 0);
 }
 
 KJ_TEST("Container::exec forwards pty options and resize() sends a resize RPC") {
@@ -956,6 +1199,41 @@ KJ_TEST("Container::exec resize() rejects out-of-range dimensions") {
 
     return env.context.awaitJs(env.js, kj::mv(jsPromise)).attach(kj::mv(container));
   });
+}
+
+KJ_TEST("Container::exec process outlives the IoContext its abort action was registered in") {
+  // An ExecProcess is a jsg::Object, so GC or isolate teardown destroys it — potentially long
+  // after the IoContext that was current when exec() registered its kill-on-abort action on the
+  // signal. Releasing that registration therefore has to stay safe once that context is gone.
+  ExecObservations observations;
+  auto fixture = makeFixture();
+
+  kj::Maybe<jsg::Ref<ExecProcess>> survivor;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto container =
+        kj::rc<Container>(rpc::Container::Client(kj::heap<MockExecContainerServer>(
+                              env.context.getByteStreamFactory(), observations, kj::none)),
+            true);
+
+    ExecOptions options;
+    options.signal = env.js.alloc<AbortSignal>();
+
+    auto jsPromise = container->exec(env.js, kj::arr(kj::str("/bin/sh")), kj::mv(options))
+                         .then(env.js, [&survivor](jsg::Lock& js, jsg::Ref<ExecProcess> process) {
+      // Stands in for a Worker stashing the process somewhere that outlives the request.
+      survivor = kj::mv(process);
+    });
+
+    return env.context.awaitJs(env.js, kj::mv(jsPromise)).attach(kj::mv(container));
+  });
+
+  KJ_EXPECT(observations.execCalled);
+  KJ_EXPECT(survivor != kj::none);
+
+  // Drop the process from a later request's context, which is where a stashed one would
+  // ordinarily be collected.
+  fixture.runInIoContext([&](const TestFixture::Environment&) { survivor = kj::none; });
 }
 
 KJ_TEST("Container reuses a healthy HTTP tunnel") {

@@ -1,0 +1,34 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The digest streams suite runs the same test modules under two configs:
+# digest-cpp against the C++ implementation, digest-ts against the
+# TypeScript implementation.
+
+digest_suite_srcs = glob(["*.js"]) + ["digest-modules.capnp"]
+
+wd_test(
+    src = "digest-cpp.wd-test",
+    data = digest_suite_srcs,
+)
+
+wd_test(
+    src = "digest-ts.wd-test",
+    args = ["--experimental"],
+    data = digest_suite_srcs,
+)
+
+# The main C++ cell plus the dateless opt-in pedantic_wpt flag, enforcing
+# that pedantic mode changes nothing on this suite's surface.
+wd_test(
+    src = "digest-cpp-pedantic.wd-test",
+    data = digest_suite_srcs,
+)
+
+# Legacy (pre-flag) regression guard, C++ implementation only. The
+# @all-compat-flags variant is disabled: at the 2999-12-31 date the flags
+# the cell deliberately omits would all turn on.
+wd_test(
+    src = "digest-cpp-legacy.wd-test",
+    data = digest_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)

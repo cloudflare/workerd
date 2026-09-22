@@ -27,6 +27,21 @@ class ExplicitEndOutputPipeAdapter final: public capnp::ExplicitEndOutputStream 
     return KJ_REQUIRE_NONNULL(inner)->write(pieces);
   }
 
+  bool tryWriteSync(kj::ArrayPtr<const byte> buffer) override {
+    KJ_IF_SOME(i, inner) {
+      return i->tryWriteSync(buffer);
+    }
+    // end() has already been called; let the async path surface the failure.
+    return false;
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    KJ_IF_SOME(i, inner) {
+      return i->tryWriteSync(pieces);
+    }
+    // end() has already been called; let the async path surface the failure.
+    return false;
+  }
+
   kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
       kj::AsyncInputStream& input, uint64_t amount) override {
     return KJ_REQUIRE_NONNULL(inner)->tryPumpFrom(input, amount);
@@ -77,6 +92,29 @@ class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
       }
     }
     co_return result;
+  }
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    KJ_IF_SOME(result, inner->tryReadSync(buffer, minBytes)) {
+      // Mirror the bookkeeping in tryRead().
+      KJ_IF_SOME(l, expectedLength) {
+        KJ_ASSERT(result <= l);
+        l -= result;
+        if (l == 0) {
+          *ended = true;
+        }
+      }
+
+      if (result < minBytes) {
+        // Verify that end() was called. (A synchronous read was possible but the stream
+        // disconnected prematurely; throw exactly as the async path would.)
+        if (!*ended) {
+          JSG_FAIL_REQUIRE(Error, "ReadableStream received over RPC disconnected prematurely.");
+        }
+      }
+      return result;
+    }
+    return kj::none;
   }
 
   kj::Maybe<uint64_t> tryGetLength() override {
@@ -146,7 +184,7 @@ namespace {
 class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
  public:
   AbortTriggerRpcServer(kj::Own<kj::PromiseFulfiller<void>> fulfiller,
-      kj::Rc<ExternalPusherImpl::PendingAbortReason> pendingReason)
+      kj::Arc<ExternalPusherImpl::PendingAbortReasonBox> pendingReason)
       : fulfiller(kj::mv(fulfiller)),
         pendingReason(kj::mv(pendingReason)) {}
 
@@ -154,7 +192,7 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
     auto params = abortCtx.getParams();
     auto reason = params.getReason().getV8Serialized();
 
-    *pendingReason = kj::heapArray(reason.asBytes());
+    *pendingReason->value.lockExclusive() = kj::heapArray(reason.asBytes());
     fulfiller->fulfill();
     return kj::READY_NOW;
   }
@@ -165,15 +203,18 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
   }
 
   ~AbortTriggerRpcServer() noexcept(false) {
-    if (*pendingReason != nullptr) {
-      // Already triggered
-      return;
-    }
+    {
+      auto lock = pendingReason->value.lockExclusive();
+      if (*lock != nullptr) {
+        // Already triggered
+        return;
+      }
 
-    if (!released) {
-      *pendingReason = JSG_KJ_EXCEPTION(FAILED, DOMAbortError,
-          "An AbortSignal received over RPC was implicitly aborted because the connection back to "
-          "its trigger was lost.");
+      if (!released) {
+        *lock = JSG_KJ_EXCEPTION(FAILED, DOMAbortError,
+            "An AbortSignal received over RPC was implicitly aborted because the connection back "
+            "to its trigger was lost.");
+      }
     }
 
     // Always fulfill the promise in case the AbortSignal was waiting
@@ -182,7 +223,7 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
 
  private:
   kj::Own<kj::PromiseFulfiller<void>> fulfiller;
-  kj::Rc<ExternalPusherImpl::PendingAbortReason> pendingReason;
+  kj::Arc<ExternalPusherImpl::PendingAbortReasonBox> pendingReason;
   bool released = false;
 };
 
@@ -217,7 +258,7 @@ ExternalPusherImpl::AbortSignal ExternalPusherImpl::unwrapAbortSignal(
   // pushAbortSignal() might not have been received yet. So, we have to allocate the box here, so
   // we can return it. Then we can try to wire it up to the right trigger later, in
   // unwrapAbortSignalImpl().
-  auto pendingReason = kj::rc<PendingAbortReason>();
+  auto pendingReason = kj::arc<PendingAbortReasonBox>();
   auto promise = unwrapAbortSignalImpl(kj::mv(cap), pendingReason.addRef());
 
   return {
@@ -227,7 +268,7 @@ ExternalPusherImpl::AbortSignal ExternalPusherImpl::unwrapAbortSignal(
 }
 
 kj::Promise<void> ExternalPusherImpl::unwrapAbortSignalImpl(
-    ExternalPusher::AbortSignal::Client cap, kj::Rc<PendingAbortReason> pendingReason) {
+    ExternalPusher::AbortSignal::Client cap, kj::Arc<PendingAbortReasonBox> pendingReason) {
   auto paf = kj::newPromiseAndFulfiller<void>();
 
   {

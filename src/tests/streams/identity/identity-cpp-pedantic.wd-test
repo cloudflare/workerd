@@ -1,0 +1,36 @@
+using Workerd = import "/workerd/workerd.capnp";
+using IdentityModules = import "identity-modules.capnp";
+
+# Runs the full suite against the C++ implementation with the dateless
+# opt-in pedantic_wpt flag added to identity-cpp.wd-test's pinned set.
+# Unlike the encoding suite's pedantic cell, this one pins the ABSENCE of
+# pedantic effects: the identity streams' internal-stream implementation
+# consults pedantic_wpt nowhere, and this cell's own config never pins the
+# standard-constructor flags, so the pedantic-gated standard-streams
+# machinery is unreachable from its surface. Every shared test therefore
+# asserts identical behavior with the flag on — and this cell turns that
+# observation into an enforced invariant against future pedantic branches
+# reaching these classes.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-identity-cpp-pedantic",
+      worker = (
+        modules = IdentityModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_byob_reader_detaches_buffer",
+          "internal_stream_byob_return_view",
+          "internal_writable_stream_abort_clears_queue",
+          "workers_api_getters_setters_on_prototype",
+          "capture_async_api_throws",
+          "set_tostring_tag",
+          "enhanced_error_serialization",
+          "pedantic_wpt",
+        ],
+      )
+    ),
+  ],
+  # For gc-interplay.js.
+  v8Flags = ["--expose-gc"],
+);

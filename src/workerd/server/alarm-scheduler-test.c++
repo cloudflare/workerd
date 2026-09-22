@@ -38,16 +38,31 @@ class AdjustableClock final: public kj::Clock {
   kj::Date time = kj::UNIX_EPOCH;
 };
 
-// Minimal WorkerInterface that only supports runAlarm(); every other entry point is unused by the
-// alarm scheduler tests. runAlarm() reports success (no retry) and invokes `onAlarm` so the test
-// can observe that the alarm fired.
+// Minimal WorkerInterface that supports runAlarm() and abandonAlarm(); every other entry point is
+// unused by the alarm scheduler tests. By default, runAlarm() reports success (no retry) and invokes
+// `onAlarm` so the test can observe that the alarm fired.
 class AlarmStubWorkerInterface final: public WorkerInterface {
  public:
-  explicit AlarmStubWorkerInterface(kj::Function<void()> onAlarm): onAlarm(kj::mv(onAlarm)) {}
+  explicit AlarmStubWorkerInterface(kj::Function<void()> onAlarm)
+      : onAlarm(kj::mv(onAlarm)),
+        onAbandon([]() { return kj::Maybe<kj::Date>(kj::none); }) {}
+
+  AlarmStubWorkerInterface(kj::Function<void()> onAlarm,
+      AlarmOutcome outcome,
+      kj::Function<kj::Promise<kj::Maybe<kj::Date>>()> onAbandon)
+      : onAlarm(kj::mv(onAlarm)),
+        outcome(outcome),
+        onAbandon(kj::mv(onAbandon)) {}
 
   kj::Promise<AlarmResult> runAlarm(kj::Date, uint32_t) override {
     onAlarm();
-    return AlarmResult{.retry = false, .outcome = EventOutcome::OK};
+    return AlarmResult{.retry = outcome.retry,
+      .retryCountsAgainstLimit = outcome.retryCountsAgainstLimit,
+      .outcome = outcome.outcome};
+  }
+
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date) override {
+    return onAbandon();
   }
 
   kj::Promise<void> request(kj::HttpMethod,
@@ -76,6 +91,8 @@ class AlarmStubWorkerInterface final: public WorkerInterface {
 
  private:
   kj::Function<void()> onAlarm;
+  AlarmOutcome outcome{.retry = false, .outcome = EventOutcome::OK};
+  kj::Function<kj::Promise<kj::Maybe<kj::Date>>()> onAbandon;
 };
 
 KJ_TEST("AlarmScheduler migrates a database created before the actor_name column existed") {
@@ -110,7 +127,8 @@ KJ_TEST("AlarmScheduler migrates a database created before the actor_name column
   {
     AlarmScheduler scheduler(clock, timer, vfs, path.clone(), failingGetActor());
 
-    auto alarm = scheduler.getAlarm(ActorKey{.actorId = "old-actor"_kj});
+    // The old schema has no actor name to restore.
+    auto alarm = scheduler.getAlarm(ActorKey("old-actor"_kj, kj::none));
     KJ_EXPECT(KJ_ASSERT_NONNULL(alarm) == scheduledTime);
   }
 
@@ -141,13 +159,13 @@ KJ_TEST("AlarmScheduler persists actor_name and preserves it across a nameless u
     AlarmScheduler scheduler(clock, timer, vfs, path.clone(), failingGetActor());
 
     // A named actor persists its name alongside the alarm.
-    scheduler.setAlarm(ActorKey{.actorId = "named-actor"_kj, .name = "my-name"_kj}, scheduledTime);
+    scheduler.setAlarm(ActorKey("named-actor"_kj, "my-name"_kj), scheduledTime);
 
     // A subsequent update without a name must not clear the previously-persisted name. This mirrors
     // how the alarm scheduler is driven: the name is only supplied when the actor is created via
     // getByName(), but later setAlarm() calls (e.g. from an already-running alarm handler) may not
     // carry it.
-    scheduler.setAlarm(ActorKey{.actorId = "named-actor"_kj}, updatedTime);
+    scheduler.setAlarm(ActorKey("named-actor"_kj, kj::none), updatedTime);
   }
 
   // Reopen the database directly to confirm both the updated time and the retained name.
@@ -163,7 +181,8 @@ KJ_TEST("AlarmScheduler persists actor_name and preserves it across a nameless u
   // A fresh scheduler should load the named alarm from disk without error.
   {
     AlarmScheduler scheduler(clock, timer, vfs, path.clone(), failingGetActor());
-    auto alarm = scheduler.getAlarm(ActorKey{.actorId = "named-actor"_kj});
+    // Alarm lookup uses only actor identity, so no name is needed.
+    auto alarm = scheduler.getAlarm(ActorKey("named-actor"_kj, kj::none));
     KJ_EXPECT(KJ_ASSERT_NONNULL(alarm) == updatedTime);
   }
 }
@@ -187,7 +206,7 @@ KJ_TEST("AlarmScheduler restores the persisted actor_name onto the ActorKey when
   // Persist a named alarm, then drop the scheduler so nothing about the name survives in memory.
   {
     AlarmScheduler scheduler(clock, timer, vfs, path.clone(), failingGetActor());
-    scheduler.setAlarm(ActorKey{.actorId = "named-actor"_kj, .name = "my-name"_kj}, scheduledTime);
+    scheduler.setAlarm(ActorKey("named-actor"_kj, "my-name"_kj), scheduledTime);
   }
 
   // A fresh scheduler must reload the alarm (and its name) from disk.
@@ -211,6 +230,102 @@ KJ_TEST("AlarmScheduler restores the persisted actor_name onto the ActorKey when
 
   KJ_EXPECT(fired);
   KJ_EXPECT(KJ_ASSERT_NONNULL(observedName) == "my-name"_kj);
+}
+
+KJ_TEST("AlarmScheduler abandons an alarm when ctx.abort() sets retryAlarm to false") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  AdjustableClock clock;
+  kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  kj::Path path({"alarms"});
+  auto scheduledTime = kj::UNIX_EPOCH + 1 * kj::HOURS;
+  // This test actor was not created from a name.
+  auto actor = ActorKey("terminal-actor"_kj, kj::none);
+
+  bool fired = false;
+  bool abandoned = false;
+  auto getActor = [&](const ActorKey&) -> kj::Own<WorkerInterface> {
+    return kj::heap<AlarmStubWorkerInterface>([&fired]() { fired = true; },
+        WorkerInterface::AlarmOutcome{
+          .retry = false,
+          .retryCountsAgainstLimit = true,
+          .outcome = EventOutcome::ABORTED,
+        },
+        [&abandoned]() {
+      abandoned = true;
+      return kj::Maybe<kj::Date>(kj::none);
+    });
+  };
+
+  AlarmScheduler scheduler(clock, timer, vfs, path.clone(), kj::mv(getActor));
+  scheduler.setAlarm(actor, scheduledTime);
+
+  clock.setTime(scheduledTime);
+  timer.advanceTo(kj::origin<kj::TimePoint>() + (scheduledTime - kj::UNIX_EPOCH));
+  for (uint i = 0; i < 100 && !abandoned; i++) {
+    waitScope.poll();
+  }
+
+  KJ_EXPECT(fired);
+  KJ_EXPECT(abandoned);
+  KJ_EXPECT(scheduler.getAlarm(actor) == kj::none);
+}
+
+KJ_TEST("AlarmScheduler preserves an alarm queued while abandonment is pending") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  AdjustableClock clock;
+  kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  kj::Path path({"alarms"});
+  auto scheduledTime = kj::UNIX_EPOCH + 1 * kj::HOURS;
+  auto replacementTime = kj::UNIX_EPOCH + 2 * kj::HOURS;
+  // This test actor was not created from a name.
+  auto actor = ActorKey("terminal-actor"_kj, kj::none);
+  auto pendingAbandon = kj::newPromiseAndFulfiller<kj::Maybe<kj::Date>>();
+  auto abandonPromise = pendingAbandon.promise.fork();
+  bool abandonStarted = false;
+
+  {
+    auto getActor = [&](const ActorKey&) -> kj::Own<WorkerInterface> {
+      return kj::heap<AlarmStubWorkerInterface>([]() {},
+          WorkerInterface::AlarmOutcome{
+            .retry = false,
+            .retryCountsAgainstLimit = true,
+            .outcome = EventOutcome::ABORTED,
+          },
+          [&abandonStarted, &abandonPromise]() {
+        abandonStarted = true;
+        return abandonPromise.addBranch();
+      });
+    };
+
+    AlarmScheduler scheduler(clock, timer, vfs, path.clone(), kj::mv(getActor));
+    scheduler.setAlarm(actor, scheduledTime);
+
+    clock.setTime(scheduledTime);
+    timer.advanceTo(kj::origin<kj::TimePoint>() + (scheduledTime - kj::UNIX_EPOCH));
+    for (uint i = 0; i < 100 && !abandonStarted; i++) {
+      waitScope.poll();
+    }
+
+    KJ_EXPECT(abandonStarted);
+    scheduler.setAlarm(actor, replacementTime);
+    pendingAbandon.fulfiller->fulfill(kj::none);
+
+    for (uint i = 0; i < 100 && scheduler.getAlarm(actor) != replacementTime; i++) {
+      waitScope.poll();
+    }
+    KJ_EXPECT(scheduler.getAlarm(actor) == replacementTime);
+  }
+
+  AlarmScheduler scheduler(clock, timer, vfs, path.clone(), failingGetActor());
+  KJ_EXPECT(scheduler.getAlarm(actor) == replacementTime);
 }
 
 }  // namespace

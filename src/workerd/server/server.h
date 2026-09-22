@@ -41,7 +41,8 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::Network& network,
       kj::EntropySource& entropySource,
       Worker::LoggingOptions loggingOptions,
-      kj::Function<void(kj::String)> reportConfigError);
+      kj::Function<void(kj::String)> reportConfigError,
+      kj::Function<void(kj::String)> reportConfigWarning);
   ~Server() noexcept;
 
   // Permit experimental features to be used. These features may break backwards compatibility
@@ -131,6 +132,10 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
     reportConfigError(kj::mv(error));
   }
 
+  void handleReportConfigWarning(kj::String warning) {
+    reportConfigWarning(kj::mv(warning));
+  }
+
  private:
   kj::Filesystem& fs;
   kj::Timer& timer;
@@ -140,6 +145,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::Network& network;
   kj::EntropySource& entropySource;
   kj::Function<void(kj::String)> reportConfigError;
+  kj::Function<void(kj::String)> reportConfigWarning;
   PythonConfig pythonConfig = PythonConfig{.packageDiskCacheRoot = kj::none,
     .pyodideDiskCacheRoot = kj::none,
     .createSnapshot = false,
@@ -160,6 +166,18 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
 
   kj::HashMap<kj::String, kj::OneOf<kj::String, kj::Own<kj::ConnectionReceiver>>> socketOverrides;
   kj::HashMap<kj::String, kj::String> directoryOverrides;
+
+  // Sockets are bound before services start so that a worker can learn the actual port of each
+  // inbound listener that targets it (Worker::Api::getInboundListeners()). Indexed by position in
+  // the config's socket list (names may repeat); none for a socket that failed to bind. Consumed
+  // by listenOnSockets().
+  struct BoundSocket {
+    kj::OneOf<kj::Own<kj::ConnectionReceiver>, kj::Own<kj::DatagramPort>> port;
+    kj::String addrStr;
+  };
+  kj::Vector<kj::Maybe<BoundSocket>> boundSockets;
+  // Bound TCP listeners by the name of the service they deliver to.
+  kj::HashMap<kj::String, kj::Vector<Worker::Api::InboundListener>> inboundListeners;
 
   // Overrides from the command line.
   //
@@ -302,9 +320,16 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::Own<HttpRewriter> rewriter);
 
   kj::Promise<void> listenTcp(
-      kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::StringPtr addrStr);
+      kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::String authority);
+
+  kj::Promise<void> listenUdp(kj::Own<kj::DatagramPort> port,
+      kj::Own<Service> service,
+      kj::StringPtr addrStr,
+      kj::Duration idleTimeout,
+      size_t maxPendingBytes);
 
   kj::Promise<void> listenDebugPort(kj::Own<kj::ConnectionReceiver> listener);
+  rpc::WorkerdDebugPort::Client makeWorkerdDebugPortClient();
 
   class InvalidConfigService;
   class InvalidConfigActorClass;
@@ -317,7 +342,9 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   class WorkerdBootstrapImpl;
   class HttpListener;
   class TcpListener;
+  class UdpListener;
   class DebugPortListener;
+  class WorkerdDebugPortImpl;
 
   struct ErrorReporter;
   struct ConfigErrorReporter;
@@ -332,6 +359,8 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       config::Config::Reader config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       kj::ForkedPromise<void>& forkedDrainWhen);
+
+  kj::Promise<void> bindSockets(config::Config::Reader config);
 
   kj::Promise<void> listenOnSockets(config::Config::Reader config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,

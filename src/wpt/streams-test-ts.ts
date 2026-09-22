@@ -6,24 +6,12 @@ import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'idlharness.any.js': {},
-  'piping/abort.any.js': {
-    comment:
-      'Microtask ordering: the async pump cannot detect source-close ' +
-      'before a same-tick abort fires, so the abort wins the race ' +
-      'against the spec condition-3 (source-close) shutdown.',
-    expectedFailures: ['abort should do nothing after the readable is closed'],
-  },
+  'piping/abort.any.js': {},
   'piping/close-propagation-backward.any.js': {},
   'piping/close-propagation-forward.any.js': {},
   'piping/error-propagation-backward.any.js': {},
   'piping/error-propagation-forward.any.js': {},
-  'piping/flow-control.any.js': {
-    comment:
-      'Backpressure tracking: desiredSize not decremented during pipe writes due to differences in the way draining read works',
-    expectedFailures: [
-      'Piping to a WritableStream that does not consume the writes fast enough exerts backpressure on the ReadableStream',
-    ],
-  },
+  'piping/flow-control.any.js': {},
   'piping/general-addition.any.js': {},
   'piping/general.any.js': {},
   'piping/multiple-propagation.any.js': {},
@@ -67,10 +55,6 @@ export default {
       'ReadableStream teeing with byte source: canceling both branches in reverse order should aggregate the cancel reasons into an array',
     ],
     expectedFailures: [
-      // AggregateError cancel reason: cancel reason is AggregateError
-      // instead of spec [r1, r2] array. These fail fast on assertion.
-      'ReadableStream teeing with byte source: failing to cancel when canceling both branches in sequence with delay',
-      'ReadableStream teeing with byte source: failing to cancel the original stream should cause cancel() to reject on branches',
       // Shared-queue tee model: pull count / pull sequencing differs
       // from the spec's per-branch clone model.
       'ReadableStream teeing with byte source: stops pulling when original stream errors while both branches are reading',
@@ -121,10 +105,6 @@ export default {
       // by-code-point, but that is surprising to users and has terrible
       // performance. We treat strings as single chunks instead.
       'ReadableStream.from throws on invalid iterables; specifically a string',
-      // TODO(soon): "The iterator method must return an object". The C++ streams
-      // implementation passes both of these.
-      'ReadableStream.from accepts a sync iterable with a function iterator',
-      'ReadableStream.from accepts an async iterable with a function iterator',
     ],
   },
   'readable-streams/garbage-collection.any.js': {},

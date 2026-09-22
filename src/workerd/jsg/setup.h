@@ -119,8 +119,7 @@ class IsolateBase {
   // Registers the TypeHandler singleton for a type registered with this isolate, keyed by
   // typeid(TypeHandler<T>). Called during isolate construction (see jsg::Isolate's
   // constructors); the handler pointer must have static storage duration (the instances
-  // are the TypeWrapper's static constexpr TYPE_HANDLER_INSTANCE singletons). Backs
-  // Lock::tryGetTypeHandler().
+  // are the constexpr TYPE_HANDLER_INSTANCE singletons). Backs Lock::tryGetTypeHandler().
   void registerTypeHandler(const std::type_info& type, const void* handler);
 
   // Type-erased lookup for Lock::tryGetTypeHandler(): returns the handler registered for
@@ -194,12 +193,6 @@ class IsolateBase {
 
   inline bool isEvalAllowed(kj::Badge<Lock>) const {
     return evalAllowed;
-  }
-
-  // One-way: once enabled, the feature must remain enabled for the isolate's lifetime since V8
-  // re-queries it at wasm compile time.
-  inline void enableWasmMemoryDiscard(kj::Badge<Lock>) {
-    wasmMemoryDiscardEnabled = true;
   }
 
   inline void setDisallowJavascriptExecution(kj::Badge<Lock>, bool allow) {
@@ -345,6 +338,10 @@ class IsolateBase {
     return exportsAsyncContextKey.addRef();
   }
 
+  kj::Arc<AsyncContextFrame::StorageKey> getActiveSpanAsyncContextKey() {
+    return activeSpanAsyncContextKey.addRef();
+  }
+
   void setUsingNewModuleRegistry() {
     usingNewModuleRegistry = true;
   }
@@ -442,13 +439,6 @@ class IsolateBase {
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
 
-  // Gates the experimental WebAssembly memory.discard proposal. Read by
-  // `wasmMemoryDiscardEnabledCallback`, which V8 consults both when installing the
-  // JS API (`InstallConditionalFeatures`) and when compiling wasm modules that use the
-  // `memory.discard` opcode. Set once per context based on the compat flag; must remain
-  // true for the isolate's lifetime so later compilations still see the feature.
-  bool wasmMemoryDiscardEnabled = false;
-
   // When > 0, we take the "safe" path in unwrap() to avoid calling Get() which can invoke
   // user-defined getters, triggering the `DisallowJavascriptExecution` scope constructed
   // as part of `Deserializer::readValue`
@@ -485,8 +475,8 @@ class IsolateBase {
 
   // Registry backing Lock::tryGetTypeHandler(), keyed by typeid(TypeHandler<T>) and
   // populated at isolate construction (see registerTypeHandler()). The values point at
-  // the TypeWrapper's static constexpr TYPE_HANDLER_INSTANCE singletons, so no ownership
-  // or lifetime management is needed. Read-only after construction.
+  // the constexpr TYPE_HANDLER_INSTANCE singletons, so no ownership or lifetime
+  // management is needed. Read-only after construction.
   //
   // The key wraps a std::type_info pointer but compares and hashes via the type_info's
   // own equality/hash so that distinct typeinfo object addresses across shared library
@@ -523,6 +513,9 @@ class IsolateBase {
 
   // A shared async context key for accessing exports
   kj::Arc<AsyncContextFrame::StorageKey> exportsAsyncContextKey;
+
+  // A shared async context key for accessing the active user tracing span.
+  kj::Arc<AsyncContextFrame::StorageKey> activeSpanAsyncContextKey;
 
   // We expect queues to remain relatively small -- 8 is the largest size I have observed from local
   // testing.
@@ -616,11 +609,12 @@ class IsolateBase {
   static v8::ModifyCodeGenerationFromStringsResult modifyCodeGenCallback(
       v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike);
   static bool allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source);
-  static bool wasmMemoryDiscardEnabledCallback(v8::Local<v8::Context> context);
+  static bool jspiEnabledCallback(v8::Local<v8::Context> context);
 
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
 
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
+  friend class V8System;
 
   HeapTracer heapTracer;
   kj::Own<IsolateObserver> observer;
@@ -969,11 +963,6 @@ class Isolate: public IsolateBase {
           static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
       jsg::setAlignedPointerInEmbedderData(
           context.getHandle(v8Isolate), jsg::ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER, wrapper);
-      if (options.installWasmMemoryDiscard) {
-        v8::Local<v8::Context> handle = context.getHandle(v8Isolate);
-        v8::Context::Scope scope(handle);
-        installWasmMemoryDiscard();
-      }
       return context;
     }
 
@@ -1047,9 +1036,19 @@ class Isolate: public IsolateBase {
       if (instance.IsEmpty()) {
         return kj::none;
       } else {
-        return *reinterpret_cast<Object*>(
+        // Finding `type`'s template in the prototype chain says nothing about
+        // what the internal field points at (sandbox corruption defense in
+        // depth), so this establishes only that the pointer is *some*
+        // `Wrappable`. The caller, which knows the type statically, is
+        // responsible for the rest -- see JsObject::tryUnwrapAs().
+        auto& wrappable = *reinterpret_cast<Wrappable*>(
             instance->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
                 static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
+        Object* object = wrappable.jsgTryGetObject();
+        if (object == nullptr) {
+          reportWrapperTypeMismatch(type, typeid(wrappable));
+        }
+        return *object;
       }
     }
 
@@ -1124,6 +1123,33 @@ WeakRef<T> WeakRef<T>::addRef(jsg::Lock& js) & {
     return WeakRef(i.target, i.anchor.addRef(), i.isolateLiveness.addRef());
   }
   return WeakRef(nullptr);
+}
+
+template <typename T>
+kj::Maybe<Ref<T>> WeakRef<T>::tryAddRef(Lock&) const {
+  KJ_IF_SOME(i, impl) {
+    if (!i.anchor->isAlive()) return kj::none;
+    // After a major GC, V8's ResetDeadNodes zaps a dead droppable TracedReference without
+    // calling ResetRoot(). The CppgcShim destructor that would release the object (running
+    // ~Wrappable(), which invalidates the anchor) can be deferred past the end of the GC
+    // cycle, so the anchor still reports isAlive() while the TracedReference dangles.
+    // Promoting a Ref in that state would call addStrongRef(), which copies the dangling
+    // reference via TracedReference::Get() — a use-after-free. Detect it instead: a wrapper
+    // that exists but was not traced in the last completed major GC cycle is dead.
+    auto& target = static_cast<Wrappable&>(i.target);
+    if (!target.wasTracedInLastGc()) {
+      // The object is condemned: its wrapper died in a completed major GC, which also means
+      // no strong refs exist (they would have rooted the wrapper) and no live wrappable
+      // holds a traced ref to it (that would have marked it) — anything still referencing
+      // it is itself unreachable garbage awaiting the same deferred sweep. Invalidating the
+      // anchor now is therefore permanent-safe, and additionally protects tryGet() and
+      // operator->() callers during the remainder of the window.
+      target.condemn();
+      return kj::none;
+    }
+    return Ref<T>(kj::addRef(i.target));
+  }
+  return kj::none;
 }
 
 template <typename T>

@@ -83,13 +83,14 @@ jsg::ModuleRegistry::ModuleInfo addCapnpModule(
 // the codebase, one for workerd and one for the internal project. It depends
 // on the TypeWrapper specific to each project.
 template <typename TypeWrapper>
-static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
+kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
     kj::Maybe<const Worker::Script::ModulesSource&> maybeSource,
     const CompatibilityFlags::Reader& featureFlags,
     const jsg::Url& bundleBase,
     auto setupForApi,
     jsg::modules::ModuleRegistry::Builder::Options options =
-        jsg::modules::ModuleRegistry::Builder::Options::NONE) {
+        jsg::modules::ModuleRegistry::Builder::Options::NONE,
+    const api::node::ModuleSource* nodeModuleSource = nullptr) {
   jsg::modules::ModuleRegistry::Builder builder(bundleBase, options);
 
   // This callback is used when a module is being loaded to arrange evaluating the
@@ -111,7 +112,7 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
   });
 
   // Add the module bundles that are built into the runtime.
-  api::registerBuiltinModules<TypeWrapper>(builder, featureFlags);
+  api::registerBuiltinModules<TypeWrapper>(builder, featureFlags, nodeModuleSource);
 
   bool hasPythonModules = false;
 
@@ -141,20 +142,12 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           if (def.name == source.mainModule) {
             flags = flags | jsg::modules::Module::Flags::MAIN;
           }
-          if (content.ownBody != kj::none) {
-            // When the source is owned (e.g. transpiled TypeScript), we must
-            // copy it into the module registry since the owning rust::String
-            // may not outlive the registry.
-            bundleBuilder.addEsmModule(def.name, kj::heapArray<const char>(content.body), flags);
-          } else {
-            // The content.body points into memory that outlives the module
-            // registry. In workerd this is a process-lifetime capnp message
-            // buffer; in edgeworker, it is the disowned script-fetcher response
-            // owned by the VirtualFileSystem (which is a sibling of the registry
-            // in Worker::Script::Impl). In edgeworker, the copy is ensured by
-            // shouldCopyScriptFetcherResponse() including the NMR flag.
-            bundleBuilder.addEsmModule(def.name, content.body, flags);
-          }
+          // Worker bundle storage is not necessarily static: transpiled source
+          // can be backed by a temporary rust::String, and edgeworker source is
+          // backed by a script-fetcher response. Copy it once into shared storage
+          // so V8 external strings can safely outlive the registry.
+          bundleBuilder.addEsmModule(
+              def.name, kj::arc<jsg::OwnedAscii>(kj::heapArray<const char>(content.body)), flags);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
@@ -177,8 +170,10 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
         }
         KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
           // The content.body resides in memory that outlives the module registry
-          // (see the ESM comment above for the ownership details).
-          bundleBuilder.addWasmModule(def.name, content.body);
+          // (see the ESM comment above for the ownership details). If the module was
+          // already compiled in another isolate, the compiled code is passed along to
+          // avoid recompilation.
+          bundleBuilder.addWasmModule(def.name, content.body, content.compiledModule);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
@@ -285,19 +280,19 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
 namespace modules::legacy {
 
 template <typename JsgIsolate>
-static v8::Local<v8::String> compileTextGlobal(
+v8::Local<v8::String> compileTextGlobal(
     typename JsgIsolate::Lock& lock, ::capnp::Text::Reader reader) {
   return lock.wrapNoContext(reader);
 };
 
 template <typename JsgIsolate>
-static v8::Local<v8::ArrayBuffer> compileDataGlobal(
+v8::Local<v8::ArrayBuffer> compileDataGlobal(
     typename JsgIsolate::Lock& lock, ::capnp::Data::Reader reader) {
   return lock.wrapNoContext(kj::heapArray(reader));
 };
 
 template <typename JsgIsolate>
-static v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lock& lock,
+v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lock& lock,
     ::capnp::Data::Reader reader,
     const jsg::CompilationObserver& observer) {
   // Wasm compilation requires code-generation permission. The scope restores
@@ -316,7 +311,7 @@ static v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lo
 };
 
 template <typename JsgIsolate>
-static v8::Local<v8::Value> compileJsonGlobal(
+v8::Local<v8::Value> compileJsonGlobal(
     typename JsgIsolate::Lock& lock, ::capnp::Text::Reader reader) {
   return jsg::check(v8::JSON::Parse(lock.v8Context(), lock.wrapNoContext(reader)));
 };
@@ -342,8 +337,15 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
               js, modules::legacy::compileDataGlobal<JsgIsolate>(lock, content.body)));
     }
     KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
-      auto wasmModule =
-          modules::legacy::compileWasmGlobal<JsgIsolate>(lock, content.body, observer);
+      v8::Local<v8::WasmModuleObject> wasmModule;
+      KJ_IF_SOME(compiled, content.compiledModule) {
+        // The module was already compiled in another isolate; share the compiled code rather
+        // than recompiling the wire bytes.
+        auto metrics = observer.onWasmCompilationFromCacheStart(js.v8Isolate);
+        wasmModule = jsg::check(v8::WasmModuleObject::FromCompiledModule(js.v8Isolate, compiled));
+      } else {
+        wasmModule = modules::legacy::compileWasmGlobal<JsgIsolate>(lock, content.body, observer);
+      }
       auto moduleInfo = jsg::ModuleRegistry::ModuleInfo(
           js, name, kj::none, jsg::ModuleRegistry::WasmModuleInfo(js, wasmModule));
       moduleInfo.setModuleSourceObject(lock, wasmModule.template As<v8::Object>());

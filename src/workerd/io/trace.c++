@@ -862,12 +862,16 @@ Log Log::clone() const {
       timestamp, logLevel, kj::str(message), cloneLogErrorInfo(errorInfo), LogTruncated(truncated));
 }
 
-Exception::Exception(
-    kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack)
+Exception::Exception(kj::Date timestamp,
+    kj::String name,
+    kj::String message,
+    kj::Maybe<kj::String> stack,
+    kj::Maybe<Code> code)
     : timestamp(timestamp),
       name(kj::mv(name)),
       message(kj::mv(message)),
-      stack(kj::mv(stack)) {}
+      stack(kj::mv(stack)),
+      code(kj::mv(code)) {}
 
 Log::Log(rpc::Trace::Log::Reader reader)
     : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
@@ -899,6 +903,17 @@ Exception::Exception(rpc::Trace::Exception::Reader reader)
   if (reader.hasStack()) {
     stack = kj::str(reader.getStack());
   }
+  auto code = reader.getCode();
+  switch (code.which()) {
+    case rpc::Trace::Exception::Code::NONE:
+      break;
+    case rpc::Trace::Exception::Code::TEXT:
+      this->code = kj::str(code.getText());
+      break;
+    case rpc::Trace::Exception::Code::NUMBER:
+      this->code = code.getNumber();
+      break;
+  }
 }
 
 void Exception::copyTo(rpc::Trace::Exception::Builder builder) const {
@@ -908,10 +923,32 @@ void Exception::copyTo(rpc::Trace::Exception::Builder builder) const {
   KJ_IF_SOME(s, stack) {
     builder.setStack(s);
   }
+  KJ_IF_SOME(c, code) {
+    KJ_SWITCH_ONEOF(c) {
+      KJ_CASE_ONEOF(text, kj::String) {
+        builder.initCode().setText(text);
+      }
+      KJ_CASE_ONEOF(number, double) {
+        builder.initCode().setNumber(number);
+      }
+    }
+  }
 }
 
 Exception Exception::clone() const {
-  return Exception(timestamp, kj::str(name), kj::str(message), mapCopyString(stack));
+  kj::Maybe<Code> clonedCode;
+  KJ_IF_SOME(c, code) {
+    KJ_SWITCH_ONEOF(c) {
+      KJ_CASE_ONEOF(text, kj::String) {
+        clonedCode = kj::str(text);
+      }
+      KJ_CASE_ONEOF(number, double) {
+        clonedCode = number;
+      }
+    }
+  }
+  return Exception(
+      timestamp, kj::str(name), kj::str(message), mapCopyString(stack), kj::mv(clonedCode));
 }
 }  // namespace tracing
 
@@ -1810,17 +1847,16 @@ void SpanEndData::copyTo(rpc::SpanEndData::Builder builder) const {
 
 // ======================================================================================
 
-SpanBuilder::SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
-    kj::ConstString operationName,
-    kj::Maybe<kj::Date> startTime) {
-  KJ_IF_SOME(obs, observer) {
+SpanBuilder::SpanBuilder(
+    kj::Rc<SpanObserver> observer, kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
+  if (observer != nullptr) {
     // TODO(o11y): Once we report the user tracing spanOpen event as soon as a span is created, we
     // should be able to fold this virtual call and just get the timestamp directly.
-    kj::Date time = startTime.orDefault([&]() { return obs->getTime(); });
+    kj::Date time = startTime.orDefault([&]() { return observer->getTime(); });
     // Report spanOpen event for user tracing spans
-    obs->onOpen(operationName.clone(), time);
+    observer->onOpen(operationName.clone(), time);
     span.emplace(kj::mv(operationName), time);
-    this->observer = kj::mv(obs);
+    this->observer = kj::mv(observer);
   }
 }
 
@@ -1836,12 +1872,12 @@ SpanBuilder::~SpanBuilder() noexcept(false) {
 }
 
 void SpanBuilder::end() {
-  KJ_IF_SOME(o, observer) {
+  if (observer != nullptr) {
     KJ_IF_SOME(s, span) {
       // TODO(performance): Fold this timer call if we are using I/O time, where we will look up
       // I/O time later.
       s.endTime = kj::systemPreciseCalendarClock().now();
-      o->onClose(s.endTime, kj::mv(s.tags), kj::mv(s.logs));
+      observer->onClose(s.endTime, kj::mv(s.tags), kj::mv(s.logs));
       span = kj::none;
     }
   }
@@ -1849,8 +1885,8 @@ void SpanBuilder::end() {
 
 void SpanBuilder::setOperationName(kj::ConstString operationName) {
   KJ_IF_SOME(s, span) {
-    KJ_IF_SOME(o, observer) {
-      o->onUpdateName(operationName.clone());
+    if (observer != nullptr) {
+      observer->onUpdateName(operationName.clone());
     }
     s.operationName = kj::mv(operationName);
   }
@@ -1922,6 +1958,17 @@ void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value
         }});
     }
   }
+}
+
+void SpanBuilder::recordException(kj::Maybe<tracing::Exception::Code> code,
+    kj::String name,
+    kj::String message,
+    kj::Maybe<kj::String> stack) {
+  if (span == kj::none) {
+    return;
+  }
+  observer->onException(
+      observer->getTime(), kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
 }
 
 void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) {

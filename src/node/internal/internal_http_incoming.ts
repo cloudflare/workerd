@@ -5,7 +5,7 @@
 
 import { EventEmitter } from 'node-internal:events';
 import { Readable } from 'node-internal:streams_readable';
-import { isIPv4, Socket } from 'node-internal:internal_net';
+import { isIPv4, Socket, getTimerDuration } from 'node-internal:internal_net';
 import type {
   IncomingMessage as _IncomingMessage,
   IncomingHttpHeaders,
@@ -14,10 +14,19 @@ const kHeaders = Symbol('kHeaders');
 const kHeadersDistinct = Symbol('kHeadersDistinct');
 const kHeadersCount = Symbol('kHeadersCount');
 
+// The idle timer of the connection a client response arrives on. In Node
+// it is the socket's, which the request's and the response's setTimeout()
+// both set and every byte read restarts; here the ClientRequest keeps it.
+export interface IncomingMessageIdleTimer {
+  setTimeout(msecs: number): void;
+  // Activity on the connection: the idle countdown starts over.
+  touch(): void;
+}
+
 export let setIncomingMessageFetchResponse: (
   incoming: IncomingMessage,
   response: Response,
-  resetTimers?: (opts: { finished: boolean }) => void
+  idleTimer?: IncomingMessageIdleTimer
 ) => void;
 
 export let setIncomingMessageSocket: (
@@ -39,6 +48,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   #reading = false;
   #socket: unknown;
   #stream: ReadableStream | null = null;
+  #idleTimer: IncomingMessageIdleTimer | undefined;
 
   override aborted = false;
   url: string = '';
@@ -79,8 +89,10 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   static {
     setIncomingMessageFetchResponse = (
       incoming: IncomingMessage,
-      response: Response
+      response: Response,
+      idleTimer?: IncomingMessageIdleTimer
     ): void => {
+      incoming.#idleTimer = idleTimer;
       incoming.#setFetchResponse(response);
     };
 
@@ -194,12 +206,6 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     this.statusCode = response.status;
     this.statusMessage = response.statusText;
 
-    this.once('end', () => {
-      // We need to emit close in a queueMicrotask because
-      // this is the only way we can ensure that the close event is emitted after destroy.
-      queueMicrotask(() => this.emit('close'));
-    });
-
     this.on('timeout', () => {
       this._consuming = false;
     });
@@ -207,6 +213,10 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     this.#stream = this.#response.body;
   }
 
+  // Pumps the body's reader into the Readable until backpressure (push()
+  // returning false) or EOF. The reader is acquired once and held for the
+  // message's lifetime, so a paused message can resume the pump later;
+  // _destroy() cancels it.
   async #tryRead(): Promise<void> {
     if (this.#stream == null || this.#reading) return;
 
@@ -217,11 +227,17 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
 
       while (!this.destroyed) {
         const data = await this.#reader.read();
+        // Destroyed while the read was pending (destroy() may have run in
+        // the meantime, which the narrowing of the loop condition does not
+        // see): its result is void.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (this.destroyed) break;
         if (data.done) {
           this.complete = true;
           this.push(null);
           break;
         }
+        this.#idleTimer?.touch();
 
         // Backpressure - stop reading until _read() is called again
         if (!this.push(data.value)) {
@@ -232,7 +248,6 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       this.destroy(e as Error);
     } finally {
       this.#reading = false;
-      this.#reader?.releaseLock();
     }
   }
 
@@ -276,6 +291,16 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     if (!this.readableEnded || !this.complete) {
       this.aborted = true;
       this.emit('aborted');
+    }
+
+    // A destroyed message never reads its body again: cancel the stream so
+    // the producer (a fetch upload, a response body) learns of it now.
+    if (!this.complete && this.#stream != null) {
+      const cancelled =
+        this.#reader !== undefined
+          ? this.#reader.cancel(error ?? undefined)
+          : this.#stream.cancel(error ?? undefined);
+      cancelled.catch(() => {});
     }
 
     queueMicrotask(() => {
@@ -430,38 +455,17 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     }
   }
 
-  setTimeout(_msecs: number, callback?: () => void): this {
+  // Node sets the socket's idle timer, the one the request's setTimeout()
+  // sets too; a client response reaches its ClientRequest's through the
+  // idle timer hook. A server request has no socket and no timer: its
+  // callback is registered, nothing arms it.
+  setTimeout(msecs: number, callback?: () => void): this {
+    msecs = getTimerDuration(msecs, 'msecs');
     if (callback) {
       this.on('timeout', callback);
     }
+    this.#idleTimer?.setTimeout(msecs);
     return this;
-  }
-
-  override pipe<T extends NodeJS.WritableStream>(
-    destination: T,
-    options?: { end?: boolean }
-  ): T {
-    const shouldEnd = options?.end !== false;
-
-    // Handle the piping manually for better control
-    this.on('data', (chunk: string | Uint8Array) => {
-      destination.write(chunk);
-    });
-
-    this.once('end', () => {
-      if (shouldEnd) {
-        destination.end();
-      }
-    });
-
-    this.once('error', (err: unknown) => {
-      destination.emit('error', err);
-    });
-
-    // Always ensure reading starts - call resume to trigger the stream
-    this.resume();
-
-    return destination;
   }
 
   set connection(value: unknown) {

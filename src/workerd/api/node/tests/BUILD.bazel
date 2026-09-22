@@ -125,6 +125,12 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto_private-key-der-encryption-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto_private-key-der-encryption-test.js"],
+)
+
+wd_test(
     src = "crypto_random-test.wd-test",
     args = ["--experimental"],
     data = ["crypto_random-test.js"],
@@ -409,12 +415,22 @@ wd_test(
     src = "dns-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["dns-nodejs-test.js"],
-    tags = ["requires-network"],
+    # Requires network access and certificates not available in RBE
+    tags = [
+        "no-remote-exec",
+        "requires-network",
+    ],
 )
 
 js_binary(
     name = "net-nodejs-tcp-server",
     entry_point = "net-nodejs-tcp-server.js",
+)
+
+wd_test(
+    src = "net-server-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["net-server-nodejs-test.js"],
 )
 
 wd_test(
@@ -427,8 +443,6 @@ wd_test(
         "SERVER_PORT",
         "ECHO_SERVER_PORT",
         "TIMEOUT_SERVER_PORT",
-        "END_SERVER_PORT",
-        "SERVER_THAT_DIES_PORT",
         "RECONNECT_SERVER_PORT",
     ],
 )
@@ -573,11 +587,9 @@ wd_test(
     sidecar = "http-client-nodejs-server",
     sidecar_port_bindings = [
         "PONG_SERVER_PORT",
-        "ASD_SERVER_PORT",
         "DEFAULT_HEADERS_EXIST_PORT",
         "REQUEST_ARGUMENTS_PORT",
         "HELLO_WORLD_SERVER_PORT",
-        "GZIP_SERVER_PORT",
         "HOST_ECHO_SERVER_PORT",
     ],
 )
@@ -622,6 +634,12 @@ wd_test(
     src = "bound-als-test.wd-test",
     args = ["--experimental"],
     data = ["bound-als-test.js"],
+)
+
+wd_test(
+    src = "async-resource-request-context-test.wd-test",
+    args = ["--experimental"],
+    data = ["async-resource-request-context-test.js"],
 )
 
 wd_test(

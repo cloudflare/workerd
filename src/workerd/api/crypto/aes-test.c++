@@ -107,9 +107,9 @@ KJ_TEST("AES-CTR key wrap") {
 
   auto subtle = kj::rc<SubtleCrypto>();
 
-  static constexpr auto getWrappingKey = [](jsg::Lock& js, SubtleCrypto& subtle) {
+  static constexpr auto getWrappingKey = [](jsg::Lock& js) {
     auto keyData = jsg::JsBufferSource(jsg::JsUint8Array::create(js, KEY_DATA));
-    return subtle.importKeySync(js, "raw", keyData.addRef(js),
+    return SubtleCrypto::importKeySync(js, "raw", keyData.addRef(js),
         SubtleCrypto::ImportKeyAlgorithm{.name = kj::str("AES-CTR")}, false /* extractable */,
         {kj::str("wrapKey"), kj::str("unwrapKey")});
   };
@@ -139,7 +139,7 @@ KJ_TEST("AES-CTR key wrap") {
   e.getIsolate().runInLockScope([&](CryptoIsolate::Lock& isolateLock) {
     JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
         isolateLock.newContext<CryptoContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
-      auto wrappingKey = getWrappingKey(js, *subtle);
+      auto wrappingKey = getWrappingKey(js);
       auto keyData = jsg::JsBufferSource(jsg::JsUint8Array::create(js, KEY_DATA));
       subtle
           ->importKey(js, kj::str("raw"), keyData.addRef(js), getImportKeyAlg(), true,

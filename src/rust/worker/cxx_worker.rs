@@ -183,6 +183,7 @@ impl From<bridge::EventOutcome> for EventOutcome {
             bridge::EventOutcome::ResponseStreamDisconnected => Self::ResponseStreamDisconnected,
             bridge::EventOutcome::InternalError => Self::InternalError,
             bridge::EventOutcome::ExceededWallTime => Self::ExceededWallTime,
+            bridge::EventOutcome::Aborted => Self::Aborted,
             other => {
                 // CXX shared enums are open (`#[repr]` value, not a closed set), so this
                 // catch-all is reachable only on discriminant drift — a variant added on the

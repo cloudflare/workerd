@@ -18,30 +18,29 @@
 namespace workerd::server {
 
 struct ActorKey {
-  kj::StringPtr actorId;
+  ActorKey(kj::String actorId, kj::Maybe<kj::String> name)
+      : actorId(kj::mv(actorId)),
+        name(kj::mv(name)) {}
 
-  // The name the actor was created with via `idFromName()`/`getByName()`, if any. This is not
-  // part of the actor's identity (it does not participate in equality/hashing); it is carried
-  // alongside the ID so that it can be persisted and later restored onto the reconstructed ID
-  // when an alarm fires, making `ctx.id.name` available in the alarm handler.
-  kj::Maybe<kj::StringPtr> name;
+  ActorKey(kj::StringPtr actorId, kj::Maybe<kj::StringPtr> name)
+      : actorId(actorId.clone()),
+        name(name.clone()) {}
 
   bool operator==(const ActorKey& other) const {
     return actorId == other.actorId;
   }
 
-  // Returns an owned copy, with `actorId` and `name` copied into storage attached to the result.
-  kj::Own<ActorKey> clone() const {
-    auto ownActorId = kj::str(actorId);
-    KJ_IF_SOME(n, name) {
-      auto ownName = kj::str(n);
-      ActorKey key{.actorId = ownActorId, .name = ownName.asPtr()};
-      return kj::attachVal(kj::mv(key), kj::mv(ownActorId), kj::mv(ownName));
-    } else {
-      ActorKey key{.actorId = ownActorId};
-      return kj::attachVal(kj::mv(key), kj::mv(ownActorId));
-    }
+  ActorKey clone() const {
+    return ActorKey(actorId.clone(), name.clone());
   }
+
+  kj::String actorId;
+
+  // The name the actor was created with via `idFromName()`/`getByName()`, if any. This is not
+  // part of the actor's identity (it does not participate in equality/hashing); it is carried
+  // alongside the ID so that it can be persisted and later restored onto the reconstructed ID
+  // when an alarm fires, making `ctx.id.name` available in the alarm handler.
+  kj::Maybe<kj::String> name;
 };
 
 inline uint KJ_HASHCODE(const ActorKey& k) {
@@ -76,9 +75,9 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
       kj::Path path,
       GetActorFn getActor);
 
-  kj::Maybe<kj::Date> getAlarm(ActorKey actor);
-  bool setAlarm(ActorKey actor, kj::Date scheduledTime);
-  bool deleteAlarm(ActorKey actor);
+  kj::Maybe<kj::Date> getAlarm(const ActorKey& actor);
+  bool setAlarm(const ActorKey& actor, kj::Date scheduledTime);
+  bool deleteAlarm(const ActorKey& actor);
 
   // Cancels all pending alarms and removes them from persistent storage.
   void deleteAll();
@@ -93,7 +92,7 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
   kj::TaskSet tasks;
 
   struct ScheduledAlarm {
-    kj::Own<ActorKey> actor;
+    ActorKey actor;
     kj::Date scheduledTime;
     kj::Promise<void> task;
     kj::Maybe<kj::Date> queuedAlarm = kj::none;
@@ -115,17 +114,11 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
 
   kj::HashMap<ActorKey, ScheduledAlarm> alarms;
 
-  struct RetryInfo {
-    bool retry;
-    bool retryCountsAgainstLimit;
-  };
-  kj::Promise<RetryInfo> runAlarm(
-      const ActorKey& actor, kj::Date scheduledTime, uint32_t retryCount);
-
-  ScheduledAlarm scheduleAlarm(kj::Date now, kj::Own<ActorKey> actor, kj::Date scheduledTime);
+  ScheduledAlarm scheduleAlarm(kj::Date now, const ActorKey& actor, kj::Date scheduledTime);
 
   kj::Promise<void> makeAlarmTask(
       kj::Duration delay, const ActorKey& actor, kj::Date scheduledTime);
+  kj::Promise<void> abandonAlarm(const ActorKey& actor, kj::Date scheduledTime);
 
   kj::Promise<void> checkTimestamp(kj::Duration delay, kj::Date scheduledTime);
 

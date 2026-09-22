@@ -1,0 +1,46 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The encoding streams suite runs the same test modules under two configs:
+# encoding-cpp against the C++ implementation, encoding-ts against the
+# TypeScript implementation.
+
+encoding_suite_srcs = glob(["*.js"]) + ["encoding-modules.capnp"]
+
+wd_test(
+    src = "encoding-cpp.wd-test",
+    data = encoding_suite_srcs,
+)
+
+wd_test(
+    src = "encoding-ts.wd-test",
+    args = ["--experimental"],
+    data = encoding_suite_srcs,
+)
+
+# The main C++ cell plus the dateless opt-in pedantic_wpt flag, pinning the
+# spec-aligned sides of pedantic-gated behaviors.
+wd_test(
+    src = "encoding-cpp-pedantic.wd-test",
+    data = encoding_suite_srcs,
+)
+
+# Legacy (pre-flag) regression guards, C++ implementation only, one cell per
+# flag window. The @all-compat-flags variant is disabled: at the 2999-12-31
+# date the flags each cell deliberately omits would all turn on.
+wd_test(
+    src = "encoding-cpp-legacy.wd-test",
+    data = encoding_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
+    src = "encoding-cpp-legacy-bp.wd-test",
+    data = encoding_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
+    src = "encoding-cpp-legacy-hwm.wd-test",
+    data = encoding_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)

@@ -86,12 +86,18 @@ namespace workerd::util {
   V(HIBERNATABLE_WEBSOCKET_REFACTOR)                                                               \
   /* When enabled, turns on per-isolate TypeScript/JavaScript bootstrap */                         \
   V(PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)                                                              \
-  /* Gate for the Durable Object fetch-retries feature, scoped to DO `fetch()`. Enables           \
+  /* Gate for the Durable Object fetch-retries feature, scoped to DO `fetch()`. Enables            \
     observe-only retry-token claim machinery. */                                                   \
   V(DURABLE_OBJECT_RETRIES_FETCH)                                                                  \
-  /* Enables Durable Object fetch retry requests and fail-closed receiver enforcement. The        \
-     observe-only DURABLE_OBJECT_RETRIES_FETCH gate is a prerequisite. */                          \
+  /* Enables Durable Object fetch retry requests. Enabled senders require receiver-side claim     \
+     enforcement on each request. The observe-only DURABLE_OBJECT_RETRIES_FETCH gate is a         \
+     prerequisite. */                                                                              \
   V(DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS)                                                   \
+  /* Extends observe-only retry-token claiming to Durable Object JSRPC calls: senders attach       \
+     tokens and receivers claim them. Requires DURABLE_OBJECT_RETRIES_FETCH. A JSRPC retry        \
+     request gate, the counterpart of DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS, is added with  \
+     sender replay. */                                                                             \
+  V(DURABLE_OBJECT_RETRIES_JSRPC)                                                                  \
   /* When enabled, the native `node-internal:url` module is provided by the Rust                   \
      implementation (api::node UrlUtil ported to src/rust/api) instead of the                      \
      C++ implementation. The C++ implementation is retained for rollback.*/                        \
@@ -106,7 +112,45 @@ namespace workerd::util {
   /* Allow a Socket to be transferred over JS RPC. When disabled, serializing a Socket fails as    \
      though the type were not serializable at all, and an incoming transferred Socket is           \
      rejected. */                                                                                  \
-  V(SOCKET_RPC_TRANSFER)
+  V(SOCKET_RPC_TRANSFER)                                                                           \
+  /* Materialize stream and socket externals of an incoming RPC value BEFORE the V8 value graph    \
+     is deserialized (RpcDeserializerExternalHandler::prepare()), with deserialize() claiming the  \
+     prebuilt objects. V8's deserializer forbids JS execution during the graph read, so this is    \
+     the only phase in which TypeScript-implemented streams (whose construction runs JS) can be    \
+     built; the mechanism itself is implementation-agnostic and runs for legacy streams too. When  \
+     disabled, deserialization constructs legacy streams in place, exactly as before the gate      \
+     existed; the typescript_implemented_streams compat flag requires this gate to receive         \
+     streams over RPC (that combination is rejected, not degraded). */                             \
+  V(RPC_EXTERNALS_HYDRATION)                                                                       \
+  /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust            \
+     implementation, instead of chromium zlib. The unprefixed zlib symbols are owned by the        \
+     routing layer in util/zlib-router.c++, so this covers every consumer: node:zlib, web          \
+     CompressionStream, crypto crc32, kj-gzip/http (fetch and WebSocket compression), and V8's     \
+     compression utils. Chromium zlib remains the default. */                                      \
+  V(COMPRESSION_RS)                                                                                \
+  /* Enables per-call JSRPC tracing, trace-context propagation, and related Fetcher spans. */      \
+  V(JSRPC_TRACING)                                                                                 \
+  /* Selects the redesigned memory cache implementation. The legacy implementation remains         \
+     available for rollback while this gate is rolled out. */                                      \
+  V(MEMORY_CACHE_V2)                                                                               \
+  /* Enable the JS-observable synchronous tryReadSync/tryWriteSync fast paths: the stream          \
+     controllers' read/write paths (reader.read() / writer.write() promises settle without an      \
+     event-loop round trip) and readAll()'s read loop. The C++ pump loops stay ungated: pumpTo()   \
+     never enters JavaScript and byte-budgets its un-yielded work, while pumpToImpl() still        \
+     suspends through the event loop on every iteration (only the write suspension is elided),     \
+     leaving the JS-visible pull() ordering unchanged. */                                          \
+  V(STREAM_CONTROLLER_SYNC_FAST_PATHS)                                                             \
+  /* When a native WritableStream sent over JS RPC is dropped or revoked without a clean end(),   \
+     abort its underlying sink so that anything connected to it (e.g. the readable half of an      \
+     IdentityTransformStream) errors instead of hanging. When disabled, the sink is dropped        \
+     without abort. */                                                                             \
+  V(JSRPC_WRITABLE_DROP_ABORTS_SINK)                                                               \
+  /* Propagate cancellation of a ReadableStream sent over JS RPC back to its origin: the sender    \
+     attaches a StreamCanceler capability, the receiver calls it when its copy of the stream is    \
+     canceled or released before EOF, and the origin's pump cancels the source (running its       \
+     cancel algorithm with the receiver's reason). When disabled, neither side participates and    \
+     the origin learns of the loss only when its next write fails. */                             \
+  V(JSRPC_READABLE_CANCEL_PROPAGATION)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

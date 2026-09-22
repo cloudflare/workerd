@@ -20,6 +20,16 @@ export const test = {
         objectId:
           'aa299662980ce671dbcb09a5d7ab26ab30e45465bcd12f263f2bdd7d5edd804a',
       },
+      {
+        name: 'fetch',
+        closed: true,
+        'network.protocol.name': 'http',
+        'network.protocol.version': 'HTTP/1.1',
+        'http.request.method': 'GET',
+        'url.full': 'http://test.example/kv-test',
+        'http.response.status_code': 200n,
+        'http.response.body.size': 34n,
+      },
       { name: 'durable_object_storage_put', closed: true },
       { name: 'durable_object_storage_put', closed: true },
       { name: 'durable_object_storage_get', closed: true },
@@ -27,8 +37,18 @@ export const test = {
       { name: 'durable_object_storage_delete', closed: true },
       { name: 'durable_object_storage_list', closed: true },
       { name: 'durable_object_storage_deleteAll', closed: true },
-      { name: 'durable_object_storage_setAlarm', closed: true },
-      { name: 'durable_object_storage_getAlarm', closed: true },
+      {
+        name: 'durable_object_storage_setAlarm',
+        closed: true,
+        'cloudflare.durable_object.alarm.scheduled_time':
+          '2100-01-01T00:00:00.000Z',
+      },
+      {
+        name: 'durable_object_storage_getAlarm',
+        closed: true,
+        'cloudflare.durable_object.alarm.scheduled_time':
+          '2100-01-01T00:00:00.000Z',
+      },
       { name: 'durable_object_storage_deleteAlarm', closed: true },
       { name: 'durable_object_storage_transaction', closed: true },
       { name: 'durable_object_storage_sync', closed: true },

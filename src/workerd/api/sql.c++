@@ -25,7 +25,7 @@ static constexpr uint SQL_STATEMENT_CACHE_MAX_SIZE = 1024 * 1024;
 
 SqlStorage::SqlStorage(jsg::Ref<DurableObjectStorage> storage)
     : storage(kj::mv(storage)),
-      statementCache(IoContext::current().addObject(kj::heap<StatementCache>())) {}
+      statementCache(IoContext::current().createObject<StatementCache>()) {}
 
 SqlStorage::~SqlStorage() {}
 
@@ -139,6 +139,9 @@ double SqlStorage::getDatabaseSize(jsg::Lock& js) {
 }
 
 bool SqlStorageRegulator::isAllowedName(kj::StringPtr name) const {
+  // TODO(someday): Ideally we would use the case-insensitive comparison
+  // functions that are provided as part of SQLite's API, but that causes build
+  // issues on Windows.
   return name.size() < 4 || strncasecmp(name.begin(), "_cf_", 4) != 0;
 }
 

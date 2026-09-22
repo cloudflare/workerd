@@ -77,7 +77,7 @@ jsg::Ref<SyncKvStorage::ListIterator> SyncKvStorage::list(
       KJ_UNWRAP_OR(DurableObjectStorageOperations::compileListOptions(asyncOptions), {
         // Key range is empty. Return empty map.
         return js.alloc<SyncKvStorage::ListIterator>(
-            IoContext::current().addObject(kj::heap<SqliteKv::ListCursor>(nullptr)));
+            IoContext::current().createObject<SqliteKv::ListCursor>(nullptr));
       });
 
   auto cursor = sqliteKv.list(start, end, limit, reverse ? SqliteKv::REVERSE : SqliteKv::FORWARD)

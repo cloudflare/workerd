@@ -156,10 +156,13 @@ def prepare_update(target):
         "GIT_COMMITTER_EMAIL": "ew-v8-patches@cloudflare.com",
     }
 
+    # --keep-non-patch is the counterpart of the -k that finish_update passes to
+    # format-patch.
     v8_nightly_shared.run(
         [
             "git",
             "am",
+            "--keep-non-patch",
             "--3way",
             "--committer-date-is-author-date",
             *patch_files,

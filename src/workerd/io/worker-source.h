@@ -1,6 +1,7 @@
 #pragma once
 
 #include <rust/cxx.h>
+#include <v8-wasm.h>
 
 #include <capnp/schema.capnp.h>
 #include <kj/debug.h>
@@ -51,6 +52,12 @@ struct WorkerSource {
   struct WasmModule {
     // Compiled .wasm file content.
     kj::ArrayPtr<const byte> body;
+
+    // If the module was provided as an already-compiled `WebAssembly.Module` (e.g. passed to the
+    // dynamic worker loader from another isolate), the shared compiled code, allowing the target
+    // isolate to avoid recompiling. In this case `body` points at the module's wire bytes, which
+    // are owned by the compiled module.
+    kj::Maybe<v8::CompiledWasmModule> compiledModule;
   };
   struct JsonModule {
     // JSON-encoded content; will be parsed automatically when imported.

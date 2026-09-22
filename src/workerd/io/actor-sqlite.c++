@@ -301,7 +301,8 @@ void ActorSqlite::onCriticalError(
     kj::Exception exception = kj::mv(maybeException).orDefault([&]() {
       return JSG_KJ_EXCEPTION(FAILED, Error, errorMessage);
     });
-    exception.setDescription(kj::str("broken.outputGateBroken; ", exception.getDescription()));
+    auto newDescription = kj::str("broken.outputGateBroken; ", exception.getDescription());
+    exception.setDescription(kj::mv(newDescription));
     broken.emplace(exception.clone());
 
     // Also ensure output gate is explicitly broken.
@@ -1213,7 +1214,7 @@ const ActorSqlite::Hooks ActorSqlite::Hooks::DEFAULT = ActorSqlite::Hooks{};
 
 kj::Promise<void> ActorSqlite::Hooks::scheduleRun(
     kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) {
-  JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
+  JSG_FAIL_REQUIRE(Error, "Alarms have not been configured for this Durable Object.");
 }
 
 kj::OneOf<kj::Maybe<ActorCacheOps::Value>, kj::Promise<kj::Maybe<ActorCacheOps::Value>>>

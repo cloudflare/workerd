@@ -1,43 +1,53 @@
 using Workerd = import "/workerd/workerd.capnp";
 
+# The worker is instantiated twice so that the bindings below cross an isolate boundary. The
+# Durable Object namespaces live only in the target because unique keys must not repeat. Only
+# the first service's test() runs; see the filter argument in BUILD.bazel.
 const unitTests :Workerd.Config = (
   services = [
     ( name = "js-rpc-test",
+      worker = (modules = .modules, compatibilityFlags = .compatibilityFlags, bindings = .bindings)
+    ),
+    ( name = "js-rpc-test-target",
       worker = (
-        modules = [
-          (name = "worker", esModule = embed "js-rpc-test.js")
-        ],
-        compatibilityFlags = [
-          "nodejs_compat",
-          "fetcher_no_get_put_delete",
-          "enable_abortsignal_rpc",
-          "enhanced_error_serialization",
-          "enable_ctx_exports",
-          "experimental",
-          "streams_enable_constructors",
-          "http_headers_getsetcookie",
-          "fetch_legacy_url",
-          "rpc_params_transfer_stubs",
-        ],
-        bindings = [
-          (name = "self", service = (name = "js-rpc-test", entrypoint = "nonClass")),
-          (name = "MyService", service = (name = "js-rpc-test", entrypoint = "MyService")),
-          (name = "MyServiceProxy", service = (name = "js-rpc-test", entrypoint = "MyServiceProxy")),
-          (name = "MyActor", durableObjectNamespace = "MyActor"),
-          (name = "ActorNoExtends", durableObjectNamespace = "ActorNoExtends"),
-          (name = "defaultExport", service = "js-rpc-test"),
-          (name = "twelve", json = "12"),
-          (name = "GreeterFactory", service = (name = "js-rpc-test", entrypoint = "GreeterFactory")),
-        ],
-
+        modules = .modules, compatibilityFlags = .compatibilityFlags, bindings = .bindings,
         durableObjectNamespaces = [
           (className = "MyActor", uniqueKey = "foo"),
           (className = "ActorNoExtends", uniqueKey = "bar"),
         ],
-
         durableObjectStorage = (inMemory = void),
       )
     ),
   ],
   v8Flags = [ "--expose-gc" ],
 );
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "js-rpc-test.js")
+];
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "fetcher_no_get_put_delete",
+  "enable_abortsignal_rpc",
+  "enhanced_error_serialization",
+  "enable_ctx_exports",
+  "experimental",
+  "streams_enable_constructors",
+  "http_headers_getsetcookie",
+  "fetch_legacy_url",
+  "rpc_params_transfer_stubs",
+];
+
+const bindings :List(Workerd.Worker.Binding) = [
+  (name = "self", service = (name = "js-rpc-test-target", entrypoint = "nonClass")),
+  (name = "MyService", service = (name = "js-rpc-test-target", entrypoint = "MyService")),
+  # Same isolate as the tests, for the tests that share module-level globals with MyService.
+  (name = "MyServiceLocal", service = (name = "js-rpc-test", entrypoint = "MyService")),
+  (name = "MyServiceProxy", service = (name = "js-rpc-test-target", entrypoint = "MyServiceProxy")),
+  (name = "MyActor", durableObjectNamespace = (className = "MyActor", serviceName = "js-rpc-test-target")),
+  (name = "ActorNoExtends", durableObjectNamespace = (className = "ActorNoExtends", serviceName = "js-rpc-test-target")),
+  (name = "defaultExport", service = "js-rpc-test-target"),
+  (name = "twelve", json = "12"),
+  (name = "GreeterFactory", service = (name = "js-rpc-test-target", entrypoint = "GreeterFactory")),
+];

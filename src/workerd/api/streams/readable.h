@@ -13,6 +13,8 @@ namespace workerd::api {
 
 class ReadableStreamDefaultReader;
 class ReadableStreamBYOBReader;
+class JsReadableStream;
+class RpcSerializerExternalHandler;
 
 class ReaderImpl final {
 public:
@@ -80,7 +82,6 @@ private:
       Closed,
       Released>;
 
-  kj::Maybe<IoContext::Id> ioContext;
   kj::Ptr<ReadableStreamController::Reader> reader;
 
   ReaderState state;
@@ -263,7 +264,6 @@ class DrainingReader: public ReadableStreamController::Reader {
   using Attached = jsg::Ref<ReadableStream>;
   struct Released {};
 
-  kj::Maybe<IoContext::Id> ioContext;
   kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state = Initial();
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
 };
@@ -272,7 +272,6 @@ class ReadableStream: public kj::PtrTarget, public jsg::Object {
 private:
 
   struct AsyncIteratorState {
-    kj::Maybe<IoContext::Id> ioContext;
     jsg::Ref<ReadableStreamDefaultReader> reader;
     bool preventCancel;
   };
@@ -474,7 +473,13 @@ public:
   void signalEof(jsg::Lock& js);
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
-  static jsg::Ref<ReadableStream> deserialize(
+
+  // Deserializes to a JsReadableStream (rather than a jsg::Ref<ReadableStream>) so that the
+  // received stream is backed by whichever stream implementation this isolate runs: under the
+  // typescript_implemented_streams compat flag the result wraps a TypeScript-implemented
+  // stream (and is an instance of the global ReadableStream class), otherwise a legacy
+  // stream exactly as before. Wire-compatible with peers running either implementation.
+  static JsReadableStream deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
 
   JSG_SERIALIZABLE(rpc::SerializationTag::READABLE_STREAM);
@@ -482,7 +487,6 @@ public:
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
-  kj::Maybe<IoContext::Id> ioContext;
   kj::Own<ReadableStreamController> controller;
 
   // Used to signal when this ReadableStream reads EOF. This signal is required for TCP sockets.
@@ -566,5 +570,33 @@ private:
 // implementation in readable.c++ for details.
 kj::Own<ReadableStreamSource> newNoDeferredProxyReadableStream(
     IoContext& context, kj::Own<ReadableStreamSource> inner);
+
+// Resolves the RPC handler backing `serializer`, throwing DOMDataCloneError when there is none
+// (structuredClone(), for one, cannot transfer a stream). Both readable-stream serialize arms
+// resolve the handler before anything else they need, so an unsupported serialize attempt
+// reports this error rather than whichever later requirement happens to fail first -- notably
+// IoContext::current(), which is unavailable in global scope.
+RpcSerializerExternalHandler& requireReadableStreamRpcSerializer(jsg::Serializer& serializer);
+
+// Builds the wire plumbing for transferring a readable stream over RPC: pushes a ByteStream to
+// the peer, writes the external-table entry describing it (encoding plus expected length, when
+// known), and returns the local sink the stream's remaining content must be pumped into (ending
+// the sink when the stream ends). Shared by ReadableStream::serialize() and JsReadableStream's
+// TypeScript arm, which differ only in how the encoding/length are obtained and how the pump is
+// driven.
+kj::Own<WritableStreamSink> newReadableStreamSerializeSink(
+    RpcSerializerExternalHandler& externalHandler,
+    StreamEncoding encoding,
+    kj::Maybe<uint64_t> expectedLength);
+
+// Materializes a readable stream received over RPC from its external-table entry: adopts the
+// pushed ByteStream, wraps it as a system stream of the peer's declared encoding (with deferred
+// proxying suppressed, since the stream dies with the RPC session's IoContext), and constructs
+// the stream through JsReadableStream::create()'s implementation dispatch. Runs during
+// RpcDeserializerExternalHandler::prepare() -- before the V8 graph read -- because the
+// TypeScript arm of create() executes JavaScript, which the graph read forbids;
+// ReadableStream::deserialize() then claims the result.
+JsReadableStream hydrateRpcReadableStream(
+    jsg::Lock& js, IoContext& ioctx, rpc::JsValue::External::ReadableStream::Reader reader);
 
 }  // namespace workerd::api

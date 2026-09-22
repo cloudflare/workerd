@@ -28,10 +28,16 @@ struct LogEntry {
   # Context depth for nested operations (optional, only included if > 0)
 
   enum LogLevel {
+    # The JSON names are a contract with whoever consumes workerd's structured output, and match the
+    # names used by JS console logs (`logLevelToString()` in io/worker.c++), so that a single set of
+    # level names covers everything workerd emits. `warning` is spelled `warn` for that reason.
+    # `log` appears only in console output and `fatal` only here, neither having a counterpart in
+    # the other.
+
     debug @0 $Cxx.name("debug_") $Json.name("debug");
     # in C++, the constant will be DEBUG_ to avoid clashing with the DEBUG macro
     info @1 $Json.name("info");
-    warning @2 $Json.name("warning");
+    warning @2 $Json.name("warn");
     error @3 $Json.name("error");
     fatal @4 $Json.name("fatal");
   }

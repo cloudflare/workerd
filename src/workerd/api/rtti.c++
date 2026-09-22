@@ -130,11 +130,11 @@ struct EncoderModuleRegistryImpl {
     }
   }
 
-  template <typename Func>
-  void addBuiltinBundleFiltered(jsg::Bundle::Reader bundle, Func filter) {
+  template <typename Filter, typename AddModule>
+  void addBuiltinBundleFiltered(jsg::Bundle::Reader bundle, Filter filter, AddModule addModule) {
     for (auto module: bundle.getModules()) {
       if (filter(module)) {
-        addBuiltinModule(module);
+        addModule(module);
       }
     }
   }

@@ -15,6 +15,7 @@
 
 import {
   ERR_METHOD_NOT_IMPLEMENTED,
+  ERR_STREAM_PREMATURE_CLOSE,
   ERR_HTTP_HEADERS_SENT,
   ERR_HTTP_INVALID_STATUS_CODE,
   ERR_INVALID_CHAR,
@@ -22,10 +23,12 @@ import {
   ERR_OUT_OF_RANGE,
   ERR_OPTION_NOT_IMPLEMENTED,
   ERR_SERVER_ALREADY_LISTEN,
+  EADDRINUSE,
 } from 'node-internal:internal_errors';
 import { EventEmitter } from 'node-internal:events';
 import { getDefaultHighWaterMark } from 'node-internal:streams_state';
 import {
+  kErrored,
   kUniqueHeaders,
   OutgoingMessage,
   parseUniqueHeadersOption,
@@ -38,7 +41,7 @@ import {
   validatePort,
   validateNumber,
 } from 'node-internal:validators';
-import { portMapper } from 'cloudflare-internal:http';
+import { tcpPorts } from 'cloudflare-internal:http';
 import {
   IncomingMessage,
   setIncomingMessageSocket,
@@ -59,7 +62,7 @@ import {
   chunkExpression,
   _checkInvalidHeaderChar,
 } from 'node-internal:internal_http';
-import { _normalizeArgs } from 'node-internal:internal_net';
+import { _normalizeArgs, bindPort } from 'node-internal:internal_net';
 import { Buffer } from 'node-internal:internal_buffer';
 
 import type {
@@ -138,7 +141,9 @@ export class Server
     if (!enableNodejsHttpServerModules) {
       throw new ERR_METHOD_NOT_IMPLEMENTED('Server');
     }
-    super();
+    // Async listeners' rejections are captured (see the rejection hook
+    // below): a 'request' listener's failure must reach its response.
+    super({ captureRejections: true });
 
     if (options != null) {
       // @ts-expect-error TS2345 TODO(soon): Find a better way to handle this type mismatch.
@@ -176,7 +181,7 @@ export class Server
   close(callback?: VoidFunction): this {
     httpServerPreClose(this);
     if (this.#port != null) {
-      portMapper.delete(this.#port);
+      tcpPorts.release(this.#port);
       this.#port = null;
     }
     if (typeof callback === 'function') {
@@ -213,6 +218,36 @@ export class Server
       this.once('timeout', callback);
     }
     return this;
+  }
+
+  // An async 'request' listener whose promise rejects: the response is torn
+  // down with the error, as a listener throwing synchronously tears it down
+  // (see #onRequest) — a Worker cannot die of an unhandled rejection as
+  // Node's process would, and the client would otherwise wait for a
+  // response that never comes.
+  //
+  // Another event's listener rejecting is reported as EventEmitter's own
+  // capture fallback would report it: an 'error' event, so a server with
+  // an 'error' listener hears of it, and one without throws it uncaught.
+  // The fallback disables capture while it emits; since this handler
+  // replaces the fallback for every event, an 'error' listener that itself
+  // rejects is re-raised uncaught instead, rather than emitted again.
+  override [EventEmitter.captureRejectionSymbol](
+    err: unknown,
+    event: string | symbol,
+    ...args: unknown[]
+  ): void {
+    if (event === 'request') {
+      (args[1] as ServerResponse).destroy(err);
+      return;
+    }
+    if (event === 'error') {
+      queueMicrotask(() => {
+        throw err;
+      });
+      return;
+    }
+    this.emit('error', err);
   }
 
   async #onRequest(
@@ -275,7 +310,12 @@ export class Server
 
     const response = new this[kServerResponse](incoming, {
       highWaterMark: this.highWaterMark,
+      rejectNonStandardBodyWrites: this.rejectNonStandardBodyWrites,
     });
+    // The reply to a HEAD carries no body, whatever the handler writes.
+    if (request.method === 'HEAD') {
+      response._hasBody = false;
+    }
     return { incoming, response };
   }
 
@@ -293,7 +333,7 @@ export class Server
       port = 0;
     }
 
-    if (this.#port != null || portMapper.has(port)) {
+    if (this.#port != null) {
       throw new ERR_SERVER_ALREADY_LISTEN();
     }
 
@@ -301,9 +341,15 @@ export class Server
       this.once('listening', callback as (...args: unknown[]) => unknown);
     }
 
-    this.#port = this.#findSuitablePort(port);
-    // @ts-expect-error TS2322 Type mismatch. Not needed.
-    portMapper.set(this.#port, { fetch: this.#onRequest.bind(this) });
+    const host = typeof options.host === 'string' ? options.host : '127.0.0.1';
+    // An http server is reached through httpServerHandler rather than an
+    // inbound connect listener, so port 0 never takes a declared port.
+    if (port === 0) {
+      port = tcpPorts.ephemeral();
+      if (port === 0) throw new EADDRINUSE(host, port);
+    }
+    this.#port = bindPort(host, port);
+    tcpPorts.setHandler(this.#port, { fetch: this.#onRequest.bind(this) });
     queueMicrotask(() => {
       // If any of the listening handlers (here and in any of the other queueMicrotask(...) instances here,
       // if the listening handlers throw an error, that will end up being reported to
@@ -311,26 +357,6 @@ export class Server
       this.emit('listening');
     });
     return this;
-  }
-
-  #findSuitablePort(port: number): number {
-    // We don't have to check if portMapper has it because the caller
-    // already validates the uniqueness of the port and calls this method.
-    if (port !== 0) {
-      return port;
-    }
-
-    // Let's try at most 10 times to find a suitable port.
-    // If we can't find by that time, let's bail and throw an error.
-    for (let i = 0; i < 10; i++) {
-      port = Math.floor(Math.random() * 65535) + 1;
-      if (!portMapper.has(port)) {
-        return port;
-      }
-    }
-
-    // This is unlikely to happen, but just in case.
-    throw new Error('Failed to find a suitable port after 10 attempts');
   }
 
   getConnections(callback?: (err: Error | null, count: number) => void): this {
@@ -396,7 +422,12 @@ let getServerResponseFetchResponse: (
 //    - Set up listeners for future data
 // 3. After headers: Data streams directly without buffering
 //    - New '_dataWritten' events are immediately enqueued to the stream
-// 4. Completion: 'finish' event closes the ReadableStream
+// 4. Completion: 'finish' event closes the ReadableStream; 'close' follows
+// 5. Destruction (destroy(), or the body's cancel): before headers the
+//    Response promise rejects; after, the ReadableStream errors with the
+//    destroy reason (ERR_STREAM_PREMATURE_CLOSE without one); 'close' follows.
+//    Once end() has been called there is nothing left to abort: destroy()
+//    only marks the response destroyed, and the completion path (4) runs
 // @ts-expect-error TS2720 Trailers related methods/attributes are missing.
 export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
   extends OutgoingMessage
@@ -436,13 +467,18 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     const { promise, resolve, reject } = Promise.withResolvers<Response>();
 
     let streamController: ReadableStreamController<Uint8Array> | null = null;
-    const chunks: (Buffer | Uint8Array)[] = [];
+    const chunks: Uint8Array<ArrayBuffer>[] = [];
     const state: { bytesWritten: number; contentLength: number | null } = {
       bytesWritten: 0,
       contentLength: null,
     };
 
     const handleData = (events: DataWrittenEvent[]): void => {
+      // A destroyed response sends nothing more: its body has been errored
+      // (or closed), so a chunk the message buffer still held when the
+      // response was destroyed — by a handler throwing after writing it —
+      // is dropped, as a destroyed socket's pending writes are in Node.
+      if (this.destroyed) return;
       for (const event of events) {
         let chunk = this.#dataFromDataWrittenEvent(event);
 
@@ -460,20 +496,30 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
         }
 
         state.bytesWritten += chunk.length;
+        if (chunk.length === 0) continue;
 
+        // The byte stream's enqueue transfers the buffer it is given, so
+        // the bytes are copied: a written buffer stays the caller's (as in
+        // Node, reusable once the write's callback has fired), and a view
+        // over memory that cannot be transferred — a SharedArrayBuffer, a
+        // WebAssembly.Memory — is written like any other.
+        const copy = new Uint8Array(chunk);
         if (streamController) {
-          if (chunk.length > 0) {
-            // @ts-expect-error TS2345 Buffer extends Uint8Array, but has ArrayBufferLike instead of ArrayBuffer.
-            streamController.enqueue(chunk);
-          }
+          streamController.enqueue(copy);
         } else {
-          chunks[event.index] = chunk;
+          chunks[event.index] = copy;
         }
       }
     };
 
     this.on('_dataWritten', handleData);
     this.once('error', reject);
+    // A response destroyed before its headers were sent never yields a
+    // Response: the fetch fails instead of waiting forever. (A no-op once
+    // the headers have resolved the promise.)
+    this.once('close', () => {
+      reject(new ERR_STREAM_PREMATURE_CLOSE());
+    });
 
     this.once(
       '_headersSent',
@@ -494,20 +540,58 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
             onStreamStart: (controller) => {
               streamController = controller;
               for (const chunk of chunks) {
-                // @ts-expect-error TS2345 Buffer extends Uint8Array, but has ArrayBufferLike instead of ArrayBuffer.
                 controller.enqueue(chunk);
               }
               chunks.length = 0;
             },
           })
         );
-
-        this._closed = true;
-        this.emit('close');
       }
     );
 
+    // As in Node, 'close' follows the response's completion ('finish'), or
+    // its destruction (see destroy()).
+    this.once('finish', () => {
+      queueMicrotask(() => {
+        this.#emitClose();
+      });
+    });
+
     this.#fetchResponse = promise;
+  }
+
+  // A closed response counts as destroyed (as in Node): writes after it
+  // fail through their callback only, never as an 'error' event.
+  #emitClose(): void {
+    if (this._closed) return;
+    this.destroyed = true;
+    this._closed = true;
+    this.emit('close');
+  }
+
+  // Takes the error alone, as Node's OutgoingMessage.destroy(error) does:
+  // there is no socket whose teardown could report back to a callback.
+  //
+  // Once end() has been called the body has been handed off (every chunk
+  // reached the stream before end() returned) and 'finish' is on its way,
+  // so there is nothing left to abort. A destroy() from then on — from
+  // inside 'finish', or right after end() — marks the response destroyed
+  // and errored at once, as Node's does (a write that follows fails through
+  // its callback alone), but emits no 'error' (Node's tears its socket down
+  // instead, and emits none on the response either), leaves the body to
+  // reach the client whole, and lets 'close' follow 'finish' as usual.
+  override destroy(err?: unknown): this {
+    if (this.destroyed) return this;
+    if (this.writableEnded) {
+      this.destroyed = true;
+      this[kErrored] = err as Error;
+      return this;
+    }
+    super.destroy(err);
+    queueMicrotask(() => {
+      this.#emitClose();
+    });
+    return this;
   }
 
   #toFetchResponse({
@@ -528,10 +612,29 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
         type: 'bytes',
         start: (controller): void => {
           onStreamStart(controller);
+          // The controller settles once: 'finish' closes it, an 'error' or
+          // a 'close' before that errors it. A 'finish' that still arrives
+          // after the response was destroyed — end() after destroy()
+          // queues one when nothing is left to flush — finds it errored,
+          // and must not close it a second time.
+          let settled = false;
           this.once('finish', () => {
+            if (settled) return;
+            settled = true;
             controller.close();
           });
-          this.on('error', controller.error.bind(controller));
+          this.on('error', (err: unknown) => {
+            if (settled) return;
+            settled = true;
+            controller.error(err);
+          });
+          // Destroyed before finishing, with or without an error: the body
+          // ends prematurely rather than staying open.
+          this.once('close', () => {
+            if (settled) return;
+            settled = true;
+            controller.error(this.errored ?? new ERR_STREAM_PREMATURE_CLOSE());
+          });
         },
         cancel: (reason: unknown): void => {
           this.destroy(reason);

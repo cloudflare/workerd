@@ -3,8 +3,8 @@ name: Make Python Snapshots
 on:
   workflow_dispatch:
     inputs:
-      update-released:
-        description: 'Update already released versions?'
+      update-released-baseline-snapshots:
+        description: 'Update already released baseline snapshots?'
         required: false
         default: false
         type: boolean
@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-22.04
     name: Build and upload Python memory snapshots
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           show-progress: false
       - uses: actions/setup-python@v6
@@ -60,7 +60,7 @@ jobs:
           # boto3 v1.36.0 fails with:
           # NotImplemented error occurred in CreateMultipartUpload operation: Header 'x-amz-checksum-algorithm' with value 'CRC32' not implemented
           pip install 'boto3<1.36.0' requests
-          python3 src/pyodide/make_snapshots.py ${{ inputs.update-released == true && '--update-released' || '' }}
+          python3 src/pyodide/make_snapshots.py ${{ inputs.update-released-baseline-snapshots == true && '--update-released-baseline-snapshots' || '' }}
 
       - name: Check for open PR and commit changes
         env:

@@ -89,6 +89,17 @@ class Serializer final: v8::ValueSerializer::Delegate {
     //   they call for a different design.
     virtual void serializeProxy(
         jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Proxy> proxy);
+
+    // Offers the handler a class instance (an object whose prototype is not Object.prototype and
+    // which is not a JSG-wrapped host object) to serialize as an external. Returns true if the
+    // handler recognized the object and serialized it; false to fall through to the default
+    // behavior (DataCloneError). This is how objects implemented in JavaScript (e.g. the
+    // TypeScript-implemented stream classes, which have no JSG wrapper for the serializer to
+    // find) participate in external serialization: the handler recognizes them by brand check.
+    virtual bool trySerializeClassInstance(
+        jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Object> object) {
+      return false;
+    }
   };
 
   struct Options {

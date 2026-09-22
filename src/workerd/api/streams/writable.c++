@@ -4,15 +4,15 @@
 
 #include "writable.h"
 
+#include <workerd/api/js-writable-stream.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::api {
 
-WritableStreamDefaultWriter::WritableStreamDefaultWriter()
-    : ioContext(tryGetIoContextId()),
-      state(WriterState::create<Initial>()) {}
+WritableStreamDefaultWriter::WritableStreamDefaultWriter(): state(WriterState::create<Initial>()) {}
 
 WritableStreamDefaultWriter::~WritableStreamDefaultWriter() noexcept(false) {
   KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
@@ -185,8 +185,7 @@ WritableStream::WritableStream(IoContext& ioContext,
           kj::mv(maybeClosureWaitable))) {}
 
 WritableStream::WritableStream(kj::Own<WritableStreamController> controller)
-    : ioContext(tryGetIoContextId()),
-      controller(kj::mv(controller)) {
+    : controller(kj::mv(controller)) {
   getController().setOwnerRef(PtrTarget::addWeakToThis());
 }
 
@@ -253,6 +252,11 @@ jsg::Ref<WritableStream> WritableStream::constructor(jsg::Lock& js,
   auto controller = newWritableStreamJsController();
   // We account for the memory usage of the WritableStream and its controller together because their
   // lifetimes are identical and memory accounting itself has a memory overhead.
+  //
+  // This is the legacy WritableStream's own JS constructor, which necessarily produces the legacy
+  // type; under typescript_implemented_streams the global WritableStream is the TypeScript class
+  // and this constructor is not reachable.
+  // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
   auto stream = js.allocAccounted<WritableStream>(
       sizeof(WritableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
   stream->getController().setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
@@ -262,12 +266,19 @@ jsg::Ref<WritableStream> WritableStream::constructor(jsg::Lock& js,
 namespace {
 
 // Wrapper around `WritableStreamSink` that makes it suitable for passing off to capnp RPC.
+//
+// The peer holds the capability wrapping this stream. Its clean close arrives as end(); anything
+// else -- the peer aborting its copy of the stream, dropping it, or its execution context ending
+// -- arrives only as the capability being released, which destroys this adapter. The byte-stream
+// protocol carries no abort reason, so that case is reported to the sink as a generic
+// disconnection.
 class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
  public:
   WritableStreamRpcAdapter(kj::Own<WritableStreamSink> inner): inner(kj::mv(inner)) {}
   ~WritableStreamRpcAdapter() noexcept(false) {
     weakRef->invalidate();
     doneFulfiller->fulfill();
+    abortIfNotEnded();
   }
 
   // Returns a promise that resolves when the stream is dropped. If the promise is canceled before
@@ -279,9 +290,7 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
     return paf.promise.attach(kj::defer([weakRef = weakRef->addRef()]() mutable {
       KJ_IF_SOME(obj, weakRef->tryGet()) {
         // Stream is still alive, revoke it.
-        if (!obj.canceler.isEmpty()) {
-          obj.canceler.cancel(cancellationException());
-        }
+        obj.abortIfNotEnded();
         obj.inner = kj::none;
       }
     }));
@@ -300,11 +309,20 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
   //   significant refactoring of streams.
 
   kj::Promise<void> whenWriteDisconnected() override {
-    // TODO(someday): WritableStreamSink doesn't give us a way to implement this.
+    // TODO(someday): This could forward WritableStreamSink::whenWriteDisconnected(), but the
+    //   returned promise would have to be severed when the revoke path drops `inner`, and no sink
+    //   reports anything there yet.
     return kj::NEVER_DONE;
   }
 
+  // `ended` records that end() was called, not that it settled. The sinks this adapter fronts (the
+  // identity and fixed-length transforms, compression) take effect synchronously in end() and only
+  // report back asynchronously, and an identity transform that has closed treats a later abort()
+  // as an error. Aborting on a drop that cancels a still-settling end() would therefore turn a
+  // clean close into an error for a reader that has not yet observed EOF. A sink whose end()
+  // genuinely completes asynchronously, dropped mid-end(), is left neither ended nor aborted.
   kj::Promise<void> end() override {
+    ended = true;
     return canceler.wrap(getInner()->end());
   }
 
@@ -315,15 +333,31 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
   kj::Own<WeakRef<WritableStreamRpcAdapter>> weakRef =
       kj::refcounted<WeakRef<WritableStreamRpcAdapter>>(
           kj::Badge<WritableStreamRpcAdapter>(), *this);
+  bool ended = false;
 
   kj::Ptr<WritableStreamSink> getInner() {
     return KJ_UNWRAP_OR(inner, { kj::throwFatalException(cancellationException()); })->getPtr();
   }
 
+  // Cancels any in-flight operation and, unless the peer ended the stream cleanly, aborts the sink
+  // so that whatever is connected to it (e.g. the readable half of an IdentityTransformStream)
+  // errors rather than waiting forever for data that will never arrive. The in-flight operation
+  // is canceled first because sinks require that abort() not race a pending write.
+  void abortIfNotEnded() {
+    if (!canceler.isEmpty()) {
+      canceler.cancel(cancellationException());
+    }
+    if (ended) return;
+    if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_WRITABLE_DROP_ABORTS_SINK)) return;
+    KJ_IF_SOME(i, inner) {
+      i->abort(cancellationException());
+    }
+  }
+
   static kj::Exception cancellationException() {
     return JSG_KJ_EXCEPTION(DISCONNECTED, Error,
         "WritableStream received over RPC was disconnected because the remote execution context "
-        "has endeded.");
+        "has ended.");
   }
 };
 
@@ -365,12 +399,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
     // hopefully improve the situation here.
     if (!ended) {
       KJ_IF_SOME(writer, this->writer) {
-        context.addTask(context.run([writer = kj::mv(writer), exception = cancellationException()](
-                                        Worker::Lock& lock) mutable {
-          jsg::Lock& js = lock;
-          auto ex = js.exceptionToJsValue(kj::mv(exception));
-          return IoContext::current().awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
-        }));
+        scheduleAbort(kj::mv(writer));
       }
     }
   }
@@ -389,13 +418,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
         }
         auto w = kj::mv(obj.writer);
         KJ_IF_SOME(writer, w) {
-          obj.context.addTask(
-              obj.context.run([writer = kj::mv(writer), exception = cancellationException()](
-                                  Worker::Lock& lock) mutable {
-            jsg::Lock& js = lock;
-            auto ex = js.exceptionToJsValue(kj::mv(exception));
-            return IoContext::current().awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
-          }));
+          obj.scheduleAbort(kj::mv(writer));
         }
       }
     }));
@@ -490,14 +513,35 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
     kj::throwFatalException(cancellationException());
   }
 
+  // Runs the writer's abort algorithm on the isolate thread, reporting the generic cancellation
+  // reason (the peer's actual reason cannot be conveyed; see the destructor).
+  void scheduleAbort(jsg::Ref<WritableStreamDefaultWriter> writer) {
+    // Once the last IncomingRequest is gone the IoContext can no longer usefully run JavaScript:
+    // the task would be queued onto a task set that is already being torn down, so the abort
+    // algorithm would never observe it. Drop the writer rather than queue unrunnable work.
+    if (!context.hasCurrentIncomingRequest()) return;
+    context.addTask(context.run(
+        [writer = kj::mv(writer), exception = cancellationException()](Worker::Lock& lock) mutable {
+      jsg::Lock& js = lock;
+      auto ex = js.exceptionToJsValue(kj::mv(exception));
+      return IoContext::current().awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
+    }));
+  }
+
   static kj::Exception cancellationException() {
     return JSG_KJ_EXCEPTION(DISCONNECTED, Error,
         "WritableStream received over RPC was disconnected because the remote execution context "
-        "has endeded.");
+        "has ended.");
   }
 };
 
 }  // namespace
+
+WritableStreamRpcWrapper newWritableStreamRpcAdapter(kj::Own<WritableStreamSink> inner) {
+  auto wrapper = kj::heap<WritableStreamRpcAdapter>(kj::mv(inner));
+  auto completionOrRevoke = wrapper->waitForCompletionOrRevoke();
+  return WritableStreamRpcWrapper{kj::mv(wrapper), kj::mv(completionOrRevoke)};
+}
 
 void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Serialize by effectively creating a `JsRpcStub` around this object and serializing that.
@@ -516,16 +560,20 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // TODO(soon): Support JS-backed WritableStreams. Currently this only supports native streams
   //   and IdentityTransformStream, since only they are backed by WritableStreamSink.
 
+  // Destination setup can fail synchronously. Resolve it before removeSink() or getWriter()
+  // changes the source stream.
+  externalHandler->resolveDestinationAndGetSpanParents();
+
   KJ_IF_SOME(sink, getController().removeSink(js)) {
     // NOTE: We're counting on `removeSink()`, to check that the stream is not locked and other
     //   common checks. It's important we don't modify the WritableStream before this call.
     auto encoding = sink->disownEncodingResponsibility();
-    auto wrapper = kj::heap<WritableStreamRpcAdapter>(kj::mv(sink));
+    auto wrapper = newWritableStreamRpcAdapter(kj::mv(sink));
 
     // Make sure this stream will be revoked if the IoContext ends.
-    ioctx.addTask(wrapper->waitForCompletionOrRevoke().attach(ioctx.registerPendingEvent()));
+    ioctx.addTask(wrapper.completionOrRevoke.attach(ioctx.registerPendingEvent()));
 
-    auto capnpStream = ioctx.getByteStreamFactory().kjToCapnp(kj::mv(wrapper));
+    auto capnpStream = ioctx.getByteStreamFactory().kjToCapnp(kj::mv(wrapper.stream));
 
     externalHandler->write([capnpStream = kj::mv(capnpStream), encoding](
                                rpc::JsValue::External::Builder builder) mutable {
@@ -554,13 +602,43 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   }
 }
 
-jsg::Ref<WritableStream> WritableStream::deserialize(
+JsWritableStream hydrateRpcWritableStream(
+    jsg::Lock& js, IoContext& ioctx, rpc::JsValue::External::WritableStream::Reader reader) {
+  auto encoding = reader.getEncoding();
+
+  KJ_REQUIRE(
+      static_cast<uint>(encoding) < capnp::Schema::from<StreamEncoding>().getEnumerants().size(),
+      "unknown StreamEncoding received from peer");
+
+  auto stream = ioctx.getByteStreamFactory().capnpToKjExplicitEnd(reader.getByteStream());
+  auto sink = newSystemStream(kj::mv(stream), encoding, ioctx);
+
+  // JsWritableStream::create() dispatches on the typescript_implemented_streams compat flag,
+  // so the received stream is backed by whichever implementation this isolate runs.
+  return JsWritableStream::create(
+      js, ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver());
+}
+
+JsWritableStream WritableStream::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  // No JavaScript may execute here: V8's deserializer forbids it for the duration of the value
+  // graph read. Everything JS-executing happened in hydrateRpcWritableStream() during
+  // RpcDeserializerExternalHandler::prepare(); this function only claims the result (or, when
+  // the rpc-externals-hydration autogate is off, constructs the legacy stream in place, which
+  // requires no JS).
   auto& handler = KJ_REQUIRE_NONNULL(
       deserializer.getExternalHandler(), "got WritableStream on non-RPC serialized object?");
   auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
   KJ_REQUIRE(externalHandler != nullptr, "got WritableStream on non-RPC serialized object?");
 
+  KJ_IF_SOME(prebuilt, externalHandler->claimPrebuiltWritable()) {
+    return kj::mv(prebuilt);
+  }
+
+  // Not hydrated: only reachable for legacy-streams isolates (the
+  // typescript_implemented_streams flag requires the hydration gate; see
+  // RpcDeserializerExternalHandler::prepare()), so the in-place legacy construction -- which
+  // runs no JS -- is the only case here.
   auto reader = externalHandler->read();
   KJ_REQUIRE(reader.isWritableStream(), "external table slot type doesn't match serialization tag");
 
@@ -575,8 +653,11 @@ jsg::Ref<WritableStream> WritableStream::deserialize(
   auto stream = ioctx.getByteStreamFactory().capnpToKjExplicitEnd(ws.getByteStream());
   auto sink = newSystemStream(kj::mv(stream), encoding, ioctx);
 
-  return js.alloc<WritableStream>(
-      ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver());
+  // Legacy-streams isolates only (see above), and JsWritableStream::create() may run JS, which is
+  // forbidden here.
+  // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
+  return JsWritableStream(js.alloc<WritableStream>(
+      ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver()));
 }
 
 void WritableStreamDefaultWriter::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

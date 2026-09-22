@@ -44,6 +44,9 @@ def _gen_compile_cache_impl(ctx):
     )
 
     args = ctx.actions.args()
+    args.add("--kind", ctx.attr.kind)
+    for flag in ctx.attr._v8_flags[BuildSettingInfo].value:
+        args.add("--v8-flag=" + flag)
     args.add(file_list)
 
     run_under = ctx.attr._run_under[BuildSettingInfo].value
@@ -68,6 +71,10 @@ _gen_compile_cache = rule(
     implementation = _gen_compile_cache_impl,
     attrs = {
         "srcs": attr.label_list(mandatory = True, allow_files = True),
+        # How the runtime compiles these sources; V8 rejects a cache built the other way.
+        #   "module":   CompileModule (ESM bundles)
+        #   "function": CompileFunction with one context extension (per-isolate scripts)
+        "kind": attr.string(default = "module", values = ["module", "function"]),
         "_tool": attr.label(
             executable = True,
             allow_single_file = True,
@@ -75,6 +82,7 @@ _gen_compile_cache = rule(
             default = "//src/rust/gen-compile-cache",
         ),
         "_run_under": attr.label(default = "//build/config:target_run_under"),
+        "_v8_flags": attr.label(default = "//build/config:compile_cache_v8_flags"),
     },
 )
 

@@ -473,6 +473,20 @@ export class ERR_FALSY_VALUE_REJECTION extends NodeError {
   }
 }
 
+// Raised when a node:stream API needs the Node.js web-stream interop hooks
+// (completion observation through Symbol.for('nodejs.webstream.isClosedPromise'),
+// external erroring through Symbol.for('nodejs.webstream.controllerErrorFunction'))
+// and the web stream in hand does not carry them, which is the case for
+// streams from the C++ streams implementation.
+export class ERR_WEB_STREAM_INTEROP_UNSUPPORTED extends NodeTypeError {
+  constructor(api: string) {
+    super(
+      'ERR_WEB_STREAM_INTEROP_UNSUPPORTED',
+      `${api} is not supported for web streams by the streams implementation in use`
+    );
+  }
+}
+
 export class ERR_METHOD_NOT_IMPLEMENTED extends NodeError {
   constructor(name: string | symbol) {
     if (typeof name === 'symbol') {
@@ -679,9 +693,43 @@ export class ERR_SOCKET_BAD_PORT extends NodeError {
   }
 }
 
+export class EADDRINUSE extends NodeError {
+  syscall = 'bind';
+  address: string;
+  port: number;
+
+  constructor(address: string, port: number) {
+    super('EADDRINUSE', `bind EADDRINUSE ${address}:${port}`);
+    this.address = address;
+    this.port = port;
+  }
+}
+
+export class EADDRNOTAVAIL extends NodeError {
+  syscall = 'bind';
+  address: string;
+  port: number;
+
+  constructor(address: string, port: number) {
+    super('EADDRNOTAVAIL', `bind EADDRNOTAVAIL ${address}:${port}`);
+    this.address = address;
+    this.port = port;
+  }
+}
+
 export class EPIPE extends NodeError {
   constructor() {
     super('EPIPE', 'This socket has been ended by the other party');
+  }
+}
+
+// A read into an empty buffer, as Node reports it (the errno exception of
+// a read that libuv refuses with UV_ENOBUFS).
+export class ENOBUFS extends NodeError {
+  syscall = 'read';
+
+  constructor() {
+    super('ENOBUFS', 'read ENOBUFS');
   }
 }
 
@@ -703,6 +751,15 @@ export class ERR_SOCKET_CLOSED extends NodeError {
 export class ERR_SOCKET_CONNECTING extends NodeError {
   constructor() {
     super('ERR_SOCKET_CONNECTING', 'Socket is already connecting');
+  }
+}
+
+export class ERR_SOCKET_HANDLE_ADOPTED extends NodeError {
+  constructor() {
+    super(
+      'ERR_SOCKET_HANDLE_ADOPTED',
+      'The bound socket has already been adopted by a server or socket'
+    );
   }
 }
 
@@ -1002,6 +1059,12 @@ export class ERR_SERVER_ALREADY_LISTEN extends NodeError {
       'ERR_SERVER_ALREADY_LISTEN',
       'Listen method has been called more than once without closing.'
     );
+  }
+}
+
+export class ERR_SERVER_NOT_RUNNING extends NodeError {
+  constructor() {
+    super('ERR_SERVER_NOT_RUNNING', 'Server is not running.');
   }
 }
 

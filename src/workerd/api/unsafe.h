@@ -133,12 +133,19 @@ class UnsafeModule: public jsg::Object {
   // This is used to verify that the all-autogates test variant is working correctly.
   bool isTestAutogateEnabled();
 
+  // Test-only: how many times jsg::WeakRef::tryAddRef() has refused to promote a target whose
+  // wrapper was zapped by a major GC before the deferred cppgc sweep released it. Lets a
+  // regression test assert that it actually reached that window rather than merely failing to
+  // crash. See jsg::HeapTracer::getCondemnedWrapperCount().
+  double getCondemnedWrapperCount(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(UnsafeModule) {
     JSG_METHOD(abortAllDurableObjects);
     JSG_METHOD(deleteAllDurableObjects);
     JSG_METHOD(evict);
     JSG_METHOD(evictAllDurableObjects);
     JSG_METHOD(isTestAutogateEnabled);
+    JSG_METHOD(getCondemnedWrapperCount);
   }
 };
 

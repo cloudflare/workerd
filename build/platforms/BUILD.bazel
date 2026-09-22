@@ -1,0 +1,35 @@
+package(default_visibility = ["//visibility:public"])
+
+constraint_setting(name = "sanitizer")
+
+constraint_value(
+    name = "sanitizer_address",
+    constraint_setting = ":sanitizer",
+)
+
+constraint_value(
+    name = "sanitizer_thread",
+    constraint_setting = ":sanitizer",
+)
+
+config_setting(
+    name = "sanitizer_thread_linux",
+    constraint_values = [
+        ":sanitizer_thread",
+        "@platforms//os:linux",
+    ],
+)
+
+platform(
+    name = "sanitizer_address_platform",
+    constraint_values = [":sanitizer_address"],
+    parents = ["@platforms//host"],
+)
+
+# Like the address platform, inherits the host's cpu/os: the TSan Rust toolchains in //build/rust
+# are defined per host (Linux x86_64, macOS arm64) and selected by toolchain resolution.
+platform(
+    name = "sanitizer_thread_platform",
+    constraint_values = [":sanitizer_thread"],
+    parents = ["@platforms//host"],
+)

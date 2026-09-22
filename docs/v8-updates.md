@@ -34,8 +34,12 @@ To update the version of V8 used by workerd, the steps are:
 
    ```sh
    git checkout -b workerd-patches
-   git am <path_to_workerd>/patches/v8/*
+   git am --keep-non-patch <path_to_workerd>/patches/v8/*
    ```
+
+   `--keep-non-patch` is the counterpart of the `-k` in step 7. It keeps subject
+   prefixes such as the `[wasm]` that upstream V8 commits carry, so the patches
+   regenerated in step 7 keep their existing filenames.
 
 6. Rebase the workerd V8 changes onto the new version of V8. For example, assuming
    we are updating to `<new_version>`, the command would be:

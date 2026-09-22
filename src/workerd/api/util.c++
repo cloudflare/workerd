@@ -80,25 +80,39 @@ kj::Maybe<kj::Exception> translateKjException(
 
 namespace {
 
+[[noreturn]] void handleTranslateTeeError(kj::Exception&& exception) {
+  KJ_IF_SOME(e,
+      translateKjException(exception,
+          {
+            {"tee buffer size limit exceeded"_kj,
+              "ReadableStream.tee() buffer limit exceeded. This error usually occurs when a Request or "
+              "Response with a large body is cloned, then only one of the clones is read, forcing "
+              "the Workers runtime to buffer the entire body in memory. To fix this issue, remove "
+              "unnecessary calls to Request/Response.clone() and ReadableStream.tee(), and always read "
+              "clones/tees in parallel."_kj},
+          })) {
+    kj::throwFatalException(kj::mv(e));
+  }
+  kj::throwFatalException(kj::mv(exception));
+}
+
+template <typename Func>
+auto translateTeeErrorsSync(Func&& f) -> decltype(kj::fwd<Func>(f)()) {
+  KJ_TRY {
+    return f();
+  }
+  KJ_CATCH(exception) {
+    handleTranslateTeeError(kj::mv(exception));
+  }
+}
+
 template <typename Func>
 auto translateTeeErrors(Func&& f) -> decltype(kj::fwd<Func>(f)()) {
-  try {
+  KJ_TRY {
     co_return co_await f();
-  } catch (...) {
-    auto exception = kj::getCaughtExceptionAsKj();
-    KJ_IF_SOME(e,
-        translateKjException(exception,
-            {
-              {"tee buffer size limit exceeded"_kj,
-                "ReadableStream.tee() buffer limit exceeded. This error usually occurs when a Request or "
-                "Response with a large body is cloned, then only one of the clones is read, forcing "
-                "the Workers runtime to buffer the entire body in memory. To fix this issue, remove "
-                "unnecessary calls to Request/Response.clone() and ReadableStream.tee(), and always read "
-                "clones/tees in parallel."_kj},
-            })) {
-      kj::throwFatalException(kj::mv(e));
-    }
-    kj::throwFatalException(kj::mv(exception));
+  }
+  KJ_CATCH(exception) {
+    handleTranslateTeeError(kj::mv(exception));
   }
 }
 
@@ -108,6 +122,10 @@ kj::Own<kj::AsyncInputStream> newTeeErrorAdapter(kj::Own<kj::AsyncInputStream> i
   class Adapter final: public kj::AsyncInputStream {
    public:
     explicit Adapter(kj::Own<AsyncInputStream> inner): inner(kj::mv(inner)) {}
+
+    kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+      return translateTeeErrorsSync([&] { return inner->tryReadSync(buffer, minBytes); });
+    }
 
     kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
       return translateTeeErrors([&] { return inner->tryRead(buffer, minBytes, maxBytes); });

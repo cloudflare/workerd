@@ -43,6 +43,8 @@ static EventOutcome toRustOutcome(workerd::EventOutcome outcome) {
       return EventOutcome::InternalError;
     case workerd::EventOutcome::EXCEEDED_WALL_TIME:
       return EventOutcome::ExceededWallTime;
+    case workerd::EventOutcome::ABORTED:
+      return EventOutcome::Aborted;
   }
   KJ_UNREACHABLE;
 }

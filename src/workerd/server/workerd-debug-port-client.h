@@ -17,12 +17,13 @@ class Fetcher;
 
 namespace workerd::server {
 
-// Holds the I/O state for a debug port connection: the TCP stream, capnp RPC client,
-// and debug port capability. Refcounted to support deferred proxying - response bodies
-// and WebSockets are proxied through the capnp connection, so it must stay alive until
-// they're fully consumed. See WorkerdBootstrapSubrequestChannel::startRequest().
+// Holds the I/O state for a debug port client. Refcounted to support deferred proxying - response
+// bodies and WebSockets may use the capability after the originating request has completed.
 class DebugPortConnectionState: public kj::Refcounted {
  public:
+  explicit DebugPortConnectionState(rpc::WorkerdDebugPort::Client debugPort)
+      : debugPort(kj::mv(debugPort)) {}
+
   DebugPortConnectionState(kj::Own<kj::AsyncIoStream> connection,
       kj::Own<capnp::TwoPartyClient> rpcClient,
       rpc::WorkerdDebugPort::Client debugPort)
@@ -34,8 +35,8 @@ class DebugPortConnectionState: public kj::Refcounted {
     return kj::addRef(*this);
   }
 
-  kj::Own<kj::AsyncIoStream> connection;
-  kj::Own<capnp::TwoPartyClient> rpcClient;
+  kj::Maybe<kj::Own<kj::AsyncIoStream>> connection;
+  kj::Maybe<kj::Own<capnp::TwoPartyClient>> rpcClient;
   rpc::WorkerdDebugPort::Client debugPort;
 };
 
@@ -105,8 +106,12 @@ class WorkerdDebugPortConnector: public jsg::Object {
   // @returns A WorkerdDebugPortClient that lazily connects on first use
   jsg::Ref<WorkerdDebugPortClient> connect(jsg::Lock& js, kj::String address);
 
+  // Access the current workerd process without opening a network connection.
+  jsg::Ref<WorkerdDebugPortClient> current(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(WorkerdDebugPortConnector) {
     JSG_METHOD(connect);
+    JSG_METHOD(current);
   }
 };
 

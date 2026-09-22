@@ -278,8 +278,11 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
 
     JSG_MEMORY_INFO(Detail) {
       tracker.trackField("cf", cf);
+      tracker.trackFieldWithSize(
+          "headers", headers.size() * sizeof(tracing::FetchEventInfo::Header));
       for (const auto& header: headers) {
-        tracker.trackField(nullptr, header);
+        tracker.trackField("name", header.name);
+        tracker.trackField("value", header.value);
       }
       tracker.trackField("method", method);
       tracker.trackField("url", url);

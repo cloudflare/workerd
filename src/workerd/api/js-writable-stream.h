@@ -83,6 +83,19 @@ class JsWritableStream final {
       kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
       kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none);
 
+  // Create a JsWritableStream whose write() calls are driven directly by the given C++
+  // `write` function: each chunk passed to writer.write() is handed to `write` as-is, with
+  // no byte-level coalescing or splitting. This is for sinks that consume whole JS values
+  // per write() call rather than bytes (e.g. UDP's Datagram objects, where each write() call
+  // must map to exactly one outbound packet).
+  //
+  // This is a compatibility-flag dispatch point: under
+  // typescript_implemented_streams, `write` is wrapped as a real JS function and the
+  // TypeScript stream is constructed over a plain (non-native-marked) underlying sink;
+  // otherwise this builds the legacy C++ WritableStream directly.
+  static JsWritableStream fromWrite(
+      jsg::Lock& js, kj::Function<jsg::Promise<void>(jsg::Lock&, jsg::JsValue)> write);
+
   // Returns a new JsWritableStream sharing this one's underlying stream. Both instances observe
   // the same underlying stream state (e.g. the stream closing through one is visible through the
   // other), and passing either through the type wrapper yields the same JavaScript object. This
@@ -138,15 +151,14 @@ class JsWritableStream final {
   // Precondition: !isNull().
   void detach(jsg::Lock& js);
 
-  // Returns the underlying legacy C++ WritableStream. FOR TESTS ONLY: this exists so that tests
-  // of consumers (e.g. sockets-test.c++'s output-gate test) can drive operations the deliberately
-  // narrow production API does not expose, such as enqueueing writes through the standard write
-  // machinery. Production code must never call this -- it would break the moment the stream is
-  // backed by the TypeScript implementation. Precondition: !isNull() and legacy-backed.
-  //
-  // TODO(streams-ts): Revisit once the TypeScript arm is wired up -- tests that need to drive
-  // writes will need a backend-neutral mechanism (or per-backend test variants).
-  jsg::Ref<WritableStream> getUnderlyingForTest(jsg::Lock& js);
+  // Enqueue a write through the stream's standard write machinery, returning a promise that
+  // settles when the write's I/O completes. FOR TESTS ONLY: this exists so that tests of
+  // consumers (e.g. sockets-test.c++'s output-gate tests) can drive writes without reaching
+  // into a backend-specific controller. The legacy arm writes through the controller
+  // directly; the TypeScript arm acquires the writer, writes, and releases it, so the
+  // stream must not be locked. Production code must never call this. Precondition:
+  // !isNull().
+  jsg::Promise<void> writeForTest(jsg::Lock& js, jsg::JsValue chunk);
 
   // Serialize the stream for RPC transfer, exactly like WritableStream::serialize(): the peer's
   // ByteStream is adopted as the stream's sink and an external table entry describing it is written
@@ -348,10 +360,11 @@ class WritableStreamNativeSink final: public jsg::Object {
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
 
   // The native+native pipe fast path, called by the TS pipeTo dispatch when both ends
-  // carry extraction markers, no prevent* option is set, and both endpoints are in their
-  // normal flowing states (the dispatch routes everything else to the JS pump, which can
-  // honor post-pipe endpoint usability and stored-error rejections; `this` is the
-  // extracted sink and `source` the extracted ReadableStreamNativeSource). Consumes both
+  // carry extraction markers, no prevent* option is set, both endpoints are in their
+  // normal flowing states, and no write or close is queued or in flight on the destination
+  // (the dispatch routes everything else to the JS pump, which can honor post-pipe
+  // endpoint usability, stored-error rejections, and writes made before the pipe; `this`
+  // is the extracted sink and `source` the extracted ReadableStreamNativeSource). Consumes both
   // endpoints and runs the pump entirely at the C++ layer. The options arrive
   // pre-converted and pre-validated by the dispatch as plain data properties; the
   // prevent* handling here implements the intended fast-path semantics but only sees
@@ -403,9 +416,21 @@ class WritableStreamNativeSink final: public jsg::Object {
   // closure on connection establishment). Consumed by the first close().
   kj::Maybe<jsg::Promise<void>> maybeClosureWaitable;
 
-  // Defensive only: the TS machinery serializes sink operations (at most one write or
-  // close in flight).
+  // True while a write's I/O is outstanding (including while parked on the actor output
+  // gate). The TS machinery serializes sink operations, so a write or close arriving
+  // meanwhile is a contract violation, and abort() and detach() defer the sink's release
+  // to the write's settlement. pipeFrom() extraction bypasses the sink-hook serialization
+  // (the TS pipe dispatch routes destinations with a write queued or in flight to the JS
+  // pump, but the sink's preconditions must not depend on that gate), and the in-flight
+  // write references the sink, so moving it into a pump would be a use-after-free.
   bool writeInFlight = false;
+
+  // True while closeImpl()'s end() is outstanding (including while parked on the actor
+  // output gate). Like writeInFlight, it keeps pipeFrom() from moving the sink out from
+  // under the in-flight operation (the TS pipe dispatch rejects close-queued destinations,
+  // but the sink's preconditions must not depend on that gate): the in-flight end()
+  // references the sink, so moving it into a pump would be a use-after-free.
+  bool closeInFlight = false;
 
   // Set when abort() arrives while a write's I/O is in flight: the sink's release is
   // deferred to the write's settlement.

@@ -14,6 +14,7 @@
 #include <kj/debug.h>
 
 #include <cstdlib>
+#include <new>
 #include <set>
 
 #if !_WIN32
@@ -85,14 +86,16 @@ kj::String typeName(const std::type_info& type) {
 
   // Strip namespace, if any.
   KJ_IF_SOME(pos, result.findLast(':')) {
-    result = kj::str(result.slice(pos + 1));
+    auto unqualified = kj::str(result.slice(pos + 1));
+    result = kj::mv(unqualified);
   }
 
   // Strip template args, if any.
   //
   // TODO(someday): Maybe just strip namespaces from each arg?
   KJ_IF_SOME(pos, result.findFirst('<')) {
-    result = kj::str(result.first(pos));
+    auto withoutTemplateArgs = kj::str(result.first(pos));
+    result = kj::mv(withoutTemplateArgs);
   }
 
   return kj::mv(result);
@@ -263,7 +266,6 @@ DecodedException decodeTunneledException(
       // that, otherwise, we'll fall back to constructing a new error object. If
       // the ignoreDetail optiom is set, we skip trying to deserialize.
       KJ_IF_SOME(serializedJsError, exception.getDetail(jsg::TUNNELED_EXCEPTION_DETAIL_ID)) {
-        kj::Maybe<jsg::JsValue> deserialized;
         v8::TryCatch tryCatch(isolate);
         try {
           auto& js = Lock::from(isolate);
@@ -384,11 +386,8 @@ v8::Local<v8::Value> exceptionToJs(
           .internalErrorId = shouldLogWithInternalId ? tunneledException.internalErrorId : kj::none,
         });
     if (shouldLogWithInternalId) {
-      // LOG_EXCEPTION("jsgInternalError", ...), but with internal error ID:
-      auto& e = exception;
-      constexpr auto sentryErrorContext = "jsgInternalError";
       auto& wdErrId = KJ_ASSERT_NONNULL(tunneledException.internalErrorId);
-      KJ_LOG(ERROR, e, sentryErrorContext, wdErrId);
+      LOG_EXCEPTION_WITH_ID("jsgInternalError", exception, wdErrId);
     } else {
       KJ_LOG(INFO, exception);  // Run with --verbose to see exception logs.
     }
@@ -799,14 +798,7 @@ void returnRejectedPromise(const v8::PropertyCallbackInfo<v8::Value>& info,
   returnRejectedPromiseImpl<const v8::PropertyCallbackInfo<v8::Value>&>(info, exception, tryCatch);
 }
 
-static ExternalStringAllocator& getAllocatorForIsolate(v8::Isolate* isolate) {
-  return IsolateBase::from(isolate).getExternalStringAllocator();
-}
-
 // Default allocator that uses standard new/delete.
-// We typically don't use the new/delete operators directly,
-// but in this case we have to because V8's ExternalStringResource may default to `delete this`
-// if not overridden, and we are allocating raw byte arrays for placement new.
 class DefaultExternalStringAllocator final: public ExternalStringAllocator {
  public:
   void* allocate(size_t size) override {
@@ -851,29 +843,22 @@ class ExternString: public Type {
   // IN THE SOFTWARE.
 
  public:
+  using Backing = kj::OneOf<kj::ArrayPtr<const Data>, kj::Arc<kj::Array<const Data>>>;
+
   inline const Data* data() const override {
-    return buf.begin();
+    return getBuffer().begin();
   }
 
   inline size_t length() const override {
-    return buf.size();
+    return getBuffer().size();
   }
 
   inline uint64_t byteLength() const {
     return length() * sizeof(Data);
   }
 
-  // Override Dispose() so that V8 properly deallocates through the configured
-  // ExternalStringAllocator rather than using `delete this` (the default).
-  void Dispose() override {
-    auto& allocator = getAllocatorForIsolate(isolate);
-    this->~ExternString();
-    allocator.deallocate(this);
-  }
-
-  static v8::MaybeLocal<v8::String> createExtern(
-      v8::Isolate* isolate, kj::ArrayPtr<const Data>& buf) {
-    if (buf.size() == 0) {
+  static v8::MaybeLocal<v8::String> createExtern(v8::Isolate* isolate, Backing backing) {
+    if (getBuffer(backing).size() == 0) {
       return v8::String::Empty(isolate);
     }
 
@@ -882,15 +867,12 @@ class ExternString: public Type {
     // heap allocated string than an external. We're not doing that here currently, but
     // we might?
 
-    auto& allocator = getAllocatorForIsolate(isolate);
-    auto mem = allocator.allocate(sizeof(ExternString<Type, Data>));
-    if (mem == nullptr) {
+    auto resource = new (std::nothrow) ExternString<Type, Data>(kj::mv(backing));
+    if (resource == nullptr) {
       isolate->ThrowException(v8::Exception::Error(
           v8::String::NewFromUtf8Literal(isolate, "String allocation failed")));
       return v8::MaybeLocal<v8::String>();
     }
-
-    auto resource = new (mem) ExternString<Type, Data>(isolate, buf);
 
     v8::MaybeLocal<v8::String> str;
     if constexpr (kj::isSameType<Type, v8::String::ExternalOneByteStringResource>()) {
@@ -901,8 +883,7 @@ class ExternString: public Type {
     }
     if (str.IsEmpty()) {
       // This should happen only if the string is too long
-      resource->~ExternString<Type, Data>();
-      allocator.deallocate(mem);
+      delete resource;
       isolate->ThrowException(v8::Exception::Error(
           v8::String::NewFromUtf8Literal(isolate, "String allocation failed")));
       return v8::MaybeLocal<v8::String>();
@@ -912,12 +893,20 @@ class ExternString: public Type {
   }
 
  private:
-  v8::Isolate* isolate;
-  kj::ArrayPtr<const Data> buf;
+  Backing backing;
 
-  inline ExternString(v8::Isolate* isolate, kj::ArrayPtr<const Data>& buf)
-      : isolate(isolate),
-        buf(buf) {}
+  static kj::ArrayPtr<const Data> getBuffer(const Backing& backing) {
+    if (backing.template is<kj::ArrayPtr<const Data>>()) {
+      return backing.template get<kj::ArrayPtr<const Data>>();
+    }
+    return backing.template get<kj::Arc<kj::Array<const Data>>>()->asPtr();
+  }
+
+  kj::ArrayPtr<const Data> getBuffer() const {
+    return getBuffer(backing);
+  }
+
+  explicit ExternString(Backing backing): backing(kj::mv(backing)) {}
 };
 
 using ExternOneByteString = ExternString<v8::String::ExternalOneByteStringResource, char>;
@@ -927,8 +916,16 @@ v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char
   return check(ExternOneByteString::createExtern(js.v8Isolate, buf));
 }
 
+v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::Arc<OwnedAscii> buf) {
+  return check(ExternOneByteString::createExtern(js.v8Isolate, kj::mv(buf)));
+}
+
 v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf) {
   return check(ExternTwoByteString::createExtern(js.v8Isolate, buf));
+}
+
+v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::Arc<OwnedUtf16> buf) {
+  return check(ExternTwoByteString::createExtern(js.v8Isolate, kj::mv(buf)));
 }
 
 // ======================================================================================

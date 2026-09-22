@@ -404,17 +404,19 @@ class Module {
       Flags flags = Flags::NONE,
       ContentType contentType = ContentType::NONE);
 
-  // Creates a new ESM module that takes ownership of the given code array.
+  // Creates a new ESM module that shares ownership of the given code.
   // This is generally used to construct ESM modules from a worker bundle.
   static kj::Own<Module> newEsm(
-      Url id, Type type, kj::Array<const char> code, Flags flags = Flags::NONE);
+      Url id, Type type, kj::Arc<OwnedAscii> code, Flags flags = Flags::NONE);
 
-  // Creates a new ESM module that does not take ownership of the given code
-  // array. This is used to construct ESM modules from compiled-in built-in
-  // modules.
+  // Creates a new ESM module that does not take ownership of the given code.
+  // The backing data must have static process lifetime. This is used to
+  // construct ESM modules from compiled-in built-in modules.
   // This variation of newEsm does not take Flags as none of the existing
   // Flags are relevant other than the ESM flag which will be set automatically.
   static kj::Own<Module> newEsm(Url id, Type type, kj::ArrayPtr<const char> code);
+  // The source is already encoded as Latin-1 or UTF-16 for V8.
+  static kj::Own<Module> newEsm(Url id, Type type, StaticExternalStringSource code);
 
   // The following methods are used to create the evaluation callbacks for various
   // kinds of common simple synthetic module types. The module registry is not
@@ -425,8 +427,10 @@ class Module {
   static EvaluateCallback newDataModuleHandler(
       kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
   static EvaluateCallback newJsonModuleHandler(kj::ArrayPtr<const char> data) KJ_WARN_UNUSED_RESULT;
-  static EvaluateCallback newWasmModuleHandler(
-      kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
+  // If `maybeCompiled` is given, it seeds the compilation cache so the module is never
+  // recompiled from `data`.
+  static EvaluateCallback newWasmModuleHandler(kj::ArrayPtr<const kj::byte> data,
+      kj::Maybe<v8::CompiledWasmModule> maybeCompiled = kj::none) KJ_WARN_UNUSED_RESULT;
 
   // An eval function is used for CommonJS style modules (including Node.js compat
   // modules. The expectation is that this method will be called when the CommonJS
@@ -565,19 +569,21 @@ class ModuleBundle {
         kj::Array<kj::String> namedExports = nullptr,
         Module::ContentType contentType = Module::ContentType::NONE) KJ_LIFETIMEBOUND;
 
+    // Adds source backed by static process-lifetime storage, such as a
+    // compiled-in string literal. Use the Arc<OwnedAscii> overload for all
+    // other source buffers.
     BundleBuilder& addEsmModule(kj::StringPtr name,
         kj::ArrayPtr<const char> code,
         Module::Flags flags = Module::Flags::ESM) KJ_LIFETIMEBOUND;
 
-    // Overload that takes ownership of the source data. Use this when the
-    // source buffer may not outlive the module registry (e.g. transpiled
-    // TypeScript where the backing rust::String has shorter lifetime).
+    // Adds source with shared ownership of its backing storage.
     BundleBuilder& addEsmModule(kj::StringPtr name,
-        kj::Array<const char> code,
+        kj::Arc<OwnedAscii> code,
         Module::Flags flags = Module::Flags::ESM) KJ_LIFETIMEBOUND;
 
-    BundleBuilder& addWasmModule(
-        kj::StringPtr name, kj::ArrayPtr<const kj::byte> data) KJ_LIFETIMEBOUND;
+    BundleBuilder& addWasmModule(kj::StringPtr name,
+        kj::ArrayPtr<const kj::byte> data,
+        kj::Maybe<v8::CompiledWasmModule> maybeCompiled = kj::none) KJ_LIFETIMEBOUND;
 
     BundleBuilder& alias(kj::StringPtr alias, kj::StringPtr name) KJ_LIFETIMEBOUND;
 
@@ -598,7 +604,10 @@ class ModuleBundle {
     BuiltinBuilder& addSynthetic(
         const Url& id, BundleBuilder::EvaluateCallback callback) KJ_LIFETIMEBOUND;
 
+    // The source must be backed by static process-lifetime storage.
     BuiltinBuilder& addEsm(const Url& id, kj::ArrayPtr<const char> source) KJ_LIFETIMEBOUND;
+    // The source is already encoded as Latin-1 or UTF-16 for V8.
+    BuiltinBuilder& addEsm(const Url& id, StaticExternalStringSource source) KJ_LIFETIMEBOUND;
 
     // Adds a module that is implemented in C++ as a jsg::Object
     template <typename T, typename TypeWrapper>
@@ -633,6 +642,11 @@ class ModuleBundle {
   static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
       Bundle::Reader bundle,
       kj::Function<bool(::workerd::jsg::Module::Reader)> filter);
+
+  static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
+      Bundle::Reader bundle,
+      kj::Function<bool(::workerd::jsg::Module::Reader)> filter,
+      kj::FunctionParam<StaticExternalStringSource(::workerd::jsg::Module::Reader)> getSource);
 
   KJ_DISALLOW_COPY_AND_MOVE(ModuleBundle);
 

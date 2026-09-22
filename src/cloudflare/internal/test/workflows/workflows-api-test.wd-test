@@ -1,5 +1,8 @@
 using Workerd = import "/workerd/workerd.capnp";
 
+# No `rpc` or `experimental` flag here on purpose. wd_test runs the default variant at compatibility
+# date 2000-01-01, so this covers the binding working while `fetcher_rpc` is off.
+
 const unitTests :Workerd.Config = (
   services = [
     ( name = "workflows-api-test",
@@ -26,35 +29,9 @@ const unitTests :Workerd.Config = (
         ],
       )
     ),
-    ( name = "workflows-api-rpc-test",
-      worker = (
-        modules = [
-          (name = "worker", esModule = embed "workflows-api-rpc-test.js")
-        ],
-        compatibilityFlags = ["nodejs_compat", "workflows_bindings_rpc",
-                              "experimental", "service_binding_extra_handlers",
-                              "rpc"],
-        bindings = [
-        (
-          name = "workflow",
-          wrapped = (
-            moduleName = "cloudflare-internal:workflows-api",
-            innerBindings = [(
-              name = "fetcher",
-              service = "workflows-mock"
-            )],
-          )
-        ),
-        (
-          name = "mock",
-          service = "workflows-mock"
-        )
-        ],
-      )
-    ),
     ( name = "workflows-mock",
       worker = (
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityFlags = ["nodejs_compat"],
         modules = [
           (name = "worker", esModule = embed "workflows-mock.js")
         ],

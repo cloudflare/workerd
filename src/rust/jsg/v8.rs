@@ -283,6 +283,7 @@ pub mod ffi {
         pub unsafe fn local_is_biguint64_array(value: &Local) -> bool;
         pub unsafe fn local_is_float16_array(value: &Local) -> bool;
         pub unsafe fn local_is_uint8clamped_array(value: &Local) -> bool;
+        pub unsafe fn local_is_typed_array(value: &Local) -> bool;
         pub unsafe fn local_is_array_buffer(value: &Local) -> bool;
         pub unsafe fn local_is_array_buffer_view(value: &Local) -> bool;
         pub unsafe fn local_is_shared_array_buffer(value: &Local) -> bool;
@@ -1320,6 +1321,12 @@ impl<'a, T> Local<'a, T> {
         unsafe { ffi::local_is_array_buffer_view(&self.handle) }
     }
 
+    /// Returns true if the value is a `TypedArray`
+    pub fn is_typed_array(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_typed_array(&self.handle) }
+    }
+
     /// Returns true if the value is a `SharedArrayBuffer`.
     pub fn is_shared_array_buffer(&self) -> bool {
         // SAFETY: handle is valid within the current HandleScope.
@@ -1536,11 +1543,7 @@ impl_local_cast!(Float64Array -> Value, is_float64_array);
 impl_local_cast!(BigInt64Array -> Value, is_bigint64_array);
 impl_local_cast!(BigUint64Array -> Value, is_biguint64_array);
 impl_local_cast!(Uint8ClampedArray -> Value, is_uint8clamped_array);
-
-// TypedArray base type to Value. Uses `is_array_buffer_view` which also matches
-// `DataView`, but this is acceptable because `TypedArray` is only constructed from
-// concrete typed array types (Uint8Array, etc.) that are always ArrayBufferViews.
-impl_local_cast!(TypedArray -> Value, is_array_buffer_view);
+impl_local_cast!(TypedArray -> Value, is_typed_array);
 
 // Concrete typed arrays to TypedArray base
 impl_local_cast!(Uint8Array -> TypedArray, is_uint8_array);
@@ -1558,7 +1561,7 @@ impl_local_cast!(Uint8ClampedArray -> TypedArray, is_uint8clamped_array);
 // Upcasts to Object (Function, Array, TypedArray are all Object subtypes in V8)
 impl_local_cast!(Function -> Object, is_function);
 impl_local_cast!(Array -> Object, is_array);
-impl_local_cast!(TypedArray -> Object, is_array_buffer_view);
+impl_local_cast!(TypedArray -> Object, is_typed_array);
 
 // ArrayBuffer <-> Value, ArrayBuffer <-> Object
 impl_local_cast!(ArrayBuffer -> Value, is_array_buffer);
@@ -2015,13 +2018,8 @@ macro_rules! impl_typed_array {
             }
 
             /// Returns the element at `index`.
-            ///
-            /// # Panics
-            ///
-            /// Panics if `index >= self.len()`.
             #[inline]
             pub fn get(&self, index: usize) -> $elem {
-                debug_assert!(index < self.len(), "index out of bounds");
                 // SAFETY: handle is valid within the current HandleScope.
                 unsafe { ffi::$get_fn(self.isolate.as_ffi(), &self.handle, index) }
             }
@@ -2279,6 +2277,20 @@ macro_rules! impl_typed_array_from_js {
                 // SAFETY: type check passed; V8 handles share the same pointer
                 // representation across subtypes within the same HandleScope.
                 Ok(unsafe { Self::from_ffi(value.isolate, value.into_ffi()) })
+            }
+
+            fn try_from_js(
+                _lock: &mut crate::Lock,
+                value: Local<Value>,
+            ) -> Result<Option<Self>, crate::Error> {
+                if !value.$check() {
+                    return Ok(None);
+                }
+                // SAFETY: type check passed; V8 handles share the same pointer
+                // representation across subtypes within the same HandleScope.
+                Ok(Some(unsafe {
+                    Self::from_ffi(value.isolate, value.into_ffi())
+                }))
             }
         }
     };
@@ -3144,7 +3156,6 @@ impl<'a> FunctionCallbackInfo<'a> {
     }
 
     pub fn get(&self, index: usize) -> Local<'a, Value> {
-        debug_assert!(index <= self.len(), "index out of bounds");
         // SAFETY: self.0 is a valid FunctionCallbackInfo pointer (guaranteed by constructor).
         unsafe { Local::from_ffi(self.isolate(), ffi::fci_get_arg(self.0, index)) }
     }

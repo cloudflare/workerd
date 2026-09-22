@@ -289,7 +289,8 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     v8::IsolateGroup group,
     kj::Own<JsgIsolateObserver> observer,
     api::MemoryCacheProvider& memoryCacheProvider,
-    const PythonConfig& pythonConfig)
+    const PythonConfig& pythonConfig,
+    kj::Array<Worker::Api::InboundListener> inboundListeners)
     : impl(kj::heap<Impl>(v8System,
           features,
           extensions,
@@ -297,7 +298,8 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
           group,
           kj::mv(observer),
           memoryCacheProvider,
-          pythonConfig)) {}
+          pythonConfig)),
+      inboundListeners(kj::mv(inboundListeners)) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
 
 kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
@@ -305,6 +307,9 @@ kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
 }
 CompatibilityFlags::Reader WorkerdApi::getFeatureFlags() const {
   return *impl->features;
+}
+kj::ArrayPtr<const Worker::Api::InboundListener> WorkerdApi::getInboundListeners() const {
+  return inboundListeners;
 }
 jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(
     jsg::Lock& lock, Worker::Api::NewContextOptions options) const {
@@ -315,7 +320,6 @@ jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(
     .schemaLoader = options.schemaLoader,
     .enableWeakRef = getFeatureFlags().getJsWeakRef(),
     .deferWeakRefDeletion = deferWeakRefDeletion,
-    .installWasmMemoryDiscard = getFeatureFlags().getWasmMemoryDiscard(),
   };
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).newContext<api::ServiceWorkerGlobalScope>(
       kj::mv(opts));
@@ -636,7 +640,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
           lock.unwrap<kj::OneOf<kj::String, api::SubtleCrypto::ImportKeyAlgorithm>>(context, algo);
 
       jsg::Ref<api::CryptoKey> importedKey =
-          lock.alloc<api::SubtleCrypto>()->importKeySync(lock, key.format, kj::mv(keyData),
+          api::SubtleCrypto::importKeySync(lock, key.format, kj::mv(keyData),
               api::interpretAlgorithmParam(kj::mv(importKeyAlgo)), key.extractable, key.usages);
 
       value = lock.wrap(context, kj::mv(importedKey));
@@ -644,13 +648,12 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
     KJ_CASE_ONEOF(cache, Global::MemoryCache) {
       value = lock.wrap(context,
-          lock.alloc<api::MemoryCache>(
-              api::SharedMemoryCache::Use(memoryCacheProvider.getInstance(cache.cacheId),
-                  {
-                    .maxKeys = cache.maxKeys,
-                    .maxValueSize = cache.maxValueSize,
-                    .maxTotalValueSize = cache.maxTotalValueSize,
-                  })));
+          lock.alloc<api::MemoryCache>(memoryCacheProvider.getUse(cache.cacheId,
+              {
+                .maxKeys = cache.maxKeys,
+                .maxValueSize = cache.maxValueSize,
+                .maxTotalValueSize = cache.maxTotalValueSize,
+              })));
     }
 
     KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {
@@ -664,13 +667,13 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
     KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
       value = lock.wrap(context,
-          lock.alloc<api::DurableObjectNamespace>(
-              ns.actorChannel, kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
+          lock.alloc<api::DurableObjectNamespace>(ns.actorChannel,
+              kj::heap<ActorIdFactoryImpl>(ns.uniqueKey), api::ActorCallRetriesAllowed::YES));
     }
     KJ_CASE_ONEOF(ns, Global::LoopbackDurableActorNamespace) {
       value = lock.wrap(context,
           lock.alloc<api::LoopbackDurableObjectNamespace>(ns.actorChannel,
-              kj::heap<ActorIdFactoryImpl>(ns.uniqueKey),
+              kj::heap<ActorIdFactoryImpl>(ns.uniqueKey), api::ActorCallRetriesAllowed::YES,
               lock.alloc<api::LoopbackDurableObjectClass>(ns.classChannel), featureFlags));
     }
 
@@ -1067,7 +1070,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newEsm(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
-                            kj::heapArray<const char>(content.body)));
+                            kj::arc<jsg::OwnedAscii>(kj::heapArray<const char>(content.body))));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
                     auto ownedData = kj::str(content.body);

@@ -33,15 +33,10 @@ const {
 
 const { TextEncoderStream, TextDecoderStream } = require('webstreams/encoding');
 
-// TEMPORARY (native-stream-integration phase 2): the native-source marker
-// symbol, exposed so native-marked underlying sources can be constructed
-// from tests before the real JSG plumbing hands capabilities over from the
-// C++ side. This module is only reachable through the (equally temporary)
-// lazy `globalThis.streams` dev surface installed by main.ts — neither is
-// part of the public API, and this export is REMOVED when the phase 3
-// C++ handshake lands. Everything else in nativeStreamInternals stays
-// module-private.
-const { nativeStreamInternals } = require('webstreams/native');
+const {
+  CompressionStream,
+  DecompressionStream,
+} = require('webstreams/compression');
 
 module.exports = {
   ReadableStream,
@@ -61,12 +56,11 @@ module.exports = {
   FixedLengthStream,
   TextEncoderStream,
   TextDecoderStream,
-  // TEMPORARY — see the comment at the require above.
-  kNativeSource: nativeStreamInternals.kNativeSource,
-  kExtractNativeSource: nativeStreamInternals.kExtractNativeSource,
-  kNativeSink: nativeStreamInternals.kNativeSink,
-  kExtractNativeSink: nativeStreamInternals.kExtractNativeSink,
-  // TEMPORARY: internal-only reader (the C++ bridge surface), exposed so
-  // tests can exercise expectedLength pass-through and draining reads.
+  CompressionStream,
+  DecompressionStream,
+  // Internal-only reader (the C++ bridge's bulk-read surface). Installed on
+  // globalThis by main.ts ONLY under the internal-testing
+  // expose_draining_reader flag, for exercising expectedLength pass-through
+  // and draining reads from JS tests.
   ReadableStreamDrainingReader,
 };

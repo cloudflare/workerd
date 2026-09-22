@@ -39,6 +39,9 @@ struct TestFixture {
     kj::Maybe<kj::StringPtr> mainModuleSource;
     // If set, make a stub of an Actor with the given id.
     kj::Maybe<Worker::Actor::Id> actorId;
+    // If set, the actor is an instance of this exported Durable Object class (e.g. "default"),
+    // constructed on the first incoming request. Otherwise the actor has no class.
+    kj::Maybe<kj::StringPtr> actorClassName;
     // If true, use real timers instead of mock timers that never advance.
     // Requires waitScope to be kj::none (so that the fixture creates its own AsyncIoContext).
     bool useRealTimers;
@@ -51,10 +54,22 @@ struct TestFixture {
     // to it) via actor.getLoopback(). This way the actor and the HibernationManager share a
     // single Loopback, mirroring production.
     kj::Maybe<kj::Own<Worker::Actor::Loopback>> actorLoopback;
+    // If set, supplied to the actor's constructor, as whatever holds a manager across generations
+    // does in production. What an actor does with a manager it is handed differs from what
+    // setHibernationManager() does with one it adopts.
+    kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> hibernationManager;
+    // If set, supplied to the actor's constructor as its holder token. Actors of one holder share a
+    // token; sibling facets do not.
+    kj::Maybe<uint64_t> holderToken;
     // If set, called to create the RequestObserver for each IncomingRequest instead of the default
     // no-op base RequestObserver. Lets tests observe metrics hooks (e.g. recording the values
-    // passed to setNextSubrequestBodyRewindable()).
+    // passed to setNextSubrequestRetryEligibility()).
     kj::Maybe<kj::Function<kj::Own<RequestObserver>()>> requestObserverFactory;
+    // If set, incremented whenever the fixture's limit enforcer checks a new subrequest.
+    kj::Maybe<uint&> checkedSubrequestCount;
+    // If set, used as the jsg::IsolateObserver for the worker's isolate instead of a no-op one.
+    // Lets tests observe compilation hooks (e.g. onCompileCacheFound / onCompileCacheRejected).
+    kj::Maybe<kj::Own<JsgIsolateObserver>> jsgIsolateObserver;
   };
 
   TestFixture(SetupParams&& params = {.useRealTimers = false});
@@ -115,6 +130,9 @@ struct TestFixture {
 
   // Performs HTTP request on the default module handler, and waits for full response.
   Response runRequest(kj::HttpMethod method, kj::StringPtr url, kj::StringPtr body);
+
+  // Constructs the same WorkerEntrypoint wrapper used in production.
+  kj::Own<WorkerInterface> makeWorkerEntrypoint();
 
   // Create a new IoContext, owned by the caller. Use this when you need an IoContext that
   // outlives a single IncomingRequest, e.g. to model an actor receiving multiple requests.
@@ -234,6 +252,10 @@ struct TestFixture {
   // outlives the actor by virtue of the test holding it.
   void resetActor();
 
+  // Same, but the replacement actor answers to `id`, so a test can stand up a different Durable
+  // Object rather than a new generation of the same one.
+  void resetActor(Worker::Actor::Id id);
+
  private:
   kj::Maybe<kj::WaitScope&> waitScope;
   capnp::MallocMessageBuilder configArena;
@@ -248,6 +270,11 @@ struct TestFixture {
   // where the namespace's Loopback outlives any single actor instance). Held via addRef so we
   // can hand fresh refs to actors as we reconstruct them.
   kj::Maybe<kj::Own<Worker::Actor::Loopback>> savedActorLoopback;
+  // Saved for the same reason as savedActorLoopback: resetActor() hands a fresh ref to each actor
+  // it constructs.
+  kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> savedHibernationManager;
+  kj::Maybe<uint64_t> savedHolderToken;
+  kj::Maybe<kj::String> savedActorClassName;
   capnp::ByteStreamFactory byteStreamFactory;
   kj::HttpHeaderTable::Builder headerTableBuilder;
   ThreadContext::HeaderIdBundle threadContextHeaderBundle;
@@ -268,6 +295,7 @@ struct TestFixture {
   kj::Own<kj::HttpHeaderTable> headerTable;
   kj::Maybe<kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
   kj::Maybe<kj::Function<kj::Own<RequestObserver>()>> requestObserverFactory;
+  kj::Maybe<uint&> checkedSubrequestCount;
 
   // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
   kj::Own<Worker::Actor> makeActor(Worker::Actor::Id id);

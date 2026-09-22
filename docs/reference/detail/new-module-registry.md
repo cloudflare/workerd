@@ -160,9 +160,9 @@ module construction time.
 
 ```
 EsModule extends Module {
-  source:        kj::ArrayPtr<const char>                   // Raw UTF-8 source text
-  encodedSource: kj::Lazy<EncodedSource>                    // V8-compatible encoding (shared)
-  cachedData:    MutexGuarded<Maybe<Own<CachedData>>>       // Cross-isolate compile cache
+  source:        kj::OneOf<kj::ArrayPtr<const char>, kj::Arc<OwnedAscii>> // UTF-8
+  encodedSource: kj::Lazy<EncodedSource>                         // V8-compatible encoding (shared)
+  cachedData:    MutexGuarded<Maybe<Own<CachedData>>>            // Cross-isolate compile cache
 }
 ```
 
@@ -181,9 +181,9 @@ isolate that compiles the module:
 
 | Source content                     | Representation                                   |
 | ---------------------------------- | ------------------------------------------------ |
-| Pure ASCII (the common case)       | Zero-copy one-byte external over the raw buffer  |
-| Non-ASCII, all code points ≤ U+00FF | One-time UTF-8→Latin-1 transcode (one-byte)     |
-| Anything else (CJK, emoji, ...)    | One-time UTF-8→UTF-16 transcode (two-byte)      |
+| Pure ASCII (the common case)       | Zero-copy one-byte external over static or Arc-owned storage |
+| Non-ASCII, all code points ≤ U+00FF | One-time UTF-8→Latin-1 transcode into Arc-owned storage       |
+| Anything else (CJK, emoji, ...)    | One-time UTF-8→UTF-16 transcode into Arc-owned storage        |
 
 Invalid UTF-8 sequences are replaced with U+FFFD (via `kj::encodeUtf16`),
 matching `v8::String::NewFromUtf8`'s tolerance and the legacy registry. The
@@ -274,11 +274,16 @@ to the `bundleBase` URL (typically `file:///bundle/`):
 
 ```cpp
 BundleBuilder builder(bundleBase);
-builder.addEsmModule("index.js", source, Flags::ESM | Flags::MAIN);
+builder.addEsmModule(
+    "index.js", kj::arc<OwnedAscii>(kj::mv(source)), Flags::ESM | Flags::MAIN);
 builder.addSyntheticModule("data.json", Module::newJsonModuleHandler(jsonData));
 builder.addWasmModule("module.wasm", wasmBytes);
 auto bundle = builder.finish();
 ```
+
+The `kj::Arc<OwnedAscii>` overload must be used for ordinary worker source. The
+`ArrayPtr` overload is reserved for compiled-in strings with static process
+lifetime because V8 can retain an external source string after compilation.
 
 Name normalization (`normalizeModuleName`):
 

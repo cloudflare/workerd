@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-22.04
     name: build Python runtime
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           show-progress: false
       - uses: actions/setup-python@v6
@@ -75,7 +75,7 @@ jobs:
           echo "Found open PR for branch $BRANCH_NAME"
 
           # Commit and push the changes
-          git add build/python_metadata.bzl build/deps/python.MODULE.bazel
+          git add build/python_metadata.bzl build/deps/pyodide.MODULE.bazel
           git commit --fixup HEAD -m "Update python_metadata.bzl with new bundle info
 
           This commit updates the backport and integrity values in python_metadata.bzl

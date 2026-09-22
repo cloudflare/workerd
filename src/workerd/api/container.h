@@ -12,7 +12,6 @@
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/io-own.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/canceler.h>
 #include <workerd/util/strong-bool.h>
 
 namespace workerd::api {
@@ -182,8 +181,9 @@ class ExecProcess: public jsg::Object {
   kj::Maybe<int> resolvedExitCode;
   bool outputCalled = false;
 
-  kj::Maybe<IoOwn<RefcountedCanceler>> abortCanceler;
-  kj::Maybe<RefcountedCanceler::Listener> abortListener;
+  // Keeps the kill-on-abort action registered with the exec() options' AbortSignal for as
+  // long as this process object is alive.
+  kj::Maybe<kj::Own<void>> abortRegistration;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(stdinStream, stdoutStream, stderrStream, exitCodePromise, exitCodePromiseCopy);
@@ -196,7 +196,9 @@ class ExecProcess: public jsg::Object {
 // etc.
 class Container: public jsg::Object {
  public:
-  Container(rpc::Container::Client rpcClient, bool running);
+  Container(rpc::Container::Client rpcClient,
+      bool running,
+      jsg::Dict<kj::String> images = jsg::Dict<kj::String>{});
 
   struct DirectorySnapshot {
     kj::String id;
@@ -215,10 +217,14 @@ class Container: public jsg::Object {
   };
 
   struct DirectorySnapshotRestoreParams {
-    DirectorySnapshot snapshot;
+    jsg::Optional<DirectorySnapshot> snapshot;
     jsg::Optional<kj::String> mountPoint;
 
     JSG_STRUCT(snapshot, mountPoint);
+    JSG_STRUCT_TS_OVERRIDE(type ContainerDirectorySnapshotRestoreParams =
+      | { snapshot: ContainerDirectorySnapshot; mountPoint?: string }
+      | { snapshot?: undefined; mountPoint: string }
+    );
   };
 
   struct Snapshot {
@@ -301,22 +307,31 @@ class Container: public jsg::Object {
             }
         ));
       } else {
-        JSG_TS_OVERRIDE(ContainerStartupOptions {
+        JSG_TS_OVERRIDE(type ContainerStartupOptions = {
           entrypoint?: string[];
           enableInternet: boolean;
           env?: Record<string, string>;
-          hardTimeout?: never;
-          image?: never;
-          instance?: never;
+          instance?: "lite" | "standard-1" | "standard-2" | "standard-3" | "standard-4" | ContainerStartResources;
           labels?: Record<string, string>;
           directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
-          containerSnapshot?: ContainerSnapshotRestoreParams;
-        });
+        } & (
+          | {
+              /** Cannot be used with `containerSnapshot`. */
+              image: string;
+              containerSnapshot?: never;
+            }
+          | {
+              image?: never;
+              /** Cannot be used with `image`. */
+              containerSnapshot?: ContainerSnapshotRestoreParams;
+            }
+        ));
       }
     }
   };
 
   bool getRunning();
+  jsg::Dict<kj::String> getImages() const;
 
   // Methods correspond closely to the RPC interface in `container.capnp`.
   void start(jsg::Lock& js, jsg::Optional<StartupOptions> options);
@@ -334,7 +349,7 @@ class Container: public jsg::Object {
       jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding);
   jsg::Promise<DirectorySnapshot> snapshotDirectory(
       jsg::Lock& js, DirectorySnapshotOptions options);
-  jsg::Promise<Snapshot> snapshotContainer(jsg::Lock& js, SnapshotOptions options);
+  jsg::Promise<Snapshot> snapshotContainer(jsg::Lock& js, jsg::Optional<SnapshotOptions> options);
   jsg::Promise<jsg::Ref<ExecProcess>> exec(
       jsg::Lock& js, kj::Array<kj::String> cmd, jsg::Optional<ExecOptions> options);
 
@@ -346,6 +361,7 @@ class Container: public jsg::Object {
 
   JSG_RESOURCE_TYPE(Container, CompatibilityFlags::Reader flags) {
     JSG_READONLY_PROTOTYPE_PROPERTY(running, getRunning);
+    JSG_READONLY_PROTOTYPE_PROPERTY(images, getImages);
     JSG_METHOD(start);
     JSG_METHOD(monitor);
     JSG_METHOD(destroy);
@@ -355,23 +371,25 @@ class Container: public jsg::Object {
 
     JSG_METHOD(interceptOutboundHttp);
     JSG_METHOD(interceptAllOutboundHttp);
-    JSG_METHOD(snapshotDirectory);
     JSG_METHOD(snapshotContainer);
     JSG_METHOD(interceptOutboundHttps);
     JSG_METHOD(exec);
+    JSG_METHOD(inspect);
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(interceptOutboundTcp);
-      JSG_METHOD(inspect);
+      JSG_METHOD(snapshotDirectory);
       JSG_METHOD(setLabels);
     }
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("destroyReason", destroyReason);
+    tracker.trackField("images", images);
   }
 
  private:
   IoOwn<rpc::Container::Client> rpcClient;
+  jsg::Dict<kj::String> images;
 
   struct Monitor final {
     Monitor(kj::ForkedPromise<int32_t> promise, uint64_t generation);

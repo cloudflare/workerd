@@ -57,6 +57,40 @@ WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
 
 class IoContext;
 
+// Request-specific user-tracing state captured in an AsyncContextFrame. Durable Object requests
+// share an IoContext and may overlap, so ambient IoContext state can refer to a newer request when
+// an older continuation resumes. Keeping the span, tracer, and invocation context together ensures
+// tracing events remain attributed to the request that created the async context.
+class UserTraceAsyncContext final {
+ public:
+  UserTraceAsyncContext(SpanParent span,
+      kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer,
+      kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext)
+      : span(kj::mv(span)),
+        tracer(kj::mv(tracer)),
+        invocationSpanContext(kj::mv(invocationSpanContext)) {}
+
+  SpanParent getSpan() {
+    return span.addRef();
+  }
+
+  kj::Maybe<workerd::WeakRef<BaseTracer>&> getTracer() {
+    KJ_IF_SOME(value, tracer) {
+      return *value;
+    }
+    return kj::none;
+  }
+
+  kj::Maybe<tracing::InvocationSpanContext&> getInvocationSpanContext() {
+    return invocationSpanContext;
+  }
+
+ private:
+  SpanParent span;
+  kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
+  kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
+};
+
 // Represents one incoming request being handled by a IoContext. In non-actor scenarios,
 // there is only ever one IncomingRequest per IoContext, but with actors there could be many.
 //
@@ -196,6 +230,8 @@ class IoContext_IncomingRequest final {
 
   bool wasDelivered = false;
 
+  kj::UnwindDetector unwindDetector;
+
   // Used for debugging, tracks whether we properly called drain() or some other mechanism to
   // wait for waitUntil tasks.
   bool waitedForWaitUntil = false;
@@ -258,6 +294,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   }
   Worker::Lock& getCurrentLock() {
     return KJ_REQUIRE_NONNULL(currentLock);
+  }
+
+  // The isolate lock this IoContext is currently running JavaScript under, if any. Code that can
+  // be reached both from JavaScript and from KJ-side teardown uses this to decide whether it may
+  // touch the isolate.
+  kj::Maybe<Worker::Lock&> tryGetCurrentLock() {
+    return currentLock;
   }
 
   kj::Maybe<Worker::Actor&> getActor() {
@@ -424,6 +467,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // The callback can accept either (Worker::Lock&) or (Worker::Lock&, IoContext&). When the
   // two-argument form is used, *this is passed as the second argument. Existing single-argument
   // call sites are unaffected.
+  //
+  // Requires a current IncomingRequest: the setup work reaches for per-request state (the
+  // IoChannelFactory's timer, the request's metrics) before the callback runs. An IoContext can
+  // outlive its last IncomingRequest, so callers reachable from teardown -- destructors and
+  // kj::defer cleanups in particular -- must check hasCurrentIncomingRequest() first and skip
+  // the work rather than call this and fault.
   template <typename Func>
   auto run(Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none) KJ_WARN_UNUSED_RESULT {
     if constexpr (runFuncAcceptsIoContext<Func>) {
@@ -507,6 +556,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Like requireCurrent() but throws a JS error if this IoContext is not the current.
   void requireCurrentOrThrowJs();
+
+  // Returns an executor through which other IoContexts (or code running outside any
+  // IoContext) can later check whether this context is current, still alive, or defer work
+  // into it. Safe to retain beyond this context's lifetime.
+  IoCrossContextExecutor getCrossContextExecutor() {
+    return IoCrossContextExecutor(deleteQueue.queue.addRef());
+  }
 
   // A WeakRef is a weak reference to a IoContext. Note that because IoContext is not
   // itself ref-counted, we cannot follow the usual pattern of a weak reference that potentially
@@ -757,6 +813,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T>
   IoOwn<T> addObject(kj::Rc<T> obj);
 
+  // Shortcut for addObject(kj::heap(...)) to avoid having to write kj::heap() in every call site.
+  template <typename T, typename... Params>
+  IoOwn<T> createObject(Params&&... params) {
+    return addObject(kj::heap<T>(kj::fwd<Params>(params)...));
+  }
+
   // Like addObject() but takes a functor, returning a functor which holds the original functor
   // under an `IoOwn`, and so will stop working if the IoContext is no longer valid. This is
   // particularly useful for passing to `jsg::Promise::then()` when you need the continuation to
@@ -916,7 +978,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // should route through this function or getSubrequest().
   kj::Own<WorkerInterface> getSubrequestNoChecks(
       kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
-      SubrequestOptions options);
+      SubrequestOptions options,
+      CountSubrequest countSubrequest);
 
   // If creating a new subrequest is permitted, calls the given factory function synchronously to
   // create one.
@@ -971,6 +1034,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // `traceContext` is the trace context to use for the subrequest, if tracing is turned on.
   kj::Own<WorkerInterface> getSubrequestChannel(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
+
+  kj::Own<WorkerInterface> getSubrequestChannel(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
+      TraceContext& traceContext,
+      SpanParent userSpanParent);
 
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(uint channel,
@@ -1043,10 +1112,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Returns an object that ensures an async JS operation started in the current scope captures
   // the given user trace span, or the current incoming request's root user trace span if none is
-  // given. Storing the span in the AsyncContextFrame (which on actors outlives individual
-  // requests via the IoContext's delete queue) is safe because user-tracing SpanSubmitter
-  // implementations hold only a BaseTracer::WeakRef - stale references cannot extend tracer
-  // lifetime.
+  // given. The originating tracer and invocation context are captured with the span so that an
+  // actor continuation cannot pick up tracing state from a newer overlapping request. Storing this
+  // data in the AsyncContextFrame (which on actors outlives individual requests via the IoContext's
+  // delete queue) is safe because the tracer reference is weak.
   jsg::AsyncContextFrame::StorageScope makeUserAsyncTraceScope(
       Worker::Lock& lock, kj::Maybe<SpanParent> userSpan = kj::none) KJ_WARN_UNUSED_RESULT;
 
@@ -1184,7 +1253,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
       TraceContext& tracing,
-      IoChannelFactory& channelFactory);
+      IoChannelFactory& channelFactory,
+      kj::Maybe<SpanParent> userSpanParent = kj::none);
 
   friend class IoContext_IncomingRequest;
   template <typename T>
