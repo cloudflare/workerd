@@ -5,7 +5,7 @@ http = use_extension("@//:build/exts/http.bzl", "http")
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
 # ada-url
-bazel_dep(name = "ada-url", version = "4.0.0")
+bazel_dep(name = "ada-url", version = "4.0.0.bcr.1")
 
 # boringssl
 bazel_dep(name = "boringssl", repo_name = "ssl")
@@ -137,10 +137,10 @@ archive_override(
 http.archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "631d95aaf39371505897b0916be2a60dd7c17ae16cec8bd5036d15d23bd0ac21",
+    sha256 = "c291c8a698e638ba40e0eae4c6da97a6caa6b96a7abaabfcf2b4b4fe1a85aa43",
     strip_prefix = "",
     type = "zip",
-    url = "https://github.com/simdutf/simdutf/releases/download/v9.1.2/singleheader.zip",
+    url = "https://github.com/simdutf/simdutf/releases/download/v9.2.0/singleheader.zip",
 )
 use_repo(http, "simdutf")
 
@@ -152,7 +152,7 @@ bazel_dep(name = "zlib")
 git_override(
     module_name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    commit = "285e94b8fa95ad3b7d16b80798ec8dce6febb8c8",
+    commit = "456ae730017b9b4bd3371927abc82627fd51feef",
     patch_strip = 1,
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",
@@ -161,4 +161,4 @@ git_override(
 )
 
 # zstd
-bazel_dep(name = "zstd", version = "1.5.7.bcr.1")
+bazel_dep(name = "zstd", version = "1.5.7.bcr.2")
