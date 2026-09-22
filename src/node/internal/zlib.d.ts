@@ -292,7 +292,7 @@ export interface ZstdOptions {
   maxOutputLength?: number | undefined;
   pledgedSrcSize?: number | undefined;
   // Declared as a view, like ZlibOptions above, though an ArrayBuffer is also accepted at
-  // runtime and any other type is ignored. See normalizeZstdDictionary() in
+  // runtime and any other type throws. See normalizeZstdDictionary() in
   // internal_zlib_base.ts.
   dictionary?: ArrayBufferView | undefined;
   // Not specified in NodeJS docs but the tests expect it

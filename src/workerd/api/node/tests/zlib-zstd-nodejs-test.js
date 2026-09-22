@@ -555,24 +555,34 @@ export const zstdDictionaryTypesTest = {
   },
 };
 
-// Node ignores a dictionary that is neither an ArrayBufferView nor an ArrayBuffer rather
-// than throwing, on both the fast path and the stream path.
-export const zstdDictionaryIgnoredTypeTest = {
+// A dictionary that is neither an ArrayBufferView nor an ArrayBuffer is a TypeError on every
+// entry point, and the async functions throw rather than calling back. Mirrors Node's
+// test/parallel/test-zlib-zstd-dictionary.js.
+export const zstdDictionaryInvalidTypeTest = {
   test() {
     const input = Buffer.from(DICT_INPUT);
-    const plain = zlib.zstdCompressSync(input).length;
+    const expected = { code: 'ERR_INVALID_ARG_TYPE', name: 'TypeError' };
+    const mustNotCall = () => assert.fail('The callback should not be called');
 
-    assert.strictEqual(
-      zlib.zstdCompressSync(input, { dictionary: 'not a buffer' }).length,
-      plain,
-      'A non-buffer dictionary should be ignored'
-    );
-    assert.strictEqual(
-      zlib.zstdCompressSync(input, { dictionary: 'not a buffer', info: true })
-        .buffer.length,
-      plain,
-      'A non-buffer dictionary should be ignored on the stream path too'
-    );
+    for (const dictionary of [null, 'string', 123, true, {}, [1, 2, 3]]) {
+      const options = { dictionary };
+      assert.throws(() => zlib.createZstdCompress(options), expected);
+      assert.throws(() => zlib.createZstdDecompress(options), expected);
+      assert.throws(() => zlib.zstdCompressSync(input, options), expected);
+      assert.throws(() => zlib.zstdDecompressSync(input, options), expected);
+      assert.throws(
+        () => zlib.zstdCompressSync(input, { ...options, info: true }),
+        expected
+      );
+      assert.throws(
+        () => zlib.zstdCompress(input, options, mustNotCall),
+        expected
+      );
+      assert.throws(
+        () => zlib.zstdDecompress(input, options, mustNotCall),
+        expected
+      );
+    }
   },
 };
 
