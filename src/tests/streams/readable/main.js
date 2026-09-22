@@ -131,6 +131,9 @@ export {
   returnThenNextNoAwait,
   nextThenReturnNoAwait,
   iteratorPrototypeShape,
+  nextFromEarlierContinuationReadsAhead,
+  nextFromEarlierContinuationBeatsReturn,
+  nextAfterRejectedNextIsDone,
 } from 'async-iteration';
 
 export {
