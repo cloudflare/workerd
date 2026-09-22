@@ -8,6 +8,8 @@
     different directories to use angled brackets
   - `workerd-consume`: validates that calls to methods annotated with
     WD_CONSUME are made through consume() when invoked on kj::Ptr.
+  - `workerd-coroutine-hostile-raii`: flags hostile RAII objects that persist
+    across coroutine suspension.
   - `workerd-legacy-stream-alloc`: flags direct allocation of the legacy C++
     ReadableStream / WritableStream (`js.alloc<ReadableStream>(...)`) outside
     JsReadableStream::create() / JsWritableStream::create(), the dispatch
@@ -37,6 +39,7 @@ filegroup(
     srcs = [
         "angled-includes.c++",
         "consume.c++",
+        "coroutine-hostile-raii.c++",
         "legacy-stream-alloc.c++",
         "promise-ignore-result.c++",
         "unsafe-continuation-capture.c++",
@@ -51,6 +54,7 @@ filegroup(
     srcs = [
         "angled-includes.h",
         "consume.h",
+        "coroutine-hostile-raii.h",
         "legacy-stream-alloc.h",
         "promise-ignore-result.h",
         "unsafe-continuation-capture.h",
