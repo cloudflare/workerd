@@ -23,6 +23,7 @@ import type {
 
 const {
   ObjectDefineProperties,
+  ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
   PromiseResolve,
   PromiseReject,
@@ -38,6 +39,10 @@ const {
 const { markPromiseHandled } = utils;
 
 const kPrivateSymbol: symbol = Symbol('private');
+
+// What an omitted dictionary argument stands for. Null-prototype: WebIDL
+// reads nothing for an omitted dictionary, so neither may we.
+const kEmptyDictionary: object = ObjectFreeze({ __proto__: null });
 
 function isActualObject(value: unknown): boolean {
   return value != null && typeof value === 'object';
@@ -299,9 +304,9 @@ class TransformStream<I = unknown, O = unknown> {
     writableStrategy?: QueuingStrategy<I>,
     readableStrategy?: QueuingStrategy<O>
   ) {
-    transformer ??= {} as Transformer<I, O>;
-    writableStrategy ??= {} as QueuingStrategy<I>;
-    readableStrategy ??= {} as QueuingStrategy<O>;
+    transformer ??= kEmptyDictionary as Transformer<I, O>;
+    writableStrategy ??= kEmptyDictionary as QueuingStrategy<I>;
+    readableStrategy ??= kEmptyDictionary as QueuingStrategy<O>;
 
     if (!isActualObject(transformer)) {
       throw new TypeError('transformer must be an object');
@@ -312,6 +317,13 @@ class TransformStream<I = unknown, O = unknown> {
     if (cancelFn !== undefined && typeof cancelFn !== 'function') {
       throw new TypeError('transformer.cancel must be a function');
     }
+    // Non-standard workerd extension: the TOTAL bytes the readable side
+    // will produce (undefined = unknown). Advertised through the
+    // readable's controller so the C++ bridge derives a Content-Length
+    // for bodies built from this transform; not enforced here.
+    const expectedLength = readableInternals.normalizeExpectedLength(
+      (transformer as { expectedLength?: unknown }).expectedLength
+    );
     const flushFn = transformer.flush;
     if (flushFn !== undefined && typeof flushFn !== 'function') {
       throw new TypeError('transformer.flush must be a function');
@@ -355,7 +367,7 @@ class TransformStream<I = unknown, O = unknown> {
       // No controller, no start gating, no algorithm wrappers.
 
       const sinkWrite = async (chunk: I): Promise<void> => {
-        while (this.#backpressure) {
+        if (this.#backpressure) {
           await this.#backpressureChange.promise;
           const state = writableInternals.getState(this.#writable);
           if (state === 'erroring' || state === 'errored') {
@@ -379,6 +391,7 @@ class TransformStream<I = unknown, O = unknown> {
 
       this.#writable = new WritableStream(
         {
+          __proto__: null,
           start: (c: object) => {
             this.#writableController = c;
           },
@@ -403,14 +416,25 @@ class TransformStream<I = unknown, O = unknown> {
           : readableStrategy.highWaterMark;
       this.#readable = new ReadableStream(
         {
+          __proto__: null,
           start: (c: object) => {
             this.#readableController = c;
           },
           pull: sourcePull,
           cancel: sourceCancel,
         },
-        { highWaterMark: readableHWM, size: readableStrategy.size }
+        {
+          __proto__: null,
+          highWaterMark: readableHWM,
+          size: readableStrategy.size,
+        }
       );
+      if (expectedLength !== undefined) {
+        readableInternals.setControllerExpectedLength(
+          this.#readableController as object,
+          expectedLength
+        );
+      }
     } else {
       // ---- STANDARD PATH (transformer has algorithms) ----
 
@@ -492,7 +516,7 @@ class TransformStream<I = unknown, O = unknown> {
         PromiseWithResolvers() as PromiseWithResolversType<void>;
 
       const sinkWrite = async (chunk: I): Promise<void> => {
-        while (this.#backpressure) {
+        if (this.#backpressure) {
           await this.#backpressureChange.promise;
           const state = writableInternals.getState(this.#writable);
           if (state === 'erroring' || state === 'errored') {
@@ -598,6 +622,7 @@ class TransformStream<I = unknown, O = unknown> {
 
       this.#writable = new WritableStream(
         {
+          __proto__: null,
           start: (c: object) => {
             this.#writableController = c;
             return startHolder.promise;
@@ -666,6 +691,7 @@ class TransformStream<I = unknown, O = unknown> {
           : readableStrategy.highWaterMark;
       this.#readable = new ReadableStream(
         {
+          __proto__: null,
           start: (c: object) => {
             this.#readableController = c;
             return startHolder.promise;
@@ -673,8 +699,18 @@ class TransformStream<I = unknown, O = unknown> {
           pull: sourcePull,
           cancel: sourceCancel,
         },
-        { highWaterMark: readableHWM, size: readableStrategy.size }
+        {
+          __proto__: null,
+          highWaterMark: readableHWM,
+          size: readableStrategy.size,
+        }
       );
+      if (expectedLength !== undefined) {
+        readableInternals.setControllerExpectedLength(
+          this.#readableController as object,
+          expectedLength
+        );
+      }
 
       // --- Start the transformer ---
       const startResult: unknown =
@@ -683,6 +719,15 @@ class TransformStream<I = unknown, O = unknown> {
           : uncurryThis(startFn)(transformer, controller);
       startHolder.resolve(startResult as void | PromiseLike<void>);
     }
+
+    // The Node.js interop hook errors one half without running the sink's
+    // abort or the source's cancel; error the pair as controller.error()
+    // would (TransformStreamError).
+    const errorPair = (reason: unknown): void => {
+      transformStreamError(this, reason);
+    };
+    writableInternals.setInteropErrorHook(this.#writable, errorPair);
+    readableInternals.setInteropErrorHook(this.#readable, errorPair);
   }
 
   get readable(): ReadableStreamType<O> {

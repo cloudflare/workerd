@@ -18,66 +18,67 @@
 namespace workerd::api {
 namespace {
 
-jsg::V8System v8System;
+jsg::V8System v8System({"--expose-gc"_kj});
 
 struct BasicsContext: public jsg::Object, public jsg::ContextGlobal {
 
-  bool testNativeListenersWork(jsg::Lock& js) {
-    auto target = js.alloc<api::EventTarget>();
+  bool testAbortAlgorithmsRun(jsg::Lock& js) {
+    auto signal = js.alloc<api::AbortSignal>();
 
-    int called = 0;
-    bool onceCalled = false;
+    kj::Vector<int> order;
+    auto reg1 = signal->addAbortAlgorithm(js, [&order](jsg::Lock&) { order.add(1); });
+    auto reg2 = signal->addAbortAlgorithm(js, [&order](jsg::Lock&) { order.add(2); });
+    auto reg3 = signal->addAbortAlgorithm(js, [&order](jsg::Lock&) { order.add(3); });
 
-    // Should be invoked multiple times.
-    auto handler = target->newNativeHandler(js, kj::str("foo"),
-        [&called](jsg::Lock& js, jsg::Ref<api::Event> event) { called++; }, false);
+    // Dropping a registration unregisters its algorithm.
+    reg2 = kj::Own<void>();
 
-    // Should only be invoked once.
-    auto handlerOnce = target->newNativeHandler(
-        js, kj::str("foo"), [&](jsg::Lock& js, jsg::Ref<api::Event> event) {
-      KJ_ASSERT(!onceCalled);
-      onceCalled = true;
-      // Recursively dispatching the event here should not cause this handler to
-      // be invoked again.
-      target->dispatchEventImpl(js, js.alloc<api::Event>(kj::str("foo")));
-    }, true);
+    // A synthetic dispatch of an 'abort' event does not run abort algorithms; only a real
+    // abort does.
+    signal->dispatchEventImpl(js, js.alloc<api::Event>(kj::str("abort")));
+    KJ_ASSERT(order.empty());
 
-    KJ_ASSERT(target->dispatchEventImpl(js, js.alloc<api::Event>(kj::str("foo"))));
-    KJ_ASSERT(target->dispatchEventImpl(js, js.alloc<api::Event>(kj::str("foo"))));
-    KJ_ASSERT(onceCalled);
-    return called == 3;
+    signal->triggerAbort(js, kj::none);
+    KJ_ASSERT(order.size() == 2);
+    KJ_ASSERT(order[0] == 1);
+    KJ_ASSERT(order[1] == 3);
+    KJ_ASSERT(signal->getAborted(js));
+
+    // Algorithms are emptied by the abort; a second trigger is a no-op.
+    signal->triggerAbort(js, kj::none);
+    KJ_ASSERT(order.size() == 2);
+    return true;
   }
 
-  bool testCanAddHandlersInHandlers(jsg::Lock& js) {
-    // Exercises a use case that triggered asan failures in earlier implementations.
-    auto target = js.alloc<api::EventTarget>();
-    int toplevelCalls = 0;
-    int otherCalls = 0;
-    kj::Vector<kj::Own<void>> handlers;
+  bool testAbortAlgorithmHandleAfterSignalGone(jsg::Lock& js) {
+    // A registration handle may safely outlive its signal: dropping it afterward is a no-op.
+    kj::Own<void> reg;
+    {
+      auto signal = js.alloc<api::AbortSignal>();
+      reg = signal->addAbortAlgorithm(js, [](jsg::Lock&) {});
+    }
+    js.v8Isolate->RequestGarbageCollectionForTesting(v8::Isolate::kFullGarbageCollection);
+    reg = kj::Own<void>();
+    return true;
+  }
 
-    handlers.add(target->newNativeHandler(
-        js, kj::str("foo"), [&](jsg::Lock& js, jsg::Ref<api::Event> event) {
-      toplevelCalls++;
+  bool testAbortAlgorithmAddedWhileAborted(jsg::Lock& js) {
+    // Callers are expected to check getAborted() first; an algorithm registered against an
+    // already-aborted signal never runs (a real abort happens at most once).
+    auto signal = js.alloc<api::AbortSignal>();
+    signal->triggerAbort(js, kj::none);
 
-      for (int i = 0; i < 16; ++i) {
-        handlers.add(target->newNativeHandler(js, kj::str("foo", i),
-            [&](jsg::Lock& js, jsg::Ref<api::Event> event) { otherCalls++; }, false));
-      }
-    }, false));
-
-    handlers.add(target->newNativeHandler(js, kj::str("foo"),
-        [&](jsg::Lock& js, jsg::Ref<api::Event> event) { toplevelCalls++; }, false));
-
-    KJ_ASSERT(target->dispatchEventImpl(js, js.alloc<api::Event>(kj::str("foo"))));
-
-    KJ_ASSERT(toplevelCalls == 2);
-    KJ_ASSERT(otherCalls == 0);
+    bool called = false;
+    auto reg = signal->addAbortAlgorithm(js, [&called](jsg::Lock&) { called = true; });
+    signal->triggerAbort(js, kj::none);
+    KJ_ASSERT(!called);
     return true;
   }
 
   JSG_RESOURCE_TYPE(BasicsContext) {
-    JSG_METHOD(testNativeListenersWork);
-    JSG_METHOD(testCanAddHandlersInHandlers);
+    JSG_METHOD(testAbortAlgorithmsRun);
+    JSG_METHOD(testAbortAlgorithmHandleAfterSignalGone);
+    JSG_METHOD(testAbortAlgorithmAddedWhileAborted);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(BasicsIsolate,
@@ -85,14 +86,19 @@ JSG_DECLARE_ISOLATE_TYPE(BasicsIsolate,
     EW_BASICS_ISOLATE_TYPES,
     jsg::TypeWrapperExtension<PromiseWrapper>);
 
-KJ_TEST("EventTarget native listeners work") {
+KJ_TEST("AbortSignal abort algorithms run in order, once, and only for real aborts") {
   jsg::test::Evaluator<BasicsContext, BasicsIsolate, CompatibilityFlags::Reader> e(v8System);
-  e.expectEval("testNativeListenersWork()", "boolean", "true");
+  e.expectEval("testAbortAlgorithmsRun()", "boolean", "true");
 }
 
-KJ_TEST("EventTarget can add handlers in handlers") {
+KJ_TEST("AbortSignal abort algorithm handles are safe after the signal is gone") {
   jsg::test::Evaluator<BasicsContext, BasicsIsolate, CompatibilityFlags::Reader> e(v8System);
-  e.expectEval("testCanAddHandlersInHandlers()", "boolean", "true");
+  e.expectEval("testAbortAlgorithmHandleAfterSignalGone()", "boolean", "true");
+}
+
+KJ_TEST("AbortSignal abort algorithms registered after abort never run") {
+  jsg::test::Evaluator<BasicsContext, BasicsIsolate, CompatibilityFlags::Reader> e(v8System);
+  e.expectEval("testAbortAlgorithmAddedWhileAborted()", "boolean", "true");
 }
 
 }  // namespace

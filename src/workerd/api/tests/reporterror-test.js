@@ -14,6 +14,7 @@ const expectedFilename = Cloudflare.compatibilityFlags.new_module_registry
   : 'worker';
 
 const handler = mock.fn((event) => {
+  strictEqual(event.isTrusted, true);
   if (event.error instanceof Error) {
     strictEqual(event.message, 'Uncaught Error: boom');
     strictEqual(event.colno, 13);
@@ -23,7 +24,7 @@ const handler = mock.fn((event) => {
   } else {
     strictEqual(event.message, 'Uncaught boom');
     strictEqual(event.colno, 0);
-    strictEqual(event.lineno, 35);
+    strictEqual(event.lineno, 36);
     strictEqual(event.filename, expectedFilename);
     strictEqual(event.error, 'boom');
   }

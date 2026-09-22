@@ -131,6 +131,7 @@ bool local_is_bigint64_array(const Local& val);
 bool local_is_biguint64_array(const Local& val);
 bool local_is_float16_array(const Local& val);
 bool local_is_uint8clamped_array(const Local& val);
+bool local_is_typed_array(const Local& val);
 bool local_is_array_buffer(const Local& val);
 bool local_is_array_buffer_view(const Local& val);
 bool local_is_shared_array_buffer(const Local& val);

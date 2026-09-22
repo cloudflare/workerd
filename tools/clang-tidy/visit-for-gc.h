@@ -31,7 +31,7 @@ namespace clang_tidy {
 // visit (accepts the KJ_IF_SOME/KJ_SWITCH_ONEOF binding idiom); templated
 // bodies are only checked where instantiated; plain holders without
 // visitForGc are only diagnosed when a visible body reaches into them.
-class VisitForGcCheck : public clang::tidy::ClangTidyCheck {
+class VisitForGcCheck: public clang::tidy::ClangTidyCheck {
  public:
   VisitForGcCheck(clang::StringRef Name, clang::tidy::ClangTidyContext *Context)
       : ClangTidyCheck(Name, Context) {}
@@ -68,15 +68,14 @@ class VisitForGcCheck : public clang::tidy::ClangTidyCheck {
 
   void recordUsedAsField(clang::QualType qt);
   void checkRecord(const clang::CXXRecordDecl *record);
-  void collectVisitedFields(const clang::Stmt *stmt,
-                            llvm::DenseSet<const clang::FieldDecl *> &visitedFields);
+  void collectVisitedFields(
+      const clang::Stmt *stmt, llvm::DenseSet<const clang::FieldDecl *> &visitedFields);
 
   // True if `record` declares its own visitForGc method or transitively
   // inherits one.
   static bool baseHasVisitForGc(const clang::CXXRecordDecl *record);
   static bool baseHasVisitForGcImpl(
-      const clang::CXXRecordDecl *record,
-      llvm::DenseSet<const clang::CXXRecordDecl *> &visited);
+      const clang::CXXRecordDecl *record, llvm::DenseSet<const clang::CXXRecordDecl *> &visited);
 };
 
 }  // namespace clang_tidy

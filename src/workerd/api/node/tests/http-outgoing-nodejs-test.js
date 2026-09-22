@@ -204,10 +204,14 @@ export const testHttpOutgoingDestroyed = {
 
       server.listen(8080);
 
-      await env.SERVICE.fetch('https://cloudflare.com', {
+      const res = await env.SERVICE.fetch('https://cloudflare.com', {
         method: 'PUT',
         body: 'asd',
       });
+      // 'close' follows 'finish', which the body's consumption completes;
+      // the handler settles `promise` from inside its own request, so it
+      // must have done so before this test awaits it.
+      strictEqual(await res.text(), 'asd');
       await promise;
       strictEqual(errorFn.mock.callCount(), 0);
     }

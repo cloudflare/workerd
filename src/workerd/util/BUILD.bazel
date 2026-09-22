@@ -19,6 +19,20 @@ selects.config_setting_group(
         ":set_use_perfetto",
         "//:is_unix",
     ],
+    visibility = ["//visibility:public"],
+)
+
+# The routing layer owning the unprefixed zlib symbol names; @zlib//:zlib depends on this, so
+# every zlib consumer links it. Deliberately kj/capnp-free (see zlib-router.c++).
+wd_cc_library(
+    name = "zlib-router",
+    srcs = ["zlib-router.c++"],
+    hdrs = ["zlib-router.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/zlib-rs",
+        "@zlib//:zlib_impl",
+    ],
 )
 
 wd_cc_library(
@@ -63,8 +77,25 @@ wd_cc_library(
 # why the Windows build is failing, we could simplify things here a bit.
 
 wd_cc_library(
+    name = "sync-wait-list",
+    hdrs = ["sync-wait-list.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+kj_test(
+    src = "sync-wait-list-test.c++",
+    deps = [
+        ":sync-wait-list",
+    ],
+)
+
+wd_cc_library(
     name = "util",
     srcs = [
+        "canceler.c++",
         "stream-utils.c++",
         "wait-list.c++",
     ],
@@ -85,9 +116,10 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":sync-wait-list",
         ":duration-exceeded-logger",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
         # TODO(cleanup): Only for abortable.h, factor out
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
@@ -135,7 +167,7 @@ wd_cc_library(
         ":strings",
         "//src/workerd/jsg:memory-tracker",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
     ],
 )
 
@@ -212,6 +244,7 @@ wd_cc_library(
     ],
     implementation_deps = [
         ":autogate",
+        ":strings",
         "//src/workerd/jsg:exception",
         "@sqlite3",
     ],
@@ -220,7 +253,7 @@ wd_cc_library(
         ":account-limits",
         ":sentry",
         ":sqlite-metering",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
     ],
 )
 
@@ -289,6 +322,7 @@ wd_cc_library(
     deps = [
         ":sentry",
         ":strong-bool",
+        ":zlib-router",
         "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/kj",
     ],
@@ -365,6 +399,7 @@ exports_files(["autogate.h"])
     for f in [
         "batch-queue-test.c++",
         "wait-list-test.c++",
+        "xthread-wait-list-test.c++",
         "duration-exceeded-logger-test.c++",
     ]
 ]
@@ -384,6 +419,13 @@ kj_test(
 )
 
 kj_test(
+    src = "canceler-test.c++",
+    deps = [
+        ":util",
+    ],
+)
+
+kj_test(
     src = "mimetype-test.c++",
     deps = [
         ":mimetype",
@@ -391,9 +433,24 @@ kj_test(
 )
 
 kj_test(
+    src = "stream-utils-test.c++",
+    deps = [
+        ":util",
+    ],
+)
+
+kj_test(
+    src = "sentry-test.c++",
+    deps = [
+        ":sentry",
+    ],
+)
+
+kj_test(
     size = "large",
     src = "sqlite-test.c++",
     deps = [
+        ":sentry",
         ":sqlite",
         "//src/workerd/io:io-gate",
         "@sqlite3",
@@ -437,6 +494,14 @@ kj_test(
 )
 
 kj_test(
+    src = "zlib-router-test.c++",
+    deps = [
+        ":autogate",
+        "@zlib",
+    ],
+)
+
+kj_test(
     src = "checked-queue-test.c++",
     deps = [":checked-queue"],
 )
@@ -464,4 +529,33 @@ wd_cc_library(
 kj_test(
     src = "state-machine-test.c++",
     deps = [":state-machine"],
+)
+
+# The tokio-backed kj::setupAsyncIo(): kj-rs-tokio's event loop and kj-rs-io's providers behind
+# kj's public entry point, so call sites need no change. BINARIES link this target -- the workerd
+# binary directly, every kj_test / wd_cc_benchmark through its macro -- and libraries never do, so
+# a downstream binary linking workerd libraries keeps its own event loop. kj-async-os (kj's own
+# event loop and sockets, which also defines kj::setupAsyncIo() and kj::UnixEventPort) must stay
+# out of such a link; the .c++ defines an inert kj::UnixEventPort in its place.
+wd_cc_library(
+    name = "setup-async-io",
+    srcs = ["setup-async-io.c++"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//deps:rust_runtime",
+        "//src/rust/cxx/kj-rs-io",
+        "//src/rust/cxx/kj-rs-io:bridge",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
+        "@capnp-cpp//src/kj:kj-async-os-hdrs",
+    ],
+)
+
+# Runtime check through the public entry point: kj::setupAsyncIo() must hand back the tokio
+# providers, whose event loop is then proven live by a timer wait. :setup-async-io itself comes from
+# the kj_test macro, as for every test binary.
+kj_test(
+    src = "setup-async-io-test.c++",
+    deps = ["//src/rust/cxx/kj-rs-io"],
 )

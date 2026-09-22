@@ -295,7 +295,7 @@ struct RustMutable {};
 
 /// kjArrayPtr.as<RustMutable>()
 template <typename T>
-inline ::rust::Slice<T> asImpl(RustMutable*, kj::ArrayPtr<T>& arr) {
+inline ::rust::Slice<T> asImpl(RustMutable*, kj::ArrayPtr<T> arr) {
   return ::rust::Slice<T>(arr.begin(), arr.size());
 }
 

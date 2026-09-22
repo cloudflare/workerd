@@ -38,10 +38,34 @@ namespace workerd::api {
 // instances, etc). Objects that represent i/o (like streams or promises are
 // explicitly not supported.
 
-struct CacheValue: kj::AtomicRefcounted {
-  CacheValue(kj::Array<kj::byte>&& bytes): bytes(kj::mv(bytes)) {}
+class CacheValueBacking {
+ public:
+  virtual kj::ArrayPtr<const kj::byte> asBytes() const = 0;
+  virtual ~CacheValueBacking() noexcept(false) = default;
+};
 
-  kj::Array<kj::byte> bytes;
+struct CacheValue: kj::AtomicRefcounted {
+  CacheValue(kj::Array<kj::byte>&& bytes): data(kj::mv(bytes)) {}
+  CacheValue(kj::Own<CacheValueBacking> backing): data(kj::mv(backing)) {}
+
+  kj::ArrayPtr<const kj::byte> asBytes() const {
+    KJ_SWITCH_ONEOF(data) {
+      KJ_CASE_ONEOF(d, kj::Array<kj::byte>) {
+        return d.asPtr();
+      }
+      KJ_CASE_ONEOF(b, kj::Own<CacheValueBacking>) {
+        return b->asBytes();
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  size_t size() const {
+    return asBytes().size();
+  }
+
+ private:
+  kj::OneOf<kj::Array<kj::byte>, kj::Own<CacheValueBacking>> data;
 };
 
 struct MemoryCacheEntry {
@@ -68,7 +92,7 @@ struct MemoryCacheEntry {
   kj::Own<CacheValue> value;
 
   inline size_t size() const {
-    return value->bytes.size();
+    return value->size();
   }
 
   // The expiration timestamp of this cache entry, usually the time at which the
@@ -158,7 +182,6 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
       kj::StringPtr id,
       kj::Maybe<AdditionalResizeMemoryLimitHandler&> additionalResizeMemoryLimitHandler,
       const kj::MonotonicClock& timer);
-
   ~SharedMemoryCache() noexcept(false);
 
   kj::StringPtr getId() const {
@@ -472,13 +495,37 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
   const kj::MonotonicClock& timer;
 };
 
+struct MemoryCachePolicy {
+  kj::Maybe<uint64_t> maxTotalValueSize;
+};
+
+class MemoryCacheUse {
+ public:
+  using FallbackResult = SharedMemoryCache::Use::FallbackResult;
+  using FallbackDoneCallback = SharedMemoryCache::Use::FallbackDoneCallback;
+  using GetWithFallbackOutcome = SharedMemoryCache::Use::GetWithFallbackOutcome;
+
+  virtual ~MemoryCacheUse() noexcept(false) = default;
+  virtual kj::Maybe<kj::Own<CacheValue>> getWithoutFallback(
+      const kj::String& key, SpanBuilder& readSpan) const = 0;
+  virtual kj::OneOf<kj::Own<CacheValue>, kj::Promise<GetWithFallbackOutcome>> getWithFallback(
+      const kj::String& key, SpanBuilder& readSpan) const = 0;
+  virtual void delete_(const kj::String& key) const = 0;
+};
+
+class MemoryCacheNamespace {
+ public:
+  static kj::Own<MemoryCacheNamespace> create(MemoryCachePolicy policy);
+  virtual ~MemoryCacheNamespace() noexcept(false) = default;
+  virtual kj::Own<MemoryCacheUse> getBinding(
+      kj::Maybe<kj::StringPtr> id, SharedMemoryCache::Limits limits) const = 0;
+};
+
 // JavaScript class that allows accessing an in-memory cache.
-// Each instance of this class holds a SharedMemoryCache::Use object and
-// all calls from JavaScript are essentially forwarded to that object, which
-// manages interaction with the shared cache in a thread-safe manner.
+// Each instance forwards JavaScript calls to the selected backend lease.
 class MemoryCache: public jsg::Object {
  public:
-  MemoryCache(SharedMemoryCache::Use&& use): cacheUse(kj::mv(use)) {}
+  MemoryCache(kj::Own<MemoryCacheUse> use): cacheUse(kj::mv(use)) {}
 
   using FallbackFunction = jsg::Function<jsg::Promise<CacheValueProduceResult>(kj::String)>;
 
@@ -499,24 +546,27 @@ class MemoryCache: public jsg::Object {
   }
 
  private:
-  SharedMemoryCache::Use cacheUse;
+  kj::Own<MemoryCacheUse> cacheUse;
 };
 
 // The MemoryCacheProvider provides the internal implementation of the MemoryCache mechanism.
 // It is responsible for owning the SharedMemoryCache instances and providing them to the
-// bindings as needed. The default implementation (created and returned by createDefault())
-// uses a simple in-memory map to store the SharedMemoryCache instances.
+// bindings as needed. The selected implementation is fixed when the provider is constructed.
 // TODO(later): It may be worth considering some kind of metrics observer for the provider
 // that can be passed along to the individual cache instances so we can monitor just how much
 // the in memory cache is being used.
 class MemoryCacheProvider {
  public:
+  explicit MemoryCacheProvider(const kj::MonotonicClock& timer);
   MemoryCacheProvider(const kj::MonotonicClock& timer,
       kj::Maybe<SharedMemoryCache::AdditionalResizeMemoryLimitHandler>
-          additionalResizeMemoryLimitHandler = kj::none);
+          additionalResizeMemoryLimitHandler);
+  MemoryCacheProvider(const kj::MonotonicClock& timer, MemoryCachePolicy policy);
   KJ_DISALLOW_COPY_AND_MOVE(MemoryCacheProvider);
   ~MemoryCacheProvider() noexcept(false);
 
+  kj::Own<MemoryCacheUse> getUse(
+      kj::Maybe<kj::StringPtr> cacheId, SharedMemoryCache::Limits limits) const;
   kj::Own<const SharedMemoryCache> getInstance(kj::Maybe<kj::StringPtr> cacheId = kj::none) const;
 
   void removeInstance(const SharedMemoryCache& instance) const;
@@ -532,7 +582,11 @@ class MemoryCacheProvider {
   // is destroyed, it will remove itself from this cache by calling removeInstance.
   kj::MutexGuarded<kj::HashMap<kj::String, const SharedMemoryCache*>> caches;
 
+  kj::Maybe<kj::Own<MemoryCacheNamespace>> namespaceV2;
+
   const kj::MonotonicClock& timer;
+
+  friend bool isMemoryCacheV2ForTest(const MemoryCacheProvider& provider);
 };
 
 // clang-format off

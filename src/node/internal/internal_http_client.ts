@@ -20,6 +20,9 @@ import {
   ERR_INVALID_ARG_VALUE,
   ERR_HTTP_HEADERS_SENT,
   ERR_METHOD_NOT_IMPLEMENTED,
+  ERR_STREAM_ALREADY_FINISHED,
+  ConnResetException,
+  AbortError,
 } from 'node-internal:internal_errors';
 import {
   validateInteger,
@@ -29,6 +32,7 @@ import {
   validateNumber,
 } from 'node-internal:validators';
 import { getTimerDuration } from 'node-internal:internal_net';
+import { isUint8Array } from 'node-internal:internal_types';
 import { addAbortSignal } from 'node-internal:streams_add_abort_signal';
 import { Writable } from 'node-internal:streams_writable';
 import type {
@@ -40,7 +44,10 @@ import {
   IncomingMessage,
   setIncomingMessageFetchResponse,
 } from 'node-internal:internal_http_incoming';
-import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
+import {
+  OutgoingMessage,
+  kErrored,
+} from 'node-internal:internal_http_outgoing';
 import { Agent, globalAgent } from 'node-internal:internal_http_agent';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 import type { Socket } from 'node:net';
@@ -71,6 +78,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   #body: (Buffer | Uint8Array)[] = [];
   #incomingMessage?: IncomingMessage;
   #timer: number | null = null;
+  #sent = false;
 
   _ended: boolean = false;
 
@@ -83,8 +91,9 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   joinDuplicateHeaders: boolean | undefined;
   agent: Agent | undefined;
 
-  // Unused fields required to be Node.js compatible.
   override aborted: boolean = false;
+
+  // Unused fields required to be Node.js compatible.
   reusedSocket: boolean = false;
   maxHeadersCount: number = Infinity;
   connection: Socket | null = null;
@@ -316,7 +325,18 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
 
   #onFinish(): void {
     if (this.destroyed) return;
+    // A failure to send — a URL the host or path cannot form, a Blob that
+    // cannot be built, fetch() itself throwing — fails the request as a
+    // connection failure does, rather than escaping the 'finish' emission
+    // and leaving the request unsent, never to close.
+    try {
+      this.#send();
+    } catch (err) {
+      this.destroy(err);
+    }
+  }
 
+  #send(): void {
     let body: BodyInit | null = null;
     if (this.method !== 'GET' && this.method !== 'HEAD') {
       if (this.#body.length > 0) {
@@ -344,13 +364,8 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       }
     }
 
-    if (this.timeout) {
-      this.#timer = setTimeout(() => {
-        this.emit('timeout');
-        this.#incomingMessage?.emit('timeout');
-        this.#abortController.abort();
-      }, this.timeout) as unknown as number;
-    }
+    this.#sent = true;
+    this.#armTimer();
 
     if (
       this.host &&
@@ -425,30 +440,101 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   }
 
   #handleFetchResponse(response: Response): void {
+    // Destroyed while the response was on its way: nobody will read it.
+    if (this.destroyed) {
+      response.body?.cancel().catch(() => {});
+      return;
+    }
+
     // Sets headersSent
     this._header = Array.from(response.headers.keys())
       .map((key) => `${key}=${response.headers.get(key)}}`)
       .join('\r\n');
     const incoming = new IncomingMessage();
-    setIncomingMessageFetchResponse(incoming, response);
+    setIncomingMessageFetchResponse(incoming, response, {
+      setTimeout: (msecs) => {
+        this.#setIdleTimeout(msecs);
+      },
+      touch: () => {
+        this.#armTimer();
+      },
+    });
+    // The response's arrival is activity on the connection.
+    this.#armTimer();
+    // The response's own failure (its body erroring, or its destroy()) is
+    // the request's too, as a socket error would be in Node; a request
+    // being destroyed reports its error itself.
     incoming.on('error', (error) => {
-      this.emit('error', error);
+      if (!this.destroyed) {
+        this.emit('error', error);
+      }
+    });
+    // The exchange is over once the response is: the request closes.
+    incoming.once('close', () => {
+      this.#emitClose();
     });
 
-    this.emit('response', incoming);
-    // @ts-expect-error TS2540 This is a read-only property.
-    this.req = this.#incomingMessage;
     this.#incomingMessage = incoming;
+    // @ts-expect-error TS2540 This is a read-only property.
+    this.res = incoming;
+    // A response nobody listens for cannot be consumed by anyone: dump it,
+    // as Node does, so the exchange completes and closes instead of holding
+    // the response body open.
+    if (!this.emit('response', incoming)) {
+      incoming._dump();
+    }
   }
 
+  // A fetch that fails before yielding a response (the connection could
+  // not be made, the request was rejected). The rejection of a fetch this
+  // request aborted itself is not news.
   #handleFetchError(error: Error): void {
-    if (!this.destroyed) {
-      this.emit('error', error);
-    } else {
-      console.log(error);
-    }
+    if (this.destroyed) return;
+    this.destroy(error);
+  }
+
+  // Marks the request closed and destroyed, once; the end of every
+  // exchange, completed or torn down, comes through here.
+  #emitClose(): void {
+    if (this._closed) return;
+    this._closed = true;
     this.destroyed = true;
-    this._ended = true;
+    this.#clearTimer();
+    this.emit('close');
+  }
+
+  // Tears the exchange down as Node does when the socket goes away. The
+  // request reports `err` — or, for a bare destroy() before any response
+  // (and not through abort()), that the connection hung up — on a later
+  // tick, as a socket error would arrive; a response in flight is aborted
+  // at once with ECONNRESET 'aborted', whatever `err` is — in Node the
+  // response learns only that its socket closed, `err` being the
+  // request's to report — which cancels its body so the server learns of
+  // it; a fetch still awaiting its response is aborted; 'close' follows.
+  override destroy(err?: unknown, _cb?: (err?: unknown) => void): this {
+    if (this.destroyed) return this;
+    this.destroyed = true;
+    this[kErrored] = (err as Error | null | undefined) ?? null;
+    this.#clearTimer();
+
+    const incoming = this.#incomingMessage;
+    if (incoming === undefined && err == null && !this.aborted) {
+      err = new ConnResetException('socket hang up');
+    }
+    if (err != null) {
+      queueMicrotask(() => {
+        this.emit('error', err);
+      });
+    }
+    if (incoming === undefined) {
+      this.#abortController.abort();
+    } else if (!incoming.complete) {
+      incoming.destroy(new ConnResetException('aborted'));
+    }
+    queueMicrotask(() => {
+      this.#emitClose();
+    });
+    return this;
   }
 
   onSocket(_socket: Socket): void {
@@ -462,16 +548,18 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     throw new ERR_METHOD_NOT_IMPLEMENTED('addTrailers');
   }
 
-  abort(error?: Error | null): void {
-    this.destroyed = true;
-    this.#resetTimers({ finished: true });
-    if (this.#incomingMessage) {
-      this.#incomingMessage.destroyed = true;
-    }
-    this.#abortController.abort();
-    if (error) {
-      this.emit('error', error);
-    }
+  // The quiet teardown: 'abort' on the next tick, then the destroy() of a
+  // bare request without its 'socket hang up'. Node's abort() reports the
+  // hang up once the request is on a socket; abort() is the common
+  // cancellation path and was always silent here, so it stays so — a
+  // deliberate divergence, recorded in src/tests/node/http-client/AGENTS.md.
+  abort(): void {
+    if (this.aborted) return;
+    this.aborted = true;
+    queueMicrotask(() => {
+      this.emit('abort');
+    });
+    this.destroy();
   }
 
   override _write(
@@ -499,18 +587,21 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     this.setTimeout(0, cb);
   }
 
+  // Arms (or, with 0, clears) the idle timeout, which runs from the moment
+  // the request is sent and this method has been called, whichever is
+  // later, and starts over on every chunk of the response. The response's
+  // setTimeout() sets the same timer.
   setTimeout(msecs: number, callback?: VoidFunction): this {
-    if (this.#timer) {
-      clearTimeout(this.#timer);
-      this.#timer = null;
-    }
-
-    this.timeout = getTimerDuration(msecs, 'msecs');
-    this.#resetTimers({ finished: false });
+    this.#setIdleTimeout(getTimerDuration(msecs, 'msecs'));
 
     if (callback) this.once('timeout', callback);
 
     return this;
+  }
+
+  #setIdleTimeout(msecs: number): void {
+    this.timeout = msecs;
+    this.#armTimer();
   }
 
   override write(
@@ -518,14 +609,27 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     encoding?: BufferEncoding | WriteCallback | null,
     callback?: WriteCallback
   ): boolean {
-    // Capture the data for the request body
-    if (this.method !== 'GET' && this.method !== 'HEAD' && chunk) {
+    // The body is sent at end(); a chunk's bytes are captured now, as Node
+    // has them on the wire or copied into its pending queue by the time
+    // write() returns: what the caller does to the buffer afterwards does
+    // not change what is sent. (The copy also frees the Blob from views it
+    // could not take as they are, such as one over a SharedArrayBuffer.)
+    // Only a string or a Uint8Array is captured: OutgoingMessage refuses
+    // anything else below, and a view of another element type must not
+    // leave its converted elements behind as body bytes. A write after
+    // end() is refused below too, as a write after end.
+    if (
+      this.method !== 'GET' &&
+      this.method !== 'HEAD' &&
+      chunk &&
+      !this.writableEnded
+    ) {
       if (typeof chunk === 'string') {
         this.#body.push(
           Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8')
         );
-      } else {
-        this.#body.push(chunk);
+      } else if (isUint8Array(chunk) && chunk.byteLength > 0) {
+        this.#body.push(new Uint8Array(chunk));
       }
     }
 
@@ -538,37 +642,77 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     encoding?: BufferEncoding | VoidFunction,
     callback?: VoidFunction
   ): this {
-    this._ended = true;
-
     if (typeof data === 'function') {
       callback = data as VoidFunction;
       data = undefined;
+    } else if (typeof encoding === 'function') {
+      callback = encoding;
+      encoding = undefined;
     }
 
-    // Don't duplicate data here - let the parent's end() call write() which will handle it
+    // Ended already, as OutgoingMessage.end() has it: a chunk is a write
+    // after end (its callback and 'error' report it; the request, already
+    // on its way, is unaffected); a bare end() calls back once the request
+    // has finished, or at once if it already has.
+    if (this.writableEnded) {
+      if (data) {
+        this.write(
+          data,
+          encoding as BufferEncoding | undefined,
+          callback as WriteCallback | undefined
+        );
+      } else if (typeof callback === 'function') {
+        if (!this.writableFinished) {
+          this.once('finish', () => {
+            callback();
+          });
+        } else {
+          (callback as WriteCallback)(new ERR_STREAM_ALREADY_FINISHED('end'));
+        }
+      }
+      return this;
+    }
+    // A destroyed request has nothing left to send and never finishes.
+    if (this.destroyed) return this;
+    this._ended = true;
+
+    // The Writable's end() writes the last chunk and finishes the request
+    // (its 'finish' sends it); the request counts as finished from here
+    // on, so that a later write() is a write after end.
     Writable.prototype.end.call(
       this,
       data,
       encoding as BufferEncoding,
       callback
     );
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    this.finished = true;
     return this;
   }
 
-  #resetTimers({ finished }: { finished: boolean }): void {
-    if (finished) {
-      clearTimeout(this.#timer as number);
+  #clearTimer(): void {
+    if (this.#timer !== null) {
+      clearTimeout(this.#timer);
       this.#timer = null;
-    } else if (this.timeout) {
-      if (this.#timer) {
-        clearTimeout(this.#timer);
-      }
-      this.#timer = setTimeout(() => {
-        this.emit('timeout');
-        this.#incomingMessage?.emit('timeout');
-        this.#abortController.abort();
-      }, this.timeout) as unknown as number;
     }
+  }
+
+  // One timer at a time, once the request has been sent; arming again
+  // restarts it, which is how activity on the connection (the response,
+  // each of its chunks) keeps an idle timer from firing, as the socket's
+  // does in Node. Firing emits 'timeout' on the request and its response,
+  // then destroys the request with an AbortError. (Node only emits and
+  // leaves the teardown to the listener; a request left open would
+  // otherwise hold the fetch.)
+  #armTimer(): void {
+    this.#clearTimer();
+    if (!this.timeout || !this.#sent || this.destroyed) return;
+    this.#timer = setTimeout(() => {
+      this.#timer = null;
+      this.emit('timeout');
+      this.#incomingMessage?.emit('timeout');
+      this.destroy(new AbortError());
+    }, this.timeout) as unknown as number;
   }
 
   override _implicitHeader(): void {

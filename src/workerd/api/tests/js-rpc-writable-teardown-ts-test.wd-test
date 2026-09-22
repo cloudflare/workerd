@@ -1,0 +1,44 @@
+# The abandoned-writable teardown test run with the TypeScript streams implementation enabled,
+# so both transferred writables serialize through the TypeScript writer sink rather than the
+# legacy adapters. See the header comment in the JS file.
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "js-rpc-writable-teardown-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "streams_enable_constructors",
+          "rpc",
+          "typescript_implemented_streams",
+        ],
+        bindings = [
+          (name = "PEER", service = (name = "peer", entrypoint = "Peer")),
+        ],
+      )
+    ),
+    ( name = "peer",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "js-rpc-writable-teardown-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "streams_enable_constructors",
+          "rpc",
+          "typescript_implemented_streams",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+    "workerd-autogate-rpc-externals-hydration",
+  ],
+);

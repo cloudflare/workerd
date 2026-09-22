@@ -18,9 +18,9 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-VERSION = "15.1.206.7"
+VERSION = "15.4.80.5"
 
-INTEGRITY = "sha256-BToQQPeqVh//fw86DQYHhNVBzyfJ7f+Wlwlfz4nRBZs="
+INTEGRITY = "sha256-0Vpl4cAuTVSALO+FrE3XtJ96IydSNAL+basIQScPXhs="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -61,7 +61,9 @@ PATCHES = [
     "0036-Fix-ExtendedMap-layout-on-Windows.patch",
     "0037-Fix-CFunction-MemorySpan-declarations-on-Windows.patch",
     "0038-Properly-depend-on-llvm-libc.patch",
-    "0039-wasm-memory.discard-prototype-for-the-memory-control.patch",
+    "0039-Fix-TSan-build-without-the-V8-sandbox.patch",
+    "0040-Enable-Perfetto-support-in-the-V8-Bazel-build.patch",
+    "0041-Disable-preserve_most-on-Windows-x64-before-Clang-22.patch",
 ]
 
 http_archive(
@@ -96,9 +98,6 @@ bazel_dep(name = "workerd-v8")
 # This is overridden in the internal non-OSS repo.
 #
 # TODO(cleanup): There must be a better way to do this?
-# TODO(soon): Figure out how to build v8 with perfetto enabled. It does not appear
-#             as if the v8 bazel build currently includes support for building with
-#             perfetto enabled as an option.
 local_path_override(
     module_name = "workerd-v8",
     path = "build/workerd-v8",

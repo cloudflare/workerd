@@ -59,17 +59,17 @@ Find three things:
 
 1. **The crash site source.** Read the assertion/crash line and its immediate context (~50 lines).
    Understand what invariant was violated and what state would cause it. If the crash is in a C++
-   class method, **use the `cross-reference` tool** to quickly locate the header, implementation
-   files, JSG registration, and test files for that class.
+   class method, locate the header, implementation files, JSG registration, and test files for that
+   class.
 
 2. **Recent changes.** If the incident being investigated started, re-occurred, or increased in rate
    recently, look at the git history around the crash site to see if recent changes may have caused
    the bug. Use `git blame` to find when the crash line or the code around it was last modified, and
    `git log` to see recent commits in that file.
 
-3. **The test file.** Use `/find-test` on the source file containing the crash site (the
-   cross-reference output may already list relevant test files). If no test exists, identify the
-   nearest test file in the same directory.
+3. **The test file.** Load the `find-and-run-tests` skill and use it to find the test target
+   covering the source file containing the crash site. If no test exists, identify the nearest test
+   file in the same directory.
 
 4. **Existing feature tests.** Search for existing tests that exercise the _feature_ involved in the
    bug — not just tests near the crash site file. The crash may be in `pipeline.c++` but the relevant

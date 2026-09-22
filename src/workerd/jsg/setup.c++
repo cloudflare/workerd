@@ -124,6 +124,9 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
 
   v8::V8::SetDcheckErrorHandler(&v8DcheckError);
   v8::V8::SetFatalErrorHandler(&v8DcheckError);
+  // V8 can fail to allocate a sandbox before there is a current isolate, so the process-wide OOM
+  // handler must be installed in addition to each isolate's handler.
+  v8::V8::SetFatalMemoryErrorCallback(&IsolateBase::oomError);
 
   // Note that v8::V8::SetFlagsFromString() simply ignores flags it doesn't recognize, which means
   // typos don't generate any error. SetFlagsFromCommandLine() has the `remove_flags` option which
@@ -155,11 +158,6 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // (It turns out you can call v8::V8::SetFlagsFromString() as many times as you want to add
   // more flags.)
   v8::V8::SetFlagsFromString("--noincremental-marking");
-
-  // These features are completed and enabled by default in Chrome, but not
-  // in V8. Follows Node.js: https://github.com/nodejs/node/pull/58154
-  v8::V8::SetFlagsFromString("--js-explicit-resource-management");
-  v8::V8::SetFlagsFromString("--js-float16array");
 
   // Enable source phase imports for WebAssembly modules
   v8::V8::SetFlagsFromString("--js-source-phase-imports");
@@ -437,6 +435,7 @@ IsolateBase::IsolateBase(V8System& system,
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       exportsAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
+      activeSpanAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)),
       externalStringAllocator(kj::mv(externalStringAllocator)) {
@@ -445,18 +444,12 @@ IsolateBase::IsolateBase(V8System& system,
 
     ptr->SetFatalErrorHandler(&fatalError);
     ptr->SetOOMErrorHandler(&oomError);
-    // We also set the global OOM error handler.  This is a bit of
-    // a hack: Later in the run the allocation of a sandbox may fail
-    // due to OOM.  In that case we want our handler to be called
-    // even though there is no current isolate.
-    v8::V8::SetFatalMemoryErrorCallback(&oomError);
 
     ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
     ptr->SetData(SET_DATA_ISOLATE_BASE, this);
 
     ptr->SetModifyCodeGenerationFromStringsCallback(&modifyCodeGenCallback);
     ptr->SetAllowWasmCodeGenerationCallback(&allowWasmCallback);
-    ptr->SetWasmMemoryDiscardEnabledCallback(&wasmMemoryDiscardEnabledCallback);
 
     // We don't support SharedArrayBuffer so Atomics.wait() doesn't make sense, and might allow DoS
     // attacks.
@@ -624,12 +617,6 @@ bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8
   IsolateBase* self =
       static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
   return self->evalAllowed;
-}
-
-bool IsolateBase::wasmMemoryDiscardEnabledCallback(v8::Local<v8::Context> context) {
-  IsolateBase* self =
-      static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
-  return self->wasmMemoryDiscardEnabled;
 }
 
 void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {

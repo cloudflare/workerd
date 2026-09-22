@@ -5,10 +5,10 @@ Subject: Change lamba signature to get around windows build failure
 
 
 diff --git a/src/objects/backing-store.cc b/src/objects/backing-store.cc
-index c98ab72ad532350404f1fac0bedf3c4e83a1ab03..e43b8ea2e693b9981b18a87191ebee5b903d4872 100644
+index feb9f85096bb984225b77f1bf2f89c206c2adb36..6b24d2ade2a9a54f6c44b8d7a57d8f5acdb3fb30 100644
 --- a/src/objects/backing-store.cc
 +++ b/src/objects/backing-store.cc
-@@ -322,7 +322,7 @@ std::unique_ptr<BackingStore> BackingStore::TryAllocateAndPartiallyCommitMemory(
+@@ -323,7 +323,7 @@ std::unique_ptr<BackingStore> BackingStore::TryAllocateAndPartiallyCommitMemory(
    // For accounting purposes, whether a GC was necessary.
    bool did_retry = false;
  

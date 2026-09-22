@@ -5,7 +5,7 @@ Subject: Don't attempt to use rules_android
 
 
 diff --git a/MODULE.bazel b/MODULE.bazel
-index f94686dcb5d94d0bc7c9e5113203450086e8fb36..87eb246bfe8502d5a6c667b395a26c218b81e6f5 100644
+index 10941b7fc8d2e88ec2392f16bb376df882a79f08..b8d4586e547b26125bd78f2fc3b1ffa7370ae371 100644
 --- a/MODULE.bazel
 +++ b/MODULE.bazel
 @@ -14,10 +14,8 @@
@@ -21,16 +21,20 @@ index f94686dcb5d94d0bc7c9e5113203450086e8fb36..87eb246bfe8502d5a6c667b395a26c21
  
  bazel_dep(name = "abseil-cpp", version = "20250127.0", repo_name = "com_google_absl")
  git_override(
-@@ -28,97 +26,6 @@ git_override(
+@@ -27,100 +25,10 @@ git_override(
+ )
  
- bazel_dep(name = "re2", version = "2024-07-02.bcr.1")
  bazel_dep(name = "bazel_skylib", version = "1.7.1")
 -bazel_dep(name = "platforms", version = "0.0.10")
 -bazel_dep(name = "protobuf", version = "31.1", repo_name = "com_google_protobuf")
 +bazel_dep(name = "platforms", version = "1.0.0")
 +bazel_dep(name = "protobuf", version = "33.4")
+ bazel_dep(name = "re2", version = "2024-07-02.bcr.1")
  bazel_dep(name = "rules_python", version = "1.0.0")
 -bazel_dep(name = "rules_android", version = "0.6.6")
+ bazel_dep(name = "rules_cc", version = "0.2.19")
++bazel_dep(name = "zlib")
+ bazel_dep(name = "zstd", version = "1.5.7.bcr.1")
 -
 -remote_android_extensions = use_extension(
 -    "@rules_android//bzlmod_extensions:android_extensions.bzl",

@@ -20,18 +20,11 @@
   ],
   "clang-format.executable": "./bazel-bin/build/deps/formatters/clang-format",
   "bazel.buildifierExecutable": "./bazel-bin/build/deps/formatters/buildifier",
-  "ruff.path": [
-    "./bazel-bin/build/deps/formatters/ruff"
-  ],
+  "ruff.path": ["./bazel-bin/build/deps/formatters/ruff"],
   "rust-analyzer.workspace.discoverConfig": {
-    "command": [
-      "just",
-      "_rust-analyzer"
-    ],
+    "command": ["just", "_rust-analyzer"],
     "progressLabel": "generating rust analyzer config",
-    "filesToWatch": [
-      "BUILD.bazel"
-    ]
+    "filesToWatch": ["BUILD.bazel"]
   },
   "files.associations": {
     "*.inc": "cpp",

@@ -55,7 +55,8 @@ kj_test(
     src = "test.c++",
     deps = [
         ":worker",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-http",
         "@workerd//src/workerd/io",
         "@workerd//src/workerd/io:frankenvalue",

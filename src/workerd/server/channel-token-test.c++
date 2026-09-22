@@ -190,6 +190,20 @@ class MockActorChannel: public IoChannelFactory::ActorChannel {
   }
 };
 
+class MockWorkerStubChannel final: public WorkerStubChannel {
+ public:
+  kj::Own<IoChannelFactory::SubrequestChannel> getEntrypointResolved(
+      kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) override {
+    return kj::refcounted<MockSubrequestChannel>(
+        ServiceTriplet("outer", kj::none, kj::mv(props)), Persistent::NO);
+  }
+
+  kj::Own<IoChannelFactory::ActorClassChannel> getActorClassResolved(
+      kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) override {
+    KJ_UNREACHABLE;
+  }
+};
+
 class MockResolver: public ChannelTokenHandler::Resolver {
  public:
   kj::Own<IoChannelFactory::SubrequestChannel> resolveEntrypoint(kj::StringPtr serviceName,
@@ -518,6 +532,31 @@ KJ_TEST("channel token with nested channel that generates token asynchronously")
   KJ_EXPECT(nestedActor.triplet ==
       ServiceTriplet("async-actor", "AsyncEntry"_kj,
           Frankenvalue::fromJson(kj::str("{\"inner\": \"async\"}"))));
+}
+
+KJ_TEST("resolving channel props keeps promised caps alive") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto paf = kj::newPromiseAndFulfiller<kj::Own<IoChannelFactory::SubrequestChannel>>();
+  kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> caps;
+  caps.add(newPromisedChannel<IoChannelFactory::SubrequestChannel>(kj::mv(paf.promise)));
+
+  auto worker = kj::refcounted<MockWorkerStubChannel>();
+  auto channel = worker->getEntrypoint(kj::none, propsWithCaps(kj::mv(caps)), kj::none);
+  auto resolutionResult = channel->getResolved();
+  auto resolution =
+      KJ_ASSERT_NONNULL(kj::mv(resolutionResult)
+                            .tryGet<kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>>());
+
+  paf.fulfiller->fulfill(kj::refcounted<MockSubrequestChannel>(
+      ServiceTriplet("nested", kj::none, Frankenvalue()), Persistent::NO));
+
+  auto resolved = resolution.wait(waitScope).downcast<MockSubrequestChannel>();
+  auto capTable = resolved->triplet.props.getCapTable();
+  KJ_ASSERT(capTable.size() == 1);
+  auto& nested = KJ_ASSERT_NONNULL(kj::tryDowncast<MockSubrequestChannel>(*capTable[0]));
+  KJ_EXPECT(nested.triplet.serviceName == "nested");
 }
 
 }  // namespace

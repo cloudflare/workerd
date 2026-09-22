@@ -135,6 +135,9 @@ struct Socket {
   # - "example.com:80": Perform a DNS lookup to determine the address, and then listen on it. If
   #     this resolves to multiple addresses, listen on all of them.
   #
+  # UDP sockets currently bind only the first address when a hostname resolves to multiple
+  # addresses. Specify a numeric address when selecting the address family matters.
+  #
   # (These are the formats supported by KJ's parseAddress().)
 
   union {
@@ -145,6 +148,26 @@ struct Socket {
     }
     tcp :group {
       tlsOptions @6 :TlsOptions;
+    }
+
+    udp :group {
+      # Listen for UDP datagrams. Bindings to this service will only support the `connect()`
+      # method, same as `tcp`; `fetch()` will throw an exception. Unlike `tcp`, the delivered
+      # Socket's `readable`/`writable` are value-mode: each chunk read or written is exactly one
+      # datagram (see Socket.protocol).
+      #
+      # Datagrams from a given peer address/port are grouped into one flow, dispatched to one
+      # `connect()` call, until no datagram has been seen from that peer for `idleTimeoutMs`.
+
+      idleTimeoutMs @7 :UInt32 = 30000;
+
+      # Bound, in bytes, on datagrams queued for one flow waiting to be consumed by
+      # `DatagramChannel::receive()`. The listener keeps
+      # draining the kernel socket regardless of whether this flow's queue has room, so one slow
+      # flow does not block delivery to other peers sharing the same socket.
+      # Once `maxPendingBytes` worth of datagrams are queued, further arrivals for this flow are
+      # dropped rather than buffered.
+      maxPendingBytes @8 :UInt32 = 262144;
     }
 
     # TODO(someday): TCP proxy, SMTP, Cap'n Proto, ...
@@ -660,14 +683,16 @@ struct Worker {
 
     container @5 :ContainerOptions;
     # If present, Durable Objects in this namespace have attached containers.
-    # workerd will talk to the configured container engine to start containers for each
-    # Durable Object based on the given image. The Durable Object can access the container via the
-    # ctx.container API. TODO(CloudChamber): add link to docs.
+    # workerd will talk to the configured container engine to start containers for each Durable
+    # Object from a configured default, a runtime-selected image, or a full container snapshot. The
+    # Durable Object can access the container via the ctx.container API.
+    # TODO(CloudChamber): add link to docs.
 
     struct ContainerOptions {
       imageName @0 :Text;
-      # Image name to be used to create the container using supported provider.
-      # By default, we pull the "latest" tag of this image.
+      # Optional default image used when start() does not specify an image or full container
+      # snapshot. An empty value means that no default image is configured.
+      # When imageName omits a tag, Docker uses the "latest" tag.
 
       privileges @1 :ContainerPrivileges;
       # Extra Docker HostConfig privileges applied when creating the container.
@@ -675,6 +700,17 @@ struct Worker {
       # They are not validated or allow-listed. Depending on the values and Docker daemon mode,
       # they can expose arbitrary host devices, disable security profiles, or grant capabilities
       # such as CAP_SYS_ADMIN that may provide host-level access. Only use trusted configuration.
+
+      images @2 :List(NamedImage);
+      # Named image references exposed to the Durable Object through ctx.container.images.
+      # These are optional; Worker code can instead supply an image reference from another source.
+      # When imageName is empty, the local container backend requires start() to specify an image or
+      # full container snapshot.
+
+      struct NamedImage {
+        name @0 :Text;
+        image @1 :Text;
+      }
 
       struct ContainerPrivileges {
         capabilities @0 :List(Text);

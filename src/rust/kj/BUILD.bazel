@@ -1,3 +1,4 @@
+load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
@@ -31,10 +32,7 @@ wd_cc_library(
     hdrs = [
         "ffi.h",
     ],
-    linkstatic = select({
-        "@platforms//os:windows": True,
-        "//conditions:default": False,
-    }),
+    linkstatic = CC_LIBRARY_LINKSTATIC,
     visibility = ["//visibility:public"],
     deps = [
         ":http.rs@cxx",

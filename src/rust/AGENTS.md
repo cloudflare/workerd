@@ -2,7 +2,9 @@
 
 ## OVERVIEW
 
-A dozen or so Rust crates — mostly libraries, plus the `gen-compile-cache` binary — linked into workerd via CXX FFI. No Cargo workspace — entirely Bazel-driven (`wd_rust_crate.bzl` / `wd_rust_binary.bzl`). Clippy pedantic+nursery enabled; `allow-unwrap-in-tests`.
+A dozen or so Rust crates — mostly libraries, plus the `gen-compile-cache` binary — linked into workerd via CXX FFI. No Cargo workspace — entirely Bazel-driven (`wd_rust_crate.bzl` / `wd_rust_binary.bzl`). Clippy pedantic+nursery enabled; `allow-unwrap-in-tests`; `clippy.toml` and `rustfmt.toml` live at the repository root and apply to every crate.
+
+Rust does not have to live here. A crate that belongs to a component may live beside that component's C++, in the same package. Such crates list `srcs` (and `cxx_bridge_hdrs`) explicitly and use the component's C++ namespace for their bridge. This directory holds the crates that have no C++ home of their own, and the in-tree cxx fork.
 
 > **The "CXX FFI" above is the in-tree `src/rust/cxx` fork of [cxx-rs](https://cxx.rs/)** — not stock cxx-rs. It adds deep KJ interoperability upstream lacks: `async` fns become `kj::Promise<T>`, you can return/hold `kj::Own<T>`, `Result<T>` throws `kj::Exception`, and other KJ types cross the boundary (see CXX BRIDGE below). cxx-rs is well represented in LLM training data, so it is easy to "recall" an API that is wrong here — prefer the prior art in these crates and the in-tree CXX sources (especially its `kj-rs` crate) over upstream cxx-rs docs or memory.
 
@@ -29,14 +31,14 @@ _Snapshot — the set drifts as crates come and go; `bazel query //src/rust/...`
 ## CONVENTIONS
 
 - **CXX bridge**: `#[cxx::bridge(namespace = "workerd::rust::<crate>")]` with companion `ffi.c++`/`ffi.h` files
-- **Namespace**: always `workerd::rust::*` except `python-parser` → `edgeworker::rust::python_parser`
+- **Namespace**: `workerd::rust::*` for crates in this directory, except `python-parser` → `edgeworker::rust::python_parser`; a crate living beside C++ uses that C++'s namespace
 - **Errors**: `thiserror` for library crates; `jsg::Error` with `ExceptionType` for JSG-facing crates
 - **JSG resources**: `#[jsg_resource]` on struct + impl block; `#[jsg_method]` auto-converts `snake_case` → `camelCase`; methods with `&self`/`&mut self` become instance methods, methods without a receiver become static methods; `#[jsg_static_constant]` on `const` items exposes read-only numeric constants on both constructor and prototype (name kept as-is, no camelCase); resources integrate with GC via `Traced` + `GarbageCollected`: every named field is traced via `Traced::trace(&self.field, visitor)` and all non-traceable types use no-op `Traced` impls
 - **JSG properties**: two property macros on `#[jsg_resource]` impl blocks — `#[jsg_property(prototype|instance [, name = "..."] [, readonly])]` (registers an accessor; `prototype` maps to `JSG_PROTOTYPE_PROPERTY`, `instance` maps to `JSG_INSTANCE_PROPERTY`; `readonly` is a compile-time check preventing a paired setter; `name = "..."` overrides the JS name; prefer `prototype` in almost all cases), and `#[jsg_inspect_property]` (registered under a unique symbol, invisible to normal enumeration and string-key lookup, surfaced by `node:util` `inspect()`, equivalent to `JSG_INSPECT_PROPERTY`); setter auto-detected from `set_` prefix; read-only when no setter present; getter/setter `.length` and `.name` are set correctly when `spec_compliant_property_attributes` compat flag is enabled
 - **`Traced`**: core tracing trait in `jsg::wrappable`; built-ins include no-op impls for primitives/value types and delegating impls for wrappers/collections (`Option`, `Nullable`, `Vec`, maps/sets, `Cell`, `jsg::Rc`, `jsg::Weak`, `jsg::v8::Global`)
 - **`#[jsg_resource(custom_trace)]`**: suppresses the auto-generated `Traced` impl so the user can write their own; `GarbageCollected` (`memory_name`), `jsg::Type`, `jsg::ToJS`, and `jsg::FromJS` are still generated
 - **Formatting**: `rustfmt.toml` — `group_imports = "StdExternalCrate"`, `imports_granularity = "Item"` (one `use` per import)
-- **Linting**: `just clippy <crate>` — pedantic+nursery; `allow-unwrap-in-tests`
+- **Linting**: `just clippy <crate>` for a crate here, `just clippy <label>` for one elsewhere — pedantic+nursery; `allow-unwrap-in-tests`
 - **Tests**: inline `#[cfg(test)]` modules; JSG tests use `jsg_test::Harness::run_in_context()`. Always run the full `src/rust/...` test suite (`bazel test //src/rust/...`) rather than targeting a single crate — changes in shared crates like `jsg` or `jsg-macros` can break downstream consumers
 - **FFI pointers**: functions receiving raw pointers must be `unsafe fn` (see `jsg/README.md`)
 - **Parameter ordering**: `&Lock` / `&mut Lock` must always be the first parameter in any function that takes a lock (matching the C++ convention where `jsg::Lock&` is always first). This applies to free functions, trait methods, and associated functions (excluding `&self`/`&mut self` receivers which come before `lock`).
@@ -91,7 +93,7 @@ The reverse direction has a stricter, non-optional rule: any `extern "C++"` shim
 
 ## CXX BRIDGE: BUILD WIRING
 
-`wd_rust_crate` (and `wd_rust_binary`) generate, for each `cxx_bridge_src` / `cxx_bridge_srcs` entry, a companion `:<bridge>@cxx` cc_library — the C++ side of the bridge: the cxx-generated `<bridge>.rs.{h,cc}` plus every `**/*.h` in the package (globbed into its `hdrs`). C++ consumers `#include <workerd/rust/<pkg>/<bridge>.rs.h>` and depend on the crate (`//src/rust/<pkg>`); depend on `:<bridge>@cxx` alone if you only need the header. The header include prefix is `workerd/` + the package path with `src/` stripped. Any crate with a bridge auto-gets `//src/rust/cxx:cxx` and `//src/rust/cxx/kj-rs`.
+`wd_rust_crate` (and `wd_rust_binary`) generate, for each `cxx_bridge_src` / `cxx_bridge_srcs` entry, a companion `:<bridge>@cxx` cc_library — the C++ side of the bridge: the cxx-generated `<bridge>.rs.{h,cc}` plus the headers the bridge `include!()`s (`cxx_bridge_hdrs`, by default every `**/*.h` in the package). C++ consumers `#include` the generated header at the package's C++ include path — `<workerd/rust/<pkg>/<bridge>.rs.h>` for `src/rust/<pkg>`, `<workerd/server/<bridge>.rs.h>` for `src/workerd/server` — and depend on the crate; depend on `:<bridge>@cxx` alone if you only need the header. Any crate with a bridge auto-gets `//src/rust/cxx:cxx` and `//src/rust/cxx/kj-rs`.
 
 ### Rust → C++ (calling a C++ function from Rust)
 

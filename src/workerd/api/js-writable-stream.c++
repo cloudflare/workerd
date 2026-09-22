@@ -4,10 +4,12 @@
 
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/js-writable-stream.h>
+#include <workerd/api/streams/standard.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <kj/common.h>
@@ -215,8 +217,8 @@ class TsWriterSink final: public WritableStreamSink {
   }
 
   void abort(kj::Exception reason) override {
-    // Nothing calls this in the RPC wiring (the adapter's revoke path drops the sink and the
-    // destructor handles the abort), but the interface requires it: forward the reason to
+    // Reached when the RPC adapter is dropped or revoked without a clean end() (the destructor
+    // below covers the remaining case of the sink being dropped directly): forward the reason to
     // the writer's abort algorithm.
     KJ_IF_SOME(w, writer) {
       scheduleAbort(kj::mv(w), kj::mv(reason));
@@ -243,6 +245,10 @@ class TsWriterSink final: public WritableStreamSink {
   }
 
   void scheduleAbort(jsg::JsRef<jsg::JsObject> writer, kj::Exception reason) {
+    // Once the last IncomingRequest is gone the IoContext can no longer usefully run JavaScript:
+    // the task would be queued onto a task set that is already being torn down, so the app's
+    // abort algorithm would never observe it. Drop the writer rather than queue unrunnable work.
+    if (!context.hasCurrentIncomingRequest()) return;
     context.addTask(
         context.run([writer = kj::mv(writer), reason = kj::mv(reason)](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
@@ -303,6 +309,31 @@ JsWritableStream JsWritableStream::create(jsg::Lock& js,
   }
   return JsWritableStream(js.alloc<WritableStream>(
       ioContext, kj::mv(sink), kj::mv(observer), maybeHighWaterMark, kj::mv(maybeClosureWaitable)));
+}
+
+JsWritableStream JsWritableStream::fromWrite(
+    jsg::Lock& js, kj::Function<jsg::Promise<void>(jsg::Lock&, jsg::JsValue)> write) {
+  if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+    UnderlyingSink underlyingSink;
+    underlyingSink.write = [write = kj::mv(write)](jsg::Lock& js, jsg::JsValue chunk,
+                               UnderlyingSink::Controller) mutable { return write(js, chunk); };
+    return JsWritableStream(WritableStream::constructor(js, kj::mv(underlyingSink), kj::none));
+  }
+
+  // TypeScript arm
+  auto tsWrite = js.wrapPromiseReturningFunction(js.v8Context(),
+      [write = kj::mv(write)](jsg::Lock& js,
+          const v8::FunctionCallbackInfo<v8::Value>& info) mutable -> jsg::Promise<jsg::Value> {
+    return write(js, jsg::JsValue(info[0])).then(js, [](jsg::Lock& js) {
+      return js.v8Ref<v8::Value>(js.v8Undefined());
+    });
+  });
+
+  auto sinkObj = js.obj();
+  sinkObj.set(js, "write"_kj, jsg::JsValue(tsWrite));
+
+  auto constructor = webstreams::getCppExport(js, "WritableStream");
+  return JsWritableStream(js, constructor.newInstance(js, jsg::JsValue(sinkObj)).addRef(js));
 }
 
 JsWritableStream JsWritableStream::addRef(jsg::Lock& js) {
@@ -514,6 +545,10 @@ void JsWritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
       IoContext& ioctx = IoContext::current();
 
+      // Destination setup can fail synchronously. Resolve it before acquiring a writer changes
+      // the source stream.
+      externalHandler->resolveDestinationAndGetSpanParents();
+
       // NOTE: We're counting on writer acquisition to check that the stream is not locked
       // and other common checks. It's important we don't modify the WritableStream before
       // this call. Acquisition goes through the frozen cppExports internals -- NOT the
@@ -648,18 +683,58 @@ jsg::Promise<void> WritableStreamNativeSink::write(
   KJ_IF_SOME(active, state) {
     KJ_IF_SOME(data, chunkToBytes(js, chunk)) {
       size_t len = data.size();
+      auto& ioContext = IoContext::current();
+
+      // Fast path: complete the write synchronously when the sink can accept the bytes
+      // immediately, settling the hook's promise without an event-loop round trip.
+      // Requires ALL of:
+      // - A non-empty chunk.
+      // - We are not running in an actor. An actor's output gate must serialize with
+      //   writes, and there is no synchronous way to check that the gate is open
+      //   (waitForOutputLocksIfNecessary() returns a promise for every actor).
+      //
+      // The legacy controller's queue-empty condition holds here by construction: the
+      // writeInFlight guard above plus the TS machinery's own serialization mean no other
+      // sink operation can be outstanding. Backpressure accounting lives in the TS
+      // machinery and is driven by this hook promise's settlement, so a synchronously
+      // resolved promise is spec-normal.
+      if (len > 0 && ioContext.getActor() == kj::none &&
+          util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+        bool syncSuccess = false;
+        KJ_TRY {
+          syncSuccess = active.sink->tryWriteSync(data.asPtr());
+        }
+        KJ_CATCH(exception) {
+          // tryWriteSync() may throw when a synchronous write is possible but fails.
+          // Handle it exactly like the asynchronous catch_ below: the sink is no longer
+          // usable; reject the hook's promise so the TS machinery errors the stream.
+          state = kj::none;
+          return js.rejectedPromise<void>(
+              jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js)));
+        }
+        if (syncSuccess) {
+          // The write completed synchronously, so there is no in-flight window: no
+          // writeInFlight to track and no deferred abort() release to settle. We still
+          // inform the observer that a chunk passed through.
+          KJ_IF_SOME(o, observer) {
+            o->onChunkEnqueued(len);
+            o->onChunkDequeued(len);
+          }
+          return js.resolvedPromise();
+        }
+      }
+
       KJ_IF_SOME(o, observer) {
         o->onChunkEnqueued(len);
       }
       writeInFlight = true;
-      auto& ioContext = IoContext::current();
       // Durable Object output gate: the write's bytes must not become externally
       // observable while an output lock is pending, exactly like the legacy internal
       // controller, which stores an output lock with every queued write event and awaits
       // it before touching the sink. The sink reference taken here stays valid for the
       // whole wait+write window: writeInFlight defers any abort()/detach() release to the
-      // write's settlement. The write's I/O runs outside the isolate lock; the copied
-      // bytes ride the promise.
+      // write's settlement, and pipeFrom() refuses to move the sink while it is set. The
+      // write's I/O runs outside the isolate lock; the copied bytes ride the promise.
       kj::Promise<void> promise = nullptr;
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
         promise = lock.then([&sink = *active.sink, data = kj::mv(data)]() mutable {
@@ -798,10 +873,11 @@ jsg::Promise<void> WritableStreamNativeSink::pipeFrom(
   // checks the lock), so a released sink here means the stream was already closed or
   // aborted out from under the pipe.
   auto& active = JSG_REQUIRE_NONNULL(state, TypeError, "This WritableStream has been closed.");
+  // The TS pipe dispatch routes destinations with a write or close queued or in flight to
+  // the JS pump before extracting, so these are unreachable through pipeTo; they keep the
+  // sink's lifetime preconditions self-contained (the in-flight write or end() references
+  // the sink this call would move into the pump).
   JSG_REQUIRE(!writeInFlight, TypeError, "pipeFrom() while a write is in flight.");
-  // The TS pipe dispatch rejects close-queued destinations before extracting, so this is
-  // unreachable through pipeTo; it keeps the sink's lifetime preconditions self-contained
-  // (the in-flight end() references the sink this call would move into the pump).
   JSG_REQUIRE(!closeInFlight, TypeError, "pipeFrom() while a close() is in flight.");
 
   // The TS dispatch converted and validated the options BEFORE extraction (spec getter

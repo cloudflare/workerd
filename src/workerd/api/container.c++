@@ -148,21 +148,15 @@ ExecProcess::ExecProcess(jsg::Lock& js,
   KJ_IF_SOME(signal, abortSignal) {
     constexpr int kSigKill = 9;
 
-    auto& canceler = signal->getCanceler();
-
     // exec() calls throwIfAborted() before sending the RPC, but the signal can still fire while the
     // RPC is in flight, i.e. before this constructor runs in the RPC's continuation. If that
-    // happened, kill the freshly-started process immediately; there's no point registering a
-    // listener.
-    if (canceler.isCanceled()) {
+    // happened, kill the freshly-started process immediately; there's no point registering an
+    // abort action.
+    if (signal->getAborted(js)) {
       sendKill(kSigKill);
     } else {
-      // Hold a strong reference to the canceler so it outlives the AbortSignal's own IoOwn, then register
-      // a listener that kills the process when the signal is later triggered.
-      auto own = kj::addRef(canceler);
-      auto& ref = *own;
-      abortCanceler = ioContext.addObject(kj::mv(own));
-      abortListener.emplace(ref, [self = JSG_THIS_WEAK(js)]() {
+      abortRegistration = signal->addAbortAction(
+          js, [self = JSG_THIS_WEAK(js)](jsg::Lock& js, const kj::Exception&) {
         KJ_IF_SOME(process, self.tryGet()) {
           process.sendKill(kSigKill);
         }
@@ -304,8 +298,9 @@ void ExecProcess::resize(jsg::Lock& js, int cols, int rows) {
 // =======================================================================================
 // Basic lifecycle methods
 
-Container::Container(rpc::Container::Client rpcClient, bool running)
-    : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))) {
+Container::Container(rpc::Container::Client rpcClient, bool running, jsg::Dict<kj::String> images)
+    : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
+      images(kj::mv(images)) {
   if (running) startMonitor();
 }
 
@@ -328,6 +323,18 @@ bool Container::getRunning() {
   return false;
 }
 
+jsg::Dict<kj::String> Container::getImages() const {
+  return jsg::Dict<kj::String>{
+    .fields =
+        KJ_MAP(field, images.fields) {
+    return jsg::Dict<kj::String>::Field{
+      .name = kj::str(field.name),
+      .value = kj::str(field.value),
+    };
+  },
+  };
+}
+
 bool Container::isCurrentMonitor(uint64_t generation) {
   KJ_IF_SOME(monitor, currentMonitor) {
     return monitor->generation == generation;
@@ -339,9 +346,21 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   auto flags = FeatureFlags::get(js);
   JSG_REQUIRE(
       !getRunning(), Error, "start() cannot be called on a container that is already running.");
-  invalidateTcpPortStates();
 
   StartupOptions options = kj::mv(maybeOptions).orDefault({});
+
+  JSG_REQUIRE(options.image == kj::none || options.containerSnapshot == kj::none, TypeError,
+      "`image` and `containerSnapshot` are mutually exclusive.");
+
+  KJ_IF_SOME(image, options.image) {
+    JSG_REQUIRE(image.size() > 0, TypeError, "Container image reference cannot be empty.");
+  }
+  KJ_IF_SOME(containerSnapshot, options.containerSnapshot) {
+    JSG_REQUIRE(
+        containerSnapshot.id.size() > 0, TypeError, "Container snapshot ID cannot be empty.");
+  }
+
+  invalidateTcpPortStates();
 
   auto req = rpcClient->startRequest();
   KJ_IF_SOME(spanContext, IoContext::current().getCurrentTraceSpan().toSpanContext()) {
@@ -365,8 +384,6 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
     }
   }
 
-  JSG_REQUIRE(options.image == kj::none || options.containerSnapshot == kj::none, TypeError,
-      "`image` and `containerSnapshot` are mutually exclusive.");
   if (flags.getWorkerdExperimental()) {
     KJ_IF_SOME(hardTimeoutMs, options.hardTimeout) {
       JSG_REQUIRE(hardTimeoutMs > 0, RangeError, "Hard timeout must be greater than 0");
@@ -466,7 +483,7 @@ void Container::startMonitor() {
   }).fork();
 
   currentMonitor =
-      IoContext::current().addObject(kj::heap<Monitor>(kj::mv(monitor), ++nextMonitorGeneration));
+      IoContext::current().createObject<Monitor>(kj::mv(monitor), ++nextMonitorGeneration);
 }
 
 jsg::Promise<void> Container::setLabels(jsg::Lock& js, jsg::Dict<kj::String> labels) {
@@ -548,7 +565,7 @@ jsg::Promise<Container::DirectorySnapshot> Container::snapshotDirectory(
 }
 
 jsg::Promise<Container::Snapshot> Container::snapshotContainer(
-    jsg::Lock& js, SnapshotOptions options) {
+    jsg::Lock& js, jsg::Optional<SnapshotOptions> options) {
   JSG_REQUIRE(getRunning(), Error,
       "snapshotContainer() cannot be called on a container that is not running.");
 
@@ -557,8 +574,10 @@ jsg::Promise<Container::Snapshot> Container::snapshotContainer(
     spanContext.toCapnp(req.initSpanContext());
   }
 
-  KJ_IF_SOME(name, options.name) {
-    req.setName(name);
+  KJ_IF_SOME(snapshotOptions, options) {
+    KJ_IF_SOME(name, snapshotOptions.name) {
+      req.setName(name);
+    }
   }
 
   return IoContext::current()
@@ -1455,12 +1474,15 @@ class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
         headerTable(headerTable),
         portState(kj::mv(portState)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
-    // At present we have no use for `cfStr`.
-    return IoContext::current().getSubrequestNoChecks(
+  Result newSingleUseClient(
+      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override {
+    // At present we have no use for `cfStr`. This factory creates no operation span.
+    auto client = IoContext::current().getSubrequestNoChecks(
         [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
+      makeUserSpanParent(tracing);
       return kj::heap<TcpPortWorkerInterface>(entropySource, headerTable, portState.addRef());
-    }, {.inHouse = false, .wrapMetrics = false});
+    }, {.inHouse = false, .wrapMetrics = false}, CountSubrequest::YES);
+    return {.client = kj::mv(client), .spanParents = kj::none};
   }
 
  private:
@@ -1487,7 +1509,7 @@ jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
   auto portState = [&]() -> kj::Rc<TcpPortState> {
     if (util::Autogate::isEnabled(util::AutogateKey::CONTAINER_TUNNEL_REUSE)) {
       if (tcpPortStates == kj::none) {
-        tcpPortStates = ioctx.addObject(kj::heap<kj::HashMap<int, kj::Rc<TcpPortState>>>());
+        tcpPortStates = ioctx.createObject<kj::HashMap<int, kj::Rc<TcpPortState>>>();
       }
       auto& states = *KJ_ASSERT_NONNULL(tcpPortStates);
 

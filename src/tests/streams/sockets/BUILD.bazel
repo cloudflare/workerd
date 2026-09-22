@@ -1,0 +1,36 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("//:build/wd_test.bzl", "wd_test")
+
+# The sockets streams suite runs the same test modules under two
+# configs: sockets-cpp against the C++ implementation, sockets-ts
+# against the TypeScript implementation. A sidecar provides the echo
+# and greet TCP servers.
+
+js_binary(
+    name = "echo-server",
+    entry_point = "echo-server.js",
+)
+
+sockets_suite_srcs = glob(["*.js"]) + ["sockets-modules.capnp"]
+
+wd_test(
+    src = "sockets-cpp.wd-test",
+    args = ["--experimental"],
+    data = sockets_suite_srcs,
+    sidecar = "echo-server",
+    sidecar_port_bindings = [
+        "STREAMS_ECHO_PORT",
+        "STREAMS_GREET_PORT",
+    ],
+)
+
+wd_test(
+    src = "sockets-ts.wd-test",
+    args = ["--experimental"],
+    data = sockets_suite_srcs,
+    sidecar = "echo-server",
+    sidecar_port_bindings = [
+        "STREAMS_ECHO_PORT",
+        "STREAMS_GREET_PORT",
+    ],
+)

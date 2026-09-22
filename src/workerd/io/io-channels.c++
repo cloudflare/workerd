@@ -8,7 +8,8 @@
 
 namespace workerd {
 
-IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(kj::Date createdAt) {
+IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(
+    kj::Date createdAt, ActorRetryGateEnabled retryGateEnabled) {
   static thread_local auto generator = [] {
     uint64_t seed;
     getEntropy(kj::asBytes(seed));
@@ -20,6 +21,7 @@ IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(kj
     .nonce = distribution(generator),
     .createdAt = createdAt,
     .isRetry = IsActorRetry::NO,
+    .retryGateEnabled = retryGateEnabled,
   };
 }
 
@@ -184,9 +186,10 @@ resolveCap(kj::Own<Frankenvalue::CapTableEntry> cap) {
         return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
       }
       KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>) {
-        return promise.then([](kj::Own<IoChannelFactory::TokenizableChannel> channel) {
+        return promise
+            .then([](kj::Own<IoChannelFactory::TokenizableChannel> channel) {
           return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
-        });
+        }).attach(kj::mv(cap));
       }
     }
     KJ_UNREACHABLE;

@@ -1,0 +1,41 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the LEGACY (unflagged) identity streams suite against the C++
+# implementation: the regression guard for the original behaviors that
+# workers with compat dates predating the semantic flags still depend on.
+# identity-cpp.wd-test pins those flags ON and asserts the modern behaviors;
+# this config deliberately omits them all and asserts the pre-flag
+# behaviors:
+# - streams_byob_reader_detaches_buffer OFF: BYOB fills happen in place in
+#   the caller's (non-detached) buffer.
+# - internal_stream_byob_return_view OFF: a BYOB read at EOF resolves with
+#   value undefined.
+# - internal_writable_stream_abort_clears_queue OFF: abort() waits for an
+#   in-flight write instead of clearing it.
+# - workers_api_getters_setters_on_prototype OFF: readable/writable are
+#   enumerable own data properties on each instance.
+# - capture_async_api_throws OFF: writing an invalid chunk type throws
+#   synchronously.
+# - set_tostring_tag OFF: instances stringify as [object Object].
+#
+# C++ only: the TypeScript implementation hard-codes the modern behaviors
+# regardless of these flags, so there is no TS legacy cell. The BUILD rule
+# disables the @all-compat-flags variant — at the 2999-12-31 date every one
+# of these flags turns on, which would contradict this config's purpose.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-identity-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "legacy-api-surface", esModule = embed "legacy-api-surface.js"),
+          (name = "legacy-invalid-chunks", esModule = embed "legacy-invalid-chunks.js"),
+          (name = "legacy-byob", esModule = embed "legacy-byob.js"),
+          (name = "legacy-abort", esModule = embed "legacy-abort.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

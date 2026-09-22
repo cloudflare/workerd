@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Legacy cell for the 2022-11-30..2024-12-16 window (C++ only): the
+# standard constructor flags are on, but fixup-transform-stream-backpressure
+# and encoder_stream_spec_compliant_backpressure are off — TransformStream
+# applies no effective backpressure, so every write settles without read
+# demand. @all-compat-flags disabled in the BUILD rule.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-encoding-cpp-legacy-bp",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-bp-main.js"),
+          (name = "legacy-backpressure-original", esModule = embed "legacy-backpressure-original.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+        ],
+      )
+    ),
+  ],
+);

@@ -18,6 +18,7 @@ import {
   COMPATIBILITY_FLAGS,
   type CompatibilityFlags,
   IS_SECOND_VALIDATION_PHASE,
+  PYODIDE_VERSION,
 } from 'pyodide-internal:metadata';
 import {
   invalidateCaches,
@@ -34,7 +35,10 @@ import {
   maybeSerializeJsModule,
   type SerializedJsModule,
 } from 'pyodide-internal:serializeJsModule';
-import { PyodideVersion } from 'pyodide-internal:const';
+import {
+  PyodideVersion,
+  type PyodideVersionType,
+} from 'pyodide-internal:const';
 
 // A handle is the pointer into the linear memory returned by dlopen. Multiple dlopens will return
 // multiple pointers.
@@ -42,12 +46,27 @@ type DsoHandles = {
   [name: string]: { handles: number[] };
 };
 
+type ClosureAllocEvent = {
+  name: 'closureAlloc';
+  closure: number;
+  index: number;
+};
+type ClosureFreeEvent = { name: 'closureFree'; closure: number; index: number };
+type ClosurePrepEvent = {
+  name: 'closurePrep';
+  closure: number;
+  index: number;
+  sig: string;
+};
+type LoadEvent =
+  string | ClosureAllocEvent | ClosureFreeEvent | ClosurePrepEvent;
+
 // This is the info about Dsos that we record in getMemoryPatched. Namely the load order and where
 // their metadata is allocated. It would be natural to also have dsoHandles in here, but we don't
 // need a global variable to calculate dsoHandles since it is calculable from the information that
 // Emscripten stores in Module.LDSO (see recordDsoHandles).
 type DsoLoadInfo = {
-  readonly loadOrder: string[];
+  readonly loadOrder: LoadEvent[];
   readonly soMemoryBases: { [name: string]: number };
   readonly soTableBases?: { [name: string]: number };
 };
@@ -62,14 +81,36 @@ type OldSnapshotMeta = DsoHandles & {
   readonly version?: undefined;
 };
 
+type Pyodide314X = (typeof PyodideVersion)['V314_0_4' | 'V314_0_6'];
+
+type PerVersionSettings =
+  | {
+      pyodideVersion: Exclude<PyodideVersionType, Pyodide314X>;
+    }
+  | {
+      pyodideVersion: Pyodide314X;
+      // Whether a function table slot was reserved for the Python call trampoline before loading
+      // dynamic libraries. See RESERVE_TRAMPOLINE_POINTER.
+      reserveTrampolinePointer: boolean;
+    };
+
+// Old snapshots won't have added fields so we have to fill them in
+// fillDefaultPerVersionSettings().
+type WirePerVersionSettings = Partial<PerVersionSettings> & {
+  pyodideVersion: PyodideVersionType;
+};
+
 type LoadedSnapshotSettings = {
   readonly snapshotType: ArtifactBundler.SnapshotType;
   readonly compatFlags: CompatibilityFlags;
+  readonly perVersionSettings: PerVersionSettings;
 };
 
 type SnapshotSettings = {
   readonly baselineSnapshot?: boolean;
-} & Partial<LoadedSnapshotSettings>;
+} & Partial<Omit<LoadedSnapshotSettings, 'perVersionSettings'>> & {
+    perVersionSettings?: WirePerVersionSettings;
+  };
 
 // The new wire format, with additional information about the hiwire state, the order that dsos were
 // loaded in, and their memory bases. We also moved settings out of the dsoHandles.
@@ -129,6 +170,24 @@ const CREATED_SNAPSHOT_META: Required<DsoLoadInfo> = {
   soTableBases: {},
   loadOrder: [],
 };
+// Whether to reserve a function table slot for the Python call trampoline before loading dynamic
+// libraries (see maybeReserveTrampolinePointer). This is only needed for Pyodide 0.28.2, but by
+// mistake the existing 314.0.4 and 314.0.6 snapshots were made with the slot reserved, so when
+// restoring one of them we must do the same or the function table layout won't match. Snapshots
+// record whether they reserved it so that new ones don't have to.
+const RESERVE_TRAMPOLINE_POINTER: boolean = ((): boolean => {
+  if (PYODIDE_VERSION === PyodideVersion.V0_28_2) {
+    return true;
+  }
+  const settings = LOADED_SNAPSHOT_META?.settings.perVersionSettings;
+  if (
+    settings?.pyodideVersion === PyodideVersion.V314_0_4 ||
+    settings?.pyodideVersion === PyodideVersion.V314_0_6
+  ) {
+    return settings.reserveTrampolinePointer;
+  }
+  return false;
+})();
 if (LOADED_SNAPSHOT_META) {
   // Make sure we include the soMemoryBases and loadOrder from the baseline snapshot when we are
   // generating stacked snapshots.
@@ -240,7 +299,7 @@ function getMemoryPatched(
   libPath: string,
   size: number
 ): number {
-  if (Module.API.version === PyodideVersion.V0_26_0a2) {
+  if (PYODIDE_VERSION === PyodideVersion.V0_26_0a2) {
     return Module.getMemory(size);
   }
   // Sometimes the module is loaded once by path and once by name, in either order. I'm not really
@@ -281,6 +340,51 @@ function getMemoryPatched(
     soTableBases[libName] = Module.wasmTable.length;
     return memoryBase;
   }
+}
+
+function recordFfiClosureAlloc(closure: number, index: number): void {
+  const { loadOrder } = CREATED_SNAPSHOT_META;
+  loadOrder.push({ name: 'closureAlloc', closure, index });
+}
+
+function recordFfiClosureFree(closure: number, index: number): void {
+  const { loadOrder } = CREATED_SNAPSHOT_META;
+  loadOrder.push({ name: 'closureFree', closure, index });
+}
+
+function recordFfiPrepClosureLoc(
+  closure: number,
+  index: number,
+  sig: string
+): void {
+  const { loadOrder } = CREATED_SNAPSHOT_META;
+  loadOrder.push({ name: 'closurePrep', closure, index, sig });
+}
+
+function handleFfiClosureAlloc(
+  Module: Module,
+  { index }: ClosureAllocEvent
+): void {
+  const newIndex = Module.getEmptyTableSlot();
+  if (newIndex !== index) {
+    throw new PythonWorkersInternalError(
+      `Error processing closure alloc: expected index ${index}, got index ${newIndex}`
+    );
+  }
+}
+
+function handleFfiClosureFree(
+  Module: Module,
+  { index }: ClosureFreeEvent
+): void {
+  Module.freeTableIndexes.push(index);
+}
+
+function handleFfiPrepClosureLoc(
+  _Module: Module,
+  _event: ClosurePrepEvent
+): void {
+  throw new PythonWorkersInternalError('Not implemented: ffi prep closure loc');
 }
 
 function loadDynlibFromTarFs(
@@ -359,13 +463,32 @@ function preloadDynamicLibs026(Module: Module): void {
  * pointers that point into the dylib symbols work correctly.
  * Load the dynamic libraries in loadOrder. Mostly logic dealing with paths.
  */
-function preloadDynamicLibsMain(Module: Module, loadOrder: string[]): void {
+function preloadDynamicLibsMain(
+  Module: Module,
+  loadOrder: LoadEvent[] | undefined
+): void {
+  if (!loadOrder) {
+    return;
+  }
   const sitePackages = Module.FS.sessionSitePackages + '/';
   const sitePackagesRoot = VIRTUALIZED_DIR.getSitePackagesRoot();
   const dynlibRoot = VIRTUALIZED_DIR.getDynlibRoot();
   const dynlibPath = '/usr/lib/';
   const userBundleNames = MetadataReader.getNames();
   for (let path of loadOrder) {
+    if (typeof path === 'object') {
+      switch (path.name) {
+        case 'closureAlloc':
+          handleFfiClosureAlloc(Module, path);
+          continue;
+        case 'closureFree':
+          handleFfiClosureFree(Module, path);
+          continue;
+        case 'closurePrep':
+          handleFfiPrepClosureLoc(Module, path);
+          continue;
+      }
+    }
     let root = sitePackagesRoot;
     let base = '';
     if (path.startsWith(sitePackages)) {
@@ -392,17 +515,9 @@ function preloadDynamicLibsMain(Module: Module, loadOrder: string[]): void {
   }
 }
 
-function preloadDynamicLibs(Module: Module): void {
-  if (Module.API.version === PyodideVersion.V0_26_0a2) {
-    // In 0.26.0a2 we need to preload dynamic libraries even if we aren't restoring a snapshot.
-    preloadDynamicLibs026(Module);
-    return;
-  }
-  //
-  const loadOrder = LOADED_SNAPSHOT_META?.loadOrder;
-  if (!loadOrder) {
-    // In newer versions we only need to do the preloading if there is a snapshot to restore.
-    return;
+function maybeReserveTrampolinePointer(Module: Module): Disposable {
+  if (!RESERVE_TRAMPOLINE_POINTER) {
+    return { [Symbol.dispose](): void {} };
   }
   // In Pyodide 0.28 we switched from using top level EM_JS to initialize the CountArgs function
   // pointer to using an initializer to work around a regression in Emscripten 4.0.3 and 4.0.4. We
@@ -415,8 +530,21 @@ function preloadDynamicLibs(Module: Module): void {
   // CountArgsPointer and after loading dynamic libraries, we put it in the free list so it will be
   // used at the right moment.
   const PyEMCountArgsPtr = Module.getEmptyTableSlot();
-  preloadDynamicLibsMain(Module, loadOrder);
-  Module.freeTableIndexes.push(PyEMCountArgsPtr);
+  return {
+    [Symbol.dispose](): void {
+      Module.freeTableIndexes.push(PyEMCountArgsPtr);
+    },
+  };
+}
+
+function preloadDynamicLibs(Module: Module): void {
+  if (PYODIDE_VERSION === PyodideVersion.V0_26_0a2) {
+    // In 0.26.0a2 we need to preload dynamic libraries even if we aren't restoring a snapshot.
+    preloadDynamicLibs026(Module);
+    return;
+  }
+  using _reserved = maybeReserveTrampolinePointer(Module);
+  preloadDynamicLibsMain(Module, LOADED_SNAPSHOT_META?.loadOrder);
 }
 
 /**
@@ -624,15 +752,29 @@ function makeLinearMemorySnapshot(
   const dsoHandles = recordDsoHandles(Module);
   let hiwire: SnapshotConfig | undefined;
   const jsModuleNames: Set<string> = new Set();
-  if (Module.API.version !== PyodideVersion.V0_26_0a2) {
+  const pyodideVersion = PYODIDE_VERSION;
+  if (pyodideVersion !== PyodideVersion.V0_26_0a2) {
     hiwire = Module.API.serializeHiwireState(
       getHiwireSerializer(customSerializedObjects, jsModuleNames)
     );
+  }
+  let perVersionSettings: PerVersionSettings;
+  if (
+    pyodideVersion === PyodideVersion.V314_0_4 ||
+    pyodideVersion === PyodideVersion.V314_0_6
+  ) {
+    perVersionSettings = {
+      pyodideVersion,
+      reserveTrampolinePointer: RESERVE_TRAMPOLINE_POINTER,
+    };
+  } else {
+    perVersionSettings = { pyodideVersion };
   }
   const settings: SnapshotSettings = {
     baselineSnapshot: snapshotType === 'baseline',
     snapshotType,
     compatFlags: COMPATIBILITY_FLAGS,
+    perVersionSettings,
   };
   return encodeSnapshot(Module.HEAP8, {
     version: 1,
@@ -665,6 +807,45 @@ function encodeSnapshot(heap: Uint8Array, meta: SnapshotMeta): Uint8Array {
   header[3] = jsonByteLength;
   toUpload.subarray(snapshotOffset).set(heap);
   return toUpload;
+}
+
+function getFallbackPerVersionSettings(): PerVersionSettings {
+  if (
+    PYODIDE_VERSION !== '0.26.0a2' &&
+    PYODIDE_VERSION !== '0.28.2' &&
+    PYODIDE_VERSION !== '314.0.4' &&
+    PYODIDE_VERSION !== '314.0.6'
+  ) {
+    throw new PythonWorkersInternalError(
+      'New snapshots should always have PerVersionSettings'
+    );
+  }
+  if (PYODIDE_VERSION === '314.0.4' || PYODIDE_VERSION === '314.0.6') {
+    return {
+      pyodideVersion: PYODIDE_VERSION,
+      // Old 3.14.x snapshots reserveTrampolinePointer, new ones don't.
+      reserveTrampolinePointer: true,
+    };
+  }
+  return { pyodideVersion: PYODIDE_VERSION };
+}
+
+function fillDefaultPerVersionSettings(
+  settings: WirePerVersionSettings
+): PerVersionSettings {
+  if (
+    settings.pyodideVersion === '314.0.4' ||
+    settings.pyodideVersion === '314.0.6'
+  ) {
+    return {
+      pyodideVersion: settings.pyodideVersion,
+      reserveTrampolinePointer: settings.reserveTrampolinePointer ?? true,
+    };
+  } else {
+    return {
+      pyodideVersion: settings.pyodideVersion,
+    };
+  }
 }
 
 /**
@@ -714,6 +895,7 @@ function decodeSnapshot(
         snapshotType: 'baseline',
         compatFlags: {},
         ...meta.settings,
+        perVersionSettings: getFallbackPerVersionSettings(),
       },
       jsModuleNames: [],
       ...extras,
@@ -726,6 +908,9 @@ function decodeSnapshot(
       ...meta.settings,
       snapshotType: meta.settings.snapshotType ?? 'baseline',
       compatFlags: meta.settings.compatFlags ?? {},
+      perVersionSettings: meta.settings.perVersionSettings
+        ? fillDefaultPerVersionSettings(meta.settings.perVersionSettings)
+        : getFallbackPerVersionSettings(),
     },
   };
 }
@@ -778,6 +963,9 @@ function checkSnapshotType(snapshotType: string): void {
 export function maybeRestoreSnapshot(Module: Module): void {
   Module.noInitialRun = isRestoringSnapshot();
   Module.getMemoryPatched = getMemoryPatched;
+  Module.recordFfiClosureAlloc = recordFfiClosureAlloc;
+  Module.recordFfiClosureFree = recordFfiClosureFree;
+  Module.recordFfiPrepClosureLoc = recordFfiPrepClosureLoc;
   // Make sure memory is large enough
   Module.growMemory(LOADED_SNAPSHOT_META?.snapshotSize ?? 0);
   enterJaegerSpan('preload_dynamic_libs', () => {
@@ -793,6 +981,11 @@ export function maybeRestoreSnapshot(Module: Module): void {
   const { snapshotSize, snapshotOffset, snapshotReader, settings } =
     LOADED_SNAPSHOT_META;
   checkSnapshotType(settings.snapshotType);
+  if (settings.perVersionSettings.pyodideVersion !== PYODIDE_VERSION) {
+    throw new PythonWorkersInternalError(
+      `Received snapshot for version ${settings.perVersionSettings.pyodideVersion}, expected version ${PYODIDE_VERSION}`
+    );
+  }
 
   Module.growMemory(snapshotSize);
   snapshotReader.readMemorySnapshot(snapshotOffset, Module.HEAP8);
@@ -845,7 +1038,7 @@ export function maybeCollectDedicatedSnapshot(
     return;
   }
 
-  if (Module.API.version == PyodideVersion.V0_26_0a2) {
+  if (PYODIDE_VERSION == PyodideVersion.V0_26_0a2) {
     // 0.26.0a2 does not support serialisation of the hiwire state, so it cannot support dedicated
     // snapshots.
     throw new PythonWorkersInternalError(
@@ -886,8 +1079,8 @@ export function finalizeBootstrap(
 ): void {
   Module.API.config._makeSnapshot =
     IS_CREATING_SNAPSHOT &&
-    Module.API.version !== PyodideVersion.V0_26_0a2 &&
-    Module.API.version !== PyodideVersion.V0_28_2;
+    PYODIDE_VERSION !== PyodideVersion.V0_26_0a2 &&
+    PYODIDE_VERSION !== PyodideVersion.V0_28_2;
   enterJaegerSpan('finalize_bootstrap', () => {
     Module.API.finalizeBootstrap(
       LOADED_SNAPSHOT_META?.hiwire,

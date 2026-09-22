@@ -22,6 +22,10 @@ function getRandomDurableObjectName(name) {
 // before testing the behaviour with your container.
 //
 export class DurableObjectExample extends DurableObject {
+  testImages(expected) {
+    assert.deepStrictEqual(this.ctx.container.images, expected);
+  }
+
   async testExitCode() {
     const container = this.ctx.container;
     if (container.running) {
@@ -117,6 +121,8 @@ export class DurableObjectExample extends DurableObject {
     const monitor = container.monitor().catch((_err) => {});
 
     await this.waitUntilContainerIsHealthy();
+    const info = await container.inspect();
+    assert.match(info.image, /container-client-test(?::latest)?$/);
 
     await container.destroy();
 
@@ -399,6 +405,38 @@ export class DurableObjectExample extends DurableObject {
     await monitor;
     assert.strictEqual(container.running, false);
   }
+
+  // Runs a long-lived process wired to an AbortSignal that this Durable Object received over
+  // RPC (from the test driver) and returns the process exit code. This exercises exec()'s
+  // abort registration against a *deserialized* signal: the registration itself must arm the
+  // signal's RPC abort subscription, or the remote abort would never be delivered here.
+  async execWithReceivedSignal(signal) {
+    const container = this.ctx.container;
+    if (!container.running) {
+      container.start();
+    }
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const proc = await container.exec(['sh', '-lc', 'sleep 60'], {
+      signal,
+      stdout: 'ignore',
+    });
+    this.#receivedSignalExecStarted = true;
+    const exitCode = await proc.exitCode;
+
+    await container.destroy();
+    await monitor;
+    return exitCode;
+  }
+
+  // Polled by the test driver so it only aborts once the exec is actually running (aborting
+  // earlier would make exec() itself fail fast instead of killing the process).
+  async receivedSignalExecStarted() {
+    return this.#receivedSignalExecStarted;
+  }
+
+  #receivedSignalExecStarted = false;
 
   async testSetInactivityTimeout(timeout) {
     const container = this.ctx.container;
@@ -713,6 +751,29 @@ export class DurableObjectExample extends DurableObject {
     await this.waitUntilContainerIsHealthy();
     await container.destroy();
     await restoreMonitor;
+  }
+
+  async testImageAlias() {
+    const container = this.ctx.container;
+    const image = 'cloudflare/debian-trixie';
+
+    container.start({
+      enableInternet: true,
+      image,
+      entrypoint: [
+        'node',
+        '-e',
+        "require('http').createServer((_, res) => res.end('Hello World!')).listen(8080)",
+      ],
+    });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const info = await container.inspect();
+    assert.strictEqual(info.image, 'cloudflare/debian-trixie');
+
+    await container.destroy();
+    await monitor;
   }
 
   async testInstanceTypeValidation() {
@@ -1316,7 +1377,7 @@ export class DurableObjectExample extends DurableObject {
     await monitor;
   }
 
-  async createContainerSnapshotForTransfer() {
+  async createContainerSnapshotForTransfer(startOptions = {}) {
     const container = this.ctx.container;
     if (container.running) {
       const monitor = container.monitor().catch((_err) => {});
@@ -1324,7 +1385,7 @@ export class DurableObjectExample extends DurableObject {
       await monitor;
     }
 
-    container.start({ enableInternet: true });
+    container.start({ enableInternet: true, ...startOptions });
     const monitor = container.monitor().catch((_err) => {});
     await this.waitUntilContainerIsHealthy();
 
@@ -1831,7 +1892,7 @@ export class DurableObjectExample extends DurableObject {
     await container.destroy();
   }
 
-  async testSnapshotRoundTrip() {
+  async testSnapshotRoundTrip(startOptions = {}) {
     const container = this.ctx.container;
     if (container.running) {
       const monitor = container.monitor().catch((_err) => {});
@@ -1841,7 +1902,7 @@ export class DurableObjectExample extends DurableObject {
 
     assert.strictEqual(container.running, false);
 
-    container.start({ enableInternet: true });
+    container.start({ enableInternet: true, ...startOptions });
     const monitor = container.monitor().catch((_err) => {});
     await this.waitUntilContainerIsHealthy();
 
@@ -1867,6 +1928,7 @@ export class DurableObjectExample extends DurableObject {
 
     container.start({
       enableInternet: true,
+      ...startOptions,
       directorySnapshots: [{ snapshot }],
     });
     const monitor2 = container.monitor().catch((_err) => {});
@@ -2404,7 +2466,7 @@ export class DurableObjectExample extends DurableObject {
       });
     assert.equal(tmpWriteResp.status, 200);
 
-    const snapshot = await container.snapshotContainer({});
+    const snapshot = await container.snapshotContainer();
     assert.strictEqual(typeof snapshot.id, 'string');
     assert.ok(snapshot.id.length > 0, 'snapshot id should be non-empty');
     assert.ok(snapshot.size > 0, 'snapshot size should be > 0');
@@ -2862,6 +2924,95 @@ export class TestService extends WorkerEntrypoint {
 
 export class DurableObjectExample2 extends DurableObjectExample {}
 
+export class SnapshotRestoreWithDifferentDefaultDurableObject extends DurableObjectExample {}
+
+function assertInvalidExplicitStartupSources(container) {
+  assert.throws(() => container.start({ image: '' }), {
+    message: 'Container image reference cannot be empty.',
+  });
+  assert.throws(() => container.start({ containerSnapshot: { id: '' } }), {
+    message: 'Container snapshot ID cannot be empty.',
+  });
+}
+
+export class NamedImagesOnlyDurableObject extends DurableObjectExample {
+  async testExplicitImageAndSnapshots() {
+    const container = this.ctx.container;
+    assert.deepStrictEqual(container.images, {
+      app: 'cloudflare/workerd/container-client-test',
+    });
+    const startOptions = { image: container.images.app };
+
+    await this.testSnapshotRoundTrip(startOptions);
+    const containerSnapshot =
+      await this.createContainerSnapshotForTransfer(startOptions);
+    await this.restoreTransferredContainerSnapshot(containerSnapshot);
+  }
+}
+
+export class EmptyContainerDurableObject extends DurableObjectExample {
+  async testExplicitImage() {
+    const container = this.ctx.container;
+    assert.deepStrictEqual(container.images, {});
+    assertInvalidExplicitStartupSources(container);
+
+    container.start({
+      enableInternet: true,
+      image: 'cloudflare/workerd/container-client-test',
+    });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    await container.destroy();
+    await monitor;
+  }
+}
+
+export const testImages = {
+  async test(_ctrl, env) {
+    const cases = [
+      [
+        env.MY_CONTAINER,
+        {
+          api: 'registry.example.com/api@sha256:' + '1'.repeat(64),
+          worker: 'registry.example.com/worker@sha256:' + '2'.repeat(64),
+        },
+      ],
+      [
+        env.MY_DUPLICATE_CONTAINER,
+        {
+          tools: 'registry.example.com/tools@sha256:' + '3'.repeat(64),
+        },
+      ],
+    ];
+
+    for (const [namespace, expected] of cases) {
+      const id = namespace.idFromName(getRandomDurableObjectName('testImages'));
+      await namespace.get(id).testImages(expected);
+    }
+  },
+};
+
+export const testNamedImagesOnlyExplicitImageAndSnapshots = {
+  async test(_ctrl, env) {
+    const id = env.MY_NAMED_IMAGES_ONLY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testNamedImagesOnlyExplicitImageAndSnapshots')
+    );
+    await env.MY_NAMED_IMAGES_ONLY_CONTAINER.get(
+      id
+    ).testExplicitImageAndSnapshots();
+  },
+};
+
+export const testEmptyContainerExplicitImage = {
+  async test(_ctrl, env) {
+    const id = env.MY_EMPTY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testEmptyContainerExplicitImage')
+    );
+    await env.MY_EMPTY_CONTAINER.get(id).testExplicitImage();
+  },
+};
+
 // Test basic container status
 export const testStatus = {
   async test(_ctrl, env) {
@@ -2894,6 +3045,27 @@ export const testExec = {
     );
     const stub = env.MY_CONTAINER.get(id);
     await stub.testExec();
+  },
+};
+
+// An AbortSignal passed into the Durable Object over RPC kills an exec()'d process when
+// aborted from the caller's context.
+export const testExecRemoteAbortSignal = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testExecRemoteAbortSignal')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+
+    const ac = new AbortController();
+    const pending = stub.execWithReceivedSignal(ac.signal);
+    while (!(await stub.receivedSignalExecStarted())) {
+      await scheduler.wait(100);
+    }
+    ac.abort(new Error('remote-abort'));
+
+    // A process killed by SIGKILL (9) reports exit code 128 + 9 = 137.
+    assert.strictEqual(await pending, 137);
   },
 };
 
@@ -3533,6 +3705,31 @@ export const testContainerSnapshotCrossDoRestore = {
 
     const snapshot = await source.createContainerSnapshotForTransfer();
     assert.strictEqual(snapshot.name, 'cross-do-container-snapshot');
+
+    await target.restoreTransferredContainerSnapshot(snapshot);
+  },
+};
+
+// A full container snapshot supplies its own image, regardless of the restoring DO's configured
+// default.
+export const testContainerSnapshotRestoreWithDifferentDefaultImage = {
+  async test(_ctrl, env) {
+    const sourceId = env.MY_EMPTY_CONTAINER.idFromName(
+      getRandomDurableObjectName(
+        'testContainerSnapshotRestoreWithDifferentDefaultImage-source'
+      )
+    );
+    const targetId = env.MY_DIFFERENT_DEFAULT_CONTAINER.idFromName(
+      getRandomDurableObjectName(
+        'testContainerSnapshotRestoreWithDifferentDefaultImage-target'
+      )
+    );
+
+    const source = env.MY_EMPTY_CONTAINER.get(sourceId);
+    const target = env.MY_DIFFERENT_DEFAULT_CONTAINER.get(targetId);
+    const snapshot = await source.createContainerSnapshotForTransfer({
+      image: 'cloudflare/workerd/container-client-test',
+    });
 
     await target.restoreTransferredContainerSnapshot(snapshot);
   },

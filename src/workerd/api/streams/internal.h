@@ -132,7 +132,9 @@ class ReadableStreamInternalController: public ReadableStreamController, public 
   class PipeLocked: public PipeController {
    public:
     static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
-    PipeLocked(kj::Ptr<ReadableStreamInternalController> inner): inner(kj::mv(inner)) {}
+    PipeLocked(kj::Ptr<ReadableStreamInternalController> inner, IoOwn<kj::Canceler> pumpCanceler)
+        : inner(kj::mv(inner)),
+          pumpCanceler(kj::mv(pumpCanceler)) {}
 
     bool isClosed() override;
 
@@ -144,6 +146,10 @@ class ReadableStreamInternalController: public ReadableStreamController, public 
 
     kj::Maybe<kj::Promise<void>> tryPumpTo(kj::Ptr<WritableStreamSink> sink, bool end) override;
 
+    void cancelPump(const kj::Exception& reason) {
+      pumpCanceler->cancel(reason);
+    }
+
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
     kj::Ptr<PipeController> getPtr() override {
@@ -152,6 +158,7 @@ class ReadableStreamInternalController: public ReadableStreamController, public 
 
    private:
     kj::Ptr<ReadableStreamInternalController> inner;
+    IoOwn<kj::Canceler> pumpCanceler;
   };
 
   kj::Weak<ReadableStream> owner;
@@ -210,7 +217,7 @@ class WritableStreamInternalController: public WritableStreamController {
       kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
       kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none)
       : state(State::create<IoOwn<Writable>>(
-            IoContext::current().addObject(kj::heap<Writable>(kj::mv(writable))))),
+            IoContext::current().createObject<Writable>(kj::mv(writable)))),
         observer(kj::mv(observer)),
         maybeHighWaterMark(maybeHighWaterMark),
         maybeClosureWaitable(kj::mv(maybeClosureWaitable)) {}
@@ -289,8 +296,13 @@ class WritableStreamInternalController: public WritableStreamController {
   void doClose(jsg::Lock& js);
   void doError(jsg::Lock& js, jsg::JsValue reason);
   void ensureWriting(jsg::Lock& js);
-  jsg::Promise<void> writeLoop(jsg::Lock& js, IoContext& ioContext);
-  jsg::Promise<void> writeLoopAfterFrontOutputLock(jsg::Lock& js);
+
+  // `syncDepth` counts consecutive synchronous loop continuations (writes completed via
+  // tryWriteSync() and zero-length writes), bounding the recursion through
+  // writeLoop() -> writeLoopAfterFrontOutputLock(). When the budget is exhausted, the next
+  // write takes the asynchronous path, which resets the depth.
+  jsg::Promise<void> writeLoop(jsg::Lock& js, IoContext& ioContext, size_t syncDepth = 0);
+  jsg::Promise<void> writeLoopAfterFrontOutputLock(jsg::Lock& js, size_t syncDepth = 0);
 
   void drain(jsg::Lock& js, jsg::JsValue reason);
   void finishClose(jsg::Lock& js);

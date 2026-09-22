@@ -19,6 +19,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <kj-rs-io/async-io.h>
 #ifdef __linux__
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -38,7 +39,6 @@
 #include <windows.h>
 #include <winsock2.h>
 
-#include <kj/async-win32.h>
 #include <kj/win32-api-version.h>
 #include <kj/windows-sanity.h>
 
@@ -48,17 +48,6 @@
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <unistd.h>
-
-#include <kj/async-unix.h>
-#endif
-
-#if __linux__
-#include <sys/inotify.h>
-#elif __APPLE__ || __FreeBSD__ || __OpenBSD__ || __NetBSD__ || __DragonFly__
-#define WORKERD_USE_KQUEUE_FOR_FILE_WATCHER 1
-#include <sys/event.h>
-#include <sys/time.h>
-#include <sys/types.h>
 #endif
 
 #ifdef __GLIBC__
@@ -170,211 +159,6 @@ constexpr capnp::ReaderOptions CONFIG_READER_OPTIONS = {
 
 // =======================================================================================
 
-#if __linux__
-
-// Class which uses inotify to watch a set of files and alert when they change.
-class FileWatcher {
- public:
-  FileWatcher(kj::UnixEventPort& port)
-      : inotifyFd(makeInotify()),
-        observer(port, inotifyFd, kj::UnixEventPort::FdObserver::OBSERVE_READ) {}
-
-  bool isSupported() {
-    return true;
-  }
-
-  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {
-    // `file` is provided if available. The Linux implementation doesn't use it.
-
-    auto pathStr = path.parent().toNativeString(true);
-
-    int wd = watches.findOrCreate(pathStr, [&]() {
-      int wd;
-      uint32_t mask = IN_DELETE | IN_MODIFY | IN_MOVE | IN_CREATE;
-      KJ_SYSCALL(wd = inotify_add_watch(inotifyFd, pathStr.cStr(), mask));
-      return decltype(watches)::Entry{kj::mv(pathStr), wd};
-    });
-
-    auto& files =
-        filesWatched.findOrCreate(wd, [&]() { return decltype(filesWatched)::Entry{wd, {}}; });
-
-    files.upsert(kj::str(path.basename()[0]), [](auto&&...) {});
-  }
-
-  kj::Promise<void> onChange() {
-    kj::byte buffer[4096]{};
-
-    for (;;) {
-      ssize_t n;
-      KJ_NONBLOCKING_SYSCALL(n = read(inotifyFd, buffer, sizeof(buffer)));
-
-      if (n < 0) {
-        // No more data to read.
-        co_await observer.whenBecomesReadable();
-        continue;
-      }
-
-      kj::byte* ptr = buffer;
-      while (n > 0) {
-        KJ_ASSERT(n >= sizeof(struct inotify_event));
-
-        auto& event = *reinterpret_cast<struct inotify_event*>(ptr);
-        size_t eventSize = sizeof(struct inotify_event) + event.len;
-        KJ_ASSERT(n >= eventSize);
-        KJ_ASSERT(eventSize % sizeof(void*) == 0);
-        ptr += eventSize;
-        n -= eventSize;
-
-        if (event.len > 0 && event.name[0] != '\0') {
-          auto& watched = KJ_ASSERT_NONNULL(filesWatched.find(event.wd));
-          if (watched.find(kj::StringPtr(event.name)) != kj::none) {
-            // HIT! We saw a change.
-            co_return;
-          }
-        }
-      }
-    }
-  }
-
- private:
-  kj::OwnFd inotifyFd;
-  kj::UnixEventPort::FdObserver observer;
-
-  kj::HashMap<kj::String, int> watches;
-  kj::HashMap<int, kj::HashSet<kj::String>> filesWatched;
-
-  static kj::OwnFd makeInotify() {
-    return KJ_SYSCALL_FD(inotify_init1(IN_NONBLOCK | IN_CLOEXEC));
-  }
-};
-
-#elif WORKERD_USE_KQUEUE_FOR_FILE_WATCHER
-
-// Class which uses inotify to watch a set of files and alert when they change.
-//
-// This version uses kqueue to watch for changes in files. kqueue typically doesn't scale well
-// to watching whole directory trees, since it must keep a file descriptor open for each watched
-// file. However, for our use case, we don't really want to watch a directory tree anyway, we
-// want to watch the specific set of files which were opened while parsing the config. This is
-// not so bad, probably.
-//
-// Apple provides the FSEvents API as an alternative, but it seems way more complicated and I
-// can't tell if it would provide a real advantage. Plus, kqueue works on BSD systems.
-class FileWatcher {
- public:
-  FileWatcher(kj::UnixEventPort& port)
-      : kqueueFd(makeKqueue()),
-        observer(port, kqueueFd, kj::UnixEventPort::FdObserver::OBSERVE_READ) {}
-
-  bool isSupported() {
-    return true;
-  }
-
-  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {
-    KJ_IF_SOME(f, file) {
-      KJ_IF_SOME(fd, f.getFd()) {
-        // We need to duplicate the FD because the original will probably be closed later and
-        // closing the FD unregisters it from kqueue.
-        watchFd(KJ_SYSCALL_FD(dup(fd)));
-        return;
-      }
-    }
-
-    // No existing file, open from disk.
-    watchFd(KJ_SYSCALL_FD(open(path.toNativeString(true).cStr(), O_RDONLY)));
-  }
-
-  kj::Promise<void> onChange() {
-    for (;;) {
-      struct kevent event;
-      struct timespec timeout;
-      memset(&event, 0, sizeof(event));
-      memset(&timeout, 0, sizeof(timeout));
-
-      int n;
-      KJ_SYSCALL(n = kevent(kqueueFd, nullptr, 0, &event, 1, &timeout));
-
-      if (n == 0) {
-        // No events, wait for the kqueue to become readable indicating an event has been
-        // delivered.
-        co_await observer.whenBecomesReadable();
-        continue;
-      } else {
-        // We only pay attention to events that indicate changes in the first place, so there's
-        // no need to examine the event, it definitely means something changed.
-        co_return;
-      }
-    }
-  }
-
- private:
-  kj::OwnFd kqueueFd;
-  kj::UnixEventPort::FdObserver observer;
-  kj::Vector<kj::OwnFd> filesWatched;
-
-  static kj::OwnFd makeKqueue() {
-    auto fd = KJ_SYSCALL_FD(kqueue());
-    KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
-    return kj::mv(fd);
-  }
-
-  void watchFd(kj::OwnFd fd) {
-    KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
-
-    struct kevent change;
-    memset(&change, 0, sizeof(change));
-    change.ident = fd.get();
-    change.filter = EVFILT_VNODE;
-    change.flags = EV_ADD | EV_CLEAR;
-    change.fflags = NOTE_WRITE | NOTE_EXTEND | NOTE_DELETE | NOTE_RENAME;
-    KJ_SYSCALL(kevent(kqueueFd, &change, 1, nullptr, 0, nullptr));
-    filesWatched.add(kj::mv(fd));
-  }
-};
-
-#elif _WIN32
-
-class FileWatcher {
- public:
-  FileWatcher(kj::Win32EventPort& port) {}
-
-  bool isSupported() {
-    return false;
-  }
-
-  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {}
-
-  kj::Promise<void> onChange() {
-    return kj::NEVER_DONE;
-  }
-
- private:
-};
-
-#else
-
-// Dummy FileWatcher implementation for operating systems that aren't supported yet.
-class FileWatcher {
- public:
-  FileWatcher(kj::UnixEventPort& port) {}
-
-  bool isSupported() {
-    return false;
-  }
-
-  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {}
-
-  kj::Promise<void> onChange() {
-    return kj::NEVER_DONE;
-  }
-
- private:
-};
-
-#endif  // #__linux__, #else
-
-// =======================================================================================
-
 kj::Maybe<kj::Own<capnp::SchemaFile>> tryImportBulitin(kj::StringPtr name);
 
 // Callbacks for capnp::SchemaFileLoader. Implementing this interface lets us control import
@@ -396,7 +180,7 @@ class SchemaFileImpl final: public capnp::SchemaFile {
       kj::PathPtr basePath,
       kj::ArrayPtr<const kj::Path> importPath,
       kj::Own<const kj::ReadableFile> fileParam,
-      kj::Maybe<FileWatcher&> watcher,
+      kj::Maybe<kj_rs_io::FileWatcher&> watcher,
       ErrorReporter& errorReporter)
       : root(root),
         current(current),
@@ -415,7 +199,7 @@ class SchemaFileImpl final: public capnp::SchemaFile {
     }
 
     KJ_IF_SOME(w, watcher) {
-      w.watch(fullPath, *file);
+      w.watch(fullPath);
     }
   }
 
@@ -494,7 +278,7 @@ class SchemaFileImpl final: public capnp::SchemaFile {
   // Mutable because the SchemaParser interface forces us to make all our methods `const` so that
   // parsing can happen on multiple threads, but we do not actually use multiple threads for
   // parsing, so we're good.
-  mutable kj::Maybe<FileWatcher&> watcher;
+  mutable kj::Maybe<kj_rs_io::FileWatcher&> watcher;
 
   ErrorReporter& errorReporter;
 };
@@ -1160,19 +944,17 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 
   void watch() {
 #if _WIN32
-    auto& w = watcher.emplace(io.win32EventPort);
+    // The watcher itself works on Windows, but --watch's reload (reloadFromConfigChange(), a
+    // re-exec) is not implemented there yet, so the feature as a whole is not.
+    CLI_ERROR("File watching is not yet implemented on your OS. Sorry! Pull requests welcome!");
 #else
-    auto& w = watcher.emplace(io.unixEventPort);
-#endif
-    if (!w.isSupported()) {
-      CLI_ERROR("File watching is not yet implemented on your OS. Sorry! Pull requests welcome!");
-    }
-
+    auto& w = *watcher.emplace(kj::heap<kj_rs_io::FileWatcher>());
     KJ_IF_SOME(e, exeInfo) {
-      w.watch(fs->getCurrentPath().eval(e.path), kj::none);
+      w.watch(fs->getCurrentPath().eval(e.path));
     } else {
       CLI_ERROR("Can't use --watch when we're unable to find our own executable.");
     }
+#endif
   }
 
   void parseConfigFile(kj::StringPtr pathStr) {
@@ -1218,7 +1000,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
         schemaParser.loadCompiledTypeAndDependencies<config::Config>();
 
         parsedSchema = schemaParser.parseFile(kj::heap<SchemaFileImpl>(fs->getRoot(),
-            fs->getCurrentPath(), kj::mv(path), nullptr, importPath, kj::mv(file), watcher, *this));
+            fs->getCurrentPath(), kj::mv(path), nullptr, importPath, kj::mv(file),
+            watcher.map(
+                [](kj::Own<kj_rs_io::FileWatcher>& w) -> kj_rs_io::FileWatcher& { return *w; }),
+            *this));
 
         // Construct a list of top-level constants of type `Config`. If there is exactly one,
         // we can use it by default.
@@ -1411,7 +1196,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
         // someone to fix the config.
         context.warning(
             "Can't start server due to config errors, waiting for config files to change...");
-        waitForChanges(w).wait(io.waitScope);
+        waitForChanges(*w).wait(io.waitScope);
         reloadFromConfigChange();
       } else {
         // Errors were reported earlier, so context.exit() will exit with a non-zero status.
@@ -1440,7 +1225,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
           KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; }, platform.get());
       auto promise = func(v8System, config);
       KJ_IF_SOME(w, watcher) {
-        promise = promise.exclusiveJoin(waitForChanges(w).then([this]() {
+        promise = promise.exclusiveJoin(waitForChanges(*w).then([this]() {
           // Watch succeeded.
           reloadFromConfigChange();
         }));
@@ -1469,7 +1254,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 #else
       return server->run(v8System, config,
           // Gracefully drain when SIGTERM is received.
-          io.unixEventPort.onSignal(SIGTERM).ignoreResult());
+          kj_rs_io::onSignal(SIGTERM));
 #endif
     });
   }
@@ -1564,7 +1349,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   bool gcStress = false;
   bool allAutogates = false;
   kj::Maybe<kj::String> testCompatDate;
-  kj::Maybe<FileWatcher> watcher;
+  kj::Maybe<kj::Own<kj_rs_io::FileWatcher>> watcher;
 
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();
   kj::AsyncIoContext io = kj::setupAsyncIo();
@@ -1711,13 +1496,13 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   }
 
 #if _WIN32
-  kj::Promise<void> waitForChanges(FileWatcher& watcher) {
+  kj::Promise<void> waitForChanges(kj_rs_io::FileWatcher& watcher) {
     KJ_UNIMPLEMENTED("Watching is not yet implemented on Windows");
   }
 #else
   // Wait for the FileWatcher to report a change, and then wait a moment for changes to settle
   // down, in case there's a bunch of changes all at once.
-  kj::Promise<void> waitForChanges(FileWatcher& watcher) {
+  kj::Promise<void> waitForChanges(kj_rs_io::FileWatcher& watcher) {
     co_await watcher.onChange();
 
     // Saw our first change!
@@ -1757,9 +1542,6 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 int main(int argc, char* argv[]) {
   workerd::server::StructuredLoggingProcessContext context(argv[0]);
 
-#if !_WIN32
-  kj::UnixEventPort::captureSignal(SIGTERM);
-#endif
   workerd::server::CliMain mainObject(context, argv);
 
 #if defined(WORKERD_FUZZILLI) && defined(__linux__)

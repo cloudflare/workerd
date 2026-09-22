@@ -82,7 +82,6 @@ private:
       Closed,
       Released>;
 
-  kj::Maybe<IoContext::Id> ioContext;
   kj::Ptr<ReadableStreamController::Reader> reader;
 
   ReaderState state;
@@ -265,7 +264,6 @@ class DrainingReader: public ReadableStreamController::Reader {
   using Attached = jsg::Ref<ReadableStream>;
   struct Released {};
 
-  kj::Maybe<IoContext::Id> ioContext;
   kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state = Initial();
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
 };
@@ -274,7 +272,6 @@ class ReadableStream: public kj::PtrTarget, public jsg::Object {
 private:
 
   struct AsyncIteratorState {
-    kj::Maybe<IoContext::Id> ioContext;
     jsg::Ref<ReadableStreamDefaultReader> reader;
     bool preventCancel;
   };
@@ -490,7 +487,6 @@ public:
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
-  kj::Maybe<IoContext::Id> ioContext;
   kj::Own<ReadableStreamController> controller;
 
   // Used to signal when this ReadableStream reads EOF. This signal is required for TCP sockets.

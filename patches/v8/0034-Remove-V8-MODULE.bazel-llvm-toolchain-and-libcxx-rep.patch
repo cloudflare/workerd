@@ -7,10 +7,10 @@ These reference third_party/ sources that are not present in the GitHub
 tarball. Workerd provides its own toolchain, so these are not needed.
 
 diff --git a/MODULE.bazel b/MODULE.bazel
-index 00ad66496a5e418d4a3f419d39cb54301fa0d64d..f66c1566f509a0ce8e3f3bba94906f05840aa4c6 100644
+index 9f3b298b0b1b00d3d78cab00dd85a504ac90e5df..f66c1566f509a0ce8e3f3bba94906f05840aa4c6 100644
 --- a/MODULE.bazel
 +++ b/MODULE.bazel
-@@ -22,170 +22,6 @@ pip.parse(
+@@ -22,169 +22,6 @@ pip.parse(
  )
  use_repo(pip, "v8_python_deps")
  
@@ -110,8 +110,7 @@ index 00ad66496a5e418d4a3f419d39cb54301fa0d64d..f66c1566f509a0ce8e3f3bba94906f05
 -            "{WORKSPACE_ROOT}/third_party/libc++abi/src/include",
 -            "{WORKSPACE_ROOT}/third_party/libc++/src/src",
 -            "{WORKSPACE_ROOT}/third_party/llvm-libc/src",
--            "{WORKSPACE_ROOT}/third_party/llvm-build/Release+Asserts/lib/clang/22/include",
--            "{WORKSPACE_ROOT}/third_party/llvm-build/Release+Asserts/lib/clang/23/include",
+-            "{WORKSPACE_ROOT}/third_party/llvm-build/Release+Asserts/lib/clang/24/include",
 -            "{WORKSPACE_ROOT}/build/linux/debian_bullseye_amd64-sysroot/usr/include",
 -            "{WORKSPACE_ROOT}/build/linux/debian_bullseye_amd64-sysroot/usr/local/include",
 -        ],
@@ -182,10 +181,10 @@ index 00ad66496a5e418d4a3f419d39cb54301fa0d64d..f66c1566f509a0ce8e3f3bba94906f05
  libcxx_repository = use_repo_rule("//bazel/toolchain:libcxx_repository.bzl", "libcxx_repository")
  
 diff --git a/bazel/toolchain/libcxx_repository.bzl b/bazel/toolchain/libcxx_repository.bzl
-index 60aca4bf91d107716929ff71682b720222e14587..ed367ef64871133867e9eccb07c6482a4de08ceb 100644
+index b60ea9be6151e8d51563d7a8e6429798c3724d8f..1e1d723fa9647e55e3d94cac10c987c78671ffab 100644
 --- a/bazel/toolchain/libcxx_repository.bzl
 +++ b/bazel/toolchain/libcxx_repository.bzl
-@@ -1,106 +1,17 @@
+@@ -1,108 +1,17 @@
 -"""Repository rule for building libc++ from third_party sources."""
 +"""Stub repository rule: workerd uses the system/toolchain libc++, so @libcxx
 +is an empty shim that satisfies the dep in bazel/defs.bzl without pulling in
@@ -220,11 +219,13 @@ index 60aca4bf91d107716929ff71682b720222e14587..ed367ef64871133867e9eccb07c6482a
  package(default_visibility = ["//visibility:public"])
  
 -LIBCXX_COPTS = [
--    "-std=c++23",
+-    "-std=c++26",
 -    "-fPIC",
 -    "-fstrict-aliasing",
 -    "-fexceptions",
 -    "-frtti",
+-    "-Wno-pragma-clang-attribute",
+-    "-Wno-ignored-attributes",
 -    "-D_LIBCPP_BUILDING_LIBRARY",
 -    "-D_LIBCPP_HARDENING_MODE_DEFAULT=_LIBCPP_HARDENING_MODE_NONE",
 -    "-DLIBC_NAMESPACE=__llvm_libc_cr",
@@ -290,7 +291,7 @@ index 60aca4bf91d107716929ff71682b720222e14587..ed367ef64871133867e9eccb07c6482a
 -)
 -'''.format(REPO_PATH=repo_path)
 -    ctx.file("BUILD.bazel", build_content)
-+# Empty stub – the real libc++ is provided by the toolchain.
++# Empty stub - the real libc++ is provided by the toolchain.
 +cc_library(name = "libc++")
 +cc_library(name = "libc++abi")
 +""")

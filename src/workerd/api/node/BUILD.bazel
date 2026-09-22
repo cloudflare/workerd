@@ -52,6 +52,7 @@ wd_cc_library(
         "diagnostics-channel.h",
         "inspector.h",
         "module.h",
+        "module-source.h",
         "node.h",
         "process.h",
         "timers.h",

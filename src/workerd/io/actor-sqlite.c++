@@ -301,7 +301,8 @@ void ActorSqlite::onCriticalError(
     kj::Exception exception = kj::mv(maybeException).orDefault([&]() {
       return JSG_KJ_EXCEPTION(FAILED, Error, errorMessage);
     });
-    exception.setDescription(kj::str("broken.outputGateBroken; ", exception.getDescription()));
+    auto newDescription = kj::str("broken.outputGateBroken; ", exception.getDescription());
+    exception.setDescription(kj::mv(newDescription));
     broken.emplace(exception.clone());
 
     // Also ensure output gate is explicitly broken.

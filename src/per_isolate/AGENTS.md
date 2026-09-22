@@ -15,7 +15,8 @@ at context creation, before any user code. Gated by the
 - Module system is bootstrap CommonJS: `require('webstreams/queue')` +
   `module.exports = {...}`. The `src/node/` ESM-only rule does NOT apply
   here. Circular requires are a FATAL startup error — keep modules
-  acyclic (e.g., `webstreams/native` is a deliberate leaf).
+  acyclic (e.g., `webstreams/ring-buffer` is a leaf, and
+  `webstreams/native` requires nothing else).
 - TypeScript `import type` / `export type` are used freely for type
   plumbing (fully erased; the loader only sees `module.exports`).
 - `main.ts` installs the real stream globals (ReadableStream et al.) when
@@ -153,11 +154,12 @@ want normal `map.get(key)` call syntax with pollution resistance.
 
 ### Promise patterns
 
-- **`SafePromise`**: species-protected; `.then()` / `.catch()` /
-  `.finally()` use captured methods and `Symbol.species` is pinned.
-  Static helpers (`SafePromise.resolve`, `.reject`, `.all`, etc.) are
-  bound to `SafePromise`. Use for **internal-only** promise chains
-  where species hijacking would be a concern.
+- **`SafePromise`**: species-protected for the promises it creates;
+  `.then()` / `.catch()` / `.finally()` use captured methods and
+  `Symbol.species` is pinned. Static helpers (`SafePromise.resolve`,
+  `.reject`, `.all`, etc.) are bound to `SafePromise`. Use for
+  **internal-only** promise chains where species hijacking would be a
+  concern. Converting an ordinary promise into one adds a microtask.
 - **`PromiseResolve` / `PromiseReject` / `PromiseWithResolvers`**:
   captured statics bound to the original `Promise` constructor. Use for
   **user-facing** promises — the returned promise is a regular
@@ -165,7 +167,30 @@ want normal `map.get(key)` call syntax with pollution resistance.
 - **`PromisePrototypeThen` / `PromisePrototypeCatch` /
   `PromisePrototypeFinally`**: captured prototype methods. Use when
   chaining on an existing promise (internal or external) without
-  relying on the prototype chain.
+  relying on the prototype chain. They are the real
+  `Promise.prototype.then` and friends, so on an ordinary promise they
+  still run the species lookup (`promise.constructor`, then
+  `Promise[Symbol.species]`); only the `then` property lookup itself is
+  bypassed. JS has no species-free `then` (V8's C++ `Promise::Then`
+  has one), so this exposure is accepted rather than worked around with
+  extra promise hops.
+
+### Accepted exposures
+
+Two prototype-pollution classes are deliberately not defended against,
+because every defense costs microtasks or a C++ call on the per-chunk
+path, and the same pollution breaks the user's own code in every engine:
+
+- `Promise[Symbol.species]` / `Promise.prototype.constructor` reaching
+  `PromisePrototypeThen` on ordinary promises (above).
+- `Object.prototype.then` intercepting a promise resolved with a plain
+  object, notably the spec-mandated `{ value, done }` read results.
+  Internal code that consumes those results through the same promise
+  (pipes, drain fallbacks) is exposed alongside the user's read.
+
+Internal-only records should still be null-prototype
+(`{ __proto__: null, ... }`) wherever nothing requires the
+`Object.prototype` chain.
 
 ### Never expose primordials to user code
 

@@ -91,7 +91,24 @@ class DeleteQueue: public kj::AtomicRefcounted {
   DeleteQueue(): crossThreadDeleteQueue(State{kj::Vector<OwnedObject*>()}) {}
 
   void scheduleDeletion(OwnedObject* object) const;
+
+  // Schedules the given action to run in the IoContext that owns this queue, the next time
+  // that context drains its queue (in its own thread, under the isolate lock). If the owning
+  // IoContext has already been destroyed, the action is dropped and a warning about
+  // cross-request promise resolution is logged to the current context, if any.
   void scheduleAction(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&& action) const;
+
+  // Like scheduleAction(), but for callers where a destroyed target context is an expected,
+  // benign outcome: returns true if the action was queued, or false — dropping the action
+  // silently — if the owning IoContext has already been destroyed.
+  bool tryScheduleAction(kj::Function<void(jsg::Lock&)>&& action) const;
+
+  // True if the IoContext that owns this queue is the calling thread's current IoContext.
+  bool isCurrentIoContext() const;
+
+  // True if the IoContext that owns this queue has been destroyed, meaning scheduled actions
+  // and deletions are dropped. Useful for reclaiming registrations that target this queue.
+  bool isDefunct() const;
 
   struct State {
     kj::Vector<OwnedObject*> queue;
@@ -144,6 +161,19 @@ class IoCrossContextExecutor {
   // Tries to execute the specified action to the owning IoContext.
   // The target IoContext will be signaled to run the action as soon as it is able.
   void execute(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&& action);
+
+  // True if the IoContext this executor targets is the calling thread's current IoContext —
+  // i.e. the caller could run the work synchronously instead of deferring through
+  // tryExecute().
+  bool isCurrent() const;
+
+  // Like execute(), but for callers where a destroyed target context is an expected, benign
+  // outcome: returns true if the action was queued, or false — dropping the action silently —
+  // if the target IoContext has already been destroyed.
+  bool tryExecute(kj::Function<void(jsg::Lock&)>&& action) const;
+
+  // True if the target IoContext has been destroyed, i.e. tryExecute() would drop the action.
+  bool isTargetDestroyed() const;
 
  private:
   friend class IoContext;

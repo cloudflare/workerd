@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "eventsource-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "experimental", "streams_enable_constructors"],
+        compatibilityFlags = ["nodejs_compat", "experimental", "streams_enable_constructors", "spec_compliant_dispatch_exceptions"],
         bindings = [
           (name = "subrequest", service = "eventsource-test")
         ]
