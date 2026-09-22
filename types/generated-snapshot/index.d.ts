@@ -11549,7 +11549,7 @@ declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
-type Ai_Cf_Google_Gemma_4_26B_A4B_IT_Input = ChatCompletionsInput<
+type Ai_Cf_Google_Gemma_4_26B_A4B_It_Input = ChatCompletionsInput<
   "high" | "none" | "minimal" | "low" | "medium" | "max" | "auto",
   boolean
 > & {
@@ -11558,10 +11558,12 @@ type Ai_Cf_Google_Gemma_4_26B_A4B_IT_Input = ChatCompletionsInput<
    */
   skip_special_tokens?: boolean;
 };
-declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
-  inputs: Ai_Cf_Google_Gemma_4_26B_A4B_IT_Input;
+declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_It {
+  inputs: Ai_Cf_Google_Gemma_4_26B_A4B_It_Input;
   postProcessedOutputs: ChatCompletionsOutput;
 }
+/** @deprecated Use Base_Ai_Cf_Google_Gemma_4_26B_A4B_It. */
+declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT extends Base_Ai_Cf_Google_Gemma_4_26B_A4B_It {}
 declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code {
   inputs: ChatCompletionsInput<ChatCompletionsReasoningEffort, true>;
   postProcessedOutputs: ChatCompletionsOutput;
@@ -11829,7 +11831,7 @@ interface AiModels {
   "@cf/moonshotai/kimi-k2.5": Base_Ai_Cf_Moonshotai_Kimi_K2_5;
   "@cf/moonshotai/kimi-k2.6": Base_Ai_Cf_Moonshotai_Kimi_K2_6;
   "@cf/nvidia/nemotron-3-120b-a12b": Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B;
-  "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT;
+  "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_It;
   "@cf/moonshotai/kimi-k2.7-code": Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code;
   "@cf/zai-org/glm-5.2": Base_Ai_Cf_Zai_Org_Glm_5_2;
   "@cf/moondream/moondream3.1-9B-A2B": Base_Ai_Cf_Moondream_Moondream3_1_9B_A2B;
