@@ -3204,15 +3204,6 @@ impl ToLocalValue for Number {
     }
 }
 
-impl<T: ToLocalValue> ToLocalValue for Option<T> {
-    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
-        match self {
-            Some(value) => value.to_local(lock),
-            None => Local::<Value>::undefined(lock),
-        }
-    }
-}
-
 impl<T: ToLocalValue> ToLocalValue for Nullable<T> {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
         match self {

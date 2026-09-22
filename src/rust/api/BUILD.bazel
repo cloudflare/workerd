@@ -1,10 +1,15 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 wd_rust_crate(
     name = "api",
     cxx_bridge_deps = ["//src/rust/jsg"],
-    cxx_bridge_srcs = ["lib.rs"],
+    cxx_bridge_srcs = [
+        "buffer_native.rs",
+        "lib.rs",
+    ],
     link_deps = [
+        ":buffer-ffi",
         # ada-url is built with its `bundled` feature disabled (see
         # //deps/rust:Cargo.toml), so it does not compile its own copy of the
         # C++ ada library. Provide the symbols via workerd's existing C++
@@ -17,10 +22,24 @@ wd_rust_crate(
     test_deps = ["//src/rust/jsg-test"],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/rust/i18n",
         "//src/rust/jsg",
-        "//src/rust/nbytes",
         "@crates_vendor//:ada-url",
         "@crates_vendor//:thiserror",
+    ],
+)
+
+# C++ library entry points called by buffer_native.rs. Linked into the crate
+# rather than compiled into its generated bridge library, so the bridge headers
+# do not pull in //src/workerd/api/node:node-core.
+wd_cc_library(
+    name = "buffer-ffi",
+    srcs = ["buffer-ffi.c++"],
+    hdrs = ["buffer-ffi.h"],
+    deps = [
+        "//src/rust/jsg:ffi",
+        "//src/workerd/api/node:node-core",
+        "//src/workerd/jsg",
+        "@nbytes",
+        "@simdutf",
     ],
 )
