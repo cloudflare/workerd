@@ -259,6 +259,9 @@ class UtilModule final: public jsg::Object {
     JSG_METHOD(isAnyArrayBuffer);
     JSG_METHOD(isBoxedPrimitive);
   }
+
+  // Stateless: a worker that imports `node:util` at top level retains this instance.
+  JSG_SNAPSHOT_RESTORE(UtilModule);
 };
 
 #define EW_NODE_UTIL_ISOLATE_TYPES                                                                 \

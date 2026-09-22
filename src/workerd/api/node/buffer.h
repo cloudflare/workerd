@@ -105,6 +105,9 @@ class BufferUtil final: public jsg::Object {
     JSG_STATIC_CONSTANT_NAMED(BASE64URL, static_cast<EncodingValue>(Encoding::BASE64URL));
     JSG_STATIC_CONSTANT_NAMED(HEX, static_cast<EncodingValue>(Encoding::HEX));
   }
+
+  // Stateless: a worker that imports `node:buffer` at top level retains this instance.
+  JSG_SNAPSHOT_RESTORE(BufferUtil);
 };
 
 #define EW_NODE_BUFFER_ISOLATE_TYPES api::node::BufferUtil, api::node::BufferUtil::CompareOptions
