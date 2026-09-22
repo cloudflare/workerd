@@ -13,12 +13,14 @@ import {
 } from 'cloudflare-internal:to-markdown-api';
 
 type AiSearchService = object;
+type WebSearchService = object;
 
 const aiBindingExperimental = !!Cloudflare.compatibilityFlags['experimental'];
 
 interface Fetcher {
   fetch: typeof fetch;
   aiSearch: () => AiSearchService;
+  websearch: (request: AiWebSearchRequest) => WebSearchService;
   gateway: (gatewayId: string) => AiGateway;
   autorag: (autoragId?: string) => AutoRAG;
   toMarkdown: () => ToMarkdownService;
@@ -364,26 +366,6 @@ export class Ai extends wrappedBinding.WrappedBinding {
     return res.body;
   }
 
-  async websearch(request: AiWebSearchRequest | null): Promise<Response> {
-    if (
-      !request ||
-      typeof request.gatewayId !== 'string' ||
-      request.gatewayId.trim().length === 0
-    ) {
-      throw new AiInternalError('Invalid gateway ID');
-    }
-
-    const { gatewayId, ...body } = request;
-    return this.#fetcher.fetch(
-      `${this.#endpointURL}/ai-gateway/gateways/${encodeURIComponent(gatewayId)}/websearch`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      }
-    );
-  }
-
   /*
    * @deprecated this method is deprecated, do not use this
    */
@@ -491,6 +473,10 @@ export class Ai extends wrappedBinding.WrappedBinding {
 
   aiSearch(): AiSearchService {
     return this.#fetcher.aiSearch();
+  }
+
+  websearch(request: AiWebSearchRequest): WebSearchService {
+    return this.#fetcher.websearch(request);
   }
 }
 
