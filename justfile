@@ -22,7 +22,7 @@ prepare-rust:
   rustup component add rust-analyzer --toolchain 1.91.0
 
 prepare-ubuntu:
-  sudo apt-get install -y --no-install-recommends libc++abi1-19 libc++1-19 libc++-19-dev lld-19 bazelisk python3 lcov fd-find
+  sudo apt-get install -y --no-install-recommends clang-22 lld-22 libunwind-22-dev libc++-22-dev libclang-rt-22-dev bazelisk python3 lcov fd-find
 
 prepare-macos:
   brew install --quiet bazelisk python3 lcov fd
@@ -82,7 +82,7 @@ test *args="//...":
 test-asan *args="//...":
   just test {{args}} --config=asan
 
-# The workerd binary must not reach kj's own event loop (kj-async-os) under --//:io_backend=rust
+# The workerd binary must not reach kj's own event loop (kj-async-os)
 check-io-backend-graph *args:
   bash build/rust_io_graph_check.sh {{args}}
 
@@ -142,8 +142,9 @@ bench path:
   bazel run //src/workerd/tests:bench-{{path}} --config=benchmark
 
 # example: just clippy dns
+# example: just clippy //src/workerd/server:workerd-cli
 clippy package="...":
-  bazel build //src/rust/{{package}} --config=lint
+  bazel build {{ if package =~ '^//' { package } else { "//src/rust/" + package } }} --config=lint
 
 # example: just clang-tidy //src/rust/jsg:ffi
 clang-tidy target="//...":

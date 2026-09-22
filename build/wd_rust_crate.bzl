@@ -46,8 +46,21 @@ def rust_cxx_bridge(
         }),
     )
 
+def rust_cxx_include_prefix():
+    """The include path of the calling package's generated cxx headers.
+
+    It matches the package's C++ include path: <workerd/server/foo.rs.h> for src/workerd/server,
+    and <workerd/rust/jsg/v8.rs.h> for src/rust/jsg.
+    """
+    path = native.package_name().removeprefix("src/")
+    if path == "workerd" or path.startswith("workerd/"):
+        return path
+    return "workerd/" + path
+
 def wd_rust_crate(
         name,
+        srcs = None,
+        crate_root = None,
         cxx_bridge_src = None,
         cxx_bridge_srcs = [],
         deps = [],
@@ -60,6 +73,7 @@ def wd_rust_crate(
         test_proc_macro_deps = [],
         test_size = "medium",
         cxx_bridge_deps = [],
+        cxx_bridge_hdrs = None,
         cxx_bridge_tags = [],
         cxx_bridge_local_defines = [],
         cxx_bridge_features = [],
@@ -68,6 +82,9 @@ def wd_rust_crate(
 
     Args:
         name: crate name.
+        srcs: crate sources; defaults to every .rs file in the package. Name them explicitly when
+            the package also holds other crates or C++.
+        crate_root: the crate's root module, if not lib.rs or <name>.rs.
         cxx_bridge_src: (optional) .rs source file with cxx ffi bridge definition. The rule will
             generation additional<name>@cxx c++ library with cxx bindings if this is set.
         deps: crate dependencies: rust crates.
@@ -84,8 +101,10 @@ def wd_rust_crate(
             crates with many subtests, since RUST_TEST_THREADS=1 forces serial execution.
         cxx_bridge_deps: either a flat dependency list applied to every bridge source, or a dict of
             bridge source => dependency list.
+        cxx_bridge_hdrs: headers the bridges include!(); defaults to every .h file in the package.
     """
-    srcs = native.glob(["**/*.rs"])
+    if srcs == None:
+        srcs = native.glob(["**/*.rs"])
     crate_name = name.replace("-", "_")
 
     if cxx_bridge_src:
@@ -108,9 +127,11 @@ def wd_rust_crate(
             "//src/rust/cxx:cxx",
         ]
 
-    include_prefix = "workerd/" + native.package_name().removeprefix("src/")
+    include_prefix = rust_cxx_include_prefix()
 
-    hdrs = native.glob(["**/*.h"], allow_empty = True)
+    hdrs = cxx_bridge_hdrs
+    if hdrs == None:
+        hdrs = native.glob(["**/*.h"], allow_empty = True)
     for bridge_src in cxx_bridge_srcs:
         rust_cxx_bridge(
             name = bridge_src + "@cxx",
@@ -134,6 +155,10 @@ def wd_rust_crate(
 
     crate_features = []
 
+    library_kwargs = {}
+    if crate_root != None:
+        library_kwargs["crate_root"] = crate_root
+
     rust_library(
         name = name,
         crate_name = crate_name,
@@ -148,6 +173,7 @@ def wd_rust_crate(
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
         }),
+        **library_kwargs
     )
 
     wd_rust_test(

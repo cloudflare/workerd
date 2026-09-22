@@ -164,6 +164,22 @@ export {
 } from 'integration-body';
 
 export {
+  nonBytesChunkCancelsSource,
+  everyConsumerCancelsOnNonBytes,
+  nonBytesCancelRejectionReplacesFailure,
+  nonBytesChunkInClosingBatch,
+  transformExpectedLengthOverflow,
+  transformExpectedLengthMet,
+} from 'integration-body-failures';
+
+export {
+  chunksCollectibleDuringConsumption,
+  oddChunkSizesAssembleIntact,
+  chunkWiderThanABlockAssemblesIntact,
+  declaredLengthBodyIsExact,
+} from 'integration-body-memory';
+
+export {
   disturbedStreamIntoResponse,
   lockedStreamIntoResponse,
   bodyIdentityAndLockCoupling,

@@ -118,25 +118,6 @@ jobs:
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
       GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
 
-  # The C++ I/O backend (--//:io_backend=cxx) stays selectable as an escape hatch. This lane builds
-  # everything under it and runs the tests of the two packages that have a per-backend arm
-  # (//src/workerd/util:setup-async-io, //src/workerd/server:cli-io-backend); the rest of the tree
-  # is identical in both configs and is tested under the rust default everywhere else.
-  build-cxx-io-backend:
-    uses: ./.github/workflows/_bazel.yml
-    with:
-      image: ubuntu-22.04-16core
-      os_name: linux
-      arch_name: 'X64'
-      suffix: -cxx-io
-      extra_bazel_args: '--config=ci-test --config=ci-linux --//:io_backend=cxx'
-      test_target: >-
-        //src/workerd/server:all
-        //src/workerd/util:all
-    secrets:
-      BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
-      WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
-      GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
   lint:
     uses: ./.github/workflows/_bazel.yml
     with:
@@ -152,7 +133,7 @@ jobs:
   check-snapshot:
     runs-on: ubuntu-22.04-16core
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           show-progress: false
       - name: Cache
@@ -217,7 +198,7 @@ jobs:
     runs-on: ubuntu-22.04-16core
     steps:
       - name: Checkout workers-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: cloudflare/workers-sdk
 

@@ -45,8 +45,8 @@ class RecordingFailingOutgoingFactory final: public Fetcher::OutgoingFactory {
     KJ_FAIL_REQUIRE("destination failed");
   }
 
-  bool supportsActorCallRetries() const override {
-    return true;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable::YES;
   }
 
   Result newActorCallAttempt(
@@ -409,8 +409,8 @@ class ReceiverOutgoingFactory final: public Fetcher::OutgoingFactory {
     return {.client = receiver.makeWorkerEntrypoint(), .spanParents = kj::none};
   }
 
-  bool supportsActorCallRetries() const override {
-    return true;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable::YES;
   }
 
   Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
@@ -441,8 +441,8 @@ class GatedReceiverOutgoingFactory final: public Fetcher::OutgoingFactory {
     };
   }
 
-  bool supportsActorCallRetries() const override {
-    return true;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable::YES;
   }
 
   Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,

@@ -4002,7 +4002,7 @@ export interface Container {
   interceptOutboundHttp(addr: string, binding: Fetcher): Promise<void>;
   interceptAllOutboundHttp(binding: Fetcher): Promise<void>;
   snapshotContainer(
-    options: ContainerSnapshotOptions,
+    options?: ContainerSnapshotOptions,
   ): Promise<ContainerSnapshot>;
   interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
   exec(cmd: string[], options?: ContainerExecOptions): Promise<ExecProcess>;
@@ -11864,11 +11864,24 @@ export type AiModelListType = Record<string, any>;
 export type AiAsyncBatchResponse = {
   request_id: string;
 };
+export type AiWebSearchRequest = {
+  /** AI Gateway configuration used for this request. */
+  gatewayId: string;
+  /** Search query. */
+  query: string;
+  /** Maximum number of results. Defaults to 10 and is capped at 20. */
+  limit?: number;
+  /** BYOK web-search provider configured on the gateway. */
+  provider: string;
+  /** Optional BYOK key alias. Defaults to `default`. */
+  byokAlias?: string;
+};
 export declare abstract class Ai<
   AiModelList extends AiModelListType = AiModels,
 > {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
+  websearch(request: AiWebSearchRequest): Promise<Response>;
   /**
    * @deprecated Use the standalone `ai_search_namespaces` or `ai_search` Workers bindings instead.
    * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
