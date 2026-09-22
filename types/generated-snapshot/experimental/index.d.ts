@@ -11840,8 +11840,22 @@ declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_6 {
   >;
   postProcessedOutputs: ChatCompletionsOutput;
 }
+interface Ai_Cf_Nvidia_Nemotron_3_120B_A12B_ChatTemplateKwargs {
+  /** Whether to enable reasoning. Reasoning is enabled by default. */
+  enable_thinking?: boolean;
+  /** Use Nemotron low-effort reasoning, which consumes significantly fewer reasoning tokens. */
+  low_effort?: boolean;
+  /** For coding agents, force non-empty assistant content. */
+  force_nonempty_content?: boolean;
+}
+type Ai_Cf_Nvidia_Nemotron_3_120B_A12B_Input = Omit<
+  ChatCompletionsMessagesInput,
+  "reasoning_effort" | "chat_template_kwargs"
+> & {
+  chat_template_kwargs?: Ai_Cf_Nvidia_Nemotron_3_120B_A12B_ChatTemplateKwargs;
+};
 declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
-  inputs: ChatCompletionsInput<"medium" | "low" | "none", boolean>;
+  inputs: Ai_Cf_Nvidia_Nemotron_3_120B_A12B_Input;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
