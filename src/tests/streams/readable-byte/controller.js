@@ -101,6 +101,47 @@ export const closeWithPartiallyFilledView = {
   },
 };
 
+// DIVERGENCE (ledger #7, on a detached body): the same close as a
+// Request body carried into new Request(request), which detaches it —
+// with the stream as the source's own and as a tee branch. TypeScript
+// errors the body: the read after the whole element rejects with
+// TypeError, and so does closed. C++ ends the body cleanly without the
+// trailing byte.
+export const closeWithPartiallyFilledViewDetached = {
+  async test() {
+    const expected = 'Insufficient bytes to fill elements in the given view';
+    for (const teed of [false, true]) {
+      let controller;
+      let rs = new ReadableStream({
+        type: 'bytes',
+        start(c) {
+          controller = c;
+        },
+      });
+      if (teed) rs = rs.tee()[0];
+      const request = new Request('http://test/', {
+        method: 'POST',
+        body: rs,
+        duplex: 'half',
+      });
+      const reader = new Request(request).body.getReader({ mode: 'byob' });
+      const first = reader.read(new Uint16Array(4));
+      await scheduler.wait(5);
+      controller.enqueue(new Uint8Array([1, 2, 3]));
+      controller.close();
+      strictEqual((await first).value.length, 1);
+      const second = reader.read(new Uint16Array(4));
+      if (usingTsImpl) {
+        strictEqual((await rejectionOf(second)).message, expected);
+        strictEqual((await rejectionOf(reader.closed)).message, expected);
+      } else {
+        strictEqual((await second).value.byteLength, 0);
+        strictEqual(await reader.closed, undefined);
+      }
+    }
+  },
+};
+
 // read(view) against a closed stream resolves done with an EMPTY view
 // over the same-sized buffer (parity under the pinned
 // internal_stream_byob_return_view flag).

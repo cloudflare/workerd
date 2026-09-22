@@ -22,6 +22,7 @@ import type {
 import type {
   ByteQueueEntry,
   ByteStreamConsumer as ByteStreamConsumerType,
+  ErrorStreamCallback,
   ByteStreamCursor as ByteStreamCursorType,
   PullIntoDescriptor,
   QueueCursor as QueueCursorType,
@@ -253,6 +254,19 @@ let readableStreamDefaultReaderRead: <R>(
   reader: ReadableStreamDefaultReaderType<R>,
   readRequest: ReadableStreamAsyncIteratorReadRequest<R>
 ) => void;
+// Errors a queued tee branch alone (see [kControllerErrorFunction]).
+let readableStreamErrorBranch: <R>(
+  stream: ReadableStream<R>,
+  reason: unknown
+) => void;
+
+// A tee branch's byte cursor errors its branch alone.
+const errorTeeBranchFromCursor: ErrorStreamCallback = (e, owner) => {
+  if (owner !== undefined) {
+    readableStreamErrorBranch(owner as ReadableStream<unknown>, e);
+  }
+};
+
 let isReadableStream: (value: unknown) => boolean;
 let isByteStreamController: (value: unknown) => boolean;
 
@@ -3518,6 +3532,32 @@ class ReadableStream<R> {
     // (deliberate divergence from the queued model below: branch cancels
     // go to each branch's OWN source). The parent becomes the same inert
     // locked shell as in the queued model.
+    readableStreamErrorBranch = <R>(
+      stream: ReadableStream<R>,
+      reason: unknown
+    ) => {
+      if (stream.#state !== 'readable') return;
+      const controller = stream.#controller;
+      if (controller === undefined) return;
+      // QUEUED INVARIANT: a tee branch of a queued stream — its consumer is
+      // necessarily a QueueCursor (tee precedent); sanctioned cast.
+      const cursor = stream.#consumer as QueueCursorType<R, R> | undefined;
+      if (cursor === undefined) return;
+      stream.#consumer = undefined;
+      cursor.errorAllReads(reason);
+      readableStreamError(stream, reason);
+      // Decided BEFORE the cursor's removal, for the reasons given at
+      // #consumerLeaving (as in QueueCursor.cancelStream).
+      markPromiseHandled(
+        controllerConsumerLeaving(
+          controller,
+          reason,
+          cursor.queue.cursorCount === 1
+        )
+      );
+      cursor.queue.removeCursor(cursor);
+    };
+
     readableStreamTee = <R>(stream: ReadableStream<R>) => {
       // The locked precondition lives HERE (not in the prototype method) so that every
       // entry point shares it -- the method after its brand assert, and the C++
@@ -3628,6 +3668,10 @@ class ReadableStream<R> {
           const to2 = branch2.#consumer as unknown as ByteStreamCursorType;
           to1.adoptReleasedBytes(from);
           to2.adoptReleasedBytes(from);
+          // A branch shares the controller with its siblings, so a
+          // fractional fill at close errors it alone.
+          to1.errorStreamCallback = errorTeeBranchFromCursor;
+          to2.errorStreamCallback = errorTeeBranchFromCursor;
           byteControllerInvalidateByobRequest(
             controller as ReadableByteStreamController
           );
@@ -3762,6 +3806,7 @@ class ReadableStream<R> {
           const from = cursor as unknown as ByteStreamCursorType;
           const to = shell.#consumer as unknown as ByteStreamCursorType;
           to.adoptReleasedBytes(from);
+          to.errorStreamCallback = from.errorStreamCallback;
           byteControllerInvalidateByobRequest(
             controller as ReadableByteStreamController
           );
@@ -4394,23 +4439,7 @@ class ReadableStream<R> {
       if (hook !== undefined) hook(reason);
       return;
     }
-    // QUEUED INVARIANT: a tee branch of a queued stream — its consumer is
-    // necessarily a QueueCursor (tee precedent); sanctioned cast.
-    const cursor = this.#consumer as QueueCursorType<R, R> | undefined;
-    if (cursor === undefined) return;
-    this.#consumer = undefined;
-    cursor.errorAllReads(reason);
-    readableStreamError(this, reason);
-    // Decided BEFORE the cursor's removal, for the reasons given at
-    // #consumerLeaving (as in QueueCursor.cancelStream).
-    markPromiseHandled(
-      controllerConsumerLeaving(
-        controller,
-        reason,
-        cursor.queue.cursorCount === 1
-      )
-    );
-    cursor.queue.removeCursor(cursor);
+    readableStreamErrorBranch(this, reason);
   }
 }
 

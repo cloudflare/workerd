@@ -480,3 +480,43 @@ export const teeNativeBodyAfterReleaseMidRead = {
     }
   },
 };
+
+// DIVERGENCE (ledger #7, on a tee branch): 3 bytes then close() under a
+// branch's read(Uint16Array). TypeScript errors that branch alone, as the
+// spec's per-branch close does: the read after the whole element rejects
+// with TypeError, and so does closed. Its sibling receives all 3 bytes.
+// C++ ends the branch cleanly without the trailing byte. Covers a read
+// pending at close() and reads issued after it.
+export const teeBranchFractionalCloseErrorsBranch = {
+  async test() {
+    const expected = 'Insufficient bytes to fill elements in the given view';
+    for (const pendingAtClose of [true, false]) {
+      let controller;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        start(c) {
+          controller = c;
+        },
+      });
+      const [a, b] = rs.tee();
+      const reader = a.getReader({ mode: 'byob' });
+      const first = pendingAtClose ? reader.read(new Uint16Array(4)) : null;
+      await scheduler.wait(5);
+      controller.enqueue(new Uint8Array([1, 2, 3]));
+      controller.close();
+      const r1 = await (first ?? reader.read(new Uint16Array(4)));
+      deepStrictEqual([...new Uint8Array(r1.value.buffer, 0, 2)], [1, 2]);
+      strictEqual(r1.value.length, 1);
+      const r2 = reader.read(new Uint16Array(4));
+      if (usingTsImpl) {
+        strictEqual((await rejectionOf(r2)).message, expected);
+        strictEqual((await rejectionOf(reader.closed)).message, expected);
+      } else {
+        const r = await r2;
+        strictEqual(r.value.byteLength, 0);
+        strictEqual(await reader.closed, undefined);
+      }
+      deepStrictEqual([...(await drainBytes(b))], [1, 2, 3]);
+    }
+  },
+};
