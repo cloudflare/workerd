@@ -70,7 +70,9 @@
 //   - tee(): returns a PAIR of new native source objects, leaving the
 //     original source closed. The stream layer wraps each branch in a
 //     fresh ReadableStream; branches are fully independent (no composite
-//     cancel).
+//     cancel). tee() may arrive while an aborted pull's read is still
+//     running (the reader was released mid-pull); both branches must then
+//     deliver the bytes that read produces, ahead of anything later.
 //   - expectedLength (non-standard extension, optional): the TOTAL bytes
 //     the source promises to produce — a non-negative bigint or integer
 //     number that fits in a uint64 (normalized to bigint), read once at

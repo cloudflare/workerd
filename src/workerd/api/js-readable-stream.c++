@@ -350,6 +350,75 @@ class PrefixedSource final: public ReadableStreamSource {
   kj::Own<ReadableStreamSource> inner;
 };
 
+// The tee input for a source teed while a read was in flight on it. Waits for that read to
+// finish, then serves the bytes read so far (the stash, then the in-flight read's bytes)
+// ahead of the source, so nothing reaches the source before its in-flight read is done.
+//
+// `length` is the total this source will produce (stash, in-flight read, and the rest of
+// the source), if known when teed. kj::newTee() samples tryGetLength() once, at
+// construction, so it must be known up front rather than after the handoff.
+class InFlightTeeSource final: public ReadableStreamSource {
+ public:
+  InFlightTeeSource(kj::Array<kj::byte> stash,
+      kj::Promise<NativeSourceInFlightRead> inFlight,
+      kj::Maybe<uint64_t> length)
+      : length(length),
+        ready(inFlight
+                  .then([this, stash = kj::mv(stash)](NativeSourceInFlightRead read) mutable {
+                    kj::Own<ReadableStreamSource> source;
+                    KJ_IF_SOME(s, read.source) {
+                      source = kj::mv(s);
+                    } else {
+                      // The in-flight read reached EOF.
+                      source = kj::heap<NullSource>();
+                    }
+                    if (stash.size() + read.bytes.size() > 0) {
+                      auto prefix = kj::heapArray<kj::byte>(stash.size() + read.bytes.size());
+                      prefix.first(stash.size()).copyFrom(stash);
+                      prefix.slice(stash.size()).copyFrom(read.bytes);
+                      source = kj::heap<PrefixedSource>(kj::mv(prefix), kj::mv(source));
+                    }
+                    inner = kj::mv(source);
+                  })
+                  .fork()) {}
+
+  // `ready`'s continuation captures `this`.
+  KJ_DISALLOW_COPY_AND_MOVE(InFlightTeeSource);
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    co_await ready.addBranch();
+    co_return co_await KJ_ASSERT_NONNULL(inner)->tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    KJ_IF_SOME(source, inner) {
+      return source->tryReadSync(buffer, minBytes);
+    }
+    return kj::none;
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    KJ_IF_SOME(source, inner) {
+      return source->tryGetLength(encoding);
+    }
+    if (encoding == StreamEncoding::IDENTITY) {
+      return length;
+    }
+    return kj::none;
+  }
+
+  void cancel(kj::Exception reason) override {
+    KJ_IF_SOME(source, inner) {
+      source->cancel(kj::mv(reason));
+    }
+  }
+
+ private:
+  kj::Maybe<uint64_t> length;
+  kj::Maybe<kj::Own<ReadableStreamSource>> inner;
+  kj::ForkedPromise<void> ready;
+};
+
 // Pumps an extracted native source into the sink. Shares the legacy internal controller's pump
 // (see pumpOwnedSourceToSink()): the sink and source stay alive through both deferred-proxy
 // phases; dropping the pump cancels the source; a pump failure, or the sink disconnecting first,
@@ -1416,6 +1485,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
 
   auto& ioContext = IoContext::current();
   pullInFlight = true;
+  inFlightReadStartLength = active.source->tryGetLength(StreamEncoding::IDENTITY);
   return ioContext
       .awaitIo(js, active.source->tryRead(scratch.begin(), 1, scratch.size()),
           [self = JSG_THIS, controller = controller.addRef(js), signal = kj::mv(signal)](
@@ -1429,6 +1499,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
       return;
     }
     auto data = self->scratch.first(amount);
+    if (self->handOffToTee(data, amount == 0)) return;
     if (signal->getAborted(js)) {
       // The consumer abandoned the read while it was in flight (e.g. releaseLock()).
       // Retain the bytes for redelivery on the next pull; the conduit treats this pull's
@@ -1447,10 +1518,11 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
     // The read failed; the source is no longer usable. Rethrow to reject the pull promise
     // -- the conduit errors the stream (or ignores the settlement if this pull was already
-    // abandoned).
+    // abandoned). A waiting tee's branches fail with the same error.
     self->pullInFlight = false;
     self->pendingCancel = false;
     self->state = kj::none;
+    self->failTeeHandoff(js, exception);
     js.throwException(kj::mv(exception));
   });
 }
@@ -1542,6 +1614,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
 
   auto& ioContext = IoContext::current();
   pullInFlight = true;
+  inFlightReadStartLength = active.source->tryGetLength(StreamEncoding::IDENTITY);
   return ioContext
       .awaitIo(js, active.source->tryRead(scratch.begin(), minBytes, maxBytes),
           [self = JSG_THIS, controller = controller.addRef(js),
@@ -1556,6 +1629,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
       return;
     }
     auto data = self->scratch.first(amount);
+    if (self->handOffToTee(data, amount < minBytes)) return;
     if (signal->getAborted(js)) {
       // The consumer abandoned the read; retain the bytes (after any previously retained
       // ones, preserving order) for redelivery on the next pull.
@@ -1577,6 +1651,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
     self->pullInFlight = false;
     self->pendingCancel = false;
     self->state = kj::none;
+    self->failTeeHandoff(js, exception);
     js.throwException(kj::mv(exception));
   });
 }
@@ -1649,18 +1724,34 @@ void ReadableStreamNativeSource::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValu
 kj::Array<jsg::Ref<ReadableStreamNativeSource>> ReadableStreamNativeSource::tee(jsg::Lock& js) {
   auto& active = JSG_REQUIRE_NONNULL(
       state, TypeError, "This ReadableStream source has already been consumed.");
-
-  // An abandoned pull's read may still be in flight (the reader was released mid-pull).
-  // Bytes that read produces after the split would land in this (dead) source's stash,
-  // invisible to both branches -- silent loss. Refuse loudly instead. Revisit per the
-  // design doc's open question D if this proves reachable in practice.
-  JSG_REQUIRE(
-      !pullInFlight, TypeError, "Cannot tee this ReadableStream while a read is in flight.");
+  // Canceled mid-read, the source is done; only its release waits on the read (see
+  // cancel()), whose settlement would never hand it over to a tee.
+  JSG_REQUIRE(!pendingCancel, TypeError, "This ReadableStream source has already been consumed.");
 
   auto& ioContext = IoContext::current();
   auto limit = ioContext.getLimitEnforcer().getBufferingLimit();
 
   auto branches = [&]() -> ReadableStreamSource::Tee {
+    if (pullInFlight) {
+      // An abandoned pull's read is still in flight (the reader was released mid-pull),
+      // so the source can be neither teed nor read until it finishes. The generic tee
+      // runs over an InFlightTeeSource that waits for the read's settlement to hand over
+      // the source and the bytes (handOffToTee()); the stash goes ahead of them. Taken
+      // before the stash moves into the tee: tryGetLength() counts it.
+      auto length = tryGetLength(StreamEncoding::IDENTITY);
+      auto paf = kj::newPromiseAndFulfiller<NativeSourceInFlightRead>();
+      teeHandoff = ioContext.addObject(kj::heap<TeeHandoff>(TeeHandoff{
+        .fulfiller = kj::mv(paf.fulfiller),
+        .source = kj::Own<ReadableStreamSource>(kj::mv(active.source)),
+      }));
+      auto tee = kj::newTee(kj::heap<TeeInputAdapter>(kj::heap<InFlightTeeSource>(
+                                stash.releaseAsArray(), kj::mv(paf.promise), length)),
+          limit);
+      return ReadableStreamSource::Tee{
+        .branches = {kj::heap<TeeBranchSource>(wrapTeeBranch(kj::mv(tee.branches[0]))),
+          kj::heap<TeeBranchSource>(wrapTeeBranch(kj::mv(tee.branches[1])))},
+      };
+    }
     KJ_IF_SOME(tee, active.source->tryTee(limit)) {
       // The underlying source has an optimized tee implementation.
       return kj::mv(tee);
@@ -1696,6 +1787,32 @@ kj::Array<jsg::Ref<ReadableStreamNativeSource>> ReadableStreamNativeSource::tee(
   return kj::arr(kj::mv(branch1), kj::mv(branch2));
 }
 
+bool ReadableStreamNativeSource::handOffToTee(kj::ArrayPtr<const kj::byte> data, bool eof) {
+  KJ_IF_SOME(pending, teeHandoff) {
+    auto& handoff = *pending;
+    kj::Maybe<kj::Own<ReadableStreamSource>> source;
+    if (!eof) {
+      source = kj::mv(handoff.source);
+    }
+    // If both branches are already gone, the handed-over source is dropped here, which is
+    // safe now that its read has finished.
+    handoff.fulfiller->fulfill(NativeSourceInFlightRead{
+      .bytes = kj::heapArray(data),
+      .source = kj::mv(source),
+    });
+    teeHandoff = kj::none;
+    return true;
+  }
+  return false;
+}
+
+void ReadableStreamNativeSource::failTeeHandoff(jsg::Lock& js, jsg::Value& exception) {
+  KJ_IF_SOME(pending, teeHandoff) {
+    pending->fulfiller->reject(js.exceptionToKj(jsg::JsValue(exception.getHandle(js))));
+    teeHandoff = kj::none;
+  }
+}
+
 jsg::Optional<jsg::JsBigInt> ReadableStreamNativeSource::getExpectedLength(jsg::Lock& js) {
   KJ_IF_SOME(length, tryGetLength(StreamEncoding::IDENTITY)) {
     return js.bigInt(length);
@@ -1705,8 +1822,16 @@ jsg::Optional<jsg::JsBigInt> ReadableStreamNativeSource::getExpectedLength(jsg::
 
 kj::Maybe<uint64_t> ReadableStreamNativeSource::tryGetLength(StreamEncoding encoding) {
   KJ_IF_SOME(active, state) {
+    if (pendingCancel) {
+      // Canceled mid-read; only the release is deferred (see cancel()).
+      return kj::none;
+    }
     if (encoding == StreamEncoding::IDENTITY) {
-      KJ_IF_SOME(length, active.source->tryGetLength(StreamEncoding::IDENTITY)) {
+      // Mid-read, the source may already count the in-flight read's bytes as consumed
+      // (see inFlightReadStartLength), so use its length from when the read was issued.
+      auto sourceLength = pullInFlight ? inFlightReadStartLength
+                                       : active.source->tryGetLength(StreamEncoding::IDENTITY);
+      KJ_IF_SOME(length, sourceLength) {
         // Bytes retained in the stash (from an abandoned pull, or inherited from a tee
         // parent) were already consumed from the underlying source but not yet delivered,
         // so they count toward the total this source will produce. Getting this right
@@ -1716,9 +1841,10 @@ kj::Maybe<uint64_t> ReadableStreamNativeSource::tryGetLength(StreamEncoding enco
       }
       return kj::none;
     }
-    // Stashed bytes are identity bytes already drawn from the source: once any exist, an
-    // encoded length no longer describes what this source will deliver.
-    if (!stash.empty()) {
+    // Stashed bytes, and those of a read in flight, are identity bytes already drawn from
+    // the source: once any exist, an encoded length no longer describes what this source
+    // will deliver.
+    if (!stash.empty() || pullInFlight) {
       return kj::none;
     }
     return active.source->tryGetLength(encoding);

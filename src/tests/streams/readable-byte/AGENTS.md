@@ -43,6 +43,7 @@ behavior-parity (messages aside).
 | 26 | pull() after both tee branches are collected (controller held) — readable #20 mirror | keeps pulling for consumers that no longer exist; DEFECT: a source that enqueues on every pull runs until the stream closes | the source is released: pull() is never called again (the parity half — enqueue accepted, desiredSize at the high-water mark, byobRequest null, close() as ever — is `teeBranchesCollected`) | `teeBranchesCollectedPullStops` |
 | 27 | where `closed` settles relative to the #12 tail read (close() below min with partial bytes) | read fulfills first, then closed | closed first — matching the order the spec gives a read that drains the last queued bytes after close(); that drain case is parity and is pinned alongside | `closedOrderAtEndOfData` |
 | 28 | read(view) with a multi-byte view (e.g. Uint16Array) on a native body | resolves Uint8Array views of whatever bytes arrive, partial elements included | views of the read's own type holding whole elements; a partial element is carried into the next read, and one left at EOF errors the stream with TypeError 'Insufficient bytes to fill elements in the given view' (as a JS byte source's close() mid-element does, spec) | `nativeByobMultiByteViews` |
+| 29 | a native body's reader released while its read is in flight, then tee() or clone() | releaseLock() throws TypeError (outstanding read promises) | the read rejects; both branches receive the whole body, including the in-flight read's bytes | `teeNativeBodyAfterReleaseMidRead` |
 
 Parity worth noting (probed, pinned): byte hwm defaults to 0 with NO
 automatic pull; pull-throw and error-then-throw identity; enqueue
@@ -120,7 +121,7 @@ named suite test pins directly, differing only in incidental asserts.
 | `respond.js` | ledger #6, #8, #15, #16; all 31 streams-respond-test tests (respond/respondWithNewView/pumps/cancel races/UAF shapes) + js-test respond family |
 | `release-relock.js` | ledger #9, #10; the WPT releaseLock→second-reader cluster; release with two pending reads or a partially filled head |
 | `read-min.js` | ledger #11-#13, #27; byobMin/constraints/readAtLeast (migrated streams-test.js); /chunked SELF endpoint |
-| `tee.js` | ledger #14, #24, #25; clone-per-branch; migrated byte-tee pair; error propagation; released branch reads, incl. partially filled ones and tee() after a release; byobRequest held across tee() |
+| `tee.js` | ledger #14, #24, #25, #29; clone-per-branch; migrated byte-tee pair; error propagation; released branch reads, incl. partially filled ones and tee() after a release; byobRequest held across tee() |
 | `buffer-lifecycle.js` | ledger #18; resizable ArrayBuffers; WASM Memory |
 | `gc.js` | pending BYOB read + byobRequest survive gc(); both tee branches collected while the controller is held: enqueue() accepted, desiredSize at the high-water mark, byobRequest null, close() then enqueue() as ever (a parity pin of the observable surface — the retention checks are the readable suite's, a transferred buffer leaving nothing to WeakRef), one branch cancelled and the other collected, observed in the gc()'s own job (the readable suite's teeSurvivorBranchCollected, plus byobRequest null), and pull() stops (ledger #26) |
 | `integration.js` | BYOB round-trips via SELF; readAtLeast on echoed body; bytes() |

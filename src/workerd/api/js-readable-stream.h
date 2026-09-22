@@ -342,6 +342,13 @@ struct JsReadableStream::Tee {
   JsReadableStream branch2;
 };
 
+// What a ReadableStreamNativeSource's read, in flight when the source was teed, hands to
+// the tee once it finishes: the bytes it read, and the source unless the read reached EOF.
+struct NativeSourceInFlightRead {
+  kj::Array<kj::byte> bytes;
+  kj::Maybe<kj::Own<ReadableStreamSource>> source;
+};
+
 // The C++ implementation of the "native underlying source" contract defined by the
 // TypeScript streams implementation.
 //
@@ -380,10 +387,10 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // Uses the underlying source's optimized tryTee() when available, and otherwise falls
   // back to a generic kj::newTee()-based split (mirroring the legacy internal controller's
   // tee). Any bytes retained from an abandoned pull are inherited by BOTH branches,
-  // delivered before anything further from upstream.
+  // delivered before anything further from upstream. If an abandoned pull's read is still
+  // in flight, the branches wait for it, then deliver its bytes ahead of the rest.
   //
-  // Throws if the source has already been consumed, or if an abandoned pull's read is
-  // still in flight.
+  // Throws if the source has already been consumed.
   kj::Array<jsg::Ref<ReadableStreamNativeSource>> tee(jsg::Lock& js);
 
   // The total number of bytes the source promises to produce, if known. Queried live from
@@ -426,6 +433,19 @@ class ReadableStreamNativeSource final: public jsg::Object {
   struct Active {
     IoOwn<ReadableStreamSource> source;
   };
+
+  // A tee waiting on a read in flight. Holds the source until that read finishes.
+  struct TeeHandoff {
+    kj::Own<kj::PromiseFulfiller<NativeSourceInFlightRead>> fulfiller;
+    kj::Own<ReadableStreamSource> source;
+  };
+
+  // Completes a tee waiting on the read that just finished (see tee()), handing over
+  // `data`, and the source unless `eof`. Returns false if no tee is waiting.
+  bool handOffToTee(kj::ArrayPtr<const kj::byte> data, bool eof);
+
+  // Fails a tee waiting on the read that just failed, if any, with the read's exception.
+  void failTeeHandoff(jsg::Lock& js, jsg::Value& exception);
 
   jsg::Promise<void> pullDefault(
       jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal, Active& active);
@@ -485,9 +505,21 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // pulling/pullAgain serialization).
   bool pullInFlight = false;
 
+  // The underlying source's IDENTITY length as of the moment the in-flight read was
+  // issued (meaningful only while pullInFlight). A source's length is only reliable between
+  // reads: memory-backed sources and HTTP fixed-length bodies both shrink it while a read is
+  // still pending, before the read's bytes are delivered. tryGetLength() during the read
+  // (including tee()'s) uses this snapshot plus the stash, which the read leaves untouched
+  // until it settles.
+  kj::Maybe<uint64_t> inFlightReadStartLength;
+
   // Set when cancel() arrives while a pull's read is in flight: the source's release is
   // deferred to the pull's settlement.
   bool pendingCancel = false;
+
+  // Set when tee() arrives while a pull's read is in flight: the pull's settlement hands
+  // the source and the read's bytes to the branches.
+  kj::Maybe<IoOwn<TeeHandoff>> teeHandoff;
 
   static constexpr size_t kScratchSize = 32 * 1024;
 
