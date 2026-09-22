@@ -134,6 +134,7 @@ export {
   readMinStagedFulfillment,
   readMinValidation,
   closeBelowMin,
+  closedOrderAtEndOfData,
   minMetThenClose,
   readAtLeastDefaultReaderThrows,
   byobReaderConstraints,
