@@ -269,7 +269,9 @@ async function teeWithReleasedPartialRead() {
 }
 
 // The released bytes reach the branch's next pending read(view) ahead of
-// the next chunk; the sibling is unaffected (parity).
+// the next chunk; the sibling is unaffected. DIVERGENCE (ledger #32): the
+// read takes the released bytes and the chunk together under TS (spec);
+// C++ gives it the released bytes alone.
 export const teeReleasedPartialReadByob = {
   async test() {
     const { a, b, controller } = await teeWithReleasedPartialRead();
@@ -277,11 +279,17 @@ export const teeReleasedPartialReadByob = {
     const read = reader.read(new Uint8Array(4));
     controller.enqueue(new Uint8Array([3, 4, 5, 6]));
     controller.close();
-    deepStrictEqual([...(await read).value], [1, 2]);
-    deepStrictEqual(
-      [...(await reader.read(new Uint8Array(4))).value],
-      [3, 4, 5, 6]
-    );
+    const [first, second] = usingTsImpl
+      ? [
+          [1, 2, 3, 4],
+          [5, 6],
+        ]
+      : [
+          [1, 2],
+          [3, 4, 5, 6],
+        ];
+    deepStrictEqual([...(await read).value], first);
+    deepStrictEqual([...(await reader.read(new Uint8Array(4))).value], second);
     deepStrictEqual([...(await drainBytes(b))], [1, 2, 3, 4, 5, 6]);
   },
 };
@@ -638,6 +646,22 @@ export const teeHeldByobRequestWithReleasedBytes = {
       deepStrictEqual([...(await drainBytes(a, readerA))], [1, 2, 9]);
       deepStrictEqual([...(await drainBytes(b, readerB))], [1, 2, 9]);
     }
+  },
+};
+
+// Ledger #32 through a held request: enqueue() retires it, and a branch's
+// pending read(view) takes the released read's bytes and the chunk
+// together under TS (spec). C++ has dropped those bytes (ledger #25).
+export const teeHeldByobRequestEnqueueFillsByobRead = {
+  async test() {
+    const { a, b, controller } = await teeWithHeldByobRequest([1, 2]);
+    const read = a.getReader({ mode: 'byob' }).read(new Uint8Array(8));
+    await scheduler.wait(5);
+    controller.enqueue(new Uint8Array([9]));
+    deepStrictEqual([...(await read).value], usingTsImpl ? [1, 2, 9] : [9]);
+    const expectedB = usingTsImpl ? [1, 2] : [9];
+    deepStrictEqual([...(await b.getReader().read()).value], expectedB);
+    controller.error(new Error('cleanup'));
   },
 };
 

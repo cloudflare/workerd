@@ -2303,9 +2303,8 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         // old captured views are detached.
         head.buffer = ArrayBufferPrototypeTransferToFixedLength(head.buffer);
       }
-      // Spec step 8.5: if the head pending pull-into has readerType 'none'
-      // (leftover from releaseLock), drain it before adding the new chunk.
-      drainCursor.drainNoneDescriptors();
+      // Spec step 8.5: a released head's bytes go ahead of the chunk.
+      drainCursor.flushReleasedHead();
       // Spec step 9.3: if the head descriptor is an auto-allocate
       // (readerType 'default'), discard it and fulfill the pending default
       // read directly from the enqueued chunk. The auto-allocate buffer is

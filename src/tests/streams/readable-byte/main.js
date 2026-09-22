@@ -147,6 +147,7 @@ export {
   relockTwoPendingRespond,
   relockAutoAllocateTwoPendingRespond,
   relockPartialHeadThenEnqueue,
+  relockPartialHeadThenEnqueueShapes,
   relockRespondOverflowSecondView,
 } from 'release-relock';
 
@@ -181,6 +182,7 @@ export {
   teeHeldByobRequestWithReleasedBytes,
   teeHeldByobRequestAfterCloseOrError,
   teeHeldByobRequestAcrossNestedTee,
+  teeHeldByobRequestEnqueueFillsByobRead,
   teeHeldByobRequestNewViewAndAutoAllocate,
   teeNativeBodyAfterReleaseMidRead,
   teeBranchFractionalCloseErrorsBranch,
