@@ -4,6 +4,8 @@
 
 #include <kj/one-of.h>
 
+#include <coroutine>
+
 struct Value {};
 void consume(Value&&);
 void use(const Value&);
@@ -248,6 +250,61 @@ void continueWithoutUse(Choice choice) {
     KJ_CASE_ONEOF(value, Value) {
       consume(kj::mv(value));
       continue;
+    }
+    KJ_CASE_ONEOF(value, int) {}
+  }
+}
+
+struct Awaitable {
+  bool await_ready() const;
+  void await_suspend(std::coroutine_handle<>) const;
+  void await_resume() const;
+};
+
+struct Promise {
+  struct promise_type {
+    Promise get_return_object();
+    std::suspend_never initial_suspend();
+    std::suspend_never final_suspend() noexcept;
+    void return_void();
+    void unhandled_exception();
+  };
+};
+
+template <typename Func>
+Awaitable run(Func&&) {
+  return Awaitable();
+}
+
+Promise coroutineCaptureInCase(Choice choice) {
+  co_await Awaitable();
+  KJ_SWITCH_ONEOF(choice) {
+    KJ_CASE_ONEOF(value, Value) {
+      co_await run([value = kj::mv(value)] { use(value); });
+    }
+    KJ_CASE_ONEOF(value, int) {}
+  }
+}
+
+Promise useAfterCoroutineCapture(Choice choice) {
+  co_await Awaitable();
+  KJ_SWITCH_ONEOF(choice) {
+    KJ_CASE_ONEOF(value, Value) {
+      co_await run([value = kj::mv(value)] { use(value); });
+      use(value);  // expect-warning
+    }
+    KJ_CASE_ONEOF(value, int) {}
+  }
+}
+
+Promise useAfterMoveInCoroutineCapture(Choice choice) {
+  co_await Awaitable();
+  KJ_SWITCH_ONEOF(choice) {
+    KJ_CASE_ONEOF(value, Value) {
+      co_await run([value = kj::mv(value)]() mutable {
+        consume(kj::mv(value));
+        use(value);  // expect-warning
+      });
     }
     KJ_CASE_ONEOF(value, int) {}
   }
