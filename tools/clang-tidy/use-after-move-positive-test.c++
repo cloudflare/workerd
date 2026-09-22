@@ -32,6 +32,9 @@ bool choose();
 
 #define KJ_SWITCH_ONEOF(value) switch (value)
 
+#define KJ_CASE_ONEOF(name, value)                                                                 \
+  for (auto &name = value, *name##Done = &name; name##Done; name##Done = nullptr)
+
 void abortSignalOrdering(Value value) {
   consumePair(value.clone(), convert(kj::mv(value)));
 }
@@ -65,6 +68,13 @@ void movedInsideKjSwitchOneof(Value value) {
       break;
     case false:
       break;
+  }
+}
+
+void movedInsideKjCaseOneof(Value value) {
+  KJ_CASE_ONEOF(selected, value) {
+    consume(kj::mv(selected));
+    use(selected);
   }
 }
 

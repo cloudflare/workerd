@@ -55,6 +55,41 @@ bool isInsideKjOneOfCase(const clang::Expr& expression, clang::ASTContext& conte
   }
 }
 
+bool referencesVariable(const clang::Stmt& statement, const clang::ValueDecl& variable) {
+  if (const auto* reference = clang::dyn_cast<clang::DeclRefExpr>(&statement)) {
+    return reference->getDecl() == &variable;
+  }
+  for (const auto* child: statement.children()) {
+    if (child != nullptr && referencesVariable(*child, variable)) return true;
+  }
+  return false;
+}
+
+// The generated KJ_CASE_ONEOF loop can make the inherited analysis revisit the move on a
+// nonexistent second iteration. Do not suppress it when the selected case contains a subsequent
+// statement that actually references the moved variable in the same source-level iteration.
+bool hasLaterReferenceInSameCompound(const clang::Expr& expression,
+    const clang::ValueDecl& variable,
+    clang::ASTContext& context) {
+  clang::DynTypedNode node = clang::DynTypedNode::create(expression);
+  while (true) {
+    const auto* current = node.get<clang::Stmt>();
+    if (current == nullptr) return false;
+
+    auto parents = context.getParents(node);
+    if (parents.size() != 1) return false;
+    if (const auto* compound = parents[0].get<clang::CompoundStmt>()) {
+      bool afterMove = false;
+      for (const auto* statement: compound->body()) {
+        if (afterMove && referencesVariable(*statement, variable)) return true;
+        if (statement == current) afterMove = true;
+      }
+      return false;
+    }
+    node = parents[0];
+  }
+}
+
 // Moving a derived object into its base move constructor leaves fields declared by the derived
 // class untouched. Clang 22's analysis does not make this distinction.
 bool isDirectDerivedFieldUse(const clang::DeclRefExpr& expression,
@@ -158,7 +193,8 @@ void UseAfterMoveCheck::check(const clang::ast_matchers::MatchFinder::MatchResul
   const auto* move = result.Nodes.getNodeAs<clang::CallExpr>("call-move");
   const auto* argument = result.Nodes.getNodeAs<clang::DeclRefExpr>("arg");
   if (move == nullptr || argument == nullptr || result.Context == nullptr) return;
-  if (isInsideKjOneOfCase(*move, *result.Context)) {
+  if (isInsideKjOneOfCase(*move, *result.Context) &&
+      !hasLaterReferenceInSameCompound(*move, *argument->getDecl(), *result.Context)) {
     return;
   }
   if (onlyUsesDirectDerivedFieldsAfterBaseMove(result, *argument)) return;
