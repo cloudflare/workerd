@@ -826,9 +826,10 @@ export const kMaxZstdDParam = Math.max(
 );
 export const zstdInitDParamsArray = new Int32Array(kMaxZstdDParam + 1);
 
-// Node accepts a zstd `dictionary` as an ArrayBufferView or an ArrayBuffer, and quietly
-// ignores any other type rather than throwing (lib/zlib.js, class Zstd). Normalize here so
-// that both the stream path and the convenience functions' fast path behave the same way.
+// Node accepts a zstd `dictionary` as an ArrayBufferView or an ArrayBuffer, and throws
+// ERR_INVALID_ARG_TYPE for any other type, null included (lib/zlib.js, class Zstd, since
+// nodejs/node#65867; earlier releases ignored it). Normalize here so that both the stream
+// path and the convenience functions' fast path behave the same way.
 export function normalizeZstdDictionary(
   dictionary: ZstdOptions['dictionary']
 ): ArrayBufferView | undefined {
@@ -838,7 +839,11 @@ export function normalizeZstdDictionary(
   if (isAnyArrayBuffer(dictionary)) {
     return new Uint8Array(dictionary);
   }
-  return undefined;
+  throw new ERR_INVALID_ARG_TYPE(
+    'options.dictionary',
+    ['Buffer', 'TypedArray', 'DataView', 'ArrayBuffer'],
+    dictionary
+  );
 }
 
 // Returns `options` unchanged unless its dictionary needed normalizing, so the common case
