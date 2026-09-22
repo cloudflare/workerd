@@ -7,6 +7,7 @@
 #include "worker-rpc.h"
 
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/autogate.h>
 
 #include <capnp/capability.h>
 #include <kj/async-io.h>
@@ -30,21 +31,52 @@ class CountingJsRpcTarget final: public rpc::JsRpcTarget::Server {
   uint& callCount;
 };
 
-class FailingOutgoingFactory final: public Fetcher::OutgoingFactory {
+class RecordingFailingOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
-  explicit FailingOutgoingFactory(uint& callCount): callCount(callCount) {}
+  RecordingFailingOutgoingFactory(uint& singleUseCount,
+      uint& actorAttemptCount,
+      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata>& metadata)
+      : singleUseCount(singleUseCount),
+        actorAttemptCount(actorAttemptCount),
+        metadata(metadata) {}
 
   Result newSingleUseClient(kj::Maybe<kj::String>, MakeUserSpanParent) override {
-    ++callCount;
+    ++singleUseCount;
     KJ_FAIL_REQUIRE("destination failed");
   }
 
-  bool supportsActorCallRetries() const override {
-    return true;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable::YES;
+  }
+
+  Result newActorCallAttempt(
+      kj::Maybe<kj::String>, ActorCallRetryState::Attempt attempt, MakeUserSpanParent) override {
+    ++actorAttemptCount;
+    metadata = attempt.takeMetadata();
+    KJ_FAIL_REQUIRE("destination failed");
   }
 
  private:
-  uint& callCount;
+  uint& singleUseCount;
+  uint& actorAttemptCount;
+  kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata>& metadata;
+};
+
+class RejectingClaimObserver final: public RequestObserver {
+ public:
+  void claimRetryTokenBeforeUserCode() override {
+    ++claimCount;
+    auto exception = KJ_EXCEPTION(FAILED, "retry claim rejected");
+    exception.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+    kj::throwFatalException(kj::mv(exception));
+  }
+
+  void delivered() override {
+    ++deliveredCount;
+  }
+
+  uint claimCount = 0;
+  uint deliveredCount = 0;
 };
 
 capnp::Capability::Client brokenCap() {
@@ -307,14 +339,18 @@ KJ_TEST("retry-capable RPC calls resolve the destination only after safe seriali
   auto flags = flagsMessage.initRoot<CompatibilityFlags>();
   flags.setFetcherRpc(true);
   flags.setRpcParamsDupStubs(false);
-  TestFixture fixture({.featureFlags = flags.asReader()});
+  TestFixture fixture({.featureFlags = flags.asReader(),
+    .autogates = kj::arr("durable-object-retries-fetch"_kj,
+        "durable-object-retries-fetch-retry-requests"_kj, "durable-object-retries-jsrpc"_kj)});
 
-  uint destinationCallCount = 0;
+  uint singleUseCount = 0;
+  uint actorAttemptCount = 0;
+  kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> metadata;
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto fetcher =
-        env.js.alloc<Fetcher>(env.context.addObject<Fetcher::OutgoingFactory>(
-                                  kj::heap<FailingOutgoingFactory>(destinationCallCount)),
-            Fetcher::RequiresHostAndProtocol::YES);
+    auto fetcher = env.js.alloc<Fetcher>(
+        env.context.addObject<Fetcher::OutgoingFactory>(
+            kj::heap<RecordingFailingOutgoingFactory>(singleUseCount, actorAttemptCount, metadata)),
+        Fetcher::RequiresHostAndProtocol::YES);
     auto method = wrapMethod(env.js, *fetcher, "method"_kj);
     auto startRejectedCall = [&](v8::Local<v8::Value> arg) {
       v8::LocalVector<v8::Value> args(env.js.v8Isolate);
@@ -328,14 +364,17 @@ KJ_TEST("retry-capable RPC calls resolve the destination only after safe seriali
 
     auto serializationFailure =
         startRejectedCall(v8::Local<v8::Value>(v8::Symbol::New(env.js.v8Isolate)));
-    KJ_EXPECT(destinationCallCount == 0);
+    KJ_EXPECT(singleUseCount == 0);
+    KJ_EXPECT(actorAttemptCount == 0);
 
     auto cap = brokenCap().castAs<rpc::JsRpcTarget>();
     auto stub = env.js.alloc<JsRpcStub>(env.context.addObject(kj::heap(kj::mv(cap))), kj::none);
     auto& stubHandler = KJ_REQUIRE_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<JsRpcStub>>());
     KJ_EXPECT_LOG(ERROR, "destination failed");
     auto destinationFailure = startRejectedCall(stubHandler.wrap(env.js, stub.addRef()));
-    KJ_EXPECT(destinationCallCount == 1);
+    KJ_EXPECT(singleUseCount == 1);
+    KJ_EXPECT(actorAttemptCount == 0);
+    KJ_EXPECT(metadata == kj::none);
     auto duplicate KJ_UNUSED = stub->dup(env.js);
 
     return kj::joinPromises(kj::arr(kj::mv(serializationFailure), kj::mv(destinationFailure)))
@@ -370,8 +409,14 @@ class ReceiverOutgoingFactory final: public Fetcher::OutgoingFactory {
     return {.client = receiver.makeWorkerEntrypoint(), .spanParents = kj::none};
   }
 
-  bool supportsActorCallRetries() const override {
-    return true;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable::YES;
+  }
+
+  Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
+      ActorCallRetryState::Attempt,
+      MakeUserSpanParent makeUserSpanParent) override {
+    return newSingleUseClient(kj::mv(cfStr), kj::mv(makeUserSpanParent));
   }
 
  private:
@@ -396,8 +441,14 @@ class GatedReceiverOutgoingFactory final: public Fetcher::OutgoingFactory {
     };
   }
 
-  bool supportsActorCallRetries() const override {
-    return true;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable::YES;
+  }
+
+  Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
+      ActorCallRetryState::Attempt,
+      MakeUserSpanParent makeUserSpanParent) override {
+    return newSingleUseClient(kj::mv(cfStr), kj::mv(makeUserSpanParent));
   }
 
  private:
@@ -515,6 +566,293 @@ KJ_TEST("an unresolved retry-capable destination supports promise pipelining") {
   });
 
   KJ_EXPECT(destinationCallCount == 1);
+}
+
+// Makes one failing replayable actor RPC call, recording how the sender dispatched it.
+struct ActorCallDispatch {
+  uint singleUseCount = 0;
+  uint actorAttemptCount = 0;
+  kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> metadata;
+};
+ActorCallDispatch makeReplayableActorCall(kj::ArrayPtr<const kj::StringPtr> autogates) {
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setFetcherRpc(true);
+  TestFixture fixture({.featureFlags = flags.asReader()});
+  // Exactly these gates, even under WORKERD_ALL_AUTOGATES: the gate-off cases assert on absence.
+  util::Autogate::initAutogateNamesForTest(autogates, util::IgnoreAllAutogatesEnv::YES);
+
+  ActorCallDispatch dispatch;
+  auto& singleUseCount = dispatch.singleUseCount;
+  auto& actorAttemptCount = dispatch.actorAttemptCount;
+  auto& metadata = dispatch.metadata;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher = env.js.alloc<Fetcher>(
+        env.context.addObject<Fetcher::OutgoingFactory>(
+            kj::heap<RecordingFailingOutgoingFactory>(singleUseCount, actorAttemptCount, metadata)),
+        Fetcher::RequiresHostAndProtocol::YES);
+    auto method = wrapMethod(env.js, *fetcher, "method"_kj);
+    v8::LocalVector<v8::Value> args(env.js.v8Isolate);
+    args.push_back(v8::Number::New(env.js.v8Isolate, 123));
+    KJ_EXPECT_LOG(ERROR, "destination failed");
+    auto result = jsg::JsFunction(method.getHandle(env.js)).call(env.js, env.js.undefined(), args);
+    return env.context.awaitJs(env.js, env.js.toPromise(result)).ignoreResult().then([]() {
+      KJ_FAIL_ASSERT("RPC call unexpectedly succeeded");
+    }, [](kj::Exception&&) {});
+  });
+  return dispatch;
+}
+
+ActorCallDispatch makeActorPropertyRead(kj::ArrayPtr<const kj::StringPtr> autogates) {
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setFetcherRpc(true);
+  TestFixture fixture({.featureFlags = flags.asReader()});
+  util::Autogate::initAutogateNamesForTest(autogates, util::IgnoreAllAutogatesEnv::YES);
+
+  ActorCallDispatch dispatch;
+  auto& singleUseCount = dispatch.singleUseCount;
+  auto& actorAttemptCount = dispatch.actorAttemptCount;
+  auto& metadata = dispatch.metadata;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher = env.js.alloc<Fetcher>(
+        env.context.addObject<Fetcher::OutgoingFactory>(
+            kj::heap<RecordingFailingOutgoingFactory>(singleUseCount, actorAttemptCount, metadata)),
+        Fetcher::RequiresHostAndProtocol::YES);
+    auto property = KJ_REQUIRE_NONNULL(fetcher->getRpcMethodForTestOnly(env.js, kj::str("value")));
+    auto handler = env.js.wrapReturningFunction(
+        env.js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&) {
+      return v8::Local<v8::Value>(js.undefined());
+    });
+    KJ_EXPECT_LOG(ERROR, "destination failed");
+    auto result = property->then(env.js, handler, {});
+    return env.context.awaitJs(env.js, env.js.toPromise(result)).ignoreResult().then([]() {
+      KJ_FAIL_ASSERT("RPC property read unexpectedly succeeded");
+    }, [](kj::Exception&&) {});
+  });
+  return dispatch;
+}
+
+KJ_TEST("replayable actor RPC calls carry observe-only retry metadata") {
+  auto dispatch = makeReplayableActorCall(kj::arr("durable-object-retries-fetch"_kj,
+      "durable-object-retries-fetch-retry-requests"_kj, "durable-object-retries-jsrpc"_kj));
+
+  KJ_EXPECT(dispatch.singleUseCount == 0);
+  KJ_EXPECT(dispatch.actorAttemptCount == 1);
+  auto recordedMetadata = KJ_ASSERT_NONNULL(dispatch.metadata);
+  KJ_EXPECT(recordedMetadata.isRetry == IsActorRetry::NO);
+  KJ_EXPECT(recordedMetadata.retryGateEnabled == ActorRetryGateEnabled::NO);
+}
+
+KJ_TEST("replayable actor RPC calls carry no retry metadata without the JSRPC gate") {
+  auto dispatch = makeReplayableActorCall(
+      kj::arr("durable-object-retries-fetch"_kj, "durable-object-retries-fetch-retry-requests"_kj));
+
+  KJ_EXPECT(dispatch.singleUseCount == 1);
+  KJ_EXPECT(dispatch.actorAttemptCount == 0);
+  KJ_EXPECT(dispatch.metadata == kj::none);
+}
+
+KJ_TEST("replayable actor RPC calls carry no retry metadata without the fetch gate") {
+  auto dispatch = makeReplayableActorCall(kj::arr("durable-object-retries-jsrpc"_kj));
+
+  KJ_EXPECT(dispatch.singleUseCount == 1);
+  KJ_EXPECT(dispatch.actorAttemptCount == 0);
+  KJ_EXPECT(dispatch.metadata == kj::none);
+}
+
+KJ_TEST("actor RPC property reads carry no retry metadata") {
+  auto dispatch = makeActorPropertyRead(
+      kj::arr("durable-object-retries-fetch"_kj, "durable-object-retries-jsrpc"_kj));
+
+  KJ_EXPECT(dispatch.singleUseCount == 1);
+  KJ_EXPECT(dispatch.actorAttemptCount == 0);
+  KJ_EXPECT(dispatch.metadata == kj::none);
+}
+
+// A Durable Object whose methods fail in the ways the receiver must classify as delivered.
+constexpr kj::StringPtr ACTOR_SOURCE = R"JS(
+  import { DurableObject } from "cloudflare:workers";
+  export default class extends DurableObject {
+    fail() { throw new Error("method failed"); }
+    get failingGetter() { throw new Error("getter failed"); }
+    // An outbound disconnect reaches user code as an Error with `retryable` set; rethrowing it
+    // is how such a failure propagates through a method.
+    rethrowDisconnect() {
+      const error = new Error("outbound disconnected");
+      error.retryable = true;
+      throw error;
+    }
+    hang() { return new Promise(() => {}); }
+    abortSelf() {
+      this.ctx.abort("test abort");
+      return new Promise(() => {});
+    }
+  }
+)JS"_kj;
+
+struct StartedSession {
+  rpc::JsRpcTarget::Client cap;
+  kj::Promise<WorkerInterface::CustomEvent::Result> session;
+};
+
+StartedSession startSession(WorkerInterface& entrypoint) {
+  auto event = kj::heap<JsRpcSessionCustomEvent>(JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
+  auto cap = event->getCap();
+  return {kj::mv(cap), entrypoint.customEvent(kj::mv(event)).eagerlyEvaluate(nullptr)};
+}
+
+enum class Operation { CALL, GET_PROPERTY };
+
+kj::Exception expectCallFailure(rpc::JsRpcTarget::Client& cap,
+    kj::StringPtr name,
+    kj::WaitScope& waitScope,
+    Operation operation = Operation::CALL) {
+  auto request = cap.callRequest();
+  request.setMethodName(name);
+  if (operation == Operation::GET_PROPERTY) {
+    request.getOperation().setGetProperty();
+  }
+  return KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { request.send().wait(waitScope); }),
+      "call unexpectedly succeeded", name);
+}
+
+void expectDeliveredDetails(const kj::Exception& exception) {
+  KJ_EXPECT(exception.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) != kj::none, exception);
+  KJ_EXPECT(exception.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, exception);
+  KJ_EXPECT(
+      exception.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, exception);
+  KJ_EXPECT(exception.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) == kj::none, exception);
+}
+
+void expectClaimRejectedDetails(const kj::Exception& exception) {
+  KJ_EXPECT(exception.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none, exception);
+  KJ_EXPECT(exception.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) == kj::none, exception);
+  KJ_EXPECT(exception.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, exception);
+}
+
+KJ_TEST("JSRPC claim rejection fails the native call before construction or delivery") {
+  // Construction would replace the claim-rejection failure with this constructor's error.
+  static constexpr auto source = R"JS(
+    import { DurableObject } from "cloudflare:workers";
+    export default class extends DurableObject {
+      constructor(ctx, env) {
+        super(ctx, env);
+        throw new Error("actor was constructed");
+      }
+      method() {}
+    }
+  )JS"_kj;
+  auto observer = kj::refcounted<RejectingClaimObserver>();
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = source,
+    .actorId = Worker::Actor::Id(kj::str("jsrpc-claim-test")),
+    .actorClassName = "default"_kj,
+    .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
+        [&observer]() -> kj::Own<RequestObserver> { return kj::addRef(*observer); }),
+  });
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  auto rejectedCall = expectCallFailure(cap, "method", fixture.getWaitScope());
+  KJ_EXPECT(rejectedCall.getDescription().contains("retry claim rejected"), rejectedCall);
+  expectClaimRejectedDetails(rejectedCall);
+  KJ_EXPECT(observer->claimCount == 1);
+  KJ_EXPECT(observer->deliveredCount == 0);
+
+  auto sessionException =
+      kj::runCatchingExceptions([&]() { session.wait(fixture.getWaitScope()); });
+  expectClaimRejectedDetails(KJ_ASSERT_NONNULL(sessionException));
+}
+
+KJ_TEST("actor JSRPC method and getter failures carry delivered details") {
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = ACTOR_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str("jsrpc-delivery-test")),
+    .actorClassName = "default"_kj,
+  });
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  auto methodFailure = expectCallFailure(cap, "fail", fixture.getWaitScope());
+  KJ_EXPECT(methodFailure.getDescription().contains("method failed"), methodFailure);
+  expectDeliveredDetails(methodFailure);
+
+  auto getterFailure =
+      expectCallFailure(cap, "failingGetter", fixture.getWaitScope(), Operation::GET_PROPERTY);
+  KJ_EXPECT(getterFailure.getDescription().contains("getter failed"), getterFailure);
+  expectDeliveredDetails(getterFailure);
+
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
+}
+
+KJ_TEST("a disconnect rethrown by an actor JSRPC method stays DISCONNECTED and delivered") {
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = ACTOR_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str("jsrpc-rethrow-test")),
+    .actorClassName = "default"_kj,
+  });
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  // The sender's classifier keys on the DISCONNECTED type and the delivery details, and the
+  // tunneled description is what lets it tell a remote JS failure from a local transport one.
+  auto failure = expectCallFailure(cap, "rethrowDisconnect", fixture.getWaitScope());
+  KJ_EXPECT(failure.getType() == kj::Exception::Type::DISCONNECTED, failure);
+  KJ_EXPECT(jsg::isTunneledException(failure.getDescription()), failure);
+  KJ_EXPECT(failure.getDescription().contains("outbound disconnected"), failure);
+  expectDeliveredDetails(failure);
+
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
+}
+
+KJ_TEST("actor JSRPC session abort marks in-flight calls delivered") {
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = ACTOR_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str("jsrpc-abort-test")),
+    .actorClassName = "default"_kj,
+  });
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  auto abortedCall = expectCallFailure(cap, "abortSelf", fixture.getWaitScope());
+  expectDeliveredDetails(abortedCall);
+
+  auto sessionException =
+      kj::runCatchingExceptions([&]() { session.wait(fixture.getWaitScope()); });
+  KJ_ASSERT_NONNULL(sessionException);
+}
+
+KJ_TEST("a native disconnect aborting the actor loses its not-delivered marker after delivery") {
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = ACTOR_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str("jsrpc-native-abort-test")),
+    .actorClassName = "default"_kj,
+  });
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  auto hangRequest = cap.callRequest();
+  hangRequest.setMethodName("hang");
+  auto hangPromise = hangRequest.send();
+  // Let the call reach user code before the actor's own outbound dependency disconnects.
+  fixture.getWaitScope().poll();
+
+  // Such a disconnect is marked not-delivered at its origin; once it aborts an actor that already
+  // received this call, the call's result must report delivery instead.
+  auto reason = KJ_EXCEPTION(DISCONNECTED, "storage disconnected");
+  jsg::markActorRequestNotDelivered(reason);
+  fixture.getActor().abort(reason);
+
+  auto abortedCall = KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { hangPromise.wait(fixture.getWaitScope()); }));
+  KJ_EXPECT(abortedCall.getType() == kj::Exception::Type::DISCONNECTED, abortedCall);
+  expectDeliveredDetails(abortedCall);
+
+  cap = nullptr;
+  kj::runCatchingExceptions([&]() { session.wait(fixture.getWaitScope()); });
 }
 
 class RecordingSink final: public WritableStreamSink {

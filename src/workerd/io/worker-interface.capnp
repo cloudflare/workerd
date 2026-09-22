@@ -627,6 +627,10 @@ struct JsValue {
           unknown @5 :Void;
           known @6 :UInt64;
         }
+
+        canceler @21 :StreamCanceler;
+        # Hosted by the stream's origin. The receiver calls it when its copy of the stream is
+        # canceled or released before reaching EOF. Null when the sender does not support it.
       }
 
       obsolete7 @7 :Void;
@@ -747,6 +751,20 @@ interface AbortTrigger $Cxx.allowCancellation {
   release @1 () -> ();
   # Informs a cloned signal that the original signal is being destroyed, and the abort will never
   # be triggered. Otherwise, the cloned signal will treat a dropped cabability as an abort.
+}
+
+interface StreamCanceler $Cxx.allowCancellation {
+  # Accompanies a `readableStream` external (see `JsValue.External.readableStream.canceler`). The
+  # bytes of a transferred ReadableStream flow from the origin to the receiver over a `ByteStream`,
+  # which gives the receiver no way to tell the origin that it stopped reading: the origin only
+  # finds out when its next write fails, and a source that is waiting for more data never writes.
+  # This interface is the return channel. The origin hosts it; the receiver calls it when its copy
+  # of the stream is canceled or released before reaching EOF, and the origin then cancels its
+  # underlying source. Dropping the capability without calling cancel() carries no meaning.
+
+  cancel @0 (reason :JsValue);
+  # `reason` is the value the receiver's copy of the stream was canceled with, serialized, when the
+  # receiver can supply one. An empty `reason` means the stream was released without one.
 }
 
 interface JsRpcTarget extends(JsValue.ExternalPusher) $Cxx.allowCancellation {
@@ -878,6 +896,14 @@ interface TailStreamTarget $Cxx.allowCancellation {
   # Report one or more streaming tail events to a tail worker.
 }
 
+interface DatagramStream $Cxx.allowCancellation {
+  send @0 (datagram :Data) -> stream;
+  # Sends one datagram. Each call preserves a message boundary.
+
+  end @1 ();
+  # Signals that no more datagrams will be sent and reports errors from previous send() calls.
+}
+
 interface EventDispatcher @0xf20697475ec1752d {
   # Interface used to deliver events to a Worker's global event handlers.
 
@@ -967,6 +993,12 @@ interface EventDispatcher @0xf20697475ec1752d {
   # a way for dynamic workers to actually send their code back to the requesting machine, to be
   # instantiated there -- or maybe some mechanism for running "remote facets". For now, though,
   # we punt and simply don't support it.)
+
+  udpConnect @14 (host :Text, down :DatagramStream)
+      -> (up :DatagramStream, result :EventOutcome) $Cxx.allowCancellation;
+  # Opens a UDP flow. `up` carries datagrams received from the peer toward the Worker, while `down`
+  # carries datagrams sent by the Worker back toward the peer. The call remains pending until the
+  # Worker's connect() handler completes.
 
   # Other methods might be added to handle other kinds of events, e.g. TCP connections, or maybe
   # even native Cap'n Proto RPC eventually.

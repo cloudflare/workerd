@@ -1,17 +1,20 @@
 using Workerd = import "/workerd/workerd.capnp";
 
+# The worker is instantiated twice so that the bindings below cross an isolate boundary.
+# Only the first service's test() runs; see the filter argument in BUILD.bazel.
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "queue-metrics-test",
-      worker = (
-        modules = [
-          ( name = "worker-metrics-test", esModule = embed "queue-metrics-test.js" )
-        ],
-        bindings = [
-          ( name = "QUEUE", queue = "queue-metrics-test" ),
-        ],
-        compatibilityFlags = ["nodejs_compat", "capture_async_api_throws"],
-      )
-    ),
+    ( name = "queue-metrics-test", worker = .worker ),
+    ( name = "queue-metrics-test-target", worker = .worker ),
   ],
+);
+
+const worker :Workerd.Worker = (
+  modules = [
+    ( name = "worker-metrics-test", esModule = embed "queue-metrics-test.js" )
+  ],
+  bindings = [
+    ( name = "QUEUE", queue = "queue-metrics-test-target" ),
+  ],
+  compatibilityFlags = ["nodejs_compat", "capture_async_api_throws"],
 );

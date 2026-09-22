@@ -296,6 +296,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return KJ_REQUIRE_NONNULL(currentLock);
   }
 
+  // The isolate lock this IoContext is currently running JavaScript under, if any. Code that can
+  // be reached both from JavaScript and from KJ-side teardown uses this to decide whether it may
+  // touch the isolate.
+  kj::Maybe<Worker::Lock&> tryGetCurrentLock() {
+    return currentLock;
+  }
+
   kj::Maybe<Worker::Actor&> getActor() {
     return actor;
   }

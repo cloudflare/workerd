@@ -150,11 +150,11 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
 // Implementation of `v8::Module::SyntheticModuleEvaluationSteps`, which is called to initialize
 // the exports on a synthetic module. Obnoxiously, you can only initialize the exports in this
 // callback; V8 will crash if you try to call `SetSyntheticModuleExport()` from anywhere else.
-v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
+v8::MaybeLocal<v8::Promise> evaluateSyntheticModuleCallback(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module) {
   auto& js = Lock::current();
   v8::EscapableHandleScope scope(js.v8Isolate);
-  v8::MaybeLocal<v8::Value> result;
+  v8::MaybeLocal<v8::Promise> result;
 
   KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
     auto registry = getModulesForResolveCallback(js.v8Isolate);

@@ -6435,6 +6435,12 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
       return api::JsRpcSessionCustomEvent::receiveRpc(context, getWorker());
     }
 
+    kj::Promise<void> udpConnect(UdpConnectContext context) override {
+      auto worker = getWorker();
+      auto& workerRef = *worker;
+      return api::UdpConnectCustomEvent::receiveRpc(context, workerRef).attach(kj::mv(worker));
+    }
+
     kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {
       auto customEvent = kj::heap<tracing::TailStreamCustomEvent>();
       auto cap = customEvent->getCap();

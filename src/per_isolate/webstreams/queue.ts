@@ -37,6 +37,11 @@
 //   - Cursors hold weak owner refs; orphan pruning happens on every cursor
 //     iteration, with the FinalizationRegistry as the idle-queue backstop
 //     (the native backend needs NEITHER — JSG owns its source lifetime).
+//   - A queue whose last cursor has left or been collected has no consumer
+//     for good: it drops what it holds and what is enqueued later, and
+//     desiredSize reads as the high-water mark. The controller releases the
+//     source (no more pulls; cancel never runs — GC timing runs no user
+//     callback) but keeps its own state machine.
 //   - desiredSize reflects the SLOWEST live cursor; a pending read on any
 //     cursor overrides backpressure at the controller.
 //   - A released reader's filled bytes precede later data: re-queued when
@@ -319,12 +324,15 @@ class StreamQueue<T, V = T> {
   #cursors: Set<QueueCursor<T, V>>;
   #highWaterMark: number;
   #state: 'readable' | 'closed' | 'errored' = 'readable';
-  // Idempotent hook, wired to the controller: cancels the underlying source
+  // Idempotent hook, wired to the controller: releases the underlying source
   // when the last consumer goes away. "cursorCount === 0" is a state, not an
   // event — every path that can remove the last cursor funnels here.
   #onAllCursorsGone: () => void;
   #hadCursors: boolean = false;
-  #allGoneSignaled: boolean = false;
+  // Set once every cursor has left or been collected. No cursor can join
+  // afterwards (one is only ever forked from a live one), so nothing will
+  // read the queue again: it drops what it holds and what is enqueued later.
+  #noConsumers: boolean = false;
 
   constructor(highWaterMark: number, onAllCursorsGone: () => void) {
     this.#cursors = new SafeSet();
@@ -350,14 +358,18 @@ class StreamQueue<T, V = T> {
   }
 
   #checkAllCursorsGone(): void {
-    if (
-      this.#hadCursors &&
-      !this.#allGoneSignaled &&
-      this.#cursors.size === 0
-    ) {
-      this.#allGoneSignaled = true;
+    if (this.#hadCursors && !this.#noConsumers && this.#cursors.size === 0) {
+      this.#noConsumers = true;
+      this.#headOffset += this.#entries.length;
+      this.#entries.clear();
       this.#onAllCursorsGone();
     }
+  }
+
+  // False once every consumer is gone (see #noConsumers). desiredSize then
+  // reads as the high-water mark, as for consumers that keep up.
+  get hasConsumers(): boolean {
+    return !this.#noConsumers;
   }
 
   // The slowest cursor's backlog determines backpressure. Note that a
@@ -456,6 +468,7 @@ class StreamQueue<T, V = T> {
   }
 
   enqueue(entry: QueueEntry<T>, notify: boolean = true): void {
+    if (this.#noConsumers) return;
     // The controller pre-checks canCloseOrEnqueue before calling size().
     // A reentrant close()/error() from inside size() may change the state
     // between the pre-check and this push; the spec's EnqueueValueWithSize
@@ -505,6 +518,7 @@ class StreamQueue<T, V = T> {
       throw new TypeError('Cannot close a closed or errored queue');
     }
     this.#state = 'closed';
+    if (this.#noConsumers) return;
     this.#entries.push(CLOSE_SENTINEL);
     this.#forEachLiveCursor((cursor) => {
       cursor.notify();
@@ -534,7 +548,6 @@ class StreamQueue<T, V = T> {
   // so the branch resumes exactly where the original left off.
   addCursor(cursor: QueueCursor<T, V>, owner: object): void {
     this.#hadCursors = true;
-    this.#allGoneSignaled = false;
     this.#cursors.add(cursor);
     registerCursorCleanup(owner, cursor);
   }
@@ -813,9 +826,9 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   }
 
   // Stream-cancel teardown (StreamConsumer interface). QUEUED INVARIANT:
-  // the source-cancel decision runs BEFORE removeCursor so a
-  // reason-carrying cancel wins the controller's idempotency cache over
-  // the all-cursors-gone GC hook's undefined-reason call. The stream layer
+  // the source-cancel decision runs BEFORE removeCursor: removing the last
+  // cursor first would fire the all-cursors-gone hook, which releases the
+  // cancel algorithm before the decision could run it. The stream layer
   // owns the policy (tee composite hooks vs direct controller cancel) via
   // `decideSourceCancel` — including binding the reason — while the
   // last-consumer determination is queue knowledge, supplied to it here.

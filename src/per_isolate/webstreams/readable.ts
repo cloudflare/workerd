@@ -51,6 +51,8 @@ const {
   EventTargetAddEventListener,
   EventTargetRemoveEventListener,
   JSONParse,
+  MathMax,
+  MathMin,
   Number,
   NumberIsNaN,
   ObjectCreate,
@@ -85,8 +87,13 @@ const {
   uncurryThis,
 } = primordials;
 
-const { isArrayBuffer, isArrayBufferView, isPromise, markPromiseHandled } =
-  utils;
+const {
+  isArrayBuffer,
+  isArrayBufferView,
+  isPromise,
+  isSharedArrayBuffer,
+  markPromiseHandled,
+} = utils;
 
 const {
   StreamQueue,
@@ -275,6 +282,10 @@ const kControllerErrorFunction: symbol = SymbolFor(
 // Settles the stream's closed-promise hook (if one was ever requested) to
 // match a state transition; assigned in ReadableStream's static block.
 let settleReadableStreamClosedPromise: <R>(stream: ReadableStream<R>) => void;
+let setReadableStreamInteropErrorHook: <R>(
+  stream: ReadableStream<R>,
+  hook: ((reason: unknown) => void) | undefined
+) => void;
 
 // BACKEND-DISPATCH: the byte-CAPABLE gate (one of the five sanctioned
 // dispatch points). True for any controller whose backend can satisfy
@@ -1202,6 +1213,12 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
 // phases) the read paths. Defined as plain functions — they only use the
 // static-block-exported accessors, which are assigned at class-definition
 // time, strictly before any of this can run.
+//
+// Both settle the Node.js interop closed-promise and drop the interop error
+// hook: the hook fires only from 'readable', so once the state is terminal
+// it can never run, and keeping it would retain the transform pair for as
+// long as this half lives (the ClearAlgorithms discipline of the
+// controllers, applied to the stream's own slot).
 function readableStreamClose<R>(stream: ReadableStream<R>): void {
   if (getReadableStreamGetState(stream) !== 'readable') return;
   setReadableStreamState(stream, 'closed');
@@ -1210,6 +1227,7 @@ function readableStreamClose<R>(stream: ReadableStream<R>): void {
     resolveGenericReaderPromise(reader);
   }
   settleReadableStreamClosedPromise(stream);
+  setReadableStreamInteropErrorHook(stream, undefined);
 }
 
 function readableStreamError<R>(stream: ReadableStream<R>, e: unknown): void {
@@ -1221,6 +1239,7 @@ function readableStreamError<R>(stream: ReadableStream<R>, e: unknown): void {
     rejectGenericReaderPromise(reader, e);
   }
   settleReadableStreamClosedPromise(stream);
+  setReadableStreamInteropErrorHook(stream, undefined);
 }
 
 // Metadata snapshot of an ArrayBufferView, captured at a trust boundary.
@@ -1475,13 +1494,12 @@ class ReadableStreamDefaultController<
 
     // --- Queue + the stream's own cursor ---
     this.#queue = new StreamQueue(highWaterMark, () => {
-      // Last consumer went away (GC-driven cursor cleanup after all
-      // branch streams became unreachable). Silently stop the source
-      // by clearing algorithms — do NOT invoke the user's cancel
-      // callback, because GC timing is nondeterministic and must not
-      // produce user-observable side effects (the cancel callback
-      // could push to event arrays, resolve promises, etc.).
-      this.#clearAlgorithms();
+      // Every consumer has been collected (see StreamQueue#noConsumers).
+      // Release the source rather than cancel it: GC timing must not run
+      // the user's cancel callback. The size algorithm stays, so enqueue()
+      // sizes chunks as before; the queue drops them.
+      this.#pullAlgorithm = undefined;
+      this.#cancelAlgorithm = undefined;
     }) as StreamQueueType<R, R>;
     setReadableStreamConsumer(
       stream,
@@ -1616,11 +1634,8 @@ class ReadableStreamDefaultController<
   }
 
   #canCloseOrEnqueue(): boolean {
-    // #cancelPromise doubles as the "source cancelled" flag: after
-    // CancelSteps (explicit cancel or the all-cursors-gone hook) the
-    // algorithms are cleared and enqueue/close must be rejected even thoughs
-    // the original stream object may still report state 'readable' (the
-    // GC-driven path has no stream left to transition).
+    // #cancelPromise marks a cancelled source: CancelSteps cleared its
+    // algorithms, whatever state its stream reports.
     return (
       !this.#closeRequested &&
       this.#cancelPromise === undefined &&
@@ -1699,7 +1714,11 @@ class ReadableStreamDefaultController<
     // The pending-read clause is what keeps a fast consumer from starving
     // when the queue is at the high water mark: a consumer that reads
     // faster than the HWM drains must still trigger pulls.
-    return this.#queue.desiredSize > 0 || this.#queue.anyCursorHasPendingRead();
+    if (this.#queue.desiredSize <= 0 && !this.#queue.anyCursorHasPendingRead())
+      return false;
+    // desiredSize has just pruned collected cursors; with none left there is
+    // nobody to pull for.
+    return this.#queue.hasConsumers;
   }
 
   #callPullIfNeeded(): void {
@@ -1731,7 +1750,7 @@ class ReadableStreamDefaultController<
   // Reached through #consumerLeaving once the last consumer has left the
   // queue — an explicit stream/branch cancel, or a branch errored through
   // the Node.js interop hook. The all-cursors-gone GC hook never comes
-  // here: it only clears the algorithms (see the constructor).
+  // here: it only releases the source (see the constructor).
   #cancelSteps(reason: unknown): Promise<void> {
     if (this.#cancelPromise !== undefined) return this.#cancelPromise;
     this.#done = true;
@@ -2070,10 +2089,10 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
     // --- Queue + the stream's own (byte) cursor ---
     this.#queue = new StreamQueue(highWaterMark, () => {
-      // Last consumer went away (GC-driven cursor cleanup). Silently
-      // stop the source — see the default controller's hook for the
-      // rationale (GC must not produce user-observable side effects).
+      // Every consumer has been collected: release the source, as the
+      // default controller's hook does.
       this.#clearAlgorithms();
+      this.#invalidateByobRequest();
     }) as StreamQueueType<ByteQueueEntry, Uint8Array>;
     const cursor = new ByteStreamCursor(this.#queue, stream);
     // Wire up the fractional-element-at-close error callback so the
@@ -2470,7 +2489,9 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   #shouldCallPull(): boolean {
     if (!this.#started) return false;
     if (!this.#canCloseOrEnqueue()) return false;
-    return this.#queue.desiredSize > 0 || this.#queue.anyCursorHasPendingRead();
+    if (this.#queue.desiredSize <= 0 && !this.#queue.anyCursorHasPendingRead())
+      return false;
+    return this.#queue.hasConsumers;
   }
 
   #callPullIfNeeded(): void {
@@ -2677,8 +2698,9 @@ class ReadableStreamDrainingReader<R> {
   // TOTAL bytes the underlying source declared it will produce
   // (undefined = unknown → chunked encoding). A construction-time value,
   // cached on the controller; backend-blind via the chained helper
-  // (byte/native report their cached value; default streams report
-  // undefined). Returns undefined after release.
+  // (byte/native report their cached value; a default controller the
+  // value the TransformStream expectedLength extension installed, if
+  // any). Returns undefined after release.
   get expectedLength(): bigint | undefined {
     const stream = getReaderStream<R>(this);
     if (stream === undefined) return undefined;
@@ -3204,6 +3226,10 @@ class ReadableStream<R> {
   // Terminal-state shells (tee and detach copies) never transition, so a
   // request against one is settled immediately from its state.
   #closedPromise?: PromiseWithResolversType<void> | undefined;
+  // A transform pair's notification when the Node.js interop hook errors
+  // this half (internalsForTransform.setInteropErrorHook). Dropped when the
+  // stream leaves 'readable', so a settled half does not retain the pair.
+  #interopErrorHook?: ((reason: unknown) => void) | undefined;
   // The pending-closure gate (JsReadableStream::setPendingClosure): set by
   // the stream's owning object (a Socket) the moment its closure begins, so
   // that new reads, pipes, and tees fail fast with a descriptive error
@@ -3231,6 +3257,10 @@ class ReadableStream<R> {
 
     setReadableStreamPendingClosure = <R>(stream: ReadableStream<R>) => {
       stream.#pendingClosure = true;
+    };
+
+    setReadableStreamInteropErrorHook = (stream, hook) => {
+      stream.#interopErrorHook = hook;
     };
 
     isReadableStreamPendingClosure = <R>(stream: ReadableStream<R>) => {
@@ -3571,7 +3601,8 @@ class ReadableStream<R> {
         //
         // ORDER MATTERS: add the branch cursors BEFORE removing the
         // original — removing the sole cursor first would fire the
-        // all-cursors-gone hook and cancel the underlying source mid-tee.
+        // all-cursors-gone hook mid-tee, dropping the buffered entries and
+        // releasing the source.
         const totalSize = cursor.remainingSize;
         branch1.#consumer = isBytes
           ? new ByteStreamCursor(
@@ -3722,8 +3753,8 @@ class ReadableStream<R> {
         const totalSize = cursor.remainingSize;
         // ORDER MATTERS: attach the shell's cursor BEFORE removing the
         // original -- removing the sole cursor first would fire the
-        // all-cursors-gone hook and cancel the underlying source
-        // mid-detach (tee precedent).
+        // all-cursors-gone hook mid-detach, dropping the buffered entries
+        // and releasing the source (tee precedent).
         shell.#consumer = isBytes
           ? new ByteStreamCursor(
               queue,
@@ -4343,13 +4374,16 @@ class ReadableStream<R> {
   // The source's own stream errors through its controller, which errors
   // every consumer of the queue (the tee branches, if any); a native-backed
   // stream also cancels its C++ source, which has lost its consumer. A
-  // queued tee branch shares that controller, so it errors alone instead:
-  // its pending reads reject and it leaves the queue as a cancelled branch
-  // would — the source is cancelled once no consumer remains, with the
-  // reason of every consumer that left (controllerConsumerLeaving). A
-  // branch that has itself been teed consumes nothing and stays what tee()
-  // left it: a permanently locked, inert shell (the queued tee model's
-  // deliberate divergence from the spec's per-branch controllers).
+  // queued source's cancel steps do not run, so a transform pair learns of
+  // it through its interop error hook instead, once this half has errored:
+  // the entry half always goes first. A queued tee branch shares that
+  // controller, so it errors alone: its pending reads reject and it leaves
+  // the queue as a cancelled branch would — the source is cancelled once
+  // no consumer remains, with the reason of every consumer that left
+  // (controllerConsumerLeaving). A branch that has itself been teed
+  // consumes nothing and stays what tee() left it: a permanently locked,
+  // inert shell (the queued tee model's deliberate divergence from the
+  // spec's per-branch controllers).
   [kControllerErrorFunction](reason: unknown): void {
     assertIsReadableStream(this);
     if (this.#state !== 'readable') return;
@@ -4364,7 +4398,12 @@ class ReadableStream<R> {
       return;
     }
     if (controllerStream(controller) === this) {
+      // Taken before the error, which drops the slot (readableStreamError);
+      // like the writable's abort hook, it fires once.
+      const hook = this.#interopErrorHook;
+      this.#interopErrorHook = undefined;
       controllerError(controller, reason);
+      if (hook !== undefined) hook(reason);
       return;
     }
     // QUEUED INVARIANT: a tee branch of a queued stream — its consumer is
@@ -4387,22 +4426,12 @@ class ReadableStream<R> {
   }
 }
 
-const kMaximumAllowedLimit = 128n * 1024n * 1024n; // 128 MB
-
-function bigIntMin(a: bigint, b: bigint): bigint {
-  return a < b ? a : b;
-}
-
-function adjustLimit(
-  limit: bigint,
-  maybeExpectedLength: bigint | undefined
-): bigint {
-  let result = bigIntMin(kMaximumAllowedLimit, limit);
-  if (maybeExpectedLength !== undefined) {
-    result = bigIntMin(result, maybeExpectedLength);
-  }
-  return result;
-}
+// Body consumption for the C++ bridge (arrayBuffer/bytes/text/json). Two
+// byte bounds apply: the caller's memory limit, capped at 128 MB, and the
+// stream's declared expectedLength. A breach names its cause and cancels
+// the stream with it, as the C++ AllReader does; a declaration the limit
+// cannot hold is refused before a byte is read.
+const kMaximumAllowedLimit = 128n * 1024n * 1024n;
 
 function acquireReadableStreamDrainingReader<R>(
   stream: ReadableStream<R>
@@ -4410,87 +4439,206 @@ function acquireReadableStreamDrainingReader<R>(
   return new ReadableStreamDrainingReader<R>(stream);
 }
 
-type CollectChunksResult = {
-  amountRead: bigint;
-  chunks: Uint8Array[];
-};
+// The collected bytes, copied out of the drained chunks as they arrive so
+// nothing is retained per chunk. Blocks grow geometrically from the first
+// chunk's size to kCollectBlockSize; a declared length that fits one block
+// is allocated whole up front, so a body that meets it fills exactly one
+// block and is handed over without a further copy.
+const kCollectBlockSize = 1024 * 1024;
+const kStreamingDecode = ObjectFreeze({ __proto__: null, stream: true });
+
+class CollectedBytes {
+  #blocks: Uint8Array[] = []; // full
+  #block: Uint8Array | undefined = undefined; // being filled
+  #blockSize = 0; // of the most recent block
+  #filled = 0; // of #block
+  #length = 0;
+  readonly #firstBlockSize: number; // 0: size to the first chunk
+
+  constructor(firstBlockSize: number) {
+    this.#firstBlockSize = firstBlockSize;
+  }
+
+  get length(): number {
+    return this.#length;
+  }
+
+  append(
+    buffer: ArrayBufferLike,
+    byteOffset: number,
+    byteLength: number
+  ): void {
+    while (byteLength > 0) {
+      const block = this.#block ?? this.#addBlock(byteLength);
+      const take = MathMin(byteLength, this.#blockSize - this.#filled);
+      TypedArrayPrototypeSet(
+        block,
+        new Uint8Array(buffer, byteOffset, take),
+        this.#filled
+      );
+      this.#filled += take;
+      this.#length += take;
+      byteOffset += take;
+      byteLength -= take;
+      if (this.#filled === this.#blockSize) {
+        ArrayPrototypePush(this.#blocks, block);
+        this.#block = undefined;
+      }
+    }
+  }
+
+  #addBlock(needed: number): Uint8Array {
+    let size: number;
+    if (this.#length === 0 && this.#firstBlockSize !== 0) {
+      size = this.#firstBlockSize;
+    } else {
+      size = MathMin(kCollectBlockSize, MathMax(this.#blockSize * 2, needed));
+    }
+    const block = new Uint8Array(size);
+    this.#block = block;
+    this.#blockSize = size;
+    this.#filled = 0;
+    return block;
+  }
+
+  // Every block as a view of its bytes, the partial one trimmed.
+  #views(): Uint8Array[] {
+    const blocks = this.#blocks;
+    const views: Uint8Array[] = [];
+    for (let i = 0; i < blocks.length; i++) {
+      ArrayPrototypePush(views, blocks[i] as Uint8Array);
+    }
+    const block = this.#block;
+    if (block !== undefined && this.#filled > 0) {
+      ArrayPrototypePush(
+        views,
+        new Uint8Array(TypedArrayPrototypeGetBuffer(block), 0, this.#filled)
+      );
+    }
+    return views;
+  }
+
+  toArrayBuffer(): ArrayBuffer {
+    const blocks = this.#blocks;
+    if (this.#block === undefined && blocks.length === 1) {
+      return TypedArrayPrototypeGetBuffer(blocks[0] as Uint8Array);
+    }
+    const result = new ArrayBuffer(this.#length);
+    const out = new Uint8Array(result);
+    const views = this.#views();
+    let offset = 0;
+    for (let i = 0; i < views.length; i++) {
+      const view = views[i] as Uint8Array;
+      TypedArrayPrototypeSet(out, view, offset);
+      offset += TypedArrayPrototypeGetByteLength(view);
+    }
+    return result;
+  }
+
+  toText(): string {
+    if (this.#length === 0) return '';
+    const decoder = new TextDecoder();
+    const views = this.#views();
+    if (views.length === 1) return TextDecoderDecode(decoder, views[0]);
+    let result = '';
+    for (let i = 0; i < views.length; i++) {
+      result += TextDecoderDecode(decoder, views[i], kStreamingDecode);
+    }
+    return result + TextDecoderDecode(decoder);
+  }
+}
+
+// Cancels the stream with a consumption failure and rethrows it. A cancel
+// that rejects replaces it, as in the C++ AllReader.
+async function failCollect(reader: object, error: Error): Promise<never> {
+  await cancelReadableStreamGenericReader(reader, error);
+  throw error;
+}
 
 async function collectChunks<R>(
   stream: ReadableStream<R>,
   limit: bigint
-): Promise<CollectChunksResult> {
+): Promise<CollectedBytes> {
   if (isReadableStreamUnusable(stream)) {
     throw new TypeError('Cannot consume a stream that is locked or disturbed');
   }
   const reader = acquireReadableStreamDrainingReader(stream);
-  limit = adjustLimit(limit, getReadableStreamExpectedLength(stream));
-  let amountRead = 0n;
-  const chunks: Uint8Array[] = [];
+  if (limit > kMaximumAllowedLimit) limit = kMaximumAllowedLimit;
+  // The declaration is the exact total the stream will deliver, so one
+  // beyond the limit settles the outcome before a byte is read.
+  const declared = getReadableStreamExpectedLength(stream);
+  if (declared !== undefined && declared > limit) {
+    return failCollect(
+      reader,
+      new TypeError('Memory limit would be exceeded before EOF.')
+    );
+  }
+  const declaredBinds = declared !== undefined;
+  const bound = Number(declaredBinds ? declared : limit);
+  const collected = new CollectedBytes(
+    declaredBinds && bound <= kCollectBlockSize ? bound : 0
+  );
   while (true) {
-    const result = await reader.read();
+    const result = await drainingReaderReadInternal<R>(reader, stream);
     const drained = result.chunks as unknown[];
     for (let i = 0; i < drained.length; i++) {
       const chunk = drained[i];
-      // Drained chunks are untrusted values: accept any BufferSource,
-      // normalized to a Uint8Array over its region with the extent pinned
-      // at drain time; anything else fails with the same TypeError the
-      // C++ bridge pump uses. Detached inputs are skipped with the other
-      // empties.
-      let view: Uint8Array;
+      // Drained chunks are untrusted values: any BufferSource contributes
+      // its bytes, with the extent pinned at drain time; anything else
+      // fails with the same TypeError the C++ bridge pump uses. Detached
+      // inputs are skipped with the other empties.
+      let buffer: ArrayBufferLike;
+      let byteOffset: number;
       let byteLength: number;
       if (isArrayBufferView(chunk)) {
         // Probe detachment through the buffer before getViewInfo: a
         // detached DataView's byteLength getter throws (typed arrays and
-        // raw buffers just report 0).
-        const buffer =
+        // raw buffers just report 0). A SharedArrayBuffer cannot be
+        // detached, and the probe rejects it as a receiver.
+        buffer =
           TypedArrayPrototypeGetSymbolToStringTag(chunk) !== undefined
             ? TypedArrayPrototypeGetBuffer(chunk)
             : DataViewPrototypeGetBuffer(chunk as DataView);
-        if (ArrayBufferPrototypeDetachedGet(buffer)) continue;
+        if (
+          !isSharedArrayBuffer(buffer) &&
+          ArrayBufferPrototypeDetachedGet(buffer)
+        )
+          continue;
         const info = getViewInfo(chunk);
+        byteOffset = info.byteOffset;
         byteLength = info.byteLength;
-        if (byteLength === 0) continue;
-        view = new Uint8Array(buffer, info.byteOffset, byteLength);
       } else if (isArrayBuffer(chunk)) {
+        buffer = chunk;
+        byteOffset = 0;
         byteLength = ArrayBufferPrototypeByteLengthGet(chunk);
-        if (byteLength === 0) continue;
-        // The explicit extent matters: on a resizable buffer a bare
-        // `new Uint8Array(chunk)` would be length-tracking, and a resize
-        // from user code at a later await would desync it from amountRead.
-        view = new Uint8Array(chunk, 0, byteLength);
       } else {
-        throw new TypeError('This ReadableStream did not return bytes.');
-      }
-      amountRead += BigInt(byteLength);
-      if (amountRead > limit) {
-        throw new RangeError(
-          `Stream exceeded the maximum allowed limit of ${Number(limit)} bytes`
+        return failCollect(
+          reader,
+          new TypeError('This ReadableStream did not return bytes.')
         );
       }
-      ArrayPrototypePush(chunks, view);
+      if (byteLength === 0) continue;
+      if (collected.length + byteLength > bound) {
+        return failCollect(
+          reader,
+          declaredBinds
+            ? new RangeError(
+                'stream delivered more bytes than its declared expectedLength'
+              )
+            : new TypeError('Memory limit exceeded before EOF.')
+        );
+      }
+      collected.append(buffer, byteOffset, byteLength);
     }
-    if (result.done) break;
+    if (result.done) return collected;
   }
-
-  return { amountRead, chunks };
 }
 
 async function consumeReadableStreamAsArrayBuffer<R>(
   stream: ReadableStream<R>,
   limit: bigint
 ): Promise<ArrayBuffer> {
-  const { amountRead, chunks } = await collectChunks(stream, limit);
-
-  const res = new ArrayBuffer(Number(amountRead));
-  const u8 = new Uint8Array(res);
-  let offset = 0;
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i] as Uint8Array;
-    TypedArrayPrototypeSet(u8, chunk, offset);
-    offset += TypedArrayPrototypeGetByteLength(chunk);
-  }
-
-  return res;
+  return (await collectChunks(stream, limit)).toArrayBuffer();
 }
 
 async function consumeReadableStreamAsUint8Array<R>(
@@ -4506,21 +4654,7 @@ async function consumeReadableStreamAsText<R>(
   stream: ReadableStream<R>,
   limit: bigint
 ): Promise<string> {
-  const { amountRead, chunks } = await collectChunks(stream, limit);
-
-  let res = '';
-  if (amountRead === 0n) return res;
-
-  const decoder = new TextDecoder();
-  for (let i = 0; i < chunks.length; i++) {
-    res += TextDecoderDecode(decoder, chunks[i], {
-      __proto__: null,
-      stream: true,
-    });
-  }
-  res += TextDecoderDecode(decoder); // flush
-
-  return res;
+  return (await collectChunks(stream, limit)).toText();
 }
 
 async function consumeReadableStreamAsJSON<R>(
@@ -4705,9 +4839,10 @@ module.exports = {
   // pipeTo and the C++ bridge. See Open Question 3 in the design doc for
   // possible future public exposure.
   ReadableStreamDrainingReader,
-  // Internal operations consumed by the TransformStream cancel/flush
-  // coordination (finishPromise guard) and the workerd expectedLength
-  // extension. Unreachable from user code.
+  // Internal operations consumed by the transform pairs (transform.ts,
+  // identity.ts, compression.ts): the TransformStream cancel/flush
+  // coordination (finishPromise guard), the workerd expectedLength
+  // extension, and the interop error hook. Unreachable from user code.
   internalsForTransform: ObjectFreeze({
     getState: <R>(stream: ReadableStream<R>) =>
       getReadableStreamGetState(stream),
@@ -4722,6 +4857,15 @@ module.exports = {
         controller as ReadableStreamDefaultController<R>,
         length
       ),
+    // A transform pair's notification, called synchronously with the
+    // reason after the Node.js interop hook has errored this stream (the
+    // only external error path that bypasses the source's cancel steps).
+    // Fires at most once; the stream drops it on leaving 'readable'.
+    // undefined clears it.
+    setInteropErrorHook: <R>(
+      stream: ReadableStream<R>,
+      hook: ((reason: unknown) => void) | undefined
+    ): void => setReadableStreamInteropErrorHook(stream, hook),
   }),
 
   // Part of the internal implementation. Do not re-export to user code

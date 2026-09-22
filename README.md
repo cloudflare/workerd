@@ -55,11 +55,11 @@ To build `workerd`, you need:
 * Bazel
   * If you use [Bazelisk](https://github.com/bazelbuild/bazelisk) (recommended), it will automatically download and use the right version of Bazel for building workerd.
 * On Linux:
-  * We use the clang/LLVM toolchain to build workerd and support version 19 and higher. Earlier versions of clang may still work, but are not officially supported.
-  * Clang 19+ (e.g. package `clang-19` on Debian Trixie). If clang is installed as `clang-<version>` please create a symlink to it in your PATH named `clang`, or use `--repo_env=CC=clang-<version>` on `bazel` command lines to specify the compiler name.
+  * We use the clang/LLVM toolchain to build workerd and support version 22 and higher. Earlier versions of clang may still work, but are not officially supported.
+  * Clang 22+ (e.g. package `clang-22` on Debian Trixie). If clang is installed as `clang-<version>` please create a symlink to it in your PATH named `clang`, or use `--repo_env=CC=clang-<version>` on `bazel` command lines to specify the compiler name.
 
-  * libc++ 19+ (e.g. packages `libc++-19-dev` and `libc++abi-19-dev`)
-  * LLD 19+ (e.g. package `lld-19`).
+  * libc++ 22+ (e.g. package `libc++-22-dev`)
+  * LLD 22+ (e.g. package `lld-22`).
   * `python3`, `python3-distutils`, and `tcl8.6`
 * On macOS:
   * Xcode 16.3 installation (available on macOS 15 and higher). Building with just the Xcode Command Line Tools is not being tested, but should work too.

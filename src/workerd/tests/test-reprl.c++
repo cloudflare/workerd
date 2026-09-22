@@ -73,7 +73,7 @@ KJ_TEST("REPRL basic functionality") {
   auto ctx = reprl_create_context();
   KJ_REQUIRE(ctx != nullptr, "Failed to create REPRL context");
 
-  const char* env[] = {"LLVM_SYMBOLIZER=/usr/bin/llvm-symbolizer-19", nullptr};
+  const char* env[] = {"LLVM_SYMBOLIZER=/usr/bin/llvm-symbolizer-22", nullptr};
 
   // Use Runfiles API to get absolute paths
   std::string workerd_path = runfiles->Rlocation("workerd/src/workerd/server/workerd");

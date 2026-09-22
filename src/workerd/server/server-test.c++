@@ -335,9 +335,14 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
     kj::Own<kj::NetworkAddress> source;
   };
 
+  struct SentDatagram {
+    kj::Array<kj::byte> content;
+    kj::String destination;
+  };
+
   struct DatagramState final: public kj::Refcounted {
     kj::ProducerConsumerQueue<QueuedDatagram> incoming;
-    kj::ProducerConsumerQueue<kj::Array<kj::byte>> outgoing;
+    kj::ProducerConsumerQueue<SentDatagram> outgoing;
   };
 
   TestServer(kj::StringPtr configText,
@@ -426,6 +431,8 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
       bool truncated = false);
 
   bool hasUdp(kj::StringPtr addr);
+
+  SentDatagram receiveUdp(kj::StringPtr addr);
 
   // Try to connect to the address and return whether or not this connection attempt hangs,
   // i.e. a listener exists but connections are not being accepted.
@@ -544,7 +551,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
 
     kj::Promise<size_t> send(
         kj::ArrayPtr<const kj::byte> buffer, kj::NetworkAddress& destination) override {
-      state->outgoing.push(kj::heapArray(buffer));
+      state->outgoing.push({kj::heapArray(buffer), destination.toString()});
       return buffer.size();
     }
 
@@ -698,6 +705,12 @@ void TestServer::sendUdp(
 
 bool TestServer::hasUdp(kj::StringPtr addr) {
   return getDatagramState(addr)->outgoing.pop().poll(ws);
+}
+
+TestServer::SentDatagram TestServer::receiveUdp(kj::StringPtr addr) {
+  auto datagram = getDatagramState(addr)->outgoing.pop();
+  KJ_REQUIRE(datagram.poll(ws), "No UDP datagram available");
+  return datagram.wait(ws);
 }
 
 // =======================================================================================
@@ -5583,6 +5596,43 @@ KJ_TEST("Server: JS RPC over HTTP connections") {
 
   auto conn = test.connect("test-addr");
   conn.httpGet200("/", "got: 35");
+}
+
+KJ_TEST("Server: UDP RPC over HTTP connections") {
+  TestServer test(R"((
+    services = [
+      ( name = "worker",
+        worker = (
+          compatibilityDate = "2024-02-23",
+          compatibilityFlags = ["experimental"],
+          modules = [(
+            name = "main.js",
+            esModule =
+              `export default {
+              `  async connect(socket) {
+              `    const { value } = await socket.readable.getReader().read();
+              `    await socket.writable.getWriter().write(value);
+              `  }
+              `}
+          )]
+        )
+      ),
+      (name = "outbound", external = (address = "loopback", http = (capnpConnectHost = "cappy")))
+    ],
+    sockets = [
+      ( name = "rpc", address = "loopback", service = "worker",
+        http = (capnpConnectHost = "cappy")),
+      ( name = "udp", address = "udp-address", service = "outbound", udp = ()),
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  test.sendUdp("udp-address", "peer:1234", "hello"_kjb);
+  auto response = test.receiveUdp("udp-address");
+  KJ_EXPECT(response.content.asPtr() == "hello"_kjb);
+  KJ_EXPECT(response.destination == "peer:1234");
 }
 
 KJ_TEST("Server: Entrypoint binding with props") {

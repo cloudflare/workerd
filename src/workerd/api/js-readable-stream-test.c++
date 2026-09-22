@@ -1388,6 +1388,67 @@ KJ_TEST("JsReadableStream pumpTo rejects when a queued stream produces non-byte 
   KJ_EXPECT(!ended);
 }
 
+KJ_TEST("JsReadableStream text() over the limit cancels a queued TypeScript stream") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Maybe<kj::String> cancelReason;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // A queued source that enqueues kData and stays open, so the cancel that the limit
+    // breach triggers reaches its cancel().
+    auto underlying = js.obj();
+    underlying.set(js, "start"_kj,
+        jsg::JsValue(js.wrapSimpleFunction(
+            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+      enqueue.call(js, controller, jsg::JsUint8Array::create(js, kData.asBytes()));
+    })));
+    underlying.set(js, "cancel"_kj,
+        jsg::JsValue(js.wrapSimpleFunction(js.v8Context(),
+            [&cancelReason](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      cancelReason = jsg::JsValue(info[0]).toString(js);
+    })));
+    auto stream = makeTsStream(js, jsg::JsValue(underlying));
+
+    auto promise = stream.text(js, kData.size() - 1).then(js, [](jsg::Lock& js, kj::String) {
+      KJ_FAIL_REQUIRE("expected text() over the limit to reject");
+    }, [](jsg::Lock& js, jsg::Value exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription() == "jsg.TypeError: Memory limit exceeded before EOF.",
+          e.getDescription());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(KJ_ASSERT_NONNULL(cancelReason) == "TypeError: Memory limit exceeded before EOF.");
+}
+
+KJ_TEST("JsReadableStream text() rejects a declared length over the limit before reading") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Maybe<kj::Exception> canceled;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // A native source declaring kData.size() bytes, consumed under a smaller limit: the
+    // declaration alone settles it, with the message the C++ AllReader uses for a
+    // Content-Length it cannot buffer, and the cancel reaches the source.
+    auto stream = JsReadableStream::create(
+        js, env.context, kj::heap<CancelableContentSource>(kData, canceled));
+
+    auto promise = stream.text(js, kData.size() - 1).then(js, [](jsg::Lock& js, kj::String) {
+      KJ_FAIL_REQUIRE("expected text() over the declared length to reject");
+    }, [](jsg::Lock& js, jsg::Value exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription() == "jsg.TypeError: Memory limit would be exceeded before EOF.",
+          e.getDescription());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  auto& e = KJ_ASSERT_NONNULL(canceled);
+  KJ_EXPECT(e.getDescription().contains("Memory limit would be exceeded before EOF."),
+      e.getDescription());
+}
+
 KJ_TEST("JsReadableStream pumpTo of a locked TypeScript-backed stream throws") {
   auto fixture = makeTsStreamsFixture();
   kj::Vector<kj::byte> collected;
