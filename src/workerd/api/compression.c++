@@ -609,13 +609,14 @@ kj::Maybe<CompressionError> ZstdEncoderContext::initialize(
     // not need to outlive this call. The content type is auto-detected: a buffer starting with
     // the zstd dictionary magic is read as a trained dictionary, anything else as raw content.
     // Loading is deferred until the first frame begins, so the parameters set by setParams()
-    // afterwards still apply to the dictionary's tables.
+    // afterwards still apply to the dictionary's tables. It also means a malformed trained
+    // dictionary is not detected here: it fails in work() when the first frame begins, which
+    // is where Node reports it too. On a fresh context this call can only fail to allocate.
     size_t result = ZSTD_CCtx_loadDictionary(cctx_.get(), dictionary.begin(), dictionary.size());
     if (ZSTD_isError(result)) {
       error_ = ZSTD_getErrorCode(result);
       return CompressionError(
-          kj::str("Failed to load zstd dictionary: ", ZSTD_getErrorName(result)),
-          "ERR_ZLIB_DICTIONARY_LOAD_FAILED"_kj, -1);
+          "Failed to load zstd dictionary"_kj, "ERR_ZLIB_DICTIONARY_LOAD_FAILED"_kj, -1);
     }
   }
 
@@ -699,12 +700,16 @@ kj::Maybe<CompressionError> ZstdDecoderContext::initialize(
     // frame written against a different one is not rejected as ZSTD_error_dictionary_wrong: it
     // fails as corrupt, or decodes to different bytes if the frame carries no checksum. That is
     // zstd's behaviour and matches what Node does with the same calls.
+    //
+    // Unlike the encoder, the decoder parses a trained dictionary's entropy tables here, so a
+    // malformed one fails now. zstd reports that as ZSTD_error_memory_allocation, because the
+    // DDict it tried to build came back null, so the message leaves zstd's error name out and
+    // uses Node's exact text instead.
     size_t result = ZSTD_DCtx_loadDictionary(dctx_.get(), dictionary.begin(), dictionary.size());
     if (ZSTD_isError(result)) {
       error_ = ZSTD_getErrorCode(result);
       return CompressionError(
-          kj::str("Failed to load zstd dictionary: ", ZSTD_getErrorName(result)),
-          "ERR_ZLIB_DICTIONARY_LOAD_FAILED"_kj, -1);
+          "Failed to load zstd dictionary"_kj, "ERR_ZLIB_DICTIONARY_LOAD_FAILED"_kj, -1);
     }
   }
 

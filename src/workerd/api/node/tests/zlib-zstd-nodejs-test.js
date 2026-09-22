@@ -668,3 +668,166 @@ export const zstdDictionaryStreamTest = {
     );
   },
 };
+
+// Every dictionary above is raw content. A trained dictionary is a different path through
+// zstd: it starts with the dictionary magic, carries entropy tables, and gives the frame a
+// dictionary ID. This one was trained with `zstd --train --maxdict=256` on 400 lines shaped
+// like TRAINED_INPUT.
+const TRAINED_DICTIONARY = Buffer.from(
+  'N6Qw7PgzMzEZEOAKlQ7/////66r6nNxy7y2TZK30a621FgMDAAAAQ4n6AQAABAAA' +
+    'gC1bQAgAAAAAAAAGAAAAiEgFCQEAGAAAAAAAAAAAAID1BQAAAAAAhK/FKg0AAAAA' +
+    'AAAAAAAAAAAAAAEAAAAEAAAACAAAADEvaXRlbXMvMjYiLCJzdGF0dXMiOjIwMCwi' +
+    'bXMiOjI0fQp7ImlkIjoyMDcsImxldmVsMS9pdGVtcy8xMyIsInN0YXR1cyI6MjAw' +
+    'LCJtcyI6MTJ9CnsiaWQiOjEzNSwibGV2ZWwxL2l0ZW1zLzE4Iiwic3RhdHVzIjoy' +
+    'MDAsIm1zIjo0Mn0KeyJpZA==',
+  'base64'
+);
+
+const TRAINED_INPUT =
+  '{"id":5,"level":"info","service":"api","route":"/v1/items/5","status":200,"ms":35}\n';
+
+// The dictionary magic, then bytes that cannot parse as entropy tables.
+const CORRUPT_TRAINED_DICTIONARY = Buffer.concat([
+  Buffer.from([0x37, 0xa4, 0x30, 0xec]),
+  Buffer.alloc(60, 0xff),
+]);
+
+export const zstdTrainedDictionaryTest = {
+  async test() {
+    const input = Buffer.from(TRAINED_INPUT);
+    const dictionary = TRAINED_DICTIONARY;
+    assert.strictEqual(dictionary.readUInt32LE(0), 0xec30a437);
+    const dictID = dictionary.readUInt32LE(4);
+
+    const plain = zlib.zstdCompressSync(input);
+    const withDict = zlib.zstdCompressSync(input, { dictionary });
+    assert(
+      withDict.length < plain.length,
+      `Trained dictionary should shrink the output, got ${withDict.length} with and ` +
+        `${plain.length} without`
+    );
+
+    // Bits 0-1 of the frame header descriptor give the size of the dictionary ID field, and
+    // 3 means four bytes. A raw-content dictionary would leave it at 0.
+    assert.strictEqual(
+      withDict[4] & 0b11,
+      3,
+      'Frame should carry a 4-byte dictionary ID'
+    );
+    assert.strictEqual(
+      withDict.readUInt32LE(5),
+      dictID,
+      'Frame should name the trained dictionary'
+    );
+
+    assert.strictEqual(
+      zlib.zstdDecompressSync(withDict, { dictionary }).toString(),
+      TRAINED_INPUT
+    );
+
+    const decompress = zlib.createZstdDecompress({ dictionary });
+    decompress.end(withDict);
+    const chunks = [];
+    for await (const chunk of decompress) {
+      chunks.push(chunk);
+    }
+    assert.strictEqual(Buffer.concat(chunks).toString(), TRAINED_INPUT);
+
+    // Because the frame names its dictionary, reading it without that dictionary is refused
+    // outright, with no checksum needed. Compare zstdDictionaryMismatchTest.
+    for (const options of [{}, { dictionary: DICTIONARY }]) {
+      assert.throws(
+        () => zlib.zstdDecompressSync(withDict, options),
+        /Dictionary mismatch/,
+        'A frame naming a dictionary should be refused without it'
+      );
+    }
+  },
+};
+
+// The decoder parses a trained dictionary when it is loaded, so a corrupt one fails before
+// any data is read. Node throws ERR_ZLIB_INITIALIZATION_FAILED from the constructor.
+export const zstdCorruptDictionaryDecoderTest = {
+  test() {
+    const frame = zlib.zstdCompressSync(Buffer.from(TRAINED_INPUT));
+    const dictionary = CORRUPT_TRAINED_DICTIONARY;
+
+    assert.throws(
+      () => zlib.zstdDecompressSync(frame, { dictionary }),
+      /Failed to load zstd dictionary/,
+      'The fast path should report the dictionary'
+    );
+    assert.throws(
+      () => zlib.createZstdDecompress({ dictionary }),
+      { code: 'ERR_ZLIB_INITIALIZATION_FAILED' },
+      'The stream constructor should throw'
+    );
+    assert.throws(
+      () => zlib.zstdDecompressSync(frame, { dictionary, info: true }),
+      { code: 'ERR_ZLIB_INITIALIZATION_FAILED' },
+      'The engine path should throw the same way'
+    );
+  },
+};
+
+// The encoder defers loading until the first frame begins, so the same corrupt dictionary
+// is accepted at construction and fails on the first write. zstd reports it as an allocation
+// failure, because the CDict it tried to build came back null. Node sees the same message.
+export const zstdCorruptDictionaryEncoderTest = {
+  async test() {
+    const input = Buffer.from(TRAINED_INPUT);
+    const dictionary = CORRUPT_TRAINED_DICTIONARY;
+
+    assert.throws(
+      () => zlib.zstdCompressSync(input, { dictionary }),
+      /Allocation error/,
+      'The fast path should fail when the frame begins'
+    );
+
+    const compress = zlib.createZstdCompress({ dictionary });
+    const { promise, resolve, reject } = Promise.withResolvers();
+    compress.on('error', resolve);
+    compress.on('end', () => reject(new Error('Stream should not finish')));
+    compress.resume();
+    compress.end(input);
+    const err = await promise;
+    assert.match(err.message, /Allocation error/);
+  },
+};
+
+// pledgedSrcSize is set after the dictionary is loaded. A correct size must still round-trip,
+// and a wrong one must still be enforced, which proves the size reached the encoder. The
+// stream is used for the wrong size because it feeds zstd in more than one call: a single
+// ZSTD_e_end call makes zstd replace the pledge with the real input size.
+export const zstdDictionaryPledgedSrcSizeTest = {
+  async test() {
+    const input = Buffer.from(DICT_INPUT);
+
+    const compressed = zlib.zstdCompressSync(input, {
+      dictionary: DICTIONARY,
+      pledgedSrcSize: input.length,
+    });
+    assert.strictEqual(
+      zlib
+        .zstdDecompressSync(compressed, { dictionary: DICTIONARY })
+        .toString(),
+      DICT_INPUT
+    );
+
+    const compress = zlib.createZstdCompress({
+      dictionary: DICTIONARY,
+      pledgedSrcSize: input.length + 1,
+    });
+    const { promise, resolve, reject } = Promise.withResolvers();
+    compress.on('error', resolve);
+    compress.on('end', () => reject(new Error('Stream should not finish')));
+    compress.resume();
+    compress.end(input);
+    const err = await promise;
+    assert.match(
+      err.message,
+      /Src size is incorrect/,
+      'A wrong pledgedSrcSize should be enforced alongside a dictionary'
+    );
+  },
+};
