@@ -521,6 +521,11 @@ export type WebSearchOptions = {
   search_context_size?: "low" | "medium" | "high";
   user_location?: WebSearchUserLocation;
 };
+// Source of truth for per-model reasoning types: each model's `reasoning_effort` metadata
+// in Workers AI ConfigAPI (supported efforts, aliases, defaults, and whether reasoning can
+// be turned off). The Workers AI SDK type generator (cloudflare/ai/sdk,
+// apps/worker-constellation-entry/scripts/build-types) turns it into the per-model
+// `inputs` types below; the developer docs model schemas come from the same metadata.
 /**
  * A reasoning effort. The listed values are suggestions: the efforts the model supports.
  * Any other string also type-checks, so new or provider-specific efforts are never blocked
