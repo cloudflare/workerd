@@ -48,7 +48,6 @@
 //!
 //! This crate implements KJ's I/O interfaces for **workerd**, which is their only consumer. It is not a drop-in for every KJ program, on purpose. The rule for
 //! leaving a KJ feature out: no consumer in workerd's production code *or its configuration
-//! leaving a KJ feature out: no consumer in workerd's production code *or its configuration
 //! surface* (`workerd.capnp` documents what `Socket.address` and the like accept -- grepping
 //! `src/workerd` for a literal is not enough, and a review caught exactly that for
 //! `unix-abstract:`), and hand-written libc / sockaddr / fd code to keep. Left out, each site
@@ -61,6 +60,8 @@
 //! extra descriptor per stream; stream.rs), `getSockaddr`, `wrapListenSocketFd` with KJ's fd
 //! flags, `onSignal`, `getaddrinfo` with KJ's hints and service names, `unix:` and
 //! `unix-abstract:` addresses, `SO_REUSEADDR`, `TCP_NODELAY`, the accept retry set, SIGPIPE.
+//! Added for workerd, with no KJ counterpart: `loopback:` addresses (loopback.rs), which
+//! `workerd test` uses to exercise the network stack end to end inside one process.
 //!
 //! # Objects
 //!
@@ -69,7 +70,8 @@
 //!     ├── kj_rs_tokio::TokioAsyncIoContext   the loop's tokio runtime (kj-rs-tokio)
 //!     ├── TokioLowLevelAsyncIoProvider       wrap*Fd(): an owned fd/SOCKET as i64 -> Rust owns it
 //!     └── TokioAsyncIoProvider
-//!             └── TokioNetwork               kj::Arc<PeerFilter>, shared down the chain:
+//!             └── TokioNetwork               kj::Arc<PeerFilter> + Box<LoopbackRegistry>,
+//!                     │                          both shared down the restrictPeers chain:
 //!                     ├── TokioNetworkAddress    Box<TokioAddress> + filter share
 //!                     │       ├── TokioConnectionReceiver  Box<TokioListener> + filter share
 //!                     │       └── TokioDatagramPort        Box<TokioDatagram> + filter share
@@ -78,7 +80,8 @@
 //! TokioStream    (stream.rs)   Arc<Inner>: the socket, plus a lazily dup'd hangup watch
 //! TokioListener  (net.rs)      Arc<..>: one listening socket per resolved address
 //! TokioDatagram  (net.rs)      Arc<..>: one datagram socket
-//! TokioAddress   (net.rs)      the parsed address: SocketAddr list, or a unix name
+//! TokioAddress   (net.rs)      the parsed address: SocketAddr list, a unix name, or a loopback
+//!                              queue (loopback.rs; `loopback:` addresses, workerd test only)
 //! TokioFileWatcher (watcher.rs) Arc<..>: notify watcher + metadata stamps; workerd's
 //!                              FileWatcher (async-io.h) wraps it for C++
 //! ```
@@ -135,6 +138,7 @@ pub use stream::TokioStream;
 
 mod error;
 mod ffi;
+mod loopback;
 mod net;
 mod signal;
 mod stream;
@@ -192,6 +196,7 @@ const _: () = {
     send_sync::<TokioAddress>();
     send_sync::<net::TokioDatagram>();
     send_sync::<net::TokioListener>();
+    send_sync::<loopback::LoopbackRegistry>();
     send_sync::<watcher::TokioFileWatcher>();
 };
 
