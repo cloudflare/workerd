@@ -3,13 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export default {
-  async websearch({
-    gatewayId,
-    provider,
-    query,
-    limit,
-    byokAlias,
-  }) {
+  async websearch({ gatewayId, provider, query, limit, byokAlias }) {
     if (typeof gatewayId !== 'string' || gatewayId.trim() === '') {
       throw new Error('Invalid gateway ID');
     }
