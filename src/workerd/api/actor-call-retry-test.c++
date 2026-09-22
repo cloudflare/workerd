@@ -172,6 +172,35 @@ KJ_TEST("actor retries return the original disconnect after claim rejection") {
   KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::CLAIM_REJECTED);
 }
 
+KJ_TEST("claim rejection returns the original ambiguous actor call failure") {
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto state = newRetryState(timer, *observer);
+
+  auto first = startAttempt(*state);
+  auto nonce = KJ_ASSERT_NONNULL(first.getMetadata()).nonce;
+  KJ_EXPECT(
+      handleFailure(*state, makeDisconnect("original ambiguous disconnect"_kj)).is<kj::Duration>());
+
+  auto second = startAttempt(*state);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(second.getMetadata()).nonce == nonce);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(second.getMetadata()).isRetry == IsActorRetry::YES);
+  auto notDelivered = makeDisconnect("later not-delivered disconnect"_kj);
+  jsg::markActorRequestNotDelivered(notDelivered);
+  KJ_EXPECT(handleFailure(*state, kj::mv(notDelivered)).is<kj::Duration>());
+
+  auto third = startAttempt(*state);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(third.getMetadata()).nonce == nonce);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(third.getMetadata()).isRetry == IsActorRetry::YES);
+  auto rejected = KJ_EXCEPTION(FAILED, "claim rejected");
+  rejected.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  auto result = handleFailure(*state, kj::mv(rejected));
+  auto& failure = KJ_ASSERT_NONNULL(result.tryGet<kj::Exception>());
+  KJ_EXPECT(failure.getDescription().contains("original ambiguous disconnect"));
+  KJ_ASSERT(observer->outcomes.size() == 1);
+  KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::CLAIM_REJECTED);
+}
+
 KJ_TEST("actor retries stop after five total attempts") {
   TestTimerChannel timer;
   auto observer = kj::refcounted<RecordingObserver>();
