@@ -18,8 +18,8 @@ namespace clang::tidy::bugprone {
 ///
 /// For details, see the user-facing documentation:
 /// https://clang.llvm.org/extra/clang-tidy/checks/bugprone/use-after-move.html
-class UseAfterMoveCheck : public ClangTidyCheck {
-public:
+class UseAfterMoveCheck: public ClangTidyCheck {
+ public:
   UseAfterMoveCheck(StringRef Name, ClangTidyContext *Context);
   void storeOptions(ClangTidyOptions::OptionMap &Opts) override;
   bool isLanguageVersionSupported(const LangOptions &LangOpts) const override {
@@ -28,11 +28,11 @@ public:
   void registerMatchers(ast_matchers::MatchFinder *Finder) override;
   void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
 
-private:
+ private:
   std::vector<StringRef> InvalidationFunctions;
   std::vector<StringRef> ReinitializationFunctions;
 };
 
-} // namespace clang::tidy::bugprone
+}  // namespace clang::tidy::bugprone
 
-#endif // LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_BUGPRONE_USEAFTERMOVECHECK_H
+#endif  // LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_BUGPRONE_USEAFTERMOVECHECK_H
