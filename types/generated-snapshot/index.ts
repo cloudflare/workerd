@@ -1730,7 +1730,7 @@ export interface MessageEventInit {
   data?: any;
   origin?: string;
   lastEventId?: string;
-  source?: MessagePort;
+  source?: MessagePort | null;
   ports?: MessagePort[];
 }
 /**
