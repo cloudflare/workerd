@@ -68,11 +68,10 @@ wd_cc_binary(
     malloc = ":malloc",
     visibility = ["//visibility:public"],
     deps = [
-        ":cpp-capnp-schema",
         ":json-logger",
+        ":schema-file",
         ":server",
         ":v8-platform-impl",
-        ":workerd-capnp-schema",
         ":workerd_capnp",
         "//src/pyodide:pyodide_extra_capnp",
         "//src/rust/cxx/kj-rs-io",
@@ -109,6 +108,21 @@ sh_test(
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
+)
+
+# The capnp::SchemaFile implementations that compile a schema-file config: files on disk with
+# workerd's import resolution, and the schemas built into the binary.
+wd_cc_library(
+    name = "schema-file",
+    srcs = ["schema-file.c++"],
+    hdrs = ["schema-file.h"],
+    deps = [
+        ":cpp-capnp-schema",
+        ":workerd-capnp-schema",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "@capnp-cpp//src/capnp:capnpc",
+        "@capnp-cpp//src/kj",
+    ],
 )
 
 wd_cc_library(
