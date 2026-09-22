@@ -113,6 +113,7 @@ export {
   respondAfterCloseAndReleaseFromLaterMicrotask,
   readableStreamByteRespondWithNewView,
   readableStreamByteRespondWithNewViewUsesNewElementSize,
+  respondRemainderSettlesHeadFirst,
   readableStreamAutoAllocateChunkSize,
 } from 'respond';
 
