@@ -124,6 +124,22 @@ sh_test(
 )
 
 sh_test(
+    name = "coroutine-hostile-raii-test",
+    srcs = ["coroutine-hostile-raii-test.sh"],
+    data = [
+        ":coroutine-hostile-raii-negative-test.c++",
+        ":coroutine-hostile-raii-positive-test.c++",
+        ":workerd-lint",
+        "//tools:clang-tidy",
+    ],
+    tags = ["no-asan"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+sh_test(
     name = "legacy-stream-alloc-test",
     srcs = ["legacy-stream-alloc-test.sh"],
     data = [

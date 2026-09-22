@@ -6,6 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Derived from LLVM's misc/CoroutineHostileRAIICheck.cpp. The ancestor walk is
+// modified to cross declaration nodes without escaping the current function.
+
 #include "coroutine-hostile-raii.h"
 
 #include "clang-tidy/utils/OptionsUtils.h"
@@ -30,28 +33,34 @@ namespace {
 using clang::ast_matchers::internal::BoundNodesTreeBuilder;
 
 AST_MATCHER_P(Stmt, forEachPrevStmt, clang::ast_matchers::internal::Matcher<Stmt>, InnerMatcher) {
-  DynTypedNode P;
+  DynTypedNode Child = DynTypedNode::create(Node);
   bool IsHostile = false;
-  for (const Stmt *Child = &Node; Child; Child = P.get<Stmt>()) {
-    auto Parents = Finder->getASTContext().getParents(*Child);
+  while (true) {
+    auto Parents = Finder->getASTContext().getParents(Child);
     if (Parents.empty()) {
       break;
     }
-    P = *Parents.begin();
-    const auto *PCS = P.get<CompoundStmt>();
-    if (PCS == nullptr) {
-      continue;
+
+    DynTypedNode Parent = *Parents.begin();
+    if (Parent.get<FunctionDecl>() != nullptr) {
+      break;
     }
-    for (const Stmt *Sibling: PCS->children()) {
-      if (Sibling == Child) {
-        break;
-      }
-      BoundNodesTreeBuilder SiblingBuilder;
-      if (InnerMatcher.matches(*Sibling, Finder, &SiblingBuilder)) {
-        Builder->addMatch(SiblingBuilder);
-        IsHostile = true;
+    if (const auto *PCS = Parent.get<CompoundStmt>()) {
+      const auto *ChildStmt = Child.get<Stmt>();
+      if (ChildStmt != nullptr) {
+        for (const Stmt *Sibling: PCS->children()) {
+          if (Sibling == ChildStmt) {
+            break;
+          }
+          BoundNodesTreeBuilder SiblingBuilder;
+          if (InnerMatcher.matches(*Sibling, Finder, &SiblingBuilder)) {
+            Builder->addMatch(SiblingBuilder);
+            IsHostile = true;
+          }
+        }
       }
     }
+    Child = Parent;
   }
   return IsHostile;
 }
