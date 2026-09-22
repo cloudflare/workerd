@@ -130,7 +130,7 @@ KJ_TEST("JS RPC call plan copies calls and property accesses") {
     builder.setMethodName("value");
     builder.getOperation().setGetProperty();
   });
-  KJ_EXPECT(!property.getReplayable());
+  KJ_EXPECT(property.getReplayable());
   capnp::MallocMessageBuilder propertyAttempt;
   property.copyTo(propertyAttempt.initRoot<rpc::JsRpcTarget::CallParams>());
   auto propertyParams = propertyAttempt.getRoot<rpc::JsRpcTarget::CallParams>();
@@ -710,13 +710,13 @@ KJ_TEST("replayable actor RPC calls carry no retry metadata without the fetch ga
   KJ_EXPECT(dispatch.metadata == kj::none);
 }
 
-KJ_TEST("actor RPC property reads carry no retry metadata") {
+KJ_TEST("actor RPC property reads carry retry metadata") {
   auto dispatch = makeActorPropertyRead(
       kj::arr("durable-object-retries-fetch"_kj, "durable-object-retries-jsrpc"_kj));
 
-  KJ_EXPECT(dispatch.singleUseCount == 1);
-  KJ_EXPECT(dispatch.actorAttemptCount == 0);
-  KJ_EXPECT(dispatch.metadata == kj::none);
+  KJ_EXPECT(dispatch.singleUseCount == 0);
+  KJ_EXPECT(dispatch.actorAttemptCount == 1);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(dispatch.metadata).retryGateEnabled == ActorRetryGateEnabled::NO);
 }
 
 // A Durable Object whose methods fail in the ways the receiver must classify as delivered.

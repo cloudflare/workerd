@@ -167,8 +167,8 @@ class JsRpcCallPlan {
       size_t serializedDataCapacity,
       RpcSerializerExternalHandler::Replayability serializerReplayability);
 
-  // True only for method calls whose arguments are absent or contain no externals and no
-  // serializer-handled ineligible values. Property reads are not replayable.
+  // True only for property reads and method calls whose arguments are absent or contain no
+  // externals and no serializer-handled ineligible values.
   bool getReplayable() const {
     return replayable;
   }

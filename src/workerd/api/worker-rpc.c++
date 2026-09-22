@@ -107,7 +107,14 @@ JsRpcCallPlan::JsRpcCallPlan(kj::Own<capnp::MallocMessageBuilder> message,
       "serialized RPC data exceeds its buffer capacity");
 
   auto operation = getParams().getOperation();
-  if (!operation.isCallWithArgs()) return;
+  if (operation.isGetProperty()) {
+    // For a retryable target, undelivered property reads count as eligible in the retry metrics
+    // even when replay memory reservation prevents retry requests.
+    KJ_REQUIRE(this->serializedData.size() == 0,
+        "RPC property call plan unexpectedly contains serialized arguments");
+    replayable = true;
+    return;
+  }
 
   KJ_REQUIRE(operation.hasCallWithArgs() == (this->serializedData.size() > 0),
       "RPC call plan has inconsistent serialized arguments");

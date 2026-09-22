@@ -53,6 +53,7 @@ constexpr kj::StringPtr RECEIVER_SOURCE = R"JS(
   export default class extends WorkerEntrypoint {
     echo(value) { return value; }
     makeChild() { return new Child(); }
+    get value() { return 42; }
   }
 )JS"_kj;
 
@@ -706,7 +707,8 @@ KJ_TEST("claim rejection breaks session pipelines with a disconnect") {
   rejection.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
   session->failed(rejection);
 
-  auto childFailure = KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&] { child.wait(io.waitScope); }));
+  auto childFailure =
+      KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&] { child.wait(io.waitScope); }));
   KJ_EXPECT(childFailure.getType() == kj::Exception::Type::DISCONNECTED, childFailure);
   KJ_EXPECT(childFailure.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none);
   auto parentFailure =
@@ -822,6 +824,35 @@ KJ_TEST("dropping an actor RPC promise during backoff releases retry state") {
   KJ_EXPECT(state.outcomes.empty());
   KJ_EXPECT(state.pendingFailureClassifications == 0);
   KJ_EXPECT(state.finalizedFailureClassifications == 1);
+  KJ_EXPECT(state.replayMemoryBytes == 0);
+}
+
+KJ_TEST("actor RPC property reads retry on a fresh session") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  RetryTestState state;
+  PausingTimerChannel timer;
+  TestFixture receiver(makeReceiverParams(io.waitScope));
+  TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1);
+    auto property = KJ_REQUIRE_NONNULL(fetcher->getRpcMethodForTestOnly(env.js, kj::str("value")));
+    auto& handler = KJ_REQUIRE_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<JsRpcProperty>>());
+    auto value = jsg::JsValue(handler.wrap(env.js, kj::mv(property)));
+    auto checked = env.js.toPromise(value).then(env.js, [](jsg::Lock& js, jsg::Value value) {
+      KJ_EXPECT(jsg::JsValue(value.getHandle(js)).strictEquals(js.num(42)));
+    });
+    return env.context.awaitJs(env.js, kj::mv(checked)).attach(kj::mv(fetcher));
+  });
+
+  KJ_ASSERT(state.metadata.size() == 2);
+  KJ_EXPECT(state.metadata[0].nonce == state.metadata[1].nonce);
+  KJ_EXPECT(state.metadata[1].isRetry == IsActorRetry::YES);
+  KJ_EXPECT(state.acceptedRetries == 1);
+  KJ_EXPECT(state.observedRetries == 1);
+  KJ_ASSERT(state.outcomes.size() == 1);
+  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RECOVERED);
   KJ_EXPECT(state.replayMemoryBytes == 0);
 }
 

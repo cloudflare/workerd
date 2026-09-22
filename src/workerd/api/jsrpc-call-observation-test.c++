@@ -381,7 +381,7 @@ KJ_TEST("disposing an RPC promise does not release projected replay memory early
   KJ_EXPECT(harness.state.replayMemoryBytes == 0);
 }
 
-KJ_TEST("an RPC property get is observed with a non-replayable payload") {
+KJ_TEST("actor RPC property reads are observed as replayable") {
   Harness harness;
   harness.sender->runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = harness.makeFetcher(env).fetcher;
@@ -390,7 +390,7 @@ KJ_TEST("an RPC property get is observed with a non-replayable payload") {
 
   auto& observations = harness.state.observations;
   KJ_ASSERT(observations.size() == 1);
-  KJ_EXPECT(observations[0]->payloadReplayable == ActorCallPayloadReplayable::NO);
+  KJ_EXPECT(observations[0]->payloadReplayable == ActorCallPayloadReplayable::YES);
   KJ_EXPECT(observations[0]->targetRetryable == ActorCallTargetRetryable::YES);
   KJ_EXPECT(observations[0]->settlement == Settlement::SUCCESS);
 }
