@@ -31,6 +31,7 @@ const needleLong = s64k.slice(40000, 40040);
 const parts = Array.from({length: 16}, (_, i) => Buffer.from(ascii(64 + i)));
 const dest = Buffer.alloc(4096);
 const u16buf = Buffer.from(s1k, 'utf16le');
+const u16big = Buffer.from(s64k, 'utf16le');
 let sink;
 
 export const ops = {
@@ -60,6 +61,9 @@ export const ops = {
   'indexOf-short-64k': () => b64k.indexOf('xyz!'),
   'indexOf-long-64k': () => b64k.indexOf(needleLong),
   'indexOf-buf-long-64k': () => b64k.indexOf(Buffer.from(needleLong)),
+  'indexOf-char-64k': () => b64k.indexOf('!'),
+  'indexOf-short-utf16-64k': () => u16big.indexOf('xyz!', 0, 'utf16le'),
+  'indexOf-short-mixed-64k': () => b64k.indexOf('xyz!') + u16big.indexOf('xyz!', 0, 'utf16le'),
   'lastIndexOf-short-64k': () => b64k.lastIndexOf('abc', 10),
   'includes-utf16-1k': () => u16buf.includes('zzz', 0, 'utf16le'),
   'fill-str-1k': () => dest.fill('abc', 0, 1024),
@@ -121,6 +125,9 @@ constexpr Case kCases[] = {
   {"indexOf-short-64k"_kj, 100},
   {"indexOf-long-64k"_kj, 100},
   {"indexOf-buf-long-64k"_kj, 100},
+  {"indexOf-char-64k"_kj, 100},
+  {"indexOf-short-utf16-64k"_kj, 100},
+  {"indexOf-short-mixed-64k"_kj, 100},
   {"lastIndexOf-short-64k"_kj, 1000},
   {"includes-utf16-1k"_kj, 1000},
   {"fill-str-1k"_kj, 1000},
