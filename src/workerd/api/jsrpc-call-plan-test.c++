@@ -183,8 +183,8 @@ KJ_TEST("serializer reports the capacity of its released buffer") {
     serializer.write(env.js, jsg::JsValue(env.js.str("x"_kj)));
     auto released = serializer.release();
 
-    KJ_EXPECT(released.dataCapacity > released.data.size(), released.dataCapacity,
-        released.data.size());
+    KJ_EXPECT(
+        released.dataCapacity > released.data.size(), released.dataCapacity, released.data.size());
   });
 }
 

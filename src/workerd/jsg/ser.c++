@@ -172,10 +172,8 @@ v8::Maybe<uint32_t> Serializer::GetSharedArrayBufferId(
   return v8::Just(n);
 }
 
-void* Serializer::ReallocateBufferMemory(
-    void* oldBuffer, size_t size, size_t* actualSize) {
-  auto result = v8::ValueSerializer::Delegate::ReallocateBufferMemory(
-      oldBuffer, size, actualSize);
+void* Serializer::ReallocateBufferMemory(void* oldBuffer, size_t size, size_t* actualSize) {
+  auto result = v8::ValueSerializer::Delegate::ReallocateBufferMemory(oldBuffer, size, actualSize);
   if (result != nullptr) {
     dataCapacity = *actualSize;
   }

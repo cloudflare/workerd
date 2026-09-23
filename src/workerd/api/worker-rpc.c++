@@ -766,8 +766,8 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
         planBuilder.getOperation().setGetProperty();
       }
 
-      JsRpcCallPlan callPlan(kj::mv(planMessage), kj::mv(serializedData),
-          serializedDataCapacity, serializerReplayability);
+      JsRpcCallPlan callPlan(kj::mv(planMessage), kj::mv(serializedData), serializedDataCapacity,
+          serializerReplayability);
 
       // JSRPC retries build on the fetch retry machinery, so the fetch gate remains a shared
       // prerequisite while the JSRPC gate controls this event type's separate rollout.

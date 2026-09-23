@@ -208,8 +208,7 @@ class Serializer final: v8::ValueSerializer::Delegate {
 
   v8::Maybe<uint32_t> GetSharedArrayBufferId(
       v8::Isolate* isolate, v8::Local<v8::SharedArrayBuffer> sab) override;
-  void* ReallocateBufferMemory(
-      void* oldBuffer, size_t size, size_t* actualSize) override;
+  void* ReallocateBufferMemory(void* oldBuffer, size_t size, size_t* actualSize) override;
 
   kj::Maybe<ExternalHandler&> externalHandler;
 
