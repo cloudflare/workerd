@@ -189,6 +189,9 @@ export {
   respondWithNewViewForeignBuffer,
   enqueueResizableBuffer,
   readResizableView,
+  resizableByobRequestCannotShrink,
+  resizableBuffersDeliveredFixedLength,
+  sharedBuffersRejected,
   nonDetachableBuffersRejected,
 } from 'buffer-lifecycle';
 
