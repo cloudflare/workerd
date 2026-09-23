@@ -308,15 +308,13 @@ function jsStringToString(string: string): Uint8Array {
 
 // =======================================================================================
 
-function tryFromHexDigit(c: number): number | undefined {
-  if (0x30 /* '0' */ <= c && c <= 0x39 /* '9' */) {
-    return c - 0x30;
-  } else if (0x61 /* 'a' */ <= c && c <= 0x66 /* 'f' */) {
-    return c - (0x61 - 10);
-  } else if (0x41 /* 'A' */ <= c && c <= 0x46 /* 'F' */) {
-    return c - (0x41 - 10);
-  }
-  return undefined;
+// tryFromHexDigit in the C++, as a table: the value of each hex digit, or -1
+// for any other byte.
+const kHexDigitValues = new Int8Array(256).fill(-1);
+for (let i = 0; i < 10; i++) kHexDigitValues[0x30 /* '0' */ + i] = i;
+for (let i = 0; i < 6; i++) {
+  kHexDigitValues[0x61 /* 'a' */ + i] = 10 + i;
+  kHexDigitValues[0x41 /* 'A' */ + i] = 10 + i;
 }
 
 // Decodes the first `textLength` bytes of `text`.
@@ -336,23 +334,16 @@ function decodeHexTruncated(
   const vec = createUint8Array(textLength / 2);
   let len = 0;
 
+  // The C++ checks each digit in turn, but either being invalid has the same
+  // effect, so both are checked at once.
   for (let i = 0; i < textLength; i += 2) {
-    let b = 0;
-    const d1 = tryFromHexDigit(text[i]!);
-    if (d1 !== undefined) {
-      b = d1 << 4;
-    } else {
+    const d1 = kHexDigitValues[text[i]!]!;
+    const d2 = kHexDigitValues[text[i + 1]!]!;
+    if ((d1 | d2) < 0) {
       if (strict) throw new TypeError('The text is not valid hex');
       break;
     }
-    const d2 = tryFromHexDigit(text[i + 1]!);
-    if (d2 !== undefined) {
-      b |= d2;
-    } else {
-      if (strict) throw new TypeError('The text is not valid hex');
-      break;
-    }
-    vec[len++] = b;
+    vec[len++] = (d1 << 4) | d2;
   }
 
   if (len === vec.length) {
