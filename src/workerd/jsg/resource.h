@@ -1375,6 +1375,7 @@ struct ResourceTypeBuilder {
         typeWrapper.template getTemplate<isContext>(isolate, static_cast<Type*>(nullptr)));
     // Propagate wildcard proxy to children. It's a data property, so it should be propagated, but v8 only handles normal data properties.
     auto& parentWrapper = static_cast<ResourceWrapper<TypeWrapper, Type>&>(typeWrapper);
+    parentWrapper.ensureMembersRegistered(isolate);
     if (parentWrapper.wildcardHandler != kj::none) {
       auto& selfWrapper = static_cast<ResourceWrapper<TypeWrapper, Self>&>(typeWrapper);
       KJ_ASSERT(
@@ -2297,6 +2298,8 @@ class ResourceWrapper {
         T::template registerMembers<decltype(builder), T>(builder);
       }
 
+      membersRegistered = true;
+
       KJ_IF_SOME(handler, wildcardHandler) {
         instance->SetHandler(handler);
       }
@@ -2310,6 +2313,25 @@ class ResourceWrapper {
   }
 
   kj::Maybe<v8::NamedPropertyHandlerConfiguration> wildcardHandler;
+
+  // Whether getTemplate() registered this type's members in this isolate. A template adopted from
+  // a startup snapshot (IsolateBase::adoptTemplatesFromSnapshot) was built in the zygote, so the
+  // C++ state registration records, such as the wildcardHandler a child type copies in
+  // registerInherit(), is missing until ensureMembersRegistered() runs it.
+  bool membersRegistered = false;
+
+  void ensureMembersRegistered(v8::Isolate* isolate) {
+    if (membersRegistered) return;
+    if (memoizedConstructor.IsEmpty()) {
+      getTemplate(isolate, static_cast<T*>(nullptr));
+      return;
+    }
+    // Build a throwaway template for its registration's side effects and keep the adopted one,
+    // which the snapshot's objects were instantiated from.
+    auto adopted = kj::mv(memoizedConstructor);
+    getTemplate(isolate, static_cast<T*>(nullptr));
+    memoizedConstructor = kj::mv(adopted);
+  }
 
   // Enumerate this type's two constructor-template slots (empty or not) for startup-snapshot
   // handling. Slots are visited in a fixed compile-time order (parameter-pack order of the
