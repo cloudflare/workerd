@@ -7,14 +7,15 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from urllib.request import urlopen
 
 import jsonc
-import v8_nightly_shared
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKOUT = Path("/tmp/workerd-v8/v8")
@@ -35,7 +36,11 @@ V8_DEPENDENCIES = {
 # build/deps/deps.jsonc.
 
 
-v8_nightly_shared.init(ROOT)
+def run(args, *, cwd=ROOT, check=True, env=None, stdout=None):
+    print("+", shlex.join(map(str, args)), flush=True)
+    return subprocess.run(
+        list(map(str, args)), cwd=cwd, check=check, text=True, env=env, stdout=stdout
+    )
 
 
 def latest_beta_v8():
@@ -65,17 +70,21 @@ def _tarball_integrity(tag):
     return "sha256-" + base64.b64encode(digest).decode()
 
 
-def _v8_dependency_commit(path, deps=None):
-    deps = deps if deps is not None else (CHECKOUT / "DEPS").read_text()
+def _v8_dependency_commit(path, deps):
     match = re.search(rf"'{re.escape(path)}'\s*:.*?'([0-9a-f]{{40}})'", deps, re.DOTALL)
     return match.group(1)
 
 
+def _v8_deps_at(tag):
+    return run(
+        ["git", "show", f"{tag}:DEPS"], cwd=CHECKOUT, stdout=subprocess.PIPE
+    ).stdout
+
+
 def changed_dependencies(old, target):
-    old_deps = v8_nightly_shared.output(["git", "show", f"{old}:DEPS"], cwd=CHECKOUT)
-    target_deps = v8_nightly_shared.output(
-        ["git", "show", f"{target}:DEPS"], cwd=CHECKOUT
-    )
+    """Return the V8_DEPENDENCIES whose V8 DEPS revision differs between two tags."""
+    old_deps = _v8_deps_at(old)
+    target_deps = _v8_deps_at(target)
     return tuple(
         name
         for name, (path, _) in V8_DEPENDENCIES.items()
@@ -87,9 +96,10 @@ def changed_dependencies(old, target):
 def _update_aligned_dependencies():
     doc = jsonc.loads(DEPS.read_text())
     repositories = {repo["name"]: repo for repo in doc.data["repositories"]}
+    v8_deps = (CHECKOUT / "DEPS").read_text()
     for name, (path, aligned) in V8_DEPENDENCIES.items():
         if aligned:
-            repositories[name]["freeze_commit"] = _v8_dependency_commit(path)
+            repositories[name]["freeze_commit"] = _v8_dependency_commit(path, v8_deps)
     DEPS.write_text(jsonc.dumps(doc) + "\n")
 
 
@@ -129,13 +139,13 @@ def prepare_update(target):
 
     shutil.rmtree(CHECKOUT, ignore_errors=True)
     CHECKOUT.parent.mkdir(parents=True, exist_ok=True)
-    v8_nightly_shared.run(["git", "init", CHECKOUT])
-    v8_nightly_shared.run(
+    run(["git", "init", CHECKOUT])
+    run(
         ["git", "remote", "add", "origin", "https://github.com/v8/v8.git"],
         cwd=CHECKOUT,
     )
     for tag in (old, target):
-        v8_nightly_shared.run(
+        run(
             [
                 "git",
                 "fetch",
@@ -145,32 +155,31 @@ def prepare_update(target):
             ],
             cwd=CHECKOUT,
         )
-    v8_nightly_shared.run(
-        ["git", "checkout", "-B", "workerd-patches", old], cwd=CHECKOUT
-    )
+    run(["git", "checkout", "-B", "workerd-patches", old], cwd=CHECKOUT)
 
     patch_files = sorted(PATCHES.glob("*.patch"))
 
     git_env = os.environ | {
-        "GIT_COMMITTER_NAME": "workerd V8 nightly",
+        "GIT_COMMITTER_NAME": "workerd V8 update",
         "GIT_COMMITTER_EMAIL": "ew-v8-patches@cloudflare.com",
     }
 
     # --keep-non-patch is the counterpart of the -k that finish_update passes to
-    # format-patch.
-    v8_nightly_shared.run(
-        [
-            "git",
-            "am",
-            "--keep-non-patch",
-            "--3way",
-            "--committer-date-is-author-date",
-            *patch_files,
-        ],
-        cwd=CHECKOUT,
-        env=git_env,
-    )
-    rebase = v8_nightly_shared.run(
+    # format-patch. With no patch files, git am would read a patch from stdin.
+    if patch_files:
+        run(
+            [
+                "git",
+                "am",
+                "--keep-non-patch",
+                "--3way",
+                "--committer-date-is-author-date",
+                *patch_files,
+            ],
+            cwd=CHECKOUT,
+            env=git_env,
+        )
+    rebase = run(
         ["git", "rebase", "--onto", target, old, "workerd-patches"],
         cwd=CHECKOUT,
         check=False,
@@ -185,8 +194,8 @@ def prepare_update(target):
 
 
 def finish_update(target):
-    with tempfile.TemporaryDirectory() as output:
-        v8_nightly_shared.run(
+    with tempfile.TemporaryDirectory() as patch_dir:
+        run(
             [
                 "git",
                 "format-patch",
@@ -196,12 +205,12 @@ def finish_update(target):
                 "--no-stat",
                 "--zero-commit",
                 "--output-directory",
-                output,
+                patch_dir,
                 target,
             ],
             cwd=CHECKOUT,
         )
-        generated = sorted(Path(output).glob("*.patch"))
+        generated = sorted(Path(patch_dir).glob("*.patch"))
         for patch in PATCHES.glob("*.patch"):
             patch.unlink()
         for patch in generated:
