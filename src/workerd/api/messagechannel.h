@@ -185,6 +185,9 @@ class MessageChannelModule final: public jsg::Object {
     JSG_NESTED_TYPE(MessageChannel);
     JSG_NESTED_TYPE(MessagePort);
   }
+
+  // Stateless: a startup snapshot that retains this object re-creates it fresh.
+  JSG_SNAPSHOT_RESTORE(MessageChannelModule);
 };
 
 template <class Registry>

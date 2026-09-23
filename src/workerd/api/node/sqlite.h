@@ -66,6 +66,9 @@ class SqliteUtil final: public jsg::Object {
     JSG_STATIC_CONSTANT(SQLITE_CHANGESET_CONSTRAINT);
     JSG_STATIC_CONSTANT(SQLITE_CHANGESET_FOREIGN_KEY);
   }
+
+  // Stateless: a startup snapshot that retains this object re-creates it fresh.
+  JSG_SNAPSHOT_RESTORE(SqliteUtil);
 };
 
 #define EW_NODE_SQLITE_ISOLATE_TYPES                                                               \

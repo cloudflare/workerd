@@ -109,6 +109,9 @@ class InspectorModule final: public jsg::Object {
   JSG_RESOURCE_TYPE(InspectorModule) {
     JSG_NESTED_TYPE_NAMED(InspectorConnection, Connection);
   }
+
+  // Stateless: a startup snapshot that retains this object re-creates it fresh.
+  JSG_SNAPSHOT_RESTORE(InspectorModule);
 };
 
 #define EW_NODE_INSPECTOR_ISOLATE_TYPES api::node::InspectorConnection, api::node::InspectorModule

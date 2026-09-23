@@ -25,6 +25,9 @@ class Base64Module final: public jsg::Object {
       encodeArrayToString(source: ArrayBuffer | ArrayBufferView): string;
     });
   }
+
+  // Stateless: a startup snapshot that retains this object re-creates it fresh.
+  JSG_SNAPSHOT_RESTORE(Base64Module);
 };
 
 template <class Registry>
