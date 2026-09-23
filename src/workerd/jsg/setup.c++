@@ -736,7 +736,8 @@ IsolateBase::SnapshotWrapperPayloads IsolateBase::collectSnapshotWrapperPayloads
         auto payload = kj::heapArray<kj::byte>(sizeof(uint32_t) + recipe.size());
         uint32_t index = SNAPSHOT_EXTERNAL_PAYLOAD_INDEX;
         memcpy(payload.begin(), &index, sizeof(index));
-        memcpy(payload.begin() + sizeof(index), recipe.begin(), recipe.size());
+        // Not memcpy(); see DynamicResourceTypeMap::trySnapshotWrapperPayload().
+        payload.slice(sizeof(index)).copyFrom(recipe);
         payloads.insert(&wrappable, kj::mv(payload));
       }
       continue;

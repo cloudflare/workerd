@@ -1141,7 +1141,9 @@ class DynamicResourceTypeMap {
     auto payload = kj::heapArray<kj::byte>(sizeof(uint32_t) + recipe.size());
     uint32_t index = restorer.index;
     memcpy(payload.begin(), &index, sizeof(index));
-    memcpy(payload.begin() + sizeof(index), recipe.begin(), recipe.size());
+    // Not memcpy(): an empty recipe has a null begin(), and a null memcpy() source lets the
+    // optimizer assume the recipe is non-null and drop its destructor's null check.
+    payload.slice(sizeof(index)).copyFrom(recipe);
     return kj::mv(payload);
   }
 
