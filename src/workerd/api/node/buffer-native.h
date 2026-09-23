@@ -10,7 +10,7 @@ namespace workerd::api::node {
 
 // `node-internal:buffer_native`: the library primitives behind the TypeScript
 // implementation of `node-internal:buffer` (src/node/internal/buffer.ts). Each
-// method wraps exactly one V8, simdutf, nbytes, kj, or i18n call made by
+// method wraps exactly one V8, libc, simdutf, nbytes, kj, or i18n call made by
 // BufferUtil (buffer.c++), with the same options, so both implementations reach
 // the same library code. The TypeScript module validates arguments before
 // calling in; the checks here only keep each primitive memory-safe on its own.
@@ -27,6 +27,9 @@ class BufferNative final: public jsg::Object {
   jsg::JsString newFromOneByte(jsg::Lock& js, jsg::JsUint8Array bytes);
   jsg::JsString newFromUtf8(jsg::Lock& js, jsg::JsUint8Array bytes);
   jsg::JsString newFromTwoByte(jsg::Lock& js, jsg::JsUint8Array bytes);
+
+  // libc
+  int memcmp(jsg::JsUint8Array one, jsg::JsUint8Array two, double length);
 
   // simdutf
   double simdutfMaximalBinaryLengthFromBase64(jsg::JsUint8Array input);
@@ -65,6 +68,8 @@ class BufferNative final: public jsg::Object {
     JSG_METHOD(newFromOneByte);
     JSG_METHOD(newFromUtf8);
     JSG_METHOD(newFromTwoByte);
+
+    JSG_METHOD(memcmp);
 
     JSG_METHOD(simdutfMaximalBinaryLengthFromBase64);
     JSG_METHOD(simdutfBase64ToBinary);

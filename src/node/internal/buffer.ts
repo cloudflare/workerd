@@ -8,7 +8,7 @@
 // (BufferUtil) and follows it function by function, so the two can be
 // compared side by side.
 //
-// Wherever the C++ calls into V8, simdutf, nbytes, kj, or i18n, this module
+// Wherever the C++ calls into V8, libc, simdutf, nbytes, kj, or i18n, this module
 // calls the same function through `node-internal:buffer_native` rather than
 // reimplementing it. Everything else is ported directly.
 //
@@ -471,16 +471,7 @@ export function compare(
   }
 
   const toCompare = Math.min(ptrOne.length, ptrTwo.length);
-  // memcmp
-  let result = 0;
-  for (let i = 0; i < toCompare; i++) {
-    const a = ptrOne[i]!;
-    const b = ptrTwo[i]!;
-    if (a !== b) {
-      result = a - b;
-      break;
-    }
-  }
+  const result = toCompare > 0 ? native.memcmp(ptrOne, ptrTwo, toCompare) : 0;
 
   if (result === 0) {
     if (ptrOne.length > ptrTwo.length) return 1;

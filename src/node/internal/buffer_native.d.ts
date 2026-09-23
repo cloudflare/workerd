@@ -4,7 +4,7 @@
 
 // Type definitions for the `node-internal:buffer_native` module
 // (src/workerd/api/node/buffer-native.h). Each function wraps exactly one V8,
-// simdutf, nbytes, kj, or i18n call made by src/workerd/api/node/buffer.c++.
+// libc, simdutf, nbytes, kj, or i18n call made by src/workerd/api/node/buffer.c++.
 
 // jsg::JsString::WriteFlags
 export const WRITE_NONE: number;
@@ -31,6 +31,13 @@ export function writeUtf16(
 export function newFromOneByte(bytes: Uint8Array): string;
 export function newFromUtf8(bytes: Uint8Array): string;
 export function newFromTwoByte(bytes: Uint8Array): string;
+
+// libc
+export function memcmp(
+  one: Uint8Array,
+  two: Uint8Array,
+  length: number
+): number;
 
 // simdutf
 export function simdutfMaximalBinaryLengthFromBase64(input: Uint8Array): number;
