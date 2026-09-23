@@ -21,7 +21,6 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 
 import { default as native } from 'node-internal:buffer_native';
-import { default as utilImpl } from 'node-internal:util';
 
 // =======================================================================================
 // Encoding (src/workerd/api/node/i18n.h)
@@ -65,9 +64,20 @@ const kMaxByteLength = Number.MAX_SAFE_INTEGER;
 
 const kResourceName = 'BufferUtil';
 
-// v8::Value::IsUint8Array
+// v8::Value::IsUint8Array, without a native call. The
+// %TypedArray%.prototype[Symbol.toStringTag] getter returns the name of the
+// typed array's type from its internal slot, and undefined for anything else,
+// including Proxies. Node.js's util.types.isUint8Array works the same way.
+// Like the module's other uses of built-ins, this relies on the getter being
+// the original when the module loads. The getter is called with .call, so it
+// is left unbound.
+// eslint-disable-next-line @typescript-eslint/unbound-method
+const getTypedArrayName = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype) as object,
+  Symbol.toStringTag
+)!.get as (this: unknown) => string | undefined;
 function isUint8Array(value: unknown): value is Uint8Array {
-  return utilImpl.isUint8Array(value);
+  return getTypedArrayName.call(value) === 'Uint8Array';
 }
 
 // v8::Value::ToNumber. Unlike Number(), throws for BigInts and Symbols.

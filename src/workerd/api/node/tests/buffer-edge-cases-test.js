@@ -126,6 +126,76 @@ export const hexDecoding = {
   },
 };
 
+export const uint8ArrayArguments = {
+  test() {
+    class Sub extends Uint8Array {}
+    const spoofedTag = new Uint8Array([0x61]);
+    Object.defineProperty(spoofedTag, Symbol.toStringTag, {
+      value: 'Int8Array',
+    });
+    const nullProto = new Uint8Array([0x61]);
+    Object.setPrototypeOf(nullProto, null);
+    const accepted = [
+      Buffer.from('a'),
+      new Sub([0x61]),
+      spoofedTag,
+      nullProto,
+      new Uint8Array(new SharedArrayBuffer(1)),
+    ];
+    for (const value of accepted) {
+      strictEqual(isAscii(value), true);
+      strictEqual(isUtf8(value), true);
+    }
+
+    const rejected = [
+      // The trap hides `buffer`, which the isAscii and isUtf8 wrappers read and
+      // which throws for a Proxy.
+      new Proxy(new Uint8Array(1), {
+        get: (target, key) => (key === 'length' ? target.length : undefined),
+      }),
+      new Int8Array(1),
+      new Uint8ClampedArray(1),
+      new DataView(new ArrayBuffer(1)),
+      new ArrayBuffer(1),
+      { [Symbol.toStringTag]: 'Uint8Array', length: 1 },
+      null,
+      undefined,
+      'a',
+    ];
+    for (const [name, fn] of [
+      ['isAscii', isAscii],
+      ['isUtf8', isUtf8],
+    ]) {
+      for (const value of rejected) {
+        throws(() => fn(value), {
+          name: 'TypeError',
+          message:
+            `Failed to execute '${name}' on 'BufferUtil': parameter 1 is ` +
+            `not of type 'Uint8Array'.`,
+        });
+      }
+    }
+
+    // Replacing the getter after node:buffer has loaded has no effect.
+    const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype);
+    const original = Object.getOwnPropertyDescriptor(
+      typedArrayPrototype,
+      Symbol.toStringTag
+    );
+    Object.defineProperty(typedArrayPrototype, Symbol.toStringTag, {
+      get() {
+        return 'Uint8Array';
+      },
+      configurable: true,
+    });
+    try {
+      throws(() => isAscii(new Int8Array(1)), { name: 'TypeError' });
+    } finally {
+      Object.defineProperty(typedArrayPrototype, Symbol.toStringTag, original);
+    }
+  },
+};
+
 export const loneSurrogates = {
   test() {
     // [input, { encoding: encoded }, utf8 byteLength]
