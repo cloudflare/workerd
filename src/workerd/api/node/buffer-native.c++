@@ -34,6 +34,16 @@ kj::ArrayPtr<kj::byte> range(jsg::JsUint8Array& array, double start, double end)
   return array.asArrayPtr().slice(static_cast<size_t>(start), static_cast<size_t>(end));
 }
 
+// Checks the arguments that SearchString relies on the caller for: a non-empty
+// needle that fits in the haystack and, for a forward search, a start index
+// that leaves room for the needle.
+void requireSearchArguments(
+    size_t haystackLength, size_t needleLength, double startIndex, bool isForward) {
+  JSG_REQUIRE(needleLength > 0 && needleLength <= haystackLength && startIndex >= 0 &&
+          (!isForward || startIndex <= haystackLength - needleLength),
+      RangeError, "Invalid search arguments");
+}
+
 }  // namespace
 
 // jsg::JsString::utf8Length()
@@ -113,22 +123,57 @@ jsg::JsString BufferNative::newFromTwoByte(
   return js.str(data.asConst());
 }
 
-// memchr over the range, as used by stringsearch::FindFirstCharacter. Returns
-// the index of the first byte equal to `value`, or -1.
-double BufferNative::memchr(jsg::JsUint8Array bytes, double start, double end, uint8_t value) {
-  auto slice = range(bytes, start, end);
-  auto pos = static_cast<const kj::byte*>(::memchr(slice.begin(), value, slice.size()));
-  return pos == nullptr ? -1 : pos - bytes.asArrayPtr().begin();
+// SearchString over one-byte characters, as in BufferUtil's indexOf for
+// encodings other than UTF-16. Returns the position of the match, or the
+// haystack length if there is none.
+double BufferNative::searchOneByte(
+    jsg::JsUint8Array haystack, jsg::JsUint8Array needle, double startIndex, bool isForward) {
+  auto hayStack = haystack.asArrayPtr();
+  auto pattern = needle.asArrayPtr();
+  requireSearchArguments(hayStack.size(), pattern.size(), startIndex, isForward);
+  return SearchString(hayStack.begin(), hayStack.size(), pattern.begin(), pattern.size(),
+      static_cast<size_t>(startIndex), isForward);
 }
 
-// stringsearch::MemrchrFill (memrchr) over the range. Returns the index of the
-// last byte equal to `value`, or -1.
-double BufferNative::memrchr(jsg::JsUint8Array bytes, double start, double end, uint8_t value) {
-  auto slice = range(bytes, start, end);
-  if (slice.size() == 0) return -1;
-  auto pos =
-      static_cast<const kj::byte*>(stringsearch::MemrchrFill(slice.begin(), value, slice.size()));
-  return pos == nullptr ? -1 : pos - bytes.asArrayPtr().begin();
+// SearchString over the first `haystackLength` and `needleLength` UTF-16 code
+// units of `haystack` and `needle`, as in BufferUtil's indexOf for UTF-16.
+// BufferUtil copies both into aligned kj::SmallArrays; here an array that is
+// already aligned is searched in place. Returns the position of the match, in
+// code units, or `haystackLength` if there is none.
+double BufferNative::searchTwoByte(jsg::JsUint8Array haystack,
+    double haystackLength,
+    jsg::JsUint8Array needle,
+    double needleLength,
+    double startIndex,
+    bool isForward) {
+  auto hayStackBytes = range(haystack, 0, haystackLength * 2);
+  auto needleBytes = range(needle, 0, needleLength * 2);
+  auto hayStackU16Len = hayStackBytes.size() / 2;
+  auto needleU16Len = needleBytes.size() / 2;
+  requireSearchArguments(hayStackU16Len, needleU16Len, startIndex, isForward);
+
+  auto isAligned = [](kj::ArrayPtr<kj::byte> bytes) {
+    return reinterpret_cast<uintptr_t>(bytes.begin()) % alignof(uint16_t) == 0;
+  };
+  kj::SmallArray<uint16_t, 1024> alignedHayStack(isAligned(hayStackBytes) ? 0 : hayStackU16Len);
+  const uint16_t* hayStackChars;
+  if (isAligned(hayStackBytes)) {
+    hayStackChars = reinterpret_cast<const uint16_t*>(hayStackBytes.begin());
+  } else {
+    alignedHayStack.asBytes().copyFrom(hayStackBytes);
+    hayStackChars = alignedHayStack.begin();
+  }
+  kj::SmallArray<uint16_t, 1024> alignedNeedle(isAligned(needleBytes) ? 0 : needleU16Len);
+  const uint16_t* needleChars;
+  if (isAligned(needleBytes)) {
+    needleChars = reinterpret_cast<const uint16_t*>(needleBytes.begin());
+  } else {
+    alignedNeedle.asBytes().copyFrom(needleBytes);
+    needleChars = alignedNeedle.begin();
+  }
+
+  return SearchString(hayStackChars, hayStackU16Len, needleChars, needleU16Len,
+      static_cast<size_t>(startIndex), isForward);
 }
 
 // memcmp over `length` bytes of each array, from the given starts.

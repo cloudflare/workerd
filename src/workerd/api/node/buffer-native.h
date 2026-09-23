@@ -10,7 +10,8 @@ namespace workerd::api::node {
 
 // `node-internal:buffer_native`: the library calls behind the TypeScript
 // implementation of `node-internal:buffer` (src/node/internal/buffer.ts). Each
-// method makes the V8, libc, simdutf, nbytes, kj, or i18n calls that BufferUtil
+// method makes the V8, libc, simdutf, nbytes, kj, i18n, or string search
+// (buffer-string-search.h) calls that BufferUtil
 // (buffer.c++) makes at the same point, with the same options, so both
 // implementations reach the same library code.
 //
@@ -51,9 +52,17 @@ class BufferNative final: public jsg::Object {
   jsg::JsString newFromUtf8(jsg::Lock& js, jsg::JsUint8Array bytes, double start, double end);
   jsg::JsString newFromTwoByte(jsg::Lock& js, jsg::JsUint8Array bytes, double start, double end);
 
+  // String search (buffer-string-search.h)
+  double searchOneByte(
+      jsg::JsUint8Array haystack, jsg::JsUint8Array needle, double startIndex, bool isForward);
+  double searchTwoByte(jsg::JsUint8Array haystack,
+      double haystackLength,
+      jsg::JsUint8Array needle,
+      double needleLength,
+      double startIndex,
+      bool isForward);
+
   // libc
-  double memchr(jsg::JsUint8Array bytes, double start, double end, uint8_t value);
-  double memrchr(jsg::JsUint8Array bytes, double start, double end, uint8_t value);
   int memcmp(jsg::JsUint8Array one,
       double oneStart,
       jsg::JsUint8Array two,
@@ -94,8 +103,9 @@ class BufferNative final: public jsg::Object {
     JSG_METHOD(newFromUtf8);
     JSG_METHOD(newFromTwoByte);
 
-    JSG_METHOD(memchr);
-    JSG_METHOD(memrchr);
+    JSG_METHOD(searchOneByte);
+    JSG_METHOD(searchTwoByte);
+
     JSG_METHOD(memcmp);
 
     JSG_METHOD(decodeBase64);
