@@ -1907,6 +1907,13 @@ void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context>
     if (!data.IsEmpty() && data->IsValue() && data.As<v8::Value>()->IsTrue()) return;
   }
 
+  // TEMP (local --jitless experiments only, remove before review): V8 exposes no `WebAssembly`
+  // under --jitless, so there is nothing to shim.
+  {
+    v8::Context::Scope contextScope(context);
+    if (lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>() == kj::none) return;
+  }
+
   // Set WebAssembly.Module @@HasInstance
   setWebAssemblyModuleHasInstance(lock, context);
 
