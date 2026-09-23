@@ -8,12 +8,20 @@
 
 namespace workerd::api::node {
 
-// `node-internal:buffer_native`: the library primitives behind the TypeScript
+// `node-internal:buffer_native`: the library calls behind the TypeScript
 // implementation of `node-internal:buffer` (src/node/internal/buffer.ts). Each
-// method wraps exactly one V8, libc, simdutf, nbytes, kj, or i18n call made by
-// BufferUtil (buffer.c++), with the same options, so both implementations reach
-// the same library code. The TypeScript module validates arguments before
-// calling in; the checks here only keep each primitive memory-safe on its own.
+// method makes the V8, libc, simdutf, nbytes, kj, or i18n calls that BufferUtil
+// (buffer.c++) makes at the same point, with the same options, so both
+// implementations reach the same library code.
+//
+// Where BufferUtil operates on a slice of a buffer, the method takes the buffer
+// with a `[start, end)` range, since a JavaScript view of the slice would cost
+// an allocation that a kj::ArrayPtr slice does not. Where BufferUtil runs a
+// sequence of library calls over a stack buffer, the method runs the whole
+// sequence, since the stack buffer has no cheap JavaScript equivalent.
+//
+// The TypeScript module validates arguments before calling in; the checks here
+// only keep each method memory-safe on its own.
 class BufferNative final: public jsg::Object {
  public:
   BufferNative() = default;
@@ -21,34 +29,53 @@ class BufferNative final: public jsg::Object {
 
   // V8 strings
   double utf8Length(jsg::Lock& js, jsg::JsString string);
-  double writeOneByte(jsg::Lock& js, jsg::JsString string, jsg::JsUint8Array dest, uint8_t flags);
-  double writeUtf8(jsg::Lock& js, jsg::JsString string, jsg::JsUint8Array dest, uint8_t flags);
-  double writeUtf16(jsg::Lock& js, jsg::JsString string, jsg::JsUint8Array dest, uint8_t flags);
-  jsg::JsString newFromOneByte(jsg::Lock& js, jsg::JsUint8Array bytes);
-  jsg::JsString newFromUtf8(jsg::Lock& js, jsg::JsUint8Array bytes);
-  jsg::JsString newFromTwoByte(jsg::Lock& js, jsg::JsUint8Array bytes);
+  double writeOneByte(jsg::Lock& js,
+      jsg::JsString string,
+      jsg::JsUint8Array dest,
+      double start,
+      double end,
+      uint8_t flags);
+  double writeUtf8(jsg::Lock& js,
+      jsg::JsString string,
+      jsg::JsUint8Array dest,
+      double start,
+      double end,
+      uint8_t flags);
+  double writeUtf16(jsg::Lock& js,
+      jsg::JsString string,
+      jsg::JsUint8Array dest,
+      double start,
+      double end,
+      uint8_t flags);
+  jsg::JsString newFromOneByte(jsg::Lock& js, jsg::JsUint8Array bytes, double start, double end);
+  jsg::JsString newFromUtf8(jsg::Lock& js, jsg::JsUint8Array bytes, double start, double end);
+  jsg::JsString newFromTwoByte(jsg::Lock& js, jsg::JsUint8Array bytes, double start, double end);
 
   // libc
-  int memcmp(jsg::JsUint8Array one, jsg::JsUint8Array two, double length);
+  double memchr(jsg::JsUint8Array bytes, double start, double end, uint8_t value);
+  double memrchr(jsg::JsUint8Array bytes, double start, double end, uint8_t value);
+  int memcmp(jsg::JsUint8Array one,
+      double oneStart,
+      jsg::JsUint8Array two,
+      double twoStart,
+      double length);
 
   // simdutf
-  double simdutfMaximalBinaryLengthFromBase64(jsg::JsUint8Array input);
-  double simdutfBase64ToBinary(jsg::JsUint8Array input, jsg::JsUint8Array output);
-  double simdutfBase64LengthFromBinary(double length);
-  double simdutfBase64UrlLengthFromBinary(double length);
-  double simdutfBinaryToBase64(jsg::JsUint8Array input, jsg::JsUint8Array output);
-  double simdutfBinaryToBase64Url(jsg::JsUint8Array input, jsg::JsUint8Array output);
+  jsg::JsUint8Array decodeBase64(jsg::Lock& js, jsg::JsString string);
+  jsg::JsString encodeBase64(jsg::Lock& js, jsg::JsUint8Array bytes, double start, double end);
+  jsg::JsString encodeBase64Url(jsg::Lock& js, jsg::JsUint8Array bytes, double start, double end);
   bool simdutfValidateAscii(jsg::JsUint8Array input);
   bool simdutfValidateUtf8(jsg::JsUint8Array input);
 
   // nbytes
-  double nbytesBase64Decode(jsg::JsUint8Array output, jsg::JsUint8Array input);
+  double nbytesBase64Decode(
+      jsg::JsUint8Array output, double start, double end, jsg::JsUint8Array input);
   bool nbytesSwapBytes16(jsg::JsUint8Array data);
   bool nbytesSwapBytes32(jsg::JsUint8Array data);
   bool nbytesSwapBytes64(jsg::JsUint8Array data);
 
   // kj
-  jsg::JsUint8Array kjEncodeHex(jsg::Lock& js, jsg::JsUint8Array input);
+  jsg::JsString encodeHex(jsg::Lock& js, jsg::JsUint8Array bytes, double start, double end);
 
   // i18n
   jsg::JsUint8Array transcode(
@@ -56,8 +83,6 @@ class BufferNative final: public jsg::Object {
 
   JSG_RESOURCE_TYPE(BufferNative) {
     JSG_STATIC_CONSTANT_NAMED(WRITE_NONE, static_cast<uint8_t>(jsg::JsString::WriteFlags::NONE));
-    JSG_STATIC_CONSTANT_NAMED(
-        WRITE_NULL_TERMINATION, static_cast<uint8_t>(jsg::JsString::WriteFlags::NULL_TERMINATION));
     JSG_STATIC_CONSTANT_NAMED(WRITE_REPLACE_INVALID_UTF8,
         static_cast<uint8_t>(jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8));
 
@@ -69,14 +94,13 @@ class BufferNative final: public jsg::Object {
     JSG_METHOD(newFromUtf8);
     JSG_METHOD(newFromTwoByte);
 
+    JSG_METHOD(memchr);
+    JSG_METHOD(memrchr);
     JSG_METHOD(memcmp);
 
-    JSG_METHOD(simdutfMaximalBinaryLengthFromBase64);
-    JSG_METHOD(simdutfBase64ToBinary);
-    JSG_METHOD(simdutfBase64LengthFromBinary);
-    JSG_METHOD(simdutfBase64UrlLengthFromBinary);
-    JSG_METHOD(simdutfBinaryToBase64);
-    JSG_METHOD(simdutfBinaryToBase64Url);
+    JSG_METHOD(decodeBase64);
+    JSG_METHOD(encodeBase64);
+    JSG_METHOD(encodeBase64Url);
     JSG_METHOD(simdutfValidateAscii);
     JSG_METHOD(simdutfValidateUtf8);
 
@@ -85,7 +109,7 @@ class BufferNative final: public jsg::Object {
     JSG_METHOD(nbytesSwapBytes32);
     JSG_METHOD(nbytesSwapBytes64);
 
-    JSG_METHOD(kjEncodeHex);
+    JSG_METHOD(encodeHex);
 
     JSG_METHOD(transcode);
   }
