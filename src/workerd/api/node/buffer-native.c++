@@ -11,6 +11,8 @@
 
 #include <kj/encoding.h>
 
+#include <cstring>
+
 namespace workerd::api::node {
 
 namespace {
@@ -98,6 +100,14 @@ jsg::JsString BufferNative::newFromTwoByte(jsg::Lock& js, jsg::JsUint8Array byte
   KJ_STACK_ARRAY(uint16_t, data, view.size(), 1024, 4096);
   data.copyFrom(view);
   return js.str(data.asConst());
+}
+
+// memcmp over the first `length` bytes of each array.
+int BufferNative::memcmp(jsg::JsUint8Array one, jsg::JsUint8Array two, double length) {
+  JSG_REQUIRE(length >= 0 && length <= one.size() && length <= two.size(), RangeError,
+      "Length exceeds array length");
+  auto size = static_cast<size_t>(length);
+  return size > 0 ? ::memcmp(one.asArrayPtr().begin(), two.asArrayPtr().begin(), size) : 0;
 }
 
 // simdutf::maximal_binary_length_from_base64
