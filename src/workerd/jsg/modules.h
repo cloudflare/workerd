@@ -12,6 +12,7 @@
 #include <workerd/util/thread-scopes.h>
 
 #include <v8-json.h>
+#include <v8-snapshot.h>
 
 #include <kj/filesystem.h>
 #include <kj/map.h>
@@ -258,6 +259,12 @@ class ModuleRegistry {
 
   // Visit all v8::Global handles owned by instantiated module entries.
   virtual void visitHandlesForSnapshot(kj::FunctionParam<void(v8::Global<v8::Data>&)> fn) = 0;
+
+  // Stores the entries that hold a compiled module in the snapshot `creator` is making and returns
+  // their records (see SnapshotArtifact::legacyModuleRecords). Called before
+  // visitHandlesForSnapshot() resets the handles.
+  virtual kj::Array<SnapshotArtifact::LegacyModuleRecord> recordForSnapshot(
+      v8::Local<v8::Context> context, v8::SnapshotCreator& creator) = 0;
 
   enum class RequireImplOptions {
     // Require returns the module namespace.
@@ -589,6 +596,122 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     }
   }
 
+  kj::Array<SnapshotArtifact::LegacyModuleRecord> recordForSnapshot(
+      v8::Local<v8::Context> context, v8::SnapshotCreator& creator) override {
+    using Record = SnapshotArtifact::LegacyModuleRecord;
+    auto isolate = v8::Isolate::GetCurrent();
+    kj::Vector<Record> records(entries.size());
+    for (auto& entry: entries) {
+      KJ_IF_SOME(info, entry->info.template tryGet<ModuleInfo>()) {
+        Record record{
+          .specifier = entry->specifier.toString(),
+          .type = static_cast<uint16_t>(entry->type),
+          .moduleDataIndex = 0,
+          .syntheticKind = Record::kNotSynthetic,
+        };
+        auto recordValue = [&](SyntheticKind kind, auto& value) {
+          record.syntheticKind = static_cast<uint8_t>(kind);
+          record.syntheticValueDataIndex = creator.AddData(context, value.getHandle(isolate));
+        };
+        // A CommonJS module's evaluation function and a Cap'n Proto module's declarations are C++
+        // state; the restored isolate compiles such a module again (see restoreFromSnapshot()).
+        bool recordable = true;
+        KJ_IF_SOME(synth, info.maybeSynthetic) {
+          KJ_SWITCH_ONEOF(synth) {
+            KJ_CASE_ONEOF(cjs, CommonJsModuleInfo) {
+              recordable = false;
+            }
+            KJ_CASE_ONEOF(capnp, CapnpModuleInfo) {
+              recordable = false;
+            }
+            KJ_CASE_ONEOF(v, DataModuleInfo) {
+              recordValue(SyntheticKind::DATA, v.value);
+            }
+            KJ_CASE_ONEOF(v, TextModuleInfo) {
+              recordValue(SyntheticKind::TEXT, v.value);
+            }
+            KJ_CASE_ONEOF(v, WasmModuleInfo) {
+              recordValue(SyntheticKind::WASM, v.value);
+            }
+            KJ_CASE_ONEOF(v, JsonModuleInfo) {
+              recordValue(SyntheticKind::JSON, v.value);
+            }
+            KJ_CASE_ONEOF(v, ObjectModuleInfo) {
+              recordValue(SyntheticKind::OBJECT, v.value);
+            }
+          }
+        }
+        if (!recordable) continue;
+
+        record.moduleDataIndex = creator.AddData(context, info.module.getHandle(isolate));
+        KJ_IF_SOME(src, info.maybeModuleSourceObject) {
+          record.sourceObjectDataIndex = creator.AddData(context, src.getHandle(isolate));
+        }
+        KJ_IF_SOME(exports, info.maybeMutableExports) {
+          record.mutableExportsDataIndex = creator.AddData(context, exports.getHandle(isolate));
+        }
+        records.add(kj::mv(record));
+      }
+    }
+    return records.releaseAsArray();
+  }
+
+  // The inverse of recordForSnapshot(), for the registry of an isolate restored from the snapshot:
+  // installs an entry holding the module the heap already holds for each record, in place of the
+  // fresh entry the embedder may have registered under the same specifier. A module the zygote
+  // had but did not record is left for the embedder to register again (see contains()).
+  void restoreFromSnapshot(
+      Lock& js, kj::ArrayPtr<const SnapshotArtifact::LegacyModuleRecord> records) {
+    using Record = SnapshotArtifact::LegacyModuleRecord;
+    auto context = js.v8Context();
+    for (auto& record: records) {
+      auto index = record.syntheticValueDataIndex;
+      kj::Maybe<ModuleInfo::SyntheticModuleInfo> synthetic;
+      if (record.syntheticKind != Record::kNotSynthetic) {
+        switch (static_cast<SyntheticKind>(record.syntheticKind)) {
+          case SyntheticKind::DATA:
+            synthetic =
+                DataModuleInfo(js, takeFromSnapshot<v8::ArrayBuffer>(context, record, index));
+            break;
+          case SyntheticKind::TEXT:
+            synthetic = TextModuleInfo(js, takeFromSnapshot<v8::String>(context, record, index));
+            break;
+          case SyntheticKind::WASM:
+            synthetic =
+                WasmModuleInfo(js, takeFromSnapshot<v8::WasmModuleObject>(context, record, index));
+            break;
+          case SyntheticKind::JSON:
+            synthetic = JsonModuleInfo(js, takeFromSnapshot<v8::Value>(context, record, index));
+            break;
+          case SyntheticKind::OBJECT:
+            synthetic = ObjectModuleInfo(js, takeFromSnapshot<v8::Object>(context, record, index));
+            break;
+        }
+      }
+
+      ModuleInfo info(js, takeFromSnapshot<v8::Module>(context, record, record.moduleDataIndex),
+          kj::mv(synthetic));
+      if (record.sourceObjectDataIndex != Record::kNoData) {
+        info.setModuleSourceObject(
+            js, takeFromSnapshot<v8::Object>(context, record, record.sourceObjectDataIndex));
+      }
+      if (record.mutableExportsDataIndex != Record::kNoData) {
+        info.maybeMutableExports = V8Ref<v8::Object>(js.v8Isolate,
+            takeFromSnapshot<v8::Object>(context, record, record.mutableExportsDataIndex));
+      }
+      entries.upsert(kj::heap<Entry>(kj::Path::parse(record.specifier),
+                         static_cast<Type>(record.type), kj::mv(info)),
+          [](kj::Own<Entry>& existing, kj::Own<Entry>&& replacement) {
+        existing = kj::mv(replacement);
+      });
+    }
+  }
+
+  bool contains(const kj::Path& specifier, Type type) const {
+    using Key = Entry::Key;
+    return entries.find(Key(specifier, type)) != kj::none;
+  }
+
   Promise<Value> resolveDynamicImport(jsg::Lock& js,
       const kj::Path& specifier,
       const kj::Path& referrer,
@@ -653,6 +776,20 @@ class ModuleRegistryImpl final: public ModuleRegistry {
  private:
   CompilationObserver& observer;
   kj::Maybe<kj::Function<DynamicImportCallback>> dynamicImportHandler;
+
+  // The synthetic module alternatives recordForSnapshot() records, as
+  // SnapshotArtifact::LegacyModuleRecord::syntheticKind.
+  enum class SyntheticKind : uint8_t { DATA, TEXT, WASM, JSON, OBJECT };
+
+  template <typename T>
+  static v8::Local<T> takeFromSnapshot(v8::Local<v8::Context> context,
+      const SnapshotArtifact::LegacyModuleRecord& record,
+      size_t index) {
+    v8::Local<T> value;
+    KJ_REQUIRE(context->GetDataFromSnapshotOnce<T>(index).ToLocal(&value),
+        "snapshot does not hold the module data it was recorded to hold", record.specifier);
+    return value;
+  }
 
   // When we build a bundle containing modules, we must build a table of modules to resolve imports.
   //

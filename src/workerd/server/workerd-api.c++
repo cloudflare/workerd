@@ -554,6 +554,29 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
   });
 }
 
+void WorkerdApi::restoreModulesFromSnapshot(jsg::Lock& lockParam,
+    const Worker::Script::ModulesSource& source,
+    const Worker::Isolate& isolate) const {
+  lockParam.withinHandleScope([&] {
+    auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
+    // The builtins first, since the entries the snapshot recorded replace theirs.
+    registerBuiltinModules(lockParam);
+    modules->restoreFromSnapshot(lockParam,
+        jsg::IsolateBase::from(lockParam.v8Isolate).readonlySnapshotArtifact().legacyModuleRecords);
+
+    auto featureFlags = getFeatureFlags();
+    for (auto& module: source.modules) {
+      auto path = kj::Path::parse(module.name);
+      if (modules->contains(path, jsg::ModuleRegistry::Type::BUNDLE)) continue;
+      KJ_IF_SOME(info,
+          tryCompileLegacyModule(
+              lockParam, module.name, module.content, modules->getObserver(), featureFlags)) {
+        modules->add(path, kj::mv(info));
+      }
+    }
+  });
+}
+
 void WorkerdApi::registerBuiltinModules(jsg::Lock& lockParam) const {
   auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
   api::registerModules(*modules, getFeatureFlags());

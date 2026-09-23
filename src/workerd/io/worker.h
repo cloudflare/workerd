@@ -639,11 +639,13 @@ class Worker::Api {
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
       SpanParent parentSpan) const = 0;
 
-  // Registers the builtin modules, not the bundle's own, in the legacy module registry.
-  // compileModules() does this as part of its work; a Script whose context is restored from a
-  // startup snapshot already holds the evaluated bundle and calls only this, so that builtins
-  // first required after the restore still resolve.
-  virtual void registerBuiltinModules(jsg::Lock& lock) const = 0;
+  // Fills the legacy module registry of a Script whose context is restored from a startup
+  // snapshot, in place of compileModules(): the registry adopts the modules the snapshot recorded
+  // (jsg::SnapshotArtifact::legacyModuleRecords), which the restored heap already holds, evaluated
+  // or not, and gets the rest registered or compiled as compileModules() would.
+  virtual void restoreModulesFromSnapshot(jsg::Lock& lock,
+      const Script::ModulesSource& source,
+      const Worker::Isolate& isolate) const = 0;
 
   virtual kj::Array<Worker::Script::CompiledGlobal> compileServiceWorkerGlobals(jsg::Lock& lock,
       const Script::ScriptSource& source,

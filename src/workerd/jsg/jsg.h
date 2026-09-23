@@ -86,11 +86,30 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
   // them the registry is empty, and V8's import.meta callback, which looks the module up in the
   // registry, would leave import.meta.url and import.meta.main unset.
   struct ModuleRecord {
-    uint8_t contextType;  // A modules::ResolveContext::Type.
+    uint8_t contextType;   // A modules::ResolveContext::Type.
     kj::String specifier;  // The normalized specifier URL, query and fragment included.
     size_t moduleDataIndex;
   };
   kj::Array<ModuleRecord> moduleRecords;
+
+  // The legacy module registry's entries (jsg::ModuleRegistryImpl) that held a compiled or
+  // instantiated module in the zygote, each naming its v8::Module, and the value a synthetic
+  // module exports, by v8::SnapshotCreator::AddData(context, ...) index. A restored isolate's
+  // registry adopts them (ModuleRegistryImpl::restoreFromSnapshot): without them, a bundle module
+  // the zygote never evaluated cannot be imported, and importing one it did evaluate, or a builtin,
+  // would evaluate a second instance next to the one the snapshot's heap already holds.
+  struct LegacyModuleRecord {
+    static constexpr size_t kNoData = SIZE_MAX;
+    kj::String specifier;  // The kj::Path, as ModuleRegistry::Entry::specifier.toString().
+    uint16_t type;         // A jsg::ModuleType.
+    size_t moduleDataIndex;
+    uint8_t syntheticKind;  // The SyntheticModuleInfo alternative, or kNotSynthetic.
+    size_t syntheticValueDataIndex = kNoData;
+    size_t sourceObjectDataIndex = kNoData;
+    size_t mutableExportsDataIndex = kNoData;
+    static constexpr uint8_t kNotSynthetic = UINT8_MAX;
+  };
+  kj::Array<LegacyModuleRecord> legacyModuleRecords;
 
   // Function templates that JSG's type wrapper does not own, stored in the blob with
   // v8::SnapshotCreator::AddData() under a name their owner chooses: the templates of Rust resource
