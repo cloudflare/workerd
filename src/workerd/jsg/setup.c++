@@ -556,6 +556,8 @@ void IsolateBase::rejectSnapshotWithUnrestorableWrappers(
   // collected garbage: the zygote's own setup leaves wrappers behind (bindings, the ctx.exports
   // object) that only its C++ locals referenced.
   v8::HandleScope scope(ptr);
+  // The constructor-name lookup below needs an entered context.
+  v8::Context::Scope contextScope(defaultContext);
   auto global = defaultContext->Global();
   kj::Vector<kj::String> leftovers;
   for (auto& wrappable: heapTracer.liveWrappables()) {
@@ -565,8 +567,18 @@ void IsolateBase::rejectSnapshotWithUnrestorableWrappers(
     if (payloads.find(&wrappable) != kj::none) continue;
     // The JSG type name where there is one (every resource type defines it); typeid() of the
     // Wrappable& only sees the base class.
-    leftovers.add(wrappable.jsgTryGetObject() == nullptr ? typeName(typeid(wrappable))
-                                                         : kj::str(wrappable.jsgGetMemoryName()));
+    if (wrappable.jsgTryGetObject() == nullptr) {
+      // Not a resource type: name it by its JavaScript constructor so the leftover is findable.
+      kj::String name = kj::str(typeName(typeid(wrappable)));
+      KJ_IF_SOME(handle, wrappable.tryGetHandle(ptr)) {
+        if (handle->IsObject()) {
+          name = kj::str(name, "(", handle.As<v8::Object>()->GetConstructorName(), ")");
+        }
+      }
+      leftovers.add(kj::mv(name));
+    } else {
+      leftovers.add(kj::str(wrappable.jsgGetMemoryName()));
+    }
   }
   KJ_REQUIRE(leftovers.size() == 0,
       "worker retains JSG objects from its top-level evaluation that cannot be restored from a "
