@@ -26,6 +26,10 @@ class TimersUtil final: public jsg::Object {
     JSG_METHOD(setImmediate);
     JSG_METHOD(clearImmediate);
   }
+
+  // Stateless: a worker that imports the owning `node:`/`cloudflare:` module at top level
+  // retains this instance.
+  JSG_SNAPSHOT_RESTORE(TimersUtil);
 };
 
 #define EW_NODE_TIMERS_ISOLATE_TYPES api::node::TimersUtil

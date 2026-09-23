@@ -527,6 +527,10 @@ class SocketsModule final: public jsg::Object {
       JSG_METHOD(internalNewHttpClient);
     }
   }
+
+  // Stateless: a worker that imports the owning `node:`/`cloudflare:` module at top level
+  // retains this instance.
+  JSG_SNAPSHOT_RESTORE(SocketsModule);
 };
 
 template <class Registry>

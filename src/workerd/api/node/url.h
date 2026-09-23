@@ -30,6 +30,10 @@ class UrlUtil final: public jsg::Object {
     JSG_METHOD(format);
     JSG_METHOD(toASCII);
   }
+
+  // Stateless: a worker that imports the owning `node:`/`cloudflare:` module at top level
+  // retains this instance.
+  JSG_SNAPSHOT_RESTORE(UrlUtil);
 };
 
 #define EW_NODE_URL_ISOLATE_TYPES api::node::UrlUtil

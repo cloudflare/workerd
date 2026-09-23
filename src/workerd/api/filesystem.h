@@ -165,6 +165,9 @@ class FileSystemModule final: public jsg::Object {
   FileSystemModule() = default;
   FileSystemModule(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless: a worker that imports `node:fs` at top level retains this instance.
+  JSG_SNAPSHOT_RESTORE(FileSystemModule);
+
   jsg::Ref<FileFdHandle> getFdHandle(jsg::Lock& js, int fd) {
     return FileFdHandle::constructor(js, fd);
   }
@@ -214,6 +217,8 @@ class FileSystemModule final: public jsg::Object {
   // to allow temp dirs to be created outside of an IoContext.
   uint32_t tmpFileCounter = 0;
 };
+static_assert(jsg::RestorableFromSnapshot<FileSystemModule>,
+    "FileSystemModule must be restorable from a startup snapshot");
 
 // ======================================================================================
 // An implementation of the WHATWG Web File System API (https://fs.spec.whatwg.org/)
