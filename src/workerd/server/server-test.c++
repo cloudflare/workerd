@@ -5876,7 +5876,7 @@ KJ_TEST("Server: configured Workflow is exposed through ctx.exports") {
           bindings = [(
             name = "ENGINE",
             durableObjectNamespace = (
-              className = "loopback-workflows-greeting",
+              className = "miniflare-workflows-greeting",
               serviceName = "app",
             ),
           )],
@@ -5899,7 +5899,7 @@ KJ_TEST("Server: configured Workflow is exposed through ctx.exports") {
   conn.httpGet200("/",
       "instance-1 | instance-1 | instance-1 | GreetingWorkflow | greeting | Hello, Ada! | "
       "Persisted hello, Ada!");
-  KJ_EXPECT(test.cwd->exists(kj::Path({"loopback-workflows-greeting"})));
+  KJ_EXPECT(test.cwd->exists(kj::Path({"miniflare-workflows-greeting"})));
 }
 
 KJ_TEST("Server: configured Workflows share Engine code but isolate namespaces and props") {
@@ -6006,7 +6006,7 @@ KJ_TEST("Server: configured Workflows share Engine code but isolate namespaces a
           bindings = [(
             name = "ENGINE",
             durableObjectNamespace = (
-              className = "loopback-workflows-alpha",
+              className = "miniflare-workflows-alpha",
               serviceName = "app",
             ),
           )],
@@ -6035,7 +6035,7 @@ KJ_TEST("Server: configured Workflows share Engine code but isolate namespaces a
           bindings = [(
             name = "ENGINE",
             durableObjectNamespace = (
-              className = "loopback-workflows-beta",
+              className = "miniflare-workflows-beta",
               serviceName = "app",
             ),
           )],
@@ -6062,8 +6062,8 @@ KJ_TEST("Server: configured Workflows share Engine code but isolate namespaces a
   auto conn = test.connect("test-addr");
   conn.httpGet200(
       "/", "different | AlphaWorkflow | alpha | alpha:one | BetaWorkflow | beta | beta:two");
-  KJ_EXPECT(test.cwd->exists(kj::Path({"alpha-storage", "loopback-workflows-alpha"})));
-  KJ_EXPECT(test.cwd->exists(kj::Path({"beta-storage", "loopback-workflows-beta"})));
+  KJ_EXPECT(test.cwd->exists(kj::Path({"alpha-storage", "miniflare-workflows-alpha"})));
+  KJ_EXPECT(test.cwd->exists(kj::Path({"beta-storage", "miniflare-workflows-beta"})));
 }
 
 KJ_TEST("Server: ctx.exports channels handle interleaved Workflow and WorkerEntrypoint exports") {
@@ -6149,7 +6149,7 @@ KJ_TEST("Server: ctx.exports channels handle interleaved Workflow and WorkerEntr
           bindings = [(
             name = "ENGINE",
             durableObjectNamespace = (
-              className = "loopback-workflows-channel-workflow",
+              className = "miniflare-workflows-channel-workflow",
               serviceName = "app",
             ),
           )],
@@ -6230,7 +6230,7 @@ KJ_TEST("Server: unconfigured Workflow remains absent from ctx.exports") {
           bindings = [(
             name = "ENGINE",
             durableObjectNamespace = (
-              className = "loopback-workflows-configured",
+              className = "miniflare-workflows-configured",
               serviceName = "app",
             ),
           )],
@@ -6271,7 +6271,7 @@ KJ_TEST("Server: Workflow configuration validates binding services and names") {
               `export class BindingWorkflow extends WorkflowEntrypoint {}
               `export class UsesWorkflowBinding extends WorkflowEntrypoint {}
               `class CollidingObject extends DurableObject {}
-              `export { CollidingObject as "loopback-workflows-colliding" };
+              `export { CollidingObject as "miniflare-workflows-colliding" };
           )],
           workflowsEngine = (
             actorClass = (name = "engine", entrypoint = "Engine"),
@@ -6336,7 +6336,7 @@ KJ_TEST("Server: Workflow configuration validates binding services and names") {
     Worker service "app" configures Workflow name "invalid/name" containing a path separator.
     service app: Workflow "test"'s bindingService Worker must configure durableObjectStorage.localDisk; in-memory and absent storage are unsupported.
     service app: Workflow "missing-binding"'s bindingService Worker does not export WorkerEntrypoint "BindingObject".
-    service app: Workflow "colliding" namespace "loopback-workflows-colliding" conflicts with an exported Durable Object class.
+    service app: Workflow "colliding" namespace "miniflare-workflows-colliding" conflicts with an exported Durable Object class.
     service app: Workflow "workflow-binding"'s bindingService Worker does not export WorkerEntrypoint "BindingWorkflow".
   )"_blockquote);
 }
@@ -6375,7 +6375,7 @@ KJ_TEST("Server: Workflow namespace key cannot collide with a Durable Object") {
           )],
           durableObjectNamespaces = [(
             className = "Engine",
-            uniqueKey = "loopback-workflows-test",
+            uniqueKey = "miniflare-workflows-test",
           )],
           durableObjectStorage = (inMemory = void)
         )
@@ -6399,7 +6399,7 @@ KJ_TEST("Server: Workflow namespace key cannot collide with a Durable Object") {
   ))"_kj);
 
   test.expectErrors(R"(
-    Workflow ActorNamespace key "loopback-workflows-test" conflicts with a Durable Object namespace unique key.
+    Workflow ActorNamespace key "miniflare-workflows-test" conflicts with a Durable Object namespace unique key.
   )"_blockquote);
 }
 

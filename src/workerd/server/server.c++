@@ -224,6 +224,12 @@ static inline kj::Own<T> fakeOwn(T& ref) {
       "and forwards to it.");
 }
 
+// TODO(cleanup): Make this configurable rather than hardcoding Miniflare's prefix. Miniflare's own
+//   Workflow engine namespaces use `miniflare-workflows-<name>` as their unique key, which
+//   determines actor IDs and the storage subdirectory; matching it lets both reach the same local
+//   instances, so a configurable key must keep that value for Miniflare.
+constexpr kj::StringPtr WORKFLOW_NAMESPACE_KEY_PREFIX = "miniflare-workflows-"_kj;
+
 }  // namespace
 
 // =======================================================================================
@@ -5782,7 +5788,7 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
       workflowClasses.insert(kj::str(className));
       workflowNames.insert(kj::str(workflowName));
 
-      auto namespaceKey = kj::str("loopback-workflows-", workflowName);
+      auto namespaceKey = kj::str(WORKFLOW_NAMESPACE_KEY_PREFIX, workflowName);
       auto& actorConfig = KJ_UNWRAP_OR(localActorConfigs.find(namespaceKey), continue);
       auto& durable = KJ_UNWRAP_OR(actorConfig.tryGet<Durable>(), continue);
       if (!durable.isWorkflow) continue;
@@ -7500,7 +7506,7 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
       // Each configured Workflow is backed by a synthetic Durable Object namespace owned by this
       // (the app) Worker. This first pass validates the `workflowsEngine` config and, for every
       // valid Workflow, synthesizes that namespace's `Durable` actor config keyed by the derived
-      // `loopback-workflows-<name>` key. Cross-service wiring (resolving the actorClass/engine and
+      // `miniflare-workflows-<name>` key. Cross-service wiring (resolving the actorClass/engine and
       // bindingService, building props) happens in a later pass once all services exist.
       if (workerConf.hasWorkflowsEngine()) {
         auto workflowsEngine = workerConf.getWorkflowsEngine();
@@ -7555,7 +7561,7 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
 
           if (!valid) continue;
 
-          auto namespaceKey = kj::str("loopback-workflows-", workflowName);
+          auto namespaceKey = kj::str(WORKFLOW_NAMESPACE_KEY_PREFIX, workflowName);
           if (serviceActorConfigs.find(namespaceKey) != kj::none) {
             reportConfigError(kj::str("Worker service \"", name,
                 "\"'s Workflow namespace conflicts with Durable Object class \"", namespaceKey,
@@ -7712,7 +7718,7 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
       workflowClasses.insert(kj::str(className));
       workflowNames.insert(kj::str(workflowName));
 
-      auto namespaceKey = kj::str("loopback-workflows-", workflowName);
+      auto namespaceKey = kj::str(WORKFLOW_NAMESPACE_KEY_PREFIX, workflowName);
       auto& localActorConfigs = KJ_ASSERT_NONNULL(actorConfigs.find(name));
       auto& actorConfig = KJ_UNWRAP_OR(localActorConfigs.find(namespaceKey), continue);
       auto& workflowActorConfig = KJ_UNWRAP_OR(actorConfig.tryGet<Durable>(), continue);
