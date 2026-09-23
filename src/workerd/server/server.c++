@@ -5907,7 +5907,14 @@ kj::Own<Worker::Isolate> Server::makeWorkerIsolate(kj::StringPtr name,
   auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
   auto observer = kj::atomicRefcounted<IsolateObserver>();
   auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
-  auto isolateGroup = v8::IsolateGroup::GetDefault();
+  // An isolate group's read-only heap comes from the first snapshot any of its isolates starts
+  // from (V8 checks the rest against it). A zygote starts from V8's built-in snapshot and then
+  // promotes objects into its read-only heap, and a Worker restored from the zygote's snapshot
+  // needs that snapshot's read-only heap, so both need a group of their own rather than the
+  // default one (IsolateGroup::Create() is the default group again in builds that support only
+  // one).
+  auto isolateGroup = snapshotConfig == kj::none ? v8::IsolateGroup::GetDefault()
+                                                 : v8::IsolateGroup::Create();
 
   kj::Array<Worker::Api::InboundListener> listeners;
   KJ_IF_SOME(l, inboundListeners.find(inboundListenersKey)) {
