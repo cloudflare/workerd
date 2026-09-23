@@ -3,8 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // tee() on byte streams: per-branch chunk cloning, mixed reader types,
-// cancel composition, error propagation, released pending reads, and a
-// byobRequest held across tee().
+// cancel composition, error propagation, released pending reads (incl. a
+// native body released mid-read), and a byobRequest held across tee().
 
 import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -434,5 +434,49 @@ export const teeSoleBranchMintsFreshByobRequest = {
     current.view[0] = 7;
     current.respond(1);
     deepStrictEqual([...(await read).value], [7]);
+  },
+};
+
+// DIVERGENCE (ledger #29): a native body's reader released while its read
+// is in flight, then tee() or clone(). C++ refuses the release (TypeError:
+// outstanding read promises). TypeScript rejects the read, and both
+// branches receive the whole body, including the bytes the in-flight read
+// produced.
+export const teeNativeBodyAfterReleaseMidRead = {
+  async test(ctrl, env) {
+    const text = async (readable) =>
+      new TextDecoder().decode(await drainBytes(readable));
+    const releasedMidRead = async (mode) => {
+      const response = await env.SELF.fetch('http://test/delayed');
+      const reader = response.body.getReader(mode ? { mode } : undefined);
+      const read = mode ? reader.read(new Uint8Array(16)) : reader.read();
+      if (!usingTsImpl) {
+        throws(() => reader.releaseLock(), TypeError);
+        await read;
+        return undefined;
+      }
+      reader.releaseLock();
+      strictEqual((await rejectionOf(read)).name, 'TypeError');
+      return response;
+    };
+
+    for (const mode of [undefined, 'byob']) {
+      const response = await releasedMidRead(mode);
+      if (response === undefined) continue;
+      const [a, b] = response.body.tee();
+      deepStrictEqual(await Promise.all([text(a), text(b)]), [
+        'foobarbaz',
+        'foobarbaz',
+      ]);
+    }
+
+    const response = await releasedMidRead(undefined);
+    if (response !== undefined) {
+      const clone = response.clone();
+      deepStrictEqual(await Promise.all([response.text(), clone.text()]), [
+        'foobarbaz',
+        'foobarbaz',
+      ]);
+    }
   },
 };
