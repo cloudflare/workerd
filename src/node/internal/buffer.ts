@@ -236,22 +236,74 @@ function sliceUint8Array(array: Uint8Array, newLength: number): Uint8Array {
   return array.subarray(0, newLength);
 }
 
-// kj::ArrayPtr<T>::fill(kj::ArrayPtr<const T>)
-function fillArray(dst: Uint8Array, src: Uint8Array): void {
+// Returns true if `a[aStart, aEnd)` and `b` share any bytes.
+function overlaps(
+  a: Uint8Array,
+  aStart: number,
+  aEnd: number,
+  b: Uint8Array
+): boolean {
+  if (a.buffer !== b.buffer) return false;
+  const start = a.byteOffset + aStart;
+  const end = a.byteOffset + aEnd;
+  return start < b.byteOffset + b.length && b.byteOffset < end;
+}
+
+// kj::ArrayPtr<T>::fill(kj::ArrayPtr<const T>) on `dst[start, end)`: repeats
+// `src` over the range, one element at a time.
+function fillArrayByElement(
+  dst: Uint8Array,
+  start: number,
+  end: number,
+  src: Uint8Array
+): void {
   const otherSize = src.length;
   let counter = 0;
-  for (let s = dst.length, i = 0; i < s; i++) {
+  for (let i = start; i < end; i++) {
     dst[i] = src[counter]!;
     if (++counter === otherSize) counter = 0;
   }
 }
 
+// fillArrayByElement for a `src` that does not overlap `dst[start, end)`: one
+// copy of `src` is written and the filled prefix is then doubled with
+// copyWithin, which writes the same bytes.
+function fillArray(
+  dst: Uint8Array,
+  start: number,
+  end: number,
+  src: Uint8Array
+): void {
+  const size = end - start;
+  const otherSize = src.length;
+  const first = Math.min(otherSize, size);
+  dst.set(first === otherSize ? src : src.subarray(0, first), start);
+  for (let filled = first; filled < size;) {
+    const n = Math.min(filled, size - filled);
+    dst.copyWithin(start + filled, start, start + n);
+    filled += n;
+  }
+}
+
+// KJ_STACK_ARRAY(kj::byte, name, size, 1024, ...): scratch space used only
+// within a single call. KJ_STACK_ARRAY puts up to 1024 bytes on the stack;
+// here sizes up to 1024 share one preallocated array, and larger sizes
+// allocate. Callers track the size themselves, since the shared array is
+// longer, and must not keep it past the call. No JavaScript runs while it is
+// in use.
+const kStackArrayMaxSize = 1024;
+let stackArray: Uint8Array | undefined;
+function stackArrayOf(size: number): Uint8Array {
+  if (size > kStackArrayMaxSize) return new Uint8Array(size);
+  return (stackArray ??= new Uint8Array(kStackArrayMaxSize));
+}
+
 // jsg::JsString::toString: the string as UTF-8, without replacing invalid
 // sequences.
 function jsStringToString(string: string): Uint8Array {
-  const buf = new Uint8Array(native.utf8Length(string) + 1);
-  native.writeUtf8(string, buf, native.WRITE_NULL_TERMINATION);
-  return buf.subarray(0, buf.length - 1);
+  const buf = new Uint8Array(native.utf8Length(string));
+  native.writeUtf8(string, buf, 0, buf.length, native.WRITE_NONE);
+  return buf;
 }
 
 // =======================================================================================
@@ -267,19 +319,24 @@ function tryFromHexDigit(c: number): number | undefined {
   return undefined;
 }
 
-function decodeHexTruncated(text: Uint8Array, strict = false): Uint8Array {
+// Decodes the first `textLength` bytes of `text`.
+function decodeHexTruncated(
+  text: Uint8Array,
+  textLength: number,
+  strict = false
+): Uint8Array {
   // We do not use kj::decodeHex because we need to match Node.js'
   // behavior of truncating the response at the first invalid hex
   // pair as opposed to just marking that an error happened and
   // trying to continue with the decode.
-  if (text.length % 2 !== 0) {
+  if (textLength % 2 !== 0) {
     if (strict) throw new TypeError('The text is not valid hex');
-    text = text.subarray(0, text.length - 1);
+    textLength -= 1;
   }
-  const vec = createUint8Array(text.length / 2);
+  const vec = createUint8Array(textLength / 2);
   let len = 0;
 
-  for (let i = 0; i < text.length; i += 2) {
+  for (let i = 0; i < textLength; i += 2) {
     let b = 0;
     const d1 = tryFromHexDigit(text[i]!);
     if (d1 !== undefined) {
@@ -314,11 +371,10 @@ function writeInto(
 ): number {
   assert(offset <= buffer.length);
   assert(length <= buffer.length - offset);
-  const dest = buffer.subarray(
-    offset,
-    Math.min(offset + length, buffer.length)
-  );
-  if (dest.length === 0 || string.length === 0) {
+  // `dest` in the C++ is the `[destStart, destEnd)` slice of `buffer`.
+  const destStart = offset;
+  const destEnd = Math.min(offset + length, buffer.length);
+  if (destEnd - destStart === 0 || string.length === 0) {
     return 0;
   }
 
@@ -328,26 +384,31 @@ function writeInto(
     case ASCII:
     // Falls through
     case LATIN1: {
-      return native.writeOneByte(string, dest, flags);
+      return native.writeOneByte(string, buffer, destStart, destEnd, flags);
     }
     case UTF8: {
-      return native.writeUtf8(string, dest, flags);
+      return native.writeUtf8(string, buffer, destStart, destEnd, flags);
     }
     case UTF16LE: {
-      return native.writeUtf16(string, dest, flags) * 2;
+      return native.writeUtf16(string, buffer, destStart, destEnd, flags) * 2;
     }
     case BASE64:
     // Falls through
     case BASE64URL: {
       const str = jsStringToString(string);
-      return native.nbytesBase64Decode(dest, str);
+      return native.nbytesBase64Decode(buffer, destStart, destEnd, str);
     }
     case HEX: {
-      const buf = new Uint8Array(string.length);
-      native.writeOneByte(string, buf, flags);
-      const backing = decodeHexTruncated(buf, false);
-      const amountToCopy = Math.min(backing.length, dest.length);
-      dest.set(backing.subarray(0, amountToCopy));
+      const buf = stackArrayOf(string.length);
+      native.writeOneByte(string, buf, 0, string.length, flags);
+      const backing = decodeHexTruncated(buf, string.length, false);
+      const amountToCopy = Math.min(backing.length, destEnd - destStart);
+      buffer.set(
+        amountToCopy === backing.length
+          ? backing
+          : backing.subarray(0, amountToCopy),
+        destStart
+      );
       return amountToCopy;
     }
     default:
@@ -388,24 +449,12 @@ function decodeStringImpl(
     case BASE64:
     // Falls through
     case BASE64URL: {
-      // We do not use the kj::String conversion here because inline null-characters
-      // need to be ignored.
-      const buf = new Uint8Array(length);
-      const len = native.writeOneByte(string, buf, options);
-      const text = buf.subarray(0, len);
-      const dest = createUint8Array(
-        native.simdutfMaximalBinaryLengthFromBase64(text)
-      );
-      const count = native.simdutfBase64ToBinary(text, dest);
-      if (count < dest.length) {
-        return sliceUint8Array(dest, count);
-      }
-      return dest;
+      return native.decodeBase64(string);
     }
     case HEX: {
-      const buf = new Uint8Array(length);
-      native.writeOneByte(string, buf, options);
-      return decodeHexTruncated(buf, strict);
+      const buf = stackArrayOf(length);
+      native.writeOneByte(string, buf, 0, length, options);
+      return decodeHexTruncated(buf, length, strict);
     }
     default:
       throw internalError();
@@ -455,27 +504,30 @@ export function compare(
   two = unwrapUint8Array(two, 'compare', 1);
   const options = unwrapCompareOptions(maybeOptions, 'compare', 2);
 
-  let ptrOne = one;
-  let ptrTwo = two;
+  // `ptrOne` and `ptrTwo` in the C++ are the `[oneStart, oneEnd)` and
+  // `[twoStart, twoEnd)` slices of the inputs.
+  let oneStart = 0;
+  let oneEnd = one.length;
+  let twoStart = 0;
+  let twoEnd = two.length;
 
   // The options allow comparing subranges within the two inputs.
   if (options !== undefined) {
-    let end = options.aEnd ?? ptrOne.length;
-    end = Math.min(end, ptrOne.length);
-    let start = Math.min(end, options.aStart ?? 0);
-    ptrOne = ptrOne.subarray(start, end);
-    end = options.bEnd ?? ptrTwo.length;
-    end = Math.min(end, ptrTwo.length);
-    start = Math.min(end, options.bStart ?? 0);
-    ptrTwo = ptrTwo.subarray(start, end);
+    oneEnd = Math.min(options.aEnd ?? one.length, one.length);
+    oneStart = Math.min(oneEnd, options.aStart ?? 0);
+    twoEnd = Math.min(options.bEnd ?? two.length, two.length);
+    twoStart = Math.min(twoEnd, options.bStart ?? 0);
   }
 
-  const toCompare = Math.min(ptrOne.length, ptrTwo.length);
-  const result = toCompare > 0 ? native.memcmp(ptrOne, ptrTwo, toCompare) : 0;
+  const oneLength = oneEnd - oneStart;
+  const twoLength = twoEnd - twoStart;
+  const toCompare = Math.min(oneLength, twoLength);
+  const result =
+    toCompare > 0 ? native.memcmp(one, oneStart, two, twoStart, toCompare) : 0;
 
   if (result === 0) {
-    if (ptrOne.length > ptrTwo.length) return 1;
-    else if (ptrOne.length < ptrTwo.length) return -1;
+    if (oneLength > twoLength) return 1;
+    else if (oneLength < twoLength) return -1;
     else return 0;
   }
 
@@ -508,7 +560,10 @@ export function concat(list: Uint8Array[], length: number): Uint8Array {
       // The amount to copy is the lesser of the remaining space in the destination or
       // the size of the chunk we're copying.
       const amountToCopy = Math.min(src.length, dest.length - offset);
-      dest.set(src.subarray(0, amountToCopy), offset);
+      dest.set(
+        amountToCopy === src.length ? src : src.subarray(0, amountToCopy),
+        offset
+      );
       offset += amountToCopy;
       // If there's no more space in the destination, we're done.
       if (offset === dest.length) {
@@ -542,22 +597,27 @@ export function fillImpl(
   end = Math.min(end, buffer.length);
   if (end <= start) return;
 
-  const ptr = buffer.subarray(start, end);
+  // `ptr` in the C++ is the `[start, end)` slice of `buffer`.
   if (typeof unwrappedValue === 'string') {
     const enc = maybeEncoding ?? UTF8;
     const decoded = decodeStringImpl(unwrappedValue, enc, true /* strict */);
     if (decoded.length === 0) {
-      ptr.fill(0);
+      buffer.fill(0, start, end);
       return;
     }
-    fillArray(ptr, decoded);
+    // `decoded` is a new array, so it cannot overlap `buffer`.
+    fillArray(buffer, start, end, decoded);
   } else {
     const source = unwrappedValue;
     if (source.length === 0) {
-      ptr.fill(0);
+      buffer.fill(0, start, end);
       return;
     }
-    fillArray(ptr, source);
+    if (overlaps(buffer, start, end, source)) {
+      fillArrayByElement(buffer, start, end, source);
+    } else {
+      fillArray(buffer, start, end, source);
+    }
   }
 }
 
@@ -600,10 +660,16 @@ function indexOfOffset(
   }
 }
 
-// Copies `bytes` into a new, aligned array of `uint16_t`s.
-function toAlignedUint16Array(bytes: Uint8Array): Uint16Array {
-  const aligned = new Uint16Array(bytes.length / 2);
-  new Uint8Array(aligned.buffer).set(bytes);
+// The first `length` uint16_ts of `bytes`, in an aligned array. The C++
+// copies them into a kj::SmallArray, which lives on the stack for up to 1024
+// elements. When `bytes` is already aligned this views the same memory
+// instead, since the search only reads it; otherwise it copies.
+function toAlignedUint16Array(bytes: Uint8Array, length: number): Uint16Array {
+  if (bytes.byteOffset % 2 === 0) {
+    return new Uint16Array(bytes.buffer, bytes.byteOffset, length);
+  }
+  const aligned = new Uint16Array(length);
+  new Uint8Array(aligned.buffer).set(bytes.subarray(0, length * 2));
   return aligned;
 }
 
@@ -639,16 +705,14 @@ function indexOfBuffer(
     if (hayStackLength < 2 || needle.length < 2) {
       return undefined;
     }
-    // Copy haystack and needle to aligned buffers, since the data may have an
-    // odd byte offset.
+    // The haystack and needle need aligned arrays, since the data may have
+    // an odd byte offset.
     const hayStackU16Len = hayStackLength / 2;
-    const alignedHayStack = toAlignedUint16Array(
-      hayStack.subarray(0, hayStackLength)
-    );
+    const alignedHayStack = toAlignedUint16Array(hayStack, hayStackU16Len);
 
     const needleLen = needle.length - (needle.length % 2);
     const needleU16Len = needleLen / 2;
-    const alignedNeedle = toAlignedUint16Array(needle.subarray(0, needleLen));
+    const alignedNeedle = toAlignedUint16Array(needle, needleU16Len);
 
     result = searchString(
       alignedHayStack,
@@ -714,12 +778,10 @@ function indexOfString(
     if (hayStackLength < 2 || decodedNeedle.length < 2) {
       return undefined;
     }
-    // Copy haystack to an aligned buffer, since the data may have an odd
+    // The haystack needs an aligned array, since the data may have an odd
     // byte offset.
     const hayStackU16Len = hayStackLength / 2;
-    const alignedHayStack = toAlignedUint16Array(
-      hayStack.subarray(0, hayStackLength)
-    );
+    const alignedHayStack = toAlignedUint16Array(hayStack, hayStackU16Len);
 
     // decodedNeedle is a freshly allocated, and therefore aligned, array.
     result = searchString(
@@ -759,43 +821,38 @@ function toStringImpl(
 ): string {
   assert(end <= bytes.length);
   if (end < start) end = start;
-  const slice = bytes.subarray(start, end);
-  if (slice.length === 0) return '';
+  // `slice` in the C++ is the `[start, end)` slice of `bytes`.
+  const sliceLength = end - start;
+  if (sliceLength === 0) return '';
   switch (encoding) {
     case ASCII: {
       // TODO(perf): We can look at making this more performant later.
       // Essentially we have to modify the buffer such that every byte
       // has the highest bit turned off. Whee! Node.js has a faster
       // algorithm that it implements so we can likely adopt that.
-      const copy = new Uint8Array(slice.length);
-      for (let i = 0; i < slice.length; i++) {
-        copy[i] = slice[i]! & 0x7f;
+      const copy = new Uint8Array(sliceLength);
+      for (let i = 0; i < sliceLength; i++) {
+        copy[i] = bytes[start + i]! & 0x7f;
       }
-      return native.newFromOneByte(copy);
+      return native.newFromOneByte(copy, 0, sliceLength);
     }
     case LATIN1: {
-      return native.newFromOneByte(slice);
+      return native.newFromOneByte(bytes, start, end);
     }
     case UTF8: {
-      return native.newFromUtf8(slice);
+      return native.newFromUtf8(bytes, start, end);
     }
     case UTF16LE: {
-      return native.newFromTwoByte(slice);
+      return native.newFromTwoByte(bytes, start, end);
     }
     case BASE64: {
-      const length = native.simdutfBase64LengthFromBinary(slice.length);
-      const out = new Uint8Array(length);
-      native.simdutfBinaryToBase64(slice, out);
-      return native.newFromOneByte(out);
+      return native.encodeBase64(bytes, start, end);
     }
     case BASE64URL: {
-      const length = native.simdutfBase64UrlLengthFromBinary(slice.length);
-      const out = new Uint8Array(length);
-      native.simdutfBinaryToBase64Url(slice, out);
-      return native.newFromOneByte(out);
+      return native.encodeBase64Url(bytes, start, end);
     }
     case HEX: {
-      return native.newFromUtf8(native.kjEncodeHex(slice));
+      return native.encodeHex(bytes, start, end);
     }
     default:
       throw internalError();
@@ -929,6 +986,29 @@ export function write(
 // The state is a Uint8Array, so, as with the kj::byte fields in the C++, arithmetic on its
 // elements wraps modulo 256 when stored.
 
+// memmove(state + dstOffset, bytes + srcStart, count) for the bytes of an
+// incomplete character. `count` is at most kIncompleteCharactersEnd, so the
+// bytes are read into locals before any is written, which is correct even
+// when `bytes` aliases `state` (e.g. when the caller passes decoder.lastChar
+// as input).
+function copyIncompleteBytes(
+  state: Uint8Array,
+  dstOffset: number,
+  bytes: Uint8Array,
+  srcStart: number,
+  count: number
+): void {
+  assert(count <= kIncompleteCharactersEnd);
+  const b0 = count > 0 ? bytes[srcStart]! : 0;
+  const b1 = count > 1 ? bytes[srcStart + 1]! : 0;
+  const b2 = count > 2 ? bytes[srcStart + 2]! : 0;
+  const b3 = count > 3 ? bytes[srcStart + 3]! : 0;
+  if (count > 0) state[dstOffset] = b0;
+  if (count > 1) state[dstOffset + 1] = b1;
+  if (count > 2) state[dstOffset + 2] = b2;
+  if (count > 3) state[dstOffset + 3] = b3;
+}
+
 function getMissingBytes(state: Uint8Array): number {
   if (!(state[kMissingBytes]! <= kIncompleteCharactersEnd)) {
     throw new Error('Missing bytes cannot exceed 4');
@@ -1008,12 +1088,12 @@ export function decode(bytes: Uint8Array, state: Uint8Array): string {
           // point (but still use the rest of the incomplete bytes from this
           // chunk) and assume that the new, unexpected byte starts a new one.
           state[kMissingBytes] = 0;
-          // TypedArray.prototype.set has memmove semantics: bytes may alias the
-          // incomplete character buffer (e.g. when the caller passes
-          // decoder.lastChar as input).
-          state.set(
-            bytes.subarray(data, data + i),
-            kIncompleteCharactersStart + getBufferedBytes(state)
+          copyIncompleteBytes(
+            state,
+            kIncompleteCharactersStart + getBufferedBytes(state),
+            bytes,
+            data,
+            i
           );
           state[kBufferedBytes] = state[kBufferedBytes]! + i;
           data += i;
@@ -1024,10 +1104,12 @@ export function decode(bytes: Uint8Array, state: Uint8Array): string {
     }
 
     const foundBytes = Math.min(nread, getMissingBytes(state));
-    // memmove, as above.
-    state.set(
-      bytes.subarray(data, data + foundBytes),
-      kIncompleteCharactersStart + getBufferedBytes(state)
+    copyIncompleteBytes(
+      state,
+      kIncompleteCharactersStart + getBufferedBytes(state),
+      bytes,
+      data,
+      foundBytes
     );
     // Adjust the two buffers.
     data += foundBytes;
@@ -1128,15 +1210,17 @@ export function decode(bytes: Uint8Array, state: Uint8Array): string {
       // Copy the requested number of buffered bytes from the end of the
       // input into the incomplete character buffer.
       nread -= getBufferedBytes(state);
-      // memmove, as above.
-      state.set(
-        bytes.subarray(data + nread, data + nread + getBufferedBytes(state)),
-        kIncompleteCharactersStart
+      copyIncompleteBytes(
+        state,
+        kIncompleteCharactersStart,
+        bytes,
+        data + nread,
+        getBufferedBytes(state)
       );
     }
 
     if (nread > 0) {
-      body = toStringImpl(bytes.subarray(data, data + nread), 0, nread, enc);
+      body = toStringImpl(bytes, data, data + nread, enc);
     } else {
       body = '';
     }
