@@ -23,6 +23,10 @@ class ModuleUtil final: public jsg::Object {
     JSG_METHOD(createRequire);
     JSG_METHOD(isBuiltin);
   }
+
+  // Stateless: a worker that imports the owning `node:`/`cloudflare:` module at top level
+  // retains this instance.
+  JSG_SNAPSHOT_RESTORE(ModuleUtil);
 };
 
 #define EW_NODE_MODULE_ISOLATE_TYPES api::node::ModuleUtil
