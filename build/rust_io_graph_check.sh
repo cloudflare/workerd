@@ -6,8 +6,7 @@
 # and with static archives the linker keeps whichever it meets first, silently.
 #
 # One query, empty output means clean; otherwise it prints one offending dependency path. Extra
-# arguments are passed to bazel (CI passes its --config flags). The linked binary's symbols are
-# checked separately by //src/workerd/server:rust-io-link-check.
+# arguments are passed to bazel (CI passes its --config flags).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
