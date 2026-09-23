@@ -126,6 +126,20 @@ pub mod ffi {
         /// into a `'static` string literal. The C++ side constructs a `kj::StringPtr`
         /// directly from `.data()` / `.size()` — no allocation needed.
         unsafe fn wrappable_invoke_get_name(wrappable: &Wrappable) -> &'static str;
+
+        /// Called from C++ `Wrappable::jsgSnapshotRecipe`: the recipe a restored isolate needs
+        /// to re-create this wrappable's resource (its type's name), or the empty string if the
+        /// type is not registered as restorable. See `crate::snapshot`.
+        unsafe fn wrappable_invoke_snapshot_recipe(wrappable: &Wrappable) -> &'static str;
+
+        /// Called from the external snapshot restorer that C++ installs on restored isolates:
+        /// re-creates the resource named by `recipe` and attaches it to `holder`. Returns false
+        /// if no registered type has that name.
+        unsafe fn restore_snapshot_wrapper(
+            isolate: *mut Isolate,
+            holder: Local, /* v8::Local<v8::Object> */
+            recipe: &str,
+        ) -> bool;
     }
 
     unsafe extern "C++" {
@@ -649,6 +663,22 @@ pub mod ffi {
             wrappable: KjRc<Wrappable>,
             args: Pin<&mut FunctionCallbackInfo>,
         );
+
+        pub unsafe fn wrappable_attach_to_object(
+            isolate: *mut Isolate,
+            wrappable: KjRc<Wrappable>,
+            object: Local, /* v8::Local<v8::Object> */
+        );
+
+        // Startup snapshots (see `crate::snapshot` and `Resources::get_constructor`): store a
+        // resource template in the snapshot being prepared, and take one back in a restored
+        // isolate (an empty `Global` if there is none).
+        pub unsafe fn snapshot_add_template(
+            isolate: *mut Isolate,
+            name: &str,
+            tmpl: &Global, /* v8::Global<FunctionTemplate> */
+        );
+        pub unsafe fn snapshot_take_template(isolate: *mut Isolate, name: &str) -> Global /* v8::Global<FunctionTemplate> */;
 
         // Infallible: only defensive tag checks; returns kj::none for non-Rust
         // wrappables rather than throwing.
@@ -3360,6 +3390,23 @@ unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str 
     }
 }
 
+unsafe fn wrappable_invoke_snapshot_recipe(wrappable: &ffi::Wrappable) -> &'static str {
+    let Some(ptr) = ffi::TraitObjectPtr::from_wrappable(wrappable) else {
+        return "";
+    };
+    crate::snapshot::recipe_for([ptr.type_id_lo, ptr.type_id_hi])
+}
+
+unsafe fn restore_snapshot_wrapper(
+    isolate: *mut ffi::Isolate,
+    holder: ffi::Local,
+    recipe: &str,
+) -> bool {
+    // SAFETY: C++ calls this from a restored isolate's newContext(), with the isolate locked and
+    // its context entered, for a wrapper whose zygote recorded `recipe`.
+    unsafe { crate::snapshot::restore(IsolatePtr::from_ffi(isolate), holder, recipe) }
+}
+
 /// Visitor for garbage collection tracing.
 ///
 /// `GcVisitor` wraps a C++ `jsg::GcVisitor` pointer. All GC visitation logic
@@ -3558,6 +3605,17 @@ impl WrappableRc {
         // SAFETY: The Pin guarantees info is valid. wrap_constructor attaches
         // the Wrappable to args.This() and sets the Rust tag.
         unsafe { ffi::wrappable_attach_wrapper(self.handle.clone(), pin) };
+    }
+
+    /// Attaches this Wrappable to `object`, an existing instance of its type's template: a
+    /// wrapper deserialized from a startup snapshot (see `crate::snapshot`).
+    ///
+    /// # Safety
+    /// `isolate` must be live and locked; `object` must be an instance of the resource's
+    /// template with nothing attached.
+    pub(crate) unsafe fn attach_to_object(&self, isolate: IsolatePtr, object: ffi::Local) {
+        // SAFETY: forwarded from the caller.
+        unsafe { ffi::wrappable_attach_to_object(isolate.as_ffi(), self.handle.clone(), object) };
     }
 
     /// Creates an owning `WrappableRc` from a raw `*const ffi::Wrappable` pointer.

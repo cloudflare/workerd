@@ -292,6 +292,14 @@ class Wrappable: public kj::Refcounted {
     return nullptr;
   }
 
+  // For a wrappable that is not a `jsg::Object` (a Rust resource): the recipe an isolate restored
+  // from a startup snapshot needs to re-create it, or kj::none if it cannot be re-created. The
+  // restored isolate hands the recipe to its external snapshot restorer (see
+  // IsolateBase::setExternalSnapshotRestorer()). `jsg::Object`s use JSG_SNAPSHOT_RESTORE instead.
+  virtual kj::Maybe<kj::Array<kj::byte>> jsgSnapshotRecipe() {
+    return kj::none;
+  }
+
   // Perform GC visitation. This is named with the `jsg` prefix because it pollutes the
   // namespace of JSG_RESOURCE types.
   virtual void jsgVisitForGc(GcVisitor& visitor);

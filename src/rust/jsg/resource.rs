@@ -84,6 +84,18 @@ impl<R: Resource> Rc<R> {
         }
     }
 
+    /// Attaches this resource to `object`, an existing wrapper created from `R`'s template: a
+    /// wrapper deserialized from a startup snapshot whose Rust half the zygote dropped (see
+    /// [`crate::snapshot`]).
+    ///
+    /// # Safety
+    /// `isolate` must be live and locked, and `object` must be an instance of `R`'s template that
+    /// has no resource attached.
+    pub(crate) unsafe fn attach_to_object(&self, isolate: v8::IsolatePtr, object: v8::ffi::Local) {
+        // SAFETY: forwarded from the caller.
+        unsafe { self.wrappable.attach_to_object(isolate, object) };
+    }
+
     /// Visits this Rc during GC tracing.
     ///
     /// Delegates to C++ `Wrappable::visitRef()` which handles strong/traced switching
@@ -450,19 +462,48 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
 
 #[derive(Default)]
 pub struct Resources {
-    /// Cached V8 `FunctionTemplate`s keyed by resource `TypeId`.
-    templates: HashMap<TypeId, v8::Global<v8::FunctionTemplate>>,
+    /// Cached V8 `FunctionTemplate`s keyed by resource `TypeId`, with the type's name, under which
+    /// a startup snapshot stores the template.
+    templates: HashMap<TypeId, (&'static str, v8::Global<v8::FunctionTemplate>)>,
 }
 
 impl Resources {
-    /// Gets or creates the cached `FunctionTemplate` for a resource type.
+    /// Gets or creates the cached `FunctionTemplate` for a resource type. An isolate restored from
+    /// a startup snapshot adopts the zygote's template instead of creating one: the snapshot's
+    /// wrappers of `R` were instantiated from it, and its methods' signatures only accept those.
     pub fn get_constructor<R: Resource + 'static>(
         &mut self,
         isolate: v8::IsolatePtr,
     ) -> &v8::Global<v8::FunctionTemplate> {
-        self.templates
+        &self
+            .templates
             .entry(TypeId::of::<R>())
-            .or_insert_with(|| Self::create_resource_constructor::<R>(isolate))
+            .or_insert_with(|| {
+                let name = std::any::type_name::<R>();
+                // SAFETY: Caller guarantees the isolate is valid and locked.
+                let adopted = unsafe { v8::ffi::snapshot_take_template(isolate.as_ffi(), name) };
+                let template = if adopted.ptr == 0 {
+                    Self::create_resource_constructor::<R>(isolate)
+                } else {
+                    adopted.into()
+                };
+                (name, template)
+            })
+            .1
+    }
+
+    /// Stores every cached template in the startup snapshot being prepared, under its type's
+    /// name, and drops the cache: the snapshot creator refuses live handles.
+    ///
+    /// # Safety
+    /// `isolate` must be live, locked and preparing a snapshot.
+    pub(crate) unsafe fn prepare_snapshot(&mut self, isolate: v8::IsolatePtr) {
+        for (_, (name, template)) in self.templates.drain() {
+            // SAFETY: forwarded from the caller; `template` is a live handle.
+            unsafe {
+                v8::ffi::snapshot_add_template(isolate.as_ffi(), name, template.as_ffi_ref());
+            }
+        }
     }
 
     /// Creates a new V8 `FunctionTemplate` for resource type `R` via the C++ FFI.

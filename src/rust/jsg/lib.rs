@@ -12,6 +12,7 @@ pub mod macros;
 pub mod modules;
 pub mod nullable;
 pub mod resource;
+pub mod snapshot;
 pub mod v8;
 mod wrappable;
 
@@ -21,6 +22,7 @@ pub use nullable::Nullable;
 pub use resource::Rc;
 pub use resource::Resource;
 pub use resource::Weak;
+pub use snapshot::SnapshotRestore;
 pub use v8::ArrayBuffer;
 pub use v8::ArrayBufferView;
 pub use v8::BackingStore;
@@ -51,6 +53,11 @@ mod ffi {
         /// bytes produced by `capnp::canonicalize()` on the C++ side.
         #[expect(clippy::unnecessary_box_returns)]
         unsafe fn realm_create(isolate: *mut Isolate, feature_flags_data: &[u8]) -> Box<Realm>;
+
+        /// Startup snapshots: stores the realm's cached resource templates in the snapshot the
+        /// isolate is preparing and drops them (the snapshot creator refuses live handles). A
+        /// restored isolate's realm adopts them on first use (`Resources::get_constructor`).
+        unsafe fn realm_prepare_snapshot(realm: &mut Realm);
     }
 
     unsafe extern "C++" {
@@ -1051,6 +1058,12 @@ impl Drop for Realm {
             "Realm must be dropped while holding the isolate lock"
         );
     }
+}
+
+unsafe fn realm_prepare_snapshot(realm: &mut Realm) {
+    let isolate = realm.isolate;
+    // SAFETY: C++ calls this with the isolate locked, just before it prepares the snapshot.
+    unsafe { realm.resources.prepare_snapshot(isolate) };
 }
 
 #[expect(clippy::unnecessary_box_returns)]

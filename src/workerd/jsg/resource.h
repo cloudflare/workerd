@@ -2181,6 +2181,9 @@ class ResourceWrapper {
         KJ_IF_SOME(name, tryGetSnapshotBindingName(pending.payload)) {
           // A retained binding: re-bound by the Worker once it has compiled its own bindings.
           js.addPendingSnapshotBindingRestore(kj::mv(pending.holder), name);
+        } else KJ_IF_SOME(recipe, tryGetSnapshotExternalRecipe(pending.payload)) {
+          // Not a jsg::Object (a Rust resource): re-created by whoever defines it.
+          js.restoreExternalWrapperFromSnapshot(pending.holder.Get(isolate), recipe);
         } else {
           wrapper.restoreWrapperFromSnapshot(js, pending.holder.Get(isolate), pending.payload);
         }

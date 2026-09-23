@@ -460,6 +460,33 @@ class IsolateBase {
     return kj::mv(pendingSnapshotBindingRestores);
   }
 
+  // Wrappables that are not `jsg::Object`s (Rust resources) are re-created by whoever defines
+  // them: their payload is SNAPSHOT_EXTERNAL_PAYLOAD_INDEX followed by their jsgSnapshotRecipe(),
+  // and a restored isolate's newContext() hands the recipe and the deserialized wrapper to the
+  // restorer installed here, which must re-create the object and attach it to the wrapper.
+  static constexpr uint32_t SNAPSHOT_EXTERNAL_PAYLOAD_INDEX = SNAPSHOT_BINDING_PAYLOAD_INDEX - 1;
+  using ExternalSnapshotRestorer = void(
+      v8::Isolate* isolate, v8::Local<v8::Object> holder, kj::ArrayPtr<const kj::byte> recipe);
+  void setExternalSnapshotRestorer(ExternalSnapshotRestorer& restorer) {
+    externalSnapshotRestorer = &restorer;
+  }
+  void restoreExternalWrapperFromSnapshot(
+      v8::Local<v8::Object> holder, kj::ArrayPtr<const kj::byte> recipe) {
+    KJ_REQUIRE(externalSnapshotRestorer != nullptr,
+        "snapshot holds an external wrapper but no external snapshot restorer is installed");
+    externalSnapshotRestorer(ptr, holder, recipe);
+  }
+
+  // When preparing a snapshot: stores `tmpl`, a function template JSG's type wrapper does not own,
+  // in the blob under `name` (SnapshotArtifact::externalTemplateRecords). The owner must reset its
+  // own handle to the template before the blob is created, and adopt the template back with
+  // takeExternalSnapshotTemplate() in a restored isolate.
+  void addExternalSnapshotTemplate(kj::StringPtr name, v8::Local<v8::FunctionTemplate> tmpl);
+
+  // The template the zygote stored under `name` if this isolate starts from a snapshot, or an
+  // empty handle if it does not or the zygote stored none. Each can be taken once.
+  v8::Local<v8::FunctionTemplate> takeExternalSnapshotTemplate(kj::StringPtr name);
+
   // When starting from a snapshot: replace the (not yet created) resource-type templates and the
   // opaque template with the ones the zygote recorded in the artifact (see
   // SnapshotArtifact::templateDataIndices). Must run as soon as the type wrapper exists, before
@@ -625,6 +652,9 @@ class IsolateBase {
   // never dereferenced: a binding that died in the pre-capture GC is simply never looked up.
   kj::HashMap<const Wrappable*, kj::String> snapshotBindingNames;
   kj::Vector<PendingSnapshotBindingRestore> pendingSnapshotBindingRestores;
+  ExternalSnapshotRestorer* externalSnapshotRestorer = nullptr;
+  // Moved into SnapshotArtifact::externalTemplateRecords by prepareSnapshot().
+  kj::Vector<SnapshotArtifact::ExternalTemplateRecord> externalTemplateRecords;
 
   // Object used as the underlying storage for a workers exports.
   v8::Global<v8::Object> workerExportsObj;
@@ -1177,6 +1207,10 @@ class Isolate: public IsolateBase {
     void addPendingSnapshotBindingRestore(
         v8::Global<v8::Object> holder, kj::StringPtr name) override {
       jsgIsolate.addPendingSnapshotBindingRestore(kj::mv(holder), name);
+    }
+    void restoreExternalWrapperFromSnapshot(
+        v8::Local<v8::Object> holder, kj::ArrayPtr<const kj::byte> recipe) override {
+      jsgIsolate.restoreExternalWrapperFromSnapshot(holder, recipe);
     }
 
     void setWorkerEnv(V8Ref<v8::Object> value) override {

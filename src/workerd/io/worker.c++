@@ -744,6 +744,9 @@ struct Worker::Isolate::Impl {
           lock->v8Isolate, featureFlagsWords.asBytes().as<kj_rs::Rust>());
       lock->v8Isolate->SetData(
           ::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*KJ_REQUIRE_NONNULL(realm));
+      // Rust resources retained by a startup-snapshot zygote are re-created by the Rust side.
+      jsg::IsolateBase::from(lock->v8Isolate)
+          .setExternalSnapshotRestorer(::workerd::rust::jsg::restoreSnapshotWrapper);
 
       limitEnforcer.customizeIsolate(lock->v8Isolate);
 
@@ -2361,6 +2364,10 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         stashPerIsolateBootstrapForSnapshot(lock, jsContext.getHandle(lock));
         stashGlobalEventHandlersForSnapshot(lock, jsContext.getHandle(lock), *jsContext);
         stashLazyNodeGlobalsForSnapshot(lock, jsContext.getHandle(lock), *jsContext);
+        // The Rust realm caches its resource templates in v8::Globals; they go into the blob.
+        // const_cast OK because guarded by `lock`.
+        ::workerd::rust::jsg::realm_prepare_snapshot(
+            const_cast<::workerd::rust::jsg::Realm&>(*script->isolate->impl->realm));
         isolateBase.prepareSnapshot(jsContext.extractContextGlobalForSnapshot());
         KJ_DASSERT(jsContext.getHandle(lock).IsEmpty(),
             "zygote context handle must be consumed by prepareSnapshot");

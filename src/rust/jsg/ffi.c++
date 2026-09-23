@@ -96,6 +96,12 @@ kj::StringPtr Wrappable::jsgGetMemoryName() const {
   return kj::StringPtr(name.data(), name.size());
 }
 
+kj::Maybe<kj::Array<kj::byte>> Wrappable::jsgSnapshotRecipe() {
+  auto name = wrappable_invoke_snapshot_recipe(*this);
+  if (name.empty()) return kj::none;
+  return kj::heapArray<kj::byte>(reinterpret_cast<const kj::byte*>(name.data()), name.size());
+}
+
 size_t Wrappable::jsgGetMemorySelfSize() const {
   return sizeof(Wrappable);
 }
@@ -607,6 +613,18 @@ DEFINE_TYPED_ARRAY_NEW(bigint64_array, BigInt64Array, int64_t)
 DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 
 // Wrappers
+namespace {
+// Attaches `wrappable` to `object` (CppgcShim, TracedReference, internal fields, etc.) and tags
+// the object as a Rust resource for unwrap_resource().
+void attachRustWrapper(v8::Isolate* isolate, Wrappable& wrappable, v8::Local<v8::Object> object) {
+  wrappable.attachWrapper(isolate, object, true);
+  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
+  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+      tagAddress,
+      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+}
+}  // namespace
+
 Local wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl) {
   // Check if already wrapped
   KJ_IF_SOME(handle, wrappable->tryGetHandle(isolate)) {
@@ -618,14 +636,7 @@ Local wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global&
   v8::Local<v8::Object> object = ::workerd::jsg::check(
       local_tmpl->InstanceTemplate()->NewInstance(isolate->GetCurrentContext()));
 
-  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
-  wrappable->attachWrapper(isolate, object, true);
-
-  // Override tag to identify as Rust object for unwrapping
-  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+  attachRustWrapper(isolate, *wrappable, object);
 
   return to_ffi(v8::Local<v8::Value>::Cast(object));
 }
@@ -634,14 +645,32 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
   auto* isolate = args.GetIsolate();
   auto object = args.This();
 
-  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
-  wrappable->attachWrapper(isolate, object, true);
+  attachRustWrapper(isolate, *wrappable, object);
+}
 
-  // Override tag to identify as Rust object for unwrapping
-  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+void wrappable_attach_to_object(Isolate* isolate, kj::Rc<Wrappable> wrappable, Local object) {
+  attachRustWrapper(isolate, *wrappable, local_from_ffi<v8::Object>(kj::mv(object)));
+}
+
+void snapshot_add_template(Isolate* isolate, ::rust::Str name, const Global& tmpl) {
+  auto& global = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
+  ::workerd::jsg::IsolateBase::from(isolate).addExternalSnapshotTemplate(
+      kj::str(kj::ArrayPtr<const char>(name.data(), name.size())), global.Get(isolate));
+}
+
+Global snapshot_take_template(Isolate* isolate, ::rust::Str name) {
+  auto tmpl = ::workerd::jsg::IsolateBase::from(isolate).takeExternalSnapshotTemplate(
+      kj::str(kj::ArrayPtr<const char>(name.data(), name.size())));
+  if (tmpl.IsEmpty()) return Global{.ptr = 0};
+  return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, tmpl));
+}
+
+void restoreSnapshotWrapper(
+    v8::Isolate* isolate, v8::Local<v8::Object> holder, kj::ArrayPtr<const kj::byte> recipe) {
+  auto name = recipe.asChars();
+  KJ_REQUIRE(restore_snapshot_wrapper(isolate, to_ffi(v8::Local<v8::Value>(holder)),
+                 ::rust::Str(name.begin(), name.size())),
+      "snapshot holds a Rust resource whose type is not registered as restorable", name);
 }
 
 // Unwrappers
@@ -926,11 +955,19 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
   // Construct lazily.
   v8::EscapableHandleScope scope(isolate);
 
+  // A startup-snapshot zygote serializes the callbacks its templates reference as external
+  // references, so each must be registered (a no-op in any other isolate).
+  auto registerCallback = [isolate](size_t callback) {
+    ::workerd::jsg::isolateRegisterExternalReference(isolate, static_cast<intptr_t>(callback));
+  };
+
   v8::Local<v8::FunctionTemplate> constructor;
   KJ_IF_SOME(descriptor, descriptor.constructor) {
+    registerCallback(descriptor.callback);
     constructor = v8::FunctionTemplate::New(isolate,
         reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(descriptor.callback)));
   } else {
+    registerCallback(reinterpret_cast<size_t>(&workerd::jsg::throwIllegalConstructor));
     constructor = v8::FunctionTemplate::New(isolate, &workerd::jsg::throwIllegalConstructor);
   }
 
@@ -959,6 +996,7 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
   constructor->SetClassName(classname);
 
   for (const auto& method: descriptor.static_methods) {
+    registerCallback(method.callback);
     auto functionTemplate = v8::FunctionTemplate::New(isolate,
         reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback)),
         v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow);
@@ -967,6 +1005,7 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
   }
 
   for (const auto& method: descriptor.methods) {
+    registerCallback(method.callback);
     auto functionTemplate = v8::FunctionTemplate::New(isolate,
         reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback)),
         v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow);
@@ -996,6 +1035,7 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     // spec_compliant_property_attributes name/length rules when enabled.
     // `isGetter` true → length=0, name="get <prop>"; false → length=1, name="set <prop>".
     auto makePropFn = [&](size_t callback, bool isGetter) {
+      registerCallback(callback);
       v8::Local<v8::FunctionTemplate> fn;
       if (specCompliant) {
         int len = isGetter ? 0 : 1;
@@ -1059,6 +1099,7 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         // spec_compliant_property_attributes has no effect on inspect properties.
         auto symbol = v8::Symbol::New(isolate, v8Name);
         inspectProperties->Set(v8Name, symbol, v8::PropertyAttribute::ReadOnly);
+        registerCallback(prop.getter_callback);
         auto getterFn = v8::FunctionTemplate::New(isolate,
             reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(prop.getter_callback)));
         prototype->SetAccessorProperty(symbol, getterFn, v8::Local<v8::FunctionTemplate>(),

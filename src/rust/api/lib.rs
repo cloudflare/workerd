@@ -36,6 +36,7 @@ mod ffi {
 }
 
 pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
+    jsg::snapshot::register::<DnsUtil>();
     jsg::modules::add_builtin(
         registry,
         "node-internal:dns",
@@ -50,6 +51,7 @@ pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
 }
 
 pub fn register_nodejs_url_module(registry: Pin<&mut ffi::ModuleRegistry>) {
+    jsg::snapshot::register::<UrlUtil>();
     jsg::modules::add_builtin(
         registry,
         "node-internal:url",

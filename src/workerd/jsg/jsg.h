@@ -92,6 +92,16 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
   };
   kj::Array<ModuleRecord> moduleRecords;
 
+  // Function templates that JSG's type wrapper does not own, stored in the blob with
+  // v8::SnapshotCreator::AddData() under a name their owner chooses: the templates of Rust resource
+  // types, which the isolate's Rust Realm caches per type. They must be adopted for the same
+  // reason as templateDataIndices; see IsolateBase::addExternalSnapshotTemplate().
+  struct ExternalTemplateRecord {
+    kj::String name;
+    size_t dataIndex;
+  };
+  kj::Array<ExternalTemplateRecord> externalTemplateRecords;
+
   ~SnapshotArtifact() noexcept(false) {
     // v8::SnapshotCreator::CreateBlob() allocates the data with `new[]` and hands over ownership.
     delete[] blob.data;
@@ -148,6 +158,11 @@ using SnapshotConfig = kj::OneOf<MutableSnapshot, ReadonlySharedSnapshot>;
 // The binding name carried by a snapshot wrapper payload of the binding kind, or kj::none for a
 // payload of a type recipe. See IsolateBase::recordSnapshotBindings() in setup.h.
 kj::Maybe<kj::StringPtr> tryGetSnapshotBindingName(kj::ArrayPtr<const kj::byte> payload);
+
+// The recipe carried by a snapshot wrapper payload of the external kind (a wrappable that is not a
+// jsg::Object), or kj::none. See IsolateBase::setExternalSnapshotRestorer() in setup.h.
+kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetSnapshotExternalRecipe(
+    kj::ArrayPtr<const kj::byte> payload);
 
 #define JSG_RESOURCE_TYPE(Type, ...)                                                               \
   static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = ::workerd::jsg::JsgKind::RESOURCE; \
@@ -3385,6 +3400,11 @@ class Lock {
   // IsolateBase::recordSnapshotBindings() in setup.h.
   virtual void addPendingSnapshotBindingRestore(
       v8::Global<v8::Object> holder, kj::StringPtr name) = 0;
+
+  // Startup snapshots: re-creates a deserialized wrapper whose object is not a jsg::Object (a Rust
+  // resource) from `recipe`. See IsolateBase::setExternalSnapshotRestorer() in setup.h.
+  virtual void restoreExternalWrapperFromSnapshot(
+      v8::Local<v8::Object> holder, kj::ArrayPtr<const kj::byte> recipe) = 0;
 
   // Store the worker environment.
   virtual void setWorkerEnv(V8Ref<v8::Object> value) = 0;

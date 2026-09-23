@@ -60,6 +60,7 @@ class Wrappable: public ::workerd::jsg::Wrappable {
   void jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) override;
   kj::StringPtr jsgGetMemoryName() const override;
   size_t jsgGetMemorySelfSize() const override;
+  kj::Maybe<kj::Array<kj::byte>> jsgSnapshotRecipe() override;
 
   // Returns a new kj::Rc reference to this Wrappable.
   kj::Rc<Wrappable> toRc() {
@@ -267,6 +268,18 @@ kj::uint wrappable_strong_refcount(const Wrappable& wrappable);
 // Wrappers
 Local wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl);
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
+void wrappable_attach_to_object(Isolate* isolate, kj::Rc<Wrappable> wrappable, Local object);
+
+// Startup snapshots: the Rust realm's resource templates travel through the snapshot under their
+// type's name (jsg::IsolateBase::addExternalSnapshotTemplate / takeExternalSnapshotTemplate).
+void snapshot_add_template(Isolate* isolate, ::rust::Str name, const Global& tmpl);
+Global snapshot_take_template(Isolate* isolate, ::rust::Str name);
+
+// The jsg::IsolateBase::ExternalSnapshotRestorer for Rust resources: re-creates the resource a
+// restored isolate's deserialized `holder` wrapped in the zygote. Install it on every isolate that
+// may start from a snapshot, once its Rust realm exists.
+void restoreSnapshotWrapper(
+    v8::Isolate* isolate, v8::Local<v8::Object> holder, kj::ArrayPtr<const kj::byte> recipe);
 
 // Unwrappers
 ::rust::String unwrap_string(Isolate* isolate, Local value);
