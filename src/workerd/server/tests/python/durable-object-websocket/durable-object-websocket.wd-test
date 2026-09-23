@@ -1,4 +1,5 @@
 using Workerd = import "/workerd/workerd.capnp";
+%PYTHON_COMPAT_DATES_IMPORT;
 
 const config :Workerd.Config = (
   services = [
@@ -9,6 +10,7 @@ const config :Workerd.Config = (
 );
 
 const mainWorker :Workerd.Worker = (
+  %COMPAT_DATE,
 
   compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_no_global_handlers"],
 
@@ -31,6 +33,7 @@ const mainWorker :Workerd.Worker = (
 
 
 const testerWorker :Workerd.Worker = (
+  %COMPAT_DATE,
 
   compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_no_global_handlers"],
 

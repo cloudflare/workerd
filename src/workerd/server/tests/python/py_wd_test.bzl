@@ -29,6 +29,16 @@ def _select_snapshots_disabled(value, fallback):
         "//conditions:default": value,
     })
 
+def _get_compatibility_date_flag(python_flag):
+    version_info = BUNDLE_VERSION_INFO[python_flag]
+    if python_flag != "development":
+        return version_info["flag"]
+
+    for name, info in BUNDLE_VERSION_INFO.items():
+        if name != "development" and info["pyodide_version"] == version_info["real_pyodide_version"]:
+            return info["flag"]
+    fail("No released Python bundle matches the development bundle")
+
 def _py_wd_test_helper(
         name,
         src,
@@ -43,6 +53,16 @@ def _py_wd_test_helper(
     name_flag = name + "_" + python_flag
     templated_src = name_flag.replace("/", "-") + "@template"
     templated_src = "/".join(src.split("/")[:-1] + [templated_src])
+    compatibility_dates_src = name_flag.replace("/", "-") + "@compatibility-dates.capnp"
+    compatibility_dates_src = "/".join(src.split("/")[:-1] + [compatibility_dates_src])
+
+    compatibility_dates_rule = name_flag + "@compatibility-dates"
+    copy_file(
+        name = compatibility_dates_rule,
+        src = "//src/workerd/server/tests/python:python-compatibility-dates",
+        out = compatibility_dates_src,
+    )
+    data = data + [":" + compatibility_dates_rule]
 
     pyodide_version = BUNDLE_VERSION_INFO[python_flag]["real_pyodide_version"]
 
@@ -71,21 +91,31 @@ def _py_wd_test_helper(
     if make_snapshot and pyodide_version != "0.26.0a2":
         snapshot_feature_flags.append("python_dedicated_snapshot")
 
+    # python_external_sdk mostly doesn't work in tests. The interal sdk is
+    # frozen, all tests for new sdk are in workers-py.
+    if "enable_python_external_sdk" not in feature_flags and "disable_python_external_sdk" not in feature_flags:
+        feature_flags = feature_flags + ["disable_python_external_sdk"]
+
     if load_snapshot and not make_snapshot:
         snapshot_args = ["--python-load-snapshot", "load_snapshot.bin"]
 
     feature_flags_txt = _feature_flags_txt(python_flag, feature_flags + snapshot_feature_flags)
     no_snapshot_feature_flags_txt = _feature_flags_txt(python_flag, feature_flags)
+    compatibility_date_flag = _get_compatibility_date_flag(python_flag)
+    compat_date_substitutions = {
+        "%PYTHON_COMPAT_DATES_IMPORT": 'using PythonCompatibilityDates = import "%s"' % compatibility_dates_src.rsplit("/", 1)[-1],
+        "%COMPAT_DATE": "compatibilityDate = PythonCompatibilityDates.%s" % compatibility_date_flag,
+    }
 
     expand_template(
         name = name_flag + "@rule",
         out = templated_src,
         template = src,
         substitutions = _select_snapshots_disabled(
-            {
+            compat_date_substitutions | {
                 "%PYTHON_FEATURE_FLAGS": feature_flags_txt,
             },
-            {
+            compat_date_substitutions | {
                 "%PYTHON_FEATURE_FLAGS": no_snapshot_feature_flags_txt,
             },
         ),
@@ -107,6 +137,7 @@ def _py_wd_test_helper(
         data = data,
         _configurable_data = _select_snapshots_disabled(snapshot_data, []),
         load_snapshot = _select_snapshots_disabled(load_snapshot, None),
+        no_default_compat_date = True,
         # TODO(soon): at the time of disabling these they all passed but because of how slow python
         #             tests are we disabled them for now. We should re-enable them when we have
         #             a better way to run them.

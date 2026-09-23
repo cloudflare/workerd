@@ -1278,7 +1278,6 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     KJ_IF_SOME(compatDate, testCompatDate) {
       server->setTestCompatibilityDateOverride(kj::str(compatDate));
     }
-
     // Enable loopback sockets in tests only.
     network.enableLoopback();
 
