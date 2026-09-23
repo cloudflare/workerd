@@ -660,6 +660,9 @@ class StorageManager final: public jsg::Object {
   JSG_RESOURCE_TYPE(StorageManager) {
     JSG_METHOD(getDirectory);
   }
+
+  // Stateless: a startup snapshot that retains this object re-creates it fresh.
+  JSG_SNAPSHOT_RESTORE(StorageManager);
 };
 
 #define EW_WEB_FILESYSTEM_ISOLATE_TYPE                                                             \
