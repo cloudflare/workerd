@@ -1,0 +1,33 @@
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_b12f2c0bd9231e 40-42
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_dadaf0660bfcbe::t_fd281993a90351 103-104,189-190,192,230-234,242,374,381,492
+src/rust/cxx/kj-rs-io/async-io.h
+  s_dadaf0660bfcbe::t_af4f2aae2a2f4d 166-167,171,175-184,194
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_dadaf0660bfcbe::t_1b2616a5ae809e 45,99-101,154,180-190,193-196,286,289-304
+src/rust/cxx/kj-rs-io/lib.rs
+  s_dadaf0660bfcbe::t_7989ce6169decd 63-64,73-74,83-84,141,199
+src/rust/cxx/kj-rs-io/loopback.rs
+  s_dadaf0660bfcbe::t_476cf3d95facb9 1-141
+src/rust/cxx/kj-rs-io/net.rs
+  s_dadaf0660bfcbe::t_0948cd72d7e994 21-22,80-81,106-112,290-294,454-464,550-568,574,579-584,587,589-593,595,614-619,662,777-778,784,787-809,922,924-925,928-929,932-933,939,941,946-954,956-963,979,982,988-989,991-994,999-1002,1009-1016,1046-1050,1191-1193,1214-1222,1259-1267,1271-1312,1548,1726
+src/rust/cxx/kj-rs-io/tests/async-io-test.c++
+  s_dadaf0660bfcbe::t_ecb8790506bf5e 868-934
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6a4ee4e58d310590be426b9e8d042da76b21379c",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

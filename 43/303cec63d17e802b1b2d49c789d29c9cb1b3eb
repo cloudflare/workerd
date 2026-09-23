@@ -1,0 +1,35 @@
+src/workerd/server/workerd.c++
+  s_dadaf0660bfcbe::t_91440e732cd1d2 346,1158
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_e2a35719d9ef70 40-42
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_dadaf0660bfcbe::t_8a0396e820fb2d 45,99-101,154,180-190,193-196,286,289-304
+src/rust/cxx/kj-rs-io/loopback.rs
+  s_dadaf0660bfcbe::t_2401d77ece5e38 1-141
+src/rust/cxx/kj-rs-io/net.rs
+  s_dadaf0660bfcbe::t_32956918e12c13 21-22,80-81,106-112,290-294,454-464,550-568,574,579-584,587,589-593,595,614-619,662,777-778,784,787-809,922,924-925,928-929,932-933,939,941,946-954,956-963,979,982,988-989,991-994,999-1002,1009-1016,1046-1050,1191-1193,1214-1222,1259-1267,1271-1312,1548,1726
+src/rust/cxx/kj-rs-io/tests/async-io-test.c++
+  s_dadaf0660bfcbe::t_4d33a884ac4b7c 868-934
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_dadaf0660bfcbe::t_6cd2e36467770b 103-104,189-190,192,230-234,242,374,381,492
+src/rust/cxx/kj-rs-io/async-io.h
+  s_dadaf0660bfcbe::t_ea2cceedf37171 167-168,172,176-185,195
+src/rust/cxx/kj-rs-io/lib.rs
+  s_dadaf0660bfcbe::t_9ee504cd3c14d3 63-64,73-74,83-84,141,199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "43303cec63d17e802b1b2d49c789d29c9cb1b3eb",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
