@@ -10,6 +10,8 @@ assert.strictEqual(publicTracing.getActiveSpan(), undefined);
 const getActiveSpanOutsideInvocationContext = AsyncLocalStorage.bind(() =>
   publicTracing.getActiveSpan()
 );
+const spanCreatedOutsideInvocationContext =
+  publicTracing.startSpan('outside-invocation');
 
 // Overlapping Durable Object requests share an IoContext, but each async continuation must retain
 // its originating request's tracing state. This verifies that request A resuming while request B is
@@ -221,6 +223,34 @@ export const setAttributes = {
         span
       );
     });
+  },
+};
+
+export const spanContext = {
+  async test(ctrl, env, ctx) {
+    assert.deepStrictEqual(spanCreatedOutsideInvocationContext.spanContext(), {
+      traceId: '00000000000000000000000000000000',
+      spanId: '0000000000000000',
+      traceFlags: 0,
+    });
+
+    const parentContext = publicTracing.getActiveSpan().spanContext();
+    const span = publicTracing.startSpan('span-context-op');
+    const context = span.spanContext();
+
+    assert.match(context.traceId, /^[0-9a-f]{32}$/);
+    assert.match(context.spanId, /^[0-9a-f]{16}$/);
+    assert.strictEqual(context.traceId, parentContext.traceId);
+    assert.notStrictEqual(context.spanId, parentContext.spanId);
+    assert.strictEqual(context.traceFlags, 0);
+    assert.strictEqual('isRemote' in context, false);
+    assert.strictEqual('traceState' in context, false);
+
+    span.end();
+    assert.deepStrictEqual(span.spanContext(), context);
+
+    context.traceId = 'mutated';
+    assert.notStrictEqual(span.spanContext().traceId, context.traceId);
   },
 };
 
