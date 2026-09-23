@@ -1,0 +1,33 @@
+src/workerd/api/jsrpc-call-observation-test.c++
+  s_756328791ab730::t_9a788b57433074 51-52,90-95,159,222,224,243,249-254,264-290,334-377,450
+src/workerd/api/worker-rpc.c++
+  s_e6ef9db3485b14::t_65a79378946724 415-416,421,474-476,556,561,760,764-765,795-798,827-831,860
+src/workerd/api/worker-rpc.h
+  s_e6ef9db3485b14::t_50b7cdf91f9c6e 164,176-179,333-345,369-370,426
+src/workerd/io/observer.h
+  s_756328791ab730::t_c4e5cd55a6b43f 183-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ea44ce1cbcb88b326f2d59e0710c6088ba6d47a9",
+  "prompts": {},
+  "sessions": {
+    "s_756328791ab730": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f516141b5ffeNlCjrhcr3GDBl3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_e6ef9db3485b14": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f940fb7bdffeOOke2jjtQ9MxFI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
