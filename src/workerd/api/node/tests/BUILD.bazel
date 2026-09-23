@@ -899,6 +899,12 @@ wd_test(
 )
 
 wd_test(
+    src = "buffer-edge-cases-test.wd-test",
+    args = ["--experimental"],
+    data = ["buffer-edge-cases-test.js"],
+)
+
+wd_test(
     src = "als-gc-test.wd-test",
     args = ["--experimental"],
     data = ["als-gc-test.js"],

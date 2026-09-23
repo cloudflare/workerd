@@ -84,6 +84,11 @@ namespace workerd::util {
   V(HIBERNATABLE_WEBSOCKET_REFACTOR)                                                               \
   /* Enables user-configured Durable Object retry policy and retryable() dispatch behavior. */     \
   V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
+  /* When enabled, `node-internal:buffer` is provided by the TypeScript                             \
+     implementation (src/node/internal/buffer.ts, backed by the C++                                \
+     `node-internal:buffer_native` primitives) instead of the C++ BufferUtil. The C++              \
+     implementation is retained for rollback. */                                                   \
+  V(NODEJS_BUFFER_TS)                                                                              \
   /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust            \
      implementation, instead of chromium zlib. The unprefixed zlib symbols are owned by the        \
      routing layer in util/zlib-router.c++, so this covers every consumer: node:zlib, web          \
