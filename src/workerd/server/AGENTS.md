@@ -127,7 +127,7 @@ Bazel labels: `//src/workerd/server:workerd` (and `:workerd_cross`, which `wd_te
 - Never depend on the `@capnp-cpp//src/kj:kj-async` umbrella: it drags in `kj-async-os`, whose
   definitions collide with the shim's (an ODR violation). Use `:kj-async-core` / `:kj-async-io`.
   `just check-io-backend-graph` (one `bazel cquery somepath`, run by the lint CI lane) rejects any
-  such path from `:workerd`; `:rust-io-link-check` inspects the linked binary's symbols on unix.
+  such path from `:workerd`.
 - Ownership: the returned `kj::AsyncIoContext` borrows a heap holder attached to its
   `lowLevelProvider`; the holder owns the tokio context and the inert event port, so the context's
   references are valid for its whole lifetime and torn down once. The inert `kj::UnixEventPort` is
