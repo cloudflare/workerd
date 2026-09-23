@@ -36,7 +36,7 @@ behavior-parity (messages aside).
 | 19 | close() with a pending UNFILLED BYOB read | read resolves done with an empty view | same — the parked read settles one microtask after close(), handing its buffer back; its descriptor remains available for a later closed-state response (#12's settlement without any min) | `closeWithPendingUnfilledByobRead` |
 | 20 | remainder after a partial BYOB read, delivered to a DEFAULT read | copied into a fresh auto-allocated buffer (4096, or 16384 under the ledger #5 autogate), byteOffset 0 | view into the original enqueued buffer with its offset preserved (spec) | `partialViewThenDefaultRead` |
 | 21 | byobRequest after a PARTIAL enqueue into a pending BYOB read | original request invalidated; no replacement exposed (null) | original request invalidated; a fresh request exposes a view shrunk to the remaining byte count (spec) | `cancelWithPartiallyFilledPull` |
-| 22 | cancel() after a partial enqueue into a pending BYOB read | read resolves done with an empty view | read resolves done with value undefined (spec) | `cancelWithPartiallyFilledPull` |
+| 22 | cancel() with a pending read (default, read(view), readAtLeast; unfilled, or after a partial enqueue into a BYOB read) | read resolves done with an empty view | read resolves done with value undefined (spec) — invisible to WPT, whose assert_object_equals equates an empty view with undefined | `cancelWithPartiallyFilledPull`, `cancelPendingReadsByteReaders` |
 | 23 | error() while a close() is still pending (bytes queued) — readable #18 mirror | ignored: desiredSize already 0, the bytes drain to a clean close for default and BYOB readers | desiredSize is hwm minus the queued bytes (-2) until the error, then the stream errors: bytes discarded, default/BYOB reads and closed reject | `errorAfterCloseWithQueuedBytes` |
 | 24 | pipeTo() from an autoAllocate tee branch, aborted (preventCancel) with its read pending | pipe stays pending until a chunk arrives, which the aborted pipe's read consumes and drops (bounded) | pipe rejects at once; the branch's next reader receives the next chunk | `teePipeAbortReleasesPendingRead` |
 | 25 | byobRequest held by the source across tee() (reader released first) | stays exposed and working (spec): the responded byte reaches both branches, and fills a sole remaining branch's read | invalidated at tee(): byobRequest null while two branches exist, respond() throws TypeError 'This BYOB request has been invalidated'; a sole remaining branch's read gets a fresh request | `teeInvalidatesHeldByobRequest`, `teeSoleBranchMintsFreshByobRequest` |
@@ -114,7 +114,7 @@ named suite test pins directly, differing only in incidental asserts.
 | --- | --- |
 | `construction.js` | ledger #1, #2, #4; byte hwm default 0 |
 | `pull-timing.js` | ledger #3; pull-throw seeds |
-| `controller.js` | ledger #5, #7, #21, #22, #23; enqueue-discards-request; read-after-close; detach-at-call |
+| `controller.js` | ledger #5, #7, #21, #22, #23; enqueue-discards-request; read-after-close and read-after-cancel; detach-at-call |
 | `byob-reader.js` | ledger #20; view-type matrix + offsets + auto-allocate sizing (migrated streams-byob-edge-cases) + mismatched sizes/types, subarray, multi-pending-reads, byobreaderRegression (migrated streams-js-test) |
 | `respond.js` | ledger #6, #8, #15, #16; all 31 streams-respond-test tests (respond/respondWithNewView/pumps/cancel races/UAF shapes) + js-test respond family |
 | `release-relock.js` | ledger #9, #10; the WPT releaseLock→second-reader cluster; release with two pending reads or a partially filled head |
@@ -123,7 +123,7 @@ named suite test pins directly, differing only in incidental asserts.
 | `buffer-lifecycle.js` | ledger #18; resizable ArrayBuffers; WASM Memory |
 | `gc.js` | pending BYOB read + byobRequest survive gc(); both tee branches collected while the controller is held: enqueue() accepted, desiredSize at the high-water mark, byobRequest null, close() then enqueue() as ever (a parity pin of the observable surface — the retention checks are the readable suite's, a transferred buffer leaving nothing to WeakRef), one branch cancelled and the other collected, observed in the gc()'s own job (the readable suite's teeSurvivorBranchCollected, plus byobRequest null), and pull() stops (ledger #26) |
 | `integration.js` | BYOB round-trips via SELF; readAtLeast on echoed body; bytes() |
-| `js-compat.js` | ledger #17; byte halves of the mixed streams-js-test tests (closed promise, cancel reads, locked ops, globals) |
+| `js-compat.js` | ledger #17, #22; byte halves of the mixed streams-js-test tests (closed promise, cancel reads, locked ops, globals) |
 | `flag-no-auto-allocate.js` | the flag cell (migrated streams-no-auto-allocate-test) |
 | `legacy-constructors.js` / `legacy-nodetach.js` | the flags table's legacy windows |
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): a queued byte backlog plus the close sentinel swept in one batched read with chunks INTACT (no coalescing); with autoAllocateChunkSize the conduit's wait-read synthesizes the descriptor so pull carries a byobRequest (ledger #6); expectedLength undefined; error/cancel propagation |

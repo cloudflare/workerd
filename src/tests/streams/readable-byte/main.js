@@ -49,6 +49,7 @@ export {
   enqueueDiscardsByobRequest,
   closeWithPartiallyFilledView,
   readAfterCloseReturnsEmptyView,
+  readAfterCancelReturnsEmptyView,
   readDetachesCallerBuffer,
   closeWithPendingUnfilledByobRead,
   controllerType,

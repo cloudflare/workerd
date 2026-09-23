@@ -124,6 +124,39 @@ export const readAfterCloseReturnsEmptyView = {
   },
 };
 
+// read(view) against a cancelled stream resolves the same way, on a
+// JS-backed stream, a tee branch and a native body (parity).
+export const readAfterCancelReturnsEmptyView = {
+  async test() {
+    const js = new ReadableStream({ type: 'bytes' }).getReader({
+      mode: 'byob',
+    });
+    await js.cancel();
+    const [branch] = new ReadableStream({ type: 'bytes' }).tee();
+    const teed = branch.getReader({ mode: 'byob' });
+    // A lone branch's cancel pends until its sibling cancels too.
+    teed.cancel();
+    for (const reader of [js, teed]) {
+      const buffer = new ArrayBuffer(8);
+      const { value, done } = await reader.read(new Uint16Array(buffer, 2, 2));
+      ok(done);
+      strictEqual(buffer.byteLength, 0);
+      ok(value instanceof Uint16Array);
+      strictEqual(value.byteOffset, 2);
+      strictEqual(value.byteLength, 0);
+      strictEqual(value.buffer.byteLength, 8);
+    }
+
+    const native = new Response('hello').body.getReader({ mode: 'byob' });
+    await native.cancel();
+    const { value, done } = await native.read(new Uint8Array(8));
+    ok(done);
+    ok(value instanceof Uint8Array);
+    strictEqual(value.byteLength, 0);
+    strictEqual(value.buffer.byteLength, 8);
+  },
+};
+
 // read(view) transfers the caller's buffer immediately (the pinned
 // streams_byob_reader_detaches_buffer behavior) and delivers the bytes
 // in a fresh view over the transferred buffer (parity).
