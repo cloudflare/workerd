@@ -10,11 +10,9 @@ use std::pin::Pin;
 
 use jsg::ToJS;
 
-use crate::buffer_native::BufferNative;
 use crate::dns::DnsUtil;
 use crate::url::UrlUtil;
 
-pub mod buffer_native;
 pub mod dns;
 pub mod url;
 
@@ -29,31 +27,12 @@ mod ffi {
     extern "Rust" {
         pub fn register_nodejs_modules(registry: Pin<&mut ModuleRegistry>);
 
-        // The library primitives used by the TypeScript implementation of
-        // `node-internal:buffer`. Registered separately because they are only
-        // needed when the C++ `NODEJS_BUFFER_TS` autogate selects that
-        // implementation (see node.h).
-        pub fn register_nodejs_buffer_native_module(registry: Pin<&mut ModuleRegistry>);
-
         // The Rust implementation of `node-internal:url`. Registered separately
         // because it is gated by the C++ `NODEJS_URL_RUST` autogate; when the
         // gate is off the C++ `UrlUtil` registers that module instead (see
         // node.h). Kept as its own entry point to avoid a boolean parameter.
         pub fn register_nodejs_url_module(registry: Pin<&mut ModuleRegistry>);
     }
-}
-
-pub fn register_nodejs_buffer_native_module(registry: Pin<&mut ffi::ModuleRegistry>) {
-    jsg::modules::add_builtin(
-        registry,
-        "node-internal:buffer_native",
-        // SAFETY: isolate is valid and locked — called from C++ module registration.
-        |isolate| unsafe {
-            let mut lock = jsg::Lock::from_isolate_ptr(isolate);
-            BufferNative::new().to_js(&mut lock).into_ffi()
-        },
-        jsg::modules::ModuleType::Internal,
-    );
 }
 
 pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {

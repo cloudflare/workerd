@@ -98,7 +98,7 @@ namespace workerd::util {
      C++ implementation. The C++ implementation is retained for rollback.*/                        \
   V(NODEJS_URL_RUST)                                                                               \
   /* When enabled, `node-internal:buffer` is provided by the TypeScript                             \
-     implementation (src/node/internal/buffer.ts, backed by the Rust                               \
+     implementation (src/node/internal/buffer.ts, backed by the C++                                \
      `node-internal:buffer_native` primitives) instead of the C++ BufferUtil. The C++              \
      implementation is retained for rollback. */                                                   \
   V(NODEJS_BUFFER_TS)                                                                              \

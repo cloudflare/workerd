@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Type definitions for the Rust `node-internal:buffer_native` module
-// (src/rust/api/buffer_native.rs). Each function wraps exactly one V8,
+// Type definitions for the `node-internal:buffer_native` module
+// (src/workerd/api/node/buffer-native.h). Each function wraps exactly one V8,
 // simdutf, nbytes, kj, or i18n call made by src/workerd/api/node/buffer.c++.
 
 // jsg::JsString::WriteFlags
