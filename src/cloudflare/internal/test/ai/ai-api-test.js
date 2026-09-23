@@ -251,13 +251,21 @@ export const tests = {
 
     {
       // Test web search
-      const resp = await env.ai.websearch({
-        gatewayId: 'my-gateway',
-        provider: 'exa',
-        query: 'Cloudflare Workers',
-        limit: 5,
-        byokAlias: 'default',
-      });
+      const resp = await env.ai.websearch(
+        {
+          gatewayId: 'my-gateway',
+          provider: 'exa',
+          query: 'Cloudflare Workers',
+          limit: 5,
+          byokAlias: 'default',
+        },
+        {
+          extraHeaders: {
+            'cf-consn-account-id': 'account-id',
+            'cf-consn-request-source': 'rest-api',
+          },
+        }
+      );
 
       assert.deepStrictEqual(await resp.json(), {
         requestUrl:
@@ -267,6 +275,10 @@ export const tests = {
           query: 'Cloudflare Workers',
           limit: 5,
           byokAlias: 'default',
+        },
+        extraHeaders: {
+          'cf-consn-account-id': 'account-id',
+          'cf-consn-request-source': 'rest-api',
         },
       });
     }
