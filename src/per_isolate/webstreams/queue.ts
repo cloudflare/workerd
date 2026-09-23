@@ -1329,8 +1329,8 @@ class ByteStreamCursor
         if (this.#errorStreamCallback !== undefined) {
           this.#errorStreamCallback(e, this.ownerDeref());
         }
-        // errorAllReads is called by the controller's error() path
-        // (via the stream error machinery), so we don't call it here.
+        // errorAllReads is called by the callback's error path (the
+        // controller's error() or readableStreamErrorBranch), not here.
         return true;
       }
     }

@@ -179,6 +179,7 @@ export {
   teeSoleBranchMintsFreshByobRequest,
   teeNativeBodyAfterReleaseMidRead,
   teeBranchFractionalCloseErrorsBranch,
+  teeSoleBranchFractionalCloseSkipsSourceCancel,
 } from 'tee';
 
 export {
