@@ -287,6 +287,50 @@ export const partialWrites = {
   },
 };
 
+export const stringNeedles = {
+  test() {
+    // A string needle must find the same positions as the same needle decoded
+    // up front, for needle lengths around 256 bytes and needles that decode to
+    // a different number of bytes than they have characters.
+    const units = ['a', '\u00e9', '\u20ac', '\ud83d\ude00', '\ud800', '\udc00'];
+    const encodings = ['utf8', 'utf16le', 'latin1', 'ascii'];
+    for (const encoding of encodings) {
+      for (const length of [1, 2, 3, 85, 86, 127, 128, 129, 255, 256, 257]) {
+        for (const unit of units) {
+          const needle = unit.repeat(Math.ceil(length / unit.length));
+          const decoded = Buffer.from(needle, encoding);
+          const hayStack = Buffer.concat([
+            Buffer.from('xyz'.repeat(50), encoding),
+            decoded,
+            Buffer.from('q', encoding),
+            decoded,
+          ]);
+          const label = `${encoding} ${length} ${unit.codePointAt(0)}`;
+          strictEqual(
+            hayStack.indexOf(needle, 0, encoding),
+            hayStack.indexOf(decoded),
+            label
+          );
+          strictEqual(
+            hayStack.lastIndexOf(needle, undefined, encoding),
+            hayStack.lastIndexOf(decoded),
+            label
+          );
+          strictEqual(hayStack.includes(needle, 1, encoding), true, label);
+        }
+      }
+    }
+
+    // A search after a longer one sees only its own needle.
+    const hayStack = Buffer.from('abcabd');
+    strictEqual(hayStack.indexOf('abd'.repeat(80)), -1);
+    strictEqual(hayStack.indexOf('ab'), 0);
+    strictEqual(hayStack.indexOf('abd'), 3);
+    strictEqual(hayStack.indexOf('abcx'), -1);
+    strictEqual(hayStack.indexOf(''), 0);
+  },
+};
+
 export const utf16IndexOf = {
   test() {
     const haystack = Buffer.from('abcabc', 'utf16le');

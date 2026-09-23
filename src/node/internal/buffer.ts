@@ -717,6 +717,54 @@ function indexOfBuffer(
   return result >>> 0;
 }
 
+// decodeStringImpl for a search needle. A needle whose decoded form fits in
+// kNeedleScratchSize bytes is written into one array shared by every search,
+// instead of a new array per search. The shared array is too large for V8 to
+// keep on the JS heap, so the search native can read it without V8 first
+// moving it off the heap. The result must not be kept past the search, and no
+// JavaScript may run while it is in use; both hold because it is only passed
+// to searchOneByte or searchTwoByte. Base64 and hex needles are not shared,
+// since decodeStringImpl already uses scratch space for them.
+const kNeedleScratchSize = 256;
+let needleScratch: Uint8Array | undefined;
+function decodeNeedle(needle: string, enc: Encoding): Uint8Array {
+  // The most bytes each encoding writes per UTF-16 code unit.
+  let maxLength: number;
+  switch (enc) {
+    case ASCII:
+    // Falls through
+    case LATIN1:
+      maxLength = needle.length;
+      break;
+    case UTF16LE:
+      maxLength = needle.length * 2;
+      break;
+    case UTF8:
+      maxLength = needle.length * 3;
+      break;
+    default:
+      return decodeStringImpl(needle, enc);
+  }
+  if (needle.length === 0 || maxLength > kNeedleScratchSize) {
+    return decodeStringImpl(needle, enc);
+  }
+  const scratch = (needleScratch ??= new Uint8Array(kNeedleScratchSize));
+  // The same writes as writeInto, into the start of `scratch`.
+  const flags = native.WRITE_REPLACE_INVALID_UTF8;
+  let length: number;
+  switch (enc) {
+    case UTF16LE:
+      length = native.writeUtf16(needle, scratch, 0, maxLength, flags) * 2;
+      break;
+    case UTF8:
+      length = native.writeUtf8(needle, scratch, 0, maxLength, flags);
+      break;
+    default:
+      length = native.writeOneByte(needle, scratch, 0, maxLength, flags);
+  }
+  return scratch.subarray(0, length);
+}
+
 function indexOfString(
   hayStack: Uint8Array,
   needle: string,
@@ -725,7 +773,7 @@ function indexOfString(
   isForward: boolean
 ): number | undefined {
   const enc = encoding;
-  const decodedNeedle = decodeStringImpl(needle, enc);
+  const decodedNeedle = decodeNeedle(needle, enc);
 
   // Round down to the nearest multiple of 2 in case of UCS2
   const hayStackLength =
