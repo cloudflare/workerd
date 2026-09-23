@@ -8,9 +8,10 @@
 // (BufferUtil) and follows it function by function, so the two can be
 // compared side by side.
 //
-// Wherever the C++ calls into V8, libc, simdutf, nbytes, kj, or i18n, this module
-// calls the same function through `node-internal:buffer_native` rather than
-// reimplementing it. Everything else is ported directly.
+// Wherever the C++ calls into V8, libc, simdutf, nbytes, kj, i18n, or the
+// string search in buffer-string-search.h, this module calls the same function
+// through `node-internal:buffer_native` rather than reimplementing it.
+// Everything else is ported directly.
 //
 // The C++ receives its arguments through JSG, which converts them to the
 // declared C++ types and throws a TypeError on failure. The `unwrap*` helpers
@@ -20,7 +21,6 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 
 import { default as native } from 'node-internal:buffer_native';
-import { searchString } from 'node-internal:buffer_string_search';
 import { default as utilImpl } from 'node-internal:util';
 
 // =======================================================================================
@@ -660,19 +660,6 @@ function indexOfOffset(
   }
 }
 
-// The first `length` uint16_ts of `bytes`, in an aligned array. The C++
-// copies them into a kj::SmallArray, which lives on the stack for up to 1024
-// elements. When `bytes` is already aligned this views the same memory
-// instead, since the search only reads it; otherwise it copies.
-function toAlignedUint16Array(bytes: Uint8Array, length: number): Uint16Array {
-  if (bytes.byteOffset % 2 === 0) {
-    return new Uint16Array(bytes.buffer, bytes.byteOffset, length);
-  }
-  const aligned = new Uint16Array(length);
-  new Uint8Array(aligned.buffer).set(bytes.subarray(0, length * 2));
-  return aligned;
-}
-
 function indexOfBuffer(
   hayStack: Uint8Array,
   needle: Uint8Array,
@@ -705,33 +692,23 @@ function indexOfBuffer(
     if (hayStackLength < 2 || needle.length < 2) {
       return undefined;
     }
-    // The haystack and needle need aligned arrays, since the data may have
-    // an odd byte offset.
+    // searchTwoByte handles the alignment of the haystack and needle, since
+    // the data may have an odd byte offset.
     const hayStackU16Len = hayStackLength / 2;
-    const alignedHayStack = toAlignedUint16Array(hayStack, hayStackU16Len);
-
     const needleLen = needle.length - (needle.length % 2);
     const needleU16Len = needleLen / 2;
-    const alignedNeedle = toAlignedUint16Array(needle, needleU16Len);
 
-    result = searchString(
-      alignedHayStack,
+    result = native.searchTwoByte(
+      hayStack,
       hayStackU16Len,
-      alignedNeedle,
+      needle,
       needleU16Len,
       Math.trunc(optOffset / 2),
       isForward
     );
     result *= 2;
   } else {
-    result = searchString(
-      hayStack,
-      hayStack.length,
-      needle,
-      needle.length,
-      optOffset,
-      isForward
-    );
+    result = native.searchOneByte(hayStack, needle, optOffset, isForward);
   }
 
   if (result === hayStackLength) return undefined;
@@ -778,31 +755,23 @@ function indexOfString(
     if (hayStackLength < 2 || decodedNeedle.length < 2) {
       return undefined;
     }
-    // The haystack needs an aligned array, since the data may have an odd
-    // byte offset.
+    // searchTwoByte handles the alignment of the haystack, since the data may
+    // have an odd byte offset.
     const hayStackU16Len = hayStackLength / 2;
-    const alignedHayStack = toAlignedUint16Array(hayStack, hayStackU16Len);
 
-    // decodedNeedle is a freshly allocated, and therefore aligned, array.
-    result = searchString(
-      alignedHayStack,
+    result = native.searchTwoByte(
+      hayStack,
       hayStackU16Len,
-      new Uint16Array(
-        decodedNeedle.buffer,
-        decodedNeedle.byteOffset,
-        decodedNeedle.length / 2
-      ),
+      decodedNeedle,
       decodedNeedle.length / 2,
       Math.trunc(optOffset / 2),
       isForward
     );
     result *= 2;
   } else {
-    result = searchString(
+    result = native.searchOneByte(
       hayStack,
-      hayStack.length,
       decodedNeedle,
-      decodedNeedle.length,
       optOffset,
       isForward
     );
