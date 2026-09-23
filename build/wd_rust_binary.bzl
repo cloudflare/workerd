@@ -86,7 +86,7 @@ def wd_rust_binary(
         experimental_use_cc_common_link = 1,
         proc_macro_deps = proc_macro_deps,
         # linkopts_tool links with full optimization, so it is given more CPUs.
-        tags = tags + ["cpu:8" if tool else "cpu:4"],
+        tags = tags + ["cpu:4" if tool else "cpu:2"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
@@ -128,6 +128,6 @@ def wd_rust_binary(
         experimental_use_cc_common_link = 1,
         link_deps = ["//build/deps:linkopts_default", "@@//deps:rust_runtime"],
         size = test_size,
-        # Tag with cpu:4 since this target depends on linkopts_default.
-        tags = ["no-coverage", "cpu:4"],
+        # Tag with cpu:2 since this target depends on linkopts_default.
+        tags = ["no-coverage", "cpu:2"],
     )
