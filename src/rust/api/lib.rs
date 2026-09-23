@@ -31,6 +31,7 @@ mod ffi {
     reason = "builds a `Lock` from the isolate pointer C++ hands to each module callback"
 )]
 pub fn register_nodejs_modules(mut registry: Pin<&mut ffi::ModuleRegistry>) {
+    jsg::snapshot::register::<DnsUtil>();
     jsg::modules::add_builtin(
         registry.as_mut(),
         "node-internal:dns",
@@ -42,6 +43,7 @@ pub fn register_nodejs_modules(mut registry: Pin<&mut ffi::ModuleRegistry>) {
         },
         jsg::modules::ModuleType::Internal,
     );
+    jsg::snapshot::register::<UrlUtil>();
     jsg::modules::add_builtin(
         registry,
         "node-internal:url",

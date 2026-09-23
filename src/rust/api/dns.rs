@@ -245,6 +245,13 @@ fn parse_presentation_naptr_record(record: &str) -> Result<NaptrRecord, DnsParse
 #[jsg_resource]
 pub struct DnsUtil;
 
+// Stateless: a startup snapshot's retained `node-internal:dns` exports get a fresh instance.
+impl jsg::SnapshotRestore for DnsUtil {
+    fn restore_from_snapshot() -> jsg::Rc<Self> {
+        Self::new()
+    }
+}
+
 #[jsg_resource]
 impl DnsUtil {
     pub fn new() -> jsg::Rc<Self> {

@@ -626,6 +626,37 @@ void IsolateBase::recordSnapshotBindings(
   }
 }
 
+kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetSnapshotExternalRecipe(
+    kj::ArrayPtr<const kj::byte> payload) {
+  if (payload.size() < sizeof(uint32_t)) return kj::none;
+  uint32_t index;
+  memcpy(&index, payload.begin(), sizeof(index));
+  if (index != IsolateBase::SNAPSHOT_EXTERNAL_PAYLOAD_INDEX) return kj::none;
+  return payload.slice(sizeof(index));
+}
+
+void IsolateBase::addExternalSnapshotTemplate(
+    kj::StringPtr name, v8::Local<v8::FunctionTemplate> tmpl) {
+  KJ_REQUIRE(isPreparingSnapshot());
+  auto& creator = KJ_ASSERT_NONNULL(snapshotCreator);
+  externalTemplateRecords.add(SnapshotArtifact::ExternalTemplateRecord{
+    .name = kj::str(name),
+    .dataIndex = creator->AddData(tmpl),
+  });
+}
+
+v8::Local<v8::FunctionTemplate> IsolateBase::takeExternalSnapshotTemplate(kj::StringPtr name) {
+  if (!isStartingFromSnapshot()) return {};
+  for (auto& record: finalizedSnapshotArtifact().externalTemplateRecords) {
+    if (record.name != name) continue;
+    v8::Local<v8::FunctionTemplate> tmpl;
+    KJ_REQUIRE(ptr->GetDataFromSnapshotOnce<v8::FunctionTemplate>(record.dataIndex).ToLocal(&tmpl),
+        "snapshot does not hold the template it was recorded to hold", name);
+    return tmpl;
+  }
+  return {};
+}
+
 kj::Maybe<kj::StringPtr> tryGetSnapshotBindingName(kj::ArrayPtr<const kj::byte> payload) {
   if (payload.size() < sizeof(uint32_t)) return kj::none;
   uint32_t index;
@@ -638,7 +669,8 @@ kj::Maybe<kj::StringPtr> tryGetSnapshotBindingName(kj::ArrayPtr<const kj::byte> 
 
 // Computes the re-creation payload of every live JSG wrapper whose type opts in, or that was
 // recorded as a binding, with the default context entered so that a type's snapshotRecipe() may
-// read JavaScript state. A type's own recipe wins over the binding payload: it re-creates the
+// read JavaScript state. A wrappable that is not a jsg::Object gets an external payload if it
+// has a jsgSnapshotRecipe(). A type's own recipe wins over the binding payload: it re-creates the
 // object without a lookup, and a binding of such a type is not a handle to I/O state.
 IsolateBase::SnapshotWrapperPayloads IsolateBase::collectSnapshotWrapperPayloads(
     v8::Local<v8::Context> defaultContext) {
@@ -648,7 +680,16 @@ IsolateBase::SnapshotWrapperPayloads IsolateBase::collectSnapshotWrapperPayloads
   auto& js = Lock::from(ptr);
   for (auto& wrappable: heapTracer.liveWrappables()) {
     Object* object = wrappable.jsgTryGetObject();
-    if (object == nullptr) continue;
+    if (object == nullptr) {
+      KJ_IF_SOME(recipe, wrappable.jsgSnapshotRecipe()) {
+        auto payload = kj::heapArray<kj::byte>(sizeof(uint32_t) + recipe.size());
+        uint32_t index = SNAPSHOT_EXTERNAL_PAYLOAD_INDEX;
+        memcpy(payload.begin(), &index, sizeof(index));
+        memcpy(payload.begin() + sizeof(index), recipe.begin(), recipe.size());
+        payloads.insert(&wrappable, kj::mv(payload));
+      }
+      continue;
+    }
     KJ_IF_SOME(payload, trySnapshotWrapperPayload(js, *object)) {
       payloads.insert(&wrappable, kj::mv(payload));
       continue;
@@ -737,6 +778,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
     artifact.opaqueTemplateDataIndex = opaqueTemplate.IsEmpty()
         ? SnapshotArtifact::kNoTemplateData
         : creator->AddData(opaqueTemplate.Get(ptr));
+    artifact.externalTemplateRecords = externalTemplateRecords.releaseAsArray();
   }
 
   // Reset the module registry's per-isolate handles; the jsg::Data visitors also drop the

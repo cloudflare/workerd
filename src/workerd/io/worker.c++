@@ -746,6 +746,9 @@ struct Worker::Isolate::Impl {
           lock->v8Isolate, featureFlagsWords.asBytes().as<kj_rs::Rust>());
       lock->v8Isolate->SetData(
           ::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*KJ_REQUIRE_NONNULL(realm));
+      // Rust resources retained by a startup-snapshot zygote are re-created by the Rust side.
+      jsg::IsolateBase::from(lock->v8Isolate)
+          .setExternalSnapshotRestorer(::workerd::rust::jsg::restoreSnapshotWrapper);
 
       limitEnforcer.customizeIsolate(lock->v8Isolate);
 
@@ -2582,22 +2585,11 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       // as stack roots, and createSnapshotBlob() collects garbage to tell wrappers only the
       // zygote's setup reached from wrappers the worker retained.
       lock.withinHandleScope([&] {
-        // Rust JSG resource templates (e.g. node-internal:dns) are cached as v8::Globals
-        // inside the Rust Realm, invisible to the C++ template slots and reset passes — each
-        // one would trip CreateBlob's CheckGlobalAndEternalHandles. Drain them here (ownership
-        // of each persistent handle transfers to this vector) and hand them to
-        // createSnapshotBlob() to reset like any other isolate handle. Templates are recreated
-        // lazily on demand and a START_FROM_SNAPSHOT isolate starts with an empty cache.
-        kj::Vector<v8::Global<v8::FunctionTemplate>> rustTemplateHandles;
-        {
-          auto* realm = ::workerd::rust::jsg::realm_from_isolate(lock.v8Isolate);
-          for (size_t word: ::workerd::rust::jsg::realm_take_resource_templates(*realm)) {
-            v8::Global<v8::FunctionTemplate> handle;
-            static_assert(sizeof(handle) == sizeof(word), "v8::Global must be one pointer word");
-            memcpy(static_cast<void*>(&handle), &word, sizeof(word));
-            rustTemplateHandles.add(kj::mv(handle));
-          }
-        }
+        // The Rust realm caches its resource templates in v8::Globals, which CreateBlob refuses;
+        // they go into the blob instead, and a restored realm adopts them on first use.
+        // const_cast OK because guarded by `lock`.
+        ::workerd::rust::jsg::realm_prepare_snapshot(
+            const_cast<::workerd::rust::jsg::Realm&>(*script->isolate->impl->realm));
         // A service worker's Script holds the compiled script and its globals as v8::Globals,
         // which CreateBlob refuses. The zygote's Script is never used again: the restored
         // isolate's own Script starts out as ScriptFromSnapshot (the global object already
@@ -2618,7 +2610,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         (*jsContext)->clear();
         const_cast<Script&>(*script).impl->moduleContext = kj::none;
         impl->context = kj::none;
-        isolateBase.createSnapshotBlob(kj::mv(contextGlobal), kj::mv(rustTemplateHandles));
+        isolateBase.createSnapshotBlob(kj::mv(contextGlobal), {});
       });
     }
   });
