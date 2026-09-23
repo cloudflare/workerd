@@ -4,8 +4,9 @@
 
 // Type definitions for the `node-internal:buffer_native` module
 // (src/workerd/api/node/buffer-native.h), which makes the V8, libc, simdutf,
-// nbytes, kj, and i18n calls of src/workerd/api/node/buffer.c++. Functions
-// that take `start` and `end` operate on that range of the array.
+// nbytes, kj, i18n, and string search calls of
+// src/workerd/api/node/buffer.c++. Functions that take `start` and `end`
+// operate on that range of the array.
 
 // jsg::JsString::WriteFlags
 export const WRITE_NONE: number;
@@ -50,19 +51,23 @@ export function newFromTwoByte(
   end: number
 ): string;
 
+// String search (buffer-string-search.h)
+export function searchOneByte(
+  haystack: Uint8Array,
+  needle: Uint8Array,
+  startIndex: number,
+  isForward: boolean
+): number;
+export function searchTwoByte(
+  haystack: Uint8Array,
+  haystackLength: number,
+  needle: Uint8Array,
+  needleLength: number,
+  startIndex: number,
+  isForward: boolean
+): number;
+
 // libc
-export function memchr(
-  bytes: Uint8Array,
-  start: number,
-  end: number,
-  value: number
-): number;
-export function memrchr(
-  bytes: Uint8Array,
-  start: number,
-  end: number,
-  value: number
-): number;
 export function memcmp(
   one: Uint8Array,
   oneStart: number,

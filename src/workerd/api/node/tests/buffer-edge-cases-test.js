@@ -422,6 +422,23 @@ export const utf16SearchByteCollisions = {
     strictEqual(long.indexOf('a', 0, 'utf16le'), 1000);
     strictEqual(long.indexOf('ab', 0, 'utf16le'), 1000);
     strictEqual(long.lastIndexOf('\u6100', 1000, 'utf16le'), 998);
+    // Needles and haystacks with odd byte offsets, including haystacks longer
+    // than 1024 code units.
+    const unaligned = (bytes) =>
+      Buffer.concat([Buffer.from([0xff]), bytes]).subarray(1);
+    const bc = unaligned(Buffer.from('bc', 'utf16le'));
+    strictEqual(bc.byteOffset % 2, 1);
+    strictEqual(Buffer.from('abcabc', 'utf16le').indexOf(bc, 0, 'utf16le'), 2);
+    strictEqual(
+      Buffer.from('abcabc', 'utf16le').lastIndexOf(bc, undefined, 'utf16le'),
+      8
+    );
+    const longUnaligned = unaligned(
+      Buffer.from('\u6100'.repeat(1500) + 'bc', 'utf16le')
+    );
+    strictEqual(longUnaligned.indexOf(bc, 0, 'utf16le'), 3000);
+    strictEqual(longUnaligned.indexOf('bc', 0, 'utf16le'), 3000);
+    strictEqual(longUnaligned.lastIndexOf('\u6100', 2000, 'utf16le'), 2000);
     const oneByte = Buffer.from('x'.repeat(1000) + 'ab' + 'x'.repeat(1000));
     strictEqual(oneByte.indexOf('ab'), 1000);
     strictEqual(oneByte.lastIndexOf('ab'), 1000);
