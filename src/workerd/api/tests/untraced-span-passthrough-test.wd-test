@@ -1,0 +1,57 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# A traced caller reaches traced targets through untraced Worker and Durable Object relays.
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "untraced-span-passthrough-test", worker = .callerWorker),
+    (name = "untraced", worker = .untracedWorker),
+    (name = "target", worker = .targetWorker),
+    (name = "tail", worker = .tailWorker),
+  ],
+);
+
+# Traced. Calls the untraced worker and Durable Object, twice each.
+const callerWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "untraced-span-passthrough-test.js")
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental"],
+  bindings = [
+    (name = "RELAY", service = "untraced"),
+    (name = "HOLDER", durableObjectNamespace = (serviceName = "untraced", className = "Holder")),
+  ],
+  streamingTails = ["tail"],
+);
+
+# Untraced: no tails. Forwards every request to the traced target.
+const untracedWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "untraced-span-passthrough-relay.js")
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental"],
+  bindings = [
+    (name = "TARGET", service = "target"),
+    (name = "TARGET_OBJECT", durableObjectNamespace = (serviceName = "target", className = "TargetObject")),
+  ],
+  durableObjectNamespaces = [(className = "Holder", uniqueKey = "holder")],
+  durableObjectStorage = (inMemory = void),
+);
+
+# Traced. Its onsets show what the untraced hop passed on.
+const targetWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "untraced-span-passthrough-target.js")
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental"],
+  durableObjectNamespaces = [(className = "TargetObject", uniqueKey = "target-object")],
+  durableObjectStorage = (inMemory = void),
+  streamingTails = ["tail"],
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "untraced-span-passthrough-test-tail.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+);

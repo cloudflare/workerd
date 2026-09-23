@@ -190,8 +190,8 @@ class IoContext_IncomingRequest final {
     return workerTracer;
   }
 
-  // Returns a new reference to the root user trace span for this incoming request, or
-  // SpanParent(nullptr) if the request has no user-tracing root span.
+  // Returns the request's root span, or its triggering span for non-recording propagation.
+  // Returns a null parent when neither is available.
   SpanParent getRootUserTraceSpan() {
     return rootUserTraceSpan.addRef();
   }
@@ -215,11 +215,11 @@ class IoContext_IncomingRequest final {
   kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory;
 
   // Root user trace span for this request. Populated during delivered() via
-  // BaseTracer::makeUserRequestSpan(); otherwise a null SpanParent. The tracer it references
-  // is owned by workerTracer above; because user-tracing SpanSubmitters hold only a
-  // BaseTracer::WeakRef, stale SpanParent references (e.g. in AsyncContextFrame storage via
-  // IoOwn, kept alive past ~IncomingRequest by the IoContext's delete queue) cannot extend
-  // tracer lifetime.
+  // BaseTracer::makeUserRequestSpan(), or from the trigger span's identity when nothing records;
+  // otherwise a null SpanParent. The tracer it references is owned by workerTracer above; because
+  // user-tracing SpanSubmitters hold only a BaseTracer::WeakRef, stale SpanParent references (e.g.
+  // in AsyncContextFrame storage via IoOwn, kept alive past ~IncomingRequest by the IoContext's
+  // delete queue) cannot extend tracer lifetime.
   SpanParent rootUserTraceSpan = SpanParent(nullptr);
 
   // The invocation span context identifies the trace id, invocation id, and root

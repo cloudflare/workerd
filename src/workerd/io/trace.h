@@ -1141,10 +1141,8 @@ class SpanParent {
   [[nodiscard]] SpanBuilder newChild(
       kj::ConstString operationName, kj::Maybe<kj::Date> startTime = kj::none);
 
-  // Useful to skip unnecessary code when not observed.
-  bool isObserved() {
-    return observer != nullptr;
-  }
+  // Non-recording parents can carry a span context without being observed.
+  bool isObserved();
 
   // Get the underlying SpanObserver representing the parent span.
   //
@@ -1330,6 +1328,11 @@ class SpanObserver: public kj::Refcounted {
   virtual tracing::SpanId getSpanId() {
     return tracing::SpanId::nullId;
   }
+
+  // Whether child spans are recorded.
+  virtual bool isRecording() {
+    return true;
+  }
 };
 
 // A non-recording SpanObserver that carries a pre-serialized SpanContext for propagation.
@@ -1347,10 +1350,17 @@ class NonRecordingSpanObserver final: public SpanObserver {
   kj::Maybe<tracing::SpanContext> toSpanContext() override {
     return tracing::SpanContext::clone(context);
   }
+  bool isRecording() override {
+    return false;
+  }
 
  private:
   tracing::SpanContext context;
 };
+
+inline bool SpanParent::isObserved() {
+  return observer != nullptr && observer->isRecording();
+}
 
 inline kj::Maybe<tracing::SpanContext> SpanParent::toSpanContext() {
   if (observer != nullptr) return observer->toSpanContext();
@@ -1416,10 +1426,12 @@ class TraceContextParent {
 // TraceContext to keep track of user tracing/existing tracing better
 class TraceContext {
  public:
-  TraceContext(): span(nullptr), userSpan(nullptr) {}
-  TraceContext(SpanBuilder span, SpanBuilder userSpan)
+  TraceContext(): span(nullptr), userSpan(nullptr), enclosingUserSpan(nullptr) {}
+  // Propagate enclosingUserSpan when this operation's user span is not recorded.
+  TraceContext(SpanBuilder span, SpanBuilder userSpan, SpanParent enclosingUserSpan = nullptr)
       : span(kj::mv(span)),
-        userSpan(kj::mv(userSpan)) {}
+        userSpan(kj::mv(userSpan)),
+        enclosingUserSpan(kj::mv(enclosingUserSpan)) {}
   TraceContext(TraceContext&& other) = default;
   TraceContext& operator=(TraceContext&& other) = default;
   KJ_DISALLOW_COPY(TraceContext);
@@ -1433,12 +1445,14 @@ class TraceContext {
     return SpanParent(span);
   }
 
+  // Returns the recorded user span, or its enclosing context when unrecorded.
   SpanParent getUserSpanParent() {
-    return SpanParent(userSpan);
+    if (userSpan.isObserved()) return SpanParent(userSpan);
+    return enclosingUserSpan.addRef();
   }
 
   TraceContextParent getSpanParents() {
-    return TraceContextParent(SpanParent(span), SpanParent(userSpan));
+    return TraceContextParent(SpanParent(span), getUserSpanParent());
   }
 
   // Like getSpanParents(), but returns kj::none when neither span is observed. Use this when the
@@ -1453,6 +1467,7 @@ class TraceContext {
  private:
   SpanBuilder span;
   SpanBuilder userSpan;
+  SpanParent enclosingUserSpan;
 };
 
 inline TraceContext TraceContextParent::newChild(kj::ConstString operationName) {
@@ -1460,7 +1475,7 @@ inline TraceContext TraceContextParent::newChild(kj::ConstString operationName) 
   // the original into the user child.
   auto internalChild = internalSpan.newChild(operationName.clone());
   auto userChild = userSpan.newChild(kj::mv(operationName));
-  return TraceContext(kj::mv(internalChild), kj::mv(userChild));
+  return TraceContext(kj::mv(internalChild), kj::mv(userChild), userSpan.addRef());
 }
 
 // RAII object that measures the time duration over its lifetime. It tags this duration onto a

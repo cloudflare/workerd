@@ -280,6 +280,13 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
     rootUserTraceSpan =
         workerTracer->makeUserRequestSpan(invCtx.getTraceId(), invCtx.getTraceFlags());
   }
+  if (!rootUserTraceSpan.isObserved()) {
+    // Untraced requests pass their triggering span on to subrequests.
+    KJ_IF_SOME(trigger, maybeTriggerInvocationSpan) {
+      rootUserTraceSpan = SpanParent::fromSpanContext(
+          tracing::SpanContext(trigger.getTraceId(), trigger.getSpanId(), trigger.getTraceFlags()));
+    }
+  }
 
   KJ_IF_SOME(a, context->actor) {
     // Re-synchronize the timer and top up limits for every new incoming request to an actor.
@@ -1342,8 +1349,9 @@ SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
 
 TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
   auto span = makeTraceSpan(operationName.clone());
-  auto userSpan = getCurrentUserTraceSpan().newChild(kj::mv(operationName));
-  return TraceContext(kj::mv(span), kj::mv(userSpan));
+  auto currentUserSpan = getCurrentUserTraceSpan();
+  auto userSpan = currentUserSpan.newChild(kj::mv(operationName));
+  return TraceContext(kj::mv(span), kj::mv(userSpan), kj::mv(currentUserSpan));
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {

@@ -229,6 +229,18 @@ wd_test(
     tags = ["no-coverage"],
 )
 
+wd_test(
+    src = "untraced-span-passthrough-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "untraced-span-passthrough-relay.js",
+        "untraced-span-passthrough-target.js",
+        "untraced-span-passthrough-test.js",
+        "untraced-span-passthrough-test-tail.js",
+    ],
+    tags = ["no-coverage"],
+)
+
 # Regression test: jsrpc onset.info emitted into a streaming tail worker must remain
 # serializable when forwarded over service-binding RPC, just like fetch onset.info.
 wd_test(
