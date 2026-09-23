@@ -5,6 +5,7 @@
 #include "zlib-util.h"
 
 #include <workerd/api/node/async-hooks.h>
+#include <workerd/api/node/buffer-native.h>
 #include <workerd/api/node/buffer.h>
 #include <workerd/api/node/module.h>
 #include <workerd/api/node/process.h>
@@ -26,7 +27,6 @@ namespace workerd::api::node {
 
 #define NODEJS_MODULES(V)                                                                          \
   V(AsyncHooksModule, "node-internal:async_hooks")                                                 \
-  V(BufferUtil, "node-internal:buffer")                                                            \
   V(CryptoImpl, "node-internal:crypto")                                                            \
   V(ModuleUtil, "node-internal:module")                                                            \
   V(ProcessModule, "node-internal:process")                                                        \
@@ -70,6 +70,18 @@ constexpr bool isNodeConsoleModule(kj::StringPtr name) {
   return name == "node:console"_kj;
 }
 
+// `node-internal:buffer` has both a C++ (`BufferUtil`) and a TypeScript
+// implementation, the latter in the NODE_BUNDLE and backed by the C++
+// `node-internal:buffer_native` module (`BufferNative`). The NODEJS_BUFFER_TS
+// autogate selects the TypeScript one; exactly one of the two registers the
+// `node-internal:buffer` specifier.
+constexpr kj::StringPtr kNodeBufferSpecifier = "node-internal:buffer"_kj;
+constexpr kj::StringPtr kNodeBufferNativeSpecifier = "node-internal:buffer_native"_kj;
+
+inline bool useTsBuffer() {
+  return util::Autogate::isEnabled(util::AutogateKey::NODEJS_BUFFER_TS);
+}
+
 // The RTTI registry (api/rtti.c++) only has the one-argument addBuiltinModule(), and no source
 // storage to map, so it takes the plain form.
 template <class Registry>
@@ -96,9 +108,22 @@ void registerNodeJsCompatModules(
 
 #undef V
 
+  bool tsBuffer = useTsBuffer();
+  if (tsBuffer) {
+    registry.template addBuiltinModule<BufferNative>(
+        kNodeBufferNativeSpecifier, workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  } else {
+    registry.template addBuiltinModule<BufferUtil>(
+        kNodeBufferSpecifier, workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  }
+
   bool nodeJsCompatEnabled = isNodeJsCompatEnabled(featureFlags);
 
   registry.addBuiltinBundleFiltered(NODE_BUNDLE, [&](jsg::Module::Reader module) {
+    if (module.getName() == kNodeBufferSpecifier) {
+      return tsBuffer;
+    }
+
     if (!nodeJsCompatEnabled) {
       // If the `nodejs_compat` flag isn't enabled, only register internal modules.
       // We need these for `console.log()`ing when running `workerd` locally.
@@ -236,7 +261,22 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
   }
 #undef V
 
-  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE, moduleSource);
+  // See registerNodeJsCompatModules(): the NODEJS_BUFFER_TS autogate selects
+  // between the C++ and TypeScript implementations of `node-internal:buffer`.
+  bool tsBuffer = useTsBuffer();
+  if (tsBuffer) {
+    static const auto kBufferNativeSpecifier = "node-internal:buffer_native"_url;
+    builder.addObject<BufferNative, TypeWrapper>(kBufferNativeSpecifier);
+  } else {
+    static const auto kBufferUtilSpecifier = "node-internal:buffer"_url;
+    builder.addObject<BufferUtil, TypeWrapper>(kBufferUtilSpecifier);
+  }
+  auto filter = [tsBuffer](jsg::Module::Reader module) {
+    return tsBuffer || module.getName() != kNodeBufferSpecifier;
+  };
+
+  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(
+      builder, NODE_BUNDLE, kj::mv(filter), moduleSource);
 
   // Register Rust-implemented Node.js modules that declare Internal
   // visibility. The adapter registers only the modules whose declared type
@@ -369,7 +409,7 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
 }  // namespace workerd::api::node
 
 #define EW_NODE_ISOLATE_TYPES                                                                      \
-  EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,                                      \
+  EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_BUFFER_NATIVE_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES, \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
       EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_PROCESS_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES,       \
       EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES
