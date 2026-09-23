@@ -7,6 +7,8 @@
 #include <workerd/util/header-validation.h>
 #include <workerd/util/strings.h>
 
+#include <algorithm>
+
 namespace workerd::api {
 
 namespace {

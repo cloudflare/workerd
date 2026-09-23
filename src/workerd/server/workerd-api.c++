@@ -61,6 +61,7 @@
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/fallback-service.h>
 #include <workerd/server/workerd-debug-port-client.h>
+#include <workerd/util/arc-view.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/strong-bool.h>
 #include <workerd/util/thread-scopes.h>
@@ -217,7 +218,7 @@ class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Serv
 }  // namespace
 
 struct WorkerdApi::Impl final {
-  kj::Own<CompatibilityFlags::Reader> features;
+  kj::Arc<CompatibilityFlags::Reader> features;
   capnp::List<config::Extension>::Reader extensions;
   kj::Own<JsgIsolateObserver> observer;
   JsgWorkerdIsolate jsgIsolate;
@@ -244,19 +245,19 @@ struct WorkerdApi::Impl final {
     }
 
    private:
-    CompatibilityFlags::Reader& features;
+    CompatibilityFlags::Reader features;
     jsg::JsgConfig jsgConfig;
   };
 
   Impl(jsg::V8System& v8System,
-      CompatibilityFlags::Reader featuresParam,
+      kj::Arc<CompatibilityFlags::Reader> featuresParam,
       capnp::List<config::Extension>::Reader extensionsParam,
       v8::Isolate::CreateParams createParams,
       v8::IsolateGroup group,
       kj::Own<JsgIsolateObserver> observerParam,
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig = defaultConfig)
-      : features(capnp::clone(featuresParam)),
+      : features(kj::mv(featuresParam)),
         extensions(extensionsParam),
         observer(kj::atomicAddRef(*observerParam)),
         jsgIsolate(v8System,
@@ -268,14 +269,14 @@ struct WorkerdApi::Impl final {
         memoryCacheProvider(memoryCacheProvider),
         pythonConfig(pythonConfig) {
     jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
-      if (isNewModuleRegistryEnabled(featuresParam)) {
+      if (isNewModuleRegistryEnabled(*features)) {
         jsgIsolate.setUsingNewModuleRegistry();
       }
 
       // Allows us to begin experimenting with eval/new fuction enabled in
       // preparation for *possibly* enabling it by default in the future
       // once v8 sandbox is fully enabled and rolled out.
-      if (featuresParam.getExperimentalAllowEvalAlways()) {
+      if (features->getExperimentalAllowEvalAlways()) {
         jsgIsolate.setAllowsAllowEval();
       }
     });
@@ -283,7 +284,7 @@ struct WorkerdApi::Impl final {
 };
 
 WorkerdApi::WorkerdApi(jsg::V8System& v8System,
-    CompatibilityFlags::Reader features,
+    kj::Arc<CompatibilityFlags::Reader> features,
     capnp::List<config::Extension>::Reader extensions,
     v8::Isolate::CreateParams createParams,
     v8::IsolateGroup group,
@@ -292,7 +293,7 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     const PythonConfig& pythonConfig,
     kj::Array<Worker::Api::InboundListener> inboundListeners)
     : impl(kj::heap<Impl>(v8System,
-          features,
+          kj::mv(features),
           extensions,
           kj::mv(createParams),
           group,
@@ -365,49 +366,51 @@ const jsg::IsolateObserver& WorkerdApi::getObserver() const {
 void WorkerdApi::setIsolateObserver(IsolateObserver&) {};
 
 Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
-    config::Worker::Reader conf,
+    kj::Arc<config::Worker::Reader> conf,
     CompatibilityFlags::Reader featureFlags,
     Worker::ValidationErrorReporter& errorReporter) {
   TRACE_EVENT("workerd", "WorkerdApi::extractSource()");
-  switch (conf.which()) {
+  using Reader = config::Worker::Reader;
+  switch (conf->which()) {
     case config::Worker::MODULES: {
-      auto modules = conf.getModules();
+      auto modules = conf->getModules();
       if (modules.size() == 0) {
         errorReporter.addError(kj::str("Modules list cannot be empty."));
         goto invalid;
       }
 
       bool isPython = false;
-      auto moduleArray = KJ_MAP(module, modules) -> Worker::Script::Module {
-        if (module.isPythonModule()) {
+      auto moduleArray = KJ_MAP(i, kj::zeroTo(modules.size())) -> Worker::Script::Module {
+        auto module = conf.addRef().project([i](Reader w) { return w.getModules()[i]; });
+        if (module->isPythonModule()) {
           isPython = true;
         }
-        return readModuleConf(module, featureFlags, errorReporter);
+        return readModuleConf(kj::mv(module), featureFlags, errorReporter);
       };
 
-      Worker::Script::ModulesSource result{
-        .mainModule = modules[0].getName(), .modules = kj::mv(moduleArray), .isPython = isPython};
-
-      return result;
+      return Worker::Script::ModulesSource{
+        .mainModule = conf.addRef().project([](Reader w) { return w.getModules()[0].getName(); }),
+        .modules = kj::arc<kj::Array<Worker::Script::Module>>(kj::mv(moduleArray)),
+        .isPython = isPython,
+      };
     }
     case config::Worker::SERVICE_WORKER_SCRIPT: {
-      uint wasmCount = 0;
-      for (auto binding: conf.getBindings()) {
-        if (binding.isWasmModule()) ++wasmCount;
-      }
-
-      auto globals = kj::heapArrayBuilder<Worker::Script::Module>(wasmCount);
-      for (auto binding: conf.getBindings()) {
-        if (binding.isWasmModule()) {
-          globals.add(Worker::Script::Module{.name = binding.getName(),
-            .content = Worker::Script::WasmModule{.body = binding.getWasmModule()}});
-        }
+      auto bindings = conf->getBindings();
+      kj::Vector<Worker::Script::Module> globals;
+      for (auto i: kj::zeroTo(bindings.size())) {
+        if (!bindings[i].isWasmModule()) continue;
+        globals.add(Worker::Script::Module{
+          .name = conf.addRef().project([i](Reader w) { return w.getBindings()[i].getName(); }),
+          .content = Worker::Script::WasmModule{.body = conf.addRef().project([i](Reader w) {
+          return w.getBindings()[i].getWasmModule();
+        })},
+        });
       }
 
       return Worker::Script::ScriptSource{
-        .mainScript = conf.getServiceWorkerScript(),
-        .mainScriptName = name,
-        .globals = globals.finish(),
+        .mainScript = conf.addRef().project([](Reader w) { return w.getServiceWorkerScript(); }),
+        .mainScriptName = arcView(kj::str(name)),
+        .globals = kj::arc<kj::Array<Worker::Script::Module>>(globals.releaseAsArray()),
       };
     }
     case config::Worker::INHERIT:
@@ -418,7 +421,10 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
   errorReporter.addError(kj::str("Encountered unknown Worker code type. Was the "
                                  "config compiled with a newer version of the schema?"));
 invalid:
-  return Worker::Script::ScriptSource{""_kj, name, nullptr};
+  return Worker::Script::ScriptSource{
+    .mainScript = arcView(kj::String()),
+    .mainScriptName = arcView(kj::str(name)),
+  };
 }
 
 kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileServiceWorkerGlobals(jsg::Lock& js,
@@ -443,26 +449,34 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
 
 // Part of the original module registry implementation.
 kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Lock& js,
-    config::Worker::Module::Reader conf,
+    kj::Arc<config::Worker::Module::Reader> conf,
     const jsg::CompilationObserver& observer,
     CompatibilityFlags::Reader featureFlags) {
-  auto module = readModuleConf(conf, featureFlags);
-  return tryCompileLegacyModule(js, module.name, module.content, observer, featureFlags);
+  auto module = readModuleConf(kj::mv(conf), featureFlags);
+  return tryCompileLegacyModule(js, *module.name, module.content, observer, featureFlags);
 }
 
-Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader conf,
+Worker::Script::Module WorkerdApi::readModuleConf(kj::Arc<config::Worker::Module::Reader> conf,
     CompatibilityFlags::Reader featureFlags,
     kj::Maybe<Worker::ValidationErrorReporter&> errorReporter) {
-  return {.name = conf.getName(), .content = [&]() -> Worker::Script::ModuleContent {
-    switch (conf.which()) {
+  // Bodies are views into the config message; each projection shares `conf`'s ownership claim.
+  using Reader = config::Worker::Module::Reader;
+  auto field = [&](auto getter) {
+    return conf.addRef().project([getter](Reader m) { return getter(m); });
+  };
+  auto emptyText = []() { return Worker::Script::TextModule{arcView(kj::String())}; };
+
+  return {.name = field([](Reader m) { return m.getName(); }),
+    .content = [&]() -> Worker::Script::ModuleContent {
+    switch (conf->which()) {
       case config::Worker::Module::TEXT:
-        return Worker::Script::TextModule{conf.getText()};
+        return Worker::Script::TextModule{field([](Reader m) { return m.getText(); })};
       case config::Worker::Module::DATA:
-        return Worker::Script::DataModule{conf.getData()};
+        return Worker::Script::DataModule{field([](Reader m) { return m.getData(); })};
       case config::Worker::Module::WASM:
-        return Worker::Script::WasmModule{conf.getWasm()};
+        return Worker::Script::WasmModule{field([](Reader m) { return m.getWasm(); })};
       case config::Worker::Module::JSON:
-        return Worker::Script::JsonModule{conf.getJson()};
+        return Worker::Script::JsonModule{field([](Reader m) { return m.getJson(); })};
       case config::Worker::Module::ES_MODULE:
         // TODO(soon): Update this to also support full TS transform
         // with a separate compat flag.
@@ -470,35 +484,41 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
         if (featureFlags.getTypescriptStripTypes()) {
           auto output = rust::transpiler::ts_strip(
               // value comes from capnp so it is a valid utf-8
-              conf.getName().as<RustUncheckedUtf8>(), conf.getEsModule().asBytes().as<Rust>());
+              conf->getName().as<RustUncheckedUtf8>(), conf->getEsModule().asBytes().as<Rust>());
 
           if (output.success) {
-            return Worker::Script::EsModule{
-              .body = ::kj::from<Rust>(output.code), .ownBody = kj::mv(output.code)};
+            // The transpiled text stays in the rust::String; the body is a view of it.
+            return Worker::Script::EsModule{.body = kj::arc<::rust::String>(kj::mv(output.code))
+                                                        .project([](const ::rust::String& code) {
+              return ::kj::from<Rust>(code);
+            })};
           }
 
-          auto description = kj::str("Error transpiling ", conf.getName(), " : ", output.error);
+          auto description = kj::str("Error transpiling ", conf->getName(), " : ", output.error);
           for (auto& diag: output.diagnostics) {
             description = kj::str(description, "\n    ", diag.message);
           }
           KJ_IF_SOME(reporter, errorReporter) {
             reporter.addError(kj::mv(description));
-            return Worker::Script::TextModule{""};
+            return emptyText();
           } else {
             KJ_FAIL_REQUIRE(description);
           }
         }
 #endif  // defined(WORKERD_USE_TRANSPILER)
-        return Worker::Script::EsModule{static_cast<kj::StringPtr>(conf.getEsModule())};
+        return Worker::Script::EsModule{
+          field([](Reader m) -> kj::ArrayPtr<const char> { return m.getEsModule(); })};
       case config::Worker::Module::COMMON_JS_MODULE: {
-        Worker::Script::CommonJsModule result{.body = conf.getCommonJsModule()};
-        if (conf.hasNamedExports()) {
-          result.namedExports = KJ_MAP(name, conf.getNamedExports()) -> kj::StringPtr { return name; };
+        Worker::Script::CommonJsModule result{
+          .body = field([](Reader m) { return m.getCommonJsModule(); })};
+        if (conf->hasNamedExports()) {
+          result.namedExports = kj::arc<kj::Array<kj::String>>(
+        KJ_MAP(name, conf->getNamedExports()) { return kj::str(name); });
         }
         return result;
       }
       case config::Worker::Module::PYTHON_MODULE:
-        return Worker::Script::PythonModule{conf.getPythonModule()};
+        return Worker::Script::PythonModule{field([](Reader m) { return m.getPythonModule(); })};
       case config::Worker::Module::OBSOLETE_PYTHON_REQUIREMENT:
         KJ_FAIL_REQUIRE(
             "NOSENTRY Worker bundle specified Python requirement which is no longer supported");
@@ -511,9 +531,9 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
     KJ_IF_SOME(e, errorReporter) {
       e.addError(kj::str("Encountered unknown Worker.Module type. Was the "
                          "config compiled with a newer version of the schema?"));
-      return Worker::Script::TextModule{""};
+      return emptyText();
     } else {
-      KJ_FAIL_REQUIRE("unknown module type", (uint)conf.which());
+      KJ_FAIL_REQUIRE("unknown module type", (uint)conf->which());
     }
   }()};
 }
@@ -531,10 +551,10 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
     using namespace workerd::api::pyodide;
     auto featureFlags = getFeatureFlags();
 
-    for (auto& module: source.modules) {
-      auto path = kj::Path::parse(module.name);
+    for (auto& module: *source.modules) {
+      auto path = kj::Path::parse(*module.name);
       auto maybeInfo = tryCompileLegacyModule(
-          lockParam, module.name, module.content, modules->getObserver(), featureFlags);
+          lockParam, *module.name, module.content, modules->getObserver(), featureFlags);
       KJ_IF_SOME(info, maybeInfo) {
         modules->add(path, kj::mv(info));
       }
@@ -877,13 +897,14 @@ const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
 
 kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
     kj::Maybe<const Worker::Script::ModulesSource&> maybeSource,
-    const CompatibilityFlags::Reader& featureFlags,
+    kj::Arc<CompatibilityFlags::Reader> ownedFeatureFlags,
     const PythonConfig& pythonConfig,
     const jsg::Url& bundleBase,
     capnp::List<config::Extension>::Reader extensions,
     kj::Maybe<kj::String> maybeFallbackService,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) {
 
+  auto featureFlags = *ownedFeatureFlags;
   return newWorkerModuleRegistry<JsgWorkerdIsolate_TypeWrapper>(maybeSource, featureFlags,
       bundleBase,
       [&](jsg::modules::ModuleRegistry::Builder& builder, IsPythonWorker isPythonWorker) {
@@ -1017,8 +1038,6 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
     KJ_IF_SOME(fallbackService, maybeFallbackService) {
       auto fallbackClient =
           kj::heap<workerd::fallback::FallbackServiceClient>(kj::str(fallbackService));
-      auto ownedFeatureFlags = capnp::clone(featureFlags);
-
       // Map from the module resolution source to the fallback service import type.
       constexpr auto sourceToImportType = [](jsg::modules::ResolveContext::Source source) {
         switch (source) {
@@ -1034,7 +1053,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
       };
 
       builder.add(jsg::modules::ModuleBundle::newFallbackBundle(
-          [client = kj::mv(fallbackClient), featureFlags = kj::mv(ownedFeatureFlags),
+          [client = kj::mv(fallbackClient), featureFlags = ownedFeatureFlags.addRef(),
               sourceToImportType](const jsg::modules::ResolveContext& context) mutable
           -> kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>> {
         auto normalizedSpecifier = kj::str(context.normalizedSpecifier.getHref());
@@ -1056,81 +1075,63 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
               // The resolution must start over with the new specifier.
               return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(kj::mv(str));
             }
-            KJ_CASE_ONEOF(def, kj::Own<server::config::Worker::Module::Reader>) {
+            KJ_CASE_ONEOF(def, kj::Arc<server::config::Worker::Module::Reader>) {
               // The fallback service returned a module definition.
               // We need to convert that into a Module instance.
-              auto mod = readModuleConf(*def, *featureFlags, kj::none);
-              KJ_IF_SOME(id, jsg::Url::tryParse(mod.name)) {
-                // Note that unlike the regular case, the module content returned
-                // by the fallback service is not guaranteed to be memory-resident.
-                // We need to copy the content into a heap-allocated arrays and
-                // make sure those stay alive while the Module is alive.
+              auto mod = readModuleConf(kj::mv(def), *featureFlags, kj::none);
+              KJ_IF_SOME(id, jsg::Url::tryParse(*mod.name)) {
                 KJ_SWITCH_ONEOF(mod.content) {
                   KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newEsm(kj::mv(id),
-                            jsg::modules::Module::Type::FALLBACK,
-                            kj::arc<jsg::OwnedAscii>(kj::heapArray<const char>(content.body))));
+                            jsg::modules::Module::Type::FALLBACK, content.body.addRef()));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
-                    auto ownedData = kj::str(content.body);
-                    auto ptr = ownedData.asPtr();
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
-                            jsg::modules::Module::newTextModuleHandler(ptr), nullptr,
-                            jsg::modules::Module::Flags::NONE,
-                            jsg::modules::Module::ContentType::TEXT)
-                            .attach(kj::mv(ownedData)));
+                            jsg::modules::Module::newOwnedTextModuleHandler(
+                                asCharView(content.body.addRef())),
+                            nullptr, jsg::modules::Module::Flags::NONE,
+                            jsg::modules::Module::ContentType::TEXT));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
-                    auto ownedData = kj::heapArray<uint8_t>(content.body);
-                    auto ptr = ownedData.asPtr();
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
-                            jsg::modules::Module::newDataModuleHandler(ptr), nullptr,
-                            jsg::modules::Module::Flags::NONE,
-                            jsg::modules::Module::ContentType::DATA)
-                            .attach(kj::mv(ownedData)));
+                            jsg::modules::Module::newOwnedDataModuleHandler(content.body.addRef()),
+                            nullptr, jsg::modules::Module::Flags::NONE,
+                            jsg::modules::Module::ContentType::DATA));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
-                    auto ownedData = kj::heapArray<uint8_t>(content.body);
-                    auto ptr = ownedData.asPtr();
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
-                            jsg::modules::Module::newWasmModuleHandler(ptr), nullptr,
-                            jsg::modules::Module::Flags::WASM,
-                            jsg::modules::Module::ContentType::WASM)
-                            .attach(kj::mv(ownedData)));
+                            jsg::modules::Module::newOwnedWasmModuleHandler(content.body.addRef()),
+                            nullptr, jsg::modules::Module::Flags::WASM,
+                            jsg::modules::Module::ContentType::WASM));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
-                    auto ownedData = kj::heapArray<const char>(content.body);
-                    auto ptr = ownedData.asPtr();
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
-                            jsg::modules::Module::newJsonModuleHandler(ptr), nullptr,
-                            jsg::modules::Module::Flags::NONE,
-                            jsg::modules::Module::ContentType::JSON)
-                            .attach(kj::mv(ownedData)));
+                            jsg::modules::Module::newOwnedJsonModuleHandler(
+                                asCharView(content.body.addRef())),
+                            nullptr, jsg::modules::Module::Flags::NONE,
+                            jsg::modules::Module::ContentType::JSON));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
-                    auto ownedData = kj::str(content.body);
-                    auto ptr = ownedData.asPtr();
-                    kj::ArrayPtr<const kj::StringPtr> named;
+                    kj::Array<kj::String> named;
                     KJ_IF_SOME(n, content.namedExports) {
-                      named = n;
+                      named = KJ_MAP(name, *n) { return kj::str(name); };
                     }
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
-                            jsg::modules::Module::newCjsStyleModuleHandler<
-                                api::CommonJsModuleContext, JsgWorkerdIsolate_TypeWrapper>(ptr),
-              KJ_MAP(name, named) {
-                      return kj::str(name);
-                    }).attach(kj::mv(ownedData)));
+                            jsg::modules::Module::newOwnedCjsStyleModuleHandler<
+                                api::CommonJsModuleContext, JsgWorkerdIsolate_TypeWrapper>(
+                                content.body.addRef()),
+                            kj::mv(named)));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
                     // Python modules are not supported.in fallback

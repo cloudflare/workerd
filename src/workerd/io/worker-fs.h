@@ -299,6 +299,9 @@ class File: public kj::Refcounted {
   // and do not count towards the isolate external memory usage.
   static kj::Rc<File> newReadable(kj::Array<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
 
+  // Same as newReadable(kj::ArrayPtr) above, but shares ownership of the data's storage.
+  static kj::Rc<File> newReadable(kj::Arc<kj::ArrayPtr<const kj::byte>> data) KJ_WARN_UNUSED_RESULT;
+
   virtual kj::StringPtr jsgGetMemoryName() const = 0;
   virtual size_t jsgGetMemorySelfSize() const = 0;
   virtual void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const = 0;

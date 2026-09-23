@@ -6,6 +6,7 @@
 #include <kj/map.h>
 #include <kj/mutex.h>
 #include <kj/one-of.h>
+#include <kj/refcount.h>
 #include <kj/string.h>
 #include <kj/thread.h>
 
@@ -51,7 +52,7 @@ enum class Version {
 };
 
 using ModuleOrRedirect =
-    kj::Maybe<kj::OneOf<kj::String, kj::Own<server::config::Worker::Module::Reader>>>;
+    kj::Maybe<kj::OneOf<kj::String, kj::Arc<server::config::Worker::Module::Reader>>>;
 
 // A persistent client for the fallback service that uses a single background
 // thread with a long-lived HTTP client for all module resolution requests.

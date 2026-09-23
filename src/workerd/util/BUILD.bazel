@@ -13,6 +13,20 @@ config_setting(
     flag_values = {"use_perfetto": "True"},
 )
 
+wd_cc_library(
+    name = "capnp-util",
+    hdrs = ["capnp-util.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/capnp"],
+)
+
+wd_cc_library(
+    name = "arc-view",
+    hdrs = ["arc-view.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
 selects.config_setting_group(
     name = "really_use_perfetto",
     match_all = [

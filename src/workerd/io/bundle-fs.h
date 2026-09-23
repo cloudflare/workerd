@@ -11,9 +11,6 @@ namespace workerd {
 // name "foo/bar/baz", it will be represented as a directory "foo" with a subdirectory
 // "bar" and a file "baz" inside it. The directory structure and files are read-only.
 // All timestamps are set to the Unix epoch.
-//
-// Callers are expected to ensure that the pointers held by the WorkerSource remain
-// valid for the lifetime of the returned Directory.
 kj::Rc<Directory> getBundleDirectory(const WorkerSource& source);
 
 }  // namespace workerd

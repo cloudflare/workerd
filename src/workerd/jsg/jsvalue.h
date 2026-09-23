@@ -1382,11 +1382,19 @@ inline JsString Lock::strExtern(kj::Arc<OwnedAscii> str) {
   return JsString(newExternalOneByteString(*this, kj::mv(str)));
 }
 
+inline JsString Lock::strExtern(SharedAscii str) {
+  return JsString(newExternalOneByteString(*this, kj::mv(str)));
+}
+
 inline JsString Lock::strExtern(kj::ArrayPtr<const uint16_t> str) {
   return JsString(newExternalTwoByteString(*this, str));
 }
 
 inline JsString Lock::strExtern(kj::Arc<OwnedUtf16> str) {
+  return JsString(newExternalTwoByteString(*this, kj::mv(str)));
+}
+
+inline JsString Lock::strExtern(SharedUtf16 str) {
   return JsString(newExternalTwoByteString(*this, kj::mv(str)));
 }
 

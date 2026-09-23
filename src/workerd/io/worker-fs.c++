@@ -675,6 +675,10 @@ class FileImpl final: public File {
       : ownedOrView(kj::mv(owned)),
         lastModified(kj::UNIX_EPOCH) {}
 
+  FileImpl(kj::Arc<kj::ArrayPtr<const kj::byte>> shared)
+      : ownedOrView(kj::mv(shared)),
+        lastModified(kj::UNIX_EPOCH) {}
+
   // Constructor used to create a writable file.
   FileImpl(jsg::Lock& js, kj::Array<kj::byte> owned)
       : ownedOrView(Owned(js, kj::mv(owned))),
@@ -796,6 +800,9 @@ class FileImpl final: public File {
       KJ_CASE_ONEOF(ownedView, kj::Array<const kj::byte>) {
         return;
       }
+      KJ_CASE_ONEOF(shared, kj::Arc<kj::ArrayPtr<const kj::byte>>) {
+        return;
+      }
     }
   }
 
@@ -821,6 +828,13 @@ class FileImpl final: public File {
           return FsError::FILE_SIZE_LIMIT_EXCEEDED;
         }
         kj::Rc<File> file = kj::rc<FileImpl>(js, kj::heapArray<kj::byte>(ownedView));
+        return kj::mv(file);
+      }
+      KJ_CASE_ONEOF(shared, kj::Arc<kj::ArrayPtr<const kj::byte>>) {
+        if (shared->size() > maxSize) [[unlikely]] {
+          return FsError::FILE_SIZE_LIMIT_EXCEEDED;
+        }
+        kj::Rc<File> file = kj::rc<FileImpl>(js, kj::heapArray<kj::byte>(*shared));
         return kj::mv(file);
       }
     }
@@ -874,8 +888,13 @@ class FileImpl final: public File {
   // - Owned: writable, isolate-memory-tracked buffer (see Owned).
   // - kj::ArrayPtr<const kj::byte>: read-only view into caller-owned memory.
   // - kj::Array<const kj::byte>: read-only buffer owned by this file.
+  // - kj::Arc<kj::ArrayPtr<const kj::byte>>: read-only view sharing ownership of its storage.
   // Only the Owned alternative is writable (see isWritable()).
-  kj::OneOf<Owned, kj::ArrayPtr<const kj::byte>, kj::Array<const kj::byte>> ownedOrView;
+  kj::OneOf<Owned,
+      kj::ArrayPtr<const kj::byte>,
+      kj::Array<const kj::byte>,
+      kj::Arc<kj::ArrayPtr<const kj::byte>>>
+      ownedOrView;
   kj::Date lastModified;
   mutable kj::Maybe<kj::String> maybeUniqueId;
   mutable kj::Maybe<jsg::ExternalMemoryAdjustment> maybeMemoryAdjustment;
@@ -903,6 +922,9 @@ class FileImpl final: public File {
       }
       KJ_CASE_ONEOF(ownedView, kj::Array<const kj::byte>) {
         return ownedView.asPtr();
+      }
+      KJ_CASE_ONEOF(shared, kj::Arc<kj::ArrayPtr<const kj::byte>>) {
+        return *shared;
       }
     }
     KJ_UNREACHABLE;
@@ -1321,6 +1343,10 @@ kj::Rc<File> File::newReadable(kj::ArrayPtr<const kj::byte> data) {
 }
 
 kj::Rc<File> File::newReadable(kj::Array<const kj::byte> data) {
+  return kj::rc<FileImpl>(kj::mv(data));
+}
+
+kj::Rc<File> File::newReadable(kj::Arc<kj::ArrayPtr<const kj::byte>> data) {
   return kj::rc<FileImpl>(kj::mv(data));
 }
 

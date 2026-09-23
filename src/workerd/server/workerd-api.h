@@ -37,7 +37,7 @@ using api::pyodide::PythonConfig;
 class WorkerdApi final: public Worker::Api {
  public:
   WorkerdApi(jsg::V8System& v8System,
-      CompatibilityFlags::Reader features,
+      kj::Arc<CompatibilityFlags::Reader> features,
       capnp::List<config::Extension>::Reader extensions,
       v8::Isolate::CreateParams createParams,
       v8::IsolateGroup group,
@@ -68,7 +68,7 @@ class WorkerdApi final: public Worker::Api {
   void setIsolateObserver(IsolateObserver&) override;
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
-      config::Worker::Reader conf,
+      kj::Arc<config::Worker::Reader> conf,
       CompatibilityFlags::Reader featureFlags,
       Worker::ValidationErrorReporter& errorReporter);
 
@@ -319,13 +319,13 @@ class WorkerdApi final: public Worker::Api {
 
   // Part of the original module registry API.
   static kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileModule(jsg::Lock& js,
-      config::Worker::Module::Reader conf,
+      kj::Arc<config::Worker::Module::Reader> conf,
       const jsg::CompilationObserver& observer,
       CompatibilityFlags::Reader featureFlags);
 
-  // Convert a module definition from workerd config to a Worker::Script::Module (which may contain
-  // string pointers into the config).
-  static Worker::Script::Module readModuleConf(config::Worker::Module::Reader conf,
+  // Convert a module definition from workerd config to a Worker::Script::Module. The module's
+  // name and body are views into `conf`'s message, sharing its ownership claim.
+  static Worker::Script::Module readModuleConf(kj::Arc<config::Worker::Module::Reader> conf,
       CompatibilityFlags::Reader featureFlags,
       kj::Maybe<Worker::ValidationErrorReporter&> errorReporter = kj::none);
 
@@ -335,7 +335,7 @@ class WorkerdApi final: public Worker::Api {
   // Create the ModuleRegistry instance for the worker.
   static kj::Arc<jsg::modules::ModuleRegistry> newWorkerdModuleRegistry(
       kj::Maybe<const Worker::Script::ModulesSource&> source,
-      const CompatibilityFlags::Reader& featureFlags,
+      kj::Arc<CompatibilityFlags::Reader> featureFlags,
       const PythonConfig& pythonConfig,
       const jsg::Url& bundleBase,
       capnp::List<config::Extension>::Reader extensions,

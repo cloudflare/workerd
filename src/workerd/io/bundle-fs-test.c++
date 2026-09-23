@@ -4,6 +4,7 @@
 
 #include <workerd/io/bundle-fs.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/arc-view.h>
 
 #include <capnp/message.h>
 #include <kj/debug.h>
@@ -12,33 +13,48 @@
 
 namespace workerd {
 namespace {
+kj::Arc<kj::StringPtr> ownString(kj::StringPtr value) {
+  return arcView(kj::str(value));
+}
+
+kj::Arc<kj::ArrayPtr<const char>> ownChars(kj::StringPtr value) {
+  return arcView(kj::heapArray<const char>(value.asArray()));
+}
+
+kj::Arc<kj::ArrayPtr<const kj::byte>> ownBytes(kj::ArrayPtr<const kj::byte> value) {
+  return arcView(kj::heapArray<const kj::byte>(value));
+}
+
 workerd::WorkerSource readConfig() {
 
   kj::Vector<WorkerSource::Module> modules(8);
 
-  modules.add(WorkerSource::Module{.name = "a/esModule"_kj,
-    .content = WorkerSource::EsModule{.body = "this is an esm module"_kj}});
+  modules.add(WorkerSource::Module{.name = ownString("a/esModule"_kj),
+    .content = WorkerSource::EsModule{.body = ownChars("this is an esm module"_kj)}});
 
-  modules.add(WorkerSource::Module{.name = "a/commonJsModule"_kj,
-    .content = WorkerSource::CommonJsModule{.body = "this is a commonjs module"_kj}});
+  modules.add(WorkerSource::Module{.name = ownString("a/commonJsModule"_kj),
+    .content = WorkerSource::CommonJsModule{.body = ownString("this is a commonjs module"_kj)}});
 
-  modules.add(WorkerSource::Module{
-    .name = "b/text"_kj, .content = WorkerSource::TextModule{.body = "this is a text module"_kj}});
+  modules.add(WorkerSource::Module{.name = ownString("b/text"_kj),
+    .content = WorkerSource::TextModule{.body = ownString("this is a text module"_kj)}});
 
-  modules.add(WorkerSource::Module{.name = "b/data"_kj,
-    .content = WorkerSource::DataModule{.body = "this is a data module"_kj.asArray().asBytes()}});
+  modules.add(WorkerSource::Module{.name = ownString("b/data"_kj),
+    .content = WorkerSource::DataModule{
+      .body = ownBytes("this is a data module"_kj.asArray().asBytes())}});
 
-  modules.add(WorkerSource::Module{.name = "c/wasm"_kj,
-    .content = WorkerSource::WasmModule{.body = "this is a wasm module"_kj.asArray().asBytes()}});
+  modules.add(WorkerSource::Module{.name = ownString("c/wasm"_kj),
+    .content = WorkerSource::WasmModule{
+      .body = ownBytes("this is a wasm module"_kj.asArray().asBytes())}});
 
-  modules.add(WorkerSource::Module{
-    .name = "c/json"_kj, .content = WorkerSource::JsonModule{.body = "this is a json module"_kj}});
+  modules.add(WorkerSource::Module{.name = ownString("c/json"_kj),
+    .content = WorkerSource::JsonModule{.body = ownString("this is a json module"_kj)}});
 
-  modules.add(WorkerSource::Module{.name = "a/pythonModule"_kj,
-    .content = WorkerSource::PythonModule{.body = "this is a python module"_kj}});
+  modules.add(WorkerSource::Module{.name = ownString("a/pythonModule"_kj),
+    .content = WorkerSource::PythonModule{.body = ownString("this is a python module"_kj)}});
 
-  return workerd::WorkerSource(workerd::WorkerSource::ModulesSource{
-    .mainModule = "worker"_kj, .modules = modules.releaseAsArray()});
+  return workerd::WorkerSource(
+      workerd::WorkerSource::ModulesSource{.mainModule = ownString("worker"_kj),
+        .modules = kj::arc<kj::Array<WorkerSource::Module>>(modules.releaseAsArray())});
 }
 
 KJ_TEST("The BundleDirectoryDelegate works") {
@@ -206,8 +222,8 @@ KJ_TEST("Module names exceeding max bundle path depth are skipped") {
 
     // A normal module that should be included.
     modules.add(WorkerSource::Module{
-      .name = "ok/module.js"_kj,
-      .content = WorkerSource::EsModule{.body = "export default 1;"_kj},
+      .name = ownString("ok/module.js"_kj),
+      .content = WorkerSource::EsModule{.body = ownChars("export default 1;"_kj)},
     });
 
     kj::Vector<char> atLimit;
@@ -218,8 +234,8 @@ KJ_TEST("Module names exceeding max bundle path depth are skipped") {
     atLimit.add('\0');
     kj::StringPtr atLimitName(atLimit.begin(), atLimit.size() - 1);
     modules.add(WorkerSource::Module{
-      .name = atLimitName,
-      .content = WorkerSource::EsModule{.body = "export default 2;"_kj},
+      .name = ownString(atLimitName),
+      .content = WorkerSource::EsModule{.body = ownChars("export default 2;"_kj)},
     });
 
     kj::Vector<char> overLimit;
@@ -230,13 +246,13 @@ KJ_TEST("Module names exceeding max bundle path depth are skipped") {
     overLimit.add('\0');
     kj::StringPtr overLimitName(overLimit.begin(), overLimit.size() - 1);
     modules.add(WorkerSource::Module{
-      .name = overLimitName,
-      .content = WorkerSource::EsModule{.body = "export default 3;"_kj},
+      .name = ownString(overLimitName),
+      .content = WorkerSource::EsModule{.body = ownChars("export default 3;"_kj)},
     });
 
     auto config = WorkerSource(WorkerSource::ModulesSource{
-      .mainModule = "ok/module.js"_kj,
-      .modules = modules.releaseAsArray(),
+      .mainModule = ownString("ok/module.js"_kj),
+      .modules = kj::arc<kj::Array<WorkerSource::Module>>(modules.releaseAsArray()),
     });
     auto dir = getBundleDirectory(config);
 
@@ -269,12 +285,10 @@ KJ_TEST("Module names exceeding max bundle path depth are skipped") {
 KJ_TEST("Transpiled bundle module bodies outlive the WorkerSource (VULN-136997)") {
   // Regression test for VULN-136997: a heap use-after-free.
   //
-  // When a module is transpiled at load time (e.g. TypeScript type-stripping),
-  // the resulting bytes are owned by WorkerSource::EsModule::ownBody -- a
-  // transient rust::String that lives only as long as the WorkerSource. The
-  // /bundle directory is materialized lazily, long after the WorkerSource has
-  // been destroyed, so the File must take ownership of those bytes rather than
-  // aliasing them.
+  // The /bundle directory is materialized lazily, long after the WorkerSource
+  // has been destroyed. Each File must share ownership of its module's bytes,
+  // which matters most when the bytes were produced at load time (e.g.
+  // TypeScript type-stripping) and nothing else keeps them alive.
   //
   // This test builds such a source, obtains the (lazy) bundle directory, then
   // destroys the source *before* the directory is materialized and read. Under
@@ -288,24 +302,19 @@ KJ_TEST("Transpiled bundle module bodies outlive the WorkerSource (VULN-136997)"
 
     kj::Maybe<kj::Rc<Directory>> maybeDir;
     {
-      // `ownBody` owns the bytes; `body` is a non-owning view into them -- exactly
-      // how workerd-api.c++ sets up a module transpiled during load.
-      ::rust::String ownBody(kBody.begin(), kBody.size());
-      kj::ArrayPtr<const char> bodyView(ownBody.data(), ownBody.size());
-
       kj::Vector<WorkerSource::Module> modules(1);
       modules.add(WorkerSource::Module{
-        .name = "a/transpiled.js"_kj,
-        .content = WorkerSource::EsModule{.body = bodyView, .ownBody = kj::mv(ownBody)},
+        .name = ownString("a/transpiled.js"_kj),
+        .content = WorkerSource::EsModule{.body = ownChars(kBody)},
       });
 
-      auto config = WorkerSource(WorkerSource::ModulesSource{
-        .mainModule = "a/transpiled.js"_kj, .modules = modules.releaseAsArray()});
+      auto config =
+          WorkerSource(WorkerSource::ModulesSource{.mainModule = ownString("a/transpiled.js"_kj),
+            .modules = kj::arc<kj::Array<WorkerSource::Module>>(modules.releaseAsArray())});
 
       maybeDir = getBundleDirectory(config);
 
-      // config -- and thus ownBody's backing buffer -- is destroyed here, before
-      // the lazy directory below is ever materialized.
+      // The source is destroyed before the lazy directory is materialized.
     }
 
     auto& dir = KJ_ASSERT_NONNULL(maybeDir);

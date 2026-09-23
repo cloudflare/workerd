@@ -79,6 +79,7 @@ wd_cc_binary(
         "//src/rust/cxx/kj-rs-io:bridge",
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
         "//src/workerd/util:autogate",
+        "//src/workerd/util:capnp-util",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:setup-async-io",
         "@capnp-cpp//src/capnp:capnpc",
@@ -226,6 +227,7 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/io:worker-modules",
         "//src/workerd/jsg",
+        "//src/workerd/util:arc-view",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-tls",
@@ -277,6 +279,8 @@ wd_cc_library(
         "//src/workerd/io:bundle-fs",
         "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
+        "//src/workerd/util:arc-view",
+        "//src/workerd/util:capnp-util",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:websocket-error-handler",
         "@capnp-cpp//src/capnp:capnp-rpc",
@@ -344,6 +348,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":workerd_capnp",
+        "//src/workerd/util:capnp-util",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj/compat:kj-http",
@@ -395,6 +400,7 @@ kj_test(
     src = "server-test.c++",
     deps = [
         ":server",
+        "//src/workerd/util:capnp-util",
         "//src/workerd/util:test-util",
     ],
 )
@@ -447,6 +453,14 @@ kj_test(
     deps = [
         ":facet-tree-index",
         "@capnp-cpp//src/kj",
+    ],
+)
+
+kj_test(
+    src = "workerd-api-test.c++",
+    deps = [
+        ":workerd-api",
+        "//src/workerd/util:capnp-util",
     ],
 )
 

@@ -18,6 +18,7 @@
 #include <workerd/jsg/setup.h>
 #include <workerd/server/workerd-api.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/capnp-util.h>
 #include <workerd/util/stream-utils.h>
 
 #include <algorithm>
@@ -240,13 +241,7 @@ struct MockErrorReporter final: public Worker::ValidationErrorReporter {
   void addWorkflowClass(kj::StringPtr exportName, kj::Array<kj::String> methods) override {}
 };
 
-inline server::config::Worker::Reader buildConfig(
-    TestFixture::SetupParams& params, capnp::MallocMessageBuilder& arena) {
-  auto config = arena.initRoot<server::config::Worker>();
-  auto modules = config.initModules(1);
-  modules[0].setName(mainModuleName);
-  modules[0].setEsModule(params.mainModuleSource.orDefault(mainModuleSource));
-
+inline kj::Arc<server::config::Worker::Reader> buildConfig(TestFixture::SetupParams& params) {
   // Initialize autogates (with an empty config unless the test supplied gate names).
   //
   // This needs to happen here because `buildConfig` is called early in the construction of
@@ -257,7 +252,11 @@ inline server::config::Worker::Reader buildConfig(
     util::Autogate::initAutogate({});
   }
 
-  return config;
+  return buildArcMessage<server::config::Worker>([&](server::config::Worker::Builder config) {
+    auto modules = config.initModules(1);
+    modules[0].setName(mainModuleName);
+    modules[0].setEsModule(params.mainModuleSource.orDefault(mainModuleSource));
+  });
 }
 
 struct MemoryOutputStream final: kj::AsyncOutputStream, public kj::Refcounted {
@@ -328,7 +327,7 @@ const PythonConfig defaultPythonConfig{.packageDiskCacheRoot = kj::none,
 
 TestFixture::TestFixture(SetupParams&& params)
     : waitScope(params.waitScope),
-      config(buildConfig(params, configArena)),
+      config(buildConfig(params)),
       io(params.waitScope == kj::none ? kj::Maybe(kj::setupAsyncIo())
                                       : kj::Maybe<kj::AsyncIoContext>(kj::none)),
       timer(kj::heap<MockTimer>()),
@@ -349,8 +348,10 @@ TestFixture::TestFixture(SetupParams&& params)
       errorReporter(kj::heap<MockErrorReporter>()),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(*timer)),
       isolateGroup(jsg::newIsolateGroup()),
+      featureFlags(cloneArcMessage<CompatibilityFlags>(
+          params.featureFlags.orDefault(CompatibilityFlags::Reader()))),
       api(kj::heap<server::WorkerdApi>(testV8System,
-          params.featureFlags.orDefault(CompatibilityFlags::Reader()),
+          featureFlags.addRef(),
           capnp::List<server::config::Extension>::Reader{},
           kj::rc<MockIsolateLimitEnforcer>()->getCreateParams(),
           isolateGroup,
@@ -365,10 +366,8 @@ TestFixture::TestFixture(SetupParams&& params)
           Worker::Isolate::InspectorPolicy::DISALLOW)),
       workerScript(kj::atomicRefcounted<Worker::Script>(kj::atomicAddRef(*workerIsolate),
           scriptId,
-          server::WorkerdApi::extractSource(mainModuleName,
-              config,
-              params.featureFlags.orDefault(CompatibilityFlags::Reader()),
-              *errorReporter),
+          server::WorkerdApi::extractSource(
+              mainModuleName, config.addRef(), *featureFlags, *errorReporter),
           IsolateObserver::StartType::COLD,
           false,
           kj::none,

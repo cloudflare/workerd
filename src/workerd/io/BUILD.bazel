@@ -113,6 +113,7 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/jsg:inspector",
         "//src/workerd/jsg:script",
+        "//src/workerd/util:arc-view",
         "//src/workerd/util:autogate",
         "//src/workerd/util:checked-queue",
         "//src/workerd/util:consume",
@@ -203,6 +204,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":io",
+        "//src/workerd/util:arc-view",
     ],
 )
 
@@ -221,7 +223,6 @@ wd_cc_library(
     hdrs = ["worker-source.h"],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/rust/cxx-integration",
         "@capnp-cpp//src/capnp",
         "@workerd-v8//:v8",
     ],
@@ -480,6 +481,7 @@ kj_test(
     src = "worker-source-test.c++",
     deps = [
         ":worker-source",
+        "//src/workerd/util:arc-view",
     ],
 )
 
