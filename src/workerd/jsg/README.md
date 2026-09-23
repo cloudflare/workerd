@@ -442,10 +442,7 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 - `deserialize()` receives the tag for version dispatch
 - Deserialization header errors include input size, header presence, decoded and supported wire
   versions, and receiving V8 version. `Deserializer::Options::diagnosticContext` supplies a fixed
-  runtime call-site label (defaults to `"unknown"`), never user data. A decoded version of zero can
-  also mean no version was read. Header failures log this metadata with a native stack trace using
-  `LOG_WARNING_PERIODICALLY`, then throw an internal KJ exception marked `worker_do_not_log` to
-  suppress duplicate reporting. JavaScript sees a generic internal error, without the metadata.
+  runtime call-site label (defaults to `"unknown"`).
 
 ## Web IDL Union Validation Rules
 
