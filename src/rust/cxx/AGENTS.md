@@ -50,6 +50,9 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - Prefer KJ C++ types over STL types unless required by the cxx ABI.
 - Preserve cancellation when converting between KJ promises and Rust futures.
 - Every unsafe Rust block needs a `// Safety:` explanation.
+- `KjOwn<T>` requires `T: kj_rs::OwnTarget`, generated per bridge for every declared type held in
+  a `KjOwn` (see `kj-rs/README.md`). A type that is only aliased into a bridge gets no
+  implementation there; add `impl KjOwn<T> {}` to the bridge that declares `T`.
 - Run formatting and the full component tests after changing generated ABI behavior.
 
 ## kj-rs-io ownership and reactor rules
