@@ -52,6 +52,13 @@ fn get_hostname(domain: &str) -> Result<Option<String>, UrlError> {
 #[jsg_resource]
 pub struct UrlUtil;
 
+// Stateless: a startup snapshot's retained `node-internal:url` exports get a fresh instance.
+impl jsg::SnapshotRestore for UrlUtil {
+    fn restore_from_snapshot() -> jsg::Rc<Self> {
+        Self::new()
+    }
+}
+
 #[jsg_resource]
 impl UrlUtil {
     #[must_use]

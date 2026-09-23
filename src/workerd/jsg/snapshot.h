@@ -51,6 +51,16 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
   };
   kj::Array<ModuleRecord> moduleRecords;
 
+  // Function templates that JSG's type wrapper does not own, stored in the blob with
+  // v8::SnapshotCreator::AddData() under a name their owner chooses: the templates of Rust resource
+  // types, which the isolate's Rust Realm caches per type. They must be adopted for the same
+  // reason as templateDataIndices; see IsolateBase::addExternalSnapshotTemplate().
+  struct ExternalTemplateRecord {
+    kj::String name;
+    size_t dataIndex;
+  };
+  kj::Array<ExternalTemplateRecord> externalTemplateRecords;
+
   ~SnapshotArtifact() noexcept(false) {
     // v8::SnapshotCreator::CreateBlob() allocates the data with `new[]` and hands over ownership.
     delete[] blob.data;
