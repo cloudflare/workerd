@@ -73,6 +73,9 @@ class UnsafeEval: public jsg::Object {
     JSG_METHOD(newAsyncFunction);
     JSG_METHOD(newWasmModule);
   }
+
+  // Stateless: a startup snapshot that retains this object re-creates it fresh.
+  JSG_SNAPSHOT_RESTORE(UnsafeEval);
 };
 
 // A special binding that allows access to stdin. Used for REPL.
@@ -140,6 +143,9 @@ class UnsafeModule: public jsg::Object {
     JSG_METHOD(evictAllDurableObjects);
     JSG_METHOD(isTestAutogateEnabled);
   }
+
+  // Stateless: a startup snapshot that retains this object re-creates it fresh.
+  JSG_SNAPSHOT_RESTORE(UnsafeModule);
 };
 
 #ifdef WORKERD_FUZZILLI

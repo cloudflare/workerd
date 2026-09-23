@@ -25,6 +25,9 @@ class RTTIModule final: public jsg::Object {
     JSG_METHOD(exportTypes);
     JSG_METHOD(exportExperimentalTypes);
   }
+
+  // Stateless: a startup snapshot that retains this object re-creates it fresh.
+  JSG_SNAPSHOT_RESTORE(RTTIModule);
 };
 
 template <class Registry>

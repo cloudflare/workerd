@@ -66,6 +66,9 @@ class WrappedBindingModule final: public jsg::Object {
   JSG_RESOURCE_TYPE(WrappedBindingModule) {
     JSG_NESTED_TYPE(WrappedBinding);
   }
+
+  // Stateless: a startup snapshot that retains this object re-creates it fresh.
+  JSG_SNAPSHOT_RESTORE(WrappedBindingModule);
 };
 
 template <class Registry>
