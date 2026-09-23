@@ -6502,15 +6502,6 @@ type WebSearchOptions = {
 // be turned off). The Workers AI SDK type generator (cloudflare/ai/sdk,
 // apps/worker-constellation-entry/scripts/build-types) turns it into the per-model
 // `inputs` types below; the developer docs model schemas come from the same metadata.
-/**
- * A reasoning effort. The listed values are suggestions: the efforts the model supports.
- * Any other string also type-checks, so new or provider-specific efforts are never blocked
- * by the types, but the model may reject or ignore values it does not support.
- */
-type AiReasoningEffortHint<Suggested extends string = never> =
-  Suggested | (string & NonNullable<unknown>);
-/** Reasoning efforts suggested for models without published reasoning metadata. */
-type ChatCompletionsReasoningEffort = "low" | "medium" | "high";
 type ChatTemplateKwargs = {
   /** Whether to enable reasoning. Support and defaults depend on the model. */
   enable_thinking?: boolean;
@@ -6534,7 +6525,7 @@ type ChatCompletionsCommonOptions = {
   prediction?: PredictionContent;
   presence_penalty?: number | null;
   /** Reasoning effort. Supported levels depend on the model. */
-  reasoning_effort?: AiReasoningEffortHint<ChatCompletionsReasoningEffort> | null;
+  reasoning_effort?: "low" | "medium" | "high" | null;
   chat_template_kwargs?: ChatTemplateKwargs;
   response_format?: ResponseFormat;
   seed?: number | null;
@@ -6657,7 +6648,7 @@ type ResponsesInput = {
   parallel_tool_calls?: boolean | null;
   previous_response_id?: string | null;
   prompt_cache_key?: string;
-  reasoning?: ResponsesInputReasoning | null;
+  reasoning?: Reasoning | null;
   safety_identifier?: string;
   service_tier?: "auto" | "default" | "flex" | "scale" | "priority" | null;
   stream?: boolean | null;
@@ -6718,16 +6709,6 @@ type ResponsePrompt = {
   } | null;
   version?: string | null;
 };
-/**
- * Reasoning options accepted in a Responses request. Unlike `Reasoning` (which responses
- * echo back), `effort` suggests the shared efforts but accepts any string, like
- * AiReasoningEffortHint (spelled out because this file cannot import it).
- */
-interface ResponsesInputReasoning extends Omit<Reasoning, "effort"> {
-  /** Reasoning effort. Supported levels depend on the model. */
-  effort?:
-    Exclude<ReasoningEffort, null> | (string & NonNullable<unknown>) | null;
-}
 type Reasoning = {
   effort?: ReasoningEffort | null;
   generate_summary?: "auto" | "concise" | "detailed" | null;
@@ -10755,13 +10736,13 @@ declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
   inputs: XOR<
     Omit<ResponsesInput, "reasoning"> & {
       reasoning?:
-        | (Omit<ResponsesInputReasoning, "effort"> & {
+        | (Omit<Reasoning, "effort"> & {
             /**
              * Reasoning effort. Supported levels: low, medium, high. Reasoning cannot be disabled.
              *
              * @default "medium"
              */
-            effort?: AiReasoningEffortHint<"low" | "medium" | "high"> | null;
+            effort?: "low" | "medium" | "high" | null;
           })
         | null;
     },
@@ -10771,16 +10752,14 @@ declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
        *
        * @default "medium"
        */
-      reasoning_effort?: AiReasoningEffortHint<
-        "low" | "medium" | "high"
-      > | null;
+      reasoning_effort?: "low" | "medium" | "high" | null;
       chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
         /**
          * Reasoning is always enabled for this model and cannot be disabled.
          *
          * @default true
          */
-        enable_thinking?: boolean;
+        enable_thinking?: true;
       };
     }
   >;
@@ -10790,13 +10769,13 @@ declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
   inputs: XOR<
     Omit<ResponsesInput, "reasoning"> & {
       reasoning?:
-        | (Omit<ResponsesInputReasoning, "effort"> & {
+        | (Omit<Reasoning, "effort"> & {
             /**
              * Reasoning effort. Supported levels: low, medium, high. Reasoning cannot be disabled.
              *
              * @default "medium"
              */
-            effort?: AiReasoningEffortHint<"low" | "medium" | "high"> | null;
+            effort?: "low" | "medium" | "high" | null;
           })
         | null;
     },
@@ -10806,16 +10785,14 @@ declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
        *
        * @default "medium"
        */
-      reasoning_effort?: AiReasoningEffortHint<
-        "low" | "medium" | "high"
-      > | null;
+      reasoning_effort?: "low" | "medium" | "high" | null;
       chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
         /**
          * Reasoning is always enabled for this model and cannot be disabled.
          *
          * @default true
          */
-        enable_thinking?: boolean;
+        enable_thinking?: true;
       };
     }
   >;
@@ -11905,13 +11882,9 @@ declare abstract class Base_Ai_Cf_Zai_Org_Glm_4_7_Flash {
     ChatCompletionsInput,
     "reasoning_effort" | "chat_template_kwargs"
   > & {
-    /**
-     * This model has no reasoning effort levels. Use `chat_template_kwargs.enable_thinking` to turn reasoning on or off.
-     */
-    reasoning_effort?: AiReasoningEffortHint | null;
     chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
       /**
-       * Whether to enable reasoning for this model.
+       * Whether to enable reasoning for this model. This model has no reasoning effort levels.
        *
        * @default true
        */
@@ -11930,11 +11903,11 @@ declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_6 {
     "reasoning_effort" | "chat_template_kwargs"
   > & {
     /**
-     * Reasoning effort. Supported levels: high, none. Compatibility aliases: low maps to high; medium maps to high; max maps to high.
+     * Reasoning effort. Supported levels: high, none. Compatibility aliases (accepted by the API, not by these types): low maps to high; medium maps to high; max maps to high.
      *
      * @default "high"
      */
-    reasoning_effort?: AiReasoningEffortHint<"high" | "none"> | null;
+    reasoning_effort?: "high" | "none" | null;
     chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
       /**
        * Whether to enable reasoning for this model.
@@ -11946,21 +11919,67 @@ declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_6 {
   };
   postProcessedOutputs: ChatCompletionsOutput;
 }
+type Ai_Cf_Nvidia_Nemotron_3_120B_A12B_Input = Omit<
+  ChatCompletionsInput,
+  | "model"
+  | "max_tokens"
+  | "metadata"
+  | "modalities"
+  | "chat_template_kwargs"
+  | "store"
+  | "reasoning_effort"
+> & {
+  /**
+   * ID of the model to use (for example, '@cf/nvidia/nemotron-3-120b-a12b').
+   */
+  model?: ChatCompletionsInput["model"];
+  /**
+   * The maximum number of tokens to generate.
+   */
+  max_tokens?: ChatCompletionsInput["max_tokens"];
+  /**
+   * Set of key-value pairs that can be attached to the object.
+   */
+  metadata?: ChatCompletionsInput["metadata"];
+  /**
+   * Output types requested from the model.
+   */
+  modalities?: ChatCompletionsInput["modalities"];
+  /**
+   * Nemotron chat-template controls for normal reasoning, low-effort reasoning, and non-reasoning responses.
+   */
+  chat_template_kwargs?: {
+    /**
+     * Whether to enable reasoning. Reasoning is enabled by default.
+     */
+    enable_thinking?: boolean;
+    /**
+     * When reasoning is enabled, use Nemotron's low-effort reasoning mode, which uses significantly fewer reasoning tokens.
+     */
+    low_effort?: boolean;
+    /**
+     * For coding agent use, Nvidia suggests setting force_nonempty_content=true
+     */
+    force_nonempty_content?: boolean;
+  };
+  /**
+   * Whether to store the output for model distillation or evaluation.
+   *
+   * @default false
+   */
+  store?: ChatCompletionsInput["store"];
+};
 declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
-  inputs: ChatCompletionsInput;
+  inputs: Ai_Cf_Nvidia_Nemotron_3_120B_A12B_Input;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 type Ai_Cf_Google_Gemma_4_26B_A4B_It_Input = Omit<
   ChatCompletionsInput,
   "reasoning_effort" | "chat_template_kwargs"
 > & {
-  /**
-   * This model has no reasoning effort levels. Use `chat_template_kwargs.enable_thinking` to turn reasoning on or off.
-   */
-  reasoning_effort?: AiReasoningEffortHint | null;
   chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
     /**
-     * Whether to enable reasoning for this model.
+     * Whether to enable reasoning for this model. This model has no reasoning effort levels.
      *
      * @default true
      */
@@ -11978,22 +11997,45 @@ declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_It {
 }
 /** @deprecated Use Base_Ai_Cf_Google_Gemma_4_26B_A4B_It. */
 declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT extends Base_Ai_Cf_Google_Gemma_4_26B_A4B_It {}
+type Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B_Input =
+  | {
+      /**
+       * readable stream with audio data and content-type specified for that data
+       */
+      audio: {
+        body: object;
+        contentType: string;
+      };
+    }
+  | {
+      /**
+       * base64 encoded audio data
+       */
+      audio: string;
+      encoding?: "wav" | "flac" | "ogg" | "linear16";
+      sample_rate?: number;
+      channels?: number;
+    };
+interface Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B_Output {
+  text?: string;
+  duration?: number;
+}
+declare abstract class Base_Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B {
+  inputs: Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B_Input;
+  postProcessedOutputs: Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B_Output;
+}
 declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code {
   inputs: Omit<
     ChatCompletionsInput,
     "reasoning_effort" | "chat_template_kwargs"
   > & {
-    /**
-     * This model has no reasoning effort levels. Reasoning is always enabled.
-     */
-    reasoning_effort?: AiReasoningEffortHint | null;
     chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
       /**
-       * Reasoning is always enabled for this model and cannot be disabled.
+       * Reasoning is always enabled for this model and cannot be disabled. This model has no reasoning effort levels.
        *
        * @default true
        */
-      enable_thinking?: boolean;
+      enable_thinking?: true;
     };
   };
   postProcessedOutputs: ChatCompletionsOutput;
@@ -12004,11 +12046,11 @@ declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_2 {
     "reasoning_effort" | "chat_template_kwargs"
   > & {
     /**
-     * Reasoning effort. Supported levels: max, high, none. Compatibility aliases: low maps to high; medium maps to high; xhigh maps to max; minimal maps to none.
+     * Reasoning effort. Supported levels: max, high, none. Compatibility aliases (accepted by the API, not by these types): low maps to high; medium maps to high; xhigh maps to max; minimal maps to none.
      *
      * @default "max"
      */
-    reasoning_effort?: AiReasoningEffortHint<"max" | "high" | "none"> | null;
+    reasoning_effort?: "max" | "high" | "none" | null;
     chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
       /**
        * Whether to enable reasoning for this model.
@@ -12159,13 +12201,11 @@ declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Flash_0731 {
     "reasoning_effort" | "chat_template_kwargs"
   > & {
     /**
-     * Reasoning effort. Supported levels: max, high, low, none. Compatibility aliases: minimal maps to low; medium maps to high; xhigh maps to high.
+     * Reasoning effort. Supported levels: max, high, low, none. Compatibility aliases (accepted by the API, not by these types): minimal maps to low; medium maps to high; xhigh maps to high.
      *
      * @default "high"
      */
-    reasoning_effort?: AiReasoningEffortHint<
-      "max" | "high" | "low" | "none"
-    > | null;
+    reasoning_effort?: "max" | "high" | "low" | "none" | null;
     chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
       /**
        * Whether to enable reasoning for this model.
@@ -12183,13 +12223,11 @@ declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813 {
     "reasoning_effort" | "chat_template_kwargs"
   > & {
     /**
-     * Reasoning effort. Supported levels: max, high, low, none. Compatibility aliases: minimal maps to low; medium maps to high; xhigh maps to high.
+     * Reasoning effort. Supported levels: max, high, low, none. Compatibility aliases (accepted by the API, not by these types): minimal maps to low; medium maps to high; xhigh maps to high.
      *
      * @default "high"
      */
-    reasoning_effort?: AiReasoningEffortHint<
-      "max" | "high" | "low" | "none"
-    > | null;
+    reasoning_effort?: "max" | "high" | "low" | "none" | null;
     chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
       /**
        * Whether to enable reasoning for this model.
@@ -12211,7 +12249,7 @@ declare abstract class Base_Ai_Cf_Qwen_Qwen3_8_27B {
      *
      * @default "xhigh"
      */
-    reasoning_effort?: AiReasoningEffortHint<"low" | "medium" | "xhigh"> | null;
+    reasoning_effort?: "low" | "medium" | "xhigh" | null;
     chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
       /**
        * Whether to enable reasoning for this model.
@@ -12229,18 +12267,18 @@ declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_3 {
     "reasoning_effort" | "chat_template_kwargs"
   > & {
     /**
-     * Reasoning effort. Supported levels: max, high, low. Reasoning cannot be disabled. Compatibility aliases: none maps to max; medium maps to max.
+     * Reasoning effort. Supported levels: max, high, low. Reasoning cannot be disabled. Compatibility aliases (accepted by the API, not by these types): none maps to max; minimal maps to max; medium maps to max; xhigh maps to max.
      *
      * @default "max"
      */
-    reasoning_effort?: AiReasoningEffortHint<"max" | "high" | "low"> | null;
+    reasoning_effort?: "max" | "high" | "low" | null;
     chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
       /**
        * Reasoning is always enabled for this model and cannot be disabled.
        *
        * @default true
        */
-      enable_thinking?: boolean;
+      enable_thinking?: true;
     };
   };
   postProcessedOutputs: ChatCompletionsOutput;
@@ -12251,18 +12289,18 @@ declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_3_Flash {
     "reasoning_effort" | "chat_template_kwargs"
   > & {
     /**
-     * Reasoning effort. Supported levels: max, high, low. Reasoning cannot be disabled. Compatibility aliases: none maps to max; minimal maps to max; medium maps to max; xhigh maps to max.
+     * Reasoning effort. Supported levels: max, high, low. Reasoning cannot be disabled. Compatibility aliases (accepted by the API, not by these types): none maps to max; minimal maps to max; medium maps to max; xhigh maps to max.
      *
      * @default "max"
      */
-    reasoning_effort?: AiReasoningEffortHint<"max" | "high" | "low"> | null;
+    reasoning_effort?: "max" | "high" | "low" | null;
     chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
       /**
        * Reasoning is always enabled for this model and cannot be disabled.
        *
        * @default true
        */
-      enable_thinking?: boolean;
+      enable_thinking?: true;
     };
   };
   postProcessedOutputs: ChatCompletionsOutput;
@@ -12271,7 +12309,6 @@ interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
   "@cf/runwayml/stable-diffusion-v1-5-inpainting": BaseAiTextToImage;
-  "@cf/runwayml/stable-diffusion-v1-5-img2img": BaseAiTextToImage;
   "@cf/lykon/dreamshaper-8-lcm": BaseAiTextToImage;
   "@cf/bytedance/stable-diffusion-xl-lightning": BaseAiTextToImage;
   "@cf/myshell-ai/melotts": BaseAiTextToSpeech;
@@ -12359,6 +12396,7 @@ interface AiModels {
   "@cf/moonshotai/kimi-k2.6": Base_Ai_Cf_Moonshotai_Kimi_K2_6;
   "@cf/nvidia/nemotron-3-120b-a12b": Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B;
   "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_It;
+  "@cf/nvidia/nemotron-speech-streaming-en-0.6b": Base_Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B;
   "@cf/moonshotai/kimi-k2.7-code": Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code;
   "@cf/zai-org/glm-5.2": Base_Ai_Cf_Zai_Org_Glm_5_2;
   "@cf/moondream/moondream3.1-9B-A2B": Base_Ai_Cf_Moondream_Moondream3_1_9B_A2B;
