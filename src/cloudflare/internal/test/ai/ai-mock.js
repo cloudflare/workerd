@@ -2,7 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-export default {
+import { WorkerEntrypoint } from 'cloudflare:workers';
+
+export default class AiMock extends WorkerEntrypoint {
   async websearch({ gatewayId, provider, query, limit, byokAlias }, params) {
     if (typeof gatewayId !== 'string' || gatewayId.trim() === '') {
       throw new Error('Invalid gateway ID');
@@ -18,9 +20,9 @@ export default {
       },
       extraHeaders: params?.extraHeaders,
     });
-  },
+  }
 
-  async fetch(request, env, ctx) {
+  async fetch(request) {
     const url = new URL(request.url);
 
     if (url.pathname === '/ai-api/models/search') {
@@ -189,5 +191,5 @@ export default {
         },
       }
     );
-  },
-};
+  }
+}
