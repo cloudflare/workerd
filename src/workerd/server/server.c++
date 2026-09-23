@@ -5733,15 +5733,18 @@ kj::Array<Worker::Api::InboundListener> Server::copyInboundListeners(kj::StringP
   return nullptr;
 }
 
+bool Server::isStartupSnapshotEligible(const WorkerDef& def) {
+  return !def.featureFlags.getPythonWorkers() && !def.featureFlags.getNewModuleRegistry() &&
+      !def.source.variant.is<WorkerSource::ScriptSource>();
+}
+
 kj::Own<jsg::SnapshotArtifact> Server::makeSnapshot(kj::StringPtr name,
     WorkerDef& def,
     capnp::List<config::Extension>::Reader extensions,
     ErrorReporter& errorReporter) {
   // Build a throwaway zygote Worker in PREPARE_SNAPSHOT mode just to extract a V8 startup
   // snapshot; the caller then builds the real Worker in START_FROM_SNAPSHOT mode using it.
-  KJ_REQUIRE(!def.featureFlags.getPythonWorkers(), "snapshot PoC: no Python workers");
-  KJ_REQUIRE(!def.featureFlags.getNewModuleRegistry(), "snapshot PoC: no new module registry");
-  KJ_REQUIRE(!def.source.variant.is<WorkerSource::ScriptSource>(), "snapshot PoC: ESM only");
+  KJ_REQUIRE(isStartupSnapshotEligible(def));
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();
   auto snapshotArtifact = kj::atomicRefcounted<jsg::SnapshotArtifact>();
@@ -5855,7 +5858,8 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   auto isolateGroup = v8::IsolateGroup::GetDefault();
   auto listeners = copyInboundListeners(name);
   kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
-  if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT)) {
+  if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) &&
+      isStartupSnapshotEligible(def)) {
     auto snapshotArtifact = makeSnapshot(name, def, extensions, errorReporter);
     snapshotConfig =
         jsg::SnapshotConfig(jsg::ReadonlySharedSnapshot{.artifact = snapshotArtifact->addRef()});
