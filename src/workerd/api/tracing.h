@@ -25,8 +25,13 @@ namespace workerd::api::user_tracing {
 // purpose.
 constexpr size_t MAX_USER_OPERATION_NAME_BYTES = 64;
 
-// The types allowed for tag and log values from JavaScript.
+// The scalar attribute value types accepted from JavaScript. JSG unwraps these with Web IDL
+// coercion. Array values are validated by hand (see toAttributeValue() in tracing.c++) because
+// OpenTelemetry requires homogeneous primitive arrays, which coercion cannot express.
 using TagValue = kj::OneOf<bool, double, kj::String>;
+
+// The native representation of a recorded attribute: a scalar or a homogeneous primitive array.
+using AttributeValue = tracing::Attribute::Value;
 
 struct ExceptionData {
   // JSG dictionaries cannot express "at least one field is required". recordException()
@@ -57,7 +62,7 @@ class SpanState: public kj::Refcounted {
   virtual workerd::SpanParent makeSpanParent() = 0;
 
   // Sets a single attribute on the span. If value is kj::none, the attribute is not set.
-  void setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue);
+  void setAttribute(kj::String key, kj::Maybe<AttributeValue> maybeValue);
 
   void recordException(kj::Maybe<tracing::Exception::Code> code,
       kj::String name,
@@ -67,7 +72,7 @@ class SpanState: public kj::Refcounted {
  protected:
   SpanState() = default;
   virtual bool canRecordAttributes() = 0;
-  virtual void recordAttribute(kj::String key, TagValue value) = 0;
+  virtual void recordAttribute(kj::String key, AttributeValue value) = 0;
   virtual void recordExceptionImpl(kj::Maybe<tracing::Exception::Code> code,
       kj::String name,
       kj::String message,
@@ -97,11 +102,24 @@ class Span: public jsg::Object {
   // code on this.
   bool getIsTraced();
 
-  // Sets a single attribute. If `value` is undefined, the attribute is not set.
-  jsg::Ref<Span> setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<TagValue> value);
+  // Sets a single attribute. Accepts strings, numbers, booleans, and homogeneous arrays of one of
+  // those types, following OpenTelemetry attribute semantics:
+  //   - If `value` is undefined, the attribute is not set.
+  //   - A one-element array is recorded as an array, not as its element.
+  //   - An empty array is recorded as an empty array.
+  //   - null and undefined array elements preserve their position as empty values. Downstream
+  //     JavaScript receives both as null, matching their representation as empty OTLP AnyValues.
+  //   - Arrays mixing primitive types or containing objects/nested arrays are ignored (with a
+  //     warning logged), matching the OpenTelemetry SDK's sanitizeAttributes() behavior.
+  jsg::Ref<Span> setAttribute(jsg::Lock& js,
+      kj::String key,
+      jsg::Optional<jsg::Value> value,
+      const jsg::TypeHandler<TagValue>& scalarHandler);
 
   // Sets each attribute in `attributes` as if by calling setAttribute().
-  jsg::Ref<Span> setAttributes(jsg::Lock& js, jsg::Dict<jsg::Optional<TagValue>> attributes);
+  jsg::Ref<Span> setAttributes(jsg::Lock& js,
+      jsg::Dict<jsg::Optional<jsg::Value>> attributes,
+      const jsg::TypeHandler<TagValue>& scalarHandler);
 
   void recordException(
       jsg::Lock& js, jsg::Value exception, const jsg::TypeHandler<ExceptionData>& exceptionHandler);
@@ -117,10 +135,19 @@ class Span: public jsg::Object {
     JSG_METHOD(recordException);
     JSG_METHOD(end);
 
+    // Keep in sync with SpanValue in src/cloudflare/internal/tracing.d.ts and the OpenTelemetry
+    // AttributeValue type.
     JSG_TS_OVERRIDE({
-      setAttribute(key: string, value: boolean | number | string): this;
+      setAttribute(key: string, value: boolean | number | string
+        | Array<boolean | null | undefined>
+        | Array<number | null | undefined>
+        | Array<string | null | undefined>): this;
       setAttributes(
-        attributes: Record<string, boolean | number | string | undefined>
+        attributes: Record<string, boolean | number | string
+          | Array<boolean | null | undefined>
+          | Array<number | null | undefined>
+          | Array<string | null | undefined>
+          | undefined>
       ): this;
       recordException(exception: string
         | { code: string | number; name?: string; message?: string; stack?: string }

@@ -91,6 +91,18 @@ class TestCounter extends RpcTarget {
 
 const symbolMethod = Symbol('symbolMethod');
 
+declare const tailAttribute: TailStream.Attribute;
+expectTypeOf(tailAttribute.value).toEqualTypeOf<
+  | string
+  | (string | null)[]
+  | boolean
+  | (boolean | null)[]
+  | number
+  | (number | null)[]
+  | bigint
+  | bigint[]
+>();
+
 type Props = {myProp: number};
 
 class TestEntrypoint extends WorkerEntrypoint<Env, Props> {

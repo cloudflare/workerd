@@ -127,6 +127,10 @@ TraceItem::TailAttributeValue getTraceTailAttributeValue(const tracing::Attribut
     KJ_CASE_ONEOF(string, kj::ConstString) {
       return TraceItem::TailAttributeValue(kj::str(string));
     }
+    // Tail attributes come from configuration and are always scalar values.
+    KJ_CASE_ONEOF_DEFAULT {
+      KJ_FAIL_REQUIRE("tail attributes must be scalar values");
+    }
   }
   KJ_UNREACHABLE;
 }

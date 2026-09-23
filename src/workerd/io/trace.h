@@ -721,12 +721,26 @@ template <typename T>
 concept AttributeValue = kj::isSameType<kj::ConstString, T>() || kj::isSameType<bool, T>() ||
     kj::isSameType<double, T>() || kj::isSameType<int64_t, T>();
 
+using AttributeStringArray = kj::Array<kj::Maybe<kj::ConstString>>;
+using AttributeBoolArray = kj::Array<kj::Maybe<bool>>;
+using AttributeDoubleArray = kj::Array<kj::Maybe<double>>;
+
 // An Attribute mark is used to add detail to a span over its lifetime.
 // The Attribute struct can also be used to provide arbitrary additional
 // properties for some other structs.
 // Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
 struct Attribute final {
-  using Value = kj::OneOf<kj::ConstString, bool, double, int64_t>;
+  // A single attribute value. The array alternatives represent OpenTelemetry's homogeneous
+  // primitive arrays as one value, so that a one-element array stays distinct from a scalar all
+  // the way through serialization (`Values` below flattens that distinction for legacy
+  // multi-value attributes).
+  using Value = kj::OneOf<kj::ConstString,
+      bool,
+      double,
+      int64_t,
+      AttributeStringArray,
+      AttributeBoolArray,
+      AttributeDoubleArray>;
   using Values = kj::Array<Value>;
 
   explicit Attribute(kj::ConstString name, Value&& value);
@@ -1245,7 +1259,10 @@ class SpanBuilder {
       kj::ConstString,
       bool,
       double,
-      int64_t>;
+      int64_t,
+      tracing::AttributeStringArray,
+      tracing::AttributeBoolArray,
+      tracing::AttributeDoubleArray>;
 
   void setTag(kj::ConstString key, TagInitValue value, IsCustomTag isCustom = IsCustomTag::NO);
 

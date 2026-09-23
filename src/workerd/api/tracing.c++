@@ -16,10 +16,12 @@ namespace {
 // modification requests. This is a soft cap to prevent accidental misuse from unbounded
 // memory growth; downstream tail-stream submission may apply additional limits.
 constexpr size_t MAX_SPAN_BYTES = 64 * 1024;
+constexpr size_t MAX_ATTRIBUTE_ARRAY_ELEMENTS = 512;
 
-size_t estimateTagValueSize(TagValue& value) {
+size_t estimateAttributeValueSize(const AttributeValue& value) {
   // Approximate size; different encodings will produce different sizes. The goal is to bound
-  // accidental overuse, not to be byte-accurate.
+  // accidental overuse, not to be byte-accurate. Array elements are counted individually so that
+  // a large array is bounded the same way as a large string.
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(b, bool) {
       return 8;
@@ -27,11 +29,139 @@ size_t estimateTagValueSize(TagValue& value) {
     KJ_CASE_ONEOF(d, double) {
       return 8;
     }
-    KJ_CASE_ONEOF(s, kj::String) {
+    KJ_CASE_ONEOF(i, int64_t) {
+      return 8;
+    }
+    KJ_CASE_ONEOF(s, kj::ConstString) {
       return s.size();
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
+      size_t size = arr.size() * sizeof(uint64_t);
+      for (auto& s: arr) {
+        KJ_IF_SOME(value, s) {
+          size += value.size();
+        }
+      }
+      return size;
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
+      return arr.size() * 8;
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
+      return arr.size() * 8;
     }
   }
   KJ_UNREACHABLE;
+}
+
+// Element type of a homogeneous attribute array, determined by its first non-nullish element.
+enum class ArrayElementType { UNKNOWN, STRING, NUMBER, BOOLEAN };
+
+// Converts a JS array to a homogeneous native array following OpenTelemetry's attribute rules:
+// elements must all be strings, all numbers, or all booleans; null and undefined elements are
+// preserved as empty values. Returns kj::none for arrays that mix primitive types or contain
+// non-primitive elements (objects, nested arrays, bigints, symbols, functions).
+kj::Maybe<AttributeValue> arrayToAttributeValue(jsg::Lock& js, jsg::JsArray array) {
+  auto type = ArrayElementType::UNKNOWN;
+  kj::Vector<kj::Maybe<kj::ConstString>> strings;
+  kj::Vector<kj::Maybe<double>> numbers;
+  kj::Vector<kj::Maybe<bool>> booleans;
+
+  auto length = array.size();
+  for (uint32_t i = 0; i < length; i++) {
+    jsg::JsValue element = array.get(js, i);
+    if (element.isNullOrUndefined()) {
+      strings.add(kj::none);
+      numbers.add(kj::none);
+      booleans.add(kj::none);
+      continue;
+    }
+    ArrayElementType elementType;
+    if (element.isString()) {
+      elementType = ArrayElementType::STRING;
+    } else if (element.isNumber()) {
+      elementType = ArrayElementType::NUMBER;
+    } else if (element.isBoolean()) {
+      elementType = ArrayElementType::BOOLEAN;
+    } else {
+      return kj::none;
+    }
+    if (type == ArrayElementType::UNKNOWN) {
+      type = elementType;
+    } else if (type != elementType) {
+      return kj::none;
+    }
+    v8::Local<v8::Value> handle = element;
+    switch (elementType) {
+      case ArrayElementType::STRING:
+        strings.add(kj::ConstString(element.toString(js)));
+        break;
+      case ArrayElementType::NUMBER:
+        numbers.add(handle.As<v8::Number>()->Value());
+        break;
+      case ArrayElementType::BOOLEAN:
+        booleans.add(handle->IsTrue());
+        break;
+      case ArrayElementType::UNKNOWN:
+        KJ_UNREACHABLE;
+    }
+  }
+
+  switch (type) {
+    case ArrayElementType::STRING:
+      return AttributeValue(strings.releaseAsArray());
+    case ArrayElementType::NUMBER:
+      return AttributeValue(numbers.releaseAsArray());
+    case ArrayElementType::BOOLEAN:
+      return AttributeValue(booleans.releaseAsArray());
+    case ArrayElementType::UNKNOWN:
+      // Empty arrays and arrays containing only empty elements have no observable element type,
+      // so the wire format uses the string variant for them.
+      return AttributeValue(strings.releaseAsArray());
+  }
+  KJ_UNREACHABLE;
+}
+
+// Converts a JS attribute value to its native representation. Scalars keep the existing JSG
+// (Web IDL) coercion via `scalarHandler` for backwards compatibility; arrays are validated
+// strictly. Returns kj::none when the attribute should not be recorded.
+kj::Maybe<AttributeValue> toAttributeValue(jsg::Lock& js,
+    kj::StringPtr key,
+    v8::Local<v8::Value> handle,
+    const jsg::TypeHandler<TagValue>& scalarHandler) {
+  if (handle->IsUndefined()) {
+    return kj::none;
+  }
+
+  if (handle->IsArray()) {
+    auto array = jsg::JsArray(handle.As<v8::Array>());
+    if (array.size() > MAX_ATTRIBUTE_ARRAY_ELEMENTS) {
+      js.logWarning(kj::str("Ignoring span attribute \"", key, "\": array values may contain at ",
+          "most ", MAX_ATTRIBUTE_ARRAY_ELEMENTS, " elements."));
+      return kj::none;
+    }
+    KJ_IF_SOME(value, arrayToAttributeValue(js, array)) {
+      return kj::mv(value);
+    }
+    js.logWarning(kj::str("Ignoring span attribute \"", key,
+        "\": array values must be homogeneous arrays of strings, numbers, or booleans."));
+    return kj::none;
+  }
+
+  KJ_IF_SOME(scalar, scalarHandler.tryUnwrap(js, handle)) {
+    KJ_SWITCH_ONEOF(scalar) {
+      KJ_CASE_ONEOF(b, bool) {
+        return AttributeValue(b);
+      }
+      KJ_CASE_ONEOF(d, double) {
+        return AttributeValue(d);
+      }
+      KJ_CASE_ONEOF(s, kj::String) {
+        return AttributeValue(kj::ConstString(kj::mv(s)));
+      }
+    }
+  }
+  return kj::none;
 }
 
 // This is a CF semantic for warning conditions surfaced on spans, modeled on OpenTelemetry's exception
@@ -53,7 +183,7 @@ kj::LiteralStringConst spanWarningTypeName(SpanWarningType type) {
 // ======================================================================================
 // SpanState
 
-void SpanState::setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue) {
+void SpanState::setAttribute(kj::String key, kj::Maybe<AttributeValue> maybeValue) {
   if (!canRecordAttributes()) {
     return;
   }
@@ -61,7 +191,7 @@ void SpanState::setAttribute(kj::String key, kj::Maybe<TagValue> maybeValue) {
     if (bytesUsed > MAX_SPAN_BYTES) {
       return;
     }
-    size_t valueSize = estimateTagValueSize(value);
+    size_t valueSize = estimateAttributeValueSize(value);
     bytesUsed += key.size() + valueSize;
     if (bytesUsed > MAX_SPAN_BYTES) {
       recordSpanDataLimitError("attribute", key, valueSize);
@@ -130,7 +260,9 @@ class UserSpanState final: public SpanState {
     return builder.isObserved();
   }
 
-  void recordAttribute(kj::String key, TagValue value) override {
+  void recordAttribute(kj::String key, AttributeValue value) override {
+    // SpanBuilder::TagInitValue is a superset of AttributeValue, but kj::OneOf does not convert
+    // between different alternative sets, so re-dispatch per alternative.
     KJ_SWITCH_ONEOF(value) {
       KJ_CASE_ONEOF(b, bool) {
         builder.setTag(kj::ConstString(kj::mv(key)), b, IsCustomTag::YES);
@@ -138,8 +270,20 @@ class UserSpanState final: public SpanState {
       KJ_CASE_ONEOF(d, double) {
         builder.setTag(kj::ConstString(kj::mv(key)), d, IsCustomTag::YES);
       }
-      KJ_CASE_ONEOF(s, kj::String) {
+      KJ_CASE_ONEOF(i, int64_t) {
+        builder.setTag(kj::ConstString(kj::mv(key)), i, IsCustomTag::YES);
+      }
+      KJ_CASE_ONEOF(s, kj::ConstString) {
         builder.setTag(kj::ConstString(kj::mv(key)), kj::mv(s), IsCustomTag::YES);
+      }
+      KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
+        builder.setTag(kj::ConstString(kj::mv(key)), kj::mv(arr), IsCustomTag::YES);
+      }
+      KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
+        builder.setTag(kj::ConstString(kj::mv(key)), kj::mv(arr), IsCustomTag::YES);
+      }
+      KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
+        builder.setTag(kj::ConstString(kj::mv(key)), kj::mv(arr), IsCustomTag::YES);
       }
     }
   }
@@ -204,22 +348,11 @@ class InvocationSpanState final: public SpanState {
     return getIsTraced();
   }
 
-  void recordAttribute(kj::String key, TagValue value) override {
+  void recordAttribute(kj::String key, AttributeValue value) override {
     KJ_IF_SOME(valueContext, context) {
       KJ_IF_SOME(valueTracer, tracer) {
         valueTracer->runIfAlive([&](BaseTracer& tracer) {
-          KJ_SWITCH_ONEOF(value) {
-            KJ_CASE_ONEOF(b, bool) {
-              tracer.addSpanAttribute(valueContext, kj::ConstString(kj::mv(key)), b);
-            }
-            KJ_CASE_ONEOF(d, double) {
-              tracer.addSpanAttribute(valueContext, kj::ConstString(kj::mv(key)), d);
-            }
-            KJ_CASE_ONEOF(s, kj::String) {
-              tracer.addSpanAttribute(
-                  valueContext, kj::ConstString(kj::mv(key)), kj::ConstString(kj::mv(s)));
-            }
-          }
+          tracer.addSpanAttribute(valueContext, kj::ConstString(kj::mv(key)), kj::mv(value));
         });
       }
     }
@@ -265,7 +398,7 @@ class NoopSpanState final: public SpanState {
     return false;
   }
 
-  void recordAttribute(kj::String, TagValue) override {}
+  void recordAttribute(kj::String, AttributeValue) override {}
 
   void recordExceptionImpl(
       kj::Maybe<tracing::Exception::Code>, kj::String, kj::String, kj::Maybe<kj::String>) override {
@@ -289,10 +422,15 @@ bool Span::getIsTraced() {
   KJ_UNREACHABLE;
 }
 
-jsg::Ref<Span> Span::setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<TagValue> value) {
-  kj::Maybe<TagValue> maybeValue;
+jsg::Ref<Span> Span::setAttribute(jsg::Lock& js,
+    kj::String key,
+    jsg::Optional<jsg::Value> value,
+    const jsg::TypeHandler<TagValue>& scalarHandler) {
+  // Convert regardless of whether the span is traced so that invalid values behave the same way
+  // (coercion, warnings, TypeErrors) on traced and untraced spans.
+  kj::Maybe<AttributeValue> maybeValue;
   KJ_IF_SOME(v, value) {
-    maybeValue = kj::mv(v);
+    maybeValue = toAttributeValue(js, key, v.getHandle(js), scalarHandler);
   }
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
@@ -305,9 +443,11 @@ jsg::Ref<Span> Span::setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<T
   return JSG_THIS;
 }
 
-jsg::Ref<Span> Span::setAttributes(jsg::Lock& js, jsg::Dict<jsg::Optional<TagValue>> attributes) {
+jsg::Ref<Span> Span::setAttributes(jsg::Lock& js,
+    jsg::Dict<jsg::Optional<jsg::Value>> attributes,
+    const jsg::TypeHandler<TagValue>& scalarHandler) {
   for (auto& field: attributes.fields) {
-    setAttribute(js, kj::mv(field.name), kj::mv(field.value));
+    setAttribute(js, kj::mv(field.name), kj::mv(field.value), scalarHandler);
   }
   return JSG_THIS;
 }
