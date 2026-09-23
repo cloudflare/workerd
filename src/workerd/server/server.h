@@ -355,6 +355,10 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       capnp::List<config::Extension>::Reader extensions,
       ErrorReporter& errorReporter);
 
+  // The inbound listeners configured for the service `name`, as the Worker::Api of its Worker (and
+  // of the snapshot zygote built for it) reports them.
+  kj::Array<Worker::Api::InboundListener> copyInboundListeners(kj::StringPtr name);
+
   // Creates a throwaway zygote Worker in PREPARE_SNAPSHOT mode and return the
   // filled snapshot artifact.
   kj::Own<jsg::SnapshotArtifact> makeSnapshot(kj::StringPtr name,

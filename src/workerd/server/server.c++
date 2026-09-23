@@ -5720,6 +5720,19 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   co_return co_await makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);
 }
 
+kj::Array<Worker::Api::InboundListener> Server::copyInboundListeners(kj::StringPtr name) {
+  KJ_IF_SOME(l, inboundListeners.find(name)) {
+    return KJ_MAP(listener, l) {
+      return Worker::Api::InboundListener{
+        .protocol = kj::str(listener.protocol),
+        .address = kj::str(listener.address),
+        .port = listener.port,
+      };
+    };
+  }
+  return nullptr;
+}
+
 kj::Own<jsg::SnapshotArtifact> Server::makeSnapshot(kj::StringPtr name,
     WorkerDef& def,
     capnp::List<config::Extension>::Reader extensions,
@@ -5739,7 +5752,7 @@ kj::Own<jsg::SnapshotArtifact> Server::makeSnapshot(kj::StringPtr name,
 
   auto zygoteApi = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
       zygoteLimitEnforcer->getCreateParams(), isolateGroup, kj::mv(zygoteJsgObserver),
-      *memoryCacheProvider, pythonConfig,
+      *memoryCacheProvider, pythonConfig, copyInboundListeners(name),
       jsg::SnapshotConfig(jsg::MutableSnapshot{.artifact = kj::mv(snapshotArtifact)}));
 
   Worker::LoggingOptions zygoteLoggingOptions = loggingOptions;
@@ -5840,16 +5853,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();
-  kj::Array<Worker::Api::InboundListener> listeners;
-  KJ_IF_SOME(l, inboundListeners.find(name)) {
-    listeners = KJ_MAP(listener, l) {
-      return Worker::Api::InboundListener{
-        .protocol = kj::str(listener.protocol),
-        .address = kj::str(listener.address),
-        .port = listener.port,
-      };
-    };
-  }
+  auto listeners = copyInboundListeners(name);
   kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
   if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT)) {
     auto snapshotArtifact = makeSnapshot(name, def, extensions, errorReporter);
