@@ -1,0 +1,25 @@
+types/generated-snapshot/index.d.ts
+  s_8d31555d8aa9a2::t_3beef020ffd5f0 15140-15143
+types/generated-snapshot/index.ts
+  s_8d31555d8aa9a2::t_3beef020ffd5f0 15118-15121
+src/workerd/io/compatibility-date.capnp
+  s_8d31555d8aa9a2::t_ffe0aed6a5831d 1652-1657
+types/defines/rpc.d.ts
+  s_8d31555d8aa9a2::t_909cf43dd2afc0 267-270
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c1cdace65b56cca2ce868748ea7aee3c5fcd6014",
+  "prompts": {},
+  "sessions": {
+    "s_8d31555d8aa9a2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_00bb15518ffeqay9X4yN1Vlme7",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}

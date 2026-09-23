@@ -1,0 +1,21 @@
+src/rust/cxx/kj-rs-tokio/ffi.rs
+  s_2427bf394889ab::t_79345b25d5d7dc 3-8,11-16,20-78
+src/rust/cxx/kj-rs-tokio/port.rs
+  s_2427bf394889ab::t_4c7f043a480c70 17-18,113,116-119,121-122,124,129-130,132-133,168-170,188-189,357-358,360-369,371-379,381-382,389,449-455,457-474
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7aefa37592145ac8a5d2ea843043fa89cf69ad9f",
+  "prompts": {},
+  "sessions": {
+    "s_2427bf394889ab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28753db2-9693-4557-828c-5c58d097f066",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

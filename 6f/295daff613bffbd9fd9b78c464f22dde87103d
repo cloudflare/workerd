@@ -1,0 +1,111 @@
+src/workerd/api/js-writable-stream.h
+  s_8896da9a87a6e3::t_27866fa2a60d34 148-153
+src/workerd/api/sockets.c++
+  s_8896da9a87a6e3::t_547ee89c7b0cba 848,850
+  s_17ea49de39358e::t_9e801d624fc15a 10,18-19,24-50,55-104,150-176,261-311,329-332,359,530,727-738,744-747,751,753,758,763-765,804,810-847,849,851-854,860-921,923-928,930-937,941-974,980,986,988,998,1000,1010-1015
+  s_e6d5dcbb5c956b::t_3bea74812e2a3a 740-741
+  s_d9b20d3c39dbd9::t_3d7bf4ebaef445 992
+  s_e6d5dcbb5c956b::t_592a30c7d53fcc 805-809
+  s_e6d5dcbb5c956b::t_38ebb1a498a390 993-995,1002,1005-1007
+  s_d9b20d3c39dbd9::t_adc33949cc92ed 997,1009
+  s_e6d5dcbb5c956b::t_03cd0c5f56df4f 996
+  s_e6d5dcbb5c956b::t_e6bad61d598a64 748-750,752,754-757,759-762
+  s_d9b20d3c39dbd9::t_023a505b2d6e6c 983-985
+  s_e6d5dcbb5c956b::t_a7bc7957a34b7a 531
+  s_8896da9a87a6e3::t_cd03b6e847ecd2 991
+  s_8896da9a87a6e3::t_182cca1cbcb5ab 929,938-939
+  s_8896da9a87a6e3::t_9ae5c8f60aab9f 989-990,999,1001,1003
+  s_8896da9a87a6e3::t_da93b826f8d8b4 922,940
+  s_e6d5dcbb5c956b::t_82de7558f9277b 739,742-743
+  s_e6d5dcbb5c956b::t_b4cef32e3671f6 855-859
+  s_d9b20d3c39dbd9::t_6fee5bbf360e7b 1004,1008
+  s_17ea49de39358e::t_93d61b97c86c4f 1016-1017
+  s_d9b20d3c39dbd9::t_3667f8c9850f62 975-979,981-982,987
+  s_e6d5dcbb5c956b::t_4be4494e0464be 363
+  s_e6d5dcbb5c956b::t_e16362236ac267 52-54
+  s_e6d5dcbb5c956b::t_6d1d931f367b6a 51
+src/workerd/api/streams/readable.h
+  s_17ea49de39358e::t_9e801d624fc15a 558-564
+src/workerd/api/tests/outbound-interceptor-socket-test.js
+  s_17ea49de39358e::t_9e801d624fc15a 1-134,136-197
+  s_e6d5dcbb5c956b::t_a53acb123bd5cb 135
+src/workerd/api/streams/readable.c++
+  s_14b1f7810fca03::t_252cfe06508c1a 689
+  s_17ea49de39358e::t_9e801d624fc15a 687-688,690-691
+src/workerd/api/js-writable-stream.c++
+  s_8896da9a87a6e3::t_a3c4528ea5c72d 188-199
+src/workerd/api/sockets.h
+  s_17ea49de39358e::t_d79200fb7bf80d 248
+  s_17ea49de39358e::t_9e801d624fc15a 154-169,185-186,243-247
+src/workerd/api/tests/outbound-interceptor-socket-test.wd-test
+  s_e6d5dcbb5c956b::t_4969244519186d 12
+  s_17ea49de39358e::t_9e801d624fc15a 1-11,13-60,65
+  s_e6d5dcbb5c956b::t_395da87f672a93 61-64
+src/workerd/api/tests/js-rpc-test.js
+  s_17ea49de39358e::t_9e801d624fc15a 286-304,634-639,911-957
+src/workerd/io/worker-interface.capnp
+  s_17ea49de39358e::t_9e801d624fc15a 529-533,565-571,639-658
+  s_17ea49de39358e::t_3dec22a97c86cd 659
+src/workerd/api/tests/BUILD.bazel
+  s_17ea49de39358e::t_546bc5c8f5d9e4 902
+  s_17ea49de39358e::t_9e801d624fc15a 903-907
+src/workerd/api/js-readable-stream.c++
+  s_8896da9a87a6e3::t_8ef3a427ecc16b 1048-1059
+tools/cross/format.py
+  s_17ea49de39358e::t_9e801d624fc15a 2
+src/workerd/util/autogate.h
+  s_e6d5dcbb5c956b::t_0d31731e7fee4e 102-106
+src/workerd/api/tests/js-rpc-socket-test.wd-test
+  s_17ea49de39358e::t_9e801d624fc15a 35-37
+  s_e6d5dcbb5c956b::t_9f7010ddf6d9ba 110-113
+src/workerd/api/js-readable-stream.h
+  s_8896da9a87a6e3::t_f16f84acb3e439 226-231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6f295daff613bffbd9fd9b78c464f22dde87103d",
+  "prompts": {},
+  "sessions": {
+    "s_14b1f7810fca03": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04b09f4f0ffeP37jNKEiysozF0",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    },
+    "s_17ea49de39358e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_073ddd5c0ffeznqJdf646gs4Le",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "adriangracia <agracia@cloudflare.com>"
+    },
+    "s_8896da9a87a6e3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0706f4108ffeaQniwkIu2fBW02",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    },
+    "s_d9b20d3c39dbd9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_051b6a388ffeJ6Umje40bfTwiR",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    },
+    "s_e6d5dcbb5c956b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04be23f3affe0QExKcwUHt9BfF",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}

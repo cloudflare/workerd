@@ -1,0 +1,19 @@
+src/workerd/api/actor.c++
+  s_bf1ef2329fbd5a::t_d7e30e190dc36d 115-117,120-129,145,147,158-160,163-168,185,187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a5d657f9a2cd9a20cec813a9dbb027aa7ac49b24",
+  "prompts": {},
+  "sessions": {
+    "s_bf1ef2329fbd5a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f853bc28bffe5fdudebM6gGEQz",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+src/workerd/api/actor-state.c++
+  s_2192e8a6d105f9::t_bcffd0a2341efb 989-990,1005-1006
+src/workerd/api/actor.c++
+  s_2192e8a6d105f9::t_cf4b3733eee18b 46,62-63,99,115-116,126,143-144
+src/workerd/api/actor.h
+  s_2192e8a6d105f9::t_1d3f959b2c92d3 349-350,384-385,410-411
+src/workerd/api/tests/tail-worker-test.js
+  s_2192e8a6d105f9::t_3fe370a21ebb0f 256,351-352
+src/workerd/api/worker-rpc.h
+  s_2192e8a6d105f9::t_868ea1e0a00e28 170-172,174-180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "233ef5fbd70395d96e9c98fcaf1829a20d78a7e7",
+  "prompts": {},
+  "sessions": {
+    "s_2192e8a6d105f9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0949d7839ffe3PH73618sV9aBi",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

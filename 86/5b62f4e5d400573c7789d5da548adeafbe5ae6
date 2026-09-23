@@ -1,0 +1,19 @@
+deps/rust/Cargo.toml
+  s_b5100e8818a1d4::t_47f4feff081ee7 35-38,44-48,50-57,62-63,66-84,87-89,92-99,103-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "865b62f4e5d400573c7789d5da548adeafbe5ae6",
+  "prompts": {},
+  "sessions": {
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

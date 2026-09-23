@@ -1,0 +1,47 @@
+src/rust/api/lib.rs
+  s_b5100e8818a1d4::t_865dfa426e2d88 5-27
+src/rust/clippy.toml
+  s_b5100e8818a1d4::t_2aa308c22ed16b 2-6
+src/rust/cxx-integration/lib.rs
+  s_b5100e8818a1d4::t_3bfb83aed41e38 1-24,33-36
+src/rust/encoding/lib.rs
+  s_b5100e8818a1d4::t_d39213abb728ca 56,87-95,105-111,114-116,121,217-238
+src/rust/jsg-macros/lib.rs
+  s_b5100e8818a1d4::t_c8aea9b778245a 22-23,245-263,265-269
+src/rust/net/lib.rs
+  s_b5100e8818a1d4::t_6fce5990212f14 1-25
+src/rust/python-parser/lib.rs
+  s_b5100e8818a1d4::t_04b9aec8e7a7fd 1-24
+src/rust/transpiler/lib.rs
+  s_b5100e8818a1d4::t_5d6707207851fa 1-24
+src/rust/worker/cxx_worker.rs
+  s_b5100e8818a1d4::t_31f281f46b861b 187-193,196-197
+src/workerd/tests/test-fixture.c++
+  s_b5100e8818a1d4::t_baa3b2f74b4769 333
+src/workerd/tests/test-fixture.h
+  s_d7a0f11aec7afd::t_bda101331fb6fa 94,173,184,241,243-250
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e143a0a8dbcbf507493ee23f9b7bd6b4f9af58d3",
+  "prompts": {},
+  "sessions": {
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    },
+    "s_d7a0f11aec7afd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a697c8e623f0d79b7",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

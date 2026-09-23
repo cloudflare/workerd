@@ -1,0 +1,28 @@
+src/workerd/api/js-writable-stream.h
+  s_8896da9a87a6e3::t_27866fa2a60d34 148-153
+src/workerd/api/js-writable-stream.c++
+  s_8896da9a87a6e3::t_a3c4528ea5c72d 188-199
+src/workerd/api/sockets.c++
+  s_8896da9a87a6e3::t_547ee89c7b0cba 839,841
+  s_8896da9a87a6e3::t_182cca1cbcb5ab 908,915,924-926
+src/workerd/api/js-readable-stream.h
+  s_8896da9a87a6e3::t_f16f84acb3e439 222-227
+src/workerd/api/js-readable-stream.c++
+  s_8896da9a87a6e3::t_8ef3a427ecc16b 526-537
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6c98f51504f534e25e5518a613ebb72d563b1877",
+  "prompts": {},
+  "sessions": {
+    "s_8896da9a87a6e3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0706f4108ffeaQniwkIu2fBW02",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "adriangracia <agracia@cloudflare.com>"
+    }
+  }
+}

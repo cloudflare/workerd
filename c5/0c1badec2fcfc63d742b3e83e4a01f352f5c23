@@ -1,0 +1,19 @@
+src/workerd/api/tests/opennextjs/opennext-ssr-test.js
+  s_be8633d2f74409::t_d4211b0e323a78 354-368
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c50c1badec2fcfc63d742b3e83e4a01f352f5c23",
+  "prompts": {},
+  "sessions": {
+    "s_be8633d2f74409": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f6e9a902bffeKLYznplfm4do2p",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Dario Piotrowicz <dario@cloudflare.com>"
+    }
+  }
+}

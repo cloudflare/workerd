@@ -1,0 +1,19 @@
+src/workerd/api/tests/jsrpc-callback-trace-test-tail.js
+  s_ab4e43acd62623::t_97364d405e3d5c 16,34,53-54,92,96-101,111-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "662074154acdc4bc2da290c8b81d774c3b39c1a3",
+  "prompts": {},
+  "sessions": {
+    "s_ab4e43acd62623": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0dd95e56cffeOLXlCNwX9ixaK3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

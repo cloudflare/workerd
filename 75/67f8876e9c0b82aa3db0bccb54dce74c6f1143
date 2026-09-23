@@ -1,0 +1,53 @@
+src/workerd/api/js-readable-stream.c++
+  s_8896da9a87a6e3::t_8ef3a427ecc16b 1048-1059
+src/workerd/api/js-writable-stream.c++
+  s_8896da9a87a6e3::t_a3c4528ea5c72d 188-199
+src/workerd/api/js-writable-stream.h
+  s_8896da9a87a6e3::t_27866fa2a60d34 148-153
+src/workerd/api/js-readable-stream.h
+  s_8896da9a87a6e3::t_f16f84acb3e439 226-231
+src/workerd/api/streams/readable.c++
+  s_17ea49de39358e::t_9e801d624fc15a 680,757
+  s_17ea49de39358e::t_6da2e1716361a0 758-759
+src/workerd/api/sockets.c++
+  s_8896da9a87a6e3::t_cd03b6e847ecd2 975-976
+  s_d9b20d3c39dbd9::t_3667f8c9850f62 961-965,967-969,971
+  s_8896da9a87a6e3::t_9ae5c8f60aab9f 973-974,977,982,984-988
+  s_8896da9a87a6e3::t_182cca1cbcb5ab 915,924-925
+  s_17ea49de39358e::t_9e801d624fc15a 972,983
+  s_d9b20d3c39dbd9::t_adc33949cc92ed 978-980,989-991
+  s_8896da9a87a6e3::t_da93b826f8d8b4 908,926
+  s_8896da9a87a6e3::t_547ee89c7b0cba 839,841
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7567f8876e9c0b82aa3db0bccb54dce74c6f1143",
+  "prompts": {},
+  "sessions": {
+    "s_17ea49de39358e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_073ddd5c0ffeznqJdf646gs4Le",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "adriangracia <agracia@cloudflare.com>"
+    },
+    "s_8896da9a87a6e3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0706f4108ffeaQniwkIu2fBW02",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    },
+    "s_d9b20d3c39dbd9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_051b6a388ffeJ6Umje40bfTwiR",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}

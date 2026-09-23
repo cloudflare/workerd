@@ -1,0 +1,19 @@
+src/workerd/util/sqlite-test.c++
+  s_9ba3d8a42a37b3::t_63bd0e11b124fa 108-109,111-112,114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7cf211d93094478c2d025358add93d9a23bf00ee",
+  "prompts": {},
+  "sessions": {
+    "s_9ba3d8a42a37b3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_099ff4091ffezSNBST9KDYtay2",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Josh Howard <jhoward@cloudflare.com>"
+    }
+  }
+}

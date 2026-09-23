@@ -1,0 +1,23 @@
+patches/sqlite/0001-row-counts-plain.patch
+  s_eacf6a9cbc0c7d::t_d3b41ac12a2371 2-5,8,21-23,57-59,71,83,95,107,119,131,143,155,167,179,191,204-206,219-221,234
+patches/sqlite/0002-macOS-missing-PATH-fix.patch
+  s_eacf6a9cbc0c7d::t_998026f922cc57 1-4,7,9
+patches/sqlite/0004-authorizer-rename-to-destination-name.patch
+  s_eacf6a9cbc0c7d::t_6067daaa56c448 1-5,17-128
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ed532027d01d0914943a19e9ae9be4fda305118b",
+  "prompts": {},
+  "sessions": {
+    "s_eacf6a9cbc0c7d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe382f332ffe0MztlX0GTgcgth",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Josh Howard <jhoward@cloudflare.com>"
+    }
+  }
+}

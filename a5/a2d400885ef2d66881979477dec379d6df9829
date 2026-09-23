@@ -1,0 +1,23 @@
+src/workerd/server/server-test.c++
+  s_33f783c6810b62::t_2cefcbdd5694f4 3960-4072
+src/workerd/server/server.c++
+  s_33f783c6810b62::t_bb09a0c5b158eb 6334-6426,6431-6433,6439-6440,6575-6576
+src/workerd/server/server.h
+  s_33f783c6810b62::t_6588815bd2f9ed 299-303
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a5a2d400885ef2d66881979477dec379d6df9829",
+  "prompts": {},
+  "sessions": {
+    "s_33f783c6810b62": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_02e50f771ffe7ImBWdtQsmjXOR",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Pete Bacon Darwin <pbacondarwin@cloudflare.com>"
+    }
+  }
+}
