@@ -5734,11 +5734,41 @@ kj::Array<Worker::Api::InboundListener> Server::copyInboundListeners(kj::StringP
 }
 
 bool Server::isStartupSnapshotEligible(const WorkerDef& def) {
-  return !def.featureFlags.getPythonWorkers() && !def.featureFlags.getNewModuleRegistry() &&
-      !def.source.variant.is<WorkerSource::ScriptSource>();
+  if (def.featureFlags.getPythonWorkers() || def.featureFlags.getNewModuleRegistry()) return false;
+  KJ_IF_SOME(modules, def.source.variant.tryGet<Worker::Script::ModulesSource>()) {
+    // V8 cannot put a compiled Wasm module in a startup snapshot: its wasm engine keeps global
+    // handles to the module's script.
+    for (auto& module: modules.modules) {
+      if (module.content.is<Worker::Script::WasmModule>()) return false;
+    }
+    return true;
+  }
+  return false;
 }
 
-kj::Own<jsg::SnapshotArtifact> Server::makeSnapshot(kj::StringPtr name,
+namespace {
+
+// Holds what a snapshot zygote reports while it starts, so that a failed start is reported once,
+// by the Worker built without a snapshot, rather than twice. Entrypoints are validated on that
+// Worker, not on the zygote.
+struct ZygoteErrorReporter final: public Worker::ValidationErrorReporter {
+  kj::Vector<kj::String> errors;
+  kj::Vector<kj::String> warnings;
+
+  void addError(kj::String error) override {
+    errors.add(kj::mv(error));
+  }
+  void addWarning(kj::String warning) override {
+    warnings.add(kj::mv(warning));
+  }
+  void addEntrypoint(kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {}
+  void addActorClass(kj::StringPtr exportName) override {}
+  void addWorkflowClass(kj::StringPtr exportName, kj::Array<kj::String> methods) override {}
+};
+
+}  // namespace
+
+kj::Maybe<kj::Own<jsg::SnapshotArtifact>> Server::makeSnapshot(kj::StringPtr name,
     WorkerDef& def,
     capnp::List<config::Extension>::Reader extensions,
     ErrorReporter& errorReporter) {
@@ -5769,8 +5799,9 @@ kj::Own<jsg::SnapshotArtifact> Server::makeSnapshot(kj::StringPtr name,
 
   auto zygoteArtifactBundler = workerd::api::pyodide::ArtifactBundler::makeDisabledBundler();
 
+  ZygoteErrorReporter zygoteErrorReporter;
   auto zygoteScript = zygoteIsolate->newScript(name, def.source, IsolateObserver::StartType::COLD,
-      SpanParent(nullptr), kj::mv(zygoteWorkerFs), false, errorReporter,
+      SpanParent(nullptr), kj::mv(zygoteWorkerFs), false, zygoteErrorReporter,
       kj::mv(zygoteArtifactBundler),
       /*newModuleRegistry=*/kj::none);
 
@@ -5782,7 +5813,11 @@ kj::Own<jsg::SnapshotArtifact> Server::makeSnapshot(kj::StringPtr name,
   auto zygoteWorker =
       kj::atomicRefcounted<Worker>(kj::mv(zygoteScript), kj::atomicRefcounted<WorkerObserver>(),
           kj::mv(zygoteCompileBindings), IsolateObserver::StartType::COLD, SpanParent(nullptr),
-          Worker::Lock::TakeSynchronously(kj::none), errorReporter);
+          Worker::Lock::TakeSynchronously(kj::none), zygoteErrorReporter);
+  if (zygoteErrorReporter.errors.size() > 0) return kj::none;
+  for (auto& warning: zygoteErrorReporter.warnings) {
+    errorReporter.addWarning(kj::mv(warning));
+  }
 
   kj::Own<jsg::SnapshotArtifact> extractedArtifact;
   zygoteIsolate->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](jsg::Lock& lock) {
@@ -5866,10 +5901,11 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       isStartupSnapshotEligible(def)) {
     // The Worker's read-only heap comes from its snapshot, which neither the default group (built
     // from V8's own snapshot) nor the zygote's group holds; see makeSnapshot().
-    auto snapshotArtifact = makeSnapshot(name, def, extensions, errorReporter);
-    isolateGroup = v8::IsolateGroup::Create();
-    snapshotConfig =
-        jsg::SnapshotConfig(jsg::ReadonlySharedSnapshot{.artifact = snapshotArtifact->addRef()});
+    KJ_IF_SOME(snapshotArtifact, makeSnapshot(name, def, extensions, errorReporter)) {
+      isolateGroup = v8::IsolateGroup::Create();
+      snapshotConfig =
+          jsg::SnapshotConfig(jsg::ReadonlySharedSnapshot{.artifact = snapshotArtifact->addRef()});
+    }
   }
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
       limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,

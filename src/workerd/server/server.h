@@ -360,13 +360,15 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::Array<Worker::Api::InboundListener> copyInboundListeners(kj::StringPtr name);
 
   // Whether the startup-snapshot pipeline (the STARTUP_SNAPSHOT autogate) covers this worker. It
-  // does not yet support Python workers, the new module registry or service-worker syntax; such a
-  // worker starts without a snapshot. A covered worker whose capture fails does not load.
+  // does not yet support Python workers, the new module registry, service-worker syntax or Wasm
+  // modules (which V8 cannot snapshot); such a worker starts without a snapshot. A covered worker
+  // whose capture fails does not load.
   static bool isStartupSnapshotEligible(const WorkerDef& def);
 
   // Creates a throwaway zygote Worker in PREPARE_SNAPSHOT mode and return the
-  // filled snapshot artifact.
-  kj::Own<jsg::SnapshotArtifact> makeSnapshot(kj::StringPtr name,
+  // filled snapshot artifact, or kj::none if the worker failed to start (a duplicate module name, a
+  // top-level exception): the Worker then starts without a snapshot and reports the failure itself.
+  kj::Maybe<kj::Own<jsg::SnapshotArtifact>> makeSnapshot(kj::StringPtr name,
       WorkerDef& def,
       capnp::List<config::Extension>::Reader extensions,
       ErrorReporter& errorReporter);

@@ -757,9 +757,14 @@ struct Worker::Isolate::Impl {
       // can never trigger in Cloudflare's production runtime. (The flag itself is `$experimental`,
       // which already bars production use, but we double-guard with the same invariant the
       // DevTools inspector relies on.)
+      //
+      // A startup-snapshot zygote gets no inspector: the V8 inspector holds global handles to the
+      // contexts and scripts it has seen, which a snapshot cannot hold, and nobody can connect to
+      // a zygote. The Worker restored from its snapshot gets the inspector instead.
       bool enableInspectorForNodeModule =
           featureFlags.getEnableNodeJsInspectorLocalDev() && !isMultiTenantProcess();
-      if (inspectorPolicy != InspectorPolicy::DISALLOW || enableInspectorForNodeModule) {
+      if ((inspectorPolicy != InspectorPolicy::DISALLOW || enableInspectorForNodeModule) &&
+          !jsg::IsolateBase::from(lock->v8Isolate).isPreparingSnapshot()) {
         // We just created our isolate, so we don't need to use Isolate::Impl::Lock.
         KJ_ASSERT(!isMultiTenantProcess(), "inspector is not safe in multi-tenant processes");
         inspector = v8_inspector::V8Inspector::create(lock->v8Isolate, inspectorClient.get());
