@@ -13,12 +13,14 @@ import {
 } from 'cloudflare-internal:to-markdown-api';
 
 type AiSearchService = object;
+type WebSearchService = object;
 
 const aiBindingExperimental = !!Cloudflare.compatibilityFlags['experimental'];
 
 interface Fetcher {
   fetch: typeof fetch;
   aiSearch: () => AiSearchService;
+  websearch: (request: AiWebSearchRequest) => WebSearchService;
   gateway: (gatewayId: string) => AiGateway;
   autorag: (autoragId?: string) => AutoRAG;
   toMarkdown: () => ToMarkdownService;
@@ -49,6 +51,14 @@ export type AiOptions = {
    */
   sessionOptions?: SessionOptions;
   signal?: AbortSignal;
+};
+
+export type AiWebSearchRequest = {
+  gatewayId: string;
+  query: string;
+  limit?: number;
+  provider?: string;
+  byokAlias?: string;
 };
 
 type CleanedAiOptions = Omit<
@@ -463,6 +473,10 @@ export class Ai extends wrappedBinding.WrappedBinding {
 
   aiSearch(): AiSearchService {
     return this.#fetcher.aiSearch();
+  }
+
+  websearch(request: AiWebSearchRequest): WebSearchService {
+    return this.#fetcher.websearch(request);
   }
 }
 

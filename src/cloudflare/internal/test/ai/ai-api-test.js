@@ -250,6 +250,45 @@ export const tests = {
     }
 
     {
+      // Test web search
+      const resp = await env.ai.websearch({
+        gatewayId: 'my-gateway',
+        provider: 'exa',
+        query: 'Cloudflare Workers',
+        limit: 5,
+        byokAlias: 'default',
+      });
+
+      assert.deepStrictEqual(await resp.json(), {
+        requestUrl:
+          'https://workers-binding.ai/ai-gateway/gateways/my-gateway/websearch',
+        body: {
+          provider: 'exa',
+          query: 'Cloudflare Workers',
+          limit: 5,
+          byokAlias: 'default',
+        },
+      });
+    }
+
+    {
+      // Test invalid web search gateway IDs
+      for (const gatewayId of ['', '   ', null]) {
+        await assert.rejects(
+          env.ai.websearch({
+            gatewayId,
+            provider: 'exa',
+            query: 'Cloudflare Workers',
+          }),
+          {
+            name: 'Error',
+            message: 'Invalid gateway ID',
+          }
+        );
+      }
+    }
+
+    {
       // Test unwanted options not getting sent upstream
       const resp = await env.ai.run(
         'rawInputs',

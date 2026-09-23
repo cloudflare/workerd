@@ -3,6 +3,22 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export default {
+  async websearch({ gatewayId, provider, query, limit, byokAlias }) {
+    if (typeof gatewayId !== 'string' || gatewayId.trim() === '') {
+      throw new Error('Invalid gateway ID');
+    }
+
+    return Response.json({
+      requestUrl: `https://workers-binding.ai/ai-gateway/gateways/${encodeURIComponent(gatewayId)}/websearch`,
+      body: {
+        provider,
+        query,
+        ...(limit !== undefined ? { limit } : {}),
+        ...(byokAlias !== undefined ? { byokAlias } : {}),
+      },
+    });
+  },
+
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
@@ -31,6 +47,13 @@ export default {
             ],
           },
         ],
+      });
+    }
+
+    if (url.pathname === '/ai-gateway/gateways/my-gateway/websearch') {
+      return Response.json({
+        requestUrl: request.url,
+        body: await request.json(),
       });
     }
 
