@@ -159,6 +159,8 @@ class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
     counter: RpcStub<TestCounter>,
     _map: Map<RpcStub<TestCounter>, RpcStub<TestCounter>>,
     _set: Set<RpcStub<TestCounter>>,
+    _readonlyMap: ReadonlyMap<RpcStub<TestCounter>, RpcStub<TestCounter>>,
+    _readonlySet: ReadonlySet<RpcStub<TestCounter>>,
     _array: Array<RpcStub<TestCounter>>,
     _readonlyArray: ReadonlyArray<RpcStub<TestCounter>>,
     _object: { a: { b: RpcStub<TestCounter> } }
@@ -216,6 +218,8 @@ class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
       RegExp: /abc/,
       Map: new Map([['a', 1]]),
       Set: new Set(['a']),
+      ReadonlyMap: new Map([['a', 1]]) as ReadonlyMap<string, number>,
+      ReadonlySet: new Set(['a']) as ReadonlySet<string>,
       Array: [1, 2, 3],
       ReadonlyArray: [4, 5, 6] as const,
       Object: { a: { b: 1 } },
@@ -231,6 +235,10 @@ class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
     return {
       Map: new Map([[new TestCounter(), new TestCounter()]]),
       Set: new Set([new TestCounter()]),
+      ReadonlyMap: new Map([
+        [new TestCounter(), new TestCounter()],
+      ]) as ReadonlyMap<TestCounter, TestCounter>,
+      ReadonlySet: new Set([new TestCounter()]) as ReadonlySet<TestCounter>,
       Array: [new TestCounter()],
       ReadonlyArray: [new TestCounter()] as const,
       Object: { a: { b: new TestCounter() } },
@@ -691,6 +699,12 @@ export default <ExportedHandler<Env>>{
         Map<RpcStub<TestCounter>, RpcStub<TestCounter>>
       >();
       expectTypeOf(ecs.Set).toEqualTypeOf<Set<RpcStub<TestCounter>>>();
+      expectTypeOf(ecs.ReadonlyMap).toEqualTypeOf<
+        ReadonlyMap<RpcStub<TestCounter>, RpcStub<TestCounter>>
+      >();
+      expectTypeOf(ecs.ReadonlySet).toEqualTypeOf<
+        ReadonlySet<RpcStub<TestCounter>>
+      >();
       expectTypeOf(ecs.Array).toEqualTypeOf<Array<RpcStub<TestCounter>>>();
       expectTypeOf(ecs.ReadonlyArray).toEqualTypeOf<
         ReadonlyArray<RpcStub<TestCounter>>
@@ -730,6 +744,8 @@ export default <ExportedHandler<Env>>{
           counter: TestCounter,
           map: Map<TestCounter, TestCounter>,
           set: Set<TestCounter>,
+          readonlyMap: ReadonlyMap<TestCounter, TestCounter>,
+          readonlySet: ReadonlySet<TestCounter>,
           array: Array<TestCounter>,
           readonlyArray: ReadonlyArray<TestCounter>,
           object: { a: { b: TestCounter } }
