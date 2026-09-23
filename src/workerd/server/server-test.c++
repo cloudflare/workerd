@@ -2624,7 +2624,7 @@ KJ_TEST("Server: named images and directory snapshots are not startup sources") 
   conn.httpGet200("/", "Container failed to start; Docker requests: 0");
 }
 
-KJ_TEST("Server: rejects Durable Object retry policy values above the system limits") {
+KJ_TEST("Server: rejects Durable Object retry policy values outside the system limits") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2024-10-01",
     modules = [
@@ -2639,11 +2639,25 @@ KJ_TEST("Server: rejects Durable Object retry policy values above the system lim
           retryPolicy = (maxAttempts = 11),
         )
       ),
+      ( name = "shortTimeout",
+        durableObjectNamespace = (
+          className = "MyActorClass",
+          retryPolicy = (timeoutMs = 499),
+        )
+      ),
+      ( name = "longTimeout",
+        durableObjectNamespace = (
+          className = "MyActorClass",
+          retryPolicy = (timeoutMs = 60001),
+        )
+      ),
     ],
   ))"_kj));
 
   test.expectErrors(R"(
-    service hello: Worker "hello"'s binding "attempts" has a Durable Object retry policy above the system limit.
+    service hello: Worker "hello"'s binding "attempts" has a Durable Object retry policy outside the system limits.
+    service hello: Worker "hello"'s binding "shortTimeout" has a Durable Object retry policy outside the system limits.
+    service hello: Worker "hello"'s binding "longTimeout" has a Durable Object retry policy outside the system limits.
   )"_blockquote);
 }
 

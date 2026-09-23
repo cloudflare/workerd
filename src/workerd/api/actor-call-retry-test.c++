@@ -310,6 +310,29 @@ KJ_TEST("user-defined retry count excludes the initial attempt") {
   checkAttemptCount(UserDefinedRetryPolicy{}, ActorRetryPolicy::systemDefault().maxAttempts());
 }
 
+KJ_TEST("user-defined retry timeout defaults to the system retry timeout") {
+  KJ_EXPECT(ActorRetryPolicy::userDefined(UserDefinedRetryPolicy{}).timeout() ==
+      ActorRetryPolicy::systemDefault().timeout());
+}
+
+KJ_TEST("expiring a configured retry timeout returns the original disconnect") {
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto state = newRetryState(timer, *observer,
+      ActorRetryPolicy::userDefined(UserDefinedRetryPolicy{.timeout = 500 * kj::MILLISECONDS}));
+
+  startAttempt(*state);
+  KJ_EXPECT(handleFailure(*state, makeDisconnect("original disconnect"_kj)).is<kj::Duration>());
+  startAttempt(*state);
+  timer.advance(500 * kj::MILLISECONDS);
+
+  auto result = handleFailure(*state, makeDisconnect("second disconnect"_kj));
+  auto& failure = KJ_ASSERT_NONNULL(result.tryGet<kj::Exception>());
+  KJ_EXPECT(failure.getDescription().contains("original disconnect"));
+  KJ_ASSERT(observer->outcomes.size() == 1);
+  KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
+}
+
 KJ_TEST("actor retries return the original disconnect when the deadline expires before retry") {
   TestTimerChannel timer;
   auto observer = kj::refcounted<RecordingObserver>();

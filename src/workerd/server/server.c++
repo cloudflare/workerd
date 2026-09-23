@@ -4865,14 +4865,18 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       kj::Maybe<api::UserDefinedRetryPolicy> userDefinedRetryPolicy;
       if (actorBinding.hasRetryPolicy()) {
         auto retryPolicy = actorBinding.getRetryPolicy();
-        if (retryPolicy.getMaxAttempts() > api::UserDefinedRetryPolicy::MAX_CONFIGURABLE_ATTEMPTS) {
+        auto retryTimeout = retryPolicy.getTimeoutMs() * kj::MILLISECONDS;
+        if (retryPolicy.getMaxAttempts() > api::UserDefinedRetryPolicy::MAX_CONFIGURABLE_ATTEMPTS ||
+            retryTimeout < api::UserDefinedRetryPolicy::MIN_CONFIGURABLE_TIMEOUT ||
+            retryTimeout > api::UserDefinedRetryPolicy::MAX_CONFIGURABLE_TIMEOUT) {
           errorReporter.addError(kj::str(errorContext,
-              " has a Durable Object retry policy above "
-              "the system limit."));
+              " has a Durable Object retry policy outside "
+              "the system limits."));
           return kj::none;
         }
         userDefinedRetryPolicy = api::UserDefinedRetryPolicy{
           .maxAttempts = retryPolicy.getMaxAttempts(),
+          .timeout = retryTimeout,
         };
       }
 
