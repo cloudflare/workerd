@@ -9,7 +9,7 @@
 pub mod test_date;
 mod test_futures;
 mod test_maybe;
-mod test_own;
+pub mod test_own;
 mod test_refcount;
 
 use kj_rs::KjOwn;
@@ -108,6 +108,26 @@ pub mod ffi {
         fn rust_take_own_driver();
     }
 
+    // A polymorphic base that is not at offset 0 of the complete object it is held through.
+    unsafe extern "C++" {
+        include!("kj-rs-demo/test-own.h");
+        type SecondBase;
+        fn second(&self) -> u64;
+
+        fn heap_two_base() -> KjOwn<SecondBase>;
+        fn rust_drop_recorded_two_base_driver() -> bool;
+        fn rust_drop_heap_two_base_driver() -> u64;
+        fn two_base_destroyed() -> u64;
+    }
+
+    // Declared here without a `KjOwn<TwoBase>`, so this bridge generates no `OwnTarget` for it;
+    // `test_own::alias_ffi` aliases it and asks for one with `impl KjOwn<TwoBase> {}`.
+    unsafe extern "C++" {
+        include!("kj-rs-demo/test-own.h");
+        type TwoBase;
+        fn first(&self) -> u64;
+    }
+
     unsafe extern "C++" {
         include!("kj-rs-demo/test-refcount.h");
 
@@ -165,6 +185,7 @@ pub mod ffi {
         fn modify_own_return(cpp_own: KjOwn<OpaqueCxxClass>) -> KjOwn<OpaqueCxxClass>;
         fn take_own(cpp_own: KjOwn<OpaqueCxxClass>);
         fn get_null() -> KjOwn<OpaqueCxxClass>;
+        fn take_second_base(own: KjOwn<SecondBase>);
     }
 
     unsafe extern "C++" {
@@ -355,6 +376,11 @@ pub fn take_own(cpp_own: KjOwn<ffi::OpaqueCxxClass>) {
     // The point of this function is to drop the [`Own`] from rust and this makes
     // it explicit, while avoiding a clippy lint
     std::mem::drop(cpp_own);
+}
+
+pub fn take_second_base(own: KjOwn<ffi::SecondBase>) {
+    assert_eq!(own.second(), 2);
+    std::mem::drop(own);
 }
 
 pub async fn lifetime_arg_void<'a>(_buf: &'a [u8]) {}

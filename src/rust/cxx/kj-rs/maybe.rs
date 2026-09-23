@@ -75,7 +75,7 @@ unsafe impl<T> HasNiche for Pin<&mut T> {
 
 // In `kj`, `kj::Own<T>` are considered `none` in a `Maybe` if the data pointer is null
 // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-unsafe impl<T> HasNiche for crate::repr::KjOwn<T> {
+unsafe impl<T: crate::OwnTarget> HasNiche for crate::repr::KjOwn<T> {
     fn is_niche(value: *const Self) -> bool {
         // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
         unsafe { (*value).as_ptr().is_null() }
@@ -142,11 +142,12 @@ pub unsafe trait MaybeItem: Sized {
 }
 
 /// Macro to implement [`MaybeItem`] for `T` which implment [`HasNiche`].
-/// Avoids running into generic specialization problems.
+/// Avoids running into generic specialization problems. A type may bound its parameter with
+/// `Type<T> where T: Bound`.
 macro_rules! impl_maybe_item_for_has_niche {
-    ($ty:ty) => {
+    (@impl [$($generics:tt)*] $ty:ty) => {
         // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-        unsafe impl<T> MaybeItem for $ty {
+        unsafe impl<$($generics)*> MaybeItem for $ty {
             type Discriminant = ();
 
             fn is_some(value: &KjMaybe<Self>) -> bool {
@@ -171,6 +172,12 @@ macro_rules! impl_maybe_item_for_has_niche {
                 }
             }
         }
+    };
+    ($ty:ty where T: $bound:path) => {
+        impl_maybe_item_for_has_niche!(@impl [T: $bound] $ty);
+    };
+    ($ty:ty) => {
+        impl_maybe_item_for_has_niche!(@impl [T] $ty);
     };
     ($ty:ty, $($tail:ty),+) => {
         impl_maybe_item_for_has_niche!($ty);
@@ -215,14 +222,8 @@ macro_rules! impl_maybe_item_for_primitive {
     };
 }
 
-impl_maybe_item_for_has_niche!(
-    crate::KjOwn<T>,
-    crate::KjRc<T>,
-    crate::KjArc<T>,
-    &T,
-    &mut T,
-    Pin<&mut T>
-);
+impl_maybe_item_for_has_niche!(crate::KjOwn<T> where T: crate::OwnTarget);
+impl_maybe_item_for_has_niche!(crate::KjRc<T>, crate::KjArc<T>, &T, &mut T, Pin<&mut T>);
 impl_maybe_item_for_primitive!(
     u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64, bool, &str, String
 );
