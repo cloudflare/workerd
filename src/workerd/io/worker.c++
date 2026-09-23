@@ -2024,22 +2024,17 @@ v8::Local<v8::Map> snapshotOwnProperties(jsg::Lock& js, v8::Local<v8::Object> sc
 }
 
 // In an isolate restored from a snapshot, once the bindings are compiled: re-binds every binding
-// wrapper the zygote's worker retained to the freshly compiled binding of the same name, and puts
-// the retained wrapper back on `bindingsScope` so that `env.X` keeps its identity too. See
-// IsolateBase::recordSnapshotBindings().
+// wrapper the zygote's worker retained to the freshly compiled binding of the same name. See
+// IsolateBase::recordSnapshotBindings(). The inner bindings of wrapped bindings were re-bound as
+// they were compiled, so nothing should be left over.
 void rebindRetainedBindingsFromSnapshot(jsg::Lock& js, v8::Local<v8::Object> bindingsScope) {
-  auto context = js.v8Context();
-  for (auto& pending: jsg::IsolateBase::from(js.v8Isolate).takePendingSnapshotBindingRestores()) {
-    auto holder = pending.holder.Get(js.v8Isolate);
-    auto name = jsg::v8Str(js.v8Isolate, pending.name);
-    auto fresh = jsg::check(bindingsScope->Get(context, name));
-    KJ_REQUIRE(fresh->IsObject() && !fresh->StrictEquals(holder),
-        "a binding retained by the worker's top-level code was not compiled again in the "
-        "restored isolate",
-        pending.name);
-    jsg::Wrappable::transplantWrapperForSnapshot(js.v8Isolate, fresh.As<v8::Object>(), holder);
-    jsg::check(bindingsScope->Set(context, name, holder));
-  }
+  auto& isolateBase = jsg::IsolateBase::from(js.v8Isolate);
+  isolateBase.rebindSnapshotBindings(js, bindingsScope, ""_kj);
+  auto leftover = isolateBase.takePendingSnapshotBindingRestores();
+  KJ_REQUIRE(leftover.size() == 0,
+      "a binding retained by the worker's top-level code was not compiled again in the restored "
+      "isolate",
+      KJ_MAP(pending, leftover) { return kj::mv(pending.name); });
 }
 
 }  // namespace

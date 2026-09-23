@@ -628,8 +628,10 @@ kj::Maybe<Wrappable&> tryGetWrappable(v8::Local<v8::Value> value) {
 
 }  // namespace
 
-void IsolateBase::recordSnapshotBindings(
-    v8::Local<v8::Context> context, v8::Local<v8::Object> scope, v8::Local<v8::Map> before) {
+void IsolateBase::recordSnapshotBindings(v8::Local<v8::Context> context,
+    v8::Local<v8::Object> scope,
+    v8::Local<v8::Map> before,
+    kj::StringPtr namePrefix) {
   KJ_REQUIRE(isPreparingSnapshot());
   v8::HandleScope handleScope(ptr);
   auto& js = Lock::from(ptr);
@@ -645,10 +647,34 @@ void IsolateBase::recordSnapshotBindings(
     }
     KJ_IF_SOME(wrappable, tryGetWrappable(value)) {
       if (value->StrictEquals(scope)) continue;  // `self` on a service worker's global
-      snapshotBindingNames.upsert(
-          &wrappable, JsValue(name).toString(js), [](kj::String&, kj::String&&) {});
+      snapshotBindingNames.upsert(&wrappable, kj::str(namePrefix, JsValue(name).toString(js)),
+          [](kj::String&, kj::String&&) {});
     }
   }
+}
+
+void IsolateBase::rebindSnapshotBindings(
+    Lock& js, v8::Local<v8::Object> scope, kj::StringPtr namePrefix) {
+  auto context = js.v8Context();
+  kj::Vector<PendingSnapshotBindingRestore> others;
+  for (auto& pending: pendingSnapshotBindingRestores) {
+    kj::StringPtr rest = pending.name;
+    if (!rest.startsWith(namePrefix) ||
+        rest.slice(namePrefix.size()).findFirst(SNAPSHOT_BINDING_NAME_SEPARATOR) != kj::none) {
+      others.add(kj::mv(pending));
+      continue;
+    }
+    auto holder = pending.holder.Get(ptr);
+    auto name = v8Str(ptr, rest.slice(namePrefix.size()));
+    auto fresh = check(scope->Get(context, name));
+    KJ_REQUIRE(fresh->IsObject() && !fresh->StrictEquals(holder),
+        "a binding retained by the worker's top-level code was not compiled again in the "
+        "restored isolate",
+        pending.name);
+    Wrappable::transplantWrapperForSnapshot(ptr, fresh.As<v8::Object>(), holder);
+    check(scope->Set(context, name, holder));
+  }
+  pendingSnapshotBindingRestores = kj::mv(others);
 }
 
 kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetSnapshotExternalRecipe(

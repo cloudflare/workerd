@@ -445,9 +445,26 @@ class IsolateBase {
   // once it has compiled its bindings, takes them with takePendingSnapshotBindingRestores() and
   // transplants each fresh binding onto the retained wrapper (Wrappable::
   // transplantWrapperForSnapshot).
-  void recordSnapshotBindings(
-      v8::Local<v8::Context> context, v8::Local<v8::Object> scope, v8::Local<v8::Map> before);
+  //
+  // The inner bindings of a wrapped binding live on a private `env` object that the binding's
+  // module wraps (an AI binding's Fetcher, held by the Ai object the module returns); they are
+  // recorded under `namePrefix`, snapshotBindingNamePrefix() of the enclosing binding's name, and
+  // re-bound by rebindSnapshotBindings() on the fresh private `env` with the same prefix.
+  void recordSnapshotBindings(v8::Local<v8::Context> context,
+      v8::Local<v8::Object> scope,
+      v8::Local<v8::Map> before,
+      kj::StringPtr namePrefix = ""_kj);
   static constexpr uint32_t SNAPSHOT_BINDING_PAYLOAD_INDEX = kj::maxValue;
+  static kj::String snapshotBindingNamePrefix(kj::StringPtr outerPrefix, kj::StringPtr name) {
+    return kj::str(outerPrefix, name, SNAPSHOT_BINDING_NAME_SEPARATOR);
+  }
+
+  // In an isolate restored from a snapshot, once `scope` holds the freshly compiled bindings that
+  // recordSnapshotBindings() recorded with `namePrefix`: transplants each fresh binding onto the
+  // wrapper the zygote's worker retained under the same name, and puts the retained wrapper back on
+  // `scope` so that `env.X` keeps its identity too.
+  void rebindSnapshotBindings(Lock& js, v8::Local<v8::Object> scope, kj::StringPtr namePrefix);
+
   struct PendingSnapshotBindingRestore {
     v8::Global<v8::Object> holder;
     kj::String name;
@@ -459,6 +476,7 @@ class IsolateBase {
   kj::Vector<PendingSnapshotBindingRestore> takePendingSnapshotBindingRestores() {
     return kj::mv(pendingSnapshotBindingRestores);
   }
+  static constexpr char SNAPSHOT_BINDING_NAME_SEPARATOR = '\x1f';
 
   // Wrappables that are not `jsg::Object`s (Rust resources) are re-created by whoever defines
   // them: their payload is SNAPSHOT_EXTERNAL_PAYLOAD_INDEX followed by their jsgSnapshotRecipe(),
