@@ -5746,7 +5746,11 @@ kj::Own<jsg::SnapshotArtifact> Server::makeSnapshot(kj::StringPtr name,
   // snapshot; the caller then builds the real Worker in START_FROM_SNAPSHOT mode using it.
   KJ_REQUIRE(isStartupSnapshotEligible(def));
 
-  auto isolateGroup = v8::IsolateGroup::GetDefault();
+  // An isolate group's read-only heap comes from the first snapshot any of its isolates starts
+  // from (V8 checks the rest against it). The zygote starts from V8's built-in snapshot and then
+  // promotes objects into its read-only heap, so it needs a group of its own, and so does the
+  // Worker restored from its snapshot (see the caller).
+  auto isolateGroup = v8::IsolateGroup::Create();
   auto snapshotArtifact = kj::atomicRefcounted<jsg::SnapshotArtifact>();
   auto zygoteJsgObserver = kj::atomicRefcounted<JsgIsolateObserver>();
   auto zygoteObserver = kj::atomicRefcounted<IsolateObserver>();
@@ -5860,7 +5864,10 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
   if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) &&
       isStartupSnapshotEligible(def)) {
+    // The Worker's read-only heap comes from its snapshot, which neither the default group (built
+    // from V8's own snapshot) nor the zygote's group holds; see makeSnapshot().
     auto snapshotArtifact = makeSnapshot(name, def, extensions, errorReporter);
+    isolateGroup = v8::IsolateGroup::Create();
     snapshotConfig =
         jsg::SnapshotConfig(jsg::ReadonlySharedSnapshot{.artifact = snapshotArtifact->addRef()});
   }
