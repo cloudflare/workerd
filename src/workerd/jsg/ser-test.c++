@@ -5,6 +5,8 @@
 #include "jsg-test.h"
 #include "ser.h"
 
+#include <v8-value-serializer-version.h>
+
 namespace workerd::jsg::test {
 namespace {
 
@@ -186,7 +188,7 @@ KJ_TEST("deserialization header diagnostics expose metadata without payload cont
               v8::CurrentValueSerializerFormatVersion(), "; v8=", v8::V8::GetVersion(), "]"));
       JSG_TRY(js) {
         Deserializer deser(js, data, kj::none, kj::none,
-            Deserializer::Options{.version = 15, .diagnosticContext = "RPC arguments"});
+            Deserializer::Options{.version = 15, .diagnosticContext = "RPC arguments"_kj});
         KJ_FAIL_EXPECT("invalid header was accepted");
       }
       JSG_CATCH(exception) {
@@ -217,19 +219,19 @@ KJ_TEST("deserialization diagnostics preserve successful reads and other errors"
   e.run([&](jsg::Lock& js) {
     for (auto version: {13u, 15u, v8::CurrentValueSerializerFormatVersion()}) {
       Serializer ser(js, {.version = version});
-      ser.write(js, js.str("private payload"));
+      ser.write(js, js.str("private payload"_kj));
       auto data = ser.release();
-      Deserializer deser(js, data, Deserializer::Options{.diagnosticContext = "RPC result"});
+      Deserializer deser(js, data, Deserializer::Options{.diagnosticContext = "RPC result"_kj});
       KJ_EXPECT(deser.getVersion() == version);
       KJ_EXPECT(kj::str(deser.readValue(js)) == "private payload");
     }
 
     Serializer headerlessSer(js, {.version = 15, .omitHeader = true});
-    headerlessSer.write(js, js.str("private payload"));
+    headerlessSer.write(js, js.str("private payload"_kj));
     auto headerlessData = headerlessSer.release();
     Deserializer headerlessDeser(js, headerlessData,
         Deserializer::Options{
-          .version = 15, .readHeader = false, .diagnosticContext = "RPC result"});
+          .version = 15, .readHeader = false, .diagnosticContext = "RPC result"_kj});
     KJ_EXPECT(kj::str(headerlessDeser.readValue(js)) == "private payload");
 
     // Call sites without a diagnostic context still report header metadata.
@@ -248,7 +250,7 @@ KJ_TEST("deserialization diagnostics preserve successful reads and other errors"
     // A valid header followed by an invalid value fails in ReadValue(), not ReadHeader().
     const kj::byte invalidValue[] = {0xff, 15, 0xff};
     Deserializer deser(js, invalidValue, kj::none, kj::none,
-        Deserializer::Options{.diagnosticContext = "RPC result"});
+        Deserializer::Options{.diagnosticContext = "RPC result"_kj});
     JSG_TRY(js) {
       deser.readValue(js);
       KJ_FAIL_EXPECT("invalid value was accepted");

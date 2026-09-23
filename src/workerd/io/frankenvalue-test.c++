@@ -2,6 +2,8 @@
 
 #include <workerd/jsg/jsg-test.h>
 
+#include <v8-value-serializer-version.h>
+
 #include <capnp/message.h>
 #include <kj/debug.h>
 #include <kj/test.h>

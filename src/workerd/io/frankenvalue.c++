@@ -239,7 +239,7 @@ jsg::JsValue Frankenvalue::toJsImpl(jsg::Lock& js, kj::ArrayPtr<kj::Own<CapTable
           jsg::Deserializer deser(js, v8Serialized.data, kj::none, kj::none,
               jsg::Deserializer::Options{
                 .externalHandler = capTableReader,
-                .diagnosticContext = "binding or entrypoint props",
+                .diagnosticContext = "binding or entrypoint props"_kj,
               });
           return deser.readValue(js);
         }

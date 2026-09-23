@@ -8,6 +8,7 @@
 #include "setup.h"
 
 #include <v8-proxy.h>
+#include <v8-value-serializer-version.h>
 
 namespace workerd::jsg {
 namespace {
