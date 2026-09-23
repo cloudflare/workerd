@@ -780,6 +780,18 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
     // A full GC first, so that only wrappers the worker actually retained are considered, both
     // for re-creation payloads and for the rejection check.
     ptr->LowMemoryNotification();
+    // The collection can leave FinalizationRegistries with dead cells to clean up, and their
+    // callbacks can drop objects the worker retained. Their cleanup task is queued on the
+    // platform: run it, and the microtasks its callbacks enqueue, as the worker's first request
+    // would, then collect again what the callbacks dropped. (Step 1b below settles the
+    // registries that destroying the JSG objects leaves behind.)
+    while (pumpMsgLoop()) {
+      auto& js = Lock::from(ptr);
+      do {
+        js.runMicrotasks();
+      } while (pumpMsgLoop());
+      ptr->LowMemoryNotification();
+    }
     auto payloads = collectSnapshotWrapperPayloads(defaultContext);
     rejectSnapshotWithUnrestorableWrappers(defaultContext, payloads);
     for (auto& entry: payloads) {
