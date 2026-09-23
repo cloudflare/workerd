@@ -114,6 +114,7 @@ enum class ReplayAction {
   SLOW_RESPONSE,
   PAUSE_RESPONSE,
   REDIRECT,
+  SLOW_REDIRECT,
   PAUSE_NEXT_RETRY,
   RETRY_DELAY_EXCEEDS_BUDGET,
   CLIENT_CREATION_FAILURE,
@@ -196,6 +197,11 @@ class DeterministicTimerChannel final: public TimerChannel {
     return timer.now();
   }
 
+  kj::Promise<void> atLimitTimeout(kj::TimePoint deadline) override {
+    if (deadline <= timer.now()) return kj::READY_NOW;
+    return timer.atTime(deadline);
+  }
+
  private:
   kj::TimerImpl& timer;
   kj::Maybe<kj::Duration> nextDelay;
@@ -255,7 +261,9 @@ class ReplayFetchTarget final: public WorkerInterface {
       kj::HttpService::Response& response) override {
     auto attempt = state.requestCount++;
     kj::Maybe<kj::Promise<void>> slowResponseDelay;
-    if (attempt < state.actions.size() && state.actions[attempt] == ReplayAction::SLOW_RESPONSE) {
+    if (attempt < state.actions.size() &&
+        (state.actions[attempt] == ReplayAction::SLOW_RESPONSE ||
+            state.actions[attempt] == ReplayAction::SLOW_REDIRECT)) {
       slowResponseDelay = IoContext::current().afterLimitTimeout(11 * kj::SECONDS);
     }
     if (headers.isWebSocket()) {
@@ -268,6 +276,9 @@ class ReplayFetchTarget final: public WorkerInterface {
         case ReplayAction::SLOW_RESPONSE:
           co_await kj::mv(KJ_ASSERT_NONNULL(slowResponseDelay));
           break;
+        case ReplayAction::SLOW_REDIRECT:
+          co_await kj::mv(KJ_ASSERT_NONNULL(slowResponseDelay));
+          [[fallthrough]];
         case ReplayAction::REDIRECT: {
           auto responseHeaders = headers.cloneShallow();
           responseHeaders.clear();
@@ -1177,18 +1188,56 @@ KJ_TEST("configured retry count resets after a redirect") {
   KJ_EXPECT(state.outcomes[1] == ActorRetryOutcome::RECOVERED);
 }
 
-KJ_TEST("actor fetch allows an in-flight retry to finish after the start budget") {
+KJ_TEST("actor fetch cancels an in-flight retry at the retry timeout") {
+  for (auto kind: {ActorFetchKind::HTTP, ActorFetchKind::WEB_SOCKET}) {
+    ReplayState state{
+      .actions = kj::arr(ReplayAction::AMBIGUOUS, ReplayAction::SLOW_RESPONSE),
+      .acceptWebSocket = true,
+    };
+
+    auto failure =
+        KJ_REQUIRE_NONNULL(runActorFetch(state, ActorRetryGateEnabled::YES, kj::none, kind));
+    KJ_EXPECT(failure.getType() == kj::Exception::Type::DISCONNECTED, failure);
+    KJ_EXPECT(state.requestCount == 2);
+    KJ_EXPECT(state.retryCount == 1);
+    KJ_EXPECT(state.observedRetryCount == 1);
+    KJ_ASSERT(state.outcomes.size() == 1);
+    KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
+  }
+}
+
+KJ_TEST("actor fetch lets a slow initial attempt finish after the retry timeout") {
   ReplayState state{
-    .actions = kj::arr(ReplayAction::AMBIGUOUS, ReplayAction::SLOW_RESPONSE),
+    .actions = kj::arr(ReplayAction::SLOW_RESPONSE),
+  };
+
+  KJ_EXPECT(
+      runActorFetch(state, ActorRetryGateEnabled::YES, kj::none, ActorFetchKind::HTTP) == kj::none);
+  KJ_EXPECT(state.requestCount == 1);
+  KJ_EXPECT(state.retryCount == 0);
+}
+
+KJ_TEST("actor fetch shares the retry timeout across redirects") {
+  ReplayState state{
+    .actions = kj::arr(ReplayAction::SLOW_REDIRECT, ReplayAction::AMBIGUOUS),
+  };
+
+  KJ_EXPECT(
+      runActorFetch(state, ActorRetryGateEnabled::YES, kj::none, ActorFetchKind::HTTP) != kj::none);
+  KJ_EXPECT(state.requestCount == 2);
+  KJ_EXPECT(state.retryCount == 0);
+  KJ_EXPECT(state.observedRetryCount == 0);
+}
+
+KJ_TEST("actor fetch lets a redirected first attempt finish after the retry timeout") {
+  ReplayState state{
+    .actions = kj::arr(ReplayAction::SLOW_REDIRECT, ReplayAction::SLOW_RESPONSE),
   };
 
   KJ_EXPECT(
       runActorFetch(state, ActorRetryGateEnabled::YES, kj::none, ActorFetchKind::HTTP) == kj::none);
   KJ_EXPECT(state.requestCount == 2);
-  KJ_EXPECT(state.retryCount == 1);
-  KJ_EXPECT(state.observedRetryCount == 1);
-  KJ_ASSERT(state.outcomes.size() == 1);
-  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RECOVERED);
+  KJ_EXPECT(state.retryCount == 0);
 }
 
 KJ_TEST("actor fetch does not start a retry after the start budget") {

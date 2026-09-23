@@ -946,15 +946,15 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
     result.replayMemoryTracker = kj::refcounted<JsRpcReplayMemoryTracker>(
         ioContext.getMetrics().trackActorCallReplayMemory(replayMemoryBytes));
   }
-  result.state = kj::rc<ActorCallRetryState>(ioContext.getIoChannelFactory().getTimer(),
-      ioContext.getMetrics(),
+  auto& timer = ioContext.getIoChannelFactory().getTimer();
+  result.state = kj::rc<ActorCallRetryState>(timer, ioContext.getMetrics(),
       ActorCallRetryState::Config{
         .callType = ActorRetryCallType::JSRPC,
         .observationEnabled = ActorRetryGateEnabled::YES,
         .enforcementEnabled = enforcementEnabled,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
       },
-      ActorRetryPolicy::systemDefault());
+      ActorRetryPolicy::systemDefault(), timer.nowForLimitTimeout());
   auto attemptOrException = KJ_ASSERT_NONNULL(result.state)->startAttempt();
   result.attempt =
       kj::mv(KJ_ASSERT_NONNULL(attemptOrException.tryGet<ActorCallRetryState::Attempt>()));

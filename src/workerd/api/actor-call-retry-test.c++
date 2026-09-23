@@ -67,7 +67,7 @@ kj::Rc<ActorCallRetryState> newRetryState(TestTimerChannel& timer,
         .enforcementEnabled = ActorRetryGateEnabled::YES,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
       },
-      policy);
+      policy, timer.nowForLimitTimeout());
 }
 
 ActorCallRetryState::Attempt startAttempt(ActorCallRetryState& state) {
@@ -355,7 +355,7 @@ KJ_TEST("actor calls do not retry when retry requests are disabled") {
         .enforcementEnabled = ActorRetryGateEnabled::NO,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
       },
-      ActorRetryPolicy::systemDefault());
+      ActorRetryPolicy::systemDefault(), timer.nowForLimitTimeout());
 
   auto first = startAttempt(*state);
   KJ_EXPECT(KJ_ASSERT_NONNULL(first.getMetadata()).retryGateEnabled == ActorRetryGateEnabled::NO);

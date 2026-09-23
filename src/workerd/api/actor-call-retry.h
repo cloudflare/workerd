@@ -94,8 +94,13 @@ class ActorCallRetryState final: public kj::Refcounted {
     IsFirstActorCallAttempt isFirstAttempt;
   };
 
-  ActorCallRetryState(
-      TimerChannel& timer, RequestObserver& observer, Config config, ActorRetryPolicy policy);
+  // `callStart` is when the logical call began, and the retry timeout runs from it. A redirected
+  // request passes the original call's start, so one timeout covers the whole chain.
+  ActorCallRetryState(TimerChannel& timer,
+      RequestObserver& observer,
+      Config config,
+      ActorRetryPolicy policy,
+      kj::TimePoint callStart);
   ~ActorCallRetryState() noexcept(false);
 
   kj::OneOf<Attempt, kj::Exception> startAttempt();
@@ -109,6 +114,20 @@ class ActorCallRetryState final: public kj::Refcounted {
   bool isRetryEnabled() const {
     return retriesEnabled;
   }
+  kj::TimePoint getCallStart() const {
+    return callStart;
+  }
+  // Rejects `promise` with the original disconnect if the retry timeout expires first. The first
+  // attempt is never cancelled, so this only affects retries.
+  template <typename T>
+  kj::Promise<T> enforceRetryTimeout(kj::Promise<T> promise) {
+    if (attemptCount == 1) return kj::mv(promise);
+    auto timeout = timer.atLimitTimeout(retryCutoff())
+                       .then([self = addRefToThis()]() mutable -> kj::Promise<T> {
+      return self->retryTimeoutExpired();
+    });
+    return kj::mv(promise).exclusiveJoin(kj::mv(timeout));
+  }
   void maybeStartRetryLatencyTimer(const kj::Exception& exception);
   void recordRecovered();
   void recordCanceled();
@@ -119,6 +138,11 @@ class ActorCallRetryState final: public kj::Refcounted {
   static constexpr auto MAX_BACKOFF = 2 * kj::SECONDS;
 
   IoChannelFactory::ActorRetryRequestMetadata freshMetadata() const;
+  // No retry may start, or still be running, at or after this point.
+  kj::TimePoint retryCutoff() const {
+    return callStart + RETRY_BUDGET;
+  }
+  kj::Exception retryTimeoutExpired();
   kj::Maybe<kj::Exception> handleClaimRejection(const kj::Exception& exception);
   kj::OneOf<kj::Duration, kj::Exception> checkCanRetry(kj::Exception exception);
   kj::Duration retryDelay();
@@ -128,9 +152,9 @@ class ActorCallRetryState final: public kj::Refcounted {
   kj::Own<RequestObserver> observer;
   Config config;
   ActorRetryPolicy policy;
+  kj::TimePoint callStart;
   bool retriesEnabled;
   kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> metadata;
-  kj::Maybe<kj::TimePoint> deadline;
   kj::Maybe<kj::Exception> originalDisconnect;
   kj::Maybe<kj::TimePoint> retryStartTime;
   uint attemptCount = 1;
