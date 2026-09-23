@@ -36,12 +36,18 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
 `controllerConsumerLeaving`):
 
 - The source is cancelled only when the LAST consumer leaves the queue
-  (cancelled, or errored through the Node.js interop hook), with the reason
-  of every consumer that left — one reason as is, several as an
-  `AggregateError` in the order they left (the spec passes
-  `[reason1, reason2]`). A consumer that leaves while others remain gets a
-  promise settled with that cancel, or with `undefined` once the source
-  closes or errors on its own (the spec's shared cancel promise).
+  (cancelled, or errored through the Node.js interop hook before the
+  source requested close), with the reason of every consumer that left —
+  one reason as is, several as an `AggregateError` in the order they left
+  (the spec passes `[reason1, reason2]`). A consumer that leaves while
+  others remain gets a promise settled with that cancel, or with
+  `undefined` once the source closes or errors on its own (the spec's
+  shared cancel promise). A branch that errors alone once close is
+  requested — through the hook, or a byte branch's fractional-element fill
+  at close — leaves without a reason and never cancels the source (the
+  spec never forwards a branch's error to it); if it was the last
+  consumer, the source ends as when every consumer has drained
+  (`controllerConsumerErrored`).
 - Erroring the source's own stream (its controller's `error()`, the
   interop hook) errors every consumer; erroring a live branch errors that
   branch alone.
@@ -144,8 +150,8 @@ rejected with the stored error, created lazily and marked handled) and a
 the stream as its controller's `error()` would; a native-backed readable
 also cancels its source; a queued tee branch, whose controller is shared
 with its siblings, errors alone — its cursor leaves the queue as a
-cancelled branch's would; a branch that has itself been teed is inert, see
-the tee model above). The readable method errors byte streams too, native
+cancelled branch's would, until the source requests close; a branch that
+has itself been teed is inert; see the tee model above). The readable method errors byte streams too, native
 ones included; Node's is deliberately a no-op for byte stream controllers,
 so `addAbortSignal()` on a `Response` body (a byte stream in Node) is
 inert there and errors the body here. The method runs neither the sink's

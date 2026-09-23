@@ -178,6 +178,13 @@ export interface PendingRead<V> {
   reader: object;
 }
 
+// Errors the stream owning a byte cursor (see ByteStreamCursor's
+// errorStreamCallback); `owner` is undefined once it has been collected.
+export type ErrorStreamCallback = (
+  e: unknown,
+  owner: object | undefined
+) => void;
+
 type ArrayBufferViewCtor = new (
   buffer: ArrayBuffer,
   byteOffset: number,
@@ -991,9 +998,10 @@ class ByteStreamCursor
   #endOfDataSettlementScheduled: boolean = false;
 
   // Callback invoked when the cursor detects a fractional-element fill at
-  // the close sentinel — the stream must be errored with a TypeError. Set
-  // by the controller (the cursor layer cannot error the stream directly).
-  #errorStreamCallback: ((e: unknown) => void) | undefined;
+  // the close sentinel — the cursor's stream must be errored with a
+  // TypeError. Set by the stream layer (the cursor layer cannot error a
+  // stream directly); it receives the cursor's owner, held weakly here.
+  #errorStreamCallback: ErrorStreamCallback | undefined;
 
   get hasPendingPullInto(): boolean {
     return this.#pendingPullIntos.length > 0;
@@ -1037,9 +1045,14 @@ class ByteStreamCursor
     );
   }
 
-  // Set the callback the controller uses to receive fractional-element-
-  // at-close errors (the cursor cannot error the stream directly).
-  set errorStreamCallback(cb: (e: unknown) => void) {
+  // The callback through which the stream layer receives fractional-
+  // element-at-close errors. A cursor moved to a new owner (detach) keeps
+  // its predecessor's.
+  get errorStreamCallback(): ErrorStreamCallback | undefined {
+    return this.#errorStreamCallback;
+  }
+
+  set errorStreamCallback(cb: ErrorStreamCallback | undefined) {
     this.#errorStreamCallback = cb;
   }
 
@@ -1203,7 +1216,7 @@ class ByteStreamCursor
             'Insufficient bytes to fill elements in the given view'
           );
           if (this.#errorStreamCallback !== undefined) {
-            this.#errorStreamCallback(e);
+            this.#errorStreamCallback(e, this.ownerDeref());
           }
           return PromiseReject(e);
         }
@@ -1314,10 +1327,10 @@ class ByteStreamCursor
           'Insufficient bytes to fill elements in the given view'
         );
         if (this.#errorStreamCallback !== undefined) {
-          this.#errorStreamCallback(e);
+          this.#errorStreamCallback(e, this.ownerDeref());
         }
-        // errorAllReads is called by the controller's error() path
-        // (via the stream error machinery), so we don't call it here.
+        // errorAllReads is called by the callback's error path (the
+        // controller's error() or readableStreamErrorBranch), not here.
         return true;
       }
     }

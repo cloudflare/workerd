@@ -65,6 +65,7 @@ export {
   byobRequestOnDefaultRead,
   enqueueDiscardsByobRequest,
   closeWithPartiallyFilledView,
+  closeWithPartiallyFilledViewDetached,
   readAfterCloseReturnsEmptyView,
   readAfterCancelReturnsEmptyView,
   readDetachesCallerBuffer,
@@ -177,6 +178,8 @@ export {
   teeInvalidatesHeldByobRequest,
   teeSoleBranchMintsFreshByobRequest,
   teeNativeBodyAfterReleaseMidRead,
+  teeBranchFractionalCloseErrorsBranch,
+  teeSoleBranchFractionalCloseSkipsSourceCancel,
 } from 'tee';
 
 export {
