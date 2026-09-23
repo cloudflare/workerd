@@ -3116,18 +3116,12 @@ class Lock {
   // implementation in setup.c++. Use responsibly.
   void requestGcForTesting() const;
 
-  // Like requestGcForTesting(), but leaves cppgc's sweep pending rather than running it inside the
-  // collection. On return, wrappers unreachable at the start of the GC have been collected and
-  // their Wrappables condemned (see Wrappable::isCondemned()), but the ~CppgcShim that releases
-  // each Wrappable has not run yet. This is the state a natural major GC leaves behind, and the
-  // only state in which the condemned-wrapper hazard is observable.
-  //
-  // Pair with finishDeferredSweepForTesting() to close the window. Testing only.
-  void requestGcWithDeferredSweepForTesting() const;
-
-  // Completes a sweep left pending by requestGcWithDeferredSweepForTesting(), running the deferred
-  // ~CppgcShim finalizers. Testing only.
-  void finishDeferredSweepForTesting() const;
+  // Like requestGcForTesting(), but sweeps cppgc the way an allocation-triggered GC would: a
+  // forced GC always sweeps atomically, whereas this uses the sweeping type newCppHeap()
+  // configured. It is the only way a test can observe the finalization timing production
+  // actually gets, and so notice if the configuration stops being honoured. Test-only, same as
+  // requestGcForTesting().
+  void requestGcWithDefaultSweepForTesting() const;
 
   // Runs the given function synchronously with a v8::HandleScope on the stack.
   // If the fn returns a v8::Local<T> or v8::MaybeLocal<T> type, then

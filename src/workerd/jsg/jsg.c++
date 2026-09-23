@@ -328,7 +328,7 @@ void Lock::requestGcForTesting() const {
       v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
 }
 
-void Lock::requestGcWithDeferredSweepForTesting() const {
+void Lock::requestGcWithDefaultSweepForTesting() const {
   if (!isPredictableModeForTest()) {
     KJ_LOG(ERROR, "Test GC used while not in a test");
     return;
@@ -336,19 +336,14 @@ void Lock::requestGcWithDeferredSweepForTesting() const {
   auto* cppHeap = v8Isolate->GetCppHeap();
   KJ_ASSERT(cppHeap != nullptr);
 
-  // Scoped rather than left on: the override only needs to cover the collection itself, and
-  // leaving it set would silently change the sweeping behaviour of every later GC in the isolate.
+  // A forced GC always sweeps cppgc atomically. This override makes it use the configured
+  // sweeping_support instead, like an allocation-triggered GC would. Scoped rather than left on so
+  // later GCs in the isolate are unaffected.
   cppHeap->SetForceIncrementalSweepingForTesting(true);
   KJ_DEFER(cppHeap->SetForceIncrementalSweepingForTesting(false));
 
   v8Isolate->RequestGarbageCollectionForTesting(
       v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
-}
-
-void Lock::finishDeferredSweepForTesting() const {
-  auto* cppHeap = v8Isolate->GetCppHeap();
-  KJ_ASSERT(cppHeap != nullptr);
-  cppHeap->FinishSweepingForTesting();
 }
 
 void Lock::v8Set(v8::Local<v8::Object> obj, kj::StringPtr name, v8::Local<v8::Value> value) {
