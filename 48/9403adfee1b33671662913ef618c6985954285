@@ -1,0 +1,60 @@
+src/workerd/api/worker-rpc.c++
+  s_b5a9ba6a23013a::t_767d9ac3d736c5 480,482-484,533,556-561,595-602,610-611,938,985,1005,1009,1023-1024,1027-1028,1030,1039,1049-1052,1057,1071,1076,1113,1334-1344
+  s_756328791ab730::t_292101e2363f48 1025-1026,1042-1043,1047,1055,1109-1110
+src/workerd/api/jsrpc-call-retry-test.c++
+  s_9522d735a8cd78::t_4ffce4f7ffe486 33,40-47,51,74,140-179,303-308,316-318,344-352,411-435,472-532,668-691,693-710,897-917,921-924
+  s_756328791ab730::t_fce44dbebb55c5 692,918-920
+  s_756328791ab730::t_fa9e9e6f386f45 32
+src/workerd/api/worker-rpc.h
+  s_6beee1a75d6ac7::t_923caa1deb9530 181
+src/workerd/util/completion-membrane.h
+  s_456e7d153a4287::t_46fb78cdb69bc6 48-53,73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "489403adfee1b33671662913ef618c6985954285",
+  "prompts": {},
+  "sessions": {
+    "s_456e7d153a4287": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f35f99b25ffeGabkV5xa7y9Nco",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_6beee1a75d6ac7": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f368abe82ffe3TlMhexmBfEZ1y",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_756328791ab730": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f516141b5ffeNlCjrhcr3GDBl3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_9522d735a8cd78": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f36354c59ffegkkVKpARLcNC4Z",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_b5a9ba6a23013a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f3affe128ffeonOWjeL5aUPQio",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
