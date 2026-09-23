@@ -97,11 +97,13 @@ jsg::JsRef<jsg::JsFunction> wrapMethod(jsg::Lock& js, Fetcher& fetcher, kj::Stri
 template <typename Func>
 JsRpcCallPlan makePlan(Func populate,
     kj::Array<const byte> serializedData = kj::heapArray<const byte>(0),
-    Replayability replayability = Replayability::REPLAYABLE) {
+    Replayability replayability = Replayability::REPLAYABLE,
+    kj::Maybe<size_t> serializedDataCapacity = kj::none) {
   auto message = kj::heap<capnp::MallocMessageBuilder>(
       JsRpcCallPlan::METADATA_SEGMENT_WORDS, capnp::AllocationStrategy::FIXED_SIZE);
   populate(message->initRoot<rpc::JsRpcTarget::CallParams>());
-  return JsRpcCallPlan(kj::mv(message), kj::mv(serializedData), replayability);
+  auto capacity = serializedDataCapacity.orDefault(serializedData.size());
+  return JsRpcCallPlan(kj::mv(message), kj::mv(serializedData), capacity, replayability);
 }
 
 // Builds a plan for a call whose arguments produced `externalHandler`'s externals, so that a test
@@ -144,6 +146,7 @@ KJ_TEST("JS RPC call plan copies calls and property accesses") {
     builder.getOperation().initCallWithArgs();
   }, kj::heapArray<const byte>(kj::arrayPtr(SERIALIZED)));
   KJ_EXPECT(plain.getReplayable());
+  KJ_EXPECT(plain.getReplayMemoryBytes() == kj::size(SERIALIZED));
 
   for (uint attempt = 0; attempt < 2; ++attempt) {
     capnp::MallocMessageBuilder attemptMessage;
@@ -156,6 +159,33 @@ KJ_TEST("JS RPC call plan copies calls and property accesses") {
     auto data = params.getOperation().getCallWithArgs().getV8Serialized();
     KJ_EXPECT(data == kj::arrayPtr(SERIALIZED));
   }
+}
+
+KJ_TEST("JS RPC call plan accounts for serialized buffer capacity") {
+  static constexpr byte SERIALIZED[] = {1, 2, 3, 4};
+  auto plan = makePlan([](rpc::JsRpcTarget::CallParams::Builder builder) {
+    builder.getOperation().initCallWithArgs();
+  }, kj::heapArray<const byte>(kj::arrayPtr(SERIALIZED)), Replayability::REPLAYABLE, 64);
+
+  KJ_EXPECT(plan.getReplayMemoryBytes() == 64);
+  capnp::MallocMessageBuilder attemptMessage;
+  plan.copyTo(attemptMessage.initRoot<rpc::JsRpcTarget::CallParams>());
+  KJ_EXPECT(attemptMessage.getRoot<rpc::JsRpcTarget::CallParams>()
+                .getOperation()
+                .getCallWithArgs()
+                .getV8Serialized() == kj::arrayPtr(SERIALIZED));
+}
+
+KJ_TEST("serializer reports the capacity of its released buffer") {
+  TestFixture fixture;
+  fixture.runInIoContext([](const TestFixture::Environment& env) {
+    jsg::Serializer serializer(env.js);
+    serializer.write(env.js, jsg::JsValue(env.js.str("x"_kj)));
+    auto released = serializer.release();
+
+    KJ_EXPECT(released.dataCapacity > released.data.size(), released.dataCapacity,
+        released.data.size());
+  });
 }
 
 KJ_TEST("JS RPC call plan copies usable external capabilities but rejects replay") {

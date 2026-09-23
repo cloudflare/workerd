@@ -172,6 +172,16 @@ v8::Maybe<uint32_t> Serializer::GetSharedArrayBufferId(
   return v8::Just(n);
 }
 
+void* Serializer::ReallocateBufferMemory(
+    void* oldBuffer, size_t size, size_t* actualSize) {
+  auto result = v8::ValueSerializer::Delegate::ReallocateBufferMemory(
+      oldBuffer, size, actualSize);
+  if (result != nullptr) {
+    dataCapacity = *actualSize;
+  }
+  return result;
+}
+
 void Serializer::throwDataCloneErrorForObject(jsg::Lock& js, v8::Local<v8::Object> obj) {
   // The default error that V8 would generate is "#<TypeName> could not be cloned." -- for some
   // reason, it surrounds the type name in "#<>", which seems bizarre? Let's generate a better
@@ -360,6 +370,7 @@ Serializer::Released Serializer::release() {
   auto pair = ser.Release();
   return Released{
     .data = kj::Array(pair.first, pair.second, jsg::SERIALIZED_BUFFER_DISPOSER),
+    .dataCapacity = dataCapacity,
     .sharedArrayBuffers = sharedBackingStores.releaseAsArray(),
     .transferredArrayBuffers = backingStores.releaseAsArray(),
   };
