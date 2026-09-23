@@ -245,9 +245,3 @@ kj_test(
         "@bazel_tools//tools/cpp/runfiles",
     ],
 )
-
-wd_cc_benchmark(
-    name = "bench-node-buffer",
-    srcs = ["bench-node-buffer.c++"],
-    deps = [":test-fixture"],
-)
