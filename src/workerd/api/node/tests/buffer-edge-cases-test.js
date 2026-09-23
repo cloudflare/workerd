@@ -95,6 +95,34 @@ export const hexDecoding = {
         strictEqual(hex(target.fill(input, 'hex')), filled, input);
       }
     }
+
+    // Every character code up to 0x1ff, as the first and the second digit of
+    // a pair. Hex decoding sees each character's low byte.
+    for (let code = 0; code < 0x200; code++) {
+      const c = String.fromCharCode(code);
+      const low = String.fromCharCode(code & 0xff);
+      const digit = /^[0-9a-fA-F]$/.test(low) ? low.toLowerCase() : undefined;
+      const first = `${c}1ab`;
+      const second = `1${c}ab`;
+      strictEqual(
+        hex(Buffer.from(first, 'hex')),
+        digit === undefined ? '' : `${digit}1ab`,
+        first
+      );
+      strictEqual(
+        hex(Buffer.from(second, 'hex')),
+        digit === undefined ? '' : `1${digit}ab`,
+        second
+      );
+      if (digit === undefined) {
+        throws(() => Buffer.alloc(2).fill(second, 'hex'), {
+          name: 'TypeError',
+          message: 'The text is not valid hex',
+        });
+      } else {
+        strictEqual(hex(Buffer.alloc(2).fill(second, 'hex')), `1${digit}ab`);
+      }
+    }
   },
 };
 
