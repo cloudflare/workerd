@@ -35,10 +35,13 @@
 // Typed-array element reads below are always in bounds, as they are in the C++.
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 
+import { default as native } from 'node-internal:buffer_native';
+
 type CharArray = Uint8Array | Uint16Array;
 
 class Vector {
   #start: CharArray;
+  #bytes: Uint8Array | undefined;
   #length: number;
   #isForward: boolean;
 
@@ -52,6 +55,18 @@ class Vector {
   // For vector v this is NOT necessarily &v[0], see forward().
   start(): CharArray {
     return this.#start;
+  }
+
+  // The memory range as bytes, for memchr and memrchr.
+  bytes(): Uint8Array {
+    if (this.#bytes === undefined) {
+      const data = this.#start;
+      this.#bytes =
+        data instanceof Uint8Array
+          ? data
+          : new Uint8Array(data.buffer, data.byteOffset, this.#length * 2);
+    }
+    return this.#bytes;
   }
 
   // Returns the length of the vector, in characters.
@@ -108,56 +123,126 @@ type SearchStrategy =
   | typeof kLinear
   | typeof kSingleChar;
 
-// Finds the first occurrence of pattern[0] in the string `subject`, starting
-// at `index`. Does not check that the whole pattern matches.
-//
-// The C++ searches raw memory with memchr / memrchr (for two-byte
-// characters, searching for one of the two bytes and then verifying the
-// character). The typed-array indexOf / lastIndexOf used here compare whole
-// characters directly, which finds the same position.
-function findFirstCharacter(
+function getHighestValueByte(character: number): number {
+  return Math.max(character & 0xff, character >> 8);
+}
+
+// Finds the first occurrence of *two-byte* character pattern[0] in the string
+// `subject`. Does not check that the whole pattern matches.
+function findFirstCharacterTwoByte(
+  pattern: Vector,
+  subject: Vector,
+  index: number
+): number {
+  const patternFirstChar = pattern.at(0);
+  const maxN = subject.length() - pattern.length() + 1;
+  const bytes = subject.bytes();
+
+  // For speed, search for the more `rare` of the two bytes in pattern[0]
+  // using memchr / memrchr (which are much faster than a simple for loop).
+  const searchByte = getHighestValueByte(patternFirstChar);
+  let pos = index;
+  do {
+    const bytesToSearch = (maxN - pos) * 2;
+    if (bytesToSearch <= 0) return subject.length();
+    let bytePos: number;
+    if (subject.forward()) {
+      const begin = pos * 2;
+      bytePos = native.memchr(bytes, begin, begin + bytesToSearch, searchByte);
+    } else {
+      const begin = (pattern.length() - 1) * 2;
+      bytePos = native.memrchr(bytes, begin, begin + bytesToSearch, searchByte);
+    }
+    if (bytePos === -1) return subject.length();
+
+    // Then, for each match, verify that the full two bytes match pattern[0].
+    const rawPos = bytePos >> 1;
+    pos = subject.forward() ? rawPos : subject.length() - rawPos - 1;
+    if (subject.at(pos) === patternFirstChar) {
+      // Match found, hooray.
+      return pos;
+    }
+    // Search byte matched, but the other byte of pattern[0] didn't. Keep going.
+  } while (++pos < maxN);
+
+  return subject.length();
+}
+
+// Finds the first occurrence of the byte pattern[0] in string `subject`.
+// Does not verify that the whole pattern matches.
+function findFirstCharacterOneByte(
   pattern: Vector,
   subject: Vector,
   index: number
 ): number {
   const patternFirstChar = pattern.at(0);
   const subjLen = subject.length();
-  const maxN = subjLen - pattern.length() + 1;
-  const start = subject.start();
+  const maxN = subject.length() - pattern.length() + 1;
+  if (maxN - index <= 0) return subjLen;
+  const bytes = subject.bytes();
 
+  let rawPos: number;
   if (subject.forward()) {
-    // memchr(subject.start() + index, pattern_first_char, max_n - index)
-    const rawPos = start.indexOf(patternFirstChar, index);
-    if (rawPos === -1 || rawPos >= maxN) {
-      return subjLen;
-    }
-    return rawPos;
+    rawPos = native.memchr(bytes, index, maxN, patternFirstChar);
+  } else {
+    const begin = pattern.length() - 1;
+    rawPos = native.memrchr(
+      bytes,
+      begin,
+      begin + (maxN - index),
+      patternFirstChar
+    );
+  }
+  if (rawPos === -1) {
+    return subjLen;
   }
 
-  // MemrchrFill(subject.start() + pattern.length() - 1, pattern_first_char,
-  //             max_n - index)
-  const regionStart = pattern.length() - 1;
-  const regionEnd = regionStart + (maxN - index);
-  // Unlike memrchr, lastIndexOf treats a negative index as relative to the
-  // end, so an empty region needs an explicit check.
-  if (regionEnd <= regionStart) {
-    return subjLen;
-  }
-  const rawPos = start.lastIndexOf(patternFirstChar, regionEnd - 1);
-  if (rawPos === -1 || rawPos < regionStart) {
-    return subjLen;
-  }
-  return subjLen - rawPos - 1;
+  return subject.forward() ? rawPos : subjLen - rawPos - 1;
 }
 
+// The number of characters findFirstCharacter checks directly before calling
+// memchr or memrchr.
+const kInlineScanLength = 256;
+
+// FindFirstCharacter. Unlike memchr in C++, each memchr call from JavaScript
+// has a fixed cost that outweighs checking a few dozen characters, so the
+// characters just after `index` are checked directly and memchr only searches
+// the rest.
+function findFirstCharacter(
+  pattern: Vector,
+  subject: Vector,
+  index: number
+): number {
+  const patternFirstChar = pattern.at(0);
+  const maxN = subject.length() - pattern.length() + 1;
+  const inlineEnd = Math.min(maxN, index + kInlineScanLength);
+  const start = subject.start();
+  const forward = subject.forward();
+  const last = subject.length() - 1;
+  for (let pos = index; pos < inlineEnd; pos++) {
+    if (start[forward ? pos : last - pos] === patternFirstChar) return pos;
+  }
+  if (inlineEnd >= maxN) return subject.length();
+  return subject.start() instanceof Uint8Array
+    ? findFirstCharacterOneByte(pattern, subject, inlineEnd)
+    : findFirstCharacterTwoByte(pattern, subject, inlineEnd);
+}
+
+// The tables are members of the C++ class, on the stack and uninitialized
+// until a strategy populates them. Allocating them here costs more than a
+// short search, so each is allocated when it is first populated.
+//
+// The C++ reads characters with Vector::operator[], which the compiler
+// inlines. V8 does not reliably inline Vector.at() into the search loops or
+// hoist its field loads, which makes the loops several times slower, so they
+// keep each vector's array, direction, and last index in locals and read
+// `chars[forward ? i : last - i]` instead. The pattern and subject vectors
+// always have the same direction.
 class StringSearch {
   // Store for the BoyerMoore(Horspool) bad char shift table.
-  #badCharShiftTable = new Int32Array(kUC16AlphabetSize);
+  #badCharShiftTable: Int32Array | undefined;
   // Store for the BoyerMoore good suffix shift table.
-  #goodSuffixShiftTable = new Int32Array(kBMMaxShift + 1);
-  // Table used temporarily while building the BoyerMoore good suffix
-  // shift table.
-  #suffixTable = new Int32Array(kBMMaxShift + 1);
+  #goodSuffixShiftTable: Int32Array | undefined;
 
   // The pattern to search for.
   #pattern: Vector;
@@ -233,6 +318,11 @@ class StringSearch {
 
   // Simple linear search for short patterns. Never bails out.
   #linearSearch(subject: Vector, index: number): number {
+    const patternChars = this.#pattern.start();
+    const patternLast = this.#pattern.length() - 1;
+    const subjectChars = subject.start();
+    const subjectLast = subject.length() - 1;
+    const forward = this.#pattern.forward();
     const pattern = this.#pattern;
     const n = subject.length() - pattern.length();
     for (let i = index; i <= n; i++) {
@@ -241,7 +331,10 @@ class StringSearch {
 
       let matches = true;
       for (let j = 1; j < pattern.length(); j++) {
-        if (pattern.at(j) !== subject.at(i + j)) {
+        if (
+          patternChars[forward ? j : patternLast - j]! !==
+          subjectChars[forward ? i + j : subjectLast - (i + j)]!
+        ) {
           matches = false;
           break;
         }
@@ -258,31 +351,45 @@ class StringSearch {
   //---------------------------------------------------------------------
 
   #boyerMooreSearch(subject: Vector, startIndex: number): number {
+    const patternChars = this.#pattern.start();
+    const patternLast = this.#pattern.length() - 1;
+    const subjectChars = subject.start();
+    const subjectLast = subject.length() - 1;
+    const forward = this.#pattern.forward();
     const pattern = this.#pattern;
     const subjectLength = subject.length();
     const patternLength = pattern.length();
     // Only preprocess at most kBMMaxShift last characters of pattern.
     const start = this.#start;
 
-    const badCharOccurrence = this.#badCharShiftTable;
+    const badCharOccurrence = this.#badCharShiftTable!;
     // The C++ biases a pointer into good_suffix_shift_table_ by -start_.
-    const goodSuffixShift = this.#goodSuffixShiftTable;
+    const goodSuffixShift = this.#goodSuffixShiftTable!;
     const goodSuffixShiftBias = -this.#start;
 
-    const lastChar = pattern.at(patternLength - 1);
+    const lastChar =
+      patternChars[
+        forward ? patternLength - 1 : patternLast - (patternLength - 1)
+      ]!;
     let index = startIndex;
     // Continue search from i.
     while (index <= subjectLength - patternLength) {
       let j = patternLength - 1;
       let c: number;
-      while (lastChar !== (c = subject.at(index + j))) {
+      while (
+        lastChar !==
+        (c = subjectChars[forward ? index + j : subjectLast - (index + j)]!)
+      ) {
         const shift = j - this.#charOccurrence(badCharOccurrence, c);
         index += shift;
         if (index > subjectLength - patternLength) {
           return subject.length();
         }
       }
-      while (pattern.at(j) === (c = subject.at(index + j))) {
+      while (
+        patternChars[forward ? j : patternLast - j]! ===
+        (c = subjectChars[forward ? index + j : subjectLast - (index + j)]!)
+      ) {
         if (j === 0) {
           return index;
         }
@@ -308,6 +415,9 @@ class StringSearch {
   }
 
   #populateBoyerMooreTable(): void {
+    const patternChars = this.#pattern.start();
+    const patternLast = this.#pattern.length() - 1;
+    const forward = this.#pattern.forward();
     const pattern = this.#pattern;
     const patternLength = pattern.length();
     // Only look at the last kBMMaxShift characters of pattern (from start_
@@ -317,8 +427,12 @@ class StringSearch {
 
     // Biased tables so that we can use pattern indices as table indices,
     // even if we only cover the part of the pattern from offset start.
-    const shiftTable = this.#goodSuffixShiftTable;
-    const suffixTable = this.#suffixTable;
+    const shiftTable = (this.#goodSuffixShiftTable = new Int32Array(
+      kBMMaxShift + 1
+    ));
+    // The C++ keeps this table, used only while building the good suffix
+    // shift table, as a member (suffix_table_).
+    const suffixTable = new Int32Array(kBMMaxShift + 1);
     const bias = -this.#start;
 
     // Initialize table.
@@ -333,13 +447,19 @@ class StringSearch {
     }
 
     // Find suffixes.
-    const lastChar = pattern.at(patternLength - 1);
+    const lastChar =
+      patternChars[
+        forward ? patternLength - 1 : patternLast - (patternLength - 1)
+      ]!;
     let suffix = patternLength + 1;
     {
       let i = patternLength;
       while (i > start) {
-        const c = pattern.at(i - 1);
-        while (suffix <= patternLength && c !== pattern.at(suffix - 1)) {
+        const c = patternChars[forward ? i - 1 : patternLast - (i - 1)]!;
+        while (
+          suffix <= patternLength &&
+          c !== patternChars[forward ? suffix - 1 : patternLast - (suffix - 1)]!
+        ) {
           if (shiftTable[suffix + bias] === length) {
             shiftTable[suffix + bias] = suffix - i;
           }
@@ -348,7 +468,10 @@ class StringSearch {
         suffixTable[--i + bias] = --suffix;
         if (suffix === patternLength) {
           // No suffix to extend, so we check against last_char only.
-          while (i > start && pattern.at(i - 1) !== lastChar) {
+          while (
+            i > start &&
+            patternChars[forward ? i - 1 : patternLast - (i - 1)]! !== lastChar
+          ) {
             if (shiftTable[patternLength + bias] === length) {
               shiftTable[patternLength + bias] = patternLength - i;
             }
@@ -378,14 +501,22 @@ class StringSearch {
   //---------------------------------------------------------------------
 
   #boyerMooreHorspoolSearch(subject: Vector, startIndex: number): number {
+    const patternChars = this.#pattern.start();
+    const patternLast = this.#pattern.length() - 1;
+    const subjectChars = subject.start();
+    const subjectLast = subject.length() - 1;
+    const forward = this.#pattern.forward();
     const pattern = this.#pattern;
     const subjectLength = subject.length();
     const patternLength = pattern.length();
-    const charOccurrences = this.#badCharShiftTable;
+    const charOccurrences = this.#badCharShiftTable!;
     let badness = -patternLength;
 
     // How bad we are doing without a good-suffix table.
-    const lastChar = pattern.at(patternLength - 1);
+    const lastChar =
+      patternChars[
+        forward ? patternLength - 1 : patternLast - (patternLength - 1)
+      ]!;
     const lastCharShift =
       patternLength - 1 - this.#charOccurrence(charOccurrences, lastChar);
 
@@ -394,7 +525,11 @@ class StringSearch {
     while (index <= subjectLength - patternLength) {
       let j = patternLength - 1;
       let subjectChar: number;
-      while (lastChar !== (subjectChar = subject.at(index + j))) {
+      while (
+        lastChar !==
+        (subjectChar =
+          subjectChars[forward ? index + j : subjectLast - (index + j)]!)
+      ) {
         const bcOcc = this.#charOccurrence(charOccurrences, subjectChar);
         const shift = j - bcOcc;
         index += shift;
@@ -404,7 +539,10 @@ class StringSearch {
         }
       }
       j--;
-      while (pattern.at(j) === subject.at(index + j)) {
+      while (
+        patternChars[forward ? j : patternLast - j]! ===
+        subjectChars[forward ? index + j : subjectLast - (index + j)]!
+      ) {
         if (j === 0) {
           return index;
         }
@@ -426,10 +564,15 @@ class StringSearch {
   }
 
   #populateBoyerMooreHorspoolTable(): void {
+    const patternChars = this.#pattern.start();
+    const patternLast = this.#pattern.length() - 1;
+    const forward = this.#pattern.forward();
     const pattern = this.#pattern;
     const patternLength = pattern.length();
 
-    const badCharOccurrence = this.#badCharShiftTable;
+    const badCharOccurrence = (this.#badCharShiftTable = new Int32Array(
+      kUC16AlphabetSize
+    ));
 
     // Only preprocess at most kBMMaxShift last characters of pattern.
     const start = this.#start;
@@ -446,7 +589,7 @@ class StringSearch {
       }
     }
     for (let i = start; i < patternLength - 1; i++) {
-      const c = pattern.at(i);
+      const c = patternChars[forward ? i : patternLast - i]!;
       const bucket = !this.#isTwoByte ? c : c % this.#alphabetSize();
       badCharOccurrence[bucket] = i;
     }
@@ -459,6 +602,11 @@ class StringSearch {
   // Simple linear search for short patterns, which bails out if the string
   // isn't found very early in the subject. Upgrades to BoyerMooreHorspool.
   #initialSearch(subject: Vector, index: number): number {
+    const patternChars = this.#pattern.start();
+    const patternLast = this.#pattern.length() - 1;
+    const subjectChars = subject.start();
+    const subjectLast = subject.length() - 1;
+    const forward = this.#pattern.forward();
     const pattern = this.#pattern;
     const patternLength = pattern.length();
     // Badness is a count of how much work we have done.  When we have
@@ -475,7 +623,10 @@ class StringSearch {
         if (i === subject.length()) return subject.length();
         let j = 1;
         do {
-          if (pattern.at(j) !== subject.at(i + j)) {
+          if (
+            patternChars[forward ? j : patternLast - j]! !==
+            subjectChars[forward ? i + j : subjectLast - (i + j)]!
+          ) {
             break;
           }
           j++;

@@ -350,6 +350,82 @@ export const fill = {
     );
     strictEqual(hex(Buffer.alloc(7).fill('ab', 'utf16le')), '61006200610062');
     strictEqual(hex(Buffer.alloc(7).fill('QUI=', 'base64')), '41424142414241');
+
+    // Long fills, with patterns that do not divide the range.
+    for (const [size, patternLength, start] of [
+      [1000, 7, 3],
+      [4096, 1000, 0],
+      [5, 9, 1],
+    ]) {
+      const pattern = Buffer.alloc(patternLength);
+      for (let i = 0; i < patternLength; i++) pattern[i] = i + 1;
+      const expected = Buffer.alloc(size);
+      for (let i = start; i < size; i++) {
+        expected[i] = pattern[(i - start) % patternLength];
+      }
+      const actual = Buffer.alloc(size).fill(pattern, start);
+      strictEqual(hex(actual), hex(expected), `${size} ${patternLength}`);
+    }
+
+    // A source that overlaps the filled range is read one element at a time
+    // as the range is written, as in kj::ArrayPtr::fill.
+    for (const [srcStart, srcEnd, start, end] of [
+      [0, 3, 2, 8],
+      [4, 7, 1, 7],
+      [2, 6, 2, 8],
+    ]) {
+      const actual = Buffer.from('abcdefgh');
+      actual.fill(actual.subarray(srcStart, srcEnd), start, end);
+      const expected = Buffer.from('abcdefgh');
+      for (let i = start, j = 0; i < end; i++) {
+        expected[i] = expected[srcStart + j];
+        if (++j === srcEnd - srcStart) j = 0;
+      }
+      strictEqual(actual.toString(), expected.toString(), `${srcStart}`);
+    }
+  },
+};
+
+export const hexScratch = {
+  test() {
+    // Hex decoding reuses scratch space; a long decode must not leak into a
+    // later short one.
+    strictEqual(hex(Buffer.from('ab'.repeat(500), 'hex')), 'ab'.repeat(500));
+    strictEqual(hex(Buffer.from('cdz', 'hex')), 'cd');
+    strictEqual(hex(Buffer.from('e', 'hex')), '');
+    const dest = Buffer.alloc(4, 0xee);
+    strictEqual(dest.write('12x', 'hex'), 1);
+    strictEqual(hex(dest), '12eeeeee');
+    // Longer than the scratch space.
+    const long = 'f0'.repeat(1500);
+    strictEqual(hex(Buffer.from(long, 'hex')), long);
+    strictEqual(Buffer.alloc(3000).write(long, 'hex'), 1500);
+    strictEqual(hex(Buffer.alloc(4).fill(long, 'hex')), 'f0f0f0f0');
+  },
+};
+
+export const utf16SearchByteCollisions = {
+  test() {
+    // Two-byte searches look for one byte of the first character and then
+    // check the whole character. Here that byte also appears in the other
+    // half of other characters.
+    const haystack = Buffer.from('\u6100\u0061\u6161\u0061b\u6100', 'utf16le');
+    strictEqual(haystack.indexOf('a', 0, 'utf16le'), 2);
+    strictEqual(haystack.indexOf('ab', 0, 'utf16le'), 6);
+    strictEqual(haystack.indexOf('\u6161', 0, 'utf16le'), 4);
+    strictEqual(haystack.lastIndexOf('a', undefined, 'utf16le'), 6);
+    strictEqual(haystack.lastIndexOf('\u6100', undefined, 'utf16le'), 10);
+    strictEqual(haystack.lastIndexOf('\u6100', 8, 'utf16le'), 0);
+    strictEqual(haystack.indexOf('\u0161', 0, 'utf16le'), -1);
+    // Far enough in that the search is not all done in JavaScript.
+    const long = Buffer.from('\u6100'.repeat(500) + 'ab', 'utf16le');
+    strictEqual(long.indexOf('a', 0, 'utf16le'), 1000);
+    strictEqual(long.indexOf('ab', 0, 'utf16le'), 1000);
+    strictEqual(long.lastIndexOf('\u6100', 1000, 'utf16le'), 998);
+    const oneByte = Buffer.from('x'.repeat(1000) + 'ab' + 'x'.repeat(1000));
+    strictEqual(oneByte.indexOf('ab'), 1000);
+    strictEqual(oneByte.lastIndexOf('ab'), 1000);
+    strictEqual(oneByte.indexOf('a'), 1000);
   },
 };
 

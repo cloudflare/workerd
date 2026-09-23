@@ -4,6 +4,7 @@
 
 #include "buffer-native.h"
 
+#include "buffer-string-search.h"
 #include "i18n.h"
 
 #include <nbytes.h>
@@ -17,25 +18,20 @@ namespace workerd::api::node {
 
 namespace {
 
+// Only these flags are accepted. Every write passes V8 the capacity of an exact
+// range, so a null terminator would be written past it.
 jsg::JsString::WriteFlags toWriteFlags(uint8_t flags) {
-  constexpr uint8_t kAll =
-      jsg::JsString::WriteFlags::NULL_TERMINATION | jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8;
-  JSG_REQUIRE((flags & ~kAll) == 0, TypeError, "Invalid write flags");
+  JSG_REQUIRE(flags == jsg::JsString::WriteFlags::NONE ||
+          flags == jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8,
+      TypeError, "Invalid write flags");
   return static_cast<jsg::JsString::WriteFlags>(flags);
 }
 
-// Write flags for the primitives that pass V8 an exact element count. V8
-// writes a null terminator after that count, which would run past `dest`, so
-// null termination is only accepted by writeUtf8.
-jsg::JsString::WriteFlags toCountedWriteFlags(uint8_t flags) {
-  auto result = toWriteFlags(flags);
-  JSG_REQUIRE((result & jsg::JsString::WriteFlags::NULL_TERMINATION) == 0, TypeError,
-      "Null termination is only supported by writeUtf8");
-  return result;
-}
-
-const char* asChars(jsg::JsUint8Array& array) {
-  return array.asArrayPtr().asChars().begin();
+// The `[start, end)` slice of `array`.
+kj::ArrayPtr<kj::byte> range(jsg::JsUint8Array& array, double start, double end) {
+  JSG_REQUIRE(
+      0 <= start && start <= end && end <= array.size(), RangeError, "Range is out of bounds");
+  return array.asArrayPtr().slice(static_cast<size_t>(start), static_cast<size_t>(end));
 }
 
 }  // namespace
@@ -47,25 +43,37 @@ double BufferNative::utf8Length(jsg::Lock& js, jsg::JsString string) {
 
 // jsg::JsString::writeInto(js, kj::ArrayPtr<kj::byte>, flags): writes the low
 // byte of each UTF-16 code unit. Returns the number of bytes written.
-double BufferNative::writeOneByte(
-    jsg::Lock& js, jsg::JsString string, jsg::JsUint8Array dest, uint8_t flags) {
-  return string.writeInto(js, dest.asArrayPtr(), toCountedWriteFlags(flags)).written;
+double BufferNative::writeOneByte(jsg::Lock& js,
+    jsg::JsString string,
+    jsg::JsUint8Array dest,
+    double start,
+    double end,
+    uint8_t flags) {
+  return string.writeInto(js, range(dest, start, end), toWriteFlags(flags)).written;
 }
 
 // jsg::JsString::writeInto(js, kj::ArrayPtr<char>, flags): writes UTF-8.
 // Returns the number of bytes written.
-double BufferNative::writeUtf8(
-    jsg::Lock& js, jsg::JsString string, jsg::JsUint8Array dest, uint8_t flags) {
-  return string.writeInto(js, dest.asArrayPtr().asChars(), toWriteFlags(flags)).written;
+double BufferNative::writeUtf8(jsg::Lock& js,
+    jsg::JsString string,
+    jsg::JsUint8Array dest,
+    double start,
+    double end,
+    uint8_t flags) {
+  return string.writeInto(js, range(dest, start, end).asChars(), toWriteFlags(flags)).written;
 }
 
-// jsg::JsString::writeInto(js, kj::ArrayPtr<uint16_t>, flags) over `dest`
+// jsg::JsString::writeInto(js, kj::ArrayPtr<uint16_t>, flags) over the range
 // reinterpreted as native-endian uint16_ts (the last byte of an odd-length
-// `dest` is not written). Returns the number of code units written.
-double BufferNative::writeUtf16(
-    jsg::Lock& js, jsg::JsString string, jsg::JsUint8Array dest, uint8_t flags) {
-  auto options = toCountedWriteFlags(flags);
-  auto bytes = dest.asArrayPtr();
+// range is not written). Returns the number of code units written.
+double BufferNative::writeUtf16(jsg::Lock& js,
+    jsg::JsString string,
+    jsg::JsUint8Array dest,
+    double start,
+    double end,
+    uint8_t flags) {
+  auto options = toWriteFlags(flags);
+  auto bytes = range(dest, start, end);
 #if __has_feature(undefined_behavior_sanitizer)
   // UBSan warns about unaligned writes, which are hard to avoid if dest is
   // unaligned. Write through an aligned buffer instead, as in buffer.c++.
@@ -82,92 +90,118 @@ double BufferNative::writeUtf16(
 }
 
 // jsg::Lock::str(kj::ArrayPtr<const kj::byte>)
-jsg::JsString BufferNative::newFromOneByte(jsg::Lock& js, jsg::JsUint8Array bytes) {
-  return js.str(bytes.asArrayPtr().asConst());
+jsg::JsString BufferNative::newFromOneByte(
+    jsg::Lock& js, jsg::JsUint8Array bytes, double start, double end) {
+  return js.str(range(bytes, start, end).asConst());
 }
 
 // jsg::Lock::str(kj::ArrayPtr<const char>)
-jsg::JsString BufferNative::newFromUtf8(jsg::Lock& js, jsg::JsUint8Array bytes) {
-  return js.str(bytes.asArrayPtr().asChars().asConst());
+jsg::JsString BufferNative::newFromUtf8(
+    jsg::Lock& js, jsg::JsUint8Array bytes, double start, double end) {
+  return js.str(range(bytes, start, end).asChars().asConst());
 }
 
-// jsg::Lock::str(kj::ArrayPtr<const uint16_t>) over `bytes` reinterpreted as
+// jsg::Lock::str(kj::ArrayPtr<const uint16_t>) over the range reinterpreted as
 // native-endian uint16_ts (a trailing odd byte is ignored). Copies to an
 // aligned buffer first, as BufferUtil's toString does.
-jsg::JsString BufferNative::newFromTwoByte(jsg::Lock& js, jsg::JsUint8Array bytes) {
-  auto slice = bytes.asArrayPtr();
+jsg::JsString BufferNative::newFromTwoByte(
+    jsg::Lock& js, jsg::JsUint8Array bytes, double start, double end) {
+  auto slice = range(bytes, start, end);
   kj::ArrayPtr<uint16_t> view(reinterpret_cast<uint16_t*>(slice.begin()), slice.size() / 2);
   KJ_STACK_ARRAY(uint16_t, data, view.size(), 1024, 4096);
   data.copyFrom(view);
   return js.str(data.asConst());
 }
 
-// memcmp over the first `length` bytes of each array.
-int BufferNative::memcmp(jsg::JsUint8Array one, jsg::JsUint8Array two, double length) {
-  JSG_REQUIRE(length >= 0 && length <= one.size() && length <= two.size(), RangeError,
-      "Length exceeds array length");
-  auto size = static_cast<size_t>(length);
-  return size > 0 ? ::memcmp(one.asArrayPtr().begin(), two.asArrayPtr().begin(), size) : 0;
+// memchr over the range, as used by stringsearch::FindFirstCharacter. Returns
+// the index of the first byte equal to `value`, or -1.
+double BufferNative::memchr(jsg::JsUint8Array bytes, double start, double end, uint8_t value) {
+  auto slice = range(bytes, start, end);
+  auto pos = static_cast<const kj::byte*>(::memchr(slice.begin(), value, slice.size()));
+  return pos == nullptr ? -1 : pos - bytes.asArrayPtr().begin();
 }
 
-// simdutf::maximal_binary_length_from_base64
-double BufferNative::simdutfMaximalBinaryLengthFromBase64(jsg::JsUint8Array input) {
-  return simdutf::maximal_binary_length_from_base64(asChars(input), input.size());
+// stringsearch::MemrchrFill (memrchr) over the range. Returns the index of the
+// last byte equal to `value`, or -1.
+double BufferNative::memrchr(jsg::JsUint8Array bytes, double start, double end, uint8_t value) {
+  auto slice = range(bytes, start, end);
+  if (slice.size() == 0) return -1;
+  auto pos =
+      static_cast<const kj::byte*>(stringsearch::MemrchrFill(slice.begin(), value, slice.size()));
+  return pos == nullptr ? -1 : pos - bytes.asArrayPtr().begin();
 }
 
-// simdutf::base64_to_binary with base64_default_or_url_accept_garbage. Returns
-// the number of bytes written; the error code is ignored, as in buffer.c++.
-double BufferNative::simdutfBase64ToBinary(jsg::JsUint8Array input, jsg::JsUint8Array output) {
-  JSG_REQUIRE(
-      output.size() >= simdutf::maximal_binary_length_from_base64(asChars(input), input.size()),
-      RangeError, "Output buffer is too small");
-  auto result = simdutf::base64_to_binary(asChars(input), input.size(),
-      output.asArrayPtr().asChars().begin(), simdutf::base64_default_or_url_accept_garbage);
-  return result.count;
+// memcmp over `length` bytes of each array, from the given starts.
+int BufferNative::memcmp(
+    jsg::JsUint8Array one, double oneStart, jsg::JsUint8Array two, double twoStart, double length) {
+  auto ptrOne = range(one, oneStart, oneStart + length);
+  auto ptrTwo = range(two, twoStart, twoStart + length);
+  return ptrOne.size() > 0 ? ::memcmp(ptrOne.begin(), ptrTwo.begin(), ptrOne.size()) : 0;
 }
 
-// simdutf::base64_length_from_binary with base64_default
-double BufferNative::simdutfBase64LengthFromBinary(double length) {
-  return simdutf::base64_length_from_binary(static_cast<size_t>(length));
+// The BASE64 and BASE64URL cases of decodeStringImpl in buffer.c++: writes the
+// string's low bytes into a stack buffer, then decodes it with
+// simdutf::base64_to_binary and base64_default_or_url_accept_garbage, ignoring
+// the error code.
+jsg::JsUint8Array BufferNative::decodeBase64(jsg::Lock& js, jsg::JsString string) {
+  auto length = string.length(js);
+  // We do not use the kj::String conversion here because inline null-characters
+  // need to be ignored.
+  KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);
+  auto result = string.writeInto(js, buf, jsg::JsString::REPLACE_INVALID_UTF8);
+  auto len = result.written;
+  auto dest = jsg::JsUint8Array::create(
+      js, simdutf::maximal_binary_length_from_base64(buf.asChars().begin(), len));
+  auto decResult = simdutf::base64_to_binary(buf.asChars().begin(), len,
+      dest.asArrayPtr().asChars().begin(), simdutf::base64_default_or_url_accept_garbage);
+  if (decResult.count < dest.size()) {
+    return dest.slice(js, decResult.count);
+  }
+  return dest;
 }
 
-// simdutf::base64_length_from_binary with base64_url
-double BufferNative::simdutfBase64UrlLengthFromBinary(double length) {
-  return simdutf::base64_length_from_binary(static_cast<size_t>(length), simdutf::base64_url);
+// The BASE64 case of toStringImpl in buffer.c++: simdutf::binary_to_base64
+// with base64_default into a stack buffer.
+jsg::JsString BufferNative::encodeBase64(
+    jsg::Lock& js, jsg::JsUint8Array bytes, double start, double end) {
+  auto slice = range(bytes, start, end);
+  size_t length = simdutf::base64_length_from_binary(slice.size());
+  KJ_STACK_ARRAY(kj::byte, out, length, 1024, 4096);
+  simdutf::binary_to_base64(reinterpret_cast<const char*>(slice.begin()), slice.size(),
+      reinterpret_cast<char*>(out.begin()));
+  return js.str(out.asConst());
 }
 
-// simdutf::binary_to_base64 with base64_default
-double BufferNative::simdutfBinaryToBase64(jsg::JsUint8Array input, jsg::JsUint8Array output) {
-  JSG_REQUIRE(output.size() >= simdutf::base64_length_from_binary(input.size()), RangeError,
-      "Output buffer is too small");
-  return simdutf::binary_to_base64(
-      asChars(input), input.size(), output.asArrayPtr().asChars().begin());
-}
-
-// simdutf::binary_to_base64 with base64_url
-double BufferNative::simdutfBinaryToBase64Url(jsg::JsUint8Array input, jsg::JsUint8Array output) {
-  JSG_REQUIRE(
-      output.size() >= simdutf::base64_length_from_binary(input.size(), simdutf::base64_url),
-      RangeError, "Output buffer is too small");
-  return simdutf::binary_to_base64(
-      asChars(input), input.size(), output.asArrayPtr().asChars().begin(), simdutf::base64_url);
+// The BASE64URL case of toStringImpl in buffer.c++: simdutf::binary_to_base64
+// with base64_url into a stack buffer.
+jsg::JsString BufferNative::encodeBase64Url(
+    jsg::Lock& js, jsg::JsUint8Array bytes, double start, double end) {
+  auto slice = range(bytes, start, end);
+  auto options = simdutf::base64_url;
+  size_t length = simdutf::base64_length_from_binary(slice.size(), options);
+  KJ_STACK_ARRAY(kj::byte, out, length, 1024, 4096);
+  simdutf::binary_to_base64(reinterpret_cast<const char*>(slice.begin()), slice.size(),
+      reinterpret_cast<char*>(out.begin()), options);
+  return js.str(out.asConst());
 }
 
 // simdutf::validate_ascii
 bool BufferNative::simdutfValidateAscii(jsg::JsUint8Array input) {
-  return simdutf::validate_ascii(asChars(input), input.size());
+  return simdutf::validate_ascii(input.asArrayPtr().asChars().begin(), input.size());
 }
 
 // simdutf::validate_utf8
 bool BufferNative::simdutfValidateUtf8(jsg::JsUint8Array input) {
-  return simdutf::validate_utf8(asChars(input), input.size());
+  return simdutf::validate_utf8(input.asArrayPtr().asChars().begin(), input.size());
 }
 
-// nbytes::Base64Decode. Returns the number of bytes written, which is at most
-// output.length.
-double BufferNative::nbytesBase64Decode(jsg::JsUint8Array output, jsg::JsUint8Array input) {
+// nbytes::Base64Decode into the `[start, end)` range of `output`. Returns the
+// number of bytes written, which is at most the size of the range.
+double BufferNative::nbytesBase64Decode(
+    jsg::JsUint8Array output, double start, double end, jsg::JsUint8Array input) {
+  auto dest = range(output, start, end);
   return nbytes::Base64Decode(
-      output.asArrayPtr().asChars().begin(), output.size(), asChars(input), input.size());
+      dest.asChars().begin(), dest.size(), input.asArrayPtr().asChars().begin(), input.size());
 }
 
 // nbytes::SwapBytes16
@@ -185,12 +219,10 @@ bool BufferNative::nbytesSwapBytes64(jsg::JsUint8Array data) {
   return nbytes::SwapBytes64(data.asArrayPtr().asChars().begin(), data.size());
 }
 
-// kj::encodeHex. Returns the lowercase hex digits as bytes.
-jsg::JsUint8Array BufferNative::kjEncodeHex(jsg::Lock& js, jsg::JsUint8Array input) {
-  auto hex = kj::encodeHex(input.asArrayPtr());
-  auto result = jsg::JsUint8Array::create(js, hex.size());
-  result.asArrayPtr().copyFrom(hex.asBytes());
-  return result;
+// The HEX case of toStringImpl in buffer.c++: kj::encodeHex.
+jsg::JsString BufferNative::encodeHex(
+    jsg::Lock& js, jsg::JsUint8Array bytes, double start, double end) {
+  return js.str(kj::encodeHex(range(bytes, start, end)));
 }
 
 // i18n::transcode
