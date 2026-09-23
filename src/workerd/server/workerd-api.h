@@ -80,7 +80,9 @@ class WorkerdApi final: public Worker::Api {
       const Worker::Isolate& isolate,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
       SpanParent parentSpan) const override;
-  void registerBuiltinModules(jsg::Lock& lock) const override;
+  void restoreModulesFromSnapshot(jsg::Lock& lock,
+      const Worker::Script::ModulesSource& source,
+      const Worker::Isolate& isolate) const override;
 
   kj::Array<Worker::Script::CompiledGlobal> compileServiceWorkerGlobals(jsg::Lock& lock,
       const Worker::Script::ScriptSource& source,
@@ -350,6 +352,9 @@ class WorkerdApi final: public Worker::Api {
  private:
   struct Impl;
   kj::Own<Impl> impl;
+
+  // Registers the builtin modules, not the bundle's own, in the legacy module registry.
+  void registerBuiltinModules(jsg::Lock& lock) const;
   kj::Array<Worker::Api::InboundListener> inboundListeners;
 };
 

@@ -783,11 +783,11 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
 
   // Reset the module registry's per-isolate handles; the jsg::Data visitors also drop the
   // paired TracedReference. Legacy registry: per-entry module / source-object / mutable-exports /
-  // synthetic handles (incl. CommonJS evalFunc); the restored isolate starts with an empty
-  // registry and takes the evaluated main module out of the heap (io/worker.c++). New registry:
-  // the v8::Module of every instantiated module, recorded in the blob first so that the restored
-  // isolate's registry re-adopts them (SnapshotArtifact::moduleRecords). Done before step 1
-  // below, whose destruction of the global scope also destroys the registry.
+  // synthetic handles (incl. CommonJS evalFunc), the ones it can restore recorded in the blob
+  // first (SnapshotArtifact::legacyModuleRecords). New registry: the v8::Module of every
+  // instantiated module, recorded in the blob first so that the restored isolate's registry
+  // re-adopts them (SnapshotArtifact::moduleRecords). Done before step 1 below, whose
+  // destruction of the global scope also destroys the registry.
   {
     v8::HandleScope scope(ptr);
     auto defaultContext = defaultContextHandle.Get(ptr);
@@ -799,7 +799,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
     } else {
       auto& moduleRegistry = KJ_ASSERT_NONNULL(getAlignedPointerFromEmbedderData<ModuleRegistry>(
           defaultContext, ContextPointerSlot::MODULE_REGISTRY));
-      moduleRegistry.visitHandlesForSnapshot(resetHandle);
+      artifact.legacyModuleRecords = moduleRegistry.recordForSnapshot(defaultContext, *creator);
     }
   }
 
