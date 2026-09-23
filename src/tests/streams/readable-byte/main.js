@@ -74,6 +74,7 @@ export {
   readableStreamMultiplePendingReads,
   byobreaderRegression,
   partialViewThenDefaultRead,
+  nativeByobMultiByteViews,
 } from 'byob-reader';
 
 export {

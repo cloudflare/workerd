@@ -648,12 +648,19 @@ jsg::JsObject makeMockController(
 }
 
 // Builds a mock of the conduit's BYOB request facade over the given view, recording
-// respond() calls into `state`.
-jsg::JsObject makeMockByobRequest(
-    jsg::Lock& js, MockControllerState& state, jsg::JsUint8Array view, double atLeast) {
+// respond() calls into `state`. `elementSize` is left unset when omitted (the source then
+// assumes 1).
+jsg::JsObject makeMockByobRequest(jsg::Lock& js,
+    MockControllerState& state,
+    jsg::JsUint8Array view,
+    double atLeast,
+    kj::Maybe<double> elementSize = kj::none) {
   auto obj = js.obj();
   obj.set(js, "view"_kj, view);
   obj.set(js, "atLeast"_kj, js.num(atLeast));
+  KJ_IF_SOME(size, elementSize) {
+    obj.set(js, "elementSize"_kj, js.num(size));
+  }
   obj.set(js, "respond"_kj,
       jsg::JsValue(js.wrapSimpleFunction(
           js.v8Context(), [&state](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -759,6 +766,43 @@ KJ_TEST("ReadableStreamNativeSource BYOB under-delivery responds then closes (fu
     }).then(js, [&state](jsg::Lock& js) {
       KJ_EXPECT(state.responded == kj::none);
       KJ_EXPECT(state.enqueued.size() == 0);
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("ReadableStreamNativeSource BYOB pull responds whole elements; a partial one at EOF "
+        "rejects") {
+  TestFixture testFixture;
+  MockControllerState state;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // 11 bytes read into a view of 2-byte elements: the first pull responds with 10 and
+    // keeps the last byte; at EOF that byte can never complete an element.
+    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData));
+    auto view = jsg::JsUint8Array::create(js, static_cast<size_t>(64));
+    auto byobRequest = makeMockByobRequest(js, state, view, 2, 2.0);
+    auto controller = makeMockController(js, state, byobRequest);
+
+    auto promise = source->pull(js, controller, freshSignal(js))
+                       .then(js,
+                           [&state, source = source.addRef(), controller = controller.addRef(js),
+                               view = view.addRef(js)](jsg::Lock& js) mutable {
+      KJ_EXPECT(KJ_ASSERT_NONNULL(state.responded) == 10);
+      auto filled = view.getHandle(js).asArrayPtr().first(10);
+      KJ_EXPECT(filled == kData.first(10).asBytes());
+      KJ_EXPECT(!state.closed);
+      state.responded = kj::none;
+      return source->pull(js, controller.getHandle(js), freshSignal(js));
+    }).then(js, [](jsg::Lock& js) {
+      KJ_FAIL_EXPECT("the pull should have rejected");
+    }, [&state](jsg::Lock& js, jsg::Value exception) {
+      auto message = kj::str(jsg::JsValue(exception.getHandle(js)));
+      KJ_EXPECT(
+          message == "TypeError: Insufficient bytes to fill elements in the given view", message);
+      KJ_EXPECT(state.responded == kj::none);
+      KJ_EXPECT(!state.closed);
     });
     return env.context.awaitJs(js, kj::mv(promise));
   });

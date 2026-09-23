@@ -42,6 +42,7 @@ behavior-parity (messages aside).
 | 25 | byobRequest held by the source across tee() (reader released first) | stays exposed and working (spec): the responded byte reaches both branches, and fills a sole remaining branch's read | invalidated at tee(): byobRequest null while two branches exist, respond() throws TypeError 'This BYOB request has been invalidated'; a sole remaining branch's read gets a fresh request | `teeInvalidatesHeldByobRequest`, `teeSoleBranchMintsFreshByobRequest` |
 | 26 | pull() after both tee branches are collected (controller held) — readable #20 mirror | keeps pulling for consumers that no longer exist; DEFECT: a source that enqueues on every pull runs until the stream closes | the source is released: pull() is never called again (the parity half — enqueue accepted, desiredSize at the high-water mark, byobRequest null, close() as ever — is `teeBranchesCollected`) | `teeBranchesCollectedPullStops` |
 | 27 | where `closed` settles relative to the #12 tail read (close() below min with partial bytes) | read fulfills first, then closed | closed first — matching the order the spec gives a read that drains the last queued bytes after close(); that drain case is parity and is pinned alongside | `closedOrderAtEndOfData` |
+| 28 | read(view) with a multi-byte view (e.g. Uint16Array) on a native body | resolves Uint8Array views of whatever bytes arrive, partial elements included | views of the read's own type holding whole elements; a partial element is carried into the next read, and one left at EOF errors the stream with TypeError 'Insufficient bytes to fill elements in the given view' (as a JS byte source's close() mid-element does, spec) | `nativeByobMultiByteViews` |
 
 Parity worth noting (probed, pinned): byte hwm defaults to 0 with NO
 automatic pull; pull-throw and error-then-throw identity; enqueue
@@ -115,7 +116,7 @@ named suite test pins directly, differing only in incidental asserts.
 | `construction.js` | ledger #1, #2, #4; byte hwm default 0 |
 | `pull-timing.js` | ledger #3; pull-throw seeds |
 | `controller.js` | ledger #5, #7, #21, #22, #23; enqueue-discards-request; read-after-close and read-after-cancel; detach-at-call |
-| `byob-reader.js` | ledger #20; view-type matrix + offsets + auto-allocate sizing (migrated streams-byob-edge-cases) + mismatched sizes/types, subarray, multi-pending-reads, byobreaderRegression (migrated streams-js-test) |
+| `byob-reader.js` | ledger #20, #28; view-type matrix + offsets + auto-allocate sizing (migrated streams-byob-edge-cases) + mismatched sizes/types, subarray, multi-pending-reads, byobreaderRegression (migrated streams-js-test) |
 | `respond.js` | ledger #6, #8, #15, #16; all 31 streams-respond-test tests (respond/respondWithNewView/pumps/cancel races/UAF shapes) + js-test respond family |
 | `release-relock.js` | ledger #9, #10; the WPT releaseLock→second-reader cluster; release with two pending reads or a partially filled head |
 | `read-min.js` | ledger #11-#13, #27; byobMin/constraints/readAtLeast (migrated streams-test.js); /chunked SELF endpoint |
