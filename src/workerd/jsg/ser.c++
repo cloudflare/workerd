@@ -439,7 +439,7 @@ Deserializer::Deserializer(Lock& js,
 #ifdef KJ_DEBUG
   kj::requireOnStack(this, "jsg::Deserializer must be allocated on the stack");
 #endif
-  init(js, kj::mv(transferredArrayBuffers), kj::mv(maybeOptions));
+  init(js, data, kj::mv(transferredArrayBuffers), kj::mv(maybeOptions));
 }
 
 Deserializer::Deserializer(
@@ -451,12 +451,30 @@ Deserializer::Deserializer(
           kj::mv(maybeOptions)) {}
 
 void Deserializer::init(Lock& js,
+    kj::ArrayPtr<const kj::byte> data,
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers,
     kj::Maybe<Options> maybeOptions) {
   auto options = kj::mv(maybeOptions).orDefault({});
   externalHandler = options.externalHandler;
   if (options.readHeader) {
-    check(deser.ReadHeader(js.v8Context()));
+    JSG_TRY(js) {
+      check(deser.ReadHeader(js.v8Context()));
+    }
+    JSG_CATCH(exception) {
+      (void)exception;
+      // Only report header metadata, never bytes from the serialized value. V8 leaves the wire
+      // version at zero if the header is absent or its version could not be decoded.
+      auto header = data.size() == 0 ? "empty" : data[0] == 0xff ? "present" : "missing";
+      auto message = kj::str(
+          "Unable to deserialize cloned data due to invalid or unsupported version. [context=",
+          options.diagnosticContext.orDefault("unknown"), "; bytes=", data.size(),
+          "; header=", header, "; wireVersion=", deser.GetWireFormatVersion(),
+          "; maxWireVersion=", v8::CurrentValueSerializerFormatVersion(),
+          "; v8=", v8::V8::GetVersion(), "]");
+      // JavaScript exceptions may be caught by the caller and never reach error reporting.
+      KJ_LOG(ERROR, message, kj::getStackTrace());
+      js.throwException(js.error(message));
+    }
   }
   preserveStackInErrors = options.preserveStackInErrors;
   KJ_IF_SOME(version, options.version) {

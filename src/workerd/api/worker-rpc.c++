@@ -282,8 +282,10 @@ struct DeserializeResult {
 };
 
 // Call to construct a JS value from an `rpc::JsValue`.
-DeserializeResult deserializeJsValue(
-    jsg::Lock& js, rpc::JsValue::Reader reader, kj::Maybe<TraceContextParent> originatingCall) {
+DeserializeResult deserializeJsValue(jsg::Lock& js,
+    rpc::JsValue::Reader reader,
+    kj::Maybe<TraceContextParent> originatingCall,
+    kj::StringPtr diagnosticContext) {
   auto disposalGroup = kj::heap<RpcStubDisposalGroup>();
 
   RpcDeserializerExternalHandler externalHandler(
@@ -308,6 +310,7 @@ DeserializeResult deserializeJsValue(
         // passed-through errors.
         .preserveStackInErrors = false,
         .externalHandler = externalHandler,
+        .diagnosticContext = diagnosticContext,
       });
 
   return {
@@ -322,7 +325,7 @@ jsg::JsValue deserializeRpcReturnValue(jsg::Lock& js,
     rpc::JsRpcTarget::CallResults::Reader callResults,
     kj::Maybe<TraceContextParent> originatingCall) {
   auto [value, disposalGroup] =
-      deserializeJsValue(js, callResults.getResult(), kj::mv(originatingCall));
+      deserializeJsValue(js, callResults.getResult(), kj::mv(originatingCall), "RPC result");
 
   // If the object had a disposer on the callee side, it will run when we discard the callPipeline,
   // so attach that to the disposal group on the caller side. If the returned object did NOT have
@@ -1915,7 +1918,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       kj::Maybe<TraceContextParent> originatingCall) {
     // We received arguments from the client, deserialize them back to JS.
     KJ_IF_SOME(a, args) {
-      auto [value, disposalGroup] = deserializeJsValue(js, a, kj::mv(originatingCall));
+      auto [value, disposalGroup] =
+          deserializeJsValue(js, a, kj::mv(originatingCall), "RPC arguments");
       auto args = KJ_REQUIRE_NONNULL(
           value.tryCast<jsg::JsArray>(), "expected JsArray when deserializing arguments.");
       // Call() expects a `Local<Value> []`... so we populate an array.
@@ -1974,7 +1978,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
     kj::Maybe<jsg::JsArray> argsArrayFromClient;
     size_t argCountFromClient = 0;
     KJ_IF_SOME(a, args) {
-      auto [value, disposalGroup] = deserializeJsValue(js, a, kj::mv(originatingCall));
+      auto [value, disposalGroup] =
+          deserializeJsValue(js, a, kj::mv(originatingCall), "RPC arguments");
 
       auto array = KJ_REQUIRE_NONNULL(
           value.tryCast<jsg::JsArray>(), "expected JsArray when deserializing arguments.");

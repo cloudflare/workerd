@@ -440,6 +440,11 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 - Tag enum values MUST NOT change once data has been serialized
 - First tag = current version; subsequent tags = accepted old versions
 - `deserialize()` receives the tag for version dispatch
+- Deserialization header errors include input size, header presence, decoded and supported wire
+  versions, and receiving V8 version. `Deserializer::Options::diagnosticContext` supplies a fixed
+  runtime call-site label (defaults to `"unknown"`), never user data. A decoded version of zero can
+  also mean no version was read. Header failures log this metadata at error level with a native
+  stack trace before throwing.
 
 ## Web IDL Union Validation Rules
 

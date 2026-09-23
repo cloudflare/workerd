@@ -66,6 +66,30 @@ struct TestContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext, TestSerializableCap);
 
+KJ_TEST("Frankenvalue header failures identify binding or entrypoint props") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  capnp::MallocMessageBuilder message;
+  auto builder = message.initRoot<rpc::Frankenvalue>();
+  builder.setV8Serialized("private payload"_kj.asBytes());
+  auto value = Frankenvalue::fromCapnp(builder.asReader(), {});
+
+  e.run([&](jsg::Lock& js) {
+    KJ_EXPECT_LOG(
+        ERROR, "[context=binding or entrypoint props; bytes=15; header=missing; wireVersion=0;");
+    JSG_TRY(js) {
+      value.toJs(js);
+      KJ_FAIL_EXPECT("invalid header was accepted");
+    }
+    JSG_CATCH(exception) {
+      KJ_EXPECT(kj::str(exception.getHandle(js)) ==
+          kj::str("Error: Unable to deserialize cloned data due to invalid or unsupported version. "
+                  "[context=binding or entrypoint props; bytes=15; header=missing; wireVersion=0; "
+                  "maxWireVersion=",
+              v8::CurrentValueSerializerFormatVersion(), "; v8=", v8::V8::GetVersion(), "]"));
+    }
+  });
+}
+
 KJ_TEST("Frankenvalue") {
   jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
 
