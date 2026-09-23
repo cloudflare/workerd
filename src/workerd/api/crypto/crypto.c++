@@ -291,6 +291,136 @@ CryptoKey::~CryptoKey() noexcept(false) {}
 kj::StringPtr CryptoKey::getAlgorithmName() const {
   return impl->getAlgorithmName();
 }
+
+namespace {
+
+// Struct types have no eagerly registered TypeHandler (see TypeWrapper::forEachTypeHandler), so
+// the recipe is built and parsed by hand as a JSON object.
+void putOptional(
+    jsg::Lock& js, jsg::JsObject& obj, kj::StringPtr name, const jsg::Optional<kj::String>& value) {
+  KJ_IF_SOME(v, value) obj.set(js, name, js.str(v));
+}
+jsg::Optional<kj::String> getOptionalString(jsg::Lock& js, jsg::JsObject& obj, kj::StringPtr name) {
+  auto v = obj.get(js, name);
+  if (v.isUndefined() || v.isNull()) return kj::none;
+  return v.toString(js);
+}
+jsg::Optional<int> getOptionalInt(jsg::Lock& js, jsg::JsObject& obj, kj::StringPtr name) {
+  auto v = obj.get(js, name);
+  if (v.isUndefined() || v.isNull()) return kj::none;
+  return KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(v.tryCast<jsg::JsInt32>()).value(js));
+}
+
+constexpr kj::StringPtr JWK_STRING_FIELDS[] = {"kty"_kj, "use"_kj, "alg"_kj, "crv"_kj, "x"_kj,
+  "y"_kj, "d"_kj, "n"_kj, "e"_kj, "p"_kj, "q"_kj, "dp"_kj, "dq"_kj, "qi"_kj, "k"_kj};
+
+jsg::Optional<kj::String>& jwkStringField(SubtleCrypto::JsonWebKey& jwk, kj::StringPtr name) {
+  if (name == "use") return jwk.use;
+  if (name == "alg") return jwk.alg;
+  if (name == "crv") return jwk.crv;
+  if (name == "x") return jwk.x;
+  if (name == "y") return jwk.y;
+  if (name == "d") return jwk.d;
+  if (name == "n") return jwk.n;
+  if (name == "e") return jwk.e;
+  if (name == "p") return jwk.p;
+  if (name == "q") return jwk.q;
+  if (name == "dp") return jwk.dp;
+  if (name == "dq") return jwk.dq;
+  if (name == "qi") return jwk.qi;
+  KJ_ASSERT(name == "k");
+  return jwk.k;
+}
+
+}  // namespace
+
+kj::Maybe<kj::Array<kj::byte>> CryptoKey::snapshotRecipe(jsg::Lock& js) {
+  if (!getExtractable()) return kj::none;
+
+  // Every algorithm's JWK export carries the key material plus alg/crv, but importKey() still
+  // wants the hash (RSA, HMAC), length (AES, HMAC) and curve (EC) spelled out.
+  auto recipe = js.obj();
+  auto algorithm = js.obj();
+  algorithm.set(js, "name", js.str(getAlgorithmName()));
+  auto putHash = [&](const KeyAlgorithm& hash) { algorithm.set(js, "hash", js.str(hash.name)); };
+  auto putLength = [&](uint16_t length) { algorithm.set(js, "length", js.num(length)); };
+  KJ_SWITCH_ONEOF(getAlgorithm(js)) {
+    KJ_CASE_ONEOF(a, KeyAlgorithm) {}
+    KJ_CASE_ONEOF(a, AesKeyAlgorithm) {
+      putLength(a.length);
+    }
+    KJ_CASE_ONEOF(a, HmacKeyAlgorithm) {
+      putHash(a.hash);
+      putLength(a.length);
+    }
+    KJ_CASE_ONEOF(a, RsaKeyAlgorithm) {
+      KJ_IF_SOME(h, a.hash) putHash(h);
+    }
+    KJ_CASE_ONEOF(a, EllipticKeyAlgorithm) {
+      algorithm.set(js, "namedCurve", js.str(a.namedCurve));
+    }
+    KJ_CASE_ONEOF(a, ArbitraryKeyAlgorithm) {
+      KJ_IF_SOME(h, a.hash) putHash(h);
+      KJ_IF_SOME(c, a.namedCurve) algorithm.set(js, "namedCurve", js.str(c));
+      KJ_IF_SOME(l, a.length) putLength(l);
+    }
+  }
+  recipe.set(js, "algorithm", algorithm);
+
+  auto exported = impl->exportKey(js, "jwk"_kj);
+  auto& jwk = KJ_UNWRAP_OR(exported.tryGet<SubtleCrypto::JsonWebKey>(), return kj::none);
+  // RSA multi-prime keys are the one JWK shape not covered below.
+  if (jwk.oth != kj::none) return kj::none;
+  auto jwkObj = js.obj();
+  jwkObj.set(js, "kty", js.str(jwk.kty));
+  for (auto name: kj::ArrayPtr(JWK_STRING_FIELDS).slice(1)) {
+    putOptional(js, jwkObj, name, jwkStringField(jwk, name));
+  }
+  KJ_IF_SOME(ext, jwk.ext) jwkObj.set(js, "ext", js.boolean(ext));
+  KJ_IF_SOME(ops, jwk.key_ops) {
+    jwkObj.set(js, "key_ops",
+        js.arr(ops.asPtr(), [](jsg::Lock& js, const kj::String& s) { return js.str(s); }));
+  }
+  recipe.set(js, "jwk", jwkObj);
+
+  auto usages = getUsages();
+  recipe.set(js, "usages",
+      js.arr(usages.asPtr(), [](jsg::Lock& js, kj::StringPtr s) { return js.str(s); }));
+  return kj::heapArray<kj::byte>(js.serializeJson(recipe).asBytes());
+}
+
+jsg::Ref<CryptoKey> CryptoKey::restoreFromSnapshot(
+    jsg::Lock& js, kj::ArrayPtr<const kj::byte> recipe) {
+  auto obj =
+      KJ_ASSERT_NONNULL(jsg::JsValue::fromJson(js, recipe.asChars()).tryCast<jsg::JsObject>());
+  auto jwkObj = KJ_ASSERT_NONNULL(obj.get(js, "jwk").tryCast<jsg::JsObject>());
+  SubtleCrypto::JsonWebKey jwk{.kty = KJ_ASSERT_NONNULL(getOptionalString(js, jwkObj, "kty"))};
+  for (auto name: kj::ArrayPtr(JWK_STRING_FIELDS).slice(1)) {
+    jwkStringField(jwk, name) = getOptionalString(js, jwkObj, name);
+  }
+  auto ext = jwkObj.get(js, "ext");
+  if (!ext.isUndefined()) jwk.ext = ext.isTrue();
+  auto ops = jwkObj.get(js, "key_ops");
+  KJ_IF_SOME(arr, ops.tryCast<jsg::JsArray>()) {
+    jwk.key_ops = KJ_MAP(i, kj::zeroTo(arr.size())) { return arr.get(js, i).toString(js); };
+  }
+
+  auto algObj = KJ_ASSERT_NONNULL(obj.get(js, "algorithm").tryCast<jsg::JsObject>());
+  SubtleCrypto::ImportKeyAlgorithm algorithm{
+    .name = KJ_ASSERT_NONNULL(getOptionalString(js, algObj, "name"))};
+  KJ_IF_SOME(h, getOptionalString(js, algObj, "hash")) {
+    algorithm.hash = kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>(kj::mv(h));
+  }
+  algorithm.length = getOptionalInt(js, algObj, "length");
+  algorithm.namedCurve = getOptionalString(js, algObj, "namedCurve");
+
+  auto usagesArr = KJ_ASSERT_NONNULL(obj.get(js, "usages").tryCast<jsg::JsArray>());
+  auto usages =
+      KJ_MAP(i, kj::zeroTo(usagesArr.size())) { return usagesArr.get(js, i).toString(js); };
+  return SubtleCrypto::importKeySync(
+      js, "jwk"_kj, kj::mv(jwk), kj::mv(algorithm), /*extractable=*/true, usages);
+}
+
 CryptoKey::AlgorithmVariant CryptoKey::getAlgorithm(jsg::Lock& js) const {
   return impl->getAlgorithm(js);
 }

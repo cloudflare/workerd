@@ -2233,6 +2233,12 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                   //     impl->ctxExports == IsolateBase::workerExportsObj.
                   // A real Worker repopulates these handles in START_FROM_SNAPSHOT mode.
                   if (lock.isPreparingSnapshot()) {
+                    // Top-level code that awaits a native promise (a framework importing its
+                    // session key with crypto.subtle.importKey, say) leaves the jsg promise
+                    // translation step queued as a microtask. Until it runs, the C++ result
+                    // is held through a strong v8::Global, which CreateBlob() refuses. The
+                    // script path above flushes for the same reason.
+                    lock.runMicrotasks();
                     // Record the namespace so a restored isolate can skip evaluation entirely.
                     context->SetEmbedderDataV2(
                         jsg::SNAPSHOT_MAIN_MODULE_NAMESPACE_SLOT, v8::Local<v8::Object>(ns));
