@@ -95,11 +95,16 @@ RpcSerializerExternalHandler::Replayability classifyExternalReplayability(
 
 JsRpcCallPlan::JsRpcCallPlan(kj::Own<capnp::MallocMessageBuilder> message,
     kj::Array<const byte> serializedData,
+    size_t serializedDataCapacity,
     RpcSerializerExternalHandler::Replayability serializerReplayability)
     : message(kj::mv(message)),
       serializedData(kj::mv(serializedData)),
+      serializedDataCapacity(serializedDataCapacity),
       replayable(false) {
   using Replayability = RpcSerializerExternalHandler::Replayability;
+
+  KJ_REQUIRE(this->serializedData.size() <= this->serializedDataCapacity,
+      "serialized RPC data exceeds its buffer capacity");
 
   auto operation = getParams().getOperation();
   if (!operation.isCallWithArgs()) return;
@@ -240,6 +245,7 @@ namespace {
 
 struct SerializedJsValue {
   kj::Array<const byte> data;
+  size_t dataCapacity;
   capnp::MessageSize sizeHint;
 };
 
@@ -253,7 +259,8 @@ SerializedJsValue serializeJsValue(
         .externalHandler = externalHandler,
       });
   serializer.write(js, value);
-  kj::Array<const byte> data = serializer.release().data;
+  auto released = serializer.release();
+  kj::Array<const byte> data = kj::mv(released.data);
   JSG_ASSERT(data.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
       "Serialized RPC arguments or return values are limited to 32MiB, but the size of this value "
       "was: ",
@@ -265,7 +272,11 @@ SerializedJsValue serializeJsValue(
   hint.wordCount += externalHandler.size() * capnp::sizeInWords<rpc::JsValue::External>();
   hint.capCount += externalHandler.size();
 
-  return {.data = kj::mv(data), .sizeHint = hint};
+  return {
+    .data = kj::mv(data),
+    .dataCapacity = released.dataCapacity,
+    .sizeHint = hint,
+  };
 }
 
 void buildJsValueExternals(
@@ -718,6 +729,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       }
 
       kj::Array<const byte> serializedData;
+      size_t serializedDataCapacity = 0;
       auto serializerReplayability = RpcSerializerExternalHandler::Replayability::REPLAYABLE;
       KJ_IF_SOME(args, maybeArgs) {
         // If we have arguments, serialize them.
@@ -746,6 +758,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
           auto argsBuilder = planBuilder.getOperation().initCallWithArgs();
           buildJsValueExternals(argsBuilder, externalHandler);
           serializedData = kj::mv(serialized.data);
+          serializedDataCapacity = serialized.dataCapacity;
           serializerReplayability = externalHandler.getReplayability();
         }
       } else {
@@ -753,7 +766,8 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
         planBuilder.getOperation().setGetProperty();
       }
 
-      JsRpcCallPlan callPlan(kj::mv(planMessage), kj::mv(serializedData), serializerReplayability);
+      JsRpcCallPlan callPlan(kj::mv(planMessage), kj::mv(serializedData), serializedDataCapacity,
+          serializerReplayability);
 
       // JSRPC retries build on the fetch retry machinery, so the fetch gate remains a shared
       // prerequisite while the JSRPC gate controls this event type's separate rollout.

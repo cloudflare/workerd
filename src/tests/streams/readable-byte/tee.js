@@ -3,8 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // tee() on byte streams: per-branch chunk cloning, mixed reader types,
-// cancel composition, error propagation, released pending reads, and a
-// byobRequest held across tee().
+// cancel composition, error propagation, released pending reads (incl. a
+// native body released mid-read), and a byobRequest held across tee().
 
 import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -434,5 +434,163 @@ export const teeSoleBranchMintsFreshByobRequest = {
     current.view[0] = 7;
     current.respond(1);
     deepStrictEqual([...(await read).value], [7]);
+  },
+};
+
+// DIVERGENCE (ledger #29): a native body's reader released while its read
+// is in flight, then tee() or clone(). C++ refuses the release (TypeError:
+// outstanding read promises). TypeScript rejects the read, and both
+// branches receive the whole body, including the bytes the in-flight read
+// produced.
+export const teeNativeBodyAfterReleaseMidRead = {
+  async test(ctrl, env) {
+    const text = async (readable) =>
+      new TextDecoder().decode(await drainBytes(readable));
+    const releasedMidRead = async (mode) => {
+      const response = await env.SELF.fetch('http://test/delayed');
+      const reader = response.body.getReader(mode ? { mode } : undefined);
+      const read = mode ? reader.read(new Uint8Array(16)) : reader.read();
+      if (!usingTsImpl) {
+        throws(() => reader.releaseLock(), TypeError);
+        await read;
+        return undefined;
+      }
+      reader.releaseLock();
+      strictEqual((await rejectionOf(read)).name, 'TypeError');
+      return response;
+    };
+
+    for (const mode of [undefined, 'byob']) {
+      const response = await releasedMidRead(mode);
+      if (response === undefined) continue;
+      const [a, b] = response.body.tee();
+      deepStrictEqual(await Promise.all([text(a), text(b)]), [
+        'foobarbaz',
+        'foobarbaz',
+      ]);
+    }
+
+    const response = await releasedMidRead(undefined);
+    if (response !== undefined) {
+      const clone = response.clone();
+      deepStrictEqual(await Promise.all([response.text(), clone.text()]), [
+        'foobarbaz',
+        'foobarbaz',
+      ]);
+    }
+  },
+};
+
+// DIVERGENCE (ledger #7, on a tee branch): a fractional element fill under
+// a branch's read(Uint16Array) at close(). TypeScript errors that branch
+// alone, as the spec's per-branch close does: the read rejects with
+// TypeError, and so does closed, while the source's close() succeeds and
+// the sibling receives every byte. C++ ends the branch cleanly without the
+// trailing byte.
+//
+// Two shapes. A read issued after close() (3 bytes enqueued; the first
+// read, issued before or after the enqueue, takes the whole element, and
+// the next meets the trailing byte at the close). And a read still pending
+// at close() with a fractional fill: 1 byte under the default min, or 3
+// bytes under { min: 2 }.
+export const teeBranchFractionalCloseErrorsBranch = {
+  async test() {
+    const expected = 'Insufficient bytes to fill elements in the given view';
+    const makeTee = () => {
+      let controller;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        start(c) {
+          controller = c;
+        },
+      });
+      return [controller, ...rs.tee()];
+    };
+
+    for (const readBeforeEnqueue of [true, false]) {
+      const [controller, a, b] = makeTee();
+      const reader = a.getReader({ mode: 'byob' });
+      const first = readBeforeEnqueue ? reader.read(new Uint16Array(4)) : null;
+      await scheduler.wait(5);
+      controller.enqueue(new Uint8Array([1, 2, 3]));
+      controller.close();
+      const r1 = await (first ?? reader.read(new Uint16Array(4)));
+      deepStrictEqual([...new Uint8Array(r1.value.buffer, 0, 2)], [1, 2]);
+      strictEqual(r1.value.length, 1);
+      const r2 = reader.read(new Uint16Array(4));
+      if (usingTsImpl) {
+        strictEqual((await rejectionOf(r2)).message, expected);
+        strictEqual((await rejectionOf(reader.closed)).message, expected);
+      } else {
+        const r = await r2;
+        strictEqual(r.value.byteLength, 0);
+        strictEqual(await reader.closed, undefined);
+      }
+      deepStrictEqual([...(await drainBytes(b))], [1, 2, 3]);
+    }
+
+    for (const [bytes, min] of [
+      [[1], undefined],
+      [[1, 2, 3], 2],
+    ]) {
+      const [controller, a, b] = makeTee();
+      const reader = a.getReader({ mode: 'byob' });
+      const read = reader.read(new Uint16Array(4), min ? { min } : undefined);
+      await scheduler.wait(5);
+      controller.enqueue(new Uint8Array(bytes));
+      controller.close();
+      if (usingTsImpl) {
+        strictEqual((await rejectionOf(read)).message, expected);
+        strictEqual((await rejectionOf(reader.closed)).message, expected);
+      } else {
+        const r = await read;
+        strictEqual(r.done, false);
+        // The whole elements only.
+        strictEqual(r.value.length, bytes.length >> 1);
+        strictEqual(await reader.closed, undefined);
+      }
+      deepStrictEqual([...(await drainBytes(b))], bytes);
+    }
+  },
+};
+
+// DIVERGENCE (ledger #7, on the sole remaining tee branch): its sibling
+// cancelled, the branch errors on a fractional fill at close(). The source
+// requested close, and the spec never forwards a branch's error to it: its
+// cancel() never runs, and the sibling's cancel() resolves undefined as the
+// source ends. C++ never errors the branch; the source ends the same way.
+// Both shapes of teeBranchFractionalCloseErrorsBranch.
+export const teeSoleBranchFractionalCloseSkipsSourceCancel = {
+  async test() {
+    const expected = 'Insufficient bytes to fill elements in the given view';
+    for (const pendingAtClose of [true, false]) {
+      let controller;
+      let cancelled = false;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        start(c) {
+          controller = c;
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+      const [a, b] = rs.tee();
+      const siblingCancel = b.cancel('sibling');
+      const reader = a.getReader({ mode: 'byob' });
+      const first = reader.read(new Uint16Array(4));
+      await scheduler.wait(5);
+      controller.enqueue(new Uint8Array(pendingAtClose ? [1] : [1, 2, 3]));
+      controller.close();
+      const last = pendingAtClose ? first : reader.read(new Uint16Array(4));
+      if (!pendingAtClose) strictEqual((await first).value.length, 1);
+      if (usingTsImpl) {
+        strictEqual((await rejectionOf(last)).message, expected);
+      } else {
+        strictEqual((await last).value.byteLength, 0);
+      }
+      strictEqual(await siblingCancel, undefined);
+      strictEqual(cancelled, false);
+    }
   },
 };

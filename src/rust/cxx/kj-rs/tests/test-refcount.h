@@ -51,6 +51,10 @@ kj::Maybe<kj::Arc<OpaqueAtomicRefcountedClass>> return_maybe_arc_none();
 // Asserts the `Maybe<Rc>` is set and that its pointee holds the expected data.
 void take_maybe_rc(kj::Maybe<kj::Rc<OpaqueRefcountedClass>> maybe);
 
+// Assert the `Maybe<Rc>` / `Maybe<Arc>` is `kj::none`.
+void take_maybe_rc_none(kj::Maybe<kj::Rc<OpaqueRefcountedClass>> maybe);
+void take_maybe_arc_none(kj::Maybe<kj::Arc<OpaqueAtomicRefcountedClass>> maybe);
+
 // Drives the Rust `take_maybe_rc_ret` function, exercising `kj::Maybe<kj::Rc>`
 // as a Rust return type for both the none and some cases.
 void maybe_rc_rust_driver();

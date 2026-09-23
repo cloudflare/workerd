@@ -811,9 +811,10 @@ class Server::ActorNamespace final {
           return getChannelTokenImpl(usage, c.id, persistent);
         }
         KJ_CASE_ONEOF(promise, kj::ForkedPromise<void>) {
-          return promise.addBranch().then([this, usage, persistent]() {
-            return getChannelTokenImpl(
-                usage, KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>()).id, persistent);
+          return promise.addBranch().then([self = addWeakToThis(), usage, persistent]() {
+            auto& container = self.assertLive();
+            return container.getChannelTokenImpl(
+                usage, KJ_ASSERT_NONNULL(container.classAndId.tryGet<ClassAndId>()).id, persistent);
           });
         }
       }
@@ -5785,7 +5786,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     }
   }
 
-  auto isolateGroup = v8::IsolateGroup::GetDefault();
+  auto isolateGroup = jsg::newIsolateGroup();
   kj::Array<Worker::Api::InboundListener> listeners;
   KJ_IF_SOME(l, inboundListeners.find(name)) {
     listeners = KJ_MAP(listener, l) {

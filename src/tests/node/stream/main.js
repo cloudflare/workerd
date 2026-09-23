@@ -198,6 +198,7 @@ export {
   addAbortSignalOnTeeBranchSparesSibling,
   addAbortSignalOnTeedSourceErrorsBranches,
   addAbortSignalOnTeeBranchThenSiblingCancel,
+  addAbortSignalOnTeeBranchAfterCloseSkipsSourceCancel,
   addAbortSignalOnTeedAwayBranchIsInert,
   addAbortSignalOnTeedAwayByteBranchIsInert,
   addAbortSignalOnTeeBranchSettlesWithSourceCleanup,

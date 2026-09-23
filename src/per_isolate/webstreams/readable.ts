@@ -23,6 +23,7 @@ import type {
   ByteQueueEntry,
   ByteStreamConsumer as ByteStreamConsumerType,
   ByteStreamCursor as ByteStreamCursorType,
+  ErrorStreamCallback,
   PullIntoDescriptor,
   QueueCursor as QueueCursorType,
   StreamConsumer as StreamConsumerType,
@@ -253,6 +254,20 @@ let readableStreamDefaultReaderRead: <R>(
   reader: ReadableStreamDefaultReaderType<R>,
   readRequest: ReadableStreamAsyncIteratorReadRequest<R>
 ) => void;
+
+// Errors a queued tee branch alone (see [kControllerErrorFunction]).
+let readableStreamErrorBranch: <R>(
+  stream: ReadableStream<R>,
+  reason: unknown
+) => void;
+
+// A tee branch's byte cursor errors its branch alone.
+const errorTeeBranchFromCursor: ErrorStreamCallback = (e, owner) => {
+  if (owner !== undefined) {
+    readableStreamErrorBranch(owner as ReadableStream<unknown>, e);
+  }
+};
+
 let isReadableStream: (value: unknown) => boolean;
 let isByteStreamController: (value: unknown) => boolean;
 
@@ -357,17 +372,31 @@ let controllerOnReaderRelease: (
     | NativeReadableStreamControllerType
 ) => void;
 // A consumer of the controller's queue leaves it — cancelled, or errored
-// through the Node.js interop hook. Only the last one to leave cancels the
-// underlying source, with the reasons of every consumer that left (see
-// makeCompositeCancelReason); the others receive a promise that settles
-// with that cancel, or with undefined once the source has closed or errored
-// on its own (spec ReadableStreamTee's shared cancel promise). A native
-// controller has one consumer, so the leaving is its cancel.
+// alone before close is requested (controllerConsumerErrored). Only the last
+// one to leave cancels the underlying source, with the reasons of every
+// consumer that left (see makeCompositeCancelReason); the others receive a
+// promise that settles with that cancel, or with undefined once the source
+// has closed or errored on its own (spec ReadableStreamTee's shared cancel
+// promise). A native controller has one consumer, so the leaving is its
+// cancel.
 let controllerConsumerLeaving: (
   controller:
     | ReadableStreamDefaultControllerType
     | ReadableByteStreamControllerType
     | NativeReadableStreamControllerType,
+  reason: unknown,
+  isLastConsumer: boolean
+) => Promise<void>;
+// A consumer of a QUEUED controller's queue errors alone (see
+// readableStreamErrorBranch). Before close is requested it leaves as a
+// cancelled one does (controllerConsumerLeaving). Once close has been
+// requested the source has nothing more to produce, and an errored branch is
+// no cancel (the spec errors that branch's controller and never forwards it
+// to the source): it leaves without a reason, and if it was the last
+// consumer the source ends as when every consumer has drained.
+let controllerConsumerErrored: (
+  controller:
+    ReadableStreamDefaultControllerType | ReadableByteStreamControllerType,
   reason: unknown,
   isLastConsumer: boolean
 ) => Promise<void>;
@@ -1142,17 +1171,8 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     // Transfer the buffer regardless of state (spec step).
     const transferred = ArrayBufferPrototypeTransfer(info.buffer);
     if (getReadableStreamGetState(stream) === 'closed') {
-      // The stream may be closed with no consumer remaining (e.g. after
-      // cancel clears it). Without a consumer, no pull-into can be
-      // registered. Return { value: undefined, done: true } — matching
-      // browser behavior and the C++ implementation.
-      const consumer = getReadableStreamConsumer(stream);
-      if (consumer === undefined) {
-        return createReadResult(undefined as unknown as T, true);
-      }
-      // Normal close with a live consumer: return a zero-length view over
-      // the transferred buffer (spec ReadableByteStreamControllerPullInto
-      // step 2 "closed" branch).
+      // Closed or cancelled alike: a zero-length view over the transferred
+      // buffer (spec ReadableByteStreamControllerPullInto "closed" branch).
       const emptyView = new info.viewCtor(transferred, info.byteOffset, 0);
       return createReadResult(emptyView as T, true);
     }
@@ -1409,6 +1429,16 @@ class ReadableStreamDefaultController<
     controllerConsumerLeaving = (controller, reason, isLastConsumer) => {
       if (#queue in controller) {
         return (controller as ReadableStreamDefaultController).#consumerLeaving(
+          reason,
+          isLastConsumer
+        );
+      }
+      return PromiseResolve() as Promise<void>;
+    };
+
+    controllerConsumerErrored = (controller, reason, isLastConsumer) => {
+      if (#queue in controller) {
+        return (controller as ReadableStreamDefaultController).#consumerErrored(
           reason,
           isLastConsumer
         );
@@ -1711,6 +1741,21 @@ class ReadableStreamDefaultController<
     return this.#pendingCancel.promise;
   }
 
+  // A consumer errors alone; see controllerConsumerErrored. Decided before
+  // the cursor's removal, as #consumerLeaving is.
+  #consumerErrored(reason: unknown, isLastConsumer: boolean): Promise<void> {
+    if (!this.#closeRequested) {
+      return this.#consumerLeaving(reason, isLastConsumer);
+    }
+    if (isLastConsumer) {
+      // As in #maybeCloseStream once every consumer has drained.
+      this.#done = true;
+      this.#clearAlgorithms();
+      this.#pendingCancel?.resolve();
+    }
+    return PromiseResolve() as Promise<void>;
+  }
+
   #shouldCallPull(): boolean {
     if (!this.#started) return false;
     if (!this.#canCloseOrEnqueue()) return false;
@@ -1964,6 +2009,14 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         return controller.#consumerLeaving(reason, isLastConsumer);
       }
       return prevConsumerLeaving(controller, reason, isLastConsumer);
+    };
+
+    const prevConsumerErrored = controllerConsumerErrored;
+    controllerConsumerErrored = (controller, reason, isLastConsumer) => {
+      if (#queue in controller) {
+        return controller.#consumerErrored(reason, isLastConsumer);
+      }
+      return prevConsumerErrored(controller, reason, isLastConsumer);
     };
 
     const prevControllerStream = controllerStream;
@@ -2229,13 +2282,18 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     }
     // Spec: closing with a fractional-element partial fill in a head
     // descriptor is a TypeError that also errors the stream — the bytes to
-    // complete the element can never arrive. Checked across ALL live
-    // cursors: tee branches each track their own partial fills through the
-    // enqueue-path min-read machinery.
+    // complete the element can never arrive. Only a cursor whose fractional
+    // fill errors the whole stream counts: the source's own, or its
+    // successor after a detach, which inherits its callback. A tee branch's
+    // errors that branch alone (the spec closes each branch through its own
+    // controller), which its cursor does itself when the close reaches it,
+    // so this close() succeeds and the sibling keeps every byte.
     const hasFractionalFill = this.#queue.someLiveCursor((cursor) => {
-      const head: PullIntoDescriptor | undefined = (
-        cursor as unknown as ByteStreamCursorType
-      ).headPullInto;
+      const byteCursor = cursor as unknown as ByteStreamCursorType;
+      if (byteCursor.errorStreamCallback === errorTeeBranchFromCursor) {
+        return false;
+      }
+      const head: PullIntoDescriptor | undefined = byteCursor.headPullInto;
       return head !== undefined && head.bytesFilled % head.elementSize !== 0;
     });
     if (hasFractionalFill) {
@@ -2483,6 +2541,20 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     this.#pendingCancel ??=
       PromiseWithResolvers() as PromiseWithResolversType<void>;
     return this.#pendingCancel.promise;
+  }
+
+  // As the default controller's: see there.
+  #consumerErrored(reason: unknown, isLastConsumer: boolean): Promise<void> {
+    if (!this.#closeRequested) {
+      return this.#consumerLeaving(reason, isLastConsumer);
+    }
+    if (isLastConsumer) {
+      this.#done = true;
+      this.#invalidateByobRequest();
+      this.#clearAlgorithms();
+      this.#pendingCancel?.resolve();
+    }
+    return PromiseResolve() as Promise<void>;
   }
 
   #shouldCallPull(): boolean {
@@ -3518,6 +3590,35 @@ class ReadableStream<R> {
       }
     };
 
+    readableStreamErrorBranch = <R>(
+      stream: ReadableStream<R>,
+      reason: unknown
+    ) => {
+      if (stream.#state !== 'readable') return;
+      const controller = stream.#controller;
+      if (controller === undefined) return;
+      // QUEUED INVARIANT: a tee branch of a queued stream — its consumer is
+      // necessarily a QueueCursor (tee precedent); sanctioned cast.
+      const cursor = stream.#consumer as QueueCursorType<R, R> | undefined;
+      if (cursor === undefined) return;
+      stream.#consumer = undefined;
+      cursor.errorAllReads(reason);
+      readableStreamError(stream, reason);
+      // Decided BEFORE the cursor's removal, for the reasons given at
+      // #consumerLeaving (as in QueueCursor.cancelStream). The controller is
+      // queued: its branch's consumer is a QueueCursor (above).
+      markPromiseHandled(
+        controllerConsumerErrored(
+          controller as
+            | ReadableStreamDefaultControllerType
+            | ReadableByteStreamControllerType,
+          reason,
+          cursor.queue.cursorCount === 1
+        )
+      );
+      cursor.queue.removeCursor(cursor);
+    };
+
     // BACKEND-DISPATCH: tee is one of the five sanctioned dispatch points
     // (native-stream-integration.md §10). The native branch runs first:
     // the source's tee hook produces a PAIR of new native source objects
@@ -3637,6 +3738,10 @@ class ReadableStream<R> {
           const to2 = branch2.#consumer as unknown as ByteStreamCursorType;
           to1.adoptReleasedBytes(from);
           to2.adoptReleasedBytes(from);
+          // A branch shares the controller with its siblings, so a
+          // fractional fill at close errors it alone.
+          to1.errorStreamCallback = errorTeeBranchFromCursor;
+          to2.errorStreamCallback = errorTeeBranchFromCursor;
           byteControllerInvalidateByobRequest(
             controller as ReadableByteStreamController
           );
@@ -3771,6 +3876,7 @@ class ReadableStream<R> {
           const from = cursor as unknown as ByteStreamCursorType;
           const to = shell.#consumer as unknown as ByteStreamCursorType;
           to.adoptReleasedBytes(from);
+          to.errorStreamCallback = from.errorStreamCallback;
           byteControllerInvalidateByobRequest(
             controller as ReadableByteStreamController
           );
@@ -4377,10 +4483,11 @@ class ReadableStream<R> {
   // controller, so it errors alone: its pending reads reject and it leaves
   // the queue as a cancelled branch would — the source is cancelled once
   // no consumer remains, with the reason of every consumer that left
-  // (controllerConsumerLeaving). A branch that has itself been teed
-  // consumes nothing and stays what tee() left it: a permanently locked,
-  // inert shell (the queued tee model's deliberate divergence from the
-  // spec's per-branch controllers).
+  // (controllerConsumerLeaving) — unless the source has already requested
+  // close, which no cancel follows (controllerConsumerErrored). A branch
+  // that has itself been teed consumes nothing and stays what tee() left
+  // it: a permanently locked, inert shell (the queued tee model's
+  // deliberate divergence from the spec's per-branch controllers).
   [kControllerErrorFunction](reason: unknown): void {
     assertIsReadableStream(this);
     if (this.#state !== 'readable') return;
@@ -4403,23 +4510,7 @@ class ReadableStream<R> {
       if (hook !== undefined) hook(reason);
       return;
     }
-    // QUEUED INVARIANT: a tee branch of a queued stream — its consumer is
-    // necessarily a QueueCursor (tee precedent); sanctioned cast.
-    const cursor = this.#consumer as QueueCursorType<R, R> | undefined;
-    if (cursor === undefined) return;
-    this.#consumer = undefined;
-    cursor.errorAllReads(reason);
-    readableStreamError(this, reason);
-    // Decided BEFORE the cursor's removal, for the reasons given at
-    // #consumerLeaving (as in QueueCursor.cancelStream).
-    markPromiseHandled(
-      controllerConsumerLeaving(
-        controller,
-        reason,
-        cursor.queue.cursorCount === 1
-      )
-    );
-    cursor.queue.removeCursor(cursor);
+    readableStreamErrorBranch(this, reason);
   }
 }
 
