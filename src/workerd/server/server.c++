@@ -7574,7 +7574,8 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
           }
 
           workflowNamespaceKeys.insert(kj::str(namespaceKey));
-          serviceActorConfigs.insert(kj::str(namespaceKey),
+          auto actorConfigKey = kj::str(namespaceKey);
+          serviceActorConfigs.insert(kj::mv(actorConfigKey),
               Durable{.uniqueKey = kj::mv(namespaceKey),
                 // Workflow actors must not be evicted mid-run, and their state is SQL-backed.
                 .isEvictable = false,
