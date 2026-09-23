@@ -545,21 +545,26 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
       }
     }
 
-    api::registerModules(*modules, featureFlags);
+    registerBuiltinModules(lockParam);
 
     if (source.isPython) {
       modules::python::registerPythonWorkerdModules<JsgWorkerdIsolate>(
           lockParam, *modules, featureFlags, kj::mv(artifacts), impl->pythonConfig, source);
     }
-
-    for (auto extension: impl->extensions) {
-      for (auto module: extension.getModules()) {
-        modules->addBuiltinModule(module.getName(), module.getEsModule().asArray(),
-            module.getInternal() ? jsg::ModuleRegistry::Type::INTERNAL
-                                 : jsg::ModuleRegistry::Type::BUILTIN);
-      }
-    }
   });
+}
+
+void WorkerdApi::registerBuiltinModules(jsg::Lock& lockParam) const {
+  auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
+  api::registerModules(*modules, getFeatureFlags());
+
+  for (auto extension: impl->extensions) {
+    for (auto module: extension.getModules()) {
+      modules->addBuiltinModule(module.getName(), module.getEsModule().asArray(),
+          module.getInternal() ? jsg::ModuleRegistry::Type::INTERNAL
+                               : jsg::ModuleRegistry::Type::BUILTIN);
+    }
+  }
 }
 
 // Whether the binding being constructed is an inner binding of a wrapped binding. Those are

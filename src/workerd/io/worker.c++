@@ -1578,11 +1578,14 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   // The context restored from the snapshot already holds the evaluated module
                   // graph; the Worker constructor picks the main module's namespace out of it.
                   // Nothing is compiled here. The new module registry re-adopts the graph's
-                  // modules when it is attached (SnapshotArtifact::moduleRecords); the legacy
-                  // registry stays empty, so dynamic import() of bundle modules is not available
-                  // under it yet, and it still needs its dynamic-import hook installed.
+                  // modules when it is attached (SnapshotArtifact::moduleRecords). The legacy
+                  // registry does not hold the bundle's modules, so dynamic import() of bundle
+                  // modules is not available under it yet; it gets the builtins, which code
+                  // run after the restore (console formatting, a lazy require()) still
+                  // resolves, and its dynamic-import hook.
                   if (!isNewModuleRegistryEnabled(isolate->getApi().getFeatureFlags())) {
                     impl->configureDynamicImports(lock, *jsg::ModuleRegistry::from(lock));
+                    isolate->getApi().registerBuiltinModules(lock);
                   }
                 } else if (!isNewModuleRegistryEnabled(isolate->getApi().getFeatureFlags())) {
                   kj::Own<void> limitScope;
@@ -2006,8 +2009,7 @@ void restoreLazyNodeGlobalsFromSnapshot(
     jsg::Lock& js, v8::Local<v8::Context> context, api::ServiceWorkerGlobalScope& global) {
   auto data = context->GetEmbedderDataV2(jsg::SNAPSHOT_LAZY_NODE_GLOBALS_SLOT);
   if (data.IsEmpty() || !data->IsValue() || !data.As<v8::Value>()->IsArray()) return;
-  global.restoreLazyNodeGlobalsFromSnapshot(
-      js, jsg::JsArray(data.As<v8::Value>().As<v8::Array>()));
+  global.restoreLazyNodeGlobalsFromSnapshot(js, jsg::JsArray(data.As<v8::Value>().As<v8::Array>()));
 }
 
 // The own properties of `scope` and their values, for IsolateBase::recordSnapshotBindings() to
