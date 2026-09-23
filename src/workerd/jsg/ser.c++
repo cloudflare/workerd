@@ -7,6 +7,8 @@
 #include "dom-exception.h"
 #include "setup.h"
 
+#include <workerd/util/sentry.h>
+
 #include <v8-proxy.h>
 #include <v8-value-serializer-version.h>
 
@@ -472,9 +474,10 @@ void Deserializer::init(Lock& js,
           "; header=", header, "; wireVersion=", deser.GetWireFormatVersion(),
           "; maxWireVersion=", v8::CurrentValueSerializerFormatVersion(),
           "; v8=", v8::V8::GetVersion(), "]");
-      // JavaScript exceptions may be caught by the caller and never reach error reporting.
-      KJ_LOG(ERROR, message, kj::getStackTrace());
-      js.throwException(js.error(message));
+      LOG_WARNING_PERIODICALLY(message, kj::getStackTrace());
+      // Header failures are internal faults. Suppress duplicate reporting when this exception
+      // crosses a JavaScript or RPC boundary; the periodic warning above carries the diagnostic.
+      kj::throwFatalException(KJ_EXCEPTION(FAILED, "worker_do_not_log", message));
     }
   }
   preserveStackInErrors = options.preserveStackInErrors;

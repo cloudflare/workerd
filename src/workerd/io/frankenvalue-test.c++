@@ -76,19 +76,16 @@ KJ_TEST("Frankenvalue header failures identify binding or entrypoint props") {
   auto value = Frankenvalue::fromCapnp(builder.asReader(), {});
 
   e.run([&](jsg::Lock& js) {
-    KJ_EXPECT_LOG(
-        ERROR, "[context=binding or entrypoint props; bytes=15; header=missing; wireVersion=0;");
-    JSG_TRY(js) {
-      value.toJs(js);
-      KJ_FAIL_EXPECT("invalid header was accepted");
-    }
-    JSG_CATCH(exception) {
-      KJ_EXPECT(kj::str(exception.getHandle(js)) ==
-          kj::str("Error: Unable to deserialize cloned data due to invalid or unsupported version. "
-                  "[context=binding or entrypoint props; bytes=15; header=missing; wireVersion=0; "
-                  "maxWireVersion=",
-              v8::CurrentValueSerializerFormatVersion(), "; v8=", v8::V8::GetVersion(), "]"));
-    }
+    auto failure = kj::runCatchingExceptions([&]() { value.toJs(js); });
+    auto& exception = KJ_ASSERT_NONNULL(failure);
+    KJ_EXPECT(exception.getType() == kj::Exception::Type::FAILED);
+    KJ_EXPECT(exception.getDescription() ==
+        kj::str("worker_do_not_log; message = Unable to deserialize cloned data due to invalid "
+                "or unsupported version. [context=binding or entrypoint props; bytes=15; "
+                "header=missing; wireVersion=0; maxWireVersion=",
+            v8::CurrentValueSerializerFormatVersion(), "; v8=", v8::V8::GetVersion(), "]"));
+    auto jsError = js.exceptionToJs(kj::mv(exception));
+    KJ_EXPECT(kj::str(jsError.getHandle(js)).startsWith("Error: internal error"));
   });
 }
 

@@ -258,7 +258,7 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
     kj::Maybe<ExternalHandler&> externalHandler;
 
     // Label header-error diagnostics with the runtime call site (defaults to "unknown").
-    // Use a fixed label, never user-controlled data: it appears in logs and the JavaScript error.
+    // Use a fixed label, never user-controlled data: it appears in logs and the internal exception.
     kj::Maybe<kj::StringPtr> diagnosticContext;
   };
 
