@@ -1142,17 +1142,8 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     // Transfer the buffer regardless of state (spec step).
     const transferred = ArrayBufferPrototypeTransfer(info.buffer);
     if (getReadableStreamGetState(stream) === 'closed') {
-      // The stream may be closed with no consumer remaining (e.g. after
-      // cancel clears it). Without a consumer, no pull-into can be
-      // registered. Return { value: undefined, done: true } — matching
-      // browser behavior and the C++ implementation.
-      const consumer = getReadableStreamConsumer(stream);
-      if (consumer === undefined) {
-        return createReadResult(undefined as unknown as T, true);
-      }
-      // Normal close with a live consumer: return a zero-length view over
-      // the transferred buffer (spec ReadableByteStreamControllerPullInto
-      // step 2 "closed" branch).
+      // Closed or cancelled alike: a zero-length view over the transferred
+      // buffer (spec ReadableByteStreamControllerPullInto "closed" branch).
       const emptyView = new info.viewCtor(transferred, info.byteOffset, 0);
       return createReadResult(emptyView as T, true);
     }

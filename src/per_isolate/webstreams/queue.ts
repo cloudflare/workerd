@@ -1220,6 +1220,13 @@ class ByteStreamCursor
   // completed; then let the base class service default pending reads
   // (including sentinel handling) and refresh backpressure.
   override notify(): void {
+    this.#processPullIntos(undefined);
+  }
+
+  // `committed` is respond()'s head, already removed from the list; it
+  // settles ahead of the descriptors filled here (spec
+  // RespondInReadableState steps 11-13).
+  #processPullIntos(committed: PullIntoDescriptor | undefined): void {
     // Two-phase processing per spec
     // ReadableByteStreamControllerProcessPullIntoDescriptorsUsingQueue:
     // fill ALL ready descriptors first, THEN resolve them. This ensures
@@ -1227,6 +1234,10 @@ class ByteStreamCursor
     // user-observable code via Object.prototype.then interception).
     let filledPullIntos:
       Array<{ desc: PullIntoDescriptor; view: ArrayBufferView }> | undefined;
+    if (committed !== undefined) {
+      filledPullIntos = [{ desc: committed, view: this.#convert(committed) }];
+    }
+    let errored = false;
     while (this.#pendingPullIntos.length > 0) {
       const slot = this.queue.getEntry(this.position);
       // A prefix precedes queued data, never the close sentinel.
@@ -1237,7 +1248,10 @@ class ByteStreamCursor
         // element size, the remaining bytes can never complete an element
         // — the stream must be errored with a TypeError (spec
         // ReadableByteStreamControllerClose step 4).
-        if (this.#checkFractionalFillAtClose()) return;
+        if (this.#checkFractionalFillAtClose()) {
+          errored = true;
+          break;
+        }
         // Synthetic descriptors for DEFAULT reads (autoAllocateChunkSize)
         // follow default-read close semantics: ReadableStreamClose drains
         // read requests with done, so they resolve { done: true } now.
@@ -1279,6 +1293,7 @@ class ByteStreamCursor
         filled.desc.resolve(createReadResult(filled.view, false));
       }
     }
+    if (errored) return;
     if (this.#prefix !== undefined && super.hasPendingRead) {
       this.fulfillFirstPendingRead(this.#takePrefix());
     }
@@ -1445,38 +1460,35 @@ class ByteStreamCursor
       // keep writing or fall back to enqueue().
       return;
     }
-    // Spec ReadableByteStreamControllerRespondInReadableState step 7–10:
-    // Remove from pending FIRST, then split remainder and enqueue.
-    // Order matters: enqueue triggers notify() on live cursors, and the
-    // head must already be gone to avoid re-entrant filling.
+    // Spec ReadableByteStreamControllerRespondInReadableState steps 7-13.
     this.#pendingPullIntos.shift();
     const remainderSize = head.bytesFilled % head.elementSize;
     if (remainderSize > 0) {
       // The remainder bytes live at the END of the filled region.
       const end = head.byteOffset + head.bytesFilled;
-      // Enqueue the remainder as a new queue entry (spec CloneArrayBuffer of
-      // the transferred buffer's tail).
-      this.queue.enqueue({
-        value: {
-          buffer: cloneArrayBuffer(
-            head.buffer,
-            end - remainderSize,
-            remainderSize
-          ),
-          byteOffset: 0,
-          byteLength: remainderSize,
+      // Queued without notifying: the head must settle before any read
+      // the remainder fills.
+      this.queue.enqueue(
+        {
+          value: {
+            buffer: cloneArrayBuffer(
+              head.buffer,
+              end - remainderSize,
+              remainderSize
+            ),
+            byteOffset: 0,
+            byteLength: remainderSize,
+          },
+          size: remainderSize,
         },
-        size: remainderSize,
-      });
+        false
+      );
       // Truncate bytesFilled to an element-aligned boundary.
       head.bytesFilled -= remainderSize;
     }
-    head.resolve(createReadResult(this.#convert(head), false));
-    // Spec ProcessPullIntosUsingQueue: data queued via the enqueue path may
-    // already satisfy subsequent descriptors — fill them now rather than
-    // waiting for the next enqueue. notify() runs exactly that loop (and
-    // its default-read/backpressure follow-ups are no-ops here).
-    this.notify();
+    // Fills later descriptors from the queue, then settles the head ahead
+    // of them. The default-read/backpressure follow-ups are no-ops here.
+    this.#processPullIntos(head);
   }
 
   // Commit all pending pull-into descriptors at end-of-stream: resolve with

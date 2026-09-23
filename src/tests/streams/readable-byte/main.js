@@ -24,6 +24,23 @@ export default {
       });
       return new Response(rs);
     }
+    // Chunks foo, bar, baz, each after a delay, so a read of the body is
+    // still in flight well after it starts.
+    if (url.pathname === '/delayed') {
+      const enc = new TextEncoder();
+      const chunks = ['foo', 'bar', 'baz'];
+      const rs = new ReadableStream({
+        async pull(controller) {
+          await scheduler.wait(20);
+          if (chunks.length > 0) {
+            controller.enqueue(enc.encode(chunks.shift()));
+          } else {
+            controller.close();
+          }
+        },
+      });
+      return new Response(rs);
+    }
     return new Response(request.body, {
       headers: { 'content-type': 'application/octet-stream' },
     });
@@ -49,6 +66,7 @@ export {
   enqueueDiscardsByobRequest,
   closeWithPartiallyFilledView,
   readAfterCloseReturnsEmptyView,
+  readAfterCancelReturnsEmptyView,
   readDetachesCallerBuffer,
   closeWithPendingUnfilledByobRead,
   controllerType,
@@ -73,6 +91,7 @@ export {
   readableStreamMultiplePendingReads,
   byobreaderRegression,
   partialViewThenDefaultRead,
+  nativeByobMultiByteViews,
 } from 'byob-reader';
 
 export {
@@ -113,6 +132,7 @@ export {
   respondAfterCloseAndReleaseFromLaterMicrotask,
   readableStreamByteRespondWithNewView,
   readableStreamByteRespondWithNewViewUsesNewElementSize,
+  respondRemainderSettlesHeadFirst,
   readableStreamAutoAllocateChunkSize,
 } from 'respond';
 
@@ -133,6 +153,7 @@ export {
   readMinStagedFulfillment,
   readMinValidation,
   closeBelowMin,
+  closedOrderAtEndOfData,
   minMetThenClose,
   readAtLeastDefaultReaderThrows,
   byobReaderConstraints,
@@ -155,6 +176,7 @@ export {
   teeOfBranchWithReleasedPartialRead,
   teeInvalidatesHeldByobRequest,
   teeSoleBranchMintsFreshByobRequest,
+  teeNativeBodyAfterReleaseMidRead,
 } from 'tee';
 
 export {
