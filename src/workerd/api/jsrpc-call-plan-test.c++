@@ -130,7 +130,7 @@ KJ_TEST("JS RPC call plan copies calls and property accesses") {
     builder.setMethodName("value");
     builder.getOperation().setGetProperty();
   });
-  KJ_EXPECT(!property.getReplayable());
+  KJ_EXPECT(property.getReplayable());
   capnp::MallocMessageBuilder propertyAttempt;
   property.copyTo(propertyAttempt.initRoot<rpc::JsRpcTarget::CallParams>());
   auto propertyParams = propertyAttempt.getRoot<rpc::JsRpcTarget::CallParams>();
@@ -674,6 +674,25 @@ KJ_TEST("replayable actor RPC calls carry observe-only retry metadata") {
   KJ_EXPECT(recordedMetadata.retryGateEnabled == ActorRetryGateEnabled::NO);
 }
 
+KJ_TEST("actor RPC retries stay disabled without fetch enforcement") {
+  auto dispatch = makeReplayableActorCall(kj::arr("durable-object-retries-fetch"_kj,
+      "durable-object-retries-jsrpc"_kj, "durable-object-retries-jsrpc-retry-requests"_kj));
+
+  KJ_EXPECT(dispatch.singleUseCount == 0);
+  KJ_EXPECT(dispatch.actorAttemptCount == 1);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(dispatch.metadata).retryGateEnabled == ActorRetryGateEnabled::NO);
+}
+
+KJ_TEST("actor RPC retries stay disabled when replay memory is not reserved") {
+  auto dispatch = makeReplayableActorCall(
+      kj::arr("durable-object-retries-fetch"_kj, "durable-object-retries-fetch-retry-requests"_kj,
+          "durable-object-retries-jsrpc"_kj, "durable-object-retries-jsrpc-retry-requests"_kj));
+
+  KJ_EXPECT(dispatch.singleUseCount == 0);
+  KJ_EXPECT(dispatch.actorAttemptCount == 1);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(dispatch.metadata).retryGateEnabled == ActorRetryGateEnabled::NO);
+}
+
 KJ_TEST("replayable actor RPC calls carry no retry metadata without the JSRPC gate") {
   auto dispatch = makeReplayableActorCall(
       kj::arr("durable-object-retries-fetch"_kj, "durable-object-retries-fetch-retry-requests"_kj));
@@ -691,13 +710,13 @@ KJ_TEST("replayable actor RPC calls carry no retry metadata without the fetch ga
   KJ_EXPECT(dispatch.metadata == kj::none);
 }
 
-KJ_TEST("actor RPC property reads carry no retry metadata") {
+KJ_TEST("actor RPC property reads carry retry metadata") {
   auto dispatch = makeActorPropertyRead(
       kj::arr("durable-object-retries-fetch"_kj, "durable-object-retries-jsrpc"_kj));
 
-  KJ_EXPECT(dispatch.singleUseCount == 1);
-  KJ_EXPECT(dispatch.actorAttemptCount == 0);
-  KJ_EXPECT(dispatch.metadata == kj::none);
+  KJ_EXPECT(dispatch.singleUseCount == 0);
+  KJ_EXPECT(dispatch.actorAttemptCount == 1);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(dispatch.metadata).retryGateEnabled == ActorRetryGateEnabled::NO);
 }
 
 // A Durable Object whose methods fail in the ways the receiver must classify as delivered.

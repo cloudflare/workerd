@@ -63,6 +63,11 @@ class ActorCallRetryState final: public kj::Refcounted {
 
   kj::OneOf<Attempt, kj::Exception> startAttempt();
   kj::OneOf<kj::Duration, kj::Exception> handleAttemptFailure(kj::Exception exception);
+  kj::Exception handleCommittedAttemptFailure(kj::Exception exception);
+
+  kj::Exception getOriginalDisconnect() const {
+    return KJ_ASSERT_NONNULL(originalDisconnect).clone();
+  }
 
   bool isRetryEnabled() const {
     return retriesEnabled;

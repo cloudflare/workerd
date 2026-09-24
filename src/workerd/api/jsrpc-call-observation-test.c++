@@ -44,6 +44,7 @@ struct Observation {
   ActorCallPayloadReplayable payloadReplayable;
   ActorCallTargetRetryable targetRetryable;
   Settlement settlement = Settlement::PENDING;
+  bool pipelineCommitted = false;
 };
 
 struct ObservationState {
@@ -61,6 +62,9 @@ class RecordingCallObserver final: public OutgoingActorCallObserver {
 
   void recordSuccess() override {
     settle(Settlement::SUCCESS);
+  }
+  void markPipelineCommitted() override {
+    observation.pipelineCommitted = true;
   }
   void recordFailure(kj::Exception&) override {
     settle(Settlement::FAILURE);
@@ -352,6 +356,8 @@ KJ_TEST("using an RPC result pipeline releases projected replay memory") {
     return kj::mv(pipelined);
   });
 
+  KJ_ASSERT(harness.state.observations.size() == 2);
+  KJ_EXPECT(harness.state.observations[0]->pipelineCommitted);
   KJ_EXPECT(harness.state.replayMemoryBytes == 0);
 }
 
@@ -375,7 +381,7 @@ KJ_TEST("disposing an RPC promise does not release projected replay memory early
   KJ_EXPECT(harness.state.replayMemoryBytes == 0);
 }
 
-KJ_TEST("an RPC property get is observed with a non-replayable payload") {
+KJ_TEST("actor RPC property reads are observed as replayable") {
   Harness harness;
   harness.sender->runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = harness.makeFetcher(env).fetcher;
@@ -384,7 +390,7 @@ KJ_TEST("an RPC property get is observed with a non-replayable payload") {
 
   auto& observations = harness.state.observations;
   KJ_ASSERT(observations.size() == 1);
-  KJ_EXPECT(observations[0]->payloadReplayable == ActorCallPayloadReplayable::NO);
+  KJ_EXPECT(observations[0]->payloadReplayable == ActorCallPayloadReplayable::YES);
   KJ_EXPECT(observations[0]->targetRetryable == ActorCallTargetRetryable::YES);
   KJ_EXPECT(observations[0]->settlement == Settlement::SUCCESS);
 }
