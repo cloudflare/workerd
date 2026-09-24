@@ -14926,6 +14926,9 @@ declare abstract class D1PreparedStatement {
 // TypeScript's interface merging will ensure our empty interface is effectively
 // ignored when `Disposable` is included in the standard lib.
 interface Disposable {}
+declare module "cloudflare:durable-objects" {
+  export { DurableObject } from "cloudflare:workers";
+}
 /**
  * The returned data after sending an email
  */
