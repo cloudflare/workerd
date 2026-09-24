@@ -7,6 +7,7 @@
 #include "actor.h"
 #include "export-loopback.h"
 #include "restore.h"
+#include "snapshot.h"
 #include "sql.h"
 #include "sync-kv.h"
 #include "util.h"
@@ -901,6 +902,30 @@ kj::Promise<void> DurableObjectStorage::waitForBookmark(kj::String bookmark) {
 
   return cache->waitForBookmark(bookmark, traceContext.getInternalSpanParent())
       .attach(kj::mv(traceContext));
+}
+
+jsg::Promise<jsg::Ref<DurableObjectSnapshot>> DurableObjectStorage::snapshot(
+    jsg::Lock& js, jsg::Optional<kj::String> bookmark) {
+  auto& context = IoContext::current();
+  auto traceContext = context.makeUserTraceSpan("durable_object_storage_snapshot"_kjc);
+  auto bookmarkSnapshot =
+      cache->captureBookmarkSnapshot(kj::mv(bookmark), traceContext.getInternalSpanParent());
+  return context.awaitIo(js, kj::mv(bookmarkSnapshot).attach(kj::mv(traceContext)),
+      [](jsg::Lock& js, capnp::Capability::Client bookmarkSnapshot) {
+    return js.alloc<DurableObjectSnapshot>(kj::mv(bookmarkSnapshot));
+  });
+}
+
+kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestore(RestoreTarget target) {
+  KJ_SWITCH_ONEOF(target) {
+    KJ_CASE_ONEOF(snapshot, jsg::Ref<DurableObjectSnapshot>) {
+      return cache->onNextSessionRestore(snapshot->getClient());
+    }
+    KJ_CASE_ONEOF(bookmark, jsg::NonCoercible<kj::String>) {
+      return cache->onNextSessionRestoreBookmark(bookmark.value);
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 void DurableObjectStorage::ensureReplicas() {
