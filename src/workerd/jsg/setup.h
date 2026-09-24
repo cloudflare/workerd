@@ -20,6 +20,7 @@
 #include <kj/mutex.h>
 #include <kj/vector.h>
 
+#include <atomic>
 #include <typeindex>
 
 namespace workerd::jsg {
@@ -329,6 +330,23 @@ class IsolateBase {
   // so it is safe to hold from objects that may outlive the isolate (e.g. jsg::WeakRef).
   kj::Arc<const IsolateLiveness> getIsolateLiveness();
 
+  // Running totals of code V8 has generated in this isolate, from the JIT code event handler.
+  // Only counts additions; code that V8 later flushes or collects is not subtracted. Zero when
+  // JIT code event tracking is disabled.
+  struct CodeStatistics {
+    // Interpreter bytecode arrays.
+    uint64_t bytecodeCount = 0;
+    uint64_t bytecodeBytes = 0;
+    // Machine code from any JavaScript tier (baseline, Maglev, TurboFan) as well as regexp and
+    // stub code.
+    uint64_t jitCodeCount = 0;
+    uint64_t jitCodeBytes = 0;
+    // Machine code from Wasm compilation, all tiers.
+    uint64_t wasmCodeCount = 0;
+    uint64_t wasmCodeBytes = 0;
+  };
+  CodeStatistics getCodeStatistics() const;
+
   // Equivalent to getExternalMemoryTarget()->getAdjustment(amount), but saves an atomic refcount
   // increment and decrement.
   ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount) {
@@ -586,6 +604,18 @@ class IsolateBase {
   // because Wasm code does not appear in JS stack traces.
   kj::TreeMap<uintptr_t, CodeBlockInfo> codeMap;
 
+  // Backs getCodeStatistics(). Atomic because Wasm tier-up delivers JIT code events from
+  // background threads.
+  struct AtomicCodeStatistics {
+    std::atomic<uint64_t> bytecodeCount{0};
+    std::atomic<uint64_t> bytecodeBytes{0};
+    std::atomic<uint64_t> jitCodeCount{0};
+    std::atomic<uint64_t> jitCodeBytes{0};
+    std::atomic<uint64_t> wasmCodeCount{0};
+    std::atomic<uint64_t> wasmCodeBytes{0};
+  };
+  AtomicCodeStatistics codeStatistics;
+
   explicit IsolateBase(V8System& system,
       v8::Isolate::CreateParams&& createParams,
       kj::Own<IsolateObserver> observer,
@@ -617,6 +647,7 @@ class IsolateBase {
   static bool jspiEnabledCallback(v8::Local<v8::Context> context);
 
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
+  void recordCodeAdded(v8::JitCodeEvent::CodeType type, size_t size);
 
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
   friend class V8System;
