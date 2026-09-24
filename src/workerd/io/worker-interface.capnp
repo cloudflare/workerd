@@ -541,6 +541,8 @@ enum SerializationTag {
   # A "wrapped binding": an application-level object (e.g. a D1Database) implemented in TypeScript
   # inside the runtime that wraps a single inner service stub. Serializes as the inner stub's
   # payload (per `serviceStub`) followed by the wrapper module name. See api/wrapped-binding.{h,c++}.
+  durableObjectSnapshot @18;
+  # A Durable Object storage snapshot handle transferred over RPC.
 }
 
 enum StreamEncoding {
@@ -572,6 +574,10 @@ struct JsValue {
   # (We could also call these "capabilities", but that word is pretty overloaded already.)
 
   struct External {
+    struct DurableObjectSnapshot {
+      capability @0 :Capability;
+    }
+
     enum SecureTransport {
       # Security transport mode for a transferred Socket. Mirrors api::SecureTransportKind.
       off @0;
@@ -670,6 +676,9 @@ struct JsValue {
         # runtime auto-closes the write side once the read side reaches EOF, so this must be carried
         # across transfer to preserve the origin socket's half-open semantics.
       }
+
+      durableObjectSnapshot @22 :DurableObjectSnapshot;
+      # Opaque capability for a Durable Object storage snapshot.
 
       # TODO(soon): WebSocket, Request, Response
     }
