@@ -11,6 +11,7 @@ export interface InboundSocket {
     remoteAddress?: string | null;
     localAddress?: string | null;
   }>;
+  protocol?: 'tcp' | 'udp';
 }
 
 export interface ConnectHandler {
@@ -42,3 +43,4 @@ export class PortTable {
 }
 
 export const tcpPorts: PortTable;
+export const udpPorts: PortTable;

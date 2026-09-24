@@ -16,6 +16,8 @@ export interface InboundSocket {
     remoteAddress?: string | null;
     localAddress?: string | null;
   }>;
+  // Absent on runtimes that only deliver TCP.
+  protocol?: 'tcp' | 'udp';
 }
 
 export interface ConnectHandler {
@@ -189,6 +191,7 @@ export class PortTable {
 // processes on one host do. It is seeded with the ports the platform delivers
 // inbound connections on.
 export const tcpPorts = new PortTable();
+export const udpPorts = new PortTable();
 for (const listener of sockets.getInboundListeners()) {
-  if (listener.protocol === 'tcp') tcpPorts.declare(listener.port);
+  (listener.protocol === 'tcp' ? tcpPorts : udpPorts).declare(listener.port);
 }

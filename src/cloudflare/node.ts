@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 import {
   tcpPorts,
+  udpPorts,
   type FetchHandler as Fetcher,
   type ConnectHandler,
   type InboundSocket,
@@ -110,19 +111,24 @@ export async function handleAsNodeRequest(
   return await instance.fetch(request, env, ctx);
 }
 
-// Routes an inbound platform socket to the net.Server listening on the port the
-// socket arrived on. Resolves when the connection is finished.
+// Routes an inbound platform socket to the net.Server (TCP) or dgram.Socket
+// (UDP) bound to the port the socket arrived on. Resolves when the connection
+// or datagram flow is finished.
 export async function handleAsNodeConnection(
   socket: InboundSocket,
   env?: unknown,
   ctx?: unknown
 ): Promise<void> {
   const port = portFromAuthority((await socket.opened).localAddress);
-  const instance = tcpPorts.getHandler(port);
+  const udp = socket.protocol === 'udp';
+  const instance = (udp ? udpPorts : tcpPorts).getHandler(port);
   if (!instance || !('connect' in instance)) {
     throw invalidArg(
-      `No net.Server is listening on port ${port}. Call server.listen(${port}) to accept ` +
-        `connections arriving on that port.`
+      udp
+        ? `No dgram.Socket is bound to port ${port}. Call socket.bind(${port}) to receive ` +
+            `datagrams arriving on that port.`
+        : `No net.Server is listening on port ${port}. Call server.listen(${port}) to accept ` +
+            `connections arriving on that port.`
     );
   }
   await instance.connect(socket, env, ctx);
