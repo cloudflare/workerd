@@ -137,10 +137,23 @@ class ActorCallRetryState final: public kj::Refcounted {
   // attempt is never cancelled, so this only affects retries.
   template <typename T>
   kj::Promise<T> enforceRetryTimeout(kj::Promise<T> promise) {
+    return enforceRetryTimeout(kj::mv(promise), [](const kj::Exception&) {});
+  }
+  // Runs `onTimeout` before JavaScript reentry, after the timeout has won the race with `promise`.
+  template <typename T, typename OnTimeout>
+  kj::Promise<T> enforceRetryTimeout(kj::Promise<T> promise, OnTimeout&& onTimeout) {
     if (attemptCount == 1) return kj::mv(promise);
-    auto timeout = timer.atLimitTimeout(retryCutoff())
-                       .then([self = addRefToThis()]() mutable -> kj::Promise<T> {
-      return self->retryTimeoutExpired();
+    auto timeout =
+        timer.atLimitTimeout(retryCutoff())
+            .then([self = addRefToThis(),
+                      onTimeout = kj::fwd<OnTimeout>(onTimeout)]() mutable -> kj::Promise<T> {
+      auto exception = self->retryTimeoutExpired();
+      // Cleanup can reject `promise`, so wait until exclusiveJoin has selected this branch.
+      return kj::Promise<T>(exception.clone())
+          .attach(
+              kj::defer([onTimeout = kj::mv(onTimeout), exception = kj::mv(exception)]() mutable {
+        onTimeout(exception);
+      }));
     });
     return kj::mv(promise).exclusiveJoin(kj::mv(timeout));
   }

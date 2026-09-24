@@ -564,6 +564,15 @@ class JsRpcCallRetryState final: public kj::Refcounted {
     return result;
   }
 
+  void cancelAttempt(const kj::Exception& exception) {
+    KJ_IF_SOME(canceler, attemptCanceler) {
+      canceler->cancel(exception.clone());
+      attemptCanceler = kj::none;
+    }
+    pipelineRevoker->reject(exception.clone());
+    setBrokenPipeline(exception.clone());
+  }
+
   // Frees the retained call plan and its memory reservation. Holds no JS heap references, so it
   // may run at native settlement, before the isolate lock is reacquired.
   void releaseReplayPayload() {
@@ -608,6 +617,7 @@ class JsRpcCallRetryState final: public kj::Refcounted {
   kj::Own<RevokerMembrane> pipelineMembrane;
   kj::Own<kj::PromiseFulfiller<void>> pipelineRevoker;
   kj::Maybe<kj::Rc<JsRpcCallAttemptObserver>> attemptObserver;
+  kj::Maybe<kj::Rc<kj::Canceler>> attemptCanceler;
   kj::Maybe<TraceContextParent> callSpanParents;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> backoffCommitFulfiller;
   bool committed = false;
@@ -916,7 +926,20 @@ struct JsRpcRetrySetup {
   kj::Maybe<ActorCallRetryState::Attempt> attempt;
 };
 
+// A binding's own policy applies only when it configured one and the retry request gates and the
+// userland gate are all on. Otherwise the runtime's default applies.
+ActorRetryPolicy getJsRpcRetryPolicy(JsRpcClientProvider& parent, bool enforcementRequested) {
+  if (enforcementRequested &&
+      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
+    KJ_IF_SOME(userPolicy, parent.getUserDefinedRetryPolicy()) {
+      return ActorRetryPolicy::userDefined(userPolicy);
+    }
+  }
+  return ActorRetryPolicy::systemDefault();
+}
+
 JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
+    JsRpcClientProvider& parent,
     bool destinationSupportsRetries,
     JsRpcCallPlan& callPlan,
     kj::Maybe<const kj::String&> name) {
@@ -946,6 +969,8 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
     result.replayMemoryTracker = kj::refcounted<JsRpcReplayMemoryTracker>(
         ioContext.getMetrics().trackActorCallReplayMemory(replayMemoryBytes));
   }
+  // The retry timeout starts now. Unlike fetch, this is before any output-gate wait, which the
+  // destination client's promise covers.
   auto& timer = ioContext.getIoChannelFactory().getTimer();
   result.state = kj::rc<ActorCallRetryState>(timer, ioContext.getMetrics(),
       ActorCallRetryState::Config{
@@ -954,7 +979,7 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
         .enforcementEnabled = enforcementEnabled,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
       },
-      ActorRetryPolicy::systemDefault(), timer.nowForLimitTimeout());
+      getJsRpcRetryPolicy(parent, enforcementRequested), timer.nowForLimitTimeout());
   auto attemptOrException = KJ_ASSERT_NONNULL(result.state)->startAttempt();
   result.attempt =
       kj::mv(KJ_ASSERT_NONNULL(attemptOrException.tryGet<ActorCallRetryState::Attempt>()));
@@ -969,6 +994,7 @@ JsRpcCallRetryState::StartedAttempt JsRpcCallRetryState::startAttempt(
   auto& ioContext = IoContext::current();
   auto& parent = KJ_ASSERT_NONNULL(this->parent);
   auto oneCall = parent->getClientForOneCall(js, kj::mv(attempt));
+  attemptCanceler = kj::mv(oneCall.attemptCanceler);
   kj::Vector<kj::StringPtr> pathViews;
   if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
     parent->appendPath(pathViews);
@@ -1089,7 +1115,11 @@ JsRpcCallAttemptPromise awaitJsRpcCallAttempt(jsg::Lock& js,
     kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> promise,
     TraceContext callSpan) {
   // Built before the callback below moves `state`; argument evaluation order is unspecified.
-  auto attempt = captureJsRpcCallAttempt(kj::mv(promise), kj::mv(callSpan), state.addRef());
+  auto timedAttempt = state->getRetryState().enforceRetryTimeout(
+      kj::mv(promise), [state = state.addRef()](const kj::Exception& exception) mutable {
+    state->cancelAttempt(exception);
+  });
+  auto attempt = captureJsRpcCallAttempt(kj::mv(timedAttempt), kj::mv(callSpan), state.addRef());
   return IoContext::current().awaitIo(js, kj::mv(attempt),
       [state = kj::mv(state)](
           jsg::Lock& js, JsRpcCallAttemptResult result) mutable -> JsRpcCallAttemptPromise {
@@ -1241,7 +1271,8 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
 
       // JSRPC retries build on the fetch retry machinery, so the fetch gate remains a shared
       // prerequisite while the JSRPC gate controls this event type's separate rollout.
-      retrySetup = setupJsRpcRetries(ioContext, destinationSupportsRetries, callPlan, name);
+      retrySetup =
+          setupJsRpcRetries(ioContext, *parent, destinationSupportsRetries, callPlan, name);
 
       auto retriesEnabled = ActorRetryGateEnabled::NO;
       KJ_IF_SOME(state, retrySetup.state) {

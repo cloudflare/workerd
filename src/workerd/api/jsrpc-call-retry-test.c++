@@ -7,6 +7,7 @@
 
 #include <workerd/jsg/script.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/autogate.h>
 
 #include <kj/async-io.h>
 #include <kj/test.h>
@@ -53,6 +54,10 @@ constexpr kj::StringPtr RECEIVER_SOURCE = R"JS(
   export default class extends WorkerEntrypoint {
     echo(value) { return value; }
     makeChild() { return new Child(); }
+    async pendingChild() {
+      await scheduler.wait(1);
+      return new Child();
+    }
     get value() { return 42; }
   }
 )JS"_kj;
@@ -67,6 +72,7 @@ struct RetryTestState {
   uint committedAttempts = 0;
   uint pendingFailureClassifications = 0;
   uint finalizedFailureClassifications = 0;
+  uint canceledReplacementSessions = 0;
   uint reservationAttempts = 0;
   uint activeRequestObservers = 0;
   ReplayReservation replayReservation = ReplayReservation::ACCEPT;
@@ -75,6 +81,7 @@ struct RetryTestState {
   // `replayMemoryBytes` when the retry outcome was recorded, the first step after reentry.
   kj::Maybe<size_t> replayMemoryBytesAtOutcome;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> replacementStarted;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> replacementCanceled;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Own<WorkerInterface>>>> replacementFulfiller;
 };
 
@@ -109,6 +116,11 @@ class PausingTimerChannel final: public TimerChannel {
     return kj::origin<kj::TimePoint>();
   }
 
+  // The clock never advances, so a future deadline never arrives.
+  kj::Promise<void> atLimitTimeout(kj::TimePoint) override {
+    return kj::NEVER_DONE;
+  }
+
   kj::Promise<void> onBackoffStarted() {
     return kj::mv(backoffStarted);
   }
@@ -126,6 +138,9 @@ class HoldingTimerChannel final: public TimerChannel {
     auto paf = kj::newPromiseAndFulfiller<void>();
     timeout = kj::mv(paf.promise);
     timeoutFulfiller = kj::mv(paf.fulfiller);
+    auto started = kj::newPromiseAndFulfiller<void>();
+    waitStarted = kj::mv(started.promise);
+    waitStartedFulfiller = kj::mv(started.fulfiller);
   }
 
   void syncTime() override {}
@@ -137,6 +152,7 @@ class HoldingTimerChannel final: public TimerChannel {
   kj::Promise<void> atTime(kj::Date) override {
     KJ_REQUIRE(!timeoutClaimed);
     timeoutClaimed = true;
+    waitStartedFulfiller->fulfill();
     return kj::mv(timeout);
   }
 
@@ -148,14 +164,74 @@ class HoldingTimerChannel final: public TimerChannel {
     return kj::origin<kj::TimePoint>();
   }
 
+  // The clock never advances, so a future deadline never arrives.
+  kj::Promise<void> atLimitTimeout(kj::TimePoint) override {
+    return kj::NEVER_DONE;
+  }
+
   void release() {
     timeoutFulfiller->fulfill();
+  }
+
+  kj::Promise<void> onWaitStarted() {
+    return kj::mv(waitStarted);
   }
 
  private:
   kj::Promise<void> timeout = nullptr;
   kj::Own<kj::PromiseFulfiller<void>> timeoutFulfiller;
+  kj::Promise<void> waitStarted = nullptr;
+  kj::Own<kj::PromiseFulfiller<void>> waitStartedFulfiller;
   bool timeoutClaimed = false;
+};
+
+// Backoffs finish immediately, and the retry timeout expires only when the test calls `expire()`.
+class RetryTimeoutTimerChannel final: public TimerChannel {
+ public:
+  RetryTimeoutTimerChannel() {
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    timeout = kj::mv(paf.promise).fork();
+    timeoutFulfiller = kj::mv(paf.fulfiller);
+  }
+
+  void syncTime() override {}
+
+  kj::Date now(kj::Maybe<kj::Date>) override {
+    return kj::UNIX_EPOCH;
+  }
+
+  kj::Promise<void> atTime(kj::Date) override {
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> afterLimitTimeout(kj::Duration) override {
+    return kj::READY_NOW;
+  }
+
+  // Moves past any retry timeout once expired, as the real clock would be when the timeout fires.
+  kj::TimePoint nowForLimitTimeout() override {
+    return kj::origin<kj::TimePoint>() + (expired ? 1 * kj::HOURS : 0 * kj::SECONDS);
+  }
+
+  kj::Promise<void> atLimitTimeout(kj::TimePoint deadline) override {
+    retryDeadline = deadline;
+    return timeout.addBranch();
+  }
+
+  kj::Maybe<kj::TimePoint> getRetryDeadline() const {
+    return retryDeadline;
+  }
+
+  void expire() {
+    expired = true;
+    timeoutFulfiller->fulfill();
+  }
+
+ private:
+  kj::ForkedPromise<void> timeout = nullptr;
+  kj::Own<kj::PromiseFulfiller<void>> timeoutFulfiller;
+  kj::Maybe<kj::TimePoint> retryDeadline;
+  bool expired = false;
 };
 
 class RetryCallObserver final: public OutgoingActorCallObserver {
@@ -245,8 +321,15 @@ kj::Own<WorkerInterface> newFailingSession(FailurePattern failurePattern) {
 }
 
 // A session that never delivers its event.
-kj::Own<WorkerInterface> newHangingSession() {
-  return newPromisedWorkerInterface(kj::NEVER_DONE);
+kj::Own<WorkerInterface> newHangingSession(RetryTestState& state) {
+  return newPromisedWorkerInterface(
+      kj::Promise<kj::Own<WorkerInterface>>(kj::NEVER_DONE).attach(kj::defer([&state]() {
+    ++state.canceledReplacementSessions;
+    KJ_IF_SOME(fulfiller, state.replacementCanceled) {
+      fulfiller->fulfill();
+      state.replacementCanceled = kj::none;
+    }
+  })));
 }
 
 class RetryOutgoingFactory final: public Fetcher::OutgoingFactory {
@@ -255,12 +338,14 @@ class RetryOutgoingFactory final: public Fetcher::OutgoingFactory {
       RetryTestState& state,
       FailurePattern failurePattern,
       uint failingAttempts,
-      Replacement replacement)
+      Replacement replacement,
+      kj::Maybe<UserDefinedRetryPolicy> retryPolicy)
       : receiver(receiver),
         state(state),
         failurePattern(failurePattern),
         failingAttempts(failingAttempts),
-        replacement(replacement) {}
+        replacement(replacement),
+        retryPolicy(retryPolicy) {}
 
   Result newSingleUseClient(kj::Maybe<kj::String>, MakeUserSpanParent) override {
     KJ_FAIL_REQUIRE("retryable JSRPC call bypassed actor attempt plumbing");
@@ -272,6 +357,10 @@ class RetryOutgoingFactory final: public Fetcher::OutgoingFactory {
 
   void onActorCallRetry() override {
     ++state.acceptedRetries;
+  }
+
+  kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() const override {
+    return retryPolicy;
   }
 
   Result newActorCallAttempt(
@@ -292,12 +381,20 @@ class RetryOutgoingFactory final: public Fetcher::OutgoingFactory {
       state.replacementStarted = kj::none;
     }
     if (replacement == Replacement::HANGING) {
-      return {.client = newHangingSession(), .spanParents = kj::none};
+      return {.client = newHangingSession(state), .spanParents = kj::none};
     }
     KJ_IF_SOME(promise, replacementPromise) {
       return {.client = newPromisedWorkerInterface(kj::mv(promise)), .spanParents = kj::none};
     }
-    return {.client = receiver.makeWorkerEntrypoint(), .spanParents = kj::none};
+    auto worker = receiver.makeWorkerEntrypoint();
+    if (state.replacementCanceled != kj::none) {
+      worker = worker.attach(kj::defer([&state = state]() {
+        ++state.canceledReplacementSessions;
+        KJ_ASSERT_NONNULL(state.replacementCanceled)->fulfill();
+        state.replacementCanceled = kj::none;
+      }));
+    }
+    return {.client = kj::mv(worker), .spanParents = kj::none};
   }
 
  private:
@@ -306,6 +403,7 @@ class RetryOutgoingFactory final: public Fetcher::OutgoingFactory {
   FailurePattern failurePattern;
   uint failingAttempts;
   Replacement replacement;
+  kj::Maybe<UserDefinedRetryPolicy> retryPolicy;
 };
 
 CompatibilityFlags::Reader makeRetryFlags(capnp::MallocMessageBuilder& message) {
@@ -338,9 +436,9 @@ TestFixture::SetupParams makeSenderParams(kj::WaitScope& waitScope,
   return {
     .waitScope = waitScope,
     .featureFlags = flags,
-    .autogates =
-        kj::arr("durable-object-retries-fetch"_kj, "durable-object-retries-fetch-retry-requests"_kj,
-            "durable-object-retries-jsrpc"_kj, "durable-object-retries-jsrpc-retry-requests"_kj),
+    .autogates = kj::arr("durable-object-retries-fetch"_kj,
+        "durable-object-retries-fetch-retry-requests"_kj, "durable-object-retries-jsrpc"_kj,
+        "durable-object-retries-jsrpc-retry-requests"_kj, "durable-object-retries-userland"_kj),
     .useRealTimers = false,
     .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
         [&timer](TimerChannel&) -> kj::Rc<IoChannelFactory> {
@@ -356,10 +454,11 @@ jsg::Ref<Fetcher> makeRetryFetcher(const TestFixture::Environment& env,
     RetryTestState& state,
     FailurePattern failurePattern,
     uint failingAttempts,
-    Replacement replacement = Replacement::RECEIVER) {
+    Replacement replacement = Replacement::RECEIVER,
+    kj::Maybe<UserDefinedRetryPolicy> retryPolicy = kj::none) {
   return env.js.alloc<Fetcher>(
       env.context.addObject<Fetcher::OutgoingFactory>(kj::heap<RetryOutgoingFactory>(
-          receiver, state, failurePattern, failingAttempts, replacement)),
+          receiver, state, failurePattern, failingAttempts, replacement, retryPolicy)),
       Fetcher::RequiresHostAndProtocol::YES);
 }
 
@@ -929,6 +1028,251 @@ KJ_TEST("actor RPC retry failures preserve the asynchronous caller stack") {
                       .runAndReturn(env.js);
     return env.context.awaitJs(env.js, env.js.toPromise(result)).attach(kj::mv(fetcher));
   });
+}
+
+KJ_TEST("configured retry count limits actor RPC retries") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  RetryTestState state;
+  PausingTimerChannel timer;
+  TestFixture receiver(makeReceiverParams(io.waitScope));
+  TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 3,
+        Replacement::RECEIVER, UserDefinedRetryPolicy{.maxAttempts = 1});
+    auto function = getRpcFunction(env.js, *fetcher, "echo"_kj);
+    auto rejected =
+        expectDisconnect(env.js, function.call(env.js, env.js.undefined(), env.js.num(42)));
+    return env.context.awaitJs(env.js, kj::mv(rejected)).attach(kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(state.metadata.size() == 2);
+  KJ_EXPECT(state.acceptedRetries == 1);
+  KJ_ASSERT(state.outcomes.size() == 1);
+  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::ATTEMPTS_EXHAUSTED);
+  KJ_EXPECT(state.replayMemoryBytes == 0);
+}
+
+KJ_TEST("zero configured retries disables nested actor RPC retries") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  RetryTestState state;
+  PausingTimerChannel timer;
+  TestFixture receiver(makeReceiverParams(io.waitScope));
+  TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1,
+        Replacement::RECEIVER, UserDefinedRetryPolicy{.maxAttempts = 0});
+    auto property = KJ_REQUIRE_NONNULL(fetcher->getRpcMethodForTestOnly(env.js, kj::str("nested")));
+    auto method = KJ_REQUIRE_NONNULL(property->getProperty(env.js, kj::str("echo")));
+    auto& handler = KJ_REQUIRE_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<JsRpcProperty>>());
+    auto function = KJ_REQUIRE_NONNULL(
+        jsg::JsValue(handler.wrap(env.js, kj::mv(method))).tryCast<jsg::JsFunction>());
+    auto rejected =
+        expectDisconnect(env.js, function.call(env.js, env.js.undefined(), env.js.num(42)));
+    return env.context.awaitJs(env.js, kj::mv(rejected)).attach(kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(state.metadata.size() == 1);
+  KJ_EXPECT(state.acceptedRetries == 0);
+  KJ_EXPECT(state.observedRetries == 0);
+  KJ_EXPECT(state.replayMemoryBytes == 0);
+}
+
+KJ_TEST("configured retry timeout sets the actor RPC retry deadline") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  RetryTestState state;
+  RetryTimeoutTimerChannel timer;
+  TestFixture receiver(makeReceiverParams(io.waitScope));
+  TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
+
+  auto replacementStarted = kj::newPromiseAndFulfiller<void>();
+  state.replacementStarted = kj::mv(replacementStarted.fulfiller);
+  constexpr auto RETRY_TIMEOUT = 1234 * kj::MILLISECONDS;
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1,
+        Replacement::HANGING, UserDefinedRetryPolicy{.timeout = RETRY_TIMEOUT});
+    auto function = getRpcFunction(env.js, *fetcher, "echo"_kj);
+    auto result = function.call(env.js, env.js.undefined(), env.js.num(42));
+    auto object = KJ_REQUIRE_NONNULL(result.tryCast<jsg::JsObject>());
+    auto promise = KJ_REQUIRE_NONNULL(object.tryUnwrapAs<JsRpcPromise>(env.js));
+    auto started = env.context.awaitIo(env.js, kj::mv(replacementStarted.promise));
+    return env.context.awaitJs(env.js, kj::mv(started)).attach(kj::mv(promise), kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(
+      KJ_ASSERT_NONNULL(timer.getRetryDeadline()) == kj::origin<kj::TimePoint>() + RETRY_TIMEOUT);
+}
+
+KJ_TEST("configured retry policy is ignored for actor RPC with the userland gate off") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  RetryTestState state;
+  PausingTimerChannel timer;
+  TestFixture receiver(makeReceiverParams(io.waitScope));
+  TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
+  // Keeps the userland gate off in the all-autogates variant too.
+  util::Autogate::initAutogateNamesForTest(
+      {"durable-object-retries-fetch"_kj, "durable-object-retries-fetch-retry-requests"_kj,
+        "durable-object-retries-jsrpc"_kj, "durable-object-retries-jsrpc-retry-requests"_kj},
+      util::IgnoreAllAutogatesEnv::YES);
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1,
+        Replacement::RECEIVER, UserDefinedRetryPolicy{.maxAttempts = 0});
+    auto function = getRpcFunction(env.js, *fetcher, "echo"_kj);
+    auto result = function.call(env.js, env.js.undefined(), env.js.num(42));
+    auto checked = env.js.toPromise(result).then(env.js, [](jsg::Lock& js, jsg::Value value) {
+      KJ_EXPECT(jsg::JsValue(value.getHandle(js)).strictEquals(js.num(42)));
+    });
+    return env.context.awaitJs(env.js, kj::mv(checked)).attach(kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(state.metadata.size() == 2);
+  KJ_EXPECT(state.acceptedRetries == 1);
+  KJ_ASSERT(state.outcomes.size() == 1);
+  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RECOVERED);
+}
+
+KJ_TEST("actor RPC first attempt is not cancelled by the retry timeout") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  RetryTestState state;
+  RetryTimeoutTimerChannel timer;
+  timer.expire();
+  TestFixture receiver(makeReceiverParams(io.waitScope));
+  TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 0);
+    auto function = getRpcFunction(env.js, *fetcher, "echo"_kj);
+    auto result = function.call(env.js, env.js.undefined(), env.js.num(42));
+    auto checked = env.js.toPromise(result).then(env.js, [](jsg::Lock& js, jsg::Value value) {
+      KJ_EXPECT(jsg::JsValue(value.getHandle(js)).strictEquals(js.num(42)));
+    });
+    return env.context.awaitJs(env.js, kj::mv(checked)).attach(kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(state.metadata.size() == 1);
+  KJ_EXPECT(state.outcomes.size() == 0);
+}
+
+KJ_TEST("actor RPC retry in flight at the retry timeout fails with the original disconnect") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  RetryTestState state;
+  RetryTimeoutTimerChannel timer;
+  TestFixture receiver(makeReceiverParams(io.waitScope));
+  TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
+
+  auto replacementStarted = kj::newPromiseAndFulfiller<void>();
+  state.replacementStarted = kj::mv(replacementStarted.fulfiller);
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher =
+        makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1, Replacement::HANGING);
+    auto function = getRpcFunction(env.js, *fetcher, "echo"_kj);
+    auto rejected =
+        expectDisconnect(env.js, function.call(env.js, env.js.undefined(), env.js.num(42)));
+    auto expired = replacementStarted.promise.then([&timer]() { timer.expire(); });
+    return kj::joinPromisesFailFast(
+        kj::arr(env.context.awaitJs(env.js, kj::mv(rejected)), kj::mv(expired)))
+        .attach(kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(state.metadata.size() == 2);
+  KJ_EXPECT(state.acceptedRetries == 1);
+  KJ_ASSERT(state.outcomes.size() == 1);
+  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
+  KJ_EXPECT(state.replayMemoryBytes == 0);
+}
+
+KJ_TEST("retry timeout cancels a pipeline-used actor RPC retry and its pipelined calls") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  RetryTestState state;
+  RetryTimeoutTimerChannel timer;
+  TestFixture receiver(makeReceiverParams(io.waitScope));
+  TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
+
+  auto replacementStarted = kj::newPromiseAndFulfiller<void>();
+  state.replacementStarted = kj::mv(replacementStarted.fulfiller);
+  auto replacementCanceled = kj::newPromiseAndFulfiller<void>();
+  state.replacementCanceled = kj::mv(replacementCanceled.fulfiller);
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher =
+        makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1, Replacement::HANGING);
+    auto function = getRpcFunction(env.js, *fetcher, "echo"_kj);
+    auto parentValue = function.call(env.js, env.js.undefined(), env.js.num(42));
+    auto parentObject = KJ_REQUIRE_NONNULL(parentValue.tryCast<jsg::JsObject>());
+    auto parent = KJ_REQUIRE_NONNULL(parentObject.tryUnwrapAs<JsRpcPromise>(env.js));
+
+    auto parentRejected = env.context.awaitJs(env.js, expectDisconnect(env.js, parentValue));
+    auto commitThenExpire = env.context.awaitIo(env.js, kj::mv(replacementStarted.promise),
+        [parent = parent.addRef(), &timer](jsg::Lock& js) mutable {
+      auto childRejected = expectDisconnect(js, callChild(js, *parent));
+      timer.expire();
+      return childRejected;
+    });
+    auto childRejected = env.context.awaitJs(env.js, kj::mv(commitThenExpire));
+    return kj::joinPromises(
+        kj::arr(kj::mv(parentRejected), kj::mv(childRejected), kj::mv(replacementCanceled.promise)))
+        .attach(kj::mv(parent), kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(state.metadata.size() == 2);
+  KJ_EXPECT(state.acceptedRetries == 1);
+  KJ_ASSERT(state.outcomes.size() == 1);
+  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
+  KJ_EXPECT(state.canceledReplacementSessions == 1);
+  KJ_EXPECT(state.replayMemoryBytes == 0);
+}
+
+KJ_TEST("retry timeout cancels an established actor RPC session with a pending call") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  RetryTestState state;
+  RetryTimeoutTimerChannel timer;
+  HoldingTimerChannel receiverTimer;
+  TestFixture receiver(makeReceiverParams(io.waitScope, receiverTimer));
+  TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
+
+  auto replacementStarted = kj::newPromiseAndFulfiller<void>();
+  state.replacementStarted = kj::mv(replacementStarted.fulfiller);
+  auto replacementCanceled = kj::newPromiseAndFulfiller<void>();
+  state.replacementCanceled = kj::mv(replacementCanceled.fulfiller);
+  auto receiverWaiting = receiverTimer.onWaitStarted();
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1);
+    auto function = getRpcFunction(env.js, *fetcher, "pendingChild"_kj);
+    auto parentValue = function.call(env.js, env.js.undefined());
+    auto parentObject = KJ_REQUIRE_NONNULL(parentValue.tryCast<jsg::JsObject>());
+    auto parent = KJ_REQUIRE_NONNULL(parentObject.tryUnwrapAs<JsRpcPromise>(env.js));
+
+    auto parentRejected = env.context.awaitJs(env.js, expectDisconnect(env.js, parentValue));
+    auto commitReplacement = env.context.awaitIo(env.js, kj::mv(replacementStarted.promise),
+        [parent = parent.addRef()](
+            jsg::Lock& js) mutable { return expectDisconnect(js, callChild(js, *parent)); });
+    auto childRejected = env.context.awaitJs(env.js, kj::mv(commitReplacement));
+    auto expireAfterDelivery = kj::mv(receiverWaiting).then([&timer]() { timer.expire(); });
+    return kj::joinPromisesFailFast(
+        kj::arr(kj::mv(parentRejected), kj::mv(childRejected), kj::mv(expireAfterDelivery),
+            kj::mv(replacementCanceled.promise)))
+        .attach(kj::mv(parent), kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(state.metadata.size() == 2);
+  KJ_EXPECT(state.acceptedRetries == 1);
+  KJ_ASSERT(state.outcomes.size() == 1);
+  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
+  KJ_EXPECT(state.canceledReplacementSessions == 1);
+  KJ_EXPECT(state.replayMemoryBytes == 0);
 }
 
 }  // namespace

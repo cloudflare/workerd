@@ -2361,6 +2361,12 @@ JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
     jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) {
   auto& ioContext = IoContext::current();
 
+  kj::Maybe<kj::Rc<kj::Canceler>> attemptCanceler;
+  KJ_IF_SOME(attempt, actorCallAttempt) {
+    if (attempt.getIsFirstAttempt() == IsFirstActorCallAttempt::NO) {
+      attemptCanceler = kj::rc<kj::Canceler>();
+    }
+  }
   kj::Maybe<TraceContext> callSpan;
   kj::Maybe<TraceContextParent> callSpanParents;
   ClientWithTracing clientWithTracing;
@@ -2401,13 +2407,18 @@ JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
   // propagated the exception to any RPC calls that we're waiting on, so we even ignore errors here
   // -- otherwise they'll end up logged as "uncaught exceptions" even if they were, in fact, caught
   // elsewhere.
-  ioContext.addTask(worker->customEvent(kj::mv(event))
-          .attach(kj::mv(worker), kj::mv(clientWithTracing.traceContext))
-          .then([](auto&&) {}, [](kj::Exception&&) {}));
+  auto eventPromise = worker->customEvent(kj::mv(event));
+  KJ_IF_SOME(canceler, attemptCanceler) {
+    eventPromise = canceler->wrap(kj::mv(eventPromise)).attach(canceler.addRef());
+  }
+  ioContext.addTask(kj::mv(eventPromise)
+                        .attach(kj::mv(worker), kj::mv(clientWithTracing.traceContext))
+                        .then([](auto&&) {}, [](kj::Exception&&) {}));
 
   return {.client = kj::mv(result),
     .callSpanParents = kj::mv(callSpanParents),
-    .callSpan = kj::mv(callSpan)};
+    .callSpan = kj::mv(callSpan),
+    .attemptCanceler = kj::mv(attemptCanceler)};
 }
 
 void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
