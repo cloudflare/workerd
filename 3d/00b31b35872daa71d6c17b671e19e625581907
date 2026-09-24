@@ -1,0 +1,67 @@
+src/workerd/server/cli/lib.rs
+  s_dadaf0660bfcbe::t_a2dd5f76b11886 1-5,7,11-12,19-22,24-28,35-65,67-83,85-92,94-103,105-106,108-114,116-125,127-133,135-141,143-145,147-155,157-159,161-163,165-173,175-177,179-181,184-185,187-195,197-200,202-226,228-231,233-234,236-239,241,243-251,255-277,279,282-283,286-296,298-300,302-328,330-358,360-389,392-409,413-418,420-421,423-431,433-434,436-447,449-451,458-460
+src/workerd/server/cli/config.rs
+  s_dadaf0660bfcbe::t_03521197705b0c 1-15,17-112,114-210
+src/workerd/server/cli/watch.rs
+  s_dadaf0660bfcbe::t_1d85a982fe8479 1-71
+src/workerd/server/cli-main.h
+  s_dadaf0660bfcbe::t_c73fa40d7d14ae 1-6,9-10,12-39
+src/workerd/server/BUILD.bazel
+  s_dadaf0660bfcbe::t_a22fff0200cf07 6,10-11,67-68,70,72-73,75-81,84-87,89-99,101-113,121,125,140-146,148-169
+src/workerd/server/workerd.rs
+  s_dadaf0660bfcbe::t_550a4847572260 1-4,6-9
+src/workerd/server/cli/socket_fd/unix.rs
+  s_dadaf0660bfcbe::t_574c96dd69ad04 3,4-5,7,8-9,10-63,65-72,74-75,76-107,110,112-115
+src/workerd/server/config-compiler.c++
+  s_dadaf0660bfcbe::t_a63f6dfe55e42b 1-8,10-175
+src/workerd/server/cli-main.c++
+  s_dadaf0660bfcbe::t_d592d8bc693a9b 1,5-6,21,26-28,65,67-68,105,107,109,117,131,133-141,144-146,148-149,151-152,154,156-158,160,163-164,166-170,172-173,175-176,178-185,189-191,193-197,199-200,202-203,207-208,212-213,218-219,224,227,230,234,241-251,257,269,275-278,287-288,290-291,294-300,303,305-308,311-318,320-324,328-329,332-333,335,337-343,345-347,349-352,354-356,360-362,364-370,372,374-376,378-388,390-400,402-415
+src/workerd/server/cli/bridge.rs
+  s_dadaf0660bfcbe::t_df9a40ccb733de 1-9,12-13,15-145
+src/workerd/server/cli/process.rs
+  s_dadaf0660bfcbe::t_0704971353a630 1-16,21-344
+src/workerd/server/config-compiler.h
+  s_dadaf0660bfcbe::t_4840d6d0d5f8b7 1-7,10,12-26
+src/workerd/server/cli/args.rs
+  s_dadaf0660bfcbe::t_b8727e06d2c255 1-11,13-96,99-215,222-382,384-388,390-434,436-618
+src/workerd/server/schema-file.h
+  s_dadaf0660bfcbe::t_06e1d592403ab5 12,22,28-29,34,59,82,94
+docs/jsg.md
+  s_dadaf0660bfcbe::t_00152303bb7aa5 348,351
+src/rust/AGENTS.md
+  s_dadaf0660bfcbe::t_b063bd4b7dd96a 34
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_dadaf0660bfcbe::t_de68fd3fa1e69e 563
+src/rust/cxx/kj-rs-io/async-io.h
+  s_dadaf0660bfcbe::t_9434bb8c7c7291 228
+src/rust/cxx/kj-rs-io/lib.rs
+  s_dadaf0660bfcbe::t_943dac92536c6b 85,87
+src/rust/cxx/kj-rs-io/signal.rs
+  s_dadaf0660bfcbe::t_d10b88266f51ec 58
+src/rust/cxx/kj-rs-io/watcher.rs
+  s_dadaf0660bfcbe::t_441b5026f1ccdb 5
+src/workerd/server/AGENTS.md
+  s_dadaf0660bfcbe::t_a45c2d0ad86cf9 11,15,54-55
+src/workerd/server/server.h
+  s_dadaf0660bfcbe::t_ec7b8ab8440f1e 35
+src/workerd/server/workerd.capnp
+  s_dadaf0660bfcbe::t_25f5b9ab1eca26 39
+src/workerd/util/setup-async-io-test.c++
+  s_dadaf0660bfcbe::t_054aa0aec0fef7 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3d00b31b35872daa71d6c17b671e19e625581907",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
