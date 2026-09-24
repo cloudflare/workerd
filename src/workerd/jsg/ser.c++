@@ -7,7 +7,10 @@
 #include "dom-exception.h"
 #include "setup.h"
 
+#include <workerd/util/sentry.h>
+
 #include <v8-proxy.h>
+#include <v8-value-serializer-version.h>
 
 namespace workerd::jsg {
 namespace {
@@ -448,7 +451,7 @@ Deserializer::Deserializer(Lock& js,
 #ifdef KJ_DEBUG
   kj::requireOnStack(this, "jsg::Deserializer must be allocated on the stack");
 #endif
-  init(js, kj::mv(transferredArrayBuffers), kj::mv(maybeOptions));
+  init(js, data, kj::mv(transferredArrayBuffers), kj::mv(maybeOptions));
 }
 
 Deserializer::Deserializer(
@@ -460,12 +463,31 @@ Deserializer::Deserializer(
           kj::mv(maybeOptions)) {}
 
 void Deserializer::init(Lock& js,
+    kj::ArrayPtr<const kj::byte> data,
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers,
     kj::Maybe<Options> maybeOptions) {
   auto options = kj::mv(maybeOptions).orDefault({});
   externalHandler = options.externalHandler;
   if (options.readHeader) {
-    check(deser.ReadHeader(js.v8Context()));
+    JSG_TRY(js) {
+      check(deser.ReadHeader(js.v8Context()));
+    }
+    JSG_CATCH(exception) {
+      (void)exception;
+      // Only report header metadata, never bytes from the serialized value. V8 leaves the wire
+      // version at zero if the header is absent or its version could not be decoded.
+      auto header = data.size() == 0 ? "empty" : data[0] == 0xff ? "present" : "missing";
+      auto message = kj::str(
+          "Unable to deserialize cloned data due to invalid or unsupported version. [context=",
+          options.diagnosticContext.orDefault("unknown"), "; bytes=", data.size(),
+          "; header=", header, "; wireVersion=", deser.GetWireFormatVersion(),
+          "; maxWireVersion=", v8::CurrentValueSerializerFormatVersion(),
+          "; v8=", v8::V8::GetVersion(), "]");
+      LOG_WARNING_PERIODICALLY(message, kj::getStackTrace());
+      // Header failures are internal faults. Suppress duplicate reporting when this exception
+      // crosses a JavaScript or RPC boundary; the periodic warning above carries the diagnostic.
+      kj::throwFatalException(KJ_EXCEPTION(FAILED, "worker_do_not_log", message));
+    }
   }
   preserveStackInErrors = options.preserveStackInErrors;
   KJ_IF_SOME(version, options.version) {
