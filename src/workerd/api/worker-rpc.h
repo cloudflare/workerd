@@ -714,6 +714,11 @@ class RpcStubDisposalGroup {
   friend class JsRpcStub;
 };
 
+// Returns a retry-claim rejection as a disconnect that keeps its detail, and any other exception
+// unchanged. Calls pipelined on a rejected call can fail before the sender processes its retry
+// decision, and a disconnect keeps them from surfacing the rejection as an application error.
+kj::Exception disconnectRetryClaimRejection(kj::Exception e);
+
 // `jsRpcSession` returns a capability that provides the client a way to call remote methods
 // over RPC. We drain the IncomingRequest after the capability is used to run the relevant JS.
 class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
@@ -783,14 +788,7 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
   }
 
   void failed(const kj::Exception& e) override {
-    KJ_IF_SOME(detail, e.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID)) {
-      // Pipelined calls can fail before their parent's retry decision is processed.
-      auto disconnect = KJ_EXCEPTION(DISCONNECTED, "retry claim rejected");
-      disconnect.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray(detail));
-      capFulfiller->reject(kj::mv(disconnect));
-      return;
-    }
-    capFulfiller->reject(e.clone());
+    capFulfiller->reject(disconnectRetryClaimRejection(e.clone()));
   }
 
   // Event ID for jsRpcSession.
