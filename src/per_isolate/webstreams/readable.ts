@@ -49,8 +49,6 @@ const {
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
   DataViewPrototypeGetByteOffset,
-  EventTargetAddEventListener,
-  EventTargetRemoveEventListener,
   JSONParse,
   MathMax,
   MathMin,
@@ -2962,15 +2960,13 @@ function pipeToInternal<R>(
     PromiseWithResolvers() as PromiseWithResolversType<void>;
 
   let shuttingDown = false;
-  let abortAlgorithm: (() => void) | undefined;
+  let abortRegistration: AbortAlgorithmHandle | undefined;
 
   const finalize = (error?: { reason: unknown }): void => {
     writableInternals.setReadyHook(destination, undefined);
     writableInternals.writerRelease(writer);
     readableStreamReaderGenericRelease(reader);
-    if (signal !== undefined && abortAlgorithm !== undefined) {
-      EventTargetRemoveEventListener(signal, 'abort', abortAlgorithm);
-    }
+    abortRegistration?.remove();
     if (error !== undefined) {
       reject(error.reason);
     } else {
@@ -3167,8 +3163,10 @@ function pipeToInternal<R>(
     );
   };
 
+  // Spec: an abort algorithm, not an 'abort' listener, so a synthetic event
+  // cannot abort the pipe and a user listener cannot prevent it.
   if (signal !== undefined) {
-    abortAlgorithm = () => {
+    const abortAlgorithm = (): void => {
       const abortReason = AbortSignalReasonGet(signal);
       const actions: (() => Promise<unknown>)[] = [];
       if (!preventAbort) {
@@ -3197,7 +3195,7 @@ function pipeToInternal<R>(
     if (AbortSignalAbortedGet(signal)) {
       abortAlgorithm();
     } else {
-      EventTargetAddEventListener(signal, 'abort', abortAlgorithm);
+      abortRegistration = utils.addAbortAlgorithm(signal, abortAlgorithm);
     }
   }
 

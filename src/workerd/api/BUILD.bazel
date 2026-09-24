@@ -64,6 +64,7 @@ filegroup(
 filegroup(
     name = "hdrs",
     srcs = [
+        "abort-bootstrap.h",
         "actor.h",
         "actor-call-retry.h",
         "actor-state.h",
