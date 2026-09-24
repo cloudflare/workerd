@@ -93,6 +93,14 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
   that itself gates on `desiredSize` stalls the same way). C++ behaves the
   same. Suite:
   `teeBackpressureFollowsSlowestBranch` in the readable suite.
+- The controller's `byobRequest` covers a cursor's reads only while that
+  cursor is the queue's only one. The exception is a released reader's
+  head pull-into on the sole cursor at `tee()`/detach: the controller takes
+  it over (`#releasedHead`), so a request the source holds across the fork
+  keeps working, as in the spec. Responding to it enqueues the head's
+  bytes, old and new, for every cursor (each drops its own copy of the old
+  ones, from `adoptReleasedBytes`). `enqueue()`, `error()`, cancel and a
+  closed-state `respond(0)` retire it. Suite: readable-byte ledger #25.
 - Nothing walks a tree of streams: closing, cancelling and erroring act on
   cursors and their owners, and no stream retains another.
 

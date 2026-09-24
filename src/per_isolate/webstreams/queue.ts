@@ -1141,6 +1141,16 @@ class ByteStreamCursor
     this.notify();
   }
 
+  // The controller's released head (see its #releasedHead) was responded
+  // to: it enqueues those bytes itself, so this cursor's copy of them
+  // (from adoptReleasedBytes) goes without being delivered.
+  dropReleasedHead(): void {
+    const head = this.#pendingPullIntos.peek();
+    if (head !== undefined && head.readerType === 'none') {
+      this.#pendingPullIntos.shift();
+    }
+  }
+
   // A cursor forked from `from` (tee, detach) copies its undelivered
   // released bytes: the prefix, and a released head holding bytes.
   adoptReleasedBytes(from: ByteStreamCursor): void {
@@ -1275,8 +1285,8 @@ class ByteStreamCursor
         // controller and claims the spec's fold shape first); whatever is
         // left when the microtask runs settles with the C++-parity tail
         // shape while retaining its descriptor for a later closed-state
-        // response. In multi-cursor mode (tee branches),
-        // byobRequest is null and respond(0) is unreachable, so the
+        // response. In multi-cursor mode (tee branches), no byobRequest
+        // covers a branch's reads and respond(0) cannot reach them, so the
         // deferred settlement is what settles every branch read.
         this.#scheduleEndOfDataSettlement();
         break;
@@ -1712,6 +1722,7 @@ export type { StreamQueue, QueueCursor, ByteStreamCursor };
 
 module.exports = {
   CLOSE_SENTINEL,
+  cloneArrayBuffer,
   createReadResult,
   StreamQueue,
   QueueCursor,
