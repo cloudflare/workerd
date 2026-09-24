@@ -48,6 +48,9 @@ export {
   invalidSignalRejected,
   brandChecks,
   pipeThroughLockedEndpoints,
+  badDestinationLeavesSourceUnlocked,
+  optionGetterLocksDestination,
+  shadowedWritableLocked,
 } from 'api-surface';
 
 export {

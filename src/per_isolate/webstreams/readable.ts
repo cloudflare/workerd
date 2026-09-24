@@ -18,6 +18,7 @@ import type {
   UnderlyingDefaultSource,
   UnderlyingSource,
   WritableStream as WritableStreamType,
+  WritableStreamDefaultWriter as WritableStreamDefaultWriterType,
 } from './types';
 import type {
   ByteQueueEntry,
@@ -227,7 +228,7 @@ let readableStreamCancel: <R>(
 let readableStreamPipeThroughTo: <R>(
   source: ReadableStream<R>,
   destination: WritableStreamType<R>,
-  options?: StreamPipeOptions
+  options: ConvertedPipeOptions
 ) => Promise<void>;
 let readableStreamPipeTo: <R>(
   source: ReadableStream<R>,
@@ -2911,6 +2912,55 @@ class ReadableStreamDrainingReader<R> {
   }
 }
 
+// StreamPipeOptions after WebIDL conversion: plain data, no getters.
+interface ConvertedPipeOptions {
+  readonly preventAbort: boolean;
+  readonly preventCancel: boolean;
+  readonly preventClose: boolean;
+  readonly signal: AbortSignal | undefined;
+}
+
+// WebIDL conversion of StreamPipeOptions. The pipe methods run it before
+// their locked checks, so a getter cannot change a lock after it is checked.
+// Members are read once each in spec order (WPT
+// piping/throwing-options.any.js).
+function convertPipeOptions(options: unknown): ConvertedPipeOptions {
+  // WebIDL: null and undefined become {}.
+  if (options == null) options = kEmptyDictionary;
+  if (!isActualObject(options)) {
+    throw new TypeError('Pipe options must be an object');
+  }
+  const dict = options as StreamPipeOptions;
+  const preventAbort = !!dict.preventAbort;
+  const preventCancel = !!dict.preventCancel;
+  const preventClose = !!dict.preventClose;
+  const signal = dict.signal;
+  if (signal !== undefined) {
+    // Brand check. Under the modern JSG layout the captured `aborted` getter
+    // throws for non-AbortSignal receivers; under the instance-property
+    // layout (old compat dates) the capture is a plain read that cannot
+    // brand-check, so additionally require the boolean a genuine signal's
+    // own data property carries. (A forged {aborted: boolean} slips through
+    // under old dates only; the native fast path's C++ unwrap rejects it.)
+    let aborted: unknown;
+    try {
+      aborted = AbortSignalAbortedGet(signal);
+    } catch {
+      throw new TypeError('options.signal must be an AbortSignal');
+    }
+    if (typeof aborted !== 'boolean') {
+      throw new TypeError('options.signal must be an AbortSignal');
+    }
+  }
+  return {
+    __proto__: null,
+    preventAbort,
+    preventCancel,
+    preventClose,
+    signal,
+  } as ConvertedPipeOptions;
+}
+
 // The pipe (spec ReadableStreamPipeTo). Internal operations only on both
 // ends — locks are held for the duration. Chunks are read only while the
 // destination desires them: the pump moves buffered chunks until
@@ -2925,35 +2975,22 @@ class ReadableStreamDrainingReader<R> {
 function pipeToInternal<R>(
   source: ReadableStream<R>,
   destination: WritableStreamType<R>,
-  options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
+  options: ConvertedPipeOptions
 ): Promise<void> {
-  // Spec-mandated read order (§4.9.1): preventAbort, preventCancel,
-  // preventClose, signal. WPT piping/throwing-options.any.js verifies
-  // that getter side-effects occur in exactly this sequence.
-  const preventAbort = !!options.preventAbort;
-  const preventCancel = !!options.preventCancel;
-  const preventClose = !!options.preventClose;
-  const signal = options.signal;
-  if (signal !== undefined) {
-    // Brand check. Under the modern JSG layout the captured `aborted` getter
-    // throws for non-AbortSignal receivers; under the instance-property
-    // layout (old compat dates) the capture is a plain read that cannot
-    // brand-check, so additionally require the boolean a genuine signal's
-    // own data property carries.
-    let aborted: unknown;
-    try {
-      aborted = AbortSignalAbortedGet(signal);
-    } catch {
-      throw new TypeError('options.signal must be an AbortSignal');
-    }
-    if (typeof aborted !== 'boolean') {
-      throw new TypeError('options.signal must be an AbortSignal');
-    }
-  }
+  const { preventAbort, preventCancel, preventClose, signal } = options;
 
-  // Lock both ends.
+  // Lock both ends. The callers have checked both locks; release the reader
+  // if the writer still cannot be acquired.
   const reader = new ReadableStreamDefaultReader<R>(source);
-  const writer = writableInternals.acquireWriter(destination);
+  let writer: WritableStreamDefaultWriterType<R>;
+  try {
+    writer = writableInternals.acquireWriter(destination);
+  } catch (e) {
+    // The catch here is purely defensive. The acquireWriter
+    // should not actually throw.
+    readableStreamReaderGenericRelease(reader);
+    throw e;
+  }
   setReadableStreamDisturbed(source);
 
   const { promise, resolve, reject } =
@@ -3529,7 +3566,7 @@ class ReadableStream<R> {
     readableStreamPipeThroughTo = <R>(
       source: ReadableStream<R>,
       destination: WritableStreamType<R>,
-      options?: StreamPipeOptions
+      options: ConvertedPipeOptions
     ) => {
       // The pending-closure gate (see #pendingClosure). The prototype
       // pipeThrough reaches pipeToInternal through here WITHOUT passing
@@ -3558,9 +3595,20 @@ class ReadableStream<R> {
     readableStreamPipeTo = <R>(
       source: ReadableStream<R>,
       destination: WritableStreamType<R>,
-      options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
+      options: unknown = kEmptyDictionary
     ): Promise<void> => {
       try {
+        // WebIDL argument conversion first: the destination brand check,
+        // then the options, all before the locked checks and before the
+        // fast path below permanently consumes both endpoints. Both paths
+        // receive the converted values and never re-read the user's object.
+        if (!writableInternals.isWritableStream(destination)) {
+          throw new TypeError(
+            "Failed to execute 'pipeTo': destination is not a WritableStream"
+          );
+        }
+        const converted = convertPipeOptions(options);
+        const { preventAbort, preventCancel, preventClose } = converted;
         if (isReadableStreamLocked(source)) {
           throw new TypeError('Cannot pipe a stream that is locked');
         }
@@ -3570,47 +3618,6 @@ class ReadableStream<R> {
         if (source.#pendingClosure) {
           throw pendingClosureError();
         }
-        // WebIDL: null coerces to {} for optional dictionaries.
-        if (options === null) options = kEmptyDictionary as StreamPipeOptions;
-        if (!isActualObject(options)) {
-          throw new TypeError('Pipe options must be an object');
-        }
-        // Convert the options ONCE, before any extraction: the fast path
-        // below permanently consumes both endpoints, so validation (and
-        // the user-observable getter side effects, in the spec-mandated
-        // §4.9.1 order) must happen while both streams are still
-        // untouched. Both paths below receive the converted values as
-        // plain data properties; neither re-reads the user's options
-        // object.
-        const preventAbort = !!options.preventAbort;
-        const preventCancel = !!options.preventCancel;
-        const preventClose = !!options.preventClose;
-        const signal = options.signal;
-        if (signal !== undefined) {
-          // Brand check (same check and error text as the JS pump). Under
-          // the modern JSG layout the captured `aborted` getter throws for
-          // non-AbortSignal receivers; under the instance-property layout
-          // (old compat dates) the capture is a plain read that cannot
-          // brand-check, so additionally require the boolean a genuine
-          // signal's own data property carries. (A deliberately forged
-          // {aborted: boolean} object can slip through under old dates
-          // only; the fast path's C++ typed unwrap still rejects it.)
-          let aborted: unknown;
-          try {
-            aborted = AbortSignalAbortedGet(signal);
-          } catch {
-            throw new TypeError('options.signal must be an AbortSignal');
-          }
-          if (typeof aborted !== 'boolean') {
-            throw new TypeError('options.signal must be an AbortSignal');
-          }
-        }
-        const converted = {
-          preventAbort,
-          preventCancel,
-          preventClose,
-          signal,
-        } as StreamPipeOptions;
 
         // PIPE DISPATCH: if both source and dest are native-backed, take
         // the fast path -- extract both and let the sink's pipeFrom hook
@@ -3637,16 +3644,16 @@ class ReadableStream<R> {
         // TODO(streams-ts): revisit extending the fast path to the
         // prevent* options (e.g. reversible extraction) so those pipes can
         // also run entirely at the C++ layer.
-        // Brand-check the destination before probing for native markers so
-        // a Proxy's getOwnPropertyDescriptor trap cannot observe the symbol.
+        // The destination is brand-checked above, so a Proxy's
+        // getOwnPropertyDescriptor trap cannot observe the symbol.
         const sourceExtractor = ObjectGetOwnPropertyDescriptor(
           source,
           kExtractNativeSource
         )?.value as ((this: ReadableStream<R>) => object) | undefined;
-        const sinkExtractor = writableInternals.isWritableStream(destination)
-          ? (ObjectGetOwnPropertyDescriptor(destination, kExtractNativeSink)
-              ?.value as ((this: object) => object) | undefined)
-          : undefined;
+        const sinkExtractor = ObjectGetOwnPropertyDescriptor(
+          destination,
+          kExtractNativeSink
+        )?.value as ((this: object) => object) | undefined;
         if (
           sourceExtractor !== undefined &&
           sinkExtractor !== undefined &&
@@ -3674,7 +3681,7 @@ class ReadableStream<R> {
             unknown
           >;
           const pipeFrom = nativeSink.pipeFrom as
-            | ((source: object, opts: StreamPipeOptions) => Promise<void>)
+            | ((source: object, opts: ConvertedPipeOptions) => Promise<void>)
             | undefined;
           if (pipeFrom === undefined) {
             throw new TypeError(
@@ -4356,13 +4363,10 @@ class ReadableStream<R> {
     options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
   ): ReadableStreamType<T> {
     assertIsReadableStream(this);
-    if (isReadableStreamLocked(this)) {
-      throw new TypeError('Cannot pipe a stream that is locked');
-    }
-    // WebIDL dictionary conversion: alphabetical member order means
-    // "readable" is read (and brand-checked) BEFORE "writable".  The
-    // WPT pipe-through.any.js tests verify that a bad readable stops
-    // the writable getter from ever being called.
+    // WebIDL argument conversion precedes the locked checks, so no user
+    // code runs between those checks and pipeToInternal taking the locks.
+    // Dictionary members are read in alphabetical order: "readable" is read
+    // and brand-checked before "writable" (WPT pipe-through.any.js).
     const readable = transform.readable;
     if (!isReadableStream(readable)) {
       throw new TypeError(
@@ -4370,15 +4374,19 @@ class ReadableStream<R> {
       );
     }
     const writable = transform.writable;
-    if (writable.locked) {
+    if (!writableInternals.isWritableStream(writable)) {
+      throw new TypeError(
+        "Failed to execute 'pipeThrough': writable is not a WritableStream"
+      );
+    }
+    const converted = convertPipeOptions(options);
+    if (isReadableStreamLocked(this)) {
+      throw new TypeError('Cannot pipe a stream that is locked');
+    }
+    if (writableInternals.isWritableStreamLocked(writable)) {
       throw new TypeError('Cannot pipe to a locked writable stream');
     }
-    // WebIDL: null coerces to {} for optional dictionaries.
-    if (options === null) options = kEmptyDictionary as StreamPipeOptions;
-    if (!isActualObject(options)) {
-      throw new TypeError('Pipe options must be an object');
-    }
-    const promise = readableStreamPipeThroughTo(this, writable, options);
+    const promise = readableStreamPipeThroughTo(this, writable, converted);
     markPromiseHandled(promise);
     return readable;
   }
