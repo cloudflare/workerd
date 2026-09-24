@@ -367,6 +367,12 @@ std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
   });
 }
 
+// The observer of the isolate that v8::Isolate::New() is creating on this thread, for
+// IsolateBase::createV8Histogram(). V8 creates its first histograms while deserializing the
+// startup snapshot inside v8::Isolate::New(), before the isolate carries a pointer to its
+// IsolateBase, so the observer has to be found some other way during that window.
+thread_local IsolateObserver* initializingIsolateObserver = nullptr;
+
 struct IsolateWithSnapshotCreator {
   v8::Isolate* isolate;
   kj::Maybe<kj::Own<v8::SnapshotCreator>> maybeSnapshotCreator;
@@ -375,7 +381,8 @@ struct IsolateWithSnapshotCreator {
 IsolateWithSnapshotCreator newIsolateWithSnapshotCreator(v8::Isolate::CreateParams&& params,
     v8::CppHeap* cppHeap,
     v8::IsolateGroup group,
-    kj::Maybe<SnapshotConfig>& snapshotConfig) {
+    kj::Maybe<SnapshotConfig>& snapshotConfig,
+    IsolateObserver& observer) {
   return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> IsolateWithSnapshotCreator {
     // We currently don't attempt to support incremental marking or sweeping. We probably could
     // support them, but it will take some careful investigation and testing. It's not clear if
@@ -401,6 +408,15 @@ IsolateWithSnapshotCreator newIsolateWithSnapshotCreator(v8::Isolate::CreatePara
           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
 #endif
     }
+
+    // Installed through the params rather than after creation so that the histograms V8 records
+    // while creating the isolate (snapshot deserialization) are captured too.
+    params.create_histogram_callback = &IsolateBase::createV8Histogram;
+    params.add_histogram_sample_callback = &IsolateBase::addV8HistogramSample;
+
+    auto* previousInitializingIsolateObserver = initializingIsolateObserver;
+    initializingIsolateObserver = &observer;
+    KJ_DEFER(initializingIsolateObserver = previousInitializingIsolateObserver);
 
     KJ_IF_SOME(c, snapshotConfig) {
       KJ_SWITCH_ONEOF(c) {
@@ -449,7 +465,7 @@ IsolateBase::IsolateBase(V8System& system,
       snapshotCreator(kj::none),
       ptr([&]() {
         auto [isolate, maybeCreator] = newIsolateWithSnapshotCreator(
-            kj::mv(createParams), cppHeap.release(), group, snapshotConf);
+            kj::mv(createParams), cppHeap.release(), group, snapshotConf, *observer);
         snapshotCreator = kj::mv(maybeCreator);
         return isolate;
       }()),
@@ -855,6 +871,32 @@ IsolateBase::CodeStatistics IsolateBase::getCodeStatistics() const {
     .wasmCodeCount = codeStatistics.wasmCodeCount.load(std::memory_order_relaxed),
     .wasmCodeBytes = codeStatistics.wasmCodeBytes.load(std::memory_order_relaxed),
   };
+}
+
+void* IsolateBase::createV8Histogram(const char* name, int min, int max, size_t buckets) noexcept {
+  // V8 creates histograms lazily, on first use, from whatever thread that happens on, and passes
+  // no isolate. While v8::Isolate::New() runs, initializingIsolateObserver names the observer.
+  // Afterwards we rely on V8 using the current isolate's counters on an entered thread. A sink
+  // belongs to that isolate's observer and must outlive its disposal. On a V8 background thread
+  // neither applies; returning null leaves the histogram off until it is next used on the
+  // isolate's own thread, when V8 asks again.
+  IsolateObserver* observer = initializingIsolateObserver;
+  if (observer == nullptr) {
+    v8::Isolate* isolate = v8::Isolate::TryGetCurrent();
+    if (isolate == nullptr) return nullptr;
+    auto* base = static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
+    // IsolateBase has not been attached yet in the window after Isolate::New() returns.
+    if (base == nullptr) return nullptr;
+    observer = base->observer.get();
+  }
+  KJ_IF_SOME(sink, observer->tryCreateV8HistogramSink(name, min, max, buckets)) {
+    return &sink;
+  }
+  return nullptr;
+}
+
+void IsolateBase::addV8HistogramSample(void* histogram, int sample) noexcept {
+  static_cast<V8HistogramSink*>(histogram)->addSample(sample);
 }
 
 void* getJsCageBase() {
