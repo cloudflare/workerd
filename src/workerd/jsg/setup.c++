@@ -174,6 +174,28 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // Enable the WebAssembly compact import section encoding.
   v8::V8::SetFlagsFromString("--wasm-compact-imports");
 
+#ifndef V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
+  // Custom startup snapshots for the shared cage mode:
+  // Keep the read-only heap sealed for serializer-enabled isolates.
+  // Without multiple pointer-compression cages every isolate lives in the default IsolateGroup
+  // and so shares one read-only heap. By default V8 leaves the read-only
+  // space writable for a SnapshotCreator isolate and CreateBlob() promotes its
+  // AccessorInfo/InterceptorInfo objects (JSG getter/setter/interceptor callback addresses) into
+  // that shared space. The next zygote in the same process then has to serialize that same
+  // read-only space and encode those foreign callback addresses against its own
+  // external_references table, which only holds the callbacks it registered itself ->
+  // "Unknown external reference". With multiple cages each zygote owns its group and read-only
+  // heap, and whatever it promotes travels inside its own blob.
+  //
+  // The flag is set unconditionally rather than only when the STARTUP_SNAPSHOT autogate is on:
+  // V8 folds every non-default flag into the hash it stamps on code caches, and the embedded
+  // compile caches are produced at build time by gen-compile-cache through this same init path.
+  // A flag that depended on the autogate would make the caches match only one of the two
+  // runtime configurations and be rejected (kFlagsMismatch) in the other. V8 only consults the
+  // flag for serializer-enabled isolates, so ordinary isolates are unaffected.
+  v8::V8::SetFlagsFromString("--no-extensible-ro-snapshot");
+#endif
+
 #ifdef __APPLE__
   // On macOS arm64, we find that V8 can be collecting pages that contain compiled code when
   // handling requests in short succession. There are some specific differences for macOS arm64
