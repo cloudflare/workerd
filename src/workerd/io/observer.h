@@ -238,6 +238,20 @@ class IsolateObserver: public kj::AtomicRefcounted {
   // Called when Worker::Isolate is created.
   virtual void created() {};
 
+  // Sizes of the source a Worker::Script was built from. Reported once, when the script is
+  // constructed, before parsing begins.
+  struct ScriptSourceStats {
+    // Bytes of JavaScript source, over all ES modules, CommonJS modules, and the main script.
+    size_t jsBytes = 0;
+    // Bytes of Wasm module content.
+    size_t wasmBytes = 0;
+    // Bytes of every other module kind (text, data, JSON, Python).
+    size_t otherBytes = 0;
+    // Number of modules in the bundle. Zero for Service Worker syntax.
+    uint moduleCount = 0;
+  };
+  virtual void scriptSourceLoaded(const ScriptSourceStats& stats) const {}
+
   // Called when the owning Worker::Script is being destroyed. The IsolateObserver may
   // live a while longer to handle deferred proxy requests.
   virtual void evicted() {}
