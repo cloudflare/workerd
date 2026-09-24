@@ -528,10 +528,21 @@ class ExternalStringAllocator {
 // Returns a singleton DefaultExternalStringAllocator.
 kj::Own<ExternalStringAllocator> defaultExternalStringAllocator();
 
+// Despite the name, OwnedAscii carries whatever one-byte encoding its consumer expects: the new
+// module registry treats it as UTF-8 and transcodes non-ASCII text, while the legacy registry and
+// newExternalOneByteString() treat it as Latin-1.
 using OwnedAscii = kj::Array<const char>;
 using OwnedUtf16 = kj::Array<const uint16_t>;
 using StaticExternalStringSource =
-    kj::OneOf<kj::ArrayPtr<const char>, kj::ArrayPtr<const uint16_t>>;
+    kj::OneOf<kj::StaticArrayPtr<const char>, kj::StaticArrayPtr<const uint16_t>>;
+
+inline kj::Arc<OwnedAscii> copyToArc(kj::ArrayPtr<const char> source) {
+  return kj::arc<OwnedAscii>(kj::heapArray(source));
+}
+
+inline kj::Arc<OwnedUtf16> copyToArc(kj::ArrayPtr<const uint16_t> source) {
+  return kj::arc<OwnedUtf16>(kj::heapArray(source));
+}
 
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite
@@ -545,7 +556,7 @@ using StaticExternalStringSource =
 // Note that these intentionally do not use the v8Str naming convention like the other
 // string methods because it needs to be absolutely clear that these use external buffers
 // that are not owned by the v8 heap.
-v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf);
+v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::StaticArrayPtr<const char> buf);
 
 // Creates a V8 external string whose resource shares ownership of `buf`. The backing
 // allocation remains alive until both the caller and all V8 strings release their Arcs.
@@ -563,7 +574,7 @@ v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::Arc<OwnedAscii> buf
 // Note that these intentionally do not use the v8Str naming convention like the other
 // string methods because it needs to be absolutely clear that these use external buffers
 // that are not owned by the v8 heap.
-v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
+v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::StaticArrayPtr<const uint16_t> buf);
 
 // Two-byte counterpart to the owning one-byte overload above.
 v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::Arc<OwnedUtf16> buf);

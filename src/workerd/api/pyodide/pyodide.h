@@ -30,17 +30,31 @@ WD_STRONG_BOOL(IsValidating);
 WD_STRONG_BOOL(IsWorkerd);
 WD_STRONG_BOOL(SnapshotToDisk);
 
+// A Pyodide bundle loaded at runtime, together with the bytes backing it. Shared through kj::Arc
+// so that module registries, V8 external strings over module sources, and readers over embedded
+// data can keep the bytes alive without copying them.
+class PyodideBundle final: public kj::AtomicRefcounted {
+ public:
+  explicit PyodideBundle(kj::Array<unsigned char> data);
+  KJ_DISALLOW_COPY_AND_MOVE(PyodideBundle);
+
+  jsg::Bundle::Reader getReader() const {
+    return bundle;
+  }
+
+ private:
+  kj::Array<unsigned char> data;
+  capnp::FlatArrayMessageReader messageReader;
+  jsg::Bundle::Reader bundle;
+};
+
 class PyodideBundleManager {
  public:
   void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const;
-  const kj::Maybe<jsg::Bundle::Reader> getPyodideBundle(kj::StringPtr version) const;
+  kj::Maybe<kj::Arc<PyodideBundle>> getPyodideBundle(kj::StringPtr version) const;
 
  private:
-  struct MessageBundlePair {
-    kj::Own<capnp::FlatArrayMessageReader> messageReader;
-    jsg::Bundle::Reader bundle;
-  };
-  const kj::MutexGuarded<kj::HashMap<kj::String, MessageBundlePair>> bundles;
+  const kj::MutexGuarded<kj::HashMap<kj::String, kj::Arc<PyodideBundle>>> bundles;
 };
 
 struct PythonConfig {
@@ -56,10 +70,14 @@ struct PythonConfig {
 // A function to read a segment of a buffer (e.g. an embedded package file) into a target buffer.
 // Set up this way to avoid copying files that aren't accessed.
 class ReadOnlyBuffer: public jsg::Object {
+  // Keeps the memory behind `source` alive.
+  kj::Arc<PyodideBundle> owner;
   kj::ArrayPtr<const kj::byte> source;
 
  public:
-  ReadOnlyBuffer(kj::ArrayPtr<const kj::byte> src): source(src) {};
+  ReadOnlyBuffer(kj::Arc<PyodideBundle> owner, kj::ArrayPtr<const kj::byte> src)
+      : owner(kj::mv(owner)),
+        source(src) {};
 
   uint32_t read(jsg::Lock& js, uint64_t offset, kj::Array<kj::byte> buf);
 
@@ -70,8 +88,8 @@ class ReadOnlyBuffer: public jsg::Object {
 
 // Metadata for a single embedded Python package file, returned to the runtime so it can build the
 // site-packages / dynlib filesystem (see src/pyodide/internal/loadPackage.ts). The string fields
-// point directly into the (process-lifetime) bundle message to avoid copying; they are only copied
-// when JSG marshals them into V8 strings.
+// point directly into the bundle message to avoid copying; they are only copied when JSG marshals
+// them into V8 strings, while the EmbeddedPackagesReader that produced them is still alive.
 struct PythonPackageFileMetadata {
   // Mount root ("site"/"stdlib" -> site-packages, "dynlib" -> /usr/lib).
   kj::StringPtr installDir;
@@ -91,12 +109,17 @@ struct PythonPackageFileMetadata {
 // per-file accessor) to avoid a JS<->C++ round-trip per file.
 class EmbeddedPackagesReader: public jsg::Object {
  public:
-  EmbeddedPackagesReader(kj::Maybe<kj::Own<capnp::FlatArrayMessageReader>> messageReader)
-      : messageReader(kj::mv(messageReader)) {}
+  EmbeddedPackagesReader(): messageReader(kj::none) {}
+  EmbeddedPackagesReader(
+      kj::Arc<PyodideBundle> bundle, kj::Own<capnp::FlatArrayMessageReader> messageReader)
+      : bundle(kj::mv(bundle)),
+        messageReader(kj::mv(messageReader)) {}
 
   // Builds a reader from a Pyodide bundle, locating the embedded `python_packages` data module. If
   // the bundle has no embedded packages, the returned reader exposes an empty file list.
-  static jsg::Ref<EmbeddedPackagesReader> fromBundle(jsg::Lock& js, jsg::Bundle::Reader bundle);
+  // The returned reader shares ownership of the bundle.
+  static jsg::Ref<EmbeddedPackagesReader> fromBundle(
+      jsg::Lock& js, const kj::Arc<PyodideBundle>& bundle);
 
   kj::Array<PythonPackageFileMetadata> getFiles(jsg::Lock& js);
 
@@ -105,7 +128,9 @@ class EmbeddedPackagesReader: public jsg::Object {
   }
 
  private:
-  // Owns the message backing `files`. `kj::none` when the bundle has no embedded packages.
+  // Owns the bytes `messageReader` reads from.
+  kj::Arc<PyodideBundle> bundle;
+  // Reads the message backing `files`. `kj::none` when the bundle has no embedded packages.
   kj::Maybe<kj::Own<capnp::FlatArrayMessageReader>> messageReader;
 
   kj::Maybe<PythonPackages::Reader> files() {

@@ -30,19 +30,29 @@ namespace workerd {
 
 namespace {
 
+struct BootstrapScript {
+  kj::StaticArrayPtr<const char> source;
+  kj::StaticArrayPtr<const kj::byte> compileCache;
+};
+
 // The script lookup table is the same for every context since PER_ISOLATE_BUNDLE
 // is a compile-time constant. We cache it as a process-wide static to avoid
 // rebuilding the HashMap on every context creation. This is safe because:
 //   - The table is immutable after construction (read-only concurrent access)
-//   - Keys (kj::StringPtr) and values (Module::Reader) are non-owning views
-//     into the static capnp bundle data which lives for the process lifetime
+//   - Keys and BootstrapScript buffers point into the static capnp bundle data
+//     which lives for the process lifetime
 //   - C++ guarantees thread-safe initialization of function-local statics
-const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& getScriptTable() {
+const kj::HashMap<kj::StringPtr, BootstrapScript>& getScriptTable() {
   static const auto table = []() {
-    jsg::Bundle::Reader bundle = PER_ISOLATE_BUNDLE;
-    kj::HashMap<kj::StringPtr, jsg::Module::Reader> t;
-    for (auto module: bundle.getModules()) {
-      t.insert(module.getName(), module);
+    kj::HashMap<kj::StringPtr, BootstrapScript> t;
+    for (auto module: PER_ISOLATE_BUNDLE.get().getModules()) {
+      auto source = module.getSrc().asChars();
+      auto cache = module.getCompileCache().asBytes();
+      t.insert(module.getName(),
+          BootstrapScript{
+            .source = {source.begin(), source.size()},
+            .compileCache = {cache.begin(), cache.size()},
+          });
     }
     return t;
   }();
@@ -56,7 +66,7 @@ struct CompatFlagField {
   capnp::StructSchema::Field field;
 };
 
-const kj::ArrayPtr<const CompatFlagField> getCompatFlagFields() {
+kj::StaticArrayPtr<const CompatFlagField> getCompatFlagFields() {
   static const auto table = []() {
     auto schema = capnp::Schema::from<CompatibilityFlags>();
     kj::Vector<CompatFlagField> fields;
@@ -73,7 +83,7 @@ const kj::ArrayPtr<const CompatFlagField> getCompatFlagFields() {
     }
     return fields.releaseAsArray();
   }();
-  return table;
+  return {table.begin(), table.size()};
 }
 
 // Per-context state for the bootstrap require() mechanism.
@@ -83,7 +93,7 @@ const kj::ArrayPtr<const CompatFlagField> getCompatFlagFields() {
 struct BootstrapState {
   // Scripts is a const reference to the process-wide script lookup table built
   // from the compiled-in bundle. It is guaranteed to outlive this BootstrapState
-  const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& scripts;
+  const kj::HashMap<kj::StringPtr, BootstrapScript>& scripts;
   v8::Global<v8::DictionaryTemplate> contextExtensionTemplate;
   kj::HashMap<kj::String, jsg::JsRef<jsg::JsValue>> cache;
   kj::HashSet<kj::String> loading;
@@ -372,17 +382,15 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
       // CompileFunction with context_extensions makes the extension object's
       // properties available as variables in the function scope without
       // putting them on globalThis.
-      auto source = script.getSrc();
       auto& observer = jsg::IsolateBase::from(js.v8Isolate).getObserver();
 #if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
       // Under LSAN, use a copied string to avoid false-positive leak reports.
       // The ExternString resource is properly owned by V8 (freed via Dispose()
-      // on GC), but LSAN can't trace through V8's heap to see it.
-      auto sourceStr = js.str(source);
+      // on GC), but LSAN can't trace through V8's heap to see it. Decode as
+      // Latin-1 bytes to match the one-byte external string used otherwise.
+      auto sourceStr = js.str(script.source.asBytes());
 #else
-      // Use strExtern to avoid copying — the source data lives in the static
-      // capnp bundle for the lifetime of the process.
-      auto sourceStr = js.strExtern(source.asChars());
+      auto sourceStr = js.strExtern(script.source);
 #endif
       auto originName = kj::str("workerd:per-isolate/", normalized);
       v8::ScriptOrigin origin(js.strIntern(originName));
@@ -390,7 +398,7 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
       // Use the compile cache from the bundle if available and compatible.
       v8::ScriptCompiler::CachedData* cachedData = nullptr;
       auto options = v8::ScriptCompiler::kNoCompileOptions;
-      auto compileCache = script.getCompileCache();
+      auto compileCache = script.compileCache;
       if (compileCache.size() > 0 && compileCache.begin() != nullptr) {
         // V8 takes ownership of the CachedData instance but not the underlying
         // buffer (which lives in the static capnp bundle data).

@@ -145,6 +145,14 @@ struct EncoderModuleRegistryImpl {
     modules.add(kj::mv(info));
   }
 
+  void addBuiltinModule(jsg::Module::Reader module, kj::StaticArrayPtr<const char>) {
+    addBuiltinModule(module);
+  }
+
+  void addBuiltinModule(jsg::Module::Reader module, jsg::StaticExternalStringSource) {
+    addBuiltinModule(module);
+  }
+
   void addBuiltinModule(kj::StringPtr specifier,
       jsg::ModuleRegistry::ModuleCallback callback,
       jsg::ModuleRegistry::Type type = jsg::ModuleRegistry::Type::BUILTIN) {

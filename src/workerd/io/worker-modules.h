@@ -146,8 +146,7 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // can be backed by a temporary rust::String, and edgeworker source is
           // backed by a script-fetcher response. Copy it once into shared storage
           // so V8 external strings can safely outlive the registry.
-          bundleBuilder.addEsmModule(
-              def.name, kj::arc<jsg::OwnedAscii>(kj::heapArray<const char>(content.body)), flags);
+          bundleBuilder.addEsmModule(def.name, jsg::copyToArc(content.body), flags);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
@@ -458,7 +457,7 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
     kj::Maybe<kj::Array<kj::byte>> maybeSnapshot,
     CompatibilityFlags::Reader featureFlags);
 
-jsg::Bundle::Reader retrievePyodideBundle(
+kj::Arc<api::pyodide::PyodideBundle> retrievePyodideBundle(
     const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version);
 
 // Registers all the modules that are common to both workerd and edgeworker.
@@ -471,7 +470,7 @@ template <typename TracerApi, class Registry>
 void registerPythonCommonModules(jsg::Lock& lock,
     Registry& modules,
     CompatibilityFlags::Reader featureFlags,
-    jsg::Bundle::Reader pyodideBundle,
+    const kj::Arc<api::pyodide::PyodideBundle>& pyodideBundle,
     const workerd::WorkerSource::ModulesSource& source,
     kj::Maybe<kj::Array<kj::byte>> maybeSnapshot,
     api::pyodide::IsWorkerd isWorkerd,
@@ -491,7 +490,7 @@ void registerPythonCommonModules(jsg::Lock& lock,
   using namespace workerd::api::pyodide;
   auto pythonRelease = KJ_REQUIRE_NONNULL(getPythonSnapshotRelease(featureFlags));
 
-  // Inject pyodide bundle.
+  // Inject pyodide bundle. Module sources share ownership of the bundle instead of being copied.
   modules.addBuiltinBundle(pyodideBundle);
 
   modules.addBuiltinModule("pyodide-internal:runtime-generated/metadata",

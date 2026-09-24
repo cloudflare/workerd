@@ -118,9 +118,9 @@ kj::Maybe<kj::Array<kj::byte>> tryGetMetadataSnapshot(
   return kj::mv(memorySnapshot);
 }
 
-jsg::Bundle::Reader retrievePyodideBundle(
+kj::Arc<api::pyodide::PyodideBundle> retrievePyodideBundle(
     const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
   auto result = pyConfig.pyodideBundleManager.getPyodideBundle(version);
-  return KJ_ASSERT_NONNULL(result, "Failed to get Pyodide bundle", version);
+  return kj::mv(KJ_ASSERT_NONNULL(result, "Failed to get Pyodide bundle", version));
 }
 }  // namespace workerd::modules::python

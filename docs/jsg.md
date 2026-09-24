@@ -2429,7 +2429,7 @@ registry->add(specifier, kj::mv(moduleInfo));
 
 // Add built-in modules
 registry->addBuiltinModule("node:buffer", sourceCode, jsg::ModuleRegistry::Type::BUILTIN);
-registry->addBuiltinBundle(bundle);  // Add modules from a capnp bundle
+registry->addBuiltinBundle(MY_BUNDLE);  // Add modules from a compiled-in capnp bundle constant
 registry->addBuiltinModule<MyApiClass>("workerd:my-api");
 registry->addBuiltinModule("workerd:instance", kj::mv(myRef));
 

@@ -160,7 +160,7 @@ module construction time.
 
 ```
 EsModule extends Module {
-  source:        kj::OneOf<kj::ArrayPtr<const char>, kj::Arc<OwnedAscii>> // UTF-8
+  source:        UnencodedSource                              // Static or Arc-owned UTF-8, or pre-encoded static source
   encodedSource: kj::Lazy<EncodedSource>                         // V8-compatible encoding (shared)
   cachedData:    MutexGuarded<Maybe<Own<CachedData>>>            // Cross-isolate compile cache
 }
@@ -172,6 +172,11 @@ EsModule extends Module {
   and stores bytecode after compilation.
 
 #### Source Encoding (`EncodedSource`)
+
+Static source buffers use `kj::StaticArrayPtr<const char>` (UTF-8 or Latin-1) or
+`kj::StaticArrayPtr<const uint16_t>` (UTF-16). `StaticExternalStringSource` holds
+pre-encoded Latin-1 or UTF-16 and bypasses UTF-8 transcoding. Both unencoded and
+encoded sources retain this static-lifetime distinction from Arc-owned buffers.
 
 V8 has no internal UTF-8 string representation — external source strings must be
 one-byte (Latin-1) or two-byte (UTF-16). Worker bundle sources arrive as UTF-8
@@ -282,8 +287,10 @@ auto bundle = builder.finish();
 ```
 
 The `kj::Arc<OwnedAscii>` overload must be used for ordinary worker source. The
-`ArrayPtr` overload is reserved for compiled-in strings with static process
+`StaticArrayPtr` overload is reserved for compiled-in strings with static process
 lifetime because V8 can retain an external source string after compilation.
+Use `jsg::copyToArc(source)` to copy a borrowed character buffer into shared owned
+storage. It supports both one-byte and UTF-16 buffers.
 
 Name normalization (`normalizeModuleName`):
 
@@ -304,6 +311,11 @@ builder.addSynthetic("node:path"_url, pathCallback);
 builder.addObject<CryptoModule, TypeWrapper>("node:crypto"_url);
 auto bundle = builder.finish();
 ```
+
+`BuiltinBuilder::addEsm()` accepts static source or `kj::Arc<OwnedAscii>` for
+runtime-loaded source such as extensions. `getBuiltInBundleFromCapnp()` imports
+only compiled-in `ConstStruct<Bundle>` constants: every module, including Wasm,
+data, and JSON modules, borrows the bundle's static data without copying.
 
 ## Resolution Flow
 

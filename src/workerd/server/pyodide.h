@@ -20,7 +20,7 @@ namespace workerd::server {
 // `integrity` is a subresource-integrity-style checksum ("sha256-<base64>") used to verify the
 // integrity of the bundle when downloaded from the network. It may be empty (e.g. for the "dev"
 // version), in which case no verification is performed.
-kj::Promise<kj::Maybe<jsg::Bundle::Reader>> fetchPyodideBundle(
+kj::Promise<kj::Maybe<kj::Arc<api::pyodide::PyodideBundle>>> fetchPyodideBundle(
     const api::pyodide::PythonConfig& pyConfig,
     kj::String version,
     kj::StringPtr integrity,

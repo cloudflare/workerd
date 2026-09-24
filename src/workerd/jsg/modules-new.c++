@@ -124,10 +124,10 @@ kj::Array<kj::String> normalizeNamedExports(kj::Array<kj::String> namedExports) 
 // every isolate replica sharing the registry agrees on it, keeping the shared
 // compile cache consistent.
 struct EncodedSource {
-  kj::OneOf<kj::ArrayPtr<const char>,  // borrowed process-lifetime ASCII
-      kj::ArrayPtr<const uint16_t>,    // borrowed process-lifetime UTF-16
-      kj::Arc<OwnedAscii>,             // owned ASCII or Latin-1
-      kj::Arc<OwnedUtf16>>             // owned UTF-16
+  kj::OneOf<kj::StaticArrayPtr<const char>,  // borrowed process-lifetime ASCII
+      kj::StaticArrayPtr<const uint16_t>,    // borrowed process-lifetime UTF-16
+      kj::Arc<OwnedAscii>,                   // owned ASCII or Latin-1
+      kj::Arc<OwnedUtf16>>                   // owned UTF-16
       repr;
 };
 
@@ -164,10 +164,9 @@ EncodedSource transcodeSource(kj::ArrayPtr<const char> source) {
   return {.repr = kj::arc<OwnedUtf16>(kj::mv(owned))};
 }
 
-EncodedSource encodeSource(kj::ArrayPtr<const char>&& source) {
+EncodedSource encodeSource(kj::StaticArrayPtr<const char> source) {
   if (simdutf::validate_ascii(source.begin(), source.size())) {
-    // Borrowed input is known to have process lifetime.
-    return {.repr = kj::mv(source)};
+    return {.repr = source};
   }
   return transcodeSource(source);
 }
@@ -181,14 +180,14 @@ EncodedSource encodeSource(kj::Arc<OwnedAscii>&& source) {
 }
 
 using UnencodedSource =
-    kj::OneOf<kj::ArrayPtr<const char>, StaticExternalStringSource, kj::Arc<OwnedAscii>>;
+    kj::OneOf<kj::StaticArrayPtr<const char>, StaticExternalStringSource, kj::Arc<OwnedAscii>>;
 
 // The implementation of Module for ESM.
 class EsModule final: public Module {
  public:
   // Source borrowed from static process-lifetime storage, such as a
   // compiled-in builtin source.
-  explicit EsModule(Url id, Type type, Flags flags, kj::ArrayPtr<const char> source)
+  explicit EsModule(Url id, Type type, Flags flags, kj::StaticArrayPtr<const char> source)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(source),
         cachedData(kj::none) {
@@ -264,15 +263,15 @@ class EsModule final: public Module {
       // EncodedSource for the tiering. kj::Lazy handles cross-thread once-init.
       const auto& encoded = encodedSource.get([this](kj::SpaceFor<EncodedSource>& space) {
         KJ_SWITCH_ONEOF(source) {
-          KJ_CASE_ONEOF(borrowed, kj::ArrayPtr<const char>) {
+          KJ_CASE_ONEOF(borrowed, kj::StaticArrayPtr<const char>) {
             return space.construct(encodeSource(kj::mv(borrowed)));
           }
           KJ_CASE_ONEOF(encoded, StaticExternalStringSource) {
             KJ_SWITCH_ONEOF(encoded) {
-              KJ_CASE_ONEOF(oneByte, kj::ArrayPtr<const char>) {
+              KJ_CASE_ONEOF(oneByte, kj::StaticArrayPtr<const char>) {
                 return space.construct(EncodedSource{.repr = kj::mv(oneByte)});
               }
-              KJ_CASE_ONEOF(twoByte, kj::ArrayPtr<const uint16_t>) {
+              KJ_CASE_ONEOF(twoByte, kj::StaticArrayPtr<const uint16_t>) {
                 return space.construct(EncodedSource{.repr = kj::mv(twoByte)});
               }
             }
@@ -285,10 +284,10 @@ class EsModule final: public Module {
       });
       v8::Local<v8::String> contentStr;
       KJ_SWITCH_ONEOF(encoded.repr) {
-        KJ_CASE_ONEOF(ascii, kj::ArrayPtr<const char>) {
+        KJ_CASE_ONEOF(ascii, kj::StaticArrayPtr<const char>) {
           contentStr = js.strExtern(ascii);
         }
-        KJ_CASE_ONEOF(utf16, kj::ArrayPtr<const uint16_t>) {
+        KJ_CASE_ONEOF(utf16, kj::StaticArrayPtr<const uint16_t>) {
           contentStr = js.strExtern(utf16);
         }
         KJ_CASE_ONEOF(oneByte, kj::Arc<OwnedAscii>) {
@@ -1849,9 +1848,10 @@ kj::HashSet<kj::StringPtr> toHashSet(kj::ArrayPtr<const kj::String> arr) {
 // ======================================================================================
 namespace {
 
+// Synthetic modules borrow their data from `bundle`, which must be a compiled-in constant.
 template <typename AddEsm>
 void addBuiltInBundleFromCapnp(ModuleBundle::BuiltinBuilder& builder,
-    Bundle::Reader bundle,
+    const capnp::_::ConstStruct<Bundle>& bundle,
     kj::Function<bool(workerd::jsg::Module::Reader)> filter,
     AddEsm addEsm) {
   auto typeFilter = ([&] {
@@ -1867,7 +1867,7 @@ void addBuiltInBundleFromCapnp(ModuleBundle::BuiltinBuilder& builder,
     KJ_UNREACHABLE;
   })();
 
-  for (auto module: bundle.getModules()) {
+  for (auto module: bundle.get().getModules()) {
     if (module.getType() != typeFilter || !filter(module)) continue;
     auto id = KJ_ASSERT_NONNULL(Url::tryParse(module.getName()));
     switch (module.which()) {
@@ -1894,21 +1894,24 @@ kj::Own<ModuleBundle> ModuleBundle::newFallbackBundle(Builder::ResolveCallback c
   return kj::heap<FallbackModuleBundle>(kj::mv(callback));
 }
 
-void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder, Bundle::Reader bundle) {
+void ModuleBundle::getBuiltInBundleFromCapnp(
+    BuiltinBuilder& builder, const capnp::_::ConstStruct<Bundle>& bundle) {
   getBuiltInBundleFromCapnp(builder, bundle, [](workerd::jsg::Module::Reader) { return true; });
 }
 
 void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
-    Bundle::Reader bundle,
+    const capnp::_::ConstStruct<Bundle>& bundle,
     kj::Function<bool(workerd::jsg::Module::Reader)> filter) {
   addBuiltInBundleFromCapnp(
       builder, bundle, kj::mv(filter), [&](const Url& id, workerd::jsg::Module::Reader module) {
-    builder.addEsm(id, module.getSrc().asChars());
+    // ConstStruct points into the compiled-in Cap'n Proto constant.
+    auto source = module.getSrc().asChars();
+    builder.addEsm(id, kj::StaticArrayPtr<const char>(source.begin(), source.size()));
   });
 }
 
 void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
-    Bundle::Reader bundle,
+    const capnp::_::ConstStruct<Bundle>& bundle,
     kj::Function<bool(workerd::jsg::Module::Reader)> filter,
     kj::FunctionParam<StaticExternalStringSource(workerd::jsg::Module::Reader)> getSource) {
   addBuiltInBundleFromCapnp(
@@ -2071,7 +2074,7 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(kj:
 }
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
-    kj::StringPtr name, kj::ArrayPtr<const char> source, Module::Flags flags) {
+    kj::StringPtr name, kj::StaticArrayPtr<const char> source, Module::Flags flags) {
   const auto url = processModuleName(name, bundleBase);
   add(url,
       [url = url.clone(), source, flags, type = type()](const ResolveContext& context) mutable
@@ -2138,12 +2141,25 @@ ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addSynthetic(
 }
 
 ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
-    const Url& id, kj::ArrayPtr<const char> source) {
+    const Url& id, kj::StaticArrayPtr<const char> source) {
   ensureIsNotBundleSpecifier(id);
   Builder::add(id,
       [url = id.clone(), source, type = type()](const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
     kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source);
+    return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
+  });
+  return *this;
+}
+
+ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
+    const Url& id, kj::Arc<OwnedAscii> source) {
+  ensureIsNotBundleSpecifier(id);
+  Builder::add(id,
+      [url = id.clone(), source = kj::mv(source), type = type()](
+          const ResolveContext& context) mutable
+      -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, kj::mv(source));
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
@@ -2478,7 +2494,7 @@ kj::Own<Module> Module::newEsm(Url id, Type type, kj::Arc<OwnedAscii> code, Flag
   return kj::heap<EsModule>(kj::mv(id), type, flags, kj::mv(code));
 }
 
-kj::Own<Module> Module::newEsm(Url id, Type type, kj::ArrayPtr<const char> code) {
+kj::Own<Module> Module::newEsm(Url id, Type type, kj::StaticArrayPtr<const char> code) {
   return kj::heap<EsModule>(kj::mv(id), type, Flags::ESM, code);
 }
 

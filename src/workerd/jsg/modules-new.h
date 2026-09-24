@@ -414,7 +414,7 @@ class Module {
   // construct ESM modules from compiled-in built-in modules.
   // This variation of newEsm does not take Flags as none of the existing
   // Flags are relevant other than the ESM flag which will be set automatically.
-  static kj::Own<Module> newEsm(Url id, Type type, kj::ArrayPtr<const char> code);
+  static kj::Own<Module> newEsm(Url id, Type type, kj::StaticArrayPtr<const char> code);
   // The source is already encoded as Latin-1 or UTF-16 for V8.
   static kj::Own<Module> newEsm(Url id, Type type, StaticExternalStringSource code);
 
@@ -573,7 +573,7 @@ class ModuleBundle {
     // compiled-in string literal. Use the Arc<OwnedAscii> overload for all
     // other source buffers.
     BundleBuilder& addEsmModule(kj::StringPtr name,
-        kj::ArrayPtr<const char> code,
+        kj::StaticArrayPtr<const char> code,
         Module::Flags flags = Module::Flags::ESM) KJ_LIFETIMEBOUND;
 
     // Adds source with shared ownership of its backing storage.
@@ -605,7 +605,9 @@ class ModuleBundle {
         const Url& id, BundleBuilder::EvaluateCallback callback) KJ_LIFETIMEBOUND;
 
     // The source must be backed by static process-lifetime storage.
-    BuiltinBuilder& addEsm(const Url& id, kj::ArrayPtr<const char> source) KJ_LIFETIMEBOUND;
+    BuiltinBuilder& addEsm(const Url& id, kj::StaticArrayPtr<const char> source) KJ_LIFETIMEBOUND;
+    // The UTF-8 source shares ownership of its backing storage.
+    BuiltinBuilder& addEsm(const Url& id, kj::Arc<OwnedAscii> source) KJ_LIFETIMEBOUND;
     // The source is already encoded as Latin-1 or UTF-16 for V8.
     BuiltinBuilder& addEsm(const Url& id, StaticExternalStringSource source) KJ_LIFETIMEBOUND;
 
@@ -634,17 +636,21 @@ class ModuleBundle {
   static kj::Own<ModuleBundle> newFallbackBundle(
       Builder::ResolveCallback callback) KJ_WARN_UNUSED_RESULT;
 
-  static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder, Bundle::Reader bundle);
+  // Loads a compiled-in bundle. Modules borrow the bundle's static data (sources, Wasm, data and
+  // JSON) without copying it.
+  static void getBuiltInBundleFromCapnp(
+      BuiltinBuilder& builder, const capnp::_::ConstStruct<Bundle>& bundle);
 
   // Overload that accepts a per-module filter predicate. Only modules for which
   // the filter returns true are added to the builder. This is used for per-module
   // feature flag gating (e.g., individual node:* modules behind compat flags).
   static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
-      Bundle::Reader bundle,
+      const capnp::_::ConstStruct<Bundle>& bundle,
       kj::Function<bool(::workerd::jsg::Module::Reader)> filter);
 
+  // Overload that obtains each ESM source from `getSource` instead of the bundle.
   static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
-      Bundle::Reader bundle,
+      const capnp::_::ConstStruct<Bundle>& bundle,
       kj::Function<bool(::workerd::jsg::Module::Reader)> filter,
       kj::FunctionParam<StaticExternalStringSource(::workerd::jsg::Module::Reader)> getSource);
 

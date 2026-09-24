@@ -44,14 +44,14 @@ void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>>&
 }
 
 // Used to preload the Pyodide bundle during workerd startup
-kj::Promise<kj::Maybe<jsg::Bundle::Reader>> fetchPyodideBundle(
+kj::Promise<kj::Maybe<kj::Arc<api::pyodide::PyodideBundle>>> fetchPyodideBundle(
     const api::pyodide::PythonConfig& pyConfig,
     kj::String version,
     kj::StringPtr integrity,
     kj::Network& network,
     kj::Timer& timer) {
-  if (pyConfig.pyodideBundleManager.getPyodideBundle(version) != kj::none) {
-    co_return pyConfig.pyodideBundleManager.getPyodideBundle(version);
+  KJ_IF_SOME(bundle, pyConfig.pyodideBundleManager.getPyodideBundle(version)) {
+    co_return kj::mv(bundle);
   }
 
   auto maybePyodideBundleFile = getPyodideBundleFile(pyConfig.pyodideDiskCacheRoot, version);

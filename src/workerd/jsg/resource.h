@@ -1695,7 +1695,8 @@ struct JsSetup {
 
   JsSetup(jsg::Lock& js, v8::Local<v8::Context> context): js(js), context(context) {}
 
-  inline void registerJsBundle(Bundle::Reader bundle) {
+  // Registers a compiled-in context bundle, preserving its static source lifetime.
+  inline void registerJsBundle(const capnp::_::ConstStruct<Bundle>& bundle) {
     ModuleRegistryImpl<TypeWrapper>::from(js)->addBuiltinBundle(bundle);
   }
 

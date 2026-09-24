@@ -208,7 +208,8 @@ struct TunneledContext: public ContextGlobalObject {
     }
   }
   void throwHugeExternalString(jsg::Lock& js) {
-    kj::ArrayPtr<const char> fakeBuf(reinterpret_cast<const char*>(1), v8::String::kMaxLength + 1);
+    kj::StaticArrayPtr<const char> fakeBuf(
+        reinterpret_cast<const char*>(1), v8::String::kMaxLength + 1);
     jsg::newExternalOneByteString(js, fakeBuf);
   }
   void throwTunneledMacroTypeError() {

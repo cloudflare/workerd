@@ -24,26 +24,25 @@
 
 namespace workerd::api::pyodide {
 
-// singleton that owns bundle
+PyodideBundle::PyodideBundle(kj::Array<unsigned char> dataParam)
+    : data(kj::mv(dataParam)),
+      // We're going to reuse this in the ModuleRegistry for every Python isolate, so set the
+      // traversal limit to infinity or else eventually a new Python isolate will fail.
+      messageReader(kj::arrayPtr(reinterpret_cast<const capnp::word*>(data.begin()),
+                        data.size() / sizeof(capnp::word)),
+          capnp::ReaderOptions{.traversalLimitInWords = kj::maxValue}),
+      bundle(messageReader.getRoot<jsg::Bundle>()) {}
 
-const kj::Maybe<jsg::Bundle::Reader> PyodideBundleManager::getPyodideBundle(
+kj::Maybe<kj::Arc<PyodideBundle>> PyodideBundleManager::getPyodideBundle(
     kj::StringPtr version) const {
   return bundles.lockShared()->find(version).map(
-      [](const MessageBundlePair& t) { return t.bundle; });
+      [](const kj::Arc<PyodideBundle>& bundle) { return bundle.addRef(); });
 }
 
 void PyodideBundleManager::setPyodideBundleData(
     kj::String version, kj::Array<unsigned char> data) const {
-  auto wordArray = kj::arrayPtr(
-      reinterpret_cast<const capnp::word*>(data.begin()), data.size() / sizeof(capnp::word));
-  // We're going to reuse this in the ModuleRegistry for every Python isolate, so set the traversal
-  // limit to infinity or else eventually a new Python isolate will fail.
-  auto messageReader = kj::heap<capnp::FlatArrayMessageReader>(
-      wordArray, capnp::ReaderOptions{.traversalLimitInWords = kj::maxValue})
-                           .attach(kj::mv(data));
-  auto bundle = messageReader->getRoot<jsg::Bundle>();
-  bundles.lockExclusive()->insert(
-      kj::mv(version), {.messageReader = kj::mv(messageReader), .bundle = bundle});
+  auto bundle = kj::arc<PyodideBundle>(kj::mv(data));
+  bundles.lockExclusive()->insert(kj::mv(version), kj::mv(bundle));
 }
 
 static uint32_t readToTarget(
@@ -421,8 +420,8 @@ namespace api::pyodide {
 static constexpr kj::StringPtr PACKAGES_MODULE_SUFFIX = "python_packages.bin"_kj;
 
 jsg::Ref<EmbeddedPackagesReader> EmbeddedPackagesReader::fromBundle(
-    jsg::Lock& js, jsg::Bundle::Reader bundle) {
-  for (auto module: bundle.getModules()) {
+    jsg::Lock& js, const kj::Arc<PyodideBundle>& bundle) {
+  for (auto module: bundle->getReader().getModules()) {
     if (module.which() != jsg::Module::DATA) {
       continue;
     }
@@ -431,9 +430,9 @@ jsg::Ref<EmbeddedPackagesReader> EmbeddedPackagesReader::fromBundle(
       continue;
     }
 
-    // The data module holds a serialized PythonPackages message. Its bytes live in the
-    // process-wide bundle message (word-aligned, since capnp allocates Data on word boundaries),
-    // so we can read it in place without copying.
+    // The data module holds a serialized PythonPackages message. Its bytes live in the bundle
+    // message (word-aligned, since capnp allocates Data on word boundaries), so we read it in
+    // place while the EmbeddedPackagesReader keeps the bundle alive.
     auto data = module.getData().asBytes();
     auto words = kj::arrayPtr(
         reinterpret_cast<const capnp::word*>(data.begin()), data.size() / sizeof(capnp::word));
@@ -441,11 +440,11 @@ jsg::Ref<EmbeddedPackagesReader> EmbeddedPackagesReader::fromBundle(
     // limit to infinity or else eventually a new Python isolate will fail.
     auto messageReader = kj::heap<capnp::FlatArrayMessageReader>(
         words, capnp::ReaderOptions{.traversalLimitInWords = kj::maxValue});
-    return js.alloc<EmbeddedPackagesReader>(kj::mv(messageReader));
+    return js.alloc<EmbeddedPackagesReader>(bundle.addRef(), kj::mv(messageReader));
   }
 
   // No embedded packages (e.g. a newer Pyodide version that bundles the stdlib directly).
-  return js.alloc<EmbeddedPackagesReader>(kj::none);
+  return js.alloc<EmbeddedPackagesReader>();
 }
 
 kj::Array<PythonPackageFileMetadata> EmbeddedPackagesReader::getFiles(jsg::Lock& js) {
@@ -462,7 +461,7 @@ kj::Array<PythonPackageFileMetadata> EmbeddedPackagesReader::getFiles(jsg::Lock&
         .installDir = file.getInstallDir(),
         .path = file.getPath(),
         .size = static_cast<int>(size),
-        .reader = js.alloc<ReadOnlyBuffer>(file.getContents().asBytes()),
+        .reader = js.alloc<ReadOnlyBuffer>(bundle.addRef(), file.getContents().asBytes()),
       });
     }
     return builder.finish();

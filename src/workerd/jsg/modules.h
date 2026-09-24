@@ -16,6 +16,8 @@
 #include <kj/filesystem.h>
 #include <kj/map.h>
 
+#include <concepts>
+
 namespace workerd::jsg {
 
 template <typename T>
@@ -188,6 +190,12 @@ class ModuleRegistry {
 
     ModuleInfo(jsg::Lock& js,
         kj::StringPtr name,
+        kj::Arc<OwnedAscii> content,
+        kj::ArrayPtr<const kj::byte> compileCache,
+        const CompilationObserver& observer);
+
+    ModuleInfo(jsg::Lock& js,
+        kj::StringPtr name,
         kj::Maybe<kj::ArrayPtr<const kj::StringPtr>> maybeExports,
         SyntheticModuleInfo synthetic);
 
@@ -276,6 +284,12 @@ kj::Maybe<kj::OneOf<kj::String, ModuleRegistry::ModuleInfo>> tryResolveFromFallb
     ModuleRegistry::ResolveMethod method,
     kj::Maybe<kj::StringPtr> rawSpecifier);
 
+// A shared object that owns a Bundle message and the memory backing it.
+template <typename T>
+concept BundleOwner = requires(const T& owner) {
+  { owner.getReader() } -> std::same_as<Bundle::Reader>;
+};
+
 template <typename TypeWrapper>
 class ModuleRegistryImpl final: public ModuleRegistry {
  public:
@@ -313,71 +327,64 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     entries.insert(kj::heap<Entry>(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
   }
 
+  // Registers a WASM, DATA, or JSON module that is instantiated lazily from `module`, which must
+  // point into a compiled-in Cap'n Proto constant. Source modules must use an overload that
+  // states the lifetime of the source.
   void addBuiltinModule(Module::Reader module) {
-    if (module.which() != Module::SRC) {
-      auto specifier = module.getName();
-      switch (module.which()) {
-        case Module::WASM:
-          // The body of this callback is copied from `compileWasmGlobal` in
-          // src/workerd/server/workerd-api.c++.
-          addBuiltinModule(specifier,
-              [specifier, module, this](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
-            // Wasm compilation requires code-generation permission. The scope
-            // restores the prior setting on exit: builtin modules resolve
-            // lazily, potentially inside a window where eval is already
-            // permitted, and that permission must survive the compilation.
-            Lock::AllowEvalScope allowEvalScope(lock, true);
+    KJ_REQUIRE(module.which() != Module::SRC, "source modules require an explicit source lifetime");
+    addBuiltinNonSourceModule(module, nullptr);
+  }
 
-            // Allow Wasm compilation to spawn a background thread for tier-up, i.e.
-            // recompiling Wasm with optimizations in the background. Otherwise Wasm startup
-            // is way too slow. Until tier-up finishes, requests will be handled using
-            // Liftoff-generated code, which compiles fast but runs slower.
-            AllowV8BackgroundThreadsScope scope;
-            auto wasmModule =
-                jsg::compileWasmModule(lock, module.getWasm().asBytes(), this->observer);
-            auto moduleInfo = jsg::ModuleRegistry::ModuleInfo(
-                lock, specifier, kj::none, jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
-            // Uncomment iff we want to permit source phase imports for builtin Wasm modules
-            // moduleInfo.setModuleSourceObject(lock, wasmModule.template As<v8::Object>());
-            return moduleInfo;
-          }, module.getType());
-          return;
-        case Module::DATA:
-          addBuiltinModule(specifier,
-              [specifier, module](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
-            v8::Local<v8::ArrayBuffer> data =
-                lock.wrapBytes(kj::heapArray(module.getData().asBytes()));
-            return jsg::ModuleRegistry::ModuleInfo(
-                lock, specifier, kj::none, jsg::ModuleRegistry::DataModuleInfo(lock, data));
-          }, module.getType());
-          return;
-        case Module::JSON:
-          addBuiltinModule(specifier,
-              [specifier, module](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
-            auto data =
-                jsg::check(v8::JSON::Parse(lock.v8Context(), lock.wrapString(module.getJson())));
-            return jsg::ModuleRegistry::ModuleInfo(
-                lock, specifier, kj::none, jsg::ModuleRegistry::JsonModuleInfo(lock, data));
-          }, module.getType());
-          return;
-        case Module::SRC:
-          KJ_UNREACHABLE
+  void addBuiltinModule(Module::Reader module, kj::StaticArrayPtr<const char> source) {
+    addBuiltinModule(
+        module.getName(), source, module.getType(), module.getCompileCache().asBytes());
+  }
+
+  void addBuiltinModule(Module::Reader module, StaticExternalStringSource source) {
+    addBuiltinModule(
+        module.getName(), kj::mv(source), module.getType(), module.getCompileCache().asBytes());
+  }
+
+  // Registers a compiled-in bundle without copying its static data.
+  void addBuiltinBundle(
+      const capnp::_::ConstStruct<Bundle>& bundle, kj::Maybe<Type> maybeFilter = kj::none) {
+    for (auto module: bundle.get().getModules()) {
+      if (module.getType() != maybeFilter.orDefault(module.getType())) continue;
+      if (module.which() == Module::SRC) {
+        // ConstStruct points into the compiled-in Cap'n Proto constant.
+        auto source = module.getSrc().asChars();
+        addBuiltinModule(module.getName(),
+            kj::StaticArrayPtr<const char>(source.begin(), source.size()), module.getType(),
+            module.getCompileCache().asBytes());
+      } else {
+        addBuiltinNonSourceModule(module, nullptr);
       }
     }
-    // TODO: asChars() might be wrong for wide characters
-    addBuiltinModule(module.getName(), module.getSrc().asChars(), module.getType(),
-        module.getCompileCache().asBytes());
   }
 
-  void addBuiltinBundle(Bundle::Reader bundle, kj::Maybe<Type> maybeFilter = kj::none) {
-    for (auto module: bundle.getModules()) {
-      if (module.getType() == maybeFilter.orDefault(module.getType())) addBuiltinModule(module);
+  // Registers the bundle owned by `owner`. Sources are not copied: each one shares ownership of
+  // `owner` with the V8 external strings created from it, and non-source modules retain `owner`
+  // until they are instantiated.
+  template <BundleOwner Owner>
+  void addBuiltinBundle(const kj::Arc<Owner>& owner, kj::Maybe<Type> maybeFilter = kj::none) {
+    for (auto module: owner->getReader().getModules()) {
+      if (module.getType() != maybeFilter.orDefault(module.getType())) continue;
+      if (module.which() == Module::SRC) {
+        addBuiltinModule(module.getName(),
+            kj::arc<OwnedAscii>(module.getSrc().asChars().attach(owner.addRef())), module.getType(),
+            module.getCompileCache().asBytes());
+      } else {
+        addBuiltinNonSourceModule(module, owner.addRef());
+      }
     }
   }
 
+  // Passes the modules of a compiled-in bundle that match `filter` to `addModule`. The modules
+  // point into the static Cap'n Proto constant.
   template <typename Filter, typename AddModule>
-  void addBuiltinBundleFiltered(Bundle::Reader bundle, Filter filter, AddModule addModule) {
-    for (auto module: bundle.getModules()) {
+  void addBuiltinBundleFiltered(
+      const capnp::_::ConstStruct<Bundle>& bundle, Filter filter, AddModule addModule) {
+    for (auto module: bundle.get().getModules()) {
       if (filter(module)) {
         addModule(module);
       }
@@ -387,11 +394,17 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   // Register new module accessible by a given importPath. The module is instantiated
   // after first resolve attempt within application has failed, i.e. it is possible for
   // application to override the module.
-  // sourceCode has to exist while this ModuleRegistry exists.
+  // sourceCode must have static storage duration; V8 strings can outlive this ModuleRegistry.
   // The expectation is for this method to be called during the assembly of worker global context
   // after registering all user modules.
+  //
+  // This registry passes builtin source bytes to V8 as a one-byte (Latin-1) string without
+  // transcoding, here and in the Arc<OwnedAscii> overload below. Source is treated as UTF-8
+  // everywhere else, so any non-ASCII character in it is misdecoded; for example, UTF-8 "é"
+  // (c3 a9) reads as "Ã©". Builtin sources should therefore be ASCII. The new module registry
+  // (modules-new.h) transcodes UTF-8 source and does not have this limitation.
   void addBuiltinModule(kj::StringPtr specifier,
-      kj::ArrayPtr<const char> sourceCode,
+      kj::StaticArrayPtr<const char> sourceCode,
       Type type = Type::BUILTIN,
       kj::ArrayPtr<const kj::byte> compileCache = {}) {
     KJ_ASSERT(type != Type::BUNDLE);
@@ -401,6 +414,17 @@ class ModuleRegistryImpl final: public ModuleRegistry {
 
   void addBuiltinModule(kj::StringPtr specifier,
       StaticExternalStringSource sourceCode,
+      Type type = Type::BUILTIN,
+      kj::ArrayPtr<const kj::byte> compileCache = {}) {
+    KJ_ASSERT(type != Type::BUNDLE);
+    auto path = kj::Path::parse(specifier);
+    entries.insert(kj::heap<Entry>(path, type, kj::mv(sourceCode), compileCache));
+  }
+
+  // The source shares ownership with V8 strings. Like the overload above, it is decoded as
+  // Latin-1.
+  void addBuiltinModule(kj::StringPtr specifier,
+      kj::Arc<OwnedAscii> sourceCode,
       Type type = Type::BUILTIN,
       kj::ArrayPtr<const kj::byte> compileCache = {}) {
     KJ_ASSERT(type != Type::BUNDLE);
@@ -595,13 +619,74 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   CompilationObserver& observer;
   kj::Maybe<kj::Function<DynamicImportCallback>> dynamicImportHandler;
 
+  // Registers a WASM, DATA, or JSON module. The module is instantiated lazily from `module`, so
+  // `keepAlive` must keep the memory behind `module` alive until then; it may be null when that
+  // memory is static.
+  void addBuiltinNonSourceModule(Module::Reader module, kj::Arc<kj::AtomicRefcounted> keepAlive) {
+    auto specifier = module.getName();
+    switch (module.which()) {
+      case Module::WASM:
+        // The body of this callback is copied from `compileWasmGlobal` in
+        // src/workerd/server/workerd-api.c++.
+        addBuiltinModule(specifier,
+            [keepAlive = kj::mv(keepAlive), specifier, module, this](
+                Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
+          // Wasm compilation requires code-generation permission. The scope
+          // restores the prior setting on exit: builtin modules resolve
+          // lazily, potentially inside a window where eval is already
+          // permitted, and that permission must survive the compilation.
+          Lock::AllowEvalScope allowEvalScope(lock, true);
+
+          // Allow Wasm compilation to spawn a background thread for tier-up, i.e.
+          // recompiling Wasm with optimizations in the background. Otherwise Wasm startup
+          // is way too slow. Until tier-up finishes, requests will be handled using
+          // Liftoff-generated code, which compiles fast but runs slower.
+          AllowV8BackgroundThreadsScope scope;
+          auto wasmModule =
+              jsg::compileWasmModule(lock, module.getWasm().asBytes(), this->observer);
+          auto moduleInfo = jsg::ModuleRegistry::ModuleInfo(
+              lock, specifier, kj::none, jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
+          // Uncomment iff we want to permit source phase imports for builtin Wasm modules
+          // moduleInfo.setModuleSourceObject(lock, wasmModule.template As<v8::Object>());
+          return moduleInfo;
+        },
+            module.getType());
+        return;
+      case Module::DATA:
+        addBuiltinModule(specifier,
+            [keepAlive = kj::mv(keepAlive), specifier, module](
+                Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
+          v8::Local<v8::ArrayBuffer> data =
+              lock.wrapBytes(kj::heapArray(module.getData().asBytes()));
+          return jsg::ModuleRegistry::ModuleInfo(
+              lock, specifier, kj::none, jsg::ModuleRegistry::DataModuleInfo(lock, data));
+        },
+            module.getType());
+        return;
+      case Module::JSON:
+        addBuiltinModule(specifier,
+            [keepAlive = kj::mv(keepAlive), specifier, module](
+                Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
+          auto data =
+              jsg::check(v8::JSON::Parse(lock.v8Context(), lock.wrapString(module.getJson())));
+          return jsg::ModuleRegistry::ModuleInfo(
+              lock, specifier, kj::none, jsg::ModuleRegistry::JsonModuleInfo(lock, data));
+        },
+            module.getType());
+        return;
+      case Module::SRC:
+        KJ_UNREACHABLE
+    }
+  }
+
   // When we build a bundle containing modules, we must build a table of modules to resolve imports.
   //
   // Because of the design of V8's resolver callback, we end up needing a table with two indexes:
   // we need to be able to search it by path (filename) as well as search for a specific module
   // object by identity. We use a kj::Table!
   struct Entry {
-    using Info = kj::OneOf<ModuleInfo, StaticExternalStringSource, ModuleCallback>;
+    using Info =
+        kj::OneOf<ModuleInfo, StaticExternalStringSource, kj::Arc<OwnedAscii>, ModuleCallback>;
 
     struct Key {
       const kj::Path& specifier;
@@ -624,7 +709,8 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     // Either instantiated module or module source code.
     Info info;
 
-    // Optional compileCache.
+    // Optional compileCache. Used only while compiling `info` from source, and may point into
+    // memory kept alive by that source.
     kj::ArrayPtr<const kj::byte> compileCache;
 
     Entry(const kj::Path& specifier, Type type, ModuleInfo info)
@@ -634,7 +720,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
 
     Entry(const kj::Path& specifier,
         Type type,
-        kj::ArrayPtr<const char> src,
+        kj::StaticArrayPtr<const char> src,
         kj::ArrayPtr<const kj::byte> compileCache)
         : specifier(specifier.clone()),
           type(type),
@@ -655,6 +741,15 @@ class ModuleRegistryImpl final: public ModuleRegistry {
           type(type),
           info(kj::mv(factory)) {}
 
+    Entry(const kj::Path& specifier,
+        Type type,
+        kj::Arc<OwnedAscii> src,
+        kj::ArrayPtr<const kj::byte> compileCache)
+        : specifier(specifier.clone()),
+          type(type),
+          info(kj::mv(src)),
+          compileCache(compileCache) {}
+
     Entry(Entry&&) = default;
     Entry& operator=(Entry&&) = default;
 
@@ -670,6 +765,12 @@ class ModuleRegistryImpl final: public ModuleRegistry {
         KJ_CASE_ONEOF(src, StaticExternalStringSource) {
           info = ModuleInfo(js, specifier.toString(), src, compileCache,
               ModuleInfoCompileOption::BUILTIN, observer);
+          return info.tryGet<ModuleInfo>();
+        }
+        KJ_CASE_ONEOF(src, kj::Arc<OwnedAscii>) {
+          info = ModuleInfo(js, specifier.toString(), src.addRef(), compileCache, observer);
+          // `compileCache` may point into memory that only the replaced source kept alive.
+          compileCache = nullptr;
           return info.tryGet<ModuleInfo>();
         }
         KJ_CASE_ONEOF(src, ModuleCallback) {

@@ -351,7 +351,7 @@ TestFixture::TestFixture(SetupParams&& params)
       isolateGroup(jsg::newIsolateGroup()),
       api(kj::heap<server::WorkerdApi>(testV8System,
           params.featureFlags.orDefault(CompatibilityFlags::Reader()),
-          capnp::List<server::config::Extension>::Reader{},
+          kj::arc<server::ExtensionModules>(),
           kj::rc<MockIsolateLimitEnforcer>()->getCreateParams(),
           isolateGroup,
           kj::mv(params.jsgIsolateObserver).orDefault(kj::atomicRefcounted<JsgIsolateObserver>()),

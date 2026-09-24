@@ -86,20 +86,16 @@ constexpr bool isNodeConsoleModule(kj::StringPtr name) {
 template <class Registry>
 void addNodeJsCompatModule(
     Registry& registry, jsg::Module::Reader module, const ModuleSource* moduleSource) {
-  if (moduleSource != nullptr) {
-    if constexpr (requires {
-                    registry.addBuiltinModule(module.getName(),
-                        moduleSource->get(module.getSrc().asChars()), module.getType(),
-                        module.getCompileCache().asBytes());
-                  }) {
-      if (module.which() == jsg::Module::SRC) {
-        registry.addBuiltinModule(module.getName(), moduleSource->get(module.getSrc().asChars()),
-            module.getType(), module.getCompileCache().asBytes());
-        return;
-      }
-    }
+  if (module.which() != jsg::Module::SRC) {
+    registry.addBuiltinModule(module);
+  } else if (moduleSource != nullptr) {
+    registry.addBuiltinModule(module, moduleSource->get(module.getSrc().asChars()));
+  } else {
+    // These modules come from the compiled-in NODE_BUNDLE.
+    auto source = module.getSrc().asChars();
+    registry.addBuiltinModule(
+        module, kj::StaticArrayPtr<const char>(source.begin(), source.size()));
   }
-  registry.addBuiltinModule(module);
 }
 
 template <class Registry>
@@ -397,7 +393,8 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
         KJ_DASSERT(module.which() == workerd::jsg::Module::SRC);
         auto specifier = KJ_ASSERT_NONNULL(jsg::Url::tryParse(module.getName()));
         if (moduleSource == nullptr) {
-          builder.addEsm(specifier, module.getSrc().asChars());
+          auto source = module.getSrc().asChars();
+          builder.addEsm(specifier, kj::StaticArrayPtr<const char>(source.begin(), source.size()));
         } else {
           builder.addEsm(specifier, moduleSource->get(module.getSrc().asChars()));
         }
