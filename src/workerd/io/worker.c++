@@ -1130,7 +1130,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       traceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()),
       userTraceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()) {
   api->setIsolateObserver(*metrics);
-  metrics->created();
+  metrics->created(getUuid());
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     auto lock = api->lock(stackScope);
