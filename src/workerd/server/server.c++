@@ -7586,10 +7586,10 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
                 // Workflow actors must not be evicted mid-run, and their state is SQL-backed.
                 .isEvictable = false,
                 .enableSql = true,
-                .containerOptions = kj::none,
                 // Marks this as a synthetic Workflow namespace so later passes recognize it and
                 // route its storage to the bindingService Worker rather than this Worker.
-                .isWorkflow = true});
+                .isWorkflow = true,
+                .containerOptions = kj::none});
         }
       }
 
