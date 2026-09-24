@@ -269,7 +269,9 @@ async function teeWithReleasedPartialRead() {
 }
 
 // The released bytes reach the branch's next pending read(view) ahead of
-// the next chunk; the sibling is unaffected (parity).
+// the next chunk; the sibling is unaffected. DIVERGENCE (ledger #32): the
+// read takes the released bytes and the chunk together under TS (spec);
+// C++ gives it the released bytes alone.
 export const teeReleasedPartialReadByob = {
   async test() {
     const { a, b, controller } = await teeWithReleasedPartialRead();
@@ -277,11 +279,17 @@ export const teeReleasedPartialReadByob = {
     const read = reader.read(new Uint8Array(4));
     controller.enqueue(new Uint8Array([3, 4, 5, 6]));
     controller.close();
-    deepStrictEqual([...(await read).value], [1, 2]);
-    deepStrictEqual(
-      [...(await reader.read(new Uint8Array(4))).value],
-      [3, 4, 5, 6]
-    );
+    const [first, second] = usingTsImpl
+      ? [
+          [1, 2, 3, 4],
+          [5, 6],
+        ]
+      : [
+          [1, 2],
+          [3, 4, 5, 6],
+        ];
+    deepStrictEqual([...(await read).value], first);
+    deepStrictEqual([...(await reader.read(new Uint8Array(4))).value], second);
     deepStrictEqual([...(await drainBytes(b))], [1, 2, 3, 4, 5, 6]);
   },
 };
@@ -359,9 +367,10 @@ export const teeOfBranchWithReleasedPartialRead = {
   },
 };
 
-// A byte stream whose source took byobRequest for a pending read(view),
-// whose reader then released, and which was teed.
-async function teeWithHeldByobRequest() {
+// A byte stream whose source took byobRequest for a pending read(view)
+// (after writing `filled` into it with respond()), whose reader then
+// released, and which was teed.
+async function teeWithHeldByobRequest(filled = []) {
   let controller;
   const rs = new ReadableStream({
     type: 'bytes',
@@ -370,8 +379,12 @@ async function teeWithHeldByobRequest() {
     },
   });
   const reader = rs.getReader({ mode: 'byob' });
-  const read = reader.read(new Uint8Array(4));
+  const read = reader.read(new Uint8Array(4), { min: 4 });
   await scheduler.wait(5);
+  if (filled.length > 0) {
+    controller.byobRequest.view.set(filled);
+    controller.byobRequest.respond(filled.length);
+  }
   const request = controller.byobRequest;
   reader.releaseLock();
   await rejectionOf(read);
@@ -381,58 +394,58 @@ async function teeWithHeldByobRequest() {
 
 const INVALIDATED = {
   name: 'TypeError',
-  message: 'This BYOB request has been invalidated',
+  message: usingTsImpl
+    ? 'This BYOB request has been invalidated'
+    : 'This ReadableStreamBYOBRequest has been invalidated.',
 };
 
-// DIVERGENCE: a byobRequest held across tee(). TypeScript invalidates it
-// (branches share the queue and see no byobRequest); later chunks still
-// reach both branches. C++ keeps it working, as the spec does: the
-// responded byte reaches both branches.
-export const teeInvalidatesHeldByobRequest = {
+// A byobRequest held across tee() keeps working, as the spec has it: the
+// responded byte reaches both branches (parity). Ledger #25: C++ leaves
+// the request's view attached (zero-length) and then throws on the
+// source's next enqueue(); TS invalidates it (spec) and delivers the chunk.
+export const teeKeepsHeldByobRequest = {
   async test() {
     const { a, b, controller, request } = await teeWithHeldByobRequest();
+    strictEqual(controller.byobRequest, request);
+    request.view[0] = 7;
+    request.respond(1);
+    if (usingTsImpl) {
+      strictEqual(request.view, null);
+    } else {
+      strictEqual(request.view.byteLength, 0);
+    }
+    const readerA = a.getReader();
+    const readerB = b.getReader();
+    deepStrictEqual([...(await readerA.read()).value], [7]);
+    deepStrictEqual([...(await readerB.read()).value], [7]);
     if (!usingTsImpl) {
-      strictEqual(controller.byobRequest, request);
-      request.view[0] = 7;
-      request.respond(1);
-      deepStrictEqual([...(await a.getReader().read()).value], [7]);
-      deepStrictEqual([...(await b.getReader().read()).value], [7]);
+      throws(() => controller.enqueue(new Uint8Array([8])), {
+        name: 'TypeError',
+        message: 'The byobRequest.view is zero-length or was detached',
+      });
       controller.error(new Error('cleanup'));
       return;
     }
     strictEqual(controller.byobRequest, null);
-    strictEqual(request.view, null);
-    throws(() => request.respond(1), INVALIDATED);
     controller.enqueue(new Uint8Array([8]));
     controller.close();
-    deepStrictEqual([...(await drainBytes(a))], [8]);
-    deepStrictEqual([...(await drainBytes(b))], [8]);
+    deepStrictEqual([...(await drainBytes(a, readerA))], [8]);
+    deepStrictEqual([...(await drainBytes(b, readerB))], [8]);
   },
 };
 
-// DIVERGENCE: once the sibling cancels, the remaining branch's read gets a
-// fresh byobRequest under TypeScript, and the held one stays invalid.
-// C++ keeps exposing the held request, which fills the read (spec).
-export const teeSoleBranchMintsFreshByobRequest = {
+// Once the sibling cancels, the held request still comes first and fills
+// the remaining branch's read (parity, spec).
+export const teeSoleBranchUsesHeldByobRequest = {
   async test() {
     const { a, b, controller, request } = await teeWithHeldByobRequest();
     b.cancel('bye');
     await scheduler.wait(5);
     const reader = a.getReader({ mode: 'byob' });
     const read = reader.read(new Uint8Array(8));
-    const current = controller.byobRequest;
-    if (!usingTsImpl) {
-      strictEqual(current, request);
-      request.view[0] = 7;
-      request.respond(1);
-      deepStrictEqual([...(await read).value], [7]);
-      return;
-    }
-    ok(current !== request);
-    strictEqual(current.view.byteLength, 8);
-    throws(() => request.respond(1), INVALIDATED);
-    current.view[0] = 7;
-    current.respond(1);
+    strictEqual(controller.byobRequest, request);
+    request.view[0] = 7;
+    request.respond(1);
     deepStrictEqual([...(await read).value], [7]);
   },
 };
@@ -477,6 +490,273 @@ export const teeNativeBodyAfterReleaseMidRead = {
         'foobarbaz',
         'foobarbaz',
       ]);
+    }
+  },
+};
+
+// DIVERGENCE (ledger #7, on a tee branch): a fractional element fill under
+// a branch's read(Uint16Array) at close(). TypeScript errors that branch
+// alone, as the spec's per-branch close does: the read rejects with
+// TypeError, and so does closed, while the source's close() succeeds and
+// the sibling receives every byte. C++ ends the branch cleanly without the
+// trailing byte.
+//
+// Two shapes. A read issued after close() (3 bytes enqueued; the first
+// read, issued before or after the enqueue, takes the whole element, and
+// the next meets the trailing byte at the close). And a read still pending
+// at close() with a fractional fill: 1 byte under the default min, or 3
+// bytes under { min: 2 }.
+export const teeBranchFractionalCloseErrorsBranch = {
+  async test() {
+    const expected = 'Insufficient bytes to fill elements in the given view';
+    const makeTee = () => {
+      let controller;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        start(c) {
+          controller = c;
+        },
+      });
+      return [controller, ...rs.tee()];
+    };
+
+    for (const readBeforeEnqueue of [true, false]) {
+      const [controller, a, b] = makeTee();
+      const reader = a.getReader({ mode: 'byob' });
+      const first = readBeforeEnqueue ? reader.read(new Uint16Array(4)) : null;
+      await scheduler.wait(5);
+      controller.enqueue(new Uint8Array([1, 2, 3]));
+      controller.close();
+      const r1 = await (first ?? reader.read(new Uint16Array(4)));
+      deepStrictEqual([...new Uint8Array(r1.value.buffer, 0, 2)], [1, 2]);
+      strictEqual(r1.value.length, 1);
+      const r2 = reader.read(new Uint16Array(4));
+      if (usingTsImpl) {
+        strictEqual((await rejectionOf(r2)).message, expected);
+        strictEqual((await rejectionOf(reader.closed)).message, expected);
+      } else {
+        const r = await r2;
+        strictEqual(r.value.byteLength, 0);
+        strictEqual(await reader.closed, undefined);
+      }
+      deepStrictEqual([...(await drainBytes(b))], [1, 2, 3]);
+    }
+
+    for (const [bytes, min] of [
+      [[1], undefined],
+      [[1, 2, 3], 2],
+    ]) {
+      const [controller, a, b] = makeTee();
+      const reader = a.getReader({ mode: 'byob' });
+      const read = reader.read(new Uint16Array(4), min ? { min } : undefined);
+      await scheduler.wait(5);
+      controller.enqueue(new Uint8Array(bytes));
+      controller.close();
+      if (usingTsImpl) {
+        strictEqual((await rejectionOf(read)).message, expected);
+        strictEqual((await rejectionOf(reader.closed)).message, expected);
+      } else {
+        const r = await read;
+        strictEqual(r.done, false);
+        // The whole elements only.
+        strictEqual(r.value.length, bytes.length >> 1);
+        strictEqual(await reader.closed, undefined);
+      }
+      deepStrictEqual([...(await drainBytes(b))], bytes);
+    }
+  },
+};
+
+// DIVERGENCE (ledger #7, on the sole remaining tee branch): its sibling
+// cancelled, the branch errors on a fractional fill at close(). The source
+// requested close, and the spec never forwards a branch's error to it: its
+// cancel() never runs, and the sibling's cancel() resolves undefined as the
+// source ends. C++ never errors the branch; the source ends the same way.
+// Both shapes of teeBranchFractionalCloseErrorsBranch.
+export const teeSoleBranchFractionalCloseSkipsSourceCancel = {
+  async test() {
+    const expected = 'Insufficient bytes to fill elements in the given view';
+    for (const pendingAtClose of [true, false]) {
+      let controller;
+      let cancelled = false;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        start(c) {
+          controller = c;
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+      const [a, b] = rs.tee();
+      const siblingCancel = b.cancel('sibling');
+      const reader = a.getReader({ mode: 'byob' });
+      const first = reader.read(new Uint16Array(4));
+      await scheduler.wait(5);
+      controller.enqueue(new Uint8Array(pendingAtClose ? [1] : [1, 2, 3]));
+      controller.close();
+      const last = pendingAtClose ? first : reader.read(new Uint16Array(4));
+      if (!pendingAtClose) strictEqual((await first).value.length, 1);
+      if (usingTsImpl) {
+        strictEqual((await rejectionOf(last)).message, expected);
+      } else {
+        strictEqual((await last).value.byteLength, 0);
+      }
+      strictEqual(await siblingCancel, undefined);
+      strictEqual(cancelled, false);
+    }
+  },
+};
+
+// Ledger #25: bytes the released read already held. The request, first
+// taken after tee(), is over the rest of the read's buffer; responding
+// delivers the held bytes and the new one together to both branches, and
+// enqueue() instead discards the request and delivers the held bytes
+// ahead of the chunk (spec). C++ drops the held bytes in both cases.
+export const teeHeldByobRequestWithReleasedBytes = {
+  async test() {
+    {
+      const { a, b, controller } = await teeWithHeldByobRequest([1, 2]);
+      const request = controller.byobRequest;
+      strictEqual(request.view.byteLength, 2);
+      request.view[0] = 7;
+      request.respond(1);
+      const expected = usingTsImpl ? [1, 2, 7] : [7];
+      deepStrictEqual([...(await a.getReader().read()).value], expected);
+      deepStrictEqual([...(await b.getReader().read()).value], expected);
+      controller.error(new Error('cleanup'));
+    }
+    {
+      const { a, b, controller, request } = await teeWithHeldByobRequest([
+        1, 2,
+      ]);
+      controller.enqueue(new Uint8Array([9]));
+      strictEqual(request.view, null);
+      strictEqual(controller.byobRequest, null);
+      throws(() => request.respond(1), INVALIDATED);
+      const readerA = a.getReader();
+      const readerB = b.getReader();
+      if (!usingTsImpl) {
+        deepStrictEqual([...(await readerA.read()).value], [9]);
+        deepStrictEqual([...(await readerB.read()).value], [9]);
+        controller.error(new Error('cleanup'));
+        return;
+      }
+      controller.close();
+      deepStrictEqual([...(await drainBytes(a, readerA))], [1, 2, 9]);
+      deepStrictEqual([...(await drainBytes(b, readerB))], [1, 2, 9]);
+    }
+  },
+};
+
+// Ledger #32 through a held request: enqueue() retires it, and a branch's
+// pending read(view) takes the released read's bytes and the chunk
+// together under TS (spec). C++ has dropped those bytes (ledger #25).
+export const teeHeldByobRequestEnqueueFillsByobRead = {
+  async test() {
+    const { a, b, controller } = await teeWithHeldByobRequest([1, 2]);
+    const read = a.getReader({ mode: 'byob' }).read(new Uint8Array(8));
+    await scheduler.wait(5);
+    controller.enqueue(new Uint8Array([9]));
+    deepStrictEqual([...(await read).value], usingTsImpl ? [1, 2, 9] : [9]);
+    const expectedB = usingTsImpl ? [1, 2] : [9];
+    deepStrictEqual([...(await b.getReader().read()).value], expectedB);
+    controller.error(new Error('cleanup'));
+  },
+};
+
+// The held request survives a sibling's cancel and a further tee() of the
+// remaining branch, and fills a BYOB read on a new branch (parity; the
+// held bytes are ledger #25, as above).
+export const teeHeldByobRequestAcrossNestedTee = {
+  async test() {
+    const { a, b, controller, request } = await teeWithHeldByobRequest([1, 2]);
+    b.cancel('bye');
+    await scheduler.wait(5);
+    const [a1, a2] = a.tee();
+    strictEqual(controller.byobRequest, request);
+    const read = a1.getReader({ mode: 'byob' }).read(new Uint8Array(8));
+    await scheduler.wait(5);
+    request.view[0] = 7;
+    request.respond(1);
+    const expected = usingTsImpl ? [1, 2, 7] : [7];
+    deepStrictEqual([...(await read).value], expected);
+    deepStrictEqual([...(await a2.getReader().read()).value], expected);
+  },
+};
+
+// respondWithNewView() on a held request, and a request held for a
+// released auto-allocated default read, work across tee() (parity).
+export const teeHeldByobRequestNewViewAndAutoAllocate = {
+  async test() {
+    {
+      const { a, b, request } = await teeWithHeldByobRequest();
+      const view = request.view;
+      view.set([3, 4]);
+      request.respondWithNewView(
+        new Uint8Array(view.buffer, view.byteOffset, 2)
+      );
+      deepStrictEqual([...(await a.getReader().read()).value], [3, 4]);
+      deepStrictEqual([...(await b.getReader().read()).value], [3, 4]);
+    }
+    {
+      let controller;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        autoAllocateChunkSize: 8,
+        start(c) {
+          controller = c;
+        },
+      });
+      const reader = rs.getReader();
+      const read = reader.read();
+      await scheduler.wait(5);
+      const request = controller.byobRequest;
+      reader.releaseLock();
+      await rejectionOf(read);
+      const [a, b] = rs.tee();
+      strictEqual(controller.byobRequest, request);
+      strictEqual(request.view.byteLength, 8);
+      request.view[0] = 5;
+      request.respond(1);
+      deepStrictEqual([...(await a.getReader().read()).value], [5]);
+      deepStrictEqual([...(await b.getReader().read()).value], [5]);
+    }
+  },
+};
+
+// After close() the held request takes only respond(0), which retires it
+// (parity, spec). Ledger #25: error() invalidates it under TS (spec); C++
+// leaves its view attached and rejects respond() as if closed.
+export const teeHeldByobRequestAfterCloseOrError = {
+  async test() {
+    {
+      const { a, controller, request } = await teeWithHeldByobRequest();
+      controller.close();
+      strictEqual(controller.byobRequest, request);
+      throws(() => request.respond(1), {
+        name: 'TypeError',
+        message: usingTsImpl
+          ? 'bytesWritten must be zero after the stream is closed'
+          : 'The bytesWritten must be zero after the stream is closed.',
+      });
+      request.respond(0);
+      strictEqual(controller.byobRequest, null);
+      strictEqual((await a.getReader().read()).done, true);
+    }
+    {
+      const { controller, request } = await teeWithHeldByobRequest();
+      controller.error(new Error('boom'));
+      if (usingTsImpl) {
+        strictEqual(request.view, null);
+        throws(() => request.respond(1), INVALIDATED);
+      } else {
+        strictEqual(request.view.byteLength, 4);
+        throws(() => request.respond(1), {
+          name: 'TypeError',
+          message: 'The bytesWritten must be zero after the stream is closed.',
+        });
+      }
     }
   },
 };

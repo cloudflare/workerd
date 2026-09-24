@@ -210,13 +210,19 @@ fn errno_exception_type(errno: i32) -> KjExceptionType {
     }
 }
 
+/// The `kj::Exception` description.
+impl std::fmt::Display for KjIoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.op {
+            Some(op) => write!(f, "{op}: {}", self.inner),
+            None => write!(f, "{}", self.inner),
+        }
+    }
+}
+
 impl From<KjIoError> for KjError {
     fn from(error: KjIoError) -> Self {
-        let description = match error.op {
-            Some(op) => format!("{op}: {}", error.inner),
-            None => error.inner.to_string(),
-        };
-        Self::new(exception_type(&error.inner), description)
+        Self::new(exception_type(&error.inner), error.to_string())
     }
 }
 

@@ -65,6 +65,7 @@ export {
   byobRequestOnDefaultRead,
   enqueueDiscardsByobRequest,
   closeWithPartiallyFilledView,
+  closeWithPartiallyFilledViewDetached,
   readAfterCloseReturnsEmptyView,
   readAfterCancelReturnsEmptyView,
   readDetachesCallerBuffer,
@@ -84,6 +85,7 @@ export {
   byobMixedViewTypes,
   byobViewOffset,
   byobAutoAllocateSizes,
+  autoAllocateDefaultReadTakesQueuedChunk,
   byobPartialRespondMisalignsFillOffset,
   readableStreamBytesMismatchedSizes,
   readableStreamBytesMismatchedViewTypes,
@@ -145,6 +147,7 @@ export {
   relockTwoPendingRespond,
   relockAutoAllocateTwoPendingRespond,
   relockPartialHeadThenEnqueue,
+  relockPartialHeadThenEnqueueShapes,
   relockRespondOverflowSecondView,
 } from 'release-relock';
 
@@ -174,9 +177,16 @@ export {
   teeReleasedPartialReadPiped,
   teeAfterReleasedPartialRead,
   teeOfBranchWithReleasedPartialRead,
-  teeInvalidatesHeldByobRequest,
-  teeSoleBranchMintsFreshByobRequest,
+  teeKeepsHeldByobRequest,
+  teeSoleBranchUsesHeldByobRequest,
+  teeHeldByobRequestWithReleasedBytes,
+  teeHeldByobRequestAfterCloseOrError,
+  teeHeldByobRequestAcrossNestedTee,
+  teeHeldByobRequestEnqueueFillsByobRead,
+  teeHeldByobRequestNewViewAndAutoAllocate,
   teeNativeBodyAfterReleaseMidRead,
+  teeBranchFractionalCloseErrorsBranch,
+  teeSoleBranchFractionalCloseSkipsSourceCancel,
 } from 'tee';
 
 export {
@@ -186,6 +196,9 @@ export {
   respondWithNewViewForeignBuffer,
   enqueueResizableBuffer,
   readResizableView,
+  resizableByobRequestCannotShrink,
+  resizableBuffersDeliveredFixedLength,
+  sharedBuffersRejected,
   nonDetachableBuffersRejected,
 } from 'buffer-lifecycle';
 

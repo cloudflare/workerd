@@ -68,6 +68,9 @@ class SqliteObserver {
 // all of its features.
 class SqliteDatabase {
  public:
+  // Allow 34 bytes of padding for V8 serialization overhead beyond the 8 MiB row limit.
+  static constexpr int MAX_ROW_LENGTH = 8 * 1024 * 1024 + 34;
+
   class Vfs;
   class Query;
   class Statement;

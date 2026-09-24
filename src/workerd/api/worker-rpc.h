@@ -164,6 +164,7 @@ class JsRpcCallPlan {
 
   JsRpcCallPlan(kj::Own<capnp::MallocMessageBuilder> message,
       kj::Array<const byte> serializedData,
+      size_t serializedDataCapacity,
       RpcSerializerExternalHandler::Replayability serializerReplayability);
 
   // True only for method calls whose arguments are absent or contain no externals and no
@@ -173,7 +174,7 @@ class JsRpcCallPlan {
   }
 
   size_t getReplayMemoryBytes() const {
-    return serializedData.size();
+    return serializedDataCapacity;
   }
 
   void copyTo(rpc::JsRpcTarget::CallParams::Builder builder);
@@ -185,6 +186,7 @@ class JsRpcCallPlan {
 
   kj::Own<capnp::MallocMessageBuilder> message;
   kj::Array<const byte> serializedData;
+  size_t serializedDataCapacity;
   bool replayable;
 };
 

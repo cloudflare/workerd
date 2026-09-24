@@ -531,7 +531,10 @@ type ExportedHandlerTailStreamHandler<Env = unknown, Props = unknown> = (
   event: TailStream.TailEvent<TailStream.Onset>,
   env: Env,
   ctx: ExecutionContext<Props>,
-) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
+) =>
+  | TailStream.TailEventHandlerType
+  | undefined
+  | Promise<TailStream.TailEventHandlerType | undefined>;
 type ExportedHandlerScheduledHandler<Env = unknown, Props = unknown> = (
   controller: ScheduledController,
   env: Env,
@@ -1726,7 +1729,7 @@ interface MessageEventInit {
   data?: any;
   origin?: string;
   lastEventId?: string;
-  source?: MessagePort;
+  source?: MessagePort | null;
   ports?: MessagePort[];
 }
 /**
@@ -11852,9 +11855,22 @@ type AiModelListType = Record<string, any>;
 type AiAsyncBatchResponse = {
   request_id: string;
 };
+type AiWebSearchRequest = {
+  /** AI Gateway configuration used for this request. */
+  gatewayId: string;
+  /** Search query. */
+  query: string;
+  /** Maximum number of results. Defaults to 10 and is capped at 20. */
+  limit?: number;
+  /** Optional BYOK web-search provider configured on the gateway. */
+  provider?: string;
+  /** Optional BYOK key alias. Defaults to `default`. */
+  byokAlias?: string;
+};
 declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
+  websearch(request: AiWebSearchRequest): Promise<Response>;
   /**
    * @deprecated Use the standalone `ai_search_namespaces` or `ai_search` Workers bindings instead.
    * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
@@ -15913,7 +15929,8 @@ declare namespace CloudflareWorkersModule {
       event: TailStream.TailEvent<TailStream.Onset>,
     ):
       | TailStream.TailEventHandlerType
-      | Promise<TailStream.TailEventHandlerType>;
+      | undefined
+      | Promise<TailStream.TailEventHandlerType | undefined>;
     test?(controller: TestController): void | Promise<void>;
     trace?(traces: TraceItem[]): void | Promise<void>;
   }

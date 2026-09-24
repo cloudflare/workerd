@@ -1403,7 +1403,7 @@ void SqliteDatabase::setupSecurity(sqlite3* db) {
   // 2. Reduce limits
   // We use most of the suggested limits from sqlite.org/security.html. Note that sqlite3_limit()
   // does NOT return an error code; it returns the old limit.
-  sqlite3_limit(db, SQLITE_LIMIT_LENGTH, 4 * 1024 * 1024);
+  sqlite3_limit(db, SQLITE_LIMIT_LENGTH, MAX_ROW_LENGTH);
   sqlite3_limit(db, SQLITE_LIMIT_SQL_LENGTH, 100000);
   sqlite3_limit(db, SQLITE_LIMIT_COLUMN, 100);
   sqlite3_limit(db, SQLITE_LIMIT_EXPR_DEPTH, 100);
