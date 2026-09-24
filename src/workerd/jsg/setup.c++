@@ -166,6 +166,15 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // Enable source phase imports for WebAssembly modules
   v8::V8::SetFlagsFromString("--js-source-phase-imports");
 
+  // Custom startup snapshots: keep the process-shared read-only heap sealed for serializer-enabled
+  // isolates. By default V8 leaves the read-only space writable for a SnapshotCreator isolate and
+  // CreateBlob() promotes its AccessorInfo/InterceptorInfo objects (JSG getter/setter/interceptor
+  // callback addresses) into the read-only space, which is shared by every isolate in the
+  // IsolateGroup. The next zygote in the same process then has to serialize that same read-only
+  // space and encode those foreign callback addresses against its own external_references table,
+  // which only holds the callbacks it registered itself -> "Unknown external reference".
+  v8::V8::SetFlagsFromString("--no-extensible-ro-snapshot");
+
 #ifdef __APPLE__
   // On macOS arm64, we find that V8 can be collecting pages that contain compiled code when
   // handling requests in short succession. There are some specific differences for macOS arm64
