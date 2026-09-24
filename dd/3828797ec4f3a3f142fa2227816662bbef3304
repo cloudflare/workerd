@@ -1,0 +1,25 @@
+src/workerd/server/schema-file.c++
+  s_dadaf0660bfcbe::t_2903ecd60dedf9 1-22
+src/workerd/server/schema-file.h
+  s_dadaf0660bfcbe::t_0b12f28783d716 1-186
+src/workerd/server/BUILD.bazel
+  s_dadaf0660bfcbe::t_6e7f84511a6bb3 72,113-127
+src/workerd/server/workerd.c++
+  s_dadaf0660bfcbe::t_edc726bb28111c 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dd3828797ec4f3a3f142fa2227816662bbef3304",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
