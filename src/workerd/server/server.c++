@@ -3590,7 +3590,7 @@ class Server::WorkerService final: public Service,
         selfTokensArePersistent);
     auto& durable = KJ_ASSERT_NONNULL(config.tryGet<Durable>());
     actorNamespacesByUniqueKey.insert(durable.uniqueKey, ns.get());
-    workflowActorStorageSources.insert(kj::str(durable.uniqueKey), &storageService);
+    workflowActorStorageSources.insert(kj::str(durable.uniqueKey), kj::addRef(storageService));
     actorNamespaces.insert(durable.uniqueKey, kj::mv(ns));
   }
 
@@ -3781,6 +3781,7 @@ class Server::WorkerService final: public Service,
 
     // Need to tear down all actors before tearing down `ioChannels.actorStorage`.
     actorNamespaces.clear();
+    workflowActorStorageSources.clear();
 
     // OK, now we can unlink.
     ioChannels = {};
@@ -4361,7 +4362,7 @@ class Server::WorkerService final: public Service,
   // For each Workflow-backing namespace (keyed by its unique key), the Worker whose local-disk
   // storage backs it -- i.e. the Workflow's `bindingService` Worker. Resolved into an actual
   // storage link in `linkActorNamespaces()`.
-  kj::HashMap<kj::String, WorkerService*> workflowActorStorageSources;
+  kj::HashMap<kj::String, kj::Own<WorkerService>> workflowActorStorageSources;
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
   DeleteActorsCallback deleteActorsCallback;
