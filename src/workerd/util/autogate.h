@@ -94,10 +94,11 @@ namespace workerd::util {
      prerequisite. */                                                                              \
   V(DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS)                                                   \
   /* Extends observe-only retry-token claiming to Durable Object JSRPC calls: senders attach       \
-     tokens and receivers claim them. Requires DURABLE_OBJECT_RETRIES_FETCH. A JSRPC retry        \
-     request gate, the counterpart of DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS, is added with  \
-     sender replay. */                                                                             \
+     tokens and receivers claim them. Requires DURABLE_OBJECT_RETRIES_FETCH. */                    \
   V(DURABLE_OBJECT_RETRIES_JSRPC)                                                                  \
+  /* Enables Durable Object JSRPC retry requests. Requires both fetch retry gates and the JSRPC   \
+     observe gate. */                                                                               \
+  V(DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS)                                                   \
   /* When enabled, the native `node-internal:url` module is provided by the Rust                   \
      implementation (api::node UrlUtil ported to src/rust/api) instead of the                      \
      C++ implementation. The C++ implementation is retained for rollback.*/                        \

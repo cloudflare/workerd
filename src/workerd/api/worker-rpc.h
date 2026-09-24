@@ -177,6 +177,15 @@ class JsRpcCallPlan {
     return serializedDataCapacity;
   }
 
+  size_t getReplayReservationBytes() {
+    size_t result = serializedData.size();
+    for (const auto& segment: message->getSegmentsForOutput()) {
+      result += kj::max(segment.size(), static_cast<size_t>(METADATA_SEGMENT_WORDS)) *
+          sizeof(capnp::word);
+    }
+    return result;
+  }
+
   void copyTo(rpc::JsRpcTarget::CallParams::Builder builder);
 
  private:
@@ -320,6 +329,10 @@ class JsRpcClientProvider: public jsg::Object {
     return getActorTargetRetryability().orDefault(ActorCallTargetRetryable::NO).toBool();
   }
 
+  virtual void onActorCallRetry() {
+    KJ_FAIL_REQUIRE("actor call retry requested from an unsupported RPC target");
+  }
+
   // Get a capnp client that can be used to dispatch one call.
   virtual ClientForOneCall getClientForOneCall(
       jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) = 0;
@@ -330,6 +343,8 @@ class JsRpcClientProvider: public jsg::Object {
 };
 
 class JsRpcProperty;
+class JsRpcCallRetryState;
+class JsRpcCallAttemptObserver;
 
 class JsRpcReplayMemoryTracker final: public kj::Refcounted {
  public:
@@ -348,6 +363,9 @@ class JsRpcReplayMemoryTracker final: public kj::Refcounted {
 // but rather our own custom thenable, so that we can support pipelining on it.
 class JsRpcPromise: public JsRpcClientProvider {
  public:
+  using PendingPipeline =
+      kj::OneOf<IoOwn<rpc::JsRpcTarget::CallResults::Pipeline>, IoOwn<JsRpcCallRetryState>>;
+
   // A weak reference to this JsRpcPromise. Unlike the usual WeakRef pattern, though, this ref is
   // allocated before the promise itself is actually created, and filled in later. This is needed
   // to solve cyclic initialization challenges in `callImpl()`.
@@ -365,13 +383,15 @@ class JsRpcPromise: public JsRpcClientProvider {
 
   JsRpcPromise(jsg::JsRef<jsg::JsPromise> inner,
       kj::Own<WeakRef> weakRef,
-      IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline,
+      PendingPipeline pipeline,
       kj::Maybe<TraceContextParent> originatingCall,
       kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability,
-      kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker);
+      kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker,
+      kj::Maybe<IoOwn<JsRpcCallAttemptObserver>> attemptObserver);
   ~JsRpcPromise() noexcept(false);
 
   void resolve(jsg::Lock& js, jsg::JsValue result);
+  void setOriginatingCall(kj::Maybe<TraceContextParent> value);
   void dispose(jsg::Lock& js);
 
   ClientForOneCall getClientForOneCall(
@@ -425,9 +445,10 @@ class JsRpcPromise: public JsRpcClientProvider {
   kj::Maybe<IoOwn<TraceContextParent>> originatingCall;
   kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability;
   kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker;
+  kj::Maybe<IoOwn<JsRpcCallAttemptObserver>> attemptObserver;
 
   struct Pending {
-    IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline;
+    PendingPipeline pipeline;
   };
   struct Resolved {
     jsg::Value result;
@@ -473,6 +494,9 @@ class JsRpcProperty: public JsRpcClientProvider {
   void appendPath(kj::Vector<kj::StringPtr>& path) override;
   kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() override {
     return parent->getActorTargetRetryability();
+  }
+  void onActorCallRetry() override {
+    parent->onActorCallRetry();
   }
   ClientForOneCall getClientForOneCall(
       jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;
@@ -759,6 +783,13 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
   }
 
   void failed(const kj::Exception& e) override {
+    KJ_IF_SOME(detail, e.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID)) {
+      // Pipelined calls can fail before their parent's retry decision is processed.
+      auto disconnect = KJ_EXCEPTION(DISCONNECTED, "retry claim rejected");
+      disconnect.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray(detail));
+      capFulfiller->reject(kj::mv(disconnect));
+      return;
+    }
     capFulfiller->reject(e.clone());
   }
 
