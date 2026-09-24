@@ -178,7 +178,7 @@ pedantic branches shifting anything the suite pins.
 | `corrupt-input.js` | write-time rejection with "Decompression failed."; both-sides error; iteration rejection; bad magic bytes |
 | `strict-checks.js` | trailing-data write rejection; close-with-no-data rejection; truncated-member close rejection |
 | `chunk-types.js` | BufferSource acceptance incl. offsets; string (#1), SAB (#2), invalid-chunk message+aftermath (#3, #4) |
-| `buffer-lifecycle.js` | snapshot-at-write: post-write mutation/detach/shrink invisible; already-detached no-op; lying metadata getters never consulted |
+| `buffer-lifecycle.js` | snapshot-at-write: post-write mutation/detach/shrink invisible; already-detached no-op; detached/out-of-bounds typed-array and DataView views are no-ops; lying metadata getters never consulted |
 | `byob.js` | BYOB reader fills a 2-byte destination with the gzip magic |
 | `backpressure.js` | eager write settlement without reads; desiredSize accounting (#8) |
 | `propagation.js` | abort rejects pending read (reason per #9), errors both sides; cancel settles parked read (#12); write-after-abort (#10); non-Error reasons (#11); writes after a queued close reject (message per impl) without disturbing the close or output; cancel→writable aftermath (#13) |
