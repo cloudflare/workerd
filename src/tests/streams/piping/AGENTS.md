@@ -40,8 +40,9 @@ ends, preventAbort/preventCancel incl. TRUTHY coercion, dest stays
 usable under preventAbort); option plumbing (getter order
 [preventAbort, preventCancel, preventClose, signal], throwing-getter
 identity with no locks taken, bad-signal TypeError); pipeThrough
-locked-endpoint sync throws; custom error type/instance preservation;
-cancel-propagation through native identity AND JS transforms (source
+locked-endpoint sync throws; a bad destination, an option getter that
+locks it, or a shadowed `locked` fails without locking the source;
+custom error type/instance preservation; cancel-propagation through native identity AND JS transforms (source
 ends CLOSED, all locks release); external close()/abort() on a piped
 (locked) destination rejects while the pipe proceeds; backward write-
 error propagation with hook identity; backpressure through
@@ -75,7 +76,7 @@ the source FIRST, then releasing the write (`pipeStopsPullingWhenDestStalls`).
 | Module | Coverage |
 | --- | --- |
 | `pipe-matrix.js` | migrated pipe-streams-test.js wholesale (35): pipeThrough + pipeTo across JS↔native in all directions, prevent* combos, pre-aborted and mid-read AbortSignals, tee'd pipes, queued-destination close (ledger #1-#4, #13) |
-| `api-surface.js` | brand checks (ledger #5), option getter order, throwing getters, invalid signal, locked pipeThrough endpoints |
+| `api-surface.js` | brand checks (ledger #5), option getter order, throwing getters, invalid signal, locked pipeThrough endpoints, lock safety when validation fails |
 | `abort-signal.js` | the pipe's AbortSignal is an abort algorithm: a synthetic 'abort' event is ignored, a listener's stopImmediatePropagation() cannot block the abort, an abort after the pipe settles does nothing |
 | `error-propagation.js` | forward matrix (starts-errored × prevent* × truthy), hwm-0 dest (ledger #6), custom-error preservation (migrated from streams-error-edge-cases-test.js) |
 | `close-propagation.js` | the WPT-disabled backward territory, bounded: external close/abort on piped dest, write-throw backward propagation, idle dest-controller error and one with a write in flight (ledger #7) |
