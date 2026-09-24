@@ -68,6 +68,21 @@ test('UDP connect() handler reports protocol "udp"', async () => {
   }
 });
 
+test('UDP connect() reports the peer address as remoteAddress', async () => {
+  const port = await workerd.getListenPort('udp');
+  const client = createSocket('udp4');
+  try {
+    await new Promise((resolve) => client.bind(0, '127.0.0.1', resolve));
+    const reply = await sendAndReceive(client, port, Buffer.from('info'));
+    // The listener binds the dual-stack wildcard, so the peer may be reported as a v4-mapped v6
+    // address.
+    const peer = `(?:127\\.0\\.0\\.1|\\[::ffff:127\\.0\\.0\\.1\\]):${client.address().port}`;
+    assert.match(reply.toString(), new RegExp(`^info:${peer}:\\*:${port}$`));
+  } finally {
+    client.close();
+  }
+});
+
 /// macOS limits the size of UDP packets to 9,216 bytes maximum, so this test chooses a value below this.
 test('UDP connect() round-trips a large datagram', async () => {
   const port = await workerd.getListenPort('udp');

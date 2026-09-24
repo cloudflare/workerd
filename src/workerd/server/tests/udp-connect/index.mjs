@@ -28,6 +28,13 @@ export default {
         await writer.write(new Datagram(encoder.encode(status)));
         continue;
       }
+      if (text === 'info') {
+        const { remoteAddress, localAddress } = await socket.opened;
+        await writer.write(
+          new Datagram(encoder.encode(`info:${remoteAddress}:${localAddress}`))
+        );
+        continue;
+      }
       if (first) {
         first = false;
         lingerAfterEof = text === 'linger';
