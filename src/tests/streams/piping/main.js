@@ -70,6 +70,7 @@ export {
   destWriteThrowsMidPipe,
   destWriteThrowsMidPipePreventCancel,
   destControllerErrorsMidPipe,
+  destErroringWaitsForInFlightWrite,
 } from 'close-propagation';
 
 export {
