@@ -9,6 +9,7 @@
 #include <workerd/jsg/exception.h>
 #include <workerd/util/strong-bool.h>
 
+#include <capnp/capability.h>
 #include <kj/async.h>
 #include <kj/debug.h>
 #include <kj/list.h>
@@ -311,6 +312,18 @@ class ActorCacheInterface: public ActorCacheOps {
   virtual kj::Promise<void> waitForBookmark(kj::StringPtr bookmark, SpanParent parentSpan) {
     JSG_FAIL_REQUIRE(
         Error, "This Durable Object's storage back-end does not implement point-in-time recovery.");
+  }
+
+  // Capture storage at `bookmark` (or the current position) as an opaque capability.
+  virtual kj::Promise<capnp::Capability::Client> captureBookmarkSnapshot(
+      kj::Maybe<kj::String> bookmark, SpanParent parentSpan) {
+    JSG_FAIL_REQUIRE(Error, "This Durable Object's storage back-end does not implement snapshots.");
+  }
+
+  // Schedule restoration from an opaque snapshot capability on the next session. Back-ends must
+  // validate the capability before using it.
+  virtual kj::Promise<kj::String> onNextSessionRestore(capnp::Capability::Client bookmarkSnapshot) {
+    JSG_FAIL_REQUIRE(Error, "This Durable Object's storage back-end does not implement snapshots.");
   }
 
   virtual void ensureReplicas() {
