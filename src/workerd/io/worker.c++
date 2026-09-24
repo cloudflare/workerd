@@ -1160,7 +1160,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       traceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()),
       userTraceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()) {
   api->setIsolateObserver(*metrics);
-  metrics->created();
+  metrics->createdWithUuid(getUuid());
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     auto lock = api->lock(stackScope);
@@ -1621,9 +1621,8 @@ kj::Own<const Worker::Isolate::WeakIsolateRef> Worker::Isolate::getWeakRef() con
 }
 
 kj::StringPtr Worker::Isolate::getUuid() const {
-  // As of this writing, getUuid() is only used by actors, for metrics. We don't want to bother
-  // generating it if not used. The call site does not have nor want an isolate lock, so we use a
-  // kj::Lazy to make initialization thread-safe.
+  // The creation observer requests the UUID for every isolate. Other metrics callers can access
+  // it without an isolate lock; kj::Lazy makes initialization and access thread-safe.
   return impl->uuid.get(
       [](kj::SpaceFor<kj::String>& space) { return space.construct(randomUUID(kj::none)); });
 }

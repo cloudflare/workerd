@@ -304,8 +304,14 @@ class IsolateObserver: public kj::AtomicRefcounted {
  public:
   virtual ~IsolateObserver() noexcept(false) {}
 
-  // Called when Worker::Isolate is created.
-  virtual void created() {};
+  // Called when Worker::Isolate is created. createdWithUuid() forwards here by default.
+  virtual void created() {}
+
+  // `isolateUuid` is the isolate's Worker::Isolate::getUuid() value, so that metrics about the same
+  // isolate reported through other channels can be joined.
+  virtual void createdWithUuid(kj::StringPtr isolateUuid) {
+    created();
+  }
 
   // Sizes of the source a Worker::Script was built from. Reported once, when the script is
   // constructed, before parsing begins.
