@@ -96,6 +96,7 @@ export {
   teeCancelReasonComposite,
   teeCancelReverseOrder,
   teePullPerRead,
+  teeBackpressureFollowsSlowestBranch,
 } from 'tee';
 
 export {

@@ -82,6 +82,17 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
   closes the source's stream; `enqueue()` after it throws as ever). C++
   does the same but keeps pulling (readable ledger #20). Suite:
   `gc.js` in the readable and readable-byte suites.
+- Backpressure follows the SLOWEST consumer: `desiredSize` is the
+  high-water mark minus the largest backlog among the cursors. This trades
+  flow for bounded memory: the spec's per-branch queues keep a reading
+  branch flowing but buffer without bound for an idle one, while here a
+  source that enqueues only while `desiredSize > 0` stalls every branch
+  once an idle branch's backlog reaches the high-water mark, until that
+  branch reads or leaves. The pull trigger is unaffected: a pending read
+  on any cursor triggers a pull regardless of `desiredSize` (a `pull()`
+  that itself gates on `desiredSize` stalls the same way). C++ behaves the
+  same. Suite:
+  `teeBackpressureFollowsSlowestBranch` in the readable suite.
 - Nothing walks a tree of streams: closing, cancelling and erroring act on
   cursors and their owners, and no stream retains another.
 
