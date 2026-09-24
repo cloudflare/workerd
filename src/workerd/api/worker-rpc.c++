@@ -2012,6 +2012,10 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
  private:
   virtual void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) = 0;
 
+  // Called after the target is resolved, and so after actor construction, but before the requested
+  // method is looked up.
+  virtual void maybeClaimRetryToken() = 0;
+
   kj::Maybe<kj::String> durableObjectId;
 
   // Function which enters the isolate lock and IoContext and then invokes callImpl(). Created
@@ -2202,6 +2206,9 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
     auto dispatch = [&]() -> kj::Promise<void> {
       auto targetInfo = getTargetInfo(lock, ctx);
+
+      // Must precede tryGetProperty(), which can run user getters and Proxy traps.
+      maybeClaimRetryToken();
 
       // Look up the requested property. If it is unavailable, tryGetProperty() throws an error
       // that is returned to the client.
@@ -2658,6 +2665,9 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
   }
 
   void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) override {}
+
+  // Calls on a returned stub or pipeline are covered by the session's top-level claim.
+  void maybeClaimRetryToken() override {}
 };
 
 // See comment at call site for explanation.
@@ -3014,7 +3024,7 @@ bool RpcSerializerExternalHandler::trySerializeClassInstance(
 
 static void markJsRpcExceptionAsDelivered(IoContext& ioctx, kj::Exception& exception) {
   markExceptionAsDelivered(exception);
-  if (ioctx.getActor() != kj::none) {
+  if (ioctx.getActor() != kj::none && !jsg::isActorPredecessorRejection(exception)) {
     exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
     exception.setDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
   }
@@ -3025,6 +3035,7 @@ static void markJsRpcExceptionAsDelivered(IoContext& ioctx, kj::Exception& excep
 class EntrypointJsRpcTarget final: public JsRpcTargetBase {
  public:
   EntrypointJsRpcTarget(IoContext& ioCtx,
+      kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::StringPtr> entrypointName,
       kj::Maybe<Worker::VersionInfo> versionInfo,
       Frankenvalue props,
@@ -3033,6 +3044,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       bool isDynamicDispatch)
       : JsRpcTargetBase(ioCtx, CantOutliveIncomingRequest()),
         ioCtx(ioCtx),
+        metrics(kj::mv(metrics)),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
         // let's be safe.
         entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })),
@@ -3125,6 +3137,16 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
 
  private:
   IoContext& ioCtx;
+
+  // The session's own observer. IoContext::getMetrics() may refer to a different request to the
+  // same actor.
+  kj::Own<RequestObserver> metrics;
+
+  // The protocol permits one top-level call per session, but this target does not enforce that.
+  // The observer can claim only once, so a rejection is kept to fail any later top-level call too.
+  bool retryTokenClaimAttempted = false;
+  kj::Maybe<kj::Exception> retryClaimRejection;
+
   kj::Maybe<kj::String> entrypointName;
   kj::Maybe<Worker::VersionInfo> versionInfo;
   Frankenvalue props;
@@ -3165,7 +3187,29 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       tracer.setJsRpcInfo(ctx.getInvocationSpanContext(), ctx.now(), methodNameForTrace);
     }
   }
+
+  void maybeClaimRetryToken() override {
+    KJ_IF_SOME(e, retryClaimRejection) {
+      kj::throwFatalException(e.clone());
+    }
+    if (retryTokenClaimAttempted) return;
+    retryTokenClaimAttempted = true;
+    KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { metrics->claimRetryTokenBeforeUserCode(); })) {
+      auto rejection = disconnectRetryClaimRejection(kj::mv(e));
+      retryClaimRejection = rejection.clone();
+      kj::throwFatalException(kj::mv(rejection));
+    }
+  }
 };
+
+kj::Exception disconnectRetryClaimRejection(kj::Exception e) {
+  KJ_IF_SOME(detail, e.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID)) {
+    auto disconnect = KJ_EXCEPTION(DISCONNECTED, "retry claim rejected");
+    disconnect.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray(detail));
+    return disconnect;
+  }
+  return e;
+}
 
 kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
@@ -3176,13 +3220,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     bool isDynamicDispatch) {
   IoContext& ioctx = incomingRequest->getContext();
 
-  try {
-    incomingRequest->getMetrics().claimRetryTokenBeforeUserCode();
-  } catch (...) {
-    auto exception = kj::getCaughtExceptionAsKj();
-    failed(exception);
-    kj::throwFatalException(kj::mv(exception));
-  }
   incomingRequest->delivered();
 
   KJ_DEFER({
@@ -3198,8 +3235,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     jsRpcSessionInternalSpan = ioctx.makeTraceSpan("jsRpcSession"_kjc);
   }
 
-  EntrypointJsRpcTarget target(ioctx, entrypointName, kj::mv(versionInfo), kj::mv(props),
-      kj::mv(wrapperModule), mapAddRef(incomingRequest->getWorkerTracer()), isDynamicDispatch);
+  EntrypointJsRpcTarget target(ioctx, kj::addRef(incomingRequest->getMetrics()), entrypointName,
+      kj::mv(versionInfo), kj::mv(props), kj::mv(wrapperModule),
+      mapAddRef(incomingRequest->getWorkerTracer()), isDynamicDispatch);
   capnp::RevocableServer<rpc::JsRpcTarget> revocableTarget(target);
 
   KJ_DEFER({

@@ -62,23 +62,6 @@ class RecordingFailingOutgoingFactory final: public Fetcher::OutgoingFactory {
   kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata>& metadata;
 };
 
-class RejectingClaimObserver final: public RequestObserver {
- public:
-  void claimRetryTokenBeforeUserCode() override {
-    ++claimCount;
-    auto exception = KJ_EXCEPTION(FAILED, "retry claim rejected");
-    exception.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
-    kj::throwFatalException(kj::mv(exception));
-  }
-
-  void delivered() override {
-    ++deliveredCount;
-  }
-
-  uint claimCount = 0;
-  uint deliveredCount = 0;
-};
-
 capnp::Capability::Client brokenCap() {
   return capnp::Capability::Client(KJ_EXCEPTION(FAILED, "test cap"));
 }
@@ -774,44 +757,192 @@ void expectDeliveredDetails(const kj::Exception& exception) {
   KJ_EXPECT(exception.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) == kj::none, exception);
 }
 
-void expectClaimRejectedDetails(const kj::Exception& exception) {
-  KJ_EXPECT(exception.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none, exception);
-  KJ_EXPECT(exception.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) == kj::none, exception);
-  KJ_EXPECT(exception.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, exception);
+// An actor that appends to `globalThis.events` from its constructor, getter and methods.
+constexpr kj::StringPtr RETRY_CLAIM_ACTOR_SOURCE = R"JS(
+  import { DurableObject, RpcTarget } from "cloudflare:workers";
+  globalThis.events = "";
+  class Counter extends RpcTarget {
+    increment() { globalThis.events += "increment;"; }
+  }
+  export default class extends DurableObject {
+    constructor(ctx, env) {
+      super(ctx, env);
+      globalThis.events += "constructor;";
+    }
+    method() { globalThis.events += "method;"; }
+    get methodFromGetter() {
+      globalThis.events += "getter;";
+      return () => { globalThis.events += "method;"; };
+    }
+    getCounter() { return new Counter(); }
+  }
+)JS"_kj;
+
+kj::String getJsEvents(jsg::Lock& js) {
+  return js.withinHandleScope([&]() { return js.global().get(js, "events"_kj).toString(js); });
 }
 
-KJ_TEST("JSRPC claim rejection fails the native call before construction or delivery") {
-  // Construction would replace the claim-rejection failure with this constructor's error.
-  static constexpr auto source = R"JS(
-    import { DurableObject } from "cloudflare:workers";
-    export default class extends DurableObject {
-      constructor(ctx, env) {
-        super(ctx, env);
-        throw new Error("actor was constructed");
-      }
-      method() {}
+kj::String getJsEvents(TestFixture& fixture) {
+  kj::String events;
+  fixture.enterWorkerLock([&](Worker::Lock& lock) {
+    jsg::Lock& js = lock;
+    js.withinHandleScope([&]() {
+      v8::Context::Scope contextScope(lock.getContext());
+      events = getJsEvents(js);
+    });
+  });
+  return events;
+}
+
+// Records the script's events when the claim fires, and rejects the claim if asked to.
+class RetryClaimObserver final: public RequestObserver {
+ public:
+  void claimRetryTokenBeforeUserCode() override {
+    ++claimCount;
+    jsEventsAtClaim = getJsEvents(jsg::Lock::current());
+    KJ_IF_SOME(e, rejection) {
+      kj::throwFatalException(e.clone());
     }
-  )JS"_kj;
-  auto observer = kj::refcounted<RejectingClaimObserver>();
-  TestFixture fixture(TestFixture::SetupParams{
-    .mainModuleSource = source,
+  }
+
+  uint claimCount = 0;
+  kj::String jsEventsAtClaim;
+  kj::Maybe<kj::Exception> rejection;
+};
+
+TestFixture::SetupParams retryClaimActorParams(RetryClaimObserver& observer) {
+  return {
+    .mainModuleSource = RETRY_CLAIM_ACTOR_SOURCE,
     .actorId = Worker::Actor::Id(kj::str("jsrpc-claim-test")),
     .actorClassName = "default"_kj,
     .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
-        [&observer]() -> kj::Own<RequestObserver> { return kj::addRef(*observer); }),
-  });
+        [&observer]() -> kj::Own<RequestObserver> { return kj::addRef(observer); }),
+  };
+}
+
+void call(rpc::JsRpcTarget::Client& cap, kj::StringPtr name, kj::WaitScope& waitScope) {
+  auto request = cap.callRequest();
+  request.setMethodName(name);
+  request.send().wait(waitScope);
+}
+
+KJ_TEST("JSRPC claims after construction and before the method is looked up") {
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  TestFixture fixture(retryClaimActorParams(*observer));
   auto entrypoint = fixture.makeWorkerEntrypoint();
   auto [cap, session] = startSession(*entrypoint);
 
-  auto rejectedCall = expectCallFailure(cap, "method", fixture.getWaitScope());
-  KJ_EXPECT(rejectedCall.getDescription().contains("retry claim rejected"), rejectedCall);
-  expectClaimRejectedDetails(rejectedCall);
-  KJ_EXPECT(observer->claimCount == 1);
-  KJ_EXPECT(observer->deliveredCount == 0);
+  call(cap, "methodFromGetter", fixture.getWaitScope());
 
-  auto sessionException =
-      kj::runCatchingExceptions([&]() { session.wait(fixture.getWaitScope()); });
-  expectClaimRejectedDetails(KJ_ASSERT_NONNULL(sessionException));
+  KJ_EXPECT(observer->claimCount == 1);
+  KJ_EXPECT(observer->jsEventsAtClaim == "constructor;", observer->jsEventsAtClaim);
+  KJ_EXPECT(getJsEvents(fixture) == "constructor;getter;method;");
+
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
+}
+
+KJ_TEST("a JSRPC session without calls does not claim") {
+  // A caller can open a session and drop it without calling a method, for example when serializing
+  // the arguments fails. No method runs, so the session's token stays unclaimed.
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  TestFixture fixture(retryClaimActorParams(*observer));
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
+
+  KJ_EXPECT(observer->claimCount == 0);
+}
+
+KJ_TEST("calls on a stub returned by the top-level JSRPC call do not claim") {
+  // The token covers the session's top-level call, the only call a sender retries. A stub returned
+  // by that call exists only if it succeeded, and calls on it are never retried on their own.
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  TestFixture fixture(retryClaimActorParams(*observer));
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  auto request = cap.callRequest();
+  request.setMethodName("getCounter");
+  auto result = request.send();
+  auto counter = result.getCallPipeline();
+  call(counter, "increment", fixture.getWaitScope());
+  call(counter, "increment", fixture.getWaitScope());
+
+  KJ_EXPECT(observer->claimCount == 1);
+  KJ_EXPECT(getJsEvents(fixture) == "constructor;increment;increment;");
+
+  { auto drop = kj::mv(result); }
+  counter = nullptr;
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
+}
+
+KJ_TEST("a rejected JSRPC claim runs neither getter nor method, and stays rejected") {
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  auto rejection = KJ_EXCEPTION(FAILED, "retry claim rejected");
+  rejection.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  observer->rejection = kj::mv(rejection);
+  TestFixture fixture(retryClaimActorParams(*observer));
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  // The rejection is a disconnect so that a call pipelined on the rejected call, which the sender
+  // does not retry, does not surface the claim rejection as an application error.
+  auto expectClaimRejected = [](const kj::Exception& e) {
+    KJ_EXPECT(e.getType() == kj::Exception::Type::DISCONNECTED, e);
+    KJ_EXPECT(e.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none, e);
+  };
+  auto request = cap.callRequest();
+  request.setMethodName("getCounter");
+  auto parent = request.send();
+  auto childRequest = parent.getCallPipeline().callRequest();
+  childRequest.setMethodName("increment");
+  auto child = childRequest.send();
+  expectClaimRejected(
+      KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { child.wait(fixture.getWaitScope()); })));
+  expectClaimRejected(
+      KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { parent.wait(fixture.getWaitScope()); })));
+
+  // A production observer consumes its claim context before rejecting, so claiming again would
+  // succeed. A second top-level call must still be rejected.
+  observer->rejection = kj::none;
+  expectClaimRejected(expectCallFailure(cap, "methodFromGetter", fixture.getWaitScope()));
+
+  KJ_EXPECT(observer->claimCount == 1);
+  KJ_EXPECT(getJsEvents(fixture) == "constructor;");
+
+  { auto drop = kj::mv(parent); }
+  { auto drop = kj::mv(child); }
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
+}
+
+KJ_TEST("JSRPC preserves not-delivered for a predecessor rejection") {
+  // The caller retries a predecessor rejection against the replacement actor, but only while it is
+  // marked not delivered. Session failures are otherwise marked delivered, so this one must be
+  // exempt.
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  auto rejection = KJ_EXCEPTION(DISCONNECTED, "request rejected before user code");
+  jsg::markActorRequestNotDelivered(rejection);
+  rejection.setDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  observer->rejection = kj::mv(rejection);
+  TestFixture fixture(retryClaimActorParams(*observer));
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  auto e = expectCallFailure(cap, "method", fixture.getWaitScope());
+
+  KJ_EXPECT(e.getType() == kj::Exception::Type::DISCONNECTED, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID) != kj::none, e);
+  KJ_EXPECT(getJsEvents(fixture) == "constructor;");
+
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
 }
 
 KJ_TEST("actor JSRPC method and getter failures carry delivered details") {

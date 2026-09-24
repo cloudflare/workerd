@@ -208,9 +208,12 @@ class RequestObserver: public kj::Refcounted {
   virtual void recordActorRetryOutcome(
       ActorRetryCallType callType, ActorRetryOutcome outcome, kj::Duration retryAddedLatency) {}
 
-  // Fired before a fetch request is delivered, so an observer can claim an actor request's
-  // retry-token nonce before actor construction or user code. This also fires for non-actor and
-  // service-worker fetches; observers are responsible for treating those as no-ops.
+  // Fired after actor construction and immediately before user code handles the request, so an
+  // observer can claim the request's retry-token nonce and throw to reject it. For fetch, that is
+  // before the fetch handler is invoked. For JSRPC, it is on the session's top-level call, before the
+  // method is looked up; calls on stubs or pipelines returned from that call don't fire it. It fires
+  // at most once per request. It also fires for non-actor requests, which carry no retry token, so
+  // observers should do nothing for them.
   virtual void claimRetryTokenBeforeUserCode() {}
 
   // Used to record when a worker has used a dynamic dispatch binding.
