@@ -393,8 +393,16 @@ std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
     return v8::CppHeap::Create(system, heapParams);
   });
 }
-static v8::Isolate* newIsolate(
-    v8::Isolate::CreateParams&& params, v8::CppHeap* cppHeap, v8::IsolateGroup group) {
+// The observer of the isolate that v8::Isolate::New() is creating on this thread, for
+// IsolateBase::createV8Histogram(). V8 creates its first histograms while deserializing the
+// startup snapshot inside v8::Isolate::New(), before the isolate carries a pointer to its
+// IsolateBase, so the observer has to be found some other way during that window.
+thread_local IsolateObserver* initializingIsolateObserver = nullptr;
+
+static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params,
+    v8::CppHeap* cppHeap,
+    v8::IsolateGroup group,
+    IsolateObserver& observer) {
   return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
     // We currently don't attempt to support incremental marking or sweeping. We probably could
     // support them, but it will take some careful investigation and testing. It's not clear if
@@ -420,6 +428,14 @@ static v8::Isolate* newIsolate(
           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
 #endif
     }
+    // Installed through the params rather than after creation so that the histograms V8 records
+    // while creating the isolate (snapshot deserialization) are captured too.
+    params.create_histogram_callback = &IsolateBase::createV8Histogram;
+    params.add_histogram_sample_callback = &IsolateBase::addV8HistogramSample;
+
+    auto* previousInitializingIsolateObserver = initializingIsolateObserver;
+    initializingIsolateObserver = &observer;
+    KJ_DEFER(initializingIsolateObserver = previousInitializingIsolateObserver);
     return v8::Isolate::New(group, params);
   });
 }
@@ -439,7 +455,7 @@ IsolateBase::IsolateBase(V8System& system,
     v8::IsolateGroup group)
     : v8System(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
-      ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group)),
+      ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group, *observer)),
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       exportsAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
@@ -768,6 +784,28 @@ IsolateBase::CodeStatistics IsolateBase::getCodeStatistics() const {
     .wasmCodeCount = codeStatistics.wasmCodeCount.load(std::memory_order_relaxed),
     .wasmCodeBytes = codeStatistics.wasmCodeBytes.load(std::memory_order_relaxed),
   };
+}
+
+void* IsolateBase::createV8Histogram(const char* name, int min, int max, size_t buckets) noexcept {
+  // V8 creates histograms lazily, on first use, from whatever thread that happens on, and passes
+  // no isolate. While v8::Isolate::New() runs, initializingIsolateObserver names the observer.
+  // Afterwards it is found through the isolate entered on this thread. On a V8 background thread
+  // neither applies; returning null leaves the histogram off until it is next used on the
+  // isolate's own thread, when V8 asks again.
+  IsolateObserver* observer = initializingIsolateObserver;
+  if (observer == nullptr) {
+    v8::Isolate* isolate = v8::Isolate::TryGetCurrent();
+    if (isolate == nullptr) return nullptr;
+    observer = IsolateBase::from(isolate).observer.get();
+  }
+  KJ_IF_SOME(sink, observer->tryCreateV8HistogramSink(name, min, max, buckets)) {
+    return &sink;
+  }
+  return nullptr;
+}
+
+void IsolateBase::addV8HistogramSample(void* histogram, int sample) noexcept {
+  static_cast<V8HistogramSink*>(histogram)->addSample(sample);
 }
 
 void* getJsCageBase() {
