@@ -12,6 +12,14 @@ src/workerd/api/actor-call-retry.h
   "base_commit_sha": "516942d69fb602f672c009fce4a9de792e1f6a42",
   "prompts": {},
   "sessions": {
+    "s_1c76ae2bf94860": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2d898ceeffeUeaNXVDLn1H391",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
     "s_456e7d153a4287": {
       "agent_id": {
         "tool": "opencode",
