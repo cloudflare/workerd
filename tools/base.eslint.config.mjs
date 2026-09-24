@@ -60,6 +60,7 @@ const workerdGlobals = {
   WritableStreamDefaultWriter: 'readonly',
   // Workers-specific
   Cloudflare: 'readonly',
+  Datagram: 'readonly',
   FixedLengthStream: 'readonly',
   IdentityTransformStream: 'readonly',
   ScheduledController: 'readonly',
