@@ -6782,13 +6782,13 @@ class Server::UdpListener final: public kj::Refcounted {
   UdpListener(Server& owner,
       kj::Own<kj::DatagramPort> port,
       kj::Own<Service> service,
-      kj::StringPtr addrStr,
+      kj::String authority,
       kj::Duration idleTimeout,
       size_t maxPendingBytes)
       : owner(owner),
         port(kj::mv(port)),
         service(kj::mv(service)),
-        addrStr(addrStr),
+        authority(kj::mv(authority)),
         idleTimeout(idleTimeout),
         maxPendingBytes(maxPendingBytes) {}
 
@@ -6902,6 +6902,11 @@ class Server::UdpListener final: public kj::Refcounted {
       co_await port->send(datagram, *peerAddr);
     }
 
+    // The peer's "address:port", as kj::NetworkAddress::toString() renders it.
+    kj::StringPtr getPeerAddress() const {
+      return key;
+    }
+
    private:
     kj::Own<UdpListener> listener;
     kj::String key;
@@ -6955,7 +6960,8 @@ class Server::UdpListener final: public kj::Refcounted {
   Server& owner;
   kj::Rc<kj::DatagramPort> port;
   kj::Own<Service> service;
-  kj::StringPtr addrStr;
+  // The bound endpoint ("host:port"), handed to the connect() handler as the local address.
+  kj::String authority;
   kj::Duration idleTimeout;
   size_t maxPendingBytes;
 
@@ -6965,8 +6971,10 @@ class Server::UdpListener final: public kj::Refcounted {
 
   void dispatch(kj::Rc<Flow> flow) {
     IoChannelFactory::SubrequestMetadata metadata;
+    metadata.clientAddress = kj::str(flow->getPeerAddress());
     auto worker = service->startRequest(kj::mv(metadata));
-    auto event = kj::heap<api::UdpConnectCustomEvent>(kj::str(addrStr), *flow);
+    auto event = kj::heap<api::UdpConnectCustomEvent>(
+        kj::str(authority), kj::str(flow->getPeerAddress()), *flow);
     owner.tasks.add(worker->customEvent(kj::mv(event))
                         .ignoreResult()
                         .attach(kj::mv(worker), kj::mv(flow))
@@ -6980,11 +6988,11 @@ class Server::UdpListener final: public kj::Refcounted {
 
 kj::Promise<void> Server::listenUdp(kj::Own<kj::DatagramPort> port,
     kj::Own<Service> service,
-    kj::StringPtr addrStr,
+    kj::String authority,
     kj::Duration idleTimeout,
     size_t maxPendingBytes) {
   auto obj = kj::refcounted<UdpListener>(
-      *this, kj::mv(port), kj::mv(service), addrStr, idleTimeout, maxPendingBytes);
+      *this, kj::mv(port), kj::mv(service), kj::mv(authority), idleTimeout, maxPendingBytes);
   co_return co_await obj->run();
 }
 
@@ -7502,7 +7510,9 @@ kj::Promise<void> Server::bindSockets(config::Config::Reader config) {
       }
 
       auto parsed = co_await network.parseAddress(addrStr, defaultPortFor(sock));
-      boundSockets.add(BoundSocket{parsed->bindDatagramPort(), kj::mv(addrStr)});
+      auto port = parsed->bindDatagramPort();
+      registerInboundListener(sock, "udp"_kj, addrStr, port->getPort());
+      boundSockets.add(BoundSocket{kj::mv(port), kj::mv(addrStr)});
       continue;
     }
 
@@ -7514,22 +7524,28 @@ kj::Promise<void> Server::bindSockets(config::Config::Reader config) {
       listener = parsed->listen();
     }
 
-    if (sock.which() == config::Socket::TCP && sock.getService().hasName()) {
-      inboundListeners
-          .findOrCreate(sock.getService().getName(),
-              [&]() {
-        return decltype(inboundListeners)::Entry{
-          kj::str(sock.getService().getName()), kj::Vector<Worker::Api::InboundListener>()};
-      })
-          .add(Worker::Api::InboundListener{
-            .protocol = kj::str("tcp"),
-            .address = hostOfAddress(addrStr),
-            .port = static_cast<uint16_t>(listener->getPort()),
-          });
+    if (sock.which() == config::Socket::TCP) {
+      registerInboundListener(sock, "tcp"_kj, addrStr, listener->getPort());
     }
 
     boundSockets.add(BoundSocket{kj::mv(listener), kj::mv(addrStr)});
   }
+}
+
+void Server::registerInboundListener(
+    config::Socket::Reader sock, kj::StringPtr protocol, kj::StringPtr addrStr, uint port) {
+  if (!sock.getService().hasName()) return;
+  inboundListeners
+      .findOrCreate(sock.getService().getName(),
+          [&]() {
+    return decltype(inboundListeners)::Entry{
+      kj::str(sock.getService().getName()), kj::Vector<Worker::Api::InboundListener>()};
+  })
+      .add(Worker::Api::InboundListener{
+        .protocol = kj::str(protocol),
+        .address = hostOfAddress(addrStr),
+        .port = static_cast<uint16_t>(port),
+      });
 }
 
 kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
@@ -7585,7 +7601,9 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
           }
         }
 
-        co_await listenUdp(kj::mv(port), kj::mv(service), addrStr, idleTimeout, maxPendingBytes);
+        auto authority = kj::str(hostOfAddress(addrStr), ":", port->getPort());
+        co_await listenUdp(
+            kj::mv(port), kj::mv(service), kj::mv(authority), idleTimeout, maxPendingBytes);
       });
       tasks.add(handle(kj::mv(datagramPort)).exclusiveJoin(forkedDrainWhen.addBranch()));
       continue;

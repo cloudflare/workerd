@@ -994,11 +994,11 @@ interface EventDispatcher @0xf20697475ec1752d {
   # instantiated there -- or maybe some mechanism for running "remote facets". For now, though,
   # we punt and simply don't support it.)
 
-  udpConnect @14 (host :Text, down :DatagramStream)
+  udpConnect @14 (host :Text, down :DatagramStream, remoteAddress :Text)
       -> (up :DatagramStream, result :EventOutcome) $Cxx.allowCancellation;
   # Opens a UDP flow. `up` carries datagrams received from the peer toward the Worker, while `down`
   # carries datagrams sent by the Worker back toward the peer. The call remains pending until the
-  # Worker's connect() handler completes.
+  # Worker's connect() handler completes. `remoteAddress` is the peer's "address:port", if known.
 
   # Other methods might be added to handle other kinds of events, e.g. TCP connections, or maybe
   # even native Cap'n Proto RPC eventually.

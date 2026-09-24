@@ -176,8 +176,10 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
     kj::String addrStr;
   };
   kj::Vector<kj::Maybe<BoundSocket>> boundSockets;
-  // Bound TCP listeners by the name of the service they deliver to.
+  // Bound TCP and UDP listeners by the name of the service they deliver to.
   kj::HashMap<kj::String, kj::Vector<Worker::Api::InboundListener>> inboundListeners;
+  void registerInboundListener(
+      config::Socket::Reader sock, kj::StringPtr protocol, kj::StringPtr addrStr, uint port);
 
   // Overrides from the command line.
   //
@@ -324,7 +326,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
 
   kj::Promise<void> listenUdp(kj::Own<kj::DatagramPort> port,
       kj::Own<Service> service,
-      kj::StringPtr addrStr,
+      kj::String authority,
       kj::Duration idleTimeout,
       size_t maxPendingBytes);
 
