@@ -347,6 +347,12 @@ class IsolateBase {
   };
   CodeStatistics getCodeStatistics() const;
 
+  // V8's histogram callbacks, installed on every isolate. V8 supplies no isolate argument, so
+  // these find the observer through the isolate entered on the calling thread and forward to
+  // IsolateObserver::tryCreateV8HistogramSink().
+  static void* createV8Histogram(const char* name, int min, int max, size_t buckets) noexcept;
+  static void addV8HistogramSample(void* histogram, int sample) noexcept;
+
   // Equivalent to getExternalMemoryTarget()->getAdjustment(amount), but saves an atomic refcount
   // increment and decrement.
   ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount) {
