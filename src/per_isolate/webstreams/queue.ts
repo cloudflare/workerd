@@ -45,9 +45,11 @@
 //     callback) but keeps its own state machine.
 //   - desiredSize reflects the SLOWEST live cursor; a pending read on any
 //     cursor overrides backpressure at the controller.
-//   - A released reader's filled bytes precede later data: re-queued when
-//     one cursor holds the queue, kept in the byte cursor's own prefix when
-//     it is shared. Forks (tee, detach) copy them.
+//   - A released reader's filled bytes precede later data. respond() on the
+//     released head re-queues them; enqueue() keeps them in the byte
+//     cursor's own prefix, ahead of the chunk, before any read is served,
+//     so a pending read(view) takes both (spec steps 8.5 and 10). Forks
+//     (tee, detach) copy them.
 //
 // Nothing in this module is ever exposed to user code: queues and cursors
 // are held in #private fields of the stream classes. Method calls on these
@@ -290,9 +292,6 @@ export interface ByteStreamConsumer extends StreamConsumer<Uint8Array> {
   readonly pendingPullIntoView: Uint8Array | undefined;
   respondBYOB(bytesWritten: number): void;
   commitPullIntosOnClose(): void;
-  // Spec: enqueue() drains 'none'-typed head descriptors BEFORE adding
-  // the new chunk. Called by the controller's enqueue() path.
-  drainNoneDescriptors(): void;
   // Spec step 9.3: if the head descriptor is an auto-allocate
   // (readerType 'default'), shift it out and return it so the controller
   // can fulfill the read directly from the enqueued chunk.
@@ -987,10 +986,10 @@ class ByteStreamCursor
   // autoAllocateChunkSize creates synthetic descriptors for default reads.
   #pendingPullIntos: RingBufferType<PullIntoDescriptor> = new RingBuffer();
 
-  // A released head's filled bytes when the queue is shared (tee branches),
-  // where they cannot go back into the queue. Read before the data at the
-  // cursor's position, and counted in remainingSize. Empty whenever a
-  // pull-into is pending (fills take it first).
+  // A released head's filled bytes (see flushReleasedHead), cursor-local
+  // since the queue may be shared. Read before the data at the cursor's
+  // position, and counted in remainingSize. Empty whenever a pull-into is
+  // pending (fills take it first).
   #prefix: ByteQueueEntry | undefined;
 
   // One-shot latch for the deferred end-of-data settlement (see
@@ -1130,15 +1129,40 @@ class ByteStreamCursor
     return result;
   }
 
-  // enqueue() step 8.5 for a cursor on a shared queue: a released head's
-  // filled bytes move to the prefix, ahead of the chunk being enqueued.
+  // enqueue() step 8.5: a released head's filled bytes move to the
+  // prefix, ahead of the chunk being enqueued. Pending read(view)s are
+  // left for the enqueue's notify(), which fills them from both (step
+  // 10); a pending auto-allocated default read takes the bytes alone now
+  // (step 9.1), before the chunk can reach it.
   flushReleasedHead(): void {
     const head = this.#pendingPullIntos.peek();
-    if (head === undefined || head.readerType !== 'none') return;
+    if (head !== undefined && head.readerType === 'none') {
+      this.#pendingPullIntos.shift();
+      this.#moveToPrefix(head);
+    }
+    const desc = this.#pendingPullIntos.peek();
+    const view = this.#takePrefixForDefaultPullInto();
+    if (view !== undefined) {
+      (desc as PullIntoDescriptor).resolve(createReadResult(view, false));
+    }
+  }
+
+  // A default read waiting on an auto-allocated descriptor takes the
+  // prefix whole, as it would a queued entry (spec
+  // FillReadRequestFromQueue), rather than a copy into its buffer. Shifts
+  // the head descriptor and returns the prefix for the caller to resolve
+  // it with.
+  #takePrefixForDefaultPullInto(): Uint8Array | undefined {
+    const head = this.#pendingPullIntos.peek();
+    if (
+      this.#prefix === undefined ||
+      head === undefined ||
+      head.readerType !== 'default'
+    ) {
+      return undefined;
+    }
     this.#pendingPullIntos.shift();
-    if (head.bytesFilled === 0) return;
-    this.#moveToPrefix(head);
-    this.notify();
+    return this.#takePrefix();
   }
 
   // The controller's released head (see its #releasedHead) was responded
@@ -1297,6 +1321,12 @@ class ByteStreamCursor
         // respond() remove it before notifying; this is a backstop.
         this.#pendingPullIntos.shift();
         this.#moveToPrefix(head);
+        continue;
+      }
+      const prefixView = this.#takePrefixForDefaultPullInto();
+      if (prefixView !== undefined) {
+        if (filledPullIntos === undefined) filledPullIntos = [];
+        ArrayPrototypePush(filledPullIntos, { desc: head, view: prefixView });
         continue;
       }
       this.#fillFromQueue(head);
@@ -1533,33 +1563,6 @@ class ByteStreamCursor
       if (desc.readerType === 'none') continue;
       // assert: desc.bytesFilled % desc.elementSize === 0
       desc.resolve(createReadResult(this.#convert(desc), true));
-    }
-  }
-
-  // Spec ReadableByteStreamControllerEnqueue step 8.5: if the head
-  // pending pull-into has readerType 'none' (leftover from releaseLock),
-  // transfer its buffer and enqueue any filled data before the new chunk
-  // is added. This ensures the released descriptor is processed eagerly.
-  drainNoneDescriptors(): void {
-    while (this.#pendingPullIntos.length > 0) {
-      const head = this.#pendingPullIntos.peek() as PullIntoDescriptor;
-      if (head.readerType !== 'none') break;
-      this.#pendingPullIntos.shift();
-      if (head.bytesFilled > 0) {
-        // Clone the filled portion into a new queue entry.
-        this.queue.enqueue({
-          value: {
-            buffer: cloneArrayBuffer(
-              head.buffer,
-              head.byteOffset,
-              head.bytesFilled
-            ),
-            byteOffset: 0,
-            byteLength: head.bytesFilled,
-          },
-          size: head.bytesFilled,
-        });
-      }
     }
   }
 

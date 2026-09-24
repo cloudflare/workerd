@@ -46,6 +46,7 @@ behavior-parity (messages aside).
 | 29 | a native body's reader released while its read is in flight, then tee() or clone() | releaseLock() throws TypeError (outstanding read promises) | the read rejects; both branches receive the whole body, including the in-flight read's bytes | `teeNativeBodyAfterReleaseMidRead` |
 | 30 | resizable ArrayBuffers handed in by read(view), enqueue() or respondWithNewView() | kept resizable except after enqueue(): the source can shrink byobRequest.view.buffer, and respond() then throws TypeError 'Cannot respond with a zero-length or detached view' (read left pending); respondWithNewView() and closed-stream read(view) results are resizable | transferred to fixed length (spec TransferArrayBuffer): byobRequest.view.buffer.resize() throws TypeError, and every result buffer is fixed-length | `resizableByobRequestCannotShrink`, `resizableBuffersDeliveredFixedLength`, `readResizableView` |
 | 31 | default read with autoAllocateChunkSize set while bytes are queued (the ledger #17 shape with auto-allocation) | copies every queued chunk into one fresh autoAllocateChunkSize buffer (5 bytes in a 64-byte buffer) | hands over the head chunk, uncopied (spec PullSteps): chunk by chunk, each result over its enqueued buffer; only an empty queue allocates, for the source's byobRequest | `autoAllocateDefaultReadTakesQueuedChunk` |
+| 32 | enqueue() meeting a released partial read's bytes (the next reader waiting; one reader or a tee branch) | a pending read(view) is filled with the released bytes alone ([1,2], then [3,4]); an auto-allocated default read gets them copied into its buffer | spec: the chunk is queued before BYOB reads are filled, so a pending read(view) takes both ([1,2,3,4]); a default read gets the released bytes alone as their own chunk (2-byte buffer); an element completed across the two is parity | `relockPartialHeadThenEnqueue`, `relockPartialHeadThenEnqueueShapes`, `teeReleasedPartialReadByob`, `teeHeldByobRequestEnqueueFillsByobRead` |
 
 Parity worth noting (probed, pinned): byte hwm defaults to 0 with NO
 automatic pull; pull-throw and error-then-throw identity; enqueue
@@ -57,9 +58,10 @@ era (see flags below); the whole releaseLock→second-reader cluster
 (respond, respond(1)×2 Uint16 assembly, respondWithNewView,
 autoAllocate respond/enqueue, two pending reads released, a partially
 filled head released), and a released tee-branch read taking no later
-bytes; a released partial read's bytes reaching the next reader on a tee
-branch (pending BYOB/default read, buffered, piped) and through a later
-tee(); staged min-fulfillment and min-met
+bytes; a released partial read's bytes reaching the next reader ahead
+of later data, on one reader or a tee branch (pending BYOB/default read,
+buffered, piped) and through a later tee() — how an enqueue() splits
+them for the next reader is #32; staged min-fulfillment and min-met
 reads; {min}-shaped arg ignored by default readers; readAtLeast exists
 on BOTH implementations; tee CLONES chunks per branch (fresh buffers,
 original detached, no cross-branch mutation) and propagates the same
@@ -122,9 +124,9 @@ named suite test pins directly, differing only in incidental asserts.
 | `controller.js` | ledger #5, #7, #21, #22, #23; enqueue-discards-request; read-after-close and read-after-cancel; detach-at-call |
 | `byob-reader.js` | ledger #20, #28, #31; view-type matrix + offsets + auto-allocate sizing (migrated streams-byob-edge-cases) + mismatched sizes/types, subarray, multi-pending-reads, byobreaderRegression (migrated streams-js-test) |
 | `respond.js` | ledger #6, #8, #15, #16; all 31 streams-respond-test tests (respond/respondWithNewView/pumps/cancel races/UAF shapes) + js-test respond family |
-| `release-relock.js` | ledger #9, #10; the WPT releaseLock→second-reader cluster; release with two pending reads or a partially filled head |
+| `release-relock.js` | ledger #9, #10, #32; the WPT releaseLock→second-reader cluster; release with two pending reads or a partially filled head |
 | `read-min.js` | ledger #11-#13, #27; byobMin/constraints/readAtLeast (migrated streams-test.js); /chunked SELF endpoint |
-| `tee.js` | ledger #7 (on a branch), #14, #24, #25, #29; clone-per-branch; migrated byte-tee pair; error propagation; released branch reads, incl. partially filled ones and tee() after a release; byobRequest held across tee() |
+| `tee.js` | ledger #7 (on a branch), #14, #24, #25, #29, #32; clone-per-branch; migrated byte-tee pair; error propagation; released branch reads, incl. partially filled ones and tee() after a release; byobRequest held across tee() |
 | `buffer-lifecycle.js` | ledger #18, #30; resizable ArrayBuffers; WASM Memory; SharedArrayBuffer |
 | `gc.js` | pending BYOB read + byobRequest survive gc(); both tee branches collected while the controller is held: enqueue() accepted, desiredSize at the high-water mark, byobRequest null, close() then enqueue() as ever (a parity pin of the observable surface — the retention checks are the readable suite's, a transferred buffer leaving nothing to WeakRef), one branch cancelled and the other collected, observed in the gc()'s own job (the readable suite's teeSurvivorBranchCollected, plus byobRequest null), and pull() stops (ledger #26) |
 | `integration.js` | BYOB round-trips via SELF; readAtLeast on echoed body; bytes() |
