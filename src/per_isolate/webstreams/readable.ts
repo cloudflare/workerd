@@ -3761,14 +3761,15 @@ class ReadableStream<R> {
       if (isNativeController(controller)) {
         if (stream.#state !== 'readable') {
           // Closed/errored native parents produce two branches in the
-          // same state, mirroring the queued behavior below — without
-          // touching the (closed) source.
+          // same state and are locked, mirroring the queued behavior
+          // below — without touching the (closed) source.
           const b1 = new ReadableStream<R>(kPrivateSymbol as never);
           const b2 = new ReadableStream<R>(kPrivateSymbol as never);
           b1.#state = stream.#state;
           b2.#state = stream.#state;
           b1.#storedError = stream.#storedError;
           b2.#storedError = stream.#storedError;
+          acquireReadableStreamDefaultReader(stream);
           return [b1, b2] as [ReadableStream<R>, ReadableStream<R>];
         }
         // Sources from the tee hook are full native sources; ordinary
