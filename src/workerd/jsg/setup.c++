@@ -656,6 +656,8 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
 
   switch (event->type) {
     case v8::JitCodeEvent::CODE_ADDED: {
+      self->recordCodeAdded(event->code_type, event->code_len);
+
       // Usually CODE_ADDED comes after CODE_END_LINE_INFO_RECORDING, but sometimes it doesn't,
       // particularly in the case of Wasm where it appears no line info is provided.
       auto& info = codeMap.findOrCreate(
@@ -738,6 +740,34 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
       break;
     }
   }
+}
+
+void IsolateBase::recordCodeAdded(v8::JitCodeEvent::CodeType type, size_t size) {
+  switch (type) {
+    case v8::JitCodeEvent::BYTE_CODE:
+      codeStatistics.bytecodeCount.fetch_add(1, std::memory_order_relaxed);
+      codeStatistics.bytecodeBytes.fetch_add(size, std::memory_order_relaxed);
+      break;
+    case v8::JitCodeEvent::JIT_CODE:
+      codeStatistics.jitCodeCount.fetch_add(1, std::memory_order_relaxed);
+      codeStatistics.jitCodeBytes.fetch_add(size, std::memory_order_relaxed);
+      break;
+    case v8::JitCodeEvent::WASM_CODE:
+      codeStatistics.wasmCodeCount.fetch_add(1, std::memory_order_relaxed);
+      codeStatistics.wasmCodeBytes.fetch_add(size, std::memory_order_relaxed);
+      break;
+  }
+}
+
+IsolateBase::CodeStatistics IsolateBase::getCodeStatistics() const {
+  return {
+    .bytecodeCount = codeStatistics.bytecodeCount.load(std::memory_order_relaxed),
+    .bytecodeBytes = codeStatistics.bytecodeBytes.load(std::memory_order_relaxed),
+    .jitCodeCount = codeStatistics.jitCodeCount.load(std::memory_order_relaxed),
+    .jitCodeBytes = codeStatistics.jitCodeBytes.load(std::memory_order_relaxed),
+    .wasmCodeCount = codeStatistics.wasmCodeCount.load(std::memory_order_relaxed),
+    .wasmCodeBytes = codeStatistics.wasmCodeBytes.load(std::memory_order_relaxed),
+  };
 }
 
 void* getJsCageBase() {
