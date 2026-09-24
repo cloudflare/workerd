@@ -51,6 +51,12 @@ export {
 } from 'api-surface';
 
 export {
+  syntheticAbortEventIgnored,
+  stopImmediatePropagationDoesNotBlockAbort,
+  abortAfterPipeSettled,
+} from 'abort-signal';
+
+export {
   sourceStartsErrored,
   sourceStartsErroredPreventAbort,
   sourceErroredAfterChunkHwmZero,

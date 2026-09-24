@@ -4,6 +4,7 @@
 
 #include "per-isolate-bootstrap.h"
 
+#include <workerd/api/abort-bootstrap.h>
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
@@ -188,6 +189,18 @@ static void CreateFileSystemWriteContext(const v8::FunctionCallbackInfo<v8::Valu
   });
 }
 
+// Registers a DOM abort algorithm on an AbortSignal (see abort-bootstrap.h). Plain
+// method: it allocates and can throw.
+static void AddAbortAlgorithm(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      args.GetReturnValue().Set(v8::Local<v8::Value>(
+          api::addAbortAlgorithmForBootstrap(js, jsg::JsValue(args[0]), jsg::JsValue(args[1]))));
+    });
+  });
+}
+
 static const v8::CFunction fast_mark_promise_handled_ =
     v8::CFunction::Make(MarkPromiseHandledFastApi);
 
@@ -232,6 +245,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "newCompressionCodec",
     "createDigestContext",
     "createFileSystemWriteContext",
+    "addAbortAlgorithm",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -244,6 +258,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, api::newCompressionCodecCallback),
     getMethod(js, CreateDigestContext),
     getMethod(js, CreateFileSystemWriteContext),
+    getMethod(js, AddAbortAlgorithm),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
