@@ -18,6 +18,7 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/validation.h>
 #include <workerd/io/wasm-instantiate-shim.embed.h>
+#include <workerd/io/worker-source-stats.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/inspector.h>
@@ -1437,6 +1438,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       "a module registry instance must be passed to Worker::Script if and only if the worker's "
       "compatibility flags enable the new module registry");
 
+  isolate->metrics->scriptSourceLoaded(computeScriptSourceStats(source));
   auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
   //   co-locate multiple scripts in the same isolate. As of this writing, we do not, except in

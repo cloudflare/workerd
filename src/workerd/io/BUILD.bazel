@@ -102,6 +102,7 @@ wd_cc_library(
         ":wasm-instantiate-shim",
         ":worker-interface",
         ":worker-source",
+        ":worker-source-stats",
         "//src/rust/cxx-integration",
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:cf-property",
@@ -226,6 +227,22 @@ wd_cc_library(
         "@capnp-cpp//src/capnp",
         "@workerd-v8//:v8",
     ],
+)
+
+wd_cc_library(
+    name = "worker-source-stats",
+    srcs = ["worker-source-stats.c++"],
+    hdrs = ["worker-source-stats.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":observer",
+        ":worker-source",
+    ],
+)
+
+kj_test(
+    src = "worker-source-stats-test.c++",
+    deps = [":worker-source-stats"],
 )
 
 # TODO(cleanup): Split this up further.
