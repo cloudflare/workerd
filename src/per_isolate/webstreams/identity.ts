@@ -25,27 +25,50 @@
 // See /src/tests/streams/identity/AGENTS.md for the IdentityTransformStream
 // and FixedLengthStream specification.
 //
-// RENDEZVOUS BACKPRESSURE MODEL
+// RENDEZVOUS MODEL
 //
-// This implementation uses a rendezvous pattern matching the original
-// C++ IdentityTransformStream behavior: backpressure starts ENABLED
-// (#backpressure = true) and the readable side uses highWaterMark: 0.
-// A write will block in sinkWrite's `while (#backpressure)` loop
-// until the readable side's pull callback fires (triggered by a
-// reader.read() call), which clears backpressure. This means
-// writer.write() will NOT resolve until a corresponding reader.read()
-// is issued — callers must not `await writer.write()` before starting
-// a read, or the result is a deadlock. Aborting the writable or
-// cancelling the readable also wakes the blocked write, which then
-// rejects.
+// A write's promise settles only once reads have CONSUMED its bytes, not
+// when they are queued. Nothing moves to the readable side until a read
+// asks: the readable uses highWaterMark 0, so its pull fires only while a
+// read is pending. Each pull hands over everything already written, in
+// order (#deliver): the rest of the write the sink is on, then the writes
+// queued behind it, whose bytes were snapshotted when they were written
+// (#snapshots). A direct BYOB read takes as much as fits in its view,
+// across writes, through its byobRequest; a read with a minimum waits for
+// it, then takes everything available, up to its view. Otherwise (a
+// default read, or any read on a tee branch) each write's bytes are
+// enqueued as one chunk, in a batch that notifies the readers once, so a
+// branch's BYOB read spans them and a default read takes one write. A pull
+// that finds nothing written parks until a write arrives (#parkedPull).
+//
+// The write the sink is on settles once the SLOWEST consumer (the sole
+// reader, or the slowest tee branch) has read its last byte, tracked
+// through the readable queue's consumption notification
+// (#checkSettlement), so its bytes stay counted in the writer's
+// desiredSize until then. A starved consumer (a pull that finds nothing
+// more) releases a fully delivered write, as a pending read overrides
+// backpressure in the queue's pull rule: an idle tee branch buffers rather
+// than stalling the writer. A write read before the writable reaches it
+// settles when its sink step runs.
+//
+// This deliberately differs from the C++ IdentityTransformStream, which
+// also settles writes on consumption but answers a BYOB read with the
+// bytes of one write at most, stops a read with a minimum once it is met,
+// and settles a write once one tee branch has read it (the identity
+// suite's ledger #22 and #23).
+//
+// writer.write() therefore does not resolve until reads consume it —
+// callers must not `await writer.write()` before starting a read, or the
+// result is a deadlock. Aborting the writable or cancelling the readable
+// also wakes the waiting write, which then rejects.
 //
 // Correct usage:
-//   const readPromise = reader.read();  // triggers pull → clears bp
-//   await writer.write(chunk);          // now proceeds
+//   const readPromise = reader.read();  // pull parks, waiting for data
+//   await writer.write(chunk);          // delivered to the read
 //   const { value } = await readPromise;
 //
 // Deadlock:
-//   await writer.write(chunk);  // blocks forever — no read pending
+//   await writer.write(chunk);  // waits forever — no read pending
 //   reader.read();              // never reached
 //
 // FixedLengthStream extends IdentityTransformStream with an
@@ -70,6 +93,7 @@ import type {
 
 const {
   ArrayBuffer,
+  ArrayPrototypePush,
   ArrayBufferPrototypeByteLengthGet,
   BigInt,
   DataViewPrototypeGetBuffer,
@@ -79,6 +103,8 @@ const {
   ObjectDefineProperties,
   ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
+  PromisePrototypeThen,
+  PromiseResolve,
   PromiseWithResolvers,
   RangeError,
   Symbol,
@@ -95,16 +121,12 @@ const {
   uncurryThis,
 } = primordials;
 
-const {
-  isArrayBufferView,
-  isArrayBuffer,
-  isSharedArrayBuffer,
-  markPromiseHandled,
-} = utils;
+const { isArrayBufferView, isArrayBuffer, isSharedArrayBuffer } = utils;
 
 const {
   ReadableStream,
   ReadableByteStreamController,
+  ReadableStreamBYOBRequest,
   internalsForTransform: readableInternals,
 } = require('webstreams/readable');
 const {
@@ -126,27 +148,34 @@ function isActualObject(value: unknown) {
 
 // --- Bootstrap captures (byte controller methods + TextEncoder) ----------
 
-const byteControllerEnqueue = uncurryThis(
-  ReadableByteStreamController.prototype.enqueue
-) as (controller: object, chunk: ArrayBufferView) => void;
 const byteControllerClose = uncurryThis(
   ReadableByteStreamController.prototype.close
 ) as (controller: object) => void;
 const byteControllerError = uncurryThis(
   ReadableByteStreamController.prototype.error
 ) as (controller: object, reason: unknown) => void;
-const byteControllerDesiredSizeGet = (() => {
-  const desc = ObjectGetOwnPropertyDescriptor(
-    ReadableByteStreamController.prototype,
-    'desiredSize'
-  );
+function captureGetter(proto: object, name: string): (self: object) => unknown {
+  const desc = ObjectGetOwnPropertyDescriptor(proto, name);
   if (desc === undefined || desc.get === undefined) {
-    throw new TypeError(
-      "Expected accessor property 'desiredSize' on prototype"
-    );
+    throw new TypeError(`Expected accessor property '${name}' on prototype`);
   }
-  return uncurryThis(desc.get);
-})() as (controller: object) => number | null;
+  return uncurryThis(desc.get) as (self: object) => unknown;
+}
+const byteControllerByobRequestGet = captureGetter(
+  ReadableByteStreamController.prototype,
+  'byobRequest'
+) as (controller: object) => object | null;
+const byobRequestViewGet = captureGetter(
+  ReadableStreamBYOBRequest.prototype,
+  'view'
+) as (request: object) => Uint8Array | null;
+const byteControllerDesiredSizeGet = captureGetter(
+  ReadableByteStreamController.prototype,
+  'desiredSize'
+) as (controller: object) => number | null;
+const byobRequestRespond = uncurryThis(
+  ReadableStreamBYOBRequest.prototype.respond
+) as (request: object, bytesWritten: number) => void;
 
 // TextEncoder instance for string → UTF-8 conversion.
 const textEncoderInstance = new TextEncoder();
@@ -261,18 +290,56 @@ const kEmptyStrategy = ObjectFreeze({
   __proto__: null,
 }) as QueuingStrategy<unknown>;
 
+// A write accepted by the writable, snapshotted in its size() callback (see
+// sizeAndSnapshot). Entries are tagged with an own `ok` data property rather
+// than discriminated with an `in` check so that a polluted Object.prototype
+// cannot forge or mask the discriminant.
+interface AcceptedWrite {
+  ok: true;
+  // The write's bytes; undefined for a zero-length write.
+  copied: Uint8Array | undefined;
+  // How many of them have been handed to the readable side.
+  delivered: number;
+  // Whether they are counted against a FixedLengthStream's budget.
+  budgeted: boolean;
+  // The offset, in the delivered byte stream, just past the write's last
+  // byte; -1 until all of it has been delivered.
+  end: number;
+}
+type SnapshotEntry = AcceptedWrite | { ok: false; error: unknown };
+// The write whose sink step is in flight, with its promise.
+interface InFlightWrite {
+  entry: AcceptedWrite;
+  pending: PromiseWithResolversType<void>;
+}
+
 class IdentityTransformStream {
   #readable: ReadableStreamType<Uint8Array>;
   #writable: WritableStreamType<unknown>;
   #readableController: object | undefined;
   #writableController: object | undefined;
-  // Backpressure starts ENABLED — part of the rendezvous pattern.
-  // Writes block until a reader pull clears this flag.
-  #backpressure: boolean = true;
-  #backpressureChange: PromiseWithResolversType<void>;
+  // Every accepted write whose sink step has not begun, in order (see
+  // sizeAndSnapshot). Their bytes are already written, so a read may take
+  // them before the writable hands the write to the sink.
+  #snapshots: RingBufferType<SnapshotEntry> = new RingBuffer();
+  // The write whose sink step is in flight, with its promise: resolved once
+  // the slowest consumer has read past its last byte, rejected when the
+  // stream errors.
+  #current: InFlightWrite | undefined;
+  // A pull that found nothing written; settled once data arrives or the
+  // stream ends.
+  #parkedPull: PromiseWithResolversType<void> | undefined;
+  // Bytes handed to the readable side so far.
+  #deliveredTotal: number = 0;
+  #settlementCheckScheduled: boolean = false;
+  #deliveryScheduled: boolean = false;
+  // True while #deliver answers a read; it checks settlement itself once
+  // the read is answered.
+  #delivering: boolean = false;
   // Byte budget for FixedLengthStream enforcement. undefined for plain
   // IdentityTransformStream; set to expectedLength for FixedLengthStream.
-  // Decremented on each write; overwrite/underwrite errors match C++
+  // Decremented as each write is delivered (or reaches the sink);
+  // overwrite/underwrite errors match C++
   // (identity-transform-stream.c++ tryReadInternal). Stored as bigint
   // to preserve precision for the full uint64_t range.
   #remaining: bigint | undefined;
@@ -284,24 +351,249 @@ class IdentityTransformStream {
     };
   }
 
-  #setBackpressure(backpressure: boolean): void {
-    this.#backpressureChange.resolve();
-    const replacement =
-      PromiseWithResolvers() as PromiseWithResolversType<void>;
-    markPromiseHandled(replacement.promise);
-    this.#backpressureChange = replacement;
-    this.#backpressure = backpressure;
+  // Bytes every consumer has read: those delivered, less the slowest
+  // consumer's backlog (the readable's high-water mark is 0, so its
+  // desiredSize is minus the largest backlog among the cursors).
+  #consumedBySlowest(): number {
+    const rc = this.#readableController;
+    if (rc === undefined) return 0;
+    const desiredSize = byteControllerDesiredSizeGet(rc);
+    const backlog = desiredSize === null || desiredSize >= 0 ? 0 : -desiredSize;
+    return this.#deliveredTotal - backlog;
   }
 
-  // Wakes a write parked in the rendezvous. The write re-checks the
-  // writable's state and throws if the stream is erroring or errored.
+  // A consumer is starved: it has a pending read and has taken everything
+  // delivered (the pull found nothing more). As the queue's pull rule lets
+  // a pending read on any cursor override backpressure, a starved consumer
+  // releases the in-flight write once all its bytes are delivered, so an
+  // idle tee branch buffers instead of stalling the writer.
+  #releaseForStarvedConsumer(): void {
+    const current = this.#current;
+    if (current === undefined || current.entry.end < 0) return;
+    if (this.#writableErroring()) return;
+    this.#current = undefined;
+    current.pending.resolve();
+  }
+
+  // Resolves the in-flight write once the slowest consumer has read past
+  // its last byte.
+  #checkSettlement(): void {
+    const current = this.#current;
+    if (current === undefined) return;
+    const end = current.entry.end;
+    if (end < 0 || end > this.#consumedBySlowest()) return;
+    if (this.#writableErroring()) return;
+    this.#current = undefined;
+    current.pending.resolve();
+  }
+
+  // Once the writable is erroring (aborted, or the readable cancelled or
+  // errored), the in-flight write is left to #unblockWrite, which rejects
+  // it. A consumer's progress can still be observed in between — a
+  // settlement check deferred from before, or a read answered while user
+  // code aborts from inside its resolution — and by then the readable's
+  // backlog no longer measures what the consumers have read.
+  #writableErroring(): boolean {
+    const state = writableInternals.getState(this.#writable);
+    return state === 'erroring' || state === 'errored';
+  }
+
+  // The readable queue's consumption notification. It runs inside the
+  // queue's walk, so the check itself waits a microtask — unless #deliver
+  // is answering a read, as it checks right after.
+  #onConsumption(): void {
+    if (
+      this.#current === undefined ||
+      this.#delivering ||
+      this.#settlementCheckScheduled
+    )
+      return;
+    this.#settlementCheckScheduled = true;
+    PromisePrototypeThen(PromiseResolve(), () => {
+      this.#settlementCheckScheduled = false;
+      this.#checkSettlement();
+    });
+  }
+
+  // Rejects the in-flight write with the writable's stored error. Checked a
+  // microtask later: abort() calls its hook before the writable starts
+  // erroring.
   #unblockWrite(): void {
-    if (this.#backpressure) {
-      this.#setBackpressure(false);
+    if (this.#current === undefined) return;
+    PromisePrototypeThen(PromiseResolve(), () => {
+      const current = this.#current;
+      if (current === undefined) return;
+      const state = writableInternals.getState(this.#writable);
+      if (state !== 'erroring' && state !== 'errored') return;
+      this.#current = undefined;
+      current.pending.reject(writableInternals.getStoredError(this.#writable));
+    });
+  }
+
+  // Settles a parked pull: data has arrived, or the stream has ended.
+  #releaseParkedPull(): void {
+    const parked = this.#parkedPull;
+    if (parked !== undefined) {
+      this.#parkedPull = undefined;
+      parked.resolve();
     }
   }
 
+  // Counts a write against a FixedLengthStream's budget. False if it does
+  // not fit: it is then not delivered, and its sink step errors the stream.
+  #budget(entry: AcceptedWrite): boolean {
+    if (entry.budgeted) return true;
+    const remaining = this.#remaining;
+    if (remaining !== undefined) {
+      const len = BigInt(
+        TypedArrayPrototypeGetByteLength(entry.copied as Uint8Array) as number
+      );
+      if (len > remaining) return false;
+      this.#remaining = remaining - len;
+    }
+    entry.budgeted = true;
+    return true;
+  }
+
+  // The undelivered writes, in order — the rest of the in-flight write,
+  // then the writes queued behind it — up to `limit` bytes, counted against
+  // a FixedLengthStream's budget as they are taken.
+  #collectUndelivered(limit: number): AcceptedWrite[] {
+    const segments: AcceptedWrite[] = [];
+    let total = 0;
+    const current = this.#current;
+    if (current !== undefined && current.entry.end < 0) {
+      ArrayPrototypePush(segments, current.entry);
+      total += this.#undeliveredBytes(current.entry);
+    }
+    const snapshots = this.#snapshots;
+    for (let i = 0; i < snapshots.length && total < limit; i++) {
+      const entry = snapshots.get(i) as SnapshotEntry;
+      if (!entry.ok || entry.copied === undefined || entry.end >= 0) continue;
+      if (!this.#budget(entry)) break;
+      ArrayPrototypePush(segments, entry);
+      total += this.#undeliveredBytes(entry);
+    }
+    return segments;
+  }
+
+  #undeliveredBytes(entry: AcceptedWrite): number {
+    return (
+      (TypedArrayPrototypeGetByteLength(entry.copied as Uint8Array) as number) -
+      entry.delivered
+    );
+  }
+
+  // Hands the read that pulled everything already written, in write order
+  // (see the rendezvous model above). A BYOB read with a byobRequest (a
+  // direct reader) takes as much as fits in its view, across writes,
+  // answered with one respond(); otherwise (a default read, or any read on
+  // a tee branch) each write's remaining bytes are enqueued as one chunk,
+  // in a batch that notifies the consumers once, so a branch's BYOB read
+  // fills across them and a default read still takes one write. False if
+  // nothing is written.
+  //
+  // Runs only while a pull is outstanding (from sourcePull, or for a parked
+  // pull), so the controller cannot call pull again until that pull
+  // settles.
+  //
+  // Bytes a read has taken count as read even while it waits for its
+  // minimum (readAtLeast, { min }): the write they came from may settle,
+  // so a writer that awaits each write can supply the rest.
+  #deliver(): boolean {
+    const rc = this.#readableController as object;
+    const request = byteControllerByobRequestGet(rc);
+    const view = request === null ? null : byobRequestViewGet(request);
+    if (request !== null && view !== null) {
+      const viewLength = TypedArrayPrototypeGetByteLength(view) as number;
+      const segments = this.#collectUndelivered(viewLength);
+      if (segments.length === 0) return false;
+      const viewBuffer = TypedArrayPrototypeGetBuffer(view) as ArrayBuffer;
+      const viewOffset = TypedArrayPrototypeGetByteOffset(view) as number;
+      let filled = 0;
+      for (let i = 0; i < segments.length && filled < viewLength; i++) {
+        const entry = segments[i] as AcceptedWrite;
+        const bytes = entry.copied as Uint8Array;
+        const left = this.#undeliveredBytes(entry);
+        const room = viewLength - filled;
+        const n = left < room ? left : room;
+        TypedArrayPrototypeSet(
+          new Uint8Array(viewBuffer, viewOffset + filled, n),
+          new Uint8Array(
+            TypedArrayPrototypeGetBuffer(bytes) as ArrayBuffer,
+            (TypedArrayPrototypeGetByteOffset(bytes) as number) +
+              entry.delivered,
+            n
+          )
+        );
+        entry.delivered += n;
+        filled += n;
+        this.#deliveredTotal += n;
+        if (n === left) entry.end = this.#deliveredTotal;
+      }
+      this.#delivering = true;
+      try {
+        byobRequestRespond(request, filled);
+      } finally {
+        this.#delivering = false;
+      }
+    } else {
+      const segments = this.#collectUndelivered(Infinity);
+      if (segments.length === 0) return false;
+      const chunks: Uint8Array[] = [];
+      for (let i = 0; i < segments.length; i++) {
+        const entry = segments[i] as AcceptedWrite;
+        const bytes = entry.copied as Uint8Array;
+        const left = this.#undeliveredBytes(entry);
+        ArrayPrototypePush(
+          chunks,
+          entry.delivered === 0
+            ? bytes
+            : new Uint8Array(
+                TypedArrayPrototypeGetBuffer(bytes) as ArrayBuffer,
+                (TypedArrayPrototypeGetByteOffset(bytes) as number) +
+                  entry.delivered,
+                left
+              )
+        );
+        this.#deliveredTotal += left;
+        entry.delivered += left;
+        entry.end = this.#deliveredTotal;
+      }
+      this.#delivering = true;
+      try {
+        readableInternals.enqueueBytesBatch(rc, chunks);
+      } finally {
+        this.#delivering = false;
+      }
+    }
+    this.#checkSettlement();
+    return true;
+  }
+
+  // A parked pull takes a write as soon as it is written. The write's
+  // size() callback is where it arrives, inside writer.write() and before
+  // the write is queued, so the delivery waits a microtask.
+  #scheduleDelivery(): void {
+    if (this.#parkedPull === undefined || this.#deliveryScheduled) return;
+    this.#deliveryScheduled = true;
+    PromisePrototypeThen(PromiseResolve(), () => {
+      this.#deliveryScheduled = false;
+      if (this.#parkedPull !== undefined && this.#deliver()) {
+        this.#releaseParkedPull();
+      }
+    });
+  }
+
+  // The stream has ended: drop the undelivered writes and settle a parked
+  // pull.
+  #discardPending(): void {
+    this.#snapshots.clear();
+    this.#releaseParkedPull();
+  }
+
   #errorWritableAndUnblockWrite(reason: unknown): void {
+    this.#discardPending();
     const wc = this.#writableController;
     if (wc !== undefined) {
       writableControllerError(wc, reason);
@@ -351,12 +643,13 @@ class IdentityTransformStream {
     // before the caller can resize or detach the buffer. sinkWrite
     // consumes the snapshots in FIFO order: the machinery calls size()
     // exactly once per write and runs the sink write algorithm for the
-    // accepted ones in the same order. The machinery runs size() BEFORE
-    // its own state checks, so a write against a closing/errored stream
-    // is detected and skipped without copying (see willAcceptWrite in
-    // writable.ts), keeping doomed writes from growing the FIFO; terminal
-    // transitions clear entries whose queued writes the machinery
-    // discards.
+    // accepted ones in the same order. Until then a snapshot is already
+    // written as far as reads are concerned (#deliver). The machinery runs
+    // size() BEFORE its own state checks, so a write against a
+    // closing/errored stream is detected and skipped without copying (see
+    // willAcceptWrite in writable.ts), keeping doomed writes from growing
+    // the FIFO; terminal transitions clear entries whose queued writes the
+    // machinery discards.
     //
     // An INVALID chunk must not throw out of size(): the spec's
     // GetChunkSize error path errors the stream immediately, which would
@@ -373,13 +666,6 @@ class IdentityTransformStream {
     // adjustWriteBufferSize with actual byte lengths. Without an explicit
     // highWaterMark the returned size stays 1 per chunk.
     //
-    // Entries are tagged with an own `ok` data property rather than
-    // discriminated with an `in` check so that a polluted Object.prototype
-    // cannot forge or mask the discriminant.
-    type SnapshotEntry =
-      | { ok: true; copied: Uint8Array | undefined }
-      | { ok: false; error: unknown };
-    const snapshots: RingBufferType<SnapshotEntry> = new RingBuffer();
     // A user-supplied highWaterMark of -0 is normalized to +0 so it cannot
     // surface as a negative-zero desiredSize; the C++ implementation's
     // uint64 coercion normalizes it the same way. For a number, adding 0
@@ -402,10 +688,22 @@ class IdentityTransformStream {
         // Size is computed before the push: if it ever threw, nothing
         // would have been queued and the FIFO could not desync.
         const size = explicitHighWaterMark !== undefined ? byteSize(chunk) : 1;
-        snapshots.push({ ok: true, copied });
+        this.#snapshots.push({
+          __proto__: null,
+          ok: true,
+          copied,
+          delivered: 0,
+          budgeted: false,
+          end: -1,
+        } as AcceptedWrite);
+        if (copied !== undefined) this.#scheduleDelivery();
         return size;
       } catch (error) {
-        snapshots.push({ ok: false, error });
+        this.#snapshots.push({
+          __proto__: null,
+          ok: false,
+          error,
+        } as SnapshotEntry);
         return 1;
       }
     };
@@ -418,16 +716,12 @@ class IdentityTransformStream {
           }
         : { __proto__: null, size: sizeAndSnapshot };
 
-    const initialBackpressureChange =
-      PromiseWithResolvers() as PromiseWithResolversType<void>;
-    markPromiseHandled(initialBackpressureChange.promise);
-    this.#backpressureChange = initialBackpressureChange;
-
     // --- Writable side (byte-only ingress) ---
-    const sinkWrite = async (_chunk: unknown): Promise<void> => {
+    const sinkWrite = (_chunk: unknown): Promise<void> | undefined => {
       // The snapshot was taken in sizeAndSnapshot when this write was
       // accepted; the raw chunk argument is deliberately unused (its
       // buffer may have been resized or detached since).
+      const snapshots = this.#snapshots;
       if (snapshots.length === 0) {
         throw new TypeError(
           'IdentityTransformStream internal error: snapshot queue desync'
@@ -442,43 +736,44 @@ class IdentityTransformStream {
       if (!entry.ok) {
         throw writableInternals.nonFatalWriteRejection(entry.error);
       }
-      const copied = entry.copied;
-      if (copied === undefined) return; // zero-length no-op
+      if (entry.copied === undefined) return; // zero-length no-op
 
       // FixedLengthStream overwrite enforcement (matches C++
-      // identity-transform-stream.c++ tryReadInternal overwrite check).
-      if (this.#remaining !== undefined) {
-        const len = BigInt(TypedArrayPrototypeGetByteLength(copied) as number);
-        if (len > this.#remaining) {
-          const err = new RangeError(
-            'Attempt to write too many bytes through a FixedLengthStream.'
-          );
-          snapshots.clear();
-          const rc = this.#readableController;
-          if (rc !== undefined) byteControllerError(rc, err);
-          throw err;
-        }
-        this.#remaining -= len;
+      // identity-transform-stream.c++ tryReadInternal overwrite check). A
+      // write already delivered fitted the budget.
+      if (!this.#budget(entry)) {
+        const err = new RangeError(
+          'Attempt to write too many bytes through a FixedLengthStream.'
+        );
+        this.#discardPending();
+        const rc = this.#readableController;
+        if (rc !== undefined) byteControllerError(rc, err);
+        throw err;
       }
 
-      // RENDEZVOUS: block here until a reader.read() triggers pull,
-      // which sets #backpressure = false, or until the writable is
-      // aborted or the readable cancelled, which wake the write so that
-      // it throws. See file-level comment.
-      while (this.#backpressure) {
-        await this.#backpressureChange.promise;
-        const state = writableInternals.getState(this.#writable);
-        if (state === 'erroring' || state === 'errored') {
-          throw writableInternals.getStoredError(this.#writable);
-        }
+      // RENDEZVOUS: the write settles once the slowest consumer has read
+      // its last byte (#checkSettlement) or a consumer is starved, or
+      // rejects when the writable is aborted or the readable cancelled
+      // (#unblockWrite). See file-level comment. A read may already have
+      // taken it: then it settles now if the slowest consumer has read it,
+      // or if a consumer is starved (a pull is parked).
+      if (
+        entry.end >= 0 &&
+        (this.#parkedPull !== undefined ||
+          entry.end <= this.#consumedBySlowest())
+      ) {
+        return;
       }
-      const rc = this.#readableController as object;
-      byteControllerEnqueue(rc, copied);
-      const desiredSize = byteControllerDesiredSizeGet(rc);
-      const backpressure = desiredSize !== null && desiredSize <= 0;
-      if (backpressure !== this.#backpressure) {
-        this.#setBackpressure(backpressure);
+      const pending = PromiseWithResolvers() as PromiseWithResolversType<void>;
+      this.#current = {
+        __proto__: null,
+        entry,
+        pending,
+      } as InFlightWrite;
+      if (this.#parkedPull !== undefined && this.#deliver()) {
+        this.#releaseParkedPull();
       }
+      return pending.promise;
     };
     // FixedLengthStream underwrite enforcement (matches C++
     // identity-transform-stream.c++ tryReadInternal underwrite check).
@@ -489,16 +784,17 @@ class IdentityTransformStream {
         const err = new RangeError(
           'FixedLengthStream did not see all expected bytes before close().'
         );
-        snapshots.clear();
+        this.#discardPending();
         const rc = this.#readableController;
         if (rc !== undefined) byteControllerError(rc, err);
         throw err;
       }
       const rc = this.#readableController;
       if (rc !== undefined) byteControllerClose(rc);
+      this.#releaseParkedPull();
     };
     const sinkAbort = (reason: unknown): void => {
-      snapshots.clear();
+      this.#discardPending();
       const rc = this.#readableController;
       if (rc !== undefined) byteControllerError(rc, reason);
     };
@@ -516,7 +812,7 @@ class IdentityTransformStream {
       sinkStrategy
     );
     // abort() runs the abort steps only after the in-flight write settles,
-    // but a write parked in the rendezvous waits for a read that may never
+    // but a write waiting in the rendezvous waits for reads that may never
     // come. The hook runs at the start of abort() and wakes the write; by
     // the time it resumes, the stream is erroring, so the write rejects
     // with the abort reason and the abort steps run.
@@ -525,14 +821,16 @@ class IdentityTransformStream {
     });
 
     // --- Readable side (byte stream, BYOB capable) ---
-    // RENDEZVOUS: pull is called when a reader.read() needs data.
-    // Clearing backpressure here unblocks the pending sinkWrite.
-    const sourcePull = (): Promise<void> => {
-      this.#setBackpressure(false);
-      return this.#backpressureChange.promise;
+    // RENDEZVOUS: pull is called when a reader.read() needs data. It hands
+    // over everything already written, or parks until a write arrives.
+    const sourcePull = (): Promise<void> | undefined => {
+      if (this.#deliver()) return undefined;
+      this.#releaseForStarvedConsumer();
+      const parked = PromiseWithResolvers() as PromiseWithResolversType<void>;
+      this.#parkedPull = parked;
+      return parked.promise;
     };
     const sourceCancel = (reason: unknown): void => {
-      snapshots.clear();
       this.#errorWritableAndUnblockWrite(reason);
     };
 
@@ -555,11 +853,19 @@ class IdentityTransformStream {
       __proto__: null,
       highWaterMark: 0,
     });
+    // A tee branch's (or the sole reader's) progress may settle the
+    // in-flight write: its bytes count as read once the slowest consumer
+    // has read them.
+    readableInternals.setConsumptionHook(
+      this.#readableController as object,
+      () => {
+        this.#onConsumption();
+      }
+    );
 
     // The Node.js interop hook errors one half without running sinkAbort
     // or sourceCancel; error the other half too, and wake a parked write.
     const errorPair = (reason: unknown): void => {
-      snapshots.clear();
       const rc = this.#readableController;
       if (rc !== undefined) byteControllerError(rc, reason);
       this.#errorWritableAndUnblockWrite(reason);

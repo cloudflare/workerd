@@ -8,7 +8,8 @@
 // branches, Request clone consumption, and TextDecoderStream over a
 // Request body.
 
-import { strictEqual, ok } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 // Bounded observation of a promise's outcome, so a regression back to a
 // hang fails the assertion instead of wedging the test.
@@ -91,6 +92,29 @@ export const byobReadAtLeastManual = {
 };
 
 // Test IdentityTransformStream with readAtLeast incremental writes
+// Consumes twelve queued 1-byte writes (eight zeros, then 1, 2, 3, 4)
+// with readAtLeast(8, 8 bytes) and then readAtLeast(2, 4 bytes).
+// DIVERGENCE (ledger #5): a BYOB read on an identity stream takes at least
+// its minimum and then everything already written, up to its view, so
+// under TypeScript the second read takes all four remaining bytes; under
+// C++ a read stops at its minimum, and a third read takes [3, 4].
+async function assertReadAtLeastOverSmallWrites(reader, writer) {
+  const res = await reader.readAtLeast(8, new Uint8Array(8));
+  strictEqual(res.value.byteLength, 8);
+
+  const res2 = await reader.readAtLeast(2, new Uint8Array(4));
+  if (usingTsImpl) {
+    deepStrictEqual([...res2.value], [0x1, 0x2, 0x3, 0x4]);
+    await writer.close();
+    const tail = await reader.read(new Uint8Array(4));
+    strictEqual(tail.done, true);
+    return;
+  }
+  deepStrictEqual([...res2.value], [0x1, 0x2]);
+  const res3 = await reader.readAtLeast(2, new Uint8Array(4));
+  deepStrictEqual([...res3.value], [0x3, 0x4]);
+}
+
 export const identityTransformReadAtLeast = {
   async test() {
     const { readable, writable } = new IdentityTransformStream();
@@ -110,19 +134,7 @@ export const identityTransformReadAtLeast = {
     writer.write(new Uint8Array([0x3]));
     writer.write(new Uint8Array([0x4]));
 
-    const res = await reader.readAtLeast(8, new Uint8Array(8));
-    strictEqual(res.value.byteLength, 8);
-
-    const res2 = await reader.readAtLeast(2, new Uint8Array(4));
-    const res3 = await reader.readAtLeast(2, new Uint8Array(4));
-
-    strictEqual(res2.value.byteLength, 2);
-    strictEqual(res2.value[0], 0x1);
-    strictEqual(res2.value[1], 0x2);
-
-    strictEqual(res3.value.byteLength, 2);
-    strictEqual(res3.value[0], 0x3);
-    strictEqual(res3.value[1], 0x4);
+    await assertReadAtLeastOverSmallWrites(reader, writer);
   },
 };
 
@@ -146,19 +158,7 @@ export const fixedLengthStreamReadAtLeast = {
     writer.write(new Uint8Array([0x3]));
     writer.write(new Uint8Array([0x4]));
 
-    const res = await reader.readAtLeast(8, new Uint8Array(8));
-    strictEqual(res.value.byteLength, 8);
-
-    const res2 = await reader.readAtLeast(2, new Uint8Array(4));
-    const res3 = await reader.readAtLeast(2, new Uint8Array(4));
-
-    strictEqual(res2.value.byteLength, 2);
-    strictEqual(res2.value[0], 0x1);
-    strictEqual(res2.value[1], 0x2);
-
-    strictEqual(res3.value.byteLength, 2);
-    strictEqual(res3.value[0], 0x3);
-    strictEqual(res3.value[1], 0x4);
+    await assertReadAtLeastOverSmallWrites(reader, writer);
   },
 };
 

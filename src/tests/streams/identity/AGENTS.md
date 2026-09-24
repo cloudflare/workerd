@@ -68,7 +68,11 @@ queued without awaiting: the chunks buffer inside the stream, in order. But
 each `write()` promise resolves only once reads have fully consumed that
 write's bytes, `close()` only once everything queued before it has drained,
 and a read completes only when there is something to deliver (data, EOF, or
-an error). Nothing is delivered ahead of read demand. (Contrast a standard
+an error). Nothing is delivered ahead of read demand; under TypeScript a
+read's demand takes everything already written, including writes queued
+behind the one the writable is on, so a write read ahead of its turn
+settles when the writable reaches it, a few microtasks after its last byte
+is read. (Contrast a standard
 `TransformStream`, where `write()` settles once the chunk passes into the
 readable's queue, before any read occurs.)
 
@@ -138,7 +142,16 @@ The readable side supports `getReader({ mode: 'byob' })` (unlike a standard
 
 - The destination view is filled at its real offset, bounded by its real
   extent; a write larger than the view is delivered across successive
-  reads, and the write resolves only once fully consumed.
+  reads, and the write resolves only once fully consumed — its bytes stay
+  counted in the writer's `desiredSize` until then.
+- A read fills its view across write boundaries with everything already
+  written (zero-length writes and invalid chunks in between deliver
+  nothing; a close ends it); each write resolves once its last byte has
+  been read. A read with a minimum (`readAtLeast`, `{ min }`) stays pending
+  until the minimum is met, then takes everything already written, up to
+  its view. The same holds for BYOB reads on tee branches. Under C++ a read
+  carries at most one write's bytes, and a read with a minimum stops once
+  it is met (ledger #22).
 - Under `streams_byob_reader_detaches_buffer`, the input buffer is
   transferred; the result is a view over the transferred buffer. At EOF
   (under `internal_stream_byob_return_view`) a BYOB read resolves `done`
@@ -166,11 +179,19 @@ The readable side supports `getReader({ mode: 'byob' })` (unlike a standard
 
 - Both branches observe the full content, including through nested tees
   (`branch.tee()`), with ordering preserved to every leaf.
-- `tee()` itself creates no demand; a **single** branch's read is
-  sufficient to drive the writer (write resolution and `desiredSize`
-  recovery), while the other branch buffers a copy that is not counted
-  against the writer's budget. Reading one branch (or one nested leaf) to
-  completion never deadlocks.
+- `tee()` itself creates no demand; a single branch's read is demand.
+  When the write then settles diverges (ledger #23). C++: once one branch
+  has read it; the sibling's buffered copy is not counted against the
+  writer's budget. TypeScript: backpressure follows the slowest branch — a
+  write settles, and leaves the writer's `desiredSize`, once every branch
+  has read its last byte, or once a branch is **starved** (it has a
+  pending read and has taken everything delivered), as a pending read on
+  any cursor overrides backpressure in the queue's pull rule. Either way,
+  reading one branch (or one nested leaf) to completion never deadlocks:
+  the unread branch buffers.
+- Each branch's BYOB reads are sized independently and, under TypeScript,
+  span the writes already made (ledger #22, #23); C++ caps a branch's reads
+  at the sizes the first-reading branch requested.
 - Canceling one branch leaves the writer flowing to the survivor. The
   cancel promise semantics and the fate of writes after **both** branches
   cancel diverge (ledger).
@@ -227,7 +248,7 @@ pattern; a change to either side fails its cell.
 | 11 | FLS enforcement | read-side `TypeError`; the offending write/close succeeds | eager write-side `RangeError`; readable errors too | `fixed-length-errors.js` |
 | 12 | Already-detached `ArrayBuffer` chunk | zero-length no-op | rejects `TypeError` (per-write; the stream survives) | `alreadyDetachedBufferAtWrite` |
 | 13 | Single tee-branch cancel promise | resolves immediately | WHATWG semantics: shared promise, settles when both branches cancel | `cancelOneBranchKeepsWriterFlowing` |
-| 14 | Write after both tee branches cancel | parks forever (composite cancel not propagated to the writable) | rejects `AggregateError` "All readable stream tee branches were canceled" | `writeAfterBothBranchesCancel` |
+| 14 | Write after both tee branches cancel | parks forever (composite cancel not propagated to the writable) | rejects `AggregateError` "All readable stream tee branches were canceled" — also a write in flight when the last branch cancels, even if a branch had read it | `writeAfterBothBranchesCancel`, `inFlightWriteRejectsWhenBranchesLeaveAfterRead` |
 | 15 | Piping between identity streams | not implemented: `pipeTo()` takes both locks then rejects `TypeError` ("Inter-TransformStream ReadableStream.pipeTo() is not implemented."); `pipeThrough()` throws it synchronously | fully functional: delivery, completion, and error propagation in both directions with original reason instances; circular `pipeThrough(its)` currently succeeds and locks both sides — `TODO(streams-ts)`: it should fail | `pipe-integration.js` |
 | 16 | Second concurrent default read | rejected at `read()` time: `TypeError` "This ReadableStream only supports a single pending read request at a time." | parked and served in order | `closeFromReadContinuationWithSecondReadParked` |
 | 17 | Default-HWM accounting | inert: `desiredSize` stays 1 regardless of buffered writes; `ready` never replaced | one unit per buffered chunk against the default HWM of 1: `desiredSize` goes negative, `ready` replaced until drained | `defaultHighWaterMarkAccounting` |
@@ -235,6 +256,8 @@ pattern; a change to either side fails its cell.
 | 19 | Non-Error cancel reasons | always surfaces an Error: strings become the message, `undefined` becomes "Stream was cancelled.", standard error types preserved, custom subclass names preserved via the pinned `enhanced_error_serialization` | the original reason VALUE, untouched — same instance, same string, even `undefined` itself | `cancelReasonTypeSurfacing` |
 | 20 | Read pending at the reader's own `cancel()` | rejects with the re-created cancel reason ("Stream was cancelled." for a bare cancel); the rejection is delivered through a promise adopted a tick later, which the unhandled-rejection tracker predating `unhandled_rejection_after_microtask_checkpoint` reports as unhandled before the read's handler runs (pinned where it surfaces, in `src/tests/node/http-server`'s legacy cell) | resolves `{ value: undefined, done: true }` (spec) | `cancelSettlesPendingRead` |
 | 21 | Reads after an abort that cleared a parked write | reject `Error` "Network connection lost.": cancelling the parked sink write puts the transform into its disconnection error before the abort reason arrives | reject with the original abort reason, as after any abort | `abortParkedWriteErrorsReadable` |
+| 22 | BYOB read with several writes already made | answered with at most one write's bytes (a read with a minimum stops once it is met); the next write waits for another read | fills its view with everything already written, across writes, up to a close — past a read's minimum too; each write settles once a read has its last byte | `byobReadSpansQueuedWrites`, `byobReadSpanningBoundaries`; readAtLeast over 1-byte writes in the r2-patterns suite (its ledger #5) |
+| 23 | Write settlement and BYOB reads across tee branches | a write settles once one branch has read it (the sibling's copy uncounted); a branch's reads are capped at the sizes the first-reading branch requested | a write settles once the slowest branch has read it, or once a branch is starved (pending read, nothing left to take) — never once the writable is erroring, when it rejects instead; each branch's reads are sized independently and span writes | `teeCreatesNoDemand`, `singleBranchReadDrivesWriter`, `writerDesiredSizeAcrossTee`, `abortBeforeStarvedReadRejectsInFlightWrite`, `tee-byob.js` |
 
 ## Assertion catalogue
 
@@ -247,23 +270,24 @@ pattern; a change to either side fails its cell.
 | `copy-semantics.js` | delivered chunk never aliases the source; source mutation after delivery is invisible; source is not detached |
 | `buffer-lifecycle.js` | write-time snapshot survives later resize/detach in both implementations; degenerate write-time inputs (already-detached per ledger #12, out-of-bounds views); shadowing/throwing metadata getters never consulted |
 | `ordering.js` | 1:1 write/read correspondence in both interleavings; multi-chunk aggregate integrity; clean EOF tails |
-| `byob.js` | BYOB reader support; partial fills across reads with write completion on full consumption; lying destination extents (at call and after enqueue) with sentinel overwrite guards; read-call validation (zero-length view, non-view, missing argument); input buffer detached by read with non-detachable (SAB-backed) destinations rejected; repeated EOF zero-length views with preserved buffers |
-| `backpressure.js` | writes and close queue unboundedly with settlement on consumption; advisory overfill (negative `desiredSize`); default HWM 1 with divergent accounting (ledger #17); explicit HWM as initial `desiredSize` (negative-zero HWM normalized to +0); byte-level tracking incl. in-flight bytes; string accounting (ledger #7); `ready` replacement and recovery |
+| `byob.js` | BYOB reader support; partial fills across reads with write completion on full consumption (still pending a macrotask after a partial read); reads spanning queued writes, past zero-length and invalid ones, stopping at a close, through FLS (#22); lying destination extents (at call and after enqueue) with sentinel overwrite guards; read-call validation (zero-length view, non-view, missing argument); input buffer detached by read with non-detachable (SAB-backed) destinations rejected; repeated EOF zero-length views with preserved buffers |
+| `backpressure.js` | writes and close queue unboundedly with settlement on consumption (a write read ahead of its turn settles when the writable reaches it, so recovery is asserted after the writes settle); a partial BYOB read keeps the write pending and its bytes counted in `desiredSize`; advisory overfill (negative `desiredSize`); default HWM 1 with divergent accounting (ledger #17); explicit HWM as initial `desiredSize` (negative-zero HWM normalized to +0); byte-level tracking incl. in-flight bytes; string accounting (ledger #7); `ready` replacement and recovery |
 | `close-propagation.js` | pending read resolves done; post-close reads done; buffered data drains before done; `closed` promises settle; writes after a queued close reject (message per impl) without disturbing the close or delivered bytes |
 | `abort-propagation.js` | pending/subsequent reads and both `closed` promises reject (identity per ledger #8); modern abort clears a pending write, rejecting it with the abort reason (undefined or original instance); abort of a write parked in the sink settles without a read (ITS and FLS, after an earlier consumed write, through the stream with the writer released), rejecting the write, the writes and close queued behind it, and `writer.closed` with the original reason; reads afterwards (ledger #21); later writes (ledger #9) |
 | `cancel-propagation.js` | pending write/close reject (ledger #8, #10); canceling reader's later reads resolve done, its `closed` resolves; a read pending at the cancel settles per ledger #20; in C++, cancellation of a pending `pipeTo()` sink write establishes the disconnection error before a later readable cancel reason |
 | `fixed-length.js` | exact-length delivery (one and two chunks); `FLS(0)`; HWM capping incl. bigint; capped-HWM data flow |
 | `fixed-length-errors.js` | over/underwrite and close-without-write error the stream with the documented messages (types/surfacing per ledger #11); abort skips the underwrite check |
 | `tee.js` | both branches observe full content (ITS and FLS); single-branch read does not hang |
-| `tee-backpressure.js` | tee creates no demand; one branch drives the writer; sibling copy uncounted; cancel semantics (ledger #13, #14) |
+| `tee-backpressure.js` | tee creates no demand; write settlement across branches (ledger #23: one branch in C++; the slowest or a starved branch in TS, with `desiredSize` held until then); cancel semantics (ledger #13, #14) |
+| `tee-byob.js` | BYOB reads of different sizes on each branch (ITS and FLS) with per-read write settlement; a lagging branch holding the writer's `desiredSize`; cancelling the slower branch settles writes; a BYOB branch spanning writes beside a default-reader branch; nested-tee leaves with different view sizes (ledger #22, #23) |
 | `tee-nested.js` | nested tee delivers to all leaves in order; single-leaf read does not hang |
-| `draining-reader.js` | TS only (C++ cell asserts the global's absence): `expectedLength` pass-through (bigint for FLS, undefined for ITS, undefined after release); a single read drains every synchronously buffered chunk plus the close sentinel in one batch (tee-sibling backlog), while a rendezvous stream yields one chunk per read via the always-makes-progress fallback; write/close settlement through the conduit; lock exclusivity and release |
+| `draining-reader.js` | TS only (C++ cell asserts the global's absence): `expectedLength` pass-through (bigint for FLS, undefined for ITS, undefined after release); a single read drains every synchronously buffered chunk plus the close sentinel in one batch (tee-sibling backlog), and over a rendezvous stream the first read sweeps every write made before it, one chunk per write (the close sentinel with them or in its own read); write/close settlement through the conduit; lock exclusivity and release |
 | `body-integration.js` | Response/Request with identity-stream bodies: `text()` drives the rendezvous; `resp.body` is the same stream object (unwrapped, unconsumed, unlocked); FLS happy path and underwrite through body consumption (types per ledger #11); multi-megabyte patterned bodies verified byte-for-byte through `arrayBuffer()` (ITS and FLS Response, Request) |
 | `pipe-integration.js` | `pipeTo`/`pipeThrough` between identity streams (ledger #15): TS delivery (small and multi-megabyte patterned bodies), completion, and both error-propagation directions with original reasons; C++ not-implemented wall (rejection for pipeTo, synchronous throw for pipeThrough); circular `pipeThrough(its)` with the `TODO(streams-ts)` pin |
 | `payload-helpers.js` | shared machinery: continuous prime-modulus byte pattern for large-body generation and byte-exact verification |
-| `reentrancy.js` | user code re-entering mid-processing: `Object.prototype.then` interception during read resolution (consulted once per read in C++, twice in TS) incl. a re-entrant `writer.close()` from inside the getter; close/write/sibling-cancel from read continuations; second-concurrent-read divergence (ledger #16) |
+| `reentrancy.js` | user code re-entering mid-processing: `Object.prototype.then` interception during read resolution (consulted once per read in C++, twice in TS) incl. a re-entrant `writer.close()` or `writer.abort()` from inside the getter (an abort rejects the write being answered, in TS); close/write/sibling-cancel from read continuations; second-concurrent-read divergence (ledger #16) |
 | `lock-release.js` | `releaseLock()` rejects the released handle's `closed` promise with TypeError ("has been released"); the stream returns to a lockable state |
-| `read-at-least.js` | `readAtLeast(min, view)` parks until min bytes accumulate across writes, EOF yields a zero-length view, unavailable on default readers; argument validation per ledger #18 |
+| `read-at-least.js` | `readAtLeast(min, view)` parks until min bytes accumulate across writes, EOF yields a zero-length view, unavailable on default readers; argument validation per ledger #18; a `read(view, { min })` spanning two writes settles the first and leaves the second pending until its last byte is read |
 | `reader-writer-acquisition.js` | `WritableStreamDefaultWriter`/`ReadableStreamDefaultReader`/`ReadableStreamBYOBReader` are directly constructible (no streams_enable_constructors needed) and lock the stream; `getReader({mode})` validates and a failed acquisition leaves the stream unlocked |
 | `cancel-reason-types.js` | the cancel-reason type matrix of ledger #19, asserted on both the pending write and the pending close |
 | `gc-interplay.js` | a writer keeps its collected stream wrapper's underlying stream alive and operable (`--expose-gc`) |
