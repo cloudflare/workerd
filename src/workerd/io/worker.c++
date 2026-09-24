@@ -1863,7 +1863,13 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
         Error, "Failed to initialize node-internal:internal_timers_global_override module");
   }
 
-  return js.resolveModule(mainModule.toString(false), jsg::RequireEsm::YES);
+  auto ns = js.resolveModule(mainModule.toString(false), jsg::RequireEsm::YES);
+
+  // Flush microtasks enqueued during top-level evaluation so that fire-and-forget promise
+  // continuations (e.g. a bare `import(...).catch(...)` in the entrypoint) run before the first
+  // request, and do not leak onto a request's microtask checkpoint.
+  js.runMicrotasks();
+  return ns;
 }
 }  // anonymous namespace
 

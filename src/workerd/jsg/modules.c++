@@ -342,10 +342,13 @@ kj::Maybe<v8::Local<v8::Promise>> instantiateModule(
     KJ_UNREACHABLE;
   }
 
-  // At depth 0 draining is safe, and we do it unconditionally so that any promises scheduled
-  // during top-level evaluation are settled even if not directly awaited. Worker code depends
-  // on this, e.g. a bare `import(...).catch(...)` in the entrypoint.
-  js.runMicrotasks();
+  // A synchronous graph has already settled during Evaluate(). Only a pending top-level
+  // await needs the microtask queue drained, and at depth 0 that is safe. Draining for an
+  // already-settled graph would run unrelated pending microtasks as a side effect of a
+  // synchronous require()/getBuiltinModule() call.
+  if (prom->State() == v8::Promise::kPending) {
+    js.runMicrotasks();
+  }
 
   switch (prom->State()) {
     case v8::Promise::kPending:

@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "module-eval-microtask-newmodreg-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "module-eval-microtask-test.js"),
+          (name = "sync-cjs", commonJsModule = "exports.ok = true;"),
+          (name = "sync-esm", esModule = "export const ok = true;"),
+          (name = "tla", esModule = "await Promise.resolve();\nexport const value = 42;\n"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "enable_nodejs_os_module", "new_module_registry", "experimental"]
+      )
+    ),
+    ( name = "module-startup-flush-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "module-startup-flush-test.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "enable_nodejs_os_module", "new_module_registry", "experimental"]
+      )
+    ),
+  ],
+);
