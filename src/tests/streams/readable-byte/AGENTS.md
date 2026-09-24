@@ -45,6 +45,7 @@ behavior-parity (messages aside).
 | 28 | read(view) with a multi-byte view (e.g. Uint16Array) on a native body | resolves Uint8Array views of whatever bytes arrive, partial elements included | views of the read's own type holding whole elements; a partial element is carried into the next read, and one left at EOF errors the stream with TypeError 'Insufficient bytes to fill elements in the given view' (as a JS byte source's close() mid-element does, spec) | `nativeByobMultiByteViews` |
 | 29 | a native body's reader released while its read is in flight, then tee() or clone() | releaseLock() throws TypeError (outstanding read promises) | the read rejects; both branches receive the whole body, including the in-flight read's bytes | `teeNativeBodyAfterReleaseMidRead` |
 | 30 | resizable ArrayBuffers handed in by read(view), enqueue() or respondWithNewView() | kept resizable except after enqueue(): the source can shrink byobRequest.view.buffer, and respond() then throws TypeError 'Cannot respond with a zero-length or detached view' (read left pending); respondWithNewView() and closed-stream read(view) results are resizable | transferred to fixed length (spec TransferArrayBuffer): byobRequest.view.buffer.resize() throws TypeError, and every result buffer is fixed-length | `resizableByobRequestCannotShrink`, `resizableBuffersDeliveredFixedLength`, `readResizableView` |
+| 31 | default read with autoAllocateChunkSize set while bytes are queued (the ledger #17 shape with auto-allocation) | copies every queued chunk into one fresh autoAllocateChunkSize buffer (5 bytes in a 64-byte buffer) | hands over the head chunk, uncopied (spec PullSteps): chunk by chunk, each result over its enqueued buffer; only an empty queue allocates, for the source's byobRequest | `autoAllocateDefaultReadTakesQueuedChunk` |
 
 Parity worth noting (probed, pinned): byte hwm defaults to 0 with NO
 automatic pull; pull-throw and error-then-throw identity; enqueue
@@ -119,7 +120,7 @@ named suite test pins directly, differing only in incidental asserts.
 | `construction.js` | ledger #1, #2, #4; byte hwm default 0 |
 | `pull-timing.js` | ledger #3; pull-throw seeds |
 | `controller.js` | ledger #5, #7, #21, #22, #23; enqueue-discards-request; read-after-close and read-after-cancel; detach-at-call |
-| `byob-reader.js` | ledger #20, #28; view-type matrix + offsets + auto-allocate sizing (migrated streams-byob-edge-cases) + mismatched sizes/types, subarray, multi-pending-reads, byobreaderRegression (migrated streams-js-test) |
+| `byob-reader.js` | ledger #20, #28, #31; view-type matrix + offsets + auto-allocate sizing (migrated streams-byob-edge-cases) + mismatched sizes/types, subarray, multi-pending-reads, byobreaderRegression (migrated streams-js-test) |
 | `respond.js` | ledger #6, #8, #15, #16; all 31 streams-respond-test tests (respond/respondWithNewView/pumps/cancel races/UAF shapes) + js-test respond family |
 | `release-relock.js` | ledger #9, #10; the WPT releaseLock→second-reader cluster; release with two pending reads or a partially filled head |
 | `read-min.js` | ledger #11-#13, #27; byobMin/constraints/readAtLeast (migrated streams-test.js); /chunked SELF endpoint |

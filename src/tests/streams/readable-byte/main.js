@@ -85,6 +85,7 @@ export {
   byobMixedViewTypes,
   byobViewOffset,
   byobAutoAllocateSizes,
+  autoAllocateDefaultReadTakesQueuedChunk,
   byobPartialRespondMisalignsFillOffset,
   readableStreamBytesMismatchedSizes,
   readableStreamBytesMismatchedViewTypes,
