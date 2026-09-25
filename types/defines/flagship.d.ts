@@ -16,6 +16,14 @@ export interface FlagshipEvaluationDetails<T> {
   errorMessage?: string | undefined;
 }
 
+export type FlagshipWidenedValue<T> = T extends boolean
+  ? boolean
+  : T extends string
+    ? string
+    : T extends number
+      ? number
+      : T;
+
 export interface FlagshipEvaluationError extends Error {}
 
 /**
@@ -68,7 +76,7 @@ export declare abstract class Flagship {
     flagKey: string,
     defaultValue: T,
     context?: FlagshipEvaluationContext
-  ): Promise<T>;
+  ): Promise<FlagshipWidenedValue<T>>;
 
   /**
    * Get a flag value with full evaluation details, inferring its expected type from the default value.
@@ -87,7 +95,7 @@ export declare abstract class Flagship {
     flagKey: string,
     defaultValue: T,
     context?: FlagshipEvaluationContext
-  ): Promise<FlagshipEvaluationDetails<T>>;
+  ): Promise<FlagshipEvaluationDetails<FlagshipWidenedValue<T>>>;
 
   /**
    * Get a boolean flag value.

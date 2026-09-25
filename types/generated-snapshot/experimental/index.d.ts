@@ -15062,6 +15062,13 @@ interface FlagshipEvaluationDetails<T> {
   errorCode?: string | undefined;
   errorMessage?: string | undefined;
 }
+type FlagshipWidenedValue<T> = T extends boolean
+  ? boolean
+  : T extends string
+    ? string
+    : T extends number
+      ? number
+      : T;
 interface FlagshipEvaluationError extends Error {}
 /**
  * Feature flags binding for evaluating feature flags from a Cloudflare Workers script.
@@ -15107,7 +15114,7 @@ declare abstract class Flagship {
     flagKey: string,
     defaultValue: T,
     context?: FlagshipEvaluationContext,
-  ): Promise<T>;
+  ): Promise<FlagshipWidenedValue<T>>;
   /**
    * Get a flag value with full evaluation details, inferring its expected type from the default value.
    * @param flagKey The key of the flag to evaluate.
@@ -15120,7 +15127,7 @@ declare abstract class Flagship {
     flagKey: string,
     defaultValue: T,
     context?: FlagshipEvaluationContext,
-  ): Promise<FlagshipEvaluationDetails<T>>;
+  ): Promise<FlagshipEvaluationDetails<FlagshipWidenedValue<T>>>;
   /**
    * Get a boolean flag value.
    * @param flagKey The key of the flag to evaluate.
