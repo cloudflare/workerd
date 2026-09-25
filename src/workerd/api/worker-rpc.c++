@@ -893,21 +893,20 @@ JsRpcCallDispatch dispatchJsRpcCall(IoContext& ioContext,
   }
   builder.getResultsStreamHandler().setExternalPusher(ioContext.getExternalPusher());
 
-  auto callResult = builder.send();
-  kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> promise = kj::mv(callResult);
+  auto parts = builder.send().releaseParts();
   KJ_IF_SOME(targetRetryable, targetRetryability) {
     KJ_IF_SOME(observer,
         ioContext.getMetrics().observeOutgoingActorRpcCall(
             ActorCallPayloadReplayable(callPlan.getReplayable()), targetRetryable)) {
       auto attemptObserver = kj::rc<JsRpcCallAttemptObserver>(retriesEnabled);
-      promise =
-          observeActorRpcCallAttempt(kj::mv(observer), attemptObserver.addRef(), kj::mv(promise));
-      return {.promise = kj::mv(promise),
-        .pipeline = kj::mv(callResult),
+      parts.promise = observeActorRpcCallAttempt(
+          kj::mv(observer), attemptObserver.addRef(), kj::mv(parts.promise));
+      return {.promise = kj::mv(parts.promise),
+        .pipeline = kj::mv(parts.pipeline),
         .attemptObserver = kj::mv(attemptObserver)};
     }
   }
-  return {.promise = kj::mv(promise), .pipeline = kj::mv(callResult)};
+  return {.promise = kj::mv(parts.promise), .pipeline = kj::mv(parts.pipeline)};
 }
 
 struct JsRpcRetrySetup {
