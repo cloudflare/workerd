@@ -221,9 +221,13 @@ class Socket: public jsg::Object {
   // closing.
   jsg::Promise<void> close(jsg::Lock& js);
 
-  // Proxies to the other socket. Equivalent to:
-  // a.readable.pipeTo(b.writable); b.readable.pipeTo(a.writable);
-  void proxyTo(jsg::Lock& js, jsg::Ref<Socket> sock, jsg::Optional<PipeToOptions> options);
+  // Relays this socket to the other one in both directions. Equivalent to:
+  //   Promise.all([a.readable.pipeTo(b.writable), b.readable.pipeTo(a.writable)])
+  // The result resolves once both directions have finished and rejects as soon as either fails.
+  // A connect() handler that relays its socket should await it: the handler's socket is closed
+  // when the handler returns.
+  jsg::Promise<void> proxyTo(
+      jsg::Lock& js, jsg::Ref<Socket> sock, jsg::Optional<PipeToOptions> options);
 
   // Flushes write buffers then performs a TLS handshake on the current Socket connection.
   // The current `Socket` instance is closed and its readable/writable instances are also closed.
@@ -485,20 +489,19 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
 // Wires up startTls() for a tunnel whose transport cannot perform a TLS handshake itself, but
 // whose peer is another Socket reached over one of our internal transports -- that is, a
 // worker-to-worker connect(), whether the two workers share a process (the tunnel is a
-// kj::newTwoWayPipe()) or talk over http-over-capnp (the peer's startTls() arrives as a
-// ByteStream.startTls() call).
+// kj::newTwoWayPipe()) or talk over http-over-capnp.
 //
 // `peerStarter` is the empty callback slot the peer handed us in kj::HttpConnectSettings; filling
-// it in is what makes the peer's startTls() work at all. The returned slot is for the local
-// (connect handler) side of the tunnel.
+// it in is what makes the peer's startTls() work. The returned slot is for the local connect
+// handler's side of the tunnel.
 //
 // Neither side encrypts anything: these bytes never leave Cloudflare's internal transport, so
-// there is nothing here for TLS to protect. What the two sides genuinely need from each other is
-// agreement on the point in the byte stream where the upgrade takes effect, because the protocol
-// being spoken negotiates the upgrade in-band (SMTP's STARTTLS, Postgres' SSLRequest, and so on)
-// and each side hands its stream to a fresh Socket at that point. So each side's startTls()
-// completes only once the other side has called startTls() too -- the same rule that holds when a
-// real handshake is involved -- and fails if the other side's socket goes away first.
+// there is nothing here for TLS to protect. What the two sides actually need from each other is
+// agreement on the point in the byte stream where the upgrade takes effect since the protocol
+// being spoken negotiates the upgrade in-band (SMTP's STARTTLS, Postgres' SSLRequest etc.) and each
+// side hands its stream to a fresh Socket at that point. Thus each side's startTls() completes only
+// once the other side has called startTls() too - the same rule that applies for a real handshake
+// - and fails if the other side can no longer call it: its socket closes or the handler returns.
 kj::Own<kj::TlsStarterCallback> setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter);
 
 // Materializes a socket received over RPC from its three external-table entries (socket

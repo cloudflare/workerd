@@ -579,6 +579,38 @@ class TlsRendezvous: public kj::Refcounted {
   }
 };
 
+// Behaves like Promise.all([first, second]): resolves once both have resolved, and rejects with
+// the first rejection as soon as it happens, without waiting for the other promise to settle.
+jsg::Promise<void> whenBothResolved(
+    jsg::Lock& js, jsg::Promise<void> first, jsg::Promise<void> second) {
+  struct Countdown: public kj::Refcounted {
+    uint pending = 2;
+  };
+  auto countdown = kj::refcounted<Countdown>();
+  auto paf = js.newPromiseAndResolver<void>();
+
+  auto settle = [&](jsg::Promise<void>& promise) {
+    promise.then(js,
+        JSG_VISITABLE_LAMBDA(
+            (resolver = paf.resolver.addRef(js), countdown = kj::addRef(*countdown)), (resolver),
+            (jsg::Lock& js) {
+              if (--countdown->pending == 0) {
+              resolver.resolve(js);
+              }
+            }),
+        JSG_VISITABLE_LAMBDA(
+            (resolver = paf.resolver.addRef(js)), (resolver), (jsg::Lock& js, jsg::Value error) {
+              // Rejecting an already-settled promise is a no-op, so only the first rejection
+              // counts.
+              resolver.reject(js, error.getHandle(js));
+            }));
+  };
+  settle(first);
+  settle(second);
+
+  return kj::mv(paf.promise);
+}
+
 }  // namespace
 
 // Forward declarations
@@ -946,7 +978,8 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   });
 }
 
-void Socket::proxyTo(jsg::Lock& js, jsg::Ref<Socket> sock, jsg::Optional<PipeToOptions> options) {
+jsg::Promise<void> Socket::proxyTo(
+    jsg::Lock& js, jsg::Ref<Socket> sock, jsg::Optional<PipeToOptions> options) {
   jsg::Optional<PipeToOptions> optionsCopy = kj::none;
   KJ_IF_SOME(o, options) {
     optionsCopy = PipeToOptions{
@@ -959,8 +992,9 @@ void Socket::proxyTo(jsg::Lock& js, jsg::Ref<Socket> sock, jsg::Optional<PipeToO
       KJ_ASSERT_NONNULL(optionsCopy).signal = s.addRef();
     }
   }
-  sock->readable.pipeTo(js, writable, kj::mv(options).orDefault({}));
-  readable.pipeTo(js, sock->writable, kj::mv(optionsCopy).orDefault({}));
+  auto fromThem = sock->readable.pipeTo(js, writable, kj::mv(options).orDefault({}));
+  auto toThem = readable.pipeTo(js, sock->writable, kj::mv(optionsCopy).orDefault({}));
+  return whenBothResolved(js, kj::mv(fromThem), kj::mv(toThem));
 }
 
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
@@ -968,8 +1002,9 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
       secureTransport != SecureTransportKind::ON, TypeError, "Cannot startTls on a TLS socket.");
   JSG_REQUIRE(connectionData != kj::none, TypeError,
       "The connection was closed before startTls could be started.");
-  // TODO: Error message is misleading in connect handler itself as the socket is passed in and no
-  // starttls option can be set there – provide more descriptive error message.
+  // TODO(cleanup): Error message is misleading when startTls() is used in the connect handler as
+  // its socket is passed in and no starttls option can be set there - provide more descriptive
+  // error message.
   auto invalidOptKindMsg =
       "The `secureTransport` socket option must be set to 'starttls' for startTls to be used.";
   JSG_REQUIRE(secureTransport == SecureTransportKind::STARTTLS, TypeError, invalidOptKindMsg);

@@ -266,9 +266,6 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     jsg::Lock& js = lock;
 
     // Support startTls if the transport that delivered this CONNECT offered a tlsStarter slot.
-    // Note that setupSocket() expects the domain parameter to be set to the expected host name
-    // using startTLS so that it can be provided to the TLS callback, so we'd need to change that
-    // or figure out a way to get the host domain.
     auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
     auto secureTransport = SecureTransportKind::OFF;
     KJ_IF_SOME(starter, settings.tlsStarter) {
@@ -294,10 +291,13 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // The handler is the server side of this connection: the peer half-closing means it has
     // finished sending, not that the reply is over, so the write side stays open until the handler
     // closes it or returns.
-    // TODO: Need to have proper domain parameter to support startTls? host is distinct from domain?
-    jsg::Ref<Socket> jsSocket = setupSocket(js, ownConnection.addRef().toOwn(),
-        kj::mv(clientAddress), kj::str(host), SocketOptions{.allowHalfOpen = true},
-        kj::mv(tlsStarter), secureTransport, SocketProtocol::TCP, kj::str(host) /* domain */, false, kj::none);
+    // The handler is also the server side of any TLS upgrade, so there is no peer name to verify:
+    // both starters set up above ignore the hostname they are given. `host` is passed as the
+    // domain only because startTls() and proxyTo() refuse to upgrade a socket that has none.
+    jsg::Ref<Socket> jsSocket =
+        setupSocket(js, ownConnection.addRef().toOwn(), kj::mv(clientAddress), kj::str(host),
+            SocketOptions{.allowHalfOpen = true}, kj::mv(tlsStarter), secureTransport,
+            SocketProtocol::TCP, kj::str(host) /* domain */, false, kj::none);
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
     // connection is already open at this point, exception handling is not required.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));

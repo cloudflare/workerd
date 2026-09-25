@@ -8,11 +8,9 @@ import { ok, strictEqual } from 'assert';
 export class ConnectProxy extends WorkerEntrypoint {
   async connect(socket) {
     // proxy for ConnectEndpoint instance on port 8083.
-    let upstream = connect('localhost:8083');
-    socket.proxyTo(upstream);
-    // proxyTo() can't be awaited – wait briefly so that we can be sure the data has been sent by
-    // the time we return so that the calling worker can read it right away.
-    await scheduler.wait(10);
+    const upstream = connect('localhost:8083');
+    // The handler's socket is closed when the handler returns, so wait for the relay to finish.
+    await socket.proxyTo(upstream);
   }
 }
 
@@ -26,7 +24,7 @@ export class ConnectEndpoint extends WorkerEntrypoint {
 }
 
 // Reads a full CRLF-terminated line, line ending included. See readLine() in
-// connect-handler-test.js.
+// connect-handler-starttls-test.js.
 async function readLine(reader) {
   const dec = new TextDecoder();
   let line = '';
