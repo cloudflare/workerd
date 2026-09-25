@@ -12968,6 +12968,8 @@ export type BrowserRunAcquireOptions = {
   keepAlive?: number;
   /** Record the browser session. */
   recording?: boolean;
+  /** Acquire the browser session from the LAB container pool. */
+  lab?: boolean;
   /** Geoegress hint as an ISO-3166 alpha-2 country code. */
   location?: string;
   /** Map hostnames to caller-provided Workers that handle outbound requests. */
