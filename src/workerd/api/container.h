@@ -11,7 +11,9 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/io-own.h>
+#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/ser.h>
 #include <workerd/util/strong-bool.h>
 
 namespace workerd::api {
@@ -24,6 +26,9 @@ class Fetcher;
 class ExecOutput: public jsg::Object {
  public:
   ExecOutput(kj::Array<kj::byte> stdoutBytes, kj::Array<kj::byte> stderrBytes, int exitCode);
+  ExecOutput(jsg::JsRef<jsg::JsArrayBuffer> stdoutBuffer,
+      jsg::JsRef<jsg::JsArrayBuffer> stderrBuffer,
+      int exitCode);
 
   jsg::JsArrayBuffer getStdout(jsg::Lock& js);
   jsg::JsArrayBuffer getStderr(jsg::Lock& js);
@@ -43,15 +48,43 @@ class ExecOutput: public jsg::Object {
     });
   }
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<ExecOutput> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+  JSG_SERIALIZABLE(rpc::SerializationTag::EXEC_OUTPUT);
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("stdout", stdoutBytes);
-    tracker.trackField("stderr", stderrBytes);
+    KJ_SWITCH_ONEOF(buffers) {
+      KJ_CASE_ONEOF(native, NativeBuffers) {
+        tracker.trackField("stdout", native.stdoutBytes);
+        tracker.trackField("stderr", native.stderrBytes);
+      }
+      KJ_CASE_ONEOF(js, JsBuffers) {
+        tracker.trackField("stdout", js.stdoutBuffer);
+        tracker.trackField("stderr", js.stderrBuffer);
+      }
+    }
   }
 
  private:
-  kj::Array<kj::byte> stdoutBytes;
-  kj::Array<kj::byte> stderrBytes;
+  struct NativeBuffers {
+    kj::Array<kj::byte> stdoutBytes;
+    kj::Array<kj::byte> stderrBytes;
+  };
+  struct JsBuffers {
+    jsg::JsRef<jsg::JsArrayBuffer> stdoutBuffer;
+    jsg::JsRef<jsg::JsArrayBuffer> stderrBuffer;
+  };
+  // Locally produced output keeps native bytes and creates its JS buffers lazily.
+  // Deserialized output retains the received buffers to preserve sharing without copying.
+  kj::OneOf<NativeBuffers, JsBuffers> buffers;
   int exitCode;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    KJ_IF_SOME(js, buffers.tryGet<JsBuffers>()) {
+      visitor.visit(js.stdoutBuffer, js.stderrBuffer);
+    }
+  }
 };
 
 struct ExecPtyOptions {

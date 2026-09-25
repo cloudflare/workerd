@@ -118,16 +118,55 @@ capnp::ByteStream::Client makeExecPipe(
 
 ExecOutput::ExecOutput(
     kj::Array<kj::byte> stdoutBytes, kj::Array<kj::byte> stderrBytes, int exitCode)
-    : stdoutBytes(kj::mv(stdoutBytes)),
-      stderrBytes(kj::mv(stderrBytes)),
+    : buffers(NativeBuffers{kj::mv(stdoutBytes), kj::mv(stderrBytes)}),
+      exitCode(exitCode) {}
+
+ExecOutput::ExecOutput(jsg::JsRef<jsg::JsArrayBuffer> stdoutBuffer,
+    jsg::JsRef<jsg::JsArrayBuffer> stderrBuffer,
+    int exitCode)
+    : buffers(JsBuffers{kj::mv(stdoutBuffer), kj::mv(stderrBuffer)}),
       exitCode(exitCode) {}
 
 jsg::JsArrayBuffer ExecOutput::getStdout(jsg::Lock& js) {
-  return jsg::JsArrayBuffer::create(js, stdoutBytes);
+  KJ_SWITCH_ONEOF(buffers) {
+    KJ_CASE_ONEOF(native, NativeBuffers) {
+      return jsg::JsArrayBuffer::create(js, native.stdoutBytes);
+    }
+    KJ_CASE_ONEOF(buffers, JsBuffers) {
+      return buffers.stdoutBuffer.getHandle(js);
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 jsg::JsArrayBuffer ExecOutput::getStderr(jsg::Lock& js) {
-  return jsg::JsArrayBuffer::create(js, stderrBytes);
+  KJ_SWITCH_ONEOF(buffers) {
+    KJ_CASE_ONEOF(native, NativeBuffers) {
+      return jsg::JsArrayBuffer::create(js, native.stderrBytes);
+    }
+    KJ_CASE_ONEOF(buffers, JsBuffers) {
+      return buffers.stderrBuffer.getHandle(js);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+void ExecOutput::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // Read the instance properties to include mutations to the lazily created buffers.
+  auto handle = jsg::JsObject(KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js)));
+  serializer.write(js, handle.get(js, "stdout"));
+  serializer.write(js, handle.get(js, "stderr"));
+  serializer.writeRawUint32(static_cast<uint32_t>(exitCode));
+}
+
+jsg::Ref<ExecOutput> ExecOutput::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto stdoutBuffer = JSG_REQUIRE_NONNULL(deserializer.readValue(js).tryCast<jsg::JsArrayBuffer>(),
+      DOMDataCloneError, "Invalid ExecOutput stdout buffer");
+  auto stderrBuffer = JSG_REQUIRE_NONNULL(deserializer.readValue(js).tryCast<jsg::JsArrayBuffer>(),
+      DOMDataCloneError, "Invalid ExecOutput stderr buffer");
+  auto exitCode = static_cast<int32_t>(deserializer.readRawUint32());
+  return js.alloc<ExecOutput>(stdoutBuffer.addRef(js), stderrBuffer.addRef(js), exitCode);
 }
 
 ExecProcess::ExecProcess(jsg::Lock& js,
