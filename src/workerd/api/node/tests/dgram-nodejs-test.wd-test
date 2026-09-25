@@ -7,8 +7,13 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "dgram-nodejs-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_dgram_module", "experimental"]
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_dgram_module", "experimental", "streams_enable_constructors"],
       )
     ),
+  ],
+  # Port 0 so that the concurrent test variants never collide; the worker
+  # learns the bound port as its one declared UDP listener.
+  sockets = [
+    (name = "udp", address = "127.0.0.1:0", udp = (), service = "dgram-nodejs-test"),
   ],
 );

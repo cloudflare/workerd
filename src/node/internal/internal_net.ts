@@ -341,7 +341,7 @@ function familyOf(address: string): string | undefined {
 }
 
 // Splits a "host:port" / "[v6]:port" authority; "*" is the wildcard.
-function parseAuthority(
+export function parseAuthority(
   authority: string | null | undefined
 ): LocalAddressInfo | null {
   if (typeof authority !== 'string') return null;

@@ -1068,6 +1068,80 @@ export class ERR_SERVER_NOT_RUNNING extends NodeError {
   }
 }
 
+export class ERR_SOCKET_BAD_TYPE extends NodeTypeError {
+  constructor() {
+    super(
+      'ERR_SOCKET_BAD_TYPE',
+      'Bad socket type specified. Valid types are: udp4, udp6'
+    );
+  }
+}
+
+export class EBADF extends NodeError {
+  syscall: string;
+
+  constructor(syscall: string) {
+    super('EBADF', `${syscall} EBADF`);
+    this.syscall = syscall;
+  }
+}
+
+export class ERR_SOCKET_ALREADY_BOUND extends NodeError {
+  constructor() {
+    super('ERR_SOCKET_ALREADY_BOUND', 'Socket is already bound');
+  }
+}
+
+export class ERR_SOCKET_BAD_BUFFER_SIZE extends NodeTypeError {
+  constructor() {
+    super(
+      'ERR_SOCKET_BAD_BUFFER_SIZE',
+      'Buffer size must be a positive integer'
+    );
+  }
+}
+
+export class ERR_SOCKET_DGRAM_IS_CONNECTED extends NodeError {
+  constructor() {
+    super('ERR_SOCKET_DGRAM_IS_CONNECTED', 'Already connected');
+  }
+}
+
+export class ERR_SOCKET_DGRAM_NOT_CONNECTED extends NodeError {
+  constructor() {
+    super('ERR_SOCKET_DGRAM_NOT_CONNECTED', 'Not connected');
+  }
+}
+
+export class ERR_SOCKET_DGRAM_NOT_RUNNING extends NodeError {
+  constructor() {
+    super('ERR_SOCKET_DGRAM_NOT_RUNNING', 'Not running');
+  }
+}
+
+export class ERR_FEATURE_UNAVAILABLE_ON_PLATFORM extends NodeTypeError {
+  constructor(feature: string) {
+    super(
+      'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM',
+      `The feature ${feature} is unavailable on the current platform, which is being used to run Node.js`
+    );
+  }
+}
+
+// A datagram addressed to a peer no flow exists for: only peers that have sent
+// to the socket are reachable.
+export class EHOSTUNREACH extends NodeError {
+  syscall = 'send';
+  address: string;
+  port: number;
+
+  constructor(address: string, port: number) {
+    super('EHOSTUNREACH', `send EHOSTUNREACH ${address}:${port}`);
+    this.address = address;
+    this.port = port;
+  }
+}
+
 export class ERR_ILLEGAL_CONSTRUCTOR extends NodeTypeError {
   constructor() {
     super('ERR_ILLEGAL_CONSTRUCTOR', 'Illegal constructor');

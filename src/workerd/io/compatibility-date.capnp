@@ -1152,8 +1152,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatEnableFlag("enable_nodejs_dgram_module")
     $compatDisableFlag("disable_nodejs_dgram_module")
     $impliedByAfterDate(name = "nodeJsCompat", date = "2026-01-29");
-  # Enables the Node.js non-functional stub dgram module. It is required to use this
-  # flag with nodejs_compat (or nodejs_compat_v2).
+  # Enables the Node.js dgram module. Sockets bound to a declared UDP listener receive
+  # its datagrams (see workerd.capnp Socket.udp); egress is limited to replying to peers
+  # that have sent to the socket. It is required to use this flag with nodejs_compat (or
+  # nodejs_compat_v2).
 
   enableNodeJsInspectorModule @134 :Bool
     $compatEnableFlag("enable_nodejs_inspector_module")
