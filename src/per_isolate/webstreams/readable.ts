@@ -255,6 +255,12 @@ let readableStreamDefaultReaderRead: <R>(
   readRequest: ReadableStreamAsyncIteratorReadRequest<R>
 ) => void;
 
+// Closes a stream whose data has moved to another stream (extraction,
+// native detach, tee of a native stream or of a branch) and drops its
+// controller, so it neither reaches nor retains the moved source. Legacy
+// C++ leaves the same streams locked, disturbed and closed.
+let closeReadableStreamHusk: <R>(stream: ReadableStream<R>) => void;
+
 // Errors a queued tee branch alone (see [kControllerErrorFunction]).
 let readableStreamErrorBranch: <R>(
   stream: ReadableStream<R>,
@@ -3420,8 +3426,9 @@ class ReadableStream<R> {
   // during controller setup, removed on cancel/tee. A queued stream that
   // has been teed (the source's own stream, or a branch teed again) keeps
   // none: its former consumer's place in the queue went to the two
-  // branches, and it is left a permanently locked, inert shell (see
-  // readableStreamTee).
+  // branches, and it is left permanently locked. The source's own stream
+  // still closes and errors with the source; a branch teed again is closed
+  // at the tee (see readableStreamTee).
   #consumer?: StreamConsumerType<R> | undefined;
   #disturbed: boolean = false;
   #state: 'readable' | 'closed' | 'errored' = 'readable';
@@ -3466,6 +3473,12 @@ class ReadableStream<R> {
 
     setReadableStreamInteropErrorHook = (stream, hook) => {
       stream.#interopErrorHook = hook;
+    };
+
+    closeReadableStreamHusk = (stream) => {
+      stream.#controller = undefined;
+      stream.#consumer = undefined;
+      readableStreamClose(stream);
     };
 
     isReadableStreamPendingClosure = <R>(stream: ReadableStream<R>) => {
@@ -3732,8 +3745,8 @@ class ReadableStream<R> {
     // ReadableStream via ordinary construction. Branches are fully
     // independent — no shared consumer and no composite-cancel wiring
     // (deliberate divergence from the queued model below: branch cancels
-    // go to each branch's OWN source). The parent becomes the same inert
-    // locked shell as in the queued model.
+    // go to each branch's OWN source). The parent is left locked and
+    // closed (closeReadableStreamHusk).
     readableStreamTee = <R>(stream: ReadableStream<R>) => {
       // The locked precondition lives HERE (not in the prototype method) so that every
       // entry point shares it -- the method after its brand assert, and the C++
@@ -3767,10 +3780,10 @@ class ReadableStream<R> {
         const branch2 = new ReadableStream<R>(
           sources[1] as UnderlyingSource<R>
         );
-        stream.#consumer = undefined;
         if (!isReadableStreamLocked(stream)) {
           acquireReadableStreamDefaultReader(stream);
         }
+        closeReadableStreamHusk(stream);
         return [branch1, branch2] as [ReadableStream<R>, ReadableStream<R>];
       }
       const state = stream.#state;
@@ -3870,11 +3883,14 @@ class ReadableStream<R> {
       // consumers to the same queue.
 
       // Per spec, tee() locks the original permanently. Acquire a real
-      // reader (never exposed, so it can never be released) — the original
-      // becomes an inert locked shell that retains only enough state to
-      // report locked === true.
+      // reader (never exposed, so it can never be released).
       if (!isReadableStreamLocked(stream)) {
         acquireReadableStreamDefaultReader(stream);
+      }
+      // A teed branch (not the source's own stream) consumes nothing now,
+      // and no source event would ever reach it: close it.
+      if (controller !== undefined && controllerStream(controller) !== stream) {
+        closeReadableStreamHusk(stream);
       }
 
       return [branch1, branch2] as [ReadableStream<R>, ReadableStream<R>];
@@ -3906,10 +3922,10 @@ class ReadableStream<R> {
 
       // Neutralize the original: no consumer, disturbed, permanently locked
       // via an internal reader (never exposed, never released) -- the same
-      // pattern extraction and tee use. Any tee-branch relationships now
-      // belong to the detached stream, so the husk's hooks are cleared: its
-      // transitions must not fire the tee wiring, and a (force-)cancel of
-      // the husk must not relay to a tee parent.
+      // pattern extraction and tee use. A native husk is disturbed, locked
+      // and closed instead (closeReadableStreamHusk drops its consumer); a
+      // queued one stays the controller's stream, closing and erroring with
+      // the source.
       const neutralize = (): void => {
         stream.#consumer = undefined;
         stream.#disturbed = true;
@@ -3939,7 +3955,11 @@ class ReadableStream<R> {
         // the source, so residual accounting -- including any stashed
         // bytes -- stays exact.
         const source = nativeControllerExtractSource(controller);
-        neutralize();
+        stream.#disturbed = true;
+        if (!isReadableStreamLocked(stream)) {
+          acquireReadableStreamDefaultReader(stream);
+        }
+        closeReadableStreamHusk(stream);
         const detached = new ReadableStream<R>(source as UnderlyingSource<R>);
         detached.#pendingClosure = stream.#pendingClosure;
         return detached;
@@ -4164,13 +4184,13 @@ class ReadableStream<R> {
       if (!isNativeController(controller)) {
         throw new TypeError('This stream is not backed by a native source');
       }
-      // Atomic: validate -> extract -> lock+disturb. No TOCTOU gap.
+      // Atomic: validate -> extract -> lock+disturb+close. No TOCTOU gap.
       const source = nativeControllerExtractSource(controller);
-      this.#consumer = undefined;
       this.#disturbed = true;
       // Permanent lock via an internal reader (never exposed, never
       // released) — same pattern as tee's parent locking.
       acquireReadableStreamDefaultReader(this);
+      closeReadableStreamHusk(this);
       return source;
     };
   }
@@ -4598,9 +4618,8 @@ class ReadableStream<R> {
   // no consumer remains, with the reason of every consumer that left
   // (controllerConsumerLeaving) — unless the source has already requested
   // close, which no cancel follows (controllerConsumerErrored). A branch
-  // that has itself been teed consumes nothing and stays what tee() left
-  // it: a permanently locked, inert shell (the queued tee model's
-  // deliberate divergence from the spec's per-branch controllers).
+  // that has itself been teed was closed by tee() (closeReadableStreamHusk),
+  // so the hook does nothing to it.
   [kControllerErrorFunction](reason: unknown): void {
     assertIsReadableStream(this);
     if (this.#state !== 'readable') return;

@@ -204,7 +204,8 @@ export {
   addAbortSignalOnTeeBranchSettlesWithSourceCleanup,
   addAbortSignalOnByteTeeBranchSparesSibling,
   addAbortSignalOnResponseBody,
-  finishedOnTeedAwayShellStaysPending,
+  finishedOnHandedOffStreamSettlesAtHandoff,
+  finishedOnDetachedQueuedBodyFollowsSource,
 } from 'finished-and-abort';
 
 export {
