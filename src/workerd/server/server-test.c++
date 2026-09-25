@@ -5804,6 +5804,642 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
       "{}, {\"foo\":123,\"bar\":\"abc\"}, false");
 }
 
+KJ_TEST("Server: configured Workflow is exposed through ctx.exports") {
+  TestServer test(R"((
+    services = [
+      ( name = "app",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          compatibilityFlags = ["enable_ctx_exports"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { WorkflowEntrypoint } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const instance = await ctx.exports.GreetingWorkflow.create({
+                `      id: "instance-1",
+                `      params: { name: "Ada" },
+                `    });
+                `    const status = await instance.status();
+                `    return new Response([
+                `      instance.id,
+                `      status.instanceId,
+                `      status.actorName,
+                `      status.workflowClassName,
+                `      status.workflowName,
+                `      status.output,
+                `      status.restoredOutput,
+                `    ].join(" | "));
+                `  },
+                `};
+                `export class GreetingWorkflow extends WorkflowEntrypoint {
+                `  run(event) { return `Hello, ${event.payload.name}!`; }
+                `}
+            )
+          ],
+          workflowsEngine = (
+            actorClass = (name = "engine", entrypoint = "Engine"),
+            workflows = [(
+              className = "GreetingWorkflow",
+              name = "greeting",
+              bindingService = (name = "greeting-binding", entrypoint = "WorkflowBinding"),
+            )],
+          )
+        )
+      ),
+      ( name = "engine",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          compatibilityFlags = ["allow_irrevocable_stub_storage"],
+          modules = [
+            ( name = "engine.js",
+              esModule =
+                `import { DurableObject, RpcStub, RpcTarget, restore } from "cloudflare:workers";
+                `class GreetingTarget extends RpcTarget {
+                `  constructor(prefix) { super(); this.prefix = prefix; }
+                `  greet(name) { return `${this.prefix}, ${name}!`; }
+                `}
+                `export class Engine extends DurableObject {
+                `  [restore](params) { return new RpcStub(new GreetingTarget(params.prefix)); }
+                `  async execute(instanceId, payload) {
+                `    const props = this.ctx.props;
+                `    const output = await props.workflowClass.run({ payload }, {});
+                `    this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS workflow_test (id INTEGER)');
+                `    const stub = await this.ctx.restore({ prefix: "Persisted hello" });
+                `    await this.ctx.storage.put("stub", stub);
+                `    stub[Symbol.dispose]();
+                `    const storedStub = await this.ctx.storage.get("stub");
+                `    const restoredOutput = await storedStub.greet(payload.name);
+                `    storedStub[Symbol.dispose]();
+                `    await this.ctx.storage.delete("stub");
+                `    const result = {
+                `      instanceId,
+                `      actorName: this.ctx.id.name,
+                `      workflowClassName: props.workflowClassName,
+                `      workflowName: props.workflowName,
+                `      output,
+                `      restoredOutput,
+                `    };
+                `    await this.ctx.storage.put("result", result);
+                `    return result;
+                `  }
+                `  status() { return this.ctx.storage.get("result"); }
+                `}
+            )
+          ],
+        )
+      ),
+      ( name = "greeting-binding",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          modules = [
+            ( name = "binding.js",
+              esModule =
+                `import { WorkerEntrypoint } from "cloudflare:workers";
+                `export class WorkflowBinding extends WorkerEntrypoint {
+                `  async create(options = {}) {
+                `    const id = options.id ?? crypto.randomUUID();
+                `    const engine = this.env.ENGINE.get(this.env.ENGINE.idFromName(id));
+                `    await engine.execute(id, options.params ?? {});
+                `    return { id };
+                `  }
+                `  status(id) {
+                `    return this.env.ENGINE.get(this.env.ENGINE.idFromName(id)).status();
+                `  }
+                `}
+            )
+          ],
+          bindings = [(
+            name = "ENGINE",
+            durableObjectNamespace = (
+              className = "miniflare-workflows-greeting",
+              serviceName = "app",
+            ),
+          )],
+          durableObjectStorage = (localDisk = "workflow-storage")
+        )
+      ),
+      ( name = "workflow-storage",
+        disk = (path = ".", writable = true)
+      ),
+    ],
+    sockets = [(
+      name = "main",
+      address = "test-addr",
+      service = "app",
+    )],
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/",
+      "instance-1 | instance-1 | instance-1 | GreetingWorkflow | greeting | Hello, Ada! | "
+      "Persisted hello, Ada!");
+  KJ_EXPECT(test.cwd->exists(kj::Path({"miniflare-workflows-greeting"})));
+}
+
+KJ_TEST("Server: configured Workflows share Engine code but isolate namespaces and props") {
+  TestServer test(R"((
+    services = [
+      ( name = "app",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          compatibilityFlags = ["enable_ctx_exports"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { WorkflowEntrypoint } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const alpha = await ctx.exports.AlphaWorkflow.create({
+                `      id: "shared-id",
+                `      params: "one",
+                `    });
+                `    const beta = await ctx.exports.BetaWorkflow.create({
+                `      id: "shared-id",
+                `      params: "two",
+                `    });
+                `    const alphaStatus = await alpha.status();
+                `    const betaStatus = await beta.status();
+                `    return new Response([
+                `      alphaStatus.actorId === betaStatus.actorId ? "same" : "different",
+                `      alphaStatus.workflowClassName,
+                `      alphaStatus.workflowName,
+                `      alphaStatus.output,
+                `      betaStatus.workflowClassName,
+                `      betaStatus.workflowName,
+                `      betaStatus.output,
+                `    ].join(" | "));
+                `  },
+                `};
+                `export class AlphaWorkflow extends WorkflowEntrypoint {
+                `  run(event) { return `alpha:${event.payload}`; }
+                `}
+                `export class BetaWorkflow extends WorkflowEntrypoint {
+                `  run(event) { return `beta:${event.payload}`; }
+                `}
+            )
+          ],
+          workflowsEngine = (
+            actorClass = (name = "engine", entrypoint = "Engine"),
+            workflows = [
+              ( className = "AlphaWorkflow",
+                name = "alpha",
+                bindingService = (name = "alpha-binding", entrypoint = "WorkflowBinding"),
+              ),
+              ( className = "BetaWorkflow",
+                name = "beta",
+                bindingService = (name = "beta-binding", entrypoint = "WorkflowBinding"),
+              ),
+            ],
+          )
+        )
+      ),
+      ( name = "engine",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          modules = [
+            ( name = "engine.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export class Engine extends DurableObject {
+                `  async execute(payload) {
+                `    const props = this.ctx.props;
+                `    const result = {
+                `      actorId: this.ctx.id.toString(),
+                `      workflowClassName: props.workflowClassName,
+                `      workflowName: props.workflowName,
+                `      output: await props.workflowClass.run({ payload }, {}),
+                `    };
+                `    await this.ctx.storage.put("result", result);
+                `    return result;
+                `  }
+                `  status() { return this.ctx.storage.get("result"); }
+                `}
+            )
+          ],
+        )
+      ),
+      ( name = "alpha-binding",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          modules = [
+            ( name = "binding.js",
+              esModule =
+                `import { WorkerEntrypoint } from "cloudflare:workers";
+                `export class WorkflowBinding extends WorkerEntrypoint {
+                `  async create(options = {}) {
+                `    const id = options.id ?? crypto.randomUUID();
+                `    await this.env.ENGINE.get(this.env.ENGINE.idFromName(id)).execute(options.params);
+                `    return { id };
+                `  }
+                `  status(id) {
+                `    return this.env.ENGINE.get(this.env.ENGINE.idFromName(id)).status();
+                `  }
+                `}
+            )
+          ],
+          bindings = [(
+            name = "ENGINE",
+            durableObjectNamespace = (
+              className = "miniflare-workflows-alpha",
+              serviceName = "app",
+            ),
+          )],
+          durableObjectStorage = (localDisk = "alpha-storage")
+        )
+      ),
+      ( name = "beta-binding",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          modules = [
+            ( name = "binding.js",
+              esModule =
+                `import { WorkerEntrypoint } from "cloudflare:workers";
+                `export class WorkflowBinding extends WorkerEntrypoint {
+                `  async create(options = {}) {
+                `    const id = options.id ?? crypto.randomUUID();
+                `    await this.env.ENGINE.get(this.env.ENGINE.idFromName(id)).execute(options.params);
+                `    return { id };
+                `  }
+                `  status(id) {
+                `    return this.env.ENGINE.get(this.env.ENGINE.idFromName(id)).status();
+                `  }
+                `}
+            )
+          ],
+          bindings = [(
+            name = "ENGINE",
+            durableObjectNamespace = (
+              className = "miniflare-workflows-beta",
+              serviceName = "app",
+            ),
+          )],
+          durableObjectStorage = (localDisk = "beta-storage")
+        )
+      ),
+      ( name = "alpha-storage",
+        disk = (path = "alpha-storage", writable = true)
+      ),
+      ( name = "beta-storage",
+        disk = (path = "beta-storage", writable = true)
+      ),
+    ],
+    sockets = [(
+      name = "main",
+      address = "test-addr",
+      service = "app",
+    )],
+  ))"_kj);
+
+  test.cwd->openSubdir(kj::Path({"alpha-storage"}), kj::WriteMode::CREATE);
+  test.cwd->openSubdir(kj::Path({"beta-storage"}), kj::WriteMode::CREATE);
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200(
+      "/", "different | AlphaWorkflow | alpha | alpha:one | BetaWorkflow | beta | beta:two");
+  KJ_EXPECT(test.cwd->exists(kj::Path({"alpha-storage", "miniflare-workflows-alpha"})));
+  KJ_EXPECT(test.cwd->exists(kj::Path({"beta-storage", "miniflare-workflows-beta"})));
+}
+
+KJ_TEST("Server: ctx.exports channels handle interleaved Workflow and WorkerEntrypoint exports") {
+  TestServer test(R"((
+    services = [
+      ( name = "app",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          compatibilityFlags = ["enable_ctx_exports"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { WorkerEntrypoint, WorkflowEntrypoint } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const instance = await ctx.exports.BWorkflow.create({ id: "channel-id" });
+                `    return new Response([
+                `      await ctx.exports.AEntry.value(),
+                `      (await instance.status()).output,
+                `      await ctx.exports.CEntry.value(),
+                `    ].join(" | "));
+                `  },
+                `};
+                `export class AEntry extends WorkerEntrypoint {
+                `  value() { return "AEntry"; }
+                `}
+                `export class BWorkflow extends WorkflowEntrypoint {
+                `  run() { return "BWorkflow"; }
+                `}
+                `export class CEntry extends WorkerEntrypoint {
+                `  value() { return "CEntry"; }
+                `}
+            )
+          ],
+          workflowsEngine = (
+            actorClass = (name = "engine", entrypoint = "Engine"),
+            workflows = [(
+              className = "BWorkflow",
+              name = "channel-workflow",
+              bindingService = (name = "workflow-binding", entrypoint = "WorkflowBinding"),
+            )],
+          )
+        )
+      ),
+      ( name = "engine",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          modules = [
+            ( name = "engine.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export class Engine extends DurableObject {
+                `  async execute() {
+                `    const result = { output: await this.ctx.props.workflowClass.run({}, {}) };
+                `    await this.ctx.storage.put("result", result);
+                `    return result;
+                `  }
+                `  status() { return this.ctx.storage.get("result"); }
+                `}
+            )
+          ],
+        )
+      ),
+      ( name = "workflow-binding",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          modules = [
+            ( name = "binding.js",
+              esModule =
+                `import { WorkerEntrypoint } from "cloudflare:workers";
+                `export class WorkflowBinding extends WorkerEntrypoint {
+                `  async create(options = {}) {
+                `    const id = options.id ?? crypto.randomUUID();
+                `    await this.env.ENGINE.get(this.env.ENGINE.idFromName(id)).execute();
+                `    return { id };
+                `  }
+                `  status(id) {
+                `    return this.env.ENGINE.get(this.env.ENGINE.idFromName(id)).status();
+                `  }
+                `}
+            )
+          ],
+          bindings = [(
+            name = "ENGINE",
+            durableObjectNamespace = (
+              className = "miniflare-workflows-channel-workflow",
+              serviceName = "app",
+            ),
+          )],
+          durableObjectStorage = (localDisk = "workflow-storage")
+        )
+      ),
+      ( name = "workflow-storage",
+        disk = (path = ".", writable = true)
+      ),
+    ],
+    sockets = [(
+      name = "main",
+      address = "test-addr",
+      service = "app",
+    )],
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "AEntry | BWorkflow | CEntry");
+}
+
+KJ_TEST("Server: unconfigured Workflow remains absent from ctx.exports") {
+  TestServer test(R"((
+    services = [
+      ( name = "app",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          compatibilityFlags = ["enable_ctx_exports"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { WorkflowEntrypoint } from "cloudflare:workers";
+                `export default {
+                `  fetch(request, env, ctx) {
+                `    return new Response([
+                `      typeof ctx.exports.ConfiguredWorkflow.create,
+                `      "UnconfiguredWorkflow" in ctx.exports,
+                `    ].join(" | "));
+                `  },
+                `};
+                `export class ConfiguredWorkflow extends WorkflowEntrypoint {}
+                `export class UnconfiguredWorkflow extends WorkflowEntrypoint {}
+            )
+          ],
+          workflowsEngine = (
+            actorClass = (name = "engine", entrypoint = "Engine"),
+            workflows = [(
+              className = "ConfiguredWorkflow",
+              name = "configured",
+              bindingService = (name = "workflow-binding", entrypoint = "WorkflowBinding"),
+            )],
+          )
+        )
+      ),
+      ( name = "engine",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          modules = [
+            ( name = "engine.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export class Engine extends DurableObject {}
+            )
+          ],
+        )
+      ),
+      ( name = "workflow-binding",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          modules = [
+            ( name = "binding.js",
+              esModule =
+                `import { WorkerEntrypoint } from "cloudflare:workers";
+                `export class WorkflowBinding extends WorkerEntrypoint {}
+            )
+          ],
+          bindings = [(
+            name = "ENGINE",
+            durableObjectNamespace = (
+              className = "miniflare-workflows-configured",
+              serviceName = "app",
+            ),
+          )],
+          durableObjectStorage = (localDisk = "workflow-storage")
+        )
+      ),
+      ( name = "workflow-storage",
+        disk = (path = ".", writable = true)
+      ),
+    ],
+    sockets = [(
+      name = "main",
+      address = "test-addr",
+      service = "app",
+    )],
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "function | false");
+}
+
+KJ_TEST("Server: Workflow configuration validates binding services and names") {
+  TestServer test(R"((
+    services = [
+      ( name = "app",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          compatibilityFlags = ["enable_ctx_exports"],
+          modules = [(
+            name = "main.js",
+            esModule =
+              `import { DurableObject, WorkflowEntrypoint } from "cloudflare:workers";
+              `export class TestWorkflow extends WorkflowEntrypoint {}
+              `export class InvalidWorkflow extends WorkflowEntrypoint {}
+              `export class MissingBindingWorkflow extends WorkflowEntrypoint {}
+              `export class CollidingWorkflow extends WorkflowEntrypoint {}
+              `export class BindingWorkflow extends WorkflowEntrypoint {}
+              `export class UsesWorkflowBinding extends WorkflowEntrypoint {}
+              `class CollidingObject extends DurableObject {}
+              `export { CollidingObject as "miniflare-workflows-colliding" };
+          )],
+          workflowsEngine = (
+            actorClass = (name = "engine", entrypoint = "Engine"),
+            workflows = [
+              (
+                className = "TestWorkflow",
+                name = "test",
+                bindingService = (name = "binding", entrypoint = "WorkflowBinding"),
+              ),
+              (
+                className = "InvalidWorkflow",
+                name = "invalid/name",
+                bindingService = (name = "binding", entrypoint = "WorkflowBinding"),
+              ),
+              (
+                className = "MissingBindingWorkflow",
+                name = "missing-binding",
+                bindingService = (name = "binding", entrypoint = "BindingObject"),
+              ),
+              (
+                className = "CollidingWorkflow",
+                name = "colliding",
+                bindingService = (name = "binding", entrypoint = "WorkflowBinding"),
+              ),
+              (
+                className = "UsesWorkflowBinding",
+                name = "workflow-binding",
+                bindingService = (name = "app", entrypoint = "BindingWorkflow"),
+              ),
+            ],
+          )
+        )
+      ),
+      ( name = "engine",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          modules = [(
+            name = "engine.js",
+            esModule =
+              `import { DurableObject } from "cloudflare:workers";
+              `export class Engine extends DurableObject {}
+          )],
+        )
+      ),
+      ( name = "binding",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          modules = [(
+            name = "binding.js",
+            esModule =
+              `import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
+              `export class WorkflowBinding extends WorkerEntrypoint {}
+              `export class BindingObject extends DurableObject {}
+          )],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+  ))"_kj);
+
+  test.expectErrors(R"(
+    Worker service "app" configures Workflow name "invalid/name" containing a path separator.
+    service app: Workflow "test"'s bindingService Worker must configure durableObjectStorage.localDisk; in-memory and absent storage are unsupported.
+    service app: Workflow "missing-binding"'s bindingService Worker does not export WorkerEntrypoint "BindingObject".
+    service app: Workflow "colliding" namespace "miniflare-workflows-colliding" conflicts with an exported Durable Object class.
+    service app: Workflow "workflow-binding"'s bindingService Worker does not export WorkerEntrypoint "BindingWorkflow".
+  )"_blockquote);
+}
+
+KJ_TEST("Server: Workflow namespace key cannot collide with a Durable Object") {
+  TestServer test(R"((
+    services = [
+      ( name = "app",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          compatibilityFlags = ["enable_ctx_exports"],
+          modules = [(
+            name = "main.js",
+            esModule =
+              `import { WorkflowEntrypoint } from "cloudflare:workers";
+              `export class TestWorkflow extends WorkflowEntrypoint {}
+          )],
+          workflowsEngine = (
+            actorClass = (name = "engine", entrypoint = "Engine"),
+            workflows = [(
+              className = "TestWorkflow",
+              name = "test",
+              bindingService = (name = "binding", entrypoint = "WorkflowBinding"),
+            )],
+          )
+        )
+      ),
+      ( name = "engine",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          modules = [(
+            name = "engine.js",
+            esModule =
+              `import { DurableObject } from "cloudflare:workers";
+              `export class Engine extends DurableObject {}
+          )],
+          durableObjectNamespaces = [(
+            className = "Engine",
+            uniqueKey = "miniflare-workflows-test",
+          )],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+      ( name = "binding",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          modules = [(
+            name = "binding.js",
+            esModule =
+              `import { WorkerEntrypoint } from "cloudflare:workers";
+              `export class WorkflowBinding extends WorkerEntrypoint {}
+          )],
+          durableObjectStorage = (localDisk = "workflow-storage")
+        )
+      ),
+      ( name = "workflow-storage",
+        disk = (path = ".", writable = true)
+      ),
+    ],
+  ))"_kj);
+
+  test.expectErrors(R"(
+    Workflow ActorNamespace key "miniflare-workflows-test" conflicts with a Durable Object namespace unique key.
+  )"_blockquote);
+}
+
 KJ_TEST("Server: loopback binding calls accept version property") {
   TestServer test(R"((
     services = [
