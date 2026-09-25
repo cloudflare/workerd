@@ -480,6 +480,8 @@ class ZstdEncoderContext final: public ZstdContext {
   KJ_DISALLOW_COPY_AND_MOVE(ZstdEncoderContext);
 
   void work();
+  // Pledging a size other than ZSTD_CONTENTSIZE_UNKNOWN makes work() reject a frame whose
+  // input turns out to be a different length.
   kj::Maybe<CompressionError> initialize(uint64_t pledgedSrcSize);
   kj::Maybe<CompressionError> resetStream();
   kj::Maybe<CompressionError> setParams(int key, int value);
@@ -490,6 +492,17 @@ class ZstdEncoderContext final: public ZstdContext {
   size_t lastResult = 0;
   kj::Own<ZSTD_CCtx> cctx_;
   ZSTD_ErrorCode error_ = ZSTD_error_no_error;
+
+  // The size passed to initialize(), which work() holds the frame to.
+  uint64_t pledgedSrcSize_ = ZSTD_CONTENTSIZE_UNKNOWN;
+
+  // Input consumed by the current frame, counted only while a size is pledged. zstd enforces
+  // a pledge by itself only when a frame spans more than one call: when the first call is
+  // also the last (ZSTD_e_end), it replaces the pledge with the real input size, so a wrong
+  // pledge would produce a valid frame and no error. The one-shot node:zlib functions always
+  // compress that way. work() compares this count with the pledge when the frame ends, which
+  // is what Node does too.
+  kj::Maybe<uint64_t> consumedSrcSize_;
 };
 
 class ZstdDecoderContext final: public ZstdContext {
