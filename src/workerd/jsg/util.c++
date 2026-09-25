@@ -928,6 +928,36 @@ v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::Arc<OwnedUtf16> buf
   return check(ExternTwoByteString::createExtern(js.v8Isolate, kj::mv(buf)));
 }
 
+v8::Local<v8::String> newExternalString(Lock& js, StaticExternalStringSource buf) {
+  KJ_SWITCH_ONEOF(buf) {
+    KJ_CASE_ONEOF(oneByte, kj::ArrayPtr<const char>) {
+      return newExternalOneByteString(js, oneByte);
+    }
+    KJ_CASE_ONEOF(twoByte, kj::ArrayPtr<const uint16_t>) {
+      return newExternalTwoByteString(js, twoByte);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+v8::Local<v8::String> newExternalString(Lock& js, const ExternalStringSource& buf) {
+  KJ_SWITCH_ONEOF(buf) {
+    KJ_CASE_ONEOF(oneByte, kj::ArrayPtr<const char>) {
+      return newExternalOneByteString(js, oneByte);
+    }
+    KJ_CASE_ONEOF(twoByte, kj::ArrayPtr<const uint16_t>) {
+      return newExternalTwoByteString(js, twoByte);
+    }
+    KJ_CASE_ONEOF(oneByte, kj::Arc<OwnedAscii>) {
+      return newExternalOneByteString(js, oneByte.addRef());
+    }
+    KJ_CASE_ONEOF(twoByte, kj::Arc<OwnedUtf16>) {
+      return newExternalTwoByteString(js, twoByte.addRef());
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 // ======================================================================================
 // Module utilities
 
