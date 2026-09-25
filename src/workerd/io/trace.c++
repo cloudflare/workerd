@@ -1961,12 +1961,15 @@ void SpanEndData::copyTo(rpc::SpanEndData::Builder builder) const {
 SpanBuilder::SpanBuilder(
     kj::Rc<SpanObserver> observer, kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
   if (observer != nullptr) {
-    // TODO(o11y): Once we report the user tracing spanOpen event as soon as a span is created, we
-    // should be able to fold this virtual call and just get the timestamp directly.
-    kj::Date time = startTime.orDefault([&]() { return observer->getTime(); });
-    // Report spanOpen event for user tracing spans
-    observer->onOpen(operationName.clone(), time);
-    span.emplace(kj::mv(operationName), time);
+    // A non-recording observer only carries a span context, so there is no span to open.
+    if (observer->isRecording()) {
+      // TODO(o11y): Once we report the user tracing spanOpen event as soon as a span is created,
+      // we should be able to fold this virtual call and just get the timestamp directly.
+      kj::Date time = startTime.orDefault([&]() { return observer->getTime(); });
+      // Report spanOpen event for user tracing spans
+      observer->onOpen(operationName.clone(), time);
+      span.emplace(kj::mv(operationName), time);
+    }
     this->observer = kj::mv(observer);
   }
 }
