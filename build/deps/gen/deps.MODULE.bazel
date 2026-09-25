@@ -15,10 +15,10 @@ archive_override(
     patches = [
         "//:patches/boringssl/0001-Expose-libdecrepit-so-NodeJS-can-use-it-for-ncrypto.patch",
     ],
-    sha256 = "c54bb763140d86bc13ce1ec256f02189ddb59597c9765b75f945b7401b4916a7",
-    strip_prefix = "google-boringssl-bc2e0ff",
+    sha256 = "37ea781c65a67c6d5f41d4b69bc853dd8b735378be2f962025a33d1f6d142495",
+    strip_prefix = "google-boringssl-030986a",
     type = "tgz",
-    url = "https://api.github.com/repos/google/boringssl/tarball/0.20251002.0",
+    url = "https://api.github.com/repos/google/boringssl/tarball/0.20260813.0",
 )
 
 # brotli

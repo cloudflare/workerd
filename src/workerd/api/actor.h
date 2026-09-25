@@ -182,23 +182,29 @@ class DurableObjectNamespace: public jsg::Object {
   // `persistent` indicates whether stubs minted from this namespace may be stored in long-term
   // storage. It is `Persistent::YES` only for `ctx.exports` self-bindings of a worker that has
   // `allow_irrevocable_stub_storage` enabled (see `LoopbackDurableObjectNamespace`); regular env
-  // bindings leave it `Persistent::NO`.
+  // bindings leave it `Persistent::NO`. `userDefinedRetryPolicy` is the binding's configured retry
+  // policy, applied to minted stubs when user-defined retry policies are enabled; none means the
+  // runtime's default applies.
   DurableObjectNamespace(uint channel,
       kj::Own<ActorIdFactory> idFactory,
       ActorCallRetriesAllowed actorCallRetriesAllowed,
-      Persistent persistent = Persistent::NO)
+      Persistent persistent,
+      kj::Maybe<UserDefinedRetryPolicy> userDefinedRetryPolicy)
       : channel(channel),
         idFactory(kj::mv(idFactory)),
         actorCallRetriesAllowed(actorCallRetriesAllowed),
-        persistent(persistent) {}
+        persistent(persistent),
+        userDefinedRetryPolicy(userDefinedRetryPolicy) {}
   DurableObjectNamespace(IoOwn<ActorChannelFactory> factory,
       kj::Own<ActorIdFactory> idFactory,
       ActorCallRetriesAllowed actorCallRetriesAllowed,
-      Persistent persistent = Persistent::NO)
+      Persistent persistent,
+      kj::Maybe<UserDefinedRetryPolicy> userDefinedRetryPolicy)
       : channel(kj::mv(factory)),
         idFactory(kj::mv(idFactory)),
         actorCallRetriesAllowed(actorCallRetriesAllowed),
-        persistent(persistent) {}
+        persistent(persistent),
+        userDefinedRetryPolicy(userDefinedRetryPolicy) {}
 
   struct NewUniqueIdOptions {
     // Restricts the new unique ID to a set of colos within a jurisdiction.
@@ -325,6 +331,8 @@ class DurableObjectNamespace: public jsg::Object {
   // See doc comment on the constructor.
   Persistent persistent;
 
+  kj::Maybe<UserDefinedRetryPolicy> userDefinedRetryPolicy;
+
   jsg::Ref<DurableObject> getImpl(jsg::Lock& js,
       ActorGetMode mode,
       jsg::Ref<DurableObjectId> id,
@@ -343,7 +351,8 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       ActorRoutingMode routingMode,
       kj::Maybe<ActorVersion> version,
       ActorCallRetriesAllowed actorCallRetriesAllowed,
-      Persistent persistent)
+      Persistent persistent,
+      kj::Maybe<UserDefinedRetryPolicy> userDefinedRetryPolicy)
       : channelIdOrFactory(kj::mv(channelIdOrFactory)),
         id(kj::mv(id)),
         locationHint(kj::mv(locationHint)),
@@ -352,12 +361,16 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
         routingMode(routingMode),
         version(kj::mv(version)),
         actorCallRetriesAllowed(actorCallRetriesAllowed),
-        persistent(persistent) {}
+        persistent(persistent),
+        userDefinedRetryPolicy(userDefinedRetryPolicy) {}
 
   Result newSingleUseClient(
       kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override;
   kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
     return ActorCallTargetRetryable(actorCallRetriesAllowed.toBool());
+  }
+  kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() const override {
+    return userDefinedRetryPolicy;
   }
   void onActorCallRetry() override;
   Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
@@ -381,6 +394,8 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   // Whether stubs minted from this namespace may be stored in long-term storage. See the
   // `persistent` field of `DurableObjectNamespace`.
   Persistent persistent;
+
+  kj::Maybe<UserDefinedRetryPolicy> userDefinedRetryPolicy;
 
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 

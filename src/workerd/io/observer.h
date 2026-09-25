@@ -83,8 +83,15 @@ class ByteStreamObserver {
 class OutgoingActorCallObserver {
  public:
   virtual ~OutgoingActorCallObserver() noexcept(false) = default;
+  virtual void markPipelineCommitted() {}
   virtual void recordSuccess() {}
   virtual void recordFailure(kj::Exception& e) {}
+
+  // Records attempt settlement while allowing pipeline-dependent failure classification to wait
+  // until destruction. markPipelineCommitted() may follow before the observer is destroyed.
+  virtual void recordFailureAwaitingRetryDecision(kj::Exception& e) {
+    recordFailure(e);
+  }
 };
 
 // Observes a specific request to a specific worker. Also observes outgoing subrequests.
@@ -186,6 +193,13 @@ class RequestObserver: public kj::Refcounted {
     return kj::Own<void>();
   }
 
+  // Attempts to reserve platform memory for retained actor-call replay state. Returning none keeps
+  // the call observe-only. Production observers must enforce an aggregate bound before returning a
+  // reservation handle.
+  virtual kj::Maybe<kj::Own<void>> tryReserveActorCallReplayMemory(size_t bytes) {
+    return kj::none;
+  }
+
   // Records an additional outgoing actor call started by a runtime retry loop.
   virtual void recordActorRetry(ActorRetryCallType callType) {}
 
@@ -194,9 +208,12 @@ class RequestObserver: public kj::Refcounted {
   virtual void recordActorRetryOutcome(
       ActorRetryCallType callType, ActorRetryOutcome outcome, kj::Duration retryAddedLatency) {}
 
-  // Fired before a fetch request is delivered, so an observer can claim an actor request's
-  // retry-token nonce before actor construction or user code. This also fires for non-actor and
-  // service-worker fetches; observers are responsible for treating those as no-ops.
+  // Fired after actor construction and immediately before user code handles the request, so an
+  // observer can claim the request's retry-token nonce and throw to reject it. For fetch, that is
+  // before the fetch handler is invoked. For JSRPC, it is on the session's top-level call, before the
+  // method is looked up; calls on stubs or pipelines returned from that call don't fire it. It fires
+  // at most once per request. It also fires for non-actor requests, which carry no retry token, so
+  // observers should do nothing for them.
   virtual void claimRetryTokenBeforeUserCode() {}
 
   // Used to record when a worker has used a dynamic dispatch binding.

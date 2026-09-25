@@ -1093,6 +1093,35 @@ KJ_TEST("SQLite extended error codes in messages") {
   }
 }
 
+KJ_TEST("SQLite error context is appended to internal errors only") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  db.setErrorContext(kj::str("actorId = abc123"));
+
+  db.run("CREATE TABLE things (id INTEGER PRIMARY KEY)");
+  db.run("INSERT INTO things VALUES (1)");
+
+  // Failures while preparing and while stepping both carry the context.
+  KJ_EXPECT_THROW_MESSAGE("no such table: nonexistent: SQLITE_ERROR; actorId = abc123",
+      db.run("SELECT * FROM nonexistent"));
+  KJ_EXPECT_THROW_MESSAGE(
+      "SQLITE_CONSTRAINT_PRIMARYKEY); actorId = abc123", db.run("INSERT INTO things VALUES (1)"));
+
+  // Errors reported by the regulator do not.
+  class ReportingRegulator: public SqliteDatabase::Regulator {
+   public:
+    void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const override {
+      kj::throwFatalException(KJ_EXCEPTION(FAILED, "reported", message));
+    }
+  };
+  static ReportingRegulator regulator;
+  auto exception = KJ_ASSERT_NONNULL(kj::runCatchingExceptions(
+      [&]() { db.run({.regulator = regulator}, "SELECT * FROM nonexistent"); }));
+  KJ_EXPECT(exception.getDescription().contains("no such table: nonexistent"), exception);
+  KJ_EXPECT(!exception.getDescription().contains("abc123"), exception);
+}
+
 class MockRollbackCallback {
  public:
   kj::Function<void()> create() {
@@ -1704,10 +1733,11 @@ KJ_TEST("SQLite memory metering tracks allocations correctly") {
       "memory should decrease when running `PRAGMA shrink_memory`");
 }
 
-KJ_TEST("I/O exceptions pass through SQLite") {
+KJ_TEST("I/O exceptions pass through SQLite with the error context") {
   auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
   SqliteDatabase::Vfs vfs(*dir);
   SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  db.setErrorContext(kj::str("actorId = abc123"));
 
   db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str(R"(
     CREATE TABLE IF NOT EXISTS things (
@@ -1728,9 +1758,16 @@ KJ_TEST("I/O exceptions pass through SQLite") {
     INSERT INTO things(value) VALUES (456);
   )"));
   }));
-  KJ_EXPECT(exception.getDescription() == "test-vfs-error", exception);
+  KJ_EXPECT(exception.getDescription() == "test-vfs-error; actorId = abc123", exception);
   auto disposition = KJ_ASSERT_NONNULL(exception.getDetail(SENTRY_TAG_DETAIL_ID));
   KJ_EXPECT(disposition.asChars() == "NOSENTRY"_kj, exception);
+
+  // Application-visible exceptions pass through unchanged.
+  KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "jsg.Error: test-vfs-error");
+  auto tunneled = KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
+    db.run({.regulator = SqliteDatabase::TRUSTED}, "INSERT INTO things(value) VALUES (789)");
+  }));
+  KJ_EXPECT(tunneled.getDescription() == "jsg.Error: test-vfs-error", tunneled);
 }
 
 void testCriticalError(const char* expectedErrorMessage,

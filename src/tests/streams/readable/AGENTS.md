@@ -36,6 +36,7 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 | 19 | controller held, stream dropped and collected | the controller does not keep its stream alive: its consumer leaves the queue, enqueue() drops the chunk silently, desiredSize stays at the high-water mark (no backpressure for a producer holding only the controller) | the controller references the stream (spec [[stream]]): enqueues count, desiredSize 4 → 0 | `controllerOnlyHeldStreamLiveness` |
 | 20 | pull() after both tee branches are collected (controller held) | keeps pulling for consumers that no longer exist; DEFECT: a source that enqueues on every pull runs until the stream closes | the source is released: pull() is never called again (the parity half — enqueue drops, desiredSize at the high-water mark, close() as ever — is `teeBranchesCollected`) | `teeBranchesCollectedPullStops` |
 | 21 | body consumption of a TransformStream readable that delivers more than its declared `expectedLength` | returns everything (consumption ignores the declaration) | rejects with RangeError 'stream delivered more bytes than its declared expectedLength' and cancels the readable with it, which errors the writable (the declaration is the exact-total contract the byte and native sources already enforce) | `transformExpectedLengthOverflow` |
+| 22 | async-iterator next() interleavings where WebIDL clears the ongoing promise | every call strictly serialized: a next() from a continuation registered on an earlier next() still waits for the queued ones, and one queued behind return() reports done; after a next() rejects, later ones reject with the same error | spec: that next() reads ahead of the queued one (n2 'c', n3 'b') and ahead of a queued return() (reads data; the return still cancels); after a next() rejects, the iterator is finished and later ones report done (this last shape is among the WPT async-iterator.any C++ expectedFailures; the read-ahead shapes are derived from the WebIDL algorithm) | `nextFromEarlierContinuationReadsAhead`, `nextFromEarlierContinuationBeatsReturn`, `nextAfterRejectedNextIsDone` |
 
 Parity worth noting (probed, pinned): pull serialization (never
 re-entered); pull/async-start rejection identity; error-undefined
@@ -45,9 +46,12 @@ desiredSize lifecycle (1 → 0 close, null error, 0 cancel) and
 enqueue-skips-queue-with-pending-read; cancel-with-pending-pull; cancel
 reason identity + once; locked-stream cancel rejects without running the
 hook; tee error propagation identity to both branches, tee pull-per-read
-shape, tee after partial read; the tee-reentrancy crash regressions;
+shape, tee backpressure following the slowest branch (a push source
+stalls both branches on an idle one; the spec's per-branch queues would
+not), tee after partial read; the tee-reentrancy crash regressions;
 from() cancel plumbing identity through return(); async-iterator
-protocol interleavings (return/next no-await); chunks held BY REFERENCE
+protocol interleavings (return/next no-await; the WebIDL
+ongoing-promise shapes are #22); chunks held BY REFERENCE
 (mutation visible, identity) + detach-while-queued observed; and the
 ENTIRE integration surface except #15 and #21: body chunk normalization
 (messages included: 'This ReadableStream did not return bytes.'), a
@@ -88,10 +92,10 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `cancel.js` | reason identity, locked-cancel, hook rejection identity, queue discard |
 | `bad-strategies.js` | ledger #8, #9, size-not-function |
 | `queue-math.js` | ledger #10 (WPT float shapes; cpp bounded observables only) |
-| `tee.js` | migrated edge cases + error propagation + cancel composite (#11) + pull-per-read |
+| `tee.js` | migrated edge cases + error propagation + cancel composite (#11) + pull-per-read + slowest-branch backpressure |
 | `tee-reentrancy.js` | the three C++ push-loop crash regressions (from api/streams/streams-test.js) |
 | `from.js` | 11 migrated + fromString (#12) + return validation messages |
-| `async-iteration.js` | 7 migrated + no-await interleavings + proto shape (#13) |
+| `async-iteration.js` | 7 migrated + no-await interleavings + proto shape (#13) + ongoing-promise interleavings (#22) |
 | `reentrancy.js` | enqueue/close/cancel-in-size (parity) + read-in-size (#14; guard the size() or C++ captures every later chunk) |
 | `buffer-lifecycle.js` | chunk by reference, detach observed |
 | `integration-body.js` | readAll family, normalization (incl. detached views, SharedArrayBuffer-backed views, resizable-extent pinning), clone, cancel-then-consume, SELF round-trips |

@@ -4395,9 +4395,13 @@ type LoopbackForExport<
   ? LoopbackServiceStub<InstanceType<T>>
   : T extends new (...args: any[]) => Rpc.DurableObjectBranded
     ? LoopbackDurableObjectClass<InstanceType<T>>
-    : T extends ExportedHandler<any, any, any>
-      ? LoopbackServiceStub<undefined>
-      : undefined;
+    : T extends new (
+          ...args: any[]
+        ) => CloudflareWorkersModule.WorkflowEntrypoint<any, infer Params>
+      ? Workflow<Params>
+      : T extends ExportedHandler<any, any, any>
+        ? LoopbackServiceStub<undefined>
+        : undefined;
 type LoopbackServiceStub<
   T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
 > = Fetcher<T> &
@@ -4889,7 +4893,14 @@ declare abstract class Span {
           stack?: string;
         },
   ): void;
+  updateName(name: string): this;
+  setStatus(status: TracingSpanStatus): this;
   end(): void;
+}
+type TracingSpanStatusCode = "unset" | "ok" | "error";
+interface TracingSpanStatus {
+  code: TracingSpanStatusCode;
+  message?: string;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.
@@ -17710,6 +17721,12 @@ declare namespace TailStream {
     readonly cpuTime: number;
     readonly wallTime: number;
   }
+  type SpanStatusCode = "unset" | "ok" | "error";
+  interface SpanStatus {
+    readonly code: SpanStatusCode;
+    /** A developer-facing error message, present only when code is "error". */
+    readonly message?: string;
+  }
   interface SpanOpen {
     readonly type: "spanOpen";
     readonly name: string;
@@ -17720,6 +17737,19 @@ declare namespace TailStream {
   interface SpanClose {
     readonly type: "spanClose";
     readonly outcome: EventOutcome;
+  }
+  type SpanUpdateInfo =
+    | {
+        readonly type: "name";
+        readonly name: string;
+      }
+    | {
+        readonly type: "status";
+        readonly status: SpanStatus;
+      };
+  interface SpanUpdate {
+    readonly type: "spanUpdate";
+    readonly info: SpanUpdateInfo;
   }
   interface DiagnosticChannelEvent {
     readonly type: "diagnosticChannel";
@@ -17790,6 +17820,7 @@ declare namespace TailStream {
     | Outcome
     | SpanOpen
     | SpanClose
+    | SpanUpdate
     | DiagnosticChannelEvent
     | Exception
     | Log
@@ -17832,6 +17863,7 @@ declare namespace TailStream {
     outcome?: TailEventHandler<Outcome>;
     spanOpen?: TailEventHandler<SpanOpen>;
     spanClose?: TailEventHandler<SpanClose>;
+    spanUpdate?: TailEventHandler<SpanUpdate>;
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;

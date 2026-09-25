@@ -45,6 +45,12 @@ class RevokerMembrane final: public capnp::MembranePolicy, public kj::Refcounted
  public:
   explicit RevokerMembrane(kj::Promise<void> promise): promise(promise.fork()) {}
 
+  // Keeps the revocation promise pending until the membrane and all capabilities crossing it are
+  // gone.
+  void retainRevoker(kj::Own<kj::PromiseFulfiller<void>> revoker) {
+    this->revoker = kj::mv(revoker);
+  }
+
   kj::Maybe<capnp::Capability::Client> inboundCall(
       uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
     return kj::none;
@@ -64,6 +70,7 @@ class RevokerMembrane final: public capnp::MembranePolicy, public kj::Refcounted
   }
 
  private:
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> revoker;
   kj::ForkedPromise<void> promise;
 };
 

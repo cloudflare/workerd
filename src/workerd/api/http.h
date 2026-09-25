@@ -268,6 +268,12 @@ class Fetcher: public JsRpcClientProvider {
       KJ_FAIL_REQUIRE("actor call retry requested from an unsupported Fetcher");
     }
 
+    // The retry policy configured on the binding this factory was minted from, if any. None means
+    // the runtime's default applies.
+    virtual kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() const {
+      return kj::none;
+    }
+
     // Factories that support actor call retries override this method. The default rejects the
     // attempt rather than silently starting a new logical call.
     virtual Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
@@ -349,7 +355,8 @@ class Fetcher: public JsRpcClientProvider {
       MakeUserSpanParent makeUserSpanParent);
 
   kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() override;
-  void onActorCallRetry();
+  kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy();
+  void onActorCallRetry() override;
 
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);

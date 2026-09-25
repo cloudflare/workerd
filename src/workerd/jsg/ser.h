@@ -261,6 +261,10 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
     // ExternalHandler, if any. Typically this would be allocated on the stack just before the
     // Deserializer.
     kj::Maybe<ExternalHandler&> externalHandler;
+
+    // Label header-error diagnostics with the runtime call site (defaults to "unknown").
+    // Use a fixed label, never user-controlled data: it appears in logs and the internal exception.
+    kj::Maybe<kj::StringPtr> diagnosticContext;
   };
 
   explicit Deserializer(Lock& js,
@@ -303,6 +307,7 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
 
  private:
   void init(Lock& js,
+      kj::ArrayPtr<const kj::byte> data,
       kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers = kj::none,
       kj::Maybe<Options> maybeOptions = kj::none);
 

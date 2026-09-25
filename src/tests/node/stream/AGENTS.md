@@ -257,8 +257,8 @@ The implementation under test is `src/node/internal/streams_readable.js`
   source is cancelled only once every consumer is gone, with each one's
   reason — unless the source has requested close, after which an aborted
   branch is no cancel and the source's `cancel()` never runs (the spec
-  never forwards a branch's error to the source); on a branch that has itself been teed it does nothing (the
-  queued tee model's inert shell, see
+  never forwards a branch's error to the source); on a branch that has
+  itself been teed it does nothing (the tee closed it, see
   `src/per_isolate/webstreams/AGENTS.md`); a branch's `cancel()` promise
   settles with the source's cleanup in either order. On either half of a
   transform pair (`TransformStream`, `TextEncoderStream`,
@@ -280,9 +280,15 @@ The implementation under test is `src/node/internal/streams_readable.js`
   has closed, the node layer treats the source as finished: an
   `addAbortSignal()` on it stops listening, so a later abort leaves the
   branches to drain what is buffered (the controller's own `error()` still
-  errors them). `finished()` on a branch that has itself been teed, and on
-  the source of a native-backed tee (a `Response` body), never settles —
-  open items, pinned in `finishedOnTeedAwayShellStaysPending`.
+  errors them).
+- A stream whose data has moved to another stream is closed at the
+  handoff, as the legacy C++ streams leave it: a branch that has itself
+  been teed, the source of a native-backed tee (a `Response` body), and a
+  native body detached by `new Request(request)`. `finished()` on it calls
+  back at once, and `addAbortSignal()` on it cannot reach the stream the
+  data moved to. A JS-backed body detached the same way stays the source's
+  own stream: it closes and errors with the source, and aborting it errors
+  the detached body.
 
 ### Liveness
 
@@ -365,7 +371,7 @@ Every entry is asserted on both sides via `usingTsImpl`.
 | `bodies.js` | Response/Request bodies through `Readable.toWeb` (incl. a megabyte); `Readable.fromWeb` over a Response body and a `TextDecoderStream` chain; `Writable.fromWeb` over `IdentityTransformStream` and `FixedLengthStream` (ledger #4); pipeThrough chains in both directions |
 | `consumers.js` | `text/json/buffer/arrayBuffer/blob` over web streams; multi-chunk and string decoding; lock release; error propagation; node Readables and async generators |
 | `readable-from.js` | `Readable.from(webStream)`: chunk types by objectMode, destroy → cancel + lock release, error propagation |
-| `finished-and-abort.js` | ledger #5: hook presence per implementation; `finished()` on readable close/error, writable close/error, settled streams, with a signal; `promises.finished`; `finished()` on a teed source (default and byte): settled by `close()` before any branch reads, by a `tee()` after `close()`, by both branches cancelling, by the source's error (also after `close()`, which errors the undrained branches); never settled on a teed-away branch or a native tee's source; `addAbortSignal` on readable/writable, already-aborted, a Response body (a byte stream, errored where Node is inert), the source of a tee (errors every branch; inert once the source has closed); on tee branches (default and byte): the sibling spared, the source cancelled once the sibling cancels too (but never when the branch is aborted after the source's `close()`), a teed-away branch inert, a branch's `cancel()` settling with the source's cleanup |
+| `finished-and-abort.js` | ledger #5: hook presence per implementation; `finished()` on readable close/error, writable close/error, settled streams, with a signal; `promises.finished`; `finished()` on a teed source (default and byte): settled by `close()` before any branch reads, by a `tee()` after `close()`, by both branches cancelling, by the source's error (also after `close()`, which errors the undrained branches); settled at the handoff on a teed-away branch, a native tee's source and a detached native body, whose hook reaches nothing; a detached JS-backed body following its source; `addAbortSignal` on readable/writable, already-aborted, a Response body (a byte stream, errored where Node is inert), the source of a tee (errors every branch; inert once the source has closed); on tee branches (default and byte): the sibling spared, the source cancelled once the sibling cancels too (but never when the branch is aborted after the source's `close()`), a teed-away branch inert, a branch's `cancel()` settling with the source's cleanup |
 | `abort-transform-pairs.js` | ledger #5: `addAbortSignal` on either half of each of the seven transform pairs errors the other half with the `AbortError` (parked and later writes, pending reads, both `closed` promises, `finished()` on the other half; the transformer's `cancel` not called); on the readable of a `pipeThrough()` stage it cancels the upstream source with it and unlocks it; on a half whose pair is already torn down it is inert |
 | `pipeline-web.js` | web source/destination/transform stages, generator stages (incl. a web source reaching a function stage as the stream itself, and a signal-honoring stage releasing it on a late node-sink failure), `TransformStream` head; sink/source/node-sink failures (incl. a node sink failing while the web source is idle, a web sink erroring or rejecting a write while the source is idle, and a web source erroring while a stuck node sink holds the pump); a detached-view chunk failing the pipeline (`TypeError`, source cancelled without a reason); promise-valued chunks by identity; a locked web destination (callback and promise forms, node and web sources); a `ReadableStream` in a destination slot (`ERR_INVALID_ARG_TYPE` thrown synchronously, callback and promise forms, middle slot too); `stream/promises` trailing web destination, `end: false`, signal abort of a node-headed and of an idle all-web pipeline, and during a pending web read |
 | `compose-web.js` | position validation; a single web stream (`Duplex.from`); web head with node tail, web readable into node or web writable, node head with web transform or web writable tail, `Readable.prototype.compose()`; `end()` completing without a consumer for node and web tails alike; the refused shape (ledger #5) leaving the head's buffer and listeners and the web stream's locks untouched, asserted by every test whose shape needs the hook; destroy tearing the pipeline down before the first write, under the tail's backpressure (the drain parked at the high-water mark, the pump on the writer), behind a closed readable, and bare (`AbortError`); an unconvertible tail chunk failing the composition (writable and readable-only heads); a deferred tail `close()` gating finish and the automatic destroy; one pending tail `read()` at a time |

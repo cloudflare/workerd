@@ -224,6 +224,53 @@ export const setAttributes = {
   },
 };
 
+export const setStatus = {
+  async test(ctrl, env, ctx) {
+    const errorSpan = publicTracing.startSpan('status-error-op');
+    errorSpan.setAttribute('test', 'setStatus');
+    assert.strictEqual(
+      errorSpan.setStatus({ code: 'error', message: 'first error' }),
+      errorSpan
+    );
+    errorSpan.setStatus({ code: 'error', message: 'second error' });
+    errorSpan.setStatus({ code: 'unset' });
+    errorSpan.end();
+    // All span mutations are no-ops after end().
+    errorSpan.setStatus({ code: 'ok' });
+
+    const okSpan = publicTracing.startSpan('status-ok-op');
+    okSpan.setAttribute('test', 'setStatus');
+    okSpan.setStatus({ code: 'error', message: 'temporary error' });
+    okSpan.setStatus({ code: 'ok', message: 'not retained' });
+    okSpan.setStatus({ code: 'error', message: 'error after ok' });
+    okSpan.end();
+  },
+};
+
+export const updateName = {
+  async test() {
+    const span = publicTracing.startSpan('update-name-original');
+    span.setAttribute('test', 'updateName');
+    assert.strictEqual(span.updateName('update-name-intermediate'), span);
+    span.updateName(`updated-${'x'.repeat(100)}`);
+    span.end();
+    span.updateName('update-name-after-end');
+  },
+};
+
+export const updateInvocationSpan = {
+  async test() {
+    const span = publicTracing.getActiveSpan();
+    assert(span);
+    span.setAttribute('test', 'updateInvocationSpan');
+    assert.strictEqual(span.updateName('updated-invocation'), span);
+    assert.strictEqual(
+      span.setStatus({ code: 'error', message: 'invocation error' }),
+      span
+    );
+  },
+};
+
 // Verify that nested withSpan calls produce correctly nested spans. This exercises the
 // AsyncContextFrame push path in enterSpan: the inner span should be parented on the
 // outer span.

@@ -718,10 +718,6 @@ class NativePullConduit implements ByteStreamConsumerType {
     // conduit has left the active state there is nothing left to commit.
   }
 
-  drainNoneDescriptors(): void {
-    // Native conduit doesn't use releaseLock pull-into descriptors.
-  }
-
   shiftAutoAllocateDescriptor(): PullIntoDescriptor | undefined {
     // Native conduit doesn't use autoAllocateChunkSize.
     return undefined;

@@ -1047,9 +1047,11 @@ class WritableStreamDefaultController<
     };
 
     // WritableStreamDefaultControllerGetChunkSize (spec §5.5.4)
-    // Runs the strategy size algorithm; on failure, errors the stream and
+    // Runs the strategy size algorithm; if it throws, errors the stream and
     // returns 1 (spec step 3).  Called BEFORE state checks / write-request
-    // enqueue per WritableStreamDefaultWriterWrite step 4.
+    // enqueue per WritableStreamDefaultWriterWrite step 4. The result is
+    // validated only on enqueue (controllerWrite), so a write the state
+    // checks reject never errors the stream with an invalid size.
     controllerGetChunkSize = <W>(
       controller: WritableStreamDefaultController<W>,
       chunk: W
@@ -1057,11 +1059,7 @@ class WritableStreamDefaultController<
       const sizeAlgorithm = controller.#sizeAlgorithm;
       if (sizeAlgorithm === undefined) return 1;
       try {
-        const size = +sizeAlgorithm(chunk);
-        if (NumberIsNaN(size) || size < 0 || size === Infinity) {
-          throw new RangeError('Invalid chunk size');
-        }
-        return size;
+        return +sizeAlgorithm(chunk);
       } catch (e) {
         controller.#errorIfNeeded(e);
         return 1;
@@ -1076,6 +1074,12 @@ class WritableStreamDefaultController<
       chunk: W,
       chunkSize: number
     ) => {
+      // EnqueueValueWithSize: an invalid size errors the stream, which
+      // rejects the write request just added.
+      if (NumberIsNaN(chunkSize) || chunkSize < 0 || chunkSize === Infinity) {
+        controller.#errorIfNeeded(new RangeError('Invalid chunk size'));
+        return;
+      }
       controller.#queue.push({ value: chunk, size: chunkSize });
       controller.#queueTotalSize += chunkSize;
       const stream = controller.#stream;

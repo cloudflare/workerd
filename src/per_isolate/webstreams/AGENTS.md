@@ -66,13 +66,9 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
   stream, which stops listening once its stream has finished, no longer
   reaches them by then, and the interop hook is a no-op on it as on any
   stream that is no longer readable.
-- A branch that has itself been teed is a shell that is not the
-  controller's stream, so none of the source's events reach it: erroring
-  it does nothing, and its closed promise never settles. The same holds
-  for the source of a native-backed tee (a `Response` body), whose C++
-  source is swapped out at tee time while its data keeps flowing into the
-  branch sources. Both are open items, to be looked at separately; pinned
-  in `src/tests/node/stream/finished-and-abort.js`.
+- A branch that has itself been teed is not the controller's stream, so
+  none of the source's events would reach it: the tee closes it
+  (`closeReadableStreamHusk`), and erroring it does nothing.
 - Consumers that are collected rather than cancelled (every branch dropped
   while the source still holds its controller) leave the queue with no
   consumer for good: it drops what it holds and what is enqueued later,
@@ -82,8 +78,44 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
   closes the source's stream; `enqueue()` after it throws as ever). C++
   does the same but keeps pulling (readable ledger #20). Suite:
   `gc.js` in the readable and readable-byte suites.
+- Backpressure follows the SLOWEST consumer: `desiredSize` is the
+  high-water mark minus the largest backlog among the cursors. This trades
+  flow for bounded memory: the spec's per-branch queues keep a reading
+  branch flowing but buffer without bound for an idle one, while here a
+  source that enqueues only while `desiredSize > 0` stalls every branch
+  once an idle branch's backlog reaches the high-water mark, until that
+  branch reads or leaves. The pull trigger is unaffected: a pending read
+  on any cursor triggers a pull regardless of `desiredSize` (a `pull()`
+  that itself gates on `desiredSize` stalls the same way). C++ behaves the
+  same. Suite:
+  `teeBackpressureFollowsSlowestBranch` in the readable suite.
+- The controller's `byobRequest` covers a cursor's reads only while that
+  cursor is the queue's only one. The exception is a released reader's
+  head pull-into on the sole cursor at `tee()`/detach: the controller takes
+  it over (`#releasedHead`), so a request the source holds across the fork
+  keeps working, as in the spec. Responding to it enqueues the head's
+  bytes, old and new, for every cursor (each drops its own copy of the old
+  ones, from `adoptReleasedBytes`). `enqueue()`, `error()`, cancel and a
+  closed-state `respond(0)` retire it. Suite: readable-byte ledger #25.
 - Nothing walks a tree of streams: closing, cancelling and erroring act on
   cursors and their owners, and no stream retains another.
+
+## HANDED-OFF STREAMS
+
+A stream whose data moves to another stream is closed at the handoff,
+left locked and disturbed, and drops its controller
+(`closeReadableStreamHusk`): a teed branch (above), the source of a
+native-backed tee, and a native-backed stream whose source is extracted
+(a native-to-native pipe, the C++ bridge's `pumpTo`) or detached (the
+bridge's `detach()`: `new Request(request)`, socket upgrades). The legacy
+C++ streams leave the same streams locked, disturbed and closed. The
+Node.js interop closed-promise settles then, and the interop error hook,
+which acts only on a readable stream, cannot reach the moved source. A
+queued stream detached from its source is the exception: it stays the
+controller's stream, closing and erroring with the source, and the hook
+on it errors the detached stream. Suites:
+`src/tests/node/stream/finished-and-abort.js`,
+`src/tests/streams/sockets/socket-streams.js`.
 
 ## KEY RULES
 

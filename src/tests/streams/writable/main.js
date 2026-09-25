@@ -95,6 +95,7 @@ export {
   floatingPointQueueTotals,
   fractionalSizeTruncation,
   invalidSizeReturnRejects,
+  invalidSizeAfterCloseRejectsOnlyTheWrite,
   desiredSizeWhileErroring,
   writableFloatQueueTotal,
 } from 'backpressure';

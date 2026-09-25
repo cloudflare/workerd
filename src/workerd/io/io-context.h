@@ -29,6 +29,7 @@
 #include <kj/compat/http.h>
 #include <kj/function.h>
 #include <kj/mutex.h>
+#include <kj/sticky-flag.h>
 
 #include <concepts>
 
@@ -423,7 +424,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // aborted, e.g. because its CPU time expired. This should be joined with any promises for
   // incoming tasks.
   kj::Promise<void> onAbort() {
-    return abortPromise.addBranch();
+    return abortFlag.whenSignaled();
   }
 
   // If this IoContext has been aborted already, return the abort reason.
@@ -1207,8 +1208,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Arc<ReverseIoOwnValidity> reverseIoOwnValidity;
 
   kj::Maybe<kj::Exception> abortException;
-  kj::Own<kj::PromiseFulfiller<void>> abortFulfiller;
-  kj::ForkedPromise<void> abortPromise = nullptr;
+  kj::StickyFlag abortFlag;
 
   class PendingEvent;
 
