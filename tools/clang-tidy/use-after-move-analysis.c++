@@ -340,7 +340,9 @@ void UseAfterMoveFinder::getUsesAndReinits(
   });
 }
 
-static bool isStandardSmartPointer(const ValueDecl *VD) {
+// Smart pointers whose moved-from state is specified to be null, so only dereferencing one after a
+// move is a bug. For the KJ types, see their move constructors and move assignment operators.
+static bool isNullAfterMoveSmartPointer(const ValueDecl *VD) {
   const Type *TheType = VD->getType().getNonReferenceType().getTypePtrOrNull();
   if (!TheType)
     return false;
@@ -354,10 +356,16 @@ static bool isStandardSmartPointer(const ValueDecl *VD) {
     return false;
 
   const StringRef Name = ID->getName();
-  if (Name != "unique_ptr" && Name != "shared_ptr" && Name != "weak_ptr")
-    return false;
+  const DeclContext *Context = RecordDecl->getDeclContext();
+  if (Context->isStdNamespace())
+    return Name == "unique_ptr" || Name == "shared_ptr" || Name == "weak_ptr";
 
-  return RecordDecl->getDeclContext()->isStdNamespace();
+  const auto *Namespace = dyn_cast<NamespaceDecl>(Context);
+  if (Namespace && Namespace->getName() == "kj" &&
+      Namespace->getParent()->getRedeclContext()->isTranslationUnit())
+    return Name == "Own" || Name == "Rc" || Name == "Arc";
+
+  return false;
 }
 
 void UseAfterMoveFinder::getDeclRefs(
@@ -375,9 +383,9 @@ void UseAfterMoveFinder::getDeclRefs(
         const auto *DeclRef = Match.getNodeAs<DeclRefExpr>("declref");
         const auto *Operator = Match.getNodeAs<CXXOperatorCallExpr>("operator");
         if (DeclRef && BlockMap->blockContainingStmt(DeclRef) == Block) {
-          // Ignore uses of a standard smart pointer that don't dereference the
-          // pointer.
-          if (Operator || !isStandardSmartPointer(DeclRef->getDecl()))
+          // Ignore uses of a null-after-move smart pointer that don't
+          // dereference the pointer.
+          if (Operator || !isNullAfterMoveSmartPointer(DeclRef->getDecl()))
             DeclRefs->insert(DeclRef);
         }
       }

@@ -69,3 +69,38 @@ void kjControlFlow(Value value) {
     consume(kj::mv(selected));
   }
 }
+
+namespace kj {
+template <typename T>
+struct Own {
+  T* get() const;
+  bool operator==(decltype(nullptr)) const;
+};
+
+template <typename T>
+struct Rc {
+  T* get() const;
+};
+
+template <typename T>
+struct Arc {
+  T* get() const;
+};
+}  // namespace kj
+
+void consumeOwn(kj::Own<Value>&&);
+void consumeRc(kj::Rc<Value>&&);
+void consumeArc(kj::Arc<Value>&&);
+bool check(bool);
+
+// Like std::unique_ptr, KJ's owning pointers are null after a move, so inspecting one without
+// dereferencing it is well-defined.
+void inspectMovedKjPointers(kj::Own<Value> own, kj::Rc<Value> rc, kj::Arc<Value> arc) {
+  consumeOwn(kj::mv(own));
+  check(own.get() == nullptr);
+  check(own == nullptr);
+  consumeRc(kj::mv(rc));
+  check(rc.get() == nullptr);
+  consumeArc(kj::mv(arc));
+  check(arc.get() == nullptr);
+}

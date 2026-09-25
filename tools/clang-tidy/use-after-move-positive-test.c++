@@ -86,3 +86,19 @@ struct CallsMethod: Base {
     other.method();
   }
 };
+
+namespace other {
+template <typename T>
+struct Own {
+  T* get() const;
+};
+}  // namespace other
+
+void consumeOtherOwn(other::Own<Value>&&);
+void useOtherPointer(Value*);
+
+// Only KJ's owning pointers are known to be null after a move.
+void inspectMovedLookalikeOwner(other::Own<Value> own) {
+  consumeOtherOwn(kj::mv(own));
+  useOtherPointer(own.get());
+}
