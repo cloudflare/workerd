@@ -9,6 +9,7 @@
 
 #include <workerd/api/actor.h>
 #include <workerd/api/container.h>
+#include <workerd/api/snapshot.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/compatibility-date.capnp.h>
@@ -268,6 +269,15 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   // `bookmark`.
   kj::Promise<void> waitForBookmark(kj::String bookmark);
 
+  // Capture this Durable Object's storage at `bookmark`, or at its current position when omitted.
+  // The returned handle is opaque to JavaScript and can only be transferred over RPC.
+  jsg::Promise<jsg::Ref<DurableObjectSnapshot>> snapshot(
+      jsg::Lock& js, jsg::Optional<kj::String> bookmark);
+
+  // Arrange for the next session to restore from a snapshot or bookmark.
+  using RestoreTarget = kj::OneOf<jsg::Ref<DurableObjectSnapshot>, jsg::NonCoercible<kj::String>>;
+  kj::Promise<kj::String> onNextSessionRestore(RestoreTarget target);
+
   // Arrange to create replicas for this Durable Object.
   //
   // Once a Durable Object instance calls `ensureReplicas`, all subsequent calls will be no-ops,
@@ -314,6 +324,8 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
 
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(waitForBookmark);
+      JSG_METHOD(snapshot);
+      JSG_METHOD(onNextSessionRestore);
       JSG_READONLY_INSTANCE_PROPERTY(primary, getPrimary);
     }
 

@@ -31,6 +31,7 @@
 #include <workerd/api/queue.h>
 #include <workerd/api/r2.h>
 #include <workerd/api/scheduled.h>
+#include <workerd/api/snapshot.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/sql.h>
 #include <workerd/api/streams.h>
@@ -125,6 +126,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_TRACE_ISOLATE_TYPES,
     EW_UNSAFE_ISOLATE_TYPES,
     EW_MEMORY_CACHE_ISOLATE_TYPES,
+    EW_SNAPSHOT_ISOLATE_TYPES,
     EW_URL_ISOLATE_TYPES,
     EW_URL_STANDARD_ISOLATE_TYPES,
     EW_URLPATTERN_ISOLATE_TYPES,
