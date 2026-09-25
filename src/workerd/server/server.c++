@@ -2354,8 +2354,11 @@ class Server::ExternalHttpService final: public Service {
     kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
       // We'll use capnp RPC for custom events.
       auto bootstrap = parent->getOutgoingCapnp(*parent->inner);
-      auto dispatcher =
-          bootstrap.startEventRequest(capnp::MessageSize{4, 0}).send().getDispatcher();
+      auto startEvent = bootstrap.startEventRequest(capnp::MessageSize{4, 0});
+      KJ_IF_SOME(addr, metadata.clientAddress) {
+        startEvent.setClientAddress(addr);
+      }
+      auto dispatcher = startEvent.send().getDispatcher();
       // NOTE: We don't support restore() over workerd-to-workerd RPC so we can use
       // getUnsupportedFrankenvalueHandler() here for now.
       return event
@@ -6570,13 +6573,17 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
     // service channel to EventDispatcherImpl. The cf blob will be included in
     // SubrequestMetadata when creating the WorkerInterface for HTTP events.
     kj::Maybe<kj::String> cfBlobJson;
+    kj::Maybe<kj::String> clientAddress;
     auto params = context.getParams();
     if (params.hasCfBlobJson()) {
       cfBlobJson = kj::str(params.getCfBlobJson());
     }
+    if (params.hasClientAddress()) {
+      clientAddress = kj::str(params.getClientAddress());
+    }
     context.initResults(capnp::MessageSize{4, 1})
         .setDispatcher(kj::heap<EventDispatcherImpl>(httpOverCapnpFactory, kj::addRef(*service),
-            kj::mv(cfBlobJson), Persistent(params.getFromPersistentStub())));
+            kj::mv(cfBlobJson), Persistent(params.getFromPersistentStub()), kj::mv(clientAddress)));
     return kj::READY_NOW;
   }
 
@@ -6589,19 +6596,23 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
     EventDispatcherImpl(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
         kj::Own<IoChannelFactory::SubrequestChannel> service,
         kj::Maybe<kj::String> cfBlobJson,
-        Persistent fromPersistentStub)
+        Persistent fromPersistentStub,
+        kj::Maybe<kj::String> clientAddress)
         : httpOverCapnpFactory(httpOverCapnpFactory),
           service(kj::mv(service)),
           cfBlobJson(kj::mv(cfBlobJson)),
-          fromPersistentStub(fromPersistentStub) {}
+          fromPersistentStub(fromPersistentStub),
+          clientAddress(kj::mv(clientAddress)) {}
 
     kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
-      // Create WorkerInterface with cf blob metadata (if provided via startEvent).
       IoChannelFactory::SubrequestMetadata metadata;
       KJ_IF_SOME(cf, cfBlobJson) {
         metadata.cfBlobJson = kj::str(cf);
       }
       metadata.fromPersistentStub = fromPersistentStub;
+      KJ_IF_SOME(addr, clientAddress) {
+        metadata.clientAddress = kj::str(addr);
+      }
       auto worker = getService()->startRequest(kj::mv(metadata));
       context.initResults(capnp::MessageSize{4, 1})
           .setHttp(httpOverCapnpFactory.kjToCapnp(kj::mv(worker)));
@@ -6663,6 +6674,7 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
     kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> service;
     kj::Maybe<kj::String> cfBlobJson;
     Persistent fromPersistentStub;
+    kj::Maybe<kj::String> clientAddress;
 
     kj::Own<IoChannelFactory::SubrequestChannel> getService() {
       auto result =
@@ -6672,9 +6684,12 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
     }
 
     kj::Own<WorkerInterface> getWorker() {
-      // For non-HTTP events (RPC, traces, etc.), create WorkerInterface with
-      // empty metadata since there's no HTTP request to extract cf from.
-      return getService()->startRequest({});
+      // Non-HTTP events have no request to carry a cf blob, but the client address applies.
+      IoChannelFactory::SubrequestMetadata metadata;
+      KJ_IF_SOME(addr, clientAddress) {
+        metadata.clientAddress = kj::str(addr);
+      }
+      return getService()->startRequest(kj::mv(metadata));
     }
 
     [[noreturn]] void throwUnsupported() {
@@ -6989,13 +7004,13 @@ class Server::UdpListener final: public kj::Refcounted {
   UdpListener(Server& owner,
       kj::Own<kj::DatagramPort> port,
       kj::Own<Service> service,
-      kj::StringPtr addrStr,
+      kj::String authority,
       kj::Duration idleTimeout,
       size_t maxPendingBytes)
       : owner(owner),
         port(kj::mv(port)),
         service(kj::mv(service)),
-        addrStr(addrStr),
+        authority(kj::mv(authority)),
         idleTimeout(idleTimeout),
         maxPendingBytes(maxPendingBytes) {}
 
@@ -7109,6 +7124,11 @@ class Server::UdpListener final: public kj::Refcounted {
       co_await port->send(datagram, *peerAddr);
     }
 
+    // The peer's "address:port", as kj::NetworkAddress::toString() renders it.
+    kj::StringPtr getPeerAddress() const {
+      return key;
+    }
+
    private:
     kj::Own<UdpListener> listener;
     kj::String key;
@@ -7162,7 +7182,8 @@ class Server::UdpListener final: public kj::Refcounted {
   Server& owner;
   kj::Rc<kj::DatagramPort> port;
   kj::Own<Service> service;
-  kj::StringPtr addrStr;
+  // The bound endpoint ("host:port"), handed to the connect() handler as the local address.
+  kj::String authority;
   kj::Duration idleTimeout;
   size_t maxPendingBytes;
 
@@ -7172,8 +7193,9 @@ class Server::UdpListener final: public kj::Refcounted {
 
   void dispatch(kj::Rc<Flow> flow) {
     IoChannelFactory::SubrequestMetadata metadata;
+    metadata.clientAddress = kj::str(flow->getPeerAddress());
     auto worker = service->startRequest(kj::mv(metadata));
-    auto event = kj::heap<api::UdpConnectCustomEvent>(kj::str(addrStr), *flow);
+    auto event = kj::heap<api::UdpConnectCustomEvent>(kj::str(authority), *flow);
     owner.tasks.add(worker->customEvent(kj::mv(event))
                         .ignoreResult()
                         .attach(kj::mv(worker), kj::mv(flow))
@@ -7187,11 +7209,11 @@ class Server::UdpListener final: public kj::Refcounted {
 
 kj::Promise<void> Server::listenUdp(kj::Own<kj::DatagramPort> port,
     kj::Own<Service> service,
-    kj::StringPtr addrStr,
+    kj::String authority,
     kj::Duration idleTimeout,
     size_t maxPendingBytes) {
   auto obj = kj::refcounted<UdpListener>(
-      *this, kj::mv(port), kj::mv(service), addrStr, idleTimeout, maxPendingBytes);
+      *this, kj::mv(port), kj::mv(service), kj::mv(authority), idleTimeout, maxPendingBytes);
   co_return co_await obj->run();
 }
 
@@ -7941,7 +7963,9 @@ kj::Promise<void> Server::bindSockets(config::Config::Reader config) {
       }
 
       auto parsed = co_await network.parseAddress(addrStr, defaultPortFor(sock));
-      boundSockets.add(BoundSocket{parsed->bindDatagramPort(), kj::mv(addrStr)});
+      auto port = parsed->bindDatagramPort();
+      registerInboundListener(sock, "udp"_kj, addrStr, port->getPort());
+      boundSockets.add(BoundSocket{kj::mv(port), kj::mv(addrStr)});
       continue;
     }
 
@@ -7953,22 +7977,28 @@ kj::Promise<void> Server::bindSockets(config::Config::Reader config) {
       listener = parsed->listen();
     }
 
-    if (sock.which() == config::Socket::TCP && sock.getService().hasName()) {
-      inboundListeners
-          .findOrCreate(sock.getService().getName(),
-              [&]() {
-        return decltype(inboundListeners)::Entry{
-          kj::str(sock.getService().getName()), kj::Vector<Worker::Api::InboundListener>()};
-      })
-          .add(Worker::Api::InboundListener{
-            .protocol = kj::str("tcp"),
-            .address = hostOfAddress(addrStr),
-            .port = static_cast<uint16_t>(listener->getPort()),
-          });
+    if (sock.which() == config::Socket::TCP) {
+      registerInboundListener(sock, "tcp"_kj, addrStr, listener->getPort());
     }
 
     boundSockets.add(BoundSocket{kj::mv(listener), kj::mv(addrStr)});
   }
+}
+
+void Server::registerInboundListener(
+    config::Socket::Reader sock, kj::StringPtr protocol, kj::StringPtr addrStr, uint port) {
+  if (!sock.getService().hasName()) return;
+  inboundListeners
+      .findOrCreate(sock.getService().getName(),
+          [&]() {
+    return decltype(inboundListeners)::Entry{
+      kj::str(sock.getService().getName()), kj::Vector<Worker::Api::InboundListener>()};
+  })
+      .add(Worker::Api::InboundListener{
+        .protocol = kj::str(protocol),
+        .address = hostOfAddress(addrStr),
+        .port = static_cast<uint16_t>(port),
+      });
 }
 
 kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
@@ -8024,7 +8054,9 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
           }
         }
 
-        co_await listenUdp(kj::mv(port), kj::mv(service), addrStr, idleTimeout, maxPendingBytes);
+        auto authority = kj::str(hostOfAddress(addrStr), ":", port->getPort());
+        co_await listenUdp(
+            kj::mv(port), kj::mv(service), kj::mv(authority), idleTimeout, maxPendingBytes);
       });
       tasks.add(handle(kj::mv(datagramPort)).exclusiveJoin(forkedDrainWhen.addBranch()));
       continue;

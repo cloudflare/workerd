@@ -271,6 +271,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
 }
 
 kj::Promise<void> ServiceWorkerGlobalScope::connectUdp(kj::String host,
+    kj::Maybe<kj::String> remoteAddress,
     DatagramChannel& channel,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
@@ -292,8 +293,8 @@ kj::Promise<void> ServiceWorkerGlobalScope::connectUdp(kj::String host,
     auto& ioContext = IoContext::current();
     jsg::Lock& js = lock;
 
-    jsg::Ref<Socket> jsSocket = setupDatagramSocket(
-        js, ownChannel.addRef().toOwn(), kj::none /* remoteAddress */, kj::mv(host));
+    jsg::Ref<Socket> jsSocket =
+        setupDatagramSocket(js, ownChannel.addRef().toOwn(), kj::mv(remoteAddress), kj::mv(host));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
     auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
