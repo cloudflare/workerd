@@ -443,6 +443,14 @@ let getControllerExpectedLength: (
     | ReadableByteStreamControllerType
     | NativeReadableStreamControllerType
 ) => bigint | undefined;
+let byteControllerEnqueueBatch: (
+  controller: ReadableByteStreamController,
+  chunks: ArrayBufferView[]
+) => void;
+let byteControllerSetConsumptionHook: (
+  controller: ReadableByteStreamController,
+  hook: (() => void) | undefined
+) => void;
 let setDefaultControllerExpectedLength: <R>(
   controller: ReadableStreamDefaultController<R>,
   length: bigint | undefined
@@ -1988,6 +1996,22 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       return isActualObject(value) && #queue in value;
     };
 
+    // Enqueues several chunks, in order, notifying the consumers once after
+    // the last, so a pending BYOB read on any cursor fills across all of
+    // them before it is answered (a per-chunk notify would answer it with
+    // the first). Only for internal sources (the identity streams); each
+    // chunk is validated and accounted as by enqueue().
+    byteControllerEnqueueBatch = (controller, chunks) => {
+      const last = chunks.length - 1;
+      for (let i = 0; i <= last; i++) {
+        controller.#enqueueChunk(chunks[i] as ArrayBufferView, i === last);
+      }
+    };
+
+    byteControllerSetConsumptionHook = (controller, hook) => {
+      controller.#queue.setConsumptionHook(hook);
+    };
+
     assertIsReadableByteStreamController = function (
       self: ReadableByteStreamController
     ): void {
@@ -2270,6 +2294,13 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
   enqueue(chunk: ArrayBufferView): void {
     assertIsReadableByteStreamController(this);
+    this.#enqueueChunk(chunk, true);
+  }
+
+  // enqueue()'s steps. With `notify` false the chunk is queued without
+  // notifying the consumers (byteControllerEnqueueBatch notifies with its
+  // last chunk).
+  #enqueueChunk(chunk: ArrayBufferView, notify: boolean): void {
     if (!this.#canCloseOrEnqueue()) {
       throw new TypeError(
         'Cannot enqueue a chunk into a stream that is closed or closing'
@@ -2331,10 +2362,10 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         (cursor as unknown as ByteStreamCursorType).flushReleasedHead();
       });
     }
-    this.#queue.enqueue({ value: entry, size: entry.byteLength });
+    this.#queue.enqueue({ value: entry, size: entry.byteLength }, notify);
     // The cursors' notify() (run by queue.enqueue) services pending
     // pull-intos and default reads alike.
-    this.#callPullIfNeeded();
+    if (notify) this.#callPullIfNeeded();
   }
 
   close(): void {
@@ -5070,6 +5101,18 @@ module.exports = {
     getStoredError: <R>(stream: ReadableStream<R>) =>
       getReadableStreamStoredError(stream),
     normalizeExpectedLength,
+    // The identity streams' delivery (see identity.ts): a batched enqueue
+    // with one notification, and the queue's consumption notification.
+    enqueueBytesBatch: (controller: object, chunks: ArrayBufferView[]) =>
+      byteControllerEnqueueBatch(
+        controller as ReadableByteStreamController,
+        chunks
+      ),
+    setConsumptionHook: (controller: object, hook: (() => void) | undefined) =>
+      byteControllerSetConsumptionHook(
+        controller as ReadableByteStreamController,
+        hook
+      ),
     setControllerExpectedLength: <R>(
       controller: object,
       length: bigint | undefined
