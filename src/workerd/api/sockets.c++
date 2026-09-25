@@ -619,11 +619,16 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
 
   incomingRequest->delivered();
 
+  // The peer address arrives with the request metadata, as it does for TCP connect().
+  kj::Maybe<kj::String> remoteAddress =
+      incomingRequest->getClientAddress().map([](kj::StringPtr s) { return kj::str(s); });
+
   auto outcome = EventOutcome::OK;
   KJ_TRY {
-    co_await context.run([this, entrypointName, versionInfo = kj::mv(versionInfo),
-                             props = kj::mv(props), isDynamicDispatch](
-                             Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
+    co_await context.run(
+        [this, entrypointName, versionInfo = kj::mv(versionInfo), props = kj::mv(props),
+            remoteAddress = kj::mv(remoteAddress), isDynamicDispatch](
+            Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
       jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
       jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
@@ -654,9 +659,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::sendRpc
 
   auto req = dispatcher.udpConnectRequest();
   req.setHost(host);
-  KJ_IF_SOME(addr, remoteAddress) {
-    req.setRemoteAddress(addr);
-  }
   req.setDown(kj::heap<OutgoingRpcDatagramStream>(rpcChannel.addRef()));
   auto sent = req.send();
   auto up = sent.getUp();
@@ -683,12 +685,7 @@ kj::Promise<void> UdpConnectCustomEvent::receiveRpc(
   context.setPipeline(pipelineBuilder.build());
   context.getResults(capnp::MessageSize{4, 1}).setUp(kj::mv(up));
 
-  kj::Maybe<kj::String> remoteAddress;
-  if (params.hasRemoteAddress()) {
-    remoteAddress = kj::str(params.getRemoteAddress());
-  }
-  auto event =
-      kj::heap<UdpConnectCustomEvent>(kj::str(params.getHost()), kj::mv(remoteAddress), *channel);
+  auto event = kj::heap<UdpConnectCustomEvent>(kj::str(params.getHost()), *channel);
   auto result = co_await worker.customEvent(kj::mv(event));
   co_await channel->endOutgoing();
   context.getResults().setResult(result.outcome);
