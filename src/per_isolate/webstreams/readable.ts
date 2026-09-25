@@ -1558,7 +1558,7 @@ class ReadableStreamDefaultController<
         ? undefined
         : uncurryThis(startFn)(underlyingSource, this);
     PromisePrototypeThen(
-      PromiseResolve(startResult),
+      writableInternals.promiseResolvedWith(startResult),
       () => {
         this.#started = true;
         this.#callPullIfNeeded();
@@ -2200,7 +2200,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         ? undefined
         : uncurryThis(startFn)(underlyingSource, this);
     PromisePrototypeThen(
-      PromiseResolve(startResult),
+      writableInternals.promiseResolvedWith(startResult),
       () => {
         this.#started = true;
         this.#callPullIfNeeded();

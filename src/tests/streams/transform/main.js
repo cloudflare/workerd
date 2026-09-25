@@ -19,6 +19,7 @@ export {
   differentTypesTransform,
   hookInvocationShape,
   prototypeChainTransformer,
+  startSettlementTiming,
 } from 'transformer-algorithms';
 
 export {
@@ -124,3 +125,10 @@ export default {
 export { structuredCloneTransform } from 'transfer';
 
 export { omittedDictionariesReadNothing } from 'pollution';
+export {
+  cancelThenAbortSameTurn,
+  abortThenCancelSameTurn,
+  cancelThenTerminateAfterStart,
+  cancelAfterWritableSizeError,
+  cancelThenCloseSameTurn,
+} from 'cancel-outcomes';

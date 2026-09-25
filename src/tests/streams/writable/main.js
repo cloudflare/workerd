@@ -32,6 +32,7 @@ export {
   sinkHooksCapturedAtConstruction,
   secondWriteRejectionErrorsStream,
   sinkHooksNotCalledAfterStartThrow,
+  startPromiseSettledInNewPromise,
 } from 'sink-algorithms';
 
 export {
