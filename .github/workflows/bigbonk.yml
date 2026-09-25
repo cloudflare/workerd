@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   bonk:
-    if: github.event.sender.type != 'Bot' && contains(github.event.comment.body, '/bigbonk')
+    if: github.event.sender.type != 'Bot' && contains(github.event.comment.body, '/bigbonk') && (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'COLLABORATOR')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
