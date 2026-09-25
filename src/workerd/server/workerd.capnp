@@ -536,6 +536,25 @@ struct Worker {
       #
       # (This is intentionally not a ServiceDesignator because you cannot choose an alternate
       # entrypoint here; the class name IS the entrypoint.)
+
+      retryPolicy @2 :RetryPolicy;
+      # Limits on how the runtime retries calls through stubs minted from this binding. When
+      # absent, the runtime's default retry behavior applies.
+
+      struct RetryPolicy {
+        maxAttempts @0 :UInt32 = 4;
+        # Maximum number of retries after the initial attempt. Zero disables retries, and one
+        # allows a single retry. The default matches the runtime's default of five attempts in
+        # total.
+
+        timeoutMs @1 :UInt32 = 10000;
+        # Time in milliseconds, measured from the start of the call, after which no retry may
+        # start. A retry still running when it expires is cancelled, and the caller gets the
+        # error that caused the first retry. The initial request, and the first request after each
+        # redirect, always run to completion. The clock starts after any output-gate wait, and a
+        # redirect shares the original call's timeout. Must be between 500 and 60,000. The default
+        # matches the runtime's default.
+      }
     }
 
     struct CryptoKey {

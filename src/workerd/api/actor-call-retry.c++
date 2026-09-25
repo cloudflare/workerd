@@ -11,20 +11,20 @@
 
 namespace workerd::api {
 
-ActorCallRetryState::ActorCallRetryState(
-    TimerChannel& timer, RequestObserver& observer, Config config)
+ActorCallRetryState::ActorCallRetryState(TimerChannel& timer,
+    RequestObserver& observer,
+    Config config,
+    ActorRetryPolicy policy,
+    kj::TimePoint callStart)
     : timer(timer),
       observer(kj::addRef(observer)),
-      config(config) {
-  auto payloadReplayable = config.payloadReplayable.toBool();
-  retriesEnabled =
-      payloadReplayable && config.observationEnabled.toBool() && config.enforcementEnabled.toBool();
-  if (payloadReplayable) {
-    metadata = generateActorRetryRequestMetadata(
-        kj::systemCoarseCalendarClock().now(), config.enforcementEnabled);
-  }
-  if (retriesEnabled) {
-    deadline = timer.nowForLimitTimeout() + RETRY_BUDGET;
+      config(config),
+      policy(policy),
+      callStart(callStart),
+      retriesEnabled(config.payloadReplayable.toBool() && config.observationEnabled.toBool() &&
+          config.enforcementEnabled.toBool() && policy.maxAttempts() > 1) {
+  if (config.payloadReplayable.toBool()) {
+    metadata = freshMetadata();
   }
 }
 
@@ -34,19 +34,26 @@ ActorCallRetryState::~ActorCallRetryState() noexcept(false) {
   }
 }
 
+IoChannelFactory::ActorRetryRequestMetadata ActorCallRetryState::freshMetadata() const {
+  return generateActorRetryRequestMetadata(
+      kj::systemCoarseCalendarClock().now(), config.enforcementEnabled);
+}
+
 kj::OneOf<ActorCallRetryState::Attempt, kj::Exception> ActorCallRetryState::startAttempt() {
   auto isFirstAttempt = IsFirstActorCallAttempt(attemptCount == 1);
   if (!isFirstAttempt.toBool()) {
-    KJ_IF_SOME(deadlineValue, deadline) {
-      if (timer.nowForLimitTimeout() >= deadlineValue) {
-        recordOutcome(ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
-        return KJ_ASSERT_NONNULL(originalDisconnect).clone();
-      }
+    if (timer.nowForLimitTimeout() >= retryCutoff()) {
+      return retryTimeoutExpired();
     }
     ++retryAttemptsStarted;
     observer->recordActorRetry(config.callType);
   }
   return Attempt(metadata, isFirstAttempt);
+}
+
+kj::Exception ActorCallRetryState::retryTimeoutExpired() {
+  recordOutcome(ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
+  return KJ_ASSERT_NONNULL(originalDisconnect).clone();
 }
 
 kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::handleAttemptFailure(
@@ -98,28 +105,22 @@ kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::checkCanRetry(kj::Ex
     recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY);
     return kj::mv(exception);
   }
-  if (attemptCount >= MAX_ATTEMPTS) {
+  if (originalDisconnect == kj::none) {
+    originalDisconnect = exception.clone();
+  }
+  if (attemptCount >= policy.maxAttempts()) {
     recordOutcome(ActorRetryOutcome::ATTEMPTS_EXHAUSTED);
     return KJ_ASSERT_NONNULL(originalDisconnect).clone();
   }
 
   auto delay = retryDelay();
-  auto deadline = KJ_ASSERT_NONNULL(this->deadline);
-  if (timer.nowForLimitTimeout() + delay >= deadline) {
-    recordOutcome(ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
-    KJ_IF_SOME(original, originalDisconnect) {
-      return original.clone();
-    }
-    return kj::mv(exception);
-  }
-  if (attemptCount == 1) {
-    originalDisconnect = exception.clone();
+  if (timer.nowForLimitTimeout() + delay >= retryCutoff()) {
+    return retryTimeoutExpired();
   }
   if (exception.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none) {
     KJ_ASSERT_NONNULL(metadata).isRetry = IsActorRetry::YES;
   } else if (KJ_ASSERT_NONNULL(metadata).isRetry == IsActorRetry::NO) {
-    metadata = generateActorRetryRequestMetadata(
-        kj::systemCoarseCalendarClock().now(), config.enforcementEnabled);
+    metadata = freshMetadata();
   }
 
   ++attemptCount;
@@ -142,7 +143,7 @@ kj::Duration ActorCallRetryState::retryDelay() {
     getEntropy(kj::asBytes(seed));
     return std::mt19937_64(seed);
   }();
-  auto maximum = INITIAL_BACKOFF * (1u << (attemptCount - 1));
+  auto maximum = kj::min(INITIAL_BACKOFF * (1u << (attemptCount - 1)), MAX_BACKOFF);
   std::uniform_int_distribution<uint64_t> distribution(0, maximum / kj::NANOSECONDS);
   return distribution(generator) * kj::NANOSECONDS;
 }
