@@ -12,6 +12,8 @@
 #include <capnp/compat/http-over-capnp.h>
 #include <capnp/rpc-twoparty.h>
 #include <kj/async-queue.h>
+#include <kj/compat/brotli.h>
+#include <kj/compat/gzip.h>
 #include <kj/encoding.h>
 #include <kj/test.h>
 
@@ -5814,6 +5816,80 @@ KJ_TEST("Server: loopback binding calls accept version property") {
 // TODO(beta): Test TLS (send and receive)
 // TODO(beta): Test CLI overrides
 
+KJ_TEST("Server: compressed event streams flush while other responses stay buffered") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-04-29",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `const event = new TextEncoder().encode("data: first\n\n");
+          `export default {
+          `  async fetch(request, env, ctx) {
+          `    const [kind, encoding] = new URL(request.url).pathname.slice(1).split("/");
+          `    const stream = new TransformStream();
+          `    const writer = stream.writable.getWriter();
+          `    ctx.waitUntil((async () => {
+          `      await writer.write(event);
+          `      await fetch("http://sse-gate/release/" + kind + "/" + encoding);
+          `      await writer.close();
+          `    })());
+          `    return new Response(stream.readable, { headers: {
+          `      "Content-Type": kind === "events"
+          `          ? "Text/Event-Stream; charset=utf-8"
+          `          : "text/plain",
+          `      "Content-Encoding": encoding,
+          `    }});
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.start();
+  auto& waitScope = test.getWaitScope();
+  enum class ExpectedDelivery { BEFORE_STREAM_END, AFTER_STREAM_END };
+  auto expectDelivery = [&]<typename Decompressor>(kj::StringPtr kind, kj::StringPtr encoding,
+                            ExpectedDelivery expectedDelivery) {
+    auto connection = test.connect("test-addr");
+    kj::HttpHeaderTable headerTable;
+    kj::HttpHeaders headers(headerTable);
+    headers.setPtr(kj::HttpHeaderId::HOST, "foo");
+    auto client = kj::newHttpClient(headerTable, connection.getStream());
+    auto path = kj::str("/", kind, "/", encoding);
+    auto response = client->request(kj::HttpMethod::GET, path, headers).response.wait(waitScope);
+    KJ_ASSERT(response.statusCode == 200);
+
+    auto gate = test.receiveInternetSubrequest("sse-gate");
+    gate.recv(kj::str("GET /release/", kind, "/", encoding, " HTTP/1.1\nHost: sse-gate\n\n"));
+
+    constexpr auto expected = "data: first\n\n"_kj;
+    Decompressor decoded(*response.body);
+    kj::byte buffer[expected.size()]{};
+    auto firstEvent = decoded.tryRead(buffer, expected.size(), expected.size());
+    bool deliveredBeforeEnd = firstEvent.poll(waitScope);
+
+    gate.send(R"(
+      HTTP/1.1 204 No Content
+      Content-Length: 0
+
+    )"_blockquote);
+
+    KJ_EXPECT(deliveredBeforeEnd == (expectedDelivery == ExpectedDelivery::BEFORE_STREAM_END));
+    KJ_EXPECT(firstEvent.wait(waitScope) == expected.size());
+    KJ_EXPECT(kj::arrayPtr(buffer) == expected.asBytes());
+    KJ_EXPECT(decoded.readAllBytes().wait(waitScope).size() == 0);
+  };
+
+  expectDelivery.template operator()<kj::GzipAsyncInputStream>(
+      "events", "gzip", ExpectedDelivery::BEFORE_STREAM_END);
+  expectDelivery.template operator()<kj::BrotliAsyncInputStream>(
+      "events", "br", ExpectedDelivery::BEFORE_STREAM_END);
+  expectDelivery.template operator()<kj::GzipAsyncInputStream>(
+      "text", "gzip", ExpectedDelivery::AFTER_STREAM_END);
+  expectDelivery.template operator()<kj::BrotliAsyncInputStream>(
+      "text", "br", ExpectedDelivery::AFTER_STREAM_END);
+}
+
 KJ_TEST("Server: encodeResponseBody: manual option") {
   TestServer test(R"((
     services = [
@@ -6894,7 +6970,7 @@ struct FdPair {
 };
 
 auto makePipeFds() {
-  int pipeFds[2];
+  int pipeFds[2]{};
   KJ_SYSCALL(pipe2(pipeFds, 0));
 
   return FdPair{
@@ -6905,7 +6981,7 @@ auto makePipeFds() {
 
 template <typename Func>
 auto expectLogLine(int fd, Func&& f) {
-  char buffer[4096];
+  char buffer[4096]{};
   int pos = 0;
   char c;
   while (read(fd, &c, 1) == 1) {
