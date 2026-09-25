@@ -118,6 +118,8 @@ static kj::String escapeJsonString(kj::StringPtr text) {
 struct AccessBlobFields {
   kj::String appAud;
   kj::Maybe<kj::String> jwtClaimsJson;
+  kj::Maybe<kj::String> teamDomain;
+  bool managedOAuthEnabled = false;
 };
 
 // Parses a JSON access blob (from the accessBlobHeader HTTP header).
@@ -135,6 +137,8 @@ static kj::Maybe<AccessBlobFields> parseAccessBlob(kj::Maybe<kj::String> blobJso
 
     kj::Maybe<kj::String> appAud;
     kj::Maybe<kj::String> jwtClaimsJson;
+    kj::Maybe<kj::String> teamDomain;
+    bool managedOAuthEnabled = false;
 
     for (auto field: fields) {
       auto name = field.getName();
@@ -144,12 +148,22 @@ static kj::Maybe<AccessBlobFields> parseAccessBlob(kj::Maybe<kj::String> blobJso
       } else if (name == "jwt_claims") {
         KJ_REQUIRE(field.getValue().isObject(), "access blob `jwt_claims` must be a JSON object");
         jwtClaimsJson = jsonCodec.encodeRaw(field.getValue());
+      } else if (name == "managed_oauth_enabled") {
+        KJ_REQUIRE(
+            field.getValue().isBoolean(), "access blob `managed_oauth_enabled` must be a boolean");
+        managedOAuthEnabled = field.getValue().getBoolean();
+      } else if (name == "team_domain") {
+        KJ_REQUIRE(field.getValue().isString(), "access blob `team_domain` must be a string");
+        auto domain = field.getValue().getString();
+        KJ_REQUIRE(domain.size() > 0, "access blob `team_domain` must not be empty");
+        teamDomain = kj::str(domain);
       }
     }
 
     auto audience =
         KJ_REQUIRE_NONNULL(kj::mv(appAud), "accessBlobHeader JSON must contain an `app_aud` field");
-    return AccessBlobFields{kj::mv(audience), kj::mv(jwtClaimsJson)};
+    return AccessBlobFields{
+      kj::mv(audience), kj::mv(jwtClaimsJson), kj::mv(teamDomain), managedOAuthEnabled};
   }
   return kj::none;
 }
@@ -3841,13 +3855,21 @@ class Server::WorkerService final: public Service,
    public:
     BlobAccessInfo(kj::String audience,
         kj::Maybe<kj::String> jwtClaimsJson,
+        kj::Maybe<kj::String> teamDomain,
+        bool managedOAuthEnabled,
         kj::Maybe<kj::uint> identityServiceChannel)
         : audience(kj::mv(audience)),
           jwtClaimsJson(kj::mv(jwtClaimsJson)),
+          teamDomain(kj::mv(teamDomain)),
+          managedOAuthEnabled(managedOAuthEnabled),
           identityServiceChannel(identityServiceChannel) {}
 
     kj::StringPtr getAudience() override {
       return audience;
+    }
+
+    bool isManagedOAuthEnabled() override {
+      return managedOAuthEnabled && teamDomain != kj::none;
     }
 
     kj::Maybe<kj::uint> getIdentityServiceChannel() override {
@@ -3860,9 +3882,15 @@ class Server::WorkerService final: public Service,
       return jwtClaimsJson.map([](kj::String& s) -> kj::StringPtr { return s; });
     }
 
+    kj::Maybe<kj::StringPtr> getTeamDomain() {
+      return teamDomain.map([](kj::String& s) -> kj::StringPtr { return s; });
+    }
+
    private:
     kj::String audience;
     kj::Maybe<kj::String> jwtClaimsJson;
+    kj::Maybe<kj::String> teamDomain;
+    bool managedOAuthEnabled;
     kj::Maybe<kj::uint> identityServiceChannel;
   };
 
@@ -3897,8 +3925,9 @@ class Server::WorkerService final: public Service,
 
       kj::Maybe<kj::Own<AccessInfo>> accessInfo;
       KJ_IF_SOME(fields, parseAccessBlob(kj::mv(blobJson))) {
-        accessInfo = kj::refcounted<BlobAccessInfo>(
-            kj::mv(fields.appAud), kj::mv(fields.jwtClaimsJson), identityServiceChannel);
+        accessInfo =
+            kj::refcounted<BlobAccessInfo>(kj::mv(fields.appAud), kj::mv(fields.jwtClaimsJson),
+                kj::mv(fields.teamDomain), fields.managedOAuthEnabled, identityServiceChannel);
       }
 
       KJ_ASSERT(cachedInner == kj::none, "request() called more than once");
@@ -4402,10 +4431,21 @@ class Server::WorkerService final: public Service,
           auto& blobInfo = kj::downcast<BlobAccessInfo>(info);
           auto escapedAud = escapeJsonString(blobInfo.getAudience());
           kj::String propsJson;
+          auto teamDomain = blobInfo.getTeamDomain().map(
+              [](kj::StringPtr domain) { return escapeJsonString(domain); });
           KJ_IF_SOME(claims, blobInfo.getJwtClaimsJson()) {
-            propsJson = kj::str("{\"aud\":", escapedAud, ",\"jwtClaims\":", claims, "}");
+            KJ_IF_SOME(domain, teamDomain) {
+              propsJson = kj::str("{\"aud\":", escapedAud, ",\"jwtClaims\":", claims,
+                  ",\"teamDomain\":", domain, "}");
+            } else {
+              propsJson = kj::str("{\"aud\":", escapedAud, ",\"jwtClaims\":", claims, "}");
+            }
           } else {
-            propsJson = kj::str("{\"aud\":", escapedAud, "}");
+            KJ_IF_SOME(domain, teamDomain) {
+              propsJson = kj::str("{\"aud\":", escapedAud, ",\"teamDomain\":", domain, "}");
+            } else {
+              propsJson = kj::str("{\"aud\":", escapedAud, "}");
+            }
           }
           SubrequestChannel& channelRef = *channels.subrequest[channel];
           auto& service = KJ_REQUIRE_NONNULL(kj::tryDowncast<Service>(channelRef),
