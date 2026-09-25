@@ -626,8 +626,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
   auto outcome = EventOutcome::OK;
   KJ_TRY {
     co_await context.run(
-        [this, entrypointName, versionInfo = kj::mv(versionInfo), props = kj::mv(props),
-            remoteAddress = kj::mv(remoteAddress), isDynamicDispatch](
+        [host = kj::mv(host), &channel = channel, entrypointName, versionInfo = kj::mv(versionInfo),
+            props = kj::mv(props), remoteAddress = kj::mv(remoteAddress), isDynamicDispatch](
             Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
       jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
       jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);

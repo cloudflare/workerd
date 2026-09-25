@@ -72,7 +72,9 @@ test('UDP connect() reports the peer address as remoteAddress', async () => {
   const port = await workerd.getListenPort('udp');
   const client = createSocket('udp4');
   try {
-    await new Promise((resolve) => client.bind(0, '127.0.0.1', resolve));
+    const bound = Promise.withResolvers();
+    client.bind(0, '127.0.0.1', bound.resolve);
+    await bound.promise;
     const reply = await sendAndReceive(client, port, Buffer.from('info'));
     // The listener binds the dual-stack wildcard, so the peer may be reported as a v4-mapped v6
     // address.
