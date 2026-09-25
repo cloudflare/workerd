@@ -6736,7 +6736,12 @@ class Server::TcpListener final: public kj::Refcounted {
       kj::HttpHeaders headers(headerTable);
       owner.tasks.add(req->connect(authority, headers, *stream.stream, *response, {})
                           .attach(kj::mv(stream.stream), kj::mv(response))
-                          .attach(kj::mv(req)));
+                          .attach(kj::mv(req))
+                          .catch_([](kj::Exception&& e) {
+        if (e.getType() != kj::Exception::Type::DISCONNECTED) {
+          KJ_LOG(ERROR, "TCP connect() handler threw", e);
+        }
+      }));
     }
   }
 
