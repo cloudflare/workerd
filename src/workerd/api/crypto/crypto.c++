@@ -62,9 +62,9 @@ CryptoKeyUsageSet CryptoKeyUsageSet::byName(kj::StringPtr name) {
 }
 
 kj::StaticArrayPtr<const CryptoKeyUsageSet> CryptoKeyUsageSet::singletons() {
-  static const workerd::api::CryptoKeyUsageSet singletons[] = {
-    encrypt(), decrypt(), sign(), verify(), deriveKey(), deriveBits(), wrapKey(), unwrapKey(),
-    encapsulateKey(), encapsulateBits(), decapsulateKey(), decapsulateBits()};
+  static const workerd::api::CryptoKeyUsageSet singletons[] = {encrypt(), decrypt(), sign(),
+    verify(), deriveKey(), deriveBits(), wrapKey(), unwrapKey(), encapsulateKey(),
+    encapsulateBits(), decapsulateKey(), decapsulateBits()};
   return {singletons, kj::size(singletons)};
 }
 
