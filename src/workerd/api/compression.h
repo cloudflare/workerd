@@ -481,7 +481,8 @@ class ZstdEncoderContext final: public ZstdContext {
 
   void work();
   // Pledging a size other than ZSTD_CONTENTSIZE_UNKNOWN makes work() reject a frame whose
-  // input turns out to be a different length.
+  // input turns out to be a different length, and resetStream() carries the pledge over to
+  // the next frame.
   kj::Maybe<CompressionError> initialize(uint64_t pledgedSrcSize);
   kj::Maybe<CompressionError> resetStream();
   kj::Maybe<CompressionError> setParams(int key, int value);
@@ -493,7 +494,8 @@ class ZstdEncoderContext final: public ZstdContext {
   kj::Own<ZSTD_CCtx> cctx_;
   ZSTD_ErrorCode error_ = ZSTD_error_no_error;
 
-  // The size passed to initialize(), which work() holds the frame to.
+  // The size passed to initialize(), kept so that resetStream() can pledge it again, since a
+  // session reset makes zstd forget it.
   uint64_t pledgedSrcSize_ = ZSTD_CONTENTSIZE_UNKNOWN;
 
   // Input consumed by the current frame, counted only while a size is pledged. zstd enforces

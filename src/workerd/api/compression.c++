@@ -638,7 +638,7 @@ void ZstdEncoderContext::work() {
         error_ = ZSTD_error_srcSize_wrong;
       }
     }
-    // Check once per frame.
+    // Check once per frame. resetStream() starts the count again for the next one.
     consumedSrcSize_ = kj::none;
   }
 }
@@ -648,6 +648,16 @@ kj::Maybe<CompressionError> ZstdEncoderContext::resetStream() {
     size_t result = ZSTD_CCtx_reset(cctx_.get(), ZSTD_reset_session_only);
     KJ_IF_SOME(err, zstdCheckError(result, error_, "ERR_ZSTD_COMPRESSION_FAILED"_kj)) {
       return kj::mv(err);
+    }
+
+    // A session reset also sets the pledged size back to unknown, so pledge it again for the
+    // next frame and restart the count that enforces it.
+    if (pledgedSrcSize_ != ZSTD_CONTENTSIZE_UNKNOWN) {
+      result = ZSTD_CCtx_setPledgedSrcSize(cctx_.get(), pledgedSrcSize_);
+      KJ_IF_SOME(err, zstdCheckError(result, error_, "ERR_ZSTD_COMPRESSION_FAILED"_kj)) {
+        return kj::mv(err);
+      }
+      consumedSrcSize_ = uint64_t(0);
     }
   }
   return kj::none;
