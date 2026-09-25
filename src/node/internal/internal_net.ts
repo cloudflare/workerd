@@ -72,6 +72,7 @@ import {
 
 import { isUint8Array, isArrayBufferView } from 'node-internal:internal_types';
 import { nextTick } from 'node-internal:internal_process';
+import { setImmediate } from 'node-internal:internal_timers';
 import { Duplex } from 'node-internal:streams_duplex';
 import { Buffer } from 'node-internal:internal_buffer';
 import {
@@ -597,6 +598,12 @@ export class Server extends EventEmitter {
 
   async #onConnection(handle: ReturnType<typeof inner.connect>): Promise<void> {
     const info = await handle.opened;
+    // 'connection' fires from a fresh turn of the delivering request, not the
+    // routing continuation: a consumer whose accept loop is driven by an
+    // already-scheduled setImmediate (a hosted runtime shared across requests)
+    // is then parked before any socket arrives and takes each one in the
+    // request that owns it, the only one in which its I/O is permitted.
+    await new Promise<void>((resolve) => setImmediate(resolve));
     if (this.#address === null) {
       await handle.close();
       return;

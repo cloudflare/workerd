@@ -2,7 +2,14 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { ok, strictEqual, notStrictEqual, throws, rejects } from 'node:assert';
+import {
+  ok,
+  strictEqual,
+  notStrictEqual,
+  deepStrictEqual,
+  throws,
+  rejects,
+} from 'node:assert';
 import { once } from 'node:events';
 import * as net from 'node:net';
 import * as http from 'node:http';
@@ -139,6 +146,51 @@ export const testInboundOnDeclaredPort = {
     // listener's 127.0.0.1 authority.
     strictEqual(await readAll(socket), `240.1.0.1:${port}:PING`);
     await socket.closed;
+    server.close();
+  },
+};
+
+// A consumer that drives every accepted socket from one setImmediate-scheduled
+// pump shared across requests, as a hosted single-event-loop runtime does. A
+// socket's I/O only works in the request that delivered it, so a 'connection'
+// must not be queued behind a pump turn already scheduled from another
+// request: here the pump is scheduled first and the connections arrive before
+// it runs.
+export const testBurstOfConnectionsBeforePumpRuns = {
+  async test(ctrl, env) {
+    const N = 3;
+    const pending = [];
+    let parked = false;
+    const drive = () => {
+      for (const s of pending.splice(0)) {
+        s.on('data', (d) => s.end(d));
+        s.write('hello ');
+      }
+      parked = true;
+    };
+    const server = net.createServer((s) => {
+      pending.push(s);
+      if (parked) {
+        parked = false;
+        queueMicrotask(drive);
+      }
+    });
+    server.listen(0);
+    await once(server, 'listening');
+    const { port } = server.address();
+
+    setImmediate(drive);
+    const clients = Array.from({ length: N }, () =>
+      env.SELF.connect(`localhost:${port}`)
+    );
+    const results = await Promise.all(
+      clients.map(async (c) => {
+        const writer = c.writable.getWriter();
+        await writer.write(new TextEncoder().encode('ping'));
+        return readAll(c);
+      })
+    );
+    deepStrictEqual(results, Array(N).fill('hello ping'));
     server.close();
   },
 };
