@@ -448,6 +448,7 @@ class Fetcher: public JsRpcClientProvider {
   kj::LiteralStringConst getRpcTargetKind() override;
 
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
+#if !WORKERD_API_EXTENDED_FETCHER_TEST
     // WARNING: New JSG_METHODs on Fetcher must be gated via compatibility flag to prevent
     // conflicts with JS RPC methods (implemented via the wildcard property). Ideally, we do not
     // add any new methods here, and instead rely on RPC for all future needs.
@@ -518,6 +519,7 @@ class Fetcher: public JsRpcClientProvider {
       // be shadowed by non-wildcard methods.
       JSG_METHOD(getRpcMethodForTestOnly);
     }
+#endif
   }
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
@@ -585,9 +587,30 @@ class Fetcher: public JsRpcClientProvider {
   const RpcCompatGateBypassed rpcCompatGateBypassed = RpcCompatGateBypassed::NO;
 };
 
+class ExtendedFetcherInitializer final: public jsg::Object {
+ public:
+  struct State {
+    uint channel;
+    uint16_t port;
+    IsHyperdrive isHyperdrive;
+  };
+
+  explicit ExtendedFetcherInitializer(State state): state(kj::mv(state)) {}
+
+  State consume() {
+    return JSG_REQUIRE_NONNULL(
+        kj::mv(state), TypeError, "ExtendedFetcher initializer has already been consumed.");
+  }
+
+  JSG_RESOURCE_TYPE(ExtendedFetcherInitializer) {}
+
+ private:
+  kj::Maybe<State> state;
+};
+
 // Extended fetcher type that makes the getters for host/port available using the JSG API. Allows
 // us to support connection string overrides in a backwards-compatible way.
-class ExtendedFetcher final: public Fetcher {
+class ExtendedFetcher: public Fetcher {
  public:
   explicit ExtendedFetcher(uint channel,
       RequiresHostAndProtocol requiresHost,
@@ -598,6 +621,13 @@ class ExtendedFetcher final: public Fetcher {
       : Fetcher(channel, requiresHost, isInHouse, rpcCompatGateBypassed),
         isHyperdrive(isHyperdrive) {
     port = connectionStringOverridePort;
+  }
+
+  static jsg::Ref<ExtendedFetcher> constructor(
+      jsg::Lock& js, jsg::Ref<ExtendedFetcherInitializer> initializer) {
+    auto state = initializer->consume();
+    return js.alloc<ExtendedFetcher>(
+        state.channel, RequiresHostAndProtocol::YES, state.port, state.isHyperdrive);
   }
 
   // Get port – this is guaranteed to be present for extended fetchers
@@ -1320,7 +1350,8 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
       api::Headers::ValueIterator::Next, api::Body, api::Response, api::Response::InitializerDict, \
       api::Request, api::Request::InitializerDict, api::Fetcher, api::Fetcher::PutOptions,         \
       api::Fetcher::ScheduledOptions, api::Fetcher::ScheduledResult, api::Fetcher::QueueResult,    \
-      api::Fetcher::ServiceBindingQueueMessage, api::ExtendedFetcher
+      api::Fetcher::ServiceBindingQueueMessage, api::ExtendedFetcherInitializer,                   \
+      api::ExtendedFetcher
 
 // The list of http.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
