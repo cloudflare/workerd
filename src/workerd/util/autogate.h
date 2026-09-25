@@ -179,13 +179,13 @@ constexpr size_t autogateToIndex(AutogateKey key) {
 // Returns all AutogateKey values (excluding NumOfKeys) as an iterable range:
 //
 //     for (AutogateKey key: getAutogateKeys()) { ... }
-constexpr kj::ArrayPtr<const AutogateKey> getAutogateKeys() {
+constexpr kj::StaticArrayPtr<const AutogateKey> getAutogateKeys() {
   static constexpr AutogateKey keys[] = {
 #define V(key) AutogateKey::key,
     WORKERD_AUTOGATES(V)
 #undef V
   };
-  return keys;
+  return {keys, kj::size(keys)};
 }
 static_assert(getAutogateKeys().size() == autogateToIndex(AutogateKey::NumOfKeys));
 
