@@ -11,9 +11,6 @@ namespace workerd::api {
 
 class CacheContext;
 
-// V8 private key set on functions decorated with `@retryable` from "cloudflare:durable-objects".
-inline constexpr auto RETRYABLE_METHOD_PRIVATE_KEY = "cloudflare:durable-objects:retryable"_kjc;
-
 // Base class for exported RPC services.
 //
 // When the worker's top-level module exports a class that extends this class, it means that it

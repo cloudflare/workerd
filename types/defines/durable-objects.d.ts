@@ -4,6 +4,9 @@ declare module 'cloudflare:durable-objects' {
    * to it after a disconnect that might have happened after the method started. It does not
    * enable retries or change how many are made.
    *
+   * Each attempt creates its own return value, so if the method returns an `RpcTarget`, its
+   * `[Symbol.dispose]()` may run once per attempt.
+   *
    * Only public instance methods can be decorated. When composing decorators, apply `@retryable`
    * outermost (first in source order) so it marks the method that is finally installed.
    * Otherwise `@retryable` has no effect, and constructing the object logs a warning.
