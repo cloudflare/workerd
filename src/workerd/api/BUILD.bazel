@@ -64,6 +64,7 @@ filegroup(
 filegroup(
     name = "hdrs",
     srcs = [
+        "abort-bootstrap.h",
         "actor.h",
         "actor-call-retry.h",
         "actor-state.h",
@@ -854,6 +855,15 @@ kj_test(
     src = "jsrpc-call-observation-test.c++",
     deps = [
         "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "jsrpc-call-retry-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
         "//src/workerd/tests:test-fixture",
     ],
 )

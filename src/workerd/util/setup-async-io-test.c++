@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Verifies that kj::setupAsyncIo() -- the public kj entry point, called exactly as workerd.c++
+// Verifies that kj::setupAsyncIo() -- the public kj entry point, called exactly as cli-main.c++
 // calls it -- resolves to the tokio-backed implementation from //src/workerd/util:setup-async-io.
 // If kj's own definition were linked instead (kj-async-os leaking in through a dependency edge),
 // the process would run on kj::UnixEventPort while tests that build their own event loop stayed

@@ -1478,6 +1478,47 @@ struct ActorFetchFailure {
 template <typename T>
 using ActorFetchAttemptResult = kj::OneOf<T, ActorFetchFailure>;
 
+ActorRetryGateEnabled fetchRetryObservationEnabled() {
+  return ActorRetryGateEnabled(
+      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH));
+}
+
+ActorRetryGateEnabled fetchRetryEnforcementEnabled() {
+  return ActorRetryGateEnabled(
+      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS));
+}
+
+// The retry policy a fetch through `fetcher` runs under, or none if the target does not support
+// actor call retries. A binding's own policy applies only when it configured one and every retry
+// gate is on: the fetch gates are prerequisites for all retry behavior, and the userland gate for
+// reading the binding's configuration. Otherwise the runtime's default applies. The gates are
+// checked before touching the stub. Its I/O objects belong to the context that created it, so
+// reaching them can throw, and a disabled rollout must never get that far.
+kj::Maybe<ActorRetryPolicy> tryGetActorRetryPolicy(Fetcher& fetcher) {
+  if (!fetcher.supportsActorCallRetries()) return kj::none;
+  if (fetchRetryObservationEnabled().toBool() && fetchRetryEnforcementEnabled().toBool() &&
+      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
+    KJ_IF_SOME(userPolicy, fetcher.getUserDefinedRetryPolicy()) {
+      return ActorRetryPolicy::userDefined(userPolicy);
+    }
+  }
+  return ActorRetryPolicy::systemDefault();
+}
+
+kj::Maybe<kj::Rc<ActorCallRetryState>> makeActorCallRetryState(
+    Fetcher& fetcher, Request& request, kj::TimePoint callStart) {
+  auto policy = KJ_UNWRAP_OR_RETURN(tryGetActorRetryPolicy(fetcher), kj::none);
+  auto& context = IoContext::current();
+  auto config = ActorCallRetryState::Config{
+    .callType = ActorRetryCallType::FETCH,
+    .observationEnabled = fetchRetryObservationEnabled(),
+    .enforcementEnabled = fetchRetryEnforcementEnabled(),
+    .payloadReplayable = ActorCallPayloadReplayable(request.canRewindBody()),
+  };
+  return kj::rc<ActorCallRetryState>(
+      context.getIoChannelFactory().getTimer(), context.getMetrics(), config, policy, callStart);
+}
+
 template <typename T>
 kj::Promise<ActorFetchAttemptResult<T>> captureActorFetchAttempt(jsg::Lock& js,
     kj::Maybe<jsg::Ref<AbortSignal>>& signal,
@@ -1504,17 +1545,21 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
     kj::Vector<kj::Url> urlList,
     kj::Maybe<kj::Rc<ActorCallRetryState>> retryState);
 
+// `callStart` is the actor call's start, carried so that a redirect shares the call's retry
+// timeout. It is none for fetches that are not actor calls.
 jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList,
-    kj::HttpClient::Response&& response);
+    kj::HttpClient::Response&& response,
+    kj::Maybe<kj::TimePoint> callStart);
 jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList,
     uint status,
-    kj::StringPtr location);
+    kj::StringPtr location,
+    kj::Maybe<kj::TimePoint> callStart);
 
 jsg::Promise<jsg::Ref<Response>> handleWebSocketFetchResponse(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
@@ -1522,12 +1567,13 @@ jsg::Promise<jsg::Ref<Response>> handleWebSocketFetchResponse(jsg::Lock& js,
     kj::Vector<kj::Url> urlList,
     kj::Own<kj::HttpClient> client,
     kj::Maybe<jsg::Ref<AbortSignal>> signal,
-    kj::HttpClient::WebSocketResponse response) {
+    kj::HttpClient::WebSocketResponse response,
+    kj::Maybe<kj::TimePoint> callStart) {
   KJ_SWITCH_ONEOF(response.webSocketOrBody) {
     KJ_CASE_ONEOF(body, kj::Own<kj::AsyncInputStream>) {
       body = body.attach(kj::mv(client));
       return handleHttpResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
-          {response.statusCode, response.statusText, response.headers, kj::mv(body)});
+          {response.statusCode, response.statusText, response.headers, kj::mv(body)}, callStart);
     }
     KJ_CASE_ONEOF(webSocket, kj::Own<kj::WebSocket>) {
       KJ_ASSERT(response.statusCode == 101);
@@ -1555,7 +1601,8 @@ jsg::Promise<jsg::Ref<Response>> handleHttpFetchResponse(jsg::Lock& js,
     kj::Vector<kj::Url> urlList,
     kj::Own<kj::HttpClient> client,
     kj::Maybe<TraceContext>& traceContext,
-    kj::HttpClient::Response response) {
+    kj::HttpClient::Response response,
+    kj::Maybe<kj::TimePoint> callStart) {
   response.body = response.body.attach(kj::mv(client));
   KJ_IF_SOME(ctx, traceContext) {
     ctx.setTag("http.response.status_code"_kjc, static_cast<int64_t>(response.statusCode));
@@ -1568,7 +1615,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpFetchResponse(jsg::Lock& js,
     }
   }
   return handleHttpResponse(
-      js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(response));
+      js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(response), callStart);
 }
 
 jsg::Promise<jsg::Ref<Response>> rejectFetch(jsg::Lock& js, kj::Exception&& exception) {
@@ -1618,27 +1665,16 @@ jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
   });
 }
 
+// `callStart` is set when a redirect continues an earlier call. A new call starts now, after any
+// output-gate wait.
 jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
-  kj::Vector<kj::Url> urlList) {
-  kj::Maybe<kj::Rc<ActorCallRetryState>> retryState;
-  if (fetcher->supportsActorCallRetries()) {
-    auto& context = IoContext::current();
-    auto observationEnabled = ActorRetryGateEnabled(
-        util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH));
-    auto enforcementEnabled = ActorRetryGateEnabled(util::Autogate::isEnabled(
-        util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS));
-    retryState = kj::rc<ActorCallRetryState>(context.getIoChannelFactory().getTimer(),
-        context.getMetrics(),
-        ActorCallRetryState::Config{
-          .callType = ActorRetryCallType::FETCH,
-          .observationEnabled = observationEnabled,
-          .enforcementEnabled = enforcementEnabled,
-          .payloadReplayable = ActorCallPayloadReplayable(jsRequest->canRewindBody()),
-        });
-  }
-
+    kj::Vector<kj::Url> urlList,
+    kj::Maybe<kj::TimePoint> callStart = kj::none) {
+  auto retryState = makeActorCallRetryState(*fetcher, *jsRequest,
+      callStart.orDefault(
+          [] { return IoContext::current().getIoChannelFactory().getTimer().nowForLimitTimeout(); }));
   return fetchImplNoOutputLockAttempt(
       js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(retryState));
 }
@@ -1668,6 +1704,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
     actorCallAttempt =
         kj::mv(KJ_ASSERT_NONNULL(attemptOrException.tryGet<ActorCallRetryState::Attempt>()));
   }
+  auto callStart = retryState.map([](auto& state) { return state->getCallStart(); });
 
   // Stash the payload and target retryability before we lose access to the JS-level request. This
   // is consumed only when the target is an actor; for other fetches the value is overwritten by the
@@ -1760,18 +1797,18 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
     KJ_IF_SOME(state, retryState) {
       if (state->isRetryEnabled()) {
         auto resultPromise = captureActorFetchAttempt(
-            js, signal, kj::mv(webSocketResponse), state.addRef());
+            js, signal, state->enforceRetryTimeout(kj::mv(webSocketResponse)), state.addRef());
         return ioContext.awaitIo(js, kj::mv(resultPromise),
               [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
                   urlList = kj::mv(urlList), client = kj::mv(client), signal = kj::mv(signal),
-                  retryState = kj::mv(retryState)](jsg::Lock& js,
+                  retryState = kj::mv(retryState), callStart](jsg::Lock& js,
                   ActorFetchAttemptResult<kj::HttpClient::WebSocketResponse>&& result) mutable
               -> jsg::Promise<jsg::Ref<Response>> {
             KJ_SWITCH_ONEOF(result) {
               KJ_CASE_ONEOF(response, kj::HttpClient::WebSocketResponse) {
               KJ_ASSERT_NONNULL(retryState)->recordRecovered();
               return handleWebSocketFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest),
-                  kj::mv(urlList), kj::mv(client), kj::mv(signal), kj::mv(response));
+                  kj::mv(urlList), kj::mv(client), kj::mv(signal), kj::mv(response), callStart);
             }
             KJ_CASE_ONEOF(failure, ActorFetchFailure) {
               return retryActorFetch(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
@@ -1785,10 +1822,10 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
     webSocketResponse = AbortSignal::maybeCancelWrap(js, signal, kj::mv(webSocketResponse));
     return ioContext.awaitIo(js, kj::mv(webSocketResponse),
         [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
-            client = kj::mv(client), signal = kj::mv(signal)](
+            client = kj::mv(client), signal = kj::mv(signal), callStart](
             jsg::Lock& js, kj::HttpClient::WebSocketResponse&& response) mutable {
       return handleWebSocketFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
-          kj::mv(client), kj::mv(signal), kj::mv(response));
+          kj::mv(client), kj::mv(signal), kj::mv(response), callStart);
     });
   } else {
     kj::Maybe<kj::HttpClient::Request> nativeRequest;
@@ -1859,19 +1896,19 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
     });
     KJ_IF_SOME(state, retryState) {
       if (state->isRetryEnabled()) {
-        auto resultPromise =
-            captureActorFetchAttempt(js, signal, kj::mv(responsePromise), state.addRef());
+        auto resultPromise = captureActorFetchAttempt(
+            js, signal, state->enforceRetryTimeout(kj::mv(responsePromise)), state.addRef());
         return ioContext.awaitIo(js, kj::mv(resultPromise),
               [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
                   urlList = kj::mv(urlList), client = kj::mv(client),
-                  traceContext = kj::mv(traceContext), retryState = kj::mv(retryState)](
+                  traceContext = kj::mv(traceContext), retryState = kj::mv(retryState), callStart](
                   jsg::Lock& js, ActorFetchAttemptResult<kj::HttpClient::Response>&& result) mutable
               -> jsg::Promise<jsg::Ref<Response>> {
             KJ_SWITCH_ONEOF(result) {
               KJ_CASE_ONEOF(response, kj::HttpClient::Response) {
               KJ_ASSERT_NONNULL(retryState)->recordRecovered();
               return handleHttpFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest),
-                  kj::mv(urlList), kj::mv(client), traceContext, kj::mv(response));
+                  kj::mv(urlList), kj::mv(client), traceContext, kj::mv(response), callStart);
             }
             KJ_CASE_ONEOF(failure, ActorFetchFailure) {
               return retryActorFetch(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
@@ -1885,10 +1922,10 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
     responsePromise = AbortSignal::maybeCancelWrap(js, signal, kj::mv(responsePromise));
     return ioContext.awaitIo(js, kj::mv(responsePromise),
         [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
-            client = kj::mv(client), traceContext = kj::mv(traceContext)](
+            client = kj::mv(client), traceContext = kj::mv(traceContext), callStart](
             jsg::Lock& js, kj::HttpClient::Response&& response) mutable {
       return handleHttpFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
-          kj::mv(client), traceContext, kj::mv(response));
+          kj::mv(client), traceContext, kj::mv(response), callStart);
     });
   }
 }
@@ -1915,7 +1952,8 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList,
-    kj::HttpClient::Response&& response) {
+    kj::HttpClient::Response&& response,
+    kj::Maybe<kj::TimePoint> callStart) {
   auto signal = jsRequest->getSignal();
 
   KJ_IF_SOME(s, signal) {
@@ -1936,9 +1974,9 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
       return ioContext.awaitIo(js,
           response.body->pumpTo(getGlobalNullOutputStream()).ignoreResult().attach(kj::mv(response.body)),
           [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
-           status = response.statusCode, location = kj::str(l)](jsg::Lock& js) mutable {
-        return handleHttpRedirectResponse(
-            js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), status, kj::mv(location));
+           status = response.statusCode, location = kj::str(l), callStart](jsg::Lock& js) mutable {
+        return handleHttpRedirectResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
+            status, kj::mv(location), callStart);
       });
     } else {
       // No Location header. That's OK, we just return the response as is.
@@ -1958,7 +1996,8 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(jsg::Lock& js,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList,
     uint status,
-    kj::StringPtr location) {
+    kj::StringPtr location,
+    kj::Maybe<kj::TimePoint> callStart) {
   // Reconstruct the request body stream for retransmission in the face of a redirect. Before
   // reconstructing the stream, however, this function:
   //
@@ -2080,7 +2119,10 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(jsg::Lock& js,
 
   // No need to wait for output locks again when following a redirect, because we didn't interact
   // with the app state in any way.
-  return fetchImplNoOutputLock(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList));
+  //
+  // The redirected request is a new actor call with fresh retry state, but it keeps the original
+  // callStart so one retry timeout covers the whole chain.
+  return fetchImplNoOutputLock(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), callStart);
 }
 
 }  // namespace
@@ -2824,6 +2866,15 @@ kj::Maybe<ActorCallTargetRetryable> Fetcher::getActorTargetRetryability() {
     return outgoingFactory->getActorTargetRetryability();
   }
   return kj::none;
+}
+
+kj::Maybe<UserDefinedRetryPolicy> Fetcher::getUserDefinedRetryPolicy() {
+  auto& outgoingFactory = KJ_REQUIRE_NONNULL(
+      channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>(),
+      "actor retry policy requested from an unsupported Fetcher");
+  KJ_REQUIRE(outgoingFactory->supportsActorCallRetries(),
+      "actor retry policy requested from an unsupported Fetcher");
+  return outgoingFactory->getUserDefinedRetryPolicy();
 }
 
 void Fetcher::onActorCallRetry() {

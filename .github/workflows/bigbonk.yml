@@ -37,7 +37,7 @@ jobs:
           OPENCODE_CONFIG_CONTENT: '{"permission":{"external_directory":{"/home/runner/work/**":"allow"},"question":"deny","doom_loop":"deny"}}'
         with:
           oidc_base_url: https://ask-bonk.cloudflare-exponent.workers.dev/auth
-          model: 'cloudflare-ai-gateway/openai/gpt-5.6-sol'
+          model: 'cloudflare-ai-gateway/anthropic/claude-opus-5-5'
           mentions: '/bigbonk'
           variant: 'max'
           permissions: write

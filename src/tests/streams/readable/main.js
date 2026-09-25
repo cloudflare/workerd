@@ -96,6 +96,7 @@ export {
   teeCancelReasonComposite,
   teeCancelReverseOrder,
   teePullPerRead,
+  teeBackpressureFollowsSlowestBranch,
 } from 'tee';
 
 export {
@@ -131,6 +132,9 @@ export {
   returnThenNextNoAwait,
   nextThenReturnNoAwait,
   iteratorPrototypeShape,
+  nextFromEarlierContinuationReadsAhead,
+  nextFromEarlierContinuationBeatsReturn,
+  nextAfterRejectedNextIsDone,
 } from 'async-iteration';
 
 export {

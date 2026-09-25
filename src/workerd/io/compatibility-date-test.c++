@@ -128,6 +128,8 @@ KJ_TEST("compatibility flag parsing") {
       "(formDataParserSupportsFiles = true, fetchRefusesUnknownProtocols = true)");
   expectCompileCompatibilityFlags("2021-11-04", {"fetch_refuses_unknown_protocols"_kj},
       "(formDataParserSupportsFiles = true, fetchRefusesUnknownProtocols = true)");
+  expectCompileCompatibilityFlags("2021-05-17", {"durable_object_io_tasks_prevent_eviction"_kj},
+      "(durableObjectIoTasksPreventEviction = true)");
 
   // Test errors.
   expectCompileCompatibilityFlags("abcd", {}, "()", {"Invalid compatibility date: abcd"});

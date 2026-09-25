@@ -214,6 +214,32 @@ export const pipeSocketToSocket = {
   },
 };
 
+// A native-to-native pipe takes the source's native source away at the
+// start: the source is left locked and closed, as the legacy C++ streams
+// leave it. The closed state is observable here only through the Node.js
+// interop closed-promise, which only the TypeScript streams carry.
+const kIsClosedPromise = Symbol.for('nodejs.webstream.isClosedPromise');
+export const pipeSocketToSocketClosesSource = {
+  async test(ctrl, env) {
+    const greetSocket = connect(greetAddress(env));
+    const echoSocket = connect(echoAddress(env));
+    const source = greetSocket.readable;
+    const piped = source.pipeTo(echoSocket.writable);
+    strictEqual(source.locked, true);
+    if (usingTsImpl) {
+      const closed = await Promise.race([
+        source[kIsClosedPromise].promise.then(() => 'closed'),
+        scheduler.wait(100).then(() => 'pending'),
+      ]);
+      strictEqual(closed, 'closed');
+    }
+    const echoed = await drainToBytes(echoSocket.readable);
+    await piped;
+    strictEqual(dec.decode(echoed), 'hello from the greet server');
+    await Promise.all([greetSocket.close(), echoSocket.close()]);
+  },
+};
+
 // A header written without awaiting it, the writer released, then a body
 // piped into the socket (a native-to-native pipe): the body follows the
 // header, and the pipe leaves both endpoints unlocked.

@@ -972,6 +972,26 @@ class Worker::Actor final: public kj::Refcounted {
     virtual void cloneFacet(kj::StringPtr src, kj::StringPtr dst) = 0;
   };
 
+  class WaitUntilTaskHandle {
+   public:
+    virtual ~WaitUntilTaskHandle() noexcept = default;
+  };
+
+  class WaitUntilTaskTracker {
+   public:
+    virtual ~WaitUntilTaskTracker() noexcept(false) = default;
+
+    // Register one task and return a handle to attach to its promise until it settles or is
+    // canceled. An empty handle leaves the task untracked.
+    //
+    // Implementations must undo partial tracking state before propagating setup failures.
+    // IoContext catches those failures so they do not reject or cancel the application task.
+    //
+    // Must not register additional tasks with IoContext, directly or through helpers,
+    // since that would recursively invoke registerTask().
+    virtual kj::Own<WaitUntilTaskHandle> registerTask() = 0;
+  };
+
   // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
   // from the thread that created it.
   Actor(const Worker& worker,
@@ -991,9 +1011,14 @@ class Worker::Actor final: public kj::Refcounted {
       jsg::Dict<kj::String> containerImages = jsg::Dict<kj::String>{},
       kj::Maybe<FacetManager&> facetManager = kj::none,
       kj::Maybe<ActorVersion> version = kj::none,
-      kj::Maybe<uint64_t> holderToken = kj::none);
+      kj::Maybe<uint64_t> holderToken = kj::none,
+      kj::Maybe<kj::Own<WaitUntilTaskTracker>> waitUntilTaskTracker = kj::none);
 
   ~Actor() noexcept(false);
+
+  // Called before a promise is added to IoContext's wait-until task set. Returns the tracker's
+  // handle, or an empty handle if no tracker is supplied.
+  kj::Own<WaitUntilTaskHandle> addedWaitUntilTask();
 
   // Call when starting any new request, to ensure that the actor object's constructor has run.
   //
@@ -1129,6 +1154,8 @@ class Worker::Actor final: public kj::Refcounted {
 
   kj::Own<const Worker> worker;
   kj::Maybe<kj::Own<RequestTracker>> tracker;
+  // The tracker must outlive the task handles destroyed with impl's IoContext.
+  kj::Maybe<kj::Own<WaitUntilTaskTracker>> waitUntilTaskTracker;
   struct Impl;
   kj::Own<Impl> impl;
 

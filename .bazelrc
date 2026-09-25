@@ -280,9 +280,14 @@ build:asan --@rules_rust//:extra_rustc_flag=-Zsanitizer=address
 build:tsan-common --config=sanitizer-common
 build:tsan-common --copt="-fsanitize=thread" --linkopt="-fsanitize=thread"
 build:tsan-common --platforms=//build/platforms:sanitizer_thread_platform
-# Let death tests observe SIGABRT directly instead of routing it through TSan's signal handler.
-build:tsan-common --action_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0
-build:tsan-common --test_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0
+# handle_sigabrt=0 lets death tests observe SIGABRT directly instead of routing it through TSan's
+# signal handler. history_size=7 (the maximum) keeps 10 trace parts of memory-access history per
+# thread instead of the default 3. TSan silently drops a race report when it can no longer
+# reconstruct the stack of the older access from that history, so with the default a thread that
+# gets a few milliseconds' head start on a loaded machine can race unreported; the larger history
+# makes detection robust to scheduling. Costs ~2.5MB of trace memory per live thread.
+build:tsan-common --action_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0:history_size=7
+build:tsan-common --test_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0:history_size=7
 # Clang-tidy loads this shared object into an unsanitized process, which cannot resolve TSan hooks.
 build:tsan-common --per_file_copt='tools/clang-tidy@-fno-sanitize=thread'
 # TSan significantly increases test runtime.
@@ -535,6 +540,11 @@ build:coverage --experimental_use_llvm_covmap
 # experimental_generate_llvm_lcov tells collect_cc_coverage to use llvm-cov export to generate LCOV
 # format instead of just outputting raw profdata. LLVM_COV specifies the llvm-cov binary to use.
 build:coverage --experimental_generate_llvm_lcov
+# C++ tests get these from the C++ toolchain. A test that only runs an instrumented binary (every
+# wd_test runs workerd) does not, and without them the collector skips the binary's profile.
+build:coverage --test_env=GENERATE_LLVM_LCOV=1
+build:coverage --test_env=LLVM_COV=llvm-cov
+build:coverage --test_env=LLVM_PROFDATA=llvm-profdata
 # Ensure that we fetch coverage data from remote cache
 build:coverage --experimental_fetch_all_coverage_outputs
 build:coverage --experimental_split_coverage_postprocessing

@@ -322,8 +322,8 @@ const SetIteratorPrototypeNext: (iter: any) => IteratorResult<any> =
 
 // ArrayBuffer
 const ArrayBufferPrototypeSlice = uncurryThis(ArrayBuffer.prototype.slice);
-const ArrayBufferPrototypeTransfer = uncurryThis(
-  ArrayBuffer.prototype.transfer
+const ArrayBufferPrototypeTransferToFixedLength = uncurryThis(
+  ArrayBuffer.prototype.transferToFixedLength
 );
 const ArrayBufferPrototypeByteLengthGet = getProtoGetter<
   (buffer: ArrayBuffer) => number
@@ -791,7 +791,7 @@ module.exports = ObjectFreeze({
 
   // ArrayBuffer
   ArrayBufferPrototypeSlice,
-  ArrayBufferPrototypeTransfer,
+  ArrayBufferPrototypeTransferToFixedLength,
   ArrayBufferPrototypeByteLengthGet,
   ArrayBufferPrototypeDetachedGet,
 

@@ -24,6 +24,23 @@ export default {
       });
       return new Response(rs);
     }
+    // Chunks foo, bar, baz, each after a delay, so a read of the body is
+    // still in flight well after it starts.
+    if (url.pathname === '/delayed') {
+      const enc = new TextEncoder();
+      const chunks = ['foo', 'bar', 'baz'];
+      const rs = new ReadableStream({
+        async pull(controller) {
+          await scheduler.wait(20);
+          if (chunks.length > 0) {
+            controller.enqueue(enc.encode(chunks.shift()));
+          } else {
+            controller.close();
+          }
+        },
+      });
+      return new Response(rs);
+    }
     return new Response(request.body, {
       headers: { 'content-type': 'application/octet-stream' },
     });
@@ -48,7 +65,9 @@ export {
   byobRequestOnDefaultRead,
   enqueueDiscardsByobRequest,
   closeWithPartiallyFilledView,
+  closeWithPartiallyFilledViewDetached,
   readAfterCloseReturnsEmptyView,
+  readAfterCancelReturnsEmptyView,
   readDetachesCallerBuffer,
   closeWithPendingUnfilledByobRead,
   controllerType,
@@ -66,6 +85,7 @@ export {
   byobMixedViewTypes,
   byobViewOffset,
   byobAutoAllocateSizes,
+  autoAllocateDefaultReadTakesQueuedChunk,
   byobPartialRespondMisalignsFillOffset,
   readableStreamBytesMismatchedSizes,
   readableStreamBytesMismatchedViewTypes,
@@ -73,6 +93,7 @@ export {
   readableStreamMultiplePendingReads,
   byobreaderRegression,
   partialViewThenDefaultRead,
+  nativeByobMultiByteViews,
 } from 'byob-reader';
 
 export {
@@ -113,6 +134,7 @@ export {
   respondAfterCloseAndReleaseFromLaterMicrotask,
   readableStreamByteRespondWithNewView,
   readableStreamByteRespondWithNewViewUsesNewElementSize,
+  respondRemainderSettlesHeadFirst,
   readableStreamAutoAllocateChunkSize,
 } from 'respond';
 
@@ -125,6 +147,7 @@ export {
   relockTwoPendingRespond,
   relockAutoAllocateTwoPendingRespond,
   relockPartialHeadThenEnqueue,
+  relockPartialHeadThenEnqueueShapes,
   relockRespondOverflowSecondView,
 } from 'release-relock';
 
@@ -133,6 +156,7 @@ export {
   readMinStagedFulfillment,
   readMinValidation,
   closeBelowMin,
+  closedOrderAtEndOfData,
   minMetThenClose,
   readAtLeastDefaultReaderThrows,
   byobReaderConstraints,
@@ -153,8 +177,17 @@ export {
   teeReleasedPartialReadPiped,
   teeAfterReleasedPartialRead,
   teeOfBranchWithReleasedPartialRead,
-  teeInvalidatesHeldByobRequest,
-  teeSoleBranchMintsFreshByobRequest,
+  teeKeepsHeldByobRequest,
+  teeSoleBranchUsesHeldByobRequest,
+  teeHeldByobRequestWithReleasedBytes,
+  teeHeldByobRequestAfterCloseOrError,
+  teeHeldByobRequestAcrossNestedTee,
+  teeHeldByobRequestEnqueueFillsByobRead,
+  teeHeldByobRequestNewViewAndAutoAllocate,
+  teeNativeBodyAfterReleaseMidRead,
+  teeClosedNativeBodyLocksOriginal,
+  teeBranchFractionalCloseErrorsBranch,
+  teeSoleBranchFractionalCloseSkipsSourceCancel,
 } from 'tee';
 
 export {
@@ -164,6 +197,9 @@ export {
   respondWithNewViewForeignBuffer,
   enqueueResizableBuffer,
   readResizableView,
+  resizableByobRequestCannotShrink,
+  resizableBuffersDeliveredFixedLength,
+  sharedBuffersRejected,
   nonDetachableBuffersRejected,
 } from 'buffer-lifecycle';
 

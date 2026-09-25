@@ -534,7 +534,10 @@ export type ExportedHandlerTailStreamHandler<Env = unknown, Props = unknown> = (
   event: TailStream.TailEvent<TailStream.Onset>,
   env: Env,
   ctx: ExecutionContext<Props>,
-) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
+) =>
+  | TailStream.TailEventHandlerType
+  | undefined
+  | Promise<TailStream.TailEventHandlerType | undefined>;
 export type ExportedHandlerScheduledHandler<Env = unknown, Props = unknown> = (
   controller: ScheduledController,
   env: Env,
@@ -1756,7 +1759,7 @@ export interface MessageEventInit {
   data?: any;
   origin?: string;
   lastEventId?: string;
-  source?: MessagePort;
+  source?: MessagePort | null;
   ports?: MessagePort[];
 }
 /**
@@ -4401,9 +4404,13 @@ export type LoopbackForExport<
   ? LoopbackServiceStub<InstanceType<T>>
   : T extends new (...args: any[]) => Rpc.DurableObjectBranded
     ? LoopbackDurableObjectClass<InstanceType<T>>
-    : T extends ExportedHandler<any, any, any>
-      ? LoopbackServiceStub<undefined>
-      : undefined;
+    : T extends new (
+          ...args: any[]
+        ) => CloudflareWorkersModule.WorkflowEntrypoint<any, infer Params>
+      ? Workflow<Params>
+      : T extends ExportedHandler<any, any, any>
+        ? LoopbackServiceStub<undefined>
+        : undefined;
 export type LoopbackServiceStub<
   T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
 > = Fetcher<T> &
@@ -4895,7 +4902,14 @@ export declare abstract class Span {
           stack?: string;
         },
   ): void;
+  updateName(name: string): this;
+  setStatus(status: TracingSpanStatus): this;
   end(): void;
+}
+export type TracingSpanStatusCode = "unset" | "ok" | "error";
+export interface TracingSpanStatus {
+  code: TracingSpanStatusCode;
+  message?: string;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.
@@ -12147,11 +12161,24 @@ export type AiModelListType = Record<string, any>;
 export type AiAsyncBatchResponse = {
   request_id: string;
 };
+export type AiWebSearchRequest = {
+  /** AI Gateway configuration used for this request. */
+  gatewayId: string;
+  /** Search query. */
+  query: string;
+  /** Maximum number of results. Defaults to 10 and is capped at 20. */
+  limit?: number;
+  /** Optional BYOK web-search provider configured on the gateway. */
+  provider?: string;
+  /** Optional BYOK key alias. Defaults to `default`. */
+  byokAlias?: string;
+};
 export declare abstract class Ai<
   AiModelList extends AiModelListType = AiModels,
 > {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
+  websearch(request: AiWebSearchRequest): Promise<Response>;
   /**
    * @deprecated Use the standalone `ai_search_namespaces` or `ai_search` Workers bindings instead.
    * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
@@ -16137,7 +16164,8 @@ export declare namespace CloudflareWorkersModule {
       event: TailStream.TailEvent<TailStream.Onset>,
     ):
       | TailStream.TailEventHandlerType
-      | Promise<TailStream.TailEventHandlerType>;
+      | undefined
+      | Promise<TailStream.TailEventHandlerType | undefined>;
     test?(controller: TestController): void | Promise<void>;
     trace?(traces: TraceItem[]): void | Promise<void>;
   }
@@ -17308,6 +17336,12 @@ export declare namespace TailStream {
     readonly cpuTime: number;
     readonly wallTime: number;
   }
+  type SpanStatusCode = "unset" | "ok" | "error";
+  interface SpanStatus {
+    readonly code: SpanStatusCode;
+    /** A developer-facing error message, present only when code is "error". */
+    readonly message?: string;
+  }
   interface SpanOpen {
     readonly type: "spanOpen";
     readonly name: string;
@@ -17318,6 +17352,19 @@ export declare namespace TailStream {
   interface SpanClose {
     readonly type: "spanClose";
     readonly outcome: EventOutcome;
+  }
+  type SpanUpdateInfo =
+    | {
+        readonly type: "name";
+        readonly name: string;
+      }
+    | {
+        readonly type: "status";
+        readonly status: SpanStatus;
+      };
+  interface SpanUpdate {
+    readonly type: "spanUpdate";
+    readonly info: SpanUpdateInfo;
   }
   interface DiagnosticChannelEvent {
     readonly type: "diagnosticChannel";
@@ -17388,6 +17435,7 @@ export declare namespace TailStream {
     | Outcome
     | SpanOpen
     | SpanClose
+    | SpanUpdate
     | DiagnosticChannelEvent
     | Exception
     | Log
@@ -17430,6 +17478,7 @@ export declare namespace TailStream {
     outcome?: TailEventHandler<Outcome>;
     spanOpen?: TailEventHandler<SpanOpen>;
     spanClose?: TailEventHandler<SpanClose>;
+    spanUpdate?: TailEventHandler<SpanUpdate>;
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;
