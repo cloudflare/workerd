@@ -101,3 +101,38 @@ declare class ServiceWorkerGlobalScope extends B<string> {
 `
   );
 });
+
+test("createGlobalScopeTransformer: emits Node.js globals as var declarations", () => {
+  const source = `declare abstract class Crypto {
+}
+interface ServiceWorkerGlobalScope {
+    Buffer: any;
+    process: any;
+    global: ServiceWorkerGlobalScope;
+    crypto: Crypto;
+}
+`;
+
+  const sourcePath = "/source.ts";
+  const sources = new Map([[sourcePath, source]]);
+  const program = createMemoryProgram(sources);
+  const checker = program.getTypeChecker();
+  const sourceFile = program.getSourceFile(sourcePath);
+  assert(sourceFile !== undefined);
+
+  const result = ts.transform(sourceFile, [
+    createGlobalScopeTransformer(checker),
+  ]);
+  assert.strictEqual(result.transformed.length, 1);
+
+  const output = printer.printFile(result.transformed[0]);
+  assert.strictEqual(
+    output,
+    source +
+      `declare var Buffer: any;
+declare var process: any;
+declare var global: ServiceWorkerGlobalScope;
+declare const crypto: Crypto;
+`
+  );
+});

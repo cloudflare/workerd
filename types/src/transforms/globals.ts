@@ -5,6 +5,14 @@
 import assert from "node:assert";
 import ts from "typescript";
 
+// These globals are also declared with `var` by @types/node, so matching that
+// declaration kind allows TypeScript to merge the declarations.
+const NODE_JS_GLOBAL_VAR_DECLARATIONS = new Set([
+  "Buffer",
+  "process",
+  "global",
+]);
+
 // Copies all properties of `ServiceWorkerGlobalScope` and its superclasses into
 // the global scope:
 //
@@ -74,7 +82,8 @@ function createInlineVisitor(
 export function maybeExtractGlobalNode(
   ctx: ts.TransformationContext,
   node: ts.Node,
-  modifiers?: readonly ts.ModifierLike[]
+  modifiers?: readonly ts.ModifierLike[],
+  varDeclarationNames?: ReadonlySet<string>
 ): ts.Statement | undefined {
   if (
     (ts.isMethodSignature(node) || ts.isMethodDeclaration(node)) &&
@@ -106,7 +115,9 @@ export function maybeExtractGlobalNode(
       );
       const varDeclarationList = ctx.factory.createVariableDeclarationList(
         [varDeclaration],
-        ts.NodeFlags.Const // Use `const` instead of `var`
+        varDeclarationNames?.has(node.name.text)
+          ? ts.NodeFlags.None
+          : ts.NodeFlags.Const
       );
       return ctx.factory.createVariableStatement(modifiers, varDeclarationList);
     }
@@ -176,7 +187,12 @@ function createGlobalScopeVisitor(
       ctx.factory.createToken(ts.SyntaxKind.DeclareKeyword),
     ];
     for (const member of node.members) {
-      const maybeNode = maybeExtractGlobalNode(ctx, member, modifiers);
+      const maybeNode = maybeExtractGlobalNode(
+        ctx,
+        member,
+        modifiers,
+        NODE_JS_GLOBAL_VAR_DECLARATIONS
+      );
       if (maybeNode !== undefined) {
         nodes.push(ts.visitNode(maybeNode, inlineVisitor));
       }
