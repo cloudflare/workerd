@@ -87,7 +87,7 @@ export {
   detachWhileQueuedObservedByReader,
 } from 'buffer-lifecycle';
 
-export { transformStreamGc } from 'gc';
+export { transformStreamGc, transformerCollectedAfterFinish } from 'gc';
 
 export {
   drainingReaderThroughTransform,
@@ -131,4 +131,5 @@ export {
   cancelThenTerminateAfterStart,
   cancelAfterWritableSizeError,
   cancelThenCloseSameTurn,
+  writeReachesSinkAfterCancelClearedAlgorithms,
 } from 'cancel-outcomes';
