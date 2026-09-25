@@ -3,9 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 // startTls() coverage for the connect() handler, on both transports that can deliver a CONNECT to
-// a handler: a TCP listener configured with a keypair, and a service binding. The tests live apart
-// from connect-handler-test.js because that module is also embedded by tail-worker-test.wd-test,
-// whose config has neither a keypair nor the service bindings these tests need.
+// a handler: a TCP listener configured with a keypair, and a service binding.
 import { connect } from 'cloudflare:sockets';
 import { ok, strictEqual } from 'assert';
 
@@ -24,8 +22,8 @@ async function readLine(reader) {
 }
 
 // Exercises startTls() on the TCP listener path. The listener's socket carries a keypair, so both
-// ends run a real handshake: the handler's startTls() serves it and this side's verifies the
-// certificate against the trusted certificate the `internet` service was given.
+// ends run a real handshake: startTls() on the the handler side serves it and this side's
+// startTls() verifies the certificate.
 export const startTlsViaTcpListener = {
   async test() {
     const socket = connect('localhost:8084', { secureTransport: 'starttls' });
