@@ -76,6 +76,19 @@ void EntrypointsModule::abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> re
   js.terminateExecutionNow();
 }
 
+jsg::JsValue EntrypointsModule::retryable(
+    jsg::Lock& js, jsg::JsValue value, jsg::JsObject context) {
+  v8::Local<v8::Function> function = JSG_REQUIRE_NONNULL(value.tryCast<jsg::JsFunction>(),
+      TypeError, "@retryable can only decorate public instance methods.");
+  JSG_REQUIRE(context.get(js, "kind"_kj).strictEquals(js.strIntern("method"_kj)) &&
+          context.get(js, "static"_kj).strictEquals(js.boolean(false)) &&
+          context.get(js, "private"_kj).strictEquals(js.boolean(false)),
+      TypeError, "@retryable can only decorate public instance methods.");
+
+  jsg::JsObject(function).setPrivate(js, RETRYABLE_METHOD_PRIVATE_KEY, js.boolean(true));
+  return value;
+}
+
 jsg::JsSymbol EntrypointsModule::getRestoreSymbol(jsg::Lock& js) {
   return js.symbolInternal("cloudflare:workers:restore");
 }

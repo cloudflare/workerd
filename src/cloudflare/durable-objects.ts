@@ -5,3 +5,5 @@
 import entrypoints from 'cloudflare-internal:workers';
 
 export const DurableObject = entrypoints.DurableObject;
+
+export const retryable = entrypoints.retryable.bind(entrypoints);
