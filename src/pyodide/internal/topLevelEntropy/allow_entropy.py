@@ -55,13 +55,34 @@ def is_bad_entropy_enabled():
     return ALLOWED_ENTROPY_CALLS[0] > 0
 
 
+def get_bad_entropy_call_count():
+    return ALLOWED_ENTROPY_CALLS[0]
+
+
+def consume_bad_entropy_call():
+    """
+    Similar to shouldAllowBadEntropy in JS but for python random module.
+    Python's random module do not use crypto.getRandomValues directly, so we need to track
+    the calls here.
+    """
+    value = ALLOWED_ENTROPY_CALLS[0]
+    if value > 0:
+        ALLOWED_ENTROPY_CALLS[0] -= 1
+        return True
+    if value == 0:
+        return False
+    raise RuntimeError(f"Unexpected randomness allowance value: {value}")
+
+
 @contextmanager
 def allow_bad_entropy_calls(n):
     old_allowed_entropy_calls = ALLOWED_ENTROPY_CALLS[0]
     ALLOWED_ENTROPY_CALLS[0] = n
-    yield
-    if ALLOWED_ENTROPY_CALLS[0] > 0:
-        raise RuntimeError(
-            f"{ALLOWED_ENTROPY_CALLS[0]} unexpected leftover getentropy calls "
-        )
-    ALLOWED_ENTROPY_CALLS[0] = old_allowed_entropy_calls
+    try:
+        yield
+        if ALLOWED_ENTROPY_CALLS[0] > 0:
+            raise RuntimeError(
+                f"{ALLOWED_ENTROPY_CALLS[0]} unexpected leftover getentropy calls "
+            )
+    finally:
+        ALLOWED_ENTROPY_CALLS[0] = old_allowed_entropy_calls
