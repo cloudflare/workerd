@@ -1,0 +1,57 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "content-encoding-chain-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "content-encoding-chain-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_zlib", "brotli_content_encoding"],
+        bindings = [
+          ( name = "HELPER", service = "ce-chain-helper" ),
+          ( name = "NOBR", service = "ce-chain-nobr" ),
+          # Reaches the helper over a real (loopback) HTTP socket rather than an in-process
+          # service binding, so tests can observe genuine wire framing (Content-Length vs.
+          # chunked).
+          ( name = "HELPER_WIRE", service = "ce-chain-wire" ),
+        ],
+      )
+    ),
+    ( name = "ce-chain-helper",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "content-encoding-chain-helper.js")
+        ],
+        compatibilityFlags = ["brotli_content_encoding"],
+        bindings = [
+          ( name = "SELF", service = "ce-chain-helper" ),
+        ],
+      )
+    ),
+    ( name = "ce-chain-nobr",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "content-encoding-chain-helper.js")
+        ],
+        compatibilityFlags = ["no_brotli_content_encoding"],
+        bindings = [
+          ( name = "PEER", service = "ce-chain-helper" ),
+        ],
+      )
+    ),
+    ( name = "ce-chain-wire",
+      external = (
+        address = "loopback:ce-chain-wire",
+        http = ()
+      )
+    ),
+  ],
+  sockets = [
+    ( name = "ce-chain-wire",
+      address = "loopback:ce-chain-wire",
+      service = "ce-chain-helper",
+      http = ()
+    ),
+  ],
+);
