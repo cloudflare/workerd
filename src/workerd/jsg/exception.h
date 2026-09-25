@@ -114,6 +114,9 @@ namespace workerd::jsg {
 // Given a KJ exception's description, strips any leading "remote exception: " prefixes.
 kj::StringPtr stripRemoteExceptionPrefix(kj::StringPtr internalMessage);
 
+// Checks a public message for diagnostic delimiters, allowing only the internal-error reference.
+bool hasInternalExceptionDetails(kj::StringPtr message);
+
 // Given a KJ exception's description, returns whether it contains a tunneled exception that could
 // be converted back to JavaScript via exceptionToJs().
 bool isTunneledException(kj::StringPtr internalMessage);
@@ -148,6 +151,9 @@ struct TunneledErrorType {
 
   // Does the error contain the "worker_do_not_log" magic constant?
   bool isDoNotLogException;
+
+  // Was a tunneled error blocked because its message may contain internal diagnostic fields?
+  bool hasInternalDetails = false;
 };
 
 TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage);
