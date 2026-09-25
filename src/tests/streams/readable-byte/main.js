@@ -185,6 +185,7 @@ export {
   teeHeldByobRequestEnqueueFillsByobRead,
   teeHeldByobRequestNewViewAndAutoAllocate,
   teeNativeBodyAfterReleaseMidRead,
+  teeClosedNativeBodyLocksOriginal,
   teeBranchFractionalCloseErrorsBranch,
   teeSoleBranchFractionalCloseSkipsSourceCancel,
 } from 'tee';

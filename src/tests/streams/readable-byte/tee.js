@@ -760,3 +760,26 @@ export const teeHeldByobRequestAfterCloseOrError = {
     }
   },
 };
+
+// tee() of a closed native body (drained, or cancelled) locks it like any
+// other tee(): a second tee() throws, and both branches are closed
+// (parity).
+export const teeClosedNativeBodyLocksOriginal = {
+  async test() {
+    const drained = new Response('abc').body;
+    const reader = drained.getReader();
+    await drainBytes(drained, reader);
+    reader.releaseLock();
+    const cancelled = new Response('abc').body;
+    await cancelled.cancel();
+    for (const body of [drained, cancelled]) {
+      const [a, b] = body.tee();
+      strictEqual(body.locked, true);
+      throws(() => body.tee(), TypeError);
+      throws(() => body.getReader(), TypeError);
+      for (const branch of [a, b]) {
+        strictEqual((await branch.getReader().read()).done, true);
+      }
+    }
+  },
+};
