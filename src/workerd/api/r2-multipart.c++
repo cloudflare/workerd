@@ -242,7 +242,7 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::completeRpc(jsg:
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
     const jsg::TypeHandler<jsg::Function<jsg::Value(
         kj::String, kj::String, kj::Array<UploadedPart>)>>& completeFnHandler,
-    const jsg::TypeHandler<jsg::Promise<R2Bucket::HeadResultRpc>>& completeResultHandler) {
+    const jsg::TypeHandler<jsg::Promise<R2Bucket::HeadBackendResult>>& completeResultHandler) {
   return js.evalNow([&] {
     TraceContext traceContext =
         bucket->makeR2TraceContext("r2_completeMultipartUpload"_kjc, "CompleteMultipartUpload"_kjc);
@@ -258,12 +258,13 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::completeRpc(jsg:
           part.partNumber);
     }
 
-    auto promise = callR2RpcMethod<R2Bucket::HeadResultRpc>(js,
+    auto promise = callR2RpcMethod<R2Bucket::HeadBackendResult>(js,
         bucket->getRpcMethod(js, "completeMultipartUpload"_kj), rpcPropHandler, completeFnHandler,
         completeResultHandler, kj::str(key), kj::str(uploadId), kj::mv(uploadedParts));
     return promise.then(js,
-        [traceContext = kj::mv(traceContext)](jsg::Lock& js, R2Bucket::HeadResultRpc rpc) mutable {
-      auto result = headResultFromRpc(js, kj::mv(rpc));
+        [traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Bucket::HeadBackendResult backend) mutable {
+      auto result = headResultFromBackend(js, kj::mv(backend));
       addHeadResultSpanTags(js, traceContext, *result.get());
       return result;
     });

@@ -9,18 +9,20 @@
 
 namespace workerd::api::public_beta {
 #define EW_R2_PUBLIC_BETA_ISOLATE_TYPES                                                            \
-  api::R2Error, api::public_beta::R2Bucket, api::public_beta::R2MultipartUpload,                   \
-      api::public_beta::R2MultipartUpload::UploadedPart, api::public_beta::R2Bucket::HeadResult,   \
-      api::public_beta::R2Bucket::GetResult, api::public_beta::R2Bucket::Range,                    \
-      api::public_beta::R2Bucket::Conditional, api::public_beta::R2Bucket::GetOptions,             \
-      api::public_beta::R2Bucket::PutOptions, api::public_beta::R2Bucket::MultipartOptions,        \
-      api::public_beta::R2Bucket::Checksums, api::public_beta::R2Bucket::StringChecksums,          \
-      api::public_beta::R2Bucket::HttpMetadata, api::public_beta::R2Bucket::ListOptions,           \
-      api::public_beta::R2Bucket::ListResult,                                                      \
+  api::R2Error, api::R2Error::RpcPayload, api::public_beta::R2Bucket,                              \
+      api::public_beta::R2MultipartUpload, api::public_beta::R2MultipartUpload::UploadedPart,      \
+      api::public_beta::R2Bucket::HeadResult, api::public_beta::R2Bucket::GetResult,               \
+      api::public_beta::R2Bucket::Range, api::public_beta::R2Bucket::Conditional,                  \
+      api::public_beta::R2Bucket::GetOptions, api::public_beta::R2Bucket::PutOptions,              \
+      api::public_beta::R2Bucket::MultipartOptions, api::public_beta::R2Bucket::Checksums,         \
+      api::public_beta::R2Bucket::StringChecksums, api::public_beta::R2Bucket::HttpMetadata,       \
+      api::public_beta::R2Bucket::ListOptions, api::public_beta::R2Bucket::ListResult,             \
       api::public_beta::R2MultipartUpload::UploadPartOptions,                                      \
       api::public_beta::R2Bucket::ChecksumsRpc, api::public_beta::R2Bucket::HeadResultRpc,         \
       api::public_beta::R2Bucket::ConditionalRpc, api::public_beta::R2Bucket::PutOptionsRpc,       \
       api::public_beta::R2Bucket::GetOptionsRpc, api::public_beta::R2Bucket::GetResultRpc,         \
-      api::public_beta::R2Bucket::ListOptionsRpc, api::public_beta::R2Bucket::ListResultRpc
+      api::public_beta::R2Bucket::ListOptionsRpc, api::public_beta::R2Bucket::ListResultRpc,       \
+      api::public_beta::R2Bucket::ListBackendResult,                                               \
+      api::public_beta::R2Bucket::MultipartUploadHandleRpc
 // The list of r2 types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api::public_beta

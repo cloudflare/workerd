@@ -131,6 +131,8 @@ class R2Bucket: public jsg::Object {
     JSG_STRUCT_TS_OVERRIDE(R2StringChecksums);
   };
 
+  struct ChecksumsRpc;
+
   class Checksums: public jsg::Object {
    public:
     Checksums(jsg::Optional<kj::Array<kj::byte>> md5,
@@ -151,6 +153,7 @@ class R2Bucket: public jsg::Object {
     jsg::Optional<jsg::JsArrayBuffer> getSha512(jsg::Lock& js);
 
     StringChecksums toJSON();
+    ChecksumsRpc toRpc() const;
 
     JSG_RESOURCE_TYPE(Checksums) {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(md5, getMd5);
@@ -167,6 +170,16 @@ class R2Bucket: public jsg::Object {
         readonly sha512?: ArrayBuffer;
       });
     }
+
+    void serialize(jsg::Lock& js,
+        jsg::Serializer& serializer,
+        const jsg::TypeHandler<ChecksumsRpc>& checksumsHandler);
+    static jsg::Ref<Checksums> deserialize(jsg::Lock& js,
+        rpc::SerializationTag tag,
+        jsg::Deserializer& deserializer,
+        const jsg::TypeHandler<ChecksumsRpc>& checksumsHandler);
+
+    JSG_SERIALIZABLE(rpc::SerializationTag::R2_CHECKSUMS);
 
     jsg::Optional<kj::Array<kj::byte>> md5;
     jsg::Optional<kj::Array<kj::byte>> sha1;
@@ -370,6 +383,15 @@ class R2Bucket: public jsg::Object {
     JSG_STRUCT(kind, object, body);
   };
 
+  struct MultipartUploadHandleRpc {
+    kj::String key;
+    kj::String uploadId;
+
+    JSG_STRUCT(key, uploadId);
+  };
+
+  using MultipartUploadBackendResult = kj::OneOf<kj::String, MultipartUploadHandleRpc>;
+
   class HeadResult: public jsg::Object {
    public:
     HeadResult(kj::String name,
@@ -442,6 +464,8 @@ class R2Bucket: public jsg::Object {
       return range;
     }
 
+    HeadResultRpc toRpc() const;
+
     void writeHttpMetadata(jsg::Lock& js, Headers& headers);
 
     JSG_RESOURCE_TYPE(HeadResult) {
@@ -460,6 +484,16 @@ class R2Bucket: public jsg::Object {
       JSG_METHOD(writeHttpMetadata);
       JSG_TS_OVERRIDE(R2Object);
     }
+
+    void serialize(jsg::Lock& js,
+        jsg::Serializer& serializer,
+        const jsg::TypeHandler<HeadResultRpc>& headResultHandler);
+    static jsg::Ref<HeadResult> deserialize(jsg::Lock& js,
+        rpc::SerializationTag tag,
+        jsg::Deserializer& deserializer,
+        const jsg::TypeHandler<HeadResultRpc>& headResultHandler);
+
+    JSG_SERIALIZABLE(rpc::SerializationTag::R2_OBJECT);
 
     void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
       tracker.trackField("name", name);
@@ -549,6 +583,16 @@ class R2Bucket: public jsg::Object {
       });
     }
 
+    void serialize(jsg::Lock& js,
+        jsg::Serializer& serializer,
+        const jsg::TypeHandler<GetResultRpc>& getResultHandler);
+    static jsg::Ref<GetResult> deserialize(jsg::Lock& js,
+        rpc::SerializationTag tag,
+        jsg::Deserializer& deserializer,
+        const jsg::TypeHandler<GetResultRpc>& getResultHandler);
+
+    JSG_SERIALIZABLE(rpc::SerializationTag::R2_OBJECT_BODY);
+
     void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
       body.visitForMemoryInfo(tracker);
     }
@@ -560,6 +604,9 @@ class R2Bucket: public jsg::Object {
       visitor.visit(body);
     }
   };
+
+  using HeadBackendResult = kj::OneOf<jsg::Ref<HeadResult>, HeadResultRpc>;
+  using GetBackendResult = kj::OneOf<jsg::Ref<GetResult>, jsg::Ref<HeadResult>, GetResultRpc>;
 
   struct ListResult {
     kj::Array<jsg::Ref<HeadResult>> objects;
@@ -575,6 +622,15 @@ class R2Bucket: public jsg::Object {
       | { truncated: true; cursor: string }
       | { truncated: false }
     ));
+  };
+
+  struct ListBackendResult {
+    kj::Array<HeadBackendResult> objects;
+    bool truncated;
+    kj::Maybe<kj::String> cursor;
+    kj::Maybe<kj::Array<kj::String>> delimitedPrefixes;
+
+    JSG_STRUCT(objects, truncated, cursor, delimitedPrefixes);
   };
 
   struct ListOptions {
@@ -635,7 +691,7 @@ class R2Bucket: public jsg::Object {
       kj::String key,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String)>>& headFnHandler,
-      const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadResultRpc>>>& headResultHandler);
+      const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadBackendResult>>>& headResultHandler);
   jsg::Promise<kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>>> getRpc(
       jsg::Lock& js,
       kj::String key,
@@ -643,7 +699,7 @@ class R2Bucket: public jsg::Object {
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, jsg::Optional<GetOptionsRpc>)>>&
           getFnHandler,
-      const jsg::TypeHandler<jsg::Promise<kj::Maybe<GetResultRpc>>>& getResultHandler);
+      const jsg::TypeHandler<jsg::Promise<kj::Maybe<GetBackendResult>>>& getResultHandler);
   jsg::Promise<void> deleteRpc(jsg::Lock& js,
       kj::OneOf<kj::String, kj::Array<kj::String>> keys,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
@@ -658,20 +714,20 @@ class R2Bucket: public jsg::Object {
       const jsg::TypeHandler<jsg::Function<jsg::Value(
           kj::String, kj::Maybe<R2PutValueRpc>, jsg::Optional<PutOptionsRpc>, double)>>&
           putFnHandler,
-      const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadResultRpc>>>& putResultHandler);
+      const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadBackendResult>>>& putResultHandler);
   jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUploadRpc(jsg::Lock& js,
       kj::String key,
       jsg::Optional<MultipartOptions> options,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<
           jsg::Function<jsg::Value(kj::String, jsg::Optional<MultipartOptions>)>>& createFnHandler,
-      const jsg::TypeHandler<jsg::Promise<kj::String>>& uploadIdResultHandler);
+      const jsg::TypeHandler<jsg::Promise<MultipartUploadBackendResult>>& uploadResultHandler);
   jsg::Promise<ListResult> listRpc(jsg::Lock& js,
       jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Optional<ListOptionsRpc>)>>&
           listFnHandler,
-      const jsg::TypeHandler<jsg::Promise<ListResultRpc>>& listResultHandler,
+      const jsg::TypeHandler<jsg::Promise<ListBackendResult>>& listResultHandler,
       CompatibilityFlags::Reader flags);
   jsg::Promise<ListResult> list(jsg::Lock& js,
       jsg::Optional<ListOptions> options,
@@ -814,6 +870,9 @@ enum class MissingMetadataPolicy {
 
 jsg::Ref<R2Bucket::HeadResult> headResultFromRpc(jsg::Lock& js,
     R2Bucket::HeadResultRpc rpc,
+    MissingMetadataPolicy policy = MissingMetadataPolicy::EMPTY);
+jsg::Ref<R2Bucket::HeadResult> headResultFromBackend(jsg::Lock& js,
+    R2Bucket::HeadBackendResult result,
     MissingMetadataPolicy policy = MissingMetadataPolicy::EMPTY);
 
 // Non-generic wrapper avoid moving the parseObjectMetadata implementation into this header file

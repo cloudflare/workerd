@@ -83,7 +83,7 @@ class R2MultipartUpload: public jsg::Object {
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<jsg::Function<jsg::Value(
           kj::String, kj::String, kj::Array<UploadedPart>)>>& completeFnHandler,
-      const jsg::TypeHandler<jsg::Promise<R2Bucket::HeadResultRpc>>& completeResultHandler);
+      const jsg::TypeHandler<jsg::Promise<R2Bucket::HeadBackendResult>>& completeResultHandler);
 
   JSG_RESOURCE_TYPE(R2MultipartUpload, CompatibilityFlags::Reader flags) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(key, getKey);

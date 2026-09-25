@@ -36,6 +36,20 @@ jsg::Promise<jsg::Value> normalizeR2RpcPromise(jsg::Lock& js, jsg::Value rpcProm
   return kj::mv(paf.promise);
 }
 
+void requireR2RpcSerializer(jsg::Serializer& serializer) {
+  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
+      "R2 resources can only be serialized for RPC.");
+  JSG_REQUIRE(dynamic_cast<RpcSerializerExternalHandler*>(&handler) != nullptr, DOMDataCloneError,
+      "R2 resources can only be serialized for RPC.");
+}
+
+void requireR2RpcDeserializer(jsg::Deserializer& deserializer) {
+  auto& handler = JSG_REQUIRE_NONNULL(deserializer.getExternalHandler(), DOMDataCloneError,
+      "R2 resources can only be deserialized for RPC.");
+  JSG_REQUIRE(dynamic_cast<RpcDeserializerExternalHandler*>(&handler) != nullptr, DOMDataCloneError,
+      "R2 resources can only be deserialized for RPC.");
+}
+
 PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value) {
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(stream, JsReadableStream) {
@@ -96,6 +110,33 @@ jsg::JsValue R2Error::getStack(jsg::Lock& js) {
   return jsg::JsObject(KJ_ASSERT_NONNULL(errorForStack).Get(js.v8Isolate)).get(js, "stack"_kj);
 }
 
+void R2Error::serialize(jsg::Lock& js,
+    jsg::Serializer& serializer,
+    const jsg::TypeHandler<RpcPayload>& payloadHandler) {
+  requireR2RpcSerializer(serializer);
+  serializer.write(js,
+      jsg::JsValue(payloadHandler.wrap(js,
+          RpcPayload{
+            .code = v4Code,
+            .message = kj::str(message),
+            .action = kj::str(KJ_REQUIRE_NONNULL(action)),
+          })));
+}
+
+jsg::Ref<R2Error> R2Error::deserialize(jsg::Lock& js,
+    rpc::SerializationTag tag,
+    jsg::Deserializer& deserializer,
+    const jsg::TypeHandler<RpcPayload>& payloadHandler) {
+  requireR2RpcDeserializer(deserializer);
+  auto payload = KJ_UNWRAP_OR(payloadHandler.tryUnwrap(js, deserializer.readValue(js)),
+      { JSG_FAIL_REQUIRE(DOMDataCloneError, "Deserialization failed: invalid R2 error payload"); });
+  auto result = js.alloc<R2Error>(payload.code, kj::mv(payload.message));
+  result->action = kj::mv(payload.action);
+  result->errorForStack = v8::Global<v8::Object>(
+      js.v8Isolate, v8::Exception::Error(v8::String::Empty(js.v8Isolate)).As<v8::Object>());
+  return result;
+}
+
 kj::Maybe<uint> R2Result::v4ErrorCode() {
   KJ_IF_SOME(e, toThrow) {
     return e->v4Code;
@@ -113,10 +154,9 @@ kj::Maybe<kj::String> R2Result::getR2ErrorMessage() {
 void R2Result::throwIfError(
     kj::StringPtr action, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   KJ_IF_SOME(e, toThrow) {
-    // TODO(soon): Once jsg::JsPromise exists, switch to using that to tunnel out the exception. As
-    // it stands today, unfortunately, all we can send back to the user is a message. R2Error isn't
-    // a registered type in the runtime. When reenabling, make sure to update overrides/r2.d.ts to
-    // reenable the type
+    // Keep the existing generic error behavior for HTTP-backed bindings. R2Error is serializable so
+    // an already-structured error can cross JSRPC, but changing this throw path would be a public
+    // compatibility change.
 #if 0
     auto isolate = IoContext::current().getCurrentLock().getIsolate();
     (*e)->action = kj::str(action);
