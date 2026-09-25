@@ -436,10 +436,8 @@ jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
 // event, exactly as kj::HttpService::connect()'s `connection` reference outlives its dispatch.
 class UdpConnectCustomEvent final: public WorkerInterface::CustomEvent {
  public:
-  UdpConnectCustomEvent(
-      kj::String host, kj::Maybe<kj::String> remoteAddress, DatagramChannel& channel)
+  UdpConnectCustomEvent(kj::String host, DatagramChannel& channel)
       : host(kj::mv(host)),
-        remoteAddress(kj::mv(remoteAddress)),
         channel(channel) {}
 
   kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
@@ -471,7 +469,6 @@ class UdpConnectCustomEvent final: public WorkerInterface::CustomEvent {
 
  private:
   kj::String host;
-  kj::Maybe<kj::String> remoteAddress;
   DatagramChannel& channel;
 };
 

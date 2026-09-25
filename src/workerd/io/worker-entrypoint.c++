@@ -309,8 +309,9 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
 
   incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::mv(context), kj::mv(ioChannelFactory),
       kj::mv(metrics), kj::mv(workerTracer), kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo),
-      kj::mv(selfTokenFactory))
-                        .attach(kj::mv(actor));
+      kj::mv(selfTokenFactory), clientAddress.map([](kj::String& s) {
+    return kj::str(s);
+  })).attach(kj::mv(actor));
 }
 
 // To match our historical behavior (when we used to pull the headers from the JavaScript object
