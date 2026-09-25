@@ -1344,9 +1344,8 @@ SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
 }
 
 TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
-  auto span = makeTraceSpan(operationName.clone());
-  auto userSpan = getCurrentUserTraceSpan().newChild(kj::mv(operationName));
-  return TraceContext(kj::mv(span), kj::mv(userSpan));
+  TraceContextParent parents(getCurrentTraceSpan(), getCurrentUserTraceSpan());
+  return parents.newChild(kj::mv(operationName));
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {
