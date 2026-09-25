@@ -109,6 +109,34 @@ kj::StringPtr AccessContext::getAud() {
   return info->getAudience();
 }
 
+jsg::Optional<jsg::Ref<AccessOAuthContext>> AccessContext::getOauth(jsg::Lock& js) {
+  if (!info->isManagedOAuthEnabled()) return kj::none;
+  return js.alloc<AccessOAuthContext>(IoContext::current().addObject(kj::addRef(*info)));
+}
+
+jsg::Promise<jsg::Value> AccessOAuthContext::getMetadata(jsg::Lock& js,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value()>>& getOAuthMetadataFnHandler) {
+  auto& context = IoContext::current();
+  auto span = context.makeTraceSpan("access_oauth_get_metadata"_kjc);
+
+  KJ_IF_SOME(channel, info->getIdentityServiceChannel()) {
+    auto fetcher =
+        js.alloc<Fetcher>(channel, Fetcher::RequiresHostAndProtocol::NO, true /* isInHouse */);
+    auto rpcProp =
+        JSG_REQUIRE_NONNULL(fetcher->getRpcMethodInternal(js, kj::str("getOAuthMetadata")), Error,
+            "Access binding worker is missing the getOAuthMetadata method");
+    auto getOAuthMetadataFn = JSG_REQUIRE_NONNULL(
+        getOAuthMetadataFnHandler.tryUnwrap(js, rpcPropHandler.wrap(js, kj::mv(rpcProp))), Error,
+        "Access binding worker getOAuthMetadata is not callable");
+    auto paf = js.newPromiseAndResolver<jsg::Value>();
+    paf.resolver.resolve(js, getOAuthMetadataFn(js));
+    return context.attachSpans(js, kj::mv(paf.promise), kj::mv(span));
+  }
+
+  JSG_FAIL_REQUIRE(Error, "Access OAuth metadata is not available in this context");
+}
+
 jsg::Promise<jsg::Value> AccessContext::getIdentity(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
     const jsg::TypeHandler<jsg::Function<jsg::Value()>>& getIdentityFnHandler) {

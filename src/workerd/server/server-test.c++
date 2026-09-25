@@ -8760,9 +8760,13 @@ KJ_TEST("Server: ctx.access.getIdentity() dispatches to accessBindingService") {
                 `  async fetch(request, env, ctx) {
                 `    if (!ctx.access) return new Response("no-access");
                 `    const identity = await ctx.access.getIdentity();
+                `    const metadata = ctx.access.oauth
+                `      ? await ctx.access.oauth.getMetadata()
+                `      : null;
                 `    return new Response(JSON.stringify({
                 `      aud: ctx.access.aud,
                 `      identity: identity,
+                `      metadata: metadata,
                 `    }));
                 `  }
                 `}
@@ -8790,6 +8794,9 @@ KJ_TEST("Server: ctx.access.getIdentity() dispatches to accessBindingService") {
                 `      aud: this.ctx.props.aud,
                 `    };
                 `  }
+                `  async getOAuthMetadata() {
+                `    return { issuer: "https://" + this.ctx.props.teamDomain };
+                `  }
                 `}
             )
           ],
@@ -8812,11 +8819,11 @@ KJ_TEST("Server: ctx.access.getIdentity() dispatches to accessBindingService") {
   // Request with access blob header + jwt_claims — getIdentity should return the identity.
   conn.send(R"(GET / HTTP/1.1
 Host: foo
-MF-Access-Blob: {"app_aud":"test-aud-99","jwt_claims":{"email":"user@example.com"}}
+MF-Access-Blob: {"app_aud":"test-aud-99","jwt_claims":{"email":"user@example.com"},"managed_oauth_enabled":true,"team_domain":"test.cloudflareaccess.com"}
 
 )"_kj);
   conn.recvHttp200(
-      R"({"aud":"test-aud-99","identity":{"email":"user@example.com","aud":"test-aud-99"}})");
+      R"({"aud":"test-aud-99","identity":{"email":"user@example.com","aud":"test-aud-99"},"metadata":{"issuer":"https://test.cloudflareaccess.com"}})");
 
   // Request with access blob header but no jwt_claims — getIdentity should still work,
   // jwtClaims will be undefined in the binding worker's ctx.props.
@@ -8825,7 +8832,17 @@ Host: foo
 MF-Access-Blob: {"app_aud":"test-aud-42"}
 
 )"_kj);
-  conn.recvHttp200(R"({"aud":"test-aud-42","identity":{"email":"unknown","aud":"test-aud-42"}})");
+  conn.recvHttp200(
+      R"({"aud":"test-aud-42","identity":{"email":"unknown","aud":"test-aud-42"},"metadata":null})");
+
+  // A partially upgraded producer may send the flag before team_domain. Keep oauth unavailable.
+  conn.send(R"(GET / HTTP/1.1
+Host: foo
+MF-Access-Blob: {"app_aud":"test-aud-43","managed_oauth_enabled":true}
+
+)"_kj);
+  conn.recvHttp200(
+      R"({"aud":"test-aud-43","identity":{"email":"unknown","aud":"test-aud-43"},"metadata":null})");
 
   // Request without the header — ctx.access should be undefined.
   conn.httpGet200("/", "no-access");

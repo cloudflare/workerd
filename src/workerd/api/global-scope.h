@@ -247,6 +247,39 @@ class CacheContext: public jsg::Object {
   }
 };
 
+// Exposes Managed OAuth operations as `ctx.access.oauth`.
+class AccessOAuthContext: public jsg::Object {
+ public:
+  explicit AccessOAuthContext(IoOwn<AccessInfo> info): info(kj::mv(info)) {}
+
+  jsg::Promise<jsg::Value> getMetadata(jsg::Lock& js,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value()>>& getOAuthMetadataFnHandler);
+
+  JSG_RESOURCE_TYPE(AccessOAuthContext) {
+    JSG_METHOD(getMetadata);
+    JSG_TS_DEFINE(interface CloudflareAccessOAuthMetadata {
+      issuer: string;
+      response_types_supported: string[];
+      authorization_endpoint?: string;
+      token_endpoint?: string;
+      registration_endpoint?: string;
+      response_modes_supported?: string[];
+      grant_types_supported?: string[];
+      token_endpoint_auth_methods_supported?: string[];
+      revocation_endpoint?: string;
+      code_challenge_methods_supported?: string[];
+      [metadata: string]: unknown;
+    });
+    JSG_TS_OVERRIDE(CloudflareAccessOAuthContext {
+      getMetadata(): Promise<CloudflareAccessOAuthMetadata>;
+    });
+  }
+
+ private:
+  IoOwn<AccessInfo> info;
+};
+
 // Concrete wrapper exposing per-request Cloudflare Access authentication info to JavaScript
 // as `ctx.access`. The actual auth data is supplied by the embedding application via
 // `workerd::AccessInfo`, which is plumbed through `newWorkerEntrypoint()` onto
@@ -261,6 +294,8 @@ class AccessContext: public jsg::Object {
 
   // Returns the audience claim from the Access JWT.
   kj::StringPtr getAud();
+
+  jsg::Optional<jsg::Ref<AccessOAuthContext>> getOauth(jsg::Lock& js);
 
   // Fetches the full identity information for the authenticated user. Resolves to `undefined`
   // if no identity is associated with the request (e.g. service-token authentication).
@@ -281,6 +316,7 @@ class AccessContext: public jsg::Object {
 
   JSG_RESOURCE_TYPE(AccessContext) {
     JSG_READONLY_INSTANCE_PROPERTY(aud, getAud);
+    JSG_READONLY_INSTANCE_PROPERTY(oauth, getOauth);
     JSG_METHOD(getIdentity);
     JSG_TS_OVERRIDE(CloudflareAccessContext {
       /**
@@ -288,6 +324,8 @@ class AccessContext: public jsg::Object {
        * taken from the validated Access JWT.
        */
       readonly aud: string;
+      /** Managed OAuth APIs, available only when Managed OAuth is enabled. */
+      readonly oauth?: CloudflareAccessOAuthContext;
       /**
        * Fetches the authenticated user's identity information from Cloudflare
        * Access, equivalent to calling `/cdn-cgi/access/get-identity`.
@@ -1217,6 +1255,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       api::ExecutionContext, api::ExportedHandler,                                                 \
       api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
       api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
-      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessContext
+      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessOAuthContext,     \
+      api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

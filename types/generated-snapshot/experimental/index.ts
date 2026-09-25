@@ -609,8 +609,25 @@ export interface CachePurgeOptions {
 export interface CacheContext {
   purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
 }
+export interface CloudflareAccessOAuthMetadata {
+  issuer: string;
+  response_types_supported: string[];
+  authorization_endpoint?: string;
+  token_endpoint?: string;
+  registration_endpoint?: string;
+  response_modes_supported?: string[];
+  grant_types_supported?: string[];
+  token_endpoint_auth_methods_supported?: string[];
+  revocation_endpoint?: string;
+  code_challenge_methods_supported?: string[];
+  [metadata: string]: unknown;
+}
+export interface CloudflareAccessOAuthContext {
+  getMetadata(): Promise<CloudflareAccessOAuthMetadata>;
+}
 export interface CloudflareAccessContext {
   readonly aud: string;
+  readonly oauth?: CloudflareAccessOAuthContext;
   getIdentity(): Promise<CloudflareAccessIdentity | undefined>;
 }
 export declare abstract class ColoLocalActorNamespace {
