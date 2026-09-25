@@ -446,3 +446,89 @@ export const zstdStreamLargeDecompressTest = {
     );
   },
 };
+
+// A pledged source size is a promise about how many bytes the frame will hold, and a wrong
+// one must be rejected. zstd only enforces it by itself when the input arrives over more
+// than one call: a first call that is also the last (ZSTD_e_end) makes zstd replace the
+// pledge with the real input size. The one-shot functions always compress that way, so the
+// encoder has to count the input itself, as Node does.
+const PLEDGE_INPUT = Buffer.from('pledged source size '.repeat(64));
+
+// Compresses through a stream and resolves to the output or the error, whichever comes.
+function compressThroughStream(stream, input) {
+  const { promise, resolve } = Promise.withResolvers();
+  const chunks = [];
+  stream.on('data', (chunk) => chunks.push(chunk));
+  stream.on('error', (err) => resolve({ err }));
+  stream.on('end', () => resolve({ out: Buffer.concat(chunks) }));
+  stream.end(input);
+  return promise;
+}
+
+export const zstdPledgedSrcSizeOneShotTest = {
+  async test() {
+    const input = PLEDGE_INPUT;
+
+    // A correct pledge still round-trips on every one-shot path.
+    for (const info of [false, true]) {
+      const result = zlib.zstdCompressSync(input, {
+        pledgedSrcSize: input.length,
+        info,
+      });
+      const compressed = info ? result.buffer : result;
+      assert(
+        zlib.zstdDecompressSync(compressed).equals(input),
+        'A correct pledge should round-trip'
+      );
+    }
+
+    // Too large and too small are both wrong. zstd's own override would hide either one.
+    for (const pledgedSrcSize of [input.length + 1, input.length - 1]) {
+      assert.throws(
+        () => zlib.zstdCompressSync(input, { pledgedSrcSize }),
+        /Src size is incorrect/,
+        `The fast path should reject a pledge of ${pledgedSrcSize}`
+      );
+      assert.throws(
+        () => zlib.zstdCompressSync(input, { pledgedSrcSize, info: true }),
+        /Src size is incorrect/,
+        `The engine path should reject a pledge of ${pledgedSrcSize}`
+      );
+
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.zstdCompress(input, { pledgedSrcSize }, (err) => resolve(err));
+      const err = await promise;
+      assert.match(
+        err?.message ?? '',
+        /Src size is incorrect/,
+        `The async function should reject a pledge of ${pledgedSrcSize}`
+      );
+    }
+  },
+};
+
+// reset() starts a new frame, and the pledge has to apply to that frame too. zstd forgets
+// a pledge on a session reset, so the encoder has to set it again.
+export const zstdPledgedSrcSizeAfterResetTest = {
+  async test() {
+    const input = PLEDGE_INPUT;
+
+    const exact = zlib.createZstdCompress({ pledgedSrcSize: input.length });
+    exact.reset();
+    const good = await compressThroughStream(exact, input);
+    assert.ifError(good.err);
+    assert(
+      zlib.zstdDecompressSync(good.out).equals(input),
+      'A correct pledge should round-trip after reset()'
+    );
+
+    const wrong = zlib.createZstdCompress({ pledgedSrcSize: input.length + 1 });
+    wrong.reset();
+    const bad = await compressThroughStream(wrong, input);
+    assert.match(
+      bad.err?.message ?? '',
+      /Src size is incorrect/,
+      'A wrong pledge should still be rejected after reset()'
+    );
+  },
+};
