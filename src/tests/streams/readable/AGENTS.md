@@ -37,6 +37,7 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 | 20 | pull() after both tee branches are collected (controller held) | keeps pulling for consumers that no longer exist; DEFECT: a source that enqueues on every pull runs until the stream closes | the source is released: pull() is never called again (the parity half — enqueue drops, desiredSize at the high-water mark, close() as ever — is `teeBranchesCollected`) | `teeBranchesCollectedPullStops` |
 | 21 | body consumption of a TransformStream readable that delivers more than its declared `expectedLength` | returns everything (consumption ignores the declaration) | rejects with RangeError 'stream delivered more bytes than its declared expectedLength' and cancels the readable with it, which errors the writable (the declaration is the exact-total contract the byte and native sources already enforce) | `transformExpectedLengthOverflow` |
 | 22 | async-iterator next() interleavings where WebIDL clears the ongoing promise | every call strictly serialized: a next() from a continuation registered on an earlier next() still waits for the queued ones, and one queued behind return() reports done; after a next() rejects, later ones reject with the same error | spec: that next() reads ahead of the queued one (n2 'c', n3 'b') and ahead of a queued return() (reads data; the return still cancels); after a next() rejects, the iterator is finished and later ones report done (this last shape is among the WPT async-iterator.any C++ expectedFailures; the read-ahead shapes are derived from the WebIDL algorithm) | `nextFromEarlierContinuationReadsAhead`, `nextFromEarlierContinuationBeatsReturn`, `nextAfterRejectedNextIsDone` |
+| 23 | when a promise returned by start() starts the stream | adopts it: the first pull runs before the first marker chained on it | spec (Node agrees): a new promise is resolved with it, so the pull runs after the second marker, whether it was fulfilled on return or later | `startPromiseSettledInNewPromise` |
 
 Parity worth noting (probed, pinned): pull serialization (never
 re-entered); pull/async-start rejection identity; error-undefined
@@ -86,7 +87,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | --- | --- |
 | `api-surface.js` | globals, controller not constructable, getReader modes, locked lifecycle |
 | `construction.js` | ledger #1-#3, default hwm 1 |
-| `source-algorithms.js` | ledger #4-#6, pull serialization, rejection identity, cancel-with-pending-pull |
+| `source-algorithms.js` | ledger #4-#6, #23, pull serialization, rejection identity, cancel-with-pending-pull |
 | `controller.js` | desiredSize accounting/terminal states, error idempotence, close terminality (#17), close-drains-queue, error during a pending close (#18) |
 | `reader.js` | read ordering, releaseLock, closed replacement (#7), undefined error, reader.cancel, reader swap |
 | `cancel.js` | reason identity, locked-cancel, hook rejection identity, queue discard |

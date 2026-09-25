@@ -94,17 +94,12 @@ const writableControllerError = uncurryThis(
   WritableStreamDefaultController.prototype.error
 ) as (controller: object, reason: unknown) => void;
 
-// WebIDL "a promise resolved with" a callback's result: a new promise, so
-// a returned promise settles it two microtasks later than PromiseResolve,
-// which adopts it. The transformer's cancel and flush results are settled
-// this way; that timing decides whether a same-turn error has reached the
-// other side when they settle (WPT transform-streams/cancel.any.js).
-function promiseResolvedWith(value: unknown): Promise<void> {
-  const { promise, resolve } =
-    PromiseWithResolvers() as PromiseWithResolversType<void>;
-  resolve(value as void);
-  return promise;
-}
+// The transformer's cancel and flush results are settled in a new promise
+// (see promiseResolvedWith in writable.ts); that timing decides whether a
+// same-turn error has reached the other side when they settle.
+const promiseResolvedWith = writableInternals.promiseResolvedWith as (
+  value: unknown
+) => Promise<void>;
 
 // ---------------------------------------------------------------------------
 
@@ -475,17 +470,10 @@ class TransformStream<I = unknown, O = unknown> {
 
     // Both inner streams' start algorithms return THIS promise, so
     // neither side processes anything until transformer.start()
-    // settles. The controllers adopt it as is (PromiseResolve), where the
-    // spec wraps it in a new promise resolved with it, which settles two
-    // microtasks later; the two pass-through reactions restore that
-    // timing, which decides whether a same-turn terminate() or abort()
-    // has errored the writable when a cancel settles.
+    // settles.
     const startHolder =
       PromiseWithResolvers() as PromiseWithResolversType<void>;
-    const startPromise = PromisePrototypeThen(
-      PromisePrototypeThen(startHolder.promise, undefined),
-      undefined
-    ) as Promise<void>;
+    const startPromise = startHolder.promise;
 
     // --- ELISION CHECK ---
     // A transformer with ZERO algorithms (no transform/flush/start/cancel)
@@ -589,6 +577,11 @@ class TransformStream<I = unknown, O = unknown> {
         };
       } else {
         const callTransform = uncurryThis(transformFn);
+        // Adopts the result (PromiseResolve) rather than settling a new
+        // promise with it as cancel and flush do: on the per-chunk path
+        // that would cost an allocation and a microtask or two per write.
+        // A returned promise therefore settles the write earlier than in
+        // the spec.
         transformAlgorithm = (chunk: I) => {
           try {
             return PromiseResolve(

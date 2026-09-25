@@ -19,6 +19,7 @@ export {
   differentTypesTransform,
   hookInvocationShape,
   prototypeChainTransformer,
+  startSettlementTiming,
 } from 'transformer-algorithms';
 
 export {
