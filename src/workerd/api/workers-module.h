@@ -90,6 +90,11 @@ class EntrypointsModule: public jsg::Object {
   // process.
   void abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> reason);
 
+  // A standard method decorator that marks `value` as safe to execute more than once when the
+  // runtime retries a Durable Object call. It returns `value` itself, so the marker is on the
+  // function that is installed unless a later decorator replaces it.
+  jsg::JsValue retryable(jsg::Lock& js, jsg::JsValue value, jsg::JsObject context);
+
   jsg::JsSymbol getRestoreSymbol(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(EntrypointsModule, CompatibilityFlags::Reader flags) {
@@ -106,6 +111,7 @@ class EntrypointsModule: public jsg::Object {
     JSG_METHOD(getCtxCache);
     JSG_LAZY_INSTANCE_PROPERTY(restore, getRestoreSymbol);
     JSG_METHOD(abortIsolate);
+    JSG_METHOD(retryable);
   }
 };
 

@@ -6,6 +6,7 @@
 
 #include <workerd/jsg/util.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/autogate.h>
 
 #include <kj/test.h>
 
@@ -131,9 +132,10 @@ class RetryClaimObserver final: public RequestObserver {
     ++deliveredCount;
   }
 
-  void claimRetryTokenBeforeUserCode() override {
+  void claimRetryTokenBeforeUserCode(IsRetryableHandler retryable) override {
     ++claimCount;
     KJ_EXPECT(deliveredCount == 1);
+    retryableAtClaim = retryable;
     jsEventsAtClaim = getJsEvents(jsg::Lock::current());
     KJ_IF_SOME(e, rejection) {
       kj::throwFatalException(e.clone());
@@ -142,6 +144,7 @@ class RetryClaimObserver final: public RequestObserver {
 
   uint deliveredCount = 0;
   uint claimCount = 0;
+  IsRetryableHandler retryableAtClaim = IsRetryableHandler::NO;
   kj::String jsEventsAtClaim;
   kj::Maybe<kj::Exception> rejection;
 };
@@ -296,8 +299,48 @@ KJ_TEST("actor fetch claims after construction and before the fetch handler") {
 
   KJ_EXPECT(response.statusCode == 200);
   KJ_EXPECT(observer->claimCount == 1);
+  KJ_EXPECT(observer->retryableAtClaim == IsRetryableHandler::NO);
   KJ_EXPECT(observer->jsEventsAtClaim == "constructor;", observer->jsEventsAtClaim);
   KJ_EXPECT(getJsEvents(fixture) == "constructor;fetch;");
+}
+
+// workerd does not transform decorator syntax, so the script calls the decorator the way a
+// bundler's standard-decorator output does.
+constexpr kj::StringPtr RETRYABLE_FETCH_ACTOR_SOURCE = R"SCRIPT(
+  import { DurableObject, retryable } from "cloudflare:durable-objects";
+  class Actor extends DurableObject {
+    async fetch() {
+      return new Response("OK");
+    }
+  }
+  retryable(Actor.prototype.fetch, { kind: "method", name: "fetch", static: false, private: false });
+  export default Actor;
+)SCRIPT"_kj;
+
+IsRetryableHandler claimRetryableForDecoratedFetch(kj::ArrayPtr<const kj::StringPtr> autogates) {
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  auto params = recordingActorParams(*observer);
+  params.mainModuleSource = RETRYABLE_FETCH_ACTOR_SOURCE;
+  TestFixture fixture(kj::mv(params));
+  // Set after the fixture, which initializes autogates, and ignore the @all-autogates variant so the
+  // disabled case stays disabled.
+  util::Autogate::initAutogateNamesForTest(autogates, util::IgnoreAllAutogatesEnv::YES);
+  TestResponse response;
+
+  KJ_EXPECT(sendFetch(fixture, response) == kj::none);
+
+  KJ_EXPECT(response.statusCode == 200);
+  KJ_EXPECT(observer->claimCount == 1);
+  return observer->retryableAtClaim;
+}
+
+KJ_TEST("a @retryable fetch claims as retryable when the userland gate is enabled") {
+  auto gates = kj::arr("durable-object-retries-userland"_kj);
+  KJ_EXPECT(claimRetryableForDecoratedFetch(gates) == IsRetryableHandler::YES);
+}
+
+KJ_TEST("a @retryable fetch claims as not retryable when the userland gate is disabled") {
+  KJ_EXPECT(claimRetryableForDecoratedFetch(nullptr) == IsRetryableHandler::NO);
 }
 
 KJ_TEST("a rejected actor fetch claim runs the constructor but not the handler") {

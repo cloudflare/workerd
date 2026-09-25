@@ -19,6 +19,7 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-timers.h>
+#include <workerd/io/observer.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
 
@@ -610,7 +611,14 @@ struct ExportedHandler {
   }
 
   ExportedHandler clone(jsg::Lock& js);
+
+  // YES if `fetch` was decorated with @retryable and DURABLE_OBJECT_RETRIES_USERLAND is enabled.
+  IsRetryableHandler isFetchRetryable(jsg::Lock& js);
 };
+
+// V8 private key set on functions decorated with `@retryable` from "cloudflare:durable-objects".
+// Reading it runs no user code, so a claim can check it before the handler or method runs.
+inline constexpr auto RETRYABLE_METHOD_PRIVATE_KEY = "cloudflare:durable-objects:retryable"_kjc;
 
 // An approximation of Node.js setImmediate `Immediate` object.
 // This is used only when the `nodejs_compat_v2` compatibility flag is enabled.
