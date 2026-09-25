@@ -40,6 +40,7 @@ struct CapturedInstance {
   bool isCustom = false;
   kj::String named;
   kj::String image;
+  kj::String containerSnapshotId;
   double vcpu = 0;
   uint64_t memoryMib = 0;
   uint64_t diskMb = 0;
@@ -60,6 +61,8 @@ class MockContainerServer final: public rpc::Container::Server {
     auto source = params.getSource();
     if (source.which() == rpc::Container::StartParams::Source::IMAGE) {
       captured.image = kj::str(source.getImage());
+    } else if (source.which() == rpc::Container::StartParams::Source::CONTAINER_SNAPSHOT_ID) {
+      captured.containerSnapshotId = kj::str(source.getContainerSnapshotId());
     }
     switch (instance.which()) {
       case rpc::Container::StartInstance::NAMED:
@@ -659,6 +662,45 @@ KJ_TEST("Container::start monitors a container that exits immediately") {
   });
 }
 
+KJ_TEST("Container::images returns configured images without exposing mutable state") {
+  auto fixture = makeFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto images = kj::heapArrayBuilder<jsg::Dict<kj::String>::Field>(2);
+    images.add(jsg::Dict<kj::String>::Field{
+      .name = kj::str("api"),
+      .value = kj::str("registry.example.com/api@sha256:111"),
+    });
+    images.add(jsg::Dict<kj::String>::Field{
+      .name = kj::str("worker"),
+      .value = kj::str("registry.example.com/worker@sha256:222"),
+    });
+
+    auto container =
+        env.js.alloc<Container>(rpc::Container::Client(kj::heap<RestartContainerServer>()), false,
+            jsg::Dict<kj::String>{.fields = images.finish()});
+
+    auto first = container->getImages();
+    KJ_EXPECT(first.fields.size() == 2);
+    KJ_EXPECT(first.fields[0].name == "api");
+    KJ_EXPECT(first.fields[0].value == "registry.example.com/api@sha256:111");
+    KJ_EXPECT(first.fields[1].name == "worker");
+    KJ_EXPECT(first.fields[1].value == "registry.example.com/worker@sha256:222");
+
+    first.fields[0].value = kj::str("changed");
+    auto second = container->getImages();
+    KJ_EXPECT(second.fields[0].value == "registry.example.com/api@sha256:111");
+  });
+}
+
+KJ_TEST("Container::images is empty when no images are configured") {
+  auto fixture = makeFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto container =
+        env.js.alloc<Container>(rpc::Container::Client(kj::heap<RestartContainerServer>()), false);
+    KJ_EXPECT(container->getImages().fields.size() == 0);
+  });
+}
+
 KJ_TEST("Container::destroy updates running before restart and clears the old reason") {
   auto fixture = makeFixture();
   fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
@@ -744,6 +786,26 @@ KJ_TEST("Container::start forwards an image") {
     return kj::mv(promise)
         .then([](CapturedInstance captured) {
       KJ_EXPECT(captured.image == "registry.example.com/image:tag");
+    }).attach(kj::mv(container));
+  });
+}
+
+KJ_TEST("Container::start forwards a container snapshot") {
+  auto fixture = makeFixture();
+  auto paf = kj::newPromiseAndFulfiller<CapturedInstance>();
+  auto promise = kj::mv(paf.promise);
+
+  fixture.runInIoContext([promise = kj::mv(promise), fulfiller = kj::mv(paf.fulfiller)](
+                             const TestFixture::Environment& env) mutable {
+    auto container = kj::rc<Container>(
+        rpc::Container::Client(kj::heap<MockContainerServer>(kj::mv(fulfiller))), false);
+    container->start(env.js,
+        Container::StartupOptions{
+          .containerSnapshot = Container::SnapshotRestoreParams{.id = kj::str("snapshot-id")},
+        });
+    return kj::mv(promise)
+        .then([](CapturedInstance captured) {
+      KJ_EXPECT(captured.containerSnapshotId == "snapshot-id");
     }).attach(kj::mv(container));
   });
 }

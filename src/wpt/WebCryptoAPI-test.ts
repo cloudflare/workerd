@@ -43,7 +43,13 @@ export default {
   'derive_bits_keys/derive.js': {},
   'derive_bits_keys/derive_key_and_encrypt.https.any.js': {},
   'derive_bits_keys/derive_key_and_encrypt.js': supportFile,
-  'derive_bits_keys/derived_bits_length.https.any.js': {},
+  'derive_bits_keys/derived_bits_length.https.any.js': {
+    comment:
+      'deriveBits converts non-finite lengths to zero instead of enforcing [EnforceRange]',
+    expectedFailures: [
+      /^(HKDF|PBKDF2|ECDH|X25519) derivation with (NaN|Infinity) as 'length' parameter$/,
+    ],
+  },
   'derive_bits_keys/derived_bits_length.js': {},
   'derive_bits_keys/derived_bits_length_testcases.js': {
     comment:
@@ -89,6 +95,10 @@ export default {
   'encap_decap/encap_decap_bits.tentative.https.any.js': {
     comment: 'ML-KEM-512 is not supported',
     expectedFailures: [/ML-KEM-512/i],
+  },
+  'encap_decap/hybrid_kem_vectors.js': {
+    comment: 'Hybrid ML-KEM (post-quantum key encapsulation) is not supported',
+    omittedTests: true,
   },
   'encap_decap/encap_decap_keys.tentative.https.any.js': {
     comment: 'ML-KEM-512 is not supported',
@@ -230,6 +240,10 @@ export default {
       'SubtleCrypto interface: operation getPublicKey(CryptoKey, sequence<KeyUsage>)',
       'Window interface: attribute crypto',
     ],
+  },
+  'import_export/Hybrid-KEM_importKey_fixtures.js': {
+    comment: 'Hybrid ML-KEM (post-quantum key encapsulation) is not supported',
+    omittedTests: true,
   },
   'import_export/AES-OCB_importKey.tentative.https.any.js':
     unsupported('AES-OCB'),

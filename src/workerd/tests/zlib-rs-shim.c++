@@ -25,9 +25,10 @@ struct ZStream {
   unsigned long reserved;
 };
 
-// zlib-rs C API.
-extern const char* zlibVersion(void);
-extern int deflateInit2_(ZStream* strm,
+// zlib-rs C API, as exported under the zlib_rs_ prefix by src/rust/zlib-rs. The unprefixed
+// names belong to the routing layer, so the benchmark calls zlib-rs directly through these.
+extern const char* zlib_rs_zlibVersion(void);
+extern int zlib_rs_deflateInit2_(ZStream* strm,
     int level,
     int method,
     int windowBits,
@@ -35,11 +36,12 @@ extern int deflateInit2_(ZStream* strm,
     int strategy,
     const char* version,
     int stream_size);
-extern int inflateInit2_(ZStream* strm, int windowBits, const char* version, int stream_size);
-extern int deflate(ZStream* strm, int flush);
-extern int inflate(ZStream* strm, int flush);
-extern int deflateEnd(ZStream* strm);
-extern int inflateEnd(ZStream* strm);
+extern int zlib_rs_inflateInit2_(
+    ZStream* strm, int windowBits, const char* version, int stream_size);
+extern int zlib_rs_deflate(ZStream* strm, int flush);
+extern int zlib_rs_inflate(ZStream* strm, int flush);
+extern int zlib_rs_deflateEnd(ZStream* strm);
+extern int zlib_rs_inflateEnd(ZStream* strm);
 
 }  // extern "C"
 
@@ -49,28 +51,28 @@ constexpr int Z_DEFLATED_METHOD = 8;
 
 Stream* newDeflate(int level, int windowBits, int memLevel, int strategy) {
   auto stream = new ZStream{};
-  int result = deflateInit2_(stream, level, Z_DEFLATED_METHOD, windowBits, memLevel, strategy,
-      zlibVersion(), sizeof(ZStream));
+  int result = zlib_rs_deflateInit2_(stream, level, Z_DEFLATED_METHOD, windowBits, memLevel,
+      strategy, zlib_rs_zlibVersion(), sizeof(ZStream));
   KJ_REQUIRE(result == 0, "zlib-rs deflateInit2 failed", result);
   return reinterpret_cast<Stream*>(stream);
 }
 
 Stream* newInflate(int windowBits) {
   auto stream = new ZStream{};
-  int result = inflateInit2_(stream, windowBits, zlibVersion(), sizeof(ZStream));
+  int result = zlib_rs_inflateInit2_(stream, windowBits, zlib_rs_zlibVersion(), sizeof(ZStream));
   KJ_REQUIRE(result == 0, "zlib-rs inflateInit2 failed", result);
   return reinterpret_cast<Stream*>(stream);
 }
 
 void freeDeflate(Stream* stream) {
   auto zs = reinterpret_cast<ZStream*>(stream);
-  deflateEnd(zs);
+  zlib_rs_deflateEnd(zs);
   delete zs;
 }
 
 void freeInflate(Stream* stream) {
   auto zs = reinterpret_cast<ZStream*>(stream);
-  inflateEnd(zs);
+  zlib_rs_inflateEnd(zs);
   delete zs;
 }
 
@@ -87,7 +89,7 @@ int runDeflate(Stream* stream,
   zs->avail_in = availIn;
   zs->next_out = nextOut;
   zs->avail_out = availOut;
-  int result = deflate(zs, flush);
+  int result = zlib_rs_deflate(zs, flush);
   *availInAfter = zs->avail_in;
   *availOutAfter = zs->avail_out;
   return result;
@@ -106,7 +108,7 @@ int runInflate(Stream* stream,
   zs->avail_in = availIn;
   zs->next_out = nextOut;
   zs->avail_out = availOut;
-  int result = inflate(zs, flush);
+  int result = zlib_rs_inflate(zs, flush);
   *availInAfter = zs->avail_in;
   *availOutAfter = zs->avail_out;
   return result;

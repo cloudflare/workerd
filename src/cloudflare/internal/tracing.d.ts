@@ -9,6 +9,38 @@ interface SpanAttributes {
   [key: string]: SpanValue | undefined;
 }
 
+interface ExceptionWithCode {
+  code: string | number;
+  name?: string;
+  message?: string;
+  stack?: string;
+}
+
+interface ExceptionWithMessage {
+  code?: string | number;
+  message: string;
+  name?: string;
+  stack?: string;
+}
+
+interface ExceptionWithName {
+  code?: string | number;
+  message?: string;
+  name: string;
+  stack?: string;
+}
+
+type Exception =
+  ExceptionWithCode | ExceptionWithMessage | ExceptionWithName | string;
+
+type TracingSpanStatusCode = 'unset' | 'ok' | 'error';
+
+interface TracingSpanStatus {
+  code: TracingSpanStatusCode;
+  /** A developer-facing error message. Ignored unless code is "error". */
+  message?: string;
+}
+
 declare class Span {
   // Returns true if this span will be recorded to the tracing system. False when the
   // current async context is not being traced, or when the span has already been submitted.
@@ -20,6 +52,16 @@ declare class Span {
 
   // Sets multiple attributes on the span. Attributes with undefined values are ignored.
   setAttributes(attributes: SpanAttributes): this;
+
+  // Records an exception event on the span. Calls after the span has ended are ignored.
+  recordException(exception: Exception): void;
+
+  // Changes the span name. Calls after the span has ended are ignored.
+  updateName(name: string): this;
+
+  // Sets the span status. Calls after the span has ended are ignored. Messages are retained only
+  // for errors.
+  setStatus(status: TracingSpanStatus): this;
 
   // Ends the span and submits its attributes to the tracing system. Idempotent.
   end(): void;
@@ -55,6 +97,10 @@ declare const tracing: {
   // Callers must invoke `span.end()` explicitly.
   startSpan(name: string): Span;
 
+  // Returns the span associated with the current async context. Returns undefined
+  // outside an invocation or when execution is detached into the root async context.
+  getActiveSpan(): Span | undefined;
+
   // The `Span` class is exposed as a nested type so callers can reference the type via
   // `InstanceType<typeof tracing.Span>` (see `tracing-helpers.ts`).
   readonly Span: typeof Span;
@@ -64,4 +110,4 @@ export default tracing;
 // Re-export `Span` as a named type export for callers that prefer `import type { Span }`
 // over `InstanceType<typeof tracing.Span>`. The runtime module does not have a named
 // `Span` export - this is purely a type-level convenience.
-export type { Span };
+export type { Exception, Span };

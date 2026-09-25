@@ -86,7 +86,9 @@ namespace {
   V(SPANID, "spanId")                                                                              \
   V(TRACEFLAGS, "traceFlags")                                                                      \
   V(SPANOPEN, "spanOpen")                                                                          \
+  V(SPANUPDATE, "spanUpdate")                                                                      \
   V(STACK, "stack")                                                                                \
+  V(STATUS, "status")                                                                              \
   V(STATUSCODE, "statusCode")                                                                      \
   V(SLUG, "slug")                                                                                  \
   V(STREAMDIAGEVENT, "streamDiagEvent")                                                            \
@@ -98,6 +100,7 @@ namespace {
   V(TRACES, "traces")                                                                              \
   V(TRUNCATED, "truncated")                                                                        \
   V(TYPE, "type")                                                                                  \
+  V(UNSET, "unset")                                                                                \
   V(UNKNOWN, "unknown")                                                                            \
   V(URL, "url")                                                                                    \
   V(VALUE, "value")                                                                                \
@@ -438,6 +441,25 @@ jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
   return obj;
 }
 
+jsg::JsValue ToJs(jsg::Lock& js, const SpanStatus& status, StringCache& cache) {
+  auto obj = js.obj();
+  switch (status.getCode()) {
+    case SpanStatusCode::UNSET:
+      obj.set(js, CODE_STR, cache.get(js, UNSET_STR));
+      break;
+    case SpanStatusCode::OK:
+      obj.set(js, CODE_STR, cache.get(js, OK_STR));
+      break;
+    case SpanStatusCode::ERROR:
+      obj.set(js, CODE_STR, cache.get(js, ERROR_STR));
+      break;
+  }
+  KJ_IF_SOME(message, status.getMessage()) {
+    obj.set(js, MESSAGE_STR, js.str(message));
+  }
+  return obj;
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const Outcome& outcome, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, OUTCOME_STR));
@@ -482,6 +504,24 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanClose& spanClose, StringCache& cache)
   return obj;
 }
 
+jsg::JsValue ToJs(jsg::Lock& js, const SpanUpdate& spanUpdate, StringCache& cache) {
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, SPANUPDATE_STR));
+  auto info = js.obj();
+  KJ_SWITCH_ONEOF(spanUpdate.info) {
+    KJ_CASE_ONEOF(operationName, kj::ConstString) {
+      info.set(js, TYPE_STR, cache.get(js, NAME_STR));
+      info.set(js, NAME_STR, js.str(operationName));
+    }
+    KJ_CASE_ONEOF(status, SpanStatus) {
+      info.set(js, TYPE_STR, cache.get(js, STATUS_STR));
+      info.set(js, STATUS_STR, ToJs(js, status, cache));
+    }
+  }
+  obj.set(js, INFO_STR, kj::mv(info));
+  return obj;
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const DiagnosticChannelEvent& dce, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, DIAGNOSTICCHANNEL_STR));
@@ -497,6 +537,16 @@ jsg::JsValue ToJs(jsg::Lock& js, const DiagnosticChannelEvent& dce, StringCache&
 jsg::JsValue ToJs(jsg::Lock& js, const Exception& ex, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, EXCEPTION_STR));
+  KJ_IF_SOME(code, ex.code) {
+    KJ_SWITCH_ONEOF(code) {
+      KJ_CASE_ONEOF(text, kj::String) {
+        obj.set(js, CODE_STR, js.str(text));
+      }
+      KJ_CASE_ONEOF(number, double) {
+        obj.set(js, CODE_STR, js.num(number));
+      }
+    }
+  }
   obj.set(js, NAME_STR, cache.get(js, ex.name));
   obj.set(js, MESSAGE_STR, js.str(ex.message));
   KJ_IF_SOME(stack, ex.stack) {
@@ -610,6 +660,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
     KJ_CASE_ONEOF(spanClose, SpanClose) {
       obj.set(js, EVENT_STR, ToJs(js, spanClose, cache));
     }
+    KJ_CASE_ONEOF(spanUpdate, SpanUpdate) {
+      obj.set(js, EVENT_STR, ToJs(js, spanUpdate, cache));
+    }
     KJ_CASE_ONEOF(de, DiagnosticChannelEvent) {
       obj.set(js, EVENT_STR, ToJs(js, de, cache));
     }
@@ -648,6 +701,9 @@ kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
     }
     KJ_CASE_ONEOF(_, SpanClose) {
       return SPANCLOSE_STR;
+    }
+    KJ_CASE_ONEOF(_, SpanUpdate) {
+      return SPANUPDATE_STR;
     }
     KJ_CASE_ONEOF(_, DiagnosticChannelEvent) {
       return DIAGNOSTICCHANNEL_STR;
@@ -1156,7 +1212,11 @@ bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
     if (active->queueSize < maxQueueSize || event.event.is<Outcome>() || event.event.is<Return>()) {
       // When we get to the outcome, no more events will be dropped. Inject an internal diagnostics
       // event indicating how many events were dropped if applicable.
-      if (event.event.is<Outcome>() && active->droppedEvents > 0) {
+      //
+      // `event` is only moved from on the last iteration (see below), so no later iteration reads
+      // a moved-from event.
+      if (event.event.is<Outcome>() &&  // NOLINT(workerd-use-after-move)
+          active->droppedEvents > 0) {
         StreamDiagnosticsEvent diag(active->droppedEvents);
         TailEvent diagTailEvent(SpanContext::clone(event.spanContext), event.invocationId,
             event.timestamp, event.sequence, kj::mv(diag));

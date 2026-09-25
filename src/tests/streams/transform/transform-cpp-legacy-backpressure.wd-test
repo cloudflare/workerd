@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Legacy-backpressure combination cell (C++ only): the standard
+# constructor flags are pinned while fixup-transform-stream-backpressure
+# stays off, reproducing the original backpressure bug — enqueues past
+# the readable high-water mark never latch backpressure, so writes
+# complete immediately. See legacy-backpressure.js. The BUILD rule
+# disables the @all-compat-flags variant, which would turn the omitted
+# flag back on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-transform-cpp-legacy-backpressure",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-backpressure-main.js"),
+          (name = "legacy-backpressure", esModule = embed "legacy-backpressure.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+          "capture_async_api_throws",
+        ],
+      )
+    ),
+  ],
+);

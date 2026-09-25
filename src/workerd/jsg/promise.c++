@@ -114,13 +114,13 @@ void UnhandledRejectionHandler::handledAfterRejection(
   }
 
   KJ_IF_SOME(item, warnedRejections.find(key)) {
-    auto promise = getLocal(js.v8Isolate, item.promise);
+    auto entry = warnedRejections.release(item);
+    auto promise = getLocal(js.v8Isolate, entry.promise);
     if (!promise.IsEmpty()) {
-      AsyncContextFrame::Scope scope(js, tryGetFrame(item.asyncContextFrame));
+      AsyncContextFrame::Scope scope(js, tryGetFrame(entry.asyncContextFrame));
       handler(js, v8::kPromiseHandlerAddedAfterReject, jsg::HashableV8Ref(js.v8Isolate, promise),
           js.v8Ref(js.v8Undefined()));
     }
-    warnedRejections.release(item);
   }
 }
 

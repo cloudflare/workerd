@@ -150,11 +150,11 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
 // Implementation of `v8::Module::SyntheticModuleEvaluationSteps`, which is called to initialize
 // the exports on a synthetic module. Obnoxiously, you can only initialize the exports in this
 // callback; V8 will crash if you try to call `SetSyntheticModuleExport()` from anywhere else.
-v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
+v8::MaybeLocal<v8::Promise> evaluateSyntheticModuleCallback(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module) {
   auto& js = Lock::current();
   v8::EscapableHandleScope scope(js.v8Isolate);
-  v8::MaybeLocal<v8::Value> result;
+  v8::MaybeLocal<v8::Promise> result;
 
   KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
     auto registry = getModulesForResolveCallback(js.v8Isolate);
@@ -377,9 +377,10 @@ static CompilationObserver::Option convertOption(ModuleInfoCompileOption option)
   KJ_UNREACHABLE;
 }
 
+template <typename GetContent>
 v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
     kj::StringPtr name,
-    kj::ArrayPtr<const char> content,
+    GetContent&& getContent,
     kj::ArrayPtr<const kj::byte> compileCache,
     ModuleInfoCompileOption option,
     const CompilationObserver& observer) {
@@ -397,16 +398,7 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
   constexpr bool isModule = true;
   v8::ScriptOrigin origin(v8StrIntern(js.v8Isolate, name), resourceLineOffset, resourceColumnOffset,
       resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, isModule);
-  v8::Local<v8::String> contentStr;
-
-  if (option == ModuleInfoCompileOption::BUILTIN) {
-    // TODO(later): Use of newExternalOneByteString here limits our built-in source
-    // modules (for which this path is used) to only the latin1 character set. We
-    // may need to revisit that to import built-ins as UTF-16 (two-byte).
-    contentStr = jsg::newExternalOneByteString(js, content);
-  } else {
-    contentStr = jsg::v8Str(js.v8Isolate, content);
-  }
+  auto contentStr = getContent();
 
   if (compileCache.size() > 0 && compileCache.begin() != nullptr) {
     auto cached =
@@ -445,9 +437,28 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
     kj::ArrayPtr<const char> content,
     kj::ArrayPtr<const kj::byte> compileCache,
-    ModuleInfoCompileOption flags,
     const CompilationObserver& observer)
-    : ModuleInfo(js, compileEsmModule(js, name, content, compileCache, flags, observer)) {}
+    : ModuleInfo(js, compileEsmModule(js, name, [&]() {
+        return jsg::v8Str(js.v8Isolate, content);
+      }, compileCache, ModuleInfoCompileOption::BUNDLE, observer)) {}
+
+ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
+    kj::StringPtr name,
+    StaticExternalStringSource content,
+    kj::ArrayPtr<const kj::byte> compileCache,
+    const CompilationObserver& observer)
+    : ModuleInfo(js, compileEsmModule(js, name, [&]() {
+        return jsg::newExternalString(js, content);
+      }, compileCache, ModuleInfoCompileOption::BUILTIN, observer)) {}
+
+ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
+    kj::StringPtr name,
+    kj::Arc<OwnedAscii> content,
+    kj::ArrayPtr<const kj::byte> compileCache,
+    const CompilationObserver& observer)
+    : ModuleInfo(js, compileEsmModule(js, name, [&]() {
+        return jsg::newExternalOneByteString(js, kj::mv(content));
+      }, compileCache, ModuleInfoCompileOption::BUILTIN, observer)) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,

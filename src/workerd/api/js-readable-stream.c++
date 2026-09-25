@@ -7,11 +7,13 @@
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/api/streams/common.h>
+#include <workerd/api/streams/standard.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/url.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/iterator.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/strong-bool.h>
 
 #include <kj/common.h>
@@ -187,6 +189,11 @@ class TeeBranchSource final: public ReadableStreamSource {
     return inner->tryRead(buffer, minBytes, maxBytes);
   }
 
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    // kj::newTee's branches serve already-buffered data synchronously.
+    return inner->tryReadSync(buffer, minBytes);
+  }
+
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
     if (encoding == StreamEncoding::IDENTITY) {
       return inner->tryGetLength();
@@ -211,6 +218,11 @@ class TeeBranchSource final: public ReadableStreamSource {
 class NullSource final: public ReadableStreamSource {
  public:
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return static_cast<size_t>(0);
+  }
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    // Always at EOF, which is a valid synchronous answer.
     return static_cast<size_t>(0);
   }
 
@@ -260,6 +272,40 @@ class PrefixedSource final: public ReadableStreamSource {
     co_return co_await inner->tryRead(buffer, minBytes, maxBytes);
   }
 
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    KJ_REQUIRE(minBytes <= buffer.size());
+    KJ_IF_SOME(prefix, maybePrefix) {
+      if (prefix.view != nullptr) {
+        size_t amount = kj::min(buffer.size(), prefix.view.size());
+        if (amount >= minBytes) {
+          // The prefix alone satisfies the read: serve it synchronously. (buffer is a
+          // by-value view; write() advancing it does not affect the caller.)
+          buffer.write(prefix.view.first(amount));
+          prefix.view = prefix.view.slice(amount);
+          if (prefix.view == nullptr) {
+            maybePrefix = kj::none;
+          }
+          return amount;
+        }
+        // The prefix alone cannot satisfy minBytes, so the remainder must come from the
+        // inner source. Probe the inner source into the tail of the buffer FIRST: a
+        // declined synchronous read must have no side effects, so the prefix may only be
+        // consumed once the combined read is known to complete. Note that amount <
+        // minBytes <= buffer.size() implies amount == prefix.view.size(), so completing
+        // consumes the entire prefix.
+        KJ_IF_SOME(n, inner->tryReadSync(buffer.slice(amount, buffer.size()), minBytes - amount)) {
+          buffer.write(prefix.view.first(amount));
+          maybePrefix = kj::none;
+          return amount + n;
+        }
+        return kj::none;
+      }
+      // An empty prefix behaves identically to no prefix. Leave the normalization to the
+      // asynchronous paths: a declined synchronous read must have no side effects.
+    }
+    return inner->tryReadSync(buffer, minBytes);
+  }
+
   kj::Promise<DeferredProxy<void>> pumpTo(kj::Ptr<WritableStreamSink> output, bool end) override {
     // Write the (kj-heap) prefix bytes in the pre-proxy phase, then delegate to the inner
     // source's own pump so its deferred-proxy classification passes through: once the
@@ -304,41 +350,82 @@ class PrefixedSource final: public ReadableStreamSource {
   kj::Own<ReadableStreamSource> inner;
 };
 
-// Pumps an extracted native source into the sink, mirroring the legacy internal
-// controller's pump (ReadableStreamInternalController::pumpTo): the sink and source ride
-// a refcounted holder attached through both deferred-proxy phases; dropping the pump
-// cancels the source; a pump failure aborts the sink and cancels the source.
+// The tee input for a source teed while a read was in flight on it. Waits for that read to
+// finish, then serves the bytes read so far (the stash, then the in-flight read's bytes)
+// ahead of the source, so nothing reaches the source before its in-flight read is done.
+//
+// `length` is the total this source will produce (stash, in-flight read, and the rest of
+// the source), if known when teed. kj::newTee() samples tryGetLength() once, at
+// construction, so it must be known up front rather than after the handoff.
+class InFlightTeeSource final: public ReadableStreamSource {
+ public:
+  InFlightTeeSource(kj::Array<kj::byte> stash,
+      kj::Promise<NativeSourceInFlightRead> inFlight,
+      kj::Maybe<uint64_t> length)
+      : length(length),
+        ready(inFlight
+                  .then([this, stash = kj::mv(stash)](NativeSourceInFlightRead read) mutable {
+                    kj::Own<ReadableStreamSource> source;
+                    KJ_IF_SOME(s, read.source) {
+                      source = kj::mv(s);
+                    } else {
+                      // The in-flight read reached EOF.
+                      source = kj::heap<NullSource>();
+                    }
+                    if (stash.size() + read.bytes.size() > 0) {
+                      auto prefix = kj::heapArray<kj::byte>(stash.size() + read.bytes.size());
+                      prefix.first(stash.size()).copyFrom(stash);
+                      prefix.slice(stash.size()).copyFrom(read.bytes);
+                      source = kj::heap<PrefixedSource>(kj::mv(prefix), kj::mv(source));
+                    }
+                    inner = kj::mv(source);
+                  })
+                  .fork()) {}
+
+  // `ready`'s continuation captures `this`.
+  KJ_DISALLOW_COPY_AND_MOVE(InFlightTeeSource);
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    co_await ready.addBranch();
+    co_return co_await KJ_ASSERT_NONNULL(inner)->tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    KJ_IF_SOME(source, inner) {
+      return source->tryReadSync(buffer, minBytes);
+    }
+    return kj::none;
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    KJ_IF_SOME(source, inner) {
+      return source->tryGetLength(encoding);
+    }
+    if (encoding == StreamEncoding::IDENTITY) {
+      return length;
+    }
+    return kj::none;
+  }
+
+  void cancel(kj::Exception reason) override {
+    KJ_IF_SOME(source, inner) {
+      source->cancel(kj::mv(reason));
+    }
+  }
+
+ private:
+  kj::Maybe<uint64_t> length;
+  kj::Maybe<kj::Own<ReadableStreamSource>> inner;
+  kj::ForkedPromise<void> ready;
+};
+
+// Pumps an extracted native source into the sink. Shares the legacy internal controller's pump
+// (see pumpOwnedSourceToSink()): the sink and source stay alive through both deferred-proxy
+// phases; dropping the pump cancels the source; a pump failure, or the sink disconnecting first,
+// aborts the sink and cancels the source.
 kj::Promise<DeferredProxy<void>> pumpExtractedSource(
     kj::Own<ReadableStreamSource> source, kj::Own<WritableStreamSink> sink, bool end) {
-  struct Holder {
-    kj::Own<WritableStreamSink> sink;
-    kj::Own<ReadableStreamSource> source;
-    bool done = false;
-
-    Holder(kj::Own<WritableStreamSink> sink, kj::Own<ReadableStreamSource> source)
-        : sink(kj::mv(sink)),
-          source(kj::mv(source)) {}
-    ~Holder() noexcept(false) {
-      if (!done) {
-        // The pump was canceled (e.g. the client disconnected); make sure the source
-        // finds out so anything feeding it doesn't hang.
-        source->cancel(KJ_EXCEPTION(DISCONNECTED, "pump canceled"));
-      }
-    }
-  };
-
-  auto holder = kj::rc<Holder>(kj::mv(sink), kj::mv(source));
-  return holder->source->pumpTo(holder->sink->getPtr(), end)
-      .then([holder = holder.addRef()](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
-    proxy.proxyTask = proxy.proxyTask.attach(holder.addRef());
-    holder->done = true;
-    return kj::mv(proxy);
-  }, [holder = holder.addRef()](kj::Exception&& exception) mutable -> DeferredProxy<void> {
-    holder->sink->abort(exception.clone());
-    holder->source->cancel(exception.clone());
-    holder->done = true;
-    kj::throwFatalException(kj::mv(exception));
-  });
+  return pumpOwnedSourceToSink(kj::mv(source), kj::mv(sink), end);
 }
 
 // Writes one drained batch to the sink and, when this is the final batch, ends it.
@@ -356,7 +443,28 @@ kj::Promise<void> queuedWriteStep(
 struct QueuedPumpState {
   jsg::JsRef<jsg::JsObject> reader;
   IoOwn<WritableStreamSink> sink;
+  // Cancels the reader if the sink disconnects while the pump is running; see
+  // pumpQueuedTsStream(). Declared after `sink` so that it is destroyed first.
+  kj::Maybe<IoOwn<kj::Promise<void>>> sinkDisconnectWatch;
 };
+
+// Cancels `reader` (a ReadableStreamDrainingReader) with `exception` as the reason, from outside
+// any JS-lock scope: the work is queued on the IoContext, which may already be gone, in which case
+// there is nothing left to cancel.
+void cancelReaderFromKj(
+    IoContext::WeakRef& weakContext, jsg::JsRef<jsg::JsObject> reader, kj::Exception exception) {
+  weakContext.runIfAlive([&](IoContext& context) {
+    context.addTask(context.run(
+        [reader = kj::mv(reader), exception = kj::mv(exception)](Worker::Lock& lock) mutable {
+      jsg::Lock& js = lock;
+      auto reason = exceptionToCancelReason(js, kj::mv(exception));
+      auto result = webstreams::invokeMethod(js, reader.getHandle(js), "cancel"_kj, reason);
+      KJ_IF_SOME(promise, JSG_TRY_CAST_PROMISE(result)) {
+        promise.markAsHandled(js);
+      }
+    }));
+  });
+}
 
 // One iteration of the queued-backend pump: collect everything the draining reader has
 // buffered (one isolate-lock trip per batch), copy it to KJ-owned memory, perform a
@@ -414,6 +522,21 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
   auto state = kj::rc<QueuedPumpState>(
       QueuedPumpState{.reader = reader.addRef(js), .sink = context.addObject(kj::mv(sink))});
 
+  // Should the sink report that its writes can no longer succeed (for example, the peer of an
+  // RPC-transferred stream canceled it), cancel the reader with the sink's reason rather than
+  // waiting for the source to produce data whose write would fail. The pending read then settles
+  // as done and the loop winds down; its final end() is best-effort against a destination that is
+  // already gone. The watch is owned by the pump state so that it ends with the pump, and it
+  // reaches the IoContext through a weak reference because it fires outside any JS-lock scope.
+  state->sinkDisconnectWatch = context.addObject(kj::heap<kj::Promise<void>>(
+      state->sink->whenWriteDisconnected()
+          .then([](kj::Exception&& exception) { return kj::mv(exception); },
+              [](kj::Exception&& exception) { return kj::mv(exception); })
+          .then([weakContext = context.getWeakRef(), reader = reader.addRef(js)](
+                    kj::Exception exception) mutable {
+    cancelReaderFromKj(*weakContext, kj::mv(reader), kj::mv(exception));
+  }).eagerlyEvaluate(nullptr)));
+
   auto loop = queuedPumpStep(js, state.addRef(), end)
                   .catch_(js,
                       context.addFunctor([state = kj::mv(state)](jsg::Lock& js, IoContext&,
@@ -438,7 +561,9 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
 // ownership of that heap buffer without changing its address, so view remains valid.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdangling-field"
-JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data): view(data), owned(kj::mv(data)) {}
+JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data)
+    : owned(kj::mv(data)),
+      view(owned) {}
 #pragma clang diagnostic pop
 
 // Blob contents live in a V8 ArrayBuffer.  The streams built from this Buffer are read on the
@@ -465,6 +590,8 @@ JsReadableStream::StreamImpl newBackingStream(
     auto constructor = webstreams::getCppExport(js, "ReadableStream");
     return JsReadableStream::StreamImpl(constructor.newInstance(js, sourceObj).addRef(js));
   }
+  // The legacy arm of the dispatch that JsReadableStream::create() delegates to.
+  // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
   return JsReadableStream::StreamImpl(js.alloc<ReadableStream>(ioContext, kj::mv(source)));
 }
 
@@ -531,33 +658,98 @@ JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::
   // legacy arm), close on completion, cancel forwarding to the generator's return().
   // Pull rejections (generator.next() failure or a rejected value promise) propagate to
   // the standard machinery, which errors the stream with the same reason.
-  //
-  // The generator is shared by the pull and cancel closures via an Rc. Like the legacy
-  // arm's closures, these capture it without GC visitation: the captured references are
-  // strong, keeping the (JS-unreachable) generator state alive as long as the stream's
-  // source object is.
-  auto rcGenerator = kj::rc<jsg::AsyncGenerator<jsg::Value>>(kj::mv(generator));
 
   auto pull = js.wrapPromiseReturningFunction(js.v8Context(),
-      [generator = rcGenerator.addRef()](
+      JSG_VISITABLE_LAMBDA((generator = generator.addRef(js)), (generator),
+          (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
+            auto controller =
+                jsg::JsRef(js, KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>()));
+            return generator.next(js).then(js,
+                JSG_VISITABLE_LAMBDA((controller = kj::mv(controller)), (controller),
+                    (jsg::Lock & js,
+                        kj::Maybe<jsg::Value> value) mutable->jsg::Promise<jsg::Value> {
+                      KJ_IF_SOME(v, value) {
+                      auto handle = v.getHandle(js);
+                      if (handle->IsPromise()) {
+                      return js.toPromise(handle.As<v8::Promise>())
+                          .then(js,
+                              JSG_VISITABLE_LAMBDA((controller = kj::mv(controller)), (controller),
+                                  (jsg::Lock & js, jsg::Value val) mutable {
+                                    webstreams::dispatchCall(js, "readableControllerEnqueue",
+                                        jsg::JsValue(controller.getHandle(js)),
+                                        jsg::JsValue(val.getHandle(js)));
+                                    return js.v8Ref<v8::Value>(js.v8Undefined());
+                                  }));
+                      }
+                      webstreams::dispatchCall(js, "readableControllerEnqueue",
+                          jsg::JsValue(controller.getHandle(js)), jsg::JsValue(handle));
+                      } else {
+                      webstreams::dispatchCall(
+                          js, "readableControllerClose", jsg::JsValue(controller.getHandle(js)));
+                      }
+                      return js.resolvedPromise(js.v8Ref<v8::Value>(js.v8Undefined()));
+                    }));
+          }));
+
+  auto cancel = js.wrapPromiseReturningFunction(js.v8Context(),
+      JSG_VISITABLE_LAMBDA((generator = generator.addRef(js)), (generator),
+          (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
+            return generator.return_(js, js.v8Ref<v8::Value>(v8::Local<v8::Value>(info[0])))
+                .then(js, [](jsg::Lock& js, kj::Maybe<jsg::Value>) {
+              // The generator might produce a value on return and might even want to continue,
+              // but the stream has been canceled at this point, so we stop here.
+              return js.v8Ref<v8::Value>(js.v8Undefined());
+            });
+          }));
+
+  auto sourceObj = js.obj();
+  sourceObj.set(js, "pull"_kj, jsg::JsValue(pull));
+  sourceObj.set(js, "cancel"_kj, jsg::JsValue(cancel));
+  // Demand-driven pulls only, per the spec's ReadableStreamFromIterable (and the legacy
+  // arm's StreamQueuingStrategy{.highWaterMark = 0}).
+  auto strategyObj = js.obj();
+  strategyObj.set(js, "highWaterMark"_kj, jsg::JsValue(js.num(0)));
+
+  auto constructor = webstreams::getCppExport(js, "ReadableStream");
+  return JsReadableStream(js,
+      constructor.newInstance(js, jsg::JsValue(sourceObj), jsg::JsValue(strategyObj)).addRef(js));
+}
+
+JsReadableStream JsReadableStream::fromPull(
+    jsg::Lock& js, kj::Function<jsg::Promise<kj::Maybe<jsg::Value>>(jsg::Lock&)> pull) {
+  if (!FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
+    UnderlyingSource underlyingSource;
+    underlyingSource.pull = [pull = kj::mv(pull)](jsg::Lock& js,
+                                UnderlyingSource::Controller c) mutable -> jsg::Promise<void> {
+      auto defaultController =
+          KJ_ASSERT_NONNULL(c.tryGet<jsg::Ref<ReadableStreamDefaultController>>()).addRef();
+      return pull(js).then(js,
+          [defaultController = kj::mv(defaultController)](
+              jsg::Lock& js, kj::Maybe<jsg::Value> value) mutable {
+        KJ_IF_SOME(v, value) {
+          defaultController->enqueue(js, jsg::JsValue(v.getHandle(js)));
+        } else {
+          defaultController->close(js);
+        }
+      });
+    };
+    return JsReadableStream(ReadableStream::constructor(
+        js, kj::mv(underlyingSource), StreamQueuingStrategy{.highWaterMark = 0}));
+  }
+
+  // TypeScript arm: same idea as from()'s TypeScript arm, but driving `pull` directly rather
+  // than an async generator's next().
+  auto tsPull = js.wrapPromiseReturningFunction(js.v8Context(),
+      [pull = kj::mv(pull)](
           jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
     auto controller =
         jsg::JsRef(js, KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>()));
-    return generator->next(js).then(js,
+    return pull(js).then(js,
         [controller = kj::mv(controller)](
             jsg::Lock& js, kj::Maybe<jsg::Value> value) mutable -> jsg::Promise<jsg::Value> {
       KJ_IF_SOME(v, value) {
-        auto handle = v.getHandle(js);
-        if (handle->IsPromise()) {
-          return js.toPromise(handle.As<v8::Promise>())
-              .then(js, [controller = kj::mv(controller)](jsg::Lock& js, jsg::Value val) mutable {
-            webstreams::dispatchCall(js, "readableControllerEnqueue",
-                jsg::JsValue(controller.getHandle(js)), jsg::JsValue(val.getHandle(js)));
-            return js.v8Ref<v8::Value>(js.v8Undefined());
-          });
-        }
         webstreams::dispatchCall(js, "readableControllerEnqueue",
-            jsg::JsValue(controller.getHandle(js)), jsg::JsValue(handle));
+            jsg::JsValue(controller.getHandle(js)), jsg::JsValue(v.getHandle(js)));
       } else {
         webstreams::dispatchCall(
             js, "readableControllerClose", jsg::JsValue(controller.getHandle(js)));
@@ -566,22 +758,9 @@ JsReadableStream JsReadableStream::from(jsg::Lock& js, jsg::AsyncGenerator<jsg::
     });
   });
 
-  auto cancel = js.wrapPromiseReturningFunction(js.v8Context(),
-      [generator = rcGenerator.addRef()](
-          jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) mutable {
-    return generator->return_(js, js.v8Ref<v8::Value>(v8::Local<v8::Value>(info[0])))
-        .then(js, [](jsg::Lock& js, kj::Maybe<jsg::Value>) {
-      // The generator might produce a value on return and might even want to continue,
-      // but the stream has been canceled at this point, so we stop here.
-      return js.v8Ref<v8::Value>(js.v8Undefined());
-    });
-  });
-
   auto sourceObj = js.obj();
-  sourceObj.set(js, "pull"_kj, jsg::JsValue(pull));
-  sourceObj.set(js, "cancel"_kj, jsg::JsValue(cancel));
-  // Demand-driven pulls only, per the spec's ReadableStreamFromIterable (and the legacy
-  // arm's StreamQueuingStrategy{.highWaterMark = 0}).
+  sourceObj.set(js, "pull"_kj, jsg::JsValue(tsPull));
+  // Demand-driven pulls only, matching from()'s TypeScript arm.
   auto strategyObj = js.obj();
   strategyObj.set(js, "highWaterMark"_kj, jsg::JsValue(js.num(0)));
 
@@ -1271,8 +1450,42 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
 
   ensureScratch(kScratchSize);
 
+  // Fast path: complete the read synchronously when data is already available (e.g.
+  // buffered tee or decompressed data), settling the pull without an event-loop round
+  // trip. Skipped when the read has already been abandoned: the asynchronous path's
+  // settlement is inert in that case (the bytes are stashed for redelivery), and there
+  // is no reason to hurry it.
+  if (!signal->getAborted(js) &&
+      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+    kj::Maybe<size_t> maybeSyncAmount;
+    KJ_TRY {
+      maybeSyncAmount = active.source->tryReadSync(scratch.asPtr(), 1);
+    }
+    KJ_CATCH(exception) {
+      // tryReadSync() may throw when a synchronous read is possible but fails. Handle it
+      // exactly like the asynchronous catch_ below: the source is no longer usable.
+      state = kj::none;
+      return js.rejectedPromise<void>(
+          jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js)));
+    }
+    KJ_IF_SOME(amount, maybeSyncAmount) {
+      // Mirrors the asynchronous continuation below, minus the in-flight-only concerns:
+      // no cancel() or abandonment can have interleaved within this synchronous frame.
+      if (amount == 0) {
+        // EOF. Settle our own state before notifying, in case the close call re-enters.
+        state = kj::none;
+        webstreams::invokeMethod(js, controller, "close"_kj);
+        return js.resolvedPromise();
+      }
+      webstreams::invokeMethod(
+          js, controller, "enqueue"_kj, jsg::JsUint8Array::create(js, scratch.first(amount)));
+      return js.resolvedPromise();
+    }
+  }
+
   auto& ioContext = IoContext::current();
   pullInFlight = true;
+  inFlightReadStartLength = active.source->tryGetLength(StreamEncoding::IDENTITY);
   return ioContext
       .awaitIo(js, active.source->tryRead(scratch.begin(), 1, scratch.size()),
           [self = JSG_THIS, controller = controller.addRef(js), signal = kj::mv(signal)](
@@ -1286,6 +1499,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
       return;
     }
     auto data = self->scratch.first(amount);
+    if (self->handOffToTee(data, amount == 0)) return;
     if (signal->getAborted(js)) {
       // The consumer abandoned the read while it was in flight (e.g. releaseLock()).
       // Retain the bytes for redelivery on the next pull; the conduit treats this pull's
@@ -1304,10 +1518,11 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
     // The read failed; the source is no longer usable. Rethrow to reject the pull promise
     // -- the conduit errors the stream (or ignores the settlement if this pull was already
-    // abandoned).
+    // abandoned). A waiting tee's branches fail with the same error.
     self->pullInFlight = false;
     self->pendingCancel = false;
     self->state = kj::none;
+    self->failTeeHandoff(js, exception);
     js.throwException(kj::mv(exception));
   });
 }
@@ -1330,17 +1545,28 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
       atLeast = kj::max(static_cast<size_t>(1), static_cast<size_t>(value));
     }
   }
+  // The read view's element size: every respond must cover whole elements. atLeast and
+  // the view size are multiples of it.
+  size_t elementSize = 1;
+  KJ_IF_SOME(num, JSG_TRY_CAST(byobRequest.get(js, "elementSize"_kj), JsNumber)) {
+    KJ_IF_SOME(value, num.value(js)) {
+      elementSize = kj::max(static_cast<size_t>(1), static_cast<size_t>(value));
+    }
+  }
   auto dest = view.asArrayPtr();
   JSG_REQUIRE(dest.size() > 0, TypeError, "The BYOB request view is empty or detached.");
   JSG_REQUIRE(
       atLeast <= dest.size(), TypeError, "The BYOB request's minimum exceeds its view size.");
+  JSG_REQUIRE(atLeast % elementSize == 0 && dest.size() % elementSize == 0, TypeError,
+      "The BYOB request is not element-aligned.");
 
-  // Bytes retained from an abandoned pull are redelivered first. If they alone satisfy the
-  // read's minimum, no I/O is needed at all.
+  // Bytes retained from an abandoned pull, or a partial element left by the previous one,
+  // are redelivered first. If they alone satisfy the read's minimum, no I/O is needed.
   if (stash.size() >= atLeast) {
     // Contract: check the signal synchronously immediately before delivering.
     if (!signal->getAborted(js)) {
       size_t amount = kj::min(stash.size(), dest.size());
+      amount -= amount % elementSize;
       dest.write(stash.asPtr().first(amount));
       consumeStash(amount);
       webstreams::invokeMethod(js, byobRequest, "respond"_kj, js.num(static_cast<double>(amount)));
@@ -1352,19 +1578,48 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
   // source performs its own internal accumulation toward minBytes (KJ tryRead semantics),
   // so this single read is the source's complete answer for the read: delivering fewer
   // than the minimum in total implicitly signals EOF (the conduit commits the partial fill
-  // fused as {done: true, value: partialView} and closes the stream).
+  // as {done: false, value: partialView} and closes the stream; the next read observes
+  // EOF — the C++-parity readAtLeast tail shape).
   size_t stashed = stash.size();
   size_t minBytes = atLeast - stashed;
   ensureScratch(kj::max(kScratchSize, minBytes));
   size_t maxBytes = kj::min(dest.size() - stashed, scratch.size());
 
+  // Fast path: complete the read synchronously when the data is already available,
+  // settling the pull without an event-loop round trip. Skipped when the read has
+  // already been abandoned (matching pullDefault's fast path). Unlike the asynchronous
+  // read, no JS runs between the view extraction above and the delivery below, so the
+  // view cannot have been detached in between.
+  if (!signal->getAborted(js) &&
+      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
+    kj::Maybe<size_t> maybeSyncAmount;
+    KJ_TRY {
+      maybeSyncAmount = active.source->tryReadSync(scratch.first(maxBytes), minBytes);
+    }
+    KJ_CATCH(exception) {
+      // Handle a synchronous failure exactly like the asynchronous catch_ below.
+      state = kj::none;
+      return js.rejectedPromise<void>(
+          jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js)));
+    }
+    KJ_IF_SOME(amount, maybeSyncAmount) {
+      // Mirrors the asynchronous continuation below, minus the in-flight-only concerns:
+      // no cancel(), abandonment, or view detachment can have interleaved within this
+      // synchronous frame. Fewer than minBytes is EOF (KJ semantics).
+      respondByob(js, controller, byobRequest, dest, scratch.first(amount), Eof(amount < minBytes),
+          elementSize);
+      return js.resolvedPromise();
+    }
+  }
+
   auto& ioContext = IoContext::current();
   pullInFlight = true;
+  inFlightReadStartLength = active.source->tryGetLength(StreamEncoding::IDENTITY);
   return ioContext
       .awaitIo(js, active.source->tryRead(scratch.begin(), minBytes, maxBytes),
           [self = JSG_THIS, controller = controller.addRef(js),
               byobRequest = byobRequest.addRef(js), view = view.addRef(js), signal = kj::mv(signal),
-              minBytes](jsg::Lock& js, size_t amount) mutable {
+              minBytes, elementSize](jsg::Lock& js, size_t amount) mutable {
     self->pullInFlight = false;
     if (self->pendingCancel) {
       // cancel() arrived while the read was in flight: complete the deferred teardown and
@@ -1374,57 +1629,76 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
       return;
     }
     auto data = self->scratch.first(amount);
+    if (self->handOffToTee(data, amount < minBytes)) return;
     if (signal->getAborted(js)) {
       // The consumer abandoned the read; retain the bytes (after any previously retained
       // ones, preserving order) for redelivery on the next pull.
       self->stash.addAll(data);
       return;
     }
-    size_t stashed = self->stash.size();
-    size_t total = stashed + amount;
-    if (total == 0) {
-      // EOF with nothing to deliver: respond(0) is forbidden; close() is the EOF signal.
-      self->state = kj::none;
-      webstreams::invokeMethod(js, controller.getHandle(js), "close"_kj);
-      return;
-    }
+    size_t total = self->stash.size() + amount;
     auto dest = view.getHandle(js).asArrayPtr();
-    if (dest.size() < total) {
+    if (total > 0 && dest.size() < total) {
       // The view was detached while the read was in flight. Treat the read as abandoned:
       // retain the bytes for the next consumer.
       self->stash.addAll(data);
       return;
     }
-    if (stashed > 0) {
-      // write() advances dest past the copied prefix, so the fresh bytes below land
-      // immediately after the redelivered stash.
-      dest.write(self->stash.asPtr());
-      self->stash.clear();
-    }
-    if (amount > 0) {
-      dest.write(data);
-    }
-    bool eof = amount < minBytes;
-    if (eof) {
-      // The source delivered fewer than minBytes: EOF (KJ semantics). Settle our own
-      // state before making the JS calls below.
-      self->state = kj::none;
-    }
-    webstreams::invokeMethod(
-        js, byobRequest.getHandle(js), "respond"_kj, js.num(static_cast<double>(total)));
-    if (eof) {
-      // Fused close-commit: deliver the partial bytes, then explicitly signal EOF in the
-      // same pull turn. (The under-delivered respond() above already implies closure to
-      // the conduit, which tolerates this close as a no-op; the explicit close keeps the
-      // EOF signal unambiguous rather than relying on that inference.)
-      webstreams::invokeMethod(js, controller.getHandle(js), "close"_kj);
-    }
+    // Fewer than minBytes is EOF (KJ semantics).
+    self->respondByob(js, controller.getHandle(js), byobRequest.getHandle(js), dest, data,
+        Eof(amount < minBytes), elementSize);
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
     self->pullInFlight = false;
     self->pendingCancel = false;
     self->state = kj::none;
+    self->failTeeHandoff(js, exception);
     js.throwException(kj::mv(exception));
   });
+}
+
+void ReadableStreamNativeSource::respondByob(jsg::Lock& js,
+    jsg::JsObject controller,
+    jsg::JsObject byobRequest,
+    kj::ArrayPtr<kj::byte> dest,
+    kj::ArrayPtr<const kj::byte> data,
+    Eof eof,
+    size_t elementSize) {
+  size_t stashed = stash.size();
+  size_t total = stashed + data.size();
+  size_t deliver = total;
+  if (eof) {
+    // Settle our own state before making the JS calls below.
+    state = kj::none;
+    if (total == 0) {
+      // Nothing to deliver: respond(0) is forbidden; close() is the EOF signal.
+      webstreams::invokeMethod(js, controller, "close"_kj);
+      return;
+    }
+    if (total % elementSize != 0) {
+      stash.clear();
+      JSG_FAIL_REQUIRE(TypeError, "Insufficient bytes to fill elements in the given view");
+    }
+  } else {
+    // Not EOF, so total >= the read's minimum, a whole number of elements larger than the
+    // stash: the partial element lies within `data`.
+    deliver -= total % elementSize;
+  }
+  KJ_ASSERT(deliver <= dest.size() && deliver >= stashed);
+  auto fresh = data.first(deliver - stashed);
+  // write() advances dest past the copied prefix, so the fresh bytes land immediately
+  // after the redelivered stash.
+  dest.write(stash.asPtr());
+  dest.write(fresh);
+  stash.clear();
+  stash.addAll(data.slice(fresh.size()));
+  webstreams::invokeMethod(js, byobRequest, "respond"_kj, js.num(static_cast<double>(deliver)));
+  if (eof) {
+    // Deliver the partial bytes, then explicitly signal EOF in the same pull turn. (The
+    // under-delivered respond() above already implies closure to the conduit, which
+    // tolerates this close as a no-op; the explicit close keeps the EOF signal unambiguous
+    // rather than relying on that inference.)
+    webstreams::invokeMethod(js, controller, "close"_kj);
+  }
 }
 
 void ReadableStreamNativeSource::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) {
@@ -1450,18 +1724,34 @@ void ReadableStreamNativeSource::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValu
 kj::Array<jsg::Ref<ReadableStreamNativeSource>> ReadableStreamNativeSource::tee(jsg::Lock& js) {
   auto& active = JSG_REQUIRE_NONNULL(
       state, TypeError, "This ReadableStream source has already been consumed.");
-
-  // An abandoned pull's read may still be in flight (the reader was released mid-pull).
-  // Bytes that read produces after the split would land in this (dead) source's stash,
-  // invisible to both branches -- silent loss. Refuse loudly instead. Revisit per the
-  // design doc's open question D if this proves reachable in practice.
-  JSG_REQUIRE(
-      !pullInFlight, TypeError, "Cannot tee this ReadableStream while a read is in flight.");
+  // Canceled mid-read, the source is done; only its release waits on the read (see
+  // cancel()), whose settlement would never hand it over to a tee.
+  JSG_REQUIRE(!pendingCancel, TypeError, "This ReadableStream source has already been consumed.");
 
   auto& ioContext = IoContext::current();
   auto limit = ioContext.getLimitEnforcer().getBufferingLimit();
 
   auto branches = [&]() -> ReadableStreamSource::Tee {
+    if (pullInFlight) {
+      // An abandoned pull's read is still in flight (the reader was released mid-pull),
+      // so the source can be neither teed nor read until it finishes. The generic tee
+      // runs over an InFlightTeeSource that waits for the read's settlement to hand over
+      // the source and the bytes (handOffToTee()); the stash goes ahead of them. Taken
+      // before the stash moves into the tee: tryGetLength() counts it.
+      auto length = tryGetLength(StreamEncoding::IDENTITY);
+      auto paf = kj::newPromiseAndFulfiller<NativeSourceInFlightRead>();
+      teeHandoff = ioContext.addObject(kj::heap<TeeHandoff>(TeeHandoff{
+        .fulfiller = kj::mv(paf.fulfiller),
+        .source = kj::Own<ReadableStreamSource>(kj::mv(active.source)),
+      }));
+      auto tee = kj::newTee(kj::heap<TeeInputAdapter>(kj::heap<InFlightTeeSource>(
+                                stash.releaseAsArray(), kj::mv(paf.promise), length)),
+          limit);
+      return ReadableStreamSource::Tee{
+        .branches = {kj::heap<TeeBranchSource>(wrapTeeBranch(kj::mv(tee.branches[0]))),
+          kj::heap<TeeBranchSource>(wrapTeeBranch(kj::mv(tee.branches[1])))},
+      };
+    }
     KJ_IF_SOME(tee, active.source->tryTee(limit)) {
       // The underlying source has an optimized tee implementation.
       return kj::mv(tee);
@@ -1497,6 +1787,32 @@ kj::Array<jsg::Ref<ReadableStreamNativeSource>> ReadableStreamNativeSource::tee(
   return kj::arr(kj::mv(branch1), kj::mv(branch2));
 }
 
+bool ReadableStreamNativeSource::handOffToTee(kj::ArrayPtr<const kj::byte> data, bool eof) {
+  KJ_IF_SOME(pending, teeHandoff) {
+    auto& handoff = *pending;
+    kj::Maybe<kj::Own<ReadableStreamSource>> source;
+    if (!eof) {
+      source = kj::mv(handoff.source);
+    }
+    // If both branches are already gone, the handed-over source is dropped here, which is
+    // safe now that its read has finished.
+    handoff.fulfiller->fulfill(NativeSourceInFlightRead{
+      .bytes = kj::heapArray(data),
+      .source = kj::mv(source),
+    });
+    teeHandoff = kj::none;
+    return true;
+  }
+  return false;
+}
+
+void ReadableStreamNativeSource::failTeeHandoff(jsg::Lock& js, jsg::Value& exception) {
+  KJ_IF_SOME(pending, teeHandoff) {
+    pending->fulfiller->reject(js.exceptionToKj(jsg::JsValue(exception.getHandle(js))));
+    teeHandoff = kj::none;
+  }
+}
+
 jsg::Optional<jsg::JsBigInt> ReadableStreamNativeSource::getExpectedLength(jsg::Lock& js) {
   KJ_IF_SOME(length, tryGetLength(StreamEncoding::IDENTITY)) {
     return js.bigInt(length);
@@ -1506,8 +1822,16 @@ jsg::Optional<jsg::JsBigInt> ReadableStreamNativeSource::getExpectedLength(jsg::
 
 kj::Maybe<uint64_t> ReadableStreamNativeSource::tryGetLength(StreamEncoding encoding) {
   KJ_IF_SOME(active, state) {
+    if (pendingCancel) {
+      // Canceled mid-read; only the release is deferred (see cancel()).
+      return kj::none;
+    }
     if (encoding == StreamEncoding::IDENTITY) {
-      KJ_IF_SOME(length, active.source->tryGetLength(StreamEncoding::IDENTITY)) {
+      // Mid-read, the source may already count the in-flight read's bytes as consumed
+      // (see inFlightReadStartLength), so use its length from when the read was issued.
+      auto sourceLength = pullInFlight ? inFlightReadStartLength
+                                       : active.source->tryGetLength(StreamEncoding::IDENTITY);
+      KJ_IF_SOME(length, sourceLength) {
         // Bytes retained in the stash (from an abandoned pull, or inherited from a tee
         // parent) were already consumed from the underlying source but not yet delivered,
         // so they count toward the total this source will produce. Getting this right
@@ -1517,9 +1841,10 @@ kj::Maybe<uint64_t> ReadableStreamNativeSource::tryGetLength(StreamEncoding enco
       }
       return kj::none;
     }
-    // Stashed bytes are identity bytes already drawn from the source: once any exist, an
-    // encoded length no longer describes what this source will deliver.
-    if (!stash.empty()) {
+    // Stashed bytes, and those of a read in flight, are identity bytes already drawn from
+    // the source: once any exist, an encoded length no longer describes what this source
+    // will deliver.
+    if (!stash.empty() || pullInFlight) {
       return kj::none;
     }
     return active.source->tryGetLength(encoding);
@@ -1574,9 +1899,10 @@ void ReadableStreamNativeSource::consumeStash(size_t bytes) {
   if (bytes >= stash.size()) {
     stash.clear();
   } else {
-    // Partial consumption (rare: a BYOB view smaller than the current stash). Rebuild
-    // from the remainder rather than shifting in place: ArrayPtr::copyFrom() forbids
-    // overlapping ranges.
+    // Partial consumption: a BYOB view smaller than the current stash, or a stash ending in
+    // a partial element that the read's whole-element delivery leaves behind. Rebuild from
+    // the remainder rather than shifting in place: ArrayPtr::copyFrom() forbids overlapping
+    // ranges.
     kj::Vector<kj::byte> remainder;
     remainder.addAll(stash.asPtr().slice(bytes, stash.size()));
     stash = kj::mv(remainder);

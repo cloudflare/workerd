@@ -4,6 +4,9 @@
 
 #include "sqlite.h"
 
+#include "strings.h"
+
+#include <workerd/jsg/exception.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
@@ -29,11 +32,6 @@
 #include <kj/vector.h>
 
 #include <atomic>
-
-#if _WIN32
-#define strncasecmp _strnicmp
-#define strcasecmp _stricmp
-#endif
 
 namespace workerd {
 
@@ -193,6 +191,29 @@ kj::String dbErrorMessage(int errorCode, sqlite3* db) {
 // exceptions through SQLite.
 static thread_local kj::Maybe<kj::Exception>* vfsErrorListener = nullptr;
 
+void tagSentry(kj::Exception& e, kj::StringPtr tag) {
+  if (e.getDetail(SENTRY_TAG_DETAIL_ID) == kj::none) {
+    e.setDetail(SENTRY_TAG_DETAIL_ID, kj::heapArray(tag.asBytes()));
+  }
+}
+
+// Applies the context given to `SqliteDatabase::setErrorContext()`, if any. Tunneled exceptions
+// are left untouched because their description is shown to the application; a VFS callback may
+// throw one (e.g. when a write exceeds a storage limit).
+void appendErrorContext(kj::Exception& e, kj::Maybe<kj::StringPtr> errorContext) {
+  if (jsg::isTunneledException(e.getDescription())) return;
+  KJ_IF_SOME(context, errorContext) {
+    e.setDescription(kj::str(e.getDescription(), "; ", context));
+  }
+}
+
+[[noreturn]] void throwSentryException(
+    kj::Exception&& e, kj::StringPtr tag, kj::Maybe<kj::StringPtr> errorContext) {
+  appendErrorContext(e, errorContext);
+  tagSentry(e, tag);
+  kj::throwFatalException(kj::mv(e));
+}
+
 // Report that in a sqlite VFS callback, an exception was caught, and SQLITE_IOERROR is being
 // returned to SQLite.
 //
@@ -201,6 +222,7 @@ static thread_local kj::Maybe<kj::Exception>* vfsErrorListener = nullptr;
 // only the frames between the throw and the catch. We actually want to retain the full trace
 // through SQLite.
 void reportVfsErrorCaught(kj::Exception&& e) {
+  tagSentry(e, "SENTRY_DO"_kj);
   if (vfsErrorListener != nullptr) {
     // Only capture the first error; assume subsequent errors are side effects.
     if (*vfsErrorListener == kj::none) {
@@ -222,8 +244,9 @@ class SqliteCallScope {
     vfsErrorListener = nullptr;
   }
 
-  void rethrowVfsError() {
+  void rethrowVfsError(kj::Maybe<kj::StringPtr> errorContext) {
     KJ_IF_SOME(e, error) {
+      appendErrorContext(e, errorContext);
       // Slight hack: The exception already has a stack trace attached which should include the
       // current stack, but `kj::throwFatalException()` would re-append the current stack trace
       // to the exception. We can avoid that by calling
@@ -248,21 +271,32 @@ class SqliteCallScope {
 
 // Like KJ_REQUIRE() but give the Regulator a chance to report the error. `errorMessage` is either
 // the return value of sqlite3_errmsg() or a string literal containing a similarly
-// application-approriate error message. A reference called `regulator` must be in-scope.
+// application-approriate error message. A reference called `regulator` must be in-scope, as must
+// a `getErrorContext()` method (i.e. this must be used within SqliteDatabase or Query).
 // sqliteErrorCode is a kj::Maybe<int> and represents the error code from sqlite.
-#define SQLITE_REQUIRE(condition, sqliteErrorCode, errorMessage, ...)                              \
+#define SQLITE_REQUIRE_WITH_TAG(condition, sqliteErrorCode, sentryTag, errorMessage, ...)          \
   if (!(condition)) {                                                                              \
     regulator->onError(sqliteErrorCode, errorMessage);                                             \
-    KJ_FAIL_REQUIRE("SENTRY_DO SQLite failed", errorMessage, ##__VA_ARGS__);                       \
+    throwSentryException(KJ_EXCEPTION(FAILED, "SQLite failed", errorMessage, ##__VA_ARGS__),       \
+        sentryTag, getErrorContext());                                                             \
   }
+
+#define SQLITE_REQUIRE(condition, sqliteErrorCode, errorMessage, ...)                              \
+  SQLITE_REQUIRE_WITH_TAG(condition, sqliteErrorCode, "SENTRY_DO"_kj, errorMessage, ##__VA_ARGS__)
 
 // Make a SQLite call and check the returned error code. Use this version when the call is not
 // associated with an open DB connection.
 #define SQLITE_CALL_NODB(code, ...)                                                                \
   do {                                                                                             \
+    SqliteCallScope sqliteCallScope;                                                               \
     int _ec = code;                                                                                \
-    KJ_ASSERT(                                                                                     \
-        _ec == SQLITE_OK, kj::str(sqlite3_errstr(_ec), ": ", namedErrorCode(_ec)), ##__VA_ARGS__); \
+    if (_ec != SQLITE_OK) sqliteCallScope.rethrowVfsError(kj::none);                               \
+    if (_ec != SQLITE_OK) {                                                                        \
+      throwSentryException(                                                                        \
+          KJ_EXCEPTION(                                                                            \
+              FAILED, kj::str(sqlite3_errstr(_ec), ": ", namedErrorCode(_ec)), ##__VA_ARGS__),     \
+          "SENTRY_DO"_kj, kj::none);                                                               \
+    }                                                                                              \
   } while (false)
 
 // This version requires the scope to contain a variable named `db` which is of type sqlite3*, or
@@ -274,7 +308,7 @@ class SqliteCallScope {
     /* SQLITE_MISUSE doesn't put error info on the database object, so check it separately */      \
     KJ_ASSERT(_ec != SQLITE_MISUSE, "SQLite misused: " #code, ##__VA_ARGS__);                      \
     handleCriticalError(_ec, dbErrorMessage(_ec, db), sqliteCallScope.getException());             \
-    if (_ec == SQLITE_IOERR) sqliteCallScope.rethrowVfsError();                                    \
+    if (_ec == SQLITE_IOERR) sqliteCallScope.rethrowVfsError(getErrorContext());                   \
     SQLITE_REQUIRE(_ec == SQLITE_OK, _ec, dbErrorMessage(_ec, db), ##__VA_ARGS__);                 \
   } while (false)
 
@@ -287,9 +321,9 @@ class SqliteCallScope {
   do {                                                                                             \
     KJ_ASSERT(error != SQLITE_MISUSE, "SQLite misused: " code, ##__VA_ARGS__);                     \
     handleCriticalError(error, dbErrorMessage(error, db), sqliteCallScope.getException());         \
-    if (error == SQLITE_IOERR) sqliteCallScope.rethrowVfsError();                                  \
-    SQLITE_REQUIRE(error != SQLITE_BUSY, error, kj::str("NOSENTRY ", dbErrorMessage(error, db)),   \
-        ##__VA_ARGS__);                                                                            \
+    if (error == SQLITE_IOERR) sqliteCallScope.rethrowVfsError(getErrorContext());                 \
+    SQLITE_REQUIRE_WITH_TAG(                                                                       \
+        error != SQLITE_BUSY, error, "NOSENTRY"_kj, dbErrorMessage(error, db), ##__VA_ARGS__);     \
     SQLITE_REQUIRE(error == SQLITE_OK, error, dbErrorMessage(error, db), ##__VA_ARGS__);           \
   } while (false);
 
@@ -599,6 +633,12 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
 
   auto memoryScope = enterMemoryScope();
 
+  // sqlite3_close_v2 is expected to be called even when sqlite3_open_v2 returns an error. It is
+  // expected that sqlite3_close_v2 sets up a database in need of close, or sets nullptr.
+  // sqlite3_close_v2 is safe to call on nullptr, so we should simply call this always, thus
+  // cleaning up a partial db even when SQLITE_CALL_NODB throws.
+  KJ_ON_SCOPE_FAILURE(sqlite3_close_v2(db));
+
   KJ_IF_SOME(mode, maybeMode) {
     int flags = SQLITE_OPEN_READWRITE;
     if (kj::has(mode, kj::WriteMode::CREATE)) {
@@ -632,8 +672,6 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
           sqlite3_open_v2(path.toString().cStr(), &db, SQLITE_OPEN_READONLY, vfs.getName().cStr()));
     }
   }
-
-  KJ_ON_SCOPE_FAILURE(sqlite3_close_v2(db));
 
   setupSecurity(db);
 
@@ -738,7 +776,7 @@ void SqliteDatabase::applyChange(const StateChange& change) {
           KJ_ASSERT(!savepoints.empty(), "released a savepoint that didn't exist?");
           auto sp = kj::mv(savepoints.back());
           savepoints.removeLast();
-          if (sp.name == name) break;
+          if (sqlite3_stricmp(sp.name.cStr(), name.cStr()) == 0) break;
         }
       } else {
         KJ_ASSERT(inTransaction, "COMMIT TRANSACTION without BEGIN TRANSACTION?");
@@ -760,7 +798,7 @@ void SqliteDatabase::applyChange(const StateChange& change) {
       KJ_IF_SOME(name, rollback.savepointName) {
         for (;;) {
           KJ_ASSERT(!savepoints.empty(), "released a savepoint that didn't exist?");
-          if (savepoints.back().name == name) {
+          if (sqlite3_stricmp(savepoints.back().name.cStr(), name.cStr()) == 0) {
             // Found the savepoint.
             // Call all rollback callbacks later than the savepoint.
             size_t index = savepoints.back().rollbackCallbackIndex;
@@ -1071,9 +1109,9 @@ bool SqliteDatabase::isAuthorized(int actionCode,
   }
 
   KJ_IF_SOME(d, dbName) {
-    if (d == "temp"_kj) {
+    if (sqlite3_stricmp(d.cStr(), "temp") == 0) {
       return isAuthorizedTemp(actionCode, param1, param2, regulator);
-    } else if (d != "main"_kj) {
+    } else if (sqlite3_stricmp(d.cStr(), "main") != 0) {
       // We don't allow opening multiple databases (except for 'main' and the 'temp'
       // temporary database), as our storage engine is not designed to track multiple
       // files on-disk.
@@ -1157,11 +1195,11 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
       kj::StringPtr op = KJ_ASSERT_NONNULL(param1);
       StateChange change;
-      if (op == "BEGIN") {
+      if (sqlite3_stricmp(op.cStr(), "BEGIN") == 0) {
         change = BeginTxn{kj::none};
-      } else if (op == "COMMIT") {
+      } else if (sqlite3_stricmp(op.cStr(), "COMMIT") == 0) {
         change = CommitTxn{kj::none};
-      } else if (op == "ROLLBACK") {
+      } else if (sqlite3_stricmp(op.cStr(), "ROLLBACK") == 0) {
         change = RollbackTxn{kj::none};
       } else {
         KJ_FAIL_ASSERT("unknown SQLITE_TRANSACTION op", op);
@@ -1183,11 +1221,11 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
       kj::StringPtr op = KJ_ASSERT_NONNULL(param1);
       StateChange change;
-      if (op == "BEGIN") {
+      if (sqlite3_stricmp(op.cStr(), "BEGIN") == 0) {
         change = BeginTxn{kj::mv(name)};
-      } else if (op == "RELEASE") {
+      } else if (sqlite3_stricmp(op.cStr(), "RELEASE") == 0) {
         change = CommitTxn{kj::mv(name)};
-      } else if (op == "ROLLBACK") {
+      } else if (sqlite3_stricmp(op.cStr(), "ROLLBACK") == 0) {
         change = RollbackTxn{kj::mv(name)};
       } else {
         KJ_FAIL_ASSERT("unknown SQLITE_TRANSACTION op", op);
@@ -1204,14 +1242,15 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       {
         kj::StringPtr pragma = KJ_ASSERT_NONNULL(param1);
 
-        if (pragma == "table_list") {
+        if (sqlite3_stricmp(pragma.cStr(), "table_list") == 0) {
           // Annoyingly, this will list internal tables. However, the existence of these tables
           // isn't really a secret, we just don't want people to access them.
           return true;
           // TODO function_list & pragma_list should be authorized but return
           // ALLOWED_SQLITE_FUNCTIONS & ALLOWED_[READ|WRITE]_PRAGMAS
           // respectively
-        } else if (pragma == "table_info" || pragma == "table_xinfo") {
+        } else if (sqlite3_stricmp(pragma.cStr(), "table_info") == 0 ||
+            sqlite3_stricmp(pragma.cStr(), "table_xinfo") == 0) {
           // Allow if the specific named table is not protected.
           KJ_IF_SOME(name, param2) {
             return regulator->isAllowedName(name);
@@ -1220,15 +1259,15 @@ bool SqliteDatabase::isAuthorized(int actionCode,
           }
         }
 
-        static const kj::HashMap<kj::StringPtr, PragmaSignature> allowedPragmas = []() {
-          kj::HashMap<kj::StringPtr, PragmaSignature> result;
-          for (auto& [name, signature]: ALLOWED_PRAGMAS) {
-            result.insert(name, signature);
+        kj::Maybe<PragmaSignature> maybeSignature;
+        for (auto& [name, signature]: ALLOWED_PRAGMAS) {
+          if (sqlite3_stricmp(pragma.cStr(), name.cStr()) == 0) {
+            maybeSignature = signature;
+            break;
           }
-          return result;
-        }();
+        }
 
-        PragmaSignature sig = KJ_UNWRAP_OR(allowedPragmas.find(pragma), return false);
+        PragmaSignature sig = KJ_UNWRAP_OR(maybeSignature, return false);
         switch (sig) {
           case PragmaSignature::NO_ARG:
             return param2 == kj::none;
@@ -1245,11 +1284,14 @@ bool SqliteDatabase::isAuthorized(int actionCode,
             }
 
             // Compare against every possible representation. Case-insensitive!
-            return strncasecmp(val.begin(), "true", 4) == 0 ||
-                strncasecmp(val.begin(), "false", 5) == 0 ||
-                strncasecmp(val.begin(), "yes", 3) == 0 || strncasecmp(val.begin(), "no", 2) == 0 ||
-                strncasecmp(val.begin(), "on", 2) == 0 || strncasecmp(val.begin(), "off", 3) == 0 ||
-                strncasecmp(val.begin(), "1", 1) == 0 || strncasecmp(val.begin(), "0", 1) == 0;
+            return sqlite3_strnicmp(val.begin(), "true", 4) == 0 ||
+                sqlite3_strnicmp(val.begin(), "false", 5) == 0 ||
+                sqlite3_strnicmp(val.begin(), "yes", 3) == 0 ||
+                sqlite3_strnicmp(val.begin(), "no", 2) == 0 ||
+                sqlite3_strnicmp(val.begin(), "on", 2) == 0 ||
+                sqlite3_strnicmp(val.begin(), "off", 3) == 0 ||
+                sqlite3_strnicmp(val.begin(), "1", 1) == 0 ||
+                sqlite3_strnicmp(val.begin(), "0", 1) == 0;
           }
           case PragmaSignature::OBJECT_NAME: {
             // Argument is required.
@@ -1282,6 +1324,10 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
     case SQLITE_FUNCTION: /* NULL            Function Name   */
     {
+      // SQLite specifies that sqlite3_stricmp() should be used when comparing
+      // identifiers, but because doing so here would require scanning the
+      // function allowlist once per-prepared statement, we instead compare
+      // lower case strings.
       static const kj::HashSet<kj::StringPtr> allowSet = []() {
         kj::HashSet<kj::StringPtr> result;
         for (const kj::StringPtr& func: ALLOWED_SQLITE_FUNCTIONS) {
@@ -1289,7 +1335,8 @@ bool SqliteDatabase::isAuthorized(int actionCode,
         }
         return result;
       }();
-      return allowSet.contains(KJ_ASSERT_NONNULL(param2));
+
+      return allowSet.contains(toLower(KJ_ASSERT_NONNULL(param2)));
     }
 
       // ---------------------------------------------------------------
@@ -1305,10 +1352,10 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       //   (Which also includes rtree_i32, the 32-bit-integer-coordinate variant)
       {
         KJ_IF_SOME(moduleName, param2) {
-          if (strcasecmp(moduleName.begin(), "fts5") == 0 ||
-              strcasecmp(moduleName.begin(), "fts5vocab") == 0 ||
-              strcasecmp(moduleName.begin(), "rtree") == 0 ||
-              strcasecmp(moduleName.begin(), "rtree_i32") == 0) {
+          if (sqlite3_stricmp(moduleName.cStr(), "fts5") == 0 ||
+              sqlite3_stricmp(moduleName.cStr(), "fts5vocab") == 0 ||
+              sqlite3_stricmp(moduleName.cStr(), "rtree") == 0 ||
+              sqlite3_stricmp(moduleName.cStr(), "rtree_i32") == 0) {
             return regulator->isAllowedName(KJ_ASSERT_NONNULL(param1));
           }
         }
@@ -1371,7 +1418,7 @@ void SqliteDatabase::setupSecurity(sqlite3* db) {
   // 2. Reduce limits
   // We use most of the suggested limits from sqlite.org/security.html. Note that sqlite3_limit()
   // does NOT return an error code; it returns the old limit.
-  sqlite3_limit(db, SQLITE_LIMIT_LENGTH, 4 * 1024 * 1024);
+  sqlite3_limit(db, SQLITE_LIMIT_LENGTH, MAX_ROW_LENGTH);
   sqlite3_limit(db, SQLITE_LIMIT_SQL_LENGTH, 100000);
   sqlite3_limit(db, SQLITE_LIMIT_COLUMN, 100);
   sqlite3_limit(db, SQLITE_LIMIT_EXPR_DEPTH, 100);
@@ -1452,9 +1499,15 @@ SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::prepareForExecuti
     // Database was reset. Recompile the statement against the new database. (This could throw,
     // of course, if the statement depends on tables that haven't been recreated yet.)
     //
+    // Move the SQL out of `stmt` before parsing it. This ensures that the StringPtrs used by
+    // prepareSql() don't point into the OneOf alternative when that alternative is replaced, and
+    // allows a failed preparation to restore the SQL for the next attempt.
+    auto sqlCodeToPrepare = kj::mv(sqlCode);
+    KJ_ON_SCOPE_FAILURE(stmt = kj::mv(sqlCodeToPrepare));
+
     // We use the MULTI flag here in case this Statement was created by prepareMulti(). If multiple
     // statements are parsed, they'll be added to our `prelude`, and also executed immediately.
-    stmt = db.prepareSql(regulator, sqlCode, SQLITE_PREPARE_PERSISTENT, MULTI, prelude);
+    stmt = db.prepareSql(regulator, sqlCodeToPrepare, SQLITE_PREPARE_PERSISTENT, MULTI, prelude);
   }
 
   return KJ_ASSERT_NONNULL(stmt.tryGet<StatementAndEffect>());
@@ -2308,7 +2361,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
 #define WRAP_METHOD(errorCode, block)                                                              \
   auto& self KJ_UNUSED = *static_cast<const SqliteDatabase::Vfs*>(vfs->pAppData);                  \
   try block catch (kj::Exception& e) {                                                             \
-    KJ_LOG(ERROR, "SQLite VFS I/O error", e);                                                      \
+    reportVfsErrorCaught(kj::mv(e));                                                               \
     return errorCode;                                                                              \
   }
 

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "actor-call-retry.h"
 #include "basics.h"
 #include "blob.h"
 #include "form-data.h"
@@ -187,6 +188,12 @@ using AnySocketAddress = kj::OneOf<SocketAddress, kj::String>;
 //   renamed, though I haven't heard any great suggestions for what the name should be.
 class Fetcher: public JsRpcClientProvider {
  public:
+  // Called synchronously while constructing a WorkerInterface, after its outer dispatch span has
+  // been opened but before SubrequestMetadata is consumed. Returning kj::none preserves the
+  // factory's usual user span parent.
+  using MakeUserSpanParent =
+      kj::FunctionParam<kj::Maybe<SpanParent>(TraceContext& outerTraceContext)>;
+
   // Should we use a fake https base url if we lack a scheme+authority?
   enum class RequiresHostAndProtocol { YES, NO };
 
@@ -234,18 +241,45 @@ class Fetcher: public JsRpcClientProvider {
   //   is almost the same thing.
   class OutgoingFactory {
    public:
-    virtual kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
+    using MakeUserSpanParent = Fetcher::MakeUserSpanParent;
 
-    virtual bool supportsActorRetryMetadata() const {
-      return false;
+    struct Result {
+      kj::Own<WorkerInterface> client;
+      // Parents of the dispatch-site span (e.g. durable_object_subrequest) that the
+      // caller can use to nest an inner operation span underneath. SpanParent holds an
+      // owning refcount on the underlying SpanObserver, so these are independently
+      // valid regardless of `client`'s lifetime. kj::none if no span was created.
+      kj::Maybe<TraceContextParent> spanParents;
+    };
+    virtual Result newSingleUseClient(
+        kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) = 0;
+
+    // Whether this factory dispatches to a Durable Object, and whether that target can create fresh
+    // retry attempts. Actor calls are observed whether or not the target supports retries.
+    virtual kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const {
+      return kj::none;
     }
 
-    // Factories that can carry actor retry metadata override this method. The default rejects the
-    // metadata rather than silently starting a new logical call.
-    virtual kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(
-        kj::Maybe<kj::String> cfStr,
-        kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
-      KJ_FAIL_REQUIRE("actor retry metadata supplied to an unsupported Fetcher");
+    bool supportsActorCallRetries() const {
+      return getActorTargetRetryability().orDefault(ActorCallTargetRetryable::NO).toBool();
+    }
+
+    virtual void onActorCallRetry() {
+      KJ_FAIL_REQUIRE("actor call retry requested from an unsupported Fetcher");
+    }
+
+    // The retry policy configured on the binding this factory was minted from, if any. None means
+    // the runtime's default applies.
+    virtual kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() const {
+      return kj::none;
+    }
+
+    // Factories that support actor call retries override this method. The default rejects the
+    // attempt rather than silently starting a new logical call.
+    virtual Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
+        ActorCallRetryState::Attempt attempt,
+        MakeUserSpanParent makeUserSpanParent) {
+      KJ_FAIL_REQUIRE("actor call attempt supplied to an unsupported Fetcher");
     }
 
     // Get a `SubrequestChannel` representing this Fetcher. This is used especially when the
@@ -264,8 +298,10 @@ class Fetcher: public JsRpcClientProvider {
   // IoContext::getSubrequestNoChecks() internally.
   class CrossContextOutgoingFactory {
    public:
-    virtual kj::Own<WorkerInterface> newSingleUseClient(
-        IoContext& context, kj::Maybe<kj::String> cfStr) = 0;
+    using MakeUserSpanParent = Fetcher::MakeUserSpanParent;
+
+    virtual OutgoingFactory::Result newSingleUseClient(
+        IoContext& context, kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) = 0;
 
     virtual kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& context) {
       // TODO(soon): Update all implementations and remove this default implementation.
@@ -291,7 +327,7 @@ class Fetcher: public JsRpcClientProvider {
         requiresHost(requiresHost),
         isInHouse(isInHouse) {}
 
-  // Returns an `WorkerInterface` that is only valid for the lifetime of the current
+  // Returns a `WorkerInterface` that is only valid for the lifetime of the current
   // `IoContext`.
   kj::Own<WorkerInterface> getClient(
       IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
@@ -302,13 +338,25 @@ class Fetcher: public JsRpcClientProvider {
     kj::Maybe<TraceContext> traceContext;
   };
 
-  // Get client and optionally create trace context, all in one call
-  ClientWithTracing getClientWithTracing(IoContext& ioContext,
+  // Get client and optionally create trace context, all in one call.
+  //
+  [[nodiscard]] ClientWithTracing getClientWithTracing(
+      IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
+
+  [[nodiscard]] ClientWithTracing getClientForActorCallAttempt(IoContext& ioContext,
       kj::Maybe<kj::String> cfStr,
       kj::ConstString operationName,
-      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata);
+      ActorCallRetryState::Attempt attempt);
 
-  bool supportsActorRetryMetadata();
+  [[nodiscard]] ClientWithTracing getClientForActorCallAttempt(IoContext& ioContext,
+      kj::Maybe<kj::String> cfStr,
+      kj::ConstString operationName,
+      ActorCallRetryState::Attempt attempt,
+      MakeUserSpanParent makeUserSpanParent);
+
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() override;
+  kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() override;
+  void onActorCallRetry() override;
 
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);
@@ -401,8 +449,10 @@ class Fetcher: public JsRpcClientProvider {
     return getRpcMethod(js, kj::mv(name));
   }
 
-  rpc::JsRpcTarget::Client getClientForOneCall(
-      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+  ClientForOneCall getClientForOneCall(
+      jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;
+
+  kj::LiteralStringConst getRpcTargetKind() override;
 
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     // WARNING: New JSG_METHODs on Fetcher must be gated via compatibility flag to prevent
@@ -515,6 +565,19 @@ class Fetcher: public JsRpcClientProvider {
       rpc::SerializationTag tag,
       jsg::Deserializer& deserializer,
       RpcCompatGateBypassed rpcCompatGateBypassed);
+
+  [[nodiscard]] ClientWithTracing buildClient(
+      IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
+  [[nodiscard]] ClientWithTracing buildClient(IoContext& ioContext,
+      kj::Maybe<kj::String> cfStr,
+      kj::ConstString operationName,
+      MakeUserSpanParent makeUserSpanParent);
+
+  // Wraps an OutgoingFactory result, nesting an inner operation span under the factory's outer
+  // dispatch span when it created one. Factories that create no dispatch span
+  // (result.spanParents == kj::none) yield no inner span and no trace context.
+  [[nodiscard]] static ClientWithTracing wrapWithInnerSpan(
+      OutgoingFactory::Result result, kj::ConstString operationName);
 
   kj::OneOf<uint,
       IoOwn<IoChannelFactory::SubrequestChannel>,

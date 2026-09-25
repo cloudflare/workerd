@@ -1,11 +1,14 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/kj_test.bzl", "kj_test")
+load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
-load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_binary.bzl", "wd_rust_binary")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 # Flag that can be used to force-disable tcmalloc. Mainly used for ASAN builds.
 # TODO(cleanup): This feels ugly but I've exceeded my timebox for fighting Bazel for now.
@@ -61,24 +64,131 @@ wd_cc_embed(
     is_text = True,
 )
 
-wd_cc_binary(
+# The workerd binary. Its entry point is :workerd-cli; :cli-main is the C++ that drives the Server.
+wd_rust_binary(
     name = "workerd",
-    srcs = ["workerd.c++"],
+    srcs = ["workerd.rs"],
     malloc = ":malloc",
+    test = False,
+    tool = True,
     visibility = ["//visibility:public"],
+    deps = [":workerd-cli"],
+)
+
+# The command line (clap), config sources, --watch, and the compiled-binary format. Runs each
+# command through :cli-main.
+wd_rust_crate(
+    name = "workerd-cli",
+    srcs = glob(["cli/**/*.rs"]),
+    crate_root = "cli/lib.rs",
+    cxx_bridge_hdrs = [
+        "cli-main.h",
+        "config-compiler.h",
+    ],
+    cxx_bridge_src = "cli/bridge.rs",
+    link_deps = [
+        ":cli-main",
+        ":config-compiler",
+    ],
     deps = [
-        ":cpp-capnp-schema",
+        ":workerd_capnp_rust",
+        "//src/rust/cxx/kj-rs-io",
+        "@crates_vendor//:capnp",
+        "@crates_vendor//:clap",
+        "@crates_vendor//:tokio",
+    ] + select({
+        "@platforms//os:windows": ["@crates_vendor//:windows-sys"],
+        "//conditions:default": [
+            "@crates_vendor//:libc",
+            "@crates_vendor//:socket2",
+        ],
+    }),
+)
+
+# The C++ side of :workerd-cli that runs the server: sets up V8 and the Server and waits on the
+# event loop.
+wd_cc_library(
+    name = "cli-main",
+    srcs = ["cli-main.c++"],
+    linkstatic = CC_LIBRARY_LINKSTATIC,
+    deps = [
+        ":cli/bridge.rs@cxx",
         ":json-logger",
         ":server",
         ":v8-platform-impl",
-        ":workerd-capnp-schema",
         ":workerd_capnp",
         "//src/pyodide:pyodide_extra_capnp",
-        "//src/rust/cxx-integration",
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
         "//src/workerd/util:autogate",
         "//src/workerd/util:perfetto",
-        "@capnp-cpp//src/capnp:capnpc",
+        # :cli-main exists only for the workerd binary, so it links the binary's kj::setupAsyncIo().
+        "//src/workerd/util:setup-async-io",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
+    # The C++ root of the workerd binary is linked eagerly, as a cc_binary's own sources would be.
+    # Bazel places it ahead of everything it depends on, and from an eager object the linker
+    # resolves the rest of the C++ in that order. Left lazy, the Rust side's references would reach
+    # it only after every library had been registered, and the linker would then find the C++ by a
+    # depth-first walk of symbol references. That walk decides which copy of a template the binary
+    # keeps when two libraries carry different ones: V8 is built without exceptions, and its copy
+    # of libc++'s std::regex parser aborts where workerd's throws.
+    alwayslink = True,
+)
+
+# Compiles a config written as a Cap'n Proto schema file (capnp::SchemaParser over :schema-file)
+# into an encoded message, for :workerd-cli.
+wd_cc_library(
+    name = "config-compiler",
+    srcs = ["config-compiler.c++"],
+    linkstatic = CC_LIBRARY_LINKSTATIC,
+    deps = [
+        ":cli/bridge.rs@cxx",
+        ":schema-file",
+        ":workerd_capnp",
+        "//src/rust/cxx/kj-rs",
+        "@capnp-cpp//src/capnp:capnpc",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+# The capnp::SchemaFile implementations behind :config-compiler: files on disk with workerd's
+# import resolution, and the schemas built into the binary.
+wd_cc_library(
+    name = "schema-file",
+    srcs = ["schema-file.c++"],
+    hdrs = ["schema-file.h"],
+    deps = [
+        ":cpp-capnp-schema",
+        ":workerd-capnp-schema",
+        "@capnp-cpp//src/capnp:capnpc",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+# The link-time complement of build/rust_io_graph_check.sh: that query forbids dependency EDGES to
+# the kj OS I/O layer in the graph; this test inspects the symbols of the linked :workerd binary and
+# fails if kj's own setupAsyncIo()/OS provider made it in anyway (or the tokio shim did not). It
+# exists because a binary that silently links kj-async-os and lets kj's setupAsyncIo() win the
+# link passes every test that constructs its own event loop. Unix, unstripped only.
+sh_test(
+    name = "rust-io-link-check",
+    # One grep pass over the unstripped workerd binary: seconds locally, longer on CI runners.
+    size = "large",
+    srcs = ["//build/fixtures:rust_io_link_check.sh"],
+    # rlocationpath, not location: the binary is looked up under $TEST_SRCDIR so the check also
+    # works when workerd is built as an external repository (the internal build).
+    args = ["$(rlocationpath :workerd)"],
+    data = [":workerd"],
+    # Needs an unstripped binary: the ASAN lane strips (--strip=always), so it is excluded there
+    # by tag (test:asan filters -no-asan) rather than passing vacuously.
+    tags = ["no-asan"],
+    target_compatible_with = select({
+        # The script matches Itanium-mangled names; MSVC mangling is not covered.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )
 
 wd_cc_library(
@@ -94,7 +204,7 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/util:sqlite",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
     ],
 )
 
@@ -132,7 +242,7 @@ wd_cc_library(
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-tls",
     ],
@@ -149,6 +259,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
+        "@capnp-cpp//src/capnp:capnp-rpc",
     ],
 )
 
@@ -215,6 +326,10 @@ wd_cc_library(
     ],
 )
 
+# Calls kj::setupAsyncIo() (Server::run's own loop) but does not supply it: the BINARY picks the I/O backend by linking
+# //src/workerd/util:setup-async-io (the tokio backend; kj_test and wd_cc_benchmark do this for
+# every test binary) or @capnp-cpp//src/kj:kj-async (kj's own event loop). A binary that links
+# neither fails to link with an undefined kj::setupAsyncIo -- by design, never a silent choice.
 wd_cc_library(
     name = "server",
     srcs = [
@@ -244,6 +359,9 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:websocket-error-handler",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-tls",
     ],
@@ -289,11 +407,12 @@ wd_cc_library(
         "@ada-url",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
+# Calls kj::setupAsyncIo() but does not supply it; see :server.
 wd_cc_library(
     name = "fallback-service",
     srcs = [
@@ -306,7 +425,7 @@ wd_cc_library(
     deps = [
         ":workerd_capnp",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
@@ -373,7 +492,8 @@ kj_test(
         ":alarm-scheduler",
         "//src/workerd/util:sqlite",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -417,7 +537,6 @@ kj_test(
         ":workerd_capnp",
         "@capnp-cpp//src/capnp/compat:json",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
@@ -427,6 +546,7 @@ kj_test(
     deps = [
         ":json-logger",
         "@capnp-cpp//src/capnp/compat:json",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )

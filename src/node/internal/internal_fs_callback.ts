@@ -747,8 +747,8 @@ export function read<T extends NodeJS.ArrayBufferView>(
     // It's an options object
     const {
       buffer = Buffer.alloc(16384),
-      offset = buffer.byteOffset,
-      length = buffer.byteLength,
+      offset = 0,
+      length = buffer.byteLength - offset,
       position = null,
     } = bufferOptionsOrCallback;
     if (!isArrayBufferView(buffer)) {
@@ -790,7 +790,7 @@ export function read<T extends NodeJS.ArrayBufferView>(
     }
 
     actualLength = actualBuffer.byteLength;
-    actualOffset = actualBuffer.byteOffset;
+    actualOffset = 0;
 
     // Now we need to find the callback and other parameters
     if (typeof offsetOptionsOrCallback === 'function') {
@@ -802,8 +802,8 @@ export function read<T extends NodeJS.ArrayBufferView>(
     ) {
       // fs.read(fd, buffer, options, callback)
       const {
-        offset = actualOffset,
-        length = actualLength,
+        offset = 0,
+        length = actualBuffer.byteLength - offset,
         position = null,
       } = offsetOptionsOrCallback;
       validateUint32(offset, 'options.offset');
@@ -832,9 +832,10 @@ export function read<T extends NodeJS.ArrayBufferView>(
       if (typeof lengthOrCallback === 'function') {
         actualCallback = lengthOrCallback;
         actualPosition = null;
-        actualLength = actualBuffer.byteLength;
+        actualLength = actualBuffer.byteLength - actualOffset;
       } else {
-        actualLength = lengthOrCallback ?? actualBuffer.byteLength;
+        actualLength =
+          lengthOrCallback ?? actualBuffer.byteLength - actualOffset;
 
         validateUint32(position, 'position');
         actualPosition = position;
@@ -873,7 +874,8 @@ export function read<T extends NodeJS.ArrayBufferView>(
   if (
     actualOffset < 0 ||
     actualLength < 0 ||
-    actualOffset + actualLength > actualBuffer.byteLength
+    (actualLength !== 0 &&
+      actualOffset + actualLength > actualBuffer.byteLength)
   ) {
     throw new ERR_INVALID_ARG_VALUE(
       'offset',

@@ -1,6 +1,7 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
+  autogates = ["workerd-autogate-jsrpc-tracing"],
   services = [
     # Embedded tests we get traces from
     ( name = "http-test",

@@ -1,0 +1,33 @@
+using Workerd = import "/workerd/workerd.capnp";
+using CacheModules = import "cache-modules.capnp";
+
+# Cache API × streams against the C++ implementation. The cache backend
+# is a loopback worker that records each put (byte count, pattern
+# integrity, declared Content-Length); the MOCK binding lets tests read
+# the record back.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-cache-cpp",
+      worker = (
+        modules = CacheModules.modules,
+        cacheApiOutbound = "cache-backend",
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+        ],
+        bindings = [
+          ( name = "MOCK", service = "cache-backend" ),
+        ],
+      )
+    ),
+    ( name = "cache-backend",
+      worker = (
+        modules = [
+          (name = "backend", esModule = embed "cache-backend.js"),
+        ],
+      )
+    ),
+  ],
+);

@@ -124,10 +124,8 @@ kj::Array<kj::String> normalizeNamedExports(kj::Array<kj::String> namedExports) 
 // every isolate replica sharing the registry agrees on it, keeping the shared
 // compile cache consistent.
 struct EncodedSource {
-  kj::OneOf<kj::ArrayPtr<const char>,  // borrowed process-lifetime ASCII
-      kj::Arc<OwnedAscii>,             // owned ASCII or Latin-1
-      kj::Arc<OwnedUtf16>>             // owned UTF-16
-      repr;
+  // Borrowed process-lifetime ASCII or UTF-16, or owned ASCII/Latin-1 or UTF-16.
+  ExternalStringSource repr;
 };
 
 // Transcodes non-ASCII UTF-8 source into the one-byte or two-byte representation
@@ -179,7 +177,8 @@ EncodedSource encodeSource(kj::Arc<OwnedAscii>&& source) {
   return transcodeSource(sourcePtr);
 }
 
-using UnencodedSource = kj::OneOf<kj::ArrayPtr<const char>, kj::Arc<OwnedAscii>>;
+using UnencodedSource =
+    kj::OneOf<kj::ArrayPtr<const char>, StaticExternalStringSource, kj::Arc<OwnedAscii>>;
 
 // The implementation of Module for ESM.
 class EsModule final: public Module {
@@ -189,6 +188,12 @@ class EsModule final: public Module {
   explicit EsModule(Url id, Type type, Flags flags, kj::ArrayPtr<const char> source)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(source),
+        cachedData(kj::none) {
+    KJ_DASSERT(isEsm());
+  }
+  explicit EsModule(Url id, Type type, Flags flags, StaticExternalStringSource source)
+      : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
+        source(kj::mv(source)),
         cachedData(kj::none) {
     KJ_DASSERT(isEsm());
   }
@@ -259,24 +264,23 @@ class EsModule final: public Module {
           KJ_CASE_ONEOF(borrowed, kj::ArrayPtr<const char>) {
             return space.construct(encodeSource(kj::mv(borrowed)));
           }
+          KJ_CASE_ONEOF(encoded, StaticExternalStringSource) {
+            KJ_SWITCH_ONEOF(encoded) {
+              KJ_CASE_ONEOF(oneByte, kj::ArrayPtr<const char>) {
+                return space.construct(EncodedSource{.repr = kj::mv(oneByte)});
+              }
+              KJ_CASE_ONEOF(twoByte, kj::ArrayPtr<const uint16_t>) {
+                return space.construct(EncodedSource{.repr = kj::mv(twoByte)});
+              }
+            }
+          }
           KJ_CASE_ONEOF(owned, kj::Arc<OwnedAscii>) {
             return space.construct(encodeSource(kj::mv(owned)));
           }
         }
         KJ_UNREACHABLE;
       });
-      v8::Local<v8::String> contentStr;
-      KJ_SWITCH_ONEOF(encoded.repr) {
-        KJ_CASE_ONEOF(ascii, kj::ArrayPtr<const char>) {
-          contentStr = js.strExtern(ascii);
-        }
-        KJ_CASE_ONEOF(oneByte, kj::Arc<OwnedAscii>) {
-          contentStr = js.strExtern(oneByte.addRef());
-        }
-        KJ_CASE_ONEOF(utf16, kj::Arc<OwnedUtf16>) {
-          contentStr = js.strExtern(utf16.addRef());
-        }
-      }
+      auto contentStr = newExternalString(js, encoded.repr);
 
       // Note that the Source takes ownership of the CachedData pointer that we pass in.
       // (but not the actual buffer it holds). Do not use data after this point.
@@ -423,7 +427,7 @@ class SyntheticModule final: public Module {
   }
 
  private:
-  static v8::MaybeLocal<v8::Value> evaluationSteps(
+  static v8::MaybeLocal<v8::Promise> evaluationSteps(
       v8::Local<v8::Context> context, v8::Local<v8::Module> module);
 
   v8::MaybeLocal<v8::Value> actuallyEvaluate(
@@ -1269,13 +1273,16 @@ class IsolateModuleRegistry final {
   friend class SyntheticModule;
 };
 
-v8::MaybeLocal<v8::Value> SyntheticModule::evaluationSteps(
+v8::MaybeLocal<v8::Promise> SyntheticModule::evaluationSteps(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module) {
   auto& js = Lock::current();
   KJ_TRY {
     auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
     KJ_IF_SOME(found, registry.lookup(js, module)) {
-      return found.module.actuallyEvaluate(js, module, registry.getObserver());
+      auto result = found.module.actuallyEvaluate(js, module, registry.getObserver());
+      v8::Local<v8::Value> value;
+      if (!result.ToLocal(&value)) return {};
+      return value.As<v8::Promise>();
     }
     KJ_LOG(ERROR, "Synthetic module not found in registry for evaluation");
     js.v8Isolate->ThrowError(js.str("Requested module does not exist"_kj));
@@ -1823,6 +1830,49 @@ kj::HashSet<kj::StringPtr> toHashSet(kj::ArrayPtr<const kj::String> arr) {
 }  // namespace
 
 // ======================================================================================
+namespace {
+
+template <typename AddEsm>
+void addBuiltInBundleFromCapnp(ModuleBundle::BuiltinBuilder& builder,
+    Bundle::Reader bundle,
+    kj::Function<bool(workerd::jsg::Module::Reader)> filter,
+    AddEsm addEsm) {
+  auto typeFilter = ([&] {
+    switch (builder.type()) {
+      case Module::Type::BUILTIN:
+        return ModuleType::BUILTIN;
+      case Module::Type::BUILTIN_ONLY:
+        return ModuleType::INTERNAL;
+      case Module::Type::BUNDLE:
+      case Module::Type::FALLBACK:
+        break;
+    }
+    KJ_UNREACHABLE;
+  })();
+
+  for (auto module: bundle.getModules()) {
+    if (module.getType() != typeFilter || !filter(module)) continue;
+    auto id = KJ_ASSERT_NONNULL(Url::tryParse(module.getName()));
+    switch (module.which()) {
+      case workerd::jsg::Module::SRC:
+        addEsm(id, module);
+        continue;
+      case workerd::jsg::Module::WASM:
+        builder.addSynthetic(id, Module::newWasmModuleHandler(module.getWasm().asBytes()));
+        continue;
+      case workerd::jsg::Module::DATA:
+        builder.addSynthetic(id, Module::newDataModuleHandler(module.getData().asBytes()));
+        continue;
+      case workerd::jsg::Module::JSON:
+        builder.addSynthetic(id, Module::newJsonModuleHandler(module.getJson().asArray()));
+        continue;
+    }
+    KJ_UNREACHABLE;
+  }
+}
+
+}  // namespace
+
 kj::Own<ModuleBundle> ModuleBundle::newFallbackBundle(Builder::ResolveCallback callback) {
   return kj::heap<FallbackModuleBundle>(kj::mv(callback));
 }
@@ -1834,44 +1884,20 @@ void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder, Bundle::Re
 void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
     Bundle::Reader bundle,
     kj::Function<bool(workerd::jsg::Module::Reader)> filter) {
-  auto typeFilter = ([&] {
-    switch (builder.type()) {
-      case Module::Type::BUILTIN:
-        return ModuleType::BUILTIN;
-      case Module::Type::BUILTIN_ONLY:
-        return ModuleType::INTERNAL;
-      case Module::Type::BUNDLE:
-        break;
-      case Module::Type::FALLBACK:
-        break;
-    }
-    KJ_UNREACHABLE;
-  })();
+  addBuiltInBundleFromCapnp(
+      builder, bundle, kj::mv(filter), [&](const Url& id, workerd::jsg::Module::Reader module) {
+    builder.addEsm(id, module.getSrc().asChars());
+  });
+}
 
-  for (auto module: bundle.getModules()) {
-    if (module.getType() == typeFilter && filter(module)) {
-      auto id = KJ_ASSERT_NONNULL(Url::tryParse(module.getName()));
-      switch (module.which()) {
-        case workerd::jsg::Module::SRC: {
-          builder.addEsm(id, module.getSrc().asChars());
-          continue;
-        }
-        case workerd::jsg::Module::WASM: {
-          builder.addSynthetic(id, Module::newWasmModuleHandler(module.getWasm().asBytes()));
-          continue;
-        }
-        case workerd::jsg::Module::DATA: {
-          builder.addSynthetic(id, Module::newDataModuleHandler(module.getData().asBytes()));
-          continue;
-        }
-        case workerd::jsg::Module::JSON: {
-          builder.addSynthetic(id, Module::newJsonModuleHandler(module.getJson().asArray()));
-          continue;
-        }
-      }
-      KJ_UNREACHABLE;
-    }
-  }
+void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
+    Bundle::Reader bundle,
+    kj::Function<bool(workerd::jsg::Module::Reader)> filter,
+    kj::FunctionParam<StaticExternalStringSource(workerd::jsg::Module::Reader)> getSource) {
+  addBuiltInBundleFromCapnp(
+      builder, bundle, kj::mv(filter), [&](const Url& id, workerd::jsg::Module::Reader module) {
+    builder.addEsm(id, getSource(module));
+  });
 }
 
 ModuleBundle::ModuleBundle(Type type): type_(type) {}
@@ -2099,6 +2125,32 @@ ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
   ensureIsNotBundleSpecifier(id);
   Builder::add(id,
       [url = id.clone(), source, type = type()](const ResolveContext& context) mutable
+      -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source);
+    return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
+  });
+  return *this;
+}
+
+ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
+    const Url& id, kj::Arc<OwnedAscii> source) {
+  ensureIsNotBundleSpecifier(id);
+  Builder::add(id,
+      [url = id.clone(), source = kj::mv(source), type = type()](
+          const ResolveContext& context) mutable
+      -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, kj::mv(source));
+    return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
+  });
+  return *this;
+}
+
+ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
+    const Url& id, StaticExternalStringSource source) {
+  ensureIsNotBundleSpecifier(id);
+  Builder::add(id,
+      [url = id.clone(), source = kj::mv(source), type = type()](
+          const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
     kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source);
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
@@ -2424,6 +2476,10 @@ kj::Own<Module> Module::newEsm(Url id, Type type, kj::Arc<OwnedAscii> code, Flag
 
 kj::Own<Module> Module::newEsm(Url id, Type type, kj::ArrayPtr<const char> code) {
   return kj::heap<EsModule>(kj::mv(id), type, Flags::ESM, code);
+}
+
+kj::Own<Module> Module::newEsm(Url id, Type type, StaticExternalStringSource code) {
+  return kj::heap<EsModule>(kj::mv(id), type, Flags::ESM, kj::mv(code));
 }
 
 Module::ModuleNamespace::ModuleNamespace(

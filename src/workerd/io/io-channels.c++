@@ -8,7 +8,8 @@
 
 namespace workerd {
 
-IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(kj::Date createdAt) {
+IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(
+    kj::Date createdAt, ActorRetryGateEnabled retryGateEnabled) {
   static thread_local auto generator = [] {
     uint64_t seed;
     getEntropy(kj::asBytes(seed));
@@ -20,6 +21,7 @@ IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(kj
     .nonce = distribution(generator),
     .createdAt = createdAt,
     .isRetry = IsActorRetry::NO,
+    .retryGateEnabled = retryGateEnabled,
   };
 }
 
@@ -83,8 +85,10 @@ class PromisedTokenizableChannel: public ChannelType {
     KJ_IF_SOME(channel, inner) {
       return channel->getTokenMaybeSync(usage);
     } else {
-      return readyPromise.addBranch().then([this, usage]() -> kj::Promise<kj::Array<byte>> {
-        KJ_SWITCH_ONEOF(KJ_ASSERT_NONNULL(inner)->getTokenMaybeSync(usage)) {
+      return readyPromise.addBranch().then(
+          [self = this->addWeakToThis(), usage]() -> kj::Promise<kj::Array<byte>> {
+        auto& channel = self.assertLive();
+        KJ_SWITCH_ONEOF(KJ_ASSERT_NONNULL(channel.inner)->getTokenMaybeSync(usage)) {
           KJ_CASE_ONEOF(token, kj::Array<byte>) {
             return kj::mv(token);
           }
@@ -103,8 +107,9 @@ class PromisedTokenizableChannel: public ChannelType {
     KJ_IF_SOME(channel, inner) {
       return kj::addRef<IoChannelFactory::TokenizableChannel>(*channel);
     } else {
-      return readyPromise.addBranch().then([this]() mutable {
-        return kj::addRef<IoChannelFactory::TokenizableChannel>(*KJ_ASSERT_NONNULL(inner));
+      return readyPromise.addBranch().then([self = this->addWeakToThis()]() mutable {
+        auto& channel = self.assertLive();
+        return kj::addRef<IoChannelFactory::TokenizableChannel>(*KJ_ASSERT_NONNULL(channel.inner));
       });
     }
   }
@@ -164,8 +169,9 @@ class PromisedRpcChannel final: public PromisedTokenizableChannel<IoChannelFacto
       return channel->restore();
     } else {
       auto splitPromise = readyPromise.addBranch()
-                              .then([this]() {
-        auto innerRestore = KJ_ASSERT_NONNULL(inner)->restore();
+                              .then([self = addWeakToThis()]() {
+        auto& channel = self.assertLive();
+        auto innerRestore = KJ_ASSERT_NONNULL(channel.inner)->restore();
         return kj::tuple(kj::mv(innerRestore.cap), kj::mv(innerRestore.task));
       }).split();
       return {
@@ -184,9 +190,10 @@ resolveCap(kj::Own<Frankenvalue::CapTableEntry> cap) {
         return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
       }
       KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>) {
-        return promise.then([](kj::Own<IoChannelFactory::TokenizableChannel> channel) {
+        return promise
+            .then([](kj::Own<IoChannelFactory::TokenizableChannel> channel) {
           return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
-        });
+        }).attach(kj::mv(cap));
       }
     }
     KJ_UNREACHABLE;

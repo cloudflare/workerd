@@ -10,13 +10,7 @@ wd_cc_library(
         "//src/workerd/server:really_use_tcmalloc": ["WD_USE_TCMALLOC"],
         "//conditions:default": [],
     }),
-    # clang-tidy fails on this target when using clang-tidy-21 together with llvm-19 headers due to
-    # changes in how intrinsics are defined - disable clang-tidy here until we start using LLVM 21
-    # everywhere.
-    tags = [
-        "no-clang-tidy",
-        "workerd-benchmark",
-    ],
+    tags = ["workerd-benchmark"],
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj:kj-test",
@@ -29,6 +23,14 @@ wd_cc_library(
     }),
 )
 
+# Calls kj::setupAsyncIo(). The I/O backend is meant to be the BINARY's choice (kj_test and
+# wd_cc_benchmark link //src/workerd/util:setup-async-io into every test binary; libraries do not
+# carry it), but this one still does, so that binaries outside this repo which link the fixture
+# without naming a backend keep linking.
+# TODO(cleanup): drop the :setup-async-io dep here once every downstream binary that links
+# :test-fixture depends on //src/workerd/util:setup-async-io (or @capnp-cpp//src/kj:kj-async)
+# itself. Until then a downstream binary that also links kj-async-os gets two definitions of
+# kj::setupAsyncIo / kj::UnixEventPort and the linker keeps whichever archive it meets first.
 wd_cc_library(
     name = "test-fixture",
     srcs = ["test-fixture.c++"],
@@ -36,9 +38,13 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
+        "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
         "//src/workerd/server:workerd-api",
         "//src/workerd/util:autogate",
+        "//src/workerd/util:setup-async-io",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -70,6 +76,16 @@ wd_cc_benchmark(
     srcs = ["bench-kj-headers.c++"],
     deps = [
         "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+wd_cc_benchmark(
+    name = "bench-try-sync",
+    srcs = ["bench-try-sync.c++"],
+    deps = [
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
     ],
 )
 

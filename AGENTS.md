@@ -28,7 +28,9 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 
 - `just build` or `just b` - Build the project
 - `just test` or `just t` - Run all tests
-- `just format` or `just f` - Format code (uses clang-format + Python formatter)
+- `just format` or `just f` - Format all code (uses clang-format + Python formatter)
+- `just format <path>...` - Format specific files
+- `just format-head` - Format files changed since `HEAD~`
 - `just clippy <package>` - Run Rust clippy linter (e.g., `just clippy jsg-macros`)
 - `just clang-tidy <target>` - Run clang-tidy on C++ code (e.g., `just clang-tidy //src/rust/jsg:ffi`)
 - `just stream-test <target>` - Stream test output for debugging
@@ -189,6 +191,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Config schema          | `src/workerd/server/workerd.capnp`                            | Cap'n Proto; capability-based security                                                                       |
 | Worker lifecycle       | `src/workerd/io/worker.{h,c++}`                               | Isolate, Script, Worker, Actor classes                                                                       |
 | Request lifecycle      | `src/workerd/io/io-context.{h,c++}`                           | IoContext: the per-request god object                                                                        |
+| Coroutine cancellation | `docs/reference/detail/async-patterns.md`                     | `CURRENT_INVOCATION` with `KJ_DEFER`; `KJ_ON_SCOPE_FAILURE` is exception-only                                |
 | Durable Object storage | `src/workerd/io/actor-cache.{h,c++}` + `actor-sqlite.{h,c++}` | LRU cache over RPC / SQLite-backed                                                                           |
 | Streams implementation | `src/workerd/api/streams/`                                    | Has 842-line README; dual internal/standard impl                                                             |
 | Bazel build rules      | `build/`                                                      | Custom `wd_*` macros; `wd_test.bzl` generates 3 test variants                                                |
@@ -201,7 +204,9 @@ This project generally follows the [KJ Style Guide](https://github.com/capnproto
 
 - **C++ standard**: C++23 (`-std=c++23`)
 - **C++ file extensions**: `.c++` / `.h` (not `.cpp`); test suffix `-test` (hyphenated)
-- **Formatting**: `just format` runs clang-format + prettier + ruff + buildifier + rustfmt
+- **Formatting**: `just format` runs clang-format + prettier + ruff + buildifier + rustfmt;
+  use `just format <path>...` for specific files or `just format-head` for files changed since
+  `HEAD~`
 - **Pre-commit hook**: Blocks `KJ_DBG` in staged code; runs format check
 - **Commit discipline**: Split PRs into small commits; each must compile + pass tests; no fixup commits
 - **TypeScript**: Strict mode, `exactOptionalPropertyTypes`, private `#` syntax enforced, explicit return types
@@ -239,6 +244,10 @@ KJ library provides several constructs that should be preferred to improve the s
 
 - `kj::ArrayPtr<T>` should be used instead of `T*`
 - `kj::Ptr<T>` should be used instead of `T&` when it is bound by T's lifetime
+
+Declare data owners before views into that data (members, lambda captures, locals), so views are
+constructed after and destroyed before the memory they reference. When an owner can be released
+while the object lives on, clear the view at the same time.
 
 ### Error Handling
 
@@ -288,6 +297,16 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 
 - Strong backwards compatibility commitment - features cannot be removed or changed once deployed
 - We use compatibility-date.capnp to introduce feature flags when we need to change the behavior
+- Review additions to the standard API surface exposed to Workers, including
+  those introduced by V8 updates. Record the compatibility decision in the
+  commit message: use a compatibility flag or explicitly accept the risk.
+- Autogates support gradual rollout and fast rollback, but do not preserve
+  existing Workers' API surface. Compatibility failures may be invisible to
+  runtime metrics or reported late by customers, so a quiet rollout alone
+  does not establish safety.
+- When changing V8 flags in `src/workerd/jsg/setup.c++`, deleting a flag does
+  not disable a feature V8 enables by default; negate the flag instead (for
+  example, `--nojs-float16array`), unless V8 has removed it.
 
 ## Development Workflow
 
@@ -313,6 +332,8 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 See [docs/v8-updates.md](docs/v8-updates.md) for instructions on updating the V8 engine version used by workerd. These steps include syncing the V8 source, applying workerd patches, rebasing onto the new version, regenerating patches, and updating dependency versions in Bazel files.
 
 When updating V8, ensure that all tests pass. Look for new deprecations when building and flag those for users if necessary.
+
+V8 updates can enable globals through changed defaults; apply the [compatibility rules](#backward-compatibility).
 
 If asked to help with a V8 update, ask for the specific target V8 version to update to and ask clarifying questions about any specific patches or customizations that need to be preserved before proceeding. Merge conflicts are common during V8 updates, so be prepared to resolve those carefully. These almost always require human judgment to ensure that workerd-specific changes are preserved while still applying the upstream V8 changes correctly. Do not attempt to resolve merge conflicts automatically without human review.
 

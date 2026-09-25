@@ -43,6 +43,15 @@ class MemoryInputStream final: public kj::AsyncInputStream {
     return toRead;
   }
 
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    // All of the data is in memory, so every read can complete synchronously.
+    size_t toRead = kj::min(data.size(), buffer.size());
+    if (toRead == 0) return toRead;
+    buffer.write(data.first(toRead));
+    data = data.slice(toRead);
+    return toRead;
+  }
+
   kj::Maybe<uint64_t> tryGetLength() override {
     return data.size();
   }
@@ -54,7 +63,10 @@ class MemoryInputStream final: public kj::AsyncInputStream {
     if (toRead == 0) {
       co_return toRead;
     }
-    co_await output.write(data.first(toRead));
+    auto ptr = data.first(toRead);
+    if (!output.tryWriteSync(ptr)) {
+      co_await output.write(ptr);
+    }
     data = data.slice(toRead);
     co_return toRead;
   }
@@ -94,6 +106,13 @@ class NeuterableInputStreamImpl final: public NeuterableInputStream {
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     return canceler.wrap(getStream().tryRead(buffer, minBytes, maxBytes));
+  }
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    KJ_IF_SOME(stream, inner.tryGet<kj::AsyncInputStream*>()) {
+      return stream->tryReadSync(buffer, minBytes);
+    }
+    // Neutered; let the async path surface the exception.
+    return kj::none;
   }
   kj::Maybe<uint64_t> tryGetLength() override {
     return getStream().tryGetLength();
@@ -137,6 +156,13 @@ class NeuterableIoStreamImpl final: public NeuterableIoStream {
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     return canceler.wrap(getStream().tryRead(buffer, minBytes, maxBytes));
   }
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    KJ_IF_SOME(stream, inner.tryGet<kj::AsyncIoStream*>()) {
+      return stream->tryReadSync(buffer, minBytes);
+    }
+    // Neutered; let the async path surface the exception.
+    return kj::none;
+  }
   kj::Maybe<uint64_t> tryGetLength() override {
     return getStream().tryGetLength();
   }
@@ -151,6 +177,20 @@ class NeuterableIoStreamImpl final: public NeuterableIoStream {
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
     return canceler.wrap(getStream().write(pieces));
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::byte> buffer) override {
+    KJ_IF_SOME(stream, inner.tryGet<kj::AsyncIoStream*>()) {
+      return stream->tryWriteSync(buffer);
+    }
+    // Neutered; let the async path surface the exception.
+    return false;
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    KJ_IF_SOME(stream, inner.tryGet<kj::AsyncIoStream*>()) {
+      return stream->tryWriteSync(pieces);
+    }
+    // Neutered; let the async path surface the exception.
+    return false;
   }
   kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
       kj::AsyncInputStream& input, uint64_t amount) override {

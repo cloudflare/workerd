@@ -100,6 +100,7 @@ class LoopbackServiceStub: public Fetcher {
           | undefined = undefined
       > = T extends new (...args: any[]) => Rpc.WorkerEntrypointBranded ? LoopbackServiceStub<InstanceType<T>>
         : T extends new (...args: any[]) => Rpc.DurableObjectBranded ? LoopbackDurableObjectClass<InstanceType<T>>
+        : T extends new (...args: any[]) => CloudflareWorkersModule.WorkflowEntrypoint<any, infer Params> ? Workflow<Params>
         : T extends ExportedHandler<any, any, any> ? LoopbackServiceStub<undefined>
         : undefined;
     );
@@ -161,11 +162,15 @@ class LoopbackDurableObjectNamespace: public DurableObjectNamespace {
   // `persistent` bit.
   LoopbackDurableObjectNamespace(uint nsChannel,
       kj::Own<ActorIdFactory> idFactory,
+      ActorCallRetriesAllowed actorCallRetriesAllowed,
       jsg::Ref<LoopbackDurableObjectClass> loopbackClass,
-      CompatibilityFlags::Reader featureFlags)
+      CompatibilityFlags::Reader featureFlags,
+      kj::Maybe<UserDefinedRetryPolicy> userDefinedRetryPolicy)
       : DurableObjectNamespace(nsChannel,
             kj::mv(idFactory),
-            Persistent(featureFlags.getAllowIrrevocableStubStorage())),
+            actorCallRetriesAllowed,
+            Persistent(featureFlags.getAllowIrrevocableStubStorage()),
+            userDefinedRetryPolicy),
         loopbackClass(kj::mv(loopbackClass)) {}
 
   // getClass() accessor for use from C++ only.

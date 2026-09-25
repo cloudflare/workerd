@@ -102,7 +102,7 @@ class CryptoKeyUsageSet {
     return (superset & *this) == *this;
   }
 
-  inline bool operator==(CryptoKeyUsageSet other) const {
+  inline bool operator==(const CryptoKeyUsageSet other) const {
     return set == other.set;
   }
 
@@ -120,7 +120,7 @@ class CryptoKeyUsageSet {
   static CryptoKeyUsageSet byName(kj::StringPtr name);
 
   // All singletons, in the order defined by the spec (encrypt, decrypt, sign, verify, ...).
-  static kj::ArrayPtr<const CryptoKeyUsageSet> singletons();
+  static kj::StaticArrayPtr<const CryptoKeyUsageSet> singletons();
 
   enum class Context { generate, importSecret, importPublic, importPrivate };
 

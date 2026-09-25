@@ -7,7 +7,10 @@
 #include "dom-exception.h"
 #include "setup.h"
 
+#include <workerd/util/sentry.h>
+
 #include <v8-proxy.h>
+#include <v8-value-serializer-version.h>
 
 namespace workerd::jsg {
 namespace {
@@ -172,6 +175,14 @@ v8::Maybe<uint32_t> Serializer::GetSharedArrayBufferId(
   return v8::Just(n);
 }
 
+void* Serializer::ReallocateBufferMemory(void* oldBuffer, size_t size, size_t* actualSize) {
+  auto result = v8::ValueSerializer::Delegate::ReallocateBufferMemory(oldBuffer, size, actualSize);
+  if (result != nullptr) {
+    dataCapacity = *actualSize;
+  }
+  return result;
+}
+
 void Serializer::throwDataCloneErrorForObject(jsg::Lock& js, v8::Local<v8::Object> obj) {
   // The default error that V8 would generate is "#<TypeName> could not be cloned." -- for some
   // reason, it surrounds the type name in "#<>", which seems bizarre? Let's generate a better
@@ -312,14 +323,11 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
         object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
             static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
 
-    // HACK: Although we don't technically know yet that `wrappable` is an `Object`, we know that
-    //   only subclasses of `Object` register serializers. So *if* a serializer is found, then this
-    //   cast is valid, and the pointer won't be accessed otherwise. We can't do a dynamic_cast
-    //   here since `Wrappable` is privately inherited by `Object` and anyway we don't want the
-    //   overhead of dynamic_cast.
-    // TODO(cleanup): Probably `Wrappable` should contain a bool indicating if it is an `Object`
-    //   or not?
-    Object* obj = reinterpret_cast<jsg::Object*>(wrappable);
+    // Only subclasses of `Object` register serializers, so anything else is not serializable.
+    Object* obj = wrappable->jsgTryGetObject();
+    if (obj == nullptr) {
+      throwDataCloneErrorForObject(js, object);
+    }
 
     if (!IsolateBase::from(isolate).serialize(
             Lock::from(isolate), typeid(*wrappable), *obj, *this)) {
@@ -363,6 +371,7 @@ Serializer::Released Serializer::release() {
   auto pair = ser.Release();
   return Released{
     .data = kj::Array(pair.first, pair.second, jsg::SERIALIZED_BUFFER_DISPOSER),
+    .dataCapacity = dataCapacity,
     .sharedArrayBuffers = sharedBackingStores.releaseAsArray(),
     .transferredArrayBuffers = backingStores.releaseAsArray(),
   };
@@ -442,7 +451,7 @@ Deserializer::Deserializer(Lock& js,
 #ifdef KJ_DEBUG
   kj::requireOnStack(this, "jsg::Deserializer must be allocated on the stack");
 #endif
-  init(js, kj::mv(transferredArrayBuffers), kj::mv(maybeOptions));
+  init(js, data, kj::mv(transferredArrayBuffers), kj::mv(maybeOptions));
 }
 
 Deserializer::Deserializer(
@@ -454,12 +463,31 @@ Deserializer::Deserializer(
           kj::mv(maybeOptions)) {}
 
 void Deserializer::init(Lock& js,
+    kj::ArrayPtr<const kj::byte> data,
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers,
     kj::Maybe<Options> maybeOptions) {
   auto options = kj::mv(maybeOptions).orDefault({});
   externalHandler = options.externalHandler;
   if (options.readHeader) {
-    check(deser.ReadHeader(js.v8Context()));
+    JSG_TRY(js) {
+      check(deser.ReadHeader(js.v8Context()));
+    }
+    JSG_CATCH(exception) {
+      (void)exception;
+      // Only report header metadata, never bytes from the serialized value. V8 leaves the wire
+      // version at zero if the header is absent or its version could not be decoded.
+      auto header = data.size() == 0 ? "empty" : data[0] == 0xff ? "present" : "missing";
+      auto message = kj::str(
+          "Unable to deserialize cloned data due to invalid or unsupported version. [context=",
+          options.diagnosticContext.orDefault("unknown"), "; bytes=", data.size(),
+          "; header=", header, "; wireVersion=", deser.GetWireFormatVersion(),
+          "; maxWireVersion=", v8::CurrentValueSerializerFormatVersion(),
+          "; v8=", v8::V8::GetVersion(), "]");
+      LOG_WARNING_PERIODICALLY(message, kj::getStackTrace());
+      // Header failures are internal faults. Suppress duplicate reporting when this exception
+      // crosses a JavaScript or RPC boundary; the periodic warning above carries the diagnostic.
+      kj::throwFatalException(KJ_EXCEPTION(FAILED, "worker_do_not_log", message));
+    }
   }
   preserveStackInErrors = options.preserveStackInErrors;
   KJ_IF_SOME(version, options.version) {

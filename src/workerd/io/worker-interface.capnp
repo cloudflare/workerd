@@ -16,6 +16,7 @@ using import "/workerd/io/outcome.capnp".EventOutcome;
 using import "/workerd/io/script-version.capnp".ScriptVersion;
 using import "/workerd/io/trace.capnp".TagValue;
 using import "/workerd/io/trace.capnp".UserSpanData;
+using import "/workerd/io/trace.capnp".SpanStatus;
 using import "/workerd/io/frankenvalue.capnp".Frankenvalue;
 
 # A 128-bit trace ID used to identify traces.
@@ -125,6 +126,11 @@ struct Trace @0x8e8d911203762d34 {
     name @1 :Text;
     message @2 :Text;
     stack @3 :Text;
+    code :union {
+      none @4 :Void;
+      text @5 :Text;
+      number @6 :Float64;
+    }
   }
 
   outcome @2 :EventOutcome;
@@ -307,6 +313,14 @@ struct Trace @0x8e8d911203762d34 {
     outcome @0 :EventOutcome;
   }
 
+  struct SpanUpdate {
+    # Updates mutable span properties over the span's lifetime.
+    info :union {
+      name @0 :Text;
+      status @1 :SpanStatus;
+    }
+  }
+
   struct Onset {
     # The Onset and Outcome event types are special forms of SpanOpen and
     # SpanClose that explicitly mark the start and end of the root span.
@@ -351,8 +365,8 @@ struct Trace @0x8e8d911203762d34 {
     # A streaming tail worker receives a series of Tail Events. Tail events always occur within an
     # InvocationSpanContext. The first TailEvent delivered to a streaming tail session is always an
     # Onset. The final TailEvent delivered is always an Outcome. Between those can be any number of
-    # SpanOpen, SpanClose, and Mark events. Every SpanOpen *must* be associated with a SpanClose
-    # unless the stream was abruptly terminated.
+    # SpanOpen, SpanUpdate, SpanClose, and Mark events. Every SpanOpen *must* be associated with a
+    # SpanClose unless the stream was abruptly terminated.
     # Inherited spanContext for this event.
     spanContext @0: SpanContext;
     # invocation id of the currently invoked worker stage.
@@ -373,6 +387,7 @@ struct Trace @0x8e8d911203762d34 {
       exception @11 :Exception;
       log @12 :Log;
       streamDiagnostics @13 :StreamDiagnosticsEvent;
+      spanUpdate @14 :SpanUpdate;
     }
   }
 }
@@ -622,6 +637,10 @@ struct JsValue {
           unknown @5 :Void;
           known @6 :UInt64;
         }
+
+        canceler @21 :StreamCanceler;
+        # Hosted by the stream's origin. The receiver calls it when its copy of the stream is
+        # canceled or released before reaching EOF. Null when the sender does not support it.
       }
 
       obsolete7 @7 :Void;
@@ -744,6 +763,20 @@ interface AbortTrigger $Cxx.allowCancellation {
   # be triggered. Otherwise, the cloned signal will treat a dropped cabability as an abort.
 }
 
+interface StreamCanceler $Cxx.allowCancellation {
+  # Accompanies a `readableStream` external (see `JsValue.External.readableStream.canceler`). The
+  # bytes of a transferred ReadableStream flow from the origin to the receiver over a `ByteStream`,
+  # which gives the receiver no way to tell the origin that it stopped reading: the origin only
+  # finds out when its next write fails, and a source that is waiting for more data never writes.
+  # This interface is the return channel. The origin hosts it; the receiver calls it when its copy
+  # of the stream is canceled or released before reaching EOF, and the origin then cancels its
+  # underlying source. Dropping the capability without calling cancel() carries no meaning.
+
+  cancel @0 (reason :JsValue);
+  # `reason` is the value the receiver's copy of the stream was canceled with, serialized, when the
+  # receiver can supply one. An empty `reason` means the stream was released without one.
+}
+
 interface JsRpcTarget extends(JsValue.ExternalPusher) $Cxx.allowCancellation {
   # Target on which RPC methods may be invoked.
   #
@@ -808,6 +841,14 @@ interface JsRpcTarget extends(JsValue.ExternalPusher) $Cxx.allowCancellation {
       # ExternalPusher object which will push into the caller's isolate. Use this to push externals
       # that will be included in the results.
     }
+
+    callerSpanContext @6 :SpanContext;
+    # Identity of the caller's per-call `jsRpcCall` span. The callee records this as a link on its
+    # own per-call span. This is needed because a single session carries many calls (e.g. calls
+    # pipelined on a returned stub or promise), while the context propagated when the session was
+    # opened identifies only the first call.
+    #
+    # Absent when the caller is not being traced.
   }
 
   struct CallResults {
@@ -863,6 +904,14 @@ interface TailStreamTarget $Cxx.allowCancellation {
 
   report @0 TailStreamParams -> TailStreamResults;
   # Report one or more streaming tail events to a tail worker.
+}
+
+interface DatagramStream $Cxx.allowCancellation {
+  send @0 (datagram :Data) -> stream;
+  # Sends one datagram. Each call preserves a message boundary.
+
+  end @1 ();
+  # Signals that no more datagrams will be sent and reports errors from previous send() calls.
 }
 
 interface EventDispatcher @0xf20697475ec1752d {
@@ -954,6 +1003,12 @@ interface EventDispatcher @0xf20697475ec1752d {
   # a way for dynamic workers to actually send their code back to the requesting machine, to be
   # instantiated there -- or maybe some mechanism for running "remote facets". For now, though,
   # we punt and simply don't support it.)
+
+  udpConnect @14 (host :Text, down :DatagramStream)
+      -> (up :DatagramStream, result :EventOutcome) $Cxx.allowCancellation;
+  # Opens a UDP flow. `up` carries datagrams received from the peer toward the Worker, while `down`
+  # carries datagrams sent by the Worker back toward the peer. The call remains pending until the
+  # Worker's connect() handler completes.
 
   # Other methods might be added to handle other kinds of events, e.g. TCP connections, or maybe
   # even native Cap'n Proto RPC eventually.

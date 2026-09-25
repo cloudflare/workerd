@@ -81,10 +81,11 @@ class MockSubrequestChannel: public IoChannelFactory::SubrequestChannel {
     KJ_IF_SOME(p, readyPromise) {
       auto promise = kj::mv(p);
       readyPromise = kj::none;
-      return promise.then([&h, usage, this]() mutable -> kj::Array<byte> {
-        return expectSync(h.encodeSubrequestChannelToken(usage, triplet.serviceName,
-            triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }), triplet.props,
-            persistent));
+      return promise.then([&h, usage, self = addWeakToThis()]() mutable -> kj::Array<byte> {
+        auto& channel = self.assertLive();
+        return expectSync(h.encodeSubrequestChannelToken(usage, channel.triplet.serviceName,
+            channel.triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }),
+            channel.triplet.props, channel.persistent));
       });
     } else {
       return expectSync(h.encodeSubrequestChannelToken(usage, triplet.serviceName,
@@ -123,10 +124,11 @@ class MockActorClassChannel: public IoChannelFactory::ActorClassChannel {
     KJ_IF_SOME(p, readyPromise) {
       auto promise = kj::mv(p);
       readyPromise = kj::none;
-      return promise.then([&h, usage, this]() mutable -> kj::Array<byte> {
-        return expectSync(h.encodeActorClassChannelToken(usage, triplet.serviceName,
-            triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }), triplet.props,
-            persistent));
+      return promise.then([&h, usage, self = addWeakToThis()]() mutable -> kj::Array<byte> {
+        auto& channel = self.assertLive();
+        return expectSync(h.encodeActorClassChannelToken(usage, channel.triplet.serviceName,
+            channel.triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }),
+            channel.triplet.props, channel.persistent));
       });
     } else {
       return expectSync(h.encodeActorClassChannelToken(usage, triplet.serviceName,
@@ -179,14 +181,29 @@ class MockActorChannel: public IoChannelFactory::ActorChannel {
     KJ_IF_SOME(p, readyPromise) {
       auto promise = kj::mv(p);
       readyPromise = kj::none;
-      return promise.then([&h, usage, this]() mutable -> kj::Array<byte> {
-        return h.encodeActorChannelToken(usage, namespaceKey, id,
-            name.map([](kj::String& s) -> kj::StringPtr { return s; }), persistent);
+      return promise.then([&h, usage, self = addWeakToThis()]() mutable -> kj::Array<byte> {
+        auto& channel = self.assertLive();
+        return h.encodeActorChannelToken(usage, channel.namespaceKey, channel.id,
+            channel.name.map([](kj::String& s) -> kj::StringPtr { return s; }), channel.persistent);
       });
     } else {
       return h.encodeActorChannelToken(usage, namespaceKey, id,
           name.map([](kj::String& s) -> kj::StringPtr { return s; }), persistent);
     }
+  }
+};
+
+class MockWorkerStubChannel final: public WorkerStubChannel {
+ public:
+  kj::Own<IoChannelFactory::SubrequestChannel> getEntrypointResolved(
+      kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) override {
+    return kj::refcounted<MockSubrequestChannel>(
+        ServiceTriplet("outer", kj::none, kj::mv(props)), Persistent::NO);
+  }
+
+  kj::Own<IoChannelFactory::ActorClassChannel> getActorClassResolved(
+      kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) override {
+    KJ_UNREACHABLE;
   }
 };
 
@@ -518,6 +535,31 @@ KJ_TEST("channel token with nested channel that generates token asynchronously")
   KJ_EXPECT(nestedActor.triplet ==
       ServiceTriplet("async-actor", "AsyncEntry"_kj,
           Frankenvalue::fromJson(kj::str("{\"inner\": \"async\"}"))));
+}
+
+KJ_TEST("resolving channel props keeps promised caps alive") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto paf = kj::newPromiseAndFulfiller<kj::Own<IoChannelFactory::SubrequestChannel>>();
+  kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> caps;
+  caps.add(newPromisedChannel<IoChannelFactory::SubrequestChannel>(kj::mv(paf.promise)));
+
+  auto worker = kj::refcounted<MockWorkerStubChannel>();
+  auto channel = worker->getEntrypoint(kj::none, propsWithCaps(kj::mv(caps)), kj::none);
+  auto resolutionResult = channel->getResolved();
+  auto resolution =
+      KJ_ASSERT_NONNULL(kj::mv(resolutionResult)
+                            .tryGet<kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>>());
+
+  paf.fulfiller->fulfill(kj::refcounted<MockSubrequestChannel>(
+      ServiceTriplet("nested", kj::none, Frankenvalue()), Persistent::NO));
+
+  auto resolved = resolution.wait(waitScope).downcast<MockSubrequestChannel>();
+  auto capTable = resolved->triplet.props.getCapTable();
+  KJ_ASSERT(capTable.size() == 1);
+  auto& nested = KJ_ASSERT_NONNULL(kj::tryDowncast<MockSubrequestChannel>(*capTable[0]));
+  KJ_EXPECT(nested.triplet.serviceName == "nested");
 }
 
 }  // namespace

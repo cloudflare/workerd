@@ -49,7 +49,7 @@ import {
   isWritableStream,
   handleKnownInternalErrors,
 } from 'node-internal:streams_util';
-import { finished, eos, nop } from 'node-internal:streams_end_of_stream';
+import { eos, nop } from 'node-internal:streams_end_of_stream';
 import { addAbortSignal } from 'node-internal:streams_add_abort_signal';
 import {
   getHighWaterMark,
@@ -1253,6 +1253,15 @@ Writable.prototype[Symbol.asyncDispose] = async function () {
  * @param {Writable} streamWritable
  * @returns {WritableStream}
  */
+// The web streams each node writable has been adapted to (one per
+// Writable.toWeb() over it), kept alive by the node writable. The C++
+// streams implementation's controller does not keep its stream alive; the
+// node side — which its own pending I/O keeps alive — holds only the
+// controller, so a full GC could collect the web stream, its writer and
+// whatever awaits them (a writer.closed or write() that then never
+// settles). The entries live exactly as long as the node writable does.
+const adaptedWritableStreams = new WeakMap();
+
 export function newWritableStreamFromStreamWritable(streamWritable) {
   // Not using the internal/streams/utils isWritableNodeStream utility
   // here because it will return false if streamWritable is a Duplex
@@ -1290,7 +1299,44 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
     if (backpressurePromise !== undefined) backpressurePromise.resolve();
   }
 
-  const cleanup = finished(streamWritable, (error) => {
+  // The web stream is constructed before the writable is touched: its
+  // constructor rejects an invalid high-water mark, and a throw there must
+  // leave the writable as it was, without this adapter's listeners on it.
+  const stream = new globalThis.WritableStream(
+    {
+      start(c) {
+        controller = c;
+      },
+
+      write(chunk) {
+        if (streamWritable.writableNeedDrain || !streamWritable.write(chunk)) {
+          backpressurePromise = Promise.withResolvers();
+          return backpressurePromise.promise.finally(() => {
+            backpressurePromise = undefined;
+          });
+        }
+      },
+
+      abort(reason) {
+        destroyImpl.destroyer(streamWritable, reason);
+      },
+
+      close() {
+        // The node side completes on its own terms — a _final() may still
+        // be running when the caller ended it directly — so close() settles
+        // with its finish or its error (the eos callback below), ending it
+        // only if the caller has not.
+        closed = Promise.withResolvers();
+        if (!isWritableEnded(streamWritable)) {
+          streamWritable.end();
+        }
+        return closed.promise;
+      },
+    },
+    strategy
+  );
+
+  const cleanup = eos(streamWritable, (error) => {
     error = handleKnownInternalErrors(error);
 
     cleanup();
@@ -1322,38 +1368,13 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
 
   streamWritable.on('drain', onDrain);
 
-  return new globalThis.WritableStream(
-    {
-      start(c) {
-        controller = c;
-      },
-
-      write(chunk) {
-        if (streamWritable.writableNeedDrain || !streamWritable.write(chunk)) {
-          backpressurePromise = Promise.withResolvers();
-          return backpressurePromise.promise.finally(() => {
-            backpressurePromise = undefined;
-          });
-        }
-      },
-
-      abort(reason) {
-        destroy(streamWritable, reason);
-      },
-
-      close() {
-        if (closed === undefined && !isWritableEnded(streamWritable)) {
-          closed = Promise.withResolvers();
-          streamWritable.end();
-          return closed.promise;
-        }
-
-        controller = undefined;
-        return Promise.resolve();
-      },
-    },
-    strategy
-  );
+  let adapted = adaptedWritableStreams.get(streamWritable);
+  if (adapted === undefined) {
+    adapted = new Set();
+    adaptedWritableStreams.set(streamWritable, adapted);
+  }
+  adapted.add(stream);
+  return stream;
 }
 
 /**
@@ -1400,22 +1421,23 @@ export function newStreamWritableFromWritableStream(
 
     writev(chunks, callback) {
       function done(error) {
-        error = error.filter((e) => e);
         try {
-          callback(error.length === 0 ? undefined : error);
+          callback(error);
         } catch (error) {
           // In a next tick because this is happening within
           // a promise context, and if there are any errors
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          nextTick(() => destroy(writable, error));
+          nextTick(() => destroyImpl.destroyer(writable, error));
         }
       }
 
+      // Promise.all rejects with the first failed write's error; its
+      // fulfillment value (the per-chunk results) is not one.
       writer.ready.then(() => {
-        return Promise.all(chunks.map((data) => writer.write(data))).then(
-          done,
+        return Promise.all(chunks.map((data) => writer.write(data.chunk))).then(
+          () => done(),
           done
         );
       }, done);
@@ -1441,7 +1463,7 @@ export function newStreamWritableFromWritableStream(
         try {
           callback(error);
         } catch (error) {
-          destroy(writable, error);
+          destroyImpl.destroyer(writable, error);
         }
       }
 
@@ -1488,7 +1510,7 @@ export function newStreamWritableFromWritableStream(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          nextTick(() => destroy(writable, error));
+          nextTick(() => destroyImpl.destroyer(writable, error));
         }
       }
 
@@ -1498,21 +1520,33 @@ export function newStreamWritableFromWritableStream(
     },
   });
 
-  writer.closed.then(
-    () => {
-      // If the WritableStream closes before the stream.Writable has been
-      // ended, we signal an error on the stream.Writable.
-      closed = true;
-      if (!isWritableEnded(writable))
-        destroy(writable, new ERR_STREAM_PREMATURE_CLOSE());
-    },
-    (error) => {
-      // If the WritableStream errors before the stream.Writable has been
-      // destroyed, signal an error on the stream.Writable.
-      closed = true;
-      destroy(writable, error);
-    }
-  );
+  try {
+    writer.closed.then(
+      () => {
+        // If the WritableStream closes before the stream.Writable has been
+        // ended, we signal an error on the stream.Writable.
+        closed = true;
+        if (!isWritableEnded(writable))
+          destroyImpl.destroyer(writable, new ERR_STREAM_PREMATURE_CLOSE());
+      },
+      (error) => {
+        // If the WritableStream errors before the stream.Writable has been
+        // destroyed, signal an error on the stream.Writable.
+        closed = true;
+        destroyImpl.destroyer(writable, error);
+      }
+    );
+  } catch (err) {
+    // As in Readable.fromWeb: a throwing then must not leave the stream
+    // locked, and the Writable nobody will have is destroyed quietly first
+    // (the web stream, marked closed here, is neither aborted nor closed),
+    // so that the release rejecting the writer's closed promise has nothing
+    // left to destroy.
+    closed = true;
+    writable.destroy();
+    writer.releaseLock();
+    throw err;
+  }
 
   return writable;
 }

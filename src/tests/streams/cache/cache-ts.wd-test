@@ -1,0 +1,35 @@
+using Workerd = import "/workerd/workerd.capnp";
+using CacheModules = import "cache-modules.capnp";
+
+# The SAME modules against the TypeScript implementation: put() must
+# drain TS-implemented bodies through the cache serialization path (the
+# bulk-drain conduit's production consumer).
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-cache-ts",
+      worker = (
+        modules = CacheModules.modules,
+        cacheApiOutbound = "cache-backend",
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "experimental",
+        ],
+        bindings = [
+          ( name = "MOCK", service = "cache-backend" ),
+        ],
+      )
+    ),
+    ( name = "cache-backend",
+      worker = (
+        modules = [
+          (name = "backend", esModule = embed "cache-backend.js"),
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

@@ -1,0 +1,37 @@
+load(":sanitizer_toolchain.bzl", "sanitizer_rust_toolchain")
+
+exports_files(["build_std.sh"])
+
+# One toolchain per sanitizer and supported host. `--config=asan` and `--config=tsan` /
+# `--config=tsan-macos` (.bazelrc) list all of a sanitizer's toolchains in --extra_toolchains;
+# toolchain resolution picks the one matching the host.
+
+sanitizer_rust_toolchain(
+    name = "asan_toolchain_linux_aarch64",
+    host = "linux_aarch64",
+    sanitizer = "address",
+)
+
+sanitizer_rust_toolchain(
+    name = "asan_toolchain_linux_x86_64",
+    host = "linux_x86_64",
+    sanitizer = "address",
+)
+
+sanitizer_rust_toolchain(
+    name = "asan_toolchain_macos_aarch64",
+    host = "macos_aarch64",
+    sanitizer = "address",
+)
+
+sanitizer_rust_toolchain(
+    name = "tsan_toolchain_linux_x86_64",
+    host = "linux_x86_64",
+    sanitizer = "thread",
+)
+
+sanitizer_rust_toolchain(
+    name = "tsan_toolchain_macos_aarch64",
+    host = "macos_aarch64",
+    sanitizer = "thread",
+)

@@ -86,12 +86,21 @@ namespace workerd::util {
   V(HIBERNATABLE_WEBSOCKET_REFACTOR)                                                               \
   /* When enabled, turns on per-isolate TypeScript/JavaScript bootstrap */                         \
   V(PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)                                                              \
-  /* Gate for the Durable Object fetch-retries feature, scoped to DO `fetch()`. Enables           \
+  /* Gate for the Durable Object fetch-retries feature, scoped to DO `fetch()`. Enables            \
     observe-only retry-token claim machinery. */                                                   \
   V(DURABLE_OBJECT_RETRIES_FETCH)                                                                  \
-  /* Enables Durable Object fetch retry requests and fail-closed receiver enforcement. The        \
-     observe-only DURABLE_OBJECT_RETRIES_FETCH gate is a prerequisite. */                          \
+  /* Enables Durable Object fetch retry requests. Enabled senders require receiver-side claim     \
+     enforcement on each request. The observe-only DURABLE_OBJECT_RETRIES_FETCH gate is a         \
+     prerequisite. */                                                                              \
   V(DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS)                                                   \
+  /* Extends observe-only retry-token claiming to Durable Object JSRPC calls: senders attach       \
+     tokens and receivers claim them. Requires DURABLE_OBJECT_RETRIES_FETCH. */                    \
+  V(DURABLE_OBJECT_RETRIES_JSRPC)                                                                  \
+  /* Enables Durable Object JSRPC retry requests. Requires both fetch retry gates and the JSRPC   \
+     observe gate. */                                                                               \
+  V(DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS)                                                   \
+  /* Enables user-configured Durable Object retry policy and @retryable dispatch behavior. */      \
+  V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
   /* When enabled, the native `node-internal:url` module is provided by the Rust                   \
      implementation (api::node UrlUtil ported to src/rust/api) instead of the                      \
      C++ implementation. The C++ implementation is retained for rollback.*/                        \
@@ -116,10 +125,35 @@ namespace workerd::util {
      existed; the typescript_implemented_streams compat flag requires this gate to receive         \
      streams over RPC (that combination is rejected, not degraded). */                             \
   V(RPC_EXTERNALS_HYDRATION)                                                                       \
-  /* Back compression streams with memory-safe Rust implementations instead of the native C      \
-     libraries. Currently covers zlib (zlib-rs) for node:zlib and web CompressionStream; the     \
-     native implementations remain the default. */                                               \
-  V(COMPRESSION_RS)
+  /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust            \
+     implementation, instead of chromium zlib. The unprefixed zlib symbols are owned by the        \
+     routing layer in util/zlib-router.c++, so this covers every consumer: node:zlib, web          \
+     CompressionStream, crypto crc32, kj-gzip/http (fetch and WebSocket compression), and V8's     \
+     compression utils. Chromium zlib remains the default. */                                      \
+  V(COMPRESSION_RS)                                                                                \
+  /* Enables per-call JSRPC tracing, trace-context propagation, and related Fetcher spans. */      \
+  V(JSRPC_TRACING)                                                                                 \
+  /* Selects the redesigned memory cache implementation. The legacy implementation remains         \
+     available for rollback while this gate is rolled out. */                                      \
+  V(MEMORY_CACHE_V2)                                                                               \
+  /* Enable the JS-observable synchronous tryReadSync/tryWriteSync fast paths: the stream          \
+     controllers' read/write paths (reader.read() / writer.write() promises settle without an      \
+     event-loop round trip) and readAll()'s read loop. The C++ pump loops stay ungated: pumpTo()   \
+     never enters JavaScript and byte-budgets its un-yielded work, while pumpToImpl() still        \
+     suspends through the event loop on every iteration (only the write suspension is elided),     \
+     leaving the JS-visible pull() ordering unchanged. */                                          \
+  V(STREAM_CONTROLLER_SYNC_FAST_PATHS)                                                             \
+  /* When a native WritableStream sent over JS RPC is dropped or revoked without a clean end(),   \
+     abort its underlying sink so that anything connected to it (e.g. the readable half of an      \
+     IdentityTransformStream) errors instead of hanging. When disabled, the sink is dropped        \
+     without abort. */                                                                             \
+  V(JSRPC_WRITABLE_DROP_ABORTS_SINK)                                                               \
+  /* Propagate cancellation of a ReadableStream sent over JS RPC back to its origin: the sender    \
+     attaches a StreamCanceler capability, the receiver calls it when its copy of the stream is    \
+     canceled or released before EOF, and the origin's pump cancels the source (running its       \
+     cancel algorithm with the receiver's reason). When disabled, neither side participates and    \
+     the origin learns of the loss only when its next write fails. */                             \
+  V(JSRPC_READABLE_CANCEL_PROPAGATION)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
@@ -145,13 +179,13 @@ constexpr size_t autogateToIndex(AutogateKey key) {
 // Returns all AutogateKey values (excluding NumOfKeys) as an iterable range:
 //
 //     for (AutogateKey key: getAutogateKeys()) { ... }
-constexpr kj::ArrayPtr<const AutogateKey> getAutogateKeys() {
+constexpr kj::StaticArrayPtr<const AutogateKey> getAutogateKeys() {
   static constexpr AutogateKey keys[] = {
 #define V(key) AutogateKey::key,
     WORKERD_AUTOGATES(V)
 #undef V
   };
-  return keys;
+  return {keys, kj::size(keys)};
 }
 static_assert(getAutogateKeys().size() == autogateToIndex(AutogateKey::NumOfKeys));
 

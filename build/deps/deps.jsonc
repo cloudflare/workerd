@@ -5,8 +5,6 @@
       "name": "ada-url",
       "type": "bazel_dep"
     },
-    // BoringSSL is more likely to break than other dependencies, because our downstream build uses
-    // a custom-built version of BoringSSL in FIPS mode.
     {
       "name": "boringssl",
       "type": "github_release",
@@ -14,7 +12,6 @@
       "owner": "google",
       "repo": "boringssl",
       "repo_name": "ssl",
-      "freeze_version": "0.20251002.0",
       "patches": [
         "//:patches/boringssl/0001-Expose-libdecrepit-so-NodeJS-can-use-it-for-ncrypto.patch"
       ]
@@ -47,7 +44,7 @@
       "url": "https://chromium.googlesource.com/chromium/deps/icu.git",
       "branch": "main",
       "build_file": "@v8//:bazel/BUILD.icu",
-      "freeze_commit": "d578f2e8b7bd5938e21cfb6bf15c079e0aa5b738",
+      "freeze_commit": "8cc91d9b6ab9991802fd208ee03a69714fd0251c",
       "patch_cmds": [
         "find source -name BUILD.bazel | xargs rm"
       ],
@@ -117,7 +114,7 @@
       "use_bazel_dep": true,
       "owner": "google",
       "repo": "perfetto",
-      "freeze_version": "v56.1",
+      "freeze_version": "v58.2",
       "patches": [
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
         "//:patches/perfetto/0002-disable-info-level-logging-re2.patch"

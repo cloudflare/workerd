@@ -57,6 +57,7 @@ declare const primordials: {
   readonly SymbolAsyncIterator: typeof Symbol.asyncIterator;
   readonly SymbolToStringTag: typeof Symbol.toStringTag;
   readonly SymbolDispose: typeof Symbol.dispose;
+  readonly SymbolFor: typeof Symbol.for;
 
   // uncurryThis accepts Function (the typeof-narrowed type) in addition to
   // properly typed callables, so callers don't need to cast after a
@@ -75,17 +76,38 @@ declare const utils: {
   isArrayBuffer(value: unknown): value is ArrayBuffer;
   isArrayBufferView(value: unknown): value is ArrayBufferView;
   isDataView(value: unknown): value is DataView;
-  isPromise(value: unknown): value is Promise;
+  isPromise(value: unknown): value is Promise<unknown>;
   isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer;
   isUint8Array(value: unknown): value is Uint8Array;
   isAnyArrayBuffer(value: unknown): value is ArrayBuffer | SharedArrayBuffer;
-  markPromiseHandled(promise: Promise): void;
+  markPromiseHandled(promise: Promise<unknown>): void;
   getApiSymbol(name: string): symbol;
   // The C++ compression codec factory (api/compression.h:
   // newCompressionCodecCallback), consumed by webstreams/compression.
   newCompressionCodec(mode: string, format: string): unknown;
   createDigestContext(algorithm: string, toWellFormed: boolean): DigestContext;
+  // The C++ write-context factory (api/filesystem-bootstrap.h), consumed by
+  // webfs/writable-file-stream. Throws the DOMException that createWritable
+  // reports for an unopenable file.
+  createFileSystemWriteContext(
+    fileHandle: object,
+    keepExistingData: boolean
+  ): FileSystemWriteContext;
+  // The DOM's "add an abort algorithm" (api/abort-bootstrap.h): `algorithm`
+  // runs when `signal` aborts, before the 'abort' event, and never for a
+  // synthetic 'abort' event. Consumed by the webstreams pipe.
+  addAbortAlgorithm(
+    signal: AbortSignal,
+    algorithm: () => void
+  ): AbortAlgorithmHandle;
 };
+
+// An abort algorithm registration. Obtained only from
+// utils.addAbortAlgorithm(); it has no JS-reachable constructor.
+declare interface AbortAlgorithmHandle {
+  // Unregisters the algorithm. Idempotent.
+  remove(): void;
+}
 
 // Native incremental digest, backing the TypeScript DigestStream. Obtained only
 // from utils.createDigestContext(); it has no JS-reachable constructor.
@@ -108,4 +130,35 @@ declare interface DigestContext {
   flush(): number;
   // Finalizes the digest. Throws if called more than once.
   digest(): ArrayBuffer;
+}
+
+// Native transactional write state, backing the TypeScript
+// FileSystemWritableFileStream. Obtained only from
+// utils.createFileSystemWriteContext(); it has no JS-reachable constructor.
+//
+// Writes land in a temporary file and the VFS lock is held from creation until
+// commit() or discard(), so a context that is created must be finished. Every
+// method resolves synchronously -- nothing here waits on I/O -- but they return
+// promises because that is what the sink algorithms consume.
+//
+// Strings are passed through rather than encoded on this side: the file system
+// writes them as WTF-8, which TextEncoder cannot produce. See
+// FileSystemWriteContextHandle in src/workerd/api/filesystem.h.
+declare interface FileSystemWriteContext {
+  // Accepts a Blob, a BufferSource, a string, or a {type, data, position, size}
+  // params object. Rejects with a TypeError once the context is finished, and
+  // with a DOMException if the underlying write fails.
+  write(
+    data: Blob | ArrayBuffer | ArrayBufferView | string | object
+  ): Promise<void>;
+  // Moves the cursor, growing the file with zero bytes when past the end.
+  seek(position: number): Promise<void>;
+  // Resizes the file, clamping the cursor to the new size when it shrinks.
+  truncate(size: number): Promise<void>;
+  // Replaces the original file's contents with the temporary's and releases the
+  // lock. The sink's close algorithm.
+  commit(): Promise<void>;
+  // Drops the written data, leaving the original intact, and releases the lock.
+  // The sink's abort algorithm. Idempotent.
+  discard(): void;
 }

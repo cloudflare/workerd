@@ -69,11 +69,13 @@ void normalizePort(kj::Url& url) {
   KJ_IF_SOME(colon, url.host.findFirst(':')) {
     if (url.host.size() == colon + 1) {
       // Remove trailing ':'.
-      url.host = kj::str(url.host.first(colon));
+      auto host = kj::str(url.host.first(colon));
+      url.host = kj::mv(host);
     } else KJ_IF_SOME(defaultPort, defaultPortForScheme(url.scheme)) {
       if (defaultPort == url.host.slice(colon + 1)) {
         // Remove scheme-default port.
-        url.host = kj::str(url.host.first(colon));
+        auto host = kj::str(url.host.first(colon));
+        url.host = kj::mv(host);
       }
     }
   }
@@ -239,7 +241,8 @@ kj::String URL::getProtocol() {
 }
 void URL::setProtocol(kj::String value) {
   KJ_IF_SOME(colon, value.findFirst(':')) {
-    value = kj::str(value.first(colon));
+    auto scheme = kj::str(value.first(colon));
+    value = kj::mv(scheme);
   }
 
   auto copy = url->clone();

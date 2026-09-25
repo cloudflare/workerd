@@ -85,7 +85,7 @@ jsg::Promise<jsg::Value> restoreCurrentEntrypoint(jsg::Lock& js,
         auto client = stub->getClient();
         stub->dispose();
         auto restored = js.alloc<JsRpcStub>(
-            ioctx.addObject(kj::heap(kj::mv(client))), ioctx.addObject(kj::mv(channel)));
+            ioctx.addObject(kj::heap(kj::mv(client))), ioctx.addObject(kj::mv(channel)), kj::none);
         return jsg::Value(js.v8Isolate, rpcStubHandler.wrap(js, kj::mv(restored)));
       }
     }

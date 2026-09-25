@@ -57,7 +57,39 @@ constexpr kj::StringPtr SNAPSHOT_VOLUME_PREFIX = "workerd-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_CLONE_VOLUME_PREFIX = "workerd-snap-clone-"_kj;
 constexpr kj::StringPtr CONTAINER_SNAPSHOT_IMAGE_PREFIX = "workerd-container-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_VOLUME_CREATED_AT_LABEL = "dev.workerd.snapshot-created-at"_kj;
-constexpr size_t MAX_SNAPSHOT_IMAGE_ANCESTRY_DEPTH = 128;
+
+struct ContainerImageAlias {
+  kj::StringPtr alias;
+  kj::StringPtr image;
+};
+
+constexpr ContainerImageAlias CONTAINER_IMAGE_ALIASES[] = {{
+  .alias = "cloudflare/debian-trixie"_kj,
+  .image = "docker.io/library/node:24.20.0-trixie-slim@"
+           "sha256:a747ad80c8a161b650d79a6da9c422005b91148b18b8d2c669eb5a0b7c07e600"_kj,
+}};
+
+kj::Maybe<kj::StringPtr> tryResolveContainerImage(kj::StringPtr image) {
+  for (const auto& entry: CONTAINER_IMAGE_ALIASES) {
+    if (entry.alias == image) {
+      return entry.image;
+    }
+  }
+  return kj::none;
+}
+
+kj::StringPtr resolveContainerImage(kj::StringPtr image) {
+  return tryResolveContainerImage(image).orDefault(image);
+}
+
+kj::StringPtr getContainerImageAlias(kj::StringPtr image) {
+  for (const auto& entry: CONTAINER_IMAGE_ALIASES) {
+    if (entry.image == image) {
+      return entry.alias;
+    }
+  }
+  return image;
+}
 
 constexpr auto SNAPSHOT_STALE_AGE = 30 * kj::DAYS;
 
@@ -157,6 +189,26 @@ class BufferedAsyncIoStream final: public kj::AsyncIoStream {
     co_return copied + read;
   }
 
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    KJ_REQUIRE(minBytes <= buffer.size());
+
+    auto bufferedRemaining = buffered.size() - bufferedOffset;
+    if (bufferedRemaining > 0) {
+      if (bufferedRemaining < minBytes) {
+        // We cannot atomically combine the remaining buffered data with a read from the inner
+        // stream: if the inner stream declined afterwards, we'd have already consumed the
+        // buffered bytes. Fall back to the async path.
+        return kj::none;
+      }
+      auto toCopy = kj::min(buffer.size(), bufferedRemaining);
+      buffer.write(buffered.asPtr().slice(bufferedOffset, bufferedOffset + toCopy));
+      bufferedOffset += toCopy;
+      return toCopy;
+    }
+
+    return inner->tryReadSync(buffer, minBytes);
+  }
+
   kj::Maybe<uint64_t> tryGetLength() override {
     KJ_IF_SOME(innerLength, inner->tryGetLength()) {
       return innerLength + (buffered.size() - bufferedOffset);
@@ -186,6 +238,12 @@ class BufferedAsyncIoStream final: public kj::AsyncIoStream {
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
     return inner->write(pieces);
+  }
+  bool tryWriteSync(kj::ArrayPtr<const byte> buffer) override {
+    return inner->tryWriteSync(buffer);
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    return inner->tryWriteSync(pieces);
   }
   kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
       kj::AsyncInputStream& input, uint64_t amount = kj::maxValue) override {
@@ -950,6 +1008,32 @@ kj::String killTokenPidFile(kj::StringPtr killToken) {
   return kj::str("/tmp/.workerd-exec-", killToken, ".pid");
 }
 
+kj::Promise<void> ensureSystemImageAvailable(
+    kj::Network& network, kj::StringPtr dockerPath, kj::StringPtr requestedImage) {
+  KJ_IF_SOME(image, tryResolveContainerImage(requestedImage)) {
+    auto inspectEndpoint = kj::str("/images/", kj::encodeUriComponent(image), "/json");
+    auto inspectResponse = co_await dockerApiRequest(
+        network, kj::str(dockerPath), kj::HttpMethod::GET, kj::str(inspectEndpoint));
+    if (inspectResponse.statusCode == 200) {
+      co_return;
+    }
+    JSG_REQUIRE(inspectResponse.statusCode == 404, Error, "Failed to inspect system image '",
+        requestedImage, "': [", inspectResponse.statusCode, "] ", inspectResponse.body);
+
+    auto pullResponse = co_await dockerApiRequest(network, kj::str(dockerPath),
+        kj::HttpMethod::POST, kj::str("/images/create?fromImage=", kj::encodeUriComponent(image)));
+    JSG_REQUIRE(pullResponse.statusCode == 200, Error, "Failed to pull system image '",
+        requestedImage, "': [", pullResponse.statusCode, "] ", pullResponse.body);
+
+    auto pulledImage = co_await dockerApiRequest(
+        network, kj::str(dockerPath), kj::HttpMethod::GET, kj::mv(inspectEndpoint));
+    JSG_REQUIRE(pulledImage.statusCode == 200, Error, "Failed to pull system image '",
+        requestedImage, "': Docker did not make the image available: [", pulledImage.statusCode,
+        "] ", pulledImage.body, ". Pull response: ", pullResponse.body);
+  }
+  co_return;
+}
+
 }  // namespace
 
 void configureContainerPrivileges(
@@ -1008,7 +1092,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::Network& network,
     kj::String dockerPath,
     kj::String containerName,
-    kj::String imageName,
+    kj::Maybe<kj::String> imageName,
     kj::String containerEgressInterceptorImage,
     kj::TaskSet& waitUntilTasks,
     kj::Promise<void> pendingCleanup,
@@ -1038,27 +1122,35 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
 }
 
 ContainerClient::~ContainerClient() noexcept(false) {
+  shutdown();
+}
+
+void ContainerClient::shutdown() {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+
   stopEgressListener();
 
-  // Best-effort cleanup for both containers.
-  auto sidecarCleanup =
-      removeContainer(network, kj::str(dockerPath), kj::str(sidecarContainerName), false)
-          .catch_([](kj::Exception&&) {});
-
-  // Also try to delete any cloned snapshot volumes.
+  // Remove the application before deleting its cloned volumes and network-namespace sidecar.
+  // Waiting for each removal ensures shutdown does not report completion while Docker is still
+  // tearing down the sidecar.
   auto volumes = snapshotClones.releaseAsArray();
-  auto mainCleanup = removeContainer(network, kj::str(dockerPath), kj::str(containerName))
-                         .catch_([](kj::Exception&&) {})
-                         .then([&network = network, dockerPath = kj::str(dockerPath),
-                                   volumes = kj::mv(volumes)]() mutable {
+  auto cleanup = removeContainer(network, kj::str(dockerPath), kj::str(containerName))
+                     .catch_([](kj::Exception&&) {})
+                     .then([&network = network, dockerPath = kj::str(dockerPath),
+                               volumes = kj::mv(volumes)]() mutable {
     return deleteVolumes(network, kj::mv(dockerPath), kj::mv(volumes));
+  })
+                     .catch_([](kj::Exception&&) {})
+                     .then([&network = network, dockerPath = kj::str(dockerPath),
+                               sidecarContainerName = kj::str(sidecarContainerName)]() mutable {
+    return removeContainer(network, kj::mv(dockerPath), kj::mv(sidecarContainerName));
   }).catch_([](kj::Exception&&) {});
 
-  // Pass the joined cleanup promise to the callback. The callback wraps it with the
-  // canceler (so a future client creation can cancel it), stores it so the next
-  // ContainerClient can await it, and adds a branch to waitUntilTasks to keep the
-  // underlying I/O alive.
-  cleanupCallback(kj::joinPromises(kj::arr(kj::mv(sidecarCleanup), kj::mv(mainCleanup))));
+  // Pass the cleanup promise to the callback. The callback wraps it with the canceler (so a
+  // future client creation can cancel it), stores it so the next ContainerClient can await it,
+  // and adds a branch to waitUntilTasks to keep the underlying I/O alive.
+  cleanupCallback(kj::mv(cleanup));
 }
 
 // Docker-specific Port implementation that implements rpc::Container::Port::Server
@@ -1665,7 +1757,7 @@ kj::Promise<kj::Maybe<ContainerClient::InspectResponse>> ContainerClient::inspec
 
   kj::String image;
   if (jsonRoot.hasConfig() && jsonRoot.getConfig().hasImage()) {
-    image = kj::str(jsonRoot.getConfig().getImage());
+    image = kj::str(getContainerImageAlias(jsonRoot.getConfig().getImage()));
   }
 
   co_return InspectResponse{
@@ -1774,7 +1866,7 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
-  jsonRoot.setImage(effectiveImage);
+  jsonRoot.setImage(resolveContainerImage(effectiveImage));
   // Add entrypoint if provided
   KJ_IF_SOME(ep, entrypoint) {
     auto jsonCmd = jsonRoot.initCmd(ep.size());
@@ -1835,6 +1927,7 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
   }
   configureContainerPrivileges(hostConfig, privileges);
 
+  co_await ensureSystemImageAvailable(network, dockerPath, effectiveImage);
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
 
@@ -2195,8 +2288,7 @@ kj::Promise<void> ContainerClient::commitContainer(kj::StringPtr imageRef) {
       "': ", response.statusCode, " ", response.body);
 }
 
-kj::Promise<ContainerClient::ImageInspectResponse> ContainerClient::inspectImage(
-    kj::StringPtr imageRef) {
+kj::Promise<uint64_t> ContainerClient::inspectImageSize(kj::StringPtr imageRef) {
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
       kj::str("/images/", kj::encodeUriComponent(imageRef), "/json"));
   JSG_REQUIRE(response.statusCode == 200, Error, "Failed to inspect Docker image '", imageRef,
@@ -2204,7 +2296,7 @@ kj::Promise<ContainerClient::ImageInspectResponse> ContainerClient::inspectImage
 
   auto message = decodeJsonResponse<docker_api::Docker::ImageInspectResponse>(response.body);
   auto root = message->getRoot<docker_api::Docker::ImageInspectResponse>();
-  co_return ImageInspectResponse{kj::str(root.getId()), root.getSize(), kj::str(root.getParent())};
+  co_return root.getSize();
 }
 
 kj::Promise<void> ContainerClient::deleteImage(kj::String imageRef) {
@@ -2220,7 +2312,9 @@ kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
-  jsonRoot.setImage(imageName);
+  // This helper only provides filesystem access to snapshot volumes, so it uses the infrastructure
+  // sidecar image.
+  jsonRoot.setImage(containerEgressInterceptorImage);
 
   auto hostConfig = jsonRoot.initHostConfig();
   auto binds = hostConfig.initBinds(1);
@@ -2421,6 +2515,34 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
     environment = params.getEnvironmentVariables();
   }
 
+  kj::String snapshotImageRef;
+  kj::Maybe<kj::StringPtr> effectiveImage =
+      imageName.map([](kj::String& image) -> kj::StringPtr { return image; });
+  auto source = params.getSource();
+  switch (source.which()) {
+    case rpc::Container::StartParams::Source::IMAGE:
+      JSG_REQUIRE(
+          source.getImage().size() > 0, Error, "Container image reference cannot be empty.");
+      effectiveImage = source.getImage();
+      break;
+    case rpc::Container::StartParams::Source::CONTAINER_SNAPSHOT_ID: {
+      if (!source.hasContainerSnapshotId()) break;
+
+      auto snapshotRef = source.getContainerSnapshotId();
+      JSG_REQUIRE(snapshotRef.size() > 0, Error, "Container snapshot ID cannot be empty.");
+
+      auto snapshotId = parseSnapshotId(snapshotRef);
+      snapshotImageRef = kj::str(CONTAINER_SNAPSHOT_IMAGE_PREFIX, snapshotId);
+      // Snapshot existence is validated before sidecar and directory-volume setup.
+      co_await inspectImageSize(snapshotImageRef);
+      effectiveImage = snapshotImageRef;
+      break;
+    }
+  }
+
+  auto image = JSG_REQUIRE_NONNULL(
+      effectiveImage, Error, "Container.start() requires an image or container snapshot.");
+
   internetEnabled = params.getEnableInternet();
 
   labels.clear();
@@ -2429,33 +2551,6 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
     labels.reserve(lbls.size());
     for (auto i: kj::zeroTo(lbls.size())) {
       labels.insert(kj::str(lbls[i].getName()), kj::str(lbls[i].getValue()));
-    }
-  }
-
-  kj::String snapshotImageRef;
-  kj::StringPtr effectiveImage = imageName;
-  auto source = params.getSource();
-  switch (source.which()) {
-    case rpc::Container::StartParams::Source::IMAGE:
-      effectiveImage = source.getImage();
-      break;
-    case rpc::Container::StartParams::Source::CONTAINER_SNAPSHOT_ID: {
-      if (!source.hasContainerSnapshotId()) break;
-
-      auto selectedImage = co_await inspectImage(effectiveImage);
-      auto snapshotId = parseSnapshotId(source.getContainerSnapshotId());
-      snapshotImageRef = kj::str(CONTAINER_SNAPSHOT_IMAGE_PREFIX, snapshotId);
-      auto snapshotImage = co_await inspectImage(snapshotImageRef);
-      for (size_t depth = 0;
-           snapshotImage.id != selectedImage.id && snapshotImage.parent.size() > 0; ++depth) {
-        JSG_REQUIRE(depth < MAX_SNAPSHOT_IMAGE_ANCESTRY_DEPTH, Error,
-            "Container snapshot image ancestry is too deep");
-        snapshotImage = co_await inspectImage(snapshotImage.parent);
-      }
-      JSG_REQUIRE(snapshotImage.id == selectedImage.id, Error,
-          "Container snapshot does not match the requested image");
-      effectiveImage = snapshotImageRef;
-      break;
     }
   }
 
@@ -2508,7 +2603,7 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   }
 
   caCertInjected.store(false, std::memory_order_release);
-  co_await createContainer(effectiveImage, entrypoint, environment, restoreMounts.asPtr(), params);
+  co_await createContainer(image, entrypoint, environment, restoreMounts.asPtr(), params);
 
   for (auto& mapping: egressState->mappings) {
     if (mapping.protocol == EgressProtocol::HTTPS) {
@@ -2771,11 +2866,11 @@ kj::Promise<void> ContainerClient::snapshotContainer(SnapshotContainerContext co
   co_await commitContainer(imageRef);
   imageCommitted = true;
 
-  auto image = co_await inspectImage(imageRef);
+  auto imageSize = co_await inspectImageSize(imageRef);
 
   auto result = context.getResults().initSnapshot();
   result.setId(snapshotId);
-  result.setSize(image.size);
+  result.setSize(imageSize);
   if (params.hasName() && params.getName().size() > 0) {
     result.setName(params.getName());
   }
@@ -2908,11 +3003,15 @@ kj::Promise<void> ContainerClient::ensureSidecarStarted() {
     co_return;
   }
 
+  bool succeeded = false;
+  KJ_DEFER(if (!succeeded) {
+    containerSidecarStarted.store(false, std::memory_order_release);
+    sidecarIngressHostPort = kj::none;
+  });
+
   // We need to call destroy here, it's mandatory that this is a fresh sidecar
   // start. Maybe we lost track of it on a previous workerd restart.
   co_await destroySidecarContainer();
-
-  KJ_ON_SCOPE_FAILURE(containerSidecarStarted.store(false, std::memory_order_release));
 
   auto ipamConfig = co_await getDockerBridgeIPAMConfig();
   co_await createSidecarContainer(egressListenerPort, kj::mv(ipamConfig.subnet));
@@ -2942,6 +3041,7 @@ kj::Promise<void> ContainerClient::ensureSidecarStarted() {
   }
 
   co_await readCACert();
+  succeeded = true;
 }
 
 kj::Promise<void> ContainerClient::ensureEgressListenerStarted(uint16_t port) {
@@ -2949,7 +3049,8 @@ kj::Promise<void> ContainerClient::ensureEgressListenerStarted(uint16_t port) {
     co_return;
   }
 
-  KJ_ON_SCOPE_FAILURE(egressListenerStarted.store(false, std::memory_order_release));
+  bool succeeded = false;
+  KJ_DEFER(if (!succeeded) stopEgressListener());
 
   // Determine the listen address: on Linux, use the Docker bridge gateway IP
   // and fall back to loopback (Docker Desktop
@@ -2957,6 +3058,7 @@ kj::Promise<void> ContainerClient::ensureEgressListenerStarted(uint16_t port) {
   auto ipamConfig = co_await getDockerBridgeIPAMConfig();
   egressListenerPort = co_await startEgressListener(
       gatewayForPlatform(kj::mv(ipamConfig.gateway)).orDefault(kj::str("127.0.0.1")), port);
+  succeeded = true;
 }
 
 kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {

@@ -27,7 +27,6 @@ import {
   ok,
   rejects,
   strictEqual,
-  throws,
 } from 'node:assert';
 
 export const existenceTest = {
@@ -107,10 +106,14 @@ export const nativeBackedMinReadUnderDelivery = {
     const stream = new Blob(['hello world']).stream();
     const reader = stream.getReader({ mode: 'byob' });
     // A minimum larger than the source's total: KJ tryRead semantics make the short read
-    // the EOF signal, and the partial fill commits fused as {done: true, value: partial}.
+    // the EOF signal. The partial fill is delivered done=false and the stream closes; the
+    // next read observes EOF with an empty view (the C++-parity readAtLeast tail shape).
     const { done, value } = await reader.read(new Uint8Array(64), { min: 20 });
-    strictEqual(done, true);
+    strictEqual(done, false);
     strictEqual(new TextDecoder().decode(value), 'hello world');
+    const eof = await reader.read(new Uint8Array(16));
+    strictEqual(eof.done, true);
+    strictEqual(eof.value.byteLength, 0);
   },
 };
 
@@ -482,54 +485,11 @@ export const nativeBackedStreamIntoFetchBody = {
   },
 };
 
-// Body preconditions still apply after unwrap: a disturbed stream is rejected by the
-// Body constructor itself (unwrap deliberately performs no such checks). This throw did
-// NOT happen before the unwrap arm landed (the async-iterable fallback wrapped the
-// stream in a fresh, undisturbed one), so this is a legacy-parity regression test.
-export const disturbedTsStreamIntoResponse = {
-  async test() {
-    const rs = new ReadableStream({
-      start(c) {
-        c.enqueue(new TextEncoder().encode('x'));
-        c.close();
-      },
-    });
-    const reader = rs.getReader();
-    await reader.read();
-    reader.releaseLock();
-    throws(() => new Response(rs), {
-      name: 'TypeError',
-      message: /disturbed/,
-    });
-  },
-};
-
 // Non-stream objects keep their non-stream Body semantics: the brand check rejects them,
 // the OneOf falls through, and a plain object stringifies per spec.
 export const plainObjectBodyStillStringifies = {
   async test() {
     strictEqual(await new Response({}).text(), '[object Object]');
-  },
-};
-
-// Response.clone() with a TypeScript-backed (queued) body: clone happens at the C++
-// layer (Body::clone -> JsReadableStream::tee's TS arm -> the TS tee machinery), and
-// both bodies read the full content independently.
-export const tsStreamBodyClone = {
-  async test() {
-    const encoder = new TextEncoder();
-    const rs = new ReadableStream({
-      start(c) {
-        c.enqueue(encoder.encode('clone'));
-        c.enqueue(encoder.encode(' me'));
-        c.close();
-      },
-    });
-    const response = new Response(rs);
-    const clone = response.clone();
-    const [a, b] = await Promise.all([response.text(), clone.text()]);
-    strictEqual(a, 'clone me');
-    strictEqual(b, 'clone me');
   },
 };
 

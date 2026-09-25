@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+using IocontextModules = import "iocontext-modules.capnp";
+
+# The SAME modules against the TypeScript implementation. Module
+# evaluation under the per-isolate JavaScript bootstrap is exactly where
+# global-scope stream construction is riskiest, so this cell is the
+# point of the suite.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-iocontext-ts",
+      worker = (
+        modules = IocontextModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "experimental",
+        ],
+        bindings = [
+          ( name = "self", service = "streams-iocontext-ts" ),
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

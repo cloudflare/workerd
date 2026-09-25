@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+using StrategiesModules = import "strategies-modules.capnp";
+
+# Runs the queuing strategies suite against the C++ implementation;
+# strategies-ts.wd-test runs the identical modules against the TypeScript
+# implementation.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes. Date-gated semantics are pinned by flag:
+# - streams_enable_constructors: the integration module builds
+#   `new ReadableStream`/`new WritableStream` with strategy arguments.
+# - workers_api_getters_setters_on_prototype: prototype accessors.
+# - set_tostring_tag: Symbol.toStringTag branding.
+# The strategy classes themselves consult no flags.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-strategies-cpp",
+      worker = (
+        modules = StrategiesModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "workers_api_getters_setters_on_prototype",
+          "set_tostring_tag",
+        ],
+      )
+    ),
+  ],
+);

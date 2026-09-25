@@ -15,6 +15,7 @@
 
 #include <kj/debug.h>
 #include <kj/exception.h>
+#include <kj/one-of.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
 
@@ -95,24 +96,6 @@ constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_DETAIL_ID = 0xe80272921
 
 // Detail type for JavaScript exception metadata (error type and stack trace)
 constexpr kj::Exception::DetailTypeId JS_EXCEPTION_METADATA_DETAIL_ID = 0xa9ae63464030fcefull;
-
-// Set on a DISCONNECTED actor-call failure that is known to have occurred BEFORE the call reached
-// the actor (i.e. user code definitely never ran). Such failures are safe to retry as a fresh
-// attempt. Set by edgeworker's pre-delivery routing/getActor failure paths; read by the caller-side
-// actor-call classifier. The payload is a zero-length array (marker only).
-constexpr kj::Exception::DetailTypeId REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID =
-    0x1a07d0b6559baea6ull;
-
-// Set on a failure that is known to have occurred AFTER the call reached the actor (user code may
-// have run). Must not be retried as a delivery failure. Set at the receiving entrypoint's actor
-// catch so it survives the internal-exception description rewrite and serializes back across the RPC
-// boundary. The payload is a zero-length array (marker only).
-constexpr kj::Exception::DetailTypeId REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID = 0x7f6e0bece261e8eeull;
-
-// Set when an actor invocation is rejected before user code because its retry token could not be
-// claimed. This distinguishes a claim rejection from other delivery failures so a caller can avoid
-// retrying it. The payload is a zero-length array (marker only).
-constexpr kj::Exception::DetailTypeId ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID = 0x6fb3a97323600af2ull;
 
 // Detail type for Durable Object metadata on exceptions propagated out of actor execution.
 constexpr kj::Exception::DetailTypeId DURABLE_OBJECT_EXCEPTION_METADATA_DETAIL_ID =
@@ -533,7 +516,7 @@ concept StrictlyBool = kj::isSameType<T, bool>();
 
 class Lock;
 
-// Interface for allocating backing stores for v8 external string.
+// Interface for allocating V8 external string character buffers.
 class ExternalStringAllocator {
  public:
   virtual ~ExternalStringAllocator() = default;
@@ -545,8 +528,26 @@ class ExternalStringAllocator {
 // Returns a singleton DefaultExternalStringAllocator.
 kj::Own<ExternalStringAllocator> defaultExternalStringAllocator();
 
+// Despite the name, OwnedAscii carries whatever one-byte encoding its consumer expects: the new
+// module registry treats it as UTF-8 and transcodes non-ASCII text, while the legacy registry and
+// newExternalOneByteString() treat it as Latin-1.
 using OwnedAscii = kj::Array<const char>;
 using OwnedUtf16 = kj::Array<const uint16_t>;
+using StaticExternalStringSource =
+    kj::OneOf<kj::ArrayPtr<const char>, kj::ArrayPtr<const uint16_t>>;
+// A buffer for an external string, either borrowed from static storage or shared with V8.
+using ExternalStringSource = kj::OneOf<kj::ArrayPtr<const char>,
+    kj::ArrayPtr<const uint16_t>,
+    kj::Arc<OwnedAscii>,
+    kj::Arc<OwnedUtf16>>;
+
+inline kj::Arc<OwnedAscii> copyToArc(kj::ArrayPtr<const char> source) {
+  return kj::arc<OwnedAscii>(kj::heapArray(source));
+}
+
+inline kj::Arc<OwnedUtf16> copyToArc(kj::ArrayPtr<const uint16_t> source) {
+  return kj::arc<OwnedUtf16>(kj::heapArray(source));
+}
 
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite
@@ -582,6 +583,12 @@ v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint
 
 // Two-byte counterpart to the owning one-byte overload above.
 v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::Arc<OwnedUtf16> buf);
+
+// Creates a one-byte or two-byte external string, depending on which buffer `buf` holds.
+v8::Local<v8::String> newExternalString(Lock& js, StaticExternalStringSource buf);
+
+// Like the overload above. An Arc buffer is shared: the V8 string takes its own reference.
+v8::Local<v8::String> newExternalString(Lock& js, const ExternalStringSource& buf);
 
 // Use this type to mark APIs that are not implemented. Attempts to use the API will throw an
 // exception.
@@ -633,7 +640,7 @@ struct CallCounter {
     fast = 0;
   }
 
-  bool operator==(const CallCounter& rhs) {
+  bool operator==(const CallCounter& rhs) const {
     return slow == rhs.slow && fast == rhs.fast;
   }
 };

@@ -7,6 +7,8 @@ use std::future::IntoFuture;
 use std::pin::Pin;
 use std::pin::pin;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::task::Context;
 use std::task::Poll;
 use std::task::Wake;
@@ -140,6 +142,109 @@ impl Future for ThreadedDelayFuture {
 
 pub async fn new_threaded_delay_future_void() {
     ThreadedDelayFuture::new().await
+}
+
+thread_local! {
+    static RETAINED_WAKER: std::cell::RefCell<Option<Waker>> =
+        const { std::cell::RefCell::new(None) };
+    static WAKING_THREAD: std::cell::RefCell<Option<WakingThread>> =
+        const { std::cell::RefCell::new(None) };
+    static JOINED_WAKER_READY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+struct WakingThread {
+    finished: Arc<AtomicBool>,
+    handle: std::thread::JoinHandle<()>,
+}
+
+struct RetainedWakerFuture;
+
+impl Future for RetainedWakerFuture {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        RETAINED_WAKER.with(|waker| {
+            *waker.borrow_mut() = Some(cx.waker().clone());
+        });
+        Poll::Pending
+    }
+}
+
+pub async fn new_retained_waker_future_void() {
+    RetainedWakerFuture.await
+}
+
+pub async fn new_joined_waker_future_void() -> Result<()> {
+    JOINED_WAKER_READY.with(|ready| ready.set(false));
+    let mut promise = pin!(crate::ffi::new_fulfillable_promise_void().into_future());
+    future::poll_fn(|cx| {
+        let _ = pin!(RetainedWakerFuture).poll(cx);
+        promise.as_mut().poll(cx)
+    })
+    .await
+    .map_err(Error::other)?;
+
+    future::poll_fn(|cx| {
+        if JOINED_WAKER_READY.with(std::cell::Cell::get) {
+            Poll::Ready(())
+        } else {
+            pin!(RetainedWakerFuture).poll(cx)
+        }
+    })
+    .await;
+    Ok(())
+}
+
+pub fn complete_joined_waker_future() {
+    JOINED_WAKER_READY.with(|ready| ready.set(true));
+    wake_retained_waker_from_background_thread();
+}
+
+pub fn start_retained_wake() {
+    let waker =
+        RETAINED_WAKER.with(|waker| waker.borrow().as_ref().expect("no retained waker").clone());
+    let finished = Arc::new(AtomicBool::new(false));
+    let thread_finished = finished.clone();
+    let handle = std::thread::spawn(move || {
+        waker.wake_by_ref();
+        thread_finished.store(true, Ordering::Relaxed);
+    });
+    // Control the schedule without providing the happens-before edge that the
+    // cross-thread notification must establish. Join only after the re-poll.
+    while !finished.load(Ordering::Relaxed) {
+        std::hint::spin_loop();
+    }
+    WAKING_THREAD.with(|thread| {
+        // Keep the Arc alive until join: its final drop would acquire from the
+        // background thread and hide the missing notification synchronization.
+        assert!(
+            thread
+                .borrow_mut()
+                .replace(WakingThread { finished, handle })
+                .is_none()
+        );
+    });
+}
+
+pub fn join_retained_wake() {
+    WAKING_THREAD.with(|thread| {
+        let WakingThread { finished, handle } =
+            thread.borrow_mut().take().expect("no waking thread");
+        handle.join().expect("waking thread panicked");
+        assert!(finished.load(Ordering::Relaxed));
+    });
+}
+
+pub fn wake_retained_waker_from_background_thread() {
+    let waker =
+        RETAINED_WAKER.with(|waker| waker.borrow().as_ref().expect("no retained waker").clone());
+    on_background_thread(move || waker.wake_by_ref());
+}
+
+pub fn clear_retained_waker() {
+    RETAINED_WAKER.with(|waker| {
+        drop(waker.borrow_mut().take().expect("no retained waker"));
+    });
 }
 
 pub async fn new_layered_ready_future_void() -> Result<()> {
@@ -343,4 +448,55 @@ pub async fn new_drop_cancellable_promise_without_polling() -> Result<()> {
     let _future = crate::ffi::new_cancellation_detecting_promise_void();
     // _future is dropped here without being .awaited
     Ok(())
+}
+
+// =======================================================================================
+// Stored-waker ordering (see the C++ test of the same name in awaitables-cc-test.c++)
+
+static STASHED_WAKER: std::sync::Mutex<Option<Waker>> = std::sync::Mutex::new(None);
+static STASHED_POLLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static STASHED_WOKEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Counts its polls and stashes a clone of its waker on every Pending poll; completes once
+/// `wake_stashed_waker()` has been called. The stash is what a channel or oneshot would hold.
+struct StashWakerFuture;
+
+impl Future for StashWakerFuture {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        use std::sync::atomic::Ordering;
+        STASHED_POLLS.fetch_add(1, Ordering::SeqCst);
+        if STASHED_WOKEN.load(Ordering::SeqCst) {
+            return Poll::Ready(());
+        }
+        *STASHED_WAKER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(cx.waker().clone());
+        Poll::Pending
+    }
+}
+
+pub async fn stash_waker_future() -> Result<()> {
+    use std::sync::atomic::Ordering;
+    STASHED_POLLS.store(0, Ordering::SeqCst);
+    STASHED_WOKEN.store(false, Ordering::SeqCst);
+    StashWakerFuture.await;
+    Ok(())
+}
+
+/// Wakes the most recently stashed waker (on the calling thread) and lets the future complete.
+pub fn wake_stashed_waker() {
+    STASHED_WOKEN.store(true, std::sync::atomic::Ordering::SeqCst);
+    let waker = STASHED_WAKER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    if let Some(waker) = waker {
+        waker.wake();
+    }
+}
+
+pub fn stashed_future_poll_count() -> u64 {
+    STASHED_POLLS.load(std::sync::atomic::Ordering::SeqCst)
 }

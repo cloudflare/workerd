@@ -8,6 +8,7 @@
 #include <workerd/io/per-isolate-bootstrap.h>
 #include <workerd/jsg/type-wrapper.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/autogate.h>
 
 #include <capnp/message.h>
 #include <kj/test.h>
@@ -77,6 +78,91 @@ struct SinkState {
   kj::Own<RecordingSink> makeSink() {
     return kj::heap<RecordingSink>(written, ended, aborted, destroyed);
   }
+};
+
+// A sink that additionally accepts writes synchronously via tryWriteSync(), recording how
+// each write was served so tests can assert which path ran.
+class SyncCollectingSink final: public WritableStreamSink {
+ public:
+  struct State {
+    kj::Vector<kj::byte> data;
+    size_t syncWrites = 0;
+    size_t asyncWrites = 0;
+  };
+
+  SyncCollectingSink(State& state): state(state) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    ++state.asyncWrites;
+    state.data.addAll(buffer);
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    ++state.asyncWrites;
+    for (auto& piece: pieces) {
+      state.data.addAll(piece);
+    }
+    return kj::READY_NOW;
+  }
+
+  bool tryWriteSync(kj::ArrayPtr<const kj::byte> buffer) override {
+    ++state.syncWrites;
+    state.data.addAll(buffer);
+    return true;
+  }
+
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    ++state.syncWrites;
+    for (auto& piece: pieces) {
+      state.data.addAll(piece);
+    }
+    return true;
+  }
+
+  kj::Promise<void> end() override {
+    return kj::READY_NOW;
+  }
+
+  void abort(kj::Exception reason) override {}
+
+ private:
+  State& state;
+};
+
+// A sink whose synchronous write path throws while the asynchronous path succeeds:
+// exercises the write fast path's error handling in the gated variant without affecting
+// the ungated one.
+class SyncThrowingSink final: public WritableStreamSink {
+ public:
+  struct State {
+    size_t asyncWrites = 0;
+  };
+
+  SyncThrowingSink(State& state): state(state) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    ++state.asyncWrites;
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    ++state.asyncWrites;
+    return kj::READY_NOW;
+  }
+
+  bool tryWriteSync(kj::ArrayPtr<const kj::byte> buffer) override {
+    kj::throwFatalException(KJ_EXCEPTION(FAILED, "jsg.Error: sync write failed"));
+  }
+
+  kj::Promise<void> end() override {
+    return kj::READY_NOW;
+  }
+
+  void abort(kj::Exception reason) override {}
+
+ private:
+  State& state;
 };
 
 KJ_TEST("JsWritableStream null state") {
@@ -168,8 +254,9 @@ KJ_TEST("JsWritableStream flush rejects when a writer is held; forceFlush succee
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    // Pre-lock the stream by attaching a writer to the underlying WritableStream before adopting
-    // it into the abstraction.
+    // Pre-lock the stream by attaching a writer to the underlying legacy WritableStream before
+    // adopting it into the abstraction.
+    // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
     auto ws = js.alloc<WritableStream>(env.context, state.makeSink(), kj::none);
     auto writer = ws->getWriter(js);
     JsWritableStream stream(kj::mv(ws));
@@ -195,6 +282,8 @@ KJ_TEST("JsWritableStream forceAbort succeeds despite a held writer") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
+    // Pre-lock the stream via the legacy WritableStream's writer before adopting it.
+    // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
     auto ws = js.alloc<WritableStream>(env.context, state.makeSink(), kj::none);
     auto writer = ws->getWriter(js);
     JsWritableStream stream(kj::mv(ws));
@@ -211,6 +300,8 @@ KJ_TEST("JsWritableStream forceClose succeeds despite a held writer") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
+    // Pre-lock the stream via the legacy WritableStream's writer before adopting it.
+    // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
     auto ws = js.alloc<WritableStream>(env.context, state.makeSink(), kj::none);
     auto writer = ws->getWriter(js);
     JsWritableStream stream(kj::mv(ws));
@@ -249,6 +340,8 @@ KJ_TEST("JsWritableStream detach throws when a writer is held") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto& js = env.js;
 
+    // Pre-lock the stream via the legacy WritableStream's writer before adopting it.
+    // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
     auto ws = js.alloc<WritableStream>(env.context, state.makeSink(), kj::none);
     auto writer = ws->getWriter(js);
     JsWritableStream stream(kj::mv(ws));
@@ -397,6 +490,8 @@ KJ_TEST("JsReadableStream pipeTo rejects when the destination is locked") {
     auto& js = env.js;
 
     JsReadableStream source(js, kj::str(kData));
+    // Pre-lock the destination via the legacy WritableStream's writer before adopting it.
+    // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
     auto ws = js.alloc<WritableStream>(env.context, state.makeSink(), kj::none);
     auto writer = ws->getWriter(js);
     JsWritableStream destination(kj::mv(ws));
@@ -616,6 +711,50 @@ class GatedSink final: public WritableStreamSink {
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>>& gate;
 };
 
+// A WritableStreamSink recording into a SinkState whose FIRST write completes only when the
+// externally-owned gate is fulfilled; later writes complete immediately. Holds one write in
+// flight while other operations start behind it.
+class FirstWriteGatedSink final: public WritableStreamSink {
+ public:
+  FirstWriteGatedSink(SinkState& state, kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>>& gate)
+      : state(state),
+        gate(gate) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    state.written.addAll(buffer);
+    return maybeGate();
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    for (auto& piece: pieces) {
+      state.written.addAll(piece);
+    }
+    return maybeGate();
+  }
+
+  kj::Promise<void> end() override {
+    state.ended = true;
+    return kj::READY_NOW;
+  }
+
+  void abort(kj::Exception reason) override {
+    state.aborted = true;
+  }
+
+ private:
+  SinkState& state;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>>& gate;
+  bool gated = false;
+
+  kj::Promise<void> maybeGate() {
+    if (gated) return kj::READY_NOW;
+    gated = true;
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    gate = kj::mv(paf.fulfiller);
+    return kj::mv(paf.promise);
+  }
+};
+
 // A ContentSource variant recording whether cancel() reached the underlying source (for
 // preventCancel pipe tests).
 class CancelRecordingSource final: public ReadableStreamSource {
@@ -677,6 +816,64 @@ KJ_TEST("WritableStreamNativeSink instances carry the kNativeSink marker") {
         v8::Symbol::ForApi(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, "kNativeSink")));
     KJ_EXPECT(obj.has(js, symbol, jsg::JsObject::HasOption::OWN));
     KJ_EXPECT(obj.get(js, symbol) == symbol);
+  });
+}
+
+KJ_TEST("WritableStreamNativeSink write fast path completes synchronously when gated on") {
+  TestFixture testFixture;
+  SyncCollectingSink::State state;
+  const bool gateOn =
+      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS);
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto sink = js.alloc<WritableStreamNativeSink>(
+        env.context, kj::heap<SyncCollectingSink>(state), kj::none, kj::none);
+
+    auto writePromise = sink->write(js, jsg::JsValue(jsg::JsUint8Array::create(js, "hi"_kjb)));
+    if (gateOn) {
+      // The write completed synchronously, before write() returned.
+      KJ_EXPECT(state.syncWrites == 1);
+      KJ_EXPECT(state.asyncWrites == 0);
+    } else {
+      // Ungated, the write must take the asynchronous path.
+      KJ_EXPECT(state.syncWrites == 0);
+      KJ_EXPECT(state.asyncWrites == 1);
+    }
+    auto promise = writePromise.then(
+        js, [&state](jsg::Lock& js) { KJ_EXPECT(state.data.asPtr() == "hi"_kjb); });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+KJ_TEST("WritableStreamNativeSink write fast path failure rejects and releases the sink") {
+  TestFixture testFixture;
+  SyncThrowingSink::State state;
+  const bool gateOn =
+      util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS);
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto sink = js.alloc<WritableStreamNativeSink>(
+        env.context, kj::heap<SyncThrowingSink>(state), kj::none, kj::none);
+
+    if (!gateOn) {
+      // Ungated, the synchronous path never runs; the write succeeds asynchronously.
+      auto promise = sink->write(js, jsg::JsValue(jsg::JsUint8Array::create(js, "hi"_kjb)))
+                         .then(js, [&state](jsg::Lock& js) { KJ_EXPECT(state.asyncWrites == 1); });
+      return env.context.awaitJs(js, kj::mv(promise));
+    }
+
+    auto promise = sink->write(js, jsg::JsValue(jsg::JsUint8Array::create(js, "hi"_kjb)))
+                       .then(js, [](jsg::Lock& js) -> jsg::Promise<void> {
+      KJ_FAIL_ASSERT("write should have rejected");
+    }, [&state, sink = sink.addRef()](jsg::Lock& js, jsg::Value exception) mutable {
+      KJ_EXPECT(state.asyncWrites == 0);
+      // The sink was released: a subsequent write resolves defensively without touching
+      // the sink.
+      return sink->write(js, jsg::JsValue(jsg::JsUint8Array::create(js, "bye"_kjb)));
+    }).then(js, [&state](jsg::Lock& js) { KJ_EXPECT(state.asyncWrites == 0); });
+    return env.context.awaitJs(js, kj::mv(promise));
   });
 }
 
@@ -1074,6 +1271,87 @@ KJ_TEST("JsReadableStream pipeTo native+native rejects a close-queued destinatio
   // Propagate-backward cancels the source; nothing may have been pumped.
   KJ_EXPECT(cancelled);
   KJ_EXPECT(state.written.size() == 0);
+}
+
+KJ_TEST("JsReadableStream pipeTo native+native queues behind a write made before start") {
+  auto fixture = makeTsStreamsFixture();
+  SinkState state;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kMoreData));
+    auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+
+    // Write and release in the destination's first turn: its controller has not started,
+    // so the write is still queued (it has not reached the sink) when the pipe begins.
+    auto handle = KJ_ASSERT_NONNULL(destination.tryGetTs(js));
+    auto writer = KJ_ASSERT_NONNULL(
+        webstreams::invokeMethod(js, handle, "getWriter"_kj).tryCast<jsg::JsObject>());
+    auto writeResult KJ_UNUSED = webstreams::invokeMethod(
+        js, writer, "write"_kj, jsg::JsUint8Array::create(js, kData.asBytes()));
+    auto releaseResult KJ_UNUSED = webstreams::invokeMethod(js, writer, "releaseLock"_kj);
+
+    // Extracting the sink now would drop the queued write: the pipe must write behind it
+    // (the JS pump, which releases both locks when it settles).
+    auto promise = source.pipeTo(js, destination)
+                       .then(js,
+                           [source = source.addRef(js), destination = destination.addRef(js)](
+                               jsg::Lock& js) mutable {
+      KJ_EXPECT(!source.isLocked(js));
+      KJ_EXPECT(!destination.isLocked(js));
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  auto expected = kj::str(kData, kMoreData);
+  KJ_EXPECT(state.written.asPtr() == expected.asBytes());
+  KJ_EXPECT(state.ended);
+  KJ_EXPECT(!state.aborted);
+}
+
+KJ_TEST("JsReadableStream pipeTo native+native queues behind an in-flight write") {
+  auto fixture = makeTsStreamsFixture();
+  SinkState state;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> gate;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    auto source = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kMoreData));
+    auto destination = JsWritableStream::create(
+        js, env.context, kj::heap<FirstWriteGatedSink>(state, gate), kj::none);
+
+    // Write without awaiting, then release: the common "write a header, then pipe the
+    // body" shape.
+    auto handle = KJ_ASSERT_NONNULL(destination.tryGetTs(js));
+    auto writer = KJ_ASSERT_NONNULL(
+        webstreams::invokeMethod(js, handle, "getWriter"_kj).tryCast<jsg::JsObject>());
+    auto writeResult KJ_UNUSED = webstreams::invokeMethod(
+        js, writer, "write"_kj, jsg::JsUint8Array::create(js, kData.asBytes()));
+    auto releaseResult KJ_UNUSED = webstreams::invokeMethod(js, writer, "releaseLock"_kj);
+
+    // A KJ roundtrip drains the microtask queue, so by the continuation the write has
+    // reached the gated sink and is in flight. The pipe starts there, and must neither
+    // reject (the native sink refuses pipeFrom() with a write in flight) nor consume the
+    // endpoints.
+    auto promise = env.context.awaitIo(js, kj::Promise<void>(kj::READY_NOW),
+        JSG_VISITABLE_LAMBDA(
+            (&state, &gate, source = kj::mv(source), destination = kj::mv(destination)),
+            (source, destination), (jsg::Lock & js) mutable {
+              KJ_EXPECT(state.written.asPtr() == kData.asBytes());
+              auto pipe = source.pipeTo(js, destination);
+              KJ_ASSERT_NONNULL(gate)->fulfill();
+              return pipe.then(js,
+                  [source = source.addRef(js), destination = destination.addRef(js)](
+                      jsg::Lock& js) mutable {
+                KJ_EXPECT(!source.isLocked(js));
+                KJ_EXPECT(!destination.isLocked(js));
+              });
+            }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  auto expected = kj::str(kData, kMoreData);
+  KJ_EXPECT(state.written.asPtr() == expected.asBytes());
+  KJ_EXPECT(state.ended);
+  KJ_EXPECT(!state.aborted);
 }
 
 KJ_TEST("WritableStreamNativeSink pipeFrom rejects while a close is in flight") {

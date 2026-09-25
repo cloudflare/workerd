@@ -471,12 +471,29 @@ KJ_TEST("Read/Write Exception works") {
   KJ_ASSERT(info2.name == "foo"_kj);
   KJ_ASSERT(info2.message == "bar"_kj);
   KJ_ASSERT(info2.stack == kj::none);
+  KJ_ASSERT(info2.code == kj::none);
 
   Exception info3 = info.clone();
   KJ_ASSERT(info.timestamp == info3.timestamp);
   KJ_ASSERT(info3.name == "foo"_kj);
   KJ_ASSERT(info3.message == "bar"_kj);
   KJ_ASSERT(info3.stack == kj::none);
+  KJ_ASSERT(info3.code == kj::none);
+
+  capnp::MallocMessageBuilder stringCodeBuilder;
+  auto stringCodeRoot = stringCodeBuilder.initRoot<rpc::Trace::Exception>();
+  kj::Maybe<Exception::Code> stringCode = Exception::Code(kj::str("ERR_TEST"));
+  Exception stringCodeInfo(
+      kj::UNIX_EPOCH, kj::str("foo"), kj::str("bar"), kj::none, kj::mv(stringCode));
+  stringCodeInfo.copyTo(stringCodeRoot);
+  Exception stringCodeRoundTrip(stringCodeRoot.asReader());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(stringCodeRoundTrip.code).get<kj::String>() == "ERR_TEST"_kj);
+
+  kj::Maybe<Exception::Code> numericCode = Exception::Code(42.0);
+  Exception numericCodeInfo(
+      kj::UNIX_EPOCH, kj::str("foo"), kj::str("bar"), kj::none, kj::mv(numericCode));
+  Exception numericCodeClone = numericCodeInfo.clone();
+  KJ_ASSERT(KJ_ASSERT_NONNULL(numericCodeClone.code).get<double>() == 42.0);
 }
 
 KJ_TEST("Read/Write StreamDiagnosticsEvent works") {
@@ -557,6 +574,53 @@ KJ_TEST("Read/Write SpanClose works") {
 
   SpanClose info3 = info.clone();
   KJ_ASSERT(info3.outcome == EventOutcome::EXCEPTION);
+}
+
+KJ_TEST("Read/Write SpanUpdate name works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::SpanUpdate>();
+  SpanUpdate info("renamed"_kjc);
+  info.copyTo(infoBuilder);
+
+  SpanUpdate info2(infoBuilder.asReader());
+  KJ_ASSERT(info2.info.get<kj::ConstString>() == "renamed");
+
+  SpanUpdate info3 = info.clone();
+  KJ_ASSERT(info3.info.get<kj::ConstString>() == "renamed");
+}
+
+KJ_TEST("Read/Write SpanUpdate status works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::SpanUpdate>();
+  SpanUpdate info(SpanStatus(SpanStatusCode::ERROR, kj::ConstString("failed"_kjc)));
+  info.copyTo(infoBuilder);
+
+  SpanUpdate info2(infoBuilder.asReader());
+  auto& status2 = info2.info.get<SpanStatus>();
+  KJ_ASSERT(status2.getCode() == SpanStatusCode::ERROR);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(status2.getMessage()) == "failed");
+
+  SpanUpdate info3 = info.clone();
+  auto& status3 = info3.info.get<SpanStatus>();
+  KJ_ASSERT(status3.getCode() == SpanStatusCode::ERROR);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(status3.getMessage()) == "failed");
+}
+
+KJ_TEST("SpanStatus ignores messages for non-error status codes") {
+  SpanStatus unsetStatus(SpanStatusCode::UNSET, kj::ConstString("ignored"_kjc));
+  KJ_ASSERT(unsetStatus.getMessage() == kj::none);
+
+  SpanStatus okStatus(SpanStatusCode::OK, kj::ConstString("ignored"_kjc));
+  KJ_ASSERT(okStatus.getMessage() == kj::none);
+
+  capnp::MallocMessageBuilder builder;
+  auto statusBuilder = builder.initRoot<rpc::SpanStatus>();
+  statusBuilder.setCode(SpanStatusCode::OK);
+  statusBuilder.initMessage().setText("ignored");
+
+  SpanStatus wireStatus(statusBuilder.asReader());
+  KJ_ASSERT(wireStatus.getCode() == SpanStatusCode::OK);
+  KJ_ASSERT(wireStatus.getMessage() == kj::none);
 }
 
 KJ_TEST("Read/Write Onset works") {

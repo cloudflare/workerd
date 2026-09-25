@@ -1722,17 +1722,31 @@ fn write_kj_own(out: &mut OutFile, key: NamedImplKey) {
         "static_assert(!::kj::_::IsRefcounted<{}>, \"Value must not inherit from kj::Refcounted\");",
         inner
     );
+    write_kj_maybe_niche_assert(out, &format!("::kj::Own<{}>", inner));
+}
+
+// Rust's `KjMaybe<KjOwn<T>>`, `KjMaybe<KjRc<T>>` and `KjMaybe<KjArc<T>>` hard-code KJ's
+// niche-optimized layout (the smart pointer alone, with a null pointee meaning `none`). Assert
+// that KJ agrees for this instantiation so a divergence fails at compile time rather than
+// producing a silent ABI mismatch.
+fn write_kj_maybe_niche_assert(out: &mut OutFile, inner: &str) {
+    writeln!(
+        out,
+        "static_assert(sizeof(::kj::Maybe<{0}>) == sizeof({0}), \"kj::Maybe<{0}> is expected to be niche-optimized (same size as {0}), as kj-rs assumes\");",
+        inner,
+    );
 }
 
 // Writes static assertions for Maybe.
 //
 // This function is only called for Maybe<T> where T is a simple identifier type (e.g., Maybe<Shared>,
-// Maybe<int64_t>). It is NOT called for Maybe<T&> or Maybe<Own<T>>, which are handled via explicit
-// implementations that understand their niche value optimization (null pointer represents None).
+// Maybe<int64_t>). It is NOT called for Maybe<T&>, Maybe<Own<T>>, Maybe<Rc<T>> or Maybe<Arc<T>>,
+// which are handled via explicit implementations that understand their niche value optimization
+// (null pointer represents None); see write_kj_maybe_niche_assert for those.
 //
 // The sizeof assertion guards against KJ adding niche optimization for value types. We don't check
 // is_reference_v or isOwn here because T is always an identifier type in this context - reference
-// and Own types go through separate code paths that don't call this function.
+// and smart pointer types go through separate code paths that don't call this function.
 fn write_kj_maybe(out: &mut OutFile, key: NamedImplKey) {
     let ident = key.rust;
     let resolve = out.types.resolve(ident);
@@ -1773,6 +1787,7 @@ fn write_kj_rc(out: &mut OutFile, key: NamedImplKey) {
         "static_assert(alignof(::kj::Rc<{}>) == sizeof(void *), \"unexpected kj::Rc alignment\");",
         inner,
     );
+    write_kj_maybe_niche_assert(out, &format!("::kj::Rc<{}>", inner));
 }
 
 // Writes assertions to make sure Rust's raw `KjArc` representation matches KJ's two-pointer
@@ -1795,6 +1810,7 @@ fn write_kj_arc(out: &mut OutFile, key: NamedImplKey) {
         "static_assert(alignof(::kj::Arc<{}>) == sizeof(void *), \"unexpected kj::Arc alignment\");",
         inner,
     );
+    write_kj_maybe_niche_assert(out, &format!("::kj::Arc<{}>", inner));
 }
 
 fn write_unique_ptr(out: &mut OutFile, key: NamedImplKey) {

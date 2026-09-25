@@ -9,6 +9,7 @@
 #include <workerd/util/strong-bool.h>
 
 #include <kj/common.h>
+#include <kj/function.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
 
@@ -25,6 +26,7 @@ class URLSearchParams;
 
 WD_STRONG_BOOL(EndStream);
 WD_STRONG_BOOL(IgnoreDisturbed);
+WD_STRONG_BOOL(Eof);
 
 // An abstraction of a ReadableStream, backed by either a C++ implemented ReadableStream
 // (defined in src/workerd/api/streams/*) or a TypeScript implemented ReadableStream (defined
@@ -49,8 +51,8 @@ class JsReadableStream final {
   // is always kj-heap memory: the streams built from it are read on the kj event loop without
   // the isolate lock, so the bytes must not sit in the V8 sandbox.
   struct Buffer {
-    kj::ArrayPtr<const kj::byte> view;
     kj::Array<const kj::byte> owned;
+    kj::ArrayPtr<const kj::byte> view;
 
     explicit Buffer(kj::Array<const kj::byte> data);
     explicit Buffer(jsg::Ref<Blob> data);
@@ -121,6 +123,19 @@ class JsReadableStream final {
   // C++-built JS underlying source driving the generator; otherwise this delegates to the
   // legacy ReadableStream::from().
   static JsReadableStream from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator);
+
+  // Create a stream-backed, value-mode JsReadableStream driven directly by a C++ pull
+  // function: each call is awaited, and its result is either enqueued as-is
+  // or, on kj::none, taken to mean the stream has ended. There is no
+  // queue-level chunking or splitting: whatever `pull` produces becomes exactly one chunk.
+  //
+  // Like create()/from(), this is a compatibility-flag dispatch point: under
+  // typescript_implemented_streams, `pull` is wrapped as a real JS function and the
+  // TypeScript stream is constructed over a plain (non-native-marked) underlying source,
+  // which resolves to its QUEUED backend; otherwise this builds the legacy C++
+  // ReadableStreamJsController directly.
+  static JsReadableStream fromPull(
+      jsg::Lock& js, kj::Function<jsg::Promise<kj::Maybe<jsg::Value>>(jsg::Lock&)> pull);
 
   // Returns a new JsReadableStream sharing this one's underlying stream (and retransmit
   // buffer, if any). Both instances observe the same underlying stream state (e.g. the stream
@@ -327,6 +342,13 @@ struct JsReadableStream::Tee {
   JsReadableStream branch2;
 };
 
+// What a ReadableStreamNativeSource's read, in flight when the source was teed, hands to
+// the tee once it finishes: the bytes it read, and the source unless the read reached EOF.
+struct NativeSourceInFlightRead {
+  kj::Array<kj::byte> bytes;
+  kj::Maybe<kj::Own<ReadableStreamSource>> source;
+};
+
 // The C++ implementation of the "native underlying source" contract defined by the
 // TypeScript streams implementation.
 //
@@ -365,10 +387,10 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // Uses the underlying source's optimized tryTee() when available, and otherwise falls
   // back to a generic kj::newTee()-based split (mirroring the legacy internal controller's
   // tee). Any bytes retained from an abandoned pull are inherited by BOTH branches,
-  // delivered before anything further from upstream.
+  // delivered before anything further from upstream. If an abandoned pull's read is still
+  // in flight, the branches wait for it, then deliver its bytes ahead of the rest.
   //
-  // Throws if the source has already been consumed, or if an abandoned pull's read is
-  // still in flight.
+  // Throws if the source has already been consumed.
   kj::Array<jsg::Ref<ReadableStreamNativeSource>> tee(jsg::Lock& js);
 
   // The total number of bytes the source promises to produce, if known. Queried live from
@@ -412,6 +434,19 @@ class ReadableStreamNativeSource final: public jsg::Object {
     IoOwn<ReadableStreamSource> source;
   };
 
+  // A tee waiting on a read in flight. Holds the source until that read finishes.
+  struct TeeHandoff {
+    kj::Own<kj::PromiseFulfiller<NativeSourceInFlightRead>> fulfiller;
+    kj::Own<ReadableStreamSource> source;
+  };
+
+  // Completes a tee waiting on the read that just finished (see tee()), handing over
+  // `data`, and the source unless `eof`. Returns false if no tee is waiting.
+  bool handOffToTee(kj::ArrayPtr<const kj::byte> data, bool eof);
+
+  // Fails a tee waiting on the read that just failed, if any, with the read's exception.
+  void failTeeHandoff(jsg::Lock& js, jsg::Value& exception);
+
   jsg::Promise<void> pullDefault(
       jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal, Active& active);
   jsg::Promise<void> pullByob(jsg::Lock& js,
@@ -419,6 +454,18 @@ class ReadableStreamNativeSource final: public jsg::Object {
       jsg::JsObject byobRequest,
       jsg::Ref<AbortSignal> signal,
       Active& active);
+
+  // Completes a BYOB pull whose read produced `data` (following the stash): writes the
+  // whole elements into `dest` and responds, keeping a trailing partial element in the
+  // stash for the next pull. At EOF the partial element can never complete, so the pull
+  // throws a TypeError instead.
+  void respondByob(jsg::Lock& js,
+      jsg::JsObject controller,
+      jsg::JsObject byobRequest,
+      kj::ArrayPtr<kj::byte> dest,
+      kj::ArrayPtr<const kj::byte> data,
+      Eof eof,
+      size_t elementSize);
 
   // Releases the underlying source for a C++-driven pump. Any bytes already consumed from
   // the source but never delivered (the stash -- only reachable when a tee-seeded branch is
@@ -448,18 +495,31 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // re-pulls an unsatisfied minimum, so a single read must be able to satisfy it).
   kj::Array<kj::byte> scratch;
 
-  // Bytes that were read by a pull whose consumer abandoned it (per-pull signal aborted)
-  // before delivery. Redelivered by the next pull, in order, before any new data, so no
-  // bytes are lost across a reader release. Multiple abandoned pulls may accumulate.
+  // Bytes read but not delivered: those of a pull whose consumer abandoned it (per-pull
+  // signal aborted), or the partial element trailing a BYOB read (see respondByob()).
+  // Redelivered by the next pull, in order, before any new data, so no bytes are lost
+  // across a reader release. Multiple abandoned pulls may accumulate.
   kj::Vector<kj::byte> stash;
 
   // Defensive only: the TypeScript conduit guarantees at most one pull in flight (standard
   // pulling/pullAgain serialization).
   bool pullInFlight = false;
 
+  // The underlying source's IDENTITY length as of the moment the in-flight read was
+  // issued (meaningful only while pullInFlight). A source's length is only reliable between
+  // reads: memory-backed sources and HTTP fixed-length bodies both shrink it while a read is
+  // still pending, before the read's bytes are delivered. tryGetLength() during the read
+  // (including tee()'s) uses this snapshot plus the stash, which the read leaves untouched
+  // until it settles.
+  kj::Maybe<uint64_t> inFlightReadStartLength;
+
   // Set when cancel() arrives while a pull's read is in flight: the source's release is
   // deferred to the pull's settlement.
   bool pendingCancel = false;
+
+  // Set when tee() arrives while a pull's read is in flight: the pull's settlement hands
+  // the source and the read's bytes to the branches.
+  kj::Maybe<IoOwn<TeeHandoff>> teeHandoff;
 
   static constexpr size_t kScratchSize = 32 * 1024;
 

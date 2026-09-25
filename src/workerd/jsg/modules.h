@@ -7,6 +7,7 @@
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
+#include <workerd/jsg/util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 
@@ -171,11 +172,28 @@ class ModuleRegistry {
         v8::Local<v8::Module> module,
         kj::Maybe<SyntheticModuleInfo> maybeSynthetic = kj::none);
 
+    // The ESM constructors below only read `compileCache` during the call.
+
+    // Compiles a bundle (user) module from UTF-8 source. The source is copied into the V8 heap,
+    // so it only needs to outlive this call.
     ModuleInfo(jsg::Lock& js,
         kj::StringPtr name,
         kj::ArrayPtr<const char> content,
         kj::ArrayPtr<const kj::byte> compileCache,
-        ModuleInfoCompileOption flags,
+        const CompilationObserver& observer);
+
+    // Compiles a builtin module whose source V8 references without copying.
+    ModuleInfo(jsg::Lock& js,
+        kj::StringPtr name,
+        StaticExternalStringSource content,
+        kj::ArrayPtr<const kj::byte> compileCache,
+        const CompilationObserver& observer);
+
+    // Compiles a builtin module whose source V8 shares ownership of.
+    ModuleInfo(jsg::Lock& js,
+        kj::StringPtr name,
+        kj::Arc<OwnedAscii> content,
+        kj::ArrayPtr<const kj::byte> compileCache,
         const CompilationObserver& observer);
 
     ModuleInfo(jsg::Lock& js,
@@ -268,6 +286,25 @@ kj::Maybe<kj::OneOf<kj::String, ModuleRegistry::ModuleInfo>> tryResolveFromFallb
     ModuleRegistry::ResolveMethod method,
     kj::Maybe<kj::StringPtr> rawSpecifier);
 
+namespace _ {  // private
+
+// Source of a builtin ESM module that ModuleRegistryImpl compiles on first resolve, borrowed from
+// static storage.
+struct StaticModuleSource {
+  StaticExternalStringSource source;
+  kj::ArrayPtr<const kj::byte> compileCache;
+};
+
+// Source of a builtin ESM module that ModuleRegistryImpl compiles on first resolve, shared with
+// the V8 strings created from it.
+struct SharedModuleSource {
+  kj::Arc<OwnedAscii> source;
+  // Released once the module is compiled.
+  kj::Array<const kj::byte> compileCache;
+};
+
+}  // namespace _
+
 template <typename TypeWrapper>
 class ModuleRegistryImpl final: public ModuleRegistry {
  public:
@@ -308,7 +345,6 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   void addBuiltinModule(Module::Reader module) {
     if (module.which() != Module::SRC) {
       auto specifier = module.getName();
-      auto path = kj::Path::parse(specifier);
       switch (module.which()) {
         case Module::WASM:
           // The body of this callback is copied from `compileWasmGlobal` in
@@ -368,11 +404,11 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     }
   }
 
-  template <typename Func>
-  void addBuiltinBundleFiltered(Bundle::Reader bundle, Func filter) {
+  template <typename Filter, typename AddModule>
+  void addBuiltinBundleFiltered(Bundle::Reader bundle, Filter filter, AddModule addModule) {
     for (auto module: bundle.getModules()) {
       if (filter(module)) {
-        addBuiltinModule(module);
+        addModule(module);
       }
     }
   }
@@ -380,16 +416,43 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   // Register new module accessible by a given importPath. The module is instantiated
   // after first resolve attempt within application has failed, i.e. it is possible for
   // application to override the module.
-  // sourceCode has to exist while this ModuleRegistry exists.
+  // sourceCode and compileCache must have static storage duration; V8 strings can outlive this
+  // ModuleRegistry.
   // The expectation is for this method to be called during the assembly of worker global context
   // after registering all user modules.
+  //
+  // This registry passes builtin source bytes to V8 as a one-byte (Latin-1) string without
+  // transcoding, here and in the Arc<OwnedAscii> overload below. Source is treated as UTF-8
+  // everywhere else, so any non-ASCII character in it is misdecoded; for example, UTF-8 "é"
+  // (c3 a9) reads as "Ã©". Builtin sources should therefore be ASCII. The new module registry
+  // (modules-new.h) transcodes UTF-8 source and does not have this limitation.
   void addBuiltinModule(kj::StringPtr specifier,
       kj::ArrayPtr<const char> sourceCode,
       Type type = Type::BUILTIN,
       kj::ArrayPtr<const kj::byte> compileCache = {}) {
+    addBuiltinModule(specifier, StaticExternalStringSource(sourceCode), type, compileCache);
+  }
+
+  void addBuiltinModule(kj::StringPtr specifier,
+      StaticExternalStringSource sourceCode,
+      Type type = Type::BUILTIN,
+      kj::ArrayPtr<const kj::byte> compileCache = {}) {
     KJ_ASSERT(type != Type::BUNDLE);
     auto path = kj::Path::parse(specifier);
-    entries.insert(kj::heap<Entry>(path, type, sourceCode, compileCache));
+    entries.insert(kj::heap<Entry>(path, type,
+        _::StaticModuleSource{.source = kj::mv(sourceCode), .compileCache = compileCache}));
+  }
+
+  // The source shares ownership with V8 strings. Like the overload above, it is decoded as
+  // Latin-1. The registry owns `compileCache` until the module is compiled.
+  void addBuiltinModule(kj::StringPtr specifier,
+      kj::Arc<OwnedAscii> sourceCode,
+      Type type = Type::BUILTIN,
+      kj::Array<const kj::byte> compileCache = nullptr) {
+    KJ_ASSERT(type != Type::BUNDLE);
+    auto path = kj::Path::parse(specifier);
+    entries.insert(kj::heap<Entry>(path, type,
+        _::SharedModuleSource{.source = kj::mv(sourceCode), .compileCache = kj::mv(compileCache)}));
   }
 
   void addBuiltinModule(
@@ -585,7 +648,9 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   // we need to be able to search it by path (filename) as well as search for a specific module
   // object by identity. We use a kj::Table!
   struct Entry {
-    using Info = kj::OneOf<ModuleInfo, kj::ArrayPtr<const char>, ModuleCallback>;
+    using StaticSource = _::StaticModuleSource;
+    using SharedSource = _::SharedModuleSource;
+    using Info = kj::OneOf<ModuleInfo, StaticSource, SharedSource, ModuleCallback>;
 
     struct Key {
       const kj::Path& specifier;
@@ -605,30 +670,13 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     kj::Path specifier;
     Type type;
 
-    // Either instantiated module or module source code.
+    // Either instantiated module, module source code, or a module factory.
     Info info;
 
-    // Optional compileCache.
-    kj::ArrayPtr<const kj::byte> compileCache;
-
-    Entry(const kj::Path& specifier, Type type, ModuleInfo info)
+    Entry(const kj::Path& specifier, Type type, Info info)
         : specifier(specifier.clone()),
           type(type),
           info(kj::mv(info)) {}
-
-    Entry(const kj::Path& specifier,
-        Type type,
-        kj::ArrayPtr<const char> src,
-        kj::ArrayPtr<const kj::byte> compileCache)
-        : specifier(specifier.clone()),
-          type(type),
-          info(src),
-          compileCache(compileCache) {}
-
-    Entry(const kj::Path& specifier, Type type, ModuleCallback factory)
-        : specifier(specifier.clone()),
-          type(type),
-          info(kj::mv(factory)) {}
 
     Entry(Entry&&) = default;
     Entry& operator=(Entry&&) = default;
@@ -642,9 +690,14 @@ class ModuleRegistryImpl final: public ModuleRegistry {
         KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
           return kj::Maybe<ModuleInfo&>(moduleInfo);
         }
-        KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
-          info = ModuleInfo(js, specifier.toString(), src, compileCache,
-              ModuleInfoCompileOption::BUILTIN, observer);
+        KJ_CASE_ONEOF(src, StaticSource) {
+          info = ModuleInfo(js, specifier.toString(), src.source, src.compileCache, observer);
+          return info.tryGet<ModuleInfo>();
+        }
+        KJ_CASE_ONEOF(src, SharedSource) {
+          // Replacing `info` releases `src`, including its compile cache, only after compiling.
+          info =
+              ModuleInfo(js, specifier.toString(), src.source.addRef(), src.compileCache, observer);
           return info.tryGet<ModuleInfo>();
         }
         KJ_CASE_ONEOF(src, ModuleCallback) {

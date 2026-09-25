@@ -1,7 +1,7 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_js//npm:defs.bzl", "npm_link_package")
 load("@bazel_skylib//lib:selects.bzl", "selects")
-load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_flag")
 load("@npm//:capnp-es/package_json.bzl", capnp_es_bins = "bin")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
@@ -27,6 +27,12 @@ alias(
 )
 
 npm_link_all_packages(name = "node_modules")
+
+# Rust formatting and lint configuration for every crate in the repository, wherever it lives.
+exports_files([
+    "clippy.toml",
+    "rustfmt.toml",
+])
 
 npm_link_package(
     name = "node_modules/@workerd/jsg",

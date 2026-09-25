@@ -3,7 +3,75 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
-import { tracing as publicTracing } from 'cloudflare:workers';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { DurableObject, tracing as publicTracing } from 'cloudflare:workers';
+
+assert.strictEqual(publicTracing.getActiveSpan(), undefined);
+const getActiveSpanOutsideInvocationContext = AsyncLocalStorage.bind(() =>
+  publicTracing.getActiveSpan()
+);
+
+// Overlapping Durable Object requests share an IoContext, but each async continuation must retain
+// its originating request's tracing state. This verifies that request A resuming while request B is
+// current cannot write A's invocation-span attributes into B's tail trace.
+export class OverlappingRequestsObject extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.firstCanResume = new Promise((resolve) => {
+      this.resumeFirst = resolve;
+    });
+    this.firstAttributed = new Promise((resolve) => {
+      this.resolveFirstAttributed = resolve;
+    });
+  }
+
+  async fetch(request) {
+    const requestName = new URL(request.url).pathname.slice(1);
+
+    if (requestName === 'a') {
+      this.firstIsWaiting = true;
+      return new Response(
+        new ReadableStream({
+          pull: async (controller) => {
+            controller.enqueue(new TextEncoder().encode('ready'));
+            await this.firstCanResume;
+            const span = publicTracing.getActiveSpan();
+            assert(span);
+            assert.strictEqual(span.isTraced, true);
+            span.setAttribute('overlapping.request', 'a');
+            this.resolveFirstAttributed();
+            controller.close();
+          },
+        })
+      );
+    }
+
+    assert.strictEqual(this.firstIsWaiting, true);
+    const span = publicTracing.getActiveSpan();
+    assert(span);
+    assert.strictEqual(span.isTraced, true);
+    span.setAttribute('overlapping.request', 'b');
+    this.resumeFirst();
+    await this.firstAttributed;
+    return new Response('b');
+  }
+}
+
+export const overlappingDurableObjectRequests = {
+  async test(ctrl, env) {
+    const id = env.overlappingRequests.idFromName('test');
+    const stub = env.overlappingRequests.get(id);
+    const first = await stub.fetch('https://example.com/a');
+    const firstReader = first.body.getReader();
+    const ready = await firstReader.read();
+    assert.strictEqual(ready.done, false);
+    assert.strictEqual(new TextDecoder().decode(ready.value), 'ready');
+    const second = await stub.fetch('https://example.com/b');
+    const [firstEnd] = await Promise.all([firstReader.read(), second.text()]);
+    assert.strictEqual(firstEnd.done, true);
+    assert.deepStrictEqual([first.status, second.status], [200, 200]);
+  },
+};
 
 export const syncFunction = {
   async test(ctrl, env, ctx) {
@@ -156,6 +224,53 @@ export const setAttributes = {
   },
 };
 
+export const setStatus = {
+  async test(ctrl, env, ctx) {
+    const errorSpan = publicTracing.startSpan('status-error-op');
+    errorSpan.setAttribute('test', 'setStatus');
+    assert.strictEqual(
+      errorSpan.setStatus({ code: 'error', message: 'first error' }),
+      errorSpan
+    );
+    errorSpan.setStatus({ code: 'error', message: 'second error' });
+    errorSpan.setStatus({ code: 'unset' });
+    errorSpan.end();
+    // All span mutations are no-ops after end().
+    errorSpan.setStatus({ code: 'ok' });
+
+    const okSpan = publicTracing.startSpan('status-ok-op');
+    okSpan.setAttribute('test', 'setStatus');
+    okSpan.setStatus({ code: 'error', message: 'temporary error' });
+    okSpan.setStatus({ code: 'ok', message: 'not retained' });
+    okSpan.setStatus({ code: 'error', message: 'error after ok' });
+    okSpan.end();
+  },
+};
+
+export const updateName = {
+  async test() {
+    const span = publicTracing.startSpan('update-name-original');
+    span.setAttribute('test', 'updateName');
+    assert.strictEqual(span.updateName('update-name-intermediate'), span);
+    span.updateName(`updated-${'x'.repeat(100)}`);
+    span.end();
+    span.updateName('update-name-after-end');
+  },
+};
+
+export const updateInvocationSpan = {
+  async test() {
+    const span = publicTracing.getActiveSpan();
+    assert(span);
+    span.setAttribute('test', 'updateInvocationSpan');
+    assert.strictEqual(span.updateName('updated-invocation'), span);
+    assert.strictEqual(
+      span.setStatus({ code: 'error', message: 'invocation error' }),
+      span
+    );
+  },
+};
+
 // Verify that nested withSpan calls produce correctly nested spans. This exercises the
 // AsyncContextFrame push path in enterSpan: the inner span should be parented on the
 // outer span.
@@ -248,6 +363,32 @@ export const publicImportStartSpan = {
     assert.strictEqual(span.isTraced, true);
     span.end();
     assert.strictEqual(span.isTraced, false);
+  },
+};
+
+export const getActiveSpan = {
+  async test(ctrl, env, ctx) {
+    const invocationSpan = publicTracing.getActiveSpan();
+    assert.ok(invocationSpan);
+    // All the ways to get the active span should return the same reference
+    assert.strictEqual(publicTracing.getActiveSpan(), invocationSpan);
+    assert.strictEqual(ctx.tracing.getActiveSpan(), invocationSpan);
+    assert.strictEqual(getActiveSpanOutsideInvocationContext(), undefined);
+    assert.strictEqual(invocationSpan.isTraced, true);
+    // This is ignored since we control the lifecycle
+    invocationSpan.end();
+    assert.strictEqual(invocationSpan.isTraced, true);
+    invocationSpan.setAttribute('test', 'getActiveSpanInvocation');
+
+    await ctx.tracing.startActiveSpan('get-active-span-op', async (span) => {
+      assert.strictEqual(publicTracing.getActiveSpan(), span);
+      await Promise.resolve();
+      assert.strictEqual(publicTracing.getActiveSpan(), span);
+      span.setAttribute('test', 'getActiveSpan');
+      span.end();
+    });
+
+    assert.strictEqual(publicTracing.getActiveSpan(), invocationSpan);
   },
 };
 

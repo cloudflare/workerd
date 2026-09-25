@@ -7,7 +7,6 @@
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/trace.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
-#include <workerd/jsg/memory.h>
 #include <workerd/util/own-util.h>
 #include <workerd/util/strong-bool.h>
 
@@ -38,6 +37,40 @@ class Trace;
 
 namespace tracing {
 WD_STRONG_BOOL(LogTruncated);
+
+using SpanStatusCode = rpc::SpanStatusCode;
+
+struct SpanStatus {
+  explicit SpanStatus(SpanStatusCode code, kj::Maybe<kj::ConstString> message = kj::none)
+      : code(code) {
+    if (code == SpanStatusCode::ERROR) {
+      this->message = kj::mv(message);
+    }
+  }
+  SpanStatus(rpc::SpanStatus::Reader reader);
+  SpanStatus(SpanStatus&&) noexcept = default;
+  SpanStatus& operator=(SpanStatus&&) = default;
+  KJ_DISALLOW_COPY(SpanStatus);
+
+  SpanStatusCode getCode() const {
+    return code;
+  }
+
+  kj::Maybe<const kj::ConstString&> getMessage() const KJ_LIFETIMEBOUND {
+    KJ_IF_SOME(value, message) {
+      return value;
+    }
+    return kj::none;
+  }
+
+  void copyTo(rpc::SpanStatus::Builder builder) const;
+  SpanStatus clone() const;
+  size_t size() const;
+
+ private:
+  SpanStatusCode code = SpanStatusCode::UNSET;
+  kj::Maybe<kj::ConstString> message;
+};
 
 // A 128-bit globally unique trace identifier. This will be used for both
 // external and internal tracing. Specifically, for internal tracing, this
@@ -394,11 +427,6 @@ struct FetchEventInfo final {
     void copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder) const;
     Header clone() const;
     kj::String toString() const;
-
-    JSG_MEMORY_INFO(Header) {
-      tracker.trackField("name", name);
-      tracker.trackField("value", value);
-    }
   };
 
   kj::HttpMethod method;
@@ -683,8 +711,13 @@ struct Log final {
 
 // Describes an exception event
 struct Exception final {
-  explicit Exception(
-      kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
+  using Code = kj::OneOf<kj::String, double>;
+
+  explicit Exception(kj::Date timestamp,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack,
+      kj::Maybe<Code> code = kj::none);
   Exception(rpc::Trace::Exception::Reader reader);
   Exception(Exception&&) noexcept = default;
   KJ_DISALLOW_COPY(Exception);
@@ -697,6 +730,7 @@ struct Exception final {
   kj::String message;
 
   kj::Maybe<kj::String> stack;
+  kj::Maybe<Code> code;
 
   void copyTo(rpc::Trace::Exception::Builder builder) const;
   Exception clone() const;
@@ -853,6 +887,24 @@ struct SpanClose final {
   kj::String toString() const;
 };
 
+struct SpanUpdate final {
+  using Info = kj::OneOf<kj::ConstString, SpanStatus>;
+
+  explicit SpanUpdate(kj::ConstString operationName);
+  explicit SpanUpdate(SpanStatus status);
+  SpanUpdate(rpc::Trace::SpanUpdate::Reader reader);
+  SpanUpdate(SpanUpdate&&) noexcept = default;
+  SpanUpdate& operator=(SpanUpdate&&) = default;
+  KJ_DISALLOW_COPY(SpanUpdate);
+
+  Info info;
+
+  void copyTo(rpc::Trace::SpanUpdate::Builder builder) const;
+  SpanUpdate clone() const;
+  kj::String toString() const;
+  size_t size() const;
+};
+
 // The Onset and Outcome event types are special forms of SpanOpen and
 // SpanClose that explicitly mark the start and end of the root span.
 // A streaming tail session will always begin with an Onset event, and
@@ -915,15 +967,16 @@ struct Outcome final {
 // A streaming tail worker receives a series of Tail Events. Tail events always
 // occur within an InvocationSpanContext. The first TailEvent delivered to a
 // streaming tail session is always an Onset. The final TailEvent delivered is
-// always an Outcome. Between those can be any number of SpanOpen, SpanClose,
-// and Mark events. Every SpanOpen *must* be associated with a SpanClose unless
-// the stream was abruptly terminated.
+// always an Outcome. Between those can be any number of SpanOpen, SpanUpdate,
+// SpanClose, and Mark events. Every SpanOpen *must* be associated with a
+// SpanClose unless the stream was abruptly terminated.
 // A future version may add support for Link events again.
 struct TailEvent final {
   using Event = kj::OneOf<Onset,
       Outcome,
       SpanOpen,
       SpanClose,
+      SpanUpdate,
       DiagnosticChannelEvent,
       Exception,
       Log,
@@ -1127,7 +1180,7 @@ class SpanParent {
   // Make a SpanParent that causes children not to be reported anywhere.
   SpanParent(decltype(nullptr)) {}
 
-  SpanParent(kj::Maybe<kj::Own<SpanObserver>> observer): observer(kj::mv(observer)) {}
+  SpanParent(kj::Rc<SpanObserver> observer): observer(kj::mv(observer)) {}
 
   SpanParent(SpanParent&& other) = default;
   SpanParent& operator=(SpanParent&& other) = default;
@@ -1143,7 +1196,7 @@ class SpanParent {
 
   // Useful to skip unnecessary code when not observed.
   bool isObserved() {
-    return observer != kj::none;
+    return observer != nullptr;
   }
 
   // Get the underlying SpanObserver representing the parent span.
@@ -1152,7 +1205,8 @@ class SpanParent {
   // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
   // the `SpanObserver` to the expected observer type in order to extract the trace ID.
   kj::Maybe<SpanObserver&> getObserver() {
-    return observer;
+    if (observer != nullptr) return *observer;
+    return kj::none;
   }
 
   // Return the serializable identity of this span for cross-boundary propagation.
@@ -1166,7 +1220,7 @@ class SpanParent {
   static SpanParent fromSpanContext(tracing::SpanContext context);
 
  private:
-  kj::Maybe<kj::Own<SpanObserver>> observer;
+  kj::Rc<SpanObserver> observer;
 };
 
 // Whether the span tag is a custom tag added using the user tracing binding, we do not log for
@@ -1188,7 +1242,7 @@ class SpanBuilder {
   //
   // `operationName` should be a string literal with infinite lifetime, or somehow otherwise be
   // attached to the observer observing this span.
-  explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
+  explicit SpanBuilder(kj::Rc<SpanObserver> observer,
       kj::ConstString operationName,
       kj::Maybe<kj::Date> startTime = kj::none);
 
@@ -1208,7 +1262,7 @@ class SpanBuilder {
 
   // Useful to skip unnecessary code when not observed.
   bool isObserved() {
-    return observer != kj::none;
+    return observer != nullptr;
   }
 
   // Get the underlying SpanObserver representing the span.
@@ -1217,7 +1271,8 @@ class SpanBuilder {
   // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
   // the `SpanObserver` to the expected observer type in order to extract the trace ID.
   kj::Maybe<SpanObserver&> getObserver() {
-    return observer;
+    if (observer != nullptr) return *observer;
+    return kj::none;
   }
 
   // Create a new child span.
@@ -1230,6 +1285,8 @@ class SpanBuilder {
   //
   // `operationName` should be a string literal with infinite lifetime.
   void setOperationName(kj::ConstString operationName);
+
+  void setStatus(tracing::SpanStatus status);
 
   using TagValue = Span::TagValue;
   // `key` must point to memory that will remain valid all the way until this span's data is
@@ -1254,8 +1311,14 @@ class SpanBuilder {
   // duplicate keys.
   void addLog(kj::Date timestamp, kj::ConstString key, TagValue value);
 
+  // Records an exception associated with this span. Calls after end() are ignored.
+  void recordException(kj::Maybe<tracing::Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack);
+
  private:
-  kj::Maybe<kj::Own<SpanObserver>> observer;
+  kj::Rc<SpanObserver> observer;
   // The under-construction span, or null if the span has ended.
   kj::Maybe<Span> span;
 
@@ -1268,18 +1331,18 @@ class SpanBuilder {
 //
 // A new SpanObserver is created at the start of each Span. The SpanBuilder drives the observer
 // through its lifecycle: onOpen() is called when the span is created, onClose() when the span
-// ends, and onUpdateName() if the operation name changes between open and close.
+// ends, and update methods are called when mutable properties change between open and close.
 class SpanObserver: public kj::Refcounted {
  public:
   // Allocate a new child span.
   //
   // Note that children can be created long after a span has completed.
-  [[nodiscard]] virtual kj::Own<SpanObserver> newChild() = 0;
+  [[nodiscard]] virtual kj::Rc<SpanObserver> newChild() = 0;
 
   // Allocate a child for a span initiated directly by user JavaScript (via
   // `ctx.tracing.enterSpan`). Allows implementations to apply different policies than for
   // runtime-issued spans (notably, edgeworker bypasses its operation-name allowlist here).
-  [[nodiscard]] virtual kj::Own<SpanObserver> newChildFromUserCode() {
+  [[nodiscard]] virtual kj::Rc<SpanObserver> newChildFromUserCode() {
     return newChild();
   }
 
@@ -1292,10 +1355,18 @@ class SpanObserver: public kj::Refcounted {
   // the observer takes ownership.
   virtual void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) = 0;
 
+  virtual void onException(kj::Date timestamp,
+      kj::Maybe<tracing::Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) {}
+
   // Called when the operation name is changed after the span was opened (via
   // SpanBuilder::setOperationName()). Observers that eagerly stream the open event should handle
   // this; others may simply update their buffered state. Default implementation is a no-op.
   virtual void onUpdateName(kj::ConstString operationName) {}
+
+  virtual void onUpdateStatus(tracing::SpanStatus&& status) {}
 
   // The current time to be provided for the span. For user tracing, we will override this to
   // provide I/O time. This *requires* that spans are only created when an IOContext is available
@@ -1325,7 +1396,7 @@ class NonRecordingSpanObserver final: public SpanObserver {
  public:
   explicit NonRecordingSpanObserver(tracing::SpanContext context): context(kj::mv(context)) {}
 
-  kj::Own<SpanObserver> newChild() override {
+  kj::Rc<SpanObserver> newChild() override {
     return {};
   }
   void onOpen(kj::ConstString, kj::Date) override {}
@@ -1339,40 +1410,65 @@ class NonRecordingSpanObserver final: public SpanObserver {
 };
 
 inline kj::Maybe<tracing::SpanContext> SpanParent::toSpanContext() {
-  KJ_IF_SOME(obs, observer) {
-    return obs->toSpanContext();
-  }
+  if (observer != nullptr) return observer->toSpanContext();
   return kj::none;
 }
 
 inline tracing::SpanId SpanParent::getSpanId() {
-  KJ_IF_SOME(obs, observer) {
-    return obs->getSpanId();
-  }
+  if (observer != nullptr) return observer->getSpanId();
   return tracing::SpanId::nullId;
 }
 
 inline SpanParent SpanParent::fromSpanContext(tracing::SpanContext context) {
-  return SpanParent(kj::refcounted<NonRecordingSpanObserver>(kj::mv(context)));
+  return SpanParent(kj::rc<NonRecordingSpanObserver>(kj::mv(context)));
 }
 
-inline SpanParent::SpanParent(SpanBuilder& builder): observer(mapAddRef(builder.observer)) {}
+inline SpanParent::SpanParent(SpanBuilder& builder): observer(builder.observer.addRef()) {}
 
 inline SpanParent SpanParent::addRef() {
-  return SpanParent(mapAddRef(observer));
+  return SpanParent(observer.addRef());
 }
 
 inline SpanBuilder SpanParent::newChild(
     kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
-  return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
-      kj::mv(operationName), startTime);
+  if (observer == nullptr) return nullptr;
+  return SpanBuilder(observer->newChild(), kj::mv(operationName), startTime);
 }
 
 inline SpanBuilder SpanBuilder::newChild(
     kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
-  return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
-      kj::mv(operationName), startTime);
+  if (observer == nullptr) return nullptr;
+  return SpanBuilder(observer->newChild(), kj::mv(operationName), startTime);
 }
+
+class TraceContext;
+
+// Pair of span parents (internal + user) used to express "open new spans nested
+// under these". Doesn't own SpanBuilders, unlike TraceContext.
+class TraceContextParent {
+ public:
+  TraceContextParent(SpanParent internalSpan, SpanParent userSpan)
+      : internalSpan(kj::mv(internalSpan)),
+        userSpan(kj::mv(userSpan)) {}
+  TraceContextParent(TraceContextParent&& other) = default;
+  TraceContextParent& operator=(TraceContextParent&& other) = default;
+  KJ_DISALLOW_COPY(TraceContextParent);
+
+  TraceContextParent addRef() {
+    return TraceContextParent(internalSpan.addRef(), userSpan.addRef());
+  }
+
+  // Useful to skip unnecessary work (e.g. creating child spans) when not observed.
+  bool isObserved() {
+    return internalSpan.isObserved() || userSpan.isObserved();
+  }
+
+  [[nodiscard]] TraceContext newChild(kj::ConstString operationName);
+
+ private:
+  SpanParent internalSpan;
+  SpanParent userSpan;
+};
 
 // TraceContext to keep track of user tracing/existing tracing better
 class TraceContext {
@@ -1398,10 +1494,31 @@ class TraceContext {
     return SpanParent(userSpan);
   }
 
+  TraceContextParent getSpanParents() {
+    return TraceContextParent(SpanParent(span), SpanParent(userSpan));
+  }
+
+  // Like getSpanParents(), but returns kj::none when neither span is observed. Use this when the
+  // parents may be retained beyond the current call (e.g. stored on a returned stub/promise):
+  // storing nothing on the untraced path avoids holding span state, while the traced path still
+  // nests follow-up calls correctly.
+  kj::Maybe<TraceContextParent> getSpanParentsIfObserved() {
+    if (!isObserved()) return kj::none;
+    return getSpanParents();
+  }
+
  private:
   SpanBuilder span;
   SpanBuilder userSpan;
 };
+
+inline TraceContext TraceContextParent::newChild(kj::ConstString operationName) {
+  // newChild() consumes its operationName argument, so clone it for the internal child and move
+  // the original into the user child.
+  auto internalChild = internalSpan.newChild(operationName.clone());
+  auto userChild = userSpan.newChild(kj::mv(operationName));
+  return TraceContext(kj::mv(internalChild), kj::mv(userChild));
+}
 
 // RAII object that measures the time duration over its lifetime. It tags this duration onto a
 // given request span using a specified tag name. Ideal for automatically tracking and logging

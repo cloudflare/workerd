@@ -4,11 +4,8 @@
 
 #include "compression.h"
 
-#include "zlib-rs-bridge.h"
-
 #include <workerd/io/features.h>
 #include <workerd/jsg/util.h>
-#include <workerd/util/autogate.h>
 
 #include <nbytes.h>
 
@@ -45,93 +42,6 @@ void CompressionAllocator::FreeForZlib(void* opaque, void* pointer) {
 }
 
 // =======================================================================================
-// ZlibBackend
-
-namespace {
-
-// Wrappers over the native (chromium) zlib. deflateInit2/inflateInit2 are
-// macros injecting ZLIB_VERSION and sizeof(z_stream), hence the indirection.
-int nativeDeflateInit2(z_stream* strm, int level, int windowBits, int memLevel, int strategy) {
-  return deflateInit2(strm, level, Z_DEFLATED, windowBits, memLevel, strategy);
-}
-int nativeInflateInit2(z_stream* strm, int windowBits) {
-  return inflateInit2(strm, windowBits);
-}
-
-constexpr ZlibBackend NATIVE_ZLIB = {
-  .initDeflate = &nativeDeflateInit2,
-  .initInflate = &nativeInflateInit2,
-  .runDeflate = &deflate,
-  .runInflate = &inflate,
-  .endDeflate = &deflateEnd,
-  .endInflate = &inflateEnd,
-  .resetDeflate = &deflateReset,
-  .resetInflate = &inflateReset,
-  .setDeflateParams = &deflateParams,
-  .setDeflateDictionary = &deflateSetDictionary,
-  .setInflateDictionary = &inflateSetDictionary,
-};
-
-// Wrappers over zlib-rs; the bridge takes void* because its translation unit
-// cannot see the chromium zlib types (see zlib-rs-bridge.h).
-int rsDeflateInit2(z_stream* strm, int level, int windowBits, int memLevel, int strategy) {
-  return zlibrs::initDeflate(strm, level, windowBits, memLevel, strategy);
-}
-int rsInflateInit2(z_stream* strm, int windowBits) {
-  return zlibrs::initInflate(strm, windowBits);
-}
-int rsDeflate(z_stream* strm, int flush) {
-  return zlibrs::runDeflate(strm, flush);
-}
-int rsInflate(z_stream* strm, int flush) {
-  return zlibrs::runInflate(strm, flush);
-}
-int rsDeflateEnd(z_stream* strm) {
-  return zlibrs::endDeflate(strm);
-}
-int rsInflateEnd(z_stream* strm) {
-  return zlibrs::endInflate(strm);
-}
-int rsDeflateReset(z_stream* strm) {
-  return zlibrs::resetDeflate(strm);
-}
-int rsInflateReset(z_stream* strm) {
-  return zlibrs::resetInflate(strm);
-}
-int rsDeflateParams(z_stream* strm, int level, int strategy) {
-  return zlibrs::setDeflateParams(strm, level, strategy);
-}
-int rsDeflateSetDictionary(z_stream* strm, const kj::byte* dictionary, uint32_t dictLength) {
-  return zlibrs::setDeflateDictionary(strm, dictionary, dictLength);
-}
-int rsInflateSetDictionary(z_stream* strm, const kj::byte* dictionary, uint32_t dictLength) {
-  return zlibrs::setInflateDictionary(strm, dictionary, dictLength);
-}
-
-constexpr ZlibBackend ZLIB_RS = {
-  .initDeflate = &rsDeflateInit2,
-  .initInflate = &rsInflateInit2,
-  .runDeflate = &rsDeflate,
-  .runInflate = &rsInflate,
-  .endDeflate = &rsDeflateEnd,
-  .endInflate = &rsInflateEnd,
-  .resetDeflate = &rsDeflateReset,
-  .resetInflate = &rsInflateReset,
-  .setDeflateParams = &rsDeflateParams,
-  .setDeflateDictionary = &rsDeflateSetDictionary,
-  .setInflateDictionary = &rsInflateSetDictionary,
-};
-
-}  // namespace
-
-const ZlibBackend& selectZlibBackend() {
-  if (util::Autogate::isEnabled(util::AutogateKey::COMPRESSION_RS)) {
-    return ZLIB_RS;
-  }
-  return NATIVE_ZLIB;
-}
-
-// =======================================================================================
 // ZlibStream
 
 ZlibStream::ZlibStream(CompressionAllocator& allocator) {
@@ -150,10 +60,10 @@ kj::Maybe<int> ZlibStream::init(Mode mode, Options options) {
   int result = [&]() {
     switch (mode) {
       case Mode::COMPRESS:
-        return backend.initDeflate(
-            &stream, options.level, options.windowBits, options.memLevel, options.strategy);
+        return deflateInit2(&stream, options.level, Z_DEFLATED, options.windowBits,
+            options.memLevel, options.strategy);
       case Mode::DECOMPRESS:
-        return backend.initInflate(&stream, options.windowBits);
+        return inflateInit2(&stream, options.windowBits);
     }
     KJ_UNREACHABLE;
   }();
@@ -169,9 +79,9 @@ kj::Maybe<int> ZlibStream::reset() {
   int result = [&]() {
     switch (mode) {
       case Mode::COMPRESS:
-        return backend.resetDeflate(&stream);
+        return deflateReset(&stream);
       case Mode::DECOMPRESS:
-        return backend.resetInflate(&stream);
+        return inflateReset(&stream);
     }
     KJ_UNREACHABLE;
   }();
@@ -188,9 +98,9 @@ int ZlibStream::end() {
   ended = true;
   switch (mode) {
     case Mode::COMPRESS:
-      return backend.endDeflate(&stream);
+      return deflateEnd(&stream);
     case Mode::DECOMPRESS:
-      return backend.endInflate(&stream);
+      return inflateEnd(&stream);
   }
   KJ_UNREACHABLE;
 }
@@ -199,9 +109,9 @@ int ZlibStream::run(int flush) {
   KJ_ASSERT(initialized && !ended, "ZlibStream::run() requires a live stream");
   switch (mode) {
     case Mode::COMPRESS:
-      return backend.runDeflate(&stream, flush);
+      return deflate(&stream, flush);
     case Mode::DECOMPRESS:
-      return backend.runInflate(&stream, flush);
+      return inflate(&stream, flush);
   }
   KJ_UNREACHABLE;
 }
@@ -323,41 +233,35 @@ void CodecStage::Context::enforceStrictChecks(int flush, const Result& result) {
       TypeError, "Called close() on a decompression stream with incomplete data");
 }
 
-kj::ArrayPtr<kj::byte> CodecStage::LazyBuffer::take(size_t readSize) {
-  KJ_ASSERT(readSize <= validSize);
-  // An empty read must not index the vector: the read offset is output.size() - validSize,
-  // which is one past the end whenever the valid region is empty.
-  if (readSize == 0) return nullptr;
-  kj::ArrayPtr<kj::byte> chunk = kj::arrayPtr(&output[output.size() - validSize], readSize);
-  validSize -= readSize;
-  return chunk;
+void CodecStage::OutputBuffer::write(kj::ArrayPtr<const kj::byte> chunk) {
+  if (chunk.size() == 0) return;
+  blocks.push_back(kj::heapArray(chunk));
+  total += chunk.size();
 }
 
-void CodecStage::LazyBuffer::maybeShift() {
-  size_t unusedSpace = output.size() - validSize;
-  if (unusedSpace >= 1024 && unusedSpace >= (output.size() >> 3)) {
-    // Shifting buffer to erase data that has already been read. validSize remains the same.
-    memmove(output.begin(), output.begin() + unusedSpace, validSize);
-    output.truncate(validSize);
+size_t CodecStage::OutputBuffer::pull(kj::ArrayPtr<kj::byte> dest) {
+  size_t copied = 0;
+  while (dest.size() > 0 && !blocks.empty()) {
+    auto remaining = blocks.front().slice(headOffset);
+    auto piece = remaining.first(kj::min(remaining.size(), dest.size()));
+    dest.write(piece);
+    copied += piece.size();
+    headOffset += piece.size();
+    if (headOffset == blocks.front().size()) {
+      blocks.pop_front();
+      headOffset = 0;
+    }
   }
+  total -= copied;
+  if (blocks.empty()) blocks.shrinkToInitial();
+  return copied;
 }
 
-void CodecStage::LazyBuffer::write(kj::ArrayPtr<const kj::byte> chunk) {
-  output.addAll(chunk);
-  validSize += chunk.size();
-}
-
-void CodecStage::LazyBuffer::clear() {
-  output.clear();
-  validSize = 0;
-}
-
-size_t CodecStage::LazyBuffer::size() {
-  return validSize;
-}
-
-bool CodecStage::LazyBuffer::empty() {
-  return validSize == 0;
+void CodecStage::OutputBuffer::clear() {
+  blocks.clear();
+  blocks.shrinkToInitial();
+  headOffset = 0;
+  total = 0;
 }
 
 CodecStage::CodecStage(Mode mode,
@@ -378,11 +282,7 @@ void CodecStage::end() {
 }
 
 size_t CodecStage::pull(kj::ArrayPtr<kj::byte> dest) {
-  auto n = kj::min(dest.size(), output.size());
-  if (n == 0) return 0;
-  dest.write(output.take(n));
-  output.maybeShift();
-  return n;
+  return output.pull(dest);
 }
 
 size_t CodecStage::available() {
@@ -442,6 +342,10 @@ uint32_t CompressionCodec::pullInto(jsg::JsBufferSource view) {
 
 double CompressionCodec::available() {
   return static_cast<double>(stage.available());
+}
+
+void CompressionCodec::clear() {
+  stage.clear();
 }
 
 void newCompressionCodecCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {

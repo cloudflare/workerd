@@ -4,13 +4,18 @@
 
 #include "per-isolate-bootstrap.h"
 
+#include <workerd/api/abort-bootstrap.h>
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
+#include <workerd/api/filesystem-bootstrap.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/sentry.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 #include <per_isolate/per_isolate.capnp.h>
 
@@ -51,7 +56,7 @@ struct CompatFlagField {
   capnp::StructSchema::Field field;
 };
 
-const kj::ArrayPtr<const CompatFlagField> getCompatFlagFields() {
+kj::StaticArrayPtr<const CompatFlagField> getCompatFlagFields() {
   static const auto table = []() {
     auto schema = capnp::Schema::from<CompatibilityFlags>();
     kj::Vector<CompatFlagField> fields;
@@ -68,7 +73,7 @@ const kj::ArrayPtr<const CompatFlagField> getCompatFlagFields() {
     }
     return fields.releaseAsArray();
   }();
-  return table;
+  return {table.begin(), table.size()};
 }
 
 // Per-context state for the bootstrap require() mechanism.
@@ -166,6 +171,36 @@ static void CreateDigestContext(const v8::FunctionCallbackInfo<v8::Value>& args)
   });
 }
 
+// Creates the native write context backing the TypeScript
+// FileSystemWritableFileStream. Like CreateDigestContext this allocates and can
+// throw -- a DOMException when the file cannot be opened, a TypeError when the
+// receiver is not a FileSystemFileHandle -- so it is a plain method rather than a
+// fast-API call, and needs liftKj.
+static void CreateFileSystemWriteContext(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      // The caller has already reduced the option bag to a boolean, so this is
+      // ToBoolean on an actual boolean and cannot run user code.
+      auto keepExistingData = api::KeepExistingData(args[1]->BooleanValue(args.GetIsolate()));
+      args.GetReturnValue().Set(v8::Local<v8::Value>(
+          api::createFileSystemWriteContext(js, jsg::JsValue(args[0]), keepExistingData)));
+    });
+  });
+}
+
+// Registers a DOM abort algorithm on an AbortSignal (see abort-bootstrap.h). Plain
+// method: it allocates and can throw.
+static void AddAbortAlgorithm(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      args.GetReturnValue().Set(v8::Local<v8::Value>(
+          api::addAbortAlgorithmForBootstrap(js, jsg::JsValue(args[0]), jsg::JsValue(args[1]))));
+    });
+  });
+}
+
 static const v8::CFunction fast_mark_promise_handled_ =
     v8::CFunction::Make(MarkPromiseHandledFastApi);
 
@@ -209,6 +244,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "getApiSymbol",
     "newCompressionCodec",
     "createDigestContext",
+    "createFileSystemWriteContext",
+    "addAbortAlgorithm",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -220,6 +257,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, GetApiSymbol),
     getMethod(js, api::newCompressionCodecCallback),
     getMethod(js, CreateDigestContext),
+    getMethod(js, CreateFileSystemWriteContext),
+    getMethod(js, AddAbortAlgorithm),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
@@ -334,6 +373,7 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
       // properties available as variables in the function scope without
       // putting them on globalThis.
       auto source = script.getSrc();
+      auto& observer = jsg::IsolateBase::from(js.v8Isolate).getObserver();
 #if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
       // Under LSAN, use a copied string to avoid false-positive leak reports.
       // The ExternString resource is properly owned by V8 (freed via Dispose()
@@ -356,8 +396,12 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
         // buffer (which lives in the static capnp bundle data).
         cachedData = new v8::ScriptCompiler::CachedData(compileCache.begin(), compileCache.size(),
             v8::ScriptCompiler::CachedData::BufferNotOwned);
-        if (cachedData->CompatibilityCheck(js.v8Isolate) !=
-            v8::ScriptCompiler::CachedData::kSuccess) {
+        auto check = cachedData->CompatibilityCheck(js.v8Isolate);
+        if (check != v8::ScriptCompiler::CachedData::kSuccess) {
+          LOG_WARNING_ONCE("NOSENTRY per-isolate bootstrap compile cache failed its "
+                           "compatibility check; scripts will be compiled from source",
+              normalized, static_cast<int>(check));
+          observer.onCompileCacheRejected(js.v8Isolate);
           delete cachedData;
           cachedData = nullptr;
         }
@@ -374,6 +418,17 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
       v8::Local<v8::Object> ext = extObj;
       auto fn = jsg::JsFunction(jsg::check(v8::ScriptCompiler::CompileFunction(
           js.v8Context(), &compilerSource, 0, nullptr, 1, &ext, options)));
+
+      if (options == v8::ScriptCompiler::kConsumeCodeCache) {
+        if (compilerSource.GetCachedData()->rejected) {
+          LOG_WARNING_ONCE("NOSENTRY per-isolate bootstrap compile cache was rejected by V8 "
+                           "while compiling; scripts will be compiled from source",
+              normalized);
+          observer.onCompileCacheRejected(js.v8Isolate);
+        } else {
+          observer.onCompileCacheFound(js.v8Isolate);
+        }
+      }
 
       // Execute the script.
       fn.call(js, js.undefined());
@@ -468,13 +523,19 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
   // The result is cached in state and injected as a pseudo-global into every
   // subsequent script via the context extension object.
   JSG_TRY(js) {
-    auto result =
-        state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("primordials"_kj));
-    state->primordials = result.addRef(js);
+    {
+      TRACE_EVENT("workerd", "PerIsolateBootrap::primordials");
+      auto result =
+          state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("primordials"_kj));
+      state->primordials = result.addRef(js);
+    }
 
-    // Run the entry point. This synchronously executes main.js, which may
-    // require() other scripts. All execution is synchronous.
-    state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("main"_kj));
+    {
+      TRACE_EVENT("workerd", "PerIsolateBootstrap::main");
+      // Run the entry point. This synchronously executes main.js, which may
+      // require() other scripts. All execution is synchronous.
+      state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("main"_kj));
+    }
 
     if (!flags.getJsWeakRef()) {
       jsg::deleteWeakRefGlobals(js.v8Isolate, context);

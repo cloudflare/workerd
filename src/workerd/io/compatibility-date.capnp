@@ -1570,8 +1570,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   autoGrpcConvert @178 :Bool
       $compatEnableFlag("auto_grpc_convert")
-      $neededByFl
-      $experimental;
+      $neededByFl;
   # When enabled, a Worker's outbound gRPC-web subrequest is converted to gRPC at
   # the edge.
 
@@ -1642,21 +1641,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   wasmMemoryDiscard @186 :Bool
       $compatEnableFlag("wasm_memory_discard")
       $experimental;
-  # Enables the experimental WebAssembly memory.discard proposal, exposing
-  # `WebAssembly.Memory.prototype.discard(byteOffset, byteLength)` and the
-  # `memory.discard` opcode. Both zero the given wasm-page-aligned region and
-  # release its physical pages back to the operating system. Shared memories
-  # are not supported, and unaligned or out-of-bounds ranges throw a
-  # RangeError (JS API) or trap (wasm opcode).
-  # WARNING: Do not remove the `$experimental` marker before
-  # the v8 change becomes part of chrome's default config.
+  # Obsolete flag. Has no effect. Still accepted so configs which set it keep validating.
 
-  pythonWorkers20260817 @187 :Bool
-      $compatEnableFlag("python_workers_20260817")
-      $compatDisableFlag("no_python_workers_20260817")
-      $experimental
+  pythonWorkers314 @187 :Bool
+      $compatEnableFlag("python_workers_314")
+      $compatDisableFlag("no_python_workers_314")
+      $impliedByAfterDate(name = "pythonWorkers", date = "2026-09-08")
       $pythonSnapshotRelease;
-  # Enables Python Workers using Pyodide 314.0.5.
+  # Enables Python Workers using Pyodide 314.0.6.
 
   specCompliantDispatchExceptions @188 :Bool
       $compatEnableFlag("spec_compliant_dispatch_exceptions")
@@ -1672,7 +1664,20 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # report-and-continue semantics. Internal runtime event delivery (fetch, scheduled, etc.)
   # is not affected and always propagates.
 
-  webCryptoModernAlgorithms @189 :Bool
+  autoInjectPythonWorkers @189 :Bool
+      $compatEnableFlag("auto_inject_python_workers")
+      $compatDisableFlag("no_auto_inject_python_workers")
+      $experimental;
+  # When enabled, a Worker whose entrypoint is Python are automatically
+  # considered as a Python Worker. This flag will be obsoleted once the feature
+  # is stable.
+
+  durableObjectIoTasksPreventEviction @190 :Bool
+      $compatEnableFlag("durable_object_io_tasks_prevent_eviction");
+  # Allows the runtime to track actor IoContext wait-until tasks to prevent Durable Object eviction.
+  # The runtime limits how long each task provides eviction protection.
+
+  webCryptoModernAlgorithms @191 :Bool
       $compatEnableFlag("webcrypto_modern_algorithms");
   # Enables opt-in WebCrypto modern algorithm support. This currently exposes the subset of
   # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA, related

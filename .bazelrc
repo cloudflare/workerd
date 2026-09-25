@@ -7,6 +7,9 @@ test --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-e
 test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli,-requires-container-engine
 # exclude enormous tests by default
 build --test_size_filters=-enormous
+# Run Python tests without snapshots while snapshot artifacts are being regenerated.
+build:regenerate-snapshots --test_size_filters=small,medium,large,enormous
+build:regenerate-snapshots --//build/config:python_snapshots=false
 # Don't run tests that set up TCP sockets in parallel since they may try to use the same ports. This
 # is less restrictive than marking such tests as "exclusive" since we can still run unrelated tests
 # at the same time.
@@ -61,12 +64,11 @@ common --incompatible_default_to_explicit_init_py
 build --per_file_copt='external@-Wno-error'
 build --per_file_copt='external@-Wno-suggest-override'
 build --per_file_copt='external/.*v8@-Wno-unused-function'
+build --per_file_copt='external/.*com_googlesource_chromium_icu@-Wno-thread-safety-analysis'
 build --per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
 build --host_per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
-build --per_file_copt=external/protobuf@-Wno-deprecated-declarations
-build --host_per_file_copt=external/protobuf@-Wno-deprecated-declarations
-build --per_file_copt=external/protobuf@-Wno-deprecated-this-capture
-build --host_per_file_copt=external/protobuf@-Wno-deprecated-this-capture
+build --per_file_copt=external/protobuf@-Wno-deprecated-declarations,-Wno-deprecated-this-capture
+build --host_per_file_copt=external/protobuf@-Wno-deprecated-declarations,-Wno-deprecated-this-capture
 
 # opt in to capnp deprecation warnings about trying to attach to a refcounted object
 build --cxxopt=-DKJ_WARN_REFCOUNTED_ATTACH=1
@@ -86,6 +88,13 @@ build:macos --per_file_copt=v8/src/heap/heap.cc@-O3
 # macros that reference symbols only available with V8_VERIFY_WRITE_BARRIERS (a debug-only define),
 # causing compile errors. Undefine DEBUG to match Linux behavior.
 build:macos --copt=-UDEBUG
+
+# Keep workerd and V8's Perfetto build configurations in sync.
+build:perfetto --//src/workerd/util:use_perfetto=True
+build:perfetto --@v8//:v8_use_perfetto=True
+build:no-perfetto --//src/workerd/util:use_perfetto=False
+build:no-perfetto --@v8//:v8_use_perfetto=False
+build:unix --config=perfetto
 
 # Increasing the optimization level of V8 significantly speeds up tests using V8 a lot, especially
 # python tests. This is useful for both CI and local development and enabled by default, but still
@@ -213,7 +222,7 @@ build --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
 # Using extra_rustc_flag for non-exec flags so they can be overwritten selectively.
 build --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=n
 build --@rules_rust//:extra_exec_rustc_flags=-Cdebug-assertions=n
-build --@rules_rust//:rustfmt.toml=//src/rust:rustfmt.toml
+build --@rules_rust//:rustfmt.toml=//:rustfmt.toml
 
 # We default to not enabling debug assertions and unwinding for Rust. For debug builds this is not
 # the right setting, but unfortunately we can't set that directly.
@@ -234,15 +243,69 @@ build:sanitizer-common --copt="-Og"
 build:sanitizer-common --copt="-g" --strip=never
 build:sanitizer-common --copt="-fno-optimize-sibling-calls"
 build:sanitizer-common --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-frame-pointer"
+# Rust's sanitizer support requires nightly
+build:sanitizer-common --@rules_rust//rust/toolchain/channel:channel=nightly
+# Rust and C++ share Clang's sanitizer runtime, linked by the C++ driver.
+build:sanitizer-common --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
 
 # address sanitizer (https://github.com/google/sanitizers/wiki/AddressSanitizer)
+#
+# Instruments both C++ and Rust (nightly rustc with -Zsanitizer=address plus an ASan-built standard
+# library, see //build/rust). Supported hosts: Linux x86_64 and aarch64, macOS arm64.
+#
+# Also enables UndefinedBehaviorSanitizer for C++ (https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html).
+# Unlike ASan and TSan, UBSan can share a build with either, so it rides along here instead of
+# needing its own CI lane. It instruments C++ only: rustc has no UBSan, and safe Rust already checks
+# bounds and (in debug builds) integer overflow.
 build:asan --config=sanitizer-common
-build:asan --copt="-fsanitize=address" --linkopt="-fsanitize=address"
+build:asan --platforms=//build/platforms:sanitizer_address_platform
+build:asan --copt="-fsanitize=address,undefined" --linkopt="-fsanitize=address,undefined"
 build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
+build:asan --test_env=UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
 build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
 build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
 build:asan --per_file_copt='external/.*v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
+# One toolchain per host; resolution picks the one matching the (host-parented) asan platform.
+build:asan --extra_toolchains=//build/rust:asan_toolchain_linux_x86_64,//build/rust:asan_toolchain_linux_aarch64,//build/rust:asan_toolchain_macos_aarch64
+build:asan --@rules_rust//:extra_rustc_flag=-Zsanitizer=address
+
+# thread sanitizer (https://github.com/google/sanitizers/wiki/ThreadSanitizerCppManual)
+#
+# Instruments both C++ and Rust (nightly rustc with -Zsanitizer=thread plus a TSan-built standard
+# library, see //build/rust). Supported hosts: Linux x86_64 (`--config=tsan`) and macOS arm64
+# (`--config=tsan-macos`). The two differ only in the Linux-specific unwinder linkopt below --
+# bazelrc has no way to make a single flag OS-conditional, hence the two entry points sharing
+# `tsan-common`.
+build:tsan-common --config=sanitizer-common
+build:tsan-common --copt="-fsanitize=thread" --linkopt="-fsanitize=thread"
+build:tsan-common --platforms=//build/platforms:sanitizer_thread_platform
+# handle_sigabrt=0 lets death tests observe SIGABRT directly instead of routing it through TSan's
+# signal handler. history_size=7 (the maximum) keeps 10 trace parts of memory-access history per
+# thread instead of the default 3. TSan silently drops a race report when it can no longer
+# reconstruct the stack of the older access from that history, so with the default a thread that
+# gets a few milliseconds' head start on a loaded machine can race unreported; the larger history
+# makes detection robust to scheduling. Costs ~2.5MB of trace memory per live thread.
+build:tsan-common --action_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0:history_size=7
+build:tsan-common --test_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0:history_size=7
+# Clang-tidy loads this shared object into an unsanitized process, which cannot resolve TSan hooks.
+build:tsan-common --per_file_copt='tools/clang-tidy@-fno-sanitize=thread'
+# TSan significantly increases test runtime.
+build:tsan-common --test_timeout=30,150,600,2400
+# Enable V8's TSan-specific generated code and synchronization annotations. V8's Bazel build does
+# not currently derive these defines from the compiler's sanitizer flags.
+build:tsan-common --copt="-DV8_IS_TSAN"
+build:tsan-common --per_file_copt='external/.*v8@-DTHREAD_SANITIZER'
+# One toolchain per host; resolution picks the one matching the (host-parented) tsan platform.
+build:tsan-common --extra_toolchains=//build/rust:tsan_toolchain_linux_x86_64,//build/rust:tsan_toolchain_macos_aarch64
+build:tsan-common --@rules_rust//:extra_rustc_flag=-Zsanitizer=thread
+
+# Linux x86_64.
+build:tsan --config=tsan-common
+
+# macOS arm64. ld64 does not accept the GNU-ld `-l:` syntax and has no equivalent need: libunwind is
+# part of libSystem and shared by every image.
+build:tsan-macos --config=tsan-common
 
 # fuzzilli (https://github.com/googleprojectzero/fuzzilli/)
 build:fuzzilli --config=asan
@@ -322,11 +385,8 @@ build:linux --features=-default_link_libs --host_features=-default_link_libs
 build:linux --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
 build:linux --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'
 build:linux --linkopt='-l:libc++.a' --linkopt='-lm' --linkopt='-static-libgcc'
-# We don't expect to distribute host tools, no need to statically link libgcc.
-# TODO(cleanup): Ideally we'd also use shared libc++ here, we'd just need to install the
-# libunwind-<version>-dev and libc++abi-<version>-dev packages on CI to have all of shared libc++
-# available.
-build:linux --host_linkopt='-l:libc++.a' --host_linkopt='-lm'
+# We don't expect to distribute host tools, no need to statically link libgcc or libc++
+build:linux --host_linkopt='-lc++' --host_linkopt='-lm'
 
 # On Linux, enable PIC. In macos pic is the default, and the objc_library rule does not work
 # correctly if we use this flag since it will not find the object files to include
@@ -468,7 +528,7 @@ build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 
 # Coverage configuration using LLVM tools. These environment variables are used by rules_cc
 # to locate LLVM coverage tools. Users should ensure llvm-profdata and llvm-cov are available
-# in PATH (create symlinks to version-specific binaries if needed, e.g., ln -s llvm-cov-19 llvm-cov).
+# in PATH (create symlinks to version-specific binaries if needed, e.g., ln -s llvm-cov-22 llvm-cov).
 build:coverage --repo_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
 # GCOV is used by rules_cc to merge raw profile data (.profraw) into indexed profile data (.profdata)
 build:coverage --repo_env=GCOV=llvm-profdata
@@ -480,6 +540,11 @@ build:coverage --experimental_use_llvm_covmap
 # experimental_generate_llvm_lcov tells collect_cc_coverage to use llvm-cov export to generate LCOV
 # format instead of just outputting raw profdata. LLVM_COV specifies the llvm-cov binary to use.
 build:coverage --experimental_generate_llvm_lcov
+# C++ tests get these from the C++ toolchain. A test that only runs an instrumented binary (every
+# wd_test runs workerd) does not, and without them the collector skips the binary's profile.
+build:coverage --test_env=GENERATE_LLVM_LCOV=1
+build:coverage --test_env=LLVM_COV=llvm-cov
+build:coverage --test_env=LLVM_PROFDATA=llvm-profdata
 # Ensure that we fetch coverage data from remote cache
 build:coverage --experimental_fetch_all_coverage_outputs
 build:coverage --experimental_split_coverage_postprocessing
@@ -509,6 +574,10 @@ coverage --test_size_filters=-enormous
 coverage --test_timeout=240,240,240,240
 coverage --build_tests_only
 
-# This config is defined internally and enabled on many machines.
-# Defining it as empty just so these machines can run build commands from the workerd repo
+# These configs are defined internally and enabled on many machines.
+# Defining them as empty just so these machines can run build commands from the workerd repo
 build:rosetta-arm64 --define=rosetta_arm64_no_op=1
+build:native-arm64 --define=native_arm64_no_op=1
+
+# Local workstation overrides. /.local/ is gitgnored.
+try-import %workspace%/.local/bazelrc

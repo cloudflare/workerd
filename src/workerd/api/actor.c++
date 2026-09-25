@@ -23,6 +23,19 @@ namespace {
 // accumulate.
 constexpr size_t ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL = 32768;
 
+template <typename StartRequest>
+kj::Own<WorkerInterface> startActorSubrequest(
+    IoContext& context, StartRequest& startRequest, CountSubrequest countSubrequest) {
+  auto options = IoContext::SubrequestOptions{.inHouse = true,
+    .wrapMetrics = true,
+    .operationName = kj::ConstString("durable_object_subrequest"_kjc)};
+  // Retries reuse the logical fetch's initial admission, bypassing its limit check and count.
+  auto client = countSubrequest
+      ? context.getSubrequest(startRequest, kj::mv(options))
+      : context.getSubrequestNoChecks(startRequest, kj::mv(options), CountSubrequest::NO);
+  return context.getMetrics().wrapActorSubrequestClient(kj::mv(client));
+}
+
 }  // namespace
 
 IoChannelFactory::ActorChannel& LocalActorOutgoingFactory::getOrCreateActorChannel(
@@ -42,22 +55,26 @@ IoChannelFactory::ActorChannel& LocalActorOutgoingFactory::getOrCreateActorChann
   return *KJ_REQUIRE_NONNULL(actorChannel);
 }
 
-kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
-    kj::Maybe<kj::String> cfStr) {
+Fetcher::OutgoingFactory::Result LocalActorOutgoingFactory::newSingleUseClient(
+    kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) {
   auto& context = IoContext::current();
 
-  return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
-      [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
+  kj::Maybe<TraceContextParent> spanParents;
+  auto startRequest = [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, actorId.asPtr());
+    spanParents = tracing.getSpanParents();
+    auto userSpanParent = tracing.getUserSpanParent();
+    KJ_IF_SOME(parent, makeUserSpanParent(tracing)) {
+      userSpanParent = kj::mv(parent);
+    }
 
     return getOrCreateActorChannel(context, tracing.getInternalSpanParent())
         .startRequest({.cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
-          .userSpanParent = tracing.getUserSpanParent()});
-  },
-      {.inHouse = true,
-        .wrapMetrics = true,
-        .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+          .userSpanParent = kj::mv(userSpanParent)});
+  };
+  auto client = startActorSubrequest(context, startRequest, CountSubrequest::YES);
+  return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 
 kj::Own<IoChannelFactory::SubrequestChannel> LocalActorOutgoingFactory::getSubrequestChannel() {
@@ -68,6 +85,8 @@ kj::Own<IoChannelFactory::SubrequestChannel> LocalActorOutgoingFactory::getSubre
 IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChannel(
     IoContext& context, SpanParent parentSpan) {
   if (actorChannel == kj::none) {
+    auto locationHint = this->locationHint.map([](kj::String& hint) { return kj::str(hint); });
+    auto version = this->version.map([](ActorVersion& version) { return version.clone(); });
     KJ_SWITCH_ONEOF(channelIdOrFactory) {
       KJ_CASE_ONEOF(channelId, uint) {
         actorChannel =
@@ -91,29 +110,43 @@ IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChan
   return *KJ_REQUIRE_NONNULL(actorChannel);
 }
 
-kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
-    kj::Maybe<kj::String> cfStr) {
-  return newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr), kj::none);
+Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::newSingleUseClient(
+    kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) {
+  return newActorCallAttempt(kj::mv(cfStr),
+      ActorCallRetryState::Attempt(kj::none, IsFirstActorCallAttempt::YES),
+      kj::mv(makeUserSpanParent));
 }
 
-kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClientWithActorRetryMetadata(
+void GlobalActorOutgoingFactory::onActorCallRetry() {
+  // The cached channel may contain the disconnected routing pipeline. Clear it so the retry
+  // resolves a fresh route instead of reusing that pipeline.
+  actorChannel = kj::none;
+  channelMemoryAdjustment = kj::none;
+}
+
+Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::newActorCallAttempt(
     kj::Maybe<kj::String> cfStr,
-    kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
+    ActorCallRetryState::Attempt attempt,
+    MakeUserSpanParent makeUserSpanParent) {
   auto& context = IoContext::current();
 
-  return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
-      [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
+  kj::Maybe<TraceContextParent> spanParents;
+  auto makeClient = [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, id->toString());
+    spanParents = tracing.getSpanParents();
+    auto userSpanParent = tracing.getUserSpanParent();
+    KJ_IF_SOME(parent, makeUserSpanParent(tracing)) {
+      userSpanParent = kj::mv(parent);
+    }
 
     return getOrCreateActorChannel(context, tracing.getInternalSpanParent())
         .startRequest({.cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
-          .userSpanParent = tracing.getUserSpanParent(),
-          .actorRetryRequestMetadata = kj::mv(actorRetryRequestMetadata)});
-  },
-      {.inHouse = true,
-        .wrapMetrics = true,
-        .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+          .userSpanParent = kj::mv(userSpanParent),
+          .actorRetryRequestMetadata = attempt.takeMetadata()});
+  };
+  auto client = startActorSubrequest(context, makeClient, attempt.getCountSubrequest());
+  return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 
 kj::Own<IoChannelFactory::SubrequestChannel> GlobalActorOutgoingFactory::getSubrequestChannel() {
@@ -121,30 +154,37 @@ kj::Own<IoChannelFactory::SubrequestChannel> GlobalActorOutgoingFactory::getSubr
   return kj::addRef(getOrCreateActorChannel(context, context.getCurrentTraceSpan()));
 }
 
-kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
-    kj::Maybe<kj::String> cfStr) {
-  return newSingleUseClientWithActorRetryMetadata(kj::mv(cfStr), kj::none);
+Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::newSingleUseClient(
+    kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) {
+  return newActorCallAttempt(kj::mv(cfStr),
+      ActorCallRetryState::Attempt(kj::none, IsFirstActorCallAttempt::YES),
+      kj::mv(makeUserSpanParent));
 }
 
-kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClientWithActorRetryMetadata(
+Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::newActorCallAttempt(
     kj::Maybe<kj::String> cfStr,
-    kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) {
+    ActorCallRetryState::Attempt attempt,
+    MakeUserSpanParent makeUserSpanParent) {
   auto& context = IoContext::current();
 
-  return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
-      [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
+  kj::Maybe<TraceContextParent> spanParents;
+  auto startRequest = [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, actorId.asPtr());
+    spanParents = tracing.getSpanParents();
+    auto userSpanParent = tracing.getUserSpanParent();
+    KJ_IF_SOME(parent, makeUserSpanParent(tracing)) {
+      userSpanParent = kj::mv(parent);
+    }
 
     // Unlike in `GlobalActorOutgoingFactory`, we do not create this lazily, since our channel was
     // already open prior to this DO starting up.
     return actorChannel->startRequest({.cfBlobJson = kj::mv(cfStr),
       .parentSpan = tracing.getInternalSpanParent(),
-      .userSpanParent = tracing.getUserSpanParent(),
-      .actorRetryRequestMetadata = kj::mv(actorRetryRequestMetadata)});
-  },
-      {.inHouse = true,
-        .wrapMetrics = true,
-        .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+      .userSpanParent = kj::mv(userSpanParent),
+      .actorRetryRequestMetadata = attempt.takeMetadata()});
+  };
+  auto client = startActorSubrequest(context, startRequest, attempt.getCountSubrequest());
+  return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 
 kj::Own<IoChannelFactory::SubrequestChannel> ReplicaActorOutgoingFactory::getSubrequestChannel() {
@@ -233,14 +273,14 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
   kj::Own<Fetcher::OutgoingFactory> outgoingFactory;
   KJ_SWITCH_ONEOF(channel) {
     KJ_CASE_ONEOF(channelId, uint) {
-      outgoingFactory =
-          kj::heap<GlobalActorOutgoingFactory>(channelId, id.addRef(), kj::mv(locationHint), mode,
-              enableReplicaRouting, routingMode, kj::mv(version), persistent);
+      outgoingFactory = kj::heap<GlobalActorOutgoingFactory>(channelId, id.addRef(),
+          kj::mv(locationHint), mode, enableReplicaRouting, routingMode, kj::mv(version),
+          actorCallRetriesAllowed, persistent, userDefinedRetryPolicy);
     }
     KJ_CASE_ONEOF(channelFactory, IoOwn<ActorChannelFactory>) {
       outgoingFactory = kj::heap<GlobalActorOutgoingFactory>(kj::addRef(*channelFactory),
           id.addRef(), kj::mv(locationHint), mode, enableReplicaRouting, routingMode,
-          kj::mv(version), persistent);
+          kj::mv(version), actorCallRetriesAllowed, persistent, userDefinedRetryPolicy);
     }
   }
 
@@ -259,12 +299,13 @@ jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(
   // inherits the `persistent` bit.
   KJ_SWITCH_ONEOF(channel) {
     KJ_CASE_ONEOF(channelId, uint) {
-      return js.alloc<api::DurableObjectNamespace>(channelId, kj::mv(newIdFactory), persistent);
+      return js.alloc<api::DurableObjectNamespace>(channelId, kj::mv(newIdFactory),
+          actorCallRetriesAllowed, persistent, userDefinedRetryPolicy);
     }
     KJ_CASE_ONEOF(channelFactory, IoOwn<ActorChannelFactory>) {
       return js.alloc<api::DurableObjectNamespace>(
           IoContext::current().addObject(kj::addRef(*channelFactory)), kj::mv(newIdFactory),
-          persistent);
+          actorCallRetriesAllowed, persistent, userDefinedRetryPolicy);
     }
   }
 

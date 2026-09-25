@@ -1,6 +1,7 @@
 """wd_cc_benchmark definition"""
 
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
 
 def wd_cc_benchmark(
         name,
@@ -13,13 +14,7 @@ def wd_cc_benchmark(
     cc_test(
         name = name,
         defines = ["WD_IS_BENCHMARK"],
-        # Use shared linkage for benchmarks, matching the approach used for tests. Unfortunately,
-        # bazel does not support shared linkage on macOS and it is broken on Windows, so only
-        # enable this on Linux.
-        linkstatic = select({
-            "@platforms//os:linux": 0,
-            "//conditions:default": 1,
-        }),
+        linkstatic = CC_TEST_LINKSTATIC,
         visibility = visibility,
         deps = deps + [
             "@google_benchmark//:benchmark_main",
@@ -27,11 +22,13 @@ def wd_cc_benchmark(
             # Use same linker flags as with test binaries – wd_cc_benchmark is used with
             # microbenchmarks, which will produce relatively accurate results without thinLTO.
             "//build/deps:linkopts_default",
+            # The kj::setupAsyncIo() seam, linked per binary (see kj_test.bzl).
+            "//src/workerd/util:setup-async-io",
         ],
         # use the same malloc we use for server
         malloc = "//src/workerd/server:malloc",
-        # Tag with cpu:4 since this target depends on linkopts_default.
-        tags = ["workerd-benchmark", "google_benchmark", "cpu:4"] + tags,
+        # Tag with cpu:2 since this target depends on linkopts_default.
+        tags = ["workerd-benchmark", "google_benchmark", "cpu:2"] + tags,
         size = "large",
         **kwargs
     )

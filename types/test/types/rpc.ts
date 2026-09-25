@@ -442,6 +442,17 @@ interface Env {
   __INVALID_OBJECT_2: DurableObjectNamespace<TestEntrypoint>;
 }
 
+type TestWorkflowParams = {foo: string};
+
+export class TestWorkflowEntrypoint extends CloudflareWorkersModule.WorkflowEntrypoint<
+  Env,
+  TestWorkflowParams
+> {}
+
+expectTypeOf<
+  LoopbackForExport<typeof TestWorkflowEntrypoint>
+>().toEqualTypeOf<Workflow<TestWorkflowParams>>();
+
 export default <ExportedHandler<Env>>{
   async fetch(_request, env, _ctx) {
     // Check non-RPC services and namespaces work as usual
@@ -1329,3 +1340,45 @@ expectTypeOf<WorkflowBatchDeleteResult['errors'][number]>().toEqualTypeOf<{
   code: number;
   message: string;
 }>();
+
+expectTypeOf(workflowInstance.subscribe()).toEqualTypeOf<
+  Promise<WorkflowInstanceSubscription>
+>();
+
+declare const workflowInstanceSubscription: WorkflowInstanceSubscription;
+expectTypeOf(workflowInstanceSubscription.next()).toEqualTypeOf<
+  Promise<IteratorResult<WorkflowInstanceEvent, void>>
+>();
+
+declare const workflowInstanceEventType: WorkflowInstanceEventType;
+expectTypeOf(workflowInstanceEventType).toEqualTypeOf<
+  | 'workflow_queued'
+  | 'workflow_started'
+  | 'workflow_running'
+  | 'workflow_paused'
+  | 'workflow_waiting_for_pause'
+  | 'workflow_waiting'
+  | 'workflow_completed'
+  | 'workflow_errored'
+  | 'workflow_terminated'
+  | 'step_started'
+  | 'step_completed'
+  | 'step_errored'
+  | 'attempt_started'
+  | 'attempt_completed'
+  | 'attempt_errored'
+  | 'sleep_started'
+  | 'sleep_completed'
+  | 'wait_started'
+  | 'wait_completed'
+  | 'wait_timed_out'
+  | 'rollback_started'
+  | 'rollback_step_started'
+  | 'rollback_step_completed'
+  | 'rollback_step_errored'
+  | 'rollback_attempt_started'
+  | 'rollback_attempt_completed'
+  | 'rollback_attempt_errored'
+  | 'rollback_completed'
+  | 'rollback_errored'
+>();

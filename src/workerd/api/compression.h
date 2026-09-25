@@ -17,6 +17,7 @@
 // (system-streams.c++) wraps kj's async gzip/brotli streams directly and does not use this.
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/ring-buffer.h>
 
 #include <brotli/decode.h>
 #include <brotli/encode.h>
@@ -54,27 +55,6 @@ class CompressionAllocator final {
 // translates to its spec-pinned TypeErrors; node:zlib to Node-fidelity CompressionError
 // codes), and node-specific zlib features (dictionaries, deflateParams) reach the structure
 // through raw() until they grow shared consumers.
-// Backend table over the zlib C API. Two implementations back it: native
-// (chromium) zlib and zlib-rs (memory-safe Rust, see zlib-rs-bridge.h). The
-// backend is chosen per stream by the compression-rs autogate at construction.
-// The z_stream ABI is identical between the two.
-struct ZlibBackend {
-  int (*initDeflate)(z_stream* strm, int level, int windowBits, int memLevel, int strategy);
-  int (*initInflate)(z_stream* strm, int windowBits);
-  int (*runDeflate)(z_stream* strm, int flush);
-  int (*runInflate)(z_stream* strm, int flush);
-  int (*endDeflate)(z_stream* strm);
-  int (*endInflate)(z_stream* strm);
-  int (*resetDeflate)(z_stream* strm);
-  int (*resetInflate)(z_stream* strm);
-  int (*setDeflateParams)(z_stream* strm, int level, int strategy);
-  int (*setDeflateDictionary)(z_stream* strm, const kj::byte* dictionary, uint32_t dictLength);
-  int (*setInflateDictionary)(z_stream* strm, const kj::byte* dictionary, uint32_t dictLength);
-};
-
-// Selects the backing zlib implementation via the compression-rs autogate.
-const ZlibBackend& selectZlibBackend();
-
 class ZlibStream final {
  public:
   enum class Mode { COMPRESS, DECOMPRESS };
@@ -136,12 +116,6 @@ class ZlibStream final {
     return stream;
   }
 
-  // The zlib implementation backing this stream, for consumer-specific calls
-  // made through raw().
-  const ZlibBackend& getZlibBackend() const {
-    return backend;
-  }
-
   // The canonical name for a zlib return code (e.g. "Z_DATA_ERROR"); "Z_UNKNOWN_ERROR" for
   // unrecognized codes.
   static kj::StringPtr errorCodeName(int code);
@@ -151,7 +125,6 @@ class ZlibStream final {
   static kj::Maybe<int> windowBitsForWebFormat(kj::StringPtr format);
 
  private:
-  const ZlibBackend& backend = selectZlibBackend();
   z_stream stream = {};
   Mode mode = Mode::COMPRESS;
   bool initialized = false;
@@ -244,37 +217,37 @@ class CodecStage final {
     Flags strictCompression;
   };
 
-  // Buffer class based on kj::Vector that erases data that has been read from it lazily to
-  // avoid excessive copying when reading a larger amount of buffered data in small chunks.
-  // validSize is used to track the amount of data that has not been read back yet.
-  class LazyBuffer {
+  // The buffered output, in production order: one block per pump iteration, released as it is
+  // pulled. A burst of output costs its own size (there is no growth copy) and is given back
+  // block by block as it is consumed.
+  class OutputBuffer {
    public:
-    // Return a chunk of data and mark it as invalid. The returned chunk remains valid until
-    // data is shifted, cleared or destructor is called. maybeShift() should be called after
-    // the returned data has been processed.
-    kj::ArrayPtr<kj::byte> take(size_t readSize);
-
-    // Shift the output only if doing so results in reducing vector size by at least 1 KiB
-    // and 1/8 of its size to avoid copying for small reads.
-    void maybeShift();
-
     void write(kj::ArrayPtr<const kj::byte> chunk);
+
+    // Copies up to dest.size() bytes into dest, returning the count copied.
+    size_t pull(kj::ArrayPtr<kj::byte> dest);
+
     void clear();
 
-    // The size of the valid data that has not been read back yet. This may be smaller than
-    // the size of the internal vector, which is not relevant to consumers.
-    size_t size();
-    bool empty();
+    size_t size() const {
+      return total;
+    }
+    bool empty() const {
+      return total == 0;
+    }
 
    private:
-    kj::Vector<kj::byte> output;
-    size_t validSize = 0;
+    // The block ring gives back any storage it grew into once it is empty.
+    RingBuffer<kj::Array<const kj::byte>, 16> blocks;
+    // Bytes of blocks.front() already pulled.
+    size_t headOffset = 0;
+    size_t total = 0;
   };
 
   void pump(int flush);
 
   Context context;
-  LazyBuffer output;
+  OutputBuffer output;
   bool finished = false;
 };
 
@@ -312,11 +285,16 @@ class CompressionCodec final: public jsg::Object {
   // the full size exactly.
   double available();
 
+  // Drops the buffered output: the TS pair's teardown paths, for output a drain cut short by
+  // a reader cancel or an error has left in the stage.
+  void clear();
+
   JSG_RESOURCE_TYPE(CompressionCodec) {
     JSG_METHOD(push);
     JSG_METHOD(end);
     JSG_METHOD(pullInto);
     JSG_METHOD(available);
+    JSG_METHOD(clear);
 
     // Internal plumbing type: keep it out of the generated TypeScript types.
     JSG_TS_OVERRIDE(type CompressionCodec = never);

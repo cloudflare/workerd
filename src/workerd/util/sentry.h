@@ -12,9 +12,12 @@
 #include <kj/string.h>
 #include <kj/time.h>
 
+#include <atomic>
 #include <cstdint>
 
 namespace workerd {
+
+constexpr kj::Exception::DetailTypeId SENTRY_TAG_DETAIL_ID = 0xd3b1bbd08ecf715ull;
 
 // For internal errors, we generate an ID to include when rendering user-facing "internal error"
 // exceptions and writing internal exception logs, to make it easier to search for logs
@@ -36,14 +39,29 @@ InternalErrorId makeInternalErrorId();
 #define LOG_EXCEPTION(context, exception)                                                          \
   [&](const kj::Exception& e) {                                                                    \
     constexpr auto sentryErrorContext = context;                                                   \
+    KJ_IF_SOME(d, e.getDetail(::workerd::SENTRY_TAG_DETAIL_ID)) {                                  \
+      auto sentryTag = d.asChars();                                                                \
+      if (sentryTag.size() > 0) {                                                                  \
+        KJ_LOG(ERROR, e, sentryErrorContext, sentryTag);                                           \
+        return;                                                                                    \
+      }                                                                                            \
+    }                                                                                              \
     KJ_LOG(ERROR, e, sentryErrorContext);                                                          \
   }(exception)
 
+// This is just log LOG_EXCEPTION, except it also records id specifically as wdErrId.
 #define LOG_EXCEPTION_WITH_ID(context, exception, id)                                              \
-  [&](const kj::Exception& e) {                                                                    \
+  [&](const kj::Exception& e, const ::workerd::InternalErrorId& wdErrId) {                         \
     constexpr auto sentryErrorContext = context;                                                   \
-    KJ_LOG(ERROR, e, sentryErrorContext, id);                                                      \
-  }(exception)
+    KJ_IF_SOME(d, e.getDetail(::workerd::SENTRY_TAG_DETAIL_ID)) {                                  \
+      auto sentryTag = d.asChars();                                                                \
+      if (sentryTag.size() > 0) {                                                                  \
+        KJ_LOG(ERROR, e, sentryErrorContext, wdErrId, sentryTag);                                  \
+        return;                                                                                    \
+      }                                                                                            \
+    }                                                                                              \
+    KJ_LOG(ERROR, e, sentryErrorContext, wdErrId);                                                 \
+  }(exception, id)
 
 #define ACTOR_STORAGE_OP_PREFIX "; actorStorageOp = "
 
@@ -51,6 +69,23 @@ inline bool isInterestingException(const kj::Exception& e) {
   return e.getType() != kj::Exception::Type::DISCONNECTED &&
       e.getType() != kj::Exception::Type::OVERLOADED;
 }
+
+struct LogPeriodically {
+  bool shouldLog() {
+    const auto now = kj::systemCoarseMonotonicClock().now();
+    const auto nowNanos = (now - kj::origin<kj::TimePoint>()) / kj::NANOSECONDS;
+    const auto lastLogged = lastLoggedNanos.load(std::memory_order_relaxed);
+    if (KJ_LIKELY(nowNanos - lastLogged < 1 * kj::HOURS / kj::NANOSECONDS)) {
+      return false;
+    }
+
+    lastLoggedNanos.store(nowNanos, std::memory_order_relaxed);
+    return true;
+  }
+
+ private:
+  std::atomic<int64_t> lastLoggedNanos{-(1 * kj::HOURS / kj::NANOSECONDS)};
+};
 
 #define LOG_NOSENTRY(severity, ...) KJ_LOG(severity, "NOSENTRY " __VA_ARGS__);
 
@@ -81,11 +116,8 @@ inline bool isInterestingException(const kj::Exception& e) {
 // be prohibitive.
 #define LOG_PERIODICALLY(severity, ...)                                                            \
   do {                                                                                             \
-    static kj::TimePoint KJ_UNIQUE_NAME(lastLogged) = kj::origin<kj::TimePoint>() - 1 * kj::HOURS; \
-    const auto KJ_UNIQUE_NAME(now) = kj::systemCoarseMonotonicClock().now();                       \
-    const auto KJ_UNIQUE_NAME(elapsed) = KJ_UNIQUE_NAME(now) - KJ_UNIQUE_NAME(lastLogged);         \
-    if (KJ_UNLIKELY(KJ_UNIQUE_NAME(elapsed) >= 1 * kj::HOURS)) {                                   \
-      KJ_UNIQUE_NAME(lastLogged) = KJ_UNIQUE_NAME(now);                                            \
+    static ::workerd::LogPeriodically KJ_UNIQUE_NAME(logPeriodically);                             \
+    if (KJ_UNLIKELY(KJ_UNIQUE_NAME(logPeriodically).shouldLog())) {                                \
       KJ_LOG(severity, __VA_ARGS__);                                                               \
     }                                                                                              \
   } while (0)

@@ -75,7 +75,6 @@ wd_cc_library(
         "//src/workerd/util:string-buffer",
         "//src/workerd/util:strings",
         "//src/workerd/util:uuid",
-        "//src/workerd/util:zlib",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@nbytes",
@@ -114,6 +113,7 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/jsg:inspector",
         "//src/workerd/jsg:script",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:checked-queue",
         "//src/workerd/util:consume",
         "//src/workerd/util:exception",
@@ -126,7 +126,8 @@ wd_cc_library(
         "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
         "@ncrypto",
         "@ssl",
     ],
@@ -144,6 +145,7 @@ wd_cc_library(
         ":compatibility-date_capnp",
         ":maximum-compatibility-date",
         ":release-version",
+        "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/kj",
     ],
@@ -158,7 +160,7 @@ wd_cc_library(
         ":worker-interface_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -250,7 +252,8 @@ wd_cc_library(
         "//src/workerd/util:sqlite",
         "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp:capnp-rpc",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -281,7 +284,6 @@ wd_cc_library(
     deps = [
         ":trace_capnp",
         ":worker-interface_capnp",
-        "//src/workerd/jsg:memory-tracker",
         "//src/workerd/util:own-util",
         "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp:capnp-rpc",
@@ -316,7 +318,8 @@ wd_cc_library(
     deps = [
         ":trace",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -328,7 +331,8 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -451,6 +455,10 @@ wd_capnp_library(src = "trace.capnp")
 
 wd_capnp_library(src = "compatibility-date.capnp")
 
+# The schema source lets text-based build rules read compatibility flag names
+# without a compiled helper to inspect the schema annotations.
+exports_files(["compatibility-date.capnp"])
+
 wd_capnp_library(src = "features.capnp")
 
 wd_capnp_library(src = "frankenvalue.capnp")
@@ -502,6 +510,7 @@ kj_test(
     deps = [
         ":actor",
         ":io-gate",
+        "//src/workerd/util:sentry",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
         "@sqlite3",
@@ -531,7 +540,6 @@ kj_test(
     src = "observer-test.c++",
     deps = [
         ":observer",
-        "//src/workerd/io:worker-interface",
         "//src/workerd/util:strings",
         "@capnp-cpp//src/capnp:capnpc",
     ],
@@ -610,6 +618,14 @@ kj_test(
 )
 
 kj_test(
+    src = "worker-entrypoint-test.c++",
+    deps = [
+        ":worker-entrypoint",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "hibernation-manager-test.c++",
     deps = [
         ":io",
@@ -622,6 +638,9 @@ kj_test(
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:autogate",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -635,6 +654,24 @@ kj_test(
 
 kj_test(
     src = "io-context-abort-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "per-isolate-compile-cache-test.c++",
+    # Downstream users may set their own flags, which breaks this test.
+    tags = ["no-downstream"],
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "io-context-task-test.c++",
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",

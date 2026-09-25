@@ -21,6 +21,18 @@ export const validateSpans = {
     // Get all spans and prepare for validation
     const allSpans = collector.spans.values();
     const spansByTest = groupSpansBy(allSpans, 'test');
+    const invocations = [...collector.invocations.values()];
+    const truncatedUpdatedName = `updated-${'x'.repeat(56)}`;
+    const spanUpdatesFor = (spanKey) =>
+      collector.spanUpdates
+        .filter(
+          (update) =>
+            `${update.invocationId}#${update.spanContext.spanId}` === spanKey
+        )
+        .map((update) => update.event.info);
+    const rootAttributes = invocations.flatMap(
+      (invocation) => invocation.attributes
+    );
 
     // Core tests that validate withSpan produces a correctly-closed span of the given name.
     const testValidations = [
@@ -35,6 +47,8 @@ export const validateSpans = {
         expectedSpan: 'undefined-attr-op',
       },
       { test: 'setAttributes', expectedSpan: 'set-attributes-op' },
+      { test: 'setStatus', expectedSpan: 'status-error-op' },
+      { test: 'updateName', expectedSpan: 'update-name-original' },
       { test: 'publicImportTracing', expectedSpan: 'public-import-op' },
       {
         test: 'publicImportStartActiveSpan',
@@ -44,6 +58,7 @@ export const validateSpans = {
         test: 'publicImportStartSpan',
         expectedSpan: 'public-start-span-op',
       },
+      { test: 'getActiveSpan', expectedSpan: 'get-active-span-op' },
       { test: 'ctxTracing', expectedSpan: 'ctx-tracing-op' },
       {
         test: 'detachedSpanEndsAfterStreamDrain',
@@ -59,6 +74,66 @@ export const validateSpans = {
 
       assert(span, `${test}: Should have created span '${expectedSpan}'`);
       assert(span.closed, `${test}: Span '${expectedSpan}' should be closed`);
+    }
+
+    {
+      const statusSpans = spansByTest.get('setStatus') || [];
+      const errorSpan = statusSpans.find((s) => s.name === 'status-error-op');
+      const okSpan = statusSpans.find((s) => s.name === 'status-ok-op');
+
+      const entries = [...collector.spans.entries()];
+      const errorKey = entries.find(([, span]) => span === errorSpan)[0];
+      const okKey = entries.find(([, span]) => span === okSpan)[0];
+      assert.deepStrictEqual(spanUpdatesFor(errorKey), [
+        {
+          type: 'status',
+          status: { code: 'error', message: 'first error' },
+        },
+        {
+          type: 'status',
+          status: { code: 'error', message: 'second error' },
+        },
+        { type: 'status', status: { code: 'unset' } },
+      ]);
+      assert.deepStrictEqual(spanUpdatesFor(okKey), [
+        {
+          type: 'status',
+          status: { code: 'error', message: 'temporary error' },
+        },
+        { type: 'status', status: { code: 'ok' } },
+        {
+          type: 'status',
+          status: { code: 'error', message: 'error after ok' },
+        },
+      ]);
+    }
+
+    {
+      const [[spanKey]] = [...collector.spans.entries()].filter(
+        ([, span]) => span.test === 'updateName'
+      );
+      assert.deepStrictEqual(spanUpdatesFor(spanKey), [
+        { type: 'name', name: 'update-name-intermediate' },
+        { type: 'name', name: truncatedUpdatedName },
+      ]);
+    }
+
+    {
+      const invocation = invocations.find((candidate) =>
+        candidate.attributes.some(
+          ({ name, value }) =>
+            name === 'test' && value === 'updateInvocationSpan'
+        )
+      );
+      assert(invocation, 'updateInvocationSpan: invocation present');
+      const spanKey = `${invocation.invocationId}#${invocation.rootSpanId}`;
+      assert.deepStrictEqual(spanUpdatesFor(spanKey), [
+        { type: 'name', name: 'updated-invocation' },
+        {
+          type: 'status',
+          status: { code: 'error', message: 'invocation error' },
+        },
+      ]);
     }
 
     // setAttributeUndefined should NOT have a 'skipped' attribute recorded.
@@ -118,6 +193,30 @@ export const validateSpans = {
       assert(span, 'startActiveSpanSyncThrow: span present');
       assert.strictEqual(span['after.throw'], true);
       assert(span.closed, 'Manual throw span should be explicitly closed');
+    }
+
+    assert.deepStrictEqual(
+      rootAttributes.find(({ name }) => name === 'test'),
+      { name: 'test', value: 'getActiveSpanInvocation' }
+    );
+
+    for (const requestName of ['a', 'b']) {
+      const request = invocations.find(
+        (invocation) =>
+          invocation.onset.executionModel === 'durableObject' &&
+          invocation.onset.entrypoint === 'OverlappingRequestsObject' &&
+          new URL(invocation.onset.info.url).pathname === `/${requestName}`
+      );
+      assert(
+        request,
+        `Missing tail trace for overlapping request ${requestName}`
+      );
+      assert.deepStrictEqual(
+        request.attributeEvents
+          .filter(({ name }) => name === 'overlapping.request')
+          .map(({ spanId, value }) => ({ spanId, value })),
+        [{ spanId: request.rootSpanId, value: requestName }]
+      );
     }
 
     // setAttributes should record each supported value and ignore undefined values.

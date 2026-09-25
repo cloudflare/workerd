@@ -182,18 +182,29 @@ class DurableObjectNamespace: public jsg::Object {
   // `persistent` indicates whether stubs minted from this namespace may be stored in long-term
   // storage. It is `Persistent::YES` only for `ctx.exports` self-bindings of a worker that has
   // `allow_irrevocable_stub_storage` enabled (see `LoopbackDurableObjectNamespace`); regular env
-  // bindings leave it `Persistent::NO`.
-  DurableObjectNamespace(
-      uint channel, kj::Own<ActorIdFactory> idFactory, Persistent persistent = Persistent::NO)
+  // bindings leave it `Persistent::NO`. `userDefinedRetryPolicy` is the binding's configured retry
+  // policy, applied to minted stubs when user-defined retry policies are enabled; none means the
+  // runtime's default applies.
+  DurableObjectNamespace(uint channel,
+      kj::Own<ActorIdFactory> idFactory,
+      ActorCallRetriesAllowed actorCallRetriesAllowed,
+      Persistent persistent,
+      kj::Maybe<UserDefinedRetryPolicy> userDefinedRetryPolicy)
       : channel(channel),
         idFactory(kj::mv(idFactory)),
-        persistent(persistent) {}
+        actorCallRetriesAllowed(actorCallRetriesAllowed),
+        persistent(persistent),
+        userDefinedRetryPolicy(userDefinedRetryPolicy) {}
   DurableObjectNamespace(IoOwn<ActorChannelFactory> factory,
       kj::Own<ActorIdFactory> idFactory,
-      Persistent persistent = Persistent::NO)
+      ActorCallRetriesAllowed actorCallRetriesAllowed,
+      Persistent persistent,
+      kj::Maybe<UserDefinedRetryPolicy> userDefinedRetryPolicy)
       : channel(kj::mv(factory)),
         idFactory(kj::mv(idFactory)),
-        persistent(persistent) {}
+        actorCallRetriesAllowed(actorCallRetriesAllowed),
+        persistent(persistent),
+        userDefinedRetryPolicy(userDefinedRetryPolicy) {}
 
   struct NewUniqueIdOptions {
     // Restricts the new unique ID to a set of colos within a jurisdiction.
@@ -315,9 +326,12 @@ class DurableObjectNamespace: public jsg::Object {
  private:
   kj::OneOf<uint, IoOwn<ActorChannelFactory>> channel;
   kj::Own<ActorIdFactory> idFactory;
+  ActorCallRetriesAllowed actorCallRetriesAllowed;
 
   // See doc comment on the constructor.
   Persistent persistent;
+
+  kj::Maybe<UserDefinedRetryPolicy> userDefinedRetryPolicy;
 
   jsg::Ref<DurableObject> getImpl(jsg::Lock& js,
       ActorGetMode mode,
@@ -336,7 +350,9 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       bool enableReplicaRouting,
       ActorRoutingMode routingMode,
       kj::Maybe<ActorVersion> version,
-      Persistent persistent)
+      ActorCallRetriesAllowed actorCallRetriesAllowed,
+      Persistent persistent,
+      kj::Maybe<UserDefinedRetryPolicy> userDefinedRetryPolicy)
       : channelIdOrFactory(kj::mv(channelIdOrFactory)),
         id(kj::mv(id)),
         locationHint(kj::mv(locationHint)),
@@ -344,14 +360,22 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
         enableReplicaRouting(enableReplicaRouting),
         routingMode(routingMode),
         version(kj::mv(version)),
-        persistent(persistent) {}
+        actorCallRetriesAllowed(actorCallRetriesAllowed),
+        persistent(persistent),
+        userDefinedRetryPolicy(userDefinedRetryPolicy) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
-  bool supportsActorRetryMetadata() const override {
-    return true;
+  Result newSingleUseClient(
+      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable(actorCallRetriesAllowed.toBool());
   }
-  kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
-      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) override;
+  kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() const override {
+    return userDefinedRetryPolicy;
+  }
+  void onActorCallRetry() override;
+  Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
+      ActorCallRetryState::Attempt attempt,
+      MakeUserSpanParent makeUserSpanParent) override;
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
  private:
@@ -365,10 +389,13 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   bool enableReplicaRouting;
   ActorRoutingMode routingMode;
   kj::Maybe<ActorVersion> version;
+  ActorCallRetriesAllowed actorCallRetriesAllowed;
 
   // Whether stubs minted from this namespace may be stored in long-term storage. See the
   // `persistent` field of `DurableObjectNamespace`.
   Persistent persistent;
+
+  kj::Maybe<UserDefinedRetryPolicy> userDefinedRetryPolicy;
 
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 
@@ -385,7 +412,11 @@ class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       : channelId(channelId),
         actorId(kj::mv(actorId)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+  Result newSingleUseClient(
+      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable::NO;
+  }
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
  private:
@@ -410,12 +441,18 @@ class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       : actorChannel(kj::mv(channel)),
         actorId(kj::mv(actorId)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
-  bool supportsActorRetryMetadata() const override {
-    return true;
+  Result newSingleUseClient(
+      kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable::YES;
   }
-  kj::Own<WorkerInterface> newSingleUseClientWithActorRetryMetadata(kj::Maybe<kj::String> cfStr,
-      kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> actorRetryRequestMetadata) override;
+  void onActorCallRetry() override {
+    // Keep the pre-resolved primary channel on retries. Reconnecting a broken channel requires
+    // routing state that this factory does not own, but request-level disconnects can still succeed.
+  }
+  Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
+      ActorCallRetryState::Attempt attempt,
+      MakeUserSpanParent makeUserSpanParent) override;
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
  private:

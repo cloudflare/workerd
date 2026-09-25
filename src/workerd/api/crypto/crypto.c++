@@ -15,10 +15,10 @@
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/uuid.h>
-#include <workerd/util/zlib.h>
 
 #include <openssl/digest.h>
 #include <openssl/mem.h>
+#include <zlib.h>
 
 #include <algorithm>
 #include <array>
@@ -61,11 +61,11 @@ CryptoKeyUsageSet CryptoKeyUsageSet::byName(kj::StringPtr name) {
   return {};
 }
 
-kj::ArrayPtr<const CryptoKeyUsageSet> CryptoKeyUsageSet::singletons() {
-  static const workerd::api::CryptoKeyUsageSet singletons[] = {encrypt(), decrypt(), sign(),
-    verify(), deriveKey(), deriveBits(), wrapKey(), unwrapKey(), encapsulateKey(),
-    encapsulateBits(), decapsulateKey(), decapsulateBits()};
-  return singletons;
+kj::StaticArrayPtr<const CryptoKeyUsageSet> CryptoKeyUsageSet::singletons() {
+  static const workerd::api::CryptoKeyUsageSet singletons[] = {
+    encrypt(), decrypt(), sign(), verify(), deriveKey(), deriveBits(), wrapKey(), unwrapKey(),
+    encapsulateKey(), encapsulateBits(), decapsulateKey(), decapsulateBits()};
+  return {singletons, kj::size(singletons)};
 }
 
 CryptoKeyUsageSet CryptoKeyUsageSet::validate(kj::StringPtr normalizedName,

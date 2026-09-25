@@ -429,9 +429,15 @@ Rewriter::Rewriter(jsg::Lock& js,
 
 namespace {
 
+#if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+// encoding_rs decoder frames can consume over 60 KiB in ASan debug builds. Leave room for
+// the rest of the rewriter's call stack as well.
+const size_t FIBER_STACK_SIZE = 1024 * 256;
+#else
 // The stack size floor enforced by kj. We could go lower,
 // but it'd always be increased to this anyway.
 const size_t FIBER_STACK_SIZE = 1024 * 64;
+#endif
 
 const kj::FiberPool& getFiberPool() {
   const static kj::FiberPool FIBER_POOL(FIBER_STACK_SIZE);
@@ -468,7 +474,7 @@ kj::Promise<void> Rewriter::write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> p
     return getFiberPool().startFiber([this, pieces](kj::WaitScope& scope) {
       maybeWaitScope = scope;
       if (!isPoisoned()) {
-        for (auto bytes: pieces) {
+        for (const auto& bytes: pieces) {
           auto chars = bytes.asChars();
           // Cannot use `check()` because `finishWrite()` implements the error path.
           auto rc = lol_html_rewriter_write(rewriter, chars.begin(), chars.size());
@@ -651,7 +657,7 @@ class ReplacerStreamSink final: public WritableStreamSink {
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-    for (auto bytes: pieces) {
+    for (const auto& bytes: pieces) {
       auto err = lol_html_streaming_sink_write_utf8_chunk(
           sink, bytes.asChars().begin(), bytes.size(), isHtml);
       if (err != 0) {

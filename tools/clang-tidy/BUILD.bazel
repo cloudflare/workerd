@@ -8,6 +8,12 @@
     different directories to use angled brackets
   - `workerd-consume`: validates that calls to methods annotated with
     WD_CONSUME are made through consume() when invoked on kj::Ptr.
+  - `workerd-coroutine-hostile-raii`: flags hostile RAII objects that persist
+    across coroutine suspension.
+  - `workerd-legacy-stream-alloc`: flags direct allocation of the legacy C++
+    ReadableStream / WritableStream (`js.alloc<ReadableStream>(...)`) outside
+    JsReadableStream::create() / JsWritableStream::create(), the dispatch
+    points that select the stream implementation by compatibility flag.
   - `workerd-promise-ignore-result` - warns on superfluous `ignoreResult()`
     calls: on promises that are immediately `co_await`ed, and on
     `capnp::Request::send()` results, which should use `sendIgnoringResult()`
@@ -15,6 +21,8 @@
   - `workerd-unsafe-continuation-capture`: flags lambdas passed to async
     sinks (e.g. kj::Promise::then) that capture bare references, raw
     pointers, or non-owning views.
+  - `workerd-use-after-move`: flags high-confidence uses of local variables
+    after they are passed to `kj::mv()`.
 
 The plugin is loaded into clang-tidy via `--load=<path>`. Symbols defined
 in the host clang-tidy binary (ClangTidyCheck vtable, ClangTidyModuleRegistry,
@@ -27,14 +35,19 @@ LLVM_ENABLE_RTTI=ON; the binary published by cloudflare/workerd-tools
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load(":test-headers.bzl", "cc_test_headers")
 
 filegroup(
     name = "srcs",
     srcs = [
         "angled-includes.c++",
         "consume.c++",
+        "coroutine-hostile-raii.c++",
+        "legacy-stream-alloc.c++",
         "promise-ignore-result.c++",
         "unsafe-continuation-capture.c++",
+        "use-after-move.c++",
+        "use-after-move-analysis.c++",
         "visit-for-gc.c++",
         "workerd-lint.c++",
     ],
@@ -46,8 +59,12 @@ filegroup(
     srcs = [
         "angled-includes.h",
         "consume.h",
+        "coroutine-hostile-raii.h",
+        "legacy-stream-alloc.h",
         "promise-ignore-result.h",
         "unsafe-continuation-capture.h",
+        "use-after-move.h",
+        "use-after-move-analysis.h",
         "visit-for-gc.h",
     ],
     visibility = ["//visibility:public"],
@@ -111,6 +128,61 @@ sh_test(
         "@platforms//os:linux",
         "@platforms//cpu:x86_64",
     ],
+)
+
+sh_test(
+    name = "coroutine-hostile-raii-test",
+    srcs = ["coroutine-hostile-raii-test.sh"],
+    data = [
+        ":coroutine-hostile-raii-negative-test.c++",
+        ":coroutine-hostile-raii-positive-test.c++",
+        ":workerd-lint",
+        "//tools:clang-tidy",
+    ],
+    tags = ["no-asan"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+sh_test(
+    name = "legacy-stream-alloc-test",
+    srcs = ["legacy-stream-alloc-test.sh"],
+    data = [
+        ":legacy-stream-alloc-negative-test.c++",
+        ":legacy-stream-alloc-positive-test.c++",
+        ":workerd-lint",
+        "//tools:clang-tidy",
+    ],
+    tags = ["no-asan"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+sh_test(
+    name = "use-after-move-test",
+    srcs = ["use-after-move-test.sh"],
+    data = [
+        ":use-after-move-kj-headers",
+        ":use-after-move-negative-test.c++",
+        ":use-after-move-oneof-test.c++",
+        ":use-after-move-positive-test.c++",
+        ":workerd-lint",
+        "//tools:clang-tidy",
+    ],
+    tags = ["no-asan"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+cc_test_headers(
+    name = "use-after-move-kj-headers",
+    dep = "@capnp-cpp//src/kj:kj",
 )
 
 sh_test(

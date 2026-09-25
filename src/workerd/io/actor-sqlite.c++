@@ -195,8 +195,9 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
     // Although the promise returned here was originally intended for "backpressure", it turns out
     // if we return a promise here, the one call site (DurableObjectStorage::asyncTransactionImpl())
     // will actually keep the input gate locked until the commit finishes, which is what we need.
-    return actorSqlite.blockTasks.onEmpty().then([this]() {
-      commitImpl();
+    return actorSqlite.blockTasks.onEmpty()
+        .then([self = addWeakToThis()]() {
+      self.assertLive().commitImpl();
     }).catch_([self = kj::addRef(*this)](kj::Exception&& e) mutable {
       if (self->actorSqlite.broken == kj::none) {
         self->rollbackImpl();
@@ -301,7 +302,8 @@ void ActorSqlite::onCriticalError(
     kj::Exception exception = kj::mv(maybeException).orDefault([&]() {
       return JSG_KJ_EXCEPTION(FAILED, Error, errorMessage);
     });
-    exception.setDescription(kj::str("broken.outputGateBroken; ", exception.getDescription()));
+    auto newDescription = kj::str("broken.outputGateBroken; ", exception.getDescription());
+    exception.setDescription(kj::mv(newDescription));
     broken.emplace(exception.clone());
 
     // Also ensure output gate is explicitly broken.

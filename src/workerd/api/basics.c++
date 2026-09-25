@@ -4,6 +4,7 @@
 
 #include "basics.h"
 
+#include "abort-bootstrap.h"
 #include "actor-state.h"
 #include "global-scope.h"
 
@@ -651,7 +652,9 @@ jsg::Ref<AbortSignal> AbortSignal::abort(jsg::Lock& js, jsg::Optional<jsg::JsVal
   KJ_IF_SOME(reason, maybeReason) {
     return js.alloc<AbortSignal>(kj::mv(exception), reason.addRef(js));
   }
-  return js.alloc<AbortSignal>(exception.clone(), js.exceptionToJsValue(kj::mv(exception)));
+  auto signalException = exception.clone();
+  auto reason = js.exceptionToJsValue(kj::mv(exception));
+  return js.alloc<AbortSignal>(kj::mv(signalException), kj::mv(reason));
 }
 
 void AbortSignal::throwIfAborted(jsg::Lock& js) {
@@ -882,6 +885,29 @@ void AbortSignal::removeAbortAlgorithm(uint64_t token) {
       return;
     }
   }
+}
+
+jsg::JsValue addAbortAlgorithmForBootstrap(
+    jsg::Lock& js, jsg::JsValue signal, jsg::JsValue algorithm) {
+  // Both types are registered in EW_BASICS_ISOLATE_TYPES, so the handlers are always
+  // present. Asserting keeps the caller (a raw bootstrap callback) free of a failure mode
+  // it could not act on.
+  auto& signalHandler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<AbortSignal>>(),
+      "AbortSignal is missing from the isolate type list");
+  auto& handleHandler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<AbortAlgorithmHandle>>(),
+      "AbortAlgorithmHandle is missing from the isolate type list");
+
+  auto target = JSG_REQUIRE_NONNULL(
+      signalHandler.tryUnwrap(js, signal), TypeError, "addAbortAlgorithm() expects an AbortSignal");
+  auto fn = JSG_REQUIRE_NONNULL(
+      algorithm.tryCast<jsg::JsFunction>(), TypeError, "addAbortAlgorithm() expects a function");
+
+  auto registration = target->addAbortAlgorithm(js,
+      JSG_VISITABLE_LAMBDA((fn = fn.addRef(js)), (fn), (jsg::Lock& js) {
+        v8::LocalVector<v8::Value> args(js.v8Isolate);
+        fn.getHandle(js).call(js, js.undefined(), args);
+      }));
+  return jsg::JsValue(handleHandler.wrap(js, js.alloc<AbortAlgorithmHandle>(kj::mv(registration))));
 }
 
 kj::Own<void> AbortSignal::registerPendingCancellation(jsg::Lock& js, ReleasingCanceler& canceler) {
@@ -1115,6 +1141,7 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
   JSG_REQUIRE(
       externalHandler != nullptr, DOMDataCloneError, "AbortSignal can only be serialized for RPC.");
+  externalHandler->markReplayIneligible();
 
   serializer.writeRawUint32(static_cast<uint>(getAborted(js)));
   serializer.writeRawUint32(static_cast<uint>(flag));

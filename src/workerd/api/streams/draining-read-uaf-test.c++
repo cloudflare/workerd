@@ -33,6 +33,10 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/tests/test-fixture.h>
 
+// This test exercises the legacy C++ streams implementation directly, so it allocates the legacy
+// ReadableStream rather than going through the JsReadableStream implementation dispatch.
+// NOLINTBEGIN(workerd-legacy-stream-alloc)
+
 namespace workerd::api {
 namespace {
 
@@ -171,3 +175,5 @@ KJ_TEST("wrapDrainingRead ref prevents UAF when DrainingReader is dropped (byte 
 
 }  // namespace
 }  // namespace workerd::api
+
+// NOLINTEND(workerd-legacy-stream-alloc)

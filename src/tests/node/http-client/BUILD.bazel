@@ -1,0 +1,43 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("//:build/wd_test.bzl", "wd_test")
+
+# The node:http client suite runs the same test modules under two configs:
+# http-client-cpp against the C++ streams implementation, http-client-ts
+# against the TypeScript implementation. A sidecar provides the HTTP server
+# the client talks to.
+
+js_binary(
+    name = "http-servers",
+    entry_point = "http-servers.js",
+)
+
+http_client_suite_srcs = glob(["*.js"]) + ["http-client-modules.capnp"]
+
+http_client_ports = [
+    "HTTP_SERVER_PORT",
+    "HTTP_RAW_PORT",
+]
+
+# The suite's 70-odd cases wait on real timers and on the sidecar, and its
+# failure-path cases (a refused connection, truncated, malformed and
+# unparseable replies) each make workerd log the exception with a symbolized
+# stack trace, which costs about a second apiece in a debug build. Under CI
+# load that adds up to more than the medium size's 15 s budget.
+http_client_size = "large"
+
+wd_test(
+    size = http_client_size,
+    src = "http-client-cpp.wd-test",
+    data = http_client_suite_srcs,
+    sidecar = "http-servers",
+    sidecar_port_bindings = http_client_ports,
+)
+
+wd_test(
+    size = http_client_size,
+    src = "http-client-ts.wd-test",
+    args = ["--experimental"],
+    data = http_client_suite_srcs,
+    sidecar = "http-servers",
+    sidecar_port_bindings = http_client_ports,
+)
