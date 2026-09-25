@@ -34,12 +34,38 @@ namespace workerd::server {
 
 using api::pyodide::PythonConfig;
 
+// The modules of all configured extensions. Sources are copied once into shared storage, so each
+// worker's module registry references them, and V8 strings created from them, without copying.
+//
+// Sources are UTF-8. The new module registry decodes them correctly, but the legacy registry
+// decodes them as Latin-1, so non-ASCII characters are misdecoded unless new_module_registry is
+// enabled (see ModuleRegistryImpl::addBuiltinModule() in jsg/modules.h).
+class ExtensionModules final: public kj::AtomicRefcounted {
+ public:
+  struct Module {
+    kj::String name;
+    bool internal;
+    kj::Arc<jsg::OwnedAscii> source;
+  };
+
+  ExtensionModules() = default;
+  explicit ExtensionModules(capnp::List<config::Extension>::Reader extensions);
+  KJ_DISALLOW_COPY_AND_MOVE(ExtensionModules);
+
+  kj::ArrayPtr<const Module> getModules() const {
+    return modules;
+  }
+
+ private:
+  kj::Array<Module> modules;
+};
+
 // A Worker::Api implementation with support for all the APIs supported by the OSS runtime.
 class WorkerdApi final: public Worker::Api {
  public:
   WorkerdApi(jsg::V8System& v8System,
       CompatibilityFlags::Reader features,
-      capnp::List<config::Extension>::Reader extensions,
+      kj::Arc<ExtensionModules> extensions,
       v8::Isolate::CreateParams createParams,
       v8::IsolateGroup group,
       kj::Own<JsgIsolateObserver> observer,
@@ -340,7 +366,7 @@ class WorkerdApi final: public Worker::Api {
       const CompatibilityFlags::Reader& featureFlags,
       const PythonConfig& pythonConfig,
       const jsg::Url& bundleBase,
-      capnp::List<config::Extension>::Reader extensions,
+      const ExtensionModules& extensions,
       kj::Maybe<kj::String> fallbackService = kj::none,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none);
 
