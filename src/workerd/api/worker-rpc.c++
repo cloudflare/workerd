@@ -872,10 +872,6 @@ TraceContext prepareJsRpcCallAttempt(IoContext& ioContext,
           ioContext, parent, name, path, kj::mv(oneCall.callSpanParents), operation);
     }
   }
-  KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
-    oneCall.client =
-        lock.then([client = kj::mv(oneCall.client)]() mutable { return kj::mv(client); });
-  }
   return callSpan;
 }
 
@@ -969,8 +965,7 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
     result.replayMemoryTracker = kj::refcounted<JsRpcReplayMemoryTracker>(
         ioContext.getMetrics().trackActorCallReplayMemory(replayMemoryBytes));
   }
-  // The retry timeout starts now. Unlike fetch, this is before any output-gate wait, which the
-  // destination client's promise covers.
+  // The retry timeout restarts once the first attempt clears the output gate.
   auto& timer = ioContext.getIoChannelFactory().getTimer();
   result.state = kj::rc<ActorCallRetryState>(timer, ioContext.getMetrics(),
       ActorCallRetryState::Config{
@@ -1194,12 +1189,23 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       TraceContext jsRpcCallSpan;
       kj::Maybe<JsRpcClientProvider::ClientForOneCall> oneCall;
       JsRpcRetrySetup retrySetup;
+      // Only the first attempt waits for the output gate. Retries resend the same payload, which
+      // that wait already cleared, as fetch retries do.
+      kj::Maybe<kj::ForkedPromise<void>> outputLock;
       auto resolveOneCall = [&]() -> JsRpcClientProvider::ClientForOneCall& {
         if (oneCall == kj::none) {
           oneCall = parent->getClientForOneCall(js, kj::mv(retrySetup.attempt));
           auto& result = KJ_ASSERT_NONNULL(oneCall);
           jsRpcCallSpan =
               prepareJsRpcCallAttempt(ioContext, *parent, name, path.asPtr(), operation, result);
+          KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
+            kj::Promise<void> clientLock = kj::mv(lock);
+            if (destinationSupportsRetries) {
+              clientLock = outputLock.emplace(kj::mv(clientLock).fork()).addBranch();
+            }
+            result.client = clientLock.then(
+                [client = kj::mv(result.client)]() mutable { return kj::mv(client); });
+          }
         }
         return KJ_ASSERT_NONNULL(oneCall);
       };
@@ -1310,6 +1316,16 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
               dispatch.attemptObserver.map(
                   [](kj::Rc<JsRpcCallAttemptObserver>& observer) { return observer.addRef(); }),
               originatingCall.map([](TraceContextParent& value) { return value.addRef(); }));
+          // As with fetch, the retry timeout excludes the output-gate wait. The first attempt
+          // cannot settle before its gate clears, so the restart precedes any retry decision. If
+          // the gate breaks, the attempt fails through its client instead.
+          KJ_IF_SOME(lock, outputLock) {
+            resultPromise = lock.addBranch()
+                                .then([state = retryState.addRef()]() mutable {
+              state->restartCallStart();
+            }, [](kj::Exception&&) {
+            }).then([promise = kj::mv(resultPromise)]() mutable { return kj::mv(promise); });
+          }
         }
       }
 

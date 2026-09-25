@@ -210,7 +210,7 @@ class RetryTimeoutTimerChannel final: public TimerChannel {
 
   // Moves past any retry timeout once expired, as the real clock would be when the timeout fires.
   kj::TimePoint nowForLimitTimeout() override {
-    return kj::origin<kj::TimePoint>() + (expired ? 1 * kj::HOURS : 0 * kj::SECONDS);
+    return kj::origin<kj::TimePoint>() + (expired ? 1 * kj::HOURS : elapsed);
   }
 
   kj::Promise<void> atLimitTimeout(kj::TimePoint deadline) override {
@@ -227,10 +227,16 @@ class RetryTimeoutTimerChannel final: public TimerChannel {
     timeoutFulfiller->fulfill();
   }
 
+  // Advances the clock without firing the retry timeout.
+  void advance(kj::Duration delay) {
+    elapsed += delay;
+  }
+
  private:
   kj::ForkedPromise<void> timeout = nullptr;
   kj::Own<kj::PromiseFulfiller<void>> timeoutFulfiller;
   kj::Maybe<kj::TimePoint> retryDeadline;
+  kj::Duration elapsed = 0 * kj::SECONDS;
   bool expired = false;
 };
 
@@ -447,6 +453,16 @@ TestFixture::SetupParams makeSenderParams(kj::WaitScope& waitScope,
     .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
         [&state]() -> kj::Own<RequestObserver> { return kj::refcounted<RetryObserver>(state); }),
   };
+}
+
+// A sender running as an actor, so its calls wait for the actor's output gate.
+TestFixture::SetupParams makeActorSenderParams(kj::WaitScope& waitScope,
+    CompatibilityFlags::Reader flags,
+    TimerChannel& timer,
+    RetryTestState& state) {
+  auto params = makeSenderParams(waitScope, flags, timer, state);
+  params.actorId = Worker::Actor::Id(kj::str("retry-sender"));
+  return params;
 }
 
 jsg::Ref<Fetcher> makeRetryFetcher(const TestFixture::Environment& env,
@@ -1273,6 +1289,74 @@ KJ_TEST("retry timeout cancels an established actor RPC session with a pending c
   KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
   KJ_EXPECT(state.canceledReplacementSessions == 1);
   KJ_EXPECT(state.replayMemoryBytes == 0);
+}
+
+jsg::Promise<void> expectEcho42(jsg::Lock& js, jsg::JsValue result) {
+  return js.toPromise(result).then(js, [](jsg::Lock& js, jsg::Value value) {
+    KJ_EXPECT(jsg::JsValue(value.getHandle(js)).strictEquals(js.num(42)));
+  });
+}
+
+KJ_TEST("actor RPC starts the retry timeout after the output gate wait") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  RetryTestState state;
+  RetryTimeoutTimerChannel timer;
+  TestFixture receiver(makeReceiverParams(io.waitScope));
+  TestFixture sender(
+      makeActorSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
+  const auto retryTimeout = ActorRetryPolicy::systemDefault().timeout();
+  // Longer than the retry timeout, so a timeout that included it would allow no retry.
+  const auto gateWait = retryTimeout + 1 * kj::SECONDS;
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) {
+    auto gate = kj::newPromiseAndFulfiller<void>();
+    auto gateBlocker =
+        env.context.getActorOrThrow().getOutputGate().lockWhile(kj::mv(gate.promise), nullptr);
+    auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1);
+    auto function = getRpcFunction(env.js, *fetcher, "echo"_kj);
+    auto checked = expectEcho42(env.js, function.call(env.js, env.js.undefined(), env.js.num(42)));
+    timer.advance(gateWait);
+    gate.fulfiller->fulfill();
+    return env.context.awaitJs(env.js, kj::mv(checked))
+        .attach(kj::mv(fetcher), kj::mv(gateBlocker), kj::mv(gate.fulfiller));
+  });
+
+  KJ_EXPECT(state.metadata.size() == 2);
+  KJ_ASSERT(state.outcomes.size() == 1);
+  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RECOVERED);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(timer.getRetryDeadline()) ==
+      kj::origin<kj::TimePoint>() + gateWait + retryTimeout);
+}
+
+KJ_TEST("actor RPC retries do not wait for the output gate") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  RetryTestState state;
+  PausingTimerChannel timer;
+  TestFixture receiver(makeReceiverParams(io.waitScope));
+  TestFixture sender(
+      makeActorSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1);
+    auto function = getRpcFunction(env.js, *fetcher, "echo"_kj);
+    auto checked = expectEcho42(env.js, function.call(env.js, env.js.undefined(), env.js.num(42)));
+    // Locked after the call starts, so only later waits are held back. The gate is released only
+    // once the call succeeds, so a retry that waited for it would never complete.
+    auto gate = kj::newPromiseAndFulfiller<void>();
+    auto gateBlocker =
+        env.context.getActorOrThrow().getOutputGate().lockWhile(kj::mv(gate.promise), nullptr);
+    return env.context.awaitJs(env.js, kj::mv(checked))
+        .then([fulfiller = kj::mv(gate.fulfiller), gateBlocker = kj::mv(gateBlocker)]() mutable {
+      fulfiller->fulfill();
+      return kj::mv(gateBlocker);
+    }).attach(kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(state.metadata.size() == 2);
+  KJ_ASSERT(state.outcomes.size() == 1);
+  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RECOVERED);
 }
 
 }  // namespace

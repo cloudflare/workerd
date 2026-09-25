@@ -133,6 +133,10 @@ class ActorCallRetryState final: public kj::Refcounted {
   kj::TimePoint getCallStart() const {
     return callStart;
   }
+  // Restarts the retry timeout from now, for a call that only starts once it clears the output gate.
+  void restartCallStart() {
+    callStart = timer.nowForLimitTimeout();
+  }
   // Rejects `promise` with the original disconnect if the retry timeout expires first. The first
   // attempt is never cancelled, so this only affects retries.
   template <typename T>
