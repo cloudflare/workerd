@@ -2015,7 +2015,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
   // Called after the target is resolved, and so after actor construction, but before the requested
   // method is looked up.
-  virtual void maybeClaimRetryToken() = 0;
+  virtual void maybeClaimRetryToken(
+      jsg::Lock& js, const TargetInfo& targetInfo, rpc::JsRpcTarget::CallParams::Reader params) = 0;
 
   kj::Maybe<kj::String> durableObjectId;
 
@@ -2209,7 +2210,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       auto targetInfo = getTargetInfo(lock, ctx);
 
       // Must precede tryGetProperty(), which can run user getters and Proxy traps.
-      maybeClaimRetryToken();
+      maybeClaimRetryToken(lock, targetInfo, params);
 
       // Look up the requested property. If it is unavailable, tryGetProperty() throws an error
       // that is returned to the client.
@@ -2667,8 +2668,12 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
 
   void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) override {}
 
-  // Calls on a returned stub or pipeline are covered by the session's top-level claim.
-  void maybeClaimRetryToken() override {}
+  // Calls on a returned stub or pipeline are covered by the session's top-level claim. They need
+  // no @retryable check even when that claim admitted a duplicate: the sender replays only the
+  // top-level call, and calling through its pending result commits the attempt so it is never
+  // replayed. A call made here therefore runs for the first time, even in a duplicate session.
+  void maybeClaimRetryToken(
+      jsg::Lock&, const TargetInfo&, rpc::JsRpcTarget::CallParams::Reader) override {}
 };
 
 // See comment at call site for explanation.
@@ -3031,6 +3036,81 @@ static void markJsRpcExceptionAsDelivered(IoContext& ioctx, kj::Exception& excep
   }
 }
 
+namespace {
+
+// The name of the method a call invokes directly on its target. None for a property get or a call
+// through a nested path, which could run user code to resolve.
+kj::Maybe<kj::StringPtr> directMethodName(rpc::JsRpcTarget::CallParams::Reader params) {
+  if (!params.getOperation().isCallWithArgs()) return kj::none;
+  switch (params.which()) {
+    case rpc::JsRpcTarget::CallParams::METHOD_NAME:
+      return params.getMethodName();
+    case rpc::JsRpcTarget::CallParams::METHOD_PATH: {
+      auto path = params.getMethodPath();
+      if (path.size() != 1) return kj::none;
+      return path[0];
+    }
+    default:
+      return kj::none;
+  }
+}
+
+struct OwnProperty {
+  // None for an accessor, whose value only a user getter can produce.
+  kj::Maybe<jsg::JsValue> dataValue;
+};
+
+// Reads an own property from its descriptor, so a getter is never called. `object` must not be a
+// Proxy, whose descriptor trap is user code.
+kj::Maybe<OwnProperty> getOwnPropertyWithoutUserCode(
+    jsg::Lock& js, jsg::JsObject object, v8::Local<v8::String> key) {
+  auto context = js.v8Context();
+  v8::Local<v8::Object> handle = object;
+  auto descriptor = jsg::check(handle->GetOwnPropertyDescriptor(context, key));
+  if (!descriptor->IsObject()) return kj::none;
+  // A data descriptor has an own `value`; reading it cannot reach a user getter.
+  auto d = descriptor.As<v8::Object>();
+  v8::Local<v8::String> valueKey = js.strIntern("value"_kj);
+  if (!jsg::check(d->HasOwnProperty(context, valueKey))) return OwnProperty{};
+  return OwnProperty{.dataValue = jsg::JsValue(jsg::check(d->Get(context, valueKey)))};
+}
+
+// Finds the function tryGetProperty() would call for `key`, without running user code. None if
+// finding it could run user code, such as a Proxy or an accessor on the prototype chain, or if
+// tryGetProperty() would reject it.
+kj::Maybe<jsg::JsObject> findMethodWithoutUserCode(
+    jsg::Lock& js, jsg::JsObject target, bool allowInstanceProperties, v8::Local<v8::String> key) {
+  auto prototypeOfObject = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
+
+  // For a class instance, tryGetProperty() also reads `Object.prototype[name]`, so an accessor
+  // there would run user code even when the method itself is found safely. It also rejects a
+  // method that is the same value as `Object.prototype[name]`.
+  kj::Maybe<jsg::JsValue> objectPrototypeValue;
+  if (!allowInstanceProperties) {
+    KJ_IF_SOME(property, getOwnPropertyWithoutUserCode(js, prototypeOfObject, key)) {
+      objectPrototypeValue = KJ_UNWRAP_OR_RETURN(property.dataValue, kj::none);
+    }
+  }
+
+  jsg::JsValue current = target;
+  for (bool own = true;; own = false) {
+    auto object = KJ_UNWRAP_OR_RETURN(current.tryCast<jsg::JsObject>(), kj::none);
+    if (current.isProxy() || current == prototypeOfObject) return kj::none;
+    KJ_IF_SOME(property, getOwnPropertyWithoutUserCode(js, object, key)) {
+      // tryGetProperty() rejects own properties of a class instance.
+      if (own && !allowInstanceProperties) return kj::none;
+      auto value = KJ_UNWRAP_OR_RETURN(property.dataValue, kj::none);
+      if (!value.isFunction() || objectPrototypeValue == value) return kj::none;
+      return value.tryCast<jsg::JsObject>();
+    }
+    // tryGetProperty() accepts only own properties of a plain object.
+    if (allowInstanceProperties) return kj::none;
+    current = object.getPrototype(js);
+  }
+}
+
+}  // namespace
+
 // JsRpcTarget implementation specific to entrypoints. This is used to deliver the first, top-level
 // call of an RPC session.
 class EntrypointJsRpcTarget final: public JsRpcTargetBase {
@@ -3145,7 +3225,8 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
 
   // The protocol permits one top-level call per session, but this target does not enforce that.
   // The observer can claim only once, so a rejection is kept to fail any later top-level call too.
-  bool retryTokenClaimAttempted = false;
+  // `claimedRetryable` records whether the claim was made for a retryable method.
+  kj::Maybe<IsRetryableHandler> claimedRetryable;
   kj::Maybe<kj::Exception> retryClaimRejection;
 
   kj::Maybe<kj::String> entrypointName;
@@ -3189,17 +3270,45 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
     }
   }
 
-  void maybeClaimRetryToken() override {
+  void maybeClaimRetryToken(jsg::Lock& js,
+      const TargetInfo& targetInfo,
+      rpc::JsRpcTarget::CallParams::Reader params) override {
     KJ_IF_SOME(e, retryClaimRejection) {
       kj::throwFatalException(e.clone());
     }
-    if (retryTokenClaimAttempted) return;
-    retryTokenClaimAttempted = true;
-    KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { metrics->claimRetryTokenBeforeUserCode(); })) {
+    KJ_IF_SOME(claim, claimedRetryable) {
+      // A retryable claim may have admitted a duplicate, so it does not cover a later call to a
+      // method that is not retryable.
+      JSG_REQUIRE(claim == IsRetryableHandler::NO ||
+              isRetryableMethod(js, targetInfo, params) == IsRetryableHandler::YES,
+          Error,
+          "After calling a @retryable method, a Durable Object RPC session can only call "
+          "@retryable methods.");
+      return;
+    }
+    auto retryable = isRetryableMethod(js, targetInfo, params);
+    claimedRetryable = retryable;
+    KJ_IF_SOME(e,
+        kj::runCatchingExceptions([&]() { metrics->claimRetryTokenBeforeUserCode(retryable); })) {
       auto rejection = disconnectRetryClaimRejection(kj::mv(e));
       retryClaimRejection = rejection.clone();
       kj::throwFatalException(kj::mv(rejection));
     }
+  }
+
+  // YES if the call invokes a method decorated with @retryable and DURABLE_OBJECT_RETRIES_USERLAND
+  // is enabled. This runs before the claim, so it must run no user code.
+  IsRetryableHandler isRetryableMethod(
+      jsg::Lock& js, const TargetInfo& targetInfo, rpc::JsRpcTarget::CallParams::Reader params) {
+    if (!util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
+      return IsRetryableHandler::NO;
+    }
+    auto name = KJ_UNWRAP_OR(directMethodName(params), return IsRetryableHandler::NO);
+    if (isReservedName(name)) return IsRetryableHandler::NO;
+    auto method = KJ_UNWRAP_OR(findMethodWithoutUserCode(js, targetInfo.target,
+                                   targetInfo.allowInstanceProperties, js.strIntern(name)),
+        return IsRetryableHandler::NO);
+    return IsRetryableHandler(method.hasPrivate(js, RETRYABLE_METHOD_PRIVATE_KEY));
   }
 };
 

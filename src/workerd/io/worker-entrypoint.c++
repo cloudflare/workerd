@@ -491,7 +491,11 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
           // but still precedes the choice and invocation of the fetch handler.
           auto handler = lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo),
               kj::mv(props), context.getActor(), isDynamicDispatch);
-          metrics->claimRetryTokenBeforeUserCode();
+          auto retryable = IsRetryableHandler::NO;
+          KJ_IF_SOME(h, handler) {
+            retryable = h->isFetchRetryable(lock);
+          }
+          metrics->claimRetryTokenBeforeUserCode(retryable);
           return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
               cfBlobJson, lock, handler, kj::mv(signal));
         });

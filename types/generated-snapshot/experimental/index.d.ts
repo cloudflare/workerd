@@ -14933,6 +14933,10 @@ declare module "cloudflare:durable-objects" {
    * to it after a disconnect that might have happened after the method started. It does not
    * enable retries or change how many are made.
    *
+   * A retry repeats only the call to this method. Calls on the value it returns are never
+   * retried. Anything the method creates may be created once per attempt, so its cleanup may also
+   * run once per attempt. For example, `[Symbol.dispose]()` runs on each `RpcTarget` it returned.
+   *
    * Only public instance methods can be decorated. When composing decorators, apply `@retryable`
    * outermost (first in source order) so it marks the method that is finally installed.
    * Requires standard (not `experimentalDecorators`) decorators and a bundler that transforms
