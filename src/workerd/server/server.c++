@@ -5564,7 +5564,8 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet:
 
       DynamicErrorReporter errorReporter;
 
-      auto service = co_await server.makeWorkerImpl(isolateName, kj::mv(def), {}, errorReporter);
+      auto service = co_await server.makeWorkerImpl(
+          isolateName, kj::mv(def), kj::arc<ExtensionModules>(), errorReporter);
       errorReporter.throwIfErrors();
 
       service->link(errorReporter);
@@ -5743,9 +5744,8 @@ static MainModuleIsPython isPythonMainModule(config::Worker::Reader conf) {
   return modules[0].isPythonModule() ? MainModuleIsPython::YES : MainModuleIsPython::NO;
 }
 
-kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
-    config::Worker::Reader conf,
-    capnp::List<config::Extension>::Reader extensions) {
+kj::Promise<kj::Own<Server::Service>> Server::makeWorker(
+    kj::StringPtr name, config::Worker::Reader conf, kj::Arc<ExtensionModules> extensions) {
   TRACE_EVENT("workerd", "Server::makeWorker()", "name", name.cStr());
   auto& localActorConfigs = KJ_ASSERT_NONNULL(actorConfigs.find(name));
 
@@ -5891,12 +5891,12 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   }(),
   };
 
-  co_return co_await makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);
+  co_return co_await makeWorkerImpl(name, kj::mv(def), kj::mv(extensions), errorReporter);
 }
 
 kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr name,
     WorkerDef def,
-    capnp::List<config::Extension>::Reader extensions,
+    kj::Arc<ExtensionModules> extensions,
     ErrorReporter& errorReporter) {
   // Load Python artifacts if this is a Python worker.
   co_await preloadPython(name, def, errorReporter);
@@ -5941,7 +5941,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
       newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(
           def.source.variant.tryGet<Worker::Script::ModulesSource>(), def.featureFlags,
-          pythonConfig, bundleBase, extensions, kj::mv(maybeFallbackService),
+          pythonConfig, bundleBase, *extensions, kj::mv(maybeFallbackService),
           ArtifactBundler::makeDisabledBundler());
     })) {
       // Building the module registry from the worker's source failed. This is
@@ -5956,9 +5956,9 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       // prevent the server from serving.
       errorReporter.addError(kj::str(exception.getDescription()));
       def.source = WorkerSource(Worker::Script::ScriptSource{""_kj, name, nullptr});
-      newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(kj::none, def.featureFlags,
-          pythonConfig, bundleBase, capnp::List<config::Extension>::Reader{}, kj::none,
-          ArtifactBundler::makeDisabledBundler());
+      newModuleRegistry =
+          WorkerdApi::newWorkerdModuleRegistry(kj::none, def.featureFlags, pythonConfig, bundleBase,
+              *kj::arc<ExtensionModules>(), kj::none, ArtifactBundler::makeDisabledBundler());
     }
   }
 
@@ -5973,7 +5973,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       };
     };
   }
-  auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
+  auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, kj::mv(extensions),
       limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
       pythonConfig, kj::mv(listeners));
 
@@ -6369,7 +6369,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
 
 kj::Promise<kj::Own<Server::Service>> Server::makeService(config::Service::Reader conf,
     kj::HttpHeaderTable::Builder& headerTableBuilder,
-    capnp::List<config::Extension>::Reader extensions) {
+    kj::Arc<ExtensionModules> extensions) {
   kj::StringPtr name = conf.getName();
 
   switch (conf.which()) {
@@ -6384,7 +6384,7 @@ kj::Promise<kj::Own<Server::Service>> Server::makeService(config::Service::Reade
       co_return makeNetworkService(conf.getNetwork());
 
     case config::Service::WORKER:
-      co_return co_await makeWorker(name, conf.getWorker(), extensions);
+      co_return co_await makeWorker(name, conf.getWorker(), kj::mv(extensions));
 
     case config::Service::DISK:
       co_return makeDiskDirectoryService(name, conf.getDisk(), headerTableBuilder);
@@ -7667,10 +7667,11 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
     inspectorIsolateRegistrar = kj::mv(registrar);
   }
 
-  // Second pass: Build services.
+  // Second pass: Build services. Extension sources are copied once and shared by all workers.
+  auto extensions = kj::arc<ExtensionModules>(config.getExtensions());
   for (auto serviceConf: config.getServices()) {
     kj::StringPtr name = serviceConf.getName();
-    auto service = co_await makeService(serviceConf, headerTableBuilder, config.getExtensions());
+    auto service = co_await makeService(serviceConf, headerTableBuilder, extensions.addRef());
 
     services.upsert(kj::str(name), kj::mv(service), [&](auto&&...) {
       reportConfigError(kj::str("Config defines multiple services named \"", name, "\"."));
