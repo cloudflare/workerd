@@ -6,12 +6,6 @@ use std::pin::Pin;
 
 use kj::http::ConnectSettings;
 use kj_rs::KjDate;
-// `KjMaybe` is only referenced inside the cxx bridge module below, but the macro expansion needs
-// the type in scope.
-#[expect(
-    unused_imports,
-    reason = "referenced inside the #[cxx::bridge] macro expansion"
-)]
 use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
 
@@ -94,6 +88,20 @@ pub mod bridge {
         )]
         fn new_cxx_worker(inner: KjOwn<WorkerInterface>) -> Box<Wrapper>;
 
+        /// Creates a `PromisedInterface` for the C++ worker that `start` resolves to. `start` is
+        /// not awaited until the first event arrives.
+        #[expect(
+            clippy::unnecessary_box_returns,
+            reason = "c++ expects heap-allocation"
+        )]
+        fn new_promised_interface(start: KjOwn<WorkerPromise>) -> Box<Wrapper>;
+
+        /// Carries a `KjError` to C++. C++ calls `raise()`, which returns the error as `Err`;
+        /// the bridge throws it as a `kj::Exception` with the same type, description, location
+        /// and details, and C++ catches that exception.
+        type Error;
+        fn raise(self: &Error) -> Result<()>;
+
         async unsafe fn request<'a>(
             self: &'a mut Wrapper,
             method: HttpMethod,
@@ -126,6 +134,13 @@ pub mod bridge {
             retry_count: u32,
         ) -> Result<AlarmResult>;
 
+        /// Returns the alarm time the actor still has stored, if any, in nanoseconds since the
+        /// Unix epoch.
+        async unsafe fn abandon_alarm<'a>(
+            self: &'a mut Wrapper,
+            scheduled_time: KjDate,
+        ) -> Result<KjMaybe<i64>>;
+
         async unsafe fn custom_event<'a>(
             self: &'a mut Wrapper,
             event: KjOwn<CustomEvent>,
@@ -136,6 +151,9 @@ pub mod bridge {
 
     unsafe extern "C++" {
         include!("workerd/rust/worker/ffi.h");
+
+        /// Converts a Rust `Interface` into a C++ `WorkerInterface`.
+        fn wrapper_into_kj(wrapper: Box<Wrapper>) -> KjOwn<WorkerInterface>;
     }
 
     unsafe extern "C++" {
@@ -184,6 +202,13 @@ pub mod bridge {
             retry_count: u32,
         ) -> Result<AlarmResult>;
 
+        /// Returns the alarm time the actor still has stored, if any, in nanoseconds since the
+        /// Unix epoch.
+        async unsafe fn worker_abandon_alarm<'a>(
+            worker: Pin<&'a mut WorkerInterface>,
+            scheduled_time_nanos: i64,
+        ) -> Result<KjMaybe<i64>>;
+
         // Takes ownership of the event and forwards it to the C++ worker.
         async unsafe fn worker_custom_event(
             worker: Pin<&mut WorkerInterface>,
@@ -191,6 +216,25 @@ pub mod bridge {
         ) -> Result<CustomEventResult>;
 
         async unsafe fn worker_test<'a>(worker: Pin<&'a mut WorkerInterface>) -> Result<bool>;
+
+        /// Calls `event->notSupported()`, which produces the event's result for a target that
+        /// cannot handle it. Takes ownership of the event and keeps it alive until the result
+        /// is ready.
+        async fn custom_event_not_supported(event: KjOwn<CustomEvent>)
+        -> Result<CustomEventResult>;
+
+        /// Calls `event->failed(exception)` to tell an event why its target never ran it,
+        /// before the event is dropped. The exception is the full `kj::Exception` for `error`
+        /// (see `Error`). Returns `Result` because `failed()` is virtual and may throw.
+        fn custom_event_failed(event: KjOwn<CustomEvent>, error: Box<Error>) -> Result<()>;
+
+        /// A `kj::Promise<kj::Own<WorkerInterface>>`: a worker that is still starting.
+        type WorkerPromise;
+
+        /// Awaits `promise` and returns the worker it resolves to, or its error.
+        async fn worker_promise_await(
+            promise: KjOwn<WorkerPromise>,
+        ) -> Result<KjOwn<WorkerInterface>>;
     }
 
     impl Box<Wrapper> {}
@@ -206,6 +250,32 @@ pub struct Wrapper {
 )]
 fn new_cxx_worker(inner: kj_rs::KjOwn<bridge::WorkerInterface>) -> Box<Wrapper> {
     crate::Interface::into_ffi(crate::CxxWorkerInterface::new(inner))
+}
+
+#[expect(
+    clippy::unnecessary_box_returns,
+    reason = "c++ expects heap-allocation"
+)]
+fn new_promised_interface(start: KjOwn<bridge::WorkerPromise>) -> Box<Wrapper> {
+    crate::Interface::into_ffi(crate::PromisedInterface::new(async move {
+        Ok(bridge::worker_promise_await(start).await?)
+    }))
+}
+
+/// See `bridge::Error`.
+pub struct Error {
+    error: cxx::KjError,
+}
+
+impl Error {
+    #[must_use]
+    pub fn new(error: cxx::KjError) -> Self {
+        Self { error }
+    }
+
+    fn raise(&self) -> Result<()> {
+        Err(self.error.clone())
+    }
 }
 
 impl Wrapper {
@@ -265,6 +335,12 @@ impl Wrapper {
         let scheduled_time = scheduled_time.into();
         let result = self.worker.run_alarm(&scheduled_time, retry_count).await?;
         Ok(result.into())
+    }
+
+    async fn abandon_alarm(&mut self, scheduled_time: KjDate) -> Result<KjMaybe<i64>> {
+        let scheduled_time = scheduled_time.into();
+        let stored = self.worker.abandon_alarm(&scheduled_time).await?;
+        Ok(stored.map(|time| KjDate::from(time).nanoseconds()).into())
     }
 
     async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {
