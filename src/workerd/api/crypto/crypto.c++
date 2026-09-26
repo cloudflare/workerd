@@ -474,8 +474,8 @@ void validateEncryptAlgorithm(
   }
 }
 
-void validateSignAlgorithm(jsg::Lock& js,
-    kj::StringPtr normalizedName, const SubtleCrypto::SignAlgorithm& algorithm) {
+void validateSignAlgorithm(
+    jsg::Lock& js, kj::StringPtr normalizedName, const SubtleCrypto::SignAlgorithm& algorithm) {
   if (normalizedName == "ECDSA") {
     validateHashAlgorithm(algorithm.hash, "AlgorithmIdentifier");
   } else if (normalizedName == "RSA-PSS") {
@@ -485,8 +485,8 @@ void validateSignAlgorithm(jsg::Lock& js,
   } else if (normalizedName.startsWith("ML-DSA-")) {
     KJ_IF_SOME(context, algorithm.context) {
       KJ_IF_SOME(source, context.getHandle(js).tryCast<jsg::JsBufferSource>()) {
-        JSG_REQUIRE(source.size() <= 255, DOMOperationError,
-            "ML-DSA context must be at most 255 bytes.");
+        JSG_REQUIRE(
+            source.size() <= 255, DOMOperationError, "ML-DSA context must be at most 255 bytes.");
       } else {
         JSG_FAIL_REQUIRE(TypeError, "ML-DSA context must be a buffer source.");
       }
@@ -1288,8 +1288,9 @@ bool SubtleCrypto::supports(jsg::Lock& js,
               if (parsedOperation == SubtleOperation::ENCAPSULATE_KEY ||
                   parsedOperation == SubtleOperation::DECAPSULATE_KEY) {
                 auto name = lookupAlgorithm(additionalAlgorithm.name).orDefault({}).name;
-                if (!isOneOf(name, {"AES-CTR"_kj, "AES-CBC"_kj, "AES-GCM"_kj, "AES-KW"_kj,
-                        "HMAC"_kj, "HKDF"_kj, "PBKDF2"_kj})) {
+                if (!isOneOf(name,
+                        {"AES-CTR"_kj, "AES-CBC"_kj, "AES-GCM"_kj, "AES-KW"_kj, "HMAC"_kj,
+                          "HKDF"_kj, "PBKDF2"_kj})) {
                   return false;
                 }
                 if (name == "HMAC") {
