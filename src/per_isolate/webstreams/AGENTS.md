@@ -135,6 +135,13 @@ on it errors the detached stream. Suites:
   `Object.prototype`. Copies of internal bytes use `cloneArrayBuffer`
   (spec CloneArrayBuffer), never the species-consulting `slice`.
   Suite guard: each suite's `pollution.js`.
+- The backends settle reads with null-prototype results
+  (`createReadResult` in queue.ts), so internal reads run no user code.
+  A user's read settles the promise the user holds, inside the call that
+  answers it, with a plain `{ value, done }` (`userReadResult`), after the
+  read's completion steps: one `then` lookup per read, at the spec's
+  moment. Suite guard: `then-interceptors.js` (readable), `pollution.js`
+  (readable-byte).
 - Do not port logic across the fence without checking BOTH invariant
   lists (`queue.ts` and `native.ts` headers).
 - The native source contract (marker symbol, standard pull/cancel hooks,

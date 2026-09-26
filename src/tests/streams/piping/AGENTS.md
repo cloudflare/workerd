@@ -33,6 +33,7 @@ a deliberate defect pin, not a hole).
 | 13 | the source's pull aborts the pipe while the pipe reads a chunk | chunk dropped; the destination's pending read rejects | chunk written before the destination is aborted (spec: read chunks are written) | `pipeToJsToNativeCancel` |
 | 14 | a chunk reaches the source while an abort waits for an in-flight write (destination hwm 2, preventCancel) | not read while the write is in flight: the chunk stays in the source | the pipe's pending read takes it; it is written, and the pipe settles once that write has (spec) | `lateChunkDuringShutdownWait` |
 | 15 | abort with nothing to write while the pipe waits on a read (preventCancel) | the pipe and its read stay pending and the source stays locked; the next chunk completes the read, which drops it, and the pipe then rejects | the pipe settles and releases the source; a later chunk stays readable (spec) | `lateChunkAfterIdleAbort` |
+| 16 | the destination's lock when its reader sees the pipe's abort (the source errors, preventAbort false) | already released | still held: released once the pipe's abort of the destination has settled (spec: the pipe finalizes after its shutdown action); the read rejects inside the abort | `pipeToJsToInternalErroredSource`, `pipeThroughJsToInternalErroredSource` |
 
 Parity worth noting (probed, pinned): the whole error-propagation-
 forward core matrix (starts-errored rejection/hook IDENTITY on both

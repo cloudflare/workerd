@@ -23,7 +23,7 @@ basics) are parity under direct observation and are pinned as such.
 | 4 | error() after terminate() with queued chunk | ignored: queue drains, then done | late error wins: reads reject (spec; WPT terminate.any) | `errorAfterTerminateWithQueuedChunk` |
 | 5 | readableType/writableType validation | TypeError, trailing-period message | RangeError (spec; WPT general.any) | `readableWritableTypeValidation` |
 | 6 | invalid highWaterMark (either strategy) | TypeError (jsg uint64 boundary) | RangeError "Invalid highWaterMark" | `highWaterMarkValidated` |
-| 7 | then-getter fires settling a write→read cycle | 2 (harness context) | 3 | `thenGetterFireCount` |
+| 7 | then-getter fires settling a write→read cycle | 2 (harness context) | same | `thenGetterFireCount` |
 | 8 | backpressure RELEASE at readable HWM | RACY: the pending write either completes or latches forever — the reason WPT backpressure.any is disabled for C++ ("A hanging Promise was canceled"); only the race-independent prefix is asserted | deterministic spec flow: drain releases the write | `backpressureAppliedAtReadableHwm` |
 | 9 | readable strategy `highWaterMark: Infinity` | TypeError at construction (integer conversion) — the ROOT CAUSE of most WPT reentrant-strategies/errors.any C++ expectedFailures, whose scenarios never construct | accepted (spec) | `hwmInfinityRejected` |
 | 10 | writer.close() inside size() (enqueue-triggered, hwm 1) | reentrant close wins: queued chunk dropped, first read done | chunk delivered, then done (spec) | `writerCloseInsideSize` |

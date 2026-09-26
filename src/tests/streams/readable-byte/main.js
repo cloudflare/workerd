@@ -248,4 +248,5 @@ export {
   readAtLeastIgnoresPatchedRead,
   speciesNotConsultedByInternalCopies,
   nativeSourceIgnoresPollutedMembers,
+  thenGetterFiresOncePerByteRead,
 } from 'pollution';

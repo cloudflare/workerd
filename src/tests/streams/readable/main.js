@@ -203,6 +203,10 @@ export {
 
 export {
   thenGetterFireCountOnRead,
+  thenGetterFiresOncePerRead,
+  thenGetterTimingForWaitingRead,
+  thenGetterNotConsultedByPipeReads,
+  thenGetterPerIteratorNext,
   thenGetterCancelsBranchDuringEnqueue,
   thenGetterCancelsBranchDuringEnqueueBacklog,
   thenGetterCancelsBranchDuringClose,
