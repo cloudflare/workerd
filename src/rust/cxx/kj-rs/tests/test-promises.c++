@@ -18,6 +18,10 @@ kj::Promise<int32_t> new_ready_promise_i32(int32_t value) {
   return kj::Promise<int32_t>(value);
 }
 
+kj::Promise<int32_t> new_ready_promise_i32_ref(const int32_t& value) {
+  return kj::evalLater([&value]() { return value; });
+}
+
 kj::Promise<void> new_pending_promise_void() {
   return kj::Promise<void>(kj::NEVER_DONE);
 }

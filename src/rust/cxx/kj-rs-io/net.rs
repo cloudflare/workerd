@@ -1369,16 +1369,23 @@ mod tests {
                 "{too_large}"
             );
         }
-        let _port = kj_rs_tokio::TokioPort::new();
+        // A service name goes to getaddrinfo, which this port-less thread refuses before it
+        // starts the lookup. (With a port, the lookup would run on the blocking pool from the
+        // moment it is spawned, so whether the first poll sees it finished is a race.)
         for service in [
             "127.0.0.1:http",
             "127.0.0.1:0x50",
             "127.0.0.1:-1",
             "127.0.0.1:",
         ] {
+            let Some(Err(err)) = parse_once(service.as_bytes(), 0) else {
+                panic!("{service}: not decimal, so a service name for getaddrinfo")
+            };
             assert!(
-                parse_once(service.as_bytes(), 0).is_none(),
-                "{service}: not decimal, so a service name for getaddrinfo"
+                KjError::from(err)
+                    .description()
+                    .contains("no TokioEventPort"),
+                "{service}"
             );
         }
     }

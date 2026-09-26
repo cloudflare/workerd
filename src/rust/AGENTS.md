@@ -51,23 +51,37 @@ _Snapshot — the set drifts as crates come and go; `bazel query //src/rust/...`
 
 ### C++ calling async Rust (`extern "Rust"`)
 
-Mark an `extern "Rust"` function `async` to generate a C++ function returning `kj::Promise<T>`. If the function borrows any references (including `&self`), it needs an explicit lifetime annotation, which in turn requires `unsafe`:
+Mark an `extern "Rust"` function `async` to generate a C++ function returning `kj::Promise<T>`. Borrowed arguments (including `self`) elide their lifetimes as in any Rust `async fn`, and the function is safe:
 
 ```rust
 extern "Rust" {
-    // Borrows &self — needs explicit lifetime + unsafe.
-    async unsafe fn do_work<'a>(self: &'a MyType, arg: i32) -> Result<u64>;
-
-    // Only owned parameters — no lifetime or unsafe needed.
+    async fn do_work(self: &MyType, buf: &[u8]) -> Result<u64>;
     async fn do_work_owned(arg: i32) -> Result<u64>;
 }
 ```
 
-Without the explicit lifetime, the CXX macro requires the future to be `'static`, which fails if the async body references borrowed parameters.
+The generated shim boxes the future as `dyn Future + '__cxx`, where `'__cxx` is the one lifetime the bridge gives every elided reference (a `'_` lifetime argument of a named type counts as elided). The C++ caller keeps the arguments alive until the promise settles, as for any promise-returning KJ function. `unsafe` is only needed for raw-pointer arguments.
+
+The accepted spellings, all equivalent (`src/rust/cxx/kj-rs/tests/lib.rs` compiles and runs each):
+
+```rust
+async fn f(self: &T, text: &str) -> Result<u64>;                  // elided, typed receiver
+async fn f(&self, delta: u64) -> u64;                             // elided, `&self` shorthand
+async fn f<'a>(x: &'a [u8], y: &'a [u8]) -> Result<()>;           // one named lifetime on every reference
+async unsafe fn f<'a>(self: &'a T, delta: u64) -> Result<u64>;    // named, `unsafe` kept
+async unsafe fn f<'a>(self: &'a T, text: &'a str) -> Result<u64>; // named on `self` and argument
+```
+
+The `async unsafe fn f<'a>(...)` forms are how borrowing async functions had to be written before lifetimes could be elided; existing declarations keep compiling unchanged, and `unsafe` there is accepted but no longer required. Rejected: a named lifetime on some references and elision on others, or more than one named lifetime, since the future has to be bound by a single lifetime that every borrowed argument outlives.
+
+A safe async function may borrow only for as long as its promise lives, which is the contract the C++ caller upholds. The checker (`syntax/check.rs`, `check_async_fn_borrows`) enforces two rules, and `src/rust/cxx/tests/cxx_gen.rs` covers each rejected shape:
+
+- The result may not borrow: `-> &'a str`, `-> &'a [u8]`, `-> KjMaybe<&'a T>` and any other output carrying a lifetime require `unsafe fn`, because C++ can keep the settled value after the argument it borrows is gone. A plain reference result (`-> &'a T`) is rejected even with `unsafe`: `kj_rs::FuturePoller` stores the settled value in a union, which cannot hold a reference.
+- Every argument reference must be bound by the future's lifetime: elided, or the one named lifetime. `&'static T` on an argument (or on `self`) requires `unsafe fn`, since the Rust body could keep the C++ caller's argument after the promise settles.
 
 ### Rust calling async C++ (`extern "C++"`)
 
-Mark an `extern "C++"` function `async` to wrap a C++ function returning `kj::Promise<T>` as a Rust `Future`. The Rust caller can `.await` it:
+Mark an `extern "C++"` function `async` to wrap a C++ function returning `kj::Promise<T>` as a Rust future. The generated function is `fn f(...) -> impl Future<Output = Result<T, KjException>>`; the `kj::Promise` is built inside the call, and the returned `impl Future` captures every argument lifetime (edition 2024 rules), so a future that borrows its arguments cannot outlive them. No lifetime annotations, `unsafe` or wrapper functions are needed:
 
 ```rust
 unsafe extern "C++" {
