@@ -2206,7 +2206,7 @@ interface RequestInit<Cf = CfProperties> {
   /* A BodyInit object or null to set request's body. */
   body?: BodyInit | null;
   /* A string indicating whether request follows redirects, results in an error upon encountering a redirect, or returns the redirect (in an opaque fashion). Sets request's redirect. */
-  redirect?: string;
+  redirect?: "follow" | "manual";
   fetcher?: Fetcher | null;
   cf?: Cf;
   /* A string indicating how the request will interact with the browser's cache to set request's cache. */
