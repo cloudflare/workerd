@@ -28,6 +28,7 @@ export default {
     comment: 'Argon2 is not supported',
     omittedTests: true,
   },
+  'derive_bits_keys/argon2.tentative.https.any.js': unsupported('Argon2'),
   'derive_bits_keys/argon2_vectors.js': {
     comment: 'Argon2 is not supported',
     omittedTests: true,
@@ -40,6 +41,8 @@ export default {
   'derive_bits_keys/cfrg_curves_bits_fixtures.js': supportFile,
   'derive_bits_keys/cfrg_curves_keys.js': supportFile,
   'derive_bits_keys/cfrg_curves_keys_curve25519.https.any.js': {},
+  'derive_bits_keys/cfrg_curves_keys_curve448.tentative.https.any.js':
+    unsupported('X448'),
   'derive_bits_keys/derive.js': {},
   'derive_bits_keys/derive_key_and_encrypt.https.any.js': {},
   'derive_bits_keys/derive_key_and_encrypt.js': supportFile,
@@ -93,12 +96,12 @@ export default {
   'digest/turboshake.tentative.https.any.js': unsupported('TurboSHAKE'),
   'digest/xof_digest.js': {},
   'encap_decap/encap_decap_bits.tentative.https.any.js': {
-    comment: 'ML-KEM-512 is not supported',
-    expectedFailures: [/ML-KEM-512/i],
+    comment: 'ML-KEM-512 and hybrid ML-KEM are not supported',
+    expectedFailures: [/ML-KEM-512/i, /^MLKEM(768|1024)-/],
   },
   'encap_decap/encap_decap_keys.tentative.https.any.js': {
-    comment: 'ML-KEM-512 is not supported',
-    expectedFailures: [/ML-KEM-512/i],
+    comment: 'ML-KEM-512 and hybrid ML-KEM are not supported',
+    expectedFailures: [/ML-KEM-512/i, /^MLKEM(768|1024)-/],
   },
   'encap_decap/hybrid_kem_vectors.js': {
     comment: 'Hybrid ML-KEM (post-quantum key encapsulation) is not supported',
@@ -131,17 +134,18 @@ export default {
   'generateKey/failures_AES-CTR.https.any.js': {},
   'generateKey/failures_AES-GCM.https.any.js': {},
   'generateKey/failures_AES-KW.https.any.js': {},
+  'generateKey/failures_AES-OCB.tentative.https.any.js': unsupported('AES-OCB'),
   'generateKey/failures_ECDH.https.any.js': {},
   'generateKey/failures_ECDSA.https.any.js': {},
   'generateKey/failures_Ed25519.https.any.js': {},
+  'generateKey/failures_Ed448.tentative.https.any.js': unsupported('Ed448'),
   'generateKey/failures_HMAC.https.any.js': {},
-  'generateKey/failures_ML-DSA.tentative.https.any.js': {
-    comment: 'Wrong type of error returned',
-    expectedFailures: [/^(Empty|Bad) algorithm:/],
-  },
+  'generateKey/failures_Hybrid-KEM.tentative.https.any.js':
+    unsupported('Hybrid ML-KEM'),
+  'generateKey/failures_ML-DSA.tentative.https.any.js': {},
   'generateKey/failures_ML-KEM.tentative.https.any.js': {
-    comment: 'Wrong type of error returned + ML-KEM-512 is not supported',
-    expectedFailures: [/^(Empty|Bad) algorithm:/, /ML-KEM-512/i],
+    comment: 'ML-KEM-512 is not supported',
+    expectedFailures: [/ML-KEM-512/i],
   },
   'generateKey/failures_RSA-OAEP.https.any.js': {},
   'generateKey/failures_RSA-PSS.https.any.js': {},
@@ -167,6 +171,8 @@ export default {
   'generateKey/successes_Ed25519.https.any.js': {},
   'generateKey/successes_Ed448.tentative.https.any.js': unsupported('Ed448'),
   'generateKey/successes_HMAC.https.any.js': {},
+  'generateKey/successes_Hybrid-KEM.tentative.https.any.js':
+    unsupported('Hybrid ML-KEM'),
   'generateKey/successes_ML-DSA.tentative.https.any.js': {},
   'generateKey/successes_ML-KEM.tentative.https.any.js': {
     comment: 'ML-KEM-512 is not supported',
@@ -180,7 +186,10 @@ export default {
   'generateKey/successes_chacha20_poly1305.tentative.https.any.js':
     unsupported('ChaCha20-Poly1305'),
   'generateKey/successes_kmac.tentative.https.any.js': unsupported('KMAC'),
-  'getPublicKey.tentative.https.any.js': {},
+  'getPublicKey.tentative.https.any.js': {
+    comment: 'Ed448, X448, ML-KEM-512, and hybrid ML-KEM are not supported',
+    expectedFailures: [/Ed448|X448|ML-KEM-512|MLKEM(768|1024)-/],
+  },
   'getRandomValues.any.js': {},
   'historical.any.js': {
     comment: 'Secure context is only relevant to browsers',
@@ -247,6 +256,8 @@ export default {
     unsupported('Argon2'),
   'import_export/ChaCha20-Poly1305_importKey.tentative.https.any.js':
     unsupported('ChaCha20-Poly1305'),
+  'import_export/Hybrid-KEM_importKey.tentative.https.any.js':
+    unsupported('Hybrid ML-KEM'),
   'import_export/Hybrid-KEM_importKey_fixtures.js': {
     comment: 'Hybrid ML-KEM (post-quantum key encapsulation) is not supported',
     omittedTests: true,
@@ -341,12 +352,15 @@ export default {
       /Invalid 'crv' field: importKey\(jwk \(public\) , .*, true, \[\]\)/,
     ],
   },
+  'import_export/okp_importKey_failures_X448.tentative.https.any.js':
+    unsupported('X448'),
   'import_export/okp_importKey_failures_fixtures.js': {},
   'import_export/okp_importKey_fixtures.js': {
     comment:
       'References okpKeyData, which is only defined when loaded after util/okp_key_fixtures.js via META scripts; cannot run standalone',
     omittedTests: true,
   },
+  'import_export/raw_format_aliases.tentative.https.any.js': {},
   'import_export/rsa_importKey.https.any.js': {},
   'import_export/symmetric_importKey.https.any.js': {},
   'import_export/symmetric_importKey.js': supportFile,
@@ -376,6 +390,9 @@ export default {
     comment: 'CryptoKey does not support structured cloning',
     expectedFailures: true,
   },
+  'serialization/aes-ocb.tentative.https.any.js': unsupported('AES-OCB'),
+  'serialization/chacha20-poly1305.tentative.https.any.js':
+    unsupported('ChaCha20-Poly1305'),
   'serialization/ecdh.https.any.js': {
     comment: 'CryptoKey does not support structured cloning',
     expectedFailures: true,
@@ -388,7 +405,19 @@ export default {
     comment: 'CryptoKey does not support structured cloning',
     expectedFailures: true,
   },
+  'serialization/ed448.tentative.https.any.js': unsupported('Ed448'),
   'serialization/hmac.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/hybridkem.tentative.https.window.js':
+    unsupported('Hybrid ML-KEM'),
+  'serialization/kmac.tentative.https.any.js': unsupported('KMAC'),
+  'serialization/mldsa.tentative.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
+  'serialization/mlkem.tentative.https.any.js': {
     comment: 'CryptoKey does not support structured cloning',
     expectedFailures: true,
   },
@@ -409,6 +438,7 @@ export default {
     comment: 'CryptoKey does not support structured cloning',
     expectedFailures: true,
   },
+  'serialization/x448.tentative.https.any.js': unsupported('X448'),
   'sign_verify/ecdsa.https.any.js': {},
   'sign_verify/ecdsa.js': supportFile,
   'sign_verify/ecdsa_vectors.js': supportFile,
@@ -442,6 +472,7 @@ export default {
     comment: 'KMAC is not supported',
     omittedTests: true,
   },
+  'sign_verify/kmac.tentative.https.any.js': unsupported('KMAC'),
   'sign_verify/kmac_vectors.js': {
     comment: 'KMAC is not supported',
     omittedTests: true,
@@ -456,7 +487,16 @@ export default {
   'sign_verify/rsa_pss.https.any.js': {},
   'sign_verify/rsa_pss_vectors.js': {},
   'sign_verify/signature.js': {},
-  'supports.tentative.https.any.js': {},
+  'supports-modern.tentative.https.any.js': {
+    comment:
+      'ML-KEM-512, hybrid ML-KEM, and ChaCha20-Poly1305 are not supported',
+    expectedFailures: [/ML-KEM-512|MLKEM(768|1024)-|ChaCha20-Poly1305/],
+  },
+  'supports.tentative.https.any.js': {
+    comment:
+      'HKDF output length validation does not match the WPT expectations',
+    expectedFailures: [/^supports validates HKDF /],
+  },
 
   'util/ec_key_fixtures.js': {},
   'util/helpers.js': {},
