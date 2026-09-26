@@ -1,0 +1,59 @@
+# kj-hyper's contract tests against kj's HTTP entry points: C++ KJ_TESTs drive a kj::HttpService
+# served by kj-hyper and a kj::HttpClient over kj-hyper's client, on the tokio-backed
+# kj::setupAsyncIo() every kj_test binary links; the Rust helpers here (lib.rs, bridged by
+# workerd-cxx) start the server and client.
+
+load("@rules_rust//rust:defs.bzl", "rust_library")
+load("//:build/kj_test.bzl", "kj_test")
+load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
+
+rust_library(
+    name = "tests",
+    srcs = glob(["*.rs"]),
+    crate_name = "kj_hyper_tests",
+    edition = "2024",
+    link_deps = [
+        ":bridge",
+    ],
+    proc_macro_deps = [
+        "@crates_vendor//:async-trait",
+    ],
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "//src/rust/cxx",
+        "//src/rust/cxx/kj-hyper",
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/kj-rs-tokio",
+        "//src/rust/kj",
+        "@crates_vendor//:futures",
+        "@crates_vendor//:tokio",
+    ],
+)
+
+rust_cxx_bridge(
+    name = "bridge",
+    src = "lib.rs",
+    hdrs = ["test-helpers.h"],
+    include_prefix = "kj-hyper-test",
+    deps = [
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/kj:ffi",
+        "@capnp-cpp//src/kj:kj-async-io",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+kj_test(
+    src = "kj-hyper-test.c++",
+    deps = [
+        ":bridge",
+        ":tests",
+        "//src/rust/cxx/kj-hyper",
+        "//src/rust/cxx/kj-hyper:cc",
+        "@capnp-cpp//src/kj:kj-async-io",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)

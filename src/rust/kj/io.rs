@@ -22,6 +22,14 @@ pub mod ffi {
         async fn async_output_stream_when_write_disconnected(
             this_: Pin<&mut AsyncOutputStream>,
         ) -> Result<()>;
+
+        async fn async_input_stream_try_read(
+            this_: Pin<&mut AsyncInputStream>,
+            buffer: &mut [u8],
+            min_bytes: usize,
+        ) -> Result<usize>;
+
+        fn async_input_stream_try_get_length(this_: Pin<&mut AsyncInputStream>) -> KjMaybe<u64>;
     }
 
     // Dropping a `KjOwn` of these is generated here, where they are declared; the bridges that
@@ -33,6 +41,23 @@ pub mod ffi {
 
 pub type AsyncInputStream = ffi::AsyncInputStream;
 pub type AsyncIoStream = ffi::AsyncIoStream;
+
+impl ffi::AsyncInputStream {
+    /// `kj::AsyncInputStream::tryRead`: reads until at least `min_bytes` are in `buffer`, or the
+    /// stream ends first (a count below `min_bytes` means EOF).
+    pub async fn try_read(
+        self: Pin<&mut Self>,
+        buffer: &mut [u8],
+        min_bytes: usize,
+    ) -> Result<usize> {
+        Ok(ffi::async_input_stream_try_read(self, buffer, min_bytes).await?)
+    }
+
+    /// `kj::AsyncInputStream::tryGetLength`: the bytes left to read, when known.
+    pub fn try_get_length(self: Pin<&mut Self>) -> Option<u64> {
+        ffi::async_input_stream_try_get_length(self).into()
+    }
+}
 
 /// Owned-or-borrowed wrapper for `kj::AsyncOutputStream`.
 pub struct AsyncOutputStream<'a>(OwnOrMut<'a, ffi::AsyncOutputStream>);

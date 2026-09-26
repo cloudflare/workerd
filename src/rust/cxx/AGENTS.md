@@ -36,6 +36,11 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - `kj-rs-tokio/` — `TokioEventPort`: a `kj::EventPort` backed by a per-thread tokio
   `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers) and
   `kj_rs_tokio::spawn()`
+- `kj-hyper/` — HTTP/1.1, WebSockets and TLS for the Rust server: hyper's server and pooled
+  client, rustls, the WebSocket handshake (kj's own `kj::WebSocket` runs over the upgraded
+  transport), with kj-typed seams (`kj::http::Service`, `kj::HttpService::Response`,
+  `kj::WebSocket`, `kj::AsyncIoStream`) so requests reach a C++ `WorkerInterface` and C++ can
+  make outbound requests; see "kj-hyper" below
 - `kj-rs-io/` — tokio-backed `kj::AsyncIoStream` / `kj::Network` / `kj::LowLevelAsyncIoProvider`
   (the I/O providers for the tokio loop, `kj_rs_io::setupTokioAsyncIo()`), `loopback:` addresses
   (in-process connections for `workerd test`), the `--watch` file watcher (Rust over `notify`),
@@ -100,3 +105,61 @@ guarantee by type, and what the **C++ adapters** guarantee by construction.
 - **`--config=asan` and the `tsan` configs instrument both C++ and Rust.** Rust is built with
   nightly rustc, `-Zsanitizer=<address|thread>`, and a standard library instrumented the same way
   (//build/rust); `//src/rust/asan` and `//src/rust/tsan` verify the instrumentation is active.
+
+## kj-hyper: the Rust-facing API and its rules
+
+kj-hyper is used from Rust; its C++ (kj-hyper.c++) exists only to implement kj interfaces over
+Rust objects, and all of its Rust `unsafe` is in ffi.rs.
+
+- **Surface.** `server::serve_connection(io, &HeaderTable, Rc<ServerSettings>, Rc<dyn Handler>,
+  &Shutdown)` serves one accepted tokio connection; `Handler::request` takes exactly what
+  `kj::http::Service::request` takes, `Handler::connect` takes a `server::Connect` that is
+  answered in Rust (`accept()` hands back the tunnel as tokio I/O, `reject()`) or handed to C++
+  (`into_kj()`). `client::Client` implements `kj::http::Service` over hyper-util's legacy client:
+  `Client::new(table, settings, dial)` pools connections to one peer through a dialer,
+  `Client::internet(table, settings, tls, allow)` dials whatever authority a request's URL names.
+  `tls` builds rustls configs from `TlsOptions` and runs the handshakes. `into_kj_stream` /
+  `tcp_into_kj_stream` hand tokio streams to C++ as `kj::AsyncIoStream`.
+- **Threads.** Everything is single-threaded state (`Rc`, `RefCell`, `Cell`), bound to the tokio
+  runtime thread it was created on, as kj's own HTTP objects are bound to their event loop's
+  thread. Transports must be `Send` (hyper's upgrade path and the legacy client's connection
+  tasks require it); handlers, settings and header tables need not be. hyper's timers (header
+  timeout, pool idle eviction) and the client's connection tasks (`tokio::spawn`) need the
+  thread's tokio runtime entered.
+- **Lifetimes.** A `HeaderTable` and `ServerSettings`/`ClientSettings` outlive the futures made
+  with them (the server borrows the table; a `WebSocketErrorHandler` in the settings is borrowed
+  by every response object built while a call runs). What a handler call borrows from C++ -- a
+  `tryRead` buffer, header slices -- is tied to the future's lifetime on the bridge; Rust objects
+  behind kj interfaces (`RustIo`, `RustBody`) are `Rc`s whose operations own a share, so a
+  `kj::Own` dropped mid-operation dangles nothing.
+- **Cancellation.** A handler call runs alongside its connection, not inside hyper's service
+  future, and is dropped when the connection ends without an upgrade (kj's cancel-on-hangup). A
+  failure after the response head went out aborts the body, so hyper drops the connection
+  instead of framing a truncated message as complete. Dropping a client request drops its
+  connection (hyper's rule); the request body pump ends with the exchange, as kj's adapter's
+  does.
+- **What is not observed.** A transport handed to C++ with `into_kj_stream` has no
+  `whenWriteDisconnected()` (it never resolves; reads and writes fail once the peer is gone), and
+  so a `kj::WebSocket` over a hyper-upgraded stream never resolves `whenAborted()` either (kj
+  derives it from that signal): peer hangups are seen by reading. `tcp_into_kj_stream` goes
+  through kj-rs-io, which does observe them.
+- **Headers are copied at the crossing.** kj headers reach hyper through `for_each_header` ->
+  `Head::append` (spellings kept in hyper's `HeaderCaseMap`, made public by
+  patches/rust/hyper-public-header-case-map.patch); hyper's come back packed (`HeaderBlock`) and
+  C++ checks the block's bounds before building `kj::HttpHeaders`.
+- **WebSockets are kj's.** kj-hyper does the handshake (`handshake.rs`: accept and client keys;
+  the extension agreement is kj's own parser, applied in kj-hyper.c++) and hands the upgraded
+  transport to `kj::newWebSocket`, with frame-mask entropy from `rand` (`RustEntropySource`).
+  A stream read and written by two tasks (a `RustIo`) is wrapped in `SharedWakers`, since
+  rustls' reads write and its writes read.
+- **Tests.** Rust unit tests sit in each module; kj-hyper/tests/ holds the contract tests
+  against kj's HTTP interfaces (a C++ `kj::HttpService` served by kj-hyper, kj-hyper's client
+  behind `kj::newHttpClient(kj::HttpService&)`, checked on the wire), a `kj_test` driving Rust
+  helpers on the tokio-backed `kj::setupAsyncIo()`. TLS policy tests live in tls.rs with
+  fixed PEM material (no certificate generation at test time).
+- **Dropped kj settings.** No `HttpServerErrorHandler` (kj's default policy is built in; a
+  handler wanting other answers handles its own errors), no `HttpClientErrorHandler`, no
+  caller-supplied `EntropySource` (handshake keys and frame masks come from `rand`), no
+  `tlsStarter`, no pipeline timeout or cancelled-upload grace period, and no cipher list
+  (`TlsOptions.cipherList` is not applied: cipher suites are rustls' defaults); hyper answers
+  unparsable requests itself.
