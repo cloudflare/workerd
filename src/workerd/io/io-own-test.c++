@@ -30,12 +30,13 @@ KJ_TEST("ReverseIoOwn supports dereferencing, moves, and early destruction") {
   KJ_EXPECT(object->value == 123);
   KJ_EXPECT((*object).value == 123);
 
+  // Checking that each move empties its source is the behavior under test.
   auto moved = kj::mv(object);
-  KJ_EXPECT(object.tryGet() == kj::none);
+  KJ_EXPECT(object.tryGet() == kj::none);  // NOLINT(workerd-use-after-move)
   KJ_EXPECT(moved.tryGet() != kj::none);
 
   object = kj::mv(moved);
-  KJ_EXPECT(moved.tryGet() == kj::none);
+  KJ_EXPECT(moved.tryGet() == kj::none);  // NOLINT(workerd-use-after-move)
   KJ_EXPECT(object.tryGet() != kj::none);
 
   object = nullptr;
@@ -52,8 +53,9 @@ KJ_TEST("ReverseIoOwn can transfer a live object out of its IoContext") {
     auto context = fixture.newIoContext();
     auto object = context->addObjectReverse(kj::heap<TrackedObject>(destructionCount, 123));
 
+    // Checking that the transfer empties the source is the behavior under test.
     owned = kj::mv(object);
-    KJ_EXPECT(object.tryGet() == kj::none);
+    KJ_EXPECT(object.tryGet() == kj::none);  // NOLINT(workerd-use-after-move)
     KJ_EXPECT(owned->value == 123);
   }
 

@@ -1,5 +1,19 @@
 use crate::ffi;
 
+/// A bridge that holds a `KjOwn` of a type another bridge declares. The alias carries no
+/// `OwnTarget` of its own, so `impl KjOwn<TwoBase> {}` requests one here.
+#[cxx::bridge(namespace = "kj_rs_demo")]
+pub mod alias_ffi {
+    unsafe extern "C++" {
+        include!("kj-rs-demo/test-own.h");
+        type TwoBase = crate::ffi::TwoBase;
+
+        fn heap_two_base_complete() -> KjOwn<TwoBase>;
+    }
+
+    impl KjOwn<TwoBase> {}
+}
+
 // Send and Sync are explicity opt-in when using cxx.
 // # Safety
 // The type `OqaqueCxxClass` contains no raw pointers or interior mutability.
@@ -44,6 +58,34 @@ pub mod tests {
     #[test]
     fn rust_take_own() {
         ffi::rust_take_own_driver();
+    }
+
+    // Dropping a `KjOwn<SecondBase>` from Rust must dispose the complete `TwoBase`, so the disposer
+    // must see the complete object's address rather than the `SecondBase` subobject's.
+    #[test]
+    fn drop_second_base_disposes_complete_object() {
+        assert!(ffi::rust_drop_recorded_two_base_driver());
+        assert_eq!(ffi::rust_drop_heap_two_base_driver(), 1);
+    }
+
+    #[test]
+    fn drop_second_base_from_rust() {
+        let before = ffi::two_base_destroyed();
+        let own = ffi::heap_two_base();
+        assert_eq!(own.second(), 2);
+        drop(own);
+        assert_eq!(ffi::two_base_destroyed() - before, 1);
+    }
+
+    // `KjOwn<TwoBase>` comes through an alias bridge whose `impl KjOwn<TwoBase> {}` supplies the
+    // `OwnTarget` for a type declared elsewhere.
+    #[test]
+    fn drop_through_alias_bridge() {
+        let before = ffi::two_base_destroyed();
+        let own = crate::test_own::alias_ffi::heap_two_base_complete();
+        assert_eq!(own.first(), 1);
+        drop(own);
+        assert_eq!(ffi::two_base_destroyed() - before, 1);
     }
 
     #[test]

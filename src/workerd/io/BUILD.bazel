@@ -126,6 +126,7 @@ wd_cc_library(
         "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
+        "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj:kj-async-io",
         "@ncrypto",
         "@ssl",
@@ -251,6 +252,7 @@ wd_cc_library(
         "//src/workerd/util:sqlite",
         "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
@@ -316,6 +318,7 @@ wd_cc_library(
     deps = [
         ":trace",
         "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
@@ -328,6 +331,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
@@ -660,6 +664,14 @@ kj_test(
     src = "per-isolate-compile-cache-test.c++",
     # Downstream users may set their own flags, which breaks this test.
     tags = ["no-downstream"],
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "io-context-task-test.c++",
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",

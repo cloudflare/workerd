@@ -76,6 +76,7 @@ export { abandonedDigestReporting } from 'unhandled-rejection';
 export {
   mutationAfterWriteIsInvisible,
   detachAfterWriteIsInvisible,
+  degenerateViewsHashAsEmpty,
   lyingMetadataNeverConsulted,
 } from 'buffer-lifecycle';
 

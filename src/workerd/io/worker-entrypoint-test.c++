@@ -92,24 +92,72 @@ class TestResponse final: public kj::HttpService::Response {
   uint statusCode = 0;
 };
 
+// Actor scripts in these tests append to `globalThis.events` from their constructor and handler.
+constexpr kj::StringPtr RECORDING_ACTOR_SOURCE = R"SCRIPT(
+  import { DurableObject } from "cloudflare:workers";
+  globalThis.events = "";
+  export default class extends DurableObject {
+    constructor(ctx, env) {
+      super(ctx, env);
+      globalThis.events += "constructor;";
+    }
+    async fetch() {
+      globalThis.events += "fetch;";
+      return new Response("OK");
+    }
+  }
+)SCRIPT"_kj;
+
+kj::String getJsEvents(jsg::Lock& js) {
+  return js.withinHandleScope([&]() { return js.global().get(js, "events"_kj).toString(js); });
+}
+
+kj::String getJsEvents(TestFixture& fixture) {
+  kj::String events;
+  fixture.enterWorkerLock([&](Worker::Lock& lock) {
+    jsg::Lock& js = lock;
+    js.withinHandleScope([&]() {
+      v8::Context::Scope contextScope(lock.getContext());
+      events = getJsEvents(js);
+    });
+  });
+  return events;
+}
+
+// Records whether the claim follows delivery, and the script's events when the claim fires.
 class RetryClaimObserver final: public RequestObserver {
  public:
+  void delivered() override {
+    ++deliveredCount;
+  }
+
   void claimRetryTokenBeforeUserCode() override {
-    KJ_EXPECT(stage == 0);
-    stage = 1;
-    if (rejectClaim) {
-      kj::throwFatalException(KJ_EXCEPTION(FAILED, "claim rejected"));
+    ++claimCount;
+    KJ_EXPECT(deliveredCount == 1);
+    jsEventsAtClaim = getJsEvents(jsg::Lock::current());
+    KJ_IF_SOME(e, rejection) {
+      kj::throwFatalException(e.clone());
     }
   }
 
-  void delivered() override {
-    KJ_EXPECT(stage == 1);
-    stage = 2;
-  }
-
-  uint stage = 0;
-  bool rejectClaim = false;
+  uint deliveredCount = 0;
+  uint claimCount = 0;
+  kj::String jsEventsAtClaim;
+  kj::Maybe<kj::Exception> rejection;
 };
+
+kj::Exception makeClaimRejection() {
+  auto exception = KJ_EXCEPTION(FAILED, "claim rejected");
+  exception.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  return exception;
+}
+
+kj::Exception makePredecessorRejection() {
+  auto exception = KJ_EXCEPTION(DISCONNECTED, "request rejected before user code");
+  jsg::markActorRequestNotDelivered(exception);
+  exception.setDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  return exception;
+}
 
 class ThrowingResponse final: public kj::HttpService::Response {
  public:
@@ -218,137 +266,128 @@ class RecordingObserver final: public RequestObserver, public WorkerInterface {
   kj::Maybe<WorkerInterface&> inner;
 };
 
-class PredecessorRejectedObserver final: public RequestObserver {
- public:
-  void claimRetryTokenBeforeUserCode() override {
-    auto exception = KJ_EXCEPTION(DISCONNECTED, "request rejected before user code");
-    jsg::markActorRequestNotDelivered(exception);
-    exception.setDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
-    kj::throwFatalException(kj::mv(exception));
-  }
-};
-
-KJ_TEST("actor fetch preserves a predecessor rejection before user code") {
-  TestFixture fixture(TestFixture::SetupParams{
-    .actorId = Worker::Actor::Id(kj::str("not-delivered-test")),
+TestFixture::SetupParams recordingActorParams(RetryClaimObserver& observer) {
+  return {
+    .mainModuleSource = RECORDING_ACTOR_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str("retry-claim-test")),
+    .actorClassName = "default"_kj,
     .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
-        []() -> kj::Own<RequestObserver> { return kj::refcounted<PredecessorRejectedObserver>(); }),
-  });
+        [&observer]() -> kj::Own<RequestObserver> { return kj::addRef(observer); }),
+  };
+}
+
+kj::Maybe<kj::Exception> sendFetch(TestFixture& fixture, TestResponse& response) {
   auto entrypoint = fixture.makeWorkerEntrypoint();
   kj::HttpHeaderTable headerTable;
   kj::HttpHeaders headers(headerTable);
   kj::NullStream requestBody;
-  TestResponse response;
-
-  auto exception = kj::runCatchingExceptions([&]() {
+  return kj::runCatchingExceptions([&]() {
     entrypoint->request(kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
         .wait(fixture.getWaitScope());
   });
+}
 
-  auto& e = KJ_ASSERT_NONNULL(exception);
+KJ_TEST("actor fetch claims after construction and before the fetch handler") {
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  TestFixture fixture(recordingActorParams(*observer));
+  TestResponse response;
+
+  KJ_EXPECT(sendFetch(fixture, response) == kj::none);
+
+  KJ_EXPECT(response.statusCode == 200);
+  KJ_EXPECT(observer->claimCount == 1);
+  KJ_EXPECT(observer->jsEventsAtClaim == "constructor;", observer->jsEventsAtClaim);
+  KJ_EXPECT(getJsEvents(fixture) == "constructor;fetch;");
+}
+
+KJ_TEST("a rejected actor fetch claim runs the constructor but not the handler") {
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  observer->rejection = makeClaimRejection();
+  TestFixture fixture(recordingActorParams(*observer));
+  TestResponse response;
+
+  auto e = KJ_ASSERT_NONNULL(sendFetch(fixture, response));
+
+  KJ_EXPECT(e.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none, e);
+  KJ_EXPECT(response.statusCode == 0);
+  KJ_EXPECT(observer->claimCount == 1);
+  KJ_EXPECT(getJsEvents(fixture) == "constructor;");
+}
+
+KJ_TEST("a rejected actor fetch claim is not replaced by an output gate failure") {
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  observer->rejection = makeClaimRejection();
+  TestFixture fixture(recordingActorParams(*observer));
+  auto gatePaf = kj::newPromiseAndFulfiller<void>();
+  auto blocker = fixture.getActor().getOutputGate().lockWhile(kj::mv(gatePaf.promise), nullptr);
+  TestResponse response;
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  kj::NullStream requestBody;
+  auto request =
+      entrypoint->request(
+                    kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
+          .eagerlyEvaluate(nullptr);
+
+  fixture.pollEventLoop();
+  gatePaf.fulfiller->reject(KJ_EXCEPTION(OVERLOADED, "output gate failed"));
+
+  auto e =
+      KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { request.wait(fixture.getWaitScope()); }));
+  KJ_EXPECT(e.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none, e);
+  KJ_EXPECT_THROW_MESSAGE("output gate failed", blocker.wait(fixture.getWaitScope()));
+}
+
+KJ_TEST("actor fetch preserves not-delivered for a predecessor rejection") {
+  // The caller retries a predecessor rejection against the replacement actor, but only while it is
+  // marked not delivered. Failures after delivered() are otherwise marked delivered, so this one
+  // must be exempt.
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  observer->rejection = makePredecessorRejection();
+  TestFixture fixture(recordingActorParams(*observer));
+  TestResponse response;
+
+  auto e = KJ_ASSERT_NONNULL(sendFetch(fixture, response));
+
   KJ_EXPECT(e.getType() == kj::Exception::Type::DISCONNECTED, e);
   KJ_EXPECT(e.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
   KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, e);
   KJ_EXPECT(e.getDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID) != kj::none, e);
+  KJ_EXPECT(getJsEvents(fixture) == "constructor;");
 }
 
-class UnqualifiedNotDeliveredObserver final: public RequestObserver {
- public:
-  void claimRetryTokenBeforeUserCode() override {
-    auto exception = KJ_EXCEPTION(DISCONNECTED, "request rejected before user code");
-    jsg::markActorRequestNotDelivered(exception);
-    kj::throwFatalException(kj::mv(exception));
-  }
-};
-
-KJ_TEST("actor fetch preserves an unqualified rejection before delivery") {
-  TestFixture fixture(TestFixture::SetupParams{
-    .actorId = Worker::Actor::Id(kj::str("not-delivered-test")),
-    .requestObserverFactory =
-        kj::Function<kj::Own<RequestObserver>()>([]() -> kj::Own<RequestObserver> {
-    return kj::refcounted<UnqualifiedNotDeliveredObserver>();
-  }),
-  });
-  auto entrypoint = fixture.makeWorkerEntrypoint();
-  kj::HttpHeaderTable headerTable;
-  kj::HttpHeaders headers(headerTable);
-  kj::NullStream requestBody;
+KJ_TEST("actor fetch marks other not-delivered rejections from the claim as delivered") {
+  // The predecessor exemption is keyed on its own detail. By the time of the claim the constructor
+  // may have run, so any other not-delivered failure is marked delivered and not retried.
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  auto rejection = KJ_EXCEPTION(DISCONNECTED, "request rejected");
+  jsg::markActorRequestNotDelivered(rejection);
+  observer->rejection = kj::mv(rejection);
+  TestFixture fixture(recordingActorParams(*observer));
   TestResponse response;
 
-  auto exception = kj::runCatchingExceptions([&]() {
-    entrypoint->request(kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
-        .wait(fixture.getWaitScope());
-  });
+  auto e = KJ_ASSERT_NONNULL(sendFetch(fixture, response));
 
-  auto& e = KJ_ASSERT_NONNULL(exception);
-  KJ_EXPECT(e.getType() == kj::Exception::Type::DISCONNECTED, e);
-  KJ_EXPECT(e.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
-  KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
 }
 
-KJ_TEST("retry claim fires synchronously before fetch delivery") {
+KJ_TEST("fetch claims once even without a fetch handler") {
+  // The claim precedes the handler lookup, so a worker without a fetch handler still claims, once,
+  // before the request fails.
   auto observer = kj::refcounted<RetryClaimObserver>();
   TestFixture fixture(TestFixture::SetupParams{
-    .mainModuleSource = R"SCRIPT(
-        export default {
-          async fetch() {
-            return new Response("OK");
-          },
-        };
-      )SCRIPT"_kj,
+    .mainModuleSource = "export default {};"_kj,
     .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
         [&observer]() -> kj::Own<RequestObserver> { return kj::addRef(*observer); }),
   });
-
-  auto entrypoint = fixture.makeWorkerEntrypoint();
-  kj::HttpHeaderTable headerTable;
-  kj::HttpHeaders headers(headerTable);
-  kj::NullStream requestBody;
   TestResponse response;
 
-  auto request = entrypoint->request(
-      kj::HttpMethod::GET, "https://example.com", headers, requestBody, response);
-  KJ_EXPECT(observer->stage == 2, "claim and delivery hooks did not fire synchronously");
-  request.wait(fixture.getWaitScope());
+  KJ_EXPECT(sendFetch(fixture, response) == kj::none);
 
-  KJ_EXPECT(response.statusCode == 200);
-  KJ_EXPECT(observer->stage == 2, "claim hook fired more than once");
-}
-
-KJ_TEST("rejected retry claim prevents actor construction and delivery") {
-  auto observer = kj::refcounted<RetryClaimObserver>();
-  observer->rejectClaim = true;
-  TestFixture fixture(TestFixture::SetupParams{
-    .mainModuleSource = R"SCRIPT(
-        export default class {
-          constructor() {
-            throw new Error("actor was constructed");
-          }
-
-          async fetch() {
-            return new Response("unexpected");
-          }
-        }
-      )SCRIPT"_kj,
-    .actorId = Worker::Actor::Id(kj::str("retry-claim-test")),
-    .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
-        [&observer]() -> kj::Own<RequestObserver> { return kj::addRef(*observer); }),
-  });
-
-  auto entrypoint = fixture.makeWorkerEntrypoint();
-  kj::HttpHeaderTable headerTable;
-  kj::HttpHeaders headers(headerTable);
-  kj::NullStream requestBody;
-  TestResponse response;
-
-  auto exception = kj::runCatchingExceptions([&]() {
-    entrypoint->request(kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
-        .wait(fixture.getWaitScope());
-  });
-
-  KJ_EXPECT(KJ_ASSERT_NONNULL(exception).getDescription().contains("claim rejected"));
-  KJ_EXPECT(observer->stage == 1, "request was delivered after its retry claim was rejected");
-  KJ_EXPECT(response.statusCode == 0);
+  KJ_EXPECT(response.statusCode == 500);
+  KJ_EXPECT(observer->claimCount == 1);
 }
 
 KJ_TEST("connect pass-through tags failures after delivery") {

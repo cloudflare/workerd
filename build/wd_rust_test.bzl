@@ -23,7 +23,7 @@ def wd_rust_test(
         ],
         malloc = "//src/workerd/server:malloc",
         # linkopts_default limits linker parallelism to avoid resource exhaustion.
-        tags = tags + ["no-coverage", "cpu:4"],
+        tags = tags + ["no-coverage", "cpu:2"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],

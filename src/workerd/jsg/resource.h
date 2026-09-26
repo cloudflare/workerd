@@ -118,7 +118,8 @@ struct ConstructorCallback<TypeWrapper, T, Ref<T>(Args...), kj::_::Indexes<index
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
           []<size_t i>() { return TypeErrorContext::constructorArgument(typeid(T), i); });
 
-      Ref<T> ptr = T::constructor(kj::mv(unwrapped).template take<indexes>()...);
+      Ref<T> ptr = kj::mv(unwrapped).apply(
+          [](auto&&... values) { return T::constructor(kj::fwd<decltype(values)>(values)...); });
       if constexpr (T::jsgHasReflection) {
         ptr->jsgInitReflection(wrapper);
       }
@@ -146,7 +147,9 @@ struct ConstructorCallback<TypeWrapper, T, Ref<T>(Lock&, Args...), kj::_::Indexe
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
           []<size_t i>() { return TypeErrorContext::constructorArgument(typeid(T), i); });
 
-      Ref<T> ptr = T::constructor(js, kj::mv(unwrapped).template take<indexes>()...);
+      Ref<T> ptr = kj::mv(unwrapped).apply([&](auto&&... values) {
+        return T::constructor(js, kj::fwd<decltype(values)>(values)...);
+      });
       if constexpr (T::jsgHasReflection) {
         ptr->jsgInitReflection(wrapper);
       }
@@ -178,7 +181,9 @@ struct ConstructorCallback<TypeWrapper,
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
           []<size_t i>() { return TypeErrorContext::constructorArgument(typeid(T), i); });
 
-      Ref<T> ptr = T::constructor(args, kj::mv(unwrapped).template take<indexes>()...);
+      Ref<T> ptr = kj::mv(unwrapped).apply([&](auto&&... values) {
+        return T::constructor(args, kj::fwd<decltype(values)>(values)...);
+      });
       if constexpr (T::jsgHasReflection) {
         ptr->jsgInitReflection(wrapper);
       }
@@ -235,11 +240,13 @@ struct MethodCallback<TypeWrapper,
       auto& self = extractInternalPointer<T, isContext>(context, obj);
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
           []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
+      auto call = [&](auto&&... values) -> decltype(auto) {
+        return (self.*method)(kj::fwd<decltype(values)>(values)...);
+      };
       if constexpr (isVoid<Ret>()) {
-        (self.*method)(kj::mv(unwrapped).template take<indexes>()...);
+        kj::mv(unwrapped).apply(call);
       } else {
-        return wrapper.wrap(
-            lock, context, obj, (self.*method)(kj::mv(unwrapped).template take<indexes>()...));
+        return wrapper.wrap(lock, context, obj, kj::mv(unwrapped).apply(call));
       }
     });
   }
@@ -299,11 +306,13 @@ struct MethodCallback<TypeWrapper,
       auto& lock = Lock::from(isolate);
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
           []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
+      auto call = [&](auto&&... values) -> decltype(auto) {
+        return (self.*method)(lock, kj::fwd<decltype(values)>(values)...);
+      };
       if constexpr (isVoid<Ret>()) {
-        (self.*method)(lock, kj::mv(unwrapped).template take<indexes>()...);
+        kj::mv(unwrapped).apply(call);
       } else {
-        return wrapper.wrap(lock, context, obj,
-            (self.*method)(lock, kj::mv(unwrapped).template take<indexes>()...));
+        return wrapper.wrap(lock, context, obj, kj::mv(unwrapped).apply(call));
       }
     });
   }
@@ -359,11 +368,13 @@ struct MethodCallback<TypeWrapper,
       auto& self = extractInternalPointer<T, isContext>(context, obj);
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
           []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
+      auto call = [&](auto&&... values) -> decltype(auto) {
+        return (self.*method)(args, kj::fwd<decltype(values)>(values)...);
+      };
       if constexpr (isVoid<Ret>()) {
-        (self.*method)(args, kj::mv(unwrapped).template take<indexes>()...);
+        kj::mv(unwrapped).apply(call);
       } else {
-        return wrapper.wrap(lock, context, obj,
-            (self.*method)(args, kj::mv(unwrapped).template take<indexes>()...));
+        return wrapper.wrap(lock, context, obj, kj::mv(unwrapped).apply(call));
       }
     });
   }
@@ -431,11 +442,13 @@ struct StaticMethodCallback<TypeWrapper,
       auto& lock = Lock::from(isolate);
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
           []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
+      auto call = [](auto&&... values) -> decltype(auto) {
+        return (*method)(kj::fwd<decltype(values)>(values)...);
+      };
       if constexpr (isVoid<Ret>()) {
-        (*method)(kj::mv(unwrapped).template take<indexes>()...);
+        kj::mv(unwrapped).apply(call);
       } else {
-        return wrapper.wrap(
-            lock, context, kj::none, (*method)(kj::mv(unwrapped).template take<indexes>()...));
+        return wrapper.wrap(lock, context, kj::none, kj::mv(unwrapped).apply(call));
       }
     });
   }
@@ -487,11 +500,13 @@ struct StaticMethodCallback<TypeWrapper,
       auto& lock = Lock::from(isolate);
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
           []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
+      auto call = [&](auto&&... values) -> decltype(auto) {
+        return (*method)(lock, kj::fwd<decltype(values)>(values)...);
+      };
       if constexpr (isVoid<Ret>()) {
-        (*method)(lock, kj::mv(unwrapped).template take<indexes>()...);
+        kj::mv(unwrapped).apply(call);
       } else {
-        return wrapper.wrap(lock, context, kj::none,
-            (*method)(lock, kj::mv(unwrapped).template take<indexes>()...));
+        return wrapper.wrap(lock, context, kj::none, kj::mv(unwrapped).apply(call));
       }
     });
   }
@@ -542,11 +557,13 @@ struct StaticMethodCallback<TypeWrapper,
       auto& wrapper = TypeWrapper::from(isolate);
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
           []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
+      auto call = [&](auto&&... values) -> decltype(auto) {
+        return (*method)(args, kj::fwd<decltype(values)>(values)...);
+      };
       if constexpr (isVoid<Ret>()) {
-        (*method)(args, kj::mv(unwrapped).template take<indexes>()...);
+        kj::mv(unwrapped).apply(call);
       } else {
-        return wrapper.wrap(lock, context, kj::none,
-            (*method)(args, kj::mv(unwrapped).template take<indexes>()...));
+        return wrapper.wrap(lock, context, kj::none, kj::mv(unwrapped).apply(call));
       }
     });
   }

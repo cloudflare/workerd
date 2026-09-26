@@ -63,6 +63,18 @@ export const handler: ExportedHandler<{ AI: Ai }> = {
       expectType<Record<string, unknown>>(result);
     }
 
+    // AI Gateway web search
+    {
+      const result = await env.AI.websearch({
+        gatewayId: 'my-gateway',
+        provider: 'exa',
+        query: 'Cloudflare Workers',
+        limit: 5,
+        byokAlias: 'default',
+      });
+      expectType<Response>(result);
+    }
+
     // Known model names do not silently fall through to the unknown-model
     // gateway-fallback overload. The fallback's signature excludes
     // `keyof AiModelList`, so a call with a known model name and an input

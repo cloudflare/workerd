@@ -95,7 +95,7 @@ jobs:
   bazel:
     runs-on: ${{ inputs.image }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           show-progress: false
           fetch-depth: ${{ inputs.fetch_depth }}
@@ -133,7 +133,7 @@ jobs:
         run: |
           bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.build_target }}
       - name: Check I/O backend dependency graph
-        # One cquery: the workerd binary must not reach kj-async-os under --//:io_backend=rust.
+        # One cquery: the workerd binary must not reach kj-async-os (kj's own event loop).
         if: inputs.check_io_backend_graph
         run: |
           bash build/rust_io_graph_check.sh --config=ci ${{ inputs.extra_bazel_args }}

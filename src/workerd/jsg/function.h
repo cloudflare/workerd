@@ -90,12 +90,14 @@ struct FunctorCallback<TypeWrapper, Ret(Args...), kj::_::Indexes<indexes...>> {
 
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
           []<size_t i>() { return TypeErrorContext::callbackArgument(i); });
+      auto call = [&](auto&&... values) -> decltype(auto) {
+        return func(js, kj::fwd<decltype(values)>(values)...);
+      };
 
       if constexpr (isVoid<Ret>()) {
-        func(js, kj::mv(unwrapped).template take<indexes>()...);
+        kj::mv(unwrapped).apply(call);
       } else {
-        return wrapper.wrap(
-            js, context, args.This(), func(js, kj::mv(unwrapped).template take<indexes>()...));
+        return wrapper.wrap(js, context, args.This(), kj::mv(unwrapped).apply(call));
       }
     });
   }
@@ -119,12 +121,14 @@ struct FunctorCallback<TypeWrapper,
 
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
           []<size_t i>() { return TypeErrorContext::callbackArgument(i); });
+      auto call = [&](auto&&... values) -> decltype(auto) {
+        return func(js, args, kj::fwd<decltype(values)>(values)...);
+      };
 
       if constexpr (isVoid<Ret>()) {
-        func(js, args, kj::mv(unwrapped).template take<indexes>()...);
+        kj::mv(unwrapped).apply(call);
       } else {
-        return wrapper.wrap(js, context, args.This(),
-            func(js, args, kj::mv(unwrapped).template take<indexes>()...));
+        return wrapper.wrap(js, context, args.This(), kj::mv(unwrapped).apply(call));
       }
     });
   }

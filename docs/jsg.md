@@ -345,10 +345,10 @@ int main() {
 
 ### Real-World Reference: workerd Initialization
 
-For a production example, see how workerd initializes V8 in `src/workerd/server/workerd.c++`:
+For a production example, see how workerd initializes V8 in `src/workerd/server/cli-main.c++`:
 
 ```cpp
-// From workerd.c++ serveImpl()
+// From cli-main.c++ serveImpl()
 auto platform = jsg::defaultPlatform(0);
 WorkerdPlatform v8Platform(*platform);
 jsg::V8System v8System(v8Platform,
