@@ -48,10 +48,11 @@ export const decoderReadableAsBodyRejectsText = {
   async test() {
     // The decoder's readable delivers strings; body consumption requires
     // bytes and rejects. The write settles normally (the consumer drained
-    // the chunk before failing on its type); the close diverges: under
-    // pedantic_wpt the C++ failing consumer cancels the readable with its
-    // error, which propagates to the writable and rejects close()/closed
-    // with the same TypeError — otherwise the close resolves.
+    // the chunk before failing on its type). The failing consumer cancels
+    // the readable with its error; in TypeScript and under pedantic_wpt
+    // the cancel propagates to the writable and rejects close()/closed
+    // with the same TypeError, while the default C++ transform keeps the
+    // cancel from its writable and the close resolves.
     const tds = new TextDecoderStream();
     const resp = new Response(tds.readable);
     const writer = tds.writable.getWriter();
@@ -65,7 +66,7 @@ export const decoderReadableAsBodyRejectsText = {
     const textExpectation = rejects(resp.text(), check);
     const writePromise = writer.write(new TextEncoder().encode('abc'));
     const closeExpectation =
-      !usingTsImpl && pedanticWpt
+      usingTsImpl || pedanticWpt
         ? Promise.all([
             rejects(writer.close(), check),
             rejects(writer.closed, check),

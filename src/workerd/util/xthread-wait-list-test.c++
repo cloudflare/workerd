@@ -177,12 +177,135 @@ KJ_TEST("XThreadWaitList separate fulfiller settles the list") {
 KJ_TEST("XThreadWaitList rejects when its separate fulfiller is dropped") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
-  XThreadWaitList<int> list;
-  auto promise = list.addWaiter();
-  { auto fulfiller = list.makeSeparateFulfiller(); }
 
-  KJ_EXPECT_THROW_MESSAGE("wait list was never fulfilled", promise.wait(ws));
-  KJ_EXPECT_THROW_MESSAGE("wait list was never fulfilled", list.addWaiter().wait(ws));
+  auto test = [&](XThreadWaitList<int>::Options options) {
+    XThreadWaitList<int> list(options);
+    auto promise = list.addWaiter();
+    { auto fulfiller = list.makeSeparateFulfiller(); }
+
+    KJ_EXPECT(list.isDone());
+    KJ_EXPECT_THROW_MESSAGE("wait list was never fulfilled", promise.wait(ws));
+    KJ_EXPECT_THROW_MESSAGE("wait list was never fulfilled", list.addWaiter().wait(ws));
+  };
+
+  test({});
+  test({.useThreadLocalOptimization = true});
+}
+
+KJ_TEST("XThreadWaitList rejects waiters when its separate fulfiller outlives it") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto test = [&](XThreadWaitList<int>::Options options) {
+    kj::Own<kj::CrossThreadPromiseFulfiller<int>> fulfiller;
+    kj::Promise<int> promise = nullptr;
+    {
+      XThreadWaitList<int> list(options);
+      fulfiller = list.makeSeparateFulfiller();
+      promise = list.addWaiter();
+    }
+
+    KJ_EXPECT(!promise.poll(ws));
+    KJ_EXPECT(fulfiller->isWaiting());
+    fulfiller = nullptr;
+    KJ_EXPECT_THROW_MESSAGE("wait list was never fulfilled", promise.wait(ws));
+  };
+
+  test({});
+  test({.useThreadLocalOptimization = true});
+}
+
+KJ_TEST("XThreadWaitList can be destroyed without outstanding waiters") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto test = [&](XThreadWaitList<int>::Options options) {
+    { XThreadWaitList<int> list(options); }
+
+    // Later lists may reuse the address of an earlier State, which keys the thread-local waiter
+    // map.
+    for (uint i = 0; i < 10; ++i) {
+      XThreadWaitList<int> list(options);
+      auto promise = list.addWaiter();
+      KJ_EXPECT(!promise.poll(ws));
+    }
+
+    {
+      XThreadWaitList<int> list(options);
+      kj::Thread thread([&]() noexcept {
+        kj::EventLoop threadLoop;
+        kj::WaitScope threadWs(threadLoop);
+        auto promise = list.addWaiter();
+        KJ_ASSERT(!promise.poll(threadWs));
+      });
+    }
+
+    {
+      XThreadWaitList<int> list(options);
+      auto fulfiller = list.makeSeparateFulfiller();
+    }
+
+    {
+      kj::Own<kj::CrossThreadPromiseFulfiller<int>> fulfiller;
+      {
+        XThreadWaitList<int> list(options);
+        fulfiller = list.makeSeparateFulfiller();
+      }
+      KJ_EXPECT(fulfiller->isWaiting());
+    }
+  };
+
+  test({});
+  test({.useThreadLocalOptimization = true});
+}
+
+KJ_TEST("XThreadWaitList rejects outstanding waiters when destroyed") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto test = [&](XThreadWaitList<int>::Options options) {
+    kj::Maybe<XThreadWaitList<int>> list;
+    list.emplace(options);
+    auto promise1 = KJ_ASSERT_NONNULL(list).addWaiter();
+    auto promise2 = KJ_ASSERT_NONNULL(list).addWaiter();
+    KJ_EXPECT(!promise1.poll(ws));
+    KJ_EXPECT(!promise2.poll(ws));
+
+    list = kj::none;
+    KJ_EXPECT_THROW_MESSAGE("wait list was never fulfilled", promise1.wait(ws));
+    KJ_EXPECT_THROW_MESSAGE("wait list was never fulfilled", promise2.wait(ws));
+  };
+
+  test({});
+  test({.useThreadLocalOptimization = true});
+}
+
+KJ_TEST("XThreadWaitList rejects waiters in other threads when destroyed") {
+  auto test = [&](XThreadWaitList<int>::Options options) {
+    kj::Maybe<XThreadWaitList<int>> list;
+    list.emplace(options);
+    kj::MutexGuarded<bool> added(false);
+    kj::Maybe<kj::Exception> exception;
+
+    {
+      kj::Thread thread([&]() noexcept {
+        kj::EventLoop loop;
+        kj::WaitScope ws(loop);
+        auto promise = KJ_ASSERT_NONNULL(list).addWaiter();
+        *added.lockExclusive() = true;
+        exception = kj::runCatchingExceptions([&]() { promise.wait(ws); });
+      });
+
+      added.when([](bool value) { return value; }, [](bool) {});
+      list = kj::none;
+    }
+
+    auto& e = KJ_ASSERT_NONNULL(exception);
+    KJ_EXPECT(e.getDescription() == "wait list was never fulfilled", e);
+  };
+
+  test({});
+  test({.useThreadLocalOptimization = true});
 }
 
 KJ_TEST("XThreadWaitList fulfillment can race waiter cancellation") {

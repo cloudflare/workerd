@@ -67,7 +67,7 @@ jsg::Ref<SyncKvStorage::ListIterator> SyncKvStorage::list(
       .start = kj::mv(options.start),
       .startAfter = kj::mv(options.startAfter),
       .end = kj::mv(options.end),
-      .prefix = kj::mv(options).prefix,
+      .prefix = kj::mv(options.prefix),
       .reverse = options.reverse,
       .limit = options.limit,
     };

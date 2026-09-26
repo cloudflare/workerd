@@ -272,6 +272,44 @@ KJ_TEST("RingBuffer growth maintains order across wrap-around") {
   KJ_EXPECT(expected == 8);
 }
 
+KJ_TEST("RingBuffer shrinkToInitial releases grown storage once empty") {
+  RingBuffer<int, 4> buffer;
+  KJ_EXPECT(buffer.capacity() == 4);
+
+  // Never grown: a no-op.
+  buffer.shrinkToInitial();
+  KJ_EXPECT(buffer.capacity() == 4);
+
+  for (int i = 0; i < 5; i++) {
+    buffer.push_back(i);
+  }
+  KJ_EXPECT(buffer.capacity() == 8);
+
+  for (int i = 0; i < 5; i++) {
+    KJ_EXPECT(buffer.front() == i);
+    buffer.pop_front();
+  }
+  KJ_EXPECT(buffer.empty());
+  KJ_EXPECT(buffer.capacity() == 8);
+
+  buffer.shrinkToInitial();
+  KJ_EXPECT(buffer.capacity() == 4);
+  KJ_EXPECT(buffer.empty());
+
+  // Usable as new afterwards, including growing again.
+  for (int i = 0; i < 6; i++) {
+    buffer.push_back(i * 10);
+  }
+  KJ_EXPECT(buffer.size() == 6);
+  KJ_EXPECT(buffer.capacity() == 8);
+  int expected = 0;
+  for (const auto& value: buffer) {
+    KJ_EXPECT(value == expected);
+    expected += 10;
+  }
+  KJ_EXPECT(expected == 60);
+}
+
 KJ_TEST("RingBuffer with non-trivial types") {
   struct ComplexType {
     kj::String str;

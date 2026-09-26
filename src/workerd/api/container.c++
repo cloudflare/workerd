@@ -565,7 +565,7 @@ jsg::Promise<Container::DirectorySnapshot> Container::snapshotDirectory(
 }
 
 jsg::Promise<Container::Snapshot> Container::snapshotContainer(
-    jsg::Lock& js, SnapshotOptions options) {
+    jsg::Lock& js, jsg::Optional<SnapshotOptions> options) {
   JSG_REQUIRE(getRunning(), Error,
       "snapshotContainer() cannot be called on a container that is not running.");
 
@@ -574,8 +574,10 @@ jsg::Promise<Container::Snapshot> Container::snapshotContainer(
     spanContext.toCapnp(req.initSpanContext());
   }
 
-  KJ_IF_SOME(name, options.name) {
-    req.setName(name);
+  KJ_IF_SOME(snapshotOptions, options) {
+    KJ_IF_SOME(name, snapshotOptions.name) {
+      req.setName(name);
+    }
   }
 
   return IoContext::current()

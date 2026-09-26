@@ -52,7 +52,7 @@ class MessageEvent final: public Event {
     jsg::Optional<jsg::JsRef<jsg::JsValue>> data;
     jsg::Optional<jsg::USVString> origin;
     jsg::Optional<kj::String> lastEventId;
-    jsg::Optional<jsg::Ref<MessagePort>> source;
+    jsg::Optional<kj::Maybe<jsg::Ref<MessagePort>>> source;
     jsg::Optional<kj::Array<jsg::Ref<MessagePort>>> ports;
 
     JSG_STRUCT(bubbles, cancelable, composed, data, origin, lastEventId, source, ports);
