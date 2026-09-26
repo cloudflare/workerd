@@ -664,7 +664,7 @@ export declare abstract class DurableObjectNamespace<
     options?: DurableObjectNamespaceGetDurableObjectOptions,
   ): DurableObjectStub<T>;
   jurisdiction(
-    jurisdiction: DurableObjectJurisdiction,
+    jurisdiction?: DurableObjectJurisdiction,
   ): DurableObjectNamespace<T>;
 }
 export type DurableObjectJurisdiction =
