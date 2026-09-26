@@ -58,7 +58,6 @@ import {
 import {
   ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE,
   ERR_INVALID_ARG_TYPE,
-  ERR_INVALID_ARG_VALUE,
   ERR_MISSING_ARGS,
 } from 'node-internal:internal_errors';
 
@@ -208,13 +207,6 @@ Cipheriv.prototype.update = function (
 ): string | Buffer {
   let ret: ArrayBuffer;
   if (typeof data === 'string') {
-    if (inputEncoding === undefined) {
-      throw new ERR_INVALID_ARG_VALUE(
-        'inputEncoding',
-        inputEncoding,
-        'If inputEncoding is not provided then the data must be a Buffer'
-      );
-    }
     ret = this[kHandle].update(Buffer.from(data, inputEncoding));
   } else if (isAnyArrayBuffer(data)) {
     ret = this[kHandle].update(data);
@@ -355,13 +347,6 @@ Decipheriv.prototype.update = function (
 ): string | Buffer {
   let ret: ArrayBuffer;
   if (typeof data === 'string') {
-    if (inputEncoding === undefined) {
-      throw new ERR_INVALID_ARG_VALUE(
-        'inputEncoding',
-        inputEncoding,
-        'If inputEncoding is not provided then the data must be a Buffer'
-      );
-    }
     ret = this[kHandle].update(Buffer.from(data, inputEncoding));
   } else if (isAnyArrayBuffer(data)) {
     ret = this[kHandle].update(data);
