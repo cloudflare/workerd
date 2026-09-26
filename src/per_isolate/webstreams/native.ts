@@ -23,10 +23,15 @@
 //   - pull(controller) discriminates the read mode via the controller:
 //     controller.byobRequest !== null ⇒ BYOB read — fill the request's
 //     view and call respond(bytesWritten), honoring `atLeast` (the
-//     read's minimum, in bytes). respondWithNewView() is deliberately
-//     omitted: the native source writes into consumer-provided memory
-//     (KJ tryRead semantics); buffer-swapping has no C++ analogue, and
-//     the default-read enqueue() path already covers source-allocated
+//     read's minimum, in bytes) and `elementSize` (the read view's
+//     element size, in bytes): bytesWritten must be a whole number of
+//     elements, so the source keeps a trailing partial element for the
+//     next pull, and one left at EOF errors the stream with a TypeError
+//     (as closing a queued byte stream mid-element does). The view and
+//     atLeast are whole elements already. respondWithNewView() is
+//     deliberately omitted: the native source writes into consumer-provided
+//     memory (KJ tryRead semantics); buffer-swapping has no C++ analogue,
+//     and the default-read enqueue() path already covers source-allocated
 //     buffers.
 //     byobRequest === null ⇒ default read — the source allocates its OWN
 //     buffer and calls controller.enqueue(view).
@@ -65,7 +70,9 @@
 //   - tee(): returns a PAIR of new native source objects, leaving the
 //     original source closed. The stream layer wraps each branch in a
 //     fresh ReadableStream; branches are fully independent (no composite
-//     cancel).
+//     cancel). tee() may arrive while an aborted pull's read is still
+//     running (the reader was released mid-pull); both branches must then
+//     deliver the bytes that read produces, ahead of anything later.
 //   - expectedLength (non-standard extension, optional): the TOTAL bytes
 //     the source promises to produce — a non-negative bigint or integer
 //     number that fits in a uint64 (normalized to bigint), read once at
@@ -301,12 +308,13 @@ let getControllerConduit: (
 //
 // Wraps the head pull-into descriptor for the native source's consumption
 // during pull. Mirrors a subset of the global ReadableStreamBYOBRequest
-// (view/atLeast/respond — respondWithNewView is deliberately omitted; see
-// the contract header) but is a distinct, module-private class: it is only
-// ever handed to the native source, never to user code, so it needs no
-// global registration or brand hardening beyond its private fields.
+// (view/atLeast/respond, plus the elementSize extension — respondWithNewView
+// is deliberately omitted; see the contract header) but is a distinct,
+// module-private class: it is only ever handed to the native source, never
+// to user code, so it needs no global registration or brand hardening
+// beyond its private fields.
 // Invalidated automatically once its descriptor is no longer the head
-// request (view/atLeast report null; responds throw).
+// request (view/atLeast/elementSize report null; responds throw).
 
 let assertIsNativeReadableStreamBYOBRequest: (
   self: NativeReadableStreamBYOBRequest
@@ -353,6 +361,14 @@ class NativeReadableStreamBYOBRequest {
     const desc = this.#desc;
     const remaining = desc.minimumFill - desc.bytesFilled;
     return remaining > 0 ? remaining : 0;
+  }
+
+  // The read view's element size in bytes; every respond covers whole
+  // elements (see the contract header).
+  get elementSize(): number | null {
+    assertIsNativeReadableStreamBYOBRequest(this);
+    if (!this.#conduit.isHeadDesc(this.#desc)) return null;
+    return this.#desc.elementSize;
   }
 
   respond(bytesWritten: number): void {
@@ -702,10 +718,6 @@ class NativePullConduit implements ByteStreamConsumerType {
     // conduit has left the active state there is nothing left to commit.
   }
 
-  drainNoneDescriptors(): void {
-    // Native conduit doesn't use releaseLock pull-into descriptors.
-  }
-
   shiftAutoAllocateDescriptor(): PullIntoDescriptor | undefined {
     // Native conduit doesn't use autoAllocateChunkSize.
     return undefined;
@@ -962,8 +974,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     }
     if (filled % desc.elementSize !== 0) {
       // Every respond commits (see below), so every respond must account
-      // a whole number of elements — there is no queue to carry a
-      // remainder.
+      // a whole number of elements; the source carries any remainder.
       throw new TypeError(
         'native sources must respond in whole-element multiples of the view'
       );

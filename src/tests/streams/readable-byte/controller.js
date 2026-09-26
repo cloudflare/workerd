@@ -6,9 +6,9 @@
 // request lifecycle around enqueue(), and close() interactions with
 // partially-filled BYOB reads.
 
-import { strictEqual, ok, throws } from 'node:assert';
+import { strictEqual, ok, throws, deepStrictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
-import { rejectionOf } from 'helpers';
+import { drainBytes, rejectionOf } from 'helpers';
 
 // DIVERGENCE (the subject of the streams_no_default_auto_allocate_
 // chunk_size flag): with a DEFAULT reader and no autoAllocateChunkSize,
@@ -101,6 +101,74 @@ export const closeWithPartiallyFilledView = {
   },
 };
 
+// DIVERGENCE (ledger #7, on a detached body): a fractional element fill
+// at close() under a Request body carried into new Request(request), which
+// detaches it — with the stream as the source's own and as a tee branch.
+// TypeScript errors the body: the read rejects with TypeError, and so does
+// closed. On the source's own stream close() throws it too; on a tee
+// branch close() succeeds and the sibling receives every byte (see
+// teeBranchFractionalCloseErrorsBranch). C++ ends the body cleanly without
+// the trailing byte.
+//
+// Two shapes: a read still pending at close() with 1 byte filled, and a
+// read issued after close() (3 bytes enqueued; the first read takes the
+// whole element, the next meets the trailing byte).
+export const closeWithPartiallyFilledViewDetached = {
+  async test() {
+    const expected = 'Insufficient bytes to fill elements in the given view';
+    for (const pendingAtClose of [true, false]) {
+      for (const teed of [false, true]) {
+        let controller;
+        let rs = new ReadableStream({
+          type: 'bytes',
+          start(c) {
+            controller = c;
+          },
+        });
+        let sibling;
+        if (teed) [rs, sibling] = rs.tee();
+        const request = new Request('http://test/', {
+          method: 'POST',
+          body: rs,
+          duplex: 'half',
+        });
+        const reader = new Request(request).body.getReader({ mode: 'byob' });
+        const first = reader.read(new Uint16Array(4));
+        await scheduler.wait(5);
+        const bytes = pendingAtClose ? [1] : [1, 2, 3];
+        controller.enqueue(new Uint8Array(bytes));
+        if (usingTsImpl && pendingAtClose && !teed) {
+          throws(() => controller.close(), {
+            name: 'TypeError',
+            message: expected,
+          });
+        } else {
+          controller.close();
+        }
+        let last = first;
+        if (!pendingAtClose) {
+          strictEqual((await first).value.length, 1);
+          last = reader.read(new Uint16Array(4));
+        }
+        if (usingTsImpl) {
+          strictEqual((await rejectionOf(last)).message, expected);
+          strictEqual((await rejectionOf(reader.closed)).message, expected);
+        } else {
+          const r = await last;
+          // A read pending at close() settles with the tail shape; one
+          // issued after it finds the stream closed.
+          strictEqual(r.done, !pendingAtClose);
+          strictEqual(r.value.byteLength, 0);
+          strictEqual(await reader.closed, undefined);
+        }
+        if (teed) {
+          deepStrictEqual([...(await drainBytes(sibling))], bytes);
+        }
+      }
+    }
+  },
+};
+
 // read(view) against a closed stream resolves done with an EMPTY view
 // over the same-sized buffer (parity under the pinned
 // internal_stream_byob_return_view flag).
@@ -121,6 +189,39 @@ export const readAfterCloseReturnsEmptyView = {
     ok(value instanceof Uint8Array);
     strictEqual(value.byteLength, 0);
     strictEqual(value.buffer.byteLength, 4);
+  },
+};
+
+// read(view) against a cancelled stream resolves the same way, on a
+// JS-backed stream, a tee branch and a native body (parity).
+export const readAfterCancelReturnsEmptyView = {
+  async test() {
+    const js = new ReadableStream({ type: 'bytes' }).getReader({
+      mode: 'byob',
+    });
+    await js.cancel();
+    const [branch] = new ReadableStream({ type: 'bytes' }).tee();
+    const teed = branch.getReader({ mode: 'byob' });
+    // A lone branch's cancel pends until its sibling cancels too.
+    teed.cancel();
+    for (const reader of [js, teed]) {
+      const buffer = new ArrayBuffer(8);
+      const { value, done } = await reader.read(new Uint16Array(buffer, 2, 2));
+      ok(done);
+      strictEqual(buffer.byteLength, 0);
+      ok(value instanceof Uint16Array);
+      strictEqual(value.byteOffset, 2);
+      strictEqual(value.byteLength, 0);
+      strictEqual(value.buffer.byteLength, 8);
+    }
+
+    const native = new Response('hello').body.getReader({ mode: 'byob' });
+    await native.cancel();
+    const { value, done } = await native.read(new Uint8Array(8));
+    ok(done);
+    ok(value instanceof Uint8Array);
+    strictEqual(value.byteLength, 0);
+    strictEqual(value.buffer.byteLength, 8);
   },
 };
 

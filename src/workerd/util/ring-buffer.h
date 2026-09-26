@@ -70,6 +70,10 @@ class RingBuffer final {
   size_t size() const {
     return count;
   }
+  // The number of elements the current storage holds before the next push grows it.
+  size_t capacity() const {
+    return storage.size() / sizeof(T);
+  }
 
   class iterator;
   class const_iterator;
@@ -298,16 +302,24 @@ class RingBuffer final {
     tail = 0;
   }
 
+  // Gives back the storage acquired by growing: replaces it with a fresh InitialCapacity
+  // allocation if the buffer has grown past that, and does nothing otherwise. Precondition:
+  // empty().
+  void shrinkToInitial() {
+    KJ_DREQUIRE(count == 0);
+    if (capacity() > InitialCapacity) {
+      storage = kj::heapArray<kj::byte>(sizeof(T) * InitialCapacity);
+      head = 0;
+      tail = 0;
+    }
+  }
+
  private:
   kj::Array<kj::byte> storage;
   size_t head = 0;
   size_t tail = 0;
   size_t count = 0;
   uint64_t generation = 0;  // Incremented on each pop_front()
-
-  size_t capacity() const {
-    return storage.size() / sizeof(T);
-  }
 
   T& slot(size_t index) {
     return reinterpret_cast<T*>(storage.begin())[index];

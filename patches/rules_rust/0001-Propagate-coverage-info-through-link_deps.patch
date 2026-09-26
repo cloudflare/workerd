@@ -1,0 +1,24 @@
+From: Dan Lapid <dlapid@cloudflare.com>
+Subject: [PATCH] Propagate coverage info through link_deps
+
+A crate's `link_deps` are linked into the binary like its `deps`, so the
+instrumented sources and coverage metadata of the C++ libraries listed
+there are part of the binary's coverage too. Bazel's LCOV merger keeps
+only the sources named in the test's instrumented-files manifest, so
+without this the C++ half of a Rust binary is dropped from the report.
+---
+ rust/private/rustc.bzl | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
+--- a/rust/private/rustc.bzl
++++ b/rust/private/rustc.bzl
+@@ -2170,7 +2170,7 @@ def rustc_compile_action(
+     executable = crate_info.output if crate_info.type == "bin" or crate_info.is_test else None
+ 
+     instrumented_files_kwargs = {
+-        "dependency_attributes": ["deps", "crate"],
++        "dependency_attributes": ["deps", "link_deps", "crate"],
+         "extensions": ["rs"],
+         "source_attributes": ["srcs"],
+     }

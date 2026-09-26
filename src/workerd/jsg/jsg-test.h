@@ -36,8 +36,7 @@ class Evaluator {
 
   IsolateType& getIsolate() {
     // Slightly more efficient to only instantiate each isolate type once (17s vs. 20s):
-    static IsolateType isolate(
-        v8System, v8::IsolateGroup::GetDefault(), config, kj::heap<IsolateObserver>());
+    static IsolateType isolate(v8System, newIsolateGroup(), config, kj::heap<IsolateObserver>());
     return isolate;
   }
 
@@ -51,8 +50,8 @@ class Evaluator {
         auto modules = ModuleRegistryImpl<IsolateType_TypeWrapper>::from(js);
         auto p = kj::Path::parse("main");
         modules->add(p,
-            jsg::ModuleRegistry::ModuleInfo(lock, "main", code, nullptr /* compile cache */,
-                ModuleInfoCompileOption::BUNDLE, observer));
+            jsg::ModuleRegistry::ModuleInfo(
+                lock, "main", code, nullptr /* compile cache */, observer));
 
         // Instantiate the module
         auto& moduleInfo = KJ_REQUIRE_NONNULL(modules->resolve(js, p));

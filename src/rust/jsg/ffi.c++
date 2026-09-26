@@ -33,7 +33,10 @@ namespace workerd::rust::jsg {
 #define DEFINE_TYPED_ARRAY_NEW(name, v8_type, elem_type)                                           \
   Local local_new_##name(Isolate* isolate, const elem_type* data, size_t length) {                 \
     auto backingStore = v8::ArrayBuffer::NewBackingStore(isolate, length * sizeof(elem_type));     \
-    memcpy(backingStore->Data(), data, length * sizeof(elem_type));                                \
+    /* A zero-length backing store has a null Data(), which memcpy must not receive. */            \
+    if (length > 0) {                                                                              \
+      memcpy(backingStore->Data(), data, length * sizeof(elem_type));                              \
+    }                                                                                              \
     auto arrayBuffer = v8::ArrayBuffer::New(isolate, std::move(backingStore));                     \
     return to_ffi(v8::v8_type::New(arrayBuffer, 0, length));                                       \
   }
