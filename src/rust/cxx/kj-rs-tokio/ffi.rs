@@ -1,16 +1,20 @@
 //! The `#[cxx::bridge]` FFI island for kj-rs-tokio.
 //!
 //! This is the crate's single dedicated FFI-island file (file-top `#![allow(unsafe_code)]`). It
-//! holds the `#[cxx::bridge] mod bridge` -- the C++ <-> Rust wire the C++
-//! `kj_rs_tokio::TokioEventPort` drives (see `tokio-event-port.h`) -- and [`EnteredRuntime`], the
-//! one hand-written `unsafe` in the crate (a lifetime extension on tokio's `EnterGuard`).
-//! Everything else -- `lib.rs` and the entire event-port business logic in `port.rs` -- is
-//! wholly-safe, compiler-proven unsafe-free under the crate-root `#![deny(unsafe_code)]`.
+//! holds the `#[cxx::bridge] mod bridge` -- the C++ <-> Rust wire in both directions: what the
+//! C++ `kj_rs_tokio::TokioEventPort` drives (see `tokio-event-port.h`), and the tokio-driven
+//! context's primitives the Rust [`Runtime`](crate::Runtime) drives -- and [`EnteredRuntime`],
+//! the one hand-written `unsafe` in the crate (a lifetime extension on tokio's `EnterGuard`).
+//! Everything else -- `lib.rs`, the event-port business logic in `port.rs`, the driver in
+//! `runtime.rs` -- is wholly-safe, compiler-proven unsafe-free under the crate-root
+//! `#![deny(unsafe_code)]`.
 #![allow(unsafe_code)]
 
 use std::mem::ManuallyDrop;
 use std::ops::Deref;
 
+pub use bridge::TokioAsyncIoContext;
+pub use bridge::new_tokio_driven_context;
 use tokio::runtime::EnterGuard;
 use tokio::runtime::Runtime;
 
@@ -140,7 +144,39 @@ mod bridge {
         /// Loop thread only: KJ has told the port it needs the thread back -- through
         /// `EventPort::setRunnable(true)` (an event was armed) or through the port's
         /// `TimerImpl::SleepHooks` (a sooner timer was armed while sleeping). Unblocks a
-        /// concurrent `wait_*` without setting the wake latch; a no-op outside `wait_*`.
+        /// concurrent `wait_*` without setting the wake latch; KJ-driven, a no-op outside
+        /// `wait_*`; tokio-driven, always signals the driver.
         fn notify_kj_service(&self);
+
+        /// Consume the wake latch without driving anything: the tokio-driven port's `poll()`.
+        fn take_wake_latch(&self) -> bool;
+    }
+
+    // The tokio-driven context and the primitives its Rust driver (runtime.rs) turns the KJ loop
+    // with. All `Result`: each runs KJ events, and a kj::Exception escaping through a Rust frame
+    // would abort. Loop thread only; never from inside a KJ event callback.
+    unsafe extern "C++" {
+        include!("kj-rs-tokio/tokio-event-port.h");
+
+        /// The C++ context -- port, kj::EventLoop, kj::WaitScope -- in tokio-driven mode (see
+        /// tokio-event-port.h).
+        type TokioAsyncIoContext;
+
+        /// Builds the context around `port`, the Rust half the Runtime made (`TokioPort::new_tokio_driven`).
+        #[cxx_name = "newTokioDrivenContext"]
+        fn new_tokio_driven_context(port: Box<TokioPort>) -> Result<KjOwn<TokioAsyncIoContext>>;
+
+        /// Fires due timers, runs up to `max_turns` events; true if the queue is not empty.
+        #[cxx_name = "runTurns"]
+        fn run_turns(self: Pin<&mut TokioAsyncIoContext>, max_turns: u32) -> Result<bool>;
+        /// Like `run_turns` through `kj::WaitScope::poll()`, which also polls the port when the
+        /// queue runs dry (draining cross-thread `kj::Executor` events and promoting
+        /// `kj::yieldUntilWouldSleep()` waiters), then re-reports the runnable state.
+        #[cxx_name = "pollTurns"]
+        fn poll_turns(self: Pin<&mut TokioAsyncIoContext>, max_turns: u32) -> Result<bool>;
+        /// The driver is about to yield or park: installs the timer's sleep hooks and returns
+        /// the nanoseconds until the next KJ timer deadline, if any.
+        #[cxx_name = "prepareToYield"]
+        fn prepare_to_yield(self: Pin<&mut TokioAsyncIoContext>) -> Result<KjMaybe<u64>>;
     }
 }

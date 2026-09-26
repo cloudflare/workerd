@@ -144,12 +144,21 @@ pub async fn std_thread_wake_future() -> Result<()> {
     Ok(())
 }
 
-/// Detaches a task that re-readies itself forever (`yield_now` in a loop). `poll()` must stay
-/// bounded (`POLL_YIELD_BUDGET`) and the KJ loop must not be starved; the task is cancelled at
-/// teardown.
+/// Process-wide count of the yield-loop task's iterations, so a test can verify the task is
+/// actually running (and still runs) while the KJ loop makes progress against it.
+static YIELD_LOOP_POLLS: AtomicU64 = AtomicU64::new(0);
+
+pub fn yield_loop_poll_count() -> u64 {
+    YIELD_LOOP_POLLS.load(Ordering::SeqCst)
+}
+
+/// Detaches a task that re-readies itself forever (`yield_now` in a loop), counting each
+/// iteration in `yield_loop_poll_count`. `poll()` must stay bounded (`POLL_YIELD_BUDGET`) and
+/// the KJ loop must not be starved; the task is cancelled at teardown.
 pub fn spawn_yield_loop_task() {
     drop(kj_rs_tokio::spawn(async {
         loop {
+            YIELD_LOOP_POLLS.fetch_add(1, Ordering::SeqCst);
             tokio::task::yield_now().await;
         }
     }));
