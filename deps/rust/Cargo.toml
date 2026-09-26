@@ -34,6 +34,10 @@ async-trait = { version = "0", default-features = false }
 # kj-hyper's WebSocket handshake: Sec-WebSocket-Key / -Accept (RFC 6455 section 4).
 base64 = { version = "0", default-features = false, features = ["std"] }
 sha1 = { version = "0", default-features = false }
+# bitflags and pastey are dependencies of the Perfetto Rust SDK, which is built from the
+# @perfetto sources by //src/rust/perfetto/sdk. pastey is a maintained drop-in replacement for the
+# archived `paste` crate that the SDK imports; it's aliased to `paste` there.
+bitflags = "2"
 bytes = { version = "1", default-features = false }
 capnp = "0.27"
 capnpc = "0.27"
@@ -70,6 +74,7 @@ hashlink = "0"
 # kj-rs-io: `fs` for fcntl (KJ's fd flags), `signal` for ignoring SIGPIPE once per process like
 # kj::UnixEventPort does.
 nix = { version = "0", features = ["fs", "signal"] }
+pastey = "0"
 pico-args = "0"
 # kj-hyper: WebSocket keys and frame masks. Every Cargo.toml merged into the crate_universe
 # workspace (downstream repos include this one alongside their own) must request the same

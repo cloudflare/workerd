@@ -24,6 +24,7 @@ Shared utility library: data structures, SQLite wrapper, feature gating, logging
 | `stream-utils.h`  | `NeuterableInputStream`, `newNullInputStream`            | Disconnectable I/O; null/identity stream factories                                     |
 | `mimetype.h`      | MIME type parser/serializer                              | `MimeType::extract()` from content-type header                                         |
 | `wait-list.h`     | Cross-request event subscription                         | Shared fulfiller list for signaling waiters                                            |
+| `perfetto-tracing.h/c++` | `PerfettoSession`, `TRACE_EVENT` categories, `PERFETTO_*_FROM_POINTER` | `WORKERD_USE_PERFETTO` gates everything; `registerWorkerdTracks()` also registers Rust categories under `WORKERD_USE_RUST_PERFETTO` (flag `:use_rust_perfetto`; see `src/rust/AGENTS.md` PERFETTO TRACING) |
 
 ## Guidelines
 
