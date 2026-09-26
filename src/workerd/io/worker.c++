@@ -1131,7 +1131,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       traceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()),
       userTraceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()) {
   api->setIsolateObserver(*metrics);
-  metrics->created();
+  metrics->created(getUuid());
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     auto lock = api->lock(stackScope);
@@ -1379,6 +1379,60 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
   });
 }
 
+namespace {
+
+void addModuleSourceStats(
+    const WorkerSource::Module& module, IsolateObserver::ScriptSourceStats& stats) {
+  ++stats.moduleCount;
+  KJ_SWITCH_ONEOF(module.content) {
+    KJ_CASE_ONEOF(esm, WorkerSource::EsModule) {
+      stats.jsBytes += esm.body.size();
+    }
+    KJ_CASE_ONEOF(cjs, WorkerSource::CommonJsModule) {
+      stats.jsBytes += cjs.body.size();
+    }
+    KJ_CASE_ONEOF(wasm, WorkerSource::WasmModule) {
+      stats.wasmBytes += wasm.body.size();
+    }
+    KJ_CASE_ONEOF(text, WorkerSource::TextModule) {
+      stats.otherBytes += text.body.size();
+    }
+    KJ_CASE_ONEOF(data, WorkerSource::DataModule) {
+      stats.otherBytes += data.body.size();
+    }
+    KJ_CASE_ONEOF(json, WorkerSource::JsonModule) {
+      stats.otherBytes += json.body.size();
+    }
+    KJ_CASE_ONEOF(python, WorkerSource::PythonModule) {
+      stats.otherBytes += python.body.size();
+    }
+    KJ_CASE_ONEOF(_, WorkerSource::ObsoletePythonRequirement) {}
+    KJ_CASE_ONEOF(_, WorkerSource::CapnpModule) {}
+  }
+}
+
+IsolateObserver::ScriptSourceStats computeScriptSourceStats(const WorkerSource& source) {
+  IsolateObserver::ScriptSourceStats stats;
+  KJ_SWITCH_ONEOF(source.variant) {
+    KJ_CASE_ONEOF(script, WorkerSource::ScriptSource) {
+      stats.jsBytes += script.mainScript.size();
+      for (auto& global: script.globals) {
+        addModuleSourceStats(global, stats);
+      }
+      // Globals are extra blobs attached to a single-file script, so they don't count as modules.
+      stats.moduleCount = 0;
+    }
+    KJ_CASE_ONEOF(modules, WorkerSource::ModulesSource) {
+      for (auto& module: modules.modules) {
+        addModuleSourceStats(module, stats);
+      }
+    }
+  }
+  return stats;
+}
+
+}  // namespace
+
 Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     kj::StringPtr id,
     const Script::Source& source,
@@ -1409,6 +1463,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       "a module registry instance must be passed to Worker::Script if and only if the worker's "
       "compatibility flags enable the new module registry");
 
+  isolate->metrics->scriptSourceLoaded(computeScriptSourceStats(source));
   auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
   //   co-locate multiple scripts in the same isolate. As of this writing, we do not, except in
