@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "actor.h"
 #include "http.h"
 #include "worker-rpc.h"
 
@@ -439,6 +440,38 @@ class RetryOutgoingFactory final: public Fetcher::OutgoingFactory {
   uint failingAttempts;
   Replacement replacement;
   kj::Maybe<UserDefinedRetryPolicy> retryPolicy;
+};
+
+// The pre-resolved primary channel given to a ReplicaActorOutgoingFactory. Every attempt starts a
+// session on this one channel.
+class ReplicaPrimaryChannel final: public IoChannelFactory::ActorChannel {
+ public:
+  ReplicaPrimaryChannel(TestFixture& receiver, RetryTestState& state, uint failingAttempts)
+      : receiver(receiver),
+        state(state),
+        failingAttempts(failingAttempts) {}
+
+  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+    state.metadata.add(KJ_REQUIRE_NONNULL(kj::mv(metadata.actorRetryRequestMetadata)));
+    if (state.metadata.size() <= failingAttempts) {
+      return newFailingSession(FailurePattern::AMBIGUOUS);
+    }
+    return receiver.makeWorkerEntrypoint();
+  }
+
+  void requireAllowsTransfer() override {
+    KJ_UNIMPLEMENTED("not used in this test");
+  }
+
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage) override {
+    KJ_UNIMPLEMENTED("not used in this test");
+  }
+
+ private:
+  TestFixture& receiver;
+  RetryTestState& state;
+  uint failingAttempts;
 };
 
 CompatibilityFlags::Reader makeRetryFlags(capnp::MallocMessageBuilder& message) {
@@ -1718,6 +1751,76 @@ KJ_TEST("concurrent actor RPC calls through one Fetcher retry independently") {
   KJ_EXPECT(state.observedRetries == 1);
   KJ_ASSERT(state.outcomes.size() == 1);
   KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RECOVERED);
+  KJ_EXPECT(state.replayMemoryBytes == 0);
+}
+
+jsg::Ref<Fetcher> makeReplicaFetcher(const TestFixture::Environment& env,
+    TestFixture& receiver,
+    RetryTestState& state,
+    uint failing) {
+  return env.js.alloc<Fetcher>(
+      env.context.addObject<Fetcher::OutgoingFactory>(kj::heap<ReplicaActorOutgoingFactory>(
+          kj::refcounted<ReplicaPrimaryChannel>(receiver, state, failing), kj::str("primary"))),
+      Fetcher::RequiresHostAndProtocol::YES);
+}
+
+KJ_TEST("replica actor RPC retries a request-level disconnect on its primary channel") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  RetryTestState state;
+  PausingTimerChannel timer;
+  uint checkedSubrequestCount = 0;
+  TestFixture receiver(makeReceiverParams(io.waitScope));
+  auto senderParams = makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state);
+  senderParams.checkedSubrequestCount = checkedSubrequestCount;
+  TestFixture sender(kj::mv(senderParams));
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher = makeReplicaFetcher(env, receiver, state, 1);
+    auto function = getRpcFunction(env.js, *fetcher, "echo"_kj);
+    auto result = function.call(env.js, env.js.undefined(), env.js.num(42));
+    auto checked = env.js.toPromise(result).then(env.js, [](jsg::Lock& js, jsg::Value value) {
+      KJ_EXPECT(jsg::JsValue(value.getHandle(js)).strictEquals(js.num(42)));
+    });
+    return env.context.awaitJs(env.js, kj::mv(checked)).attach(kj::mv(fetcher));
+  });
+
+  KJ_ASSERT(state.metadata.size() == 2);
+  KJ_EXPECT(state.metadata[0].nonce == state.metadata[1].nonce);
+  KJ_EXPECT(state.metadata[0].isRetry == IsActorRetry::NO);
+  KJ_EXPECT(state.metadata[1].isRetry == IsActorRetry::YES);
+  KJ_EXPECT(checkedSubrequestCount == 1);
+  KJ_EXPECT(state.observedRetries == 1);
+  KJ_ASSERT(state.outcomes.size() == 1);
+  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RECOVERED);
+  KJ_EXPECT(state.replayMemoryBytes == 0);
+}
+
+KJ_TEST("replica actor RPC exhausts default attempts on a broken primary channel") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  RetryTestState state;
+  PausingTimerChannel timer;
+  TestFixture receiver(makeReceiverParams(io.waitScope));
+  TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher = makeReplicaFetcher(env, receiver, state, kj::maxValue);
+    auto function = getRpcFunction(env.js, *fetcher, "echo"_kj);
+    auto rejected =
+        expectDisconnect(env.js, function.call(env.js, env.js.undefined(), env.js.num(42)));
+    return env.context.awaitJs(env.js, kj::mv(rejected)).attach(kj::mv(fetcher));
+  });
+
+  // The replica cannot re-resolve its primary, so every attempt reuses the broken channel until the
+  // system default of five attempts is spent.
+  KJ_ASSERT(state.metadata.size() == 5);
+  for (auto& metadata: state.metadata) {
+    KJ_EXPECT(metadata.nonce == state.metadata[0].nonce);
+  }
+  KJ_EXPECT(state.observedRetries == 4);
+  KJ_ASSERT(state.outcomes.size() == 1);
+  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::ATTEMPTS_EXHAUSTED);
   KJ_EXPECT(state.replayMemoryBytes == 0);
 }
 
