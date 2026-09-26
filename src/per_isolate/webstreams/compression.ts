@@ -37,19 +37,16 @@ import type {
   RingBuffer as RingBufferType,
   RingBufferConstructor,
 } from './ring-buffer';
+import type { ViewExtentHelpers } from './view-extent';
 
 const {
   ArrayBufferPrototypeByteLengthGet,
   DataViewPrototypeGetBuffer,
-  DataViewPrototypeGetByteLength,
-  DataViewPrototypeGetByteOffset,
   MathMin,
   ObjectDefineProperties,
   SymbolToStringTag,
   TypeError,
   TypedArrayPrototypeGetBuffer,
-  TypedArrayPrototypeGetByteLength,
-  TypedArrayPrototypeGetByteOffset,
   TypedArrayPrototypeSet,
   Uint8Array,
   uncurryThis,
@@ -71,6 +68,8 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
+const { viewByteExtent } =
+  require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
 };
@@ -142,8 +141,8 @@ function isValidChunk(chunk: unknown): boolean {
 // detaching, or mutating the buffer after write() returns cannot change
 // what the codec consumes — matching the C++ implementation, whose adapter
 // copies inside write() for exactly these hazards. Detached or
-// out-of-bounds inputs report zero length through the captured getters and
-// copy as empty (a codec no-op).
+// out-of-bounds inputs, DataViews included, copy as empty (a codec no-op;
+// see view-extent.ts).
 function snapshotChunk(chunk: unknown): Uint8Array {
   if (!isValidChunk(chunk)) {
     throw new TypeError(
@@ -157,15 +156,11 @@ function snapshotChunk(chunk: unknown): Uint8Array {
     buffer = chunk as ArrayBuffer;
     byteOffset = 0;
     byteLength = ArrayBufferPrototypeByteLengthGet(chunk) as number;
-  } else if (isDataView(chunk)) {
-    buffer = DataViewPrototypeGetBuffer(chunk) as ArrayBuffer;
-    byteOffset = DataViewPrototypeGetByteOffset(chunk) as number;
-    byteLength = DataViewPrototypeGetByteLength(chunk) as number;
   } else {
-    const view = chunk as ArrayBufferView;
-    buffer = TypedArrayPrototypeGetBuffer(view) as ArrayBuffer;
-    byteOffset = TypedArrayPrototypeGetByteOffset(view) as number;
-    byteLength = TypedArrayPrototypeGetByteLength(view) as number;
+    const extent = viewByteExtent(chunk as ArrayBufferView);
+    buffer = extent.buffer as ArrayBuffer;
+    byteOffset = extent.byteOffset;
+    byteLength = extent.byteLength;
   }
   const copy = new Uint8Array(byteLength);
   if (byteLength > 0) {

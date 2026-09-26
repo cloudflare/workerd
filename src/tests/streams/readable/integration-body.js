@@ -214,6 +214,18 @@ export const bodyConsumptionNormalizesBufferSourceChunks = {
       await new Response(bodyOf([detachedView, enc.encode('y')])).text(),
       'y'
     );
+    // Views a shrink has left out of bounds are empty too, a DataView
+    // included (its byteLength getter throws where a typed array's
+    // reports 0).
+    for (const View of [Uint8Array, DataView]) {
+      const rab = new ArrayBuffer(8, { maxByteLength: 8 });
+      const outOfBounds = new View(rab, 4, 4);
+      rab.resize(2);
+      strictEqual(
+        await new Response(bodyOf([outOfBounds, enc.encode('o')])).text(),
+        'o'
+      );
+    }
     const shared = new Uint8Array(new SharedArrayBuffer(3), 1, 2);
     shared.set(enc.encode('zw'));
     strictEqual(

@@ -110,6 +110,10 @@ const {
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
 
+import type { ViewExtentHelpers } from './view-extent';
+const { viewByteExtent } =
+  require('webstreams/view-extent') as ViewExtentHelpers;
+
 // The native backend (see the fence conventions in native.ts and
 // queue.ts). The cast restores the real shape the untyped loader erases,
 // so the brand predicates keep their type-guard narrowing.
@@ -4838,27 +4842,16 @@ async function collectChunks<R>(
       // Drained chunks are untrusted values: any BufferSource contributes
       // its bytes, with the extent pinned at drain time; anything else
       // fails with the same TypeError the C++ bridge pump uses. Detached
-      // inputs are skipped with the other empties.
+      // or out-of-bounds inputs are skipped with the other empties (see
+      // view-extent.ts).
       let buffer: ArrayBufferLike;
       let byteOffset: number;
       let byteLength: number;
       if (isArrayBufferView(chunk)) {
-        // Probe detachment through the buffer before getViewInfo: a
-        // detached DataView's byteLength getter throws (typed arrays and
-        // raw buffers just report 0). A SharedArrayBuffer cannot be
-        // detached, and the probe rejects it as a receiver.
-        buffer =
-          TypedArrayPrototypeGetSymbolToStringTag(chunk) !== undefined
-            ? TypedArrayPrototypeGetBuffer(chunk)
-            : DataViewPrototypeGetBuffer(chunk as DataView);
-        if (
-          !isSharedArrayBuffer(buffer) &&
-          ArrayBufferPrototypeDetachedGet(buffer)
-        )
-          continue;
-        const info = getViewInfo(chunk);
-        byteOffset = info.byteOffset;
-        byteLength = info.byteLength;
+        const extent = viewByteExtent(chunk);
+        buffer = extent.buffer;
+        byteOffset = extent.byteOffset;
+        byteLength = extent.byteLength;
       } else if (isArrayBuffer(chunk)) {
         buffer = chunk;
         byteOffset = 0;

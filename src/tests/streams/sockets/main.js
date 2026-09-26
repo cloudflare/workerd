@@ -7,6 +7,7 @@
 
 export {
   echoRoundTrip,
+  degenerateViewsWithHighWaterMark,
   greetReadsToEof,
   echoByobReads,
   echoReadAtLeast,
