@@ -1372,6 +1372,55 @@ KJ_TEST("coalesced move-later followed by move-earlier does not race") {
   KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
 }
 
+KJ_TEST("parked move-later alarm is not applied when subsequent commit moved alarm earlier") {
+  // Regression test for issue #7330:
+  // When an in-flight move-later request is resolving while a subsequent commit is persisting
+  // an alarm that moved earlier than a parked move-later time, the parked later time must not
+  // be applied to overwrite alarmScheduledNoLaterThan with a time later than the committed alarm.
+  ActorSqliteTest test;
+
+  // 1. Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // 2. Move alarm to 3ms (later). Commit finishes, scheduleRun(3ms) goes in-flight.
+  test.setAlarm(threeMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  auto fulfiller3Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(3ms)"})[0]);
+
+  // 3. Move alarm to 10ms (later). Commit finishes.
+  // Since scheduleRun(3ms) is in-flight, 10ms is coalesced into pendingLaterAlarmTime.
+  test.setAlarm(tenMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});  // No scheduleRun yet: coalesced into pending.
+  KJ_ASSERT(expectSync(test.getAlarm()) == tenMs);
+
+  // 4. Move alarm to 6ms. This is earlier than the parked 10ms, but later than
+  // alarmScheduledNoLaterThan (3ms).
+  test.setAlarm(sixMs);
+  // Grab the commit fulfiller for the 6ms write so we can control when the db commit completes.
+  auto commitFulfiller6Ms = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+
+  // 5. While the 6ms commit is in-flight (waiting on commitCallback), the 3ms scheduleRun completes.
+  // Without the fix, the completion handler would drain the stale parked 10ms and schedule it,
+  // leaving the scheduled alarm at 10ms (later than the committed 6ms).
+  // With the fix, the parked 10ms was invalidated by the 6ms precommit, so no scheduleRun(10ms) is issued.
+  fulfiller3Ms->fulfill();
+  test.pollAndExpectCalls({});  // No scheduleRun(10ms)!
+
+  // 6. Complete the db commit for 6ms.
+  commitFulfiller6Ms->fulfill();
+
+  // The 6ms commit now completes its post-commit alarm sync and issues scheduleRun(6ms).
+  test.pollAndExpectCalls({"scheduleRun(6ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  KJ_ASSERT(expectSync(test.getAlarm()) == sixMs);
+}
+
 KJ_TEST("an exception thrown during merged commits does not hang") {
   ActorSqliteTest test({.monitorOutputGate = false});
 

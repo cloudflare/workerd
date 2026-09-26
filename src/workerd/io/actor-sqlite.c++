@@ -465,10 +465,12 @@ void ActorSqlite::scheduleLaterAlarm(kj::Maybe<kj::Date> newAlarmTime, SpanParen
   }).fork();
 
   commitTasks.add(alarmLaterInFlight.addBranch()
-                      .then([this]() {
+          .then([this]() {
     alarmLaterIsInFlight = false;
     KJ_IF_SOME(nextTime, kj::mv(pendingLaterAlarmTime)) {
-      scheduleLaterAlarm(nextTime, nullptr);
+      if (!willFireEarlier(metadata.getAlarm(), nextTime)) {
+        scheduleLaterAlarm(nextTime, nullptr);
+      }
     }
   }).catch_([](kj::Exception&& e) {
     // Move-later alarm failures are non-fatal; catch here to prevent taskFailed() from
@@ -479,22 +481,33 @@ void ActorSqlite::scheduleLaterAlarm(kj::Maybe<kj::Date> newAlarmTime, SpanParen
 
 ActorSqlite::PrecommitAlarmState ActorSqlite::startPrecommitAlarmScheduling() {
   PrecommitAlarmState state;
-  if (pendingCommit == kj::none &&
-      willFireEarlier(metadata.getAlarm(), alarmScheduledNoLaterThan)) {
-    // We must wait on the `alarmLaterInFlight` promise here, otherwise, if there is an in-flight
-    // "move later" alarm task and it fails, our "move earlier" alarm might interleave, succeed,
-    // and be followed by a retry of the in-flight "move later" alarm. This happens because "move later"
-    // alarms complete after we commit to local SQLite.
-    //
-    // By waiting on any in-flight "move later" alarm, we correctly serialize our `scheduleRun()`
-    // calls to the alarm manager.
-    // Clear any pending move-later alarm time. Since we are about to move the alarm
-    // earlier, any coalesced later time is now obsolete. This also prevents the
-    // scheduleLaterAlarm completion handler from starting a concurrent scheduleRun
-    // when it drains pendingLaterAlarmTime after the current in-flight request resolves.
-    pendingLaterAlarmTime = kj::none;
-    state.schedulingPromise =
-        requestScheduledAlarm(metadata.getAlarm(), alarmLaterInFlight.addBranch());
+  if (pendingCommit == kj::none) {
+    // Clear any pending move-later alarm time if the alarm being committed fires earlier than it.
+    // Since we are committing an alarm that fires earlier than the parked move-later time, any
+    // coalesced later time is now obsolete. This prevents the scheduleLaterAlarm completion
+    // handler from applying a stale later time when the current in-flight request resolves.
+    KJ_IF_SOME(pending, pendingLaterAlarmTime) {
+      if (willFireEarlier(metadata.getAlarm(), pending)) {
+        pendingLaterAlarmTime = kj::none;
+      }
+    }
+
+    if (willFireEarlier(metadata.getAlarm(), alarmScheduledNoLaterThan)) {
+      // We must wait on the `alarmLaterInFlight` promise here, otherwise, if there is an in-flight
+      // "move later" alarm task and it fails, our "move earlier" alarm might interleave, succeed,
+      // and be followed by a retry of the in-flight "move later" alarm. This happens because "move later"
+      // alarms complete after we commit to local SQLite.
+      //
+      // By waiting on any in-flight "move later" alarm, we correctly serialize our `scheduleRun()`
+      // calls to the alarm manager.
+      // Clear any pending move-later alarm time. Since we are about to move the alarm
+      // earlier, any coalesced later time is now obsolete. This also prevents the
+      // scheduleLaterAlarm completion handler from starting a concurrent scheduleRun
+      // when it drains pendingLaterAlarmTime after the current in-flight request resolves.
+      pendingLaterAlarmTime = kj::none;
+      state.schedulingPromise =
+          requestScheduledAlarm(metadata.getAlarm(), alarmLaterInFlight.addBranch());
+    }
   }
   return kj::mv(state);
 }
@@ -636,6 +649,15 @@ kj::Promise<void> ActorSqlite::commitImpl(
             logDate(alarmStateForCommit), logDate(alarmScheduledNoLaterThan), alarmVersion);
       }
       scheduleLaterAlarm(alarmStateForCommit, commitSpan);
+    } else if (willFireEarlier(alarmStateForCommit, alarmScheduledNoLaterThan)) {
+      // The scheduled alarm time is later than the committed database alarm state.
+      // This could happen if a move-later operation was applied while we were async.
+      // Move the scheduled alarm earlier to match the committed alarm state.
+      commitTasks.add(requestScheduledAlarm(alarmStateForCommit, alarmLaterInFlight.addBranch())
+              .attach(commitSpan.newChild("actor_sqlite_alarm_sync"_kjc))
+              .catch_([](kj::Exception&& e) {
+        LOG_WARNING_PERIODICALLY("NOSENTRY SQLite resync earlier alarm failed", e);
+      }));
     }
   }
 }
