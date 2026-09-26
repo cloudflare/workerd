@@ -88,21 +88,21 @@ export default {
   },
   'digest/digest.js': {},
   'digest/digest_test_data.js': {},
-  'digest/xof_digest.js': {},
   'digest/kangarootwelve.tentative.https.any.js': unsupported('KangarooTwelve'),
   'digest/sha3.tentative.https.any.js': unsupported('SHA3'),
   'digest/turboshake.tentative.https.any.js': unsupported('TurboSHAKE'),
+  'digest/xof_digest.js': {},
   'encap_decap/encap_decap_bits.tentative.https.any.js': {
+    comment: 'ML-KEM-512 is not supported',
+    expectedFailures: [/ML-KEM-512/i],
+  },
+  'encap_decap/encap_decap_keys.tentative.https.any.js': {
     comment: 'ML-KEM-512 is not supported',
     expectedFailures: [/ML-KEM-512/i],
   },
   'encap_decap/hybrid_kem_vectors.js': {
     comment: 'Hybrid ML-KEM (post-quantum key encapsulation) is not supported',
     omittedTests: true,
-  },
-  'encap_decap/encap_decap_keys.tentative.https.any.js': {
-    comment: 'ML-KEM-512 is not supported',
-    expectedFailures: [/ML-KEM-512/i],
   },
   'encap_decap/ml_kem_vectors.js': supportFile,
   'encrypt_decrypt/aes.js': supportFile,
@@ -147,11 +147,11 @@ export default {
   'generateKey/failures_RSA-PSS.https.any.js': {},
   'generateKey/failures_RSASSA-PKCS1-v1_5.https.any.js': {},
   'generateKey/failures_X25519.https.any.js': {},
+  'generateKey/failures_X448.tentative.https.any.js': unsupported('X448'),
   'generateKey/failures_bad_algorithm.https.any.js': {
     comment: 'Wrong type of error returned',
     expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
-  'generateKey/failures_X448.tentative.https.any.js': unsupported('X448'),
   'generateKey/failures_chacha20_poly1305.tentative.https.any.js':
     unsupported('ChaCha20-Poly1305'),
   'generateKey/failures_kmac.tentative.https.any.js': unsupported('KMAC'),
@@ -241,21 +241,19 @@ export default {
       'Window interface: attribute crypto',
     ],
   },
-  'import_export/Hybrid-KEM_importKey_fixtures.js': {
-    comment: 'Hybrid ML-KEM (post-quantum key encapsulation) is not supported',
-    omittedTests: true,
-  },
   'import_export/AES-OCB_importKey.tentative.https.any.js':
     unsupported('AES-OCB'),
   'import_export/Argon2_importKey.tentative.https.any.js':
     unsupported('Argon2'),
   'import_export/ChaCha20-Poly1305_importKey.tentative.https.any.js':
     unsupported('ChaCha20-Poly1305'),
+  'import_export/Hybrid-KEM_importKey_fixtures.js': {
+    comment: 'Hybrid ML-KEM (post-quantum key encapsulation) is not supported',
+    omittedTests: true,
+  },
   'import_export/KMAC_importKey.tentative.https.any.js': unsupported('KMAC'),
-  'import_export/ML-DSA_importKey.js': supportFile,
   'import_export/ML-DSA_importKey.tentative.https.any.js': {},
   'import_export/ML-DSA_importKey_fixtures.js': supportFile,
-  'import_export/ML-KEM_importKey.js': supportFile,
   'import_export/ML-KEM_importKey.tentative.https.any.js': {
     comment: 'ML-KEM-512 is not supported',
     expectedFailures: [/ML-KEM-512/i],
