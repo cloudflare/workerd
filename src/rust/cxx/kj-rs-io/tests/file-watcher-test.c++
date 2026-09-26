@@ -26,30 +26,7 @@ namespace {
 using kj_rs_io::setupTokioAsyncIo;
 using kj_rs_io::TokioAsyncIoContext;
 
-// The three bridged watcher calls behind workerd's TokioFileWatcher (server/cli-io-backend.c++),
-// wrapped the same way it wraps them: paths cross as the bytes kj::Path::toNativeString produces
-// (a unix path need not be UTF-8), and onChange() is started inside the call (async-io.h,
-// operation-start policy) so a caller that merely retains the promise still has its files
-// watched.
-class FileWatcher {
- public:
-  FileWatcher(): inner(kj_rs_io::new_file_watcher()) {}
-  KJ_DISALLOW_COPY_AND_MOVE(FileWatcher);
-
-  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile &> = kj::none) {
-    auto native = path.toNativeString(true);
-    kj_rs_io::file_watcher_watch(*inner,
-        ::rust::Slice<const uint8_t>(
-            reinterpret_cast<const uint8_t *>(native.begin()), native.size()));
-  }
-
-  kj::Promise<void> onChange() {
-    return kj_rs_io::file_watcher_on_change(*inner).eagerlyEvaluate(nullptr);
-  }
-
- private:
-  ::rust::Box<kj_rs_io::TokioFileWatcher> inner;
-};
+using kj_rs_io::FileWatcher;
 
 #if !_WIN32
 
@@ -151,7 +128,7 @@ KJ_TEST("FileWatcher: modification fires onChange") {
   dir.writeFile("a.txt", "one");
 
   FileWatcher watcher;
-  watcher.watch(dir.filePath("a.txt"), kj::none);
+  watcher.watch(dir.filePath("a.txt"));
 
   auto change = watcher.onChange();
   dir.appendFile("a.txt", " two");
@@ -164,7 +141,7 @@ KJ_TEST("FileWatcher: change before onChange() is called is not lost") {
   dir.writeFile("a.txt", "one");
 
   FileWatcher watcher;
-  watcher.watch(dir.filePath("a.txt"), kj::none);
+  watcher.watch(dir.filePath("a.txt"));
 
   // Modify before anyone is waiting: the event queues in the kernel.
   dir.appendFile("a.txt", " two");
@@ -178,7 +155,7 @@ KJ_TEST("FileWatcher: atomic replace-by-rename fires onChange") {
   dir.writeFile("a.txt", "one");
 
   FileWatcher watcher;
-  watcher.watch(dir.filePath("a.txt"), kj::none);
+  watcher.watch(dir.filePath("a.txt"));
 
   auto change = watcher.onChange();
   dir.writeFile("a.txt.tmp", "two");
@@ -196,7 +173,7 @@ KJ_TEST("FileWatcher: watching via an already-open file handle") {
   auto file = dir.openFile("a.txt");
 
   FileWatcher watcher;
-  watcher.watch(dir.filePath("a.txt"), *file);
+  watcher.watch(dir.filePath("a.txt"));
   file = nullptr;  // The original handle may be closed; the watch must survive.
 
   auto change = watcher.onChange();
@@ -211,7 +188,7 @@ KJ_TEST("FileWatcher: rapid changes coalesce; watcher stays armed for later "
   dir.writeFile("a.txt", "one");
 
   FileWatcher watcher;
-  watcher.watch(dir.filePath("a.txt"), kj::none);
+  watcher.watch(dir.filePath("a.txt"));
 
   // A burst of changes produces one resolution per onChange() call (not one per event), ...
   auto change = watcher.onChange();
@@ -236,7 +213,7 @@ KJ_TEST("FileWatcher: deleting the watched file fires; a recreated file is track
   dir.writeFile("a.txt", "one");
 
   FileWatcher watcher;
-  watcher.watch(dir.filePath("a.txt"), kj::none);
+  watcher.watch(dir.filePath("a.txt"));
 
   // Delete: reported through the directory watch on every backend.
   auto change = watcher.onChange();
@@ -267,7 +244,7 @@ KJ_TEST("FileWatcher: the onChange() promise outlives the FileWatcher object") {
   kj::Promise<void> change = nullptr;
   {
     FileWatcher watcher;
-    watcher.watch(dir.filePath("a.txt"), kj::none);
+    watcher.watch(dir.filePath("a.txt"));
     change = watcher.onChange();
     KJ_EXPECT(!change.poll(io.getWaitScope()));
   }
@@ -282,7 +259,7 @@ KJ_TEST("FileWatcher: unrelated files in the same directory do not fire (basenam
   dir.writeFile("other.txt", "other");
 
   FileWatcher watcher;
-  watcher.watch(dir.filePath("a.txt"), kj::none);
+  watcher.watch(dir.filePath("a.txt"));
 
   dir.appendFile("other.txt", " more");
   KJ_EXPECT(!resolvesWithin(watcher.onChange(), io, QUIET_TIMEOUT));
@@ -298,7 +275,7 @@ KJ_TEST("FileWatcher: a missing file in a populated directory fires on creation 
   dir.writeFile("c.txt", "c");
 
   FileWatcher watcher;
-  watcher.watch(dir.filePath("missing.txt"), kj::none);
+  watcher.watch(dir.filePath("missing.txt"));
 
   dir.appendFile("a.txt", " more");
   KJ_EXPECT(!resolvesWithin(watcher.onChange(), io, QUIET_TIMEOUT));
@@ -314,7 +291,7 @@ KJ_TEST("FileWatcher: watching a not-yet-existing file fires when it is created"
   TempDir dir;
 
   FileWatcher watcher;
-  watcher.watch(dir.filePath("missing.txt"), kj::none);
+  watcher.watch(dir.filePath("missing.txt"));
 
   auto change = watcher.onChange();
   dir.writeFile("missing.txt", "now it exists");
@@ -327,7 +304,7 @@ KJ_TEST("FileWatcher: canceling an armed onChange() and re-arming works") {
   dir.writeFile("a.txt", "one");
 
   FileWatcher watcher;
-  watcher.watch(dir.filePath("a.txt"), kj::none);
+  watcher.watch(dir.filePath("a.txt"));
 
   {
     auto armed = watcher.onChange();
@@ -347,8 +324,8 @@ KJ_TEST("FileWatcher: multiple files in one watcher each fire on change") {
   dir.writeFile("b.txt", "b");
 
   FileWatcher watcher;
-  watcher.watch(dir.filePath("a.txt"), kj::none);
-  watcher.watch(dir.filePath("b.txt"), kj::none);
+  watcher.watch(dir.filePath("a.txt"));
+  watcher.watch(dir.filePath("b.txt"));
 
   {
     auto change = watcher.onChange();
@@ -371,9 +348,9 @@ KJ_TEST("FileWatcher: two independent watchers do not cross-fire") {
   dir.writeFile("b.txt", "b");
 
   FileWatcher w1;
-  w1.watch(dir.filePath("a.txt"), kj::none);
+  w1.watch(dir.filePath("a.txt"));
   FileWatcher w2;
-  w2.watch(dir.filePath("b.txt"), kj::none);
+  w2.watch(dir.filePath("b.txt"));
 
   // Changing a.txt fires w1 but must NOT fire w2 (each filters by basename).
   auto c2 = w2.onChange();
@@ -391,7 +368,7 @@ KJ_TEST("FileWatcher: teardown while a watch promise is armed") {
   dir.writeFile("a.txt", "one");
 
   auto watcher = kj::heap<FileWatcher>();
-  watcher->watch(dir.filePath("a.txt"), kj::none);
+  watcher->watch(dir.filePath("a.txt"));
 
   auto armed = watcher->onChange();
   KJ_EXPECT(!armed.poll(io.getWaitScope()));
@@ -409,7 +386,7 @@ KJ_TEST("FileWatcher: attribute-only changes do not fire") {
   dir.writeFile("a.txt", "one");
 
   FileWatcher watcher;
-  watcher.watch(dir.filePath("a.txt"), kj::none);
+  watcher.watch(dir.filePath("a.txt"));
 
   KJ_SYSCALL(chmod(dir.fileName("a.txt").cStr(), 0600));
   KJ_EXPECT(!resolvesWithin(watcher.onChange(), io, QUIET_TIMEOUT));
@@ -421,7 +398,7 @@ KJ_TEST("FileWatcher: a second concurrent onChange() is rejected, not raced") {
   dir.writeFile("a.txt", "one");
 
   FileWatcher watcher;
-  watcher.watch(dir.filePath("a.txt"), kj::none);
+  watcher.watch(dir.filePath("a.txt"));
   auto first = watcher.onChange();
   KJ_EXPECT(!first.poll(io.getWaitScope()));
   auto second = watcher.onChange();
@@ -439,7 +416,7 @@ KJ_TEST("FileWatcher: a symlinked file fires when its target elsewhere changes")
   KJ_SYSCALL(symlink(targetDir.fileName("real.txt").cStr(), linkDir.fileName("link.txt").cStr()));
 
   FileWatcher watcher;
-  watcher.watch(linkDir.filePath("link.txt"), kj::none);
+  watcher.watch(linkDir.filePath("link.txt"));
 
   auto change = watcher.onChange();
   targetDir.appendFile("real.txt", " two");
@@ -459,7 +436,7 @@ KJ_TEST("FileWatcher: a retargeted symlink fires, and its new target directory i
   KJ_SYSCALL(symlink(oldTarget.fileName("real.txt").cStr(), linkDir.fileName("link.txt").cStr()));
 
   FileWatcher watcher;
-  watcher.watch(linkDir.filePath("link.txt"), kj::none);
+  watcher.watch(linkDir.filePath("link.txt"));
 
   // Atomic retarget: a new link renamed over the old one, as `ln -sfn` does.
   auto change = watcher.onChange();

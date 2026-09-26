@@ -118,3 +118,64 @@ export const pipeThroughLockedEndpoints = {
     strictEqual(rs2.locked, false);
   },
 };
+
+// A TypeError without internal names (`#writer`), and no lock taken.
+const cleanTypeError = (e) => e.name === 'TypeError' && !/#/.test(e.message);
+
+// A non-WritableStream destination fails before the source is locked.
+export const badDestinationLeavesSourceUnlocked = {
+  async test() {
+    const rs = new ReadableStream({});
+    throws(
+      () => rs.pipeThrough({ readable: new ReadableStream(), writable: {} }),
+      cleanTypeError
+    );
+    strictEqual(rs.locked, false);
+    await rejects(rs.pipeTo({}), cleanTypeError);
+    strictEqual(rs.locked, false);
+  },
+};
+
+// Options are read before the locked checks, so an option getter that
+// locks the destination fails the pipe without locking the source.
+export const optionGetterLocksDestination = {
+  async test() {
+    const rs = new ReadableStream({});
+    const t = new TransformStream();
+    throws(
+      () =>
+        rs.pipeThrough(t, {
+          get preventAbort() {
+            t.writable.getWriter();
+            return false;
+          },
+        }),
+      cleanTypeError
+    );
+    strictEqual(rs.locked, false);
+    const ws = new WritableStream({});
+    await rejects(
+      rs.pipeTo(ws, {
+        get preventAbort() {
+          ws.getWriter();
+          return false;
+        },
+      }),
+      cleanTypeError
+    );
+    strictEqual(rs.locked, false);
+  },
+};
+
+// pipeThrough checks the writable's lock internally, not through its
+// user-visible `locked`.
+export const shadowedWritableLocked = {
+  test() {
+    const rs = new ReadableStream({});
+    const t = new TransformStream();
+    t.writable.getWriter();
+    Object.defineProperty(t.writable, 'locked', { value: false });
+    throws(() => rs.pipeThrough(t), cleanTypeError);
+    strictEqual(rs.locked, false);
+  },
+};

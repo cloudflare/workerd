@@ -2,8 +2,27 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-export default {
-  async fetch(request, env, ctx) {
+import { WorkerEntrypoint } from 'cloudflare:workers';
+
+export default class AiMock extends WorkerEntrypoint {
+  async websearch({ gatewayId, provider, query, limit, byokAlias }, params) {
+    if (typeof gatewayId !== 'string' || gatewayId.trim() === '') {
+      throw new Error('Invalid gateway ID');
+    }
+
+    return Response.json({
+      requestUrl: `https://workers-binding.ai/ai-gateway/gateways/${encodeURIComponent(gatewayId)}/websearch`,
+      body: {
+        provider,
+        query,
+        ...(limit !== undefined ? { limit } : {}),
+        ...(byokAlias !== undefined ? { byokAlias } : {}),
+      },
+      extraHeaders: params?.extraHeaders,
+    });
+  }
+
+  async fetch(request) {
     const url = new URL(request.url);
 
     if (url.pathname === '/ai-api/models/search') {
@@ -31,6 +50,13 @@ export default {
             ],
           },
         ],
+      });
+    }
+
+    if (url.pathname === '/ai-gateway/gateways/my-gateway/websearch') {
+      return Response.json({
+        requestUrl: request.url,
+        body: await request.json(),
       });
     }
 
@@ -165,5 +191,5 @@ export default {
         },
       }
     );
-  },
-};
+  }
+}

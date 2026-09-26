@@ -275,6 +275,19 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
   tailStreamWriter->report(spanComponentContext, tracing::SpanClose(), span.endTime, 0);
 }
 
+void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+
+  auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+  auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
+      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+  auto size = update.size();
+  tailStreamWriter->report(context, kj::mv(update), getTime(), size);
+}
+
 void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     kj::String name,
@@ -696,6 +709,18 @@ void UserSpanObserver::onClose(
   (void)logs;
   if (wasAccepted) {
     submitter->submitSpanClose(spanId, startTime, endTime, kj::mv(tags));
+  }
+}
+
+void UserSpanObserver::onUpdateName(kj::ConstString operationName) {
+  if (wasAccepted) {
+    submitter->submitSpanUpdate(spanId, tracing::SpanUpdate(kj::mv(operationName)));
+  }
+}
+
+void UserSpanObserver::onUpdateStatus(tracing::SpanStatus&& status) {
+  if (wasAccepted) {
+    submitter->submitSpanUpdate(spanId, tracing::SpanUpdate(kj::mv(status)));
   }
 }
 

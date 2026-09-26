@@ -145,12 +145,18 @@ KJ_TEST("CrossThreadWaitList rejects when its separate fulfiller is dropped") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
 
-  CrossThreadWaitList list;
-  auto promise = list.addWaiter();
-  { auto fulfiller = list.makeSeparateFulfiller(); }
+  auto test = [&](CrossThreadWaitList::Options options) {
+    CrossThreadWaitList list(options);
+    auto promise = list.addWaiter();
+    { auto fulfiller = list.makeSeparateFulfiller(); }
 
-  KJ_EXPECT_THROW_MESSAGE("wait list was never fulfilled", promise.wait(ws));
-  KJ_EXPECT_THROW_MESSAGE("wait list was never fulfilled", list.addWaiter().wait(ws));
+    KJ_EXPECT(list.isDone());
+    KJ_EXPECT_THROW_MESSAGE("wait list was never fulfilled", promise.wait(ws));
+    KJ_EXPECT_THROW_MESSAGE("wait list was never fulfilled", list.addWaiter().wait(ws));
+  };
+
+  test({});
+  test({.useThreadLocalOptimization = true});
 }
 
 KJ_TEST("CrossThreadWaitList waiters can be canceled") {
@@ -193,6 +199,122 @@ KJ_TEST("CrossThreadWaitList fulfillment can race waiter cancellation") {
       *start.lockExclusive() = true;
       promise = kj::none;
     }
+  };
+
+  test({});
+  test({.useThreadLocalOptimization = true});
+}
+
+KJ_TEST("CrossThreadWaitList can be destroyed without outstanding waiters") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto test = [&](CrossThreadWaitList::Options options) {
+    { CrossThreadWaitList list(options); }
+
+    // Later lists may reuse the address of an earlier State, which keys the thread-local waiter
+    // map.
+    for (uint i = 0; i < 10; ++i) {
+      CrossThreadWaitList list(options);
+      auto promise = list.addWaiter();
+      KJ_EXPECT(!promise.poll(ws));
+    }
+
+    {
+      CrossThreadWaitList list(options);
+      kj::Thread thread([&]() noexcept {
+        kj::EventLoop threadLoop;
+        kj::WaitScope threadWs(threadLoop);
+        auto promise = list.addWaiter();
+        KJ_ASSERT(!promise.poll(threadWs));
+      });
+    }
+
+    {
+      CrossThreadWaitList list(options);
+      auto fulfiller = list.makeSeparateFulfiller();
+    }
+
+    {
+      kj::Own<kj::CrossThreadPromiseFulfiller<void>> fulfiller;
+      {
+        CrossThreadWaitList list(options);
+        fulfiller = list.makeSeparateFulfiller();
+      }
+      KJ_EXPECT(fulfiller->isWaiting());
+    }
+  };
+
+  test({});
+  test({.useThreadLocalOptimization = true});
+}
+
+KJ_TEST("CrossThreadWaitList rejects outstanding waiters when destroyed") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto test = [&](CrossThreadWaitList::Options options) {
+    kj::Maybe<CrossThreadWaitList> list;
+    list.emplace(options);
+    auto promise1 = KJ_ASSERT_NONNULL(list).addWaiter();
+    auto promise2 = KJ_ASSERT_NONNULL(list).addWaiter();
+    KJ_EXPECT(!promise1.poll(ws));
+    KJ_EXPECT(!promise2.poll(ws));
+
+    list = kj::none;
+    KJ_EXPECT_THROW_MESSAGE("wait list was never fulfilled", promise1.wait(ws));
+    KJ_EXPECT_THROW_MESSAGE("wait list was never fulfilled", promise2.wait(ws));
+  };
+
+  test({});
+  test({.useThreadLocalOptimization = true});
+}
+
+KJ_TEST("CrossThreadWaitList rejects waiters in other threads when destroyed") {
+  auto test = [&](CrossThreadWaitList::Options options) {
+    kj::Maybe<CrossThreadWaitList> list;
+    list.emplace(options);
+    kj::MutexGuarded<bool> added(false);
+    kj::Maybe<kj::Exception> exception;
+
+    {
+      kj::Thread thread([&]() noexcept {
+        kj::EventLoop loop;
+        kj::WaitScope ws(loop);
+        auto promise = KJ_ASSERT_NONNULL(list).addWaiter();
+        *added.lockExclusive() = true;
+        exception = kj::runCatchingExceptions([&]() { promise.wait(ws); });
+      });
+
+      added.when([](bool value) { return value; }, [](bool) {});
+      list = kj::none;
+    }
+
+    auto& e = KJ_ASSERT_NONNULL(exception);
+    KJ_EXPECT(e.getDescription() == "wait list was never fulfilled", e);
+  };
+
+  test({});
+  test({.useThreadLocalOptimization = true});
+}
+
+KJ_TEST("CrossThreadWaitList rejects waiters when its separate fulfiller outlives it") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto test = [&](CrossThreadWaitList::Options options) {
+    kj::Own<kj::CrossThreadPromiseFulfiller<void>> fulfiller;
+    kj::Promise<void> promise = nullptr;
+    {
+      CrossThreadWaitList list(options);
+      fulfiller = list.makeSeparateFulfiller();
+      promise = list.addWaiter();
+    }
+
+    KJ_EXPECT(!promise.poll(ws));
+    KJ_EXPECT(fulfiller->isWaiting());
+    fulfiller = nullptr;
+    KJ_EXPECT_THROW_MESSAGE("wait list was never fulfilled", promise.wait(ws));
   };
 
   test({});

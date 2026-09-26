@@ -115,38 +115,47 @@ export const alreadyDetachedBufferAtWrite = {
   },
 };
 
+// Writes `view` and then [1, 2, 3], and asserts the view was a zero-length
+// no-op: only [1, 2, 3] is delivered.
+async function expectNoopView(view) {
+  const { readable, writable } = new IdentityTransformStream();
+  const writer = writable.getWriter();
+  const reader = readable.getReader();
+  const writes = [writer.write(view), writer.write(new Uint8Array([1, 2, 3]))];
+  const closePromise = writer.close();
+  const first = await reader.read();
+  strictEqual(first.done, false);
+  strictEqual([...first.value].join(), '1,2,3');
+  strictEqual((await reader.read()).done, true);
+  await Promise.all([...writes, closePromise]);
+}
+
 export const alreadyDetachedViewAtWrite = {
   async test() {
-    // A view over an already-detached buffer reports byteLength 0, so both
-    // implementations treat it as a zero-length no-op.
-    const ab = new ArrayBuffer(4);
-    const view = new Uint8Array(ab);
-    ab.transfer();
-    const { readable, writable } = new IdentityTransformStream();
-    const writer = writable.getWriter();
-    const reader = readable.getReader();
-    await writer.write(view);
-    const closePromise = writer.close();
-    strictEqual((await reader.read()).done, true);
-    await closePromise;
+    // A view over an already-detached buffer has no bytes, so both
+    // implementations treat it as a zero-length no-op — a DataView too,
+    // although its byteLength getter throws where a typed array's reports
+    // 0.
+    for (const View of [Uint8Array, DataView]) {
+      const ab = new ArrayBuffer(8);
+      const view = new View(ab, 2, 4);
+      ab.transfer();
+      await expectNoopView(view);
+    }
   },
 };
 
 export const outOfBoundsViewAtWrite = {
   async test() {
-    // A fixed-length view made out-of-bounds by a shrink reports
-    // byteLength 0, so both implementations treat it as a zero-length
-    // no-op.
-    const rab = new ArrayBuffer(8, { maxByteLength: 8 });
-    const view = new Uint8Array(rab, 4, 4);
-    rab.resize(2);
-    const { readable, writable } = new IdentityTransformStream();
-    const writer = writable.getWriter();
-    const reader = readable.getReader();
-    await writer.write(view);
-    const closePromise = writer.close();
-    strictEqual((await reader.read()).done, true);
-    await closePromise;
+    // A fixed-length view made out-of-bounds by a shrink has no bytes, so
+    // both implementations treat it as a zero-length no-op, whether a
+    // typed array or a DataView.
+    for (const View of [Uint8Array, DataView]) {
+      const rab = new ArrayBuffer(8, { maxByteLength: 8 });
+      const view = new View(rab, 4, 4);
+      rab.resize(2);
+      await expectNoopView(view);
+    }
   },
 };
 

@@ -2,14 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Provides the kj::setupAsyncIo() *symbol* for the rust I/O backend, so every existing
-// kj::setupAsyncIo() call site links unchanged under --//:io_backend=rust -- no per-call-site
-// #if, no divergence from upstream kj (kj/async-io.h is untouched).
+// Provides the kj::setupAsyncIo() *symbol*, tokio-backed, so every existing kj::setupAsyncIo()
+// call site links unchanged -- no per-call-site code, no divergence from upstream kj
+// (kj/async-io.h is untouched).
 //
-// Under --//:io_backend=rust the native OS event loop (kj-async-os, which defines both
-// kj::setupAsyncIo() and kj::UnixEventPort's member functions) is NOT linked. This TU supplies a
-// tokio-backed kj::setupAsyncIo() that repackages src/rust/cxx/kj-rs-io's setupTokioAsyncIo() into a
-// kj::AsyncIoContext.
+// kj's native OS event loop (kj-async-os, which defines both kj::setupAsyncIo() and
+// kj::UnixEventPort's member functions) is NOT linked. This TU supplies a kj::setupAsyncIo() that
+// repackages src/rust/cxx/kj-rs-io's setupTokioAsyncIo() into a kj::AsyncIoContext.
 //
 // kj::AsyncIoContext still declares `UnixEventPort& unixEventPort` (a concrete reference we must
 // not change -- it's upstream kj public API). kj::UnixEventPort is `final`, but that only forbids
@@ -17,22 +16,15 @@
 // So we define an inert kj::UnixEventPort here (its ctor/dtor + the EventPort/SleepHooks virtuals)
 // with no ODR competitor, construct one, and bind the reference to it. It is never driven -- the
 // event loop runs on kj_rs_tokio::TokioEventPort; signals use kj_rs_io::onSignal() -- and nothing
-// reads AsyncIoContext::unixEventPort under the rust backend (verified: the only readers, SIGTERM
-// drain + --watch, are #if !WORKERD_RUST_IO_BACKEND_RUST). Its methods KJ_UNIMPLEMENTED as a
-// backstop: if anything ever does drive it, the link/run fails loudly rather than silently.
+// in workerd reads AsyncIoContext::unixEventPort. Its methods KJ_UNIMPLEMENTED as a backstop: if
+// anything ever does drive it, the link/run fails loudly rather than silently.
 //
-// The whole TU is gated on WORKERD_RUST_IO_BACKEND_RUST so that in the default (cxx) build it is
-// empty and cannot ODR-clash with kj-async-os's real definitions.
-//
-// In the rust config the reverse hazard exists: if kj-async-os is ever accidentally linked back
-// in, this TU's definitions collide with the native ones, and with static archives the winner is
-// LINK-ORDER-DEPENDENT -- a duplicate-symbol error if you are lucky, the native setupAsyncIo
-// silently winning (wrong event loop) or pairing with this inert UnixEventPort
-// (KJ_UNIMPLEMENTED at runtime) if you are not. The guard against that is the build-graph gate
-// //src/workerd/server:rust-io-hermeticity (build/rust_io_backend.bzl), which every wildcard
-// build and CI lane analyzes.
-
-#if WORKERD_RUST_IO_BACKEND_RUST
+// If kj-async-os is ever accidentally linked in, this TU's definitions collide with the native
+// ones, and with static archives the winner is LINK-ORDER-DEPENDENT -- a duplicate-symbol error if
+// you are lucky, the native setupAsyncIo silently winning (wrong event loop) or pairing with this
+// inert UnixEventPort (KJ_UNIMPLEMENTED at runtime) if you are not. The guards against that are
+// build/rust_io_graph_check.sh (the dependency graph) and //src/workerd/server:rust-io-link-check
+// (the linked binary's symbols).
 
 #include <kj-rs-io/async-io.h>
 
@@ -58,22 +50,22 @@ class InertWin32EventPort final: public Win32EventPort {
   InertWin32EventPort(): clock(systemPreciseMonotonicClock()), timerImpl(clock.now()) {}
 
   bool wait() override {
-    KJ_UNIMPLEMENTED("Win32EventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+    KJ_UNIMPLEMENTED("Win32EventPort is inert (tokio drives the loop)");
   }
   bool poll() override {
-    KJ_UNIMPLEMENTED("Win32EventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+    KJ_UNIMPLEMENTED("Win32EventPort is inert (tokio drives the loop)");
   }
   void wake() const override {
-    KJ_UNIMPLEMENTED("Win32EventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+    KJ_UNIMPLEMENTED("Win32EventPort is inert (tokio drives the loop)");
   }
   Own<IoObserver> observeIo(HANDLE handle) override {
-    KJ_UNIMPLEMENTED("Win32EventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+    KJ_UNIMPLEMENTED("Win32EventPort is inert (tokio drives the loop)");
   }
   Own<SignalObserver> observeSignalState(HANDLE handle) override {
-    KJ_UNIMPLEMENTED("Win32EventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+    KJ_UNIMPLEMENTED("Win32EventPort is inert (tokio drives the loop)");
   }
   void allowApc() override {
-    KJ_UNIMPLEMENTED("Win32EventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+    KJ_UNIMPLEMENTED("Win32EventPort is inert (tokio drives the loop)");
   }
   Timer& getTimer() override {
     return timerImpl;
@@ -104,15 +96,15 @@ UnixEventPort::UnixEventPort(): clock(systemPreciseMonotonicClock()), timerImpl(
 UnixEventPort::~UnixEventPort() noexcept(false) {}
 
 bool UnixEventPort::wait() {
-  KJ_UNIMPLEMENTED("UnixEventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+  KJ_UNIMPLEMENTED("UnixEventPort is inert (tokio drives the loop)");
 }
 
 bool UnixEventPort::poll() {
-  KJ_UNIMPLEMENTED("UnixEventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+  KJ_UNIMPLEMENTED("UnixEventPort is inert (tokio drives the loop)");
 }
 
 void UnixEventPort::wake() const {
-  KJ_UNIMPLEMENTED("UnixEventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+  KJ_UNIMPLEMENTED("UnixEventPort is inert (tokio drives the loop)");
 }
 
 #if KJ_USE_EPOLL
@@ -121,14 +113,14 @@ void UnixEventPort::wake() const {
 // there UnixEventPort inherits kj::EventPort::setRunnable, whose default is a no-op — harmless,
 // since this inert port is never installed as an EventLoop's port.
 void UnixEventPort::setRunnable(bool runnable) {
-  KJ_UNIMPLEMENTED("UnixEventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+  KJ_UNIMPLEMENTED("UnixEventPort is inert (tokio drives the loop)");
 }
 #endif
 
 void UnixEventPort::updateNextTimerEvent(kj::Maybe<TimePoint> time) {}
 
 kj::TimePoint UnixEventPort::getTimeWhileSleeping() {
-  KJ_UNIMPLEMENTED("UnixEventPort is inert under --//:io_backend=rust (tokio drives the loop)");
+  KJ_UNIMPLEMENTED("UnixEventPort is inert (tokio drives the loop)");
 }
 
 using InertEventPort = UnixEventPort;
@@ -142,8 +134,7 @@ AsyncIoContext setupAsyncIo(kj::Maybe<EventLoopObserver&> observer) {
   // so an observer cannot be honored here. No in-tree caller passes one; refuse rather than
   // silently drop it.
   KJ_REQUIRE(observer == kj::none,
-      "EventLoopObserver is not supported by the tokio-backed kj::setupAsyncIo() "
-      "(--//:io_backend=rust)");
+      "EventLoopObserver is not supported by the tokio-backed kj::setupAsyncIo()");
   struct Holder {
     kj_rs_io::TokioAsyncIoContext tokio;
     InertEventPort inertPort;
@@ -173,5 +164,3 @@ AsyncIoContext setupAsyncIo(kj::Maybe<EventLoopObserver&> observer) {
 }
 
 }  // namespace kj
-
-#endif  // WORKERD_RUST_IO_BACKEND_RUST

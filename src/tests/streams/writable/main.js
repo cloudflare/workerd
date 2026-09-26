@@ -32,6 +32,7 @@ export {
   sinkHooksCapturedAtConstruction,
   secondWriteRejectionErrorsStream,
   sinkHooksNotCalledAfterStartThrow,
+  startPromiseSettledInNewPromise,
 } from 'sink-algorithms';
 
 export {
@@ -95,6 +96,7 @@ export {
   floatingPointQueueTotals,
   fractionalSizeTruncation,
   invalidSizeReturnRejects,
+  invalidSizeAfterCloseRejectsOnlyTheWrite,
   desiredSizeWhileErroring,
   writableFloatQueueTotal,
 } from 'backpressure';

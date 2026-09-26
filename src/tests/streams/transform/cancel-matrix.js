@@ -58,33 +58,41 @@ export const writableAbortRunsCancelHook = {
   },
 };
 
-// DIVERGENCE (the WPT cancel.any family): when the cancel hook calls
-// controller.error(err), the spec (TypeScript) rejects BOTH the pending
-// readable.cancel() and the parallel writable.close() with err; C++
-// fulfills the readable.cancel() and only rejects the close.
+// A cancel hook that calls controller.error(err) errors the writable, so a
+// parallel writable.close() rejects with err (parity). Whether the pending
+// readable.cancel() rejects too depends on whether the writable has errored
+// by the time the hook's result settles (spec step 7.1.1): a sync hook's
+// result settles first, while the writable is still erroring during start,
+// and the cancel fulfills (parity); an async hook's promise settles two
+// microtasks later, after the writable has errored, and the cancel rejects
+// with err (the WPT cancel.any case). DIVERGENCE (ledger #3): C++ fulfills
+// the cancel in both.
 export const cancelHookErrorFanOut = {
   async test() {
-    let ctrl;
-    const ts = new TransformStream({
-      start(c) {
-        ctrl = c;
-      },
-      cancel() {
+    for (const isAsync of [false, true]) {
+      let ctrl;
+      const hook = () => {
         ctrl.error(new Error('from-cancel'));
-      },
-    });
-    const cancelP = ts.readable.cancel('why');
-    const closeP = ts.writable.close();
-    const rs = await Promise.allSettled([cancelP, closeP]);
+      };
+      const ts = new TransformStream({
+        start(c) {
+          ctrl = c;
+        },
+        cancel: isAsync ? async () => hook() : hook,
+      });
+      const cancelP = ts.readable.cancel('why');
+      const closeP = ts.writable.close();
+      const rs = await Promise.allSettled([cancelP, closeP]);
 
-    if (usingTsImpl) {
-      strictEqual(rs[0].status, 'rejected');
-      strictEqual(rs[0].reason.message, 'from-cancel');
-    } else {
-      strictEqual(rs[0].status, 'fulfilled');
+      if (usingTsImpl && isAsync) {
+        strictEqual(rs[0].status, 'rejected');
+        strictEqual(rs[0].reason.message, 'from-cancel');
+      } else {
+        strictEqual(rs[0].status, 'fulfilled');
+      }
+      strictEqual(rs[1].status, 'rejected');
+      strictEqual(rs[1].reason.message, 'from-cancel');
     }
-    strictEqual(rs[1].status, 'rejected');
-    strictEqual(rs[1].reason.message, 'from-cancel');
   },
 };
 
