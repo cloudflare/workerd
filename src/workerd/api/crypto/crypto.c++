@@ -474,7 +474,7 @@ void validateEncryptAlgorithm(
   }
 }
 
-void validateSignAlgorithm(
+void validateSignAlgorithm(jsg::Lock& js,
     kj::StringPtr normalizedName, const SubtleCrypto::SignAlgorithm& algorithm) {
   if (normalizedName == "ECDSA") {
     validateHashAlgorithm(algorithm.hash, "AlgorithmIdentifier");
@@ -482,6 +482,15 @@ void validateSignAlgorithm(
     auto saltLength = JSG_REQUIRE_NONNULL(algorithm.saltLength, TypeError,
         "Failed to provide salt for RSA-PSS key operation which requires a salt");
     JSG_REQUIRE(saltLength >= 0, DOMDataError, "SaltLength for RSA-PSS must be non-negative.");
+  } else if (normalizedName.startsWith("ML-DSA-")) {
+    KJ_IF_SOME(context, algorithm.context) {
+      KJ_IF_SOME(source, context.getHandle(js).tryCast<jsg::JsBufferSource>()) {
+        JSG_REQUIRE(source.size() <= 255, DOMOperationError,
+            "ML-DSA context must be at most 255 bytes.");
+      } else {
+        JSG_FAIL_REQUIRE(TypeError, "ML-DSA context must be a buffer source.");
+      }
+    }
   }
 }
 
@@ -1138,7 +1147,7 @@ bool SubtleCrypto::supports(jsg::Lock& js,
                 normalizeSupportAlgorithm(js, algorithmValue, signAlgorithmHandler);
             KJ_IF_SOME(algoImpl, lookupAlgorithm(normalizedAlgorithm.name)) {
               if (!supportsSign(algoImpl.name)) return false;
-              validateSignAlgorithm(algoImpl.name, normalizedAlgorithm);
+              validateSignAlgorithm(js, algoImpl.name, normalizedAlgorithm);
               return true;
             }
             return false;
@@ -1149,7 +1158,7 @@ bool SubtleCrypto::supports(jsg::Lock& js,
                 normalizeSupportAlgorithm(js, algorithmValue, signAlgorithmHandler);
             KJ_IF_SOME(algoImpl, lookupAlgorithm(normalizedAlgorithm.name)) {
               if (!supportsVerify(algoImpl.name)) return false;
-              validateSignAlgorithm(algoImpl.name, normalizedAlgorithm);
+              validateSignAlgorithm(js, algoImpl.name, normalizedAlgorithm);
               return true;
             }
             return false;
@@ -1275,6 +1284,19 @@ bool SubtleCrypto::supports(jsg::Lock& js,
             case SubtleOperation::DECAPSULATE_KEY:
               if (!checkSupportForAlgorithm(SubtleOperation::IMPORT_KEY, thirdArgument, kj::none)) {
                 return false;
+              }
+              if (parsedOperation == SubtleOperation::ENCAPSULATE_KEY ||
+                  parsedOperation == SubtleOperation::DECAPSULATE_KEY) {
+                auto name = lookupAlgorithm(additionalAlgorithm.name).orDefault({}).name;
+                if (!isOneOf(name, {"AES-CTR"_kj, "AES-CBC"_kj, "AES-GCM"_kj, "AES-KW"_kj,
+                        "HMAC"_kj, "HKDF"_kj, "PBKDF2"_kj})) {
+                  return false;
+                }
+                if (name == "HMAC") {
+                  KJ_IF_SOME(length, additionalAlgorithm.length) {
+                    if (length <= 248 || length > 256) return false;
+                  }
+                }
               }
               return checkSupportForAlgorithm(parsedOperation, algorithm, kj::none);
 

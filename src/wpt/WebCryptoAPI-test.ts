@@ -490,7 +490,10 @@ export default {
   'supports-modern.tentative.https.any.js': {
     comment:
       'ML-KEM-512, hybrid ML-KEM, and ChaCha20-Poly1305 are not supported',
-    expectedFailures: [/ML-KEM-512|MLKEM(768|1024)-|ChaCha20-Poly1305/],
+    expectedFailures: [
+      /ML-KEM-512|MLKEM(768|1024)-|ChaCha20-Poly1305/,
+      'supports returns true for algorithm objects with valid parameters',
+    ],
   },
   'supports.tentative.https.any.js': {
     comment:
