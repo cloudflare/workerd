@@ -1507,7 +1507,7 @@ interface SubtleCryptoDeriveKeyAlgorithm {
   salt?: ArrayBuffer | ArrayBufferView;
   iterations?: number;
   hash?: string | SubtleCryptoHashAlgorithm;
-  $public?: CryptoKey;
+  public?: CryptoKey;
   info?: ArrayBuffer | ArrayBufferView;
 }
 interface SubtleCryptoEncryptAlgorithm {
