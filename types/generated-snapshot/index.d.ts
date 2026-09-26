@@ -1496,6 +1496,8 @@ interface JsonWebKey {
   qi?: string;
   oth?: RsaOtherPrimesInfo[];
   k?: string;
+  pub?: string;
+  priv?: string;
 }
 interface RsaOtherPrimesInfo {
   r?: string;
@@ -1542,6 +1544,7 @@ interface SubtleCryptoSignAlgorithm {
   hash?: string | SubtleCryptoHashAlgorithm;
   dataLength?: number;
   saltLength?: number;
+  context?: ArrayBuffer | ArrayBufferView;
 }
 interface CryptoKeyKeyAlgorithm {
   name: string;

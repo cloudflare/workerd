@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto-modern-algorithms-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-modern-algorithms-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "webcrypto_modern_algorithms"],
+      )
+    ),
+  ],
+);
