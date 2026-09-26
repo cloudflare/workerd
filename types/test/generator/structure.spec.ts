@@ -144,6 +144,32 @@ test('createStructureNode: property members', () => {
   );
 });
 
+test('createStructureNode: property members with leading dollar sign', () => {
+  const structure = new Message().initRoot(Structure);
+  structure.name = 'DollarProperties';
+  structure.fullyQualifiedName = 'workerd::api::DollarProperties';
+
+  const members = structure._initMembers(2);
+
+  let prop = members.get(0)._initProperty();
+  prop.name = '$public';
+  prop._initType().boolt = true;
+
+  prop = members.get(1)._initProperty();
+  prop.name = '$class';
+  prop._initType()._initString().name = 'kj::String';
+  prop.readonly = true;
+  prop.prototype = true;
+
+  assert.strictEqual(
+    printNode(createStructureNode(structure, { asClass: false })),
+    `interface DollarProperties {
+    public: boolean;
+    get class(): string;
+}`
+  );
+});
+
 test('createStructureNode: nested type members', () => {
   const structure = new Message().initRoot(Structure);
   structure.name = 'Nested';

@@ -71,7 +71,7 @@ function createInstancePropertyPartial(
   if (prop.readonly) {
     modifiers.push(f.createToken(ts.SyntaxKind.ReadonlyKeyword));
   }
-  const name = prop.name;
+  const name = prop.name.startsWith('$') ? prop.name.slice(1) : prop.name;
   let value = createTypeNode(prop.type);
 
   // If this is an optional type, use an optional property with a `?`
@@ -91,7 +91,7 @@ function createPrototypeProperty(
   | ts.GetAccessorDeclaration
   | [ts.GetAccessorDeclaration, ts.SetAccessorDeclaration] {
   assert(prop.prototype);
-  const name = prop.name;
+  const name = prop.name.startsWith('$') ? prop.name.slice(1) : prop.name;
   const value = createTypeNode(prop.type);
 
   const getter = f.createGetAccessorDeclaration(
