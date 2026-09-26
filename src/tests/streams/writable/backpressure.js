@@ -17,7 +17,7 @@
 // exactly, including RangeError("Invalid chunk size") for invalid size
 // returns.
 
-import { strictEqual, ok, rejects } from 'node:assert';
+import { strictEqual, ok, rejects, deepStrictEqual } from 'node:assert';
 import { usingTsImpl, pedanticWpt } from 'which-impl';
 
 // desiredSize decrements per queued write and recovers; ready is replaced
@@ -261,6 +261,77 @@ export const invalidSizeReturnRejects = {
       await rejects(writer.write('x'), expected);
       // The bad size does not just doom the write; the stream errors.
       await rejects(writer.closed, expected);
+    }
+  },
+};
+
+// A write made after close() is doomed whatever its size: the size is
+// validated only when the chunk would be enqueued (spec
+// EnqueueValueWithSize), which a closing stream never reaches, so the
+// late write alone rejects and the close completes. DIVERGENCE (ledger
+// #9): C++ rejects the late write with its conversion TypeError, and with
+// an earlier write queued it also rejects the close with it.
+export const invalidSizeAfterCloseRejectsOnlyTheWrite = {
+  async test() {
+    const cases = [
+      { ret: NaN, cppMessage: /not an integer/ },
+      { ret: -1, cppMessage: /negative/ },
+      { ret: Infinity, cppMessage: /not an integer/ },
+    ];
+    for (const { ret, cppMessage } of cases) {
+      for (const earlierWrite of [false, true]) {
+        const events = [];
+        let lateSizeCalls = 0;
+        const ws = new WritableStream(
+          {
+            write(chunk) {
+              events.push(`write:${chunk}`);
+            },
+            close() {
+              events.push('close');
+            },
+          },
+          {
+            size(chunk) {
+              if (chunk === 'late') {
+                lateSizeCalls++;
+                return ret;
+              }
+              return 1;
+            },
+          }
+        );
+        const writer = ws.getWriter();
+        const first = earlierWrite ? writer.write('a') : undefined;
+        const closed = writer.close();
+        const late = writer.write('late');
+        // Spec WritableStreamDefaultWriterWrite step 4: size() runs before
+        // the closing-state check rejects the write.
+        strictEqual(lateSizeCalls, 1);
+        if (usingTsImpl) {
+          await rejects(late, {
+            name: 'TypeError',
+            message: 'Cannot write to a stream that is closing or closed',
+          });
+          await first;
+          await closed;
+          deepStrictEqual(
+            events,
+            earlierWrite ? ['write:a', 'close'] : ['close']
+          );
+        } else {
+          const expected = { name: 'TypeError', message: cppMessage };
+          await rejects(late, expected);
+          await first;
+          if (earlierWrite) {
+            await rejects(closed, expected);
+            deepStrictEqual(events, ['write:a']);
+          } else {
+            await closed;
+            deepStrictEqual(events, ['close']);
+          }
+        }
+      }
     }
   },
 };

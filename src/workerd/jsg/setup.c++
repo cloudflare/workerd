@@ -424,6 +424,14 @@ static v8::Isolate* newIsolate(
   });
 }
 }  // namespace
+
+v8::IsolateGroup newIsolateGroup() {
+  if (v8::IsolateGroup::CanCreateNewGroups()) {
+    return v8::IsolateGroup::Create();
+  }
+  return v8::IsolateGroup::GetDefault();
+}
+
 IsolateBase::IsolateBase(V8System& system,
     v8::Isolate::CreateParams&& createParams,
     kj::Own<IsolateObserver> observer,

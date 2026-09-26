@@ -44,9 +44,7 @@ Shared utility library: data structures, SQLite wrapper, feature gating, logging
 
 ## `setup-async-io` (the `kj::setupAsyncIo()` seam)
 
-`setup-async-io-tokio.c++` defines `kj::setupAsyncIo()` and an inert `kj::UnixEventPort` for
-`--//:io_backend=rust`; in the cxx config it compiles to an empty TU and the dependency falls
-through to kj's own. It is sound only while `kj-async-os` is absent from the rust link -- see the
-I/O backend section in `src/workerd/server/AGENTS.md` for the rule (no `:kj-async` umbrella deps)
-and the gates that enforce it. Only this library, `//src/workerd/server:cli-io-backend` and
-`setup-async-io-test` read `WORKERD_RUST_IO_BACKEND_RUST`.
+`setup-async-io.c++` defines a tokio-backed `kj::setupAsyncIo()` and an inert `kj::UnixEventPort`.
+It is sound only while `kj-async-os` is absent from the link -- see the I/O section in
+`src/workerd/server/AGENTS.md` for the rule (no `:kj-async` umbrella deps) and the gates that
+enforce it.

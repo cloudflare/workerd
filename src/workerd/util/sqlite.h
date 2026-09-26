@@ -68,6 +68,9 @@ class SqliteObserver {
 // all of its features.
 class SqliteDatabase {
  public:
+  // Allow 34 bytes of padding for V8 serialization overhead beyond the 8 MiB row limit.
+  static constexpr int MAX_ROW_LENGTH = 8 * 1024 * 1024 + 34;
+
   class Vfs;
   class Query;
   class Statement;
@@ -252,6 +255,14 @@ class SqliteDatabase {
     onCriticalErrorCallback = kj::mv(callback);
   }
 
+  // Identifies this database in internal error logs and Sentry reports, e.g. so that a
+  // SQLITE_IOERR, etc. can be traced back to the specific database file that produced
+  // it. `context` (e.g. "id = 1234") is appended as "; <context>" to the description of
+  // exceptions thrown.
+  void setErrorContext(kj::String context) {
+    errorContext = kj::mv(context);
+  }
+
   SqliteMemoryScope enterMemoryScope();
 
   // Returns true if a transaction was automatically rolled due to a critical error.
@@ -386,6 +397,7 @@ class SqliteDatabase {
   kj::Maybe<kj::Function<void(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException)>>
       onCriticalErrorCallback;
   kj::Maybe<kj::Function<void(SqliteDatabase&)>> afterResetCallback;
+  kj::Maybe<kj::String> errorContext;
 
   kj::List<ResetListener, &ResetListener::link> resetListeners;
 
@@ -429,6 +441,10 @@ class SqliteDatabase {
   void handleCriticalError(kj::Maybe<int> errorCode,
       kj::StringPtr errorMessage,
       kj::Maybe<const kj::Exception&> exception);
+
+  kj::Maybe<kj::StringPtr> getErrorContext() {
+    return errorContext.map([](kj::String& s) -> kj::StringPtr { return s; });
+  }
 
   enum Multi { SINGLE, MULTI };
 
@@ -764,6 +780,10 @@ class SqliteDatabase::Query final: private ResetListener {
       kj::StringPtr errorMessage,
       kj::Maybe<const kj::Exception&> maybeException) {
     db.handleCriticalError(errorCode, errorMessage, maybeException);
+  }
+
+  kj::Maybe<kj::StringPtr> getErrorContext() {
+    return db.getErrorContext();
   }
 
   // Some reasonable automatic conversions.

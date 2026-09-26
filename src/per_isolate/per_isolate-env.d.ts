@@ -93,7 +93,21 @@ declare const utils: {
     fileHandle: object,
     keepExistingData: boolean
   ): FileSystemWriteContext;
+  // The DOM's "add an abort algorithm" (api/abort-bootstrap.h): `algorithm`
+  // runs when `signal` aborts, before the 'abort' event, and never for a
+  // synthetic 'abort' event. Consumed by the webstreams pipe.
+  addAbortAlgorithm(
+    signal: AbortSignal,
+    algorithm: () => void
+  ): AbortAlgorithmHandle;
 };
+
+// An abort algorithm registration. Obtained only from
+// utils.addAbortAlgorithm(); it has no JS-reachable constructor.
+declare interface AbortAlgorithmHandle {
+  // Unregisters the algorithm. Idempotent.
+  remove(): void;
+}
 
 // Native incremental digest, backing the TypeScript DigestStream. Obtained only
 // from utils.createDigestContext(); it has no JS-reachable constructor.
