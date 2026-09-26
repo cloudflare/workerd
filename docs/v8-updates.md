@@ -84,6 +84,11 @@ from the V8 directory.
     figure out what version of the github code V8 depends on. Instead, it should be safe
     to just bump these dependencies to the latest version on github.
 
+    When bumping `perfetto`, rebase `patches/perfetto/0003-*.patch`. It adds
+    `:libperfetto_c_over_client`, whose `srcs` and `deps` follow upstream's `:libperfetto_c`,
+    and exposes the Rust SDK sources. Then run `bazel test //src/rust/perfetto/...` to check
+    the Rust SDK still builds against the new C ABI and interoperates with the C++ SDK.
+
 11. Check workerd's tests pass with the updated V8.
 
      ```sh

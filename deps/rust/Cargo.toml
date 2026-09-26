@@ -32,6 +32,10 @@ syn = { version = "2", features = ["full"] }
 ada-url = { version = "4", default-features = false, features = ["std"] }
 anyhow = "1"
 async-trait = { version = "0", default-features = false }
+# bitflags and pastey are dependencies of the Perfetto Rust SDK, which is built from the
+# @perfetto sources by //src/rust/perfetto/sdk. pastey is a maintained drop-in replacement for the
+# archived `paste` crate that the SDK imports; it's aliased to `paste` there.
+bitflags = "2"
 bytes = { version = "1", default-features = false }
 capnp = "0.27"
 capnpc = "0.27"
@@ -50,6 +54,7 @@ hashlink = "0"
 # kj-rs-io: `fs` for fcntl (KJ's fd flags), `signal` for ignoring SIGPIPE once per process like
 # kj::UnixEventPort does.
 nix = { version = "0", features = ["fs", "signal"] }
+pastey = "0"
 pico-args = "0"
 ruff_python_ast = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
 ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }

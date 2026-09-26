@@ -1,0 +1,30 @@
+load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# Non-production crate whose test checks that Rust and C++ trace points land in the same Perfetto
+# session with matching flow and track IDs. It runs in every build configuration and checks what
+# that configuration should produce: both languages' events, only C++ events (Perfetto without
+# Rust Perfetto, as in embedders that don't enable it), or nothing (no Perfetto).
+wd_rust_crate(
+    name = "perfetto-test",
+    crate_features = select({
+        "//src/workerd/util:really_use_rust_perfetto": ["rust_perfetto"],
+        "//conditions:default": [],
+    }),
+    cxx_bridge_src = "lib.rs",
+    link_deps = [":test-helper"],
+    deps = ["//src/rust/perfetto"],
+)
+
+wd_cc_library(
+    name = "test-helper",
+    srcs = ["test-helper.c++"],
+    hdrs = ["test-helper.h"],
+    linkstatic = CC_LIBRARY_LINKSTATIC,
+    deps = [
+        "//src/rust/cxx:core",
+        "//src/workerd/util:perfetto",
+        "@capnp-cpp//src/kj",
+    ],
+)

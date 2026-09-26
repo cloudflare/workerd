@@ -22,6 +22,32 @@ selects.config_setting_group(
     visibility = ["//visibility:public"],
 )
 
+# Enables Perfetto trace points in Rust (//src/rust/perfetto), which needs the Perfetto C ABI
+# (@perfetto//:libperfetto_c_over_client) and the Rust SDK sources (@perfetto//contrib/rust-sdk).
+# This defaults to off and is turned on by workerd's .bazelrc (`build:perfetto`), because embedders
+# that build workerd from their own workspace don't read that file and may provide a @perfetto
+# repository without those targets. With the flag off, the Rust facade compiles to no-ops and
+# nothing references the new @perfetto targets. Keep every such reference inside a select() on
+# :really_use_rust_perfetto.
+bool_flag(
+    name = "use_rust_perfetto",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "set_use_rust_perfetto",
+    flag_values = {"use_rust_perfetto": "True"},
+)
+
+selects.config_setting_group(
+    name = "really_use_rust_perfetto",
+    match_all = [
+        ":really_use_perfetto",
+        ":set_use_rust_perfetto",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 # The routing layer owning the unprefixed zlib symbol names; @zlib//:zlib depends on this, so
 # every zlib consumer links it. Deliberately kj/capnp-free (see zlib-router.c++).
 wd_cc_library(
@@ -63,11 +89,20 @@ wd_cc_library(
         ":really_use_perfetto": ["WORKERD_USE_PERFETTO"],
         "//conditions:default": [],
     }),
+    local_defines = select({
+        ":really_use_rust_perfetto": ["WORKERD_USE_RUST_PERFETTO"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",
     ] + select({
         ":really_use_perfetto": ["@perfetto//:libperfetto_client_experimental"],
+        "//conditions:default": [],
+    }) + select({
+        ":really_use_rust_perfetto": [
+            "//src/rust/perfetto",
+        ],
         "//conditions:default": [],
     }),
 )
