@@ -198,12 +198,14 @@ export {
   addAbortSignalOnTeeBranchSparesSibling,
   addAbortSignalOnTeedSourceErrorsBranches,
   addAbortSignalOnTeeBranchThenSiblingCancel,
+  addAbortSignalOnTeeBranchAfterCloseSkipsSourceCancel,
   addAbortSignalOnTeedAwayBranchIsInert,
   addAbortSignalOnTeedAwayByteBranchIsInert,
   addAbortSignalOnTeeBranchSettlesWithSourceCleanup,
   addAbortSignalOnByteTeeBranchSparesSibling,
   addAbortSignalOnResponseBody,
-  finishedOnTeedAwayShellStaysPending,
+  finishedOnHandedOffStreamSettlesAtHandoff,
+  finishedOnDetachedQueuedBodyFollowsSource,
 } from 'finished-and-abort';
 
 export {

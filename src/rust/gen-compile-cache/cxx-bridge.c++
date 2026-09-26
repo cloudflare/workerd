@@ -102,8 +102,8 @@ v8::ScriptCompiler::CachedData* compileAsModule(jsg::Lock& js,
     return JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
         isolateLock.newContext<CompilerCacheContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
       return js.tryCatch([&]() {
-        auto resourceName = jsg::newExternalOneByteString(js, kj::from<Rust>(path));
-        auto contentStr = jsg::newExternalOneByteString(js, kj::from<Rust>(source));
+        auto resourceName = jsg::newExternalOneByteString(js, jsg::copyToArc(kj::from<Rust>(path)));
+        auto contentStr = jsg::newExternalOneByteString(js, jsg::copyToArc(kj::from<Rust>(source)));
 
         auto codeCache = asFunction
             ? compileAsFunction(js, resourceName, contentStr, compileOptions)

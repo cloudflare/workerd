@@ -71,7 +71,10 @@
     // rust
     {
       "name": "rules_rust",
-      "type": "bazel_dep"
+      "type": "bazel_dep",
+      "patches": [
+        "//:patches/rules_rust/0001-Propagate-coverage-info-through-link_deps.patch"
+      ]
     },
     {
       "name": "rules_foreign_cc",

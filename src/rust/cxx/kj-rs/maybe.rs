@@ -10,22 +10,24 @@ use repr::KjMaybe;
 ///
 /// This trait represents types which have a "niche", a value which represents
 /// an invalid instance of the type or can reasonably be interpreted as the absence
-/// of that type. This trait is implmented for 2 types, references and `Owns`.
+/// of that type. It is implemented for references and for the KJ smart pointers
+/// `Own`, `Rc` and `Arc`, matching the `kj::MaybeTraits` specializations in KJ.
 ///
 /// References have a niche where they are null. It's invalid and ensured by the
 /// compiler that this is impossible, so we can optimize an optional type by
 /// eliminating a flag that checks whether the item is set or not, and instead
 /// checking if it is null.
 ///
-/// `Own`s have a niche where the pointer to the owned data is null. This is
-/// a valid instance of `Own`, but was decided by the `kj` authors to represent
-/// `kj::none`. In Rust, it is guaranteed that an `Own` is nonnull, requiring
-/// `KjMaybe<Own<T>>` to represent a null `Own`.
+/// `Own`, `Rc` and `Arc` have a niche where the pointer to the pointee is null.
+/// This is a valid instance of each type, but was decided by the `kj` authors to
+/// represent `kj::none`. In Rust, it is guaranteed that a bare smart pointer is
+/// nonnull, requiring `KjMaybe<Own<T>>` (and likewise `Rc`/`Arc`) to represent a
+/// null pointer.
 ///
 /// Pointers are not optimized in this way, as `null` is a valid and meaningful
 /// instance of a pointer.
 ///
-/// An invalid implementation of this trait for any of the 3 types it is for
+/// An invalid implementation of this trait for any of the types it is for
 /// could result in undefined behavior when passed between languages.
 unsafe trait HasNiche: Sized {
     fn is_niche(value: *const Self) -> bool;
@@ -73,10 +75,30 @@ unsafe impl<T> HasNiche for Pin<&mut T> {
 
 // In `kj`, `kj::Own<T>` are considered `none` in a `Maybe` if the data pointer is null
 // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-unsafe impl<T> HasNiche for crate::repr::KjOwn<T> {
+unsafe impl<T: crate::OwnTarget> HasNiche for crate::repr::KjOwn<T> {
     fn is_niche(value: *const Self) -> bool {
         // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
         unsafe { (*value).as_ptr().is_null() }
+    }
+}
+
+// `kj::MaybeTraits<kj::Rc<T>>` defines `kj::none` as `rc.get() == nullptr`, i.e. the pointee
+// pointer (second word) is null. A default-constructed `kj::Rc` is all-null, so `NONE`'s zeroed
+// bytes are exactly what `initNone` produces.
+// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+unsafe impl<T> HasNiche for crate::repr::KjRc<T> {
+    fn is_niche(value: *const Self) -> bool {
+        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        unsafe { (*value).ptr.as_ptr().is_null() }
+    }
+}
+
+// `kj::MaybeTraits<kj::Arc<T>>` defines `kj::none` the same way as for `kj::Rc<T>`.
+// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+unsafe impl<T> HasNiche for crate::repr::KjArc<T> {
+    fn is_niche(value: *const Self) -> bool {
+        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        unsafe { (*value).ptr.as_ptr().is_null() }
     }
 }
 
@@ -120,11 +142,12 @@ pub unsafe trait MaybeItem: Sized {
 }
 
 /// Macro to implement [`MaybeItem`] for `T` which implment [`HasNiche`].
-/// Avoids running into generic specialization problems.
+/// Avoids running into generic specialization problems. A type may bound its parameter with
+/// `Type<T> where T: Bound`.
 macro_rules! impl_maybe_item_for_has_niche {
-    ($ty:ty) => {
+    (@impl [$($generics:tt)*] $ty:ty) => {
         // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-        unsafe impl<T> MaybeItem for $ty {
+        unsafe impl<$($generics)*> MaybeItem for $ty {
             type Discriminant = ();
 
             fn is_some(value: &KjMaybe<Self>) -> bool {
@@ -149,6 +172,12 @@ macro_rules! impl_maybe_item_for_has_niche {
                 }
             }
         }
+    };
+    ($ty:ty where T: $bound:path) => {
+        impl_maybe_item_for_has_niche!(@impl [T: $bound] $ty);
+    };
+    ($ty:ty) => {
+        impl_maybe_item_for_has_niche!(@impl [T] $ty);
     };
     ($ty:ty, $($tail:ty),+) => {
         impl_maybe_item_for_has_niche!($ty);
@@ -193,75 +222,14 @@ macro_rules! impl_maybe_item_for_primitive {
     };
 }
 
-impl_maybe_item_for_has_niche!(crate::KjOwn<T>, &T, &mut T, Pin<&mut T>);
+impl_maybe_item_for_has_niche!(crate::KjOwn<T> where T: crate::OwnTarget);
+impl_maybe_item_for_has_niche!(crate::KjRc<T>, crate::KjArc<T>, &T, &mut T, Pin<&mut T>);
 impl_maybe_item_for_primitive!(
     u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64, bool, &str, String
 );
 
 // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
 unsafe impl<T> MaybeItem for &[T] {
-    type Discriminant = bool;
-
-    fn is_some(value: &KjMaybe<Self>) -> bool {
-        value.is_set
-    }
-
-    fn is_none(value: &KjMaybe<Self>) -> bool {
-        !value.is_set
-    }
-
-    const NONE: KjMaybe<Self> = {
-        KjMaybe {
-            is_set: false,
-            some: MaybeUninit::uninit(),
-        }
-    };
-
-    fn some(value: Self) -> KjMaybe<Self> {
-        KjMaybe {
-            is_set: true,
-            some: MaybeUninit::new(value),
-        }
-    }
-}
-
-// Unlike `kj::Own<T>`, the `kj::Rc<T>` and `kj::Arc<T>` types do NOT define
-// `kj::MaybeTraits` niche members (`initNone`/`isNone`). This means
-// `kj::Maybe<kj::Rc<T>>` does not use niche-value optimization: it uses the
-// non-niche `kj::_::NullableValue<T>` representation, which stores a separate
-// `bool` flag followed by the value (`bool isSet; union { T value; };`).
-//
-// We therefore mirror that layout with a `bool` discriminant here, exactly like
-// the primitive types above, rather than implementing [`HasNiche`].
-// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-unsafe impl<T> MaybeItem for crate::KjRc<T> {
-    type Discriminant = bool;
-
-    fn is_some(value: &KjMaybe<Self>) -> bool {
-        value.is_set
-    }
-
-    fn is_none(value: &KjMaybe<Self>) -> bool {
-        !value.is_set
-    }
-
-    const NONE: KjMaybe<Self> = {
-        KjMaybe {
-            is_set: false,
-            some: MaybeUninit::uninit(),
-        }
-    };
-
-    fn some(value: Self) -> KjMaybe<Self> {
-        KjMaybe {
-            is_set: true,
-            some: MaybeUninit::new(value),
-        }
-    }
-}
-
-// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-unsafe impl<T> MaybeItem for crate::KjArc<T> {
     type Discriminant = bool;
 
     fn is_some(value: &KjMaybe<Self>) -> bool {
@@ -299,8 +267,9 @@ pub(crate) mod repr {
     /// It is an optional type, but represented using a struct, for alignment with kj.
     ///
     /// # Layout
-    /// In kj, `Maybe` has 3 specializations, one without niche value optimization, and
-    /// two with it. In order to maintain an identical layout in Rust, we include an associated type
+    /// In kj, `Maybe<T>` stores either `bool isSet; union { T value; };` or, when
+    /// `kj::MaybeTraits<T>` declares a niche (`initNone`/`isNone`), just `union { T value; };`.
+    /// In order to maintain an identical layout in Rust, we include an associated type
     /// in the [`MaybeItem`] trait, which determines the discriminant of the `KjMaybe<T: MaybeItem>`.
     ///
     /// ## Niche Value Optimization
@@ -315,12 +284,13 @@ pub(crate) mod repr {
 
     assert_eq_size!(KjMaybe<isize>, [usize; 2]);
     assert_eq_size!(KjMaybe<&isize>, usize);
+    // The KJ smart pointers are niche-optimized: `Maybe<Own/Rc/Arc<T>>` is two pointers, the
+    // same size as the smart pointer itself, with a null pointee pointer meaning `none`.
     assert_eq_size!(KjMaybe<crate::KjOwn<isize>>, [usize; 2]);
-    // `kj::Rc<T>` has no niche, so `kj::Maybe<kj::Rc<T>>` carries a separate flag:
-    // a `bool` discriminant followed by the two-pointer `kj::Rc` value.
-    assert_eq_size!(KjMaybe<crate::KjRc<isize>>, [usize; 3]);
-    // `String` (three-pointer struct, no niche) uses the same layout: `bool` discriminant plus
-    // padding, followed by three pointers.
+    assert_eq_size!(KjMaybe<crate::KjRc<isize>>, [usize; 2]);
+    assert_eq_size!(KjMaybe<crate::KjArc<isize>>, [usize; 2]);
+    // `String` (three-pointer struct, no niche) uses a `bool` discriminant plus padding,
+    // followed by three pointers.
     assert_eq_size!(KjMaybe<String>, [usize; 4]);
 
     impl<T: MaybeItem> KjMaybe<T> {

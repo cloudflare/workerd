@@ -107,7 +107,7 @@ class CryptoKeyUsageSet {
   static CryptoKeyUsageSet byName(kj::StringPtr name);
 
   // All singletons, in the order defined by the spec (encrypt, decrypt, sign, verify, ...).
-  static kj::ArrayPtr<const CryptoKeyUsageSet> singletons();
+  static kj::StaticArrayPtr<const CryptoKeyUsageSet> singletons();
 
   enum class Context { generate, importSecret, importPublic, importPrivate };
 
