@@ -916,8 +916,8 @@ Buffer.prototype.asciiWrite = function asciiWrite(
   length?: number
 ) {
   offset ??= 0;
-  length ??= this.length;
   validateOffset(offset as number, 'offset', 0, this.length);
+  length ??= this.length - offset;
   validateOffset(length as number, 'length', 0, this.length - offset);
   return bufferUtil.write(
     this,
@@ -934,8 +934,8 @@ Buffer.prototype.base64Write = function base64Write(
   length?: number
 ) {
   offset ??= 0;
-  length ??= this.length;
   validateOffset(offset as number, 'offset', 0, this.length);
+  length ??= this.length - offset;
   validateOffset(length as number, 'length', 0, this.length - offset);
   return bufferUtil.write(
     this,
@@ -952,8 +952,8 @@ Buffer.prototype.base64urlWrite = function base64urlWrite(
   length?: number
 ) {
   offset ??= 0;
-  length ??= this.length;
   validateOffset(offset as number, 'offset', 0, this.length);
+  length ??= this.length - offset;
   validateOffset(length as number, 'length', 0, this.length - offset);
   return bufferUtil.write(
     this,
@@ -966,12 +966,12 @@ Buffer.prototype.base64urlWrite = function base64urlWrite(
 
 Buffer.prototype.hexWrite = function hexWrite(
   string: StringLike,
-  offset: number,
-  length: number
+  offset?: number,
+  length?: number
 ) {
   offset ??= 0;
-  length ??= this.length;
   validateOffset(offset as number, 'offset', 0, this.length);
+  length ??= this.length - offset;
   validateOffset(length as number, 'length', 0, this.length - offset);
   return bufferUtil.write(
     this,
@@ -984,12 +984,12 @@ Buffer.prototype.hexWrite = function hexWrite(
 
 Buffer.prototype.latin1Write = function latin1Write(
   string: StringLike,
-  offset: number,
-  length: number
+  offset?: number,
+  length?: number
 ) {
   offset ??= 0;
-  length ??= this.length;
   validateOffset(offset as number, 'offset', 0, this.length);
+  length ??= this.length - offset;
   validateOffset(length as number, 'length', 0, this.length - offset);
   return bufferUtil.write(
     this,
@@ -1002,12 +1002,12 @@ Buffer.prototype.latin1Write = function latin1Write(
 
 Buffer.prototype.ucs2Write = function ucs2Write(
   string: StringLike,
-  offset: number,
-  length: number
+  offset?: number,
+  length?: number
 ) {
   offset ??= 0;
-  length ??= this.length;
   validateOffset(offset as number, 'offset', 0, this.length);
+  length ??= this.length - offset;
   validateOffset(length as number, 'length', 0, this.length - offset);
   return bufferUtil.write(
     this,
@@ -1020,12 +1020,12 @@ Buffer.prototype.ucs2Write = function ucs2Write(
 
 Buffer.prototype.utf8Write = function utf8Write(
   string: StringLike,
-  offset: number,
-  length: number
+  offset?: number,
+  length?: number
 ) {
   offset ??= 0;
-  length ??= this.length;
   validateOffset(offset as number, 'offset', 0, this.length);
+  length ??= this.length - offset;
   validateOffset(length as number, 'length', 0, this.length - offset);
   return bufferUtil.write(
     this,
