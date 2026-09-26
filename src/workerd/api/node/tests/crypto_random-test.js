@@ -536,3 +536,38 @@ export const generate_prime_size_cap = {
     ok(generatePrimeSync(512).byteLength > 0);
   },
 };
+
+// Ref: https://github.com/cloudflare/workerd/issues/6749
+// Node.js crypto.randomBytes and randomFillSync must support sizes greater than 65536 bytes.
+export const randomBytesLargeSize = {
+  async test() {
+    const { randomBytes, randomFillSync } = await import('node:crypto');
+
+    // Test synchronous randomBytes with size > 65536
+    const size = 65537;
+    const buf = randomBytes(size);
+    strictEqual(buf.length, size);
+    ok(buf.some((b) => b !== 0));
+
+    // Test randomFillSync with size > 65536 and check that it returns the passed buffer
+    const largeBuf = Buffer.alloc(70000, 0);
+    const ret = randomFillSync(largeBuf);
+    strictEqual(ret, largeBuf);
+    strictEqual(largeBuf.length, 70000);
+    ok(largeBuf.some((b) => b !== 0));
+
+    // Test asynchronous randomBytes callback with size > 65536
+    await new Promise((resolve, reject) => {
+      randomBytes(size, (err, res) => {
+        if (err) return reject(err);
+        try {
+          strictEqual(res.length, size);
+          ok(res.some((b) => b !== 0));
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+  },
+};
