@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James M Snell <jsnell@cloudflare.com>
+Date: Sat, 26 Sep 2026 00:00:00 +0000
+Subject: Add C ABI library over the client library and expose Rust SDK sources
+
+
+diff --git a/BUILD b/BUILD
+index e531db5..9c57994 100644
+--- a/BUILD
++++ b/BUILD
+@@ -12275,5 +12275,48 @@ perfetto_py_binary(
+ 
+ exports_files(
+     ["ui/src/assets/favicon.png"],
+     visibility = PERFETTO_CONFIG.public_visibility,
+ )
++
++# workerd: the Perfetto C ABI (src/shared_lib) layered on top of
++# :libperfetto_client_experimental instead of beside it. :libperfetto_c compiles its own copy of
++# the whole client/service stack, so linking it next to the C++ client would duplicate symbols and
++# produce a second perfetto::Tracing singleton. This target only adds the C ABI implementation, so
++# C ABI users (e.g. the Rust SDK in contrib/rust-sdk) and C++ SDK users share one Tracing instance
++# and one tracing session. Linked statically, so PERFETTO_SDK_SHLIB_IMPLEMENTATION is not defined.
++perfetto_cc_library(
++    name = "libperfetto_c_over_client",
++    srcs = [
++        "src/tracing/internal/tracing_muxer_impl.h",
++        ":src_shared_lib_for_testing",
++        ":src_shared_lib_shared_lib",
++        ":src_shared_lib_track_event_intern_map",
++        ":src_shared_lib_track_event_track_event",
++    ],
++    hdrs = [
++        ":include_perfetto_public_abi_base",
++        ":include_perfetto_public_abi_public",
++        ":include_perfetto_public_base",
++        ":include_perfetto_public_protos_protos",
++        ":include_perfetto_public_protozero",
++        ":include_perfetto_public_public",
++    ],
++    visibility = PERFETTO_CONFIG.public_visibility,
++    deps = [
++        ":libperfetto_client_experimental",
++        ":protos_perfetto_common_cpp",
++        ":protos_perfetto_common_zero",
++        ":protos_perfetto_config_cpp",
++        ":protos_perfetto_config_track_event_cpp",
++        ":protos_perfetto_config_track_event_zero",
++        ":protos_perfetto_config_zero",
++        ":protos_perfetto_trace_interned_data_zero",
++        ":protos_perfetto_trace_minimal_zero",
++        ":protos_perfetto_trace_non_minimal_zero",
++        ":protos_perfetto_trace_track_event_cpp",
++        ":protos_perfetto_trace_track_event_zero",
++        ":protozero",
++        ":src_base_base",
++    ],
++    linkstatic = True,
++)
+diff --git a/contrib/rust-sdk/BUILD.bazel b/contrib/rust-sdk/BUILD.bazel
+new file mode 100644
+index 0000000..301b71c
+--- /dev/null
++++ b/contrib/rust-sdk/BUILD.bazel
+@@ -0,0 +1,21 @@
++# workerd: exposes the Rust SDK sources so embedders can define their own rust_library targets
++# (this repository does not depend on rules_rust). perfetto-sys is used with its checked-in
++# bindings.rs and linked against //:libperfetto_c_over_client; its build.rs is not used.
++
++package(default_visibility = ["//visibility:public"])
++
++exports_files([
++    "perfetto-sys/src/lib.rs",
++    "perfetto/src/lib.rs",
++    "perfetto/README.md",
++])
++
++filegroup(
++    name = "perfetto_sys_srcs",
++    srcs = glob(["perfetto-sys/src/**/*.rs"]),
++)
++
++filegroup(
++    name = "perfetto_srcs",
++    srcs = glob(["perfetto/src/**/*.rs"]),
++)
