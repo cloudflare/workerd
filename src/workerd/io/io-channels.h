@@ -53,6 +53,9 @@ class CacheClient {
     // Serialized JSON value to pass in ew_compat field of control header to FL. This has the same
     // semantics as the field in IoChannelFactory::SubrequestMetadata.
     kj::Maybe<kj::String> featureFlagsForFl;
+
+    // User span parent for trace propagation, as in IoChannelFactory::SubrequestMetadata.
+    SpanParent userSpanParent = SpanParent(nullptr);
   };
 
   // Get the default namespace, i.e. the one that fetch() will use for caching.

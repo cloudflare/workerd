@@ -4430,15 +4430,15 @@ class Server::WorkerService final: public Service,
           cacheNamespaceHeader(cacheNamespaceHeader) {}
 
     kj::Own<kj::HttpClient> getDefault(CacheClient::SubrequestMetadata metadata) override {
-      return kj::heap<CacheHttpClientImpl>(*cacheService, cacheNamespaceHeader, kj::none,
-          kj::mv(metadata.cfBlobJson), kj::mv(metadata.parentSpan));
+      return kj::heap<CacheHttpClientImpl>(
+          *cacheService, cacheNamespaceHeader, kj::none, kj::mv(metadata));
     }
 
     kj::Own<kj::HttpClient> getNamespace(
         kj::StringPtr cacheName, CacheClient::SubrequestMetadata metadata) override {
       auto encodedName = kj::encodeUriComponent(cacheName);
-      return kj::heap<CacheHttpClientImpl>(*cacheService, cacheNamespaceHeader, kj::mv(encodedName),
-          kj::mv(metadata.cfBlobJson), kj::mv(metadata.parentSpan));
+      return kj::heap<CacheHttpClientImpl>(
+          *cacheService, cacheNamespaceHeader, kj::mv(encodedName), kj::mv(metadata));
     }
 
    private:
@@ -4451,9 +4451,12 @@ class Server::WorkerService final: public Service,
     CacheHttpClientImpl(IoChannelFactory::SubrequestChannel& parent,
         kj::HttpHeaderId cacheNamespaceHeader,
         kj::Maybe<kj::String> cacheName,
-        kj::Maybe<kj::String> cfBlobJson,
-        SpanParent parentSpan)
-        : client(asHttpClient(parent.startRequest({kj::mv(cfBlobJson), kj::mv(parentSpan)}))),
+        CacheClient::SubrequestMetadata metadata)
+        : client(asHttpClient(parent.startRequest({
+            .cfBlobJson = kj::mv(metadata.cfBlobJson),
+            .parentSpan = kj::mv(metadata.parentSpan),
+            .userSpanParent = kj::mv(metadata.userSpanParent),
+          }))),
           cacheName(kj::mv(cacheName)),
           cacheNamespaceHeader(cacheNamespaceHeader) {}
 

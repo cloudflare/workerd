@@ -389,12 +389,17 @@ void WorkerTracer::setEventInfo(
   // IoContext is available at this time, capture weakRef.
   KJ_ASSERT(weakIoContext == kj::none, "tracer can only be used for a single event");
   weakIoContext = incomingRequest.getContext().getWeakRef();
-  setEventInfoInternal(
-      incomingRequest.getInvocationSpanContext(), incomingRequest.nowForTraceOnset(), kj::mv(info));
+  auto& context = incomingRequest.getInvocationSpanContext();
+  setEventInfoInternal(context,
+      context.getParent().map(
+          [](const tracing::InvocationSpanContext& p) { return p.getSpanId(); }),
+      incomingRequest.nowForTraceOnset(), kj::mv(info));
 }
 
-void WorkerTracer::setEventInfoInternal(
-    const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&& info) {
+void WorkerTracer::setEventInfoInternal(const tracing::InvocationSpanContext& context,
+    kj::Maybe<tracing::SpanId> parentSpanId,
+    kj::Date timestamp,
+    tracing::EventInfo&& info) {
   KJ_ASSERT(trace->eventInfo == kj::none, "tracer can only be used for a single event");
 
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything
@@ -443,17 +448,14 @@ void WorkerTracer::setEventInfoInternal(
       .durableObjectId = mapCopyString(trace->durableObjectId),
     };
 
-    tracing::SpanId parentSpanId = tracing::SpanId::nullId;
-    KJ_IF_SOME(trigger, context.getParent()) {
-      parentSpanId = trigger.getSpanId();
-    }
     // Onset needs special handling for spanId: The top-level spanId is zero unless a trigger
     // context is available. The inner spanId is taken from the invocation
     // span context, that span is being "opened" with the onset event. All other tail events have it
     // as its parent span ID, except for recursive SpanOpens (which have the parent span instead)
     // and Attribute/SpanClose events (which have the spanId opened in the corresponding SpanOpen).
-    auto onsetContext = tracing::InvocationSpanContext(
-        context.getTraceId(), context.getInvocationId(), parentSpanId, context.getTraceFlags());
+    auto onsetContext =
+        tracing::InvocationSpanContext(context.getTraceId(), context.getInvocationId(),
+            parentSpanId.orDefault(tracing::SpanId::nullId), context.getTraceFlags());
 
     // Not applying size accounting for Onset since it is sent separately
     writer->report(onsetContext,
