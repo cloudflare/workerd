@@ -99,7 +99,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `async-iteration.js` | 7 migrated + no-await interleavings + proto shape (#13) + ongoing-promise interleavings (#22) |
 | `reentrancy.js` | enqueue/close/cancel-in-size (parity) + read-in-size (#14; guard the size() or C++ captures every later chunk) |
 | `buffer-lifecycle.js` | chunk by reference, detach observed |
-| `integration-body.js` | readAll family, normalization (incl. detached views, SharedArrayBuffer-backed views, resizable-extent pinning), clone, cancel-then-consume, SELF round-trips |
+| `integration-body.js` | readAll family, normalization (incl. detached and out-of-bounds views, DataViews included, SharedArrayBuffer-backed views, resizable-extent pinning), clone, cancel-then-consume, SELF round-trips |
 | `integration-body-failures.js` | consumer-side failures cancel the source with the error (every consumer; the cancel's rejection replaces it; nothing to cancel once the closing batch is in), leave the stream locked and stop pulls; TransformStream `expectedLength` overflow (#21) and exact delivery |
 | `integration-body-memory.js` | body consumption copies bytes out as they arrive: chunk buffers are collectible mid-consumption (WeakRef + gc()), ~2.5 MiB of pseudo-random chunk sizes assembles exactly as bytes and as text, one chunk wider than a 1 MiB collection block assembles exactly, a declared-length byte body is exact |
 | `integration-locked-disturbed.js` | disturbed rejected, locked accepted, body identity + lock coupling (#15) |

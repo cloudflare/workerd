@@ -89,6 +89,7 @@ export {
   detachAfterWriteStillDelivers,
   resizableShrinkAfterWriteStillDelivers,
   alreadyDetachedChunkIsNoop,
+  degenerateViewsAreNoops,
   lyingMetadataNeverConsulted,
 } from 'buffer-lifecycle';
 

@@ -92,11 +92,12 @@ export const defaultHighWaterMarkAccounting = {
       strictEqual(firstReady, writer.ready);
     }
     await reader.read();
+    await w1;
     strictEqual(writer.desiredSize, usingTsImpl ? 0 : 1);
     await reader.read();
+    await w2;
     strictEqual(writer.desiredSize, 1);
     await writer.ready;
-    await Promise.all([w1, w2]);
     await writer.close();
   },
 };
@@ -141,13 +142,44 @@ export const desiredSizeTracksBytes = {
     const w3 = writer.write(new Uint8Array(7));
     strictEqual(writer.desiredSize, 3);
 
-    // Drain: as reads consume writes, desiredSize recovers.
+    // Drain: as reads consume writes, desiredSize recovers. A write read
+    // before the writable reaches it settles when its turn comes.
     await reader.read();
     await reader.read();
     await reader.read();
+    await Promise.all([w1, w2, w3]);
     strictEqual(writer.desiredSize, 20);
 
-    await Promise.all([w1, w2, w3]);
+    await writer.close();
+  },
+};
+
+// A write's bytes stay counted until reads consume all of them: a BYOB read
+// that takes part of the write leaves the write pending and desiredSize
+// where the write put it; the read that takes the rest settles the write
+// and restores the budget (parity).
+export const partialByobReadKeepsWriteCounted = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream({
+      highWaterMark: 10,
+    });
+    const writer = writable.getWriter();
+    const reader = readable.getReader({ mode: 'byob' });
+    let settled = false;
+    const write = writer.write(new Uint8Array(10)).then(() => {
+      settled = true;
+    });
+
+    const first = await reader.read(new Uint8Array(3));
+    strictEqual(first.value.byteLength, 3);
+    await scheduler.wait(5);
+    strictEqual(settled, false);
+    strictEqual(writer.desiredSize, 0);
+
+    const rest = await reader.read(new Uint8Array(20));
+    strictEqual(rest.value.byteLength, 7);
+    await write;
+    strictEqual(writer.desiredSize, 10);
     await writer.close();
   },
 };
@@ -209,9 +241,9 @@ export const readyReflectsBackpressure = {
 
     // Drain the remaining 9 bytes.
     await reader.read();
+    await Promise.all([w1, w2]);
     strictEqual(writer.desiredSize, 10);
 
-    await Promise.all([w1, w2]);
     await writer.close();
   },
 };
