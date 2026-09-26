@@ -36,9 +36,6 @@ declare namespace Rpc {
   //   cloneable composite types. This allows types defined with the "interface" keyword to pass the
   //   serializable check as well. Otherwise, only types defined with the "type" keyword would pass.
   type Serializable<T> =
-    [unknown] extends [T]
-      ? unknown
-      :
     // Structured cloneables
     | BaseType
     // Structured cloneable composites
@@ -49,7 +46,11 @@ declare namespace Rpc {
     | Set<T extends Set<infer U> ? Serializable<U> : never>
     | ReadonlyArray<T extends ReadonlyArray<infer U> ? Serializable<U> : never>
     | {
-        [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
+        [K in keyof T]: K extends number | string
+          ? [unknown] extends [T[K]]
+            ? unknown
+            : Serializable<T[K]>
+          : never;
       }
     // Special types
     | Stub<Stubable>
@@ -127,6 +128,7 @@ declare namespace Rpc {
   // prettier-ignore
   type Result<R> =
     R extends Stubable ? Promise<Stub<R>> & Provider<R>
+    : [unknown] extends [R] ? Promise<unknown>
     : R extends Serializable<R> ? Promise<Stubify<R> & MaybeDisposable<R>> & MaybeProvider<R>
     : never;
 
