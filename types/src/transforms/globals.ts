@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "node:assert";
-import ts from "typescript";
+import assert from 'node:assert';
+import ts from 'typescript';
 
 // Copies all properties of `ServiceWorkerGlobalScope` and its superclasses into
 // the global scope:
@@ -69,6 +69,13 @@ function createInlineVisitor(
   return visitor;
 }
 
+// Node.js globals exposed via nodejs_compat_v2. These must be emitted as
+// `var` (not `const`) so their declarations merge with those from @types/node.
+// `const` does not merge across declaration files and would produce TS2451
+// redeclaration errors in any project listing both workers-types and
+// @types/node in compilerOptions.types.
+const NODE_OWNED_GLOBALS = new Set(['Buffer', 'process', 'global']);
+
 // Call with each potential method/property that could be extracted into a
 // global function/const.
 export function maybeExtractGlobalNode(
@@ -104,9 +111,16 @@ export function maybeExtractGlobalNode(
         /* exclamationToken */ undefined,
         node.type
       );
+      // Use `var` for Node-owned globals (Buffer, process, global) so their
+      // declarations merge with @types/node rather than conflicting. All other
+      // globals stay `const` to prevent merging with DOM definitions that
+      // workers-types intentionally overrides.
+      const flags = NODE_OWNED_GLOBALS.has(node.name.text)
+        ? ts.NodeFlags.None // `var`
+        : ts.NodeFlags.Const;
       const varDeclarationList = ctx.factory.createVariableDeclarationList(
         [varDeclaration],
-        ts.NodeFlags.Const // Use `const` instead of `var`
+        flags
       );
       return ctx.factory.createVariableStatement(modifiers, varDeclarationList);
     }
@@ -191,7 +205,7 @@ function createGlobalScopeVisitor(
     if (
       (ts.isInterfaceDeclaration(node) || ts.isClassDeclaration(node)) &&
       node.name !== undefined &&
-      node.name.text === "ServiceWorkerGlobalScope"
+      node.name.text === 'ServiceWorkerGlobalScope'
     ) {
       return [node, ...extractGlobalNodes(node)];
     }
