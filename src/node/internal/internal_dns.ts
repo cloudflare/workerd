@@ -52,6 +52,9 @@ export const validDnsOrders: DnsOrder[] = [
 
 let defaultDnsOrder: DnsOrder = 'verbatim';
 
+const DNS_TYPE_A = 1;
+const DNS_TYPE_AAAA = 28;
+
 // Magic hostnames (e.g. Hyperdrive's) resolve to a synthetic IPv4 that routes via a connect
 // override. Gate on the suffix so ordinary lookups stay entirely in JS rather than crossing into
 // C++ on every resolution.
@@ -187,12 +190,16 @@ export function lookup(
     ])
       .then(([ipv4Response, ipv6Response]): void => {
         const ipv4Addresses: { address: string; family: 4 }[] =
-          ipv4Response.Answer?.map((answer) => ({
+          ipv4Response.Answer?.filter(
+            (answer) => answer.type === DNS_TYPE_A
+          ).map((answer) => ({
             address: answer.data,
             family: 4,
           })) ?? [];
         const ipv6Addresses: { address: string; family: 6 }[] =
-          ipv6Response.Answer?.map((answer) => ({
+          ipv6Response.Answer?.filter(
+            (answer) => answer.type === DNS_TYPE_AAAA
+          ).map((answer) => ({
             address: answer.data,
             family: 6,
           })) ?? [];
@@ -222,8 +229,12 @@ export function lookup(
       sendDnsRequest(hostname, 'AAAA').catch(() => ({ Answer: [] })),
     ])
       .then(([ipv4Response, ipv6Response]): void => {
-        const ipv4 = ipv4Response.Answer?.at(0)?.data;
-        const ipv6 = ipv6Response.Answer?.at(0)?.data;
+        const ipv4 = ipv4Response.Answer?.find(
+          (a) => a.type === DNS_TYPE_A
+        )?.data;
+        const ipv6 = ipv6Response.Answer?.find(
+          (a) => a.type === DNS_TYPE_AAAA
+        )?.data;
 
         if (ipv4 == null && ipv6 == null) {
           callback(new DnsError(hostname, errorCodes.NOTFOUND, 'queryA'));
@@ -250,24 +261,36 @@ export function lookup(
       });
   } else {
     const requestType = family === 4 ? 'A' : 'AAAA';
+    const expectedType = family === 4 ? DNS_TYPE_A : DNS_TYPE_AAAA;
 
     // Single request when family is specified (with or without all=true)
     sendDnsRequest(hostname, requestType)
       .then((json): void => {
         validateAnswer(json.Answer, hostname, `query${requestType}`);
 
+        const matchingAnswers = json.Answer.filter(
+          (answer) => answer.type === expectedType
+        );
+
+        if (matchingAnswers.length === 0) {
+          callback(
+            new DnsError(hostname, errorCodes.NOTFOUND, `query${requestType}`)
+          );
+          return;
+        }
+
         if (all) {
           // Return all addresses with the specified family
           callback(
             null,
-            json.Answer.map((answer) => ({
+            matchingAnswers.map((answer) => ({
               address: answer.data,
               family,
             }))
           );
         } else {
           // Return just the first address
-          callback(null, json.Answer.at(0)?.data as string, family);
+          callback(null, matchingAnswers[0].data, family);
         }
       })
       .catch((error: unknown): void => {
@@ -340,7 +363,12 @@ export function resolve4(
   return sendDnsRequest(name, 'A').then((json) => {
     validateAnswer(json.Answer, name, 'queryA');
 
-    return json.Answer.map((a) =>
+    const matchingAnswers = json.Answer.filter((a) => a.type === DNS_TYPE_A);
+    if (matchingAnswers.length === 0) {
+      throw new DnsError(name, errorCodes.NODATA, 'queryA');
+    }
+
+    return matchingAnswers.map((a) =>
       ttl ? { ttl: a.TTL, address: a.data } : a.data
     );
   });
@@ -366,7 +394,12 @@ export function resolve6(
   return sendDnsRequest(name, 'AAAA').then((json) => {
     validateAnswer(json.Answer, name, 'queryAaaa');
 
-    return json.Answer.map((a) =>
+    const matchingAnswers = json.Answer.filter((a) => a.type === DNS_TYPE_AAAA);
+    if (matchingAnswers.length === 0) {
+      throw new DnsError(name, errorCodes.NODATA, 'queryAaaa');
+    }
+
+    return matchingAnswers.map((a) =>
       ttl ? { ttl: a.TTL, address: a.data } : a.data
     );
   });
