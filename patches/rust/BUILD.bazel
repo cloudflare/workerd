@@ -1,3 +1,6 @@
+# Patches in this directory apply to the Rust standard library's sources when build/rust builds a
+# sanitizer-instrumented std. Patches to crates from the registry live in crates/ and are wired up
+# through crate.annotation() in build/deps/rust.MODULE.bazel.
 filegroup(
     name = "patches",
     srcs = glob(["*.patch"]),

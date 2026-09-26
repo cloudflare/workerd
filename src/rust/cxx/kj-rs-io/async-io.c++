@@ -280,11 +280,13 @@ kj::Promise<PeerStream> acceptAllowed(
 // TokioAsyncIoStream
 
 kj::Promise<size_t> TokioAsyncIoStream::tryRead(void *buffer, size_t minBytes, size_t maxBytes) {
-  return started(stream_try_read(*inner, reinterpret_cast<uint8_t *>(buffer), maxBytes, minBytes));
+  return started(
+      stream_try_read(stream(), reinterpret_cast<uint8_t *>(buffer), maxBytes, minBytes));
 }
 
 kj::Promise<void> TokioAsyncIoStream::write(kj::ArrayPtr<const kj::byte> buffer) {
-  return started(stream_write(*inner, ::rust::Slice<const uint8_t>(buffer.begin(), buffer.size())));
+  return started(
+      stream_write(stream(), ::rust::Slice<const uint8_t>(buffer.begin(), buffer.size())));
 }
 
 kj::Promise<void> TokioAsyncIoStream::write(
@@ -297,40 +299,40 @@ kj::Promise<void> TokioAsyncIoStream::writePieces(
   // The coroutine frame owns the KjPieces the Rust side reads through (bridge.h) for as long as
   // the write is pending; the piece buffers themselves are the caller's, per KJ's contract.
   KjPieces owned{pieces};
-  co_await stream_write_pieces(*inner, owned);
+  co_await stream_write_pieces(stream(), owned);
 }
 
 kj::Promise<void> TokioAsyncIoStream::whenWriteDisconnected() {
-  return started(stream_when_write_disconnected(*inner));
+  return started(stream_when_write_disconnected(stream()));
 }
 
 void TokioAsyncIoStream::shutdownWrite() {
-  stream_shutdown_write(*inner);
+  stream_shutdown_write(stream());
 }
 
 void TokioAsyncIoStream::abortRead() {
-  stream_abort_read(*inner);
+  stream_abort_read(stream());
 }
 
 void TokioAsyncIoStream::getsockname(struct sockaddr *addr, kj::uint *length) {
-  copyOut(encodeSockaddr(stream_local_addr(*inner)), addr, length);
+  copyOut(encodeSockaddr(stream_local_addr(stream())), addr, length);
 }
 
 void TokioAsyncIoStream::getpeername(struct sockaddr *addr, kj::uint *length) {
-  copyOut(encodeSockaddr(stream_peer_addr(*inner)), addr, length);
+  copyOut(encodeSockaddr(stream_peer_addr(stream())), addr, length);
 }
 
 kj::Maybe<int> TokioAsyncIoStream::getFd() const {
 #if _WIN32
   return kj::none;
 #else
-  return static_cast<int>(stream_raw_handle(*inner));
+  return static_cast<int>(stream_raw_handle(stream()));
 #endif
 }
 
 #if _WIN32
 kj::Maybe<void *> TokioAsyncIoStream::getWin32Handle() const {
-  return reinterpret_cast<void *>(static_cast<uintptr_t>(stream_raw_handle(*inner)));
+  return reinterpret_cast<void *>(static_cast<uintptr_t>(stream_raw_handle(stream())));
 }
 #endif
 

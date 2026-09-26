@@ -56,6 +56,7 @@ use std::io::IoSlice;
 use std::mem::MaybeUninit;
 use std::sync::Arc;
 
+use cxx::KjError;
 use tokio::io::Interest;
 use tokio::net::TcpStream;
 #[cfg(unix)]
@@ -93,8 +94,10 @@ struct Inner {
     read_abort: tokio::sync::Notify,
 }
 
-/// A registered tokio socket of either family. Constructed only by net.rs, from sockets it
-/// registered on the loop thread (lib.rs, "The tokio runtime").
+/// A registered tokio socket of either family.
+///
+/// Registered on the loop thread (lib.rs, "The tokio runtime"): by net.rs, or by a Rust server
+/// handing its own socket to C++ as a `kj::AsyncIoStream` (kj-hyper).
 pub enum Socket {
     Tcp(TcpStream),
     #[cfg(unix)]
@@ -388,8 +391,12 @@ impl Inner {
 }
 
 impl TokioStream {
-    /// Wraps a socket net.rs registered with the loop's runtime.
-    pub(crate) fn new(socket: Socket) -> Result<Self> {
+    /// Wraps a socket registered with the loop's runtime.
+    ///
+    /// # Errors
+    ///
+    /// Off the loop thread (lib.rs, "The tokio runtime").
+    pub fn new(socket: Socket) -> Result<Self> {
         Ok(Self {
             inner: Arc::new(Inner {
                 socket,
@@ -405,6 +412,36 @@ impl TokioStream {
     /// A share of the state, for an operation's future to own (see the module docs).
     fn shared(&self) -> Arc<Inner> {
         Arc::clone(&self.inner)
+    }
+
+    /// Recovers the native tokio socket, consuming the wrapper (the reverse of
+    /// `TokioAsyncIoStream::release()` handing the stream back to Rust). The socket stays
+    /// registered with the loop runtime that created it.
+    ///
+    /// Refuses -- handing the wrapper back untouched -- while any operation still holds a share
+    /// of the state (an I/O future in flight, an outstanding `whenWriteDisconnected()`), or off
+    /// the owning loop: that is the checked half of KJ's "no I/O in flight when handing over a
+    /// stream" contract, detected here rather than assumed.
+    ///
+    /// # Errors
+    ///
+    /// The wrapper plus the reason, so the caller can keep using (or re-wrap) the stream.
+    pub fn into_socket(self: Box<Self>) -> std::result::Result<Socket, (Box<Self>, KjError)> {
+        if let Err(error) = crate::ensure_owner_loop(self.inner.owner) {
+            return Err((self, error.into()));
+        }
+        let Self { inner } = *self;
+        match Arc::try_unwrap(inner) {
+            Ok(inner) => Ok(inner.socket),
+            Err(inner) => Err((
+                Box::new(Self { inner }),
+                KjIoError::other(
+                    "kj_rs_io",
+                    "cannot take the stream's socket: an I/O operation is still in flight on it",
+                )
+                .into(),
+            )),
+        }
     }
 
     /// `kj::AsyncIoStream::tryRead` as a future owning its share of the stream. `buf` may be
@@ -768,5 +805,32 @@ mod tests {
                 .description()
                 .contains("other than this thread's TokioEventPort runtime")
         );
+    }
+
+    #[test]
+    fn into_socket_takes_the_socket_when_nothing_is_in_flight() {
+        let port = kj_rs_tokio::TokioPort::new();
+        let (stream, _client) = connected_pair(&port);
+        assert!(Box::new(stream).into_socket().is_ok());
+        drop(port);
+    }
+
+    #[test]
+    fn into_socket_while_an_operation_is_in_flight_hands_the_stream_back() {
+        let port = kj_rs_tokio::TokioPort::new();
+        let (stream, _client) = connected_pair(&port);
+        let mut buf = [MaybeUninit::<u8>::uninit(); 8];
+        // The read borrows only the shared state, not the handle, so the handle can be moved.
+        let mut read = Box::pin(stream.try_read_min(&mut buf, 1));
+        assert!(poll_once(&mut read).is_pending());
+        let Err((stream, error)) = Box::new(stream).into_socket() else {
+            panic!("into_socket() succeeded with a read in flight")
+        };
+        assert!(error.description().contains("in flight"), "{error:?}");
+        // The handed-back wrapper is the same stream: still sharing with the read.
+        assert_eq!(Arc::strong_count(&stream.inner), 2);
+        drop(read);
+        assert!(stream.into_socket().is_ok());
+        drop(port);
     }
 }

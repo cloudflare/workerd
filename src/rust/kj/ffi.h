@@ -28,12 +28,25 @@ inline kj::Promise<void> async_output_stream_when_write_disconnected(AsyncOutput
   return stream.whenWriteDisconnected();
 }
 
+inline kj::Promise<size_t> async_input_stream_try_read(
+    AsyncInputStream& stream, ::rust::Slice<kj::byte> buffer, size_t minBytes) {
+  return stream.tryRead(buffer.data(), minBytes, buffer.size());
+}
+
+inline kj::Maybe<uint64_t> async_input_stream_try_get_length(AsyncInputStream& stream) {
+  return stream.tryGetLength();
+}
+
 // --- kj::HttpHeaders ffi
 
 using BuiltinIndicesEnum = kj::HttpHeaders::BuiltinIndicesEnum;
 using HttpHeaderTable = kj::HttpHeaderTable;
 using HttpHeaders = kj::HttpHeaders;
 using HttpHeaderId = kj::HttpHeaderId;
+
+inline kj::Own<kj::HttpHeaderTable> new_http_header_table() {
+  return kj::heap<kj::HttpHeaderTable>();
+}
 
 inline kj::Own<kj::HttpHeaders> new_http_headers(const HttpHeaderTable& table) {
   // There is no C++ stack frame to hold the new instance, so we heap allocate it for Rust.
@@ -135,6 +148,7 @@ using HttpMethod = kj::HttpMethod;
 using HttpService = kj::HttpService;
 using HttpServiceResponse = kj::HttpService::Response;
 using TlsStarterCallback = kj::TlsStarterCallback;
+using WebSocket = kj::WebSocket;
 
 inline kj::Own<AsyncOutputStream> response_send(HttpServiceResponse& response,
     uint32_t statusCode,
@@ -142,6 +156,11 @@ inline kj::Own<AsyncOutputStream> response_send(HttpServiceResponse& response,
     const HttpHeaders& headers,
     kj::Maybe<uint64_t> expectedBodySize) {
   return response.send(statusCode, kj::str(statusText), headers, expectedBodySize);
+}
+
+inline kj::Own<WebSocket> response_accept_websocket(
+    HttpServiceResponse& response, const HttpHeaders& headers) {
+  return response.acceptWebSocket(headers);
 }
 
 inline void connect_response_accept(ConnectResponse& response,
