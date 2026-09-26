@@ -154,6 +154,45 @@ addEventListener("fetch", event => {
 
 [There is also a library of sample config files.](samples)
 
+### Compatibility Dates and Migration Guide
+
+In `workerd`, versioning is date-driven rather than SemVer-based. Setting a `compatibilityDate` guarantees that existing code continues to execute against the exact runtime semantics and API surface of that date, preventing unexpected breaking changes.
+
+#### 1. Checking Your Current Compatibility Date
+* In `workerd.capnp` config files: Look for the `compatibilityDate` field on the worker definition:
+  ```capnp
+  compatibilityDate = "2024-01-01",
+  ```
+* In `wrangler.toml` or `wrangler.jsonc` projects: Look for the `compatibility_date` key:
+  ```toml
+  compatibility_date = "2024-01-01"
+  ```
+* In `.wd-test` test configurations: Specified on the test worker schema.
+
+#### 2. Planning a Date Upgrade
+When upgrading your compatibility date to adopt newer runtime features:
+* Review active flags: All compatibility flags and their enable dates are defined in [src/workerd/io/compatibility-date.capnp](src/workerd/io/compatibility-date.capnp) and documented in the [Cloudflare Compatibility Flags documentation](https://developers.cloudflare.com/workers/configuration/compatibility-flags/).
+* Incremental migration via flags: Before bumping the global date, you can test specific features early by setting individual flags in `compatibilityFlags`:
+  ```capnp
+  compatibilityFlags = ["nodejs_compat_v2"],
+  ```
+* Opting out of specific changes: If a new date introduces a behavior change that requires refactoring your application, you can adopt the new date while temporarily opting out of that specific change by prefixing the flag with `no_`:
+  ```capnp
+  compatibilityDate = "2024-09-23",
+  compatibilityFlags = ["no_global_navigator"],
+  ```
+
+#### 3. Testing Locally
+Before deploying an updated compatibility date:
+* Run local servers: Start `workerd` with your updated configuration:
+  ```sh
+  workerd serve config.capnp
+  ```
+* Test suites: In repository test targets, every test automatically generates variants:
+  * `name@`: Tests baseline compatibility date (2000-01-01).
+  * `name@all-compat-flags`: Tests future compatibility date (2999-12-31) with all flags enabled.
+  * Run target variants via `just test <target>@all-compat-flags` or `bazel test <target>@all-compat-flags`.
+
 ### Running `workerd`
 
 To serve your config, do:
