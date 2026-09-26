@@ -118,7 +118,7 @@ standard-streams machinery changes nothing the suite pins).
 | `lifecycle.js` | close resolves; abort rejects (incl. after writes); write-after-close rejects without disturbing the digest; double close safe; abandoned stream/writer safe; unused stream safe |
 | `dispose.js` | dispose errors digest + non-empty writes while stream state untouched; zero-length writes still resolve; idempotent; no-op after close |
 | `unhandled-rejection.js` | ledger #2 reporting matrix + derived-promise reporting |
-| `buffer-lifecycle.js` | consume-at-write: post-write mutation/detach invisible; lying metadata getters never consulted |
+| `buffer-lifecycle.js` | consume-at-write: post-write mutation/detach invisible; detached/out-of-bounds typed-array and DataView views hash as empty; lying metadata getters never consulted |
 | `pipe-integration.js` | pipeTo from user streams; TransformStream chain; Response body |
 | `large-payload.js` | 1MB+ chunk digesting |
 | `gc-interplay.js` | GC never settles an abandoned digest; writer remains operable across GC |

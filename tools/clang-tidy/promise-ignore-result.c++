@@ -19,8 +19,8 @@ SourceRange memberAccessRange(const CXXMemberCallExpr &Call) {
     return SourceRange();
   }
   SourceRange Range(Member->getOperatorLoc(), Call.getEndLoc());
-  if (Range.getBegin().isInvalid() || Range.getBegin().isMacroID() ||
-      Range.getEnd().isInvalid() || Range.getEnd().isMacroID()) {
+  if (Range.getBegin().isInvalid() || Range.getBegin().isMacroID() || Range.getEnd().isInvalid() ||
+      Range.getEnd().isMacroID()) {
     return SourceRange();
   }
   return Range;
@@ -37,7 +37,7 @@ SourceLocation memberNameLoc(const CXXMemberCallExpr &Call) {
   return Member->getMemberLoc();
 }
 
-} // namespace
+}  // namespace
 
 void PromiseIgnoreResultCheck::registerMatchers(MatchFinder *Finder) {
   // Match on the method's own class rather than on the type of the object
@@ -47,8 +47,7 @@ void PromiseIgnoreResultCheck::registerMatchers(MatchFinder *Finder) {
   auto promiseClass = classTemplateSpecializationDecl(hasName("::kj::Promise"));
 
   auto sendOfCapnpRequest = cxxMemberCallExpr(callee(cxxMethodDecl(
-      hasName("send"),
-      ofClass(classTemplateSpecializationDecl(hasName("::capnp::Request"))))));
+      hasName("send"), ofClass(classTemplateSpecializationDecl(hasName("::capnp::Request"))))));
 
   // capnp::Request::sendIgnoringResult() sends the same call without building
   // the typed response wrapper and pipeline that send() has to build only for
@@ -56,8 +55,7 @@ void PromiseIgnoreResultCheck::registerMatchers(MatchFinder *Finder) {
   // whatever the resulting promise is used for. This is the more specific
   // diagnosis, hence the co_await matcher below excludes this shape.
   Finder->addMatcher(
-      cxxMemberCallExpr(
-          callee(cxxMethodDecl(hasName("ignoreResult"), ofClass(promiseClass))),
+      cxxMemberCallExpr(callee(cxxMethodDecl(hasName("ignoreResult"), ofClass(promiseClass))),
           on(expr(ignoringImplicit(sendOfCapnpRequest.bind("foldedSend")))))
           .bind("foldedCall"),
       this);
@@ -69,10 +67,8 @@ void PromiseIgnoreResultCheck::registerMatchers(MatchFinder *Finder) {
   // statement. Streaming methods aren't matched: their send() belongs to
   // capnp::StreamingRequest, which has no result to drop in the first place.
   Finder->addMatcher(
-      coawaitExpr(
-          has(expr(ignoringImplicit(sendOfCapnpRequest.bind("droppedSend")))),
-          anyOf(hasParent(compoundStmt()),
-                hasParent(exprWithCleanups(hasParent(compoundStmt()))))),
+      coawaitExpr(has(expr(ignoringImplicit(sendOfCapnpRequest.bind("droppedSend")))),
+          anyOf(hasParent(compoundStmt()), hasParent(exprWithCleanups(hasParent(compoundStmt()))))),
       this);
 
   // The operand of a co_await is a direct child of the CoawaitExpr, alongside
@@ -83,37 +79,31 @@ void PromiseIgnoreResultCheck::registerMatchers(MatchFinder *Finder) {
   // `co_await promise.ignoreResult().catch_(handler)`, are left alone.
   // ignoringImplicit() sees through the temporary materialization that the
   // operand is wrapped in.
-  Finder->addMatcher(
-      coawaitExpr(has(expr(ignoringImplicit(
-          cxxMemberCallExpr(
-              callee(cxxMethodDecl(hasName("ignoreResult"),
-                                   ofClass(promiseClass))),
-              unless(on(expr(ignoringImplicit(sendOfCapnpRequest)))))
-              .bind("awaitedCall"))))),
+  Finder->addMatcher(coawaitExpr(has(expr(ignoringImplicit(cxxMemberCallExpr(
+                         callee(cxxMethodDecl(hasName("ignoreResult"), ofClass(promiseClass))),
+                         unless(on(expr(ignoringImplicit(sendOfCapnpRequest)))))
+                                                               .bind("awaitedCall"))))),
       this);
 }
 
 void PromiseIgnoreResultCheck::check(const MatchFinder::MatchResult &Result) {
   const auto *Folded = Result.Nodes.getNodeAs<CXXMemberCallExpr>("foldedCall");
-  const auto *FoldedSend =
-      Result.Nodes.getNodeAs<CXXMemberCallExpr>("foldedSend");
+  const auto *FoldedSend = Result.Nodes.getNodeAs<CXXMemberCallExpr>("foldedSend");
   if (Folded != nullptr && FoldedSend != nullptr) {
     reportSendFold(*Folded, *FoldedSend);
   }
-  if (const auto *Send =
-          Result.Nodes.getNodeAs<CXXMemberCallExpr>("droppedSend")) {
+  if (const auto *Send = Result.Nodes.getNodeAs<CXXMemberCallExpr>("droppedSend")) {
     reportDroppedSend(*Send);
   }
-  if (const auto *Call =
-          Result.Nodes.getNodeAs<CXXMemberCallExpr>("awaitedCall")) {
+  if (const auto *Call = Result.Nodes.getNodeAs<CXXMemberCallExpr>("awaitedCall")) {
     reportAwaited(*Call);
   }
 }
 
 void PromiseIgnoreResultCheck::reportAwaited(const CXXMemberCallExpr &Call) {
   auto Diag = diag(Call.getCallee()->getExprLoc(),
-                   "co_await discards the promise's result already, remove "
-                   "ignoreResult()");
+      "co_await discards the promise's result already, remove "
+      "ignoreResult()");
   Diag << Call.getSourceRange();
 
   SourceRange Removal = memberAccessRange(Call);
@@ -122,10 +112,10 @@ void PromiseIgnoreResultCheck::reportAwaited(const CXXMemberCallExpr &Call) {
   }
 }
 
-void PromiseIgnoreResultCheck::reportSendFold(const CXXMemberCallExpr &Call,
-                                              const CXXMemberCallExpr &Send) {
-  auto Diag = diag(Call.getCallee()->getExprLoc(),
-                   "use sendIgnoringResult() instead of send().ignoreResult()");
+void PromiseIgnoreResultCheck::reportSendFold(
+    const CXXMemberCallExpr &Call, const CXXMemberCallExpr &Send) {
+  auto Diag = diag(
+      Call.getCallee()->getExprLoc(), "use sendIgnoringResult() instead of send().ignoreResult()");
   Diag << Call.getSourceRange();
 
   // Renaming send() without dropping ignoreResult() would leave code that
@@ -134,24 +124,21 @@ void PromiseIgnoreResultCheck::reportSendFold(const CXXMemberCallExpr &Call,
   SourceLocation SendName = memberNameLoc(Send);
   if (Removal.isValid() && SendName.isValid()) {
     Diag << FixItHint::CreateReplacement(
-                CharSourceRange::getTokenRange(SendName, SendName),
-                "sendIgnoringResult")
+                CharSourceRange::getTokenRange(SendName, SendName), "sendIgnoringResult")
          << FixItHint::CreateRemoval(CharSourceRange::getTokenRange(Removal));
   }
 }
 
-void PromiseIgnoreResultCheck::reportDroppedSend(
-    const CXXMemberCallExpr &Send) {
-  auto Diag = diag(Send.getCallee()->getExprLoc(),
-                   "the awaited response is dropped, use sendIgnoringResult()");
+void PromiseIgnoreResultCheck::reportDroppedSend(const CXXMemberCallExpr &Send) {
+  auto Diag = diag(
+      Send.getCallee()->getExprLoc(), "the awaited response is dropped, use sendIgnoringResult()");
   Diag << Send.getSourceRange();
 
   SourceLocation SendName = memberNameLoc(Send);
   if (SendName.isValid()) {
     Diag << FixItHint::CreateReplacement(
-        CharSourceRange::getTokenRange(SendName, SendName),
-        "sendIgnoringResult");
+        CharSourceRange::getTokenRange(SendName, SendName), "sendIgnoringResult");
   }
 }
 
-} // namespace workerd::clang_tidy
+}  // namespace workerd::clang_tidy

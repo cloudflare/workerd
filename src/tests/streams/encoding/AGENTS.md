@@ -119,9 +119,11 @@ HWM 1 (count-based) and readable HWM 0 under
   boundaries.
 - The decoder's readable yields **strings**: consuming it as a body rejects
   with `TypeError` "This ReadableStream did not return bytes." while the
-  write settles normally; under `pedantic_wpt` the C++ failing consumer's
-  cancel propagates to the writable and `close()`/`closed` reject with the
-  same error. `response.body.pipeThrough(tds)` is the working direction.
+  write settles normally. The failing consumer cancels the readable with
+  that error; in TypeScript and under `pedantic_wpt` the cancel propagates
+  to the writable and `close()`/`closed` reject with the same error, while
+  the default C++ transform resolves the close.
+  `response.body.pipeThrough(tds)` is the working direction.
 - Piping a byte body **into** the encoder's writable is a footgun, not an
   error: each `Uint8Array` chunk is ToString-coerced (`"120,121"`) and that
   text is encoded.
@@ -168,7 +170,7 @@ exactly two things, both pinned:
   unflagged side is also pinned by `legacyFatalDefaultsTrueWithOptionsBag`)
 - a failing body consumer's cancel propagates to the writable, so
   `close()`/`closed` reject with the consumer's TypeError instead of
-  resolving (`decoderReadableAsBodyRejectsText`)
+  resolving, as in TypeScript (`decoderReadableAsBodyRejectsText`)
 
 Production workers never get `pedantic_wpt`, so the main cell continues to
 assert the defaults.

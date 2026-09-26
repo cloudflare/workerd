@@ -370,6 +370,13 @@ kj::Exception exceptionToPropagate(bool isInternalException, kj::Exception&& exc
   }
 }
 
+// True for a retry-claim or predecessor rejection, which the runtime raises before the fetch
+// handler runs. The sender classifies it by its details, so it must propagate unchanged.
+bool isActorDispatchRejection(const kj::Exception& exception) {
+  return exception.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none ||
+      exception.getDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID) != kj::none;
+}
+
 kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     kj::StringPtr url,
     const kj::HttpHeaders& headers,
@@ -405,9 +412,6 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     workerTracer = t;
   }
 
-  // Claim before delivered() constructs an actor. This introduces no asynchronous boundary, so
-  // capability pipelining remains unchanged.
-  incomingRequest->getMetrics().claimRetryTokenBeforeUserCode();
   incomingRequest->delivered();
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
@@ -461,7 +465,8 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       KJ_TRY {
         api::DeferredProxy<void> deferredProxy = co_await context.run(
             [this, method, url, &headers, &requestBody, &wrappedResponse = *wrappedResponse,
-                entrypointName = entrypointName.clone()](
+                entrypointName = entrypointName.clone(),
+                metrics = kj::addRef(incomingRequest->getMetrics())](
                 Worker::Lock& lock, IoContext& context) mutable {
           TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
           TRACE_EVENT(
@@ -482,11 +487,13 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
                     ->getSignal());
           }
 
+          // Getting the handler finishes actor construction, so the claim sees a constructed actor
+          // but still precedes the choice and invocation of the fetch handler.
+          auto handler = lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo),
+              kj::mv(props), context.getActor(), isDynamicDispatch);
+          metrics->claimRetryTokenBeforeUserCode();
           return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
-              cfBlobJson, lock,
-              lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props),
-                  context.getActor(), isDynamicDispatch),
-              kj::mv(signal));
+              cfBlobJson, lock, handler, kj::mv(signal));
         });
 
         // Record the proxy task and the tracer return time on the success path.
@@ -506,10 +513,14 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         TRACE_EVENT(
             "workerd", "WorkerEntrypoint::request() catch", PERFETTO_FLOW_FROM_POINTER(this));
         // Log JS exceptions to the JS console, if inspector is attached. This also has the effect
-        // of logging internal errors to syslog.
+        // of logging internal errors to syslog. A dispatch rejection is a runtime decision rather
+        // than an uncaught exception, so it is not logged.
         loggedExceptionEarlier = true;
-        context.logUncaughtExceptionAsync(
-            UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());
+        bool dispatchRejected = isActorDispatchRejection(exception);
+        if (!dispatchRejected) {
+          context.logUncaughtExceptionAsync(
+              UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());
+        }
 
         // Record a failure if cancellation interrupts either wait. Otherwise the WorkerInterface
         // wrapper reports it. An output-gate failure takes precedence over the handler failure.
@@ -524,12 +535,15 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
 
         // Do not allow the exception to escape the isolate without waiting for the output gate to
         // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.
-        // If the gate is broken, that exception propagates and replaces the original.
+        // If the gate is broken, that exception propagates and replaces the original, unless the
+        // original is a dispatch rejection.
         KJ_TRY {
           co_await context.waitForOutputLocks();
         }
         KJ_CATCH(e) {
-          outputGateException.emplace(kj::mv(e));
+          if (!dispatchRejected) {
+            outputGateException.emplace(kj::mv(e));
+          }
         }
         TRACE_EVENT("workerd", "WorkerEntrypoint::request() after output lock wait",
             PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
@@ -623,14 +637,11 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       // caller-side actor-call classifier knows this failure must not be retried as a fresh
       // delivery. Only DISCONNECTED failures participate in the delivery-position metric, so other
       // exception types need no annotation. Preserve not-delivered only for a predecessor rejection,
-      // which occurs before user code despite crossing this entrypoint. Set before
-      // exceptionToPropagate() so the detail survives the internal-exception description rewrite
-      // and serializes back across the RPC boundary.
+      // which occurs before the fetch handler runs, though possibly after the actor constructor.
+      // Set before exceptionToPropagate() so the detail survives the internal-exception description
+      // rewrite and serializes back across the RPC boundary.
       if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-        bool predecessorRejected =
-            exception.getDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID) != kj::none &&
-            exception.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none;
-        if (!predecessorRejected) {
+        if (!jsg::isActorPredecessorRejection(exception)) {
           exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
           exception.setDetail(
               jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));

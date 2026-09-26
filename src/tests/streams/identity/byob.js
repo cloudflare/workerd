@@ -10,6 +10,7 @@
 // compatibility flags, which both test configs set explicitly.
 
 import { ok, strictEqual, deepStrictEqual, rejects } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 export const supportsByobReader = {
   async test() {
@@ -43,7 +44,9 @@ export const partialFillAcrossReads = {
     const first = await reader.read(new Uint8Array(3));
     strictEqual(first.done, false);
     deepStrictEqual([...first.value], [1, 2, 3]);
-    // Only 3 of 5 bytes consumed: the write must still be pending.
+    // Only 3 of 5 bytes consumed: the write must still be pending, however
+    // long we wait.
+    await scheduler.wait(5);
     strictEqual(writeResolved, false);
 
     const second = await reader.read(new Uint8Array(3));
@@ -53,6 +56,143 @@ export const partialFillAcrossReads = {
     await writePromise;
     strictEqual(writeResolved, true);
     await writer.close();
+  },
+};
+
+// Collects BYOB reads of `viewLength` until done, or until a read is
+// still pending after a macrotask.
+async function readAllByob(reader, viewLength) {
+  const reads = [];
+  for (;;) {
+    const result = await Promise.race([
+      reader.read(new Uint8Array(viewLength)),
+      scheduler.wait(5).then(() => 'pending'),
+    ]);
+    if (result === 'pending' || result.done) {
+      reads.push(result === 'pending' ? 'pending' : 'done');
+      return reads;
+    }
+    reads.push([...result.value].join(''));
+  }
+}
+
+// DIVERGENCE (ledger #22): a BYOB read fills its view with everything
+// already written, across write boundaries. Each write settles once a read
+// has taken its last byte. C++ answers a read with at most one write's
+// bytes.
+export const byobReadSpansQueuedWrites = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+    const writer = writable.getWriter();
+    const reader = readable.getReader({ mode: 'byob' });
+    const settled = [false, false];
+    const p1 = writer.write(new Uint8Array(10).fill(1)).then(() => {
+      settled[0] = true;
+    });
+
+    const first = await reader.read(new Uint8Array(5));
+    strictEqual(first.value.byteLength, 5);
+    await scheduler.wait(5);
+    deepStrictEqual(settled, [false, false]);
+
+    const p2 = writer.write(new Uint8Array(10).fill(2)).then(() => {
+      settled[1] = true;
+    });
+    await scheduler.wait(5);
+    deepStrictEqual(settled, [false, false]);
+
+    const second = await reader.read(new Uint8Array(15));
+    await scheduler.wait(5);
+    if (usingTsImpl) {
+      strictEqual([...second.value].join(''), '11111' + '2'.repeat(10));
+      deepStrictEqual(settled, [true, true]);
+    } else {
+      strictEqual([...second.value].join(''), '11111');
+      deepStrictEqual(settled, [true, false]);
+      const third = await reader.read(new Uint8Array(15));
+      strictEqual([...third.value].join(''), '2'.repeat(10));
+    }
+    await Promise.all([p1, p2]);
+
+    // A view that ends inside a queued write leaves the rest pending.
+    {
+      const its = new IdentityTransformStream();
+      const w = its.writable.getWriter();
+      w.write(new Uint8Array(10).fill(1));
+      w.write(new Uint8Array(10).fill(2));
+      deepStrictEqual(
+        await readAllByob(its.readable.getReader({ mode: 'byob' }), 12),
+        usingTsImpl
+          ? ['1'.repeat(10) + '22', '2'.repeat(8), 'pending']
+          : ['1'.repeat(10), '2'.repeat(10), 'pending']
+      );
+    }
+    await writer.close();
+  },
+};
+
+// Spanning (ledger #22) continues past zero-length writes and invalid
+// chunks between two writes, and through a FixedLengthStream; it stops at
+// a queued close, which then ends the stream (parity).
+export const byobReadSpanningBoundaries = {
+  async test() {
+    const cases = [
+      {
+        make: () => new IdentityTransformStream(),
+        writes: (w) => [
+          w.write(new Uint8Array([1, 1, 1])),
+          w.write(new Uint8Array(0)),
+          w.write(new Uint8Array([2, 2, 2, 2])),
+        ],
+        ts: ['1112222', 'pending'],
+        cpp: ['111', '2222', 'pending'],
+        outcomes: ['ok', 'ok', 'ok'],
+      },
+      {
+        make: () => new IdentityTransformStream(),
+        writes: (w) => [
+          w.write(new Uint8Array([1, 1, 1])),
+          w.write(42),
+          w.write(new Uint8Array([2, 2, 2, 2])),
+        ],
+        ts: ['1112222', 'pending'],
+        cpp: ['111', '2222', 'pending'],
+        outcomes: ['ok', 'TypeError', 'ok'],
+      },
+      {
+        make: () => new FixedLengthStream(7),
+        writes: (w) => [
+          w.write(new Uint8Array([1, 1, 1])),
+          w.write(new Uint8Array([2, 2, 2, 2])),
+          w.close(),
+        ],
+        ts: ['1112222', 'done'],
+        cpp: ['111', '2222', 'done'],
+        outcomes: ['ok', 'ok', 'ok'],
+      },
+      {
+        make: () => new IdentityTransformStream(),
+        writes: (w) => [w.write(new Uint8Array([1, 1, 1])), w.close()],
+        ts: ['111', 'done'],
+        cpp: ['111', 'done'],
+        outcomes: ['ok', 'ok'],
+      },
+    ];
+    for (const { make, writes, ts, cpp, outcomes } of cases) {
+      const stream = make();
+      const settled = writes(stream.writable.getWriter()).map((p) =>
+        p.then(
+          () => 'ok',
+          (e) => e.name
+        )
+      );
+      const reads = await readAllByob(
+        stream.readable.getReader({ mode: 'byob' }),
+        10
+      );
+      deepStrictEqual(reads, usingTsImpl ? ts : cpp);
+      deepStrictEqual(await Promise.all(settled), outcomes);
+    }
   },
 };
 

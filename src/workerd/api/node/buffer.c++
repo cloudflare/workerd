@@ -98,12 +98,12 @@ uint32_t writeInto(jsg::Lock& js,
     }
     case Encoding::UTF16LE: {
 #if __has_feature(undefined_behavior_sanitizer)
-      // UBSan warns about unaligned writes, but this can be hard to avoid if dest is unaligned.
-      // Use temp variable to perform aligned write instead.
+      // dest may start at an odd byte offset, so a uint16_t view of it is misaligned. Write into
+      // an aligned temporary and copy the bytes across so UBSan sees only byte-sized accesses.
       kj::Array<uint16_t> tmpBuf = kj::heapArray<uint16_t>(dest.size() / sizeof(uint16_t));
       auto result = string.writeInto(js, tmpBuf, flags);
-      kj::ArrayPtr<uint16_t> buf(reinterpret_cast<uint16_t*>(dest.begin()), result.written);
-      buf.copyFrom(tmpBuf.first(result.written));
+      dest.first(result.written * sizeof(uint16_t))
+          .copyFrom(tmpBuf.first(result.written).asBytes());
 #else
       kj::ArrayPtr<uint16_t> buf(
           reinterpret_cast<uint16_t*>(dest.begin()), dest.size() / sizeof(uint16_t));
@@ -448,14 +448,11 @@ jsg::JsString toStringImpl(
       return js.str(slice.asChars());
     }
     case Encoding::UTF16LE: {
-      // Why are we copying here? Good question! There's really not much of a
-      // good reason why we should be copying here except that V8 doesn't seem
-      // to like it! We end up with an asan buffer over-read error if we pass
-      // in the slice directly... looks to have something to do with alignment
-      // issues. Copying here sidesteps the problem and avoids the asan issue.
-      kj::ArrayPtr<uint16_t> view(reinterpret_cast<uint16_t*>(slice.begin()), slice.size() / 2);
-      KJ_STACK_ARRAY(uint16_t, data, view.size(), 1024, 4096);
-      data.copyFrom(view);
+      // slice may start at an odd byte offset, so it cannot be viewed as uint16_t directly: V8
+      // over-reads it under ASan and UBSan flags the misaligned loads. Copy the bytes into an
+      // aligned buffer (dropping a trailing odd byte) and hand V8 that instead.
+      KJ_STACK_ARRAY(uint16_t, data, slice.size() / sizeof(uint16_t), 1024, 4096);
+      data.asBytes().copyFrom(slice.first(data.size() * sizeof(uint16_t)));
       return js.str(data);
     }
     case Encoding::BASE64: {

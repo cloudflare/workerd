@@ -27,6 +27,9 @@ WD_STRONG_BOOL(SubrequestBodyRewindable);
 WD_STRONG_BOOL(ActorCallTargetRetryable);
 // Whether an outgoing request contributes to the logical subrequest count.
 WD_STRONG_BOOL(CountSubrequest);
+// Whether an outgoing actor call's payload can be sent again unchanged, e.g. a fetch with a
+// rewindable body or an RPC call whose arguments hold no externals.
+WD_STRONG_BOOL(ActorCallPayloadReplayable);
 
 enum class ActorRetryCallType : uint8_t {
   FETCH,
@@ -72,6 +75,23 @@ class ByteStreamObserver {
   // Called when a chunk of size `bytes` is dequeued from the stream (e.g. when a writable byte
   // stream writes the chunk to its corresponding sink).
   virtual void onChunkDequeued(size_t bytes) {};
+};
+
+// Observes one physical attempt of an outgoing Durable Object RPC call, from the moment it is sent
+// until its result settles. Destroying the observer without recording a result means the attempt
+// was canceled.
+class OutgoingActorCallObserver {
+ public:
+  virtual ~OutgoingActorCallObserver() noexcept(false) = default;
+  virtual void markPipelineCommitted() {}
+  virtual void recordSuccess() {}
+  virtual void recordFailure(kj::Exception& e) {}
+
+  // Records attempt settlement while allowing pipeline-dependent failure classification to wait
+  // until destruction. markPipelineCommitted() may follow before the observer is destroyed.
+  virtual void recordFailureAwaitingRetryDecision(kj::Exception& e) {
+    recordFailure(e);
+  }
 };
 
 // Observes a specific request to a specific worker. Also observes outgoing subrequests.
@@ -150,13 +170,35 @@ class RequestObserver: public kj::Refcounted {
   // Wrap an HttpClient so that its usage is counted in the request's actor subrequest count.
   virtual kj::Own<WorkerInterface> wrapActorSubrequestClient(kj::Own<WorkerInterface> client);
 
-  // Record whether the next outgoing subrequest's request body can be rewound (e.g. a buffered or
-  // null fetch body) and whether its target supports runtime retries. Consumed when the
-  // subrequest client for that call is constructed. The set->consume window is synchronous, so the
-  // values always correspond to the next call. No-op in the base observer; edgeworker overrides it
-  // to feed retry classification.
+  // Record whether the next outgoing subrequest's request body can be rewound and whether its
+  // target supports runtime retries. Consumed when the subrequest client for that call is
+  // constructed. The set->consume window is synchronous, so the values correspond to the next
+  // call. No-op in the base observer; edgeworker overrides it to feed retry classification.
   virtual void setNextSubrequestRetryEligibility(
       SubrequestBodyRewindable bodyRewindable, ActorCallTargetRetryable targetRetryable) {}
+
+  // Observes one `JsRpcTarget.call()` attempt on a Durable Object stub. The session carrying the
+  // call is not observed through wrapActorSubrequestClient(); its lifetime ends with capability
+  // teardown rather than with the call's result, so it says nothing about call latency or outcome.
+  // `payloadReplayable` is the call's serialized-argument classification; `targetRetryable` is
+  // whether the stub's factory can retry at all.
+  virtual kj::Maybe<kj::Own<OutgoingActorCallObserver>> observeOutgoingActorRpcCall(
+      ActorCallPayloadReplayable payloadReplayable, ActorCallTargetRetryable targetRetryable) {
+    return kj::none;
+  }
+
+  // Tracks serialized argument bytes retained while a replayable actor call's retry state is live.
+  // The returned handle releases the tracked bytes when destroyed.
+  virtual kj::Own<void> trackActorCallReplayMemory(size_t bytes) {
+    return kj::Own<void>();
+  }
+
+  // Attempts to reserve platform memory for retained actor-call replay state. Returning none keeps
+  // the call observe-only. Production observers must enforce an aggregate bound before returning a
+  // reservation handle.
+  virtual kj::Maybe<kj::Own<void>> tryReserveActorCallReplayMemory(size_t bytes) {
+    return kj::none;
+  }
 
   // Records an additional outgoing actor call started by a runtime retry loop.
   virtual void recordActorRetry(ActorRetryCallType callType) {}
@@ -166,9 +208,12 @@ class RequestObserver: public kj::Refcounted {
   virtual void recordActorRetryOutcome(
       ActorRetryCallType callType, ActorRetryOutcome outcome, kj::Duration retryAddedLatency) {}
 
-  // Fired before a fetch request is delivered, so an observer can claim an actor request's
-  // retry-token nonce before actor construction or user code. This also fires for non-actor and
-  // service-worker fetches; observers are responsible for treating those as no-ops.
+  // Fired after actor construction and immediately before user code handles the request, so an
+  // observer can claim the request's retry-token nonce and throw to reject it. For fetch, that is
+  // before the fetch handler is invoked. For JSRPC, it is on the session's top-level call, before the
+  // method is looked up; calls on stubs or pipelines returned from that call don't fire it. It fires
+  // at most once per request. It also fires for non-actor requests, which carry no retry token, so
+  // observers should do nothing for them.
   virtual void claimRetryTokenBeforeUserCode() {}
 
   // Used to record when a worker has used a dynamic dispatch binding.

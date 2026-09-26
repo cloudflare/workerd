@@ -166,10 +166,6 @@ IoContext::IoContext(ThreadContext& thread,
       waitUntilTasks(*this),
       tasks(*this),
       deleteQueueSignalTask(startDeleteQueueSignalTask(this)) {
-  kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
-  abortFulfiller = kj::mv(paf.fulfiller);
-  abortPromise = paf.promise.fork();
-
   // Arrange to complain if execution resource limits (CPU/memory) are exceeded.
   auto makeLimitsPromise = [this]() {
     auto promise = limitEnforcer->onLimitsExceeded();
@@ -537,7 +533,7 @@ void IoContext::abort(kj::Exception&& e) {
     // or unintentional async work
     a.shutdownActorCache(e.clone());
   }
-  abortFulfiller->reject(kj::mv(e));
+  abortFlag.reject(kj::mv(e));
 }
 
 void IoContext::abortIsolate(kj::StringPtr reason) {
@@ -587,8 +583,16 @@ void IoContext::addTask(kj::Promise<void> promise) {
 }
 
 void IoContext::addWaitUntil(kj::Promise<void> promise) {
-  // The empty check comes first: getMetrics() requires a current IncomingRequest, so consulting
-  // it before checking would turn the recoverable no-request case into a fatal one. See addTask().
+  kj::Own<Worker::Actor::WaitUntilTaskHandle> handle;
+  KJ_IF_SOME(a, actor) {
+    KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { handle = a.addedWaitUntilTask(); })) {
+      KJ_LOG(ERROR, "Actor::addedWaitUntilTask() threw an exception", e);
+    }
+  }
+  if (handle.get() != nullptr) {
+    promise = promise.attach(kj::mv(handle));
+  }
+
   if (incomingRequests.empty()) {
     DEBUG_FATAL_RELEASE_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
         lastDeliveredLocation, kj::getStackTrace());
@@ -722,7 +726,7 @@ kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finish
                      .then([this]() { return context->waitUntilStatus(); })
                      .exclusiveJoin(kj::mv(timeoutPromise))
                      .exclusiveJoin(context->onAbort().then([] {
-    // abortFulfiller should only ever be rejected instead of being fulfilled, return an
+    // The abort flag should only ever be rejected instead of being fulfilled, return an
     // internalError outcome if it does happen
     return EventOutcome::INTERNAL_ERROR;
   }, [](kj::Exception&& e) {
