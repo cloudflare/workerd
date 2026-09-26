@@ -46,7 +46,11 @@ declare namespace Rpc {
     | Set<T extends Set<infer U> ? Serializable<U> : never>
     | ReadonlyArray<T extends ReadonlyArray<infer U> ? Serializable<U> : never>
     | {
-        [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
+        [K in keyof T]: K extends number | string
+          ? [unknown] extends [T[K]]
+            ? unknown
+            : Serializable<T[K]>
+          : never;
       }
     // Special types
     | Stub<Stubable>
@@ -124,6 +128,7 @@ declare namespace Rpc {
   // prettier-ignore
   type Result<R> =
     R extends Stubable ? Promise<Stub<R>> & Provider<R>
+    : [unknown] extends [R] ? Promise<unknown>
     : R extends Serializable<R> ? Promise<Stubify<R> & MaybeDisposable<R>> & MaybeProvider<R>
     : never;
 

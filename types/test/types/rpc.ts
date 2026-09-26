@@ -362,6 +362,13 @@ class TestObject extends DurableObject {
     return new TestCounter();
   }
 
+  unknownMethod(): Promise<unknown> {
+    return Promise.resolve();
+  }
+  unknownObjectMethod(): Promise<{ a: number; b: unknown }> {
+    return Promise.resolve({ a: 1, b: 'test' });
+  }
+
   [Symbol.dispose]() {
     console.log('Disposing');
   }
@@ -810,6 +817,11 @@ export default <ExportedHandler<Env>>{
           };
         }>
       >;
+
+      expectTypeOf(s.unknownMethod()).toMatchTypeOf<Promise<unknown>>();
+      expectTypeOf(s.unknownObjectMethod()).toMatchTypeOf<
+        Promise<{ a: number; b: unknown }>
+      >();
     }
 
     return new Response();
