@@ -228,43 +228,66 @@ export const resizableBuffersDeliveredFixedLength = {
   },
 };
 
-// SharedArrayBuffer-backed views are rejected with TypeError by
-// read(view), enqueue() and respondWithNewView().
+// SharedArrayBuffer-backed views, typed arrays and DataViews alike, are
+// rejected with TypeError by read(view), readAtLeast(), enqueue() and
+// respondWithNewView(): an explicit message under TS, never one leaked
+// from a captured getter. Under TS respondWithNewView() also rejects one
+// after close(), where the pending read's descriptor stays available for a
+// closed-state response (#19); C++ has no byobRequest there.
 export const sharedBuffersRejected = {
   async test() {
-    const { rs, controller } = byteStream();
-    const reader = rs.getReader({ mode: 'byob' });
-    await rejects(reader.read(new Uint8Array(new SharedArrayBuffer(4))), {
-      name: 'TypeError',
-      message: usingTsImpl
-        ? 'view must not be backed by a SharedArrayBuffer'
-        : 'Unabled to use non-detachable ArrayBuffer.',
-    });
-    throws(
-      () => controller().enqueue(new Uint8Array(new SharedArrayBuffer(4))),
-      {
+    const viewMessage = usingTsImpl
+      ? 'view must not be backed by a SharedArrayBuffer'
+      : 'Unabled to use non-detachable ArrayBuffer.';
+    const respondMessage = usingTsImpl
+      ? 'view must not be backed by a SharedArrayBuffer'
+      : 'Unable to use non-detachable ArrayBuffer.';
+    const kinds = {
+      Uint8Array: () => new Uint8Array(new SharedArrayBuffer(4)),
+      Uint16Array: () => new Uint16Array(new SharedArrayBuffer(4)),
+      DataView: () => new DataView(new SharedArrayBuffer(4)),
+    };
+    for (const [kind, sharedView] of Object.entries(kinds)) {
+      const { rs, controller } = byteStream();
+      const reader = rs.getReader({ mode: 'byob' });
+      await rejects(reader.read(sharedView()), {
+        name: 'TypeError',
+        message: viewMessage,
+      });
+      await rejects(reader.readAtLeast(1, sharedView()), {
+        name: 'TypeError',
+        message: viewMessage,
+      });
+      throws(() => controller().enqueue(sharedView()), {
         name: 'TypeError',
         message: usingTsImpl
           ? 'chunk must not be backed by a SharedArrayBuffer'
           : 'The provided ArrayBuffer must be detachable.',
-      }
-    );
-    const read = reader.read(new Uint8Array(4));
-    await scheduler.wait(5);
-    throws(
-      () =>
-        controller().byobRequest.respondWithNewView(
-          new Uint8Array(new SharedArrayBuffer(4))
-        ),
-      {
+      });
+      const read = reader.read(new Uint8Array(4));
+      await scheduler.wait(5);
+      throws(() => controller().byobRequest.respondWithNewView(sharedView()), {
         name: 'TypeError',
-        message: usingTsImpl
-          ? 'view must not be backed by a SharedArrayBuffer'
-          : 'Unable to use non-detachable ArrayBuffer.',
+        message: respondMessage,
+      });
+      controller().enqueue(new Uint8Array([5]));
+      deepStrictEqual([...(await read).value], [5], kind);
+
+      if (usingTsImpl) {
+        reader.read(new Uint8Array(4));
+        await scheduler.wait(5);
+        controller().close();
+        throws(
+          () =>
+            controller().byobRequest.respondWithNewView(
+              kind === 'DataView'
+                ? new DataView(new SharedArrayBuffer(0))
+                : new globalThis[kind](new SharedArrayBuffer(0))
+            ),
+          { name: 'TypeError', message: respondMessage }
+        );
       }
-    );
-    controller().enqueue(new Uint8Array([5]));
-    deepStrictEqual([...(await read).value], [5]);
+    }
   },
 };
 
