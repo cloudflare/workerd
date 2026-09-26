@@ -24,6 +24,8 @@ use syn::Ident;
 use syn::ItemEnum;
 use syn::ItemImpl;
 use syn::ItemStruct;
+use syn::Lifetime;
+use syn::LifetimeParam;
 use syn::Lit;
 use syn::LitStr;
 use syn::Pat;
@@ -609,7 +611,7 @@ fn parse_extern_fn(
         },
     ));
 
-    let generics = &foreign_fn.sig.generics;
+    let mut generics = foreign_fn.sig.generics.clone();
     if generics.where_clause.is_some()
         || generics.params.iter().any(|param| match param {
             GenericParam::Lifetime(lifetime) => !lifetime.bounds.is_empty(),
@@ -720,11 +722,19 @@ fn parse_extern_fn(
     let mut throws_tokens = None;
     let ret = parse_return_type(&foreign_fn.sig.output, &mut throws_tokens)?;
     let asyncness = foreign_fn.sig.asyncness;
+    let fn_token = foreign_fn.sig.fn_token;
     let (ret, throws_tokens) = if asyncness.is_some() {
+        let lifetime = match lang {
+            Lang::Rust => {
+                async_fn_lifetime(&mut generics, receiver.as_mut(), &mut args, fn_token.span)?
+            }
+            Lang::Cxx => None,
+        };
         (
             Some(Type::Future(Box::new(Future {
-                output: ret.unwrap_or(Type::Void(foreign_fn.sig.fn_token.span)),
+                output: ret.unwrap_or(Type::Void(fn_token.span)),
                 throws_tokens,
+                lifetime,
             }))),
             None,
         )
@@ -733,11 +743,9 @@ fn parse_extern_fn(
     };
     let throws = throws_tokens.is_some();
     let unsafety = foreign_fn.sig.unsafety;
-    let fn_token = foreign_fn.sig.fn_token;
     let inherited_span = unsafety.map_or(fn_token.span, |unsafety| unsafety.span);
     let visibility = visibility_pub(&foreign_fn.vis, inherited_span);
     let name = pair(namespace, &foreign_fn.sig.ident, cxx_name, rust_name);
-    let generics = generics.clone();
     let paren_token = foreign_fn.sig.paren_token;
     let semi_token = foreign_fn.semi_token;
 
@@ -1589,6 +1597,100 @@ fn parse_return_type(
         }
     }
 }
+// The lifetime that bounds the future of an async `extern "Rust"` function: the one lifetime its
+// generics name, or, when every reference argument elides its lifetime, `'__cxx`, added to the
+// generics and given to each of those references. The function borrows nothing when it has
+// neither. A mix of named and elided lifetimes, or several named ones, is rejected: the future
+// has to be bound by a single lifetime that every borrowed argument outlives.
+fn async_fn_lifetime(
+    generics: &mut Generics,
+    receiver: Option<&mut Receiver>,
+    args: &mut Punctuated<Var, Token![,]>,
+    span: Span,
+) -> Result<Option<Lifetime>> {
+    let mut named = generics.lifetimes();
+    let named = (named.next().map(|def| def.lifetime.clone()), named.next());
+    let receiver_elided = receiver.as_ref().is_some_and(|r| r.lifetime.is_none());
+    let elided = receiver_elided || args.iter().any(|arg| has_elided_lifetime(&arg.ty));
+    match named {
+        (None, None) if !elided => Ok(None),
+        (Some(lifetime), None) if !elided => Ok(Some(lifetime)),
+        (None, None) => {
+            let lifetime = Lifetime::new("'__cxx", span);
+            generics
+                .params
+                .push(GenericParam::Lifetime(LifetimeParam::new(lifetime.clone())));
+            if let Some(receiver) = receiver {
+                receiver.lifetime.get_or_insert_with(|| lifetime.clone());
+            }
+            for arg in args.iter_mut() {
+                fill_elided_lifetimes(&mut arg.ty, &lifetime);
+            }
+            Ok(Some(lifetime))
+        }
+        _ => Err(Error::new(
+            span,
+            "async extern \"Rust\" function's references must share one lifetime: elide it on every reference, or name the same one on each",
+        )),
+    }
+}
+
+fn fill_elided_lifetimes(ty: &mut Type, lifetime: &Lifetime) {
+    match ty {
+        Type::Ident(t) => {
+            for lt in t.generics.lifetimes.iter_mut().filter(|lt| lt.ident == "_") {
+                *lt = lifetime.clone();
+            }
+        }
+        Type::Fn(_) | Type::Void(_) | Type::KjDate(_) => {}
+        Type::RustBox(t)
+        | Type::RustVec(t)
+        | Type::UniquePtr(t)
+        | Type::KjOwn(t)
+        | Type::KjRc(t)
+        | Type::KjArc(t)
+        | Type::SharedPtr(t)
+        | Type::WeakPtr(t)
+        | Type::KjMaybe(t)
+        | Type::CxxVector(t) => fill_elided_lifetimes(&mut t.inner, lifetime),
+        Type::Ptr(t) => fill_elided_lifetimes(&mut t.inner, lifetime),
+        Type::Array(t) => fill_elided_lifetimes(&mut t.inner, lifetime),
+        Type::Future(t) => fill_elided_lifetimes(&mut t.output, lifetime),
+        Type::Ref(t) | Type::Str(t) => {
+            t.lifetime.get_or_insert_with(|| lifetime.clone());
+            fill_elided_lifetimes(&mut t.inner, lifetime);
+        }
+        Type::SliceRef(t) => {
+            t.lifetime.get_or_insert_with(|| lifetime.clone());
+            fill_elided_lifetimes(&mut t.inner, lifetime);
+        }
+    }
+}
+
+// Whether an argument type borrows through an elided lifetime, at any depth: a reference,
+// `&str` or slice without one, or a named type with a `'_` lifetime argument.
+fn has_elided_lifetime(ty: &Type) -> bool {
+    match ty {
+        Type::Ident(t) => t.generics.lifetimes.iter().any(|lt| lt.ident == "_"),
+        Type::Fn(_) | Type::Void(_) | Type::KjDate(_) => false,
+        Type::RustBox(t)
+        | Type::RustVec(t)
+        | Type::UniquePtr(t)
+        | Type::KjOwn(t)
+        | Type::KjRc(t)
+        | Type::KjArc(t)
+        | Type::SharedPtr(t)
+        | Type::WeakPtr(t)
+        | Type::KjMaybe(t)
+        | Type::CxxVector(t) => has_elided_lifetime(&t.inner),
+        Type::Ptr(t) => has_elided_lifetime(&t.inner),
+        Type::Array(t) => has_elided_lifetime(&t.inner),
+        Type::Future(t) => has_elided_lifetime(&t.output),
+        Type::Ref(t) | Type::Str(t) => t.lifetime.is_none() || has_elided_lifetime(&t.inner),
+        Type::SliceRef(t) => t.lifetime.is_none() || has_elided_lifetime(&t.inner),
+    }
+}
+
 fn has_references_without_lifetime(ty: &Type) -> bool {
     match ty {
         Type::Fn(_) | Type::Ident(_) | Type::Str(_) | Type::Void(_) | Type::KjDate(_) => false,
