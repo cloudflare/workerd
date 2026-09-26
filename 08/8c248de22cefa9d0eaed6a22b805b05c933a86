@@ -1,0 +1,45 @@
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_00d46c84d2eba2 37-43
+src/rust/cxx/kj-rs-tokio/BUILD.bazel
+  s_dadaf0660bfcbe::t_ffb8655da1d08e 38-39,66
+src/rust/cxx/kj-rs-tokio/ffi.rs
+  s_dadaf0660bfcbe::t_7e4816f1d65895 4-10,16-17,147-148,150-180
+src/rust/cxx/kj-rs-tokio/lib.rs
+  s_dadaf0660bfcbe::t_a286c02e00b149 1-2,4-17,48,52,56
+src/rust/cxx/kj-rs-tokio/port.rs
+  s_dadaf0660bfcbe::t_b58ec16ddd925b 19-22,28,56,96-125,132-135,139-148,159-162,164-165,208,210-226,234-237,240-248,310-314,316,339-344,358-362,364,370-371,647
+src/rust/cxx/kj-rs-tokio/runtime.rs
+  s_dadaf0660bfcbe::t_8c03b85fb9fcf5 1-182
+src/rust/cxx/kj-rs-tokio/tests/BUILD.bazel
+  s_dadaf0660bfcbe::t_b0725aa4063571 3-4,7-8,15,25,37-52,56,73,80-87
+src/rust/cxx/kj-rs-tokio/tests/lib.rs
+  s_dadaf0660bfcbe::t_c251921d44a65e 6-7,10-21,115-121,132,138-168
+src/rust/cxx/kj-rs-tokio/tests/runtime_tests.rs
+  s_dadaf0660bfcbe::t_c994ff6d0001c3 1-293
+src/rust/cxx/kj-rs-tokio/tests/test-helpers.c++
+  s_dadaf0660bfcbe::t_b95cd9cc0ec50c 1-127
+src/rust/cxx/kj-rs-tokio/tests/test-helpers.h
+  s_dadaf0660bfcbe::t_195ef85295df7a 3-4,7-9,12-21,28-30,34-35,37-38,41-59
+src/rust/cxx/kj-rs-tokio/tests/tokio-event-port-test.c++
+  s_dadaf0660bfcbe::t_440678bfda9509 504-505,526-527,647,649
+src/rust/cxx/kj-rs-tokio/tokio-event-port.c++
+  s_dadaf0660bfcbe::t_65cbf7c9676922 3-4,28-33,35,38,72-75,84,96-98,124-126,136-150,159-180,187-192
+src/rust/cxx/kj-rs-tokio/tokio-event-port.h
+  s_dadaf0660bfcbe::t_1237333c2ebec5 2-20,24-29,33-34,38-44,50-52,54-55,60-62,67-68,79,81,90-99,102,104-105,109-117,130-131,137-138,149-158,160-164,175,178-179,184-186,196,201,219,226-240,243,246-249
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "088c248de22cefa9d0eaed6a22b805b05c933a86",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

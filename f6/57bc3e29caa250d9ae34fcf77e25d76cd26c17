@@ -1,0 +1,19 @@
+src/workerd/server/BUILD.bazel
+  s_dadaf0660bfcbe::t_6185a1cbe58293 67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f657bc3e29caa250d9ae34fcf77e25d76cd26c17",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
