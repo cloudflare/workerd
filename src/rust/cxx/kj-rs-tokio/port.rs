@@ -16,15 +16,16 @@ use tokio::task::LocalSet;
 
 use crate::ffi::EnteredRuntime;
 
-/// How many bounded yield points `poll()` grants the runtime. This gives ready work opportunities
-/// to run without promising an ordering or an exact number of task or driver polls, which are
-/// Tokio scheduler implementation details.
+/// How many bounded yield points `poll()` grants the runtime (and, tokio-driven, how many the
+/// driver grants between running the KJ loop to idle and parking; runtime.rs). This gives ready
+/// work opportunities to run without promising an ordering or an exact number of task or driver
+/// polls, which are Tokio scheduler implementation details.
 ///
 /// The value is a latency/throughput compromise, not derived from any tokio internal: large
 /// enough to drain a typical burst of already-ready tasks in one `poll()` call, small enough to
 /// bound how long `poll()` withholds control from the KJ loop when spawned tasks keep re-readying
 /// each other. Safe to retune if profiling shows either starvation or excessive poll latency.
-const POLL_YIELD_BUDGET: u32 = 16;
+pub const POLL_YIELD_BUDGET: u32 = 16;
 
 thread_local! {
     /// Handle to the `TokioPort` runtime driving the KJ event loop on this thread, if any.
@@ -52,7 +53,7 @@ pub fn current_handle() -> Option<Handle> {
 }
 
 /// Returns this thread's KJ-loop `LocalSet`, if a `TokioEventPort` exists on this thread.
-fn current_local_set() -> Option<Rc<LocalSet>> {
+pub fn current_local_set() -> Option<Rc<LocalSet>> {
     LOOP_LOCAL_SET.with(|l| l.borrow().clone())
 }
 
@@ -92,22 +93,57 @@ where
     local.spawn_local(future)
 }
 
-/// State shared with `wake()` callers on other threads.
-struct SharedState {
-    /// Unblocks the `block_on(...)` inside `wait_*` when `wake()` fires, or when KJ reports (via
-    /// `notify_kj_service`) that it has work.
-    notify: Notify,
+/// Registers this thread as a KJ-loop thread of the runtime `handle` belongs to: installs the
+/// handle for [`current_handle`] and the `LocalSet` that [`spawn`] enqueues onto (owned by the
+/// thread-local, not by `TokioPort`, which must stay `Send + Sync`; dropped by
+/// `TokioPort::cancel_spawned_tasks`).
+///
+/// # Panics
+///
+/// Panics if this thread already has one (one KJ event loop per thread, hence one port).
+fn register_loop_thread(handle: Handle) {
+    LOOP_RUNTIME_HANDLE.with(|h| {
+        let mut slot = h.borrow_mut();
+        assert!(
+            slot.is_none(),
+            "a kj-rs-tokio runtime already exists on this thread (one KJ event loop per thread, \
+             hence one TokioEventPort per thread)"
+        );
+        *slot = Some(handle);
+    });
+    LOOP_LOCAL_SET.with(|l| {
+        *l.borrow_mut() = Some(Rc::new(LocalSet::new()));
+    });
+}
+
+/// State shared with `wake()` callers on other threads, and (tokio-driven) with the
+/// [`Runtime`](crate::Runtime) driver that parks on it.
+pub struct SharedState {
+    /// Unblocks the sleeper -- KJ-driven the `block_on(...)` inside `wait_*`, tokio-driven the
+    /// parked driver -- when `wake()` fires, or when KJ reports (via `notify_kj_service`) that
+    /// it has work.
+    pub(crate) notify: Notify,
 
     /// The `kj::EventPort::wake()` latch: set by `wake()`, consumed (swapped to `false`) by the
     /// return value of `wait_*`/`poll`. The KJ event loop uses a `true` return to know it must
     /// drain cross-thread events (`kj::Executor`, `CrossThreadPromiseFulfiller`).
     woken: AtomicBool,
 
-    /// True while the loop thread is inside `wait_*`'s `block_on`. `notify_kj_service` only acts
-    /// then: KJ also reports runnable transitions while it is turning events itself, and a permit
-    /// stored then would only make the next wait return spuriously once. Only mutated from the
-    /// loop thread; atomic so the struct stays `Sync`.
+    /// True while the loop thread is inside `wait_*`'s `block_on`. KJ-driven, `notify_kj_service`
+    /// only acts then: KJ also reports runnable transitions while it is turning events itself,
+    /// and a permit stored then would only make the next wait return spuriously once. Only
+    /// mutated from the loop thread; atomic so the struct stays `Sync`.
     in_wait: AtomicBool,
+}
+
+impl SharedState {
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            notify: Notify::new(),
+            woken: AtomicBool::new(false),
+            in_wait: AtomicBool::new(false),
+        })
+    }
 }
 
 /// The Rust backing of one `kj_rs_tokio::TokioEventPort` (C++): owns the per-thread
@@ -120,8 +156,13 @@ struct SharedState {
 /// One instance per KJ event loop, created on (and driven by) that loop's thread. Only `wake()`
 /// may be called from other threads. `!Send` by type: the entered context must be left on the
 /// thread that entered it, which is also the only thread that may drive or drop the port.
+///
+/// Tokio-driven (`new_tokio_driven`), the port owns no runtime: the [`Runtime`](crate::Runtime)
+/// that built it does, and drives the loop itself, so `wait_*` and `poll` are never reached (the
+/// C++ port refuses `wait()` and answers `poll()` from the wake latch alone).
 pub struct TokioPort {
-    runtime: EnteredRuntime,
+    /// `None` when tokio-driven.
+    runtime: Option<EnteredRuntime>,
     state: Arc<SharedState>,
     owner_thread: std::thread::ThreadId,
 }
@@ -149,11 +190,6 @@ impl TokioPort {
     /// Panics if the tokio runtime cannot be built.
     #[must_use]
     pub fn new() -> Self {
-        let state = Arc::new(SharedState {
-            notify: Notify::new(),
-            woken: AtomicBool::new(false),
-            in_wait: AtomicBool::new(false),
-        });
         #[expect(
             clippy::expect_used,
             reason = "startup-only: building the per-thread current_thread runtime fails only under resource exhaustion, at which point fail-fast at port construction is the correct behavior"
@@ -169,22 +205,25 @@ impl TokioPort {
         // Enter the runtime context for the life of the port (see EnteredRuntime): from here on,
         // `Handle::current()` on this thread is this runtime.
         let runtime = EnteredRuntime::new(runtime);
-        LOOP_RUNTIME_HANDLE.with(|h| {
-            let mut slot = h.borrow_mut();
-            assert!(
-                slot.is_none(),
-                "a kj-rs-tokio runtime already exists on this thread (one KJ event loop per \
-                 thread, hence one TokioEventPort per thread)"
-            );
-            *slot = Some(runtime.handle().clone());
-        });
-        // The `LocalSet` that `spawn()` enqueues onto and `wait_*`/`poll` drive. Owned by the
-        // thread-local (not by `TokioPort`, which must stay `Send + Sync`); dropped in `drop()`.
-        LOOP_LOCAL_SET.with(|l| {
-            *l.borrow_mut() = Some(Rc::new(LocalSet::new()));
-        });
+        register_loop_thread(runtime.handle().clone());
         Self {
-            runtime,
+            runtime: Some(runtime),
+            state: SharedState::new(),
+            owner_thread: std::thread::current().id(),
+        }
+    }
+
+    /// The Rust half of a tokio-driven port (see [`Runtime`](crate::Runtime)): `handle` is the
+    /// Runtime's, already entered on this thread; `state` is shared with the driver, which parks
+    /// on its `notify`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a kj-rs-tokio runtime already exists on this thread (`Runtime::new` checks first).
+    pub(crate) fn new_tokio_driven(handle: Handle, state: Arc<SharedState>) -> Self {
+        register_loop_thread(handle);
+        Self {
+            runtime: None,
             state,
             owner_thread: std::thread::current().id(),
         }
@@ -192,9 +231,21 @@ impl TokioPort {
 
     /// Handle to this port's runtime, usable to spawn tasks from any thread. (On the loop thread
     /// itself `tokio::runtime::Handle::current()` is the same runtime; see [`EnteredRuntime`].)
+    ///
+    /// # Panics
+    ///
+    /// Panics on a tokio-driven port, which owns no runtime (`Runtime::handle` is the one to use).
     #[must_use]
     pub fn handle(&self) -> Handle {
-        self.runtime.handle().clone()
+        #[expect(
+            clippy::expect_used,
+            reason = "documented `# Panics`: a tokio-driven port has no runtime of its own"
+        )]
+        self.runtime
+            .as_ref()
+            .expect("a tokio-driven TokioPort owns no runtime")
+            .handle()
+            .clone()
     }
 
     /// Cancels every task spawned onto this thread's `LocalSet` via [`spawn`], by dropping the
@@ -256,8 +307,13 @@ impl TokioPort {
         )]
         let local =
             current_local_set().expect("TokioPort is driving without a registered LocalSet");
+        // Tokio-driven, the C++ port never calls this (its wait() throws first); the latch is the
+        // only sensible answer if it did.
+        let Some(runtime) = &self.runtime else {
+            return self.take_wake_latch();
+        };
         state.in_wait.store(true, Ordering::Relaxed);
-        local.block_on(&self.runtime, async {
+        local.block_on(runtime, async {
             match timeout {
                 Some(t) => {
                     let _ = tokio::time::timeout(t, state.notify.notified()).await;
@@ -280,7 +336,12 @@ impl TokioPort {
         )]
         let local =
             current_local_set().expect("TokioPort is driving without a registered LocalSet");
-        local.block_on(&self.runtime, async {
+        // Tokio-driven, the C++ port answers poll() from `take_wake_latch` directly: the driver is
+        // already inside the runtime's block_on, which cannot nest.
+        let Some(runtime) = &self.runtime else {
+            return self.take_wake_latch();
+        };
+        local.block_on(runtime, async {
             for _ in 0..POLL_YIELD_BUDGET {
                 tokio::task::yield_now().await;
             }
@@ -294,17 +355,20 @@ impl TokioPort {
     }
 
     /// See the bridge doc (ffi.rs): KJ has told the C++ port it has work (`setRunnable(true)`,
-    /// or a sooner timer through the port's `TimerImpl::SleepHooks`). Wake the `notified()`
-    /// future if we are parked in `wait_*`; a no-op otherwise.
+    /// or a sooner timer through the port's `TimerImpl::SleepHooks`). KJ-driven, wake the
+    /// `notified()` future if we are parked in `wait_*` and do nothing otherwise. Tokio-driven,
+    /// always signal: the driver may be parked on `notify` at any moment KJ is not turning, and
+    /// `Notify` stores the permit if it is not, so a redundant signal costs the driver one idle
+    /// iteration whereas a missed one would hang the loop.
     pub(crate) fn notify_kj_service(&self) {
-        if self.state.in_wait.load(Ordering::Relaxed) {
+        if self.runtime.is_none() || self.state.in_wait.load(Ordering::Relaxed) {
             self.state.notify.notify_one();
         }
     }
 
     /// Consumes the wake latch: returns `true` iff `wake()` was called since the last `true`
-    /// return from `wait_*`/`poll`.
-    fn take_wake_latch(&self) -> bool {
+    /// return from `wait_*`/`poll`/`take_wake_latch`.
+    pub(crate) fn take_wake_latch(&self) -> bool {
         self.state.woken.swap(false, Ordering::SeqCst)
     }
 }
@@ -580,7 +644,7 @@ mod tests {
         }
         assert!(done);
         // The JoinHandle should complete promptly now.
-        port.runtime.block_on(&mut jh).unwrap();
+        port.runtime.as_ref().unwrap().block_on(&mut jh).unwrap();
     }
 
     #[test]

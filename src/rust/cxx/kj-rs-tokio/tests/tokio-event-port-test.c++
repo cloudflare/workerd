@@ -403,38 +403,6 @@ KJ_TEST("KJ coroutine can co_await spawned Rust tasks and KJ timers together") {
 // =======================================================================================
 // Teardown.
 
-kj::Timer *testTimer = nullptr;
-void setTestTimer(kj::Timer *timer) {
-  testTimer = timer;
-}
-kj::WaitScope *testWaitScope = nullptr;
-void setTestWaitScope(kj::WaitScope *ws) {
-  testWaitScope = ws;
-}
-kj::Maybe<kj::Own<kj::PromiseFulfiller<int>>> testFulfiller;
-}  // namespace
-
-// External linkage: called by the cxx bridge (kj_rs_tokio_test::kjTimerDelay etc.).
-kj::Promise<void> kjTimerDelay(uint64_t ms) {
-  KJ_REQUIRE(testTimer != nullptr, "setTestTimer() not called");
-  return testTimer->afterDelay(ms * kj::MILLISECONDS);
-}
-
-kj::Promise<void> kjNeverPromise() {
-  return kj::NEVER_DONE;
-}
-
-void nestedWait() {
-  KJ_REQUIRE(testWaitScope != nullptr, "setTestWaitScope() not called");
-  kj::evalLater([]() {}).wait(*testWaitScope);
-}
-
-void fulfillTestFulfiller(int32_t value) {
-  KJ_ASSERT_NONNULL(testFulfiller, "setTestFulfiller() not called")->fulfill(kj::cp(value));
-}
-
-namespace {
-
 KJ_TEST("context destruction with a spawned task HOLDING a KJ timer promise is clean") {
   // Unlike the test below, the spawned task itself owns live KJ objects (TimerPromiseAdapter in
   // the port's TimerImpl, armed RustPromiseAwaiter Event on the loop) at teardown. The LocalSet
@@ -533,8 +501,8 @@ KJ_TEST("a spawned task fulfilling a kj::PromiseFulfiller while the loop is park
   auto &sysClock = kj::systemPreciseMonotonicClock();
 
   auto paf = kj::newPromiseAndFulfiller<int>();
-  testFulfiller = kj::mv(paf.fulfiller);
-  KJ_DEFER(testFulfiller = kj::none);
+  setTestFulfiller(kj::mv(paf.fulfiller));
+  KJ_DEFER(setTestFulfiller(kj::none));
 
   // The task fulfills ~20 ms into the park; the 10 s timer is the "we hung" bound. Without KJ
   // reporting the arm (setRunnable(true)) it sits unserviced until that timer.
@@ -555,8 +523,8 @@ KJ_TEST("a spawned task fulfilling a kj::PromiseFulfiller during a wait-forever 
   auto &ws = io.getWaitScope();
 
   auto paf = kj::newPromiseAndFulfiller<int>();
-  testFulfiller = kj::mv(paf.fulfiller);
-  KJ_DEFER(testFulfiller = kj::none);
+  setTestFulfiller(kj::mv(paf.fulfiller));
+  KJ_DEFER(setTestFulfiller(kj::none));
 
   auto bound = kj::newPromiseAndCrossThreadFulfiller<int>();
   std::atomic<bool> done{false};
@@ -676,7 +644,9 @@ KJ_TEST("a spawned task re-entering promise.wait() gets a kj::Exception, not an 
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
   setTestWaitScope(&ws);
+  setTestTimer(&io.getTimer());
   KJ_DEFER(setTestWaitScope(nullptr));
+  KJ_DEFER(setTestTimer(nullptr));
 
   // Documented in tokio-event-port.h: nesting block_on inside block_on is rejected by tokio;
   // the panic must reach the task as a catchable exception (an Err across the bridge), and the
