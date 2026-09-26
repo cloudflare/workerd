@@ -1,13 +1,18 @@
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_rust//rust:defs.bzl", "rust_library")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_test.bzl", "wd_rust_test")
 load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
 
+# The Rust half of both suites: the bridged helpers the KJ-driven KJ_TESTs call, and the
+# tokio-driven tests themselves (runtime_tests.rs, run by :runtime_tests).
 rust_library(
     name = "tests",
     srcs = glob(["*.rs"]),
     edition = "2024",
     link_deps = [
         ":bridge",
+        ":test-helpers",
     ],
     target_compatible_with = select({
         "@//build/config:no_build": ["@platforms//:incompatible"],
@@ -17,6 +22,7 @@ rust_library(
         "//src/rust/cxx",
         "//src/rust/cxx/kj-rs",
         "//src/rust/cxx/kj-rs-tokio",
+        "@crates_vendor//:futures",
         "@crates_vendor//:tokio",
     ],
 )
@@ -28,9 +34,26 @@ rust_cxx_bridge(
     include_prefix = "kj-rs-tokio-test",
     deps = [
         "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
     ],
 )
 
+# The C++ helpers (test-helpers.h), shared by the KJ-driven and the tokio-driven suites.
+wd_cc_library(
+    name = "test-helpers",
+    srcs = ["test-helpers.c++"],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    deps = [
+        ":bridge",
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
+    ],
+)
+
+# The KJ-driven suite: C++ KJ_TESTs block on the WaitScope of setupTokioAsyncIo().
 cc_test(
     name = "tokio-event-port-test",
     size = "medium",
@@ -47,9 +70,18 @@ cc_test(
     }),
     deps = [
         ":bridge",
+        ":test-helpers",
         ":tests",
         "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
         "//src/rust/cxx/third-party:runtime",
         "@capnp-cpp//src/kj:kj-test",
     ],
+)
+
+# The tokio-driven suite: Rust tests block on kj_rs_tokio::Runtime.
+wd_rust_test(
+    name = "runtime_tests",
+    size = "medium",
+    crate = ":tests",
+    edition = "2024",
 )

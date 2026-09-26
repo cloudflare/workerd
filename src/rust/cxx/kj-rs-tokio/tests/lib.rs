@@ -3,8 +3,22 @@
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::missing_panics_doc)]
 
+#[cfg(test)]
+mod runtime_tests;
 mod test_helpers;
 
+// The tokio-driven suite's C++ helpers (runtime_tests.rs, which reaches them through `ffi`), as
+// the crate's public surface.
+pub use ffi::clear_executor;
+pub use ffi::clear_test_context;
+pub use ffi::cross_thread_fulfill_from_thread;
+pub use ffi::execute_async_on;
+pub use ffi::execute_sync_from_thread;
+pub use ffi::install_test_context;
+pub use ffi::kj_awaits_rust_sleep;
+pub use ffi::kj_yield_until_would_sleep;
+pub use ffi::publish_executor;
+pub use ffi::test_fulfiller_promise;
 use test_helpers::completed_task_count;
 use test_helpers::has_loop_runtime_handle;
 use test_helpers::nested_wait_from_task;
@@ -98,6 +112,13 @@ mod ffi {
         fn stashed_future_poll_count() -> u64;
     }
 
+    #[namespace = "kj_rs_tokio"]
+    unsafe extern "C++" {
+        include!("kj-rs-tokio/tokio-event-port.h");
+
+        type TokioAsyncIoContext = kj_rs_tokio::TokioAsyncIoContext;
+    }
+
     unsafe extern "C++" {
         include!("kj-rs-tokio-test/test-helpers.h");
 
@@ -108,11 +129,42 @@ mod ffi {
         #[cxx_name = "kjNeverPromise"]
         async fn kj_never_promise();
         /// Re-enters `promise.wait()` on the test's WaitScope from wherever it is called. Throws
-        /// (-> `Err`) when called from inside a spawned task.
+        /// (-> `Err`) when called from inside a spawned task, or on a tokio-driven loop.
         #[cxx_name = "nestedWait"]
         fn nested_wait() -> Result<()>;
         /// Fulfills the kj::PromiseFulfiller the C++ test installed with `setTestFulfiller`.
         #[cxx_name = "fulfillTestFulfiller"]
         fn fulfill_test_fulfiller(value: i32) -> Result<()>;
+
+        // The tokio-driven suite's helpers (runtime_tests.rs); see test-helpers.h.
+
+        /// Installs the context's timer and WaitScope as the helpers' current ones.
+        #[cxx_name = "installTestContext"]
+        fn install_test_context(context: Pin<&mut TokioAsyncIoContext>);
+        #[cxx_name = "clearTestContext"]
+        fn clear_test_context();
+        /// A promise fulfilled by `fulfill_test_fulfiller`.
+        #[cxx_name = "testFulfillerPromise"]
+        async fn test_fulfiller_promise() -> i32;
+        /// `value * 2`, computed on this loop by `kj::Executor::executeSync()` from a thread
+        /// started for the call.
+        #[cxx_name = "executeSyncFromThread"]
+        async fn execute_sync_from_thread(value: i32) -> i32;
+        /// `value`, through a cross-thread fulfiller fulfilled from a thread after `delay_ms`.
+        #[cxx_name = "crossThreadFulfillFromThread"]
+        async fn cross_thread_fulfill_from_thread(delay_ms: u64, value: i32) -> i32;
+        /// This loop's Executor into `slot` (0 or 1); `execute_async_on` runs `value` on the
+        /// loop that published `slot`, blocking until it has.
+        #[cxx_name = "publishExecutor"]
+        fn publish_executor(slot: u8) -> Result<()>;
+        #[cxx_name = "clearExecutor"]
+        fn clear_executor(slot: u8) -> Result<()>;
+        #[cxx_name = "executeAsyncOn"]
+        async fn execute_async_on(slot: u8, value: i32) -> i32;
+        #[cxx_name = "kjYieldUntilWouldSleep"]
+        async fn kj_yield_until_would_sleep();
+        /// A KJ coroutine awaiting `tokio_sleep_on_runtime(ms)`.
+        #[cxx_name = "kjAwaitsRustSleep"]
+        async fn kj_awaits_rust_sleep(ms: u64);
     }
 }
