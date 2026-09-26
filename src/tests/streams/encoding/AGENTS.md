@@ -192,7 +192,7 @@ Every entry is asserted on both sides via the `which-impl` pattern.
 | 3 | `readable`/`writable` placement | inherited from `TransformStream.prototype` | own enumerable accessors on the class prototype | `accessorPlacement` |
 | 4 | Invalid TDS chunk `TypeError` message | "This TransformStream is being used as a byte stream, but received a value that is not a BufferSource." | "TextDecoderStream: chunk must be a BufferSource" | `decoderRejectsNonBufferSource` |
 | 5 | Constructor source text | native code | not | `constructorSurface` |
-| 6 | Thenable check during read resolution | `Object.prototype.then` getter consulted once per read | twice | `thenInterceptionDuringReadResolution` |
+| 6 | Thenable check during read resolution | `Object.prototype.then` getter consulted once per read | same | `thenInterceptionDuringReadResolution` |
 | 7 | In-flight write rejection when the readable is cancelled mid-transform | `TypeError` "The readable side of this TransformStream is no longer readable." | `TypeError` "Cannot enqueue a chunk into a stream that is closed or has been errored" | `cancelReadableFromChunkToString` |
 
 ## Assertion catalogue
