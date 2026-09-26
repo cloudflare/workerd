@@ -36,6 +36,11 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - `kj-rs-tokio/` — `TokioEventPort`: a `kj::EventPort` backed by a per-thread tokio
   `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers) and
   `kj_rs_tokio::spawn()`
+- `kj-hyper/` — HTTP/1.1, WebSockets and TLS for the Rust server: hyper's server and pooled
+  client, rustls, the WebSocket handshake (kj's own `kj::WebSocket` runs over the upgraded
+  transport), with kj-typed seams (`kj::http::Service`, `kj::HttpService::Response`,
+  `kj::WebSocket`, `kj::AsyncIoStream`) so requests reach a C++ `WorkerInterface` and C++ can
+  make outbound requests; see "kj-hyper" below
 - `kj-rs-io/` — tokio-backed `kj::AsyncIoStream` / `kj::Network` / `kj::LowLevelAsyncIoProvider`
   (the I/O providers for the tokio loop, `kj_rs_io::setupTokioAsyncIo()`), `loopback:` addresses
   (in-process connections for `workerd test`), the `--watch` file watcher (Rust over `notify`),
@@ -100,3 +105,110 @@ guarantee by type, and what the **C++ adapters** guarantee by construction.
 - **`--config=asan` and the `tsan` configs instrument both C++ and Rust.** Rust is built with
   nightly rustc, `-Zsanitizer=<address|thread>`, and a standard library instrumented the same way
   (//build/rust); `//src/rust/asan` and `//src/rust/tsan` verify the instrumentation is active.
+
+## kj-hyper: the Rust-facing API and its rules
+
+kj-hyper is used from Rust; its C++ (kj-hyper.c++) exists only to implement kj interfaces over
+Rust objects, and all of its Rust `unsafe` is in ffi.rs.
+
+- **Surface.** `server::serve_connection(io, Hangup, &HeaderTable, Rc<ServerSettings>,
+  Rc<dyn Handler>, &Shutdown)` serves one accepted tokio connection; `Handler::request` takes
+  exactly what `kj::http::Service::request` takes, `Handler::connect` takes a `server::Connect`
+  that is answered in Rust (`accept()` hands back the tunnel as tokio I/O, `reject()`) or handed
+  to C++ (`into_kj()`). `client::Client` implements
+  `kj::http::Service` over hyper-util's legacy client: `Client::new(table, settings, peer, dial)`
+  pools connections to one peer through a dialer and asks it for paths (`Peer::Origin`) or, of
+  an HTTP proxy, for absolute URLs sent whole (`Peer::Proxy`), and its `tunnel(host)` is an HTTP
+  CONNECT through that peer, handed to C++ as a `kj::AsyncIoStream`;
+  `Client::internet(table, settings, tls, connect)` reaches whatever authority a request's URL
+  names through `connect(host, port)`, the caller's connection to it
+  (`client::connect_allowed(host, port, allow)` is the usual one: resolve, then the first
+  address `allow` admits that accepts). `tls` builds rustls configs from `TlsOptions` and runs
+  the handshakes. `into_kj_stream` / `into_kj_stream_with` hand tokio streams to C++ as
+  `kj::AsyncIoStream`.
+- **Threads.** Everything is single-threaded state (`Rc`, `RefCell`, `Cell`), bound to the tokio
+  runtime thread it was created on, as kj's own HTTP objects are bound to their event loop's
+  thread. Transports must be `Send` (hyper's upgrade path and the legacy client's connection
+  tasks require it); handlers, settings and header tables need not be. hyper's timers (header
+  timeout, pool idle eviction) and the client's connection tasks (`tokio::spawn`) need the
+  thread's tokio runtime entered.
+- **Lifetimes.** A `HeaderTable` and `ServerSettings`/`ClientSettings` outlive the futures made
+  with them (the server borrows the table; a `WebSocketErrorHandler` in the settings is borrowed
+  by every response object built while a call runs). What a handler call borrows from C++ -- a
+  `tryRead` buffer, header slices -- is tied to the future's lifetime on the bridge; Rust objects
+  behind kj interfaces (`RustIo`, `RustBody`) are `Rc`s whose operations own a share, so a
+  `kj::Own` dropped mid-operation dangles nothing.
+- **Cancellation.** A handler call runs alongside its connection, not inside hyper's service
+  future, and is dropped when the connection ends without an upgrade (kj's cancel-on-hangup). A
+  failure after the response head went out aborts the body, so hyper drops the connection
+  instead of framing a truncated message as complete. Dropping a client request drops its
+  connection (hyper's rule); the request body pump ends with the exchange, as kj's adapter's
+  does.
+- **Hang-ups.** A transport comes with its `Hangup`: a future that resolves when kj's own
+  stream over that transport would resolve `whenWriteDisconnected()` (a socket hung up or
+  failed, `kj_rs_io::when_write_disconnected`, not a peer that shut down its side; an in-memory
+  pipe's other end dropped; never on Windows, as under kj). `serve_connection` takes it as an
+  argument; a dialer returns a socket, which `client::Dialed::from` takes it of, or a `Dialed`
+  made with one (`Dialed::with_hangup`, kept across `Dialed::tls`). The kj streams made of the
+  connection resolve `whenWriteDisconnected()` from it, and so a `kj::WebSocket` its
+  `whenAborted()`, which is how kj learns of a peer that goes away while nothing is read: a
+  served connection's WebSocket and a CONNECT's `into_kj()` tunnel (the upgrade owns the signal
+  from then on), the client's WebSockets, CONNECT tunnels and raw `connect()` tunnels (the
+  pool hands each response the connection's signal), `Dialed::into_kj()`, and a transport
+  handed to C++ with its signal (`into_kj_stream_with`). One handed over with `into_kj_stream`
+  never resolves it (reads and writes fail once the peer is gone).
+- **Headers are copied at the crossing, and written as kj writes them.** kj headers reach hyper
+  through `for_each_header` -> `Head::append` (body.rs), in the order `kj::HttpHeaders::forEach`
+  yields: the header table's first, in the table's order and spelling, then the rest as added
+  (spellings ride in hyper's `HeaderCaseMap`, made public by
+  patches/rust/crates/hyper-public-header-case-map.patch). The connection-level headers are the
+  protocol's, not the application's, as under kj's `connectionHeaders` (`Head::claim`), and
+  `Head` always sets the framing (`Content-Length` / `Transfer-Encoding: chunked`) and
+  `Connection: close` (a drain, a failure's answer, a refused CONNECT) itself, at kj's position,
+  so hyper finds them and appends none of its own. To get a header written ahead of the
+  unknown ones with a fixed spelling, put it in the `kj::HttpHeaderTable`. Where this
+  differs from kj: a header's repeated values are written together (`http::HeaderMap` groups
+  them; kj writes each where it was added, a second `Set-Cookie` after the table's headers), a
+  GET or HEAD request whose body length is unknown is sent without a body (hyper's rule) where
+  kj would chunk it, a response to HEAD never says `Transfer-Encoding`, and hyper closes a
+  connection, saying so after the other headers, when the request asked it to
+  (`Connection: close`, HTTP/1.0 without keep-alive, which it also answers as HTTP/1.0 and never
+  chunked); kj kept those open. hyper's headers come back packed (`HeaderBlock`) and
+  C++ checks the block's bounds before building `kj::HttpHeaders`.
+- **Request parsing is hyper's.** Framing is strict per RFC 9112: a request with both
+  `Content-Length` and `Transfer-Encoding` is read as chunked, reaches the handler without its
+  `Content-Length`, and closes the connection; an invalid `Content-Length` or differing
+  duplicates, whitespace before a header's colon, a folded header line, `Transfer-Encoding` on
+  HTTP/1.0 and a `Transfer-Encoding` that does not end in `chunked` are refused
+  (`Transfer-Encoding: gzip, chunked` is read as chunked), and an empty line before the request
+  line is accepted. kj differed on each of these. Absolute-form targets and `OPTIONS *` reach
+  the handler as written, as under kj. A
+  request hyper cannot parse never reaches the `Handler`: hyper answers it itself with `400`
+  (`414` for a target past 65534 bytes, `431` for a head past hyper's buffer limit or
+  `MAX_HEADERS`), `Content-Type: text/plain`, `Connection: close` and hyper's own description of
+  the error as the body ("invalid HTTP header parsed"; a request line naming HEAD gets the same
+  head and no body), as RFC 9110
+  section 15.5 asks and kj did; upstream hyper sends no body
+  (patches/rust/crates/hyper-parse-error-explanation.patch).
+- **WebSockets are kj's.** kj-hyper does the handshake (`handshake.rs`: accept and client keys;
+  the extension agreement is kj's own parser, applied in kj-hyper.c++) and hands the upgraded
+  transport to `kj::newWebSocket`, with frame-mask entropy from `rand` (`RustEntropySource`).
+  Where the handshake differs from kj: an unsupported `Sec-WebSocket-Version` is refused with
+  `426` and `Sec-WebSocket-Version: 13` (kj: `400`), and a handshake by POST with `400`.
+  A stream read and written by two tasks (a `RustIo`) is wrapped in `SharedWakers`, since
+  rustls' reads write and its writes read.
+- **Tests.** Rust unit tests sit in their modules; kj-hyper/tests/ holds the contract tests
+  against kj's HTTP interfaces (a C++ `kj::HttpService` served by kj-hyper, kj-hyper's client
+  behind `kj::newHttpClient(kj::HttpService&)`, checked on the wire), a `kj_test` driving Rust
+  helpers on the tokio-backed `kj::setupAsyncIo()`. TLS policy tests live in tls.rs with
+  fixed PEM material (no certificate generation at test time).
+- **A failed call gets a bare 500.** A call that fails before responding is answered with
+  `500 Internal Server Error`, the status text as the body and `Connection: close`, and the
+  connection closes after it: the text of an exception never reaches a client, and logging it is
+  the handler's business. A failure after the response head went out drops the connection;
+  DISCONNECTED gets no answer. A call that returns without responding gets kj's plain-text 500.
+- **Dropped kj settings.** No `HttpServerErrorHandler` or `HttpClientErrorHandler`, no
+  caller-supplied `EntropySource` (handshake keys and frame masks come from `rand`), no
+  `tlsStarter`, no pipeline timeout or cancelled-upload grace period, and no cipher list
+  (`TlsOptions.cipherList` is not applied: cipher suites are rustls' defaults); hyper answers
+  unparsable requests itself (above).
