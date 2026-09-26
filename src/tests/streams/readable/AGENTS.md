@@ -40,6 +40,8 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 | 23 | when a promise returned by start() starts the stream | adopts it: the first pull runs before the first marker chained on it | spec (Node agrees): a new promise is resolved with it, so the pull runs after the second marker, whether it was fulfilled on return or later | `startPromiseSettledInNewPromise` |
 | 24 | then-getter fires on the result of an async-iterator `next()` made while another is still pending | once | twice: the `next()` settles by adopting the promise of the step it waited for (WebIDL; Node agrees) | `thenGetterPerIteratorNext` |
 | 25 | async-iterator `next()`/`return()` called with a `this` that is not a stream's iterator | throws TypeError synchronously | returns a promise rejected with TypeError (WebIDL) | `iteratorMethodsRejectForeignThis` |
+| 26 | from(ArrayBufferView) | a typed array iterates element by element (`Uint8Array [1,2,3]` gives 1, 2, 3); a DataView is rejected (spec) | one chunk, the view itself, as for a string (#12) | `fromArrayBufferViewIsOneChunk` |
+| 27 | from() iterator protocol edges | reads `value` of an async iterator's final result; a sync iterator whose value rejects (not done) is left open; the `value` of a sync return() result is not resolved; a non-callable `next` ends the stream; a throwing `return` getter escapes as an uncaught exception | spec (WebIDL async_sequence + ECMA-262 async-from-sync): only `done` of the final result; the sync iterator is closed through return(); the return() result's value is resolved (a rejection rejects the cancel); the read rejects with TypeError; the cancel rejects | `fromIteratorProtocolEdges`, `fromCancelReturnLookup` |
 
 Parity worth noting (probed, pinned): pull serialization (never
 re-entered); pull/async-start rejection identity; error-undefined
@@ -52,7 +54,12 @@ hook; tee error propagation identity to both branches, tee pull-per-read
 shape, tee backpressure following the slowest branch (a push source
 stalls both branches on an idle one; the spec's per-branch queues would
 not), tee after partial read; the tee-reentrancy crash regressions;
-from() cancel plumbing identity through return(); the first
+from() cancel plumbing identity through return(), and its iterator
+protocol: `next` read once at from() and called without arguments, a
+sync result's `done` read before `value`, method lookups as plain gets
+(no Proxy `has` traps), function iterables accepted and non-string
+primitives rejected, return() read once per cancel with a null return()
+treated as absent; the first
 async-iterator next() pulling synchronously; async-iterator
 protocol interleavings (return/next no-await; the WebIDL
 ongoing-promise shapes are #22); chunks held BY REFERENCE
@@ -98,7 +105,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `queue-math.js` | ledger #10 (WPT float shapes; cpp bounded observables only) |
 | `tee.js` | migrated edge cases + error propagation + cancel composite (#11) + pull-per-read + slowest-branch backpressure |
 | `tee-reentrancy.js` | the three C++ push-loop crash regressions (from api/streams/streams-test.js) |
-| `from.js` | 11 migrated + fromString (#12) + return validation messages |
+| `from.js` | 11 migrated + fromString (#12) + return validation messages + iterator protocol (next read once, done before value, gets not `has`, objects only, return() lookup; parity) + ArrayBufferView as one chunk (#26) + async-from-sync edges (#27) |
 | `async-iteration.js` | 7 migrated + no-await interleavings + proto shape and class string (#13) + foreign `this` (#25) + first next() pulls synchronously (parity) + ongoing-promise interleavings (#22) |
 | `reentrancy.js` | enqueue/close/cancel-in-size (parity) + read-in-size (#14; guard the size() or C++ captures every later chunk) |
 | `buffer-lifecycle.js` | chunk by reference, detach observed |
@@ -111,7 +118,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `legacy-constructors.js` | the unflagged cell (see flags table) |
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): a queued backlog plus the close sentinel swept in ONE batched read; value chunks pass through UNTOUCHED (object identity); pull-driven yields per read with EOF as a separate empty batch; expectedLength undefined; error/cancel propagation; lock exclusivity and release |
 | `data-volumes.js` | value-stream volume axes: 4096-chunk counts, a 1 MiB single string chunk, 8 MiB aggregate (128 × 64 KiB), and 1 MiB through tee on both branches — every chunk index-encoded |
-| `pollution.js` | prototype pollution neither implementation observes: a patched array iterator or replaced Number global leaves bodies intact; a patched controller error() still errors the stream; omitted dictionaries read nothing from Object.prototype; @@asyncIterator shape (TS: the values() function object, per WebIDL; C++: a separate function) and for-await ignoring a patched values() |
+| `pollution.js` | prototype pollution neither implementation observes: a patched array iterator or replaced Number global leaves bodies intact; a patched controller error() still errors the stream; omitted dictionaries read nothing from Object.prototype, nor does from() for the source and strategy it builds; @@asyncIterator shape (TS: the values() function object, per WebIDL; C++: a separate function) and for-await ignoring a patched values() |
 
 Consumed sources: streams-async-iterator-test.js (deleted),
 streams-tee-edge-cases-test.js (value half), streams-test.js (from/

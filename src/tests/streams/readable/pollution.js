@@ -182,6 +182,60 @@ export const omittedDictionariesReadNothing = {
   },
 };
 
+// ReadableStream.from() builds its source and strategy itself: nothing is
+// read from Object.prototype for them.
+export const fromBuildsNoDictionariesFromObjectPrototype = {
+  async test() {
+    let pollutedCalls = 0;
+    const pollution = {
+      type: 'bytes',
+      start() {
+        pollutedCalls++;
+      },
+      size() {
+        pollutedCalls++;
+        return 100;
+      },
+      highWaterMark: 7,
+      autoAllocateChunkSize: 16,
+    };
+    for (const key of Object.keys(pollution)) {
+      Object.defineProperty(Object.prototype, key, {
+        value: pollution[key],
+        configurable: true,
+        writable: true,
+      });
+    }
+    const results = [];
+    try {
+      async function* gen() {
+        yield 'c';
+      }
+      for (const rs of [
+        ReadableStream.from(['a', 'b']),
+        ReadableStream.from(gen()),
+        ReadableStream.from('s'),
+      ]) {
+        const reader = rs.getReader();
+        const chunks = [];
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+        }
+        results.push(chunks);
+      }
+    } finally {
+      for (const key of Object.keys(pollution)) {
+        Reflect.deleteProperty(Object.prototype, key);
+      }
+    }
+    strictEqual('type' in {}, false, 'pollution must be removed');
+    strictEqual(pollutedCalls, 0);
+    deepStrictEqual(results, [['a', 'b'], ['c'], ['s']]);
+  },
+};
+
 // @@asyncIterator is not enumerable, and patching values() does not reach
 // for-await.
 export const asyncIteratorShape = {
