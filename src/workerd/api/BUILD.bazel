@@ -64,6 +64,7 @@ filegroup(
 filegroup(
     name = "hdrs",
     srcs = [
+        "abort-bootstrap.h",
         "actor.h",
         "actor-call-retry.h",
         "actor-state.h",
@@ -289,10 +290,19 @@ wd_cc_library(
     deps = [
         "//src/workerd/io:features",
         "//src/workerd/jsg",
+        "//src/workerd/util:ring-buffer",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@nbytes",
         "@zstd",
+    ],
+)
+
+kj_test(
+    src = "compression-test.c++",
+    deps = [
+        ":compression",
+        "//src/workerd/io",
     ],
 )
 
@@ -834,6 +844,23 @@ kj_test(
 
 kj_test(
     src = "jsrpc-call-plan-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "jsrpc-call-observation-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "jsrpc-call-retry-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",

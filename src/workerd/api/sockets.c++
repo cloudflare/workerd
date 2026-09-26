@@ -617,9 +617,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
     bool isDynamicDispatch) {
   auto& context = incomingRequest->getContext();
 
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(*incomingRequest, tracing::ConnectEventInfo());
-  }
   incomingRequest->delivered();
 
   auto outcome = EventOutcome::OK;

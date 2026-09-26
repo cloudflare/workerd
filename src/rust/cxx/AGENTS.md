@@ -37,8 +37,9 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
   `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers) and
   `kj_rs_tokio::spawn()`
 - `kj-rs-io/` — tokio-backed `kj::AsyncIoStream` / `kj::Network` / `kj::LowLevelAsyncIoProvider`
-  (the I/O providers for the tokio loop, `kj_rs_io::setupTokioAsyncIo()`), the `--watch` file
-  watcher (Rust over `notify`), and signals. C++ there is interface adaptation only; the one policy
+  (the I/O providers for the tokio loop, `kj_rs_io::setupTokioAsyncIo()`), `loopback:` addresses
+  (in-process connections for `workerd test`), the `--watch` file watcher (Rust over `notify`),
+  and signals. C++ there is interface adaptation only; the one policy
   object that stays C++ is `PeerFilter`, a wrapper over KJ's own `kj::_::NetworkFilter`, which
   Rust consults through a bridged `should_allow`
 - `tests/` and `kj-rs/tests/` — Rust and C++ bridge integration tests
@@ -50,6 +51,9 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - Prefer KJ C++ types over STL types unless required by the cxx ABI.
 - Preserve cancellation when converting between KJ promises and Rust futures.
 - Every unsafe Rust block needs a `// Safety:` explanation.
+- `KjOwn<T>` requires `T: kj_rs::OwnTarget`, generated per bridge for every declared type held in
+  a `KjOwn` (see `kj-rs/README.md`). A type that is only aliased into a bridge gets no
+  implementation there; add `impl KjOwn<T> {}` to the bridge that declares `T`.
 - Run formatting and the full component tests after changing generated ABI behavior.
 
 ## kj-rs-io ownership and reactor rules
@@ -93,7 +97,6 @@ guarantee by type, and what the **C++ adapters** guarantee by construction.
   provider", lists what is left out and the rule: no consumer in workerd's production code *or
   its configuration surface* (workerd.capnp's documented address grammar counts -- check it
   before declaring a feature unused), and hand-written libc/sockaddr/fd code to keep.
-- **`--config=asan` instruments C++ only.** Rust is compiled without `-Zsanitizer=address` under
-  that config (only the `tsan` configs instrument Rust), so a passing `--config=asan` run says
-  nothing about Rust memory safety; add `--@rules_rust//:extra_rustc_flag=-Zsanitizer=address`
-  to instrument it.
+- **`--config=asan` and the `tsan` configs instrument both C++ and Rust.** Rust is built with
+  nightly rustc, `-Zsanitizer=<address|thread>`, and a standard library instrumented the same way
+  (//build/rust); `//src/rust/asan` and `//src/rust/tsan` verify the instrumentation is active.
