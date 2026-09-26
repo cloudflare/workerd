@@ -125,6 +125,13 @@ impl Interface for CxxWorkerInterface {
         Ok(result.into())
     }
 
+    async fn abandon_alarm(&mut self, scheduled_time: &SystemTime) -> Result<Option<SystemTime>> {
+        let nanos = KjDate::from(*scheduled_time).nanoseconds();
+        // SAFETY: the returned future borrows self.inner for its duration.
+        let stored = unsafe { bridge::worker_abandon_alarm(self.inner.as_mut(), nanos) }.await?;
+        Ok(Option::from(stored).map(|nanos: i64| KjDate::from(nanos).into()))
+    }
+
     async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {
         // SAFETY: the returned future borrows self.inner for its duration; event is moved in.
         let result = unsafe { bridge::worker_custom_event(self.inner.as_mut(), event) }.await?;

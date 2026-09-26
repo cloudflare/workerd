@@ -19,6 +19,7 @@ pub mod exception;
 pub mod ffi;
 pub mod kill_switch;
 pub mod ok;
+pub mod pending;
 
 use std::time::SystemTime;
 
@@ -40,6 +41,7 @@ pub use crate::cxx_worker::CxxWorkerInterface;
 pub use crate::ffi::Wrapper;
 pub use crate::ffi::bridge::CustomEvent;
 pub use crate::ffi::bridge::WorkerInterface;
+pub use crate::pending::Pending;
 
 pub type Result<T> = std::result::Result<T, KjError>;
 
@@ -72,6 +74,16 @@ pub trait Interface: kj::http::Service {
         retry_count: u32,
     ) -> Result<AlarmResult>;
 
+    /// Called when the alarm manager has given up retrying an alarm after too many counted
+    /// failures. The actor should clear its alarm state so `getAlarm()` reflects the deletion.
+    /// Returns the actor's stored alarm time if it differs from `scheduled_time` (the user set a
+    /// new alarm), or `None` if the alarm was cleared or no alarm was stored.
+    ///
+    /// The default does nothing, so implementors that do not host actors need not override it.
+    async fn abandon_alarm(&mut self, _scheduled_time: &SystemTime) -> Result<Option<SystemTime>> {
+        Ok(None)
+    }
+
     /// Run the test handler. The returned promise resolves to true or false to indicate that the test
     /// passed or failed. In the case of a failure, information should have already been written to
     /// stderr and to the devtools; there is no need for the caller to write anything further. (If the
@@ -93,7 +105,12 @@ pub trait Interface: kj::http::Service {
     /// immediately; if its callbacks have not run yet, they will not run at all. So, a `CustomEvent`
     /// implementation can hold references to objects it doesn't own as long as the returned promise
     /// will be canceled before those objects go away.
-    async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult>;
+    ///
+    /// By default the event is answered with [`not_supported`], as a C++ `WorkerInterface` that
+    /// returns `event->notSupported()` does.
+    async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {
+        not_supported(event).await
+    }
 
     /// Convert `self` into the structure suitable for passing to C++ through FFI layer
     /// To obtain `workerd::WorkerInterface` on C++ side finish wrapping with `fromRust()`
@@ -104,6 +121,23 @@ pub trait Interface: kj::http::Service {
     {
         Box::new(ffi::Wrapper::new(Box::new(self)))
     }
+
+    /// `self` as the C++ `WorkerInterface` it implements.
+    fn into_kj(self) -> KjOwn<WorkerInterface>
+    where
+        Self: Sized + 'static,
+    {
+        ffi::bridge::wrapper_into_kj(Interface::into_ffi(self))
+    }
+}
+
+/// Answer `event` as a target that does not support it.
+///
+/// This is `CustomEvent::notSupported()`, which the event implements itself (typically by raising
+/// an appropriate error). Owns `event` until the answer arrives.
+pub async fn not_supported(event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {
+    let result = ffi::bridge::custom_event_not_supported(event).await?;
+    Ok(result.into())
 }
 
 /// Result of a scheduled event.

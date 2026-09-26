@@ -4,6 +4,8 @@
 
 #include "ffi.h"
 
+#include "bridge.h"
+
 #include <workerd/rust/worker/ffi.rs.h>
 
 #include <kj-rs/date.h>
@@ -13,41 +15,6 @@
 // itself cannot include it. See kj/ffi.c++ for the same pattern with HttpConnectSettings.
 
 namespace workerd::rust::worker {
-
-// C++ EventOutcome -> the bridge's shared EventOutcome enum (reverse of bridge.h's fromImpl).
-static EventOutcome toRustOutcome(workerd::EventOutcome outcome) {
-  switch (outcome) {
-    case workerd::EventOutcome::UNKNOWN:
-      return EventOutcome::Unknown;
-    case workerd::EventOutcome::OK:
-      return EventOutcome::Ok;
-    case workerd::EventOutcome::EXCEPTION:
-      return EventOutcome::Exception;
-    case workerd::EventOutcome::EXCEEDED_CPU:
-      return EventOutcome::ExceededCpu;
-    case workerd::EventOutcome::KILL_SWITCH:
-      return EventOutcome::KillSwitch;
-    case workerd::EventOutcome::DAEMON_DOWN:
-      return EventOutcome::DaemonDown;
-    case workerd::EventOutcome::SCRIPT_NOT_FOUND:
-      return EventOutcome::ScriptNotFound;
-    case workerd::EventOutcome::CANCELED:
-      return EventOutcome::Canceled;
-    case workerd::EventOutcome::EXCEEDED_MEMORY:
-      return EventOutcome::ExceededMemory;
-    case workerd::EventOutcome::LOAD_SHED:
-      return EventOutcome::LoadShed;
-    case workerd::EventOutcome::RESPONSE_STREAM_DISCONNECTED:
-      return EventOutcome::ResponseStreamDisconnected;
-    case workerd::EventOutcome::INTERNAL_ERROR:
-      return EventOutcome::InternalError;
-    case workerd::EventOutcome::EXCEEDED_WALL_TIME:
-      return EventOutcome::ExceededWallTime;
-    case workerd::EventOutcome::ABORTED:
-      return EventOutcome::Aborted;
-  }
-  KJ_UNREACHABLE;
-}
 
 kj::Promise<ScheduledResult> worker_run_scheduled(
     WorkerInterface& worker, int64_t scheduledTimeNanos, ::rust::Slice<const kj::byte> cron) {
@@ -80,6 +47,24 @@ kj::Promise<CustomEventResult> worker_custom_event(
   co_return CustomEventResult{
     .outcome = toRustOutcome(result.outcome),
   };
+}
+
+kj::Promise<CustomEventResult> custom_event_not_supported(kj::Own<CustomEvent> event) {
+  // `event` is a coroutine parameter, so it lives until the promise it returns has settled.
+  auto result = co_await event->notSupported();
+  co_return CustomEventResult{
+    .outcome = toRustOutcome(result.outcome),
+  };
+}
+
+void custom_event_failed(kj::Own<CustomEvent> event, ::rust::Box<Error> error) {
+  // Raising the error across the bridge is the bridge's own KjError -> kj::Exception conversion,
+  // so the exception the event sees keeps the error's type, description, location and details.
+  event->failed(KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { error->raise(); })));
+}
+
+kj::Own<WorkerInterface> wrapper_into_kj(::rust::Box<Wrapper> wrapper) {
+  return kj::from<kj_rs::Rust>(kj::mv(wrapper));
 }
 
 }  // namespace workerd::rust::worker
