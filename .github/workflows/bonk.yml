@@ -29,7 +29,7 @@ jobs:
           fetch-depth: 0 # Full history so the PR diff has a merge base with main
 
       - name: Run Bonk
-        uses: danlapid/ask-bonk/github@4768a8b500c9998bf02b321475fab0fe6f4c2f84
+        uses: danlapid/ask-bonk/github@4f53fb35754b4217f3ba4bb9cefb4659cc74d6c6
         # Fork of ask-bonk with the timeout input and rereview_context, pending upstream review.
         # Switch back to ask-bonk/ask-bonk once those changes land there.
         env:

@@ -46,6 +46,7 @@ What to look for in added code:
   `#[allow]` for lints.
 
 Boundaries:
+- Do not make correctness claims; those belong to the correctness specialist.
 - Never ask to rewrite existing C++ in Rust, and never ask to port code the PR only touches.
 - Do not suggest Rust where the new code is glue that mostly calls C++ APIs (JSG, V8, IoContext),
   where a bridge would cost more than the code it replaces, or where the surrounding component

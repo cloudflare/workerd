@@ -65,6 +65,15 @@ Severity:
   plausible.
 - `suggestion`: tightening ownership types when the current code is sound.
 
+Test code: in test files and test-only crates, cap severity at `info` unless the unsafety is
+reachable from production code. Before suggesting a guard or wrapper, check whether one already
+exists (for example an RAII test fixture that installs and clears state).
+
+Large PRs: start from the FFI and bridge files (`ffi.rs`, `bridge.h`, `*-ffi.c++`, `io.rs` and
+similar) and read every `// SAFETY:` comment. Ask whether the stated invariant is actually
+enforced, and by whom. A `question` is appropriate when an invariant depends on a caller contract
+you cannot see, such as a `&mut` receiver that is only sound if events never overlap.
+
 Calibration: trace the lifetime before reporting. A pattern that looks risky but is provably
 safe is not a finding. Do not flag `noexcept(false)` destructors, the size of `jsg::Lock` or
 `IoContext`, or anything clang-tidy already rejects in CI (`jsg-visit-for-gc`,

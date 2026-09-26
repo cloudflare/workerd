@@ -41,8 +41,10 @@ What to check in added or changed lines:
   set, check `src/workerd/util/` (`ring-buffer.h`, `weak-refs.h`, `state-machine.h`,
   `small-weak-vector.h`) and name the existing utility.
 - **Missing `override`, `[[nodiscard]]`/`KJ_WARN_UNUSED_RESULT`** where a result must be checked,
-  and unexplained magic numbers.
-- **New files**: need the Apache-2.0 copyright header with the current year.
+  and unexplained magic numbers (not in test files).
+- **New files**: need the Apache-2.0 copyright header, but only where sibling files in the same
+  directory carry one. It does not apply under `src/rust/cxx/` (the cxx fork, MIT/Apache) or in
+  other vendored code. Never flag the year of an existing header.
 - **Comments**: `//` only. `TODO(type)` uses a documented type, and `TODO(now)` must not merge.
   Comments describe the current state of the code, not the change, the ticket, or the debugging
   that produced it. Do not leave "previously this did X" notes. That narrative belongs in the
