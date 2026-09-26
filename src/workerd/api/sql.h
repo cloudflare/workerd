@@ -215,7 +215,7 @@ class SqlStorage::Cursor final: public jsg::Object {
     JSG_TS_OVERRIDE(<T extends Record<string, SqlStorageValue>> {
       [Symbol.iterator](): IterableIterator<T>;
       raw<U extends SqlStorageValue[]>(): IterableIterator<U>;
-      next(): { done?: false, value: T } | { done: true, value?: never };
+      next(): IteratorResult<T, undefined>;
       toArray(): T[];
       one(): T;
       columnNames: string[];
