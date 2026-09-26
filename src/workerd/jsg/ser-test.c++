@@ -5,6 +5,8 @@
 #include "jsg-test.h"
 #include "ser.h"
 
+#include <v8-value-serializer-version.h>
+
 namespace workerd::jsg::test {
 namespace {
 
@@ -175,6 +177,76 @@ JSG_DECLARE_ISOLATE_TYPE(SerTestIsolate,
     SerTestContext::Bar,
     SerTestContext::Baz,
     SerTestContext::Qux);
+
+KJ_TEST("deserialization header diagnostics expose metadata without payload contents") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+  auto expectFailure = [&](kj::ArrayPtr<const kj::byte> data, kj::StringPtr header, uint version) {
+    e.run([&](jsg::Lock& js) {
+      auto failure = kj::runCatchingExceptions([&]() {
+        Deserializer deser(js, data, kj::none, kj::none,
+            Deserializer::Options{.version = 15, .diagnosticContext = "RPC arguments"_kj});
+      });
+      auto& exception = KJ_ASSERT_NONNULL(failure);
+      KJ_EXPECT(exception.getType() == kj::Exception::Type::FAILED);
+      KJ_EXPECT(exception.getDescription() ==
+          kj::str("worker_do_not_log; message = Unable to deserialize cloned data due to invalid "
+                  "or unsupported version. [context=RPC arguments; bytes=",
+              data.size(), "; header=", header, "; wireVersion=", version, "; maxWireVersion=",
+              v8::CurrentValueSerializerFormatVersion(), "; v8=", v8::V8::GetVersion(), "]"));
+      auto jsError = js.exceptionToJs(kj::mv(exception));
+      KJ_EXPECT(kj::str(jsError.getHandle(js)).startsWith("Error: internal error"));
+    });
+  };
+
+  expectFailure({}, "empty", 0);
+  expectFailure("private payload"_kj.asBytes(), "missing", 0);
+  const kj::byte incompleteHeader[] = {0xff, 0x80};
+  expectFailure(kj::arrayPtr(incompleteHeader, 1), "present", 0);
+  expectFailure(incompleteHeader, "present", 0);
+  const kj::byte legacyHeader[] = {0xff, 12};
+  expectFailure(legacyHeader, "present", 12);
+  // A complete buffer with an unsupported multi-byte version, followed by private contents.
+  const kj::byte futureHeader[] = {0xff, 0xff, 0x01, 's', 'e', 'c', 'r', 'e', 't'};
+  expectFailure(futureHeader, "present", 255);
+}
+
+KJ_TEST("deserialization diagnostics preserve successful reads and other errors") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+  e.run([&](jsg::Lock& js) {
+    for (auto version: {13u, 15u, v8::CurrentValueSerializerFormatVersion()}) {
+      Serializer ser(js, {.version = version});
+      ser.write(js, js.str("private payload"_kj));
+      auto data = ser.release();
+      Deserializer deser(js, data, Deserializer::Options{.diagnosticContext = "RPC result"_kj});
+      KJ_EXPECT(deser.getVersion() == version);
+      KJ_EXPECT(kj::str(deser.readValue(js)) == "private payload");
+    }
+
+    Serializer headerlessSer(js, {.version = 15, .omitHeader = true});
+    headerlessSer.write(js, js.str("private payload"_kj));
+    auto headerlessData = headerlessSer.release();
+    Deserializer headerlessDeser(js, headerlessData,
+        Deserializer::Options{
+          .version = 15, .readHeader = false, .diagnosticContext = "RPC result"_kj});
+    KJ_EXPECT(kj::str(headerlessDeser.readValue(js)) == "private payload");
+
+    // Call sites without a diagnostic context still report header metadata.
+    KJ_EXPECT_THROW_MESSAGE("[context=unknown; bytes=15; header=missing; wireVersion=0;",
+        Deserializer(js, "private payload"_kj.asBytes()));
+
+    // A valid header followed by an invalid value fails in ReadValue(), not ReadHeader().
+    const kj::byte invalidValue[] = {0xff, 15, 0xff};
+    Deserializer deser(js, invalidValue, kj::none, kj::none,
+        Deserializer::Options{.diagnosticContext = "RPC result"_kj});
+    JSG_TRY(js) {
+      deser.readValue(js);
+      KJ_FAIL_EXPECT("invalid value was accepted");
+    }
+    JSG_CATCH(exception) {
+      KJ_EXPECT(kj::str(exception.getHandle(js)) == "Error: Unable to deserialize cloned data.");
+    }
+  });
+}
 
 // Define a whole second JSG isolate type that contains "updated" code where Bar no longer wraps
 // a string, it wraps an arbitrary value.

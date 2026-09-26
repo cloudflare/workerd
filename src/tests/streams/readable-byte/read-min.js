@@ -114,15 +114,25 @@ export const readMinValidation = {
 // (RespondInClosedState). Only a fractional fill makes close() throw
 // (ledger #7). TypeScript settles the parked read one microtask after
 // close(), leaving the descriptor available for that later response.
+//
+// The shape is shared with closedOrderAtEndOfData: a min-3 read parks, 2
+// bytes arrive, then close(). `observe` runs before close() so callers can
+// attach reactions to the reader and the read before either settles.
+async function closeBelowMinShape(observe = () => {}) {
+  const { rs, controller } = byteStream();
+  const reader = rs.getReader({ mode: 'byob' });
+  const read = reader.read(new Uint8Array(10), { min: 3 });
+  observe(reader, read);
+  await scheduler.wait(5);
+  controller().enqueue(new Uint8Array([1, 2]));
+  await scheduler.wait(5);
+  controller().close();
+  return { reader, read };
+}
+
 export const closeBelowMin = {
   async test() {
-    const { rs, controller } = byteStream();
-    const reader = rs.getReader({ mode: 'byob' });
-    const read = reader.read(new Uint8Array(10), { min: 3 });
-    await scheduler.wait(5);
-    controller().enqueue(new Uint8Array([1, 2]));
-    await scheduler.wait(5);
-    controller().close();
+    const { reader, read } = await closeBelowMinShape();
     strictEqual(await reader.closed, undefined);
     const { value, done } = await read;
     strictEqual(done, false);
@@ -133,6 +143,41 @@ export const closeBelowMin = {
     strictEqual(tail.done, true);
     ok(tail.value instanceof Uint8Array);
     strictEqual(tail.value.byteLength, 0);
+  },
+};
+
+// DIVERGENCE (ledger #27): where closed settles relative to the
+// closeBelowMin tail read. C++ fulfills the read first; TypeScript
+// resolves closed first, matching the order the spec gives a read that
+// drains the last queued bytes after close() (HandleQueueDrain closes the
+// stream before the read commits). That drain case is parity and is
+// asserted first.
+export const closedOrderAtEndOfData = {
+  async test() {
+    const drained = [];
+    {
+      const { rs, controller } = byteStream();
+      controller().enqueue(new Uint8Array([1, 2]));
+      controller().close();
+      const reader = rs.getReader({ mode: 'byob' });
+      const closed = reader.closed.then(() => drained.push('closed'));
+      const read = reader
+        .read(new Uint8Array(10))
+        .then((r) => drained.push(`read:${r.value.byteLength}`));
+      await Promise.all([closed, read]);
+    }
+    strictEqual(drained.join(), 'closed,read:2');
+
+    const tail = [];
+    let observed;
+    await closeBelowMinShape((reader, read) => {
+      observed = [
+        reader.closed.then(() => tail.push('closed')),
+        read.then((r) => tail.push(`read:${r.value.byteLength}`)),
+      ];
+    });
+    await Promise.all(observed);
+    strictEqual(tail.join(), usingTsImpl ? 'closed,read:2' : 'read:2,closed');
   },
 };
 

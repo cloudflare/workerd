@@ -19,6 +19,7 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "construction", esModule = embed "construction.js"),
   (name = "cancel-matrix", esModule = embed "cancel-matrix.js"),
   (name = "terminate", esModule = embed "terminate.js"),
+  (name = "cancel-outcomes", esModule = embed "cancel-outcomes.js"),
   (name = "then-interceptors", esModule = embed "then-interceptors.js"),
   (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
   (name = "gc", esModule = embed "gc.js"),

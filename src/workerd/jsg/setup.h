@@ -46,6 +46,11 @@ WD_STRONG_BOOL(JitCodeEventTracking);
 // V8 to consume all available cores with background work. So, please specify a thread pool size.
 kj::Own<v8::Platform> defaultPlatform(uint backgroundThreadCount);
 
+// Returns a fresh v8::IsolateGroup if this V8 build supports more than one group (pointer
+// compression with multiple cages), otherwise the default group. Giving each isolate its own
+// group exercises the multi-group code paths when the V8 build has them.
+v8::IsolateGroup newIsolateGroup();
+
 // In order to use any part of the JSG API, you must first construct a V8System. You can only
 // construct one of these per process. This performs process-wide initialization of the V8
 // library.
@@ -707,8 +712,9 @@ class Isolate: public IsolateBase {
   // most 4Gbytes of V8 heap in all.  Groups can be created with
   // v8::IsolateGroup::Create().  (If using V8 pointer compression, this
   // requires the enable_pointer_compression_multiple_cages build flag for V8.)
-  // Pass v8::IsolateGroup::Default() as the group to put all isolates in the
-  // same group.
+  // Pass v8::IsolateGroup::GetDefault() as the group to put all isolates in the
+  // same group, or jsg::newIsolateGroup() to get a fresh group when the build
+  // supports it.
   template <typename MetaConfiguration>
   explicit Isolate(V8System& system,
       v8::IsolateGroup group,
@@ -754,7 +760,7 @@ class Isolate: public IsolateBase {
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {})
       : Isolate(system,
-            v8::IsolateGroup::GetDefault(),
+            newIsolateGroup(),
             nullptr,
             kj::mv(observer),
             defaultExternalStringAllocator(),

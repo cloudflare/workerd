@@ -606,6 +606,8 @@ class ModuleBundle {
 
     // The source must be backed by static process-lifetime storage.
     BuiltinBuilder& addEsm(const Url& id, kj::ArrayPtr<const char> source) KJ_LIFETIMEBOUND;
+    // The UTF-8 source shares ownership of its backing storage.
+    BuiltinBuilder& addEsm(const Url& id, kj::Arc<OwnedAscii> source) KJ_LIFETIMEBOUND;
     // The source is already encoded as Latin-1 or UTF-16 for V8.
     BuiltinBuilder& addEsm(const Url& id, StaticExternalStringSource source) KJ_LIFETIMEBOUND;
 

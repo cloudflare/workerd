@@ -449,6 +449,17 @@ interface Env {
   __INVALID_OBJECT_2: DurableObjectNamespace<TestEntrypoint>;
 }
 
+type TestWorkflowParams = {foo: string};
+
+export class TestWorkflowEntrypoint extends CloudflareWorkersModule.WorkflowEntrypoint<
+  Env,
+  TestWorkflowParams
+> {}
+
+expectTypeOf<
+  LoopbackForExport<typeof TestWorkflowEntrypoint>
+>().toEqualTypeOf<Workflow<TestWorkflowParams>>();
+
 export default <ExportedHandler<Env>>{
   async fetch(_request, env, _ctx) {
     // Check non-RPC services and namespaces work as usual

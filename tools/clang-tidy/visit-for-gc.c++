@@ -37,9 +37,15 @@ bool endsWithQualified(llvm::StringRef qualifiedName, llvm::StringRef suffix) {
 
 // Visitable leaf templates: each holds a GC root and has a public visitForGc.
 const llvm::StringRef kVisitableLeafTemplates[] = {
-    "jsg::Ref",      "jsg::V8Ref",   "jsg::JsRef",
-    "jsg::Function", "jsg::Promise", "jsg::HashableV8Ref",
-    "jsg::MemoizedIdentity", "jsg::Generator", "jsg::AsyncGenerator",
+  "jsg::Ref",
+  "jsg::V8Ref",
+  "jsg::JsRef",
+  "jsg::Function",
+  "jsg::Promise",
+  "jsg::HashableV8Ref",
+  "jsg::MemoizedIdentity",
+  "jsg::Generator",
+  "jsg::AsyncGenerator",
 };
 
 // Non-template visitable leaf types. jsg::Name is deliberately absent: its
@@ -47,8 +53,8 @@ const llvm::StringRef kVisitableLeafTemplates[] = {
 // handle is a strong root, and a v8::Symbol cannot form a JS<->C++ cycle, so
 // visitation is never required.
 const llvm::StringRef kVisitableLeafTypes[] = {
-    "jsg::Value",
-    "jsg::Data",
+  "jsg::Value",
+  "jsg::Data",
 };
 
 // jsg::Promise<T>::Resolver's printed qualified name embeds the
@@ -58,8 +64,7 @@ bool isPromiseResolver(const clang::CXXRecordDecl *rd) {
   const auto *parent = llvm::dyn_cast<clang::CXXRecordDecl>(rd->getDeclContext());
   if (parent == nullptr) return false;
   std::string fqn;
-  if (const auto *spec =
-          llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(parent)) {
+  if (const auto *spec = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(parent)) {
     fqn = spec->getSpecializedTemplate()->getQualifiedNameAsString();
   } else {
     fqn = parent->getQualifiedNameAsString();
@@ -75,19 +80,23 @@ enum class ContainerKind { None, FirstArg, AnyArg };
 // jsg::Sequence is a kj::Array subclass without its own visitForGc: visitable
 // iff its element type is (via visitAll).
 const llvm::StringRef kFirstArgContainers[] = {
-    "kj::Maybe",  "kj::Array",       "kj::Vector",
-    "jsg::Optional", "jsg::LenientOptional", "jsg::Sequence",
+  "kj::Maybe",
+  "kj::Array",
+  "kj::Vector",
+  "jsg::Optional",
+  "jsg::LenientOptional",
+  "jsg::Sequence",
 };
 
 const llvm::StringRef kAnyArgContainers[] = {
-    "kj::OneOf",
+  "kj::OneOf",
 };
 
 ContainerKind getContainerKind(llvm::StringRef qualifiedName) {
-  for (auto suffix : kFirstArgContainers) {
+  for (auto suffix: kFirstArgContainers) {
     if (endsWithQualified(qualifiedName, suffix)) return ContainerKind::FirstArg;
   }
-  for (auto suffix : kAnyArgContainers) {
+  for (auto suffix: kAnyArgContainers) {
     if (endsWithQualified(qualifiedName, suffix)) return ContainerKind::AnyArg;
   }
   return ContainerKind::None;
@@ -110,7 +119,7 @@ bool isVisitableType(clang::QualType qt) {
   // Direct named record type.
   if (const auto *rt = qt.getTypePtr()->getAs<clang::RecordType>()) {
     auto fqn = rt->getDecl()->getQualifiedNameAsString();
-    for (auto suffix : kVisitableLeafTypes) {
+    for (auto suffix: kVisitableLeafTypes) {
       if (endsWithQualified(fqn, suffix)) return true;
     }
     if (const auto *rd = llvm::dyn_cast<clang::CXXRecordDecl>(rt->getDecl())) {
@@ -122,7 +131,7 @@ bool isVisitableType(clang::QualType qt) {
   std::string tmpl = getTemplateQualifiedName(qt);
   if (tmpl.empty()) return false;
 
-  for (auto suffix : kVisitableLeafTemplates) {
+  for (auto suffix: kVisitableLeafTemplates) {
     if (endsWithQualified(tmpl, suffix)) return true;
   }
 
@@ -139,7 +148,7 @@ bool isVisitableType(clang::QualType qt) {
     return isVisitableType(args[0].getAsType());
   }
   // AnyArg
-  for (const auto &arg : args) {
+  for (const auto &arg: args) {
     if (arg.getKind() == clang::TemplateArgument::Type) {
       if (isVisitableType(arg.getAsType())) return true;
     }
@@ -154,8 +163,8 @@ bool isVisitableType(clang::QualType qt) {
 // would yield false "no body" diagnostics when the definition lives in a
 // sibling .c++ file.
 bool isImplFile(llvm::StringRef filename) {
-  return filename.ends_with(".c++") || filename.ends_with(".cpp") ||
-         filename.ends_with(".cc") || filename.ends_with(".c");
+  return filename.ends_with(".c++") || filename.ends_with(".cpp") || filename.ends_with(".cc") ||
+      filename.ends_with(".c");
 }
 
 // Returns true if `decl` is lexically nested inside a `namespace jsg` (whose
@@ -179,9 +188,7 @@ void VisitForGcCheck::registerMatchers(clang::ast_matchers::MatchFinder *Finder)
   // check(). We also match every FieldDecl so we can compute the set of
   // record types that appear as fields of other records (the "used as
   // member" set), which gates the Option B diagnostic.
-  Finder->addMatcher(
-      cxxRecordDecl(isDefinition(), unless(isImplicit())).bind("record"),
-      this);
+  Finder->addMatcher(cxxRecordDecl(isDefinition(), unless(isImplicit())).bind("record"), this);
   Finder->addMatcher(fieldDecl().bind("field"), this);
 }
 
@@ -223,12 +230,12 @@ void VisitForGcCheck::onEndOfTranslationUnit() {
   // (a) recognize when a parent's visitForGc reaches into a nested struct
   // field, and (b) restrict "used-as-field" diagnostics to TUs where some
   // holder's body is actually parseable here.
-  for (const auto *record : records_) {
+  for (const auto *record: records_) {
     if (isInJsgNamespace(record)) continue;
     if (record->getDescribedClassTemplate() != nullptr) continue;
     if (llvm::isa<clang::ClassTemplatePartialSpecializationDecl>(record)) continue;
     if (record->isDependentContext()) continue;
-    for (const auto *method : record->methods()) {
+    for (const auto *method: record->methods()) {
       if (method->getNameAsString() != "visitForGc") continue;
       const clang::FunctionDecl *defn = nullptr;
       if (!method->isDefined(defn) || defn == nullptr) continue;
@@ -238,7 +245,7 @@ void VisitForGcCheck::onEndOfTranslationUnit() {
   }
 
   // Second pass: emit diagnostics for records that need them.
-  for (const auto *record : records_) {
+  for (const auto *record: records_) {
     checkRecord(record);
   }
 }
@@ -256,7 +263,7 @@ void VisitForGcCheck::recordUsedAsField(clang::QualType qt) {
   // Recurse into template arguments so kj::Maybe<Impl>, kj::Vector<Impl>,
   // etc. mark Impl as used-as-field.
   if (const auto *t = qt.getTypePtr()->getAs<clang::TemplateSpecializationType>()) {
-    for (const auto &arg : t->template_arguments()) {
+    for (const auto &arg: t->template_arguments()) {
       if (arg.getKind() == clang::TemplateArgument::Type) {
         recordUsedAsField(arg.getAsType());
       }
@@ -276,7 +283,7 @@ void VisitForGcCheck::checkRecord(const clang::CXXRecordDecl *record) {
   if (isInJsgNamespace(record)) return;
 
   llvm::SmallVector<const clang::FieldDecl *, 8> visitableFields;
-  for (const auto *field : record->fields()) {
+  for (const auto *field: record->fields()) {
     if (isVisitableType(field->getType())) {
       visitableFields.push_back(field);
     }
@@ -284,7 +291,7 @@ void VisitForGcCheck::checkRecord(const clang::CXXRecordDecl *record) {
   if (visitableFields.empty()) return;
 
   const clang::CXXMethodDecl *visitMethod = nullptr;
-  for (const auto *method : record->methods()) {
+  for (const auto *method: record->methods()) {
     if (method->getNameAsString() == "visitForGc") {
       visitMethod = method;
       break;
@@ -307,7 +314,7 @@ void VisitForGcCheck::checkRecord(const clang::CXXRecordDecl *record) {
     //     TU, defer — some other TU will be authoritative.
     //   - Standalone struct not held anywhere, no diagnostic.
     bool hasBaseVisitForGc = false;
-    for (const auto &base : record->bases()) {
+    for (const auto &base: record->bases()) {
       if (const auto *baseRecord = base.getType()->getAsCXXRecordDecl()) {
         if (baseHasVisitForGc(baseRecord)) {
           hasBaseVisitForGc = true;
@@ -316,19 +323,18 @@ void VisitForGcCheck::checkRecord(const clang::CXXRecordDecl *record) {
       }
     }
     bool usedAsField = usedAsField_.count(record->getCanonicalDecl()) != 0;
-    bool holderVisible =
-        holderVisitForGcVisible_.count(record->getCanonicalDecl()) != 0;
+    bool holderVisible = holderVisitForGcVisible_.count(record->getCanonicalDecl()) != 0;
     if (!hasBaseVisitForGc && !(usedAsField && holderVisible)) return;
 
-    for (const auto *field : visitableFields) {
+    for (const auto *field: visitableFields) {
       // Suppress when an enclosing record's visitForGc body reaches this
       // field via a member-access chain (e.g., visitor.visit(state.func)
       // covers State::func from NativeHandler's body).
       if (transitivelyVisitedFields_.count(field->getCanonicalDecl())) continue;
 
       diag(field->getLocation(),
-           "field '%0' of visitable type '%1' is not visited in visitForGc "
-           "(class has no visitForGc method)")
+          "field '%0' of visitable type '%1' is not visited in visitForGc "
+          "(class has no visitForGc method)")
           << field->getName() << field->getType().getAsString();
     }
     return;
@@ -345,10 +351,9 @@ void VisitForGcCheck::checkRecord(const clang::CXXRecordDecl *record) {
   llvm::DenseSet<const clang::FieldDecl *> visitedFields;
   collectVisitedFields(body, visitedFields);
 
-  for (const auto *field : visitableFields) {
+  for (const auto *field: visitableFields) {
     if (!visitedFields.count(field->getCanonicalDecl())) {
-      diag(field->getLocation(),
-           "field '%0' of visitable type '%1' is not visited in visitForGc")
+      diag(field->getLocation(), "field '%0' of visitable type '%1' is not visited in visitForGc")
           << field->getName() << field->getType().getAsString();
     }
   }
@@ -360,16 +365,15 @@ bool VisitForGcCheck::baseHasVisitForGc(const clang::CXXRecordDecl *record) {
 }
 
 bool VisitForGcCheck::baseHasVisitForGcImpl(
-    const clang::CXXRecordDecl *record,
-    llvm::DenseSet<const clang::CXXRecordDecl *> &visited) {
+    const clang::CXXRecordDecl *record, llvm::DenseSet<const clang::CXXRecordDecl *> &visited) {
   if (record == nullptr) return false;
   record = record->getDefinition();
   if (record == nullptr) return false;
   if (!visited.insert(record->getCanonicalDecl()).second) return false;
-  for (const auto *method : record->methods()) {
+  for (const auto *method: record->methods()) {
     if (method->getNameAsString() == "visitForGc") return true;
   }
-  for (const auto &base : record->bases()) {
+  for (const auto &base: record->bases()) {
     if (const auto *baseRecord = base.getType()->getAsCXXRecordDecl()) {
       if (baseHasVisitForGcImpl(baseRecord, visited)) return true;
     }
@@ -378,8 +382,7 @@ bool VisitForGcCheck::baseHasVisitForGcImpl(
 }
 
 void VisitForGcCheck::collectVisitedFields(
-    const clang::Stmt *stmt,
-    llvm::DenseSet<const clang::FieldDecl *> &visitedFields) {
+    const clang::Stmt *stmt, llvm::DenseSet<const clang::FieldDecl *> &visitedFields) {
   if (!stmt) return;
 
   if (auto *memberExpr = llvm::dyn_cast<clang::MemberExpr>(stmt)) {
@@ -399,14 +402,13 @@ void VisitForGcCheck::collectVisitedFields(
       // i.e., we have evidence about whether its fields are visited in
       // this TU. Used to gate the "used-as-field" diagnostic so it only
       // fires in TUs that can authoritatively answer.
-      if (const auto *parent = llvm::dyn_cast<clang::CXXRecordDecl>(
-              fieldDecl->getParent())) {
+      if (const auto *parent = llvm::dyn_cast<clang::CXXRecordDecl>(fieldDecl->getParent())) {
         holderVisitForGcVisible_.insert(parent->getCanonicalDecl());
       }
     }
   }
 
-  for (const auto *child : stmt->children()) {
+  for (const auto *child: stmt->children()) {
     collectVisitedFields(child, visitedFields);
   }
 }
