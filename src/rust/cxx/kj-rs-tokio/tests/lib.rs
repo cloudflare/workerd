@@ -3,8 +3,24 @@
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::missing_panics_doc)]
 
+use std::future::Future;
+
+use kj_rs_tokio::Runtime;
+
+#[cfg(test)]
+mod runtime_tests;
 mod test_helpers;
 
+// The tokio-driven suite's C++ helpers (runtime_tests.rs, which reaches them through `ffi`), as
+// the crate's public surface. Installing a context for them is `TestRuntime`'s alone.
+pub use ffi::clear_executor;
+pub use ffi::cross_thread_fulfill_from_thread;
+pub use ffi::execute_async_on;
+pub use ffi::execute_sync_from_thread;
+pub use ffi::kj_awaits_rust_sleep;
+pub use ffi::kj_yield_until_would_sleep;
+pub use ffi::publish_executor;
+pub use ffi::test_fulfiller_promise;
 use test_helpers::completed_task_count;
 use test_helpers::has_loop_runtime_handle;
 use test_helpers::nested_wait_from_task;
@@ -23,9 +39,51 @@ use test_helpers::task_fulfills_kj_fulfiller;
 use test_helpers::threaded_wake_future;
 use test_helpers::tokio_sleep_on_runtime;
 use test_helpers::wake_stashed_waker;
+use test_helpers::yield_loop_poll_count;
 
 type Result<T> = std::io::Result<T>;
 type Error = std::io::Error;
+
+/// A [`Runtime`] whose context is the C++ helpers' current one (test-helpers.h,
+/// `installTestContext`) for as long as this value lives.
+///
+/// The helpers keep bare pointers into the context in thread-local state, so the installation
+/// must not outlive the context. This type is the only installer and owns the Runtime, hands out
+/// no `&mut Runtime` (the one way to move the Runtime, and its context, out from under the
+/// installation), and clears the helpers' state in `Drop`, which runs before the field drops the
+/// Runtime. Like the Runtime, it is `!Send`: the installation is this thread's.
+pub struct TestRuntime(Runtime);
+
+impl TestRuntime {
+    pub fn new() -> Self {
+        let mut runtime = Runtime::new().expect("Runtime::new");
+        // SAFETY: the pointers `installTestContext` keeps live in this thread's state until
+        // `Drop` calls `clearTestContext`, and the context's owner (`self.0`) is dropped only
+        // after `Drop` has run; no other code installs or clears (the bridge fns are private).
+        unsafe { ffi::install_test_context(runtime.context()) };
+        Self(runtime)
+    }
+
+    /// [`Runtime::block_on`].
+    pub fn block_on<F: Future>(
+        &mut self,
+        future: F,
+    ) -> std::result::Result<F::Output, cxx::KjError> {
+        self.0.block_on(future)
+    }
+}
+
+impl Default for TestRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for TestRuntime {
+    fn drop(&mut self) {
+        ffi::clear_test_context();
+    }
+}
 
 #[cxx::bridge(namespace = "kj_rs_tokio_test")]
 mod ffi {
@@ -68,6 +126,8 @@ mod ffi {
         async fn std_thread_wake_future() -> Result<()>;
         /// A task that yields forever; poll() must stay bounded.
         fn spawn_yield_loop_task();
+        /// How many times `spawn_yield_loop_task`'s task has run (process-wide).
+        fn yield_loop_poll_count() -> u64;
         /// A task re-enters promise.wait(); must surface as an Err, not an abort.
         async fn nested_wait_from_task() -> Result<()>;
         /// A spawned task panics; the JoinHandle error surfaces as an Err (never an abort).
@@ -98,6 +158,13 @@ mod ffi {
         fn stashed_future_poll_count() -> u64;
     }
 
+    #[namespace = "kj_rs_tokio"]
+    unsafe extern "C++" {
+        include!("kj-rs-tokio/tokio-event-port.h");
+
+        type TokioAsyncIoContext = kj_rs_tokio::TokioAsyncIoContext;
+    }
+
     unsafe extern "C++" {
         include!("kj-rs-tokio-test/test-helpers.h");
 
@@ -108,11 +175,47 @@ mod ffi {
         #[cxx_name = "kjNeverPromise"]
         async fn kj_never_promise();
         /// Re-enters `promise.wait()` on the test's WaitScope from wherever it is called. Throws
-        /// (-> `Err`) when called from inside a spawned task.
+        /// (-> `Err`) when called from inside a spawned task, or on a tokio-driven loop.
         #[cxx_name = "nestedWait"]
         fn nested_wait() -> Result<()>;
         /// Fulfills the kj::PromiseFulfiller the C++ test installed with `setTestFulfiller`.
         #[cxx_name = "fulfillTestFulfiller"]
         fn fulfill_test_fulfiller(value: i32) -> Result<()>;
+
+        // The tokio-driven suite's helpers (runtime_tests.rs); see test-helpers.h.
+
+        /// Installs the context's timer and WaitScope as the helpers' current ones.
+        ///
+        /// # Safety
+        ///
+        /// Keeps pointers into `context` in thread-local state past the call: the caller must
+        /// call `clear_test_context` on this thread before `context` is dropped (`TestRuntime`).
+        #[cxx_name = "installTestContext"]
+        unsafe fn install_test_context(context: Pin<&mut TokioAsyncIoContext>);
+        #[cxx_name = "clearTestContext"]
+        fn clear_test_context();
+        /// A promise fulfilled by `fulfill_test_fulfiller`.
+        #[cxx_name = "testFulfillerPromise"]
+        async fn test_fulfiller_promise() -> i32;
+        /// `value * 2`, computed on this loop by `kj::Executor::executeSync()` from a thread
+        /// started for the call.
+        #[cxx_name = "executeSyncFromThread"]
+        async fn execute_sync_from_thread(value: i32) -> i32;
+        /// `value`, through a cross-thread fulfiller fulfilled from a thread after `delay_ms`.
+        #[cxx_name = "crossThreadFulfillFromThread"]
+        async fn cross_thread_fulfill_from_thread(delay_ms: u64, value: i32) -> i32;
+        /// This loop's Executor into `slot` (0 or 1); `execute_async_on` runs `value` on the
+        /// loop that published `slot`, blocking until it has.
+        #[cxx_name = "publishExecutor"]
+        fn publish_executor(slot: u8) -> Result<()>;
+        #[cxx_name = "clearExecutor"]
+        fn clear_executor(slot: u8) -> Result<()>;
+        #[cxx_name = "executeAsyncOn"]
+        async fn execute_async_on(slot: u8, value: i32) -> i32;
+        #[cxx_name = "kjYieldUntilWouldSleep"]
+        async fn kj_yield_until_would_sleep();
+        /// A KJ coroutine awaiting `tokio_sleep_on_runtime(ms)`.
+        #[cxx_name = "kjAwaitsRustSleep"]
+        async fn kj_awaits_rust_sleep(ms: u64);
     }
 }

@@ -39,6 +39,8 @@ rust_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/cxx",
+        "//src/rust/cxx/kj-rs",
+        "@crates_vendor//:futures",
         "@crates_vendor//:tokio",
     ],
 )
@@ -66,5 +68,6 @@ rust_cxx_bridge(
         # forbids.
         "@capnp-cpp//src/kj:kj-async-core",
         "//src/rust/cxx:core",
+        "//src/rust/cxx/kj-rs",
     ],
 )

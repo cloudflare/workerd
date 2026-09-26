@@ -242,7 +242,7 @@ fn spawned_tasks_run_during_wait() {
     }
     assert!(done);
     // The JoinHandle should complete promptly now.
-    port.runtime.block_on(&mut jh).unwrap();
+    port.runtime.as_ref().unwrap().block_on(&mut jh).unwrap();
 }
 
 #[test]
