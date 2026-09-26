@@ -33,6 +33,7 @@ wd_rust_crate(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        "@crates_vendor//:futures",
         "@workerd//src/rust/kj",
         "@workerd//src/workerd/io:outcome_capnp_rust",
     ],
@@ -42,6 +43,7 @@ wd_cc_library(
     name = "bridge",
     srcs = ["ffi.c++"],
     hdrs = ["bridge.h"],
+    visibility = ["//visibility:public"],
     deps = [
         ":ffi.rs@cxx",
         "@capnp-cpp//src/kj",

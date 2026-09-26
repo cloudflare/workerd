@@ -86,13 +86,6 @@ impl Interface for Worker {
     ) -> crate::Result<AlarmResult> {
         Err(Self::not_implemented("run_alarm"))
     }
-
-    async fn custom_event(
-        &mut self,
-        _event: crate::KjOwn<crate::CustomEvent>,
-    ) -> crate::Result<crate::CustomEventResult> {
-        Err(Self::not_implemented("custom_event"))
-    }
 }
 
 pub fn new_ok_worker() -> Box<Wrapper> {
