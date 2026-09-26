@@ -4,10 +4,9 @@
 
 // Re-entrancy edges. Read results are ordinary objects, so resolving a
 // read runs the thenable check — a patched Object.prototype.then getter
-// fires once per read under C++, twice under TypeScript. Under TypeScript
-// the first firing runs inside the write that produced the chunk, while it
-// is still moving the rest of its output into the readable, so the getter
-// can tear the pair down mid-write. A second concurrent default read
+// fires once per read. Under TypeScript it fires inside the write that
+// produced the chunk, while it is still moving the rest of its output into
+// the readable, so the getter can tear the pair down mid-write. A second concurrent default read
 // diverges: the C++ internal readable supports a single pending read
 // (TypeError), TypeScript parks and serves in order.
 
@@ -49,7 +48,7 @@ export const thenInterceptionDuringReadResolution = {
         const readPromise = reader.read();
         await writer.write(enc.encode('ab'));
         ok(!(await readPromise).done);
-        strictEqual(fired, usingTsImpl ? 2 : 1);
+        strictEqual(fired, 1);
       }
     );
   },

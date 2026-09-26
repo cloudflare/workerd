@@ -75,9 +75,9 @@ const {
   FinalizationRegistryPrototypeUnregister,
   MathMin,
   ObjectCreate,
+  ObjectSetPrototypeOf,
   PromisePrototypeThen,
   PromiseResolve,
-  PromiseReject,
   PromiseWithResolvers,
   ReflectConstruct,
   Symbol,
@@ -92,12 +92,13 @@ const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
 };
 
-// Read-result objects are plain { value, done } objects with the default
-// Object.prototype, as the spec requires. Resolving a read promise with one
-// looks up `then` on it, so a patched Object.prototype.then can intercept
-// the user's read and the internal code that consumes the same promise
-// (the pipe, the draining fallback, drain-then-close). Accepted: the
-// spec's own resolution has the same lookup.
+// The read results the backends settle their read promises with. Their
+// prototype is null, so resolving a promise with one finds no `then` for a
+// patched Object.prototype to supply: settling an internal read runs no user
+// code. Built as a literal, then detached from Object.prototype: a
+// { __proto__: null } literal would get dictionary-mode properties. A user's
+// read promise settles with a plain copy instead (the reader layer's
+// userReadResult), the one `then` lookup the spec makes per read.
 export function createReadResult<T>(
   value: T,
   done: false
@@ -110,7 +111,9 @@ export function createReadResult<T>(
   value: T | undefined,
   done: boolean
 ): { value: T | undefined; done: boolean } {
-  return { value, done };
+  const result = { value, done };
+  ObjectSetPrototypeOf(result, null);
+  return result;
 }
 
 // Spec CloneArrayBuffer: a fresh %ArrayBuffer% holding the given bytes.
@@ -247,6 +250,11 @@ export interface StreamConsumer<V> {
   // Submit a default read. Per-reader FIFO; reader identity enables
   // selective rejection on lock release.
   read(reader: object): Promise<ReadableStreamReadResult<V>>;
+  // Submit a default read as a read request (spec): the consumer settles it
+  // by calling its resolve or reject, synchronously when the read can be
+  // answered now, otherwise from the call that answers it (an enqueue, a
+  // close, a delivery). read() is this with a promise's resolvers.
+  submitRead(request: PendingRead<V>): void;
   // Attempt a synchronous read. Returns the result directly when data (or
   // the close sentinel) is immediately available at the cursor, or
   // undefined when no data is buffered / reads are already queued (caller
@@ -570,9 +578,10 @@ class StreamQueue<T, V = T> {
     this.#notifyAll();
   }
 
-  // notify() is the one walk callback that runs user code: it resolves read
-  // promises with plain { value, done } objects, whose `then` lookup invokes
-  // a patched Object.prototype.then getter synchronously, and that getter
+  // notify() is the one walk callback that runs user code: it settles read
+  // requests, and a user's read request resolves the user's promise with a
+  // plain { value, done } object, whose `then` lookup invokes a patched
+  // Object.prototype.then getter synchronously; that getter
   // can cancel or tee a branch, removing its cursor and shifting the tail of
   // #cursors down. A lone cursor leaves nothing to skip; with more, notify a
   // copy: a cursor that left meanwhile has no pending reads, so its notify()
@@ -866,6 +875,15 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
       >;
     this.#pendingReads.push({ resolve, reject, reader });
     return promise;
+  }
+
+  submitRead(request: PendingRead<V>): void {
+    const sync = this.tryReadSync(request.reader);
+    if (sync !== undefined) {
+      request.resolve(sync);
+      return;
+    }
+    this.#pendingReads.push(request);
   }
 
   // Called by the queue when new data (or the close sentinel) is enqueued.
@@ -1251,7 +1269,8 @@ class ByteStreamCursor
     if (this.#pendingPullIntos.length === 0) {
       this.#fillFromQueue(desc);
       if (desc.bytesFilled >= desc.minimumFill) {
-        return PromiseResolve(createReadResult(this.#convert(desc), false));
+        desc.resolve(createReadResult(this.#convert(desc), false));
+        return desc.promise;
       }
       if (this.queue.getEntry(this.position) === CLOSE_SENTINEL) {
         // The cursor faces the sentinel: no more data can ever arrive
@@ -1265,7 +1284,8 @@ class ByteStreamCursor
           if (this.#errorStreamCallback !== undefined) {
             this.#errorStreamCallback(e, this.ownerDeref());
           }
-          return PromiseReject(e);
+          desc.reject(e);
+          return desc.promise;
         }
         // Element-aligned (possibly empty) fill: settle via the deferred
         // end-of-data settlement.
