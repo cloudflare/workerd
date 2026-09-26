@@ -3937,15 +3937,7 @@ type SqlStorageValue = ArrayBuffer | string | number | null;
 declare abstract class SqlStorageCursor<
   T extends Record<string, SqlStorageValue>,
 > {
-  next():
-    | {
-        done?: false;
-        value: T;
-      }
-    | {
-        done: true;
-        value?: never;
-      };
+  next(): IteratorResult<T, undefined>;
   toArray(): T[];
   one(): T;
   raw<U extends SqlStorageValue[]>(): IterableIterator<U>;
