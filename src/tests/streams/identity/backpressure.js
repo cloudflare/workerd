@@ -199,11 +199,12 @@ export const stringWriteDesiredSizeAccounting = {
     const w = writer.write('hello');
     strictEqual(writer.desiredSize, usingTsImpl ? 85 : 95);
 
-    // Either way, the accounting reverses fully once the chunk is consumed.
+    // Either way, the accounting reverses fully once the chunk is read and
+    // the write has settled.
     await reader.read();
+    await w;
     strictEqual(writer.desiredSize, 100);
 
-    await w;
     await writer.close();
   },
 };

@@ -195,10 +195,11 @@ function createCodecPair(
   let readableController: object;
   // Set, with the reason, once the readable takes no more chunks: its
   // reader cancelled it, or the pair errored. Enqueuing runs user code —
-  // resolving a read looks up `then` on the result (createReadResult in
-  // queue.ts), and a getter there can cancel the reader or error the pair
-  // through the Node.js interop hook — so a drain checks this between
-  // pieces rather than enqueue into a stream that would throw.
+  // resolving a user's read looks up `then` on the result (see
+  // defaultReaderRead in readable.ts), and a getter there can cancel the
+  // reader or error the pair through the Node.js interop hook — so a drain
+  // checks this between pieces rather than enqueue into a stream that
+  // would throw.
   let finished = false;
   let finishReason: unknown;
 
