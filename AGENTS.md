@@ -197,6 +197,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Bazel build rules      | `build/`                                                      | Custom `wd_*` macros; `wd_test.bzl` generates 3 test variants                                                |
 | TypeScript types       | `types/`                                                      | Extracted from C++ RTTI + hand-written `defines/*.d.ts`; see `types/AGENTS.md` for detailed typings guidance |
 | V8 patches             | `patches/v8/`                                                 | 33 patches; see `docs/v8-updates.md`                                                                         |
+| Perfetto trace points  | `src/workerd/util/perfetto-tracing.h` (C++), `src/rust/perfetto/` (Rust) | Rust backend behind `--//src/workerd/util:use_rust_perfetto`; see `src/rust/AGENTS.md` PERFETTO TRACING |
 
 ## Coding Conventions
 

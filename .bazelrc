@@ -92,8 +92,13 @@ build:macos --copt=-UDEBUG
 # Keep workerd and V8's Perfetto build configurations in sync.
 build:perfetto --//src/workerd/util:use_perfetto=True
 build:perfetto --@v8//:v8_use_perfetto=True
+# Perfetto trace points in Rust (//src/rust/perfetto). The flag defaults to off so that embedders
+# that don't read this file (and may not provide the Perfetto C ABI and Rust SDK) get the no-op
+# facade; see the comment on the flag in src/workerd/util/BUILD.bazel.
+build:perfetto --//src/workerd/util:use_rust_perfetto=True
 build:no-perfetto --//src/workerd/util:use_perfetto=False
 build:no-perfetto --@v8//:v8_use_perfetto=False
+build:no-perfetto --//src/workerd/util:use_rust_perfetto=False
 build:unix --config=perfetto
 
 # Increasing the optimization level of V8 significantly speeds up tests using V8 a lot, especially

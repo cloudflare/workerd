@@ -77,6 +77,7 @@ def wd_rust_crate(
         cxx_bridge_tags = [],
         cxx_bridge_local_defines = [],
         cxx_bridge_features = [],
+        crate_features = [],
         visibility = None):
     """Define rust crate.
 
@@ -102,6 +103,7 @@ def wd_rust_crate(
         cxx_bridge_deps: either a flat dependency list applied to every bridge source, or a dict of
             bridge source => dependency list.
         cxx_bridge_hdrs: headers the bridges include!(); defaults to every .h file in the package.
+        crate_features: cargo-style features to enable for the crate and its test; may be a select().
     """
     if srcs == None:
         srcs = native.glob(["**/*.rs"])
@@ -152,8 +154,6 @@ def wd_rust_crate(
 
     for bridge_src in cxx_bridge_srcs:
         link_deps = link_deps + [bridge_src + "@cxx"]
-
-    crate_features = []
 
     library_kwargs = {}
     if crate_root != None:
