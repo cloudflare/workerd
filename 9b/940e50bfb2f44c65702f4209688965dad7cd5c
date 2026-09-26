@@ -1,0 +1,273 @@
+AGENTS.md
+  s_dadaf0660bfcbe::t_72d8d1c8a606da 164,172,191
+RUST_SERVER_OPEN_QUESTIONS.md
+  s_dadaf0660bfcbe::t_0ad721b3f541cc 1-126
+build/deps/rust.MODULE.bazel
+  s_dadaf0660bfcbe::t_214885cd57f68a 61-96
+build/wd_rust_crate.bzl
+  s_dadaf0660bfcbe::t_6d89b5af16d766 80,106-107,145-147
+clippy.toml
+  s_dadaf0660bfcbe::t_acc934c5c148ae 5-6
+deps/rust/BUILD.bazel
+  s_dadaf0660bfcbe::t_94028f5f7b8c60 14-21
+deps/rust/Cargo.lock
+  s_dadaf0660bfcbe::t_242bb245158c5f 83-88,111-116,262-272,332-341,369-390,407-408,410,412,464-486,525,540-543,552,555-557,562,570-571,574,676-681,858,917-989,1157-1205,1450-1455,1525,1656-1667,1677,1689-1694,1724-1737,1815-1887,1909-1917,1936-1958,2049,2070-2071,2073-2077,2119-2128,2152-2157,2587-2602,2644-2649,2702,2705-2710,2761-2769,2821-2829,2845-2853,2860,2872-2887,2895-2902,2905-2910,2917-2922,2929-2934,2941-2946,2953-2958,2965-2970,2977-2982,2989-2994,3016-3026,3091-3096
+deps/rust/Cargo.toml
+  s_dadaf0660bfcbe::t_14c7fa5c4f86b4 35-37,44-45,51-56,64,67-72,77,82-83
+docs/jsg.md
+  s_dadaf0660bfcbe::t_74697219cff12b 348,351,359,362-365
+docs/reference/detail/new-module-registry.md
+  s_dadaf0660bfcbe::t_88524fd40e0dc3 717
+justfile
+  s_dadaf0660bfcbe::t_42f6217312eee5 49,145
+patches/rust/http-kj-lenient-header-values.patch
+  s_dadaf0660bfcbe::t_f69b9b03be116d 1-17
+patches/rust/httparse-kj-lenient-header-values.patch
+  s_dadaf0660bfcbe::t_420e7ff6a1e145 1-29
+patches/rust/hyper-client-lazy-response-body.patch
+  s_dadaf0660bfcbe::t_4eaa0992b046af 1-16
+patches/rust/hyper-graceful-shutdown-partial-request.patch
+  s_dadaf0660bfcbe::t_70289c531667de 1-13
+patches/rust/hyper-public-header-case-map.patch
+  s_dadaf0660bfcbe::t_c27e30a97e4343 1-43
+src/rust/AGENTS.md
+  s_dadaf0660bfcbe::t_aff0fee39ccef7 7,24-26,45,56,60,65,69
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_7f2375f6cece64 37-48,51-52,64-66,72-74,120-177
+src/rust/cxx/PATCHES.md
+  s_dadaf0660bfcbe::t_bf1a64ef9f0b8e 14-19
+src/rust/cxx/kj-hyper/BUILD.bazel
+  s_dadaf0660bfcbe::t_ba9bd043728c8d 1-89
+src/rust/cxx/kj-hyper/body.rs
+  s_dadaf0660bfcbe::t_ce6abaf1ed14ca 1-442
+src/rust/cxx/kj-hyper/client.rs
+  s_dadaf0660bfcbe::t_4d2249b372cdee 1-802
+src/rust/cxx/kj-hyper/ffi.rs
+  s_dadaf0660bfcbe::t_2aaf7ba3d44e3e 1-265
+src/rust/cxx/kj-hyper/handshake.rs
+  s_dadaf0660bfcbe::t_4d5ff653ba4fef 1-56
+src/rust/cxx/kj-hyper/io.rs
+  s_dadaf0660bfcbe::t_22ccd98196dbff 1-483
+src/rust/cxx/kj-hyper/kj-hyper.c++
+  s_dadaf0660bfcbe::t_b796d923f3176a 1-409
+src/rust/cxx/kj-hyper/kj-hyper.h
+  s_dadaf0660bfcbe::t_51e82f589d3471 1-78
+src/rust/cxx/kj-hyper/lib.rs
+  s_dadaf0660bfcbe::t_8d26334ac47ea7 1-50
+src/rust/cxx/kj-hyper/server.rs
+  s_dadaf0660bfcbe::t_473c000220bd38 1-958
+src/rust/cxx/kj-hyper/starttls.rs
+  s_dadaf0660bfcbe::t_c962db6cf3da13 1-245
+src/rust/cxx/kj-hyper/tests/BUILD.bazel
+  s_dadaf0660bfcbe::t_ed4c135feaa953 1-59
+src/rust/cxx/kj-hyper/tests/harness.rs
+  s_dadaf0660bfcbe::t_97502a3e3fe8b2 1-402
+src/rust/cxx/kj-hyper/tests/kj-hyper-test.c++
+  s_dadaf0660bfcbe::t_dad9ab41e78eab 1-1163
+src/rust/cxx/kj-hyper/tests/lib.rs
+  s_dadaf0660bfcbe::t_3034fc7b4aafdb 1-117
+src/rust/cxx/kj-hyper/tests/test-helpers.h
+  s_dadaf0660bfcbe::t_67dd390a4da13e 1-17
+src/rust/cxx/kj-hyper/tls.rs
+  s_dadaf0660bfcbe::t_a239535f7f756b 1-880
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_dadaf0660bfcbe::t_4e936f5f1294a2 283-284,288-289,302,306,310,314,318,322,329,335,564-568
+src/rust/cxx/kj-rs-io/async-io.h
+  s_dadaf0660bfcbe::t_4131cf49fe9fa5 40,85-94,98-102
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_dadaf0660bfcbe::t_ac8febc4ca574d 164-165
+src/rust/cxx/kj-rs-io/lib.rs
+  s_dadaf0660bfcbe::t_7f5e58c77cc19c 138
+src/rust/cxx/kj-rs-io/signal.rs
+  s_dadaf0660bfcbe::t_319d2651b1b4d2 5-6,59-60
+src/rust/cxx/kj-rs-io/stream.rs
+  s_dadaf0660bfcbe::t_586de943008789 59,97-100,394-399,417-446,809-835
+src/rust/cxx/kj-rs-tokio/BUILD.bazel
+  s_dadaf0660bfcbe::t_9b276489ec7300 38-39,66
+src/rust/cxx/kj-rs-tokio/ffi.rs
+  s_dadaf0660bfcbe::t_2667834b9daa66 4-10,16-17,147-148,150-180
+src/rust/cxx/kj-rs-tokio/lib.rs
+  s_dadaf0660bfcbe::t_1f0499a7c94651 1-2,4-17,48,52,56
+src/rust/cxx/kj-rs-tokio/port.rs
+  s_dadaf0660bfcbe::t_308d9dfa22470e 19-22,28,56,96-125,132-135,139-148,159-162,164-165,208,210-226,234-237,240-248,310-314,316,339-344,358-362,364,370-371,647
+src/rust/cxx/kj-rs-tokio/runtime.rs
+  s_dadaf0660bfcbe::t_58580e68ff7dda 1-182
+src/rust/cxx/kj-rs-tokio/tests/BUILD.bazel
+  s_dadaf0660bfcbe::t_b60988005caf00 3-4,7-8,15,25,37-52,56,73,80-87
+src/rust/cxx/kj-rs-tokio/tests/lib.rs
+  s_dadaf0660bfcbe::t_901e40c3d9de4f 6-7,10-21,115-121,132,138-168
+src/rust/cxx/kj-rs-tokio/tests/runtime_tests.rs
+  s_dadaf0660bfcbe::t_95717effbb59d9 1-293
+src/rust/cxx/kj-rs-tokio/tests/test-helpers.c++
+  s_dadaf0660bfcbe::t_88b40050cab663 1-127
+src/rust/cxx/kj-rs-tokio/tests/test-helpers.h
+  s_dadaf0660bfcbe::t_b89888dc9bd009 3-4,7-9,12-21,28-30,34-35,37-38,41-59
+src/rust/cxx/kj-rs-tokio/tests/tokio-event-port-test.c++
+  s_dadaf0660bfcbe::t_1b8150fdae2a00 504-505,526-527,647,649
+src/rust/cxx/kj-rs-tokio/tokio-event-port.c++
+  s_dadaf0660bfcbe::t_2f688ffb698fe8 3-4,28-33,35,38,72-75,84,96-98,124-126,136-150,159-180,187-192
+src/rust/cxx/kj-rs-tokio/tokio-event-port.h
+  s_dadaf0660bfcbe::t_1db472841dfbed 2-20,24-29,33-34,38-44,50-52,54-55,60-62,67-68,79,81,90-99,102,104-105,109-117,130-131,137-138,149-158,160-164,175,178-179,184-186,196,201,219,226-240,243,246-249
+src/rust/cxx/kj-rs/tests/awaitables-cc-test.c++
+  s_dadaf0660bfcbe::t_3496f922418791 294-304
+src/rust/cxx/kj-rs/tests/lib.rs
+  s_dadaf0660bfcbe::t_eb13ca9f718f6f 72-73,328-331,347-348,357,391,393-394,398-403,434
+src/rust/cxx/kj-rs/tests/test-promises.c++
+  s_dadaf0660bfcbe::t_296bbaff3942f2 21-24
+src/rust/cxx/kj-rs/tests/test-promises.h
+  s_dadaf0660bfcbe::t_fc04afc62685db 17
+src/rust/cxx/macro/src/expand.rs
+  s_dadaf0660bfcbe::t_03b0e41972c29f 1206,1208,1210,1298,1300,1302
+src/rust/cxx/syntax/check.rs
+  s_dadaf0660bfcbe::t_7a1a16b23cff1c 569-574
+src/rust/cxx/syntax/mod.rs
+  s_dadaf0660bfcbe::t_a95f87f28c196d 331-334
+src/rust/cxx/syntax/parse.rs
+  s_dadaf0660bfcbe::t_8d111aa7b7d98b 27-28,614,725,727-732,735,737,1600-1693
+src/rust/kj/ffi.c++
+  s_dadaf0660bfcbe::t_50013741262b45 33-74
+src/rust/kj/ffi.h
+  s_dadaf0660bfcbe::t_a51f6ddf5d952e 31-39,47-50,122-131,143,157,167-171,204-242
+src/rust/kj/http.rs
+  s_dadaf0660bfcbe::t_9a4097281b74b6 99,134-135,145-149,186-204,209-210,212-215,218-224,238-245,401-428,434-451
+src/rust/kj/io.rs
+  s_dadaf0660bfcbe::t_1819c28ca962e8 25-32,45-61
+src/rust/kj/tests/ffi-test.c++
+  s_dadaf0660bfcbe::t_5bd35758ade608 62-164
+src/rust/kj/tests/lib.rs
+  s_dadaf0660bfcbe::t_84e49ea556fcbd 26,62-75,79-109
+src/rust/worker/BUILD
+  s_dadaf0660bfcbe::t_6f36a24040be4f 36,46
+src/rust/worker/bridge.h
+  s_dadaf0660bfcbe::t_05251333d12f0a 46-80
+src/rust/worker/cxx_worker.rs
+  s_dadaf0660bfcbe::t_868982a14b1edd 56-63,76-83,92,103,113,118,123
+src/rust/worker/ffi.c++
+  s_dadaf0660bfcbe::t_2d11fb3f6830f9 7-8,52-70
+src/rust/worker/ffi.h
+  s_dadaf0660bfcbe::t_2b9b665f800c20 30-32,78-80
+src/rust/worker/ffi.rs
+  s_dadaf0660bfcbe::t_4f016b61d6af45 93-94,96-99,102-108,111,113-114,116,119-120,125-126,130,135-137,149-150,152-155,158-164,167,171-172,174,177-178,184,189-198
+src/rust/worker/lib.rs
+  s_dadaf0660bfcbe::t_08285180f118a8 22,44,98-103,114-130
+src/rust/worker/pending.rs
+  s_dadaf0660bfcbe::t_725f91b9748fb6 1-147
+src/rust/worker/test.c++
+  s_dadaf0660bfcbe::t_f4764c2c6c091e 64-112
+src/workerd/server/AGENTS.md
+  s_dadaf0660bfcbe::t_042283de69be9a 5-24,28,30-47,49,51-93,95-100,104-124,133-134
+src/workerd/server/BUILD.bazel
+  s_dadaf0660bfcbe::t_313f79207dac76 67-68,80-81,86-87,89,93,96-97,101,106,287,297-298,342-346,372,399,408
+src/workerd/server/cli/args.rs
+  s_dadaf0660bfcbe::t_7dad902c83671d 11,384-389,392-393,396,403-404,407-408,428-429,435
+src/workerd/server/cli/bridge.rs
+  s_dadaf0660bfcbe::t_ffa798a2dd848c 2-3,5,32
+src/workerd/server/cli/lib.rs
+  s_dadaf0660bfcbe::t_b6e8566bf29d04 5-7,29-33,78,89,98-100,103-104,112,129-130,132,135-136,159,161,164-166,177,179,182-184,232,236-239,242,247,249-250,291-292,413-416,418-419,426,437,440,443-454,456-508
+src/workerd/server/cli/socket_fd.rs
+  s_dadaf0660bfcbe::t_366423efbf937f 2,4-7,43
+src/workerd/server/cli/socket_fd/unix.rs
+  s_dadaf0660bfcbe::t_7521601cfb0dd5 49-51,55-69,100-103
+src/workerd/server/cli/socket_fd/windows.rs
+  s_dadaf0660bfcbe::t_7c9a93868e2d06 19-29,33-37
+src/workerd/server/compiled-bindings.capnp
+  s_dadaf0660bfcbe::t_c8e24b0203b97f 1-128
+src/workerd/server/factory/BUILD.bazel
+  s_dadaf0660bfcbe::t_c201497962c5c7 1-114
+src/workerd/server/factory/bootstrap.c++
+  s_dadaf0660bfcbe::t_32334920364c43 5,7,14,19-20,26,32-36,113-115,117-142,144-148,153,155-163,165-166,169-175,178,180-182,184-193,195-196,198-199,205-207,210,213-216,218-221,227-239,241,243-250,252-253,255-258,260-263,265-276,278-281,283-287,291-292,294-295,298-302,334-352,355,357-411
+src/workerd/server/factory/bootstrap.h
+  s_dadaf0660bfcbe::t_cd829beb23fea6 8-12,14,18-28,40-64,66-84
+src/workerd/server/factory/worker-factory-actor.c++
+  s_dadaf0660bfcbe::t_d663e1b18dc528 1-537
+src/workerd/server/factory/worker-factory-impl.h
+  s_dadaf0660bfcbe::t_f417e87e709ccd 1-287
+src/workerd/server/factory/worker-factory-listen.c++
+  s_dadaf0660bfcbe::t_82b6b8ab1799f6 1-150
+src/workerd/server/factory/worker-factory-rpc.c++
+  s_dadaf0660bfcbe::t_b63f0585f3b54f 1-422
+src/workerd/server/factory/worker-factory.c++
+  s_dadaf0660bfcbe::t_1d85394b1bc979 1,5,16,20,22-23,32-35,37-38,41-42,44-70,72-73,76-78,80-175,177-184,186-226,228-237,239-250,253-263,266-278,281-285,288-290,292-301,304,306,308,310-311,313-321,323-353,355-357,360,362-381,384-385,387-391,393-394,396,398-399,401-402,404-407,409,413-416,418,421-424,428-467,469-472,474-482,484-485,487,489-492,494-499,501-502,505-507,510-518,520-523,525-532,534-538,540-542,544,548-550,553,556,558-564,566-567,569-584,586-587,589-595,597-608,610-617,619-620,622,624-627,629-635,638-639,641-644,646,648-663,665-666,668-672,674-679,681-683,685-689,693-694,697-699,701-706,708-721,725-727,730-736,738-753,756-762,764-770,772-783,785,788-790,792-795,797-799,801-806,808-812,814,816-824,826-833,835-836,838-855,857-858,861-864,866-874,876-879,881-891,894-899,902-910,912-937,939-941,943-958,960-982,984-994,996-1033,1035-1039,1041-1045,1047-1111,1113,1116-1123,1127-1134,1136,1138-1172,1174-1175,1177,1179,1181,1183-1299,1301-1303,1305-1309,1311,1313-1314,1316-1323,1325-1333,1335-1337,1339-1350,1355-1372,1375-1380,1384-1393,1396-1416,1418-1424,1426-1432,1434-1435,1438-1448,1451-1452,1454-1458,1460-1462,1464-1468,1470,1472-1476,1478-1484,1486-1487,1489-1496,1499-1500,1502-1506,1509-1511,1513,1515-1529,1531,1533-1535,1538-1550,1552-1559,1561,1563-1564,1566-1573,1575-1585,1587-1618,1620-1626,1628,1630-1681,1683,1685-1689,1691-1715,1717,1719-1724,1726-1744,1746-1777,1781-1782,1786-1852,1854-1862
+src/workerd/server/factory/worker-factory.h
+  s_dadaf0660bfcbe::t_231d93a56fe766 1,7-16,20-21,23-25,28-31,40-43,45,47-87,89-100,105-134,137-138,152,154-232,234-239,241,243-257,260-515
+src/workerd/server/server/BUILD.bazel
+  s_dadaf0660bfcbe::t_7ec15c6b39218a 1-52
+src/workerd/server/server/actor.rs
+  s_dadaf0660bfcbe::t_29d2b32471b606 1-1574
+src/workerd/server/server/bindings.rs
+  s_dadaf0660bfcbe::t_cc8199635f5492 1-2070
+src/workerd/server/server/bridge.rs
+  s_dadaf0660bfcbe::t_f92f4baff3e6df 1-839
+src/workerd/server/server/channels.rs
+  s_dadaf0660bfcbe::t_305cfe8074e390 1-629
+src/workerd/server/server/config.rs
+  s_dadaf0660bfcbe::t_b35ada452aca97 1-1730
+src/workerd/server/server/entry.rs
+  s_dadaf0660bfcbe::t_40303195182e18 1-340
+src/workerd/server/server/lib.rs
+  s_dadaf0660bfcbe::t_8e6941d88e56db 1-78
+src/workerd/server/server/listen/loopback.rs
+  s_dadaf0660bfcbe::t_fd59a96eeb7a69 1-242
+src/workerd/server/server/listen/mod.rs
+  s_dadaf0660bfcbe::t_f84fdf76ad323e 1-1106
+src/workerd/server/server/listen/udp.rs
+  s_dadaf0660bfcbe::t_7f70c772ad71f0 1-256
+src/workerd/server/server/loader.rs
+  s_dadaf0660bfcbe::t_80b825d909b198 1-507
+src/workerd/server/server/log.rs
+  s_dadaf0660bfcbe::t_437bd3a13a7fc7 1-128
+src/workerd/server/server/run.rs
+  s_dadaf0660bfcbe::t_a028f6242c9ced 1-526
+src/workerd/server/server/services/disk.rs
+  s_dadaf0660bfcbe::t_49dbd79254914d 1-691
+src/workerd/server/server/services/mod.rs
+  s_dadaf0660bfcbe::t_d628ff4235ba64 1-875
+src/workerd/server/server/services/network.rs
+  s_dadaf0660bfcbe::t_ba04f60e8e8c0a 1-368
+src/workerd/server/server/services/rewriter.rs
+  s_dadaf0660bfcbe::t_84674e68633f9a 1-339
+src/workerd/server/server/tasks.rs
+  s_dadaf0660bfcbe::t_2e9f5b4d59dd24 1-116
+src/workerd/server/server/tests.rs
+  s_dadaf0660bfcbe::t_ba6b96c6fbc528 1,5-7,9-10,12-13,15-19,21-27,30-33,35-36,40-43,45-46,49-62,64,66-68,70-74,77-91,93,95-97,99-101,103,106-163,165-167,170-198,202-206,208-234,236-257,261-263,268-280,285-286,291-307,309,311,313,315-316,318-337,340-444,448-514,516-526,528,530-544,546,548-641
+src/workerd/server/server/worker.rs
+  s_dadaf0660bfcbe::t_d91a0a54da0ddf 1-1284
+src/workerd/server/tests/server-harness.mjs
+  s_dadaf0660bfcbe::t_7f4d65857f92d0 66-83,89,101
+src/workerd/server/tests/tcp-connect-throws/BUILD.bazel
+  s_dadaf0660bfcbe::t_d1b6539207ea61 1-18
+src/workerd/server/tests/tcp-connect-throws/config.capnp
+  s_dadaf0660bfcbe::t_891de6d2279295 1-19
+src/workerd/server/tests/tcp-connect-throws/driver.mjs
+  s_dadaf0660bfcbe::t_d307311a4ee637 1-66
+src/workerd/server/tests/tcp-connect-throws/index.mjs
+  s_dadaf0660bfcbe::t_15c18f88314390 1-10
+src/workerd/server/tests/workflows/BUILD.bazel
+  s_dadaf0660bfcbe::t_d86ca7dcc82790 1-6
+src/workerd/server/tests/workflows/app.js
+  s_dadaf0660bfcbe::t_5bc741871597e6 1-100
+src/workerd/server/tests/workflows/binding.js
+  s_dadaf0660bfcbe::t_185c0a65237845 1-19
+src/workerd/server/tests/workflows/engine.js
+  s_dadaf0660bfcbe::t_1c2aca4f7bf21f 1-26
+src/workerd/server/tests/workflows/workflows-test.wd-test
+  s_dadaf0660bfcbe::t_eadeb1bd70b337 1-74
+src/workerd/util/setup-async-io-test.c++
+  s_dadaf0660bfcbe::t_a383686cc32870 5-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9b940e50bfb2f44c65702f4209688965dad7cd5c",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
