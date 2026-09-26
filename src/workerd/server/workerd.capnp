@@ -36,7 +36,7 @@
 
 # Any capnp files imported here must be:
 # 1. embedded using wd_cc_embed
-# 2. added to `tryImportBulitin` in workerd.c++ (grep for '"/workerd/workerd.capnp"').
+# 2. added to `tryImportBulitin` in schema-file.c++ (grep for '"/workerd/workerd.capnp"').
 using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd::server::config");
 $Cxx.allowCancellation;
@@ -255,6 +255,39 @@ struct ServiceDesignator {
 
   # TODO(someday): Options to specify which event types are allowed.
   # TODO(someday): Allow adding an outgoing middleware stack here (see TODO in Service, above).
+}
+
+struct WorkflowsEngine {
+  # Defines an engine that allows running Workflows defined on this worker.
+  # These workflows are exposed through the `ctx.exports.*` mechanism
+  #
+  # Each Workflow gets assigned its own ActorNamespace, but all of them use the same underlying ActorClass
+  # to run the Workflows code.
+  #
+  # Additionally, a list of workflows can be given to specify which workflows can run or not,
+  # i.e., which workflows get a binding built for them.
+
+  actorClass @0 :ServiceDesignator;
+  # The actor class implementing the Workflows engine which all local Workflow-related ActorNamespaces
+  # use to instantiate actors
+
+  workflows @1 :List(Workflow);
+  # List of local workflows that can run for this worker. This controls which workflows get a binding built
+  # and placed on the `ctx.exports` object
+
+  struct Workflow {
+    # Minimal definition of a Workflow in the context of building a binding for it in `ctx.exports.*`
+
+    className @0 :Text;
+    # The name of the class extending `WorkflowEntrypoint`
+
+    name @1 :Text;
+    # The name of the workflow
+
+    bindingService @2 :ServiceDesignator;
+    # Reference to the service implementing the Workflows public API.
+    # This is used as the inner fetcher when building the Workflows binding
+  }
 }
 
 struct Worker {
@@ -536,6 +569,25 @@ struct Worker {
       #
       # (This is intentionally not a ServiceDesignator because you cannot choose an alternate
       # entrypoint here; the class name IS the entrypoint.)
+
+      retryPolicy @2 :RetryPolicy;
+      # Limits on how the runtime retries calls through stubs minted from this binding. When
+      # absent, the runtime's default retry behavior applies.
+
+      struct RetryPolicy {
+        maxAttempts @0 :UInt32 = 4;
+        # Maximum number of retries after the initial attempt. Zero disables retries, and one
+        # allows a single retry. The default matches the runtime's default of five attempts in
+        # total.
+
+        timeoutMs @1 :UInt32 = 10000;
+        # Time in milliseconds, measured from the start of the call, after which no retry may
+        # start. A retry still running when it expires is cancelled, and the caller gets the
+        # error that caused the first retry. The initial request, and the first request after each
+        # redirect, always run to completion. The clock starts after any output-gate wait, and a
+        # redirect shares the original call's timeout. Must be between 500 and 60,000. The default
+        # matches the runtime's default.
+      }
     }
 
     struct CryptoKey {
@@ -821,6 +873,9 @@ struct Worker {
   #
   # If not set, `ctx.access.getIdentity()` resolves to `undefined` (even when `accessBlobHeader`
   # is configured and `ctx.access.aud` is available).
+
+  workflowsEngine @20 :WorkflowsEngine;
+  # the externally-supplied service responsible for running Workflows defined in this worker
 }
 
 struct ExternalServer {

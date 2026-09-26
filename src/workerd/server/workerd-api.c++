@@ -668,13 +668,15 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
       value = lock.wrap(context,
           lock.alloc<api::DurableObjectNamespace>(ns.actorChannel,
-              kj::heap<ActorIdFactoryImpl>(ns.uniqueKey), api::ActorCallRetriesAllowed::YES));
+              kj::heap<ActorIdFactoryImpl>(ns.uniqueKey), api::ActorCallRetriesAllowed::YES,
+              Persistent::NO, ns.userDefinedRetryPolicy));
     }
     KJ_CASE_ONEOF(ns, Global::LoopbackDurableActorNamespace) {
       value = lock.wrap(context,
           lock.alloc<api::LoopbackDurableObjectNamespace>(ns.actorChannel,
               kj::heap<ActorIdFactoryImpl>(ns.uniqueKey), api::ActorCallRetriesAllowed::YES,
-              lock.alloc<api::LoopbackDurableObjectClass>(ns.classChannel), featureFlags));
+              lock.alloc<api::LoopbackDurableObjectClass>(ns.classChannel), featureFlags,
+              /*userDefinedRetryPolicy=*/kj::none));
     }
 
     KJ_CASE_ONEOF(ae, Global::AnalyticsEngine) {
@@ -1069,8 +1071,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                   KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
                         jsg::modules::Module::newEsm(kj::mv(id),
-                            jsg::modules::Module::Type::FALLBACK,
-                            kj::arc<jsg::OwnedAscii>(kj::heapArray<const char>(content.body))));
+                            jsg::modules::Module::Type::FALLBACK, jsg::copyToArc(content.body)));
                   }
                   KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
                     auto ownedData = kj::str(content.body);

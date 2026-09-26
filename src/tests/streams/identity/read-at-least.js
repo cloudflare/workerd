@@ -51,6 +51,32 @@ export const readAtLeastWaitsForMinimum = {
   },
 };
 
+// A read(view, { min }) spanning two writes takes the first whole and
+// only what it needs of the second: the first write settles, the second
+// stays pending until a later read takes its last byte (parity).
+export const readAtLeastSpanningWritesSettlesEach = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+    const writer = writable.getWriter();
+    const reader = readable.getReader({ mode: 'byob' });
+    const settled = [false, false];
+    const writes = [
+      writer.write(new Uint8Array([1, 2])).then(() => (settled[0] = true)),
+      writer.write(new Uint8Array([3, 4, 5])).then(() => (settled[1] = true)),
+    ];
+
+    const first = await reader.read(new Uint8Array(4), { min: 4 });
+    strictEqual([...first.value].join(), '1,2,3,4');
+    await scheduler.wait(5);
+    strictEqual(settled.join(), 'true,false');
+
+    const second = await reader.read(new Uint8Array(4));
+    strictEqual([...second.value].join(), '5');
+    await Promise.all(writes);
+    await writer.close();
+  },
+};
+
 export const readAtLeastValidation = {
   async test() {
     const its = new IdentityTransformStream();

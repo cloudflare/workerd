@@ -23,6 +23,7 @@ rust_library(
         ":bridge",
         ":test-date",
         ":test-maybe",
+        ":test-own-bridge",
         ":test-promises",
     ],
     target_compatible_with = select({
@@ -95,6 +96,20 @@ wd_cc_library(
     ],
 )
 
+# A second bridge over `test-own.h`: it aliases a type `:bridge` declares and holds it in a
+# `KjOwn` through an explicit `impl KjOwn<T> {}`.
+rust_cxx_bridge(
+    name = "test-own-bridge",
+    src = "test_own.rs",
+    hdrs = [
+        "test-own.h",
+    ],
+    include_prefix = "kj-rs-demo",
+    deps = [
+        "//src/rust/cxx/kj-rs",
+    ],
+)
+
 rust_cxx_bridge(
     name = "test-date-bridge",
     src = "test_date.rs",
@@ -155,6 +170,15 @@ kj_test(
     deps = [
         ":tests",
         "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/third-party:runtime",
+    ],
+)
+
+kj_test(
+    src = "own-test.c++",
+    deps = [
+        ":bridge",
+        ":tests",
         "//src/rust/cxx/third-party:runtime",
     ],
 )

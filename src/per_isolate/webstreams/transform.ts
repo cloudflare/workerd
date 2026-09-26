@@ -94,6 +94,74 @@ const writableControllerError = uncurryThis(
   WritableStreamDefaultController.prototype.error
 ) as (controller: object, reason: unknown) => void;
 
+// The transformer's cancel and flush results are settled in a new promise
+// (see promiseResolvedWith in writable.ts); that timing decides whether a
+// same-turn error has reached the other side when they settle.
+const promiseResolvedWith = writableInternals.promiseResolvedWith as (
+  value: unknown
+) => Promise<void>;
+
+interface TransformerAlgorithms<I> {
+  transform: ((chunk: I) => Promise<void>) | undefined;
+  flush: (() => Promise<void>) | undefined;
+  cancel: ((reason: unknown) => Promise<void>) | undefined;
+}
+
+// SetUpTransformStreamDefaultControllerFromTransformer's algorithms. Built
+// outside the TransformStream constructor so that `transformer` is captured
+// only by these closures, not by the constructor's shared context (which
+// every closure the constructor creates keeps alive): once ClearAlgorithms
+// drops them, the transformer is collectable.
+function makeTransformerAlgorithms<I, O>(
+  transformer: Transformer<I, O>,
+  controller: TransformStreamDefaultController<I, O>,
+  transformFn: Transformer<I, O>['transform'],
+  flushFn: Transformer<I, O>['flush'],
+  cancelFn: Transformer<I, O>['cancel']
+): TransformerAlgorithms<I> {
+  let transform: TransformerAlgorithms<I>['transform'];
+  if (transformFn !== undefined) {
+    const callTransform = uncurryThis(transformFn);
+    // Adopts the result (PromiseResolve) rather than settling a new
+    // promise with it as cancel and flush do: on the per-chunk path
+    // that would cost an allocation and a microtask or two per write.
+    // A returned promise therefore settles the write earlier than in
+    // the spec.
+    transform = (chunk: I) => {
+      try {
+        return PromiseResolve(
+          callTransform(transformer, chunk, controller)
+        ) as Promise<void>;
+      } catch (e) {
+        return PromiseReject(e) as Promise<void>;
+      }
+    };
+  }
+  let flush: TransformerAlgorithms<I>['flush'];
+  if (flushFn !== undefined) {
+    const callFlush = uncurryThis(flushFn);
+    flush = () => {
+      try {
+        return promiseResolvedWith(callFlush(transformer, controller));
+      } catch (e) {
+        return PromiseReject(e) as Promise<void>;
+      }
+    };
+  }
+  let cancel: TransformerAlgorithms<I>['cancel'];
+  if (cancelFn !== undefined) {
+    const callCancel = uncurryThis(cancelFn);
+    cancel = (reason: unknown) => {
+      try {
+        return promiseResolvedWith(callCancel(transformer, reason));
+      } catch (e) {
+        return PromiseReject(e) as Promise<void>;
+      }
+    };
+  }
+  return { transform, flush, cancel };
+}
+
 // ---------------------------------------------------------------------------
 
 let transformStreamDefaultControllerInit: <I, O>(
@@ -191,11 +259,14 @@ class TransformStream<I = unknown, O = unknown> {
   // sink transforms the first chunk.
   #backpressure: boolean = true;
   #backpressureChange: PromiseWithResolversType<void>;
-  // Set by the constructor to a closure that clears the transformer
-  // algorithm references.  Called from #errorWritableAndUnblockWrite
-  // (which lives outside the constructor scope and cannot access the
-  // algorithm locals directly).  Undefined for ELIDED transforms.
-  #clearAlgorithms: (() => void) | undefined;
+  // The transformer's algorithms (undefined when the transformer has
+  // none, or once cleared; see makeTransformerAlgorithms), and the spec's
+  // [[finishPromise]]: whichever of close, abort and cancel runs first
+  // settles it, and the others return it.
+  #transformAlgorithm: ((chunk: I) => Promise<void>) | undefined;
+  #cancelAlgorithm: ((reason: unknown) => Promise<void>) | undefined;
+  #flushAlgorithm: (() => Promise<void>) | undefined;
+  #finishPromise: Promise<void> | undefined;
 
   static {
     transformStreamDesiredSize = (stream) => {
@@ -281,15 +352,127 @@ class TransformStream<I = unknown, O = unknown> {
     this.#backpressure = backpressure;
   }
 
+  // Spec: TransformStreamDefaultControllerClearAlgorithms.
+  #clearAlgorithms(): void {
+    this.#transformAlgorithm = undefined;
+    this.#cancelAlgorithm = undefined;
+    this.#flushAlgorithm = undefined;
+  }
+
+  // Spec: TransformStreamDefaultSinkCloseAlgorithm.
+  #sinkClose(): Promise<void> {
+    if (this.#finishPromise !== undefined) return this.#finishPromise;
+    const { promise, resolve, reject } =
+      PromiseWithResolvers() as PromiseWithResolversType<void>;
+    this.#finishPromise = promise;
+    const flushAlgorithm = this.#flushAlgorithm;
+    const flushResult =
+      flushAlgorithm !== undefined
+        ? flushAlgorithm()
+        : (PromiseResolve() as Promise<void>);
+    this.#clearAlgorithms();
+    markPromiseHandled(
+      PromisePrototypeThen(
+        flushResult,
+        () => {
+          if (readableInternals.getState(this.#readable) === 'errored') {
+            reject(readableInternals.getStoredError(this.#readable));
+            return;
+          }
+          const rc = this.#readableController;
+          if (rc !== undefined) {
+            try {
+              readableControllerClose(rc);
+            } catch {
+              // Already closed — acceptable per spec.
+            }
+          }
+          resolve();
+        },
+        (r: unknown) => {
+          const rc = this.#readableController;
+          if (rc !== undefined) readableControllerError(rc, r);
+          reject(r);
+        }
+      )
+    );
+    return promise;
+  }
+
+  // Spec: TransformStreamDefaultSinkAbortAlgorithm.
+  #sinkAbort(reason: unknown): Promise<void> {
+    if (this.#finishPromise !== undefined) return this.#finishPromise;
+    const { promise, resolve, reject } =
+      PromiseWithResolvers() as PromiseWithResolversType<void>;
+    this.#finishPromise = promise;
+    const cancelAlgorithm = this.#cancelAlgorithm;
+    const cancelResult =
+      cancelAlgorithm !== undefined
+        ? cancelAlgorithm(reason)
+        : (PromiseResolve() as Promise<void>);
+    this.#clearAlgorithms();
+    markPromiseHandled(
+      PromisePrototypeThen(
+        cancelResult,
+        () => {
+          if (readableInternals.getState(this.#readable) === 'errored') {
+            reject(readableInternals.getStoredError(this.#readable));
+            return;
+          }
+          const rc = this.#readableController;
+          if (rc !== undefined) readableControllerError(rc, reason);
+          resolve();
+        },
+        (r: unknown) => {
+          const rc = this.#readableController;
+          if (rc !== undefined) readableControllerError(rc, r);
+          reject(r);
+        }
+      )
+    );
+    return promise;
+  }
+
+  // Spec: TransformStreamDefaultSourceCancelAlgorithm. The writable's state
+  // is read when the cancel algorithm settles (step 7.1.1): an abort, a
+  // terminate() or an error that reached it by then rejects the cancel.
+  #sourceCancel(reason: unknown): Promise<void> {
+    if (this.#finishPromise !== undefined) return this.#finishPromise;
+    const { promise, resolve, reject } =
+      PromiseWithResolvers() as PromiseWithResolversType<void>;
+    this.#finishPromise = promise;
+    const cancelAlgorithm = this.#cancelAlgorithm;
+    const cancelResult =
+      cancelAlgorithm !== undefined
+        ? cancelAlgorithm(reason)
+        : (PromiseResolve() as Promise<void>);
+    this.#clearAlgorithms();
+    markPromiseHandled(
+      PromisePrototypeThen(
+        cancelResult,
+        () => {
+          if (writableInternals.getState(this.#writable) === 'errored') {
+            reject(writableInternals.getStoredError(this.#writable));
+            return;
+          }
+          this.#errorWritableAndUnblockWrite(reason);
+          resolve();
+        },
+        (r: unknown) => {
+          this.#errorWritableAndUnblockWrite(r);
+          reject(r);
+        }
+      )
+    );
+    return promise;
+  }
+
   #errorWritableAndUnblockWrite(reason: unknown): void {
     // Spec: TransformStreamErrorWritableAndUnblockWrite step 1 —
     // TransformStreamDefaultControllerClearAlgorithms.  Prevents a
     // later readable.cancel() from invoking the transformer's cancel
     // callback after the stream has already errored/terminated.
-    if (this.#clearAlgorithms !== undefined) {
-      this.#clearAlgorithms();
-      this.#clearAlgorithms = undefined;
-    }
+    this.#clearAlgorithms();
     const writableController = this.#writableController;
     if (writableController !== undefined) {
       writableControllerError(writableController, reason);
@@ -348,14 +531,22 @@ class TransformStream<I = unknown, O = unknown> {
     markPromiseHandled(initialBackpressureChange.promise);
     this.#backpressureChange = initialBackpressureChange;
 
+    // Both inner streams' start algorithms return THIS promise, so
+    // neither side processes anything until transformer.start()
+    // settles.
+    const startHolder =
+      PromiseWithResolvers() as PromiseWithResolversType<void>;
+    const startPromise = startHolder.promise;
+
     // --- ELISION CHECK ---
     // A transformer with ZERO algorithms (no transform/flush/start/cancel)
     // is semantically equivalent to no transformer: every write enqueues
     // the chunk unchanged into the readable queue. The elided path skips
-    // controller allocation, the start-promise gate, and per-write
-    // algorithm wrappers while preserving the spec-observable backpressure
-    // handshake (writer.desiredSize, writer.ready, write-settlement
-    // timing). An empty transformer {} is equivalent to undefined.
+    // controller allocation and per-write algorithm wrappers while
+    // preserving the spec-observable backpressure handshake
+    // (writer.desiredSize, writer.ready, write-settlement timing) and the
+    // close/abort/cancel coordination. An empty transformer {} is
+    // equivalent to undefined.
     const isElided =
       cancelFn === undefined &&
       flushFn === undefined &&
@@ -364,7 +555,7 @@ class TransformStream<I = unknown, O = unknown> {
 
     if (isElided) {
       // ---- ELIDED PATH ----
-      // No controller, no start gating, no algorithm wrappers.
+      // No controller and no algorithm wrappers.
 
       const sinkWrite = async (chunk: I): Promise<void> => {
         if (this.#backpressure) {
@@ -382,22 +573,16 @@ class TransformStream<I = unknown, O = unknown> {
           this.#setBackpressure(backpressure);
         }
       };
-      const sinkClose = (): void => {
-        readableControllerClose(this.#readableController as object);
-      };
-      const sinkAbort = (reason: unknown): void => {
-        readableControllerError(this.#readableController as object, reason);
-      };
-
       this.#writable = new WritableStream(
         {
           __proto__: null,
           start: (c: object) => {
             this.#writableController = c;
+            return startPromise;
           },
           write: sinkWrite,
-          close: sinkClose,
-          abort: sinkAbort,
+          close: () => this.#sinkClose(),
+          abort: (reason: unknown) => this.#sinkAbort(reason),
         },
         writableStrategy
       );
@@ -405,9 +590,6 @@ class TransformStream<I = unknown, O = unknown> {
       const sourcePull = (): Promise<void> => {
         this.#setBackpressure(false);
         return this.#backpressureChange.promise;
-      };
-      const sourceCancel = (reason: unknown): void => {
-        this.#errorWritableAndUnblockWrite(reason);
       };
 
       const readableHWM =
@@ -419,9 +601,10 @@ class TransformStream<I = unknown, O = unknown> {
           __proto__: null,
           start: (c: object) => {
             this.#readableController = c;
+            return startPromise;
           },
           pull: sourcePull,
-          cancel: sourceCancel,
+          cancel: (reason: unknown) => this.#sourceCancel(reason),
         },
         {
           __proto__: null,
@@ -435,6 +618,7 @@ class TransformStream<I = unknown, O = unknown> {
           expectedLength
         );
       }
+      startHolder.resolve();
     } else {
       // ---- STANDARD PATH (transformer has algorithms) ----
 
@@ -444,76 +628,27 @@ class TransformStream<I = unknown, O = unknown> {
       transformStreamDefaultControllerInit(controller, this);
       this.#controller = controller;
 
-      let transformAlgorithm: (chunk: I) => Promise<void>;
-      if (transformFn === undefined) {
-        transformAlgorithm = (chunk: I) => {
+      const algorithms = makeTransformerAlgorithms(
+        transformer,
+        controller,
+        transformFn,
+        flushFn,
+        cancelFn
+      );
+      // No transform hook: enqueue the chunk unchanged (spec step 2's
+      // default transformAlgorithm).
+      this.#transformAlgorithm =
+        algorithms.transform ??
+        ((chunk: I) => {
           try {
             transformStreamEnqueue(this, chunk as unknown as O);
             return PromiseResolve() as Promise<void>;
           } catch (e) {
             return PromiseReject(e) as Promise<void>;
           }
-        };
-      } else {
-        const callTransform = uncurryThis(transformFn);
-        transformAlgorithm = (chunk: I) => {
-          try {
-            return PromiseResolve(
-              callTransform(transformer, chunk, controller)
-            ) as Promise<void>;
-          } catch (e) {
-            return PromiseReject(e) as Promise<void>;
-          }
-        };
-      }
-      let cancelAlgorithm: ((reason: unknown) => Promise<void>) | undefined;
-      if (cancelFn !== undefined) {
-        const callCancel = uncurryThis(cancelFn);
-        cancelAlgorithm = (reason: unknown) => {
-          try {
-            return PromiseResolve(
-              callCancel(transformer, reason)
-            ) as Promise<void>;
-          } catch (e) {
-            return PromiseReject(e) as Promise<void>;
-          }
-        };
-      }
-      let flushAlgorithm: (() => Promise<void>) | undefined;
-      if (flushFn !== undefined) {
-        const callFlush = uncurryThis(flushFn);
-        flushAlgorithm = () => {
-          try {
-            return PromiseResolve(
-              callFlush(transformer, controller)
-            ) as Promise<void>;
-          } catch (e) {
-            return PromiseReject(e) as Promise<void>;
-          }
-        };
-      }
-
-      // Spec: TransformStreamDefaultControllerClearAlgorithms — releases
-      // the transformer closures so they cannot be invoked after
-      // close/abort/cancel/error/terminate.  Stored on the instance so
-      // #errorWritableAndUnblockWrite (outside this closure scope) can
-      // reach them.
-      const clearAlgorithms = (): void => {
-        cancelAlgorithm = undefined;
-        flushAlgorithm = undefined;
-      };
-      this.#clearAlgorithms = clearAlgorithms;
-
-      // Spec §6.4.2: [[finishPromise]] — coordinates cancel, abort, and
-      // close so that whichever runs first wins; parallel operations
-      // return the SAME promise.
-      let finishPromise: Promise<void> | undefined;
-
-      // Both inner streams' start algorithms return THIS promise, so
-      // neither side processes anything until transformer.start()
-      // settles.
-      const startHolder =
-        PromiseWithResolvers() as PromiseWithResolversType<void>;
+        });
+      this.#flushAlgorithm = algorithms.flush;
+      this.#cancelAlgorithm = algorithms.cancel;
 
       const sinkWrite = async (chunk: I): Promise<void> => {
         if (this.#backpressure) {
@@ -522,6 +657,23 @@ class TransformStream<I = unknown, O = unknown> {
           if (state === 'erroring' || state === 'errored') {
             throw writableInternals.getStoredError(this.#writable);
           }
+        }
+        // Cleared algorithms: a write that reached the sink after
+        // readable.cancel() cleared them, before the cancel settles and
+        // errors the writable (or after controller.error(), terminate() or
+        // a size() error, which error it at once). The spec leaves this
+        // undefined. The chunk is not transformed, and the write rejects
+        // with the writable's stored error once the finish promise has
+        // settled; every settlement of the cancel's errors the writable
+        // first. (Node fulfills the write, dropping the chunk; C++ rejects
+        // it with a TypeError.)
+        const transformAlgorithm = this.#transformAlgorithm;
+        if (transformAlgorithm === undefined) {
+          const finishPromise = this.#finishPromise;
+          if (finishPromise !== undefined) {
+            await PromisePrototypeThen(finishPromise, undefined, () => {});
+          }
+          throw writableInternals.getStoredError(this.#writable);
         }
         // Spec TransformStreamDefaultControllerPerformTransform: a
         // rejection from the transform algorithm errors BOTH sides
@@ -535,101 +687,16 @@ class TransformStream<I = unknown, O = unknown> {
           }
         ) as Promise<void>;
       };
-      // Spec: TransformStreamDefaultSinkCloseAlgorithm
-      const sinkClose = (): Promise<void> => {
-        if (finishPromise !== undefined) return finishPromise;
-        const {
-          promise,
-          resolve: finishResolve,
-          reject: finishReject,
-        } = PromiseWithResolvers() as PromiseWithResolversType<void>;
-        finishPromise = promise;
-        const flushResult =
-          flushAlgorithm !== undefined
-            ? flushAlgorithm()
-            : (PromiseResolve() as Promise<void>);
-        // Spec: TransformStreamDefaultControllerClearAlgorithms
-        clearAlgorithms();
-        markPromiseHandled(
-          PromisePrototypeThen(
-            flushResult,
-            () => {
-              if (readableInternals.getState(this.#readable) === 'errored') {
-                finishReject(readableInternals.getStoredError(this.#readable));
-              } else {
-                const rc = this.#readableController;
-                if (rc !== undefined) {
-                  try {
-                    readableControllerClose(rc);
-                  } catch {
-                    // Already closed — acceptable per spec.
-                  }
-                }
-                finishResolve();
-              }
-            },
-            (r: unknown) => {
-              const rc = this.#readableController;
-              if (rc !== undefined) {
-                readableControllerError(rc, r);
-              }
-              finishReject(r);
-            }
-          )
-        );
-        return finishPromise;
-      };
-      // Spec: TransformStreamDefaultSinkAbortAlgorithm
-      const sinkAbort = (reason: unknown): Promise<void> => {
-        if (finishPromise !== undefined) return finishPromise;
-        const {
-          promise,
-          resolve: finishResolve,
-          reject: finishReject,
-        } = PromiseWithResolvers() as PromiseWithResolversType<void>;
-        finishPromise = promise;
-        const cancelResult =
-          cancelAlgorithm !== undefined
-            ? cancelAlgorithm(reason)
-            : (PromiseResolve() as Promise<void>);
-        // Spec: TransformStreamDefaultControllerClearAlgorithms
-        clearAlgorithms();
-        markPromiseHandled(
-          PromisePrototypeThen(
-            cancelResult,
-            () => {
-              if (readableInternals.getState(this.#readable) === 'errored') {
-                finishReject(readableInternals.getStoredError(this.#readable));
-              } else {
-                const rc = this.#readableController;
-                if (rc !== undefined) {
-                  readableControllerError(rc, reason);
-                }
-                finishResolve();
-              }
-            },
-            (r: unknown) => {
-              const rc = this.#readableController;
-              if (rc !== undefined) {
-                readableControllerError(rc, r);
-              }
-              finishReject(r);
-            }
-          )
-        );
-        return finishPromise;
-      };
-
       this.#writable = new WritableStream(
         {
           __proto__: null,
           start: (c: object) => {
             this.#writableController = c;
-            return startHolder.promise;
+            return startPromise;
           },
           write: sinkWrite,
-          close: sinkClose,
-          abort: sinkAbort,
+          close: () => this.#sinkClose(),
+          abort: (reason: unknown) => this.#sinkAbort(reason),
         },
         writableStrategy
       );
@@ -638,53 +705,6 @@ class TransformStream<I = unknown, O = unknown> {
         this.#setBackpressure(false);
         return this.#backpressureChange.promise;
       };
-      // Spec: TransformStreamDefaultSourceCancelAlgorithm
-      const sourceCancel = (reason: unknown): Promise<void> => {
-        if (finishPromise !== undefined) return finishPromise;
-        const {
-          promise,
-          resolve: finishResolve,
-          reject: finishReject,
-        } = PromiseWithResolvers() as PromiseWithResolversType<void>;
-        finishPromise = promise;
-        // Snapshot writable state before calling the cancel algorithm so we
-        // can detect if the callback itself errored the writable (via
-        // controller.error()).  The spec checks writable.[[state]] at
-        // microtask time, but that also catches unrelated user code
-        // (e.g. controller.enqueue() on the now-closed readable) that
-        // runs between cancel() and the microtask.  Comparing before/after
-        // detects only errors caused by the cancel algorithm.
-        const writableCleanBeforeCancel =
-          writableInternals.getState(this.#writable) === 'writable';
-        const cancelResult =
-          cancelAlgorithm !== undefined
-            ? cancelAlgorithm(reason)
-            : (PromiseResolve() as Promise<void>);
-        // Spec: TransformStreamDefaultControllerClearAlgorithms
-        clearAlgorithms();
-        const writableErroredByCancel =
-          writableCleanBeforeCancel &&
-          writableInternals.getState(this.#writable) !== 'writable';
-        markPromiseHandled(
-          PromisePrototypeThen(
-            cancelResult,
-            () => {
-              if (writableErroredByCancel) {
-                finishReject(writableInternals.getStoredError(this.#writable));
-              } else {
-                this.#errorWritableAndUnblockWrite(reason);
-                finishResolve();
-              }
-            },
-            (r: unknown) => {
-              this.#errorWritableAndUnblockWrite(r);
-              finishReject(r);
-            }
-          )
-        );
-        return finishPromise;
-      };
-
       const readableHWM =
         readableStrategy.highWaterMark === undefined
           ? 0
@@ -694,10 +714,10 @@ class TransformStream<I = unknown, O = unknown> {
           __proto__: null,
           start: (c: object) => {
             this.#readableController = c;
-            return startHolder.promise;
+            return startPromise;
           },
           pull: sourcePull,
-          cancel: sourceCancel,
+          cancel: (reason: unknown) => this.#sourceCancel(reason),
         },
         {
           __proto__: null,

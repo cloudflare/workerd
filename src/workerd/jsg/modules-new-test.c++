@@ -210,7 +210,7 @@ struct TestContext: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext, TestType);
 
 #define PREAMBLE(fn)                                                                               \
-  TestIsolate isolate(v8System, v8::IsolateGroup::GetDefault(), 123, kj::heap<IsolateObserver>()); \
+  TestIsolate isolate(v8System, newIsolateGroup(), 123, kj::heap<IsolateObserver>());              \
   isolate.runInLockScope([&](auto& lock) {                                                         \
     IsolateBase::from(lock.v8Isolate).setUsingNewModuleRegistry();                                 \
     JSG_WITHIN_CONTEXT_SCOPE(lock, lock.template newContext<TestContext>().getHandle(lock),        \
@@ -1611,12 +1611,14 @@ KJ_TEST("Built-in source distinguishes UTF-8 from pre-encoded Latin-1") {
     builtinBuilder.addEsm("test:utf8"_url, kj::arrayPtr(utf8Source, sizeof(utf8Source) - 1));
     builtinBuilder.addEsm("test:latin1"_url,
         StaticExternalStringSource(kj::arrayPtr(latin1Source, sizeof(latin1Source) - 1)));
+    builtinBuilder.addEsm(
+        "test:owned"_url, copyToArc(kj::arrayPtr(utf8Source, sizeof(utf8Source) - 1)));
 
     auto registry = ModuleRegistry::Builder(BASE).add(builtinBuilder.finish()).finish();
     auto attached = registry->attachToIsolate(js, compilationObserver);
 
     JSG_TRY(js) {
-      for (auto specifier: {"test:utf8"_kjc, "test:latin1"_kjc}) {
+      for (auto specifier: {"test:utf8"_kjc, "test:latin1"_kjc, "test:owned"_kjc}) {
         auto value =
             ModuleRegistry::resolve(js, specifier, "default"_kjc, ResolveContext::Type::BUILTIN);
         KJ_ASSERT(kj::str(value) == "caf\xc3\xa9", kj::str(value));
