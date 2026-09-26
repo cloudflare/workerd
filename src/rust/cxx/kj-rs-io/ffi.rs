@@ -161,11 +161,8 @@ mod bridge {
             len: usize,
             min_bytes: usize,
         ) -> Result<usize>;
-        async unsafe fn stream_write<'a>(stream: &'a TokioStream, buf: &'a [u8]) -> Result<()>;
-        async unsafe fn stream_write_pieces<'a>(
-            stream: &'a TokioStream,
-            pieces: &'a KjPieces,
-        ) -> Result<()>;
+        async fn stream_write(stream: &TokioStream, buf: &[u8]) -> Result<()>;
+        async fn stream_write_pieces(stream: &TokioStream, pieces: &KjPieces) -> Result<()>;
         async fn stream_when_write_disconnected(stream: &TokioStream) -> Result<()>;
         fn stream_shutdown_write(stream: &TokioStream) -> Result<()>;
         fn stream_abort_read(stream: &TokioStream) -> Result<()>;
