@@ -39,11 +39,11 @@ declare namespace Rpc {
     // Structured cloneables
     | BaseType
     // Structured cloneable composites
-    | Map<
-        T extends Map<infer U, unknown> ? Serializable<U> : never,
-        T extends Map<unknown, infer U> ? Serializable<U> : never
+    | ReadonlyMap<
+        T extends ReadonlyMap<infer U, unknown> ? Serializable<U> : never,
+        T extends ReadonlyMap<unknown, infer U> ? Serializable<U> : never
       >
-    | Set<T extends Set<infer U> ? Serializable<U> : never>
+    | ReadonlySet<T extends ReadonlySet<infer U> ? Serializable<U> : never>
     | ReadonlyArray<T extends ReadonlyArray<infer U> ? Serializable<U> : never>
     | {
         [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
@@ -86,7 +86,9 @@ declare namespace Rpc {
   type Stubify<T> =
     T extends Stubable ? Stub<T>
     : T extends Map<infer K, infer V> ? Map<Stubify<K>, Stubify<V>>
+    : T extends ReadonlyMap<infer K, infer V> ? ReadonlyMap<Stubify<K>, Stubify<V>>
     : T extends Set<infer V> ? Set<Stubify<V>>
+    : T extends ReadonlySet<infer V> ? ReadonlySet<Stubify<V>>
     : T extends Array<infer V> ? Array<Stubify<V>>
     : T extends ReadonlyArray<infer V> ? ReadonlyArray<Stubify<V>>
     : T extends BaseType ? T
@@ -101,7 +103,9 @@ declare namespace Rpc {
   type Unstubify<T> =
     T extends StubBase<infer V> ? V
     : T extends Map<infer K, infer V> ? Map<Unstubify<K>, Unstubify<V>>
+    : T extends ReadonlyMap<infer K, infer V> ? ReadonlyMap<Unstubify<K>, Unstubify<V>>
     : T extends Set<infer V> ? Set<Unstubify<V>>
+    : T extends ReadonlySet<infer V> ? ReadonlySet<Unstubify<V>>
     : T extends Array<infer V> ? Array<Unstubify<V>>
     : T extends ReadonlyArray<infer V> ? ReadonlyArray<Unstubify<V>>
     : T extends BaseType ? T
