@@ -215,7 +215,9 @@ class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
       URIError: new URIError(),
       RegExp: /abc/,
       Map: new Map([['a', 1]]),
+      ReadonlyMap: new Map([['a', 1]]) as ReadonlyMap<string, number>,
       Set: new Set(['a']),
+      ReadonlySet: new Set(['a']) as ReadonlySet<string>,
       Array: [1, 2, 3],
       ReadonlyArray: [4, 5, 6] as const,
       Object: { a: { b: 1 } },
@@ -230,7 +232,12 @@ class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
   get everyCompositeSerializable() {
     return {
       Map: new Map([[new TestCounter(), new TestCounter()]]),
+      ReadonlyMap: new Map([[new TestCounter(), new TestCounter()]]) as ReadonlyMap<
+        TestCounter,
+        TestCounter
+      >,
       Set: new Set([new TestCounter()]),
+      ReadonlySet: new Set([new TestCounter()]) as ReadonlySet<TestCounter>,
       Array: [new TestCounter()],
       ReadonlyArray: [new TestCounter()] as const,
       Object: { a: { b: new TestCounter() } },
@@ -701,7 +708,11 @@ export default <ExportedHandler<Env>>{
       expectTypeOf(ecs.Map).toEqualTypeOf<
         Map<RpcStub<TestCounter>, RpcStub<TestCounter>>
       >();
+      expectTypeOf(ecs.ReadonlyMap).toEqualTypeOf<
+        ReadonlyMap<RpcStub<TestCounter>, RpcStub<TestCounter>>
+      >();
       expectTypeOf(ecs.Set).toEqualTypeOf<Set<RpcStub<TestCounter>>>();
+      expectTypeOf(ecs.ReadonlySet).toEqualTypeOf<ReadonlySet<RpcStub<TestCounter>>>();
       expectTypeOf(ecs.Array).toEqualTypeOf<Array<RpcStub<TestCounter>>>();
       expectTypeOf(ecs.ReadonlyArray).toEqualTypeOf<
         ReadonlyArray<RpcStub<TestCounter>>
