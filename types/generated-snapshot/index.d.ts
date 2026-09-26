@@ -15113,7 +15113,16 @@ declare module "cloudflare:email" {
  * Evaluation context for targeting rules.
  * Keys are attribute names (e.g. "userId", "country"), values are the attribute values.
  */
-type FlagshipEvaluationContext = Record<string, string | number | boolean>;
+type FlagshipEvaluationContextValue =
+  | string
+  | number
+  | boolean
+  | null
+  | FlagshipEvaluationContextValue[]
+  | {
+      [key: string]: FlagshipEvaluationContextValue;
+    };
+type FlagshipEvaluationContext = Record<string, FlagshipEvaluationContextValue>;
 interface FlagshipEvaluationDetails<T> {
   flagKey: string;
   value: T;
