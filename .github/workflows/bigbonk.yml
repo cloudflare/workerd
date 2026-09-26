@@ -1,4 +1,4 @@
-name: Bonk
+name: BigBonk
 
 on:
   issue_comment:
@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   bonk:
-    if: github.event.sender.type != 'Bot' && contains(github.event.comment.body, '/bigbonk')
+    if: github.event.sender.type != 'Bot' && (contains(github.event.comment.body, '/bigbonk') || contains(github.event.review.body, '/bigbonk'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -26,15 +26,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          fetch-depth: 0 # Full history so the PR diff has a merge base with main
 
       - name: Run Bonk
-        uses: ask-bonk/ask-bonk/github@d00cbcf581a5463f7adc2d81e470234b1727f8dd # main
+        uses: danlapid/ask-bonk/github@5a93168ff25d374f5d4191c7be4e9859991c48e7
+        # Fork of ask-bonk with the timeout input and rereview_context, pending upstream review.
+        # Switch back to ask-bonk/ask-bonk once those changes land there.
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_AI_GATEWAY_ACCOUNT_ID }}
           CLOUDFLARE_GATEWAY_ID: ${{ secrets.CF_AI_GATEWAY_NAME }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_AI_GATEWAY_TOKEN }}
-          OPENCODE_CONFIG_CONTENT: '{"permission":{"external_directory":{"/home/runner/work/**":"allow"},"question":"deny","doom_loop":"deny"}}'
+          # opencode's default for paths not listed under external_directory is "ask", which
+          # nobody can answer in CI, so the run blocks until the job timeout. Deny by default;
+          # rules are matched last-wins, so "*" must come first.
+          OPENCODE_CONFIG_CONTENT: '{"permission":{"external_directory":{"*":"deny","/home/runner/work/**":"allow","/home/runner/.cache/bazel/**":"allow"},"question":"deny","doom_loop":"deny"}}'
         with:
           oidc_base_url: https://ask-bonk.cloudflare-exponent.workers.dev/auth
           model: 'cloudflare-ai-gateway/anthropic/claude-opus-5-5'
@@ -42,7 +47,10 @@ jobs:
           variant: 'max'
           permissions: write
           opencode_dev: true
-          opencode_version: "1.18.32"
+          # Stop opencode before the 30-minute job timeout so ask-bonk can finalize the run.
+          timeout: '25m'
+          # Give re-reviews Bonk's previous review, its threads, and the changes since then.
+          rereview_context: 'true'
           # token_permissions defaults to WRITE (i.e. Bonk can push commits).
           # We intentionally leave it that way here because users may ask Bonk
           # to update their PR via /bigbonk.

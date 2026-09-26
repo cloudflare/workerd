@@ -36,9 +36,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Update rust dependencies
         run: bazel run @rules_rust//tools/upstream_wrapper:cargo -- update --manifest-path=deps/rust/Cargo.toml
-      - name: Update opencode version
-        run: python3 tools/update_opencode_version.py
-        continue-on-error: true
       - name: Reformat changed files
         run: ./tools/cross/format.py git
       - name: Open pull request

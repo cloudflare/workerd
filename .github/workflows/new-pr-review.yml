@@ -2,11 +2,14 @@ name: New PR Review
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, ready_for_review, synchronize]
 
 jobs:
   review:
-    if: github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name &&
+      !github.event.pull_request.draft &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
@@ -35,12 +38,17 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Run Bonk
-        uses: ask-bonk/ask-bonk/github@d00cbcf581a5463f7adc2d81e470234b1727f8dd # main
+        uses: danlapid/ask-bonk/github@5a93168ff25d374f5d4191c7be4e9859991c48e7
+        # Fork of ask-bonk with the timeout input and rereview_context, pending upstream review.
+        # Switch back to ask-bonk/ask-bonk once those changes land there.
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_AI_GATEWAY_ACCOUNT_ID }}
           CLOUDFLARE_GATEWAY_ID: ${{ secrets.CF_AI_GATEWAY_NAME }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_AI_GATEWAY_TOKEN }}
-          OPENCODE_CONFIG_CONTENT: '{"permission":{"external_directory":{"/home/runner/work/**":"allow"},"edit":"deny","question":"deny","doom_loop":"deny"}}'
+          # opencode's default for paths not listed under external_directory is "ask", which
+          # nobody can answer in CI, so the run blocks until the job timeout. Deny by default;
+          # rules are matched last-wins, so "*" must come first.
+          OPENCODE_CONFIG_CONTENT: '{"permission":{"external_directory":{"*":"deny","/home/runner/work/**":"allow","/home/runner/.cache/bazel/**":"allow"},"edit":"deny","question":"deny","doom_loop":"deny"}}'
         with:
           oidc_base_url: https://ask-bonk.cloudflare-exponent.workers.dev/auth
           model: 'cloudflare-ai-gateway/openai/gpt-5.6-terra'
@@ -48,7 +56,10 @@ jobs:
           forks: 'false'
           permissions: write
           opencode_dev: true
-          opencode_version: "1.18.32"
+          # Stop opencode before the 30-minute job timeout so ask-bonk can finalize the run.
+          timeout: '25m'
+          # Give re-reviews Bonk's previous review, its threads, and the changes since then.
+          rereview_context: 'true'
           # The auto-reviewer must never push to PR branches. Its prompt
           # (bonk_reviewer.md) already forbids git write ops, but NO_PUSH
           # enforces that at the token level so it holds even if the model
