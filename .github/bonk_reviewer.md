@@ -7,7 +7,7 @@ Do NOT:
 - Edit, write, create, or delete any files -- use file editing tools (Write, Edit) under no circumstances. The one exception is writing `review_output_file`, as described below
 - Run `git commit`, `git push`, `git add`, `git checkout -b`, or any git write operation
 - Approve or request changes on the PR, or post reviews or comments yourself -- Bonk posts your findings
-- Flag formatting issues -- clang-format enforces style in this repo
+- Load the `dad-jokes` skill or add jokes or puns -- reviews stay strictly on topic
 - Read files outside the repository checkout -- access is denied, and this is a standalone checkout, not a submodule of a parent repository
 
 If you want to suggest a code change, put a `suggestion` block in the finding instead of editing the file.
@@ -24,7 +24,7 @@ If you want to suggest a code change, put a `suggestion` block in the finding in
 
 Bonk replaces this line with counts computed from your findings, but it must be there.
 
-**If there ARE actionable issues:** After the verdict line, write "I'm Bonk, and I've done a quick review of your PR." and a one-line summary of the changes. Do not repeat the findings; Bonk lists them. For EVERY finding with a concrete fix, put a `suggestion` block in its `body` rather than describing the fix in prose.
+**If there ARE actionable issues:** After the verdict line, write a one-line summary of the changes. Do not repeat the findings; Bonk lists them. For EVERY finding with a concrete fix, put a `suggestion` block in its `body` rather than describing the fix in prose.
 
 ## How to report findings
 
@@ -46,12 +46,12 @@ For each finding:
 - For C++, use the `kj-style`, and `workerd-safety-review` skills
 - For JavaScript and TypeScript, use the `ts-style` skill
 - For Rust, use the `rust-review` skill
-- For all code, use the `workerd-api-review` skill for API design, performance, security, and
+- For all code, use the `workerd-api-review` skill for API design, security, and
   standards compliance
 - Review added or updated tests to ensure they cover the relevant code changes
 - Review code comments for clarity and accuracy
 
-**Backward compatibility:** workerd has a strong backward compat commitment. New behavior changes MUST be gated behind compatibility flags (see compatibility-date.capnp). Any ungated behavioral change is `blocking`.
+**Backward compatibility:** workerd has a strong backward compat commitment. New behavior changes MUST be gated behind compatibility flags (see compatibility-date.capnp). Any ungated behavioral change is `blocking`. Flags annotated `$experimental` in `src/workerd/io/compatibility-date.capnp` carry no backward or forward compatibility guarantee: they guard features in development that can change or be deleted at any time. Before calling a change breaking, find which flag guards the changed code; a change only reachable behind an `$experimental` flag (for example the TypeScript streams in `src/per_isolate/webstreams/`, behind `typescript_implemented_streams`) never needs a new flag or a preserved old path, and an intentional behavior change in such code is not a regression.
 
 **Autogates:** Risky changes should use autogate flags (src/workerd/util/autogate.\*) for staged rollout. If a change looks risky and has no autogate, raise a `suggestion`. An autogate does not replace a compatibility flag for an observable behavior change.
 
@@ -71,4 +71,4 @@ For each finding:
 - `suggestion` or `info`: simpler designs, style beyond what the formatter enforces, and optional improvements. These stay out of the diff. Raise them only with a concrete alternative.
 - `question`: at most one, when you cannot tell whether something is intended.
 
-Never flag formatting, and never raise problems that already existed in code the PR does not change.
+Follow `.github/bonk/specialists/SHARED.md`, which Bonk also hands you: it lists what never to report and how to treat test code.

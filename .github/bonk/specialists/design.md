@@ -28,6 +28,11 @@ What to look for:
   (`src/workerd/util/state-machine.h`) would make illegal states unrepresentable, or a design that
   forces callers to repeat the same boilerplate.
 
+Verify before reporting: grep for other uses before claiming something is unused or exists
+"only" for one purpose, and make sure the simpler version you propose would compile (types,
+error conversions, trait bounds). Newly added public API with no callers, and code that
+duplicates an existing in-tree helper (name it), are among the most valuable findings.
+
 Every finding must show the simpler alternative concretely: a suggestion block when the fix fits
 the hunk, otherwise a short sketch (a few lines of code or a precise description such as "delete
 `FooWrapper`, call `bar()` directly at both sites in x.c++"). "Consider simplifying" without an

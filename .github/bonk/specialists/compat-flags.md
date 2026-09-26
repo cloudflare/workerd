@@ -43,7 +43,10 @@ What to check:
   date in the past is `blocking`. The docs check runs in CI
   (`.github/workflows/compat-flag-docs.yml`), so do not ask for the docs PR itself.
 - **Existing flags**: never remove one, invert its meaning, change its enable date after it has
-  passed, or delete a flag check as dead code.
+  passed, or delete a flag check as dead code. These rules do not apply to `$experimental` flags,
+  which may be renamed, made obsolete or deleted. A flag without an enable date is still a shipped
+  opt-in covered by the compatibility promise; only the `$experimental` annotation removes that
+  guarantee, so look it up rather than inferring it from a missing date.
 - **Tests**: both paths should be exercised. The `@` variant runs the oldest date and
   `@all-compat-flags` the newest, and a `.wd-test` can set `compatibilityFlags` explicitly. Missing
   coverage of the old path is a `warning`.
@@ -62,6 +65,11 @@ Severity:
 - `warning`: a malformed flag definition, a too-near enable date, or an untested old path.
 - `suggestion`: a missing autogate on a risky internal change.
 
-Calibration: first decide whether Worker code can observe the change. Bug fixes that make
-previously-throwing code succeed rarely need a flag. Fixes that change a successful result usually
-do. Do not ask for a flag on `$experimental` surfaces or on test-only code. One finding per change.
+Calibration: first decide whether Worker code can observe the change. Write-only data that user code cannot read back (such as
+tracing span attributes) is not observable. Bug fixes that make previously-throwing code succeed
+rarely need a flag. Fixes that change a successful result usually do, except that a fix aligning
+shipped behavior with Node.js or a web spec may be treated as a bug fix: raise the compatibility
+question at most once, as a `question` naming realistic code that depends on the old result, and
+never as `blocking` unless such dependence is plausible and widespread. Do not ask for a flag on `$experimental` surfaces or on test-only code. Check which flag guards the
+changed code first: behavior changes in code only reachable behind an `$experimental` flag need no
+new flag and no preserved old path. One finding per change.

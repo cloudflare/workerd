@@ -33,7 +33,9 @@ What to check:
 - **New API surface**, including globals, methods and properties that arrive via V8 updates. There
   is a high bar for non-standard APIs. Prefer web standards. A new global or method on an existing
   global can shadow user code, so it needs a compatibility flag, or the PR must explicitly accept
-  that risk.
+  that risk. A new export of an import-only module (such as `node:*` or `cloudflare:*`) or a new
+  method on a non-global class does not shadow user code: at most, ask as `info` that the
+  compatibility decision be recorded in the commit message.
 - **`Fetcher`**: any new method needs a compat flag because it collides with the JS RPC wildcard
   (AGENTS.md, Anti-Patterns).
 - **Serialized or stable enums**: never change `Headers::Guard` values or `JSG_SERIALIZABLE` tag
@@ -51,6 +53,7 @@ What to check:
 - **Cap'n Proto schemas**: adding fields with the next ordinal is fine. Removing, renaming,
   renumbering, retyping, or reordering fields breaks wire and config compatibility.
 - **Never** recommend removing a compat flag, inverting one, or deleting a flag check as dead code.
+  This does not apply to `$experimental` flags, which may be made obsolete or deleted.
 
 Severity:
 - `blocking`: an ungated observable change to shipped behavior, a changed serialized enum or tag, a
@@ -60,5 +63,7 @@ Severity:
 - `suggestion`/`info`: API ergonomics or consistency with neighbouring APIs.
 
 Calibration: evaluate plausible breakage of real user code, not contrived code. Changes behind
-`$experimental` flags are not covered by the compatibility promise. Performance opinions need a
-hot path and a reason; "could be slow" is not a finding. One finding per root cause.
+`$experimental` flags are not covered by the compatibility promise: they can change or be deleted at
+any time. Before reporting a break, find which flag guards the changed code (check its annotations
+in `src/workerd/io/compatibility-date.capnp`); code only reachable behind an `$experimental` flag,
+such as the TypeScript streams under `src/per_isolate/webstreams/`, is never a compatibility break. One finding per root cause.
