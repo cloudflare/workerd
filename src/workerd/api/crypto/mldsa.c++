@@ -151,9 +151,14 @@ kj::ArrayPtr<const uint8_t> getOid() {
 // Get context bytes from the SignAlgorithm parameter.
 std::pair<const uint8_t*, size_t> getContext(
     jsg::Lock& js, SubtleCrypto::SignAlgorithm& algorithm) {
-  KJ_IF_SOME(ctx, algorithm.context) {
-    auto ctxData = ctx.getHandle(js).asArrayPtr();
-    return {ctxData.begin(), ctxData.size()};
+  KJ_IF_SOME(context, algorithm.context) {
+    KJ_IF_SOME(ctx, context.getHandle(js).tryCast<jsg::JsBufferSource>()) {
+      auto ctxData = ctx.asArrayPtr();
+      JSG_REQUIRE(
+          ctxData.size() <= 255, DOMOperationError, "ML-DSA context must be at most 255 bytes.");
+      return {ctxData.begin(), ctxData.size()};
+    }
+    JSG_FAIL_REQUIRE(TypeError, "ML-DSA context must be a buffer source.");
   }
   // BoringSSL treats (nullptr, 0) as an empty context, equivalent to a zero-length byte string
   // per FIPS 204 §5.2.

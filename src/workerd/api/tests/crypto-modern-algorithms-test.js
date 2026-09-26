@@ -79,3 +79,59 @@ export const mlDsaJwkKeyOpsValidation = {
     );
   },
 };
+
+export const mlDsaContextLength = {
+  async test() {
+    const keyPair = await crypto.subtle.generateKey('ML-DSA-44', false, [
+      'sign',
+      'verify',
+    ]);
+    const data = new Uint8Array([1]);
+    const context = new Uint8Array(256);
+    const validAlgorithm = {
+      name: 'ML-DSA-44',
+      context: context.subarray(0, 255),
+    };
+    const invalidAlgorithm = { name: 'ML-DSA-44', context };
+
+    const signature = await crypto.subtle.sign(
+      validAlgorithm,
+      keyPair.privateKey,
+      data
+    );
+    strictEqual(
+      await crypto.subtle.verify(
+        validAlgorithm,
+        keyPair.publicKey,
+        signature,
+        data
+      ),
+      true
+    );
+    await rejects(
+      crypto.subtle.sign(invalidAlgorithm, keyPair.privateKey, data),
+      {
+        name: 'OperationError',
+      }
+    );
+    await rejects(
+      crypto.subtle.verify(
+        invalidAlgorithm,
+        keyPair.publicKey,
+        signature,
+        data
+      ),
+      { name: 'OperationError' }
+    );
+    for (const context of [null, 'invalid']) {
+      await rejects(
+        crypto.subtle.sign(
+          { name: 'ML-DSA-44', context },
+          keyPair.privateKey,
+          data
+        ),
+        { name: 'TypeError' }
+      );
+    }
+  },
+};

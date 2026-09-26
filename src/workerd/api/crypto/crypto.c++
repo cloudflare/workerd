@@ -160,6 +160,14 @@ static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
   }
 }
 
+void requireModernKeyFormat(jsg::Lock& js, kj::StringPtr format) {
+  if (format == "raw-public" || format == "raw-private" || format == "raw-seed" ||
+      format == "raw-secret") {
+    JSG_REQUIRE(FeatureFlags::get(js).getWebCryptoModernAlgorithms(), DOMNotSupportedError,
+        "Key format \"", format, "\" requires the webcrypto_modern_algorithms flag.");
+  }
+}
+
 // =======================================================================================
 // Helper functions
 
@@ -813,6 +821,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::wrapKey(jsg::Lock& js
       webCryptoOperationBegin(__func__, wrappingKey.getAlgorithmName(), key.getAlgorithmName());
 
   return js.evalNow([&] {
+    requireModernKeyFormat(js, format);
     auto algorithm = interpretAlgorithmParam(kj::mv(wrapAlgorithm));
 
     validateOperation(wrappingKey, algorithm.name, CryptoKeyUsageSet::wrapKey());
@@ -855,6 +864,7 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::unwrapKey(jsg::Lock& js,
     const jsg::TypeHandler<JsonWebKey>& jwkHandler) {
   auto operation = __func__;
   return js.evalNow([&]() -> jsg::Ref<CryptoKey> {
+    requireModernKeyFormat(js, format);
     auto normalizedAlgorithm = interpretAlgorithmParam(kj::mv(unwrapAlgorithm));
     auto normalizedUnwrapAlgorithm = interpretAlgorithmParam(kj::mv(unwrappedKeyAlgorithm));
 
@@ -902,6 +912,7 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::importKey(jsg::Lock& js,
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm, format.asPtr());
 
   return js.evalNow([&] {
+    requireModernKeyFormat(js, format);
     return importKeySync(js, format, kj::mv(keyData), kj::mv(algorithm), extractable, keyUsages);
   });
 }
@@ -961,6 +972,7 @@ jsg::Promise<SubtleCrypto::ExportKeyData> SubtleCrypto::exportKey(
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, key.getAlgorithmName());
 
   return js.evalNow([&] {
+    requireModernKeyFormat(js, format);
     // TODO(someday): Throw a NotSupportedError? The Web Crypto API spec says InvalidAccessError,
     //   but Web IDL says that's deprecated.
     JSG_REQUIRE(key.getExtractable(), DOMInvalidAccessError, "Attempt to export non-extractable ",

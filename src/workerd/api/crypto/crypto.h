@@ -412,9 +412,10 @@ class SubtleCrypto: public jsg::Object {
     jsg::Optional<int> saltLength;
 
     // Used for ML-DSA context parameter.
-    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> context;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> context;
 
     JSG_STRUCT(name, hash, dataLength, saltLength, context);
+    JSG_STRUCT_TS_OVERRIDE({ context?: ArrayBuffer | ArrayBufferView });
   };
 
   // Type of the `algorithm` parameter passed to `generateKey()`. Different algorithms call for
