@@ -1,0 +1,54 @@
+diff --git a/src/proto/h1/conn.rs b/src/proto/h1/conn.rs
+--- a/src/proto/h1/conn.rs
++++ b/src/proto/h1/conn.rs
+@@ -821,11 +821,25 @@
+             if self.has_h2_prefix() {
+                 return Err(crate::Error::new_version_h2());
+             }
+-            if let Some(msg) = T::on_error(&err) {
++            if let Some(mut msg) = T::on_error(&err) {
+                 // Drop the cached headers so as to not trigger a debug
+                 // assert in `write_head`...
+                 self.state.cached_headers.take();
+-                self.write_head(msg, None);
++                // workerd: the response says what was wrong in a text/plain body (RFC 9110
++                // section 15.5), as kj's HttpServer does: hyper's own description of the error,
++                // which depends only on its kind. `B` is generic, so the text follows the head
++                // in the head buffer rather than going through `write_body`. The head leaves a
++                // body to write unless the request line named HEAD.
++                let explanation = err.to_string();
++                msg.headers.insert(
++                    http::header::CONTENT_TYPE,
++                    HeaderValue::from_static("text/plain"),
++                );
++                self.write_head(msg, Some(BodyLength::Known(explanation.len() as u64)));
++                if let Writing::Body(_) = self.state.writing {
++                    self.io.headers_buf().extend_from_slice(explanation.as_bytes());
++                    self.state.writing = Writing::Closed;
++                }
+                 self.state.error = Some(err);
+                 return Ok(());
+             }
+diff --git a/src/proto/h1/role.rs b/src/proto/h1/role.rs
+--- a/src/proto/h1/role.rs
++++ b/src/proto/h1/role.rs
+@@ -173,11 +173,17 @@
+             trace!(bytes = buf.len(), "Request.parse");
+             let mut req = httparse::Request::new(&mut []);
+             let bytes = buf.as_ref();
+-            match ctx.h1_parser_config.parse_request_with_uninit_headers(
++            let parsed = ctx.h1_parser_config.parse_request_with_uninit_headers(
+                 &mut req,
+                 bytes,
+                 &mut headers,
+-            ) {
++            );
++            // workerd: a request line naming HEAD is recorded even when the head does not parse,
++            // so that the response to the parse error is written without a body.
++            if req.method == Some("HEAD") {
++                *ctx.req_method = Some(Method::HEAD);
++            }
++            match parsed {
+                 Ok(httparse::Status::Complete(parsed_len)) => {
+                     trace!("Request.parse Complete({})", parsed_len);
+                     len = parsed_len;

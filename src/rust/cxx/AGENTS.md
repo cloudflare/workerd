@@ -37,6 +37,11 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
   `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers),
   `kj_rs_tokio::spawn()`, and `kj_rs_tokio::Runtime` (the same loop owned by a Rust `main`;
   its `block_on` polls the future as a task and blocks in `promise.wait()` until it completes)
+- `kj-hyper/` — HTTP/1.1, WebSockets and TLS for the Rust server: hyper's server and pooled
+  client, rustls, the WebSocket handshake (kj's own `kj::WebSocket` runs over the upgraded
+  transport), with kj-typed seams (`kj::http::Service`, `kj::HttpService::Response`,
+  `kj::WebSocket`, `kj::AsyncIoStream`) so requests reach a C++ `WorkerInterface` and C++ can
+  make outbound requests; see "kj-hyper" below
 - `kj-rs-io/` — tokio-backed `kj::AsyncIoStream` / `kj::Network` / `kj::LowLevelAsyncIoProvider`
   (the I/O providers for the tokio loop, `kj_rs_io::setupTokioAsyncIo()`), `loopback:` addresses
   (in-process connections for `workerd test`), the `--watch` file watcher (Rust over `notify`),
@@ -101,3 +106,17 @@ guarantee by type, and what the **C++ adapters** guarantee by construction.
 - **`--config=asan` and the `tsan` configs instrument both C++ and Rust.** Rust is built with
   nightly rustc, `-Zsanitizer=<address|thread>`, and a standard library instrumented the same way
   (//build/rust); `//src/rust/asan` and `//src/rust/tsan` verify the instrumentation is active.
+
+## kj-hyper
+
+kj-hyper is used from Rust; its C++ (kj-hyper.c++) exists only to implement kj interfaces over
+Rust objects, and all of its Rust `unsafe` is in ffi.rs. Its rules (threads, lifetimes,
+cancellation, hang-ups, header order, parsing differences from kj, dropped kj settings) are in
+the crate docs in lib.rs and the module docs.
+
+- **Tests.** A module's Rust unit tests are in the `<module>-test.rs` beside it (`server-test.rs`
+  for server.rs), compiled only into `:kj-hyper_test`; kj-hyper/tests/ holds the contract tests
+  against kj's HTTP interfaces (a C++ `kj::HttpService` served by kj-hyper, kj-hyper's client
+  behind `kj::newHttpClient(kj::HttpService&)`, checked on the wire), a `kj_test` driving Rust
+  helpers on the tokio-backed `kj::setupAsyncIo()`. TLS policy tests live in tls-test.rs with
+  fixed PEM material (no certificate generation at test time).
