@@ -106,7 +106,9 @@ export function randomFillSync<
     const view = new Uint8Array(underlyingBuffer, byteOffset, size);
     for (let i = 0; i < size; i += MAX_RANDOM_BYTES) {
       const chunkSize = Math.min(size - i, MAX_RANDOM_BYTES);
-      crypto.getRandomValues(view.subarray(i, i + chunkSize));
+      crypto.getRandomValues(
+        view.subarray(i, i + chunkSize) as Uint8Array<ArrayBuffer>
+      );
     }
   }
 
