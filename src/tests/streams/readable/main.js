@@ -120,6 +120,13 @@ export {
   readableStreamFromCancelResolvesWhenReturnMissing,
   fromString,
   fromReturnValidationMessages,
+  fromReadsNextOnce,
+  fromSyncResultReadsDoneBeforeValue,
+  fromIteratorLookupsAreGets,
+  fromAcceptsObjectsOnly,
+  fromCancelReturnLookup,
+  fromArrayBufferViewIsOneChunk,
+  fromIteratorProtocolEdges,
 } from 'from';
 
 export {
@@ -243,5 +250,6 @@ export {
   replacedNumberKeepsBody,
   patchedControllerErrorStillErrors,
   omittedDictionariesReadNothing,
+  fromBuildsNoDictionariesFromObjectPrototype,
   asyncIteratorShape,
 } from 'pollution';
