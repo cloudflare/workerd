@@ -348,7 +348,7 @@ TestFixture::TestFixture(SetupParams&& params)
           byteStreamFactory),
       errorReporter(kj::heap<MockErrorReporter>()),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(*timer)),
-      isolateGroup(v8::IsolateGroup::GetDefault()),
+      isolateGroup(jsg::newIsolateGroup()),
       api(kj::heap<server::WorkerdApi>(testV8System,
           params.featureFlags.orDefault(CompatibilityFlags::Reader()),
           capnp::List<server::config::Extension>::Reader{},
@@ -393,6 +393,7 @@ TestFixture::TestFixture(SetupParams&& params)
       headerTable(headerTableBuilder.build()),
       ioChannelFactory(kj::mv(params.ioChannelFactory)),
       requestObserverFactory(kj::mv(params.requestObserverFactory)),
+      waitUntilTaskTrackerFactory(kj::mv(params.waitUntilTaskTrackerFactory)),
       checkedSubrequestCount(params.checkedSubrequestCount) {
   KJ_IF_SOME(id, params.actorId) {
     KJ_IF_SOME(provided, params.actorLoopback) {
@@ -402,6 +403,8 @@ TestFixture::TestFixture(SetupParams&& params)
     }
     savedHibernationManager = kj::mv(params.hibernationManager);
     savedHolderToken = params.holderToken;
+    savedActorClassName =
+        params.actorClassName.map([](kj::StringPtr name) { return kj::str(name); });
     actor = makeActor(kj::mv(id));
   }
 }
@@ -428,14 +431,19 @@ jsg::Ref<api::DurableObjectStorage> storageFactory(
 kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
   auto& loopback = KJ_ASSERT_NONNULL(savedActorLoopback);
   return kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
-      /*hasTransient=*/false, actorCacheFactory, /*classname=*/kj::none,
+      /*hasTransient=*/false, actorCacheFactory,
+      savedActorClassName.map([](kj::String& name) { return name.asPtr(); }),
       /*props=*/Frankenvalue(), storageFactory, loopback->addRef(), *timerChannel,
       kj::refcounted<ActorObserver>(),
       savedHibernationManager.map(
           [](kj::Own<Worker::Actor::HibernationManager>& m) { return m->addRef(); }),
       /*hibernationEventType=*/kj::none, /*container=*/kj::none,
       /*containerImages=*/jsg::Dict<kj::String>{}, /*facetManager=*/kj::none,
-      /*version=*/kj::none, savedHolderToken);
+      /*version=*/kj::none, savedHolderToken,
+      waitUntilTaskTrackerFactory.map(
+          [](kj::Function<kj::Own<Worker::Actor::WaitUntilTaskTracker>()>& factory) {
+    return factory();
+  }));
 }
 
 void TestFixture::resetActor() {

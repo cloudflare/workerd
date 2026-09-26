@@ -14,20 +14,22 @@
 namespace workerd::api {
 namespace {
 
-// Records, in call order, every body-rewindable value passed to setNextSubrequestRetryEligibility().
+struct RetryEligibility {
+  bool bodyRewindable;
+  ActorCallTargetRetryable targetRetryable;
+};
+
 class RecordingRequestObserver final: public RequestObserver {
  public:
-  RecordingRequestObserver(kj::Vector<bool>& calls): calls(calls) {}
+  RecordingRequestObserver(kj::Vector<RetryEligibility>& calls): calls(calls) {}
 
   void setNextSubrequestRetryEligibility(
       SubrequestBodyRewindable bodyRewindable, ActorCallTargetRetryable targetRetryable) override {
-    // A service binding is not a retryable actor target.
-    KJ_EXPECT(targetRetryable == ActorCallTargetRetryable::NO);
-    calls.add(bodyRewindable.toBool());
+    calls.add(RetryEligibility{bodyRewindable.toBool(), targetRetryable});
   }
 
  private:
-  kj::Vector<bool>& calls;
+  kj::Vector<RetryEligibility>& calls;
 };
 
 // Minimal WorkerInterface that answers every outgoing request() with an empty 200, draining the
@@ -76,17 +78,12 @@ struct FetchTargetIoChannelFactory final: public TestFixture::DummyIoChannelFact
   }
 };
 
-// fetchImplNoOutputLock forwards Request::canRewindBody() and the target's retry support to
-// RequestObserver so that, downstream, edgeworker can classify retry eligibility for disconnected
-// outgoing actor calls. The subtle
-// property here is that the stashed signal is per-call, not sticky: a single RequestObserver is
-// shared across every outgoing subrequest in an IoContext, so the value set for one call must not
-// carry over into the next. We issue two fetches in one invocation -- a rewindable (buffered) body
-// then a non-rewindable (stream) body -- to exercise that shared observer across consecutive calls
-// and verify the per-body mapping, the per-call sequencing, and the absence of stale attribution all
-// at once (the no-staleness behaviour can only be observed across more than one fetch).
-KJ_TEST("fetch reports each outgoing body's rewindability per-call without staleness") {
-  kj::Vector<bool> bodyRewindableCalls;
+// fetchImplNoOutputLock forwards payload and target retryability to RequestObserver so edgeworker
+// can classify disconnected outgoing actor calls. The stashed signal is per-call, not sticky: one
+// RequestObserver is shared across every outgoing subrequest in an IoContext, so the value set for
+// one call must not carry over into the next. Two fetches exercise consecutive values.
+KJ_TEST("fetch reports each outgoing call's retry eligibility without staleness") {
+  kj::Vector<RetryEligibility> calls;
 
   TestFixture fixture(TestFixture::SetupParams{
     .mainModuleSource = R"SCRIPT(
@@ -109,7 +106,7 @@ KJ_TEST("fetch reports each outgoing body's rewindability per-call without stale
   }),
     .requestObserverFactory =
         kj::Function<kj::Own<RequestObserver>()>([&]() -> kj::Own<RequestObserver> {
-    return kj::refcounted<RecordingRequestObserver>(bodyRewindableCalls);
+    return kj::refcounted<RecordingRequestObserver>(calls);
   }),
   });
 
@@ -117,11 +114,12 @@ KJ_TEST("fetch reports each outgoing body's rewindability per-call without stale
       fixture.runRequest(kj::HttpMethod::POST, "http://www.example.com"_kj, "incoming-body"_kj);
   KJ_EXPECT(result.statusCode == 200);
 
-  KJ_ASSERT(bodyRewindableCalls.size() == 2,
-      "expected exactly one rewindability signal per outgoing fetch");
-  KJ_EXPECT(bodyRewindableCalls[0] == true, "buffered request body should be rewindable");
-  KJ_EXPECT(bodyRewindableCalls[1] == false,
-      "streamed request body should not be rewindable (no carryover)");
+  KJ_ASSERT(calls.size() == 2, "expected exactly one retry eligibility signal per outgoing fetch");
+  KJ_EXPECT(calls[0].bodyRewindable, "buffered request body should be rewindable");
+  KJ_EXPECT(
+      !calls[1].bodyRewindable, "streamed request body should not be rewindable (no carryover)");
+  KJ_EXPECT(calls[0].targetRetryable == ActorCallTargetRetryable::NO);
+  KJ_EXPECT(calls[1].targetRetryable == ActorCallTargetRetryable::NO);
 }
 
 }  // namespace

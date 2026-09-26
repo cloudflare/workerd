@@ -1,4 +1,16 @@
-load("@bazel_skylib//rules:common_settings.bzl", "repeatable_string_flag", "string_flag")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "repeatable_string_flag", "string_flag")
+
+bool_flag(
+    name = "python_snapshots",
+    build_setting_default = True,
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "python_snapshots_disabled",
+    flag_values = {":python_snapshots": "false"},
+    visibility = ["//visibility:public"],
+)
 
 # Similar to --run_under flag to be able to run cross-compiled target binaries.
 string_flag(

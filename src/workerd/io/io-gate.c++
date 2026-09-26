@@ -10,11 +10,7 @@ namespace workerd {
 
 const InputGate::Hooks InputGate::Hooks::DEFAULT;
 
-InputGate::InputGate(Hooks& hooks): InputGate(hooks, kj::newPromiseAndFulfiller<void>()) {}
-InputGate::InputGate(Hooks& hooks, kj::PromiseFulfillerPair<void> paf)
-    : hooks(hooks),
-      brokenPromise(paf.promise.fork()),
-      brokenState(kj::mv(paf.fulfiller)) {}
+InputGate::InputGate(Hooks& hooks): hooks(hooks) {}
 InputGate::~InputGate() noexcept {
   // Intentionally `noexcept` because if this throws then there are dangling references.
   KJ_ASSERT(lockCount == 0,
@@ -53,7 +49,7 @@ InputGate::Waiter::~Waiter() noexcept(false) {
 
 kj::Promise<InputGate::Lock> InputGate::wait(SpanParent parentSpan) {
   auto methodSpan = parentSpan.newChild("input_gate_wait_attempt"_kjc);
-  KJ_IF_SOME(e, brokenState.tryGet<kj::Exception>()) {
+  KJ_IF_SOME(e, brokenException) {
     return e.clone();
   } else if (lockCount == 0) {
     return Lock(*this, methodSpan);
@@ -63,10 +59,10 @@ kj::Promise<InputGate::Lock> InputGate::wait(SpanParent parentSpan) {
 }
 
 kj::Promise<void> InputGate::onBroken() {
-  KJ_IF_SOME(e, brokenState.tryGet<kj::Exception>()) {
+  KJ_IF_SOME(e, brokenException) {
     return e.clone();
   } else {
-    return brokenPromise.addBranch();
+    return brokenFlag.whenSignaled();
   }
 }
 
@@ -215,7 +211,7 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait(SpanParent parentS
         state = INITIAL_WAIT;
 
         auto& target = parentAsInputGate();
-        KJ_IF_SOME(e, target.brokenState.tryGet<kj::Exception>()) {
+        KJ_IF_SOME(e, target.brokenException) {
           // Oops, we're broken.
           setBroken(e);
           kj::throwFatalException(e.clone());
@@ -305,7 +301,7 @@ InputGate::Lock InputGate::CriticalSection::succeeded() {
 void InputGate::CriticalSection::failed(const kj::Exception& e) {
   CriticalSection* ptr = this;
   for (;;) {
-    if (ptr->brokenState.is<kj::Exception>()) {
+    if (ptr->brokenException != kj::none) {
       // Already failed I guess.
       return;
     }
@@ -337,10 +333,10 @@ void InputGate::setBroken(const kj::Exception& e) {
     waiter.fulfiller.reject(e.clone());
     waiters.remove(waiter);
   }
-  KJ_IF_SOME(f, brokenState.tryGet<kj::Own<kj::PromiseFulfiller<void>>>()) {
-    f.get()->reject(e.clone());
+  if (brokenException == kj::none) {
+    brokenFlag.reject(e.clone());
   }
-  brokenState = e.clone();
+  brokenException = e.clone();
 }
 
 InputGate& InputGate::CriticalSection::parentAsInputGate() {
@@ -390,20 +386,15 @@ kj::Promise<void> OutputGate::wait(SpanParent parentSpan) {
 }
 
 kj::Promise<void> OutputGate::onBroken() {
-  KJ_REQUIRE(
-      !brokenState.is<kj::Own<kj::PromiseFulfiller<void>>>(), "onBroken() can only be called once");
-
-  KJ_IF_SOME(e, brokenState.tryGet<kj::Exception>()) {
+  KJ_IF_SOME(e, brokenException) {
     return e.clone();
   } else {
-    auto paf = kj::newPromiseAndFulfiller<void>();
-    brokenState = kj::mv(paf.fulfiller);
-    return kj::mv(paf.promise);
+    return brokenFlag.whenSignaled();
   }
 }
 
 bool OutputGate::isBroken() {
-  return brokenState.is<kj::Exception>();
+  return brokenException != kj::none;
 }
 
 namespace {
@@ -422,10 +413,10 @@ kj::Exception OutputGate::makeUnfulfilledException() {
 void OutputGate::setBroken(const kj::Exception& e) {
   // We assume the exception is already propagated into `pastLocksPromise`, so all we need to do
   // is handle onBroken().
-  KJ_IF_SOME(f, brokenState.tryGet<kj::Own<kj::PromiseFulfiller<void>>>()) {
-    f.get()->reject(e.clone());
+  if (brokenException == kj::none) {
+    brokenFlag.reject(e.clone());
   }
-  brokenState = e.clone();
+  brokenException = e.clone();
 }
 
 }  // namespace workerd

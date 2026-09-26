@@ -50,6 +50,7 @@
 #include <kj/encoding.h>
 #include <kj/filesystem.h>
 #include <kj/map.h>
+#include <kj/sticky-flag.h>
 
 #include <cstdint>
 #include <ctime>
@@ -3800,8 +3801,7 @@ struct Worker::Actor::Impl {
 
   TimerChannel& timerChannel;
 
-  kj::ForkedPromise<void> shutdownPromise;
-  kj::Own<kj::PromiseFulfiller<void>> shutdownFulfiller;
+  kj::StickyFlag shutdownFlag;
 
   // If this Actor has a HibernationManager, it means the Actor has recently accepted a Hibernatable
   // websocket. We eventually move the HibernationManager into the DeferredProxy task
@@ -3858,8 +3858,7 @@ struct Worker::Actor::Impl {
       kj::Maybe<uint16_t>& hibernationEventType,
       kj::Maybe<rpc::Container::Client> container,
       jsg::Dict<kj::String> containerImages,
-      kj::Maybe<FacetManager&> facetManager,
-      kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
+      kj::Maybe<FacetManager&> facetManager)
       : actorId(kj::mv(actorId)),
         props(kj::mv(props)),
         makeStorage(kj::mv(makeStorage)),
@@ -3873,8 +3872,6 @@ struct Worker::Actor::Impl {
         outputGate(hooks),
         loopback(kj::mv(loopback)),
         timerChannel(timerChannel),
-        shutdownPromise(paf.promise.fork()),
-        shutdownFulfiller(kj::mv(paf.fulfiller)),
         hibernationManager(kj::mv(manager)),
         hibernationEventType(kj::mv(hibernationEventType)) {
     actorCache =
@@ -3920,9 +3917,11 @@ Worker::Actor::Actor(const Worker& worker,
     jsg::Dict<kj::String> containerImages,
     kj::Maybe<FacetManager&> facetManager,
     kj::Maybe<ActorVersion> version,
-    kj::Maybe<uint64_t> holderToken)
+    kj::Maybe<uint64_t> holderToken,
+    kj::Maybe<kj::Own<WaitUntilTaskTracker>> waitUntilTaskTracker)
     : worker(kj::atomicAddRef(worker)),
-      tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
+      tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })),
+      waitUntilTaskTracker(kj::mv(waitUntilTaskTracker)) {
   impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache), kj::mv(props),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
       hibernationEventType, kj::mv(container), kj::mv(containerImages), facetManager);
@@ -4083,7 +4082,7 @@ void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&
 
   shutdownActorCache(error);
 
-  impl->shutdownFulfiller->fulfill();
+  impl->shutdownFlag.signal();
 }
 
 void Worker::Actor::shutdownActorCache(kj::Maybe<const kj::Exception&> error) {
@@ -4101,7 +4100,7 @@ void Worker::Actor::abort(const kj::Exception& error) {
   } else {
     shutdownActorCache(error);
   }
-  impl->shutdownFulfiller->fulfill();
+  impl->shutdownFlag.signal();
 
   // Now hard-cancel everything that might be using the actor.
   //
@@ -4126,7 +4125,7 @@ void Worker::Actor::abort(const kj::Exception& error) {
 }
 
 kj::Promise<void> Worker::Actor::onShutdown() {
-  return impl->shutdownPromise.addBranch();
+  return impl->shutdownFlag.whenSignaled();
 }
 
 kj::Promise<void> Worker::Actor::onBroken() {
@@ -4405,6 +4404,13 @@ kj::Maybe<api::ExportedHandler&> Worker::Actor::getHandler() {
 
 ActorObserver& Worker::Actor::getMetrics() {
   return *impl->metrics;
+}
+
+kj::Own<Worker::Actor::WaitUntilTaskHandle> Worker::Actor::addedWaitUntilTask() {
+  KJ_IF_SOME(tracker, waitUntilTaskTracker) {
+    return tracker->registerTask();
+  }
+  return kj::Own<WaitUntilTaskHandle>();
 }
 
 InputGate& Worker::Actor::getInputGate() {

@@ -93,6 +93,14 @@ namespace workerd::util {
      enforcement on each request. The observe-only DURABLE_OBJECT_RETRIES_FETCH gate is a         \
      prerequisite. */                                                                              \
   V(DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS)                                                   \
+  /* Extends observe-only retry-token claiming to Durable Object JSRPC calls: senders attach       \
+     tokens and receivers claim them. Requires DURABLE_OBJECT_RETRIES_FETCH. */                    \
+  V(DURABLE_OBJECT_RETRIES_JSRPC)                                                                  \
+  /* Enables Durable Object JSRPC retry requests. Requires both fetch retry gates and the JSRPC   \
+     observe gate. */                                                                               \
+  V(DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS)                                                   \
+  /* Enables user-configured Durable Object retry policy and @retryable dispatch behavior. */      \
+  V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
   /* When enabled, the native `node-internal:url` module is provided by the Rust                   \
      implementation (api::node UrlUtil ported to src/rust/api) instead of the                      \
      C++ implementation. The C++ implementation is retained for rollback.*/                        \
@@ -134,7 +142,18 @@ namespace workerd::util {
      never enters JavaScript and byte-budgets its un-yielded work, while pumpToImpl() still        \
      suspends through the event loop on every iteration (only the write suspension is elided),     \
      leaving the JS-visible pull() ordering unchanged. */                                          \
-  V(STREAM_CONTROLLER_SYNC_FAST_PATHS)
+  V(STREAM_CONTROLLER_SYNC_FAST_PATHS)                                                             \
+  /* When a native WritableStream sent over JS RPC is dropped or revoked without a clean end(),   \
+     abort its underlying sink so that anything connected to it (e.g. the readable half of an      \
+     IdentityTransformStream) errors instead of hanging. When disabled, the sink is dropped        \
+     without abort. */                                                                             \
+  V(JSRPC_WRITABLE_DROP_ABORTS_SINK)                                                               \
+  /* Propagate cancellation of a ReadableStream sent over JS RPC back to its origin: the sender    \
+     attaches a StreamCanceler capability, the receiver calls it when its copy of the stream is    \
+     canceled or released before EOF, and the origin's pump cancels the source (running its       \
+     cancel algorithm with the receiver's reason). When disabled, neither side participates and    \
+     the origin learns of the loss only when its next write fails. */                             \
+  V(JSRPC_READABLE_CANCEL_PROPAGATION)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
@@ -160,13 +179,13 @@ constexpr size_t autogateToIndex(AutogateKey key) {
 // Returns all AutogateKey values (excluding NumOfKeys) as an iterable range:
 //
 //     for (AutogateKey key: getAutogateKeys()) { ... }
-constexpr kj::ArrayPtr<const AutogateKey> getAutogateKeys() {
+constexpr kj::StaticArrayPtr<const AutogateKey> getAutogateKeys() {
   static constexpr AutogateKey keys[] = {
 #define V(key) AutogateKey::key,
     WORKERD_AUTOGATES(V)
 #undef V
   };
-  return keys;
+  return {keys, kj::size(keys)};
 }
 static_assert(getAutogateKeys().size() == autogateToIndex(AutogateKey::NumOfKeys));
 

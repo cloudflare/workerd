@@ -254,12 +254,24 @@ class Fetcher: public JsRpcClientProvider {
     virtual Result newSingleUseClient(
         kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) = 0;
 
-    virtual bool supportsActorCallRetries() const {
-      return false;
+    // Whether this factory dispatches to a Durable Object, and whether that target can create fresh
+    // retry attempts. Actor calls are observed whether or not the target supports retries.
+    virtual kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const {
+      return kj::none;
+    }
+
+    bool supportsActorCallRetries() const {
+      return getActorTargetRetryability().orDefault(ActorCallTargetRetryable::NO).toBool();
     }
 
     virtual void onActorCallRetry() {
       KJ_FAIL_REQUIRE("actor call retry requested from an unsupported Fetcher");
+    }
+
+    // The retry policy configured on the binding this factory was minted from, if any. None means
+    // the runtime's default applies.
+    virtual kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() const {
+      return kj::none;
     }
 
     // Factories that support actor call retries override this method. The default rejects the
@@ -336,8 +348,15 @@ class Fetcher: public JsRpcClientProvider {
       kj::ConstString operationName,
       ActorCallRetryState::Attempt attempt);
 
-  bool supportsActorCallRetries() override;
-  void onActorCallRetry();
+  [[nodiscard]] ClientWithTracing getClientForActorCallAttempt(IoContext& ioContext,
+      kj::Maybe<kj::String> cfStr,
+      kj::ConstString operationName,
+      ActorCallRetryState::Attempt attempt,
+      MakeUserSpanParent makeUserSpanParent);
+
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() override;
+  kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() override;
+  void onActorCallRetry() override;
 
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);
@@ -430,7 +449,8 @@ class Fetcher: public JsRpcClientProvider {
     return getRpcMethod(js, kj::mv(name));
   }
 
-  ClientForOneCall getClientForOneCall(jsg::Lock& js) override;
+  ClientForOneCall getClientForOneCall(
+      jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;
 
   kj::LiteralStringConst getRpcTargetKind() override;
 

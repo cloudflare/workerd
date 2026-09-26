@@ -348,6 +348,8 @@ class XThreadWaitList {
     }
 
     void lostFulfiller() const {
+      // See XThreadWaitList<void>::State::lostFulfiller().
+      if (!isShared()) return;
       if (list.isReady() != kj::none) return;
       list.tryReady(Outcome{kj::none, makeNeverFulfilledException()});
     }

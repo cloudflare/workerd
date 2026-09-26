@@ -80,7 +80,8 @@ KJ_TEST("WeakRef: becomes invalid when all Refs dropped") {
 
     // operation->() throws different message when weak itself is destroyed/moved
     auto weak2 = kj::mv(weak);
-    KJ_EXPECT_THROW_MESSAGE("destroyed", weak->value);
+    // Dereferencing the moved-from ref is the behavior under test.
+    KJ_EXPECT_THROW_MESSAGE("destroyed", weak->value);  // NOLINT(workerd-use-after-move)
   });
 }
 
@@ -117,7 +118,8 @@ KJ_TEST("WeakRef: move semantics") {
 
     // weak2 should be alive, weak1 should be null.
     KJ_ASSERT(weak2.isAlive());
-    KJ_ASSERT(!weak1.isAlive());
+    // Checking the moved-from ref is the behavior under test.
+    KJ_ASSERT(!weak1.isAlive());  // NOLINT(workerd-use-after-move)
     KJ_ASSERT(weak2->value == 3);
   });
 }
@@ -223,7 +225,8 @@ KJ_TEST("Moving WeakRefs") {
     auto weak1 = strong.getWeakRef(js);
     auto weak2 = kj::mv(weak1);
     KJ_ASSERT(weak2.isAlive());
-    KJ_ASSERT(!weak1.isAlive());
+    // Checking the moved-from ref is the behavior under test.
+    KJ_ASSERT(!weak1.isAlive());  // NOLINT(workerd-use-after-move)
 
     auto strong2 = js.alloc<NumberBox2>(456);
     auto weak3 = strong2.getWeakRef(js);
@@ -312,7 +315,8 @@ KJ_TEST("WeakV8Ref: move semantics") {
     auto weak2 = kj::mv(weak1);
 
     KJ_ASSERT(weak2.isAlive());
-    KJ_ASSERT(!weak1.isAlive());
+    // Checking the moved-from ref is the behavior under test.
+    KJ_ASSERT(!weak1.isAlive());  // NOLINT(workerd-use-after-move)
   });
 }
 
@@ -378,7 +382,8 @@ KJ_TEST("WeakJsRef: move semantics") {
     auto weak2 = kj::mv(weak1);
 
     KJ_ASSERT(weak2.isAlive());
-    KJ_ASSERT(!weak1.isAlive());
+    // Checking the moved-from ref is the behavior under test.
+    KJ_ASSERT(!weak1.isAlive());  // NOLINT(workerd-use-after-move)
   });
 }
 

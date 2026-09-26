@@ -8,6 +8,7 @@
 
 import { strictEqual, ok } from 'node:assert';
 import { consume, consumeBytes } from 'helpers';
+import { usingTsImpl } from 'which-impl';
 
 // start/transform/flush enqueues arrive in order.
 export const simpleTransform = {
@@ -172,5 +173,46 @@ export const prototypeChainTransformer = {
     strictEqual(r.value, 'x');
     await writer.close();
     strictEqual(seen.join(','), 'start,transform,flush');
+  },
+};
+
+// DIVERGENCE (ledger #17): the pair's start promise is resolved with
+// start()'s result and each inner controller settles a new promise with
+// it, so a write queued during start reaches transform() after the third
+// marker chained on a promise fulfilled before construction when start()
+// is synchronous, and after the fourth marker chained on the promise
+// start() returns when that fulfills in the same turn (spec; Node
+// agrees). C++ transforms after the first marker in both.
+export const startSettlementTiming = {
+  async test() {
+    for (const pending of [false, true]) {
+      const log = [];
+      const { promise, resolve } = Promise.withResolvers();
+      if (!pending) resolve();
+      const ts = new TransformStream(
+        {
+          start: pending ? () => promise : () => {},
+          transform() {
+            log.push('transform');
+          },
+        },
+        undefined,
+        { highWaterMark: 1 }
+      );
+      const write = ts.writable.getWriter().write('x');
+      let p = promise;
+      for (let i = 1; i <= 5; i++) {
+        p = p.then(() => log.push(i));
+      }
+      resolve();
+      await write;
+      await scheduler.wait(1);
+      const expected = !usingTsImpl
+        ? '1,transform,2,3,4,5'
+        : pending
+          ? '1,2,3,4,transform,5'
+          : '1,2,3,transform,4,5';
+      strictEqual(log.join(','), expected, `pending: ${pending}`);
+    }
   },
 };

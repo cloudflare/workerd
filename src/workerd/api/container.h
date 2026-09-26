@@ -349,7 +349,7 @@ class Container: public jsg::Object {
       jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding);
   jsg::Promise<DirectorySnapshot> snapshotDirectory(
       jsg::Lock& js, DirectorySnapshotOptions options);
-  jsg::Promise<Snapshot> snapshotContainer(jsg::Lock& js, SnapshotOptions options);
+  jsg::Promise<Snapshot> snapshotContainer(jsg::Lock& js, jsg::Optional<SnapshotOptions> options);
   jsg::Promise<jsg::Ref<ExecProcess>> exec(
       jsg::Lock& js, kj::Array<kj::String> cmd, jsg::Optional<ExecOptions> options);
 
