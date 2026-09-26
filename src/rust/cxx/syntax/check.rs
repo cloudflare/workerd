@@ -566,7 +566,9 @@ fn check_api_fn(cx: &mut Check, efn: &ExternFn) {
             }
         }
         Lang::Rust => {
-            if !efn.generics.params.is_empty() && efn.unsafety.is_none() {
+            if let Some(Type::Future(fut)) = &efn.ret {
+                check_async_fn_borrows(cx, efn, fut);
+            } else if !efn.generics.params.is_empty() && efn.unsafety.is_none() {
                 let ref span = span_for_generics_error(efn);
                 let message = format!(
                     "must be `unsafe fn {}` in order to expose explicit lifetimes to C++",
@@ -770,6 +772,84 @@ fn check_mut_return_restriction(cx: &mut Check, efn: &ExternFn) {
         efn,
         "&mut return type is not allowed unless there is a &mut argument",
     );
+}
+
+// What an async `extern "Rust"` function may borrow. C++ sees `kj::Promise<T> f(const U&...)`,
+// and the promise borrowing its arguments until it settles is the contract of every
+// promise-returning KJ function, so the function is safe as long as nothing outlives that:
+// without `unsafe`, the settled result may not borrow (C++ can hold it after the argument it
+// borrows is gone), and every reference argument must be bound by the future's one lifetime (a
+// `&'static` argument would let the Rust body keep a C++ argument forever). A plain reference
+// result is rejected outright, `unsafe` or not: `kj_rs::FuturePoller` stores the settled value
+// in a union, which cannot hold a reference.
+fn check_async_fn_borrows(cx: &mut Check, efn: &ExternFn, fut: &Future) {
+    if let Type::Ref(_) = &fut.output {
+        cx.error(
+            &fut.output,
+            "async function cannot return a reference: the promise's settled result is stored by value",
+        );
+        return;
+    }
+    if efn.unsafety.is_some() {
+        return;
+    }
+
+    if !collect_lifetimes(&fut.output).is_empty() {
+        let message = format!(
+            "must be `unsafe fn {}` in order to return a borrow from an async function: C++ can keep the promise's settled result after the argument it borrows is gone",
+            efn.name.rust,
+        );
+        cx.error(&fut.output, message);
+    }
+
+    let bound = fut.lifetime.as_ref();
+    let message = |lifetime: &Lifetime| {
+        format!(
+            "argument of async fn `{name}` borrows for `{lifetime}`, longer than its promise: a safe async function elides every argument lifetime or shares the one it names; keeping a C++ argument past settlement requires `unsafe fn {name}`",
+            name = efn.name.rust,
+        )
+    };
+    if let Some(receiver) = &efn.receiver
+        && let Some(lifetime) = &receiver.lifetime
+        && Some(lifetime) != bound
+    {
+        let ref span = span_for_receiver_error(receiver);
+        cx.error(span, message(lifetime));
+    }
+    for arg in &efn.args {
+        if let Some(lifetime) = collect_lifetimes(&arg.ty)
+            .into_iter()
+            .flatten()
+            .find(|lifetime| Some(*lifetime) != bound)
+        {
+            cx.error(&arg.ty, message(lifetime));
+        }
+    }
+}
+
+// Every lifetime a type borrows through, at any depth: on references, `&str` and slices (`None`
+// when elided) and as arguments of named types. Function pointer types borrow nothing.
+fn collect_lifetimes(ty: &Type) -> Vec<Option<&Lifetime>> {
+    struct Collector<'t>(Vec<Option<&'t Lifetime>>);
+
+    impl<'t> Visit<'t> for Collector<'t> {
+        fn visit_type(&mut self, ty: &'t Type) {
+            match ty {
+                Type::Ident(ident) => self.0.extend(ident.generics.lifetimes.iter().map(Some)),
+                Type::Ref(reference) | Type::Str(reference) => {
+                    self.0.push(reference.lifetime.as_ref());
+                }
+                Type::SliceRef(slice) => self.0.push(slice.lifetime.as_ref()),
+                Type::Fn(_) => return,
+                _ => {}
+            }
+            visit::visit_type(self, ty);
+        }
+    }
+
+    let mut collector = Collector(Vec::new());
+    collector.visit_type(ty);
+    collector.0
 }
 
 fn check_reserved_name(cx: &mut Check, ident: &Ident) {

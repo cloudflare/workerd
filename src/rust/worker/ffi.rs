@@ -22,10 +22,6 @@ use crate::ffi::bridge::CustomEventResult;
 use crate::ffi::bridge::ScheduledResult;
 
 #[cxx::bridge(namespace = "workerd::rust::worker")]
-#[expect(
-    clippy::missing_safety_doc,
-    reason = "cxx bridge extern decls; safety is uniform"
-)]
 pub mod bridge {
     #[namespace = "kj::rust"]
     unsafe extern "C++" {
@@ -94,44 +90,44 @@ pub mod bridge {
         )]
         fn new_cxx_worker(inner: KjOwn<WorkerInterface>) -> Box<Wrapper>;
 
-        async unsafe fn request<'a>(
-            self: &'a mut Wrapper,
+        async fn request(
+            self: &mut Wrapper,
             method: HttpMethod,
-            url: &'a [u8],
-            headers: &'a HttpHeaders,
-            request_body: Pin<&'a mut AsyncInputStream>,
-            response: Pin<&'a mut HttpServiceResponse>,
+            url: &[u8],
+            headers: &HttpHeaders,
+            request_body: Pin<&mut AsyncInputStream>,
+            response: Pin<&mut HttpServiceResponse>,
         ) -> Result<()>;
 
-        async unsafe fn connect<'a>(
-            self: &'a mut Wrapper,
-            host: &'a [u8],
-            headers: &'a HttpHeaders,
-            connection: Pin<&'a mut AsyncIoStream>,
-            response: Pin<&'a mut ConnectResponse>,
-            settings: HttpConnectSettings<'a>,
+        async fn connect(
+            self: &mut Wrapper,
+            host: &[u8],
+            headers: &HttpHeaders,
+            connection: Pin<&mut AsyncIoStream>,
+            response: Pin<&mut ConnectResponse>,
+            settings: HttpConnectSettings<'_>,
         ) -> Result<()>;
 
-        async unsafe fn prewarm<'a>(self: &'a mut Wrapper, url: &'a [u8]) -> Result<()>;
+        async fn prewarm(self: &mut Wrapper, url: &[u8]) -> Result<()>;
 
-        async unsafe fn run_scheduled<'a>(
-            self: &'a mut Wrapper,
+        async fn run_scheduled(
+            self: &mut Wrapper,
             scheduled_time: KjDate,
-            cron: &'a [u8],
+            cron: &[u8],
         ) -> Result<ScheduledResult>;
 
-        async unsafe fn run_alarm<'a>(
-            self: &'a mut Wrapper,
+        async fn run_alarm(
+            self: &mut Wrapper,
             scheduled_time: KjDate,
             retry_count: u32,
         ) -> Result<AlarmResult>;
 
-        async unsafe fn custom_event<'a>(
-            self: &'a mut Wrapper,
+        async fn custom_event(
+            self: &mut Wrapper,
             event: KjOwn<CustomEvent>,
         ) -> Result<CustomEventResult>;
 
-        async unsafe fn test<'a>(self: &'a mut Wrapper) -> Result<bool>;
+        async fn test(self: &mut Wrapper) -> Result<bool>;
     }
 
     unsafe extern "C++" {
@@ -147,50 +143,47 @@ pub mod bridge {
     unsafe extern "C++" {
         type WorkerInterface;
 
-        async unsafe fn worker_request<'a>(
-            worker: Pin<&'a mut WorkerInterface>,
+        async fn worker_request(
+            worker: Pin<&mut WorkerInterface>,
             method: HttpMethod,
-            url: &'a [u8],
-            headers: &'a HttpHeaders,
-            request_body: Pin<&'a mut AsyncInputStream>,
-            response: Pin<&'a mut HttpServiceResponse>,
+            url: &[u8],
+            headers: &HttpHeaders,
+            request_body: Pin<&mut AsyncInputStream>,
+            response: Pin<&mut HttpServiceResponse>,
         ) -> Result<()>;
 
-        async unsafe fn worker_connect<'a>(
-            worker: Pin<&'a mut WorkerInterface>,
-            host: &'a [u8],
-            headers: &'a HttpHeaders,
-            connection: Pin<&'a mut AsyncIoStream>,
-            response: Pin<&'a mut ConnectResponse>,
-            settings: HttpConnectSettings<'a>,
+        async fn worker_connect(
+            worker: Pin<&mut WorkerInterface>,
+            host: &[u8],
+            headers: &HttpHeaders,
+            connection: Pin<&mut AsyncIoStream>,
+            response: Pin<&mut ConnectResponse>,
+            settings: HttpConnectSettings<'_>,
         ) -> Result<()>;
 
-        async unsafe fn worker_prewarm<'a>(
-            worker: Pin<&'a mut WorkerInterface>,
-            url: &'a [u8],
-        ) -> Result<()>;
+        async fn worker_prewarm(worker: Pin<&mut WorkerInterface>, url: &[u8]) -> Result<()>;
 
         // Dates cross as i64 nanoseconds since the Unix epoch (kj_rs::repr::{to,from}Nanos), to
         // avoid marshalling KjDate through an extern "C++" boundary.
-        async unsafe fn worker_run_scheduled<'a>(
-            worker: Pin<&'a mut WorkerInterface>,
+        async fn worker_run_scheduled(
+            worker: Pin<&mut WorkerInterface>,
             scheduled_time_nanos: i64,
-            cron: &'a [u8],
+            cron: &[u8],
         ) -> Result<ScheduledResult>;
 
-        async unsafe fn worker_run_alarm<'a>(
-            worker: Pin<&'a mut WorkerInterface>,
+        async fn worker_run_alarm(
+            worker: Pin<&mut WorkerInterface>,
             scheduled_time_nanos: i64,
             retry_count: u32,
         ) -> Result<AlarmResult>;
 
         // Takes ownership of the event and forwards it to the C++ worker.
-        async unsafe fn worker_custom_event(
+        async fn worker_custom_event(
             worker: Pin<&mut WorkerInterface>,
             event: KjOwn<CustomEvent>,
         ) -> Result<CustomEventResult>;
 
-        async unsafe fn worker_test<'a>(worker: Pin<&'a mut WorkerInterface>) -> Result<bool>;
+        async fn worker_test(worker: Pin<&mut WorkerInterface>) -> Result<bool>;
     }
 
     impl Box<Wrapper> {}

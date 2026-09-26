@@ -177,3 +177,111 @@ fn test_kj_arc_in_shared_struct() {
     let expected = "::rust::ManuallyDrop<::Holder> holder$(::std::move(holder));";
     assert!(implementation.contains(expected));
 }
+
+// Every spelling of a borrowing async `extern "Rust"` function the bridge accepts as safe, plus
+// the `unsafe` forms that take on a longer borrow.
+const ASYNC_BORROWS: &str = r#"
+    #[cxx::bridge]
+    mod ffi {
+        extern "Rust" {
+            type Borrower;
+
+            async fn elided(buf: &[u8], text: &str) -> Result<u64>;
+            async fn elided_self(self: &Borrower, text: &str) -> Result<u64>;
+            async fn elided_self_shorthand(&self, delta: u64) -> u64;
+            async fn named<'a>(buf: &'a [u8], tail: &'a [u8]) -> Result<()>;
+            async unsafe fn named_self<'a>(self: &'a Borrower, text: &'a str) -> Result<u64>;
+            async unsafe fn keeps_static<'a>(buf: &'a [u8], forever: &'static str) -> u64;
+            async unsafe fn returns_borrow<'a>(text: &'a str) -> &'a str;
+        }
+    }
+"#;
+
+#[test]
+fn test_async_borrows() {
+    let opt = cxx_gen::Opt::default();
+    let source = ASYNC_BORROWS.parse().unwrap();
+    let generated = generate_header_and_cc(source, &opt).unwrap();
+    let header = str::from_utf8(&generated.header).unwrap();
+    assert!(header.contains("kj::Promise<::std::uint64_t> elided(::rust::Slice<::std::uint8_t const> buf, ::rust::Str text)"));
+    assert!(header.contains("kj::Promise<::std::uint64_t> elided_self(::rust::Str text) const"));
+    assert!(header.contains(
+        "kj::Promise<::std::uint64_t> elided_self_shorthand(::std::uint64_t delta) const"
+    ));
+    assert!(header.contains("kj::Promise<void> named("));
+    assert!(header.contains("kj::Promise<::rust::Str> returns_borrow(::rust::Str text)"));
+}
+
+// The borrows a safe async function may not expose: a settled result C++ can keep after the
+// argument it borrows is gone, and an argument bound for longer than the promise.
+fn async_bridge(function: &str) -> String {
+    format!(
+        r#"
+        #[cxx::bridge]
+        mod ffi {{
+            extern "Rust" {{
+                type Borrower;
+                {function}
+            }}
+        }}
+        "#
+    )
+}
+
+fn generation_error(function: &str) -> String {
+    let opt = cxx_gen::Opt::default();
+    let source = async_bridge(function)
+        .parse()
+        .unwrap_or_else(|err| panic!("{function}: {err}"));
+    match generate_header_and_cc(source, &opt) {
+        Ok(_) => panic!("accepted: {function}"),
+        Err(err) => err.to_string(),
+    }
+}
+
+#[test]
+fn test_async_reference_result_rejected() {
+    for function in [
+        "async fn expose<'a>(input: &'a i32) -> &'a i32;",
+        "async unsafe fn expose<'a>(input: &'a i32) -> &'a i32;",
+    ] {
+        let error = generation_error(function);
+        assert!(
+            error.contains("async function cannot return a reference"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn test_async_borrowed_result_requires_unsafe() {
+    for function in [
+        "async fn expose<'a>(input: &'a str) -> &'a str;",
+        "async fn expose<'a>(input: &'a [u8]) -> &'a [u8];",
+        "async fn expose<'a>(input: &'a i32) -> KjMaybe<&'a i32>;",
+    ] {
+        let error = generation_error(function);
+        assert!(
+            error.contains("must be `unsafe fn expose` in order to return a borrow"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn test_async_static_argument_requires_unsafe() {
+    for function in [
+        "async fn keep<'a>(input: &'a i32, forever: &'static i32) -> i32;",
+        "async fn keep(input: &i32, forever: &'static i32) -> i32;",
+        "async fn keep(forever: &'static i32) -> i32;",
+        "async fn keep(forever: &'static [u8]) -> i32;",
+        "async fn keep(self: &'static Borrower) -> i32;",
+    ] {
+        let error = generation_error(function);
+        assert!(
+            error.contains("borrows for `'static`, longer than its promise"),
+            "{error}"
+        );
+        assert!(error.contains("requires `unsafe fn keep`"), "{error}");
+    }
+}

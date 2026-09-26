@@ -189,18 +189,14 @@ impl Process {
     }
 }
 
-/// Resolves once a watched file has changed and changes have settled. The future owns a share of
-/// the watcher, not a borrow of `process`.
-pub fn wait_for_changes(process: &Process) -> impl Future<Output = Result<(), KjError>> + use<> {
-    let changes = process.watcher.as_ref().map(Watcher::wait_for_changes);
-    async move {
-        match changes {
-            Some(changes) => changes.await,
-            None => Err(KjError::new(
-                cxx::KjExceptionType::Failed,
-                "wait_for_changes() called without --watch".to_owned(),
-            )),
-        }
+/// Resolves once a watched file has changed and changes have settled.
+pub async fn wait_for_changes(process: &Process) -> Result<(), KjError> {
+    match &process.watcher {
+        Some(watcher) => watcher.wait_for_changes().await,
+        None => Err(KjError::new(
+            cxx::KjExceptionType::Failed,
+            "wait_for_changes() called without --watch".to_owned(),
+        )),
     }
 }
 

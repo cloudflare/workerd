@@ -1203,21 +1203,11 @@ fn expand_rust_function_shim_impl(
         let ret = if let Type::Future(fut) = ret {
             let span = sig.ret.span();
             let output = &fut.output;
-            let lifetimes: Vec<_> = sig.generics.lifetimes().map(|lt| quote!(#lt)).collect();
-            let lifetimes = if lifetimes.is_empty() {
-                quote!()
-            } else {
-                assert_eq!(
-                    lifetimes.len(),
-                    1,
-                    "workerd-cxx: expected single lifetime (todo: do we need to support multiple?)"
-                );
-                quote!(#(#lifetimes),*, )
-            };
+            let lifetime = fut.lifetime.iter().map(|lt| quote!(#lt,));
             if fut.throws_tokens.is_some() {
-                quote_spanned!(span=> ::kj_rs::repr::RustFuture::<#lifetimes #output>)
+                quote_spanned!(span=> ::kj_rs::repr::RustFuture::<#(#lifetime)* #output>)
             } else {
-                quote_spanned!(span=> ::kj_rs::repr::RustInfallibleFuture::<#lifetimes #output>)
+                quote_spanned!(span=> ::kj_rs::repr::RustInfallibleFuture::<#(#lifetime)* #output>)
             }
         } else {
             expand_extern_type(ret, types, ExternTypeStyle::Layout)
@@ -1305,17 +1295,11 @@ fn expand_rust_function_shim_super(
         quote!(-> ::cxx::core::result::Result<#ok, impl ::cxx::IntoKjException + use<>>)
     } else if let Some(Type::Future(fut)) = &sig.ret {
         let output = &fut.output;
-        let lifetimes: Vec<_> = sig.generics.lifetimes().map(|lt| quote!(#lt)).collect();
-        let lifetimes = if lifetimes.is_empty() {
-            quote!()
-        } else {
-            quote!( + #(#lifetimes)+* )
-        };
-
+        let lifetime = fut.lifetime.iter().map(|lt| quote!(+ #lt));
         if fut.throws_tokens.is_some() {
-            quote!(-> std::pin::Pin<Box<dyn ::std::future::Future<Output = ::std::result::Result<#output, ::cxx::KjException>> #lifetimes>>)
+            quote!(-> std::pin::Pin<Box<dyn ::std::future::Future<Output = ::std::result::Result<#output, ::cxx::KjException>> #(#lifetime)*>>)
         } else {
-            quote!(-> std::pin::Pin<Box<dyn ::std::future::Future<Output = #output> #lifetimes>>)
+            quote!(-> std::pin::Pin<Box<dyn ::std::future::Future<Output = #output> #(#lifetime)*>>)
         }
     } else {
         expand_return_type(&sig.ret)

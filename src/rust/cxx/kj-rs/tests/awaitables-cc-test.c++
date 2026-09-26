@@ -291,6 +291,28 @@ KJ_TEST("Work before poll") {
   KJ_EXPECT(val == 42);
 }
 
+KJ_TEST("Borrowed arguments cross both directions") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  int32_t value = 7;
+  KJ_EXPECT(pass_through_borrowed(value).wait(waitScope) == 7);
+  auto buf = kj::heapArray<uint8_t>(3);
+  rust::Slice<const uint8_t> slice(buf.begin(), buf.size());
+  lifetime_arg_result(slice, slice).wait(waitScope);
+}
+
+KJ_TEST("Every spelling of a borrowing async Rust method") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto borrower = new_borrower(40);
+  KJ_EXPECT(borrower->named_lifetime_self(2).wait(waitScope) == 42);
+  KJ_EXPECT(borrower->named_lifetime_self_and_arg(rust::Str("ab")).wait(waitScope) == 42);
+  KJ_EXPECT(borrower->elided_self(rust::Str("ab")).wait(waitScope) == 42);
+  KJ_EXPECT(borrower->elided_self_shorthand(2).wait(waitScope) == 42);
+}
+
 // TODO(someday): More test cases.
 //   - Standalone ArcWaker tests. Ensure Rust calls ArcWaker destructor when we expect.
 //   - Throwing an exception from PromiseNode functions, including destructor.

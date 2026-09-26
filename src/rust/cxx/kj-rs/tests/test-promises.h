@@ -14,6 +14,7 @@ kj::Promise<void> new_coroutine_promise_void();
 
 kj::Promise<void> new_errored_promise_void();
 kj::Promise<int32_t> new_ready_promise_i32(int32_t);
+kj::Promise<int32_t> new_ready_promise_i32_ref(const int32_t& value);
 kj::Promise<Shared> new_ready_promise_shared_type();
 
 // Cancellation testing helpers. The "cancellation-detecting promise" is a promise that never
