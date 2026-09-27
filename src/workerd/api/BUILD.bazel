@@ -707,7 +707,6 @@ kj_test(
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
-        "//src/workerd/util:autogate",
     ],
 )
 
@@ -719,7 +718,6 @@ wd_cc_benchmark(
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
-        "//src/workerd/util:autogate",
     ],
 )
 
