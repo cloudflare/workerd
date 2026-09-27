@@ -10,7 +10,7 @@ namespace kj_rs {
 
 using OwnPromiseNode = kj::_::OwnPromiseNode;
 
-void own_promise_node_drop_in_place(OwnPromiseNode*);
+void own_promise_node_drop_in_place(OwnPromiseNode&);
 
 namespace repr {
 

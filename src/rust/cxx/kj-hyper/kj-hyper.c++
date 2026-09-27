@@ -17,12 +17,6 @@
 namespace workerd::rust::kj_hyper {
 namespace {
 
-// Bridged Rust futures are cold: start them where kj expects the operation to be in flight.
-template <typename T>
-kj::Promise<T> hot(kj::Promise<T> promise) {
-  return promise.eagerlyEvaluate(nullptr);
-}
-
 ::rust::Slice<const uint8_t> bytes(kj::ArrayPtr<const kj::byte> data) {
   return {data.begin(), data.size()};
 }
@@ -51,21 +45,21 @@ class RustIoStream final: public kj::AsyncIoStream {
   explicit RustIoStream(::rust::Box<RustIo> io): io(kj::mv(io)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return hot(rust_io_read(*io, static_cast<uint8_t*>(buffer), maxBytes, minBytes));
+    return rust_io_read(*io, static_cast<uint8_t*>(buffer), maxBytes, minBytes);
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
-    return hot(io->write(bytes(buffer)));
+    return io->write(bytes(buffer));
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
     auto joined = join(pieces);
     auto promise = io->write(bytes(joined));
-    return hot(kj::mv(promise)).attach(kj::mv(joined));
+    return kj::mv(promise).attach(kj::mv(joined));
   }
   kj::Promise<void> whenWriteDisconnected() override {
-    return hot(io->when_write_disconnected());
+    return io->when_write_disconnected();
   }
   void shutdownWrite() override {
-    shutdownTask = hot(io->shutdown_write()).catch_([](kj::Exception&& e) { KJ_LOG(ERROR, e); });
+    shutdownTask = io->shutdown_write().catch_([](kj::Exception&& e) { KJ_LOG(ERROR, e); });
   }
   void abortRead() override {
     io->abort_read();
@@ -81,7 +75,7 @@ class BodyStream final: public kj::AsyncInputStream {
   explicit BodyStream(::rust::Box<RustBody> body): body(kj::mv(body)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return hot(body_read(*body, static_cast<uint8_t*>(buffer), maxBytes, minBytes));
+    return body_read(*body, static_cast<uint8_t*>(buffer), maxBytes, minBytes);
   }
   kj::Maybe<uint64_t> tryGetLength() override {
     return body_length(*body);
@@ -96,15 +90,15 @@ class BodySinkStream final: public kj::AsyncOutputStream {
   explicit BodySinkStream(::rust::Box<BodySink> sink): sink(kj::mv(sink)) {}
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
-    return hot(sink->write(bytes(buffer)));
+    return sink->write(bytes(buffer));
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
     auto joined = join(pieces);
     auto promise = sink->write(bytes(joined));
-    return hot(kj::mv(promise)).attach(kj::mv(joined));
+    return kj::mv(promise).attach(kj::mv(joined));
   }
   kj::Promise<void> whenWriteDisconnected() override {
-    return hot(sink->when_write_disconnected());
+    return sink->when_write_disconnected();
   }
 
  private:
@@ -374,7 +368,7 @@ kj::Function<kj::Promise<void>(kj::StringPtr)> tlsStarterCallback(::rust::Box<Tl
     // The name may be dropped once this returns (kj's contract), so the future gets a copy.
     auto host = kj::str(expectedServerHostname);
     auto promise = start->start(bytes(host.asPtr()));
-    return hot(kj::mv(promise)).attach(kj::mv(host));
+    return kj::mv(promise).attach(kj::mv(host));
   };
 }
 

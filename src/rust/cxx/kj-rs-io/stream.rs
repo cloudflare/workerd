@@ -24,10 +24,10 @@
 //! of hand-written I/O this crate is meant to retire. The observable difference is narrow: a
 //! write whose promise is dropped without ever being awaited, as the *first* operation on a
 //! descriptor tokio has not yet seen ready, is not sent. workerd's full test suite under the
-//! Rust backend has no such case (verified 2026-09-13); the C++ adapters still start every
-//! returned promise inside the call (async-io.c++ `started()`), so an operation that is kept
-//! but never awaited completes as the loop turns, and on a descriptor the driver has already
-//! seen ready the first poll does issue the syscall.
+//! Rust backend has no such case (verified 2026-09-13); every returned promise is still started
+//! inside the call (kj-rs converts a bridged future into an eager `kj::Promise`), so an operation
+//! that is kept but never awaited completes as the loop turns, and on a descriptor the driver
+//! has already seen ready the first poll does issue the syscall.
 //!
 //! # Read buffers
 //!
