@@ -1478,21 +1478,14 @@ struct ActorFetchFailure {
 template <typename T>
 using ActorFetchAttemptResult = kj::OneOf<T, ActorFetchFailure>;
 
-ActorRetryGateEnabled fetchRetryEnforcementEnabled() {
-  return ActorRetryGateEnabled(
-      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS));
-}
-
 // The retry policy a fetch through `fetcher` runs under, or none if the target does not support
-// actor call retries. A binding's own policy applies only when it configured one and every retry
-// gate is on: the fetch retry-requests gate is a prerequisite for all retry behavior, and the
-// userland gate for reading the binding's configuration. Otherwise the runtime's default applies.
-// The gates are checked before touching the stub. Its I/O objects belong to the context that
-// created it, so reaching them can throw, and a disabled rollout must never get that far.
+// actor call retries. A binding's own policy applies only when it configured one and the userland
+// retry gate is on. Otherwise the runtime's default applies. The gate is checked before touching
+// the stub. Its I/O objects belong to the context that created it, so reaching them can throw, and
+// a disabled rollout must never get that far.
 kj::Maybe<ActorRetryPolicy> tryGetActorRetryPolicy(Fetcher& fetcher) {
   if (!fetcher.supportsActorCallRetries()) return kj::none;
-  if (fetchRetryEnforcementEnabled().toBool() &&
-      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
+  if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
     KJ_IF_SOME(userPolicy, fetcher.getUserDefinedRetryPolicy()) {
       return ActorRetryPolicy::userDefined(userPolicy);
     }
@@ -1506,7 +1499,7 @@ kj::Maybe<kj::Rc<ActorCallRetryState>> makeActorCallRetryState(
   auto& context = IoContext::current();
   auto config = ActorCallRetryState::Config{
     .callType = ActorRetryCallType::FETCH,
-    .enforcementEnabled = fetchRetryEnforcementEnabled(),
+    .enforcementEnabled = ActorRetryGateEnabled::YES,
     .payloadReplayable = ActorCallPayloadReplayable(request.canRewindBody()),
   };
   return kj::rc<ActorCallRetryState>(

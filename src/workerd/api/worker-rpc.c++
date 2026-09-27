@@ -940,7 +940,6 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
   }
 
   auto enforcementRequested =
-      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS) &&
       util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS);
   auto policy = getJsRpcRetryPolicy(parent, enforcementRequested);
   auto enforcementEnabled = ActorRetryGateEnabled(enforcementRequested);
