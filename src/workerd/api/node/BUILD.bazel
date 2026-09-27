@@ -28,7 +28,6 @@ wd_cc_library(
         "//src/rust/jsg:ffi",
         "//src/rust/node-exceptions",
         "//src/workerd/jsg",
-        "//src/workerd/util:autogate",
     ],
 )
 
