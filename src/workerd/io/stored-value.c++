@@ -91,7 +91,7 @@ jsg::JsValue deserializeV8Value(
     // We don't expect users to ever actually see this error.
     JSG_FAIL_REQUIRE(Error,
         "isolate terminated while deserializing value from Durable Object "
-        "storage; contact us if you're wondering why you're seeing this");
+        "storage. Contact us if you're wondering why you're seeing this");
   }
 }
 

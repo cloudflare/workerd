@@ -482,7 +482,7 @@ jsg::Ref<Request> Request::constructor(
         KJ_IF_SOME(r, initDict.redirect) {
           redirect = JSG_REQUIRE_NONNULL(Request::tryParseRedirect(r), TypeError,
               "Invalid redirect value, must be one of \"follow\" or \"manual\" (\"error\" won't be "
-              "implemented since it does not make sense at the edge; use \"manual\" and check the "
+              "implemented since it does not make sense at the edge. Use \"manual\" and check the "
               "response status code).");
         }
 
@@ -1448,7 +1448,7 @@ void FetchEvent::respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> pro
     }
     KJ_CASE_ONEOF(called, RespondWithCalled) {
       JSG_FAIL_REQUIRE(DOMInvalidStateError,
-          "FetchEvent.respondWith() has already been called; it can only be called once.");
+          "FetchEvent.respondWith() has already been called. It can only be called once.");
     }
     KJ_CASE_ONEOF(_, ResponseSent) {
       JSG_FAIL_REQUIRE(DOMInvalidStateError,
@@ -2033,7 +2033,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(jsg::Lock& js,
 
   if (redirectedLocation == kj::none) {
     auto exception =
-        JSG_KJ_EXCEPTION(FAILED, TypeError, "Invalid Location header; unable to follow redirect.");
+        JSG_KJ_EXCEPTION(FAILED, TypeError, "Invalid Location header: unable to follow redirect.");
     return js.rejectedPromise<jsg::Ref<Response>>(kj::mv(exception));
   }
 
@@ -2053,13 +2053,13 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(jsg::Lock& js,
 
     auto currentUrl = KJ_UNWRAP_OR(jsg::Url::tryParse(base.asPtr()), {
       auto exception =
-        JSG_KJ_EXCEPTION(FAILED, TypeError, "Invalid current URL; unable to follow redirect.");
+        JSG_KJ_EXCEPTION(FAILED, TypeError, "Invalid current URL: unable to follow redirect.");
       return js.rejectedPromise<jsg::Ref<Response>>(kj::mv(exception));
     });
 
     auto locationUrl = KJ_UNWRAP_OR(jsg::Url::tryParse(location, base.asPtr()), {
       auto exception =
-        JSG_KJ_EXCEPTION(FAILED, TypeError, "Invalid Location header; unable to follow redirect.");
+        JSG_KJ_EXCEPTION(FAILED, TypeError, "Invalid Location header: unable to follow redirect.");
       return js.rejectedPromise<jsg::Ref<Response>>(kj::mv(exception));
     });
 

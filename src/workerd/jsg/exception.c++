@@ -21,12 +21,20 @@ constexpr auto ERROR_PREFIX_DELIM = "; "_kj;
 constexpr auto ERROR_REMOTE_PREFIX = "remote."_kj;
 constexpr auto ERROR_TUNNELED_PREFIX_JSG = "jsg."_kj;
 constexpr auto ERROR_INTERNAL_SOURCE_PREFIX_JSG = "jsg-internal."_kj;
+
+// Does `message` contain the diagnostic delimiter entirely before index `end`?
+bool hasDelimiterBefore(kj::StringPtr message, size_t end) {
+  KJ_IF_SOME(i, message.find(ERROR_PREFIX_DELIM)) {
+    return i + ERROR_PREFIX_DELIM.size() <= end;
+  }
+  return false;
+}
 }  // namespace
 
 bool hasInternalExceptionDetails(kj::StringPtr message) {
   constexpr auto referenceMarker = "internal error; reference = "_kj;
   KJ_IF_SOME(i, message.find(referenceMarker)) {
-    return message.first(i).contains(ERROR_PREFIX_DELIM) ||
+    return hasDelimiterBefore(message, i) ||
         message.slice(i + referenceMarker.size()).contains(ERROR_PREFIX_DELIM);
   }
   return message.contains(ERROR_PREFIX_DELIM);
@@ -79,8 +87,7 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
     // disabling serialized-error restoration, rather than exposing any of this message to JS.
     bool containsContext = msg.contains(ERROR_PREFIX_DELIM);
     KJ_IF_SOME(i, msg.find(": "_kj)) {
-      containsContext = msg.first(i).contains(ERROR_PREFIX_DELIM) ||
-          hasInternalExceptionDetails(msg.slice(i + 2));
+      containsContext = hasDelimiterBefore(msg, i) || hasInternalExceptionDetails(msg.slice(i + 2));
     }
     if (msg.startsWith(ERROR_TUNNELED_PREFIX_JSG)) {
       return TunneledErrorType{

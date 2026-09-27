@@ -2742,8 +2742,8 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
       // Pass through exception type to convey appropriate retry behavior.
       return kj::Exception(e.getType(), __FILE__, __LINE__,
           kj::str("broken.outputGateBroken; jsg.Error: Internal error in Durable "
-                  "Object storage write caused object to be reset; reference = ",
-              wdErrId));
+                  "Object storage write caused object to be reset (reference = ",
+              wdErrId, ")"));
     }
   });
 }
@@ -3144,8 +3144,8 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
       // Pass through exception type to convey appropriate retry behavior.
       return kj::Exception(e.getType(), __FILE__, __LINE__,
           kj::str("broken.outputGateBroken; jsg.Error: Internal error in Durable "
-                  "Object storage deleteAll() caused object to be reset; reference = ",
-              wdErrId));
+                  "Object storage deleteAll() caused object to be reset (reference = ",
+              wdErrId, ")"));
     }
   });
 }

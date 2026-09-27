@@ -257,7 +257,7 @@ kj::Maybe<AsymmetricKeyData> Rsa::fromJwk(
   auto eBuf = simdutfBase64UrlDecodeChecked(js, e, kInvalidBase64Error);
   auto eDecoded = toBignumOwned(eBuf.asArrayPtr());
   JSG_REQUIRE(RSA_set0_key(rsa.get(), nDecoded.get(), eDecoded.get(), nullptr) == 1, Error,
-      "Invalid RSA key in JSON Web Key; failed to set key parameters");
+      "Invalid RSA key in JSON Web Key: failed to set key parameters");
   nDecoded.release();
   eDecoded.release();
 
@@ -296,15 +296,15 @@ kj::Maybe<AsymmetricKeyData> Rsa::fromJwk(
     // .release() transfers BIGNUM ownership to the RSA key. UniqueBignum ensures
     // cleanup if any earlier allocation or decode throws.
     JSG_REQUIRE(RSA_set0_key(rsa.get(), nullptr, nullptr, dDecoded.get()) == 1, Error,
-        "Invalid RSA key in JSON Web Key; failed to set private exponent");
+        "Invalid RSA key in JSON Web Key: failed to set private exponent");
     dDecoded.release();
     JSG_REQUIRE(RSA_set0_factors(rsa.get(), pDecoded.get(), qDecoded.get()) == 1, Error,
-        "Invalid RSA key in JSON Web Key; failed to set prime factors");
+        "Invalid RSA key in JSON Web Key: failed to set prime factors");
     pDecoded.release();
     qDecoded.release();
     JSG_REQUIRE(
         RSA_set0_crt_params(rsa.get(), dpDecoded.get(), dqDecoded.get(), qiDecoded.get()) == 1,
-        Error, "Invalid RSA key in JSON Web Key; failed to set CRT parameters");
+        Error, "Invalid RSA key in JSON Web Key: failed to set CRT parameters");
     dpDecoded.release();
     dqDecoded.release();
     qiDecoded.release();
