@@ -94,8 +94,9 @@ export const ecdhJwkTest = {
     );
 
     for (const coordinate of ['x', 'y']) {
-      const invalidJwk = { ...publicJwk };
-      delete invalidJwk[coordinate];
+      const invalidJwk = Object.fromEntries(
+        Object.entries(publicJwk).filter(([key]) => key !== coordinate)
+      );
       await assert.rejects(
         crypto.subtle.importKey(
           'jwk',

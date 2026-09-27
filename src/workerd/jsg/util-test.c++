@@ -154,6 +154,9 @@ struct TunneledContext: public ContextGlobalObject {
     kj::throwFatalException(
         kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::mv(description)));
   }
+  void throwTypeErrorMessage(jsg::Lock& js, kj::String message) {
+    jsg::throwTypeError(js.v8Isolate, message);
+  }
   void throwSerializedException(jsg::Lock& js, v8::Local<v8::Value> value) {
     auto exception = createTunneledException(js.v8Isolate, value);
     js.throwException(kj::mv(exception), {.trusted = true});
@@ -259,6 +262,7 @@ struct TunneledContext: public ContextGlobalObject {
   JSG_RESOURCE_TYPE(TunneledContext) {
     JSG_NESTED_TYPE(DOMException);
     JSG_METHOD(throwDescription);
+    JSG_METHOD(throwTypeErrorMessage);
     JSG_METHOD(throwSerializedException);
     JSG_METHOD(throwTunneledTypeError);
     JSG_METHOD(throwTunneledTypeErrorWithoutMessage);
@@ -386,6 +390,15 @@ KJ_TEST("serialized exceptions cannot bypass diagnostic delimiter protection") {
         "string", "internal error; reference = 0123456789abcdefghijklmn");
   }
   e.expectEval("throwSerializedException(new TypeError('safe'))", "throws", "TypeError: safe");
+}
+
+KJ_TEST("type errors containing diagnostic delimiters are not exposed to JS") {
+  setPredictableModeForTest();
+  Evaluator<TunneledContext, TunneledIsolate> e(v8System);
+  KJ_EXPECT_LOG(ERROR, "ownerId = secret");
+  e.expectEval("throwTypeErrorMessage('public; ownerId = secret')", "throws",
+      "Error: internal error; reference = 0123456789abcdefghijklmn");
+  e.expectEval("throwTypeErrorMessage('public: safe')", "throws", "TypeError: public: safe");
 }
 
 KJ_TEST("internal-error references are the only allowed diagnostic delimiter") {
