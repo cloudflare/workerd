@@ -69,7 +69,6 @@ wd_cc_library(
         "//src/rust/api",
         "//src/workerd/api:compression",
         "//src/workerd/io",
-        "//src/workerd/util:autogate",
         "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@ncrypto",
@@ -84,7 +83,6 @@ wd_cc_library(
         "buffer.c++",
         "i18n.c++",
         "sqlite.c++",
-        "url.c++",
     ],
     hdrs = [
         "buffer.h",
@@ -92,12 +90,8 @@ wd_cc_library(
         "i18n.h",
         "node-version.h",
         "sqlite.h",
-        "url.h",
     ],
     implementation_deps = [
-        "//src/rust/cxx-integration",
-        "//src/rust/net",
-        "@ada-url",
         "@nbytes",
         "@simdutf",
     ],
