@@ -1,3 +1,9 @@
+//! FFI island: the `KjMaybe` representation of `kj::Maybe`.
+//!
+//! (See crate-root `#![deny(unsafe_code)]`.) Carries the `unsafe trait` niche contracts
+//! (`HasNiche`/`MaybeItem`) and `assume_init` on the discriminated union. A genuine unsafe seam.
+#![allow(unsafe_code)]
+
 use std::mem::MaybeUninit;
 use std::pin::Pin;
 
@@ -33,11 +39,12 @@ unsafe trait HasNiche: Sized {
     fn is_niche(value: *const Self) -> bool;
 }
 
-// In Rust, references are not allowed to be null, so a null `MaybeUninit<&T>` is a niche
-// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+// SAFETY: in Rust, references are not allowed to be null, so a null `MaybeUninit<&T>` is a
+// niche (see the `HasNiche` trait contract above).
 unsafe impl<T> HasNiche for &T {
     fn is_niche(value: *const &T) -> bool {
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: `value` points to a valid `&T`; we read it as a `*const *const T` (never as a
+        // reference, which the compiler assumes non-null) to test the pointer for null.
         unsafe {
             // We must cast it as pointing to a pointer, as opposed to a reference,
             // because the rust compiler assumes a reference is never null, and
@@ -47,10 +54,10 @@ unsafe impl<T> HasNiche for &T {
     }
 }
 
-// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+// SAFETY: as for `&T` — a null `&mut T` is the niche (see the `HasNiche` trait contract).
 unsafe impl<T> HasNiche for &mut T {
     fn is_niche(value: *const &mut T) -> bool {
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: `value` points to a valid `&mut T`; read as `*const *mut T` to null-check.
         unsafe {
             // We must cast it as pointing to a pointer, as opposed to a reference,
             // because the rust compiler assumes a reference is never null, and
@@ -60,10 +67,11 @@ unsafe impl<T> HasNiche for &mut T {
     }
 }
 
-// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+// SAFETY: as for `&mut T` — a null pointee is the niche (see the `HasNiche` trait contract).
 unsafe impl<T> HasNiche for Pin<&mut T> {
     fn is_niche(value: *const Pin<&mut T>) -> bool {
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: `value` points to a valid `Pin<&mut T>` (layout-identical to `&mut T`); read
+        // as `*const *mut T` to null-check.
         unsafe {
             // We must cast it as pointing to a pointer, as opposed to a reference,
             // because the rust compiler assumes a reference is never null, and
@@ -74,10 +82,10 @@ unsafe impl<T> HasNiche for Pin<&mut T> {
 }
 
 // In `kj`, `kj::Own<T>` are considered `none` in a `Maybe` if the data pointer is null
-// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+// SAFETY: a `KjOwn` with a null data pointer is `kj::none` (see the `HasNiche` trait contract).
 unsafe impl<T: crate::OwnTarget> HasNiche for crate::repr::KjOwn<T> {
     fn is_niche(value: *const Self) -> bool {
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: `value` points to a valid `KjOwn<T>`; querying its data pointer is sound.
         unsafe { (*value).as_ptr().is_null() }
     }
 }
@@ -85,19 +93,19 @@ unsafe impl<T: crate::OwnTarget> HasNiche for crate::repr::KjOwn<T> {
 // `kj::MaybeTraits<kj::Rc<T>>` defines `kj::none` as `rc.get() == nullptr`, i.e. the pointee
 // pointer (second word) is null. A default-constructed `kj::Rc` is all-null, so `NONE`'s zeroed
 // bytes are exactly what `initNone` produces.
-// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+// SAFETY: a `KjRc` with a null pointee pointer is `kj::none` (see the `HasNiche` trait contract).
 unsafe impl<T> HasNiche for crate::repr::KjRc<T> {
     fn is_niche(value: *const Self) -> bool {
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: `value` points to a valid `KjRc<T>`; querying its pointee pointer is sound.
         unsafe { (*value).ptr.as_ptr().is_null() }
     }
 }
 
 // `kj::MaybeTraits<kj::Arc<T>>` defines `kj::none` the same way as for `kj::Rc<T>`.
-// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+// SAFETY: a `KjArc` with a null pointee pointer is `kj::none` (see the `HasNiche` trait contract).
 unsafe impl<T> HasNiche for crate::repr::KjArc<T> {
     fn is_niche(value: *const Self) -> bool {
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: `value` points to a valid `KjArc<T>`; querying its pointee pointer is sound.
         unsafe { (*value).ptr.as_ptr().is_null() }
     }
 }
@@ -133,7 +141,8 @@ pub unsafe trait MaybeItem: Sized {
     }
     fn drop_in_place(value: &mut KjMaybe<Self>) {
         if <Self as MaybeItem>::is_some(value) {
-            // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+            // SAFETY: `is_some` just confirmed the `some` union member is initialized, so
+            // dropping it in place is sound. `KjMaybe`'s `Drop` calls this exactly once.
             unsafe {
                 value.some.assume_init_drop();
             }
@@ -146,7 +155,9 @@ pub unsafe trait MaybeItem: Sized {
 /// `Type<T> where T: Bound`.
 macro_rules! impl_maybe_item_for_has_niche {
     (@impl [$($generics:tt)*] $ty:ty) => {
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: `$ty` is only ever a `HasNiche` type (enforced at the macro's use sites), so
+        // it carries a `()` discriminant and detects `none` via its null niche — matching kj's
+        // niche-value-optimized `Maybe` layout, as the `MaybeItem` trait contract requires.
         unsafe impl<$($generics)*> MaybeItem for $ty {
             type Discriminant = ();
 
@@ -189,7 +200,9 @@ macro_rules! impl_maybe_item_for_has_niche {
 /// Avoids running into generic specialization problems.
 macro_rules! impl_maybe_item_for_primitive {
     ($ty:ty) => {
-        // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+        // SAFETY: primitives have no niche, so this mirrors kj's non-niche
+        // `kj::_::NullableValue` layout with an explicit `bool` discriminant (`is_set`)
+        // followed by the value, exactly as the `MaybeItem` trait contract requires.
         unsafe impl MaybeItem for $ty {
             type Discriminant = bool;
 
@@ -228,7 +241,8 @@ impl_maybe_item_for_primitive!(
     u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64, bool, &str, String
 );
 
-// Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+// SAFETY: `&[T]` is a fat pointer with no usable niche here, so it uses the explicit
+// `bool`-discriminant (non-niche) `MaybeItem` representation, matching kj's layout.
 unsafe impl<T> MaybeItem for &[T] {
     type Discriminant = bool;
 
@@ -357,7 +371,9 @@ pub(crate) mod repr {
             if value.is_some() {
                 // We can't move out of value so we copy it and forget it in
                 // order to perform a "manual" move out of value
-                // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
+                // SAFETY: `is_some` confirmed `some` is initialized; `assume_init_read` copies
+                // it out, and the immediately following `mem::forget(value)` prevents the
+                // source from being dropped, so ownership moves out exactly once.
                 let ret = unsafe { Some(value.some.assume_init_read()) };
                 std::mem::forget(value);
                 ret
@@ -378,10 +394,10 @@ pub(crate) mod repr {
             if self.is_none() {
                 write!(f, "Maybe::None")
             } else {
-                // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
-                write!(f, "Maybe::Some({:?})", unsafe {
-                    self.some.assume_init_ref()
-                })
+                // SAFETY: the `is_none()` branch above is false here, so `some` is
+                // initialized and may be borrowed for formatting.
+                let value = unsafe { self.some.assume_init_ref() };
+                write!(f, "Maybe::Some({value:?})")
             }
         }
     }

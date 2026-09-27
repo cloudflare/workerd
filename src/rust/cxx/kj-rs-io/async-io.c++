@@ -22,14 +22,6 @@ namespace kj_rs_io {
 
 namespace {
 
-// Operation-start policy (async-io.h): a bridged future is cold until first polled; KJ's own
-// streams start their operation inside the call. eagerlyEvaluate's first poll is synchronous
-// (kj::_::EagerPromiseNodeBase's constructor), so this starts the Rust body before returning.
-template <typename T>
-kj::Promise<T> started(kj::Promise<T> promise) {
-  return promise.eagerlyEvaluate(nullptr);
-}
-
 // =======================================================================================
 // struct sockaddr <-> SocketAddress. The only place in kj-rs-io a raw sockaddr is read or
 // written: KJ's interface speaks them at getSockaddr(), getsockname()/getpeername() and
@@ -280,11 +272,11 @@ kj::Promise<PeerStream> acceptAllowed(
 // TokioAsyncIoStream
 
 kj::Promise<size_t> TokioAsyncIoStream::tryRead(void *buffer, size_t minBytes, size_t maxBytes) {
-  return started(stream_try_read(*inner, reinterpret_cast<uint8_t *>(buffer), maxBytes, minBytes));
+  return stream_try_read(*inner, reinterpret_cast<uint8_t *>(buffer), maxBytes, minBytes);
 }
 
 kj::Promise<void> TokioAsyncIoStream::write(kj::ArrayPtr<const kj::byte> buffer) {
-  return started(stream_write(*inner, ::rust::Slice<const uint8_t>(buffer.begin(), buffer.size())));
+  return stream_write(*inner, ::rust::Slice<const uint8_t>(buffer.begin(), buffer.size()));
 }
 
 kj::Promise<void> TokioAsyncIoStream::write(
@@ -301,7 +293,7 @@ kj::Promise<void> TokioAsyncIoStream::writePieces(
 }
 
 kj::Promise<void> TokioAsyncIoStream::whenWriteDisconnected() {
-  return started(stream_when_write_disconnected(*inner));
+  return stream_when_write_disconnected(*inner);
 }
 
 void TokioAsyncIoStream::shutdownWrite() {
@@ -451,10 +443,10 @@ kj::Promise<size_t> TokioDatagramPort::send(
   auto targets = address_targets(kj::downcast<TokioNetworkAddress>(destination).getInner());
   KJ_REQUIRE(targets.size() > 0, "send() destination has no addresses");
   KJ_REQUIRE(allowed(*filter, targets[0]), "send() blocked by restrictPeers()");
-  return started(datagram_send(*inner,
+  return datagram_send(*inner,
       ::rust::Slice<const uint8_t>(
           reinterpret_cast<const uint8_t *>(buffer.begin()), buffer.size()),
-      kj::mv(targets[0])));
+      kj::mv(targets[0]));
 }
 
 kj::Promise<size_t> TokioDatagramPort::send(
@@ -486,14 +478,13 @@ kj::uint TokioDatagramPort::getPort() {
 kj::Promise<kj::Own<kj::NetworkAddress>> TokioNetwork::parseAddress(
     kj::StringPtr addr, kj::uint portHint) {
   KJ_REQUIRE(portHint < 65536, "port hint too large", portHint);
-  return started(
-      network_parse_address(::rust::Slice<const uint8_t>(
-                                reinterpret_cast<const uint8_t *>(addr.begin()), addr.size()),
-          static_cast<uint16_t>(portHint), *loopback)
-          .then([filter = filter.addRef()](
-                    ::rust::Box<TokioAddress> address) mutable -> kj::Own<kj::NetworkAddress> {
+  return network_parse_address(
+      ::rust::Slice<const uint8_t>(reinterpret_cast<const uint8_t *>(addr.begin()), addr.size()),
+      static_cast<uint16_t>(portHint), *loopback)
+      .then([filter = filter.addRef()](
+                ::rust::Box<TokioAddress> address) mutable -> kj::Own<kj::NetworkAddress> {
     return kj::heap<TokioNetworkAddress>(kj::mv(address), kj::mv(filter));
-  }));
+  });
 }
 
 kj::Own<kj::NetworkAddress> TokioNetwork::getSockaddr(const void *sockaddr, kj::uint len) {
@@ -613,7 +604,7 @@ TokioAsyncIoContext setupTokioAsyncIo() {
 }
 
 kj::Promise<void> onSignal(int signum) {
-  return started(wait_for_signal(signum));
+  return wait_for_signal(signum);
 }
 
 // =======================================================================================
@@ -627,7 +618,7 @@ void FileWatcher::watch(kj::PathPtr path) {
 }
 
 kj::Promise<void> FileWatcher::onChange() {
-  return started(file_watcher_on_change(*inner));
+  return file_watcher_on_change(*inner);
 }
 
 }  // namespace kj_rs_io
