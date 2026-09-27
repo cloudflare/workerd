@@ -13,16 +13,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  changes:
+  # This is a required check, so the job always runs and succeeds without
+  # building when the PR doesn't touch anything the parent project consumes.
+  # Keeping the path filter in the same job means a filter failure fails the
+  # check instead of skipping it.
+  internal-build:
     runs-on: ubuntu-latest
-    outputs:
-      internal_build: ${{ steps.filter.outputs.internal_build }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-          show-progress: false
-
       - name: Check for internal build changes
         id: filter
         env:
@@ -35,14 +32,40 @@ jobs:
             "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
             --jq '.[] | .filename, (.previous_filename // empty)')"
 
+          # The internal build compiles the parent project against this PR, so
+          # it only needs to run for paths the parent project consumes. The
+          # first matching pattern wins, so exceptions come before the broader
+          # patterns they carve out of. Unlisted paths (docs/, .github/,
+          # samples/, types/, justfile, ...) are used only by this repository.
           internal_build=false
           while IFS= read -r path; do
             case "$path" in
+              # Documentation, including READMEs and AGENTS.md files under src/.
+              *.md)
+                ;;
+              # The parent project doesn't link workerd's server, but its
+              # .bazelrc sets //src/workerd/server:use_tcmalloc, and BUILD files
+              # elsewhere under src/ load .bzl files from here.
+              src/workerd/server/BUILD.bazel|src/workerd/server/*.bzl)
+                internal_build=true
+                break
+                ;;
               src/workerd/server/*)
                 ;;
+              # Tooling used only by this repository. internal_build.py always
+              # runs from the base branch, so the internal build can't exercise
+              # PR changes to it.
+              tools/cross/internal_build.py|tools/intellij/*|tools/unix/*|\
+              tools/windows/*|tools/update_node_version.py|\
+              tools/custom-eslint-rules.test.mjs)
+                ;;
+              # The parent project symlinks src/ and parts of build/, reuses
+              # patches/ and deps/, runs tools/clang-tidy and tools/cross/format.py,
+              # and builds the pnpm workspace defined here.
               src/*|build/*|deps/*|patches/*|tools/*|\
               BUILD.bazel|.bazelignore|\
-              .npmrc|package.json|pnpm-lock.yaml|pnpm-workspace.yaml)
+              .npmrc|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|\
+              images/container-client-test/package.json)
                 internal_build=true
                 break
                 ;;
@@ -51,14 +74,14 @@ jobs:
 
           echo "internal_build=$internal_build" >> "$GITHUB_OUTPUT"
 
-  internal-build:
-    needs: changes
-    if: needs.changes.outputs.internal_build == 'true'
-    runs-on: ubuntu-latest
-    steps:
+      - name: Skip internal build
+        if: steps.filter.outputs.internal_build != 'true'
+        run: |
+          echo "This PR doesn't change anything the internal build depends on; passing without building."
+
       # Check if this is a fork and if the owner is a Cloudflare org member
       - name: Check fork status and org membership
-        if: github.event.pull_request.head.repo.fork
+        if: steps.filter.outputs.internal_build == 'true' && github.event.pull_request.head.repo.fork
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORK_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
@@ -80,6 +103,7 @@ jobs:
           fi
 
       - name: Checkout trusted workflow tooling
+        if: steps.filter.outputs.internal_build == 'true'
         uses: actions/checkout@v7
         with:
           path: trusted
@@ -89,6 +113,7 @@ jobs:
       # Try to checkout the merge commit - will fail if PR isn't mergeable
       - uses: actions/checkout@v7
         id: checkout_merge
+        if: steps.filter.outputs.internal_build == 'true'
         continue-on-error: true
         with:
           # Fork PRs reach this step only after their owner is confirmed to be a
@@ -101,12 +126,13 @@ jobs:
 
       # Fail the workflow if checkout failed (PR isn't mergeable)
       - name: Fail if PR isn't mergeable
-        if: steps.checkout_merge.outcome != 'success'
+        if: steps.filter.outputs.internal_build == 'true' && steps.checkout_merge.outcome != 'success'
         run: |
           echo "The pull request is not mergeable. Please rebase and resolve any conflicts."
           exit 1
 
       - name: Run internal build
+        if: steps.filter.outputs.internal_build == 'true'
         working-directory: trusted
         env:
           CI_URL: ${{ secrets.CI_URL }}
