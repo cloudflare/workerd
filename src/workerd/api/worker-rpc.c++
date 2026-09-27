@@ -195,9 +195,6 @@ void RpcDeserializerExternalHandler::prepare(jsg::Lock& js, IoContext& ioctx) {
         slots[index].value = hydrateRpcWritableStream(js, ioctx, external.getWritableStream());
         break;
       case rpc::JsValue::External::SOCKET: {
-        // The socket transfer kill switch also gates hydration: with it off, the slots stay
-        // empty and Socket::deserialize() rejects the tag before attempting a claim.
-        if (!util::Autogate::isEnabled(util::AutogateKey::SOCKET_RPC_TRANSFER)) break;
         KJ_REQUIRE(index + 2 < externals.size(),
             "socket external is missing its stream externals, possible corruption");
         auto socket =
