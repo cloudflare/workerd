@@ -935,7 +935,6 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
     kj::Maybe<const kj::String&> name) {
   JsRpcRetrySetup result;
   if (!destinationSupportsRetries || !callPlan.getReplayable() ||
-      !util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH) ||
       !util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_JSRPC)) {
     return result;
   }
@@ -969,7 +968,6 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
   result.state = kj::rc<ActorCallRetryState>(timer, ioContext.getMetrics(),
       ActorCallRetryState::Config{
         .callType = ActorRetryCallType::JSRPC,
-        .observationEnabled = ActorRetryGateEnabled::YES,
         .enforcementEnabled = enforcementEnabled,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
       },
@@ -1272,8 +1270,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       JsRpcCallPlan callPlan(kj::mv(planMessage), kj::mv(serializedData), serializedDataCapacity,
           serializerReplayability);
 
-      // JSRPC retries build on the fetch retry machinery, so the fetch gate remains a shared
-      // prerequisite while the JSRPC gate controls this event type's separate rollout.
+      // The JSRPC gate controls this event type's retry rollout separately from fetch.
       retrySetup =
           setupJsRpcRetries(ioContext, *parent, destinationSupportsRetries, callPlan, name);
 

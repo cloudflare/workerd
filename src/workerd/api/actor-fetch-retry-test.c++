@@ -430,7 +430,6 @@ kj::Maybe<kj::Exception> runActorFetch(ReplayState& state,
   }),
   });
   kj::Vector<kj::StringPtr> autogates;
-  autogates.add("durable-object-retries-fetch"_kj);
   if (retryGateEnabled.toBool()) {
     autogates.add("durable-object-retries-fetch-retry-requests"_kj);
   }
@@ -497,8 +496,7 @@ void runActorFetchUntilCanceled(ReplayState& state, kj::Promise<void> pauseStart
   }),
   });
   util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-fetch"_kj, "durable-object-retries-fetch-retry-requests"_kj},
-      util::IgnoreAllAutogatesEnv::YES);
+      {"durable-object-retries-fetch-retry-requests"_kj}, util::IgnoreAllAutogatesEnv::YES);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = env.js.alloc<Fetcher>(
@@ -648,8 +646,7 @@ KJ_TEST("fetch generates actor retry metadata for a supported outgoing factory")
   kj::Date beforeFetch = kj::UNIX_EPOCH;
   kj::Date afterFetch = kj::UNIX_EPOCH;
   TestFixture fixture;
-  util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-fetch"_kj}, util::IgnoreAllAutogatesEnv::YES);
+  util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = env.js.alloc<Fetcher>(
@@ -913,8 +910,7 @@ KJ_TEST("actor fetch abort before an actor failure does not report retry telemet
   ReplayState state{.actions = kj::arr(ReplayAction::AMBIGUOUS)};
   kj::Maybe<kj::Exception> failure;
   TestFixture fixture(TestFixture::SetupParams{
-    .autogates = kj::arr<kj::StringPtr>(
-        "durable-object-retries-fetch"_kj, "durable-object-retries-fetch-retry-requests"_kj),
+    .autogates = kj::arr<kj::StringPtr>("durable-object-retries-fetch-retry-requests"_kj),
     .useRealTimers = true,
     .requestObserverFactory =
         kj::Function<kj::Own<RequestObserver>()>([&]() -> kj::Own<RequestObserver> {
@@ -966,8 +962,7 @@ KJ_TEST("actor fetch abort before the first retry does not report an outcome") {
   }),
   });
   util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-fetch"_kj, "durable-object-retries-fetch-retry-requests"_kj},
-      util::IgnoreAllAutogatesEnv::YES);
+      {"durable-object-retries-fetch-retry-requests"_kj}, util::IgnoreAllAutogatesEnv::YES);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = env.js.alloc<Fetcher>(
@@ -1044,8 +1039,7 @@ KJ_TEST("dropping actor fetch during a later backoff reports other") {
   }),
   });
   util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-fetch"_kj, "durable-object-retries-fetch-retry-requests"_kj},
-      util::IgnoreAllAutogatesEnv::YES);
+      {"durable-object-retries-fetch-retry-requests"_kj}, util::IgnoreAllAutogatesEnv::YES);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) mutable {
     auto fetcher = env.js.alloc<Fetcher>(
@@ -1314,8 +1308,7 @@ void runActorFetchAfterLongGateWait(ReplayState& state, UserDefinedRetryPolicy r
   }),
   });
   util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-fetch"_kj, "durable-object-retries-fetch-retry-requests"_kj,
-        "durable-object-retries-userland"_kj},
+      {"durable-object-retries-fetch-retry-requests"_kj, "durable-object-retries-userland"_kj},
       util::IgnoreAllAutogatesEnv::YES);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
@@ -1369,8 +1362,7 @@ KJ_TEST("replica actor fetch retries a request-level disconnect on its primary c
     .checkedSubrequestCount = checkedSubrequestCount,
   });
   util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-fetch"_kj, "durable-object-retries-fetch-retry-requests"_kj},
-      util::IgnoreAllAutogatesEnv::YES);
+      {"durable-object-retries-fetch-retry-requests"_kj}, util::IgnoreAllAutogatesEnv::YES);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = env.js.alloc<Fetcher>(
