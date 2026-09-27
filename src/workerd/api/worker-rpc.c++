@@ -860,14 +860,12 @@ TraceContext prepareJsRpcCallAttempt(IoContext& ioContext,
     JsRpcOperation operation,
     JsRpcClientProvider::ClientForOneCall& oneCall) {
   TraceContext callSpan;
-  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-    KJ_IF_SOME(span, oneCall.callSpan) {
-      callSpan = kj::mv(span);
-      setJsRpcCallSpanTags(callSpan, parent, name, path, operation);
-    } else {
-      callSpan = makeJsRpcCallSpan(
-          ioContext, parent, name, path, kj::mv(oneCall.callSpanParents), operation);
-    }
+  KJ_IF_SOME(span, oneCall.callSpan) {
+    callSpan = kj::mv(span);
+    setJsRpcCallSpanTags(callSpan, parent, name, path, operation);
+  } else {
+    callSpan = makeJsRpcCallSpan(
+        ioContext, parent, name, path, kj::mv(oneCall.callSpanParents), operation);
   }
   return callSpan;
 }
@@ -992,9 +990,7 @@ JsRpcCallRetryState::StartedAttempt JsRpcCallRetryState::startAttempt(
   auto oneCall = parent->getClientForOneCall(js, kj::mv(attempt));
   attemptCanceler = kj::mv(oneCall.attemptCanceler);
   kj::Vector<kj::StringPtr> pathViews;
-  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-    parent->appendPath(pathViews);
-  }
+  parent->appendPath(pathViews);
   auto nameRef = name.map([](kj::String& value) -> const kj::String& { return value; });
   auto callSpan =
       prepareJsRpcCallAttempt(ioContext, *parent, nameRef, pathViews.asPtr(), operation, oneCall);
@@ -2108,30 +2104,26 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       }
     }
 
-    auto jsRpcTracingEnabled = util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING);
-    TraceContext jsRpcCallSpan;
-    if (jsRpcTracingEnabled) {
-      // Server-side jsRpcCall, nested under an exported capability's origin when available.
-      // It stays open through JS invocation and result serialization via the dispatch promise.
-      jsRpcCallSpan = [&]() -> TraceContext {
-        KJ_IF_SOME(parent, tryGetOriginatingCall()) {
-          return parent.newChild("jsRpcCall"_kjc);
-        }
-        return ctx.makeUserTraceSpan("jsRpcCall"_kjc);
-      }();
-      jsRpcCallSpan.setTag("jsrpc.method"_kjc, methodNameForTrace.asPtr());
-      jsRpcCallSpan.setTag("jsrpc.target_kind"_kjc, getTargetKind());
-      jsRpcCallSpan.setTag("jsrpc.operation"_kjc,
-          params.getOperation().isGetProperty() ? "getProperty"_kjc : "call"_kjc);
+    // Server-side jsRpcCall, nested under an exported capability's origin when available.
+    // It stays open through JS invocation and result serialization via the dispatch promise.
+    TraceContext jsRpcCallSpan = [&]() -> TraceContext {
+      KJ_IF_SOME(parent, tryGetOriginatingCall()) {
+        return parent.newChild("jsRpcCall"_kjc);
+      }
+      return ctx.makeUserTraceSpan("jsRpcCall"_kjc);
+    }();
+    jsRpcCallSpan.setTag("jsrpc.method"_kjc, methodNameForTrace.asPtr());
+    jsRpcCallSpan.setTag("jsrpc.target_kind"_kjc, getTargetKind());
+    jsRpcCallSpan.setTag("jsrpc.operation"_kjc,
+        params.getOperation().isGetProperty() ? "getProperty"_kjc : "call"_kjc);
 
-      // Link this dispatch to the caller's per-call span. This span stays a child of its own
-      // invocation root, so that a consumer reading this invocation's tail stream can always
-      // resolve the parent.
-      if (jsRpcCallSpan.isObserved() && params.hasCallerSpanContext()) {
-        auto callerContext = tracing::SpanContext::fromCapnp(params.getCallerSpanContext());
-        KJ_IF_SOME(callerSpanId, callerContext.getSpanId()) {
-          jsRpcCallSpan.setTag("jsrpc.caller_span_id"_kjc, callerSpanId.toGoString());
-        }
+    // Link this dispatch to the caller's per-call span. This span stays a child of its own
+    // invocation root, so that a consumer reading this invocation's tail stream can always
+    // resolve the parent.
+    if (jsRpcCallSpan.isObserved() && params.hasCallerSpanContext()) {
+      auto callerContext = tracing::SpanContext::fromCapnp(params.getCallerSpanContext());
+      KJ_IF_SOME(callerSpanId, callerContext.getSpanId()) {
+        jsRpcCallSpan.setTag("jsrpc.caller_span_id"_kjc, callerSpanId.toGoString());
       }
     }
 
@@ -2306,8 +2298,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
       KJ_FAIL_ASSERT("unknown JsRpcTarget::CallParams::Operation", (uint)op.which());
     };
-
-    if (!jsRpcTracingEnabled) return dispatch();
 
     auto jsRpcCallSpanIsObserved = jsRpcCallSpan.isObserved();
     SpanParent traceParent =
@@ -3277,12 +3267,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   });
 
-  SpanBuilder jsRpcSessionInternalSpan(nullptr);
-  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-    // No server-side user span: the jsrpc-typed onset already represents the session. The internal
-    // span is still emitted for the legacy buffered tail.
-    jsRpcSessionInternalSpan = ioctx.makeTraceSpan("jsRpcSession"_kjc);
-  }
+  // No server-side user span: the jsrpc-typed onset already represents the session. The internal
+  // span is still emitted for the legacy buffered tail.
+  auto jsRpcSessionInternalSpan = ioctx.makeTraceSpan("jsRpcSession"_kjc);
 
   EntrypointJsRpcTarget target(ioctx, kj::addRef(incomingRequest->getMetrics()), entrypointName,
       kj::mv(versionInfo), kj::mv(props), kj::mv(wrapperModule),

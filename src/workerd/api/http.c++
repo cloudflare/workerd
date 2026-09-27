@@ -2367,36 +2367,25 @@ JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
       attemptCanceler = kj::rc<kj::Canceler>();
     }
   }
+
+  // The "jsRpcSession" trace context is attached to the customEvent task below so it covers the
+  // whole session. The first jsRpcCall span is opened before the session client so its user span
+  // can also become the callee invocation's parent.
   kj::Maybe<TraceContext> callSpan;
-  kj::Maybe<TraceContextParent> callSpanParents;
+  auto makeUserSpanParent = [&](TraceContext& sessionSpan) -> kj::Maybe<SpanParent> {
+    callSpan = sessionSpan.getSpanParents().newChild("jsRpcCall"_kjc);
+    return KJ_ASSERT_NONNULL(callSpan).getUserSpanParent();
+  };
   ClientWithTracing clientWithTracing;
-  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-    // The "jsRpcSession" trace context is attached to the customEvent task below so it covers the
-    // whole session. The first jsRpcCall span is opened before the session client so its user span
-    // can also become the callee invocation's parent.
-    auto makeUserSpanParent = [&](TraceContext& sessionSpan) -> kj::Maybe<SpanParent> {
-      callSpan = sessionSpan.getSpanParents().newChild("jsRpcCall"_kjc);
-      return KJ_ASSERT_NONNULL(callSpan).getUserSpanParent();
-    };
-    KJ_IF_SOME(attempt, actorCallAttempt) {
-      clientWithTracing = getClientForActorCallAttempt(ioContext, kj::none, "jsRpcSession"_kjc,
-          kj::mv(attempt), kj::mv(makeUserSpanParent));
-    } else {
-      clientWithTracing =
-          buildClient(ioContext, kj::none, "jsRpcSession"_kjc, kj::mv(makeUserSpanParent));
-    }
-    callSpanParents = clientWithTracing.traceContext.map(
-        [](TraceContext& tc) { return tc.getSpanParents(); });
+  KJ_IF_SOME(attempt, actorCallAttempt) {
+    clientWithTracing = getClientForActorCallAttempt(ioContext, kj::none, "jsRpcSession"_kjc,
+        kj::mv(attempt), kj::mv(makeUserSpanParent));
   } else {
-    KJ_IF_SOME(attempt, actorCallAttempt) {
-      clientWithTracing = getClientForActorCallAttempt(
-          ioContext, kj::none, "jsRpcSession"_kjc, kj::mv(attempt));
-    } else {
-      clientWithTracing = ClientWithTracing{
-        .client = getClient(ioContext, kj::none, "jsRpcSession"_kjc),
-      };
-    }
+    clientWithTracing =
+        buildClient(ioContext, kj::none, "jsRpcSession"_kjc, kj::mv(makeUserSpanParent));
   }
+  auto callSpanParents =
+      clientWithTracing.traceContext.map([](TraceContext& tc) { return tc.getSpanParents(); });
   auto worker = kj::mv(clientWithTracing.client);
   auto event = kj::heap<api::JsRpcSessionCustomEvent>(JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
 
@@ -2801,11 +2790,6 @@ Fetcher::ClientWithTracing Fetcher::getClientForActorCallAttempt(IoContext& ioCo
       "actor call attempt supplied to an unsupported Fetcher");
   KJ_REQUIRE(outgoingFactory->supportsActorCallRetries(),
       "actor call attempt supplied to an unsupported Fetcher");
-  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-    auto result = outgoingFactory->newActorCallAttempt(kj::mv(cfStr), kj::mv(attempt),
-        [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
-    return ClientWithTracing{kj::mv(result.client), kj::none};
-  }
   kj::Maybe<TraceContext> traceContext;
   auto result = outgoingFactory->newActorCallAttempt(kj::mv(cfStr), kj::mv(attempt),
       [&](TraceContext& outerTraceContext) -> kj::Maybe<SpanParent> {
@@ -2818,9 +2802,6 @@ Fetcher::ClientWithTracing Fetcher::getClientForActorCallAttempt(IoContext& ioCo
 
 Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
     OutgoingFactory::Result result, kj::ConstString operationName) {
-  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-    return ClientWithTracing{kj::mv(result.client), kj::none};
-  }
   KJ_IF_SOME(parents, result.spanParents) {
     // Factories populate `spanParents` unconditionally. Only build the inner span when tracing is
     // actually observed; otherwise returning a (non-recording) TraceContext would still force the

@@ -4,8 +4,6 @@ using Workerd = import "/workerd/workerd.capnp";
 # The tail worker verifies both callee stub calls and caller transient dispatches.
 
 const unitTests :Workerd.Config = (
-  # The default variant verifies that tracing remains disabled. The @all-autogates variant verifies
-  # both span hierarchies.
   services = [
     (name = "jsrpc-callback-trace-test", worker = .mainWorker),
     (name = "tail", worker = .tailWorker),
