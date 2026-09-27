@@ -161,6 +161,20 @@ struct TunneledContext: public ContextGlobalObject {
     auto exception = createTunneledException(js.v8Isolate, value);
     js.throwException(kj::mv(exception), {.trusted = true});
   }
+  // Converts a JS value as it would be when crossing a worker or actor boundary: the serialized
+  // error isn't restored, so the message comes from the exception's description, which the runtime
+  // may have prefixed.
+  void throwConvertedException(jsg::Lock& js, kj::String prefix, v8::Local<v8::Value> value) {
+    auto exception = createTunneledException(js.v8Isolate, value);
+    exception.setDescription(kj::str(prefix, exception.getDescription()));
+    js.throwException(kj::mv(exception));
+  }
+  // Converts a JS value, then appends runtime diagnostics to its message.
+  void throwConvertedExceptionWithContext(jsg::Lock& js, v8::Local<v8::Value> value) {
+    auto exception = createTunneledException(js.v8Isolate, value);
+    exception.setDescription(kj::str(exception.getDescription(), "; ownerId = secret"));
+    js.throwException(kj::mv(exception), {.trusted = true});
+  }
   void throwTunneledTypeError() {
     JSG_FAIL_REQUIRE(TypeError, "thrown from throwTunneledTypeError");
   }
@@ -264,6 +278,8 @@ struct TunneledContext: public ContextGlobalObject {
     JSG_METHOD(throwDescription);
     JSG_METHOD(throwTypeErrorMessage);
     JSG_METHOD(throwSerializedException);
+    JSG_METHOD(throwConvertedException);
+    JSG_METHOD(throwConvertedExceptionWithContext);
     JSG_METHOD(throwTunneledTypeError);
     JSG_METHOD(throwTunneledTypeErrorWithoutMessage);
     JSG_METHOD(throwTunneledTypeErrorLateColon);
@@ -356,15 +372,22 @@ KJ_TEST("throw tunneled exception") {
   }
 }
 
-KJ_TEST("tunneled exceptions containing diagnostic delimiters are not exposed to JS") {
+// Applies the check used when a runtime-authored exception is shown to JavaScript.
+bool isPublicRuntimeMessage(kj::StringPtr description) {
+  kj::Exception exception(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::str(description));
+  return !tunneledErrorType(exception).isInternal;
+}
+
+KJ_TEST("runtime exceptions containing diagnostic delimiters are not exposed to JS") {
   setPredictableModeForTest();
   Evaluator<TunneledContext, TunneledIsolate> e(v8System);
   for (auto prefix: {"jsg.Error: ", "jsg.TypeError: ", "jsg.DOMException(OperationError): ",
          "jsg-internal.Error: ", "expected condition; jsg.Error: ",
          "remote exception: remote.broken.outputGateBroken; jsg.Error: "}) {
     auto description = kj::str(prefix, "Replica disconnected from primary.; ownerId = secret; ");
-    KJ_EXPECT(!isTunneledException(description));
-    KJ_EXPECT(extractTunneledExceptionDescription(description) == "Error: internal error");
+    kj::Exception exception(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::str(description));
+    KJ_EXPECT(!isPublicRuntimeMessage(description));
+    KJ_EXPECT(extractTunneledExceptionDescription(exception) == "Error: internal error");
     KJ_EXPECT_LOG(ERROR, "ownerId = secret");
     KJ_EXPECT_LOG(WARNING, "Almost returned an exception with internal details to user");
     e.expectEval(kj::str("throwDescription('", description, "')"), "throws",
@@ -378,18 +401,42 @@ KJ_TEST("tunneled exceptions containing diagnostic delimiters are not exposed to
       "throwDescription('jsg.Error: safe;without-space')", "throws", "Error: safe;without-space");
 }
 
-KJ_TEST("serialized exceptions cannot bypass diagnostic delimiter protection") {
-  setPredictableModeForTest();
+KJ_TEST("errors created by JavaScript keep diagnostic delimiters") {
   Evaluator<TunneledContext, TunneledIsolate> e(v8System);
-  for (auto message: {"public message; ownerId = secret", "public\\0; ownerId = secret",
-         "internal error; reference = abc; ownerId = secret"}) {
-    KJ_EXPECT_LOG(ERROR, "ownerId = secret");
-    KJ_EXPECT_LOG(WARNING, "Almost returned an exception with internal details to user");
+  for (auto message: {"public message; ownerId = secret",
+         "internal error; reference = abc; ownerId = secret", "a; b"}) {
     e.expectEval(kj::str("try { throwSerializedException(new Error('", message,
                      "')); } catch (e) { e.message; }"),
-        "string", "internal error; reference = 0123456789abcdefghijklmn");
+        "string", message);
+    e.expectEval(kj::str("try { throwConvertedException('', new TypeError('", message,
+                     "')); } catch (e) { e.name + ': ' + e.message; }"),
+        "string", kj::str("TypeError: ", message));
+    e.expectEval(
+        kj::str("try { throwConvertedException('', '", message, "'); } catch (e) { e.message; }"),
+        "string", message);
   }
-  e.expectEval("throwSerializedException(new TypeError('safe'))", "throws", "TypeError: safe");
+
+  // Prefixes added by the runtime while the error crosses a boundary don't affect the exemption.
+  for (auto prefix: {"remote exception: remote.", "broken.outputGateBroken; ",
+         "remote exception: remote.broken.inputGateBroken; "}) {
+    e.expectEval(kj::str("try { throwConvertedException('", prefix,
+                     "', new Error('a; b')); } catch (e) { e.message; }"),
+        "string", "a; b");
+  }
+
+  // Description-only classification treats these as ordinary tunneled errors, as it always has.
+  KJ_EXPECT(isTunneledException("remote exception: remote.jsg.Error: a; b"));
+  KJ_EXPECT(isTunneledException("broken.outputGateBroken; jsg.Error: a; b"));
+}
+
+KJ_TEST("runtime diagnostics added to a JavaScript error are not exposed to JS") {
+  setPredictableModeForTest();
+  Evaluator<TunneledContext, TunneledIsolate> e(v8System);
+  KJ_EXPECT_LOG(ERROR, "ownerId = secret");
+  KJ_EXPECT_LOG(WARNING, "Almost returned an exception with internal details to user");
+  e.expectEval("try { throwConvertedExceptionWithContext(new Error('public')); } "
+               "catch (e) { e.message; }",
+      "string", "internal error; reference = 0123456789abcdefghijklmn");
 }
 
 KJ_TEST("type errors containing diagnostic delimiters are not exposed to JS") {
@@ -406,15 +453,15 @@ KJ_TEST("internal-error references are the only allowed diagnostic delimiter") {
   for (auto prefix: {"jsg.Error: ", "jsg.TypeError: ", "jsg.DOMException(OperationError): ",
          "remote exception: remote.broken.outputGateBroken; jsg.Error: "}) {
     auto description = kj::str(prefix, "internal error; reference = abc");
-    KJ_EXPECT(isTunneledException(description));
+    KJ_EXPECT(isPublicRuntimeMessage(description));
     e.expectEval(kj::str("try { throwDescription('", description, "'); } catch (e) { e.message; }"),
         "string", "internal error; reference = abc");
-    KJ_EXPECT(!isTunneledException(kj::str(description, "; ownerId = secret")));
+    KJ_EXPECT(!isPublicRuntimeMessage(kj::str(description, "; ownerId = secret")));
   }
-  KJ_EXPECT(!isTunneledException("jsg.Error: public; internal error; reference = abc"));
-  KJ_EXPECT(!isTunneledException("jsg.Error: internal error; referenceOther = secret"));
-  KJ_EXPECT(
-      !isTunneledException("jsg.DOMException(internal; details): internal error; reference = abc"));
+  KJ_EXPECT(!isPublicRuntimeMessage("jsg.Error: public; internal error; reference = abc"));
+  KJ_EXPECT(!isPublicRuntimeMessage("jsg.Error: internal error; referenceOther = secret"));
+  KJ_EXPECT(!isPublicRuntimeMessage(
+      "jsg.DOMException(internal; details): internal error; reference = abc"));
   KJ_EXPECT(!hasInternalExceptionDetails("wrapper: internal error; reference = abc"));
   KJ_EXPECT(
       hasInternalExceptionDetails("ownerId = secret; wrapper: internal error; reference = abc"));

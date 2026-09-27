@@ -194,7 +194,7 @@ DecodedException decodeTunneledException(
   // https://heycam.github.io/webidl/#idl-exceptions
   //
   // TODO(someday): Support arbitrary user-defined error types, not just Error?
-  auto tunneledInfo = tunneledErrorType(exception.getDescription());
+  auto tunneledInfo = tunneledErrorType(exception);
   if (tunneledInfo.hasInternalDetails) {
     KJ_LOG(WARNING, "Almost returned an exception with internal details to user", exception);
   }
@@ -359,8 +359,8 @@ DecodedException decodeTunneledException(
 
 }  // namespace
 
-kj::StringPtr extractTunneledExceptionDescription(kj::StringPtr message) {
-  auto tunneledError = tunneledErrorType(message);
+kj::StringPtr extractTunneledExceptionDescription(const kj::Exception& exception) {
+  auto tunneledError = tunneledErrorType(exception);
   if (tunneledError.isInternal) {
     // TODO(soon): Include an internal error ID in message, and also return the id.
     return "Error: internal error";

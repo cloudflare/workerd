@@ -152,11 +152,28 @@ struct TunneledErrorType {
   // Does the error contain the "worker_do_not_log" magic constant?
   bool isDoNotLogException;
 
-  // Was a tunneled error blocked because its message may contain internal diagnostic fields?
+  // Was a runtime-authored tunneled error treated as internal because its message may contain
+  // diagnostic fields? Only set by tunneledErrorType(const kj::Exception&).
   bool hasInternalDetails = false;
 };
 
+// Parses the prefixes of a KJ exception's description. This looks only at the text, so it does not
+// apply the internal-details check below. Use the kj::Exception overload for any message that may
+// be shown to JavaScript.
 TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage);
+
+// Like tunneledErrorType(exception.getDescription()), but treats a runtime-authored tunneled
+// message as internal when it contains the diagnostic delimiter "; " (other than a single
+// "internal error; reference = " fragment), so that diagnostic fields are never shown to
+// JavaScript. Messages recorded by markMessageFromJs() are exempt, because JavaScript wrote them.
+TunneledErrorType tunneledErrorType(const kj::Exception& exception);
+
+// Records that the exception's tunneled message was written by JavaScript, such as a JS value
+// converted to a kj::Exception or a reason passed to state.abort(). The message is stored in the
+// EXCEPTION_MESSAGE_FROM_JS detail, which survives cloning, setDescription() and Cap'n Proto RPC.
+// The exemption only applies while the tunneled message still matches the recorded text, so
+// runtime code that adds fields to the message is still subject to the internal-details check.
+void markMessageFromJs(kj::Exception& exception);
 
 // Annotate an internal message with the corresponding brokenness reason.
 kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokennessReason);
@@ -166,6 +183,11 @@ kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokennes
 bool isExceptionFromInputGateBroken(kj::StringPtr description);
 
 constexpr kj::Exception::DetailTypeId EXCEPTION_IS_USER_ERROR = 0x82aff7d637c30e47ull;
+
+// Holds the tunneled message that JavaScript wrote, set by markMessageFromJs(). Unlike
+// EXCEPTION_IS_USER_ERROR, which marks failures caused by the application, this marks who wrote
+// the message text.
+constexpr kj::Exception::DetailTypeId EXCEPTION_MESSAGE_FROM_JS = 0x5b0e2f9c4d7a3e61ull;
 
 // Set when a Durable Object execution was terminated by a call to state.abort().
 constexpr kj::Exception::DetailTypeId EXCEPTION_DURABLE_OBJECT_ABORT = 0x2900166d61b404a7ull;

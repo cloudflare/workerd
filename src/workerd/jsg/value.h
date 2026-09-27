@@ -1490,6 +1490,8 @@ class ExceptionWrapper {
       }
     }();
 
+    // JavaScript wrote this message, so it's exempt from the check that hides runtime diagnostics.
+    markMessageFromJs(result);
     addExceptionDetail(js, result, handle);
     addJsExceptionMetadata(js, result, handle);
     return result;

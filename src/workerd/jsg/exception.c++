@@ -83,32 +83,24 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
 
   auto tryExtractError = [](kj::StringPtr msg,
                              Properties properties) -> kj::Maybe<TunneledErrorType> {
-    // A remaining delimiter may introduce internal diagnostic fields. Fail closed, including
-    // disabling serialized-error restoration, rather than exposing any of this message to JS.
-    bool containsContext = msg.contains(ERROR_PREFIX_DELIM);
-    KJ_IF_SOME(i, msg.find(": "_kj)) {
-      containsContext = hasDelimiterBefore(msg, i) || hasInternalExceptionDetails(msg.slice(i + 2));
-    }
     if (msg.startsWith(ERROR_TUNNELED_PREFIX_JSG)) {
       return TunneledErrorType{
         .message = msg.slice(ERROR_TUNNELED_PREFIX_JSG.size()),
-        .isJsgError = !containsContext,
-        .isInternal = containsContext,
+        .isJsgError = true,
+        .isInternal = false,
         .isFromRemote = properties.isFromRemote,
         .isDurableObjectReset = properties.isDurableObjectReset,
         .isDoNotLogException = properties.isDoNotLogException,
-        .hasInternalDetails = containsContext,
       };
     }
     if (msg.startsWith(ERROR_INTERNAL_SOURCE_PREFIX_JSG)) {
       return TunneledErrorType{
         .message = msg.slice(ERROR_INTERNAL_SOURCE_PREFIX_JSG.size()),
-        .isJsgError = !containsContext,
+        .isJsgError = true,
         .isInternal = true,
         .isFromRemote = properties.isFromRemote,
         .isDurableObjectReset = properties.isDurableObjectReset,
         .isDoNotLogException = properties.isDoNotLogException,
-        .hasInternalDetails = containsContext,
       };
     }
 
@@ -155,6 +147,43 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
   } else {
     return makeDefaultError(internalMessage, properties);
   }
+}
+
+namespace {
+// Does a tunneled message, such as "Error: ..." or "DOMException(Name): ...", contain diagnostic
+// fields in either its error type or its public message?
+bool tunneledMessageHasInternalDetails(kj::StringPtr message) {
+  KJ_IF_SOME(i, message.find(": "_kj)) {
+    return hasDelimiterBefore(message, i) || hasInternalExceptionDetails(message.slice(i + 2));
+  }
+  return message.contains(ERROR_PREFIX_DELIM);
+}
+
+// Was `tunneledMessage` recorded by markMessageFromJs() and left unchanged since?
+bool isMessageFromJs(const kj::Exception& exception, kj::StringPtr tunneledMessage) {
+  KJ_IF_SOME(recorded, exception.getDetail(EXCEPTION_MESSAGE_FROM_JS)) {
+    return recorded == tunneledMessage.asBytes();
+  }
+  return false;
+}
+}  // namespace
+
+void markMessageFromJs(kj::Exception& exception) {
+  auto message = tunneledErrorType(exception.getDescription()).message;
+  exception.setDetail(EXCEPTION_MESSAGE_FROM_JS, kj::heapArray(message.asBytes()));
+}
+
+TunneledErrorType tunneledErrorType(const kj::Exception& exception) {
+  auto result = tunneledErrorType(exception.getDescription());
+  // Messages written by JavaScript pass through unchanged. Runtime messages fail closed when they
+  // may carry diagnostic fields, including skipping serialized-error restoration.
+  if (result.isJsgError && !isMessageFromJs(exception, result.message) &&
+      tunneledMessageHasInternalDetails(result.message)) {
+    result.isJsgError = false;
+    result.isInternal = true;
+    result.hasInternalDetails = true;
+  }
+  return result;
 }
 
 bool isTunneledException(kj::StringPtr internalMessage) {

@@ -1195,6 +1195,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectState::blockConcurrencyWhile
 
 void DurableObjectState::abort(
     jsg::Lock& js, jsg::Optional<kj::String> reason, jsg::Optional<AbortOptions> options) {
+  bool hasReason = reason != kj::none;
   kj::String description = kj::mv(reason)
                                .map([](kj::String&& text) {
     return kj::str("broken.outputGateBroken; jsg.Error: ", text);
@@ -1204,6 +1205,10 @@ void DurableObjectState::abort(
   });
 
   kj::Exception error(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::mv(description));
+  if (hasReason) {
+    // The application wrote the reason, so it must reach callers unchanged.
+    jsg::markMessageFromJs(error);
+  }
   error.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<byte>(0));
   error.setDetail(jsg::EXCEPTION_DURABLE_OBJECT_ABORT, kj::heapArray<byte>(0));
   KJ_IF_SOME(o, options) {
