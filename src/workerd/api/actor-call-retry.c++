@@ -21,8 +21,8 @@ ActorCallRetryState::ActorCallRetryState(TimerChannel& timer,
       config(config),
       policy(policy),
       callStart(callStart),
-      retriesEnabled(config.payloadReplayable.toBool() && config.observationEnabled.toBool() &&
-          config.enforcementEnabled.toBool() && policy.allowsRetries()) {
+      retriesEnabled(config.payloadReplayable.toBool() && config.enforcementEnabled.toBool() &&
+          policy.allowsRetries()) {
   if (config.payloadReplayable.toBool()) {
     metadata = freshMetadata();
   }

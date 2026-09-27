@@ -77,7 +77,6 @@ class ActorCallRetryState final: public kj::Refcounted {
  public:
   struct Config {
     ActorRetryCallType callType;
-    ActorRetryGateEnabled observationEnabled;
     ActorRetryGateEnabled enforcementEnabled;
     ActorCallPayloadReplayable payloadReplayable;
   };

@@ -450,9 +450,9 @@ TestFixture::SetupParams makeSenderParams(kj::WaitScope& waitScope,
   return {
     .waitScope = waitScope,
     .featureFlags = flags,
-    .autogates = kj::arr("durable-object-retries-fetch"_kj,
-        "durable-object-retries-fetch-retry-requests"_kj, "durable-object-retries-jsrpc"_kj,
-        "durable-object-retries-jsrpc-retry-requests"_kj, "durable-object-retries-userland"_kj),
+    .autogates = kj::arr("durable-object-retries-fetch-retry-requests"_kj,
+        "durable-object-retries-jsrpc"_kj, "durable-object-retries-jsrpc-retry-requests"_kj,
+        "durable-object-retries-userland"_kj),
     .useRealTimers = false,
     .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
         [&timer](TimerChannel&) -> kj::Rc<IoChannelFactory> {
