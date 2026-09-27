@@ -1,0 +1,49 @@
+.github/bonk/specialists/SHARED.md
+  s_d47f00959a824f::t_323bdd40574015 1-48
+.github/bonk/specialists/api-compat.md
+  s_d47f00959a824f::t_e529610747166e 36-38,56,66-69
+.github/bonk/specialists/compat-flags.md
+  s_d47f00959a824f::t_cc428bad8f2a24 46-49,68-75
+.github/bonk/specialists/correctness.md
+  s_d47f00959a824f::t_2137878e0b7f3d 1-43
+.github/bonk/specialists/design.md
+  s_d47f00959a824f::t_5fb1df92a5ae15 31-35
+.github/bonk/specialists/docs.md
+  s_d47f00959a824f::t_7da00d37bf16e2 1-20
+.github/bonk/specialists/kj-style.md
+  s_d47f00959a824f::t_38cbd0e6ef9732 44-47
+.github/bonk/specialists/memory-safety.md
+  s_d47f00959a824f::t_aa0fc02694d4d2 68-76
+.github/bonk/specialists/rust-first.md
+  s_d47f00959a824f::t_61940811684316 49
+.github/bonk/specialists/tests.md
+  s_d47f00959a824f::t_e386c0484bf705 1-25
+.github/bonk_reviewer.md
+  s_d47f00959a824f::t_63407597786880 10,27,49,54,74
+.github/workflows/bigbonk.yml
+  s_d47f00959a824f::t_c59e4c05467e84 32
+.github/workflows/bonk.yml
+  s_d47f00959a824f::t_ad740cc68e5313 32
+.github/workflows/new-pr-review.yml
+  s_d47f00959a824f::t_b66e8204c4924e 41
+src/rust/AGENTS.md
+  s_d47f00959a824f::t_9b5e6ecaf7b644 92
+.github/bonk/specialists/performance.md
+  s_d47f00959a824f::t_9bc6d071301bb0 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8d15d72cf2b0f5e9804470634b174db5a78a9c63",
+  "prompts": {},
+  "sessions": {
+    "s_d47f00959a824f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f0edf6e-9af5-4419-ae90-ea2787327637",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
