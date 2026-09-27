@@ -450,9 +450,8 @@ TestFixture::SetupParams makeSenderParams(kj::WaitScope& waitScope,
   return {
     .waitScope = waitScope,
     .featureFlags = flags,
-    .autogates = kj::arr("durable-object-retries-fetch-retry-requests"_kj,
-        "durable-object-retries-jsrpc"_kj, "durable-object-retries-jsrpc-retry-requests"_kj,
-        "durable-object-retries-userland"_kj),
+    .autogates = kj::arr("durable-object-retries-jsrpc"_kj,
+        "durable-object-retries-jsrpc-retry-requests"_kj, "durable-object-retries-userland"_kj),
     .useRealTimers = false,
     .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
         [&timer](TimerChannel&) -> kj::Rc<IoChannelFactory> {
@@ -1154,8 +1153,7 @@ KJ_TEST("configured retry policy is ignored for actor RPC with the userland gate
   TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
   // Keeps the userland gate off in the all-autogates variant too.
   util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-fetch"_kj, "durable-object-retries-fetch-retry-requests"_kj,
-        "durable-object-retries-jsrpc"_kj, "durable-object-retries-jsrpc-retry-requests"_kj},
+      {"durable-object-retries-jsrpc"_kj, "durable-object-retries-jsrpc-retry-requests"_kj},
       util::IgnoreAllAutogatesEnv::YES);
 
   sender.runInIoContext([&](const TestFixture::Environment& env) {
