@@ -26,6 +26,9 @@ expectTypeOf(cache).toEqualTypeOf<CacheContext>();
 expectTypeOf(cache.purge).toEqualTypeOf<
   (options: CachePurgeOptions) => Promise<CachePurgeResult>
 >();
+expectTypeOf(cache.invalidate).toEqualTypeOf<
+  (options: CachePurgeOptions) => Promise<CachePurgeResult>
+>();
 
 type TestType = {
   fieldString: string;
