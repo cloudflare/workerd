@@ -547,7 +547,8 @@ KJ_TEST("ambiguous actor RPC disconnect is retried") {
   KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RECOVERED);
   KJ_EXPECT(state.rejectedReservations == 0);
   // A reserved call counts toward demand too.
-  KJ_EXPECT(state.lastTrackedBytes != kj::none);
+  KJ_EXPECT(state.lastReservationBytes != kj::none);
+  KJ_EXPECT(state.lastTrackedBytes == state.lastReservationBytes);
   // The payload is released at native success, before the call reenters the isolate.
   KJ_EXPECT(KJ_ASSERT_NONNULL(state.replayMemoryBytesAtOutcome) == 0);
   KJ_EXPECT(state.replayMemoryBytes == 0);
@@ -1005,6 +1006,8 @@ KJ_TEST("argument-free actor RPC reserves memory for retained metadata") {
 
   KJ_EXPECT(state.reservationAttempts == 1);
   KJ_EXPECT(KJ_ASSERT_NONNULL(state.lastReservationBytes) > METHOD_NAME.size());
+  // A rejected call tracks the bytes it tried to reserve.
+  KJ_EXPECT(state.lastTrackedBytes == state.lastReservationBytes);
   KJ_EXPECT(state.replayMemoryBytes == 0);
 }
 
@@ -1105,9 +1108,13 @@ KJ_TEST("zero configured retries disables nested actor RPC retries") {
     return env.context.awaitJs(env.js, kj::mv(rejected)).attach(kj::mv(fetcher));
   });
 
-  KJ_EXPECT(state.metadata.size() == 1);
+  KJ_ASSERT(state.metadata.size() == 1);
+  KJ_EXPECT(state.metadata[0].retryGateEnabled == ActorRetryGateEnabled::YES);
   KJ_EXPECT(state.acceptedRetries == 0);
   KJ_EXPECT(state.observedRetries == 0);
+  // A call that can never retry uses neither the replay budget nor demand.
+  KJ_EXPECT(state.reservationAttempts == 0);
+  KJ_EXPECT(state.lastTrackedBytes == kj::none);
   KJ_EXPECT(state.replayMemoryBytes == 0);
 }
 

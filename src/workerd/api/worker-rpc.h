@@ -173,12 +173,8 @@ class JsRpcCallPlan {
     return replayable;
   }
 
-  size_t getReplayMemoryBytes() const {
-    return serializedDataCapacity;
-  }
-
   size_t getReplayReservationBytes() {
-    size_t result = serializedData.size();
+    size_t result = serializedDataCapacity;
     for (const auto& segment: message->getSegmentsForOutput()) {
       result += kj::max(segment.size(), static_cast<size_t>(METADATA_SEGMENT_WORDS)) *
           sizeof(capnp::word);
