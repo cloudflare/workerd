@@ -541,6 +541,18 @@ enum SerializationTag {
   # A "wrapped binding": an application-level object (e.g. a D1Database) implemented in TypeScript
   # inside the runtime that wraps a single inner service stub. Serializes as the inner stub's
   # payload (per `serviceStub`) followed by the wrapper module name. See api/wrapped-binding.{h,c++}.
+
+  r2Checksums @18;
+  # Checksums attached to an R2 object.
+
+  r2Object @19;
+  # R2 object metadata without a body.
+
+  r2ObjectBody @20;
+  # R2 object metadata with a transferred body stream.
+
+  r2Error @21;
+  # A structured error produced by an R2 operation.
 }
 
 enum StreamEncoding {
