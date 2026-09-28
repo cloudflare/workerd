@@ -3,75 +3,43 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
-import { WorkerEntrypoint } from 'cloudflare:workers';
+import { ObservedR2Binding as PassthroughR2Binding } from './r2-test.js';
 
-export class ObservedR2Binding extends WorkerEntrypoint {
-  fetch() {
-    throw new Error('R2 platform binding tests must not use HTTP');
-  }
-
-  async head(...args) {
-    if (args[0] === 'body-as-head') {
+// Extends the shared passthrough so that some keys return a native R2 result of the wrong type
+// for the method, and adds methods that return native results to the test directly, without the
+// R2 binding's JSRPC client in between.
+export class ObservedR2Binding extends PassthroughR2Binding {
+  async head(requestKey) {
+    if (requestKey === 'body-as-head') {
       return this.env.REAL_BUCKET.get('rpc-json');
     }
-    if (args[0] === 'list-object-as-head') {
+    if (requestKey === 'list-object-as-head') {
       const listed = await this.env.REAL_BUCKET.list({
         prefix: 'httpMeta',
         include: [],
       });
       return listed.objects[0];
     }
-    return this.env.REAL_BUCKET.head(...args);
+    return super.head(requestKey);
   }
 
-  async get(...args) {
-    if (args[0] === 'list-object-as-get') {
+  async get(requestKey, options) {
+    if (requestKey === 'list-object-as-get') {
       const listed = await this.env.REAL_BUCKET.list({
         prefix: 'httpMeta',
         include: [],
       });
       return listed.objects[0];
     }
-    return this.env.REAL_BUCKET.get(...args);
-  }
-
-  put(...args) {
-    return this.env.REAL_BUCKET.put(...args);
-  }
-
-  list(...args) {
-    return this.env.REAL_BUCKET.list(...args);
+    return super.get(requestKey, options);
   }
 
   async checksums() {
     return (await this.env.REAL_BUCKET.head('multipleChecksums')).checksums;
   }
 
-  getNative(key) {
-    return this.env.REAL_BUCKET.get(key);
-  }
-
-  async createMultipartUpload(...args) {
-    const upload = await this.env.REAL_BUCKET.createMultipartUpload(...args);
-    return { key: upload.key, uploadId: upload.uploadId };
-  }
-
-  uploadPart(key, uploadId, partNumber, value, options) {
-    return this.env.REAL_BUCKET.resumeMultipartUpload(key, uploadId).uploadPart(
-      partNumber,
-      value,
-      options
-    );
-  }
-
-  abortMultipartUpload(key, uploadId) {
-    return this.env.REAL_BUCKET.resumeMultipartUpload(key, uploadId).abort();
-  }
-
-  completeMultipartUpload(key, uploadId, uploadedParts) {
-    return this.env.REAL_BUCKET.resumeMultipartUpload(key, uploadId).complete(
-      uploadedParts
-    );
+  getNative(requestKey) {
+    return this.env.REAL_BUCKET.get(requestKey);
   }
 }
 

@@ -199,7 +199,101 @@ async function assertLargeRpcBody(requestKey, value, valueSize) {
   }
 }
 
-function buildGetResponse({ head, body, isList } = {}) {
+// The HTTP protocol reports failures with a status code and a CF-R2-Error header, which the
+// binding turns into an Error whose message is "<action>: <message> (<v4code>)".
+function r2ErrorHeaders({ v4code, message }) {
+  return { 'cf-r2-error': JSON.stringify({ version: 1, v4code, message }) };
+}
+
+function r2ErrorResponse(error) {
+  return new Response(null, {
+    status: error.status,
+    headers: r2ErrorHeaders(error),
+  });
+}
+
+const noSuchKeyError = {
+  status: 404,
+  v4code: 10007,
+  message: 'The specified key does not exist.',
+};
+const noSuchBucketError = {
+  status: 404,
+  v4code: 10006,
+  message: 'no such bucket',
+};
+const preconditionFailedError = {
+  status: 412,
+  v4code: 10031,
+  message: 'At least one of the pre-conditions you specified did not hold.',
+};
+const uploadNotFoundError = {
+  status: 404,
+  v4code: 10024,
+  message: 'Upload not found',
+};
+
+// Multipart uploads for keys starting with 'rpc-multipart-' are tracked so that the mock can
+// report uploads that were never created, or were already completed or aborted. The first upload
+// for a key gets the ID '<key>-id', and later uploads for the same key get '<key>-id-<n>'.
+const activeMultipartUploads = new Map();
+const multipartUploadCounts = new Map();
+
+function handleTrackedMultipartRequest(jsonRequest, uploadedBody) {
+  const requestKey = jsonRequest.object;
+  const { uploadId } = jsonRequest;
+  const isActive = activeMultipartUploads.get(uploadId) === requestKey;
+  switch (jsonRequest.method) {
+    case 'createMultipartUpload': {
+      // Metadata is captured when createMultipartUpload() is called, so later changes to the
+      // caller's objects are not sent.
+      if (jsonRequest.customFields !== undefined) {
+        assert.deepStrictEqual(jsonRequest.customFields, [
+          { k: 'uploadKey', v: requestKey },
+        ]);
+        assert.deepStrictEqual(jsonRequest.httpFields, httpFields);
+      }
+      const count = (multipartUploadCounts.get(requestKey) ?? 0) + 1;
+      multipartUploadCounts.set(requestKey, count);
+      const newUploadId =
+        count === 1 ? `${requestKey}-id` : `${requestKey}-id-${count}`;
+      activeMultipartUploads.set(newUploadId, requestKey);
+      return Response.json({ uploadId: newUploadId });
+    }
+    case 'uploadPart':
+      if (!isActive) {
+        return r2ErrorResponse(uploadNotFoundError);
+      }
+      assert.strictEqual(uploadedBody, body);
+      return Response.json({
+        etag: `${requestKey}/${uploadId}/${jsonRequest.partNumber}`,
+      });
+    case 'completeMultipartUpload':
+      if (!isActive) {
+        return r2ErrorResponse(uploadNotFoundError);
+      }
+      for (const { part, etag } of jsonRequest.parts ?? []) {
+        assert.strictEqual(etag, `${requestKey}/${uploadId}/${part}`);
+      }
+      activeMultipartUploads.delete(uploadId);
+      return Response.json({
+        ...objResponse,
+        name: requestKey,
+        version: uploadId,
+      });
+    case 'abortMultipartUpload':
+      // Aborting an upload that no longer exists succeeds.
+      if (isActive) {
+        activeMultipartUploads.delete(uploadId);
+      }
+      return new Response();
+  }
+  throw new Error(`Unexpected method: ${jsonRequest.method}`);
+}
+
+// An R2 error makes this an error response, such as a failed precondition that still carries the
+// object's metadata but no body.
+function buildGetResponse({ head, body, isList, error } = {}) {
   const encoder = new TextEncoder();
   let meta;
   if (!isList) {
@@ -221,11 +315,16 @@ function buildGetResponse({ head, body, isList } = {}) {
         },
       })
     : metadata;
+  const headers = {
+    'cf-r2-metadata-size': metadata.length.toString(),
+    'content-length': metadata.length.toString(),
+  };
+  if (error === undefined) {
+    return new Response(responseBody, { headers });
+  }
   return new Response(responseBody, {
-    headers: {
-      'cf-r2-metadata-size': metadata.length.toString(),
-      'content-length': metadata.length.toString(),
-    },
+    status: error.status,
+    headers: { ...headers, ...r2ErrorHeaders(error) },
   });
 }
 
@@ -281,15 +380,24 @@ const testWorker = {
           assert.fail('R2 backend must not be called for invalid input');
         }
 
-        // Currently not using the body in these test so I'm going to just discard
-        for await (const _ of request.body) {
-          // intentionally empty
+        // The metadata has already been read from the body, so a Response cannot wrap it.
+        const chunks = [];
+        for await (const chunk of request.body) {
+          chunks.push(chunk);
         }
+        const uploadedBody = await new Blob(chunks).text();
 
         // Assert it's the correct version
         assert((jsonRequest.version = 1));
 
         if (jsonRequest.method === 'delete') {
+          if (jsonRequest.object === 'boom') {
+            return r2ErrorResponse({
+              status: 400,
+              v4code: 10021,
+              message: 'bad keys',
+            });
+          }
           if (jsonRequest.objects) {
             // A batch delete can report individual key failures in a successful HTTP response.
             // R2Bucket::delete_() reads this body from the legacy transport but does not expose it.
@@ -317,8 +425,18 @@ const testWorker = {
           return new Response();
         }
 
+        if (jsonRequest.object.startsWith('rpc-multipart-')) {
+          return handleTrackedMultipartRequest(jsonRequest, uploadedBody);
+        }
+
         switch (jsonRequest.object) {
           case 'basicKey': {
+            if (jsonRequest.uploadId !== undefined) {
+              assert(
+                ['multipartId', 'resumedId'].includes(jsonRequest.uploadId)
+              );
+            }
+            const resumed = jsonRequest.uploadId === 'resumedId';
             switch (jsonRequest.method) {
               case 'put': {
                 break;
@@ -330,17 +448,37 @@ const testWorker = {
               }
               case 'uploadPart': {
                 return Response.json({
-                  etag: 'partEtag',
+                  etag: resumed ? 'resumedRpcPartEtag' : 'partEtag',
                 });
               }
               case 'abortMultipartUpload': {
                 return new Response();
               }
               case 'completeMultipartUpload': {
-                return Response.json(objResponse);
+                return Response.json(
+                  resumed
+                    ? { ...objResponse, version: 'resumedRpcObjectVersion' }
+                    : objResponse
+                );
               }
             }
             break;
+          }
+          case 'rpcStream': {
+            assert.strictEqual(uploadedBody, rpcStreamBody);
+            if (jsonRequest.method === 'uploadPart') {
+              assert.strictEqual(jsonRequest.uploadId, 'streamedId');
+              return Response.json({ etag: 'partEtag' });
+            }
+            assert.strictEqual(jsonRequest.method, 'put');
+            break;
+          }
+          case 'rpc-conditional-null': {
+            assert.strictEqual(jsonRequest.method, 'put');
+            assert.deepStrictEqual(jsonRequest.onlyIf, {
+              etagMatches: [{ value: 'strongEtag', type: 'strong' }],
+            });
+            return r2ErrorResponse(preconditionFailedError);
           }
           case 'onlyIfStrongEtag': {
             assert.deepStrictEqual(jsonRequest.onlyIf, {
@@ -556,70 +694,161 @@ const testWorker = {
         }
         assert((jsonRequest.version = 1));
         if (jsonRequest.method === 'list') {
+          // Without r2_list_honor_include, the binding always asks for both kinds of metadata.
+          // Each config tells the mock which behavior its R2 bindings use.
+          const honorsIncludes = env.R2_LIST_HONOR_INCLUDE !== 'false';
+          const { include = [], ...listRequest } = jsonRequest;
+          const assertInclude = (requested) =>
+            assert.deepStrictEqual(
+              include,
+              honorsIncludes ? requested : [0, 1]
+            );
+          const listResponse = (result) =>
+            buildGetResponse({ head: result, isList: true });
           switch (jsonRequest.prefix) {
+            case undefined: {
+              assertInclude([]);
+              assert.deepStrictEqual(listRequest, {
+                method: 'list',
+                newRuntime: true,
+                version: 1,
+              });
+              return listResponse({ objects: [], truncated: false });
+            }
             case 'basic': {
-              assert.deepEqual(jsonRequest, {
+              assertInclude([0, 1]);
+              assert.deepEqual(listRequest, {
                 cursor: 'ai',
                 delimiter: '/',
-                include: [0, 1],
                 limit: 1,
                 method: 'list',
                 newRuntime: true,
                 prefix: 'basic',
                 version: 1,
               });
-              return buildGetResponse({
-                head: {
-                  objects: [objResponse],
-                  truncated: true,
-                  cursor: 'ai',
-                  deliminatedPrefixes: [],
-                },
-                isList: true,
+              return listResponse({
+                objects: [objResponse],
+                truncated: true,
+                cursor: 'ai',
               });
             }
             case 'httpMeta': {
-              assert.deepEqual(jsonRequest, {
-                include: [0],
+              assert.deepEqual(listRequest, {
                 method: 'list',
                 newRuntime: true,
                 prefix: 'httpMeta',
                 version: 1,
               });
-
-              return buildGetResponse({
-                head: {
-                  objects: [{ ...objResponse, httpFields, customFields: [] }],
+              // An empty include list returns objects without optional metadata.
+              if (include.length === 0) {
+                return listResponse({
+                  objects: [objResponse],
                   truncated: false,
-                  deliminatedPrefixes: [],
-                },
-                isList: true,
+                });
+              }
+              assertInclude([0]);
+              return listResponse({
+                objects: [{ ...objResponse, httpFields, customFields: [] }],
+                truncated: false,
               });
             }
             case 'customMeta': {
-              assert.deepEqual(jsonRequest, {
-                include: [1],
+              assertInclude([1]);
+              assert.deepEqual(listRequest, {
                 method: 'list',
                 newRuntime: true,
                 prefix: 'customMeta',
                 version: 1,
               });
-
-              return buildGetResponse({
-                head: {
-                  objects: [{ ...objResponse, httpFields: {}, customFields }],
-                  truncated: false,
-                  deliminatedPrefixes: [],
-                },
-                isList: true,
+              return listResponse({
+                objects: [{ ...objResponse, httpFields: {}, customFields }],
+                truncated: false,
               });
             }
+            // Returns only the kinds of metadata that the request includes, which are empty.
+            case 'rpc-metadata': {
+              assert.deepStrictEqual(listRequest, {
+                method: 'list',
+                newRuntime: true,
+                prefix: 'rpc-metadata',
+                version: 1,
+              });
+              return listResponse({
+                objects: [
+                  {
+                    ...objResponse,
+                    ...(include.includes(0) && { httpFields: {} }),
+                    ...(include.includes(1) && { customFields: [] }),
+                  },
+                ],
+                truncated: false,
+              });
+            }
+            case 'rpc-options': {
+              assertInclude([]);
+              assert.deepStrictEqual(listRequest, {
+                cursor: 'cursor-in',
+                delimiter: '/',
+                limit: 2,
+                method: 'list',
+                newRuntime: true,
+                prefix: 'rpc-options',
+                startAfter: 'after',
+                version: 1,
+              });
+              return listResponse({
+                objects: [],
+                truncated: true,
+                cursor: 'cursor-out',
+                delimitedPrefixes: ['rpc-options/'],
+              });
+            }
+            case 'rpc-boom':
+              return r2ErrorResponse(noSuchBucketError);
           }
+          throw new Error(`Unexpected list prefix: ${jsonRequest.prefix}`);
         }
         assert(['get', 'head'].includes(jsonRequest.method));
         switch (jsonRequest.object) {
-          case 'basicKey': {
+          case 'basicKey':
+          case 'rpc-lazy-body':
+          case 'rpc-bytes':
+          case 'rpc-array-buffer':
+          case 'rpc-blob': {
             return buildGetResponse({ body });
+          }
+          case 'missing':
+            return r2ErrorResponse(noSuchKeyError);
+          case 'boom':
+          case 'rpc-get-boom':
+            return r2ErrorResponse(noSuchBucketError);
+          // The binding converts a non-string key to a string.
+          case '12345': {
+            assert.strictEqual(jsonRequest.method, 'head');
+            return buildGetResponse();
+          }
+          case 'ranged': {
+            assert.strictEqual(jsonRequest.method, 'head');
+            return buildGetResponse({
+              head: { range: { offset: '10', length: '20' } },
+            });
+          }
+          case 'rpc-json': {
+            assert.strictEqual(jsonRequest.method, 'get');
+            const jsonBody = JSON.stringify({ ok: true });
+            return buildGetResponse({
+              head: { size: String(jsonBody.length) },
+              body: jsonBody,
+            });
+          }
+          case 'rpc-conditional-metadata': {
+            assert.strictEqual(jsonRequest.method, 'get');
+            if (jsonRequest.onlyIf !== undefined) {
+              assert.deepStrictEqual(jsonRequest.onlyIf, {
+                etagMatches: [{ value: 'objectEtag', type: 'strong' }],
+              });
+            }
+            return buildGetResponse({ error: preconditionFailedError });
           }
           case 'rangeOffLen': {
             assert.deepEqual(jsonRequest.range, {
@@ -971,16 +1200,9 @@ const testWorker = {
           });
           list.objects[0] = { ...list.objects[0] };
           list.objects[0].checksums = { ...list.objects[0].checksums };
-          const expected = { ...HeadObject, ...head };
-          if (
-            env.R2_TRANSPORT === 'jsrpc' &&
-            env.R2_LIST_HONOR_INCLUDE === 'true'
-          ) {
-            expected.customMetadata = undefined;
-          }
           assert.deepEqual(list, {
             delimitedPrefixes: [],
-            objects: [expected],
+            objects: [{ ...HeadObject, ...head }],
             truncated: false,
           });
         }
@@ -1022,16 +1244,9 @@ const testWorker = {
           });
           list.objects[0] = { ...list.objects[0] };
           list.objects[0].checksums = { ...list.objects[0].checksums };
-          const expected = { ...HeadObject, ...head };
-          if (
-            env.R2_TRANSPORT === 'jsrpc' &&
-            env.R2_LIST_HONOR_INCLUDE === 'true'
-          ) {
-            expected.httpMetadata = undefined;
-          }
           assert.deepEqual(list, {
             delimitedPrefixes: [],
-            objects: [expected],
+            objects: [{ ...HeadObject, ...head }],
             truncated: false,
           });
         }
@@ -1165,66 +1380,104 @@ const testWorker = {
   },
 };
 
-const finishedRpcUploads = new Set();
-
-// Checks that the key and upload ids match test expectations
-function assertMultipartIdentity(requestKey, uploadId, action) {
-  assert.strictEqual(typeof requestKey, 'string');
-  assert.strictEqual(typeof uploadId, 'string');
-  if (requestKey.startsWith('rpc-multipart-')) {
-    assert(
-      [`${requestKey}-id`, 'resumed-a', 'resumed-b', 'missing'].includes(
-        uploadId
-      )
-    );
-    const missing =
-      uploadId === 'missing' ||
-      finishedRpcUploads.has(JSON.stringify([requestKey, uploadId]));
-    if (missing && action !== 'abortMultipartUpload') {
-      throw new Error(`${action}: Upload not found (10024)`);
-    }
-    return;
+// JSRPC bodies can arrive as a stream whose length is known only from the separate size argument.
+// The native binding requires a known-length stream, so restore it from that argument.
+function withKnownLength(value, valueSize) {
+  if (!(value instanceof ReadableStream)) {
+    return value;
   }
-  const expected = {
-    'must-not-call': 'invalidPartUploadId',
-    rpcStream: 'streamedId',
-    largeBuffer: 'largeUploadId',
-    'rpc-wrong-part-number': 'wrongPartUploadId',
-  }[requestKey];
-  if (expected !== undefined) {
-    assert.strictEqual(uploadId, expected);
-  } else {
-    assert(
-      uploadId === 'multipartId' ||
-        (requestKey === key && uploadId === 'resumedId')
+  const { readable, writable } = new FixedLengthStream(valueSize);
+  value.pipeTo(writable).catch(() => {});
+  return readable;
+}
+
+// Implements the R2 binding's JSRPC methods by forwarding each call to a native R2 binding, in
+// the way a customer Worker can stand in for R2. The JSRPC tests target this entrypoint so the
+// shared suite exercises the serialization of native R2 results and errors, while REAL_BUCKET
+// reaches the same HTTP mock as the HTTP tests. HTTP requests are rejected to detect any
+// transport fallback on the JSRPC hop.
+export class ObservedR2Binding extends WorkerEntrypoint {
+  fetch() {
+    throw new Error('R2 JSRPC tests must not use HTTP');
+  }
+
+  head(requestKey) {
+    return this.env.REAL_BUCKET.head(requestKey);
+  }
+
+  get(requestKey, options) {
+    return this.env.REAL_BUCKET.get(requestKey, options);
+  }
+
+  put(requestKey, value, options, valueSize) {
+    return this.env.REAL_BUCKET.put(
+      requestKey,
+      withKnownLength(value, valueSize),
+      options
     );
+  }
+
+  delete(keys) {
+    return this.env.REAL_BUCKET.delete(keys);
+  }
+
+  list(options) {
+    return this.env.REAL_BUCKET.list(options);
+  }
+
+  async createMultipartUpload(requestKey, options) {
+    const upload = await this.env.REAL_BUCKET.createMultipartUpload(
+      requestKey,
+      options
+    );
+    return { key: upload.key, uploadId: upload.uploadId };
+  }
+
+  uploadPart(requestKey, uploadId, partNumber, value, options, valueSize) {
+    return this.env.REAL_BUCKET.resumeMultipartUpload(
+      requestKey,
+      uploadId
+    ).uploadPart(partNumber, withKnownLength(value, valueSize), options);
+  }
+
+  abortMultipartUpload(requestKey, uploadId) {
+    return this.env.REAL_BUCKET.resumeMultipartUpload(
+      requestKey,
+      uploadId
+    ).abort();
+  }
+
+  completeMultipartUpload(requestKey, uploadId, uploadedParts) {
+    return this.env.REAL_BUCKET.resumeMultipartUpload(
+      requestKey,
+      uploadId
+    ).complete(uploadedParts);
   }
 }
 
-// This entrypoint rejects HTTP requests so the JSRPC tests detect any transport fallback.
-// The HTTP tests use the default export's backend.
+// A fake R2 gateway for the gateway contract tests (jsrpcGateway*ContractTests). Each method
+// asserts the exact arguments the JSRPC client sends for the keys those tests use, and some keys
+// return results that a native R2 binding cannot produce. It rejects HTTP requests to detect any
+// transport fallback.
 export class R2BindingEntrypoint extends WorkerEntrypoint {
   fetch() {
     throw new Error('R2 JSRPC tests must not use HTTP');
   }
 
   head(requestKey) {
-    if (requestKey === 'missing') {
-      return null;
-    }
-    if (requestKey === 'boom') {
-      throw new Error('head: no such bucket (10006)');
-    }
-
     const result = buildRpcHead(requestKey);
-    if (requestKey === 'rpc-malformed-size') {
-      result.size = -1;
-    }
-    if (requestKey === 'rpc-malformed-range') {
-      result.range = { offset: -1, length: 1 };
-    }
-    if (requestKey === 'rpc-malformed-date') {
-      result.uploaded = new Date(NaN);
+    switch (requestKey) {
+      case 'rpc-malformed-size':
+        result.size = -1;
+        break;
+      case 'rpc-malformed-range':
+        result.range = { offset: -1, length: 1 };
+        break;
+      case 'rpc-malformed-date':
+        result.uploaded = new Date(NaN);
+        break;
+      default:
+        assert.fail(`unexpected head key: ${requestKey}`);
     }
     return result;
   }
@@ -1249,178 +1502,87 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
       }
       return null;
     }
-    if (requestKey === 'missing') {
-      return null;
+    switch (requestKey) {
+      case 'rpc-malformed-kind':
+        return { kind: 'other', object: buildRpcHead(requestKey) };
+      case 'rpc-malformed-metadata-body':
+        return {
+          kind: 'metadata',
+          object: buildRpcHead(requestKey),
+          body: new ReadableStream(),
+        };
+      case 'rpc-malformed-missing-body':
+        return { kind: 'body', object: buildRpcHead(requestKey) };
+      case 'rpc-options':
+        assert.deepStrictEqual(options, {
+          onlyIf: {
+            etagMatches: 'strongEtag',
+            uploadedBefore: new Date(0),
+            secondsGranularity: false,
+          },
+          range: { offset: 1, length: 3 },
+          ssecKey: hexKey,
+        });
+        return null;
+      case 'rpc-header-options':
+        assert(options.onlyIf instanceof Headers);
+        assert.strictEqual(
+          options.onlyIf.get('if-match'),
+          '"strongEtag", W/"weakEtag"'
+        );
+        assert.strictEqual(
+          options.onlyIf.get('if-none-match'),
+          '"firstEtag", "secondEtag"'
+        );
+        assert.strictEqual(
+          options.onlyIf.get('if-modified-since'),
+          new Date(0).toUTCString()
+        );
+        assert(options.range instanceof Headers);
+        assert.strictEqual(options.range.get('range'), 'bytes=1-3');
+        return null;
     }
-    if (requestKey === 'rpc-get-boom') {
-      throw new Error('get: no such bucket (10006)');
-    }
-    if (requestKey === 'rpc-malformed-kind') {
-      return { kind: 'other', object: buildRpcHead(requestKey) };
-    }
-    if (requestKey === 'rpc-malformed-metadata-body') {
-      return {
-        kind: 'metadata',
-        object: buildRpcHead(requestKey),
-        body: new ReadableStream(),
-      };
-    }
-    if (requestKey === 'rpc-malformed-missing-body') {
-      return { kind: 'body', object: buildRpcHead(requestKey) };
-    }
-    if (requestKey === 'rpc-options') {
-      assert.deepStrictEqual(options, {
-        onlyIf: {
-          etagMatches: 'strongEtag',
-          uploadedBefore: new Date(0),
-          secondsGranularity: false,
-        },
-        range: { offset: 1, length: 3 },
-        ssecKey: hexKey,
-      });
-    }
-    if (requestKey === 'rpc-header-options') {
-      assert(options.onlyIf instanceof Headers);
-      assert.strictEqual(
-        options.onlyIf.get('if-match'),
-        '"strongEtag", W/"weakEtag"'
-      );
-      assert.strictEqual(
-        options.onlyIf.get('if-none-match'),
-        '"firstEtag", "secondEtag"'
-      );
-      assert.strictEqual(
-        options.onlyIf.get('if-modified-since'),
-        new Date(0).toUTCString()
-      );
-      assert(options.range instanceof Headers);
-      assert.strictEqual(options.range.get('range'), 'bytes=1-3');
-    }
-    if (requestKey === 'onlyIfMultipleEtags') {
-      assert(options.onlyIf instanceof Headers);
-      assert.strictEqual(
-        options.onlyIf.get('if-match'),
-        '"strongEtag", W/"weakEtag"'
-      );
-      assert.strictEqual(
-        options.onlyIf.get('if-none-match'),
-        '"firstEtag", "secondEtag"'
-      );
-    }
-    if (requestKey === 'must-not-call') {
-      throw new Error('get RPC method must not be called');
-    }
-
-    const object = buildRpcHead(requestKey);
-    if (requestKey === 'rangeOffLen') {
-      assert.deepStrictEqual(options, { range: { offset: 1, length: 3 } });
-      object.range = { offset: 1, length: 3 };
-    } else if (requestKey === 'rangeSuff') {
-      assert.deepStrictEqual(options, { range: { suffix: 2 } });
-      object.range = { offset: 5, length: 2 };
-    }
-
-    if (requestKey === 'rpc-conditional-metadata') {
-      return { kind: 'metadata', object };
-    }
-
-    const responseBody =
-      requestKey === 'rangeOffLen'
-        ? 'ont'
-        : requestKey === 'rangeSuff'
-          ? 'nt'
-          : requestKey === 'rpc-json'
-            ? JSON.stringify({ ok: true })
-            : body;
-    if (object.range === undefined) {
-      object.size = new TextEncoder().encode(responseBody).byteLength;
-    }
-    let sent = false;
-    return {
-      kind: 'body',
-      object,
-      body: new ReadableStream({
-        pull(controller) {
-          assert.strictEqual(sent, false);
-          sent = true;
-          controller.enqueue(new TextEncoder().encode(responseBody));
-          controller.close();
-        },
-      }),
-    };
-  }
-
-  delete(keys) {
-    if (keys === 'boom') {
-      throw new Error('delete: bad keys (10021)');
-    }
-    if (Array.isArray(keys)) {
-      if (keys[0] === perKeyErrorDeleteKeys[0]) {
-        // R2BindingEntrypoint has already discarded the successful HTTP batch response body before
-        // deleteRpc() receives this void RPC result.
-        assert.deepEqual(keys, perKeyErrorDeleteKeys);
-      } else {
-        assert.deepEqual(keys, [key, key + '2']);
-      }
-    } else {
-      assert.strictEqual(keys, key);
-    }
-    return rpcSuccess(null);
+    assert.fail(`unexpected get key: ${requestKey}`);
   }
 
   async put(requestKey, value, options, valueSize) {
-    if (requestKey === 'must-not-call') {
-      throw new Error('put RPC method must not be called');
-    }
-    if (requestKey === 'rpc-null-value') {
-      assert.strictEqual(value, null);
-      assert.strictEqual(valueSize, 0);
-      return buildRpcHead(requestKey);
-    }
-    if (requestKey === 'rpc-conditional-null') {
-      assert.deepStrictEqual(options.onlyIf, {
-        etagMatches: 'strongEtag',
-        secondsGranularity: false,
-      });
-      return null;
-    }
-    if (requestKey === 'rpc-put-options') {
-      assert.deepStrictEqual(options.onlyIf, {
-        etagMatches: 'strongEtag',
-        uploadedBefore: new Date(0),
-        secondsGranularity: false,
-      });
-      assert.deepStrictEqual(options.httpMetadata, httpMetaObj);
-      assert.deepStrictEqual(options.customMetadata, customMetadata);
-      assert.deepStrictEqual(new Uint8Array(options.md5), md5Buffer);
-      assert.strictEqual(options.storageClass, 'InfrequentAccess');
-      assert.strictEqual(options.ssecKey, hexKey);
-    }
-    if (requestKey === 'rpc-put-header-options') {
-      assert(options.onlyIf instanceof Headers);
-      assert.strictEqual(
-        options.onlyIf.get('if-match'),
-        '"strongEtag", W/"weakEtag"'
-      );
-      assert.strictEqual(
-        options.onlyIf.get('if-none-match'),
-        '"firstEtag", "secondEtag"'
-      );
-    }
-    if (requestKey === 'onlyIfMultipleEtags') {
-      assert(options.onlyIf instanceof Headers);
-      assert.strictEqual(
-        options.onlyIf.get('if-match'),
-        '"strongEtag", W/"weakEtag"'
-      );
-      assert.strictEqual(
-        options.onlyIf.get('if-none-match'),
-        '"firstEtag", "secondEtag"'
-      );
-    }
-    if (requestKey.startsWith('large')) {
-      await assertLargeRpcBody(requestKey, value, valueSize);
-      return buildRpcHead(requestKey, options);
+    switch (requestKey) {
+      case 'rpc-null-value':
+        assert.strictEqual(value, null);
+        assert.strictEqual(valueSize, 0);
+        return buildRpcHead(requestKey);
+      case 'rpc-put-options':
+        assert.deepStrictEqual(options.onlyIf, {
+          etagMatches: 'strongEtag',
+          uploadedBefore: new Date(0),
+          secondsGranularity: false,
+        });
+        assert.deepStrictEqual(options.httpMetadata, httpMetaObj);
+        assert.deepStrictEqual(options.customMetadata, customMetadata);
+        assert.deepStrictEqual(new Uint8Array(options.md5), md5Buffer);
+        assert.strictEqual(options.storageClass, 'InfrequentAccess');
+        assert.strictEqual(options.ssecKey, hexKey);
+        break;
+      case 'rpc-put-header-options':
+        assert(options.onlyIf instanceof Headers);
+        assert.strictEqual(
+          options.onlyIf.get('if-match'),
+          '"strongEtag", W/"weakEtag"'
+        );
+        assert.strictEqual(
+          options.onlyIf.get('if-none-match'),
+          '"firstEtag", "secondEtag"'
+        );
+        break;
+      case 'largeBuffer':
+      case 'largeString':
+      case 'largeBlob':
+        await assertLargeRpcBody(requestKey, value, valueSize);
+        return buildRpcHead(requestKey, options);
+      case 'rpcStream':
+        break;
+      default:
+        assert.fail(`unexpected put key: ${requestKey}`);
     }
     const uploaded = await new Response(value).text();
     const expected = requestKey === 'rpcStream' ? rpcStreamBody : body;
@@ -1438,9 +1600,6 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
       ? (options?.include ?? [])
       : ['httpMetadata', 'customMetadata'];
 
-    if (options?.prefix === 'rpc-boom') {
-      throw new Error('list: no such bucket (10006)');
-    }
     if (options?.prefix === 'rpc-malformed') {
       return { objects: [{}], truncated: false };
     }
@@ -1461,39 +1620,6 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
       };
     }
 
-    if (options?.prefix === 'basic') {
-      assert.deepStrictEqual(options, {
-        limit: 1,
-        prefix: 'basic',
-        cursor: 'ai',
-        delimiter: '/',
-        include: effectiveIncludes,
-      });
-      return {
-        objects: [listRpcHead('basic', effectiveIncludes)],
-        truncated: true,
-        cursor: 'ai',
-      };
-    }
-    if (options?.prefix === 'httpMeta') {
-      return {
-        objects: [listRpcHead('httpMetadata', effectiveIncludes)],
-        truncated: false,
-      };
-    }
-    if (options?.prefix === 'customMeta') {
-      return {
-        objects: [listRpcHead('customMetadata', effectiveIncludes)],
-        truncated: false,
-      };
-    }
-    if (options?.prefix === 'rpc-metadata') {
-      return {
-        objects: [listRpcHead('basic', effectiveIncludes)],
-        truncated: false,
-      };
-    }
-
     if (honorsIncludes) {
       assert.strictEqual(options, undefined);
     } else {
@@ -1505,19 +1631,12 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
   }
 
   createMultipartUpload(requestKey, options) {
-    if (requestKey === 'must-not-call') {
-      throw new Error('createMultipartUpload RPC method must not be called');
-    }
-    if (requestKey === 'rpc-create-options') {
-      assert.deepStrictEqual(options.httpMetadata, httpMetaObj);
-      assert.deepStrictEqual(options.customMetadata, customMetadata);
-      assert.strictEqual(options.storageClass, 'InfrequentAccess');
-      assert.strictEqual(options.ssecKey, hexKey);
-    }
-    assert.strictEqual(typeof requestKey, 'string');
-    return requestKey.startsWith('rpc-multipart-')
-      ? `${requestKey}-id`
-      : 'multipartId';
+    assert.strictEqual(requestKey, 'rpc-create-options');
+    assert.deepStrictEqual(options.httpMetadata, httpMetaObj);
+    assert.deepStrictEqual(options.customMetadata, customMetadata);
+    assert.strictEqual(options.storageClass, 'InfrequentAccess');
+    assert.strictEqual(options.ssecKey, hexKey);
+    return 'multipartId';
   }
 
   async uploadPart(
@@ -1528,87 +1647,28 @@ export class R2BindingEntrypoint extends WorkerEntrypoint {
     options,
     valueSize
   ) {
-    assertMultipartIdentity(requestKey, uploadId, 'uploadPart');
-    assert(partNumber >= 1 && partNumber <= 10000);
-    if (requestKey === 'must-not-call') {
-      throw new Error('uploadPart RPC method must not be called');
-    }
+    const expectedUploadId = {
+      rpcStream: 'streamedId',
+      largeBuffer: 'largeUploadId',
+      'rpc-wrong-part-number': 'wrongPartUploadId',
+    }[requestKey];
+    assert.strictEqual(uploadId, expectedUploadId);
     if (requestKey === 'largeBuffer') {
       await assertLargeRpcBody(requestKey, value, valueSize);
       return { partNumber, etag: 'partEtag' };
     }
     const uploaded = await new Response(value).text();
-    const expected =
-      requestKey === 'ssecMultipart'
-        ? 'hey'
-        : requestKey === 'rpcStream'
-          ? rpcStreamBody
-          : body;
+    const expected = requestKey === 'rpcStream' ? rpcStreamBody : body;
     assert.strictEqual(uploaded, expected);
     assert.strictEqual(
       valueSize,
       new TextEncoder().encode(expected).byteLength
     );
-    if (requestKey === 'ssecMultipart') {
-      assert.strictEqual(options?.ssecKey, hexKey);
-    }
     return {
       partNumber: requestKey === 'rpc-wrong-part-number' ? 9999 : partNumber,
-      etag: requestKey.startsWith('rpc-multipart-')
-        ? `${requestKey}/${uploadId}/${partNumber}`
-        : uploadId === 'resumedId'
-          ? 'resumedRpcPartEtag'
-          : 'partEtag',
+      etag: 'partEtag',
     };
   }
-
-  abortMultipartUpload(requestKey, uploadId) {
-    assertMultipartIdentity(requestKey, uploadId, 'abortMultipartUpload');
-    if (requestKey.startsWith('rpc-multipart-')) {
-      finishedRpcUploads.add(JSON.stringify([requestKey, uploadId]));
-    }
-  }
-
-  completeMultipartUpload(requestKey, uploadId, uploadedParts) {
-    assertMultipartIdentity(requestKey, uploadId, 'completeMultipartUpload');
-    if (requestKey === 'must-not-call') {
-      throw new Error('completeMultipartUpload RPC method must not be called');
-    }
-    for (const part of uploadedParts) {
-      assert(part.partNumber >= 1 && part.partNumber <= 10000);
-      assert.strictEqual(typeof part.etag, 'string');
-      if (requestKey.startsWith('rpc-multipart-')) {
-        assert.strictEqual(
-          part.etag,
-          `${requestKey}/${uploadId}/${part.partNumber}`
-        );
-      }
-    }
-    const result = buildRpcHead(requestKey);
-    // The backend completion response omits create-time HTTP and custom metadata.
-    result.httpMetadata = {};
-    result.customMetadata = {};
-    if (requestKey.startsWith('rpc-multipart-')) {
-      finishedRpcUploads.add(JSON.stringify([requestKey, uploadId]));
-      result.key = requestKey;
-      result.version = uploadId;
-    }
-    if (uploadId === 'resumedId') {
-      result.version = 'resumedRpcObjectVersion';
-    }
-    return result;
-  }
-}
-
-function listRpcHead(requestKey, includes) {
-  const result = buildRpcHead(requestKey);
-  if (!includes.includes('httpMetadata')) {
-    delete result.httpMetadata;
-  }
-  if (!includes.includes('customMetadata')) {
-    delete result.customMetadata;
-  }
-  return result;
 }
 
 // Test that documents the behaviour of multi-key deletion where one fails and the other succeeds
@@ -1619,7 +1679,7 @@ export const deletePerKeyErrorParityTests = {
     }
 
     // Both transports implement Promise<void>: the legacy path discards the successful HTTP body,
-    // while the RPC path receives the corresponding void result from R2BindingEntrypoint.
+    // while the RPC path receives the corresponding void result from its backend entrypoint.
     const deletion = env.BUCKET.delete(perKeyErrorDeleteKeys);
     assert(deletion instanceof Promise);
     assert.strictEqual(await deletion, undefined);
@@ -1723,42 +1783,32 @@ export const r2ValidationTests = {
   },
 };
 
-// These cases cover RPC boundary behavior that the HTTP-oriented fake cannot observe directly.
-// The canonical API suite remains identical for both transport configurations.
-export const jsrpcTransportTests = {
-  async test(ctrl, env, ctx) {
-    if (env.R2_TRANSPORT !== 'jsrpc') {
-      return;
-    }
-
+// Public R2 binding behavior that both transports implement the same way. The JSRPC configs run
+// these through ObservedR2Binding, so results and errors come from the same HTTP mock as the HTTP
+// config.
+export const r2BindingApiTests = {
+  async test(ctrl, env) {
     assert.strictEqual(await env.BUCKET.head('missing'), null);
+    assert.strictEqual(await env.BUCKET.get('missing'), null);
 
     const ranged = await env.BUCKET.head('ranged');
     assert.deepStrictEqual(ranged.range, { offset: 10, length: 20 });
 
+    const coerced = await env.BUCKET.head(12345);
+    assert.strictEqual(coerced.key, key);
+
+    // Backend errors surface as plain Errors, without an R2Error code property.
     await assert.rejects(env.BUCKET.head('boom'), (err) => {
       assert.strictEqual(err.message, 'head: no such bucket (10006)');
       assert.strictEqual(err.code, undefined);
       return true;
     });
-    await assert.rejects(env.BUCKET.head('rpc-malformed-size'), {
-      message: /^internal error; reference = \S+$/,
+    await assert.rejects(env.BUCKET.get('rpc-get-boom'), {
+      message: 'get: no such bucket (10006)',
     });
-    await assert.rejects(env.BUCKET.head('rpc-malformed-range'), {
-      message: /^internal error; reference = \S+$/,
-    });
-    await assert.rejects(env.BUCKET.head('rpc-malformed-date'), {
-      message: /^internal error; reference = \S+$/,
-    });
-
     await assert.rejects(env.BUCKET.delete('boom'), {
       message: 'delete: bad keys (10021)',
     });
-
-    const coerced = await env.BUCKET.head(12345);
-    assert.strictEqual(coerced.key, key);
-
-    assert.strictEqual(await env.BUCKET.get('missing'), null);
 
     const conditional = await env.BUCKET.get('rpc-conditional-metadata', {
       onlyIf: { etagMatches: 'objectEtag' },
@@ -1789,37 +1839,6 @@ export const jsrpcTransportTests = {
     assert.deepStrictEqual(await jsonResult.json(), { ok: true });
     const blobResult = await env.BUCKET.get('rpc-blob');
     assert.strictEqual(await (await blobResult.blob()).text(), body);
-
-    await env.BUCKET.get('rpc-options', {
-      onlyIf: {
-        etagMatches: 'strongEtag',
-        uploadedBefore: new Date(0),
-      },
-      range: { offset: 1, length: 3 },
-      ssecKey: bufferKey,
-    });
-    await env.BUCKET.get('rpc-header-options', {
-      onlyIf: new Headers({
-        'if-match': '"strongEtag", W/"weakEtag"',
-        'if-none-match': '"firstEtag", "secondEtag"',
-        'if-modified-since': new Date(0).toUTCString(),
-      }),
-      range: new Headers({ range: 'bytes=1-3' }),
-    });
-
-    await assert.rejects(env.BUCKET.get('rpc-malformed-kind'), {
-      message: /^internal error; reference = \S+$/,
-    });
-    await assert.rejects(env.BUCKET.get('rpc-malformed-metadata-body'), {
-      message: /^internal error; reference = \S+$/,
-    });
-    // The missing-body assertion logs the details and exposes only an internal error reference.
-    await assert.rejects(env.BUCKET.get('rpc-malformed-missing-body'), {
-      message: /^internal error; reference = \S+$/,
-    });
-    await assert.rejects(env.BUCKET.get('rpc-get-boom'), {
-      message: 'get: no such bucket (10006)',
-    });
 
     const emptyList = await env.BUCKET.list();
     assert.deepStrictEqual(emptyList, {
@@ -1877,35 +1896,13 @@ export const jsrpcTransportTests = {
     await assert.rejects(env.BUCKET.list({ prefix: 'rpc-boom' }), {
       message: 'list: no such bucket (10006)',
     });
-    await assert.rejects(env.BUCKET.list({ prefix: 'rpc-malformed' }), {
-      message: /^internal error; reference = \S+$/,
-    });
 
-    const nullPut = await env.BUCKET.put('rpc-null-value', null);
-    assert.strictEqual(nullPut.key, key);
     assert.strictEqual(
       await env.BUCKET.put('rpc-conditional-null', body, {
         onlyIf: { etagMatches: 'strongEtag' },
       }),
       null
     );
-    await env.BUCKET.put('rpc-put-options', body, {
-      onlyIf: {
-        etagMatches: 'strongEtag',
-        uploadedBefore: new Date(0),
-      },
-      httpMetadata: httpMetaHeaders,
-      customMetadata,
-      md5: md5Buffer,
-      storageClass: 'InfrequentAccess',
-      ssecKey: bufferKey,
-    });
-    await env.BUCKET.put('rpc-put-header-options', body, {
-      onlyIf: new Headers({
-        'if-match': '"strongEtag", W/"weakEtag"',
-        'if-none-match': '"firstEtag", "secondEtag"',
-      }),
-    });
 
     const encodedStreamBody = new TextEncoder().encode(rpcStreamBody);
     {
@@ -1936,53 +1933,21 @@ export const jsrpcTransportTests = {
           'Provided readable stream must have a known length (request/response body or readable half of FixedLengthStream)',
       }
     );
-    assert.strictEqual(
-      unknownLengthCancelReason.message,
-      'Stream cancelled because the associated put operation encountered an error.'
-    );
-
-    const largeBufferBacking = new Uint8Array(largeRpcBodySize + 2);
-    largeBufferBacking.fill(0x41);
-    const largeBuffer = largeBufferBacking.subarray(1, -1);
-    largeBuffer[0] = 0x11;
-    largeBuffer[largeBuffer.length - 1] = 0x22;
-    await env.BUCKET.put('largeBuffer', largeBuffer);
-
-    const largeString = 'é'.repeat(largeRpcBodySize / 2);
-    await env.BUCKET.put('largeString', largeString);
-
-    const largeBlobBytes = new Uint8Array(largeRpcBodySize);
-    largeBlobBytes.fill(0x5a);
-    await env.BUCKET.put('largeBlob', new Blob([largeBlobBytes]));
+    // The JSRPC client cancels a stream it rejects; the HTTP client leaves it to the caller.
+    if (env.R2_TRANSPORT === 'jsrpc') {
+      assert.strictEqual(
+        unknownLengthCancelReason.message,
+        'Stream cancelled because the associated put operation encountered an error.'
+      );
+    } else {
+      assert.strictEqual(unknownLengthCancelReason, undefined);
+    }
   },
 };
 
-export const jsrpcMultipartTests = {
+// Multipart behavior that both transports implement the same way. See r2BindingApiTests.
+export const r2MultipartApiTests = {
   async test(ctrl, env) {
-    if (env.R2_TRANSPORT !== 'jsrpc') {
-      return;
-    }
-
-    const createOptionsUpload = await env.BUCKET.createMultipartUpload(
-      'rpc-create-options',
-      {
-        httpMetadata: httpMetaHeaders,
-        customMetadata,
-        storageClass: 'InfrequentAccess',
-        ssecKey: bufferKey,
-      }
-    );
-    assert.strictEqual(createOptionsUpload.uploadId, 'multipartId');
-
-    const encodedStreamBody = new TextEncoder().encode(rpcStreamBody);
-    // Use a view with a non-zero byte offset to verify that the RPC upload streams only the view's
-    // bytes, rather than the entire underlying ArrayBuffer.
-    const largeBufferBacking = new Uint8Array(largeRpcBodySize + 2);
-    largeBufferBacking.fill(0x41);
-    const largeBuffer = largeBufferBacking.subarray(1, -1);
-    largeBuffer[0] = 0x11;
-    largeBuffer[largeBuffer.length - 1] = 0x22;
-
     const resumed = env.BUCKET.resumeMultipartUpload(key, 'resumedId');
     assert.strictEqual(resumed.key, key);
     assert.strictEqual(resumed.uploadId, 'resumedId');
@@ -2005,6 +1970,7 @@ export const jsrpcMultipartTests = {
     assert.strictEqual(typeof resumedObject.checksums.toJSON, 'function');
     assert.strictEqual(JSON.stringify(resumedObject.checksums), '{}');
 
+    const encodedStreamBody = new TextEncoder().encode(rpcStreamBody);
     const streamedUpload = env.BUCKET.resumeMultipartUpload(
       'rpcStream',
       'streamedId'
@@ -2018,24 +1984,6 @@ export const jsrpcMultipartTests = {
     await writing;
     assert.deepStrictEqual(streamedPart, {
       partNumber: 2,
-      etag: 'partEtag',
-    });
-
-    const largeUpload = env.BUCKET.resumeMultipartUpload(
-      'largeBuffer',
-      'largeUploadId'
-    );
-    assert.deepStrictEqual(await largeUpload.uploadPart(1, largeBuffer), {
-      partNumber: 1,
-      etag: 'partEtag',
-    });
-
-    const wrongPartUpload = env.BUCKET.resumeMultipartUpload(
-      'rpc-wrong-part-number',
-      'wrongPartUploadId'
-    );
-    assert.deepStrictEqual(await wrongPartUpload.uploadPart(3, body), {
-      partNumber: 3,
       etag: 'partEtag',
     });
 
@@ -2055,7 +2003,15 @@ export const jsrpcMultipartTests = {
       assert.strictEqual(upload.uploadId, `${uploadKey}-id`);
       uploads.push(upload);
     }
-    for (const uploadId of ['resumed-a', 'resumed-b']) {
+    // More uploads for the same key, addressed through wrappers resumed from their IDs.
+    for (const uploadId of [
+      'rpc-multipart-first-id-2',
+      'rpc-multipart-first-id-3',
+    ]) {
+      const created = await env.BUCKET.createMultipartUpload(
+        'rpc-multipart-first'
+      );
+      assert.strictEqual(created.uploadId, uploadId);
       const upload = env.BUCKET.resumeMultipartUpload(
         'rpc-multipart-first',
         uploadId
@@ -2088,7 +2044,7 @@ export const jsrpcMultipartTests = {
       const result = await upload.complete(uploadedParts[i]);
       assert.strictEqual(result.key, upload.key);
       assert.strictEqual(result.version, upload.uploadId);
-      // Created and resumed uploads both use the metadata returned by the gateway.
+      // Created and resumed uploads both use the metadata returned by the backend.
       assert.deepStrictEqual(result.customMetadata, {});
       const resultHeaders = new Headers();
       result.writeHttpMetadata(resultHeaders);
@@ -2121,7 +2077,196 @@ export const jsrpcMultipartTests = {
   },
 };
 
-export const jsrpcRangeTests = {
+// Gateway contract tests: they target R2BindingEntrypoint, a fake gateway that asserts the exact
+// arguments the JSRPC client sends and returns results that a native R2 binding cannot produce.
+// A passthrough to a native binding cannot observe or produce either.
+export const jsrpcGatewayContractTests = {
+  async test(ctrl, env) {
+    if (env.R2_TRANSPORT !== 'jsrpc') {
+      return;
+    }
+
+    await assert.rejects(env.BUCKET.head('rpc-malformed-size'), {
+      message: /^internal error; reference = \S+$/,
+    });
+    await assert.rejects(env.BUCKET.head('rpc-malformed-range'), {
+      message: /^internal error; reference = \S+$/,
+    });
+    await assert.rejects(env.BUCKET.head('rpc-malformed-date'), {
+      message: /^internal error; reference = \S+$/,
+    });
+
+    await env.BUCKET.get('rpc-options', {
+      onlyIf: {
+        etagMatches: 'strongEtag',
+        uploadedBefore: new Date(0),
+      },
+      range: { offset: 1, length: 3 },
+      ssecKey: bufferKey,
+    });
+    await env.BUCKET.get('rpc-header-options', {
+      onlyIf: new Headers({
+        'if-match': '"strongEtag", W/"weakEtag"',
+        'if-none-match': '"firstEtag", "secondEtag"',
+        'if-modified-since': new Date(0).toUTCString(),
+      }),
+      range: new Headers({ range: 'bytes=1-3' }),
+    });
+
+    await assert.rejects(env.BUCKET.get('rpc-malformed-kind'), {
+      message: /^internal error; reference = \S+$/,
+    });
+    await assert.rejects(env.BUCKET.get('rpc-malformed-metadata-body'), {
+      message: /^internal error; reference = \S+$/,
+    });
+    // The missing-body assertion logs the details and exposes only an internal error reference.
+    await assert.rejects(env.BUCKET.get('rpc-malformed-missing-body'), {
+      message: /^internal error; reference = \S+$/,
+    });
+
+    // The gateway checks the list options, including the include list the compatibility flag
+    // selects.
+    assert.deepStrictEqual(await env.BUCKET.list(), {
+      objects: [],
+      truncated: false,
+      delimitedPrefixes: [],
+    });
+    assert.deepStrictEqual(
+      await env.BUCKET.list({
+        limit: 2,
+        prefix: 'rpc-options',
+        cursor: 'cursor-in',
+        delimiter: '/',
+        startAfter: 'after',
+        include: [],
+      }),
+      {
+        objects: [],
+        truncated: true,
+        cursor: 'cursor-out',
+        delimitedPrefixes: ['rpc-options/'],
+      }
+    );
+    await assert.rejects(env.BUCKET.list({ prefix: 'rpc-malformed' }), {
+      message: /^internal error; reference = \S+$/,
+    });
+
+    const nullPut = await env.BUCKET.put('rpc-null-value', null);
+    assert.strictEqual(nullPut.key, key);
+    await env.BUCKET.put('rpc-put-options', body, {
+      onlyIf: {
+        etagMatches: 'strongEtag',
+        uploadedBefore: new Date(0),
+      },
+      httpMetadata: httpMetaHeaders,
+      customMetadata,
+      md5: md5Buffer,
+      storageClass: 'InfrequentAccess',
+      ssecKey: bufferKey,
+    });
+    await env.BUCKET.put('rpc-put-header-options', body, {
+      onlyIf: new Headers({
+        'if-match': '"strongEtag", W/"weakEtag"',
+        'if-none-match': '"firstEtag", "secondEtag"',
+      }),
+    });
+
+    // The gateway checks the streamed body and its separately sent size.
+    const encodedStreamBody = new TextEncoder().encode(rpcStreamBody);
+    {
+      const { readable, writable } = new FixedLengthStream(
+        encodedStreamBody.byteLength
+      );
+      const writer = writable.getWriter();
+      const writing = writer
+        .write(encodedStreamBody)
+        .then(() => writer.close());
+      await env.BUCKET.put('rpcStream', readable);
+      await writing;
+    }
+
+    // Bodies above the inline limit are sent as streams.
+    const largeBufferBacking = new Uint8Array(largeRpcBodySize + 2);
+    largeBufferBacking.fill(0x41);
+    const largeBuffer = largeBufferBacking.subarray(1, -1);
+    largeBuffer[0] = 0x11;
+    largeBuffer[largeBuffer.length - 1] = 0x22;
+    await env.BUCKET.put('largeBuffer', largeBuffer);
+
+    const largeString = 'é'.repeat(largeRpcBodySize / 2);
+    await env.BUCKET.put('largeString', largeString);
+
+    const largeBlobBytes = new Uint8Array(largeRpcBodySize);
+    largeBlobBytes.fill(0x5a);
+    await env.BUCKET.put('largeBlob', new Blob([largeBlobBytes]));
+  },
+};
+
+// Multipart gateway contract tests. See jsrpcGatewayContractTests.
+export const jsrpcGatewayMultipartContractTests = {
+  async test(ctrl, env) {
+    if (env.R2_TRANSPORT !== 'jsrpc') {
+      return;
+    }
+
+    const createOptionsUpload = await env.BUCKET.createMultipartUpload(
+      'rpc-create-options',
+      {
+        httpMetadata: httpMetaHeaders,
+        customMetadata,
+        storageClass: 'InfrequentAccess',
+        ssecKey: bufferKey,
+      }
+    );
+    assert.strictEqual(createOptionsUpload.uploadId, 'multipartId');
+
+    // The gateway checks the streamed body and its separately sent size.
+    const encodedStreamBody = new TextEncoder().encode(rpcStreamBody);
+    const streamedUpload = env.BUCKET.resumeMultipartUpload(
+      'rpcStream',
+      'streamedId'
+    );
+    const { readable, writable } = new FixedLengthStream(
+      encodedStreamBody.byteLength
+    );
+    const writer = writable.getWriter();
+    const writing = writer.write(encodedStreamBody).then(() => writer.close());
+    assert.deepStrictEqual(await streamedUpload.uploadPart(2, readable), {
+      partNumber: 2,
+      etag: 'partEtag',
+    });
+    await writing;
+
+    // Use a view with a non-zero byte offset to verify that the RPC upload streams only the view's
+    // bytes, rather than the entire underlying ArrayBuffer.
+    const largeBufferBacking = new Uint8Array(largeRpcBodySize + 2);
+    largeBufferBacking.fill(0x41);
+    const largeBuffer = largeBufferBacking.subarray(1, -1);
+    largeBuffer[0] = 0x11;
+    largeBuffer[largeBuffer.length - 1] = 0x22;
+    const largeUpload = env.BUCKET.resumeMultipartUpload(
+      'largeBuffer',
+      'largeUploadId'
+    );
+    assert.deepStrictEqual(await largeUpload.uploadPart(1, largeBuffer), {
+      partNumber: 1,
+      etag: 'partEtag',
+    });
+
+    // The gateway reports a different part number; the result uses the requested one.
+    const wrongPartUpload = env.BUCKET.resumeMultipartUpload(
+      'rpc-wrong-part-number',
+      'wrongPartUploadId'
+    );
+    assert.deepStrictEqual(await wrongPartUpload.uploadPart(3, body), {
+      partNumber: 3,
+      etag: 'partEtag',
+    });
+  },
+};
+
+// Range gateway contract tests. See jsrpcGatewayContractTests.
+export const jsrpcGatewayRangeContractTests = {
   async test(controller, env) {
     if (env.R2_TRANSPORT !== 'jsrpc') {
       return;

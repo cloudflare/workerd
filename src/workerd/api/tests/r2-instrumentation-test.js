@@ -1178,6 +1178,8 @@ export const test = {
       },
     ];
 
+    // The JSRPC transport also records a jsRpcSession span per call and does not set
+    // cloudflare.r2.response.success, so only the HTTP transport is compared exactly.
     const projectSharedTags = (span) =>
       Object.fromEntries(
         Object.entries(span).filter(
@@ -1185,15 +1187,16 @@ export const test = {
         )
       );
 
+    // The expected spans come from the default test and deletePerKeyErrorParityTests, which run
+    // before the other test exports. Spans from those later exports are not checked.
     const sharedReceived = received
       .filter((span) => span['cloudflare.binding.type'] === 'r2')
-      // The JSRPC target runs transport-specific tests after the canonical suite.
-      .slice(0, expected.length)
-      .map(projectSharedTags);
+      .map(projectSharedTags)
+      .slice(0, expected.length);
     assert.deepStrictEqual(sharedReceived, expected.map(projectSharedTags));
 
     if (env.R2_TRACE_TRANSPORT === 'http') {
-      assert.deepStrictEqual(received, expected);
+      assert.deepStrictEqual(received.slice(0, expected.length), expected);
     }
   },
 };
