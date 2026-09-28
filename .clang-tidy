@@ -72,6 +72,7 @@ Checks: >
   workerd-legacy-stream-alloc,
   workerd-promise-ignore-result,
   workerd-unsafe-continuation-capture,
+  workerd-use-after-move,
   custom-iocontext-run-manual-capture
 
 # TODO: Fix and enable
@@ -104,6 +105,8 @@ CheckOptions:
     value: "jsg/jsg.h|jsg/dom-exception.h"
   - key: cppcoreguidelines-missing-std-forward.ForwardFunction
     value: "kj::fwd"
+  - key: workerd-use-after-move.InvalidationFunctions
+    value: "::kj::mv"
 
 ####
 # Custom checks.

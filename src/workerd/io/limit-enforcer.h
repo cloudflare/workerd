@@ -178,6 +178,13 @@ class LimitEnforcer {
   // data in C++ memory, such as reading an entire HTTP response into an `ArrayBuffer`.
   virtual size_t getBufferingLimit() = 0;
 
+  // Reserves memory for the state a replayable actor call retains so it can be retried. Returns
+  // none if the reservation would exceed the budget, in which case the call is sent without
+  // retries. The returned handle releases the reservation when destroyed.
+  virtual kj::Maybe<kj::Own<void>> tryReserveActorCallReplayMemory(size_t bytes) {
+    return kj::none;
+  }
+
   // If a limit has been exceeded which prevents further JavaScript execution, such as the CPU or
   // memory limit, returns a request status code indicating which one. Returns null if no limits
   // are exceeded.

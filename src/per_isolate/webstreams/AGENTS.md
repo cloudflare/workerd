@@ -13,6 +13,7 @@ private-brand dispatch, no `instanceof`) apply here — see
 | File          | Role                                                                                         |
 | ------------- | -------------------------------------------------------------------------------------------- |
 | `ring-buffer.ts` | O(1) FIFO with indexed access backing every internal queue below; leaf module             |
+| `view-extent.ts` | A caller-supplied view's byte extent through captured getters; detached/out-of-bounds views (DataViews included) read as empty; leaf module |
 | `queue.ts`    | QUEUED backend: single-queue/multi-cursor, JS sources; fence interfaces; invariant list      |
 | `native.ts`   | NATIVE backend: C++-backed pull conduit; **the C++/JS contract** + invariants                |
 | `readable.ts` | Reader layer + queued controllers + the BACKEND-DISPATCH points (constructor, tee, chains, byte-capable gate, JS-to-C++ extraction) |

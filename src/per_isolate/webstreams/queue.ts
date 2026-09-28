@@ -344,6 +344,11 @@ class StreamQueue<T, V = T> {
   // event — every path that can remove the last cursor funnels here.
   #onAllCursorsGone: () => void;
   #hadCursors: boolean = false;
+  // An internal source's notification that consumption progressed: called
+  // at the end of every reclaim walk (a cursor advanced or left), so the
+  // slowest cursor's backlog may have shrunk. It must run no user code
+  // (it is called inside the walk); see setConsumptionHook.
+  #onConsumption: (() => void) | undefined;
   // Set once every cursor has left or been collected. No cursor can join
   // afterwards (one is only ever forked from a live one), so nothing will
   // read the queue again: it drops what it holds and what is enqueued later.
@@ -652,6 +657,12 @@ class StreamQueue<T, V = T> {
     this.#gc();
   }
 
+  // Installs (or clears) the consumption notification. The identity
+  // streams settle a write once the slowest consumer has read past it.
+  setConsumptionHook(hook: (() => void) | undefined): void {
+    this.#onConsumption = hook;
+  }
+
   #gc(): void {
     this.#prune();
     const cursors = this.#cursors;
@@ -666,6 +677,8 @@ class StreamQueue<T, V = T> {
       this.#entries.trimFront(freedCount);
       this.#headOffset = minPos;
     }
+    const hook = this.#onConsumption;
+    if (hook !== undefined) hook();
   }
 }
 

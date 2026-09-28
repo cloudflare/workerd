@@ -28,7 +28,6 @@ const {
   AbortControllerAbort,
   AbortControllerSignalGet,
   ArrayBufferPrototypeByteLengthGet,
-  DataViewPrototypeGetByteLength,
   NumberIsNaN,
   ObjectDefineProperties,
   ObjectDefineProperty,
@@ -42,17 +41,11 @@ const {
   SymbolFor,
   SymbolToStringTag,
   TypeError,
-  TypedArrayPrototypeGetByteLength,
   uncurryThis,
 } = primordials;
 
-const {
-  isArrayBuffer,
-  isArrayBufferView,
-  isDataView,
-  isPromise,
-  markPromiseHandled,
-} = utils;
+const { isArrayBuffer, isArrayBufferView, isPromise, markPromiseHandled } =
+  utils;
 
 // The native backend (see the fence conventions in native.ts). The cast
 // restores the real shape.
@@ -61,6 +54,10 @@ const { nativeStreamInternals } = require('webstreams/native') as {
   nativeStreamInternals: NativeStreamInternals;
 };
 const { kExtractNativeSink, isNativeUnderlyingSink } = nativeStreamInternals;
+
+import type { ViewExtentHelpers } from './view-extent';
+const { viewByteLength } =
+  require('webstreams/view-extent') as ViewExtentHelpers;
 
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
@@ -119,6 +116,20 @@ function assertPrivateSymbol(symbol: symbol): void {
   if (symbol !== kPrivateSymbol) {
     throw new TypeError('Illegal constructor');
   }
+}
+
+// WebIDL "a promise resolved with" a value: a new promise resolved with it.
+// For a promise or thenable, its reactions run one microtask after the
+// value's (two if the value settles before the resolution job subscribes
+// to it), where PromiseResolve adopts a native promise as is. The
+// controllers here and in readable.ts settle their start() results this
+// way, as the transformer's cancel and flush are (transform.ts); that
+// timing is observable, as in WPT transform-streams/cancel.any.js.
+function promiseResolvedWith(value: unknown): Promise<void> {
+  const { promise, resolve } =
+    PromiseWithResolvers() as PromiseWithResolversType<void>;
+  resolve(value as void);
+  return promise;
 }
 
 type WritableState = 'writable' | 'erroring' | 'errored' | 'closed';
@@ -1175,7 +1186,7 @@ class WritableStreamDefaultController<
         ? undefined
         : uncurryThis(startFn)(underlyingSink, this);
     PromisePrototypeThen(
-      PromiseResolve(startResult),
+      promiseResolvedWith(startResult),
       () => {
         this.#started = true;
         this.#advanceQueueIfNeeded();
@@ -1829,9 +1840,8 @@ function writableStreamFlush<W>(stream: WritableStream<W>): Promise<void> {
 // heuristic).
 function byteSizeOf(chunk: unknown): number {
   if (isArrayBufferView(chunk)) {
-    return isDataView(chunk)
-      ? DataViewPrototypeGetByteLength(chunk)
-      : TypedArrayPrototypeGetByteLength(chunk);
+    // A detached or out-of-bounds view counts 0 (see view-extent.ts).
+    return viewByteLength(chunk);
   }
   if (isArrayBuffer(chunk)) {
     return ArrayBufferPrototypeByteLengthGet(chunk);
@@ -1990,6 +2000,7 @@ module.exports = {
       getWriterReadyPromiseInternal(writer),
     getWriterClosedPromise: <W>(writer: WritableStreamDefaultWriter<W>) =>
       getWriterClosedPromiseInternal(writer),
+    promiseResolvedWith,
   },
 
   // Part of the internal implementation. Do not re-export to user code

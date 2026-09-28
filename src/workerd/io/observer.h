@@ -187,18 +187,16 @@ class RequestObserver: public kj::Refcounted {
     return kj::none;
   }
 
-  // Tracks serialized argument bytes retained while a replayable actor call's retry state is live.
-  // The returned handle releases the tracked bytes when destroyed.
+  // Tracks the replay memory a replayable actor call retains, or would retain if
+  // LimitEnforcer::tryReserveActorCallReplayMemory() granted it. The returned handle releases the
+  // tracked bytes when destroyed.
   virtual kj::Own<void> trackActorCallReplayMemory(size_t bytes) {
     return kj::Own<void>();
   }
 
-  // Attempts to reserve platform memory for retained actor-call replay state. Returning none keeps
-  // the call observe-only. Production observers must enforce an aggregate bound before returning a
-  // reservation handle.
-  virtual kj::Maybe<kj::Own<void>> tryReserveActorCallReplayMemory(size_t bytes) {
-    return kj::none;
-  }
+  // Records that a replayable actor call was sent without retries because
+  // LimitEnforcer::tryReserveActorCallReplayMemory() refused its reservation.
+  virtual void recordActorCallReplayMemoryRejected() {}
 
   // Records an additional outgoing actor call started by a runtime retry loop.
   virtual void recordActorRetry(ActorRetryCallType callType) {}

@@ -103,12 +103,10 @@ export const drainingReaderDrainsIdentityStream = {
     }
     // Queued writes and a close settle through draining-reader consumption
     // exactly as through a default reader: the rendezvous holds across the
-    // conduit. Because this is a rendezvous stream, nothing is ever
-    // synchronously buffered on the readable side — each read exercises the
-    // always-makes-progress fallback and yields exactly one chunk, with EOF
-    // arriving as a separate empty-batch read. (Contrast
-    // drainingReaderBatchesBufferedChunks, where a real backlog IS swept in
-    // one read.)
+    // conduit. The first read's pull hands over everything already written,
+    // one chunk per write, so a read sweeps every write made before it; the
+    // close follows once the last write is consumed, with the last chunks
+    // or in its own read.
     const its = new IdentityTransformStream();
     const writer = its.writable.getWriter();
     const enc = new TextEncoder();
@@ -121,15 +119,16 @@ export const drainingReaderDrainsIdentityStream = {
     ];
     const reader = new ReadableStreamDrainingReader(its.readable);
     strictEqual(its.readable.locked, true);
-    for (const expected of ['hello ', 'draining ', 'world']) {
-      const { chunks, done } = await reader.read();
-      strictEqual(done, false);
-      strictEqual(chunks.length, 1);
-      strictEqual(dec.decode(chunks[0]), expected);
+    const first = await reader.read();
+    deepStrictEqual(
+      first.chunks.map((chunk) => dec.decode(chunk)),
+      ['hello ', 'draining ', 'world']
+    );
+    if (!first.done) {
+      const tail = await reader.read();
+      strictEqual(tail.done, true);
+      strictEqual(tail.chunks.length, 0);
     }
-    const tail = await reader.read();
-    strictEqual(tail.done, true);
-    strictEqual(tail.chunks.length, 0);
     await Promise.all(pending);
   },
 };

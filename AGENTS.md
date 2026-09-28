@@ -245,6 +245,10 @@ KJ library provides several constructs that should be preferred to improve the s
 - `kj::ArrayPtr<T>` should be used instead of `T*`
 - `kj::Ptr<T>` should be used instead of `T&` when it is bound by T's lifetime
 
+Declare data owners before views into that data (members, lambda captures, locals), so views are
+constructed after and destroyed before the memory they reference. When an owner can be released
+while the object lives on, clear the view at the same time.
+
 ### Error Handling
 
 - `KJ_IF_SOME` for unwrapping `kj::Maybe` (1400+ uses across the codebase)

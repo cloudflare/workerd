@@ -195,9 +195,6 @@ void RpcDeserializerExternalHandler::prepare(jsg::Lock& js, IoContext& ioctx) {
         slots[index].value = hydrateRpcWritableStream(js, ioctx, external.getWritableStream());
         break;
       case rpc::JsValue::External::SOCKET: {
-        // The socket transfer kill switch also gates hydration: with it off, the slots stay
-        // empty and Socket::deserialize() rejects the tag before attempting a claim.
-        if (!util::Autogate::isEnabled(util::AutogateKey::SOCKET_RPC_TRANSFER)) break;
         KJ_REQUIRE(index + 2 < externals.size(),
             "socket external is missing its stream externals, possible corruption");
         auto socket =
@@ -564,6 +561,15 @@ class JsRpcCallRetryState final: public kj::Refcounted {
     return result;
   }
 
+  void cancelAttempt(const kj::Exception& exception) {
+    KJ_IF_SOME(canceler, attemptCanceler) {
+      canceler->cancel(exception.clone());
+      attemptCanceler = kj::none;
+    }
+    pipelineRevoker->reject(exception.clone());
+    setBrokenPipeline(exception.clone());
+  }
+
   // Frees the retained call plan and its memory reservation. Holds no JS heap references, so it
   // may run at native settlement, before the isolate lock is reacquired.
   void releaseReplayPayload() {
@@ -608,6 +614,7 @@ class JsRpcCallRetryState final: public kj::Refcounted {
   kj::Own<RevokerMembrane> pipelineMembrane;
   kj::Own<kj::PromiseFulfiller<void>> pipelineRevoker;
   kj::Maybe<kj::Rc<JsRpcCallAttemptObserver>> attemptObserver;
+  kj::Maybe<kj::Rc<kj::Canceler>> attemptCanceler;
   kj::Maybe<TraceContextParent> callSpanParents;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> backoffCommitFulfiller;
   bool committed = false;
@@ -853,18 +860,12 @@ TraceContext prepareJsRpcCallAttempt(IoContext& ioContext,
     JsRpcOperation operation,
     JsRpcClientProvider::ClientForOneCall& oneCall) {
   TraceContext callSpan;
-  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-    KJ_IF_SOME(span, oneCall.callSpan) {
-      callSpan = kj::mv(span);
-      setJsRpcCallSpanTags(callSpan, parent, name, path, operation);
-    } else {
-      callSpan = makeJsRpcCallSpan(
-          ioContext, parent, name, path, kj::mv(oneCall.callSpanParents), operation);
-    }
-  }
-  KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
-    oneCall.client =
-        lock.then([client = kj::mv(oneCall.client)]() mutable { return kj::mv(client); });
+  KJ_IF_SOME(span, oneCall.callSpan) {
+    callSpan = kj::mv(span);
+    setJsRpcCallSpanTags(callSpan, parent, name, path, operation);
+  } else {
+    callSpan = makeJsRpcCallSpan(
+        ioContext, parent, name, path, kj::mv(oneCall.callSpanParents), operation);
   }
   return callSpan;
 }
@@ -893,21 +894,20 @@ JsRpcCallDispatch dispatchJsRpcCall(IoContext& ioContext,
   }
   builder.getResultsStreamHandler().setExternalPusher(ioContext.getExternalPusher());
 
-  auto callResult = builder.send();
-  kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> promise = kj::mv(callResult);
+  auto parts = builder.send().releaseParts();
   KJ_IF_SOME(targetRetryable, targetRetryability) {
     KJ_IF_SOME(observer,
         ioContext.getMetrics().observeOutgoingActorRpcCall(
             ActorCallPayloadReplayable(callPlan.getReplayable()), targetRetryable)) {
       auto attemptObserver = kj::rc<JsRpcCallAttemptObserver>(retriesEnabled);
-      promise =
-          observeActorRpcCallAttempt(kj::mv(observer), attemptObserver.addRef(), kj::mv(promise));
-      return {.promise = kj::mv(promise),
-        .pipeline = kj::mv(callResult),
+      parts.promise = observeActorRpcCallAttempt(
+          kj::mv(observer), attemptObserver.addRef(), kj::mv(parts.promise));
+      return {.promise = kj::mv(parts.promise),
+        .pipeline = kj::mv(parts.pipeline),
         .attemptObserver = kj::mv(attemptObserver)};
     }
   }
-  return {.promise = kj::mv(promise), .pipeline = kj::mv(callResult)};
+  return {.promise = kj::mv(parts.promise), .pipeline = kj::mv(parts.pipeline)};
 }
 
 struct JsRpcRetrySetup {
@@ -916,45 +916,61 @@ struct JsRpcRetrySetup {
   kj::Maybe<ActorCallRetryState::Attempt> attempt;
 };
 
+// A binding's own policy applies only when it configured one and the retry request gates and the
+// userland gate are all on. Otherwise the runtime's default applies.
+ActorRetryPolicy getJsRpcRetryPolicy(JsRpcClientProvider& parent, bool enforcementRequested) {
+  if (enforcementRequested &&
+      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
+    KJ_IF_SOME(userPolicy, parent.getUserDefinedRetryPolicy()) {
+      return ActorRetryPolicy::userDefined(userPolicy);
+    }
+  }
+  return ActorRetryPolicy::systemDefault();
+}
+
 JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
+    JsRpcClientProvider& parent,
     bool destinationSupportsRetries,
     JsRpcCallPlan& callPlan,
     kj::Maybe<const kj::String&> name) {
   JsRpcRetrySetup result;
   if (!destinationSupportsRetries || !callPlan.getReplayable() ||
-      !util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH) ||
       !util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_JSRPC)) {
     return result;
   }
 
   auto enforcementRequested =
-      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS) &&
       util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS);
-  auto replayMemoryBytes = callPlan.getReplayMemoryBytes();
-  auto replayReservationBytes = callPlan.getReplayReservationBytes() + sizeof(JsRpcCallRetryState) +
-      sizeof(RevokerMembrane) + sizeof(ActorCallRetryState);
-  KJ_IF_SOME(value, name) {
-    replayReservationBytes += value.size();
-  }
-  auto reservation = enforcementRequested
-      ? ioContext.getMetrics().tryReserveActorCallReplayMemory(replayReservationBytes)
-      : kj::Maybe<kj::Own<void>>(kj::none);
-  auto enforcementEnabled = ActorRetryGateEnabled(reservation != kj::none);
-  KJ_IF_SOME(reservedMemory, reservation) {
-    result.replayMemoryTracker = kj::refcounted<JsRpcReplayMemoryTracker>(kj::mv(reservedMemory));
-  } else {
+  auto policy = getJsRpcRetryPolicy(parent, enforcementRequested);
+  auto enforcementEnabled = ActorRetryGateEnabled(enforcementRequested);
+  // A policy without retries never retains the call, so it neither reserves nor tracks memory.
+  if (policy.allowsRetries()) {
+    auto replayMemoryBytes = callPlan.getReplayReservationBytes() + sizeof(JsRpcCallRetryState) +
+        sizeof(RevokerMembrane) + sizeof(ActorCallRetryState);
+    KJ_IF_SOME(value, name) {
+      replayMemoryBytes += value.size();
+    }
+    kj::Maybe<kj::Own<void>> reservation;
+    if (enforcementRequested) {
+      reservation = ioContext.getLimitEnforcer().tryReserveActorCallReplayMemory(replayMemoryBytes);
+      if (reservation == kj::none) {
+        ioContext.getMetrics().recordActorCallReplayMemoryRejected();
+      }
+    }
+    enforcementEnabled = ActorRetryGateEnabled(reservation != kj::none);
+    // Tracked whether or not the reservation was granted, so demand does not depend on the budget.
     result.replayMemoryTracker = kj::refcounted<JsRpcReplayMemoryTracker>(
-        ioContext.getMetrics().trackActorCallReplayMemory(replayMemoryBytes));
+        ioContext.getMetrics().trackActorCallReplayMemory(replayMemoryBytes), kj::mv(reservation));
   }
+  // The retry timeout restarts once the first attempt clears the output gate.
   auto& timer = ioContext.getIoChannelFactory().getTimer();
   result.state = kj::rc<ActorCallRetryState>(timer, ioContext.getMetrics(),
       ActorCallRetryState::Config{
         .callType = ActorRetryCallType::JSRPC,
-        .observationEnabled = ActorRetryGateEnabled::YES,
         .enforcementEnabled = enforcementEnabled,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
       },
-      ActorRetryPolicy::systemDefault(), timer.nowForLimitTimeout());
+      policy, timer.nowForLimitTimeout());
   auto attemptOrException = KJ_ASSERT_NONNULL(result.state)->startAttempt();
   result.attempt =
       kj::mv(KJ_ASSERT_NONNULL(attemptOrException.tryGet<ActorCallRetryState::Attempt>()));
@@ -969,10 +985,9 @@ JsRpcCallRetryState::StartedAttempt JsRpcCallRetryState::startAttempt(
   auto& ioContext = IoContext::current();
   auto& parent = KJ_ASSERT_NONNULL(this->parent);
   auto oneCall = parent->getClientForOneCall(js, kj::mv(attempt));
+  attemptCanceler = kj::mv(oneCall.attemptCanceler);
   kj::Vector<kj::StringPtr> pathViews;
-  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-    parent->appendPath(pathViews);
-  }
+  parent->appendPath(pathViews);
   auto nameRef = name.map([](kj::String& value) -> const kj::String& { return value; });
   auto callSpan =
       prepareJsRpcCallAttempt(ioContext, *parent, nameRef, pathViews.asPtr(), operation, oneCall);
@@ -1089,7 +1104,11 @@ JsRpcCallAttemptPromise awaitJsRpcCallAttempt(jsg::Lock& js,
     kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> promise,
     TraceContext callSpan) {
   // Built before the callback below moves `state`; argument evaluation order is unspecified.
-  auto attempt = captureJsRpcCallAttempt(kj::mv(promise), kj::mv(callSpan), state.addRef());
+  auto timedAttempt = state->getRetryState().enforceRetryTimeout(
+      kj::mv(promise), [state = state.addRef()](const kj::Exception& exception) mutable {
+    state->cancelAttempt(exception);
+  });
+  auto attempt = captureJsRpcCallAttempt(kj::mv(timedAttempt), kj::mv(callSpan), state.addRef());
   return IoContext::current().awaitIo(js, kj::mv(attempt),
       [state = kj::mv(state)](
           jsg::Lock& js, JsRpcCallAttemptResult result) mutable -> JsRpcCallAttemptPromise {
@@ -1164,12 +1183,23 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       TraceContext jsRpcCallSpan;
       kj::Maybe<JsRpcClientProvider::ClientForOneCall> oneCall;
       JsRpcRetrySetup retrySetup;
+      // Only the first attempt waits for the output gate. Retries resend the same payload, which
+      // that wait already cleared, as fetch retries do.
+      kj::Maybe<kj::ForkedPromise<void>> outputLock;
       auto resolveOneCall = [&]() -> JsRpcClientProvider::ClientForOneCall& {
         if (oneCall == kj::none) {
           oneCall = parent->getClientForOneCall(js, kj::mv(retrySetup.attempt));
           auto& result = KJ_ASSERT_NONNULL(oneCall);
           jsRpcCallSpan =
               prepareJsRpcCallAttempt(ioContext, *parent, name, path.asPtr(), operation, result);
+          KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
+            kj::Promise<void> clientLock = kj::mv(lock);
+            if (destinationSupportsRetries) {
+              clientLock = outputLock.emplace(kj::mv(clientLock).fork()).addBranch();
+            }
+            result.client = clientLock.then(
+                [client = kj::mv(result.client)]() mutable { return kj::mv(client); });
+          }
         }
         return KJ_ASSERT_NONNULL(oneCall);
       };
@@ -1239,9 +1269,9 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       JsRpcCallPlan callPlan(kj::mv(planMessage), kj::mv(serializedData), serializedDataCapacity,
           serializerReplayability);
 
-      // JSRPC retries build on the fetch retry machinery, so the fetch gate remains a shared
-      // prerequisite while the JSRPC gate controls this event type's separate rollout.
-      retrySetup = setupJsRpcRetries(ioContext, destinationSupportsRetries, callPlan, name);
+      // The JSRPC gate controls this event type's retry rollout separately from fetch.
+      retrySetup =
+          setupJsRpcRetries(ioContext, *parent, destinationSupportsRetries, callPlan, name);
 
       auto retriesEnabled = ActorRetryGateEnabled::NO;
       KJ_IF_SOME(state, retrySetup.state) {
@@ -1279,6 +1309,16 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
               dispatch.attemptObserver.map(
                   [](kj::Rc<JsRpcCallAttemptObserver>& observer) { return observer.addRef(); }),
               originatingCall.map([](TraceContextParent& value) { return value.addRef(); }));
+          // As with fetch, the retry timeout excludes the output-gate wait. The first attempt
+          // cannot settle before its gate clears, so the restart precedes any retry decision. If
+          // the gate breaks, the attempt fails through its client instead.
+          KJ_IF_SOME(lock, outputLock) {
+            resultPromise = lock.addBranch()
+                                .then([state = retryState.addRef()]() mutable {
+              state->restartCallStart();
+            }, [](kj::Exception&&) {
+            }).then([promise = kj::mv(resultPromise)]() mutable { return kj::mv(promise); });
+          }
         }
       }
 
@@ -2060,30 +2100,26 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       }
     }
 
-    auto jsRpcTracingEnabled = util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING);
-    TraceContext jsRpcCallSpan;
-    if (jsRpcTracingEnabled) {
-      // Server-side jsRpcCall, nested under an exported capability's origin when available.
-      // It stays open through JS invocation and result serialization via the dispatch promise.
-      jsRpcCallSpan = [&]() -> TraceContext {
-        KJ_IF_SOME(parent, tryGetOriginatingCall()) {
-          return parent.newChild("jsRpcCall"_kjc);
-        }
-        return ctx.makeUserTraceSpan("jsRpcCall"_kjc);
-      }();
-      jsRpcCallSpan.setTag("jsrpc.method"_kjc, methodNameForTrace.asPtr());
-      jsRpcCallSpan.setTag("jsrpc.target_kind"_kjc, getTargetKind());
-      jsRpcCallSpan.setTag("jsrpc.operation"_kjc,
-          params.getOperation().isGetProperty() ? "getProperty"_kjc : "call"_kjc);
+    // Server-side jsRpcCall, nested under an exported capability's origin when available.
+    // It stays open through JS invocation and result serialization via the dispatch promise.
+    TraceContext jsRpcCallSpan = [&]() -> TraceContext {
+      KJ_IF_SOME(parent, tryGetOriginatingCall()) {
+        return parent.newChild("jsRpcCall"_kjc);
+      }
+      return ctx.makeUserTraceSpan("jsRpcCall"_kjc);
+    }();
+    jsRpcCallSpan.setTag("jsrpc.method"_kjc, methodNameForTrace.asPtr());
+    jsRpcCallSpan.setTag("jsrpc.target_kind"_kjc, getTargetKind());
+    jsRpcCallSpan.setTag("jsrpc.operation"_kjc,
+        params.getOperation().isGetProperty() ? "getProperty"_kjc : "call"_kjc);
 
-      // Link this dispatch to the caller's per-call span. This span stays a child of its own
-      // invocation root, so that a consumer reading this invocation's tail stream can always
-      // resolve the parent.
-      if (jsRpcCallSpan.isObserved() && params.hasCallerSpanContext()) {
-        auto callerContext = tracing::SpanContext::fromCapnp(params.getCallerSpanContext());
-        KJ_IF_SOME(callerSpanId, callerContext.getSpanId()) {
-          jsRpcCallSpan.setTag("jsrpc.caller_span_id"_kjc, callerSpanId.toGoString());
-        }
+    // Link this dispatch to the caller's per-call span. This span stays a child of its own
+    // invocation root, so that a consumer reading this invocation's tail stream can always
+    // resolve the parent.
+    if (jsRpcCallSpan.isObserved() && params.hasCallerSpanContext()) {
+      auto callerContext = tracing::SpanContext::fromCapnp(params.getCallerSpanContext());
+      KJ_IF_SOME(callerSpanId, callerContext.getSpanId()) {
+        jsRpcCallSpan.setTag("jsrpc.caller_span_id"_kjc, callerSpanId.toGoString());
       }
     }
 
@@ -2258,8 +2294,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
       KJ_FAIL_ASSERT("unknown JsRpcTarget::CallParams::Operation", (uint)op.which());
     };
-
-    if (!jsRpcTracingEnabled) return dispatch();
 
     auto jsRpcCallSpanIsObserved = jsRpcCallSpan.isObserved();
     SpanParent traceParent =
@@ -3229,12 +3263,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   });
 
-  SpanBuilder jsRpcSessionInternalSpan(nullptr);
-  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-    // No server-side user span: the jsrpc-typed onset already represents the session. The internal
-    // span is still emitted for the legacy buffered tail.
-    jsRpcSessionInternalSpan = ioctx.makeTraceSpan("jsRpcSession"_kjc);
-  }
+  // No server-side user span: the jsrpc-typed onset already represents the session. The internal
+  // span is still emitted for the legacy buffered tail.
+  auto jsRpcSessionInternalSpan = ioctx.makeTraceSpan("jsRpcSession"_kjc);
 
   EntrypointJsRpcTarget target(ioctx, kj::addRef(incomingRequest->getMetrics()), entrypointName,
       kj::mv(versionInfo), kj::mv(props), kj::mv(wrapperModule),

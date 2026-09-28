@@ -138,13 +138,14 @@ class Frankenvalue {
   kj::Maybe<kj::Promise<void>> resolveCaps(Func&& resolve) {
     kj::Vector<kj::Promise<void>> promises;
     for (auto& slot: capTable) {
+      auto* slotPtr = &slot;
       KJ_SWITCH_ONEOF(resolve(kj::mv(slot))) {
         KJ_CASE_ONEOF(replacement, kj::Own<CapTableEntry>) {
-          slot = kj::mv(replacement);
+          *slotPtr = kj::mv(replacement);
         }
         KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<CapTableEntry>>) {
           promises.add(promise.then(
-              [&slot](kj::Own<CapTableEntry> replacement) { slot = kj::mv(replacement); }));
+              [slotPtr](kj::Own<CapTableEntry> replacement) { *slotPtr = kj::mv(replacement); }));
         }
       }
     }

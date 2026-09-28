@@ -103,6 +103,47 @@ export const closeWriterFromThenInterceptorDuringRead = {
   },
 };
 
+export const abortWriterFromThenInterceptorDuringRead = {
+  async test() {
+    // The interceptor aborts the writer while a BYOB read is being answered
+    // with the bytes of the write in flight. Under TypeScript that read is
+    // answered from inside the write itself, so the write must reject with
+    // the abort reason rather than settle as read.
+    const its = new IdentityTransformStream();
+    const writer = its.writable.getWriter();
+    const reader = its.readable.getReader({ mode: 'byob' });
+    const reason = new Error('abort from interceptor');
+    let fired = 0;
+    let abortPromise;
+    let writePromise;
+    await withThenInterceptor(
+      () => {
+        if (++fired === 1) {
+          abortPromise = writer.abort(reason);
+        }
+      },
+      async () => {
+        const readPromise = reader.read(new Uint8Array(4));
+        await Promise.resolve();
+        writePromise = writer.write(new Uint8Array([7, 8]));
+        const writeOutcome = writePromise.then(
+          () => 'fulfilled',
+          (err) => err
+        );
+        const r = await readPromise.catch((err) => err);
+        const outcome = await writeOutcome;
+        await abortPromise;
+        ok(fired >= 1, 'the interceptor must have fired');
+        if (usingTsImpl) {
+          strictEqual(r.done, false);
+          deepStrictEqual([...r.value], [7, 8]);
+          strictEqual(outcome, reason);
+        }
+      }
+    );
+  },
+};
+
 export const closeFromReadContinuationWithSecondReadParked = {
   async test() {
     // Closing the writer from inside a read continuation is safe in both

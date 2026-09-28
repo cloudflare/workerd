@@ -70,6 +70,34 @@ export const echoRoundTrip = {
   },
 };
 
+// With a highWaterMark the writable counts bytes. Views already detached,
+// or left out of bounds by a shrink, count and send nothing — DataViews
+// too, whose byteLength getter throws where a typed array's reports 0 —
+// and the stream keeps writing (parity).
+export const degenerateViewsWithHighWaterMark = {
+  async test(ctrl, env) {
+    const socket = connect(echoAddress(env), { highWaterMark: 1024 });
+    const writer = socket.writable.getWriter();
+    for (const View of [Uint8Array, DataView]) {
+      const ab = new ArrayBuffer(8);
+      const detached = new View(ab, 2, 4);
+      ab.transfer();
+      await writer.write(detached);
+      const rab = new ArrayBuffer(8, { maxByteLength: 8 });
+      const outOfBounds = new View(rab, 4, 4);
+      rab.resize(2);
+      await writer.write(outOfBounds);
+    }
+    await writer.write(enc.encode('still writable'));
+    await writer.close();
+    strictEqual(
+      dec.decode(await drainToBytes(socket.readable)),
+      'still writable'
+    );
+    await socket.close();
+  },
+};
+
 // The greet server ends after one message: the readable delivers it
 // and reaches done; the socket's closed promise settles.
 export const greetReadsToEof = {

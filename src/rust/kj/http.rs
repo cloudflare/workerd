@@ -199,6 +199,8 @@ pub mod ffi {
     }
 
     impl Box<DynHttpService> {}
+    impl KjOwn<ConnectResponse> {}
+    impl KjOwn<HttpService> {}
 }
 
 assert_eq_size!(ffi::HttpConnectSettings, [u8; 16]);

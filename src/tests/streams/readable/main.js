@@ -41,6 +41,7 @@ export {
   pullThrowSecondCall,
   syncStartThrow,
   asyncStartRejectionErrorsStream,
+  startPromiseSettledInNewPromise,
   cancelWithPendingPull,
 } from 'source-algorithms';
 
