@@ -1,0 +1,52 @@
+src/rust/cxx/kj-rs/tests/lib.rs
+  s_dadaf0660bfcbe::t_1f3e473de3825e 72-73,328-331,347-370,379,413,415-416,420-451,482
+src/rust/cxx/PATCHES.md
+  s_dadaf0660bfcbe::t_3e65b26f1f6296 14-19
+src/rust/worker/ffi.rs
+  s_dadaf0660bfcbe::t_6f1646b95b3d04 93-94,96-99,102-108,111,113-114,116,119-120,125-126,130,146-147,149-152,155-161,164,168-169,171,174-175,181,186
+src/workerd/server/cli/process.rs
+  s_dadaf0660bfcbe::t_76b9979572acfd 192-199
+src/rust/cxx/kj-rs/tests/awaitables-cc-test.c++
+  s_dadaf0660bfcbe::t_ac9600792986a3 294-304,306-307,314
+  s_dadaf0660bfcbe::t_986a2a69f3acee 305,308-313,315
+src/rust/cxx/syntax/mod.rs
+  s_dadaf0660bfcbe::t_802d31936b18bc 331-334
+src/rust/cxx/macro/src/expand.rs
+  s_dadaf0660bfcbe::t_7503ce839e9052 1206,1208,1210,1298,1300,1302
+src/rust/cxx/syntax/parse.rs
+  s_dadaf0660bfcbe::t_71aa97dcdb5863 27-28,614,725,727-732,735,737,1600-1693
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_fdaad6db22e84c 53-55
+src/rust/cxx/kj-rs/tests/test-promises.h
+  s_dadaf0660bfcbe::t_77c0be5786400d 17
+src/rust/AGENTS.md
+  s_dadaf0660bfcbe::t_fdf4fddd6b896a 54,58,63-75,79
+src/rust/kj/http.rs
+  s_dadaf0660bfcbe::t_52fff9197d2eee 182-183,185-188,191-197
+src/rust/cxx/kj-rs/tests/test-promises.c++
+  s_dadaf0660bfcbe::t_840ee118bf95ce 21-24
+src/rust/worker/cxx_worker.rs
+  s_dadaf0660bfcbe::t_45b774a706f163 56-63,76-83,92,103,113,118,123
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_dadaf0660bfcbe::t_29fb5b50692719 164-165
+src/rust/cxx/syntax/check.rs
+  s_dadaf0660bfcbe::t_ac07e0b39cd02a 569-574
+src/rust/cxx/kj-rs-io/net.rs
+  s_dadaf0660bfcbe::t_f874e4ec50440e 1372-1374,1381-1383,1385-1388
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a57fce9d5ea8c59ee3e64547d445f7b38bbf27ba",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

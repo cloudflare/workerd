@@ -1,19 +1,7 @@
-ci/v8_nightly.py
-  s_c9fa8f13979260::t_239543a81331ae 17-37,41-46,50-68,79-81,85,102-103,105-106
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.6.10",
   "base_commit_sha": "bead3c3e255bab7d8175a94e1e49439096423820",
-  "prompts": {},
-  "sessions": {
-    "s_c9fa8f13979260": {
-      "agent_id": {
-        "tool": "opencode",
-        "id": "ses_02b8f4a41ffec0F9RnOOFAzE37",
-        "model": "claude-opus-5"
-      },
-      "human_author": "Cormick Holland <cormick@cloudflare.com>"
-    }
-  }
+  "prompts": {}
 }
