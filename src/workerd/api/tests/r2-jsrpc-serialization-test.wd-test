@@ -1,0 +1,46 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The user-facing R2 binding targets a platform Worker. That Worker calls a separate real R2
+# binding whose fetcher targets the mock R2GW entrypoint. Keeping this topology in a dedicated
+# config prevents the native-resource round trips from being conflated with the HTTP transport.
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "user", worker = (
+      modules = [
+        (name = "worker", esModule = "export { nativeR2ResultTests } from './test.js';"),
+        (name = "test.js", esModule = embed "r2-jsrpc-serialization-test.js"),
+      ],
+      bindings = [
+        (name = "BUCKET",
+         r2Bucket = (name = "platform", entrypoint = "ObservedR2Binding")),
+        (name = "PLATFORM",
+         service = (name = "platform", entrypoint = "ObservedR2Binding")),
+      ],
+      compatibilityFlags = ["experimental", "nodejs_compat", "streams_enable_constructors",
+                            "r2_list_honor_include", "r2_binding_jsrpc", "rpc",
+                            "fetcher_no_get_put_delete"],
+    )),
+    (name = "platform", worker = (
+      modules = [
+        (name = "worker", esModule = "export { ObservedR2Binding } from './test.js';"),
+        (name = "test.js", esModule = embed "r2-jsrpc-serialization-test.js"),
+      ],
+      bindings = [
+        (name = "REAL_BUCKET",
+         r2Bucket = (name = "gateway", entrypoint = "R2BindingEntrypoint")),
+      ],
+      compatibilityFlags = ["experimental", "nodejs_compat", "streams_enable_constructors",
+                            "r2_list_honor_include", "r2_binding_jsrpc"],
+    )),
+    (name = "gateway", worker = (
+      modules = [
+        (name = "worker", esModule = "export { R2BindingEntrypoint } from './r2-test.js';"),
+        (name = "r2-test.js", esModule = embed "r2-test.js"),
+      ],
+      bindings = [
+        (name = "R2_LIST_HONOR_INCLUDE", text = "true"),
+      ],
+      compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+    )),
+  ],
+);
