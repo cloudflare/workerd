@@ -12,12 +12,38 @@ import {
 export default testTailHandler;
 
 export const test = {
-  async test() {
+  async test(_ctrl, env) {
     // Wait for all the tailStream executions to finish
     await Promise.allSettled(invocationPromises);
 
     // Recorded streaming tail worker events, in insertion order.
     let received = Array.from(spans.values());
+
+    // Calls using the must-not-call key produce spans even though validation rejects them before
+    // reaching the backend. These spans are validated here because they are not included in the
+    // `expected` array below.
+    const validationSpans = received.filter(
+      (span) => span['cloudflare.r2.request.key'] === 'must-not-call'
+    );
+    assert.deepStrictEqual(
+      validationSpans.map((span) => span.name),
+      [
+        ...Array(14).fill('r2_get'),
+        ...Array(4).fill('r2_put'),
+        'r2_createMultipartUpload',
+        'r2_uploadPart',
+        'r2_completeMultipartUpload',
+      ]
+    );
+    for (const span of validationSpans) {
+      assert.strictEqual(span['cloudflare.binding.type'], 'r2');
+      assert.strictEqual(span['cloudflare.binding.name'], 'BUCKET');
+      assert.strictEqual(span['cloudflare.r2.bucket'], 'r2-test');
+      assert.strictEqual(span.closed, true);
+    }
+    received = received.filter(
+      (span) => span['cloudflare.r2.request.key'] !== 'must-not-call'
+    );
 
     // spans emitted by r2-test.js in execution order
     let expected = [
@@ -31,7 +57,7 @@ export const test = {
         'cloudflare.r2.request.size': 7n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -62,7 +88,7 @@ export const test = {
         'cloudflare.r2.request.key': 'basicKey',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -77,7 +103,7 @@ export const test = {
         'cloudflare.r2.request.key': 'basicKey',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -92,7 +118,7 @@ export const test = {
         'cloudflare.r2.request.key': 'basicKey',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -145,7 +171,7 @@ export const test = {
         'cloudflare.r2.request.uploaded_parts': '1',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -201,7 +227,7 @@ export const test = {
         'cloudflare.r2.request.range.length': 3n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -217,7 +243,7 @@ export const test = {
         'cloudflare.r2.request.range.suffix': 2n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -255,7 +281,7 @@ export const test = {
         'cloudflare.r2.request.size': 7n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -275,7 +301,7 @@ export const test = {
         'cloudflare.r2.request.size': 7n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -294,7 +320,44 @@ export const test = {
           '2000-01-01T00:00:00.000Z',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
+        'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
+        'cloudflare.r2.response.storage_class': 'Standard',
+        'cloudflare.r2.response.custom_metadata': true,
+        closed: true,
+      },
+      {
+        name: 'r2_put',
+        'cloudflare.binding.type': 'r2',
+        'cloudflare.binding.name': 'BUCKET',
+        'cloudflare.r2.operation': 'PutObject',
+        'cloudflare.r2.bucket': 'r2-test',
+        'cloudflare.r2.request.key': 'onlyIfMultipleEtags',
+        'cloudflare.r2.request.only_if.etag_matches': 'strongEtag, weakEtag',
+        'cloudflare.r2.request.only_if.etag_does_not_match':
+          'firstEtag, secondEtag',
+        'cloudflare.r2.request.size': 7n,
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.etag': 'objectEtag',
+        'cloudflare.r2.response.size': 7,
+        'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
+        'cloudflare.r2.response.storage_class': 'Standard',
+        'cloudflare.r2.response.custom_metadata': true,
+        closed: true,
+      },
+      {
+        name: 'r2_get',
+        'cloudflare.binding.type': 'r2',
+        'cloudflare.binding.name': 'BUCKET',
+        'cloudflare.r2.operation': 'GetObject',
+        'cloudflare.r2.bucket': 'r2-test',
+        'cloudflare.r2.request.key': 'onlyIfMultipleEtags',
+        'cloudflare.r2.request.only_if.etag_matches': 'strongEtag, weakEtag',
+        'cloudflare.r2.request.only_if.etag_does_not_match':
+          'firstEtag, secondEtag',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.etag': 'objectEtag',
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -313,7 +376,7 @@ export const test = {
           '2000-01-01T00:00:00.000Z',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -336,7 +399,7 @@ export const test = {
         'cloudflare.r2.request.size': 7n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.content_type': 'text/plain',
@@ -358,7 +421,7 @@ export const test = {
         'cloudflare.r2.request.key': 'httpMetadata',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.content_type': 'text/plain',
@@ -380,7 +443,7 @@ export const test = {
         'cloudflare.r2.request.key': 'httpMetadata',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.content_type': 'text/plain',
@@ -436,16 +499,9 @@ export const test = {
         'cloudflare.r2.request.uploaded_parts': '',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
-        'cloudflare.r2.response.content_type': 'text/plain',
-        'cloudflare.r2.response.content_encoding': 'utf-8',
-        'cloudflare.r2.response.content_disposition':
-          'attachment; filename = "basicKey.txt"',
-        'cloudflare.r2.response.content_language': 'en-US',
-        'cloudflare.r2.response.cache_control': 'no-store',
-        'cloudflare.r2.response.cache_expiry': '1970-01-01T00:00:01.000Z',
         'cloudflare.r2.response.custom_metadata': true,
         closed: true,
       },
@@ -466,7 +522,7 @@ export const test = {
         'cloudflare.r2.request.size': 7n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.content_type': 'text/plain',
@@ -488,7 +544,7 @@ export const test = {
         'cloudflare.r2.request.key': 'httpMetadata',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.content_type': 'text/plain',
@@ -510,7 +566,7 @@ export const test = {
         'cloudflare.r2.request.key': 'httpMetadata',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.content_type': 'text/plain',
@@ -566,16 +622,9 @@ export const test = {
         'cloudflare.r2.request.uploaded_parts': '',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
-        'cloudflare.r2.response.content_type': 'text/plain',
-        'cloudflare.r2.response.content_encoding': 'utf-8',
-        'cloudflare.r2.response.content_disposition':
-          'attachment; filename = "basicKey.txt"',
-        'cloudflare.r2.response.content_language': 'en-US',
-        'cloudflare.r2.response.cache_control': 'no-store',
-        'cloudflare.r2.response.cache_expiry': '1970-01-01T00:00:01.000Z',
         'cloudflare.r2.response.custom_metadata': true,
         closed: true,
       },
@@ -590,7 +639,7 @@ export const test = {
         'cloudflare.r2.request.size': 7n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -605,7 +654,7 @@ export const test = {
         'cloudflare.r2.request.key': 'customMetadata',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -620,7 +669,7 @@ export const test = {
         'cloudflare.r2.request.key': 'customMetadata',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -663,7 +712,7 @@ export const test = {
         'cloudflare.r2.request.uploaded_parts': '',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -679,7 +728,7 @@ export const test = {
         'cloudflare.r2.request.size': 7n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -694,7 +743,7 @@ export const test = {
         'cloudflare.r2.request.key': 'classDefault',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -709,7 +758,7 @@ export const test = {
         'cloudflare.r2.request.key': 'classDefault',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -737,7 +786,7 @@ export const test = {
         'cloudflare.r2.request.uploaded_parts': '',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -754,7 +803,7 @@ export const test = {
         'cloudflare.r2.request.size': 7n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -769,7 +818,7 @@ export const test = {
         'cloudflare.r2.request.key': 'classStandard',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -784,7 +833,7 @@ export const test = {
         'cloudflare.r2.request.key': 'classStandard',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -813,7 +862,7 @@ export const test = {
         'cloudflare.r2.request.uploaded_parts': '',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
@@ -830,7 +879,7 @@ export const test = {
         'cloudflare.r2.request.size': 7n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'InfrequentAccess',
         'cloudflare.r2.response.custom_metadata': true,
@@ -845,7 +894,7 @@ export const test = {
         'cloudflare.r2.request.key': 'classInfrequentAccess',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'InfrequentAccess',
         'cloudflare.r2.response.custom_metadata': true,
@@ -860,7 +909,7 @@ export const test = {
         'cloudflare.r2.request.key': 'classInfrequentAccess',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'InfrequentAccess',
         'cloudflare.r2.response.custom_metadata': true,
@@ -889,7 +938,7 @@ export const test = {
         'cloudflare.r2.request.uploaded_parts': '',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'InfrequentAccess',
         'cloudflare.r2.response.custom_metadata': true,
@@ -906,7 +955,7 @@ export const test = {
         'cloudflare.r2.request.size': 7n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.ssec_key': true,
@@ -923,7 +972,7 @@ export const test = {
         'cloudflare.r2.request.ssec_key': true,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.ssec_key': true,
@@ -939,7 +988,7 @@ export const test = {
         'cloudflare.r2.request.key': 'ssec',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.ssec_key': true,
@@ -984,7 +1033,7 @@ export const test = {
         'cloudflare.r2.request.uploaded_parts': '1',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.ssec_key': true,
@@ -1002,7 +1051,7 @@ export const test = {
         'cloudflare.r2.request.size': 7n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.ssec_key': true,
@@ -1019,7 +1068,7 @@ export const test = {
         'cloudflare.r2.request.ssec_key': true,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.ssec_key': true,
@@ -1035,7 +1084,7 @@ export const test = {
         'cloudflare.r2.request.key': 'ssec',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.ssec_key': true,
@@ -1080,7 +1129,7 @@ export const test = {
         'cloudflare.r2.request.uploaded_parts': '1',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.ssec_key': true,
@@ -1100,7 +1149,7 @@ export const test = {
         'cloudflare.r2.request.size': 7n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.checksum.md5':
           '9a0364b9e99bb480dd25e1f0284c8555',
@@ -1121,7 +1170,7 @@ export const test = {
         'cloudflare.r2.request.key': 'multipleChecksums',
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.checksum.md5':
           '9a0364b9e99bb480dd25e1f0284c8555',
@@ -1133,8 +1182,34 @@ export const test = {
         'cloudflare.r2.response.custom_metadata': true,
         closed: true,
       },
+      {
+        name: 'r2_delete',
+        'cloudflare.binding.type': 'r2',
+        'cloudflare.binding.name': 'BUCKET',
+        'cloudflare.r2.operation': 'DeleteObject',
+        'cloudflare.r2.bucket': 'r2-test',
+        'cloudflare.r2.request.keys': 'existing, missing',
+        'cloudflare.r2.response.success': true,
+        closed: true,
+      },
     ];
 
-    assert.deepStrictEqual(received, expected);
+    const projectSharedTags = (span) =>
+      Object.fromEntries(
+        Object.entries(span).filter(
+          ([name]) => name !== 'cloudflare.r2.response.success'
+        )
+      );
+
+    const sharedReceived = received
+      .filter((span) => span['cloudflare.binding.type'] === 'r2')
+      // The JSRPC target runs transport-specific tests after the canonical suite.
+      .slice(0, expected.length)
+      .map(projectSharedTags);
+    assert.deepStrictEqual(sharedReceived, expected.map(projectSharedTags));
+
+    if (env.R2_TRACE_TRANSPORT === 'http') {
+      assert.deepStrictEqual(received, expected);
+    }
   },
 };

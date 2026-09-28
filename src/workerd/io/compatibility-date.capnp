@@ -1717,4 +1717,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # the origin's Cache-Control (for example, an origin `no-store` gets cached as `no-cache`). When
   # enabled, the cache option no longer sets `cf.cacheControl`. To override the origin's
   # Cache-Control, omit the `cache` option and use `cf.cacheControl` instead.
+
+  r2BindingsJsrpc @195 :Bool
+      $compatEnableFlag("r2_binding_jsrpc")
+      $experimental;
+  # When enabled, R2 bindings dispatch to the R2 gateway worker over JSRPC
+  # instead of synthesising an HTTP request and calling `fetch`. Without this
+  # flag, R2 bindings continue to use the HTTP transport.
 }
