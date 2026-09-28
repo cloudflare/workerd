@@ -2,235 +2,218 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! The codec primitives behind [`crate::dispatch`]: safe wrappers around the
-//! ICU converters exposed by `rust_icu_sys`, and safe Rust ports of the
-//! simdutf functions `i18n.c++` calls.
+//! The codec primitives behind [`crate::dispatch`], all in safe Rust.
 //!
-//! Everything unsafe about calling ICU lives here: deriving pointers and
-//! lengths from slices, owning the `UConverter`, and turning ICU's
-//! out-parameter `UErrorCode` into `Option` and `Result`. The simdutf ports
-//! need no `unsafe` at all. The transcoding *logic* -- dispatch, sizing,
-//! substitute-character setup, truncation -- lives in [`crate::dispatch`].
+//! [`transcode_substituting`] reproduces the conversions `i18n.c++` hands to
+//! ICU, and the functions after it reproduce the simdutf calls it makes. The
+//! transcoding *logic* -- dispatch, sizing, validation, truncation -- lives in
+//! [`crate::dispatch`].
 
-use std::ffi::CStr;
-use std::ffi::c_char;
-
-use rust_icu_sys as sys;
-use rust_icu_sys::versioned_function;
+use std::char::REPLACEMENT_CHARACTER;
 
 use crate::error::TranscodeError;
 use crate::ffi;
 
-/// ICU treats positive codes as failures and negative codes as warnings,
-/// matching the `U_FAILURE` macro.
-fn is_failure(error: sys::UErrorCode) -> bool {
-    error > sys::UErrorCode::U_ZERO_ERROR
-}
-
-/// The fixed properties of the ICU converter for one transcodable encoding.
-struct EncodingInfo {
-    /// The ICU converter name, matching `getEncodingName()` in `i18n.c++`.
-    icu_name: &'static CStr,
-    /// What `ucnv_getMinCharSize` returns for this converter.
-    min_char_size: usize,
-    /// What `ucnv_getMaxCharSize` returns for this converter.
-    max_char_size: usize,
-}
-
-// The char sizes are ICU's `minBytesPerChar` / `maxBytesPerChar`, which ICU
-// hard-codes in each algorithmic converter's `UConverterStaticData`
-// (`ucnvlat1.cpp`, `ucnv_u8.cpp`, `ucnv_u16.cpp`) and which
-// `ucnv_getMinCharSize` / `ucnv_getMaxCharSize` return unchanged. ICU measures
-// them per UTF-16 code unit, which is why UTF-8's maximum is 3 rather than 4:
-// a supplementary character is two code units and four bytes.
-const ASCII: EncodingInfo = EncodingInfo {
-    icu_name: c"us-ascii",
-    min_char_size: 1,
-    max_char_size: 1,
-};
-const LATIN1: EncodingInfo = EncodingInfo {
-    icu_name: c"iso8859-1",
-    min_char_size: 1,
-    max_char_size: 1,
-};
-const UTF8: EncodingInfo = EncodingInfo {
-    icu_name: c"utf-8",
-    min_char_size: 1,
-    max_char_size: 3,
-};
-const UTF16LE: EncodingInfo = EncodingInfo {
-    icu_name: c"utf16le",
-    min_char_size: 2,
-    max_char_size: 2,
-};
-
-/// Returns the converter properties of a transcodable encoding.
+/// One of the four transcodable encodings.
 ///
-/// The bridge `Encoding` enum is a `cxx` shared enum, which is a `u8` newtype
-/// rather than a real Rust enum, so a value outside the four declared variants
-/// is representable. It can only arise if the C++ and Rust halves of the
-/// bridge disagree, and is reported as an error rather than a panic because a
-/// panic crossing the bridge aborts the process.
-fn encoding_info(encoding: ffi::Encoding) -> Result<&'static EncodingInfo, TranscodeError> {
-    match encoding {
-        ffi::Encoding::Ascii => Ok(&ASCII),
-        ffi::Encoding::Latin1 => Ok(&LATIN1),
-        ffi::Encoding::Utf8 => Ok(&UTF8),
-        ffi::Encoding::Utf16Le => Ok(&UTF16LE),
-        _ => Err(TranscodeError::InvalidEncoding),
-    }
+/// The Rust-side counterpart of the bridge `Encoding` enum, which is a `cxx`
+/// shared enum and so a `u8` newtype rather than a real Rust enum: a value
+/// outside its four declared variants is representable. Converting to `Codec`
+/// rejects such a value once, at the edge, so everything past it can match
+/// exhaustively.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Codec {
+    Ascii,
+    Latin1,
+    Utf8,
+    Utf16Le,
 }
 
-/// An open ICU converter for one of the four transcodable encodings.
-///
-/// Owns its `UConverter` and closes it on drop, including while unwinding.
-/// Holding a raw pointer makes the type neither `Send` nor `Sync`, which is
-/// what we want: ICU converters carry conversion state and are not safe to
-/// share between threads.
-pub struct Converter {
-    cnv: *mut sys::UConverter,
-    info: &'static EncodingInfo,
-}
+impl TryFrom<ffi::Encoding> for Codec {
+    type Error = TranscodeError;
 
-impl Converter {
-    /// Opens an ICU converter for `encoding`.
-    pub fn open(encoding: ffi::Encoding) -> Result<Self, TranscodeError> {
-        let info = encoding_info(encoding)?;
-        let mut err = sys::UErrorCode::U_ZERO_ERROR;
-        // SAFETY: `icu_name` is a NUL-terminated static string, and `err` is a
-        // live local for the duration of the call.
-        let cnv = unsafe { versioned_function!(ucnv_open)(info.icu_name.as_ptr(), &raw mut err) };
-        if is_failure(err) || cnv.is_null() {
-            return Err(TranscodeError::ConverterOpenFailed);
+    /// An out-of-range value can only arise if the C++ and Rust halves of the
+    /// bridge disagree, and is reported as an error rather than a panic
+    /// because a panic crossing the bridge aborts the process.
+    fn try_from(encoding: ffi::Encoding) -> Result<Self, TranscodeError> {
+        match encoding {
+            ffi::Encoding::Ascii => Ok(Self::Ascii),
+            ffi::Encoding::Latin1 => Ok(Self::Latin1),
+            ffi::Encoding::Utf8 => Ok(Self::Utf8),
+            ffi::Encoding::Utf16Le => Ok(Self::Utf16Le),
+            _ => Err(TranscodeError::InvalidEncoding),
         }
-        Ok(Self { cnv, info })
     }
+}
 
-    /// Returns the largest number of bytes a single UTF-16 code unit occupies
-    /// in this converter's encoding, as `ucnv_getMaxCharSize` reports it.
-    pub const fn max_char_size(&self) -> usize {
-        self.info.max_char_size
-    }
-
-    /// Returns the smallest number of bytes a single character occupies in
-    /// this converter's encoding, as `ucnv_getMinCharSize` reports it.
-    pub const fn min_char_size(&self) -> usize {
-        self.info.min_char_size
-    }
-
-    /// Sets the converter's substitute character sequence, used in place of
-    /// unmappable characters during conversion.
+impl Codec {
+    /// The most bytes one UTF-16 code unit can occupy in this encoding, which
+    /// is what `ucnv_getMaxCharSize` reports for the ICU converter `i18n.c++`
+    /// opens for it. `i18n.c++` sizes its ICU conversions' destinations from
+    /// this, and the size is visible to JavaScript as the result's
+    /// `buffer.byteLength`, so `dispatch` must size them the same way.
     ///
-    /// Without this ICU substitutes its own default, which for ASCII is
-    /// U+001A rather than the `?` the C++ path produces.
-    pub fn set_subst_chars(&self, substitute: &str) -> Result<(), TranscodeError> {
-        if substitute.is_empty() {
-            return Ok(());
+    /// ICU measures per UTF-16 code unit, which is why UTF-8's maximum is 3
+    /// rather than 4: a supplementary character is two code units and four
+    /// bytes.
+    pub const fn max_char_size(self) -> usize {
+        match self {
+            Self::Ascii | Self::Latin1 => 1,
+            Self::Utf8 => 3,
+            Self::Utf16Le => 2,
         }
-        // ICU takes the length as an `int8_t` and reads a negative length as
-        // "NUL-terminated", which `substitute` is not. Its own limit on
-        // substitute sequences is far lower still.
-        let length =
-            i8::try_from(substitute.len()).map_err(|_| TranscodeError::SetSubstituteCharsFailed)?;
-
-        let mut err = sys::UErrorCode::U_ZERO_ERROR;
-        // SAFETY: `self.cnv` is non-null, and `substitute` outlives the call and
-        // is at least `length` bytes long. ICU takes the sequence as bytes and
-        // does not require NUL termination when given an explicit length.
-        unsafe {
-            versioned_function!(ucnv_setSubstChars)(
-                self.cnv,
-                substitute.as_ptr().cast(),
-                length,
-                &raw mut err,
-            );
-        }
-        if is_failure(err) {
-            return Err(TranscodeError::SetSubstituteCharsFailed);
-        }
-        Ok(())
     }
 }
 
-impl Drop for Converter {
-    fn drop(&mut self) {
-        // SAFETY: `self.cnv` was returned non-null by `ucnv_open` and is closed
-        // exactly once, here.
-        unsafe { versioned_function!(ucnv_close)(self.cnv) }
+/// The characters windows-1252 assigns to bytes `0x80`-`0x9f`, per the WHATWG
+/// Encoding Standard's `index-windows-1252`. Every other byte maps to the code
+/// point of the same value, as in Latin-1; so do the five bytes the index
+/// leaves unassigned in this range (`0x81`, `0x8d`, `0x8f`, `0x90`, `0x9d`),
+/// whose entries here are those C1 controls.
+const WINDOWS_1252_HIGH: [char; 32] = [
+    '\u{20ac}', '\u{0081}', '\u{201a}', '\u{0192}', '\u{201e}', '\u{2026}', '\u{2020}', '\u{2021}',
+    '\u{02c6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{008d}', '\u{017d}', '\u{008f}',
+    '\u{0090}', '\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}', '\u{2022}', '\u{2013}', '\u{2014}',
+    '\u{02dc}', '\u{2122}', '\u{0161}', '\u{203a}', '\u{0153}', '\u{009d}', '\u{017e}', '\u{0178}',
+];
+
+/// Decodes a windows-1252 byte. Every byte is assigned.
+fn windows_1252_decode(byte: u8) -> char {
+    match byte {
+        0x80..=0x9f => WINDOWS_1252_HIGH[usize::from(byte - 0x80)],
+        _ => char::from(byte),
     }
 }
 
-/// Converts `source` from `from`'s encoding to `to`'s encoding via ICU's
-/// `ucnv_convertEx`, mirroring `TranscodeDefault` in `i18n.c++`. Returns the
-/// number of bytes written to `target`, or `None` if ICU reports failure.
-pub fn convert_ex(
-    to: &Converter,
-    from: &Converter,
-    source: &[u8],
-    target: &mut [u8],
-) -> Option<usize> {
-    let target_start: *mut c_char = target.as_mut_ptr().cast();
-    let mut target_cursor = target_start;
-    let mut source_cursor: *const c_char = source.as_ptr().cast();
-    let mut err = sys::UErrorCode::U_ZERO_ERROR;
-
-    // SAFETY: both cursors start at the base of a live slice and are bounded
-    // by a limit one past that slice's end, which is what ICU advances them
-    // against. Passing a null pivot asks ICU to use an internal one.
-    unsafe {
-        versioned_function!(ucnv_convertEx)(
-            to.cnv,
-            from.cnv,
-            &raw mut target_cursor,
-            target_start.add(target.len()),
-            &raw mut source_cursor,
-            source_cursor.add(source.len()),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            1, // reset
-            1, // flush
-            &raw mut err,
-        );
+/// Encodes `ch` as windows-1252, if it has a mapping.
+fn windows_1252_encode(ch: char) -> Option<u8> {
+    match u32::from(ch) {
+        0x00..=0x7f | 0xa0..=0xff => u8::try_from(ch).ok(),
+        _ => WINDOWS_1252_HIGH
+            .iter()
+            .position(|&high| high == ch)
+            .and_then(|index| u8::try_from(0x80 + index).ok()),
     }
-    if is_failure(err) {
-        return None;
-    }
-    // SAFETY: ICU advanced `target_cursor` within `target`, so both pointers
-    // are into the same allocation.
-    let written = unsafe { target_cursor.offset_from(target_start) };
-    usize::try_from(written).ok()
 }
 
-/// Converts UTF-16LE `source` (as raw bytes) to `to`'s encoding via ICU's
-/// `ucnv_fromUChars`, mirroring `TranscodeFromUTF16` in `i18n.c++`. Returns
-/// the number of bytes written to `target`, or `None` if ICU reports failure.
-pub fn from_uchars(to: &Converter, source: &[u8], target: &mut [u8]) -> Option<usize> {
-    let src_length = i32::try_from(source.len() / size_of::<u16>()).ok()?;
-    let dest_capacity = i32::try_from(target.len()).ok()?;
-    let mut err = sys::UErrorCode::U_ZERO_ERROR;
+/// Whether ICU's substitute callback drops `ch`, rather than substituting it,
+/// when a converter cannot map it: ICU's hard-coded list of default-ignorable
+/// code points, `IS_DEFAULT_IGNORABLE_CODE_POINT` in ICU's `ucnv_err.cpp`.
+const fn is_icu_default_ignorable(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x00ad
+            | 0x034f
+            | 0x061c
+            | 0x115f
+            | 0x1160
+            | 0x17b4..=0x17b5
+            | 0x180b..=0x180f
+            | 0x200b..=0x200f
+            | 0x202a..=0x202e
+            | 0x2060..=0x206f
+            | 0x3164
+            | 0xfe00..=0xfe0f
+            | 0xfeff
+            | 0xffa0
+            | 0xfff0..=0xfff8
+            | 0x1bca0..=0x1bca3
+            | 0x1d173..=0x1d17a
+            | 0xe0000..=0xe0fff
+    )
+}
 
-    // SAFETY: the pointers and lengths describe the two live slices. `source`
-    // need not be `u16`-aligned -- it is caller-supplied buffer contents, which
-    // a Uint8Array can expose at an odd byteOffset -- and is reinterpreted as
-    // `UChar*` exactly as `i18n.c++` does with the same bytes. Casting a raw
-    // pointer is well-defined in Rust regardless of alignment; no reference to
-    // the misaligned data is ever formed on this side.
-    let len = unsafe {
-        versioned_function!(ucnv_fromUChars)(
-            to.cnv,
-            target.as_mut_ptr().cast(),
-            dest_capacity,
-            source.as_ptr().cast(),
-            src_length,
-            &raw mut err,
-        )
-    };
-    if is_failure(err) {
-        return None;
+/// Converts `source` from `from` to `to` the way `i18n.c++`'s ICU conversions
+/// do (`ucnv_convertEx` in `TranscodeDefault`, `ucnv_fromUChars` in
+/// `TranscodeFromUTF16`), writing into `target` and returning the number of
+/// bytes written. Never fails: malformed or unmappable input is substituted.
+///
+/// `i18n.c++` opens ICU converters named `us-ascii` and `iso8859-1` for ASCII
+/// and Latin-1, but workerd links Chromium's ICU, whose converter aliases
+/// follow the WHATWG Encoding Standard and make both names aliases of
+/// `windows-1252`. So on this path, and only this one, both encodings are
+/// windows-1252. (The Latin-1 to UTF-16 conversion below is true Latin-1, as
+/// it is in `i18n.c++`.)
+///
+/// ICU converts through Unicode, substituting in each direction with the
+/// callbacks `i18n.c++` leaves in place:
+///
+/// - Decoding `from`, each ill-formed sequence becomes U+FFFD: each maximal
+///   subpart of ill-formed UTF-8, as [`<[u8]>::utf8_chunks`] splits them; an
+///   unpaired UTF-16 surrogate; and a trailing odd byte of UTF-16LE, together
+///   with the lead surrogate before it if there is one. Every windows-1252
+///   byte is well-formed.
+/// - Encoding into `to`, each character the encoding cannot represent becomes
+///   `?`, the substitute `i18n.c++` configures, unless it is one of ICU's
+///   default-ignorable code points, which is dropped. Only windows-1252 has
+///   unrepresentable characters; UTF-8 and UTF-16LE represent everything,
+///   U+FFFD included.
+///
+/// Stops at the end of `target` rather than overflowing it, though `dispatch`
+/// sizes it to always fit.
+pub fn transcode_substituting(from: Codec, to: Codec, source: &[u8], target: &mut [u8]) -> usize {
+    match from {
+        Codec::Ascii | Codec::Latin1 => {
+            encode_substituting(to, source.iter().copied().map(windows_1252_decode), target)
+        }
+        Codec::Utf8 => {
+            let chars = source.utf8_chunks().flat_map(|chunk| {
+                let replacement = (!chunk.invalid().is_empty()).then_some(REPLACEMENT_CHARACTER);
+                chunk.valid().chars().chain(replacement)
+            });
+            encode_substituting(to, chars, target)
+        }
+        Codec::Utf16Le => {
+            let (mut units, odd_byte) = source.as_chunks::<2>();
+            // ICU reads a lead surrogate followed by a lone trailing byte as
+            // one truncated sequence, for one U+FFFD rather than two.
+            if !odd_byte.is_empty()
+                && let Some((&last, rest)) = units.split_last()
+                && (0xd800..=0xdbff).contains(&u16::from_le_bytes(last))
+            {
+                units = rest;
+            }
+            let chars = char::decode_utf16(units.iter().map(|&unit| u16::from_le_bytes(unit)))
+                .map(|ch| ch.unwrap_or(REPLACEMENT_CHARACTER))
+                .chain((!odd_byte.is_empty()).then_some(REPLACEMENT_CHARACTER));
+            encode_substituting(to, chars, target)
+        }
     }
-    usize::try_from(len).ok()
+}
+
+/// Encodes `chars` into `to`, substituting `?` for, or dropping, any character
+/// `to` cannot represent. Returns the number of bytes written, stopping at the
+/// end of `target`.
+fn encode_substituting(to: Codec, chars: impl Iterator<Item = char>, target: &mut [u8]) -> usize {
+    let mut written = 0;
+    let mut buf = [0u8; 4];
+    for ch in chars {
+        let bytes: &[u8] = match to {
+            Codec::Ascii | Codec::Latin1 => match windows_1252_encode(ch) {
+                Some(byte) => {
+                    buf[0] = byte;
+                    &buf[..1]
+                }
+                None if is_icu_default_ignorable(ch) => &[],
+                None => b"?",
+            },
+            Codec::Utf8 => ch.encode_utf8(&mut buf).as_bytes(),
+            Codec::Utf16Le => {
+                let mut units = [0u16; 2];
+                let units = ch.encode_utf16(&mut units);
+                for (out, unit) in buf.as_chunks_mut::<2>().0.iter_mut().zip(units.iter()) {
+                    *out = unit.to_le_bytes();
+                }
+                &buf[..units.len() * 2]
+            }
+        };
+        let Some(out) = target.get_mut(written..written + bytes.len()) else {
+            break;
+        };
+        out.copy_from_slice(bytes);
+        written += bytes.len();
+    }
+    written
 }
 
 // simdutf ports
@@ -387,48 +370,147 @@ pub fn convert_utf16le_to_utf8(source: &[u8], target: &mut [u8]) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use jsg_test::Harness;
-
     use super::*;
-
-    const ENCODINGS: [ffi::Encoding; 4] = [
-        ffi::Encoding::Ascii,
-        ffi::Encoding::Latin1,
-        ffi::Encoding::Utf8,
-        ffi::Encoding::Utf16Le,
-    ];
 
     fn utf16le(text: &str) -> Vec<u8> {
         text.encode_utf16().flat_map(u16::to_le_bytes).collect()
     }
 
-    /// The char sizes are copied out of ICU's converter tables; check them
-    /// against the converters themselves so an ICU change cannot silently
-    /// desynchronize them.
+    /// Runs [`transcode_substituting`] into a destination sized the way
+    /// `dispatch` sizes it for `ucnv_convertEx`, and returns what it wrote.
+    fn substituting(from: Codec, to: Codec, source: &[u8]) -> Vec<u8> {
+        let mut target = vec![0; source.len() * to.max_char_size()];
+        let written = transcode_substituting(from, to, source, &mut target);
+        target.truncate(written);
+        target
+    }
+
     #[test]
-    fn char_sizes_match_icu() {
-        // Installs the embedded ICU data, without which converters fail to open.
-        let _harness = Harness::new();
-        for encoding in ENCODINGS {
-            let converter = Converter::open(encoding).unwrap();
-            // SAFETY: `converter.cnv` is a live converter returned by `ucnv_open`.
-            let (min, max) = unsafe {
-                (
-                    versioned_function!(ucnv_getMinCharSize)(converter.cnv),
-                    versioned_function!(ucnv_getMaxCharSize)(converter.cnv),
-                )
-            };
+    fn out_of_range_encoding_is_rejected() {
+        assert_eq!(
+            Codec::try_from(ffi::Encoding { repr: 4 }),
+            Err(TranscodeError::InvalidEncoding)
+        );
+    }
+
+    // `src/workerd/api/node/i18n-test.c++` checks `transcode_substituting`
+    // against the C++ path; these pin down the rules its doc comment
+    // describes.
+
+    #[test]
+    fn ascii_and_latin1_are_windows_1252() {
+        let euro = "\u{20ac}".as_bytes();
+        for codec in [Codec::Ascii, Codec::Latin1] {
+            // Decoding: 0x80 is the euro sign; unassigned 0x81 is U+0081.
+            assert_eq!(substituting(codec, Codec::Utf8, &[0x80]), euro);
             assert_eq!(
-                converter.min_char_size(),
-                usize::try_from(min).unwrap(),
-                "{encoding:?} min"
+                substituting(codec, Codec::Utf8, &[0x81]),
+                "\u{81}".as_bytes()
             );
+            assert_eq!(substituting(codec, Codec::Utf8, &[0xe9]), "é".as_bytes());
+            // Encoding is the inverse, and high bytes pass through identity pairs.
+            assert_eq!(substituting(Codec::Utf8, codec, euro), [0x80]);
             assert_eq!(
-                converter.max_char_size(),
-                usize::try_from(max).unwrap(),
-                "{encoding:?} max"
+                substituting(codec, codec, &[0x61, 0x80, 0xff]),
+                [0x61, 0x80, 0xff]
             );
         }
+        assert_eq!(
+            substituting(Codec::Ascii, Codec::Latin1, &[0x8d, 0xe9]),
+            [0x8d, 0xe9]
+        );
+    }
+
+    #[test]
+    fn ill_formed_input_decodes_to_replacement_characters() {
+        const FFFD: &[u8] = "\u{fffd}".as_bytes();
+        // One U+FFFD per maximal subpart.
+        assert_eq!(
+            substituting(Codec::Utf8, Codec::Utf8, &[0xf4, 0x90, 0x80, 0x80]),
+            FFFD.repeat(4)
+        );
+        assert_eq!(
+            substituting(Codec::Utf8, Codec::Utf8, &[0xe2, 0x82, 0x41]),
+            [FFFD, b"A"].concat()
+        );
+        assert_eq!(
+            substituting(Codec::Utf8, Codec::Utf8, &[0xed, 0xa0, 0x80]),
+            FFFD.repeat(3)
+        );
+        // Unpaired surrogates, and a trailing odd byte.
+        assert_eq!(
+            substituting(Codec::Utf16Le, Codec::Utf16Le, &[0x00, 0xd8, 0x41, 0x00]),
+            [0xfd, 0xff, 0x41, 0x00]
+        );
+        assert_eq!(
+            substituting(Codec::Utf16Le, Codec::Utf16Le, &[0x41, 0x00, 0x42]),
+            [0x41, 0x00, 0xfd, 0xff]
+        );
+        // A lead surrogate and a trailing odd byte are one truncated sequence;
+        // a trail surrogate and one are two.
+        assert_eq!(
+            substituting(Codec::Utf16Le, Codec::Utf16Le, &[0x00, 0xd8, 0x42]),
+            [0xfd, 0xff]
+        );
+        assert_eq!(
+            substituting(Codec::Utf16Le, Codec::Utf16Le, &[0x00, 0xdc, 0x42]),
+            [0xfd, 0xff, 0xfd, 0xff]
+        );
+    }
+
+    #[test]
+    fn unrepresentable_characters_encode_as_question_marks() {
+        // Including U+FFFD from ill-formed input, and C1 controls windows-1252
+        // assigns other characters to.
+        assert_eq!(substituting(Codec::Utf8, Codec::Latin1, &[0xff]), b"?");
+        assert_eq!(
+            substituting(Codec::Utf8, Codec::Latin1, "é☕".as_bytes()),
+            [0xe9, b'?']
+        );
+        assert_eq!(
+            substituting(Codec::Utf8, Codec::Ascii, "\u{80}".as_bytes()),
+            b"?"
+        );
+        // A supplementary character is one character, so one `?`.
+        assert_eq!(
+            substituting(Codec::Utf8, Codec::Ascii, "😀".as_bytes()),
+            b"?"
+        );
+        assert_eq!(
+            substituting(Codec::Utf16Le, Codec::Ascii, &utf16le("😀")),
+            b"?"
+        );
+        assert_eq!(
+            substituting(Codec::Utf16Le, Codec::Ascii, &[0x00, 0xd8, 0x41, 0x00]),
+            b"?A"
+        );
+    }
+
+    #[test]
+    fn unrepresentable_default_ignorables_are_dropped() {
+        assert_eq!(
+            substituting(Codec::Utf8, Codec::Latin1, "a\u{200b}b\u{feff}".as_bytes()),
+            b"ab"
+        );
+        assert_eq!(
+            substituting(Codec::Utf8, Codec::Ascii, "\u{e0001}".as_bytes()),
+            b""
+        );
+        // U+00AD is on ICU's list, but windows-1252 represents it.
+        assert_eq!(
+            substituting(Codec::Utf8, Codec::Latin1, "\u{ad}".as_bytes()),
+            [0xad]
+        );
+    }
+
+    #[test]
+    fn transcode_substituting_stops_at_the_end_of_a_short_target() {
+        let mut target = [0; 2];
+        assert_eq!(
+            transcode_substituting(Codec::Latin1, Codec::Utf8, &[0xe9, 0xe9], &mut target),
+            2
+        );
+        assert_eq!(target, [0xc3, 0xa9]);
     }
 
     #[test]

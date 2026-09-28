@@ -107,6 +107,15 @@ wd_cc_library(
 )
 
 kj_test(
+    src = "i18n-test.c++",
+    deps = [
+        ":node-core",
+        "//src/workerd/jsg",
+        "//src/workerd/util:autogate",
+    ],
+)
+
+kj_test(
     src = "buffer-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
 )

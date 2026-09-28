@@ -37,10 +37,6 @@ pub enum TranscodeError {
     Utf8LengthMismatch,
     #[error("Unable to transcode buffer")]
     UnableToTranscode,
-    #[error("Failed to initialize converter")]
-    ConverterOpenFailed,
-    #[error("Setting ICU substitute characters failed")]
-    SetSubstituteCharsFailed,
     // The remaining variants report broken internal invariants rather than bad
     // input, and so have no C++ counterpart to match.
     #[error("Invalid encoding passed to transcode")]
