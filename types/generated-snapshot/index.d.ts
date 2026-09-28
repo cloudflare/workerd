@@ -609,6 +609,7 @@ interface CachePurgeOptions {
 }
 interface CacheContext {
   purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
+  invalidate(options: CachePurgeOptions): Promise<CachePurgeResult>;
 }
 interface CloudflareAccessContext {
   readonly aud: string;

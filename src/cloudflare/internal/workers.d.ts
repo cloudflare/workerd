@@ -58,6 +58,7 @@ export interface CachePurgeOptions {
 
 export interface CacheContext {
   purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
+  invalidate(options: CachePurgeOptions): Promise<CachePurgeResult>;
 }
 
 export function getCtxCache(): CacheContext | undefined;

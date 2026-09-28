@@ -205,7 +205,7 @@ class TestController: public jsg::Object {
   JSG_RESOURCE_TYPE(TestController) {}
 };
 
-// Structured types for the cache purge API (ctx.cache.purge()).
+// Structured types for the cache purge APIs (ctx.cache.purge() and ctx.cache.invalidate()).
 // These match the coreless-purge-ingest WorkersCachePurgeEntrypoint types.
 // NOTE: TypeScript stubs for CachePurgeError, CachePurgeResult, CachePurgeOptions, and
 // CacheContext are manually maintained in src/cloudflare/internal/workers.d.ts. If you change
@@ -242,8 +242,22 @@ class CacheContext: public jsg::Object {
       const jsg::TypeHandler<CachePurgeResult>& resultHandler,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler);
 
+  // Mark cached content matching `options` as stale without deleting it. Accepts the same options
+  // as purge(). The next matching request is revalidated: the Worker receives a conditional
+  // request built from the stored validators (e.g. `If-None-Match` from the cached `ETag`). If
+  // the Worker responds with `304 Not Modified`, the stored body is kept and served; a full
+  // response replaces the cached one.
+  //
+  // The default implementation throws without an overriding IoContext.
+  virtual jsg::Promise<CachePurgeResult> invalidate(jsg::Lock& js,
+      CachePurgeOptions options,
+      const jsg::TypeHandler<CachePurgeOptions>& optionsHandler,
+      const jsg::TypeHandler<CachePurgeResult>& resultHandler,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler);
+
   JSG_RESOURCE_TYPE(CacheContext) {
     JSG_METHOD(purge);
+    JSG_METHOD(invalidate);
   }
 };
 
