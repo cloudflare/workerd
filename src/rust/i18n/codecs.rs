@@ -11,57 +11,30 @@
 
 use std::char::REPLACEMENT_CHARACTER;
 
-use crate::error::TranscodeError;
-use crate::ffi;
+use crate::ffi::Encoding;
 
-/// One of the four transcodable encodings.
+// The bridge `Encoding` is a `cxx` shared enum, and so a `u8` newtype rather
+// than a real Rust enum: every `match` on it needs a wildcard arm. As in
+// `i18n.c++`, whose `getEncodingName` ends in `default: KJ_UNREACHABLE`,
+// `dispatch` rejects an unknown source encoding up front and every later match
+// treats one as unreachable. The C++ `fromImpl` conversion rejects anything
+// but the four transcodable encodings before Rust is entered, and a panic in
+// Rust reaches C++ as a `kj::Exception`.
+
+/// The most bytes one UTF-16 code unit can occupy in `encoding`, which is what
+/// `ucnv_getMaxCharSize` reports for the ICU converter `i18n.c++` opens for it
+/// (`Converter::maxCharSize`). `i18n.c++` sizes its ICU conversions'
+/// destinations from this, and the size is visible to JavaScript as the
+/// result's `buffer.byteLength`, so `dispatch` must size them the same way.
 ///
-/// The Rust-side counterpart of the bridge `Encoding` enum, which is a `cxx`
-/// shared enum and so a `u8` newtype rather than a real Rust enum: a value
-/// outside its four declared variants is representable. Converting to `Codec`
-/// rejects such a value once, at the edge, so everything past it can match
-/// exhaustively.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Codec {
-    Ascii,
-    Latin1,
-    Utf8,
-    Utf16Le,
-}
-
-impl TryFrom<ffi::Encoding> for Codec {
-    type Error = TranscodeError;
-
-    /// An out-of-range value can only arise if the C++ and Rust halves of the
-    /// bridge disagree, and is reported as an error rather than a panic
-    /// because a panic crossing the bridge aborts the process.
-    fn try_from(encoding: ffi::Encoding) -> Result<Self, TranscodeError> {
-        match encoding {
-            ffi::Encoding::Ascii => Ok(Self::Ascii),
-            ffi::Encoding::Latin1 => Ok(Self::Latin1),
-            ffi::Encoding::Utf8 => Ok(Self::Utf8),
-            ffi::Encoding::Utf16Le => Ok(Self::Utf16Le),
-            _ => Err(TranscodeError::InvalidEncoding),
-        }
-    }
-}
-
-impl Codec {
-    /// The most bytes one UTF-16 code unit can occupy in this encoding, which
-    /// is what `ucnv_getMaxCharSize` reports for the ICU converter `i18n.c++`
-    /// opens for it. `i18n.c++` sizes its ICU conversions' destinations from
-    /// this, and the size is visible to JavaScript as the result's
-    /// `buffer.byteLength`, so `dispatch` must size them the same way.
-    ///
-    /// ICU measures per UTF-16 code unit, which is why UTF-8's maximum is 3
-    /// rather than 4: a supplementary character is two code units and four
-    /// bytes.
-    pub const fn max_char_size(self) -> usize {
-        match self {
-            Self::Ascii | Self::Latin1 => 1,
-            Self::Utf8 => 3,
-            Self::Utf16Le => 2,
-        }
+/// ICU measures per UTF-16 code unit, which is why UTF-8's maximum is 3 rather
+/// than 4: a supplementary character is two code units and four bytes.
+pub fn max_char_size(encoding: Encoding) -> usize {
+    match encoding {
+        Encoding::Ascii | Encoding::Latin1 => 1,
+        Encoding::Utf8 => 3,
+        Encoding::Utf16Le => 2,
+        _ => unreachable!("invalid encoding {encoding:?}"),
     }
 }
 
@@ -151,19 +124,24 @@ const fn is_icu_default_ignorable(ch: char) -> bool {
 ///
 /// Stops at the end of `target` rather than overflowing it, though `dispatch`
 /// sizes it to always fit.
-pub fn transcode_substituting(from: Codec, to: Codec, source: &[u8], target: &mut [u8]) -> usize {
+pub fn transcode_substituting(
+    from: Encoding,
+    to: Encoding,
+    source: &[u8],
+    target: &mut [u8],
+) -> usize {
     match from {
-        Codec::Ascii | Codec::Latin1 => {
+        Encoding::Ascii | Encoding::Latin1 => {
             encode_substituting(to, source.iter().copied().map(windows_1252_decode), target)
         }
-        Codec::Utf8 => {
+        Encoding::Utf8 => {
             let chars = source.utf8_chunks().flat_map(|chunk| {
                 let replacement = (!chunk.invalid().is_empty()).then_some(REPLACEMENT_CHARACTER);
                 chunk.valid().chars().chain(replacement)
             });
             encode_substituting(to, chars, target)
         }
-        Codec::Utf16Le => {
+        Encoding::Utf16Le => {
             let (mut units, odd_byte) = source.as_chunks::<2>();
             // ICU reads a lead surrogate followed by a lone trailing byte as
             // one truncated sequence, for one U+FFFD rather than two.
@@ -178,18 +156,23 @@ pub fn transcode_substituting(from: Codec, to: Codec, source: &[u8], target: &mu
                 .chain((!odd_byte.is_empty()).then_some(REPLACEMENT_CHARACTER));
             encode_substituting(to, chars, target)
         }
+        _ => unreachable!("invalid encoding {from:?}"),
     }
 }
 
 /// Encodes `chars` into `to`, substituting `?` for, or dropping, any character
 /// `to` cannot represent. Returns the number of bytes written, stopping at the
 /// end of `target`.
-fn encode_substituting(to: Codec, chars: impl Iterator<Item = char>, target: &mut [u8]) -> usize {
+fn encode_substituting(
+    to: Encoding,
+    chars: impl Iterator<Item = char>,
+    target: &mut [u8],
+) -> usize {
     let mut written = 0;
     let mut buf = [0u8; 4];
     for ch in chars {
         let bytes: &[u8] = match to {
-            Codec::Ascii | Codec::Latin1 => match windows_1252_encode(ch) {
+            Encoding::Ascii | Encoding::Latin1 => match windows_1252_encode(ch) {
                 Some(byte) => {
                     buf[0] = byte;
                     &buf[..1]
@@ -197,8 +180,8 @@ fn encode_substituting(to: Codec, chars: impl Iterator<Item = char>, target: &mu
                 None if is_icu_default_ignorable(ch) => &[],
                 None => b"?",
             },
-            Codec::Utf8 => ch.encode_utf8(&mut buf).as_bytes(),
-            Codec::Utf16Le => {
+            Encoding::Utf8 => ch.encode_utf8(&mut buf).as_bytes(),
+            Encoding::Utf16Le => {
                 let mut units = [0u16; 2];
                 let units = ch.encode_utf16(&mut units);
                 for (out, unit) in buf.as_chunks_mut::<2>().0.iter_mut().zip(units.iter()) {
@@ -206,6 +189,7 @@ fn encode_substituting(to: Codec, chars: impl Iterator<Item = char>, target: &mu
                 }
                 &buf[..units.len() * 2]
             }
+            _ => unreachable!("invalid encoding {to:?}"),
         };
         let Some(out) = target.get_mut(written..written + bytes.len()) else {
             break;
@@ -378,19 +362,11 @@ mod tests {
 
     /// Runs [`transcode_substituting`] into a destination sized the way
     /// `dispatch` sizes it for `ucnv_convertEx`, and returns what it wrote.
-    fn substituting(from: Codec, to: Codec, source: &[u8]) -> Vec<u8> {
-        let mut target = vec![0; source.len() * to.max_char_size()];
+    fn substituting(from: Encoding, to: Encoding, source: &[u8]) -> Vec<u8> {
+        let mut target = vec![0; source.len() * max_char_size(to)];
         let written = transcode_substituting(from, to, source, &mut target);
         target.truncate(written);
         target
-    }
-
-    #[test]
-    fn out_of_range_encoding_is_rejected() {
-        assert_eq!(
-            Codec::try_from(ffi::Encoding { repr: 4 }),
-            Err(TranscodeError::InvalidEncoding)
-        );
     }
 
     // `src/workerd/api/node/i18n-test.c++` checks `transcode_substituting`
@@ -400,23 +376,26 @@ mod tests {
     #[test]
     fn ascii_and_latin1_are_windows_1252() {
         let euro = "\u{20ac}".as_bytes();
-        for codec in [Codec::Ascii, Codec::Latin1] {
+        for encoding in [Encoding::Ascii, Encoding::Latin1] {
             // Decoding: 0x80 is the euro sign; unassigned 0x81 is U+0081.
-            assert_eq!(substituting(codec, Codec::Utf8, &[0x80]), euro);
+            assert_eq!(substituting(encoding, Encoding::Utf8, &[0x80]), euro);
             assert_eq!(
-                substituting(codec, Codec::Utf8, &[0x81]),
+                substituting(encoding, Encoding::Utf8, &[0x81]),
                 "\u{81}".as_bytes()
             );
-            assert_eq!(substituting(codec, Codec::Utf8, &[0xe9]), "é".as_bytes());
-            // Encoding is the inverse, and high bytes pass through identity pairs.
-            assert_eq!(substituting(Codec::Utf8, codec, euro), [0x80]);
             assert_eq!(
-                substituting(codec, codec, &[0x61, 0x80, 0xff]),
+                substituting(encoding, Encoding::Utf8, &[0xe9]),
+                "é".as_bytes()
+            );
+            // Encoding is the inverse, and high bytes pass through identity pairs.
+            assert_eq!(substituting(Encoding::Utf8, encoding, euro), [0x80]);
+            assert_eq!(
+                substituting(encoding, encoding, &[0x61, 0x80, 0xff]),
                 [0x61, 0x80, 0xff]
             );
         }
         assert_eq!(
-            substituting(Codec::Ascii, Codec::Latin1, &[0x8d, 0xe9]),
+            substituting(Encoding::Ascii, Encoding::Latin1, &[0x8d, 0xe9]),
             [0x8d, 0xe9]
         );
     }
@@ -426,34 +405,38 @@ mod tests {
         const FFFD: &[u8] = "\u{fffd}".as_bytes();
         // One U+FFFD per maximal subpart.
         assert_eq!(
-            substituting(Codec::Utf8, Codec::Utf8, &[0xf4, 0x90, 0x80, 0x80]),
+            substituting(Encoding::Utf8, Encoding::Utf8, &[0xf4, 0x90, 0x80, 0x80]),
             FFFD.repeat(4)
         );
         assert_eq!(
-            substituting(Codec::Utf8, Codec::Utf8, &[0xe2, 0x82, 0x41]),
+            substituting(Encoding::Utf8, Encoding::Utf8, &[0xe2, 0x82, 0x41]),
             [FFFD, b"A"].concat()
         );
         assert_eq!(
-            substituting(Codec::Utf8, Codec::Utf8, &[0xed, 0xa0, 0x80]),
+            substituting(Encoding::Utf8, Encoding::Utf8, &[0xed, 0xa0, 0x80]),
             FFFD.repeat(3)
         );
         // Unpaired surrogates, and a trailing odd byte.
         assert_eq!(
-            substituting(Codec::Utf16Le, Codec::Utf16Le, &[0x00, 0xd8, 0x41, 0x00]),
+            substituting(
+                Encoding::Utf16Le,
+                Encoding::Utf16Le,
+                &[0x00, 0xd8, 0x41, 0x00]
+            ),
             [0xfd, 0xff, 0x41, 0x00]
         );
         assert_eq!(
-            substituting(Codec::Utf16Le, Codec::Utf16Le, &[0x41, 0x00, 0x42]),
+            substituting(Encoding::Utf16Le, Encoding::Utf16Le, &[0x41, 0x00, 0x42]),
             [0x41, 0x00, 0xfd, 0xff]
         );
         // A lead surrogate and a trailing odd byte are one truncated sequence;
         // a trail surrogate and one are two.
         assert_eq!(
-            substituting(Codec::Utf16Le, Codec::Utf16Le, &[0x00, 0xd8, 0x42]),
+            substituting(Encoding::Utf16Le, Encoding::Utf16Le, &[0x00, 0xd8, 0x42]),
             [0xfd, 0xff]
         );
         assert_eq!(
-            substituting(Codec::Utf16Le, Codec::Utf16Le, &[0x00, 0xdc, 0x42]),
+            substituting(Encoding::Utf16Le, Encoding::Utf16Le, &[0x00, 0xdc, 0x42]),
             [0xfd, 0xff, 0xfd, 0xff]
         );
     }
@@ -462,26 +445,33 @@ mod tests {
     fn unrepresentable_characters_encode_as_question_marks() {
         // Including U+FFFD from ill-formed input, and C1 controls windows-1252
         // assigns other characters to.
-        assert_eq!(substituting(Codec::Utf8, Codec::Latin1, &[0xff]), b"?");
         assert_eq!(
-            substituting(Codec::Utf8, Codec::Latin1, "é☕".as_bytes()),
+            substituting(Encoding::Utf8, Encoding::Latin1, &[0xff]),
+            b"?"
+        );
+        assert_eq!(
+            substituting(Encoding::Utf8, Encoding::Latin1, "é☕".as_bytes()),
             [0xe9, b'?']
         );
         assert_eq!(
-            substituting(Codec::Utf8, Codec::Ascii, "\u{80}".as_bytes()),
+            substituting(Encoding::Utf8, Encoding::Ascii, "\u{80}".as_bytes()),
             b"?"
         );
         // A supplementary character is one character, so one `?`.
         assert_eq!(
-            substituting(Codec::Utf8, Codec::Ascii, "😀".as_bytes()),
+            substituting(Encoding::Utf8, Encoding::Ascii, "😀".as_bytes()),
             b"?"
         );
         assert_eq!(
-            substituting(Codec::Utf16Le, Codec::Ascii, &utf16le("😀")),
+            substituting(Encoding::Utf16Le, Encoding::Ascii, &utf16le("😀")),
             b"?"
         );
         assert_eq!(
-            substituting(Codec::Utf16Le, Codec::Ascii, &[0x00, 0xd8, 0x41, 0x00]),
+            substituting(
+                Encoding::Utf16Le,
+                Encoding::Ascii,
+                &[0x00, 0xd8, 0x41, 0x00]
+            ),
             b"?A"
         );
     }
@@ -489,16 +479,20 @@ mod tests {
     #[test]
     fn unrepresentable_default_ignorables_are_dropped() {
         assert_eq!(
-            substituting(Codec::Utf8, Codec::Latin1, "a\u{200b}b\u{feff}".as_bytes()),
+            substituting(
+                Encoding::Utf8,
+                Encoding::Latin1,
+                "a\u{200b}b\u{feff}".as_bytes()
+            ),
             b"ab"
         );
         assert_eq!(
-            substituting(Codec::Utf8, Codec::Ascii, "\u{e0001}".as_bytes()),
+            substituting(Encoding::Utf8, Encoding::Ascii, "\u{e0001}".as_bytes()),
             b""
         );
         // U+00AD is on ICU's list, but windows-1252 represents it.
         assert_eq!(
-            substituting(Codec::Utf8, Codec::Latin1, "\u{ad}".as_bytes()),
+            substituting(Encoding::Utf8, Encoding::Latin1, "\u{ad}".as_bytes()),
             [0xad]
         );
     }
@@ -507,7 +501,7 @@ mod tests {
     fn transcode_substituting_stops_at_the_end_of_a_short_target() {
         let mut target = [0; 2];
         assert_eq!(
-            transcode_substituting(Codec::Latin1, Codec::Utf8, &[0xe9, 0xe9], &mut target),
+            transcode_substituting(Encoding::Latin1, Encoding::Utf8, &[0xe9, 0xe9], &mut target),
             2
         );
         assert_eq!(target, [0xc3, 0xa9]);
