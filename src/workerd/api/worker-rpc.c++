@@ -948,21 +948,26 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
   auto enforcementRequested =
       util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS) &&
       util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS);
-  auto replayMemoryBytes = callPlan.getReplayMemoryBytes();
-  auto replayReservationBytes = callPlan.getReplayReservationBytes() + sizeof(JsRpcCallRetryState) +
-      sizeof(RevokerMembrane) + sizeof(ActorCallRetryState);
-  KJ_IF_SOME(value, name) {
-    replayReservationBytes += value.size();
-  }
-  auto reservation = enforcementRequested
-      ? ioContext.getMetrics().tryReserveActorCallReplayMemory(replayReservationBytes)
-      : kj::Maybe<kj::Own<void>>(kj::none);
-  auto enforcementEnabled = ActorRetryGateEnabled(reservation != kj::none);
-  KJ_IF_SOME(reservedMemory, reservation) {
-    result.replayMemoryTracker = kj::refcounted<JsRpcReplayMemoryTracker>(kj::mv(reservedMemory));
-  } else {
+  auto policy = getJsRpcRetryPolicy(parent, enforcementRequested);
+  auto enforcementEnabled = ActorRetryGateEnabled(enforcementRequested);
+  // A policy without retries never retains the call, so it neither reserves nor tracks memory.
+  if (policy.allowsRetries()) {
+    auto replayMemoryBytes = callPlan.getReplayReservationBytes() + sizeof(JsRpcCallRetryState) +
+        sizeof(RevokerMembrane) + sizeof(ActorCallRetryState);
+    KJ_IF_SOME(value, name) {
+      replayMemoryBytes += value.size();
+    }
+    kj::Maybe<kj::Own<void>> reservation;
+    if (enforcementRequested) {
+      reservation = ioContext.getLimitEnforcer().tryReserveActorCallReplayMemory(replayMemoryBytes);
+      if (reservation == kj::none) {
+        ioContext.getMetrics().recordActorCallReplayMemoryRejected();
+      }
+    }
+    enforcementEnabled = ActorRetryGateEnabled(reservation != kj::none);
+    // Tracked whether or not the reservation was granted, so demand does not depend on the budget.
     result.replayMemoryTracker = kj::refcounted<JsRpcReplayMemoryTracker>(
-        ioContext.getMetrics().trackActorCallReplayMemory(replayMemoryBytes));
+        ioContext.getMetrics().trackActorCallReplayMemory(replayMemoryBytes), kj::mv(reservation));
   }
   // The retry timeout restarts once the first attempt clears the output gate.
   auto& timer = ioContext.getIoChannelFactory().getTimer();
@@ -973,7 +978,7 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
         .enforcementEnabled = enforcementEnabled,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
       },
-      getJsRpcRetryPolicy(parent, enforcementRequested), timer.nowForLimitTimeout());
+      policy, timer.nowForLimitTimeout());
   auto attemptOrException = KJ_ASSERT_NONNULL(result.state)->startAttempt();
   result.attempt =
       kj::mv(KJ_ASSERT_NONNULL(attemptOrException.tryGet<ActorCallRetryState::Attempt>()));

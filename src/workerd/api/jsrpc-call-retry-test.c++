@@ -74,10 +74,13 @@ struct RetryTestState {
   uint finalizedFailureClassifications = 0;
   uint canceledReplacementSessions = 0;
   uint reservationAttempts = 0;
+  uint rejectedReservations = 0;
   uint activeRequestObservers = 0;
   ReplayReservation replayReservation = ReplayReservation::ACCEPT;
+  // Tracked and reserved replay memory still held.
   size_t replayMemoryBytes = 0;
   kj::Maybe<size_t> lastReservationBytes;
+  kj::Maybe<size_t> lastTrackedBytes;
   // `replayMemoryBytes` when the retry outcome was recorded, the first step after reentry.
   kj::Maybe<size_t> replayMemoryBytesAtOutcome;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> replacementStarted;
@@ -267,6 +270,11 @@ class RetryCallObserver final: public OutgoingActorCallObserver {
   bool classificationPending = false;
 };
 
+kj::Own<void> holdReplayMemory(RetryTestState& state, size_t bytes) {
+  state.replayMemoryBytes += bytes;
+  return kj::heap(kj::defer([&state, bytes]() { state.replayMemoryBytes -= bytes; }));
+}
+
 class RetryObserver final: public RequestObserver {
  public:
   explicit RetryObserver(RetryTestState& state): state(state) {
@@ -296,24 +304,24 @@ class RetryObserver final: public RequestObserver {
   }
 
   kj::Own<void> trackActorCallReplayMemory(size_t bytes) override {
-    return trackMemory(bytes);
+    state.lastTrackedBytes = bytes;
+    return holdReplayMemory(state, bytes);
   }
 
-  kj::Maybe<kj::Own<void>> tryReserveActorCallReplayMemory(size_t bytes) override {
-    ++state.reservationAttempts;
-    state.lastReservationBytes = bytes;
-    if (state.replayReservation == ReplayReservation::REJECT) return kj::none;
-    return trackMemory(bytes);
+  void recordActorCallReplayMemoryRejected() override {
+    ++state.rejectedReservations;
   }
 
  private:
-  kj::Own<void> trackMemory(size_t bytes) {
-    state.replayMemoryBytes += bytes;
-    return kj::heap(kj::defer([&state = state, bytes]() { state.replayMemoryBytes -= bytes; }));
-  }
-
   RetryTestState& state;
 };
+
+kj::Maybe<kj::Own<void>> reserveReplayMemory(RetryTestState& state, size_t bytes) {
+  ++state.reservationAttempts;
+  state.lastReservationBytes = bytes;
+  if (state.replayReservation == ReplayReservation::REJECT) return kj::none;
+  return holdReplayMemory(state, bytes);
+}
 
 // A session that fails before returning a call result.
 kj::Own<WorkerInterface> newFailingSession(FailurePattern failurePattern) {
@@ -452,6 +460,8 @@ TestFixture::SetupParams makeSenderParams(kj::WaitScope& waitScope,
   }),
     .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
         [&state]() -> kj::Own<RequestObserver> { return kj::refcounted<RetryObserver>(state); }),
+    .actorCallReplayMemoryReserver = TestFixture::ActorCallReplayMemoryReserver(
+        [&state](size_t bytes) { return reserveReplayMemory(state, bytes); }),
   };
 }
 
@@ -535,6 +545,10 @@ KJ_TEST("ambiguous actor RPC disconnect is retried") {
   KJ_EXPECT(state.finalizedFailureClassifications == 1);
   KJ_ASSERT(state.outcomes.size() == 1);
   KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RECOVERED);
+  KJ_EXPECT(state.rejectedReservations == 0);
+  // A reserved call counts toward demand too.
+  KJ_EXPECT(state.lastReservationBytes != kj::none);
+  KJ_EXPECT(state.lastTrackedBytes == state.lastReservationBytes);
   // The payload is released at native success, before the call reenters the isolate.
   KJ_EXPECT(KJ_ASSERT_NONNULL(state.replayMemoryBytesAtOutcome) == 0);
   KJ_EXPECT(state.replayMemoryBytes == 0);
@@ -886,6 +900,7 @@ KJ_TEST("failed replay memory reservation disables actor RPC retries") {
   KJ_ASSERT(state.metadata.size() == 1);
   KJ_EXPECT(state.metadata[0].retryGateEnabled == ActorRetryGateEnabled::NO);
   KJ_EXPECT(state.reservationAttempts == 1);
+  KJ_EXPECT(state.rejectedReservations == 1);
   KJ_EXPECT(state.acceptedRetries == 0);
   KJ_EXPECT(state.observedRetries == 0);
   KJ_EXPECT(state.pendingFailureClassifications == 0);
@@ -991,6 +1006,8 @@ KJ_TEST("argument-free actor RPC reserves memory for retained metadata") {
 
   KJ_EXPECT(state.reservationAttempts == 1);
   KJ_EXPECT(KJ_ASSERT_NONNULL(state.lastReservationBytes) > METHOD_NAME.size());
+  // A rejected call tracks the bytes it tried to reserve.
+  KJ_EXPECT(state.lastTrackedBytes == state.lastReservationBytes);
   KJ_EXPECT(state.replayMemoryBytes == 0);
 }
 
@@ -1091,9 +1108,13 @@ KJ_TEST("zero configured retries disables nested actor RPC retries") {
     return env.context.awaitJs(env.js, kj::mv(rejected)).attach(kj::mv(fetcher));
   });
 
-  KJ_EXPECT(state.metadata.size() == 1);
+  KJ_ASSERT(state.metadata.size() == 1);
+  KJ_EXPECT(state.metadata[0].retryGateEnabled == ActorRetryGateEnabled::YES);
   KJ_EXPECT(state.acceptedRetries == 0);
   KJ_EXPECT(state.observedRetries == 0);
+  // A call that can never retry uses neither the replay budget nor demand.
+  KJ_EXPECT(state.reservationAttempts == 0);
+  KJ_EXPECT(state.lastTrackedBytes == kj::none);
   KJ_EXPECT(state.replayMemoryBytes == 0);
 }
 

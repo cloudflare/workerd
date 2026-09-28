@@ -129,7 +129,6 @@ KJ_TEST("JS RPC call plan copies calls and property accesses") {
     builder.getOperation().initCallWithArgs();
   }, kj::heapArray<const byte>(kj::arrayPtr(SERIALIZED)));
   KJ_EXPECT(plain.getReplayable());
-  KJ_EXPECT(plain.getReplayMemoryBytes() == kj::size(SERIALIZED));
 
   for (uint attempt = 0; attempt < 2; ++attempt) {
     capnp::MallocMessageBuilder attemptMessage;
@@ -144,13 +143,17 @@ KJ_TEST("JS RPC call plan copies calls and property accesses") {
   }
 }
 
-KJ_TEST("JS RPC call plan accounts for serialized buffer capacity") {
+KJ_TEST("JS RPC call plan reserves serialized buffer capacity") {
   static constexpr byte SERIALIZED[] = {1, 2, 3, 4};
-  auto plan = makePlan([](rpc::JsRpcTarget::CallParams::Builder builder) {
-    builder.getOperation().initCallWithArgs();
-  }, kj::heapArray<const byte>(kj::arrayPtr(SERIALIZED)), Replayability::REPLAYABLE, 64);
+  auto makeArgsPlan = [](kj::Maybe<size_t> capacity) {
+    return makePlan([](rpc::JsRpcTarget::CallParams::Builder builder) {
+      builder.getOperation().initCallWithArgs();
+    }, kj::heapArray<const byte>(kj::arrayPtr(SERIALIZED)), Replayability::REPLAYABLE, capacity);
+  };
+  auto plan = makeArgsPlan(64);
 
-  KJ_EXPECT(plan.getReplayMemoryBytes() == 64);
+  KJ_EXPECT(plan.getReplayReservationBytes() ==
+      makeArgsPlan(kj::none).getReplayReservationBytes() + 64 - kj::size(SERIALIZED));
   capnp::MallocMessageBuilder attemptMessage;
   plan.copyTo(attemptMessage.initRoot<rpc::JsRpcTarget::CallParams>());
   KJ_EXPECT(attemptMessage.getRoot<rpc::JsRpcTarget::CallParams>()

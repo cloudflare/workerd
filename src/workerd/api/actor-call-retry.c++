@@ -22,7 +22,7 @@ ActorCallRetryState::ActorCallRetryState(TimerChannel& timer,
       policy(policy),
       callStart(callStart),
       retriesEnabled(config.payloadReplayable.toBool() && config.observationEnabled.toBool() &&
-          config.enforcementEnabled.toBool() && policy.maxAttempts() > 1) {
+          config.enforcementEnabled.toBool() && policy.allowsRetries()) {
   if (config.payloadReplayable.toBool()) {
     metadata = freshMetadata();
   }
