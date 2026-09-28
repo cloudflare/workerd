@@ -13,7 +13,7 @@ const unitTests :Workerd.Config = (
           ( name = "R2_TRANSPORT", text = "http" ),
           ( name = "R2_LIST_HONOR_INCLUDE", text = "true" ),
         ],
-        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "streams_enable_constructors", "r2_list_honor_include", "disable_fast_jsg_struct"],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "streams_enable_constructors", "r2_list_honor_include"],
         streamingTails = ["tail"],
       )
     ),
@@ -33,5 +33,5 @@ const tailWorker :Workerd.Worker = (
   bindings = [
     (name = "R2_TRACE_TRANSPORT", text = "http"),
   ],
-  compatibilityFlags = ["experimental", "nodejs_compat", "disable_fast_jsg_struct"],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
 );
