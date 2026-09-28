@@ -29,7 +29,7 @@ const unitTests :Workerd.Config = (
         ],
         compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
                                "streams_enable_constructors", "r2_list_honor_include",
-                               "r2_binding_jsrpc", "disable_fast_jsg_struct"],
+                               "r2_binding_jsrpc"],
         streamingTails = ["tail"],
       )
     ),
@@ -50,5 +50,5 @@ const tailWorker :Workerd.Worker = (
   bindings = [
     (name = "R2_TRACE_TRANSPORT", text = "jsrpc"),
   ],
-  compatibilityFlags = ["experimental", "nodejs_compat", "disable_fast_jsg_struct"],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
 );
