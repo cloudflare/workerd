@@ -6,14 +6,11 @@
 //! (`src/workerd/api/node/i18n.c++`), the engine behind `node:buffer`'s
 //! `transcode()`. Selected at runtime by the `NODEJS_I18N_RUST` autogate; when
 //! the gate is off, the C++ implementation is used instead. The two paths are
-//! byte-for-byte and error-message identical by construction: [`dispatch`]
-//! ports the C++ dispatch/sizing/truncation logic to Rust, while [`codecs`]
-//! calls the exact same ICU primitives the C++ path uses and ports its simdutf
-//! primitives to safe Rust.
-//!
-//! ICU is bound by `rust_icu_sys`, configured for the Chromium ICU version
-//! already linked into workerd. Matching the C++ path's behaviour is a matter
-//! of calling the same codecs the same way, not of sharing code with it.
+//! byte-for-byte and error-message identical: [`dispatch`] ports the C++
+//! dispatch/sizing/truncation logic to Rust, while [`codecs`] reimplements, in
+//! safe Rust, the ICU conversions and simdutf primitives the C++ path calls.
+//! `src/workerd/api/node/i18n-test.c++` checks the two paths against each
+//! other.
 
 use jsg::Lock;
 use jsg::v8;
@@ -99,29 +96,13 @@ fn transcode_impl<'a>(
     source: &[u8],
     from_encoding: ffi::Encoding,
     to_encoding: ffi::Encoding,
-) -> Result<v8::Local<'a, v8::Uint8Array>, TranscodeError> {
+) -> jsg::Result<v8::Local<'a, v8::Uint8Array>> {
     let transcoder = Transcoder::new(source, from_encoding, to_encoding)?;
-
-    // JavaScript can access the whole backing store through the returned
-    // view's `buffer` property, including bytes excluded from the view.
-    let mut buffer = v8::ArrayBuffer::new_with_mode(
-        lock,
-        transcoder.dest_len(),
-        v8::ffi::BackingStoreInitializationMode::ZeroInitialized,
-    )
+    let (buffer, written) = v8::ArrayBuffer::new_zeroed_with(lock, transcoder.dest_len(), |dest| {
+        transcoder.transcode_into(dest)
+    })
     .ok_or(TranscodeError::AllocationFailed)?;
-
-    let written = {
-        // SAFETY: `buffer` was created immediately above and has not been
-        // handed to JavaScript or aliased by another handle, so this is the
-        // only live reference into its backing store. `&mut Lock` is borrowed
-        // for the whole of `dest`, so no JavaScript can run and detach the
-        // buffer meanwhile.
-        let dest = unsafe { buffer.as_mut_slice(lock) };
-        transcoder.transcode_into(dest)?
-    };
-
-    Ok(v8::Uint8Array::from_buffer(lock, &buffer, 0, written))
+    v8::Uint8Array::from_buffer(lock, &buffer, 0, written?)
 }
 
 #[cfg(test)]

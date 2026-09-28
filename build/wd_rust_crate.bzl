@@ -66,7 +66,6 @@ def wd_rust_crate(
         deps = [],
         link_deps = [],
         proc_macro_deps = [],
-        rustc_env = {},
         data = [],
         test_env = {},
         test_tags = [],
@@ -171,7 +170,6 @@ def wd_rust_crate(
         srcs = srcs,
         deps = deps,
         link_deps = link_deps + ["@@//deps:rust_runtime"],
-        rustc_env = rustc_env,
         visibility = visibility,
         data = data,
         proc_macro_deps = proc_macro_deps,
@@ -193,7 +191,6 @@ def wd_rust_crate(
         size = test_size,
         tags = test_tags,
         crate_features = crate_features,
-        rustc_env = rustc_env,
         deps = test_deps,
         proc_macro_deps = test_proc_macro_deps,
     )

@@ -412,12 +412,13 @@ pub mod ffi {
         ) -> Result<Vec<Global>>;
 
         // Local<TypedArray>
+        // Fallible: KJ_REQUIREs the view is within the buffer's bounds.
         pub unsafe fn uint8_array_from_buffer(
             isolate: *mut Isolate,
             buffer: &Local,
             byte_offset: usize,
             length: usize,
-        ) -> Local;
+        ) -> Result<Local>;
         pub unsafe fn local_typed_array_length(isolate: *mut Isolate, array: &Local) -> usize;
         pub unsafe fn local_typed_array_buffer_data(isolate: *mut Isolate, array: &Local) -> usize;
         pub unsafe fn local_typed_array_byte_offset(isolate: *mut Isolate, array: &Local) -> usize;
@@ -1718,6 +1719,39 @@ impl ArrayBuffer {
             )
         }
     }
+
+    /// Attempts to create a new zero-initialized `ArrayBuffer` with
+    /// `byte_length` bytes, and lets `fill` write into it before anything else
+    /// can observe it. Returns the buffer along with `fill`'s result, or `None`
+    /// if allocation fails, in which case `fill` is not called.
+    ///
+    /// This is the safe way to produce an `ArrayBuffer` from bytes computed in
+    /// Rust without an intermediate `Vec`: unlike the `unsafe`
+    /// `Local::<ArrayBuffer>::as_mut_slice`, exclusive access to the backing
+    /// store is guaranteed by construction rather than by the caller.
+    ///
+    /// Bytes `fill` does not write remain zero. The buffer is always zeroed
+    /// first because JavaScript can read the whole backing store once it has
+    /// the buffer, including any bytes a view over it excludes.
+    pub fn new_zeroed_with<'a, R>(
+        lock: &mut crate::Lock,
+        byte_length: usize,
+        fill: impl FnOnce(&mut [u8]) -> R,
+    ) -> Option<(Local<'a, Self>, R)> {
+        let mut buffer = Self::new_with_mode(
+            lock,
+            byte_length,
+            ffi::BackingStoreInitializationMode::ZeroInitialized,
+        )?;
+        // SAFETY: `buffer` was allocated just above and is the only handle to
+        // it: no other `Local` refers to it and it has never been exposed to
+        // JavaScript, so nothing else can reach its backing store until it is
+        // returned. That holds even if `fill` somehow ran JavaScript, since
+        // detaching or resizing a buffer needs a handle to it, and V8 never
+        // moves a backing store's contents. The slice does not outlive `fill`.
+        let result = fill(unsafe { buffer.as_mut_slice(lock) });
+        Some((buffer, result))
+    }
 }
 
 impl Local<'_, ArrayBuffer> {
@@ -2348,38 +2382,29 @@ impl Uint8Array {
     ///
     /// Zero-copy, unlike [`Vec<u8>::to_js`](crate::ToJS), which allocates a fresh
     /// backing store and copies into it. Producing a `Uint8Array` from bytes computed
-    /// in Rust therefore does not require an intermediate `Vec`: allocate the buffer
-    /// with [`ArrayBuffer::new_with_mode`], fill it through
-    /// [`Local::<ArrayBuffer>::as_mut_slice`], and wrap the written prefix here.
+    /// in Rust therefore does not require an intermediate `Vec`: allocate and fill
+    /// the buffer with [`ArrayBuffer::new_zeroed_with`], and wrap the written prefix
+    /// here.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `byte_offset + length` exceeds `buffer`'s byte length. The
-    /// check is repeated in C++, but failing it here keeps the failure a Rust
-    /// panic rather than a `kj::Exception` thrown across the bridge, which
-    /// this function's signature cannot carry.
+    /// Returns an error if `byte_offset + length` exceeds `buffer`'s byte
+    /// length.
     pub fn from_buffer<'a>(
         lock: &mut crate::Lock,
         buffer: &Local<'_, ArrayBuffer>,
         byte_offset: usize,
         length: usize,
-    ) -> Local<'a, Self> {
-        let byte_length = buffer.byte_length();
-        assert!(
-            byte_offset <= byte_length && length <= byte_length - byte_offset,
-            "Uint8Array view [{byte_offset}, {byte_offset}+{length}) is out of bounds \
-             of its {byte_length}-byte ArrayBuffer"
-        );
+    ) -> crate::Result<Local<'a, Self>> {
         let isolate = lock.isolate();
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
-        // `buffer` is a live handle to an ArrayBuffer. The bounds precondition is
-        // checked on the C++ side.
-        unsafe {
-            Local::from_ffi(
-                isolate,
-                ffi::uint8_array_from_buffer(isolate.as_ffi(), &buffer.handle, byte_offset, length),
-            )
-        }
+        // `buffer` is a live handle to an ArrayBuffer. The C++ side checks the
+        // bounds and reports a violation as an `Err`.
+        let handle = unsafe {
+            ffi::uint8_array_from_buffer(isolate.as_ffi(), &buffer.handle, byte_offset, length)
+        }?;
+        // SAFETY: `handle` is a fresh Uint8Array created in `isolate`.
+        Ok(unsafe { Local::from_ffi(isolate, handle) })
     }
 }
 

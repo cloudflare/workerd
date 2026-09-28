@@ -14,12 +14,11 @@
 //! how many bytes it actually wrote, which is often fewer because the
 //! destination is sized for the worst case.
 //!
-//! All sizing, validation, substitute-character setup, and length checking
-//! happens here; [`crate::codecs`] only provides the underlying ICU calls and
-//! the Rust ports of the simdutf calls.
+//! All sizing, validation, and length checking happens here;
+//! [`crate::codecs`] only provides the conversions themselves.
 
 use crate::codecs;
-use crate::codecs::Converter;
+use crate::codecs::Codec;
 use crate::error::TranscodeError;
 use crate::ffi::Encoding;
 
@@ -31,7 +30,7 @@ const ISOLATE_LIMIT: usize = 134_217_728;
 ///
 /// Borrows its source for the whole of its life, so [`Transcoder::dest_len`]
 /// cannot go stale: the bytes it was computed from are the same bytes
-/// [`Transcoder::transcode_into`] reads. Three of the five conversions check
+/// [`Transcoder::transcode_into`] reads. The UTF-8/UTF-16 conversions check
 /// that they wrote exactly the length estimated from the source, so a stale
 /// estimate would turn into a spurious length-mismatch error.
 pub struct Transcoder<'a> {
@@ -40,17 +39,14 @@ pub struct Transcoder<'a> {
     dest_len: usize,
 }
 
-/// The conversion [`Transcoder::transcode_into`] will perform, along with any
-/// ICU converters [`Transcoder::new`] had to open to size the destination.
+/// The conversion [`Transcoder::transcode_into`] will perform.
 enum Conversion {
-    /// ICU `ucnv_convertEx` between two converters, mirroring
-    /// `TranscodeDefault`. Handles every pair the conversions below do not,
-    /// including all four identity pairs.
-    ConvertEx { to: Converter, from: Converter },
+    /// [`codecs::transcode_substituting`], mirroring the ICU conversions in
+    /// `TranscodeDefault` and `TranscodeFromUTF16`. Handles every pair the
+    /// conversions below do not, including all four identity pairs.
+    Substituting { from: Codec, to: Codec },
     /// Latin-1 to UTF-16, mirroring `TranscodeLatin1ToUTF16`.
     Latin1ToUtf16,
-    /// ICU `ucnv_fromUChars` from UTF-16LE, mirroring `TranscodeFromUTF16`.
-    FromUtf16 { to: Converter },
     /// UTF-8 to UTF-16LE, mirroring `TranscodeUTF16FromUTF8`.
     Utf16FromUtf8,
     /// UTF-16LE to UTF-8, mirroring `TranscodeUTF8FromUTF16`.
@@ -64,15 +60,15 @@ impl<'a> Transcoder<'a> {
     /// Returns an error if `source` is malformed for `from`, or if the
     /// destination the conversion would need exceeds [`ISOLATE_LIMIT`].
     pub fn new(source: &'a [u8], from: Encoding, to: Encoding) -> Result<Self, TranscodeError> {
+        let from = Codec::try_from(from)?;
+        let to = Codec::try_from(to)?;
         match (from, to) {
-            (Encoding::Ascii | Encoding::Latin1, Encoding::Utf16Le) => {
-                Self::latin1_to_utf16(source)
-            }
-            (Encoding::Utf8, Encoding::Utf16Le) => Self::utf16_from_utf8(source),
-            (Encoding::Utf16Le, Encoding::Utf8) => Self::utf8_from_utf16(source),
-            (Encoding::Utf16Le, Encoding::Ascii | Encoding::Latin1) => Self::from_utf16(source, to),
-            // Identity pairs, UTF16LE -> UTF16LE, and anything else the
-            // conversions above do not cover.
+            (Codec::Ascii | Codec::Latin1, Codec::Utf16Le) => Self::latin1_to_utf16(source),
+            (Codec::Utf8, Codec::Utf16Le) => Self::utf16_from_utf8(source),
+            (Codec::Utf16Le, Codec::Utf8) => Self::utf8_from_utf16(source),
+            (Codec::Utf16Le, Codec::Ascii | Codec::Latin1) => Self::from_utf16(source, to),
+            // Identity pairs, and anything else the conversions above do not
+            // cover.
             _ => Self::convert_ex(source, from, to),
         }
     }
@@ -101,8 +97,11 @@ impl<'a> Transcoder<'a> {
 
         let source = self.source;
         match &self.conversion {
-            Conversion::ConvertEx { to, from } => {
-                codecs::convert_ex(to, from, source, dest).ok_or(TranscodeError::UnableToTranscode)
+            // Substitutes rather than failing. The C++ path reports "Unable to
+            // transcode buffer" if ICU fails, which these converters do not do
+            // for a destination sized as below.
+            &Conversion::Substituting { from, to } => {
+                Ok(codecs::transcode_substituting(from, to, source, dest))
             }
             Conversion::Latin1ToUtf16 => {
                 // Every byte is valid Latin-1 and widens to exactly one UTF-16
@@ -110,9 +109,6 @@ impl<'a> Transcoder<'a> {
                 // The C++ path checks simdutf's result for 0, which it can only
                 // return for an empty source, handled above.
                 Ok(codecs::convert_latin1_to_utf16(source, dest) * 2)
-            }
-            Conversion::FromUtf16 { to } => {
-                codecs::from_uchars(to, source, dest).ok_or(TranscodeError::UnableToTranscode)
             }
             Conversion::Utf16FromUtf8 => {
                 // `dest` was sized as two bytes per estimated code unit.
@@ -144,16 +140,18 @@ impl<'a> Transcoder<'a> {
         }
     }
 
-    /// ICU `ucnv_convertEx` between two converters, sized at `to`'s maximum
-    /// bytes per character.
-    fn convert_ex(source: &'a [u8], from: Encoding, to: Encoding) -> Result<Self, TranscodeError> {
-        let to_conv = Converter::open(to)?;
-        to_conv.set_subst_chars(&"?".repeat(to_conv.min_char_size()))?;
-        let from_conv = Converter::open(from)?;
-
+    /// A substituting conversion, mirroring `TranscodeDefault`'s
+    /// `ucnv_convertEx`, sized at `to`'s maximum bytes per character for every
+    /// source byte.
+    ///
+    /// Always large enough: no source byte produces more than that. A byte is
+    /// at most one character, and for a UTF-8 destination, the worst case is
+    /// a single byte becoming a three-byte character: U+FFFD for an ill-formed
+    /// UTF-8 byte, or, say, the euro sign for windows-1252 byte `0x80`.
+    fn convert_ex(source: &'a [u8], from: Codec, to: Codec) -> Result<Self, TranscodeError> {
         let dest_len = source
             .len()
-            .checked_mul(to_conv.max_char_size())
+            .checked_mul(to.max_char_size())
             .ok_or(TranscodeError::SourceBufferTooLarge)?;
         if dest_len > ISOLATE_LIMIT {
             return Err(TranscodeError::SourceBufferTooLarge);
@@ -161,10 +159,7 @@ impl<'a> Transcoder<'a> {
 
         Ok(Self {
             source,
-            conversion: Conversion::ConvertEx {
-                to: to_conv,
-                from: from_conv,
-            },
+            conversion: Conversion::Substituting { from, to },
             dest_len,
         })
     }
@@ -173,8 +168,6 @@ impl<'a> Transcoder<'a> {
     ///
     /// Taken for an `Ascii` source as well as a `Latin1` one, so source bytes
     /// `0x80`-`0xFF` widen to U+0080-U+00FF instead of being substituted.
-    ///
-    /// No ICU converter is involved: the widening is purely arithmetic.
     fn latin1_to_utf16(source: &'a [u8]) -> Result<Self, TranscodeError> {
         let dest_len = source
             .len()
@@ -191,18 +184,17 @@ impl<'a> Transcoder<'a> {
         })
     }
 
-    /// ICU `ucnv_fromUChars` from UTF-16LE into `to`'s encoding, sized at
-    /// `to`'s maximum bytes per character.
-    fn from_utf16(source: &'a [u8], to: Encoding) -> Result<Self, TranscodeError> {
+    /// A substituting conversion from UTF-16LE into ASCII or Latin-1,
+    /// mirroring `TranscodeFromUTF16`'s `ucnv_fromUChars`, sized at `to`'s
+    /// maximum bytes per character for every code unit. Each code unit is at
+    /// most one character, so one byte, which always fits.
+    fn from_utf16(source: &'a [u8], to: Codec) -> Result<Self, TranscodeError> {
         if !source.len().is_multiple_of(2) {
             return Err(TranscodeError::OddUtf16leInput);
         }
 
-        let to_conv = Converter::open(to)?;
-        to_conv.set_subst_chars(&"?".repeat(to_conv.min_char_size()))?;
-
         let dest_len = (source.len() / 2)
-            .checked_mul(to_conv.max_char_size())
+            .checked_mul(to.max_char_size())
             .ok_or(TranscodeError::BufferTooLarge)?;
         if dest_len > ISOLATE_LIMIT {
             return Err(TranscodeError::BufferTooLarge);
@@ -210,7 +202,10 @@ impl<'a> Transcoder<'a> {
 
         Ok(Self {
             source,
-            conversion: Conversion::FromUtf16 { to: to_conv },
+            conversion: Conversion::Substituting {
+                from: Codec::Utf16Le,
+                to,
+            },
             dest_len,
         })
     }
@@ -257,8 +252,6 @@ impl<'a> Transcoder<'a> {
 
 #[cfg(test)]
 mod tests {
-    use jsg_test::Harness;
-
     use super::*;
 
     /// All four transcodable encodings, for exhaustively testing every pair.
@@ -268,13 +261,6 @@ mod tests {
         Encoding::Utf8,
         Encoding::Utf16Le,
     ];
-
-    // `Harness::new()` initializes the V8 platform, which is what installs the
-    // embedded ICU data. ICU converter opens fail without it, even though
-    // these tests never create an isolate or run JavaScript.
-    fn init_icu() -> Harness {
-        Harness::new()
-    }
 
     /// Runs both transcode steps the way [`crate::transcode`] does -- size,
     /// allocate, convert, narrow to the written length -- against a plain
@@ -294,7 +280,6 @@ mod tests {
 
     #[test]
     fn every_pair_round_trips_ascii_text() {
-        let _harness = init_icu();
         for &from in &ENCODINGS {
             // UTF16LE source bytes must have even length; every other encoding
             // is happy with plain ASCII bytes.
@@ -312,7 +297,6 @@ mod tests {
 
     #[test]
     fn every_pair_empty_input_is_empty_output() {
-        let _harness = init_icu();
         for &from in &ENCODINGS {
             for &to in &ENCODINGS {
                 let result = transcode(&[], from, to);
@@ -327,38 +311,43 @@ mod tests {
 
     #[test]
     fn identity_pairs_round_trip() {
-        let _harness = init_icu();
         for &encoding in &ENCODINGS {
-            let source = b"identity";
-            let result = transcode(source, encoding, encoding).unwrap();
-            if encoding == Encoding::Utf16Le {
-                // `source` is treated as raw UTF-16LE code units, so identity is
-                // not a byte-for-byte passthrough of ASCII text; just check it
-                // succeeds (covered by `every_pair_round_trips_ascii_text`).
-                continue;
-            }
-            assert_eq!(result, source);
+            // UTF16LE source bytes must be well-formed UTF-16LE to pass through
+            // unchanged.
+            let source: &[u8] = if encoding == Encoding::Utf16Le {
+                b"H\0i\0"
+            } else {
+                b"identity"
+            };
+            assert_eq!(
+                transcode(source, encoding, encoding).unwrap(),
+                source,
+                "{encoding:?} identity"
+            );
         }
     }
 
     #[test]
     fn unmappable_characters_become_question_marks() {
-        let _harness = init_icu();
         // '☕' (U+2615, HOT BEVERAGE) has no representation in ASCII or Latin-1.
-        let source = "☕".as_bytes();
-        assert_eq!(
-            transcode(source, Encoding::Utf8, Encoding::Ascii).unwrap(),
-            b"?"
-        );
-        assert_eq!(
-            transcode(source, Encoding::Utf8, Encoding::Latin1).unwrap(),
-            b"?"
-        );
+        let utf8_source = "☕".as_bytes();
+        let utf16le_source = [0x15, 0x26];
+        for (source, from) in [
+            (utf8_source, Encoding::Utf8),
+            (utf16le_source.as_slice(), Encoding::Utf16Le),
+        ] {
+            for to in [Encoding::Ascii, Encoding::Latin1] {
+                assert_eq!(
+                    transcode(source, from, to).unwrap(),
+                    b"?",
+                    "{from:?} -> {to:?}"
+                );
+            }
+        }
     }
 
     #[test]
     fn ascii_to_utf16le_widens_high_bytes_via_latin1_path() {
-        let _harness = init_icu();
         // ASCII -> UTF16LE takes the Latin-1 path, so a high byte is widened to
         // U+00FF rather than substituted with '?'.
         let result = transcode(&[0xff], Encoding::Ascii, Encoding::Utf16Le).unwrap();
@@ -367,7 +356,6 @@ mod tests {
 
     #[test]
     fn utf8_continuation_byte_only_input_yields_empty_utf16le() {
-        let _harness = init_icu();
         // The UTF8 -> UTF16LE size estimate is zero for input consisting only of
         // continuation bytes, so the result is empty rather than an error, even
         // though the input is non-empty.
@@ -377,28 +365,24 @@ mod tests {
 
     #[test]
     fn invalid_utf8_to_utf16le_is_unable_to_transcode() {
-        let _harness = init_icu();
         let result = transcode(&[0x61, 0xc3], Encoding::Utf8, Encoding::Utf16Le);
         assert_eq!(result, Err(TranscodeError::UnableToTranscode));
     }
 
     #[test]
     fn odd_length_utf16le_to_utf8_is_rejected() {
-        let _harness = init_icu();
         let result = transcode(&[0x61], Encoding::Utf16Le, Encoding::Utf8);
         assert_eq!(result, Err(TranscodeError::OddUtf16leInput));
     }
 
     #[test]
     fn odd_length_utf16le_to_latin1_is_rejected() {
-        let _harness = init_icu();
         let result = transcode(&[0x61], Encoding::Utf16Le, Encoding::Latin1);
         assert_eq!(result, Err(TranscodeError::OddUtf16leInput));
     }
 
     #[test]
     fn unpaired_surrogate_utf16le_to_utf8() {
-        let _harness = init_icu();
         // U+D800, an unpaired high surrogate, encoded as UTF-16LE bytes.
         let source = [0x00, 0xd8];
         // `utf8_length_from_utf16le` does not validate, and reports two bytes
@@ -411,7 +395,6 @@ mod tests {
 
     #[test]
     fn destination_size_mismatch_is_rejected() {
-        let _harness = init_icu();
         let transcoder = Transcoder::new(b"Hi", Encoding::Latin1, Encoding::Utf16Le).unwrap();
         let mut too_small = vec![0u8; transcoder.dest_len() - 1];
         assert_eq!(
