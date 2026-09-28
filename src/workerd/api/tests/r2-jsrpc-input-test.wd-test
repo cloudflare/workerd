@@ -1,0 +1,42 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the input-forwarding contract both before and after r2_list_honor_include. The backend has
+# no native R2 binding: any expected R2 error must therefore come from its named method.
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "modern", worker = (
+      modules = .testModules,
+      bindings = [
+        (name = "BUCKET",
+         r2Bucket = (name = "backend", entrypoint = "InputObservingR2Binding")),
+      ],
+      compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
+                            "streams_enable_constructors", "r2_list_honor_include",
+                            "r2_binding_jsrpc", "rpc", "fetcher_no_get_put_delete"],
+    )),
+    (name = "legacy-list", worker = (
+      modules = .testModules,
+      bindings = [
+        (name = "BUCKET",
+         r2Bucket = (name = "backend", entrypoint = "InputObservingR2Binding")),
+      ],
+      compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
+                            "streams_enable_constructors", "r2_binding_jsrpc", "rpc",
+                            "fetcher_no_get_put_delete"],
+    )),
+    (name = "backend", worker = (
+      modules = [
+        (name = "worker",
+         esModule = "export { InputObservingR2Binding } from './test.js';"),
+        (name = "test.js", esModule = embed "r2-jsrpc-input-test.js"),
+      ],
+      compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+    )),
+  ],
+  autogates = ["workerd-autogate-jsrpc-readable-cancel-propagation"],
+);
+
+const testModules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = "export { inputForwardingTests } from './test.js';"),
+  (name = "test.js", esModule = embed "r2-jsrpc-input-test.js"),
+];
