@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+using R2BodyLength = import "r2-body-length-test.wd-test";
+
+# The TS backend needs bootstrap/hydration autogates. A separate config lets the normal
+# R2 tests also exercise the legacy receiver with those autogates disabled.
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "jsrpc-ts", worker = (
+      modules = R2BodyLength.testModules,
+      bindings = [
+        (name = "BUCKET", r2Bucket = (name = "gateway", entrypoint = "R2BodyLengthEntrypoint")),
+        (name = "SERVICE", service = (name = "gateway", entrypoint = "R2BodyLengthEntrypoint")),
+        (name = "R2_BODY_LENGTH_TRANSPORT", text = "jsrpc-ts"),
+      ],
+      compatibilityFlags = ["experimental", "nodejs_compat", "streams_enable_constructors",
+                            "r2_binding_jsrpc", "rpc", "fetcher_no_get_put_delete",
+                            "typescript_implemented_streams"],
+    )),
+    (name = "gateway", worker = R2BodyLength.gatewayWorker),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+    "workerd-autogate-rpc-externals-hydration",
+  ],
+);
