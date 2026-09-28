@@ -1,0 +1,29 @@
+src/workerd/api/jsrpc-call-retry-test.c++
+  s_b716b0d48442fc::t_449530f5a6498d 77,80,83,273-277,307-308,311-312,319-325,463-464,548-550,902
+src/workerd/api/worker-rpc.c++
+  s_b716b0d48442fc::t_fdc1a003802992 957-963,965-968
+src/workerd/api/worker-rpc.h
+  s_b716b0d48442fc::t_a3917fb4318407 361-363,367,371,373-374
+src/workerd/io/limit-enforcer.h
+  s_b716b0d48442fc::t_c1851a99f3e142 181-187
+src/workerd/tests/test-fixture.c++
+  s_b716b0d48442fc::t_7c1477705a68fc 125-128,153-158,176,406-407,501,573-575
+src/workerd/tests/test-fixture.h
+  s_b716b0d48442fc::t_b33a990cfa24d4 32-33,75-77,309
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d939ca29595ad793f839f2acbf3bf525ff2651c2",
+  "prompts": {},
+  "sessions": {
+    "s_b716b0d48442fc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f27481c64ffejF0PRmNbz1lsxV",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
