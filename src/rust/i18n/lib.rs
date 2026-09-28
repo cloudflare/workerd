@@ -8,12 +8,12 @@
 //! the gate is off, the C++ implementation is used instead. The two paths are
 //! byte-for-byte and error-message identical by construction: [`dispatch`]
 //! ports the C++ dispatch/sizing/truncation logic to Rust, while [`codecs`]
-//! calls the exact same ICU and simdutf primitives the C++ path uses.
+//! calls the exact same ICU primitives the C++ path uses and ports its simdutf
+//! primitives to safe Rust.
 //!
 //! ICU is bound by `rust_icu_sys`, configured for the Chromium ICU version
-//! already linked into workerd. The simdutf primitives are bound directly by
-//! the [`ffi`] bridge. Matching the C++ path's behaviour is a matter of calling
-//! the same codecs the same way, not of sharing code with it.
+//! already linked into workerd. Matching the C++ path's behaviour is a matter
+//! of calling the same codecs the same way, not of sharing code with it.
 
 use jsg::Lock;
 use jsg::v8;
@@ -40,35 +40,6 @@ mod ffi {
         Latin1,
         Utf8,
         Utf16Le,
-    }
-
-    // simdutf
-    //
-    // Each of these names is an overload set: a raw-pointer overload plus
-    // `std::span` and constrained-template overloads. cxx binds a C++ function
-    // by initializing an exactly-typed function pointer with its address, which
-    // picks the raw-pointer overload by exact match.
-    #[namespace = "simdutf"]
-    unsafe extern "C++" {
-        include!("simdutf.h");
-
-        unsafe fn convert_latin1_to_utf16(
-            input: *const c_char,
-            length: usize,
-            utf16_output: *mut c_char16,
-        ) -> usize;
-        unsafe fn utf16_length_from_utf8(input: *const c_char, length: usize) -> usize;
-        unsafe fn convert_utf8_to_utf16le(
-            input: *const c_char,
-            length: usize,
-            utf16_output: *mut c_char16,
-        ) -> usize;
-        unsafe fn utf8_length_from_utf16le(input: *const c_char16, length: usize) -> usize;
-        unsafe fn convert_utf16le_to_utf8(
-            input: *const c_char16,
-            length: usize,
-            utf8_output: *mut c_char,
-        ) -> usize;
     }
 
     #[namespace = "workerd::rust::jsg"]

@@ -15,8 +15,8 @@
 //! destination is sized for the worst case.
 //!
 //! All sizing, validation, substitute-character setup, and length checking
-//! happens here; [`crate::codecs`] only forwards to the underlying ICU and
-//! simdutf calls.
+//! happens here; [`crate::codecs`] only provides the underlying ICU calls and
+//! the Rust ports of the simdutf calls.
 
 use crate::codecs;
 use crate::codecs::Converter;
@@ -31,9 +31,9 @@ const ISOLATE_LIMIT: usize = 134_217_728;
 ///
 /// Borrows its source for the whole of its life, so [`Transcoder::dest_len`]
 /// cannot go stale: the bytes it was computed from are the same bytes
-/// [`Transcoder::transcode_into`] reads. This matters because three of the
-/// five conversions bottom out in simdutf functions that take no output
-/// length and size their writes purely from the source.
+/// [`Transcoder::transcode_into`] reads. Three of the five conversions check
+/// that they wrote exactly the length estimated from the source, so a stale
+/// estimate would turn into a spurious length-mismatch error.
 pub struct Transcoder<'a> {
     source: &'a [u8],
     conversion: Conversion,
@@ -44,16 +44,16 @@ pub struct Transcoder<'a> {
 /// ICU converters [`Transcoder::new`] had to open to size the destination.
 enum Conversion {
     /// ICU `ucnv_convertEx` between two converters, mirroring
-    /// `TranscodeDefault`. Handles every pair the simdutf conversions below do
-    /// not, including all four identity pairs.
+    /// `TranscodeDefault`. Handles every pair the conversions below do not,
+    /// including all four identity pairs.
     ConvertEx { to: Converter, from: Converter },
-    /// simdutf Latin-1 to UTF-16, mirroring `TranscodeLatin1ToUTF16`.
+    /// Latin-1 to UTF-16, mirroring `TranscodeLatin1ToUTF16`.
     Latin1ToUtf16,
     /// ICU `ucnv_fromUChars` from UTF-16LE, mirroring `TranscodeFromUTF16`.
     FromUtf16 { to: Converter },
-    /// simdutf UTF-8 to UTF-16LE, mirroring `TranscodeUTF16FromUTF8`.
+    /// UTF-8 to UTF-16LE, mirroring `TranscodeUTF16FromUTF8`.
     Utf16FromUtf8,
-    /// simdutf UTF-16LE to UTF-8, mirroring `TranscodeUTF8FromUTF16`.
+    /// UTF-16LE to UTF-8, mirroring `TranscodeUTF8FromUTF16`.
     Utf8FromUtf16,
 }
 
@@ -72,7 +72,7 @@ impl<'a> Transcoder<'a> {
             (Encoding::Utf16Le, Encoding::Utf8) => Self::utf8_from_utf16(source),
             (Encoding::Utf16Le, Encoding::Ascii | Encoding::Latin1) => Self::from_utf16(source, to),
             // Identity pairs, UTF16LE -> UTF16LE, and anything else the
-            // simdutf conversions above do not cover.
+            // conversions above do not cover.
             _ => Self::convert_ex(source, from, to),
         }
     }
@@ -88,9 +88,8 @@ impl<'a> Transcoder<'a> {
     ///
     /// `dest` must be exactly [`Transcoder::dest_len`] bytes long.
     pub fn transcode_into(&self, dest: &mut [u8]) -> Result<usize, TranscodeError> {
-        // Not merely a sanity check: the simdutf conversions below take no
-        // output length, so a destination shorter than the size computed for
-        // this source would overflow it.
+        // The conversions below stop at the end of a short destination rather
+        // than overflowing it, but the result would be silently truncated.
         if dest.len() != self.dest_len {
             return Err(TranscodeError::DestinationSizeMismatch);
         }
@@ -106,14 +105,11 @@ impl<'a> Transcoder<'a> {
                 codecs::convert_ex(to, from, source, dest).ok_or(TranscodeError::UnableToTranscode)
             }
             Conversion::Latin1ToUtf16 => {
-                let units = codecs::convert_latin1_to_utf16(source, dest);
-                // simdutf returns 0 for invalid input.
-                if units == 0 {
-                    return Err(TranscodeError::UnableToTranscode);
-                }
-                // Each Latin-1 byte widens to exactly one UTF-16 code unit, and
-                // `dest` was sized as two bytes per source byte.
-                Ok(units * 2)
+                // Every byte is valid Latin-1 and widens to exactly one UTF-16
+                // code unit, and `dest` was sized as two bytes per source byte.
+                // The C++ path checks simdutf's result for 0, which it can only
+                // return for an empty source, handled above.
+                Ok(codecs::convert_latin1_to_utf16(source, dest) * 2)
             }
             Conversion::FromUtf16 { to } => {
                 codecs::from_uchars(to, source, dest).ok_or(TranscodeError::UnableToTranscode)
@@ -122,7 +118,7 @@ impl<'a> Transcoder<'a> {
                 // `dest` was sized as two bytes per estimated code unit.
                 let expected_units = dest.len() / 2;
                 let units = codecs::convert_utf8_to_utf16le(source, dest);
-                // simdutf returns 0 for invalid UTF-8 input.
+                // 0 means invalid UTF-8 input.
                 if units == 0 {
                     return Err(TranscodeError::UnableToTranscode);
                 }
@@ -134,12 +130,12 @@ impl<'a> Transcoder<'a> {
             Conversion::Utf8FromUtf16 => {
                 let expected_bytes = dest.len();
                 let written = codecs::convert_utf16le_to_utf8(source, dest);
-                // simdutf returns 0 for invalid input, which fails this check
-                // because `expected_bytes` is nonzero here. The C++
+                // Invalid input writes 0 bytes, which fails this check because
+                // `expected_bytes` is nonzero here. The C++
                 // `TranscodeUTF8FromUTF16` checks for 0 only *after* requiring
                 // equality with the (nonzero) estimate, so that branch is dead
-                // there too: a simdutf failure surfaces as a length mismatch,
-                // not "Unable to transcode buffer", unlike every other pair.
+                // there too: invalid input surfaces as a length mismatch, not
+                // "Unable to transcode buffer", unlike every other pair.
                 if written != expected_bytes {
                     return Err(TranscodeError::Utf8LengthMismatch);
                 }
@@ -173,7 +169,7 @@ impl<'a> Transcoder<'a> {
         })
     }
 
-    /// simdutf widening of ASCII/Latin-1 into UTF-16.
+    /// Widening of ASCII/Latin-1 into UTF-16.
     ///
     /// Taken for an `Ascii` source as well as a `Latin1` one, so source bytes
     /// `0x80`-`0xFF` widen to U+0080-U+00FF instead of being substituted.
@@ -219,8 +215,7 @@ impl<'a> Transcoder<'a> {
         })
     }
 
-    /// simdutf UTF-8 to UTF-16LE, sized from
-    /// `simdutf::utf16_length_from_utf8`.
+    /// UTF-8 to UTF-16LE, sized from [`codecs::utf16_length_from_utf8`].
     ///
     /// That estimate is zero for some non-empty inputs -- a source of nothing
     /// but UTF-8 continuation bytes, for instance -- which yields an empty
@@ -241,8 +236,7 @@ impl<'a> Transcoder<'a> {
         })
     }
 
-    /// simdutf UTF-16LE to UTF-8, sized from
-    /// `simdutf::utf8_length_from_utf16le`.
+    /// UTF-16LE to UTF-8, sized from [`codecs::utf8_length_from_utf16le`].
     fn utf8_from_utf16(source: &'a [u8]) -> Result<Self, TranscodeError> {
         if !source.len().is_multiple_of(2) {
             return Err(TranscodeError::OddUtf16leInput);
@@ -407,10 +401,10 @@ mod tests {
         let _harness = init_icu();
         // U+D800, an unpaired high surrogate, encoded as UTF-16LE bytes.
         let source = [0x00, 0xd8];
-        // `simdutf::utf8_length_from_utf16le` does not validate, and reports the
-        // three bytes a replacement character would occupy, but
-        // `simdutf::convert_utf16le_to_utf8` rejects the input and writes
-        // nothing -- so the mismatch check is what surfaces the failure.
+        // `utf8_length_from_utf16le` does not validate, and reports two bytes
+        // for the surrogate, but `convert_utf16le_to_utf8` rejects the input
+        // and writes nothing -- so the mismatch check is what surfaces the
+        // failure.
         let result = transcode(&source, Encoding::Utf16Le, Encoding::Utf8);
         assert_eq!(result, Err(TranscodeError::Utf8LengthMismatch));
     }
