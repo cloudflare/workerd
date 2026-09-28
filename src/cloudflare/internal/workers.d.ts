@@ -64,4 +64,12 @@ export function getCtxCache(): CacheContext | undefined;
 
 export function abortIsolate(reason?: string): never;
 
+export function retryable<This, Args extends unknown[], Return>(
+  value: (this: This, ...args: Args) => Return,
+  context: ClassMethodDecoratorContext<
+    This,
+    (this: This, ...args: Args) => Return
+  >
+): (this: This, ...args: Args) => Return;
+
 export const restore: symbol;
