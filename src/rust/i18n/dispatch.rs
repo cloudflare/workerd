@@ -18,13 +18,28 @@
 //! [`crate::codecs`] only provides the conversions themselves.
 
 use crate::codecs;
-use crate::codecs::Codec;
 use crate::error::TranscodeError;
 use crate::ffi::Encoding;
 
 /// An isolate has a 128MB memory limit, and thus so does any single
 /// destination buffer. Mirrors `ISOLATE_LIMIT` in `i18n.c++`.
 const ISOLATE_LIMIT: usize = 134_217_728;
+
+/// Fails with `error` unless `limit` is within [`ISOLATE_LIMIT`], mirroring
+/// `i18n.c++`'s `JSG_REQUIRE(limit <= ISOLATE_LIMIT, Error, ...)`.
+///
+/// Callers compute `limit` with saturating arithmetic, where the C++ path
+/// multiplies unchecked, so an overflowing size saturates and fails here.
+const fn require_within_isolate_limit(
+    limit: usize,
+    error: TranscodeError,
+) -> Result<(), TranscodeError> {
+    if limit <= ISOLATE_LIMIT {
+        Ok(())
+    } else {
+        Err(error)
+    }
+}
 
 /// A validated, sized transcode, ready to run.
 ///
@@ -44,7 +59,7 @@ enum Conversion {
     /// [`codecs::transcode_substituting`], mirroring the ICU conversions in
     /// `TranscodeDefault` and `TranscodeFromUTF16`. Handles every pair the
     /// conversions below do not, including all four identity pairs.
-    Substituting { from: Codec, to: Codec },
+    Icu { from: Encoding, to: Encoding },
     /// Latin-1 to UTF-16, mirroring `TranscodeLatin1ToUTF16`.
     Latin1ToUtf16,
     /// UTF-8 to UTF-16LE, mirroring `TranscodeUTF16FromUTF8`.
@@ -57,19 +72,31 @@ impl<'a> Transcoder<'a> {
     /// Prepares a transcode of `source` from `from` to `to`, matching the
     /// dispatch table built by `i18n::transcode()` in `i18n.c++`.
     ///
-    /// Returns an error if `source` is malformed for `from`, or if the
-    /// destination the conversion would need exceeds [`ISOLATE_LIMIT`].
+    /// Returns an error if `from` is not a transcodable encoding, if `source`
+    /// is malformed for `from`, or if the destination the conversion would
+    /// need exceeds [`ISOLATE_LIMIT`].
     pub fn new(source: &'a [u8], from: Encoding, to: Encoding) -> Result<Self, TranscodeError> {
-        let from = Codec::try_from(from)?;
-        let to = Codec::try_from(to)?;
-        match (from, to) {
-            (Codec::Ascii | Codec::Latin1, Codec::Utf16Le) => Self::latin1_to_utf16(source),
-            (Codec::Utf8, Codec::Utf16Le) => Self::utf16_from_utf8(source),
-            (Codec::Utf16Le, Codec::Utf8) => Self::utf8_from_utf16(source),
-            (Codec::Utf16Le, Codec::Ascii | Codec::Latin1) => Self::from_utf16(source, to),
-            // Identity pairs, and anything else the conversions above do not
-            // cover.
-            _ => Self::convert_ex(source, from, to),
+        match from {
+            Encoding::Ascii | Encoding::Latin1 => {
+                if to == Encoding::Utf16Le {
+                    Self::transcode_latin1_to_utf16(source)
+                } else {
+                    Self::transcode_default(source, from, to)
+                }
+            }
+            Encoding::Utf8 => {
+                if to == Encoding::Utf16Le {
+                    Self::transcode_utf16_from_utf8(source)
+                } else {
+                    Self::transcode_default(source, from, to)
+                }
+            }
+            Encoding::Utf16Le => match to {
+                Encoding::Utf16Le => Self::transcode_default(source, from, to),
+                Encoding::Utf8 => Self::transcode_utf8_from_utf16(source),
+                _ => Self::transcode_from_utf16(source, to),
+            },
+            _ => Err(TranscodeError::InvalidEncoding),
         }
     }
 
@@ -100,7 +127,7 @@ impl<'a> Transcoder<'a> {
             // Substitutes rather than failing. The C++ path reports "Unable to
             // transcode buffer" if ICU fails, which these converters do not do
             // for a destination sized as below.
-            &Conversion::Substituting { from, to } => {
+            &Conversion::Icu { from, to } => {
                 Ok(codecs::transcode_substituting(from, to, source, dest))
             }
             Conversion::Latin1ToUtf16 => {
@@ -140,112 +167,105 @@ impl<'a> Transcoder<'a> {
         }
     }
 
-    /// A substituting conversion, mirroring `TranscodeDefault`'s
-    /// `ucnv_convertEx`, sized at `to`'s maximum bytes per character for every
-    /// source byte.
+    /// Mirrors `TranscodeDefault`: a substituting conversion, as ICU's
+    /// `ucnv_convertEx` performs, sized at `to`'s maximum bytes per character
+    /// for every source byte.
     ///
     /// Always large enough: no source byte produces more than that. A byte is
     /// at most one character, and for a UTF-8 destination, the worst case is
     /// a single byte becoming a three-byte character: U+FFFD for an ill-formed
     /// UTF-8 byte, or, say, the euro sign for windows-1252 byte `0x80`.
-    fn convert_ex(source: &'a [u8], from: Codec, to: Codec) -> Result<Self, TranscodeError> {
-        let dest_len = source
-            .len()
-            .checked_mul(to.max_char_size())
-            .ok_or(TranscodeError::SourceBufferTooLarge)?;
-        if dest_len > ISOLATE_LIMIT {
-            return Err(TranscodeError::SourceBufferTooLarge);
-        }
+    fn transcode_default(
+        source: &'a [u8],
+        from: Encoding,
+        to: Encoding,
+    ) -> Result<Self, TranscodeError> {
+        let limit = source.len().saturating_mul(codecs::max_char_size(to));
+        require_within_isolate_limit(limit, TranscodeError::SourceBufferTooLarge)?;
 
         Ok(Self {
             source,
-            conversion: Conversion::Substituting { from, to },
-            dest_len,
+            conversion: Conversion::Icu { from, to },
+            dest_len: limit,
         })
     }
 
-    /// Widening of ASCII/Latin-1 into UTF-16.
+    /// Mirrors `TranscodeLatin1ToUTF16`: widening of ASCII/Latin-1 into
+    /// UTF-16.
     ///
     /// Taken for an `Ascii` source as well as a `Latin1` one, so source bytes
     /// `0x80`-`0xFF` widen to U+0080-U+00FF instead of being substituted.
-    fn latin1_to_utf16(source: &'a [u8]) -> Result<Self, TranscodeError> {
-        let dest_len = source
-            .len()
-            .checked_mul(2)
-            .ok_or(TranscodeError::SourceBufferTooLarge)?;
-        if dest_len > ISOLATE_LIMIT {
-            return Err(TranscodeError::SourceBufferTooLarge);
-        }
+    fn transcode_latin1_to_utf16(source: &'a [u8]) -> Result<Self, TranscodeError> {
+        let length_in_chars = source.len().saturating_mul(2);
+        require_within_isolate_limit(length_in_chars, TranscodeError::SourceBufferTooLarge)?;
 
         Ok(Self {
             source,
             conversion: Conversion::Latin1ToUtf16,
-            dest_len,
+            dest_len: length_in_chars,
         })
     }
 
-    /// A substituting conversion from UTF-16LE into ASCII or Latin-1,
-    /// mirroring `TranscodeFromUTF16`'s `ucnv_fromUChars`, sized at `to`'s
-    /// maximum bytes per character for every code unit. Each code unit is at
-    /// most one character, so one byte, which always fits.
-    fn from_utf16(source: &'a [u8], to: Codec) -> Result<Self, TranscodeError> {
+    /// Mirrors `TranscodeFromUTF16`: a substituting conversion from UTF-16LE
+    /// into ASCII or Latin-1, as ICU's `ucnv_fromUChars` performs, sized at
+    /// `to`'s maximum bytes per character for every code unit. Each code unit
+    /// is at most one character, so one byte, which always fits.
+    fn transcode_from_utf16(source: &'a [u8], to: Encoding) -> Result<Self, TranscodeError> {
         if !source.len().is_multiple_of(2) {
             return Err(TranscodeError::OddUtf16leInput);
         }
 
-        let dest_len = (source.len() / 2)
-            .checked_mul(to.max_char_size())
-            .ok_or(TranscodeError::BufferTooLarge)?;
-        if dest_len > ISOLATE_LIMIT {
-            return Err(TranscodeError::BufferTooLarge);
-        }
+        let limit = (source.len() / 2).saturating_mul(codecs::max_char_size(to));
+        require_within_isolate_limit(limit, TranscodeError::BufferTooLarge)?;
 
         Ok(Self {
             source,
-            conversion: Conversion::Substituting {
-                from: Codec::Utf16Le,
+            conversion: Conversion::Icu {
+                from: Encoding::Utf16Le,
                 to,
             },
-            dest_len,
+            dest_len: limit,
         })
     }
 
-    /// UTF-8 to UTF-16LE, sized from [`codecs::utf16_length_from_utf8`].
+    /// Mirrors `TranscodeUTF16FromUTF8`: UTF-8 to UTF-16LE, sized from
+    /// [`codecs::utf16_length_from_utf8`].
     ///
     /// That estimate is zero for some non-empty inputs -- a source of nothing
     /// but UTF-8 continuation bytes, for instance -- which yields an empty
     /// result rather than an error.
-    fn utf16_from_utf8(source: &'a [u8]) -> Result<Self, TranscodeError> {
-        let expected_units = codecs::utf16_length_from_utf8(source);
-        if expected_units > ISOLATE_LIMIT {
-            return Err(TranscodeError::ExpectedUtf16LengthTooLarge);
-        }
-        let dest_len = expected_units
-            .checked_mul(2)
-            .ok_or(TranscodeError::ExpectedUtf16LengthTooLarge)?;
+    fn transcode_utf16_from_utf8(source: &'a [u8]) -> Result<Self, TranscodeError> {
+        let expected_utf16_length = codecs::utf16_length_from_utf8(source);
+        require_within_isolate_limit(
+            expected_utf16_length,
+            TranscodeError::ExpectedUtf16LengthTooLarge,
+        )?;
 
         Ok(Self {
             source,
             conversion: Conversion::Utf16FromUtf8,
-            dest_len,
+            // Cannot overflow: at most `ISOLATE_LIMIT` code units.
+            dest_len: expected_utf16_length * 2,
         })
     }
 
-    /// UTF-16LE to UTF-8, sized from [`codecs::utf8_length_from_utf16le`].
-    fn utf8_from_utf16(source: &'a [u8]) -> Result<Self, TranscodeError> {
+    /// Mirrors `TranscodeUTF8FromUTF16`: UTF-16LE to UTF-8, sized from
+    /// [`codecs::utf8_length_from_utf16le`].
+    fn transcode_utf8_from_utf16(source: &'a [u8]) -> Result<Self, TranscodeError> {
         if !source.len().is_multiple_of(2) {
             return Err(TranscodeError::OddUtf16leInput);
         }
 
-        let dest_len = codecs::utf8_length_from_utf16le(source);
-        if dest_len > ISOLATE_LIMIT {
-            return Err(TranscodeError::ExpectedUtf8LengthTooLarge);
-        }
+        let expected_utf8_length = codecs::utf8_length_from_utf16le(source);
+        require_within_isolate_limit(
+            expected_utf8_length,
+            TranscodeError::ExpectedUtf8LengthTooLarge,
+        )?;
 
         Ok(Self {
             source,
             conversion: Conversion::Utf8FromUtf16,
-            dest_len,
+            dest_len: expected_utf8_length,
         })
     }
 }
@@ -391,6 +411,18 @@ mod tests {
         // failure.
         let result = transcode(&source, Encoding::Utf16Le, Encoding::Utf8);
         assert_eq!(result, Err(TranscodeError::Utf8LengthMismatch));
+    }
+
+    #[test]
+    fn out_of_range_source_encoding_is_rejected() {
+        let invalid = Encoding { repr: 4 };
+        for &to in &ENCODINGS {
+            assert_eq!(
+                Transcoder::new(b"Hi", invalid, to).err(),
+                Some(TranscodeError::InvalidEncoding),
+                "{to:?}"
+            );
+        }
     }
 
     #[test]

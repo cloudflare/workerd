@@ -9,16 +9,12 @@ use thiserror::Error;
 
 /// A failed transcode.
 ///
-/// The messages of the variants that have a C++ counterpart match the
-/// corresponding `JSG_REQUIRE` / `JSG_FAIL_REQUIRE` string in
-/// `workerd::api::node::i18n::transcode` (`src/workerd/api/node/i18n.c++`)
+/// The messages and JavaScript error types of the variants that have a C++
+/// counterpart match the corresponding `JSG_REQUIRE` / `JSG_FAIL_REQUIRE` in
+/// `workerd::api::node::i18n::transcode` (`src/workerd/api/node/i18n.c++`), or
+/// in `jsg::JsUint8Array::create` for [`TranscodeError::AllocationFailed`],
 /// verbatim, so gate-on and gate-off are indistinguishable to JavaScript.
 /// Do not reword them.
-///
-/// `"Invalid encoding passed to transcode"` has no variant here: the C++
-/// `fromImpl` conversion raises it before the Rust entry point is reached,
-/// since the bridge `Encoding` enum can only name the four transcodable
-/// encodings.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum TranscodeError {
     #[error("Source buffer is too large to transcode")]
@@ -37,20 +33,45 @@ pub enum TranscodeError {
     Utf8LengthMismatch,
     #[error("Unable to transcode buffer")]
     UnableToTranscode,
-    // The remaining variants report broken internal invariants rather than bad
-    // input, and so have no C++ counterpart to match.
     #[error("Invalid encoding passed to transcode")]
     InvalidEncoding,
+    #[error("Failed to allocate memory for Uint8Array")]
+    AllocationFailed,
+    // Reports a broken internal invariant rather than bad input, and so has no
+    // C++ counterpart to match.
     #[error("Destination buffer size does not match the prepared transcode")]
     DestinationSizeMismatch,
-    #[error("Failed to allocate transcode destination buffer")]
-    AllocationFailed,
 }
 
 impl From<TranscodeError> for jsg::Error {
     fn from(value: TranscodeError) -> Self {
-        // All of these are plain JS `Error`s, matching the
-        // `JSG_REQUIRE(..., Error, ...)` calls they replace.
-        Self::new_error(value.to_string())
+        match value {
+            // A `RangeError`, matching `JSG_REQUIRE(..., RangeError, ...)` in
+            // `jsg::JsUint8Array::create`.
+            TranscodeError::AllocationFailed => Self::new_range_error(value.to_string()),
+            // Plain JS `Error`s, matching the `JSG_REQUIRE(..., Error, ...)`
+            // calls in `i18n.c++`.
+            _ => Self::new_error(value.to_string()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use jsg::ExceptionType;
+
+    use super::*;
+
+    #[test]
+    fn allocation_failure_is_a_range_error() {
+        let error = jsg::Error::from(TranscodeError::AllocationFailed);
+        assert_eq!(error.name, ExceptionType::RangeError);
+        assert_eq!(error.message, "Failed to allocate memory for Uint8Array");
+    }
+
+    #[test]
+    fn other_failures_are_plain_errors() {
+        let error = jsg::Error::from(TranscodeError::OddUtf16leInput);
+        assert_eq!(error.name, ExceptionType::Error);
     }
 }

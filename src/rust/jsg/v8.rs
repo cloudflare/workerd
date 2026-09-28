@@ -1737,9 +1737,9 @@ impl ArrayBuffer {
         // SAFETY: `buffer` was allocated just above and is the only handle to
         // it: no other `Local` refers to it and it has never been exposed to
         // JavaScript, so nothing else can reach its backing store until it is
-        // returned. That holds even if `fill` somehow ran JavaScript, since
-        // detaching or resizing a buffer needs a handle to it, and V8 never
-        // moves a backing store's contents. The slice does not outlive `fill`.
+        // returned. `fill` is not passed the `Lock` and cannot capture it,
+        // since `lock` is mutably borrowed for this call, so it cannot run
+        // JavaScript. The slice does not outlive `fill`.
         let result = fill(unsafe { buffer.as_mut_slice(lock) });
         Some((buffer, result))
     }
@@ -2588,8 +2588,8 @@ where
     // SAFETY: forwarded from this function's safety contract.
     let mut lock = unsafe { Lock::from_isolate_ptr(isolate) };
     let result = callback(&mut lock).map(|local| {
-        // SAFETY: the callback's return lifetime is tied to `lock`, whose
-        // isolate is the one supplied by the active C++ HandleScope.
+        // SAFETY: the handle is consumed by the C++ caller while its
+        // `HandleScope` is still alive, per this function's safety contract.
         unsafe { local.into_ffi() }
     });
     match result {

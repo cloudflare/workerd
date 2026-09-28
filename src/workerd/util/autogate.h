@@ -127,7 +127,7 @@ namespace workerd::util {
   /* When enabled, the Node.js `i18n` transcode implementation (api::node                          \
      i18n::transcode) is provided by the Rust implementation (src/rust/i18n)                       \
      instead of the C++ implementation. The C++ implementation is retained                         \
-     for rollback.*/                                                                               \
+     for rollback. */                                                                              \
   V(NODEJS_I18N_RUST)
 // clang-format on
 // --------------------------------------------------------------------------------------
