@@ -431,7 +431,10 @@ wd_test(
 wd_test(
     src = "r2-jsrpc-multipart-test.wd-test",
     args = ["--experimental"],
-    data = ["r2-test.js"],
+    data = [
+        "r2-jsrpc-passthrough.capnp",
+        "r2-test.js",
+    ],
 )
 
 wd_test(
@@ -461,14 +464,24 @@ wd_test(
     data = [
         "instrumentation-tail-worker.js",
         "r2-instrumentation-test.js",
+        "r2-jsrpc-passthrough.capnp",
         "r2-test.js",
     ],
 )
 
 wd_test(
-    src = "r2-jsrpc-legacy-list-test.wd-test",
+    src = "r2-jsrpc-gateway-contract-test.wd-test",
     args = ["--experimental"],
     data = ["r2-test.js"],
+)
+
+wd_test(
+    src = "r2-jsrpc-legacy-list-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "r2-jsrpc-passthrough.capnp",
+        "r2-test.js",
+    ],
     generate_all_compat_flags_variant = False,
 )
 

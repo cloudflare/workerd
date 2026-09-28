@@ -1,0 +1,29 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Checks the R2 binding's JSRPC client against R2BindingEntrypoint, a fake gateway that asserts
+# the arguments each method receives and returns results a native R2 binding cannot produce, such
+# as malformed objects. r2-jsrpc-test.wd-test runs the canonical and shared suites through a
+# passthrough to a native binding.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "r2-jsrpc-gateway-contract-test",
+      worker = (
+        modules = [
+          ( name = "worker",
+            esModule = "export { R2BindingEntrypoint, jsrpcGatewayContractTests } from './r2-test.js';" ),
+          ( name = "r2-test.js", esModule = embed "r2-test.js" ),
+        ],
+        bindings = [
+          ( name = "BUCKET",
+            r2Bucket = (name = "r2-jsrpc-gateway-contract-test",
+                        entrypoint = "R2BindingEntrypoint") ),
+          ( name = "R2_TRANSPORT", text = "jsrpc" ),
+          ( name = "R2_LIST_HONOR_INCLUDE", text = "true" ),
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
+                               "streams_enable_constructors", "r2_list_honor_include",
+                               "r2_binding_jsrpc", "disable_fast_jsg_struct"],
+      )
+    ),
+  ],
+);

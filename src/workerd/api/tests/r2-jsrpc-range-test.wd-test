@@ -8,7 +8,7 @@ const unitTests :Workerd.Config = (
     ( name = "fast-structs",
       worker = (
         modules = [
-          (name = "worker", esModule = "export { R2BindingEntrypoint, jsrpcRangeTests } from './r2-test.js';"),
+          (name = "worker", esModule = "export { R2BindingEntrypoint, jsrpcGatewayRangeContractTests } from './r2-test.js';"),
           (name = "r2-test.js", esModule = embed "r2-test.js"),
         ],
         bindings = [
@@ -22,7 +22,7 @@ const unitTests :Workerd.Config = (
     ( name = "slow-structs",
       worker = (
         modules = [
-          (name = "worker", esModule = "export { R2BindingEntrypoint, jsrpcRangeTests } from './r2-test.js';"),
+          (name = "worker", esModule = "export { R2BindingEntrypoint, jsrpcGatewayRangeContractTests } from './r2-test.js';"),
           (name = "r2-test.js", esModule = embed "r2-test.js"),
         ],
         bindings = [

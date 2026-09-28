@@ -1,14 +1,21 @@
 using Workerd = import "/workerd/workerd.capnp";
 
-# The user-facing R2 binding targets a platform Worker. That Worker calls a separate real R2
-# binding whose fetcher targets the mock R2GW entrypoint. Keeping this topology in a dedicated
-# config prevents the native-resource round trips from being conflated with the HTTP transport.
+# The user-facing R2 binding uses JSRPC to call a platform Worker. That Worker lacks
+# r2_binding_jsrpc, so its real R2 binding reaches the HTTP mock in r2-test.js over HTTP, and
+# returns the resulting native R2 objects across the JSRPC hop. Keeping this topology in a
+# dedicated config prevents the native-resource round trips from being conflated with the HTTP
+# transport.
+#
+# The platform Worker also serves the HTTP mock: its REAL_BUCKET points back at itself, as in
+# r2-jsrpc-passthrough.capnp. It uses its own modules because it exports the ObservedR2Binding
+# subclass from r2-jsrpc-serialization-test.js, which adds methods for this test.
 const unitTests :Workerd.Config = (
   services = [
     (name = "user", worker = (
       modules = [
         (name = "worker", esModule = "export { nativeR2ResultTests } from './test.js';"),
         (name = "test.js", esModule = embed "r2-jsrpc-serialization-test.js"),
+        (name = "r2-test.js", esModule = embed "r2-test.js"),
       ],
       bindings = [
         (name = "BUCKET",
@@ -20,27 +27,19 @@ const unitTests :Workerd.Config = (
                             "r2_list_honor_include", "r2_binding_jsrpc", "rpc",
                             "fetcher_no_get_put_delete"],
     )),
+    # Exports no test handlers, so the test runner does not run the tests in r2-test.js here.
     (name = "platform", worker = (
       modules = [
-        (name = "worker", esModule = "export { ObservedR2Binding } from './test.js';"),
+        (name = "worker",
+         esModule = "import mock from './r2-test.js'; export { ObservedR2Binding } from './test.js'; export default { fetch: mock.fetch };"),
         (name = "test.js", esModule = embed "r2-jsrpc-serialization-test.js"),
-      ],
-      bindings = [
-        (name = "REAL_BUCKET",
-         r2Bucket = (name = "gateway", entrypoint = "R2BindingEntrypoint")),
-      ],
-      compatibilityFlags = ["experimental", "nodejs_compat", "streams_enable_constructors",
-                            "r2_list_honor_include", "r2_binding_jsrpc"],
-    )),
-    (name = "gateway", worker = (
-      modules = [
-        (name = "worker", esModule = "export { R2BindingEntrypoint } from './r2-test.js';"),
         (name = "r2-test.js", esModule = embed "r2-test.js"),
       ],
       bindings = [
-        (name = "R2_LIST_HONOR_INCLUDE", text = "true"),
+        (name = "REAL_BUCKET", r2Bucket = "platform"),
       ],
-      compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+      compatibilityFlags = ["nodejs_compat", "streams_enable_constructors",
+                            "r2_list_honor_include"],
     )),
   ],
 );
