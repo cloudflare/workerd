@@ -1,49 +1,20 @@
 using Workerd = import "/workerd/workerd.capnp";
-using Passthrough = import "r2-jsrpc-passthrough.capnp";
 
-# Runs the multipart suites with fast structs; r2-jsrpc-test.wd-test covers slow structs for the
-# shared suite.
-#
-# The fast-structs service calls the passthrough in r2-jsrpc-passthrough.capnp.
-#
-# The gateway contract suite targets R2BindingEntrypoint in both struct-wrapping modes, because it
-# asserts the exact arguments the JSRPC client sends.
+# Checks the multipart JSRPC client against R2BindingEntrypoint, a fake gateway that asserts the
+# exact arguments the client sends. It uses the same struct mode as the other R2 JSRPC configs;
+# the multipart wire inputs do not depend on property presence, so one mode is enough.
+# r2-jsrpc-test.wd-test and r2-jsrpc-legacy-list-test.wd-test run r2MultipartApiTests through
+# the passthrough to a native binding.
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "fast-structs",
+    ( name = "gateway",
       worker = (
         modules = [
-          (name = "worker", esModule = "export { r2MultipartApiTests } from './r2-test.js';"),
+          (name = "worker", esModule = "export { R2BindingEntrypoint, jsrpcGatewayMultipartContractTests } from './r2-test.js';"),
           (name = "r2-test.js", esModule = embed "r2-test.js"),
         ],
         bindings = [
-          (name = "BUCKET",
-           r2Bucket = (name = "r2-test", entrypoint = "ObservedR2Binding")),
-          (name = "R2_TRANSPORT", text = "jsrpc"),
-        ],
-        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
-                              "streams_enable_constructors", "r2_binding_jsrpc", "enable_fast_jsg_struct"],
-      ),
-    ),
-    ( name = "r2-test", worker = Passthrough.passthroughFastStructsWorker ),
-    ( name = "gateway-fast-structs",
-      worker = (
-        modules = .gatewayModules,
-        bindings = [
-          (name = "BUCKET",
-           r2Bucket = (name = "gateway-fast-structs", entrypoint = "R2BindingEntrypoint")),
-          (name = "R2_TRANSPORT", text = "jsrpc"),
-        ],
-        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
-                              "streams_enable_constructors", "r2_binding_jsrpc", "enable_fast_jsg_struct"],
-      ),
-    ),
-    ( name = "gateway-slow-structs",
-      worker = (
-        modules = .gatewayModules,
-        bindings = [
-          (name = "BUCKET",
-           r2Bucket = (name = "gateway-slow-structs", entrypoint = "R2BindingEntrypoint")),
+          (name = "BUCKET", r2Bucket = (name = "gateway", entrypoint = "R2BindingEntrypoint")),
           (name = "R2_TRANSPORT", text = "jsrpc"),
         ],
         compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
@@ -52,8 +23,3 @@ const unitTests :Workerd.Config = (
     ),
   ],
 );
-
-const gatewayModules :List(Workerd.Worker.Module) = [
-  (name = "worker", esModule = "export { R2BindingEntrypoint, jsrpcGatewayMultipartContractTests } from './r2-test.js';"),
-  (name = "r2-test.js", esModule = embed "r2-test.js"),
-];

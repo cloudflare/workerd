@@ -9,7 +9,8 @@
 # which is also the bucket name that R2 spans record.
 #
 # Each worker variant matches the mock's R2_LIST_HONOR_INCLUDE expectation to its
-# r2_list_honor_include flag.
+# r2_list_honor_include flag. The workers do not set a JSG struct mode, so the compatibility date
+# of each test variant selects it.
 
 @0xe8a01684ab8486bc;
 
@@ -30,7 +31,7 @@ const passthroughModules :List(Workerd.Worker.Module) = [
   ( name = "r2-test.js", esModule = embed "r2-test.js" ),
 ];
 
-# r2_list_honor_include with slow structs.
+# r2_list_honor_include.
 const passthroughWorker :Workerd.Worker = (
   modules = .passthroughModules,
   bindings = [
@@ -38,27 +39,15 @@ const passthroughWorker :Workerd.Worker = (
     ( name = "R2_LIST_HONOR_INCLUDE", text = "true" ),
   ],
   compatibilityFlags = ["nodejs_compat", "streams_enable_constructors",
-                        "r2_list_honor_include", "disable_fast_jsg_struct"],
+                        "r2_list_honor_include"],
 );
 
-# No r2_list_honor_include, with slow structs.
+# No r2_list_honor_include.
 const passthroughLegacyListWorker :Workerd.Worker = (
   modules = .passthroughModules,
   bindings = [
     ( name = "REAL_BUCKET", r2Bucket = "r2-test" ),
     ( name = "R2_LIST_HONOR_INCLUDE", text = "false" ),
   ],
-  compatibilityFlags = ["nodejs_compat", "streams_enable_constructors",
-                        "disable_fast_jsg_struct"],
-);
-
-# No r2_list_honor_include, with fast structs.
-const passthroughFastStructsWorker :Workerd.Worker = (
-  modules = .passthroughModules,
-  bindings = [
-    ( name = "REAL_BUCKET", r2Bucket = "r2-test" ),
-    ( name = "R2_LIST_HONOR_INCLUDE", text = "false" ),
-  ],
-  compatibilityFlags = ["nodejs_compat", "streams_enable_constructors",
-                        "enable_fast_jsg_struct"],
+  compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
 );
