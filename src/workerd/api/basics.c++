@@ -652,7 +652,9 @@ jsg::Ref<AbortSignal> AbortSignal::abort(jsg::Lock& js, jsg::Optional<jsg::JsVal
   KJ_IF_SOME(reason, maybeReason) {
     return js.alloc<AbortSignal>(kj::mv(exception), reason.addRef(js));
   }
-  return js.alloc<AbortSignal>(exception.clone(), js.exceptionToJsValue(kj::mv(exception)));
+  auto signalException = exception.clone();
+  auto reason = js.exceptionToJsValue(kj::mv(exception));
+  return js.alloc<AbortSignal>(kj::mv(signalException), kj::mv(reason));
 }
 
 void AbortSignal::throwIfAborted(jsg::Lock& js) {
@@ -674,8 +676,8 @@ jsg::Ref<AbortSignal> AbortSignal::timeout(jsg::Lock& js, double delay) {
 
   auto context = js.v8Context();
 
-  auto& global =
-      jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(context, context->Global());
+  auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
+      js.v8Isolate, context, context->Global(), jsg::kNonResourceWrappableTagRange);
 
   // It's worth noting that the setTimeout holds a strong pointer to the AbortSignal,
   // keeping it from being garbage collected before the timer fires or until the request
@@ -1371,8 +1373,8 @@ kj::Promise<void> Scheduler::wait(
 
   auto context = js.v8Context();
 
-  auto& global =
-      jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(context, context->Global());
+  auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
+      js.v8Isolate, context, context->Global(), jsg::kNonResourceWrappableTagRange);
   auto timeoutId = global.setTimeoutInternal(
       [fulfiller = IoContext::current().addObject(kj::mv(paf.fulfiller))](jsg::Lock& lock) mutable {
     fulfiller->fulfill();

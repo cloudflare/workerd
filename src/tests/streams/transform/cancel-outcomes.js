@@ -10,6 +10,8 @@
 // has errored by then, the cancel rejects with its stored error.
 // TypeScript follows the spec (Node agrees on every case); C++ diverges
 // (ledger #16), and only the parts stable across its cells are asserted.
+// The last case is a write racing the cancel, which the spec leaves
+// undefined (ledger #19).
 
 import { strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -153,6 +155,67 @@ export const cancelThenCloseSameTurn = {
         strictEqual(await closed, reason);
       } else {
         strictEqual(await close, 'fulfilled');
+      }
+    }
+  },
+};
+
+// A write parked on backpressure is released by a read, and a
+// readable.cancel() in the same turn clears the transformer's algorithms
+// before the write reaches the sink, while the writable is still
+// writable (the cancel errors it once the cancel hook settles). The spec
+// leaves this undefined. The write rejects in both implementations, so no
+// chunk is dropped while the write reports success (Node fulfills it).
+// TypeScript never calls transform() after cancel() and rejects the write
+// with the writable's stored error; C++ rejects it with a TypeError and,
+// with a cancel hook, still runs transform() (ledger #19).
+export const writeReachesSinkAfterCancelClearedAlgorithms = {
+  async test() {
+    for (const hooks of ['transform', 'cancel', 'cancel-rejects']) {
+      const hookError = new Error('hook');
+      const transformed = [];
+      const transformer = {
+        transform(chunk, c) {
+          transformed.push(chunk);
+          c.enqueue(chunk);
+        },
+      };
+      if (hooks === 'cancel') transformer.cancel = () => {};
+      if (hooks === 'cancel-rejects') {
+        transformer.cancel = () => Promise.reject(hookError);
+      }
+      const ts = new TransformStream(transformer, undefined, {
+        highWaterMark: 0,
+      });
+      await scheduler.wait(1);
+      const writer = ts.writable.getWriter();
+      const reader = ts.readable.getReader();
+      const write = outcome(writer.write('a'));
+      await scheduler.wait(1);
+      // Relieves backpressure, releasing the parked write; releaseLock()
+      // rejects the read.
+      reader.read().catch(() => {});
+      reader.releaseLock();
+      const reason = new Error('cancel');
+      const cancel = outcome(ts.readable.cancel(reason));
+      const settled = hooks === 'cancel-rejects' ? hookError : reason;
+      strictEqual(
+        await cancel,
+        hooks === 'cancel-rejects' ? hookError : 'fulfilled'
+      );
+      strictEqual(await outcome(writer.closed), settled);
+      const writeOutcome = await write;
+      if (usingTsImpl) {
+        strictEqual(writeOutcome, settled);
+        strictEqual(transformed.length, 0);
+      } else {
+        // DIVERGENCE (ledger #19).
+        strictEqual(writeOutcome.name, 'TypeError');
+        strictEqual(
+          writeOutcome.message,
+          'The readable side of this TransformStream is no longer readable.'
+        );
+        strictEqual(transformed.length, hooks === 'transform' ? 0 : 1);
       }
     }
   },

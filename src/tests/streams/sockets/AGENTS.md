@@ -30,6 +30,7 @@ under C++, while TypeScript resolves the read done.
 | Test | Shape |
 | --- | --- |
 | `echoRoundTrip` | write ×2, half-close via writer.close(), drain echo to EOF |
+| `degenerateViewsWithHighWaterMark` | byte-counting writable (`highWaterMark`): detached/out-of-bounds typed-array and DataView views count and send nothing; the stream keeps writing |
 | `greetReadsToEof` | server-initiated EOF: greeting then done, tail read `{done: true, value: undefined}` |
 | `echoByobReads` | BYOB reader with recycled views over the socket readable, byte-exact |
 | `echoReadAtLeast` | readAtLeast accumulates across TCP fragmentation |

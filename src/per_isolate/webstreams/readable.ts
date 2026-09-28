@@ -110,6 +110,10 @@ const {
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
 
+import type { ViewExtentHelpers } from './view-extent';
+const { viewByteExtent } =
+  require('webstreams/view-extent') as ViewExtentHelpers;
+
 // The native backend (see the fence conventions in native.ts and
 // queue.ts). The cast restores the real shape the untyped loader erases,
 // so the brand predicates keep their type-guard narrowing.
@@ -443,6 +447,14 @@ let getControllerExpectedLength: (
     | ReadableByteStreamControllerType
     | NativeReadableStreamControllerType
 ) => bigint | undefined;
+let byteControllerEnqueueBatch: (
+  controller: ReadableByteStreamController,
+  chunks: ArrayBufferView[]
+) => void;
+let byteControllerSetConsumptionHook: (
+  controller: ReadableByteStreamController,
+  hook: (() => void) | undefined
+) => void;
 let setDefaultControllerExpectedLength: <R>(
   controller: ReadableStreamDefaultController<R>,
   length: bigint | undefined
@@ -1988,6 +2000,22 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       return isActualObject(value) && #queue in value;
     };
 
+    // Enqueues several chunks, in order, notifying the consumers once after
+    // the last, so a pending BYOB read on any cursor fills across all of
+    // them before it is answered (a per-chunk notify would answer it with
+    // the first). Only for internal sources (the identity streams); each
+    // chunk is validated and accounted as by enqueue().
+    byteControllerEnqueueBatch = (controller, chunks) => {
+      const last = chunks.length - 1;
+      for (let i = 0; i <= last; i++) {
+        controller.#enqueueChunk(chunks[i] as ArrayBufferView, i === last);
+      }
+    };
+
+    byteControllerSetConsumptionHook = (controller, hook) => {
+      controller.#queue.setConsumptionHook(hook);
+    };
+
     assertIsReadableByteStreamController = function (
       self: ReadableByteStreamController
     ): void {
@@ -2270,6 +2298,13 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
   enqueue(chunk: ArrayBufferView): void {
     assertIsReadableByteStreamController(this);
+    this.#enqueueChunk(chunk, true);
+  }
+
+  // enqueue()'s steps. With `notify` false the chunk is queued without
+  // notifying the consumers (byteControllerEnqueueBatch notifies with its
+  // last chunk).
+  #enqueueChunk(chunk: ArrayBufferView, notify: boolean): void {
     if (!this.#canCloseOrEnqueue()) {
       throw new TypeError(
         'Cannot enqueue a chunk into a stream that is closed or closing'
@@ -2331,10 +2366,10 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         (cursor as unknown as ByteStreamCursorType).flushReleasedHead();
       });
     }
-    this.#queue.enqueue({ value: entry, size: entry.byteLength });
+    this.#queue.enqueue({ value: entry, size: entry.byteLength }, notify);
     // The cursors' notify() (run by queue.enqueue) services pending
     // pull-intos and default reads alike.
-    this.#callPullIfNeeded();
+    if (notify) this.#callPullIfNeeded();
   }
 
   close(): void {
@@ -4807,27 +4842,16 @@ async function collectChunks<R>(
       // Drained chunks are untrusted values: any BufferSource contributes
       // its bytes, with the extent pinned at drain time; anything else
       // fails with the same TypeError the C++ bridge pump uses. Detached
-      // inputs are skipped with the other empties.
+      // or out-of-bounds inputs are skipped with the other empties (see
+      // view-extent.ts).
       let buffer: ArrayBufferLike;
       let byteOffset: number;
       let byteLength: number;
       if (isArrayBufferView(chunk)) {
-        // Probe detachment through the buffer before getViewInfo: a
-        // detached DataView's byteLength getter throws (typed arrays and
-        // raw buffers just report 0). A SharedArrayBuffer cannot be
-        // detached, and the probe rejects it as a receiver.
-        buffer =
-          TypedArrayPrototypeGetSymbolToStringTag(chunk) !== undefined
-            ? TypedArrayPrototypeGetBuffer(chunk)
-            : DataViewPrototypeGetBuffer(chunk as DataView);
-        if (
-          !isSharedArrayBuffer(buffer) &&
-          ArrayBufferPrototypeDetachedGet(buffer)
-        )
-          continue;
-        const info = getViewInfo(chunk);
-        byteOffset = info.byteOffset;
-        byteLength = info.byteLength;
+        const extent = viewByteExtent(chunk);
+        buffer = extent.buffer;
+        byteOffset = extent.byteOffset;
+        byteLength = extent.byteLength;
       } else if (isArrayBuffer(chunk)) {
         buffer = chunk;
         byteOffset = 0;
@@ -5070,6 +5094,18 @@ module.exports = {
     getStoredError: <R>(stream: ReadableStream<R>) =>
       getReadableStreamStoredError(stream),
     normalizeExpectedLength,
+    // The identity streams' delivery (see identity.ts): a batched enqueue
+    // with one notification, and the queue's consumption notification.
+    enqueueBytesBatch: (controller: object, chunks: ArrayBufferView[]) =>
+      byteControllerEnqueueBatch(
+        controller as ReadableByteStreamController,
+        chunks
+      ),
+    setConsumptionHook: (controller: object, hook: (() => void) | undefined) =>
+      byteControllerSetConsumptionHook(
+        controller as ReadableByteStreamController,
+        hook
+      ),
     setControllerExpectedLength: <R>(
       controller: object,
       length: bigint | undefined

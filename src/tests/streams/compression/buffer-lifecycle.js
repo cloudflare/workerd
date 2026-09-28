@@ -74,6 +74,30 @@ export const alreadyDetachedChunkIsNoop = {
   },
 };
 
+// Views already detached, or left out of bounds by a shrink, at write()
+// time contribute zero bytes — DataViews too, whose byteLength getter
+// throws where a typed array's reports 0 — and later chunks still flow
+// (parity).
+export const degenerateViewsAreNoops = {
+  async test() {
+    const views = [];
+    for (const View of [Uint8Array, DataView]) {
+      const ab = new ArrayBuffer(8);
+      views.push(new View(ab, 2, 4));
+      ab.transfer();
+      const rab = new ArrayBuffer(8, { maxByteLength: 8 });
+      views.push(new View(rab, 4, 4));
+      rab.resize(2);
+    }
+    const compressed = await pump(new CompressionStream('gzip'), [
+      ...views,
+      enc.encode('ok'),
+    ]);
+    const restored = await pump(new DecompressionStream('gzip'), [compressed]);
+    strictEqual(new TextDecoder().decode(restored), 'ok');
+  },
+};
+
 export const lyingMetadataNeverConsulted = {
   async test() {
     // Buffer metadata comes from internal slots; shadowing own getters are

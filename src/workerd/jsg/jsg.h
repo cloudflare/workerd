@@ -59,7 +59,7 @@ namespace workerd::jsg {
 
 #define JSG_RESOURCE_TYPE(Type, ...)                                                               \
   static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = ::workerd::jsg::JsgKind::RESOURCE; \
-  using jsgSuper = jsgThis;                                                                        \
+  using jsgSuper = typename Type::jsgThis;                                                         \
   using jsgThis = Type;                                                                            \
   inline kj::StringPtr jsgGetMemoryName() const override {                                         \
     return #Type##_kjc;                                                                            \
@@ -1463,9 +1463,13 @@ class Object: private Wrappable {
 // Declared in wrappable.h; see there for why this check exists.
 template <typename T>
 T& downcastObject(Object& object) {
+  const auto& actualType = typeid(object);
+  if (&actualType == &typeid(T) || actualType == typeid(T)) {
+    return static_cast<T&>(object);
+  }
   T* result = dynamic_cast<T*>(&object);
   if (result == nullptr) {
-    reportWrapperTypeMismatch(typeid(T), typeid(object));
+    reportWrapperTypeMismatch(typeid(T), actualType);
   }
   return *result;
 }
@@ -1575,8 +1579,12 @@ class Ref {
   //
   // It is an error to attach a wrapper when another wrapper is already attached. Hence,
   // typically this should only be called on a newly-allocated object.
-  void attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object) {
-    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>());
+  // `tag` is the per-type CppHeapPointerTag for T, computed by the caller via
+  // TypeWrapper::wrappableTag<T>() (the caller has the TypeWrapper and thus the full type list
+  // needed to number T; Ref<T> does not).
+  void attachWrapper(
+      v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTag tag) {
+    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>(), tag);
   }
 
   // Obtain a weak reference to the referenced object. The weak reference does not keep the
@@ -1661,7 +1669,7 @@ Ref<T> _jsgThis(T* obj) {
 //   use-after-free.
 //
 // - tryAddRef(js) answers "is the object still usable from JS?". It requires the isolate
-//   lock and returns kj::none for condemned objects (see Wrappable::wasTracedInLastGc()).
+//   lock and returns kj::none for condemned objects (see Wrappable::isCondemned()).
 //   Any JS-facing work through a WeakRef must go through tryAddRef().
 //
 // Use operator->() for convenient single-expression access that asserts liveness:
@@ -1765,7 +1773,7 @@ class WeakRef {
 
   // Try to promote to a strong Ref<T>. Returns kj::none if the target has been destroyed,
   // or if the target's V8 wrapper died in a major GC whose deferred cleanup has not yet
-  // released the target (detected via the GC epoch check in Wrappable::wasTracedInLastGc();
+  // released the target (detected via Wrappable::isCondemned();
   // see the implementation in setup.h). In the latter case the target is condemned and this
   // WeakRef is permanently invalidated.
   kj::Maybe<Ref<T>> tryAddRef(Lock&) const;
@@ -3107,6 +3115,13 @@ class Lock {
   // it will throw. If a need for a minor GC is needed look at the call in jsg.c++ and the
   // implementation in setup.c++. Use responsibly.
   void requestGcForTesting() const;
+
+  // Like requestGcForTesting(), but sweeps cppgc the way an allocation-triggered GC would: a
+  // forced GC always sweeps atomically, whereas this uses the sweeping type newCppHeap()
+  // configured. It is the only way a test can observe the finalization timing production
+  // actually gets, and so notice if the configuration stops being honoured. Test-only, same as
+  // requestGcForTesting().
+  void requestGcWithDefaultSweepForTesting() const;
 
   // Runs the given function synchronously with a v8::HandleScope on the stack.
   // If the fn returns a v8::Local<T> or v8::MaybeLocal<T> type, then

@@ -28,7 +28,6 @@ const {
   AbortControllerAbort,
   AbortControllerSignalGet,
   ArrayBufferPrototypeByteLengthGet,
-  DataViewPrototypeGetByteLength,
   NumberIsNaN,
   ObjectDefineProperties,
   ObjectDefineProperty,
@@ -42,17 +41,11 @@ const {
   SymbolFor,
   SymbolToStringTag,
   TypeError,
-  TypedArrayPrototypeGetByteLength,
   uncurryThis,
 } = primordials;
 
-const {
-  isArrayBuffer,
-  isArrayBufferView,
-  isDataView,
-  isPromise,
-  markPromiseHandled,
-} = utils;
+const { isArrayBuffer, isArrayBufferView, isPromise, markPromiseHandled } =
+  utils;
 
 // The native backend (see the fence conventions in native.ts). The cast
 // restores the real shape.
@@ -61,6 +54,10 @@ const { nativeStreamInternals } = require('webstreams/native') as {
   nativeStreamInternals: NativeStreamInternals;
 };
 const { kExtractNativeSink, isNativeUnderlyingSink } = nativeStreamInternals;
+
+import type { ViewExtentHelpers } from './view-extent';
+const { viewByteLength } =
+  require('webstreams/view-extent') as ViewExtentHelpers;
 
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
@@ -1843,9 +1840,8 @@ function writableStreamFlush<W>(stream: WritableStream<W>): Promise<void> {
 // heuristic).
 function byteSizeOf(chunk: unknown): number {
   if (isArrayBufferView(chunk)) {
-    return isDataView(chunk)
-      ? DataViewPrototypeGetByteLength(chunk)
-      : TypedArrayPrototypeGetByteLength(chunk);
+    // A detached or out-of-bounds view counts 0 (see view-extent.ts).
+    return viewByteLength(chunk);
   }
   if (isArrayBuffer(chunk)) {
     return ArrayBufferPrototypeByteLengthGet(chunk);
