@@ -328,10 +328,38 @@ function buildGetResponse({ head, body, isList, error } = {}) {
   });
 }
 
+// With the fastJsgStruct compatibility flag, a JSG struct such as R2HTTPMetadata or R2Range has
+// every optional field as an own property, set to undefined when the field is unset. Without the
+// flag, unset fields are absent. Dropping unset fields lets an assertion check the same shape in
+// both modes.
+function withoutUnsetFields(struct) {
+  return Object.fromEntries(
+    Object.entries(struct).filter(([, value]) => value !== undefined)
+  );
+}
+
+// Copies a list() result into plain objects that compare the same in both JSG struct modes.
+function plainListResult(list) {
+  return {
+    ...withoutUnsetFields(list),
+    objects: list.objects.map((object) => {
+      const plain = { ...object, checksums: { ...object.checksums } };
+      if (plain.httpMetadata !== undefined) {
+        plain.httpMetadata = withoutUnsetFields(plain.httpMetadata);
+      }
+      return plain;
+    }),
+  };
+}
+
 async function compareResponse(res, { head, body } = {}, bytes) {
   // Destructuring syntax looks ugly, but gets around needing to construct HeadResponse objects(somehow?)
   const { ...obj } = await res;
   obj.checksums = { ...obj.checksums };
+  obj.httpMetadata = withoutUnsetFields(obj.httpMetadata);
+  if (obj.range !== undefined) {
+    obj.range = withoutUnsetFields(obj.range);
+  }
   assert.deepEqual(obj, {
     ...HeadObject,
     ...head,
@@ -1053,9 +1081,7 @@ const testWorker = {
           delimiter: '/',
           include: ['httpMetadata', 'customMetadata'],
         });
-        list.objects[0] = { ...list.objects[0] };
-        list.objects[0].checksums = { ...list.objects[0].checksums };
-        assert.deepEqual(list, {
+        assert.deepEqual(plainListResult(list), {
           objects: [HeadObject],
           truncated: true,
           cursor: 'ai',
@@ -1198,9 +1224,7 @@ const testWorker = {
             prefix: 'httpMeta',
             include: ['httpMetadata'],
           });
-          list.objects[0] = { ...list.objects[0] };
-          list.objects[0].checksums = { ...list.objects[0].checksums };
-          assert.deepEqual(list, {
+          assert.deepEqual(plainListResult(list), {
             delimitedPrefixes: [],
             objects: [{ ...HeadObject, ...head }],
             truncated: false,
@@ -1242,9 +1266,7 @@ const testWorker = {
             prefix: 'customMeta',
             include: ['customMetadata'],
           });
-          list.objects[0] = { ...list.objects[0] };
-          list.objects[0].checksums = { ...list.objects[0].checksums };
-          assert.deepEqual(list, {
+          assert.deepEqual(plainListResult(list), {
             delimitedPrefixes: [],
             objects: [{ ...HeadObject, ...head }],
             truncated: false,
@@ -1370,7 +1392,7 @@ const testWorker = {
         new Uint8Array(headResp.checksums.sha256),
         sha256Buffer
       );
-      assert.deepStrictEqual(headResp.checksums.toJSON(), {
+      assert.deepStrictEqual(withoutUnsetFields(headResp.checksums.toJSON()), {
         md5: '9a0364b9e99bb480dd25e1f0284c8555',
         sha1: '2a0364b9e99bb480dd25e1f0284c855511223344',
         sha256:
@@ -1792,7 +1814,10 @@ export const r2BindingApiTests = {
     assert.strictEqual(await env.BUCKET.get('missing'), null);
 
     const ranged = await env.BUCKET.head('ranged');
-    assert.deepStrictEqual(ranged.range, { offset: 10, length: 20 });
+    assert.deepStrictEqual(withoutUnsetFields(ranged.range), {
+      offset: 10,
+      length: 20,
+    });
 
     const coerced = await env.BUCKET.head(12345);
     assert.strictEqual(coerced.key, key);
@@ -1814,7 +1839,7 @@ export const r2BindingApiTests = {
       onlyIf: { etagMatches: 'objectEtag' },
     });
     assert.strictEqual(conditional.body, undefined);
-    assert.deepStrictEqual(conditional.httpMetadata, {});
+    assert.deepStrictEqual(withoutUnsetFields(conditional.httpMetadata), {});
     assert.deepStrictEqual(conditional.customMetadata, {});
     assert.strictEqual(typeof conditional.writeHttpMetadata, 'function');
 
@@ -1841,7 +1866,7 @@ export const r2BindingApiTests = {
     assert.strictEqual(await (await blobResult.blob()).text(), body);
 
     const emptyList = await env.BUCKET.list();
-    assert.deepStrictEqual(emptyList, {
+    assert.deepStrictEqual(plainListResult(emptyList), {
       objects: [],
       truncated: false,
       delimitedPrefixes: [],
@@ -1855,7 +1880,7 @@ export const r2BindingApiTests = {
       startAfter: 'after',
       include: [],
     });
-    assert.deepStrictEqual(optionList, {
+    assert.deepStrictEqual(plainListResult(optionList), {
       objects: [],
       truncated: true,
       cursor: 'cursor-out',
@@ -1885,7 +1910,7 @@ export const r2BindingApiTests = {
           !include.includes('customMetadata')
         );
         if (include.includes('httpMetadata')) {
-          assert.deepStrictEqual(object.httpMetadata, {});
+          assert.deepStrictEqual(withoutUnsetFields(object.httpMetadata), {});
         }
         if (include.includes('customMetadata')) {
           assert.deepStrictEqual(object.customMetadata, {});

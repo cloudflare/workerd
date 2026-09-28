@@ -19,8 +19,7 @@ const unitTests :Workerd.Config = (
           ( name = "R2_LIST_HONOR_INCLUDE", text = "false" ),
         ],
         compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
-                              "streams_enable_constructors", "r2_binding_jsrpc",
-                              "disable_fast_jsg_struct"],
+                              "streams_enable_constructors", "r2_binding_jsrpc"],
       )
     ),
     ( name = "r2-test", worker = Passthrough.passthroughLegacyListWorker ),
