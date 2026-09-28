@@ -1,0 +1,41 @@
+src/cloudflare/durable-objects.ts
+  s_f70c3d9c923e90::t_f27a9514a78231 1-40
+src/cloudflare/internal/workers.d.ts
+  s_f70c3d9c923e90::t_939f677c9df026 67-74
+src/workerd/api/tests/BUILD.bazel
+  s_f70c3d9c923e90::t_23dd32ed570fc5 41-45
+src/workerd/api/tests/new-module-registry-test.js
+  s_f70c3d9c923e90::t_b3553b17100bdf 21,35
+src/workerd/api/tests/retryable-test.js
+  s_f70c3d9c923e90::t_967dea8a9c4c57 1-119
+src/workerd/api/tests/retryable-test.wd-test
+  s_f70c3d9c923e90::t_ac9f4833024e74 1-13
+src/workerd/api/workers-module.c++
+  s_f70c3d9c923e90::t_498fedefd318dc 79-91
+src/workerd/api/workers-module.h
+  s_f70c3d9c923e90::t_e159b06015e153 14-16,96-100,117
+types/defines/durable-objects.d.ts
+  s_f70c3d9c923e90::t_84204a9d9baa26 1-20
+types/generated-snapshot/experimental/index.d.ts
+  s_f70c3d9c923e90::t_3ecc100229a06b 14929-14948
+types/generated-snapshot/index.d.ts
+  s_f70c3d9c923e90::t_b970c212652570 14646-14665
+types/test/types/durable-objects.ts
+  s_f70c3d9c923e90::t_702bd5d8571df9 1-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5c36db9c33bf84b46701e8399f1d49e742229621",
+  "prompts": {},
+  "sessions": {
+    "s_f70c3d9c923e90": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2fdf8364ffeOHX8yTIJunIGkw",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
