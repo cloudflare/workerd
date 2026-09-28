@@ -3740,6 +3740,26 @@ inline Value SelfRef::asValue(Lock& js) const {
   return Value(js.v8Isolate, getHandle(js).As<v8::Value>());
 }
 
+// Returns a JavaScript function that calls `callback` with `boundArgs` as its leading arguments
+// and the caller's arguments after them: `Function.prototype.bind` applied, with no receiver, to a
+// new function over `callback`. This is how a function made from a static callback carries
+// JavaScript values as its state: a startup snapshot serializes a v8::Function's data at isolate
+// level, where context objects are not allowed, while a bound function is an ordinary context
+// object.
+//
+// The `bind` applied is the one the context was created with (see saveFunctionPrototypeBind()),
+// so JavaScript can neither observe the call nor reach the function that is bound: `callback` is
+// only ever called with `boundArgs` in front. It does not see the receiver of the call. The
+// returned function has the empty name of a function made directly over a callback, and
+// `callback` is registered as a snapshot external reference.
+v8::Local<v8::Function> newBoundFunction(
+    Lock& js, v8::FunctionCallback callback, kj::ArrayPtr<const v8::Local<v8::Value>> boundArgs);
+
+// Keeps `context`'s `Function.prototype.bind` where newBoundFunction() finds it, whatever
+// JavaScript does to `Function.prototype` later. Called on a new context before any JavaScript
+// runs in it; a context restored from a startup snapshot already carries it.
+void saveFunctionPrototypeBind(v8::Isolate* isolate, v8::Local<v8::Context> context);
+
 namespace _ {
 
 // Helper class for JSG_TRY / JSG_CATCH macros.

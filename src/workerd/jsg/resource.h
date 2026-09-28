@@ -1920,6 +1920,8 @@ class ResourceWrapper {
     // Expose the type of the global scope in the global scope itself.
     exposeGlobalScopeType(isolate, context);
 
+    saveFunctionPrototypeBind(isolate, context);
+
     KJ_IF_SOME(newModuleRegistry, options.newModuleRegistry) {
       ptr->setModuleRegistryBackingOwner(JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
         // The context must be current for attachToIsolate to succeed.

@@ -785,6 +785,55 @@ MemoryProtectionKeyScope::PkeyScope::~PkeyScope() {
 }
 #endif
 
+namespace {
+
+// The private name under which a context's %Function.prototype% keeps its original `bind`.
+v8::Local<v8::Private> functionPrototypeBindKey(v8::Isolate* isolate) {
+  return v8::Private::ForApi(isolate, v8StrIntern(isolate, "jsg::functionPrototypeBind"_kj));
+}
+
+}  // namespace
+
+void saveFunctionPrototypeBind(v8::Isolate* isolate, v8::Local<v8::Context> context) {
+  // A restored context carries what its zygote saved, and by now JavaScript may have replaced
+  // `Function`.
+  if (IsolateBase::from(isolate).isStartingFromSnapshot()) return;
+
+  // The prototype of `Function` itself is %Function.prototype%.
+  auto function = check(context->Global()->Get(context, v8StrIntern(isolate, "Function"_kj)));
+  auto prototype = function.As<v8::Object>()->GetPrototype().As<v8::Object>();
+  auto bind = check(prototype->Get(context, v8StrIntern(isolate, "bind"_kj)));
+  KJ_ASSERT(bind->IsFunction());
+  check(prototype->SetPrivate(context, functionPrototypeBindKey(isolate), bind));
+}
+
+v8::Local<v8::Function> newBoundFunction(
+    Lock& js, v8::FunctionCallback callback, kj::ArrayPtr<const v8::Local<v8::Value>> boundArgs) {
+  auto isolate = js.v8Isolate;
+  auto context = js.v8Context();
+
+  isolateRegisterExternalReference(isolate, reinterpret_cast<intptr_t>(callback));
+  auto target = check(v8::Function::New(context, callback));
+
+  // The prototype of a new function is %Function.prototype%, whatever JavaScript has done to
+  // `Function` since the context was created.
+  auto prototype = target->GetPrototype().As<v8::Object>();
+  auto bind = check(prototype->GetPrivate(context, functionPrototypeBindKey(isolate)));
+  KJ_ASSERT(bind->IsFunction(), "the context was not created with saveFunctionPrototypeBind()");
+
+  // Function.prototype.bind(thisArg, ...boundArgs), called on `target`.
+  v8::LocalVector<v8::Value> args(isolate, boundArgs.size() + 1);
+  args[0] = v8::Undefined(isolate);
+  kj::arrayPtr(args.data(), args.size()).slice(1).copyFrom(boundArgs);
+  auto bound = check(bind.As<v8::Function>()->Call(context, target, args.size(), args.data()))
+                   .As<v8::Function>();
+
+  // A bound function is named "bound " followed by the name of its target.
+  check(bound->DefineOwnProperty(context, v8StrIntern(isolate, "name"_kj),
+      v8::String::Empty(isolate), static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontEnum)));
+  return bound;
+}
+
 namespace _ {
 
 JsgCatchScope::JsgCatchScope(Lock& js): js(js) {
