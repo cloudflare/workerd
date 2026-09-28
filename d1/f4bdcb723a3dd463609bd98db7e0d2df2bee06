@@ -1,16 +1,9 @@
-src/workerd/api/output-gate-test.c++
-  s_a29df4c77cfcb1::t_872e31d0f4917e 5-17,30-45,48-124,126,128-130,133-169
-  s_a29df4c77cfcb1::t_cf8a8ae0a365a0 1
-  s_a29df4c77cfcb1::t_6a74f81c60778b 2-4
-  s_a29df4c77cfcb1::t_97a48e25a824e9 127,131
-  s_a29df4c77cfcb1::t_f9742b1c685675 18-29,46-47,125,132
-src/workerd/api/web-socket.c++
-  s_a29df4c77cfcb1::t_36dc8aad3db5fa 499-503,537-538
 src/workerd/api/BUILD.bazel
-  s_a29df4c77cfcb1::t_872e31d0f4917e 685-692
-  s_a29df4c77cfcb1::t_e5280c8102c25f 684
+  s_b716b0d48442fc::t_dd82fb7da7b9b9 684-692
 src/workerd/api/queue.c++
-  s_a29df4c77cfcb1::t_36dc8aad3db5fa 265-272,287-288,406-413,428-429
+  s_b716b0d48442fc::t_3113804c706199 265-272,287-288,406-413,428-429
+src/workerd/api/web-socket.c++
+  s_058aebe6755b86::t_7ae06a954fa9f5 499-503,537-538
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -18,11 +11,19 @@ src/workerd/api/queue.c++
   "base_commit_sha": "d1f4bdcb723a3dd463609bd98db7e0d2df2bee06",
   "prompts": {},
   "sessions": {
-    "s_a29df4c77cfcb1": {
+    "s_058aebe6755b86": {
       "agent_id": {
         "tool": "opencode",
-        "id": "ses_056700b0affe7yJjLtTlvExuxv",
+        "id": "ses_f56952ceeffe4Mg4IG4It72qBs",
         "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_b716b0d48442fc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f27481c64ffejF0PRmNbz1lsxV",
+        "model": "claude-opus-5-5"
       },
       "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
     }

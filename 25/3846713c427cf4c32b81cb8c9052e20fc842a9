@@ -1,10 +1,12 @@
-src/workerd/io/worker-entrypoint.c++
-  s_b716b0d48442fc::t_538cc325e4f1b6 567-574
+src/cloudflare/durable-objects.ts
+  s_b716b0d48442fc::t_0bce19af53c09e 7-40
+src/workerd/api/tests/retryable-test.js
+  s_b716b0d48442fc::t_d8b067b429caa1 6-7,38-97
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.6.10",
-  "base_commit_sha": "fdb86a0ec5ee8c93b950924b32071cc6a9e0addc",
+  "base_commit_sha": "253846713c427cf4c32b81cb8c9052e20fc842a9",
   "prompts": {},
   "sessions": {
     "s_b716b0d48442fc": {

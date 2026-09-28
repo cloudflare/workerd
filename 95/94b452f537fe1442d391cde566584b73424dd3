@@ -1,10 +1,12 @@
-src/workerd/io/worker-entrypoint.c++
-  s_b716b0d48442fc::t_538cc325e4f1b6 567-574
+src/workerd/api/jsrpc-call-retry-test.c++
+  s_b716b0d48442fc::t_6bf1320d6c8507 77,80,273-277,308,311-312,319-325,463-464,548-551,903
+src/workerd/tests/test-fixture.c++
+  s_b716b0d48442fc::t_e082cfe795581c 125-128,153-158,176,406-407,501,573-575
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.6.10",
-  "base_commit_sha": "fdb86a0ec5ee8c93b950924b32071cc6a9e0addc",
+  "base_commit_sha": "9594b452f537fe1442d391cde566584b73424dd3",
   "prompts": {},
   "sessions": {
     "s_b716b0d48442fc": {

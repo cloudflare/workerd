@@ -1,10 +1,12 @@
-src/workerd/io/worker-entrypoint.c++
-  s_b716b0d48442fc::t_538cc325e4f1b6 567-574
+src/workerd/api/worker-rpc.c++
+  s_b716b0d48442fc::t_01c5d230b17d2d 951-952,955,958
+src/workerd/api/worker-rpc.h
+  s_b716b0d48442fc::t_c2892675726f45 177
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.6.10",
-  "base_commit_sha": "fdb86a0ec5ee8c93b950924b32071cc6a9e0addc",
+  "base_commit_sha": "b5a82148f611563a84d0d65ff783e402bc611c02",
   "prompts": {},
   "sessions": {
     "s_b716b0d48442fc": {
