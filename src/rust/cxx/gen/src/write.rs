@@ -1698,14 +1698,27 @@ fn write_rust_vec_impl(out: &mut OutFile, key: NamedImplKey) {
 }
 
 // Writes static assertion that we do not use an Own with a static disposer
+// Writes the layout assertions for `kj::Own<T>` and the drop function behind the Rust
+// `kj_rs::OwnTarget` implementation that the macro generates for the same `T`.
+//
+// The drop is typed: `kj::Own<T>::~Own()` hands the disposer the complete object's address
+// (`dynamic_cast<void*>` for polymorphic `T`), which Rust cannot compute for a `T` that is a base
+// at a nonzero offset of the object it points into. That needs `T` complete here.
 fn write_kj_own(out: &mut OutFile, key: NamedImplKey) {
     let ident = key.rust;
     let resolve = out.types.resolve(ident);
     let inner = resolve.name.to_fully_qualified();
+    let instance = ident.to_mangled(out.types);
 
     out.include.utility = true;
     out.include.kj_rs = true;
+    out.builtin.is_complete = true;
 
+    writeln!(
+        out,
+        "static_assert(::rust::detail::is_complete<{}>::value, \"definition of {} is required to drop kj::Own<{}> from Rust\");",
+        inner, resolve.name.cxx, resolve.name.cxx,
+    );
     // Static disposers are not supported, only Owns containing 2 pointers are allowed
     writeln!(
         out,
@@ -1723,6 +1736,15 @@ fn write_kj_own(out: &mut OutFile, key: NamedImplKey) {
         inner
     );
     write_kj_maybe_niche_assert(out, &format!("::kj::Own<{}>", inner));
+
+    begin_function_definition(out);
+    writeln!(
+        out,
+        "void cxxbridge$kjrs$own${}$drop(::kj::Own<{}> *own) {{",
+        instance, inner,
+    );
+    writeln!(out, "  own->~Own();");
+    writeln!(out, "}}");
 }
 
 // Rust's `KjMaybe<KjOwn<T>>`, `KjMaybe<KjRc<T>>` and `KjMaybe<KjArc<T>>` hard-code KJ's

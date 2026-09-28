@@ -56,7 +56,7 @@ struct CompatFlagField {
   capnp::StructSchema::Field field;
 };
 
-const kj::ArrayPtr<const CompatFlagField> getCompatFlagFields() {
+kj::StaticArrayPtr<const CompatFlagField> getCompatFlagFields() {
   static const auto table = []() {
     auto schema = capnp::Schema::from<CompatibilityFlags>();
     kj::Vector<CompatFlagField> fields;
@@ -73,7 +73,7 @@ const kj::ArrayPtr<const CompatFlagField> getCompatFlagFields() {
     }
     return fields.releaseAsArray();
   }();
-  return table;
+  return {table.begin(), table.size()};
 }
 
 // Per-context state for the bootstrap require() mechanism.

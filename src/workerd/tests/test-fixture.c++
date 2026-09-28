@@ -347,7 +347,7 @@ TestFixture::TestFixture(SetupParams&& params)
           httpOverCapnpFactory,
           byteStreamFactory),
       errorReporter(kj::heap<MockErrorReporter>()),
-      memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(*timer)),
+      memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()),
       isolateGroup(jsg::newIsolateGroup()),
       api(kj::heap<server::WorkerdApi>(testV8System,
           params.featureFlags.orDefault(CompatibilityFlags::Reader()),

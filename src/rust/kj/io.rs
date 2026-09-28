@@ -23,6 +23,12 @@ pub mod ffi {
             this_: Pin<&mut AsyncOutputStream>,
         ) -> Result<()>;
     }
+
+    // Dropping a `KjOwn` of these is generated here, where they are declared; the bridges that
+    // alias them cannot provide it.
+    impl KjOwn<AsyncInputStream> {}
+    impl KjOwn<AsyncIoStream> {}
+    impl KjOwn<AsyncOutputStream> {}
 }
 
 pub type AsyncInputStream = ffi::AsyncInputStream;

@@ -55,10 +55,10 @@ CryptoKeyUsageSet CryptoKeyUsageSet::byName(kj::StringPtr name) {
   return {};
 }
 
-kj::ArrayPtr<const CryptoKeyUsageSet> CryptoKeyUsageSet::singletons() {
+kj::StaticArrayPtr<const CryptoKeyUsageSet> CryptoKeyUsageSet::singletons() {
   static const workerd::api::CryptoKeyUsageSet singletons[] = {
     encrypt(), decrypt(), sign(), verify(), deriveKey(), deriveBits(), wrapKey(), unwrapKey()};
-  return singletons;
+  return {singletons, kj::size(singletons)};
 }
 
 CryptoKeyUsageSet CryptoKeyUsageSet::validate(kj::StringPtr normalizedName,

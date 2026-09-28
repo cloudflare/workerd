@@ -313,6 +313,10 @@ class JsRpcClientProvider: public jsg::Object {
     // The per-call span may be opened while resolving a root Fetcher so its user span can be
     // propagated as the callee invocation's parent before the session client is constructed.
     kj::Maybe<TraceContext> callSpan;
+
+    // Present for retry attempts whose underlying JSRPC session must be canceled at the retry
+    // timeout, even if capabilities derived from its result pipeline remain reachable.
+    kj::Maybe<kj::Rc<kj::Canceler>> attemptCanceler;
   };
 
   // Append this provider's property path, if any, without resolving the destination client.
@@ -331,6 +335,12 @@ class JsRpcClientProvider: public jsg::Object {
 
   virtual void onActorCallRetry() {
     KJ_FAIL_REQUIRE("actor call retry requested from an unsupported RPC target");
+  }
+
+  // The retry policy configured on the binding this provider dispatches through, if any. None means
+  // the runtime's default applies. Only called on providers that support actor call retries.
+  virtual kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() {
+    return kj::none;
   }
 
   // Get a capnp client that can be used to dispatch one call.
@@ -497,6 +507,9 @@ class JsRpcProperty: public JsRpcClientProvider {
   }
   void onActorCallRetry() override {
     parent->onActorCallRetry();
+  }
+  kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() override {
+    return parent->getUserDefinedRetryPolicy();
   }
   ClientForOneCall getClientForOneCall(
       jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;

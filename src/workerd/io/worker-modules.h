@@ -146,8 +146,7 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // can be backed by a temporary rust::String, and edgeworker source is
           // backed by a script-fetcher response. Copy it once into shared storage
           // so V8 external strings can safely outlive the registry.
-          bundleBuilder.addEsmModule(
-              def.name, kj::arc<jsg::OwnedAscii>(kj::heapArray<const char>(content.body)), flags);
+          bundleBuilder.addEsmModule(def.name, jsg::copyToArc(content.body), flags);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
@@ -358,8 +357,8 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
     }
     KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
       // TODO(soon): Make sure passing nullptr to compile cache is desired.
-      return jsg::ModuleRegistry::ModuleInfo(js, name, content.body, nullptr /* compile cache */,
-          jsg::ModuleInfoCompileOption::BUNDLE, observer);
+      return jsg::ModuleRegistry::ModuleInfo(
+          js, name, content.body, nullptr /* compile cache */, observer);
     }
     KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
       return jsg::ModuleRegistry::ModuleInfo(js, name, content.namedExports,

@@ -3749,7 +3749,10 @@ struct Worker::Actor::Impl {
       >
       classInstance;
 
-  class HooksImpl: public InputGate::Hooks, public OutputGate::Hooks, public ActorCache::Hooks {
+  class HooksImpl final: public InputGate::Hooks,
+                         public OutputGate::Hooks,
+                         public ActorCache::Hooks,
+                         private kj::TaskSet::ErrorHandler {
    public:
     HooksImpl(kj::Own<Loopback> loopback, TimerChannel& timerChannel, ActorObserver& metrics)
         : loopback(kj::mv(loopback)),
@@ -3809,12 +3812,20 @@ struct Worker::Actor::Impl {
       metrics.storageWriteCompleted(latency);
     }
 
+    void taskFailed(kj::Exception&& exception) override {
+      LOG_EXCEPTION("alarmPreviewTaskCleanup", exception);
+    }
+
    private:
     kj::Own<Loopback> loopback;  // only for updateAlarmInMemory()
     TimerChannel& timerChannel;  // only for afterLimitTimeout() and updateAlarmInMemory()
     ActorObserver& metrics;
 
     kj::Maybe<kj::Promise<void>> maybeAlarmPreviewTask;
+
+    // Holds displaced alarm tasks until the next turn of the event loop, so that replacing or
+    // clearing the alarm from within the task itself doesn't destroy a running promise callback.
+    kj::TaskSet alarmPreviewTaskCleanups{*this};
   };
 
   HooksImpl hooks;
@@ -4304,6 +4315,13 @@ void Worker::Actor::assertCanSetAlarm() {
 }
 
 void Worker::Actor::Impl::HooksImpl::updateAlarmInMemory(kj::Maybe<kj::Date> newTime) {
+  // The running alarm handler can update the alarm, and runAlarm() itself clears it after the
+  // handler finishes, so this can be called from within the old task. Defer destroying the old
+  // task to a later turn rather than destroying it here, while one of its callbacks is running.
+  if (maybeAlarmPreviewTask != kj::none) {
+    alarmPreviewTaskCleanups.add(kj::yield().attach(kj::mv(maybeAlarmPreviewTask)));
+  }
+
   if (newTime == kj::none) {
     maybeAlarmPreviewTask = kj::none;
     return;

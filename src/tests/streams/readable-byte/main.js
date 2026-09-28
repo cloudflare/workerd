@@ -59,6 +59,7 @@ export {
   pullThrowErrorsStream,
   pullThrowIgnoredIfErrored,
   backpressureByteStreamHwm,
+  startPromiseSettledInNewPromise,
 } from 'pull-timing';
 
 export {

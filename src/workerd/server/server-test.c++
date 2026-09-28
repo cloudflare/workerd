@@ -769,6 +769,87 @@ KJ_TEST("Server: UDP listener drops truncated datagrams") {
   KJ_EXPECT(!test.hasUdp("udp-address"));
 }
 
+KJ_TEST("Server: TCP listener survives connect() handler exceptions") {
+  TestServer test(R"((
+    services = [(
+      name = "worker",
+      worker = (
+        compatibilityDate = "2024-01-01",
+        modules = [(
+          name = "worker.js",
+          esModule =
+            `export default {
+            `  async connect(socket) {
+            `    const writer = socket.writable.getWriter();
+            `    await writer.write(new TextEncoder().encode("before-throw"));
+            `    throw new Error("connect handler threw");
+            `  }
+            `}
+        )]
+      )
+    )],
+    sockets = [(
+      name = "tcp",
+      address = "tcp-address",
+      tcp = (),
+      service = "worker"
+    )]
+  ))"_kj);
+
+  test.start();
+
+  // The second connection is only served if the server survived the first exception.
+  for (auto i = 0; i < 2; i++) {
+    KJ_EXPECT_LOG(INFO, "Error: connect handler threw");
+    KJ_EXPECT_LOG(ERROR, "TCP connect() handler threw");
+    auto conn = test.connect("tcp-address");
+    conn.recv("before-throw");
+    KJ_EXPECT(conn.isEof());
+  }
+}
+
+KJ_TEST("Server: UDP listener survives connect() handler exceptions") {
+  TestServer test(R"((
+    services = [(
+      name = "worker",
+      worker = (
+        compatibilityDate = "2024-01-01",
+        compatibilityFlags = ["experimental"],
+        modules = [(
+          name = "worker.js",
+          esModule =
+            `export default {
+            `  async connect(socket) {
+            `    const { value } = await socket.readable.getReader().read();
+            `    await socket.writable.getWriter().write(value);
+            `    throw new Error("connect handler threw");
+            `  }
+            `}
+        )]
+      )
+    )],
+    sockets = [(
+      name = "udp",
+      address = "udp-address",
+      udp = (),
+      service = "worker"
+    )]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  // The second flow is only served if the server survived the first exception.
+  for (auto i = 0; i < 2; i++) {
+    KJ_EXPECT_LOG(INFO, "Error: connect handler threw");
+    test.sendUdp("udp-address", "peer:1234", "hello"_kjb);
+    auto response = test.receiveUdp("udp-address");
+    KJ_EXPECT(response.content.asPtr() == "hello"_kjb);
+    KJ_EXPECT(response.destination == "peer:1234");
+    test.getWaitScope().poll();
+  }
+}
+
 KJ_TEST("Server: serve basic Service Worker") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",

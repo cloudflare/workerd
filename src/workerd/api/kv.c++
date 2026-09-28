@@ -535,11 +535,9 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
         getHttpClient(context, headers, LimitEnforcer::KvOpType::LIST, urlStr, traceContext);
 
     auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
-    return context.attachSpans(js,
-        context.awaitIo(js, kj::mv(request.response),
-            [&context, client = kj::mv(client), traceContext = kj::mv(traceContext)](
-                jsg::Lock& js, kj::HttpClient::Response&& response) mutable
-            -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
+    return context.awaitIo(js, kj::mv(request.response),
+        [&context, client = kj::mv(client), traceContext = kj::mv(traceContext)](jsg::Lock& js,
+            kj::HttpClient::Response&& response) mutable -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
       checkForErrorStatus("GET", response);
 
       kj::Maybe<jsg::JsRef<jsg::JsValue>> cacheStatus =
@@ -570,8 +568,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
                 [&](jsg::JsRef<jsg::JsValue>& cs) -> jsg::JsValue { return cs.getHandle(js); }));
         return jsg::JsRef(js, result);
       });
-    }),
-        kj::mv(traceContext));
+    });
   });
 }
 
