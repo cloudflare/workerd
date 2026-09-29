@@ -14,6 +14,17 @@ export class ConnectProxy extends WorkerEntrypoint {
   }
 }
 
+// Reached via a service binding from connect-handler-starttls-test.js. Relays to a server that
+// negotiates TLS in-band and then performs a real handshake, without knowing the protocol or where
+// in it the upgrade falls. The client's startTls() is forwarded to the upstream socket, which is
+// why that socket has to be opened with secureTransport: 'starttls'.
+export class StartTlsProxy extends WorkerEntrypoint {
+  async connect(socket) {
+    const upstream = connect('localhost:8085', { secureTransport: 'starttls' });
+    await socket.proxyTo(upstream);
+  }
+}
+
 export class ConnectEndpoint extends WorkerEntrypoint {
   async connect(socket) {
     const enc = new TextEncoder();
