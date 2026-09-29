@@ -1,0 +1,93 @@
+build/deps/deps.jsonc
+  s_a0df21b9ec4e2c::t_ad5d077d486c84 47,73
+build/deps/gen/deps.MODULE.bazel
+  s_a0df21b9ec4e2c::t_1f28a44ac14ec8 41,69-70,72
+build/deps/v8.MODULE.bazel
+  s_a0df21b9ec4e2c::t_a894df396d0837 21,23,69
+patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch
+  s_a0df21b9ec4e2c::t_0cb28f0aeb3012 40,43
+patches/v8/0002-Allow-manually-setting-ValueSerializer-format-versio.patch
+  s_a0df21b9ec4e2c::t_8d49c191d6e901 26,29,41
+patches/v8/0003-Allow-Windows-builds-under-Bazel.patch
+  s_a0df21b9ec4e2c::t_165ffe76da3213 9,12
+patches/v8/0005-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch
+  s_a0df21b9ec4e2c::t_a59d17276ee42a 13,24,53
+patches/v8/0006-Implement-Promise-Context-Tagging.patch
+  s_a0df21b9ec4e2c::t_1877749d18490b 8,11,27,30,40,61,64,208,250,262,270,312,315,331,344,353,356,370,373,457,460,516
+patches/v8/0007-Randomize-the-initial-ExecutionContextId-used-by-the.patch
+  s_a0df21b9ec4e2c::t_531b09ccac33c1 13
+patches/v8/0009-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch
+  s_a0df21b9ec4e2c::t_0a37a4087cc969 33,36,48
+patches/v8/0010-Modify-where-to-look-for-fp16-dependency.-This-depen.patch
+  s_a0df21b9ec4e2c::t_23bc5396059b3c 11,14,45
+patches/v8/0011-Revert-heap-Add-masm-specific-unwinding-annotations-.patch
+  s_a0df21b9ec4e2c::t_38d9fe812f6d21 17,20,30
+patches/v8/0012-Update-illegal-invocation-error-message-in-v8.patch
+  s_a0df21b9ec4e2c::t_7e93ceb124052b 26,29,47,61
+patches/v8/0013-Implement-cross-request-context-promise-resolve-hand.patch
+  s_a0df21b9ec4e2c::t_75c6711776d536 9,12,39,42,52,55,169,181,206,217,244,259,262,398,401,476
+patches/v8/0014-Add-another-slot-in-the-isolate-for-embedder.patch
+  s_a0df21b9ec4e2c::t_173bc193e6b556 9,12
+patches/v8/0015-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch
+  s_a0df21b9ec4e2c::t_4d08d2305ec214 33,36,48
+patches/v8/0017-Enable-V8-shared-linkage.patch
+  s_a0df21b9ec4e2c::t_611da0eacaa240 9,12,20,28,36,45,53,64
+patches/v8/0018-Modify-where-to-look-for-fast_float-and-simdutf.patch
+  s_a0df21b9ec4e2c::t_7fced23ad58780 15,18,26,35,67
+patches/v8/0020-Add-methods-to-get-heap-and-external-memory-sizes-di.patch
+  s_a0df21b9ec4e2c::t_c7802f88b6e0a5 11,14,32,35
+patches/v8/0021-Port-concurrent-mksnapshot-support.patch
+  s_a0df21b9ec4e2c::t_68996e1cb03450 9,24
+patches/v8/0022-Port-V8_USE_ZLIB-support.patch
+  s_a0df21b9ec4e2c::t_363350222b862b 9,32
+patches/v8/0023-Modify-where-to-look-for-dragonbox.patch
+  s_a0df21b9ec4e2c::t_6dbf144c729e7b 8,11
+patches/v8/0026-Implement-additional-Exception-construction-methods.patch
+  s_a0df21b9ec4e2c::t_f2d95a1db7f1a8 28,31
+patches/v8/0028-bind-icu-to-googlesource.patch
+  s_a0df21b9ec4e2c::t_574911d91bc545 8,11,20
+patches/v8/0029-Add-v8-String-IsFlat-API.patch
+  s_a0df21b9ec4e2c::t_4564b113a36661 27,30
+patches/v8/0030-Expose-AdjustAmountOfExternalAllocatedMemoryImpl-as-.patch
+  s_a0df21b9ec4e2c::t_bee89b9efba21e 17,20,35
+patches/v8/0031-Add-verify_write_barriers-flag-in-V8-s-bazel-config.patch
+  s_a0df21b9ec4e2c::t_6e328094cc2247 8
+patches/v8/0033-Return-false-on-Object.hasOwnProperty-with-intercept.patch
+  s_a0df21b9ec4e2c::t_165455c2f88af8 8
+patches/v8/0038-Properly-depend-on-llvm-libc.patch
+  s_a0df21b9ec4e2c::t_03b1d6618e7ac0 9,12,26
+patches/v8/0039-Fix-TSan-build-without-the-V8-sandbox.patch
+  s_a0df21b9ec4e2c::t_006e1191cf474e 12,15,23,31
+patches/v8/0040-Enable-Perfetto-support-in-the-V8-Bazel-build.patch
+  s_a0df21b9ec4e2c::t_7f395fb1dedcce 14,34,63,71,94
+patches/v8/0041-Disable-preserve_most-on-Windows-x64-before-Clang-22.patch
+  s_a0df21b9ec4e2c::t_4d300a46d4b343 18,21
+patches/v8/0042-cppgc-Sweep-cppgc-eagerly-with-non-incremental-GC.patch
+  s_a0df21b9ec4e2c::t_cfe68ba82637da 13
+patches/v8/0043-Allow-V8-release-archives-without-metagen-Clang-head.patch
+  s_a0df21b9ec4e2c::t_2379c5c4bbaa81 17,20
+patches/v8/0044-Disable-metagen-instance-types-in-the-Bazel-build.patch
+  s_a0df21b9ec4e2c::t_4c363e6e277a73 1-31
+src/workerd/jsg/observer.h
+  s_a0df21b9ec4e2c::t_422dd6328228f0 172-173
+src/workerd/jsg/setup-test.c++
+  s_a0df21b9ec4e2c::t_481db8cfd1efc1 33-40
+src/workerd/jsg/setup.c++
+  s_a0df21b9ec4e2c::t_4c7b0576bb9da0 551-556,560-567,570,574
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0b1086ee1ef24f99ba8122fd924ded5311992e9a",
+  "prompts": {},
+  "sessions": {
+    "s_a0df21b9ec4e2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_a0df21b9ec4e2c",
+        "model": "unknown"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}
