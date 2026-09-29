@@ -22,7 +22,12 @@ class Blob: public jsg::Object {
   Blob(jsg::Lock& js, jsg::JsBufferSource data, kj::String type);
   Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type);
 
-  kj::ArrayPtr<const byte> getData() const KJ_LIFETIMEBOUND;
+  // The Blob's bytes. Every copy of the bytes starts here: it verifies that they lie inside
+  // the V8 sandbox, which is where a genuine Blob's ArrayBuffer always lives, and aborts
+  // otherwise. See jsg::requireInsideSandbox(). Taking the lock ties the check to the isolate
+  // whose sandbox the bytes must be in. The check covers only the bytes: `type` (and File's
+  // `name`) are ordinary heap strings, which the sandbox range cannot vouch for.
+  kj::ArrayPtr<const byte> getData(jsg::Lock& js) const KJ_LIFETIMEBOUND;
 
   // ---------------------------------------------------------------------------
   // JS API

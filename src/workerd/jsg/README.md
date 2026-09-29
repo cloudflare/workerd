@@ -556,6 +556,15 @@ Supported template params: `v8::ArrayBuffer`, `v8::Uint8Array`, `v8::Int8Array`,
 `v8::Int32Array`, `v8::Float32Array`, `v8::Float64Array`, `v8::BigInt64Array`,
 `v8::BigUint64Array`, `v8::DataView`.
 
+## Sandbox Range Checks
+
+`sandbox.h` provides `isInsideSandbox(isolate, range)` and
+`requireInsideSandbox(isolate, range, what)` for native byte views expected to be
+backed by V8 ArrayBuffers. The latter logs a fatal error and aborts if any byte
+lies outside the isolate group's sandbox. Empty ranges are accepted; both checks
+are no-ops in builds without the V8 sandbox. They validate address containment,
+not allocation ownership or object type.
+
 ## Observer Hooks
 
 | Observer                    | Method                            | When Called                               |

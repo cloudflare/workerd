@@ -7,6 +7,7 @@
 #include <workerd/api/streams/readable.h>
 #include <workerd/io/features.h>
 #include <workerd/io/observer.h>
+#include <workerd/jsg/sandbox.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 
@@ -41,7 +42,7 @@ kj::Maybe<jsg::JsBufferSource> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> m
         partSize = text.asBytes().size();
       }
       KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-        partSize = blob->getData().size();
+        partSize = blob->getData(js).size();
       }
     }
     cachedPartSizes[index++] = partSize;
@@ -98,7 +99,7 @@ kj::Maybe<jsg::JsBufferSource> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> m
         view.write(text.asBytes());
       }
       KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-        auto data = blob->getData();
+        auto data = blob->getData(js);
         KJ_ASSERT(data.size() == cachedPartSizes[index++]);
         if (data.size() == 0) continue;
         KJ_ASSERT(view.size() >= data.size());
@@ -179,7 +180,7 @@ jsg::Ref<Blob> Blob::constructor(
         if (parent->getSize() == 0) {
           return js.alloc<Blob>(kj::mv(type));
         }
-        auto ptr = parent->data;
+        auto ptr = parent->getData(js);
         KJ_IF_SOME(root, parent->ownData.template tryGet<jsg::Ref<Blob>>()) {
           parent = root.addRef();
         }
@@ -194,7 +195,8 @@ jsg::Ref<Blob> Blob::constructor(
   return js.alloc<Blob>(kj::mv(type));
 }
 
-kj::ArrayPtr<const byte> Blob::getData() const {
+kj::ArrayPtr<const byte> Blob::getData(jsg::Lock& js) const {
+  jsg::requireInsideSandbox(js.v8Isolate, data, "Blob data"_kj);
   return data;
 }
 
@@ -204,31 +206,32 @@ jsg::Ref<Blob> Blob::slice(jsg::Lock& js,
     jsg::Optional<kj::String> type) {
 
   auto normalizedType = normalizeType(kj::mv(type).orDefault(nullptr));
-  if (data.size() == 0) {
+  auto bytes = getData(js);
+  if (bytes.size() == 0) {
     // Blob is empty, there's nothing to slice.
     return js.alloc<Blob>(kj::mv(normalizedType));
   }
 
   int start = maybeStart.orDefault(0);
-  int end = maybeEnd.orDefault(data.size());
+  int end = maybeEnd.orDefault(bytes.size());
 
   if (start < 0) {
     // Negative value interpreted as offset from end.
-    start += data.size();
+    start += bytes.size();
   }
   if (end < 0) {
     // Negative value interpreted as offset from end.
-    end += data.size();
+    end += bytes.size();
   }
 
   // Clamp start and end to range.
-  start = kj::max(0, kj::min(start, static_cast<int>(data.size())));
-  end = kj::max(start, kj::min(end, static_cast<int>(data.size())));
+  start = kj::max(0, kj::min(start, static_cast<int>(bytes.size())));
+  end = kj::max(start, kj::min(end, static_cast<int>(bytes.size())));
 
   // We run with KJ_IREQUIRE checks enabled in production, which will catch
   // out of bounds start/end ... but since we're clamping them above, this
   // should never actually be a problem.
-  auto slicedData = data.slice(start, end);
+  auto slicedData = bytes.slice(start, end);
 
   // If the slice is empty, we can just return a new empty Blob without worrying about
   // referencing the original data at all. Super minor optimization that avoids an
@@ -257,13 +260,13 @@ jsg::Ref<Blob> Blob::slice(jsg::Lock& js,
 
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> Blob::arrayBuffer(jsg::Lock& js) {
   FeatureObserver::maybeRecordUse(FeatureObserver::Feature::BLOB_AS_ARRAY_BUFFER);
-  auto ret = jsg::JsArrayBuffer::create(js, data);
+  auto ret = jsg::JsArrayBuffer::create(js, getData(js));
   return js.resolvedPromise(ret.addRef(js));
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> Blob::bytes(jsg::Lock& js) {
   FeatureObserver::maybeRecordUse(FeatureObserver::Feature::BLOB_AS_ARRAY_BUFFER);
-  auto ret = jsg::JsUint8Array::create(js, data);
+  auto ret = jsg::JsUint8Array::create(js, getData(js));
   return js.resolvedPromise(ret.addRef(js));
 }
 
@@ -271,7 +274,7 @@ jsg::Promise<jsg::JsRef<jsg::JsString>> Blob::text(jsg::Lock& js) {
   FeatureObserver::maybeRecordUse(FeatureObserver::Feature::BLOB_AS_TEXT);
   // Using js.str here instead of returning kj::String avoids an additional
   // intermediate allocation and copy of the string data.
-  return js.resolvedPromise(js.str(data.asChars()).addRef(js));
+  return js.resolvedPromise(js.str(getData(js).asChars()).addRef(js));
 }
 
 JsReadableStream Blob::stream(jsg::Lock& js) {
@@ -279,7 +282,7 @@ JsReadableStream Blob::stream(jsg::Lock& js) {
   // Pass no backing so that newMemorySource copies: our data is a V8 ArrayBuffer, and the
   // stream is read from the kj event loop where the isolate's MPK-protected sandbox pages
   // are unreadable.
-  return JsReadableStream::create(js, IoContext::current(), newMemorySource(data));
+  return JsReadableStream::create(js, IoContext::current(), newMemorySource(getData(js)));
 }
 
 // =======================================================================================
@@ -330,7 +333,7 @@ jsg::Ref<File> File::constructor(
         if (parent->getSize() == 0) {
           return js.alloc<File>(kj::mv(name), kj::mv(type), lastModified);
         }
-        auto ptr = parent->data;
+        auto ptr = parent->getData(js);
         KJ_IF_SOME(root, parent->ownData.template tryGet<jsg::Ref<Blob>>()) {
           parent = root.addRef();
         }
@@ -350,8 +353,9 @@ void Blob::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // structuredClone, we should find a way for the clones to
   // just share the same backend data to avoid the copy.
   serializer.writeLengthDelimited(type);
-  serializer.writeRawUint64(data.size());
-  serializer.writeRawBytes(data);
+  auto bytes = getData(js);
+  serializer.writeRawUint64(bytes.size());
+  serializer.writeRawBytes(bytes);
 }
 
 jsg::Ref<Blob> Blob::deserialize(
