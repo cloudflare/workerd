@@ -662,6 +662,7 @@ AlarmExceptionInfo inspectAlarmException(const kj::Exception& exception, IoConte
 kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj::Date scheduledTime,
     kj::Duration timeout,
     uint32_t retryCount,
+    IoContext_IncomingRequest& incomingRequest,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
 
@@ -735,7 +736,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::OK};
         }).exclusiveJoin(kj::mv(timeoutPromise));
       })
-          .catch_([&context, deferredDelete = kj::mv(armResult.deferredDelete)](
+          .catch_([&context, &incomingRequest, deferredDelete = kj::mv(armResult.deferredDelete)](
                       kj::Exception&& e) mutable {
         auto& actor = KJ_ASSERT_NONNULL(context.getActor());
         auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
@@ -749,7 +750,8 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         auto alarmException = inspectAlarmException(e, context);
 
         // This will include the error in inspector/tracers and log to syslog if internal.
-        context.logUncaughtExceptionAsync(UncaughtExceptionSource::ALARM_HANDLER, kj::mv(e));
+        context.logUncaughtExceptionAsync(
+            UncaughtExceptionSource::ALARM_HANDLER, kj::mv(e), incomingRequest);
 
         auto limitsExceeded = context.getLimitEnforcer().getLimitsExceeded();
         EventOutcome outcome = EventOutcome::ABORTED;

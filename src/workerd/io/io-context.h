@@ -207,6 +207,10 @@ class IoContext_IncomingRequest final {
   // worker invocation.
   tracing::InvocationSpanContext& getInvocationSpanContext();
 
+  // Returns this request's invocation span context, with the span ID replaced by that of
+  // `userSpan` if it has one.
+  tracing::InvocationSpanContext getInvocationSpanContextForUserSpan(SpanParent& userSpan);
+
  private:
   kj::Own<IoContext> context;
   kj::Own<RequestObserver> metrics;
@@ -417,8 +421,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       const jsg::JsMessage& message = jsg::JsMessage());
 
   // Log an uncaught exception from an asynchronous context, i.e. when the IoContext is not
-  // "current".
+  // "current". The exception is added to the trace of the current incoming request.
   void logUncaughtExceptionAsync(UncaughtExceptionSource source, kj::Exception&& e);
+
+  // Like above, but adds the exception to the trace of `incomingRequest`. Use this when the
+  // exception is known to belong to a specific request, such as the failure of its event handler:
+  // in an actor, the current incoming request may be a newer, unrelated one.
+  void logUncaughtExceptionAsync(
+      UncaughtExceptionSource source, kj::Exception&& e, IncomingRequest& incomingRequest);
 
   // Returns a promise that will reject with an exception if and when the request should be
   // aborted, e.g. because its CPU time expired. This should be joined with any promises for
@@ -1129,13 +1139,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // span's spanId (as pushed by `ctx.tracing.enterSpan`), falling back to the invocation
   // root's spanId when no user span is active.
   tracing::InvocationSpanContext getInvocationSpanContext() {
-    auto& base = getCurrentIncomingRequest().getInvocationSpanContext();
-    tracing::SpanId sid = getCurrentUserTraceSpan().getSpanId();
-    if (sid != tracing::SpanId::nullId) {
-      return tracing::InvocationSpanContext(
-          base.getTraceId(), base.getInvocationId(), sid, base.getTraceFlags());
-    }
-    return base.clone();
+    auto userSpan = getCurrentUserTraceSpan();
+    return getCurrentIncomingRequest().getInvocationSpanContextForUserSpan(userSpan);
   }
 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
@@ -1263,6 +1268,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   friend class IoPtr;
 
   void taskFailed(kj::Exception&& exception) override;
+
+  // Implements both logUncaughtExceptionAsync() overloads. `incomingRequest` is none to use the
+  // current incoming request.
+  void logUncaughtExceptionAsyncImpl(UncaughtExceptionSource source,
+      kj::Exception&& exception,
+      kj::Maybe<IncomingRequest&> incomingRequest);
+
   void requireCurrent();
   void checkFarGet(const DeleteQueue& expectedQueue, const std::type_info& type);
 

@@ -3458,8 +3458,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // an exception outcome – log the exception to avoid reporting an exception outcome without the
     // actual exception.
     KJ_IF_SOME(exc, kj::runCatchingExceptions([&]() {
-      incomingRequest->getContext().logUncaughtExceptionAsync(
-          UncaughtExceptionSource::ASYNC_TASK, e.clone());
+      ioctx.logUncaughtExceptionAsync(
+          UncaughtExceptionSource::ASYNC_TASK, e.clone(), *incomingRequest);
     })) {
       KJ_LOG(ERROR, "logUncaughtExceptionAsync() threw an exception?", exc);
     }
