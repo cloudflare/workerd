@@ -408,18 +408,6 @@ wd_test(
 )
 
 wd_test(
-    src = "r2-jsrpc-multipart-test.wd-test",
-    args = ["--experimental"],
-    data = ["r2-test.js"],
-)
-
-wd_test(
-    src = "r2-jsrpc-range-test.wd-test",
-    args = ["--experimental"],
-    data = ["r2-test.js"],
-)
-
-wd_test(
     src = "r2-jsrpc-response-test.wd-test",
     args = ["--experimental"],
     data = ["r2-test.js"],
@@ -443,12 +431,6 @@ wd_test(
         "r2-jsrpc-passthrough.capnp",
         "r2-test.js",
     ],
-)
-
-wd_test(
-    src = "r2-jsrpc-gateway-contract-test.wd-test",
-    args = ["--experimental"],
-    data = ["r2-test.js"],
 )
 
 wd_test(

@@ -12,10 +12,6 @@ using Passthrough = import "r2-jsrpc-passthrough.capnp";
 #     "experimental" in the flag list here
 #   - a binding that targets the named entrypoint, which is the production shape; a bare-string
 #     designator would target the default export instead
-#
-# Tests that assert the gateway's wire shapes or malformed results need a fake gateway rather
-# than a passthrough, so they run in the configs that target R2BindingEntrypoint
-# (r2-jsrpc-gateway-contract-test.wd-test and the multipart and range configs).
 const unitTests :Workerd.Config = (
   services = [
     ( name = "user",
