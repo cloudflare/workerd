@@ -85,8 +85,8 @@ struct FunctorCallback<TypeWrapper, Ret(Args...), kj::_::Indexes<indexes...>> {
       auto context = isolate->GetCurrentContext();
       auto& js = Lock::from(isolate);
       auto& wrapper = TypeWrapper::from(isolate);
-      auto& func = extractInternalPointer<WrappableFunction<Ret(Args...)>, false>(
-          isolate, context, args.Data().As<v8::Object>(), kNonResourceWrappableTagRange);
+      auto& func = extractInternalPointer<WrappableFunction<Ret(Args...)>, false>(isolate, context,
+          args.DataV2().As<v8::Value>().As<v8::Object>(), kNonResourceWrappableTagRange);
 
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
           []<size_t i>() { return TypeErrorContext::callbackArgument(i); });
@@ -117,7 +117,8 @@ struct FunctorCallback<TypeWrapper,
       auto& js = Lock::from(isolate);
       auto& func = extractInternalPointer<
           WrappableFunction<Ret(const v8::FunctionCallbackInfo<v8::Value>&, Args...)>, false>(
-          isolate, context, args.Data().As<v8::Object>(), kNonResourceWrappableTagRange);
+          isolate, context, args.DataV2().As<v8::Value>().As<v8::Object>(),
+          kNonResourceWrappableTagRange);
 
       auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
           []<size_t i>() { return TypeErrorContext::callbackArgument(i); });

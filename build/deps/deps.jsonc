@@ -44,7 +44,7 @@
       "url": "https://chromium.googlesource.com/chromium/deps/icu.git",
       "branch": "main",
       "build_file": "@v8//:bazel/BUILD.icu",
-      "freeze_commit": "6ebb40c594776cc2c21ea14df85a2a89a328b364",
+      "freeze_commit": "5aa526207171ecadf31597f0980a7b7ad8872f33",
       "patch_cmds": [
         "find source -name BUILD.bazel | xargs rm"
       ],
@@ -70,7 +70,7 @@
       "owner": "fastfloat",
       "repo": "fast_float",
       "branch": "main",
-      "freeze_commit": "34164f547b7df3f5d794ff67e9f885c36819ebfc",
+      "freeze_commit": "b0ab987b3dfdde13fa1915f65ef2a5c068d9208c",
       "build_file_content": "cc_library(name = 'fast_float', hdrs = glob(['include/fast_float/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/fast_float/src')",
       "use_module_bazel_from_bcr": "8.0.2"
     },
