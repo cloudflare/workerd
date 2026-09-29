@@ -14,6 +14,17 @@ function newIoContextProbe() {
   return () => strictEqual(pair[0].readyState, WebSocket.OPEN);
 }
 
+function isHungRequest(error) {
+  // GC can discover that the promise cannot settle before idle detection runs.
+  return (
+    error.message === 'Promise will never complete.' ||
+    error.message ===
+      "The Workers runtime canceled this request because it detected that your Worker's code " +
+        'had hung and would never generate a response. Refer to: ' +
+        'https://developers.cloudflare.com/workers/observability/errors/'
+  );
+}
+
 export const crossContextResolveWorks = {
   async test(_, env) {
     // We're going to send two simultaneous requests to the same endpoint.
@@ -96,25 +107,14 @@ export const unhandledRejectionWorks = {
 
 export const expiredContextWorks = {
   async test(_, env) {
-    // We're going to send two simultaneous requests to the same endpoint.
-    const results = await Promise.allSettled([
+    // The creating request must be canceled before the resolver is called.
+    await rejects(
       env.subrequest.fetch('http://example.org/expired'),
-      env.subrequest.fetch('http://example.org/expired'),
-    ]);
-    strictEqual(results[0].status, 'rejected');
-    strictEqual(results[1].status, 'fulfilled');
-    strictEqual(
-      results[0].reason.message,
-      "The Workers runtime canceled this request because it detected that your Worker's code " +
-        'had hung and would never generate a response. Refer to: ' +
-        'https://developers.cloudflare.com/workers/observability/errors/'
+      isHungRequest
     );
-    strictEqual(results[1].value.status, 200);
-    strictEqual(await results[1].value.text(), 'ok');
-    // Wait a tick for things to settle out before checking the global.
-    // We're just making sure here that the promise in the first request
-    // was canceled correctly.
-    await scheduler.wait(100);
+    const response = await env.subrequest.fetch('http://example.org/expired');
+    strictEqual(response.status, 200);
+    strictEqual(await response.text(), 'ok');
     strictEqual(globalThis.expiredRan, undefined);
   },
 };
@@ -399,10 +399,7 @@ async function expiredContext(req, env, ctx) {
     return new Response('ok');
   }
 
-  // This is our second request. Here, all we do is resolve the promise.
-  // Let's wait a bit to make sure the other request has had time to
-  // be canceled and destroyed.
-  await scheduler.wait(100);
+  // The caller has already observed cancellation of the creating request.
   globalThis.expired.resolve();
   globalThis.expired = undefined;
   return new Response('ok');
