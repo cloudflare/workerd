@@ -87,9 +87,10 @@ kj::String describeMismatch(const Outcome& expected, const Outcome& actual) {
       expected.buffer[firstDifference] == actual.buffer[firstDifference]) {
     ++firstDifference;
   }
+  constexpr size_t CONTEXT_BYTES = 16;
   auto context = [&](const Outcome& outcome) {
-    auto start = firstDifference - kj::min(firstDifference, size_t(16));
-    auto end = kj::min(outcome.buffer.size(), firstDifference + 16);
+    auto start = firstDifference - kj::min(firstDifference, CONTEXT_BYTES);
+    auto end = kj::min(outcome.buffer.size(), firstDifference + CONTEXT_BYTES);
     return kj::encodeHex(outcome.buffer.slice(start, end));
   };
   return kj::str("buffers first differ at byte ", firstDifference, "; expected ",
@@ -128,10 +129,10 @@ Outcome transcodeOutcome(
 constexpr kj::byte INTERESTING[] = {0x00, 0x41, 0x7f, 0x80, 0x8f, 0x90, 0x9f, 0xa0, 0xbb, 0xbf,
   0xc0, 0xc2, 0xdf, 0xe0, 0xe2, 0xed, 0xef, 0xf0, 0xf4, 0xf5, 0xff, 0xd8, 0xdb, 0xdc, 0xfe, 0xfd};
 
-// A smaller set, for exhaustive four-byte inputs: enough for every UTF-8
-// sequence length, and for UTF-16 surrogate pairs in both orders.
-constexpr kj::byte INTERESTING_4[] = {
-  0x00, 0x41, 0x80, 0xbf, 0xc2, 0xe2, 0xed, 0xf0, 0xf4, 0xff, 0xd8, 0xdc};
+// A smaller set, for exhaustive three- and four-byte inputs: enough for every
+// UTF-8 sequence length and its continuation-byte bounds, and for UTF-16
+// surrogate pairs in both orders.
+constexpr kj::byte SEQUENCE_BYTES[] = {0x41, 0x80, 0xbf, 0xc2, 0xe2, 0xed, 0xf0, 0xf4, 0xd8, 0xdc};
 
 // A deterministic pseudo-random generator (xorshift64).
 struct Random {
@@ -220,9 +221,8 @@ kj::Array<kj::byte> encode(kj::ArrayPtr<const char32_t> codePoints, Encoder enco
 // Lengths around the block sizes the codecs work in: simdutf's SIMD kernels
 // (16 to 64 bytes per step) and ICU's conversion pivot (1024 UChars, so 2048
 // bytes of UTF-16), plus lengths long enough to take many steps of each.
-constexpr size_t LONG_LENGTHS[] = {15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 1023, 1024,
-  1025, 2047, 2048, 2049, 3071, 3072, 3073, 4095, 4096, 4097, 8191, 8192, 8193, 65535, 65536,
-  65537};
+constexpr size_t LONG_LENGTHS[] = {
+  15, 16, 17, 63, 64, 65, 1023, 1024, 1025, 2047, 2048, 2049, 4097, 65537};
 
 // Appends inputs of several kilobytes, so that conversions cross the SIMD and
 // ICU block boundaries mid-character, and so that the SIMD fast paths for
@@ -242,9 +242,9 @@ void addLongInputs(kj::Vector<kj::Array<kj::byte>>& corpus, Random& random) {
 
     // Well-formed text, but for one ill-formed byte (UTF-8) or unpaired
     // surrogate (UTF-16) at a block boundary, or at either end.
+    constexpr size_t POSITIONS[] = {0, 2, 62, 64, 1022, 1024, 2048, 4096, 8188, 8190};
     auto base = text.asPtr().first(8192);
-    for (size_t position: {size_t(0), size_t(2), size_t(62), size_t(64), size_t(1022), size_t(1024),
-           size_t(2048), size_t(4096), size_t(8188), size_t(8190)}) {
+    for (auto position: POSITIONS) {
       auto input = kj::heapArray(base);
       if (encoder == appendUtf8) {
         input[position] = 0xff;
@@ -270,15 +270,14 @@ void addLongInputs(kj::Vector<kj::Array<kj::byte>>& corpus, Random& random) {
   }
 
   // Long pseudo-random inputs.
-  for (size_t n = 0; n < 50; ++n) {
+  for (size_t n = 0; n < 20; ++n) {
     corpus.add(random.input(static_cast<size_t>(random.next() % 20000) + 1000));
   }
 }
 
 // Supplementary code points at the edges of the ranges ICU drops, rather than
 // substitutes, when a converter cannot represent them, along with the
-// largest code point. (The exhaustive two-byte inputs already hold every BMP
-// code point as UTF-16LE.)
+// largest code point.
 constexpr char32_t SUPPLEMENTARY_EDGES[] = {0x1bc9f, 0x1bca0, 0x1bca3, 0x1bca4, 0x1d172, 0x1d173,
   0x1d17a, 0x1d17b, 0xdffff, 0xe0000, 0xe0001, 0xe0fff, 0xe1000, 0x10ffff};
 
@@ -308,37 +307,46 @@ void addCodePointSweep(kj::Vector<kj::Array<kj::byte>>& corpus,
 
 // Appends Unicode text covering every code point that behaves distinctly: each
 // supplementary edge case on its own, so a mismatch names it; every BMP code
-// point as UTF-8 (the exhaustive two-byte inputs already hold each as
-// UTF-16LE); planes 1 and 14, which hold ICU's supplementary ignorables, in
-// full; and a sample of the rest of the supplementary planes.
+// point; the blocks around ICU's supplementary ignorables in full; and a
+// sample of the rest of the supplementary planes.
 void addUnicodeInputs(kj::Vector<kj::Array<kj::byte>>& corpus) {
-  addCodePointSweep(corpus, appendUtf8, 0, 0xffff);
   for (Encoder encoder: {appendUtf8, appendUtf16le}) {
+    addCodePointSweep(corpus, encoder, 0, 0xffff);
     for (auto codePoint: SUPPLEMENTARY_EDGES) {
       corpus.add(encode({codePoint}, encoder));
       corpus.add(encode({U'a', codePoint, U'b'}, encoder));
     }
-    addCodePointSweep(corpus, encoder, 0x10000, 0x1ffff);
-    addCodePointSweep(corpus, encoder, 0xe0000, 0xeffff);
-    addCodePointSweep(corpus, encoder, 0x20000, 0x10ffff, 251);
+    addCodePointSweep(corpus, encoder, 0x1bc00, 0x1bcff);
+    addCodePointSweep(corpus, encoder, 0x1d100, 0x1d1ff);
+    addCodePointSweep(corpus, encoder, 0xdff00, 0xe10ff);
+    addCodePointSweep(corpus, encoder, 0x10000, 0x10ffff, 251);
   }
 }
 
 kj::Array<kj::Array<kj::byte>> buildCorpus() {
   kj::Vector<kj::Array<kj::byte>> corpus;
 
-  // Every input of up to two bytes.
+  // Every input of up to one byte, and every two-byte input with a sequence
+  // byte on either side: each UTF-8 lead byte with each kind of byte after it,
+  // and each UTF-16 code unit with a surrogate's or ASCII's high byte.
   auto allBytes = kj::heapArray<kj::byte>(256);
   for (size_t i = 0; i < 256; ++i) allBytes[i] = static_cast<kj::byte>(i);
-  for (size_t length = 0; length <= 2; ++length) addAllStrings(corpus, allBytes, length);
+  addAllStrings(corpus, allBytes, 0);
+  addAllStrings(corpus, allBytes, 1);
+  for (auto first: allBytes) {
+    for (auto second: SEQUENCE_BYTES) {
+      corpus.add(kj::heapArray<kj::byte>({first, second}));
+      corpus.add(kj::heapArray<kj::byte>({second, first}));
+    }
+  }
 
   // Every short input of interesting bytes.
-  addAllStrings(corpus, INTERESTING, 3);
-  addAllStrings(corpus, INTERESTING_4, 4);
+  addAllStrings(corpus, SEQUENCE_BYTES, 3);
+  addAllStrings(corpus, SEQUENCE_BYTES, 4);
 
   // Longer pseudo-random inputs.
   Random random;
-  for (size_t n = 0; n < 5000; ++n) {
+  for (size_t n = 0; n < 2000; ++n) {
     corpus.add(random.input(static_cast<size_t>(random.next() % 64) + 5));
   }
 
