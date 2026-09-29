@@ -1120,10 +1120,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
     // outcome. There is no need to re-throw it as for tail workers we're not interested in
     // propagating the exception via jsRpc.
     incomingRequest->getMetrics().reportFailure(e);
-    ioContext.logUncaughtExceptionAsync(UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e));
+    ioContext.logUncaughtExceptionAsync(
+        UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e), *incomingRequest);
     return EventOutcome::EXCEPTION;
   });
-  KJ_IF_SOME(t, ioContext.getWorkerTracer()) {
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setReturn(ioContext.now());
   }
 
