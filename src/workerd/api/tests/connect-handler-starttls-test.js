@@ -6,7 +6,7 @@
 // a handler: a TCP listener configured with a keypair, and a service binding.
 import { connect } from 'cloudflare:sockets';
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import { ok, strictEqual } from 'assert';
+import { ok, rejects, strictEqual } from 'assert';
 
 // Reads from `reader` until a full CRLF-terminated line is available and returns it, line ending
 // included. The miniature STARTTLS protocol below is line-based and strictly alternating, so a
@@ -102,6 +102,55 @@ export const startTlsForwardedByProxyTo = {
       env.STARTTLS_PROXY.connect('smtp.example.com:25', {
         secureTransport: 'starttls',
       })
+    );
+  },
+};
+
+// Speaks the client side of the same protocol up to the upgrade, to a handler that answers the
+// upgrade request and then does not upgrade its own end, and checks that startTls() fails with
+// `message`.
+async function expectStartTlsRefused(socket, message) {
+  const enc = new TextEncoder();
+  await socket.opened;
+
+  const reader = socket.readable.getReader();
+  const writer = socket.writable.getWriter();
+  strictEqual(await readLine(reader), '220 ready\r\n');
+  await writer.write(enc.encode('STARTTLS\r\n'));
+  strictEqual(await readLine(reader), '220 go ahead\r\n');
+  reader.releaseLock();
+  writer.releaseLock();
+
+  const secure = socket.startTls();
+  await rejects(secure.opened, { message });
+}
+
+// The handler finishes without upgrading, although its socket outlives it.
+export const startTlsRefusedByHandlerFinishing = {
+  async test(ctrl, env) {
+    await expectStartTlsRefused(
+      // The handler can finish before this side calls startTls(), and that ends the tunnel. With
+      // allowHalfOpen, reaching the end of the tunnel does not close this socket, so its startTls()
+      // still reaches the handler's side and hears why.
+      env.FINISHES_WITHOUT_STARTTLS.connect('smtp.example.com:25', {
+        secureTransport: 'starttls',
+        allowHalfOpen: true,
+      }),
+      'The connect() handler finished without starting TLS.'
+    );
+  },
+};
+
+// The handler closes its socket instead of upgrading it.
+export const startTlsRefusedByHandlerClosing = {
+  async test(ctrl, env) {
+    await expectStartTlsRefused(
+      // As in startTlsRefusedByHandlerFinishing.
+      env.CLOSES_WITHOUT_STARTTLS.connect('smtp.example.com:25', {
+        secureTransport: 'starttls',
+        allowHalfOpen: true,
+      }),
+      "The connect() handler's socket closed before it started TLS."
     );
   },
 };

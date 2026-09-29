@@ -541,6 +541,10 @@ struct InternalTlsRendezvous {
   // by upgrading the socket it relays to. Settles the same side as `handlerStarter` does, so only
   // one of the two is ever used.
   kj::Own<InboundTlsUpgrade> peerRequests;
+
+  // To be held for as long as the connect() handler runs. Dropping it reports that the handler
+  // has finished, and so will not start TLS, even if its socket outlives it.
+  kj::Own<void> handlerRun;
 };
 InternalTlsRendezvous setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter);
 

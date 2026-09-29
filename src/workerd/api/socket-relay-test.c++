@@ -303,6 +303,35 @@ KJ_TEST("relayStreams() answers an upgrade request with its own failure if it fa
   KJ_EXPECT(KJ_ASSERT_NONNULL(request.failure).getDescription() == "handshake failed");
 }
 
+KJ_TEST("relayStreams() fails an upgrade request that is still under way when it ends") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  auto a = newLink();
+  auto b = newLink();
+  UpgradeRequest request;
+  Upgrade upgrade;
+
+  auto relay = relayStreams(RelayEnd{.stream = kj::mv(a.relayed),
+                              .inboundUpgrade = kj::heap<FakeInboundTlsUpgrade>(request)},
+      RelayEnd{.stream = kj::mv(b.relayed), .startTls = upgrade.starter()})
+                   .eagerlyEvaluate(nullptr);
+
+  request.asked.fulfiller->fulfill();
+  KJ_EXPECT(!relay.poll(waitScope));
+  KJ_ASSERT(upgrade.calls == 1);
+
+  // Both far sides end theirs before the upgrade completes, which ends the relay.
+  a.far->shutdownWrite();
+  b.far->shutdownWrite();
+  expectEof(*b.far, waitScope);
+  expectEof(*a.far, waitScope);
+  relay.wait(waitScope);
+  KJ_EXPECT(request.answered);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(request.failure)
+                .getDescription()
+                .contains("The proxied connection ended before the upgrade completed."));
+}
+
 KJ_TEST("relayStreams() carries on when the far side goes away without asking to upgrade") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);

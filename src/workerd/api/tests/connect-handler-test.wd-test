@@ -36,6 +36,12 @@ const unitTests :Workerd.Config = (
           (name = "STARTTLS_PROXY", service = (
             name = "connect-handler-test-starttls-endpoint",
             entrypoint = "StartTlsProxy")),
+          (name = "FINISHES_WITHOUT_STARTTLS", service = (
+            name = "connect-handler-test-starttls-endpoint",
+            entrypoint = "FinishesWithoutStartTls")),
+          (name = "CLOSES_WITHOUT_STARTTLS", service = (
+            name = "connect-handler-test-starttls-endpoint",
+            entrypoint = "ClosesWithoutStartTls")),
         ],
       )
     ),

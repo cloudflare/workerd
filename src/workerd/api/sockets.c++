@@ -507,7 +507,14 @@ kj::Promise<void> pumpDatagramsToRpc(
 // The handler's side can be settled in either of two ways: by the handler calling startTls()
 // itself, or, when the handler relays its socket with proxyTo(), by the relay answering the peer's
 // request with the outcome of an upgrade it made further along. The InboundTlsUpgrade interface is
-// the second of these, seen from the handler's side.
+// the second of these, seen from the handler's side. Either side fails instead once it can no
+// longer settle: its socket closes, or, on the handler's side, the handler finishes.
+//
+// FIXME: A handler that keeps running with its socket open, but never calls startTls() or
+// proxyTo(), leaves the peer's startTls() waiting until the handler finishes or its socket
+// closes. A handler that relays its socket by hand with pipeTo(), not knowing that the protocol
+// has an upgrade in it, does exactly that, and the peer, the handler and whatever is beyond it all
+// wait on each other.
 class TlsRendezvous: public kj::Refcounted, public InboundTlsUpgrade {
  public:
   enum class Side {
@@ -531,7 +538,12 @@ class TlsRendezvous: public kj::Refcounted, public InboundTlsUpgrade {
     ~Claim() noexcept(false) {
       // A moved-from Claim holds a null Own and no longer speaks for its side.
       if (rendezvous.get() != nullptr) {
-        rendezvous->abandon(side);
+        rendezvous->abandon(side,
+            side == Side::PEER
+                ? KJ_EXCEPTION(DISCONNECTED,
+                      "jsg.Error: The peer disconnected before agreeing to start TLS.")
+                : KJ_EXCEPTION(DISCONNECTED,
+                      "jsg.Error: The connect() handler's socket closed before it started TLS."));
       }
     }
 
@@ -546,6 +558,22 @@ class TlsRendezvous: public kj::Refcounted, public InboundTlsUpgrade {
     Side side;
   };
 
+  // Stands for the connect() handler's run. Destroying it reports that the handler has finished,
+  // which it may do before its socket goes away.
+  class HandlerRun {
+   public:
+    explicit HandlerRun(kj::Own<TlsRendezvous> rendezvous): rendezvous(kj::mv(rendezvous)) {}
+    KJ_DISALLOW_COPY_AND_MOVE(HandlerRun);
+    ~HandlerRun() noexcept(false) {
+      rendezvous->abandon(Side::HANDLER,
+          KJ_EXCEPTION(
+              DISCONNECTED, "jsg.Error: The connect() handler finished without starting TLS."));
+    }
+
+   private:
+    kj::Own<TlsRendezvous> rendezvous;
+  };
+
   // Records that `side` called startTls(). The result resolves once the other side has called it
   // too, and rejects if the other side is abandoned first.
   kj::Promise<void> upgrade(Side side) {
@@ -553,12 +581,11 @@ class TlsRendezvous: public kj::Refcounted, public InboundTlsUpgrade {
     return halfFor(otherSide(side)).arrivedPromise.addBranch();
   }
 
-  // Records that `side`'s socket went away without ever calling startTls(), so that the other side
-  // stops waiting for it. Harmless if that side already upgraded, since fulfillers ignore a second
-  // resolution.
-  void abandon(Side side) {
-    halfFor(side).arrived->reject(KJ_EXCEPTION(
-        DISCONNECTED, "jsg.Error: The peer disconnected before agreeing to start TLS."));
+  // Records that `side` can no longer call startTls(), for the reason `reason` gives, so that the
+  // other side stops waiting for it. Harmless if that side already upgraded, since fulfillers
+  // ignore a second resolution.
+  void abandon(Side side, kj::Exception reason) {
+    halfFor(side).arrived->reject(kj::mv(reason));
   }
 
   kj::Promise<void> whenRequested() override {
@@ -828,6 +855,8 @@ InternalTlsRendezvous setupInternalTlsRendezvous(kj::TlsStarterCallback& peerSta
 
   kj::Own<InboundTlsUpgrade> peerRequests = kj::addRef(*rendezvous);
 
+  kj::Own<void> handlerRun = kj::heap<TlsRendezvous::HandlerRun>(kj::addRef(*rendezvous));
+
   kj::Function<kj::Promise<void>(kj::StringPtr)> handlerClaim =
       TlsRendezvous::Claim(kj::mv(rendezvous), TlsRendezvous::Side::HANDLER);
   auto handlerStarter = kj::heap<kj::TlsStarterCallback>();
@@ -835,6 +864,7 @@ InternalTlsRendezvous setupInternalTlsRendezvous(kj::TlsStarterCallback& peerSta
   return InternalTlsRendezvous{
     .handlerStarter = kj::mv(handlerStarter),
     .peerRequests = kj::mv(peerRequests),
+    .handlerRun = kj::mv(handlerRun),
   };
 }
 
