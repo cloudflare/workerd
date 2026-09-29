@@ -62,14 +62,46 @@ class RelayDirection {
   kj::Maybe<kj::ForkedPromise<void>> transportChange;
 };
 
-// Waits for `request`, then upgrades the stream `direction` writes to on the requester's behalf.
-kj::Promise<void> forwardUpgrade(InboundTlsUpgrade& request,
-    RelayDirection& direction,
-    kj::Maybe<kj::Function<kj::Promise<void>()>>& startTls) {
+// Forwards upgrade requests arriving from the far side of one end to the other end.
+class UpgradeForward {
+ public:
+  UpgradeForward(InboundTlsUpgrade& request,
+      RelayDirection& direction,
+      kj::Maybe<kj::Function<kj::Promise<void>()>>& startTls)
+      : request(request),
+        direction(direction),
+        startTls(startTls) {}
+  KJ_DISALLOW_COPY_AND_MOVE(UpgradeForward);
+
+  // Waits for the request, then upgrades the stream `direction` writes to on the requester's
+  // behalf, and answers the request with the outcome.
+  kj::Promise<void> run();
+
+  // Answers the request with `failure` if it has been made and not yet answered. For when the
+  // relay fails while the upgrade is under way: the requester would otherwise hear only that the
+  // relay went away, not why.
+  void abandon(const kj::Exception& failure) {
+    if (awaitingAnswer) answer(failure.clone());
+  }
+
+ private:
+  InboundTlsUpgrade& request;
+  RelayDirection& direction;
+  kj::Maybe<kj::Function<kj::Promise<void>()>>& startTls;
+  bool awaitingAnswer = false;
+
+  void answer(kj::Maybe<kj::Exception> failure) {
+    awaitingAnswer = false;
+    request.answer(kj::mv(failure));
+  }
+};
+
+kj::Promise<void> UpgradeForward::run() {
   // A far side that goes away without asking leaves nothing to forward.
   bool requested = co_await request.whenRequested().then(
       []() { return true; }, [](kj::Exception&&) { return false; });
   if (!requested) co_return;
+  awaitingAnswer = true;
 
   // The far side asks only once every byte it sent before asking has been consumed from its
   // transport, so those bytes have already been read by `direction`. The continuations that hand
@@ -84,10 +116,10 @@ kj::Promise<void> forwardUpgrade(InboundTlsUpgrade& request,
     co_await direction.changeTransport(kj::mv(start));
   }
   KJ_CATCH(e) {
-    request.answer(e.clone());
+    answer(e.clone());
     kj::throwFatalException(kj::mv(e));
   }
-  request.answer(kj::none);
+  answer(kj::none);
 }
 
 }  // namespace
@@ -96,21 +128,28 @@ kj::Promise<void> relayStreams(RelayEnd a, RelayEnd b) {
   RelayDirection aToB(*a.stream, *b.stream);
   RelayDirection bToA(*b.stream, *a.stream);
 
-  kj::Vector<kj::Promise<void>> forwards;
+  kj::Vector<kj::Own<UpgradeForward>> forwards;
   KJ_IF_SOME(request, a.inboundUpgrade) {
-    forwards.add(forwardUpgrade(*request, aToB, b.startTls));
+    forwards.add(kj::heap<UpgradeForward>(*request, aToB, b.startTls));
   }
   KJ_IF_SOME(request, b.inboundUpgrade) {
-    forwards.add(forwardUpgrade(*request, bToA, a.startTls));
+    forwards.add(kj::heap<UpgradeForward>(*request, bToA, a.startTls));
   }
   // Forwarding can fail the relay, but only the two directions can finish it.
-  auto forwarding =
-      kj::joinPromisesFailFast(forwards.releaseAsArray()).then([]() -> kj::Promise<void> {
-    return kj::NEVER_DONE;
-  });
+  auto forwarding = kj::joinPromisesFailFast(KJ_MAP(forward, forwards) {
+    return forward->run();
+  }).then([]() -> kj::Promise<void> { return kj::NEVER_DONE; });
 
-  co_await kj::joinPromisesFailFast(kj::arr(aToB.run(), bToA.run()))
-      .exclusiveJoin(kj::mv(forwarding));
+  KJ_TRY {
+    co_await kj::joinPromisesFailFast(kj::arr(aToB.run(), bToA.run()))
+        .exclusiveJoin(kj::mv(forwarding));
+  }
+  KJ_CATCH(e) {
+    for (auto& forward: forwards) {
+      forward->abandon(e);
+    }
+    kj::throwFatalException(kj::mv(e));
+  }
 }
 
 }  // namespace workerd::api

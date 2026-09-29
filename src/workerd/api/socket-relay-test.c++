@@ -65,6 +65,38 @@ class DelayedReads final: public kj::AsyncIoStream {
   kj::Own<kj::AsyncIoStream> inner;
 };
 
+// Fails its reads when the test says so, and otherwise never completes them.
+class FailingReads final: public kj::AsyncIoStream {
+ public:
+  explicit FailingReads(kj::Own<kj::AsyncIoStream> inner): inner(kj::mv(inner)) {}
+
+  void fail(kj::Exception e) {
+    failure->reject(kj::mv(e));
+  }
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return failed.addBranch().then([]() -> size_t { KJ_UNREACHABLE; });
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    return inner->write(buffer);
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    return inner->write(pieces);
+  }
+  kj::Promise<void> whenWriteDisconnected() override {
+    return inner->whenWriteDisconnected();
+  }
+  void shutdownWrite() override {
+    inner->shutdownWrite();
+  }
+
+ private:
+  kj::Own<kj::AsyncIoStream> inner;
+  kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
+  kj::Own<kj::PromiseFulfiller<void>> failure = kj::mv(paf.fulfiller);
+  kj::ForkedPromise<void> failed = paf.promise.fork();
+};
+
 // What the test observes of an upgrade request the relay was handed.
 struct UpgradeRequest {
   kj::PromiseFulfillerPair<void> asked = kj::newPromiseAndFulfiller<void>();
@@ -239,6 +271,33 @@ KJ_TEST("relayStreams() fails, and fails the request, when the upgrade fails") {
   KJ_ASSERT(upgrade.calls == 1);
   KJ_ASSERT_NONNULL(upgrade.fulfiller)->reject(KJ_EXCEPTION(FAILED, "handshake failed"));
 
+  KJ_EXPECT_THROW_MESSAGE("handshake failed", relay.wait(waitScope));
+  KJ_EXPECT(request.answered);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(request.failure).getDescription() == "handshake failed");
+}
+
+KJ_TEST("relayStreams() answers an upgrade request with its own failure if it fails first") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  auto a = newLink();
+  auto b = newLink();
+  UpgradeRequest request;
+  Upgrade upgrade;
+  auto failingB = kj::heap<FailingReads>(kj::mv(b.relayed));
+  auto& failing = *failingB;
+
+  auto relay = relayStreams(RelayEnd{.stream = kj::mv(a.relayed),
+                              .inboundUpgrade = kj::heap<FakeInboundTlsUpgrade>(request)},
+      RelayEnd{.stream = kj::mv(failingB), .startTls = upgrade.starter()})
+                   .eagerlyEvaluate(nullptr);
+
+  request.asked.fulfiller->fulfill();
+  KJ_EXPECT(!relay.poll(waitScope));
+  KJ_ASSERT(upgrade.calls == 1);
+
+  // The end being upgraded fails before its upgrade does, as a transport whose handshake fails
+  // may report on its read side first.
+  failing.fail(KJ_EXCEPTION(FAILED, "handshake failed"));
   KJ_EXPECT_THROW_MESSAGE("handshake failed", relay.wait(waitScope));
   KJ_EXPECT(request.answered);
   KJ_EXPECT(KJ_ASSERT_NONNULL(request.failure).getDescription() == "handshake failed");
