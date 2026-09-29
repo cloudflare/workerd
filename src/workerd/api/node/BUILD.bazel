@@ -107,6 +107,9 @@ wd_cc_library(
 )
 
 kj_test(
+    # Runs every corpus input through both implementations for all 16 encoding
+    # pairs; the Windows CI runners need more than the default 15s.
+    size = "large",
     src = "i18n-test.c++",
     deps = [
         ":node-core",
