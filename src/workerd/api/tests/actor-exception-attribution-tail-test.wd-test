@@ -1,0 +1,23 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "actor-exception-attribution", worker = .actorExceptionAttributionWorker),
+  ],
+);
+
+const actorExceptionAttributionWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "actor-exception-attribution-tail-test.js")
+  ],
+  compatibilityFlags = ["nodejs_compat"],
+  durableObjectNamespaces = [
+    (className = "OverlappingRequests", uniqueKey = "actor-exception-attribution"),
+  ],
+  durableObjectStorage = (inMemory = void),
+  bindings = [
+    (name = "OVERLAPPING", durableObjectNamespace = "OverlappingRequests"),
+  ],
+  # Self-tail: the worker's tail handler receives the traces of its own Durable Object requests.
+  tails = ["actor-exception-attribution"],
+);

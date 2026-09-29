@@ -259,8 +259,6 @@ tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
   return tracing::ErrorInfo(kj::mv(name), kj::mv(message), kj::mv(stack));
 }
 
-// Adds `exception` to `tracer`, which belongs to `incomingRequest` or, if that is none, to the
-// IoContext's current incoming request.
 void addExceptionToTrace(jsg::Lock& js,
     IoContext& ioContext,
     BaseTracer& tracer,
