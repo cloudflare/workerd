@@ -78,7 +78,9 @@ import {
   O_WRONLY,
   O_RDWR,
   O_APPEND,
+  O_CREAT,
   O_EXCL,
+  O_TRUNC,
   COPYFILE_EXCL,
   COPYFILE_FICLONE,
   COPYFILE_FICLONE_FORCE,
@@ -511,14 +513,18 @@ export function openSync(
   const read = !(newFlags & O_WRONLY) || Boolean(newFlags & O_RDWR);
   const write = Boolean(newFlags & O_WRONLY) || Boolean(newFlags & O_RDWR);
   const append = Boolean(newFlags & O_APPEND);
+  const create = Boolean(newFlags & O_CREAT);
   const exclusive = Boolean(newFlags & O_EXCL);
+  const truncate = Boolean(newFlags & O_TRUNC);
   const followSymlinks = true;
 
   return cffs.open(normalizePath(path), {
     read,
     write,
     append,
+    create,
     exclusive,
+    truncate,
     followSymlinks,
   });
 }

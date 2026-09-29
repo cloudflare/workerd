@@ -1,0 +1,216 @@
+# node:net × web streams
+
+An informal specification of how a `node:net` `Socket` drives the two
+web-stream halves of the `connect()` socket underneath it, derived from
+and kept in lockstep with the test suite in this directory. **The tests
+are the normative artifact**; this document maps behaviors to the tests
+that assert them. Every test runs against the C++ streams implementation
+(`net-cpp.wd-test`) and the TypeScript one (`net-ts.wd-test`). The general
+`net` surface (option validation, DNS, `BlockList`, `SocketAddress`,
+`BoundSocket`, abort signals, reconnect) is owned by
+`src/workerd/api/node/tests/net-nodejs-test.js`; this suite owns the
+STREAMS interaction only.
+
+The implementation under test is `src/node/internal/internal_net.ts`:
+`initializeConnection` (the handle: a BYOB reader and a default writer over
+the `connect()` socket's halves), `startRead` (the read loop),
+`_writeGeneric`/`_final`/`_destroy` (the write path), and the half-open,
+timeout and byte-accounting logic around them.
+
+## Infrastructure
+
+A node sidecar (`tcp-servers.js`) runs eight TCP servers whose ports arrive
+through `fromEnvironment` bindings (plus `SIDECAR_HOSTNAME`):
+
+- **echo** (`NET_ECHO_PORT`): echoes every byte; ends after the client ends.
+- **end** (`NET_END_PORT`): ends its write side on connect, keeps reading.
+- **greet** (`NET_GREET_PORT`): writes one greeting and ends its write side,
+  keeps reading.
+- **sink** (`NET_SINK_PORT`): counts bytes; on the client's end replies with
+  the decimal count and ends.
+- **ticker** (`NET_TICKER_PORT`): writes `tick` every 20 ms until the client
+  ends.
+- **reset** (`NET_RESET_PORT`): writes `ready`, then resets the connection
+  (RST, no FIN) on the client's first bytes.
+- **trickle** (`NET_TRICKLE_PORT`): writes bytes 0..1999 (`i % 251`) one
+  per millisecond, then ends.
+- **utf8-split** (`NET_UTF8_SPLIT_PORT`): writes `UTF8_SPLIT_TEXT`
+  (`servers.js`; 2-, 3- and 4-byte sequences) one byte per millisecond, so
+  every sequence is split at every boundary, then ends.
+
+Both cells need `experimental` (the `connect()` socket) and an `internet`
+network service allowing `private`.
+
+## Core semantics
+
+### The handle
+
+- The `connect()` socket is opened with `secureTransport: 'starttls'` and
+  **`allowHalfOpen: true`**: the Duplex owns the half-open policy (see
+  below), so the native socket must never close the writable half on EOF
+  itself. The handle holds `readable.getReader({ mode: 'byob' })` and
+  `writable.getWriter()`; both halves stay locked for the socket's life.
+- 'connect' then 'ready' fire when the socket opens; `pending`,
+  `connecting` and `readyState` track the transition. Writes issued while
+  connecting are held and flushed after 'connect', in order with writes
+  issued from the 'connect' handler.
+
+### The read loop
+
+- Exactly one loop runs per handle. Each iteration hands a view to a BYOB
+  read: a fresh 4 KiB `Uint8Array` by default, or the `onread` option's
+  buffer/generator result. Fills are pushed as copied Buffers (or decoded
+  by `setEncoding`), or handed to the `onread` callback as a Buffer over
+  the current backing store. A callback returning `false`, a `push()`
+  returning `false`, or `pause()` stops the loop; `resume()`/`read()`
+  restart it.
+- The BYOB read transfers the view's buffer. Every `onread` view the
+  caller hands out is therefore continued over the transferred backing
+  store as a view of the same range — the caller's offset and capacity, so
+  a view into a larger allocation never grows to it and the bytes around
+  it are never written — and handing the same view out again reads into
+  that store: a fixed buffer, a generator returning one shared buffer, or
+  one rotating through a pool all receive every fill, as Node's in-place
+  fills do. The caller's original `Uint8Array` is detached from the first
+  read into it on, and each callback's Buffer is valid until the next read
+  into the same view (with a pool, the previous fill stays readable while
+  the next lands). A buffer over a resizable `ArrayBuffer` is transferred
+  like any other — the caller's is detached (resizing it throws) — and the
+  loop's view stays fixed to the caller's range. Whether the transferred
+  store stays resizable depends on the implementation (ledger #1).
+- EOF (`done`) pushes EOF and reads zero bytes, so 'end' fires at once even
+  with no consumer. `bytesRead` counts pushed bytes. The `connect()`
+  socket's `closed` ends the readable only while no read is pending
+  (paused, or stopped on backpressure); a pending read reports the
+  connection's outcome itself — EOF as its `done` result, a failure as its
+  rejection — so a failed connection is never announced as EOF.
+- The loop's failures are the socket's 'error' (then 'close'), never a
+  silent stop with the socket open: a generator that throws (its error), a
+  generator returning anything but a `Uint8Array` (`ERR_INVALID_ARG_TYPE`;
+  Node reuses its previous buffer, which the transferring read has no way
+  to), an empty view — a zero-length one, or the fixed buffer once the
+  callback has detached it — (`ENOBUFS`, code and `syscall: 'read'`, as
+  Node's read into an empty buffer), a view the read refuses (one over a
+  `SharedArrayBuffer`: the runtime's `TypeError`), and a throw from the
+  delivery itself — the `onread` callback, or a 'data' listener run
+  synchronously by the loop's `push()` (the socket flowing with nothing
+  buffered) — which becomes the socket's error where Node lets it escape
+  as an uncaught exception. A read rejected because the socket is being
+  destroyed, or because a TLS upgrade replaced the handle, is ignored.
+
+### The write path
+
+- `_write` encodes strings itself (`decodeStrings` is off) and writes one
+  chunk through the writer; `_writev` concatenates a corked batch into one
+  write. The write callback fires when the writer's promise settles;
+  `bytesWritten` counts the encoded bytes once flushed (queued bytes are
+  added from `writableLength`), and `bufferSize` mirrors `writableLength`.
+- `end()` → `_final` → `writer.close()` → 'finish'. Backpressure follows the
+  Duplex's `highWaterMark`: `write()` returns false and 'drain' follows the
+  flush.
+
+### Half-open, end and destroy
+
+- `allowHalfOpen` defaults to false and the 'end' enforcer is registered
+  unconditionally. With it false, the peer's EOF → 'end' (socket still not
+  destroyed, still writable) → `end()` → 'finish' → auto-destroy → 'close';
+  a later `write()` fails with `EPIPE` (and, the socket already being
+  destroyed, no 'error' event). With it true the writable side stays open
+  after 'end' and writes complete; the client's `end()` closes it.
+- A `write()` from inside the 'end' handler, with `allowHalfOpen` false,
+  goes out cleanly and is counted in `bytesWritten`: the automatic `end()`
+  runs a tick later, and the `connect()` socket keeps its writable half
+  open on EOF (see "The handle"), so nothing underneath refuses the write.
+- `destroy()` closes the `connect()` socket and emits 'close' with
+  `hadError`; `destroy(err)` emits 'error' once, then 'close' `true`. A
+  write after destroy fails with `ERR_STREAM_DESTROYED`; a write on a socket
+  whose handle is gone fails with `ERR_SOCKET_CLOSED`; a non-byte chunk
+  throws `ERR_INVALID_ARG_TYPE`. Property access on a closed socket is
+  harmless.
+- A peer's RST while reading: the pending read's rejection is the
+  connection's failure, which surfaces as 'error' (a plain `Error` without
+  a code — Node reports `ECONNRESET`), then 'close' with `hadError` true,
+  and the socket is destroyed with that error; no 'end' fires and neither
+  side is ended (as in Node), so writes after it fail through their
+  callbacks with `ERR_STREAM_DESTROYED`. The error's text is not pinned.
+
+### Timeouts
+
+- `setTimeout(ms)` arms a one-shot idle timer; delivered or flushed data
+  re-arms it without registering listeners; it fires 'timeout' without
+  closing the socket; `setTimeout(0)` clears it, and activity afterwards
+  arms nothing.
+- The re-arming is asserted as a gap, not as a count: a 'timeout' may only
+  follow at least `ms` without a delivery. A machine stalled for that long
+  mid-test makes one fire legitimately (an expired timer runs before the
+  reads the stall held up — as in Node, whose timers phase precedes poll),
+  so a fixed-wait "no timeout" assertion would be flaky under load.
+
+### Re-entrancy
+
+- The socket may be driven from inside its own deliveries: a `write()` from
+  the `onread` callback goes out in order (each echo triggering the next);
+  a `destroy()` there stops the loop after that fill and closes without an
+  error; `pause()`/`resume()` toggled repeatedly inside `'data'` leave the
+  one read loop running and lose nothing; an `end()` from inside `'data'`
+  or from a write callback, with writes still queued, flushes every queued
+  byte before the FIN.
+
+### Prototype pollution
+
+- The socket uses no primordials: a patched `Promise.prototype.then` sees
+  its hops (the count is not pinned) and a transparent patch changes
+  nothing; a `then` that throws during `connect()`'s setup surfaces as the
+  socket's `'error'` (then `'close'` with `hadError`), `'connect'` never
+  firing — `connect()` itself returns the socket.
+
+### Interop
+
+- The socket is a Duplex, so `socket.pipe(Writable.fromWeb(ws))`,
+  `Readable.toWeb(socket)` as a Response body (EOF requires the writable
+  side finished too — end first), `pipeline(socket, TransformStream, sink)`,
+  `pipeline(ReadableStream, socket)` and `Duplex.toWeb(socket)` all work;
+  the underlying halves themselves refuse a second consumer (locked).
+
+## Compatibility flags
+
+| Flag (enable date) | Selects | Unflagged behavior tested by |
+| --- | --- | --- |
+| `streams_byob_reader_detaches_buffer` (2021-11-10) | the BYOB read transfers the `onread` buffer; the caller's `Uint8Array` is detached | `legacyFixedBufferIsFilledInPlace` |
+| `internal_stream_byob_return_view` (2024-05-13) | a BYOB read at EOF returns a zero-length view (the loop checks `done` first; unobservable here) | — |
+| `streams_enable_constructors`, `transformstream_enable_standard_constructor` | the interop tests' web streams (gate pinned in `src/tests/node/stream`) | — |
+
+`net-ts.wd-test` omits the streams-semantic flags; its variants prove the
+TypeScript implementation is indifferent to them.
+
+## Divergence ledger (C++ vs TypeScript)
+
+| # | Area | C++ | TypeScript | Pinned in |
+| --- | --- | --- | --- | --- |
+| 1 | `onread` buffer over a resizable `ArrayBuffer` | the transferred store stays resizable; shrinking it below the loop's range from the callback leaves the next read an empty view (`ENOBUFS`) | the store is fixed-length (readable-byte ledger #30): `resize()` throws and the loop carries on | `resizableOnreadBuffer` |
+
+## Assertion catalogue
+
+| Module | Asserts |
+| --- | --- |
+| `connect-lifecycle.js` | handle locks (BYOB reader, default writer); connect → ready and state properties; deferred writes before connect (order, callback state, `bytesWritten`); destroy before connect (`ERR_SOCKET_CLOSED_BEFORE_CONNECTION`, no 'connect') |
+| `echo-roundtrip.js` | Buffers and event order; `setEncoding` (latin1 byte round trip); 40 KiB multi-byte utf8; byte accounting; 10 MB `bytesWritten`; 256 KiB patterned volume; corked batch |
+| `half-close.js` | enforcer registration and default; peer EOF ending both sides; a write from inside 'end' completing and counted (`allowHalfOpen` false); `EPIPE` after EOF; half-open writes after EOF; explicit end with half-open; EOF surfacing without a consumer |
+| `end-and-destroy.js` | end callback forms; `bufferSize`; destroy with/without error (events, `hadError`); writes after destroy, without handle, with invalid chunks; inert closed socket; all queued writes flushed before end; peer RST mid-read (codeless 'error', 'close' true, no 'end', neither side ended) and the writes after it (`ERR_STREAM_DESTROYED` callbacks, one 'error') |
+| `backpressure.js` | pause/resume against a ticking peer; paused-mode `read()` restarting the loop; `write()` false and 'drain'; cork cycles |
+| `timeouts.js` | idle timeout without closing; data re-arms (a 'timeout' only ever ≥ the timeout after the last delivery, ticks kept arriving); `setTimeout(0)` clears, also across later traffic |
+| `data-volumes.js` | 2000 trickled bytes (order, pattern, many reads, `bytesRead`); split UTF-8 reassembled by `setEncoding('utf8')` without replacement characters, and concatenating cleanly without it; 20,000 one-byte writes (`bytesWritten`, callbacks, sink count); a 4 MiB echo round trip paused after every 256 KiB (pattern exact, pauses honored) |
+| `onread.js` | fixed buffer across several fills (and its detachment); a fixed view into a larger allocation keeping its range; generated buffers — fresh, one shared (every fill, caller's capacity, detached), a rotating pool (every fill, previous fill intact until its buffer is reused, then detached); callback `false` stopping and `resume()` restarting; a throwing generator (its error), a throwing callback and a throwing 'data' listener (their error, one delivery), garbage from the generator (`ERR_INVALID_ARG_TYPE`), an empty view and a callback-detached fixed buffer (`ENOBUFS`), a SAB view (`TypeError`) — each destroying the socket; a resizable buffer (ledger #1) |
+| `reentrancy.js` | write and destroy from the `onread` callback; pause/resume storm inside `'data'` (one loop, no loss); `end()` from inside `'data'` and from a write callback flushing the queue |
+| `then-pollution.js` | transparent patched `then` (data intact); hostile `then` during `connect()` → socket `'error'`, `'close'` true, no `'connect'` |
+| `interop.js` | pipe into `Writable.fromWeb`; `Readable.toWeb(socket)` body; pipeline through a TransformStream and from a web source; `Duplex.toWeb` round trip; locked halves |
+| `servers.js`, `which-impl.js` | shared machinery |
+
+## Legacy (unflagged) behaviors
+
+Guarded by `net-cpp-legacy.wd-test` (C++ only):
+
+| Behavior | Asserted by |
+| --- | --- |
+| A fixed `onread` buffer is filled in place: never detached, same backing store in every callback, last fill readable from the caller's buffer | `legacyFixedBufferIsFilledInPlace` |
+| A fixed `onread` view into a larger allocation is filled within its own range; the bytes around it survive every fill | `legacySubarrayIsFilledWithinItsRange` |

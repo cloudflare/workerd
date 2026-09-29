@@ -11,6 +11,7 @@ import { Writable, Readable, Duplex } from 'node:stream';
 import { Buffer } from 'node:buffer';
 import { strictEqual, deepStrictEqual, rejects, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
+import { once, withUncaughtGuard } from 'helpers';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -27,10 +28,6 @@ function recordingWritable(options = {}) {
     },
   });
   return { writable, chunks };
-}
-
-function once(emitter, event) {
-  return new Promise((resolve) => emitter.once(event, resolve));
 }
 
 // A chunk written through the web writer reaches the node _write().
@@ -170,6 +167,84 @@ export const toWebNodeEndWithoutCloseAbortsStream = {
   },
 };
 
+// Collects uncaught errors and unhandled rejections while fn runs; the
+// adapter must leak neither.
+// The node side ended directly and the writer closed before it finishes:
+// close() waits for the finish (a slow _final()) rather than resolving at
+// once, and the stream closes cleanly — nothing escapes the adapter.
+export const toWebCloseAfterNodeEndWaitsForFinish = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      let finishFinal;
+      const writable = new Writable({
+        write(chunk, encoding, callback) {
+          callback();
+        },
+        final(callback) {
+          finishFinal = callback;
+        },
+      });
+      const writer = Writable.toWeb(writable).getWriter();
+      writable.end();
+      let closeSettled = false;
+      const closing = writer.close().then(() => (closeSettled = true));
+      await scheduler.wait(10);
+      strictEqual(closeSettled, false);
+      strictEqual(writable.writableFinished, false);
+      finishFinal();
+      await closing;
+      strictEqual(writable.writableFinished, true);
+      await writer.closed;
+    });
+  },
+};
+
+// The same with a _final() that fails after the writer's close(): close()
+// and writer.closed reject with that error, the node side reports it, and
+// nothing escapes the adapter. A _final() failing synchronously in the
+// direct end() is reported the same way.
+export const toWebCloseAfterNodeEndRejectsWithFinalError = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const boom = new Error('late final failed');
+      let failFinal;
+      const writable = new Writable({
+        write(chunk, encoding, callback) {
+          callback();
+        },
+        final(callback) {
+          failFinal = () => callback(boom);
+        },
+      });
+      const errored = once(writable, 'error');
+      const writer = Writable.toWeb(writable).getWriter();
+      writable.end();
+      const closing = writer.close();
+      await scheduler.wait(10);
+      failFinal();
+      await rejects(closing, (err) => err === boom);
+      await rejects(writer.closed, (err) => err === boom);
+      strictEqual(await errored, boom);
+    });
+    await withUncaughtGuard(async () => {
+      const boom = new Error('final failed');
+      const writable = new Writable({
+        write(chunk, encoding, callback) {
+          callback();
+        },
+        final(callback) {
+          callback(boom);
+        },
+      });
+      writable.on('error', () => {});
+      const writer = Writable.toWeb(writable).getWriter();
+      writable.end();
+      await rejects(writer.close(), (err) => err === boom);
+      await rejects(writer.closed, (err) => err === boom);
+    });
+  },
+};
+
 // The node side being destroyed without an error surfaces as an AbortError
 // whose cause is the premature-close error.
 export const toWebNodeDestroyBecomesAbortError = {
@@ -276,6 +351,97 @@ export const toWebDuckTypedInputYieldsClosedStream = {
         : 'This WritableStream has been closed.',
     });
     strictEqual(writes, 0);
+  },
+};
+
+// A duck that also claims `writable: true` is a live legacy writable:
+// end-of-stream subscribes to its 'end'/'close'/'finish'/'error' through
+// plain on() calls (whatever on() returns), and the adapter takes the duck
+// at its word on backpressure — a `writableNeedDrain` that stays true keeps
+// the web write pending without even calling write(); a truthy non-boolean
+// return from write() counts as accepted, a falsy one as backpressure that
+// only a 'drain' the duck never emits would release.
+export const toWebLiveDuckIsTakenAtItsWord = {
+  async test() {
+    const liveDuck = (overrides) => ({
+      writable: true,
+      writableNeedDrain: false,
+      writes: [],
+      write(chunk) {
+        this.writes.push(chunk);
+        return true;
+      },
+      // A legacy emitter's on() need not return anything.
+      on() {},
+      once() {},
+      removeListener() {},
+      end() {},
+      ...overrides,
+    });
+    const outcome = (promise) =>
+      Promise.race([
+        promise.then(
+          () => 'settled',
+          () => 'rejected'
+        ),
+        scheduler.wait(50).then(() => 'pending'),
+      ]);
+
+    const liar = liveDuck({ writableNeedDrain: true });
+    const liarWriter = Writable.toWeb(liar).getWriter();
+    strictEqual(await outcome(liarWriter.write(enc.encode('x'))), 'pending');
+    strictEqual(liar.writes.length, 0);
+
+    const truthy = liveDuck({
+      write(chunk) {
+        this.writes.push(chunk);
+        return 'yes';
+      },
+    });
+    const truthyWriter = Writable.toWeb(truthy).getWriter();
+    strictEqual(await outcome(truthyWriter.write(enc.encode('x'))), 'settled');
+    strictEqual(truthy.writes.length, 1);
+
+    const falsy = liveDuck({
+      write(chunk) {
+        this.writes.push(chunk);
+        return 0;
+      },
+    });
+    const falsyWriter = Writable.toWeb(falsy).getWriter();
+    strictEqual(await outcome(falsyWriter.write(enc.encode('x'))), 'pending');
+    strictEqual(falsy.writes.length, 1);
+  },
+};
+
+// A writable misreporting its writableHighWaterMark (NaN, negative) makes
+// the web stream's construction throw — a RangeError under TypeScript, the
+// C++ implementation's TypeError (streams readable ledger #3). The web
+// stream is constructed before the writable is touched, so the throw
+// leaves it as it was: no listeners, and ending it afterwards finishes
+// quietly rather than tripping a dangling end-of-stream bridge.
+export const toWebInvalidHighWaterMarkLeavesWritableUntouched = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      for (const value of [NaN, -1]) {
+        const { writable, chunks } = recordingWritable();
+        Object.defineProperty(writable, 'writableHighWaterMark', {
+          get: () => value,
+        });
+        throws(() => Writable.toWeb(writable), {
+          name: usingTsImpl ? 'RangeError' : 'TypeError',
+        });
+        for (const event of ['drain', 'finish', 'error', 'close']) {
+          strictEqual(writable.listenerCount(event), 0, event);
+        }
+        writable.end(enc.encode('still fine'));
+        await once(writable, 'finish');
+        deepStrictEqual(
+          chunks.map((chunk) => dec.decode(chunk)),
+          ['still fine']
+        );
+      }
+    });
   },
 };
 
@@ -391,5 +557,98 @@ export const toWebChunksReachSinkAsNodeWrites = {
     await objectWriter.write(u8);
     strictEqual(objects.chunks[0], object);
     strictEqual(objects.chunks[1], u8);
+  },
+};
+
+// The node _write() destroying its own stream with an error, synchronously,
+// before completing the write: the web write in flight rejects with that
+// error, so does writer.closed, and the node side reports it once —
+// 'error', then 'close'. Nothing escapes.
+export const toWebDestroyInsideWriteErrorsOnce = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const boom = new Error('destroyed in _write');
+      const writable = new Writable({
+        write(chunk, encoding, callback) {
+          this.destroy(boom);
+          callback();
+        },
+      });
+      const events = [];
+      writable.on('error', (err) => events.push(['error', err]));
+      writable.on('close', () => events.push(['close']));
+      const closed = once(writable, 'close');
+      const writer = Writable.toWeb(writable).getWriter();
+      await rejects(writer.write(enc.encode('x')), (err) => err === boom);
+      await rejects(writer.closed, (err) => err === boom);
+      await closed;
+      deepStrictEqual(events, [['error', boom], ['close']]);
+    });
+  },
+};
+
+// writer.abort(reason) issued from inside the node _write() the write in
+// flight reached: that write still resolves — the spec lets an in-flight
+// write finish before the stream errors — abort() resolves, writer.closed
+// rejects with the reason, and the node side is destroyed with it, once.
+export const toWebAbortInsideWriteFinishesTheWrite = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      const reason = new Error('aborted in _write');
+      let writer;
+      let aborted;
+      const writable = new Writable({
+        write(chunk, encoding, callback) {
+          aborted = writer.abort(reason);
+          callback();
+        },
+      });
+      const events = [];
+      writable.on('error', (err) => events.push(['error', err]));
+      writable.on('close', () => events.push(['close']));
+      const closed = once(writable, 'close');
+      writer = Writable.toWeb(writable).getWriter();
+      await writer.write(enc.encode('x'));
+      await aborted;
+      await rejects(writer.closed, (err) => err === reason);
+      await closed;
+      strictEqual(writable.errored, reason);
+      deepStrictEqual(events, [['error', reason], ['close']]);
+    });
+  },
+};
+
+// A web write of something a byte-mode Writable cannot take (a number, a
+// plain object): the node write() throws ERR_INVALID_ARG_TYPE inside the
+// sink, which errors the web stream — the write and writer.closed reject
+// with it — while the node writable itself, as in Node, is left intact:
+// neither destroyed nor errored, still writable directly.
+export const toWebInvalidWebChunkErrorsStreamOnly = {
+  async test() {
+    await withUncaughtGuard(async () => {
+      for (const chunk of [42, { a: 1 }]) {
+        const { writable, chunks } = recordingWritable();
+        const events = [];
+        writable.on('error', (err) => events.push(['error', err]));
+        writable.on('close', () => events.push(['close']));
+        const writer = Writable.toWeb(writable).getWriter();
+        const check = (err) => {
+          strictEqual(err.name, 'TypeError');
+          strictEqual(err.code, 'ERR_INVALID_ARG_TYPE');
+          return true;
+        };
+        await rejects(writer.write(chunk), check);
+        await rejects(writer.closed, check);
+        strictEqual(writable.destroyed, false);
+        strictEqual(writable.errored, null);
+        deepStrictEqual(events, []);
+        writable.end(enc.encode('direct'));
+        await once(writable, 'finish');
+        deepStrictEqual(
+          chunks.map((c) => dec.decode(c)),
+          ['direct']
+        );
+      }
+    });
   },
 };

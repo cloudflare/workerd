@@ -23,6 +23,7 @@ export function createInstrumentationState() {
     invocationPromises: [],
     invocations: new Map(),
     spans: new Map(),
+    spanUpdates: [],
   };
 }
 
@@ -83,6 +84,10 @@ export function createTailStreamHandler(state) {
           let span = state.spans.get(spanKey);
           span['closed'] = true;
           state.spans.set(spanKey, span);
+          break;
+        }
+        case 'spanUpdate': {
+          state.spanUpdates.push(event);
           break;
         }
         case 'outcome':
@@ -259,6 +264,7 @@ export function createTailStreamCollector() {
   const tailStream = createTailStreamHandler(state);
 
   const spans = state.spans;
+  const spanUpdates = state.spanUpdates;
   const invocations = state.invocations;
   const invocationPromises = state.invocationPromises;
   const waitForCompletion = () => {
@@ -270,6 +276,7 @@ export function createTailStreamCollector() {
     waitForCompletion,
     invocations,
     spans,
+    spanUpdates,
   };
 }
 

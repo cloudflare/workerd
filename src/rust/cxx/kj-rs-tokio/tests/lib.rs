@@ -15,11 +15,14 @@ use test_helpers::spawn_task_awaiting_kj_never_promise;
 use test_helpers::spawn_task_holding_kj_timer;
 use test_helpers::spawn_task_on_runtime;
 use test_helpers::spawn_yield_loop_task;
+use test_helpers::stash_waker_future;
+use test_helpers::stashed_future_poll_count;
 use test_helpers::std_thread_wake_future;
 use test_helpers::task_awaits_kj_timer;
 use test_helpers::task_fulfills_kj_fulfiller;
 use test_helpers::threaded_wake_future;
 use test_helpers::tokio_sleep_on_runtime;
+use test_helpers::wake_stashed_waker;
 
 type Result<T> = std::io::Result<T>;
 type Error = std::io::Error;
@@ -85,6 +88,14 @@ mod ffi {
         /// KJ timer is registered while the loop is parked with a longer (or no) planned
         /// deadline; the port's TimerImpl::SleepHooks must notice the sooner deadline.
         async fn task_awaits_kj_timer(delay_ms: u64, timer_ms: u64) -> Result<()>;
+
+        /// A bridged future that stashes a clone of its waker on every Pending poll (as a channel
+        /// or oneshot would) and completes once `wake_stashed_waker()` has run; counts its polls.
+        async fn stash_waker_future() -> Result<()>;
+        /// Wakes the stashed waker on the calling (loop) thread.
+        fn wake_stashed_waker();
+        /// How many times `stash_waker_future`'s future has been polled.
+        fn stashed_future_poll_count() -> u64;
     }
 
     unsafe extern "C++" {

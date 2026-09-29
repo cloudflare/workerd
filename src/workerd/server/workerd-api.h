@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/api/http.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
@@ -200,6 +201,7 @@ class WorkerdApi final: public Worker::Api {
     struct DurableActorNamespace {
       uint actorChannel;
       kj::StringPtr uniqueKey;
+      kj::Maybe<api::UserDefinedRetryPolicy> userDefinedRetryPolicy;
 
       DurableActorNamespace clone() const {
         return *this;

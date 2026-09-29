@@ -6,7 +6,6 @@
 // It is executed using the appropriate Node.js version defined in build/deps/nodejs.MODULE.bazel.
 const http = require('node:http');
 const assert = require('node:assert/strict');
-const zlib = require('node:zlib');
 
 function listenAndReport(server, name) {
   server.listen({ port: 0, host: process.env.SIDECAR_HOSTNAME }, () => {
@@ -23,12 +22,6 @@ const pongServer = http.createServer((req, res) => {
 });
 
 listenAndReport(pongServer, 'PONG_SERVER_PORT');
-
-const asdServer = http.createServer((_req, res) => {
-  res.end('asd');
-});
-
-listenAndReport(asdServer, 'ASD_SERVER_PORT');
 
 {
   const expectedHeaders = {
@@ -100,19 +93,6 @@ const helloWorldServer = http.createServer((req, res) => {
       break;
     }
 
-    case 'echo': {
-      // Echo the request body back as the response
-      let body = '';
-      req.on('data', (chunk) => {
-        body += chunk.toString();
-      });
-      req.on('end', () => {
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end(body);
-      });
-      break;
-    }
-
     default: {
       res.end();
     }
@@ -120,17 +100,6 @@ const helloWorldServer = http.createServer((req, res) => {
 });
 
 listenAndReport(helloWorldServer, 'HELLO_WORLD_SERVER_PORT');
-
-const gzipServer = http.createServer((_req, res) => {
-  const body = zlib.gzipSync(Buffer.from('hello from gzip server'));
-  res.writeHead(200, {
-    'Content-Encoding': 'gzip',
-    'Content-Type': 'text/plain',
-  });
-  res.end(body);
-});
-
-listenAndReport(gzipServer, 'GZIP_SERVER_PORT');
 
 // Echoes back the Host header the sidecar received, so the test can verify
 // that a user-supplied Host header does not redirect the transport destination.

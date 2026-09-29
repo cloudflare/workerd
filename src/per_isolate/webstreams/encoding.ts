@@ -35,11 +35,18 @@ const {
 
 const { isArrayBuffer, isArrayBufferView } = utils;
 
-const { TransformStream } = require('webstreams/transform');
+const {
+  TransformStream,
+  TransformStreamDefaultController,
+} = require('webstreams/transform');
 
 function isActualObject(value: unknown) {
   return value != null && typeof value === 'object';
 }
+
+const transformControllerEnqueue = uncurryThis(
+  TransformStreamDefaultController.prototype.enqueue
+) as (controller: object, chunk: unknown) => void;
 
 // Capture TransformStream.prototype accessors at bootstrap time so
 // internal reads do not go through the (user-patchable) prototype chain.
@@ -87,10 +94,8 @@ class TextEncoderStream {
     const self = this;
     const encoder = new TextEncoder();
     this.#transform = new TransformStream({
-      transform(
-        chunk: unknown,
-        controller: { enqueue: (c: Uint8Array) => void }
-      ) {
+      __proto__: null,
+      transform(chunk: unknown, controller: object) {
         // Spec: "encode and enqueue a chunk" ToString-coerces the input.
         // Template literal = ToString exactly: user toString honored for
         // objects, TypeError for symbols (String() would stringify them).
@@ -109,18 +114,27 @@ class TextEncoderStream {
           ) as string;
           const prefix = StringPrototypeSlice(text, 0, len - 1) as string;
           if (prefix.length > 0) {
-            controller.enqueue(TextEncoderEncode(encoder, prefix));
+            transformControllerEnqueue(
+              controller,
+              TextEncoderEncode(encoder, prefix)
+            );
           }
         } else {
           self.#pendingHighSurrogate = '';
-          controller.enqueue(TextEncoderEncode(encoder, text));
+          transformControllerEnqueue(
+            controller,
+            TextEncoderEncode(encoder, text)
+          );
         }
       },
-      flush(controller: { enqueue: (c: Uint8Array) => void }) {
+      flush(controller: object) {
         // A pending high surrogate at end-of-stream is replaced with
         // U+FFFD (the replacement character).
         if (self.#pendingHighSurrogate !== '') {
-          controller.enqueue(TextEncoderEncode(encoder, '\uFFFD'));
+          transformControllerEnqueue(
+            controller,
+            TextEncoderEncode(encoder, '\uFFFD')
+          );
           self.#pendingHighSurrogate = '';
         }
       },
@@ -177,7 +191,8 @@ class TextDecoderStream {
     this.#decoder = decoder;
 
     this.#transform = new TransformStream({
-      transform(chunk: unknown, controller: { enqueue: (c: string) => void }) {
+      __proto__: null,
+      transform(chunk: unknown, controller: object) {
         if (!isArrayBufferView(chunk) && !isArrayBuffer(chunk)) {
           throw new TypeError(
             'TextDecoderStream: chunk must be a BufferSource'
@@ -188,15 +203,15 @@ class TextDecoderStream {
           stream: true,
         });
         if (decoded.length > 0) {
-          controller.enqueue(decoded);
+          transformControllerEnqueue(controller, decoded);
         }
       },
-      flush(controller: { enqueue: (c: string) => void }) {
+      flush(controller: object) {
         // Final decode: flushes any incomplete multi-byte sequences.
         // In fatal mode this throws if the sequence is incomplete.
         const decoded = TextDecoderDecode(decoder);
         if (decoded.length > 0) {
-          controller.enqueue(decoded);
+          transformControllerEnqueue(controller, decoded);
         }
       },
     });

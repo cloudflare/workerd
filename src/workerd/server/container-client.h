@@ -86,7 +86,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       kj::Network& network,
       kj::String dockerPath,
       kj::String containerName,
-      kj::String imageName,
+      kj::Maybe<kj::String> imageName,
       kj::String containerEgressInterceptorImage,
       kj::TaskSet& waitUntilTasks,
       kj::Promise<void> pendingCleanup,
@@ -95,6 +95,10 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       ContainerPrivileges privileges);
 
   ~ContainerClient() noexcept(false);
+
+  // Starts best-effort Docker cleanup before this client is destroyed. This is used during
+  // graceful server shutdown, when cleanup can still use the server's network resources.
+  void shutdown();
 
   // Implement rpc::Container::Server interface
   kj::Promise<void> status(StatusContext context) override;
@@ -124,7 +128,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::String dockerPath;
   kj::String containerName;
   kj::String sidecarContainerName;
-  kj::String imageName;
+  kj::Maybe<kj::String> imageName;
 
   // Container egress interceptor image name (sidecar for egress proxy)
   kj::String containerEgressInterceptorImage;
@@ -172,12 +176,6 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
     kj::String cloneVolume;
   };
 
-  struct ImageInspectResponse {
-    kj::String id;
-    uint64_t size;
-    kj::String parent;
-  };
-
   struct ExecInspectResponse {
     int32_t exitCode;
     bool running;
@@ -213,7 +211,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> createVolume(kj::StringPtr volumeName);
   kj::Promise<void> deleteVolume(kj::String volumeName);
   kj::Promise<void> commitContainer(kj::StringPtr imageRef);
-  kj::Promise<ImageInspectResponse> inspectImage(kj::StringPtr imageRef);
+  kj::Promise<uint64_t> inspectImageSize(kj::StringPtr imageRef);
   kj::Promise<void> deleteImage(kj::String imageRef);
   kj::Promise<kj::String> createTempContainerWithVolume(
       kj::StringPtr volumeName, kj::StringPtr mountPath);
@@ -231,10 +229,11 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> destroySidecarContainer();
   kj::Promise<void> monitorSidecarContainer();
 
-  // Cleanup callback invoked from the destructor. Receives the joined cleanup promise so
+  // Cleanup callback invoked when shutdown begins. Receives the cleanup promise so
   // ActorNamespace can wrap it with the canceler, store it for the next ContainerClient
   // to await, and add a branch to waitUntilTasks to keep the cleanup tasks alive.
   kj::Function<void(kj::Promise<void>)> cleanupCallback;
+  bool shutdownStarted = false;
 
   // For redeeming channel tokens received via setEgressHttp / setEgressHttps.
   ChannelTokenHandler& channelTokenHandler;

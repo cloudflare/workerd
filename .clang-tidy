@@ -28,6 +28,7 @@ Checks: >
   cppcoreguidelines-prefer-member-initializer,
   google-readability-casting,
   misc-confusable-identifiers,
+  workerd-coroutine-hostile-raii,
   misc-header-include-cycle,
   misc-redundant-expression,
   misc-throw-by-value-catch-by-reference,
@@ -68,8 +69,10 @@ Checks: >
   jsg-visit-for-gc,
   workerd-angled-includes,
   workerd-consume,
+  workerd-legacy-stream-alloc,
   workerd-promise-ignore-result,
   workerd-unsafe-continuation-capture,
+  workerd-use-after-move,
   custom-iocontext-run-manual-capture
 
 # TODO: Fix and enable
@@ -89,13 +92,21 @@ Checks: >
 
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*src/workerd/.*'
+# Headers cxx generates from Rust bridges are not ours to style-check.
+ExcludeHeaderFilterRegex: '.*\.rs\.h$'
 
 CheckOptions:
+  - key: workerd-coroutine-hostile-raii.AllowedAwaitablesList
+    value: "kj::CurrentInvocationConstant;workerd::api::BeginDeferredProxyingConstant"
+  - key: workerd-coroutine-hostile-raii.RAIITypesList
+    value: "kj::UnwindDetector"
   # JSG has very entrenched include cycles
   - key: misc-header-include-cycle.IgnoredFilesList
     value: "jsg/jsg.h|jsg/dom-exception.h"
   - key: cppcoreguidelines-missing-std-forward.ForwardFunction
     value: "kj::fwd"
+  - key: workerd-use-after-move.InvalidationFunctions
+    value: "::kj::mv"
 
 ####
 # Custom checks.

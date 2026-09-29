@@ -55,7 +55,14 @@ def parse_args() -> Namespace:
         action="store_true",
         default=False,
     )
+    files_parser = subparsers.add_parser("files")
+    files_parser.add_argument("files", nargs="*")
+
     options = parser.parse_args()
+    if options.subcommand == "git":
+        options.files = []
+    elif options.subcommand is None:
+        options.files = []
     if (
         options.subcommand == "git"
         and options.staged
@@ -267,7 +274,9 @@ def format(config: FormatConfig, files: list[Path], check: bool) -> tuple[bool, 
 def main() -> None:
     options = parse_args()
 
-    if options.subcommand == "git":
+    if options.files:
+        files = [Path(file) for file in options.files]
+    elif options.subcommand == "git":
         files = git_get_modified_files(options.target, options.source, options.staged)
     else:
         files = git_get_all_files()

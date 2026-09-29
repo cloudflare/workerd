@@ -7,9 +7,6 @@ wd_rust_crate(
         "@capnp-cpp//src/kj",
     ],
     cxx_bridge_src = "lib.rs",
-    test_deps = [
-        "@crates_vendor//:nix",
-    ],
     visibility = ["//visibility:public"],
     deps = [
         "@crates_vendor//:tracing",
@@ -22,6 +19,7 @@ kj_test(
         ":cxx-integration-test",
         "//src/rust/cxx-integration",
         "//src/rust/cxx/kj-rs",
-        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )

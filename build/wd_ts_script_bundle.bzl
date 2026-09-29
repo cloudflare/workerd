@@ -192,6 +192,7 @@ def wd_ts_script_bundle(
         _gen_compile_cache(
             name = name + "@compile_cache",
             srcs = list(scripts_dict.keys()),
+            kind = "function",
         )
         compile_cache = name + "@compile_cache"
         compile_cache_deps = [compile_cache]

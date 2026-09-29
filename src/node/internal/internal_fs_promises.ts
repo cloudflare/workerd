@@ -165,7 +165,7 @@ export class FileHandle extends EventEmitter {
           options = {
             buffer: bufferOrOptions,
             offset: offsetOrOptions,
-            length: length ?? bufferOrOptions.byteLength,
+            length: length ?? bufferOrOptions.byteLength - offsetOrOptions,
             position: position ?? null,
           };
         } else {
@@ -180,8 +180,8 @@ export class FileHandle extends EventEmitter {
 
       const {
         buffer = Buffer.alloc(16384),
-        offset: actualOffset = buffer.byteOffset,
-        length: actualLength = buffer.byteLength - buffer.byteOffset,
+        offset: actualOffset = 0,
+        length: actualLength = buffer.byteLength - actualOffset,
         position: actualPosition = null,
       } = options;
 

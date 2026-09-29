@@ -171,6 +171,42 @@ export const syncStartThrow = {
   },
 };
 
+// DIVERGENCE (ledger #23): the controller settles a new promise with
+// start()'s result (spec "a promise resolved with"), so a returned promise
+// starts the stream later than adopting it would: the first pull runs
+// after the second marker chained on it (Node agrees). C++ adopts the
+// promise and pulls before the first marker.
+export const startPromiseSettledInNewPromise = {
+  async test() {
+    const expected = usingTsImpl ? '1,2,pull,3,4' : 'pull,1,2,3,4';
+    // start() returning a fulfilled promise, and one fulfilled later.
+    for (const pending of [false, true]) {
+      const log = [];
+      const { promise, resolve } = Promise.withResolvers();
+      if (!pending) resolve();
+      new ReadableStream(
+        {
+          start: () => promise,
+          pull() {
+            log.push('pull');
+          },
+        },
+        { highWaterMark: 1 }
+      );
+      let p = promise;
+      for (let i = 1; i <= 4; i++) {
+        p = p.then(() => log.push(i));
+      }
+      if (pending) {
+        await null;
+        resolve();
+      }
+      await scheduler.wait(1);
+      strictEqual(log.join(','), expected, `pending: ${pending}`);
+    }
+  },
+};
+
 // An async start() rejection errors the stream on both sides: reads
 // reject with the same error object.
 export const asyncStartRejectionErrorsStream = {

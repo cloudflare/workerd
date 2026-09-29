@@ -151,12 +151,12 @@ KJ_TEST("large key") {
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
   SqliteKv kv(db);
 
-  // Test 4 MB because we document a 4 MB limit for SQLite Durable Objects, but implement a 4 MiB
+  // Test 8 MB because we document an 8 MB limit for SQLite Durable Objects, but implement an 8 MiB
   // limit.
-  kj::String closeToLimitString = kj::heapString(4000000);
+  kj::String closeToLimitString = kj::heapString(8000000);
   kv.put(closeToLimitString, "hello"_kj.asBytes());
 
-  kj::String tooBigString = kj::heapString(4 * 1024 * 1024 + 1);
+  kj::String tooBigString = kj::heapString(SqliteDatabase::MAX_ROW_LENGTH + 1);
   KJ_EXPECT_THROW_MESSAGE(
       "string or blob too big: SQLITE_TOOBIG", kv.put(tooBigString, "hello"_kj.asBytes()));
 }
@@ -276,7 +276,7 @@ KJ_TEST("SQLite-KV multi-put rollback on error") {
 
   // Create a multi-put that will fail due to a key being too large. The string must outlive the
   // non-owning pointer stored in pairs.
-  kj::String tooBigString = kj::heapString(4 * 1024 * 1024 + 1);
+  kj::String tooBigString = kj::heapString(SqliteDatabase::MAX_ROW_LENGTH + 1);
   kj::Vector<KeyValue> pairs;
   pairs.add(KeyValue{"key1"_kj, "value1"_kj.asBytes()});
   pairs.add(KeyValue{"key2"_kj, "value2"_kj.asBytes()});

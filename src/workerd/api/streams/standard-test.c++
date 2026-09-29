@@ -7,6 +7,11 @@
 #include <workerd/jsg/observer.h>
 #include <workerd/tests/test-fixture.h>
 
+// These tests exercise the legacy C++ streams implementation directly, so they allocate the
+// legacy ReadableStream / WritableStream rather than going through the JsReadableStream /
+// JsWritableStream implementation dispatch.
+// NOLINTBEGIN(workerd-legacy-stream-alloc)
+
 namespace workerd::api {
 namespace {
 
@@ -2524,3 +2529,5 @@ KJ_TEST("DrainingReader: controller closes promptly after drainingRead done (byt
 
 }  // namespace
 }  // namespace workerd::api
+
+// NOLINTEND(workerd-legacy-stream-alloc)

@@ -689,10 +689,14 @@ def split_bzl_file(file: Path) -> dict[str, str]:
 
 
 def read_access_token():
+    # 1. Try to obtain token from the environment (e.g. GITHUB_TOKEN provided by CI)
+    if token := os.environ.get("GITHUB_TOKEN"):
+        return token
+
     if not sys.stdin.isatty():
         return ""
 
-    # 1. Try to obtain token from the gh tool
+    # 2. Try to obtain token from the gh tool
     try:
         res = subprocess.run(["gh", "auth", "token"], capture_output=True)
         if res.returncode == 0:
@@ -705,6 +709,7 @@ def read_access_token():
     except FileNotFoundError:
         pass  # User does not have gh tool installed
 
+        # 3. Ask user to provide key via stdin
         print(
             """Follow these steps to obtain a GitHub API access token with
 appropriate permissions:

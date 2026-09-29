@@ -1,17 +1,20 @@
 using Workerd = import "/workerd/workerd.capnp";
 
+# The worker is instantiated twice so that the bindings below cross an isolate boundary.
+# Only the first service's test() runs; see the filter argument in BUILD.bazel.
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "r2-write-http-metadata-validation-test",
-      worker = (
-        modules = [
-          (name = "worker", esModule = embed "r2-write-http-metadata-validation-test.js")
-        ],
-        bindings = [
-          ( name = "BUCKET", r2Bucket = "r2-write-http-metadata-validation-test" ),
-        ],
-        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
-      )
-    ),
+    ( name = "r2-write-http-metadata-validation-test", worker = .worker ),
+    ( name = "r2-write-http-metadata-validation-test-target", worker = .worker ),
   ],
+);
+
+const worker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "r2-write-http-metadata-validation-test.js")
+  ],
+  bindings = [
+    ( name = "BUCKET", r2Bucket = "r2-write-http-metadata-validation-test-target" ),
+  ],
+  compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
 );

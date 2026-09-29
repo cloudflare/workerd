@@ -71,14 +71,11 @@ ValueQueue::QueueEntry ValueQueue::QueueEntry::clone(jsg::Lock& js) {
 
 ValueQueue::Consumer::Consumer(
     ValueQueue& queue, kj::Weak<ConsumerImpl::StateListener> stateListener)
-    : impl(queue.impl, stateListener) {}
+    : impl(queue.impl.addWeak(), kj::mv(stateListener)) {}
 
 ValueQueue::Consumer::Consumer(
-    kj::Ptr<QueueImpl> impl, kj::Weak<ConsumerImpl::StateListener> stateListener)
-    : impl(impl, stateListener) {}
-
-ValueQueue::Consumer::Consumer(kj::Weak<ConsumerImpl::StateListener> stateListener)
-    : impl(stateListener) {}
+    kj::Weak<QueueImpl> impl, kj::Weak<ConsumerImpl::StateListener> stateListener)
+    : impl(kj::mv(impl), kj::mv(stateListener)) {}
 
 void ValueQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   impl.cancel(js, maybeReason);
@@ -116,12 +113,7 @@ kj::Own<ValueQueue::Consumer> ValueQueue::Consumer::clone(
     jsg::Lock& js, kj::Weak<ConsumerImpl::StateListener> stateListener) {
   // If the queue was destroyed (e.g., stream was closed), we can still clone
   // the consumer - the cloneTo() will copy the closed/errored state.
-  kj::Own<Consumer> consumer;
-  KJ_IF_SOME(q, impl.queue) {
-    consumer = kj::heap<Consumer>(q, stateListener);
-  } else {
-    consumer = kj::heap<Consumer>(stateListener);
-  }
+  auto consumer = kj::heap<Consumer>(impl.queue, stateListener);
   impl.cloneTo(js, consumer->impl);
   return kj::mv(consumer);
 }
@@ -551,8 +543,8 @@ void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsValue value) {
 }
 
 kj::Own<ByteQueue::ByobRequest> ByteQueue::ReadRequest::makeByobReadRequest(
-    kj::Weak<ConsumerImpl> consumer, kj::Ptr<QueueImpl> queue) {
-  auto req = kj::heap<ByobRequest>(addWeakToThis(), kj::mv(consumer), queue);
+    kj::Weak<ConsumerImpl> consumer, kj::Weak<QueueImpl> queue) {
+  auto req = kj::heap<ByobRequest>(addWeakToThis(), kj::mv(consumer), kj::mv(queue));
   byobReadRequest = req->addWeakRef();
   return kj::mv(req);
 }
@@ -605,14 +597,11 @@ ByteQueue::QueueEntry ByteQueue::QueueEntry::clone(jsg::Lock& js) {
 #pragma region ByteQueue::Consumer
 
 ByteQueue::Consumer::Consumer(ByteQueue& queue, kj::Weak<ConsumerImpl::StateListener> stateListener)
-    : impl(queue.impl, stateListener) {}
+    : impl(queue.impl.addWeak(), kj::mv(stateListener)) {}
 
 ByteQueue::Consumer::Consumer(
-    kj::Ptr<QueueImpl> impl, kj::Weak<ConsumerImpl::StateListener> stateListener)
-    : impl(impl, stateListener) {}
-
-ByteQueue::Consumer::Consumer(kj::Weak<ConsumerImpl::StateListener> stateListener)
-    : impl(stateListener) {}
+    kj::Weak<QueueImpl> impl, kj::Weak<ConsumerImpl::StateListener> stateListener)
+    : impl(kj::mv(impl), kj::mv(stateListener)) {}
 
 void ByteQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   impl.cancel(js, maybeReason);
@@ -650,12 +639,7 @@ kj::Own<ByteQueue::Consumer> ByteQueue::Consumer::clone(
     jsg::Lock& js, kj::Weak<ConsumerImpl::StateListener> stateListener) {
   // If the queue was destroyed (e.g., stream was closed), we can still clone
   // the consumer - the cloneTo() will copy the closed/errored state.
-  kj::Own<Consumer> consumer;
-  KJ_IF_SOME(q, impl.queue) {
-    consumer = kj::heap<Consumer>(q, stateListener);
-  } else {
-    consumer = kj::heap<Consumer>(stateListener);
-  }
+  auto consumer = kj::heap<Consumer>(impl.queue, stateListener);
   impl.cloneTo(js, consumer->impl);
   return kj::mv(consumer);
 }
@@ -1277,7 +1261,7 @@ void ByteQueue::handleRead(jsg::Lock& js,
       KJ_IF_SOME(q, queue) {
         KJ_IF_SOME(queueState, q->getState()) {
           queueState.pendingByobReadRequests.push_back(
-              state.readRequests.back()->makeByobReadRequest(consumer, q));
+              state.readRequests.back()->makeByobReadRequest(consumer, queue));
         }
       }
     }

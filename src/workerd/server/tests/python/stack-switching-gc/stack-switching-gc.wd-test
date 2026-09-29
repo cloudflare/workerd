@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "py", worker = .pyWorker),
+  ],
+);
+
+const pyWorker :Workerd.Worker = (
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+  modules = [
+    (name = "worker.py", pythonModule = embed "worker.py"),
+  ],
+);

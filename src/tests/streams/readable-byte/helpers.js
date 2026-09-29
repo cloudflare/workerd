@@ -4,10 +4,9 @@
 
 // Shared helpers for the readable-byte suite.
 
-// Reads a byte stream to completion with a default reader, returning
-// all bytes concatenated.
-export async function drainBytes(readable) {
-  const reader = readable.getReader();
+// Reads a byte stream to completion with a default reader (`reader`, when
+// one is already held), returning all bytes concatenated.
+export async function drainBytes(readable, reader = readable.getReader()) {
   const parts = [];
   let total = 0;
   for (;;) {

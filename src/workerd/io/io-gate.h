@@ -25,6 +25,7 @@
 #include <kj/async.h>
 #include <kj/list.h>
 #include <kj/one-of.h>
+#include <kj/sticky-flag.h>
 
 namespace workerd {
 
@@ -160,16 +161,13 @@ class InputGate {
   // waiters.
   kj::List<Waiter, &Waiter::link> waitingChildren;
 
-  // A fulfiller for onBroken(), or an exception if already broken.
-  kj::ForkedPromise<void> brokenPromise;
-  kj::OneOf<kj::Own<kj::PromiseFulfiller<void>>, kj::Exception> brokenState;
+  kj::StickyFlag brokenFlag;
+  kj::Maybe<kj::Exception> brokenException;
 
   void releaseLock();
 
   // Called when a critical section fails. All future waiters will throw this exception.
   void setBroken(const kj::Exception& e);
-
-  InputGate(Hooks& hooks, kj::PromiseFulfillerPair<void> paf);
 };
 
 // A CriticalSection is a procedure that must not be interrupted by anything "external".
@@ -293,7 +291,6 @@ class OutputGate {
   // Rejects if and when calls to `wait()` become broken due to a failed lockWhile(). The actor
   // should be shut down in this case. This promise never resolves, only rejects.
   //
-  // This method can only be called once.
   kj::Promise<void> onBroken();
 
   bool isBroken();
@@ -303,8 +300,8 @@ class OutputGate {
 
   kj::ForkedPromise<void> pastLocksPromise;
 
-  // A fulfiller for onBroken(), or an exception if already broken.
-  kj::OneOf<kj::Own<kj::PromiseFulfiller<void>>, kj::Exception> brokenState;
+  kj::StickyFlag brokenFlag;
+  kj::Maybe<kj::Exception> brokenException;
 
   void setBroken(const kj::Exception& e);
 

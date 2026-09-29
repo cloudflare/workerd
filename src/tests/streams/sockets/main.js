@@ -7,6 +7,7 @@
 
 export {
   echoRoundTrip,
+  degenerateViewsWithHighWaterMark,
   greetReadsToEof,
   echoByobReads,
   echoReadAtLeast,
@@ -14,6 +15,9 @@ export {
   pipeJsSourceToSocketWritable,
   pipeSocketThroughJsTransform,
   pipeSocketToSocket,
+  pipeSocketToSocketClosesSource,
+  pipeBehindUnawaitedWrite,
+  pipeBehindWriteBeforeStart,
   cancelReadableSettlesSocket,
   largeEchoVolume,
   closeWithPipeCloseInFlight,

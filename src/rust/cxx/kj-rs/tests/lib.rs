@@ -9,15 +9,18 @@
 pub mod test_date;
 mod test_futures;
 mod test_maybe;
-mod test_own;
+pub mod test_own;
 mod test_refcount;
 
 use kj_rs::KjOwn;
 use test_futures::clear_retained_waker;
+use test_futures::complete_joined_waker_future;
+use test_futures::join_retained_wake;
 use test_futures::new_drop_cancellable_promise_without_polling;
 use test_futures::new_error_handling_future_void_infallible;
 use test_futures::new_errored_future_void;
 use test_futures::new_future_awaiting_cancellable_promise;
+use test_futures::new_joined_waker_future_void;
 use test_futures::new_kj_errored_future_void;
 use test_futures::new_layered_ready_future_void;
 use test_futures::new_naive_select_future_void;
@@ -32,8 +35,12 @@ use test_futures::new_two_step_cancellable_future;
 use test_futures::new_waking_future_void;
 use test_futures::new_wrapped_waker_future_void;
 use test_futures::poll_and_stash_promise_future;
+use test_futures::start_retained_wake;
+use test_futures::stash_waker_future;
+use test_futures::stashed_future_poll_count;
 use test_futures::unstash_and_await_promise_future;
 use test_futures::wake_retained_waker_from_background_thread;
+use test_futures::wake_stashed_waker;
 use test_maybe::take_maybe_own;
 use test_maybe::take_maybe_own_ret;
 use test_maybe::take_maybe_ref;
@@ -101,6 +108,26 @@ pub mod ffi {
         fn rust_take_own_driver();
     }
 
+    // A polymorphic base that is not at offset 0 of the complete object it is held through.
+    unsafe extern "C++" {
+        include!("kj-rs-demo/test-own.h");
+        type SecondBase;
+        fn second(&self) -> u64;
+
+        fn heap_two_base() -> KjOwn<SecondBase>;
+        fn rust_drop_recorded_two_base_driver() -> bool;
+        fn rust_drop_heap_two_base_driver() -> u64;
+        fn two_base_destroyed() -> u64;
+    }
+
+    // Declared here without a `KjOwn<TwoBase>`, so this bridge generates no `OwnTarget` for it;
+    // `test_own::alias_ffi` aliases it and asks for one with `impl KjOwn<TwoBase> {}`.
+    unsafe extern "C++" {
+        include!("kj-rs-demo/test-own.h");
+        type TwoBase;
+        fn first(&self) -> u64;
+    }
+
     unsafe extern "C++" {
         include!("kj-rs-demo/test-refcount.h");
 
@@ -117,6 +144,7 @@ pub mod ffi {
         fn return_maybe_rc_some() -> KjMaybe<KjRc<OpaqueRefcountedClass>>;
         fn return_maybe_rc_none() -> KjMaybe<KjRc<OpaqueRefcountedClass>>;
         fn take_maybe_rc(maybe: KjMaybe<KjRc<OpaqueRefcountedClass>>);
+        fn take_maybe_rc_none(maybe: KjMaybe<KjRc<OpaqueRefcountedClass>>);
         fn maybe_rc_rust_driver();
     }
 
@@ -136,6 +164,7 @@ pub mod ffi {
 
         fn return_maybe_arc_some() -> KjMaybe<KjArc<OpaqueAtomicRefcountedClass>>;
         fn return_maybe_arc_none() -> KjMaybe<KjArc<OpaqueAtomicRefcountedClass>>;
+        fn take_maybe_arc_none(maybe: KjMaybe<KjArc<OpaqueAtomicRefcountedClass>>);
     }
 
     extern "Rust" {
@@ -156,6 +185,7 @@ pub mod ffi {
         fn modify_own_return(cpp_own: KjOwn<OpaqueCxxClass>) -> KjOwn<OpaqueCxxClass>;
         fn take_own(cpp_own: KjOwn<OpaqueCxxClass>);
         fn get_null() -> KjOwn<OpaqueCxxClass>;
+        fn take_second_base(own: KjOwn<SecondBase>);
     }
 
     unsafe extern "C++" {
@@ -263,7 +293,19 @@ pub mod ffi {
         async fn new_ready_future_shared_type() -> Shared;
         async fn new_waking_future_void(cloning_action: CloningAction, waking_action: WakingAction);
         async fn new_threaded_delay_future_void();
+
+        /// A bridged future that stashes a clone of its waker on every Pending poll (as a channel
+        /// or oneshot would) and completes once `wake_stashed_waker()` has run; counts its polls.
+        async fn stash_waker_future() -> Result<()>;
+        /// Wakes the stashed waker on the calling (loop) thread.
+        fn wake_stashed_waker();
+        /// How many times `stash_waker_future`'s future has been polled.
+        fn stashed_future_poll_count() -> u64;
         async fn new_retained_waker_future_void();
+        async fn new_joined_waker_future_void() -> Result<()>;
+        fn complete_joined_waker_future();
+        fn start_retained_wake();
+        fn join_retained_wake();
         fn wake_retained_waker_from_background_thread();
         fn clear_retained_waker();
         async fn new_layered_ready_future_void() -> Result<()>;
@@ -334,6 +376,11 @@ pub fn take_own(cpp_own: KjOwn<ffi::OpaqueCxxClass>) {
     // The point of this function is to drop the [`Own`] from rust and this makes
     // it explicit, while avoiding a clippy lint
     std::mem::drop(cpp_own);
+}
+
+pub fn take_second_base(own: KjOwn<ffi::SecondBase>) {
+    assert_eq!(own.second(), 2);
+    std::mem::drop(own);
 }
 
 pub async fn lifetime_arg_void<'a>(_buf: &'a [u8]) {}

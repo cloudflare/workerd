@@ -74,7 +74,7 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
 
 Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
   // gates array is zero-initialized by default.
-  for (auto name: autogates) {
+  for (const auto& name: autogates) {
     if (!name.startsWith(WORKERD_PREFIX)) {
       LOG_ERROR_ONCE("Autogate configuration includes gate with invalid prefix.");
       continue;

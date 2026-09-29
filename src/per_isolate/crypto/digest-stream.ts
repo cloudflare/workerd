@@ -55,18 +55,16 @@ import type {
   UnderlyingSink,
   WritableStream as WritableStreamType,
 } from '../webstreams/types';
+import type { ViewExtentHelpers } from '../webstreams/view-extent';
 
 const {
   ArrayBufferPrototypeByteLengthGet,
   BigInt,
-  DataViewPrototypeGetByteLength,
   ObjectDefineProperties,
   PromiseWithResolvers,
   SymbolDispose,
   SymbolToStringTag,
   TypeError,
-  TypedArrayPrototypeGetByteLength,
-  TypedArrayPrototypeGetSymbolToStringTag,
 } = primordials;
 
 const {
@@ -79,6 +77,8 @@ const {
 const { WritableStream } = require('webstreams/writable') as {
   WritableStream: typeof WritableStreamType;
 };
+const { viewByteLength } =
+  require('webstreams/view-extent') as ViewExtentHelpers;
 
 type Chunk = ArrayBuffer | ArrayBufferView | string;
 
@@ -104,12 +104,9 @@ function byteLengthOf(chunk: ArrayBuffer | ArrayBufferView): number {
   if (isArrayBuffer(chunk)) {
     return ArrayBufferPrototypeByteLengthGet(chunk);
   }
-  // A view: either a TypedArray or a DataView. The tag getter returns the
-  // internal [[TypedArrayName]], and undefined for a DataView.
-  if (TypedArrayPrototypeGetSymbolToStringTag(chunk) !== undefined) {
-    return TypedArrayPrototypeGetByteLength(chunk as Uint8Array);
-  }
-  return DataViewPrototypeGetByteLength(chunk as DataView);
+  // A detached or out-of-bounds view, DataViews included, is empty (see
+  // webstreams/view-extent.ts).
+  return viewByteLength(chunk);
 }
 
 // Collapses the WebCrypto-style `string | { name }` algorithm parameter to a
@@ -246,7 +243,8 @@ class DigestStream extends WritableStream<ArrayBuffer | ArrayBufferView> {
     // until super() returns. An unrecognized algorithm therefore also throws
     // before any stream exists, as in C++.
     const state = createDigestState(algorithm, options);
-    const sink: UnderlyingSink<ArrayBuffer | ArrayBufferView> = {
+    const sink = {
+      __proto__: null,
       write(chunk: ArrayBuffer | ArrayBufferView): void {
         digestWrite(state, chunk);
       },
@@ -256,7 +254,7 @@ class DigestStream extends WritableStream<ArrayBuffer | ArrayBufferView> {
       abort(reason?: unknown): void {
         digestError(state, reason);
       },
-    };
+    } as UnderlyingSink<ArrayBuffer | ArrayBufferView>;
     super(sink);
     this.#state = state;
   }

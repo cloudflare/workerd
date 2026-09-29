@@ -40,7 +40,7 @@ class CompressionStreamImpl final: public kj::Refcounted,
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
     // We check state here so that we catch errors even if pieces is empty.
     requireActive("Write after close");
-    for (auto piece: pieces) {
+    for (const auto& piece: pieces) {
       co_await write(piece);
     }
     co_return;
@@ -372,6 +372,12 @@ class CompressionStreamAdapter final: public kj::Refcounted,
 
 }  // namespace
 
+// These are the legacy implementation's JS constructors, so the readable and writable sides they
+// build are legacy streams by construction; under typescript_implemented_streams the global
+// CompressionStream / DecompressionStream are the TypeScript classes and these constructors are
+// not reachable.
+// NOLINTBEGIN(workerd-legacy-stream-alloc)
+
 jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::String format) {
   JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
       "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
@@ -411,5 +417,7 @@ jsg::Ref<DecompressionStream> DecompressionStream::constructor(jsg::Lock& js, kj
       js.alloc<WritableStream>(ioContext, kj::mv(writableSide),
           ioContext.getMetrics().tryCreateWritableByteStreamObserver()));
 }
+
+// NOLINTEND(workerd-legacy-stream-alloc)
 
 }  // namespace workerd::api

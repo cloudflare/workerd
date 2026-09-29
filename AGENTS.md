@@ -28,7 +28,9 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 
 - `just build` or `just b` - Build the project
 - `just test` or `just t` - Run all tests
-- `just format` or `just f` - Format code (uses clang-format + Python formatter)
+- `just format` or `just f` - Format all code (uses clang-format + Python formatter)
+- `just format <path>...` - Format specific files
+- `just format-head` - Format files changed since `HEAD~`
 - `just clippy <package>` - Run Rust clippy linter (e.g., `just clippy jsg-macros`)
 - `just clang-tidy <target>` - Run clang-tidy on C++ code (e.g., `just clang-tidy //src/rust/jsg:ffi`)
 - `just stream-test <target>` - Stream test output for debugging
@@ -189,6 +191,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Config schema          | `src/workerd/server/workerd.capnp`                            | Cap'n Proto; capability-based security                                                                       |
 | Worker lifecycle       | `src/workerd/io/worker.{h,c++}`                               | Isolate, Script, Worker, Actor classes                                                                       |
 | Request lifecycle      | `src/workerd/io/io-context.{h,c++}`                           | IoContext: the per-request god object                                                                        |
+| Coroutine cancellation | `docs/reference/detail/async-patterns.md`                     | `CURRENT_INVOCATION` with `KJ_DEFER`; `KJ_ON_SCOPE_FAILURE` is exception-only                                |
 | Durable Object storage | `src/workerd/io/actor-cache.{h,c++}` + `actor-sqlite.{h,c++}` | LRU cache over RPC / SQLite-backed                                                                           |
 | Streams implementation | `src/workerd/api/streams/`                                    | Has 842-line README; dual internal/standard impl                                                             |
 | Bazel build rules      | `build/`                                                      | Custom `wd_*` macros; `wd_test.bzl` generates 3 test variants                                                |
@@ -201,7 +204,9 @@ This project generally follows the [KJ Style Guide](https://github.com/capnproto
 
 - **C++ standard**: C++23 (`-std=c++23`)
 - **C++ file extensions**: `.c++` / `.h` (not `.cpp`); test suffix `-test` (hyphenated)
-- **Formatting**: `just format` runs clang-format + prettier + ruff + buildifier + rustfmt
+- **Formatting**: `just format` runs clang-format + prettier + ruff + buildifier + rustfmt;
+  use `just format <path>...` for specific files or `just format-head` for files changed since
+  `HEAD~`
 - **Pre-commit hook**: Blocks `KJ_DBG` in staged code; runs format check
 - **Commit discipline**: Split PRs into small commits; each must compile + pass tests; no fixup commits
 - **TypeScript**: Strict mode, `exactOptionalPropertyTypes`, private `#` syntax enforced, explicit return types
@@ -239,6 +244,10 @@ KJ library provides several constructs that should be preferred to improve the s
 
 - `kj::ArrayPtr<T>` should be used instead of `T*`
 - `kj::Ptr<T>` should be used instead of `T&` when it is bound by T's lifetime
+
+Declare data owners before views into that data (members, lambda captures, locals), so views are
+constructed after and destroyed before the memory they reference. When an owner can be released
+while the object lives on, clear the view at the same time.
 
 ### Error Handling
 

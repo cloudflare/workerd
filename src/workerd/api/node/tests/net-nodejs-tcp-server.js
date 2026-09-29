@@ -47,22 +47,6 @@ const timeoutServer = net.createServer((s) => {
 });
 listenAndReport(timeoutServer, 'TIMEOUT_SERVER_PORT');
 
-const endServer = net.createServer((s) => {
-  s.end();
-});
-listenAndReport(endServer, 'END_SERVER_PORT');
-
-let count = 0;
-const serverThatDies = net.createServer(function (s) {
-  // We ignore the first event because wd_test checks for the connected state
-  // while preparing the sidecar test suite.
-  if (count++ > 0) {
-    serverThatDies.close();
-  }
-  s.end();
-});
-listenAndReport(serverThatDies, 'SERVER_THAT_DIES_PORT');
-
 const reconnectServer = net.createServer((s) => {
   s.resume();
   s.on('error', () => {

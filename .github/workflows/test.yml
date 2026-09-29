@@ -124,6 +124,7 @@ jobs:
       extra_bazel_args: '--config=lint --config=ci-test --config=ci-linux-common'
       run_tests: false
       parse_headers: true
+      check_io_backend_graph: true
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
@@ -132,7 +133,7 @@ jobs:
   check-snapshot:
     runs-on: ubuntu-22.04-16core
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           show-progress: false
       - name: Cache
@@ -197,7 +198,7 @@ jobs:
     runs-on: ubuntu-22.04-16core
     steps:
       - name: Checkout workers-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: cloudflare/workers-sdk
 

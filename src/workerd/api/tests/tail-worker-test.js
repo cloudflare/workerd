@@ -131,8 +131,14 @@ function splitEvents(str) {
 // lifecycles are checked exactly. Cross-invocation nesting is verified separately by buildTree
 // via span IDs.
 function canonicalizeEvents(eventsStr) {
-  if (!eventsStr.includes('"name":"jsRpcSession"')) return eventsStr;
-  const events = splitEvents(eventsStr);
+  const normalizedEvents = eventsStr.replaceAll(
+    /("name":"cloudflare\.durable_object\.alarm\.scheduled_time","value":")[^"]+("})/g,
+    '$1ALARM_SCHEDULED_TIME$2'
+  );
+  if (!normalizedEvents.includes('"name":"jsRpcSession"')) {
+    return normalizedEvents;
+  }
+  const events = splitEvents(normalizedEvents);
   if (events.length <= 1) return eventsStr;
   const ordered = [];
   const closes = [];
@@ -310,7 +316,7 @@ const E = {
   alarm:
     '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"alarm","scheduledTime":"1970-01-01T00:00:00.000Z"}}{"type":"spanOpen","name":"durable_object_storage_getAlarm","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   doFetch:
-    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://foo/test","headers":[]}}{"type":"spanOpen","name":"durable_object_storage_setAlarm","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"durable_object_storage_getAlarm","spanId":"0000000000000002"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"durable_object_storage_getAlarm","spanId":"0000000000000003"}{"type":"spanClose","outcome":"ok"}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","durableObjectId":"DO_ID","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://foo/test","headers":[]}}{"type":"spanOpen","name":"durable_object_storage_setAlarm","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"cloudflare.durable_object.alarm.scheduled_time","value":"ALARM_SCHEDULED_TIME"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"durable_object_storage_getAlarm","spanId":"0000000000000002"}{"type":"attributes","info":[{"name":"cloudflare.durable_object.alarm.scheduled_time","value":"ALARM_SCHEDULED_TIME"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"durable_object_storage_getAlarm","spanId":"0000000000000003"}{"type":"spanClose","outcome":"ok"}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
   // websocket/hibernation
   wsUpgrade:

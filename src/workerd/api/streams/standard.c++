@@ -3061,6 +3061,11 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
 
   // This will leave this stream locked, disturbed, and closed.
 
+  // The branches of a legacy stream are legacy streams by construction: they are built directly
+  // over clones of this controller's state, not through the implementation dispatch in
+  // JsReadableStream::create().
+  // NOLINTBEGIN(workerd-legacy-stream-alloc)
+
   // Check for pending state first (deferred close/error during a prior read operation)
   if (state.pendingStateIs<StreamStates::Closed>()) {
     return Tee{
@@ -3129,6 +3134,7 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
       };
     }
   }
+  // NOLINTEND(workerd-legacy-stream-alloc)
   KJ_UNREACHABLE;
 }
 
@@ -3532,7 +3538,8 @@ kj::Promise<void> forwardToFulfiller(
 kj::Promise<void> pumpToImpl(IoContext& ioContext,
     kj::Own<DrainingReader> reader,
     kj::Own<WritableStreamSink> sink,
-    bool end) {
+    bool end,
+    kj::CoUnwindAware = {}) {
 
   bool writeFailed = false;
 
@@ -3555,13 +3562,20 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
       });
       ioContext.addTask(forwardToFulfiller(kj::mv(promise), kj::mv(prp.fulfiller)));
 
-      DrainingReadResult result = co_await prp.promise;
+      // The read races the sink reporting that its writes can no longer succeed (for example, the
+      // peer of an RPC-transferred stream canceled it). A source that is idle would otherwise keep
+      // this pump parked indefinitely, and its cancel algorithm would run only when data finally
+      // arrived and the write failed. Losing the race throws into the catch block below, which
+      // cancels the reader with the sink's reason. The join drops whichever side lost.
+      DrainingReadResult result = co_await prp.promise.exclusiveJoin(
+          rejectWhenWriteDisconnected<DrainingReadResult>(*sink));
 
       // Write all the chunks we received using vectored write for efficiency.
       // Fast path: hand chunks to the sink synchronously via tryWriteSync() when it can
       // accept data immediately, avoiding a round-trip through the KJ event loop.
       if (result.chunks.size() > 0) {
-        KJ_ON_SCOPE_FAILURE(writeFailed = true);
+        auto invocation = KJ_CO_MAGIC kj::CURRENT_INVOCATION;
+        KJ_DEFER(if (invocation.isUnwinding()) { writeFailed = true; });
         auto pieces =
             KJ_MAP(chunk, result.chunks) -> kj::ArrayPtr<const kj::byte> { return chunk.asPtr(); };
         if (!sink->tryWriteSync(pieces)) {
@@ -3571,7 +3585,8 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
 
       // If the stream is done, end the output if needed and exit.
       if (result.done) {
-        KJ_ON_SCOPE_FAILURE(writeFailed = true);
+        auto invocation = KJ_CO_MAGIC kj::CURRENT_INVOCATION;
+        KJ_DEFER(if (invocation.isUnwinding()) { writeFailed = true; });
         if (end) {
           co_await sink->end();
         }
@@ -3589,8 +3604,8 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
                                      jsg::Lock& js) mutable -> kj::Promise<void> {
       auto& ioContext = IoContext::current();
       KJ_IF_SOME(reader, weakReader.tryGet()) {
-        auto error = js.exceptionToJsValue(kj::mv(ex));
-        return ioContext.awaitJs(js, reader.cancel(js, error.getHandle(js)));
+        auto reason = exceptionToCancelReason(js, kj::mv(ex));
+        return ioContext.awaitJs(js, reader.cancel(js, reason));
       } else {
         return KJ_EXCEPTION(DISCONNECTED, "The pump was canceled.");
       }

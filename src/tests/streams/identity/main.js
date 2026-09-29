@@ -67,6 +67,8 @@ export {
 export {
   supportsByobReader,
   partialFillAcrossReads,
+  byobReadSpansQueuedWrites,
+  byobReadSpanningBoundaries,
   byobViewLyingAboutLength,
   byobViewLyingAfterEnqueue,
   byobReadCallValidation,
@@ -80,6 +82,7 @@ export {
   defaultHighWaterMarkAccounting,
   explicitHighWaterMarkIsInitialDesiredSize,
   desiredSizeTracksBytes,
+  partialByobReadKeepsWriteCounted,
   stringWriteDesiredSizeAccounting,
   readyReflectsBackpressure,
 } from 'backpressure';
@@ -95,6 +98,9 @@ export {
   abortRejectsPendingRead,
   abortRejectsSubsequentReads,
   abortClearsPendingWrite,
+  abortClearsParkedWrite,
+  abortClearsParkedWriteAndQueue,
+  abortParkedWriteErrorsReadable,
   abortRejectsSubsequentWrites,
 } from 'abort-propagation';
 
@@ -104,6 +110,7 @@ export {
   pipeCancellationWinsOverLaterReadableCancel,
   cancelResolvesReaderClosedPromise,
   cancelledReaderReadsResolveDone,
+  cancelSettlesPendingRead,
 } from 'cancel-propagation';
 
 export {
@@ -135,8 +142,18 @@ export {
   singleBranchReadDrivesWriter,
   writerDesiredSizeAcrossTee,
   cancelOneBranchKeepsWriterFlowing,
+  inFlightWriteRejectsWhenBranchesLeaveAfterRead,
+  abortBeforeStarvedReadRejectsInFlightWrite,
   writeAfterBothBranchesCancel,
 } from 'tee-backpressure';
+
+export {
+  teeByobBranchesReadDifferentSizes,
+  teeLaggingBranchHoldsWriterDesiredSize,
+  teeCancelSlowerBranchSettlesWrites,
+  teeMixedByobAndDefaultReaders,
+  nestedTeeByobLeavesReadDifferentSizes,
+} from 'tee-byob';
 
 export {
   teeOfTeeBranchDeliversToAllLeaves,
@@ -177,6 +194,7 @@ export { releaseLockRejectsClosedPromises } from 'lock-release';
 
 export {
   readAtLeastWaitsForMinimum,
+  readAtLeastSpanningWritesSettlesEach,
   readAtLeastValidation,
   readAtLeastUnavailableOnDefaultReader,
 } from 'read-at-least';
@@ -193,9 +211,12 @@ export { abortWriterAfterGc } from 'gc-interplay';
 export {
   thenInterceptionDuringReadResolution,
   closeWriterFromThenInterceptorDuringRead,
+  abortWriterFromThenInterceptorDuringRead,
   closeFromReadContinuationWithSecondReadParked,
   writeFromReadContinuation,
   cancelSiblingFromReadContinuation,
 } from 'reentrancy';
 
 export { structuredCloneIdentity } from 'transfer';
+
+export { internalDictionariesIgnorePollution } from 'pollution';

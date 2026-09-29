@@ -6,7 +6,53 @@
 // when user references are dropped. Requires --expose-gc (set in all
 // three cell configs).
 
-import { strictEqual, ok } from 'node:assert';
+import { strictEqual, ok, throws } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
+
+async function collectGarbage() {
+  for (let i = 0; i < 3; i++) {
+    gc();
+    await scheduler.wait(5);
+  }
+}
+
+// A controller whose stream was teed with both branches left unreachable.
+function makeTeedAway(source = {}, highWaterMark = 4) {
+  let controller;
+  const rs = new ReadableStream(
+    {
+      ...source,
+      start(c) {
+        controller = c;
+      },
+    },
+    new CountQueuingStrategy({ highWaterMark })
+  );
+  (() => {
+    rs.tee();
+  })();
+  return controller;
+}
+
+// Enqueue n chunks tracked only weakly. A separate frame, so no chunk
+// lingers in the caller's slots.
+function enqueueTracked(controller, n) {
+  const refs = [];
+  for (let i = 0; i < n; i++) {
+    const chunk = { i };
+    refs.push(new WeakRef(chunk));
+    controller.enqueue(chunk);
+  }
+  return refs;
+}
+
+function countAlive(refs) {
+  let alive = 0;
+  for (const ref of refs) {
+    if (ref.deref() !== undefined) alive++;
+  }
+  return alive;
+}
 
 // A pending read with the stream and reader references dropped still
 // completes when the (still-referenced) controller enqueues (the value
@@ -111,5 +157,138 @@ export const readableStreamFromPendingPromiseCollects = {
       `expected pending ReadableStream.from cycles to be collected, ` +
         `${alive} of ${refs.length} objects still alive`
     );
+  },
+};
+
+// A controller held while its stream is dropped (ledger #19). Per spec the
+// controller's [[stream]] slot keeps the stream alive, so enqueues keep
+// counting against the high-water mark: TypeScript, where the controller
+// strongly references the stream. Under C++ the controller does not keep
+// its stream alive: once the stream is collected its consumer is gone from
+// the controller's queue, enqueue() drops the chunk without throwing and
+// desiredSize stays at the high-water mark — a producer holding only the
+// controller never sees backpressure.
+export const controllerOnlyHeldStreamLiveness = {
+  async test() {
+    let controller;
+    const make = () => {
+      new ReadableStream(
+        {
+          start(c) {
+            controller = c;
+          },
+        },
+        new ByteLengthQueuingStrategy({ highWaterMark: 4 })
+      );
+    };
+    make();
+    await scheduler.wait(10);
+    gc();
+    await scheduler.wait(10);
+    gc();
+    strictEqual(controller.desiredSize, 4);
+    controller.enqueue(new Uint8Array(2));
+    controller.enqueue(new Uint8Array(2));
+    gc();
+    await scheduler.wait(10);
+    strictEqual(controller.desiredSize, usingTsImpl ? 0 : 4);
+  },
+};
+
+// Both tee branches collected while the source still holds the controller
+// (parity). Nothing can read the queue again, so enqueue() accepts and
+// drops each chunk, desiredSize stays at the high-water mark, and the
+// controller's own state machine is unchanged: close() closes the source's
+// stream, and a later enqueue() throws as ever.
+export const teeBranchesCollected = {
+  async test() {
+    const controller = makeTeedAway();
+    await collectGarbage();
+    strictEqual(controller.desiredSize, 4);
+    const refs = enqueueTracked(controller, 16);
+    strictEqual(controller.desiredSize, 4);
+    await collectGarbage();
+    strictEqual(countAlive(refs), 0, 'dropped chunks must not be retained');
+    controller.close();
+    strictEqual(controller.desiredSize, 0);
+    throws(() => controller.enqueue('late'), TypeError);
+  },
+};
+
+// Chunks buffered for the branches are released once the branches are
+// collected (parity).
+export const teeBranchesCollectedReleaseBacklog = {
+  async test() {
+    const controller = makeTeedAway();
+    const refs = enqueueTracked(controller, 8);
+    strictEqual(controller.desiredSize, -4);
+    await collectGarbage();
+    strictEqual(controller.desiredSize, 4);
+    await collectGarbage();
+    strictEqual(countAlive(refs), 0, 'the backlog must be released');
+  },
+};
+
+// One branch cancelled, the other collected (parity), observed in the same
+// job as the gc(), before any finalization callback can run: the
+// controller's own queries notice the collected consumer. Either branch may
+// be the survivor. enqueue() drops and desiredSize stays at the high-water
+// mark.
+export const teeSurvivorBranchCollected = {
+  async test() {
+    for (const cancelFirst of [true, false]) {
+      let controller;
+      const rs = new ReadableStream(
+        {
+          start(c) {
+            controller = c;
+          },
+        },
+        new CountQueuingStrategy({ highWaterMark: 4 })
+      );
+      (() => {
+        const [a, b] = rs.tee();
+        // A lone branch's cancel promise pends under TypeScript (ledger #11).
+        (cancelFirst ? a : b).cancel('bye');
+      })();
+      await scheduler.wait(1);
+      gc();
+      strictEqual(controller.desiredSize, 4, `cancelFirst=${cancelFirst}`);
+      for (let i = 0; i < 16; i++) controller.enqueue(i);
+      strictEqual(controller.desiredSize, 4, `cancelFirst=${cancelFirst}`);
+    }
+  },
+};
+
+// A pull source with both branches collected (ledger #20). TypeScript
+// releases the source: pull() is never called again. C++ keeps pulling
+// for consumers that no longer exist, so a source that enqueues on every
+// pull runs until the stream closes.
+export const teeBranchesCollectedPullStops = {
+  async test() {
+    let pulls = 0;
+    const controller = makeTeedAway(
+      {
+        async pull(c) {
+          pulls++;
+          await scheduler.wait(1);
+          // Bound the C++ side's loop so it does not outlive the test.
+          if (pulls >= 200) c.close();
+          else c.enqueue(pulls);
+        },
+      },
+      1
+    );
+    await collectGarbage();
+    strictEqual(controller.desiredSize, 1);
+    const pullsAfterCollection = pulls;
+    // An enqueue is what restarts the C++ loop once the consumers are gone.
+    controller.enqueue('poke');
+    await scheduler.wait(50);
+    if (usingTsImpl) {
+      strictEqual(pulls, pullsAfterCollection);
+    } else {
+      ok(pulls > pullsAfterCollection, `C++ keeps pulling (${pulls})`);
+    }
   },
 };

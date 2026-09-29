@@ -2,6 +2,8 @@
 
 #include <workerd/jsg/jsg-test.h>
 
+#include <v8-value-serializer-version.h>
+
 #include <capnp/message.h>
 #include <kj/debug.h>
 #include <kj/test.h>
@@ -65,6 +67,27 @@ struct TestContext: public ContextGlobalObject {
   JSG_RESOURCE_TYPE(TestContext) {}
 };
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext, TestSerializableCap);
+
+KJ_TEST("Frankenvalue header failures identify binding or entrypoint props") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  capnp::MallocMessageBuilder message;
+  auto builder = message.initRoot<rpc::Frankenvalue>();
+  builder.setV8Serialized("private payload"_kj.asBytes());
+  auto value = Frankenvalue::fromCapnp(builder.asReader(), {});
+
+  e.run([&](jsg::Lock& js) {
+    auto failure = kj::runCatchingExceptions([&]() { value.toJs(js); });
+    auto& exception = KJ_ASSERT_NONNULL(failure);
+    KJ_EXPECT(exception.getType() == kj::Exception::Type::FAILED);
+    KJ_EXPECT(exception.getDescription() ==
+        kj::str("worker_do_not_log; message = Unable to deserialize cloned data due to invalid "
+                "or unsupported version. [context=binding or entrypoint props; bytes=15; "
+                "header=missing; wireVersion=0; maxWireVersion=",
+            v8::CurrentValueSerializerFormatVersion(), "; v8=", v8::V8::GetVersion(), "]"));
+    auto jsError = js.exceptionToJs(kj::mv(exception));
+    KJ_EXPECT(kj::str(jsError.getHandle(js)).startsWith("Error: internal error"));
+  });
+}
 
 KJ_TEST("Frankenvalue") {
   jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);

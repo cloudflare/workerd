@@ -119,9 +119,11 @@ HWM 1 (count-based) and readable HWM 0 under
   boundaries.
 - The decoder's readable yields **strings**: consuming it as a body rejects
   with `TypeError` "This ReadableStream did not return bytes." while the
-  write settles normally; under `pedantic_wpt` the C++ failing consumer's
-  cancel propagates to the writable and `close()`/`closed` reject with the
-  same error. `response.body.pipeThrough(tds)` is the working direction.
+  write settles normally. The failing consumer cancels the readable with
+  that error; in TypeScript and under `pedantic_wpt` the cancel propagates
+  to the writable and `close()`/`closed` reject with the same error, while
+  the default C++ transform resolves the close.
+  `response.body.pipeThrough(tds)` is the working direction.
 - Piping a byte body **into** the encoder's writable is a footgun, not an
   error: each `Uint8Array` chunk is ToString-coerced (`"120,121"`) and that
   text is encoded.
@@ -168,7 +170,7 @@ exactly two things, both pinned:
   unflagged side is also pinned by `legacyFatalDefaultsTrueWithOptionsBag`)
 - a failing body consumer's cancel propagates to the writable, so
   `close()`/`closed` reject with the consumer's TypeError instead of
-  resolving (`decoderReadableAsBodyRejectsText`)
+  resolving, as in TypeScript (`decoderReadableAsBodyRejectsText`)
 
 Production workers never get `pedantic_wpt`, so the main cell continues to
 assert the defaults.
@@ -215,6 +217,7 @@ Every entry is asserted on both sides via the `which-impl` pattern.
 | `reentrancy.js` | thenable-check interception counts (ledger #6); re-entrant `writer.close()` from the interceptor mid-delivery; the encoder's `toString()` hook re-entering with write+close (delivery order preserved, clean EOF); `readable.cancel()` from the hook (the AUTOVULN-63 trigger shape — ledger #7; the C++ use-after-free regression lives in api/tests/autovuln-63-test.js); write from a read continuation; second concurrent read parks and is served in order (parity — contrast identity #16); sibling tee-branch cancel from a read continuation |
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): `expectedLength` undefined for both streams; encoder drains as one `Uint8Array` chunk per read (HWM 0 — nothing synchronously buffered) with EOF as a separate empty batch; a tee-sibling backlog IS swept in one batched read; decoder chunks pass through the conduit as raw strings (byte validation happens at consumption) |
 | `gc-interplay.js` | a writer keeps its collected encoder wrapper operable (abort); reader+writer keep a collected decoder wrapper decoding through close (`--expose-gc`) |
+| `pollution.js` | prototype pollution neither implementation observes: a patched TransformStreamDefaultController enqueue() never rewrites output; Object.prototype members reach neither the internal transformers nor the omitted strategies |
 | `which-impl.js` | implementation detection |
 
 ## Legacy (pre-flag) behaviors

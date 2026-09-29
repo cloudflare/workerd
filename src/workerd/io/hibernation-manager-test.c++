@@ -1198,7 +1198,9 @@ KJ_TEST("HibernationManager: smoke (create, accept, query)") {
   TestFixture fixture(stubLoopbackParams(stats, kj::str("smoke")));
   auto hm = makeTestHm(fixture);
   auto request = fixture.newIncomingRequest();
+  KJ_ASSERT(hm->getWebSocketCount() == 0);
   auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request, *hm);
+  KJ_ASSERT(hm->getWebSocketCount() == 1);
 
   fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
     auto websockets = hm->getWebSockets(env.js, kj::none);
@@ -1293,6 +1295,7 @@ KJ_TEST("HibernationManager: failed event dispatches remove WebSocket") {
   auto hm = makeTestHm(fixture);
   auto request = fixture.newIncomingRequest();
   auto end1 = acceptNewWebSocket(fixture, *request, *hm, "terminated"_kj);
+  KJ_ASSERT(hm->getWebSocketCount() == 1);
 
   fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
 
@@ -1300,6 +1303,7 @@ KJ_TEST("HibernationManager: failed event dispatches remove WebSocket") {
   end1->send("message"_kj).wait(fixture.getWaitScope());
   fixture.pollEventLoop();
   KJ_ASSERT(stats.customEventCalls == 2, stats.customEventCalls);
+  KJ_ASSERT(hm->getWebSocketCount() == 0);
 
   fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
     KJ_ASSERT(hm->getWebSockets(env.js, kj::none).size() == 0);

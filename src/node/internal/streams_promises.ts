@@ -23,7 +23,11 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { isIterable, isNodeStream } from 'node-internal:streams_util';
+import {
+  isIterable,
+  isNodeStream,
+  isWebStream,
+} from 'node-internal:streams_util';
 import { finished } from 'node-internal:streams_end_of_stream';
 
 import { pipelineImpl as pl } from 'node-internal:streams_pipeline';
@@ -39,7 +43,8 @@ export function pipeline(...streams: unknown[]): Promise<unknown> {
       lastArg &&
       typeof lastArg === 'object' &&
       !isNodeStream(lastArg) &&
-      !isIterable(lastArg)
+      !isIterable(lastArg) &&
+      !isWebStream(lastArg)
     ) {
       const options = streams.pop() as { signal?: AbortSignal; end?: boolean };
       signal = options.signal;

@@ -167,10 +167,13 @@ class FuturePollEvent: public kj::_::PromiseNode,
   // Used by FutureAwaiter<T>, our derived class.
   class PollScope;
 
+  // Protected so test fixtures can inject a notification promise. They enter polling through
+  // PollScope, so enterPollScope() does not need the same access.
+  void exitPollScope(kj::Maybe<kj::Promise<void>> maybeLazyArcWakerPromise);
+
  private:
   // Private API for PollScope.
   void enterPollScope() noexcept;
-  void exitPollScope(kj::Maybe<kj::Promise<void>> maybeLazyArcWakerPromise);
 
   kj::Maybe<OwnPromiseNode> arcWakerPromise;
 };

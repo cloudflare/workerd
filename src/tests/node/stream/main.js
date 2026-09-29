@@ -23,6 +23,11 @@ export {
   toWebSourceErrorRejectsRead,
   toWebSourceDestroyBecomesAbortError,
   toWebUnreadableSourceYieldsCancelledStream,
+  toWebLyingStrategyDestroysSource,
+  toWebCancelFromDataListenerIsQuiet,
+  toWebInvalidHighWaterMarkLeavesSourceUntouched,
+  toWebLateErrorAfterEndIsSwallowed,
+  toWebDestroyInsidePullBecomesAbortError,
 } from 'readable-to-web';
 
 export {
@@ -37,6 +42,10 @@ export {
   fromWebCloseEmitsEndThenClose,
   fromWebErrorWithoutPendingReadDestroys,
   fromWebErrorWithPendingReadDestroys,
+  fromWebDetachedChunkDestroysWithTypeError,
+  fromWebSharedAndEmptyChunks,
+  fromWebResizableChunkAliasesUntilDelivery,
+  fromWebListenerThrowDestroysReadable,
   fromWebDestroyCancelsWebStream,
   fromWebDestroyAfterCloseSkipsCancel,
   fromWebEncodingOption,
@@ -53,12 +62,19 @@ export {
   toWebAsyncNodeErrorErrorsStream,
   toWebFinalErrorRejectsClose,
   toWebNodeEndWithoutCloseAbortsStream,
+  toWebCloseAfterNodeEndWaitsForFinish,
+  toWebCloseAfterNodeEndRejectsWithFinalError,
   toWebNodeDestroyBecomesAbortError,
   toWebNodeDestroyWithErrorErrorsStream,
   toWebAbortDestroysNodeWritable,
   toWebAbortWithoutReasonDestroysWithAbortError,
   toWebRejectsNonWritable,
   toWebDuckTypedInputYieldsClosedStream,
+  toWebLiveDuckIsTakenAtItsWord,
+  toWebInvalidHighWaterMarkLeavesWritableUntouched,
+  toWebDestroyInsideWriteErrorsOnce,
+  toWebAbortInsideWriteFinishesTheWrite,
+  toWebInvalidWebChunkErrorsStreamOnly,
   toWebUnwritableSourceYieldsClosedStream,
   toWebStrategyFollowsWritable,
   toWebBackpressureFollowsDrain,
@@ -81,6 +97,7 @@ export {
   fromWebEndClosesWebStream,
   fromWebDestroyAbortsOrClosesWebStream,
   fromWebWritesCompleteWhenSinkAccepts,
+  fromWebChunksAreHandedOverByReference,
 } from 'writable-from-web';
 
 export {
@@ -95,6 +112,7 @@ export {
 } from 'duplex-to-web';
 
 export {
+  fromWebPairDetachedChunkDestroysDuplex,
   fromWebPairRoundTrip,
   fromWebObjectModeStrings,
   fromWebPairRejectsNonStreamPair,
@@ -107,6 +125,8 @@ export {
   fromWebPairReadableEofEndsWritable,
   fromWebPairIterationToCompletionIsClean,
   fromWebPairDestroyAbortsWriterAndCancelsReader,
+  fromWebPairDestroyInDataWithWriteInFlight,
+  fromWebPairEndInsideFinish,
 } from 'duplex-from-web';
 
 export {
@@ -136,4 +156,106 @@ export {
   fromWebStreamErrorPropagates,
 } from 'readable-from';
 
+export {
+  pipelineWebReadableToNodeWritable,
+  pipelineNodeReadableToWebWritable,
+  pipelineThroughWebTransform,
+  pipelineWebTransformAsSource,
+  pipelineGeneratorBetweenWebStreams,
+  pipelineWebSourceToFunctionStageHonoringSignal,
+  pipelineWebSinkErrorFailsPipeline,
+  pipelineWebSourceErrorFailsPipeline,
+  pipelineLockedWebDestinationFails,
+  pipelineWebReadableAsDestinationThrows,
+  pipelineWebSourceUnconvertibleChunkFails,
+  pipelineWebSourcePreservesPromiseChunks,
+  pipelineWebSinkFailureWithIdleSource,
+  promisesPipelineSignalAbortsIdleWebPipeline,
+  pipelineNodeSinkAsyncErrorInterruptsIdleWebSource,
+  pipelineNodeSinkErrorCancelsWebSource,
+  promisesPipelineTrailingWebWritable,
+  promisesPipelineEndFalseLeavesWebWritableOpen,
+  promisesPipelineSignalAbortsWebWritable,
+  promisesPipelineSignalAbortsPendingWebRead,
+  pipelineWebSourceErrorUnderNodeBackpressure,
+} from 'pipeline-web';
+
+export {
+  interopHooksPresence,
+  finishedObservesReadableClose,
+  finishedObservesReadableError,
+  finishedObservesWritable,
+  finishedOnSettledStream,
+  finishedWithSignal,
+  promisesFinishedWebStreams,
+  finishedObservesTeedSourceClose,
+  finishedObservesTeedSourceClosedBeforeTee,
+  finishedObservesTeedSourceCancel,
+  finishedObservesTeedSourceError,
+  addAbortSignalErrorsReadable,
+  addAbortSignalErrorsWritable,
+  addAbortSignalAlreadyAborted,
+  addAbortSignalOnTeeBranchSparesSibling,
+  addAbortSignalOnTeedSourceErrorsBranches,
+  addAbortSignalOnTeeBranchThenSiblingCancel,
+  addAbortSignalOnTeeBranchAfterCloseSkipsSourceCancel,
+  addAbortSignalOnTeedAwayBranchIsInert,
+  addAbortSignalOnTeedAwayByteBranchIsInert,
+  addAbortSignalOnTeeBranchSettlesWithSourceCleanup,
+  addAbortSignalOnByteTeeBranchSparesSibling,
+  addAbortSignalOnResponseBody,
+  finishedOnHandedOffStreamSettlesAtHandoff,
+  finishedOnDetachedQueuedBodyFollowsSource,
+} from 'finished-and-abort';
+
+export {
+  addAbortSignalOnPairReadableErrorsWritable,
+  addAbortSignalOnPairWritableErrorsReadable,
+  addAbortSignalOnPipedPairReadableCancelsSource,
+  addAbortSignalOnPairHalfAlreadyErroredIsInert,
+} from 'abort-transform-pairs';
+
+export {
+  composeValidatesWebStreamPositions,
+  composeSingleWebStream,
+  composeWebHeadNodeTail,
+  composeWebReadableIntoNodeWritable,
+  composeEndCompletesBeforeReading,
+  composeNodeHeadWebTail,
+  composeNodeHeadWebWritableTail,
+  composeWebReadableIntoWebWritable,
+  composeWebTailDestroyBeforeWrite,
+  composeWebTailDestroyUnderBackpressure,
+  composeWebTailClosedReadableDestroy,
+  composeWebTailUnconvertibleChunkFails,
+  composeWebTailUnconvertibleChunkFailsReadableHead,
+  composeWebTailDeferredCloseCompletesCleanly,
+  composeWebTailBareDestroyIsAbortError,
+  composeWebTailReadsOneAtATime,
+  readableComposeWithWebTransform,
+} from 'compose-web';
+
 export { duplexFromWebStreamHalves } from 'duplex-from';
+
+export {
+  patchedThenPassthroughKeepsData,
+  hostileThenDuringFromWebLeavesStreamUnlocked,
+  hostileThenAfterRegisteringLeavesNothingBehind,
+  objectPrototypeThenGetterIsConsultedNotObeyed,
+} from 'then-pollution';
+
+export {
+  toWebPendingReadSurvivesGc,
+  toWebUnheldStreamStillPausesSource,
+  toWebTwiceKeepsBothStreamsAlive,
+  toWebWriterClosedSurvivesGc,
+  toWebTwiceKeepsBothWritableStreamsAlive,
+  duplexToWebPendingOperationsSurviveGc,
+} from 'gc';
+
+export {
+  tenThousandTinyChunksThroughToWeb,
+  alternatingTinyAndLargeThroughFromWeb,
+  eightMebibyteChunkBothWays,
+  objectModeIndexedThroughPipeline,
+} from 'data-volumes';

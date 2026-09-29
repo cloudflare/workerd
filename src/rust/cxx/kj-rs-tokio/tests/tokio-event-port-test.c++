@@ -129,12 +129,18 @@ KJ_TEST("timer.afterDelay fires with real elapsed time") {
   auto &sysClock = kj::systemPreciseMonotonicClock();
   auto before = sysClock.now();
   auto timerBefore = timer.now();
+  // kj::Timer::now() is the loop's cached time, taken when the port last returned from a wait,
+  // so it lags the clock by however long has passed since -- microseconds normally, several
+  // milliseconds on a loaded sanitizer runner. afterDelay() measures from that cached time, so
+  // the wall-clock check below has to allow for the lag; the timer's own clock is exact.
+  KJ_ASSERT(before >= timerBefore);
+  auto lag = before - timerBefore;
 
   // If the port forgot timerImpl.advanceTo() after waits, this would never resolve (caught by
   // the test timeout).
   timer.afterDelay(30 * kj::MILLISECONDS).wait(ws);
 
-  KJ_EXPECT(sysClock.now() - before >= 30 * kj::MILLISECONDS);
+  KJ_EXPECT(sysClock.now() - before + lag >= 30 * kj::MILLISECONDS);
   // Timer time is synced to the monotonic clock at each wait return.
   KJ_EXPECT(timer.now() - timerBefore >= 30 * kj::MILLISECONDS);
 }
@@ -351,6 +357,33 @@ KJ_TEST("kj-rs bridged Rust future with same-thread delayed waker works under th
   threaded_wake_future().wait(ws);
 
   []() -> kj::Promise<void> { co_await threaded_wake_future(); }().wait(ws);
+}
+
+KJ_TEST("a stored waker woken by another KJ event re-polls the bridged future before "
+        "later-queued events (tokio port)") {
+  // The same guarantee kj-rs's awaitables test pins on a bare kj::EventLoop, under the tokio
+  // port: a bridged future's stored waker (what a tokio oneshot/channel holds) woken from another
+  // KJ event on the loop thread arms the future's poll event immediately, in KJ event order — the
+  // future is re-polled before a KJ event queued after the wake runs. Consumers such as the rust
+  // WebSocket pipe hand messages over exactly this way and rely on the receiver being resumed
+  // before anything queued later (e.g. a teardown continuation) can observe it.
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+
+  auto promise = stash_waker_future();
+  KJ_EXPECT(!promise.poll(ws));  // Polled (and re-polled on detach); a waker is stashed.
+  auto pollsBeforeWake = stashed_future_poll_count();
+  KJ_EXPECT(pollsBeforeWake >= 1);
+
+  uint64_t pollsSeenByB = 0;
+  auto a = kj::evalLater([]() { wake_stashed_waker(); }).eagerlyEvaluate(nullptr);
+  auto b =
+      kj::evalLater([&]() { pollsSeenByB = stashed_future_poll_count(); }).eagerlyEvaluate(nullptr);
+  b.wait(ws);
+
+  // A's wake re-polled the future (completing it) before B ran.
+  KJ_EXPECT(pollsSeenByB == pollsBeforeWake + 1, pollsSeenByB, pollsBeforeWake);
+  promise.wait(ws);
 }
 
 KJ_TEST("KJ coroutine can co_await spawned Rust tasks and KJ timers together") {

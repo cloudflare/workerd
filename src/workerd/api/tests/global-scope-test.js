@@ -131,6 +131,12 @@ export const mutableGlobals = {
   },
 };
 
+export const datagramRequiresExperimental = {
+  test() {
+    strictEqual(globalThis.Datagram, undefined);
+  },
+};
+
 export const queueMicrotask = {
   async test() {
     [1, undefined, 'hello'].forEach((i) => {

@@ -1392,7 +1392,6 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
       KJ_IF_SOME(prefix, maybePrefix) {
         if (prefix.size() > 0) {
           KJ_IF_SOME(c, options.prefix) {
-            kj::String s;
             if (prefix[0] != c) {
               appendToPendingFixedValue(prefix);
               maybePrefix = kj::none;

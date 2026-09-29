@@ -57,6 +57,7 @@ declare const primordials: {
   readonly SymbolAsyncIterator: typeof Symbol.asyncIterator;
   readonly SymbolToStringTag: typeof Symbol.toStringTag;
   readonly SymbolDispose: typeof Symbol.dispose;
+  readonly SymbolFor: typeof Symbol.for;
 
   // uncurryThis accepts Function (the typeof-narrowed type) in addition to
   // properly typed callables, so callers don't need to cast after a
@@ -75,11 +76,11 @@ declare const utils: {
   isArrayBuffer(value: unknown): value is ArrayBuffer;
   isArrayBufferView(value: unknown): value is ArrayBufferView;
   isDataView(value: unknown): value is DataView;
-  isPromise(value: unknown): value is Promise;
+  isPromise(value: unknown): value is Promise<unknown>;
   isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer;
   isUint8Array(value: unknown): value is Uint8Array;
   isAnyArrayBuffer(value: unknown): value is ArrayBuffer | SharedArrayBuffer;
-  markPromiseHandled(promise: Promise): void;
+  markPromiseHandled(promise: Promise<unknown>): void;
   getApiSymbol(name: string): symbol;
   // The C++ compression codec factory (api/compression.h:
   // newCompressionCodecCallback), consumed by webstreams/compression.
@@ -92,7 +93,21 @@ declare const utils: {
     fileHandle: object,
     keepExistingData: boolean
   ): FileSystemWriteContext;
+  // The DOM's "add an abort algorithm" (api/abort-bootstrap.h): `algorithm`
+  // runs when `signal` aborts, before the 'abort' event, and never for a
+  // synthetic 'abort' event. Consumed by the webstreams pipe.
+  addAbortAlgorithm(
+    signal: AbortSignal,
+    algorithm: () => void
+  ): AbortAlgorithmHandle;
 };
+
+// An abort algorithm registration. Obtained only from
+// utils.addAbortAlgorithm(); it has no JS-reachable constructor.
+declare interface AbortAlgorithmHandle {
+  // Unregisters the algorithm. Idempotent.
+  remove(): void;
+}
 
 // Native incremental digest, backing the TypeScript DigestStream. Obtained only
 // from utils.createDigestContext(); it has no JS-reachable constructor.

@@ -17,6 +17,7 @@
 #include <kj/debug.h>
 #include <kj/mutex.h>
 #include <kj/refcount.h>
+#include <kj/sticky-flag.h>
 #include <kj/string.h>
 
 namespace workerd {
@@ -59,8 +60,7 @@ class AsyncLockWaiter: public kj::Refcounted {
   // Fires when this waiter is destroyed, i.e. the lock is released. Used to serialize one thread's
   // attempts on different resources so it only ever chases one at a time. Deliberately NOT a
   // cross-thread fulfiller: only the owning thread may fulfill it.
-  kj::ForkedPromise<void> releasePromise = nullptr;
-  kj::Own<kj::PromiseFulfiller<void>> releaseFulfiller;
+  kj::StickyFlag releaseFlag;
 
   // Guarded by the queue's mutex, along with the list itself.
   kj::Maybe<AsyncLockWaiter&> next;
@@ -172,12 +172,6 @@ AsyncLockWaiter<Resource>::AsyncLockWaiter(
     : executor(kj::getCurrentThreadExecutor()),
       queue(queue),
       resource(kj::mv(resourceParam)) {
-  {
-    auto paf = kj::newPromiseAndFulfiller<void>();
-    releasePromise = paf.promise.fork();
-    releaseFulfiller = kj::mv(paf.fulfiller);
-  }
-
   auto lock = queue.waiters.lockExclusive();
   if (lock->tail == &lock->head) {
     // Queue is empty, so it's immediately our turn.
@@ -207,7 +201,7 @@ AsyncLockWaiter<Resource>::~AsyncLockWaiter() noexcept {
 
   auto lock = queue.waiters.lockExclusive();
 
-  releaseFulfiller->fulfill();
+  releaseFlag.signal();
 
   // Unlink.
   *prev = next;
@@ -268,7 +262,7 @@ kj::Promise<typename AsyncLockQueue<Resource>::Lock> AsyncLockQueue<Resource>::l
       KJ_IF_SOME(h, hooks) {
         h.waitingForOtherResource(waiter->resource->getId());
       }
-      co_await waiter->releasePromise;
+      co_await waiter->releaseFlag.whenSignaled();
     }
   }
 }
@@ -278,7 +272,7 @@ kj::Promise<void> AsyncLockQueue<Resource>::whenThreadIdle() {
   Waiter*& currentWaiter = *threadCurrentWaiter;
   for (;;) {
     if (currentWaiter != nullptr) {
-      co_await currentWaiter->releasePromise;
+      co_await currentWaiter->releaseFlag.whenSignaled();
       continue;
     }
 

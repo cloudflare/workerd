@@ -6,6 +6,7 @@ import {
   createWriteStream,
   createReadStream,
   readFileSync,
+  writeFileSync,
   closeSync,
   open as openAsync,
   close as closeAsync,
@@ -404,6 +405,7 @@ export const writeStreamTest18 = {
     const firstEncoding = 'base64';
     const secondEncoding = 'latin1';
 
+    writeFileSync(examplePath, 'xyz\n');
     const exampleReadStream = createReadStream(examplePath, {
       encoding: firstEncoding,
     });
@@ -418,6 +420,7 @@ export const writeStreamTest18 = {
         write: function (chunk, enc, next) {
           const expected = Buffer.from('xyz\n');
           deepStrictEqual(expected, chunk);
+          next();
         },
       });
       assertWriteStream.setDefaultEncoding(secondEncoding);

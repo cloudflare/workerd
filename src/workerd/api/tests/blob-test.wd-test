@@ -1,22 +1,25 @@
 using Workerd = import "/workerd/workerd.capnp";
 
+# The worker is instantiated twice so that the bindings below cross an isolate boundary.
+# Only the first service's test() runs; see the filter argument in BUILD.bazel.
 const unitTests :Workerd.Config = (
   v8Flags = ["--expose-gc"],
   services = [
-    ( name = "blob-test",
-      worker = (
-        modules = [
-          (name = "worker", esModule = embed "blob-test.js")
-        ],
-        compatibilityFlags = [
-          "nodejs_compat",
-          "set_tostring_tag",
-          "workers_api_getters_setters_on_prototype",
-          "resizable_array_buffer_in_blob"],
-        bindings = [
-          (name = "request-blob", service = "blob-test")
-        ]
-      )
-    ),
+    ( name = "blob-test", worker = .worker ),
+    ( name = "blob-test-target", worker = .worker ),
   ],
+);
+
+const worker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "blob-test.js")
+  ],
+  compatibilityFlags = [
+    "nodejs_compat",
+    "set_tostring_tag",
+    "workers_api_getters_setters_on_prototype",
+    "resizable_array_buffer_in_blob"],
+  bindings = [
+    (name = "request-blob", service = "blob-test-target")
+  ]
 );

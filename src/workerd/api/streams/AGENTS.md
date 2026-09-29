@@ -13,6 +13,14 @@ implementation backs a given stream (and provide `JsReadableWritablePair` +
 `pipeTo`/`pipeThrough` for abstraction-level pipelines). New C++ consumers of streams should use
 those abstractions, not the types defined here.
 
+Allocating the types defined here directly (`js.alloc<ReadableStream>(...)` and friends) is
+rejected by the `workerd-legacy-stream-alloc` clang-tidy check everywhere except inside
+`JsReadableStream::create()` / `JsWritableStream::create()`, which dispatch on the
+`typescript_implemented_streams` compatibility flag. The legacy implementation's own internals
+that necessarily produce legacy streams (`tee()`, `detach()`, the legacy JS constructors, the
+`deserialize()` legacy fallbacks) and tests that exercise this implementation directly carry
+`NOLINT(workerd-legacy-stream-alloc)` with a comment saying why.
+
 Dual implementation behind unified API:
 
 - **Internal** (`internal.h`): kj-backed, byte-only, single pending read, no JS queue

@@ -6,7 +6,7 @@ Subject: Disable slow handle check
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/src/handles/handles.h b/src/handles/handles.h
-index 9269281671c54a9811c2cafac14bcbf2c92b65f7..bc253686cfe5544fca587d22fcb5cd1410bacae6 100644
+index 0bbe40f806be8caf509add0c0087cdade4109f72..3e2f8585e396bbb49f6342c59a4e79d9899205dc 100644
 --- a/src/handles/handles.h
 +++ b/src/handles/handles.h
 @@ -641,11 +641,7 @@ IndirectHandle<T> indirect_handle(DirectHandle<T> handle,

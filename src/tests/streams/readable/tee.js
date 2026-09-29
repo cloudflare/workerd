@@ -192,8 +192,9 @@ export const teeErrorPropagatesBothBranches = {
 // two tests that HANG the TypeScript WPT run): when both branches
 // cancel, the spec passes the source an ARRAY [reason1, reason2].
 // TypeScript intentionally passes an AggregateError carrying both
-// reasons (in branch order, by identity), and the FIRST branch's cancel
-// promise stays pending until the second branch cancels. C++ runs the
+// reasons (in the order the branches cancelled, by identity), and the
+// FIRST branch's cancel promise stays pending until the second branch
+// cancels. C++ runs the
 // source cancel with only the reason of whichever branch completed the
 // pair, and the first branch's cancel promise fulfills immediately.
 export const teeCancelReasonComposite = {
@@ -228,9 +229,9 @@ export const teeCancelReasonComposite = {
   },
 };
 
-// The C++ single-reason behavior is order-dependent: whichever branch
-// completes the pair supplies the reason (reversed order pinned here;
-// TypeScript aggregates in branch order regardless).
+// Both behaviors are order-dependent: under C++ whichever branch completes
+// the pair supplies the reason; TypeScript aggregates the reasons in the
+// order the branches cancelled (reversed order pinned here).
 export const teeCancelReverseOrder = {
   async test() {
     const r1 = { branch: 1 };
@@ -247,8 +248,9 @@ export const teeCancelReverseOrder = {
     await scheduler.wait(10);
     if (usingTsImpl) {
       ok(cancelReason instanceof AggregateError);
-      strictEqual(cancelReason.errors[0], r1);
-      strictEqual(cancelReason.errors[1], r2);
+      strictEqual(cancelReason.errors.length, 2);
+      strictEqual(cancelReason.errors[0], r2);
+      strictEqual(cancelReason.errors[1], r1);
     } else {
       strictEqual(cancelReason, r1);
     }
@@ -278,5 +280,61 @@ export const teePullPerRead = {
     }
     await scheduler.wait(10);
     strictEqual(pulls, 3);
+  },
+};
+
+// Backpressure follows the SLOWEST branch (parity; a deliberate spec
+// divergence of the queued tee model). A push source that enqueues only
+// while desiredSize > 0 stalls the reading branch once the idle branch's
+// backlog reaches the high-water mark; the spec's per-branch queues would
+// keep it flowing. Reading the idle branch, or cancelling it, resumes the
+// flow. The pull trigger is unaffected: a pending read on any branch
+// triggers a pull regardless of desiredSize.
+export const teeBackpressureFollowsSlowestBranch = {
+  async test() {
+    let controller;
+    let next = 0;
+    const pump = () => {
+      while (controller.desiredSize > 0) controller.enqueue(next++);
+    };
+    const rs = new ReadableStream(
+      {
+        start(c) {
+          controller = c;
+        },
+      },
+      { highWaterMark: 4 }
+    );
+    const [b1, b2] = rs.tee();
+    pump();
+    const reader1 = b1.getReader();
+    for (let i = 0; i < 4; i++) {
+      strictEqual((await reader1.read()).value, i);
+    }
+    pump();
+    strictEqual(next, 4);
+    strictEqual(controller.desiredSize, 0);
+    const stalled = reader1.read();
+    const outcome = await Promise.race([
+      stalled.then(() => 'settled'),
+      scheduler.wait(20).then(() => 'pending'),
+    ]);
+    strictEqual(outcome, 'pending');
+
+    const reader2 = b2.getReader();
+    strictEqual((await reader2.read()).value, 0);
+    pump();
+    strictEqual((await stalled).value, 4);
+
+    // The idle branch's backlog is back at the high-water mark; leaving
+    // lifts the stall. Its cancel is not awaited alone: under the TS
+    // implementation a lone branch cancel pends until the other branch
+    // cancels (ledger #11).
+    strictEqual(controller.desiredSize, 0);
+    const stalledAgain = reader1.read();
+    const cancel2 = reader2.cancel();
+    pump();
+    strictEqual((await stalledAgain).value, 5);
+    await Promise.all([reader1.cancel(), cancel2]);
   },
 };

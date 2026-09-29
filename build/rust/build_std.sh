@@ -14,14 +14,15 @@
 #   WORK_DIR             Scratch directory for the generated Cargo package.
 #   TARGET_TRIPLE        Rust target triple.
 #   SANITIZER            rustc -Zsanitizer value.
+#   EXTRA_RUSTFLAGS      Space-separated additional rustc flags (may be empty).
 #   PATCH_COUNT          Number of standard-library patch paths that follow.
 #   PATCH...             Patches to apply to the Rust standard-library sources.
 #   CRATE...             Standard-library crates declared as Bazel outputs.
 
 set -euo pipefail
 
-if [[ $# -lt 9 ]]; then
-  echo "usage: $0 RUST_TOOLCHAIN_ROOT RUST_LIBRARY TARGET_DIR OUTPUT_DIR WORK_DIR TARGET_TRIPLE SANITIZER PATCH_COUNT [PATCH...] CRATE..." >&2
+if [[ $# -lt 10 ]]; then
+  echo "usage: $0 RUST_TOOLCHAIN_ROOT RUST_LIBRARY TARGET_DIR OUTPUT_DIR WORK_DIR TARGET_TRIPLE SANITIZER EXTRA_RUSTFLAGS PATCH_COUNT [PATCH...] CRATE..." >&2
   exit 2
 fi
 
@@ -37,8 +38,9 @@ output_dir=$(abs_path "$4")
 work=$(abs_path "$5")
 target_triple=$6
 sanitizer=$7
-patch_count=$8
-shift 8
+extra_rustflags=$8
+patch_count=$9
+shift 9
 if ! [[ $patch_count =~ ^[0-9]+$ ]] || ((patch_count > $#)); then
   echo "invalid PATCH_COUNT: $patch_count" >&2
   exit 2
@@ -106,7 +108,7 @@ export __CARGO_TESTS_ONLY_SRC_ROOT="$rust_library"
 # action only builds rlibs; sanitizer runtime selection is deferred to the final Bazel link, where
 # Rust and C++ share Clang's runtime.
 env_name="CARGO_TARGET_$(printf '%s' "$target_triple" | tr '[:lower:]-' '[:upper:]_')_RUSTFLAGS"
-export "$env_name=-Zsanitizer=$sanitizer"
+export "$env_name=-Zsanitizer=$sanitizer${extra_rustflags:+ $extra_rustflags}"
 
 "$rust_root/bin/cargo" build \
   --manifest-path "$work/Cargo.toml" \

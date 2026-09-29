@@ -41,6 +41,7 @@ export {
   pullThrowSecondCall,
   syncStartThrow,
   asyncStartRejectionErrorsStream,
+  startPromiseSettledInNewPromise,
   cancelWithPendingPull,
 } from 'source-algorithms';
 
@@ -96,6 +97,7 @@ export {
   teeCancelReasonComposite,
   teeCancelReverseOrder,
   teePullPerRead,
+  teeBackpressureFollowsSlowestBranch,
 } from 'tee';
 
 export {
@@ -131,6 +133,9 @@ export {
   returnThenNextNoAwait,
   nextThenReturnNoAwait,
   iteratorPrototypeShape,
+  nextFromEarlierContinuationReadsAhead,
+  nextFromEarlierContinuationBeatsReturn,
+  nextAfterRejectedNextIsDone,
 } from 'async-iteration';
 
 export {
@@ -164,6 +169,22 @@ export {
 } from 'integration-body';
 
 export {
+  nonBytesChunkCancelsSource,
+  everyConsumerCancelsOnNonBytes,
+  nonBytesCancelRejectionReplacesFailure,
+  nonBytesChunkInClosingBatch,
+  transformExpectedLengthOverflow,
+  transformExpectedLengthMet,
+} from 'integration-body-failures';
+
+export {
+  chunksCollectibleDuringConsumption,
+  oddChunkSizesAssembleIntact,
+  chunkWiderThanABlockAssemblesIntact,
+  declaredLengthBodyIsExact,
+} from 'integration-body-memory';
+
+export {
   disturbedStreamIntoResponse,
   lockedStreamIntoResponse,
   bodyIdentityAndLockCoupling,
@@ -173,9 +194,20 @@ export {
   pendingReadSurvivesGc,
   asyncIterationSurvivesGc,
   readableStreamFromPendingPromiseCollects,
+  controllerOnlyHeldStreamLiveness,
+  teeBranchesCollected,
+  teeBranchesCollectedReleaseBacklog,
+  teeSurvivorBranchCollected,
+  teeBranchesCollectedPullStops,
 } from 'gc';
 
-export { thenGetterFireCountOnRead } from 'then-interceptors';
+export {
+  thenGetterFireCountOnRead,
+  thenGetterCancelsBranchDuringEnqueue,
+  thenGetterCancelsBranchDuringEnqueueBacklog,
+  thenGetterCancelsBranchDuringClose,
+  thenGetterCancelsTwoBranchesDuringEnqueue,
+} from 'then-interceptors';
 
 export {
   drainingReaderSweepsQueuedBacklog,
@@ -199,3 +231,11 @@ export {
 } from 'backpressure';
 
 export { structuredCloneReadable } from 'transfer';
+
+export {
+  patchedArrayIteratorKeepsBody,
+  replacedNumberKeepsBody,
+  patchedControllerErrorStillErrors,
+  omittedDictionariesReadNothing,
+  asyncIteratorShape,
+} from 'pollution';

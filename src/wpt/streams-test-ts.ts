@@ -6,34 +6,12 @@ import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'idlharness.any.js': {},
-  'piping/abort.any.js': {
-    comment:
-      'INTENTIONAL SPEC DIVERGENCE: the pipe pump drains the source in ' +
-      'batches per writer-ready cycle, amortizing per-chunk read overhead ' +
-      'instead of following the spec reference one-chunk-per-read shape. ' +
-      'A consequence is that source-close is observed through the read ' +
-      'loop rather than a [[closedPromise]] reaction, so an abort fired ' +
-      'one microtask after the close wins the shutdown race that the ' +
-      'spec has it lose.',
-    expectedFailures: ['abort should do nothing after the readable is closed'],
-  },
+  'piping/abort.any.js': {},
   'piping/close-propagation-backward.any.js': {},
   'piping/close-propagation-forward.any.js': {},
   'piping/error-propagation-backward.any.js': {},
   'piping/error-propagation-forward.any.js': {},
-  'piping/flow-control.any.js': {
-    comment:
-      'INTENTIONAL SPEC DIVERGENCE: the same batched-drain pump design ' +
-      'as piping/abort.any.js above. Buffered chunks move to the ' +
-      'writable queue in one batch per writer-ready cycle, so the ' +
-      'READABLE queue does not accumulate (desiredSize stays high) while ' +
-      'the writer is slow the way the spec one-chunk-per-ready cadence ' +
-      'produces. Total buffering stays bounded; only its location (and ' +
-      'the desiredSize the source observes) differs.',
-    expectedFailures: [
-      'Piping to a WritableStream that does not consume the writes fast enough exerts backpressure on the ReadableStream',
-    ],
-  },
+  'piping/flow-control.any.js': {},
   'piping/general-addition.any.js': {},
   'piping/general.any.js': {},
   'piping/multiple-propagation.any.js': {},
@@ -77,10 +55,6 @@ export default {
       'ReadableStream teeing with byte source: canceling both branches in reverse order should aggregate the cancel reasons into an array',
     ],
     expectedFailures: [
-      // AggregateError cancel reason: cancel reason is AggregateError
-      // instead of spec [r1, r2] array. These fail fast on assertion.
-      'ReadableStream teeing with byte source: failing to cancel when canceling both branches in sequence with delay',
-      'ReadableStream teeing with byte source: failing to cancel the original stream should cause cancel() to reject on branches',
       // Shared-queue tee model: pull count / pull sequencing differs
       // from the spec's per-branch clone model.
       'ReadableStream teeing with byte source: stops pulling when original stream errors while both branches are reading',

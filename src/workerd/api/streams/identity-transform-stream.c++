@@ -399,6 +399,12 @@ Pair newIdentityPair(kj::Maybe<uint64_t> expectedLength = kj::none) {
 }
 }  // namespace
 
+// These are the legacy implementation's JS constructors, so the readable and writable sides they
+// build are legacy streams by construction; under typescript_implemented_streams the global
+// IdentityTransformStream / FixedLengthStream are the TypeScript classes and these constructors are
+// not reachable.
+// NOLINTBEGIN(workerd-legacy-stream-alloc)
+
 jsg::Ref<IdentityTransformStream> IdentityTransformStream::constructor(
     jsg::Lock& js, jsg::Optional<IdentityTransformStream::QueuingStrategy> maybeQueuingStrategy) {
 
@@ -436,6 +442,8 @@ jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(jsg::Lock& js,
       js.alloc<WritableStream>(ioContext, kj::mv(pipe.out),
           ioContext.getMetrics().tryCreateWritableByteStreamObserver(), maybeHighWaterMark));
 }
+
+// NOLINTEND(workerd-legacy-stream-alloc)
 
 OneWayPipe newIdentityPipe(kj::Maybe<uint64_t> expectedLength) {
   auto pair = newIdentityPair(kj::mv(expectedLength));

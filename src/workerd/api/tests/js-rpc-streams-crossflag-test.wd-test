@@ -1,6 +1,6 @@
-# Cross-implementation stream transfer: the runner has typescript_implemented_streams, the
-# peer does not, so every stream RPC in the test crosses stream implementations (in both
-# serialization directions). See the header comment in the JS file.
+# Cross-implementation stream transfer with a TypeScript runner and legacy peer. The reverse
+# config swaps the implementations so streams originating on either implementation are tested.
+# See the header comment in the JS file.
 using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (

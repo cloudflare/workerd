@@ -58,6 +58,7 @@ const ErrorCtor = Error;
 const FinalizationRegistryCtor = FinalizationRegistry;
 const FunctionCtor = Function;
 const MapCtor = Map;
+const NumberCtor = Number;
 const ObjectCtor = Object;
 const PromiseCtor = Promise;
 const RangeErrorCtor = RangeError;
@@ -250,6 +251,7 @@ const StringPrototypeStartsWith = uncurryThis(String.prototype.startsWith);
 const SymbolIterator = Symbol.iterator;
 const SymbolAsyncIterator = Symbol.asyncIterator;
 const SymbolToStringTag = Symbol.toStringTag;
+const SymbolFor = Symbol.for;
 // Only the sync disposer is captured: JSG's guidance (jsg.h, JSG_DISPOSE) is to
 // implement Symbol.dispose and avoid defining Symbol.asyncDispose alongside it,
 // and no bootstrap class defines the async form.
@@ -320,8 +322,8 @@ const SetIteratorPrototypeNext: (iter: any) => IteratorResult<any> =
 
 // ArrayBuffer
 const ArrayBufferPrototypeSlice = uncurryThis(ArrayBuffer.prototype.slice);
-const ArrayBufferPrototypeTransfer = uncurryThis(
-  ArrayBuffer.prototype.transfer
+const ArrayBufferPrototypeTransferToFixedLength = uncurryThis(
+  ArrayBuffer.prototype.transferToFixedLength
 );
 const ArrayBufferPrototypeByteLengthGet = getProtoGetter<
   (buffer: ArrayBuffer) => number
@@ -678,6 +680,7 @@ module.exports = ObjectFreeze({
   FinalizationRegistry: FinalizationRegistryCtor,
   Function: FunctionCtor,
   Map: MapCtor,
+  Number: NumberCtor,
   Object: ObjectCtor,
   Promise: PromiseCtor,
   RangeError: RangeErrorCtor,
@@ -788,7 +791,7 @@ module.exports = ObjectFreeze({
 
   // ArrayBuffer
   ArrayBufferPrototypeSlice,
-  ArrayBufferPrototypeTransfer,
+  ArrayBufferPrototypeTransferToFixedLength,
   ArrayBufferPrototypeByteLengthGet,
   ArrayBufferPrototypeDetachedGet,
 
@@ -816,6 +819,7 @@ module.exports = ObjectFreeze({
   // Symbol
   SymbolAsyncIterator,
   SymbolDispose,
+  SymbolFor,
   SymbolIterator,
   SymbolToStringTag,
 

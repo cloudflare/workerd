@@ -26,6 +26,10 @@ kj::Vector<jsg::Ref<api::WebSocket>> HibernationManagerImpl::getWebSockets(
   KJ_UNIMPLEMENTED("HibernationManagerImpl::getWebSockets not yet implemented (EW-10817)");
 }
 
+uint64_t HibernationManagerImpl::getWebSocketCount() const {
+  KJ_UNIMPLEMENTED("HibernationManagerImpl::getWebSocketCount not yet implemented (EW-10817)");
+}
+
 void HibernationManagerImpl::hibernateWebSockets(Worker::Lock& lock) {
   KJ_UNIMPLEMENTED("HibernationManagerImpl::hibernateWebSockets not yet implemented (EW-10817)");
 }

@@ -200,6 +200,8 @@ enum class FsError {
   FILE_SIZE_LIMIT_EXCEEDED,
   // Symlink depth exceeded
   SYMLINK_DEPTH_EXCEEDED,
+  // Path does not exist
+  NOT_FOUND,
 };
 
 // A file in the virtual file system. If the file is read-only, then the
@@ -612,8 +614,17 @@ class VirtualFileSystem {
     // Open the file descriptor for appending. Ignored if write is false.
     bool append = false;
 
-    // If true, opening the path will fail if it already exists.
+    // If true, a missing file is created on open. Otherwise opening a
+    // missing path fails with NOT_FOUND.
+    bool create = false;
+
+    // If true, opening the path will fail if it already exists. Only
+    // meaningful together with create.
     bool exclusive = false;
+
+    // If true, an existing file is truncated to zero length on open.
+    // Ignored if write is false.
+    bool truncate = false;
 
     // If true, and the destination is a symbolic link, the link will be
     // followed such that the file descriptor is opened on the target
@@ -667,9 +678,8 @@ class VirtualFileSystem {
   // file descriptor will fail.
   //
   // If the file cannot be opened or created, an exception will be thrown.
-  virtual kj::OneOf<FsError, kj::Rc<OpenedFile>> openFd(jsg::Lock& js,
-      const jsg::Url& url,
-      OpenOptions options = {true, false, false, false, true}) const KJ_WARN_UNUSED_RESULT = 0;
+  virtual kj::OneOf<FsError, kj::Rc<OpenedFile>> openFd(
+      jsg::Lock& js, const jsg::Url& url, OpenOptions options) const KJ_WARN_UNUSED_RESULT = 0;
 
   // Closes the given file descriptor. This is a no-op if the file descriptor is not open.
   // Using an int fd is not super nice but it is the most compatible with the node:fs

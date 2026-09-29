@@ -4,11 +4,14 @@
 
 // Buffer ownership hazards at every stage of the BYOB cycle: detached
 // buffers, foreign buffers in respondWithNewView, resizable
-// ArrayBuffers, and non-detachable (WebAssembly.Memory) buffers. The
-// BEHAVIOR is parity throughout — only messages differ (the WPT
-// bad-buffers-and-views and non-transferable-buffers families).
+// ArrayBuffers, and non-detachable (WebAssembly.Memory, SharedArrayBuffer)
+// buffers. The BEHAVIOR is parity — only messages differ (the WPT
+// bad-buffers-and-views and non-transferable-buffers families) — except
+// for resizable buffers (ledger #30): TS transfers them to fixed length
+// (spec TransferArrayBuffer), while C++ can hand the source a resizable
+// byobRequest buffer and return resizable results.
 
-import { strictEqual, throws, rejects } from 'node:assert';
+import { deepStrictEqual, strictEqual, throws, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 function byteStream(source = {}) {
@@ -122,6 +125,7 @@ export const enqueueResizableBuffer = {
     strictEqual(done, false);
     strictEqual(value.byteLength, 2);
     strictEqual(value[1], 2);
+    strictEqual(value.buffer.resizable, false);
   },
 };
 
@@ -144,6 +148,123 @@ export const readResizableView = {
     strictEqual(done, false);
     strictEqual(value.byteLength, 1);
     strictEqual(value[0], 3);
+    strictEqual(value.buffer.resizable, !usingTsImpl);
+  },
+};
+
+// A read(view) over a resizable buffer: TS exposes a fixed-length
+// byobRequest buffer, so the source cannot shrink it and respond() works;
+// C++ lets it shrink and respond() then throws (ledger #30).
+export const resizableByobRequestCannotShrink = {
+  async test() {
+    for (const release of [false, true]) {
+      const { rs, controller } = byteStream();
+      const reader = rs.getReader({ mode: 'byob' });
+      const read = reader.read(
+        new Uint8Array(new ArrayBuffer(8, { maxByteLength: 16 }))
+      );
+      read.catch(() => {});
+      await scheduler.wait(5);
+      const req = controller().byobRequest;
+      strictEqual(req.view.buffer.resizable, !usingTsImpl);
+      if (release) reader.releaseLock();
+      if (usingTsImpl) {
+        throws(() => req.view.buffer.resize(0), TypeError);
+        req.view.set([1, 2, 3, 4]);
+        req.respond(4);
+        const { value, done } = release
+          ? await rs.getReader().read()
+          : await read;
+        strictEqual(done, false);
+        deepStrictEqual([...value], [1, 2, 3, 4]);
+        strictEqual(value.buffer.resizable, false);
+      } else {
+        req.view.buffer.resize(0);
+        throws(() => req.respond(4), {
+          name: 'TypeError',
+          message: 'Cannot respond with a zero-length or detached view',
+        });
+        if (!release) {
+          const outcome = await Promise.race([
+            read.then(() => 'settled'),
+            scheduler.wait(50).then(() => 'pending'),
+          ]);
+          strictEqual(outcome, 'pending');
+        }
+        await rs.cancel('cleanup').catch(() => {});
+        await reader.cancel('cleanup').catch(() => {});
+      }
+    }
+  },
+};
+
+// Results built over a resizable buffer handed in by respondWithNewView()
+// or by read(view) on a closed stream are fixed-length on TS only
+// (ledger #30).
+export const resizableBuffersDeliveredFixedLength = {
+  async test() {
+    {
+      const { rs, controller } = byteStream();
+      const reader = rs.getReader({ mode: 'byob' });
+      const read = reader.read(new Uint8Array(4));
+      await scheduler.wait(5);
+      const rab = new ArrayBuffer(4, { maxByteLength: 16 });
+      new Uint8Array(rab).set([1, 2, 3, 4]);
+      controller().byobRequest.respondWithNewView(new Uint8Array(rab));
+      const { value } = await read;
+      deepStrictEqual([...value], [1, 2, 3, 4]);
+      strictEqual(value.buffer.resizable, !usingTsImpl);
+    }
+    {
+      const { rs, controller } = byteStream();
+      controller().close();
+      const { value, done } = await rs
+        .getReader({ mode: 'byob' })
+        .read(new Uint8Array(new ArrayBuffer(4, { maxByteLength: 16 })));
+      strictEqual(done, true);
+      strictEqual(value.byteLength, 0);
+      strictEqual(value.buffer.resizable, !usingTsImpl);
+    }
+  },
+};
+
+// SharedArrayBuffer-backed views are rejected with TypeError by
+// read(view), enqueue() and respondWithNewView().
+export const sharedBuffersRejected = {
+  async test() {
+    const { rs, controller } = byteStream();
+    const reader = rs.getReader({ mode: 'byob' });
+    await rejects(reader.read(new Uint8Array(new SharedArrayBuffer(4))), {
+      name: 'TypeError',
+      message: usingTsImpl
+        ? 'view must not be backed by a SharedArrayBuffer'
+        : 'Unabled to use non-detachable ArrayBuffer.',
+    });
+    throws(
+      () => controller().enqueue(new Uint8Array(new SharedArrayBuffer(4))),
+      {
+        name: 'TypeError',
+        message: usingTsImpl
+          ? 'chunk must not be backed by a SharedArrayBuffer'
+          : 'The provided ArrayBuffer must be detachable.',
+      }
+    );
+    const read = reader.read(new Uint8Array(4));
+    await scheduler.wait(5);
+    throws(
+      () =>
+        controller().byobRequest.respondWithNewView(
+          new Uint8Array(new SharedArrayBuffer(4))
+        ),
+      {
+        name: 'TypeError',
+        message: usingTsImpl
+          ? 'view must not be backed by a SharedArrayBuffer'
+          : 'Unable to use non-detachable ArrayBuffer.',
+      }
+    );
+    controller().enqueue(new Uint8Array([5]));
+    deepStrictEqual([...(await read).value], [5]);
   },
 };
 

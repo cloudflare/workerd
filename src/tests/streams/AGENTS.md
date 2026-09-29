@@ -4,7 +4,7 @@ Streams test suite, organized WPT-style: one subdirectory per functional area
 (`identity/`, `encoding/`, `compression/`, `digest/`, `strategies/`,
 `readable/`, `readable-byte/`, `writable/`, `transform/`, `piping/`,
 `inspect/`, `r2-patterns/`, `iocontext/`, `cache/`, `htmlrewriter/`,
-`formdata/`, `sockets/`). Every
+`formdata/`, `sockets/`, `scaling/`). Every
 test here runs against **both** streams implementations — the legacy C++ one
 (`src/workerd/api/streams/`) and the TypeScript one
 (`src/per_isolate/webstreams/`) — to prove parity. A test that only makes
@@ -130,7 +130,10 @@ Targets per suite: `<name>-cpp@`, `<name>-ts@`, each with `@all-compat-flags`
 and `@all-autogates` variants, plus `@gc-stress` (off-by-default; run with
 `--test_tag_filters=`). `workerd test` requires an exported `test()` handler
 per case; assertions come from `node:assert` (`nodejs_compat` is in both
-configs' flag lists).
+configs' flag lists). The `scaling/` suite is the exception to the
+variant set: it times shapes at 80k-160k entries, so it has no
+`@gc-stress` variant, skips the sanitizer builds, and its C++ cell is
+`off-by-default` (see its `AGENTS.md`).
 
 ## Streams tests that live elsewhere (by design)
 

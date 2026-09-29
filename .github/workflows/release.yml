@@ -25,11 +25,9 @@ jobs:
       date: ${{ steps.echo.outputs.date }}
       version: ${{ steps.echo.outputs.version }}
       types_version: ${{ steps.echo.outputs.types_version }}
-    # version job uses ubuntu 24.04, this way we don't have to install the updated clang while
-    # the build job uses 22.04 for libc compatibility.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - id: echo
         run: |
           echo "date=$(cat src/workerd/io/release-version.txt)" >> $GITHUB_OUTPUT;
@@ -43,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: mukunku/tag-exists-action@v1.7.0
@@ -60,7 +58,7 @@ jobs:
     if: ${{ needs.check-tag.outputs.exists != 'true' }}
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - run: git tag v${{ needs.version.outputs.version }} && git push origin v${{ needs.version.outputs.version }}
@@ -148,7 +146,7 @@ jobs:
             name: Windows-X64
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -203,7 +201,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout workers-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: cloudflare/workers-sdk
 
@@ -239,7 +237,7 @@ jobs:
     runs-on: ubuntu-22.04-16core
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -298,7 +296,7 @@ jobs:
     runs-on: ubuntu-22.04-16core
     needs: [version, upload-artifacts]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           show-progress: false
       - name: Use Node

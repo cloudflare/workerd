@@ -9,8 +9,19 @@
 // fixup_transform_stream_backpressure pinned in the C++ cells (the
 // legacy-backpressure cell guards the original buggy accounting).
 
-import { strictEqual, ok } from 'node:assert';
+import { strictEqual, ok, rejects, deepStrictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
+
+// Tracks a write's settlement without awaiting it: a regression here parks
+// the write, and an await would hang the cell.
+function trackWrite(writer, chunk) {
+  const state = { value: 'pending' };
+  writer.write(chunk).then(
+    () => (state.value = 'fulfilled'),
+    () => (state.value = 'rejected')
+  );
+  return state;
+}
 
 // The transformer sees the readable-side desiredSize drain as it
 // enqueues; the writable side recovers once the queue is consumed... or
@@ -152,5 +163,121 @@ export const backpressureAppliedAtReadableHwm = {
       strictEqual(r1.value, 'a');
       await w1;
     }
+  },
+};
+
+// A write parked on backpressure is released by a read's pull. An enqueue on
+// a stored controller in the same turn re-asserts backpressure before the
+// write's reaction runs; the write transforms anyway (spec
+// TransformStreamDefaultSinkWriteAlgorithm waits once). Parity. Re-checking
+// the flag after the wait would park the write until the next read, and a
+// producer that awaits each write before reading again would deadlock.
+export const writeReleasedByReadSurvivesSameTurnEnqueue = {
+  async test() {
+    let ctl;
+    const ts = new TransformStream({
+      start(c) {
+        ctl = c;
+      },
+      transform(chunk, c) {
+        c.enqueue(chunk.toUpperCase());
+      },
+    });
+    const writer = ts.writable.getWriter();
+    const reader = ts.readable.getReader();
+
+    const write = trackWrite(writer, 'a');
+    await scheduler.wait(1);
+    strictEqual(write.value, 'pending');
+
+    const read = reader.read();
+    ctl.enqueue('x');
+    await scheduler.wait(10);
+    strictEqual(write.value, 'fulfilled');
+    strictEqual((await read).value, 'x');
+    strictEqual((await reader.read()).value, 'A');
+  },
+};
+
+// Same release through a dequeue at readable hwm 1 instead of a pending
+// read. DIVERGENCE (ledger #14): C++ does not pull when a read leaves the
+// queue with room (readable ledger #5), so the write stays parked until a
+// read finds the queue empty; TS pulls on the dequeue and the write
+// transforms although the same-turn enqueue re-asserted backpressure (spec).
+export const writeReleasedByDequeueSurvivesSameTurnEnqueue = {
+  async test() {
+    let ctl;
+    const ts = new TransformStream(
+      {
+        start(c) {
+          ctl = c;
+        },
+        transform(chunk, c) {
+          c.enqueue(chunk.toUpperCase());
+        },
+      },
+      undefined,
+      { highWaterMark: 1 }
+    );
+    const writer = ts.writable.getWriter();
+    const reader = ts.readable.getReader();
+
+    await writer.write('a');
+    const write = trackWrite(writer, 'b');
+    await scheduler.wait(1);
+    strictEqual(write.value, 'pending');
+
+    const read = reader.read();
+    ctl.enqueue('x');
+    strictEqual((await read).value, 'A');
+    await scheduler.wait(10);
+    strictEqual(write.value, usingTsImpl ? 'fulfilled' : 'pending');
+    strictEqual((await reader.read()).value, 'x');
+    strictEqual((await reader.read()).value, 'B');
+    await scheduler.wait(1);
+    strictEqual(write.value, 'fulfilled');
+  },
+};
+
+// The release's turn also errors the controller: the released write finds
+// the writable erroring and rejects without transforming. DIVERGENCE
+// (ledger #15): TS rejects with the writable's stored error (spec); C++ has
+// already dropped its writable reference and cleared the algorithms, so the
+// write takes the identity path into the errored readable and rejects with
+// that enqueue's TypeError.
+export const writeReleasedByReadThenErroredSameTurn = {
+  async test() {
+    let ctl;
+    const transformed = [];
+    const ts = new TransformStream({
+      start(c) {
+        ctl = c;
+      },
+      transform(chunk) {
+        transformed.push(chunk);
+      },
+    });
+    const writer = ts.writable.getWriter();
+    const reader = ts.readable.getReader();
+
+    const write = writer.write('a');
+    await scheduler.wait(1);
+
+    const read = reader.read();
+    ctl.enqueue('x');
+    const reason = new Error('boom');
+    ctl.error(reason);
+    strictEqual((await read).value, 'x');
+    await rejects(
+      write,
+      usingTsImpl
+        ? (e) => e === reason
+        : {
+            name: 'TypeError',
+            message:
+              'The readable side of this TransformStream is no longer readable.',
+          }
+    );
+    deepStrictEqual(transformed, []);
   },
 };

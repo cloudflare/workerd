@@ -86,7 +86,9 @@ namespace {
   V(SPANID, "spanId")                                                                              \
   V(TRACEFLAGS, "traceFlags")                                                                      \
   V(SPANOPEN, "spanOpen")                                                                          \
+  V(SPANUPDATE, "spanUpdate")                                                                      \
   V(STACK, "stack")                                                                                \
+  V(STATUS, "status")                                                                              \
   V(STATUSCODE, "statusCode")                                                                      \
   V(SLUG, "slug")                                                                                  \
   V(STREAMDIAGEVENT, "streamDiagEvent")                                                            \
@@ -98,6 +100,7 @@ namespace {
   V(TRACES, "traces")                                                                              \
   V(TRUNCATED, "truncated")                                                                        \
   V(TYPE, "type")                                                                                  \
+  V(UNSET, "unset")                                                                                \
   V(UNKNOWN, "unknown")                                                                            \
   V(URL, "url")                                                                                    \
   V(VALUE, "value")                                                                                \
@@ -438,6 +441,25 @@ jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
   return obj;
 }
 
+jsg::JsValue ToJs(jsg::Lock& js, const SpanStatus& status, StringCache& cache) {
+  auto obj = js.obj();
+  switch (status.getCode()) {
+    case SpanStatusCode::UNSET:
+      obj.set(js, CODE_STR, cache.get(js, UNSET_STR));
+      break;
+    case SpanStatusCode::OK:
+      obj.set(js, CODE_STR, cache.get(js, OK_STR));
+      break;
+    case SpanStatusCode::ERROR:
+      obj.set(js, CODE_STR, cache.get(js, ERROR_STR));
+      break;
+  }
+  KJ_IF_SOME(message, status.getMessage()) {
+    obj.set(js, MESSAGE_STR, js.str(message));
+  }
+  return obj;
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const Outcome& outcome, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, OUTCOME_STR));
@@ -479,6 +501,24 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanClose& spanClose, StringCache& cache)
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANCLOSE_STR));
   obj.set(js, OUTCOME_STR, ToJs(js, spanClose.outcome, cache));
+  return obj;
+}
+
+jsg::JsValue ToJs(jsg::Lock& js, const SpanUpdate& spanUpdate, StringCache& cache) {
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, SPANUPDATE_STR));
+  auto info = js.obj();
+  KJ_SWITCH_ONEOF(spanUpdate.info) {
+    KJ_CASE_ONEOF(operationName, kj::ConstString) {
+      info.set(js, TYPE_STR, cache.get(js, NAME_STR));
+      info.set(js, NAME_STR, js.str(operationName));
+    }
+    KJ_CASE_ONEOF(status, SpanStatus) {
+      info.set(js, TYPE_STR, cache.get(js, STATUS_STR));
+      info.set(js, STATUS_STR, ToJs(js, status, cache));
+    }
+  }
+  obj.set(js, INFO_STR, kj::mv(info));
   return obj;
 }
 
@@ -620,6 +660,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
     KJ_CASE_ONEOF(spanClose, SpanClose) {
       obj.set(js, EVENT_STR, ToJs(js, spanClose, cache));
     }
+    KJ_CASE_ONEOF(spanUpdate, SpanUpdate) {
+      obj.set(js, EVENT_STR, ToJs(js, spanUpdate, cache));
+    }
     KJ_CASE_ONEOF(de, DiagnosticChannelEvent) {
       obj.set(js, EVENT_STR, ToJs(js, de, cache));
     }
@@ -659,6 +702,9 @@ kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
     KJ_CASE_ONEOF(_, SpanClose) {
       return SPANCLOSE_STR;
     }
+    KJ_CASE_ONEOF(_, SpanUpdate) {
+      return SPANUPDATE_STR;
+    }
     KJ_CASE_ONEOF(_, DiagnosticChannelEvent) {
       return DIAGNOSTICCHANNEL_STR;
     }
@@ -681,7 +727,7 @@ kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
   return kj::none;
 }
 
-class TailStreamTarget final: public rpc::TailStreamTarget::Server {
+class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::Refcounted {
  public:
   TailStreamTarget(IoContext& ioContext,
       kj::Maybe<kj::StringPtr> entrypointNamePtr,
@@ -725,7 +771,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     auto sharedResults = kj::rc<SharedResults>(reportContext.initResults());
 
     auto promise =
-        ioContext.run([this, sharedResults = sharedResults.addRef(), reportContext,
+        ioContext.run([self = addRefToThis(), sharedResults = sharedResults.addRef(), reportContext,
                           ownReportContext = ownReportContext->addRef()](
                           Worker::Lock& lock, IoContext& ioContext) mutable -> kj::Promise<void> {
       auto params = reportContext.getParams();
@@ -737,22 +783,23 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // received collection must be an Onset event and must be handled separately.
       // We will only dispatch the remaining events if a handler is returned.
       auto result = ([&]() -> kj::Promise<void> {
-        KJ_IF_SOME(handler, maybeHandler) {
+        KJ_IF_SOME(handler, self->maybeHandler) {
           KJ_IF_SOME(h, handler.tryGet()) {
             auto handle = h.getHandle(lock);
-            return handleEvents(lock, handle, ioContext, kj::mv(events), kj::mv(sharedResults));
+            return self->handleEvents(
+                lock, handle, ioContext, kj::mv(events), kj::mv(sharedResults));
           } else {
             KJ_LOG(ERROR, "tail stream handler was destroyed while processing events");
             JSG_FAIL_REQUIRE(Error, "Tail stream handler became invalid during event processing");
             KJ_UNREACHABLE;
           }
         } else {
-          return handleOnset(lock, ioContext, kj::mv(events), kj::mv(sharedResults));
+          return self->handleOnset(lock, ioContext, kj::mv(events), kj::mv(sharedResults));
         }
       })();
 
       if (ioContext.hasOutputGate()) {
-        return result.then([weakIoContext = weakIoContext->addRef()]() mutable {
+        return result.then([weakIoContext = self->weakIoContext->addRef()]() mutable {
           return KJ_REQUIRE_NONNULL(weakIoContext->tryGet()).waitForOutputLocks();
         });
       } else {
@@ -762,7 +809,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 
     auto paf = kj::newPromiseAndFulfiller<void>();
     promise = promise.then([&fulfiller = *paf.fulfiller]() { fulfiller.fulfill(); },
-        [&, &fulfiller = *paf.fulfiller, ownReportContext = kj::mv(ownReportContext),
+        [self = addRefToThis(), &fulfiller = *paf.fulfiller,
+            ownReportContext = kj::mv(ownReportContext),
             results = kj::mv(sharedResults)](kj::Exception&& e) mutable {
       // This is the top level exception catcher for tail events being delivered. We do not want to
       // propagate JS exceptions to the client side here, all exceptions should stay within this
@@ -778,8 +826,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // We still fulfill this fulfiller to disarm the cancellation check below
       fulfiller.fulfill();
       results->setStop(true);
-      doneReceiving = true;
-      doneFulfiller->reject(kj::mv(e));
+      self->doneReceiving = true;
+      self->doneFulfiller->reject(kj::mv(e));
     });
     promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
       if (fulfiller->isWaiting()) {
@@ -865,8 +913,9 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // handling...
       return ioContext.awaitJs(js,
           js.toPromise(result).then(js,
-              ioContext.addFunctor([this, results = results.addRef()](jsg::Lock& js,
-                                       IoContext& ioContext, jsg::Value value) mutable {
+              ioContext.addFunctor(
+                  [self = addRefToThis(), results = results.addRef()](
+                      jsg::Lock& js, IoContext& ioContext, jsg::Value value) mutable {
         // The value here can be one of a function, an object, or undefined.
         // Any value other than these will result in a warning but will otherwise
         // be treated like undefined.
@@ -878,7 +927,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         if (handle->IsFunction() || handle->IsObject()) {
           // Sweet! Our tail worker wants to keep receiving events. Let's store
           // the handler and return.
-          maybeHandler = ioContext.addObjectReverse(
+          self->maybeHandler = ioContext.addObjectReverse(
               kj::heap<jsg::JsRef<jsg::JsValue>>(js, jsg::JsValue(handle)));
           return;
         }
@@ -895,15 +944,15 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         // And finally, we'll stop the stream since the tail worker did not return
         // a handler for us to continue with.
         results->setStop(true);
-        doneReceiving = true;
-        doneFulfiller->fulfill();
+        self->doneReceiving = true;
+        self->doneFulfiller->fulfill();
       }),
-              ioContext.addFunctor(
-                  [&, results = results.addRef()](jsg::Lock& js, jsg::Value&& error) mutable {
+              ioContext.addFunctor([self = addRefToThis(), results = results.addRef()](
+                                       jsg::Lock& js, jsg::Value&& error) mutable {
         // Received a JS error. Do not reject doneFulfiller yet, this will be handled when we catch
         // the exception later.
         results->setStop(true);
-        doneReceiving = true;
+        self->doneReceiving = true;
         js.throwException(kj::mv(error));
       })));
     } catch (...) {
@@ -1002,9 +1051,9 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // from the onset event etc. JSG knows how JS exceptions look like, so we don't need an
       // identifier for them.
       if (doFulfill) {
-        p = p.then(js, [&](jsg::Lock& js) {
-          doneReceiving = true;
-          doneFulfiller->fulfill();
+        p = p.then(js, [self = addRefToThis()](jsg::Lock& js) mutable {
+          self->doneReceiving = true;
+          self->doneFulfiller->fulfill();
         });
       }
       return ioContext.awaitJs(js, kj::mv(p));
@@ -1053,7 +1102,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
   incomingRequest->delivered();
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(kj::heap<TailStreamTarget>(ioContext, kj::mv(entrypointName),
+  capFulfiller->fulfill(kj::refcounted<TailStreamTarget>(ioContext, kj::mv(entrypointName),
       kj::mv(versionInfo), kj::mv(props), kj::mv(doneFulfiller), isDynamicDispatch));
 
   donePromise = donePromise.attach(ioContext.registerPendingEvent());
@@ -1166,7 +1215,11 @@ bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
     if (active->queueSize < maxQueueSize || event.event.is<Outcome>() || event.event.is<Return>()) {
       // When we get to the outcome, no more events will be dropped. Inject an internal diagnostics
       // event indicating how many events were dropped if applicable.
-      if (event.event.is<Outcome>() && active->droppedEvents > 0) {
+      //
+      // `event` is only moved from on the last iteration (see below), so no later iteration reads
+      // a moved-from event.
+      if (event.event.is<Outcome>() &&  // NOLINT(workerd-use-after-move)
+          active->droppedEvents > 0) {
         StreamDiagnosticsEvent diag(active->droppedEvents);
         TailEvent diagTailEvent(SpanContext::clone(event.spanContext), event.invocationId,
             event.timestamp, event.sequence, kj::mv(diag));

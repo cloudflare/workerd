@@ -48,7 +48,16 @@ export {
   invalidSignalRejected,
   brandChecks,
   pipeThroughLockedEndpoints,
+  badDestinationLeavesSourceUnlocked,
+  optionGetterLocksDestination,
+  shadowedWritableLocked,
 } from 'api-surface';
+
+export {
+  syntheticAbortEventIgnored,
+  stopImmediatePropagationDoesNotBlockAbort,
+  abortAfterPipeSettled,
+} from 'abort-signal';
 
 export {
   sourceStartsErrored,
@@ -70,12 +79,26 @@ export {
   destWriteThrowsMidPipe,
   destWriteThrowsMidPipePreventCancel,
   destControllerErrorsMidPipe,
+  destErroringWaitsForInFlightWrite,
 } from 'close-propagation';
 
 export {
   backpressurePipeChain,
   pipeStopsPullingWhenDestStalls,
 } from 'flow-control';
+
+export {
+  abortWithBacklogKeepsUnwrittenChunks,
+  abortWithBacklogHighWaterMark,
+  sourceErrorWithBacklogWritesNoMore,
+  invalidChunkWithBacklogEndsPipe,
+} from 'shutdown-backlog';
+
+export {
+  lateChunkDuringShutdownWait,
+  lateChunkInAbortTurnIsLost,
+  lateChunkAfterIdleAbort,
+} from 'shutdown-pending-read';
 
 export {
   cancelPropagationThroughIdentity,

@@ -6,10 +6,10 @@ Subject: Port V8_USE_ZLIB support
 Change-Id: Icfedf3e90522f1ff5037517a39a5f0e3d44abace
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index d324fcdd78bd0f5d941281c37a8e39f697334824..29b68d89b4d54917c19a0de783fdea5ff3b5783f 100644
+index 3bb9dae232afc593343b2b11b3750baf3efdfa95..30e16e4ec102c04a4a4193214b10702e1fd5eb70 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -173,6 +173,11 @@ v8_flag(name = "v8_enable_verify_predictable")
+@@ -174,6 +174,11 @@ v8_flag(name = "v8_enable_verify_predictable")
  
  v8_flag(name = "v8_enable_test_features")
  
@@ -21,7 +21,7 @@ index d324fcdd78bd0f5d941281c37a8e39f697334824..29b68d89b4d54917c19a0de783fdea5f
  v8_flag(name = "v8_wasm_random_fuzzers")
  
  v8_flag(
-@@ -546,6 +551,7 @@ v8_config(
+@@ -548,6 +553,7 @@ v8_config(
          "v8_enable_vtunejit": "ENABLE_VTUNE_JIT_INTERFACE",
          "v8_enable_undefined_double": "V8_ENABLE_UNDEFINED_DOUBLE",
          "v8_use_host_cpu_arm_features": "V8_USE_HOST_CPU_ARM_FEATURES",
@@ -29,7 +29,7 @@ index d324fcdd78bd0f5d941281c37a8e39f697334824..29b68d89b4d54917c19a0de783fdea5f
      },
      defines = [
          "GOOGLE3",
-@@ -4737,6 +4743,8 @@ v8_library(
+@@ -4743,6 +4749,8 @@ v8_library(
          "@highway//:hwy",
          "@fast_float",
          "@simdutf",

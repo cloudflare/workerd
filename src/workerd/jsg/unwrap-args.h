@@ -51,11 +51,13 @@
 // -----
 //     auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
 //         []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
-//     (self.*method)(lock, kj::mv(unwrapped).template take<indexes>()...);
+//     kj::mv(unwrapped).apply([&](auto&&... values) -> decltype(auto) {
+//       return (self.*method)(lock, kj::fwd<decltype(values)>(values)...);
+//     });
 //
-// The second pack expansion (`take<indexes>()...`) is safe: each `take`
-// call is a `kj::fwd` of an already-initialized member, with no side
-// effects, so the outer call's argument-evaluation order is irrelevant.
+// The pack expansion inside `apply()` is safe: each element is a `kj::fwd`
+// of an already-initialized member, with no side effects, so the call's
+// argument-evaluation order is irrelevant.
 
 #include <workerd/jsg/util.h>  // for RemoveRvalueRef
 
@@ -114,6 +116,15 @@ struct UnwrappedArgs<kj::_::Indexes<I...>, Args...>: UnwrappedArg<I, Args>... {
   decltype(auto) take() && {
     using T = kj::_::TypeByIndex<Idx, Args...>;
     return kj::fwd<T>(static_cast<UnwrappedArg<Idx, T>&>(*this).value);
+  }
+
+  // Synchronously invoke `func` with every argument slot, forwarded as by
+  // `take<Idx>()`, and return whatever `func` returns.  Consumes the
+  // arguments: `*this` must not be used afterwards.  The stored values stay
+  // alive for the duration of the call.
+  template <typename Func>
+  decltype(auto) apply(Func&& func) && {
+    return kj::fwd<Func>(func)(kj::fwd<Args>(static_cast<UnwrappedArg<I, Args>&>(*this).value)...);
   }
 };
 

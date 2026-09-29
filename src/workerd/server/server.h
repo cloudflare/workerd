@@ -32,7 +32,7 @@ using api::pyodide::PythonConfig;
 // Implements the single-tenant Workers Runtime server / CLI.
 //
 // The purpose of this class is to implement the core logic independently of the CLI itself,
-// in such a way that it can be unit-tested. workerd.c++ implements the CLI wrapper around this.
+// in such a way that it can be unit-tested. cli-main.c++ implements the CLI wrapper around this.
 class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandler::Resolver {
  public:
   Server(kj::Filesystem& fs,
@@ -117,6 +117,12 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
     kj::String uniqueKey;
     bool isEvictable;
     bool enableSql;
+    // True when this config was synthesized to back a Workflow (from `workflowsEngine`) rather
+    // than declared as a normal Durable Object namespace. Workflow-backing namespaces are created
+    // and linked through a separate code path (see `initWorkflowActorNamespace`) because they use
+    // an external engine's actor class and take their storage from a different Worker; this flag
+    // makes the normal Durable Object init/link paths skip them.
+    bool isWorkflow = false;
     kj::Maybe<config::Worker::DurableObjectNamespace::ContainerOptions::Reader> containerOptions;
   };
   struct Ephemeral {
@@ -172,7 +178,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   // the config's socket list (names may repeat); none for a socket that failed to bind. Consumed
   // by listenOnSockets().
   struct BoundSocket {
-    kj::Own<kj::ConnectionReceiver> listener;
+    kj::OneOf<kj::Own<kj::ConnectionReceiver>, kj::Own<kj::DatagramPort>> port;
     kj::String addrStr;
   };
   kj::Vector<kj::Maybe<BoundSocket>> boundSockets;
@@ -322,6 +328,12 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::Promise<void> listenTcp(
       kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::String authority);
 
+  kj::Promise<void> listenUdp(kj::Own<kj::DatagramPort> port,
+      kj::Own<Service> service,
+      kj::StringPtr addrStr,
+      kj::Duration idleTimeout,
+      size_t maxPendingBytes);
+
   kj::Promise<void> listenDebugPort(kj::Own<kj::ConnectionReceiver> listener);
   rpc::WorkerdDebugPort::Client makeWorkerdDebugPortClient();
 
@@ -336,6 +348,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   class WorkerdBootstrapImpl;
   class HttpListener;
   class TcpListener;
+  class UdpListener;
   class DebugPortListener;
   class WorkerdDebugPortImpl;
 

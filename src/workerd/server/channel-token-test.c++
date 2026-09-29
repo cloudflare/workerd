@@ -81,10 +81,11 @@ class MockSubrequestChannel: public IoChannelFactory::SubrequestChannel {
     KJ_IF_SOME(p, readyPromise) {
       auto promise = kj::mv(p);
       readyPromise = kj::none;
-      return promise.then([&h, usage, this]() mutable -> kj::Array<byte> {
-        return expectSync(h.encodeSubrequestChannelToken(usage, triplet.serviceName,
-            triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }), triplet.props,
-            persistent));
+      return promise.then([&h, usage, self = addWeakToThis()]() mutable -> kj::Array<byte> {
+        auto& channel = self.assertLive();
+        return expectSync(h.encodeSubrequestChannelToken(usage, channel.triplet.serviceName,
+            channel.triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }),
+            channel.triplet.props, channel.persistent));
       });
     } else {
       return expectSync(h.encodeSubrequestChannelToken(usage, triplet.serviceName,
@@ -123,10 +124,11 @@ class MockActorClassChannel: public IoChannelFactory::ActorClassChannel {
     KJ_IF_SOME(p, readyPromise) {
       auto promise = kj::mv(p);
       readyPromise = kj::none;
-      return promise.then([&h, usage, this]() mutable -> kj::Array<byte> {
-        return expectSync(h.encodeActorClassChannelToken(usage, triplet.serviceName,
-            triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }), triplet.props,
-            persistent));
+      return promise.then([&h, usage, self = addWeakToThis()]() mutable -> kj::Array<byte> {
+        auto& channel = self.assertLive();
+        return expectSync(h.encodeActorClassChannelToken(usage, channel.triplet.serviceName,
+            channel.triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }),
+            channel.triplet.props, channel.persistent));
       });
     } else {
       return expectSync(h.encodeActorClassChannelToken(usage, triplet.serviceName,
@@ -179,9 +181,10 @@ class MockActorChannel: public IoChannelFactory::ActorChannel {
     KJ_IF_SOME(p, readyPromise) {
       auto promise = kj::mv(p);
       readyPromise = kj::none;
-      return promise.then([&h, usage, this]() mutable -> kj::Array<byte> {
-        return h.encodeActorChannelToken(usage, namespaceKey, id,
-            name.map([](kj::String& s) -> kj::StringPtr { return s; }), persistent);
+      return promise.then([&h, usage, self = addWeakToThis()]() mutable -> kj::Array<byte> {
+        auto& channel = self.assertLive();
+        return h.encodeActorChannelToken(usage, channel.namespaceKey, channel.id,
+            channel.name.map([](kj::String& s) -> kj::StringPtr { return s; }), channel.persistent);
       });
     } else {
       return h.encodeActorChannelToken(usage, namespaceKey, id,

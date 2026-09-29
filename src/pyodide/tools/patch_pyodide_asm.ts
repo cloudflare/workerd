@@ -56,16 +56,8 @@ function prelude(imports: string[]): string {
   `;
 }
 
-const PATCHED_IMPORTS = [
-  'addEventListener',
-  'getRandomValues',
-  'location',
-  'monotonicDateNow',
-  'newWasmModule',
-  'patchedApplyFunc',
-  'patchedLoadLibData',
-  'wasmInstantiate',
-];
+// Imports needed to shadow global references in Emscripten's output.
+const BASE_IMPORTS = ['addEventListener', 'location'];
 
 // Direct eval is disallowed in esbuild, see: https://esbuild.github.io/content-types/#direct-eval
 const EVAL_REPLACEMENT = `(() => {
@@ -205,6 +197,13 @@ function call(
   });
 }
 
+function renameFunction(
+  node: FunctionDeclaration,
+  name: string
+): FunctionDeclaration {
+  return { ...node, id: identifier(name) };
+}
+
 /** Build `export <declaration>` or, without a declaration, `export { ...names };`. */
 function exportNamed({
   declaration = null,
@@ -243,6 +242,8 @@ type Replacement = AnyNode | AnyNode[];
 interface Patch {
   name: string;
   expected: ExpectedCount;
+  /** `builtin_wrappers` exports that the replacement refers to; imported when the patch is applied. */
+  imports?: string[];
   /** If set, only nodes inside a function declaration with this name are candidates. */
   functionName?: string;
   /** Whether this node is a patch site. `parent` is what contains the node (see Container). */
@@ -257,6 +258,7 @@ interface Patch {
 function patch<T extends AnyNode>(spec: {
   name: string;
   expected: ExpectedCount;
+  imports?: string[];
   functionName?: string;
   match: (node: AnyNode, parent: Container) => node is T;
   replace: (node: T) => Replacement;
@@ -268,24 +270,28 @@ const COMMON_PATCHES: Patch[] = [
   patch({
     name: 'new WebAssembly.Module(...) -> newWasmModule(...)',
     expected: { '0.26.0a2': 6, default: 4 },
+    imports: ['newWasmModule'],
     match: (node): node is NewExpression => isNewOf(node, 'WebAssembly.Module'),
     replace: (node) => call('newWasmModule', node.arguments),
   }),
   {
     name: 'WebAssembly.instantiate -> wasmInstantiate',
     expected: 2,
+    imports: ['wasmInstantiate'],
     match: (node) => memberPath(node) === 'WebAssembly.instantiate',
     replace: () => expr('wasmInstantiate'),
   },
   {
     name: 'Date.now -> monotonicDateNow',
     expected: { '0.26.0a2': 18, default: 22 },
+    imports: ['monotonicDateNow'],
     match: (node) => memberPath(node) === 'Date.now',
     replace: () => expr('monotonicDateNow'),
   },
   patch({
     name: 'crypto.getRandomValues(...) -> getRandomValues(Module, ...)',
     expected: 1,
+    imports: ['getRandomValues'],
     match: (node): node is CallExpression =>
       isCallOf(node, 'crypto.getRandomValues'),
     replace: (node) =>
@@ -299,10 +305,11 @@ const COMMON_PATCHES: Patch[] = [
   },
   // Dynamic linking patches.
   patch({
-    // Library lookup: route dynamic library loading through our own loader, keeping the original
-    // function around (renamed) so that references to any of its locals stay valid.
+    // Library lookup: route dynamic library loading through our own loader. `libName` and `flags`
+    // are locals of the enclosing `loadDynamicLibrary`, as in the original.
     name: 'function loadLibData() -> patchedLoadLibData',
     expected: 1,
+    imports: ['patchedLoadLibData'],
     match: (node): node is FunctionDeclaration =>
       isFunctionDeclarationNamed(node, 'loadLibData'),
     replace: () => [
@@ -392,6 +399,7 @@ const PATCHES_0_26_0A2: Patch[] = [
   patch({
     name: 'function _PyEM_CountFuncParams(func) -> patched_PyEM_CountFuncParams',
     expected: 1,
+    imports: ['patched_PyEM_CountFuncParams'],
     match: (node): node is FunctionDeclaration =>
       isFunctionDeclarationNamed(node, '_PyEM_CountFuncParams'),
     replace: (node) => ({
@@ -406,6 +414,7 @@ const PATCHES_0_26_0A2: Patch[] = [
     // To fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7.
     name: 'nullToUndefined(func.apply(...)) -> nullToUndefined(patchedApplyFunc(API, func, ...))',
     expected: 2,
+    imports: ['patchedApplyFunc'],
     match: (node): node is CallExpression & { arguments: [CallExpression] } =>
       isCallOf(node, 'nullToUndefined') &&
       node.arguments.length === 1 &&
@@ -419,6 +428,45 @@ const PATCHES_0_26_0A2: Patch[] = [
           ...node.arguments[0].arguments,
         ]),
       ]),
+  }),
+];
+
+// Hot fix for https://github.com/pyodide/pyodide/pull/6466
+const STACK_SWITCH_GC_HOTFIX_314_0_6: Patch[] = [
+  patch({
+    name: 'clear and record PyThreadState.current_frame',
+    expected: 1,
+    match: (node, parent): node is FunctionDeclaration =>
+      Array.isArray(parent) && isFunctionDeclarationNamed(node, 'saveState'),
+    replace: (node) => [
+      stmt(`
+        function saveState() {
+          const state = origSaveState();
+          if (state === Module.error) {
+            return state;
+          }
+          state.currentFrame = HEAP32[(state.threadState + 52) / 4];
+          HEAP32[(state.threadState + 52) / 4] = 0;
+          return state;
+        }
+      `),
+      renameFunction(node, 'origSaveState'),
+    ],
+  }),
+  patch({
+    name: 'restore PyThreadState.current_frame',
+    expected: 1,
+    match: (node, parent): node is FunctionDeclaration =>
+      Array.isArray(parent) && isFunctionDeclarationNamed(node, 'restoreState'),
+    replace: (node) => [
+      stmt(`
+        function restoreState(state) {
+          origRestoreState(state);
+          HEAP32[(state.threadState + 52) / 4] = state.currentFrame;
+        }
+      `),
+      renameFunction(node, 'origRestoreState'),
+    ],
   }),
 ];
 
@@ -469,6 +517,8 @@ function patchesForVersion(version: string): Patch[] {
   const patches = [...COMMON_PATCHES];
   if (version === '0.26.0a2') {
     patches.push(...PATCHES_0_26_0A2);
+  } else if (version === '314.0.6') {
+    patches.push(...STACK_SWITCH_GC_HOTFIX_314_0_6);
   }
   patches.push(
     ...(COMMONJS_VERSIONS.includes(version)
@@ -579,13 +629,17 @@ function patchSource(source: string, version: string): string {
   const ast = parse(source, ACORN_OPTIONS);
   const counts = new Map<string, number>();
   visit(ast, null, 0, patches, counts, []);
-  // Import the wrappers the patches above refer to. Done after visiting so that the prelude itself
-  // is never a candidate for patching.
-  const imports = Array.from(PATCHED_IMPORTS);
-  if (version === '0.26.0a2') {
-    imports.push('patched_PyEM_CountFuncParams');
+  // Import the wrappers the applied patches refer to. Done after visiting so that the prelude
+  // itself is never a candidate for patching.
+  const imports = new Set(BASE_IMPORTS);
+  for (const spec of patches) {
+    if ((counts.get(spec.name) ?? 0) > 0) {
+      for (const name of spec.imports ?? []) {
+        imports.add(name);
+      }
+    }
   }
-  ast.body.unshift(...stmts(prelude(imports)));
+  ast.body.unshift(...stmts(prelude([...imports].sort())));
 
   const mismatches: string[] = [];
   for (const spec of patches) {

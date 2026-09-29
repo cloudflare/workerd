@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { Duplex, Readable, Writable } from 'node:stream';
+import { Duplex, Readable, Writable, finished } from 'node:stream';
 import { strictEqual, deepStrictEqual, ok } from 'node:assert';
 import { mock } from 'node:test';
 
@@ -180,5 +180,32 @@ export const testStreamReadableHwm0 = {
     await promise;
     strictEqual(onReadFn.mock.callCount(), 1);
     strictEqual(onReadableFn.mock.callCount(), 1);
+  },
+};
+
+// finished() on a plain Writable that happens to carry a setHeader() method
+// (a test double, a wrapper): a writable, not an http OutgoingMessage —
+// 'finish' completes it, as in Node, even with autoDestroy off and no
+// 'close' ever coming.
+export const testFinishedHeaderBearingWritableCompletesAtFinish = {
+  async test() {
+    const sink = new Writable({
+      autoDestroy: false,
+      write(chunk, encoding, callback) {
+        callback();
+      },
+    });
+    sink.setHeader = () => {};
+    const completion = new Promise((resolve) => finished(sink, resolve));
+    sink.end('abc');
+    const outcome = await Promise.race([
+      completion.then(
+        (err) => `finished(${err === undefined ? '' : err.message})`
+      ),
+      scheduler.wait(200).then(() => 'pending'),
+    ]);
+    strictEqual(outcome, 'finished()');
+    strictEqual(sink.writableFinished, true);
+    strictEqual(sink.closed, false);
   },
 };

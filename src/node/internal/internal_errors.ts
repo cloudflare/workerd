@@ -473,6 +473,20 @@ export class ERR_FALSY_VALUE_REJECTION extends NodeError {
   }
 }
 
+// Raised when a node:stream API needs the Node.js web-stream interop hooks
+// (completion observation through Symbol.for('nodejs.webstream.isClosedPromise'),
+// external erroring through Symbol.for('nodejs.webstream.controllerErrorFunction'))
+// and the web stream in hand does not carry them, which is the case for
+// streams from the C++ streams implementation.
+export class ERR_WEB_STREAM_INTEROP_UNSUPPORTED extends NodeTypeError {
+  constructor(api: string) {
+    super(
+      'ERR_WEB_STREAM_INTEROP_UNSUPPORTED',
+      `${api} is not supported for web streams by the streams implementation in use`
+    );
+  }
+}
+
 export class ERR_METHOD_NOT_IMPLEMENTED extends NodeError {
   constructor(name: string | symbol) {
     if (typeof name === 'symbol') {
@@ -706,6 +720,16 @@ export class EADDRNOTAVAIL extends NodeError {
 export class EPIPE extends NodeError {
   constructor() {
     super('EPIPE', 'This socket has been ended by the other party');
+  }
+}
+
+// A read into an empty buffer, as Node reports it (the errno exception of
+// a read that libuv refuses with UV_ENOBUFS).
+export class ENOBUFS extends NodeError {
+  syscall = 'read';
+
+  constructor() {
+    super('ENOBUFS', 'read ENOBUFS');
   }
 }
 

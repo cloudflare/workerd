@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+using HttpServerModules = import "http-server-modules.capnp";
+
+# The SAME modules against the TypeScript streams implementation: the
+# Request body the server pumps and the ReadableStream the ServerResponse
+# builds are TypeScript streams here.
+#
+# The streams-semantic flags pinned in http-server-cpp.wd-test are
+# deliberately absent: the TypeScript implementation hard-codes those
+# behaviors, and the `@` / `@all-compat-flags` variants prove its
+# indifference to them.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "node-http-server-ts",
+      worker = (
+        modules = HttpServerModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_http_modules",
+          "enable_nodejs_http_server_modules",
+          "typescript_implemented_streams",
+          "experimental",
+        ],
+        bindings = [
+          (name = "SERVICE", service = "node-http-server-ts"),
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

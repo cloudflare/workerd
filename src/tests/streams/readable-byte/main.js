@@ -24,6 +24,23 @@ export default {
       });
       return new Response(rs);
     }
+    // Chunks foo, bar, baz, each after a delay, so a read of the body is
+    // still in flight well after it starts.
+    if (url.pathname === '/delayed') {
+      const enc = new TextEncoder();
+      const chunks = ['foo', 'bar', 'baz'];
+      const rs = new ReadableStream({
+        async pull(controller) {
+          await scheduler.wait(20);
+          if (chunks.length > 0) {
+            controller.enqueue(enc.encode(chunks.shift()));
+          } else {
+            controller.close();
+          }
+        },
+      });
+      return new Response(rs);
+    }
     return new Response(request.body, {
       headers: { 'content-type': 'application/octet-stream' },
     });
@@ -42,13 +59,16 @@ export {
   pullThrowErrorsStream,
   pullThrowIgnoredIfErrored,
   backpressureByteStreamHwm,
+  startPromiseSettledInNewPromise,
 } from 'pull-timing';
 
 export {
   byobRequestOnDefaultRead,
   enqueueDiscardsByobRequest,
   closeWithPartiallyFilledView,
+  closeWithPartiallyFilledViewDetached,
   readAfterCloseReturnsEmptyView,
+  readAfterCancelReturnsEmptyView,
   readDetachesCallerBuffer,
   closeWithPendingUnfilledByobRead,
   controllerType,
@@ -66,6 +86,7 @@ export {
   byobMixedViewTypes,
   byobViewOffset,
   byobAutoAllocateSizes,
+  autoAllocateDefaultReadTakesQueuedChunk,
   byobPartialRespondMisalignsFillOffset,
   readableStreamBytesMismatchedSizes,
   readableStreamBytesMismatchedViewTypes,
@@ -73,6 +94,7 @@ export {
   readableStreamMultiplePendingReads,
   byobreaderRegression,
   partialViewThenDefaultRead,
+  nativeByobMultiByteViews,
 } from 'byob-reader';
 
 export {
@@ -113,6 +135,7 @@ export {
   respondAfterCloseAndReleaseFromLaterMicrotask,
   readableStreamByteRespondWithNewView,
   readableStreamByteRespondWithNewViewUsesNewElementSize,
+  respondRemainderSettlesHeadFirst,
   readableStreamAutoAllocateChunkSize,
 } from 'respond';
 
@@ -122,6 +145,10 @@ export {
   relockRespondWithNewView,
   relockAutoAllocateRespond,
   relockAutoAllocateEnqueue,
+  relockTwoPendingRespond,
+  relockAutoAllocateTwoPendingRespond,
+  relockPartialHeadThenEnqueue,
+  relockPartialHeadThenEnqueueShapes,
   relockRespondOverflowSecondView,
 } from 'release-relock';
 
@@ -130,6 +157,7 @@ export {
   readMinStagedFulfillment,
   readMinValidation,
   closeBelowMin,
+  closedOrderAtEndOfData,
   minMetThenClose,
   readAtLeastDefaultReaderThrows,
   byobReaderConstraints,
@@ -142,6 +170,25 @@ export {
   teeByteStreamMixedReaders,
   teeCancelComposite,
   teeErrorPropagatesToBothBranches,
+  teeReleasedPendingRead,
+  teePipeAbortReleasesPendingRead,
+  teeReleasedPartialReadByob,
+  teeReleasedPartialReadDefault,
+  teeReleasedPartialReadBuffered,
+  teeReleasedPartialReadPiped,
+  teeAfterReleasedPartialRead,
+  teeOfBranchWithReleasedPartialRead,
+  teeKeepsHeldByobRequest,
+  teeSoleBranchUsesHeldByobRequest,
+  teeHeldByobRequestWithReleasedBytes,
+  teeHeldByobRequestAfterCloseOrError,
+  teeHeldByobRequestAcrossNestedTee,
+  teeHeldByobRequestEnqueueFillsByobRead,
+  teeHeldByobRequestNewViewAndAutoAllocate,
+  teeNativeBodyAfterReleaseMidRead,
+  teeClosedNativeBodyLocksOriginal,
+  teeBranchFractionalCloseErrorsBranch,
+  teeSoleBranchFractionalCloseSkipsSourceCancel,
 } from 'tee';
 
 export {
@@ -151,10 +198,19 @@ export {
   respondWithNewViewForeignBuffer,
   enqueueResizableBuffer,
   readResizableView,
+  resizableByobRequestCannotShrink,
+  resizableBuffersDeliveredFixedLength,
+  sharedBuffersRejected,
   nonDetachableBuffersRejected,
 } from 'buffer-lifecycle';
 
-export { pendingByobReadSurvivesGc, byobRequestSurvivesGc } from 'gc';
+export {
+  teeBranchesCollected,
+  teeSurvivorBranchCollected,
+  teeBranchesCollectedPullStops,
+  pendingByobReadSurvivesGc,
+  byobRequestSurvivesGc,
+} from 'gc';
 
 export {
   byobRoundtrip,
@@ -186,3 +242,10 @@ export {
   veryLargeByteTransfer,
   veryLargeByteTransferMismatchedViews,
 } from 'data-volumes';
+
+export {
+  patchedByteControllerErrorStillErrors,
+  readAtLeastIgnoresPatchedRead,
+  speciesNotConsultedByInternalCopies,
+  nativeSourceIgnoresPollutedMembers,
+} from 'pollution';

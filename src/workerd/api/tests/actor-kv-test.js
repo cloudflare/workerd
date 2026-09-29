@@ -21,7 +21,7 @@ async function testKvOperations(state) {
   await storage.delete('testKey1');
   await storage.list();
   await storage.deleteAll();
-  await storage.setAlarm(Date.now() + 50);
+  await storage.setAlarm(Date.UTC(2100, 0, 1));
   await storage.getAlarm();
   await storage.deleteAlarm();
   await storage.transaction(() => {

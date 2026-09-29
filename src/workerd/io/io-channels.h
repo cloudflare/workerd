@@ -88,6 +88,14 @@ class TimerChannel {
   virtual kj::TimePoint nowForLimitTimeout() {
     return kj::systemPreciseMonotonicClock().now();
   }
+
+  // Returns a promise that resolves at an absolute deadline on the same clock as
+  // nowForLimitTimeout().
+  virtual kj::Promise<void> atLimitTimeout(kj::TimePoint deadline) {
+    auto now = nowForLimitTimeout();
+    if (deadline <= now) return kj::READY_NOW;
+    return afterLimitTimeout(deadline - now);
+  }
 };
 
 class WorkerStubChannel;

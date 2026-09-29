@@ -78,8 +78,7 @@ JSG_DECLARE_ISOLATE_TYPE(
 
 KJ_TEST("configuration values reach nested type declarations") {
   {
-    ConfigIsolate isolate(
-        v8System, v8::IsolateGroup::GetDefault(), 123, kj::heap<IsolateObserver>());
+    ConfigIsolate isolate(v8System, newIsolateGroup(), 123, kj::heap<IsolateObserver>());
     isolate.runInLockScope([&](ConfigIsolate::Lock& lock) {
       jsg::Lock& js = lock;
       js.withinHandleScope([&] { lock.newContext<ConfigContext>().getHandle(lock); });
@@ -87,8 +86,7 @@ KJ_TEST("configuration values reach nested type declarations") {
   }
   {
     KJ_EXPECT_LOG(ERROR, "failed: expected configuration == 123");
-    ConfigIsolate isolate(
-        v8System, v8::IsolateGroup::GetDefault(), 456, kj::heap<IsolateObserver>());
+    ConfigIsolate isolate(v8System, newIsolateGroup(), 456, kj::heap<IsolateObserver>());
     isolate.runInLockScope([&](ConfigIsolate::Lock& lock) {
       jsg::Lock& js = lock;
       js.withinHandleScope([&] { lock.newContext<ConfigContext>().getHandle(lock); });

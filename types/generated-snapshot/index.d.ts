@@ -531,7 +531,10 @@ type ExportedHandlerTailStreamHandler<Env = unknown, Props = unknown> = (
   event: TailStream.TailEvent<TailStream.Onset>,
   env: Env,
   ctx: ExecutionContext<Props>,
-) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
+) =>
+  | TailStream.TailEventHandlerType
+  | undefined
+  | Promise<TailStream.TailEventHandlerType | undefined>;
 type ExportedHandlerScheduledHandler<Env = unknown, Props = unknown> = (
   controller: ScheduledController,
   env: Env,
@@ -1493,6 +1496,8 @@ interface JsonWebKey {
   qi?: string;
   oth?: RsaOtherPrimesInfo[];
   k?: string;
+  pub?: string;
+  priv?: string;
 }
 interface RsaOtherPrimesInfo {
   r?: string;
@@ -1539,6 +1544,7 @@ interface SubtleCryptoSignAlgorithm {
   hash?: string | SubtleCryptoHashAlgorithm;
   dataLength?: number;
   saltLength?: number;
+  context?: ArrayBuffer | ArrayBufferView;
 }
 interface CryptoKeyKeyAlgorithm {
   name: string;
@@ -1726,7 +1732,7 @@ interface MessageEventInit {
   data?: any;
   origin?: string;
   lastEventId?: string;
-  source?: MessagePort;
+  source?: MessagePort | null;
   ports?: MessagePort[];
 }
 /**
@@ -3993,7 +3999,7 @@ interface Container {
   interceptOutboundHttp(addr: string, binding: Fetcher): Promise<void>;
   interceptAllOutboundHttp(binding: Fetcher): Promise<void>;
   snapshotContainer(
-    options: ContainerSnapshotOptions,
+    options?: ContainerSnapshotOptions,
   ): Promise<ContainerSnapshot>;
   interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
   exec(cmd: string[], options?: ContainerExecOptions): Promise<ExecProcess>;
@@ -4119,9 +4125,13 @@ type LoopbackForExport<
   ? LoopbackServiceStub<InstanceType<T>>
   : T extends new (...args: any[]) => Rpc.DurableObjectBranded
     ? LoopbackDurableObjectClass<InstanceType<T>>
-    : T extends ExportedHandler<any, any, any>
-      ? LoopbackServiceStub<undefined>
-      : undefined;
+    : T extends new (
+          ...args: any[]
+        ) => CloudflareWorkersModule.WorkflowEntrypoint<any, infer Params>
+      ? Workflow<Params>
+      : T extends ExportedHandler<any, any, any>
+        ? LoopbackServiceStub<undefined>
+        : undefined;
 type LoopbackServiceStub<
   T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
 > = Fetcher<T> &
@@ -4603,7 +4613,14 @@ declare abstract class Span {
           stack?: string;
         },
   ): void;
+  updateName(name: string): this;
+  setStatus(status: TracingSpanStatus): this;
   end(): void;
+}
+type TracingSpanStatusCode = "unset" | "ok" | "error";
+interface TracingSpanStatus {
+  code: TracingSpanStatusCode;
+  message?: string;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.
@@ -6200,8 +6217,13 @@ type WebSearchOptions = {
   search_context_size?: "low" | "medium" | "high";
   user_location?: WebSearchUserLocation;
 };
+// Source of truth for per-model reasoning types: each model's `reasoning_effort` metadata
+// in Workers AI ConfigAPI (supported efforts, aliases, defaults, and whether reasoning can
+// be turned off). The Workers AI SDK type generator (cloudflare/ai/sdk,
+// apps/worker-constellation-entry/scripts/build-types) turns it into the per-model
+// `inputs` types below; the developer docs model schemas come from the same metadata.
 type ChatTemplateKwargs = {
-  /** Whether to enable reasoning, enabled by default. */
+  /** Whether to enable reasoning. Support and defaults depend on the model. */
   enable_thinking?: boolean;
   /** If false, preserves reasoning context between turns. */
   clear_thinking?: boolean;
@@ -6222,6 +6244,7 @@ type ChatCompletionsCommonOptions = {
   parallel_tool_calls?: boolean;
   prediction?: PredictionContent;
   presence_penalty?: number | null;
+  /** Reasoning effort. Supported levels depend on the model. */
   reasoning_effort?: "low" | "medium" | "high" | null;
   chat_template_kwargs?: ChatTemplateKwargs;
   response_format?: ResponseFormat;
@@ -10430,11 +10453,69 @@ declare abstract class Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2 {
   postProcessedOutputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output;
 }
 declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
-  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
+  inputs: XOR<
+    Omit<ResponsesInput, "reasoning"> & {
+      reasoning?:
+        | (Omit<Reasoning, "effort"> & {
+            /**
+             * Reasoning effort. Supported levels: low, medium, high. Reasoning cannot be disabled.
+             *
+             * @default "medium"
+             */
+            effort?: "low" | "medium" | "high" | null;
+          })
+        | null;
+    },
+    Omit<ChatCompletionsInput, "reasoning_effort" | "chat_template_kwargs"> & {
+      /**
+       * Reasoning effort. Supported levels: low, medium, high. Reasoning cannot be disabled.
+       *
+       * @default "medium"
+       */
+      reasoning_effort?: "low" | "medium" | "high" | null;
+      chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+        /**
+         * Reasoning is always enabled for this model and cannot be disabled.
+         *
+         * @default true
+         */
+        enable_thinking?: true;
+      };
+    }
+  >;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
-  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
+  inputs: XOR<
+    Omit<ResponsesInput, "reasoning"> & {
+      reasoning?:
+        | (Omit<Reasoning, "effort"> & {
+            /**
+             * Reasoning effort. Supported levels: low, medium, high. Reasoning cannot be disabled.
+             *
+             * @default "medium"
+             */
+            effort?: "low" | "medium" | "high" | null;
+          })
+        | null;
+    },
+    Omit<ChatCompletionsInput, "reasoning_effort" | "chat_template_kwargs"> & {
+      /**
+       * Reasoning effort. Supported levels: low, medium, high. Reasoning cannot be disabled.
+       *
+       * @default "medium"
+       */
+      reasoning_effort?: "low" | "medium" | "high" | null;
+      chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+        /**
+         * Reasoning is always enabled for this model and cannot be disabled.
+         *
+         * @default true
+         */
+        enable_thinking?: true;
+      };
+    }
+  >;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 interface Ai_Cf_Leonardo_Phoenix_1_0_Input {
@@ -11517,7 +11598,19 @@ declare abstract class Base_Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B {
   postProcessedOutputs: Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B_Output;
 }
 declare abstract class Base_Ai_Cf_Zai_Org_Glm_4_7_Flash {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Whether to enable reasoning for this model. This model has no reasoning effort levels.
+       *
+       * @default true
+       */
+      enable_thinking?: boolean;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_5 {
@@ -11525,23 +11618,168 @@ declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_5 {
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_6 {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    /**
+     * Reasoning effort. Supported levels: high, none. Compatibility aliases (accepted by the API, not by these types): low maps to high; medium maps to high; max maps to high.
+     *
+     * @default "high"
+     */
+    reasoning_effort?: "high" | "none" | null;
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Whether to enable reasoning for this model.
+       *
+       * @default true
+       */
+      enable_thinking?: boolean;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
+type Ai_Cf_Nvidia_Nemotron_3_120B_A12B_Input = Omit<
+  ChatCompletionsInput,
+  | "model"
+  | "max_tokens"
+  | "metadata"
+  | "modalities"
+  | "chat_template_kwargs"
+  | "store"
+  | "reasoning_effort"
+> & {
+  /**
+   * ID of the model to use (for example, '@cf/nvidia/nemotron-3-120b-a12b').
+   */
+  model?: ChatCompletionsInput["model"];
+  /**
+   * The maximum number of tokens to generate.
+   */
+  max_tokens?: ChatCompletionsInput["max_tokens"];
+  /**
+   * Set of key-value pairs that can be attached to the object.
+   */
+  metadata?: ChatCompletionsInput["metadata"];
+  /**
+   * Output types requested from the model.
+   */
+  modalities?: ChatCompletionsInput["modalities"];
+  /**
+   * Nemotron chat-template controls for normal reasoning, low-effort reasoning, and non-reasoning responses.
+   */
+  chat_template_kwargs?: {
+    /**
+     * Whether to enable reasoning. Reasoning is enabled by default.
+     */
+    enable_thinking?: boolean;
+    /**
+     * When reasoning is enabled, use Nemotron's low-effort reasoning mode, which uses significantly fewer reasoning tokens.
+     */
+    low_effort?: boolean;
+    /**
+     * For coding agent use, Nvidia suggests setting force_nonempty_content=true
+     */
+    force_nonempty_content?: boolean;
+  };
+  /**
+   * Whether to store the output for model distillation or evaluation.
+   *
+   * @default false
+   */
+  store?: ChatCompletionsInput["store"];
+};
 declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
-  inputs: ChatCompletionsInput;
+  inputs: Ai_Cf_Nvidia_Nemotron_3_120B_A12B_Input;
   postProcessedOutputs: ChatCompletionsOutput;
 }
-declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
-  inputs: ChatCompletionsInput;
+type Ai_Cf_Google_Gemma_4_26B_A4B_It_Input = Omit<
+  ChatCompletionsInput,
+  "reasoning_effort" | "chat_template_kwargs"
+> & {
+  chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+    /**
+     * Whether to enable reasoning for this model. This model has no reasoning effort levels.
+     *
+     * @default true
+     */
+    enable_thinking?: boolean;
+  };
+} & {
+  /**
+   * @default false
+   */
+  skip_special_tokens?: boolean;
+};
+declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_It {
+  inputs: Ai_Cf_Google_Gemma_4_26B_A4B_It_Input;
   postProcessedOutputs: ChatCompletionsOutput;
+}
+/** @deprecated Use Base_Ai_Cf_Google_Gemma_4_26B_A4B_It. */
+declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT extends Base_Ai_Cf_Google_Gemma_4_26B_A4B_It {}
+type Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B_Input =
+  | {
+      /**
+       * readable stream with audio data and content-type specified for that data
+       */
+      audio: {
+        body: object;
+        contentType: string;
+      };
+    }
+  | {
+      /**
+       * base64 encoded audio data
+       */
+      audio: string;
+      encoding?: "wav" | "flac" | "ogg" | "linear16";
+      sample_rate?: number;
+      channels?: number;
+    };
+interface Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B_Output {
+  text?: string;
+  duration?: number;
+}
+declare abstract class Base_Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B {
+  inputs: Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B_Input;
+  postProcessedOutputs: Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B_Output;
 }
 declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Reasoning is always enabled for this model and cannot be disabled. This model has no reasoning effort levels.
+       *
+       * @default true
+       */
+      enable_thinking?: true;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_2 {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    /**
+     * Reasoning effort. Supported levels: max, high, none. Compatibility aliases (accepted by the API, not by these types): low maps to high; medium maps to high; xhigh maps to max; minimal maps to none.
+     *
+     * @default "max"
+     */
+    reasoning_effort?: "max" | "high" | "none" | null;
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Whether to enable reasoning for this model.
+       *
+       * @default true
+       */
+      enable_thinking?: boolean;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
 interface Ai_Cf_Moondream_Moondream3_1_9B_A2B_Input {
@@ -11678,26 +11916,119 @@ declare abstract class Base_Ai_Cf_Moondream_Moondream3_1_9B_A2B {
   postProcessedOutputs: Ai_Cf_Moondream_Moondream3_1_9B_A2B_Output;
 }
 declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Flash_0731 {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    /**
+     * Reasoning effort. Supported levels: max, high, low, none. Compatibility aliases (accepted by the API, not by these types): minimal maps to low; medium maps to high; xhigh maps to high.
+     *
+     * @default "high"
+     */
+    reasoning_effort?: "max" | "high" | "low" | "none" | null;
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Whether to enable reasoning for this model.
+       *
+       * @default true
+       */
+      enable_thinking?: boolean;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813 {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    /**
+     * Reasoning effort. Supported levels: max, high, low, none. Compatibility aliases (accepted by the API, not by these types): minimal maps to low; medium maps to high; xhigh maps to high.
+     *
+     * @default "high"
+     */
+    reasoning_effort?: "max" | "high" | "low" | "none" | null;
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Whether to enable reasoning for this model.
+       *
+       * @default true
+       */
+      enable_thinking?: boolean;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Qwen_Qwen3_8_27B {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    /**
+     * Reasoning effort. Supported levels: low, medium, xhigh.
+     *
+     * @default "xhigh"
+     */
+    reasoning_effort?: "low" | "medium" | "xhigh" | null;
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Whether to enable reasoning for this model.
+       *
+       * @default true
+       */
+      enable_thinking?: boolean;
+    };
+  };
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_3 {
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    /**
+     * Reasoning effort. Supported levels: max, high, low. Reasoning cannot be disabled. Compatibility aliases (accepted by the API, not by these types): none maps to max; minimal maps to max; medium maps to max; xhigh maps to max.
+     *
+     * @default "max"
+     */
+    reasoning_effort?: "max" | "high" | "low" | null;
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Reasoning is always enabled for this model and cannot be disabled.
+       *
+       * @default true
+       */
+      enable_thinking?: true;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_3_Flash {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    /**
+     * Reasoning effort. Supported levels: max, high, low. Reasoning cannot be disabled. Compatibility aliases (accepted by the API, not by these types): none maps to max; minimal maps to max; medium maps to max; xhigh maps to max.
+     *
+     * @default "max"
+     */
+    reasoning_effort?: "max" | "high" | "low" | null;
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Reasoning is always enabled for this model and cannot be disabled.
+       *
+       * @default true
+       */
+      enable_thinking?: true;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
 interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
   "@cf/runwayml/stable-diffusion-v1-5-inpainting": BaseAiTextToImage;
-  "@cf/runwayml/stable-diffusion-v1-5-img2img": BaseAiTextToImage;
   "@cf/lykon/dreamshaper-8-lcm": BaseAiTextToImage;
   "@cf/bytedance/stable-diffusion-xl-lightning": BaseAiTextToImage;
   "@cf/myshell-ai/melotts": BaseAiTextToSpeech;
@@ -11784,13 +12115,15 @@ interface AiModels {
   "@cf/moonshotai/kimi-k2.5": Base_Ai_Cf_Moonshotai_Kimi_K2_5;
   "@cf/moonshotai/kimi-k2.6": Base_Ai_Cf_Moonshotai_Kimi_K2_6;
   "@cf/nvidia/nemotron-3-120b-a12b": Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B;
-  "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT;
+  "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_It;
+  "@cf/nvidia/nemotron-speech-streaming-en-0.6b": Base_Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B;
   "@cf/moonshotai/kimi-k2.7-code": Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code;
   "@cf/zai-org/glm-5.2": Base_Ai_Cf_Zai_Org_Glm_5_2;
   "@cf/moondream/moondream3.1-9B-A2B": Base_Ai_Cf_Moondream_Moondream3_1_9B_A2B;
   "@cf/deepseek-ai/deepseek-v4-flash-0731": Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Flash_0731;
   "@cf/deepseek-ai/deepseek-v4-pro-0813": Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813;
   "@cf/qwen/qwen3.8-27b": Base_Ai_Cf_Qwen_Qwen3_8_27B;
+  "@cf/zai-org/glm-5.3": Base_Ai_Cf_Zai_Org_Glm_5_3;
   "@cf/zai-org/glm-5.3-flash": Base_Ai_Cf_Zai_Org_Glm_5_3_Flash;
 }
 type AiOptions = {
@@ -11852,9 +12185,22 @@ type AiModelListType = Record<string, any>;
 type AiAsyncBatchResponse = {
   request_id: string;
 };
+type AiWebSearchRequest = {
+  /** AI Gateway configuration used for this request. */
+  gatewayId: string;
+  /** Search query. */
+  query: string;
+  /** Maximum number of results. Defaults to 10 and is capped at 20. */
+  limit?: number;
+  /** Optional BYOK web-search provider configured on the gateway. */
+  provider?: string;
+  /** Optional BYOK key alias. Defaults to `default`. */
+  byokAlias?: string;
+};
 declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
+  websearch(request: AiWebSearchRequest): Promise<Response>;
   /**
    * @deprecated Use the standalone `ai_search_namespaces` or `ai_search` Workers bindings instead.
    * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
@@ -12052,6 +12398,35 @@ declare abstract class AiGateway {
     },
   ): Promise<Response>;
   getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
+}
+/** A parameter accepted by an Analytics SQL query. */
+type AnalyticsSQLParameter = string | number | boolean | null;
+/** An Analytics SQL query and its optional positional or named parameters. */
+interface AnalyticsSQLQuery {
+  query: string;
+  params?:
+    | readonly AnalyticsSQLParameter[]
+    | Readonly<Record<string, AnalyticsSQLParameter>>;
+}
+/** Execution statistics returned by Analytics SQL. */
+interface AnalyticsSQLStatistics {
+  elapsed_ms: number;
+  rows_read: number;
+  bytes_read: number;
+}
+/** The rows and execution statistics returned by an Analytics SQL query. */
+interface AnalyticsSQLResult<
+  T extends Record<string, unknown> = Record<string, unknown>,
+> {
+  data: T[];
+  rows: number;
+  statistics: AnalyticsSQLStatistics;
+}
+/** An Analytics SQL binding. */
+interface AnalyticsSQLBinding {
+  query<T extends Record<string, unknown> = Record<string, unknown>>(
+    request: AnalyticsSQLQuery,
+  ): Promise<AnalyticsSQLResult<T>>;
 }
 // Copyright (c) 2022-2025 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
@@ -12889,6 +13264,178 @@ type BrowserRunJsonErrorResponse = BrowserRunErrorResponse & {
   /** Raw AI response text for debugging */
   rawAiResponse?: string;
 };
+/** Session-scoped guardrails applied when acquiring a browser session. */
+type BrowserRunAcquireGuardrails = {
+  /** Domains that the browser may access. An empty list denies all domains. */
+  allowedDomains?: string[];
+  /** Named domain sets that the browser may access. */
+  allowedDomainSets?: string[];
+};
+/** Options for acquiring a new browser session. */
+type BrowserRunAcquireOptions = {
+  /** Idle session lifetime in milliseconds. */
+  keepAlive?: number;
+  /** Record the browser session. */
+  recording?: boolean;
+  /** Geoegress hint as an ISO-3166 alpha-2 country code. */
+  location?: string;
+  /** Map hostnames to caller-provided Workers that handle outbound requests. */
+  outboundByHost?: Record<string, Fetcher>;
+  /** Session-scoped network guardrails. */
+  guardrails?: BrowserRunAcquireGuardrails;
+  /** Include the session's DevTools targets in the result. */
+  targets?: boolean;
+  /** Lifetime of target live-view URLs in milliseconds. */
+  liveViewUrlExpiresInMs?: number;
+};
+/** Metadata returned when a browser session is acquired. */
+type BrowserRunAcquireResult = {
+  sessionId: string;
+  targets?: BrowserRunDevToolsTarget[];
+};
+/** Options for connecting to an already-acquired browser session. */
+type BrowserRunConnectOptions = {
+  /** Connect to a specific page target instead of the browser-level CDP endpoint. */
+  targetId?: string;
+};
+/** Connection capability returned by `connectSession()` and `launch()`. */
+type BrowserRunConnection = {
+  sessionId: string;
+  /** A session-pinned Fetcher. Use its `fetch()` method for a WebSocket upgrade. */
+  webSocket: Fetcher;
+  targets?: BrowserRunDevToolsTarget[];
+};
+/** The UI mode for a live-view link. */
+type BrowserRunLiveViewMode = "devtools" | "tab" | "full";
+/** Connection-scoped guardrails applied to a live-view link. */
+type BrowserRunConnectionGuardrails = {
+  mode: "readonly";
+};
+/** Options for minting a live-view link. */
+type BrowserRunLiveViewOptions = {
+  mode?: BrowserRunLiveViewMode;
+  targetId?: string;
+  expiresInMs?: number;
+  guardrails?: BrowserRunConnectionGuardrails;
+};
+/** Live-view link metadata. */
+type BrowserRunLiveView = {
+  webSocketDebuggerUrl: string;
+  devtoolsFrontendUrl: string;
+  id: string;
+  options: {
+    mode: BrowserRunLiveViewMode;
+    guardrails?: BrowserRunConnectionGuardrails;
+  };
+};
+/** Options for listing active browser sessions. */
+type BrowserRunListSessionsOptions = {
+  limit?: number;
+  offset?: number;
+};
+/** Options for listing session history. */
+type BrowserRunHistoryOptions = {
+  limit?: number;
+  offset?: number;
+};
+/** A browser session returned by the session-management methods. */
+type BrowserRunSession = {
+  sessionId: string;
+  startTime?: number;
+  endTime?: number;
+  closeReason?: number;
+  closeReasonText?: string;
+  connectionId?: string;
+  connectionStartTime?: number;
+  connectionEndTime?: number;
+  lastUpdated?: number;
+  webSocketDebuggerUrl?: string;
+  devtoolsFrontendUrl?: string;
+};
+/** Account browser-session and browser-time limits. */
+type BrowserRunLimits = {
+  activeSessions: Array<{
+    id: string;
+  }>;
+  maxConcurrentSessions: number;
+  allowedBrowserAcquisitions: number;
+  timeUntilNextAllowedBrowserAcquisition: number;
+  usedBrowserTimeSeconds?: number;
+};
+/** A browser target returned by the DevTools JSON methods. */
+type BrowserRunDevToolsTarget = {
+  id: string;
+  type: string;
+  url: string;
+  title?: string;
+  description?: string;
+  webSocketDebuggerUrl?: string;
+  devtoolsFrontendUrl?: string;
+};
+/** Browser and protocol version metadata. */
+type BrowserRunDevToolsVersion = {
+  Browser: string;
+  "Protocol-Version": string;
+  "User-Agent": string;
+  "V8-Version": string;
+  "WebKit-Version": string;
+  webSocketDebuggerUrl: string;
+};
+/** A DevTools protocol domain. Protocol definitions may gain additional fields over time. */
+interface BrowserRunDevToolsProtocolDomain extends Record<string, unknown> {
+  domain: string;
+  experimental?: boolean;
+  dependencies?: string[];
+  types?: Array<Record<string, any>>;
+  commands?: Array<Record<string, any>>;
+  events?: Array<Record<string, any>>;
+}
+/** The DevTools protocol definition. Additional protocol fields may be returned by Chrome. */
+interface BrowserRunDevToolsProtocol extends Record<string, any> {
+  domains: BrowserRunDevToolsProtocolDomain[];
+  version?: {
+    major: string;
+    minor: string;
+  };
+}
+/** Options shared by DevTools target-listing and target-creation methods. */
+type BrowserRunTargetOptions = {
+  liveViewUrlExpiresInMs?: number;
+};
+/** Result returned by DevTools target activation and close methods. */
+type BrowserRunTargetActionResult = {
+  message: string;
+};
+/** Methods exposed by the nested `devtools` binding target. */
+type BrowserRunDevtools = {
+  getVersion(sessionId: string): Promise<BrowserRunDevToolsVersion>;
+  getProtocol(sessionId: string): Promise<BrowserRunDevToolsProtocol>;
+  listTargets(
+    sessionId: string,
+    options?: BrowserRunTargetOptions,
+  ): Promise<BrowserRunDevToolsTarget[]>;
+  getTarget(
+    sessionId: string,
+    targetId: string,
+  ): Promise<BrowserRunDevToolsTarget>;
+  newTarget(
+    sessionId: string,
+    url?: string,
+    options?: BrowserRunTargetOptions,
+  ): Promise<BrowserRunDevToolsTarget>;
+  activateTarget(
+    sessionId: string,
+    targetId: string,
+  ): Promise<BrowserRunTargetActionResult>;
+  closeTarget(
+    sessionId: string,
+    targetId: string,
+  ): Promise<BrowserRunTargetActionResult>;
+};
+/** Result returned when closing a browser session. */
+type BrowserRunCloseSessionResult = {
+  status: "closing" | "closed";
+};
 /**
  * Browser Run API binding for automating headless browsers.
  * @see https://developers.cloudflare.com/browser-run/
@@ -13077,6 +13624,34 @@ declare abstract class BrowserRun {
     action: "accessibilityTree",
     options: BrowserRunAccessibilityTreeOptions,
   ): Promise<Response>;
+  /** Acquire a new browser session and return its metadata. */
+  acquire(options?: BrowserRunAcquireOptions): Promise<BrowserRunAcquireResult>;
+  /** Acquire a browser session and return a session-pinned WebSocket capability. */
+  launch(options?: BrowserRunAcquireOptions): Promise<BrowserRunConnection>;
+  /** Return a session-pinned WebSocket capability for an existing session. */
+  connectSession(
+    sessionId: string,
+    options?: BrowserRunConnectOptions,
+  ): Promise<BrowserRunConnection>;
+  /** Mint an authenticated live-view link for a browser session. */
+  getLiveView(
+    sessionId: string,
+    options?: BrowserRunLiveViewOptions,
+  ): Promise<BrowserRunLiveView>;
+  /** List the caller's active browser sessions. */
+  listSessions(
+    options?: BrowserRunListSessionsOptions,
+  ): Promise<BrowserRunSession[]>;
+  /** List recent active and closed browser sessions. */
+  history(options?: BrowserRunHistoryOptions): Promise<BrowserRunSession[]>;
+  /** Return the caller's browser-session and browser-time limits. */
+  limits(): Promise<BrowserRunLimits>;
+  /** Return details for one browser session, or `null` when it does not exist. */
+  getSession(sessionId: string): Promise<BrowserRunSession | null>;
+  /** Close a browser session. */
+  closeSession(sessionId: string): Promise<BrowserRunCloseSessionResult>;
+  /** DevTools JSON methods exposed through one nested binding target. */
+  get devtools(): BrowserRunDevtools;
 }
 /**
  * In addition to the properties you can set in the RequestInit dict
@@ -14391,6 +14966,29 @@ declare abstract class D1PreparedStatement {
 // TypeScript's interface merging will ensure our empty interface is effectively
 // ignored when `Disposable` is included in the standard lib.
 interface Disposable {}
+declare module "cloudflare:durable-objects" {
+  /**
+   * Marks a Durable Object method as safe to run more than once. The runtime may then retry calls
+   * to it after a disconnect that might have happened after the method started. It does not
+   * enable retries or change how many are made.
+   *
+   * Each attempt creates its own return value, so if the method returns an `RpcTarget`, its
+   * `[Symbol.dispose]()` may run once per attempt.
+   *
+   * Only public instance methods can be decorated. When composing decorators, apply `@retryable`
+   * outermost (first in source order) so it marks the method that is finally installed.
+   * Otherwise `@retryable` has no effect, and constructing the object logs a warning.
+   * Requires standard (not `experimentalDecorators`) decorators and a bundler that transforms
+   * them, such as Wrangler.
+   */
+  export function retryable<This, Args extends unknown[], Return>(
+    value: (this: This, ...args: Args) => Return,
+    context: ClassMethodDecoratorContext<
+      This,
+      (this: This, ...args: Args) => Return
+    >,
+  ): (this: This, ...args: Args) => Return;
+}
 /**
  * The returned data after sending an email
  */
@@ -15684,7 +16282,8 @@ declare namespace CloudflareWorkersModule {
       event: TailStream.TailEvent<TailStream.Onset>,
     ):
       | TailStream.TailEventHandlerType
-      | Promise<TailStream.TailEventHandlerType>;
+      | undefined
+      | Promise<TailStream.TailEventHandlerType | undefined>;
     test?(controller: TestController): void | Promise<void>;
     trace?(traces: TraceItem[]): void | Promise<void>;
   }
@@ -16865,6 +17464,12 @@ declare namespace TailStream {
     readonly cpuTime: number;
     readonly wallTime: number;
   }
+  type SpanStatusCode = "unset" | "ok" | "error";
+  interface SpanStatus {
+    readonly code: SpanStatusCode;
+    /** A developer-facing error message, present only when code is "error". */
+    readonly message?: string;
+  }
   interface SpanOpen {
     readonly type: "spanOpen";
     readonly name: string;
@@ -16875,6 +17480,19 @@ declare namespace TailStream {
   interface SpanClose {
     readonly type: "spanClose";
     readonly outcome: EventOutcome;
+  }
+  type SpanUpdateInfo =
+    | {
+        readonly type: "name";
+        readonly name: string;
+      }
+    | {
+        readonly type: "status";
+        readonly status: SpanStatus;
+      };
+  interface SpanUpdate {
+    readonly type: "spanUpdate";
+    readonly info: SpanUpdateInfo;
   }
   interface DiagnosticChannelEvent {
     readonly type: "diagnosticChannel";
@@ -16945,6 +17563,7 @@ declare namespace TailStream {
     | Outcome
     | SpanOpen
     | SpanClose
+    | SpanUpdate
     | DiagnosticChannelEvent
     | Exception
     | Log
@@ -16987,6 +17606,7 @@ declare namespace TailStream {
     outcome?: TailEventHandler<Outcome>;
     spanOpen?: TailEventHandler<SpanOpen>;
     spanClose?: TailEventHandler<SpanClose>;
+    spanUpdate?: TailEventHandler<SpanUpdate>;
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;

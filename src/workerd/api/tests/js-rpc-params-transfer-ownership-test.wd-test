@@ -1,0 +1,26 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "js-rpc-params-transfer-ownership-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "js-rpc-params-transfer-ownership-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "rpc",
+          "rpc_params_transfer_stubs",
+          "enable_ctx_exports",
+        ],
+        bindings = [
+          (name = "TestActor", durableObjectNamespace = "TestActor"),
+        ],
+        durableObjectNamespaces = [
+          (className = "TestActor", uniqueKey = "js-rpc-params-transfer-ownership-test"),
+        ],
+        durableObjectStorage = (inMemory = void),
+      )
+    ),
+  ],
+);

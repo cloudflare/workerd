@@ -11,10 +11,10 @@ Use V8's standard v8_flag mechanism so the define, sources, and
 Perfetto dependency are controlled together.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 364dbb280aa7a48e383b7fbb101847b9b6646778..dcd9101b59c929618cd2c5810aaa24dc43bef90b 100644
+index a6220048a4aa37bc48653c50817577844bb2263a..4aa69d93dcc9b3e0dd61ce59f9ea25d8a3ecf8c4 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -197,6 +197,8 @@ v8_flag(
+@@ -198,6 +198,8 @@ v8_flag(
      default = True,
  )
  
@@ -23,7 +23,7 @@ index 364dbb280aa7a48e383b7fbb101847b9b6646778..dcd9101b59c929618cd2c5810aaa24dc
  # Default setting for v8_enable_maglev
  selects.config_setting_group(
      name = "maglev_by_default",
-@@ -551,6 +553,7 @@ v8_config(
+@@ -553,6 +555,7 @@ v8_config(
          "v8_enable_vtunejit": "ENABLE_VTUNE_JIT_INTERFACE",
          "v8_enable_undefined_double": "V8_ENABLE_UNDEFINED_DOUBLE",
          "v8_use_host_cpu_arm_features": "V8_USE_HOST_CPU_ARM_FEATURES",
@@ -60,7 +60,7 @@ index 364dbb280aa7a48e383b7fbb101847b9b6646778..dcd9101b59c929618cd2c5810aaa24dc
  )
  
  filegroup(
-@@ -2728,7 +2737,6 @@ filegroup(
+@@ -2731,7 +2740,6 @@ filegroup(
          "src/tracing/perfetto-sdk.h",
          "src/tracing/trace-event.cc",
          "src/tracing/trace-event.h",
@@ -68,7 +68,7 @@ index 364dbb280aa7a48e383b7fbb101847b9b6646778..dcd9101b59c929618cd2c5810aaa24dc
          "src/tracing/trace-id.h",
          "src/tracing/traced-value.cc",
          "src/tracing/traced-value.h",
-@@ -2792,6 +2800,22 @@ filegroup(
+@@ -2795,6 +2803,22 @@ filegroup(
          ":v8_bigint",
          ":v8_heap_base_files",
      ] + select({
@@ -91,7 +91,7 @@ index 364dbb280aa7a48e383b7fbb101847b9b6646778..dcd9101b59c929618cd2c5810aaa24dc
          "@v8//bazel/config:v8_target_ia32": [
              "src/baseline/ia32/baseline-assembler-ia32-inl.h",
              "src/baseline/ia32/baseline-compiler-ia32-inl.h",
-@@ -4734,7 +4758,10 @@ v8_library(
+@@ -4740,7 +4764,10 @@ v8_library(
          "@simdutf",
          "@zlib",
          "@zlib//:compression_utils_portable",

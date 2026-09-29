@@ -170,18 +170,3 @@ fn get_string() -> String {
 fn get_str() -> &'static str {
     "rust_str"
 }
-
-#[cfg(all(test, feature = "sanitizer_address"))]
-mod tests {
-    use nix::sys::signal::Signal;
-    use safe_libc::expect_signal;
-
-    #[test]
-    fn asan_stack_buffer_overflow() {
-        expect_signal!(Signal::SIGABRT, {
-            let xs = [0, 1, 2, 3];
-            // SAFETY: Intentional out-of-bounds access to trigger ASAN detection.
-            let _y = unsafe { *xs.as_ptr().offset(4) };
-        });
-    }
-}

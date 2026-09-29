@@ -23,10 +23,15 @@
 //   - pull(controller) discriminates the read mode via the controller:
 //     controller.byobRequest !== null ⇒ BYOB read — fill the request's
 //     view and call respond(bytesWritten), honoring `atLeast` (the
-//     read's minimum, in bytes). respondWithNewView() is deliberately
-//     omitted: the native source writes into consumer-provided memory
-//     (KJ tryRead semantics); buffer-swapping has no C++ analogue, and
-//     the default-read enqueue() path already covers source-allocated
+//     read's minimum, in bytes) and `elementSize` (the read view's
+//     element size, in bytes): bytesWritten must be a whole number of
+//     elements, so the source keeps a trailing partial element for the
+//     next pull, and one left at EOF errors the stream with a TypeError
+//     (as closing a queued byte stream mid-element does). The view and
+//     atLeast are whole elements already. respondWithNewView() is
+//     deliberately omitted: the native source writes into consumer-provided
+//     memory (KJ tryRead semantics); buffer-swapping has no C++ analogue,
+//     and the default-read enqueue() path already covers source-allocated
 //     buffers.
 //     byobRequest === null ⇒ default read — the source allocates its OWN
 //     buffer and calls controller.enqueue(view).
@@ -65,7 +70,9 @@
 //   - tee(): returns a PAIR of new native source objects, leaving the
 //     original source closed. The stream layer wraps each branch in a
 //     fresh ReadableStream; branches are fully independent (no composite
-//     cancel).
+//     cancel). tee() may arrive while an aborted pull's read is still
+//     running (the reader was released mid-pull); both branches must then
+//     deliver the bytes that read produces, ahead of anything later.
 //   - expectedLength (non-standard extension, optional): the TOTAL bytes
 //     the source promises to produce — a non-negative bigint or integer
 //     number that fits in a uint64 (normalized to bigint), read once at
@@ -109,21 +116,24 @@ import type {
   PromiseWithResolvers as PromiseWithResolversType,
   ReadableStreamReadResult,
 } from './types';
+import type {
+  RingBuffer as RingBufferType,
+  RingBufferConstructor,
+} from './ring-buffer';
 
 const {
   AbortController,
   AbortControllerAbort,
   AbortControllerSignalGet,
   AbortSignalAbortedGet,
-  ArrayPrototypePush,
-  ArrayPrototypeShift,
-  ArrayPrototypeSplice,
   BigInt,
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
   DataViewPrototypeGetByteOffset,
   NumberIsNaN,
   ObjectGetOwnPropertyDescriptor,
+  ObjectGetPrototypeOf,
+  ObjectPrototype,
   PromiseResolve,
   PromiseReject,
   PromiseWithResolvers,
@@ -138,6 +148,10 @@ const {
 } = primordials;
 
 const { isArrayBufferView, isUint8Array, markPromiseHandled } = utils;
+
+const { RingBuffer } = require('webstreams/ring-buffer') as {
+  RingBuffer: RingBufferConstructor;
+};
 
 // ---------------------------------------------------------------------------
 // The construction-time handshake
@@ -294,12 +308,13 @@ let getControllerConduit: (
 //
 // Wraps the head pull-into descriptor for the native source's consumption
 // during pull. Mirrors a subset of the global ReadableStreamBYOBRequest
-// (view/atLeast/respond — respondWithNewView is deliberately omitted; see
-// the contract header) but is a distinct, module-private class: it is only
-// ever handed to the native source, never to user code, so it needs no
-// global registration or brand hardening beyond its private fields.
+// (view/atLeast/respond, plus the elementSize extension — respondWithNewView
+// is deliberately omitted; see the contract header) but is a distinct,
+// module-private class: it is only ever handed to the native source, never
+// to user code, so it needs no global registration or brand hardening
+// beyond its private fields.
 // Invalidated automatically once its descriptor is no longer the head
-// request (view/atLeast report null; responds throw).
+// request (view/atLeast/elementSize report null; responds throw).
 
 let assertIsNativeReadableStreamBYOBRequest: (
   self: NativeReadableStreamBYOBRequest
@@ -346,6 +361,14 @@ class NativeReadableStreamBYOBRequest {
     const desc = this.#desc;
     const remaining = desc.minimumFill - desc.bytesFilled;
     return remaining > 0 ? remaining : 0;
+  }
+
+  // The read view's element size in bytes; every respond covers whole
+  // elements (see the contract header).
+  get elementSize(): number | null {
+    assertIsNativeReadableStreamBYOBRequest(this);
+    if (!this.#conduit.isHeadDesc(this.#desc)) return null;
+    return this.#desc.elementSize;
   }
 
   respond(bytesWritten: number): void {
@@ -439,7 +462,7 @@ interface NativeAlgorithms {
 }
 
 class NativePullConduit implements ByteStreamConsumerType {
-  #requests: NativeRequest[] = [];
+  #requests: RingBufferType<NativeRequest> = new RingBuffer();
   // 'closed' covers source-close, stream cancel, and tee (the contract
   // leaves a teed-away original source closed).
   #status: 'active' | 'closed' | 'errored' = 'active';
@@ -523,7 +546,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     const withResolvers = PromiseWithResolvers() as PromiseWithResolversType<
       ReadableStreamReadResult<Uint8Array>
     >;
-    ArrayPrototypePush(this.#requests, {
+    this.#requests.push({
       kind: 'default',
       read: {
         resolve: withResolvers.resolve,
@@ -543,10 +566,10 @@ class NativePullConduit implements ByteStreamConsumerType {
   }
 
   cancelReadsForReader(reader: object, reason: unknown): void {
-    const kept: NativeRequest[] = [];
+    const kept: RingBufferType<NativeRequest> = new RingBuffer();
     const requests = this.#requests;
     for (let i = 0; i < requests.length; i++) {
-      const request = requests[i] as NativeRequest;
+      const request = requests.get(i) as NativeRequest;
       const owner =
         request.kind === 'default' ? request.read.reader : request.desc.reader;
       if (owner === reader) {
@@ -556,7 +579,7 @@ class NativePullConduit implements ByteStreamConsumerType {
           request.desc.reject(reason);
         }
       } else {
-        ArrayPrototypePush(kept, request);
+        kept.push(request);
       }
     }
     this.#requests = kept;
@@ -574,10 +597,10 @@ class NativePullConduit implements ByteStreamConsumerType {
 
   errorAllReads(reason: unknown): void {
     const requests = this.#requests;
-    this.#requests = [];
+    this.#requests = new RingBuffer();
     this.#byobRequestCache = null;
     for (let i = 0; i < requests.length; i++) {
-      const request = requests[i] as NativeRequest;
+      const request = requests.get(i) as NativeRequest;
       if (request.kind === 'default') {
         request.read.reject(reason);
       } else {
@@ -588,10 +611,10 @@ class NativePullConduit implements ByteStreamConsumerType {
 
   resolveAllReadsAsDone(): void {
     const requests = this.#requests;
-    this.#requests = [];
+    this.#requests = new RingBuffer();
     this.#byobRequestCache = null;
     for (let i = 0; i < requests.length; i++) {
-      const request = requests[i] as NativeRequest;
+      const request = requests.get(i) as NativeRequest;
       if (request.kind === 'default') {
         request.read.resolve({ done: true, value: undefined });
       } else {
@@ -605,7 +628,7 @@ class NativePullConduit implements ByteStreamConsumerType {
   }
 
   fulfillFirstPendingRead(value: Uint8Array): void {
-    const pending = ArrayPrototypeShift(this.#requests) as NativeDefaultRequest;
+    const pending = this.#requests.shift() as NativeDefaultRequest;
     pending.read.resolve({ value, done: false });
   }
 
@@ -644,7 +667,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       });
       return desc.promise;
     }
-    ArrayPrototypePush(this.#requests, {
+    this.#requests.push({
       kind: 'byob',
       desc,
     } satisfies NativeByobRequestEntry);
@@ -654,25 +677,25 @@ class NativePullConduit implements ByteStreamConsumerType {
   get hasPendingPullInto(): boolean {
     const requests = this.#requests;
     for (let i = 0; i < requests.length; i++) {
-      if ((requests[i] as NativeRequest).kind === 'byob') return true;
+      if ((requests.get(i) as NativeRequest).kind === 'byob') return true;
     }
     return false;
   }
 
   get hasPartiallyFulfilledRead(): boolean {
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     return (
       head !== undefined && head.kind === 'byob' && head.desc.bytesFilled > 0
     );
   }
 
   get headPullInto(): PullIntoDescriptor | undefined {
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     return head !== undefined && head.kind === 'byob' ? head.desc : undefined;
   }
 
   get pendingPullIntoView(): Uint8Array | undefined {
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     if (head === undefined || head.kind !== 'byob') return undefined;
     const desc = head.desc;
     return new Uint8Array(
@@ -683,7 +706,7 @@ class NativePullConduit implements ByteStreamConsumerType {
   }
 
   respondBYOB(bytesWritten: number): void {
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     if (head === undefined || head.kind !== 'byob') {
       throw new TypeError('No pending BYOB read to respond to');
     }
@@ -693,10 +716,6 @@ class NativePullConduit implements ByteStreamConsumerType {
   commitPullIntosOnClose(): void {
     // The fused close-commit happens in closeFromSource(); once the
     // conduit has left the active state there is nothing left to commit.
-  }
-
-  drainNoneDescriptors(): void {
-    // Native conduit doesn't use releaseLock pull-into descriptors.
   }
 
   shiftAutoAllocateDescriptor(): PullIntoDescriptor | undefined {
@@ -817,7 +836,7 @@ class NativePullConduit implements ByteStreamConsumerType {
   // --- The source-facing operations (via the controller façade) -------------
 
   isHeadDesc(desc: PullIntoDescriptor): boolean {
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     return (
       this.#status === 'active' &&
       head !== undefined &&
@@ -827,7 +846,7 @@ class NativePullConduit implements ByteStreamConsumerType {
   }
 
   getByobRequest(): NativeReadableStreamBYOBRequest | null {
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     if (
       this.#status !== 'active' ||
       head === undefined ||
@@ -866,7 +885,7 @@ class NativePullConduit implements ByteStreamConsumerType {
         'the native source must deliver at most once per pull invocation'
       );
     }
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     if (head === undefined) {
       // REFUSAL BACKSTOP: the demand was withdrawn (reader released /
       // stream cancelled) and the pull's signal was aborted. A
@@ -906,7 +925,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       }
       // EXPECTED-LENGTH CONTRACT: overflow check before commit.
       this.#accountDelivery(TypedArrayPrototypeGetByteLength(view) as number);
-      ArrayPrototypeSplice(this.#requests, 0, 1);
+      this.#requests.shift();
       this.#deliveredThisPull = true;
       head.read.resolve({ done: false, value: view });
       return;
@@ -928,7 +947,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       );
     }
     if (!this.isHeadDesc(desc)) {
-      if (this.#requests[0] === undefined) {
+      if (this.#requests.length === 0) {
         // REFUSAL BACKSTOP: same as the enqueue case — the pull was
         // aborted, the source should have checked signal.aborted.
         throw new TypeError(
@@ -955,8 +974,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     }
     if (filled % desc.elementSize !== 0) {
       // Every respond commits (see below), so every respond must account
-      // a whole number of elements — there is no queue to carry a
-      // remainder.
+      // a whole number of elements; the source carries any remainder.
       throw new TypeError(
         'native sources must respond in whole-element multiples of the view'
       );
@@ -966,7 +984,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     desc.bytesFilled = filled;
     this.#byobRequestCache = null;
     this.#deliveredThisPull = true;
-    ArrayPrototypeSplice(this.#requests, 0, 1);
+    this.#requests.shift();
     const value = new desc.viewCtor(
       desc.buffer,
       desc.byteOffset,
@@ -1038,10 +1056,10 @@ class NativePullConduit implements ByteStreamConsumerType {
   // view). Shared by the close paths.
   #settleRemainingAsEof(): void {
     const requests = this.#requests;
-    this.#requests = [];
+    this.#requests = new RingBuffer();
     this.#byobRequestCache = null;
     for (let i = 0; i < requests.length; i++) {
-      const request = requests[i] as NativeRequest;
+      const request = requests.get(i) as NativeRequest;
       if (request.kind === 'default') {
         request.read.resolve({ done: true, value: undefined });
       } else {
@@ -1080,7 +1098,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     // cannot persist to close(). Retained should a future revision
     // reintroduce partial responds; the shape mirrors the under-delivery
     // tail (partial done: false, then #settleRemainingAsEof).
-    const head = this.#requests[0];
+    const head = this.#requests.peek();
     if (
       head !== undefined &&
       head.kind === 'byob' &&
@@ -1099,7 +1117,7 @@ class NativePullConduit implements ByteStreamConsumerType {
         this.#hooks.errorStream(error);
         return;
       }
-      ArrayPrototypeSplice(this.#requests, 0, 1);
+      this.#requests.shift();
       desc.resolve({
         done: false,
         value: new desc.viewCtor(
@@ -1208,9 +1226,22 @@ class NativePullConduit implements ByteStreamConsumerType {
 // ---------------------------------------------------------------------------
 // Construction glue
 
+// Whether the source declares `key` itself or on its own prototype. The
+// C++ source's members live on its prototype, so a plain read of a member
+// it lacks would reach Object.prototype.
+function declaresMember(source: object, key: string): boolean {
+  if (ObjectGetOwnPropertyDescriptor(source, key) !== undefined) return true;
+  const proto = ObjectGetPrototypeOf(source) as object | null;
+  return (
+    proto !== null &&
+    proto !== ObjectPrototype &&
+    ObjectGetOwnPropertyDescriptor(proto, key) !== undefined
+  );
+}
+
 // Extraction follows the queued controllers' conventions: properties are
-// read ONCE, alphabetically, validated, and invoked thereafter only via
-// captured uncurryThis wrappers with the source as `this` (spec
+// read ONCE, validated, and invoked thereafter only via captured
+// uncurryThis wrappers with the source as `this` (spec
 // CreateAlgorithmFromUnderlyingMethod / PromiseCall). `start` is
 // deliberately NOT read: native sources have no start algorithm (assumed
 // no-op per the contract; its presence is simply ignored).
@@ -1221,34 +1252,29 @@ function createNativeReadableStreamParts(
   controller: NativeReadableStreamController;
   conduit: NativePullConduit;
 } {
-  const {
-    autoAllocateChunkSize,
-    cancel: cancelFn,
-    expectedLength: rawExpectedLength,
-    pull: pullFn,
-    tee: teeFn,
-    type,
-  } = source as {
-    autoAllocateChunkSize?: unknown;
-    cancel?: unknown;
-    expectedLength?: unknown;
-    pull?: unknown;
-    tee?: unknown;
-    type?: unknown;
-  };
-
   // Native sources must not look like queued sources: the reader layer's
   // autoAllocate synthesis is queued-only and relies on this prohibition,
   // and a declared type would suggest the object was built for the queued
-  // byte path.
-  if (autoAllocateChunkSize !== undefined) {
+  // byte path. Checked as declarations, since the C++ source has neither.
+  if (declaresMember(source, 'autoAllocateChunkSize')) {
     throw new TypeError(
       'Native stream sources must not declare autoAllocateChunkSize'
     );
   }
-  if (type !== undefined) {
+  if (declaresMember(source, 'type')) {
     throw new TypeError('Native stream sources must not declare type');
   }
+  const {
+    cancel: cancelFn,
+    expectedLength: rawExpectedLength,
+    pull: pullFn,
+    tee: teeFn,
+  } = source as {
+    cancel?: unknown;
+    expectedLength?: unknown;
+    pull?: unknown;
+    tee?: unknown;
+  };
   if (cancelFn !== undefined && typeof cancelFn !== 'function') {
     throw new TypeError('underlyingSource.cancel must be a function');
   }
@@ -1325,6 +1351,15 @@ function nativeControllerCancelSteps(
   return getControllerConduit(controller).cancelSource(reason);
 }
 
+// The controller's error() for internal callers (the prototype method is
+// user-patchable).
+function nativeControllerError(
+  controller: NativeReadableStreamController,
+  reason: unknown
+): void {
+  getControllerConduit(controller).errorFromSource(reason);
+}
+
 function nativeControllerMaybeCloseStream(
   _controller: NativeReadableStreamController
 ): void {
@@ -1374,6 +1409,7 @@ const nativeStreamInternals = {
   createNativeReadableStreamParts,
   nativeControllerPullIfNeeded,
   nativeControllerCancelSteps,
+  nativeControllerError,
   nativeControllerMaybeCloseStream,
   nativeControllerOnReaderRelease,
   nativeControllerTeeSource,
