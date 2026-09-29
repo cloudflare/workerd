@@ -159,6 +159,10 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // more flags.)
   v8::V8::SetFlagsFromString("--noincremental-marking");
 
+  // Text modules are not yet supported by either module registry. Keep V8 from accepting text
+  // imports until workerd can gate their behavior with a compatibility flag.
+  v8::V8::SetFlagsFromString("--nojs-import-text");
+
   // Enable source phase imports for WebAssembly modules
   v8::V8::SetFlagsFromString("--js-source-phase-imports");
 

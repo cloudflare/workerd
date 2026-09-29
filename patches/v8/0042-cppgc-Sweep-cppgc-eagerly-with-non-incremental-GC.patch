@@ -10,10 +10,10 @@ the setting and does cppgc sweeping and calling of
 cppgc finalizers in the atomic GC pause.
 
 diff --git a/src/heap/cppgc-js/cpp-heap.cc b/src/heap/cppgc-js/cpp-heap.cc
-index 6d0a7b913899f0c1063d89eebda8f9cb9e4c43ba..4bd9a5eef49802121bbb40576f5568db38bb247d 100644
+index 120bcce5a11b636bba9559eb5a79b6b74c176145..676d3667c81f09c3b92fdabda705fd72b714d0f9 100644
 --- a/src/heap/cppgc-js/cpp-heap.cc
 +++ b/src/heap/cppgc-js/cpp-heap.cc
-@@ -761,6 +761,19 @@ CppHeap::SweepingType CppHeap::SelectSweepingType() const {
+@@ -760,6 +760,19 @@ CppHeap::SweepingType CppHeap::SelectSweepingType() const {
  }
  
  void CppHeap::UpdateGCCapabilitiesFromFlags() {
@@ -33,7 +33,7 @@ index 6d0a7b913899f0c1063d89eebda8f9cb9e4c43ba..4bd9a5eef49802121bbb40576f5568db
    CHECK_IMPLIES(v8_flags.cppheap_concurrent_marking,
                  v8_flags.cppheap_incremental_marking);
    if (v8_flags.cppheap_concurrent_marking) {
-@@ -773,9 +786,13 @@ void CppHeap::UpdateGCCapabilitiesFromFlags() {
+@@ -772,9 +785,13 @@ void CppHeap::UpdateGCCapabilitiesFromFlags() {
      marking_support_ = MarkingType::kAtomic;
    }
  
