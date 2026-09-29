@@ -745,10 +745,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
-  // Received runAlarm (called from C++, not JS).
+  // Received runAlarm (called from C++, not JS). `incomingRequest` is the alarm's own incoming
+  // request, which must outlive the returned promise.
   kj::Promise<WorkerInterface::AlarmResult> runAlarm(kj::Date scheduledTime,
       kj::Duration timeout,
       uint32_t retryCount,
+      IoContext_IncomingRequest& incomingRequest,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
