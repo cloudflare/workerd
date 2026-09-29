@@ -6,16 +6,12 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { inspect } from 'util';
 import { mock } from 'node:test';
 
-// Returns a probe function that is bound to the calling request's IoContext: invoking it
-// succeeds in that context and throws "Cannot perform I/O on behalf of a different request"
-// from any other. Several tests below use this to prove which IoContext a cross-request
-// promise continuation runs in. An accepted WebSocket has the property we need because its
-// native state is owned by the request that created it; its peer is never accepted, so sent
-// probe messages just buffer.
+// Reading readyState checks the WebSocket's request-owned native state without
+// starting read loops or queuing writes. The probe throws when called from a
+// different IoContext.
 function newIoContextProbe() {
   const pair = new WebSocketPair();
-  pair[0].accept();
-  return () => pair[0].send('probe');
+  return () => strictEqual(pair[0].readyState, WebSocket.OPEN);
 }
 
 export const crossContextResolveWorks = {
