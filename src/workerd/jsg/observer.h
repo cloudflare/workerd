@@ -169,8 +169,8 @@ struct IsolateObserver: public CompilationObserver,
   virtual ~IsolateObserver() noexcept(false) {}
 
   // Called when eval(), new Function(), or similar dynamic code generation
-  // is performed. Note that the source here may not be a string if isCodeLike
-  // is YES.
+  // is performed. Note that the source here may not be a string: V8 also reports
+  // each object argument to new Function() before converting it to a string.
   virtual void onDynamicEval(
       v8::Local<v8::Context> context, v8::Local<v8::Value> source, IsCodeLike isCodeLike) {
     // Default is to do nothing.

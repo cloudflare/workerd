@@ -9,10 +9,10 @@ without the sandbox, so compile the indirect-pointer handling only when the
 field is present.
 
 diff --git a/src/compiler/backend/x64/code-generator-x64.cc b/src/compiler/backend/x64/code-generator-x64.cc
-index b0be9bc5878966c027ee1a926f23a7849ffc4cad..bba2bb16e2604a49d17a05b26e84824fbc24e50c 100644
+index 42ae89aeba43c54b9de8dd3da0c2faf7f76374cc..440f15e0146cd41248b7245ec7a3dc975128ecc4 100644
 --- a/src/compiler/backend/x64/code-generator-x64.cc
 +++ b/src/compiler/backend/x64/code-generator-x64.cc
-@@ -815,6 +815,7 @@ Register GetTSANValueRegister(MacroAssembler* masm, Register value,
+@@ -813,6 +813,7 @@ Register GetTSANValueRegister(MacroAssembler* masm, Register value,
      masm->movq(value_reg, value);
      masm->EncodeSandboxedPointer(value_reg);
      return value_reg;
@@ -20,7 +20,7 @@ index b0be9bc5878966c027ee1a926f23a7849ffc4cad..bba2bb16e2604a49d17a05b26e84824f
    } else if (rep == MachineRepresentation::kIndirectPointer) {
      // Indirect pointer fields contain an index to a pointer table entry, which
      // is obtained from the referenced object.
-@@ -823,6 +824,7 @@ Register GetTSANValueRegister(MacroAssembler* masm, Register value,
+@@ -821,6 +822,7 @@ Register GetTSANValueRegister(MacroAssembler* masm, Register value,
                 FieldOperand(value, offsetof(ExposedTrustedObject,
                                              self_indirect_pointer_)));
      return value_reg;
@@ -28,7 +28,7 @@ index b0be9bc5878966c027ee1a926f23a7849ffc4cad..bba2bb16e2604a49d17a05b26e84824f
    }
    return value;
  }
-@@ -841,12 +843,14 @@ Register GetTSANValueRegister<std::memory_order_relaxed>(
+@@ -839,12 +841,14 @@ Register GetTSANValueRegister<std::memory_order_relaxed>(
    if (rep == MachineRepresentation::kSandboxedPointer) {
      // SandboxedPointers need to be encoded.
      masm->EncodeSandboxedPointer(value_reg);
