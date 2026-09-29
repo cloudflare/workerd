@@ -1117,6 +1117,44 @@ RelayEnd Socket::takeRelayEnd(jsg::Lock& js) {
       // The upgrade is verified against the host this socket connected to, just as its own
       // startTls() would be. The far side of the other socket names nothing here: it did not
       // open this connection, so it has no say in what is on the end of it.
+      //
+      // FIXME: Which name a forwarded upgrade is verified against is a security policy, and only
+      // part of it is in place. What holds today:
+      //
+      //   * The request carries no hostname. InboundTlsUpgrade::whenRequested() resolves with
+      //     nothing, and TlsRendezvous::Claim drops the name that the requester's startTls()
+      //     passes, so a name the requester chose never reaches the starter below.
+      //   * The starter below is given `domain`, the host this socket connected to, so in workerd
+      //     the certificate is checked against the host the proxy dialled.
+      //
+      // What is missing:
+      //
+      //   * The policy is not recorded as a decision, and has not been agreed with the owners of
+      //     the transports involved and of OER. It should say that verification is against the
+      //     host the proxy dialled, never against the host the requester believes it is talking
+      //     to, and that the requester cannot name one. It should also say that the legs between
+      //     the requester and the socket upgraded here stay plaintext, so the requester's upgrade
+      //     protects only the hop beyond that socket.
+      //   * A name the requester does give is dropped silently, rather than refused. Socket's
+      //     startTls() refuses expectedServerHostname only while the
+      //     STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME autogate is on, and otherwise passes it to its
+      //     starter. An ingress can pass any name to ByteStream.startTls over http-over-capnp.
+      //     Either way, the requester is not told that the name it asked to be verified was not
+      //     the one used. Whether a forwarded request that names a host should fail instead is
+      //     undecided.
+      //   * No test gives the requester a name of its own and checks that it is not the one
+      //     verified. The forwarding tests (startTlsForwardedByProxyTo in
+      //     connect-handler-starttls-test.js, and connect-starttls-proxy and
+      //     connect-proxy-to-forwarded-starttls in edgeworker) show verification against the host
+      //     the proxy dialled only because the requester connected to a different host. The
+      //     requester never names a host for verification itself, and the edgeworker ingress calls
+      //     its starter with an empty name.
+      //   * In edgeworker, the starter that ProxyToHostHttpClientAdapter fills in ignores the name
+      //     it is given, and the handshake-init capsule it sends OER carries none. The name OER
+      //     verifies is whatever OER takes from the CONNECT request. That OER verifies the
+      //     certificate at all, against the CONNECT authority rather than something else, and with
+      //     which trust store, is assumed rather than confirmed. The emulated OER in the edgeworker
+      //     tests works that way, which is all that the tests establish.
       end.startTls = [starter = kj::mv(connData->tlsStarter),
                          hostname = kj::str(d)]() mutable -> kj::Promise<void> {
         // As in startTls(), whichever layer handled the CONNECT leaves the slot empty when it has
