@@ -66,6 +66,7 @@ class VirtualFileSystem;
 
 class ThreadContext;
 class IoContext;
+class IoContext_IncomingRequest;
 class InputGate;
 class OutputGate;
 
@@ -764,6 +765,12 @@ class Worker::Lock {
   // error may be extracted and used.
   void logUncaughtException(UncaughtExceptionSource source, kj::Exception&& exception);
 
+  // Like above, but adds the exception to the trace of `incomingRequest` rather than of the
+  // IoContext's current incoming request.
+  void logUncaughtException(UncaughtExceptionSource source,
+      kj::Exception&& exception,
+      IoContext_IncomingRequest& incomingRequest);
+
   void reportPromiseRejectEvent(v8::PromiseRejectMessage& message);
 
   // Checks for problems with the registered event handlers (such as that there are none) and
@@ -806,6 +813,16 @@ class Worker::Lock {
  private:
   explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);
   struct Impl;
+
+  // Implements the logUncaughtException() overloads that take an exception value. The exception is
+  // added to the trace of `incomingRequest`, or of the current incoming request if none is given.
+  void logUncaughtExceptionImpl(UncaughtExceptionSource source,
+      const jsg::JsValue& exception,
+      const jsg::JsMessage& message,
+      kj::Maybe<IoContext_IncomingRequest&> incomingRequest);
+  void logUncaughtExceptionImpl(UncaughtExceptionSource source,
+      kj::Exception&& exception,
+      kj::Maybe<IoContext_IncomingRequest&> incomingRequest);
 
   Worker& worker;
   kj::Own<Impl> impl;

@@ -519,7 +519,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         bool dispatchRejected = isActorDispatchRejection(exception);
         if (!dispatchRejected) {
           context.logUncaughtExceptionAsync(
-              UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());
+              UncaughtExceptionSource::REQUEST_HANDLER, exception.clone(), *incomingRequest);
         }
 
         // Record a failure if cancellation interrupts either wait. Otherwise the WorkerInterface
@@ -749,6 +749,10 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
 
+  // `incomingRequest` is moved into the attachment below, which keeps it alive until the
+  // continuations the attachment wraps have run.
+  auto& incomingRequestRef = *incomingRequest;
+
   return wrapWithCanceler(
       context
           .run([this, &headers, &connection, &response, entrypointName = entrypointName.clone(),
@@ -768,11 +772,13 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       t.setReturn(context.now());
     }
   })
-          .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
+          .catch_([this, &context, &incomingRequestRef](
+                      kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Log JS exceptions to the JS console, if inspector is attached. This also has the effect of
     // logging internal errors to syslog.
     loggedExceptionEarlier = true;
-    context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());
+    context.logUncaughtExceptionAsync(
+        UncaughtExceptionSource::REQUEST_HANDLER, exception.clone(), incomingRequestRef);
 
     // Do not allow the exception to escape the isolate without waiting for the output gate to
     // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.
@@ -971,8 +977,8 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 
       KJ_TRY {
         auto result = co_await context.run(
-            [scheduledTime, retryCount, entrypointName = entrypointName.clone(),
-                versionInfo = kj::mv(versionInfo),
+            [scheduledTime, retryCount, &incomingRequest = *incomingRequest,
+                entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
                 props = kj::mv(props)](Worker::Lock& lock, IoContext& context) mutable {
           jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
           jsg::AsyncContextFrame::StorageScope userTraceScope =
@@ -987,7 +993,8 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 
           auto handler = lock.getExportedHandler(
               asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor());
-          return lock.getGlobalScope().runAlarm(scheduledTime, timeout, retryCount, lock, handler);
+          return lock.getGlobalScope().runAlarm(
+              scheduledTime, timeout, retryCount, incomingRequest, lock, handler);
         });
 
         // The alarm handler was successfully complete. We must guarantee this same alarm does not

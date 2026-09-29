@@ -243,6 +243,17 @@ tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanCon
   return KJ_ASSERT_NONNULL(invocationSpanContext);
 }
 
+tracing::InvocationSpanContext IoContext::IncomingRequest::getInvocationSpanContextForUserSpan(
+    SpanParent& userSpan) {
+  auto& base = getInvocationSpanContext();
+  tracing::SpanId sid = userSpan.getSpanId();
+  if (sid != tracing::SpanId::nullId) {
+    return tracing::InvocationSpanContext(
+        base.getTraceId(), base.getInvocationId(), sid, base.getTraceFlags());
+  }
+  return base.clone();
+}
+
 // A call to delivered() implies a promise to call drain() later (or one of the other methods
 // that sets waitedForWaitUntil). So, we can now safely add the request to
 // context->incomingRequests, which implies taking responsibility for draining on the way out.
@@ -480,7 +491,29 @@ void IoContext::logUncaughtException(
 
 void IoContext::logUncaughtExceptionAsync(
     UncaughtExceptionSource source, kj::Exception&& exception) {
-  if (getWorkerTracer() == kj::none && !worker->getIsolate().isInspectorEnabled()) {
+  logUncaughtExceptionAsyncImpl(source, kj::mv(exception), kj::none);
+}
+
+void IoContext::logUncaughtExceptionAsync(
+    UncaughtExceptionSource source, kj::Exception&& exception, IncomingRequest& incomingRequest) {
+  logUncaughtExceptionAsyncImpl(source, kj::mv(exception), incomingRequest);
+}
+
+void IoContext::logUncaughtExceptionAsyncImpl(UncaughtExceptionSource source,
+    kj::Exception&& exception,
+    kj::Maybe<IncomingRequest&> incomingRequest) {
+  kj::Maybe<BaseTracer&> tracer;
+  kj::Maybe<RequestObserver&> metrics;
+  KJ_IF_SOME(request, incomingRequest) {
+    KJ_DASSERT(&request.getContext() == this);
+    tracer = request.getWorkerTracer();
+    metrics = request.getMetrics();
+  } else if (!incomingRequests.empty()) {
+    tracer = getWorkerTracer();
+    metrics = getMetrics();
+  }
+
+  if (tracer == kj::none && !worker->getIsolate().isInspectorEnabled()) {
     // We don't need to take the isolate lock as neither inspecting nor tracing is enabled. We
     // do still want to syslog if relevant, but we can do that without a lock.
     if (!jsg::isTunneledException(exception.getDescription()) &&
@@ -498,13 +531,21 @@ void IoContext::logUncaughtExceptionAsync(
   struct RunnableImpl: public Runnable {
     UncaughtExceptionSource source;
     kj::Exception exception;
+    kj::Maybe<IncomingRequest&> incomingRequest;
 
-    RunnableImpl(UncaughtExceptionSource source, kj::Exception&& exception)
+    RunnableImpl(UncaughtExceptionSource source,
+        kj::Exception&& exception,
+        kj::Maybe<IncomingRequest&> incomingRequest)
         : source(source),
-          exception(kj::mv(exception)) {}
+          exception(kj::mv(exception)),
+          incomingRequest(incomingRequest) {}
     void run(Worker::Lock& lock) override {
       // TODO(soon): Add logUncaughtException to jsg::Lock.
-      lock.logUncaughtException(source, kj::mv(exception));
+      KJ_IF_SOME(request, incomingRequest) {
+        lock.logUncaughtException(source, kj::mv(exception), request);
+      } else {
+        lock.logUncaughtException(source, kj::mv(exception));
+      }
     }
   };
 
@@ -512,12 +553,10 @@ void IoContext::logUncaughtExceptionAsync(
   // e.g. if `runImpl` throws before calling logUncaughtException.
   // This is useful for tests (and in fact only affects tests, since it's logged at an INFO level).
   KJ_ON_SCOPE_FAILURE({ KJ_LOG(INFO, "uncaught exception", source, exception); });
-  RunnableImpl runnable(source, kj::mv(exception));
+  RunnableImpl runnable(source, kj::mv(exception), incomingRequest);
   // TODO(perf): Is it worth using an async lock here? The only case where it really matters is
   //   when a trace worker is active, but maybe they'll be more common in the future. To take an
   //   async lock here, we'll probably have to update all the call sites of this method... ick.
-  kj::Maybe<RequestObserver&> metrics;
-  if (!incomingRequests.empty()) metrics = getMetrics();
   runImpl(
       runnable, Worker::Lock::TakeSynchronously(metrics), kj::none, Runnable::Exceptional(true));
 }
