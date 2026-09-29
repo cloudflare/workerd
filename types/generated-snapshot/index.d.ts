@@ -3899,6 +3899,9 @@ interface SocketInfo {
   remoteAddress?: string;
   localAddress?: string;
 }
+interface ProxyToOptions {
+  signal?: AbortSignal;
+}
 /**
  * The **`EventSource`** interface is web content's interface to server-sent events.
  *

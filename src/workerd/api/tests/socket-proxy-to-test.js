@@ -4,6 +4,18 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { rejects } from 'assert';
 
+// Checks that proxyTo() refuses to start. It throws, or rejects when the
+// capture_async_api_throws compatibility flag turns its throws into rejections.
+async function refuses(start, expected) {
+  let relay;
+  try {
+    relay = start();
+  } catch (e) {
+    relay = Promise.reject(e);
+  }
+  await rejects(relay, expected);
+}
+
 // Sends back everything it receives, and ends its side once its peer has ended theirs.
 export class Echo extends WorkerEntrypoint {
   async connect(socket) {
@@ -45,12 +57,40 @@ export class Silent extends WorkerEntrypoint {
 // and back, and it is the Greeter ending its side that winds down both directions afterwards.
 export const proxyToResolvesOnceBothDirectionsFinish = {
   async test(ctrl, env) {
-    const echo = env.ECHO.connect('echo.example:1', { allowHalfOpen: true });
-    const greeter = env.GREETER.connect('greeter.example:1', {
-      allowHalfOpen: true,
+    const echo = env.ECHO.connect('echo.example:1');
+    const greeter = env.GREETER.connect('greeter.example:1');
+
+    await echo.proxyTo(greeter);
+    await echo.closed;
+    await greeter.closed;
+  },
+};
+
+// proxyTo() takes the sockets' connections over, so it refuses to start while JavaScript holds
+// either socket's streams, and leaves neither usable afterwards.
+export const proxyToTakesTheConnectionsOver = {
+  async test(ctrl, env) {
+    const echo = env.ECHO.connect('echo.example:1');
+    const greeter = env.GREETER.connect('greeter.example:1');
+
+    const reader = greeter.readable.getReader();
+    await refuses(() => echo.proxyTo(greeter), {
+      name: 'TypeError',
+      message:
+        'proxyTo() cannot take over a socket whose readable or writable is locked.',
+    });
+    reader.releaseLock();
+    await refuses(() => echo.proxyTo(echo), {
+      name: 'TypeError',
+      message: 'A socket cannot be proxied to itself.',
     });
 
     await echo.proxyTo(greeter);
+    await refuses(() => echo.proxyTo(greeter), {
+      name: 'TypeError',
+      message:
+        'The socket is closed, or its connection has already been taken over.',
+    });
   },
 };
 
@@ -58,15 +98,14 @@ export const proxyToResolvesOnceBothDirectionsFinish = {
 // own: nothing is ever sent between the Echo and the Silent peer, and neither ends its side.
 export const proxyToRejectsWhenTheRelayFails = {
   async test(ctrl, env) {
-    const echo = env.ECHO.connect('echo.example:1', { allowHalfOpen: true });
-    const silent = env.SILENT.connect('silent.example:1', {
-      allowHalfOpen: true,
-    });
+    const echo = env.ECHO.connect('echo.example:1');
+    const silent = env.SILENT.connect('silent.example:1');
     const controller = new AbortController();
 
     const relay = echo.proxyTo(silent, { signal: controller.signal });
     controller.abort(new Error('relay aborted'));
 
     await rejects(relay, { message: 'relay aborted' });
+    await rejects(echo.closed, { message: 'relay aborted' });
   },
 };

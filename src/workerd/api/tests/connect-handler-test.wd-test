@@ -33,6 +33,9 @@ const unitTests :Workerd.Config = (
           (name = "STARTTLS_TARGET", service = (
             name = "connect-handler-test-starttls-endpoint",
             entrypoint = "StartTlsEndpoint")),
+          (name = "STARTTLS_PROXY", service = (
+            name = "connect-handler-test-starttls-endpoint",
+            entrypoint = "StartTlsProxy")),
         ],
       )
     ),
@@ -84,6 +87,15 @@ const unitTests :Workerd.Config = (
         ),
       ),
       tlsMode = startTls,
-    ), service = "connect-handler-starttls-test")
+    ), service = "connect-handler-starttls-test"),
+    (name = "tcp", address = "*:8085", tcp = (
+      tlsOptions = (
+        keypair = (
+          privateKey = embed "connect-handler-server.key",
+          certificateChain = embed "connect-handler-server.pem",
+        ),
+      ),
+      tlsMode = startTls,
+    ), service = (name = "connect-handler-starttls-test", entrypoint = "StartTlsServer"))
   ]
 );
