@@ -78,7 +78,7 @@ class UpgradeForward {
   kj::Promise<void> run();
 
   // Answers the request with `failure` if it has been made and not yet answered. For when the
-  // relay fails while the upgrade is under way: the requester would otherwise hear only that the
+  // relay ends while the upgrade is under way: the requester would otherwise hear only that the
   // relay went away, not why.
   void abandon(const kj::Exception& failure) {
     if (awaitingAnswer) answer(failure.clone());
@@ -149,6 +149,13 @@ kj::Promise<void> relayStreams(RelayEnd a, RelayEnd b) {
       forward->abandon(e);
     }
     kj::throwFatalException(kj::mv(e));
+  }
+
+  // Both directions can end while an upgrade is still under way, if both far sides end theirs.
+  auto ended = KJ_EXCEPTION(
+      DISCONNECTED, "jsg.Error: The proxied connection ended before the upgrade completed.");
+  for (auto& forward: forwards) {
+    forward->abandon(ended);
   }
 }
 
