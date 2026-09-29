@@ -137,13 +137,12 @@ export const asyncIterWorks = {
 
 export const cyclicAwaitsWorks = {
   async test(_, env) {
-    // We're going to send two simultaneous requests to the same endpoint.
-    const results = await Promise.allSettled([
+    globalThis.cyclicHelperCompleted = false;
+    await rejects(
       env.subrequest.fetch('http://example.org/cyclic'),
-      env.subrequest.fetch('http://example.org/cyclic'),
-    ]);
-    strictEqual(results[0].status, 'rejected');
-    strictEqual(results[1].status, 'fulfilled');
+      isHungRequest
+    );
+    strictEqual(globalThis.cyclicHelperCompleted, true);
   },
 };
 
@@ -451,18 +450,22 @@ async function asyncIterator(req, env, ctx) {
 
 async function cyclicPromise(req, env, ctx) {
   if (globalThis.cyclic === undefined) {
-    setupWaiter(ctx);
     const { promise, resolve } = Promise.withResolvers();
     globalThis.cyclic = { promise, resolve };
     const probe = newIoContextProbe();
     probe();
+    // Pending subrequest I/O keeps this context alive until the cycle is installed.
+    const response = await env.subrequest.fetch('http://example.org/cyclic');
+    strictEqual(response.status, 200);
+    strictEqual(await response.text(), 'ok');
+    globalThis.cyclicHelperCompleted = true;
     await promise;
     throw new Error('should never get here');
   }
 
   async function foo() {
     await globalThis.cyclic.promise;
-    throw new Error('shnould never get here');
+    throw new Error('should never get here');
   }
 
   // The first request will hang because the promise is resolved
