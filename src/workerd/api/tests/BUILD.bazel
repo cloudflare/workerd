@@ -39,6 +39,11 @@ wd_test(
 )
 
 wd_test(
+    src = "retryable-test.wd-test",
+    data = ["retryable-test.js"],
+)
+
+wd_test(
     src = "urlpattern-regex-search-oob-test.wd-test",
     args = ["--experimental"],
     data = ["urlpattern-regex-search-oob-test.js"],
