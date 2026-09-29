@@ -2260,9 +2260,17 @@ void Fetcher::registerOverride(jsg::Lock& js, IsHyperdrive isHyperdrive, uint16_
     return;
   }
   KJ_DASSERT(host == kj::none);
-  kj::FixedArray<kj::byte, 16> randomBytes;
-  workerd::getEntropy(randomBytes);
-  host = kj::str(kj::encodeHex(randomBytes), isHyperdrive ? ".hyperdrive.local" : ".workers.alt");
+  if (isHyperdrive) {
+    kj::FixedArray<kj::byte, 48> randomBytes;
+    workerd::getEntropy(randomBytes);
+    auto bytes = randomBytes.asPtr();
+    host = kj::str(kj::encodeHex(bytes.first(16)), ".", kj::encodeHex(bytes.slice(16, 32)), ".",
+        kj::encodeHex(bytes.slice(32, 48)), ".hyperdrive.local");
+  } else {
+    kj::FixedArray<kj::byte, 16> randomBytes;
+    workerd::getEntropy(randomBytes);
+    host = kj::str(kj::encodeHex(randomBytes), ".workers.alt");
+  }
 
   // Register an entry in the global scope connectOverrides HashMap so that cloudflare:sockets's
   // connect() will route connections to this magic hostname through the fetcher.
