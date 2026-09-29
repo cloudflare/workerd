@@ -537,6 +537,17 @@ wd_cc_library(
     ],
 )
 
+wd_cc_library(
+    name = "socket-relay",
+    srcs = ["socket-relay.c++"],
+    hdrs = ["socket-relay.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async-io",
+    ],
+)
+
 wd_capnp_library(src = "r2-api.capnp")
 
 wd_capnp_library(src = "analytics-engine.capnp")
@@ -636,6 +647,13 @@ kj_test(
     src = "deferred-proxy-test.c++",
     deps = [
         ":deferred-proxy",
+    ],
+)
+
+kj_test(
+    src = "socket-relay-test.c++",
+    deps = [
+        ":socket-relay",
     ],
 )
 
