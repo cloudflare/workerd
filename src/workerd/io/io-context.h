@@ -421,14 +421,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       const jsg::JsMessage& message = jsg::JsMessage());
 
   // Log an uncaught exception from an asynchronous context, i.e. when the IoContext is not
-  // "current". The exception is added to the trace of the current incoming request.
-  void logUncaughtExceptionAsync(UncaughtExceptionSource source, kj::Exception&& e);
-
-  // Like above, but adds the exception to the trace of `incomingRequest`. Use this when the
-  // exception is known to belong to a specific request, such as the failure of its event handler:
-  // in an actor, the current incoming request may be a newer, unrelated one.
-  void logUncaughtExceptionAsync(
-      UncaughtExceptionSource source, kj::Exception&& e, IncomingRequest& incomingRequest);
+  // "current". The exception is added to the trace of `incomingRequest`, or of the current incoming
+  // request if none is given. Pass `incomingRequest` when the exception is known to belong to a
+  // specific request, such as the failure of its event handler: in an actor, the current incoming
+  // request may be a newer, unrelated one.
+  void logUncaughtExceptionAsync(UncaughtExceptionSource source,
+      kj::Exception&& e,
+      kj::Maybe<IncomingRequest&> incomingRequest = kj::none);
 
   // Returns a promise that will reject with an exception if and when the request should be
   // aborted, e.g. because its CPU time expired. This should be joined with any promises for
@@ -1268,13 +1267,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   friend class IoPtr;
 
   void taskFailed(kj::Exception&& exception) override;
-
-  // Implements both logUncaughtExceptionAsync() overloads. `incomingRequest` is none to use the
-  // current incoming request.
-  void logUncaughtExceptionAsyncImpl(UncaughtExceptionSource source,
-      kj::Exception&& exception,
-      kj::Maybe<IncomingRequest&> incomingRequest);
-
   void requireCurrent();
   void checkFarGet(const DeleteQueue& expectedQueue, const std::type_info& type);
 

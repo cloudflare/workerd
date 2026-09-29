@@ -757,19 +757,19 @@ class Worker::Lock {
   // optimization. This value will be passed along to the trace handler, if there is one, rather
   // than querying the property from the exception itself. This is also useful in the case that
   // the exception itself is not the original and the stack is missing.
+  //
+  // The exception is added to the trace of `incomingRequest`, or of the IoContext's current
+  // incoming request if none is given.
   void logUncaughtException(UncaughtExceptionSource source,
       const jsg::JsValue& exception,
-      const jsg::JsMessage& message = jsg::JsMessage());
+      const jsg::JsMessage& message = jsg::JsMessage(),
+      kj::Maybe<IoContext_IncomingRequest&> incomingRequest = kj::none);
 
   // Version that takes a kj::Exception. If it has a serialized JS error attached as a detail, that
   // error may be extracted and used.
-  void logUncaughtException(UncaughtExceptionSource source, kj::Exception&& exception);
-
-  // Like above, but adds the exception to the trace of `incomingRequest` rather than of the
-  // IoContext's current incoming request.
   void logUncaughtException(UncaughtExceptionSource source,
       kj::Exception&& exception,
-      IoContext_IncomingRequest& incomingRequest);
+      kj::Maybe<IoContext_IncomingRequest&> incomingRequest = kj::none);
 
   void reportPromiseRejectEvent(v8::PromiseRejectMessage& message);
 
@@ -813,16 +813,6 @@ class Worker::Lock {
  private:
   explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);
   struct Impl;
-
-  // Implements the logUncaughtException() overloads that take an exception value. The exception is
-  // added to the trace of `incomingRequest`, or of the current incoming request if none is given.
-  void logUncaughtExceptionImpl(UncaughtExceptionSource source,
-      const jsg::JsValue& exception,
-      const jsg::JsMessage& message,
-      kj::Maybe<IoContext_IncomingRequest&> incomingRequest);
-  void logUncaughtExceptionImpl(UncaughtExceptionSource source,
-      kj::Exception&& exception,
-      kj::Maybe<IoContext_IncomingRequest&> incomingRequest);
 
   Worker& worker;
   kj::Own<Impl> impl;
