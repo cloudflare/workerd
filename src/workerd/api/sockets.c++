@@ -503,7 +503,12 @@ kj::Promise<void> pumpDatagramsToRpc(
 // Joins up the two ends of a startTls() upgrade on a tunnel where neither end can perform a TLS
 // handshake because the tunnel is one of our internal transports. See
 // setupInternalTlsRendezvous(), which is the only thing that creates one of these.
-class TlsRendezvous: public kj::Refcounted {
+//
+// The handler's side can be settled in either of two ways: by the handler calling startTls()
+// itself, or, when the handler relays its socket with proxyTo(), by the relay answering the peer's
+// request with the outcome of an upgrade it made further along. The InboundTlsUpgrade interface is
+// the second of these, seen from the handler's side.
+class TlsRendezvous: public kj::Refcounted, public InboundTlsUpgrade {
  public:
   enum class Side {
     // The socket held by the worker that opened the tunnel by calling connect().
@@ -554,6 +559,19 @@ class TlsRendezvous: public kj::Refcounted {
   void abandon(Side side) {
     halfFor(side).arrived->reject(KJ_EXCEPTION(
         DISCONNECTED, "jsg.Error: The peer disconnected before agreeing to start TLS."));
+  }
+
+  kj::Promise<void> whenRequested() override {
+    return peer.arrivedPromise.addBranch();
+  }
+
+  // Settles the handler's side on its behalf, which is what the peer's startTls() is waiting for.
+  void answer(kj::Maybe<kj::Exception> failure) override {
+    KJ_IF_SOME(e, failure) {
+      handler.arrived->reject(kj::mv(e));
+    } else {
+      handler.arrived->fulfill();
+    }
   }
 
  private:
@@ -801,18 +819,23 @@ tracing::EventInfo UdpConnectCustomEvent::getEventInfo() const {
   return tracing::ConnectEventInfo();
 }
 
-kj::Own<kj::TlsStarterCallback> setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter) {
+InternalTlsRendezvous setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter) {
   auto rendezvous = kj::refcounted<TlsRendezvous>();
 
   kj::Function<kj::Promise<void>(kj::StringPtr)> peerClaim =
       TlsRendezvous::Claim(kj::addRef(*rendezvous), TlsRendezvous::Side::PEER);
   peerStarter = kj::mv(peerClaim);
 
+  kj::Own<InboundTlsUpgrade> peerRequests = kj::addRef(*rendezvous);
+
   kj::Function<kj::Promise<void>(kj::StringPtr)> handlerClaim =
       TlsRendezvous::Claim(kj::mv(rendezvous), TlsRendezvous::Side::HANDLER);
   auto handlerStarter = kj::heap<kj::TlsStarterCallback>();
   *handlerStarter = kj::mv(handlerClaim);
-  return handlerStarter;
+  return InternalTlsRendezvous{
+    .handlerStarter = kj::mv(handlerStarter),
+    .peerRequests = kj::mv(peerRequests),
+  };
 }
 
 jsg::Ref<Socket> connectImpl(jsg::Lock& js,
@@ -983,22 +1006,107 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
 }
 
 jsg::Promise<void> Socket::proxyTo(
-    jsg::Lock& js, jsg::Ref<Socket> sock, jsg::Optional<PipeToOptions> options) {
-  jsg::Optional<PipeToOptions> optionsCopy = kj::none;
+    jsg::Lock& js, jsg::Ref<Socket> other, jsg::Optional<ProxyToOptions> options) {
+  JSG_REQUIRE(other.get() != this, TypeError, "A socket cannot be proxied to itself.");
+  // Check both before waiting on either, so that a socket that cannot be relayed is reported
+  // before anything has been taken from the other.
+  requireRelayable(js);
+  other->requireRelayable(js);
+
+  kj::Maybe<jsg::Ref<AbortSignal>> signal;
   KJ_IF_SOME(o, options) {
-    optionsCopy = PipeToOptions{
-      .preventAbort = o.preventAbort,
-      .preventCancel = o.preventCancel,
-      .preventClose = o.preventClose,
-      .signal = kj::none,
-    };
-    KJ_IF_SOME(s, o.signal) {
-      KJ_ASSERT_NONNULL(optionsCopy).signal = s.addRef();
+    signal = kj::mv(o.signal);
+  }
+
+  auto ready = whenBothResolved(js, whenReadyToRelay(js), other->whenReadyToRelay(js));
+  return ready.then(js,
+      JSG_VISITABLE_LAMBDA((self = JSG_THIS, other = kj::mv(other), signal = kj::mv(signal)),
+          (self, other, signal),
+          (jsg::Lock & js) mutable { return self->runRelay(js, kj::mv(other), kj::mv(signal)); }));
+}
+
+jsg::Promise<void> Socket::runRelay(
+    jsg::Lock& js, jsg::Ref<Socket> other, kj::Maybe<jsg::Ref<AbortSignal>> signal) {
+  // Either socket may have been locked or closed while we waited for them to be ready.
+  requireRelayable(js);
+  other->requireRelayable(js);
+  auto relay = relayStreams(takeRelayEnd(js), other->takeRelayEnd(js));
+
+  auto& context = IoContext::current();
+  return context.awaitIo(js, AbortSignal::maybeCancelWrap(js, signal, kj::mv(relay)))
+      .then(js,
+          JSG_VISITABLE_LAMBDA((self = JSG_THIS, other = other.addRef()), (self, other),
+              (jsg::Lock& js) {
+                self->closedResolver.resolve(js);
+                other->closedResolver.resolve(js);
+                return js.resolvedPromise();
+              }),
+          JSG_VISITABLE_LAMBDA((self = JSG_THIS, other = other.addRef()), (self, other),
+              (jsg::Lock& js, jsg::Value error) {
+                self->errorHandler(js, error.addRef(js));
+                other->errorHandler(js, error.addRef(js));
+                return js.rejectedPromise<void>(kj::mv(error));
+              }));
+}
+
+void Socket::requireRelayable(jsg::Lock& js) {
+  JSG_REQUIRE(protocol == SocketProtocol::TCP, TypeError,
+      "proxyTo() is not supported for datagram sockets.");
+  JSG_REQUIRE(connectionData != kj::none && !isClosing, TypeError,
+      "The socket is closed, or its connection has already been taken over.");
+  JSG_REQUIRE(!readable.isLocked(js) && !writable.isLocked(js), TypeError,
+      "proxyTo() cannot take over a socket whose readable or writable is locked.");
+}
+
+jsg::Promise<void> Socket::whenReadyToRelay(jsg::Lock& js) {
+  // Writes to the socket's writable wait for the connection to open, so a flush alone could
+  // resolve before it has.
+  return openedPromiseCopy.whenResolved(js).then(
+      js, JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self), (jsg::Lock& js) {
+        return self->writable.flush(js);
+      }));
+}
+
+RelayEnd Socket::takeRelayEnd(jsg::Lock& js) {
+  // As in takeConnectionStream(), a later close() must not touch the connection.
+  isClosing = true;
+  writable.detach(js);
+  readable.detach(js, IgnoreDisturbed::YES);
+
+  auto& connData = KJ_ASSERT_NONNULL(connectionData);
+  auto& stream = KJ_ASSERT_NONNULL(connData->connectionStream.tryGet<kj::Rc<kj::AsyncIoStream>>());
+  RelayEnd end{.stream = stream.addRef().toOwn()};
+
+  KJ_IF_SOME(upgrade, connData->inboundTlsUpgrade) {
+    // Answering the far side's upgrade requests is the relay's job now. This socket's own
+    // startTls() would have answered the same requests, so it goes unused, but it has to stay
+    // alive until the relay is done: dropping it reports that no upgrade is coming.
+    end.inboundUpgrade = kj::mv(upgrade).attach(kj::mv(connData->tlsStarter));
+  } else if (secureTransport == SecureTransportKind::STARTTLS) {
+    KJ_IF_SOME(d, domain) {
+      // The upgrade is verified against the host this socket connected to, just as its own
+      // startTls() would be. The far side of the other socket names nothing here: it did not
+      // open this connection, so it has no say in what is on the end of it.
+      end.startTls = [starter = kj::mv(connData->tlsStarter),
+                         hostname = kj::str(d)]() mutable -> kj::Promise<void> {
+        // As in startTls(), whichever layer handled the CONNECT leaves the slot empty when it has
+        // no way to perform a handshake.
+        KJ_IF_SOME(start, *starter) {
+          return start(hostname);
+        }
+        return KJ_EXCEPTION(FAILED,
+            "jsg.Error: The peer asked to start TLS, but the connection it is proxied to does "
+            "not support startTls().");
+      };
     }
   }
-  auto fromThem = sock->readable.pipeTo(js, writable, kj::mv(options).orDefault({}));
-  auto toThem = readable.pipeTo(js, sock->writable, kj::mv(optionsCopy).orDefault({}));
-  return whenBothResolved(js, kj::mv(fromThem), kj::mv(toThem));
+
+  connectionData = kj::none;
+  return end;
+}
+
+void Socket::setInboundTlsUpgrade(kj::Own<InboundTlsUpgrade> upgrade) {
+  KJ_ASSERT_NONNULL(connectionData)->inboundTlsUpgrade = kj::mv(upgrade);
 }
 
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
