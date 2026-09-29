@@ -2617,12 +2617,7 @@ void Worker::Lock::logUncaughtException(kj::StringPtr description) {
   KJ_LOG(INFO, "uncaught exception", description);
 }
 
-void Worker::Lock::logUncaughtException(
-    UncaughtExceptionSource source, const jsg::JsValue& exception, const jsg::JsMessage& message) {
-  logUncaughtExceptionImpl(source, exception, message, kj::none);
-}
-
-void Worker::Lock::logUncaughtExceptionImpl(UncaughtExceptionSource source,
+void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
     const jsg::JsValue& exception,
     const jsg::JsMessage& message,
     kj::Maybe<IoContext_IncomingRequest&> incomingRequest) {
@@ -2666,17 +2661,7 @@ void Worker::Lock::logUncaughtExceptionImpl(UncaughtExceptionSource source,
   }
 }
 
-void Worker::Lock::logUncaughtException(UncaughtExceptionSource source, kj::Exception&& exception) {
-  logUncaughtExceptionImpl(source, kj::mv(exception), kj::none);
-}
-
 void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
-    kj::Exception&& exception,
-    IoContext_IncomingRequest& incomingRequest) {
-  logUncaughtExceptionImpl(source, kj::mv(exception), incomingRequest);
-}
-
-void Worker::Lock::logUncaughtExceptionImpl(UncaughtExceptionSource source,
     kj::Exception&& exception,
     kj::Maybe<IoContext_IncomingRequest&> incomingRequest) {
   jsg::Lock& js = *this;
@@ -2685,7 +2670,7 @@ void Worker::Lock::logUncaughtExceptionImpl(UncaughtExceptionSource source,
         {
           .trusted = true,
         });
-    logUncaughtExceptionImpl(source, jsError.getHandle(js), jsg::JsMessage(), incomingRequest);
+    logUncaughtException(source, jsError.getHandle(js), jsg::JsMessage(), incomingRequest);
   } catch (const jsg::JsExceptionThrown&) {
     // An exception occurred while trying to convert the exception to a JS value.
     // With exceptionToJs, this should only happen if the isolate is terminating
@@ -2695,7 +2680,7 @@ void Worker::Lock::logUncaughtExceptionImpl(UncaughtExceptionSource source,
     // if it throws again, we'll give up and propagate that exception to the
     // caller.
     auto jsError = js.exceptionToJsValue(exception.clone(), {.ignoreDetail = true});
-    logUncaughtExceptionImpl(source, jsError.getHandle(js), jsg::JsMessage(), incomingRequest);
+    logUncaughtException(source, jsError.getHandle(js), jsg::JsMessage(), incomingRequest);
   }
 }
 

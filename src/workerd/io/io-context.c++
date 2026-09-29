@@ -489,17 +489,7 @@ void IoContext::logUncaughtException(
   KJ_REQUIRE_NONNULL(currentLock).logUncaughtException(source, exception, message);
 }
 
-void IoContext::logUncaughtExceptionAsync(
-    UncaughtExceptionSource source, kj::Exception&& exception) {
-  logUncaughtExceptionAsyncImpl(source, kj::mv(exception), kj::none);
-}
-
-void IoContext::logUncaughtExceptionAsync(
-    UncaughtExceptionSource source, kj::Exception&& exception, IncomingRequest& incomingRequest) {
-  logUncaughtExceptionAsyncImpl(source, kj::mv(exception), incomingRequest);
-}
-
-void IoContext::logUncaughtExceptionAsyncImpl(UncaughtExceptionSource source,
+void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
     kj::Exception&& exception,
     kj::Maybe<IncomingRequest&> incomingRequest) {
   kj::Maybe<BaseTracer&> tracer;
@@ -541,11 +531,7 @@ void IoContext::logUncaughtExceptionAsyncImpl(UncaughtExceptionSource source,
           incomingRequest(incomingRequest) {}
     void run(Worker::Lock& lock) override {
       // TODO(soon): Add logUncaughtException to jsg::Lock.
-      KJ_IF_SOME(request, incomingRequest) {
-        lock.logUncaughtException(source, kj::mv(exception), request);
-      } else {
-        lock.logUncaughtException(source, kj::mv(exception));
-      }
+      lock.logUncaughtException(source, kj::mv(exception), incomingRequest);
     }
   };
 
