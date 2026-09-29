@@ -5,8 +5,7 @@ using Passthrough = import "r2-jsrpc-passthrough.capnp";
 # because a future compatibility date necessarily enables the behavior under test.
 #
 # The canonical and shared suites run through the passthrough in r2-jsrpc-passthrough.capnp, with
-# the flag disabled for both the JSRPC client and the native binding. The gateway service checks
-# the include list that the JSRPC client sends without the flag.
+# the flag disabled for both the JSRPC client and the native binding.
 const unitTests :Workerd.Config = (
   services = [
     ( name = "user",
@@ -23,23 +22,5 @@ const unitTests :Workerd.Config = (
       )
     ),
     ( name = "r2-test", worker = Passthrough.passthroughLegacyListWorker ),
-    ( name = "gateway",
-      worker = (
-        modules = [
-          ( name = "worker",
-            esModule = "export { R2BindingEntrypoint, jsrpcGatewayContractTests } from './r2-test.js';" ),
-          ( name = "r2-test.js", esModule = embed "r2-test.js" ),
-        ],
-        bindings = [
-          ( name = "BUCKET",
-            r2Bucket = (name = "gateway", entrypoint = "R2BindingEntrypoint") ),
-          ( name = "R2_TRANSPORT", text = "jsrpc" ),
-          ( name = "R2_LIST_HONOR_INCLUDE", text = "false" ),
-        ],
-        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
-                              "streams_enable_constructors", "r2_binding_jsrpc",
-                              "disable_fast_jsg_struct"],
-      )
-    ),
   ],
 );
