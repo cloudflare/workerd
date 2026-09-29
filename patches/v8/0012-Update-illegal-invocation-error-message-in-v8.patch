@@ -23,7 +23,7 @@ index 4b47483f3998ada2320ed48f44a30b003ed97b6b..4591cbc5f6d721796efa19ecf02ebdc8
      "Immutable prototype object '%' cannot have their prototype set")          \
    T(ImportAttributesDuplicateKey, "Import attribute has duplicate key '%'")    \
 diff --git a/test/cctest/test-api.cc b/test/cctest/test-api.cc
-index 3518564c582d148387ac0bd7785915def22c5f22..8bf9c1800f771d4a98aee6f4878b348f84c1024b 100644
+index 2c5d1dceebb911a27e5f1585d0028afb537350c7..19ff04e632c27fb62c2b1d3a6d56e5bbd575e45d 100644
 --- a/test/cctest/test-api.cc
 +++ b/test/cctest/test-api.cc
 @@ -228,6 +228,17 @@ THREADED_TEST(IsolateOfContext) {
