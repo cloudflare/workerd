@@ -3,8 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 declare namespace internalJaeger {
+  interface InternalSpan {
+    setTags(tags: Record<string, string | number | boolean>): void;
+  }
+
   const traceId: number | null,
-    enterSpan: <T>(name: string, callback: () => T) => T;
+    enterSpan: <T>(name: string, callback: (span: InternalSpan) => T) => T;
 }
 
 export default internalJaeger;
