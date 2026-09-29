@@ -158,7 +158,7 @@ struct ThenCatchPair {
 };
 // FunctionCallback implementing a C++ .then() continuation on a JS promise.
 //
-// We expect the input is already an opaque-wrapped value, args.Data() is an opaque-wrapped C++
+// We expect the input is already an opaque-wrapped value, args.DataV2() is an opaque-wrapped C++
 // function to execute, and we want to produce an opaque-wrapped output or Promise.
 template <typename FuncPairType, bool isCatch, typename Input, typename Output>
 void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -170,7 +170,7 @@ void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
     // so it's likely to be caught in debug, and we'd like to avoid the extra overhead in releases.
     DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
 #endif
-    auto funcPair = unwrapOpaque<FuncPairType>(isolate, args.Data());
+    auto funcPair = unwrapOpaque<FuncPairType>(isolate, args.DataV2().As<v8::Value>());
 #ifdef KJ_DEBUG
     kj::AllowAsyncDestructorsScope allowAsyncDestructors;
 #endif
@@ -211,7 +211,7 @@ void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
 template <typename FuncPairType, bool isCatch>
 void identityPromiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
   auto isolate = args.GetIsolate();
-  dropOpaque<FuncPairType>(isolate, args.Data());
+  dropOpaque<FuncPairType>(isolate, args.DataV2().As<v8::Value>());
   if constexpr (isCatch) {
     isolate->ThrowException(args[0]);
   } else {

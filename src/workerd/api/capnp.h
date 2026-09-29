@@ -330,7 +330,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
 
   static void constructorCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     jsg::liftKj(args, [&]() {
-      auto data = args.Data();
+      auto data = args.DataV2().As<v8::Value>();
       KJ_ASSERT(data->IsExternal());
       void* schemaAsPtr = data.As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault);
       capnp::Schema schema;
@@ -363,7 +363,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
 
   static void methodCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     jsg::liftKj(args, [&]() {
-      auto data = args.Data();
+      auto data = args.DataV2().As<v8::Value>();
       KJ_ASSERT(data->IsExternal());
       auto& method = *reinterpret_cast<capnp::InterfaceSchema::Method*>(
           data.As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault));

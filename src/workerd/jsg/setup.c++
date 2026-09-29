@@ -686,26 +686,30 @@ v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
   //
   // V8 synthesizes the full source string before calling this callback (see
   // CreateDynamicFunction in v8/src/builtins/builtins-function.cc). When called with
-  // no arguments (argc == 0), isCodeLike is true and the source is the exact string
-  // below — which contains no user-provided code.
+  // no arguments (argc == 0), the source is the exact string below, which contains no
+  // user-provided code.
+  //
+  // We don't check isCodeLike here. Since V8 15.6, a call with no arguments passes
+  // isCodeLike = false, so isCodeLike no longer tells `new Function()` apart from
+  // `eval()` or from calls with string arguments.
   //
   // Security notes:
-  //   - isCodeLike is false on the eval() path, so this check cannot be reached via
-  //     eval(). An attacker cannot use eval("<evil> {\n\n}") to bypass this.
-  //   - isCodeLike is also false when any arguments are plain strings (not CodeLike
-  //     objects), so new Function('a', 'b', undefined) cannot reach this check either.
   //   - The exact string match ensures no user content (parameters or body) is present.
-  //   - We intentionally only match the no-parameter, no-body case. Calls like
-  //     new Function('a', 'b') are always blocked since the last argument becomes the
-  //     body via ToString(), producing a non-matching source string.
+  //     Whichever path produces this source, including eval() of it or
+  //     new Function(''), compiling it only creates an empty function.
+  //   - Calls like new Function('a', 'b') or new Function('a', 'b', undefined) are
+  //     always blocked, since the last argument becomes the body via ToString(),
+  //     producing a non-matching source string.
+  //   - Since V8 15.6, V8 also calls this callback with each object argument before
+  //     converting it to a string. Such a source is neither undefined nor a string, so
+  //     it falls through to the evalAllowed check below.
   //
   // NOTE: This pattern is tied to V8's CreateDynamicFunction format in
-  // builtins-function.cc:46-71 and must be reviewed during V8 updates. If the format
+  // builtins-function.cc and must be reviewed during V8 updates. If the format
   // changes, the setup-test and worker-test will fail, signaling that this constant
   // needs updating.
   static constexpr auto kEmptyFunctionSource = "(function anonymous(\n) {\n\n})"_kj;
-  if (isCodeLike && source->IsString() &&
-      kj::str(source.As<v8::String>()) == kEmptyFunctionSource) {
+  if (source->IsString() && kj::str(source.As<v8::String>()) == kEmptyFunctionSource) {
     return {.codegen_allowed = true, .modified_source = {}};
   }
 

@@ -12,10 +12,10 @@ include changes are needed.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index ace64692dcec743e96b8b6a797dddd671063a158..e958ea3b034395506f2c68974dadc65dd2fa49a0 100644
+index 74a610af2887d8527a20eb52ac11da3c2a2fd4e8..e050165da217db64b24febc589f2bef9686115f8 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4517,7 +4517,6 @@ filegroup(
+@@ -4522,7 +4522,6 @@ filegroup(
          # than a blanket third_party/**, which would also stage the
          # large gclient trees.
          "third_party/utf8-decoder/**/*.h",
@@ -23,7 +23,7 @@ index ace64692dcec743e96b8b6a797dddd671063a158..e958ea3b034395506f2c68974dadc65d
          "third_party/rapidhash-v8/**/*.h",
          "third_party/wasm-api/**/*.h",
          "third_party/siphash/**/*.h",
-@@ -4622,7 +4621,7 @@ metagen_instance_types(
+@@ -4627,7 +4626,7 @@ metagen_instance_types(
          ":define_flags",
          ":v8_libbase",
          ":lib_fp16",
@@ -32,7 +32,7 @@ index ace64692dcec743e96b8b6a797dddd671063a158..e958ea3b034395506f2c68974dadc65d
          "@abseil-cpp//absl/container:btree",
          "@abseil-cpp//absl/container:flat_hash_map",
          "@abseil-cpp//absl/container:flat_hash_set",
-@@ -4869,18 +4868,19 @@ cc_library(
+@@ -4874,18 +4873,19 @@ cc_library(
      ],
  )
  
@@ -64,7 +64,7 @@ index ace64692dcec743e96b8b6a797dddd671063a158..e958ea3b034395506f2c68974dadc65d
  
  v8_library(
      name = "v8_libshared",
-@@ -4927,15 +4927,15 @@ v8_library(
+@@ -4932,15 +4932,15 @@ v8_library(
      }),
      deps = [
          ":lib_dragonbox",

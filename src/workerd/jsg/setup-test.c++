@@ -166,6 +166,14 @@ KJ_TEST("eval() is blocked") {
   // synthesized source matches the known empty-body, no-parameter pattern).
   e.expectEval("typeof new Function()", "string", "function");
 
+  // An empty string body synthesizes the same source, so it is allowed too.
+  e.expectEval("typeof new Function('')", "string", "function");
+
+  // An object argument is checked before it is converted to a string, so it is blocked
+  // even if it would convert to an empty body.
+  e.expectEval("new Function({ toString() { return ''; } })", "throws",
+      "EvalError: Code generation from strings disallowed for this context");
+
   // new Function() with params and an undefined body is blocked (the body becomes
   // the string "undefined" via ToString, producing a non-empty source).
   e.expectEval("new Function('a', 'b', undefined)", "throws",
