@@ -86,6 +86,11 @@ class EntrypointsModule: public jsg::Object {
   // expose an importable `cache` proxy.
   jsg::Optional<jsg::Ref<CacheContext>> getCtxCache(jsg::Lock& js);
 
+  // Equivalent of ctx.mapVirtualHost() for internal modules, which have no access to ctx. Returns
+  // `host:port`. Can be called outside of a request, so bindings can map their host when they are
+  // constructed.
+  kj::String mapVirtualHost(jsg::Lock& js, jsg::Ref<Fetcher> fetcher, uint16_t port);
+
   // Immediately condemn and terminate the current isolate. In workerd for now this just aborts the
   // process.
   void abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> reason);
@@ -109,6 +114,7 @@ class EntrypointsModule: public jsg::Object {
 
     JSG_METHOD(waitUntil);
     JSG_METHOD(getCtxCache);
+    JSG_METHOD(mapVirtualHost);
     JSG_LAZY_INSTANCE_PROPERTY(restore, getRestoreSymbol);
     JSG_METHOD(abortIsolate);
     JSG_METHOD(retryable);
