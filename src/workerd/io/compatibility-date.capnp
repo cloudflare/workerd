@@ -1683,7 +1683,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("webcrypto_modern_algorithms");
   # Enables opt-in WebCrypto modern algorithm support. This currently exposes the subset of
   # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA,
-  # ChaCha20-Poly1305, related key encapsulation helpers,
+  # ChaCha20-Poly1305, MLKEM768-X25519, related key encapsulation helpers,
   # getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is explicitly gated because
   # the draft is still changing and workerd does not implement the full proposal. The API may
   # change as the draft evolves.
