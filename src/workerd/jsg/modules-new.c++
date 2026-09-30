@@ -10,6 +10,7 @@
 
 #include <simdutf.h>
 
+#include <kj/convert.h>
 #include <kj/encoding.h>
 #include <kj/mutex.h>
 #include <kj/table.h>
@@ -2266,8 +2267,7 @@ kj::Maybe<const Module&> ModuleRegistry::lookupImpl(
           .source = context.source,                                                                \
           .normalizedSpecifier = url,                                                              \
           .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,                      \
-          .rawSpecifier =                                                                          \
-              context.rawSpecifier.map([](auto& str) -> kj::StringPtr { return str; }),            \
+          .rawSpecifier = context.rawSpecifier.as<kj::View>(),                                     \
           .importType = context.importType,                                                        \
         };                                                                                         \
         return lookupImpl(impl, ctx, seen);                                                        \

@@ -17,6 +17,7 @@
 #include <workerd/util/mimetype.h>
 
 #include <kj/compat/http.h>
+#include <kj/convert.h>
 #include <kj/encoding.h>
 
 namespace workerd::api {
@@ -432,8 +433,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImp
       maybeMeta = kj::str(m);
     }
 
-    auto typeName =
-        type.map([](const kj::String& s) -> kj::StringPtr { return s; }).orDefault("text");
+    auto typeName = type.as<kj::View>().orDefault("text");
 
     auto& context = IoContext::current();
     auto stream = newSystemStream(response.body.attach(kj::mv(client)),

@@ -4,6 +4,7 @@
 #include <workerd/jsg/memory.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
+#include <kj/convert.h>
 #include <kj/compat/http.h>
 
 namespace workerd::api {
@@ -181,7 +182,7 @@ private:
 
     kj::Own<Header> clone() const {
       Header header;
-      header.name = name.map([](const kj::String& s) { return kj::str(s); });
+      header.name = name.as<kj::Copy>();
       header.values = KJ_MAP(v, values) { return kj::str(v); };
       return kj::heap(kj::mv(header));
     }

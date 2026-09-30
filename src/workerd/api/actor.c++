@@ -12,6 +12,7 @@
 #include <capnp/message.h>
 #include <capnp/schema.h>
 #include <kj/compat/http.h>
+#include <kj/convert.h>
 #include <kj/encoding.h>
 
 namespace workerd::api {
@@ -85,7 +86,7 @@ kj::Own<IoChannelFactory::SubrequestChannel> LocalActorOutgoingFactory::getSubre
 IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChannel(
     IoContext& context, SpanParent parentSpan) {
   if (actorChannel == kj::none) {
-    auto locationHint = this->locationHint.map([](kj::String& hint) { return kj::str(hint); });
+    auto locationHint = this->locationHint.as<kj::Copy>();
     auto version = this->version.map([](ActorVersion& version) { return version.clone(); });
     KJ_SWITCH_ONEOF(channelIdOrFactory) {
       KJ_CASE_ONEOF(channelId, uint) {

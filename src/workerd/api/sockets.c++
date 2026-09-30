@@ -22,6 +22,7 @@
 
 #include <capnp/compat/byte-stream.h>
 #include <kj/async-queue.h>
+#include <kj/convert.h>
 
 namespace workerd::api {
 
@@ -892,8 +893,8 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
           JSG_VISITABLE_LAMBDA((self = JSG_THIS, domain = kj::heapString(KJ_ASSERT_NONNULL(domain)),
                                    tlsOptions = kj::mv(tlsOptions),
                                    openedResolver = openedPrPair.resolver.addRef(js),
-                                   remoteAddress = mapCopyString(remoteAddress),
-                                   localAddress = mapCopyString(localAddress)),
+                                   remoteAddress = remoteAddress.as<kj::Copy>(),
+                                   localAddress = localAddress.as<kj::Copy>()),
               (self, openedResolver), (jsg::Lock & js) mutable {
                 auto& context = IoContext::current();
 
@@ -961,7 +962,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   // to `setupSocket`.
   auto newTlsStarter = kj::heap<kj::TlsStarterCallback>();
   return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)),
-      mapCopyString(remoteAddress), mapCopyString(localAddress), kj::mv(options),
+      remoteAddress.as<kj::Copy>(), localAddress.as<kj::Copy>(), kj::mv(options),
       kj::mv(newTlsStarter), SecureTransportKind::ON, protocol, kj::mv(domain), isDefaultFetchPort,
       kj::mv(openedPrPair));
 }
@@ -1010,8 +1011,8 @@ void Socket::handleProxyStatus(
       // authority that the peer targeted.
       self->openedResolver.resolve(js,
           SocketInfo{
-            .remoteAddress = mapCopyString(self->remoteAddress),
-            .localAddress = mapCopyString(self->localAddress),
+            .remoteAddress = self->remoteAddress.as<kj::Copy>(),
+            .localAddress = self->localAddress.as<kj::Copy>(),
           });
     }
   };
@@ -1042,8 +1043,8 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
       // authority that the peer targeted.
       self->openedResolver.resolve(js,
           SocketInfo{
-            .remoteAddress = mapCopyString(self->remoteAddress),
-            .localAddress = mapCopyString(self->localAddress),
+            .remoteAddress = self->remoteAddress.as<kj::Copy>(),
+            .localAddress = self->localAddress.as<kj::Copy>(),
           });
     }
   };
@@ -1167,7 +1168,7 @@ void Socket::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Serialize the socket metadata, referencing the stream externals
   // The call to write is synchronous, so capturing this is safe.
   externalHandler->write(
-      [this, remoteAddr = kj::str(remoteAddress), localAddr = mapCopyString(localAddress),
+      [this, remoteAddr = kj::str(remoteAddress), localAddr = localAddress.as<kj::Copy>(),
           transport = toRpcSecureTransport(secureTransport),
           allowHalfOpen = getAllowHalfOpen(options)](
           rpc::JsValue::External::Builder builder) mutable {
@@ -1300,7 +1301,7 @@ jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
   openedPrPair.resolver.resolve(js,
       SocketInfo{
         .remoteAddress = kj::str(remoteAddr),
-        .localAddress = mapCopyString(localAddr),
+        .localAddress = localAddr.as<kj::Copy>(),
       });
 
   // Set up disconnection detection now. This part is pure kj and safe under the deserialize scope;

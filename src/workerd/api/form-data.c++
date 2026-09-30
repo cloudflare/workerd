@@ -8,9 +8,9 @@
 
 #include <workerd/io/io-util.h>
 #include <workerd/util/mimetype.h>
-#include <workerd/util/own-util.h>
 
 #include <kj/compat/http.h>
+#include <kj/convert.h>
 #include <kj/parse/char.h>
 #include <kj/vector.h>
 
@@ -244,7 +244,7 @@ void FormData::parseFormDataImpl(
       message = message.first(message.size() - static_cast<uint>(message.back() == '\r'));
     }
 
-    callback(name, filename.map([](auto& str) { return str.asPtr(); }), type, message.asBytes());
+    callback(name, filename.as<kj::View>(), type, message.asBytes());
   }
 }
 

@@ -14,6 +14,7 @@
 #include <workerd/util/strong-bool.h>
 
 #include <capnp/capability.h>  // for Capability
+#include <kj/convert.h>
 #include <kj/debug.h>
 #include <kj/string.h>
 
@@ -207,7 +208,7 @@ class IoChannelFactory: public virtual kj::Refcounted {
 
     VersionRequest clone() const {
       return {
-        .cohort = cohort.map([](const kj::String& s) { return kj::str(s); }),
+        .cohort = cohort.as<kj::Copy>(),
       };
     }
   };

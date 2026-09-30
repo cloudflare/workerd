@@ -1,6 +1,7 @@
 #pragma once
 
 #include <kj/common.h>
+#include <kj/convert.h>
 #include <kj/string.h>
 
 namespace workerd {
@@ -29,7 +30,7 @@ struct ActorVersion {
 
   ActorVersion clone() const {
     return {
-      .cohort = cohort.map([](const kj::String& value) { return kj::str(value); }),
+      .cohort = cohort.as<kj::Copy>(),
     };
   }
 };

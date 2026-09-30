@@ -9,6 +9,7 @@
 #include <workerd/util/mimetype.h>
 #include <workerd/util/strings.h>
 
+#include <kj/convert.h>
 #include <kj/encoding.h>
 
 namespace workerd::api {
@@ -61,7 +62,7 @@ void parseQueryString(kj::Vector<kj::Url::QueryParam>& query,
 
 kj::Maybe<kj::String> readContentTypeParameter(kj::StringPtr contentType, kj::StringPtr param) {
   KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
-    return parsed.params().find(toLower(param)).map([](auto& value) { return kj::str(value); });
+    return parsed.params().find(toLower(param)).as<kj::Copy>();
   }
   return kj::none;
 }

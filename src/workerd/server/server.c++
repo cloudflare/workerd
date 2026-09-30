@@ -54,6 +54,7 @@
 #include <kj/compat/http.h>
 #include <kj/compat/tls.h>
 #include <kj/compat/url.h>
+#include <kj/convert.h>
 #include <kj/debug.h>
 #include <kj/encoding.h>
 #include <kj/glob-filter.h>
@@ -417,8 +418,8 @@ class Server::ActorNamespace final {
       AlarmScheduler::GetActorFn getActor =
           [this, idFactory = kj::mv(idFactory)](
               const ActorKey& actor) mutable -> kj::Own<WorkerInterface> {
-        Worker::Actor::Id id = idFactory->idFromStringNamed(
-            kj::str(actor.actorId), actor.name.map([](kj::StringPtr n) { return kj::str(n); }));
+        Worker::Actor::Id id =
+            idFactory->idFromStringNamed(kj::str(actor.actorId), actor.name.as<kj::Copy>());
         auto actorContainer = this->getActorContainer(kj::mv(id));
         return newPromisedWorkerInterface(
             actorContainer->startRequest({}).attach(actorContainer->addRef()));
@@ -1257,9 +1258,7 @@ class Server::ActorNamespace final {
       // actor has been evicted from memory by then.
       kj::Maybe<kj::String> actorName;
       KJ_IF_SOME(actorId, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
-        KJ_IF_SOME(n, actorId->getName()) {
-          actorName = kj::str(n);
-        }
+        actorName = actorId->getName().as<kj::Copy>();
       }
 
       auto makeActorCache = [this, actorName = kj::mv(actorName)](
@@ -1503,8 +1502,7 @@ class Server::ActorNamespace final {
     };
 
     auto client = kj::refcounted<ContainerClient>(byteStreamFactory, timer, dockerNetwork,
-        kj::str(dockerPathRef), kj::str(containerId),
-        imageName.map([](kj::StringPtr image) { return kj::str(image); }),
+        kj::str(dockerPathRef), kj::str(containerId), imageName.as<kj::Copy>(),
         kj::str(KJ_ASSERT_NONNULL(containerEgressInterceptorImage,
             "containerEgressInterceptorImage must be configured for containers.")),
         waitUntilTasks, kj::mv(previousCleanup), kj::mv(cleanupCallback), channelTokenHandler,
@@ -3857,7 +3855,7 @@ class Server::WorkerService final: public Service,
     // The per-request JWT claims JSON, used by startSubrequest() to build the props
     // Frankenvalue for the access binding worker.
     kj::Maybe<kj::StringPtr> getJwtClaimsJson() {
-      return jwtClaimsJson.map([](kj::String& s) -> kj::StringPtr { return s; });
+      return jwtClaimsJson.as<kj::View>();
     }
 
    private:
@@ -4059,7 +4057,7 @@ class Server::WorkerService final: public Service,
           streamingTailWorkers.releaseAsArray(), waitUntilTasks);
       auto trace = kj::refcounted<Trace>(kj::none /* stableId */, kj::none /* scriptName */,
           kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, kj::none /* scriptId */,
-          nullptr /* scriptTags */, mapCopyString(entrypointName), executionModel,
+          nullptr /* scriptTags */, entrypointName.as<kj::Copy>(), executionModel,
           kj::mv(durableObjectId));
       kj::Own<WorkerTracer> tracer = kj::refcounted<WorkerTracer>(
           kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::mv(tailStreamWriter));
@@ -5931,10 +5929,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     // In workerd the module registry is always associated with just a single
     // worker instance, so we initialize it here. In production, however, a
     // single instance may be shared across multiple replicas.
-    kj::Maybe<kj::String> maybeFallbackService;
-    KJ_IF_SOME(moduleFallback, def.moduleFallback) {
-      maybeFallbackService = kj::str(moduleFallback);
-    }
+    kj::Maybe<kj::String> maybeFallbackService = def.moduleFallback.as<kj::Copy>();
 
     using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
 
@@ -6601,9 +6596,7 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
     kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
       // Create WorkerInterface with cf blob metadata (if provided via startEvent).
       IoChannelFactory::SubrequestMetadata metadata;
-      KJ_IF_SOME(cf, cfBlobJson) {
-        metadata.cfBlobJson = kj::str(cf);
-      }
+      metadata.cfBlobJson = cfBlobJson.as<kj::Copy>();
       metadata.fromPersistentStub = fromPersistentStub;
       auto worker = getService()->startRequest(kj::mv(metadata));
       context.initResults(capnp::MessageSize{4, 1})
@@ -6841,7 +6834,7 @@ class Server::HttpListener final: public kj::Refcounted {
         kj::HttpService::Response& response) override {
       TRACE_EVENT("workerd", "Connection:request()");
       IoChannelFactory::SubrequestMetadata metadata;
-      metadata.cfBlobJson = mapCopyString(cfBlobJson);
+      metadata.cfBlobJson = cfBlobJson.as<kj::Copy>();
 
       Response* wrappedResponse = &response;
       kj::Own<ResponseWrapper> ownResponse;
@@ -6877,7 +6870,7 @@ class Server::HttpListener final: public kj::Refcounted {
       }
 
       IoChannelFactory::SubrequestMetadata metadata;
-      metadata.cfBlobJson = mapCopyString(cfBlobJson);
+      metadata.cfBlobJson = cfBlobJson.as<kj::Copy>();
 
       auto worker = parent.service->startRequest(kj::mv(metadata));
       co_return co_await worker->connect(host, headers, connection, response, kj::mv(settings));

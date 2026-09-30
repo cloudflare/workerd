@@ -17,6 +17,7 @@
 #include <workerd/jsg/jsg.h>
 
 #include <kj/async.h>
+#include <kj/convert.h>
 
 namespace workerd::api {
 class SqlStorage;
@@ -623,9 +624,8 @@ class DurableObjectState: public jsg::Object {
     JSG_STRUCT(cohort);
   };
   jsg::Optional<Version> getVersion() {
-    return version.map([](ActorVersion& v) -> Version {
-      return Version{.cohort = v.cohort.map([](kj::String& s) -> kj::StringPtr { return s; })};
-    });
+    return version.map(
+        [](ActorVersion& v) -> Version { return Version{.cohort = v.cohort.as<kj::View>()}; });
   }
   jsg::Optional<jsg::Ref<Container>> getContainer() {
     return container.map([](jsg::Ref<Container>& c) { return c.addRef(); });
