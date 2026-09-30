@@ -1,20 +1,40 @@
-name: Experimental Workflow
+name: Isolate metrics repeated validation
 on:
   workflow_dispatch:
 
-# You can modify this workflow in order to verify your changes to Github Actions on a branch.
-# DO NOT MERGE THESE CHANGES TO MAIN
-# This workflow exists to work around a limitation in Github Actions. You can only use 
-# workflow_dispatch on files that exist in main. However, once the file exists, you can dispatch to
-# your branch and make sure changes work.
-
 permissions:
-  contents: none
+  contents: read
+  actions: write
 
 jobs:
-  experiment:
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Hello World
-        shell: bash
-        run: echo Hello World
+  repeated-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - config: ci-linux
+            suffix: ''
+          - config: ci-linux-tsan
+            suffix: -tsan
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      extra_bazel_args: --config=ci-test --config=${{ matrix.config }}
+      suffix: ${{ matrix.suffix }}
+      build_target: >-
+        //src/workerd/io:observer-test@
+        //src/tests/node/http-client:http-client-cpp@
+        //src/tests/node/http-client:http-client-ts@
+      test_target: >-
+        --runs_per_test=5
+        //src/workerd/io:observer-test@
+        //src/tests/node/http-client:http-client-cpp@
+        //src/tests/node/http-client:http-client-cpp@all-compat-flags
+        //src/tests/node/http-client:http-client-cpp@all-autogates
+        //src/tests/node/http-client:http-client-ts@
+        //src/tests/node/http-client:http-client-ts@all-compat-flags
+        //src/tests/node/http-client:http-client-ts@all-autogates
+      upload_test_logs: true
+    secrets:
+      BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
+      WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+      GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
