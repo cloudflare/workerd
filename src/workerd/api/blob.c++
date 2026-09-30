@@ -196,7 +196,7 @@ jsg::Ref<Blob> Blob::constructor(
 }
 
 kj::ArrayPtr<const byte> Blob::getData(jsg::Lock& js) const {
-  jsg::requireInsideSandbox(js.v8Isolate, data, "Blob data"_kj);
+  jsg::abortOnSandboxViolation(js.v8Isolate, data, "Blob data"_kj);
   return data;
 }
 
