@@ -929,8 +929,11 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                 // perform a TLS handshake on the connection. There is nothing we can do about it at
                 // this point, so surface it to the application instead of failing an internal
                 // assert.
-                JSG_REQUIRE(*tlsStarter != kj::none, Error,
-                    "startTls() is not supported on this connection.");
+                if (*tlsStarter == kj::none) {
+                openedResolver.reject(
+                    js, js.error("startTls() is not supported on this connection."));
+                JSG_FAIL_REQUIRE(Error, "startTls() is not supported on this connection.");
+                }
 
                 // Fork the starter promise because we need to create two separate things waiting
                 // on it below. The first is resolving the openedResolver with a JS promise that
