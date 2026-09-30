@@ -914,7 +914,8 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                 } else {
                 }  // Needed to avoid compiler error/warning
 
-                // All non-secure sockets should have `connectionData` with a `tlsStarter`.
+                // All non-secure sockets should have `connectionData`, which will have a
+                // `tlsStarter` if startTls is supported.
                 // Though since it's inside an IoOwn, if the request's IoContext has ended
                 // then `connectionData` will be null. This can happen if the flush operation is taking
                 // a particularly long time (EW-8538), so we throw a JSG error if that's the case.
@@ -922,6 +923,14 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                     "The connection was closed before startTls completed.");
 
                 auto& tlsStarter = connData->tlsStarter;
+
+                // The tlsStarter is an output parameter, filled in by whichever layer actually
+                // handled the CONNECT request. That layer leaves it empty when it has no way to
+                // perform a TLS handshake on the connection. There is nothing we can do about it at
+                // this point, so surface it to the application instead of failing an internal
+                // assert.
+                JSG_REQUIRE(*tlsStarter != kj::none, Error,
+                    "startTls() is not supported on this connection.");
 
                 // Fork the starter promise because we need to create two separate things waiting
                 // on it below. The first is resolving the openedResolver with a JS promise that
