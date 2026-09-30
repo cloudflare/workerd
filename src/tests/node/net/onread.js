@@ -13,6 +13,7 @@
 import { strictEqual, deepStrictEqual, ok, throws } from 'node:assert';
 import { Buffer } from 'node:buffer';
 import { echo, once, echoSegments } from 'servers';
+import { usingTsImpl } from 'which-impl';
 
 // A fixed buffer keeps receiving fills across several echoed writes.
 export const fixedBufferReceivesEveryFill = {
@@ -420,37 +421,51 @@ export const sharedOnreadBufferDestroysSocket = {
 };
 
 // A fixed buffer over a resizable ArrayBuffer: the BYOB read transfers it
-// like any other (the caller's buffer is detached, so resizing it throws),
-// and the transferred backing store the loop continues over — the one the
-// callback's Buffer sits on, until the next read transfers it again —
-// keeps the resizability. The loop's view is fixed to the caller's range:
-// shrinking the current store below it from the callback leaves the next
-// read an empty view, which fails as ENOBUFS.
-export const resizableOnreadBufferIsTransferredResizable = {
+// like any other (the caller's buffer is detached, so resizing it throws).
+// The loop's view is fixed to the caller's range. Ledger #1: under C++ the
+// transferred store the loop continues over keeps the resizability, and
+// shrinking it below that range from the callback leaves the next read an
+// empty view, which fails as ENOBUFS; under TS the store is fixed-length,
+// so resize() throws and the loop carries on.
+export const resizableOnreadBuffer = {
   async test(ctrl, env) {
     const original = new ArrayBuffer(8, { maxByteLength: 64 });
     const fills = [];
+    const { promise: filled, resolve: onFill } = Promise.withResolvers();
     const socket = echo(env, {
       onread: {
         buffer: new Uint8Array(original),
         callback(nread, buf) {
           fills.push(nread);
-          strictEqual(buf.buffer.resizable, true);
+          onFill();
+          strictEqual(buf.buffer.resizable, !usingTsImpl);
           strictEqual(buf.buffer.byteLength, 8);
           throws(() => original.resize(4), { name: 'TypeError' });
-          buf.buffer.resize(4);
+          if (usingTsImpl) {
+            throws(() => buf.buffer.resize(4), { name: 'TypeError' });
+          } else {
+            buf.buffer.resize(4);
+          }
         },
       },
     });
     await once(socket, 'connect');
     strictEqual(original.detached, true);
-    const errored = once(socket, 'error');
     const closed = once(socket, 'close');
-    socket.write('abc');
-    const err = await errored;
-    await closed;
+    if (usingTsImpl) {
+      socket.write('abc');
+      await filled;
+      socket.end();
+      const hadError = await closed;
+      strictEqual(hadError, false);
+    } else {
+      const errored = once(socket, 'error');
+      socket.write('abc');
+      const err = await errored;
+      await closed;
+      strictEqual(err.code, 'ENOBUFS');
+    }
     deepStrictEqual(fills, [3]);
-    strictEqual(err.code, 'ENOBUFS');
     strictEqual(socket.destroyed, true);
   },
 };

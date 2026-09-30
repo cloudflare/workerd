@@ -33,7 +33,10 @@ namespace workerd::rust::jsg {
 #define DEFINE_TYPED_ARRAY_NEW(name, v8_type, elem_type)                                           \
   Local local_new_##name(Isolate* isolate, const elem_type* data, size_t length) {                 \
     auto backingStore = v8::ArrayBuffer::NewBackingStore(isolate, length * sizeof(elem_type));     \
-    memcpy(backingStore->Data(), data, length * sizeof(elem_type));                                \
+    /* A zero-length backing store has a null Data(), which memcpy must not receive. */            \
+    if (length > 0) {                                                                              \
+      memcpy(backingStore->Data(), data, length * sizeof(elem_type));                              \
+    }                                                                                              \
     auto arrayBuffer = v8::ArrayBuffer::New(isolate, std::move(backingStore));                     \
     return to_ffi(v8::v8_type::New(arrayBuffer, 0, length));                                       \
   }
@@ -619,7 +622,8 @@ Local wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global&
       local_tmpl->InstanceTemplate()->NewInstance(isolate->GetCurrentContext()));
 
   // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
-  wrappable->attachWrapper(isolate, object, true);
+  wrappable->attachWrapper(isolate, object, true,
+      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kNonResourceWrappableTag));
 
   // Override tag to identify as Rust object for unwrapping
   auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
@@ -635,7 +639,8 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
   auto object = args.This();
 
   // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
-  wrappable->attachWrapper(isolate, object, true);
+  wrappable->attachWrapper(isolate, object, true,
+      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kNonResourceWrappableTag));
 
   // Override tag to identify as Rust object for unwrapping
   auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
@@ -711,11 +716,15 @@ kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {
           const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG)) {
     return kj::none;
   }
-  auto* ptr = static_cast<Wrappable*>(
-      reinterpret_cast<::workerd::jsg::Wrappable*>(v8_obj->GetAlignedPointerFromInternalField(
-          ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
-          static_cast<v8::EmbedderDataTypeTag>(
-              ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX))));
+  // The WORKERD_RUST_WRAPPABLE_TAG marker check above established that this is one of our Rust
+  // wrappables, so the pointer can be taken directly through the shim.
+  auto* wrappable = ::workerd::jsg::Wrappable::unwrapFromShimAnyType(isolate, v8_obj);
+  if (wrappable == nullptr) {
+    // unwrapFromShimAnyType() should never return null for a marked object.
+    KJ_LOG(FATAL, "wrapper type mismatch: marked object's CppHeap handle resolves to no wrappable");
+    abort();
+  }
+  auto* ptr = static_cast<Wrappable*>(reinterpret_cast<::workerd::jsg::Wrappable*>(wrappable));
   return ptr->toRc();
 }
 

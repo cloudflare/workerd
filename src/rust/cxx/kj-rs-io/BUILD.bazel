@@ -46,31 +46,6 @@ wd_cc_library(
     ],
 )
 
-# The dependencies of whichever I/O backend --//:io_backend selects, in one place. The two
-# libraries with a WORKERD_RUST_IO_BACKEND_RUST arm (//src/workerd/util:setup-async-io and
-# //src/workerd/server:cli-io-backend) depend on this instead of spelling the select out:
-#   * rust (default): kj-rs-io + its cxx bridge and C++ adapter, the Rust runtime shims, and the
-#     ABSTRACT kj async layers they implement (Promise machinery, streams / Network, plus the
-#     declaration-only view of kj::UnixEventPort that the setupAsyncIo() shim defines inertly).
-#     kj-async-os -- kj's own event loop and sockets -- is deliberately not here.
-#   * cxx: kj's full async stack (the :kj-async umbrella, which brings kj-async-os).
-wd_cc_library(
-    name = "active-backend",
-    visibility = ["//visibility:public"],
-    deps = select({
-        "//:io_backend_rust": [
-            ":bridge",
-            ":kj-rs-io",
-            ":kj-rs-io-lib",
-            "//deps:rust_runtime",
-            "@capnp-cpp//src/kj:kj-async-core",
-            "@capnp-cpp//src/kj:kj-async-io",
-            "@capnp-cpp//src/kj:kj-async-os-hdrs",
-        ],
-        "//conditions:default": ["@capnp-cpp//src/kj:kj-async"],
-    }),
-)
-
 rust_library(
     name = "kj-rs-io",
     srcs = glob(["*.rs"]),
@@ -117,7 +92,7 @@ rust_cxx_bridge(
     deps = [
         "//src/rust/cxx/kj-rs",
         "@capnp-cpp//src/kj:kj",
-        # kj-rs-io IS the kj-side implementation of the rust I/O backend: it derives from the
+        # kj-rs-io IS the kj-side implementation of workerd's I/O layer: it derives from the
         # abstract kj::AsyncIoStream / kj::Network / kj::LowLevelAsyncIoProvider interfaces and
         # reuses portable helpers (kj::newOneWayPipe, kj::CidrRange, the AsyncInputStream /
         # AsyncOutputStream default-method vtable slots). Those live in the ABSTRACT layers

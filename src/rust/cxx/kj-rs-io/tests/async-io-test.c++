@@ -865,6 +865,73 @@ KJ_TEST("restrictPeers: a child network (and its addresses) outlive the parent n
   KJ_EXPECT(KJ_ASSERT_NONNULL(blocked).getDescription().contains("restrictPeers"));
 }
 
+KJ_TEST("loopback: addresses connect within the process once enabled") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  auto &network = io.getNetwork();
+
+  // Off by default: "loopback:svc" is then a host "loopback" with service "svc".
+  KJ_EXPECT_THROW_MESSAGE("getaddrinfo()", network.parseAddress("loopback:svc").wait(ws));
+
+  kj::downcast<kj_rs_io::TokioNetwork>(network).enableLoopback();
+  auto addr = network.parseAddress("loopback:svc").wait(ws);
+  KJ_EXPECT(addr->toString() == "loopback:svc");
+  auto receiver = addr->listen();
+  KJ_EXPECT(receiver->getPort() == 0);
+
+  // A restrictPeers() child shares the namespace, and the filter does not judge loopback
+  // connections: this restriction would block any real address.
+  auto restricted = network.restrictPeers({"1.2.3.4/32"_kj}, {});
+  auto clientPromise = restricted->parseAddress("loopback:svc").wait(ws)->connect();
+  auto server = receiver->accept().wait(ws);
+  auto client = clientPromise.wait(ws);
+
+  // Real sockets underneath: bytes flow both ways.
+  client->write("ping"_kjb).wait(ws);
+  kj::byte buffer[4];
+  KJ_EXPECT(server->tryRead(buffer, 4, 4).wait(ws) == 4);
+  KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 4) == "ping"_kjb);
+  server->write("pong"_kjb).wait(ws);
+  KJ_EXPECT(client->tryRead(buffer, 4, 4).wait(ws) == 4);
+  KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 4) == "pong"_kjb);
+
+  // Connections made before anyone accepts are queued, and different names are separate.
+  auto other = network.parseAddress("loopback:other").wait(ws);
+  auto queued = addr->connect().wait(ws);
+  auto otherReceiver = other->listen();
+  auto otherAccept = otherReceiver->accept();
+  KJ_EXPECT(!otherAccept.poll(ws));
+  auto accepted = receiver->accept().wait(ws);
+  queued->write("!"_kjb).wait(ws);
+  KJ_EXPECT(accepted->tryRead(buffer, 1, 1).wait(ws) == 1);
+  KJ_EXPECT(!otherAccept.poll(ws));
+}
+
+KJ_TEST("loopback: a name belongs to the loop that first parsed it") {
+  auto io = setupTokioAsyncIo();
+  auto &ws = io.getWaitScope();
+  kj::downcast<kj_rs_io::TokioNetwork>(io.getNetwork()).enableLoopback();
+  auto addr = io.getNetwork().parseAddress("loopback:owned").wait(ws);
+  auto receiver = addr->listen();
+
+  // A clone of the address carried to another loop thread cannot connect: the queued end would
+  // be a socket of that loop, unusable by the receiver here.
+  kj::Maybe<kj::Exception> failure;
+  {
+    auto other = addr->clone();
+    kj::Thread thread([&]() noexcept {
+      auto otherIo = setupTokioAsyncIo();
+      failure = kj::runCatchingExceptions([&]() { other->connect().wait(otherIo.getWaitScope()); });
+    });
+  }
+  KJ_EXPECT(KJ_ASSERT_NONNULL(failure).getDescription().contains("different TokioEventPort"),
+      KJ_ASSERT_NONNULL(failure).getDescription());
+
+  // Nothing was queued: an accept here still waits.
+  auto acceptPromise = receiver->accept();
+  KJ_EXPECT(!acceptPromise.poll(ws));
+}
+
 KJ_TEST("dropping a just-started connect() then tearing down the context is clean") {
   // Start a connect(), kick the machinery with one poll, then drop the promise and destroy the
   // whole context -- exercising cancellation of the connect's readiness registration and the

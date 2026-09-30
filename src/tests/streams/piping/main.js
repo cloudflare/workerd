@@ -48,7 +48,16 @@ export {
   invalidSignalRejected,
   brandChecks,
   pipeThroughLockedEndpoints,
+  badDestinationLeavesSourceUnlocked,
+  optionGetterLocksDestination,
+  shadowedWritableLocked,
 } from 'api-surface';
+
+export {
+  syntheticAbortEventIgnored,
+  stopImmediatePropagationDoesNotBlockAbort,
+  abortAfterPipeSettled,
+} from 'abort-signal';
 
 export {
   sourceStartsErrored,
@@ -70,6 +79,7 @@ export {
   destWriteThrowsMidPipe,
   destWriteThrowsMidPipePreventCancel,
   destControllerErrorsMidPipe,
+  destErroringWaitsForInFlightWrite,
 } from 'close-propagation';
 
 export {

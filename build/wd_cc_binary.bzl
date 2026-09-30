@@ -18,8 +18,8 @@ def wd_cc_binary(
             "//conditions:default": [],
         }) + target_compatible_with,
         visibility = visibility,
-        # Tag with cpu:8 since this target depends on linkopts_tool.
-        tags = tags + ["cpu:8"],
+        # Tag with cpu:4 since this target depends on linkopts_tool.
+        tags = tags + ["cpu:4"],
         deps = deps + ["//build/deps:linkopts_tool"],
         **kwargs
     )

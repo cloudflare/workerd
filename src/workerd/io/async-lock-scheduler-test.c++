@@ -161,24 +161,32 @@ KJ_TEST("AsyncLockQueue: a different resource on the same thread waits for the f
   KJ_EXPECT(a->getCurrentLoad() == 0);
 }
 
-KJ_TEST("AsyncLockQueue: cancelling a pending attempt leaves no trace") {
+KJ_TEST("AsyncLockQueue: canceling one release observer does not affect another") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
 
   auto a = kj::atomicRefcounted<FakeResource>("a"_kj);
   auto b = kj::atomicRefcounted<FakeResource>("b"_kj);
+  auto c = kj::atomicRefcounted<FakeResource>("c"_kj);
 
   auto lockA = kj::heap(a->lock().wait(ws));
 
-  {
-    auto promiseB = b->lock();
-    KJ_EXPECT(!promiseB.poll(ws));
-  }  // dropped
+  auto promiseB = b->lock();
+  auto promiseC = c->lock();
+  KJ_EXPECT(!promiseB.poll(ws));
+  KJ_EXPECT(!promiseC.poll(ws));
+  promiseB = nullptr;
 
   KJ_EXPECT(b->getCurrentLoad() == 0);
+  KJ_EXPECT(c->getCurrentLoad() == 0);
 
   lockA = nullptr;
   KJ_EXPECT(a->getCurrentLoad() == 0);
+  KJ_EXPECT(promiseC.poll(ws));
+  {
+    auto lockC = promiseC.wait(ws);
+    KJ_EXPECT(c->getCurrentLoad() == 1);
+  }
 
   // The queue is still usable afterwards.
   auto lockB = b->lock().wait(ws);

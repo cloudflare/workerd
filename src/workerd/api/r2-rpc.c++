@@ -155,12 +155,17 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
 }
 
 namespace {
+// The body forms doR2HTTPPutRequestImpl() may hold across a suspension. Unlike R2PutValue,
+// there is no Blob alternative, and any kj::Array<byte> is a kj-heap copy made by
+// doR2HTTPPutRequest() rather than a view of a V8 BackingStore.
+using R2PutBody = kj::OneOf<JsReadableStream, kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>;
+
 // The coroutine half of doR2HTTPPutRequest(). Split out of the public function because
 // computing the expected body size requires a jsg::Lock, and a jsg::Lock must never be
 // captured in a KJ coroutine frame. Everything up to the first co_await runs synchronously
 // in the caller's context (in particular, `path` is consumed before any suspension).
 kj::Promise<R2Result> doR2HTTPPutRequestImpl(kj::Own<kj::HttpClient> client,
-    kj::Maybe<R2PutValue> supportedBody,
+    kj::Maybe<R2PutBody> supportedBody,
     uint64_t expectedBodySize,
     kj::String metadataPayload,
     kj::ArrayPtr<kj::StringPtr> path,
@@ -188,10 +193,6 @@ kj::Promise<R2Result> doR2HTTPPutRequestImpl(kj::Own<kj::HttpClient> client,
         co_await request.body->write(text.value.asBytes());
       }
       KJ_CASE_ONEOF(data, kj::Array<byte>) {
-        co_await request.body->write(data);
-      }
-      KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-        auto data = blob->getData();
         co_await request.body->write(data);
       }
       KJ_CASE_ONEOF(stream, JsReadableStream) {
@@ -246,6 +247,7 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js,
   // NOTE: A lot of code here is duplicated with kv.c++. Maybe it can be refactored to be more
   // reusable?
   kj::Maybe<uint64_t> expectedBodySize;
+  kj::Maybe<R2PutBody> body;
 
   KJ_IF_SOME(b, supportedBody) {
     KJ_SWITCH_ONEOF(b) {
@@ -262,18 +264,26 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js,
             ") doesn't match what "
             "the stream reports (",
             KJ_ASSERT_NONNULL(expectedBodySize), ")");
+        body = kj::mv(stream);
       }
       KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
         expectedBodySize = text.value.size();
         KJ_REQUIRE(streamSize == kj::none);
+        body = kj::mv(text);
       }
       KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
         expectedBodySize = data.size();
         KJ_REQUIRE(streamSize == kj::none);
+        // `data` aliases the caller's V8 BackingStore (see jsg::asBytes()). The coroutine writes
+        // it after releasing the isolate lock, and with it the sandbox's MPK key, so copy the
+        // bytes while we still hold the key.
+        body = kj::heapArray(data.asPtr());
       }
-      KJ_CASE_ONEOF(data, jsg::Ref<Blob>) {
-        expectedBodySize = data->getSize();
+      KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+        expectedBodySize = blob->getSize();
         KJ_REQUIRE(streamSize == kj::none);
+        // Blob data is likewise a V8 ArrayBuffer; see above.
+        body = kj::heapArray(blob->getData());
       }
     }
   } else {
@@ -281,7 +291,7 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js,
     KJ_REQUIRE(streamSize == kj::none);
   }
 
-  return doR2HTTPPutRequestImpl(kj::mv(client), kj::mv(supportedBody),
-      KJ_ASSERT_NONNULL(expectedBodySize), kj::mv(metadataPayload), path, kj::mv(jwt));
+  return doR2HTTPPutRequestImpl(kj::mv(client), kj::mv(body), KJ_ASSERT_NONNULL(expectedBodySize),
+      kj::mv(metadataPayload), path, kj::mv(jwt));
 }
 }  // namespace workerd::api

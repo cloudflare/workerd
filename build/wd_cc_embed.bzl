@@ -28,12 +28,14 @@ def wd_cc_embed(name, src, base_name = "", is_text = None, **kwargs):
     if is_text == None:
         is_text = embed_filename.endswith(".txt") or embed_filename.endswith(".js") or embed_filename.endswith(".ts")
     pod_data_type = "unsigned char"
-    data_type = "kj::ArrayPtr<const kj::byte>"
+    data_constructor = "kj::StaticArrayPtr<const kj::byte>"
     suffix = ""
     size_adjust = ""
     if is_text:
         pod_data_type = "char"
-        data_type = "kj::StringPtr"
+
+        # The embed has static storage, so preserve that lifetime in asArray()/asBytes() too.
+        data_constructor = '::operator ""_kjc'
 
         # for text data, add terminating NUL byte, but don't count it to length so kj::StringPtr constructor works properly
         suffix = " suffix(, 0)"
@@ -68,10 +70,10 @@ extern "C" {{
 #endif
 extern const {pod_data_type} {embed_name}_begin[];
 extern size_t {embed_name}_size;
-#define {embed_name} ({data_type}({embed_name}_begin, {embed_name}_size))
+#define {embed_name} ({data_constructor}({embed_name}_begin, {embed_name}_size))
 #ifdef __cplusplus
 }}
-#endif""".format(embed_name = embed_name, data_type = data_type, pod_data_type = pod_data_type)],
+#endif""".format(embed_name = embed_name, data_constructor = data_constructor, pod_data_type = pod_data_type)],
     )
 
     wd_cc_library(

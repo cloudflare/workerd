@@ -12,22 +12,29 @@ pub mod repr {
     use std::ffi::c_void;
     use std::ops::Deref;
     use std::pin::Pin;
-    use std::ptr::NonNull;
+
+    use crate::own::NonNullExceptMaybe;
 
     /// Bindings to the kj type `kj::Rc`. Represents an owned and reference counted type,
     /// like Rust's [`std::rc::Rc`]. The pointee does not need to inherit `kj::Refcounted`.
+    ///
+    /// `ptr` is never null in a bare `KjRc<T>`; it is only null as the niche `None`
+    /// representation inside a `KjMaybe<KjRc<T>>`, mirroring `kj::MaybeTraits<kj::Rc<T>>`.
     #[repr(C)]
     pub struct KjRc<T> {
         refcounted: *mut c_void,
-        ptr: NonNull<T>,
+        pub(crate) ptr: NonNullExceptMaybe<T>,
     }
 
     /// Bindings to the kj type `kj::Arc`. Represents and owned and atomically reference
     /// counted type, like Rust's [`std::sync::Arc`].
+    ///
+    /// `ptr` is never null in a bare `KjArc<T>`; it is only null as the niche `None`
+    /// representation inside a `KjMaybe<KjArc<T>>`, mirroring `kj::MaybeTraits<kj::Arc<T>>`.
     #[repr(C)]
     pub struct KjArc<T> {
         refcounted: *const c_void,
-        ptr: NonNull<T>,
+        pub(crate) ptr: NonNullExceptMaybe<T>,
     }
 
     // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
@@ -49,7 +56,7 @@ pub mod repr {
 
         #[must_use]
         pub fn get(&self) -> *const T {
-            self.ptr.as_ptr().cast_const()
+            self.ptr.as_ptr()
         }
 
         // The return value here represents exclusive access to the pointee.
@@ -59,7 +66,7 @@ pub mod repr {
                 None
             } else {
                 // Safety: moving the `KjRc` does not move the pointee, `is_shared()` proves that
-                // this is the only active `KjRc` reference to it.
+                // this is the only active `KjRc` reference to it. A bare `KjRc` is never null.
                 // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
                 unsafe { Some(Pin::new_unchecked(self.ptr.as_mut())) }
             }
@@ -94,7 +101,7 @@ pub mod repr {
 
         #[must_use]
         pub fn get(&self) -> *const T {
-            self.ptr.as_ptr().cast_const()
+            self.ptr.as_ptr()
         }
 
         // The return value here represents exclusive access to the pointee.
@@ -104,7 +111,7 @@ pub mod repr {
                 None
             } else {
                 // Safety: moving the `KjArc` does not move the pointee, `is_shared()` proves that
-                // this is the only active `KjArc` reference to it.
+                // this is the only active `KjArc` reference to it. A bare `KjArc` is never null.
                 // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
                 unsafe { Some(Pin::new_unchecked(self.ptr.as_mut())) }
             }

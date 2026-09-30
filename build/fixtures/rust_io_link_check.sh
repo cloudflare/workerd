@@ -2,7 +2,7 @@
 # Link-truth check for the Rust I/O backend: inspects the symbol names of the linked workerd
 # binary and fails if kj's own C++ event-loop setup made it into the link.
 #
-# Under --//:io_backend=rust, kj::setupAsyncIo() is supplied by //src/workerd/util:setup-async-io
+# kj::setupAsyncIo() is supplied by //src/workerd/util:setup-async-io
 # (tokio-backed) by symbol override, and the concrete kj OS I/O layer (kj-async-os) must not be
 # linked. The dependency-graph check (build/rust_io_graph_check.sh) forbids dependency EDGES to it;
 # this test checks the RESULT: when kj-async-os does get pulled in (e.g. through the
@@ -13,7 +13,7 @@
 #     `LowLevelAsyncIoProviderImpl`; neither may be present.
 #   * the shim's TU references kj_rs_io::TokioAsyncIoContext; it must be present.
 # The kj::UnixEventPort::* symbols ARE expected: the shim defines an inert UnixEventPort because
-# kj::AsyncIoContext names the type (see setup-async-io-tokio.c++).
+# kj::AsyncIoContext names the type (see setup-async-io.c++).
 #
 # How: the symbol names are matched in their MANGLED form (Itanium ABI, identical for GNU/LLVM/
 # Apple toolchains) as strings of the binary itself, in one `grep -a` pass. In an unstripped
@@ -69,10 +69,10 @@ echo "  kj::UnixEventPort::* names            : $unixport   (informational; the 
 
 status=0
 if [ "$kj_setup" -ne 0 ] || [ "$kj_lowlevel" -ne 0 ]; then
-  echo "FAIL: kj's C++ setupAsyncIo()/OS I/O provider is linked into the rust-backend binary."
+  echo "FAIL: kj's C++ setupAsyncIo()/OS I/O provider is linked into the workerd binary."
   echo "      Some dependency reaches @capnp-cpp//src/kj:kj-async-os (usually via the :kj-async"
   echo "      umbrella). Find every offending edge with:"
-  echo "        bazel cquery --//:io_backend=rust 'rdeps(deps(//src/workerd/server:workerd), @capnp-cpp//src/kj:kj-async, 1)'"
+  echo "        bazel cquery 'rdeps(deps(//src/workerd/server:workerd), @capnp-cpp//src/kj:kj-async, 1)'"
   echo "      and retarget it to :kj-async-core / :kj-async-io."
   status=1
 fi

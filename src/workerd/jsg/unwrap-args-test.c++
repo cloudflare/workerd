@@ -77,29 +77,28 @@ KJ_TEST("UnwrappedArgs invokes callable with correct compile-time Index and Type
   KJ_EXPECT(calls[2].typeName == "bool");
 }
 
-KJ_TEST("UnwrappedArgs take<I>() moves values out of the I'th slot") {
+KJ_TEST("UnwrappedArgs apply() moves values out of each slot") {
   using Indexes = kj::_::Indexes<0, 1, 2>;
 
   auto unwrap = []<size_t I, typename U>() -> kj::String { return kj::str("slot-", I); };
 
   jsg::_::UnwrappedArgs<Indexes, kj::String, kj::String, kj::String> args(unwrap);
 
-  kj::String a = kj::mv(args).template take<0>();
-  kj::String b = kj::mv(args).template take<1>();
-  kj::String c = kj::mv(args).template take<2>();
-
-  KJ_EXPECT(a == "slot-0");
-  KJ_EXPECT(b == "slot-1");
-  KJ_EXPECT(c == "slot-2");
+  // By-value parameters are move-constructed from the stored values.
+  kj::mv(args).apply([](kj::String a, kj::String b, kj::String c) {
+    KJ_EXPECT(a == "slot-0");
+    KJ_EXPECT(b == "slot-1");
+    KJ_EXPECT(c == "slot-2");
+  });
 }
 
-KJ_TEST("UnwrappedArgs take<I>() forwards rvalue-ref parameter types as rvalue refs") {
+KJ_TEST("UnwrappedArgs apply() forwards rvalue-ref parameter types as rvalue refs") {
   // Rvalue-ref parameters (e.g. `JsgStruct&&` for move-in, as
   // `HTMLRewriter::on` does with `ElementContentHandlers&&`) need to come
   // out as rvalue references that bind to T&& method parameters.  Because
   // `RemoveRvalueRef` strips the `&&`, the stored value is held by value
   // (owned by the helper) rather than as a dangling rvalue-ref member.
-  // `take<I>()` then forwards it back as an rvalue ref via reference
+  // `apply()` then forwards it back as an rvalue ref via reference
   // collapsing on `kj::fwd<T&&>`.
   using Indexes = kj::_::Indexes<0>;
 
@@ -107,18 +106,17 @@ KJ_TEST("UnwrappedArgs take<I>() forwards rvalue-ref parameter types as rvalue r
 
   jsg::_::UnwrappedArgs<Indexes, kj::String&&> args(unwrap);
 
-  // take<0>() must return `kj::String&&` so it binds to a T&& method
-  // parameter, allowing move-in semantics at the call site.
-  static_assert(kj::isSameType<decltype(kj::mv(args).template take<0>()), kj::String&&>(),
-      "take<I>() of T&& parameter must return T&&, enabling move into the call site");
-
-  kj::String s = kj::mv(args).template take<0>();
-  KJ_EXPECT(s == "moved");
+  kj::mv(args).apply([](auto&& value) {
+    static_assert(kj::isSameType<decltype(value), kj::String&&>(),
+        "apply() of T&& parameter must pass T&&, enabling move into the call site");
+    kj::String s = kj::mv(value);
+    KJ_EXPECT(s == "moved");
+  });
 }
 
-KJ_TEST("UnwrappedArgs take<I>() preserves reference parameter types as lvalue refs") {
+KJ_TEST("UnwrappedArgs apply() preserves reference parameter types as lvalue refs") {
   // For reference-typed parameters (e.g. `Lock&`, `TypeHandler<T>&`), the
-  // stored value is a reference member.  `take<I>()` must return an lvalue
+  // stored value is a reference member.  `apply()` must pass an lvalue
   // reference, not an rvalue reference — otherwise the value would not bind
   // to a non-const lvalue-ref parameter at the JSG call site.
   using Indexes = kj::_::Indexes<0, 1>;
@@ -129,16 +127,63 @@ KJ_TEST("UnwrappedArgs take<I>() preserves reference parameter types as lvalue r
 
   jsg::_::UnwrappedArgs<Indexes, int&, int&> args(unwrap);
 
-  // take<0>() must return `int&` so we can mutate through it.
-  static_assert(kj::isSameType<decltype(kj::mv(args).template take<0>()), int&>(),
-      "take<I>() of int& parameter must return int&, not int&&");
-
-  int& a = kj::mv(args).template take<0>();
-  int& b = kj::mv(args).template take<1>();
-  a = 100;
-  b = 200;
+  kj::mv(args).apply([](auto&& a, auto&& b) {
+    static_assert(
+        kj::isSameType<decltype(a), int&>(), "apply() of int& parameter must pass int&, not int&&");
+    a = 100;
+    b = 200;
+  });
   KJ_EXPECT(x == 100);
   KJ_EXPECT(y == 200);
+}
+
+KJ_TEST("UnwrappedArgs apply() forwards the callback's return value") {
+  using Indexes = kj::_::Indexes<0>;
+
+  int target = 21;
+  auto unwrap = [&]<size_t I, typename U>() -> int& { return target; };
+
+  {
+    jsg::_::UnwrappedArgs<Indexes, int&> args(unwrap);
+    decltype(auto) result = kj::mv(args).apply([](int& r) { return r * 2; });
+    static_assert(kj::isSameType<decltype(result), int>());
+    KJ_EXPECT(result == 42);
+  }
+
+  {
+    // Reference returns are preserved rather than decayed to copies.
+    jsg::_::UnwrappedArgs<Indexes, int&> args(unwrap);
+    decltype(auto) result = kj::mv(args).apply([](int& r) -> int& { return r; });
+    static_assert(kj::isSameType<decltype(result), int&>());
+    KJ_EXPECT(&result == &target);
+  }
+}
+
+KJ_TEST("UnwrappedArgs apply() supports void callbacks") {
+  using Indexes = kj::_::Indexes<0>;
+
+  auto unwrap = []<size_t I, typename U>() -> int { return 42; };
+
+  jsg::_::UnwrappedArgs<Indexes, int> args(unwrap);
+
+  int seen = 0;
+  kj::mv(args).apply([&](int v) { seen = v; });
+  KJ_EXPECT(seen == 42);
+}
+
+KJ_TEST("UnwrappedArgs apply() invokes the callback with an empty argument pack") {
+  // With no slots, `unwrap` is never instantiated.
+  auto unwrap = []<size_t I, typename U>() -> int { return 0; };
+
+  jsg::_::UnwrappedArgs<kj::_::Indexes<>> args(unwrap);
+
+  bool called = false;
+  int result = kj::mv(args).apply([&]() {
+    called = true;
+    return 7;
+  });
+  KJ_EXPECT(called);
+  KJ_EXPECT(result == 7);
 }
 
 // Records its destruction in a shared vector.  Used to verify that when

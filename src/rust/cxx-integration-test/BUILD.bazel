@@ -7,9 +7,6 @@ wd_rust_crate(
         "@capnp-cpp//src/kj",
     ],
     cxx_bridge_src = "lib.rs",
-    test_deps = [
-        "@crates_vendor//:nix",
-    ],
     visibility = ["//visibility:public"],
     deps = [
         "@crates_vendor//:tracing",

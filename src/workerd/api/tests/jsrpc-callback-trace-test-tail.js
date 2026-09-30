@@ -9,7 +9,6 @@
 // Each callback span must nest under the jsRpcCall that originated it.
 
 import * as assert from 'node:assert';
-import unsafe from 'workerd:unsafe';
 
 // Per-invocation span data: invocationId -> { onset, rootSpanId, spans: Map(spanId -> span) }.
 // Each span records its name, its parent span ID (from the spanOpen's spanContext), and any
@@ -27,7 +26,6 @@ export default {
       },
       rootSpanId,
       spans: new Map(),
-      complete: false,
     };
     invocations.set(invocationId, data);
 
@@ -46,8 +44,6 @@ export default {
             span.attrs[name] = value;
           }
         }
-      } else if (type === 'outcome') {
-        data.complete = true;
       }
     };
   },
@@ -105,18 +101,17 @@ function findCallbackSpans() {
 
 export const test = {
   async test() {
-    const tracingEnabled = unsafe.isTestAutogateEnabled();
-    // Poll until the expected spans arrive or, with tracing disabled, the invocation completes.
-    // Tail events are asynchronous, so avoid relying on a fixed delay.
+    // Poll until the expected spans arrive. Tail events are asynchronous, so avoid relying on a
+    // fixed delay.
     const deadline = Date.now() + 5000;
     let found = findCallbackSpans();
     while (
-      !(tracingEnabled
-        ? found.callerDispatch &&
-          found.calleeDispatch &&
-          found.callerTransientCalls.length === 3 &&
-          found.calleeStubCalls.length === 3
-        : found.callee?.complete) &&
+      !(
+        found.callerDispatch &&
+        found.calleeDispatch &&
+        found.callerTransientCalls.length === 3 &&
+        found.calleeStubCalls.length === 3
+      ) &&
       Date.now() < deadline
     ) {
       await scheduler.wait(10);
@@ -135,16 +130,6 @@ export const test = {
       callee,
       'Could not find the CallbackService JSRPC invocation in tail events'
     );
-    if (!tracingEnabled) {
-      assert.ok(callee.complete, 'CallbackService invocation did not complete');
-      assert.strictEqual(
-        jsRpcCalls(callee).length,
-        0,
-        'jsRpcCall spans must not be emitted while the autogate is disabled'
-      );
-      return;
-    }
-
     assert.ok(caller, 'Could not find the caller invocation in tail events');
     assert.ok(callerDispatch, 'Missing caller jsRpcCall for invokeCallbacks');
     assert.ok(calleeDispatch, 'Missing callee jsRpcCall for invokeCallbacks');

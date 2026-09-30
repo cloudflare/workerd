@@ -45,8 +45,8 @@ class RecordingFailingOutgoingFactory final: public Fetcher::OutgoingFactory {
     KJ_FAIL_REQUIRE("destination failed");
   }
 
-  bool supportsActorCallRetries() const override {
-    return true;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable::YES;
   }
 
   Result newActorCallAttempt(
@@ -60,23 +60,6 @@ class RecordingFailingOutgoingFactory final: public Fetcher::OutgoingFactory {
   uint& singleUseCount;
   uint& actorAttemptCount;
   kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata>& metadata;
-};
-
-class RejectingClaimObserver final: public RequestObserver {
- public:
-  void claimRetryTokenBeforeUserCode() override {
-    ++claimCount;
-    auto exception = KJ_EXCEPTION(FAILED, "retry claim rejected");
-    exception.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
-    kj::throwFatalException(kj::mv(exception));
-  }
-
-  void delivered() override {
-    ++deliveredCount;
-  }
-
-  uint claimCount = 0;
-  uint deliveredCount = 0;
 };
 
 capnp::Capability::Client brokenCap() {
@@ -97,11 +80,13 @@ jsg::JsRef<jsg::JsFunction> wrapMethod(jsg::Lock& js, Fetcher& fetcher, kj::Stri
 template <typename Func>
 JsRpcCallPlan makePlan(Func populate,
     kj::Array<const byte> serializedData = kj::heapArray<const byte>(0),
-    Replayability replayability = Replayability::REPLAYABLE) {
+    Replayability replayability = Replayability::REPLAYABLE,
+    kj::Maybe<size_t> serializedDataCapacity = kj::none) {
   auto message = kj::heap<capnp::MallocMessageBuilder>(
       JsRpcCallPlan::METADATA_SEGMENT_WORDS, capnp::AllocationStrategy::FIXED_SIZE);
   populate(message->initRoot<rpc::JsRpcTarget::CallParams>());
-  return JsRpcCallPlan(kj::mv(message), kj::mv(serializedData), replayability);
+  auto capacity = serializedDataCapacity.orDefault(serializedData.size());
+  return JsRpcCallPlan(kj::mv(message), kj::mv(serializedData), capacity, replayability);
 }
 
 // Builds a plan for a call whose arguments produced `externalHandler`'s externals, so that a test
@@ -128,7 +113,7 @@ KJ_TEST("JS RPC call plan copies calls and property accesses") {
     builder.setMethodName("value");
     builder.getOperation().setGetProperty();
   });
-  KJ_EXPECT(!property.getReplayable());
+  KJ_EXPECT(property.getReplayable());
   capnp::MallocMessageBuilder propertyAttempt;
   property.copyTo(propertyAttempt.initRoot<rpc::JsRpcTarget::CallParams>());
   auto propertyParams = propertyAttempt.getRoot<rpc::JsRpcTarget::CallParams>();
@@ -156,6 +141,37 @@ KJ_TEST("JS RPC call plan copies calls and property accesses") {
     auto data = params.getOperation().getCallWithArgs().getV8Serialized();
     KJ_EXPECT(data == kj::arrayPtr(SERIALIZED));
   }
+}
+
+KJ_TEST("JS RPC call plan reserves serialized buffer capacity") {
+  static constexpr byte SERIALIZED[] = {1, 2, 3, 4};
+  auto makeArgsPlan = [](kj::Maybe<size_t> capacity) {
+    return makePlan([](rpc::JsRpcTarget::CallParams::Builder builder) {
+      builder.getOperation().initCallWithArgs();
+    }, kj::heapArray<const byte>(kj::arrayPtr(SERIALIZED)), Replayability::REPLAYABLE, capacity);
+  };
+  auto plan = makeArgsPlan(64);
+
+  KJ_EXPECT(plan.getReplayReservationBytes() ==
+      makeArgsPlan(kj::none).getReplayReservationBytes() + 64 - kj::size(SERIALIZED));
+  capnp::MallocMessageBuilder attemptMessage;
+  plan.copyTo(attemptMessage.initRoot<rpc::JsRpcTarget::CallParams>());
+  KJ_EXPECT(attemptMessage.getRoot<rpc::JsRpcTarget::CallParams>()
+                .getOperation()
+                .getCallWithArgs()
+                .getV8Serialized() == kj::arrayPtr(SERIALIZED));
+}
+
+KJ_TEST("serializer reports the capacity of its released buffer") {
+  TestFixture fixture;
+  fixture.runInIoContext([](const TestFixture::Environment& env) {
+    jsg::Serializer serializer(env.js);
+    serializer.write(env.js, jsg::JsValue(env.js.str("x"_kj)));
+    auto released = serializer.release();
+
+    KJ_EXPECT(
+        released.dataCapacity > released.data.size(), released.dataCapacity, released.data.size());
+  });
 }
 
 KJ_TEST("JS RPC call plan copies usable external capabilities but rejects replay") {
@@ -339,9 +355,8 @@ KJ_TEST("retry-capable RPC calls resolve the destination only after safe seriali
   auto flags = flagsMessage.initRoot<CompatibilityFlags>();
   flags.setFetcherRpc(true);
   flags.setRpcParamsDupStubs(false);
-  TestFixture fixture({.featureFlags = flags.asReader(),
-    .autogates = kj::arr("durable-object-retries-fetch"_kj,
-        "durable-object-retries-fetch-retry-requests"_kj, "durable-object-retries-jsrpc"_kj)});
+  TestFixture fixture(
+      {.featureFlags = flags.asReader(), .autogates = kj::arr("durable-object-retries-jsrpc"_kj)});
 
   uint singleUseCount = 0;
   uint actorAttemptCount = 0;
@@ -409,8 +424,8 @@ class ReceiverOutgoingFactory final: public Fetcher::OutgoingFactory {
     return {.client = receiver.makeWorkerEntrypoint(), .spanParents = kj::none};
   }
 
-  bool supportsActorCallRetries() const override {
-    return true;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable::YES;
   }
 
   Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
@@ -441,8 +456,8 @@ class GatedReceiverOutgoingFactory final: public Fetcher::OutgoingFactory {
     };
   }
 
-  bool supportsActorCallRetries() const override {
-    return true;
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable::YES;
   }
 
   Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
@@ -634,8 +649,7 @@ ActorCallDispatch makeActorPropertyRead(kj::ArrayPtr<const kj::StringPtr> autoga
 }
 
 KJ_TEST("replayable actor RPC calls carry observe-only retry metadata") {
-  auto dispatch = makeReplayableActorCall(kj::arr("durable-object-retries-fetch"_kj,
-      "durable-object-retries-fetch-retry-requests"_kj, "durable-object-retries-jsrpc"_kj));
+  auto dispatch = makeReplayableActorCall(kj::arr("durable-object-retries-jsrpc"_kj));
 
   KJ_EXPECT(dispatch.singleUseCount == 0);
   KJ_EXPECT(dispatch.actorAttemptCount == 1);
@@ -644,30 +658,29 @@ KJ_TEST("replayable actor RPC calls carry observe-only retry metadata") {
   KJ_EXPECT(recordedMetadata.retryGateEnabled == ActorRetryGateEnabled::NO);
 }
 
-KJ_TEST("replayable actor RPC calls carry no retry metadata without the JSRPC gate") {
+KJ_TEST("actor RPC retries stay disabled when replay memory is not reserved") {
   auto dispatch = makeReplayableActorCall(
-      kj::arr("durable-object-retries-fetch"_kj, "durable-object-retries-fetch-retry-requests"_kj));
+      kj::arr("durable-object-retries-jsrpc"_kj, "durable-object-retries-jsrpc-retry-requests"_kj));
+
+  KJ_EXPECT(dispatch.singleUseCount == 0);
+  KJ_EXPECT(dispatch.actorAttemptCount == 1);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(dispatch.metadata).retryGateEnabled == ActorRetryGateEnabled::NO);
+}
+
+KJ_TEST("replayable actor RPC calls carry no retry metadata without the JSRPC gate") {
+  auto dispatch = makeReplayableActorCall({});
 
   KJ_EXPECT(dispatch.singleUseCount == 1);
   KJ_EXPECT(dispatch.actorAttemptCount == 0);
   KJ_EXPECT(dispatch.metadata == kj::none);
 }
 
-KJ_TEST("replayable actor RPC calls carry no retry metadata without the fetch gate") {
-  auto dispatch = makeReplayableActorCall(kj::arr("durable-object-retries-jsrpc"_kj));
+KJ_TEST("actor RPC property reads carry retry metadata") {
+  auto dispatch = makeActorPropertyRead(kj::arr("durable-object-retries-jsrpc"_kj));
 
-  KJ_EXPECT(dispatch.singleUseCount == 1);
-  KJ_EXPECT(dispatch.actorAttemptCount == 0);
-  KJ_EXPECT(dispatch.metadata == kj::none);
-}
-
-KJ_TEST("actor RPC property reads carry no retry metadata") {
-  auto dispatch = makeActorPropertyRead(
-      kj::arr("durable-object-retries-fetch"_kj, "durable-object-retries-jsrpc"_kj));
-
-  KJ_EXPECT(dispatch.singleUseCount == 1);
-  KJ_EXPECT(dispatch.actorAttemptCount == 0);
-  KJ_EXPECT(dispatch.metadata == kj::none);
+  KJ_EXPECT(dispatch.singleUseCount == 0);
+  KJ_EXPECT(dispatch.actorAttemptCount == 1);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(dispatch.metadata).retryGateEnabled == ActorRetryGateEnabled::NO);
 }
 
 // A Durable Object whose methods fail in the ways the receiver must classify as delivered.
@@ -725,44 +738,428 @@ void expectDeliveredDetails(const kj::Exception& exception) {
   KJ_EXPECT(exception.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) == kj::none, exception);
 }
 
-void expectClaimRejectedDetails(const kj::Exception& exception) {
-  KJ_EXPECT(exception.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none, exception);
-  KJ_EXPECT(exception.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) == kj::none, exception);
-  KJ_EXPECT(exception.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, exception);
+// An actor that appends to `globalThis.events` from its constructor, getter and methods.
+constexpr kj::StringPtr RETRY_CLAIM_ACTOR_SOURCE = R"JS(
+  import { DurableObject, RpcTarget } from "cloudflare:workers";
+  globalThis.events = "";
+  class Counter extends RpcTarget {
+    increment() { globalThis.events += "increment;"; }
+  }
+  export default class extends DurableObject {
+    constructor(ctx, env) {
+      super(ctx, env);
+      globalThis.events += "constructor;";
+    }
+    method() { globalThis.events += "method;"; }
+    get methodFromGetter() {
+      globalThis.events += "getter;";
+      return () => { globalThis.events += "method;"; };
+    }
+    getCounter() { return new Counter(); }
+  }
+)JS"_kj;
+
+kj::String getJsEvents(jsg::Lock& js) {
+  return js.withinHandleScope([&]() { return js.global().get(js, "events"_kj).toString(js); });
 }
 
-KJ_TEST("JSRPC claim rejection fails the native call before construction or delivery") {
-  // Construction would replace the claim-rejection failure with this constructor's error.
-  static constexpr auto source = R"JS(
-    import { DurableObject } from "cloudflare:workers";
-    export default class extends DurableObject {
-      constructor(ctx, env) {
-        super(ctx, env);
-        throw new Error("actor was constructed");
-      }
-      method() {}
+kj::String getJsEvents(TestFixture& fixture) {
+  kj::String events;
+  fixture.enterWorkerLock([&](Worker::Lock& lock) {
+    jsg::Lock& js = lock;
+    js.withinHandleScope([&]() {
+      v8::Context::Scope contextScope(lock.getContext());
+      events = getJsEvents(js);
+    });
+  });
+  return events;
+}
+
+// Records the script's events when the claim fires, and rejects the claim if asked to.
+class RetryClaimObserver final: public RequestObserver {
+ public:
+  void claimRetryTokenBeforeUserCode(IsRetryableHandler retryable) override {
+    ++claimCount;
+    retryableAtClaim = retryable;
+    jsEventsAtClaim = getJsEvents(jsg::Lock::current());
+    KJ_IF_SOME(e, rejection) {
+      kj::throwFatalException(e.clone());
     }
-  )JS"_kj;
-  auto observer = kj::refcounted<RejectingClaimObserver>();
-  TestFixture fixture(TestFixture::SetupParams{
-    .mainModuleSource = source,
+  }
+
+  uint claimCount = 0;
+  IsRetryableHandler retryableAtClaim = IsRetryableHandler::NO;
+  kj::String jsEventsAtClaim;
+  kj::Maybe<kj::Exception> rejection;
+};
+
+TestFixture::SetupParams retryClaimActorParams(RetryClaimObserver& observer) {
+  return {
+    .mainModuleSource = RETRY_CLAIM_ACTOR_SOURCE,
     .actorId = Worker::Actor::Id(kj::str("jsrpc-claim-test")),
     .actorClassName = "default"_kj,
     .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
-        [&observer]() -> kj::Own<RequestObserver> { return kj::addRef(*observer); }),
-  });
+        [&observer]() -> kj::Own<RequestObserver> { return kj::addRef(observer); }),
+  };
+}
+
+void call(rpc::JsRpcTarget::Client& cap, kj::StringPtr name, kj::WaitScope& waitScope) {
+  auto request = cap.callRequest();
+  request.setMethodName(name);
+  request.send().wait(waitScope);
+}
+
+KJ_TEST("JSRPC claims after construction and before the method is looked up") {
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  TestFixture fixture(retryClaimActorParams(*observer));
   auto entrypoint = fixture.makeWorkerEntrypoint();
   auto [cap, session] = startSession(*entrypoint);
 
-  auto rejectedCall = expectCallFailure(cap, "method", fixture.getWaitScope());
-  KJ_EXPECT(rejectedCall.getDescription().contains("retry claim rejected"), rejectedCall);
-  expectClaimRejectedDetails(rejectedCall);
-  KJ_EXPECT(observer->claimCount == 1);
-  KJ_EXPECT(observer->deliveredCount == 0);
+  call(cap, "methodFromGetter", fixture.getWaitScope());
 
-  auto sessionException =
-      kj::runCatchingExceptions([&]() { session.wait(fixture.getWaitScope()); });
-  expectClaimRejectedDetails(KJ_ASSERT_NONNULL(sessionException));
+  KJ_EXPECT(observer->claimCount == 1);
+  KJ_EXPECT(observer->jsEventsAtClaim == "constructor;", observer->jsEventsAtClaim);
+  KJ_EXPECT(getJsEvents(fixture) == "constructor;getter;method;");
+
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
+}
+
+KJ_TEST("a JSRPC session without calls does not claim") {
+  // A caller can open a session and drop it without calling a method, for example when serializing
+  // the arguments fails. No method runs, so the session's token stays unclaimed.
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  TestFixture fixture(retryClaimActorParams(*observer));
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
+
+  KJ_EXPECT(observer->claimCount == 0);
+}
+
+KJ_TEST("calls on a stub returned by the top-level JSRPC call do not claim") {
+  // The token covers the session's top-level call, the only call a sender retries. A stub returned
+  // by that call exists only if it succeeded, and calls on it are never retried on their own.
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  TestFixture fixture(retryClaimActorParams(*observer));
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  auto request = cap.callRequest();
+  request.setMethodName("getCounter");
+  auto result = request.send();
+  auto counter = result.getCallPipeline();
+  call(counter, "increment", fixture.getWaitScope());
+  call(counter, "increment", fixture.getWaitScope());
+
+  KJ_EXPECT(observer->claimCount == 1);
+  KJ_EXPECT(getJsEvents(fixture) == "constructor;increment;increment;");
+
+  { auto drop = kj::mv(result); }
+  counter = nullptr;
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
+}
+
+KJ_TEST("a rejected JSRPC claim runs neither getter nor method, and stays rejected") {
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  auto rejection = KJ_EXCEPTION(FAILED, "retry claim rejected");
+  rejection.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  observer->rejection = kj::mv(rejection);
+  TestFixture fixture(retryClaimActorParams(*observer));
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  // The rejection is a disconnect so that a call pipelined on the rejected call, which the sender
+  // does not retry, does not surface the claim rejection as an application error.
+  auto expectClaimRejected = [](const kj::Exception& e) {
+    KJ_EXPECT(e.getType() == kj::Exception::Type::DISCONNECTED, e);
+    KJ_EXPECT(e.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none, e);
+  };
+  auto request = cap.callRequest();
+  request.setMethodName("getCounter");
+  auto parent = request.send();
+  auto childRequest = parent.getCallPipeline().callRequest();
+  childRequest.setMethodName("increment");
+  auto child = childRequest.send();
+  expectClaimRejected(
+      KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { child.wait(fixture.getWaitScope()); })));
+  expectClaimRejected(
+      KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { parent.wait(fixture.getWaitScope()); })));
+
+  // A production observer consumes its claim context before rejecting, so claiming again would
+  // succeed. A second top-level call must still be rejected.
+  observer->rejection = kj::none;
+  expectClaimRejected(expectCallFailure(cap, "methodFromGetter", fixture.getWaitScope()));
+
+  KJ_EXPECT(observer->claimCount == 1);
+  KJ_EXPECT(getJsEvents(fixture) == "constructor;");
+
+  { auto drop = kj::mv(parent); }
+  { auto drop = kj::mv(child); }
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
+}
+
+// workerd does not transform decorator syntax, so the script calls the decorator the way a
+// bundler's standard-decorator output does.
+constexpr kj::StringPtr RETRYABLE_JSRPC_ACTOR_SOURCE = R"JS(
+  import { DurableObject } from "cloudflare:workers";
+  import { retryable } from "cloudflare:durable-objects";
+  globalThis.events = "";
+  const context = (name) => ({ kind: "method", name, static: false, private: false,
+        addInitializer() {} });
+  class Base extends DurableObject {
+    inherited() {}
+    overridden() {}
+  }
+  retryable(Base.prototype.inherited, context("inherited"));
+  retryable(Base.prototype.overridden, context("overridden"));
+  class Actor extends Base {
+    constructor(ctx, env) {
+      super(ctx, env);
+      this.ownRetryable = this.retryableMethod;
+    }
+    retryableMethod() {}
+    plainMethod() {}
+    overridden() {}
+    get retryableFromGetter() {
+      globalThis.events += "getter;";
+      return this.retryableMethod;
+    }
+  }
+  retryable(Actor.prototype.retryableMethod, context("retryableMethod"));
+  export default Actor;
+)JS"_kj;
+
+// Owns a worker running `source` with only the given autogates enabled, ignoring the
+// @all-autogates variant. The call target is the actor, or the default export for PLAIN_OBJECT.
+struct RetryableClaimTest {
+  enum class Target { ACTOR, PLAIN_OBJECT };
+
+  RetryableClaimTest(kj::StringPtr source, kj::ArrayPtr<const kj::StringPtr> autogates)
+      : RetryableClaimTest(source, autogates, Target::ACTOR) {}
+
+  RetryableClaimTest(
+      kj::StringPtr source, kj::ArrayPtr<const kj::StringPtr> autogates, Target target)
+      : fixture([&]() {
+          auto params = retryClaimActorParams(*observer);
+          params.mainModuleSource = source;
+          if (target == Target::PLAIN_OBJECT) {
+            params.actorId = kj::none;
+            params.actorClassName = kj::none;
+          }
+          return params;
+        }()) {
+    // Set after the fixture, which initializes autogates.
+    util::Autogate::initAutogateNamesForTest(autogates, util::IgnoreAllAutogatesEnv::YES);
+  }
+
+  enum class CallOutcome { SUCCEEDS, FAILS };
+
+  // Makes one top-level call in a new session, checks that it claimed once and had the expected
+  // outcome, and returns how it claimed.
+  template <typename SetUp>
+  IsRetryableHandler claimFor(CallOutcome expected, SetUp&& setUp) {
+    auto claimsBefore = observer->claimCount;
+    auto entrypoint = fixture.makeWorkerEntrypoint();
+    auto [cap, session] = startSession(*entrypoint);
+    auto request = cap.callRequest();
+    setUp(request);
+    KJ_IF_SOME(e,
+        kj::runCatchingExceptions([&]() { request.send().wait(fixture.getWaitScope()); })) {
+      KJ_EXPECT(expected == CallOutcome::FAILS, e);
+    } else {
+      KJ_EXPECT(expected == CallOutcome::SUCCEEDS);
+    }
+    cap = nullptr;
+    session.wait(fixture.getWaitScope());
+    KJ_EXPECT(observer->claimCount == claimsBefore + 1);
+    return observer->retryableAtClaim;
+  }
+
+  IsRetryableHandler claimForMethod(kj::StringPtr name, CallOutcome expected) {
+    return claimFor(expected, [&](auto& request) { request.setMethodName(name); });
+  }
+
+  // Declared before `fixture`, whose initializer uses it.
+  kj::Own<RetryClaimObserver> observer = kj::refcounted<RetryClaimObserver>();
+  TestFixture fixture;
+};
+
+constexpr auto USERLAND_GATE = "durable-object-retries-userland"_kj;
+using CallOutcome = RetryableClaimTest::CallOutcome;
+
+KJ_TEST("JSRPC claims as retryable only for a @retryable method found without user code") {
+  RetryableClaimTest test(RETRYABLE_JSRPC_ACTOR_SOURCE, kj::arr(USERLAND_GATE));
+
+  KJ_EXPECT(
+      test.claimForMethod("retryableMethod", CallOutcome::SUCCEEDS) == IsRetryableHandler::YES);
+  KJ_EXPECT(test.claimForMethod("inherited", CallOutcome::SUCCEEDS) == IsRetryableHandler::YES);
+  KJ_EXPECT(test.claimFor(CallOutcome::SUCCEEDS, [](auto& request) {
+    request.initMethodPath(1).set(0, "retryableMethod");
+  }) == IsRetryableHandler::YES);
+
+  KJ_EXPECT(test.claimForMethod("plainMethod", CallOutcome::SUCCEEDS) == IsRetryableHandler::NO);
+  // An undecorated override masks the decorated base method.
+  KJ_EXPECT(test.claimForMethod("overridden", CallOutcome::SUCCEEDS) == IsRetryableHandler::NO);
+  // Own properties cannot be called over RPC.
+  KJ_EXPECT(test.claimForMethod("ownRetryable", CallOutcome::FAILS) == IsRetryableHandler::NO);
+  KJ_EXPECT(test.claimFor(CallOutcome::FAILS, [](auto& request) {
+    auto path = request.initMethodPath(2);
+    path.set(0, "retryableMethod");
+    path.set(1, "call");
+  }) == IsRetryableHandler::NO);
+  KJ_EXPECT(test.claimFor(CallOutcome::SUCCEEDS, [](auto& request) {
+    request.setMethodName("retryableMethod");
+    request.getOperation().setGetProperty();
+  }) == IsRetryableHandler::NO);
+
+  KJ_EXPECT(
+      test.claimForMethod("retryableFromGetter", CallOutcome::SUCCEEDS) == IsRetryableHandler::NO);
+  KJ_EXPECT(!test.observer->jsEventsAtClaim.contains("getter;"), test.observer->jsEventsAtClaim);
+  KJ_EXPECT(getJsEvents(test.fixture).contains("getter;"));
+}
+
+KJ_TEST("JSRPC claims a @retryable method as not retryable when the userland gate is disabled") {
+  RetryableClaimTest test(RETRYABLE_JSRPC_ACTOR_SOURCE, nullptr);
+
+  KJ_EXPECT(
+      test.claimForMethod("retryableMethod", CallOutcome::SUCCEEDS) == IsRetryableHandler::NO);
+}
+
+KJ_TEST("JSRPC treats a method shadowing an Object.prototype getter as not retryable") {
+  // The method lookup also reads Object.prototype's property of the same name, running the getter.
+  RetryableClaimTest test(R"JS(
+    import { DurableObject } from "cloudflare:workers";
+    import { retryable } from "cloudflare:durable-objects";
+    globalThis.events = "";
+    class Actor extends DurableObject {
+      shadowing() {}
+    }
+    retryable(Actor.prototype.shadowing,
+        { kind: "method", name: "shadowing", static: false, private: false,
+        addInitializer() {} });
+    Object.defineProperty(Object.prototype, "shadowing", {
+      get() { globalThis.events += "getter;"; },
+      configurable: true,
+    });
+    export default Actor;
+  )JS"_kj,
+      kj::arr(USERLAND_GATE));
+
+  KJ_EXPECT(test.claimForMethod("shadowing", CallOutcome::SUCCEEDS) == IsRetryableHandler::NO);
+  KJ_EXPECT(!test.observer->jsEventsAtClaim.contains("getter;"), test.observer->jsEventsAtClaim);
+  KJ_EXPECT(getJsEvents(test.fixture).contains("getter;"));
+}
+
+KJ_TEST("JSRPC treats a @retryable method also on Object.prototype as not retryable") {
+  // The method lookup rejects a method that is the same value as Object.prototype's property.
+  RetryableClaimTest test(R"JS(
+    import { DurableObject } from "cloudflare:workers";
+    import { retryable } from "cloudflare:durable-objects";
+    class Actor extends DurableObject {
+      shared() {}
+    }
+    retryable(Actor.prototype.shared,
+        { kind: "method", name: "shared", static: false, private: false,
+        addInitializer() {} });
+    Object.prototype.shared = Actor.prototype.shared;
+    export default Actor;
+  )JS"_kj,
+      kj::arr(USERLAND_GATE));
+
+  KJ_EXPECT(test.claimForMethod("shared", CallOutcome::FAILS) == IsRetryableHandler::NO);
+}
+
+KJ_TEST("JSRPC claims only a plain object's own @retryable method as retryable") {
+  // tryGetProperty() does not look up a plain object's prototype chain.
+  RetryableClaimTest test(R"JS(
+    import { retryable } from "cloudflare:durable-objects";
+    const marked = (name) => {
+      const method = function() {};
+      retryable(method, { kind: "method", name, static: false, private: false,
+        addInitializer() {} });
+      return method;
+    };
+    const handler = Object.create({ inherited: marked("inherited") });
+    handler.own = marked("own");
+    export default handler;
+  )JS"_kj,
+      kj::arr(USERLAND_GATE), RetryableClaimTest::Target::PLAIN_OBJECT);
+
+  // The call fails only because a plain object's method must receive exactly one argument.
+  KJ_EXPECT(test.claimForMethod("own", CallOutcome::FAILS) == IsRetryableHandler::YES);
+  KJ_EXPECT(test.claimForMethod("inherited", CallOutcome::FAILS) == IsRetryableHandler::NO);
+}
+
+KJ_TEST("JSRPC treats a method reached through a Proxy prototype as not retryable") {
+  RetryableClaimTest test(R"JS(
+    import { DurableObject } from "cloudflare:workers";
+    import { retryable } from "cloudflare:durable-objects";
+    globalThis.events = "";
+    class Base extends DurableObject {
+      inherited() {}
+    }
+    retryable(Base.prototype.inherited,
+        { kind: "method", name: "inherited", static: false, private: false,
+        addInitializer() {} });
+    class Actor extends Base {}
+    Object.setPrototypeOf(Actor.prototype, new Proxy(Base.prototype, {
+      getOwnPropertyDescriptor(target, key) {
+        globalThis.events += "trap;";
+        return Reflect.getOwnPropertyDescriptor(target, key);
+      },
+    }));
+    export default Actor;
+  )JS"_kj,
+      kj::arr(USERLAND_GATE));
+
+  KJ_EXPECT(test.claimForMethod("inherited", CallOutcome::SUCCEEDS) == IsRetryableHandler::NO);
+  KJ_EXPECT(!test.observer->jsEventsAtClaim.contains("trap;"), test.observer->jsEventsAtClaim);
+}
+
+KJ_TEST("after a retryable JSRPC claim, the session can only call @retryable methods") {
+  RetryableClaimTest test(RETRYABLE_JSRPC_ACTOR_SOURCE, kj::arr(USERLAND_GATE));
+  auto entrypoint = test.fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  call(cap, "retryableMethod", test.fixture.getWaitScope());
+  call(cap, "inherited", test.fixture.getWaitScope());
+  auto e = expectCallFailure(cap, "plainMethod", test.fixture.getWaitScope());
+
+  KJ_EXPECT(e.getDescription().contains("can only call @retryable methods"), e);
+  KJ_EXPECT(test.observer->claimCount == 1);
+
+  cap = nullptr;
+  session.wait(test.fixture.getWaitScope());
+}
+
+KJ_TEST("JSRPC preserves not-delivered for a predecessor rejection") {
+  // The caller retries a predecessor rejection against the replacement actor, but only while it is
+  // marked not delivered. Session failures are otherwise marked delivered, so this one must be
+  // exempt.
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  auto rejection = KJ_EXCEPTION(DISCONNECTED, "request rejected before user code");
+  jsg::markActorRequestNotDelivered(rejection);
+  rejection.setDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  observer->rejection = kj::mv(rejection);
+  TestFixture fixture(retryClaimActorParams(*observer));
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  auto e = expectCallFailure(cap, "method", fixture.getWaitScope());
+
+  KJ_EXPECT(e.getType() == kj::Exception::Type::DISCONNECTED, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID) != kj::none, e);
+  KJ_EXPECT(getJsEvents(fixture) == "constructor;");
+
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
 }
 
 KJ_TEST("actor JSRPC method and getter failures carry delivered details") {

@@ -33,6 +33,14 @@ interface ExceptionWithName {
 type Exception =
   ExceptionWithCode | ExceptionWithMessage | ExceptionWithName | string;
 
+type TracingSpanStatusCode = 'unset' | 'ok' | 'error';
+
+interface TracingSpanStatus {
+  code: TracingSpanStatusCode;
+  /** A developer-facing error message. Ignored unless code is "error". */
+  message?: string;
+}
+
 declare class Span {
   // Returns true if this span will be recorded to the tracing system. False when the
   // current async context is not being traced, or when the span has already been submitted.
@@ -47,6 +55,13 @@ declare class Span {
 
   // Records an exception event on the span. Calls after the span has ended are ignored.
   recordException(exception: Exception): void;
+
+  // Changes the span name. Calls after the span has ended are ignored.
+  updateName(name: string): this;
+
+  // Sets the span status. Calls after the span has ended are ignored. Messages are retained only
+  // for errors.
+  setStatus(status: TracingSpanStatus): this;
 
   // Ends the span and submits its attributes to the tracing system. Idempotent.
   end(): void;

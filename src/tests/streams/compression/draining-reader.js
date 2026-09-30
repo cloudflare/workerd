@@ -8,16 +8,17 @@
 // expose_draining_reader); the C++ cell asserts the global's absence.
 //
 // Compression-specific facts: no declared expectedLength, and — because the
-// eager codec pushes buffer output ahead of demand — a closed stream's
-// entire backlog (all buffered chunks plus the close sentinel) is swept by
-// a SINGLE read reporting done, no tee sibling needed (contrast the
-// encoding suite, where HWM-0 production means nothing is ever
-// synchronously buffered).
+// eager codec's output is queued ahead of demand, in pieces of at most
+// 64 KiB — a closed stream's entire backlog (all queued pieces plus the
+// close sentinel) is swept by a SINGLE read reporting done, no tee sibling
+// needed (contrast the encoding suite, where HWM-0 production means nothing
+// is ever synchronously buffered).
 
 /* global ReadableStreamDrainingReader */
 
 import { strictEqual, ok } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
+import { pump } from 'round-trip';
 
 export const drainingReaderSweepsBufferedBacklog = {
   async test() {
@@ -41,6 +42,35 @@ export const drainingReaderSweepsBufferedBacklog = {
     const tail = await reader.read();
     strictEqual(tail.done, true);
     strictEqual(tail.chunks.length, 0);
+  },
+};
+
+export const drainingReaderTakesBoundedPieces = {
+  async test() {
+    if (!usingTsImpl) {
+      strictEqual(typeof ReadableStreamDrainingReader, 'undefined');
+      return;
+    }
+    const kPiece = 64 * 1024;
+    const size = 1024 * 1024;
+    const compressed = await pump(new CompressionStream('gzip'), [
+      new Uint8Array(size),
+    ]);
+    const ds = new DecompressionStream('gzip');
+    const writer = ds.writable.getWriter();
+    await writer.write(compressed);
+    await writer.close();
+    const reader = new ReadableStreamDrainingReader(ds.readable);
+    // One sweep takes the whole backlog, as the pieces it was queued in.
+    const { chunks, done } = await reader.read();
+    strictEqual(done, true);
+    strictEqual(chunks.length, size / kPiece);
+    let total = 0;
+    for (const chunk of chunks) {
+      strictEqual(chunk.byteLength, kPiece);
+      total += chunk.byteLength;
+    }
+    strictEqual(total, size);
   },
 };
 

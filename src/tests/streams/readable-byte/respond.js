@@ -7,7 +7,7 @@
 // consumption driving JS byte sources, multi-chunk fills, reentrant
 // respond, cancel races, transform pumps, and UAF regressions).
 
-import { strictEqual, rejects, throws, ok } from 'node:assert';
+import { deepStrictEqual, strictEqual, rejects, throws, ok } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 // Test Response body methods with JS-backed BYOB ReadableStream
@@ -1187,6 +1187,41 @@ export const readableStreamByteRespondWithNewViewUsesNewElementSize = {
     // Ensure no further bytes remain queued.
     const end = await reader.read(new Uint8Array(1));
     ok(end.done);
+  },
+};
+
+// respond() leaving a sub-element remainder queues it for the next read;
+// the head read settles first all the same.
+export const respondRemainderSettlesHeadFirst = {
+  async test() {
+    let request;
+    const pulled = Promise.withResolvers();
+    const rs = new ReadableStream({
+      type: 'bytes',
+      pull(c) {
+        request = c.byobRequest;
+        pulled.resolve();
+      },
+    });
+    const reader = rs.getReader({ mode: 'byob' });
+    const order = [];
+    const p1 = reader.read(new Uint16Array(2)).then((r) => {
+      order.push(`p1:${r.value.byteLength}`);
+      return r;
+    });
+    const p2 = reader.read(new Uint8Array(1)).then((r) => {
+      order.push(`p2:${r.value.byteLength}`);
+      return r;
+    });
+    await pulled.promise;
+    new Uint8Array(request.view.buffer, request.view.byteOffset, 3).set([
+      1, 2, 3,
+    ]);
+    request.respond(3);
+    const [r1, r2] = await Promise.all([p1, p2]);
+    deepStrictEqual(order, ['p1:2', 'p2:1']);
+    deepStrictEqual([...new Uint8Array(r1.value.buffer, 0, 2)], [1, 2]);
+    deepStrictEqual([...r2.value], [3]);
   },
 };
 

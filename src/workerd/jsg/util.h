@@ -528,10 +528,26 @@ class ExternalStringAllocator {
 // Returns a singleton DefaultExternalStringAllocator.
 kj::Own<ExternalStringAllocator> defaultExternalStringAllocator();
 
+// Despite the name, OwnedAscii carries whatever one-byte encoding its consumer expects: the new
+// module registry treats it as UTF-8 and transcodes non-ASCII text, while the legacy registry and
+// newExternalOneByteString() treat it as Latin-1.
 using OwnedAscii = kj::Array<const char>;
 using OwnedUtf16 = kj::Array<const uint16_t>;
 using StaticExternalStringSource =
     kj::OneOf<kj::ArrayPtr<const char>, kj::ArrayPtr<const uint16_t>>;
+// A buffer for an external string, either borrowed from static storage or shared with V8.
+using ExternalStringSource = kj::OneOf<kj::ArrayPtr<const char>,
+    kj::ArrayPtr<const uint16_t>,
+    kj::Arc<OwnedAscii>,
+    kj::Arc<OwnedUtf16>>;
+
+inline kj::Arc<OwnedAscii> copyToArc(kj::ArrayPtr<const char> source) {
+  return kj::arc<OwnedAscii>(kj::heapArray(source));
+}
+
+inline kj::Arc<OwnedUtf16> copyToArc(kj::ArrayPtr<const uint16_t> source) {
+  return kj::arc<OwnedUtf16>(kj::heapArray(source));
+}
 
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite
@@ -567,6 +583,12 @@ v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint
 
 // Two-byte counterpart to the owning one-byte overload above.
 v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::Arc<OwnedUtf16> buf);
+
+// Creates a one-byte or two-byte external string, depending on which buffer `buf` holds.
+v8::Local<v8::String> newExternalString(Lock& js, StaticExternalStringSource buf);
+
+// Like the overload above. An Arc buffer is shared: the V8 string takes its own reference.
+v8::Local<v8::String> newExternalString(Lock& js, const ExternalStringSource& buf);
 
 // Use this type to mark APIs that are not implemented. Attempts to use the API will throw an
 // exception.

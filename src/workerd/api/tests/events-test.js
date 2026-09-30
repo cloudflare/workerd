@@ -782,6 +782,43 @@ export const messageEventSpecInit = {
   },
 };
 
+// MessageEventInit's source is nullable, so an event whose source reads as null can
+// serve as the init for a new event.
+export const messageEventNullSource = {
+  async test() {
+    strictEqual(new MessageEvent('message', { source: null }).source, null);
+
+    const original = new MessageEvent('message', {
+      data: 'x',
+      lastEventId: '7',
+    });
+    const copy = new MessageEvent(original.type, original);
+    strictEqual(copy.data, 'x');
+    strictEqual(copy.lastEventId, '7');
+    strictEqual(copy.source, null);
+
+    // Message events fired by a WebSocket have a null source as well.
+    const { 0: client, 1: server } = new WebSocketPair();
+    client.accept();
+    server.accept();
+    const { promise, resolve, reject } = Promise.withResolvers();
+    client.addEventListener('message', (event) => {
+      try {
+        resolve(new MessageEvent(event.type, event));
+      } catch (err) {
+        reject(err);
+      }
+    });
+    server.send('hello');
+    const cloned = await promise;
+    strictEqual(cloned.data, 'hello');
+    strictEqual(cloned.source, null);
+
+    client.close();
+    server.close();
+  },
+};
+
 // CloseEventInit supports the common EventInit members.
 export const closeEventSpecInit = {
   test() {

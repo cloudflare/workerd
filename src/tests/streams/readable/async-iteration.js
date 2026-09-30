@@ -5,10 +5,16 @@
 // Async iteration over ReadableStream: for-await, the iterator protocol
 // (return/next interleavings), preventCancel, and the iterator's shape.
 // The seven protocol tests are migrated from
-// streams-async-iterator-test.js; the no-awaiting interleavings and the
-// prototype-shape divergence are pinned from probes (most WPT
-// async-iterator.any C++ expectedFailures are protocol-strictness
-// mismatches, but the observable interleavings below are parity).
+// streams-async-iterator-test.js; the interleavings and the
+// prototype-shape divergence are pinned from probes. Plain no-await
+// interleavings are parity. Ledger #22: WebIDL clears the iterator's
+// ongoing promise whenever a next() settles, so a continuation that was
+// registered on that next() before a later call runs with no ongoing
+// promise, and its next() reads ahead of the queued one; a next() after
+// a rejected one reports done (one of the WPT async-iterator.any C++
+// expectedFailures; the read-ahead shapes are derived from the WebIDL
+// algorithm, not WPT cases). TS follows the spec; C++ serializes every
+// call.
 
 import { strictEqual, ok, rejects, deepStrictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -255,5 +261,107 @@ export const iteratorPrototypeShape = {
       ).sort()
     );
     await it.return();
+  },
+};
+
+// Ledger #22: n1; a continuation on n1 calls next() (n3); then n2. Per
+// spec, n3 reads before n2: n2 gets 'c', n3 gets 'b'. C++ keeps call
+// order.
+export const nextFromEarlierContinuationReadsAhead = {
+  async test() {
+    let controller;
+    const rs = new ReadableStream({
+      start(c) {
+        controller = c;
+      },
+    });
+    const it = rs.values();
+    const n1 = it.next();
+    let n3;
+    const continued = n1.then(() => {
+      n3 = it.next();
+    });
+    const n2 = it.next();
+    await scheduler.wait(5);
+    controller.enqueue('a');
+    await continued;
+    await scheduler.wait(5);
+    controller.enqueue('b');
+    controller.enqueue('c');
+    strictEqual((await n1).value, 'a');
+    deepStrictEqual(
+      [(await n2).value, (await n3).value],
+      usingTsImpl ? ['c', 'b'] : ['b', 'c']
+    );
+    await it.return();
+  },
+};
+
+// Ledger #22: n1; a continuation on n1 calls next() (n2); then return().
+// Per spec, n2 runs before the return and reads queued data; the return
+// still cancels. C++ reports n2 done.
+export const nextFromEarlierContinuationBeatsReturn = {
+  async test() {
+    let controller;
+    let cancelReason;
+    const rs = new ReadableStream({
+      start(c) {
+        controller = c;
+      },
+      cancel(reason) {
+        cancelReason = reason;
+      },
+    });
+    const it = rs.values();
+    const n1 = it.next();
+    let n2;
+    const continued = n1.then(() => {
+      n2 = it.next();
+    });
+    await scheduler.wait(5);
+    const ret = it.return('bye');
+    controller.enqueue('a');
+    // 'b' must be queued before n2 is issued: n2's read is then served
+    // synchronously, so the reader has no pending read requests when the
+    // return steps run, as the streams spec's async iterator return
+    // asserts. A single enqueue would leave n2's read request pending
+    // there, a state the spec treats as unreachable.
+    controller.enqueue('b');
+    strictEqual((await n1).value, 'a');
+    await continued;
+    const r2 = await n2;
+    strictEqual(r2.done, !usingTsImpl);
+    strictEqual(r2.value, usingTsImpl ? 'b' : undefined);
+    deepStrictEqual(await ret, { value: 'bye', done: true });
+    strictEqual(cancelReason, 'bye');
+  },
+};
+
+// Ledger #22: two next() calls pending when the stream errors. Per spec,
+// the first rejects and the iterator is finished, so later ones report
+// done. C++ rejects them all.
+export const nextAfterRejectedNextIsDone = {
+  async test() {
+    let controller;
+    const rs = new ReadableStream({
+      start(c) {
+        controller = c;
+      },
+    });
+    const it = rs.values();
+    const n1 = it.next();
+    const n2 = it.next();
+    await scheduler.wait(5);
+    const boom = new Error('boom');
+    controller.error(boom);
+    const n3 = it.next();
+    await rejects(n1, (e) => e === boom);
+    for (const p of [n2, n3]) {
+      if (usingTsImpl) {
+        deepStrictEqual(await p, { value: undefined, done: true });
+      } else {
+        await rejects(p, (e) => e === boom);
+      }
+    }
   },
 };

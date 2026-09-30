@@ -55,6 +55,7 @@ class BaseTracer: public kj::Refcounted {
       kj::Date startTime) = 0;
   // Add a span close event.
   virtual void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) = 0;
+  virtual void addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) = 0;
   virtual void addSpanAttribute(const tracing::InvocationSpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value) = 0;
@@ -165,6 +166,7 @@ class WorkerTracer final: public BaseTracer {
       kj::ConstString operationName,
       kj::Date startTime) override;
   void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
+  void addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) override;
   void addSpanAttribute(const tracing::InvocationSpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value) override;
@@ -224,7 +226,6 @@ class WorkerTracer final: public BaseTracer {
   // for trace events. This should no longer be needed after merging the existing span ID and
   // InvocationSpanContext interfaces.
   kj::Maybe<tracing::InvocationSpanContext> topLevelInvocationSpanContext;
-
   // When true, the destructor will not log a warning about missing Onset event.
   // Set via markUnused() when a tracer is intentionally not used (e.g., duplicate alarm requests).
   bool markedUnused = false;
@@ -259,6 +260,8 @@ class SpanSubmitter: public kj::Refcounted {
   // Called when a span is closed. Together with the open data, provides all span information.
   virtual void submitSpanClose(
       tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) = 0;
+
+  virtual void submitSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) = 0;
 
   virtual void submitSpanException(tracing::SpanId spanId,
       kj::Date timestamp,
@@ -308,6 +311,8 @@ class UserSpanObserver final: public SpanObserver {
   kj::Rc<SpanObserver> newChildFromUserCode() override;
   void onOpen(kj::ConstString operationName, kj::Date startTime) override;
   void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override;
+  void onUpdateName(kj::ConstString operationName) override;
+  void onUpdateStatus(tracing::SpanStatus&& status) override;
   void onException(kj::Date timestamp,
       kj::Maybe<tracing::Exception::Code> code,
       kj::String name,

@@ -128,6 +128,8 @@ KJ_TEST("compatibility flag parsing") {
       "(formDataParserSupportsFiles = true, fetchRefusesUnknownProtocols = true)");
   expectCompileCompatibilityFlags("2021-11-04", {"fetch_refuses_unknown_protocols"_kj},
       "(formDataParserSupportsFiles = true, fetchRefusesUnknownProtocols = true)");
+  expectCompileCompatibilityFlags("2021-05-17", {"durable_object_io_tasks_prevent_eviction"_kj},
+      "(durableObjectIoTasksPreventEviction = true)");
 
   // Test errors.
   expectCompileCompatibilityFlags("abcd", {}, "()", {"Invalid compatibility date: abcd"});
@@ -560,6 +562,20 @@ KJ_TEST("encode to full flag list") {
     KJ_EXPECT(!contains(strings, "no_cots_on_external_fetch"_kj));
     // But other date-enabled flags still appear.
     KJ_EXPECT(contains(strings, "minimal_subrequests"_kj));
+  }
+
+  {
+    // durable_object_io_tasks_prevent_eviction is enabled by date on 2026-10-01 and can be
+    // disabled explicitly.
+    constexpr auto flag = "durable_object_io_tasks_prevent_eviction"_kj;
+    KJ_EXPECT(!contains(
+        decompileCompatibilityFlags(compileOwnFeatureFlags("2026-09-30", {}).get()), flag));
+    KJ_EXPECT(contains(
+        decompileCompatibilityFlags(compileOwnFeatureFlags("2026-10-01", {}).get()), flag));
+    KJ_EXPECT(!contains(decompileCompatibilityFlags(compileOwnFeatureFlags(
+                            "2026-10-01", {"durable_object_io_tasks_do_not_prevent_eviction"_kj})
+                                                        .get()),
+        flag));
   }
 }
 

@@ -29,14 +29,12 @@ namespace workerd::clang_tidy {
 // Suppress intentional uses with `// NOLINT(workerd-unsafe-continuation-capture)`
 // plus a comment explaining why the capture cannot dangle.
 
-class UnsafeContinuationCaptureCheck : public clang::tidy::ClangTidyCheck {
-public:
-  UnsafeContinuationCaptureCheck(clang::StringRef Name,
-                                 clang::tidy::ClangTidyContext *Context);
+class UnsafeContinuationCaptureCheck: public clang::tidy::ClangTidyCheck {
+ public:
+  UnsafeContinuationCaptureCheck(clang::StringRef Name, clang::tidy::ClangTidyContext *Context);
 
   void registerMatchers(clang::ast_matchers::MatchFinder *Finder) override;
-  void
-  check(const clang::ast_matchers::MatchFinder::MatchResult &Result) override;
+  void check(const clang::ast_matchers::MatchFinder::MatchResult &Result) override;
   // Surface the AsyncSinks / OwningCaptureTypes options to
   // `clang-tidy --dump-config` and to option serialization.
   void storeOptions(clang::tidy::ClangTidyOptions::OptionMap &Opts) override;
@@ -45,7 +43,7 @@ public:
   // thread.
   void onEndOfTranslationUnit() override;
 
-private:
+ private:
   // Raw option strings (preserved verbatim for storeOptions()).
   std::string AsyncSinksRaw;
   std::string OwningCaptureTypesRaw;
@@ -58,4 +56,4 @@ private:
   std::vector<std::string> ExtraSyncSinks;
 };
 
-} // namespace workerd::clang_tidy
+}  // namespace workerd::clang_tidy

@@ -70,6 +70,34 @@ export const echoRoundTrip = {
   },
 };
 
+// With a highWaterMark the writable counts bytes. Views already detached,
+// or left out of bounds by a shrink, count and send nothing — DataViews
+// too, whose byteLength getter throws where a typed array's reports 0 —
+// and the stream keeps writing (parity).
+export const degenerateViewsWithHighWaterMark = {
+  async test(ctrl, env) {
+    const socket = connect(echoAddress(env), { highWaterMark: 1024 });
+    const writer = socket.writable.getWriter();
+    for (const View of [Uint8Array, DataView]) {
+      const ab = new ArrayBuffer(8);
+      const detached = new View(ab, 2, 4);
+      ab.transfer();
+      await writer.write(detached);
+      const rab = new ArrayBuffer(8, { maxByteLength: 8 });
+      const outOfBounds = new View(rab, 4, 4);
+      rab.resize(2);
+      await writer.write(outOfBounds);
+    }
+    await writer.write(enc.encode('still writable'));
+    await writer.close();
+    strictEqual(
+      dec.decode(await drainToBytes(socket.readable)),
+      'still writable'
+    );
+    await socket.close();
+  },
+};
+
 // The greet server ends after one message: the readable delivers it
 // and reaches done; the socket's closed promise settles.
 export const greetReadsToEof = {
@@ -209,6 +237,32 @@ export const pipeSocketToSocket = {
       drainToBytes(echoSocket.readable),
       greetSocket.readable.pipeTo(echoSocket.writable),
     ]);
+    strictEqual(dec.decode(echoed), 'hello from the greet server');
+    await Promise.all([greetSocket.close(), echoSocket.close()]);
+  },
+};
+
+// A native-to-native pipe takes the source's native source away at the
+// start: the source is left locked and closed, as the legacy C++ streams
+// leave it. The closed state is observable here only through the Node.js
+// interop closed-promise, which only the TypeScript streams carry.
+const kIsClosedPromise = Symbol.for('nodejs.webstream.isClosedPromise');
+export const pipeSocketToSocketClosesSource = {
+  async test(ctrl, env) {
+    const greetSocket = connect(greetAddress(env));
+    const echoSocket = connect(echoAddress(env));
+    const source = greetSocket.readable;
+    const piped = source.pipeTo(echoSocket.writable);
+    strictEqual(source.locked, true);
+    if (usingTsImpl) {
+      const closed = await Promise.race([
+        source[kIsClosedPromise].promise.then(() => 'closed'),
+        scheduler.wait(100).then(() => 'pending'),
+      ]);
+      strictEqual(closed, 'closed');
+    }
+    const echoed = await drainToBytes(echoSocket.readable);
+    await piped;
     strictEqual(dec.decode(echoed), 'hello from the greet server');
     await Promise.all([greetSocket.close(), echoSocket.close()]);
   },

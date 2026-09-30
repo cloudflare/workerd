@@ -16,7 +16,7 @@ namespace workerd::clang_tidy {
 // Flags calls to WD_CONSUME methods made directly through kj::Ptr.
 // Such calls must use consume(kj::mv(ptr))->method(...) so the active kj::Ptr is
 // dropped before the callee can synchronously destroy its target.
-class ConsumeCheck : public clang::tidy::ClangTidyCheck {
+class ConsumeCheck: public clang::tidy::ClangTidyCheck {
  public:
   ConsumeCheck(clang::StringRef Name, clang::tidy::ClangTidyContext* Context)
       : ClangTidyCheck(Name, Context) {}

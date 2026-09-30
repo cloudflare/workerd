@@ -19,6 +19,7 @@ export {
   differentTypesTransform,
   hookInvocationShape,
   prototypeChainTransformer,
+  startSettlementTiming,
 } from 'transformer-algorithms';
 
 export {
@@ -86,7 +87,7 @@ export {
   detachWhileQueuedObservedByReader,
 } from 'buffer-lifecycle';
 
-export { transformStreamGc } from 'gc';
+export { transformStreamGc, transformerCollectedAfterFinish } from 'gc';
 
 export {
   drainingReaderThroughTransform,
@@ -124,3 +125,11 @@ export default {
 export { structuredCloneTransform } from 'transfer';
 
 export { omittedDictionariesReadNothing } from 'pollution';
+export {
+  cancelThenAbortSameTurn,
+  abortThenCancelSameTurn,
+  cancelThenTerminateAfterStart,
+  cancelAfterWritableSizeError,
+  cancelThenCloseSameTurn,
+  writeReachesSinkAfterCancelClearedAlgorithms,
+} from 'cancel-outcomes';
