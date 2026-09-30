@@ -542,13 +542,64 @@ export const addAbortSignalOnTeeBranchThenSiblingCancel = {
   },
 };
 
+// Once the source has requested close, a branch errored through the hook is
+// not a cancel: the spec errors that branch's own controller and never
+// forwards the error to the source. With the sibling already cancelled, the
+// aborted branch is the last consumer, and the source's cancel() still never
+// runs; the sibling's cancel promise settles once the aborted branch has
+// left. Before close the same sequence cancels the source with both reasons
+// (addAbortSignalOnTeeBranchThenSiblingCancel).
+export const addAbortSignalOnTeeBranchAfterCloseSkipsSourceCancel = {
+  async test() {
+    if (!usingTsImpl) return;
+    for (const bytes of [false, true]) {
+      let cancelCalls = 0;
+      const {
+        stream: source,
+        controller,
+        chunk,
+      } = sourceStream(bytes, {
+        cancel() {
+          cancelCalls++;
+        },
+      });
+      const [branch1, branch2] = source.tee();
+      controller.enqueue(chunk);
+      // branch1 still consumes, so the sibling's cancel promise waits on the
+      // source. Close alone does not settle it: branch1 has not drained.
+      const cancelled = branch2.cancel(new Error('the other consumer leaves'));
+      strictEqual(await settlement(cancelled), 'pending');
+      strictEqual(cancelCalls, 0);
+      controller.close();
+      strictEqual(await settlement(cancelled), 'pending');
+      const ac = new AbortController();
+      addAbortSignal(ac.signal, branch1);
+      const reason = new Error('the last consumer gives up');
+      ac.abort(reason);
+      const reader = branch1.getReader();
+      await rejects(reader.read(), (err) => {
+        strictEqual(err.name, 'AbortError');
+        strictEqual(err.cause, reason);
+        return true;
+      });
+      await rejects(reader.closed, { name: 'AbortError' });
+      // The last consumer gone, the source ends as when every consumer has
+      // drained: the sibling's cancel settles without the source's cancel().
+      strictEqual(await cancelled, undefined);
+      strictEqual(await callbackOf((cb) => finished(source, cb)), undefined);
+      strictEqual(cancelCalls, 0);
+    }
+  },
+};
+
 // A branch that has itself been teed is a permanently locked, inert shell:
 // under the queued tee model its two branches took its place as consumers
 // of the shared queue, and there is no per-branch controller for the hook
 // to error (a deliberate divergence from the spec's tee). Aborting it
 // changes nothing — not for its branches, not for its sibling — and the
 // source is cancelled only once every consumer has left, with each one's
-// reason.
+// reason (before close is requested; after it, see
+// addAbortSignalOnTeeBranchAfterCloseSkipsSourceCancel).
 export const addAbortSignalOnTeedAwayBranchIsInert = {
   async test() {
     if (!usingTsImpl) return;
@@ -738,14 +789,13 @@ export const addAbortSignalOnResponseBody = {
   },
 };
 
-// Never settled, to be looked at separately: finished() on a branch that
-// has itself been teed (a shell that is not the controller's stream, so
-// none of the source's events reach it), and on the source of a
-// native-backed tee (a Response body: its C++ source is swapped out at tee
-// time while the data keeps flowing into the branch sources, so nothing
-// reports its end). Both stay pending after every branch has drained; the
-// source of a queued tee settles.
-export const finishedOnTeedAwayShellStaysPending = {
+// A stream whose data has moved to another stream closes at the handoff,
+// as the legacy C++ streams leave it: a branch that has itself been teed,
+// the source of a native-backed tee (a Response body), and a native body
+// detached by new Request(request). finished() on it settles at once,
+// before the data has been read, and its error hook does nothing, so it
+// cannot reach the stream the data moved to.
+export const finishedOnHandedOffStreamSettlesAtHandoff = {
   async test() {
     if (!usingTsImpl) return;
     const source = new ReadableStream({
@@ -755,17 +805,61 @@ export const finishedOnTeedAwayShellStaysPending = {
       },
     });
     const [a, b] = source.tee();
-    const [a1, a2] = a.tee();
     const shell = callbackOf((cb) => finished(a, cb));
+    const [a1, a2] = a.tee();
+    strictEqual(await shell, undefined);
+
     const body = new Response('x').body;
-    const [n1, n2] = body.tee();
     const native = callbackOf((cb) => finished(body, cb));
+    const [n1, n2] = body.tee();
+    strictEqual(await native, undefined);
+
+    const detachedBody = new Response('xyz').body;
+    const request = new Request('http://example.com/', {
+      method: 'POST',
+      body: detachedBody,
+    });
+    const detached = callbackOf((cb) => finished(detachedBody, cb));
+    const copy = new Request(request);
+    strictEqual(await detached, undefined);
+
+    for (const husk of [a, body, detachedBody]) {
+      husk[kControllerErrorFunction](new Error('ignored'));
+    }
+    strictEqual(await copy.text(), 'xyz');
     for (const branch of [a1, a2, b, n1, n2]) {
       const reader = branch.getReader();
       while (!(await reader.read()).done);
     }
-    strictEqual(await callbackOf((cb) => finished(source, cb)), undefined);
-    strictEqual(await settlement(shell), 'pending');
-    strictEqual(await settlement(native), 'pending');
+  },
+};
+
+// A JS-backed body detached by new Request(request) is different: it stays
+// the source's own stream, so it closes and errors with the source, and its
+// error hook errors the detached body.
+export const finishedOnDetachedQueuedBodyFollowsSource = {
+  async test() {
+    if (!usingTsImpl) return;
+    const { stream, controller } = sourceStream(true);
+    const request = new Request('http://example.com/', {
+      method: 'POST',
+      body: stream,
+    });
+    const done = callbackOf((cb) => finished(stream, cb));
+    const copy = new Request(request);
+    strictEqual(await settlement(done), 'pending');
+    controller.close();
+    strictEqual(await done, undefined);
+    strictEqual(await copy.text(), '');
+
+    const other = sourceStream(true);
+    const request2 = new Request('http://example.com/', {
+      method: 'POST',
+      body: other.stream,
+    });
+    const copy2 = new Request(request2);
+    const boom = new Error('boom');
+    other.stream[kControllerErrorFunction](boom);
+    await rejects(copy2.text(), (err) => err === boom);
   },
 };

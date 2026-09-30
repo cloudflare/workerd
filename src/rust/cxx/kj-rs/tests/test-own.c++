@@ -79,4 +79,45 @@ void rust_take_own_driver() {
   take_own(kj::mv(own));
 }
 
+uint64_t TwoBase::destroyed = 0;
+
+kj::Own<SecondBase> heap_two_base() {
+  return kj::heap<TwoBase>();
+}
+
+namespace {
+
+// Records the pointer `kj::Own` hands it instead of freeing anything.
+class RecordingDisposer final: public kj::Disposer {
+ public:
+  void disposeImpl(void* pointer) const override {
+    disposed = pointer;
+  }
+  mutable void* disposed = nullptr;
+};
+
+}  // namespace
+
+bool rust_drop_recorded_two_base_driver() {
+  TwoBase object;
+  RecordingDisposer disposer;
+  take_second_base(kj::Own<SecondBase>(&object, disposer));
+  // `dynamic_cast<void*>` yields the complete object's address, which here is `&object`.
+  return disposer.disposed == static_cast<void*>(&object);
+}
+
+uint64_t rust_drop_heap_two_base_driver() {
+  auto before = TwoBase::destroyed;
+  take_second_base(heap_two_base());
+  return TwoBase::destroyed - before;
+}
+
+uint64_t two_base_destroyed() {
+  return TwoBase::destroyed;
+}
+
+kj::Own<TwoBase> heap_two_base_complete() {
+  return kj::heap<TwoBase>();
+}
+
 }  // namespace kj_rs_demo

@@ -5,6 +5,7 @@ pub use date::KjDate;
 pub use future::FuturePollStatus;
 pub use future::map_err;
 pub use maybe::repr::KjMaybe;
+pub use own::OwnTarget;
 pub use own::repr::KjOwn;
 pub use promise::KjPromise;
 pub use promise::KjPromiseNodeImpl;

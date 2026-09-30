@@ -22,6 +22,12 @@ void give_rc_back(kj::Rc<OpaqueRefcountedClass> rc) {
   KJ_ASSERT(ret_rc->getData() == 467);
 }
 
+// kj-rs mirrors KJ's niche optimization for these: `Maybe<Rc/Arc<T>>` is the bare smart pointer.
+static_assert(
+    sizeof(kj::Maybe<kj::Rc<OpaqueRefcountedClass>>) == sizeof(kj::Rc<OpaqueRefcountedClass>));
+static_assert(sizeof(kj::Maybe<kj::Arc<OpaqueAtomicRefcountedClass>>) ==
+    sizeof(kj::Arc<OpaqueAtomicRefcountedClass>));
+
 kj::Maybe<kj::Rc<OpaqueRefcountedClass>> return_maybe_rc_some() {
   return kj::rc<OpaqueRefcountedClass>(111);
 }
@@ -41,6 +47,14 @@ kj::Maybe<kj::Arc<OpaqueAtomicRefcountedClass>> return_maybe_arc_none() {
 void take_maybe_rc(kj::Maybe<kj::Rc<OpaqueRefcountedClass>> maybe) {
   auto& rc = KJ_ASSERT_NONNULL(maybe);
   KJ_ASSERT(rc->getData() == 111);
+}
+
+void take_maybe_rc_none(kj::Maybe<kj::Rc<OpaqueRefcountedClass>> maybe) {
+  KJ_ASSERT(maybe == kj::none);
+}
+
+void take_maybe_arc_none(kj::Maybe<kj::Arc<OpaqueAtomicRefcountedClass>> maybe) {
+  KJ_ASSERT(maybe == kj::none);
 }
 
 void maybe_rc_rust_driver() {

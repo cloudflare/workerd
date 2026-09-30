@@ -32,6 +32,7 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "fixed-length-errors", esModule = embed "fixed-length-errors.js"),
   (name = "tee", esModule = embed "tee.js"),
   (name = "tee-backpressure", esModule = embed "tee-backpressure.js"),
+  (name = "tee-byob", esModule = embed "tee-byob.js"),
   (name = "tee-nested", esModule = embed "tee-nested.js"),
   (name = "draining-reader", esModule = embed "draining-reader.js"),
   (name = "payload-helpers", esModule = embed "payload-helpers.js"),

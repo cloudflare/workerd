@@ -6,6 +6,7 @@
 
 #include "strings.h"
 
+#include <workerd/jsg/exception.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
@@ -196,7 +197,19 @@ void tagSentry(kj::Exception& e, kj::StringPtr tag) {
   }
 }
 
-[[noreturn]] void throwSentryException(kj::Exception&& e, kj::StringPtr tag) {
+// Applies the context given to `SqliteDatabase::setErrorContext()`, if any. Tunneled exceptions
+// are left untouched because their description is shown to the application; a VFS callback may
+// throw one (e.g. when a write exceeds a storage limit).
+void appendErrorContext(kj::Exception& e, kj::Maybe<kj::StringPtr> errorContext) {
+  if (jsg::isTunneledException(e.getDescription())) return;
+  KJ_IF_SOME(context, errorContext) {
+    e.setDescription(kj::str(e.getDescription(), "; ", context));
+  }
+}
+
+[[noreturn]] void throwSentryException(
+    kj::Exception&& e, kj::StringPtr tag, kj::Maybe<kj::StringPtr> errorContext) {
+  appendErrorContext(e, errorContext);
   tagSentry(e, tag);
   kj::throwFatalException(kj::mv(e));
 }
@@ -231,8 +244,9 @@ class SqliteCallScope {
     vfsErrorListener = nullptr;
   }
 
-  void rethrowVfsError() {
+  void rethrowVfsError(kj::Maybe<kj::StringPtr> errorContext) {
     KJ_IF_SOME(e, error) {
+      appendErrorContext(e, errorContext);
       // Slight hack: The exception already has a stack trace attached which should include the
       // current stack, but `kj::throwFatalException()` would re-append the current stack trace
       // to the exception. We can avoid that by calling
@@ -257,13 +271,14 @@ class SqliteCallScope {
 
 // Like KJ_REQUIRE() but give the Regulator a chance to report the error. `errorMessage` is either
 // the return value of sqlite3_errmsg() or a string literal containing a similarly
-// application-approriate error message. A reference called `regulator` must be in-scope.
+// application-approriate error message. A reference called `regulator` must be in-scope, as must
+// a `getErrorContext()` method (i.e. this must be used within SqliteDatabase or Query).
 // sqliteErrorCode is a kj::Maybe<int> and represents the error code from sqlite.
 #define SQLITE_REQUIRE_WITH_TAG(condition, sqliteErrorCode, sentryTag, errorMessage, ...)          \
   if (!(condition)) {                                                                              \
     regulator->onError(sqliteErrorCode, errorMessage);                                             \
-    throwSentryException(                                                                          \
-        KJ_EXCEPTION(FAILED, "SQLite failed", errorMessage, ##__VA_ARGS__), sentryTag);            \
+    throwSentryException(KJ_EXCEPTION(FAILED, "SQLite failed", errorMessage, ##__VA_ARGS__),       \
+        sentryTag, getErrorContext());                                                             \
   }
 
 #define SQLITE_REQUIRE(condition, sqliteErrorCode, errorMessage, ...)                              \
@@ -273,12 +288,14 @@ class SqliteCallScope {
 // associated with an open DB connection.
 #define SQLITE_CALL_NODB(code, ...)                                                                \
   do {                                                                                             \
+    SqliteCallScope sqliteCallScope;                                                               \
     int _ec = code;                                                                                \
+    if (_ec != SQLITE_OK) sqliteCallScope.rethrowVfsError(kj::none);                               \
     if (_ec != SQLITE_OK) {                                                                        \
       throwSentryException(                                                                        \
           KJ_EXCEPTION(                                                                            \
               FAILED, kj::str(sqlite3_errstr(_ec), ": ", namedErrorCode(_ec)), ##__VA_ARGS__),     \
-          "SENTRY_DO"_kj);                                                                         \
+          "SENTRY_DO"_kj, kj::none);                                                               \
     }                                                                                              \
   } while (false)
 
@@ -291,7 +308,7 @@ class SqliteCallScope {
     /* SQLITE_MISUSE doesn't put error info on the database object, so check it separately */      \
     KJ_ASSERT(_ec != SQLITE_MISUSE, "SQLite misused: " #code, ##__VA_ARGS__);                      \
     handleCriticalError(_ec, dbErrorMessage(_ec, db), sqliteCallScope.getException());             \
-    if (_ec == SQLITE_IOERR) sqliteCallScope.rethrowVfsError();                                    \
+    if (_ec == SQLITE_IOERR) sqliteCallScope.rethrowVfsError(getErrorContext());                   \
     SQLITE_REQUIRE(_ec == SQLITE_OK, _ec, dbErrorMessage(_ec, db), ##__VA_ARGS__);                 \
   } while (false)
 
@@ -304,7 +321,7 @@ class SqliteCallScope {
   do {                                                                                             \
     KJ_ASSERT(error != SQLITE_MISUSE, "SQLite misused: " code, ##__VA_ARGS__);                     \
     handleCriticalError(error, dbErrorMessage(error, db), sqliteCallScope.getException());         \
-    if (error == SQLITE_IOERR) sqliteCallScope.rethrowVfsError();                                  \
+    if (error == SQLITE_IOERR) sqliteCallScope.rethrowVfsError(getErrorContext());                 \
     SQLITE_REQUIRE_WITH_TAG(                                                                       \
         error != SQLITE_BUSY, error, "NOSENTRY"_kj, dbErrorMessage(error, db), ##__VA_ARGS__);     \
     SQLITE_REQUIRE(error == SQLITE_OK, error, dbErrorMessage(error, db), ##__VA_ARGS__);           \
@@ -1401,7 +1418,7 @@ void SqliteDatabase::setupSecurity(sqlite3* db) {
   // 2. Reduce limits
   // We use most of the suggested limits from sqlite.org/security.html. Note that sqlite3_limit()
   // does NOT return an error code; it returns the old limit.
-  sqlite3_limit(db, SQLITE_LIMIT_LENGTH, 4 * 1024 * 1024);
+  sqlite3_limit(db, SQLITE_LIMIT_LENGTH, MAX_ROW_LENGTH);
   sqlite3_limit(db, SQLITE_LIMIT_SQL_LENGTH, 100000);
   sqlite3_limit(db, SQLITE_LIMIT_COLUMN, 100);
   sqlite3_limit(db, SQLITE_LIMIT_EXPR_DEPTH, 100);
@@ -2344,7 +2361,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
 #define WRAP_METHOD(errorCode, block)                                                              \
   auto& self KJ_UNUSED = *static_cast<const SqliteDatabase::Vfs*>(vfs->pAppData);                  \
   try block catch (kj::Exception& e) {                                                             \
-    KJ_LOG(ERROR, "SQLite VFS I/O error", e);                                                      \
+    reportVfsErrorCaught(kj::mv(e));                                                               \
     return errorCode;                                                                              \
   }
 

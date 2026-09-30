@@ -35,7 +35,7 @@ use cxx::type_id;
 use kj_rs::{KjArc, KjOwn, KjRc};
 
 pub type ImportedKjArc = KjArc<()>;
-pub type ImportedKjOwn = KjOwn<()>;
+pub type ImportedKjOwn = KjOwn<i64>;
 pub type ImportedKjRc = KjRc<()>;
 
 #[cxx::bridge(namespace = "tests")]

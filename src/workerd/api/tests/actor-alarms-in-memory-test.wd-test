@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "actor-alarms-in-memory-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "AlarmClearObject", uniqueKey = "410bd0cbd803ef7883a1ee9d86cce06f"),
+    (className = "AlarmUpdateObject", uniqueKey = "310bd0cbd803ef7883a1ee9d86cce06f"),
+  ],
+
+  durableObjectStorage = (inMemory = void),
+
+  bindings = [
+    (name = "clearNs", durableObjectNamespace = "AlarmClearObject"),
+    (name = "updateNs", durableObjectNamespace = "AlarmUpdateObject"),
+  ],
+);

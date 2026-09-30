@@ -10,7 +10,6 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/own-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
@@ -166,10 +165,6 @@ IoContext::IoContext(ThreadContext& thread,
       waitUntilTasks(*this),
       tasks(*this),
       deleteQueueSignalTask(startDeleteQueueSignalTask(this)) {
-  kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
-  abortFulfiller = kj::mv(paf.fulfiller);
-  abortPromise = paf.promise.fork();
-
   // Arrange to complain if execution resource limits (CPU/memory) are exceeded.
   auto makeLimitsPromise = [this]() {
     auto promise = limitEnforcer->onLimitsExceeded();
@@ -321,7 +316,7 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   bool hadUndrainedWaitUntilTasks = !waitedForWaitUntil && !context->waitUntilTasks.isEmpty();
   kj::Maybe<kj::Exception> cancellationException;
 
-  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING) && !context->isShared()) {
+  if (!context->isShared()) {
     // Reentry callbacks may have spans attached to their pending promises. Cancel them while the
     // request is still current so those spans close before the request outcome is reported.
     while (!context->canceler.isEmpty()) {
@@ -537,7 +532,7 @@ void IoContext::abort(kj::Exception&& e) {
     // or unintentional async work
     a.shutdownActorCache(e.clone());
   }
-  abortFulfiller->reject(kj::mv(e));
+  abortFlag.reject(kj::mv(e));
 }
 
 void IoContext::abortIsolate(kj::StringPtr reason) {
@@ -587,8 +582,16 @@ void IoContext::addTask(kj::Promise<void> promise) {
 }
 
 void IoContext::addWaitUntil(kj::Promise<void> promise) {
-  // The empty check comes first: getMetrics() requires a current IncomingRequest, so consulting
-  // it before checking would turn the recoverable no-request case into a fatal one. See addTask().
+  kj::Own<Worker::Actor::WaitUntilTaskHandle> handle;
+  KJ_IF_SOME(a, actor) {
+    KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { handle = a.addedWaitUntilTask(); })) {
+      KJ_LOG(ERROR, "Actor::addedWaitUntilTask() threw an exception", e);
+    }
+  }
+  if (handle.get() != nullptr) {
+    promise = promise.attach(kj::mv(handle));
+  }
+
   if (incomingRequests.empty()) {
     DEBUG_FATAL_RELEASE_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
         lastDeliveredLocation, kj::getStackTrace());
@@ -722,7 +725,7 @@ kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finish
                      .then([this]() { return context->waitUntilStatus(); })
                      .exclusiveJoin(kj::mv(timeoutPromise))
                      .exclusiveJoin(context->onAbort().then([] {
-    // abortFulfiller should only ever be rejected instead of being fulfilled, return an
+    // The abort flag should only ever be rejected instead of being fulfilled, return an
     // internalError outcome if it does happen
     return EventOutcome::INTERNAL_ERROR;
   }, [](kj::Exception&& e) {
@@ -1341,9 +1344,8 @@ SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
 }
 
 TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
-  auto span = makeTraceSpan(operationName.clone());
-  auto userSpan = getCurrentUserTraceSpan().newChild(kj::mv(operationName));
-  return TraceContext(kj::mv(span), kj::mv(userSpan));
+  TraceContextParent parents(getCurrentTraceSpan(), getCurrentUserTraceSpan());
+  return parents.newChild(kj::mv(operationName));
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {

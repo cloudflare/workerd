@@ -1,27 +1,30 @@
 using Workerd = import "/workerd/workerd.capnp";
 
+# The worker is instantiated twice so that the bindings below cross an isolate boundary.
+# Only the first service's test() runs; see the filter argument in BUILD.bazel.
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "ts-webstreams-test",
-      worker = (
-        modules = [
-          (name = "worker", esModule = embed "ts-webstreams-test.js")
-        ],
-        compatibilityFlags = [
-          "nodejs_compat",
-          "typescript_implemented_streams",
-          # The iterable-body tests need the Iterable/AsyncIterable BodyInit extension in
-          # every variant, including the oldest-compat-date default variant.
-          "fetch_iterable_type_support",
-          "experimental",
-        ],
-        bindings = [
-          ( name = "SELF", service = "ts-webstreams-test" ),
-        ],
-      )
-    ),
+    ( name = "ts-webstreams-test", worker = .worker ),
+    ( name = "ts-webstreams-test-target", worker = .worker ),
   ],
   autogates = [
     "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);
+
+const worker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "ts-webstreams-test.js")
+  ],
+  compatibilityFlags = [
+    "nodejs_compat",
+    "typescript_implemented_streams",
+    # The iterable-body tests need the Iterable/AsyncIterable BodyInit extension in
+    # every variant, including the oldest-compat-date default variant.
+    "fetch_iterable_type_support",
+    "experimental",
+  ],
+  bindings = [
+    ( name = "SELF", service = "ts-webstreams-test-target" ),
   ],
 );

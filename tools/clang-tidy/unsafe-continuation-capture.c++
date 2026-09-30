@@ -28,15 +28,14 @@ namespace workerd::clang_tidy {
 // Built lazily by `getOrBuildFunctionUseMap` and cached for the
 // lifetime of the current translation-unit analysis (cleared in
 // `UnsafeContinuationCaptureCheck::onEndOfTranslationUnit`).
-using FunctionUseMap = llvm::DenseMap<const clang::VarDecl *,
-                                       llvm::SmallVector<const clang::DeclRefExpr *, 4>>;
+using FunctionUseMap =
+    llvm::DenseMap<const clang::VarDecl *, llvm::SmallVector<const clang::DeclRefExpr *, 4>>;
 
 // One-pass collector: visits the entire function body once and
 // populates a FunctionUseMap keyed by VarDecl.
-class FunctionUseMapBuilder
-    : public clang::RecursiveASTVisitor<FunctionUseMapBuilder> {
-public:
-  explicit FunctionUseMapBuilder(FunctionUseMap &out) : Out(out) {}
+class FunctionUseMapBuilder: public clang::RecursiveASTVisitor<FunctionUseMapBuilder> {
+ public:
+  explicit FunctionUseMapBuilder(FunctionUseMap &out): Out(out) {}
   bool VisitDeclRefExpr(clang::DeclRefExpr *e) {
     if (const auto *vd = clang::dyn_cast<clang::VarDecl>(e->getDecl())) {
       Out[vd].push_back(e);
@@ -44,13 +43,12 @@ public:
     return true;
   }
 
-private:
+ private:
   FunctionUseMap &Out;
 };
 
 // Forward declaration. Defined below the anonymous namespace.
-const FunctionUseMap &
-getOrBuildFunctionUseMap(const clang::FunctionDecl *fn);
+const FunctionUseMap &getOrBuildFunctionUseMap(const clang::FunctionDecl *fn);
 
 namespace {
 
@@ -60,14 +58,10 @@ namespace {
 // `<prefix>::<suffix>`. Borrowed in spirit from workerd-lint.c++; this
 // avoids the substring trap that would match e.g. `foo::then_helper` against
 // `then`.
-static bool endsWithQualified(llvm::StringRef qualifiedName,
-                              llvm::StringRef suffix) {
-  if (qualifiedName == suffix)
-    return true;
-  if (qualifiedName.size() < suffix.size() + 2)
-    return false;
-  if (!qualifiedName.ends_with(suffix))
-    return false;
+static bool endsWithQualified(llvm::StringRef qualifiedName, llvm::StringRef suffix) {
+  if (qualifiedName == suffix) return true;
+  if (qualifiedName.size() < suffix.size() + 2) return false;
+  if (!qualifiedName.ends_with(suffix)) return false;
   auto sep = qualifiedName.size() - suffix.size();
   return qualifiedName[sep - 1] == ':' && qualifiedName[sep - 2] == ':';
 }
@@ -87,55 +81,39 @@ static bool endsWithQualified(llvm::StringRef qualifiedName,
 // This list is intentionally conservative -- start narrow and expand. The
 // `AsyncSinks` check option allows projects to add more without recompiling.
 static const llvm::StringRef kBuiltinAsyncSinks[] = {
-    // KJ promise continuations.
-    "kj::Promise::then",
-    "kj::Promise::catch_",
-    "kj::Promise::eagerlyEvaluate",
-    "kj::Promise::attach",
-    "kj::Promise::detach",  // Explicit: result lives forever in event loop.
-    "kj::ForkedPromise::addBranch",
-    "kj::evalLater",
-    "kj::evalLast",
-    "kj::retryOnDisconnect",
-    // Note: kj::evalNow is intentionally NOT included -- it invokes its
-    // callable synchronously before returning, only wrapping any thrown
-    // exception in the returned promise. Captures into an evalNow lambda
-    // therefore have the same lifetime semantics as captures in an
-    // immediately-invoked lambda and are safe.
-    // Similarly jsg::Lock::evalNow is synchronous (try/catch wrapper).
-    // JSG promise continuations.
-    "workerd::jsg::Promise::then",
-    "workerd::jsg::Promise::catch_",
-    "workerd::jsg::Promise::markAsHandled",
-    // IoContext entry points that schedule deferred work.
-    "workerd::IoContext::run",
-    "workerd::IoContext::addTask",
-    "workerd::IoContext::addFunctor",
-    "workerd::IoContext::addWaitUntil",
-    "workerd::IoContext::awaitIo",
-    "workerd::IoContext::awaitIoLegacy",
-    "workerd::IoContext::awaitIoWithInputLock",
-    "workerd::IoContext::awaitJs",
-    "workerd::IoContext::makeReentryCallback",
-    "workerd::IoContext::onAbort",
-    "workerd::IoContext::blockConcurrencyWhile",
-    // Timers.
-    "workerd::IoContext::afterLimitTimeout",
-    // Note: kj::TaskSet::add takes a kj::Promise<void>, not a callable,
-    // so a lambda cannot be a direct argument. Removed.
-    // Note: edgeworker-specific sinks (e.g. edgeworker::PromiseCache::findOrCreate)
-    // should be configured via the AsyncSinks option in .clang-tidy.
+  // KJ promise continuations.
+  "kj::Promise::then", "kj::Promise::catch_", "kj::Promise::eagerlyEvaluate", "kj::Promise::attach",
+  "kj::Promise::detach",  // Explicit: result lives forever in event loop.
+  "kj::ForkedPromise::addBranch", "kj::evalLater", "kj::evalLast", "kj::retryOnDisconnect",
+  // Note: kj::evalNow is intentionally NOT included -- it invokes its
+  // callable synchronously before returning, only wrapping any thrown
+  // exception in the returned promise. Captures into an evalNow lambda
+  // therefore have the same lifetime semantics as captures in an
+  // immediately-invoked lambda and are safe.
+  // Similarly jsg::Lock::evalNow is synchronous (try/catch wrapper).
+  // JSG promise continuations.
+  "workerd::jsg::Promise::then", "workerd::jsg::Promise::catch_",
+  "workerd::jsg::Promise::markAsHandled",
+  // IoContext entry points that schedule deferred work.
+  "workerd::IoContext::run", "workerd::IoContext::addTask", "workerd::IoContext::addFunctor",
+  "workerd::IoContext::addWaitUntil", "workerd::IoContext::awaitIo",
+  "workerd::IoContext::awaitIoLegacy", "workerd::IoContext::awaitIoWithInputLock",
+  "workerd::IoContext::awaitJs", "workerd::IoContext::makeReentryCallback",
+  "workerd::IoContext::onAbort", "workerd::IoContext::blockConcurrencyWhile",
+  // Timers.
+  "workerd::IoContext::afterLimitTimeout",
+  // Note: kj::TaskSet::add takes a kj::Promise<void>, not a callable,
+  // so a lambda cannot be a direct argument. Removed.
+  // Note: edgeworker-specific sinks (e.g. edgeworker::PromiseCache::findOrCreate)
+  // should be configured via the AsyncSinks option in .clang-tidy.
 };
 
-static bool isAsyncSink(llvm::StringRef qualifiedName,
-                        const std::vector<std::string> &extras) {
-  for (auto suffix : kBuiltinAsyncSinks) {
-    if (endsWithQualified(qualifiedName, suffix))
-      return true;
+static bool isAsyncSink(llvm::StringRef qualifiedName, const std::vector<std::string> &extras) {
+  for (auto suffix: kBuiltinAsyncSinks) {
+    if (endsWithQualified(qualifiedName, suffix)) return true;
   }
-  for (const auto &extra : extras) {
-    if (endsWithQualified(qualifiedName, extra))
-      return true;
+  for (const auto &extra: extras) {
+    if (endsWithQualified(qualifiedName, extra)) return true;
   }
   return false;
 }
@@ -158,30 +136,28 @@ static bool isAsyncSink(llvm::StringRef qualifiedName,
 //
 // Treated as suffix-qualified names (see `endsWithQualified`).
 static const llvm::StringRef kBuiltinSynchronousSinks[] = {
-    // workerd test harness: synchronously runs the callback in an
-    // IoContext and `.wait()`s on the returned promise before returning.
-    // See `deps/workerd/src/workerd/tests/test-fixture.h`.
-    "workerd::TestFixture::runInIoContext",
-    // KJ cross-thread synchronous dispatch. Schedules `func()` on the
-    // target executor thread, blocks the calling thread, and if `func()`
-    // returns a Promise, waits for it to resolve before returning.
-    // See `deps/capnproto/c++/src/kj/async.h` (declaration) and
-    // `async-inl.h` (definition).
-    "kj::Executor::executeSync",
-    // Note: project-specific synchronous sinks (e.g.
-    // edgeworker::api::TestFixture::runInIoContext) should be configured
-    // via the SynchronousSinks option in .clang-tidy.
+  // workerd test harness: synchronously runs the callback in an
+  // IoContext and `.wait()`s on the returned promise before returning.
+  // See `deps/workerd/src/workerd/tests/test-fixture.h`.
+  "workerd::TestFixture::runInIoContext",
+  // KJ cross-thread synchronous dispatch. Schedules `func()` on the
+  // target executor thread, blocks the calling thread, and if `func()`
+  // returns a Promise, waits for it to resolve before returning.
+  // See `deps/capnproto/c++/src/kj/async.h` (declaration) and
+  // `async-inl.h` (definition).
+  "kj::Executor::executeSync",
+  // Note: project-specific synchronous sinks (e.g.
+  // edgeworker::api::TestFixture::runInIoContext) should be configured
+  // via the SynchronousSinks option in .clang-tidy.
 };
 
-static bool isSynchronousSink(llvm::StringRef qualifiedName,
-                              const std::vector<std::string> &extras) {
-  for (auto suffix : kBuiltinSynchronousSinks) {
-    if (endsWithQualified(qualifiedName, suffix))
-      return true;
+static bool isSynchronousSink(
+    llvm::StringRef qualifiedName, const std::vector<std::string> &extras) {
+  for (auto suffix: kBuiltinSynchronousSinks) {
+    if (endsWithQualified(qualifiedName, suffix)) return true;
   }
-  for (const auto &extra : extras) {
-    if (endsWithQualified(qualifiedName, extra))
-      return true;
+  for (const auto &extra: extras) {
+    if (endsWithQualified(qualifiedName, extra)) return true;
   }
   return false;
 }
@@ -199,11 +175,9 @@ static bool isSynchronousSink(llvm::StringRef qualifiedName,
 // When all three hold, the return value's lifetime is bounded by the
 // enclosing sink call -- it cannot outlive the caller's activation --
 // so for escape-analysis purposes the return acts like `.wait()`.
-static bool isReturnFromSynchronousSinkLambda(const ReturnStmt *rs,
-                                              ASTContext &Ctx,
-                                              const std::vector<std::string> &extraSyncSinks) {
-  if (!rs)
-    return false;
+static bool isReturnFromSynchronousSinkLambda(
+    const ReturnStmt *rs, ASTContext &Ctx, const std::vector<std::string> &extraSyncSinks) {
+  if (!rs) return false;
   // 1. Find the enclosing function declaration.
   const FunctionDecl *enclosingFn = nullptr;
   {
@@ -224,15 +198,12 @@ static bool isReturnFromSynchronousSinkLambda(const ReturnStmt *rs,
       break;
     }
   }
-  if (!enclosingFn)
-    return false;
+  if (!enclosingFn) return false;
   // Must be the call operator of a lambda closure type.
   const auto *md = dyn_cast<CXXMethodDecl>(enclosingFn);
-  if (!md)
-    return false;
+  if (!md) return false;
   const auto *closure = md->getParent();
-  if (!closure || !closure->isLambda())
-    return false;
+  if (!closure || !closure->isLambda()) return false;
   // 2. Walk up from the closure record decl to find the enclosing
   // `LambdaExpr`, then up again to find the call it's an argument to.
   const LambdaExpr *lambdaExpr = nullptr;
@@ -255,22 +226,17 @@ static bool isReturnFromSynchronousSinkLambda(const ReturnStmt *rs,
       break;
     }
   }
-  if (!lambdaExpr)
-    return false;
+  if (!lambdaExpr) return false;
   // 3. Walk parents of the LambdaExpr through transparent wrappers
   // until we find a CallExpr that takes the lambda as a direct argument.
   const Stmt *current = lambdaExpr;
   for (int hops = 0; hops < 16; ++hops) {
     auto parents = Ctx.getParents(*current);
-    if (parents.empty())
-      return false;
+    if (parents.empty()) return false;
     const Stmt *parent = parents[0].get<Stmt>();
-    if (!parent)
-      return false;
-    if (isa<ParenExpr>(parent) || isa<ImplicitCastExpr>(parent) ||
-        isa<ExprWithCleanups>(parent) ||
-        isa<MaterializeTemporaryExpr>(parent) ||
-        isa<CXXBindTemporaryExpr>(parent)) {
+    if (!parent) return false;
+    if (isa<ParenExpr>(parent) || isa<ImplicitCastExpr>(parent) || isa<ExprWithCleanups>(parent) ||
+        isa<MaterializeTemporaryExpr>(parent) || isa<CXXBindTemporaryExpr>(parent)) {
       current = parent;
       continue;
     }
@@ -285,15 +251,12 @@ static bool isReturnFromSynchronousSinkLambda(const ReturnStmt *rs,
       std::string calleeName;
       if (const auto *mce = dyn_cast<CXXMemberCallExpr>(ce)) {
         if (const auto *cm = mce->getMethodDecl()) {
-          if (const auto *spec = dyn_cast<ClassTemplateSpecializationDecl>(
-                  cm->getParent())) {
+          if (const auto *spec = dyn_cast<ClassTemplateSpecializationDecl>(cm->getParent())) {
             if (const auto *td = spec->getSpecializedTemplate()) {
-              calleeName =
-                  td->getQualifiedNameAsString() + "::" + cm->getNameAsString();
+              calleeName = td->getQualifiedNameAsString() + "::" + cm->getNameAsString();
             }
           }
-          if (calleeName.empty())
-            calleeName = cm->getQualifiedNameAsString();
+          if (calleeName.empty()) calleeName = cm->getQualifiedNameAsString();
         }
       }
       if (calleeName.empty()) {
@@ -302,12 +265,10 @@ static bool isReturnFromSynchronousSinkLambda(const ReturnStmt *rs,
             if (const auto *ftd = fd->getPrimaryTemplate())
               calleeName = ftd->getQualifiedNameAsString();
           }
-          if (calleeName.empty())
-            calleeName = fd->getQualifiedNameAsString();
+          if (calleeName.empty()) calleeName = fd->getQualifiedNameAsString();
         }
       }
-      if (calleeName.empty())
-        return false;
+      if (calleeName.empty()) return false;
       return isSynchronousSink(calleeName, extraSyncSinks);
     }
     return false;
@@ -322,31 +283,31 @@ static bool isReturnFromSynchronousSinkLambda(const ReturnStmt *rs,
 // reference are *not* safe even for owning wrappers -- only the owned value
 // itself transfers ownership into the continuation.
 static const llvm::StringRef kOwningTemplates[] = {
-    "kj::Own",
-    "kj::Rc",
-    "kj::Arc",
-    "kj::WeakRef",
-    "workerd::jsg::Ref",
-    "workerd::jsg::V8Ref",
-    "workerd::jsg::JsRef",
-    "workerd::jsg::HashableV8Ref",
-    "workerd::jsg::WeakRef",
-    "workerd::IoOwn",
-    "workerd::ReverseIoOwn",
-    // IoPtr is debatable -- it is a non-owning *checked* view backed by
-    // the IoContext. Treat it as safe: dereference is guarded.
-    "workerd::IoPtr",
+  "kj::Own",
+  "kj::Rc",
+  "kj::Arc",
+  "kj::WeakRef",
+  "workerd::jsg::Ref",
+  "workerd::jsg::V8Ref",
+  "workerd::jsg::JsRef",
+  "workerd::jsg::HashableV8Ref",
+  "workerd::jsg::WeakRef",
+  "workerd::IoOwn",
+  "workerd::ReverseIoOwn",
+  // IoPtr is debatable -- it is a non-owning *checked* view backed by
+  // the IoContext. Treat it as safe: dereference is guarded.
+  "workerd::IoPtr",
 };
 
 // Container templates whose ownership-safety is determined by their first
 // type argument (e.g. `kj::Maybe<kj::Own<T>>` is safe, `kj::Maybe<T&>` is
 // not).
 static const llvm::StringRef kTransparentContainers[] = {
-    "kj::Maybe",
-    "kj::Array",
-    "kj::Vector",
-    "std::optional",
-    "std::vector",
+  "kj::Maybe",
+  "kj::Array",
+  "kj::Vector",
+  "std::optional",
+  "std::vector",
 };
 
 // Non-owning view type names. These are matched against the qualified
@@ -356,14 +317,14 @@ static const llvm::StringRef kTransparentContainers[] = {
 // `isNonOwningViewType`; an entry only needs to appear once and will be
 // matched by whichever path applies to the concrete type.
 static const llvm::StringRef kNonOwningViewNames[] = {
-    "kj::ArrayPtr",       // template
-    "kj::StringPtr",      // non-template class
-    "std::span",          // template
-    "std::string_view",   // non-template (typedef of basic_string_view)
-    // kj::FunctionParam<Sig>: explicitly documented as "MUST NOT outlive
-    // the call". Capturing one into a long-lived continuation is exactly
-    // the documented anti-use.
-    "kj::FunctionParam",  // template
+  "kj::ArrayPtr",      // template
+  "kj::StringPtr",     // non-template class
+  "std::span",         // template
+  "std::string_view",  // non-template (typedef of basic_string_view)
+  // kj::FunctionParam<Sig>: explicitly documented as "MUST NOT outlive
+  // the call". Capturing one into a long-lived continuation is exactly
+  // the documented anti-use.
+  "kj::FunctionParam",  // template
 };
 
 // "Stable singleton" types: instances are owned by the V8 isolate or some
@@ -371,13 +332,13 @@ static const llvm::StringRef kNonOwningViewNames[] = {
 // dangle for the lifetime of a continuation running on that isolate.
 // Capturing these by reference is therefore safe by convention.
 static const llvm::StringRef kStableSingletonNames[] = {
-    // jsg::TypeHandler<T>: thin pointer into the isolate's TypeWrapper,
-    // stable for the lifetime of the isolate.
-    "workerd::jsg::TypeHandler",
-    // workerd::api::CapnpTypeWrapperBase: base class of the isolate's
-    // TypeWrapper used by the capnp bindings; the instance is owned by
-    // the isolate and outlives any continuation that runs on it.
-    "workerd::api::CapnpTypeWrapperBase",
+  // jsg::TypeHandler<T>: thin pointer into the isolate's TypeWrapper,
+  // stable for the lifetime of the isolate.
+  "workerd::jsg::TypeHandler",
+  // workerd::api::CapnpTypeWrapperBase: base class of the isolate's
+  // TypeWrapper used by the capnp bindings; the instance is owned by
+  // the isolate and outlives any continuation that runs on it.
+  "workerd::api::CapnpTypeWrapperBase",
 };
 
 // ---- Type classification ---------------------------------------------------
@@ -385,16 +346,14 @@ static const llvm::StringRef kStableSingletonNames[] = {
 static std::string templateQualifiedName(QualType qt) {
   qt = qt.getNonReferenceType().getUnqualifiedType().getCanonicalType();
   const Type *t = qt.getTypePtrOrNull();
-  if (!t)
-    return "";
+  if (!t) return "";
   if (const auto *tst = t->getAs<TemplateSpecializationType>()) {
     if (auto *td = tst->getTemplateName().getAsTemplateDecl())
       return td->getQualifiedNameAsString();
   }
   // Look through CXXRecordDecl that is a ClassTemplateSpecializationDecl.
   if (const auto *rt = t->getAs<RecordType>()) {
-    if (const auto *spec =
-            dyn_cast<ClassTemplateSpecializationDecl>(rt->getDecl())) {
+    if (const auto *spec = dyn_cast<ClassTemplateSpecializationDecl>(rt->getDecl())) {
       return spec->getSpecializedTemplate()->getQualifiedNameAsString();
     }
   }
@@ -404,8 +363,7 @@ static std::string templateQualifiedName(QualType qt) {
 static std::string recordQualifiedName(QualType qt) {
   qt = qt.getNonReferenceType().getUnqualifiedType().getCanonicalType();
   const Type *t = qt.getTypePtrOrNull();
-  if (!t)
-    return "";
+  if (!t) return "";
   if (const auto *rt = t->getAs<RecordType>()) {
     return rt->getDecl()->getQualifiedNameAsString();
   }
@@ -417,18 +375,15 @@ static std::string recordQualifiedName(QualType qt) {
 static QualType firstTemplateArg(QualType qt) {
   qt = qt.getNonReferenceType().getUnqualifiedType().getCanonicalType();
   const Type *t = qt.getTypePtrOrNull();
-  if (!t)
-    return {};
+  if (!t) return {};
   if (const auto *tst = t->getAs<TemplateSpecializationType>()) {
     if (tst->template_arguments().size() > 0) {
       const auto &arg = tst->template_arguments()[0];
-      if (arg.getKind() == TemplateArgument::Type)
-        return arg.getAsType();
+      if (arg.getKind() == TemplateArgument::Type) return arg.getAsType();
     }
   }
   if (const auto *rt = t->getAs<RecordType>()) {
-    if (const auto *spec =
-            dyn_cast<ClassTemplateSpecializationDecl>(rt->getDecl())) {
+    if (const auto *spec = dyn_cast<ClassTemplateSpecializationDecl>(rt->getDecl())) {
       const auto &args = spec->getTemplateArgs();
       if (args.size() > 0 && args[0].getKind() == TemplateArgument::Type)
         return args[0].getAsType();
@@ -448,30 +403,23 @@ enum class CaptureSafety {
 // Classify the *value type* that the lambda member will hold for this
 // capture. By-reference captures store a reference; by-value captures store
 // a copy.
-static bool isOwningType(QualType qt,
-                         const std::vector<std::string> &extraOwning,
-                         int depth = 0) {
-  if (depth > 4)
-    return false; // bail on deeply nested templates
+static bool isOwningType(QualType qt, const std::vector<std::string> &extraOwning, int depth = 0) {
+  if (depth > 4) return false;  // bail on deeply nested templates
   qt = qt.getNonReferenceType().getUnqualifiedType().getCanonicalType();
-  if (qt.isNull())
-    return false;
+  if (qt.isNull()) return false;
 
   std::string tmpl = templateQualifiedName(qt);
   if (!tmpl.empty()) {
-    for (auto suffix : kOwningTemplates) {
-      if (endsWithQualified(tmpl, suffix))
-        return true;
+    for (auto suffix: kOwningTemplates) {
+      if (endsWithQualified(tmpl, suffix)) return true;
     }
-    for (const auto &extra : extraOwning) {
-      if (endsWithQualified(tmpl, extra))
-        return true;
+    for (const auto &extra: extraOwning) {
+      if (endsWithQualified(tmpl, extra)) return true;
     }
-    for (auto suffix : kTransparentContainers) {
+    for (auto suffix: kTransparentContainers) {
       if (endsWithQualified(tmpl, suffix)) {
         QualType inner = firstTemplateArg(qt);
-        if (!inner.isNull())
-          return isOwningType(inner, extraOwning, depth + 1);
+        if (!inner.isNull()) return isOwningType(inner, extraOwning, depth + 1);
         return false;
       }
     }
@@ -482,8 +430,7 @@ static bool isOwningType(QualType qt,
 
 static bool isNonOwningViewType(QualType qt) {
   qt = qt.getNonReferenceType().getUnqualifiedType().getCanonicalType();
-  if (qt.isNull())
-    return false;
+  if (qt.isNull()) return false;
   // Try the underlying template name first (matches `kj::ArrayPtr<T>`,
   // `std::span<T>`, etc.), then fall back to the RecordDecl qualified
   // name (matches non-template classes like `kj::StringPtr`). The same
@@ -491,16 +438,14 @@ static bool isNonOwningViewType(QualType qt) {
   // non-empty string for any given type.
   std::string tmpl = templateQualifiedName(qt);
   if (!tmpl.empty()) {
-    for (auto suffix : kNonOwningViewNames) {
-      if (endsWithQualified(tmpl, suffix))
-        return true;
+    for (auto suffix: kNonOwningViewNames) {
+      if (endsWithQualified(tmpl, suffix)) return true;
     }
   }
   std::string rec = recordQualifiedName(qt);
   if (!rec.empty()) {
-    for (auto suffix : kNonOwningViewNames) {
-      if (endsWithQualified(rec, suffix))
-        return true;
+    for (auto suffix: kNonOwningViewNames) {
+      if (endsWithQualified(rec, suffix)) return true;
     }
   }
   return false;
@@ -512,20 +457,17 @@ static bool isNonOwningViewType(QualType qt) {
 // to such types are therefore safe to capture into continuations.
 static bool isStableSingletonType(QualType qt) {
   qt = qt.getNonReferenceType().getUnqualifiedType().getCanonicalType();
-  if (qt.isNull())
-    return false;
+  if (qt.isNull()) return false;
   std::string tmpl = templateQualifiedName(qt);
   if (!tmpl.empty()) {
-    for (auto suffix : kStableSingletonNames) {
-      if (endsWithQualified(tmpl, suffix))
-        return true;
+    for (auto suffix: kStableSingletonNames) {
+      if (endsWithQualified(tmpl, suffix)) return true;
     }
   }
   std::string rec = recordQualifiedName(qt);
   if (!rec.empty()) {
-    for (auto suffix : kStableSingletonNames) {
-      if (endsWithQualified(rec, suffix))
-        return true;
+    for (auto suffix: kStableSingletonNames) {
+      if (endsWithQualified(rec, suffix)) return true;
     }
   }
   return false;
@@ -537,30 +479,27 @@ static bool isStableSingletonType(QualType qt) {
 // well-known POD-ish types.
 static bool isTriviallySafeValue(QualType qt) {
   qt = qt.getNonReferenceType().getUnqualifiedType().getCanonicalType();
-  if (qt.isNull())
-    return false;
-  if (qt->isPointerType())
-    return false; // raw pointer -- unsafe
-  if (qt->isReferenceType())
-    return false; // shouldn't happen after stripping
-  if (qt->isIntegerType() || qt->isFloatingType() || qt->isEnumeralType() ||
-      qt->isBooleanType())
+  if (qt.isNull()) return false;
+  if (qt->isPointerType()) return false;    // raw pointer -- unsafe
+  if (qt->isReferenceType()) return false;  // shouldn't happen after stripping
+  if (qt->isIntegerType() || qt->isFloatingType() || qt->isEnumeralType() || qt->isBooleanType())
     return true;
   // Well-known small value types.
   std::string rec = recordQualifiedName(qt);
   static const llvm::StringRef kTrivialRecords[] = {
-      "kj::Date",      "kj::Duration", "kj::String", // owns its buffer
-      "kj::Exception",
+    "kj::Date",
+    "kj::Duration",
+    "kj::String",  // owns its buffer
+    "kj::Exception",
   };
-  for (auto suffix : kTrivialRecords) {
-    if (endsWithQualified(rec, suffix))
-      return true;
+  for (auto suffix: kTrivialRecords) {
+    if (endsWithQualified(rec, suffix)) return true;
   }
   return false;
 }
 
-static CaptureSafety classifyCapture(const LambdaCapture &cap, QualType fieldTy,
-                                     const std::vector<std::string> &extraOwning) {
+static CaptureSafety classifyCapture(
+    const LambdaCapture &cap, QualType fieldTy, const std::vector<std::string> &extraOwning) {
   if (cap.capturesThis()) {
     return CaptureSafety::UnsafeThis;
   }
@@ -576,8 +515,7 @@ static CaptureSafety classifyCapture(const LambdaCapture &cap, QualType fieldTy,
   if (cap.getCaptureKind() == LCK_ByRef) {
     if (cap.capturesVariable()) {
       if (const auto *vd = cap.getCapturedVar()) {
-        if (isStableSingletonType(vd->getType()))
-          return CaptureSafety::Safe;
+        if (isStableSingletonType(vd->getType())) return CaptureSafety::Safe;
       }
     }
     return CaptureSafety::UnsafeBareReference;
@@ -586,8 +524,7 @@ static CaptureSafety classifyCapture(const LambdaCapture &cap, QualType fieldTy,
   // By-value capture (LCK_ByCopy or init-capture). The captured value is
   // a copy of whatever expression. Look at the resulting field type.
   QualType t = fieldTy.getNonReferenceType().getCanonicalType();
-  if (t.isNull())
-    return CaptureSafety::Safe; // give up safely
+  if (t.isNull()) return CaptureSafety::Safe;  // give up safely
 
   // A by-value capture of a `T&` field shouldn't normally happen, but in
   // some clang versions the VarDecl field carries the reference type for
@@ -598,19 +535,15 @@ static CaptureSafety classifyCapture(const LambdaCapture &cap, QualType fieldTy,
   if (t->isPointerType()) {
     // Function pointers are fine.
     QualType pointee = t->getPointeeType();
-    if (pointee->isFunctionType())
-      return CaptureSafety::Safe;
+    if (pointee->isFunctionType()) return CaptureSafety::Safe;
     return CaptureSafety::UnsafeRawPointer;
   }
 
-  if (isOwningType(t, extraOwning))
-    return CaptureSafety::Safe;
+  if (isOwningType(t, extraOwning)) return CaptureSafety::Safe;
 
-  if (isNonOwningViewType(t))
-    return CaptureSafety::UnsafeNonOwningView;
+  if (isNonOwningViewType(t)) return CaptureSafety::UnsafeNonOwningView;
 
-  if (isTriviallySafeValue(t))
-    return CaptureSafety::Safe;
+  if (isTriviallySafeValue(t)) return CaptureSafety::Safe;
 
   // Unknown type -- be permissive. A future refinement could flag
   // captures of structs that contain non-owning fields, but that requires
@@ -620,35 +553,35 @@ static CaptureSafety classifyCapture(const LambdaCapture &cap, QualType fieldTy,
 
 static const char *safetyLabel(CaptureSafety s) {
   switch (s) {
-  case CaptureSafety::UnsafeBareReference:
-    return "by-reference";
-  case CaptureSafety::UnsafeRawPointer:
-    return "raw pointer";
-  case CaptureSafety::UnsafeNonOwningView:
-    return "non-owning view";
-  case CaptureSafety::UnsafeThis:
-    return "this";
-  case CaptureSafety::Safe:
-    return "";
+    case CaptureSafety::UnsafeBareReference:
+      return "by-reference";
+    case CaptureSafety::UnsafeRawPointer:
+      return "raw pointer";
+    case CaptureSafety::UnsafeNonOwningView:
+      return "non-owning view";
+    case CaptureSafety::UnsafeThis:
+      return "this";
+    case CaptureSafety::Safe:
+      return "";
   }
   return "";
 }
 
 static const char *safetyAdvice(CaptureSafety s) {
   switch (s) {
-  case CaptureSafety::UnsafeBareReference:
-    return "transfer ownership (kj::Own / kj::Rc / jsg::Ref) or capture a "
-           "kj::WeakRef / jsg::WeakRef";
-  case CaptureSafety::UnsafeRawPointer:
-    return "capture an owning smart pointer (kj::Own / kj::Rc) instead";
-  case CaptureSafety::UnsafeNonOwningView:
-    return "materialize the data into a kj::String / kj::Array before "
-           "capturing, or capture the owning source";
-  case CaptureSafety::UnsafeThis:
-    return "use JSG_THIS (jsg::Ref<Self>) for JSG resource types, "
-           "kj::addRef(*this) for kj::Refcounted, or an IoOwn<Self>";
-  case CaptureSafety::Safe:
-    return "";
+    case CaptureSafety::UnsafeBareReference:
+      return "transfer ownership (kj::Own / kj::Rc / jsg::Ref) or capture a "
+             "kj::WeakRef / jsg::WeakRef";
+    case CaptureSafety::UnsafeRawPointer:
+      return "capture an owning smart pointer (kj::Own / kj::Rc) instead";
+    case CaptureSafety::UnsafeNonOwningView:
+      return "materialize the data into a kj::String / kj::Array before "
+             "capturing, or capture the owning source";
+    case CaptureSafety::UnsafeThis:
+      return "use JSG_THIS (jsg::Ref<Self>) for JSG resource types, "
+             "kj::addRef(*this) for kj::Refcounted, or an IoOwn<Self>";
+    case CaptureSafety::Safe:
+      return "";
   }
   return "";
 }
@@ -719,10 +652,8 @@ static const Stmt *peelWrappers(const Stmt *s) {
 // function, constructor, destructor, ...). NamedDecl::getName() asserts
 // in debug builds in those cases.
 static llvm::StringRef safeGetName(const NamedDecl *nd) {
-  if (!nd)
-    return {};
-  if (const auto *id = nd->getIdentifier())
-    return id->getName();
+  if (!nd) return {};
+  if (const auto *id = nd->getIdentifier()) return id->getName();
   return {};
 }
 
@@ -748,22 +679,20 @@ static bool isPromisePassThroughMethod(llvm::StringRef name) {
   // will be visited separately by the matcher.)
   // .attach(), .eagerlyEvaluate(), .catch_(), .ignoreResult(),
   // .exclusiveJoin(): all return a new promise.
-  return name == "then" || name == "catch_" || name == "attach" ||
-         name == "eagerlyEvaluate" || name == "ignoreResult" ||
-         name == "exclusiveJoin" || name == "addBranch" ||
-         name == "markAsHandled" ||
-         // .fork() turns a Promise into a ForkedPromise. Lifetime of
-         // the underlying chain is the lifetime of the resulting
-         // ForkedPromise.
-         name == "fork";
+  return name == "then" || name == "catch_" || name == "attach" || name == "eagerlyEvaluate" ||
+      name == "ignoreResult" || name == "exclusiveJoin" || name == "addBranch" ||
+      name == "markAsHandled" ||
+      // .fork() turns a Promise into a ForkedPromise. Lifetime of
+      // the underlying chain is the lifetime of the resulting
+      // ForkedPromise.
+      name == "fork";
 }
 
 // Free functions that consume one or more promises and return a
 // combined promise. When `current` is an argument to one of these, the
 // resulting call inherits the lifetime of all its arguments.
 static bool isPromiseCombinatorFunction(llvm::StringRef name) {
-  return name == "joinPromises" || name == "joinPromisesFailFast" ||
-         name == "race";
+  return name == "joinPromises" || name == "joinPromisesFailFast" || name == "race";
 }
 
 // Free functions that build an array (or array-like) from their arguments,
@@ -789,8 +718,7 @@ static bool isContainerInsertMethod(llvm::StringRef name) {
 // `kj::Vector::releaseAsArray`/`asArray`/`asPtr`. The result's escape determines
 // the contained continuations' fate, so treat as pass-through.
 static bool isContainerFinalizeMethod(llvm::StringRef name) {
-  return name == "finish" || name == "releaseAsArray" || name == "asArray" ||
-         name == "asPtr";
+  return name == "finish" || name == "releaseAsArray" || name == "asArray" || name == "asPtr";
 }
 
 // Const query methods on a container that neither move the container nor its
@@ -814,8 +742,7 @@ struct BoundNames {
   // For member-access bindings like `kj::mv(paf.fulfiller)`, record the
   // (base-var, member-decl) pair. We match captures whose init
   // expression dereferences the same member of the same base variable.
-  llvm::SmallVector<std::pair<const VarDecl *, const ValueDecl *>, 4>
-      boundMembers;
+  llvm::SmallVector<std::pair<const VarDecl *, const ValueDecl *>, 4> boundMembers;
 };
 
 // Strip outer wrappers (kj::mv / std::move / kj::addRef / IgnoreImplicit /
@@ -824,15 +751,13 @@ struct BoundNames {
 // after the peel.
 static const Expr *peelAttachArg(const Expr *e, bool &sawAddRef) {
   sawAddRef = false;
-  if (!e)
-    return nullptr;
+  if (!e) return nullptr;
   e = e->IgnoreImplicit()->IgnoreParens();
   while (true) {
     if (const auto *ce = dyn_cast<CallExpr>(e)) {
       if (const auto *fd = ce->getDirectCallee()) {
         llvm::StringRef name = safeGetName(fd);
-        if (name == "mv" || name == "move" || name == "cp" ||
-            name == "fwd" || name == "forward") {
+        if (name == "mv" || name == "move" || name == "cp" || name == "fwd" || name == "forward") {
           if (ce->getNumArgs() == 1) {
             e = ce->getArg(0)->IgnoreImplicit()->IgnoreParens();
             continue;
@@ -867,13 +792,11 @@ static const Expr *peelAttachArg(const Expr *e, bool &sawAddRef) {
 
 // Add the bindings introduced by a single `.attach(arg1, arg2, ...)`
 // call to `out`.
-static void collectAttachBindings(const CXXMemberCallExpr *attachCall,
-                                  BoundNames &out) {
+static void collectAttachBindings(const CXXMemberCallExpr *attachCall, BoundNames &out) {
   for (unsigned i = 0; i < attachCall->getNumArgs(); ++i) {
     bool sawAddRef = false;
     const Expr *peeled = peelAttachArg(attachCall->getArg(i), sawAddRef);
-    if (!peeled)
-      continue;
+    if (!peeled) continue;
     // `*this` or `this` (after deref-peel).
     if (isa<CXXThisExpr>(peeled)) {
       out.boundThis = true;
@@ -904,33 +827,26 @@ static void collectAttachBindings(const CXXMemberCallExpr *attachCall,
 // chain, collecting bindings introduced by every `.attach(...)` call
 // encountered. The walk stops when we leave the chain (e.g. the parent is
 // no longer a passthrough method-call).
-static BoundNames collectChainAttachBindings(const CallExpr *startCall,
-                                             ASTContext &Ctx) {
+static BoundNames collectChainAttachBindings(const CallExpr *startCall, ASTContext &Ctx) {
   BoundNames out;
   const Stmt *current = startCall;
   for (int hops = 0; hops < 32; ++hops) {
     auto parents = Ctx.getParents(*current);
-    if (parents.empty())
-      break;
+    if (parents.empty()) break;
     const Stmt *parent = parents[0].get<Stmt>();
-    if (!parent)
-      break;
+    if (!parent) break;
     // Look through wrappers.
-    if (isa<ParenExpr>(parent) || isa<ImplicitCastExpr>(parent) ||
-        isa<ExprWithCleanups>(parent) ||
-        isa<MaterializeTemporaryExpr>(parent) ||
-        isa<CXXBindTemporaryExpr>(parent)) {
+    if (isa<ParenExpr>(parent) || isa<ImplicitCastExpr>(parent) || isa<ExprWithCleanups>(parent) ||
+        isa<MaterializeTemporaryExpr>(parent) || isa<CXXBindTemporaryExpr>(parent)) {
       current = parent;
       continue;
     }
     // MemberExpr -> grandparent should be the CXXMemberCallExpr.
     if (isa<MemberExpr>(parent)) {
       auto grandparents = Ctx.getParents(*parent);
-      if (grandparents.empty())
-        break;
+      if (grandparents.empty()) break;
       const auto *mce = grandparents[0].get<CXXMemberCallExpr>();
-      if (!mce)
-        break;
+      if (!mce) break;
       if (const auto *md = mce->getMethodDecl()) {
         llvm::StringRef name = safeGetName(md);
         if (name == "attach") {
@@ -970,8 +886,6 @@ static BoundNames collectChainAttachBindings(const CallExpr *startCall,
 // them go through `getOrBuildFunctionUseMap`, which has its own forward
 // declaration at file scope.)
 
-
-
 enum class Escape {
   // The continuation is consumed in the current function activation.
   // Captures are safe.
@@ -988,25 +902,26 @@ enum class Escape {
 };
 
 // Forward decl.
-static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
-                              const std::vector<std::string> &extraSyncSinks,
-                              const std::vector<std::string> &extraAsyncSinks);
+static Escape classifyExprUse(const Expr *e,
+    ASTContext &Ctx,
+    int depth,
+    const std::vector<std::string> &extraSyncSinks,
+    const std::vector<std::string> &extraAsyncSinks);
 
 // Forward decl.
 static Escape classifyVarDeclUses(const VarDecl *vd,
-                                  const FunctionDecl *enclosingFn,
-                                  ASTContext &Ctx, int depth,
-                                  const std::vector<std::string> &extraSyncSinks,
-                                  const std::vector<std::string> &extraAsyncSinks);
+    const FunctionDecl *enclosingFn,
+    ASTContext &Ctx,
+    int depth,
+    const std::vector<std::string> &extraSyncSinks,
+    const std::vector<std::string> &extraAsyncSinks);
 
 // Locate the FunctionDecl enclosing a given Decl by walking parents.
 static const FunctionDecl *enclosingFunctionOf(const Decl *d, ASTContext &Ctx) {
-  if (!d)
-    return nullptr;
+  if (!d) return nullptr;
   auto parents = Ctx.getParents(*d);
   while (!parents.empty()) {
-    if (const auto *fd = parents[0].get<FunctionDecl>())
-      return fd;
+    if (const auto *fd = parents[0].get<FunctionDecl>()) return fd;
     if (const auto *dd = parents[0].get<Decl>()) {
       parents = Ctx.getParents(*dd);
       continue;
@@ -1026,13 +941,11 @@ static const FunctionDecl *enclosingFunctionOf(const Decl *d, ASTContext &Ctx) {
 // not make the container escape. Returns true and sets `result`/`next`
 // accordingly when handled. `next` non-null means "continue the walk with
 // `next` as the new current".
-static bool classifyContainerReceiverMethod(llvm::StringRef name,
-                                             const CXXMemberCallExpr *mce,
-                                             Escape &result,
-                                             const Stmt *&next) {
+static bool classifyContainerReceiverMethod(
+    llvm::StringRef name, const CXXMemberCallExpr *mce, Escape &result, const Stmt *&next) {
   next = nullptr;
   if (isContainerFinalizeMethod(name)) {
-    next = mce; // result array carries the contained promises' lifetime
+    next = mce;  // result array carries the contained promises' lifetime
     return true;
   }
   if (isContainerInsertMethod(name) || isContainerQueryMethod(name)) {
@@ -1057,13 +970,13 @@ static bool classifyContainerReceiverMethod(llvm::StringRef name,
 // Local (we'll catch any escape via one of the other, non-circular uses
 // in the outer call frame).
 static Escape classifyVarDeclUses(const VarDecl *vd,
-                                  const FunctionDecl *enclosingFn,
-                                  ASTContext &Ctx, int depth,
-                                  const std::vector<std::string> &extraSyncSinks,
-                                  const std::vector<std::string> &extraAsyncSinks) {
+    const FunctionDecl *enclosingFn,
+    ASTContext &Ctx,
+    int depth,
+    const std::vector<std::string> &extraSyncSinks,
+    const std::vector<std::string> &extraAsyncSinks) {
   static thread_local llvm::SmallPtrSet<const VarDecl *, 8> inProgress;
-  if (!enclosingFn || !enclosingFn->getBody())
-    return Escape::Escapes;
+  if (!enclosingFn || !enclosingFn->getBody()) return Escape::Escapes;
   if (!inProgress.insert(vd).second) {
     // Already analyzing this var elsewhere on the call stack; the
     // outer frame will decide.
@@ -1075,7 +988,9 @@ static Escape classifyVarDeclUses(const VarDecl *vd,
   struct EraseOnExit {
     llvm::SmallPtrSet<const VarDecl *, 8> *set;
     const VarDecl *vd;
-    ~EraseOnExit() { set->erase(vd); }
+    ~EraseOnExit() {
+      set->erase(vd);
+    }
   } cleanup{&inProgress, vd};
   // Single-pass per-function use map: built once per enclosingFn and
   // cached, so analyzing N promise-bound variables in the same function
@@ -1083,16 +998,15 @@ static Escape classifyVarDeclUses(const VarDecl *vd,
   const FunctionUseMap &useMap = getOrBuildFunctionUseMap(enclosingFn);
   auto it = useMap.find(vd);
   if (it == useMap.end() || it->second.empty()) {
-    return Escape::Local; // dead store: no escape
+    return Escape::Local;  // dead store: no escape
   }
   bool sawStored = false;
-  for (const auto *use : it->second) {
+  for (const auto *use: it->second) {
     Escape e = classifyExprUse(use, Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
     if (e == Escape::Escapes) {
       return Escape::Escapes;
     }
-    if (e == Escape::StoredAsSelfMember)
-      sawStored = true;
+    if (e == Escape::StoredAsSelfMember) sawStored = true;
   }
   return sawStored ? Escape::StoredAsSelfMember : Escape::Local;
 }
@@ -1101,13 +1015,13 @@ static Escape classifyVarDeclUses(const VarDecl *vd,
 // current function activation. `depth` guards against pathological
 // recursion (cycles aren't possible in well-formed ASTs, but
 // instantiation can produce deep parent chains).
-static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
-                              const std::vector<std::string> &extraSyncSinks,
-                              const std::vector<std::string> &extraAsyncSinks) {
-  if (depth > 32)
-    return Escape::Escapes;
-  if (!e)
-    return Escape::Escapes;
+static Escape classifyExprUse(const Expr *e,
+    ASTContext &Ctx,
+    int depth,
+    const std::vector<std::string> &extraSyncSinks,
+    const std::vector<std::string> &extraAsyncSinks) {
+  if (depth > 32) return Escape::Escapes;
+  if (!e) return Escape::Escapes;
 
   // Walk through any wrappers above `e` before consulting parents.
   // Parents queried via ParentMapContext skip implicit casts already in
@@ -1149,7 +1063,8 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
             }
             break;
           }
-          return classifyVarDeclUses(vd, enclosingFn, Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
+          return classifyVarDeclUses(
+              vd, enclosingFn, Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
         }
         // Non-local VarDecl (e.g. static/global/member). Escapes.
         return Escape::Escapes;
@@ -1162,10 +1077,8 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
       // owns the chain, and when `*this` dies the ForkedPromise dies,
       // cancelling the chain. Outstanding branches resolve to
       // cancelled, not UAF.
-      if (const auto *ci =
-              parents[0].get<CXXCtorInitializer>()) {
-        if (ci->isMemberInitializer())
-          return Escape::StoredAsSelfMember;
+      if (const auto *ci = parents[0].get<CXXCtorInitializer>()) {
+        if (ci->isMemberInitializer()) return Escape::StoredAsSelfMember;
         return Escape::Escapes;
       }
       // ParentMapContext sometimes elides the CXXCtorInitializer node
@@ -1173,26 +1086,19 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
       // case, walk the constructor's init list and check whether our
       // current expression is (transitively) the init of a member
       // initializer.
-      if (const auto *ctor =
-              parents[0].get<CXXConstructorDecl>()) {
-        for (const auto *init : ctor->inits()) {
-          if (!init->isMemberInitializer())
-            continue;
+      if (const auto *ctor = parents[0].get<CXXConstructorDecl>()) {
+        for (const auto *init: ctor->inits()) {
+          if (!init->isMemberInitializer()) continue;
           const Expr *initExpr = init->getInit();
-          if (!initExpr)
-            continue;
+          if (!initExpr) continue;
           // Check whether our `current` is a sub-expression of initExpr.
           // We use a source-range containment check; for member inits
           // the init expression is the whole RHS of `member(expr)`.
           auto initRange = initExpr->getSourceRange();
           auto curRange = current->getSourceRange();
           auto &SM = Ctx.getSourceManager();
-          if (SM.isBeforeInTranslationUnit(curRange.getBegin(),
-                                           initRange.getBegin()))
-            continue;
-          if (SM.isBeforeInTranslationUnit(initRange.getEnd(),
-                                           curRange.getEnd()))
-            continue;
+          if (SM.isBeforeInTranslationUnit(curRange.getBegin(), initRange.getBegin())) continue;
+          if (SM.isBeforeInTranslationUnit(initRange.getEnd(), curRange.getEnd())) continue;
           // current is within initExpr's source range.
           return Escape::StoredAsSelfMember;
         }
@@ -1203,10 +1109,8 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
     }
 
     // Transparent wrappers: keep walking up.
-    if (isa<ParenExpr>(parent) || isa<ImplicitCastExpr>(parent) ||
-        isa<ExprWithCleanups>(parent) ||
-        isa<MaterializeTemporaryExpr>(parent) ||
-        isa<CXXBindTemporaryExpr>(parent)) {
+    if (isa<ParenExpr>(parent) || isa<ImplicitCastExpr>(parent) || isa<ExprWithCleanups>(parent) ||
+        isa<MaterializeTemporaryExpr>(parent) || isa<CXXBindTemporaryExpr>(parent)) {
       current = parent;
       continue;
     }
@@ -1231,8 +1135,7 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
       // Look at the MemberExpr's parent to find the call.
       auto grandparents = Ctx.getParents(*parent);
       if (!grandparents.empty()) {
-        if (const auto *mce =
-                grandparents[0].get<CXXMemberCallExpr>()) {
+        if (const auto *mce = grandparents[0].get<CXXMemberCallExpr>()) {
           if (const auto *md = mce->getMethodDecl()) {
             llvm::StringRef name = safeGetName(md);
             if (isSynchronousConsumerMethod(name)) {
@@ -1247,8 +1150,7 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
             // `promises.add(...)` with `promises` as receiver).
             Escape containerResult = Escape::Escapes;
             const Stmt *containerNext = nullptr;
-            if (classifyContainerReceiverMethod(name, mce, containerResult,
-                                                containerNext)) {
+            if (classifyContainerReceiverMethod(name, mce, containerResult, containerNext)) {
               if (containerNext) {
                 current = containerNext;
                 continue;
@@ -1272,17 +1174,14 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
     // the return value is `.wait()`-ed by the sink before its own
     // activation ends, so the captures cannot dangle.
     if (const auto *rs = dyn_cast<ReturnStmt>(parent)) {
-      if (isReturnFromSynchronousSinkLambda(rs, Ctx, extraSyncSinks))
-        return Escape::Local;
+      if (isReturnFromSynchronousSinkLambda(rs, Ctx, extraSyncSinks)) return Escape::Local;
       return Escape::Escapes;
     }
-    if (isa<CoreturnStmt>(parent))
-      return Escape::Escapes;
+    if (isa<CoreturnStmt>(parent)) return Escape::Escapes;
 
     // `co_await <expr>` / `co_yield <expr>` -- consumed by the coroutine
     // suspension; the coroutine frame keeps the captures alive.
-    if (isa<CoawaitExpr>(parent) || isa<CoyieldExpr>(parent))
-      return Escape::Local;
+    if (isa<CoawaitExpr>(parent) || isa<CoyieldExpr>(parent)) return Escape::Local;
 
     // Assignment via overloaded operator= (e.g. `kj::Promise::operator=`).
     // Represented as a CXXOperatorCallExpr with kind OO_Equal, two args:
@@ -1297,8 +1196,7 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
         // when `*this` dies, so a captured `this` cannot dangle.
         if (const auto *me = dyn_cast<MemberExpr>(lhs)) {
           const Expr *base = me->getBase()->IgnoreImplicit()->IgnoreParens();
-          if (isa<CXXThisExpr>(base) &&
-              isa<FieldDecl>(me->getMemberDecl())) {
+          if (isa<CXXThisExpr>(base) && isa<FieldDecl>(me->getMemberDecl())) {
             return Escape::StoredAsSelfMember;
           }
         }
@@ -1323,7 +1221,8 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
                 }
                 break;
               }
-              return classifyVarDeclUses(vd, enclosingFn, Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
+              return classifyVarDeclUses(
+                  vd, enclosingFn, Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
             }
           }
         }
@@ -1339,8 +1238,7 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
         receiver = me->getBase();
       }
       // Compare ignoring wrappers.
-      const Stmt *peeledRecv =
-          receiver ? peelWrappers(receiver) : nullptr;
+      const Stmt *peeledRecv = receiver ? peelWrappers(receiver) : nullptr;
       const Stmt *peeledCurrent = peelWrappers(current);
       if (peeledRecv == peeledCurrent) {
         if (const auto *md = mce->getMethodDecl()) {
@@ -1357,8 +1255,7 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
           // Local promise-container method on the container as receiver.
           Escape containerResult = Escape::Escapes;
           const Stmt *containerNext = nullptr;
-          if (classifyContainerReceiverMethod(name, mce, containerResult,
-                                              containerNext)) {
+          if (classifyContainerReceiverMethod(name, mce, containerResult, containerNext)) {
             if (containerNext) {
               current = containerNext;
               continue;
@@ -1389,15 +1286,14 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
         // does not escape; if the container itself escapes, so does it.
         if (isContainerInsertMethod(name)) {
           const Expr *recv = nullptr;
-          if (const auto *me = dyn_cast<MemberExpr>(mce->getCallee()))
-            recv = me->getBase();
+          if (const auto *me = dyn_cast<MemberExpr>(mce->getCallee())) recv = me->getBase();
           if (recv) {
             const Stmt *peeled = peelWrappers(recv);
             if (const auto *dre = dyn_cast<DeclRefExpr>(peeled)) {
               if (const auto *vd = dyn_cast<VarDecl>(dre->getDecl())) {
                 if (vd->isLocalVarDecl()) {
-                  return classifyVarDeclUses(
-                      vd, enclosingFunctionOf(vd, Ctx), Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
+                  return classifyVarDeclUses(vd, enclosingFunctionOf(vd, Ctx), Ctx, depth + 1,
+                      extraSyncSinks, extraAsyncSinks);
                 }
               }
             }
@@ -1408,10 +1304,8 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
             // `*this` can dangle, so a captured `this` is safe (other captures
             // still escape past the chain's invocation point).
             if (const auto *me2 = dyn_cast<MemberExpr>(peeled)) {
-              const Expr *base =
-                  me2->getBase()->IgnoreImplicit()->IgnoreParens();
-              if (isa<CXXThisExpr>(base) &&
-                  isa<FieldDecl>(me2->getMemberDecl())) {
+              const Expr *base = me2->getBase()->IgnoreImplicit()->IgnoreParens();
+              if (isa<CXXThisExpr>(base) && isa<FieldDecl>(me2->getMemberDecl())) {
                 return Escape::StoredAsSelfMember;
               }
             }
@@ -1428,14 +1322,12 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
         // promise is locally consumed, our argument chain's captures
         // cannot dangle. Recurse on the call.
         std::string qn;
-        if (const auto *spec = dyn_cast<ClassTemplateSpecializationDecl>(
-                md->getParent())) {
+        if (const auto *spec = dyn_cast<ClassTemplateSpecializationDecl>(md->getParent())) {
           if (const auto *td = spec->getSpecializedTemplate()) {
             qn = td->getQualifiedNameAsString() + "::" + md->getNameAsString();
           }
         }
-        if (qn.empty())
-          qn = md->getQualifiedNameAsString();
+        if (qn.empty()) qn = md->getQualifiedNameAsString();
         if (isAsyncSink(qn, extraAsyncSinks)) {
           current = mce;
           continue;
@@ -1452,8 +1344,7 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
     if (const auto *ce = dyn_cast<CallExpr>(parent)) {
       if (const auto *fd = ce->getDirectCallee()) {
         llvm::StringRef name = safeGetName(fd);
-        if (name == "mv" || name == "move" || name == "cp" ||
-            name == "fwd" || name == "forward") {
+        if (name == "mv" || name == "move" || name == "cp" || name == "fwd" || name == "forward") {
           current = parent;
           continue;
         }
@@ -1479,10 +1370,9 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
     if (const auto *ds = dyn_cast<DeclStmt>(parent)) {
       // Find the VarDecl whose initializer we are. There can be multiple
       // decls in one DeclStmt (`int a = ..., b = ...;`).
-      for (const auto *d : ds->decls()) {
+      for (const auto *d: ds->decls()) {
         if (const auto *vd = dyn_cast<VarDecl>(d)) {
-          if (vd->hasInit() &&
-              peelWrappers(vd->getInit()) == peelWrappers(current)) {
+          if (vd->hasInit() && peelWrappers(vd->getInit()) == peelWrappers(current)) {
             if (vd->isLocalVarDecl()) {
               // Find enclosing function and analyze uses.
               auto fnParents = Ctx.getParents(*vd);
@@ -1502,7 +1392,8 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
                 }
                 break;
               }
-              return classifyVarDeclUses(vd, enclosingFn, Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
+              return classifyVarDeclUses(
+                  vd, enclosingFn, Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
             }
             return Escape::Escapes;
           }
@@ -1518,9 +1409,8 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
       // point. The promise's .wait() or value-extraction must have
       // already happened to participate in the comparison, so the
       // captures cannot outlive the enclosing full-expression.
-      if (bo->isComparisonOp() || bo->isLogicalOp() ||
-          bo->isAdditiveOp() || bo->isMultiplicativeOp() ||
-          bo->isBitwiseOp() || bo->isShiftOp()) {
+      if (bo->isComparisonOp() || bo->isLogicalOp() || bo->isAdditiveOp() ||
+          bo->isMultiplicativeOp() || bo->isBitwiseOp() || bo->isShiftOp()) {
         return Escape::Local;
       }
       if (bo->isAssignmentOp() || bo->isCompoundAssignmentOp()) {
@@ -1548,7 +1438,8 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
                 }
                 break;
               }
-              return classifyVarDeclUses(vd, enclosingFn, Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
+              return classifyVarDeclUses(
+                  vd, enclosingFn, Ctx, depth + 1, extraSyncSinks, extraAsyncSinks);
             }
           }
         }
@@ -1558,8 +1449,7 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
         // branches resolve to cancelled, not UAF.)
         if (const auto *me = dyn_cast<MemberExpr>(lhs)) {
           const Expr *base = me->getBase()->IgnoreImplicit()->IgnoreParens();
-          if (isa<CXXThisExpr>(base) &&
-              isa<FieldDecl>(me->getMemberDecl())) {
+          if (isa<CXXThisExpr>(base) && isa<FieldDecl>(me->getMemberDecl())) {
             return Escape::StoredAsSelfMember;
           }
         }
@@ -1574,17 +1464,15 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
     }
 
     // Conditional / control flow that uses the value: be conservative.
-    if (isa<IfStmt>(parent) || isa<SwitchStmt>(parent) ||
-        isa<WhileStmt>(parent) || isa<DoStmt>(parent) ||
-        isa<ForStmt>(parent) || isa<CXXForRangeStmt>(parent)) {
+    if (isa<IfStmt>(parent) || isa<SwitchStmt>(parent) || isa<WhileStmt>(parent) ||
+        isa<DoStmt>(parent) || isa<ForStmt>(parent) || isa<CXXForRangeStmt>(parent)) {
       // Used as a condition: by the time the body runs, the value has
       // been consumed; treat as local.
       return Escape::Local;
     }
 
     // Ternary, comma operator, etc.: walk up.
-    if (isa<ConditionalOperator>(parent) ||
-        isa<BinaryConditionalOperator>(parent)) {
+    if (isa<ConditionalOperator>(parent) || isa<BinaryConditionalOperator>(parent)) {
       current = parent;
       continue;
     }
@@ -1595,26 +1483,24 @@ static Escape classifyExprUse(const Expr *e, ASTContext &Ctx, int depth,
   }
 }
 
-static Escape promiseEscape(const CallExpr *Call, ASTContext &Ctx,
-                            const std::vector<std::string> &extraSyncSinks,
-                            const std::vector<std::string> &extraAsyncSinks) {
+static Escape promiseEscape(const CallExpr *Call,
+    ASTContext &Ctx,
+    const std::vector<std::string> &extraSyncSinks,
+    const std::vector<std::string> &extraAsyncSinks) {
   return classifyExprUse(Call, Ctx, 0, extraSyncSinks, extraAsyncSinks);
 }
 
-} // namespace
+}  // namespace
 
 // Per-function use-map cache. Defined at namespace scope (outside the
 // anonymous namespace) so that the check's `onEndOfTranslationUnit`
 // member can clear it. `thread_local` keeps clang-tidy worker threads
 // from racing on shared state.
-static thread_local llvm::DenseMap<const FunctionDecl *, FunctionUseMap>
-    g_perFunctionUseMaps;
+static thread_local llvm::DenseMap<const FunctionDecl *, FunctionUseMap> g_perFunctionUseMaps;
 
-const FunctionUseMap &
-getOrBuildFunctionUseMap(const FunctionDecl *fn) {
+const FunctionUseMap &getOrBuildFunctionUseMap(const FunctionDecl *fn) {
   auto it = g_perFunctionUseMaps.find(fn);
-  if (it != g_perFunctionUseMaps.end())
-    return it->second;
+  if (it != g_perFunctionUseMaps.end()) return it->second;
   auto &slot = g_perFunctionUseMaps[fn];
   if (const Stmt *body = fn->getBody()) {
     FunctionUseMapBuilder builder(slot);
@@ -1632,7 +1518,7 @@ UnsafeContinuationCaptureCheck::UnsafeContinuationCaptureCheck(
   auto split = [](llvm::StringRef in, std::vector<std::string> &out) {
     llvm::SmallVector<llvm::StringRef, 8> parts;
     in.split(parts, ',', -1, /*KeepEmpty=*/false);
-    for (auto p : parts) {
+    for (auto p: parts) {
       out.push_back(p.trim().str());
     }
   };
@@ -1641,8 +1527,7 @@ UnsafeContinuationCaptureCheck::UnsafeContinuationCaptureCheck(
   split(SynchronousSinksRaw, ExtraSyncSinks);
 }
 
-void UnsafeContinuationCaptureCheck::storeOptions(
-    clang::tidy::ClangTidyOptions::OptionMap &Opts) {
+void UnsafeContinuationCaptureCheck::storeOptions(clang::tidy::ClangTidyOptions::OptionMap &Opts) {
   Options.store(Opts, "AsyncSinks", AsyncSinksRaw);
   Options.store(Opts, "OwningCaptureTypes", OwningCaptureTypesRaw);
   Options.store(Opts, "SynchronousSinks", SynchronousSinksRaw);
@@ -1662,23 +1547,19 @@ void UnsafeContinuationCaptureCheck::registerMatchers(MatchFinder *Finder) {
   // other expressions.
   Finder->addMatcher(
       callExpr(unless(cxxOperatorCallExpr()),
-               hasAnyArgument(ignoringImplicit(
-                   ignoringParenCasts(lambdaExpr().bind("lambda")))))
+          hasAnyArgument(ignoringImplicit(ignoringParenCasts(lambdaExpr().bind("lambda")))))
           .bind("call"),
       this);
 }
 
-void UnsafeContinuationCaptureCheck::check(
-    const MatchFinder::MatchResult &Result) {
+void UnsafeContinuationCaptureCheck::check(const MatchFinder::MatchResult &Result) {
   const auto *Lambda = Result.Nodes.getNodeAs<LambdaExpr>("lambda");
   const auto *Call = Result.Nodes.getNodeAs<CallExpr>("call");
-  if (!Lambda || !Call)
-    return;
+  if (!Lambda || !Call) return;
 
   // Don't lint generated code.
   auto &SM = *Result.SourceManager;
-  if (SM.isInSystemHeader(Lambda->getBeginLoc()))
-    return;
+  if (SM.isInSystemHeader(Lambda->getBeginLoc())) return;
 
   // The matcher's `hasAnyArgument(ignoringImplicit(ignoringParenCasts(...)))`
   // already guarantees the lambda is a direct argument of this call;
@@ -1694,15 +1575,12 @@ void UnsafeContinuationCaptureCheck::check(
   // the name from the *underlying* template's qualified name plus the
   // method's bare name.
   auto stripTemplateArgs = [](const NamedDecl *nd) -> std::string {
-    if (!nd)
-      return "";
+    if (!nd) return "";
     if (const auto *md = dyn_cast<CXXMethodDecl>(nd)) {
       const auto *parent = md->getParent();
-      if (const auto *spec =
-              dyn_cast<ClassTemplateSpecializationDecl>(parent)) {
+      if (const auto *spec = dyn_cast<ClassTemplateSpecializationDecl>(parent)) {
         if (const auto *td = spec->getSpecializedTemplate()) {
-          return td->getQualifiedNameAsString() +
-                 "::" + md->getNameAsString();
+          return td->getQualifiedNameAsString() + "::" + md->getNameAsString();
         }
       }
     }
@@ -1727,11 +1605,9 @@ void UnsafeContinuationCaptureCheck::check(
       calleeName = stripTemplateArgs(fd);
     }
   }
-  if (calleeName.empty())
-    return;
+  if (calleeName.empty()) return;
 
-  if (!isAsyncSink(calleeName, ExtraSinks))
-    return;
+  if (!isAsyncSink(calleeName, ExtraSinks)) return;
 
   // Escape analysis: even though the lambda is passed to an async sink,
   // if the resulting promise is locally consumed (`.wait()`-ed,
@@ -1767,41 +1643,36 @@ void UnsafeContinuationCaptureCheck::check(
   // Walk captures and report each unsafe one.
   const auto *LambdaClass = Lambda->getLambdaClass();
   auto fieldIt = LambdaClass->field_begin();
-  for (const auto &cap : Lambda->captures()) {
+  for (const auto &cap: Lambda->captures()) {
     QualType fieldTy;
     if (fieldIt != LambdaClass->field_end()) {
       fieldTy = fieldIt->getType();
       ++fieldIt;
     }
     auto safety = classifyCapture(cap, fieldTy, ExtraOwningTypes);
-    if (safety == CaptureSafety::Safe)
-      continue;
+    if (safety == CaptureSafety::Safe) continue;
 
     // Suppress: this capture is kept alive by a downstream `.attach()`.
-    if (cap.capturesThis() && bound.boundThis)
-      continue;
+    if (cap.capturesThis() && bound.boundThis) continue;
 
     // Suppress: the chain is stored as a member of the class whose `this`
     // was captured. The field's destructor will cancel the chain before
     // `this` becomes invalid. (Other captures are unaffected: a captured
     // reference to a stack local still dangles when the constructor /
     // method returns.)
-    if (cap.capturesThis() && escape == Escape::StoredAsSelfMember)
-      continue;
+    if (cap.capturesThis() && escape == Escape::StoredAsSelfMember) continue;
 
     // Suppress: the capture is a reference (or value) of the same
     // variable that is the receiver of the matched sink call. The
     // receiver owns the continuation, so its lifetime envelops the
     // capture.
-    if (receiverVar && cap.capturesVariable() &&
-        cap.getCapturedVar() == receiverVar)
-      continue;
+    if (receiverVar && cap.capturesVariable() && cap.getCapturedVar() == receiverVar) continue;
     if (cap.capturesVariable()) {
       const auto *vd = cap.getCapturedVar();
       bool isBound = false;
       // Direct match on the captured VarDecl: `[&x]` + `.attach(kj::mv(x))`.
       if (vd) {
-        for (const auto *bv : bound.boundVars) {
+        for (const auto *bv: bound.boundVars) {
           if (bv == vd) {
             isBound = true;
             break;
@@ -1828,14 +1699,13 @@ void UnsafeContinuationCaptureCheck::check(
         if (fd) {
           // Look up the per-capture init expression on the LambdaExpr.
           unsigned idx = 0;
-          for (const auto &c : Lambda->captures()) {
-            if (&c == &cap)
-              break;
+          for (const auto &c: Lambda->captures()) {
+            if (&c == &cap) break;
             ++idx;
           }
           const Expr *initE = nullptr;
           unsigned i = 0;
-          for (const Expr *e : Lambda->capture_inits()) {
+          for (const Expr *e: Lambda->capture_inits()) {
             if (i == idx) {
               initE = e;
               break;
@@ -1843,8 +1713,7 @@ void UnsafeContinuationCaptureCheck::check(
             ++i;
           }
           if (initE) {
-            const Expr *peeled =
-                initE->IgnoreImplicit()->IgnoreParens();
+            const Expr *peeled = initE->IgnoreImplicit()->IgnoreParens();
             // Peel a leading `*` (for `[&f = *paf.fulfiller]`
             // or `[&adapter = *adapter]`).
             if (const auto *uo = dyn_cast<UnaryOperator>(peeled)) {
@@ -1856,7 +1725,7 @@ void UnsafeContinuationCaptureCheck::check(
             // local; match against attach-bound vars.
             if (const auto *dre = dyn_cast<DeclRefExpr>(peeled)) {
               if (const auto *vd = dyn_cast<VarDecl>(dre->getDecl())) {
-                for (const auto *bv : bound.boundVars) {
+                for (const auto *bv: bound.boundVars) {
                   if (bv == vd) {
                     isBound = true;
                     break;
@@ -1868,15 +1737,11 @@ void UnsafeContinuationCaptureCheck::check(
             // against attach-bound (base, member) pairs.
             if (!isBound) {
               if (const auto *me = dyn_cast<MemberExpr>(peeled)) {
-                const Expr *baseE =
-                    me->getBase()->IgnoreImplicit()->IgnoreParens();
-                if (const auto *baseDre =
-                        dyn_cast<DeclRefExpr>(baseE)) {
-                  if (const auto *baseVd =
-                          dyn_cast<VarDecl>(baseDre->getDecl())) {
-                    for (const auto &bm : bound.boundMembers) {
-                      if (bm.first == baseVd &&
-                          bm.second == me->getMemberDecl()) {
+                const Expr *baseE = me->getBase()->IgnoreImplicit()->IgnoreParens();
+                if (const auto *baseDre = dyn_cast<DeclRefExpr>(baseE)) {
+                  if (const auto *baseVd = dyn_cast<VarDecl>(baseDre->getDecl())) {
+                    for (const auto &bm: bound.boundMembers) {
+                      if (bm.first == baseVd && bm.second == me->getMemberDecl()) {
                         isBound = true;
                         break;
                       }
@@ -1888,13 +1753,11 @@ void UnsafeContinuationCaptureCheck::check(
           }
         }
       }
-      if (isBound)
-        continue;
+      if (isBound) continue;
     }
 
     SourceLocation loc = cap.getLocation();
-    if (!loc.isValid())
-      loc = Lambda->getBeginLoc();
+    if (!loc.isValid()) loc = Lambda->getBeginLoc();
 
     std::string name;
     if (cap.capturesThis()) {
@@ -1904,15 +1767,13 @@ void UnsafeContinuationCaptureCheck::check(
         name = vd->getNameAsString();
       }
     }
-    if (name.empty())
-      name = "<capture>";
+    if (name.empty()) name = "<capture>";
 
-    diag(loc,
-         "unsafe %0 capture of %1 in lambda passed to %2; %3")
+    diag(loc, "unsafe %0 capture of %1 in lambda passed to %2; %3")
         << safetyLabel(safety) << name << calleeName << safetyAdvice(safety);
     diag(Call->getBeginLoc(), "lambda is passed here", DiagnosticIDs::Note)
         << Call->getSourceRange();
   }
 }
 
-} // namespace workerd::clang_tidy
+}  // namespace workerd::clang_tidy

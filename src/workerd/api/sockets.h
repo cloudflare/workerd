@@ -430,10 +430,6 @@ jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
 // WorkerInterface::customEvent() with it, exactly as Queue/Alarm/Scheduled events do for their own
 // non-HTTP-shaped triggers.
 //
-// This event cannot be forwarded over RPC: a DatagramChannel is a live, in-process-only object,
-// so sendRpc() is unimplemented. It is only ever dispatched by a listener running in the same
-// process as the worker.
-//
 // `channel` is borrowed, not owned: the listener that constructs this event attaches the
 // underlying flow's ownership to the same task that dispatches this event (see
 // Server::UdpListener::dispatch()), so it is guaranteed to outlive every call made through this
@@ -454,11 +450,11 @@ class UdpConnectCustomEvent final: public WorkerInterface::CustomEvent {
   kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
       FrankenvalueHandler& frankenvalueHandler,
-      rpc::EventDispatcher::Client dispatcher) override {
-    KJ_UNIMPLEMENTED(
-        "a UDP connect event cannot be forwarded over RPC; it is only ever dispatched in-process "
-        "by the listener that owns the underlying datagram flow");
-  }
+      rpc::EventDispatcher::Client dispatcher) override;
+
+  using UdpConnectContext = capnp::CallContext<rpc::EventDispatcher::UdpConnectParams,
+      rpc::EventDispatcher::UdpConnectResults>;
+  static kj::Promise<void> receiveRpc(UdpConnectContext context, WorkerInterface& worker);
 
   kj::Promise<Result> notSupported() override {
     KJ_UNIMPLEMENTED("udp connect event not supported");

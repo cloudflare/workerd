@@ -29,20 +29,17 @@ namespace workerd::clang_tidy {
 // `promise.ignoreResult().catch_(handler)`, where ignoreResult() is what allows
 // the handler to return void.
 
-class PromiseIgnoreResultCheck : public clang::tidy::ClangTidyCheck {
-public:
-  PromiseIgnoreResultCheck(clang::StringRef Name,
-                           clang::tidy::ClangTidyContext *Context)
+class PromiseIgnoreResultCheck: public clang::tidy::ClangTidyCheck {
+ public:
+  PromiseIgnoreResultCheck(clang::StringRef Name, clang::tidy::ClangTidyContext *Context)
       : ClangTidyCheck(Name, Context) {}
   void registerMatchers(clang::ast_matchers::MatchFinder *Finder) override;
-  void
-  check(const clang::ast_matchers::MatchFinder::MatchResult &Result) override;
+  void check(const clang::ast_matchers::MatchFinder::MatchResult &Result) override;
 
-private:
+ private:
   void reportAwaited(const clang::CXXMemberCallExpr &Call);
-  void reportSendFold(const clang::CXXMemberCallExpr &Call,
-                      const clang::CXXMemberCallExpr &Send);
+  void reportSendFold(const clang::CXXMemberCallExpr &Call, const clang::CXXMemberCallExpr &Send);
   void reportDroppedSend(const clang::CXXMemberCallExpr &Send);
 };
 
-} // namespace workerd::clang_tidy
+}  // namespace workerd::clang_tidy

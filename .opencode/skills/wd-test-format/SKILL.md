@@ -20,7 +20,7 @@ patterns and fields required. Skipping it WILL lead to incorrect configs that fa
 
 | File                            | MUST load when...                                            |
 | ------------------------------- | ------------------------------------------------------------ |
-| `reference/advanced-configs.md` | Test involves Durable Objects, multiple services             |
+| [Advanced configurations](reference/advanced-configs.md) | Test involves Durable Objects, multiple services             |
 |                                 | communicating via service bindings, outbound network access, |
 |                                 | external services/sockets, or TypeScript source files        |
 

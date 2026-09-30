@@ -319,16 +319,21 @@ KJ_TEST("InputGate broken") {
 
   InputGate gate;
 
-  auto brokenPromise = gate.onBroken();
+  auto canceledBrokenPromise = gate.onBroken();
+  canceledBrokenPromise = nullptr;
+  auto brokenPromise1 = gate.onBroken();
+  auto brokenPromise2 = gate.onBroken();
 
   kj::Own<InputGate::CriticalSection> cs1;
   kj::Own<InputGate::CriticalSection> cs2;
   kj::Own<InputGate::CriticalSection> cs3;
+  kj::Own<InputGate::CriticalSection> cs4;
 
   {
     auto lock = gate.wait(nullptr).wait(ws);
     cs1 = lock.startCriticalSection();
     cs3 = lock.startCriticalSection();
+    cs4 = lock.startCriticalSection();
   }
 
   {
@@ -354,8 +359,13 @@ KJ_TEST("InputGate broken") {
   KJ_EXPECT_THROW_MESSAGE("foobar", cs3Wait.wait(ws));
   KJ_EXPECT_THROW_MESSAGE("foobar", rootWait.wait(ws));
   KJ_EXPECT_THROW_MESSAGE("foobar", cs2->wait(nullptr).wait(ws));
-  KJ_EXPECT_THROW_MESSAGE("foobar", brokenPromise.wait(ws));
+  KJ_EXPECT_THROW_MESSAGE("foobar", brokenPromise1.wait(ws));
+  KJ_EXPECT_THROW_MESSAGE("foobar", brokenPromise2.wait(ws));
   KJ_EXPECT_THROW_MESSAGE("foobar", gate.onBroken().wait(ws));
+
+  cs4->failed(KJ_EXCEPTION(FAILED, "later failure"));
+  KJ_EXPECT_THROW_MESSAGE("later failure", gate.onBroken().wait(ws));
+  KJ_EXPECT_THROW_MESSAGE("later failure", gate.wait(nullptr).wait(ws));
 }
 
 KJ_TEST("InputGate deeply nested critical sections tear down without overflowing the stack") {
@@ -642,6 +652,9 @@ KJ_TEST("OutputGate exception") {
 
   OutputGate gate;
   auto onBroken = gate.onBroken();
+  auto secondOnBroken = gate.onBroken();
+  auto canceledOnBroken = gate.onBroken();
+  canceledOnBroken = nullptr;
 
   KJ_EXPECT(gate.wait(nullptr).poll(ws));
 
@@ -674,6 +687,7 @@ KJ_TEST("OutputGate exception") {
   // We are marked broken at this point, though.
   KJ_ASSERT(onBroken.poll(ws));
   KJ_EXPECT_THROW_MESSAGE("foo", onBroken.wait(ws));
+  KJ_EXPECT_THROW_MESSAGE("foo", secondOnBroken.wait(ws));
 
   // Fulfill the first blocker (normally, not with an exception).
   KJ_EXPECT(!blocker1.poll(ws));
@@ -749,6 +763,26 @@ KJ_TEST("OutputGate canceled") {
   onBroken = gate.onBroken();
   KJ_ASSERT(onBroken.poll(ws));
   KJ_EXPECT_THROW_MESSAGE("output lock was canceled before completion", onBroken.wait(ws));
+}
+
+KJ_TEST("OutputGate retains latest exception for future observers") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  OutputGate gate;
+  auto currentObserver = gate.onBroken();
+  auto first = kj::newPromiseAndFulfiller<void>();
+  auto second = kj::newPromiseAndFulfiller<void>();
+  auto firstBlocker = gate.lockWhile(kj::mv(first.promise), nullptr);
+  auto secondBlocker = gate.lockWhile(kj::mv(second.promise), nullptr);
+
+  first.fulfiller->reject(KJ_EXCEPTION(FAILED, "first failure"));
+  KJ_EXPECT_THROW_MESSAGE("first failure", firstBlocker.wait(ws));
+  KJ_EXPECT_THROW_MESSAGE("first failure", currentObserver.wait(ws));
+
+  second.fulfiller->reject(KJ_EXCEPTION(FAILED, "second failure"));
+  KJ_EXPECT_THROW_MESSAGE("second failure", secondBlocker.wait(ws));
+  KJ_EXPECT_THROW_MESSAGE("second failure", gate.onBroken().wait(ws));
 }
 
 }  // namespace

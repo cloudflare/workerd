@@ -28,3 +28,9 @@ Python SDK (`internal/workers-api/`) now lives in [cloudflare/workers-py](https:
 ## TESTING
 
 Tests live in `src/workerd/server/tests/python/`. `py_wd_test.bzl` macro: expands `%PYTHON_FEATURE_FLAGS` template, handles multiple Pyodide versions, snapshot generation/loading, per-version compat flag isolation. Tests are `size="enormous"` by default. Each test generates variants per supported Pyodide version (`0.26.0a2`, newer).
+
+When Python changes require new snapshots, run tests locally without creating or loading snapshots:
+
+```sh
+bazel test --config=regenerate-snapshots //src/workerd/server/tests/python:<target>
+```

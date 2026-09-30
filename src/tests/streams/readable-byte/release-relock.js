@@ -6,7 +6,8 @@
 // releasing a reader rejects its pending reads, but the pull-into
 // descriptor machinery survives, so a later respond()/enqueue() routes
 // the bytes to a SECOND reader's read. Parity throughout except the
-// released-read message and the overflow shape at the end.
+// released-read message, the overflow shape, and how an enqueue() after a
+// released partial read is split (ledger #32).
 
 import { strictEqual, ok, deepStrictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -198,27 +199,108 @@ export const relockAutoAllocateTwoPendingRespond = {
 };
 
 // A below-min partial fill at the head plus a second pending read,
-// released: the partial bytes reach the second reader ahead of the next
-// chunk (parity).
+// released, then released bytes met by an enqueue(): they reach the next
+// reader ahead of the chunk.
+async function releasedPartialHead(source) {
+  const { rs, controller } = byteStream(source);
+  const r1 = rs.getReader({ mode: 'byob' });
+  const read1 = r1.read(new Uint8Array(4), { min: 4 });
+  controller().enqueue(new Uint8Array([1, 2]));
+  const read2 = r1.read(new Uint8Array(4));
+  await scheduler.wait(5);
+  r1.releaseLock();
+  await rejectionOf(read1);
+  await rejectionOf(read2);
+  return { rs, controller };
+}
+
+async function pendingOrValue(read) {
+  return Promise.race([
+    read.then(({ value }) => [...value]),
+    scheduler.wait(20).then(() => 'pending'),
+  ]);
+}
+
+// DIVERGENCE (ledger #32): a pending read(view) takes the released bytes
+// and the chunk together under TS (spec: the chunk is queued before BYOB
+// reads are filled); C++ fills it with the released bytes alone.
 export const relockPartialHeadThenEnqueue = {
   async test() {
-    const { rs, controller } = byteStream();
-    const r1 = rs.getReader({ mode: 'byob' });
-    const read1 = r1.read(new Uint8Array(4), { min: 4 });
-    controller().enqueue(new Uint8Array([1, 2]));
-    const read2 = r1.read(new Uint8Array(4));
-    await scheduler.wait(5);
-    r1.releaseLock();
-    await rejectionOf(read1);
-    await rejectionOf(read2);
+    const { rs, controller } = await releasedPartialHead();
     const r2 = rs.getReader({ mode: 'byob' });
     const read3 = r2.read(new Uint8Array(4));
     controller().enqueue(new Uint8Array([3, 4]));
     const first = await read3;
     strictEqual(first.done, false);
+    if (usingTsImpl) {
+      deepStrictEqual([...first.value], [1, 2, 3, 4]);
+      strictEqual(await pendingOrValue(r2.read(new Uint8Array(4))), 'pending');
+      await r2.cancel();
+      return;
+    }
     deepStrictEqual([...first.value], [1, 2]);
     const second = await r2.read(new Uint8Array(4));
     deepStrictEqual([...second.value], [3, 4]);
+  },
+};
+
+// Ledger #32 with two pending read(view)s, and with auto-allocated
+// default reads: TS hands a default read the released bytes as their own
+// chunk (spec), C++ copies them into the auto-allocated buffer. An element
+// completed across the released byte and the chunk is parity.
+export const relockPartialHeadThenEnqueueShapes = {
+  async test() {
+    {
+      const { rs, controller } = await releasedPartialHead();
+      const r2 = rs.getReader({ mode: 'byob' });
+      const a = r2.read(new Uint8Array(4));
+      const b = r2.read(new Uint8Array(4));
+      controller().enqueue(new Uint8Array([3, 4, 5, 6, 7]));
+      deepStrictEqual(
+        [[...(await a).value], [...(await b).value]],
+        usingTsImpl
+          ? [
+              [1, 2, 3, 4],
+              [5, 6, 7],
+            ]
+          : [
+              [1, 2],
+              [3, 4, 5, 6],
+            ]
+      );
+    }
+    for (const reads of [1, 2]) {
+      const { rs, controller } = await releasedPartialHead({
+        autoAllocateChunkSize: 16,
+      });
+      const r2 = rs.getReader();
+      const pending = [];
+      for (let i = 0; i < reads; i++) pending.push(r2.read());
+      await scheduler.wait(5);
+      controller().enqueue(new Uint8Array([3, 4]));
+      const first = (await pending[0]).value;
+      deepStrictEqual([...first], [1, 2]);
+      strictEqual(first.buffer.byteLength, usingTsImpl ? 2 : 16);
+      if (reads === 2) {
+        const second = (await pending[1]).value;
+        deepStrictEqual([...second], [3, 4]);
+        strictEqual(second.buffer.byteLength, usingTsImpl ? 2 : 16);
+      }
+      await r2.cancel();
+    }
+    {
+      const { rs, controller } = await releasedPartialHead();
+      const r2 = rs.getReader({ mode: 'byob' });
+      const read = r2.read(new Uint16Array(4));
+      controller().enqueue(new Uint8Array([3]));
+      const { value } = await read;
+      ok(value instanceof Uint16Array);
+      deepStrictEqual(
+        [...new Uint8Array(value.buffer, value.byteOffset, value.byteLength)],
+        [1, 2]
+      );
+      await r2.cancel();
+    }
   },
 };
 

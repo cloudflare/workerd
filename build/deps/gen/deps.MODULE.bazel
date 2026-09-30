@@ -5,7 +5,7 @@ http = use_extension("@//:build/exts/http.bzl", "http")
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
 # ada-url
-bazel_dep(name = "ada-url", version = "4.0.0")
+bazel_dep(name = "ada-url", version = "4.0.0.bcr.1")
 
 # boringssl
 bazel_dep(name = "boringssl", repo_name = "ssl")
@@ -15,10 +15,10 @@ archive_override(
     patches = [
         "//:patches/boringssl/0001-Expose-libdecrepit-so-NodeJS-can-use-it-for-ncrypto.patch",
     ],
-    sha256 = "c54bb763140d86bc13ce1ec256f02189ddb59597c9765b75f945b7401b4916a7",
-    strip_prefix = "google-boringssl-bc2e0ff",
+    sha256 = "37ea781c65a67c6d5f41d4b69bc853dd8b735378be2f962025a33d1f6d142495",
+    strip_prefix = "google-boringssl-030986a",
     type = "tgz",
-    url = "https://api.github.com/repos/google/boringssl/tarball/0.20251002.0",
+    url = "https://api.github.com/repos/google/boringssl/tarball/0.20260813.0",
 )
 
 # brotli
@@ -27,10 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.0.bcr.3")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "c82c071cc7d3585479ad10851cbd8d3093a3f4254daf65e1c77eff98a23350c0",
-    strip_prefix = "capnproto-capnproto-0501d34/c++",
+    sha256 = "17fed2f708217291547d8b3a2b768f7f5ee2c8f65224d81bc4f313488b93fd40",
+    strip_prefix = "capnproto-capnproto-1be2d2a/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/0501d3436cd3ebda9145f6b04b16d5b65c0230fa",
+    url = "https://github.com/capnproto/capnproto/tarball/1be2d2a8e60152c89b00adca758c0c495acadc2b",
 )
 use_repo(http, "capnp-cpp")
 
@@ -127,20 +127,20 @@ archive_override(
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
         "//:patches/perfetto/0002-disable-info-level-logging-re2.patch",
     ],
-    sha256 = "4fcc98fe4754269a70e297f6caba429420039c89a1c6cb561dffb4057de63abb",
-    strip_prefix = "google-perfetto-9e9bdaf",
+    sha256 = "5b0312f61b4e3d4d29b0962593af0589bd4d2399c6797400e61e9ea4f31f7fb5",
+    strip_prefix = "google-perfetto-f00e0f6",
     type = "tgz",
-    url = "https://api.github.com/repos/google/perfetto/tarball/v58.2",
+    url = "https://api.github.com/repos/google/perfetto/tarball/v58.3",
 )
 
 # simdutf
 http.archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "631d95aaf39371505897b0916be2a60dd7c17ae16cec8bd5036d15d23bd0ac21",
+    sha256 = "a1b1fc3a3a8358820438f663237e9f252ce5ad356ae283ac066dcc9212eaa4dc",
     strip_prefix = "",
     type = "zip",
-    url = "https://github.com/simdutf/simdutf/releases/download/v9.1.2/singleheader.zip",
+    url = "https://github.com/simdutf/simdutf/releases/download/v9.2.1/singleheader.zip",
 )
 use_repo(http, "simdutf")
 
@@ -152,7 +152,7 @@ bazel_dep(name = "zlib")
 git_override(
     module_name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    commit = "285e94b8fa95ad3b7d16b80798ec8dce6febb8c8",
+    commit = "456ae730017b9b4bd3371927abc82627fd51feef",
     patch_strip = 1,
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",
@@ -161,4 +161,4 @@ git_override(
 )
 
 # zstd
-bazel_dep(name = "zstd", version = "1.5.7.bcr.1")
+bazel_dep(name = "zstd", version = "1.5.7.bcr.2")

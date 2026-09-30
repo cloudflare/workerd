@@ -128,8 +128,21 @@ pub mod tests {
     fn test_maybe_rc_none_pass_cxx() {
         let none: kj_rs::KjMaybe<kj_rs::KjRc<ffi::OpaqueRefcountedClass>> = kj_rs::KjMaybe::None;
         assert!(none.is_none());
-        // Dropping a None must not touch the uninitialized Rc storage.
+        // Dropping a None must not touch the Rc storage.
         std::mem::drop(none);
+
+        // A Rust-constructed None must be read as `kj::none` by C++.
+        ffi::take_maybe_rc_none(kj_rs::KjMaybe::None);
+    }
+
+    #[test]
+    fn test_maybe_arc_none_pass_cxx() {
+        let none: kj_rs::KjMaybe<kj_rs::KjArc<ffi::OpaqueAtomicRefcountedClass>> =
+            kj_rs::KjMaybe::None;
+        assert!(none.is_none());
+        std::mem::drop(none);
+
+        ffi::take_maybe_arc_none(kj_rs::KjMaybe::None);
     }
 
     #[test]

@@ -1015,6 +1015,10 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
     return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
   }
 
+  kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
+    return ActorCallTargetRetryable::NO;
+  }
+
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override {
     return kj::addRef(getOrCreateActorChannel());
   }

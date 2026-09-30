@@ -164,3 +164,50 @@ export const destControllerErrorsMidPipe = {
     }
   },
 };
+
+// The destination's controller errors while a write is in flight: the
+// destination is erroring until the write settles, and only then errored.
+// Backward propagation waits for errored (spec), so the source is not
+// cancelled while the write is outstanding. DIVERGENCE (ledger #7): C++
+// then cancels the source with the error but FULFILLS the pipe promise.
+export const destErroringWaitsForInFlightWrite = {
+  async test() {
+    const derr = new Error('dest-err');
+    let cancelArg = 'not-called';
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue('a');
+      },
+      cancel(r) {
+        cancelArg = r;
+      },
+    });
+    let wc;
+    let releaseWrite;
+    const writeStarted = Promise.withResolvers();
+    const ws = new WritableStream({
+      start(c) {
+        wc = c;
+      },
+      write() {
+        writeStarted.resolve();
+        return new Promise((r) => (releaseWrite = r));
+      },
+    });
+    const pipeP = rs.pipeTo(ws);
+    await writeStarted.promise;
+    wc.error(derr);
+    const early = await outcomeOf(pipeP, 50);
+    strictEqual(early.state, 'pending');
+    strictEqual(cancelArg, 'not-called');
+    releaseWrite();
+    const outcome = await outcomeOf(pipeP);
+    if (usingTsImpl) {
+      strictEqual(outcome.state, 'rejected');
+      strictEqual(outcome.reason, derr);
+    } else {
+      strictEqual(outcome.state, 'fulfilled');
+    }
+    strictEqual(cancelArg, derr);
+  },
+};

@@ -83,6 +83,7 @@ def _rust_build_std_impl(ctx):
             output_dir + "-work",
             ctx.attr.target_triple,
             ctx.attr.sanitizer,
+            " ".join(ctx.attr.rustflags),
             str(len(patches)),
         ] + [patch.path for patch in patches] + _STDLIB_CRATES,
         inputs = depset(
@@ -102,6 +103,7 @@ rust_build_std = rule(
         "rust_src": attr.label(mandatory = True, allow_files = True),
         "rust_src_manifest": attr.label(mandatory = True, allow_single_file = True),
         "rust_toolchain_files": attr.label_list(mandatory = True, allow_files = True),
+        "rustflags": attr.string_list(),
         "sanitizer": attr.string(mandatory = True),
         "target_triple": attr.string(mandatory = True),
         "_build_std": attr.label(
@@ -123,10 +125,14 @@ def instrumented_rust_std(
         target_triple,
         rust_tools,
         rust_src,
+        rustflags = [],
         tags = None,
         target_compatible_with = None,
         visibility = None):
-    """Defines a rules_rust standard library instrumented by `sanitizer`."""
+    """Defines a rules_rust standard library instrumented by `sanitizer`.
+
+    `rustflags` are extra rustc flags every standard-library crate is compiled with.
+    """
     rust_build_std(
         name = name + "_build",
         cargo = rust_tools + "//:cargo",
@@ -134,6 +140,7 @@ def instrumented_rust_std(
         rust_src = rust_src + "//:rust_src",
         rust_src_manifest = rust_src + "//:library/Cargo.toml",
         rust_toolchain_files = [rust_tools + "//:rustc_lib"],
+        rustflags = rustflags,
         sanitizer = sanitizer,
         target_triple = target_triple,
         tags = tags,

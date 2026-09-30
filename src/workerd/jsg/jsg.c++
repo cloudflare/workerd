@@ -12,6 +12,8 @@
 #include <workerd/jsg/util.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <v8-cppgc.h>
+
 #ifdef V8_ENABLE_SANDBOX
 #include <sys/mman.h>
 #endif
@@ -322,6 +324,24 @@ void Lock::requestGcForTesting() const {
     KJ_LOG(ERROR, "Test GC used while not in a test");
     return;
   }
+  v8Isolate->RequestGarbageCollectionForTesting(
+      v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
+}
+
+void Lock::requestGcWithDefaultSweepForTesting() const {
+  if (!isPredictableModeForTest()) {
+    KJ_LOG(ERROR, "Test GC used while not in a test");
+    return;
+  }
+  auto* cppHeap = v8Isolate->GetCppHeap();
+  KJ_ASSERT(cppHeap != nullptr);
+
+  // A forced GC always sweeps cppgc atomically. This override makes it use the configured
+  // sweeping_support instead, like an allocation-triggered GC would. Scoped rather than left on so
+  // later GCs in the isolate are unaffected.
+  cppHeap->SetForceIncrementalSweepingForTesting(true);
+  KJ_DEFER(cppHeap->SetForceIncrementalSweepingForTesting(false));
+
   v8Isolate->RequestGarbageCollectionForTesting(
       v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
 }

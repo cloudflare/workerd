@@ -4,14 +4,22 @@
 
 // Re-entrancy edges. Read results are ordinary objects, so resolving a
 // read runs the thenable check — a patched Object.prototype.then getter
-// fires once per read under C++, twice under TypeScript. A second
-// concurrent default read diverges: the C++ internal readable supports a
-// single pending read (TypeError), TypeScript parks and serves in order.
+// fires once per read under C++, twice under TypeScript. Under TypeScript
+// the first firing runs inside the write that produced the chunk, while it
+// is still moving the rest of its output into the readable, so the getter
+// can tear the pair down mid-write. A second concurrent default read
+// diverges: the C++ internal readable supports a single pending read
+// (TypeError), TypeScript parks and serves in order.
 
 import { ok, strictEqual, deepStrictEqual, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
+import { pump } from 'round-trip';
 
 const enc = new TextEncoder();
+
+function macrotask() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 async function withThenInterceptor(onGet, fn) {
   Object.defineProperty(Object.prototype, 'then', {
@@ -44,6 +52,64 @@ export const thenInterceptionDuringReadResolution = {
         strictEqual(fired, usingTsImpl ? 2 : 1);
       }
     );
+  },
+};
+
+export const cancelFromReadResultThenGetterDuringWrite = {
+  async test() {
+    // A 1 MiB member: under TypeScript the write moves its output into the
+    // readable as sixteen 64 KiB pieces, and the getter fires on the first
+    // of them, with fifteen still to go. The cancel from there tears the
+    // pair down mid-write: the write rejects with the cancel reason (never
+    // with an error from enqueuing into the cancelled readable), the read
+    // whose result fired the getter still gets its piece, the readable
+    // closes and the writable errors with the reason (#13). Under C++ the
+    // read resolves from the C++ side once the write has settled: the
+    // write resolves, and the cancel leaves the writable untouched (#13).
+    const compressed = await pump(new CompressionStream('gzip'), [
+      new Uint8Array(1024 * 1024),
+    ]);
+    const ds = new DecompressionStream('gzip');
+    const reader = ds.readable.getReader();
+    const writer = ds.writable.getWriter();
+    const first = reader.read();
+    const reason = new Error('cancelled from then');
+    let cancelled;
+    let writeOutcome;
+    let firstResult;
+    await withThenInterceptor(
+      () => {
+        cancelled ??= reader.cancel(reason);
+      },
+      async () => {
+        writeOutcome = await writer.write(compressed).then(
+          () => 'resolved',
+          (e) => e
+        );
+        firstResult = await first;
+      }
+    );
+    ok(cancelled !== undefined, 'the getter fired');
+    await cancelled;
+    strictEqual(firstResult.done, false);
+    ok(firstResult.value.byteLength > 0);
+    await reader.closed;
+    strictEqual((await reader.read()).done, true);
+    if (usingTsImpl) {
+      strictEqual(writeOutcome, reason);
+      await rejects(writer.closed, (e) => e === reason);
+      await rejects(writer.write(enc.encode('x')), (e) => e === reason);
+    } else {
+      strictEqual(writeOutcome, 'resolved');
+      let state = 'pending';
+      writer.closed.then(
+        () => (state = 'resolved'),
+        () => (state = 'rejected')
+      );
+      await macrotask();
+      await macrotask();
+      strictEqual(state, 'pending');
+    }
   },
 };
 

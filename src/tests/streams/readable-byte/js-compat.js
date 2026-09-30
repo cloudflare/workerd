@@ -65,31 +65,47 @@ export const closedPromiseByteReaders = {
 
 // reader.cancel() resolves pending reads done=true for default, BYOB,
 // and readAtLeast reads (byte halves of readableStreamCancelReads).
+// DIVERGENCE in the value of a cancelled pending read, for all three
+// read kinds (ledger #22): C++ resolves a zero-length Uint8Array,
+// TypeScript resolves undefined (spec ReadableStreamCancel). WPT's
+// assert_object_equals treats the two as equal, so this pin is the
+// only one guarding it.
 export const cancelPendingReadsByteReaders = {
   async test() {
+    const assertCancelledValue = (value) => {
+      if (usingTsImpl) {
+        strictEqual(value, undefined);
+      } else {
+        ok(value instanceof Uint8Array);
+        strictEqual(value.byteLength, 0);
+      }
+    };
     {
       const rs = new ReadableStream({ type: 'bytes' });
       const reader = rs.getReader();
       const read = reader.read();
       reader.cancel();
-      const { done } = await read;
+      const { done, value } = await read;
       ok(done);
+      assertCancelledValue(value);
     }
     {
       const rs = new ReadableStream({ type: 'bytes' });
       const reader = rs.getReader({ mode: 'byob' });
       const read = reader.read(new Uint8Array(1));
       reader.cancel();
-      const { done } = await read;
+      const { done, value } = await read;
       ok(done);
+      assertCancelledValue(value);
     }
     {
       const rs = new ReadableStream({ type: 'bytes' });
       const reader = rs.getReader({ mode: 'byob' });
       const read = reader.readAtLeast(1, new Uint8Array(1));
       reader.cancel();
-      const { done } = await read;
+      const { done, value } = await read;
       ok(done);
+      assertCancelledValue(value);
     }
   },
 };

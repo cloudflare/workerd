@@ -135,7 +135,7 @@ export let nonClass = {
 };
 
 // Globals used to test passing RPC promises or properties across I/O contexts (which is expected
-// to fail).
+// to fail). MyService only sees them via the same-isolate MyServiceLocal binding.
 let globalRpcPromise;
 
 // Promise initialized by testWaitUntil() and then resolved shortly later, in a waitUntil task.
@@ -1332,15 +1332,15 @@ export let crossContextSharingDoesntWork = {
     // Sharing an RPC promise between contexts works as long as the promise returns a simple value
     // (with no I/O objects), since JsRpcPromise wraps a simple JS promise and we support sharing
     // JS promises.
-    globalRpcPromise = env.MyService.oneArgMethod(2);
-    assert.strictEqual(await env.MyService.tryUseGlobalRpcPromise(), 24);
+    globalRpcPromise = env.MyServiceLocal.oneArgMethod(2);
+    assert.strictEqual(await env.MyServiceLocal.tryUseGlobalRpcPromise(), 24);
 
     // Sharing a property of a service binding works, because the service  binding itself is not
     // tied to an I/O context. Awaiting the property actually initiates a new RPC session from
     // whatever context performed the await.
-    globalRpcPromise = env.MyService.nonFunctionProperty;
+    globalRpcPromise = env.MyServiceLocal.nonFunctionProperty;
     assert.strictEqual(
-      JSON.stringify(await env.MyService.tryUseGlobalRpcPromise()),
+      JSON.stringify(await env.MyServiceLocal.tryUseGlobalRpcPromise()),
       '{"foo":123}'
     );
 
@@ -1360,9 +1360,9 @@ export let crossContextSharingDoesntWork = {
     // Note that the part that actually fails here is not awaiting the promise, but rather when
     // tryUseGlobalRpcPromise() tries to return the result, it tries to serialize the stub, but
     // it can't do that from the wrong context.
-    globalRpcPromise = env.MyService.makeCounter(12);
+    globalRpcPromise = env.MyServiceLocal.makeCounter(12);
 
-    await assert.rejects(() => env.MyService.tryUseGlobalRpcPromise(), {
+    await assert.rejects(() => env.MyServiceLocal.tryUseGlobalRpcPromise(), {
       name: 'Error',
       message:
         'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
@@ -1372,23 +1372,26 @@ export let crossContextSharingDoesntWork = {
     });
 
     // Pipelining on someone else's promise straight-up doesn't work.
-    await assert.rejects(() => env.MyService.tryUseGlobalRpcPromisePipeline(), {
-      name: 'Error',
-      message:
-        'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
-        'request/response bodies, and others) created in the context of one request handler ' +
-        "cannot be accessed from a different request's handler. This is a limitation of " +
-        'Cloudflare Workers which allows us to improve overall performance. ' +
-        '(I/O type: JsRpcPromise)',
-    });
+    await assert.rejects(
+      () => env.MyServiceLocal.tryUseGlobalRpcPromisePipeline(),
+      {
+        name: 'Error',
+        message:
+          'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
+          'request/response bodies, and others) created in the context of one request handler ' +
+          "cannot be accessed from a different request's handler. This is a limitation of " +
+          'Cloudflare Workers which allows us to improve overall performance. ' +
+          '(I/O type: JsRpcPromise)',
+      }
+    );
 
     // Now let's try accessing a JsRpcProperty, where the property is NOT a direct property of a
     // top-level service binding. This works even less than a JsRpcPromise, since there's no inner
     // JS promise, it tries to create one on-demand, which fails because the parent object is
     // tied to the original I/O context.
-    globalRpcPromise = env.MyService.getAnObject(5).counter;
+    globalRpcPromise = env.MyServiceLocal.getAnObject(5).counter;
 
-    await assert.rejects(() => env.MyService.tryUseGlobalRpcPromise(), {
+    await assert.rejects(() => env.MyServiceLocal.tryUseGlobalRpcPromise(), {
       name: 'Error',
       message:
         'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
@@ -1397,15 +1400,18 @@ export let crossContextSharingDoesntWork = {
         'Cloudflare Workers which allows us to improve overall performance. (I/O type: Pipeline)',
     });
 
-    await assert.rejects(() => env.MyService.tryUseGlobalRpcPromisePipeline(), {
-      name: 'Error',
-      message:
-        'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
-        'request/response bodies, and others) created in the context of one request handler ' +
-        "cannot be accessed from a different request's handler. This is a limitation of " +
-        'Cloudflare Workers which allows us to improve overall performance. ' +
-        '(I/O type: JsRpcPromise)',
-    });
+    await assert.rejects(
+      () => env.MyServiceLocal.tryUseGlobalRpcPromisePipeline(),
+      {
+        name: 'Error',
+        message:
+          'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
+          'request/response bodies, and others) created in the context of one request handler ' +
+          "cannot be accessed from a different request's handler. This is a limitation of " +
+          'Cloudflare Workers which allows us to improve overall performance. ' +
+          '(I/O type: JsRpcPromise)',
+      }
+    );
   },
 };
 
@@ -1414,7 +1420,7 @@ export let waitUntilWorks = {
     // Tests ctx.waitUntil
     {
       globalWaitUntilPromise = null;
-      await env.MyService.testWaitUntil();
+      await env.MyServiceLocal.testWaitUntil();
 
       assert.ok(globalWaitUntilPromise instanceof Promise);
       await globalWaitUntilPromise;
@@ -1423,7 +1429,7 @@ export let waitUntilWorks = {
     // Tests `import { waitUntil } from 'cloudflare:workers` on WorkerEntrypoint
     {
       globalWaitUntilPromise = null;
-      await env.MyService.testImportedWaitUntil();
+      await env.MyServiceLocal.testImportedWaitUntil();
 
       assert.ok(globalWaitUntilPromise instanceof Promise);
       await globalWaitUntilPromise;

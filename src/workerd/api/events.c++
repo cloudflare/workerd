@@ -72,7 +72,7 @@ MessageEvent::MessageEvent(jsg::Lock& js, kj::String type, Initializer initializ
           }),
       data(kj::mv(initializer.data).orDefault([&] { return jsg::JsRef(js, js.null()); })),
       lastEventId(kj::mv(initializer.lastEventId).orDefault(kj::String())),
-      maybeSource(kj::mv(initializer.source)),
+      maybeSource(kj::mv(initializer.source).orDefault(kj::none)),
       // Per the spec, origin defaults to the empty string for user-constructed events.
       maybeOrigin(kj::mv(initializer.origin)
                       .map([](jsg::USVString&& origin) -> kj::String { return kj::mv(origin); })

@@ -69,13 +69,17 @@ constexpr ContainerImageAlias CONTAINER_IMAGE_ALIASES[] = {{
            "sha256:a747ad80c8a161b650d79a6da9c422005b91148b18b8d2c669eb5a0b7c07e600"_kj,
 }};
 
-kj::StringPtr resolveContainerImage(kj::StringPtr image) {
+kj::Maybe<kj::StringPtr> tryResolveContainerImage(kj::StringPtr image) {
   for (const auto& entry: CONTAINER_IMAGE_ALIASES) {
     if (entry.alias == image) {
       return entry.image;
     }
   }
-  return image;
+  return kj::none;
+}
+
+kj::StringPtr resolveContainerImage(kj::StringPtr image) {
+  return tryResolveContainerImage(image).orDefault(image);
 }
 
 kj::StringPtr getContainerImageAlias(kj::StringPtr image) {
@@ -1004,6 +1008,32 @@ kj::String killTokenPidFile(kj::StringPtr killToken) {
   return kj::str("/tmp/.workerd-exec-", killToken, ".pid");
 }
 
+kj::Promise<void> ensureSystemImageAvailable(
+    kj::Network& network, kj::StringPtr dockerPath, kj::StringPtr requestedImage) {
+  KJ_IF_SOME(image, tryResolveContainerImage(requestedImage)) {
+    auto inspectEndpoint = kj::str("/images/", kj::encodeUriComponent(image), "/json");
+    auto inspectResponse = co_await dockerApiRequest(
+        network, kj::str(dockerPath), kj::HttpMethod::GET, kj::str(inspectEndpoint));
+    if (inspectResponse.statusCode == 200) {
+      co_return;
+    }
+    JSG_REQUIRE(inspectResponse.statusCode == 404, Error, "Failed to inspect system image '",
+        requestedImage, "': [", inspectResponse.statusCode, "] ", inspectResponse.body);
+
+    auto pullResponse = co_await dockerApiRequest(network, kj::str(dockerPath),
+        kj::HttpMethod::POST, kj::str("/images/create?fromImage=", kj::encodeUriComponent(image)));
+    JSG_REQUIRE(pullResponse.statusCode == 200, Error, "Failed to pull system image '",
+        requestedImage, "': [", pullResponse.statusCode, "] ", pullResponse.body);
+
+    auto pulledImage = co_await dockerApiRequest(
+        network, kj::str(dockerPath), kj::HttpMethod::GET, kj::mv(inspectEndpoint));
+    JSG_REQUIRE(pulledImage.statusCode == 200, Error, "Failed to pull system image '",
+        requestedImage, "': Docker did not make the image available: [", pulledImage.statusCode,
+        "] ", pulledImage.body, ". Pull response: ", pullResponse.body);
+  }
+  co_return;
+}
+
 }  // namespace
 
 void configureContainerPrivileges(
@@ -1897,6 +1927,7 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
   }
   configureContainerPrivileges(hostConfig, privileges);
 
+  co_await ensureSystemImageAvailable(network, dockerPath, effectiveImage);
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
 

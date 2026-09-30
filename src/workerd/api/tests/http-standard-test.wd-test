@@ -1,17 +1,20 @@
 using Workerd = import "/workerd/workerd.capnp";
 
+# The worker is instantiated twice so that the bindings below cross an isolate boundary.
+# Only the first service's test() runs; see the filter argument in BUILD.bazel.
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "http-standard-test",
-      worker = (
-        modules = [
-          ( name = "worker", esModule = embed "http-standard-test.js" )
-        ],
-        bindings = [
-          ( name = "SERVICE", service = "http-standard-test" )
-        ],
-        compatibilityFlags = ["nodejs_compat", "rpc", "url_standard", "fetch_standard_url"],
-      )
-    ),
+    ( name = "http-standard-test", worker = .worker ),
+    ( name = "http-standard-test-target", worker = .worker ),
   ],
+);
+
+const worker :Workerd.Worker = (
+  modules = [
+    ( name = "worker", esModule = embed "http-standard-test.js" )
+  ],
+  bindings = [
+    ( name = "SERVICE", service = "http-standard-test-target" )
+  ],
+  compatibilityFlags = ["nodejs_compat", "rpc", "url_standard", "fetch_standard_url"],
 );

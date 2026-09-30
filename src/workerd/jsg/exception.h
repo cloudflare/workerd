@@ -188,14 +188,23 @@ inline void markActorRequestNotDelivered(kj::Exception& exception) {
 // boundary. The payload is a zero-length array (marker only).
 constexpr kj::Exception::DetailTypeId REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID = 0x7f6e0bece261e8eeull;
 
-// Set when an actor invocation is rejected before user code because its retry token could not be
-// claimed. This distinguishes a terminal claim rejection from other delivery failures. The payload
-// is a zero-length array (marker only).
+// Set when an actor invocation is rejected before its handler or method runs because its retry
+// token could not be claimed. The actor constructor may already have run. This distinguishes a
+// terminal claim rejection from other delivery failures. The payload is a zero-length array (marker
+// only).
 constexpr kj::Exception::DetailTypeId ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID = 0x6fb3a97323600af2ull;
 
-// Set when a draining predecessor rejects an actor invocation before user code. The caller can
-// retry the request against the replacement actor. The payload is a zero-length array (marker only).
+// Set when a draining predecessor rejects an actor invocation before its handler or method runs.
+// The caller can retry the request against the replacement actor. The payload is a zero-length
+// array (marker only).
 constexpr kj::Exception::DetailTypeId ACTOR_PREDECESSOR_REJECTED_DETAIL_ID = 0xaef1c0c972f21fe7ull;
+
+// A predecessor rejection keeps its not-delivered marker even though the receiving entrypoint has
+// delivered the request, because the handler or method never ran.
+inline bool isActorPredecessorRejection(const kj::Exception& exception) {
+  return exception.getDetail(ACTOR_PREDECESSOR_REJECTED_DETAIL_ID) != kj::none &&
+      exception.getDetail(REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none;
+}
 
 struct ExceptionToJsOptions {
   // When ignoreDetail is true, tells kjExceptionToJs() to ignore any serialized

@@ -1,0 +1,93 @@
+# Termination propagation for streams transferred over JS RPC, in every pairing of the legacy and
+# TypeScript stream implementations (runner = stream origin for the argument-direction cases, peer
+# = origin for the return-direction cases). See the header comment in the JS file.
+using Workerd = import "/workerd/workerd.capnp";
+
+const legacyFlags :List(Text) = [
+  "nodejs_compat",
+  "experimental",
+  "streams_enable_constructors",
+];
+
+const tsFlags :List(Text) = [
+  "nodejs_compat",
+  "experimental",
+  "streams_enable_constructors",
+  "typescript_implemented_streams",
+];
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner-legacy-to-legacy",
+      worker = (
+        modules = [(name = "worker", esModule = embed "js-rpc-streams-cancellation-test.js")],
+        compatibilityFlags = .legacyFlags,
+        bindings = [
+          (name = "CELL", text = "legacy->legacy"),
+          (name = "PEER", service = (name = "peer-legacy-a", entrypoint = "Peer")),
+        ],
+      )
+    ),
+    ( name = "runner-legacy-to-ts",
+      worker = (
+        modules = [(name = "worker", esModule = embed "js-rpc-streams-cancellation-test.js")],
+        compatibilityFlags = .legacyFlags,
+        bindings = [
+          (name = "CELL", text = "legacy->ts"),
+          (name = "PEER", service = (name = "peer-ts-a", entrypoint = "Peer")),
+        ],
+      )
+    ),
+    ( name = "runner-ts-to-legacy",
+      worker = (
+        modules = [(name = "worker", esModule = embed "js-rpc-streams-cancellation-test.js")],
+        compatibilityFlags = .tsFlags,
+        bindings = [
+          (name = "CELL", text = "ts->legacy"),
+          (name = "PEER", service = (name = "peer-legacy-b", entrypoint = "Peer")),
+        ],
+      )
+    ),
+    ( name = "runner-ts-to-ts",
+      worker = (
+        modules = [(name = "worker", esModule = embed "js-rpc-streams-cancellation-test.js")],
+        compatibilityFlags = .tsFlags,
+        bindings = [
+          (name = "CELL", text = "ts->ts"),
+          (name = "PEER", service = (name = "peer-ts-b", entrypoint = "Peer")),
+        ],
+      )
+    ),
+    # Each runner gets its own peer so that the cells do not share execution contexts.
+    ( name = "peer-legacy-a",
+      worker = (
+        modules = [(name = "worker", esModule = embed "js-rpc-streams-cancellation-test.js")],
+        compatibilityFlags = .legacyFlags,
+      )
+    ),
+    ( name = "peer-legacy-b",
+      worker = (
+        modules = [(name = "worker", esModule = embed "js-rpc-streams-cancellation-test.js")],
+        compatibilityFlags = .legacyFlags,
+      )
+    ),
+    ( name = "peer-ts-a",
+      worker = (
+        modules = [(name = "worker", esModule = embed "js-rpc-streams-cancellation-test.js")],
+        compatibilityFlags = .tsFlags,
+      )
+    ),
+    ( name = "peer-ts-b",
+      worker = (
+        modules = [(name = "worker", esModule = embed "js-rpc-streams-cancellation-test.js")],
+        compatibilityFlags = .tsFlags,
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+    "workerd-autogate-rpc-externals-hydration",
+    "workerd-autogate-jsrpc-writable-drop-aborts-sink",
+    "workerd-autogate-jsrpc-readable-cancel-propagation",
+  ],
+);

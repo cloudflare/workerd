@@ -156,8 +156,7 @@ fn expand(ffi: Module, doc: Doc, attrs: OtherAttrs, apis: &[Api], types: &Types)
             }
             ImplKey::KjRc(ident) => expanded.extend(expand_kj_rc(ident, types, explicit_impl)),
             ImplKey::KjArc(ident) => expanded.extend(expand_kj_arc(ident, types, explicit_impl)),
-            // We do not yet need to generate code on the rust side for [`kj_rs::Own`]
-            ImplKey::Own(_) => (),
+            ImplKey::Own(ident) => expanded.extend(expand_impl_kj_own(ident, types, explicit_impl)),
         }
     }
 
@@ -1754,6 +1753,39 @@ fn expand_shared_ptr(
                 }
                 unsafe {
                     __drop(this);
+                }
+            }
+        }
+    }
+}
+
+// Implements `kj_rs::OwnTarget` for a C++ type held in a `KjOwn`, over the drop function that
+// `gen` writes for the same type (`write_kj_own`).
+fn expand_impl_kj_own(
+    key: NamedImplKey,
+    types: &Types,
+    explicit_impl: Option<&Impl>,
+) -> TokenStream {
+    let ident = key.rust;
+    let resolve = types.resolve(ident);
+    let link_drop = format!("cxxbridge$kjrs$own${}$drop", resolve.name.to_symbol());
+
+    let (impl_generics, ty_generics) = generics::split_for_impl(key, explicit_impl, resolve);
+
+    let begin_span = explicit_impl.map_or(key.begin_span, |explicit| explicit.impl_token.span);
+    let end_span = explicit_impl.map_or(key.end_span, |explicit| explicit.brace_token.span.join());
+    let unsafe_token = format_ident!("unsafe", span = begin_span);
+
+    quote_spanned! {end_span=>
+        #[automatically_derived]
+        #unsafe_token impl #impl_generics ::kj_rs::OwnTarget for #ident #ty_generics {
+            unsafe fn __drop(own: *mut ::kj_rs::KjOwn<Self>) {
+                #UnsafeExtern extern "C" {
+                    #[link_name = #link_drop]
+                    fn __drop(own: *mut ::kj_rs::KjOwn<#ident #ty_generics>);
+                }
+                unsafe {
+                    __drop(own);
                 }
             }
         }

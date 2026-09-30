@@ -73,7 +73,7 @@ export {
   generatorGarbageDestroysSocket,
   emptyOrDetachedBufferDestroysSocketWithEnobufs,
   sharedOnreadBufferDestroysSocket,
-  resizableOnreadBufferIsTransferredResizable,
+  resizableOnreadBuffer,
 } from 'onread';
 
 export {

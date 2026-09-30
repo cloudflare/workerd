@@ -140,6 +140,11 @@ void XThreadWaitList<void>::State::reject(kj::Exception&& e) const {
 }
 
 void XThreadWaitList<void>::State::lostFulfiller() const {
+  // The list, its separate fulfiller, and every waiter hold a reference to the State (as does each
+  // pending result continuation in XThreadWaitList<T>), and only the list can create more. When the
+  // caller's reference is the only one, the State is about to be destroyed and nothing can observe
+  // its outcome, so skip building the exception and its stack trace.
+  if (!isShared()) return;
   if (list.isReady() != kj::none) return;
   list.tryReady(Outcome{makeNeverFulfilledException()});
 }

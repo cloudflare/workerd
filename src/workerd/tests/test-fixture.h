@@ -29,6 +29,8 @@ struct HeapLimitFlag: public kj::AtomicRefcounted {
 // TestFixture is responsible for creating workerd environment during tests.
 // All the infrastructure is started in the constructor. It is accessed through run() method.
 struct TestFixture {
+  using ActorCallReplayMemoryReserver = kj::Function<kj::Maybe<kj::Own<void>>(size_t bytes)>;
+
   struct SetupParams {
     // waitScope of outer IO loop. New IO will be set up if missing.
     kj::Maybe<kj::WaitScope&> waitScope;
@@ -39,6 +41,9 @@ struct TestFixture {
     kj::Maybe<kj::StringPtr> mainModuleSource;
     // If set, make a stub of an Actor with the given id.
     kj::Maybe<Worker::Actor::Id> actorId;
+    // If set, the actor is an instance of this exported Durable Object class (e.g. "default"),
+    // constructed on the first incoming request. Otherwise the actor has no class.
+    kj::Maybe<kj::StringPtr> actorClassName;
     // If true, use real timers instead of mock timers that never advance.
     // Requires waitScope to be kj::none (so that the fixture creates its own AsyncIoContext).
     bool useRealTimers;
@@ -62,8 +67,14 @@ struct TestFixture {
     // no-op base RequestObserver. Lets tests observe metrics hooks (e.g. recording the values
     // passed to setNextSubrequestRetryEligibility()).
     kj::Maybe<kj::Function<kj::Own<RequestObserver>()>> requestObserverFactory;
+    // If set, creates the wait-until task tracker for each actor created by this fixture.
+    kj::Maybe<kj::Function<kj::Own<Worker::Actor::WaitUntilTaskTracker>()>>
+        waitUntilTaskTrackerFactory;
     // If set, incremented whenever the fixture's limit enforcer checks a new subrequest.
     kj::Maybe<uint&> checkedSubrequestCount;
+    // If set, the fixture's limit enforcer delegates tryReserveActorCallReplayMemory() to this.
+    // Otherwise it refuses every reservation.
+    kj::Maybe<ActorCallReplayMemoryReserver> actorCallReplayMemoryReserver;
     // If set, used as the jsg::IsolateObserver for the worker's isolate instead of a no-op one.
     // Lets tests observe compilation hooks (e.g. onCompileCacheFound / onCompileCacheRejected).
     kj::Maybe<kj::Own<JsgIsolateObserver>> jsgIsolateObserver;
@@ -271,6 +282,7 @@ struct TestFixture {
   // it constructs.
   kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> savedHibernationManager;
   kj::Maybe<uint64_t> savedHolderToken;
+  kj::Maybe<kj::String> savedActorClassName;
   capnp::ByteStreamFactory byteStreamFactory;
   kj::HttpHeaderTable::Builder headerTableBuilder;
   ThreadContext::HeaderIdBundle threadContextHeaderBundle;
@@ -291,7 +303,10 @@ struct TestFixture {
   kj::Own<kj::HttpHeaderTable> headerTable;
   kj::Maybe<kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
   kj::Maybe<kj::Function<kj::Own<RequestObserver>()>> requestObserverFactory;
+  kj::Maybe<kj::Function<kj::Own<Worker::Actor::WaitUntilTaskTracker>()>>
+      waitUntilTaskTrackerFactory;
   kj::Maybe<uint&> checkedSubrequestCount;
+  kj::Maybe<ActorCallReplayMemoryReserver> actorCallReplayMemoryReserver;
 
   // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
   kj::Own<Worker::Actor> makeActor(Worker::Actor::Id id);

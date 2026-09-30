@@ -85,8 +85,10 @@ class PromisedTokenizableChannel: public ChannelType {
     KJ_IF_SOME(channel, inner) {
       return channel->getTokenMaybeSync(usage);
     } else {
-      return readyPromise.addBranch().then([this, usage]() -> kj::Promise<kj::Array<byte>> {
-        KJ_SWITCH_ONEOF(KJ_ASSERT_NONNULL(inner)->getTokenMaybeSync(usage)) {
+      return readyPromise.addBranch().then(
+          [self = this->addWeakToThis(), usage]() -> kj::Promise<kj::Array<byte>> {
+        auto& channel = self.assertLive();
+        KJ_SWITCH_ONEOF(KJ_ASSERT_NONNULL(channel.inner)->getTokenMaybeSync(usage)) {
           KJ_CASE_ONEOF(token, kj::Array<byte>) {
             return kj::mv(token);
           }
@@ -105,8 +107,9 @@ class PromisedTokenizableChannel: public ChannelType {
     KJ_IF_SOME(channel, inner) {
       return kj::addRef<IoChannelFactory::TokenizableChannel>(*channel);
     } else {
-      return readyPromise.addBranch().then([this]() mutable {
-        return kj::addRef<IoChannelFactory::TokenizableChannel>(*KJ_ASSERT_NONNULL(inner));
+      return readyPromise.addBranch().then([self = this->addWeakToThis()]() mutable {
+        auto& channel = self.assertLive();
+        return kj::addRef<IoChannelFactory::TokenizableChannel>(*KJ_ASSERT_NONNULL(channel.inner));
       });
     }
   }
@@ -166,8 +169,9 @@ class PromisedRpcChannel final: public PromisedTokenizableChannel<IoChannelFacto
       return channel->restore();
     } else {
       auto splitPromise = readyPromise.addBranch()
-                              .then([this]() {
-        auto innerRestore = KJ_ASSERT_NONNULL(inner)->restore();
+                              .then([self = addWeakToThis()]() {
+        auto& channel = self.assertLive();
+        auto innerRestore = KJ_ASSERT_NONNULL(channel.inner)->restore();
         return kj::tuple(kj::mv(innerRestore.cap), kj::mv(innerRestore.task));
       }).split();
       return {

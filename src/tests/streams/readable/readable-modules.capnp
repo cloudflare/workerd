@@ -23,6 +23,8 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "reentrancy", esModule = embed "reentrancy.js"),
   (name = "buffer-lifecycle", esModule = embed "buffer-lifecycle.js"),
   (name = "integration-body", esModule = embed "integration-body.js"),
+  (name = "integration-body-failures", esModule = embed "integration-body-failures.js"),
+  (name = "integration-body-memory", esModule = embed "integration-body-memory.js"),
   (name = "integration-locked-disturbed", esModule = embed "integration-locked-disturbed.js"),
   (name = "gc", esModule = embed "gc.js"),
   (name = "then-interceptors", esModule = embed "then-interceptors.js"),

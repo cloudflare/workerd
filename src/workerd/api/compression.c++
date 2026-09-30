@@ -233,41 +233,35 @@ void CodecStage::Context::enforceStrictChecks(int flush, const Result& result) {
       TypeError, "Called close() on a decompression stream with incomplete data");
 }
 
-kj::ArrayPtr<kj::byte> CodecStage::LazyBuffer::take(size_t readSize) {
-  KJ_ASSERT(readSize <= validSize);
-  // An empty read must not index the vector: the read offset is output.size() - validSize,
-  // which is one past the end whenever the valid region is empty.
-  if (readSize == 0) return nullptr;
-  kj::ArrayPtr<kj::byte> chunk = kj::arrayPtr(&output[output.size() - validSize], readSize);
-  validSize -= readSize;
-  return chunk;
+void CodecStage::OutputBuffer::write(kj::ArrayPtr<const kj::byte> chunk) {
+  if (chunk.size() == 0) return;
+  blocks.push_back(kj::heapArray(chunk));
+  total += chunk.size();
 }
 
-void CodecStage::LazyBuffer::maybeShift() {
-  size_t unusedSpace = output.size() - validSize;
-  if (unusedSpace >= 1024 && unusedSpace >= (output.size() >> 3)) {
-    // Shifting buffer to erase data that has already been read. validSize remains the same.
-    memmove(output.begin(), output.begin() + unusedSpace, validSize);
-    output.truncate(validSize);
+size_t CodecStage::OutputBuffer::pull(kj::ArrayPtr<kj::byte> dest) {
+  size_t copied = 0;
+  while (dest.size() > 0 && !blocks.empty()) {
+    auto remaining = blocks.front().slice(headOffset);
+    auto piece = remaining.first(kj::min(remaining.size(), dest.size()));
+    dest.write(piece);
+    copied += piece.size();
+    headOffset += piece.size();
+    if (headOffset == blocks.front().size()) {
+      blocks.pop_front();
+      headOffset = 0;
+    }
   }
+  total -= copied;
+  if (blocks.empty()) blocks.shrinkToInitial();
+  return copied;
 }
 
-void CodecStage::LazyBuffer::write(kj::ArrayPtr<const kj::byte> chunk) {
-  output.addAll(chunk);
-  validSize += chunk.size();
-}
-
-void CodecStage::LazyBuffer::clear() {
-  output.clear();
-  validSize = 0;
-}
-
-size_t CodecStage::LazyBuffer::size() {
-  return validSize;
-}
-
-bool CodecStage::LazyBuffer::empty() {
-  return validSize == 0;
+void CodecStage::OutputBuffer::clear() {
+  blocks.clear();
+  blocks.shrinkToInitial();
+  headOffset = 0;
+  total = 0;
 }
 
 CodecStage::CodecStage(Mode mode,
@@ -288,11 +282,7 @@ void CodecStage::end() {
 }
 
 size_t CodecStage::pull(kj::ArrayPtr<kj::byte> dest) {
-  auto n = kj::min(dest.size(), output.size());
-  if (n == 0) return 0;
-  dest.write(output.take(n));
-  output.maybeShift();
-  return n;
+  return output.pull(dest);
 }
 
 size_t CodecStage::available() {
@@ -352,6 +342,10 @@ uint32_t CompressionCodec::pullInto(jsg::JsBufferSource view) {
 
 double CompressionCodec::available() {
   return static_cast<double>(stage.available());
+}
+
+void CompressionCodec::clear() {
+  stage.clear();
 }
 
 void newCompressionCodecCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {

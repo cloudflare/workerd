@@ -11,6 +11,7 @@
 #include <workerd/api/util.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/ser.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/string-buffer.h>
 
@@ -345,10 +346,10 @@ class TeeAdapter final: public kj::AsyncInputStream {
 
 class TeeBranch final: public ReadableStreamSource {
  public:
-  explicit TeeBranch(kj::Own<kj::AsyncInputStream> inner): inner(kj::mv(inner)) {}
+  explicit TeeBranch(kj::Rc<kj::AsyncInputStream> inner): inner(kj::mv(inner)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return inner->tryRead(buffer, minBytes, maxBytes);
+    return inner->tryRead(buffer, minBytes, maxBytes).attach(inner.addRef());
   }
 
   kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
@@ -370,19 +371,10 @@ class TeeBranch final: public ReadableStreamSource {
     // It is important we actually call `inner->pumpTo()` so that `kj::newTee()` is aware of this
     // pump operation's backpressure. So we can't use the default `ReadableStreamSource::pumpTo()`
     // implementation, and have to implement our own.
-
-    PumpAdapter outputAdapter(output);
-    co_await inner->pumpTo(outputAdapter);
-
-    if (end) {
-      co_await output->end();
-    }
-
-    // We only use `TeeBranch` when a locally-sourced stream was tee'd (because system streams
-    // implement `tryTee()` in a different way that doesn't use `TeeBranch`). So, we know that
-    // none of the pump can be performed without the IoContext active, and thus we do not
-    // `KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`.
-    co_return;
+    //
+    // Pipe cancellation can synchronously destroy this TeeBranch before the returned pump promise
+    // finishes unwinding. Give the operation its own reference to the wrapped stream.
+    return pumpToImpl(inner.addRef(), output, end);
   }
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
@@ -441,7 +433,23 @@ class TeeBranch final: public ReadableStreamSource {
     kj::Ptr<WritableStreamSink> inner;
   };
 
-  kj::Own<kj::AsyncInputStream> inner;
+  static kj::Promise<DeferredProxy<void>> pumpToImpl(
+      kj::Rc<kj::AsyncInputStream> inner, kj::Ptr<WritableStreamSink> output, bool end) {
+    PumpAdapter outputAdapter(output);
+    co_await inner->pumpTo(outputAdapter);
+
+    if (end) {
+      co_await output->end();
+    }
+
+    // We only use `TeeBranch` when a locally-sourced stream was tee'd (because system streams
+    // implement `tryTee()` in a different way that doesn't use `TeeBranch`). So, we know that
+    // none of the pump can be performed without the IoContext active, and thus we do not
+    // `KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`.
+    co_return;
+  }
+
+  kj::Rc<kj::AsyncInputStream> inner;
 };
 }  // namespace
 
@@ -495,6 +503,87 @@ bool WritableStreamSink::tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const byte
 kj::Maybe<kj::Promise<DeferredProxy<void>>> WritableStreamSink::tryPumpFrom(
     kj::Ptr<ReadableStreamSource> input, bool end) {
   return kj::none;
+}
+
+kj::Promise<kj::Exception> WritableStreamSink::whenWriteDisconnected() {
+  return kj::NEVER_DONE;
+}
+
+kj::Promise<DeferredProxy<void>> pumpOwnedSourceToSink(
+    kj::Own<ReadableStreamSource> source, kj::Own<WritableStreamSink> sink, bool end) {
+  struct Holder: public kj::Refcounted {
+    kj::Own<WritableStreamSink> sink;
+    kj::Own<ReadableStreamSource> source;
+    bool done = false;
+
+    Holder(kj::Own<WritableStreamSink> sink, kj::Own<ReadableStreamSource> source)
+        : sink(kj::mv(sink)),
+          source(kj::mv(source)) {}
+    ~Holder() noexcept(false) {
+      if (!done) {
+        // It appears the pump was canceled. We should make sure this propagates back to the
+        // source stream. This is important in particular when we're implementing the response
+        // pump for an HTTP event (see Response::send()). Presumably it was canceled because the
+        // client disconnected. If we don't cancel the source, then if the source is one end of
+        // a TransformStream, the write end will just hang. Of course, this is fine if there are
+        // no waitUntil()s running, because the whole I/O context will be canceled anyway. But if
+        // there are waitUntil()s, then the application probably expects to get an exception from
+        // the write() on cancellation, rather than have it hang.
+        source->cancel(KJ_EXCEPTION(DISCONNECTED, "pump canceled"));
+      }
+    }
+
+    void fail(const kj::Exception& exception) {
+      sink->abort(exception.clone());
+      source->cancel(exception.clone());
+      done = true;
+    }
+  };
+
+  auto holder = kj::rc<Holder>(kj::mv(sink), kj::mv(source));
+
+  // Both phases of the pump race against the sink reporting that its writes can no longer
+  // succeed. Without this, a source that is idle -- waiting for data that may never come -- would
+  // keep the pump parked long after the destination went away. The join drops the losing side
+  // before the continuation runs, so fail() never overlaps an in-flight pump operation.
+  auto& sinkRef = *holder->sink;
+  return holder->source->pumpTo(holder->sink->getPtr(), end)
+      .exclusiveJoin(rejectWhenWriteDisconnected<DeferredProxy<void>>(sinkRef))
+      .then([holder = holder.addRef()](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
+    auto& sinkRef = *holder->sink;
+    proxy.proxyTask = proxy.proxyTask.exclusiveJoin(rejectWhenWriteDisconnected<void>(sinkRef))
+                          .catch_([holder = holder.addRef()](kj::Exception&& exception) mutable {
+      holder->fail(exception);
+      kj::throwFatalException(kj::mv(exception));
+    }).attach(holder.addRef());
+    holder->done = true;
+    return kj::mv(proxy);
+  }, [holder = holder.addRef()](kj::Exception&& exception) mutable -> DeferredProxy<void> {
+    holder->fail(exception);
+    kj::throwFatalException(kj::mv(exception));
+  });
+}
+
+jsg::JsValue exceptionToCancelReason(jsg::Lock& js, kj::Exception exception) {
+  KJ_IF_SOME(serialized, exception.getDetail(SERIALIZED_CANCEL_REASON_DETAIL_ID)) {
+    // The bytes came from another isolate, possibly a different runtime version; if they cannot be
+    // read, the exception itself is still a faithful description of what happened.
+    return js.tryCatch([&]() -> jsg::JsValue {
+      // The value crossed a JS RPC boundary, so it is read the way the RPC layer reads every other
+      // value from a peer: at the wire format version JS RPC pins, and without carrying over the
+      // stack of any error in it.
+      jsg::Deserializer deserializer(js, serialized, kj::none, kj::none,
+          jsg::Deserializer::Options{
+            .version = 15,
+            .readHeader = true,
+            .preserveStackInErrors = false,
+          });
+      return deserializer.readValue(js);
+    }, [&](jsg::Value&& error) -> jsg::JsValue {
+      return js.exceptionToJsValue(kj::mv(exception)).getHandle(js);
+    });
+  }
+  return js.exceptionToJsValue(kj::mv(exception)).getHandle(js);
 }
 
 // =======================================================================================
@@ -2960,42 +3049,7 @@ kj::Own<ReadableStreamController> ReadableStreamInternalController::detach(
 kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
     jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) {
   auto source = KJ_ASSERT_NONNULL(removeSource(js));
-
-  struct Holder: public kj::Refcounted {
-    kj::Own<WritableStreamSink> sink;
-    kj::Own<ReadableStreamSource> source;
-    bool done = false;
-
-    Holder(kj::Own<WritableStreamSink> sink, kj::Own<ReadableStreamSource> source)
-        : sink(kj::mv(sink)),
-          source(kj::mv(source)) {}
-    ~Holder() noexcept(false) {
-      if (!done) {
-        // It appears the pump was canceled. We should make sure this propagates back to the
-        // source stream. This is important in particular when we're implementing the response
-        // pump for an HTTP event (see Response::send()). Presumably it was canceled because the
-        // client disconnected. If we don't cancel the source, then if the source is one end of
-        // a TransformStream, the write end will just hang. Of course, this is fine if there are
-        // no waitUntil()s running, because the whole I/O context will be canceled anyway. But if
-        // there are waitUntil()s, then the application probably expects to get an exception from
-        // the write() on cancellation, rather than have it hang.
-        source->cancel(KJ_EXCEPTION(DISCONNECTED, "pump canceled"));
-      }
-    }
-  };
-
-  auto holder = kj::rc<Holder>(kj::mv(sink), kj::mv(source));
-  return holder->source->pumpTo(holder->sink->getPtr(), end)
-      .then([holder = holder.addRef()](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
-    proxy.proxyTask = proxy.proxyTask.attach(holder.addRef());
-    holder->done = true;
-    return kj::mv(proxy);
-  }, [holder = holder.addRef()](kj::Exception&& ex) mutable {
-    holder->sink->abort(ex.clone());
-    holder->source->cancel(ex.clone());
-    holder->done = true;
-    return kj::mv(ex);
-  });
+  return pumpOwnedSourceToSink(kj::mv(source), kj::mv(sink), end);
 }
 
 StreamEncoding ReadableStreamInternalController::getPreferredEncoding() {

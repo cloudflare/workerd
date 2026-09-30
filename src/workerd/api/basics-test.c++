@@ -6,6 +6,7 @@
 // test without pulling in the world.
 #define WORKERD_API_BASICS_TEST 1
 
+#include "abort-bootstrap.h"
 #include "actor-state.h"
 #include "actor.h"
 #include "basics.h"
@@ -75,10 +76,25 @@ struct BasicsContext: public jsg::Object, public jsg::ContextGlobal {
     return true;
   }
 
+  jsg::Ref<api::AbortSignal> newSignal(jsg::Lock& js) {
+    return js.alloc<api::AbortSignal>();
+  }
+
+  void abortSignal(jsg::Lock& js, jsg::Ref<api::AbortSignal> signal) {
+    signal->triggerAbort(js, kj::none);
+  }
+
+  jsg::JsValue addAbortAlgorithm(jsg::Lock& js, jsg::JsValue signal, jsg::JsValue algorithm) {
+    return addAbortAlgorithmForBootstrap(js, signal, algorithm);
+  }
+
   JSG_RESOURCE_TYPE(BasicsContext) {
     JSG_METHOD(testAbortAlgorithmsRun);
     JSG_METHOD(testAbortAlgorithmHandleAfterSignalGone);
     JSG_METHOD(testAbortAlgorithmAddedWhileAborted);
+    JSG_METHOD(newSignal);
+    JSG_METHOD(abortSignal);
+    JSG_METHOD(addAbortAlgorithm);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(BasicsIsolate,
@@ -99,6 +115,26 @@ KJ_TEST("AbortSignal abort algorithm handles are safe after the signal is gone")
 KJ_TEST("AbortSignal abort algorithms registered after abort never run") {
   jsg::test::Evaluator<BasicsContext, BasicsIsolate, CompatibilityFlags::Reader> e(v8System);
   e.expectEval("testAbortAlgorithmAddedWhileAborted()", "boolean", "true");
+}
+
+KJ_TEST("Bootstrap abort algorithms run on abort unless removed") {
+  jsg::test::Evaluator<BasicsContext, BasicsIsolate, CompatibilityFlags::Reader> e(v8System);
+  e.expectEval("const s = newSignal(); const calls = [];"
+               "addAbortAlgorithm(s, () => calls.push(1));"
+               "const h = addAbortAlgorithm(s, () => calls.push(2));"
+               "h.remove(); h.remove();"
+               "addAbortAlgorithm(s, () => calls.push(3));"
+               "abortSignal(s);"
+               "calls.join(',')",
+      "string", "1,3");
+}
+
+KJ_TEST("Bootstrap abort algorithms reject bad arguments") {
+  jsg::test::Evaluator<BasicsContext, BasicsIsolate, CompatibilityFlags::Reader> e(v8System);
+  e.expectEval("addAbortAlgorithm({}, () => {})", "throws",
+      "TypeError: addAbortAlgorithm() expects an AbortSignal");
+  e.expectEval("addAbortAlgorithm(newSignal(), {})", "throws",
+      "TypeError: addAbortAlgorithm() expects a function");
 }
 
 }  // namespace

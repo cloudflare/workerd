@@ -531,7 +531,10 @@ type ExportedHandlerTailStreamHandler<Env = unknown, Props = unknown> = (
   event: TailStream.TailEvent<TailStream.Onset>,
   env: Env,
   ctx: ExecutionContext<Props>,
-) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
+) =>
+  | TailStream.TailEventHandlerType
+  | undefined
+  | Promise<TailStream.TailEventHandlerType | undefined>;
 type ExportedHandlerScheduledHandler<Env = unknown, Props = unknown> = (
   controller: ScheduledController,
   env: Env,
@@ -1493,6 +1496,8 @@ interface JsonWebKey {
   qi?: string;
   oth?: RsaOtherPrimesInfo[];
   k?: string;
+  pub?: string;
+  priv?: string;
 }
 interface RsaOtherPrimesInfo {
   r?: string;
@@ -1539,6 +1544,7 @@ interface SubtleCryptoSignAlgorithm {
   hash?: string | SubtleCryptoHashAlgorithm;
   dataLength?: number;
   saltLength?: number;
+  context?: ArrayBuffer | ArrayBufferView;
 }
 interface CryptoKeyKeyAlgorithm {
   name: string;
@@ -1726,7 +1732,7 @@ interface MessageEventInit {
   data?: any;
   origin?: string;
   lastEventId?: string;
-  source?: MessagePort;
+  source?: MessagePort | null;
   ports?: MessagePort[];
 }
 /**
@@ -3993,7 +3999,7 @@ interface Container {
   interceptOutboundHttp(addr: string, binding: Fetcher): Promise<void>;
   interceptAllOutboundHttp(binding: Fetcher): Promise<void>;
   snapshotContainer(
-    options: ContainerSnapshotOptions,
+    options?: ContainerSnapshotOptions,
   ): Promise<ContainerSnapshot>;
   interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
   exec(cmd: string[], options?: ContainerExecOptions): Promise<ExecProcess>;
@@ -4119,9 +4125,13 @@ type LoopbackForExport<
   ? LoopbackServiceStub<InstanceType<T>>
   : T extends new (...args: any[]) => Rpc.DurableObjectBranded
     ? LoopbackDurableObjectClass<InstanceType<T>>
-    : T extends ExportedHandler<any, any, any>
-      ? LoopbackServiceStub<undefined>
-      : undefined;
+    : T extends new (
+          ...args: any[]
+        ) => CloudflareWorkersModule.WorkflowEntrypoint<any, infer Params>
+      ? Workflow<Params>
+      : T extends ExportedHandler<any, any, any>
+        ? LoopbackServiceStub<undefined>
+        : undefined;
 type LoopbackServiceStub<
   T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
 > = Fetcher<T> &
@@ -4603,7 +4613,14 @@ declare abstract class Span {
           stack?: string;
         },
   ): void;
+  updateName(name: string): this;
+  setStatus(status: TracingSpanStatus): this;
   end(): void;
+}
+type TracingSpanStatusCode = "unset" | "ok" | "error";
+interface TracingSpanStatus {
+  code: TracingSpanStatusCode;
+  message?: string;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.
@@ -6200,8 +6217,13 @@ type WebSearchOptions = {
   search_context_size?: "low" | "medium" | "high";
   user_location?: WebSearchUserLocation;
 };
+// Source of truth for per-model reasoning types: each model's `reasoning_effort` metadata
+// in Workers AI ConfigAPI (supported efforts, aliases, defaults, and whether reasoning can
+// be turned off). The Workers AI SDK type generator (cloudflare/ai/sdk,
+// apps/worker-constellation-entry/scripts/build-types) turns it into the per-model
+// `inputs` types below; the developer docs model schemas come from the same metadata.
 type ChatTemplateKwargs = {
-  /** Whether to enable reasoning, enabled by default. */
+  /** Whether to enable reasoning. Support and defaults depend on the model. */
   enable_thinking?: boolean;
   /** If false, preserves reasoning context between turns. */
   clear_thinking?: boolean;
@@ -6222,6 +6244,7 @@ type ChatCompletionsCommonOptions = {
   parallel_tool_calls?: boolean;
   prediction?: PredictionContent;
   presence_penalty?: number | null;
+  /** Reasoning effort. Supported levels depend on the model. */
   reasoning_effort?: "low" | "medium" | "high" | null;
   chat_template_kwargs?: ChatTemplateKwargs;
   response_format?: ResponseFormat;
@@ -10430,11 +10453,69 @@ declare abstract class Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2 {
   postProcessedOutputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output;
 }
 declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
-  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
+  inputs: XOR<
+    Omit<ResponsesInput, "reasoning"> & {
+      reasoning?:
+        | (Omit<Reasoning, "effort"> & {
+            /**
+             * Reasoning effort. Supported levels: low, medium, high. Reasoning cannot be disabled.
+             *
+             * @default "medium"
+             */
+            effort?: "low" | "medium" | "high" | null;
+          })
+        | null;
+    },
+    Omit<ChatCompletionsInput, "reasoning_effort" | "chat_template_kwargs"> & {
+      /**
+       * Reasoning effort. Supported levels: low, medium, high. Reasoning cannot be disabled.
+       *
+       * @default "medium"
+       */
+      reasoning_effort?: "low" | "medium" | "high" | null;
+      chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+        /**
+         * Reasoning is always enabled for this model and cannot be disabled.
+         *
+         * @default true
+         */
+        enable_thinking?: true;
+      };
+    }
+  >;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
-  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
+  inputs: XOR<
+    Omit<ResponsesInput, "reasoning"> & {
+      reasoning?:
+        | (Omit<Reasoning, "effort"> & {
+            /**
+             * Reasoning effort. Supported levels: low, medium, high. Reasoning cannot be disabled.
+             *
+             * @default "medium"
+             */
+            effort?: "low" | "medium" | "high" | null;
+          })
+        | null;
+    },
+    Omit<ChatCompletionsInput, "reasoning_effort" | "chat_template_kwargs"> & {
+      /**
+       * Reasoning effort. Supported levels: low, medium, high. Reasoning cannot be disabled.
+       *
+       * @default "medium"
+       */
+      reasoning_effort?: "low" | "medium" | "high" | null;
+      chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+        /**
+         * Reasoning is always enabled for this model and cannot be disabled.
+         *
+         * @default true
+         */
+        enable_thinking?: true;
+      };
+    }
+  >;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 interface Ai_Cf_Leonardo_Phoenix_1_0_Input {
@@ -11517,7 +11598,19 @@ declare abstract class Base_Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B {
   postProcessedOutputs: Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B_Output;
 }
 declare abstract class Base_Ai_Cf_Zai_Org_Glm_4_7_Flash {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Whether to enable reasoning for this model. This model has no reasoning effort levels.
+       *
+       * @default true
+       */
+      enable_thinking?: boolean;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_5 {
@@ -11525,23 +11618,168 @@ declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_5 {
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_6 {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    /**
+     * Reasoning effort. Supported levels: high, none. Compatibility aliases (accepted by the API, not by these types): low maps to high; medium maps to high; max maps to high.
+     *
+     * @default "high"
+     */
+    reasoning_effort?: "high" | "none" | null;
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Whether to enable reasoning for this model.
+       *
+       * @default true
+       */
+      enable_thinking?: boolean;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
+type Ai_Cf_Nvidia_Nemotron_3_120B_A12B_Input = Omit<
+  ChatCompletionsInput,
+  | "model"
+  | "max_tokens"
+  | "metadata"
+  | "modalities"
+  | "chat_template_kwargs"
+  | "store"
+  | "reasoning_effort"
+> & {
+  /**
+   * ID of the model to use (for example, '@cf/nvidia/nemotron-3-120b-a12b').
+   */
+  model?: ChatCompletionsInput["model"];
+  /**
+   * The maximum number of tokens to generate.
+   */
+  max_tokens?: ChatCompletionsInput["max_tokens"];
+  /**
+   * Set of key-value pairs that can be attached to the object.
+   */
+  metadata?: ChatCompletionsInput["metadata"];
+  /**
+   * Output types requested from the model.
+   */
+  modalities?: ChatCompletionsInput["modalities"];
+  /**
+   * Nemotron chat-template controls for normal reasoning, low-effort reasoning, and non-reasoning responses.
+   */
+  chat_template_kwargs?: {
+    /**
+     * Whether to enable reasoning. Reasoning is enabled by default.
+     */
+    enable_thinking?: boolean;
+    /**
+     * When reasoning is enabled, use Nemotron's low-effort reasoning mode, which uses significantly fewer reasoning tokens.
+     */
+    low_effort?: boolean;
+    /**
+     * For coding agent use, Nvidia suggests setting force_nonempty_content=true
+     */
+    force_nonempty_content?: boolean;
+  };
+  /**
+   * Whether to store the output for model distillation or evaluation.
+   *
+   * @default false
+   */
+  store?: ChatCompletionsInput["store"];
+};
 declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
-  inputs: ChatCompletionsInput;
+  inputs: Ai_Cf_Nvidia_Nemotron_3_120B_A12B_Input;
   postProcessedOutputs: ChatCompletionsOutput;
 }
-declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
-  inputs: ChatCompletionsInput;
+type Ai_Cf_Google_Gemma_4_26B_A4B_It_Input = Omit<
+  ChatCompletionsInput,
+  "reasoning_effort" | "chat_template_kwargs"
+> & {
+  chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+    /**
+     * Whether to enable reasoning for this model. This model has no reasoning effort levels.
+     *
+     * @default true
+     */
+    enable_thinking?: boolean;
+  };
+} & {
+  /**
+   * @default false
+   */
+  skip_special_tokens?: boolean;
+};
+declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_It {
+  inputs: Ai_Cf_Google_Gemma_4_26B_A4B_It_Input;
   postProcessedOutputs: ChatCompletionsOutput;
+}
+/** @deprecated Use Base_Ai_Cf_Google_Gemma_4_26B_A4B_It. */
+declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT extends Base_Ai_Cf_Google_Gemma_4_26B_A4B_It {}
+type Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B_Input =
+  | {
+      /**
+       * readable stream with audio data and content-type specified for that data
+       */
+      audio: {
+        body: object;
+        contentType: string;
+      };
+    }
+  | {
+      /**
+       * base64 encoded audio data
+       */
+      audio: string;
+      encoding?: "wav" | "flac" | "ogg" | "linear16";
+      sample_rate?: number;
+      channels?: number;
+    };
+interface Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B_Output {
+  text?: string;
+  duration?: number;
+}
+declare abstract class Base_Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B {
+  inputs: Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B_Input;
+  postProcessedOutputs: Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B_Output;
 }
 declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Reasoning is always enabled for this model and cannot be disabled. This model has no reasoning effort levels.
+       *
+       * @default true
+       */
+      enable_thinking?: true;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_2 {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    /**
+     * Reasoning effort. Supported levels: max, high, none. Compatibility aliases (accepted by the API, not by these types): low maps to high; medium maps to high; xhigh maps to max; minimal maps to none.
+     *
+     * @default "max"
+     */
+    reasoning_effort?: "max" | "high" | "none" | null;
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Whether to enable reasoning for this model.
+       *
+       * @default true
+       */
+      enable_thinking?: boolean;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
 interface Ai_Cf_Moondream_Moondream3_1_9B_A2B_Input {
@@ -11678,26 +11916,119 @@ declare abstract class Base_Ai_Cf_Moondream_Moondream3_1_9B_A2B {
   postProcessedOutputs: Ai_Cf_Moondream_Moondream3_1_9B_A2B_Output;
 }
 declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Flash_0731 {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    /**
+     * Reasoning effort. Supported levels: max, high, low, none. Compatibility aliases (accepted by the API, not by these types): minimal maps to low; medium maps to high; xhigh maps to high.
+     *
+     * @default "high"
+     */
+    reasoning_effort?: "max" | "high" | "low" | "none" | null;
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Whether to enable reasoning for this model.
+       *
+       * @default true
+       */
+      enable_thinking?: boolean;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813 {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    /**
+     * Reasoning effort. Supported levels: max, high, low, none. Compatibility aliases (accepted by the API, not by these types): minimal maps to low; medium maps to high; xhigh maps to high.
+     *
+     * @default "high"
+     */
+    reasoning_effort?: "max" | "high" | "low" | "none" | null;
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Whether to enable reasoning for this model.
+       *
+       * @default true
+       */
+      enable_thinking?: boolean;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Qwen_Qwen3_8_27B {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    /**
+     * Reasoning effort. Supported levels: low, medium, xhigh.
+     *
+     * @default "xhigh"
+     */
+    reasoning_effort?: "low" | "medium" | "xhigh" | null;
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Whether to enable reasoning for this model.
+       *
+       * @default true
+       */
+      enable_thinking?: boolean;
+    };
+  };
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_3 {
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    /**
+     * Reasoning effort. Supported levels: max, high, low. Reasoning cannot be disabled. Compatibility aliases (accepted by the API, not by these types): none maps to max; minimal maps to max; medium maps to max; xhigh maps to max.
+     *
+     * @default "max"
+     */
+    reasoning_effort?: "max" | "high" | "low" | null;
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Reasoning is always enabled for this model and cannot be disabled.
+       *
+       * @default true
+       */
+      enable_thinking?: true;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Zai_Org_Glm_5_3_Flash {
-  inputs: ChatCompletionsInput;
+  inputs: Omit<
+    ChatCompletionsInput,
+    "reasoning_effort" | "chat_template_kwargs"
+  > & {
+    /**
+     * Reasoning effort. Supported levels: max, high, low. Reasoning cannot be disabled. Compatibility aliases (accepted by the API, not by these types): none maps to max; minimal maps to max; medium maps to max; xhigh maps to max.
+     *
+     * @default "max"
+     */
+    reasoning_effort?: "max" | "high" | "low" | null;
+    chat_template_kwargs?: Omit<ChatTemplateKwargs, "enable_thinking"> & {
+      /**
+       * Reasoning is always enabled for this model and cannot be disabled.
+       *
+       * @default true
+       */
+      enable_thinking?: true;
+    };
+  };
   postProcessedOutputs: ChatCompletionsOutput;
 }
 interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
   "@cf/runwayml/stable-diffusion-v1-5-inpainting": BaseAiTextToImage;
-  "@cf/runwayml/stable-diffusion-v1-5-img2img": BaseAiTextToImage;
   "@cf/lykon/dreamshaper-8-lcm": BaseAiTextToImage;
   "@cf/bytedance/stable-diffusion-xl-lightning": BaseAiTextToImage;
   "@cf/myshell-ai/melotts": BaseAiTextToSpeech;
@@ -11784,13 +12115,15 @@ interface AiModels {
   "@cf/moonshotai/kimi-k2.5": Base_Ai_Cf_Moonshotai_Kimi_K2_5;
   "@cf/moonshotai/kimi-k2.6": Base_Ai_Cf_Moonshotai_Kimi_K2_6;
   "@cf/nvidia/nemotron-3-120b-a12b": Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B;
-  "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT;
+  "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_It;
+  "@cf/nvidia/nemotron-speech-streaming-en-0.6b": Base_Ai_Cf_Nvidia_Nemotron_Speech_Streaming_En_0_6B;
   "@cf/moonshotai/kimi-k2.7-code": Base_Ai_Cf_Moonshotai_Kimi_K2_7_Code;
   "@cf/zai-org/glm-5.2": Base_Ai_Cf_Zai_Org_Glm_5_2;
   "@cf/moondream/moondream3.1-9B-A2B": Base_Ai_Cf_Moondream_Moondream3_1_9B_A2B;
   "@cf/deepseek-ai/deepseek-v4-flash-0731": Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Flash_0731;
   "@cf/deepseek-ai/deepseek-v4-pro-0813": Base_Ai_Cf_Deepseek_Ai_Deepseek_V4_Pro_0813;
   "@cf/qwen/qwen3.8-27b": Base_Ai_Cf_Qwen_Qwen3_8_27B;
+  "@cf/zai-org/glm-5.3": Base_Ai_Cf_Zai_Org_Glm_5_3;
   "@cf/zai-org/glm-5.3-flash": Base_Ai_Cf_Zai_Org_Glm_5_3_Flash;
 }
 type AiOptions = {
@@ -11852,9 +12185,22 @@ type AiModelListType = Record<string, any>;
 type AiAsyncBatchResponse = {
   request_id: string;
 };
+type AiWebSearchRequest = {
+  /** AI Gateway configuration used for this request. */
+  gatewayId: string;
+  /** Search query. */
+  query: string;
+  /** Maximum number of results. Defaults to 10 and is capped at 20. */
+  limit?: number;
+  /** Optional BYOK web-search provider configured on the gateway. */
+  provider?: string;
+  /** Optional BYOK key alias. Defaults to `default`. */
+  byokAlias?: string;
+};
 declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
+  websearch(request: AiWebSearchRequest): Promise<Response>;
   /**
    * @deprecated Use the standalone `ai_search_namespaces` or `ai_search` Workers bindings instead.
    * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
@@ -12128,8 +12474,6 @@ interface ArtifactsCreateRepoResult {
   remote: string;
   /** Plaintext access token (only returned at creation time). */
   token: string;
-  /** ISO 8601 token expiry timestamp. */
-  tokenExpiresAt: string;
 }
 /** Paginated list of repositories. */
 interface ArtifactsRepoListResult {
@@ -12172,11 +12516,62 @@ interface ArtifactsTokenListResult {
   total: number;
 }
 /**
- * Handle for a single repository. Returned by Artifacts.get().
+ * Classification of a Git tree entry derived from its mode.
  *
- * Methods may throw `ArtifactsError` with code `INTERNAL_ERROR` if an unexpected service error occurs.
+ * `tree` is a directory, `blob` is a regular file, `symlink` is a symbolic link,
+ * `gitlink` is a submodule reference, and `exec` is an executable file.
  */
-interface ArtifactsRepo extends ArtifactsRepoInfo {
+type ArtifactsTreeEntryType = "tree" | "blob" | "symlink" | "gitlink" | "exec";
+/** An immediate child of a Git tree returned by {@link ArtifactsRepo.readTree}. */
+interface ArtifactsTreeEntry {
+  /** Name relative to the tree being read. */
+  name: string;
+  /** Canonical Git mode, such as `100644` for a file or `40000` for a tree. */
+  mode: string;
+  /** Lowercase, 40-character SHA-1 object ID. */
+  hash: string;
+  /** Classification derived from `mode`. */
+  type: ArtifactsTreeEntryType;
+}
+/** Decoded metadata returned by {@link ArtifactsRepo.readCommit} and {@link ArtifactsRepo.log}. */
+interface ArtifactsCommitMetadata {
+  /** Lowercase, 40-character SHA-1 commit ID. */
+  hash: string;
+  /** Lowercase, 40-character SHA-1 ID of the commit's root tree. */
+  treeHash: string;
+  /** Commit message with one trailing newline removed, if present. */
+  message: string;
+  /** Author identity from the commit. */
+  author: {
+    /** Author name. */
+    name: string;
+    /** Author email address. */
+    email: string;
+  };
+  /** Committer identity from the commit. */
+  committer: {
+    /** Committer name. */
+    name: string;
+    /** Committer email address. */
+    email: string;
+  };
+  /** Parent commit IDs in Git order; empty for a root commit. */
+  parents: string[];
+  /** Author timestamp in Unix seconds. */
+  authoredAt: number;
+  /** Committer timestamp in Unix seconds. */
+  committedAt: number;
+}
+/**
+ * Repository capability returned by {@link Artifacts.get}.
+ *
+ * Metadata is available through {@link info}, not as properties on the capability.
+ * Methods may throw `ArtifactsError` with code `INTERNAL_ERROR` if an unexpected service error occurs.
+ *
+ * The capability is an RPC stub. Dispose of it when finished, for example with
+ * `using repo = await env.ARTIFACTS.get(name);`, to release it before the request ends.
+ */
+interface ArtifactsRepo extends Disposable {
   /**
    * Create an access token for this repo.
    * @param scope Token scope: "write" (default) or "read".
@@ -12196,6 +12591,66 @@ interface ArtifactsRepo extends ArtifactsRepoInfo {
    * @throws {ArtifactsError} with code `INVALID_INPUT` if tokenOrId is empty.
    */
   revokeToken(tokenOrId: string): Promise<boolean>;
+  /**
+   * Retrieve current repository metadata. Each call performs a fresh lookup.
+   * @returns Current public repository metadata.
+   * @throws {ArtifactsError} `NOT_FOUND` if the repository was deleted, or `INTERNAL_ERROR` on
+   * an unexpected lookup failure.
+   */
+  info(): Promise<ArtifactsRepoInfo>;
+  /**
+   * Read the raw bytes of a Git blob by object ID.
+   * @param hash Lowercase, 40-character SHA-1 object ID.
+   * @returns An untyped {@link Blob}, or `null` if the object is missing or is not a Git blob.
+   * @throws {ArtifactsError} `INVALID_INPUT` for a malformed hash, `MEMORY_LIMIT` if the object
+   * cannot be buffered safely, or `INTERNAL_ERROR` on an unexpected read failure.
+   * @see {@link ArtifactsRepo.readFile} to resolve a file by ref and path.
+   */
+  readBlob(hash: string): Promise<Blob | null>;
+  /**
+   * Read the immediate children of a Git tree by object ID.
+   * @param hash Lowercase, 40-character SHA-1 tree ID.
+   * @returns Tree entries, or `null` if the object is missing.
+   * @throws {ArtifactsError} `INVALID_INPUT` for a malformed hash, or `INTERNAL_ERROR` if the
+   * object is not a valid tree or the read fails unexpectedly.
+   * @see {@link ArtifactsTreeEntry}
+   */
+  readTree(hash: string): Promise<ArtifactsTreeEntry[] | null>;
+  /**
+   * Decode a Git commit by object ID.
+   * @param hash Lowercase, 40-character SHA-1 commit ID.
+   * @returns Commit metadata, or `null` if the object is missing.
+   * @throws {ArtifactsError} `INVALID_INPUT` for a malformed hash, or `INTERNAL_ERROR` if the
+   * object is not a valid commit or the read fails unexpectedly.
+   * @see {@link ArtifactsCommitMetadata}
+   */
+  readCommit(hash: string): Promise<ArtifactsCommitMetadata | null>;
+  /**
+   * Resolve a file from a branch, tag, or commit ID and return its bytes with a browser-safe
+   * content type in {@link Blob.type}.
+   * @param args File lookup options.
+   * @param args.ref Branch, tag, or commit ID to resolve.
+   * @param args.path Non-empty repository-relative path.
+   * @returns A MIME-typed {@link Blob}, or `null` if the ref or path cannot resolve to a file.
+   * @throws {ArtifactsError} `INVALID_INPUT` if either argument is empty, `MEMORY_LIMIT` if the
+   * file cannot be buffered safely, or `INTERNAL_ERROR` on an unexpected read failure.
+   */
+  readFile(args: { ref: string; path: string }): Promise<Blob | null>;
+  /**
+   * List commits along the first-parent chain, newest first.
+   * @param opts History options. All fields are optional.
+   * @param opts.ref Branch, tag, or commit ID; defaults to `HEAD`.
+   * @param opts.limit Maximum results; defaults to `50` and is capped at `1000`.
+   * @param opts.offset Number of matching commits to skip; defaults to `0`.
+   * @returns Commit metadata, or an empty array if the ref cannot be resolved.
+   * @throws {ArtifactsError} `INTERNAL_ERROR` on an unexpected traversal failure.
+   * @see {@link ArtifactsCommitMetadata}
+   */
+  log(opts?: {
+    ref?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ArtifactsCommitMetadata[]>;
   // ── Fork ──
   /**
    * Fork this repo to a new repo.
@@ -12223,6 +12678,7 @@ interface ArtifactsRepo extends ArtifactsRepoInfo {
 type ArtifactsErrorCode =
   | "ALREADY_EXISTS"
   | "NOT_FOUND"
+  | "CREATE_IN_PROGRESS"
   | "IMPORT_IN_PROGRESS"
   | "FORK_IN_PROGRESS"
   | "INVALID_INPUT"
@@ -12275,6 +12731,7 @@ interface Artifacts {
    * @param name Repository name.
    * @returns Repo handle.
    * @throws {ArtifactsError} with code `NOT_FOUND` if the repo does not exist.
+   * @throws {ArtifactsError} with code `CREATE_IN_PROGRESS` if the repo is still being created.
    * @throws {ArtifactsError} with code `IMPORT_IN_PROGRESS` if the repo is still importing.
    * @throws {ArtifactsError} with code `FORK_IN_PROGRESS` if the repo is still forking.
    */
@@ -14620,6 +15077,29 @@ declare abstract class D1PreparedStatement {
 // TypeScript's interface merging will ensure our empty interface is effectively
 // ignored when `Disposable` is included in the standard lib.
 interface Disposable {}
+declare module "cloudflare:durable-objects" {
+  /**
+   * Marks a Durable Object method as safe to run more than once. The runtime may then retry calls
+   * to it after a disconnect that might have happened after the method started. It does not
+   * enable retries or change how many are made.
+   *
+   * Each attempt creates its own return value, so if the method returns an `RpcTarget`, its
+   * `[Symbol.dispose]()` may run once per attempt.
+   *
+   * Only public instance methods can be decorated. When composing decorators, apply `@retryable`
+   * outermost (first in source order) so it marks the method that is finally installed.
+   * Otherwise `@retryable` has no effect, and constructing the object logs a warning.
+   * Requires standard (not `experimentalDecorators`) decorators and a bundler that transforms
+   * them, such as Wrangler.
+   */
+  export function retryable<This, Args extends unknown[], Return>(
+    value: (this: This, ...args: Args) => Return,
+    context: ClassMethodDecoratorContext<
+      This,
+      (this: This, ...args: Args) => Return
+    >,
+  ): (this: This, ...args: Args) => Return;
+}
 /**
  * The returned data after sending an email
  */
@@ -15913,7 +16393,8 @@ declare namespace CloudflareWorkersModule {
       event: TailStream.TailEvent<TailStream.Onset>,
     ):
       | TailStream.TailEventHandlerType
-      | Promise<TailStream.TailEventHandlerType>;
+      | undefined
+      | Promise<TailStream.TailEventHandlerType | undefined>;
     test?(controller: TestController): void | Promise<void>;
     trace?(traces: TraceItem[]): void | Promise<void>;
   }
@@ -17094,6 +17575,12 @@ declare namespace TailStream {
     readonly cpuTime: number;
     readonly wallTime: number;
   }
+  type SpanStatusCode = "unset" | "ok" | "error";
+  interface SpanStatus {
+    readonly code: SpanStatusCode;
+    /** A developer-facing error message, present only when code is "error". */
+    readonly message?: string;
+  }
   interface SpanOpen {
     readonly type: "spanOpen";
     readonly name: string;
@@ -17104,6 +17591,19 @@ declare namespace TailStream {
   interface SpanClose {
     readonly type: "spanClose";
     readonly outcome: EventOutcome;
+  }
+  type SpanUpdateInfo =
+    | {
+        readonly type: "name";
+        readonly name: string;
+      }
+    | {
+        readonly type: "status";
+        readonly status: SpanStatus;
+      };
+  interface SpanUpdate {
+    readonly type: "spanUpdate";
+    readonly info: SpanUpdateInfo;
   }
   interface DiagnosticChannelEvent {
     readonly type: "diagnosticChannel";
@@ -17174,6 +17674,7 @@ declare namespace TailStream {
     | Outcome
     | SpanOpen
     | SpanClose
+    | SpanUpdate
     | DiagnosticChannelEvent
     | Exception
     | Log
@@ -17216,6 +17717,7 @@ declare namespace TailStream {
     outcome?: TailEventHandler<Outcome>;
     spanOpen?: TailEventHandler<SpanOpen>;
     spanClose?: TailEventHandler<SpanClose>;
+    spanUpdate?: TailEventHandler<SpanUpdate>;
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;

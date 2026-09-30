@@ -229,6 +229,37 @@ export const teeBranchesCollectedReleaseBacklog = {
   },
 };
 
+// One branch cancelled, the other collected (parity), observed in the same
+// job as the gc(), before any finalization callback can run: the
+// controller's own queries notice the collected consumer. Either branch may
+// be the survivor. enqueue() drops and desiredSize stays at the high-water
+// mark.
+export const teeSurvivorBranchCollected = {
+  async test() {
+    for (const cancelFirst of [true, false]) {
+      let controller;
+      const rs = new ReadableStream(
+        {
+          start(c) {
+            controller = c;
+          },
+        },
+        new CountQueuingStrategy({ highWaterMark: 4 })
+      );
+      (() => {
+        const [a, b] = rs.tee();
+        // A lone branch's cancel promise pends under TypeScript (ledger #11).
+        (cancelFirst ? a : b).cancel('bye');
+      })();
+      await scheduler.wait(1);
+      gc();
+      strictEqual(controller.desiredSize, 4, `cancelFirst=${cancelFirst}`);
+      for (let i = 0; i < 16; i++) controller.enqueue(i);
+      strictEqual(controller.desiredSize, 4, `cancelFirst=${cancelFirst}`);
+    }
+  },
+};
+
 // A pull source with both branches collected (ledger #20). TypeScript
 // releases the source: pull() is never called again. C++ keeps pulling
 // for consumers that no longer exist, so a source that enqueues on every

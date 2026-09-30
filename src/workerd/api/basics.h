@@ -924,6 +924,31 @@ class AbortSignal final: public EventTarget {
   void subscribeToRpcAbort(jsg::Lock& js);
 };
 
+// Holds one AbortSignal::addAbortAlgorithm() registration for the per-isolate
+// bootstrap; remove() unregisters it. Not registered on the global scope and
+// excluded from the generated types. Created by addAbortAlgorithmForBootstrap()
+// (abort-bootstrap.h).
+class AbortAlgorithmHandle final: public jsg::Object {
+ public:
+  explicit AbortAlgorithmHandle(kj::Own<void> registration): registration(kj::mv(registration)) {}
+
+  // Idempotent.
+  void remove() {
+    registration = nullptr;
+  }
+
+  JSG_RESOURCE_TYPE(AbortAlgorithmHandle) {
+    JSG_METHOD(remove);
+
+    // Internal plumbing type: keep it out of the generated TypeScript types.
+    JSG_TS_OVERRIDE(type AbortAlgorithmHandle = never);
+  }
+
+ private:
+  // Holds only a weak reference to the signal; no GC visitation needed.
+  kj::Own<void> registration;
+};
+
 // An implementation of the Web Platform Standard AbortController API
 class AbortController final: public jsg::Object {
  public:
@@ -990,8 +1015,9 @@ class Scheduler final: public jsg::Object {
 #define EW_BASICS_ISOLATE_TYPES                                                                    \
   api::Event, api::Event::Init, api::EventTarget, api::EventTarget::EventListenerOptions,          \
       api::EventTarget::AddEventListenerOptions, api::EventTarget::HandlerObject,                  \
-      api::AbortController, api::AbortSignal, api::Scheduler, api::Scheduler::WaitOptions,         \
-      api::ExtendableEvent, api::CustomEvent, api::CustomEvent::CustomEventInit
+      api::AbortController, api::AbortSignal, api::AbortAlgorithmHandle, api::Scheduler,           \
+      api::Scheduler::WaitOptions, api::ExtendableEvent, api::CustomEvent,                         \
+      api::CustomEvent::CustomEventInit
 // The list of basics.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

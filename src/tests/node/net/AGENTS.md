@@ -76,9 +76,8 @@ network service allowing `private`.
   into the same view (with a pool, the previous fill stays readable while
   the next lands). A buffer over a resizable `ArrayBuffer` is transferred
   like any other — the caller's is detached (resizing it throws) — and the
-  transferred store keeps the resizability; the loop's view stays fixed to
-  the caller's range, so a store shrunk below it from the callback leaves
-  the next read an empty view (`ENOBUFS`).
+  loop's view stays fixed to the caller's range. Whether the transferred
+  store stays resizable depends on the implementation (ledger #1).
 - EOF (`done`) pushes EOF and reads zero bytes, so 'end' fires at once even
   with no consumer. `bytesRead` counts pushed bytes. The `connect()`
   socket's `closed` ends the readable only while no read is pending
@@ -186,11 +185,9 @@ TypeScript implementation is indifferent to them.
 
 ## Divergence ledger (C++ vs TypeScript)
 
-No divergence is observable through the socket: every assertion holds
-unchanged under both implementations. (The one that existed — the
-TypeScript writable rejecting a second `close()` after the native socket
-had already closed the half on EOF — was resolved by leaving the half-open
-policy to the Duplex; see "The handle".)
+| # | Area | C++ | TypeScript | Pinned in |
+| --- | --- | --- | --- | --- |
+| 1 | `onread` buffer over a resizable `ArrayBuffer` | the transferred store stays resizable; shrinking it below the loop's range from the callback leaves the next read an empty view (`ENOBUFS`) | the store is fixed-length (readable-byte ledger #30): `resize()` throws and the loop carries on | `resizableOnreadBuffer` |
 
 ## Assertion catalogue
 
@@ -203,7 +200,7 @@ policy to the Duplex; see "The handle".)
 | `backpressure.js` | pause/resume against a ticking peer; paused-mode `read()` restarting the loop; `write()` false and 'drain'; cork cycles |
 | `timeouts.js` | idle timeout without closing; data re-arms (a 'timeout' only ever ≥ the timeout after the last delivery, ticks kept arriving); `setTimeout(0)` clears, also across later traffic |
 | `data-volumes.js` | 2000 trickled bytes (order, pattern, many reads, `bytesRead`); split UTF-8 reassembled by `setEncoding('utf8')` without replacement characters, and concatenating cleanly without it; 20,000 one-byte writes (`bytesWritten`, callbacks, sink count); a 4 MiB echo round trip paused after every 256 KiB (pattern exact, pauses honored) |
-| `onread.js` | fixed buffer across several fills (and its detachment); a fixed view into a larger allocation keeping its range; generated buffers — fresh, one shared (every fill, caller's capacity, detached), a rotating pool (every fill, previous fill intact until its buffer is reused, then detached); callback `false` stopping and `resume()` restarting; a throwing generator (its error), a throwing callback and a throwing 'data' listener (their error, one delivery), garbage from the generator (`ERR_INVALID_ARG_TYPE`), an empty view and a callback-detached fixed buffer (`ENOBUFS`), a SAB view (`TypeError`) — each destroying the socket; a resizable buffer transferred resizable, its shrinking → `ENOBUFS` |
+| `onread.js` | fixed buffer across several fills (and its detachment); a fixed view into a larger allocation keeping its range; generated buffers — fresh, one shared (every fill, caller's capacity, detached), a rotating pool (every fill, previous fill intact until its buffer is reused, then detached); callback `false` stopping and `resume()` restarting; a throwing generator (its error), a throwing callback and a throwing 'data' listener (their error, one delivery), garbage from the generator (`ERR_INVALID_ARG_TYPE`), an empty view and a callback-detached fixed buffer (`ENOBUFS`), a SAB view (`TypeError`) — each destroying the socket; a resizable buffer (ledger #1) |
 | `reentrancy.js` | write and destroy from the `onread` callback; pause/resume storm inside `'data'` (one loop, no loss); `end()` from inside `'data'` and from a write callback flushing the queue |
 | `then-pollution.js` | transparent patched `then` (data intact); hostile `then` during `connect()` → socket `'error'`, `'close'` true, no `'connect'` |
 | `interop.js` | pipe into `Writable.fromWeb`; `Readable.toWeb(socket)` body; pipeline through a TransformStream and from a web source; `Duplex.toWeb` round trip; locked halves |

@@ -8,10 +8,10 @@ Subject: Modify where to look for fp16 dependency. This dependency is normally
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index b4b3f46c3f3e77d87254372f56fb3ff4156bec84..a5c5d8278308a7a4c227d31cc09e734c18a41381 100644
+index 83939aede73463d501714c4213647f0320341d42..ab7a935e1b54ca9025e072630ef66a6ffe7bc794 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4190,17 +4190,23 @@ v8_library(
+@@ -4200,17 +4200,23 @@ v8_library(
      ],
  )
  
@@ -42,3 +42,11 @@ index b4b3f46c3f3e77d87254372f56fb3ff4156bec84..a5c5d8278308a7a4c227d31cc09e734c
  )
  
  filegroup(
+@@ -4510,7 +4516,6 @@ filegroup(
+         "third_party/utf8-decoder/**/*.h",
+         "third_party/simdutf/**/*.h",
+         "third_party/rapidhash-v8/**/*.h",
+-        "third_party/fp16/**/*.h",
+         "third_party/wasm-api/**/*.h",
+         "third_party/siphash/**/*.h",
+         "third_party/vtune/**/*.h",

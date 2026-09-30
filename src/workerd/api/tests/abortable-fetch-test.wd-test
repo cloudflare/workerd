@@ -1,17 +1,20 @@
 using Workerd = import "/workerd/workerd.capnp";
 
+# The worker is instantiated twice so that the bindings below cross an isolate boundary.
+# Only the first service's test() runs; see the filter argument in BUILD.bazel.
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "abortable-fetch-test",
-      worker = (
-        modules = [
-          (name = "worker", esModule = embed "abortable-fetch-test.js")
-        ],
-        compatibilityFlags = ["nodejs_compat", "url_original", "fetch_legacy_url"],
-        bindings = [
-          (name = "subrequest", service = "abortable-fetch-test")
-        ]
-      )
-    ),
+    ( name = "abortable-fetch-test", worker = .worker ),
+    ( name = "abortable-fetch-test-target", worker = .worker ),
   ],
+);
+
+const worker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "abortable-fetch-test.js")
+  ],
+  compatibilityFlags = ["nodejs_compat", "url_original", "fetch_legacy_url"],
+  bindings = [
+    (name = "subrequest", service = "abortable-fetch-test-target")
+  ]
 );

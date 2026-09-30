@@ -847,22 +847,23 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::sendRpc(
     }
   }
 
-  return req.send().then([this](auto resp) {
+  return req.send().then([self = addWeakToThis()](auto resp) {
+    auto& event = self.assertLive();
     auto respResult = resp.getResult();
-    this->result->ackAll = respResult.getAckAll();
+    event.result->ackAll = respResult.getAckAll();
     auto retryBatch = respResult.getRetryBatch();
-    this->result->retryBatch.retry = retryBatch.getRetry();
+    event.result->retryBatch.retry = retryBatch.getRetry();
     if (retryBatch.isDelaySeconds()) {
-      this->result->retryBatch.delaySeconds = retryBatch.getDelaySeconds();
+      event.result->retryBatch.delaySeconds = retryBatch.getDelaySeconds();
     }
 
-    this->result->explicitAcks.clear();
+    event.result->explicitAcks.clear();
     for (const auto& msgId: respResult.getExplicitAcks()) {
-      this->result->explicitAcks.insert(kj::heapString(msgId));
+      event.result->explicitAcks.insert(kj::heapString(msgId));
     }
-    this->result->retries.clear();
+    event.result->retries.clear();
     for (const auto& retry: respResult.getRetryMessages()) {
-      auto& entry = this->result->retries.upsert(kj::heapString(retry.getMsgId()), {});
+      auto& entry = event.result->retries.upsert(kj::heapString(retry.getMsgId()), {});
       if (retry.isDelaySeconds()) {
         entry.value.delaySeconds = retry.getDelaySeconds();
       }

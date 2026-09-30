@@ -60,6 +60,39 @@ export const teeBranchesCollected = {
   },
 };
 
+// One branch cancelled, the other collected, observed in the same job as
+// the gc(), before any finalization callback can run: the controller's own
+// queries notice the collected consumer (the readable suite's
+// teeSurvivorBranchCollected). Either branch may be the survivor. enqueue()
+// drops, desiredSize stays at the high-water mark, no byobRequest is minted.
+export const teeSurvivorBranchCollected = {
+  async test() {
+    for (const cancelFirst of [true, false]) {
+      let controller;
+      const rs = new ReadableStream(
+        {
+          type: 'bytes',
+          start(c) {
+            controller = c;
+          },
+        },
+        { highWaterMark: 4 }
+      );
+      (() => {
+        const [a, b] = rs.tee();
+        // A lone branch's cancel promise pends under TypeScript (ledger #14).
+        (cancelFirst ? a : b).cancel('bye');
+      })();
+      await scheduler.wait(1);
+      gc();
+      strictEqual(controller.desiredSize, 4, `cancelFirst=${cancelFirst}`);
+      for (let i = 0; i < 16; i++) controller.enqueue(new Uint8Array(1024));
+      strictEqual(controller.desiredSize, 4, `cancelFirst=${cancelFirst}`);
+      strictEqual(controller.byobRequest, null, `cancelFirst=${cancelFirst}`);
+    }
+  },
+};
+
 // A pull source with both branches collected (ledger #26, the readable
 // suite's #20). TypeScript releases the source: pull() is never called
 // again. C++ keeps pulling for consumers that no longer exist, so a source

@@ -38,6 +38,7 @@
 
 #include <kj/async-io.h>
 #include <kj/exception.h>
+#include <kj/filesystem.h>
 #include <kj/timer.h>
 
 namespace kj_rs_io {
@@ -163,16 +164,25 @@ class TokioDatagramPort final: public kj::DatagramPort {
 
 // The tokio-backed kj::Network. The address grammar is KJ's SocketAddress::parse for everything
 // workerd's configs use (net.rs, "Address grammar"). restrictPeers() returns a network sharing
-// this one's filter chain, so derived networks, addresses and receivers remain valid regardless
-// of the order the networks are destroyed in.
+// this one's filter chain and loopback namespace, so derived networks, addresses and receivers
+// remain valid regardless of the order the networks are destroyed in.
 class TokioNetwork final: public kj::Network {
  public:
   // Allow-everything root network (matches KJ's root networks).
-  TokioNetwork(): filter(kj::arc<PeerFilter>()) {}
+  TokioNetwork(): filter(kj::arc<PeerFilter>()), loopback(new_loopback_registry()) {}
   TokioNetwork(TokioNetwork &parent,
       kj::ArrayPtr<const kj::StringPtr> allow,
       kj::ArrayPtr<const kj::StringPtr> deny)
-      : filter(kj::arc<PeerFilter>(allow, deny, parent.filter.addRef())) {}
+      : filter(kj::arc<PeerFilter>(allow, deny, parent.filter.addRef())),
+        loopback(loopback_registry_clone(*parent.loopback)) {}
+
+  // Makes parseAddress() accept "loopback:<name>" addresses -- connections serviced within this
+  // process (loopback.rs) -- on this network and every network derived from it by
+  // restrictPeers(). For `workerd test`, which uses them to exercise the network stack end to
+  // end without an external socket; production configs use direct service bindings instead.
+  void enableLoopback() {
+    loopback_registry_enable(*loopback);
+  }
 
   kj::Promise<kj::Own<kj::NetworkAddress>> parseAddress(
       kj::StringPtr addr, kj::uint portHint) override;
@@ -182,6 +192,7 @@ class TokioNetwork final: public kj::Network {
 
  private:
   kj::Arc<PeerFilter> filter;
+  ::rust::Box<LoopbackRegistry> loopback;
 };
 
 // The tokio-backed kj::LowLevelAsyncIoProvider. Each wrap*Fd hands the raw handle -- a Unix fd
@@ -214,8 +225,7 @@ class TokioLowLevelAsyncIoProvider final: public kj::LowLevelAsyncIoProvider {
 };
 
 // The tokio-backed kj::AsyncIoProvider. Its pipes are socket pairs, not in-memory kj pipes: a
-// write into an empty pipe completes without a reader waiting, and workerd's loopback transport
-// (server/workerd.c++) gets the real sockets it asks the provider for. newPipeThread throws
+// write into an empty pipe completes without a reader waiting. newPipeThread throws
 // UNIMPLEMENTED (workerd does not use it); newCapabilityPipe keeps its default-throwing
 // implementation.
 class TokioAsyncIoProvider final: public kj::AsyncIoProvider {
@@ -292,5 +302,28 @@ TokioAsyncIoContext setupTokioAsyncIo();
 // disposition (see signal.rs). On Windows, SIGTERM/SIGINT are mapped to the ctrl_break/ctrl_c
 // console control events; the promise rejects for other signums.
 kj::Promise<void> onSignal(int signum);
+
+// Watches files for changes: kj-rs-io's watcher (watcher.rs, Rust over the `notify` crate --
+// inotify on Linux, FSEvents on macOS, ReadDirectoryChangesW on Windows) behind a C++ interface.
+// It watches each file's directory and judges changes by re-stamping the files, so replaced,
+// recreated and symlinked files keep firing; a file need not exist yet, but its directory must.
+// Its descriptors are CLOEXEC. Runtime-independent: it may be created before the loop is.
+class FileWatcher {
+ public:
+  FileWatcher(): inner(new_file_watcher()) {}
+  KJ_DISALLOW_COPY_AND_MOVE(FileWatcher);
+
+  // Adds `path` to the watched set. Paths cross to Rust as the bytes kj::Path::toNativeString
+  // produces (a unix path need not be UTF-8).
+  void watch(kj::PathPtr path);
+
+  // Resolves the next time any watched file changes (at once if one already has). The watch is
+  // armed inside the call (operation-start policy above), so a caller that merely retains the
+  // promise still has its files watched. Call again after resolution for the next change.
+  kj::Promise<void> onChange();
+
+ private:
+  ::rust::Box<TokioFileWatcher> inner;
+};
 
 }  // namespace kj_rs_io

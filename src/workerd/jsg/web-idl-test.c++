@@ -109,9 +109,10 @@ static_assert(kj::isSameType<ArgumentIndexes<void()>, kj::_::Indexes<>>());
 struct FakeConfig {};  // Simulates an InjectConfiguration<T> injected type.
 
 struct MockTypeWrapper {
-  // Makes ValueLessParameter<MockTypeWrapper, TypeHandler<T>> true.
+  // Makes ValueLessParameter<MockTypeWrapper, TypeHandler<T>> true. The concept only checks that
+  // this overload exists; no definition or runtime call is needed.
   template <typename U>
-  const TypeHandler<U>& unwrap(Lock&, v8::Local<v8::Context>, TypeHandler<U>*);
+  [[maybe_unused]] const TypeHandler<U>& unwrap(Lock&, v8::Local<v8::Context>, TypeHandler<U>*);
   // Makes ValueLessParameter<MockTypeWrapper, FakeConfig> true (simulates InjectConfiguration).
   FakeConfig unwrap(Lock&, v8::Local<v8::Context>, FakeConfig*);
 };

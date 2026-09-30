@@ -349,7 +349,7 @@ class Container: public jsg::Object {
       jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding);
   jsg::Promise<DirectorySnapshot> snapshotDirectory(
       jsg::Lock& js, DirectorySnapshotOptions options);
-  jsg::Promise<Snapshot> snapshotContainer(jsg::Lock& js, SnapshotOptions options);
+  jsg::Promise<Snapshot> snapshotContainer(jsg::Lock& js, jsg::Optional<SnapshotOptions> options);
   jsg::Promise<jsg::Ref<ExecProcess>> exec(
       jsg::Lock& js, kj::Array<kj::String> cmd, jsg::Optional<ExecOptions> options);
 
@@ -429,9 +429,9 @@ class Container: public jsg::Object {
   class TcpPortWorkerInterface;
   class TcpPortOutgoingFactory;
 
-  // Per-TCP-port state for the tunnel-reuse optimization. Populated lazily by getTcpPort() when
-  // the container-tunnel-reuse autogate is enabled. Held via IoOwn because it holds KJ I/O objects
-  // (Cap'n Proto capabilities, kj streams) that must remain tied to the Durable Object's IoContext.
+  // Per-TCP-port state for the tunnel-reuse optimization. Populated lazily by getTcpPort(). Held
+  // via IoOwn because it holds KJ I/O objects (Cap'n Proto capabilities, kj streams) that must
+  // remain tied to the Durable Object's IoContext.
   class TcpPortState;
   kj::Maybe<IoOwn<kj::HashMap<int, kj::Rc<TcpPortState>>>> tcpPortStates;
 

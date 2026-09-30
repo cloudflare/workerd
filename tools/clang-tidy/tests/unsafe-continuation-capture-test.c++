@@ -19,7 +19,7 @@
 namespace kj {
 template <typename T>
 class Own {
-public:
+ public:
   T *operator->() const;
   T &operator*() const;
 };
@@ -35,7 +35,7 @@ template <typename T>
 class Array {};
 template <typename T>
 class Vector {
-public:
+ public:
   template <typename U>
   void add(U &&);
   Array<T> releaseAsArray();
@@ -43,24 +43,24 @@ public:
 };
 template <typename T>
 class ArrayBuilder {
-public:
+ public:
   template <typename U>
   void add(U &&);
   Array<T> finish();
 };
 class TaskSet {
-public:
+ public:
   template <typename U>
   void add(U &&);
 };
 template <typename T>
 class ArrayPtr {
-public:
+ public:
   ArrayPtr() = default;
   ArrayPtr(T *, unsigned long);
 };
 class StringPtr {
-public:
+ public:
   StringPtr() = default;
   StringPtr(const char *);
 };
@@ -68,7 +68,7 @@ class String {};
 class Date {};
 template <typename T>
 class Promise {
-public:
+ public:
   template <typename F>
   Promise then(F &&);
   template <typename F>
@@ -88,7 +88,7 @@ template <typename T>
 Promise<void> joinPromisesFailFast(Array<Promise<T>>);
 template <typename T>
 Promise<void> joinPromises(Array<Promise<T>>);
-} // namespace kj
+}  // namespace kj
 
 namespace workerd {
 namespace jsg {
@@ -103,16 +103,16 @@ template <typename T>
 class WeakRef {};
 template <typename T>
 class Promise {
-public:
+ public:
   template <typename F>
   Promise then(Lock &, F &&);
 };
 template <typename Self>
 Ref<Self> _jsgThis(Self *);
-} // namespace jsg
+}  // namespace jsg
 
 class IoContext {
-public:
+ public:
   template <typename Func>
   auto run(Func &&) -> kj::Promise<int>;
   void addTask(kj::Promise<void>);
@@ -134,11 +134,11 @@ class IoPtr {};
 // continuations whose escape route is `return` from the callback) are
 // treated as locally consumed.
 class TestFixture {
-public:
+ public:
   template <typename Func>
   auto runInIoContext(Func &&) -> int;
 };
-} // namespace workerd
+}  // namespace workerd
 
 #define JSG_THIS (::workerd::jsg::_jsgThis(this))
 
@@ -146,7 +146,7 @@ public:
 // Example sink we expect the check to *not* recognize.
 
 template <typename Container, typename F>
-auto KJ_MAP(Container &&c, F &&f) -> int {
+auto KJ_MAP(Container &&c, F && f) -> int {
   return 0;
 }
 
@@ -164,37 +164,55 @@ kj::Promise<int> bareReferenceCapture(Resource &r) {
 kj::Promise<int> bareReferenceDefault(Resource &r) {
   kj::Promise<int> p;
   // expected: unsafe by-reference capture (implicit `[&]`)
-  return p.then([&](int x) { (void)r; return x; });
+  return p.then([&](int x) {
+    (void)r;
+    return x;
+  });
 }
 
 kj::Promise<int> rawPointerCapture(Resource *r) {
   kj::Promise<int> p;
   // expected: unsafe raw pointer capture of `r`
-  return p.then([r](int x) { (void)r; return x; });
+  return p.then([r](int x) {
+    (void)r;
+    return x;
+  });
 }
 
 kj::Promise<int> arrayPtrCapture(kj::ArrayPtr<int> data) {
   kj::Promise<int> p;
   // expected: unsafe non-owning view capture of `data`
-  return p.then([data](int x) { (void)data; return x; });
+  return p.then([data](int x) {
+    (void)data;
+    return x;
+  });
 }
 
 kj::Promise<int> stringPtrCapture(kj::StringPtr s) {
   kj::Promise<int> p;
   // expected: unsafe non-owning view capture of `s`
-  return p.then([s](int x) { (void)s; return x; });
+  return p.then([s](int x) {
+    (void)s;
+    return x;
+  });
 }
 
 struct JsgThing {
   jsg::Promise<int> doIt(jsg::Lock &js, jsg::Promise<int> p) {
     // expected: unsafe `this` capture; use JSG_THIS
-    return p.then(js, [this](jsg::Lock &, int x) { (void)this; return x; });
+    return p.then(js, [this](jsg::Lock &, int x) {
+      (void)this;
+      return x;
+    });
   }
 };
 
 kj::Promise<int> ioContextRun(workerd::IoContext &ctx, kj::Own<Resource> r) {
   // Mirror of streams/standard.c++:3789. Expected diagnostic on `&r`.
-  return ctx.run([&r](workerd::jsg::Lock &) -> int { (void)r; return 0; });
+  return ctx.run([&r](workerd::jsg::Lock &) -> int {
+    (void)r;
+    return 0;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -203,13 +221,18 @@ kj::Promise<int> ioContextRun(workerd::IoContext &ctx, kj::Own<Resource> r) {
 kj::Promise<int> ownedCapture(kj::Own<Resource> r) {
   kj::Promise<int> p;
   // safe: kj::Own transfers ownership.
-  return p.then([r = kj::mv(r)](int x) { (void)r; return x; });
+  return p.then([r = kj::mv(r)](int x) {
+    (void)r;
+    return x;
+  });
 }
 
-kj::Promise<int> jsgRefCapture(workerd::jsg::Ref<Resource> ref,
-                               kj::Promise<int> p) {
+kj::Promise<int> jsgRefCapture(workerd::jsg::Ref<Resource> ref, kj::Promise<int> p) {
   // safe: jsg::Ref is an owning JS heap root.
-  return p.then([ref = kj::mv(ref)](int x) { (void)ref; return x; });
+  return p.then([ref = kj::mv(ref)](int x) {
+    (void)ref;
+    return x;
+  });
 }
 
 jsg::Promise<int> jsgThisOk(JsgThing *t, jsg::Lock &js, jsg::Promise<int> p) {
@@ -235,35 +258,50 @@ int promiseWaitedSynchronously(Resource &r) {
   kj::Promise<int> p;
   kj::WaitScope *ws = nullptr;
   // safe: .then's promise is .wait()'d immediately. `r` cannot dangle.
-  return p.then([&r](int x) { (void)r; return x; }).wait(*ws);
+  return p
+      .then([&r](int x) {
+    (void)r;
+    return x;
+  }).wait(*ws);
 }
 
 kj::Promise<int> promiseAwaitedInCoroutine(Resource &r, kj::Promise<int> p) {
   // safe: the .then's promise is co_await-ed; the coroutine frame keeps
   // `r` alive through the suspension point.
-  int v = co_await p.then([&r](int x) { (void)r; return x; });
+  int v = co_await p.then([&r](int x) {
+    (void)r;
+    return x;
+  });
   co_return v;
 }
 
-kj::Promise<int> promiseChainWaitedLater(Resource &r, kj::Promise<int> p,
-                                         kj::WaitScope &ws) {
+kj::Promise<int> promiseChainWaitedLater(Resource &r, kj::Promise<int> p, kj::WaitScope &ws) {
   // safe: result is bound to a local, then .wait()-ed.
-  auto chained = p.then([&r](int x) { (void)r; return x; });
+  auto chained = p.then([&r](int x) {
+    (void)r;
+    return x;
+  });
   return chained.wait(ws);
 }
 
 kj::Promise<int> promiseChainedThenReturned(Resource &r, kj::Promise<int> p) {
   // unsafe: outer .then's result is returned; the captures of *both*
   // lambdas escape. expected diagnostic on `&r`.
-  return p.then([&r](int x) { (void)r; return x; })
-      .then([](int y) { return y + 1; });
+  return p
+      .then([&r](int x) {
+    (void)r;
+    return x;
+  }).then([](int y) { return y + 1; });
 }
 
 kj::Promise<int> promiseDiscarded(kj::Promise<int> p, Resource &r) {
   // The .then result is discarded as a full-expression. The promise's
   // destructor runs in this scope; the captures don't outlive the
   // function. Safe.
-  p.then([&r](int x) { (void)r; return x; });
+  p.then([&r](int x) {
+    (void)r;
+    return x;
+  });
   return kj::Promise<int>();
 }
 
@@ -275,7 +313,10 @@ kj::Promise<void> addedToArrayBuilderThenJoined(Resource &r, kj::Promise<int> p)
   // safe: continuation is added to a local kj::ArrayBuilder, finished, joined,
   // and co_await-ed in this coroutine.
   auto promises = kj::heapArrayBuilder<kj::Promise<int>>(1);
-  promises.add(p.then([&r](int x) { (void)r; return x; }));
+  promises.add(p.then([&r](int x) {
+    (void)r;
+    return x;
+  }));
   co_await kj::joinPromisesFailFast(promises.finish());
 }
 
@@ -283,7 +324,10 @@ kj::Promise<void> addedToVectorThenJoined(Resource &r, kj::Promise<int> p) {
   // safe: continuation is added to a local kj::Vector, released, joined, and
   // co_await-ed in this coroutine.
   kj::Vector<kj::Promise<int>> promises;
-  promises.add(p.then([&r](int x) { (void)r; return x; }));
+  promises.add(p.then([&r](int x) {
+    (void)r;
+    return x;
+  }));
   co_await kj::joinPromisesFailFast(promises.releaseAsArray());
 }
 
@@ -291,7 +335,10 @@ kj::Promise<void> addedToVectorWithEmptyCheck(Resource &r, kj::Promise<int> p) {
   // safe: the container is queried via .empty() (a benign query) and then
   // released, joined, and co_await-ed -- the continuation still cannot escape.
   kj::Vector<kj::Promise<int>> promises;
-  promises.add(p.then([&r](int x) { (void)r; return x; }));
+  promises.add(p.then([&r](int x) {
+    (void)r;
+    return x;
+  }));
   if (!promises.empty()) {
     co_await kj::joinPromisesFailFast(promises.releaseAsArray());
   }
@@ -300,16 +347,21 @@ kj::Promise<void> addedToVectorWithEmptyCheck(Resource &r, kj::Promise<int> p) {
 kj::Promise<void> localTaskIntoArrThenJoined(Resource &r, kj::Promise<int> p) {
   // safe: continuation bound to a local, moved into kj::arr(...), joined, and
   // co_await-ed in this coroutine.
-  auto task = p.then([&r](int x) { (void)r; return x; });
+  auto task = p.then([&r](int x) {
+    (void)r;
+    return x;
+  });
   co_await kj::joinPromisesFailFast(kj::arr(kj::mv(task)));
 }
 
-kj::Array<kj::Promise<int>> addedToArrayThenReturned(Resource &r,
-                                                     kj::Promise<int> p) {
+kj::Array<kj::Promise<int>> addedToArrayThenReturned(Resource &r, kj::Promise<int> p) {
   // unsafe: the promise array is returned to the caller, so the continuation
   // escapes this function. expected diagnostic on `&r`.
   auto promises = kj::heapArrayBuilder<kj::Promise<int>>(1);
-  promises.add(p.then([&r](int x) { (void)r; return x; }));
+  promises.add(p.then([&r](int x) {
+    (void)r;
+    return x;
+  }));
   return promises.finish();
 }
 
@@ -348,14 +400,19 @@ kj::Promise<int> intCapture(int n, kj::Promise<int> p) {
 
 kj::Promise<int> stringCapture(kj::String s, kj::Promise<int> p) {
   // safe: kj::String owns its buffer.
-  return p.then([s = kj::mv(s)](int x) { (void)s; return x; });
+  return p.then([s = kj::mv(s)](int x) {
+    (void)s;
+    return x;
+  });
 }
 
-kj::Promise<int> maybeOwnCapture(kj::Maybe<kj::Own<Resource>> maybe,
-                                 kj::Promise<int> p) {
+kj::Promise<int> maybeOwnCapture(kj::Maybe<kj::Own<Resource>> maybe, kj::Promise<int> p) {
   // safe: kj::Maybe<kj::Own<T>> -- transparent container around an
   // owning type.
-  return p.then([maybe = kj::mv(maybe)](int x) { (void)maybe; return x; });
+  return p.then([maybe = kj::mv(maybe)](int x) {
+    (void)maybe;
+    return x;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -366,18 +423,22 @@ kj::Promise<int> maybeOwnCapture(kj::Maybe<kj::Own<Resource>> maybe,
 namespace kj {
 template <typename T>
 class Promise2 {
-public:
+ public:
   template <typename F>
   Promise2 then(F &&);
   template <typename... Attachments>
   Promise2 attach(Attachments &&...);
 };
-} // namespace kj
+}  // namespace kj
 
 kj::Promise2<int> attachOwnSuppresses(kj::Own<Resource> r, kj::Promise2<int> p) {
   // safe: r is bound to the chain via .attach(kj::mv(r)), so the
   // by-reference capture of r in the inner lambda cannot dangle.
-  return p.then([&r](int x) { (void)r; return x; }).attach(kj::mv(r));
+  return p
+      .then([&r](int x) {
+    (void)r;
+    return x;
+  }).attach(kj::mv(r));
 }
 
 struct PromiseAndFulfiller {
@@ -389,8 +450,11 @@ kj::Promise2<int> attachMemberInitCapture(kj::Promise2<int> p) {
   // safe: init-capture binds a reference to `paf.fulfiller`, and the
   // chain attaches `paf.fulfiller` -- the bound (base, member) pair
   // matches, so the capture is treated as safe.
-  return p.then([&f = *paf.fulfiller](int x) { (void)f; return x; })
-      .attach(kj::mv(paf.fulfiller));
+  return p
+      .then([&f = *paf.fulfiller](int x) {
+    (void)f;
+    return x;
+  }).attach(kj::mv(paf.fulfiller));
 }
 
 kj::Promise2<int> attachThisSuppresses(kj::Promise2<int> p);
@@ -398,7 +462,11 @@ struct AttachThisHolder {
   kj::Promise2<int> p;
   kj::Promise2<int> doIt() {
     // safe: `*this` is attached to the chain.
-    return p.then([this](int x) { (void)this; return x; }).attach(*this);
+    return p
+        .then([this](int x) {
+      (void)this;
+      return x;
+    }).attach(*this);
   }
 };
 
@@ -414,13 +482,19 @@ struct StoresChain {
     kj::Promise<int> p;
     // safe: [this] is OK because `task` (the storing field) will be
     // destroyed and cancel the chain before *this dies.
-    task = p.then([this](int x) { (void)this; return x; });
+    task = p.then([this](int x) {
+      (void)this;
+      return x;
+    });
   }
   void startBadRef(Resource &r) {
     kj::Promise<int> p;
     // expected: unsafe by-reference capture of `r` -- the chain may
     // outlive r even though it's stored on *this.
-    task = p.then([&r](int x) { (void)r; return x; });
+    task = p.then([&r](int x) {
+      (void)r;
+      return x;
+    });
   }
 };
 
@@ -430,16 +504,22 @@ struct StoresChain {
 namespace kj {
 template <typename F>
 auto evalLast(F &&) -> Promise<int>;
-} // namespace kj
+}  // namespace kj
 
 kj::Promise<int> evalLaterBadCapture(Resource &r) {
   // expected: unsafe by-reference capture passed to kj::evalLater.
-  return kj::evalLater([&r]() { (void)r; return 0; });
+  return kj::evalLater([&r]() {
+    (void)r;
+    return 0;
+  });
 }
 
 kj::Promise<int> evalLastBadCapture(Resource &r) {
   // expected: unsafe by-reference capture passed to kj::evalLast.
-  return kj::evalLast([&r]() { (void)r; return 0; });
+  return kj::evalLast([&r]() {
+    (void)r;
+    return 0;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -461,19 +541,24 @@ auto mySink(F &&) -> kj::Promise<int>;
 
 template <typename T>
 class MyOwn {};
-} // namespace myproject
+}  // namespace myproject
 
 kj::Promise<int> extraSinkBadCapture(Resource &r) {
   // expected (when ExtraSinks contains "myproject::mySink"): unsafe
   // by-reference capture passed to myproject::mySink.
-  return myproject::mySink([&r]() { (void)r; return 0; });
+  return myproject::mySink([&r]() {
+    (void)r;
+    return 0;
+  });
 }
 
-kj::Promise<int> extraOwningTypeOk(myproject::MyOwn<Resource> own,
-                                   kj::Promise<int> p) {
+kj::Promise<int> extraOwningTypeOk(myproject::MyOwn<Resource> own, kj::Promise<int> p) {
   // safe (when OwningCaptureTypes contains "myproject::MyOwn"):
   // capturing a MyOwn by value transfers ownership.
-  return p.then([own = kj::mv(own)](int x) { (void)own; return x; });
+  return p.then([own = kj::mv(own)](int x) {
+    (void)own;
+    return x;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -488,26 +573,36 @@ int syncSinkDirectLambdaIsExempt(workerd::TestFixture &fx, Resource &r) {
   // safe: the lambda runs synchronously; capturing `&r` cannot dangle
   // because `runInIoContext` is not an async sink at all (and a fortiori
   // not flagged for this capture).
-  return fx.runInIoContext([&r]() { (void)r; return 0; });
+  return fx.runInIoContext([&r]() {
+    (void)r;
+    return 0;
+  });
 }
 
-int syncSinkNestedThenIsExempt(workerd::TestFixture &fx, Resource &r,
-                               kj::Promise<int> p) {
+int syncSinkNestedThenIsExempt(workerd::TestFixture &fx, Resource &r, kj::Promise<int> p) {
   // safe: the inner .then's promise is returned from a lambda that is
   // passed directly to a synchronous sink. The sink will .wait() on the
   // returned promise before returning, so `&r` cannot dangle.
   return fx.runInIoContext([&r, p = kj::mv(p)]() mutable {
-    return p.then([&r](int x) { (void)r; return x; });
+    return p.then([&r](int x) {
+      (void)r;
+      return x;
+    });
   });
 }
 
-int syncSinkNestedThenChainIsExempt(workerd::TestFixture &fx, Resource &r,
-                                    kj::Promise<int> p) {
+int syncSinkNestedThenChainIsExempt(workerd::TestFixture &fx, Resource &r, kj::Promise<int> p) {
   // safe: same as above but with a longer .then chain. Every link
   // ultimately escapes via `return` from the outer sync-sink lambda.
   return fx.runInIoContext([&r, p = kj::mv(p)]() mutable {
-    return p.then([&r](int x) { (void)r; return x; })
-        .then([&r](int y) { (void)r; return y + 1; });
+    return p
+        .then([&r](int x) {
+      (void)r;
+      return x;
+    }).then([&r](int y) {
+      (void)r;
+      return y + 1;
+    });
   });
 }
 
@@ -523,7 +618,10 @@ struct StoresChainInSink {
       // assigned to `task` (a non-local destination), not returned to
       // the synchronous sink, so the capture's lifetime is not bounded
       // by runInIoContext.
-      task = p.then([&r](int x) { (void)r; return x; });
+      task = p.then([&r](int x) {
+        (void)r;
+        return x;
+      });
       return 0;
     });
   }
