@@ -160,9 +160,6 @@ generate-types:
 update-reported-node-version:
   python3 tools/update_node_version.py src/workerd/api/node/node-version.h
 
-update-opencode:
-  python3 tools/update_opencode_version.py
-
 # called by rust-analyzer discoverConfig (quiet recipe with no output)
 # rust-analyzer doesn't like stderr output, redirect it to /dev/null
 @_rust-analyzer:
