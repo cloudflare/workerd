@@ -12,7 +12,6 @@
 #include <workerd/api/node/process.h>
 #include <workerd/api/node/sqlite.h>
 #include <workerd/api/node/timers.h>
-#include <workerd/api/node/url.h>
 #include <workerd/api/node/util.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
@@ -20,7 +19,6 @@
 #include <workerd/jsg/url.h>
 #include <workerd/rust/api/lib.rs.h>
 #include <workerd/rust/jsg/jsg.h>
-#include <workerd/util/autogate.h>
 
 #include <node/node.capnp.h>
 
@@ -115,17 +113,6 @@ void registerNodeJsCompatModules(
   }
 
 #undef V
-
-  // The native `node-internal:url` module has both a C++ (`UrlUtil`) and a Rust
-  // implementation. The `NODEJS_URL_RUST` autogate selects the Rust one; when
-  // the gate is off we register the C++ implementation here instead. Exactly one
-  // of the two registers the `node-internal:url` specifier (the Rust side is
-  // told whether to register it via `register_nodejs_url_module` below).
-  bool useRustUrl = util::Autogate::isEnabled(util::AutogateKey::NODEJS_URL_RUST);
-  if (!useRustUrl) {
-    registry.template addBuiltinModule<UrlUtil>(
-        "node-internal:url", workerd::jsg::ModuleRegistry::Type::INTERNAL);
-  }
 
   bool nodeJsCompatEnabled = isNodeJsCompatEnabled(featureFlags);
 
@@ -251,9 +238,6 @@ void registerNodeJsCompatModules(
 
   ::workerd::rust::jsg::RustModuleRegistry r(registry);
   ::workerd::rust::api::register_nodejs_modules(r);
-  if (useRustUrl) {
-    ::workerd::rust::api::register_nodejs_url_module(r);
-  }
 }
 
 template <class TypeWrapper>
@@ -269,14 +253,6 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
     NODEJS_MODULES_EXPERIMENTAL(V)
   }
 #undef V
-
-  // See registerNodeJsCompatModules(): the NODEJS_URL_RUST autogate selects
-  // between the C++ and Rust implementations of `node-internal:url`.
-  bool useRustUrl = util::Autogate::isEnabled(util::AutogateKey::NODEJS_URL_RUST);
-  if (!useRustUrl) {
-    static const auto kUrlUtilSpecifier = "node-internal:url"_url;
-    builder.addObject<UrlUtil, TypeWrapper>(kUrlUtilSpecifier);
-  }
 
   if (moduleSource == nullptr) {
     jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(
@@ -295,9 +271,6 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
   {
     ::workerd::rust::jsg::RustBuiltinModuleAdapter adapter(builder);
     ::workerd::rust::api::register_nodejs_modules(adapter);
-    if (useRustUrl) {
-      ::workerd::rust::api::register_nodejs_url_module(adapter);
-    }
   }
 
   return builder.finish();
@@ -417,9 +390,6 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
   {
     ::workerd::rust::jsg::RustBuiltinModuleAdapter adapter(builder);
     ::workerd::rust::api::register_nodejs_modules(adapter);
-    if (util::Autogate::isEnabled(util::AutogateKey::NODEJS_URL_RUST)) {
-      ::workerd::rust::api::register_nodejs_url_module(adapter);
-    }
   }
   return builder.finish();
 }
@@ -431,5 +401,5 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
   EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,                                      \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
       EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_PROCESS_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES,       \
-      EW_NODE_URL_ISOLATE_TYPES, EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES,       \
-      EW_NODE_SQLITE_ISOLATE_TYPES, EW_NODE_INSPECTOR_ISOLATE_TYPES
+      EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES, EW_NODE_SQLITE_ISOLATE_TYPES,    \
+      EW_NODE_INSPECTOR_ISOLATE_TYPES

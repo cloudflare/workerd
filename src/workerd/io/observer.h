@@ -30,6 +30,9 @@ WD_STRONG_BOOL(CountSubrequest);
 // Whether an outgoing actor call's payload can be sent again unchanged, e.g. a fetch with a
 // rewindable body or an RPC call whose arguments hold no externals.
 WD_STRONG_BOOL(ActorCallPayloadReplayable);
+// Whether the handler or method an actor request is about to run was decorated with @retryable,
+// with DURABLE_OBJECT_RETRIES_USERLAND enabled. See RequestObserver::claimRetryTokenBeforeUserCode().
+WD_STRONG_BOOL(IsRetryableHandler);
 
 enum class ActorRetryCallType : uint8_t {
   FETCH,
@@ -187,18 +190,16 @@ class RequestObserver: public kj::Refcounted {
     return kj::none;
   }
 
-  // Tracks serialized argument bytes retained while a replayable actor call's retry state is live.
-  // The returned handle releases the tracked bytes when destroyed.
+  // Tracks the replay memory a replayable actor call retains, or would retain if
+  // LimitEnforcer::tryReserveActorCallReplayMemory() granted it. The returned handle releases the
+  // tracked bytes when destroyed.
   virtual kj::Own<void> trackActorCallReplayMemory(size_t bytes) {
     return kj::Own<void>();
   }
 
-  // Attempts to reserve platform memory for retained actor-call replay state. Returning none keeps
-  // the call observe-only. Production observers must enforce an aggregate bound before returning a
-  // reservation handle.
-  virtual kj::Maybe<kj::Own<void>> tryReserveActorCallReplayMemory(size_t bytes) {
-    return kj::none;
-  }
+  // Records that a replayable actor call was sent without retries because
+  // LimitEnforcer::tryReserveActorCallReplayMemory() refused its reservation.
+  virtual void recordActorCallReplayMemoryRejected() {}
 
   // Records an additional outgoing actor call started by a runtime retry loop.
   virtual void recordActorRetry(ActorRetryCallType callType) {}
@@ -214,7 +215,10 @@ class RequestObserver: public kj::Refcounted {
   // method is looked up; calls on stubs or pipelines returned from that call don't fire it. It fires
   // at most once per request. It also fires for non-actor requests, which carry no retry token, so
   // observers should do nothing for them.
-  virtual void claimRetryTokenBeforeUserCode() {}
+  //
+  // `retryable` is YES when the handler or method opts into duplicate execution. The observer should
+  // then admit a request whose nonce was already claimed, but keep every other rejection.
+  virtual void claimRetryTokenBeforeUserCode(IsRetryableHandler retryable) {}
 
   // Used to record when a worker has used a dynamic dispatch binding.
   virtual void setHasDispatched() {};
