@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 // A Blob's bytes are a view of an ArrayBuffer, so they always lie inside the V8 sandbox, and
 // Blob::getData() verifies that before any copy. This covers the genuine case, which must read
 // normally. The check's failure path is observable only where V8 is built with the sandbox, so
