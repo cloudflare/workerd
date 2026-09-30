@@ -6,6 +6,7 @@
 #include "internal.h"
 #include "readable.h"
 #include "standard.h"
+#include "transform.h"
 #include "writable.h"
 
 #include <workerd/jsg/jsg-test.h>
@@ -1183,6 +1184,96 @@ KJ_TEST("Writing SharedArrayBuffer works") {
     auto sab = v8::SharedArrayBuffer::New(env.js.v8Isolate, 5);
     auto writePromise = writer->write(env.js, jsg::JsSharedArrayBuffer(sab));
     env.js.runMicrotasks();
+  });
+}
+
+KJ_TEST("tee branch survives reentrant transform cancellation until read unwinds") {
+  class OneByteSource final: public ReadableStreamSource {
+   public:
+    kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+      KJ_ASSERT(minBytes <= 1);
+      KJ_ASSERT(maxBytes >= 1);
+      if (done) return static_cast<size_t>(0);
+
+      static_cast<kj::byte*>(buffer)[0] = 1;
+      done = true;
+      return static_cast<size_t>(1);
+    }
+
+   private:
+    bool done = false;
+  };
+
+  class FailingSink final: public WritableStreamSink {
+   public:
+    explicit FailingSink(bool& writeStarted): writeStarted(writeStarted) {}
+
+    kj::Promise<void> write(kj::ArrayPtr<const byte>) override {
+      return failWrite();
+    }
+
+    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>>) override {
+      return failWrite();
+    }
+
+    kj::Promise<void> end() override {
+      return kj::READY_NOW;
+    }
+
+    void abort(kj::Exception) override {}
+
+   private:
+    kj::Promise<void> failWrite() {
+      writeStarted = true;
+      return KJ_EXCEPTION(FAILED, "downstream write failed");
+    }
+
+    bool& writeStarted;
+  };
+
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setStreamsJavaScriptControllers(true);
+  flags.setTransformStreamJavaScriptControllers(true);
+  TestFixture fixture({.featureFlags = flags.asReader()});
+
+  bool writeStarted = false;
+  bool downstreamRejected = false;
+  KJ_EXPECT_LOG(ERROR, "downstream write failed");
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto source = env.js.alloc<ReadableStream>(env.context, kj::heap<OneByteSource>());
+    auto branches = source->tee(env.js);
+    auto transform = TransformStream::constructor(env.js, kj::none, kj::none, kj::none);
+    auto destination =
+        env.js.alloc<WritableStream>(env.context, kj::heap<FailingSink>(writeStarted), kj::none);
+
+    auto upstreamPipe = branches[0]
+                            ->pipeTo(env.js, transform->getWritable(), PipeToOptions{})
+                            .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) {
+      auto exception = js.exceptionToKj(kj::mv(reason));
+      KJ_ASSERT(!exception.getDescription().contains(
+                    "destroying tee branch with operation still in-progress"),
+          exception);
+    });
+    auto downstreamPipe =
+        transform->getReadable()
+            ->pipeTo(env.js, destination.addRef(), PipeToOptions{})
+            .catch_(env.js, [&](jsg::Lock&, jsg::Value) { downstreamRejected = true; });
+
+    auto upstream = env.context.awaitJs(env.js, kj::mv(upstreamPipe));
+    auto downstream = env.context.awaitJs(env.js, kj::mv(downstreamPipe));
+
+    // The downstream failure makes pumpToImpl cancel the transform's readable side. That errors
+    // its writable side and reentrantly releases the upstream tee pipe, matching the production
+    // destruction trace. Before the fix, the task later unwinds a ReadSink whose backlink points
+    // into the freed AsyncTee::Branch, which ASAN reports as an invalid access.
+    return downstream.then([upstream = kj::mv(upstream)]() mutable {
+      return kj::mv(upstream);
+    }).then([&] {
+      KJ_ASSERT(writeStarted);
+      KJ_ASSERT(downstreamRejected);
+    });
   });
 }
 

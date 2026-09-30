@@ -70,7 +70,7 @@ class HmacKey final: public CryptoKey::Impl {
   }
 
   SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const override {
-    JSG_REQUIRE(format == "raw" || format == "jwk", DOMNotSupportedError,
+    JSG_REQUIRE(format == "raw" || format == "raw-secret" || format == "jwk", DOMNotSupportedError,
         "Unimplemented key export format \"", format, "\".");
 
     if (format == "jwk") {
@@ -266,7 +266,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHmac(jsg::Lock& js,
   kj::StringPtr hash = api::getAlgorithmName(
       JSG_REQUIRE_NONNULL(algorithm.hash, TypeError, "Missing field \"hash\" in \"algorithm\"."));
 
-  if (format == "raw") {
+  if (format == "raw" || format == "raw-secret") {
     // NOTE: Checked in SubtleCrypto::importKey().
     auto& source = keyData.get<jsg::JsRef<jsg::JsBufferSource>>();
     auto handle = source.getHandle(js);
