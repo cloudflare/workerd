@@ -24,7 +24,7 @@ namespace workerd {
 namespace {
 
 kj::Own<kj::HttpClient> newClient(::rust::Box<RustWorkerInterface::Impl> impl) {
-  auto worker = kj::from<Rust>(kj::mv(impl));
+  auto worker = kj::mv(impl).as<Kj>();
   return kj::newHttpClient(*worker).attach(kj::mv(worker));
 }
 
@@ -82,7 +82,7 @@ KJ_TEST("kill_switch worker prewarm") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  auto worker = kj::from<Rust>(new_kill_switch_worker());
+  auto worker = new_kill_switch_worker().as<Kj>();
 
   // Prewarm should succeed (default implementation)
   kj::StringPtr url = "/test";
@@ -95,7 +95,7 @@ KJ_TEST("kill_switch worker runScheduled") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  auto worker = kj::from<Rust>(new_kill_switch_worker());
+  auto worker = new_kill_switch_worker().as<Kj>();
 
   kj::Date scheduledTime = kj::UNIX_EPOCH + 1000 * kj::SECONDS;
   kj::StringPtr cron = "0 0 * * *";
@@ -110,7 +110,7 @@ KJ_TEST("kill_switch worker runAlarm") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  auto worker = kj::from<Rust>(new_kill_switch_worker());
+  auto worker = new_kill_switch_worker().as<Kj>();
 
   kj::Date scheduledTime = kj::UNIX_EPOCH + 2000 * kj::SECONDS;
   uint32_t retryCount = 3;
@@ -126,7 +126,7 @@ KJ_TEST("kill_switch worker customEvent") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  auto worker = kj::from<Rust>(new_kill_switch_worker());
+  auto worker = new_kill_switch_worker().as<Kj>();
 
   // Create a minimal custom event mock
   class TestCustomEvent: public workerd::WorkerInterface::CustomEvent {
@@ -173,7 +173,7 @@ KJ_TEST("kill_switch worker test") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  auto worker = kj::from<Rust>(new_kill_switch_worker());
+  auto worker = new_kill_switch_worker().as<Kj>();
 
   auto p = worker->test();
   bool result = p.wait(waitScope);
@@ -217,7 +217,7 @@ KJ_TEST("error worker runScheduled") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  auto worker = kj::from<Rust>(new_error_worker("Scheduled task failed"));
+  auto worker = new_error_worker("Scheduled task failed").as<Kj>();
 
   kj::Date scheduledTime = kj::UNIX_EPOCH + 1000 * kj::SECONDS;
   kj::StringPtr cron = "0 0 * * *";
@@ -239,7 +239,7 @@ KJ_TEST("error worker runAlarm") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  auto worker = kj::from<Rust>(new_error_worker("Alarm execution failed"));
+  auto worker = new_error_worker("Alarm execution failed").as<Kj>();
 
   kj::Date scheduledTime = kj::UNIX_EPOCH + 2000 * kj::SECONDS;
   uint32_t retryCount = 5;
@@ -261,7 +261,7 @@ KJ_TEST("error worker customEvent") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  auto worker = kj::from<Rust>(new_error_worker("Custom event error"));
+  auto worker = new_error_worker("Custom event error").as<Kj>();
 
   // Create a minimal custom event mock
   class TestCustomEvent: public workerd::WorkerInterface::CustomEvent {
@@ -318,7 +318,7 @@ KJ_TEST("error worker test") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  auto worker = kj::from<Rust>(new_error_worker("Test method failed"));
+  auto worker = new_error_worker("Test method failed").as<Kj>();
 
   KJ_ASSERT(!worker->test().wait(waitScope));
 }
@@ -398,7 +398,7 @@ KJ_TEST("cxx_worker delegates non-HTTP events to the wrapped C++ worker") {
   auto stub = kj::heap<StubWorker>();
   auto& stubRef = *stub;
   // Wrap the C++ stub as a Rust worker::Interface, then re-expose it to C++.
-  auto worker = kj::from<Rust>(new_cxx_worker(kj::mv(stub)));
+  auto worker = new_cxx_worker(kj::mv(stub)).as<Kj>();
 
   worker->prewarm("/warm"_kj).wait(waitScope);
   KJ_ASSERT(stubRef.prewarmCalled);
@@ -455,7 +455,7 @@ KJ_TEST("cxx_worker delegates customEvent (ownership transfer) to the wrapped C+
 
   auto stub = kj::heap<StubWorker>();
   auto& stubRef = *stub;
-  auto worker = kj::from<Rust>(new_cxx_worker(kj::mv(stub)));
+  auto worker = new_cxx_worker(kj::mv(stub)).as<Kj>();
 
   auto result = worker->customEvent(kj::heap<TestCustomEvent>()).wait(waitScope);
   KJ_ASSERT(stubRef.customEventCalled);

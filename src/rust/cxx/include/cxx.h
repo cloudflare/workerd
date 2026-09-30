@@ -172,6 +172,24 @@ class String final {
   bool operator>(const String &) const noexcept;
   bool operator>=(const String &) const noexcept;
 
+  // Conversion customization point, like KJ's as<T>(): ADL finds asImpl(T*, value).
+  template <typename T>
+  auto as() & {
+    return asImpl(static_cast<T *>(nullptr), *this);
+  }
+  template <typename T>
+  auto as() const & {
+    return asImpl(static_cast<T *>(nullptr), *this);
+  }
+  template <typename T>
+  auto as() && {
+    return asImpl(static_cast<T *>(nullptr), std::move(*this));
+  }
+  template <typename T>
+  auto as() const && {
+    return asImpl(static_cast<T *>(nullptr), std::move(*this));
+  }
+
   void swap(String &) noexcept;
 
   // Internal API only intended for the cxxbridge code generator.
@@ -234,6 +252,23 @@ class Str final {
   bool operator>(const Str &) const noexcept;
   bool operator>=(const Str &) const noexcept;
 
+  template <typename T>
+  auto as() & {
+    return asImpl(static_cast<T *>(nullptr), *this);
+  }
+  template <typename T>
+  auto as() const & {
+    return asImpl(static_cast<T *>(nullptr), *this);
+  }
+  template <typename T>
+  auto as() && {
+    return asImpl(static_cast<T *>(nullptr), std::move(*this));
+  }
+  template <typename T>
+  auto as() const && {
+    return asImpl(static_cast<T *>(nullptr), std::move(*this));
+  }
+
   void swap(Str &) noexcept;
 
  private:
@@ -291,6 +326,23 @@ class Slice final: private detail::copy_assignable_if<std::is_const_v<T>> {
   class iterator;
   iterator begin() const noexcept;
   iterator end() const noexcept;
+
+  template <typename U>
+  auto as() & {
+    return asImpl(static_cast<U *>(nullptr), *this);
+  }
+  template <typename U>
+  auto as() const & {
+    return asImpl(static_cast<U *>(nullptr), *this);
+  }
+  template <typename U>
+  auto as() && {
+    return asImpl(static_cast<U *>(nullptr), std::move(*this));
+  }
+  template <typename U>
+  auto as() const && {
+    return asImpl(static_cast<U *>(nullptr), std::move(*this));
+  }
 
   void swap(Slice &) noexcept;
 
@@ -387,6 +439,23 @@ class Box final {
   template <typename... Fields>
   static Box in_place(Fields &&...);
 
+  template <typename U>
+  auto as() & {
+    return asImpl(static_cast<U *>(nullptr), *this);
+  }
+  template <typename U>
+  auto as() const & {
+    return asImpl(static_cast<U *>(nullptr), *this);
+  }
+  template <typename U>
+  auto as() && {
+    return asImpl(static_cast<U *>(nullptr), std::move(*this));
+  }
+  template <typename U>
+  auto as() const && {
+    return asImpl(static_cast<U *>(nullptr), std::move(*this));
+  }
+
   void swap(Box &) noexcept;
 
   // Important: requires that `raw` came from an into_raw call. Do not pass a
@@ -460,6 +529,23 @@ class Vec final {
   const_iterator end() const noexcept;
   const_iterator cbegin() const noexcept;
   const_iterator cend() const noexcept;
+
+  template <typename U>
+  auto as() & {
+    return asImpl(static_cast<U *>(nullptr), *this);
+  }
+  template <typename U>
+  auto as() const & {
+    return asImpl(static_cast<U *>(nullptr), *this);
+  }
+  template <typename U>
+  auto as() && {
+    return asImpl(static_cast<U *>(nullptr), std::move(*this));
+  }
+  template <typename U>
+  auto as() const && {
+    return asImpl(static_cast<U *>(nullptr), std::move(*this));
+  }
 
   void swap(Vec &) noexcept;
 

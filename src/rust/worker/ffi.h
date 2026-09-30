@@ -38,7 +38,7 @@ inline kj::Promise<void> worker_request(WorkerInterface& worker,
     const HttpHeaders& headers,
     AsyncInputStream& requestBody,
     HttpServiceResponse& response) {
-  auto urlStr = kj::str(kj::from<kj_rs::Rust>(url).asChars());
+  auto urlStr = kj::str(url.as<kj_rs::Kj>().asChars());
   co_await worker.request(method, urlStr, headers, requestBody, response);
 }
 
@@ -48,7 +48,7 @@ inline kj::Promise<void> worker_connect(WorkerInterface& worker,
     AsyncIoStream& connection,
     ConnectResponse& response,
     kj::rust::HttpConnectSettings settings) {
-  auto hostStr = kj::str(kj::from<kj_rs::Rust>(host).asChars());
+  auto hostStr = kj::str(host.as<kj_rs::Kj>().asChars());
   co_await worker.connect(hostStr, headers, connection, response,
       {
         .useTls = settings.use_tls,
@@ -58,7 +58,7 @@ inline kj::Promise<void> worker_connect(WorkerInterface& worker,
 
 inline kj::Promise<void> worker_prewarm(
     WorkerInterface& worker, ::rust::Slice<const kj::byte> url) {
-  auto urlStr = kj::str(kj::from<kj_rs::Rust>(url).asChars());
+  auto urlStr = kj::str(url.as<kj_rs::Kj>().asChars());
   co_await worker.prewarm(urlStr);
 }
 

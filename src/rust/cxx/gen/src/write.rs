@@ -360,6 +360,8 @@ fn write_struct<'a>(out: &mut OutFile<'a>, strct: &'a Struct, methods: &[&Extern
         );
     }
 
+    write_as_methods(out);
+
     out.include.type_traits = true;
     writeln!(out, "  using IsRelocatable = ::std::true_type;");
 
@@ -378,6 +380,23 @@ fn write_struct<'a>(out: &mut OutFile<'a>, strct: &'a Struct, methods: &[&Extern
 
     writeln!(out, "}};");
     writeln!(out, "#endif  // {}", guard);
+}
+
+fn write_as_methods(out: &mut OutFile) {
+    out.include.utility = true;
+    for qualifier in ["&", "const &", "&&", "const &&"] {
+        let value = if qualifier.ends_with("&&") {
+            "::std::move(*this)"
+        } else {
+            "*this"
+        };
+        writeln!(out, "  template <typename T>");
+        writeln!(
+            out,
+            "  auto as() {} {{ return asImpl(static_cast<T *>(nullptr), {}); }}",
+            qualifier, value,
+        );
+    }
 }
 
 fn write_struct_decl(out: &mut OutFile, ident: &Pair) {
@@ -429,6 +448,8 @@ fn write_opaque_type<'a>(out: &mut OutFile<'a>, ety: &'a ExternType, methods: &[
             out.next_section();
         }
     }
+
+    write_as_methods(out);
 
     writeln!(out, "  ~{}() = delete;", ety.name.cxx);
     writeln!(out);

@@ -70,7 +70,7 @@ kj::Maybe<jsg::JsString> LegacyDecoder::decode(
   }
 
   // Zero-copy view of the UTF-16 output slice from the Rust-owned buffer.
-  return js.str(kj::from<kj_rs::Rust>(result.output));
+  return js.str(result.output.as<kj_rs::Kj>());
 }
 
 }  // namespace workerd::api

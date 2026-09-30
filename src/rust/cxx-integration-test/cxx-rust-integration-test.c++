@@ -16,6 +16,44 @@ using namespace kj_rs;
 
 namespace workerd::rust {
 
+namespace {
+struct ValueCategory {};
+
+template <typename T>
+int asImpl(ValueCategory*, T&) {
+  return 1;
+}
+template <typename T>
+int asImpl(ValueCategory*, const T&) {
+  return 2;
+}
+template <typename T>
+int asImpl(ValueCategory*, T&&) {
+  return 3;
+}
+template <typename T>
+int asImpl(ValueCategory*, const T&&) {
+  return 4;
+}
+
+template <typename T>
+void checkAsValueCategory(T& value) {
+  const T& constValue = value;
+  KJ_EXPECT(value.template as<ValueCategory>() == 1);
+  KJ_EXPECT(constValue.template as<ValueCategory>() == 2);
+  KJ_EXPECT(kj::mv(value).template as<ValueCategory>() == 3);
+  KJ_EXPECT(kj::mv(constValue).template as<ValueCategory>() == 4);
+}
+}  // namespace
+
+KJ_TEST("bridged structs and boxes support ADL conversions") {
+  auto shared = rust::test::return_shared_struct();
+  checkAsValueCategory(shared);
+  auto box = rust::test::rust_struct_new_box("name");
+  checkAsValueCategory(box);
+  checkAsValueCategory(*box);
+}
+
 KJ_TEST("panic results in abort") {
   KJ_EXPECT_SIGNAL(SIGABRT, rust::cxx_integration::trigger_panic("foobar"));
 }
@@ -159,11 +197,11 @@ KJ_TEST("opaque rust type") {
 
   // ::rust::Str is _not_ null-terminated so kj::StringPtr can't be created from
   // it. need to allocate to create c++-string (or use it as ArrayPtr).
-  auto strName = std::string(name);
-  KJ_EXPECT("test_name"_kj == kj::StringPtr(strName.c_str()));
+  auto strName = name.as<KjCopy>();
+  KJ_EXPECT("test_name"_kj == strName);
 
   s->set_name("another_name");
-  KJ_EXPECT("another_name"_kjc == kj::arrayPtr(s->get_name().data(), s->get_name().size()));
+  KJ_EXPECT("another_name"_kjc == s->get_name().as<Kj>());
 }
 
 KJ_TEST("rust::String test") {
