@@ -8,8 +8,8 @@ git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "g
 http.file(
     name = "buildifier-darwin-amd64",
     executable = True,
-    sha256 = "9f8cffceb82f4e6722a32a021cbc9a5344b386b77b9f79ee095c61d087aaea06",
-    url = "https://github.com/bazel-contrib/buildtools/releases/download/v8.2.1/buildifier-darwin-amd64",
+    sha256 = "e9e10ff52ec8786fcabccd251c8109ebf31ef7be1f667e27c6e069b96dbdc1f6",
+    url = "https://github.com/bazel-contrib/buildtools/releases/download/v10.1.0/buildifier-darwin-amd64",
 )
 use_repo(http, "buildifier-darwin-amd64")
 
@@ -17,8 +17,8 @@ use_repo(http, "buildifier-darwin-amd64")
 http.file(
     name = "buildifier-darwin-arm64",
     executable = True,
-    sha256 = "cfab310ae22379e69a3b1810b433c4cd2fc2c8f4a324586dfe4cc199943b8d5a",
-    url = "https://github.com/bazel-contrib/buildtools/releases/download/v8.2.1/buildifier-darwin-arm64",
+    sha256 = "e9804864c407f920f5ecbf03a5e056a8145e11a6ae6b90d2438a3fd106d34473",
+    url = "https://github.com/bazel-contrib/buildtools/releases/download/v10.1.0/buildifier-darwin-arm64",
 )
 use_repo(http, "buildifier-darwin-arm64")
 
@@ -26,8 +26,8 @@ use_repo(http, "buildifier-darwin-arm64")
 http.file(
     name = "buildifier-linux-amd64",
     executable = True,
-    sha256 = "6ceb7b0ab7cf66fceccc56a027d21d9cc557a7f34af37d2101edb56b92fcfa1a",
-    url = "https://github.com/bazel-contrib/buildtools/releases/download/v8.2.1/buildifier-linux-amd64",
+    sha256 = "31b6a8aa1e5c746696788f428729701770ad91925873d8256cb885c60e12c77e",
+    url = "https://github.com/bazel-contrib/buildtools/releases/download/v10.1.0/buildifier-linux-amd64",
 )
 use_repo(http, "buildifier-linux-amd64")
 
@@ -35,8 +35,8 @@ use_repo(http, "buildifier-linux-amd64")
 http.file(
     name = "buildifier-linux-arm64",
     executable = True,
-    sha256 = "3baa1cf7eb41d51f462fdd1fff3a6a4d81d757275d05b2dd5f48671284e9a1a5",
-    url = "https://github.com/bazel-contrib/buildtools/releases/download/v8.2.1/buildifier-linux-arm64",
+    sha256 = "38d2ed845f560b4a16ddee41de906508a95f8dc85b04e0851b0a71e3a70d3890",
+    url = "https://github.com/bazel-contrib/buildtools/releases/download/v10.1.0/buildifier-linux-arm64",
 )
 use_repo(http, "buildifier-linux-arm64")
 
@@ -44,8 +44,8 @@ use_repo(http, "buildifier-linux-arm64")
 http.file(
     name = "buildifier-windows-amd64",
     executable = True,
-    sha256 = "802104da0bcda0424a397ac5be0004c372665a70289a6d5146e652ee497c0dc6",
-    url = "https://github.com/bazel-contrib/buildtools/releases/download/v8.2.1/buildifier-windows-amd64.exe",
+    sha256 = "931a6e9c3844b90ccdb1467ccacd8dd72457e308d2709d624a3c5880d835ac3c",
+    url = "https://github.com/bazel-contrib/buildtools/releases/download/v10.1.0/buildifier-windows-amd64.exe",
 )
 use_repo(http, "buildifier-windows-amd64")
 
