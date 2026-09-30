@@ -122,8 +122,10 @@ class MockEntropySource final: public kj::EntropySource {
 };
 
 struct MockLimitEnforcer final: public LimitEnforcer {
-  MockLimitEnforcer(kj::Maybe<uint&> checkedSubrequestCount = kj::none)
-      : checkedSubrequestCount(checkedSubrequestCount) {}
+  MockLimitEnforcer(kj::Maybe<uint&> checkedSubrequestCount,
+      kj::Maybe<TestFixture::ActorCallReplayMemoryReserver>& actorCallReplayMemoryReserver)
+      : checkedSubrequestCount(checkedSubrequestCount),
+        actorCallReplayMemoryReserver(actorCallReplayMemoryReserver) {}
 
   kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) override {
     return {};
@@ -148,6 +150,12 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   size_t getBufferingLimit() override {
     return kj::maxValue;
   }
+  kj::Maybe<kj::Own<void>> tryReserveActorCallReplayMemory(size_t bytes) override {
+    KJ_IF_SOME(reserve, actorCallReplayMemoryReserver) {
+      return reserve(bytes);
+    }
+    return kj::none;
+  }
   kj::Maybe<EventOutcome> getLimitsExceeded() override {
     return kj::none;
   }
@@ -165,6 +173,7 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   }
 
   kj::Maybe<uint&> checkedSubrequestCount;
+  kj::Maybe<TestFixture::ActorCallReplayMemoryReserver>& actorCallReplayMemoryReserver;
 };
 
 struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
@@ -347,7 +356,7 @@ TestFixture::TestFixture(SetupParams&& params)
           httpOverCapnpFactory,
           byteStreamFactory),
       errorReporter(kj::heap<MockErrorReporter>()),
-      memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(*timer)),
+      memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()),
       isolateGroup(jsg::newIsolateGroup()),
       api(kj::heap<server::WorkerdApi>(testV8System,
           params.featureFlags.orDefault(CompatibilityFlags::Reader()),
@@ -394,7 +403,8 @@ TestFixture::TestFixture(SetupParams&& params)
       ioChannelFactory(kj::mv(params.ioChannelFactory)),
       requestObserverFactory(kj::mv(params.requestObserverFactory)),
       waitUntilTaskTrackerFactory(kj::mv(params.waitUntilTaskTrackerFactory)),
-      checkedSubrequestCount(params.checkedSubrequestCount) {
+      checkedSubrequestCount(params.checkedSubrequestCount),
+      actorCallReplayMemoryReserver(kj::mv(params.actorCallReplayMemoryReserver)) {
   KJ_IF_SOME(id, params.actorId) {
     KJ_IF_SOME(provided, params.actorLoopback) {
       savedActorLoopback = kj::mv(provided);
@@ -488,7 +498,7 @@ void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environmen
 
 kj::Own<IoContext> TestFixture::newIoContext() {
   return kj::refcounted<IoContext>(threadContext, kj::atomicAddRef(*worker), actor,
-      kj::heap<MockLimitEnforcer>(checkedSubrequestCount));
+      kj::heap<MockLimitEnforcer>(checkedSubrequestCount, actorCallReplayMemoryReserver));
 }
 
 kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest() {
@@ -560,8 +570,9 @@ kj::Own<WorkerInterface> TestFixture::makeWorkerEntrypoint() {
   }
 
   return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), kj::none, Frankenvalue(),
-      kj::mv(actorRef), kj::heap<MockLimitEnforcer>(), kj::Own<void>(), kj::mv(channelFactory),
-      kj::mv(observer), waitUntilTasks, false, kj::none, kj::none, kj::none);
+      kj::mv(actorRef), kj::heap<MockLimitEnforcer>(kj::none, actorCallReplayMemoryReserver),
+      kj::Own<void>(), kj::mv(channelFactory), kj::mv(observer), waitUntilTasks, false, kj::none,
+      kj::none, kj::none);
 }
 
 }  // namespace workerd

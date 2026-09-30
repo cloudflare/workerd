@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { strictEqual, ok } from 'node:assert';
+import { rejects, strictEqual, ok } from 'node:assert';
 
 export const timingSafeEqual = {
   test() {
@@ -418,5 +418,96 @@ export const ecJwkKeyConsistencyCheck = {
       ok(e instanceof Error, 'Expected an Error');
     }
     ok(threw, 'Import should have thrown for inconsistent EC JWK private key');
+  },
+};
+
+export const webCryptoModernAlgorithmsRequireCompatFlag = {
+  async test() {
+    strictEqual('supports' in crypto.subtle.constructor, false);
+    strictEqual('encapsulateKey' in crypto.subtle, false);
+    strictEqual('encapsulateBits' in crypto.subtle, false);
+    strictEqual('decapsulateKey' in crypto.subtle, false);
+    strictEqual('decapsulateBits' in crypto.subtle, false);
+    strictEqual('getPublicKey' in crypto.subtle, false);
+
+    await crypto.subtle.generateKey('ML-DSA-44', true, ['sign']).then(
+      () => {
+        throw new Error('generateKey should not have resolved');
+      },
+      (error) => {
+        strictEqual(error.name, 'NotSupportedError');
+      }
+    );
+
+    const key = await crypto.subtle.generateKey(
+      { name: 'AES-GCM', length: 128 },
+      true,
+      ['encrypt', 'decrypt', 'wrapKey', 'unwrapKey']
+    );
+    const algorithm = { name: 'AES-GCM', iv: new Uint8Array(12) };
+    for (const format of [
+      'raw-public',
+      'raw-private',
+      'raw-seed',
+      'raw-secret',
+    ]) {
+      await rejects(
+        crypto.subtle.importKey(format, new Uint8Array(16), 'AES-GCM', true, [
+          'encrypt',
+        ]),
+        {
+          name: 'NotSupportedError',
+          message: /webcrypto_modern_algorithms/,
+        }
+      );
+    }
+    await rejects(crypto.subtle.exportKey('raw-secret', key), {
+      name: 'NotSupportedError',
+      message: /webcrypto_modern_algorithms/,
+    });
+    await rejects(crypto.subtle.wrapKey('raw-secret', key, key, algorithm), {
+      name: 'NotSupportedError',
+      message: /webcrypto_modern_algorithms/,
+    });
+    await rejects(
+      crypto.subtle.unwrapKey(
+        'raw-secret',
+        new Uint8Array(16),
+        key,
+        algorithm,
+        'AES-GCM',
+        true,
+        ['encrypt']
+      ),
+      { name: 'NotSupportedError', message: /webcrypto_modern_algorithms/ }
+    );
+  },
+};
+
+export const webCryptoSignAlgorithmIgnoresUnrelatedContext = {
+  async test() {
+    const keyPair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['sign', 'verify']
+    );
+    const data = new Uint8Array([1]);
+    for (const context of [null, 'ignored', 42, { value: true }]) {
+      const algorithm = { name: 'ECDSA', hash: 'SHA-256', context };
+      const signature = await crypto.subtle.sign(
+        algorithm,
+        keyPair.privateKey,
+        data
+      );
+      strictEqual(
+        await crypto.subtle.verify(
+          algorithm,
+          keyPair.publicKey,
+          signature,
+          data
+        ),
+        true
+      );
+    }
   },
 };

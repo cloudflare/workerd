@@ -32,7 +32,7 @@ impl From<UrlError> for jsg::Error {
 ///
 /// # Errors
 /// `UrlError::ParseFailed` if the placeholder URL fails to parse (should never
-/// happen in practice — it mirrors the `JSG_REQUIRE` in the C++ implementation).
+/// happen in practice).
 fn get_hostname(domain: &str) -> Result<Option<String>, UrlError> {
     if domain.is_empty() {
         return Ok(None);
@@ -105,19 +105,17 @@ impl UrlUtil {
 
         if !auth {
             // Clearing both the username and the password removes the userinfo
-            // section entirely, matching the C++ implementation which assigns
-            // empty strings to both fields. The setters can refuse on URLs that
-            // cannot have credentials, in which case there is nothing to clear.
+            // section entirely. The setters can refuse on URLs that cannot have
+            // credentials, in which case there is nothing to clear.
             let _ = out.set_username(Some(""));
             let _ = out.set_password(Some(""));
         }
 
         if unicode && out.has_hostname() {
-            // The C++ implementation assigns the IDNA Unicode form directly to
-            // the host field, bypassing the host parser which would otherwise
-            // re-encode it back to ASCII/punycode for special schemes. The Rust
-            // binding only exposes parser-backed setters, so we instead splice
-            // the Unicode hostname into the serialized href.
+            // The IDNA Unicode form must bypass the host parser, which would
+            // otherwise re-encode it back to ASCII/punycode for special schemes.
+            // The Rust binding only exposes parser-backed setters, so we instead
+            // splice the Unicode hostname into the serialized href.
             //
             // `host_end` reliably marks the end of the (ASCII/punycode) host in
             // the href, but `host_start` from `components()` points at the `@`
@@ -149,9 +147,7 @@ impl UrlUtil {
         Ok(out.href().to_owned())
     }
 
-    // We return an empty string if the input is not a valid IP address. This
-    // mirrors `workerd::rust::net::canonicalize_ip`, reimplemented here to avoid
-    // a cross-crate FFI dependency now that the caller is itself Rust.
+    // We return an empty string if the input is not a valid IP address.
     #[jsg_method(name = "canonicalizeIp")]
     pub fn canonicalize_ip(&self, input: String) -> String {
         IpAddr::from_str(&input).map_or(String::new(), |ip| ip.to_string())
