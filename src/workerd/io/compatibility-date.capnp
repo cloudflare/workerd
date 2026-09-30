@@ -1675,7 +1675,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   durableObjectIoTasksPreventEviction @190 :Bool
       $compatEnableFlag("durable_object_io_tasks_prevent_eviction")
       $compatDisableFlag("durable_object_io_tasks_do_not_prevent_eviction")
-      $compatEnableDate("2026-10-06");
+      $compatEnableDate("2026-10-01");
   # Allows the runtime to track actor IoContext wait-until tasks to prevent Durable Object eviction.
   # The runtime limits how long each task provides eviction protection.
 

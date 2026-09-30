@@ -565,15 +565,15 @@ KJ_TEST("encode to full flag list") {
   }
 
   {
-    // durable_object_io_tasks_prevent_eviction is enabled by date on 2026-10-06 and can be
+    // durable_object_io_tasks_prevent_eviction is enabled by date on 2026-10-01 and can be
     // disabled explicitly.
     constexpr auto flag = "durable_object_io_tasks_prevent_eviction"_kj;
     KJ_EXPECT(!contains(
-        decompileCompatibilityFlags(compileOwnFeatureFlags("2026-10-05", {}).get()), flag));
+        decompileCompatibilityFlags(compileOwnFeatureFlags("2026-09-30", {}).get()), flag));
     KJ_EXPECT(contains(
-        decompileCompatibilityFlags(compileOwnFeatureFlags("2026-10-06", {}).get()), flag));
+        decompileCompatibilityFlags(compileOwnFeatureFlags("2026-10-01", {}).get()), flag));
     KJ_EXPECT(!contains(decompileCompatibilityFlags(compileOwnFeatureFlags(
-                            "2026-10-06", {"durable_object_io_tasks_do_not_prevent_eviction"_kj})
+                            "2026-10-01", {"durable_object_io_tasks_do_not_prevent_eviction"_kj})
                                                         .get()),
         flag));
   }
