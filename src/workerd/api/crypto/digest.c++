@@ -108,6 +108,10 @@ class HmacKey final: public CryptoKey::Impl {
     return keyAlgorithm;
   }
 
+  size_t getSymmetricKeySize() const override {
+    return keyData.size();
+  }
+
   bool equals(const CryptoKey::Impl& other) const override final {
     return this == &other || (other.getType() == "secret"_kj && other.equals(keyData));
   }
