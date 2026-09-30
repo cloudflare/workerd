@@ -116,8 +116,7 @@ export default {
   'encrypt_decrypt/aes_ocb.tentative.https.any.js': unsupported('AES-OCB'),
   'encrypt_decrypt/aes_ocb_fixtures.js': supportFile,
   'encrypt_decrypt/aes_ocb_vectors.js': supportFile,
-  'encrypt_decrypt/chacha20_poly1305.tentative.https.any.js':
-    unsupported('ChaCha20-Poly1305'),
+  'encrypt_decrypt/chacha20_poly1305.tentative.https.any.js': {},
   'encrypt_decrypt/rsa.js': supportFile,
   'encrypt_decrypt/rsa_oaep.https.any.js': {},
   'encrypt_decrypt/rsa_vectors.js': {},
@@ -160,8 +159,7 @@ export default {
     comment: 'Wrong type of error returned',
     expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
-  'generateKey/failures_chacha20_poly1305.tentative.https.any.js':
-    unsupported('ChaCha20-Poly1305'),
+  'generateKey/failures_chacha20_poly1305.tentative.https.any.js': {},
   'generateKey/failures_kmac.tentative.https.any.js': unsupported('KMAC'),
   'generateKey/successes.js': supportFile,
   'generateKey/successes_AES-CBC.https.any.js': {},
@@ -187,8 +185,7 @@ export default {
   'generateKey/successes_RSASSA-PKCS1-v1_5.https.any.js': {},
   'generateKey/successes_X25519.https.any.js': {},
   'generateKey/successes_X448.tentative.https.any.js': unsupported('X448'),
-  'generateKey/successes_chacha20_poly1305.tentative.https.any.js':
-    unsupported('ChaCha20-Poly1305'),
+  'generateKey/successes_chacha20_poly1305.tentative.https.any.js': {},
   'generateKey/successes_kmac.tentative.https.any.js': unsupported('KMAC'),
   'getPublicKey.tentative.https.any.js': {
     comment: 'Ed448, X448, ML-KEM-512, and hybrid ML-KEM are not supported',
@@ -258,8 +255,7 @@ export default {
     unsupported('AES-OCB'),
   'import_export/Argon2_importKey.tentative.https.any.js':
     unsupported('Argon2'),
-  'import_export/ChaCha20-Poly1305_importKey.tentative.https.any.js':
-    unsupported('ChaCha20-Poly1305'),
+  'import_export/ChaCha20-Poly1305_importKey.tentative.https.any.js': {},
   'import_export/Hybrid-KEM_importKey.tentative.https.any.js':
     unsupported('Hybrid ML-KEM'),
   'import_export/Hybrid-KEM_importKey_fixtures.js': {
@@ -395,8 +391,10 @@ export default {
     expectedFailures: true,
   },
   'serialization/aes-ocb.tentative.https.any.js': unsupported('AES-OCB'),
-  'serialization/chacha20-poly1305.tentative.https.any.js':
-    unsupported('ChaCha20-Poly1305'),
+  'serialization/chacha20-poly1305.tentative.https.any.js': {
+    comment: 'CryptoKey does not support structured cloning',
+    expectedFailures: true,
+  },
   'serialization/ecdh.https.any.js': {
     comment: 'CryptoKey does not support structured cloning',
     expectedFailures: true,
@@ -502,12 +500,8 @@ export default {
   'sign_verify/rsa_pss_vectors.js': {},
   'sign_verify/signature.js': {},
   'supports-modern.tentative.https.any.js': {
-    comment:
-      'ML-KEM-512, hybrid ML-KEM, and ChaCha20-Poly1305 are not supported',
-    expectedFailures: [
-      /ML-KEM-512|MLKEM(768|1024)-|ChaCha20-Poly1305/,
-      'supports returns true for algorithm objects with valid parameters',
-    ],
+    comment: 'ML-KEM-512 and hybrid ML-KEM are not supported',
+    expectedFailures: [/ML-KEM-512|MLKEM(768|1024)-/],
   },
   'supports.tentative.https.any.js': {
     comment:
