@@ -146,6 +146,7 @@ static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
     {"ML-DSA-87"_kj, &CryptoKey::Impl::importMlDsa, &CryptoKey::Impl::generateMlDsa},
     {"ML-KEM-768"_kj, &CryptoKey::Impl::importMlKem, &CryptoKey::Impl::generateMlKem},
     {"ML-KEM-1024"_kj, &CryptoKey::Impl::importMlKem, &CryptoKey::Impl::generateMlKem},
+    {"MLKEM768-X25519"_kj, &CryptoKey::Impl::importHybridKem, &CryptoKey::Impl::generateHybridKem},
   };
 
   auto iter = ALGORITHMS.find(CryptoAlgorithm{name});
@@ -155,7 +156,7 @@ static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
     return Worker::Api::current().getCryptoAlgorithm(name);
   } else {
     if ((iter->name == "ChaCha20-Poly1305"_kj || iter->name.startsWith("ML-DSA-"_kj) ||
-            iter->name.startsWith("ML-KEM-"_kj)) &&
+            iter->name.startsWith("ML-KEM-"_kj) || iter->name.startsWith("MLKEM"_kj)) &&
         !Worker::Api::current().getFeatureFlags().getWebCryptoModernAlgorithms()) {
       return kj::none;
     }
@@ -444,18 +445,18 @@ bool supportsExportKey(kj::StringPtr normalizedName) {
       {"AES-CTR"_kj, "AES-CBC"_kj, "AES-GCM"_kj, "AES-KW"_kj, "HMAC"_kj, "RSASSA-PKCS1-v1_5"_kj,
         "RSA-PSS"_kj, "RSA-OAEP"_kj, "RSA-RAW"_kj, "ECDSA"_kj, "ECDH"_kj, "NODE-ED25519"_kj,
         "Ed25519"_kj, "X25519"_kj, "ML-DSA-44"_kj, "ML-DSA-65"_kj, "ML-DSA-87"_kj, "ML-KEM-768"_kj,
-        "ML-KEM-1024"_kj, "ChaCha20-Poly1305"_kj});
+        "ML-KEM-1024"_kj, "MLKEM768-X25519"_kj, "ChaCha20-Poly1305"_kj});
 }
 
 bool supportsEncapsulate(kj::StringPtr normalizedName) {
-  return isOneOf(normalizedName, {"ML-KEM-768"_kj, "ML-KEM-1024"_kj});
+  return isOneOf(normalizedName, {"ML-KEM-768"_kj, "ML-KEM-1024"_kj, "MLKEM768-X25519"_kj});
 }
 
 bool supportsGetPublicKey(kj::StringPtr normalizedName) {
   return isOneOf(normalizedName,
       {"RSA-OAEP"_kj, "ECDH"_kj, "X25519"_kj, "ML-KEM-768"_kj, "ML-KEM-1024"_kj, "ECDSA"_kj,
         "Ed25519"_kj, "RSA-PSS"_kj, "RSASSA-PKCS1-v1_5"_kj, "ML-DSA-44"_kj, "ML-DSA-65"_kj,
-        "ML-DSA-87"_kj});
+        "ML-DSA-87"_kj, "MLKEM768-X25519"_kj});
 }
 
 void validateEncryptAlgorithm(
@@ -1097,7 +1098,8 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::getPublicKey(
       allowedUsages = CryptoKeyUsageSet::encrypt() | CryptoKeyUsageSet::wrapKey();
     } else if (algorithmName == "ECDH" || algorithmName == "X25519") {
       allowedUsages = CryptoKeyUsageSet();
-    } else if (algorithmName == "ML-KEM-768" || algorithmName == "ML-KEM-1024") {
+    } else if (algorithmName == "ML-KEM-768" || algorithmName == "ML-KEM-1024" ||
+        algorithmName == "MLKEM768-X25519") {
       allowedUsages = CryptoKeyUsageSet::encapsulateKey() | CryptoKeyUsageSet::encapsulateBits();
     } else if (algorithmName == "ECDSA" || algorithmName == "Ed25519" ||
         algorithmName == "RSA-PSS" || algorithmName == "RSASSA-PKCS1-v1_5" ||
