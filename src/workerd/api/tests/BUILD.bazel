@@ -341,6 +341,16 @@ wd_test(
 )
 
 wd_test(
+    src = "cache-span-parent-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "cache-span-parent-test.js",
+        "cache-span-parent-test-tail.js",
+    ],
+    tags = ["no-coverage"],
+)
+
+wd_test(
     src = "kv-test.wd-test",
     args = ["--experimental"],
     data = [
