@@ -6,10 +6,10 @@ Subject: Add another slot in the isolate for embedder
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-internal.h b/include/v8-internal.h
-index 281f669323caee35e72e1dfa0b64c63c3ff15dcb..cf12b527d62a717479e4c83dd59e4659660aa22a 100644
+index 43b598c4a0c2407f3c06fa0f772b45a760ee72fa..4c3e193d03197c2c944a40c8c823b3255086090d 100644
 --- a/include/v8-internal.h
 +++ b/include/v8-internal.h
-@@ -1018,7 +1018,7 @@ class Internals {
+@@ -1014,7 +1014,7 @@ class Internals {
    // AccessorInfo::data and InterceptorInfo::data field.
    static const int kCallbackInfoDataOffset = 1 * kApiTaggedSize;
  

@@ -16,7 +16,6 @@
 #include <workerd/io/io-context.h>
 #include <workerd/tests/bench-tools.h>
 #include <workerd/tests/test-fixture.h>
-#include <workerd/util/autogate.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <kj/async-io.h>
@@ -30,23 +29,11 @@ constexpr size_t BODY_SIZE = 64;
 
 constexpr size_t REQUESTS_PER_ITER = 256;
 
+// A Container pools tunnels for at most this many distinct ports (MAX_CACHED_TCP_PORTS in
+// container.c++); any further port gets a fresh tunnel per request.
+constexpr int MAX_POOLED_PORTS = 4;
+
 enum class TunnelReuse { DISABLED, ENABLED };
-
-class AutogateScope {
- public:
-  AutogateScope(TunnelReuse tunnelReuse) {
-    if (tunnelReuse == TunnelReuse::ENABLED) {
-      util::Autogate::initAutogateNamesForTest(
-          {"container-tunnel-reuse"_kj}, util::IgnoreAllAutogatesEnv::YES);
-    } else {
-      util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
-    }
-  }
-
-  ~AutogateScope() noexcept(false) {
-    util::Autogate::deinitAutogate();
-  }
-};
 
 class BackendHttpService final: public kj::HttpService {
  public:
@@ -322,7 +309,6 @@ void runWorkerInterfaceBench(benchmark::State& state,
 void runManagedBench(
     benchmark::State& state, TestFixture::SetupParams params, TunnelReuse tunnelReuse) {
   TestFixture fixture(kj::mv(params));
-  AutogateScope autogateScope(tunnelReuse);
 
   capnp::ByteStreamFactory serverByteStreamFactory;
   auto body = kj::heapArray<kj::byte>(BODY_SIZE);
@@ -339,6 +325,12 @@ void runManagedBench(
         rpc::Container::Client(kj::heap<MockContainerServer>(
             sharedFakeTimer(), env.context.getHeaderTable(), *backend, serverByteStreamFactory)),
         true);
+    if (tunnelReuse == TunnelReuse::DISABLED) {
+      // Fill the tunnel pool with other ports so that the benchmarked port is not pooled.
+      for (int i = 0; i < MAX_POOLED_PORTS; i++) {
+        container->getTcpPort(env.js, 9000 + i);
+      }
+    }
   });
 
   auto& headerTable = ioContext->getHeaderTable();

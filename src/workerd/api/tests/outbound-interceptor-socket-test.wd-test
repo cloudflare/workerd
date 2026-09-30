@@ -58,8 +58,4 @@ const unitTests :Workerd.Config = (
       http = (capnpConnectHost = "cappy")
     ),
   ],
-  # This test transfers sockets over RPC, which is gated.
-  autogates = [
-    "workerd-autogate-socket-rpc-transfer",
-  ],
 );
