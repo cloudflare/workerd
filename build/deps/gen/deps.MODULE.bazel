@@ -27,10 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.0.bcr.3")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "33cc601ce1d19d5f2cb133821c809ca33c007525f1e5353dbe0779b8efb72b22",
-    strip_prefix = "capnproto-capnproto-fda9aec/c++",
+    sha256 = "17fed2f708217291547d8b3a2b768f7f5ee2c8f65224d81bc4f313488b93fd40",
+    strip_prefix = "capnproto-capnproto-1be2d2a/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/fda9aecf8120d92f2085c9625330ffd9ddca7c24",
+    url = "https://github.com/capnproto/capnproto/tarball/1be2d2a8e60152c89b00adca758c0c495acadc2b",
 )
 use_repo(http, "capnp-cpp")
 
@@ -127,20 +127,20 @@ archive_override(
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
         "//:patches/perfetto/0002-disable-info-level-logging-re2.patch",
     ],
-    sha256 = "4fcc98fe4754269a70e297f6caba429420039c89a1c6cb561dffb4057de63abb",
-    strip_prefix = "google-perfetto-9e9bdaf",
+    sha256 = "5b0312f61b4e3d4d29b0962593af0589bd4d2399c6797400e61e9ea4f31f7fb5",
+    strip_prefix = "google-perfetto-f00e0f6",
     type = "tgz",
-    url = "https://api.github.com/repos/google/perfetto/tarball/v58.2",
+    url = "https://api.github.com/repos/google/perfetto/tarball/v58.3",
 )
 
 # simdutf
 http.archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "c291c8a698e638ba40e0eae4c6da97a6caa6b96a7abaabfcf2b4b4fe1a85aa43",
+    sha256 = "a1b1fc3a3a8358820438f663237e9f252ce5ad356ae283ac066dcc9212eaa4dc",
     strip_prefix = "",
     type = "zip",
-    url = "https://github.com/simdutf/simdutf/releases/download/v9.2.0/singleheader.zip",
+    url = "https://github.com/simdutf/simdutf/releases/download/v9.2.1/singleheader.zip",
 )
 use_repo(http, "simdutf")
 

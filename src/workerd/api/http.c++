@@ -1478,26 +1478,14 @@ struct ActorFetchFailure {
 template <typename T>
 using ActorFetchAttemptResult = kj::OneOf<T, ActorFetchFailure>;
 
-ActorRetryGateEnabled fetchRetryObservationEnabled() {
-  return ActorRetryGateEnabled(
-      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH));
-}
-
-ActorRetryGateEnabled fetchRetryEnforcementEnabled() {
-  return ActorRetryGateEnabled(
-      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS));
-}
-
 // The retry policy a fetch through `fetcher` runs under, or none if the target does not support
-// actor call retries. A binding's own policy applies only when it configured one and every retry
-// gate is on: the fetch gates are prerequisites for all retry behavior, and the userland gate for
-// reading the binding's configuration. Otherwise the runtime's default applies. The gates are
-// checked before touching the stub. Its I/O objects belong to the context that created it, so
-// reaching them can throw, and a disabled rollout must never get that far.
+// actor call retries. A binding's own policy applies only when it configured one and the userland
+// retry gate is on. Otherwise the runtime's default applies. The gate is checked before touching
+// the stub. Its I/O objects belong to the context that created it, so reaching them can throw, and
+// a disabled rollout must never get that far.
 kj::Maybe<ActorRetryPolicy> tryGetActorRetryPolicy(Fetcher& fetcher) {
   if (!fetcher.supportsActorCallRetries()) return kj::none;
-  if (fetchRetryObservationEnabled().toBool() && fetchRetryEnforcementEnabled().toBool() &&
-      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
+  if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
     KJ_IF_SOME(userPolicy, fetcher.getUserDefinedRetryPolicy()) {
       return ActorRetryPolicy::userDefined(userPolicy);
     }
@@ -1511,8 +1499,7 @@ kj::Maybe<kj::Rc<ActorCallRetryState>> makeActorCallRetryState(
   auto& context = IoContext::current();
   auto config = ActorCallRetryState::Config{
     .callType = ActorRetryCallType::FETCH,
-    .observationEnabled = fetchRetryObservationEnabled(),
-    .enforcementEnabled = fetchRetryEnforcementEnabled(),
+    .enforcementEnabled = ActorRetryGateEnabled::YES,
     .payloadReplayable = ActorCallPayloadReplayable(request.canRewindBody()),
   };
   return kj::rc<ActorCallRetryState>(
@@ -1618,10 +1605,6 @@ jsg::Promise<jsg::Ref<Response>> handleHttpFetchResponse(jsg::Lock& js,
       js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(response), callStart);
 }
 
-jsg::Promise<jsg::Ref<Response>> rejectFetch(jsg::Lock& js, kj::Exception&& exception) {
-  return js.rejectedPromise<jsg::Ref<Response>>(js.exceptionToJsValue(kj::mv(exception)));
-}
-
 kj::Maybe<jsg::JsValue> getAbortReason(jsg::Lock& js, Request& request) {
   KJ_IF_SOME(signal, request.getSignal()) {
     if (signal->getAborted(js)) {
@@ -1643,7 +1626,9 @@ jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
   }
   auto delayOrException = retryState->handleAttemptFailure(kj::mv(exception));
   KJ_IF_SOME(exception, delayOrException.tryGet<kj::Exception>()) {
-    return rejectFetch(js, kj::mv(exception));
+    // Let awaitIo() reject its existing promise rather than creating an intermediate rejected
+    // promise, which could report an unhandled rejection before awaitIo() adopts it.
+    js.throwException(kj::mv(exception));
   }
   auto delay = KJ_ASSERT_NONNULL(delayOrException.tryGet<kj::Duration>());
   fetcher->onActorCallRetry();
@@ -1699,7 +1684,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
   KJ_IF_SOME(state, retryState) {
     auto attemptOrException = state->startAttempt();
     KJ_IF_SOME(exception, attemptOrException.tryGet<kj::Exception>()) {
-      return rejectFetch(js, kj::mv(exception));
+      js.throwException(kj::mv(exception));
     }
     actorCallAttempt =
         kj::mv(KJ_ASSERT_NONNULL(attemptOrException.tryGet<ActorCallRetryState::Attempt>()));
@@ -2367,36 +2352,25 @@ JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
       attemptCanceler = kj::rc<kj::Canceler>();
     }
   }
+
+  // The "jsRpcSession" trace context is attached to the customEvent task below so it covers the
+  // whole session. The first jsRpcCall span is opened before the session client so its user span
+  // can also become the callee invocation's parent.
   kj::Maybe<TraceContext> callSpan;
-  kj::Maybe<TraceContextParent> callSpanParents;
+  auto makeUserSpanParent = [&](TraceContext& sessionSpan) -> kj::Maybe<SpanParent> {
+    callSpan = sessionSpan.getSpanParents().newChild("jsRpcCall"_kjc);
+    return KJ_ASSERT_NONNULL(callSpan).getUserSpanParent();
+  };
   ClientWithTracing clientWithTracing;
-  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-    // The "jsRpcSession" trace context is attached to the customEvent task below so it covers the
-    // whole session. The first jsRpcCall span is opened before the session client so its user span
-    // can also become the callee invocation's parent.
-    auto makeUserSpanParent = [&](TraceContext& sessionSpan) -> kj::Maybe<SpanParent> {
-      callSpan = sessionSpan.getSpanParents().newChild("jsRpcCall"_kjc);
-      return KJ_ASSERT_NONNULL(callSpan).getUserSpanParent();
-    };
-    KJ_IF_SOME(attempt, actorCallAttempt) {
-      clientWithTracing = getClientForActorCallAttempt(ioContext, kj::none, "jsRpcSession"_kjc,
-          kj::mv(attempt), kj::mv(makeUserSpanParent));
-    } else {
-      clientWithTracing =
-          buildClient(ioContext, kj::none, "jsRpcSession"_kjc, kj::mv(makeUserSpanParent));
-    }
-    callSpanParents = clientWithTracing.traceContext.map(
-        [](TraceContext& tc) { return tc.getSpanParents(); });
+  KJ_IF_SOME(attempt, actorCallAttempt) {
+    clientWithTracing = getClientForActorCallAttempt(ioContext, kj::none, "jsRpcSession"_kjc,
+        kj::mv(attempt), kj::mv(makeUserSpanParent));
   } else {
-    KJ_IF_SOME(attempt, actorCallAttempt) {
-      clientWithTracing = getClientForActorCallAttempt(
-          ioContext, kj::none, "jsRpcSession"_kjc, kj::mv(attempt));
-    } else {
-      clientWithTracing = ClientWithTracing{
-        .client = getClient(ioContext, kj::none, "jsRpcSession"_kjc),
-      };
-    }
+    clientWithTracing =
+        buildClient(ioContext, kj::none, "jsRpcSession"_kjc, kj::mv(makeUserSpanParent));
   }
+  auto callSpanParents =
+      clientWithTracing.traceContext.map([](TraceContext& tc) { return tc.getSpanParents(); });
   auto worker = kj::mv(clientWithTracing.client);
   auto event = kj::heap<api::JsRpcSessionCustomEvent>(JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
 
@@ -2801,11 +2775,6 @@ Fetcher::ClientWithTracing Fetcher::getClientForActorCallAttempt(IoContext& ioCo
       "actor call attempt supplied to an unsupported Fetcher");
   KJ_REQUIRE(outgoingFactory->supportsActorCallRetries(),
       "actor call attempt supplied to an unsupported Fetcher");
-  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-    auto result = outgoingFactory->newActorCallAttempt(kj::mv(cfStr), kj::mv(attempt),
-        [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
-    return ClientWithTracing{kj::mv(result.client), kj::none};
-  }
   kj::Maybe<TraceContext> traceContext;
   auto result = outgoingFactory->newActorCallAttempt(kj::mv(cfStr), kj::mv(attempt),
       [&](TraceContext& outerTraceContext) -> kj::Maybe<SpanParent> {
@@ -2818,9 +2787,6 @@ Fetcher::ClientWithTracing Fetcher::getClientForActorCallAttempt(IoContext& ioCo
 
 Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
     OutgoingFactory::Result result, kj::ConstString operationName) {
-  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) {
-    return ClientWithTracing{kj::mv(result.client), kj::none};
-  }
   KJ_IF_SOME(parents, result.spanParents) {
     // Factories populate `spanParents` unconditionally. Only build the inner span when tracing is
     // actually observed; otherwise returning a (non-recording) TraceContext would still force the

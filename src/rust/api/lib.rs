@@ -26,18 +26,12 @@ mod ffi {
     }
     extern "Rust" {
         pub fn register_nodejs_modules(registry: Pin<&mut ModuleRegistry>);
-
-        // The Rust implementation of `node-internal:url`. Registered separately
-        // because it is gated by the C++ `NODEJS_URL_RUST` autogate; when the
-        // gate is off the C++ `UrlUtil` registers that module instead (see
-        // node.h). Kept as its own entry point to avoid a boolean parameter.
-        pub fn register_nodejs_url_module(registry: Pin<&mut ModuleRegistry>);
     }
 }
 
-pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
+pub fn register_nodejs_modules(mut registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(
-        registry,
+        registry.as_mut(),
         "node-internal:dns",
         // SAFETY: isolate is valid and locked — called from C++ module registration.
         |isolate| unsafe {
@@ -47,9 +41,6 @@ pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
         },
         jsg::modules::ModuleType::Internal,
     );
-}
-
-pub fn register_nodejs_url_module(registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(
         registry,
         "node-internal:url",
