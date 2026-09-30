@@ -19,6 +19,8 @@
 
 #include <kj/encoding.h>
 
+#include <cmath>
+
 using BIGNUM = struct bignum_st;
 
 // Wrap calls to OpenSSL's EVP_* interface (and similar APIs) in this macro to
@@ -78,6 +80,14 @@ std::pair<kj::StringPtr, const EVP_MD*> lookupDigestAlgorithm(kj::StringPtr algo
 // kj::decodeBase64 can do this in-situ for both cases.
 kj::EncodingResult<kj::Array<kj::byte>> decodeBase64Url(kj::String text);
 
+inline int normalizeAesGcmTagLength(double tagLength) {
+  if (!jsg::isFinite(tagLength)) return 0;
+  JSG_REQUIRE(
+      tagLength <= static_cast<int>(kj::maxValue) && tagLength >= static_cast<int>(kj::minValue),
+      TypeError, "AES-GCM tagLength is outside the integer range.");
+  return static_cast<int>(tagLength);
+}
+
 inline void validateAesGcmTagLength(int tagLength) {
   switch (tagLength) {
     case 32:
@@ -91,6 +101,15 @@ inline void validateAesGcmTagLength(int tagLength) {
     default:
       JSG_FAIL_REQUIRE(DOMOperationError, "Invalid AES-GCM tag length ", tagLength, ".");
   }
+}
+
+inline void validateChacha20Poly1305TagLength(double tagLength) {
+  JSG_REQUIRE(jsg::isFinite(tagLength), TypeError, "ChaCha20-Poly1305 tagLength must be finite.");
+  tagLength = std::trunc(tagLength);
+  JSG_REQUIRE(tagLength >= 0 && tagLength <= 255, TypeError,
+      "ChaCha20-Poly1305 tagLength must be an octet.");
+  JSG_REQUIRE(
+      tagLength == 128, DOMOperationError, "ChaCha20-Poly1305 tag length must be 128 bits.");
 }
 
 // WebCrypto likes to allow algorithms to be specified as a simple string name, or as a struct
@@ -129,6 +148,7 @@ class CryptoKey::Impl {
       kj::ArrayPtr<const kj::String> keyUsages);
 
   static ImportFunc importAes;
+  static ImportFunc importChacha20Poly1305;
   static ImportFunc importHmac;
   static ImportFunc importPbkdf2;
   static ImportFunc importHkdf;
@@ -147,6 +167,7 @@ class CryptoKey::Impl {
       kj::ArrayPtr<const kj::String> keyUsages);
 
   static GenerateFunc generateAes;
+  static GenerateFunc generateChacha20Poly1305;
   static GenerateFunc generateHmac;
   static GenerateFunc generateRsa;
   static GenerateFunc generateEcdsa;
