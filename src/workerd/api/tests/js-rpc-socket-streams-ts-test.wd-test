@@ -88,9 +88,7 @@ const unitTests :Workerd.Config = (
     (name = "tcp", address = "*:8081", tcp = (), service = "js-rpc-test-target")
   ],
   v8Flags = [ "--expose-gc" ],
-  # Required by the socket-transfer assertions guarded by the `socketTransfer` binding above.
   autogates = [
-    "workerd-autogate-socket-rpc-transfer",
     "workerd-autogate-per-isolate-javascript-bootstrap",
     "workerd-autogate-rpc-externals-hydration",
   ],

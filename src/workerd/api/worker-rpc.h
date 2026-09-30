@@ -173,12 +173,8 @@ class JsRpcCallPlan {
     return replayable;
   }
 
-  size_t getReplayMemoryBytes() const {
-    return serializedDataCapacity;
-  }
-
   size_t getReplayReservationBytes() {
-    size_t result = serializedData.size();
+    size_t result = serializedDataCapacity;
     for (const auto& segment: message->getSegmentsForOutput()) {
       result += kj::max(segment.size(), static_cast<size_t>(METADATA_SEGMENT_WORDS)) *
           sizeof(capnp::word);
@@ -358,15 +354,20 @@ class JsRpcCallAttemptObserver;
 
 class JsRpcReplayMemoryTracker final: public kj::Refcounted {
  public:
-  explicit JsRpcReplayMemoryTracker(kj::Own<void> trackedMemory)
-      : trackedMemory(kj::mv(trackedMemory)) {}
+  JsRpcReplayMemoryTracker(kj::Own<void> trackedMemory, kj::Maybe<kj::Own<void>> reservation)
+      : trackedMemory(kj::mv(trackedMemory)),
+        reservation(kj::mv(reservation)) {}
 
   void release() {
     trackedMemory = kj::Own<void>();
+    reservation = kj::none;
   }
 
  private:
+  // From RequestObserver::trackActorCallReplayMemory().
   kj::Own<void> trackedMemory;
+  // From LimitEnforcer::tryReserveActorCallReplayMemory(), if it granted one.
+  kj::Maybe<kj::Own<void>> reservation;
 };
 
 // Represents the promise returned by calling an RPC method. We don't use a regular Promise object,

@@ -300,6 +300,10 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 - Review additions to the standard API surface exposed to Workers, including
   those introduced by V8 updates. Record the compatibility decision in the
   commit message: use a compatibility flag or explicitly accept the risk.
+- For a V8 update, identify every newly default-enabled standard API and
+  record its disposition. If the update disables all such APIs and the audit
+  finds no others, stating both facts in the commit message satisfies this
+  requirement.
 - Autogates support gradual rollout and fast rollback, but do not preserve
   existing Workers' API surface. Compatibility failures may be invisible to
   runtime metrics or reported late by customers, so a quiet rollout alone

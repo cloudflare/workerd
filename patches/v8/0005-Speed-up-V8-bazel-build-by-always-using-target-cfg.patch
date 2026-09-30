@@ -10,10 +10,10 @@ both target and exec configurations as generator tools depend on them.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 7fd6e3097a67db6e3a1790995b03752b08dfc7b4..b4b3f46c3f3e77d87254372f56fb3ff4156bec84 100644
+index e2ef53e129be12ae1963f447a2d05536768b435b..83939aede73463d501714c4213647f0320341d42 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -19,6 +19,7 @@ load(
+@@ -20,6 +20,7 @@ load(
      "v8_mksnapshot",
      "v8_string",
      "v8_torque_files",
@@ -21,7 +21,7 @@ index 7fd6e3097a67db6e3a1790995b03752b08dfc7b4..b4b3f46c3f3e77d87254372f56fb3ff4
  )
  load(":bazel/v8-non-pointer-compression.bzl", "v8_binary_non_pointer_compression")
  
-@@ -4558,22 +4559,20 @@ filegroup(
+@@ -4749,22 +4750,20 @@ filegroup(
      ],
  )
  
@@ -50,7 +50,7 @@ index 7fd6e3097a67db6e3a1790995b03752b08dfc7b4..b4b3f46c3f3e77d87254372f56fb3ff4
  )
  
  v8_mksnapshot(
-@@ -4807,7 +4806,6 @@ v8_binary(
+@@ -5015,7 +5014,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
@@ -59,10 +59,10 @@ index 7fd6e3097a67db6e3a1790995b03752b08dfc7b4..b4b3f46c3f3e77d87254372f56fb3ff4
      copts = ["-Wno-implicit-fallthrough"],
      defines = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 0eb8a966b9150ecfc9ba38258243f473fd90d98d..6d668d7782f7c5e9793eab06e23549ec910700e0 100644
+index 4e3471ad6e7fc208ecca37b4a1ae46214c814f32..ef73dfc9e0aae7e1ab42b930ae8cd4f4dd68f54b 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -357,6 +357,15 @@ def v8_library(
+@@ -358,6 +358,15 @@ def v8_library(
              **kwargs
          )
  
@@ -78,7 +78,7 @@ index 0eb8a966b9150ecfc9ba38258243f473fd90d98d..6d668d7782f7c5e9793eab06e23549ec
  # Use a single generator target for torque definitions and initializers. We can
  # split the set of outputs by using OutputGroupInfo, that way we do not need to
  # run the torque generator twice.
-@@ -423,7 +432,7 @@ _v8_torque_files = rule(
+@@ -424,7 +433,7 @@ _v8_torque_files = rule(
          "tool": attr.label(
              allow_files = True,
              executable = True,
@@ -87,7 +87,7 @@ index 0eb8a966b9150ecfc9ba38258243f473fd90d98d..6d668d7782f7c5e9793eab06e23549ec
          ),
          "args": attr.string_list(),
      },
-@@ -525,13 +534,16 @@ _v8_mksnapshot = rule(
+@@ -526,13 +535,16 @@ _v8_mksnapshot = rule(
              mandatory = True,
              allow_files = True,
              executable = True,
@@ -106,7 +106,7 @@ index 0eb8a966b9150ecfc9ba38258243f473fd90d98d..6d668d7782f7c5e9793eab06e23549ec
  )
  
  def v8_mksnapshot(name, args, suffix = ""):
-@@ -664,3 +676,34 @@ def v8_build_config(name, arch):
+@@ -954,3 +966,34 @@ def v8_build_config(name, arch):
          outs = ["icu/" + name + ".json"],
          cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
      )

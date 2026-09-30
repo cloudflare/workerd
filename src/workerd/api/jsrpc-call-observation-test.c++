@@ -160,7 +160,7 @@ class Harness {
     sender = kj::heap<TestFixture>(TestFixture::SetupParams{
       .waitScope = io.waitScope,
       .featureFlags = flags.asReader(),
-      .autogates = kj::arr("durable-object-retries-fetch"_kj, "durable-object-retries-jsrpc"_kj),
+      .autogates = kj::arr("durable-object-retries-jsrpc"_kj),
       .mainModuleSource = SENDER_SOURCE,
       .useRealTimers = false,
       .requestObserverFactory =

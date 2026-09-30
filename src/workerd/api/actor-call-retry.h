@@ -53,6 +53,9 @@ class ActorRetryPolicy {
   uint maxAttempts() const {
     return attempts;
   }
+  bool allowsRetries() const {
+    return attempts > 1;
+  }
   // Time from the start of the call after which no retry may start or keep running.
   kj::Duration timeout() const {
     return retryTimeout;
@@ -74,7 +77,6 @@ class ActorCallRetryState final: public kj::Refcounted {
  public:
   struct Config {
     ActorRetryCallType callType;
-    ActorRetryGateEnabled observationEnabled;
     ActorRetryGateEnabled enforcementEnabled;
     ActorCallPayloadReplayable payloadReplayable;
   };
