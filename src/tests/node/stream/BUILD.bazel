@@ -7,12 +7,18 @@ load("//:build/wd_test.bzl", "wd_test")
 
 stream_suite_srcs = glob(["*.js"]) + ["stream-modules.capnp"]
 
+# The full suite's volume and forced-GC cases exceed the medium size's 15 s
+# budget in debug builds under load.
+stream_size = "large"
+
 wd_test(
+    size = stream_size,
     src = "stream-cpp.wd-test",
     data = stream_suite_srcs,
 )
 
 wd_test(
+    size = stream_size,
     src = "stream-ts.wd-test",
     args = ["--experimental"],
     data = stream_suite_srcs,
@@ -21,6 +27,7 @@ wd_test(
 # The main C++ cell plus the dateless opt-in pedantic_wpt flag, enforcing
 # that pedantic mode changes nothing on this suite's surface.
 wd_test(
+    size = stream_size,
     src = "stream-cpp-pedantic.wd-test",
     data = stream_suite_srcs,
 )

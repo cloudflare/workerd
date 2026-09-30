@@ -12,6 +12,10 @@ js_binary(
 
 net_suite_srcs = glob(["*.js"]) + ["net-modules.capnp"]
 
+# The full suite's timer and volume cases exceed the medium size's 15 s budget
+# in debug builds under load.
+net_size = "large"
+
 net_ports = [
     "NET_ECHO_PORT",
     "NET_END_PORT",
@@ -24,6 +28,7 @@ net_ports = [
 ]
 
 wd_test(
+    size = net_size,
     src = "net-cpp.wd-test",
     args = ["--experimental"],
     data = net_suite_srcs,
@@ -32,6 +37,7 @@ wd_test(
 )
 
 wd_test(
+    size = net_size,
     src = "net-ts.wd-test",
     args = ["--experimental"],
     data = net_suite_srcs,
