@@ -69,8 +69,19 @@ class TimerChannel {
   // that Date.now() never goes backwards or reveals timing side channels.
   virtual kj::Date now(kj::Maybe<kj::Date> nextTimeout = kj::none) = 0;
 
+  // Return continuously-updating time without Spectre mitigation. Embedders which support precise
+  // timers should override this using a monotonic clock and a fixed calendar-time offset.
+  virtual kj::Date preciseNow() {
+    return now();
+  }
+
   // Returns a promise that resolves once `now() >= when`.
   virtual kj::Promise<void> atTime(kj::Date when) = 0;
+
+  // Like atTime(), but schedules against the same clock as preciseNow().
+  virtual kj::Promise<void> atTimePrecisely(kj::Date when) {
+    return atTime(when);
+  }
 
   // Returns a promise that resolves after some time. This is intended to be used for implementing
   // time limits on some sort of operation, not for implementing application-driven timing, as it does

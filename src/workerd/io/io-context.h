@@ -139,6 +139,8 @@ class IoContext_IncomingRequest final {
   // based on setTimeout() when needed.
   kj::Date now(kj::Maybe<kj::Date> nextTimeout = kj::none);
 
+  kj::Date preciseNow();
+
   // Read the time for trace onset information, which is recorded ahead of delivered().
   //
   // Side effect: for actors this forces a clock resync (syncTime()) before reading. Actors reuse
@@ -828,6 +830,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Access the event loop's current time point. This will remain constant between ticks.
   kj::Date now();
 
+  // Returns unrounded precise time when precise timers are enabled. Timer deadlines must be based
+  // on this rather than the application-visible clock, which is rounded down to 3ms.
+  kj::Date nowForTimer();
+
   TmpDirStoreScope& getTmpDirStoreScope() {
     KJ_IF_SOME(scope, tmpDirStoreScope) {
       return *scope;
@@ -836,9 +842,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   }
 
   // Returns a promise that resolves once `now() >= when`.
-  kj::Promise<void> atTime(kj::Date when) {
-    return getIoChannelFactory().getTimer().atTime(when);
-  }
+  kj::Promise<void> atTime(kj::Date when);
 
   // Returns a promise that resolves after some time. This is intended to be used for implementing
   // time limits on some sort of operation, not for implementing application-driven timing, as it

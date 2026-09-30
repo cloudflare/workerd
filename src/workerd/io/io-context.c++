@@ -129,7 +129,7 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
   kj::Promise<void> timerTask = nullptr;
 
   // Must be called any time timeoutTimes.begin() changes.
-  void resetTimerTask(TimerChannel& timerChannel);
+  void resetTimerTask(IoContext& context);
 };
 
 class IoContext::TimeoutManagerImpl::TimeoutState {
@@ -299,6 +299,11 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
 kj::Date IoContext::IncomingRequest::now(kj::Maybe<kj::Date> nextTimeout) {
   metrics->clockRead();
   return ioChannelFactory->getTimer().now(kj::mv(nextTimeout));
+}
+
+kj::Date IoContext::IncomingRequest::preciseNow() {
+  metrics->clockRead();
+  return ioChannelFactory->getTimer().preciseNow();
 }
 
 kj::Date IoContext::IncomingRequest::nowForTraceOnset() {
@@ -843,8 +848,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
 
   auto paf = kj::newPromiseAndFulfiller<void>();
 
-  // Schedule relative to Date.now() so the delay appears exact to the application.
-  auto when = context.now() + state.params.msDelay * kj::MILLISECONDS;
+  auto when = context.nowForTimer() + state.params.msDelay * kj::MILLISECONDS;
   // TODO(cleanup): The manual use of run() here (including carrying over the critical section) is
   //   kind of ugly, but using awaitIo() doesn't work here because we need the ability to cancel
   //   the timer, so we don't want to addTask() it, which awaitIo() does implicitly.
@@ -924,12 +928,12 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
     if (context.selfRef->isValid() && context.abortException == kj::none) {
       bool isNext = timeoutTimes.begin()->key == timeoutTimesKey;
       timeoutTimes.erase(timeoutTimesKey);
-      if (isNext) resetTimerTask(context.getIoChannelFactory().getTimer());
+      if (isNext) resetTimerTask(context);
     }
   });
 
   if (timeoutTimes.begin()->key == timeoutTimesKey) {
-    resetTimerTask(context.getIoChannelFactory().getTimer());
+    resetTimerTask(context);
   }
   promise = promise.attach(kj::mv(deferredTimeoutTimeRemoval));
 
@@ -945,14 +949,14 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   state.maybePromise = promise.eagerlyEvaluate(nullptr);
 }
 
-void IoContext::TimeoutManagerImpl::resetTimerTask(TimerChannel& timerChannel) {
+void IoContext::TimeoutManagerImpl::resetTimerTask(IoContext& context) {
   if (timeoutTimes.size() == 0) {
     // Not waiting for any timer, clear the existing timer task.
     timerTask = nullptr;
   } else {
     // Wait for the first timer.
     auto& entry = *timeoutTimes.begin();
-    timerTask = timerChannel.atTime(entry.key.when)
+    timerTask = context.atTime(entry.key.when)
                     .then([this, key = entry.key]() {
       auto& newEntry = *timeoutTimes.begin();
       KJ_ASSERT(newEntry.key == key,
@@ -997,8 +1001,7 @@ size_t IoContext::getTimeoutCount() {
 
 kj::Date IoContext::now(IncomingRequest& incomingRequest) {
   if (getWorker().getScript().getIsolate().getApi().getFeatureFlags().getPreciseTimers()) {
-    auto now = kj::systemPreciseCalendarClock().now();
-    // Round to 3ms granularity
+    auto now = incomingRequest.preciseNow();
     int64_t ms = (now - kj::UNIX_EPOCH) / kj::MILLISECONDS;
     int64_t roundedMs = (ms / 3) * 3;
     return kj::UNIX_EPOCH + roundedMs * kj::MILLISECONDS;
@@ -1011,6 +1014,21 @@ kj::Date IoContext::now(IncomingRequest& incomingRequest) {
 
 kj::Date IoContext::now() {
   return now(getCurrentIncomingRequest());
+}
+
+kj::Date IoContext::nowForTimer() {
+  if (getWorker().getScript().getIsolate().getApi().getFeatureFlags().getPreciseTimers()) {
+    return getCurrentIncomingRequest().preciseNow();
+  }
+  return now();
+}
+
+kj::Promise<void> IoContext::atTime(kj::Date when) {
+  auto& timer = getIoChannelFactory().getTimer();
+  if (getWorker().getScript().getIsolate().getApi().getFeatureFlags().getPreciseTimers()) {
+    return timer.atTimePrecisely(when);
+  }
+  return timer.atTime(when);
 }
 
 kj::Rc<ExternalPusherImpl> IoContext::getExternalPusher() {
