@@ -7,7 +7,6 @@
 #include <workerd/api/http.h>
 #include <workerd/io/observer.h>
 #include <workerd/tests/test-fixture.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/stream-utils.h>
 
 #include <capnp/compat/byte-stream.h>
@@ -275,23 +274,21 @@ Container::DirectorySnapshot makeDirectorySnapshot(kj::StringPtr id, kj::StringP
   };
 }
 
-enum class TunnelReuseGate { DISABLED, ENABLED };
+// A Container pools tunnels for at most this many distinct ports (MAX_CACHED_TCP_PORTS in
+// container.c++); any further port gets a fresh tunnel per request.
+constexpr int MAX_POOLED_PORTS = 4;
 
-class AutogateScope {
- public:
-  AutogateScope(TunnelReuseGate gate = TunnelReuseGate::ENABLED) {
-    if (gate == TunnelReuseGate::ENABLED) {
-      util::Autogate::initAutogateNamesForTest(
-          {"container-tunnel-reuse"_kj}, util::IgnoreAllAutogatesEnv::YES);
-    } else {
-      util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
+enum class PortPooling { POOLED, UNPOOLED };
+
+// With PortPooling::UNPOOLED, fills the Container's tunnel pool with other ports, so that ports
+// requested afterwards take the non-pooled path.
+void setUpPortPooling(jsg::Lock& js, Container& container, PortPooling pooling) {
+  if (pooling == PortPooling::UNPOOLED) {
+    for (int i = 0; i < MAX_POOLED_PORTS; i++) {
+      container.getTcpPort(js, 9000 + i);
     }
   }
-
-  ~AutogateScope() noexcept(false) {
-    util::Autogate::deinitAutogate();
-  }
-};
+}
 
 enum class ResponseMode {
   KEEP_ALIVE,
@@ -584,10 +581,9 @@ TestFixture makeFixture();
 
 void runTunnelTest(ResponseMode mode,
     size_t expectedConnectCount,
-    TunnelReuseGate gate = TunnelReuseGate::ENABLED,
+    PortPooling pooling = PortPooling::POOLED,
     WaitForClose waitForClose = WaitForClose::NO) {
   auto fixture = makeFixture();
-  AutogateScope autogateScope(gate);
   capnp::ByteStreamFactory byteStreamFactory;
   size_t connectCount = 0;
   kj::Promise<void> beforeSecond = kj::READY_NOW;
@@ -604,6 +600,7 @@ void runTunnelTest(ResponseMode mode,
             closeFulfiller.map([](kj::Own<kj::PromiseFulfiller<void>>& fulfiller)
                                    -> kj::PromiseFulfiller<void>& { return *fulfiller; }))),
         true);
+    setUpPortPooling(env.js, *container, pooling);
     auto firstFetcher = container->getTcpPort(env.js, 8080);
     auto secondFetcher = container->getTcpPort(env.js, 8080);
     auto first = firstFetcher->getClient(env.context, kj::none, "container"_kjc);
@@ -1241,11 +1238,11 @@ KJ_TEST("Container reuses a healthy HTTP tunnel") {
 }
 
 KJ_TEST("Container discards a tunnel closed after a complete response") {
-  runTunnelTest(ResponseMode::CLOSE_AFTER_RESPONSE, 2, TunnelReuseGate::ENABLED, WaitForClose::YES);
+  runTunnelTest(ResponseMode::CLOSE_AFTER_RESPONSE, 2, PortPooling::POOLED, WaitForClose::YES);
 }
 
 KJ_TEST("Container propagates clean EOF for a close-delimited response") {
-  runTunnelTest(ResponseMode::CLOSE_DELIMITED, 2, TunnelReuseGate::ENABLED, WaitForClose::YES);
+  runTunnelTest(ResponseMode::CLOSE_DELIMITED, 2, PortPooling::POOLED, WaitForClose::YES);
 }
 
 KJ_TEST("Container fetch completes when Port.connect() stays outstanding") {
@@ -1256,7 +1253,6 @@ KJ_TEST("Container fetch completes when Port.connect() stays outstanding") {
   // `deferConnect` reproduces that server behavior; a fetcher that awaited connect() before
   // returning the stream would hang here.
   auto fixture = makeFixture();
-  AutogateScope autogateScope(TunnelReuseGate::ENABLED);
   capnp::ByteStreamFactory byteStreamFactory;
   size_t connectCount = 0;
 
@@ -1276,10 +1272,9 @@ KJ_TEST("Container fetch completes when Port.connect() stays outstanding") {
 }
 
 void runFetchFailureTest(ResponseMode mode,
-    TunnelReuseGate gate,
+    PortPooling pooling,
     kj::Maybe<kj::StringPtr> expectedDescription = kj::none) {
   auto fixture = makeFixture();
-  AutogateScope autogateScope(gate);
   capnp::ByteStreamFactory byteStreamFactory;
   size_t connectCount = 0;
 
@@ -1287,6 +1282,7 @@ void runFetchFailureTest(ResponseMode mode,
     auto container = env.js.alloc<Container>(rpc::Container::Client(kj::heap<TestContainerServer>(
                                                  byteStreamFactory, mode, connectCount)),
         true);
+    setUpPortPooling(env.js, *container, pooling);
     auto fetcher = container->getTcpPort(env.js, 8080);
     auto client = fetcher->getClient(env.context, kj::none, "container"_kjc);
     auto& headerTable = env.context.getHeaderTable();
@@ -1312,36 +1308,35 @@ void runFetchFailureTest(ResponseMode mode,
 }
 
 KJ_TEST("Container fails a fetch when a pooled tunnel disconnects uncleanly") {
-  runFetchFailureTest(ResponseMode::TRUNCATED_DISCONNECT, TunnelReuseGate::ENABLED);
+  runFetchFailureTest(ResponseMode::TRUNCATED_DISCONNECT, PortPooling::POOLED);
 }
 
 KJ_TEST("Container fails a fetch when a non-pooled tunnel disconnects uncleanly") {
-  runFetchFailureTest(ResponseMode::TRUNCATED_DISCONNECT, TunnelReuseGate::DISABLED);
+  runFetchFailureTest(ResponseMode::TRUNCATED_DISCONNECT, PortPooling::UNPOOLED);
 }
 
 KJ_TEST("Container preserves pooled Port.connect() errors") {
   runFetchFailureTest(
-      ResponseMode::CONNECT_FAILURE, TunnelReuseGate::ENABLED, "jsg.Error: Testing error path"_kj);
+      ResponseMode::CONNECT_FAILURE, PortPooling::POOLED, "jsg.Error: Testing error path"_kj);
 }
 
 KJ_TEST("Container preserves non-pooled Port.connect() errors") {
   runFetchFailureTest(
-      ResponseMode::CONNECT_FAILURE, TunnelReuseGate::DISABLED, "jsg.Error: Testing error path"_kj);
+      ResponseMode::CONNECT_FAILURE, PortPooling::UNPOOLED, "jsg.Error: Testing error path"_kj);
 }
 
 KJ_TEST("Container propagates pooled upstream pump failures") {
-  runFetchFailureTest(ResponseMode::UPSTREAM_FAILURE, TunnelReuseGate::ENABLED,
-      "jsg.Error: Upstream write failed"_kj);
+  runFetchFailureTest(
+      ResponseMode::UPSTREAM_FAILURE, PortPooling::POOLED, "jsg.Error: Upstream write failed"_kj);
 }
 
 KJ_TEST("Container propagates non-pooled upstream pump failures") {
-  runFetchFailureTest(ResponseMode::UPSTREAM_FAILURE, TunnelReuseGate::DISABLED,
-      "jsg.Error: Upstream write failed"_kj);
+  runFetchFailureTest(
+      ResponseMode::UPSTREAM_FAILURE, PortPooling::UNPOOLED, "jsg.Error: Upstream write failed"_kj);
 }
 
 KJ_TEST("Container fails a raw connect() when the tunnel disconnects uncleanly") {
   auto fixture = makeFixture();
-  AutogateScope autogateScope;
   capnp::ByteStreamFactory byteStreamFactory;
   size_t connectCount = 0;
 
@@ -1392,7 +1387,6 @@ KJ_TEST("Container aborts the up tunnel when a connect() is torn down mid-reques
   // behavior, where the up ExplicitEndOutputStream was simply destroyed without end() on any
   // abnormal teardown.
   auto fixture = makeFixture();
-  AutogateScope autogateScope;
   capnp::ByteStreamFactory byteStreamFactory;
   size_t connectCount = 0;
   bool upEndedUncleanly = false;
@@ -1444,7 +1438,6 @@ KJ_TEST("Container aborts the up tunnel when a connect() is torn down mid-reques
 
 KJ_TEST("Container fails a raw connect() when the upstream half-close fails") {
   auto fixture = makeFixture();
-  AutogateScope autogateScope;
   capnp::ByteStreamFactory byteStreamFactory;
   size_t connectCount = 0;
 
@@ -1484,13 +1477,12 @@ KJ_TEST("Container fails a raw connect() when the upstream half-close fails") {
   KJ_EXPECT(connectCount == 1);
 }
 
-KJ_TEST("Container does not reuse tunnels when the autogate is disabled") {
-  runTunnelTest(ResponseMode::KEEP_ALIVE, 2, TunnelReuseGate::DISABLED);
+KJ_TEST("Container does not reuse tunnels for ports beyond the pool limit") {
+  runTunnelTest(ResponseMode::KEEP_ALIVE, 2, PortPooling::UNPOOLED);
 }
 
 KJ_TEST("Container start invalidates pooled tunnels") {
   auto fixture = makeFixture();
-  AutogateScope autogateScope;
   capnp::ByteStreamFactory byteStreamFactory;
   size_t connectCount = 0;
   auto ioContext = fixture.newIoContext();
@@ -1521,7 +1513,6 @@ KJ_TEST("Container start invalidates pooled tunnels") {
 
 KJ_TEST("Container TCP port fetcher keeps pooled state alive") {
   auto fixture = makeFixture();
-  AutogateScope autogateScope;
   capnp::ByteStreamFactory byteStreamFactory;
   size_t connectCount = 0;
 
@@ -1542,7 +1533,6 @@ KJ_TEST("Container TCP port fetcher keeps pooled state alive") {
 
 KJ_TEST("Container request errors do not wait for open tunnel pumps") {
   auto fixture = makeFixture();
-  AutogateScope autogateScope;
   capnp::ByteStreamFactory byteStreamFactory;
   size_t connectCount = 0;
   bool rejected = false;

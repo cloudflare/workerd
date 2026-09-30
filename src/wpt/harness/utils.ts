@@ -24,13 +24,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import crypto from 'node:crypto';
-import {
-  type UnknownFunc,
-  type TestFn,
-  type PromiseTestFn,
-  type HostInfo,
-  getHostInfo,
-} from './common';
+import { type UnknownFunc, type HostInfo, getHostInfo } from './common';
 
 declare global {
   var GLOBAL: {
@@ -40,19 +34,14 @@ declare global {
   };
 
   function done(): undefined;
-  function subsetTestByKey<T>(
+  function subsetTestByKey(
     _key: string,
-    testType: (
-      testCallback: TestFn | PromiseTestFn | string,
-      testMessage?: string
-    ) => T,
-    testCallback: TestFn | PromiseTestFn | string,
-    testMessage?: string
-  ): T;
+    testFunc: (...args: unknown[]) => unknown,
+    ...args: unknown[]
+  ): unknown;
   function subsetTest(
-    testType: TestRunnerFn,
-    testCallback: TestFn | PromiseTestFn,
-    testMessage: string
+    testFunc: (...args: unknown[]) => void,
+    ...args: unknown[]
   ): void;
   // Used by idlharness.js to determine if a subtest should be run
   function shouldRunSubTest(name?: string): boolean;
@@ -79,8 +68,6 @@ declare global {
   function fetch_spec(spec: string): Promise<{ spec: string; idl: string }>;
 }
 
-type TestRunnerFn = (callback: TestFn | PromiseTestFn, message: string) => void;
-
 globalThis.get_host_info = (): HostInfo => {
   return getHostInfo();
 };
@@ -99,32 +86,31 @@ globalThis.GLOBAL = {
 
 globalThis.done = (): undefined => undefined;
 
-globalThis.subsetTestByKey = <T>(
+globalThis.subsetTestByKey = (
   _key: string,
-  testType: (testCallback: TestFn | PromiseTestFn, testMessage: string) => T,
-  testCallback: TestFn | PromiseTestFn | string,
-  testMessage?: string
-): T => {
+  testFunc: (...args: unknown[]) => unknown,
+  ...args: unknown[]
+): unknown => {
   // This function is designed to allow selecting only certain tests when
   // running in a browser, by changing the query string. We'll always run
   // all the tests.
-  return testType(
-    testCallback as TestFn | PromiseTestFn,
-    testMessage as string
-  );
+  return testFunc(...args);
 };
 
 // Used by idlharness.js to determine if a subtest should be run.
 // We always run all subtests.
 globalThis.shouldRunSubTest = (): boolean => true;
 
-globalThis.subsetTest = (testType, testCallback, testMessage): void => {
+globalThis.subsetTest = (
+  testFunc: (...args: unknown[]) => void,
+  ...args: unknown[]
+): void => {
   // This function is designed to allow selecting only certain tests when
   // running in a browser, by changing the query string. We'll always run
   // all the tests.
 
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -- We are emulating WPT's existing interface which always passes through the returned value
-  return testType(testCallback, testMessage);
+  return testFunc(...args);
 };
 
 /**

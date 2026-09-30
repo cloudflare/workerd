@@ -14,10 +14,10 @@ while preserving JSInterceptorMap's object size and raw/tagged-field
 boundary.
 
 diff --git a/src/objects/js-interceptor-map.h b/src/objects/js-interceptor-map.h
-index 1bf77351fa028f6c7b2147827f38590aedfa0e1d..1c25801648f86742beaced5e5864bfcdf8be9c44 100644
+index 5c9b246a934e5b4a3cc91bda083143d0f70f006a..3241da7e5d8846ec01bf1d9212a4d384d66ec3b7 100644
 --- a/src/objects/js-interceptor-map.h
 +++ b/src/objects/js-interceptor-map.h
-@@ -40,8 +40,6 @@ V8_OBJECT class JSInterceptorMap : public ExtendedMap {
+@@ -42,8 +42,6 @@ V8_OBJECT class JSInterceptorMap : public ExtendedMap {
    inline void init_flags_and_clear_extended_padding();
  
   public:
@@ -41,19 +41,19 @@ index f351cb0fb0a75ab7639b56d0e4f8c0dc10e935e8..9795025976d26792bcc16c0f7120949c
    indexed_interceptor: InterceptorInfo;
    // This prototype validity cell guards modifications of the interceptor's
 diff --git a/src/objects/map.h b/src/objects/map.h
-index 95676554a82d096d3e9c3ba2b80de03d281fbe5a..513c9fd31bebb603ed44458d344d00032c641d2e 100644
+index a33c7f01ac16fb720ddf7eefda491cd8988802bc..ba78c4bc131d1ad829b5e0ae701c0bd44ad03670 100644
 --- a/src/objects/map.h
 +++ b/src/objects/map.h
-@@ -1263,7 +1263,7 @@ static_assert(offsetof(Map, instance_type_) ==
+@@ -1221,7 +1221,7 @@ static_assert(offsetof(Map, instance_type_) ==
                Internals::kMapInstanceTypeOffset);
  
  // Base class for Maps with extra fields. Subclasses must be defined with
 -// @hasSameInstanceTypeAsParent and define padding fields up to kTaggedSize.
 +// @hasSameInstanceTypeAsParent.
  V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
-  public:
-   // Bit positions for |bit_field_ex|.
-@@ -1289,7 +1289,10 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
+   V8_IT_REUSE_PARENT;
+ 
+@@ -1249,7 +1249,10 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
    static const int kStartOfStrongExtendedFieldsOffset;
  
    std::atomic<uint8_t> bit_field_ex_;

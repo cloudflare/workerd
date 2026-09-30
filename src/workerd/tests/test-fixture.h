@@ -29,6 +29,8 @@ struct HeapLimitFlag: public kj::AtomicRefcounted {
 // TestFixture is responsible for creating workerd environment during tests.
 // All the infrastructure is started in the constructor. It is accessed through run() method.
 struct TestFixture {
+  using ActorCallReplayMemoryReserver = kj::Function<kj::Maybe<kj::Own<void>>(size_t bytes)>;
+
   struct SetupParams {
     // waitScope of outer IO loop. New IO will be set up if missing.
     kj::Maybe<kj::WaitScope&> waitScope;
@@ -70,6 +72,9 @@ struct TestFixture {
         waitUntilTaskTrackerFactory;
     // If set, incremented whenever the fixture's limit enforcer checks a new subrequest.
     kj::Maybe<uint&> checkedSubrequestCount;
+    // If set, the fixture's limit enforcer delegates tryReserveActorCallReplayMemory() to this.
+    // Otherwise it refuses every reservation.
+    kj::Maybe<ActorCallReplayMemoryReserver> actorCallReplayMemoryReserver;
     // If set, used as the jsg::IsolateObserver for the worker's isolate instead of a no-op one.
     // Lets tests observe compilation hooks (e.g. onCompileCacheFound / onCompileCacheRejected).
     kj::Maybe<kj::Own<JsgIsolateObserver>> jsgIsolateObserver;
@@ -301,6 +306,7 @@ struct TestFixture {
   kj::Maybe<kj::Function<kj::Own<Worker::Actor::WaitUntilTaskTracker>()>>
       waitUntilTaskTrackerFactory;
   kj::Maybe<uint&> checkedSubrequestCount;
+  kj::Maybe<ActorCallReplayMemoryReserver> actorCallReplayMemoryReserver;
 
   // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
   kj::Own<Worker::Actor> makeActor(Worker::Actor::Id id);
