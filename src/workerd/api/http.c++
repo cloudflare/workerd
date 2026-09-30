@@ -1605,10 +1605,6 @@ jsg::Promise<jsg::Ref<Response>> handleHttpFetchResponse(jsg::Lock& js,
       js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(response), callStart);
 }
 
-jsg::Promise<jsg::Ref<Response>> rejectFetch(jsg::Lock& js, kj::Exception&& exception) {
-  return js.rejectedPromise<jsg::Ref<Response>>(js.exceptionToJsValue(kj::mv(exception)));
-}
-
 kj::Maybe<jsg::JsValue> getAbortReason(jsg::Lock& js, Request& request) {
   KJ_IF_SOME(signal, request.getSignal()) {
     if (signal->getAborted(js)) {
@@ -1630,7 +1626,9 @@ jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
   }
   auto delayOrException = retryState->handleAttemptFailure(kj::mv(exception));
   KJ_IF_SOME(exception, delayOrException.tryGet<kj::Exception>()) {
-    return rejectFetch(js, kj::mv(exception));
+    // Let awaitIo() reject its existing promise rather than creating an intermediate rejected
+    // promise, which could report an unhandled rejection before awaitIo() adopts it.
+    js.throwException(kj::mv(exception));
   }
   auto delay = KJ_ASSERT_NONNULL(delayOrException.tryGet<kj::Duration>());
   fetcher->onActorCallRetry();
@@ -1686,7 +1684,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
   KJ_IF_SOME(state, retryState) {
     auto attemptOrException = state->startAttempt();
     KJ_IF_SOME(exception, attemptOrException.tryGet<kj::Exception>()) {
-      return rejectFetch(js, kj::mv(exception));
+      js.throwException(kj::mv(exception));
     }
     actorCallAttempt =
         kj::mv(KJ_ASSERT_NONNULL(attemptOrException.tryGet<ActorCallRetryState::Attempt>()));
