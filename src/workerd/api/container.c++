@@ -10,7 +10,6 @@
 #include <workerd/api/system-streams.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
-#include <workerd/util/autogate.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <kj/filesystem.h>
@@ -1332,7 +1331,7 @@ class Container::TcpPortState {
   }
 
  private:
-  // Present only for pooled ports (the CONTAINER_TUNNEL_REUSE autogate): a persistent HTTP client
+  // Present only for pooled ports (those cached in `tcpPortStates`): a persistent HTTP client
   // that reuses connections across requests. `invalidated` is set when the container lifecycle
   // changes such that pooled reuse must stop; thereafter a fresh connection is formed per request.
   struct PooledPort {
@@ -1507,28 +1506,27 @@ jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
   };
 
   auto portState = [&]() -> kj::Rc<TcpPortState> {
-    if (util::Autogate::isEnabled(util::AutogateKey::CONTAINER_TUNNEL_REUSE)) {
-      if (tcpPortStates == kj::none) {
-        tcpPortStates = ioctx.createObject<kj::HashMap<int, kj::Rc<TcpPortState>>>();
-      }
-      auto& states = *KJ_ASSERT_NONNULL(tcpPortStates);
+    if (tcpPortStates == kj::none) {
+      tcpPortStates = ioctx.createObject<kj::HashMap<int, kj::Rc<TcpPortState>>>();
+    }
+    auto& states = *KJ_ASSERT_NONNULL(tcpPortStates);
 
-      KJ_IF_SOME(entry, states.findEntry(port)) {
-        if (!entry.value->hasPortFailed()) return entry.value.addRef();
-        states.erase(entry);
-      }
-      if (states.size() < MAX_CACHED_TCP_PORTS) {
-        auto req = makePortRequest();
-        auto response = req.send();
-        auto state = kj::rc<TcpPortState>(ioctx.getUnsafeTimer(), ioctx.getByteStreamFactory(),
-            ioctx.getEntropySource(), ioctx.getHeaderTable(), response.getPort());
-        ioctx.addTask(response.ignoreResult().catch_(
-            [state = state.addRef()](kj::Exception&&) mutable { state->markPortFailed(); }));
-        states.insert(port, state.addRef());
-        return state;
-      }
+    KJ_IF_SOME(entry, states.findEntry(port)) {
+      if (!entry.value->hasPortFailed()) return entry.value.addRef();
+      states.erase(entry);
+    }
+    if (states.size() < MAX_CACHED_TCP_PORTS) {
+      auto req = makePortRequest();
+      auto response = req.send();
+      auto state = kj::rc<TcpPortState>(ioctx.getUnsafeTimer(), ioctx.getByteStreamFactory(),
+          ioctx.getEntropySource(), ioctx.getHeaderTable(), response.getPort());
+      ioctx.addTask(response.ignoreResult().catch_(
+          [state = state.addRef()](kj::Exception&&) mutable { state->markPortFailed(); }));
+      states.insert(port, state.addRef());
+      return state;
     }
 
+    // Too many ports are cached already; this one gets a fresh connection per request.
     auto req = makePortRequest();
     return kj::rc<TcpPortState>(ioctx.getByteStreamFactory(), req.send().getPort());
   }();

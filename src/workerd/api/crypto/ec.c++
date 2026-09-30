@@ -151,6 +151,11 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
     return keyAlgorithm.name;
   }
 
+  kj::Own<CryptoKey::Impl> cloneAsPublicKey(
+      jsg::Lock& js, AsymmetricKeyData publicKeyData) const override {
+    return kj::heap<EllipticKey>(kj::mv(publicKeyData), keyAlgorithm, rsSize, true);
+  }
+
   void requireSigningAbility() const {
     // This assert is internal to our WebCrypto implementation because we share the AsymmetricKey
     // implementation between ECDH & ECDSA (the former only supports deriveBits/deriveKey, not
@@ -705,7 +710,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(jsg::Lock& js,
   auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(namedCurve);
 
   auto importedKey = [&, curveId = curveId] {
-    if (format != "raw") {
+    if (format != "raw" && format != "raw-public") {
       return importAsymmetricForWebCrypto(js, format, kj::mv(keyData), normalizedName, extractable,
           keyUsages,
           // Verbose lambda capture needed because: https://bugs.llvm.org/show_bug.cgi?id=35984
@@ -766,7 +771,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(jsg::Lock& js,
     auto strictCrypto = FeatureFlags::get(js).getStrictCrypto();
     auto usageSet = strictCrypto ? CryptoKeyUsageSet() : CryptoKeyUsageSet::derivationKeyMask();
 
-    if (format != "raw") {
+    if (format != "raw" && format != "raw-public") {
       return importAsymmetricForWebCrypto(js, format, kj::mv(keyData), normalizedName, extractable,
           keyUsages,
           // Verbose lambda capture needed because: https://bugs.llvm.org/show_bug.cgi?id=35984
@@ -838,6 +843,11 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
 
   kj::StringPtr getAlgorithmName() const override {
     return keyAlgorithm;
+  }
+
+  kj::Own<CryptoKey::Impl> cloneAsPublicKey(
+      jsg::Lock& js, AsymmetricKeyData publicKeyData) const override {
+    return kj::heap<EdDsaKey>(kj::mv(publicKeyData), keyAlgorithm, true);
   }
 
   kj::StringPtr chooseHash(
@@ -1171,7 +1181,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(jsg::Lock& js,
 
   auto importedKey = [&] {
     auto nid = normalizedName == "X25519" ? NID_X25519 : NID_ED25519;
-    if (format != "raw") {
+    if (format != "raw" && format != "raw-public") {
       return importAsymmetricForWebCrypto(js, format, kj::mv(keyData), normalizedName, extractable,
           keyUsages,
           [nid, normalizedName = kj::str(normalizedName)](

@@ -25,10 +25,10 @@ index 74f57311a5257e8fdba3a060e9f6844a26a6dd69..88ba0737664800d8bcc1e091d9648ca7
    /**
     * Creates an error message for the given exception.
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 95c70ca28afcc8ffa73b42da1893dacc86aa9fca..31eed70d1335b67297de5a860720ea51c0b9698a 100644
+index 0fdf7c6b4e8e9763102e8277a6fbef1c39e2cb41..72b31b8250bf60460d82d0e0e0827a81af2f4f36 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -11456,6 +11456,10 @@ DEFINE_ERROR(WasmCompileError, wasm_compile_error)
+@@ -11487,6 +11487,10 @@ DEFINE_ERROR(WasmCompileError, wasm_compile_error)
  DEFINE_ERROR(WasmLinkError, wasm_link_error)
  DEFINE_ERROR(WasmRuntimeError, wasm_runtime_error)
  DEFINE_ERROR(WasmSuspendError, wasm_suspend_error)
@@ -40,7 +40,7 @@ index 95c70ca28afcc8ffa73b42da1893dacc86aa9fca..31eed70d1335b67297de5a860720ea51
  
  #undef DEFINE_ERROR
 diff --git a/src/logging/runtime-call-stats.h b/src/logging/runtime-call-stats.h
-index 9197dd2752037c9bfeea7ea2b6c4da96c3b6b6ed..b5a6d4fe07549f84a1bae1d4ba8fb25cbd0231e8 100644
+index 1ab0baba1b4b1da31d462cbb38d66bd4f90a556e..b93054261af368b9e0ffcddb3513f9535399c87f 100644
 --- a/src/logging/runtime-call-stats.h
 +++ b/src/logging/runtime-call-stats.h
 @@ -219,7 +219,11 @@ namespace v8::internal {

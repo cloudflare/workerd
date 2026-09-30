@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Harris Hancock <harris@cloudflare.com>
+Date: Mon, 28 Sep 2026 15:31:26 +0100
+Subject: Allow V8 release archives without metagen Clang headers
+
+workerd builds V8 from GitHub source archives, which do not include the
+Clang files downloaded by gclient. V8 requires the optional metagen
+header glob to match while loading the Bazel package even though metagen
+is disabled, so the archive cannot otherwise be built.
+
+Allow the glob to be empty. Builds that enable metagen still require the
+actual Clang headers.
+
+Assisted-by: Codex:gpt-5.6-sol
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index c75adb604ede34589eaee4cc108133c75044823d..e40bb6e41247a538e7949a34c60cc5a2aa4ddd1d 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -4588,7 +4588,7 @@ filegroup(
+     name = "metagen_clang_builtin_headers",
+     srcs = glob([
+         "third_party/llvm-build/Release+Asserts/lib/clang/*/include/**",
+-    ]),
++    ], allow_empty = True),
+ )
+ 
+ # The harvest's checked-in C++ driver, shared with GN and metagen.py. It

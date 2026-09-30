@@ -1673,7 +1673,17 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # is stable.
 
   durableObjectIoTasksPreventEviction @190 :Bool
-      $compatEnableFlag("durable_object_io_tasks_prevent_eviction");
+      $compatEnableFlag("durable_object_io_tasks_prevent_eviction")
+      $compatDisableFlag("durable_object_io_tasks_do_not_prevent_eviction")
+      $compatEnableDate("2026-10-01");
   # Allows the runtime to track actor IoContext wait-until tasks to prevent Durable Object eviction.
   # The runtime limits how long each task provides eviction protection.
+
+  webCryptoModernAlgorithms @191 :Bool
+      $compatEnableFlag("webcrypto_modern_algorithms");
+  # Enables opt-in WebCrypto modern algorithm support. This currently exposes the subset of
+  # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA, related
+  # key encapsulation helpers, getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is
+  # explicitly gated because the draft is still changing and workerd does not implement the full
+  # proposal. The API may change as the draft evolves.
 }
