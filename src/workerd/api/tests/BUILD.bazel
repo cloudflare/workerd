@@ -1026,6 +1026,23 @@ wd_test(
 )
 
 js_binary(
+    name = "websocket-open-error-sidecar",
+    entry_point = "websocket-open-error-sidecar.js",
+)
+
+wd_test(
+    src = "websocket-open-error-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "websocket-open-error-test.js",
+    ],
+    sidecar = "websocket-open-error-sidecar",
+    sidecar_port_bindings = [
+        "OPEN_ERROR_SERVER_PORT",
+    ],
+)
+
+js_binary(
     name = "http-socket-server",
     entry_point = "http-socket-server.js",
 )

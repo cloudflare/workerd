@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+    (name = "internet", network = (allow = ["private"])),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "websocket-open-error-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "OpenErrorClient", uniqueKey = "5b1e2c1f0a6b4e7fa3c9d8e7f6a5b4c3"),
+  ],
+
+  durableObjectStorage = (inMemory = void),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "OpenErrorClient"),
+    (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+    (name = "OPEN_ERROR_SERVER_PORT", fromEnvironment = "OPEN_ERROR_SERVER_PORT"),
+  ],
+);
