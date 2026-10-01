@@ -106,6 +106,52 @@ void checkSql(SqliteDatabase& db) {
   }
 }
 
+class MockSqliteObserver: public SqliteObserver {
+ public:
+  struct Event {
+    kj::Maybe<kj::String> queryStatement;
+    uint64_t queryRowsRead;
+    uint64_t queryRowsWritten;
+    kj::Duration queryLatency;
+    uint64_t dbWalBytesWritten;
+    int queryError;
+    int extendedErrorCode;
+    bool isInternalQuery;
+    kj::Maybe<kj::String> queryErrorDescription;
+  };
+
+  uint64_t rowsRead = 0;
+  uint64_t rowsWritten = 0;
+  kj::Vector<Event> events;
+
+  void addQueryStats(uint64_t read, uint64_t written) override {
+    rowsRead += read;
+    rowsWritten += written;
+  }
+
+  void reportQueryEvent(kj::Maybe<kj::String> queryStatement,
+      uint64_t queryRowsRead,
+      uint64_t queryRowsWritten,
+      kj::Duration queryLatency,
+      uint64_t dbWalBytesWritten,
+      int queryError,
+      int extendedErrorCode,
+      bool isInternalQuery,
+      kj::Maybe<kj::String> queryErrorDescription) override {
+    events.add(Event{
+      .queryStatement = kj::mv(queryStatement),
+      .queryRowsRead = queryRowsRead,
+      .queryRowsWritten = queryRowsWritten,
+      .queryLatency = queryLatency,
+      .dbWalBytesWritten = dbWalBytesWritten,
+      .queryError = queryError,
+      .extendedErrorCode = extendedErrorCode,
+      .isInternalQuery = isInternalQuery,
+      .queryErrorDescription = kj::mv(queryErrorDescription),
+    });
+  }
+};
+
 class DefaultRegulatorForTest: public SqliteDatabase::Regulator {
  public:
   bool isAllowedName(kj::StringPtr name) const override {
@@ -856,17 +902,6 @@ KJ_TEST("reset database") {
 }
 
 KJ_TEST("SQLite observer addQueryStats") {
-  class TestSqliteObserver: public SqliteObserver {
-   public:
-    void addQueryStats(uint64_t read, uint64_t written) override {
-      rowsRead += read;
-      rowsWritten += written;
-    }
-
-    uint64_t rowsRead = 0;
-    uint64_t rowsWritten = 0;
-  };
-
   class TestQueryStatsRegulator: public SqliteDatabase::Regulator {
    public:
     bool shouldAddQueryStats() const override {
@@ -876,7 +911,7 @@ KJ_TEST("SQLite observer addQueryStats") {
 
   TempDirOnDisk dir;
   SqliteDatabase::Vfs vfs(*dir);
-  TestSqliteObserver sqliteObserver = TestSqliteObserver();
+  MockSqliteObserver sqliteObserver = MockSqliteObserver();
   static TestQueryStatsRegulator regulator;
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
       /*sqliteMaxMemoryBytes=*/kj::maxValue, /*sqliteMaxMemoryPerProcessBytes=*/kj::maxValue,
@@ -948,29 +983,9 @@ KJ_TEST("SQLite observer addQueryStats") {
 }
 
 KJ_TEST("SQLite observer reportQueryEvent") {
-  class TestSqliteObserver: public SqliteObserver {
-   public:
-    int capturedEvents = 0;
-
-    void reportQueryEvent(kj::Maybe<kj::String> queryStatement,
-        uint64_t queryRowsRead,
-        uint64_t queryRowsWritten,
-        kj::Duration,
-        uint64_t dbWalBytesWritten,
-        int queryError,
-        int extendedErrorCode,
-        bool isInternalQuery,
-        kj::Maybe<kj::String> queryErrorDescription) override {
-      KJ_IF_SOME(err, queryErrorDescription) {
-        KJ_ASSERT(err.contains("query canceled because reset()"));
-      }
-      capturedEvents++;
-    }
-  };
-
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  TestSqliteObserver sqliteObserver;
+  MockSqliteObserver sqliteObserver;
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
       /*sqliteMaxMemoryBytes=*/kj::maxValue, /*sqliteMaxMemoryPerProcessBytes=*/kj::maxValue,
       sqliteObserver);
@@ -996,7 +1011,7 @@ KJ_TEST("SQLite observer reportQueryEvent") {
   }
   {
     // Expect 4 events so far: PRAGMA, CREATE, INSERT, SELECT.
-    KJ_ASSERT(sqliteObserver.capturedEvents == 4);
+    KJ_ASSERT(sqliteObserver.events.size() == 4);
 
     // SELECT #2 (canceled due to reset later)
     auto stmt = db.prepare("SELECT * FROM people");
@@ -1013,37 +1028,21 @@ KJ_TEST("SQLite observer reportQueryEvent") {
     KJ_EXPECT_THROW_MESSAGE("query canceled because reset()", query.getInt(0));
 
     // 1 more event: PRAGMA
-    KJ_ASSERT(sqliteObserver.capturedEvents == 5);
+    KJ_ASSERT(sqliteObserver.events.size() == 5);
   }
 
   // Cancelled SELECT #2 emiited with an errorDesc after query goes out of scope
-  KJ_ASSERT(sqliteObserver.capturedEvents == 6);
+  KJ_ASSERT(sqliteObserver.events.size() == 6);
+
+  // Assert that the test failed because of reset
+  auto& err = KJ_ASSERT_NONNULL(sqliteObserver.events[5].queryErrorDescription);
+  KJ_EXPECT(err.contains("query canceled because reset()"), err);
 }
 
 KJ_TEST("SQLite observer reportQueryEvent covers prepare failures") {
-  class TestSqliteObserver: public SqliteObserver {
-   public:
-    int capturedEvents = 0;
-
-    void reportQueryEvent(kj::Maybe<kj::String> queryStatement,
-        uint64_t queryRowsRead,
-        uint64_t queryRowsWritten,
-        kj::Duration,
-        uint64_t dbWalBytesWritten,
-        int queryError,
-        int extendedErrorCode,
-        bool isInternalQuery,
-        kj::Maybe<kj::String> queryErrorDescription) override {
-      KJ_IF_SOME(err, queryErrorDescription) {
-        KJ_ASSERT(err.contains("query canceled because reset()"));
-      }
-      capturedEvents++;
-    }
-  };
-
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  TestSqliteObserver sqliteObserver;
+  MockSqliteObserver sqliteObserver;
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
       /*sqliteMaxMemoryBytes=*/kj::maxValue, /*sqliteMaxMemoryPerProcessBytes=*/kj::maxValue,
       sqliteObserver);
@@ -1051,9 +1050,16 @@ KJ_TEST("SQLite observer reportQueryEvent covers prepare failures") {
   KJ_EXPECT_THROW_MESSAGE("no such table: table_does_not_exist: SQLITE_ERROR",
       db.run("SELECT * FROM table_does_not_exist"));
 
-  // TODO(now): Expect one event once preparation failures are reported. Zero records the bug:
-  // sqlite3_prepare_v3() fails before a Query exists, so its error never reaches the observer.
-  KJ_ASSERT(sqliteObserver.capturedEvents == 0);
+  KJ_ASSERT(sqliteObserver.events.size() == 1);
+
+  auto& event = sqliteObserver.events[0];
+  auto& queryStmt = KJ_ASSERT_NONNULL(event.queryStatement);
+
+  KJ_EXPECT(event.queryError == SQLITE_ERROR, event.queryError);
+  KJ_EXPECT(queryStmt.contains("table_does_not_exist"), queryStmt);
+  KJ_EXPECT(event.queryErrorDescription == kj::none, event.queryErrorDescription);
+  KJ_EXPECT(event.queryRowsRead == 0, event.queryRowsRead);
+  KJ_EXPECT(event.queryRowsWritten == 0, event.queryRowsWritten);
 }
 
 KJ_TEST("SQLite failed statement reset") {
