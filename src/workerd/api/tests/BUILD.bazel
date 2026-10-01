@@ -488,6 +488,14 @@ wd_test(
 )
 
 wd_test(
+    # Repeated constructor failures log symbolized stacks in debug builds.
+    size = "large",
+    src = "actor-fetch-rejection-test.wd-test",
+    compat_date = "2025-12-02",
+    data = ["actor-fetch-rejection-test.js"],
+)
+
+wd_test(
     src = "als-only-test.wd-test",
     args = ["--experimental"],
     data = ["als-only-test.js"],

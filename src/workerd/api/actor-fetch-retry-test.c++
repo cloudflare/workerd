@@ -419,6 +419,16 @@ kj::Maybe<kj::Exception> runActorFetch(ReplayState& state,
   DeterministicTimerChannel timerChannel(timer);
   state.timerChannel = timerChannel;
   TestFixture fixture(TestFixture::SetupParams{
+    // Default fixture flags retain legacy unhandled-rejection timing, which can expose rejected
+    // intermediate promises before the public fetch promise adopts them.
+    .mainModuleSource = R"JS(
+      globalThis.unhandledRejectionCount = 0;
+      addEventListener("unhandledrejection", event => {
+        ++globalThis.unhandledRejectionCount;
+        event.preventDefault();
+      });
+      export default {};
+    )JS"_kj,
     .useRealTimers = false,
     .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
         [&](TimerChannel&) -> kj::Rc<IoChannelFactory> {
@@ -437,6 +447,7 @@ kj::Maybe<kj::Exception> runActorFetch(ReplayState& state,
   kj::Maybe<kj::Exception> failure;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    KJ_ASSERT(!FeatureFlags::get(env.js).getUnhandledRejectionAfterMicrotaskCheckpoint());
     auto fetcher = env.js.alloc<Fetcher>(env.context.addObject<Fetcher::OutgoingFactory>(
                                              kj::heap<ReplayOutgoingFactory>(state, retryPolicy)),
         Fetcher::RequiresHostAndProtocol::YES);
@@ -462,6 +473,12 @@ kj::Maybe<kj::Exception> runActorFetch(ReplayState& state,
         .catch_([&](kj::Exception&& exception) {
       failure.emplace(kj::mv(exception));
     }).attach(kj::mv(fetcher));
+  });
+
+  fixture.pollEventLoop();
+  fixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto count = env.js.global().get(env.js, "unhandledRejectionCount"_kj);
+    KJ_EXPECT(count.strictEquals(env.js.num(0)), count.toString(env.js));
   });
 
   return failure;
@@ -1215,7 +1232,7 @@ KJ_TEST(
   KJ_EXPECT(state.retryCount == 1);
 }
 
-KJ_TEST("actor fetch does not start a retry after a configured retry timeout") {
+KJ_TEST("handled actor fetch rejection after a configured retry timeout is not unhandled") {
   ReplayState state{
     .actions = kj::arr(ReplayAction::RETRY_DELAY_EXCEEDS_BUDGET),
     .retryTimeoutDelay = 501 * kj::MILLISECONDS,
