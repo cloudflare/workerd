@@ -1020,6 +1020,42 @@ KJ_TEST("SQLite observer reportQueryEvent") {
   KJ_ASSERT(sqliteObserver.capturedEvents == 6);
 }
 
+KJ_TEST("SQLite observer reportQueryEvent covers prepare failures") {
+  class TestSqliteObserver: public SqliteObserver {
+   public:
+    int capturedEvents = 0;
+
+    void reportQueryEvent(kj::Maybe<kj::String> queryStatement,
+        uint64_t queryRowsRead,
+        uint64_t queryRowsWritten,
+        kj::Duration,
+        uint64_t dbWalBytesWritten,
+        int queryError,
+        int extendedErrorCode,
+        bool isInternalQuery,
+        kj::Maybe<kj::String> queryErrorDescription) override {
+      KJ_IF_SOME(err, queryErrorDescription) {
+        KJ_ASSERT(err.contains("query canceled because reset()"));
+      }
+      capturedEvents++;
+    }
+  };
+
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  TestSqliteObserver sqliteObserver;
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/kj::maxValue, /*sqliteMaxMemoryPerProcessBytes=*/kj::maxValue,
+      sqliteObserver);
+
+  KJ_EXPECT_THROW_MESSAGE("no such table: table_does_not_exist: SQLITE_ERROR",
+      db.run("SELECT * FROM table_does_not_exist"));
+
+  // TODO(now): Expect one event once preparation failures are reported. Zero records the bug:
+  // sqlite3_prepare_v3() fails before a Query exists, so its error never reaches the observer.
+  KJ_ASSERT(sqliteObserver.capturedEvents == 0);
+}
+
 KJ_TEST("SQLite failed statement reset") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
