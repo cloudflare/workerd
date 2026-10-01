@@ -11,7 +11,9 @@ const net = require('node:net');
 const tls = require('node:tls');
 const assert = require('node:assert');
 
-// Create a self-signed certificate for TLS with proper SAN extension
+// Create a self-signed certificate for TLS with proper SAN extension. The certificate below is
+// also checked in as starttls-server.pem, which the test's `internet` service embeds as its only
+// trusted certificate.
 function createSelfSignedCert() {
   const key = `-----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCmi4tGNwMie1Ha

@@ -92,6 +92,7 @@ class WorkerEntrypoint final: public WorkerInterface {
 
  private:
   class ResponseSentTracker;
+  class ConnectResponseSentTracker;
 
   // Members initialized at startup.
 
@@ -194,6 +195,34 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
  private:
   uint httpResponseStatus = 0;
   kj::HttpService::Response& inner;
+  bool sent = false;
+};
+
+// Like ResponseSentTracker, for the response to a CONNECT request.
+class WorkerEntrypoint::ConnectResponseSentTracker final: public kj::HttpService::ConnectResponse {
+ public:
+  ConnectResponseSentTracker(kj::HttpService::ConnectResponse& inner): inner(inner) {}
+  KJ_DISALLOW_COPY_AND_MOVE(ConnectResponseSentTracker);
+
+  bool isSent() const {
+    return sent;
+  }
+
+  void accept(uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
+    sent = true;
+    inner.accept(statusCode, statusText, headers);
+  }
+
+  kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+    sent = true;
+    return inner.reject(statusCode, statusText, headers, expectedBodySize);
+  }
+
+ private:
+  kj::HttpService::ConnectResponse& inner;
   bool sent = false;
 };
 
@@ -752,12 +781,13 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   incomingRequest->delivered();
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
+  auto wrappedResponse = kj::heap<ConnectResponseSentTracker>(response);
 
   return wrapWithCanceler(
       context
-          .run([this, &headers, &connection, &response, entrypointName = entrypointName.clone(),
-                   versionInfo = kj::mv(versionInfo), host = kj::str(host),
-                   clientAddress = kj::mv(clientAddress)](
+          .run([this, &headers, &connection, &response = *wrappedResponse,
+                   entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
+                   host = kj::str(host), clientAddress = kj::mv(clientAddress)](
                    Worker::Lock& lock, IoContext& context) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
@@ -789,8 +819,8 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     // The request has been canceled, but allow it to continue executing in the background.
     incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   }))
-          .catch_([this, isActor, &response, metrics = kj::mv(metricsForCatch), workerTracer](
-                      kj::Exception&& exception) mutable -> kj::Promise<void> {
+          .catch_([this, isActor, &response = *wrappedResponse, metrics = kj::mv(metricsForCatch),
+                      workerTracer](kj::Exception&& exception) mutable -> kj::Promise<void> {
     markExceptionAsDelivered(exception);
 
     // Don't return errors to end user.
@@ -831,6 +861,10 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       // an exception.
       metrics->reportFailure(exception);
 
+      // Once the tunnel is answered, there is no status left to replace with an error, and ending
+      // it is all that remains.
+      if (response.isSent()) return kj::READY_NOW;
+
       KJ_TRY {
         kj::HttpHeaders headers(threadContext.getHeaderTable());
         if (exception.getType() == kj::Exception::Type::OVERLOADED) {
@@ -853,7 +887,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
       return kj::READY_NOW;
     }
-  }));
+  })).attach(kj::mv(wrappedResponse));
 }
 
 kj::Promise<void> WorkerEntrypoint::prewarm(kj::StringPtr url) {
