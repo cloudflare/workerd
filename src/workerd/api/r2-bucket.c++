@@ -712,6 +712,17 @@ jsg::Ref<R2Bucket::HeadResult> headResultFromSerializable(
       kj::mv(rpc.storageClass), kj::mv(rpc.ssecKeyMd5));
 }
 
+static uint64_t getResultBodyLength(R2Bucket::HeadResult& object) {
+  // Retrieve body length from range/size metadata to avoid depending on the stream to report it.
+  auto bodyLength = object.getSize();
+  KJ_IF_SOME(range, object.getRange()) {
+    bodyLength = range.length.orDefault(bodyLength);
+  }
+  KJ_ASSERT(bodyLength <= 9007199254740991ull,
+      "Malformed R2 get RPC result: body length must be a safe integer.");
+  return static_cast<uint64_t>(bodyLength);
+}
+
 static jsg::Ref<R2Bucket::GetResult> getResultFromSerializable(
     jsg::Lock& js, R2Bucket::SerializableGetResult rpc) {
   KJ_ASSERT(rpc.kind == "body", "Malformed R2 get RPC result: expected a body result.");
@@ -721,15 +732,8 @@ static jsg::Ref<R2Bucket::GetResult> getResultFromSerializable(
       [&] { body.forceCancel(js, js.error("Malformed R2 get RPC result.")).markAsHandled(js); });
   auto object = headResultFromSerializable(js, kj::mv(rpc.object), MissingMetadataPolicy::EMPTY);
 
-  // Retrieve body length from range/size metadata to avoid depending on the stream to report it.
-  auto bodyLength = object->getSize();
-  KJ_IF_SOME(range, object->getRange()) {
-    bodyLength = range.length.orDefault(bodyLength);
-  }
-  KJ_ASSERT(bodyLength <= 9007199254740991ull,
-      "Malformed R2 get RPC result: body length must be a safe integer.");
   auto& context = IoContext::current();
-  auto pipe = newIdentityPipe(static_cast<uint64_t>(bodyLength));
+  auto pipe = newIdentityPipe(getResultBodyLength(*object));
   auto pump = context.waitForDeferredProxy(body.pumpTo(js, kj::mv(pipe.out), EndStream::YES));
   body = JsReadableStream::create(
       js, context, kj::heap<R2GetBodyStream>(kj::mv(pipe.in), kj::mv(pump)));
@@ -2116,6 +2120,7 @@ void R2Bucket::HeadResult::writeHttpMetadata(jsg::Lock& js, Headers& headers) {
 
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> R2Bucket::GetResult::arrayBuffer(jsg::Lock& js) {
   return js.evalNow([&] {
+    ensureBodyLength(js);
     auto& context = IoContext::current();
     return body.arrayBuffer(js, context.getLimitEnforcer().getBufferingLimit());
   });
@@ -2123,6 +2128,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> R2Bucket::GetResult::arrayBuffer(js
 
 jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> R2Bucket::GetResult::bytes(jsg::Lock& js) {
   return js.evalNow([&] {
+    ensureBodyLength(js);
     auto& context = IoContext::current();
     return body.bytes(js, context.getLimitEnforcer().getBufferingLimit());
   });
@@ -2131,6 +2137,7 @@ jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> R2Bucket::GetResult::bytes(jsg::Lock
 jsg::Promise<kj::String> R2Bucket::GetResult::text(jsg::Lock& js) {
   // Copy-pasted from http.c++
   return js.evalNow([&] {
+    ensureBodyLength(js);
     // Check for a disturbed body before emitting the non-text warning below. (body.text()
     // performs the same check with the same error message; this one just runs first.)
     JSG_REQUIRE(!body.isDisturbed(js), TypeError,
@@ -2192,9 +2199,8 @@ jsg::Ref<R2Bucket::Checksums> R2Bucket::Checksums::deserialize(jsg::Lock& js,
     jsg::Deserializer& deserializer,
     const jsg::TypeHandler<SerializableChecksums>& checksumsHandler) {
   requireR2RpcDeserializer(deserializer);
-  auto checksums = KJ_UNWRAP_OR(checksumsHandler.tryUnwrap(js, deserializer.readValue(js)), {
-    JSG_FAIL_REQUIRE(DOMDataCloneError, "Deserialization failed: invalid R2 checksums payload");
-  });
+  auto checksums = KJ_ASSERT_NONNULL(checksumsHandler.tryUnwrap(js, deserializer.readValue(js)),
+      "Deserialization failed: invalid R2 checksums payload");
   return js.alloc<Checksums>(kj::mv(checksums.md5), kj::mv(checksums.sha1),
       kj::mv(checksums.sha256), kj::mv(checksums.sha384), kj::mv(checksums.sha512));
 }
@@ -2246,16 +2252,27 @@ jsg::Ref<R2Bucket::HeadResult> R2Bucket::HeadResult::deserialize(jsg::Lock& js,
     jsg::Deserializer& deserializer,
     const jsg::TypeHandler<SerializableHeadResult>& headResultHandler) {
   requireR2RpcDeserializer(deserializer);
-  auto headResult = KJ_UNWRAP_OR(headResultHandler.tryUnwrap(js, deserializer.readValue(js)), {
-    JSG_FAIL_REQUIRE(DOMDataCloneError, "Deserialization failed: invalid R2 object payload");
-  });
+  auto headResult = KJ_ASSERT_NONNULL(headResultHandler.tryUnwrap(js, deserializer.readValue(js)),
+      "Deserialization failed: invalid R2 object payload");
   return headResultFromSerializable(js, kj::mv(headResult), MissingMetadataPolicy::ABSENT);
+}
+
+void R2Bucket::GetResult::ensureBodyLength(jsg::Lock& js) {
+  KJ_IF_SOME(length, expectedBodyLength) {
+    auto& context = IoContext::current();
+    auto pipe = newIdentityPipe(length);
+    auto pump = context.waitForDeferredProxy(body.pumpTo(js, kj::mv(pipe.out), EndStream::YES));
+    body = JsReadableStream::create(
+        js, context, kj::heap<R2GetBodyStream>(kj::mv(pipe.in), kj::mv(pump)));
+    expectedBodyLength = kj::none;
+  }
 }
 
 void R2Bucket::GetResult::serialize(jsg::Lock& js,
     jsg::Serializer& serializer,
     const jsg::TypeHandler<SerializableGetResult>& getResultHandler) {
   requireR2RpcSerializer(serializer);
+  ensureBodyLength(js);
   serializer.write(js,
       jsg::JsValue(getResultHandler.wrap(js,
           SerializableGetResult{
@@ -2270,14 +2287,21 @@ jsg::Ref<R2Bucket::GetResult> R2Bucket::GetResult::deserialize(jsg::Lock& js,
     jsg::Deserializer& deserializer,
     const jsg::TypeHandler<SerializableGetResult>& getResultHandler) {
   requireR2RpcDeserializer(deserializer);
-  auto getResult = KJ_UNWRAP_OR(getResultHandler.tryUnwrap(js, deserializer.readValue(js)), {
-    JSG_FAIL_REQUIRE(DOMDataCloneError, "Deserialization failed: invalid R2 object body payload");
-  });
-  JSG_REQUIRE(getResult.kind == "body", DOMDataCloneError,
+  auto getResult = KJ_ASSERT_NONNULL(getResultHandler.tryUnwrap(js, deserializer.readValue(js)),
+      "Deserialization failed: invalid R2 object body payload");
+  KJ_ASSERT(getResult.kind == "body",
       "Deserialization failed: R2 object body payload has an invalid kind");
-  JSG_REQUIRE(getResult.body != kj::none, DOMDataCloneError,
+  KJ_ASSERT(getResult.body != kj::none,
       "Deserialization failed: R2 object body payload is missing its body");
-  return getResultFromSerializable(js, kj::mv(getResult));
+  auto object =
+      headResultFromSerializable(js, kj::mv(getResult.object), MissingMetadataPolicy::EMPTY);
+  auto bodyLength = getResultBodyLength(*object);
+  auto customMetadata = object->getCustomMetadata();
+  return js.alloc<GetResult>(kj::str(object->getName()), kj::str(object->getVersion()),
+      object->getSize(), kj::str(object->getEtag()), object->getChecksums(), object->getUploaded(),
+      object->getHttpMetadata(), kj::mv(customMetadata), object->getRange(),
+      kj::str(object->getStorageClass()), mapCopyString(object->getSSECKeyMd5()),
+      KJ_ASSERT_NONNULL(kj::mv(getResult.body)), bodyLength);
 }
 
 R2Bucket::StringChecksums R2Bucket::Checksums::toJSON() {

@@ -3,11 +3,19 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
+import { Buffer } from 'node:buffer';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 
 const key = 'basicKey';
 const body = 'content';
 const rpcStreamBody = 'café';
+const stringUploadCases = {
+  'string-upload-below-limit': { size: (8 << 20) - 1, suffix: 'Ā' },
+  'string-upload-at-limit': { size: 8 << 20, suffix: 'Ā' },
+  'string-upload-above-limit': { size: (8 << 20) + 1, suffix: 'Ā' },
+  'string-upload-rpc-limit': { size: 16 << 20, suffix: 'Ā' },
+  'string-upload-ascii': { size: 16 << 20, suffix: '' },
+};
 const perKeyErrorDeleteKeys = ['existing', 'missing'];
 const httpMetaObj = {
   contentType: 'text/plain',
@@ -220,6 +228,62 @@ function handleTrackedMultipartRequest(jsonRequest, uploadedBody) {
   throw new Error(`Unexpected method: ${jsonRequest.method}`);
 }
 
+async function handleStringUploadRequest(request, jsonRequest, metadataSize) {
+  const expected = stringUploadCases[jsonRequest.object];
+  const suffix = new TextEncoder().encode(expected.suffix);
+  const asciiLength = expected.size - suffix.byteLength;
+  assert.strictEqual(
+    request.headers.get('content-length'),
+    String(metadataSize + expected.size)
+  );
+
+  // Check every byte without retaining another full copy of the large upload.
+  const ascii = new Uint8Array(1 << 20).fill(0x61);
+  const reader = request.body.getReader({ mode: 'byob' });
+  let received = 0;
+  try {
+    for (;;) {
+      const { value: chunk, done } = await reader.readAtLeast(
+        ascii.length,
+        new Uint8Array(ascii.length)
+      );
+      if (done) break;
+      const asciiEnd = Math.min(
+        chunk.length,
+        Math.max(asciiLength - received, 0)
+      );
+      assert.strictEqual(
+        Buffer.compare(
+          chunk.subarray(0, asciiEnd),
+          ascii.subarray(0, asciiEnd)
+        ),
+        0
+      );
+      const suffixStart = Math.max(received - asciiLength, 0);
+      assert.deepStrictEqual(
+        chunk.subarray(asciiEnd),
+        suffix.subarray(suffixStart, suffixStart + chunk.length - asciiEnd)
+      );
+      received += chunk.length;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  assert.strictEqual(received, expected.size);
+
+  if (jsonRequest.method === 'put') {
+    return Response.json({
+      ...objResponse,
+      name: jsonRequest.object,
+      size: String(received),
+    });
+  }
+  assert.strictEqual(jsonRequest.method, 'uploadPart');
+  assert.strictEqual(jsonRequest.uploadId, 'string-upload-id');
+  assert.strictEqual(jsonRequest.partNumber, 1);
+  return Response.json({ etag: `string-upload-${received}` });
+}
+
 // An R2 error makes this an error response, such as a failed precondition that still carries the
 // object's metadata but no body.
 function buildGetResponse({ head, body, isList, error } = {}) {
@@ -335,6 +399,9 @@ const testWorker = {
         const jsonRequest = JSON.parse(new TextDecoder().decode(value));
         if (jsonRequest.object === 'must-not-call') {
           assert.fail('R2 backend must not be called for invalid input');
+        }
+        if (Object.hasOwn(stringUploadCases, jsonRequest.object)) {
+          return handleStringUploadRequest(request, jsonRequest, metadataSize);
         }
 
         // The metadata has already been read from the body, so a Response cannot wrap it.
@@ -1811,6 +1878,37 @@ export const r2MultipartApiTests = {
       });
       await upload.abort();
       await upload.abort();
+    }
+  },
+};
+
+function stringUploadValue({ size, suffix }) {
+  return (
+    'a'.repeat(size - new TextEncoder().encode(suffix).byteLength) + suffix
+  );
+}
+
+export const r2StringPutTests = {
+  async test(_ctrl, env) {
+    if (env.R2_STRING_UPLOAD_TEST !== 'true') return;
+    for (const [key, fixture] of Object.entries(stringUploadCases)) {
+      const result = await env.BUCKET.put(key, stringUploadValue(fixture));
+      assert.strictEqual(result.key, key);
+      assert.strictEqual(result.size, fixture.size);
+    }
+  },
+};
+
+export const r2StringUploadPartTests = {
+  async test(_ctrl, env) {
+    if (env.R2_STRING_UPLOAD_TEST !== 'true') return;
+    for (const [key, fixture] of Object.entries(stringUploadCases)) {
+      const upload = env.BUCKET.resumeMultipartUpload(key, 'string-upload-id');
+      const result = await upload.uploadPart(1, stringUploadValue(fixture));
+      assert.deepStrictEqual(result, {
+        partNumber: 1,
+        etag: `string-upload-${fixture.size}`,
+      });
     }
   },
 };

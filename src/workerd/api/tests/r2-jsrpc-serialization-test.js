@@ -41,6 +41,10 @@ export class ObservedR2Binding extends PassthroughR2Binding {
   getNative(requestKey) {
     return this.env.REAL_BUCKET.get(requestKey);
   }
+
+  echoNative(object) {
+    return object;
+  }
 }
 
 export const nativeR2ResultTests = {
@@ -85,10 +89,43 @@ export const nativeR2ResultTests = {
     const directGet = await env.PLATFORM.getNative('rpc-json');
     assert.throws(() => structuredClone(directGet), { name: 'DataCloneError' });
     assert.deepStrictEqual(await directGet.json(), { ok: true });
+    assert.strictEqual(directGet.bodyUsed, true);
 
     const object = await env.BUCKET.get('rpc-json');
     assert.strictEqual(typeof object.text, 'function');
+    assert.strictEqual(object.bodyUsed, false);
+    const objectBody = object.body;
+    assert.strictEqual(object.body, objectBody);
+    assert.strictEqual(object.bodyUsed, false);
+    assert.strictEqual(objectBody.locked, false);
     assert.deepStrictEqual(await object.json(), { ok: true });
+    assert.strictEqual(object.body, objectBody);
+    assert.strictEqual(object.bodyUsed, true);
+
+    // Each consumption method must work without first accessing the body getter.
+    for (const method of ['arrayBuffer', 'bytes', 'text', 'blob']) {
+      const result = await env.PLATFORM.getNative('rpc-lazy-body');
+      const consumed = await result[method]();
+      assert.strictEqual(await new Response(consumed).text(), 'content');
+      assert.strictEqual(result.bodyUsed, true);
+    }
+
+    // A deserialized native result must be serializable again before its body is accessed.
+    const echoed = await env.PLATFORM.echoNative(
+      await env.PLATFORM.getNative('rpc-json')
+    );
+    assert.deepStrictEqual(await echoed.json(), { ok: true });
+
+    // Both service RPC and an R2 interceptor preserve the length for immediate streaming copies.
+    for (const get of [
+      () => env.PLATFORM.getNative('rpc-lazy-body'),
+      () => env.BUCKET.get('rpc-lazy-body'),
+    ]) {
+      const source = await get();
+      const copied = await env.BUCKET.put('basicKey', source.body);
+      assert.strictEqual(copied.size, 7);
+      assert.strictEqual(source.bodyUsed, true);
+    }
 
     const metadataOnly = await env.BUCKET.get('rpc-conditional-metadata');
     assert.strictEqual(metadataOnly.key, 'basicKey');
