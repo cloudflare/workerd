@@ -12,10 +12,27 @@ include changes are needed.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 4eb3c0d9482b94dabd5557448117dcfe27130972..29cff990dc4f7227445d5cd5902c448261fcf644 100644
+index ace64692dcec743e96b8b6a797dddd671063a158..e958ea3b034395506f2c68974dadc65dd2fa49a0 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4679,17 +4679,19 @@ cc_library(
+@@ -4517,7 +4517,6 @@ filegroup(
+         # than a blanket third_party/**, which would also stage the
+         # large gclient trees.
+         "third_party/utf8-decoder/**/*.h",
+-        "third_party/simdutf/**/*.h",
+         "third_party/rapidhash-v8/**/*.h",
+         "third_party/wasm-api/**/*.h",
+         "third_party/siphash/**/*.h",
+@@ -4622,7 +4621,7 @@ metagen_instance_types(
+         ":define_flags",
+         ":v8_libbase",
+         ":lib_fp16",
+-        ":simdutf",
++        "@simdutf",
+         "@abseil-cpp//absl/container:btree",
+         "@abseil-cpp//absl/container:flat_hash_map",
+         "@abseil-cpp//absl/container:flat_hash_set",
+@@ -4869,18 +4868,19 @@ cc_library(
      ],
  )
  
@@ -23,6 +40,7 @@ index 4eb3c0d9482b94dabd5557448117dcfe27130972..29cff990dc4f7227445d5cd5902c4482
 -    name = "simdutf",
 -    srcs = ["third_party/simdutf/simdutf.cpp"],
 -    hdrs = ["third_party/simdutf/simdutf.h"],
+-    strip_include_prefix = "third_party/simdutf",
 -    copts = select({
 -        "@v8//bazel/config:is_clang": ["-std=c++20"],
 -        "@v8//bazel/config:is_gcc": ["-std=gnu++2a"],
@@ -46,8 +64,8 @@ index 4eb3c0d9482b94dabd5557448117dcfe27130972..29cff990dc4f7227445d5cd5902c4482
  
  v8_library(
      name = "v8_libshared",
-@@ -4720,15 +4722,15 @@ v8_library(
-     ],
+@@ -4927,15 +4927,15 @@ v8_library(
+     }),
      deps = [
          ":lib_dragonbox",
 -        "//third_party/fast_float/src:fast_float",

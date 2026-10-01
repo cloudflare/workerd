@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "actor-fetch-rejection-test", worker = (
+      modules = [
+        (name = "worker", esModule = embed "actor-fetch-rejection-test.js"),
+      ],
+      compatibilityFlags = ["nodejs_compat"],
+      durableObjectNamespaces = [
+        (className = "FailingActor", uniqueKey = "actor-fetch-rejection"),
+      ],
+      durableObjectStorage = (inMemory = void),
+      bindings = [
+        (name = "ns", durableObjectNamespace = "FailingActor"),
+      ],
+    )),
+  ],
+);

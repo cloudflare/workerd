@@ -63,7 +63,6 @@ kj::Rc<ActorCallRetryState> newRetryState(TestTimerChannel& timer,
   return kj::rc<ActorCallRetryState>(timer, observer,
       ActorCallRetryState::Config{
         .callType = ActorRetryCallType::JSRPC,
-        .observationEnabled = ActorRetryGateEnabled::YES,
         .enforcementEnabled = ActorRetryGateEnabled::YES,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
       },
@@ -374,7 +373,6 @@ KJ_TEST("actor calls do not retry when retry requests are disabled") {
   auto state = kj::rc<ActorCallRetryState>(timer, *observer,
       ActorCallRetryState::Config{
         .callType = ActorRetryCallType::JSRPC,
-        .observationEnabled = ActorRetryGateEnabled::YES,
         .enforcementEnabled = ActorRetryGateEnabled::NO,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
       },
