@@ -540,7 +540,8 @@ class R2Bucket: public jsg::Object {
         jsg::Optional<Range> range,
         kj::String storageClass,
         jsg::Optional<kj::String> ssecKeyMd5,
-        JsReadableStream body)
+        JsReadableStream body,
+        kj::Maybe<uint64_t> expectedBodyLength = kj::none)
         : HeadResult(kj::mv(name),
               kj::mv(version),
               size,
@@ -552,9 +553,11 @@ class R2Bucket: public jsg::Object {
               range,
               kj::mv(storageClass),
               kj::mv(ssecKeyMd5)),
-          body(kj::mv(body)) {}
+          body(kj::mv(body)),
+          expectedBodyLength(expectedBodyLength) {}
 
     JsReadableStream getBody(jsg::Lock& js) {
+      ensureBodyLength(js);
       return body.addRef(js);
     }
 
@@ -600,6 +603,11 @@ class R2Bucket: public jsg::Object {
 
    private:
     JsReadableStream body;
+    // RPC deserialization cannot run the JavaScript needed to wrap a TypeScript stream.
+    // Its length is restored on first use, after the deserializer finishes reading the graph.
+    kj::Maybe<uint64_t> expectedBodyLength;
+
+    void ensureBodyLength(jsg::Lock& js);
 
     void visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(body);

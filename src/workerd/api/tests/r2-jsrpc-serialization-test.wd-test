@@ -12,11 +12,7 @@ using Workerd = import "/workerd/workerd.capnp";
 const unitTests :Workerd.Config = (
   services = [
     (name = "user", worker = (
-      modules = [
-        (name = "worker", esModule = "export { nativeR2ResultTests } from './test.js';"),
-        (name = "test.js", esModule = embed "r2-jsrpc-serialization-test.js"),
-        (name = "r2-test.js", esModule = embed "r2-test.js"),
-      ],
+      modules = .testModules,
       bindings = [
         (name = "BUCKET",
          r2Bucket = (name = "platform", entrypoint = "ObservedR2Binding")),
@@ -27,19 +23,27 @@ const unitTests :Workerd.Config = (
                             "r2_list_honor_include", "r2_binding_jsrpc", "rpc",
                             "fetcher_no_get_put_delete"],
     )),
-    # Exports no test handlers, so the test runner does not run the tests in r2-test.js here.
-    (name = "platform", worker = (
-      modules = [
-        (name = "worker",
-         esModule = "import mock from './r2-test.js'; export { ObservedR2Binding } from './test.js'; export default { fetch: mock.fetch };"),
-        (name = "test.js", esModule = embed "r2-jsrpc-serialization-test.js"),
-        (name = "r2-test.js", esModule = embed "r2-test.js"),
-      ],
-      bindings = [
-        (name = "REAL_BUCKET", r2Bucket = "platform"),
-      ],
-      compatibilityFlags = ["nodejs_compat", "streams_enable_constructors",
-                            "r2_list_honor_include"],
-    )),
+    (name = "platform", worker = .platformWorker),
   ],
+);
+
+const testModules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = "export { nativeR2ResultTests } from './test.js';"),
+  (name = "test.js", esModule = embed "r2-jsrpc-serialization-test.js"),
+  (name = "r2-test.js", esModule = embed "r2-test.js"),
+];
+
+# Exports no test handlers, so the test runner does not run the tests in r2-test.js here.
+const platformWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker",
+     esModule = "import mock from './r2-test.js'; export { ObservedR2Binding } from './test.js'; export default { fetch: mock.fetch };"),
+    (name = "test.js", esModule = embed "r2-jsrpc-serialization-test.js"),
+    (name = "r2-test.js", esModule = embed "r2-test.js"),
+  ],
+  bindings = [
+    (name = "REAL_BUCKET", r2Bucket = "platform"),
+  ],
+  compatibilityFlags = ["nodejs_compat", "streams_enable_constructors",
+                        "r2_list_honor_include"],
 );
