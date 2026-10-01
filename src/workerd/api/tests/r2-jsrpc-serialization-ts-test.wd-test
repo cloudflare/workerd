@@ -1,0 +1,26 @@
+using Workerd = import "/workerd/workerd.capnp";
+using NativeR2 = import "r2-jsrpc-serialization-test.wd-test";
+
+# Native R2 object bodies cross the RPC deserializer's no-JavaScript graph-read scope.
+# The TypeScript stream receiver requires its streams to be hydrated before that scope.
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "user", worker = (
+      modules = NativeR2.testModules,
+      bindings = [
+        (name = "BUCKET",
+         r2Bucket = (name = "platform", entrypoint = "ObservedR2Binding")),
+        (name = "PLATFORM",
+         service = (name = "platform", entrypoint = "ObservedR2Binding")),
+      ],
+      compatibilityFlags = ["experimental", "nodejs_compat", "streams_enable_constructors",
+                            "r2_list_honor_include", "r2_binding_jsrpc", "rpc",
+                            "fetcher_no_get_put_delete", "typescript_implemented_streams"],
+    )),
+    (name = "platform", worker = NativeR2.platformWorker),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+    "workerd-autogate-rpc-externals-hydration",
+  ],
+);

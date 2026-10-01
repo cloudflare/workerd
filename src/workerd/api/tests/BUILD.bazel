@@ -423,6 +423,17 @@ wd_test(
 )
 
 wd_test(
+    src = "r2-jsrpc-serialization-ts-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "r2-jsrpc-serialization-test.js",
+        "r2-jsrpc-serialization-test.wd-test",
+        "r2-test.js",
+    ],
+    lint = False,
+)
+
+wd_test(
     src = "r2-jsrpc-test.wd-test",
     args = ["--experimental"],
     data = [
@@ -441,6 +452,16 @@ wd_test(
         "r2-test.js",
     ],
     generate_all_compat_flags_variant = False,
+)
+
+wd_test(
+    size = "large",
+    src = "r2-string-upload-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "r2-jsrpc-passthrough.capnp",
+        "r2-test.js",
+    ],
 )
 
 wd_test(
