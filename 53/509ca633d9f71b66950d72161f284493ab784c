@@ -1,0 +1,87 @@
+src/workerd/api/unsafe.h
+  s_2dfe3889216c4d::t_2db594dcbbb953 297,300-338,341,342-344,345-347,402-405,416,452,460
+  s_4bcd2f07aa5d0a::t_5c9785f330e0d2 387
+src/workerd/util/sqlite.h
+  s_2dfe3889216c4d::t_0199f0e2042d40 349-372,374-375,444-452,454-455,459-462
+src/workerd/util/BUILD.bazel
+  s_2dfe3889216c4d::t_d7669a8c0e958e 34-43,51,433-439
+src/workerd/util/sqlite-test.c++
+  s_2dfe3889216c4d::t_83de2677f8d028 1474,1865-1997,2090-2255
+  s_2dfe3889216c4d::t_7867919598ed50 1449-1452,1472-1473
+src/workerd/util/storage-telemetry.c++
+  s_2dfe3889216c4d::t_37f9fb6434a550 1-10,70-71,77-99,101-103,111-118,120-125,141-146,148-153,155-160,165-170,187,190-191,200,201-203
+  s_710093cfa2d5fb::t_e32f0262613bca 100,104
+  s_4bcd2f07aa5d0a::t_cc31a7e7f7722a 154
+src/workerd/util/virtual-time.h
+  s_2dfe3889216c4d::t_ba99773a901d15 8,264-265,273
+  s_4bcd2f07aa5d0a::t_ee258fe4c43afe 28-30,56-58,72-73,129-130,132,138-139,150-153,171,188-190,272,310-326
+src/workerd/util/virtual-time.c++
+  s_2dfe3889216c4d::t_0937e55eb256ba 474-475
+  s_4bcd2f07aa5d0a::t_3a1b34ac2ba709 44-47,51,57-58,64,70,147-148,153,157-161,176-183,186,204-205,212-216,218,233,254-258,265-268,291-293,304-305,326-329,472-475
+src/workerd/server/tests/virtual-time/virtual-time-storage-test.js
+  s_2dfe3889216c4d::t_375153f5c9b663 1-9,11-41,46-55,67-68,78-108,110-111,113-117,119-140,166,169-192,194-203,205-206,208-233,235-239,241-264,266-271,273-289,291-295,297-300,305-309
+  s_4bcd2f07aa5d0a::t_6e5cdded515067 207,301-304
+src/workerd/server/tests/virtual-time/BUILD.bazel
+  s_2dfe3889216c4d::t_54db0924f5cf41 38-43
+  s_710093cfa2d5fb::t_ba6b29dff6a264 44-49
+  s_4bcd2f07aa5d0a::t_527eb7ed093c86 50-55
+src/workerd/api/unsafe.c++
+  s_2dfe3889216c4d::t_709e0eada05666 400,405-425
+src/workerd/util/sqlite.c++
+  s_2dfe3889216c4d::t_e202ec668b128b 641,645-697,709-713,715-733,734-758,770-824
+  s_710093cfa2d5fb::t_cf291689281a37 759-769
+docs/virtual-time.md
+  s_2dfe3889216c4d::t_5c299227dc876a 161-162,164,167,170-171,186-194,249
+  s_710093cfa2d5fb::t_4c5b165aa61b25 47,195-201,214-229,249
+  s_4bcd2f07aa5d0a::t_0a9bd3ff5b1265 48,202-205,233-249
+src/workerd/server/server.c++
+  s_2dfe3889216c4d::t_9958500ff3c955 227-231,233-235,238,242-243,245-249,253-271,273-284,286-288,1403,1406-1408,1410,1419,1423,1424-1428,1436-1439,1445,1452-1454,1469
+  s_710093cfa2d5fb::t_339b222b85ce92 250-252,289-304,1409,1412,1432,1440-1444,1447-1451,7160,7180-7188,7205,7212-7215,7246,7266-7276
+  s_4bcd2f07aa5d0a::t_b0ebe66605717f 221-226,236-237,240-241,244,285,467,628,684-691,783,953-955,1134,1156,1187,1243,1251,1364,1376-1377,1765-1767,1781-1792,1821-1826,7189-7198,7206,7216-7219,7247,7277-7287
+src/workerd/util/storage-telemetry-test.c++
+  s_2dfe3889216c4d::t_af9bb98b61465f 1-15,18,19-24,26-28,36-41,43-46,52,54,59,61-62,64-68,70,73-77,79,80,109,123-125,130,132-134,136-137,145,147,150,156-159
+src/workerd/util/storage-telemetry.h
+  s_2dfe3889216c4d::t_345a8b16e07dc8 1-7,9,10-18,20-42,45-47,49-56,58-59,63-71,73,82,84,87-90,91,93-95,98-99,104-106
+  s_710093cfa2d5fb::t_15bbb101acc10d 43-44,48,72
+  s_4bcd2f07aa5d0a::t_1853ef01c67f08 83
+src/workerd/server/tests/virtual-time/virtual-time-storage-srs-test.wd-test
+  s_710093cfa2d5fb::t_356e7bfec3c1fe 1-18,20-24,30
+src/workerd/server/tests/virtual-time/virtual-time-hibernation-test.js
+  s_4bcd2f07aa5d0a::t_a618e9bcbf2ded 1-10,12-39,50-51,63-86,88-96,98-115,117-129,131-163,165-178,180-191,193-201,205-212
+src/workerd/server/workerd.capnp
+  s_4bcd2f07aa5d0a::t_e7b5e902989786 168,170-181
+src/workerd/util/virtual-time-test.c++
+  s_4bcd2f07aa5d0a::t_7bd37ff8a590a8 232-341
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "53509ca633d9f71b66950d72161f284493ab784c",
+  "prompts": {},
+  "sessions": {
+    "s_2dfe3889216c4d": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0ecb8-bdfb-706a-b701-bd5fdc9b167f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    },
+    "s_4bcd2f07aa5d0a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0f80b-b3fd-718f-a242-352c049eed26",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    },
+    "s_710093cfa2d5fb": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0ed11-9617-7551-bfea-22d824e1f190",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}
