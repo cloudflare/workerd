@@ -21,6 +21,9 @@ namespace workerd::api {
 namespace {
 
 constexpr size_t R2_RPC_INLINE_BODY_LIMIT = 16u << 20;
+// V8's UTF-16 string serialization can use twice the UTF-8 byte count. Keep strings within
+// the same inline budget as binary values, leaving room for the other RPC arguments.
+constexpr size_t R2_RPC_INLINE_STRING_LIMIT = R2_RPC_INLINE_BODY_LIMIT / 2;
 
 JsReadableStream makeR2RpcMemoryStream(
     jsg::Lock& js, kj::ArrayPtr<const byte> bytes, kj::Maybe<kj::Own<void>> backing = kj::none) {
@@ -76,7 +79,7 @@ PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value) {
     }
     KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
       auto size = text.value.size();
-      if (size > R2_RPC_INLINE_BODY_LIMIT) {
+      if (size > R2_RPC_INLINE_STRING_LIMIT) {
         auto bytes = text.value.asBytes();
         return {.value = makeR2RpcMemoryStream(js, bytes, kj::heap(kj::mv(text.value))),
           .size = static_cast<double>(size)};
@@ -128,8 +131,8 @@ jsg::Ref<R2Error> R2Error::deserialize(jsg::Lock& js,
     jsg::Deserializer& deserializer,
     const jsg::TypeHandler<SerializableR2Error>& payloadHandler) {
   requireR2RpcDeserializer(deserializer);
-  auto payload = KJ_UNWRAP_OR(payloadHandler.tryUnwrap(js, deserializer.readValue(js)),
-      { JSG_FAIL_REQUIRE(DOMDataCloneError, "Deserialization failed: invalid R2 error payload"); });
+  auto payload = KJ_ASSERT_NONNULL(payloadHandler.tryUnwrap(js, deserializer.readValue(js)),
+      "Deserialization failed: invalid R2 error payload");
   auto result = js.alloc<R2Error>(payload.code, kj::mv(payload.message));
   result->action = kj::mv(payload.action);
   result->errorForStack = v8::Global<v8::Object>(
