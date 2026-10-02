@@ -44,7 +44,7 @@
       "url": "https://chromium.googlesource.com/chromium/deps/icu.git",
       "branch": "main",
       "build_file": "@v8//:bazel/BUILD.icu",
-      "freeze_commit": "8cc91d9b6ab9991802fd208ee03a69714fd0251c",
+      "freeze_commit": "6ebb40c594776cc2c21ea14df85a2a89a328b364",
       "patch_cmds": [
         "find source -name BUILD.bazel | xargs rm"
       ],

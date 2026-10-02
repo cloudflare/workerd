@@ -6,10 +6,10 @@ Subject: Port V8_USE_ZLIB support
 Change-Id: Icfedf3e90522f1ff5037517a39a5f0e3d44abace
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 3bb9dae232afc593343b2b11b3750baf3efdfa95..30e16e4ec102c04a4a4193214b10702e1fd5eb70 100644
+index 214bcd2dc166b04fc3ab8d3a034f7a5b8d40714a..a714df90df89e4932f2620ab6afeb60f0d6e5e57 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -174,6 +174,11 @@ v8_flag(name = "v8_enable_verify_predictable")
+@@ -170,6 +170,11 @@ v8_flag(name = "v8_enable_verify_predictable")
  
  v8_flag(name = "v8_enable_test_features")
  
@@ -21,7 +21,7 @@ index 3bb9dae232afc593343b2b11b3750baf3efdfa95..30e16e4ec102c04a4a4193214b10702e
  v8_flag(name = "v8_wasm_random_fuzzers")
  
  v8_flag(
-@@ -548,6 +553,7 @@ v8_config(
+@@ -551,6 +556,7 @@ v8_config(
          "v8_enable_vtunejit": "ENABLE_VTUNE_JIT_INTERFACE",
          "v8_enable_undefined_double": "V8_ENABLE_UNDEFINED_DOUBLE",
          "v8_use_host_cpu_arm_features": "V8_USE_HOST_CPU_ARM_FEATURES",
@@ -29,7 +29,7 @@ index 3bb9dae232afc593343b2b11b3750baf3efdfa95..30e16e4ec102c04a4a4193214b10702e
      },
      defines = [
          "GOOGLE3",
-@@ -4743,6 +4749,8 @@ v8_library(
+@@ -4948,6 +4954,8 @@ v8_library(
          "@highway//:hwy",
          "@fast_float",
          "@simdutf",
@@ -38,32 +38,6 @@ index 3bb9dae232afc593343b2b11b3750baf3efdfa95..30e16e4ec102c04a4a4193214b10702e
      ],
  )
  
-diff --git a/src/deoptimizer/frame-translation-builder.cc b/src/deoptimizer/frame-translation-builder.cc
-index d8d430ea39e6e1ede1125b6230d9ecd2ec275535..3433a528b3adaf1dc2a7310222311cf623ed7f25 100644
---- a/src/deoptimizer/frame-translation-builder.cc
-+++ b/src/deoptimizer/frame-translation-builder.cc
-@@ -13,7 +13,7 @@
- #include "src/objects/fixed-primitive-array-inl.h"
- 
- #ifdef V8_USE_ZLIB
--#include "third_party/zlib/google/compression_utils_portable.h"
-+#include <google/compression_utils_portable.h>
- #endif  // V8_USE_ZLIB
- 
- namespace v8 {
-diff --git a/src/objects/deoptimization-data.cc b/src/objects/deoptimization-data.cc
-index 7e8165f1f2e1f1bbedab71872635e66bc7cca217..a4ed8991674366cbff364cc3e69cfd04d7c53445 100644
---- a/src/objects/deoptimization-data.cc
-+++ b/src/objects/deoptimization-data.cc
-@@ -15,7 +15,7 @@
- #include "src/objects/shared-function-info.h"
- 
- #ifdef V8_USE_ZLIB
--#include "third_party/zlib/google/compression_utils_portable.h"
-+#include <google/compression_utils_portable.h>
- #endif  // V8_USE_ZLIB
- 
- namespace v8 {
 diff --git a/src/snapshot/snapshot-utils.cc b/src/snapshot/snapshot-utils.cc
 index ea04fcec0ecebd409d1ed9839dd0db3ac73160a9..e67eb478a0f49fa2a6c4f338e86a7e6a5e6d686f 100644
 --- a/src/snapshot/snapshot-utils.cc

@@ -1457,6 +1457,55 @@ declare abstract class SubtleCrypto {
     extractable: boolean,
     keyUsages: string[],
   ): Promise<CryptoKey>;
+  static supports(
+    operation: string,
+    algorithm:
+      | string
+      | SubtleCryptoGenerateKeyAlgorithm
+      | SubtleCryptoImportKeyAlgorithm
+      | SubtleCryptoDeriveKeyAlgorithm
+      | SubtleCryptoHashAlgorithm
+      | SubtleCryptoEncryptAlgorithm
+      | SubtleCryptoSignAlgorithm,
+    length?: number | null,
+  ): boolean;
+  static supports(
+    operation: string,
+    algorithm:
+      | string
+      | SubtleCryptoGenerateKeyAlgorithm
+      | SubtleCryptoImportKeyAlgorithm
+      | SubtleCryptoDeriveKeyAlgorithm
+      | SubtleCryptoHashAlgorithm
+      | SubtleCryptoEncryptAlgorithm
+      | SubtleCryptoSignAlgorithm,
+    additionalAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+  ): boolean;
+  encapsulateKey(
+    encapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+    encapsulationKey: CryptoKey,
+    sharedKeyAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+    extractable: boolean,
+    keyUsages: string[],
+  ): Promise<SubtleCryptoEncapsulatedKey>;
+  encapsulateBits(
+    encapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+    encapsulationKey: CryptoKey,
+  ): Promise<SubtleCryptoEncapsulatedBits>;
+  decapsulateKey(
+    decapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+    decapsulationKey: CryptoKey,
+    ciphertext: ArrayBuffer | ArrayBufferView,
+    sharedKeyAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+    extractable: boolean,
+    keyUsages: string[],
+  ): Promise<CryptoKey>;
+  decapsulateBits(
+    decapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+    decapsulationKey: CryptoKey,
+    ciphertext: ArrayBuffer | ArrayBufferView,
+  ): Promise<ArrayBuffer>;
+  getPublicKey(key: CryptoKey, keyUsages: string[]): Promise<CryptoKey>;
   timingSafeEqual(
     a: ArrayBuffer | ArrayBufferView,
     b: ArrayBuffer | ArrayBufferView,
@@ -1523,11 +1572,21 @@ interface JsonWebKey {
   qi?: string;
   oth?: RsaOtherPrimesInfo[];
   k?: string;
+  pub?: string;
+  priv?: string;
 }
 interface RsaOtherPrimesInfo {
   r?: string;
   d?: string;
   t?: string;
+}
+interface SubtleCryptoEncapsulatedBits {
+  sharedKey: ArrayBuffer;
+  ciphertext: ArrayBuffer;
+}
+interface SubtleCryptoEncapsulatedKey {
+  sharedKey: CryptoKey;
+  ciphertext: ArrayBuffer;
 }
 interface SubtleCryptoDeriveKeyAlgorithm {
   name: string;
@@ -1569,6 +1628,7 @@ interface SubtleCryptoSignAlgorithm {
   hash?: string | SubtleCryptoHashAlgorithm;
   dataLength?: number;
   saltLength?: number;
+  context?: ArrayBuffer | ArrayBufferView;
 }
 interface CryptoKeyKeyAlgorithm {
   name: string;
@@ -12755,8 +12815,6 @@ interface ArtifactsCreateRepoResult {
   remote: string;
   /** Plaintext access token (only returned at creation time). */
   token: string;
-  /** ISO 8601 token expiry timestamp. */
-  tokenExpiresAt: string;
 }
 /** Paginated list of repositories. */
 interface ArtifactsRepoListResult {
@@ -12799,11 +12857,62 @@ interface ArtifactsTokenListResult {
   total: number;
 }
 /**
- * Handle for a single repository. Returned by Artifacts.get().
+ * Classification of a Git tree entry derived from its mode.
  *
- * Methods may throw `ArtifactsError` with code `INTERNAL_ERROR` if an unexpected service error occurs.
+ * `tree` is a directory, `blob` is a regular file, `symlink` is a symbolic link,
+ * `gitlink` is a submodule reference, and `exec` is an executable file.
  */
-interface ArtifactsRepo extends ArtifactsRepoInfo {
+type ArtifactsTreeEntryType = "tree" | "blob" | "symlink" | "gitlink" | "exec";
+/** An immediate child of a Git tree returned by {@link ArtifactsRepo.readTree}. */
+interface ArtifactsTreeEntry {
+  /** Name relative to the tree being read. */
+  name: string;
+  /** Canonical Git mode, such as `100644` for a file or `40000` for a tree. */
+  mode: string;
+  /** Lowercase, 40-character SHA-1 object ID. */
+  hash: string;
+  /** Classification derived from `mode`. */
+  type: ArtifactsTreeEntryType;
+}
+/** Decoded metadata returned by {@link ArtifactsRepo.readCommit} and {@link ArtifactsRepo.log}. */
+interface ArtifactsCommitMetadata {
+  /** Lowercase, 40-character SHA-1 commit ID. */
+  hash: string;
+  /** Lowercase, 40-character SHA-1 ID of the commit's root tree. */
+  treeHash: string;
+  /** Commit message with one trailing newline removed, if present. */
+  message: string;
+  /** Author identity from the commit. */
+  author: {
+    /** Author name. */
+    name: string;
+    /** Author email address. */
+    email: string;
+  };
+  /** Committer identity from the commit. */
+  committer: {
+    /** Committer name. */
+    name: string;
+    /** Committer email address. */
+    email: string;
+  };
+  /** Parent commit IDs in Git order; empty for a root commit. */
+  parents: string[];
+  /** Author timestamp in Unix seconds. */
+  authoredAt: number;
+  /** Committer timestamp in Unix seconds. */
+  committedAt: number;
+}
+/**
+ * Repository capability returned by {@link Artifacts.get}.
+ *
+ * Metadata is available through {@link info}, not as properties on the capability.
+ * Methods may throw `ArtifactsError` with code `INTERNAL_ERROR` if an unexpected service error occurs.
+ *
+ * The capability is an RPC stub. Dispose of it when finished, for example with
+ * `using repo = await env.ARTIFACTS.get(name);`, to release it before the request ends.
+ */
+interface ArtifactsRepo extends Disposable {
   /**
    * Create an access token for this repo.
    * @param scope Token scope: "write" (default) or "read".
@@ -12823,6 +12932,66 @@ interface ArtifactsRepo extends ArtifactsRepoInfo {
    * @throws {ArtifactsError} with code `INVALID_INPUT` if tokenOrId is empty.
    */
   revokeToken(tokenOrId: string): Promise<boolean>;
+  /**
+   * Retrieve current repository metadata. Each call performs a fresh lookup.
+   * @returns Current public repository metadata.
+   * @throws {ArtifactsError} `NOT_FOUND` if the repository was deleted, or `INTERNAL_ERROR` on
+   * an unexpected lookup failure.
+   */
+  info(): Promise<ArtifactsRepoInfo>;
+  /**
+   * Read the raw bytes of a Git blob by object ID.
+   * @param hash Lowercase, 40-character SHA-1 object ID.
+   * @returns An untyped {@link Blob}, or `null` if the object is missing or is not a Git blob.
+   * @throws {ArtifactsError} `INVALID_INPUT` for a malformed hash, `MEMORY_LIMIT` if the object
+   * cannot be buffered safely, or `INTERNAL_ERROR` on an unexpected read failure.
+   * @see {@link ArtifactsRepo.readFile} to resolve a file by ref and path.
+   */
+  readBlob(hash: string): Promise<Blob | null>;
+  /**
+   * Read the immediate children of a Git tree by object ID.
+   * @param hash Lowercase, 40-character SHA-1 tree ID.
+   * @returns Tree entries, or `null` if the object is missing.
+   * @throws {ArtifactsError} `INVALID_INPUT` for a malformed hash, or `INTERNAL_ERROR` if the
+   * object is not a valid tree or the read fails unexpectedly.
+   * @see {@link ArtifactsTreeEntry}
+   */
+  readTree(hash: string): Promise<ArtifactsTreeEntry[] | null>;
+  /**
+   * Decode a Git commit by object ID.
+   * @param hash Lowercase, 40-character SHA-1 commit ID.
+   * @returns Commit metadata, or `null` if the object is missing.
+   * @throws {ArtifactsError} `INVALID_INPUT` for a malformed hash, or `INTERNAL_ERROR` if the
+   * object is not a valid commit or the read fails unexpectedly.
+   * @see {@link ArtifactsCommitMetadata}
+   */
+  readCommit(hash: string): Promise<ArtifactsCommitMetadata | null>;
+  /**
+   * Resolve a file from a branch, tag, or commit ID and return its bytes with a browser-safe
+   * content type in {@link Blob.type}.
+   * @param args File lookup options.
+   * @param args.ref Branch, tag, or commit ID to resolve.
+   * @param args.path Non-empty repository-relative path.
+   * @returns A MIME-typed {@link Blob}, or `null` if the ref or path cannot resolve to a file.
+   * @throws {ArtifactsError} `INVALID_INPUT` if either argument is empty, `MEMORY_LIMIT` if the
+   * file cannot be buffered safely, or `INTERNAL_ERROR` on an unexpected read failure.
+   */
+  readFile(args: { ref: string; path: string }): Promise<Blob | null>;
+  /**
+   * List commits along the first-parent chain, newest first.
+   * @param opts History options. All fields are optional.
+   * @param opts.ref Branch, tag, or commit ID; defaults to `HEAD`.
+   * @param opts.limit Maximum results; defaults to `50` and is capped at `1000`.
+   * @param opts.offset Number of matching commits to skip; defaults to `0`.
+   * @returns Commit metadata, or an empty array if the ref cannot be resolved.
+   * @throws {ArtifactsError} `INTERNAL_ERROR` on an unexpected traversal failure.
+   * @see {@link ArtifactsCommitMetadata}
+   */
+  log(opts?: {
+    ref?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ArtifactsCommitMetadata[]>;
   // ── Fork ──
   /**
    * Fork this repo to a new repo.
@@ -12850,6 +13019,7 @@ interface ArtifactsRepo extends ArtifactsRepoInfo {
 type ArtifactsErrorCode =
   | "ALREADY_EXISTS"
   | "NOT_FOUND"
+  | "CREATE_IN_PROGRESS"
   | "IMPORT_IN_PROGRESS"
   | "FORK_IN_PROGRESS"
   | "INVALID_INPUT"
@@ -12902,6 +13072,7 @@ interface Artifacts {
    * @param name Repository name.
    * @returns Repo handle.
    * @throws {ArtifactsError} with code `NOT_FOUND` if the repo does not exist.
+   * @throws {ArtifactsError} with code `CREATE_IN_PROGRESS` if the repo is still being created.
    * @throws {ArtifactsError} with code `IMPORT_IN_PROGRESS` if the repo is still importing.
    * @throws {ArtifactsError} with code `FORK_IN_PROGRESS` if the repo is still forking.
    */
@@ -15247,6 +15418,29 @@ declare abstract class D1PreparedStatement {
 // TypeScript's interface merging will ensure our empty interface is effectively
 // ignored when `Disposable` is included in the standard lib.
 interface Disposable {}
+declare module "cloudflare:durable-objects" {
+  /**
+   * Marks a Durable Object method as safe to run more than once. The runtime may then retry calls
+   * to it after a disconnect that might have happened after the method started. It does not
+   * enable retries or change how many are made.
+   *
+   * Each attempt creates its own return value, so if the method returns an `RpcTarget`, its
+   * `[Symbol.dispose]()` may run once per attempt.
+   *
+   * Only public instance methods can be decorated. When composing decorators, apply `@retryable`
+   * outermost (first in source order) so it marks the method that is finally installed.
+   * Otherwise `@retryable` has no effect, and constructing the object logs a warning.
+   * Requires standard (not `experimentalDecorators`) decorators and a bundler that transforms
+   * them, such as Wrangler.
+   */
+  export function retryable<This, Args extends unknown[], Return>(
+    value: (this: This, ...args: Args) => Return,
+    context: ClassMethodDecoratorContext<
+      This,
+      (this: This, ...args: Args) => Return
+    >,
+  ): (this: This, ...args: Args) => Return;
+}
 /**
  * The returned data after sending an email
  */
@@ -18306,10 +18500,18 @@ declare abstract class Workflow<PARAMS = unknown> {
     options?: WorkflowInstanceCreateOptions<PARAMS>,
   ): Promise<WorkflowInstance>;
   /**
-   * Create a batch of instances and return handle for all of them. If a provided id exists, an error will be thrown.
+   * Create a batch of instances and return handles for the created instances and any per-instance errors.
    * `createBatch` is limited at 100 instances at a time or when the RPC limit for the batch (1MiB) is reached.
-   * @param batch List of Options when creating an instance including name and params
-   * @returns A promise that resolves with a list of handles for the created instances.
+   * @param options Options for creating instances by count or from a list of instance options
+   * @returns A promise that resolves with the created instance handles and any per-instance errors.
+   */
+  public createBatch(
+    options: WorkflowBatchCreateOptions<PARAMS>,
+  ): Promise<WorkflowBatchCreateResult>;
+  /**
+   * Create a batch of instances and return handles for the ones that were created.
+   * Instances that could not be created, for example because their ID already exists, are omitted from the result without an error.
+   * @deprecated Use the object form of `createBatch` instead of the array form.
    */
   public createBatch(
     batch: WorkflowInstanceCreateOptions<PARAMS>[],
@@ -18323,6 +18525,33 @@ declare abstract class Workflow<PARAMS = unknown> {
    */
   public deleteBatch(instanceIds: string[]): Promise<WorkflowBatchDeleteResult>;
 }
+type WorkflowBatchCreateOptions<PARAMS = unknown> =
+  | {
+      count: number;
+      params?: PARAMS;
+      retention?: {
+        successRetention?: WorkflowRetentionDuration;
+        errorRetention?: WorkflowRetentionDuration;
+      };
+      locationHint?: WorkflowInstanceLocationHint;
+      instances?: never;
+    }
+  | {
+      instances: WorkflowInstanceCreateOptions<PARAMS>[];
+      count?: never;
+      params?: never;
+      retention?: never;
+      locationHint?: never;
+    };
+type WorkflowBatchCreateResult = {
+  created: WorkflowInstance[];
+  errors: {
+    index: number;
+    id?: string;
+    code: number;
+    message: string;
+  }[];
+};
 type WorkflowBatchDeleteResult = {
   deleted: {
     id: string;
