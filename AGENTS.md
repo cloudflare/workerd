@@ -187,6 +187,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Add Node.js compat     | `src/workerd/api/node/` (C++) + `src/node/` (TS)              | Dual-layer; register in `api/node/node.h` NODEJS_MODULES macro                                               |
 | Add Cloudflare API     | `src/cloudflare/`                                             | TypeScript; mock in `internal/test/<product>/`                                                               |
 | Modify compat flags    | `src/workerd/io/compatibility-date.capnp`                     | ~1400 lines; annotations define flag names + enable dates                                                    |
+| Compat date migration  | `docs/reference/compatibility-date-migration.md`             | Guide to date-driven versioning, flag adoption, opt-outs, and testing                                        |
 | Add autogate           | `src/workerd/util/autogate.h`                                 | Add key to WORKERD_AUTOGATES macro; kebab-case name auto-derived; see header comment                         |
 | Config schema          | `src/workerd/server/workerd.capnp`                            | Cap'n Proto; capability-based security                                                                       |
 | Worker lifecycle       | `src/workerd/io/worker.{h,c++}`                               | Isolate, Script, Worker, Actor classes                                                                       |
@@ -296,7 +297,7 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 ## Backward Compatibility
 
 - Strong backwards compatibility commitment - features cannot be removed or changed once deployed
-- We use compatibility-date.capnp to introduce feature flags when we need to change the behavior
+- We use compatibility-date.capnp to introduce feature flags when we need to change the behavior; see `docs/reference/compatibility-date-migration.md` for guidance on dates and flag adoption
 - Review additions to the standard API surface exposed to Workers, including
   those introduced by V8 updates. Record the compatibility decision in the
   commit message: use a compatibility flag or explicitly accept the risk.
