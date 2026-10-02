@@ -13,6 +13,8 @@ RUST_TARGET_TRIPLES = [
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
     allocator_library = "@rules_rust//ffi/rs:empty",
+    # Compiler-private plugins use this same nightly as rustfmt and sanitizer builds.
+    dev_components = True,
     edition = "2024",
     extra_rustc_flags_triples = {
         # Enable ISA extensions matching the ones used for C++.

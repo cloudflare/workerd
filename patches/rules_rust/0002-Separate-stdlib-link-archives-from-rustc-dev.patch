@@ -1,0 +1,79 @@
+Subject: [PATCH] Keep compiler-private rlibs out of native stdlib links
+
+Snapshot the rust-std archive libraries before rustc-dev is installed. Retain
+all sysroot inputs for compiler-private tools, but export only the runtime
+archives to C++ linkers. Compiler allocator archives must not replace or
+conflict with the application allocator.
+
+diff --git a/rust/private/toolchain.bzl b/rust/private/toolchain.bzl
+--- a/rust/private/toolchain.bzl
++++ b/rust/private/toolchain.bzl
+@@ -41,7 +41,8 @@
+     ]
+     panic_files = []
+ 
+-    std_rlibs = [f for f in rust_std if f.basename.endswith(".rlib")]
++    # Compiler-private rlibs remain sysroot inputs but are not native stdlib link inputs.
++    std_rlibs = ctx.files.link_rlibs or [f for f in rust_std if f.basename.endswith(".rlib")]
+     has_profiler_builtins = any(["profiler_builtins" in f.basename for f in std_rlibs])
+     if std_rlibs:
+         # test depends on std
+@@ -117,6 +118,10 @@
+             doc = "The list of targets/files that are components of the rust-stdlib file group",
+             mandatory = True,
+         ),
++        "link_rlibs": attr.label_list(
++            allow_files = [".rlib"],
++            doc = "The rust-std archive's rlibs for native linking; defaults to all srcs rlibs.",
++        ),
+     },
+ )
+ 
+diff --git a/rust/private/repository_utils.bzl b/rust/private/repository_utils.bzl
+--- a/rust/private/repository_utils.bzl
++++ b/rust/private/repository_utils.bzl
+@@ -297,6 +297,7 @@
+ 
+ rust_stdlib_filegroup(
+     name = "rust_std-{target_triple}",
++    link_rlibs = {link_rlibs},
+     srcs = glob(
+         [
+             "lib/rustlib/{target_triple}/lib/*.rlib",
+@@ -319,16 +320,18 @@
+ )
+ """
+ 
+-def BUILD_for_stdlib(target_triple):
++def BUILD_for_stdlib(target_triple, link_rlibs = []):
+     """Emits a BUILD file the stdlib archive.
+ 
+     Args:
+         target_triple (triple): The triple of the target platform
++        link_rlibs (list): The rlibs installed by the rust-std component.
+ 
+     Returns:
+         str: The contents of a BUILD file
+     """
+     return _build_file_for_stdlib_template.format(
++        link_rlibs = repr(link_rlibs),
+         binary_ext = system_to_binary_ext(target_triple.system),
+         staticlib_ext = system_to_staticlib_ext(target_triple.system, target_triple.abi),
+         dylib_ext = system_to_dylib_ext(target_triple.system),
+@@ -774,7 +777,15 @@
+         version = version,
+     )
+ 
+-    return BUILD_for_stdlib(target_triple), sha256
++    # Snapshot rust-std before rustc-dev installs compiler-private rlibs into
++    # the same directory. Those libraries belong in the sysroot, not C++ links.
++    lib_dir = "lib/rustlib/{}/lib".format(target_triple.str)
++    link_rlibs = sorted([
++        "{}/{}".format(lib_dir, file.basename)
++        for file in ctx.path(lib_dir).readdir()
++        if file.basename.endswith(".rlib")
++    ])
++    return BUILD_for_stdlib(target_triple, link_rlibs), sha256
+ 
+ def load_rustc_dev_nightly(ctx, target_triple, version, iso_date = None):
+     """Loads the nightly rustc dev component

@@ -1,0 +1,51 @@
+load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "driver_env",
+    src = "driver/Cargo.toml",
+)
+
+rust_library(
+    name = "internal",
+    srcs = glob(["internal/src/**/*.rs"]),
+    crate_features = ["rustup"],
+    crate_name = "dylint_internal",
+    crate_root = "internal/src/lib.rs",
+    edition = "2024",
+    tags = ["manual"],
+    deps = [
+        "@crates_vendor//:anyhow",
+        "@crates_vendor//:cargo_metadata",
+        "@crates_vendor//:log",
+        "@crates_vendor//:regex",
+    ],
+)
+
+# Build scripts and Cargo/rustup discovery are deliberately not part of this graph.
+rust_library(
+    name = "driver",
+    srcs = glob(["driver/src/**/*.rs"]),
+    compile_data = ["@workerd//build/tools/rust_lint:extra_symbols"],
+    crate_name = "dylint_driver",
+    crate_root = "driver/src/lib.rs",
+    edition = "2024",
+    proc_macro_deps = ["@crates_vendor//:rustversion"],
+    rustc_env = {
+        "OUT_DIR": "$(execpath @workerd//build/tools/rust_lint:extra_symbols)",
+        "RUSTUP_TOOLCHAIN": "bazel-pinned-nightly",
+    },
+    rustc_env_files = [":driver_env"],
+    rustc_flags = ["-Cprefer-dynamic"],
+    tags = ["manual"],
+    deps = [
+        ":internal",
+        "@crates_vendor//:anyhow",
+        "@crates_vendor//:libc",
+        "@crates_vendor//:log",
+        "@crates_vendor//:serde_json",
+        "@rust_lint_libloading//:libloading",
+    ],
+)

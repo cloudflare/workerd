@@ -1,0 +1,2 @@
+missing.rs: error[explicit_unsafe_policy]: module `ffi` must explicitly declare an unsafe-code policy
+missing.rs: error[explicit_unsafe_policy]: module `inherited_only` must explicitly declare an unsafe-code policy

@@ -1,0 +1,12 @@
+load(":extra_symbols.bzl", "dylint_extra_symbols")
+
+exports_files([
+    "BUILD.dylint",
+    "BUILD.libloading",
+])
+
+# Clippy's extra interned symbols are unnecessary for our rustc-only collection.
+dylint_extra_symbols(
+    name = "extra_symbols",
+    visibility = ["//visibility:public"],
+)

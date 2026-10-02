@@ -1,0 +1,1 @@
+denied_unsafe.rs: error[unsafe_code]: declaration of an `unsafe` function

@@ -63,6 +63,17 @@ http.file(
 )
 use_repo(http, "clang_tidy_linux_arm64")
 
+# dylint
+http.archive(
+    name = "dylint",
+    build_file = "@workerd//build/tools/rust_lint:BUILD.dylint",
+    sha256 = "1c5d20b12ec77bd494e97595185ed4364e44ca829532c7ad68860c9836e30aa6",
+    strip_prefix = "trailofbits-dylint-0e3d6eb",
+    type = "tgz",
+    url = "https://github.com/trailofbits/dylint/tarball/0e3d6eb2215ae6f5398a276c8fd01d3e44457fea",
+)
+use_repo(http, "dylint")
+
 # llvm_runtimes
 git_repository(
     name = "llvm_runtimes",
@@ -110,11 +121,23 @@ single_version_override(
     patch_strip = 1,
     patches = [
         "//:patches/rules_rust/0001-Propagate-coverage-info-through-link_deps.patch",
+        "//:patches/rules_rust/0002-Separate-stdlib-link-archives-from-rustc-dev.patch",
     ],
 )
 
 # rules_shell
 bazel_dep(name = "rules_shell", version = "0.8.0")
+
+# rust_lint_libloading
+http.archive(
+    name = "rust_lint_libloading",
+    build_file = "@workerd//build/tools/rust_lint:BUILD.libloading",
+    sha256 = "118733538694a83d9b2d5ae31cff93ab18ab064231e510bfe4a37ea82bde9ec8",
+    strip_prefix = "nagisa-rust_libloading-f5dc3b8",
+    type = "tgz",
+    url = "https://github.com/nagisa/rust_libloading/tarball/f5dc3b81485b978596d518f7574d941ff811bf74",
+)
+use_repo(http, "rust_lint_libloading")
 
 # rust_nightly
 RUST_NIGHTLY_VERSION = "nightly/2026-07-16"

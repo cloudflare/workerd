@@ -73,7 +73,8 @@
       "name": "rules_rust",
       "type": "bazel_dep",
       "patches": [
-        "//:patches/rules_rust/0001-Propagate-coverage-info-through-link_deps.patch"
+        "//:patches/rules_rust/0001-Propagate-coverage-info-through-link_deps.patch",
+        "//:patches/rules_rust/0002-Separate-stdlib-link-archives-from-rustc-dev.patch"
       ]
     },
     {
@@ -84,6 +85,23 @@
       "name": "rust_nightly",
       "type": "rust_nightly",
       "freeze_version": "2026-07-16"
+    },
+    // Source-built compiler-private lint driver and its dynamic library loader.
+    {
+      "name": "dylint",
+      "type": "github_tarball",
+      "owner": "trailofbits",
+      "repo": "dylint",
+      "branch": "master",
+      "build_file": "@workerd//build/tools/rust_lint:BUILD.dylint"
+    },
+    {
+      "name": "rust_lint_libloading",
+      "type": "github_tarball",
+      "owner": "nagisa",
+      "repo": "rust_libloading",
+      "branch": "master",
+      "build_file": "@workerd//build/tools/rust_lint:BUILD.libloading"
     },
     // wasm-tools
     {
