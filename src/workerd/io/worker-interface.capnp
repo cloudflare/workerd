@@ -551,6 +551,10 @@ enum SerializationTag {
   # A "wrapped binding": an application-level object (e.g. a D1Database) implemented in TypeScript
   # inside the runtime that wraps a single inner service stub. Serializes as the inner stub's
   # payload (per `serviceStub`) followed by the wrapper module name. See api/wrapped-binding.{h,c++}.
+
+  execOutput @18;
+  # Buffered container exec output: stdout and stderr ArrayBuffer values, then the exit code as
+  # a UInt32 containing the Int32 bit pattern.
 }
 
 enum StreamEncoding {
