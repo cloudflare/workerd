@@ -1236,10 +1236,15 @@ class NonCoercibleWrapper {
   }
 
   template <CoercibleType T>
-  v8::Local<v8::Value> wrap(Lock& js,
+  v8::Local<v8::Value> wrap(this auto&& self,
+      Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
-      NonCoercible<T>) = delete;
+      NonCoercible<T> value) {
+    // NonCoercible only constrains JS-to-C++ conversion. Wrapping its
+    // underlying value lets JSG_STRUCTs containing these fields cross JSRPC.
+    return self.wrap(js, context, creator, kj::mv(value.value));
+  }
 
   template <CoercibleType T>
   kj::Maybe<NonCoercible<T>> tryUnwrap(this auto&& self,
