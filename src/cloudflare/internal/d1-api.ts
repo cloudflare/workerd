@@ -34,8 +34,7 @@ type DirectQuerySuccess = {
 };
 
 type DirectQueryResponse =
-  | DirectQuerySuccess
-  | { success: false; error: Error };
+  DirectQuerySuccess | { success: false; error: Error };
 
 type QuerySql = {
   sql: string;

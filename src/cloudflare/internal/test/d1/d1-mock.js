@@ -139,14 +139,24 @@ export default {
   commitTokensReceived: [],
   commitTokensReturned: [],
   nextTokenExpected: null,
+  nextResponseLegacy: false,
 
   async query(params, env) {
+    const legacyResponse = this.nextResponseLegacy;
+    this.nextResponseLegacy = false;
     this.commitTokensReceived.push(params.bookmark ?? null);
 
     const stub = env.db.get(env.db.idFromName('test'));
     const response = await stub.query(params);
     if (params.bookmark) {
       response.bookmark = this.nextCommitToken();
+    }
+    if (legacyResponse) {
+      const results = { queryResults: response.results };
+      if (response.bookmark !== undefined) {
+        results.bookmark = response.bookmark;
+      }
+      return { success: true, results };
     }
     return response;
   },
@@ -222,11 +232,17 @@ export default {
         this.nextTokenExpected = new URL(request.url).searchParams.get('t');
         return respondTokens();
 
+      case '/commitTokens/legacyResponse':
+        // Only the next RPC query uses the legacy response envelope.
+        this.nextResponseLegacy = true;
+        return respondTokens();
+
       case '/commitTokens/reset':
         this.commitTokensReceived = [];
         this.commitTokensReturned = [];
         this.commitTokenNum = 0;
         this.nextTokenExpected = null;
+        this.nextResponseLegacy = false;
         return respondTokens();
 
       default:

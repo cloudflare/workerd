@@ -30,6 +30,32 @@ export const testDirectQuerySuccess = {
   },
 };
 
+export const testLegacyQuerySuccess = {
+  async test(_ctr, env) {
+    const bookmark = 'token-legacy';
+    for (const route of [
+      `/commitTokens/nextToken?t=${bookmark}`,
+      '/commitTokens/legacyResponse',
+    ]) {
+      const response = await env.d1MockFetcher.fetch(
+        `http://d1-api-test${route}`
+      );
+      assert.equal(response.status, 200);
+    }
+
+    const response = await env.d1.query({
+      queries: [{ sql: 'select ? as answer', params: [42] }],
+      bookmark: 'first-primary',
+    });
+    assert.deepEqual(Object.keys(response), ['results', 'bookmark']);
+    assert.deepEqual(
+      response.results.map((result) => result.data),
+      [{ kind: 'raw', columns: ['answer'], rows: [[42]] }]
+    );
+    assert.equal(response.bookmark, bookmark);
+  },
+};
+
 export const testThrownErrorsPropagate = {
   async test(_ctr, env) {
     const db = env.d1;

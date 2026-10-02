@@ -7,6 +7,7 @@ const unitTests :Workerd.Config = (
       modules = [(name = "worker", esModule = embed "d1-api-test-jsrpc-contract.js")],
       compatibilityFlags = ["experimental", "nodejs_compat", "d1_binding_jsrpc", "enhanced_error_serialization"],
       bindings = [
+        (name = "d1MockFetcher", service = "d1-mock"),
         (name = "d1", wrapped = (
           moduleName = "cloudflare-internal:d1-api",
           innerBindings = [(name = "fetcher", service = "d1-mock")],
