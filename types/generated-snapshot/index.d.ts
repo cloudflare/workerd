@@ -12402,12 +12402,18 @@ declare abstract class AiGateway {
 }
 /** A parameter accepted by an Analytics SQL query. */
 type AnalyticsSQLParameter = string | number | boolean | null;
-/** An Analytics SQL query and its optional positional or named parameters. */
+/** Optional timestamp bounds for an Analytics SQL query. */
+interface AnalyticsSQLTimeRange {
+  start?: string;
+  end?: string;
+}
+/** An Analytics SQL query with optional parameters and timestamp bounds. */
 interface AnalyticsSQLQuery {
   query: string;
   params?:
     | readonly AnalyticsSQLParameter[]
     | Readonly<Record<string, AnalyticsSQLParameter>>;
+  timeRange?: AnalyticsSQLTimeRange;
 }
 /** Execution statistics returned by Analytics SQL. */
 interface AnalyticsSQLStatistics {
