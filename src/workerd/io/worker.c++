@@ -758,7 +758,13 @@ struct Worker::Isolate::Impl {
       // DevTools inspector relies on.)
       bool enableInspectorForNodeModule =
           featureFlags.getEnableNodeJsInspectorLocalDev() && !isMultiTenantProcess();
-      if (inspectorPolicy != InspectorPolicy::DISALLOW || enableInspectorForNodeModule) {
+      // A PREPARE_SNAPSHOT zygote gets no inspector either way: V8Inspector pins the context and
+      // its own objects in global and traced handles that nothing resets ahead of CreateBlob(),
+      // and the zygote never serves a session. Consequently node:inspector's Session.connect()
+      // is unavailable while top-level code runs in the zygote.
+      bool wantInspector =
+          inspectorPolicy != InspectorPolicy::DISALLOW || enableInspectorForNodeModule;
+      if (wantInspector && !lock->isPreparingSnapshot()) {
         // We just created our isolate, so we don't need to use Isolate::Impl::Lock.
         KJ_ASSERT(!isMultiTenantProcess(), "inspector is not safe in multi-tenant processes");
         inspector = v8_inspector::V8Inspector::create(lock->v8Isolate, inspectorClient.get());
