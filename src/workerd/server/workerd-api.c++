@@ -216,9 +216,28 @@ class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Serv
 
 }  // namespace
 
+ExtensionModules::ExtensionModules(capnp::List<config::Extension>::Reader extensions) {
+  size_t count = 0;
+  for (auto extension: extensions) {
+    count += extension.getModules().size();
+  }
+  // The config message is not guaranteed to outlive the V8 strings created from these sources.
+  auto builder = kj::heapArrayBuilder<Module>(count);
+  for (auto extension: extensions) {
+    for (auto module: extension.getModules()) {
+      builder.add(Module{
+        .name = kj::str(module.getName()),
+        .internal = module.getInternal(),
+        .source = jsg::copyToArc(module.getEsModule().asArray()),
+      });
+    }
+  }
+  modules = builder.finish();
+}
+
 struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;
-  capnp::List<config::Extension>::Reader extensions;
+  kj::Arc<ExtensionModules> extensions;
   kj::Own<JsgIsolateObserver> observer;
   JsgWorkerdIsolate jsgIsolate;
   api::MemoryCacheProvider& memoryCacheProvider;
@@ -250,14 +269,14 @@ struct WorkerdApi::Impl final {
 
   Impl(jsg::V8System& v8System,
       CompatibilityFlags::Reader featuresParam,
-      capnp::List<config::Extension>::Reader extensionsParam,
+      kj::Arc<ExtensionModules> extensionsParam,
       v8::Isolate::CreateParams createParams,
       v8::IsolateGroup group,
       kj::Own<JsgIsolateObserver> observerParam,
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig = defaultConfig)
       : features(capnp::clone(featuresParam)),
-        extensions(extensionsParam),
+        extensions(kj::mv(extensionsParam)),
         observer(kj::atomicAddRef(*observerParam)),
         jsgIsolate(v8System,
             group,
@@ -284,7 +303,7 @@ struct WorkerdApi::Impl final {
 
 WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     CompatibilityFlags::Reader features,
-    capnp::List<config::Extension>::Reader extensions,
+    kj::Arc<ExtensionModules> extensions,
     v8::Isolate::CreateParams createParams,
     v8::IsolateGroup group,
     kj::Own<JsgIsolateObserver> observer,
@@ -293,7 +312,7 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     kj::Array<Worker::Api::InboundListener> inboundListeners)
     : impl(kj::heap<Impl>(v8System,
           features,
-          extensions,
+          kj::mv(extensions),
           kj::mv(createParams),
           group,
           kj::mv(observer),
@@ -547,12 +566,10 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
           lockParam, *modules, featureFlags, kj::mv(artifacts), impl->pythonConfig, source);
     }
 
-    for (auto extension: impl->extensions) {
-      for (auto module: extension.getModules()) {
-        modules->addBuiltinModule(module.getName(), module.getEsModule().asArray(),
-            module.getInternal() ? jsg::ModuleRegistry::Type::INTERNAL
-                                 : jsg::ModuleRegistry::Type::BUILTIN);
-      }
+    for (auto& module: impl->extensions->getModules()) {
+      modules->addBuiltinModule(module.name, module.source.addRef(),
+          module.internal ? jsg::ModuleRegistry::Type::INTERNAL
+                          : jsg::ModuleRegistry::Type::BUILTIN);
     }
   });
 }
@@ -882,7 +899,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
     const CompatibilityFlags::Reader& featureFlags,
     const PythonConfig& pythonConfig,
     const jsg::Url& bundleBase,
-    capnp::List<config::Extension>::Reader extensions,
+    const ExtensionModules& extensions,
     kj::Maybe<kj::String> maybeFallbackService,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) {
 
@@ -986,25 +1003,23 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
     jsg::modules::ModuleBundle::BuiltinBuilder privateExtensionsBuilder(
         jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
 
-    for (auto extension: extensions) {
-      for (auto module: extension.getModules()) {
-        KJ_IF_SOME(url, jsg::Url::tryParse(module.getName())) {
-          if (module.getInternal()) {
-            privateExtensionsBuilder.addEsm(url, module.getEsModule().asArray());
-          } else {
-            publicExtensionsBuilder.addEsm(url, module.getEsModule().asArray());
-          }
+    for (auto& module: extensions.getModules()) {
+      KJ_IF_SOME(url, jsg::Url::tryParse(module.name.asPtr())) {
+        if (module.internal) {
+          privateExtensionsBuilder.addEsm(url, module.source.addRef());
         } else {
-          // The new module registry identifies extension modules by URL, so
-          // the name must parse as an absolute URL (the legacy registry
-          // accepts any path-like name). Silently dropping the module would
-          // surface later as a confusing "Module not found" error at import
-          // time, so fail registry construction with an actionable error
-          // instead; makeWorkerImpl() reports it as a worker config error.
-          KJ_FAIL_REQUIRE(kj::str("Invalid extension module name \"", module.getName(),
-              "\": when the new_module_registry compatibility flag is enabled, extension "
-              "module names must be fully-qualified URLs (e.g. \"my-extension:module\")."));
+          publicExtensionsBuilder.addEsm(url, module.source.addRef());
         }
+      } else {
+        // The new module registry identifies extension modules by URL, so
+        // the name must parse as an absolute URL (the legacy registry
+        // accepts any path-like name). Silently dropping the module would
+        // surface later as a confusing "Module not found" error at import
+        // time, so fail registry construction with an actionable error
+        // instead; makeWorkerImpl() reports it as a worker config error.
+        KJ_FAIL_REQUIRE(kj::str("Invalid extension module name \"", module.name,
+            "\": when the new_module_registry compatibility flag is enabled, extension "
+            "module names must be fully-qualified URLs (e.g. \"my-extension:module\")."));
       }
     }
 

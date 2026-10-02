@@ -29,6 +29,8 @@ namespace workerd::server {
 
 using api::pyodide::PythonConfig;
 
+class ExtensionModules;
+
 // Implements the single-tenant Workers Runtime server / CLI.
 //
 // The purpose of this class is to implement the core logic independently of the CLI itself,
@@ -269,12 +271,11 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::Own<Service> makeDiskDirectoryService(kj::StringPtr name,
       config::DiskDirectory::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
-  kj::Promise<kj::Own<Service>> makeWorker(kj::StringPtr name,
-      config::Worker::Reader conf,
-      capnp::List<config::Extension>::Reader extensions);
+  kj::Promise<kj::Own<Service>> makeWorker(
+      kj::StringPtr name, config::Worker::Reader conf, kj::Arc<ExtensionModules> extensions);
   kj::Promise<kj::Own<Service>> makeService(config::Service::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
-      capnp::List<config::Extension>::Reader extensions);
+      kj::Arc<ExtensionModules> extensions);
 
   // Aborts all actors in this server except those in namespaces marked with `preventEviction`.
   void abortAllActors(kj::Maybe<const kj::Exception&> reason);
@@ -358,7 +359,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   struct WorkerDef;
   kj::Promise<kj::Own<WorkerService>> makeWorkerImpl(kj::StringPtr name,
       WorkerDef def,
-      capnp::List<config::Extension>::Reader extensions,
+      kj::Arc<ExtensionModules> extensions,
       ErrorReporter& errorReporter);
 
   kj::Promise<void> startServices(jsg::V8System& v8System,
