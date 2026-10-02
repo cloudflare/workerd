@@ -1,0 +1,35 @@
+.github/workflows/_bazel.yml
+  s_ad98b07a2ebbe9::t_a9fb64cf09ac5e 74-77,135-139
+.github/workflows/test.yml
+  s_ad98b07a2ebbe9::t_52f71b67fedc36 127
+BUILD.bazel
+  s_ad98b07a2ebbe9::t_de21fc5ce610d5 137-140
+build/fixtures/BUILD.bazel
+  s_ad98b07a2ebbe9::t_9eff37ff68bf33 1-4
+build/fixtures/rust_io_link_check.sh
+  s_ad98b07a2ebbe9::t_d28baa3d4db428 1-83
+build/rust_io_backend.bzl
+  s_ad98b07a2ebbe9::t_1c8d11466ecdb0 1-13
+build/rust_io_graph_check.sh
+  s_ad98b07a2ebbe9::t_09bc6a1cea85b4 1-29
+justfile
+  s_ad98b07a2ebbe9::t_8260534707c318 53-56
+src/workerd/server/BUILD.bazel
+  s_ad98b07a2ebbe9::t_ea48c807b55271 4,105-131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2776fbed340251bd9c205a2ccb24cab232a4ebf2",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

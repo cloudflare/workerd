@@ -1,0 +1,19 @@
+src/cloudflare/internal/test/ai/ai-mock.js
+  s_2cdd765712a8b4::t_1c628494edf996 37-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "efdad6ef1ea434e7224a9e8c01ba08cb180c1399",
+  "prompts": {},
+  "sessions": {
+    "s_2cdd765712a8b4": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f55d4107cffeJXFCGcTLZqD1m0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Phani Raj <phani@cloudflare.com>"
+    }
+  }
+}

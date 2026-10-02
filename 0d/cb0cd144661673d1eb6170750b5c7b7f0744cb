@@ -1,0 +1,27 @@
+src/rust/cxx-integration-test/BUILD.bazel
+  s_ad98b07a2ebbe9::t_a8e6209509878d 25-26
+src/rust/worker/BUILD
+  s_ad98b07a2ebbe9::t_f1e4efb00a68e6 58-59
+src/workerd/io/BUILD.bazel
+  s_ad98b07a2ebbe9::t_1ccfc4a0a9644e 638-639
+src/workerd/server/BUILD.bazel
+  s_ad98b07a2ebbe9::t_1e0ce40ef0a53e 379-380,424-425,435-436
+src/workerd/tests/BUILD.bazel
+  s_ad98b07a2ebbe9::t_193ba38a58c73c 82-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0dcb0cd144661673d1eb6170750b5c7b7f0744cb",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

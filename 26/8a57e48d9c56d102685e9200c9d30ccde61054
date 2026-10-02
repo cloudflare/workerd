@@ -1,0 +1,31 @@
+build/wd_rust_binary.bzl
+  s_dadaf0660bfcbe::t_4124270fec4e51 63,67-69
+build/wd_rust_crate.bzl
+  s_dadaf0660bfcbe::t_d5e29cec78bed3 11,18-38,54,58-68,72-73,181,187-189
+src/rust/AGENTS.md
+  s_dadaf0660bfcbe::t_bf6652cd1b8dd7 96-101,116,122,125
+src/rust/jsg-test/BUILD.bazel
+  s_dadaf0660bfcbe::t_17334e140b8f92 20
+src/rust/jsg/BUILD.bazel
+  s_dadaf0660bfcbe::t_7c6c3fe6e59025 47-48
+src/rust/kj/BUILD.bazel
+  s_dadaf0660bfcbe::t_487519063c07f1 38
+src/rust/worker/BUILD
+  s_dadaf0660bfcbe::t_0589df4f04082a 13,16,19,46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "268a57e48d9c56d102685e9200c9d30ccde61054",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

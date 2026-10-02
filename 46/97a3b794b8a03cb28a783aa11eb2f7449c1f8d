@@ -1,0 +1,43 @@
+src/workerd/api/global-scope.c++
+  s_78769e78586072::t_bde1ced2c7a061 198,802-861
+src/workerd/api/tests/BUILD.bazel
+  s_78769e78586072::t_08f41f991a8422 600-605
+src/workerd/api/tests/do-on-evict-test.js
+  s_78769e78586072::t_d769586e552f8a 1-346
+src/workerd/api/tests/do-on-evict-test.wd-test
+  s_78769e78586072::t_2c36b36f0297d9 1-45
+src/workerd/io/incoming-request-test.c++
+  s_78769e78586072::t_eaa6fa252ff613 126-170
+src/workerd/io/io-context.c++
+  s_78769e78586072::t_0040c886d45ab3 370-395
+src/workerd/io/io-context.h
+  s_78769e78586072::t_0a04ad9a94f155 137-147
+src/workerd/io/limit-enforcer.h
+  s_78769e78586072::t_eafc23214a10b9 177-190
+src/workerd/io/worker.h
+  s_78769e78586072::t_9c3a24c99196f0 51,64,641-643,885-898,1085-1109
+src/workerd/server/server.c++
+  s_78769e78586072::t_8c2241589caad4 14,328-335,609-621,624-629,631-638,643-644,861-882,1086-1106,1121-1153,1157,1165,1180-1184,1187-1200,1206-1234,1237,1241-1252,1256-1259,2156-2161,4073-4089,4281-4285,5629-5633
+src/workerd/server/workerd-api.c++
+  s_78769e78586072::t_8fc4a43863a9d0 332-343
+src/workerd/server/workerd-api.h
+  s_78769e78586072::t_5423ff325f0a5f 58
+src/workerd/util/uncaught-exception-source.h
+  s_78769e78586072::t_f9ee2d4b9f093e 17,34-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4697a3b794b8a03cb28a783aa11eb2f7449c1f8d",
+  "prompts": {},
+  "sessions": {
+    "s_78769e78586072": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fbc9ebe86ffeC6UD7t8jfQyh7x",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

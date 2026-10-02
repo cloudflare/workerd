@@ -1,0 +1,25 @@
+src/workerd/server/BUILD.bazel
+  s_ad98b07a2ebbe9::t_7f8b5f960970a5 70,85-96
+src/workerd/server/cli-io-backend.c++
+  s_ad98b07a2ebbe9::t_547434910dc22c 1-263
+src/workerd/server/cli-io-backend.h
+  s_ad98b07a2ebbe9::t_6fda70f41a8cbf 1-54
+src/workerd/server/workerd.c++
+  s_ad98b07a2ebbe9::t_2143bcfc472c7d 12,946,1001-1002,1195,1224,1252-1253,1348,1542
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7834c5fbb9d9aef6227d2c490919622d7fc8369f",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

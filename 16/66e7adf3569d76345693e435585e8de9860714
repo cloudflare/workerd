@@ -1,0 +1,43 @@
+src/workerd/api/tracing.c++
+  s_0346b04e92a043::t_dda5fb61910c06 37-50,120-122
+types/generated-snapshot/definitions/experimental/index.ts
+  s_0346b04e92a043::t_4f1352c9d49a39 1-17220
+types/generated-snapshot/definitions/index.d.ts
+  s_0346b04e92a043::t_4f1352c9d49a39 1-16986
+src/workerd/api/tests/BUILD.bazel
+  s_0346b04e92a043::t_ef41cfba208c65 163
+src/workerd/io/BUILD.bazel
+  s_0346b04e92a043::t_16927cafa1b852 280
+src/workerd/api/tests/tail-worker-test.wd-test
+  s_0346b04e92a043::t_e4c13f60336e85 32-43
+src/workerd/io/trace-test.c++
+  s_0346b04e92a043::t_4f1352c9d49a39 444
+  s_0346b04e92a043::t_a01eca858bfa75 452,458
+src/workerd/io/trace-stream.c++
+  s_0346b04e92a043::t_8d07af36d8d50d 98,525-532
+types/generated-snapshot/definitions/experimental/index.d.ts
+  s_0346b04e92a043::t_4f1352c9d49a39 1-17261
+src/workerd/api/tests/tail-worker-test.js
+  s_0346b04e92a043::t_4f1352c9d49a39 264,266,268,270,272,274
+  s_0346b04e92a043::t_91ef0c603e4a2b 164-227,250,252,254,427-433
+types/generated-snapshot/definitions/index.ts
+  s_0346b04e92a043::t_4f1352c9d49a39 1-16945
+src/workerd/api/tests/stw-large-log-subject.js
+  s_0346b04e92a043::t_347a10a118c34b 1-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1666e7adf3569d76345693e435585e8de9860714",
+  "prompts": {},
+  "sessions": {
+    "s_0346b04e92a043": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0563c77b5ffezzIEHES5TkOBL8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ibrahim Khajanchi <ikhajanchi@cloudflare.com>"
+    }
+  }
+}

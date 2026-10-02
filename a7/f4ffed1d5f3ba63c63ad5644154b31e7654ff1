@@ -1,0 +1,43 @@
+src/workerd/tests/test-fixture.c++
+  s_80fd8e845a3525::t_9997631a6d2961 405-406,433-434
+src/workerd/util/autogate.h
+  s_6ba2030b43c23b::t_eab58e56c73519 96-100
+src/workerd/api/bench-jsrpc-sender.c++
+  s_6ba2030b43c23b::t_0a22bd0c98185d 97-102
+src/workerd/api/http.c++
+  s_6ba2030b43c23b::t_007b611dd64581 2318-2319,2329,2332-2339,2343-2350,2730-2740,2742-2743,2761
+src/workerd/api/worker-rpc.h
+  s_80fd8e845a3525::t_c640e04bdf0bf8 17,311-312,349-350,446-447,559-560
+src/workerd/tests/test-fixture.h
+  s_80fd8e845a3525::t_95fd13cf44b6ed 274
+src/workerd/api/jsrpc-call-plan-test.c++
+  s_6ba2030b43c23b::t_b852b4bedc900c 33,35-40,43,51-57,59-61,330-332,334-336,338-341,355-356,363-365,463-561
+src/workerd/api/http.h
+  s_6ba2030b43c23b::t_e6859a1f22eb35 339-344,439-440
+src/workerd/api/worker-rpc.c++
+  s_6ba2030b43c23b::t_9443d0d69ccf15 453-455,519-521,629,632,716-724,1043-1045
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a7f4ffed1d5f3ba63c63ad5644154b31e7654ff1",
+  "prompts": {},
+  "sessions": {
+    "s_6ba2030b43c23b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f7fdd34c1ffeJ4joNLMehWneBI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_80fd8e845a3525": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f6e9d45fbffe5iEZ6BSRFX4oBB",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

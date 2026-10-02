@@ -1,0 +1,21 @@
+src/cloudflare/internal/test/tracing/opentelemetry-context-test.js
+  s_b27eb293e3a79c::t_c34e658e7211e1 86-89,120
+src/cloudflare/internal/test/tracing/opentelemetry-context-instrumentation-test.js
+  s_b27eb293e3a79c::t_c34e658e7211e1 26-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9c7cdf23c67af8b9e4a9c747c26652d7c1434107",
+  "prompts": {},
+  "sessions": {
+    "s_b27eb293e3a79c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_077f20387ffed8e7iIyvCiLbfx",
+        "model": "gpt-5.6"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    }
+  }
+}

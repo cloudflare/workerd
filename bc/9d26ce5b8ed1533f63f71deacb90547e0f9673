@@ -1,0 +1,22 @@
+ci/v8_nightly_shared.py
+  s_03acf2309a4ac3::t_92d020c56a3b09 160-161
+  s_03acf2309a4ac3::t_0ac3bb38fa13d3 107-110
+cfsetup.yaml
+  s_03acf2309a4ac3::t_f5419e66b8ee88 52-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bc9d26ce5b8ed1533f63f71deacb90547e0f9673",
+  "prompts": {},
+  "sessions": {
+    "s_03acf2309a4ac3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_075d7c3a5ffeUU1f0YdOY4tEVX",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+build/deps/v8.MODULE.bazel
+  s_6b793593ea8bda::t_d73a6a9586b760 64
+patches/v8/0039-build-Fix-cluster-build-and-macro-hygiene.patch
+  s_6b793593ea8bda::t_d73a6a9586b760 1-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dcaff3d27ddbea9a7443874420068bc27bdcfe6b",
+  "prompts": {},
+  "sessions": {
+    "s_6b793593ea8bda": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_037d52815ffejhMeUv0OdI6PHz",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+build/deps/deps.jsonc
+  s_f6f00775d66ba2::t_9850f57a8b2299 117
+build/deps/gen/deps.MODULE.bazel
+  s_f6f00775d66ba2::t_4a56c5f33f9f1e 130-131,133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dc39b9bbcac8d892d3f9c69fa6c77d58000b49f4",
+  "prompts": {},
+  "sessions": {
+    "s_f6f00775d66ba2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f1661a89cffewYt0kIhk6ssfL2",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}

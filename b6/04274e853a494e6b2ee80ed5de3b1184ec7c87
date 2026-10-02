@@ -1,0 +1,30 @@
+src/workerd/io/worker-entrypoint.c++
+  s_1c76ae2bf94860::t_c4b6bd1f476ca4 373-379,468-469,490-494,496,516-517,519-523,538-539,544-546,640-642,644
+src/workerd/io/worker-entrypoint-test.c++
+  s_1c76ae2bf94860::t_505471edd49bce 95-106,109-113,115-129,131,134-146,149-161,269-273,275-279,284,288,290-300,303-307,309-323,328-348,351,356-357,360-362,364-367,370,372-373,376-378,381,387,389-390
+src/workerd/api/jsrpc-call-plan-test.c++
+  s_1c76ae2bf94860::t_486bc3f1b71897 760-794,797-804,806-815,819-831,835-836,838-849,853-873,875-942,944-945
+  s_6ba2030b43c23b::t_fa7a8cd560fb01 832-834,837
+src/workerd/api/worker-rpc.c++
+  s_1c76ae2bf94860::t_7f3b3153c290dd 2015-2018,2210-2212,2668-2670,3027,3038,3047,3140-3149,3190-3202,3205-3213,3238-3240
+src/workerd/io/observer.h
+  s_1c76ae2bf94860::t_a5d601229e66be 211-216
+src/workerd/jsg/exception.h
+  s_1c76ae2bf94860::t_ebc4bd5ef840d3 191-194,197-199,202-208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b604274e853a494e6b2ee80ed5de3b1184ec7c87",
+  "prompts": {},
+  "sessions": {
+    "s_1c76ae2bf94860": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2d898ceeffeUeaNXVDLn1H391",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

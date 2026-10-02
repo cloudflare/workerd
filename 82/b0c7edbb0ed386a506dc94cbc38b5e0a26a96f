@@ -1,0 +1,26 @@
+src/workerd/util/sqlite.c++
+  s_3f7421ac37d418::t_f1e994d4deeed4 516-518
+src/workerd/util/sqlite-test.c++
+  s_3f7421ac37d418::t_57eecef87e5ef9 1813-1815,1817,1819-1821,1827,1847-1857
+  s_3f7421ac37d418::t_2e4384962c6697 1811-1812
+  s_3f7421ac37d418::t_e75f733f690be5 1816
+  s_3f7421ac37d418::t_d27519e9a0f758 1818
+  s_3f7421ac37d418::t_594de84b41d429 1822-1826
+  s_3f7421ac37d418::t_ec045b9e654b04 1828-1830,1844-1846
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "82b0c7edbb0ed386a506dc94cbc38b5e0a26a96f",
+  "prompts": {},
+  "sessions": {
+    "s_3f7421ac37d418": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_08f76492bffe8hyIJCQEsdW7LK",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Josh Howard <jhoward@cloudflare.com>"
+    }
+  }
+}

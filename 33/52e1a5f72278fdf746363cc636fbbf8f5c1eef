@@ -1,0 +1,37 @@
+build/deps/gen/build_deps.MODULE.bazel
+  s_dadaf0660bfcbe::t_7976c3262190ad 108-114
+patches/rules_rust/0001-Propagate-coverage-info-through-link_deps.patch
+  s_dadaf0660bfcbe::t_f185b19cbb136e 1-24
+.bazelrc
+  s_dadaf0660bfcbe::t_88ec39f1ea3151 517-521
+build/wd_rust_binary.bzl
+  s_dadaf0660bfcbe::t_5d399d97e44244 1,5-36,107-114
+build/deps/build_deps.jsonc
+  s_dadaf0660bfcbe::t_30726ecb295d15 74-77
+src/workerd/server/BUILD.bazel
+  s_dccdbcee9eb73b::t_9f35ad6b1cd710 123,155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3352e1a5f72278fdf746363cc636fbbf8f5c1eef",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_dccdbcee9eb73b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a07663-3837-7741-892f-3e0fae2953db",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
