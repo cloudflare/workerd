@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+// Module registration constructs locks from C++ isolate pointers.
+#![allow(unsafe_code)]
 // Production code must not panic; test code is exempt via clippy.toml allow-*-in-tests.
 #![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
 #![deny(clippy::todo, clippy::unimplemented)]
@@ -18,6 +20,12 @@ pub mod url;
 
 #[cxx::bridge(namespace = "workerd::rust::api")]
 mod ffi {
+    #![allow(unsafe_code)]
+    #![expect(
+        clippy::allow_attributes,
+        reason = "CXX emits an outer unsafe-code policy"
+    )]
+
     #[namespace = "workerd::rust::jsg"]
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");

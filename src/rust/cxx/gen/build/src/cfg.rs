@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::fmt::Debug;
 use std::fmt::{self};
 use std::marker::PhantomData;
@@ -342,6 +344,9 @@ pub use self::r#impl::Cfg::CFG;
 
 #[cfg(not(doc))]
 mod r#impl {
+    // Deref uses pointers into the thread-local configuration side table.
+    #![allow(unsafe_code)]
+
     use std::cell::RefCell;
     use std::fmt::Debug;
     use std::fmt::{self};

@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! The CXX code generator for constructing and compiling C++ code.
 //!
 //! This is intended to be used from Cargo build scripts to execute CXX's

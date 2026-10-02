@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 #![allow(missing_docs)]
 #![allow(dead_code)]
 

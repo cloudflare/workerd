@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![allow(unsafe_code)]
+
 //! `CxxWorkerInterface`: wraps a C++ `workerd::WorkerInterface` and exposes it as a Rust
 //! `worker::Interface`.
 //!

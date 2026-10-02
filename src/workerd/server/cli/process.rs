@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! The running process as the C++ driver sees it: our own executable (and the config `workerd
 //! compile` appended to it), the files `--watch` watches, and the listen sockets inherited through
 //! `--socket-fd`.

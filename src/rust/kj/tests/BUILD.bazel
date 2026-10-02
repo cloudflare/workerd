@@ -1,6 +1,8 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
+package(default_testonly = True)
+
 wd_rust_crate(
     name = "tests",
     cxx_bridge_deps = [

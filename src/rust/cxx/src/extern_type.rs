@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use alloc::string::String;
 
 use self::kind::Kind;
@@ -151,6 +153,8 @@ pub unsafe trait ExternType {
 /// impls of the `ExternType` trait. Refer to the documentation of `Kind` for an
 /// overview of their purpose.
 pub mod kind {
+    #![deny(unsafe_code)]
+
     use super::private;
 
     /// An opaque type which cannot be passed or held by value within Rust.
@@ -177,6 +181,8 @@ pub mod kind {
 }
 
 mod private {
+    #![deny(unsafe_code)]
+
     pub trait Sealed {}
     impl Sealed for super::Opaque {}
     impl Sealed for super::Trivial {}

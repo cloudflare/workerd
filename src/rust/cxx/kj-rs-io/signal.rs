@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! tokio-backed signal watching: POSIX signals on Unix, the corresponding console control
 //! events on Windows.
 //!

@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! Where the config comes from: a Cap'n Proto schema file (compiled by C++, the only compiler for
 //! that format), an encoded config file (`--binary`), stdin, the config compiled into the
 //! executable, or the config `make-pyodide-baseline-snapshot` synthesizes. Every source is
@@ -124,7 +126,9 @@ impl fmt::Display for ffi::ConfigParseError {
 /// Converts bytes to native-endian words, ignoring a trailing partial word.
 pub fn words_from_bytes(bytes: &[u8]) -> Vec<u64> {
     bytes
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .map(|chunk| {
             let mut word = [0u8; 8];
             word.copy_from_slice(chunk);

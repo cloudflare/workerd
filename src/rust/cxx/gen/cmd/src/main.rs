@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 #![cfg_attr(not(check_cfg), allow(unexpected_cfgs))]
 #![allow(
     clippy::cast_sign_loss,

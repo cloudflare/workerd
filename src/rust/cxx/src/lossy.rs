@@ -1,3 +1,6 @@
+// UTF-8 error offsets delimit prefixes that can be decoded without another validation pass.
+#![allow(unsafe_code)]
+
 use core::char;
 use core::fmt::Write as _;
 use core::fmt::{self};

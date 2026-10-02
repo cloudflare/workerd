@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
 

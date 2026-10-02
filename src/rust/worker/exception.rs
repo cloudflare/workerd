@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![deny(unsafe_code)]
+
 // NOTE: Constants in this file must match `workerd/util/exception.h`
 
 /// If an exception is thrown for exceeding CPU time limits, it will contain this detail.

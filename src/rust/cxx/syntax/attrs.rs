@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use proc_macro2::Ident;
 use proc_macro2::TokenStream;
 use quote::ToTokens;
@@ -207,6 +209,8 @@ enum DocAttribute {
 }
 
 mod kw {
+    #![deny(unsafe_code)]
+
     syn::custom_keyword!(hidden);
 }
 

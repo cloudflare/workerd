@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![allow(unsafe_code)]
+
 //! V8 JavaScript engine bindings and garbage collector integration.
 //!
 //! This module provides Rust wrappers for V8 types and integration with the C++ `Wrappable`
@@ -48,6 +50,12 @@ use crate::Resource;
 #[expect(clippy::missing_safety_doc)]
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 pub mod ffi {
+    #![allow(unsafe_code)]
+    #![expect(
+        clippy::allow_attributes,
+        reason = "CXX emits an outer unsafe-code policy"
+    )]
+
     #[derive(Debug)]
     struct Local {
         ptr: usize,

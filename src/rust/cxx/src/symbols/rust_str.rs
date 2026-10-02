@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use alloc::string::String;
 use core::mem::MaybeUninit;
 use core::ptr;

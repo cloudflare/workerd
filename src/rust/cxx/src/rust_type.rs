@@ -1,3 +1,4 @@
+#![allow(unsafe_code)]
 #![allow(missing_docs)]
 
 pub unsafe trait RustType {}

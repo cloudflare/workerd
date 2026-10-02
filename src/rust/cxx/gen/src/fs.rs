@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 #![allow(dead_code)]
 
 use std::error::Error as StdError;

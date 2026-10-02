@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::fmt::Display;

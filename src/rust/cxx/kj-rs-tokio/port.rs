@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! Per-thread tokio `current_thread` runtime management and the Rust half of `TokioEventPort`.
 
 use std::cell::RefCell;

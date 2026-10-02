@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::fmt::Display;
 use std::fmt::Write;
 use std::fmt::{self};

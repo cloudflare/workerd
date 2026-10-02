@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 #![allow(
     clippy::cast_sign_loss,
     clippy::doc_markdown,

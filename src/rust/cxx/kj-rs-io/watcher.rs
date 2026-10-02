@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! The `--watch` file watcher, over the `notify` crate (inotify on Linux, `FSEvents` on macOS,
 //! `ReadDirectoryChangesW` on Windows).
 //!

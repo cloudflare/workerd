@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! Rust-native access to workerd compatibility flags.
 //!
 //! ```ignore

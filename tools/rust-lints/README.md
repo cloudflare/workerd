@@ -177,6 +177,15 @@ The Bazel production crates include `src/rust/`, the server CLI and `workerd`
 binary, and `src/workerd/tools:param_extractor_bin`. Generated Cap'n Proto roots
 and empty generated dependency-resolver roots are not authored modules.
 
+Imported CXX parser, proc-macro, and generator modules use `deny` except for
+specific implementation islands: transparent borrowed key casts, the thread-local
+configuration side table, and the optional clang AST memory mapping. CXX runtime
+ABI/layout/ownership modules and authored KJ smart-pointer/future/waker bindings
+explicitly allow their unsafe operations. Safe children and re-export modules
+use `deny`; existing `forbid` restrictions are preserved. CLI descriptor handling
+and dedicated bridges remain unsafe islands. Test-support packages use Bazel
+`testonly` metadata and need no unsafe-policy migration.
+
 Linux arm64/macOS arm64 packaging and additional host/target/feature configuration
 coverage remain work to do.
 

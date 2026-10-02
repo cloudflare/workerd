@@ -1,3 +1,6 @@
+// The clang AST dump is read through a memory mapping.
+#![allow(unsafe_code)]
+
 use std::env;
 use std::fmt::Display;
 use std::fmt::{self};

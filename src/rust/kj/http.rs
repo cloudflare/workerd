@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use std::marker::PhantomData;
 use std::pin::Pin;
 
@@ -14,6 +16,12 @@ use crate::io::AsyncIoStream;
 #[cxx::bridge(namespace = "kj::rust")]
 #[expect(clippy::missing_safety_doc)]
 pub mod ffi {
+    #![allow(unsafe_code)]
+    #![expect(
+        clippy::allow_attributes,
+        reason = "CXX emits an outer unsafe-code policy"
+    )]
+
     unsafe extern "C++" {
         include!("workerd/rust/kj/ffi.h");
     }

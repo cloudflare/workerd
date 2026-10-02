@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![allow(unsafe_code)]
+
 use std::future::Future;
 use std::num::ParseIntError;
 use std::ops::Deref;
@@ -43,6 +45,12 @@ pub use wrappable::Traced;
 
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 mod ffi {
+    #![allow(unsafe_code)]
+    #![expect(
+        clippy::allow_attributes,
+        reason = "CXX emits an outer unsafe-code policy"
+    )]
+
     extern "Rust" {
         type Realm;
 

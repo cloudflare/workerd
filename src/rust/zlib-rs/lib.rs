@@ -3,6 +3,7 @@
 // by the routing layer (src/workerd/util/zlib-router.c++), which forwards to
 // these or to the chromium implementation (Cr_z_*) based on the compression-rs
 // autogate.
+#![allow(unsafe_code)]
 #![allow(non_snake_case)]
 // Thin forwarders to the libz-rs-sys C API: each wrapper has exactly the safety contract of the
 // zlib function it forwards to.

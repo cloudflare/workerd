@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::collections::BTreeSet as Set;
 
 use quote::quote;

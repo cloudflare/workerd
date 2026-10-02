@@ -12,6 +12,12 @@ pub use crate::process::wait_for_changes;
 
 #[cxx::bridge(namespace = "workerd::server::cli")]
 pub mod ffi {
+    #![allow(unsafe_code)]
+    #![expect(
+        clippy::allow_attributes,
+        reason = "CXX emits an outer unsafe-code policy"
+    )]
+
     /// A `<name>=<value>` option value.
     struct Override {
         name: String,

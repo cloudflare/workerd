@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 // Functionality that is shared between the cxxbridge macro and the cmd.
 
 // NOTE(workerd-cxx): upstream is really messy

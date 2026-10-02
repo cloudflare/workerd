@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::hash::Hash;
 use std::hash::Hasher;
 

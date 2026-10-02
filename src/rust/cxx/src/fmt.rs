@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use core::fmt::Display;
 use core::fmt::{self};
 

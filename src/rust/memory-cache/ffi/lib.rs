@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! Generated workerd-cxx boundary for the safe memory-cache crate.
 
 #![expect(
@@ -12,6 +14,12 @@ use kj_rs::KjMaybe;
 
 #[cxx::bridge(namespace = "workerd::rust::memory_cache")]
 mod ffi {
+    #![allow(unsafe_code)]
+    #![expect(
+        clippy::allow_attributes,
+        reason = "CXX emits an outer unsafe-code policy"
+    )]
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum ReadKind {
         Miss,

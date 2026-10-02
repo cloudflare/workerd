@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use quote::quote;
 use syn::Abi;
 use syn::Attribute;

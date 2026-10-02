@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use crate::block::Block;
 use crate::ifndef;
 use crate::out::Content;

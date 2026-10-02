@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! KJ ffi crate.
 //!
 //! This crate provides bindings to common KJ classes and functions that do not require special

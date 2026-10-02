@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::path::PathBuf;
 
 #[derive(Debug)]

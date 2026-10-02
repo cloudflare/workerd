@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! Module for both [`KjRc`] and [`KjArc`], since they're nearly identical types
 
 use static_assertions::assert_eq_align;
@@ -9,6 +11,8 @@ assert_eq_size!(repr::KjArc<()>, [*const (); 2]);
 assert_eq_align!(repr::KjArc<()>, *const ());
 
 pub mod repr {
+    #![allow(unsafe_code)]
+
     use std::ffi::c_void;
     use std::ops::Deref;
     use std::pin::Pin;
