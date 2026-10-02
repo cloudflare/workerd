@@ -856,20 +856,23 @@ struct Worker {
   # Name of the HTTP header carrying per-request Cloudflare Access metadata for local dev.
   # When set, the worker reads this header from every incoming request to populate `ctx.access`.
   # The header value is a JSON object matching the production Access struct:
-  #   { "app_aud": "<audience>", "jwt_claims": { ... } }
+  #   { "app_aud": "<audience>", "jwt_claims": { ... },
+  #     "managed_oauth_enabled": true, "team_domain": "example.cloudflareaccess.com" }
   # `app_aud` (string, required) populates `ctx.access.aud`.
   # `jwt_claims` (object, optional) is passed as `ctx.props.jwtClaims` to the access binding
   # worker (if configured via `accessBindingService`) when `ctx.access.getIdentity()` is called.
+  # `managed_oauth_enabled` (boolean, optional), together with a non-empty `team_domain`, exposes
+  # `ctx.access.oauth`.
+  # `team_domain` is passed to the binding worker as `ctx.props.teamDomain`.
   # Requests that carry the header get `ctx.access` populated; requests without it get
   # `ctx.access === undefined`.
 
   accessBindingService @19 :ServiceDesignator;
-  # Names a service that acts as the Cloudflare Access identity binding worker for local dev.
-  # When `ctx.access.getIdentity()` is called, workerd dispatches a `getIdentity` JS-RPC method
-  # on this service with per-request `props` set to `{ aud }` or `{ aud, jwtClaims }` (extracted
-  # from the `accessBlobHeader` HTTP header; `jwtClaims` is included only when the optional
-  # `jwt_claims` field is present in the header). This mimics the production path where an
-  # Access binding worker resolves the identity from JWT claims.
+  # Names a service that acts as the Cloudflare Access binding worker for local dev.
+  # Workerd dispatches `getIdentity` for `ctx.access.getIdentity()` and `getOAuthMetadata` for
+  # `ctx.access.oauth.getMetadata()`. Per-request `props` may include `aud`, `jwtClaims`, and
+  # `teamDomain`, extracted from the `accessBlobHeader` HTTP header. This mimics the production
+  # path where an Access binding worker handles these methods.
   #
   # If not set, `ctx.access.getIdentity()` resolves to `undefined` (even when `accessBlobHeader`
   # is configured and `ctx.access.aud` is available).

@@ -18,7 +18,10 @@ class AccessInfo: public kj::Refcounted {
   // The audience claim from the Access JWT. Stable for the lifetime of the request.
   virtual kj::StringPtr getAudience() = 0;
 
-  // Subrequest channel index for the Access identity binding worker. The IoChannelFactory is
+  // Whether Managed OAuth is enabled for the matched Access application.
+  virtual bool isManagedOAuthEnabled() = 0;
+
+  // Subrequest channel index for the Access binding worker. The IoChannelFactory is
   // responsible for injecting per-request props (aud, jwtClaims) when this channel is dispatched.
   // Returns `kj::none` when no identity service is available, causing `ctx.access.getIdentity()`
   // to resolve to `undefined`.
