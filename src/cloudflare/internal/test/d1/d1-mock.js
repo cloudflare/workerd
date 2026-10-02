@@ -46,34 +46,29 @@ export class D1MockDO extends DurableObject {
   }
 
   async query(params) {
-    const results = params.queries.map((query) => {
-      try {
-        return this.runQuery(query, 'ROWS_AND_COLUMNS');
-      } catch (e) {
-        // Reproduce the production behavior by catching any error and returning a V4Failure
-        return {
-          success: false,
-          error: String(e instanceof Error ? e.message : e),
-        };
-      }
-    });
-    const failure = results.find((result) => !result.success);
-    if (failure) {
-      return { success: false, error: new Error(failure.error) };
-    }
-
     return {
-      success: true,
-      results: {
-        queryResults: results.map((result) => ({
-          meta: result.meta,
-          data: {
-            kind: 'raw',
-            columns: result.results.columns,
-            rows: result.results.rows,
-          },
-        })),
-      },
+      results: params.queries.map((query, queryIndex) => {
+        try {
+          const result = this.runQuery(query, 'ROWS_AND_COLUMNS');
+          return {
+            meta: result.meta,
+            data: {
+              kind: 'raw',
+              columns: result.results.columns,
+              rows: result.results.rows,
+            },
+          };
+        } catch (cause) {
+          // Keep the SQL error as the cause. Add metadata for the RPC tests.
+          // The tests check that both fields reach the caller.
+          // This metadata is test data, not the D1 error contract.
+          const message =
+            cause instanceof Error ? cause.message : String(cause);
+          const error = new Error(message, { cause });
+          error.metadata = { code: 'D1_TEST_ERROR', queryIndex };
+          throw error;
+        }
+      }),
     };
   }
 
@@ -148,30 +143,12 @@ export default {
   async query(params, env) {
     this.commitTokensReceived.push(params.bookmark ?? null);
 
-    try {
-      const stub = env.db.get(env.db.idFromName('test'));
-      const queryResult = await stub.query(params);
-      if (!queryResult.success) {
-        return queryResult;
-      }
-
-      const results = {
-        queryResults: queryResult.results.queryResults,
-      };
-      if (params.bookmark) {
-        results.bookmark = this.nextCommitToken();
-      }
-
-      return {
-        success: true,
-        results,
-      };
-    } catch (err) {
-      return {
-        success: false,
-        error: err instanceof Error ? err : new Error(String(err)),
-      };
+    const stub = env.db.get(env.db.idFromName('test'));
+    const response = await stub.query(params);
+    if (params.bookmark) {
+      response.bookmark = this.nextCommitToken();
     }
+    return response;
   },
 
   async fetch(request, env, ctx) {
