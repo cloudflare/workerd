@@ -114,9 +114,9 @@ bazel build --config=clang-tidy-unsafe-continuation-capture //src/...
 
 ## RUST LINTS
 
-- `--config=dylint` enables opt-in custom Dylint checks on the pinned nightly
-  Rust graph. `--config=lint` enables Clippy and rustfmt without custom checks;
-  production builds and Clippy remain on stable.
+- `--config=lint` enables Clippy, custom Dylint checks, and rustfmt on the pinned
+  nightly Rust graph. Production builds and standalone `--config=clippy` remain
+  stable; `--config=dylint` selects only the custom driver/aspect.
 - The custom collection lives in `tools/rust-lints/`; its provider-driven aspect
   is `build/tools/rust_lint/rust_lint.bzl`. It publishes
   `workerd_rust_lint_checks`, independently of Clippy's output group.

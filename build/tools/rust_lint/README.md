@@ -3,9 +3,8 @@
 This directory supplies source-build overlays, a provider-driven Bazel aspect,
 and fixture rules for
 [workerd's custom Rust lint collection](../../../tools/rust-lints/README.md).
-The custom driver is separate from Clippy. `--config=dylint` enables opt-in
-custom checks on the pinned nightly graph; `--config=lint` enables Clippy and
-rustfmt without custom checks.
+The custom driver is separate from Clippy. `--config=lint` enables both drivers
+on the pinned nightly graph; `--config=dylint` enables only custom checks.
 
 ## Dependencies and compiler
 
@@ -144,5 +143,6 @@ bazel aquery 'mnemonic("WorkerdRustLint", //tools/rust-lints/tests/integration:b
 
 `--config=dylint` selects the pinned nightly for the whole Rust graph
 and enables the aspect/output group.
-`--config=lint` does not enable custom checks. Production builds and Clippy
-remain stable.
+`--config=lint` implies this configuration alongside Clippy and rustfmt, so the
+combined lint graph uses nightly. Production builds and standalone
+`--config=clippy` remain stable.

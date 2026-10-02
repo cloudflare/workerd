@@ -4,10 +4,10 @@ This collection contains workerd-specific rustc lints loaded dynamically by
 [Dylint](https://github.com/trailofbits/dylint). It is separate from the bundled
 Clippy driver; it does not add checks to stable Clippy.
 
-`--config=dylint` runs opt-in custom checks on the pinned nightly Rust graph.
-`--config=lint` runs Clippy and rustfmt without custom checks. Production builds
-and Clippy remain on stable. The existing Linux lint CI job uses `--config=lint`
-and does not run Dylint.
+`--config=lint` runs Clippy, Dylint, and rustfmt on the pinned nightly Rust graph.
+`--config=dylint` runs only the custom checks. Production builds and the standalone
+`--config=clippy` remain on stable. The existing Linux lint CI job uses
+`--config=lint`, so both drivers enforce their checks there.
 
 ## Build and test
 
@@ -32,8 +32,8 @@ bazel build //src/workerd/server:workerd-cli --config=dylint \
 `just rust-lint` uses `--config=dylint` with no path filters or audit override.
 The configuration selects nightly and enables the custom aspect/output group;
 bootstrap targets are excluded from checks to avoid dependency cycles.
-`just clippy` uses `--config=lint` for Clippy and rustfmt without Dylint. To run
-only stable Clippy, use `bazel build <target> --config=clippy`.
+`just clippy` uses the combined `--config=lint` graph. To run only stable Clippy,
+use `bazel build <target> --config=clippy`.
 
 Bootstrap targets are tagged `manual`, so normal wildcard builds/tests do not
 attempt to compile compiler-private code with stable Rust. The existing
