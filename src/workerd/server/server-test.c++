@@ -850,6 +850,50 @@ KJ_TEST("Server: UDP listener survives connect() handler exceptions") {
   }
 }
 
+KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response body") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    modules = [
+      ( name = "worker",
+        esModule =
+          `let state = "none";
+          `export default {
+          `  fetch(req) {
+          `    if (new URL(req.url).pathname == "/state") {
+          `      return new Response(state);
+          `    }
+          `    state = "streaming";
+          `    return new Response(new ReadableStream({
+          `      start(c) { c.enqueue(new TextEncoder().encode("first")); },
+          `      // Keep the source waiting on I/O so the request is not considered hung.
+          `      pull(c) { return new Promise(resolve => setTimeout(resolve, 1000000)); },
+          `      cancel(reason) { state = "canceled:" + reason; },
+          `    }));
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.start();
+
+  {
+    auto conn = test.connect("test-addr");
+    conn.sendHttpGet("/stream");
+    conn.recv(R"(
+      HTTP/1.1 200 OK
+      Transfer-Encoding: chunked
+
+      5
+      first
+    )"_blockquote);
+    // Dropping the connection here disconnects the client while the body is still open.
+  }
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/state", "canceled:undefined");
+}
+
 KJ_TEST("Server: serve basic Service Worker") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",

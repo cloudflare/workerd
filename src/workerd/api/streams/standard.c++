@@ -3510,6 +3510,31 @@ kj::Promise<void> forwardToFulfiller(
   }
 }
 
+// Called from pumpToImpl's frame teardown when the pump is dropped before settling. The
+// isolate lock is not held there, so the cancel runs in a waitUntil task that takes ownership
+// of the reader (and through it, the stream). Using waitUntil rather than a plain task keeps
+// the IoContext alive until the cancel algorithm has run: IncomingRequest::drain() waits for
+// waitUntil tasks, but nothing waits for plain tasks once the request is done.
+//
+// The pump can be owned by the IoContext's own task sets, so the drop can happen while the
+// IoContext is being destroyed; the WeakRef is invalid by then. With no IncomingRequest left,
+// nothing would reliably run the task either. In both cases the source is left alone.
+//
+// Cancellation here is best-effort cleanup. It rejects if the source errored the stream before
+// the drop, and that must not surface as a failed waitUntil task.
+void cancelSourceOfDroppedPump(IoContext::WeakRef& contextWeakRef, kj::Own<DrainingReader> reader) {
+  if (!reader->isAttached()) return;
+  contextWeakRef.runIfAlive([&](IoContext& context) {
+    if (!context.hasCurrentIncomingRequest()) return;
+    context.addWaitUntil(
+        context
+            .run([reader = kj::mv(reader)](jsg::Lock& js) mutable -> kj::Promise<void> {
+      auto& ioContext = IoContext::current();
+      return ioContext.awaitJs(js, reader->cancel(js, kj::none)).attach(kj::mv(reader));
+    }).catch_([](kj::Exception&&) {}));
+  });
+}
+
 // pumpToImpl uses a DrainingReader to efficiently pull all synchronously available
 // data from the stream in each iteration, then writes it to the sink using vectored
 // I/O. This minimizes isolate lock acquisitions by batching: each time the lock is
@@ -3535,11 +3560,22 @@ kj::Promise<void> forwardToFulfiller(
 // The consequence is that those tasks outlive the coroutine frame, so they must not
 // name anything the frame owns. The DrainingReader is reached through a kj::Weak,
 // which reports the frame's destruction rather than dangling into it.
+//
+// Dropping the pump before it settles (for example, because the client disconnected and
+// the HTTP layer dropped the response body) cancels the source with an undefined reason,
+// so that its cancel algorithm runs and it stops producing data. See
+// cancelSourceOfDroppedPump().
 kj::Promise<void> pumpToImpl(IoContext& ioContext,
     kj::Own<DrainingReader> reader,
     kj::Own<WritableStreamSink> sink,
     bool end,
     kj::CoUnwindAware = {}) {
+
+  auto pumpInvocation = KJ_CO_MAGIC kj::CURRENT_INVOCATION;
+  auto contextWeakRef = ioContext.getWeakRef();
+  KJ_DEFER(if (pumpInvocation.isCanceling()) {
+    cancelSourceOfDroppedPump(*contextWeakRef, kj::mv(reader));
+  });
 
   bool writeFailed = false;
 
