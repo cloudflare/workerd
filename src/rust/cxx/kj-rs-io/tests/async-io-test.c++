@@ -755,8 +755,8 @@ KJ_TEST("onSignal is delivered even when another runtime's thread consumes the s
   // Tokio's process-global signal registry broadcasts from whichever runtime consumes the
   // signal's wake byte. A second parked runtime (any other tokio runtime in the process with the
   // signal driver enabled) can therefore wake this loop's signal future from another thread.
-  // ArcWaker must deliver that wake through its cross-thread fulfiller so this loop observes
-  // the signal.
+  // kj-rs's FutureWakerCell must deliver that wake through its loop's cross-thread wake sink so
+  // this loop observes the signal.
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
 
