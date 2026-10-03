@@ -5,6 +5,7 @@ import {
   deepStrictEqual,
   ok,
   match,
+  notStrictEqual,
   rejects,
   strictEqual,
   throws,
@@ -230,6 +231,16 @@ export const mkdtempSyncTest = {
     match(ret2, /\/tmp\/testdir-\d+/);
     ok(existsSync(ret1));
     ok(existsSync(ret2));
+    // A prefix ending in the path separator creates the temporary directory
+    // inside that directory rather than treating the path as a name prefix.
+    const ret3 = mkdtempSync('/tmp/');
+    match(ret3, /^\/tmp\/\d+$/);
+    ok(existsSync(ret3));
+    const ret4 = mkdtempSync('/tmp/');
+    match(ret4, /^\/tmp\/\d+$/);
+    notStrictEqual(ret3, ret4);
+    // A prefix whose parent does not exist fails with ENOENT.
+    throws(() => mkdtempSync('/does-not-exist/pfx'), kENoEntError);
     throws(() => mkdtempSync('/bundle/testdir-'), kEPermError);
   },
 };
