@@ -125,14 +125,17 @@ jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> getReadableStreamBytes(
   });
 }
 
-jsg::Promise<kj::String> getReadableStreamText(jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
+jsg::Promise<jsg::JsRef<jsg::JsString>> getReadableStreamText(
+    jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
   jsg::JsValue result =
       webstreams::dispatchCall(js, "consumeReadableStreamAsText", obj, js.bigInt(limit));
   // The result must be a promise for a String
   jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_PROMISE(result));
   return js.toPromise(promise).then(js, [](jsg::Lock& js, jsg::Value ref) {
     auto value = jsg::JsValue(ref.getHandle(js));
-    return value.toString(js);
+    // If it throws, it manifests as an internal error. That's intended.
+    auto str = KJ_REQUIRE_NONNULL(JSG_TRY_CAST(value, JsString));
+    return str.addRef(js);
   });
 }
 
@@ -1031,7 +1034,12 @@ jsg::Promise<kj::String> JsReadableStream::text(jsg::Lock& js, uint64_t limit) {
         return stream->getController().readAllText(js, limit);
       }
       KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
-        return getReadableStreamText(js, obj.getHandle(js), limit);
+        // JsString::toString() sizes the copy from the string's UTF-8 length, so embedded NUL
+        // characters survive the conversion.
+        return getReadableStreamText(js, obj.getHandle(js), limit)
+            .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsString> str) {
+          return str.getHandle(js).toString(js);
+        });
       }
     }
     KJ_UNREACHABLE;
@@ -1039,6 +1047,28 @@ jsg::Promise<kj::String> JsReadableStream::text(jsg::Lock& js, uint64_t limit) {
 
   // A null stream yields an empty result.
   return js.resolvedPromise(kj::String());
+}
+
+jsg::Promise<jsg::JsRef<jsg::JsString>> JsReadableStream::textAsJsString(
+    jsg::Lock& js, uint64_t limit) {
+  KJ_IF_SOME(i, impl) {
+    KJ_SWITCH_ONEOF(i.stream) {
+      KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+        if (stream->isDisturbed()) {
+          return js.rejectedPromise<jsg::JsRef<jsg::JsString>>(js.typeError(kBodyUsedError));
+        }
+        return stream->getController().readAllText(js, limit).then(
+            js, [](jsg::Lock& js, kj::String text) { return js.str(text).addRef(js); });
+      }
+      KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+        return getReadableStreamText(js, obj.getHandle(js), limit);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  // A null stream yields an empty result.
+  return js.resolvedPromise(js.str().addRef(js));
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> JsReadableStream::bytes(jsg::Lock& js, uint64_t limit) {

@@ -204,8 +204,13 @@ class JsReadableStream final {
   // by the caller) to avoid an extra jsg::Promise allocation and microtask hop per call. blob()
   // takes the desired Content-Type (derived by the caller, e.g. from headers) because
   // JsReadableStream has no notion of headers.
+  //
+  // text() yields a kj::String for C++ consumers. textAsJsString() yields the decoded text as a JS
+  // string; use it when the result is headed back to JavaScript, since the TypeScript-implemented
+  // streams already produce a JS string and this avoids copying it out to C++ and back.
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> arrayBuffer(jsg::Lock& js, uint64_t limit);
   jsg::Promise<kj::String> text(jsg::Lock& js, uint64_t limit);
+  jsg::Promise<jsg::JsRef<jsg::JsString>> textAsJsString(jsg::Lock& js, uint64_t limit);
   jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> bytes(jsg::Lock& js, uint64_t limit);
   jsg::Promise<jsg::JsRef<jsg::JsValue>> json(jsg::Lock& js, uint64_t limit);
   jsg::Promise<jsg::Ref<Blob>> blob(jsg::Lock& js, uint64_t limit, kj::String contentType);
