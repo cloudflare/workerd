@@ -305,6 +305,57 @@ interface ServiceEntrypointStub {
   ): Promise<ImageDirectUploadResult>;
 }
 
+async function annotateErrorOnSpan<T>(
+  span: Span,
+  operation: () => Promise<T>
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (e) {
+    span.setAttribute('error.type', e instanceof Error ? e.message : String(e));
+    throw e;
+  }
+}
+
+// `handle` is a JS RPC stub, not a `fetch()`-based object.
+class ImageHandleImpl implements ImageHandle {
+  readonly #handle: ImageHandle;
+
+  constructor(handle: ImageHandle) {
+    this.#handle = handle;
+  }
+
+  async details(): Promise<ImageMetadata | null> {
+    return await withSpan('images_details', async (span) => {
+      span.setAttribute('cloudflare.binding.type', 'Images');
+      return await annotateErrorOnSpan(span, () => this.#handle.details());
+    });
+  }
+
+  async bytes(): Promise<ReadableStream<Uint8Array> | null> {
+    return await withSpan('images_fetch', async (span) => {
+      span.setAttribute('cloudflare.binding.type', 'Images');
+      return await annotateErrorOnSpan(span, () => this.#handle.bytes());
+    });
+  }
+
+  async update(options: ImageUpdateOptions): Promise<ImageMetadata> {
+    return await withSpan('images_update', async (span) => {
+      span.setAttribute('cloudflare.binding.type', 'Images');
+      return await annotateErrorOnSpan(span, () =>
+        this.#handle.update(options)
+      );
+    });
+  }
+
+  async delete(): Promise<boolean> {
+    return await withSpan('images_delete', async (span) => {
+      span.setAttribute('cloudflare.binding.type', 'Images');
+      return await annotateErrorOnSpan(span, () => this.#handle.delete());
+    });
+  }
+}
+
 class HostedImagesBindingImpl implements HostedImagesBinding {
   readonly #fetcher: ServiceEntrypointStub;
 
@@ -313,18 +364,26 @@ class HostedImagesBindingImpl implements HostedImagesBinding {
   }
 
   image(imageId: string): ImageHandle {
-    return this.#fetcher.image(imageId);
+    return new ImageHandleImpl(this.#fetcher.image(imageId));
   }
 
   async upload(
     image: ReadableStream<Uint8Array> | ArrayBuffer,
     options?: ImageUploadOptions
   ): Promise<ImageMetadata> {
-    return this.#fetcher.upload(image, options);
+    return await withSpan('images_upload', async (span) => {
+      span.setAttribute('cloudflare.binding.type', 'Images');
+      return await annotateErrorOnSpan(span, () =>
+        this.#fetcher.upload(image, options)
+      );
+    });
   }
 
   async list(options?: ImageListOptions): Promise<ImageList> {
-    return this.#fetcher.list(options);
+    return await withSpan('images_list', async (span) => {
+      span.setAttribute('cloudflare.binding.type', 'Images');
+      return await annotateErrorOnSpan(span, () => this.#fetcher.list(options));
+    });
   }
 
   async createDirectUpload(
