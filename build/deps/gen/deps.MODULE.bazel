@@ -126,6 +126,7 @@ archive_override(
     patches = [
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
         "//:patches/perfetto/0002-disable-info-level-logging-re2.patch",
+        "//:patches/perfetto/0003-Add-C-ABI-library-over-client-and-expose-Rust-SDK-sources.patch",
     ],
     sha256 = "4fcc98fe4754269a70e297f6caba429420039c89a1c6cb561dffb4057de63abb",
     strip_prefix = "google-perfetto-9e9bdaf",

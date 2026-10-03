@@ -1,0 +1,27 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# Perfetto trace points for Rust. The SDK backend is only compiled in (feature "perfetto") under
+# //src/workerd/util:really_use_rust_perfetto; otherwise every macro compiles to a no-op and this
+# crate has no dependency on Perfetto. Keep all references to Perfetto targets inside these
+# selects so embedders that don't provide them can still build this crate.
+wd_rust_crate(
+    name = "perfetto",
+    srcs = [
+        "disabled.rs",
+        "enabled.rs",
+        "ffi.rs",
+        "lib.rs",
+    ],
+    crate_features = select({
+        "//src/workerd/util:really_use_rust_perfetto": ["perfetto"],
+        "//conditions:default": [],
+    }),
+    cxx_bridge_src = "ffi.rs",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//:static_assertions",
+    ] + select({
+        "//src/workerd/util:really_use_rust_perfetto": ["//src/rust/perfetto/sdk:perfetto_sdk"],
+        "//conditions:default": [],
+    }),
+)

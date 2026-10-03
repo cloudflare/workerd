@@ -1,0 +1,55 @@
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+# The Perfetto Rust SDK, built from the sources in the @perfetto archive (exposed by
+# patches/perfetto/0003-*.patch) so that the checked-in bindings, the C headers and the C ABI
+# implementation always come from the same Perfetto commit. perfetto-sys's build.rs, which would
+# compile a vendored amalgamation, is not used: it links @perfetto//:libperfetto_c_over_client,
+# which shares the C++ client library's perfetto::Tracing instance.
+#
+# Only //src/rust/perfetto should depend on these, and only under
+# //src/workerd/util:really_use_rust_perfetto; see the comment on that flag.
+
+_COMPATIBLE = select({
+    "//src/workerd/util:really_use_rust_perfetto": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+# Third-party code: don't apply workerd's lints to it.
+_THIRD_PARTY_RUSTC_FLAGS = ["--cap-lints=allow"]
+
+_THIRD_PARTY_TAGS = [
+    "noclippy",
+    "norustfmt",
+]
+
+rust_library(
+    name = "perfetto_sdk_sys",
+    srcs = ["@perfetto//contrib/rust-sdk:perfetto_sys_srcs"],
+    crate_name = "perfetto_sdk_sys",
+    crate_root = "@perfetto//contrib/rust-sdk:perfetto-sys/src/lib.rs",
+    edition = "2024",
+    link_deps = ["@perfetto//:libperfetto_c_over_client"],
+    rustc_flags = _THIRD_PARTY_RUSTC_FLAGS,
+    tags = _THIRD_PARTY_TAGS,
+    target_compatible_with = _COMPATIBLE,
+)
+
+rust_library(
+    name = "perfetto_sdk",
+    srcs = ["@perfetto//contrib/rust-sdk:perfetto_srcs"],
+    aliases = {"@crates_vendor//:pastey": "paste"},
+    compile_data = ["@perfetto//contrib/rust-sdk:perfetto/README.md"],
+    crate_name = "perfetto_sdk",
+    crate_root = "@perfetto//contrib/rust-sdk:perfetto/src/lib.rs",
+    edition = "2024",
+    proc_macro_deps = ["@crates_vendor//:pastey"],
+    rustc_flags = _THIRD_PARTY_RUSTC_FLAGS,
+    tags = _THIRD_PARTY_TAGS,
+    target_compatible_with = _COMPATIBLE,
+    visibility = ["//src/rust/perfetto:__subpackages__"],
+    deps = [
+        ":perfetto_sdk_sys",
+        "@crates_vendor//:bitflags",
+        "@crates_vendor//:thiserror",
+    ],
+)
