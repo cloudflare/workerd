@@ -84,6 +84,9 @@ export const pipeThroughJsToInternalErroredSource = {
 
     await rejects(reader.read(), { message: 'boom' });
 
+    // Released once the pipe's abort of the writable has settled (#16).
+    strictEqual(transform.writable.locked, usingTsImpl);
+    await scheduler.wait(0);
     ok(!transform.writable.locked);
 
     // Attempts to use the writable from here on will fail with the same error.
@@ -110,13 +113,14 @@ export const pipeToJsToInternalErroredSource = {
 
     await rejects(reader.read(), { message: 'boom' });
 
+    // Released once the pipe's abort of the writable has settled (#16).
+    strictEqual(writable.locked, usingTsImpl);
+    await rejects(pipe, { message: 'boom' });
     ok(!writable.locked);
 
     // Attempts to use the writable from here on will fail with the same error.
     const writer = writable.getWriter();
     await rejects(writer.write(enc.encode('hello')), { message: 'boom' });
-
-    await rejects(pipe, { message: 'boom' });
   },
 };
 

@@ -16,7 +16,7 @@ at context creation, before any user code. Gated by the
   `module.exports = {...}`. The `src/node/` ESM-only rule does NOT apply
   here. Circular requires are a FATAL startup error — keep modules
   acyclic (e.g., `webstreams/ring-buffer` is a leaf, and
-  `webstreams/native` requires nothing else).
+  `webstreams/native` requires only `ring-buffer` and `queue`).
 - TypeScript `import type` / `export type` are used freely for type
   plumbing (fully erased; the loader only sees `module.exports`).
 - `main.ts` installs the real stream globals (ReadableStream et al.) when
@@ -184,9 +184,10 @@ path, and the same pollution breaks the user's own code in every engine:
 - `Promise[Symbol.species]` / `Promise.prototype.constructor` reaching
   `PromisePrototypeThen` on ordinary promises (above).
 - `Object.prototype.then` intercepting a promise resolved with a plain
-  object, notably the spec-mandated `{ value, done }` read results.
-  Internal code that consumes those results through the same promise
-  (pipes, drain fallbacks) is exposed alongside the user's read.
+  object, notably the user's read promise, which the spec resolves with a
+  `{ value, done }` result. Internal reads are not exposed: the backends
+  settle them with null-prototype results (`createReadResult` in
+  `webstreams/queue.ts`).
 
 Internal-only records should still be null-prototype
 (`{ __proto__: null, ... }`) wherever nothing requires the
