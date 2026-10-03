@@ -3569,6 +3569,256 @@ function pipeToInternal<R>(
   return promise;
 }
 
+// ---------------------------------------------------------------------------
+// ReadableStream.from(): spec ReadableStreamFromIterable over WebIDL's
+// async_sequence<any> (conversion, "open", "get the next value", "close"),
+// with ECMA-262's CreateAsyncFromSyncIterator for a sync iterable. The
+// user's methods are read exactly when the spec reads them: @@asyncIterator
+// and @@iterator through GetMethod (a Get; no `in` checks), `next` once when
+// the iterator is opened, `return` at each cancel.
+
+const kFromStrategy = ObjectFreeze({ __proto__: null, highWaterMark: 0 });
+
+type IteratorMethod = (this: unknown, ...args: unknown[]) => unknown;
+
+// Spec GetMethod: undefined and null both mean "absent".
+function getIteratorMethod(
+  value: object,
+  key: PropertyKey,
+  message: string
+): IteratorMethod | undefined {
+  const method = (value as Record<PropertyKey, unknown>)[key];
+  if (method == null) return undefined;
+  if (typeof method !== 'function') throw new TypeError(message);
+  return method as IteratorMethod;
+}
+
+// Spec GetIteratorFromMethod: the iterator must be an object, and its
+// `next` is read once, here. A `next` that is not callable fails each pull
+// (Call), not the open.
+type BoundNext = ((iterator: object) => unknown) | undefined;
+function openIterator(
+  iterable: object,
+  method: IteratorMethod
+): { iterator: object; next: BoundNext } {
+  const iterator: unknown = uncurryThis(method)(iterable);
+  if (!isObjectLike(iterator)) {
+    throw new TypeError('The iterator method must return an object');
+  }
+  const next = (iterator as { next?: unknown }).next;
+  return {
+    iterator: iterator as object,
+    next:
+      typeof next === 'function'
+        ? (uncurryThis(next as IteratorMethod) as BoundNext)
+        : undefined,
+  };
+}
+
+// Spec IteratorNext without a value: the result must be an object.
+function iteratorNext(iterator: object, next: BoundNext): object {
+  if (next === undefined) {
+    throw new TypeError('The iterator next method is not a function');
+  }
+  const result = next(iterator);
+  if (!isObjectLike(result)) {
+    throw new TypeError('The result of next() must be an object');
+  }
+  return result as object;
+}
+
+// Spec IteratorClose with a throw completion: return() runs, and anything
+// thrown while reading or calling it is dropped in favor of the original
+// error.
+function closeSyncIteratorAfterError(iterator: object): void {
+  try {
+    const returnMethod = getIteratorMethod(
+      iterator,
+      'return',
+      'Iterator return() is not a function'
+    );
+    if (returnMethod !== undefined) uncurryThis(returnMethod)(iterator);
+  } catch {
+    // The original error wins.
+  }
+}
+
+// The %AsyncFromSyncIteratorPrototype% continuation: `done` is read before
+// `value`, and the value is awaited through PromiseResolve. With
+// closeOnRejection (next(), not return()), a value that cannot be resolved
+// or that rejects while `done` is false closes the sync iterator.
+function asyncFromSyncContinuation(
+  iterator: object,
+  result: object,
+  closeOnRejection: boolean,
+  onFulfilled: (value: unknown, done: boolean) => void
+): Promise<void> {
+  let done: boolean;
+  let valueWrapper: Promise<unknown>;
+  try {
+    done = !!(result as { done?: unknown }).done;
+    const value = (result as { value?: unknown }).value;
+    try {
+      valueWrapper = PromiseResolve(value) as Promise<unknown>;
+    } catch (e) {
+      if (!done && closeOnRejection) closeSyncIteratorAfterError(iterator);
+      throw e;
+    }
+  } catch (e) {
+    return PromiseReject(e) as Promise<void>;
+  }
+  return PromisePrototypeThen(
+    valueWrapper,
+    (value: unknown) => onFulfilled(value, done),
+    done || !closeOnRejection
+      ? undefined
+      : (e: unknown) => {
+          closeSyncIteratorAfterError(iterator);
+          throw e;
+        }
+  ) as Promise<void>;
+}
+
+// WebIDL "close an async iterator" on the user's async iterator.
+function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
+  let returnResult: unknown;
+  try {
+    const returnMethod = getIteratorMethod(
+      iterator,
+      'return',
+      'Iterator return() is not a function'
+    );
+    if (returnMethod === undefined) {
+      return PromiseResolve(undefined) as Promise<void>;
+    }
+    returnResult = uncurryThis(returnMethod)(iterator, reason);
+  } catch (e) {
+    return PromiseReject(e) as Promise<void>;
+  }
+  return PromisePrototypeThen(
+    writableInternals.promiseResolvedWith(returnResult),
+    (iterResult: unknown) => {
+      if (!isObjectLike(iterResult)) {
+        throw new TypeError('The return method must return an object');
+      }
+    }
+  ) as Promise<void>;
+}
+
+// WebIDL "close an async iterator" on the async-from-sync wrapper of the
+// user's sync iterator: the wrapper's return() calls the sync return() with
+// the reason, checks for an object, and resolves its `value` (after reading
+// `done`); the wrapper's own result is always an object.
+function closeSyncIterator(iterator: object, reason: unknown): Promise<void> {
+  let result: unknown;
+  try {
+    const returnMethod = getIteratorMethod(
+      iterator,
+      'return',
+      'Iterator return() is not a function'
+    );
+    if (returnMethod === undefined) {
+      return PromiseResolve(undefined) as Promise<void>;
+    }
+    result = uncurryThis(returnMethod)(iterator, reason);
+    if (!isObjectLike(result)) {
+      throw new TypeError('The return method must return an object');
+    }
+  } catch (e) {
+    return PromiseReject(e) as Promise<void>;
+  }
+  return asyncFromSyncContinuation(iterator, result as object, false, () => {});
+}
+
+function readableStreamFromIterable<R>(
+  asyncIterable: unknown
+): ReadableStream<R> {
+  // WebIDL async_sequence conversion.
+  if (!isObjectLike(asyncIterable)) {
+    throw new TypeError('The argument must be sync or async iterable');
+  }
+  const iterable = asyncIterable as object;
+  const asyncMethod = getIteratorMethod(
+    iterable,
+    SymbolAsyncIterator,
+    'The @@asyncIterator method is not a function'
+  );
+  let source: UnderlyingDefaultSource<R>;
+  if (asyncMethod !== undefined) {
+    const { iterator, next } = openIterator(iterable, asyncMethod);
+    source = {
+      __proto__: null,
+      // WebIDL "get the next value".
+      pull(controller: ReadableStreamDefaultControllerType): Promise<void> {
+        let nextResult: object;
+        try {
+          nextResult = iteratorNext(iterator, next);
+        } catch (e) {
+          return PromiseReject(e) as Promise<void>;
+        }
+        return PromisePrototypeThen(
+          writableInternals.promiseResolvedWith(nextResult),
+          (iterResult: unknown) => {
+            if (!isObjectLike(iterResult)) {
+              throw new TypeError('The result of next() must be an object');
+            }
+            if ((iterResult as { done?: unknown }).done) {
+              defaultControllerClose(controller);
+            } else {
+              defaultControllerEnqueue(
+                controller,
+                (iterResult as { value?: unknown }).value
+              );
+            }
+          }
+        ) as Promise<void>;
+      },
+      cancel(reason: unknown): Promise<void> {
+        return closeAsyncIterator(iterator, reason);
+      },
+    } as UnderlyingDefaultSource<R>;
+  } else {
+    const syncMethod = getIteratorMethod(
+      iterable,
+      SymbolIterator,
+      'The @@iterator method is not a function'
+    );
+    if (syncMethod === undefined) {
+      throw new TypeError('The argument must be sync or async iterable');
+    }
+    const { iterator, next } = openIterator(iterable, syncMethod);
+    source = {
+      __proto__: null,
+      // The async-from-sync wrapper's next(), then "get the next value" on
+      // its result, which is always an object: nothing more to check.
+      pull(controller: ReadableStreamDefaultControllerType): Promise<void> {
+        let result: object;
+        try {
+          result = iteratorNext(iterator, next);
+        } catch (e) {
+          return PromiseReject(e) as Promise<void>;
+        }
+        return asyncFromSyncContinuation(
+          iterator,
+          result,
+          true,
+          (value: unknown, done: boolean) => {
+            if (done) {
+              defaultControllerClose(controller);
+            } else {
+              defaultControllerEnqueue(controller, value);
+            }
+          }
+        );
+      },
+      cancel(reason: unknown): Promise<void> {
+        return closeSyncIterator(iterator, reason);
+      },
+    } as UnderlyingDefaultSource<R>;
+  }
+  return new ReadableStream<R>(source, kFromStrategy as QueuingStrategy<R>);
+}
+
 let assertIsReadableStream: <W>(self: ReadableStream<W>) => void;
 
 class ReadableStream<R> {
@@ -4600,133 +4850,28 @@ class ReadableStream<R> {
   }
 
   static from<R>(
-    iterable: Iterable<R> | AsyncIterable<R> | R
+    asyncIterable: Iterable<R> | AsyncIterable<R> | R
   ): ReadableStream<R> {
-    // We are intentionally a bit more lax in what we accept here.
-    // The spec says AsyncIterable. We allow Iterable as well. If
-    // a String or ArrayBufferView is passed, we will treat it as
-    // a single chunk, rather than an iterable of chunks.
-    if (typeof iterable === 'string' || isArrayBufferView(iterable)) {
-      // INTENTIONAL SPEC DIVERGENCE: The spec treats strings as
-      // iterables and iterates them code-point-by-code-point. We
-      // deliberately treat strings (and ArrayBufferViews) as single
-      // chunks instead — iterating a string through a stream one
-      // code point at a time is both surprising to users and has
-      // terrible performance. This causes the WPT test
-      // "ReadableStream.from accepts a string" to fail.
-      // The ArrayBufferView case avoids traversing the patchable
-      // %ArrayIteratorPrototype%.
-      const chunk = iterable as unknown as R;
-      return new ReadableStream<R>({
-        pull(controller: ReadableStreamDefaultControllerType) {
-          defaultControllerEnqueue(controller, chunk);
-          defaultControllerClose(controller);
-        },
-      });
-    }
-
-    // It can't be an iterable if it's not an actual object.
-    if (isActualObject(iterable)) {
-      // Check @@asyncIterator first, but only if the value is non-null.
-      // Per spec, a null/undefined @@asyncIterator is ignored and we
-      // fall through to @@iterator (WPT: "from ignores a null @@asyncIterator").
-      const asyncMethod =
-        SymbolAsyncIterator in iterable
-          ? (iterable as AsyncIterable<R>)[primordials.SymbolAsyncIterator]
-          : undefined;
-      if (asyncMethod != null) {
-        const asyncIterator: AsyncIterator<R> =
-          uncurryThis(asyncMethod)(iterable);
-        if (!isObjectLike(asyncIterator)) {
-          throw new TypeError('The iterator method must return an object');
-        }
-        // HWM 0: the iterator's next() must only be called in response
-        // to a consumer read(), never eagerly (WPT: "calls next() after
-        // first read()").
-        return new ReadableStream<R>(
-          {
-            async pull(controller: ReadableStreamDefaultControllerType) {
-              // If the pull method throws, the stream will error.
-              const next = await asyncIterator.next();
-              if (!isObjectLike(next)) {
-                throw new TypeError('The result of next() must be an object');
-              }
-              if (next.done) {
-                return defaultControllerClose(controller);
-              }
-              defaultControllerEnqueue(controller, next.value);
-            },
-            async cancel(reason?: unknown) {
-              const returnMethod = asyncIterator.return;
-              // Per spec, iterators without a return() method cancel
-              // silently. But if return exists and is not callable,
-              // cancel must reject with TypeError.
-              if (returnMethod === undefined) return;
-              if (typeof returnMethod !== 'function') {
-                throw new TypeError('Iterator return() is not a function');
-              }
-              const ret = await uncurryThis(returnMethod)(
-                asyncIterator,
-                reason
-              );
-              if (!isObjectLike(ret)) {
-                throw new TypeError('The return method must return an object');
-              }
-            },
+    // INTENTIONAL SPEC DIVERGENCE: a string or an ArrayBufferView is one
+    // chunk. The spec rejects a string primitive (it is not an object),
+    // and iterates a typed array element by element and rejects a
+    // DataView; C++ iterates both strings and typed arrays (readable
+    // ledger #12 and #26). This fails the WPT case "ReadableStream.from
+    // throws on invalid iterables; specifically a string".
+    if (typeof asyncIterable === 'string' || isArrayBufferView(asyncIterable)) {
+      const chunk = asyncIterable as unknown as R;
+      return new ReadableStream<R>(
+        {
+          __proto__: null,
+          pull(controller: ReadableStreamDefaultControllerType) {
+            defaultControllerEnqueue(controller, chunk);
+            defaultControllerClose(controller);
           },
-          { highWaterMark: 0 }
-        );
-      }
-
-      if (SymbolIterator in iterable) {
-        const method = (iterable as Iterable<R>)[primordials.SymbolIterator];
-        const syncIterator: Iterator<R> = uncurryThis(method)(iterable);
-        if (!isObjectLike(syncIterator)) {
-          throw new TypeError('The iterator method must return an object');
-        }
-        // HWM 0: same rationale as the async path above — next() must
-        // be deferred until a consumer read() arrives.
-        return new ReadableStream<R>(
-          {
-            // The spec uses GetIterator(asyncIterable, async) which
-            // wraps the sync iterator in an async-from-sync wrapper.
-            // That wrapper awaits each value via PromiseResolve, so
-            // e.g. an iterable of promises yields the resolved values,
-            // not the Promise objects.
-            async pull(controller: ReadableStreamDefaultControllerType) {
-              // If the pull method throws, the stream will error.
-              const next = syncIterator.next();
-              if (!isObjectLike(next)) {
-                throw new TypeError('The result of next() must be an object');
-              }
-              // Await the value: the async-from-sync iterator wrapper
-              // resolves each value through PromiseResolve, which
-              // awaits thenables (including Promises).
-              const value = await next.value;
-              if (next.done) {
-                defaultControllerClose(controller);
-                return;
-              }
-              defaultControllerEnqueue(controller, value as R);
-            },
-            async cancel(reason?: unknown) {
-              const returnMethod = syncIterator.return;
-              if (returnMethod === undefined) return;
-              if (typeof returnMethod !== 'function') {
-                throw new TypeError('Iterator return() is not a function');
-              }
-              const ret = uncurryThis(returnMethod)(syncIterator, reason);
-              if (!isObjectLike(ret)) {
-                throw new TypeError('The return method must return an object');
-              }
-            },
-          },
-          { highWaterMark: 0 }
-        );
-      }
+        } as UnderlyingDefaultSource<R>,
+        kFromStrategy as QueuingStrategy<R>
+      );
     }
-
-    throw new TypeError('The argument must be sync or async iterable');
+    return readableStreamFromIterable<R>(asyncIterable);
   }
 
   values(
