@@ -1,0 +1,38 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The test entrypoint is the streaming tail worker: it drives the trigger worker and asserts on
+# the leaked-stub warnings that reach it. The trigger runs with the inspector enabled so that the
+# warning path also attempts to capture a JS stack trace for the DevTools console.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "trigger",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "rpc-stub-gc-warning-inspector-trigger.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_inspector_local_dev",
+          "experimental",
+        ],
+        bindings = [
+          (name = "MyService", service = (
+            name = "trigger",
+            entrypoint = "MyService")),
+        ],
+        streamingTails = ["rpc-stub-gc-warning-inspector-test"],
+      )
+    ),
+    ( name = "rpc-stub-gc-warning-inspector-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "rpc-stub-gc-warning-inspector-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [
+          (name = "TRIGGER", service = "trigger"),
+        ],
+      ),
+    ),
+  ],
+);
