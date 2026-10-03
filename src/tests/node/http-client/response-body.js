@@ -10,7 +10,7 @@
 import { Buffer } from 'node:buffer';
 import { gunzipSync } from 'node:zlib';
 import { strictEqual, ok, deepStrictEqual } from 'node:assert';
-import { get, response, collect, once } from 'harness';
+import { get, response, collect, once, uniqueId } from 'harness';
 
 // The body arrives as Buffer chunks and ends with `complete` set; status
 // and headers are on the message from the start.
@@ -42,20 +42,33 @@ export const setEncodingYieldsStrings = {
   },
 };
 
-// A chunked body arrives as the server writes it: three writes 30 ms apart
-// are three 'data' events, each in hand before the next is written.
+// Each chunk is observed before acknowledging it lets the server write the
+// next chunk or end the body. Network reads may split a server write.
 export const chunkedBodyArrivesIncrementally = {
   async test(ctrl, env) {
-    const res = await response(get(env, '/chunked?n=3&delay=30'));
+    const id = uniqueId('incremental');
+    const res = await response(get(env, `/chunked-controlled?id=${id}`));
     strictEqual(res.headers['transfer-encoding'], 'chunked');
     const arrivals = [];
-    res.on('data', (chunk) => arrivals.push([Date.now(), chunk.toString()]));
-    await once(res, 'end');
-    deepStrictEqual(
-      arrivals.map(([, text]) => text),
-      ['chunk-0|', 'chunk-1|', 'chunk-2|']
-    );
-    ok(arrivals[2][0] - arrivals[0][0] >= 40, 'chunks were not coalesced');
+    let pending = '';
+    for await (const chunk of res) {
+      const index = arrivals.length;
+      const expected = `chunk-${index}|`;
+      pending += chunk.toString();
+      ok(expected.startsWith(pending), `unexpected body: ${pending}`);
+      if (pending !== expected) continue;
+      strictEqual(res.complete, false);
+      arrivals.push(pending);
+      pending = '';
+      const ack = await response(
+        get(env, `/chunked-ack?id=${id}&index=${index}`)
+      );
+      strictEqual(ack.statusCode, 204);
+      await collect(ack);
+    }
+    deepStrictEqual(arrivals, ['chunk-0|', 'chunk-1|', 'chunk-2|']);
+    strictEqual(pending, '');
+    strictEqual(res.complete, true);
   },
 };
 
