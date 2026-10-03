@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 mod rust_slice;
 mod rust_str;
 mod rust_string;

@@ -22,6 +22,12 @@ scratch = "1"
 static_assertions = "1"
 syn = { version = "2", features = ["full"] }
 
+# Source-built custom lint tooling (the driver itself is pinned separately).
+cargo_metadata = "0.23"
+cfg-if = "1"
+log = "0.4"
+regex = "1"
+
 # We prefer single-digit dependencies to stay up to date as much as possible
 # When adding packages here, please only enable features as needed to keep compile times and
 # binary sizes bounded.

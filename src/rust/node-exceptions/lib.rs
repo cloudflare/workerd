@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![allow(unsafe_code)]
+
 //! Utilities for creating Node.js-style exceptions.
 //!
 //! This implements the C++ `workerd::api::node` exception helpers
@@ -14,6 +16,12 @@ use kj_rs::KjMaybe;
 
 #[cxx::bridge(namespace = "workerd::rust::node_exceptions")]
 mod ffi {
+    #![allow(unsafe_code)]
+    #![expect(
+        clippy::allow_attributes,
+        reason = "CXX emits an outer unsafe-code policy"
+    )]
+
     /// Most Node.js exceptions are represented as either Error, TypeError, or
     /// RangeError. This is a cxx *extern* enum: the C++ `api::node::JsErrorType`
     /// is the single source of truth, and cxx generates static-asserts that the

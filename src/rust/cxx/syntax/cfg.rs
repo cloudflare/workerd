@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::mem;
 
 use proc_macro2::Ident;

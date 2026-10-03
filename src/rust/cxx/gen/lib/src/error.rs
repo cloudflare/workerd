@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 // We can expose more detail on the error as the need arises, but start with an
 // opaque error type for now.
 

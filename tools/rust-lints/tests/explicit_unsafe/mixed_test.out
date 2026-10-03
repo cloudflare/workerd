@@ -1,0 +1,1 @@
+mixed_test.rs: error[explicit_unsafe_policy]: module `production` must explicitly declare an unsafe-code policy

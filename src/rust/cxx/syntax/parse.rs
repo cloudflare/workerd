@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::mem;
 
 use proc_macro2::Delimiter;
@@ -88,6 +90,8 @@ use crate::file::ItemForeignMod;
 use crate::report::Errors;
 
 pub mod kw {
+    #![deny(unsafe_code)]
+
     syn::custom_keyword!(Pin);
     syn::custom_keyword!(Result);
 }

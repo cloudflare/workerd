@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;

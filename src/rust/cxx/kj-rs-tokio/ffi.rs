@@ -106,6 +106,8 @@ impl Drop for EnteredRuntime {
 #[expect(clippy::allow_attributes)]
 #[allow(clippy::unnecessary_box_returns)]
 mod bridge {
+    #![allow(unsafe_code)]
+
     // None of these are `Result`: they cannot fail in a way C++ could handle. The panics that CAN
     // occur -- a second port on one thread (`TokioPort::new`), a nested `block_on` from a task
     // that re-entered `promise.wait()` (`wait_*`/`poll`), the LocalSet slot being gone -- are

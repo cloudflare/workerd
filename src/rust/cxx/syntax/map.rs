@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::borrow::Borrow;
 pub use std::collections::hash_map::Entry;
 use std::hash::Hash;
@@ -8,6 +10,8 @@ pub use self::ordered::OrderedMap;
 pub use self::unordered::UnorderedMap;
 
 mod ordered {
+    #![deny(unsafe_code)]
+
     use std::borrow::Borrow;
     use std::hash::Hash;
     use std::mem;
@@ -75,6 +79,8 @@ mod ordered {
 }
 
 mod unordered {
+    #![deny(unsafe_code)]
+
     use std::borrow::Borrow;
     use std::collections::hash_map::Entry;
     use std::collections::hash_map::HashMap;

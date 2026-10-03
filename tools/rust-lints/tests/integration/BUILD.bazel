@@ -1,0 +1,145 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_proc_macro", "rust_shared_library", "rust_test")
+load("//build/tools/rust_lint:integration_test.bzl", "rust_lint_integration_test")
+
+# Fixtures are opt-in, independent of normal repository builds.
+package(default_visibility = ["//visibility:public"])
+
+rust_proc_macro(
+    name = "macros",
+    srcs = ["macros.rs"],
+    tags = ["manual"],
+)
+
+rust_library(
+    name = "dependency",
+    srcs = ["dependency.rs"],
+    tags = ["manual"],
+)
+
+genrule(
+    name = "schema",
+    outs = ["generated.rs"],
+    cmd = "echo 'pub mod generated_without_policy {}' > $@",
+    tags = ["manual"],
+)
+
+rust_library(
+    name = "passing",
+    srcs = [
+        "passing.rs",
+        ":schema",
+    ],
+    aliases = {":dependency": "renamed_dependency"},
+    compile_data = ["included.rs"],
+    crate_features = ["policy"],
+    proc_macro_deps = [":macros"],
+    rustc_env = {"POLICY_ENV": "present"},
+    rustc_env_files = ["environment.txt"],
+    tags = ["manual"],
+    deps = [":dependency"],
+)
+
+rust_test(
+    name = "passing_test",
+    crate = ":passing",
+    crate_features = ["policy"],
+    tags = ["manual"],
+)
+
+rust_shared_library(
+    name = "shared",
+    srcs = ["dependency.rs"],
+    tags = ["manual"],
+)
+
+rust_binary(
+    name = "binary",
+    srcs = ["binary.rs"],
+    tags = ["manual"],
+    deps = [":passing"],
+)
+
+rust_library(
+    name = "missing",
+    srcs = ["missing.rs"],
+    compile_data = ["missing.out"],
+    tags = ["manual"],
+    deps = ["//src/rust/cxx"],
+)
+
+rust_test(
+    name = "missing_test",
+    srcs = ["missing_test.rs"],
+    tags = ["manual"],
+)
+
+rust_test(
+    name = "missing_production_test",
+    compile_data = ["missing.out"],
+    crate = ":missing",
+    tags = ["manual"],
+)
+
+rust_library(
+    name = "test_helper",
+    testonly = True,
+    srcs = ["test_helper.rs"],
+    tags = ["manual"],
+    deps = [":dependency"],
+)
+
+rust_test(
+    name = "test_helper_test",
+    crate = ":test_helper",
+    tags = ["manual"],
+)
+
+rust_library(
+    name = "inherited_tests",
+    srcs = ["inherited_tests.rs"],
+    tags = ["manual"],
+)
+
+rust_test(
+    name = "inherited_tests_test",
+    crate = ":inherited_tests",
+    tags = ["manual"],
+)
+
+rust_library(
+    name = "staged_missing",
+    srcs = [
+        "external_missing.rs",
+        "staged_missing.rs",
+        ":schema",
+    ],
+    compile_data = [
+        "included_missing.rs",
+        "staged_missing.out",
+    ],
+    crate_root = "staged_missing.rs",
+    tags = ["manual"],
+)
+
+rust_lint_integration_test(
+    name = "adapter_test",
+    size = "small",
+    exempt_targets = [
+        ":missing_test",
+        ":test_helper",
+        ":test_helper_test",
+    ],
+    tags = ["manual"],
+    targets = [
+        ":binary",
+        ":dependency",
+        ":inherited_tests_test",
+        ":macros",
+        ":missing",
+        ":missing_production_test",
+        ":passing",
+        ":passing_test",
+        ":shared",
+        ":staged_missing",
+    ],
+)

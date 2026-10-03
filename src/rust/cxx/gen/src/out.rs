@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::cell::RefCell;
 use std::fmt::Arguments;
 use std::fmt::Write;

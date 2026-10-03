@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use alloc::borrow::Cow;
 use alloc::string::String;
 use core::cmp::Ordering;

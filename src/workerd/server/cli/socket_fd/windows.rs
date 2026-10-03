@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 //! `--socket-fd` on Windows: there is no re-exec to keep the socket for, so the server simply
 //! takes it.
 

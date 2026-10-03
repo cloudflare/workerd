@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![deny(unsafe_code)]
+
 use crate::Nullable;
 use crate::v8::Global;
 use crate::v8::Value;

@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use proc_macro2::Ident;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]

@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! Less used details of `UniquePtr` and `SharedPtr`.
 //!
 //! The pointer types themselves are exposed at the crate root.

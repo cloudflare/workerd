@@ -32,8 +32,14 @@ build:rust-enable-rustfmt-checks --output_groups=+rustfmt_checks
 # configure rustfmt
 build --@rules_rust//:rustfmt.toml=//:rustfmt.toml
 
-# enable clippy & rustfmt checks in lint configuration
-build:lint --config=rust-enable-clippy-checks --config=rust-enable-rustfmt-checks
+# Run Clippy, custom Dylint checks, and rustfmt on the pinned nightly lint graph.
+# Production builds and the standalone clippy configuration remain on stable.
+build:lint --config=rust-enable-clippy-checks --config=dylint --config=rust-enable-rustfmt-checks
+
+# Custom checks require compiler-matched nightly dependencies and proc macros.
+build:dylint --@rules_rust//rust/toolchain/channel:channel=nightly
+build:dylint --aspects=//build/tools/rust_lint:rust_lint.bzl%rust_lint_aspect
+build:dylint --output_groups=+workerd_rust_lint_checks
 
 # convenience shortcuts
 build:clippy --config=rust-enable-clippy-checks

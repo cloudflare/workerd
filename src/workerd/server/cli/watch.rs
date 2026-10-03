@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! `--watch`: the files the server depends on -- the config, everything it imports, and this
 //! executable -- and waiting for them to change.
 

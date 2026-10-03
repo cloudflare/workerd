@@ -1,8 +1,12 @@
+#![allow(unsafe_code)]
+
 pub use repr::Result;
 
 use crate::exception::IntoKjException;
 
 pub mod repr {
+    #![allow(unsafe_code)]
+
     use core::ptr::NonNull;
 
     use crate::CanceledException;

@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 #![allow(missing_docs)]
 
 use core::ffi::c_void;

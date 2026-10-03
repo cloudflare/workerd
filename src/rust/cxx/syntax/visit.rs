@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use crate::Type;
 
 pub trait Visit<'a> {

@@ -1,0 +1,2 @@
+forbid_parent.rs: error[explicit_unsafe_policy]: module `inherited` must explicitly declare an unsafe-code policy
+outer.rs: error[explicit_unsafe_policy]: module `external_inherited` must explicitly declare an unsafe-code policy

@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use core::fmt;
 use std::time::Duration;
 use std::time::SystemTime;

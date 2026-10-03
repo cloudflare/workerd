@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![deny(unsafe_code)]
 // Production code must not panic; test code is exempt via clippy.toml allow-*-in-tests.
 #![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
 #![deny(clippy::todo, clippy::unimplemented)]
@@ -18,6 +19,12 @@
 
 #[cxx::bridge(namespace = "workerd::rust::encoding")]
 mod ffi {
+    #![allow(unsafe_code)]
+    #![expect(
+        clippy::allow_attributes,
+        reason = "CXX emits an outer unsafe-code policy"
+    )]
+
     /// Legacy encoding types supported by the Rust decoder.
     /// Shared between C++ and Rust.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

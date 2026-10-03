@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::fmt::Debug;
 use std::fmt::{self};
 use std::slice;
@@ -6,6 +8,8 @@ pub use self::ordered::OrderedSet;
 pub use self::unordered::UnorderedSet;
 
 mod ordered {
+    #![deny(unsafe_code)]
+
     use std::hash::Hash;
 
     use super::Iter;
@@ -56,6 +60,8 @@ mod ordered {
 }
 
 mod unordered {
+    #![deny(unsafe_code)]
+
     use std::borrow::Borrow;
     use std::collections::HashSet;
     use std::hash::Hash;

@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! Tokio-backed `kj::AsyncIoStream` backend.
 //!
 //! # Operations own their state

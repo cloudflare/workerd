@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 //! Helpers for Rust wrappers around C++ objects passed through the CXX bridge.
 //!
 //! Most Rust-visible wrappers in this crate hold one of two shapes:

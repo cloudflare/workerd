@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::fmt::Display;
 use std::fmt::{self};
 use std::slice::Iter;
@@ -16,6 +18,8 @@ use syn::parse::Result;
 use crate::qualified::QualifiedName;
 
 mod kw {
+    #![deny(unsafe_code)]
+
     syn::custom_keyword!(namespace);
 }
 

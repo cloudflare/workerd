@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![deny(unsafe_code)]
+
 use std::pin::Pin;
 use std::time::SystemTime;
 
@@ -25,6 +27,12 @@ use crate::ffi::Wrapper;
 
 #[cxx::bridge(namespace = "workerd::rust::worker")]
 pub mod bridge {
+    #![allow(unsafe_code)]
+    #![expect(
+        clippy::allow_attributes,
+        reason = "CXX emits an outer unsafe-code policy"
+    )]
+
     extern "Rust" {
         type Wrapper = crate::ffi::Wrapper;
 

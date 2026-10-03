@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 // Production code must not panic; test code is exempt via clippy.toml allow-*-in-tests.
 #![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
 #![deny(clippy::todo, clippy::unimplemented)]
@@ -16,6 +17,12 @@ use crate::ffi::Output;
 
 #[cxx::bridge(namespace = "workerd::rust::transpiler")]
 mod ffi {
+    #![allow(unsafe_code)]
+    #![expect(
+        clippy::allow_attributes,
+        reason = "CXX emits an outer unsafe-code policy"
+    )]
+
     #[derive(Debug)]
     struct Output {
         success: bool,

@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use core::ffi::c_void;
 use core::fmt::Debug;
 use core::fmt::{self};

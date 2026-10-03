@@ -6,7 +6,7 @@
 //! own. This is the one place a number from the command line becomes an owned descriptor.
 
 // The platform module turns a descriptor number into an owned handle; `unsafe` is confined to it.
-#![allow(unsafe_code)]
+#![deny(unsafe_code)]
 
 use std::fmt;
 use std::io;

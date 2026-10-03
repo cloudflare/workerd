@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use proc_macro2::TokenStream;
 use quote::ToTokens;
 use quote::quote;

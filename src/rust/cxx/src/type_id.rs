@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 /// For use in impls of the `ExternType` trait. See [`ExternType`].
 ///
 /// [`ExternType`]: crate::ExternType

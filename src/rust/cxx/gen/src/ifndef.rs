@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use crate::include::HEADER;
 use crate::out::Content;
 

@@ -1,0 +1,2 @@
+suppressed.rs: error[E0453]: allow(explicit_unsafe_policy) incompatible with previous forbid
+suppressed.rs: error[explicit_unsafe_policy]: module `missing` must explicitly declare an unsafe-code policy

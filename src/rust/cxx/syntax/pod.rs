@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use crate::Trait;
 use crate::Type;
 use crate::Types;

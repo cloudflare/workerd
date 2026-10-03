@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 // Mangled symbol arrangements:
 //
 //   (a) One-off internal symbol.

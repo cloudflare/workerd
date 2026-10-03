@@ -1,3 +1,6 @@
+// Lookup is a transparent borrowed view of a string key.
+#![allow(unsafe_code)]
+
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap as Map;

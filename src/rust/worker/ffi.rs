@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![deny(unsafe_code)]
+
 use std::pin::Pin;
 
 use kj::http::ConnectSettings;
@@ -27,6 +29,12 @@ use crate::ffi::bridge::ScheduledResult;
     reason = "cxx bridge extern decls; safety is uniform"
 )]
 pub mod bridge {
+    #![allow(unsafe_code)]
+    #![expect(
+        clippy::allow_attributes,
+        reason = "CXX emits an outer unsafe-code policy"
+    )]
+
     #[namespace = "kj::rust"]
     unsafe extern "C++" {
         type HttpMethod = kj::http::ffi::HttpMethod;

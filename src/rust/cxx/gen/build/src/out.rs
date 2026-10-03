@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::env;
 use std::io;
 use std::path::Component;

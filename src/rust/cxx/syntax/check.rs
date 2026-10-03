@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::fmt::Display;
 
 use proc_macro2::Delimiter;

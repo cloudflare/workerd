@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 //! The `workerd-cxx` module containing the [`Own<T>`] type, which is bindings to the `kj::Own<T>` C++ type
 
 use std::fmt;
@@ -100,6 +102,8 @@ impl<T> fmt::Pointer for NonNullExceptMaybe<T> {
 }
 
 pub mod repr {
+    #![allow(unsafe_code)]
+
     use std::ffi::c_void;
     use std::fmt::Debug;
     use std::fmt::Display;
