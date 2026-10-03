@@ -133,6 +133,8 @@ export {
   returnThenNextNoAwait,
   nextThenReturnNoAwait,
   iteratorPrototypeShape,
+  iteratorMethodsRejectForeignThis,
+  firstNextPullsSynchronously,
   nextFromEarlierContinuationReadsAhead,
   nextFromEarlierContinuationBeatsReturn,
   nextAfterRejectedNextIsDone,

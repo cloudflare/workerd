@@ -368,8 +368,7 @@ export const thenGetterNotConsultedByPipeReads = {
 // once, answered from the queue or waiting for a chunk. A next() made while
 // another is still pending settles by adopting the promise of the step it
 // waited for, which looks `then` up a second time (WebIDL; Node agrees);
-// C++ looks it up once (ledger #24). The TypeScript first next() is always
-// one of those.
+// C++ looks it up once (ledger #24). The first next() waits for nothing.
 export const thenGetterPerIteratorNext = {
   async test() {
     const primed = async (chunks) => {
@@ -407,10 +406,7 @@ export const thenGetterPerIteratorNext = {
       const { rs, controller } = pushSource();
       controller.enqueue('x');
       const it = rs.values();
-      strictEqual(
-        await resultThenLookups(async () => [await it.next()]),
-        chained
-      );
+      strictEqual(await resultThenLookups(async () => [await it.next()]), 1);
     }
   },
 };
