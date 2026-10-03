@@ -437,13 +437,29 @@ jsg::JsUint8Array convertSignatureToDER(
   return jsg::JsUint8Array::create(js, kj::ArrayPtr<kj::byte>(buf.data, buf.len));
 }
 
-const EVP_MD* maybeGetDigest(jsg::Optional<kj::String>& maybeAlgorithm) {
+// When Node's sign/verify APIs are called with a null or undefined algorithm,
+// OpenSSL resolves the digest from the key itself
+// (EVP_PKEY_get_default_digest_nid): SHA-256 for RSA and EC keys. Digest-free
+// key types (Ed25519, Ed448) resolve to no digest, which is the null digest
+// BoringSSL requires for them.
+const EVP_MD* defaultDigestForKey(const ncrypto::EVPKeyPointer& pkey) {
+  switch (pkey.id()) {
+    case EVP_PKEY_RSA:
+    case EVP_PKEY_EC:
+      return EVP_sha256();
+    default:
+      return nullptr;
+  }
+}
+
+const EVP_MD* maybeGetDigest(
+    jsg::Optional<kj::String>& maybeAlgorithm, const ncrypto::EVPKeyPointer& pkey) {
   KJ_IF_SOME(alg, maybeAlgorithm) {
     auto md = ncrypto::getDigestByName(alg.cStr());
     JSG_REQUIRE(md != nullptr, Error, kj::str("Unknown digest: ", alg));
     return md;
   }
-  return nullptr;
+  return defaultDigestForKey(pkey);
 }
 }  // namespace
 
@@ -577,7 +593,7 @@ jsg::JsUint8Array CryptoImpl::signOneShot(jsg::Lock& js,
   // TODO(later): When DSA keys are supported, uncomment to validate DSA params.
   // JSG_REQUIRE(pkey.validateDsaParameters(), Error, "Invalid DSA parameters");
 
-  auto md = maybeGetDigest(algorithm);
+  auto md = maybeGetDigest(algorithm, pkey);
 
   JSG_REQUIRE(mdctx.signInit(pkey, md).has_value(), Error, "Failed to initialize signing context");
 
@@ -629,7 +645,7 @@ bool CryptoImpl::verifyOneShot(jsg::Lock& js,
   // TODO(later): When DSA keys are supported, uncomment to validate DSA params.
   // JSG_REQUIRE(pkey.validateDsaParameters(), Error, "Invalid DSA parameters");
 
-  auto md = maybeGetDigest(algorithm);
+  auto md = maybeGetDigest(algorithm, pkey);
 
   JSG_REQUIRE(
       mdctx.verifyInit(pkey, md).has_value(), Error, "Failed to initialize verification context");

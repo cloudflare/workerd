@@ -98,6 +98,58 @@ export const rsaSignVerifyOneshot = {
   },
 };
 
+export const defaultDigestSignVerifyOneshot = {
+  test(_, env) {
+    // When the algorithm is null or undefined, Node resolves the digest from
+    // the key type: SHA-256 for RSA and EC keys, and no digest for
+    // digest-free key types like Ed25519.
+    const data = Buffer.from('hello world');
+
+    const keyPair = generateKeyPairSync('ec', {
+      namedCurve: 'prime256v1',
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+
+    for (const algorithm of [undefined, null]) {
+      // EC keys default to SHA-256 for both KeyObject and PEM inputs, and a
+      // signature made with the default verifies under an explicit 'sha256'.
+      const sig = sign(algorithm, data, createPrivateKey(keyPair.privateKey));
+      strictEqual(verify(algorithm, data, keyPair.publicKey, sig), true);
+      strictEqual(verify('sha256', data, keyPair.publicKey, sig), true);
+
+      // Altered data or signature must not verify.
+      strictEqual(
+        verify(algorithm, Buffer.from('goodbye'), keyPair.publicKey, sig),
+        false
+      );
+      const tampered = Buffer.from(sig);
+      tampered[0] ^= 0xff;
+      strictEqual(verify(algorithm, data, keyPair.publicKey, tampered), false);
+
+      // RSA keys default to SHA-256 as well.
+      const rsaDefault = sign(
+        algorithm,
+        data,
+        createPrivateKey(env['rsa_private.pem'])
+      );
+      strictEqual(
+        verify(algorithm, data, env['rsa_public.pem'], rsaDefault),
+        true
+      );
+    }
+
+    // RSA PKCS#1 v1.5 signing is deterministic, so the default-digest
+    // signature is byte-identical to the explicit 'sha256' one.
+    strictEqual(
+      sign(null, data, createPrivateKey(env['rsa_private.pem'])).toString(
+        'hex'
+      ),
+      rsaSig
+    );
+  },
+};
+
 export const ed25519SignVerifyObjects = {
   test(_, env) {
     // Sign object is not allowed with ed25519
