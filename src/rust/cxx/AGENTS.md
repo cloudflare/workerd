@@ -34,8 +34,13 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - `syntax/`, `gen/`, and `macro/` — bridge parser and code generators
 - `kj-rs/` — KJ promises/futures, exceptions, ownership, refcounting, dates, and `Maybe`
 - `kj-rs-tokio/` — `TokioEventPort`: a `kj::EventPort` backed by a per-thread tokio
-  `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers) and
-  `kj_rs_tokio::spawn()`
+  `current_thread` runtime, in two modes. KJ-driven (`setupTokioAsyncIo()`, no I/O providers):
+  the KJ loop schedules the thread and parks inside `Runtime::block_on`, so `promise.wait()`
+  works; for `kj_test` binaries and threads that block on a `kj::WaitScope`. Tokio-driven
+  (`kj_rs_tokio::Runtime`, Rust): tokio owns the thread and `Runtime::block_on` runs the KJ loop
+  to idle whenever it has work, tokio only while it is idle (the same event order as KJ-driven);
+  `promise.wait()` throws; for a Rust `main` that blocks on tokio. Plus `kj_rs_tokio::spawn()`
+  onto the loop thread's `LocalSet` in both modes
 - `kj-rs-io/` — tokio-backed `kj::AsyncIoStream` / `kj::Network` / `kj::LowLevelAsyncIoProvider`
   (the I/O providers for the tokio loop, `kj_rs_io::setupTokioAsyncIo()`), `loopback:` addresses
   (in-process connections for `workerd test`), the `--watch` file watcher (Rust over `notify`),
