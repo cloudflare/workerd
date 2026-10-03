@@ -3,6 +3,7 @@
 #include <workerd/util/sentry.h>
 #include <workerd/util/strings.h>
 
+#include <kj/convert.h>
 #include <kj/hash.h>
 
 extern "C" {
@@ -599,10 +600,6 @@ inline bool isValidCodepoint(uint32_t codepoint, bool first) {
       u_hasBinaryProperty(codepoint, UCHAR_ID_CONTINUE);
 };
 
-inline kj::Maybe<kj::String> strFromMaybePtr(const kj::Maybe<kj::StringPtr>& ptr) {
-  return ptr.map([](const kj::StringPtr& ptr) { return kj::str(ptr); });
-}
-
 using Canonicalizer = kj::Maybe<kj::String>(kj::StringPtr, kj::Maybe<kj::StringPtr>);
 
 kj::Maybe<kj::String> canonicalizeProtocol(
@@ -713,7 +710,7 @@ kj::Maybe<kj::String> chooseStr(kj::Maybe<kj::String> str, kj::Maybe<kj::StringP
   KJ_IF_SOME(s, str) {
     return kj::mv(s);
   } else {
-    return strFromMaybePtr(other);
+    return other.as<kj::Copy>();
   }
 }
 
@@ -1730,7 +1727,7 @@ UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
   bool protocolMatchesSpecialScheme = false;
 
   UrlPattern::Init result{
-    .baseUrl = strFromMaybePtr(options.baseUrl),
+    .baseUrl = options.baseUrl.as<kj::Copy>(),
   };
 
   kj::Array<Token> tokens = nullptr;

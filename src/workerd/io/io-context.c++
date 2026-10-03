@@ -10,12 +10,12 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/util/own-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
 #include <workerd/util/use-perfetto-categories.h>
 
+#include <kj/convert.h>
 #include <kj/debug.h>
 
 #include <atomic>
@@ -1202,7 +1202,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
     .cfBlobJson = kj::mv(cfBlobJson),
     .parentSpan = tracing.getInternalSpanParent(),
     .userSpanParent = kj::mv(propagatedUserSpanParent),
-    .featureFlagsForFl = mapCopyString(worker->getIsolate().getFeatureFlagsForFl()),
+    .featureFlagsForFl = worker->getIsolate().getFeatureFlagsForFl().as<kj::Copy>(),
   };
 
   auto client = channelFactory.startSubrequest(channel, kj::mv(metadata));

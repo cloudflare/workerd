@@ -10,6 +10,8 @@
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
 
+#include <kj/convert.h>
+
 namespace workerd {
 namespace api {
 namespace pyodide {
@@ -175,7 +177,7 @@ class WorkerdApi final: public Worker::Api {
 
       MemoryCache clone() const {
         return MemoryCache{
-          .cacheId = cacheId.map([](auto& id) { return kj::str(id); }),
+          .cacheId = cacheId.as<kj::Copy>(),
           .maxKeys = maxKeys,
           .maxValueSize = maxValueSize,
           .maxTotalValueSize = maxTotalValueSize,

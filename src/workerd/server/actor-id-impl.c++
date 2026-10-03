@@ -1,11 +1,11 @@
 #include <workerd/jsg/exception.h>
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/util/entropy.h>
-#include <workerd/util/own-util.h>
 #include <workerd/util/thread-scopes.h>
 
 #include <openssl/hmac.h>
 
+#include <kj/convert.h>
 #include <kj/encoding.h>
 #include <kj/memory.h>
 
@@ -34,7 +34,7 @@ bool ActorIdFactoryImpl::ActorIdImpl::equals(const ActorId& other) const {
 }
 
 kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::ActorIdImpl::clone() const {
-  return kj::heap<ActorIdImpl>(id, mapCopyString(name));
+  return kj::heap<ActorIdImpl>(id, name.as<kj::Copy>());
 }
 
 ActorIdFactoryImpl::ActorIdFactoryImpl(kj::StringPtr uniqueKey) {

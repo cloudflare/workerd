@@ -4,8 +4,7 @@
 
 #include "urlpattern.h"
 
-#include <workerd/util/own-util.h>
-
+#include <kj/convert.h>
 #include <kj/vector.h>
 
 namespace workerd::api {
@@ -127,15 +126,15 @@ kj::StringPtr URLPattern::getHash() {
 
 URLPattern::URLPatternInit::operator jsg::UrlPattern::Init() {
   return {
-    .protocol = mapCopyString(this->protocol),
-    .username = mapCopyString(this->username),
-    .password = mapCopyString(this->password),
-    .hostname = mapCopyString(this->hostname),
-    .port = mapCopyString(this->port),
-    .pathname = mapCopyString(this->pathname),
-    .search = mapCopyString(this->search),
-    .hash = mapCopyString(this->hash),
-    .baseUrl = mapCopyString(this->baseURL),
+    .protocol = this->protocol.as<kj::Copy>(),
+    .username = this->username.as<kj::Copy>(),
+    .password = this->password.as<kj::Copy>(),
+    .hostname = this->hostname.as<kj::Copy>(),
+    .port = this->port.as<kj::Copy>(),
+    .pathname = this->pathname.as<kj::Copy>(),
+    .search = this->search.as<kj::Copy>(),
+    .hash = this->hash.as<kj::Copy>(),
+    .baseUrl = this->baseURL.as<kj::Copy>(),
   };
 }
 
@@ -167,7 +166,7 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
     KJ_CASE_ONEOF(str, kj::String) {
       KJ_SWITCH_ONEOF(jsg::UrlPattern::tryCompile(str.asPtr(),
                           jsg::UrlPattern::CompileOptions{
-                            .baseUrl = base.map([](kj::String& str) { return str.asPtr(); }),
+                            .baseUrl = base.as<kj::View>(),
                             .ignoreCase = ignoreCase.orDefault(false),
                           })) {
         KJ_CASE_ONEOF(err, kj::String) {
@@ -181,7 +180,7 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
     KJ_CASE_ONEOF(init, URLPatternInit) {
       KJ_SWITCH_ONEOF(jsg::UrlPattern::tryCompile(init,
                           jsg::UrlPattern::CompileOptions{
-                            .baseUrl = base.map([](kj::String& str) { return str.asPtr(); }),
+                            .baseUrl = base.as<kj::View>(),
                             .ignoreCase = ignoreCase.orDefault(false),
                           })) {
         KJ_CASE_ONEOF(err, kj::String) {
@@ -217,9 +216,7 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
 
   KJ_SWITCH_ONEOF(input) {
     KJ_CASE_ONEOF(string, kj::String) {
-      KJ_IF_SOME(url, jsg::Url::tryParse(string.asPtr(), maybeBase.map([](kj::String& s) {
-        return s.asPtr();
-      }))) {
+      KJ_IF_SOME(url, jsg::Url::tryParse(string.asPtr(), maybeBase.as<kj::View>())) {
         auto p = url.getProtocol();
         protocol = kj::str(p.first(p.size() - 1));
         username = kj::str(url.getUsername());
@@ -241,15 +238,15 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
       JSG_REQUIRE(
           maybeBase == kj::none, TypeError, "A baseURL is not allowed when input is an object.");
       inputs.add(URLPattern::URLPatternInit{
-        .protocol = mapCopyString(i.protocol),
-        .username = mapCopyString(i.username),
-        .password = mapCopyString(i.password),
-        .hostname = mapCopyString(i.hostname),
-        .port = mapCopyString(i.port),
-        .pathname = mapCopyString(i.pathname),
-        .search = mapCopyString(i.search),
-        .hash = mapCopyString(i.hash),
-        .baseURL = mapCopyString(i.baseURL),
+        .protocol = i.protocol.as<kj::Copy>(),
+        .username = i.username.as<kj::Copy>(),
+        .password = i.password.as<kj::Copy>(),
+        .hostname = i.hostname.as<kj::Copy>(),
+        .port = i.port.as<kj::Copy>(),
+        .pathname = i.pathname.as<kj::Copy>(),
+        .search = i.search.as<kj::Copy>(),
+        .hash = i.hash.as<kj::Copy>(),
+        .baseURL = i.baseURL.as<kj::Copy>(),
       });
 
       jsg::UrlPattern::Init init = {

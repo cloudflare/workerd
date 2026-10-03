@@ -40,6 +40,7 @@
 
 #include <v8-microtask-queue.h>
 
+#include <kj/convert.h>
 #include <kj/encoding.h>
 
 namespace workerd::api {
@@ -477,7 +478,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     }
 
     auto client = ioContext.getHttpClient(
-        IoContext::NEXT_CLIENT_CHANNEL, false, mapCopyString(cfBlobJson), "fetch_default"_kjc);
+        IoContext::NEXT_CLIENT_CHANNEL, false, cfBlobJson.as<kj::Copy>(), "fetch_default"_kjc);
     auto adapter = kj::newHttpService(*client);
     auto promise = adapter->request(method, url, headers, requestBody, response);
     // Default handling doesn't rely on the IoContext at all so we can return it as a
@@ -1026,7 +1027,7 @@ void ServiceWorkerGlobalScope::setDnsOverride(kj::String hostname, kj::String ip
 }
 
 kj::Maybe<kj::StringPtr> ServiceWorkerGlobalScope::getDnsOverride(kj::StringPtr hostname) {
-  return dnsOverrides.find(hostname).map([](kj::String& ip) -> kj::StringPtr { return ip; });
+  return dnsOverrides.find(hostname).as<kj::View>();
 }
 
 jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {

@@ -10,12 +10,12 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/ser.h>
-#include <workerd/util/own-util.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
 #include <workerd/util/uuid.h>
 
 #include <capnp/schema.h>
+#include <kj/convert.h>
 #include <kj/encoding.h>
 
 namespace workerd::api {
@@ -209,15 +209,15 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       logs(getTraceLogs(js, trace)),
       exceptions(getTraceExceptions(js, trace)),
       diagnosticChannelEvents(getTraceDiagnosticChannelEvents(js, trace)),
-      scriptName(mapCopyString(trace.scriptName)),
-      entrypoint(mapCopyString(trace.entrypoint)),
+      scriptName(trace.scriptName.as<kj::Copy>()),
+      entrypoint(trace.entrypoint.as<kj::Copy>()),
       scriptVersion(getTraceScriptVersion(trace)),
-      dispatchNamespace(mapCopyString(trace.dispatchNamespace)),
+      dispatchNamespace(trace.dispatchNamespace.as<kj::Copy>()),
       scriptTags(getTraceScriptTags(trace)),
       tailAttributes(trace.tailAttributes.map(
           [](auto& tags) { return KJ_MAP(tag, tags) { return tag.clone(); }; })),
       preview(trace.preview.map([](auto& p) { return TracePreviewInfo(p); })),
-      durableObjectId(mapCopyString(trace.durableObjectId)),
+      durableObjectId(trace.durableObjectId.as<kj::Copy>()),
       executionModel(kj::str(trace.executionModel)),
       outcome(kj::str(trace.outcome)),
       cpuTime(trace.cpuTime / kj::MILLISECONDS),
@@ -279,7 +279,7 @@ kj::ArrayPtr<jsg::Ref<TraceDiagnosticChannelEvent>> TraceItem::getDiagnosticChan
 }
 
 kj::Maybe<kj::StringPtr> TraceItem::getScriptName() {
-  return scriptName.map([](auto& name) -> kj::StringPtr { return name; });
+  return scriptName.as<kj::View>();
 }
 
 jsg::Optional<kj::StringPtr> TraceItem::getEntrypoint() {
@@ -291,7 +291,7 @@ jsg::Optional<ScriptVersion> TraceItem::getScriptVersion() {
 }
 
 jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
-  return dispatchNamespace.map([](auto& ns) -> kj::StringPtr { return ns; });
+  return dispatchNamespace.as<kj::View>();
 }
 
 jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {
@@ -318,7 +318,7 @@ jsg::Optional<TracePreviewInfo> TraceItem::getPreview() {
 }
 
 jsg::Optional<kj::StringPtr> TraceItem::getDurableObjectId() {
-  return durableObjectId.map([](auto& id) -> kj::StringPtr { return id; });
+  return durableObjectId.as<kj::View>();
 }
 
 kj::StringPtr TraceItem::getExecutionModel() {
@@ -499,7 +499,7 @@ kj::Array<jsg::Ref<TraceItem::TailEventInfo::TailItem>> TraceItem::TailEventInfo
 }
 
 TraceItem::TailEventInfo::TailItem::TailItem(const tracing::TraceEventInfo::TraceItem& traceItem)
-    : scriptName(mapCopyString(traceItem.scriptName)) {}
+    : scriptName(traceItem.scriptName.as<kj::Copy>()) {}
 
 kj::Maybe<kj::StringPtr> TraceItem::TailEventInfo::TailItem::getScriptName() {
   return scriptName;
@@ -544,9 +544,9 @@ ScriptVersion::ScriptVersion(workerd::ScriptVersion::Reader version)
       }()} {}
 
 ScriptVersion::ScriptVersion(const ScriptVersion& other)
-    : id{mapCopyString(other.id)},
-      tag{mapCopyString(other.tag)},
-      message{mapCopyString(other.message)} {}
+    : id{other.id.as<kj::Copy>()},
+      tag{other.tag.as<kj::Copy>()},
+      message{other.message.as<kj::Copy>()} {}
 
 TracePreviewInfo::TracePreviewInfo(const tracing::TracePreview& preview)
     : id(kj::str(preview.id)),
@@ -604,12 +604,12 @@ bool TraceItem::HibernatableWebSocketEventInfo::Close::getWasClean() {
 TraceLogErrorInfo::TraceLogErrorInfo(const tracing::ErrorInfo& info)
     : name(kj::str(info.name)),
       message(kj::str(info.message)),
-      stack(mapCopyString(info.stack)) {}
+      stack(info.stack.as<kj::Copy>()) {}
 
 TraceLogErrorInfo::TraceLogErrorInfo(const TraceLogErrorInfo& other)
     : name(kj::str(other.name)),
       message(kj::str(other.message)),
-      stack(other.stack.map([](const kj::String& s) { return kj::str(s); })) {}
+      stack(other.stack.as<kj::Copy>()) {}
 
 namespace {
 kj::Maybe<kj::Array<kj::Maybe<TraceLogErrorInfo>>> convertLogErrorInfo(
@@ -666,7 +666,7 @@ TraceException::TraceException(const Trace& trace, const tracing::Exception& exc
     : timestamp(getTraceExceptionTimestamp(exception)),
       name(kj::str(exception.name)),
       message(kj::str(exception.message)),
-      stack(mapCopyString(exception.stack)) {}
+      stack(exception.stack.as<kj::Copy>()) {}
 
 double TraceException::getTimestamp() {
   return timestamp;
@@ -714,7 +714,7 @@ void sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingReq
   // Add the actual JS as a wait until because the handler may be an event listener which can't
   // wait around for async resolution. We're relying on `drain()` below to persist `incomingRequest`
   // and its members until this task completes.
-  auto entrypointName = mapCopyString(entrypointNamePtr);
+  auto entrypointName = entrypointNamePtr.as<kj::Copy>();
   context.addWaitUntil(
       context
           .run([nonEmptyTraces = kj::mv(nonEmptyTraces), entrypointName = kj::mv(entrypointName),

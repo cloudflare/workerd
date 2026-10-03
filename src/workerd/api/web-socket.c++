@@ -24,6 +24,7 @@
 #include <workerd/util/sentry.h>
 
 #include <kj/compat/url.h>
+#include <kj/convert.h>
 
 namespace workerd::api {
 
@@ -1038,15 +1039,15 @@ kj::Maybe<kj::String> LegacyWebSocketAdapter::getPreferredExtensions(
 }
 
 kj::Maybe<kj::StringPtr> LegacyWebSocketAdapter::getUrl() {
-  return url.map([](kj::StringPtr value) { return value; });
+  return url.as<kj::View>();
 }
 
 kj::Maybe<kj::StringPtr> LegacyWebSocketAdapter::getProtocol() {
-  return protocol.map([](kj::StringPtr value) { return value; });
+  return protocol.as<kj::View>();
 }
 
 kj::Maybe<kj::StringPtr> LegacyWebSocketAdapter::getExtensions() {
-  return extensions.map([](kj::StringPtr value) { return value; });
+  return extensions.as<kj::View>();
 }
 
 kj::Maybe<jsg::JsValue> LegacyWebSocketAdapter::deserializeAttachment(jsg::Lock& js) {
