@@ -1299,9 +1299,20 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     return wsPromise;
   } else KJ_IF_SOME(jsBody, getBody(js)) {
     auto encoding = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
+    auto flushAfterWrite = FlushCompressionAfterWrite::NO;
+    if (encoding != StreamEncoding::IDENTITY) {
+      KJ_IF_SOME(contentType, outHeaders.get(kj::HttpHeaderId::CONTENT_TYPE)) {
+        KJ_IF_SOME(mimeType, MimeType::extract(contentType)) {
+          if (mimeType == MimeType::EVENT_STREAM) {
+            flushAfterWrite = FlushCompressionAfterWrite::YES;
+          }
+        }
+      }
+    }
     auto maybeLength = jsBody.tryGetLength(js, encoding);
-    auto stream =
-        newSystemStream(outer.send(statusCode, getStatusText(), outHeaders, maybeLength), encoding);
+    auto stream = newSystemStream(
+        outer.send(statusCode, getStatusText(), outHeaders, maybeLength), encoding, context,
+        flushAfterWrite);
     // We need to enter the AsyncContextFrame that was captured when the
     // Response was created before starting the loop.
     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
