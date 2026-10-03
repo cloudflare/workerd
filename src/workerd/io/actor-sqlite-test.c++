@@ -1407,7 +1407,8 @@ KJ_TEST("parked move-later alarm is not applied when subsequent commit moved ala
   // 5. While the 6ms commit is in-flight (waiting on commitCallback), the 3ms scheduleRun completes.
   // Without the fix, the completion handler would drain the stale parked 10ms and schedule it,
   // leaving the scheduled alarm at 10ms (later than the committed 6ms).
-  // With the fix, the parked 10ms was invalidated by the 6ms precommit, so no scheduleRun(10ms) is issued.
+  // With the fix, the completion handler checks metadata.getAlarm() and drops the stale
+  // parked 10ms because the stored alarm (6ms) is earlier, so no scheduleRun(10ms) is issued.
   fulfiller3Ms->fulfill();
   test.pollAndExpectCalls({});  // No scheduleRun(10ms)!
 
