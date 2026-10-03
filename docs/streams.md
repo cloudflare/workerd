@@ -413,7 +413,10 @@ these APIs were built for Internal streams and use kj async I/O internally.
 To bridge this, Standard `ReadableStream`s can be consumed via the `ReadableStreamSource`
 API (the same API Internal streams use). When `pumpTo()` is called on the adapter, it
 acquires the isolate lock and runs a promise loop: read from the JS stream, write to the
-kj output, repeat until the data is exhausted or an error occurs.
+kj output, repeat until the data is exhausted or an error occurs. If the consumer goes away
+first -- for example, the client disconnects while a response body is still streaming -- the
+stream is canceled with an `undefined` reason, so the source's cancel algorithm runs and it
+can stop producing data.
 
 ### Streams sent over JS RPC
 
