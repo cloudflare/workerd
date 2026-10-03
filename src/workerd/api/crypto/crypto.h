@@ -375,17 +375,14 @@ class SubtleCrypto: public jsg::Object {
     // The additional authentication data to include.
     jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> additionalData;
 
-    // The desired length of the authentication tag. May be 0 - 128.
-    // Note: the spec specifies this as a Web IDL byte (== signed char in C++), not an int, but JS
-    //   has no such 8-bit integer animal.
-    jsg::Optional<int> tagLength;
+    // The desired length of the authentication tag, validated by the selected algorithm.
+    jsg::Optional<double> tagLength;
 
     // The initial value of the counter block for AES-CTR.
     // https://www.w3.org/TR/WebCryptoAPI/#aes-ctr-params
     jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> counter;
 
     // The length, in bits, of the rightmost part of the counter block that is incremented.
-    // See above why we use int instead of int8_t.
     // https://www.w3.org/TR/WebCryptoAPI/#aes-ctr-params
     jsg::Optional<int> length;
 
