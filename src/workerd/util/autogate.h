@@ -123,7 +123,12 @@ namespace workerd::util {
      canceled or released before EOF, and the origin's pump cancels the source (running its       \
      cancel algorithm with the receiver's reason). When disabled, neither side participates and    \
      the origin learns of the loss only when its next write fails. */                             \
-  V(JSRPC_READABLE_CANCEL_PROPAGATION)
+  V(JSRPC_READABLE_CANCEL_PROPAGATION)                                                             \
+  /* When enabled, the Node.js `i18n` transcode implementation (api::node                          \
+     i18n::transcode) is provided by the Rust implementation (src/rust/i18n)                       \
+     instead of the C++ implementation. The C++ implementation is retained                         \
+     for rollback. */                                                                              \
+  V(NODEJS_I18N_RUST)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

@@ -404,6 +404,13 @@ pub mod ffi {
         ) -> Result<Vec<Global>>;
 
         // Local<TypedArray>
+        // Fallible: KJ_REQUIREs the view is within the buffer's bounds.
+        pub unsafe fn uint8_array_from_buffer(
+            isolate: *mut Isolate,
+            buffer: &Local,
+            byte_offset: usize,
+            length: usize,
+        ) -> Result<Local>;
         pub unsafe fn local_typed_array_length(isolate: *mut Isolate, array: &Local) -> usize;
         pub unsafe fn local_typed_array_buffer_data(isolate: *mut Isolate, array: &Local) -> usize;
         pub unsafe fn local_typed_array_byte_offset(isolate: *mut Isolate, array: &Local) -> usize;
@@ -1703,6 +1710,39 @@ impl ArrayBuffer {
             )
         }
     }
+
+    /// Attempts to create a new zero-initialized `ArrayBuffer` with
+    /// `byte_length` bytes, and lets `fill` write into it before anything else
+    /// can observe it. Returns the buffer along with `fill`'s result, or `None`
+    /// if allocation fails, in which case `fill` is not called.
+    ///
+    /// This is the safe way to produce an `ArrayBuffer` from bytes computed in
+    /// Rust without an intermediate `Vec`: unlike the `unsafe`
+    /// `Local::<ArrayBuffer>::as_mut_slice`, exclusive access to the backing
+    /// store is guaranteed by construction rather than by the caller.
+    ///
+    /// Bytes `fill` does not write remain zero. The buffer is always zeroed
+    /// first because JavaScript can read the whole backing store once it has
+    /// the buffer, including any bytes a view over it excludes.
+    pub fn new_zeroed_with<'a, R>(
+        lock: &mut crate::Lock,
+        byte_length: usize,
+        fill: impl FnOnce(&mut [u8]) -> R,
+    ) -> Option<(Local<'a, Self>, R)> {
+        let mut buffer = Self::new_with_mode(
+            lock,
+            byte_length,
+            ffi::BackingStoreInitializationMode::ZeroInitialized,
+        )?;
+        // SAFETY: `buffer` was allocated just above and is the only handle to
+        // it: no other `Local` refers to it and it has never been exposed to
+        // JavaScript, so nothing else can reach its backing store until it is
+        // returned. `fill` is not passed the `Lock` and cannot capture it,
+        // since `lock` is mutably borrowed for this call, so it cannot run
+        // JavaScript. The slice does not outlive `fill`.
+        let result = fill(unsafe { buffer.as_mut_slice(lock) });
+        Some((buffer, result))
+    }
 }
 
 impl Local<'_, ArrayBuffer> {
@@ -2327,6 +2367,38 @@ impl_typed_array!(BigUint64Array, u64, local_biguint64_array_get);
 // Uint8ClampedArray has the same element type as Uint8Array; clamping is a write-side JS concern.
 impl_typed_array!(Uint8ClampedArray, u8, local_uint8clamped_array_get);
 
+impl Uint8Array {
+    /// Creates a `Uint8Array` viewing `length` bytes of `buffer`, starting at
+    /// `byte_offset`.
+    ///
+    /// Zero-copy, unlike [`Vec<u8>::to_js`](crate::ToJS), which allocates a fresh
+    /// backing store and copies into it. Producing a `Uint8Array` from bytes computed
+    /// in Rust therefore does not require an intermediate `Vec`: allocate and fill
+    /// the buffer with [`ArrayBuffer::new_zeroed_with`], and wrap the written prefix
+    /// here.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `byte_offset + length` exceeds `buffer`'s byte
+    /// length.
+    pub fn from_buffer<'a>(
+        lock: &mut crate::Lock,
+        buffer: &Local<'_, ArrayBuffer>,
+        byte_offset: usize,
+        length: usize,
+    ) -> crate::Result<Local<'a, Self>> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
+        // `buffer` is a live handle to an ArrayBuffer. The C++ side checks the
+        // bounds and reports a violation as an `Err`.
+        let handle = unsafe {
+            ffi::uint8_array_from_buffer(isolate.as_ffi(), &buffer.handle, byte_offset, length)
+        }?;
+        // SAFETY: `handle` is a fresh Uint8Array created in `isolate`.
+        Ok(unsafe { Local::from_ffi(isolate, handle) })
+    }
+}
+
 // =============================================================================
 // `String`-specific implementations
 // =============================================================================
@@ -2488,6 +2560,43 @@ impl<'a, T> From<Option<Local<'a, T>>> for MaybeLocal<'a, T> {
         Self {
             handle: ffi::MaybeLocal { ptr },
             _marker: PhantomData,
+        }
+    }
+}
+
+/// Runs a synchronous callback entered from C++ with a valid, locked V8 isolate.
+///
+/// The callback receives a safe [`Lock`] and returns a local handle. On success,
+/// the handle is transferred back across the CXX bridge as a [`ffi::MaybeLocal`].
+/// On failure, the error is scheduled as a JavaScript exception and an empty
+/// `MaybeLocal` is returned.
+///
+/// This centralizes the raw-isolate and local-handle ownership transitions for
+/// C++ entry points implemented in Rust. The callback itself contains no FFI
+/// safety obligations.
+///
+/// # Safety
+///
+/// `isolate` must point to a live V8 isolate locked by the current thread, and
+/// the C++ caller must keep its active `HandleScope` alive until it consumes the
+/// returned handle.
+pub unsafe fn run_ffi_callback<T, E, F>(isolate: *mut ffi::Isolate, callback: F) -> ffi::MaybeLocal
+where
+    E: Into<Error>,
+    F: for<'a> FnOnce(&'a mut Lock) -> Result<Local<'a, T>, E>,
+{
+    // SAFETY: forwarded from this function's safety contract.
+    let mut lock = unsafe { Lock::from_isolate_ptr(isolate) };
+    let result = callback(&mut lock).map(|local| {
+        // SAFETY: the handle is consumed by the C++ caller while its
+        // `HandleScope` is still alive, per this function's safety contract.
+        unsafe { local.into_ffi() }
+    });
+    match result {
+        Ok(local) => ffi::MaybeLocal { ptr: local.ptr },
+        Err(error) => {
+            lock.throw_exception(&error.into());
+            ffi::MaybeLocal { ptr: 0 }
         }
     }
 }
