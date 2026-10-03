@@ -328,6 +328,10 @@ pub struct Array {
 pub struct Future {
     pub output: Type,
     pub throws_tokens: Option<(kw::Result, Token![<], Token![>])>,
+    /// The lifetime the future is bound by, for an `extern "Rust"` function that borrows its
+    /// arguments: the one lifetime they name, or `'__cxx`, which the parser adds to the
+    /// function's generics and gives to every argument reference whose lifetime is elided.
+    pub lifetime: Option<Lifetime>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]

@@ -179,22 +179,22 @@ pub mod ffi {
     extern "Rust" {
         type DynHttpService;
 
-        async unsafe fn request<'a>(
-            self: &'a mut DynHttpService,
+        async fn request(
+            self: &mut DynHttpService,
             method: HttpMethod,
-            url: &'a [u8],
-            headers: &'a HttpHeaders,
-            request_body: Pin<&'a mut AsyncInputStream>,
-            response: Pin<&'a mut HttpServiceResponse>,
+            url: &[u8],
+            headers: &HttpHeaders,
+            request_body: Pin<&mut AsyncInputStream>,
+            response: Pin<&mut HttpServiceResponse>,
         ) -> Result<()>;
 
-        async unsafe fn connect<'a>(
-            self: &'a mut DynHttpService,
-            host: &'a [u8],
-            headers: &'a HttpHeaders,
-            connection: Pin<&'a mut AsyncIoStream>,
-            response: Pin<&'a mut ConnectResponse>,
-            settings: HttpConnectSettings<'a>,
+        async fn connect(
+            self: &mut DynHttpService,
+            host: &[u8],
+            headers: &HttpHeaders,
+            connection: Pin<&mut AsyncIoStream>,
+            response: Pin<&mut ConnectResponse>,
+            settings: HttpConnectSettings<'_>,
         ) -> Result<()>;
     }
 
