@@ -800,6 +800,10 @@ export interface DurableObjectStorage {
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
   onNextSessionRestoreBookmark(bookmark: string): Promise<string>;
   waitForBookmark(bookmark: string): Promise<void>;
+  snapshot(
+    options?: DurableObjectSnapshotOptions,
+  ): Promise<DurableObjectSnapshot>;
+  onNextSessionRestore(target: DurableObjectSnapshot | string): Promise<string>;
   /** @deprecated Use `ctx.primaryStub` instead. */
   readonly primary?: DurableObjectStub;
   /** @deprecated Use `ctx.configureReadReplication()` instead. */
@@ -812,6 +816,9 @@ export interface DurableObjectAbortOptions {
 }
 export interface DurableObjectReadReplicationOptions {
   mode: "auto" | "disabled";
+}
+export interface DurableObjectSnapshotOptions {
+  bookmark?: string;
 }
 export interface DurableObjectListOptions {
   start?: string;
@@ -2365,6 +2372,7 @@ export type ServiceBindingQueueMessage<Body = unknown> = {
       serializedBody: ArrayBuffer | ArrayBufferView;
     }
 );
+export interface DurableObjectSnapshot {}
 export interface KVNamespaceListKey<Metadata, Key extends string = string> {
   name: Key;
   expiration?: number;
