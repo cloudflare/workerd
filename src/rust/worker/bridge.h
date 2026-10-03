@@ -43,16 +43,16 @@ inline workerd::EventOutcome fromImpl(kj_rs::Rust*, workerd::rust::worker::Event
   }
 }
 
-inline workerd::WorkerInterface::ScheduledResult fromImpl(
-    kj_rs::Rust*, workerd::rust::worker::ScheduledResult result) {
+inline workerd::WorkerInterface::ScheduledResult asImpl(
+    kj_rs::Kj*, workerd::rust::worker::ScheduledResult result) {
   return workerd::WorkerInterface::ScheduledResult{
     .retry = result.retry,
     .outcome = kj::from<kj_rs::Rust>(result.outcome),
   };
 }
 
-inline workerd::WorkerInterface::AlarmResult fromImpl(
-    kj_rs::Rust*, workerd::rust::worker::AlarmResult result) {
+inline workerd::WorkerInterface::AlarmResult asImpl(
+    kj_rs::Kj*, workerd::rust::worker::AlarmResult result) {
   return workerd::WorkerInterface::AlarmResult{
     .retry = result.retry,
     .retryCountsAgainstLimit = result.retry_counts_against_limit,
@@ -62,8 +62,8 @@ inline workerd::WorkerInterface::AlarmResult fromImpl(
   };
 }
 
-inline workerd::WorkerInterface::CustomEvent::Result fromImpl(
-    kj_rs::Rust*, workerd::rust::worker::CustomEventResult result) {
+inline workerd::WorkerInterface::CustomEvent::Result asImpl(
+    kj_rs::Kj*, workerd::rust::worker::CustomEventResult result) {
   return workerd::WorkerInterface::CustomEvent::Result{
     .outcome = kj::from<kj_rs::Rust>(result.outcome),
   };
@@ -99,16 +99,16 @@ class RustWorkerInterface final: public workerd::WorkerInterface {
   }
 
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
-    co_return kj::from<kj_rs::Rust>(
-        co_await impl->run_scheduled(scheduledTime, cron.asBytes().as<kj_rs::Rust>()));
+    co_return (co_await impl->run_scheduled(scheduledTime, cron.asBytes().as<kj_rs::Rust>()))
+        .as<kj_rs::Kj>();
   }
 
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
-    co_return kj::from<kj_rs::Rust>(co_await impl->run_alarm(scheduledTime, retryCount));
+    co_return (co_await impl->run_alarm(scheduledTime, retryCount)).as<kj_rs::Kj>();
   }
 
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
-    co_return kj::from<kj_rs::Rust>(co_await impl->custom_event(kj::mv(event)));
+    co_return (co_await impl->custom_event(kj::mv(event))).as<kj_rs::Kj>();
   }
 
   kj::Promise<bool> test() override {
@@ -119,8 +119,8 @@ class RustWorkerInterface final: public workerd::WorkerInterface {
   ::rust::Box<Impl> impl;
 };
 
-inline kj::Own<workerd::WorkerInterface> fromImpl(
-    kj_rs::Rust*, ::rust::Box<RustWorkerInterface::Impl> impl) {
+inline kj::Own<workerd::WorkerInterface> asImpl(
+    kj_rs::Kj*, ::rust::Box<RustWorkerInterface::Impl> impl) {
   return kj::heap<RustWorkerInterface>(kj::mv(impl));
 }
 

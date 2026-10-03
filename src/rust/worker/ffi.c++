@@ -51,7 +51,7 @@ static EventOutcome toRustOutcome(workerd::EventOutcome outcome) {
 
 kj::Promise<ScheduledResult> worker_run_scheduled(
     WorkerInterface& worker, int64_t scheduledTimeNanos, ::rust::Slice<const kj::byte> cron) {
-  auto cronStr = kj::str(kj::from<kj_rs::Rust>(cron).asChars());
+  auto cronStr = kj::str(cron.as<kj_rs::Kj>().asChars());
   auto result = co_await worker.runScheduled(kj_rs::repr::fromNanos(scheduledTimeNanos), cronStr);
   co_return ScheduledResult{
     .retry = result.retry,
