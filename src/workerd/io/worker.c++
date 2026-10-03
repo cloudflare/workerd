@@ -299,7 +299,7 @@ void reportStartupError(kj::StringPtr id,
   try {
     KJ_SWITCH_ONEOF(limitErrorOrTime) {
       KJ_CASE_ONEOF(limitError, kj::Exception) {
-        auto description = jsg::extractTunneledExceptionDescription(limitError.getDescription());
+        auto description = jsg::extractTunneledExceptionDescription(limitError);
 
         auto& ex = permanentException.emplace(kj::mv(limitError));
         KJ_IF_SOME(e, errorReporter) {
@@ -329,8 +329,7 @@ void reportStartupError(kj::StringPtr id,
 
               kj::Vector<kj::String> lines;
               lines.add(kj::str("Uncaught ",
-                  jsg::extractTunneledExceptionDescription(
-                      KJ_ASSERT_NONNULL(permanentException).getDescription())));
+                  jsg::extractTunneledExceptionDescription(KJ_ASSERT_NONNULL(permanentException))));
               jsg::JsMessage message(catcher.Message());
               message.addJsStackTrace(js, lines);
               e.addError(kj::strArray(lines, "\n"));
@@ -3125,8 +3124,8 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
           inspector.contextCreated(v8_inspector::V8ContextInfo(dummyContext, 1,
               v8_inspector::StringView(reinterpret_cast<const uint8_t*>("Worker"), 6)));
           JSG_WITHIN_CONTEXT_SCOPE(*lock, dummyContext, [&](jsg::Lock& js) {
-            jsg::sendExceptionToInspector(js, inspector,
-                jsg::extractTunneledExceptionDescription(limitError.getDescription()));
+            jsg::sendExceptionToInspector(
+                js, inspector, jsg::extractTunneledExceptionDescription(limitError));
           });
           inspector.contextDestroyed(dummyContext);
         });

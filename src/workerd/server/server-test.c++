@@ -6771,7 +6771,7 @@ KJ_TEST("Server: Catch websocket server errors") {
   };
 
   KJ_EXPECT_LOG(ERROR,
-      "jsg.Error: WebSocket protocol error; protocolError.statusCode = 1009; protocolError.description = Message is too large: 34603008 > 33554432");
+      "jsg.Error: WebSocket protocol error (1009): Message is too large: 34603008 > 33554432");
   test.start();
   auto& waitScope = test.getWaitScope();
 

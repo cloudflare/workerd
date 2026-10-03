@@ -184,8 +184,7 @@ IoContext::IoContext(ThreadContext& thread,
         KJ_IF_SOME(exception, maybeException) {
           Worker::AsyncLock asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
           worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
-            lock.logUncaughtException(
-                jsg::extractTunneledExceptionDescription(exception.getDescription()));
+            lock.logUncaughtException(jsg::extractTunneledExceptionDescription(exception));
             kj::throwFatalException(kj::mv(exception));
           });
         }
