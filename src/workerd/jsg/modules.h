@@ -22,10 +22,10 @@ template <typename T>
 class Promise;
 
 enum class InstantiateModuleOptions {
-  // Allows pending top-level await in the module when evaluated. Will cause the microtask
-  // queue to be drained once in an attempt to resolve those, but only when not nested inside
-  // another module's evaluation; when nested, a pending evaluation is reported as an
-  // unsettled top-level await instead.
+  // Allows pending top-level await in the module when evaluated. If evaluation leaves a
+  // pending promise, the microtask queue is drained once in an attempt to resolve it, but
+  // only when not nested inside another module's evaluation; when nested, a pending
+  // evaluation is reported as an unsettled top-level await instead.
   DEFAULT,
   // Throws if the module evaluation results in a pending promise.
   NO_TOP_LEVEL_AWAIT,
