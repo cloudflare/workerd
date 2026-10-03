@@ -1,0 +1,59 @@
+using Workerd = import "/workerd/workerd.capnp";
+using TestExtension = import "extension.capnp";
+
+# Constructs mock of extendedFetcher as fetcher innerBindings
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "hyperdrive-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "hyperdrive-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          ( name = "HYPERDRIVE_PG",
+            wrapped = (
+              moduleName = "cloudflare-internal:hyperdrive",
+              innerBindings = [
+                ( name = "fetcher",
+                  wrapped = (
+                    moduleName = "test:hyperdrive-extended-fetcher-mock",
+                    innerBindings = [
+                      (name = "fetcher", service = "hyperdrive-mock"),
+                      (name = "port", json = "5432"),
+                    ],
+                  )
+                ),
+              ],
+            )
+          ),
+          ( name = "HYPERDRIVE_MYSQL",
+            wrapped = (
+              moduleName = "cloudflare-internal:hyperdrive",
+              innerBindings = [
+                ( name = "fetcher",
+                  wrapped = (
+                    moduleName = "test:hyperdrive-extended-fetcher-mock",
+                    innerBindings = [
+                      (name = "fetcher", service = "hyperdrive-mock"),
+                      (name = "port", json = "3306"),
+                    ],
+                  )
+                ),
+              ],
+            )
+          ),
+        ],
+      )
+    ),
+    ( name = "hyperdrive-mock",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "hyperdrive-mock.js")
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+  extensions = [ TestExtension.extension ],
+);
