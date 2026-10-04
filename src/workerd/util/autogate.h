@@ -122,8 +122,11 @@ namespace workerd::util {
      attaches a StreamCanceler capability, the receiver calls it when its copy of the stream is    \
      canceled or released before EOF, and the origin's pump cancels the source (running its       \
      cancel algorithm with the receiver's reason). When disabled, neither side participates and    \
-     the origin learns of the loss only when its next write fails. */                             \
-  V(JSRPC_READABLE_CANCEL_PROPAGATION)
+     the origin learns of the loss only when its next write fails. */                              \
+  V(JSRPC_READABLE_CANCEL_PROPAGATION)                                                             \
+  /* Enables the V8 startup-snapshot pipeline: a throwaway zygote Worker is built to produce a     \
+     startup snapshot, and the real Worker's isolate is then created from it. */                   \
+  V(STARTUP_SNAPSHOT)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
