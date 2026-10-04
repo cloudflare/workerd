@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/api/base64.h>
+#include <workerd/api/extended-fetcher.h>
 #include <workerd/api/filesystem.h>
 #include <workerd/api/messagechannel.h>
 #include <workerd/api/node/node.h>
@@ -68,6 +69,7 @@ void registerModules(
   registerWorkersModule(registry, featureFlags);
   registerTracingModule(registry, featureFlags);
   registerWrappedBindingModule(registry, featureFlags);
+  registerExtendedFetcherModule(registry);
   registry.template addBuiltinModule<EnvModule>(
       "cloudflare-internal:env", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   registry.template addBuiltinModule<FileSystemModule>(
@@ -89,6 +91,7 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder,
   builder.add(getInternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalTracingModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalWrappedBindingModuleBundle<TypeWrapper>(featureFlags));
+  builder.add(getInternalExtendedFetcherModuleBundle<TypeWrapper>());
   if (featureFlags.getUnsafeModule()) {
     builder.add(getExternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
   }
